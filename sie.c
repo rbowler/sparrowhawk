@@ -55,6 +55,7 @@ int     icode;                          /* Interception code         */
 int     n;                              /* Loop counter              */
 U16     lhcpu;                          /* Last Host CPU address     */
 
+    debugmsg("start sie loop\n");
     S(inst, execflag, regs, b2, effective_addr2);
 
     SIE_MODE_XC_OPEX(regs);
@@ -272,7 +273,11 @@ U16     lhcpu;                          /* Last Host CPU address     */
     }
 
     LASTPAGE_INVALIDATE (regs);
+#ifdef IBUF
+    regs->actpage = NULL;
+#endif
 
+    debugmsg("bef sie loop\n");
     do {
         if(!(icode = setjmp(guestregs->progjmp)))
             while(! SIE_I_WAIT(guestregs)
@@ -292,9 +297,11 @@ U16     lhcpu;                          /* Last Host CPU address     */
 
                 guestregs->instvalid = 0;
 
+                guestregs->iaabs = 0;
                 instfetch (guestregs->inst, guestregs->psw.ia, guestregs);
 
                 guestregs->instvalid = 1;
+                guestregs->iaabs = 0;
 
                 regs->instcount++;
 
@@ -304,6 +311,8 @@ U16     lhcpu;                          /* Last Host CPU address     */
 #ifdef IBUF
                 regs->actentry = NULL;
 #endif
+                debugmsg("SIE execute %x %x\n", guestregs->inst[0], 
+                                                guestregs->inst[1]);
                 EXECUTE_INSTRUCTION(guestregs->inst, 0, guestregs);
 
 #if MAX_CPU_ENGINES > 1
@@ -342,7 +351,9 @@ U16     lhcpu;                          /* Last Host CPU address     */
 
     } while(icode == 0 || icode == SIE_NO_INTERCEPT);
 
+    debugmsg("bef sie_exit\n");
     sie_exit(regs, icode);
+    debugmsg("aft sie_exit\n");
 
     /* Perform serialization and checkpoint synchronization */
     PERFORM_SERIALIZATION (regs);
@@ -494,6 +505,9 @@ int     n;
 
     /* Indicate we have left SIE mode */
     regs->sie_active = 0;
+#ifdef IBUF
+    regs->actpage = NULL;
+#endif
 
     LASTPAGE_INVALIDATE(regs);
     REASSIGN_FRAG (regs);

@@ -231,6 +231,21 @@ U32             n;                      /* 32-bit operand value      */
         }
         }
 #endif
+
+#ifdef IBUF_STAT
+        logmsg("instcount %llu\n", regs->instcount);
+        logmsg("ibufrecompile %llu\n", regs->ibufrecompile);
+        logmsg("ibufrecompilestorage %llu\n", regs->ibufrecompilestorage);
+        logmsg("ibufrecompiledisk %llu\n", regs->ibufrecompiledisk);
+        logmsg("ibufinterpret %llu\n", regs->ibufinterpret);
+        logmsg("ibufcodechange %llu\n", regs->ibufcodechange);
+        logmsg("ibufexeinst %llu\n", regs->ibufexeinst);
+        logmsg("ibufget %llu\n", regs->ibufget);
+        logmsg("ibufassign %llu\n", regs->ibufassign);
+        logmsg("ibufexeassign %llu\n", regs->ibufexeassign);
+        logmsg("ibufinvalidate %llu\n", regs->ibufinvalidate);
+        logmsg("ibufinvalidatex %llu\n", regs->ibufinvalidatex);
+#endif
         break;
 
     case 0xF0C:

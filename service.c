@@ -20,6 +20,7 @@
 
 #include "hercules.h"
 
+#include "inline.h"
 #include "opcode.h"
 
 /*-------------------------------------------------------------------*/
@@ -733,8 +734,12 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 #ifdef FEATURE_EXTENDED_TOD_CLOCK
                         | SCCB_CFG4_EXTENDED_TOD_CLOCK
 #endif /*FEATURE_EXTENDED_TOD_CLOCK*/
-//                      | SCCB_CFG4_EXTENDED_TRANSLATION
-//                      | SCCB_CFG4_STORE_SYSTEM_INFORMATION
+#ifdef FEATURE_EXTENDED_TRANSLATION
+                        | SCCB_CFG4_EXTENDED_TRANSLATION
+#endif /*FEATURE_EXTENDED_TRANSLATION*/
+#ifdef FEATURE_STORE_SYSTEM_INFORMATION
+                        | SCCB_CFG4_STORE_SYSTEM_INFORMATION
+#endif /*FEATURE_STORE_SYSTEM_INFORMATION*/
                         ;
 
         /* Build the CPU information array after the SCP info */

@@ -10,7 +10,7 @@
 <H4>What is Hercules?</H4>
 <P>Hercules is a software implementation of the System/370 and ESA/390
 hardware which runs under Linux on several hardware platforms including the
-Intel Pentium PC. </P>
+Intel Pentium PC, and under Windows NT and Windows 2000.</P>
 <H4>So what exactly does that mean?</H4>
 <P>It means that your PC can emulate an IBM mainframe processor. The
 mainframe can range from a 360 to a 390 - running in "System/370" mode or
@@ -110,19 +110,21 @@ at <A
 HREF="http://www.corestore.org/hercules.html">http://www.corestore.org/hercules.html</A>
 </P>
 <H4>What are the licensing restrictions for Hercules?</H4>
+
 <P>Hercules is a copyright work which has been made available for use by any
-individual, subject to the terms of the <A HREF="herclic.html">Hercules
+individual, subject to the terms of the <A HREF="herclic.html">Q
 Public License</A>. In essence this allows private individuals to freely
 copy, modify, and execute the program for personal use. You may not sell the
 program, or copy any portion of the source code for use in any other
 program. Any modifications you make to the program are subject to the same
-restrictions. The Hercules Public License does not permit any form of
-commercial use or distribution, except as a platform to develop commercial
-software on. If you wish to use Hercules for commercial purposes, drop me an
-email and we'll work out licensing terms. </P>
+restrictions.</p>
 <P>Hercules is <EM>not</EM>, repeat, <EM>not</EM> GPL software! The GNU
 General Public License is a Unix/Linux software licensing agreement, which
-we, the authors, will not participate in. </P>
+we, the authors, will not participate in. We believe that the QPL, which has
+been certified as compliant with the <a
+href="http://www.opensource.org">Open Source Definition</a>, provides the
+benefits and protections of open source for both users and developers,
+without the political baggage that has come to be associated with the GPL.</P>
 <H4>What PC hardware do I need to run Hercules?</H4>
 <P>It depends how fast you want it to run. A Pentium 166 with 16Mb RAM is
 probably the minimum practical requirement; 500+ MHz with 128Mb RAM would be
@@ -151,26 +153,33 @@ the better. </P>
 <P>You also need enough hard disk space to accommodate the emulated DASD. A
 virtual "3330 model 1" disk drive will need about 100 megabytes of space for
 emulation (a 3330-11 will need about 200 megabytes). A 3380 "single density"
-model will need about 650MB, and a 3390 model 2 needs about 2GB. </P>
+model will need about 650MB, and a 3390 model 2 needs about 2GB. If you use
+the <a href="cckddasd.html">compressed CKD DASD feature</a>, these sizes will
+shrink dramatically, usually to about 20 to 30 percent of the original
+size.</P>
 <H4><A NAME="software">What PC software do I need to run Hercules? </A></H4>
 <P>1. You need a Linux system with POSIX threads (pthread) support. I will
 only provide support for Linux 2.2.x kernels with glibc2 (libc6) as supplied
 in popular distributions such as Red Hat 6.0 or later and SuSE Linux 6.1 or
-later. My development system runs Red Hat 6.1. </P>
+later. My development system runs Red Hat 6.1. You can also run under
+Windows NT or Windows 2000, though Hercules isn't quite as polished on that
+platform.</P>
 <P>2. An egcs C compiler, normally distributed with Linux. See the notes
-below on this compiler.</P>
+below on this compiler. If you wish to rebuild the Windows version, you will
+need the <a href="http://sources.redhat.com/cygwin">Cygwin</a> tools from
+Red Hat.</P>
 <P>3. You will also need tn3270 client software, normally distributed with
 Linux, for the virtual 3270 console. This does not have to run on the Linux
 box. You can use any Windows tn3270 client (such as QWS3270, <A
 HREF="http://www.tombrennansoftware.com">Vista tn3270</A>, IBM Personal
 Communications, Attachmate Extra, or Dynacomm Elite), or any Unix tn3270
-client (such as x3270). If your Limux distribution does not include x3270,
+client (such as x3270). If your Linux distribution does not include x3270,
 you can get it from <A
 HREF="http://www.geocities.com/SiliconValley?Peaks/7814">www.geocities.com/SiliconValley/Peaks/7814</A>
 which is the homepage for x3270. </P>
 <H4>What sort of MIPS rate can I expect?</H4>
 <P>Don't get excited... On a Pentium Pro 200, I am seeing an execution speed
-of between 0.25 and 0.5 MIPS. That's enough to run OS/360 (MFT or MVT) with
+of around 0.5 MIPS. That's enough to run OS/360 (MFT or MVT) with
 a response time similar to that of a 370/145 from the 1970's. It's also fast
 enough to run VSE/ESA with a slow but acceptable response time. If you want
 to run OS/390 instead of OS/360, you'd better wait until Intel processor
@@ -178,7 +187,8 @@ speeds get into the gigahertz range (which isn't that far off, now).
 Releases 1.60 and above of Hercules incorporated many performance
 improvements, and on a fast Pentium III, it's now not unusual to see 5 MIPS
 or better.</P>
-<P>I haven't measured the I/O rate, but I would imagine it is abysmal. </P>
+<P>Typical I/O rates of around 50 EXCP/second are reported on average
+hardware, with rates over 500/second achievable with hardware RAID. </P>
 <H4>Which C compiler should I use to build Hercules?</H4> 
 <P>You <EM>must</EM> use the egcs C compiler. I am using the version that
 came with Red Hat 6.1 and it seems to work OK. The version number reported
@@ -211,14 +221,11 @@ system. </P>
 whatever, then by all means go ahead. I welcome reports of any bugs or
 problems you find, but I probably won't fix problems if it means introducing
 platform-specific code, and I will not be able to test new releases against
-other platforms. </P>
+other platforms. Folks who have gotten it compiled on the BSDs report that
+the hardest part is removing the Linux-specific tape support. </P>
 <p>There is ongoing work to make Hercules run under Windows 98, NT, and
 2000. The source code has support for these platforms included, and there is
-a Win32 makefile as makefile.w32. Because of the licensing terms of the
-Cygnus Systems cygwin package, which is used to provide the necessary
-compatibility libraries, I cannot distribute pre-built binaries of a Win32
-version, and the Hercules license prohibits anyone else from doing so. You
-may build your own copy, however.</p>
+a Win32 makefile as makefile.w32.</p>
 <P>The Hercules code is not intended to be specific to Intel hardware, so if
 you find any issues or faults related to running on other hardware (SPARC,
 Alpha, PPC, ...) under Linux 2.2, then I'm likely to be receptive to fixing
@@ -246,14 +253,11 @@ DCB=BLKSIZE=32760. </P>
 <H4>Can I attach a PC tape drive to Hercules?</H4>
 <P>Yes. Hercules can read and write tapes on SCSI drives. I have tested this
 with 4mm DAT, QIC-1000, and 9-track drives. </P>
-<H4>Can I attach a mainframe tape drive to Hercules?</H4>
-<P>Maybe. Hercules can read and write tapes on SCSI drives. It is possible
-to obtain 3480-type drives which attach to the SCSI bus, so in theory it
-should be possible to read real mainframe cartridges using Hercules.
-Unfortunately, these drives are shockingly expensive (about $10,000 each,
-last time I inquired), so unless someone wants to donate one to me, this
-tantalizing possibility will have to remain in the realms of fantasy for the
-time being. </P>
+<H4>Can I process mainframe tapes with Hercules?</H4>
+<P>Yes.  It is possible to obtain 9-track open reel drives and 3480-type
+cartridge drives which attach to the SCSI bus.  Hercules makes these
+appear to the operating system as channel-attached 3420 or 3480 devices,
+making it possible to read and write real mainframe tapes. </P>
 <H4>Can I create Assembler programs without a mainframe?</H4>
 <P>Yes. If you want to write Assembler (BAL) programs to run on Hercules,
 but you don't have access to a mainframe, then there are two interesting
@@ -328,9 +332,12 @@ September 1999 issue of NaSPA Technical Support magazine. </P>
 <LI>Concurrent Sense </LI>
 <LI>Suppression on Protection with Virtual-Address enhancement </LI>
 <LI>Extended TOD clock </LI>
-<li>Compression (minimal function only)</li>
+<li>Compression (minimal function only by default; full function can be
+built, but has not been tested fully)</li>
 <LI>Perform Locked Operation </LI>
 <li>Vector Facility</li>
+<LI>Extended Translation </LI>
+<LI>Store System Information </LI>
 </ul>
 <P>The following standard features have not yet been implemented: </P>
 <UL>
@@ -340,7 +347,6 @@ September 1999 issue of NaSPA Technical Support magazine. </P>
 be in due course: </P>
 <UL>
 <LI>Address-Limit Checking </LI>
-<LI>Compression (full function)</LI>
 <LI>Incorrect-Length-Indication Suppression </LI>
 <LI>MVS assists </LI>
 <li>64-bit operations</li>
@@ -370,6 +376,9 @@ Reconfiguration, SCP-initiated Reset, Processor Availability </LI>
 <LI>Sysplex </LI>
 <LI>Sysplex Timer (ETR) </LI>
 <LI>VM assists </LI></UL>
+<p>Hercules is compliant with both IBM's ALS-1 and ALS-2 architectural level
+sets to the degree necessary to run all OS/390 versions through 2.10 and
+z/OS version 1.1.</p>
 <H4>Who are the Herculeans?</H4>
 
 <P>The following people are among those who have contributed to this
@@ -393,6 +402,7 @@ maintainer)
 <li>Roland Goetschi
 <li>Axel Schwarzer
 <li>Valery Pogonchenko
+<li>Juergen Dobrinski
 <li>Steve Gay
 <li>Reed H. Petty
 <li>Glen Herrmannsfeldt
@@ -400,6 +410,7 @@ maintainer)
 <li>Bernard van der Helm
 <li>David Barth
 <li>Soren Jorvang
+<li>Volker Bandke
 <li>Greg Smith
 <li>Dave Morton
 <li>Albert Louw
@@ -414,6 +425,7 @@ maintainer)
 <li>Sam Knutson
 <li>Tim Alpaerts
 <li>Rich Smrcina
+<li>Rick Fochtman
 <li>Daniel Rudin
 <li>Cory Hamasaki
 <li>Bertus Bekker
@@ -435,5 +447,5 @@ HREF="http://www.onelist.com/community/hercules-390">http://www.onelist.com/comm
 <P ALIGN="CENTER"><hr width="15%" noshade><A
 HREF="hercules.html"><IMG SRC="gifs/back.gif" BORDER=0 ALT="back"></A></P>
 <P><small>
-Last updated 29 October 2000</P></BODY>
+Last updated 03 December 2000</P></BODY>
 </HTML>

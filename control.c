@@ -20,6 +20,7 @@
 /*      Instruction decode rework - Jan Jaeger                       */
 /*      PR may lose pending interrupts - Jan Jaeger                  */
 /*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
+/*      STSI instruction by Jan Jaeger                               */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -3954,8 +3955,172 @@ U32     effective_addr2;                /* Effective address         */
 }
 
 
+#ifdef FEATURE_STORE_SYSTEM_INFORMATION
 /*-------------------------------------------------------------------*/
-/* AC   STNSM - Store Then And Systen Mask                      [SI] */
+/* B27D STSI  - Store System Information                         [S] */
+/*-------------------------------------------------------------------*/
+void zz_store_system_information (BYTE inst[], int execflag, REGS *regs)
+{
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
+U32     n;                              /* Absolute address          */
+int     i;
+SYSIB111  *sysib111;                    /* Basic machine conf        */
+SYSIB121  *sysib121;                    /* Basic machine CPU         */
+SYSIB122  *sysib122;                    /* Basic machine CPUs        */
+#if 0
+SYSIB221  *sysib221;                    /* LPAR CPU                  */
+SYSIB222  *sysib222;                    /* LPAR CPUs                 */
+SYSIB322  *sysib322;                    /* VM CPUs                   */
+SYSIBVMDB *sysib322;                    /* VM description block      */
+#endif
+static BYTE manufact[16] = { 0xD1,0xC1,0xD5,0xD1,0xC1,0xC5,0xC7,0xC5,
+                             0xD9,0x40,0x40,0x40,0x40,0x40,0x40,0x40 };
+static BYTE plant[4] = { 0xE9,0xE9,0x40,0x40 };
+static BYTE hexebcdic[16] = { 0xF0,0xF1,0xF2,0xF3,0xF4,0xF5,0xF6,0xF7,
+                              0xF8,0xF9,0xC1,0xC2,0xC3,0xC4,0xC5,0xC6 };
+static BYTE model[8] = { 0xC8,0xC5,0xD9,0xC3,0xE4,0xD3,0xC5,0xE2 };
+static BYTE mpfact[32] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
+                           0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
+                           0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
+                           0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B };
+
+#define STSI_CAPACITY   2
+
+    S(inst, execflag, regs, b2, effective_addr2);
+
+    PRIV_CHECK(regs);
+
+    SIE_INTERCEPT(regs);
+
+    /* Check function code */
+    if((regs->gpr[0] & STSI_GPR0_FC_MASK) > STSI_GPR0_FC_BASIC)
+    {
+        regs->psw.cc = 3;
+        return;
+    }
+
+    /* Program check if reserved bit not zero */
+    if(regs->gpr[0] & STSI_GPR0_RESERVED
+       || regs->gpr[1] & STSI_GPR1_RESERVED)
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /* Return current level if function code is zero */
+    if((regs->gpr[0] & STSI_GPR0_FC_MASK) == STSI_GPR0_FC_CURRENT)
+    {
+        regs->gpr[0] |= STSI_GPR0_FC_BASIC;
+        regs->psw.cc = 0;
+        return;
+    }
+
+    /* Program check if operand not on a page boundary */
+    if ( effective_addr2 & 0x00000FFF )
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /* Return with cc3 if selector codes invalid */
+    if( ((regs->gpr[0] & STSI_GPR0_FC_MASK) == 1
+      && ((regs->gpr[0] & STSI_GPR0_SEL1_MASK) > 1
+      || (regs->gpr[1] & STSI_GPR1_SEL2_MASK) > 1))
+     || (regs->gpr[0] & STSI_GPR0_SEL1_MASK) == 0
+      || (regs->gpr[1] & STSI_GPR1_SEL2_MASK) == 0
+      || (regs->gpr[0] & STSI_GPR0_SEL1_MASK) > 2
+      || (regs->gpr[1] & STSI_GPR1_SEL2_MASK) > 2)
+    {
+        regs->psw.cc = 3;
+        return;
+    }
+
+    /* Obtain absolute address of main storage block,
+       check protection, and set reference and change bits */
+    n = logical_to_abs (effective_addr2, b2, regs,
+                        ACCTYPE_WRITE, regs->psw.pkey);
+
+    switch(regs->gpr[0] & STSI_GPR0_FC_MASK) {
+
+    case STSI_GPR0_FC_BASIC:
+
+        switch(regs->gpr[0] & STSI_GPR0_SEL1_MASK) {
+
+        case 1:
+
+            switch(regs->gpr[1] & STSI_GPR1_SEL2_MASK) {
+
+            case 1:
+                sysib111 = (SYSIB111*)(sysblk.mainstor + n);
+                memset(sysib111, 0x00, sizeof(SYSIB111));
+                memcpy(sysib111->manufact,manufact,sizeof(manufact));
+                for(i = 0; i < 4; i++)
+                    sysib111->type[i] =
+                        hexebcdic[(sysblk.cpuid >> (28 - (i*4))) & 0x0F];
+                memset(sysib111->model, 0x40, sizeof(sysib111->model));
+                memcpy(sysib111->model, model, sizeof(model));
+                memset(sysib111->seqc,0xF0,sizeof(sysib111->seqc));
+                for(i = 0; i < 6; i++)
+                    sysib111->seqc[(sizeof(sysib111->seqc) - 6) + i] =
+                    hexebcdic[(sysblk.cpuid >> (52 - (i*4))) & 0x0F];
+                memcpy(sysib111->plant,plant,sizeof(plant));
+                regs->psw.cc = 0;
+                break;
+
+            default:
+                regs->psw.cc = 3;
+            } /* selector 2 */
+            break;
+
+        case 2:
+
+            switch(regs->gpr[1] & STSI_GPR1_SEL2_MASK) {
+
+            case 1:
+                sysib121 = (SYSIB121*)(sysblk.mainstor + n);
+                memset(sysib121, 0x00, sizeof(SYSIB121));
+                memset(sysib121->seqc,0xF0,sizeof(sysib121->seqc));
+                for(i = 0; i < 6; i++)
+                    sysib121->seqc[(sizeof(sysib121->seqc) - 6) + i] =
+                        hexebcdic[sysblk.cpuid >> (52 - (i*4)) & 0x0F];
+                memcpy(sysib121->plant,plant,sizeof(plant));
+                sysib121->cpuad[0] = regs->cpuad >> 8;
+                sysib121->cpuad[1] = regs->cpuad & 0xFF;
+                regs->psw.cc = 0;
+                break;
+
+            case 2:
+                sysib122 = (SYSIB122*)(sysblk.mainstor + n);
+                memset(sysib122, 0x00, sizeof(SYSIB122));
+                sysib122->cap[0] = STSI_CAPACITY >> 24;
+                sysib122->cap[1] = (STSI_CAPACITY >> 16) & 0xFF;
+                sysib122->cap[2] = (STSI_CAPACITY >> 8) & 0xFF;
+                sysib122->cap[3] = STSI_CAPACITY & 0xFF;
+                sysib122->totcpu[0] = MAX_CPU_ENGINES >> 8;
+                sysib122->totcpu[1] = MAX_CPU_ENGINES & 0xFF;
+                sysib122->confcpu[0] = sysblk.numcpu >> 8;
+                sysib122->confcpu[1] = sysblk.numcpu & 0xFF;
+                sysib122->sbcpu[0] = (MAX_CPU_ENGINES - sysblk.numcpu) >> 8;
+                sysib122->sbcpu[1] = (MAX_CPU_ENGINES - sysblk.numcpu) & 0xFF;
+                memcpy(sysib122->mpfact,mpfact,(MAX_CPU_ENGINES-1)*2);
+                regs->psw.cc = 0;
+                break;
+
+            default:
+                regs->psw.cc = 3;
+            } /* selector 2 */
+            break;
+
+        default:
+            regs->psw.cc = 3;
+        } /* selector 1 */
+        break;
+
+    default:
+        regs->psw.cc = 3;
+    } /* function code */
+
+}
+#endif /*FEATURE_STORE_SYSTEM_INFORMATION*/
+
+
+/*-------------------------------------------------------------------*/
+/* AC   STNSM - Store Then And System Mask                      [SI] */
 /*-------------------------------------------------------------------*/
 void zz_store_then_and_system_mask (BYTE inst[], int execflag, REGS *regs)
 {
@@ -3985,7 +4150,7 @@ U32     effective_addr1;                /* Effective address         */
 
 
 /*-------------------------------------------------------------------*/
-/* AD   STOSM - Store Then Or Systen Mask                       [SI] */
+/* AD   STOSM - Store Then Or System Mask                       [SI] */
 /*-------------------------------------------------------------------*/
 void zz_store_then_or_system_mask (BYTE inst[], int execflag, REGS *regs)
 {

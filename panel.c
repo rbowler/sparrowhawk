@@ -26,6 +26,9 @@
 #include "hercules.h"
 
 #include "inline.h"
+#ifdef IBUF
+#include "ibuf.h"
+#endif
 
 /*=NP================================================================*/
 /* Global data for new panel display                                 */
@@ -2532,7 +2535,11 @@ struct  timeval tv;                     /* Select timeout structure  */
                     "CPU%4.4X "
 #endif
                     "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X"
+#ifndef IBUF_STAT
                     " %-13.13s %llu instructions executed"
+#else
+                    " %-13.13s %llu inst %llu %llu %llu %llu"
+#endif
                     ANSI_ERASE_EOL,
 #if MAX_CPU_ENGINES > 1
                     regs->cpuad,
@@ -2544,7 +2551,15 @@ struct  timeval tv;                     /* Select timeout structure  */
                         (pswwait && pswmask == 0) ? "DISABLED WAIT" :
                         pswwait ? "ENABLED WAIT" :
                         "RUNNING"),
+#ifndef IBUF_STAT
                     (long long)regs->instcount);
+#else
+                    (long long)regs->instcount,
+                    regs->ibufrecompile,
+                    regs->ibufexeinst,
+                    regs->ibuflow,
+                    (regs->ibufrecompiledisk + regs->ibufrecompilestorage));
+#endif
             } /* end if(redraw_status) */
 
             if (redraw_cmd)

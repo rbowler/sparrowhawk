@@ -3128,10 +3128,9 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         num = (count < dev->ckdcurkl) ? count : dev->ckdcurkl;
         *residual = count - num;
 
-        /* Reorient to data area if key length is zero */
+        /* Nothing to compare if key length is zero */
         if (dev->ckdcurkl == 0)
         {
-            dev->ckdorient = CKDORIENT_DATA;
             *unitstat = CSW_CE | CSW_DE;
             break;
         }

@@ -148,7 +148,7 @@ U32     xaddr;                          /* Expanded storage address  */
 
 
 /*-------------------------------------------------------------------*/
-/* B262 ????? - Lock Page                                      [RRE] */
+/* B262 LKPG  - Lock Page                                      [RRE] */
 /*-------------------------------------------------------------------*/
 void zz_lock_page (BYTE inst[], int execflag, REGS *regs)
 {
@@ -160,8 +160,6 @@ int     protect;                        /* 1=ALE or page protection  */
 int     stid;                           /* Segment table indication  */
 U16     xcode;                          /* Exception code            */
 
-    logmsg("Lock Page: "); display_inst(regs, inst);
-
     RRE(inst, execflag, regs, r1, r2);
 
     PRIV_CHECK(regs);
@@ -169,21 +167,27 @@ U16     xcode;                          /* Exception code            */
     if(REAL_MODE(&(regs->psw)))
         program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
-    if(regs->gpr[r1] & 0x0000FF00)
+    n2 = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
+
+    if(regs->gpr[0] & LKPG_GPR0_RESV)
         program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     n2 = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
 
-    /* Return condition code 3 if translation exception */
-    if (translate_addr (n2, r2, regs, ACCTYPE_LOCKPAGE, &raddr,
-            &xcode, &private, &protect, &stid, NULL, NULL))
-    {
-        regs->psw.cc = 3;
-        return;
-    }
+    /* Access to PTE must be serialized */
+    OBTAIN_MAINLOCK(regs);
 
-    /*INCOMPLETE*/
-    regs->psw.cc = 1;
+    /* Return condition code 3 if translation exception */
+    if (translate_addr (n2, r2, regs, (regs->gpr[0] & LKPG_GPR0_LOCKBIT)
+                ? ACCTYPE_LOCKPAGE : ACCTYPE_UNLKPAGE,
+                &raddr, &xcode, &private, &protect, &stid, NULL, NULL))
+        regs->psw.cc = 3;
+
+    RELEASE_MAINLOCK(regs);
+
+    if((regs->gpr[0] & LKPG_GPR0_LOCKBIT) && regs->psw.cc == 0)
+        regs->gpr[r1] = raddr;
+
 }
 
 

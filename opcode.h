@@ -92,6 +92,16 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
         if( (_regs)->psw.prob ) \
             program_interrupt( (_regs), PGM_PRIVILEGED_OPERATION_EXCEPTION)
 
+#ifdef IBUF
+#define INC_ACTFRAG(_regs) \
+        { \
+           if ((_regs)->actentry) \
+               ((FRAGENTRY*)(_regs)->actentry)++; \
+        }
+#else
+#define INC_ACTFRAG(_regs) { }
+#endif
+
 #define E(_inst, _execflag, _regs) \
         { \
             if( !(_execflag) ) \
@@ -99,10 +109,11 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 2; \
                 (_regs)->psw.ia += 2; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         }
 
-#ifdef IBUF
+#ifdef IBUF_FASTOP
 #ifdef CHECK_FRAGPARMS
 #define RR(_inst, _execflag, _regs, _r1, _r2) \
         { \
@@ -110,9 +121,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
         { \
             RADDR *raddr; \
             FRAGENTRY *entry; \
-            FRAG *frag; \
             int ok = 0; \
-            frag = (FRAG*)(_regs)->actfrag; \
             entry = (FRAGENTRY*)(_regs)->actentry; \
             raddr = &entry->raddr; \
             (_r1) = (_inst)[1] >> 4; \
@@ -141,6 +150,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 2; \
                 (_regs)->psw.ia += 2; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         } \
         else \
@@ -152,6 +162,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 2; \
                 (_regs)->psw.ia += 2; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         } \
         }
@@ -171,6 +182,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 2; \
                 (_regs)->psw.ia += 2; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         } \
         else \
@@ -182,6 +194,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 2; \
                 (_regs)->psw.ia += 2; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         } \
         }
@@ -193,6 +206,11 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
             (_r2) = (_inst)[1] & 0x0F; \
         }
 #else
+#define IBUF_RR(_inst, _r1, _r2) \
+        { \
+            (_r1) = (_inst)[1] >> 4; \
+            (_r2) = (_inst)[1] & 0x0F; \
+        }
 #define RR(_inst, _execflag, _regs, _r1, _r2) \
         { \
             (_r1) = (_inst)[1] >> 4; \
@@ -202,6 +220,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 2; \
                 (_regs)->psw.ia += 2; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         }
 #endif
@@ -214,14 +233,15 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 2; \
                 (_regs)->psw.ia += 2; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         }
 
-#ifdef IBUF
+#ifdef IBUF_FASTOP
 #ifdef CHECK_FRAGPARMS
 #define RX(_inst, _execflag, _regs, _r1, _b2, _effective_addr2) \
         { \
-        if ((_regs)->actentry) \
+        if ((_regs)->actentry && ((FRAGENTRY*)((_regs)->actentry))->inst) \
         { \
             RADDR *raddr; \
             FRAGENTRY *entry; \
@@ -260,8 +280,6 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
             } \
             if (ok) \
             { \
-               FRAG *frag; \
-               frag = (FRAG*)(_regs)->actfrag; \
                logmsg("ERROR COMPILE RX %llu %4x %4x %4x op %x %x %x decoded: %x %x %x %x %4x\n",  \
                        (_regs)->instcount, \
                        entry->iaabs, \
@@ -281,6 +299,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 4; \
                 (_regs)->psw.ia += 4; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         } \
         else \
@@ -304,13 +323,14 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 4; \
                 (_regs)->psw.ia += 4; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         } \
         }
 #else
 #define RX(_inst, _execflag, _regs, _r1, _b2, _effective_addr2) \
         { \
-        if ((_regs)->actentry) \
+        if ((_regs)->actentry && ((FRAGENTRY*)((_regs)->actentry))->inst) \
         { \
             RADDR *raddr; \
             FRAGENTRY *entry; \
@@ -335,6 +355,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 4; \
                 (_regs)->psw.ia += 4; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         } \
         else \
@@ -358,6 +379,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 4; \
                 (_regs)->psw.ia += 4; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         } \
         }
@@ -371,6 +393,13 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
             (_b3) = (_inst)[2] >> 4; \
         }
 #else
+#define IBUF_RX(_inst, _r1, _x2, _b3, _addr) \
+        { \
+            (_r1) = (_inst)[1] >> 4; \
+            (_x2) = (_inst)[1] & 0x0F; \
+            (_addr) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
+            (_b3) = (_inst)[2] >> 4; \
+        }
 #define RX(_inst, _execflag, _regs, _r1, _b2, _effective_addr2) \
         { \
             (_r1) = (_inst)[1] >> 4; \
@@ -392,6 +421,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 4; \
                 (_regs)->psw.ia += 4; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         }
 #endif
@@ -410,8 +440,9 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 4; \
                 (_regs)->psw.ia += 4; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
-        }
+        } 
 
 #define RS(_inst, _execflag, _regs, _r1, _r3, _b2, _effective_addr2) \
         { \
@@ -429,6 +460,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 4; \
                 (_regs)->psw.ia += 4; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         }
 
@@ -442,6 +474,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 4; \
                 (_regs)->psw.ia += 4; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         }
 
@@ -460,6 +493,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 4; \
                 (_regs)->psw.ia += 4; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         }
 
@@ -472,6 +506,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 4; \
                 (_regs)->psw.ia += 4; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         }
 
@@ -499,6 +534,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 6; \
                 (_regs)->psw.ia += 6; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         }
 
@@ -525,6 +561,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 6; \
                 (_regs)->psw.ia += 6; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         }
 
@@ -550,6 +587,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ilc = 6; \
                 (_regs)->psw.ia += 6; \
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+                INC_ACTFRAG(_regs); \
             } \
         }
 
@@ -802,6 +840,7 @@ void zz_store_cpu_address (BYTE inst[], int execflag, REGS *regs);
 void zz_store_cpu_id (BYTE inst[], int execflag, REGS *regs);
 void zz_store_cpu_timer (BYTE inst[], int execflag, REGS *regs);
 void zz_store_prefix (BYTE inst[], int execflag, REGS *regs);
+void zz_store_system_information (BYTE inst[], int execflag, REGS *regs);
 void zz_store_then_and_system_mask (BYTE inst[], int execflag, REGS *regs);
 void zz_store_then_or_system_mask (BYTE inst[], int execflag, REGS *regs);
 void zz_store_using_real_address (BYTE inst[], int execflag, REGS *regs);
@@ -932,6 +971,8 @@ void zz_compare_logical_long (BYTE inst[], int execflag, REGS *regs);
 void zz_compare_logical_long_extended (BYTE inst[], int execflag, REGS *regs);
 void zz_compare_logical_string (BYTE inst[], int execflag, REGS *regs);
 void zz_compare_until_substring_equal (BYTE inst[], int execflag, REGS *regs);
+void zz_convert_unicode_to_utf8 (BYTE inst[], int execflag, REGS *regs);
+void zz_convert_utf8_to_unicode (BYTE inst[], int execflag, REGS *regs);
 void zz_convert_to_binary (BYTE inst[], int execflag, REGS *regs);
 void zz_convert_to_decimal (BYTE inst[], int execflag, REGS *regs);
 void zz_copy_access (BYTE inst[], int execflag, REGS *regs);
@@ -1011,6 +1052,7 @@ void zz_test_under_mask_high (BYTE inst[], int execflag, REGS *regs);
 void zz_test_under_mask_low (BYTE inst[], int execflag, REGS *regs);
 void zz_translate (BYTE inst[], int execflag, REGS *regs);
 void zz_translate_and_test (BYTE inst[], int execflag, REGS *regs);
+void zz_translate_extended (BYTE inst[], int execflag, REGS *regs);
 void zz_unpack (BYTE inst[], int execflag, REGS *regs);
 void zz_update_tree (BYTE inst[], int execflag, REGS *regs);
 

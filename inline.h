@@ -4,6 +4,55 @@
 
 /* Storage protection override fix               Jan Jaeger 31/08/00 */
 
+#ifdef IBUF
+#ifdef INLINE_INVALIDATE
+/*-------------------------------------------------------------------*/
+/* Invalidate Fragment                                               */
+/*-------------------------------------------------------------------*/
+static inline void ibuf_fastinvalidate (U32 abs, U32 len)
+{
+REGS *regs;
+#if MAX_CPU_ENGINES > 1
+int i;
+#endif
+
+#ifdef IBUF_STAT
+BYTE invalid = 1;
+#endif
+
+    if ((abs & (FRAG_BYTESIZE - 1)) < (FRAG_BYTESIZE - 8))
+    {
+#if MAX_CPU_ENGINES > 1
+        for (i=0; i < MAX_CPU_ENGINES; i++)
+        {
+            regs = &sysblk.regs[i];
+            if (regs->fragvalid)
+            {
+#else
+                regs = &sysblk.regs[0];
+               
+#endif
+#ifdef IBUF_STAT
+                regs->ibufinvalidatex++;
+#endif
+                regs->icount[(abs >> FRAG_ADDRESSLENGTH) & (FRAG_BUFFER - 1)]
+                          = 0;
+                regs->fragvalid[(abs >> FRAG_ADDRESSLENGTH) & (FRAG_BUFFER - 1)]
+                          = 0;
+#ifdef IBUF_STAT
+                regs->fraginvalid[(abs >> FRAG_ADDRESSLENGTH) & (FRAG_BUFFER - 1)]
+                          = invalid;
+#endif
+                return;
+#if MAX_CPU_ENGINES > 1
+            }
+        }
+#endif
+    }
+    ibuf_invalidate(abs, len);
+}
+#endif
+#endif
 /*-------------------------------------------------------------------*/
 /* Add two signed fullwords giving a signed fullword result          */
 /* and return condition code                                         */
@@ -306,7 +355,7 @@ U32     i;
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
     }
     else
-#ifndef INLINE_FETCH
+#ifndef INLINE_VSTORE
         vstore4(value, regs->sie_mso + addr, USE_PRIMARY_SPACE, regs->hostregs);
 #else
         xvstore4(value, regs->sie_mso + addr, USE_PRIMARY_SPACE, regs->hostregs);
@@ -436,7 +485,7 @@ U32     ssaste5;                        /* Subspace ASTE word 5      */
 } /* end function subspace_replace */
 
 
-#ifdef INLINE_FETCH
+#ifndef FEATURE_OPTIMIZE_SAME_PAGE
 /*-------------------------------------------------------------------*/
 /* Translate a 31-bit virtual address to a real address              */
 /*                                                                   */
@@ -785,7 +834,12 @@ U16     eax;                            /* Authorization index       */
 
         /* Only a single entry in the TLB will be looked up, namely the
            entry indexed by bits 12-19 of the virtual address */
-        if (acctype == ACCTYPE_LRA)
+        if (acctype == ACCTYPE_LRA
+#if defined(FEATURE_LOCK_PAGE)
+               || acctype == ACCTYPE_LOCKPAGE
+               || acctype == ACCTYPE_UNLKPAGE
+#endif /*defined(FEATURE_LOCK_PAGE)*/
+)
             tlbp = NULL;
         else
             tlbp = &(regs->tlb[(vaddr >> 12) & 0xFF]);
@@ -872,6 +926,30 @@ U16     eax;                            /* Authorization index       */
                 tlbp->common = (ste & SEGTAB_COMMON) ? 1 : 0;
                 tlbp->valid = 1;
             }
+    
+#if defined(FEATURE_LOCK_PAGE)
+            switch(acctype) {
+                case ACCTYPE_LOCKPAGE:
+                    if(pte & PAGETAB_PGLOCK)
+                        regs->psw.cc = 1;
+                    else
+                    {
+                        store_fullword_absolute(pte | PAGETAB_PGLOCK,
+                                                pto, regs);
+                        regs->psw.cc = 0;
+                    }
+                    break;
+
+                case ACCTYPE_UNLKPAGE:
+                    if(pte & PAGETAB_PGLOCK) {
+                        store_fullword_absolute(pte & ~PAGETAB_PGLOCK,
+                                                pto, regs);
+                        regs->psw.cc = 0;
+                    } else
+                        regs->psw.cc = 1;
+                    break;
+            }
+#endif /*defined(FEATURE_LOCK_PAGE)*/
     
         } /* end if(!TLB) */
     
@@ -996,6 +1074,9 @@ tran_excp_addr:
     return cc;
 
 } /* end function translate_addr */
+#endif
+
+#ifdef INLINE_LOGICAL
 /*-------------------------------------------------------------------*/
 /* Convert logical address to absolute address and check protection  */
 /*                                                                   */
@@ -1222,7 +1303,9 @@ vabs_prog_check:
 
     return -1; /* prevent warning from compiler */
 } /* end function logical_to_abs */
+#endif
 
+#ifdef INLINE_VSTORE
 /*-------------------------------------------------------------------*/
 /* Store 1 to 256 characters into virtual storage operand            */
 /*                                                                   */
@@ -1289,7 +1372,7 @@ static inline void vstoreb (BYTE value, U32 addr, int arn, REGS *regs)
                                 regs->psw.pkey);
     sysblk.mainstor[addr] = value;
 #ifdef IBUF
-    FRAG_INVALIDATE(addr, 1);
+    FRAG_INVALIDATEX(regs, addr, 1);
 #endif
 } /* end function vstoreb */
 
@@ -1333,11 +1416,11 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
 #ifdef IBUF
     if ((abs1 + 1) == abs2)
-        FRAG_INVALIDATE(abs1, 2)
+        FRAG_INVALIDATEX(regs, abs1, 2)
     else
     {
-        FRAG_INVALIDATE(abs1, 1);
-        FRAG_INVALIDATE(abs2, 1);
+        FRAG_INVALIDATEX(regs, abs1, 1);
+        FRAG_INVALIDATEX(regs, abs2, 1);
     }
 #endif
 
@@ -1380,7 +1463,7 @@ BYTE    l1 = 0;
     {
         *((U32*)(sysblk.mainstor + abs)) = htonl(value);
 #ifdef IBUF
-        FRAG_INVALIDATE(abs, 4);
+        FRAG_INVALIDATEX(regs, abs, 4);
 #endif
         return;
     }
@@ -1416,13 +1499,13 @@ BYTE    l1 = 0;
 
 #ifdef IBUF
     if ((habs & STORAGE_KEY_PAGEMASK) == (habs2 & STORAGE_KEY_PAGEMASK))
-        FRAG_INVALIDATE(habs, 4)
+        FRAG_INVALIDATEX(regs, habs, 4)
     else
     {
         l1 = (habs & STORAGE_KEY_PAGEMASK) +
               STORAGE_KEY_PAGESIZE - habs;
-        FRAG_INVALIDATE(habs, l1);
-        FRAG_INVALIDATE(habs2, 4 - l1);
+        FRAG_INVALIDATEX(regs, habs, l1);
+        FRAG_INVALIDATEX(regs, habs2, 4 - l1);
     }
 #endif
 
@@ -1471,7 +1554,7 @@ BYTE    l1 = 0;
         sysblk.mainstor[abs+6] = (value >> 8) & 0xFF;
         sysblk.mainstor[abs+7] = value & 0xFF;
 #ifdef IBUF
-        FRAG_INVALIDATE(abs, 8);
+        FRAG_INVALIDATEX(regs, abs, 8);
 #endif
         return;
     }
@@ -1507,18 +1590,20 @@ BYTE    l1 = 0;
 
 #ifdef IBUF
     if ((habs & STORAGE_KEY_PAGEMASK) == (habs2 & STORAGE_KEY_PAGEMASK))
-        FRAG_INVALIDATE(habs, 8)
+        FRAG_INVALIDATEX(regs, habs, 8)
     else
     {
         l1 = (habs & STORAGE_KEY_PAGEMASK) +
               STORAGE_KEY_PAGESIZE - habs;
-        FRAG_INVALIDATE(habs, l1);
-        FRAG_INVALIDATE(habs2, 8 - l1);
+        FRAG_INVALIDATEX(regs, habs, l1);
+        FRAG_INVALIDATEX(regs, habs2, 8 - l1);
     }
 #endif
 
 } /* end function vstore8 */
+#endif
 
+#ifdef INLINE_VFETCH
 /*-------------------------------------------------------------------*/
 /* Fetch a 1 to 256 character operand from virtual storage           */
 /*                                                                   */
@@ -1750,7 +1835,9 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     return value;
 
 } /* end function vfetch8 */
+#endif
 
+#ifdef INLINE_IFETCH
 /*-------------------------------------------------------------------*/
 /* Fetch instruction from halfword-aligned virtual storage location  */
 /*                                                                   */
@@ -1778,23 +1865,56 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
     /* Program check if instruction address is odd */
     if (addr & 0x01)
+    {
+#ifdef CHECK_FRAGADDRESS
+        logmsg("SPEC EXCEPTION instfetch\n");
+#endif
         program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+     }
 
     /* Fetch six bytes if instruction cannot cross a page boundary */
     if ((addr & STORAGE_KEY_BYTEMASK) <= STORAGE_KEY_PAGESIZE - 6)
     {
+#ifdef OPTIMIZE_IAABS
+#ifdef CHECK_IAABS
+        if (regs->iaabs)
+        {
+            abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
+            if (abs != regs->iaabs)
+                logmsg("ERROR iaabs in instfetch %4x %4x\n",
+                        abs, regs->iaabs);
+        }
+        else
+            abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
+#else
+        if (regs->iaabs)
+            abs = regs->iaabs;
+        else
+            abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
+#endif
+#else
         abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
-#ifdef CHECK_FRAGPARMS
-        regs->iaabs = abs;
 #endif
         memcpy (dest, sysblk.mainstor+abs, 6);
         return;
     }
 
     /* Fetch first two bytes of instruction */
-    abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
-#ifdef CHECK_FRAGPARMS
-    regs->iaabs = abs;
+#ifdef CHECK_IAABS
+    if (regs->iaabs)
+    {
+        abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
+        if (abs != regs->iaabs)
+            logmsg("ERROR iaabs in instfetch %4x %4x\n",
+                    abs, regs->iaabs);
+    }
+    else
+        abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
+#else
+    if (regs->iaabs)
+        abs = regs->iaabs;
+    else
+        abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
 #endif
     memcpy (dest, sysblk.mainstor+abs, 2);
 

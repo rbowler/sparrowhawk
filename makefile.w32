@@ -6,22 +6,22 @@
 #
 #
 
-VERSION  = 1.67
+VERSION  = 1.70
 
 # Change this if you want to install the Hercules executables somewhere
 #   besides /usr/bin. The $PREFIX (which defaults to nothing) can be
 #   overridden in the make command line, as in "PREFIX=/foo make install"
 #   (the directory is only used when installing).
-DESTDIR  = $(PREFIX)/usr/bin
+DESTDIR  = $(PREFIX)/hercules
 
 # Directory where the pthreads-win32 library was installed.
-PTHREADS_W32DIR = //G/pthreads
+PTHREADS_W32DIR = /usr
 
 #CFLAGS	 = -O0 -Wall -DARCH=390
-CFLAGS	 = -O2 -Wall -fPIC -malign-double -DARCH=390 -DWIN32
+CFLAGS	 = -O2 -Wall -malign-double -DARCH=390 -DWIN32
 #	   -march=pentium -malign-double -mwide-multiply
 #CFL_370  = -O0 -Wall -DARCH=370
-CFL_370  = -O2 -Wall -fPIC -malign-double -DARCH=370 -DWIN32
+CFL_370  = -O2 -Wall -malign-double -DARCH=370 -DWIN32
 #	   -march=pentium -malign-double -mwide-multiply
 LFLAGS	 = -L$(PTHREADS_W32DIR)/DLL -lpthreadw32
 
@@ -50,7 +50,7 @@ HRC_370_OBJS = obj370/impl.o obj370/config.o obj370/panel.o \
 	   obj370/printer.o obj370/console.o obj370/external.o \
 	   obj370/float.o obj370/ctcadpt.o obj370/trace.o \
 	   obj370/machchk.o obj370/vector.o obj370/xstore.o \
-	   obj370/cmpsc.o
+	   obj370/cmpsc.o obj370/cckddasd.o
            
 
 HRC_390_OBJS = obj390/impl.o obj390/config.o obj390/panel.o \
@@ -64,7 +64,7 @@ HRC_390_OBJS = obj390/impl.o obj390/config.o obj390/panel.o \
 	   obj390/printer.o obj390/console.o obj390/external.o \
 	   obj390/float.o obj390/ctcadpt.o obj390/trace.o \
 	   obj390/machchk.o obj390/vector.o obj390/xstore.o \
-	   obj390/cmpsc.o obj390/sie.o
+	   obj390/cmpsc.o obj390/sie.o obj390/cckddasd.o
            
 
 DIN_OBJS = dasdinit.o dasdutil.o
@@ -148,5 +148,5 @@ tar:    clean
 	(cd ..; tar cvzf hercules-$(VERSION).tar.gz hercules-$(VERSION))
 
 install:  $(EXEFILES)
-	cp $(EXEFILES) $(DESTDIR)
-	cp dasdlist $(DESTDIR)
+	cp *.exe $(DESTDIR)
+	cp $(PTHREADS_W32DIR)/DLL/*.dll $(DESTDIR)

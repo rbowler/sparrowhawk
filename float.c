@@ -12,9 +12,76 @@
 /*                                               Jan Jaeger 01/07/00 */
 /*-------------------------------------------------------------------*/
 
+/*-------------------------------------------------------------------*/
+/* Added the square-root-facility (instructions SQDR, SQER).         */
+/*                                         Peter Kuschnerus 01/09/00 */
+/*-------------------------------------------------------------------*/
+
+
 #include "hercules.h"
 #include "opcode.h"
 #include "inline.h"
+
+
+/*-------------------------------------------------------------------*/
+/* Definitions							     */
+/*-------------------------------------------------------------------*/
+
+/*-------------------------------------------------------------------*/
+/* Add 128 bit unsigned integer                                      */
+/* The result is placed in operand a                                 */
+/*                                                                   */
+/* msa 	most significant 64 bit of operand a			     */
+/* lsa 	least significant 64 bit of operand a			     */
+/* msb 	most significant 64 bit of operand b			     */
+/* lsb 	least significant 64 bit of operand b			     */
+/*                                                                   */
+/* all 64 bit operands are expected to be defined as U64             */
+/*-------------------------------------------------------------------*/
+#define add_U128(msa, lsa, msb, lsb) \
+    (lsa) += (lsb); \
+    (msa) += (msb); \
+    if ((lsa) < (lsb)) \
+	(msa)++
+
+
+/*-------------------------------------------------------------------*/
+/* Subtract 128 bit unsigned integer                                 */
+/* The operand b is subtracted from operand a                        */
+/* The result is placed in operand a                                 */
+/*                                                                   */
+/* msa 	most significant 64 bit of operand a			     */
+/* lsa 	least significant 64 bit of operand a			     */
+/* msb 	most significant 64 bit of operand b			     */
+/* lsb 	least significant 64 bit of operand b			     */
+/*                                                                   */
+/* all 64 bit operands are expected to be defined as U64             */
+/*-------------------------------------------------------------------*/
+#define sub_U128(msa, lsa, msb, lsb) \
+    (msa) -= (msb); \
+    if ((lsa) < (lsb)) \
+	(msa)--; \
+    (lsa) -= (lsb)
+
+
+/*-------------------------------------------------------------------*/
+/* Subtract 128 bit unsigned integer reverse                         */
+/* The operand a is subtracted from operand b                        */
+/* The result is placed in operand a                                 */
+/*                                                                   */
+/* msa 	most significant 64 bit of operand a			     */
+/* lsa 	least significant 64 bit of operand a			     */
+/* msb 	most significant 64 bit of operand b			     */
+/* lsb 	least significant 64 bit of operand b			     */
+/*                                                                   */
+/* all 64 bit operands are expected to be defined as U64             */
+/*-------------------------------------------------------------------*/
+#define sub_reverse_U128(msa, lsa, msb, lsb) \
+    (msa) = (msb) - (msa); \
+    if ((lsb) < (lsa)) \
+	(msa)--; \
+    (lsa) = (lsb) - (lsa)
+
 
 /*-------------------------------------------------------------------*/
 /* Structure definition for internal short floatingpoint format      */
@@ -25,6 +92,7 @@ typedef struct _SHORT_FLOAT {
 	BYTE	sign;			/* Sign			     */
 } SHORT_FLOAT;
 
+
 /*-------------------------------------------------------------------*/
 /* Structure definition for internal long floatingpoint format       */
 /*-------------------------------------------------------------------*/
@@ -33,6 +101,7 @@ typedef struct _LONG_FLOAT {
 	short	expo;			/* Exponent + 64             */
 	BYTE	sign;			/* Sign			     */
 } LONG_FLOAT;
+
 
 /*-------------------------------------------------------------------*/
 /* Structure definition for internal extended floatingpoint format   */
@@ -44,6 +113,7 @@ typedef struct _EXTENDED_FLOAT {
 	BYTE	sign;			/* Sign			     */
 } EXTENDED_FLOAT;
 
+
 #define	POS	0			/* Positive value of sign    */
 #define NEG	1			/* Negative value of sign    */
 #define UNNORMAL 0			/* Without normalisation     */
@@ -53,89 +123,6 @@ typedef struct _EXTENDED_FLOAT {
 /*-------------------------------------------------------------------*/
 /* Static inline functions                                           */
 /*-------------------------------------------------------------------*/
-
-/*-------------------------------------------------------------------*/
-/* Add 128 bit integer                                               */
-/* The result is placed in operand a                                 */
-/*                                                                   */
-/* Input:                                                            */
-/*	msa 	most significant 64 bit of operand a                 */
-/*	lsa 	least significant 64 bit of operand a                */
-/*	msb 	most significant 64 bit of operand b                 */
-/*	lsb 	least significant 64 bit of operand b                */
-/*-------------------------------------------------------------------*/
-static inline void add_U128( U64 *msa, U64 *lsa, U64 msb, U64 lsb )
-{
-U64 wk;
-U32 sum;
-U32 c;
-
-    wk = (*lsa & 0x00000000FFFFFFFFULL) + (lsb & 0x00000000FFFFFFFFULL);
-    sum = wk;
-    c = wk >> 32;
-    wk = (*lsa >> 32) + (lsb >> 32) + c;
-    c = wk >> 32;
-    *lsa = (wk << 32) | sum;
-    *msa = *msa + msb + c;
-
-} /* end function add_U128 */
-
-
-/*-------------------------------------------------------------------*/
-/* Subtract 128 bit integer                                          */
-/* The operand b is subtracted from operand a                        */
-/* The result is placed in operand a                                 */
-/*                                                                   */
-/* Input:                                                            */
-/*	msa 	most significant 64 bit of operand a                 */
-/*	lsa 	least significant 64 bit of operand a                */
-/*	msb 	most significant 64 bit of operand b                 */
-/*	lsb 	least significant 64 bit of operand b                */
-/*-------------------------------------------------------------------*/
-static inline void sub_U128( U64 *msa, U64 *lsa, U64 msb, U64 lsb )
-{
-S64 wk;
-U32 sum;
-int c;
-
-    wk = (*lsa & 0x00000000FFFFFFFFULL) - (lsb & 0x00000000FFFFFFFFULL);
-    sum = wk;
-    c = wk >> 32;
-    wk = (*lsa >> 32) - (lsb >> 32) + c;
-    c = wk >> 32;
-    *lsa = (wk << 32) | sum;
-    *msa = *msa - msb + c;
-
-} /* end function sub_U128 */
-
-
-/*-------------------------------------------------------------------*/
-/* Subtract 128 bit integer reverse                                  */
-/* The operand a is subtracted from operand b                        */
-/* The result is placed in operand a                                 */
-/*                                                                   */
-/* Input:                                                            */
-/*	msa 	most significant 64 bit of operand a                 */
-/*	lsa 	least significant 64 bit of operand a                */
-/*	msb 	most significant 64 bit of operand b                 */
-/*	lsb 	least significant 64 bit of operand b                */
-/*-------------------------------------------------------------------*/
-static inline void sub_reverse_U128( U64 *msa, U64 *lsa, U64 msb, U64 lsb )
-{
-S64 wk;
-U32 sum;
-int c;
-
-    wk = (lsb & 0x00000000FFFFFFFFULL) - (*lsa & 0x00000000FFFFFFFFULL);
-    sum = wk;
-    c = wk >> 32;
-    wk = (lsb >> 32) - (*lsa >> 32) + c;
-    c = wk >> 32;
-    *lsa = (wk << 32) | sum;
-    *msa = msb - *msa + c;
-
-} /* end function sub_reverse_U128 */
-
 
 /*-------------------------------------------------------------------*/
 /* Get short float from register                                     */
@@ -317,7 +304,15 @@ U64     value;                          /* Operand value             */
 static inline void normal_sf( SHORT_FLOAT *fl )
 {
     if (fl->short_fract) {
-	while ((fl->short_fract & 0x00F00000) == 0) {
+	if ((fl->short_fract & 0x00FFFF00) == 0) {
+	    fl->short_fract <<= 16;
+	    fl->expo -= 4;
+	}
+	if ((fl->short_fract & 0x00FF0000) == 0) {
+	    fl->short_fract <<= 8;
+	    fl->expo -= 2;
+	}
+	if ((fl->short_fract & 0x00F00000) == 0) {
 	    fl->short_fract <<= 4;
 	    (fl->expo)--;
 	}
@@ -338,7 +333,19 @@ static inline void normal_sf( SHORT_FLOAT *fl )
 static inline void normal_lf( LONG_FLOAT *fl )
 {
     if (fl->long_fract) {
-	while ((fl->long_fract & 0x00F0000000000000ULL) == 0) {
+	if ((fl->long_fract & 0x00FFFFFFFF000000ULL) == 0) {
+	    fl->long_fract <<= 32;
+	    fl->expo -= 8;
+	}
+	if ((fl->long_fract & 0x00FFFF0000000000ULL) == 0) {
+	    fl->long_fract <<= 16;
+	    fl->expo -= 4;
+	}
+	if ((fl->long_fract & 0x00FF000000000000ULL) == 0) {
+	    fl->long_fract <<= 8;
+	    fl->expo -= 2;
+	}
+	if ((fl->long_fract & 0x00F0000000000000ULL) == 0) {
 	    fl->long_fract <<= 4;
 	    (fl->expo)--;
 	}
@@ -359,16 +366,45 @@ static inline void normal_lf( LONG_FLOAT *fl )
 static inline void normal_ef( EXTENDED_FLOAT *fl )
 {
     if (fl->ms_fract || fl->ls_fract) {
-	while (fl->ms_fract == 0) {
+	if (fl->ms_fract == 0) {
 	    fl->ms_fract = fl->ls_fract >> 16;
 	    fl->ls_fract <<= 48;
 	    fl->expo -= 12;
 	}
-
-	while ((fl->ms_fract & 0x0000F00000000000ULL) == 0) {
+	if ((fl->ms_fract & 0x0000FFFFFFFF0000ULL) == 0) {
+	    if (fl->ls_fract) {
+		fl->ms_fract = (fl->ms_fract << 32) 
+			     | (fl->ls_fract >> 32);
+		fl->ls_fract <<= 32;
+	    } else {
+		fl->ms_fract <<= 32;
+	    }
+	    fl->expo -= 8;
+	}
+	if ((fl->ms_fract & 0x0000FFFF00000000ULL) == 0) {
+	    if (fl->ls_fract) {
+		fl->ms_fract = (fl->ms_fract << 16) 
+			     | (fl->ls_fract >> 48);
+		fl->ls_fract <<= 16;
+	    } else {
+		fl->ms_fract <<= 16;
+	    }
+	    fl->expo -= 4;
+	}
+	if ((fl->ms_fract & 0x0000FF0000000000ULL) == 0) {
+	    if (fl->ls_fract) {
+		fl->ms_fract = (fl->ms_fract << 8) 
+			     | (fl->ls_fract >> 56);
+		fl->ls_fract <<= 8;
+	    } else {
+		fl->ms_fract <<= 8;
+	    }
+	    fl->expo -= 2;
+	}
+	if ((fl->ms_fract & 0x0000F00000000000ULL) == 0) {
 	    if (fl->ls_fract) {
 		fl->ms_fract = (fl->ms_fract << 4) 
-			 | (fl->ls_fract >> 60);
+			     | (fl->ls_fract >> 60);
 		fl->ls_fract <<= 4;
 	    } else {
 		fl->ms_fract <<= 4;
@@ -494,23 +530,31 @@ static inline int underflow_lf( LONG_FLOAT *fl, REGS *regs )
 /*                                                                   */
 /* Input:                                                            */
 /*      fl	Internal float					     */
+/*	fpr	Register to be stored to			     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static inline int underflow_ef( EXTENDED_FLOAT *fl, REGS *regs )
+static inline int underflow_ef( EXTENDED_FLOAT *fl, U32 *fpr, REGS *regs )
 {
     if (fl->expo < 0) {
 	if (regs->psw.eumask) {
 	    fl->expo &= 0x007F;
+
+            store_ef( fl, fpr );
 	    return(PGM_EXPONENT_UNDERFLOW_EXCEPTION);
 	} else {
 	    /* set true 0 */
 
-	    fl->ms_fract = 0;
-	    fl->ls_fract = 0;
-	    fl->sign = POS;
-	    fl->expo = 0;
+	    fpr[0] = 0;
+	    fpr[1] = 0;
+	    fpr[2] = 0;
+	    fpr[3] = 0;
+            fl->ms_fract = 0;  /* needed by AXR / SXR ...  - mbz - */
+            fl->ls_fract = 0;  /* ... to properly set cc   - mbz - */
+	    return(0);
 	}
     }
+
+    store_ef( fl, fpr );
     return(0);
 
 } /* end function underflow_ef */
@@ -556,7 +600,7 @@ static inline int over_under_flow_sf( SHORT_FLOAT *fl, REGS *regs )
 /*-------------------------------------------------------------------*/
 static inline int over_under_flow_lf( LONG_FLOAT *fl, REGS *regs )
 {
-    if(fl->expo > 127) {
+    if (fl->expo > 127) {
 	fl->expo &= 0x007F;
 	return(PGM_EXPONENT_OVERFLOW_EXCEPTION);
     } else {
@@ -660,17 +704,23 @@ static inline int significance_lf( LONG_FLOAT *fl, REGS *regs )
 /*                                                                   */
 /* Input:                                                            */
 /*      fl	Internal float					     */
+/*	fpr	Register to be stored to			     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static inline int significance_ef( EXTENDED_FLOAT *fl, REGS *regs )
+static inline int significance_ef( EXTENDED_FLOAT *fl, U32 *fpr, REGS *regs )
 {
-    fl->sign = POS;
+    fpr[1] = 0;
+    fpr[3] = 0;
+
     if (regs->psw.sgmask) {
+	fpr[0] = (U32)fl->expo << 24;
+	fpr[2] = (((U32)fl->expo - 14) << 24) & 0x7f000000;
 	return(PGM_SIGNIFICANCE_EXCEPTION);
     }
     /* set true 0 */
 
-    fl->expo = 0;
+    fpr[0] = 0;
+    fpr[2] = 0;
     return(0);
 
 } /* end function significance_ef */
@@ -689,8 +739,7 @@ static inline int significance_ef( EXTENDED_FLOAT *fl, REGS *regs )
 /*	normal	Normalize if true				     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static int add_sf( SHORT_FLOAT *fl, SHORT_FLOAT *add_fl, BYTE normal, 
-		REGS *regs )
+static int add_sf( SHORT_FLOAT *fl, SHORT_FLOAT *add_fl, BYTE normal, REGS *regs )
 {
 int	pgm_check;
 BYTE	shift;
@@ -845,8 +894,7 @@ BYTE	shift;
 /*	normal	Normalize if true				     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static int add_lf( LONG_FLOAT *fl, LONG_FLOAT *add_fl, BYTE normal, 
-		REGS *regs )
+static int add_lf( LONG_FLOAT *fl, LONG_FLOAT *add_fl, BYTE normal, REGS *regs )
 {
 int	pgm_check;
 BYTE	shift;
@@ -956,13 +1004,13 @@ BYTE	shift;
                         /* true 0 */
 
                         pgm_check = significance_lf(fl, regs);
-                    }
+		    }
                 } else {
                     /* not normalize, just guard digit */
                     fl->long_fract >>= 4;
                     if (fl->long_fract == 0) {
                         pgm_check = significance_lf(fl, regs);
-                    }
+		    }
                 }
             }
 	    return(pgm_check);
@@ -981,7 +1029,7 @@ BYTE	shift;
             /* both 0 */
 
             return( significance_lf(fl, regs) );
-        }
+	}
     }
     if (normal == NORMAL) {
 	normal_lf(fl);
@@ -1000,7 +1048,7 @@ BYTE	shift;
 /*      add_fl	Float to be added				     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static int add_ef( EXTENDED_FLOAT *fl, EXTENDED_FLOAT *add_fl, REGS *regs )
+static int add_ef( EXTENDED_FLOAT *fl, EXTENDED_FLOAT *add_fl, U32 *fpr, REGS *regs )
 {
 int	pgm_check;
 BYTE	shift;
@@ -1036,11 +1084,11 @@ BYTE	shift;
 			    fl->ms_fract = add_fl->ms_fract;
 			    fl->ls_fract = add_fl->ls_fract;
 
-			    if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) {	
-				pgm_check = significance_ef(fl, regs);
+			    if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) {
+				pgm_check = significance_ef(fl, fpr, regs);
 			    } else {
 				normal_ef(fl);
-				pgm_check =  underflow_ef(fl, regs);
+				pgm_check =  underflow_ef(fl, fpr, regs);
 			    }
 			    return(pgm_check);
 			} else if (shift >= 16) {
@@ -1063,11 +1111,11 @@ BYTE	shift;
 			    fl->ms_fract = add_fl->ms_fract;
 			    fl->ls_fract = add_fl->ls_fract;
 
-			    if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) {	
-				pgm_check = significance_ef(fl, regs);
+			    if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) {
+				pgm_check = significance_ef(fl, fpr, regs);
 			    } else {
 				normal_ef(fl);
-				pgm_check = underflow_ef(fl, regs);
+				pgm_check = underflow_ef(fl, fpr, regs);
 			    }
 			    return(pgm_check);
 			}
@@ -1084,11 +1132,11 @@ BYTE	shift;
 		    	if (shift >= 28) {
 			    /* 0, nothing to add */
 
-			    if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) {	
-				pgm_check = significance_ef(fl, regs);
+			    if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) {
+				pgm_check = significance_ef(fl, fpr, regs);
 			    } else {
 				normal_ef(fl);
-				pgm_check = underflow_ef(fl, regs);
+				pgm_check = underflow_ef(fl, fpr, regs);
 			    }
 			    return(pgm_check);
 			} else if (shift >= 16) {
@@ -1107,11 +1155,11 @@ BYTE	shift;
 			if ((add_fl->ms_fract == 0) && (add_fl->ls_fract == 0)) {	
 			    /* 0, nothing to add */
 
-			    if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) {	
-				pgm_check = significance_ef(fl, regs);
+			    if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) {
+				pgm_check = significance_ef(fl, fpr, regs);
 			    } else {
 				normal_ef(fl);
-				pgm_check = underflow_ef(fl, regs);
+				pgm_check = underflow_ef(fl, fpr, regs);
 			    }
 			    return(pgm_check);
 			}
@@ -1125,31 +1173,22 @@ BYTE	shift;
 
 	    /* compute with guard digit */
 	    if (fl->sign == add_fl->sign) {
-		add_U128 (&(fl->ms_fract), 
-			  &(fl->ls_fract), 
-			  add_fl->ms_fract, 
-			  add_fl->ls_fract);
+		add_U128(fl->ms_fract, fl->ls_fract, add_fl->ms_fract, add_fl->ls_fract);
 	    } else {
 		if ((fl->ms_fract == add_fl->ms_fract) 
 		    && (fl->ls_fract == add_fl->ls_fract)) {
 		    /* true 0 */
 
-		    fl->ms_fract = 0;
-		    fl->ls_fract = 0;
-		    return( significance_ef(fl, regs) );
+                    fl->ms_fract = 0;  /* needed by AXR / SXR ...  - mbz - */
+                    fl->ls_fract = 0;  /* ... to properly set cc   - mbz - */
+		    return( significance_ef(fl, fpr, regs) );
 
 		} else if ((fl->ms_fract > add_fl->ms_fract) 
-			|| ((fl->ms_fract == add_fl->ms_fract) 
-			 && (fl->ls_fract > add_fl->ls_fract))) {
-		    sub_U128(&(fl->ms_fract), 
-			  &(fl->ls_fract), 
-			  add_fl->ms_fract, 
-			  add_fl->ls_fract);
+		       || ((fl->ms_fract == add_fl->ms_fract) 
+		       && (fl->ls_fract > add_fl->ls_fract))) {
+		    sub_U128(fl->ms_fract, fl->ls_fract, add_fl->ms_fract, add_fl->ls_fract);
 		} else {
-		    sub_reverse_U128(&(fl->ms_fract), 
-			  &(fl->ls_fract), 
-			  add_fl->ms_fract, 
-			  add_fl->ls_fract);
+		    sub_reverse_U128(fl->ms_fract, fl->ls_fract, add_fl->ms_fract, add_fl->ls_fract);
 		    fl->sign = add_fl->sign;
 		}
 	    }
@@ -1157,10 +1196,11 @@ BYTE	shift;
 	    /* handle overflow with guard digit */
 	    if (fl->ms_fract & 0x00F0000000000000ULL) {
 		fl->ls_fract = (fl->ms_fract << 56) 
-			 | (fl->ls_fract >> 8);
+			     | (fl->ls_fract >> 8);
 		fl->ms_fract >>= 8;
                 (fl->expo)++;
 		pgm_check = overflow_ef(fl, regs);
+                store_ef( fl, fpr );
             } else {
 		/* normalize with guard digit */
 		if (fl->ms_fract || fl->ls_fract) {
@@ -1171,15 +1211,16 @@ BYTE	shift;
 		 	fl->ls_fract = (fl->ms_fract << 60) 
 				     | (fl->ls_fract >> 4);
 			fl->ms_fract >>= 4;
+                        store_ef( fl, fpr );
 		    } else {
 			(fl->expo)--;
 			normal_ef(fl);
-			pgm_check = underflow_ef(fl, regs);
+			pgm_check = underflow_ef(fl, fpr, regs);
 		    }
 		} else {
 		    /* true 0 */
 
-		    pgm_check = significance_ef(fl, regs);
+		    pgm_check = significance_ef(fl, fpr, regs);
 		}
 	    }
 	    return(pgm_check);
@@ -1190,19 +1231,19 @@ BYTE	shift;
 	    fl->sign = add_fl->sign;
 	    fl->ms_fract = add_fl->ms_fract;
 	    fl->ls_fract = add_fl->ls_fract;
-	    if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) {	
-		return( significance_ef(fl, regs) );
+	    if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) {
+		return( significance_ef(fl, fpr, regs) );
 	    }
 	}
     } else {						  /* add_fl 0*/
 	if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) { /* fl 0 */
 	    /* both 0 */
 
-	    return( significance_ef(fl, regs) );
+	    return( significance_ef(fl, fpr, regs) );
 	}
     }
     normal_ef(fl);
-    return( underflow_ef(fl, regs) );
+    return( underflow_ef(fl, fpr, regs) );
   
 } /* end function add_ef */
 
@@ -1272,7 +1313,7 @@ BYTE	shift;
 	    /* compute with guard digit */
 	    if (fl->sign != cmp_fl->sign) {
 		fl->short_fract += cmp_fl->short_fract;
-	    } else if (fl->short_fract >= cmp_fl->short_fract) {
+	     } else if (fl->short_fract >= cmp_fl->short_fract) {
 		fl->short_fract -= cmp_fl->short_fract;
 	    } else {
 		fl->short_fract = cmp_fl->short_fract - fl->short_fract;
@@ -1339,7 +1380,7 @@ BYTE	shift;
 		    shift = cmp_fl->expo - fl->expo - 1;
 
 		    if (shift) {
-		    	if (shift >= 6 || ((fl->long_fract >>= (shift * 4)) == 0)) {	
+		    	if (shift >= 14 || ((fl->long_fract >>= (shift * 4)) == 0)) {	
 			    /* Set condition code */
 			    if (cmp_fl->long_fract) {
 			        regs->psw.cc = cmp_fl->sign ? 2 : 1;
@@ -1356,7 +1397,7 @@ BYTE	shift;
 		    shift = fl->expo - cmp_fl->expo - 1;
 
 		    if (shift) {
-		    	if (shift >= 6 || ((cmp_fl->long_fract >>= (shift * 4)) == 0)) {
+		    	if (shift >= 14 || ((cmp_fl->long_fract >>= (shift * 4)) == 0)) {
 			    /* Set condition code */
 			    if (fl->long_fract) {
 			        regs->psw.cc = fl->sign ? 1 : 2;
@@ -1420,8 +1461,7 @@ BYTE	shift;
 /*      result_fl	Result long float			     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static int mul_sf_to_lf( SHORT_FLOAT *fl, SHORT_FLOAT *mul_fl, 
-		LONG_FLOAT *result_fl, REGS *regs )
+static int mul_sf_to_lf( SHORT_FLOAT *fl, SHORT_FLOAT *mul_fl, LONG_FLOAT *result_fl, REGS *regs )
 {
     if (fl->short_fract && mul_fl->short_fract) {
 	/* normalize operands */
@@ -1466,8 +1506,7 @@ static int mul_sf_to_lf( SHORT_FLOAT *fl, SHORT_FLOAT *mul_fl,
 /*      result_fl	Result extended float			     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static int mul_lf_to_ef( LONG_FLOAT *fl, LONG_FLOAT *mul_fl, 
-		EXTENDED_FLOAT *result_fl, REGS *regs )
+static int mul_lf_to_ef( LONG_FLOAT *fl, LONG_FLOAT *mul_fl, EXTENDED_FLOAT *result_fl, REGS *regs )
 {
 U64	wk;
 
@@ -1491,7 +1530,8 @@ U64	wk;
 	if (result_fl->ms_fract & 0x0000F00000000000ULL) {
 	    result_fl->expo = fl->expo + mul_fl->expo - 64;
 	} else {
-	    result_fl->ms_fract = (result_fl->ms_fract << 4) | (result_fl->ls_fract >> 60);
+	    result_fl->ms_fract = (result_fl->ms_fract << 4) 
+				| (result_fl->ls_fract >> 60);
 	    result_fl->ls_fract <<= 4;
 	    result_fl->expo = fl->expo + mul_fl->expo - 65;
 	}
@@ -1543,10 +1583,12 @@ U32	v;
 
 	/* normalize result and compute expo */
 	if (fl->long_fract & 0x0000F00000000000ULL) {
-	    fl->long_fract = (fl->long_fract << 8) | (v >> 24);
+	    fl->long_fract = (fl->long_fract << 8) 
+			   | (v >> 24);
 	    fl->expo = fl->expo + mul_fl->expo - 64;
 	} else {
-	    fl->long_fract = (fl->long_fract << 12) | (v >> 20);
+	    fl->long_fract = (fl->long_fract << 12) 
+			   | (v >> 20);
 	    fl->expo = fl->expo + mul_fl->expo - 65;
 	}
 
@@ -1586,7 +1628,7 @@ U32 wk0;
 U32 v;
 
     if ((fl->ms_fract || fl->ls_fract)
-     && (mul_fl->ms_fract || mul_fl->ls_fract)) {
+    && (mul_fl->ms_fract || mul_fl->ls_fract)) {
 	/* normalize operands */
 	normal_ef ( fl );
 	normal_ef ( mul_fl );
@@ -1602,41 +1644,45 @@ U32 v;
 	wk1 = (fl->ls_fract & 0x00000000FFFFFFFFULL) * (mul_fl->ms_fract & 0x00000000FFFFFFFFULL);
 	wk2 = (fl->ls_fract >> 32) * (mul_fl->ls_fract >> 32);
 	wk3 = (fl->ms_fract & 0x00000000FFFFFFFFULL) * (mul_fl->ls_fract & 0x00000000FFFFFFFFULL);
-	wk += (wk1 & 0x00000000FFFFFFFFULL) + (wk2 & 0x00000000FFFFFFFFULL) + (wk3 & 0x00000000FFFFFFFFULL);
+	wk += ((wk1 & 0x00000000FFFFFFFFULL) + (wk2 & 0x00000000FFFFFFFFULL) + (wk3 & 0x00000000FFFFFFFFULL));
 	wk = (wk >> 32) + (wk1 >> 32) + (wk2 >> 32) + (wk3 >> 32);
 
 	wk1 = (fl->ls_fract & 0x00000000FFFFFFFFULL) * (mul_fl->ms_fract >> 32);
 	wk2 = (fl->ls_fract >> 32) * (mul_fl->ms_fract & 0x00000000FFFFFFFFULL);
 	wk3 = (fl->ms_fract & 0x00000000FFFFFFFFULL) * (mul_fl->ls_fract >> 32);
 	wk4 = (fl->ms_fract >> 32) * (mul_fl->ls_fract & 0x00000000FFFFFFFFULL);
-	wk += (wk1 & 0x00000000FFFFFFFFULL) + (wk2 & 0x00000000FFFFFFFFULL) + (wk3 & 0x00000000FFFFFFFFULL) + (wk4 & 0x00000000FFFFFFFFULL);
+	wk += ((wk1 & 0x00000000FFFFFFFFULL) + (wk2 & 0x00000000FFFFFFFFULL) + (wk3 & 0x00000000FFFFFFFFULL) + (wk4 & 0x00000000FFFFFFFFULL));
 	v = wk;
 	wk = (wk >> 32) + (wk1 >> 32) + (wk2 >> 32) + (wk3 >> 32) + (wk4 >> 32);
 
 	wk1 = (fl->ls_fract >> 32) * (mul_fl->ms_fract >> 32);
 	wk2 = (fl->ms_fract & 0x00000000FFFFFFFFULL) * (mul_fl->ms_fract & 0x00000000FFFFFFFFULL);
 	wk3 = (fl->ms_fract >> 32) * (mul_fl->ls_fract >> 32);
-	wk += (wk1 & 0x00000000FFFFFFFFULL) + (wk2 & 0x00000000FFFFFFFFULL) + (wk3 & 0x00000000FFFFFFFFULL);
+	wk += ((wk1 & 0x00000000FFFFFFFFULL) + (wk2 & 0x00000000FFFFFFFFULL) + (wk3 & 0x00000000FFFFFFFFULL));
 	fl->ls_fract = wk & 0x00000000FFFFFFFFULL;
 	wk = (wk >> 32) + (wk1 >> 32) + (wk2 >> 32) + (wk3 >> 32);
 
 	wk1 = (fl->ms_fract & 0x00000000FFFFFFFFULL) * (mul_fl->ms_fract >> 32);
 	wk2 = (fl->ms_fract >> 32) * (mul_fl->ms_fract & 0x00000000FFFFFFFFULL);
-	wk += (wk1 & 0x00000000FFFFFFFFULL) + (wk2 & 0x00000000FFFFFFFFULL);
+	wk += ((wk1 & 0x00000000FFFFFFFFULL) + (wk2 & 0x00000000FFFFFFFFULL));
 	fl->ls_fract |= wk << 32;
 	wk0 = (wk >> 32) + (wk1 >> 32) + (wk2 >> 32);
 
-	wk0 += (fl->ms_fract >> 32) * (mul_fl->ms_fract >> 32);
+	wk0 += ((fl->ms_fract >> 32) * (mul_fl->ms_fract >> 32));
 	fl->ms_fract = wk0;
 
 	/* normalize result and compute expo */
 	if (wk0 & 0xF0000000UL) {
-	    fl->ms_fract = (fl->ms_fract << 16) | (fl->ls_fract >> 48);
-	    fl->ls_fract = (fl->ls_fract << 16) | (v >> 16);
+	    fl->ms_fract = (fl->ms_fract << 16) 
+			 | (fl->ls_fract >> 48);
+	    fl->ls_fract = (fl->ls_fract << 16) 
+			 | (v >> 16);
 	    fl->expo = fl->expo + mul_fl->expo - 64;
 	} else {
-	    fl->ms_fract = (fl->ms_fract << 20) | (fl->ls_fract >> 44);
-	    fl->ls_fract = (fl->ls_fract << 20) | (v >> 12);
+	    fl->ms_fract = (fl->ms_fract << 20) 
+			 | (fl->ls_fract >> 44);
+	    fl->ls_fract = (fl->ls_fract << 20) 
+			 | (v >> 12);
 	    fl->expo = fl->expo + mul_fl->expo - 65;
 	}
 
@@ -1744,12 +1790,14 @@ int	i;
 	    /* partial divide middle hex digits */
 	    i = 13;
 	    while (i--) {
-		wk2 = (wk2 << 4) | (wk / div_fl->long_fract);
+		wk2 = (wk2 << 4) 
+		    | (wk / div_fl->long_fract);
 		wk = (wk % div_fl->long_fract) << 4;
 	    }
 
 	    /* partial divide last hex digit */
-	    fl->long_fract = (wk2 << 4) | (wk / div_fl->long_fract);
+	    fl->long_fract = (wk2 << 4) 
+			   | (wk / div_fl->long_fract);
 
 	    /* determine sign */
 	    fl->sign = (fl->sign == div_fl->sign) ? POS : NEG;
@@ -1795,11 +1843,12 @@ int	i;
 
 	    /* position fracts and compute expo */
 	    if ((fl->ms_fract < div_fl->ms_fract)
-	     || ((fl->ms_fract == div_fl->ms_fract) && (fl->ls_fract < div_fl->ls_fract))) {
+	    || ((fl->ms_fract == div_fl->ms_fract) && (fl->ls_fract < div_fl->ls_fract))) {
 		fl->expo = fl->expo - div_fl->expo + 64;
 	    } else {
 		fl->expo = fl->expo - div_fl->expo + 65;
-		div_fl->ms_fract = (div_fl->ms_fract << 4) | (div_fl->ls_fract >> 60);
+		div_fl->ms_fract = (div_fl->ms_fract << 4) 
+				 | (div_fl->ls_fract >> 60);
 		div_fl->ls_fract <<= 4;
 	    }
 
@@ -1808,36 +1857,40 @@ int	i;
 	    /* the first binary digit */
 	    wkm = fl->ms_fract;
 	    wkl = fl->ls_fract;
-	    sub_U128(&wkm, &wkl, div_fl->ms_fract, div_fl->ls_fract);
-	    wkm = (wkm << 1) | (wkl >> 63);
+	    sub_U128(wkm, wkl, div_fl->ms_fract, div_fl->ls_fract);
+	    wkm = (wkm << 1) 
+		| (wkl >> 63);
 	    wkl <<= 1;
 	    fl->ms_fract = 0;
 	    if (((S64)wkm) >= 0) {
 		fl->ls_fract = 1;
-		sub_U128(&wkm, &wkl, div_fl->ms_fract, div_fl->ls_fract);
+		sub_U128(wkm, wkl, div_fl->ms_fract, div_fl->ls_fract);
 	    } else {
 		fl->ls_fract = 0;
-		add_U128(&wkm, &wkl, div_fl->ms_fract, div_fl->ls_fract);
+		add_U128(wkm, wkl, div_fl->ms_fract, div_fl->ls_fract);
 	    }
 
 	    /* the middle binary digits */
 	    i = 111;
 	    while (i--) {
-		wkm = (wkm << 1) | (wkl >> 63);
+		wkm = (wkm << 1) 
+		    | (wkl >> 63);
 		wkl <<= 1;
 
-		fl->ms_fract = (fl->ms_fract << 1) | (fl->ls_fract >> 63);
+		fl->ms_fract = (fl->ms_fract << 1) 
+			     | (fl->ls_fract >> 63);
 		fl->ls_fract <<= 1;
 		if (((S64)wkm) >= 0) {
 		    fl->ls_fract |= 1;
-		    sub_U128(&wkm, &wkl, div_fl->ms_fract, div_fl->ls_fract);
+		    sub_U128(wkm, wkl, div_fl->ms_fract, div_fl->ls_fract);
 		} else {
-		    add_U128(&wkm, &wkl, div_fl->ms_fract, div_fl->ls_fract);
+		    add_U128(wkm, wkl, div_fl->ms_fract, div_fl->ls_fract);
 		}
 	    }
 
 	    /* the last binary digit */
-	    fl->ms_fract = (fl->ms_fract << 1) | (fl->ls_fract >> 63);
+	    fl->ms_fract = (fl->ms_fract << 1) 
+			 | (fl->ls_fract >> 63);
 	    fl->ls_fract <<= 1;
 	    if (((S64)wkm) >= 0) {
 		fl->ls_fract |= 1;
@@ -1866,6 +1919,7 @@ int	i;
 } /* end function div_ef */
 
 
+#if defined (FEATURE_SQUARE_ROOT)
 /*-------------------------------------------------------------------*/
 /* Square root of fraction		                             */
 /* This routine uses the Newton-Iteration-Method                     */
@@ -2170,7 +2224,8 @@ U64	q;
 int	i;
 
     /* the first binary digit */
-    msa = ((msa - div) << 1) | (lsa >> 63);
+    msa = ((msa - div) << 1) 
+	| (lsa >> 63);
     lsa <<= 1;
 
     if (((S64)msa) >= 0) {
@@ -2184,7 +2239,8 @@ int	i;
     /* the middle binary digits */
     i = 63;
     while (i--) {
-	msa = (msa << 1) | (lsa >> 63);
+	msa = (msa << 1) 
+	    | (lsa >> 63);
 	lsa <<= 1;
 
 	q <<= 1;
@@ -2204,6 +2260,7 @@ int	i;
 
     return(q);
 }
+#endif /* FEATURE_SQUARE_ROOT */
 
 
 /*-------------------------------------------------------------------*/
@@ -2225,9 +2282,7 @@ int     r1, r2;                         /* Values of R fields        */
     regs->fpr[r1+1] = regs->fpr[r2+1];
 
     /* Set condition code */
-    regs->psw.cc =
-        ((regs->fpr[r1] & 0x00FFFFFF) || regs->fpr[r1+1]) ? 2 : 0;
-
+    regs->psw.cc = ((regs->fpr[r1] & 0x00FFFFFF) || regs->fpr[r1+1]) ? 2 : 0;
 }
 
 
@@ -2246,9 +2301,7 @@ int     r1, r2;                         /* Values of R fields        */
     regs->fpr[r1+1] = regs->fpr[r2+1];
 
     /* Set condition code */
-    regs->psw.cc =
-        ((regs->fpr[r1] & 0x00FFFFFF) || regs->fpr[r1+1]) ? 1 : 0;
-
+    regs->psw.cc = ((regs->fpr[r1] & 0x00FFFFFF) || regs->fpr[r1+1]) ? 1 : 0;
 }
 
 
@@ -2269,9 +2322,9 @@ int     r1, r2;                         /* Values of R fields        */
     /* Set condition code */
     if ((regs->fpr[r1] & 0x00FFFFFF) || regs->fpr[r1+1]) {
         regs->psw.cc = (regs->fpr[r1] & 0x80000000) ? 1 : 2;
-    } else
+    } else {
         regs->psw.cc = 0;
-
+    }
 }
 
 
@@ -2292,9 +2345,9 @@ int     r1, r2;                         /* Values of R fields        */
     /* Set condition code */
     if ((regs->fpr[r1] & 0x00FFFFFF) || regs->fpr[r1+1]) {
         regs->psw.cc = (regs->fpr[r1] & 0x80000000) ? 1 : 2;
-    } else
+    } else {
         regs->psw.cc = 0;
-
+    }
 }
 
 
@@ -2328,14 +2381,15 @@ int	pgm_check;
     store_lf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
 /*-------------------------------------------------------------------*/
-/* 25   LRDR  - Load Rounded Floating Point Long Register       [RR] */
+/* 25   LDXR  - Load Rounded Floating Point Long Register       [RR] */
+/*              Older mnemonic of this instruction LRDR              */
 /*-------------------------------------------------------------------*/
 void zz_round_float_long_reg(BYTE inst[], int execflag, REGS *regs)
 {
@@ -2345,10 +2399,8 @@ int	pgm_check;
 
     RR(inst, execflag, regs, r1, r2);
 
-    /* Program check if R1 is not 0, 2, 4, or 6 */
-    /* or if R2 is not 0 or 4 */
-    if (( r1 & 9) || (r2 & 11))
-        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
+    HFPREG_CHECK(r1, regs);
+    HFPODD_CHECK(r2, regs);
 
     /* Get register content */
     get_lf(&fl, regs->fpr + r2);
@@ -2369,9 +2421,9 @@ int	pgm_check;
     store_lf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -2399,9 +2451,9 @@ int	pgm_check;
     store_ef(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -2418,10 +2470,8 @@ int	pgm_check;
 
     RR(inst, execflag, regs, r1, r2);
 
-    /* Program check if R1 is not 0 or 4 */
-    /* or if R2 is not 0, 2, 4, or 6 */
-    if (( r1 & 11) || (r2 & 9))
-        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
+    HFPODD_CHECK(r1, regs);
+    HFPREG_CHECK(r2, regs);
 
     /* Get the operands */
     get_lf(&fl, regs->fpr + r1);
@@ -2434,9 +2484,9 @@ int	pgm_check;
     store_ef(&result_fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -2453,7 +2503,6 @@ int     r1, r2;                         /* Values of R fields        */
     /* Copy register contents */
     regs->fpr[r1] = regs->fpr[r2];
     regs->fpr[r1+1] = regs->fpr[r2+1];
-
 }
 
 
@@ -2475,7 +2524,6 @@ LONG_FLOAT cmp_fl;
 
     /* Compare long */
     cmp_lf(&fl, &cmp_fl, regs);
-
 }
 
 
@@ -2510,9 +2558,9 @@ int	pgm_check;
     store_lf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -2550,9 +2598,9 @@ int	pgm_check;
     store_lf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -2580,9 +2628,9 @@ int	pgm_check;
     store_lf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -2610,9 +2658,9 @@ int	pgm_check;
     store_lf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -2647,9 +2695,9 @@ int	pgm_check;
     store_lf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -2687,9 +2735,9 @@ int	pgm_check;
     store_lf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -2708,7 +2756,6 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* Set condition code */
     regs->psw.cc = (regs->fpr[r1] & 0x00FFFFFF) ? 2 : 0;
-
 }
 
 
@@ -2727,7 +2774,6 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* Set condition code */
     regs->psw.cc = (regs->fpr[r1] & 0x00FFFFFF) ? 1 : 0;
-
 }
 
 
@@ -2747,9 +2793,9 @@ int     r1, r2;                         /* Values of R fields        */
     /* Set condition code */
     if (regs->fpr[r1] & 0x00FFFFFF) {
         regs->psw.cc = (regs->fpr[r1] & 0x80000000) ? 1 : 2;
-    } else
+    } else {
         regs->psw.cc = 0;
-
+    }
 }
 
 
@@ -2769,9 +2815,9 @@ int     r1, r2;                         /* Values of R fields        */
     /* Set condition code */
     if (regs->fpr[r1] & 0x00FFFFFF) {
         regs->psw.cc = (regs->fpr[r1] & 0x80000000) ? 1 : 2;
-    } else
+    } else {
         regs->psw.cc = 0;
-
+    }
 }
 
 
@@ -2805,14 +2851,15 @@ int	pgm_check;
     store_sf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
 /*-------------------------------------------------------------------*/
-/* 35   LRER  - Load Rounded Floating Point Short Register      [RR] */
+/* 35   LEDR  - Load Rounded Floating Point Short Register      [RR] */
+/*              Older mnemonic of this instruction LRER              */
 /*-------------------------------------------------------------------*/
 void zz_round_float_short_reg(BYTE inst[], int execflag, REGS *regs)
 {
@@ -2845,9 +2892,9 @@ int	pgm_check;
     store_sf(&to_fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -2869,7 +2916,7 @@ int	pgm_check;
     get_ef(&add_fl, regs->fpr + r2);
 
     /* Add extended */
-    pgm_check = add_ef(&fl, &add_fl, regs);
+    pgm_check = add_ef(&fl, &add_fl, regs->fpr + r1, regs);
 
     /* Set condition code */
     if (fl.ms_fract || fl.ls_fract) {
@@ -2878,13 +2925,10 @@ int	pgm_check;
 	regs->psw.cc = 0;
     }
 
-    /* Back to register */
-    store_ef(&fl, regs->fpr + r1);
-
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -2909,7 +2953,7 @@ int	pgm_check;
     sub_fl.sign = ! (sub_fl.sign);
 
     /* Add extended */
-    pgm_check = add_ef(&fl, &sub_fl, regs);
+    pgm_check = add_ef(&fl, &sub_fl, regs->fpr + r1, regs);
 
     /* Set condition code */
     if (fl.ms_fract || fl.ls_fract) {
@@ -2918,13 +2962,10 @@ int	pgm_check;
 	regs->psw.cc = 0;
     }
 
-    /* Back to register */
-    store_ef(&fl, regs->fpr + r1);
-
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -2940,7 +2981,6 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* Copy register content */
     regs->fpr[r1] = regs->fpr[r2];
-
 }
 
 
@@ -2962,7 +3002,6 @@ SHORT_FLOAT cmp_fl;
 
     /* Compare short */
     cmp_sf(&fl, &cmp_fl, regs);
-
 }
 
 
@@ -2997,9 +3036,9 @@ int	pgm_check;
     store_sf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3037,9 +3076,9 @@ int	pgm_check;
     store_sf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3068,9 +3107,9 @@ int	pgm_check;
     store_lf(&result_fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3098,9 +3137,9 @@ int	pgm_check;
     store_sf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3135,9 +3174,9 @@ int	pgm_check;
     store_sf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3175,9 +3214,9 @@ int	pgm_check;
     store_sf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3197,7 +3236,6 @@ U64     dreg;                           /* Double word workarea      */
     /* Store register contents at operand address */
     dreg = ((U64)regs->fpr[r1] << 32) | regs->fpr[r1+1];
     vstore8(dreg, effective_addr2, b2, regs);
-
 }
 
 
@@ -3228,9 +3266,9 @@ int	pgm_check;
     store_ef(&result_fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3253,7 +3291,6 @@ U64     dreg;                           /* Double word workarea      */
     /* Update register contents */
     regs->fpr[r1] = dreg >> 32;
     regs->fpr[r1+1] = dreg;
-
 }
 
 
@@ -3277,7 +3314,6 @@ LONG_FLOAT cmp_fl;
 
     /* Compare long */
     cmp_lf(&fl, &cmp_fl, regs);
-
 }
 
 
@@ -3314,9 +3350,9 @@ int	pgm_check;
     store_lf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3356,9 +3392,9 @@ int	pgm_check;
     store_lf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3388,9 +3424,9 @@ int	pgm_check;
     store_lf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3420,9 +3456,9 @@ int	pgm_check;
     store_lf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3459,9 +3495,9 @@ int	pgm_check;
     store_lf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3501,9 +3537,9 @@ int	pgm_check;
     store_lf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3521,7 +3557,6 @@ U32     effective_addr2;                /* Effective address         */
 
     /* Store register contents at operand address */
     vstore4(regs->fpr[r1], effective_addr2, b2, regs);
-
 }
 
 
@@ -3539,7 +3574,6 @@ U32     effective_addr2;                /* Effective address         */
 
     /* Update first 32 bits of register from operand address */
     regs->fpr[r1] = vfetch4(effective_addr2, b2, regs);
-
 }
 
 
@@ -3563,7 +3597,6 @@ SHORT_FLOAT cmp_fl;
 
     /* Compare long */
     cmp_sf(&fl, &cmp_fl, regs);
-
 }
 
 
@@ -3600,9 +3633,9 @@ int	pgm_check;
     store_sf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3642,14 +3675,15 @@ int	pgm_check;
     store_sf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
 /*-------------------------------------------------------------------*/
-/* 7C   ME    - Multiply Floating Point Short to Long           [RX] */
+/* 7C   MDE   - Multiply Floating Point Short to Long           [RX] */
+/*              Older mnemonic of this instruction ME                */
 /*-------------------------------------------------------------------*/
 void zz_multiply_float_short_to_long(BYTE inst[], int execflag, REGS *regs)
 {
@@ -3675,9 +3709,9 @@ int	pgm_check;
     store_lf(&result_fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3707,9 +3741,9 @@ int	pgm_check;
     store_sf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3746,9 +3780,9 @@ int	pgm_check;
     store_sf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
@@ -3788,14 +3822,14 @@ int	pgm_check;
     store_sf(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
 /*-------------------------------------------------------------------*/
-/* B22D DXR   - Divide Float Extended Register                 [RRE] */
+/* B22D DXR   - Divide Floating Point Extended Register        [RRE] */
 /*-------------------------------------------------------------------*/
 void zz_divide_float_ext_reg(BYTE inst[], int execflag, REGS *regs)
 {
@@ -3818,14 +3852,15 @@ int	pgm_check;
     store_ef(&fl, regs->fpr + r1);
 
     /* Program check ? */
-    if (pgm_check)
+    if (pgm_check) {
         program_interrupt(regs, pgm_check);
-
+    }
 }
 
 
+#if defined (FEATURE_SQUARE_ROOT)
 /*-------------------------------------------------------------------*/
-/* B244 SQDR  - Square Root Float Long Register               [RRE] */
+/* B244 SQDR  - Square Root Floating Point Long Register       [RRE] */
 /*-------------------------------------------------------------------*/
 void zz_squareroot_float_long_reg(BYTE inst[], int execflag, REGS *regs)
 {
@@ -3873,7 +3908,8 @@ U64	xj;
 	    }
 
 	    /* square root of fraction low precision */
-	    xi = ((U64) (square_root_fraction(msa & 0xfffffffffffffffeULL)) << 32) | 0x80000000UL;
+	    xi = ((U64) (square_root_fraction(msa & 0xfffffffffffffffeULL)) << 32) 
+	       | 0x80000000UL;
 
 	    /* continue iteration for high precision */
 	    for (;;) {
@@ -3897,12 +3933,11 @@ U64	xj;
 
     /* Back to register */
     store_lf(&sq_fl, regs->fpr + r1);
-
 }
 
 
 /*-------------------------------------------------------------------*/
-/* B245 SQDR  - Square Root Float Short Register               [RRE] */
+/* B245 SQER  - Square Root Floating Point Short Register      [RRE] */
 /*-------------------------------------------------------------------*/
 void zz_squareroot_float_short_reg(BYTE inst[], int execflag, REGS *regs)
 {
@@ -3961,8 +3996,7 @@ U32	x;
 
     /* Back to register */
     store_sf(&sq_fl, regs->fpr + r1);
-
 }
+#endif /* FEATURE_SQUARE_ROOT */
 
 /* end of float.c */
-

@@ -24,6 +24,7 @@
 /*      Fix address wraparound in MVO - Jan Jaeger                   */
 /*      PLO instruction - Jan Jaeger                                 */
 /*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
+/*      Extended translation feature - Roger Bowler                  */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -1795,6 +1796,286 @@ S32     remlen1, remlen2;               /* Lengths remaining         */
 }
 
 
+#ifdef FEATURE_EXTENDED_TRANSLATION
+/*-------------------------------------------------------------------*/
+/* B2A6 CUUTF - Convert Unicode to UTF-8                       [RRE] */
+/*-------------------------------------------------------------------*/
+void zz_convert_unicode_to_utf8 (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1, r2;                         /* Register numbers          */
+int     i;                              /* Loop counter              */
+int     cc = 0;                         /* Condition code            */
+U32     addr1, addr2;                   /* Operand addresses         */
+U32     len1, len2;                     /* Operand lengths           */
+U32     naddr2, nlen2;                  /* Next operand 2 addr/length*/
+U16     uvwxy;                          /* Unicode work area         */
+U16     unicode1;                       /* Unicode character         */
+U16     unicode2;                       /* Unicode low surrogate     */
+int     n;                              /* Number of UTF-8 bytes - 1 */
+BYTE    utf[4];                         /* UTF-8 bytes               */
+
+    RRE(inst, execflag, regs, r1, r2);
+
+    ODD2_CHECK(r1, r2, regs);
+
+    /* Determine the destination and source addresses */
+    addr1 = regs->gpr[r1] & ADDRESS_MAXWRAP(regs);
+    addr2 = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
+
+    /* Load operand lengths from bits 0-31 of R1+1 and R2+1 */
+    len1 = regs->gpr[r1+1];
+    len2 = regs->gpr[r2+1];
+
+    /* Process operands from left to right */
+    for (i = 0; len1 > 0 || len2 > 0; i++)
+    {
+        /* If 4096 characters have been converted, exit with cc=3 */
+        if (i >= 4096)
+        {
+            cc = 3;
+            break;
+        }
+
+        /* Exit if fewer than 2 bytes remain in source operand */
+        if (len2 < 2) break;
+
+        /* Fetch two bytes from source operand */
+        unicode1 = vfetch2 ( addr2, r2, regs );
+        naddr2 = addr2 + 2;
+        naddr2 &= ADDRESS_MAXWRAP(regs);
+        nlen2 = len2 - 2;
+
+        /* Convert Unicode to UTF-8 */
+        if (unicode1 < 0x0080)
+        {
+            /* Convert Unicode 0000-007F to one UTF-8 byte */
+            utf[0] = (BYTE)unicode1;
+            n = 0;
+        }
+        else if (unicode1 < 0x0800)
+        {
+            /* Convert Unicode 0080-07FF to two UTF-8 bytes */
+            utf[0] = (BYTE)0xC0 | (BYTE)(unicode1 >> 6);
+            utf[1] = (BYTE)0x80 | (BYTE)(unicode1 & 0x003F);
+            n = 1;
+        }
+        else if (unicode1 < 0xD800 || unicode1 >= 0xDC00)
+        {
+            /* Convert Unicode 0800-D7FF or DC00-FFFF
+               to three UTF-8 bytes */
+            utf[0] = (BYTE)0xE0 | (BYTE)(unicode1 >> 12);
+            utf[1] = (BYTE)0x80 | (BYTE)((unicode1 & 0x0FC0) >> 6);
+            utf[2] = (BYTE)0x80 | (BYTE)(unicode1 & 0x003F);
+            n = 2;
+        }
+        else
+        {
+            /* Exit if fewer than 2 bytes remain in source operand */
+            if (nlen2 < 2) break;
+
+            /* Fetch the Unicode low surrogate */
+            unicode2 = vfetch2 ( naddr2, r2, regs );
+            naddr2 += 2;
+            naddr2 &= ADDRESS_MAXWRAP(regs);
+            nlen2 -= 2;
+
+            /* Convert Unicode surrogate pair to four UTF-8 bytes */
+            uvwxy = ((unicode1 & 0x03C0) >> 6) + 1;
+            utf[0] = (BYTE)0xF0 | (BYTE)(uvwxy >> 2);
+            utf[1] = (BYTE)0x80 | (BYTE)((uvwxy & 0x0003) << 4)
+                        | (BYTE)((unicode1 & 0x003C) >> 2);
+            utf[2] = (BYTE)0x80 | (BYTE)((unicode1 & 0x0003) << 4)
+                        | (BYTE)((unicode2 & 0x03C0) >> 6);
+            utf[3] = (BYTE)0x80 | (BYTE)(unicode2 & 0x003F);
+            n = 3;
+        }
+
+        /* Exit cc=1 if too few bytes remain in destination operand */
+        if (len1 <= n)
+        {
+            cc = 1;
+            break;
+        }
+
+        /* Store the result bytes in the destination operand */
+        vstorec ( utf, n, addr1, r1, regs );
+        addr1 += n + 1;
+        addr1 &= ADDRESS_MAXWRAP(regs);
+        len1 -= n + 1;
+
+        /* Update operand 2 address and length */
+        addr2 = naddr2;
+        len2 = nlen2;
+
+        /* Update the registers */
+        regs->gpr[r1] = addr1;
+        regs->gpr[r1+1] = len1;
+        regs->gpr[r2] = addr2;
+        regs->gpr[r2+1] = len2;
+
+    } /* end for(i) */
+
+    regs->psw.cc = cc;
+
+} /* end zz_convert_unicode_to_utf8 */
+
+
+/*-------------------------------------------------------------------*/
+/* B2A7 CUTFU - Convert UTF-8 to Unicode                       [RRE] */
+/*-------------------------------------------------------------------*/
+void zz_convert_utf8_to_unicode (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1, r2;                         /* Register numbers          */
+int     i;                              /* Loop counter              */
+int     cc = 0;                         /* Condition code            */
+U32     addr1, addr2;                   /* Operand addresses         */
+U32     len1, len2;                     /* Operand lengths           */
+int     pair;                           /* 1=Store Unicode pair      */
+U16     uvwxy;                          /* Unicode work area         */
+U16     unicode1;                       /* Unicode character         */
+U16     unicode2;                       /* Unicode low surrogate     */
+int     n;                              /* Number of UTF-8 bytes - 1 */
+BYTE    utf[4];                         /* UTF-8 bytes               */
+
+    RRE(inst, execflag, regs, r1, r2);
+
+    ODD2_CHECK(r1, r2, regs);
+
+    /* Determine the destination and source addresses */
+    addr1 = regs->gpr[r1] & ADDRESS_MAXWRAP(regs);
+    addr2 = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
+
+    /* Load operand lengths from bits 0-31 of R1+1 and R2+1 */
+    len1 = regs->gpr[r1+1];
+    len2 = regs->gpr[r2+1];
+
+    /* Process operands from left to right */
+    for (i = 0; len1 > 0 || len2 > 0; i++)
+    {
+        /* If 4096 characters have been converted, exit with cc=3 */
+        if (i >= 4096)
+        {
+            cc = 3;
+            break;
+        }
+
+        /* Fetch first UTF-8 byte from source operand */
+        utf[0] = vfetchb ( addr2, r2, regs );
+
+        /* Convert UTF-8 to Unicode */
+        if (utf[0] < (BYTE)0x80)
+        {
+            /* Convert 00-7F to Unicode 0000-007F */
+            n = 0;
+            unicode1 = utf[0];
+            pair = 0;
+        }
+        else if ((utf[0] & 0xE0) == 0xC0)
+        {
+            /* Exit if fewer than 2 bytes remain in source operand */
+            n = 1;
+            if (len2 <= n) break;
+
+            /* Fetch two UTF-8 bytes from source operand */
+            vfetchc ( utf, n, addr2, r2, regs );
+
+            /* Convert C0xx-DFxx to Unicode */
+            unicode1 = ((U16)(utf[0] & 0x1F) << 6)
+                        | ((U16)(utf[1] & 0x3F));
+            pair = 0;
+        }
+        else if ((utf[0] & 0xF0) == 0xE0)
+        {
+            /* Exit if fewer than 3 bytes remain in source operand */
+            n = 2;
+            if (len2 <= n) break;
+
+            /* Fetch three UTF-8 bytes from source operand */
+            vfetchc ( utf, n, addr2, r2, regs );
+
+            /* Convert E0xxxx-EFxxxx to Unicode */
+            unicode1 = ((U16)(utf[0]) << 12)
+                        | ((U16)(utf[1] & 0x3F) << 6)
+                        | ((U16)(utf[2] & 0x3F));
+            pair = 0;
+        }
+        else if ((utf[0] & 0xF8) == 0xF0)
+        {
+            /* Exit if fewer than 4 bytes remain in source operand */
+            n = 3;
+            if (len2 <= n) break;
+
+            /* Fetch four UTF-8 bytes from source operand */
+            vfetchc ( utf, n, addr2, r2, regs );
+
+            /* Convert F0xxxxxx-F7xxxxxx to Unicode surrogate pair */
+            uvwxy = (((U16)(utf[0] & 0x07) << 2)
+                        | ((U16)(utf[1] & 0x30) >> 4)) - 1;
+            unicode1 = 0xD800 | (uvwxy << 6) | ((U16)(utf[1] & 0x0F) << 2)
+                        | ((U16)(utf[2] & 0x30) >> 4);
+            unicode2 = 0xDC00 | ((U16)(utf[2] & 0x0F) << 6)
+                        | ((U16)(utf[3] & 0x3F));
+            pair = 1;
+        }
+        else
+        {
+            /* Invalid UTF-8 byte 80-BF or F8-FF, exit with cc=2 */
+            cc = 2;
+            break;
+        }
+
+        /* Store the result bytes in the destination operand */
+        if (pair)
+        {
+            /* Exit if fewer than 4 bytes remain in destination */
+            if (len1 < 4)
+            {
+                cc = 1;
+                break;
+            }
+
+            /* Store Unicode surrogate pair in destination */
+            vstore4 ( ((U32)unicode1 << 16) | (U32)unicode2,
+                        addr1, r1, regs );
+            addr1 += 4;
+            addr1 &= ADDRESS_MAXWRAP(regs);
+            len1 -= 4;
+        }
+        else
+        {
+            /* Exit if fewer than 2 bytes remain in destination */
+            if (len1 < 2)
+            {
+                cc = 1;
+                break;
+            }
+
+            /* Store Unicode character in destination */
+            vstore2 ( unicode1, addr1, r1, regs );
+            addr1 += 2;
+            addr1 &= ADDRESS_MAXWRAP(regs);
+            len1 -= 2;
+        }
+
+        /* Update operand 2 address and length */
+        addr2 += n + 1;
+        addr2 &= ADDRESS_MAXWRAP(regs);
+        len2 -= n + 1;
+
+        /* Update the registers */
+        regs->gpr[r1] = addr1;
+        regs->gpr[r1+1] = len1;
+        regs->gpr[r2] = addr2;
+        regs->gpr[r2+1] = len2;
+
+    } /* end for(i) */
+
+    regs->psw.cc = cc;
+
+} /* end zz_convert_utf8_to_unicode */
+#endif /*FEATURE_EXTENDED_TRANSLATION*/
+
+
 /*-------------------------------------------------------------------*/
 /* 4F   CVB   - Convert to Binary                               [RX] */
 /*-------------------------------------------------------------------*/
@@ -2173,7 +2454,9 @@ U32     effective_addr2;                /* Effective address         */
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Fetch target instruction from operand address */
+    regs->iaabs = 0;
     instfetch (regs->exinst, effective_addr2, regs);
+    regs->iaabs = 0;
 
     /* Program check if recursive execute */
     if ( regs->exinst[0] == 0x44 )
@@ -5390,6 +5673,81 @@ int     i;                              /* Integer work areas        */
     regs->psw.cc = cc;
 }
 
+
+#ifdef FEATURE_EXTENDED_TRANSLATION
+/*-------------------------------------------------------------------*/
+/* B2A5 TRE - Translate Extended                               [RRE] */
+/*-------------------------------------------------------------------*/
+void zz_translate_extended (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1, r2;                         /* Values of R fields        */
+int     i;                              /* Loop counter              */
+int     cc = 0;                         /* Condition code            */
+U32     addr1, addr2;                   /* Operand addresses         */
+U32     len1;                           /* Operand length            */
+BYTE    byte1, byte2;                   /* Operand bytes             */
+BYTE    tbyte;                          /* Test byte                 */
+BYTE    trtab[256];                     /* Translate table           */
+
+    RRE(inst, execflag, regs, r1, r2);
+
+    ODD_CHECK(r1, regs);
+
+    /* Load the test byte from bits 24-31 of register 0 */
+    tbyte = regs->gpr[0] & 0xFF;
+
+    /* Load the operand addresses */
+    addr1 = regs->gpr[r1] & ADDRESS_MAXWRAP(regs);
+    addr2 = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
+
+    /* Load first operand length from R1+1 */
+    len1 = regs->gpr[r1+1];
+
+    /* Fetch second operand into work area.
+       [7.5.101] Access exceptions for all 256 bytes of the second
+       operand may be recognized, even if not all bytes are used */
+    vfetchc ( trtab, 255, addr2, r2, regs );
+
+    /* Process first operand from left to right */
+    for (i = 0; len1 > 0; i++)
+    {
+        /* If 4096 bytes have been compared, exit with condition code 3 */
+        if (i >= 4096)
+        {
+            cc = 3;
+            break;
+        }
+
+        /* Fetch byte from first operand */
+        byte1 = vfetchb ( addr1, r1, regs );
+
+        /* If equal to test byte, exit with condition code 1 */
+        if (byte1 == tbyte)
+        {
+            cc = 1;
+            break;
+        }
+
+        /* Load indicated byte from translate table */
+        byte2 = trtab[byte1];
+
+        /* Store result at first operand address */
+        vstoreb ( byte2, addr1, r1, regs );
+        addr1++;
+        addr1 &= ADDRESS_MAXWRAP(regs);
+        len1--;
+
+        /* Update the registers */
+        regs->gpr[r1] = addr1;
+        regs->gpr[r1+1] = len1;
+
+    } /* end for(i) */
+
+    /* Set condition code */
+    regs->psw.cc =  cc;
+
+} /* end zz_translate_extended */
+#endif /*FEATURE_EXTENDED_TRANSLATION*/
 
 
 /*-------------------------------------------------------------------*/

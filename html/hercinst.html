@@ -10,14 +10,17 @@ Hercules: Installation and Operation</TITLE>
 
 <h2>Installation Procedure</h2>
 <h3>Building from source</h3>
+<p>These instructions apply to the Linux version. Volker Bandke has
+instructions on how to build the Win32 version at <a
+href="http://www.bsp-gmbh.com/hercules/nude_w32.html">http://www.bsp-gmbh.com/hercules/nude_w32.html</a>.
 <ol>
 <li>Download the distribution file
-<a href="hercules-1.69.tar.gz">hercules-1.69.tar.gz</a>
+<a href="hercules-1.70.tar.gz">hercules-1.70.tar.gz</a>
 <p>
 <em>Notes:</em>
 <ol>
 <li>By downloading this file you agree to the terms
-    of the <a href="herclic.html">Hercules Public Licence</a>.
+    of the <a href="herclic.html">Q Public Licence</a>.
 <li>IE4 may report "problem with security settings or file does
     not exist" when downloading this file.  I do not know why.
     If you experience this problem, use IE5 or Netscape Navigator
@@ -25,8 +28,8 @@ Hercules: Installation and Operation</TITLE>
 </ol>
 <p>
 <li>Use these commands to unzip the distribution file:
-<pre>tar xvzf ../hercules-1.69.tar.gz
-cd hercules-1.69</pre>
+<pre>tar xvzf ../hercules-1.70.tar.gz
+cd hercules-1.70</pre>
 <li>Build the executable files:
 <br><code>make </code>[<code>HOST_ARCH=<i>arch</i></code>]<br>
 The <code>HOST_ARCH</code> argument is optional. It specifies the machine
@@ -59,12 +62,12 @@ compiler and other software levels.
 <ol>
 <li>Download the RPM file you want:
 <ul>
-<li><a href="hercules-1.69-1.i686.rpm">hercules-1.69-1.i686.rpm</a>: Intel
+<li><a href="hercules-1.70-1.i686.rpm">hercules-1.70-1.i686.rpm</a>: Intel
 Pentium Pro/Pentium II
-<li><a href="hercules-1.69-1.i586.rpm">hercules-1.69-1.i586.rpm</a>: Intel
+<li><a href="hercules-1.70-1.i586.rpm">hercules-1.70-1.i586.rpm</a>: Intel
 Pentium
-<li><a href="hercules-1.69-1.i386.rpm">hercules-1.69-1.i386.rpm</a>: Intel 386
-<li><a href="hercules-1.69-1.alpha.rpm">hercules-1.69-1.alpha.rpm</a>: Alpha
+<li><a href="hercules-1.70-1.i386.rpm">hercules-1.70-1.i386.rpm</a>: Intel 386
+<li><a href="hercules-1.70-1.alpha.rpm">hercules-1.70-1.alpha.rpm</a>: Alpha
 (all flavors)
 </ul>
 <li>Install the RPM:
@@ -86,7 +89,8 @@ a complete description.
 <p>
 The <a href="hercload.html">Creating Hercules DASD</a> page
 describes various methods of creating and loading virtual DASD
-volumes.
+volumes. The compressed CKD DASD support is described in <a
+href="cckddasd.html">this page</a>.
 
 <h2>Operating Procedure</h2>
 <p>
@@ -216,6 +220,6 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 29 October 2000
+<p>Last updated 3 December 2000
 </BODY>
 </HTML>

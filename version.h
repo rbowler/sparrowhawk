@@ -5,4 +5,4 @@
 /* Header file defining the Hercules version number.		     */
 /*-------------------------------------------------------------------*/
 
-#define	VERSION	1.69			/* Hercules version number   */
+#define	VERSION	1.70			/* Hercules version number   */

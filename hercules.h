@@ -33,7 +33,6 @@
 #include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include "esa390.h"
 #include "version.h"
 
 /*-------------------------------------------------------------------*/
@@ -54,21 +53,32 @@
 /*-------------------------------------------------------------------*/
 /* Performance options                                               */
 /*-------------------------------------------------------------------*/
-#define  EXPERIMENTAL
+#undef EXPERIMENTAL
 #undef CHECK_OPTIMIZATION
 
 #ifdef EXPERIMENTAL
 #ifdef CHECK_OPTIMIZATION
-#define INLINE_FETCH                /* inline code for dat.c         */
+#undef INLINE_LOGICAL               /* inline code for dat.c         */
+#undef INLINE_IFETCH                /* inline code for dat.c         */
+#undef INLINE_VFETCH                /* inline code for dat.c         */
+#undef INLINE_VSTORE                /* inline code for dat.c         */
 #define INTERRUPT_OPTIMIZE          /* enable check for doint flag   */
 #undef  TRACE_INTERRUPT_DELAY       /* trace missing interrups       */
 
+#define OPTIMIZE_IAABS              /* IAABS optimization            */
+#define CHECK_IAABS                 /* Check IAABS optimization      */
+
 #define IBUF                        /* inst. prefetch and buffering  */
+#define IBUF_FASTOP                 /* RR, RX Fastexecution          */
+#define INLINE_GET                  /* inline code for ibuf.h        */
+#define INLINE_INVALIDATE           /* inline code for ibuf.h        */
+#define  IBUF_STAT                   /* IBUF statistics               */
+#define IBUF_SWITCH                 /* Switch IBUF dynamically on/off*/
 #define CHECK_FRAGPARMS             /* check compiled operation parms*/
 #define CHECK_FRAGADDRESS           /* check inst.addr in comp. op   */
-#undef  NO_REASSIGN                 /* No get fragment in zz_*       */
 #undef  DO_INSTFETCH                /* Do allways instfetch          */
 #define CHECK_PTR                   /* check fragment/entry pointer  */
+#define DEBUGMSG                    /* Write debugmessages           */
 #undef  FLUSHLOG                    /* use logfile with flush        */
 
 #define FEATURE_OPTIMIZE_SAME_PAGE  /* fast address translation      */
@@ -77,16 +87,27 @@
 #define FEATURE_WATCHPOINT          /* watchpoint for phys. addr     */
 #undef  INSTSTAT                    /* instruction stat              */
 #else /* no CHECK_OPIMIZATION */
-#define INLINE_FETCH                /* inline code for dat.c         */
+#define INLINE_LOGICAL               /* inline code for dat.c         */
+#define INLINE_IFETCH                /* inline code for dat.c         */
+#define INLINE_VFETCH                /* inline code for dat.c         */
+#define INLINE_VSTORE                /* inline code for dat.c         */
 #define INTERRUPT_OPTIMIZE          /* enable check for doint flag   */
 #undef  TRACE_INTERRUPT_DELAY       /* trace missing interrups       */
 
+#define OPTIMIZE_IAABS              /* IAABS optimization            */
+#undef CHECK_IAABS                  /* Check IAABS optimization      */
+
 #define IBUF                        /* inst. prefetch and buffering  */
+#define IBUF_FASTOP                 /* RR, RX Fastexecution          */
+#define INLINE_GET                  /* inline code for ibuf.h        */
+#define INLINE_INVALIDATE           /* inline code for ibuf.h        */
+#undef  IBUF_STAT                   /* IBUF statistics               */
+#define IBUF_SWITCH                 /* Switch IBUF dynamically on/off*/
 #undef  CHECK_FRAGPARMS             /* check compiled operation parms*/
 #undef  CHECK_FRAGADDRESS           /* check inst.addr in comp. op   */
-#undef  NO_REASSIGN                 /* No get fragment in zz_*       */
-#undef  DO_INSTFETCH                /* Do allways instfetch          */
+#undef DO_INSTFETCH                /* Do allways instfetch          */
 #undef  CHECK_PTR                   /* check fragment/entry pointer  */
+#undef  DEBUGMSG                    /* Write debugmessages           */
 #undef  FLUSHLOG                    /* use logfile with flush        */
 
 #define FEATURE_OPTIMIZE_SAME_PAGE  /* fast address translation      */
@@ -96,18 +117,29 @@
 #undef  INSTSTAT                    /* instruction stat              */
 #endif
 #else /* No EXPERIMENTAL */
-#define INLINE_FETCH                /* inline code for dat.c         */
+#define INLINE_LOGICAL               /* inline code for dat.c         */
+#define INLINE_IFETCH                /* inline code for dat.c         */
+#define INLINE_VFETCH                /* inline code for dat.c         */
+#define INLINE_VSTORE                /* inline code for dat.c         */
 #define INTERRUPT_OPTIMIZE          /* enable check for doint flag   */
 #undef  TRACE_INTERRUPT_DELAY       /* trace missing interrups       */
 
+#undef  OPTIMIZE_IAABS               /* IAABS optimization            */
+#undef  CHECK_IAABS                  /* Check IAABS optimization      */
+
 
 #undef IBUF                         /* inst. prefetch and buffering  */
+#undef IBUF_FASTOP                 /* RR, RX Fastexecution          */
+#undef INLINE_GET                   /* inline code for ibuf.h        */
+#undef INLINE_INVALIDATE            /* inline code for ibuf.h        */
+#undef IBUF_STAT                   /* IBUF statistics               */
+#undef IBUF_SWITCH                  /* Switch IBUF dynamically on/off*/
 #undef CHECK_FRAGPARMS              /* check compiled operation parms*/
 #undef CHECK_FRAGADDRESS            /* check inst.addr in comp. op   */
-#undef NO_REASSIGN                  /* Allway new translation        */
 #undef DO_INSTFETCH                 /* Do allways instfetch          */
 #undef CORRECT_FRAGADDRESS          /* check and correct inst. adr   */
 #undef CHECK_PTR                    /* check fragment/entry pointer  */
+#undef  DEBUGMSG                    /* Write debugmessages           */
 #undef FLUSHLOG                     /* use logfile with flush        */
 
 #define FEATURE_OPTIMIZE_SAME_PAGE   /* fast address translation      */
@@ -128,7 +160,6 @@
 #endif
 #endif
 #endif
-
 /*-------------------------------------------------------------------*/
 /* Windows 32-specific definitions                                   */
 /*-------------------------------------------------------------------*/
@@ -146,9 +177,10 @@
 #define _WINDOWS_H
 #define _WINSOCK_H
 #define HANDLE int
-#define DWORD int	/* will be undefined later */
 #define NO_CCKD		/* disable cckd support for windows for the
 			   time being */
+#undef CLK_TCK
+#define CLK_TCK 100	/* fix timer tick rate */
 #endif
 
 /*-------------------------------------------------------------------*/
@@ -172,6 +204,7 @@
 #undef	FEATURE_EXPANDED_STORAGE
 #undef	FEATURE_EXTENDED_STORAGE_KEYS
 #undef	FEATURE_EXTENDED_TOD_CLOCK
+#undef	FEATURE_EXTENDED_TRANSLATION
 #undef	FEATURE_FETCH_PROTECTION_OVERRIDE
 #undef	FEATURE_HEXADECIMAL_FLOATING_POINT
 #undef	FEATURE_HYPERVISOR
@@ -193,6 +226,7 @@
 #undef	FEATURE_SQUARE_ROOT
 #undef  FEATURE_STORAGE_KEY_ASSIST
 #undef	FEATURE_STORAGE_PROTECTION_OVERRIDE
+#undef	FEATURE_STORE_SYSTEM_INFORMATION
 #undef	FEATURE_SUBSPACE_GROUP
 #undef	FEATURE_SUPPRESSION_ON_PROTECTION
 #undef	FEATURE_SYSTEM_CONSOLE
@@ -232,6 +266,7 @@
  #define FEATURE_EXPANDED_STORAGE
  #define FEATURE_EXTENDED_STORAGE_KEYS
  #define FEATURE_EXTENDED_TOD_CLOCK
+ #define FEATURE_EXTENDED_TRANSLATION
  #define FEATURE_FETCH_PROTECTION_OVERRIDE
  #define FEATURE_HEXADECIMAL_FLOATING_POINT
  #define FEATURE_HYPERVISOR
@@ -251,6 +286,7 @@
  #define FEATURE_SQUARE_ROOT
  #define FEATURE_STORAGE_KEY_ASSIST
  #define FEATURE_STORAGE_PROTECTION_OVERRIDE
+ #define FEATURE_STORE_SYSTEM_INFORMATION
  #define FEATURE_SUBSPACE_GROUP
  #define FEATURE_SUPPRESSION_ON_PROTECTION
  #define FEATURE_SYSTEM_CONSOLE
@@ -264,6 +300,12 @@
 #else
  #error Either ARCH=370 or ARCH=390 must be specified
 #endif
+
+
+/*-------------------------------------------------------------------*/
+/* ESA/390 data structures					     */
+/*-------------------------------------------------------------------*/
+#include "esa390.h"
 
 
 /*-------------------------------------------------------------------*/
@@ -345,6 +387,9 @@
 /* Macro definitions for thread functions			     */
 /*-------------------------------------------------------------------*/
 #ifndef NOTHREAD
+#ifdef WIN32
+#define DWORD int	/* will be undefined later */
+#endif
 #include <pthread.h>
 #ifdef WIN32
 #undef DWORD
@@ -462,28 +507,47 @@ typedef struct _LASTPAGE {		/* Vector Facility Registers*/
 /*-------------------------------------------------------------------*/
 /* Definition for instruction buffering                              */
 /*-------------------------------------------------------------------*/
-#ifdef IBUF
-#ifdef NO_REASSIGN
-#define REASSIGN_FRAG(_r)
-#define GET_FRAGENTRY(_r)
+#ifdef CHECK_FRAGADDRESS
+#define SAVE_FILE \
+         { \
+             strcpy(regs->file, __FILE__); \
+             regs->line = __LINE__; \
+         }
 #else
+#define SAVE_FILE { }
+#endif
+
+#ifdef IBUF
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
 #define REASSIGN_FRAG(_r) { \
-        if ((_r)->actfrag && !(_r)->psw.wait) \
+        if (!(_r)->psw.wait && !(_r)->sie_state) \
             { \
+                SAVE_FILE; \
                 ibuf_assign_fragment((_r), (_r)->psw.ia); \
-                ((FRAGENTRY*)(_r)->actentry)--; \
             } \
         }
 
 #define GET_FRAGENTRY(_r) { \
-        if ((_r)->actfrag && !(_r)->psw.wait) \
+        if (!(_r)->psw.wait && !(_r)->sie_state) \
             { \
-            debugmsg("GET FRAGENTRY %llu, %4x ", (_r)->instcount, \
-                    (_r)->psw.ia); \
+            SAVE_FILE; \
             ibuf_get_fragentry((_r), (_r)->psw.ia); \
-            debugmsg("%4x \n", \
-                    ((FRAGENTRY*)((_r)->actentry))->ia); \
-            ((FRAGENTRY*)(_r)->actentry)--; \
+            } \
+        }
+#else
+#define REASSIGN_FRAG(_r) { \
+        if (!(_r)->psw.wait) \
+            { \
+                SAVE_FILE; \
+                ibuf_assign_fragment((_r), (_r)->psw.ia); \
+            } \
+        }
+
+#define GET_FRAGENTRY(_r) { \
+        if (!(_r)->psw.wait) \
+            { \
+            SAVE_FILE; \
+            ibuf_get_fragentry((_r), (_r)->psw.ia); \
             } \
         }
 #endif
@@ -491,16 +555,13 @@ typedef struct _LASTPAGE {		/* Vector Facility Registers*/
 #ifdef CHECK_PTR
 #define CHECK_FRAGPTR(_r, _s) \
         { \
-            if (!_r->actfrag) \
-                logmsg("actfrag = NULL %llu %s\n", _r->instcount, _s) \
-            else \
+            if (!_r->actentry) \
+            { \
+                logmsg("actentry = NULL %llu %s\n", _r->instcount, _s); \
+                GET_FRAGENTRY(_r); \
                 if (!_r->actentry) \
-                { \
-                    logmsg("actentry = NULL %llu %s\n", _r->instcount, _s); \
-                    GET_FRAGENTRY(_r); \
-                    if (!_r->actentry) \
-                        logmsg("actentry = NULL aft get %s\n", _s); \
-                } \
+                    logmsg("actentry = NULL aft get %s\n", _s); \
+            } \
         }
 #else
 #define CHECK_FRAGPTR(_r, _s) 
@@ -513,8 +574,18 @@ typedef struct _LASTPAGE {		/* Vector Facility Registers*/
 #define LOAD_INST(_r)
 #endif
 
-#if 0
-#define debugmsg(a...) logmsg(a)
+#ifdef DEBUGMSG
+#define debugmsg(a...) \
+        { \
+            if (regs->debugmsg) \
+            { \
+                if (regs->actpage) \
+                    logmsg("EXECUTE %llu ", regs->instcount) \
+                else \
+                    logmsg("INTERPRET %llu ", regs->instcount); \
+                logmsg(a); \
+            } \
+        }
 #else
 #define debugmsg(a...)
 #endif
@@ -642,22 +713,48 @@ typedef struct _REGS {			/* Processor registers	     */
         BYTE    oldvalue;
 #endif
         int     doint;
-#ifdef IBUF
-        U64     ibufrecompile;
-        U64     ibufsearch;		
-        U64     ibuffound;	
-        U64     ibufcodechange;	
-        void*   fragbuffer;
-        void*   actfrag;
-        void*   actentry;
 
-#ifdef CHECK_FRAGPARMS
         U32     iaabs;
+
+#ifdef DEBUGMSG
+        BYTE    debugmsg;
 #endif
+
+#ifdef IBUF
+#ifdef IBUF_STAT
+        U64     ibufrecompile;
+        U64     ibufrecompilestorage;
+        U64     ibufrecompiledisk;
+        U64     ibufexecute;		
+        U64     ibufinterpret;	
+        U64     ibufcodechange;	
+        U64     ibufexeinst;
+        U64     ibufget;
+        U64     ibufassign;
+        U64     ibufexeassign;
+        U64     ibufinvalidate;
+        U64     ibufinvalidatex;
+        U64     ibuflow;
+        U64     ibufhigh;
+        U64     ibufdif;
+        U64     ibufoverflow;
+        BYTE*   fraginvalid;
+#endif
+        void*   fragbuffer;
+        void*   actentry;
+        void**  actpage;
+        void**  dict;
+        U64*    icount;
+        BYTE*    fragvalid;
 
 #ifdef LASTINST
         BYTE    lastinst[3];
 #endif
+#endif
+
+#ifdef CHECK_FRAGADDRESS
+        char file[40];
+        int  line;
 #endif
 
 #ifdef FEATURE_OPTIMIZE_SAME_PAGE
@@ -834,6 +931,8 @@ typedef struct _DEVBLK {
 	/* Device dependent fields for ctcadpt */
 	unsigned int			/* Flags		     */
 		ctcxmode:1;		/* 0=Basic mode, 1=Extended  */
+	BYTE	ctctype;		/* CTC_xxx device type	     */
+	struct _DEVBLK *ctcpair;	/* -> Paired device block    */
 	int	ctcpos;			/* next byte offset	     */
 	int	ctcrem;			/* bytes remaining in buffer */
 	int	ctclastpos;		/* last packet read	     */
@@ -1171,91 +1270,36 @@ extern BYTE	ebcdic_to_ascii[];	/* Translate table	     */
 /* structure definitions for module ibuf.c          			     */
 /*-------------------------------------------------------------------*/
 
-#define FRAG_ADDRESSLENGTH   9     /* Bits of the fragment size     */
+#define FRAG_ADDRESSLENGTH   6     /* Bits of the fragment size     */
 
-#define FRAG_BYTESIZE    512       /* Size of /370 code fragments   */
+#define FRAG_BYTESIZE   64       /* Size of /370 code fragments   */
+
+#define FRAG_SIZE       128       /* Size of /370 code fragments   */
 
 #define FRAG_INSTSIZE   (FRAG_BYTESIZE / 2) /* number of cmp. inst */
 
 #define FRAG_BYTEMASK   (0x7FFFFFFF - (FRAG_BYTESIZE -1))
 
-#define FRAG_BUFFER     256      /* Number of fragments in cache  */
+#define FRAG_BUFFER     1024       /* Number of fragments in cache  */
+
+#define IBUF_ICOUNT     64
 
 #define FRAG_BUFFERMASK (((FRAG_BUFFER * FRAG_BYTESIZE) - 1) - (FRAG_BYTESIZE - 1))
 
-#define FRAG_BUFFERADDRESS(_r, _a) &((FRAG*)(_r->fragbuffer))[(((U32)_a) & \
-                                     (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH] 
-
 #ifdef IBUF
-#if 1
-#if MAX_CPU_ENGINES > 1
+#define FRAG_INVALIDATEIO(_a, _s) { \
+           ibuf_invalidate(_a, _s); \
+           }
 #define FRAG_INVALIDATE(_a, _s) { \
-           int i; \
-           int j; \
-           REGS *regs; \
-           for (i=0; i < MAX_CPU_ENGINES; i++) \
-           { \
-           regs = &sysblk.regs[i]; \
-           if (regs->fragbuffer) \
-           { \
-           if (((U32)(_a) & (FRAG_BUFFERMASK)) == ((U32)(_a + _s) & (FRAG_BUFFERMASK))) \
-                   ((FRAG*)(regs->fragbuffer))[(((U32)_a) & \
-                                     (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH].valid = 0; \
-           else \
-               { \
-               int j0 = (((U32)_a) & (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH; \
-               int jn = (((U32)((_a) + (_s))) & (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH; \
-               if (j0 < jn) \
-               { \
-                   for (j=j0; j <= jn; j++) \
-                       ((FRAG*)(regs->fragbuffer))[j].valid = 0; \
-               } \
-               else \
-               { \
-                   for (j=j0; j < FRAG_BUFFER; j++) \
-                       ((FRAG*)(regs->fragbuffer))[j].valid = 0; \
-                   for (j=0; j < jn; j++) \
-                       ((FRAG*)(regs->fragbuffer))[j].valid = 0; \
-               } \
-               } \
-           } \
-           } \
+           ibuf_invalidate(_a, _s); \
+           }
+#define FRAG_INVALIDATEX(_r, _a, _s) { \
+           ibuf_fastinvalidate(_a, _s); \
            }
 #else
-#define FRAG_INVALIDATE(_a, _s) { \
-           int j; \
-           REGS *regs = &sysblk.regs[0]; \
-           if (((U32)(_a) & (FRAG_BUFFERMASK)) == ((U32)(_a + _s) & (FRAG_BUFFERMASK))) \
-                   ((FRAG*)(regs->fragbuffer))[(((U32)_a) & \
-                                     (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH].valid = 0; \
-           else \
-               { \
-               int j0 = (((U32)_a) & (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH; \
-               int jn = (((U32)((_a) + (_s))) & (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH; \
-               if (j0 < jn) \
-               { \
-                   for (j=j0; j <= jn; j++) \
-                       ((FRAG*)(regs->fragbuffer))[j].valid = 0; \
-               } \
-               else \
-               { \
-                   for (j=j0; j < FRAG_BUFFER; j++) \
-                       ((FRAG*)(regs->fragbuffer))[j].valid = 0; \
-                   for (j=0; j < jn; j++) \
-                       ((FRAG*)(regs->fragbuffer))[j].valid = 0; \
-               } \
-               } \
-           } 
-#endif
-#else
-#define FRAG_INVALIDATE(_a, _s) { \
-           REGS *regs = &sysblk.regs[0]; \
-           ((FRAG*)(regs->fragbuffer))[(((U32)_a) & \
-                                     (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH].valid = 0; \
-           }
-#endif
-#else
-#define FRAG_INVALIDATE(_a, _s)
+#define FRAG_INVALIDATE(_a, _s) { }
+#define FRAG_INVALIDATEIO(_a, _s) { }
+#define FRAG_INVALIDATEX(_r, _a, _s) { }
 #endif
 
 #define FRAG_PER_PAGE    (STORAGE_KEY_PAGESIZE / FRAG_BYTESIZE)
@@ -1263,45 +1307,51 @@ extern BYTE	ebcdic_to_ascii[];	/* Translate table	     */
 typedef void (*zz_func) (BYTE inst[], int execflag, REGS *regs);
 
 typedef struct _RADDR {	/* Compiled Register and Address */
-        int r1;
-        int r2;
-        int r3;
+        BYTE r1;
+        BYTE r2;
+        BYTE r3;
+        BYTE r4;
         U32 addr;
     } RADDR;
 
 typedef struct _FRAGENTRY {	/* Compiled Code Entry */
-        zz_func code;
-        BYTE    *inst;
-        RADDR   raddr;
+#ifdef IBUF_FASTOP
+        RADDR raddr;
+#endif
         U32     ia;
-#ifdef CHECK_FRAGPARMS
         U32     iaabs;
+        BYTE    *inst;
+        BYTE    *valid;
+#ifdef CHECK_FRAGPARMS
         BYTE    oinst[6];
 #endif
     } FRAGENTRY;
 
 typedef struct _FRAG {		/* Compliled Code Fragments */
-        U32     firstia;                  /* first log. address     */
-        U32     minabs;                   /* abs. addr. of frag     */
-        int     valid;                    /* fragment validity      */
-        U16     dict[FRAG_BYTESIZE];    /* offsets to cmp inst */
-        FRAGENTRY entry[FRAG_INSTSIZE+1]; /* includes stop entry */
+        void **dict;
+        U32 minabs;
+        U16 maxind;
+        FRAGENTRY entry[FRAG_SIZE];   /* compiled instruction */
     } FRAG;
 
 /*-------------------------------------------------------------------*/
 /* Function prototypes						     */
 /*-------------------------------------------------------------------*/
 
-#ifdef INLINE_FETCH
+#ifdef INLINE_VFETCH
 #define VFETCH2(addr, arn, regs)  xvfetch2(addr, arn, regs)
 #define VFETCH4(addr, arn, regs)  xvfetch4(addr, arn, regs)
 #define VFETCH8(addr, arn, regs)  xvfetch8(addr, arn, regs)
-#define VSTORE4(value, addr, arn, regs)  xvstore4(value, addr, arn, regs)
-#define VSTORE8(value, addr, arn, regs)  xvstore8(value, addr, arn, regs)
 #else
 #define VFETCH2(addr, arn, regs)  vfetch2(addr, arn, regs)
 #define VFETCH4(addr, arn, regs)  vfetch4(addr, arn, regs)
 #define VFETCH8(addr, arn, regs)  vfetch8(addr, arn, regs)
+#endif
+
+#ifdef INLINE_VSTORE
+#define VSTORE4(value, addr, arn, regs)  xvstore4(value, addr, arn, regs)
+#define VSTORE8(value, addr, arn, regs)  xvstore8(value, addr, arn, regs)
+#else
 #define VSTORE4(value, addr, arn, regs)  vstore4(value, addr, arn, regs)
 #define VSTORE8(value, addr, arn, regs)  vstore8(value, addr, arn, regs)
 #endif
@@ -1339,7 +1389,15 @@ void *set_doint(REGS *regs);
 void *set_doinst();
 #ifdef IBUF
 void ibuf_loadinst(REGS *regs);
+void ibuf_invalidate(U32 abs, U32 len);
+#ifndef INLINE_INVALIDATE
+void ibuf_fastinvalidate(U32 abs, U32 len);
+#endif
 void ibuf_compile_frag (REGS *regs, U32 ia);
+void ibuf_assign_fragment (REGS *regs, U32 ia);
+#ifndef INLINE_GET
+void ibuf_get_frag (REGS *regs, U32 ia);
+#endif
 #endif
 
 /* Functions in module dat.c */
@@ -1347,7 +1405,7 @@ U16  translate_asn (U16 asn, REGS *regs, U32 *asteo, U32 aste[]);
 int  authorize_asn (U16 ax, U32 aste[], int atemask, REGS *regs);
 U16  translate_alet (U32 alet, U16 eax, int acctype, REGS *regs,
 	U32 *asteo, U32 aste[], int *prot);
-#ifndef INLINE_FETCH
+#ifdef FEATURE_OPTIMIZE_SAME_PAGE
 int  translate_addr (U32 vaddr, int arn, REGS *regs, int acctype,
 	U32 *raddr, U16 *xcode, int *priv, int *prot, int *pstid,
 	U32 *xpblk, BYTE *xpkey);
@@ -1355,28 +1413,39 @@ int  translate_addr (U32 vaddr, int arn, REGS *regs, int acctype,
 void purge_alb (REGS *regs);
 void purge_tlb (REGS *regs);
 void invalidate_pte (BYTE ibyte, int r1, int r2, REGS *regs);
-#ifndef INLINE_FETCH
+#ifndef INLINE_LOGICAL
 U32  logical_to_abs (U32 addr, int arn, REGS *regs, int acctype,
 	BYTE akey);
+#endif
+
+#ifndef INLINE_VSTORE
 void vstorec (void *src, BYTE len, U32 addr, int arn, REGS *regs);
 void vstoreb (BYTE value, U32 addr, int arn, REGS *regs);
 void vstore2 (U16 value, U32 addr, int arn, REGS *regs);
 void vstore4 (U32 value, U32 addr, int arn, REGS *regs);
 void vstore8 (U64 value, U32 addr, int arn, REGS *regs);
+#else
+void xvstore4 (U32 value, U32 addr, int arn, REGS *regs);
+void xvstore8 (U64 value, U32 addr, int arn, REGS *regs);
+#endif
+
+#ifndef INLINE_VFETCH
 void vfetchc (void *dest, BYTE len, U32 addr, int arn, REGS *regs);
 BYTE vfetchb (U32 addr, int arn, REGS *regs);
 U16  vfetch2 (U32 addr, int arn, REGS *regs);
 U32  vfetch4 (U32 addr, int arn, REGS *regs);
 U64  vfetch8 (U32 addr, int arn, REGS *regs);
-void instfetch (BYTE *dest, U32 addr, REGS *regs);
 #else
 BYTE  xvfetchb (U32 addr, int arn, REGS *regs);
 U16  xvfetch2 (U32 addr, int arn, REGS *regs);
 U32  xvfetch4 (U32 addr, int arn, REGS *regs);
 U64  xvfetch8 (U32 addr, int arn, REGS *regs);
-void xvstore4 (U32 value, U32 addr, int arn, REGS *regs);
-void xvstore8 (U64 value, U32 addr, int arn, REGS *regs);
 #endif
+
+#ifndef INLINE_IFETCH
+void instfetch (BYTE *dest, U32 addr, REGS *regs);
+#endif
+
 void validate_operand (U32 addr, int arn, int len,
 	int acctype, REGS *regs);
 void move_chars (U32 addr1, int arn1, BYTE key1, U32 addr2,
@@ -1393,7 +1462,8 @@ void move_chars (U32 addr1, int arn1, BYTE key1, U32 addr2,
 #define ACCTYPE_STACK		8	/* Linkage stack operations  */
 #define ACCTYPE_BSG		9	/* Branch in Subspace Group  */
 #define ACCTYPE_LOCKPAGE       10	/* Lock page                 */
-#define ACCTYPE_SIE            11	/* SIE host translation      */
+#define ACCTYPE_UNLKPAGE       11	/* Unlock page               */
+#define ACCTYPE_SIE            12	/* SIE host translation      */
 
 /* Special value for arn parameter for translate functions in dat.c */
 #define USE_REAL_ADDR		(-1)	/* Real address              */

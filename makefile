@@ -6,7 +6,7 @@
 #
 #
 
-VERSION  = 1.69
+VERSION  = 1.70
 
 # Change this if you want to install the Hercules executables somewhere
 #   besides /usr/bin. The $PREFIX (which defaults to nothing) can be
@@ -21,8 +21,8 @@ LFLAGS	 = -lpthread
 
 # Add default flags for Pentium compilations
 ifndef HOST_ARCH
-CFLAGS	 += -malign-double -march=pentium
-CFL_370  += -malign-double -march=pentium
+CFLAGS	 += -malign-double -march=pentiumpro
+CFL_370  += -malign-double -march=pentiumpro
 endif
 
 # Handle host architecture if specified

@@ -213,6 +213,7 @@ typedef struct _TLBE {
 #define PAGETAB_INVALID 0x00000400	/* Invalid page 	     */
 #define PAGETAB_PROT	0x00000200	/* Protected page	     */
 #define PAGETAB_ESVALID 0x00000100	/* Valid in expanded storage */
+#define PAGETAB_PGLOCK  0x00000001      /* Page lock (LKPG)          */
 #define PAGETAB_RESV	0x80000900	/* Reserved bits - must be 0 */
 
 /* Page table entry bit definitions (S/370 mode) */
@@ -1045,3 +1046,91 @@ typedef struct _SIEBK {			/* SIE State Descriptor      */
 /*E5*/  BYTE  xsl[3];                   /* Expanded storage limit    */
 /*E8*/  BYTE  resvE8b[24];
 } SIEBK;
+
+#define LKPG_GPR0_LOCKBIT       0x00000200
+#define LKPG_GPR0_RESV          0x0000FD00
+
+/* Bit definitions for STSI instruction */
+#define STSI_GPR0_FC_MASK	0xF0000000
+#define STSI_GPR0_FC_CURRENT	0x00000000
+#define STSI_GPR0_FC_BASIC	0x10000000
+#define STSI_GPR0_FC_LPAR	0x20000000
+#define STSI_GPR0_FC_VM 	0x30000000
+#define STSI_GPR0_SEL1_MASK	0x000000FF
+#define STSI_GPR0_RESERVED	0x0FFFFF00
+
+#define STSI_GPR1_SEL2_MASK	0x0000FFFF
+#define STSI_GPR1_RESERVED	0xFFFF0000
+
+/* Structure definitions for STSI instruction */
+typedef struct _SYSIB111 {	/* Basic Machine Configuration	*/
+	BYTE	resv1[4*8];	/* Reserved			*/
+	BYTE	manufact[4*4];	/* Manufacturer 		*/
+	BYTE	type[4*1];	/* Type 			*/
+	BYTE	resv2[4*3];	/* Reserved			*/
+	BYTE	model[4*4];	/* Model			*/
+	BYTE	seqc[4*4];	/* Sequence Code		*/
+	BYTE	plant[4*1];	/* Plant of manufacture 	*/
+	}	SYSIB111;
+
+typedef struct _SYSIB121 {	/* Basic Machine CPU		*/
+	BYTE	resv1[4*20];	/* Reserved			*/
+	BYTE	seqc[4*4];	/* Sequence Code		*/
+	BYTE	plant[4*1];	/* Plant of manufacture 	*/
+	BYTE	resv2[2*1];	/* Reserved			*/
+	BYTE	cpuad[2*1];	/* CPU address			*/
+	}	SYSIB121;
+
+typedef struct _SYSIB122 {	/* Basic Machine CPUs		*/
+	BYTE	resv1[4*8];	/* Reserved			*/
+	BYTE	cap[4*1];	/* CPU capacity 		*/
+	BYTE	totcpu[2*1];	/* Total CPU count		*/
+	BYTE	confcpu[2*1];	/* Configured CPU count 	*/
+	BYTE	sbcpu[2*1];	/* Standby CPU count		*/
+	BYTE	resvcpu[2*1];	/* Reserved CPU count		*/
+	BYTE	mpfact[2*MAX_CPU_ENGINES];	/* MP factors	*/
+	}	SYSIB122;
+
+typedef struct _SYSIB221 {	/* Logical partition CPU	*/
+	BYTE	resv1[4*20];	/* Reserved			*/
+	BYTE	seqc[4*4];	/* Logical CPU Sequence Code	*/
+	BYTE	lcpuid[2*1];	/* Logical CPU ID		*/
+	BYTE	cpuad[2*1];	/* CPU address			*/
+	}	SYSIB221;
+
+typedef struct _SYSIB222 {	/* Logical partition CPUs	*/
+	BYTE	resv1[4*8];	/* Reserved			*/
+	BYTE	lparnum[2*1];	/* LPAR number			*/
+	BYTE	resv2[1*1];	/* Reserved			*/
+	BYTE	lcpuc[1*1];	/* Logical CPU characteristics	*/
+#define SYSIB222_LCPUC_DEDICATED	0x80
+#define SYSIB222_LCPUC_SHARED		0x40
+#define SYSIB222_LCPUC_CAPPED		0x20
+	BYTE	totcpu[2*1];	/* Total CPU count		*/
+	BYTE	confcpu[2*1];	/* Configured CPU count 	*/
+	BYTE	sbcpu[2*1];	/* Standby CPU count		*/
+	BYTE	resvcpu[2*1];	/* Reserved CPU count		*/
+	BYTE	lparname[4*2];	/* LPAR name			*/
+	BYTE	lparcaf[4*1];	/* LPAR capability adjustment	*/
+	BYTE	resv3[4*4];	/* Reserved			*/
+	BYTE	dedcpu[2*1];	/* Dedicated CPU count		*/
+	BYTE	shrcpu[2*1];	/* Shared CPU count		*/
+	}	SYSIB222;
+
+typedef struct _SYSIB322 {	/* Virtual Machines CPUs	*/
+	BYTE	resv1[4*7];	/* Reserved			*/
+	BYTE	resv2[3*1];	/* Reserved			*/
+	BYTE	dbct;		/* Four bit desc block count	*/
+	BYTE	vmdb[4*16];	/* Virtual Machine desc block	*/
+	}	SYSIB322;
+
+typedef struct _SYSIBVMDB {	/* Virtual Machine Desc Block	*/
+	BYTE	resv1[4*1];	/* Reserved			*/
+	BYTE	totcpu[2*1];	/* Total CPU count		*/
+	BYTE	confcpu[2*1];	/* Configured CPU count 	*/
+	BYTE	sbcpu[2*1];	/* Standby CPU count		*/
+	BYTE	resvcpu[2*1];	/* Reserved CPU count		*/
+	BYTE	vmname[4*2];	/* VM userid			*/
+	BYTE	vmcaf[4*1];	/* VM capability adjustment	*/
+	BYTE	cpid[4*4];	/* Control Program ID		*/
+	}	SYSIBVMDB;

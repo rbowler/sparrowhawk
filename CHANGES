@@ -1,3 +1,14 @@
+03 Dec 2000 New file hercwin32.zip contains build scripts for Win32 version
+            (Volker Bandke)
+03 Dec 2000 More performance enhancements (Juergen Dobrinski)
+03 Dec 2000 ALS-1 and ALS-2 support completion (Roger Bowler and Jan Jaeger)
+03 Dec 2000 Pick up correct float.c module (Jay Maynard)
+03 Dec 2000 Distribute Windows binaries as well as Linux (Jay Maynard)
+02 Dec 2000 Fix orienting bug in CKD DASD search CCW processing (Bob Abeles)
+30 Nov 2000 Obtain TOD clock lock when accessing or updating 370 interval
+            timer (Bob Abeles)
+26 Nov 2000 Change license to the QPL Open Source Definition-compliant
+            license (Roger Bowler, Jay Maynard, and Jan Jaeger)
 29 Oct 2000 Correct AXR and SXR instruction results when significance
             exception raised (Peter Kuschnerus, with help from Mario Bezzi)
 29 Oct 2000 Correct CD and CDR instruction condition code logic (Peter

@@ -246,6 +246,18 @@
 #endif /*!defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
 
+#if !defined(FEATURE_STORE_SYSTEM_INFORMATION)
+ #define zz_store_system_information            operation_exception
+#endif /*!defined(FEATURE_STORE_SYSTEM_INFORMATION)*/
+
+
+#if !defined(FEATURE_EXTENDED_TRANSLATION)
+ #define zz_translate_extended                  operation_exception
+ #define zz_convert_unicode_to_utf8             operation_exception
+ #define zz_convert_utf8_to_unicode             operation_exception
+#endif /*!defined(FEATURE_EXTENDED_TRANSLATION)*/
+
+
 zz_func opcode_table[256] = {
  /*00*/         &operation_exception,            
  /*01*/         &execute_01xx,                          /* 01XX      */
@@ -909,7 +921,7 @@ zz_func opcode_b2xx[256] = {
  /*B27A*/       &operation_exception,            
  /*B27B*/       &operation_exception,            
  /*B27C*/       &operation_exception,            
- /*B27D*/       &operation_exception,            
+ /*B27D*/       &zz_store_system_information,           /* STSI      */
  /*B27E*/       &operation_exception,            
  /*B27F*/       &operation_exception,            
  /*B280*/       &operation_exception,            
@@ -949,9 +961,9 @@ zz_func opcode_b2xx[256] = {
  /*B2A2*/       &operation_exception,            
  /*B2A3*/       &operation_exception,            
  /*B2A4*/       &operation_exception,            
- /*B2A5*/       &operation_exception,            
- /*B2A6*/       &operation_exception,            
- /*B2A7*/       &operation_exception,            
+ /*B2A5*/       &zz_translate_extended,                 /* TRE       */
+ /*B2A6*/       &zz_convert_unicode_to_utf8,            /* CUUTF     */
+ /*B2A7*/       &zz_convert_utf8_to_unicode,            /* CUTFU     */
  /*B2A8*/       &operation_exception,            
  /*B2A9*/       &operation_exception,            
  /*B2AA*/       &operation_exception,            

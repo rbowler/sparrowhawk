@@ -2708,6 +2708,12 @@ int             start, i;               /* Start index, index        */
 
 #else /* NO_CCKD */
 
+void cckd_print_itrace (DEVBLK *dev)
+{
+    logmsg ("%4.4X cckddasd support not generated\n", dev->devnum);
+    return -1;
+}
+
 int cckddasd_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 {
     logmsg ("%4.4X cckddasd support not generated\n", dev->devnum);

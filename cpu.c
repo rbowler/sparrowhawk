@@ -161,7 +161,6 @@ int load_psw (REGS *regs, BYTE *addr)
         regs->psw.ia = (addr[5] << 16) | (addr[6] << 8) | addr[7];
 
         LASTPAGE_INVALIDATE(regs);
-        REASSIGN_FRAG(regs);
 #else /*!FEATURE_BCMODE*/
         /* BC mode is not valid for 370-XA, ESA/370, or ESA/390 */
         return PGM_SPECIFICATION_EXCEPTION;

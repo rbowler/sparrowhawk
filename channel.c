@@ -15,6 +15,7 @@
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
+#include "inline.h"
 
 /*-------------------------------------------------------------------*/
 /* FORMAT I/O BUFFER DATA                                            */
@@ -295,7 +296,7 @@ BYTE    area[64];                       /* Data display area         */
             {
                 WATCH("bef memcpy 1");
                 memcpy (sysblk.mainstor + idadata, iobuf, idalen);
-                FRAG_INVALIDATE(idadata, idalen);
+                FRAG_INVALIDATEIO(idadata, idalen);
             }
             else
                 memcpy (iobuf, sysblk.mainstor + idadata, idalen);
@@ -357,13 +358,13 @@ BYTE    area[64];                       /* Data display area         */
             memcpy (sysblk.mainstor + addr, iobuf, count);
             if (firstpage == lastpage)
             {
-                FRAG_INVALIDATE(addr, count);
+                FRAG_INVALIDATEIO(addr, count);
             }
             else
             {
                 for (i = firstpage; i <= lastpage; i++)
                 {
-                    FRAG_INVALIDATE((U32)(i * (U32)STORAGE_KEY_PAGESIZE), 
+                    FRAG_INVALIDATEIO((U32)(i * (U32)STORAGE_KEY_PAGESIZE), 
                                              STORAGE_KEY_PAGESIZE);
                 }
             }
@@ -535,7 +536,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             mbcount++;
             mbk->srcount[0] = mbcount >> 8;
             mbk->srcount[1] = mbcount & 0xFF;
-            FRAG_INVALIDATE(mbaddr, 2);
+            FRAG_INVALIDATEIO(mbaddr, 2);
         } else {
             /* Generate subchannel logout indicating program
                check or protection check, and set the subchannel
