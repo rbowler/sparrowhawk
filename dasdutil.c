@@ -812,3 +812,217 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
     return 0;
 } /* end function build_extent_array */
 
+/*-------------------------------------------------------------------*/
+/* Subroutine to calculate physical device track capacities          */
+/* Input:                                                            */
+/*      devtype Device type                                          */
+/*      used    Number of bytes used so far on track,                */
+/*              excluding home address and record 0                  */
+/*      keylen  Key length of proposed new record                    */
+/*      datalen Data length of proposed new record                   */
+/* Output:                                                           */
+/*      newused Number of bytes used including proposed new record   */
+/*      trkbaln Number of bytes remaining on track                   */
+/*      physlen Number of bytes on physical track (=ds4devtk)        */
+/*      kbconst Overhead for non-last keyed block (=ds4devi)         */
+/*      lbconst Overhead for last keyed block (=ds4devl)             */
+/*      nkconst Overhead difference for non-keyed block (=ds4devk)   */
+/*      devflag Device flag byte for VTOC (=ds4devfg)                */
+/*      tolfact Device tolerance factor (=ds4devtl)                  */
+/*      maxdlen Maximum data length for non-keyed record 1           */
+/*      numrecs Number of records of specified length per track      */
+/*      numhead Number of tracks per cylinder                        */
+/*      numcyls Number of cylinders per volume                       */
+/*      A NULL address may be specified for any of the output        */
+/*      fields if the output value is not required.                  */
+/*      The return value is 0 if the record will fit on the track,   */
+/*      +1 if record will not fit on track, or -1 if unknown devtype */
+/* Note:                                                             */
+/*      Although the virtual DASD image file contains no interrecord */
+/*      gaps, this subroutine performs its calculations taking into  */
+/*      account the gaps that would exist on a real device, so that  */
+/*      the track capacities of the real device are not exceeded.    */
+/*-------------------------------------------------------------------*/
+int capacity_calc (U16 devtype, int used, int keylen, int datalen,
+                int *newused, int *trkbaln, int *physlen, int *kbconst,
+                int *lbconst, int *nkconst, BYTE*devflag, int *tolfact,
+                int *maxdlen, int *numrecs, int *numhead, int *numcyls)
+{
+int             heads;                  /* Number of tracks/cylinder */
+int             cyls;                   /* Number of cyls/volume     */
+int             trklen;                 /* Physical track length     */
+int             maxlen;                 /* Maximum data length       */
+int             devi, devl, devk;       /* Overhead fields for VTOC  */
+BYTE            devfg;                  /* Flag field for VTOC       */
+int             devtl;                  /* Tolerance field for VTOC  */
+int             b1;                     /* Bytes used by new record
+                                           when last record on track */
+int             b2;                     /* Bytes used by new record
+                                           when not last on track    */
+int             nrecs;                  /* Number of record/track    */
+int             c, d1, d2, x;           /* 23xx/3330/3350 factors    */
+int             f1, f2, f3, f4, f5, f6; /* 3380/3390 factors         */
+int             fl1, fl2, int1, int2;   /* 3380/3390 calculations    */
+
+    switch (devtype)
+    {
+    case 0x2301:
+        heads = 1;
+        cyls = 200;
+        trklen = 20483;
+        maxlen = 20483;
+        c = 53; x = 133;
+        devfg = 0x04;
+        goto formula1;
+
+    case 0x2302:
+        heads = 46;
+        cyls = 492;
+        trklen = 4984;
+        maxlen = 4984;
+        c = 20; x = 61; d1 = 537; d2 = 512;
+        devfg = 0x01;
+        goto formula2;
+
+    case 0x2303:
+        heads = 1;
+        cyls = 800;
+        trklen = 4892;
+        maxlen = 4892;
+        c = 38; x = 108;
+        devfg = 0x00;
+        goto formula1;
+
+    case 0x2311:
+        heads = 10;
+        cyls = 200;
+        trklen = 3625;
+        maxlen = 3625;
+        c = 20; x = 61; d1 = 537; d2 = 512;
+        devfg = 0x01;
+        goto formula2;
+
+    case 0x2314:
+        heads = 20;
+        cyls = 200;
+        trklen = 7294;
+        maxlen = 7294;
+        c = 45; x = 101; d1 = 2137; d2 = 2048;
+        devfg = 0x01;
+        goto formula2;
+
+    case 0x2321:
+        heads = 20;
+        cyls = 50;
+        trklen = 2000;
+        maxlen = 2000;
+        heads = 20;
+        c = 16; x = 84; d1 = 537; d2 = 512;
+        devfg = 0x03;
+        goto formula2;
+
+    case 0x3330:
+        heads = 19;
+        cyls = 404;
+        trklen = 13165;
+        maxlen = 13030;
+        c = 56; x = 135;
+        devfg = 0x01;
+        goto formula3;
+
+    case 0x3350:
+        heads = 30;
+        cyls = 555;
+        trklen = 19254;
+        maxlen = 19069;
+        c = 82; x = 185;
+        devfg = 0x01;
+        goto formula3;
+
+    formula1:
+        b1 = keylen + datalen + (keylen == 0 ? 0 : c);
+        b2 = b1 + x;
+        nrecs = (trklen - b1)/b2 + 1;
+        devi = c + x; devl = c; devk = c; devtl = 512;
+        break;
+
+    formula2:
+        b1 = keylen + datalen + (keylen == 0 ? 0 : c);
+        b2 = ((keylen + datalen) * d1 / d2)
+                + (keylen == 0 ? 0 : c) + x;
+        nrecs = (trklen - b1)/b2 + 1;
+        devi = c + x; devl = c; devk = c; devtl = d1 / (d2/512);
+        break;
+
+    formula3:
+        b1 = b2 = keylen + datalen + (keylen == 0 ? 0 : c) + x;
+        nrecs = trklen / b2;
+        devi = c + x; devl = c + x; devk = c; devtl = 512;
+        break;
+
+    case 0x3380:
+        heads = 15;
+        cyls = 885;
+        trklen = 47968;
+        maxlen = 47476;
+        f1 = 32; f2 = 492; f3 = 236;
+        fl1 = datalen + f2;
+        fl2 = (keylen == 0 ? 0 : keylen + f3);
+        fl1 = ((fl1 + f1 - 1) / f1) * f1;
+        fl2 = ((fl2 + f1 - 1) / f1) * f1;
+        b1 = b2 = fl1 + fl2;
+        nrecs = trklen / b2;
+        devi = 0; devl = 0; devk = 0; devtl = 0; devfg = 0x30;
+        break;
+
+    case 0x3390:
+        heads = 15;
+        cyls = 1113;
+        trklen = 58786;
+        maxlen = 56664;
+        f1 = 34; f2 = 19; f3 = 9; f4 = 6; f5 = 116; f6 = 6;
+        int1 = ((datalen + f6) + (f5*2-1)) / (f5*2);
+        int2 = ((keylen + f6) + (f5*2-1)) / (f5*2);
+        fl1 = (f1 * f2) + datalen + f6 + f4*int1;
+        fl2 = (keylen == 0 ? 0 : (f1 * f3) + keylen + f6 + f4*int2);
+        fl1 = ((fl1 + f1 - 1) / f1) * f1;
+        fl2 = ((fl2 + f1 - 1) / f1) * f1;
+        b1 = b2 = fl1 + fl2;
+        nrecs = trklen / b2;
+        devi = 0; devl = 0; devk = 0; devtl = 0; devfg = 0x30;
+        break;
+
+    default:
+        return -1;
+    } /* end switch(devtype) */
+
+    /* Return VTOC fields and maximum data length */
+    if (physlen != NULL) *physlen = trklen;
+    if (kbconst != NULL) *kbconst = devi;
+    if (lbconst != NULL) *lbconst = devl;
+    if (nkconst != NULL) *nkconst = devk;
+    if (devflag != NULL) *devflag = devfg;
+    if (tolfact != NULL) *tolfact = devtl;
+    if (maxdlen != NULL) *maxdlen = maxlen;
+
+    /* Return number of records per track */
+    if (numrecs != NULL) *numrecs = nrecs;
+
+    /* Return number of tracks per cylinder
+       and usual number of cylinders per volume */
+    if (numhead != NULL) *numhead = heads;
+    if (numcyls != NULL) *numcyls = cyls;
+
+    /* Return if record will not fit on the track */
+    if (used + b1 > trklen)
+        return +1;
+
+    /* Calculate number of bytes used and track balance */
+    if (newused != NULL)
+        *newused = used + b2;
+    if (trkbaln != NULL)
+        *trkbaln = (used + b2 > trklen) ? 0 : trklen - used - b2;
+
+    return 0;
+} /* end function capacity_calc */
+

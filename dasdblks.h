@@ -330,4 +330,8 @@ CIFBLK* open_ckd_image (BYTE *fname, int omode);
 int  close_ckd_image (CIFBLK *cif);
 int  build_extent_array (CIFBLK *cif, BYTE *dsnama, DSXTENT extent[],
 	int *noext);
+int  capacity_calc (U16 devtype, int used, int keylen, int datalen,
+	int *newused, int *trkbaln, int *physlen, int *kbconst,
+	int *lbconst, int *nkconst, BYTE*devflag, int *tolfact,
+	int *maxdlen, int *numrecs, int *numhead, int *numcyls);
 

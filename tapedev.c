@@ -1147,7 +1147,7 @@ BYTE            c;                      /* Work area for sscanf      */
 
             /* Check for valid fixed block length */
             if (tdfblklen == NULL
-                || sscanf(tdfblklen, "%lu%c", &blklen, &c) != 1
+                || sscanf(tdfblklen, "%u%c", &blklen, &c) != 1
                 || blklen < 1 || blklen > MAX_BLKLEN)
             {
                 logmsg ("HHC253I Invalid record size %s in "
@@ -1298,6 +1298,13 @@ BYTE            devclass;               /* Device class              */
 BYTE            devtcode;               /* Device type code          */
 U32             sctlfeat;               /* Storage control features  */
 
+    /* Release the previous OMA descriptor array if allocated */
+    if (dev->omadesc != NULL)
+    {
+        free (dev->omadesc);
+        dev->omadesc = NULL;
+    }
+
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
     {
@@ -1321,6 +1328,7 @@ U32             sctlfeat;               /* Storage control features  */
     /* Initialize device dependent fields */
     dev->fd = -1;
     dev->omadesc = NULL;
+    dev->omafiles = 0;
     dev->curfilen = 1;
     dev->curblklen = 0;
     dev->curblkpos = -1;
@@ -1866,6 +1874,34 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
 
         /* Issue message on 3480 matrix display */
         issue_mount_msg (dev, iobuf);
+
+        /* Return unit status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0xB7:
+    /*---------------------------------------------------------------*/
+    /* ASSIGN                                                        */
+    /*---------------------------------------------------------------*/
+        /* Command reject if path assignment is not supported */
+        if (dev->devtype != 0x3480)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Calculate residual byte count */
+        num = (count < 11) ? count : 11;
+        *residual = count - num;
+
+        /* Control information length must be at least 11 bytes */
+        if (count < 11)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
 
         /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;

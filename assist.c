@@ -103,7 +103,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
     hlhi_word = vfetch4 ( addr2, ar2, regs );
 
     /* Fetch our logical CPU address from PSALCPUA */
-    lcpa = fetch_fullword_absolute ( PSALCPUA );
+    lcpa = fetch_fullword_absolute ( PSALCPUA + regs->pxr);
 
     /* Fetch the local lock from the ASCB */
     lock = vfetch4 ( ascb_addr + ASCBLOCK, 0, regs );
@@ -194,7 +194,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
     hlhi_word = vfetch4 ( addr2, ar2, regs );
 
     /* Fetch our logical CPU address from PSALCPUA */
-    lcpa = fetch_fullword_absolute ( PSALCPUA );
+    lcpa = fetch_fullword_absolute ( PSALCPUA + regs->pxr );
 
     /* Fetch the local lock and the suspend queue from the ASCB */
     lock = vfetch4 ( ascb_addr + ASCBLOCK, 0, regs );
@@ -202,7 +202,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
 
     /* Test if this CPU holds the local lock, and does not hold
        any CMS lock, and the local lock suspend queue is empty */
-    if (lock == PSALCPUA
+    if (lock == lcpa
         && (hlhi_word & (PSALCLLI | PSACMSLI)) == PSALCLLI
         && susp == 0)
     {

@@ -6,7 +6,7 @@
 #	make ARCH=390
 #
 
-VERSION  = 1.40
+VERSION  = 1.41
 
 CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=$(ARCH)
 #	   -march=pentium -malign-double -mwide-multiply
@@ -19,7 +19,8 @@ TARFILES = makefile *.c *.h hercules.cnf tapeconv.jcl dasdlist
 HRC_OBJS = impl.o config.o panel.o ipl.o cpu.o assist.o \
 	   dat.o decimal.o block.o stack.o xmem.o \
 	   channel.o service.o ckddasd.o fbadasd.o \
-	   tapedev.o cardrdr.o printer.o console.o
+	   tapedev.o cardrdr.o printer.o console.o \
+	   diagnose.o
 
 DIN_OBJS = dasdinit.o dasdutil.o
 
@@ -90,6 +91,8 @@ tapedev.o: tapedev.c $(HEADERS)
 ckddasd.o: ckddasd.c $(HEADERS)
 
 fbadasd.o: fbadasd.c $(HEADERS)
+
+diagnose.o: diagnose.c $(HEADERS)
 
 dasdinit.o: dasdinit.c $(HEADERS) dasdblks.h makefile
 

@@ -298,195 +298,6 @@ int     track;                          /* Relative track number     */
 } /* end function calculate_ttr */
 
 /*-------------------------------------------------------------------*/
-/* Subroutine to calculate physical device track capacities          */
-/* Input:                                                            */
-/*      devtype Device type                                          */
-/*      used    Number of bytes used so far on track,                */
-/*              excluding home address and record 0                  */
-/*      keylen  Key length of proposed new record                    */
-/*      datalen Data length of proposed new record                   */
-/* Output:                                                           */
-/*      newused Number of bytes used including proposed new record   */
-/*      trkbaln Number of bytes remaining on track                   */
-/*      physlen Number of bytes on physical track                    */
-/*      maxdlen Maximum data length for non-keyed record 1           */
-/*      numrecs Number of records of specified length per track      */
-/*      numhead Number of tracks per cylinder                        */
-/*      numcyls Number of cylinders per volume                       */
-/*      A NULL address may be specified for any of the output        */
-/*      fields if the output value is not required.                  */
-/*      The return value is 0 if the record will fit on the track,   */
-/*      +1 if the record will not fit on the track, or -1 if error.  */
-/* Note:                                                             */
-/*      Although the virtual DASD image file contains no interrecord */
-/*      gaps, this subroutine performs its calculations taking into  */
-/*      account the gaps that would exist on a real device, so that  */
-/*      the track capacities of the real device are not exceeded.    */
-/*-------------------------------------------------------------------*/
-static int
-capacity_calc (U16 devtype, int used, int keylen, int datalen,
-                int *newused, int *trkbaln, int *physlen,
-                int *maxdlen, int *numrecs, int *numhead, int *numcyls)
-{
-int             heads;                  /* Number of tracks/cylinder */
-int             cyls;                   /* Number of cyls/volume     */
-int             trklen;                 /* Physical track length     */
-int             maxlen;                 /* Maximum data length       */
-int             b1;                     /* Bytes used by new record
-                                           when last record on track */
-int             b2;                     /* Bytes used by new record
-                                           when not last on track    */
-int             nrecs;                  /* Number of record/track    */
-int             c, d1, d2, x;           /* 23xx/3330/3350 factors    */
-int             f1, f2, f3, f4, f5, f6; /* 3380/3390 factors         */
-int             fl1, fl2, int1, int2;   /* 3380/3390 calculations    */
-
-    switch (devtype)
-    {
-    case 0x2301:
-        heads = 1;
-        cyls = 200;
-        trklen = 20483;
-        maxlen = 20483;
-        c = 53; x = 133;
-        goto formula1;
-
-    case 0x2302:
-        heads = 46;
-        cyls = 492;
-        trklen = 4984;
-        maxlen = 4984;
-        c = 20; x = 61; d1 = 537; d2 = 512;
-        goto formula2;
-
-    case 0x2303:
-        heads = 1;
-        cyls = 800;
-        trklen = 4892;
-        maxlen = 4892;
-        c = 38; x = 108;
-        goto formula1;
-
-    case 0x2311:
-        heads = 10;
-        cyls = 200;
-        trklen = 3625;
-        maxlen = 3625;
-        c = 20; x = 61; d1 = 537; d2 = 512;
-        goto formula2;
-
-    case 0x2314:
-        heads = 20;
-        cyls = 200;
-        trklen = 7294;
-        maxlen = 7294;
-        c = 45; x = 101; d1 = 2137; d2 = 2048;
-        goto formula2;
-
-    case 0x2321:
-        heads = 20;
-        cyls = 50;
-        trklen = 2000;
-        maxlen = 2000;
-        heads = 20;
-        c = 16; x = 84; d1 = 537; d2 = 512;
-        goto formula2;
-
-    case 0x3330:
-        heads = 19;
-        cyls = 404;
-        trklen = 13030;
-        maxlen = 13030;
-        c = 56; x = 135;
-        goto formula1;
-
-    case 0x3350:
-        heads = 30;
-        cyls = 555;
-        trklen = 19069;
-        maxlen = 19069;
-        c = 82; x = 185;
-        goto formula1;
-
-    formula1:
-        b1 = keylen + datalen + (keylen == 0 ? 0 : c);
-        b2 = b1 + x;
-        nrecs = (trklen - b1)/b2 + 1;
-        break;
-
-    formula2:
-        b1 = keylen + datalen + (keylen == 0 ? 0 : c);
-        b2 = ((keylen + datalen) * d1 / d2)
-                + (keylen == 0 ? 0 : c) + x;
-        nrecs = (trklen - b1)/b2 + 1;
-        break;
-
-    case 0x3380:
-        heads = 15;
-        cyls = 885;
-        trklen = 47968;
-        maxlen = 47476;
-        f1 = 32; f2 = 492; f3 = 236;
-        fl1 = datalen + f2;
-        fl2 = (keylen == 0 ? 0 : keylen + f3);
-        fl1 = ((fl1 + f1 - 1) / f1) * f1;
-        fl2 = ((fl2 + f1 - 1) / f1) * f1;
-        b1 = b2 = fl1 + fl2;
-        nrecs = trklen / b2;
-        break;
-
-    case 0x3390:
-        heads = 15;
-        cyls = 1113;
-        trklen = 58786;
-        maxlen = 56664;
-        f1 = 34; f2 = 19; f3 = 9; f4 = 6; f5 = 116; f6 = 6;
-        int1 = ((datalen + f6) + (f5*2-1)) / (f5*2);
-        int2 = ((keylen + f6) + (f5*2-1)) / (f5*2);
-        fl1 = (f1 * f2) + datalen + f6 + f4*int1;
-        fl2 = (keylen == 0 ? 0 : (f1 * f3) + keylen + f6 + f4*int2);
-        fl1 = ((fl1 + f1 - 1) / f1) * f1;
-        fl2 = ((fl2 + f1 - 1) / f1) * f1;
-        b1 = b2 = fl1 + fl2;
-        nrecs = trklen / b2;
-        break;
-
-    default:
-        XMERRF ("Unknown device type: %4.4X\n", devtype);
-        return -1;
-    } /* end switch(devtype) */
-
-    /* Return track length and maximum data length */
-    if (physlen != NULL) *physlen = trklen;
-    if (maxdlen != NULL) *maxdlen = maxlen;
-
-    /* Return number of records per track */
-    if (numrecs != NULL) *numrecs = nrecs;
-
-    /* Return number of tracks per cylinder
-       and usual number of cylinders per volume */
-    if (numhead != NULL) *numhead = heads;
-    if (numcyls != NULL) *numcyls = cyls;
-
-    /* Return if record will not fit on the track */
-    if (used + b1 > trklen)
-    {
-        XMINFF (5, "capacity_calc: dev=%4.4X used=%d kl=%d dl=%d "
-                "b1=%d b2=%d trklen=%d\n",
-                devtype, used, keylen, datalen, b1, b2, trklen);
-        return +1;
-    }
-
-    /* Calculate number of bytes used and track balance */
-    if (newused != NULL)
-        *newused = used + b2;
-    if (trkbaln != NULL)
-        *trkbaln = (used + b2 > trklen) ? 0 : trklen - used - b2;
-
-    return 0;
-} /* end function capacity_calc */
-
-/*-------------------------------------------------------------------*/
 /* Subroutine to read IPL text from an EBCDIC object file            */
 /* Input:                                                            */
 /*      iplfnm  Name of EBCDIC card image object file                */
@@ -720,7 +531,8 @@ CKDDASD_RECHDR *rechdr;                 /* -> Record header          */
 
     /* Determine whether record will fit on current track */
     cc = capacity_calc (devtype, *usedr, keylen, datalen,
-                        usedr, trkbal, NULL, NULL, NULL, NULL, NULL);
+                        usedr, trkbal, NULL, NULL, NULL, NULL, NULL,
+                        NULL, NULL, NULL, NULL, NULL);
     if (cc < 0) return -1;
 
     /* Move to next track if record will not fit */
@@ -737,8 +549,8 @@ CKDDASD_RECHDR *rechdr;                 /* -> Record header          */
 
         /* Determine whether record will fit on new track */
         cc = capacity_calc (devtype, *usedr, keylen, datalen,
-                            usedr, trkbal, NULL, NULL, NULL,
-                            NULL, NULL);
+                            usedr, trkbal, NULL, NULL, NULL, NULL,
+                            NULL, NULL, NULL, NULL, NULL, NULL);
         if (cc < 0) return -1;
 
     } /* end if */
@@ -1221,13 +1033,20 @@ int             numdblk;                /* Number of dir blks/track  */
 int             physlen;                /* Physical track length     */
 int             numcyls;                /* Device size in cylinders  */
 int             numheads;               /* Number of heads/cylinder  */
+int             kbconst;                /* Keyed block constant      */
+int             lbconst;                /* Last keyed block constant */
+int             nkconst;                /* Non-keyed block constant  */
+BYTE            devflag;                /* Device flags for VTOC     */
+int             tolfact;                /* Device tolerance          */
 
-    /* Calculate the physical track length, device size, and
-       the number of DSCBs and directory blocks per track */
-    capacity_calc (devtype, 0, 44, 96, NULL, NULL, &physlen,
-                    NULL, &numdscb, &numheads, &numcyls);
+    /* Calculate the physical track length, block overheads, device
+       size, and the number of DSCBs and directory blocks per track */
+    capacity_calc (devtype, 0, 44, 96, NULL, NULL, &physlen, &kbconst,
+                    &lbconst, &nkconst, &devflag, &tolfact, NULL,
+                    &numdscb, &numheads, &numcyls);
     capacity_calc (devtype, 0, 8, 256, NULL, NULL, NULL,
-                    NULL, &numdblk, NULL, NULL);
+                    NULL, NULL, NULL, NULL, NULL, NULL,
+                    &numdblk, NULL, NULL);
 
     /* Allocate storage for a DATABLK structure */
     blklen = 12 + sizeof(FORMAT4_DSCB);
@@ -1265,6 +1084,12 @@ int             numheads;               /* Number of heads/cylinder  */
     f4dscb->ds4devsz[3] = numheads & 0xFF;
     f4dscb->ds4devtk[0] = (physlen >> 8) & 0xFF;
     f4dscb->ds4devtk[1] = physlen & 0xFF;
+    f4dscb->ds4devi = kbconst;
+    f4dscb->ds4devl = lbconst;
+    f4dscb->ds4devk = nkconst;
+    f4dscb->ds4devfg = devflag;
+    f4dscb->ds4devtl[0] = (tolfact >> 8) & 0xFF;
+    f4dscb->ds4devtl[1] = tolfact & 0xFF;
     f4dscb->ds4devdt = numdscb;
     f4dscb->ds4devdb = numdblk;
 
@@ -1854,7 +1679,7 @@ BYTE           *fieldptr[MAXNUM];       /* Array of field pointers   */
     /* Return the dataset values if this is the IEBCOPY record */
     if (strcmp(tuutiln, "IEBCOPY") == 0)
     {
-        XMINFF (2, "File %lu: DSNAME=%s\n",
+        XMINFF (2, "File %u: DSNAME=%s\n",
                 filenum, tudsnam);
         XMINFF (2, "DSORG=%s RECFM=%s "
                 "LRECL=%d BLKSIZE=%d KEYLEN=%d DIRBLKS=%d\n",
@@ -2686,6 +2511,7 @@ static BYTE    *sys1name[NUM_SYS1_DATASETS] =
 
     /* Obtain the number of blocks which will fit on a track */
     capacity_calc (devtype, 0, keylen, datalen, NULL, NULL,
+                    NULL, NULL, NULL, NULL, NULL,
                     NULL, NULL, &blkptrk, NULL, NULL);
 
     /* Calculate the total number of blocks in the catalog */
@@ -3004,7 +2830,8 @@ DATABLK         datablk;                /* Data block                */
     /* Obtain the physical track size and the track balance
        remaining on the first track after the header record */
     capacity_calc (devtype, 0, keylen, datalen, NULL, &remlen,
-                    &physlen, NULL, NULL, NULL, NULL);
+                    &physlen, NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL);
 
     /* Calculate the end of extent cylinder and head */
     lasthead = heads - 1;
@@ -3577,6 +3404,7 @@ off_t           seekpos;                /* Seek position for lseek   */
             /* Create empty dataset */
             tracks = 0;
             dirblu = 0;
+            lastrec = 0;
 
             /* Create the end of file record */
             datablk = (DATABLK*)nullblk;
@@ -3765,11 +3593,15 @@ int             stmtno;                 /* Statement number          */
             argexit(4);
     }
 
-    /* Obtain number of heads and track length for device type */
+    /* Obtain number of heads and maximum data length for device */
     rc = capacity_calc (devtype, 0, 0, 0, NULL, NULL, NULL,
+                        NULL, NULL, NULL, NULL, NULL,
                         &outmaxdl, NULL, &outheads, NULL);
     if (rc < 0)
+    {
+        XMERRF ("Unknown device type: %4.4X\n", devtype);
         argexit(3);
+    }
 
     /* Calculate the track size of the virtual device */
     outtrklv = sizeof(CKDDASD_TRKHDR)

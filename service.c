@@ -6,6 +6,11 @@
 /* interrupt functions for the Hercules ESA/390 emulator.            */
 /*-------------------------------------------------------------------*/
 
+/*-------------------------------------------------------------------*/
+/* Additional credits:                                               */
+/*      Corrections contributed by Jan Jaeger                        */
+/*-------------------------------------------------------------------*/
+
 #include "hercules.h"
 
 /*-------------------------------------------------------------------*/
@@ -30,7 +35,7 @@ typedef struct _SCCB_HEADER {
 
 /* Bit definitions for SCCB header reason code */
 #define SCCB_REAS_NONE          0x00    /* No reason                 */
-#define SCCB_REAS_NOT_ALIGNED   0x01    /* SCCB not on 2K boundary   */
+#define SCCB_REAS_NOT_4KBNDRY   0x01    /* SCCB crosses 4K boundary  */
 #define SCCB_REAS_ODD_LENGTH    0x02    /* Length not multiple of 8  */
 #define SCCB_REAS_TOO_SHORT     0x03    /* Length is inadequate      */
 #define SCCB_REAS_INVALID_CMD   0x01    /* Invalid SCLP command code */
@@ -214,7 +219,7 @@ int     rc;
                 psa->extnew[0], psa->extnew[1], psa->extnew[2],
                 psa->extnew[3], psa->extnew[4], psa->extnew[5],
                 psa->extnew[6], psa->extnew[7]);
-        exit(1);
+        regs->cpustate = CPUSTATE_STOPPED;
     }
 
 } /* end function external_interrupt */
@@ -264,7 +269,9 @@ PSA    *psa;                            /* -> Prefixed storage area  */
         && (regs->psw.sysmask & PSW_EXTMASK)
         && (regs->cr[0] & CR0_XM_SERVSIG))
     {
-        logmsg ("External interrupt: Service signal %8.8lX\n",
+        sysblk.servparm = APPLY_PREFIXING (sysblk.servparm, regs->pxr);
+
+        logmsg ("External interrupt: Service signal %8.8X\n",
                 sysblk.servparm);
 
         /* Store service signal parameter at PSA+X'80' */
@@ -312,6 +319,9 @@ SCCB_SCP_INFO  *sccbscp;                /* -> SCCB SCP information   */
 SCCB_CPU_INFO  *sccbcpu;                /* -> SCCB CPU information   */
 SCCB_CHP_INFO  *sccbchp;                /* -> SCCB channel path info */
 U16             offset;                 /* Offset from start of SCCB */
+DEVBLK         *dev;                    /* Used to find CHPIDs       */
+int             chpbyte;                /* Offset to byte for CHPID  */
+int             chpbit;                 /* Bit number for CHPID      */
 
     /* Program check if SCCB is not on a doubleword boundary */
     if ( sccb_absolute_addr & 0x00000007 )
@@ -327,7 +337,7 @@ U16             offset;                 /* Offset from start of SCCB */
         return 3;
     }
 
-    /*debug*/logmsg("Service call %8.8lX SCCB=%8.8lX\n",
+    /*debug*/logmsg("Service call %8.8X SCCB=%8.8X\n",
     /*debug*/       sclp_command, sccb_absolute_addr);
 
     /* Point to service call control block */
@@ -336,6 +346,9 @@ U16             offset;                 /* Offset from start of SCCB */
     /* Load SCCB length from header */
     sccblen = (sccb->length[0] << 8) | sccb->length[1];
 
+    /* Set the main storage reference bit */
+    sysblk.storkeys[sccb_absolute_addr >> 12] |= STORKEY_REF;
+
     /* Program check if end of SCCB falls outside main storage */
     if ( sysblk.mainsize - sccblen < sccb_absolute_addr )
     {
@@ -343,10 +356,37 @@ U16             offset;                 /* Offset from start of SCCB */
         return 3;
     }
 
+    /* Obtain lock if immediate response is not requested */
+    if (!(sccb->flag & SCCB_FLAG_SYNC))
+    {
+        /* Obtain the interrupt lock */
+        obtain_lock (&sysblk.intlock);
+
+        /* If a service signal is pending then return condition
+           code 2 to indicate that service processor is busy */
+        if (sysblk.servsig)
+        {
+            release_lock (&sysblk.intlock);
+            return 2;
+        }
+    }
+
     /* Test SCLP command word */
     switch (sclp_command) {
 
     case SCLP_READ_SCP_INFO:
+
+        /* Set the main storage change bit */
+        sysblk.storkeys[sccb_absolute_addr >> 12] |= STORKEY_CHANGE;
+
+        /* Set response code X'0100' if SCCB crosses a page boundary */
+        if ((sccb_absolute_addr & 0x7FFFF000) !=
+            ((sccb_absolute_addr + sccblen - 1) & 0x7FFFF000))
+        {
+            sccb->reas = SCCB_REAS_NOT_4KBNDRY;
+            sccb->resp = SCCB_RESP_BLOCK_ERROR;
+            break;
+        }
 
         /* Set response code X'0300' if SCCB length
            is insufficient to contain SCP info */
@@ -419,7 +459,7 @@ U16             offset;                 /* Offset from start of SCCB */
         for (i = 0; i < sysblk.numcpu; i++, sccbcpu++)
         {
             memset (sccbcpu, 0, sizeof(SCCB_CPU_INFO));
-            sccbcpu->cpa = i;
+            sccbcpu->cpa = sysblk.regs[i].cpuad;
             sccbcpu->tod = 0;
             sccbcpu->cpf2 = SCCB_CPF2_PRIVATE_SPACE_BIT_INSTALLED;
         }
@@ -431,6 +471,18 @@ U16             offset;                 /* Offset from start of SCCB */
         break;
 
     case SCLP_READ_CHP_INFO:
+
+        /* Set the main storage change bit */
+        sysblk.storkeys[sccb_absolute_addr >> 12] |= STORKEY_CHANGE;
+
+        /* Set response code X'0100' if SCCB crosses a page boundary */
+        if ((sccb_absolute_addr & 0x7FFFF000) !=
+            ((sccb_absolute_addr + sccblen - 1) & 0x7FFFF000))
+        {
+            sccb->reas = SCCB_REAS_NOT_4KBNDRY;
+            sccb->resp = SCCB_RESP_BLOCK_ERROR;
+            break;
+        }
 
         /* Set response code X'0300' if SCCB length
            is insufficient to contain channel path info */
@@ -445,14 +497,16 @@ U16             offset;                 /* Offset from start of SCCB */
         sccbchp = (SCCB_CHP_INFO*)(sccb+1);
         memset (sccbchp, 0, sizeof(SCCB_CHP_INFO));
 
-        /* Set the bits which indicate channels installed */
-        memset (sccbchp->installed, 0xFF, sizeof(sccbchp->installed));
+        /* Identify CHPIDs installed, owned, and online */
+        for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+        {
+            chpbyte = dev->devnum >> 11;
+            chpbit = (dev->devnum >> 8) & 7;
 
-        /* Set the bits which indicate channels owned */
-        memset (sccbchp->owned, 0xFF, sizeof(sccbchp->owned));
-
-        /* Set the bits which indicate channels online */
-        memset (sccbchp->online, 0xFF, sizeof(sccbchp->online));
+            sccbchp->installed[chpbyte] |= 0x80 >> chpbit;
+            sccbchp->owned[chpbyte] |= 0x80 >> chpbit;
+            sccbchp->online[chpbyte] |= 0x80 >> chpbit;
+        }
 
 #ifdef FEATURE_S370_CHANNEL
         /* For S/370, initialize identifiers for channel set 0A */
@@ -484,9 +538,6 @@ U16             offset;                 /* Offset from start of SCCB */
     /* If immediate response is requested, return condition code 1 */
     if (sccb->flag & SCCB_FLAG_SYNC)
         return 1;
-
-    /* Obtain the interrupt lock */
-    obtain_lock (&sysblk.intlock);
 
     /* Set service signal external interrupt pending */
     sysblk.servparm = sccb_absolute_addr;

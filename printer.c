@@ -15,16 +15,40 @@
 #define SPACE           ((BYTE)' ')
 
 /*-------------------------------------------------------------------*/
+/* Subroutine to write data to the printer                           */
+/*-------------------------------------------------------------------*/
+static void
+write_buffer (DEVBLK *dev, BYTE *buf, int len, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+
+    /* Write data to the printer file */
+    rc = write (dev->fd, buf, len);
+
+    /* Equipment check if error writing to printer file */
+    if (rc < len)
+    {
+        logmsg ("HHC413I Error writing to %s: %s\n",
+                dev->filename,
+                (errno == 0 ? "incomplete": strerror(errno)));
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return;
+    }
+
+} /* end function write_buffer */
+
+/*-------------------------------------------------------------------*/
 /* Initialize the device handler                                     */
 /*-------------------------------------------------------------------*/
-int printer_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
+int printer_init_handler (DEVBLK *dev, int argc, BYTE *argv[])
 {
 
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
     {
         fprintf (stderr,
-                "HHC401I File name missing or invalid\n");
+                "HHC411I File name missing or invalid\n");
         return -1;
     }
 
@@ -32,13 +56,13 @@ int printer_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     strcpy (dev->filename, argv[0]);
 
     /* Initialize device dependent fields */
-    dev->fp = NULL;
+    dev->fd = -1;
     dev->printpos = 0;
     dev->printrem = LINE_LENGTH;
     dev->fold = 0;
 
     /* Set length of print buffer */
-    dev->bufsize = LINE_LENGTH;
+    dev->bufsize = LINE_LENGTH + 8;
 
     /* Set number of sense bytes */
     dev->numsense = 1;
@@ -59,33 +83,35 @@ int printer_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     return 0;
 } /* end function printer_init_handler */
 
-
 /*-------------------------------------------------------------------*/
 /* Execute a Channel Command Word                                    */
 /*-------------------------------------------------------------------*/
-void printer_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
+void printer_execute_ccw (DEVBLK *dev, BYTE code, BYTE flags,
         BYTE chained, U16 count, BYTE prevcode, int ccwseq,
-        BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual )
+        BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual)
 {
-int     i;                              /* Loop counter              */
-int     num;                            /* Number of bytes to move   */
-char   *eor;                            /* -> end of record string   */
-BYTE    c;                              /* Print character           */
+int             rc;                     /* Return code               */
+int             i;                      /* Loop counter              */
+int             num;                    /* Number of bytes to move   */
+char           *eor;                    /* -> end of record string   */
+BYTE            c;                      /* Print character           */
 
     /* Open the device file if necessary */
-    if (dev->fp == NULL && !IS_CCW_SENSE(code))
+    if (dev->fd < 0 && !IS_CCW_SENSE(code))
     {
-        dev->fp = fopen (dev->filename, "w");
-        if (dev->fp == NULL)
+        rc = open (dev->filename, O_WRONLY);
+        if (rc < 0)
         {
             /* Handle open failure */
-            perror("printer: open error");
+            logmsg ("HHC412I Error opening file %s: %s\n",
+                    dev->filename, strerror(errno));
 
             /* Set unit check with intervention required */
             dev->sense[0] = SENSE_IR;
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
             return;
         }
+        dev->fd = rc;
     }
 
     /* Process depending on CCW opcode */
@@ -159,23 +185,15 @@ BYTE    c;                              /* Print character           */
             for (i = dev->printpos; i > 0; i--)
                 if (dev->buf[i-1] != SPACE) break;
 
-            /* Write print line */
-            fwrite (dev->buf, i, 1, dev->fp);
+            /* Append carriage return and line feed(s) */
+            strcpy (dev->buf + i, eor);
+            i += strlen(eor);
 
-            /* Write carriage return and line feed(s) */
-            fprintf (dev->fp, "%s", eor);
+            /* Write print line */
+            write_buffer (dev, dev->buf, i, unitstat);
+            if (*unitstat != 0) break;
 
         } /* end if(!data-chaining) */
-
-        /* Equipment check if error occurred writing to printer file */
-        if (ferror(dev->fp))
-        {
-            logmsg ("printer: error writing to %s: %s\n",
-                    dev->filename, strerror(errno));
-            dev->sense[0] = SENSE_EC;
-            *unitstat = CSW_CE | CSW_DE | CSW_UC;
-            break;
-        }
 
         /* Return normal status */
         *unitstat = CSW_CE | CSW_DE;
@@ -192,7 +210,9 @@ BYTE    c;                              /* Print character           */
     /*---------------------------------------------------------------*/
     /* SPACE 1 LINE IMMEDIATE                                        */
     /*---------------------------------------------------------------*/
-        fprintf (dev->fp, "\r\n");
+        write_buffer (dev, "\r\n", 2, unitstat);
+        if (*unitstat != 0) break;
+
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -200,7 +220,9 @@ BYTE    c;                              /* Print character           */
     /*---------------------------------------------------------------*/
     /* SPACE 2 LINES IMMEDIATE                                       */
     /*---------------------------------------------------------------*/
-        fprintf (dev->fp, "\r\n\n");
+        write_buffer (dev, "\r\n\n", 3, unitstat);
+        if (*unitstat != 0) break;
+
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -208,7 +230,9 @@ BYTE    c;                              /* Print character           */
     /*---------------------------------------------------------------*/
     /* SPACE 3 LINES IMMEDIATE                                       */
     /*---------------------------------------------------------------*/
-        fprintf (dev->fp, "\r\n\n\n");
+        write_buffer (dev, "\r\n\n\n", 4, unitstat);
+        if (*unitstat != 0) break;
+
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -246,7 +270,9 @@ BYTE    c;                              /* Print character           */
     /*---------------------------------------------------------------*/
     /* SKIP TO CHANNEL 1 IMMEDIATE                                   */
     /*---------------------------------------------------------------*/
-        fprintf (dev->fp, "\r\f");
+        write_buffer (dev, "\r\f", 2, unitstat);
+        if (*unitstat != 0) break;
+
         *unitstat = CSW_CE | CSW_DE;
         break;
 

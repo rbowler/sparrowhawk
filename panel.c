@@ -13,7 +13,8 @@
 
 /*-------------------------------------------------------------------*/
 /* Additional credits:                                               */
-/*      Breakpoint command contributed by Dan Horak                  */
+/*      breakpoint command contributed by Dan Horak                  */
+/*      devinit command contributed by Jay Maynard                   */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -45,7 +46,7 @@ static void display_regs (REGS *regs)
 int     i;
 
     for (i = 0; i < 16; i++)
-        logmsg ("R%2.2d=%8.8lX%s", i, regs->gpr[i],
+        logmsg ("R%2.2d=%8.8X%s", i, regs->gpr[i],
             ((i & 0x03) == 0x03) ? "\n" : "\t");
 
 } /* end function display_regs */
@@ -58,7 +59,7 @@ static void display_cregs (REGS *regs)
 int     i;
 
     for (i = 0; i < 16; i++)
-        logmsg ("CR%2.2d=%8.8lX%s", i, regs->cr[i],
+        logmsg ("CR%2.2d=%8.8X%s", i, regs->cr[i],
             ((i & 0x03) == 0x03) ? "\n" : "\t");
 
 } /* end function display_cregs */
@@ -71,7 +72,7 @@ static void display_aregs (REGS *regs)
 int     i;
 
     for (i = 0; i < 16; i++)
-        logmsg ("AR%2.2d=%8.8lX%s", i, regs->ar[i],
+        logmsg ("AR%2.2d=%8.8X%s", i, regs->ar[i],
             ((i & 0x03) == 0x03) ? "\n" : "\t");
 
 } /* end function display_aregs */
@@ -82,8 +83,8 @@ int     i;
 static void display_fregs (REGS *regs)
 {
 
-    logmsg ("FPR0=%8.8lX %8.8lX\t\tFPR2=%8.8lX %8.8lX\n"
-            "FPR4=%8.8lX %8.8lX\t\tFPR6=%8.8lX %8.8lX\n",
+    logmsg ("FPR0=%8.8X %8.8X\t\tFPR2=%8.8X %8.8X\n"
+            "FPR4=%8.8X %8.8X\t\tFPR6=%8.8X %8.8X\n",
             regs->fpr[0], regs->fpr[1], regs->fpr[2], regs->fpr[3],
             regs->fpr[4], regs->fpr[5], regs->fpr[6], regs->fpr[7]);
 
@@ -103,7 +104,7 @@ BYTE    hbuf[40];                       /* Hexadecimal buffer        */
 BYTE    cbuf[17];                       /* Character buffer          */
 BYTE    c;                              /* Character work area       */
 
-    n = sprintf (buf, "R:%8.8lX:", raddr);
+    n = sprintf (buf, "R:%8.8X:", raddr);
     aaddr = APPLY_PREFIXING (raddr, regs->pxr);
     if (aaddr >= sysblk.mainsize)
     {
@@ -225,7 +226,7 @@ int     n;                              /* Number of bytes in buffer */
         }
 
         /* Display storage at first storage operand location */
-        n = sprintf (buf, "V:%8.8lX:", addr1);
+        n = sprintf (buf, "V:%8.8X:", addr1);
         xcode = virt_to_real (&raddr, addr1, b1, regs,
                                 (opcode == 0x44 ? ACCTYPE_INSTFETCH :
                                  opcode == 0xB1 ? ACCTYPE_LRA :
@@ -251,7 +252,7 @@ int     n;                              /* Number of bytes in buffer */
         }
 
         /* Display storage at second storage operand location */
-        n = sprintf (buf, "V:%8.8lX:", addr2);
+        n = sprintf (buf, "V:%8.8X:", addr2);
         xcode = virt_to_real (&raddr, addr2, b2, regs, ACCTYPE_READ);
         if (xcode == 0)
             n += display_real (regs, raddr, buf+n);
@@ -296,7 +297,7 @@ BYTE   *s;                              /* Alteration value pointer  */
 BYTE    delim;                          /* Operand delimiter         */
 BYTE    c;                              /* Character work area       */
 
-    rc = sscanf(operand, "%lx%c%lx%c", saddr, &delim, eaddr, &c);
+    rc = sscanf(operand, "%x%c%x%c", saddr, &delim, eaddr, &c);
 
     /* Process storage alteration operand */
     if (rc > 2 && delim == '=')
@@ -384,6 +385,10 @@ BYTE   *loadparm;                       /* -> IPL parameter (ASCIIZ) */
 BYTE    buf[100];                       /* Message buffer            */
 int     n;                              /* Number of bytes in buffer */
 BYTE    newval[32];                     /* Storage alteration value  */
+BYTE   *devascii;                       /* ASCII text device number  */
+#define MAX_ARGS 10                     /* Max num of devinit args   */
+int     devargc;                        /* Arg count for devinit     */
+BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
 
     /* Copy panel command to work area */
     memset (cmd, 0, sizeof(cmd));
@@ -413,6 +418,7 @@ BYTE    newval[32];                     /* Storage alteration value  */
             "stop=stop CPU, start=start CPU, restart=PSW restart\n"
             "loadcore filename=load core image from file\n"
             "loadparm xxxxxxxx=set IPL parameter, ipl devn=IPL\n"
+            "devinit devn arg [arg...] = reinitialize device\n"
             "quit/exit=terminate\n");
         return NULL;
     }
@@ -530,7 +536,7 @@ BYTE    newval[32];                     /* Storage alteration value  */
     /* pr command - display prefix register */
     if (strcmp(cmd,"pr") == 0)
     {
-        logmsg ("Prefix=%8.8lX\n", regs->pxr);
+        logmsg ("Prefix=%8.8X\n", regs->pxr);
         return NULL;
     }
 
@@ -590,6 +596,13 @@ BYTE    newval[32];                     /* Storage alteration value  */
     /* v command - display or alter virtual storage */
     if (cmd[0] == 'v')
     {
+        /* Reject the command if no segment table */
+        if (regs->cr[1] == 0)
+        {
+            logmsg ("Virtual storage not available\n");
+            return NULL;
+        }
+
         /* Parse the range or alteration operand */
         rc = parse_range (cmd+1, &vaddr, &eaddr, newval);
         if (rc < 0) return NULL;
@@ -612,7 +625,7 @@ BYTE    newval[32];                     /* Storage alteration value  */
         /* Display virtual storage */
         for (i = 0; i < 999 && vaddr <= eaddr; i++)
         {
-            n = sprintf (buf, "V:%8.8lX:", vaddr);
+            n = sprintf (buf, "V:%8.8X:", vaddr);
             xcode = virt_to_real (&raddr, vaddr, 0, regs,
                     ACCTYPE_LRA);
             if (xcode == 0)
@@ -638,10 +651,10 @@ BYTE    newval[32];                     /* Storage alteration value  */
             return NULL;
         }
 
-        if (sscanf(cmd+1, "%lx%c", &sysblk.breakaddr, &c) == 1)
+        if (sscanf(cmd+1, "%x%c", &sysblk.breakaddr, &c) == 1)
         {
             sysblk.instbreak = 1;
-            logmsg ("Setting breakpoint at %8.8lX\n", sysblk.breakaddr);
+            logmsg ("Setting breakpoint at %8.8X\n", sysblk.breakaddr);
             return NULL;
         }
     }
@@ -660,55 +673,18 @@ BYTE    newval[32];                     /* Storage alteration value  */
         /* Obtain the device lock */
         obtain_lock (&dev->lock);
 
-        /* If device is already busy or interrupt pending or
-           status pending then do not present interrupt */
-        if (dev->busy || dev->pending
-            || (dev->scsw.flag3 & SCSW3_SC_PEND))
-        {
-            release_lock (&dev->lock);
-            logmsg ("Device %4.4X busy or interrupt pending\n",
-                    devnum);
-            return NULL;
-        }
-
-#ifdef FEATURE_S370_CHANNEL
-        /* Set CSW for attention interrupt */
-        dev->csw[0] = 0;
-        dev->csw[1] = 0;
-        dev->csw[2] = 0;
-        dev->csw[3] = 0;
-        dev->csw[4] = CSW_ATTN;
-        dev->csw[5] = 0;
-        dev->csw[6] = 0;
-        dev->csw[7] = 0;
-#endif /*FEATURE_S370_CHANNEL*/
-
-#ifdef FEATURE_CHANNEL_SUBSYSTEM
-        /* Set SCSW for attention interrupt */
-        dev->scsw.flag0 = 0;
-        dev->scsw.flag1 = 0;
-        dev->scsw.flag2 = 0;
-        dev->scsw.flag3 = SCSW3_SC_ALERT | SCSW3_SC_PEND;
-        dev->scsw.ccwaddr[0] = 0;
-        dev->scsw.ccwaddr[1] = 0;
-        dev->scsw.ccwaddr[2] = 0;
-        dev->scsw.ccwaddr[3] = 0;
-        dev->scsw.unitstat = CSW_ATTN;
-        dev->scsw.chanstat = 0;
-        dev->scsw.count[0] = 0;
-        dev->scsw.count[1] = 0;
-#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
-
-        /* Set the interrupt pending flag for this device */
-        dev->pending = 1;
-
-        /* Signal waiting CPUs that an interrupt is pending */
-        obtain_lock (&sysblk.intlock);
-        signal_condition (&sysblk.intcond);
-        release_lock (&sysblk.intlock);
+        /* Raise attention interrupt for the device */
+        rc = device_attention (dev, CSW_ATTN);
 
         /* Release the device lock */
         release_lock (&dev->lock);
+
+        /* Issue error message is device was busy or pending */
+        if (rc != 0)
+        {
+            logmsg ("Device %4.4X busy or interrupt pending\n",
+                    devnum);
+        }
 
         return NULL;
     } /* end if(i) */
@@ -806,7 +782,7 @@ BYTE    newval[32];                     /* Storage alteration value  */
         }
         if (sscanf(cmd+3, "%hx%c", &devnum, &c) != 1)
         {
-            logmsg ("device number %s invalid\n", cmd+3);
+            logmsg ("Device number %s is invalid\n", cmd+3);
             return NULL;
         }
         load_ipl (devnum, regs);
@@ -817,6 +793,76 @@ BYTE    newval[32];                     /* Storage alteration value  */
     if (strcmp(cmd,"quit") == 0 || strcmp(cmd,"exit") == 0)
     {
         exit(0);
+    }
+
+    /* devinit command - assign/open a file for a configured device */
+    if (memcmp(cmd,"devinit",7)==0)
+    {
+        devascii = strtok(cmd+7," \t");
+        if (devascii == NULL
+            || sscanf(devascii, "%hx%c", &devnum, &c) != 1)
+        {
+            logmsg ("Device number %s is invalid\n",devascii);
+            return NULL;
+        }
+        dev = find_device_by_devnum (devnum);
+        if (dev == NULL)
+        {
+            logmsg ("Device number %4.4X not found\n", devnum);
+            return NULL;
+        }
+
+        /* Set up remaining arguments for initialization handler */
+        for (devargc = 0; devargc < MAX_ARGS &&
+            (devargv[devargc] = strtok(NULL," \t")) != NULL;
+            devargc++);
+
+        /* Obtain the device lock */
+        obtain_lock (&dev->lock);
+
+        /* Reject if device is busy or interrupt pending */
+        if (dev->busy || dev->pending
+            || (dev->scsw.flag3 & SCSW3_SC_PEND))
+        {
+            release_lock (&dev->lock);
+            logmsg ("Device %4.4X busy or interrupt pending\n",
+                    devnum);
+            return NULL;
+        }
+
+        /* Close the existing file, if any */
+        if (dev->fd > 2)
+        {
+            if (close(dev->fd) < 0)
+            {
+                /* Close failed; log the event */
+                logmsg ("Error closing file %s: %s\n",
+                        dev->filename,strerror(errno));
+            }
+            dev->fd = -1;
+        }
+
+        /* Call the device init routine to do the hard work */
+        if (devargc > 0)
+        {
+            rc = (*(dev->devinit))(dev, devargc, devargv);
+            if (rc < 0)
+            {
+                logmsg ("Initialization failed for device %4.4X\n",
+                        devnum);
+            } else {
+                logmsg ("Device %4.4X initialized\n",
+                        devnum);
+            }
+        }
+
+        /* Raise unsolicited device end interrupt for the device */
+        device_attention (dev, CSW_DE);
+
+        /* Release the device lock */
+        release_lock (&dev->lock);
+
+        return NULL;
     }
 
     /* Invalid command - display error message */

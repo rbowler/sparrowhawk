@@ -49,6 +49,7 @@
 #undef	FEATURE_INTERVAL_TIMER
 #undef	FEATURE_HALFWORD_IMMEDIATE
 #undef	FEATURE_LINKAGE_STACK
+#undef	FEATURE_MSSF_CALL
 #undef	FEATURE_MVS_ASSIST
 #undef	FEATURE_PAGE_PROTECTION
 #undef	FEATURE_PRIVATE_SPACE
@@ -76,8 +77,9 @@
  #define FEATURE_DUAL_ADDRESS_SPACE
  #define FEATURE_EXTENDED_STORAGE_KEYS
  #define FEATURE_HALFWORD_IMMEDIATE
- #define FEATURE_MVS_ASSIST
  #define FEATURE_LINKAGE_STACK
+ #define FEATURE_MSSF_CALL
+ #define FEATURE_MVS_ASSIST
  #define FEATURE_PAGE_PROTECTION
  #define FEATURE_PRIVATE_SPACE
  #define FEATURE_RELATIVE_BRANCH
@@ -235,6 +237,7 @@ typedef struct _DEVBLK {
 	U16	subchan;		/* Subchannel number	     */
 	U16	devnum; 		/* Device number	     */
 	U16	devtype;		/* Device type		     */
+	DEVIF  *devinit;		/* -> Init device function   */
 	DEVXF  *devexec;		/* -> Execute CCW function   */
 	LOCK	lock;			/* Device block lock	     */
 	COND	resumecond;		/* Resume condition	     */
@@ -287,7 +290,6 @@ typedef struct _DEVBLK {
 	/* Device dependent fields for printer */
 	unsigned int			/* Flags		     */
 		fold:1; 		/* 1=Fold to upper case      */
-	FILE   *fp;			/* File pointer 	     */
 	int	printpos;		/* Number of bytes already
 					   placed in print buffer    */
 	int	printrem;		/* Number of bytes remaining
@@ -527,6 +529,10 @@ int  compare_string (int r1, int r2, REGS *regs);
 int  search_string (int r1, int r2, REGS *regs);
 int  compare_until_substring_equal (int r1, int r2, REGS *regs);
 
+/* Functions in module diagnose.c */
+void scpend_call (void);
+int  mssf_call (U32 mssf_command, U32 spccb_absolute_addr);
+
 /* Functions in module service.c */
 void perform_external_interrupt (REGS *regs);
 int  service_call (U32 sclp_command, U32 sccb_absolute_addr);
@@ -564,6 +570,7 @@ int  resume_subchan (REGS *regs, DEVBLK *dev);
 int  present_io_interrupt (REGS *regs, U32 *ioid, U32 *ioparm,
 	BYTE *csw);
 void io_reset (void);
+int  device_attention (DEVBLK *dev, BYTE unitstat);
 
 /* Functions in module cardrdr.c */
 DEVIF cardrdr_init_handler;

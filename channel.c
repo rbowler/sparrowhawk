@@ -91,6 +91,65 @@ static void display_scsw (DEVBLK *dev, SCSW scsw)
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
 /*-------------------------------------------------------------------*/
+/* FETCH A CHANNEL COMMAND WORD FROM MAIN STORAGE                    */
+/*-------------------------------------------------------------------*/
+static void fetch_ccw (
+                        BYTE ccwkey,    /* Bits 0-3=key, 4-7=zeroes  */
+                        int ccwfmt,     /* CCW format (0 or 1)       */
+                        U32 ccwaddr,    /* Main storage addr of CCW  */
+                        BYTE *code,     /* Returned operation code   */
+                        U32 *addr,      /* Returned data address     */
+                        BYTE *flags,    /* Returned flags            */
+                        U16 *count,     /* Returned data count       */
+                        BYTE *chanstat) /* Returned channel status   */
+{
+BYTE    storkey;                        /* Storage key               */
+BYTE   *ccw;                            /* CCW pointer               */
+
+    /* Channel program check if CCW is not on a doubleword
+       boundary or is outside limit of main storage */
+    if ((ccwaddr & 0x00000007) || ccwaddr >= sysblk.mainsize)
+    {
+        *chanstat = CSW_PROGC;
+        return;
+    }
+
+    /* Channel protection check if CCW is fetch protected */
+    storkey = sysblk.storkeys[ccwaddr >> 12];
+    if (ccwkey != 0 && (storkey & STORKEY_FETCH)
+        && (storkey & STORKEY_KEY) != ccwkey)
+    {
+        *chanstat = CSW_PROTC;
+        return;
+    }
+
+    /* Set the main storage reference bit for the CCW location */
+    sysblk.storkeys[ccwaddr >> 12] |= STORKEY_REF;
+
+    /* Point to the CCW in main storage */
+    ccw = sysblk.mainstor + ccwaddr;
+
+    /* Extract CCW opcode, flags, byte count, and data address */
+    if (ccwfmt == 0)
+    {
+        *code = ccw[0];
+        *addr = ((U32)(ccw[1]) << 16) | ((U32)(ccw[2]) << 8)
+                    | ccw[3];
+        *flags = ccw[4];
+        *count = ((U16)(ccw[6]) << 8) | ccw[7];
+    }
+    else
+    {
+        *code = ccw[0];
+        *flags = ccw[1];
+        *count = ((U16)(ccw[2]) << 8) | ccw[3];
+        *addr = ((U32)(ccw[4]) << 24) | ((U32)(ccw[5]) << 16)
+                    | ((U32)(ccw[6]) << 8) | ccw[7];
+    }
+
+} /* end function fetch_ccw */
+
+/*-------------------------------------------------------------------*/
 /* FETCH AN INDIRECT DATA ADDRESS WORD FROM MAIN STORAGE             */
 /*-------------------------------------------------------------------*/
 static void fetch_idaw (BYTE code,      /* CCW operation code        */
@@ -123,6 +182,9 @@ BYTE    storkey;                        /* Storage key               */
         *chanstat = CSW_PROTC;
         return;
     }
+
+    /* Set the main storage reference bit for the IDAW location */
+    sysblk.storkeys[idawaddr >> 12] |= STORKEY_REF;
 
     /* Fetch IDAW from main storage */
     idaw = sysblk.mainstor[idawaddr] << 24
@@ -216,6 +278,10 @@ BYTE    area[64];                       /* Data display area         */
             /* Reduce length if less than one page remaining */
             if (idalen > idacount) idalen = idacount;
 
+            /* Set the main storage reference and change bits */
+            sysblk.storkeys[idadata >> 12] |=
+                (readcmd ? (STORKEY_REF|STORKEY_CHANGE) : STORKEY_REF);
+
             /* Copy data between main storage and channel buffer */
             if (readcmd)
                 memcpy (sysblk.mainstor + idadata, iobuf, idalen);
@@ -226,7 +292,7 @@ BYTE    area[64];                       /* Data display area         */
             if (dev->ccwtrace || dev->ccwstep)
             {
                 format_iobuf_data (idadata, area);
-                logmsg ("%4.4X:IDAW=%8.8lX L=%4.4X %s\n",
+                logmsg ("%4.4X:IDAW=%8.8X L=%4.4X %s\n",
                         dev->devnum, idadata, idalen, area);
             }
 
@@ -262,6 +328,13 @@ BYTE    area[64];                       /* Data display area         */
                 *chanstat = CSW_PROTC;
                 return;
             }
+        } /* end for(i) */
+
+        /* Set the main storage reference and change bits */
+        for (i = firstpage; i <= lastpage; i++)
+        {
+            sysblk.storkeys[i] |=
+                (readcmd ? (STORKEY_REF|STORKEY_CHANGE) : STORKEY_REF);
         } /* end for(i) */
 
         /* Copy data between main storage and channel buffer */
@@ -321,6 +394,9 @@ int start_io (DEVBLK *dev, U32 ioparm, BYTE orb4, BYTE orb5,
         return 2;
     }
 
+#ifdef FEATURE_S370_CHANNEL
+#endif /*FEATURE_S370_CHANNEL*/
+
     /* Set the device busy indicator */
     dev->busy = 1;
 
@@ -379,8 +455,7 @@ void *execute_ccw_chain (DEVBLK *dev)
 U32     ccwaddr = dev->ccwaddr;         /* Address of CCW            */
 int     ccwfmt = dev->ccwfmt;           /* CCW format (0 or 1)       */
 BYTE    ccwkey = dev->ccwkey;           /* Bits 0-3=key, 4-7=zero    */
-BYTE    storkey;                        /* Storage key               */
-BYTE    code = 0;                       /* CCW operation code        */
+BYTE    opcode;                         /* CCW operation code        */
 BYTE    flags;                          /* CCW flags                 */
 U32     addr;                           /* CCW data address          */
 U16     count;                          /* CCW byte count            */
@@ -395,6 +470,7 @@ BYTE    chained = 0;                    /* Command chain and data chain
                                            bits from previous CCW    */
 BYTE    prev_chained = 0;               /* Chaining flags from CCW
                                            preceding the data chain  */
+BYTE    code = 0;                       /* Current CCW opcode        */
 BYTE    prevcode = 0;                   /* Previous CCW opcode       */
 BYTE    tracethis = 0;                  /* 1=Trace this CCW only     */
 BYTE    area[64];                       /* Message area              */
@@ -454,22 +530,9 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         chanstat = 0;
         unitstat = 0;
 
-        /* Channel program check if CCW is not on a doubleword
-           boundary or is outside limit of main storage */
-        if ((ccwaddr & 0x00000007) || ccwaddr >= sysblk.mainsize)
-        {
-            chanstat = CSW_PROGC;
-            break;
-        }
-
-        /* Channel protection check if CCW is fetch protected */
-        storkey = sysblk.storkeys[ccwaddr >> 12];
-        if (ccwkey != 0 && (storkey & STORKEY_FETCH)
-            && (storkey & STORKEY_KEY) != ccwkey)
-        {
-            chanstat = CSW_PROTC;
-            break;
-        }
+        /* Fetch the next CCW */
+        fetch_ccw (ccwkey, ccwfmt, ccwaddr, &opcode, &addr,
+                    &flags, &count, &chanstat);
 
         /* Point to the CCW in main storage */
         ccw = sysblk.mainstor + ccwaddr;
@@ -483,21 +546,8 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         dev->scsw.ccwaddr[2] = (ccwaddr & 0xFF00) >> 8;
         dev->scsw.ccwaddr[3] = ccwaddr & 0xFF;
 
-        /* Extract CCW flags, byte count, and data address */
-        if (ccwfmt == 0)
-        {
-            addr = ((U32)(ccw[1]) << 16) | ((U32)(ccw[2]) << 8)
-                   | ccw[3];
-            flags = ccw[4];
-            count = ((U16)(ccw[6]) << 8) | ccw[7];
-        }
-        else
-        {
-            flags = ccw[1];
-            count = ((U16)(ccw[2]) << 8) | ccw[3];
-            addr = ((U32)(ccw[4]) << 24) | ((U32)(ccw[5]) << 16)
-                   | ((U32)(ccw[6]) << 8) | ccw[7];
-        }
+        /* Exit if fetch_ccw detected channel program check */
+        if (chanstat != 0) break;
 
         /* Display the CCW */
         if (dev->ccwtrace || dev->ccwstep)
@@ -506,7 +556,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         /*----------------------------------------------*/
         /* TRANSFER IN CHANNEL (TIC) command            */
         /*----------------------------------------------*/
-        if (IS_CCW_TIC(ccw[0]))
+        if (IS_CCW_TIC(opcode))
         {
             /* Channel program check if TIC-to-TIC */
             if (tic)
@@ -517,7 +567,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
             /* Channel program check if format-1 TIC reserved bits set*/
             if (ccwfmt == 1
-                && (ccw[0] != 0x08 || flags != 0 || count != 0))
+                && (opcode != 0x08 || flags != 0 || count != 0))
             {
                 chanstat = CSW_PROGC;
                 break;
@@ -537,11 +587,11 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         /* Reset the TIC-to-TIC flag */
         tic = 0;
 
-        /* Extract CCW opcode, unless data chaining */
+        /* Update current CCW opcode, unless data chaining */
         if ((chained & CCW_FLAGS_CD) == 0)
         {
             prevcode = code;
-            code = ccw[0];
+            code = opcode;
         }
 
         /* Channel program check if invalid flags */
@@ -1485,4 +1535,58 @@ DEVBLK *dev;                            /* -> Device control block   */
     } /* end for(dev) */
 
 } /* end function io_reset */
+
+/*-------------------------------------------------------------------*/
+/* DEVICE ATTENTION                                                  */
+/* Raises an unsolicited interrupt condition for a specified device. */
+/* Note: The caller MUST hold the device lock for the device.        */
+/* Return value is 0 if successful, 1 if device is busy or pending   */
+/*-------------------------------------------------------------------*/
+int
+device_attention (DEVBLK *dev, BYTE unitstat)
+{
+    /* If device is already busy or interrupt pending or
+       status pending then do not present interrupt */
+    if (dev->busy || dev->pending
+        || (dev->scsw.flag3 & SCSW3_SC_PEND))
+        return 1;
+
+#ifdef FEATURE_S370_CHANNEL
+    /* Set CSW for attention interrupt */
+    dev->csw[0] = 0;
+    dev->csw[1] = 0;
+    dev->csw[2] = 0;
+    dev->csw[3] = 0;
+    dev->csw[4] = unitstat;
+    dev->csw[5] = 0;
+    dev->csw[6] = 0;
+    dev->csw[7] = 0;
+#endif /*FEATURE_S370_CHANNEL*/
+
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+    /* Set SCSW for attention interrupt */
+    dev->scsw.flag0 = 0;
+    dev->scsw.flag1 = 0;
+    dev->scsw.flag2 = 0;
+    dev->scsw.flag3 = SCSW3_SC_ALERT | SCSW3_SC_PEND;
+    dev->scsw.ccwaddr[0] = 0;
+    dev->scsw.ccwaddr[1] = 0;
+    dev->scsw.ccwaddr[2] = 0;
+    dev->scsw.ccwaddr[3] = 0;
+    dev->scsw.unitstat = unitstat;
+    dev->scsw.chanstat = 0;
+    dev->scsw.count[0] = 0;
+    dev->scsw.count[1] = 0;
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    /* Set the interrupt pending flag for this device */
+    dev->pending = 1;
+
+    /* Signal waiting CPUs that an interrupt is pending */
+    obtain_lock (&sysblk.intlock);
+    signal_condition (&sysblk.intcond);
+    release_lock (&sysblk.intlock);
+
+    return 0;
+} /* end function device_attention */
 

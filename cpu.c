@@ -655,7 +655,7 @@ static BYTE module[8];                  /* Module name               */
         n >>= 12;
         sysblk.storkeys[n] = regs->gpr[r1] & 0xFE;
 
-//      /*debug*/logmsg("SSK storage block %8.8lX key %2.2lX\n",
+//      /*debug*/logmsg("SSK storage block %8.8X key %2.2X\n",
 //                      regs->gpr[r2], regs->gpr[r1] & 0xFE);
 
         break;
@@ -701,7 +701,7 @@ static BYTE module[8];                  /* Module name               */
         if ( regs->psw.ecmode == 0 )
             regs->gpr[r1] &= 0xFFFFFFF8;
 
-        /*debug*/logmsg("ISK storage block %8.8lX key %2.2lX\n",
+        /*debug*/logmsg("ISK storage block %8.8X key %2.2X\n",
                         regs->gpr[r2], regs->gpr[r1] & 0xFE);
 
         break;
@@ -1346,7 +1346,7 @@ static BYTE module[8];                  /* Module name               */
             vfetchc (module, 7, regs->psw.ia + 1, 0, regs);
             for (i=0; i < 8; i++)
                 module[i] = ebcdic_to_ascii[module[i]];
-            logmsg ("Entering %8.8s at %8.8lX\n",
+            logmsg ("Entering %8.8s at %8.8X\n",
                     module, regs->psw.ia - 4);
 //          if (memcmp(module, "????????", 8) == 0) sysblk.inststep = 1;
         }
@@ -1903,12 +1903,61 @@ static BYTE module[8];                  /* Module name               */
 
         break;
 
-//  case 0x83:
+    case 0x83:
     /*---------------------------------------------------------------*/
     /* --       Diagnose                                             */
     /*---------------------------------------------------------------*/
 
-//      break;
+        /* Program check if in problem state */
+        if ( regs->psw.prob )
+        {
+            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            goto terminate;
+        }
+
+        switch(effective_addr) {
+
+        case 0x044:
+        /*-----------------------------------------------------------*/
+        /* Diagnose 044: SCPEND                                      */
+        /*-----------------------------------------------------------*/
+
+            scpend_call();
+
+            break;
+
+#ifdef FEATURE_MSSF_CALL
+        case 0x080:
+        /*-----------------------------------------------------------*/
+        /* Diagnose 080: MSSFCALL                                    */
+        /*-----------------------------------------------------------*/
+
+            /* R1 contains the real address of the SPCCB */
+            n1 = APPLY_PREFIXING ( regs->gpr[r1], regs->pxr );
+
+            /* R3 contains the service-processor-command word */
+            n2 = regs->gpr[r3];
+
+            /* Call MSSF and set condition code */
+            regs->psw.cc = mssf_call (n1, n2);
+
+            /* Perform serialization and checkpoint-synchronization */
+            perform_serialization ();
+            perform_chkpt_sync ();
+
+            break;
+#endif /*FEATURE_MSSF_CALL*/
+
+        default:
+        /*-----------------------------------------------------------*/
+        /* Diagnose xxx: Invalid function code                       */
+        /*-----------------------------------------------------------*/
+            program_check (PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+
+        } /* end switch(effective_addr) */
+
+        break;
 
 #ifdef FEATURE_RELATIVE_BRANCH
     case 0x84:
@@ -2393,6 +2442,9 @@ static BYTE module[8];                  /* Module name               */
         /* Release the TOD clock update lock */
         release_lock (&sysblk.todlock);
 
+        /* Set the main storage change and reference bits */
+        sysblk.storkeys[n >> 12] |= (STORKEY_REF | STORKEY_CHANGE);
+
         /* Build the explicit trace entry */
         sysblk.mainstor[n++] = (0x70 | i);
         sysblk.mainstor[n++] = 0x00;
@@ -2522,9 +2574,11 @@ static BYTE module[8];                  /* Module name               */
         ccwkey = psa->caw[0] & 0xF0;
         ccwaddr = (psa->caw[1] << 16) | (psa->caw[2] << 8)
                         | psa->caw[3];
+        ioparm = 0;
 
         /* Start the channel program and set the condition code */
-        regs->psw.cc = start_io (dev, 0, ccwkey, 0, 0, 0, ccwaddr);
+        regs->psw.cc =
+            start_io (dev, ioparm, ccwkey, 0, 0, 0, ccwaddr);
 
         break;
 
@@ -2861,7 +2915,7 @@ static BYTE module[8];                  /* Module name               */
         /* Load the parameter from R1 (if R1 odd), or R1+1 (if even) */
         n = (r1 & 1) ? regs->gpr[r1] : regs->gpr[r1+1];
 
-        /*debug*/logmsg("SIGP CPU %4.4X OPERATION %2.2X PARM %8.8lX\n",
+        /*debug*/logmsg("SIGP CPU %4.4X OPERATION %2.2X PARM %8.8X\n",
                         i, d, n);
 
         /* Set condition code 3 if target CPU does not exist */
@@ -4013,8 +4067,9 @@ static BYTE module[8];                  /* Module name               */
                         | (orb.intparm[2] << 8) | orb.intparm[3];
 
             /* Start the channel program and set the condition code */
-            regs->psw.cc = start_io (dev, ioparm, orb.flag4, orb.flag5,
-                                    orb.lpm, orb.flag7, ccwaddr);
+            regs->psw.cc =
+                start_io (dev, ioparm, orb.flag4, orb.flag5,
+                                orb.lpm, orb.flag7, ccwaddr);
 
             break;
 
@@ -5810,8 +5865,8 @@ int     icidx;                          /* Instruction counter index */
         {
             if (diswait == 0)
             {
-                logmsg ("Disabled wait state code %8.8lX\n",
-                        regs->psw.ia);
+                logmsg ("Disabled wait state code %8.8X\n",
+                        regs->psw.ia | (regs->psw.amode << 31));
 #ifdef INSTRUCTION_COUNTING
                 logmsg ("%llu instructions executed\n",
                         regs->instcount);
@@ -5910,7 +5965,9 @@ int     icidx;                          /* Instruction counter index */
                 regs->cpustate = CPUSTATE_STOPPED;
 
                 /* Wait for start command from panel */
-                wait_condition (&sysblk.intcond, &sysblk.intlock);
+                obtain_lock (&sysblk.intlock);
+                while (regs->cpustate == CPUSTATE_STOPPED)
+                    wait_condition (&sysblk.intcond, &sysblk.intlock);
                 release_lock (&sysblk.intlock);
             }
         }

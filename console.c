@@ -1054,54 +1054,15 @@ BYTE                    unitstat;       /* Status after receive data */
                 /* Indicate that data is available at the device */
                 dev->readpending = 1;
 
-                /* If device is already busy or interrupt pending or
-                   status pending then do not present interrupt */
-                if (dev->busy || dev->pending
-                    || (dev->scsw.flag3 & SCSW3_SC_PEND))
-                {
-                    release_lock (&dev->lock);
-                    continue;
-                }
+                /* Raise attention interrupt for the device */
+                rc = device_attention (dev, unitstat);
 
-#ifdef FEATURE_S370_CHANNEL
-                /* Set CSW for attention interrupt */
-                dev->csw[0] = 0;
-                dev->csw[1] = 0;
-                dev->csw[2] = 0;
-                dev->csw[3] = 0;
-                dev->csw[4] = unitstat;
-                dev->csw[5] = 0;
-                dev->csw[6] = 0;
-                dev->csw[7] = 0;
-#endif /*FEATURE_S370_CHANNEL*/
+                /* Trace the attention request */
+                TNSDEBUG(2, "%4.4X attention request %s\n",
+                        dev->devnum,
+                        (rc == 0 ? "raised" : "rejected"));
 
-#ifdef FEATURE_CHANNEL_SUBSYSTEM
-                /* Set SCSW for attention interrupt */
-                dev->scsw.flag0 = 0;
-                dev->scsw.flag1 = 0;
-                dev->scsw.flag2 = 0;
-                dev->scsw.flag3 = SCSW3_SC_ALERT | SCSW3_SC_PEND;
-                dev->scsw.ccwaddr[0] = 0;
-                dev->scsw.ccwaddr[1] = 0;
-                dev->scsw.ccwaddr[2] = 0;
-                dev->scsw.ccwaddr[3] = 0;
-                dev->scsw.unitstat = unitstat;
-                dev->scsw.chanstat = 0;
-                dev->scsw.count[0] = 0;
-                dev->scsw.count[1] = 0;
-#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
-
-                /* Trace the attention interrupt */
-                TNSDEBUG(2, "%4.4X attention request\n", dev->devnum);
-
-                /* Set the interrupt pending flag for this device */
-                dev->pending = 1;
-
-                /* Signal waiting CPUs that an interrupt is pending */
-                obtain_lock (&sysblk.intlock);
-                signal_condition (&sysblk.intcond);
-                release_lock (&sysblk.intlock);
-            }
+            } /* end if(data available) */
 
             /* Release the device lock */
             release_lock (&dev->lock);

@@ -71,6 +71,15 @@ BYTE    chanstat;                       /* IPL device channel status */
 
     execute_ccw_chain (dev);
 
+    /* Reset CCW tracing for the IPL device */
+    dev->ccwtrace = 0;
+
+    /* Clear the interrupt pending and device busy conditions */
+    dev->pending = 0;
+    dev->busy = 0;
+    dev->scsw.flag2 = 0;
+    dev->scsw.flag3 = 0;
+
     /* Check that load completed normally */
 #ifdef FEATURE_S370_CHANNEL
     unitstat = dev->csw[4];
@@ -94,15 +103,6 @@ BYTE    chanstat;                       /* IPL device channel status */
         logmsg ("\n");
         return -1;
     }
-
-    /* Reset CCW tracing for the IPL device */
-    dev->ccwtrace = 0;
-
-    /* Clear the interrupt pending and device busy conditions */
-    dev->pending = 0;
-    dev->busy = 0;
-    dev->scsw.flag2 = 0;
-    dev->scsw.flag3 = 0;
 
 #ifdef FEATURE_S370_CHANNEL
     /* Test the EC mode bit in the IPL PSW */

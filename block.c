@@ -494,6 +494,9 @@ BYTE    akey;                           /* Access key                */
     /* Perform page movement */
     if (xpvalid2)
     {
+        /* Set the main storage reference and change bits */
+        sysblk.storkeys[aaddr1 >> 12] |= (STORKEY_REF | STORKEY_CHANGE);
+
         /* Move 4K bytes from expanded storage to main storage */
         memcpy (sysblk.mainstor + aaddr1,
                 sysblk.xpndstor + (xpblk2 << 12),
@@ -501,6 +504,9 @@ BYTE    akey;                           /* Access key                */
     }
     else if (xpvalid1)
     {
+        /* Set the main storage reference bit */
+        sysblk.storkeys[aaddr2 >> 12] |= STORKEY_REF;
+
         /* Move 4K bytes from main storage to expanded storage */
         memcpy (sysblk.xpndstor + (xpblk1 << 12),
                 sysblk.mainstor + aaddr2,
@@ -508,6 +514,10 @@ BYTE    akey;                           /* Access key                */
     }
     else
     {
+        /* Set the main storage reference and change bits */
+        sysblk.storkeys[aaddr1 >> 12] |= (STORKEY_REF | STORKEY_CHANGE);
+        sysblk.storkeys[aaddr2 >> 12] |= STORKEY_REF;
+
         /* Move 4K bytes from main storage to main storage */
         memcpy (sysblk.mainstor + aaddr1,
                 sysblk.mainstor + aaddr2,

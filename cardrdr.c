@@ -107,6 +107,7 @@ int     rc;                             /* Return code               */
     if (rc == 0)
     {
         close (dev->fd);
+        dev->fd = -1;
         *unitstat = CSW_CE | CSW_DE | CSW_UX;
         return -1;
     }
@@ -157,6 +158,7 @@ BYTE    c;                              /* Input character           */
 
             /* Set unit exception to signal end of file */
             close (dev->fd);
+            dev->fd = -1;
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
             return -1;
         }

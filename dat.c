@@ -106,6 +106,8 @@ static inline int is_store_protected (U32 addr, BYTE skey, BYTE akey,
 
 /*-------------------------------------------------------------------*/
 /* Fetch a fullword from absolute storage.                           */
+/* The caller is assumed to have already checked that the absolute   */
+/* address is within the limit of main storage.                      */
 /* All bytes of the word are fetched concurrently as observed by     */
 /* other CPUs.  The fullword is first fetched as an integer, then    */
 /* the bytes are reversed into host byte order if necessary.         */
@@ -114,6 +116,10 @@ static inline U32 fetch_fullword_absolute (U32 addr)
 {
 U32     i;
 
+    /* Set the main storage reference bit */
+    sysblk.storkeys[addr >> 12] |= STORKEY_REF;
+
+    /* Fetch the fullword from absolute storage */
     i = *((U32*)(sysblk.mainstor + addr));
     return ntohl(i);
 } /* end function fetch_fullword_absolute */
@@ -311,6 +317,9 @@ BYTE    ate;                            /* Authority table entry     */
     ato = APPLY_PREFIXING (ato, regs->pxr);
     ate = sysblk.mainstor[ato];
     ate <<= ((ax & 0x03)*2);
+
+    /* Set the main storage reference bit */
+    sysblk.storkeys[ato >> 12] |= STORKEY_REF;
 
     /* Authorization fails if the specified bit (either X'80' or
        X'40' of the 2 bit authority table entry) is zero */

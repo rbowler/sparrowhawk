@@ -99,7 +99,7 @@ U32             trksize;                /* DASD image track length   */
     if (cyls < mincyls || cyls > maxcyls)
     {
         fprintf (stderr,
-                "Cylinder count %lu is outside range %lu-%lu\n",
+                "Cylinder count %u is outside range %u-%u\n",
                 cyls, mincyls, maxcyls);
         exit(4);
     }
@@ -115,8 +115,8 @@ U32             trksize;                /* DASD image track length   */
 
     /* Display progress message */
     fprintf (stderr,
-            "Creating %4.4X volume %s: %lu cyls, "
-            "%lu trks/cyl, %lu bytes/track\n",
+            "Creating %4.4X volume %s: %u cyls, "
+            "%u trks/cyl, %u bytes/track\n",
             devtype, volser, cyls, heads, trksize);
 
     /* Create the device header */
@@ -142,7 +142,7 @@ U32             trksize;                /* DASD image track length   */
     {
         /* Display progress message every 10 cylinders */
         if ((cyl % 10) == 0)
-            fprintf (stderr, "Writing cylinder %lu\r", cyl);
+            fprintf (stderr, "Writing cylinder %u\r", cyl);
 
         for (head = 0; head < heads; head++)
         {
@@ -235,7 +235,7 @@ U32             trksize;                /* DASD image track length   */
             if (rc < trksize)
             {
                 fprintf (stderr,
-                        "%s cylinder %lu head %lu write error: %s\n",
+                        "%s cylinder %u head %u write error: %s\n",
                         fname, cyl, head,
                         errno ? strerror(errno) : "incomplete");
                 exit(1);
@@ -249,7 +249,7 @@ U32             trksize;                /* DASD image track length   */
     free (buf);
 
     /* Display completion message */
-    fprintf (stderr, "%lu cylinders successfully written\n", cyl);
+    fprintf (stderr, "%u cylinders successfully written\n", cyl);
 
 } /* end function create_ckd */
 
@@ -281,7 +281,7 @@ U32             maxsect;                /* Maximum sector count      */
     if (sectors < minsect || sectors > maxsect)
     {
         fprintf (stderr,
-                "Sector count %lu is outside range %lu-%lu\n",
+                "Sector count %u is outside range %u-%u\n",
                 sectors, minsect, maxsect);
         exit(4);
     }
@@ -298,7 +298,7 @@ U32             maxsect;                /* Maximum sector count      */
     /* Display progress message */
     fprintf (stderr,
             "Creating %4.4X volume %s: "
-            "%lu sectors, %lu bytes/sector\n",
+            "%u sectors, %u bytes/sector\n",
             devtype, volser, sectors, sectsz);
 
     /* Write each sector */
@@ -316,13 +316,13 @@ U32             maxsect;                /* Maximum sector count      */
 
         /* Display progress message every 100 sectors */
         if ((sectnum % 100) == 0)
-            fprintf (stderr, "Writing sector %lu\r", sectnum);
+            fprintf (stderr, "Writing sector %u\r", sectnum);
 
         /* Write the sector to the file */
         rc = write (fd, buf, sectsz);
         if (rc < sectsz)
         {
-            fprintf (stderr, "%s sector %lu write error: %s\n",
+            fprintf (stderr, "%s sector %u write error: %s\n",
                     fname, sectnum,
                     errno ? strerror(errno) : "incomplete");
             exit(1);
@@ -333,7 +333,7 @@ U32             maxsect;                /* Maximum sector count      */
     free (buf);
 
     /* Display completion message */
-    fprintf (stderr, "%lu sectors successfully written\n", sectnum);
+    fprintf (stderr, "%u sectors successfully written\n", sectnum);
 
 } /* end function create_fba */
 
@@ -385,7 +385,7 @@ BYTE    c;                              /* Character work area       */
 
     /* The fourth argument is the volume size */
     if (argv[4] == NULL || strlen(argv[4]) == 0
-        || sscanf(argv[4], "%lu%c", &size, &c) != 1)
+        || sscanf(argv[4], "%u%c", &size, &c) != 1)
         argexit(4);
 
     /* Check the device type */

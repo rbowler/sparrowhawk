@@ -201,7 +201,7 @@ int     subchan;                        /* Subchannel number         */
     }
 
     if (strlen(sserial) > 6
-        || sscanf(sserial, "%lx%c", &serial, &c) != 1)
+        || sscanf(sserial, "%x%c", &serial, &c) != 1)
     {
         fprintf (stderr,
                 "HHC006I Error in %s line %d: "
@@ -494,7 +494,9 @@ int     subchan;                        /* Subchannel number         */
         dev->subchan = subchan;
         dev->devnum = devnum;
         dev->devtype = devtype;
+        dev->devinit = devinit;
         dev->devexec = devexec;
+        dev->fd = -1;
 
         /* Initialize the path management control word */
         dev->pmcw.flag5 |= PMCW5_V;
