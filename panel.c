@@ -18,6 +18,7 @@
 /*      devinit command contributed by Jay Maynard                   */
 /*      New Panel Display contributed by Dutch Owen                  */
 /*      HMC system console commands contributed by Jan Jaeger        */
+/*      Set/reset bad frame indicator command by Jan Jaeger          */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -1001,6 +1002,7 @@ BYTE   *devclass;                       /* -> Device class name      */
             "devinit devn arg [arg...] = reinitialize device\n"
             "devlist=list devices\n"
             SYSCONS_CMD
+            "f-addr=mark frame unusable, f+addr=mark frame usable\n"
             "quit/exit=terminate, Esc=alternate panel display\n");
         return NULL;
     }
@@ -1067,6 +1069,23 @@ BYTE   *devclass;                       /* -> Device class name      */
         } else {
             oneorzero = 0;
             onoroff = "off";
+        }
+
+        /* f- and f+ commands - mark frames unusable/usable */
+        if ((cmd[0] == 'f') && sscanf(cmd+2, "%x%c", &aaddr, &c) == 1)
+        {
+            aaddr &= 0x7FFFF000;
+            if (aaddr >= sysblk.mainsize)
+            {
+                logmsg ("Invalid frame address %8.8X\n", aaddr);
+                return NULL;
+            }
+            STORAGE_KEY(aaddr) &= ~(STORKEY_BADFRM);
+            if (!oneorzero)
+                STORAGE_KEY(aaddr) |= STORKEY_BADFRM;
+            logmsg ("Frame %8.8X marked %s\n", aaddr,
+                    oneorzero ? "usable" : "unusable");
+            return NULL;
         }
 
         /* t+ and t- commands - instruction tracing on/off */

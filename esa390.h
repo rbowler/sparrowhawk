@@ -362,6 +362,7 @@ typedef struct _LSED {
 #define STORKEY_FETCH	0x08		/* Fetch protect bit	     */
 #define STORKEY_REF	0x04		/* Reference bit	     */
 #define STORKEY_CHANGE	0x02		/* Change bit		     */
+#define STORKEY_BADFRM	0x01		/* Unusable frame            */
 
 /* Prefixed storage area structure definition */
 typedef struct _PSA {			/* Prefixed storage area     */

@@ -14,6 +14,7 @@
 /*      Nullification corrections by Jan Jaeger                      */
 /*      Corrections to shift instructions by Jay Maynard, Jan Jaeger */
 /*      Set priority by Reed H. Petty from an idea by Steve Gay      */
+/*      Bad frame support by Jan Jaeger                              */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -757,7 +758,8 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Update the storage key from R1 register bits 24-30 */
-        STORAGE_KEY(n) = regs->gpr[r1] & 0xFE;
+        STORAGE_KEY(n) &= STORKEY_BADFRM;
+        STORAGE_KEY(n) |= regs->gpr[r1] & ~(STORKEY_BADFRM);
 
 //      /*debug*/logmsg("SSK storage block %8.8X key %2.2X\n",
 //                      regs->gpr[r2], regs->gpr[r1] & 0xFE);
@@ -798,7 +800,7 @@ static BYTE module[8];                  /* Module name               */
 
         /* Insert the storage key into R1 register bits 24-31 */
         regs->gpr[r1] &= 0xFFFFFF00;
-        regs->gpr[r1] |= STORAGE_KEY(n);
+        regs->gpr[r1] |= (STORAGE_KEY(n) & 0xFE);
 
         /* In BC mode, clear bits 29-31 of R1 register */
         if ( regs->psw.ecmode == 0 )
@@ -2725,85 +2727,12 @@ static BYTE module[8];                  /* Module name               */
     /* --       Diagnose                                             */
     /*---------------------------------------------------------------*/
 
-        /* Program check if in problem state */
-        if ( regs->psw.prob && (effective_addr < 0xF00))
-        {
-            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
-            goto terminate;
-        }
+        /* Process diagnose instruction */
+        diagnose_call (effective_addr, r1, r2, regs);
 
-        switch(effective_addr) {
-
-        case 0x044:
-        /*-----------------------------------------------------------*/
-        /* Diagnose 044: SCPEND                                      */
-        /*-----------------------------------------------------------*/
-            scpend_call();
-
-            break;
-
-#ifdef FEATURE_MSSF_CALL
-        case 0x080:
-        /*-----------------------------------------------------------*/
-        /* Diagnose 080: MSSFCALL                                    */
-        /*-----------------------------------------------------------*/
-            /* R1 contains the real address of the SPCCB */
-            n1 = APPLY_PREFIXING ( regs->gpr[r1], regs->pxr );
-
-            /* R3 contains the service-processor-command word */
-            n2 = regs->gpr[r3];
-
-            /* Call MSSF and set condition code */
-            regs->psw.cc = mssf_call (n1, n2, regs);
-
-            /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
-
-            break;
-#endif /*FEATURE_MSSF_CALL*/
-
-        case 0x204:
-        /*-----------------------------------------------------------*/
-        /* Diagnose 204: LPAR RMF Interface                          */
-        /*-----------------------------------------------------------*/
-            diag204_call (r1, r2, regs);
-            regs->psw.cc = 0;
-
-            break;
-
-        case 0xF00:
-        /*-----------------------------------------------------------*/
-        /* Diagnose F00: Hercules normal mode                        */
-        /*-----------------------------------------------------------*/
-            sysblk.inststep = 0;
-
-            break;
-
-        case 0xF01:
-        /*-----------------------------------------------------------*/
-        /* Diagnose F01: Hercules single step mode                   */
-        /*-----------------------------------------------------------*/
-            sysblk.inststep = 1;
-
-            break;
-
-        case 0xF02:
-        /*-----------------------------------------------------------*/
-        /* Diagnose F02: Hercules get instruction counter            */
-        /*-----------------------------------------------------------*/
-            regs->gpr[r1] = (U32)regs->instcount;
-
-            break;
-
-        default:
-        /*-----------------------------------------------------------*/
-        /* Diagnose xxx: Invalid function code                       */
-        /*-----------------------------------------------------------*/
-            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
-            goto terminate;
-
-        } /* end switch(effective_addr) */
+        /* Perform serialization and checkpoint-synchronization */
+        perform_serialization ();
+        perform_chkpt_sync ();
 
         break;
 
@@ -4599,7 +4528,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Insert the storage key into R1 register bits 24-31 */
             regs->gpr[r1] &= 0xFFFFFF00;
-            regs->gpr[r1] |= STORAGE_KEY(n);
+            regs->gpr[r1] |= (STORAGE_KEY(n) & 0xFE);
 
             /* Clear bits 29-31 of R1 register */
             regs->gpr[r1] &= 0xFFFFFFF8;
@@ -4768,7 +4697,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Insert the storage key into R1 register bits 24-31 */
             regs->gpr[r1] &= 0xFFFFFF00;
-            regs->gpr[r1] |= STORAGE_KEY(n);
+            regs->gpr[r1] |= (STORAGE_KEY(n) & 0xFE);
 
             break;
 
@@ -4838,7 +4767,8 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Update the storage key from R1 register bits 24-30 */
-            STORAGE_KEY(n) = regs->gpr[r1] & 0xFE;
+            STORAGE_KEY(n) &= STORKEY_BADFRM;
+            STORAGE_KEY(n) |= regs->gpr[r1] & ~(STORKEY_BADFRM);
 
             /* Perform serialization and checkpoint-synchronization */
             perform_serialization ();
@@ -4891,7 +4821,10 @@ static BYTE module[8];                  /* Module name               */
             memset (sysblk.mainstor + n, 0x00, 4096);
 
             /* Set condition code 0 if storage usable, 1 if unusable */
-            regs->psw.cc = 0;
+            if (STORAGE_KEY(n) & STORKEY_BADFRM)
+                regs->psw.cc = 1;
+            else
+                regs->psw.cc = 0;
 
             /* Perform serialization */
             perform_serialization ();
@@ -5763,6 +5696,16 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 #endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+
+        case 0xF0:
+        /*-----------------------------------------------------------*/
+        /* B2F0: IUCV - Inter User Communications Vehicle        [S] */
+        /*-----------------------------------------------------------*/
+
+            /* Set condition code to indicate IUCV not available */
+            regs->psw.cc = 3;
+
+            break;
 
         default:
         /*-----------------------------------------------------------*/
@@ -7092,10 +7035,12 @@ int     icidx;                          /* Instruction counter index */
 //      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x47) sysblk.inststep = 1; /*MSTA*/
 //      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x49) sysblk.inststep = 1; /*EREG*/
 //      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x4A) sysblk.inststep = 1; /*ESTA*/
+//      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0xF0) sysblk.inststep = 1; /*IUCV*/
 //      if (regs->inst[0] == 0x01 && regs->inst[1] == 0x01) sysblk.inststep = 1; /*PR*/
 //      if (regs->inst[0] == 0xE5) sysblk.inststep = 1; /*LASP & MVS assists*/
 //      if (regs->inst[0] == 0xFC) sysblk.inststep = 1; /*MP*/
         if (regs->inst[0] == 0xFD) tracethis = 1; /*DP*/
+//      if (regs->inst[0] == 0x83 && regs->inst[2] == 0x02 && regs->inst[3] == 0x14) sysblk.inststep = 1; /*Diagnose 214*/
 
         /* Test for breakpoint */
         shouldbreak = sysblk.instbreak

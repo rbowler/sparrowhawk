@@ -42,7 +42,10 @@ struct  stat statbuf;                   /* File information          */
 U32     blkspcg;                        /* Blocks per cyclical group */
 U32     blkspap;                        /* Blocks per access position*/
 U32     blksufh;                        /* Blocks under fixed heads  */
+U32     startblk;                       /* Device origin block number*/
+U32     numblks;                        /* Device block count        */
 BYTE    unittyp;                        /* Unit type                 */
+BYTE    c;                              /* Character work area       */
 
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
@@ -72,15 +75,51 @@ BYTE    unittyp;                        /* Unit type                 */
         fprintf (stderr,
                 "HHC303I File %s fstat error: %s\n",
                 dev->filename, strerror(errno));
+        close (dev->fd);
+        dev->fd = -1;
         return -1;
     }
 
-    /* Set block size and number of blocks in device */
+    /* Set block size, device origin, and device size in blocks */
     dev->fbablksiz = 512;
+    dev->fbaorigin = 0;
     dev->fbanumblk = statbuf.st_size / dev->fbablksiz;
 
-    logmsg ("fbadasd: %s blks=%d\n",
-            dev->filename, dev->fbanumblk);
+    /* The second argument is the device origin block number */
+    if (argc >= 2)
+    {
+        if (sscanf(argv[1], "%u%c", &startblk, &c) != 1
+            || startblk >= dev->fbanumblk)
+        {
+            fprintf (stderr,
+                    "HHC304I Invalid device origin block number %s\n",
+                    argv[1]);
+            close (dev->fd);
+            dev->fd = -1;
+            return -1;
+        }
+        dev->fbaorigin = startblk;
+        dev->fbanumblk -= startblk;
+    }
+
+    /* The third argument is the device block count */
+    if (argc >= 3 && strcmp(argv[2],"*") != 0)
+    {
+        if (sscanf(argv[2], "%u%c", &numblks, &c) != 1
+            || numblks > dev->fbanumblk)
+        {
+            fprintf (stderr,
+                    "HHC305I Invalid device block count %s\n",
+                    argv[2]);
+            close (dev->fd);
+            dev->fd = -1;
+            return -1;
+        }
+        dev->fbanumblk = numblks;
+    }
+
+    logmsg ("fbadasd: %s origin=%d blks=%d\n",
+            dev->filename, dev->fbaorigin, dev->fbanumblk);
 
     /* Set number of sense bytes */
     dev->numsense = 24;
@@ -107,7 +146,7 @@ BYTE    unittyp;                        /* Unit type                 */
         break;
     default:
         fprintf (stderr,
-                "HHC304I Unsupported device type: %4.4X\n",
+                "HHC306I Unsupported device type: %4.4X\n",
                 dev->devtype);
         return -1;
     } /* end switch(dev->devtype) */
@@ -188,9 +227,9 @@ void fbadasd_query_device (DEVBLK *dev, BYTE **class,
 {
 
     *class = "DASD";
-    snprintf (buffer, buflen, "%s [%d blks]",
+    snprintf (buffer, buflen, "%s [%d,%d]",
             dev->filename,
-            dev->fbanumblk);
+            dev->fbaorigin, dev->fbanumblk);
 
 } /* end function fbadasd_query_device */
 
@@ -234,12 +273,13 @@ int     repcnt;                         /* Replication count         */
         dev->fbaxlast = dev->fbanumblk - 1;
 
         /* Seek to start of block zero */
-        rc = lseek (dev->fd, 0, SEEK_SET);
+        rba = dev->fbaorigin * dev->fbablksiz;
+        rc = lseek (dev->fd, rba, SEEK_SET);
         if (rc < 0)
         {
             /* Handle seek error condition */
-            logmsg ("fbadasd: lseek error: %s\n",
-                    strerror(errno));
+            logmsg ("HHC311I Seek error in file %s: %s\n",
+                    dev->filename, strerror(errno));
 
             /* Set unit check with equipment check */
             dev->sense[0] = SENSE_EC;
@@ -266,10 +306,11 @@ int     repcnt;                         /* Replication count         */
         {
             /* Handle read error condition */
             if (rc < 0)
-                logmsg ("fbadasd: read error: %s\n",
-                        strerror(errno));
+                logmsg ("HHC312I Read error in file %s: %s\n",
+                        dev->filename, strerror(errno));
             else
-                logmsg ("fbadasd: unexpected end of file\n");
+                logmsg ("HHC313I Unexpected end of file in %s\n",
+                        dev->filename);
 
             /* Set unit check with equipment check */
             dev->sense[0] = SENSE_EC;
@@ -340,8 +381,8 @@ int     repcnt;                         /* Replication count         */
                 if (rc < num)
                 {
                     /* Handle write error condition */
-                    logmsg ("fbadasd: write error: %s\n",
-                            strerror(errno));
+                    logmsg ("HHC314I Write error in file %s: %s\n",
+                            dev->filename, strerror(errno));
 
                     /* Set unit check with equipment check */
                     dev->sense[0] = SENSE_EC;
@@ -358,8 +399,8 @@ int     repcnt;                         /* Replication count         */
                 if (rc < rem)
                 {
                     /* Handle write error condition */
-                    logmsg ("fbadasd: write error: %s\n",
-                            strerror(errno));
+                    logmsg ("HHC315I Write error in file %s: %s\n",
+                            dev->filename, strerror(errno));
 
                     /* Set unit check with equipment check */
                     dev->sense[0] = SENSE_EC;
@@ -425,10 +466,11 @@ int     repcnt;                         /* Replication count         */
             {
                 /* Handle read error condition */
                 if (rc < 0)
-                    logmsg ("fbadasd: read error: %s\n",
-                            strerror(errno));
+                    logmsg ("HHC316I Read error in file %s: %s\n",
+                            dev->filename, strerror(errno));
                 else
-                    logmsg ("fbadasd: unexpected end of file\n");
+                    logmsg ("HHC317I Unexpected end of filein %s\n",
+                            dev->filename);
 
                 /* Set unit check with equipment check */
                 dev->sense[0] = SENSE_EC;
@@ -555,6 +597,7 @@ int     repcnt;                         /* Replication count         */
 
         /* Position device to start of block */
         rba = (dev->fbalcblk - dev->fbaxfirst
+                + dev->fbaorigin
                 + dev->fbaxblkn) * dev->fbablksiz;
 
         DEVTRACE("fbadasd: Positioning to %8.8lX (%lu)\n", rba, rba);
@@ -563,8 +606,8 @@ int     repcnt;                         /* Replication count         */
         if (rc < 0)
         {
             /* Handle seek error condition */
-            logmsg ("fbadasd: lseek error: %s\n",
-                    strerror(errno));
+            logmsg ("HHC318I Seek error in file %s: %s\n",
+                    dev->filename, strerror(errno));
 
             /* Set unit check with equipment check */
             dev->sense[0] = SENSE_EC;
@@ -713,3 +756,87 @@ int     repcnt;                         /* Replication count         */
 
 } /* end function fbadasd_execute_ccw */
 
+/*-------------------------------------------------------------------*/
+/* Synchronous Fixed Block I/O (used by Diagnose instruction)        */
+/*-------------------------------------------------------------------*/
+void fbadasd_syncblk_io ( DEVBLK *dev, BYTE type, U32 blknum,
+        U32 blksize, BYTE *iobuf, BYTE *unitstat, U16 *residual )
+{
+int     rc;                             /* Return code               */
+long    rba;                            /* Offset for seek           */
+int     blkfactor;                      /* Number of device blocks
+                                           per logical block         */
+
+    /* Calculate the blocking factor */
+    blkfactor = blksize / dev->fbablksiz;
+
+    /* Unit check if block number is invalid */
+    if (blknum * blkfactor >= dev->fbanumblk)
+    {
+        dev->sense[0] = SENSE_CR;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return;
+    }
+
+    /* Seek to start of desired block */
+    rba = dev->fbaorigin * dev->fbablksiz;
+    rba += blknum * blksize;
+    rc = lseek (dev->fd, rba, SEEK_SET);
+    if (rc < 0)
+    {
+        /* Handle seek error condition */
+        logmsg ("HHC321I Seek error in file %s: %s\n",
+                dev->filename, strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return;
+    }
+
+    /* Process depending on operation type */
+    switch (type) {
+
+    case 0x01:
+        /* Write block from I/O buffer */
+        rc = write (dev->fd, iobuf, blksize);
+        if (rc < blksize)
+        {
+            /* Handle write error condition */
+            logmsg ("HHC322I Write error in file %s: %s\n",
+                    dev->filename, strerror(errno));
+
+            /* Set unit check with equipment check */
+            dev->sense[0] = SENSE_EC;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            return;
+        }
+        break;
+
+    case 0x02:
+        /* Read block into I/O buffer */
+        rc = read (dev->fd, iobuf, blksize);
+        if (rc < blksize)
+        {
+            /* Handle read error condition */
+            if (rc < 0)
+                logmsg ("HHC323I Read error in file %s: %s\n",
+                        dev->filename, strerror(errno));
+            else
+                logmsg ("HHC324I Unexpected end of file in %s\n",
+                        dev->filename);
+
+            /* Set unit check with equipment check */
+            dev->sense[0] = SENSE_EC;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            return;
+        }
+        break;
+
+    } /* end switch(type) */
+
+    /* Return unit status and residual byte count */
+    *unitstat = CSW_CE | CSW_DE;
+    *residual = 0;
+
+} /* end function fbadasd_syncblk_io */

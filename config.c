@@ -488,6 +488,15 @@ int     subchan;                        /* Subchannel number         */
         exit(1);
     }
 
+#if 0   /*DEBUG-JJ-20/03/2000*/
+    /* Mark selected frames invalid for debugging purposes */
+    for (i = 64 ; i < (sysblk.mainsize / STORAGE_KEY_PAGESIZE); i += 2)
+        if (i < (sysblk.mainsize / STORAGE_KEY_PAGESIZE) - 64)
+            sysblk.storkeys[i] = STORKEY_BADFRM;
+        else
+            sysblk.storkeys[i++] = STORKEY_BADFRM;
+#endif
+
     if (xpndsize != 0)
     {
 #ifdef FEATURE_EXPANDED_STORAGE

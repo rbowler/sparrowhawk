@@ -316,6 +316,24 @@ the device record is:
 <dd>The argument specifies the name of a file which contains the FBA
     DASD image.  The file consists of fixed length 512-byte records,
     each of which represents one physical block of the emulated disk.
+    <p>
+    To allow access to a minidisk within a full-pack FBA DASD image
+    file, two additional arguments may be specified after the file
+    name:
+    <p>
+    <dl>
+    <dt><code><em>origin</em></code>
+    <dd>specifies the relative block number within the DASD image
+        file at which the minidisk begins.  The number must be less
+        than the number of blocks in the file.  The default origin
+        is zero.
+    <dt><code><em>numblks</em></code>
+    <dd>specifies the number of 512-byte blocks in the minidisk.
+        This number must not exceed the number of blocks in the file
+        minus the origin.
+        If omitted, or if specified as an asterisk, then the minidisk
+        continues to the end of the DASD image file.
+    </dl>
 <p>
 <a name="ckddasd">
 <dt><em>CKD DASD devices</em>
@@ -340,7 +358,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 02 Mar 2000
+<p>Last updated 21 Mar 2000
 </BODY>
 </HTML>
 

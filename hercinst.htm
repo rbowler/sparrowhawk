@@ -12,7 +12,7 @@ Installing and Operating Hercules</TITLE>
 <h2>Installation Procedure</h2>
 <ol>
 <li>Download the distribution file
-<a href="hercules/hercules-1.54.tar.gz">hercules-1.54.tar.gz</a>
+<a href="hercules/hercules-1.55.tar.gz">hercules-1.55.tar.gz</a>
 <p>
 <em>Notes:</em>
 <ol>
@@ -27,7 +27,7 @@ Installing and Operating Hercules</TITLE>
 <li>Use these commands to unzip the distribution file:
 <pre>mkdir hercules
 cd hercules
-tar xvzf ../hercules-1.54.tar.gz</pre>
+tar xvzf ../hercules-1.55.tar.gz</pre>
 <li>Build the executable files:
 <br><code>make</code>
 </ol>
@@ -97,6 +97,8 @@ r<em>x-y</em>    Display real storage locations x to y
 v<em>x</em>      Display 64 bytes starting at virtual address x
 v<em>x.n</em>    Display n bytes starting at virtual address x
 v<em>x-y</em>    Display virtual storage locations x to y
+f-<em>x</em>     Mark storage frame at address x unusable
+f+<em>x</em>     Mark storage frame at address x usable
 
 r<em>x</em>=<em>hexvalue</em>   Alter real storage location x
 v<em>x</em>=<em>hexvalue</em>   Alter virtual storage location x
@@ -158,7 +160,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 14 Mar 2000
+<p>Last updated 22 Mar 2000
 </BODY>
 </HTML>
 
