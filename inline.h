@@ -1,6 +1,6 @@
 
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /* Storage protection override fix               Jan Jaeger 31/08/00 */
 

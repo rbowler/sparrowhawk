@@ -1,4 +1,4 @@
-/* SIE.C        (c) Copyright Jan Jaeger, 1999-2000                  */
+/* SIE.C        (c) Copyright Jan Jaeger, 1999-2001                  */
 /*              Interpretive Execution                               */
 
 /*      This module contains the SIE instruction as                  */

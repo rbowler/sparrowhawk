@@ -2,8 +2,8 @@
 * *      build a dasd file from sysut1 to sysut2
 * * ---------------------------------------------------------------- */
 version  EQU   0
-release  EQU   1
-mod      EQU   12
+release  EQU   2
+mod      EQU   1
 
 */* ----------------------------------------------------------------
 * *      macros
@@ -995,7 +995,7 @@ no_c_env  LM   r1,r2,excp_io_area
           STORAGE RELEASE,ADDR=(1),LENGTH=(r2)
 read_term DS   0H
 
- DC H'0'
+********* DC   H'0'
 
 */* ----------------------------------------------------------------
 * *       print statistics

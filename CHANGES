@@ -1,3 +1,20 @@
+18 Jan 2001 Compressed CKD DASD support release 2, with improved
+            performance, shadow file support, and better reliability (Greg
+            Smith)
+18 Jan 2001 Hercules Emulated Tape format support (Leland Lucius)
+18 Jan 2001 Make HET bzip2 compression optional, analogous to CCKD bzip2
+            (Jay Maynard)
+18 Jan 2001 Fix for track overflow record zeroing (Roger Bowler)
+18 Jan 2001 Clarified licensing discussion in FAQ (Roger Bowler)
+18 Jan 2001 Treat printer X'37' CCW as NOP (Jay Maynard, suggested by
+            Brandon Hill)
+18 Jan 2001 Treat X'E503' MVS/XA assist instruction as no-op (Jay Maynard,
+            suggested by Brandon Hill)
+18 Jan 2001 Read commands from hercules.rc at startup (Willem Koynenberg)
+18 Jan 2001 New tapelist program prints contents of 80-byte record tapes
+            (Jim Morrison)
+18 Jan 2001 Increased MAXDBLK from 3000 to 40000 and MAXTTR from 10000 to
+            40000 in dasdload (Volker Bandke)
 03 Dec 2000 New file hercwin32.zip contains build scripts for Win32 version
             (Volker Bandke)
 03 Dec 2000 More performance enhancements (Juergen Dobrinski)

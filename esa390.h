@@ -1,7 +1,7 @@
-/* ESA390.H	(c) Copyright Roger Bowler, 1994-2000		     */
+/* ESA390.H	(c) Copyright Roger Bowler, 1994-2001		     */
 /*		ESA/390 Data Areas				     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* Header file containing ESA/390 structure definitions 	     */

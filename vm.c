@@ -1,7 +1,7 @@
-/* VM.C         (c) Copyright Roger Bowler, 2000                     */
+/* VM.C         (c) Copyright Roger Bowler, 2000-2001                */
 /*              ESA/390 VM Diagnose calls and IUCV instruction       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements miscellaneous diagnose functions           */

@@ -6,7 +6,7 @@
 #
 #
 
-VERSION  = 1.70
+VERSION  = 1.71
 
 # Change this if you want to install the Hercules executables somewhere
 #   besides /usr/bin. The $PREFIX (which defaults to nothing) can be
@@ -32,9 +32,20 @@ LFLAGS	 = -L$(PTHREADS_W32DIR)/DLL -lpthreadw32
 #LFLAGS += -L/usr/pkg/pthreads/lib -R/usr/pkg/pthreads
 #LFLAGS += -L/usr/pkg/lib -R/usr/pkg/pthreads/lib
 
+# Reverse the comments below to disable Compressed CKD Dasd support
+#CFLAGS += -DNO_CCKD
+#CFL_370        += -DNO_CCKD
+LFLAGS  += -lz
+
+# Uncomment these lines to enable Compressed CKD bzip2 compression
+#CFLAGS += -DCCKD_BZIP2
+#CFL_370        += -DCCKD_BZIP2
+#LFLAGS += -lbz2
+
 EXEFILES = hercules-370 hercules-390 \
 	   dasdinit dasdisup dasdload dasdls dasdpdsu \
-	   tapecopy tapemap tapesplit
+	   tapecopy tapemap tapesplit \
+           cckd2ckd cckdcdsk ckd2cckd cckdcomp
 
 TARFILES = makefile *.c *.h hercules.cnf tapeconv.jcl dasdlist \
 	   obj370 obj390 html zzsa.cnf zzsacard.bin
@@ -50,7 +61,8 @@ HRC_370_OBJS = obj370/impl.o obj370/config.o obj370/panel.o \
 	   obj370/printer.o obj370/console.o obj370/external.o \
 	   obj370/float.o obj370/ctcadpt.o obj370/trace.o \
 	   obj370/machchk.o obj370/vector.o obj370/xstore.o \
-	   obj370/cmpsc.o obj370/cckddasd.o
+	   obj370/cmpsc.o obj370/cckddasd.o obj370/cckdcdsk.o \
+	   obj370/parser.o
            
 
 HRC_390_OBJS = obj390/impl.o obj390/config.o obj390/panel.o \
@@ -64,7 +76,8 @@ HRC_390_OBJS = obj390/impl.o obj390/config.o obj390/panel.o \
 	   obj390/printer.o obj390/console.o obj390/external.o \
 	   obj390/float.o obj390/ctcadpt.o obj390/trace.o \
 	   obj390/machchk.o obj390/vector.o obj390/xstore.o \
-	   obj390/cmpsc.o obj390/sie.o obj390/cckddasd.o
+	   obj390/cmpsc.o obj390/sie.o obj390/cckddasd.o \
+           obj390/cckdcdsk.o obj390/parser.o
            
 
 DIN_OBJS = dasdinit.o dasdutil.o
@@ -79,9 +92,19 @@ DPU_OBJS = dasdpdsu.o dasdutil.o
 
 TCY_OBJS = tapecopy.o
 
+TLS_OBJS = tapelist.o
+
 TMA_OBJS = tapemap.o
 
 TSP_OBJS = tapesplit.o
+
+CC2C_OBJ = cckd2ckd.o
+
+CCHK_OBJ = cckdcdsk.o
+
+C2CC_OBJ = ckd2cckd.o
+
+COMP_OBJ = cckdcomp.o obj390/cckdcdsk.o
 
 HEADERS  = hercules.h esa390.h version.h opcode.h inline.h
 
@@ -117,6 +140,9 @@ dasdpdsu:  $(DPU_OBJS)
 tapecopy:  $(TCY_OBJS)
 	$(CC) -o tapecopy $(TCY_OBJS)
 
+tapelist:  $(TLS_OBJS)
+	$(CC) -o tapemap $(TLS_OBJS)
+
 tapemap:  $(TMA_OBJS)
 	$(CC) -o tapemap $(TMA_OBJS)
 
@@ -137,9 +163,28 @@ dasdutil.o: dasdutil.c $(HEADERS) dasdblks.h
 
 tapecopy.o: tapecopy.c $(HEADERS)
 
+tapelist.o: tapelist.c $(HEADERS)
+
 tapemap.o: tapemap.c $(HEADERS)
 
 tapesplit.o: tapesplit.c $(HEADERS)
+
+cckd:      cckd2ckd cckdcdsk ckd2cckd cckd2comp
+
+cckd2ckd:  $(CC2C_OBJ)
+	$(CC) -o cckd2ckd $(CC2C_OBJ) $(LFLAGS)
+
+cckdcdsk:  $(CCHK_OBJ)
+	$(CC) -o cckdcdsk $(CCHK_OBJ) $(LFLAGS)
+
+ckd2cckd:  $(C2CC_OBJ)
+	$(CC) -o ckd2cckd $(C2CC_OBJ) $(LFLAGS)
+
+cckdcomp:  $(COMP_OBJ)
+	$(CC) -o cckdcomp $(COMP_OBJ) $(LFLAGS)
+
+$(CCHK_OBJ): %.o: %.c $(HEADERS)
+	$(CC) $(CFLAGS) -DCCKD_CHKDSK_MAIN -o $@ -c $<
 
 clean:
 	rm -rf $(EXEFILES) *.o obj370 obj390; mkdir obj370 obj390

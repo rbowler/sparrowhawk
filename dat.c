@@ -1,7 +1,7 @@
-/* DAT.C        (c) Copyright Roger Bowler, 1999-2000                */
+/* DAT.C        (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 Dynamic Address Translation                  */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the DAT, ALET, and ASN translation         */

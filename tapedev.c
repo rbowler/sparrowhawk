@@ -1,4 +1,4 @@
-/* TAPEDEV.C    (c) Copyright Roger Bowler, 1999-2000                */
+/* TAPEDEV.C    (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 Tape Device Handler                          */
 
 /*-------------------------------------------------------------------*/
@@ -38,6 +38,10 @@
 /*              All SCSI tapes are processed using the generalized   */
 /*              SCSI tape driver (st.c) which is controlled using    */
 /*              the MTIOCxxx set of IOCTL commands.                  */
+/* 4. HET       This format is based on the AWSTAPE format but has   */
+/*              been extended to support compression.  Since the     */
+/*              basic file format has remained the same, AWSTAPEs    */
+/*              can be read/written using the HET routines.          */
 /*-------------------------------------------------------------------*/
 
 /*-------------------------------------------------------------------*/
@@ -54,11 +58,13 @@
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
+#include "parser.h"
 
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
 /*-------------------------------------------------------------------*/
 #define MAX_BLKLEN              65530   /* Maximum I/O buffer size   */
+#define TAPE_UNLOADED           "*"     /* Name for unloaded drive   */
 
 /*-------------------------------------------------------------------*/
 /* Definitions for 3420/3480 sense bytes                             */
@@ -121,15 +127,16 @@
 #define TAPEDEVT_AWSTAPE        1       /* AWSTAPE format disk file  */
 #define TAPEDEVT_OMATAPE        2       /* OMATAPE format disk files */
 #define TAPEDEVT_SCSITAPE       3       /* Physical SCSI tape        */
+#define TAPEDEVT_HET            4       /* HET format disk file      */
 
 /*-------------------------------------------------------------------*/
 /* Structure definition for tape block headers                       */
 /*-------------------------------------------------------------------*/
 
 /*
- * The integer fields in the AWSTAPE and OMATAPE headers are encoded
- * in the Intel format (i.e. the bytes of the integer are held in
- * reverse order).  For this reason the integers are defined as byte
+ * The integer fields in the HET, AWSTAPE and OMATAPE headers are 
+ * encoded in the Intel format (i.e. the bytes of the integer are held
+ * in reverse order).  For this reason the integers are defined as byte
  * arrays, and the bytes are fetched individually in order to make
  * the code portable across architectures which use either the Intel
  * format or the S/370 format.
@@ -137,7 +144,7 @@
  * Block length fields contain the length of the emulated tape block
  * and do not include the length of the header.
  *
- * For the AWSTAPE format:
+ * For the AWSTAPE and HET formats:
  * - the first block has a previous block length of zero
  * - a tapemark is indicated by a header with a block length of zero
  *   and a flag byte of X'40'
@@ -213,6 +220,28 @@ static struct mt_tape_info densinfo[] = {
     {0x90, "EXB-8205 compressed"},
     {0, NULL}};
 
+static PARSER ptab[] =
+{
+    { "awstape", NULL }, 
+    { "idrc", "%d" },
+    { "compress", "%d" },
+    { "method", "%d" },
+    { "level", "%d" },
+	{ "chunksize", "%d" },
+    { NULL, NULL },
+};
+
+enum
+{
+    TDPARM_NONE,
+    TDPARM_AWSTAPE,
+    TDPARM_IDRC,
+    TDPARM_COMPRESS,
+    TDPARM_METHOD,
+    TDPARM_LEVEL,
+	TDPARM_CHKSIZE,
+};
+
 /*-------------------------------------------------------------------*/
 /* Open an AWSTAPE format file                                       */
 /*                                                                   */
@@ -222,6 +251,15 @@ static struct mt_tape_info densinfo[] = {
 static int open_awstape (DEVBLK *dev, BYTE *unitstat)
 {
 int             rc;                     /* Return code               */
+
+    /* Check for no tape in drive */
+    if (!strcmp (dev->filename, TAPE_UNLOADED))
+    {
+        dev->sense[0] = SENSE_IR;
+        dev->sense[1] = SENSE1_TAPE_TUB;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
 
     /* Open the AWSTAPE file */
     rc = open (dev->filename, O_RDWR | O_BINARY);
@@ -239,6 +277,8 @@ int             rc;                     /* Return code               */
         logmsg ("HHC201I Error opening %s: %s\n",
                 dev->filename, strerror(errno));
 
+	if (dev->tapedevt == TAPEDEVT_AWSTAPE)
+	    strcpy(dev->filename, TAPE_UNLOADED);
         dev->sense[0] = SENSE_IR;
         dev->sense[1] = SENSE1_TAPE_TUB;
         dev->sense[7] = SENSE7_TAPE_LOADFAIL;
@@ -732,6 +772,368 @@ int             rc;                     /* Return code               */
     return 0;
 
 } /* end function bsf_awstape */
+
+/*-------------------------------------------------------------------*/
+/* Open an HET format file                                           */
+/*                                                                   */
+/* If successful, the het control blk is stored in the device block  */
+/* and the return value is zero.  Otherwise the return value is -1.  */
+/*-------------------------------------------------------------------*/
+static int open_het (DEVBLK *dev, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+
+    /* Check for no tape in drive */
+    if (!strcmp (dev->filename, TAPE_UNLOADED))
+    {
+        dev->sense[0] = SENSE_IR;
+        dev->sense[1] = SENSE1_TAPE_TUB;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Open the HET file */
+    rc = het_open (&dev->hetb, dev->filename, HETOPEN_CREATE );
+    if (rc >= 0)
+    {
+        rc = het_cntl (dev->hetb,
+                    HETCNTL_SET | HETCNTL_COMPRESS,
+                    dev->tdparms.compress);
+        if (rc >= 0)
+        {
+            rc = het_cntl (dev->hetb,
+                        HETCNTL_SET | HETCNTL_METHOD,
+                        dev->tdparms.method);
+            if (rc >= 0)
+            {
+                rc = het_cntl (dev->hetb,
+                            HETCNTL_SET | HETCNTL_LEVEL,
+                            dev->tdparms.level);
+                if (rc < 0)
+                {
+                    rc = het_cntl (dev->hetb,
+                                HETCNTL_SET | HETCNTL_CHUNKSIZE,
+                                dev->tdparms.chksize);
+                }
+            }
+        }
+    }
+
+    /* Check for successful open */
+    if (rc < 0)
+    {
+        het_close (&dev->hetb);
+
+        logmsg ("HHC290I Error opening %s: %s(%s)\n",
+                dev->filename, het_error(rc), strerror(errno));
+
+        dev->sense[0] = SENSE_IR;
+        dev->sense[1] = SENSE1_TAPE_TUB;
+        dev->sense[7] = SENSE7_TAPE_LOADFAIL;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+    
+	/* Indicate file opened */
+	dev->fd = 1;
+
+    return 0;
+
+} /* end function open_het */
+
+/*-------------------------------------------------------------------*/
+/* Close an HET format file                                          */
+/*                                                                   */
+/* The HET file is close and all device block fields reinitialized.  */
+/*-------------------------------------------------------------------*/
+static void close_het (DEVBLK *dev)
+{
+
+    /* Close the HET file */
+    het_close (&dev->hetb);
+
+	/* Reinitialize the DEV fields */
+	dev->fd = -1;
+
+    return;
+
+} /* end function close_het */
+
+/*-------------------------------------------------------------------*/
+/* Read a block from an HET format file                              */
+/*                                                                   */
+/* If successful, return value is block length read.                 */
+/* If a tapemark was read, the return value is zero, and the         */
+/* current file number in the device block is incremented.           */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int read_het (DEVBLK *dev, BYTE *buf, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+
+    rc = het_read (dev->hetb, buf);
+    if (rc < 0)
+    {
+        /* Increment file number and return zero if tapemark was read */
+        if (rc == HETE_TAPEMARK)
+        {
+            dev->curfilen++;
+            return 0;
+        }
+
+        /* Handle end of file (uninitialized tape) condition */
+        if (rc == HETE_EOT)
+        {
+            logmsg ("HHC203I End of file (uninitialized tape) "
+                    "at block %8.8X in file %s\n",
+                    dev->hetb->cblk, dev->filename);
+
+            /* Set unit exception with tape indicate (end of tape) */
+            dev->sense[4] = SENSE4_TAPE_EOT;
+            *unitstat = CSW_CE | CSW_DE | CSW_UX;
+            return -1;
+        }
+
+        logmsg ("HHC205I Error reading data block "
+                "at block %8.8X in file %s: %s(%s)\n",
+                dev->hetb->cblk, dev->filename,
+                het_error(rc), strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Return block length */
+    return rc;
+
+} /* end function read_het */
+
+/*-------------------------------------------------------------------*/
+/* Write a block to an HET format file                               */
+/*                                                                   */
+/* If successful, return value is zero.                              */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int write_het (DEVBLK *dev, BYTE *buf, U16 blklen,
+                      BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+
+    /* Write the data block */
+    rc = het_write (dev->hetb, buf, blklen);
+    if (rc < 0)
+    {
+        /* Handle write error condition */
+        logmsg ("HHC209I Error writing data block "
+                "at block %8.8X in file %s: %s(%s)\n",
+                dev->hetb->cblk, dev->filename,
+                het_error(rc), strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Return normal status */
+    return 0;
+
+} /* end function write_het */
+
+/*-------------------------------------------------------------------*/
+/* Write a tapemark to an HET format file                            */
+/*                                                                   */
+/* If successful, return value is zero.                              */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int write_hetmark (DEVBLK *dev, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+
+    /* Write the tape mark */
+    rc = het_tapemark (dev->hetb);
+    if (rc < 0)
+    {
+        /* Handle error condition */
+        logmsg ("HHC211I Error writing tape mark "
+                "at block %8.8X in file %s: %s(%s)\n",
+                dev->hetb->cblk, dev->filename,
+                het_error(rc), strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Return normal status */
+    return 0;
+
+} /* end function write_hetmark */
+
+/*-------------------------------------------------------------------*/
+/* Forward space over next block of an HET format file               */
+/*                                                                   */
+/* If successful, return value +1.                                   */
+/* If the block skipped was a tapemark, the return value is zero,    */
+/* and the current file number in the device block is incremented.   */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int fsb_het (DEVBLK *dev, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+
+    /* Forward space one block */
+    rc = het_fsb (dev->hetb);
+    if (rc < 0)
+    {
+        /* Increment file number and return zero if tapemark was read */
+        if (rc == HETE_TAPEMARK)
+        {
+            dev->blockid++;
+            dev->curfilen++;
+            return 0;
+        }
+
+        logmsg ("HHC205I Error forward spacing "
+                "at block %8.8X in file %s: %s(%s)\n",
+                dev->hetb->cblk, dev->filename,
+                het_error(rc), strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    dev->blockid++;
+
+    /* Return +1 to indicate forward space successful */
+    return +1;
+
+} /* end function fsb_het */
+
+/*-------------------------------------------------------------------*/
+/* Backspace to previous block of an HET format file                 */
+/*                                                                   */
+/* If successful, return value will be +1.                           */
+/* If the block is a tapemark, the return value is zero,             */
+/* and the current file number in the device block is decremented.   */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int bsb_het (DEVBLK *dev, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+
+    /* Back space one block */
+    rc = het_bsb (dev->hetb);
+    if (rc < 0)
+    {
+        /* Increment file number and return zero if tapemark was read */
+        if (rc == HETE_TAPEMARK)
+        {
+            dev->blockid--;
+            dev->curfilen--;
+            return 0;
+        }
+
+        /* Unit check if already at start of tape */
+        if (rc == HETE_BOT)
+        {
+            dev->sense[0] = 0;
+            dev->sense[1] = SENSE1_TAPE_LOADPT;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            return -1;
+        }
+
+        logmsg ("HHC205I Error reading data block "
+                "at block %8.8X in file %s: %s(%s)\n",
+                dev->hetb->cblk, dev->filename,
+                het_error(rc), strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    dev->blockid--;
+
+    /* Return +1 to indicate back space successful */
+    return +1;
+
+} /* end function bsb_het */
+
+/*-------------------------------------------------------------------*/
+/* Forward space to next logical file of HET format file             */
+/*                                                                   */
+/* If successful, return value is zero, and the current file number  */
+/* in the device block is incremented.                               */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int fsf_het (DEVBLK *dev, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+
+    /* Forward space to start of next file */
+    rc = het_fsf (dev->hetb);
+    if (rc < 0)
+    {
+        logmsg ("HHC205I Error forward spacing to next file "
+                "at block %8.8X in file %s: %s(%s)\n",
+                dev->hetb->cblk, dev->filename,
+                het_error(rc), strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Maintain position */
+    dev->blockid = rc;
+    dev->curfilen++;
+
+    /* Return success */
+    return 0;
+
+} /* end function fsf_het */
+
+/*-------------------------------------------------------------------*/
+/* Backspace to previous logical file of HET format file             */
+/*                                                                   */
+/* If successful, return value is zero, and the current file number  */
+/* in the device block is decremented.                               */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int bsf_het (DEVBLK *dev, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+
+    rc = het_bsf (dev->hetb);
+    if (rc < 0)
+    {
+        logmsg ("HHC205I Error back spacing to previous file "
+                "at block %8.8X in file %s:\n %s(%s)\n",
+                dev->hetb->cblk, dev->filename,
+                het_error(rc), strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Maintain position */
+    dev->blockid = rc;
+    dev->curfilen--;
+
+    /* Return success */
+    return 0;
+
+} /* end function bsf_het */
 
 /*-------------------------------------------------------------------*/
 /* Obtain and display SCSI tape status                               */
@@ -2299,9 +2701,10 @@ static void build_sense (DEVBLK *dev)
 U32             stat;                   /* SCSI tape status bits     */
 
     /* Indicate intervention required if no file */
-    if (dev->fd < 0)
-        dev->sense[0] |= SENSE_IR;
-    else
+    if (!strcmp (dev->filename, TAPE_UNLOADED))
+	dev->sense[0] |= SENSE_IR;
+
+    if (!(dev->fd < 0))
     {
         /* Set load point indicator if tape is at load point */
         dev->sense[1] &= ~SENSE1_TAPE_LOADPT;
@@ -2310,6 +2713,11 @@ U32             stat;                   /* SCSI tape status bits     */
         default:
         case TAPEDEVT_AWSTAPE:
             if (dev->nxtblkpos == 0)
+                dev->sense[1] |= SENSE1_TAPE_LOADPT;
+            break;
+
+        case TAPEDEVT_HET:
+            if (dev->hetb->cblk == 0)
                 dev->sense[1] |= SENSE1_TAPE_LOADPT;
             break;
 
@@ -2366,12 +2774,18 @@ U32             stat;                   /* SCSI tape status bits     */
 int tapedev_init_handler (DEVBLK *dev, int argc, BYTE *argv[])
 {
 int             len;                    /* Length of file name       */
+int             i;                      /* Argument index            */
 U16             cutype;                 /* Control unit type         */
 BYTE            cumodel;                /* Control unit model number */
 BYTE            devmodel;               /* Device model number       */
 BYTE            devclass;               /* Device class              */
 BYTE            devtcode;               /* Device type code          */
 U32             sctlfeat;               /* Storage control features  */
+union
+{
+    U32         num;
+    BYTE        str[ 80 ];
+}               res;                    /* Parser results            */
 
     /* Release the previous OMA descriptor array if allocated */
     if (dev->omadesc != NULL)
@@ -2382,19 +2796,17 @@ U32             sctlfeat;               /* Storage control features  */
 
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
-    {
-        fprintf (stderr,
-                "HHC282I File name missing or invalid\n");
-        return -1;
-    }
-
-    /* Save the file name in the device block */
-    strcpy (dev->filename, argv[0]);
+        strcpy (dev->filename, TAPE_UNLOADED);
+    else
+        /* Save the file name in the device block */
+        strcpy (dev->filename, argv[0]);
 
     /* Use the file name to determine the device type */
     len = strlen(dev->filename);
     if (len >= 4 && strcasecmp(dev->filename + len - 4, ".tdf") == 0)
         dev->tapedevt = TAPEDEVT_OMATAPE;
+    else if (len >= 4 && strcasecmp(dev->filename + len - 4, ".het") == 0)
+        dev->tapedevt = TAPEDEVT_HET;
     else if (len >= 5 && memcmp(dev->filename, "/dev/", 5) == 0)
         dev->tapedevt = TAPEDEVT_SCSITAPE;
     else
@@ -2410,7 +2822,74 @@ U32             sctlfeat;               /* Storage control features  */
     dev->curblkrem = 0;
     dev->curbufoff = 0;
     dev->readonly = 0;
+    dev->hetb = NULL;
+    dev->tdparms.compress = HETDFLT_COMPRESS;
+    dev->tdparms.method = HETDFLT_METHOD;
+    dev->tdparms.level = HETDFLT_LEVEL;
+    dev->tdparms.chksize = HETDFLT_CHKSIZE;
 
+    /* Process remaining parameters */
+    for (i = 1; i < argc; i++)
+    {
+        switch (parser (&ptab[0], argv[i], &res))
+        {
+            case TDPARM_NONE:
+                fprintf (stderr,
+                    "HHC287I Unrecognized parameter: '%s'\n", argv[i]);
+                return -1;
+            break;
+
+            case TDPARM_AWSTAPE:
+                dev->tdparms.compress = FALSE;
+                dev->tdparms.chksize = 4096;
+            break;
+
+            case TDPARM_IDRC:
+            case TDPARM_COMPRESS:
+                dev->tdparms.compress = (res.num ? TRUE : FALSE);
+            break;
+            
+            case TDPARM_METHOD:
+                if (res.num < HETMIN_METHOD || res.num > HETMAX_METHOD)
+                {
+                    fprintf (stderr,
+                        "HHC288I Method must be within %u-%u\n",
+                        HETMIN_METHOD, HETMAX_METHOD);
+                    return -1;
+                }
+                dev->tdparms.method = res.num;
+            break;
+            
+            case TDPARM_LEVEL:
+                if (res.num < HETMIN_LEVEL || res.num > HETMAX_LEVEL)
+                {
+                    fprintf (stderr,
+                        "HHC289I Level must be within %u-%u\n",
+                        HETMIN_LEVEL, HETMAX_LEVEL);
+                    return -1;
+                }
+                dev->tdparms.level = res.num;
+            break;
+
+            case TDPARM_CHKSIZE:
+                if (res.num < HETMIN_CHUNKSIZE || res.num > HETMAX_CHUNKSIZE)
+                {
+                    fprintf (stderr,
+                        "HHC289I Chunksize must be within %u-%u\n",
+                        HETMIN_CHUNKSIZE, HETMAX_CHUNKSIZE);
+                    return -1;
+                }
+                dev->tdparms.chksize = res.num;
+            break;
+
+            default:
+                fprintf (stderr,
+                    "HHC290I Error in '%s' parameter\n", argv[i]);
+                return -1;
+            break;
+        }
+    }
+ 
     /* Set number of sense bytes */
     dev->numsense = 24;
 
@@ -2471,10 +2950,14 @@ void tapedev_query_device (DEVBLK *dev, BYTE **class,
 {
 
     *class = "TAPE";
-    snprintf (buffer, buflen, "%s%s [%d:%8.8lX]",
-            dev->filename,
-            (dev->readonly ? " ro" : ""),
-            dev->curfilen, dev->nxtblkpos);
+
+    if (!strcmp (dev->filename, TAPE_UNLOADED))
+        snprintf (buffer, buflen, TAPE_UNLOADED);
+    else
+        snprintf (buffer, buflen, "%s%s [%d:%8.8lX]",
+                dev->filename,
+                (dev->readonly ? " ro" : ""),
+                dev->curfilen, dev->nxtblkpos);
 
 } /* end function tapedev_query_device */
 
@@ -2484,7 +2967,20 @@ void tapedev_query_device (DEVBLK *dev, BYTE **class,
 int tapedev_close_device ( DEVBLK *dev )
 {
     /* Close the device file */
-    close (dev->fd);
+	switch (dev->tapedevt)
+	{
+	default:
+	case TAPEDEVT_AWSTAPE:
+	case TAPEDEVT_SCSITAPE:
+	case TAPEDEVT_OMATAPE:
+		close (dev->fd);
+		break;
+
+	case TAPEDEVT_HET:
+		close_het (dev);
+		break;
+	} /* end switch(dev->tapedevt) */
+
     dev->fd = -1;
 
     /* Release the OMA descriptor array if allocated */
@@ -2557,6 +3053,10 @@ long		locblock;		/* Block Id for Locate Block */
             rc = open_awstape (dev, unitstat);
             break;
 
+        case TAPEDEVT_HET:
+            rc = open_het (dev, unitstat);
+            break;
+
         case TAPEDEVT_SCSITAPE:
             rc = open_scsitape (dev, unitstat);
             break;
@@ -2596,6 +3096,10 @@ long		locblock;		/* Block Id for Locate Block */
             rc = write_awstape (dev, iobuf, count, unitstat);
             break;
 
+        case TAPEDEVT_HET:
+            rc = write_het (dev, iobuf, count, unitstat);
+            break;
+
         case TAPEDEVT_SCSITAPE:
             rc = write_scsitape (dev, iobuf, count, unitstat);
             break;
@@ -2623,6 +3127,10 @@ long		locblock;		/* Block Id for Locate Block */
         default:
         case TAPEDEVT_AWSTAPE:
             len = read_awstape (dev, iobuf, unitstat);
+            break;
+
+        case TAPEDEVT_HET:
+            len = read_het (dev, iobuf, unitstat);
             break;
 
         case TAPEDEVT_SCSITAPE:
@@ -2729,6 +3237,23 @@ long		locblock;		/* Block Id for Locate Block */
             }
         } /* end if(AWSTAPE) */
 
+        /* For HET file, just rewind it */
+        if (dev->tapedevt == TAPEDEVT_HET)
+        {
+			rc = het_rewind (dev->hetb);
+            if (rc < 0)
+            {
+                /* Handle seek error condition */
+                logmsg ("HHC285I Error seeking to start of %s: %s(%s)\n",
+                        dev->filename, het_error(rc), strerror(errno));
+
+                /* Set unit check with equipment check */
+                dev->sense[0] = SENSE_EC;
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                break;
+            }
+        } /* end if(HET) */
+
         /* Reset position counters to start of file */
         dev->curfilen = 1;
         dev->nxtblkpos = 0;
@@ -2761,8 +3286,28 @@ long		locblock;		/* Block Id for Locate Block */
             } /* end if(rc) */
         } /* end if(SCSITAPE) */
 
+	if ((dev->tapedevt == TAPEDEVT_AWSTAPE) ||
+	    (dev->tapedevt == TAPEDEVT_HET))
+        {
+	    strcpy(dev->filename, TAPE_UNLOADED);
+            logmsg ("HHC287I Tape %4.4X unloaded\n",
+                    dev->devnum);
+        }
+
         /* Close the file and reset position counters */
-        close (dev->fd);
+        switch (dev->tapedevt)
+        {
+        default:
+        case TAPEDEVT_AWSTAPE:
+        case TAPEDEVT_SCSITAPE:
+        case TAPEDEVT_OMATAPE:
+            close (dev->fd);
+            break;
+    
+        case TAPEDEVT_HET:
+            close_het (dev);
+            break;
+        } /* end switch(dev->tapedevt) */
         dev->fd = -1;
         dev->curfilen = 1;
         dev->nxtblkpos = 0;
@@ -2814,6 +3359,10 @@ long		locblock;		/* Block Id for Locate Block */
             rc = write_awsmark (dev, unitstat);
             break;
 
+        case TAPEDEVT_HET:
+            rc = write_hetmark (dev, unitstat);
+            break;
+
         case TAPEDEVT_SCSITAPE:
             rc = write_scsimark (dev, unitstat);
             break;
@@ -2827,7 +3376,7 @@ long		locblock;		/* Block Id for Locate Block */
         /* Increment current file number */
         dev->curfilen++;
 
-	dev->blockid++;
+        dev->blockid++;
 
         /* Set normal status */
         *residual = 0;
@@ -2877,6 +3426,10 @@ long		locblock;		/* Block Id for Locate Block */
             rc = bsb_awstape (dev, unitstat);
             break;
 
+        case TAPEDEVT_HET:
+            rc = bsb_het (dev, unitstat);
+            break;
+
         case TAPEDEVT_SCSITAPE:
             rc = bsb_scsitape (dev, unitstat);
             break;
@@ -2916,6 +3469,10 @@ long		locblock;		/* Block Id for Locate Block */
             rc = bsf_awstape (dev, unitstat);
             break;
 
+        case TAPEDEVT_HET:
+            rc = bsf_het (dev, unitstat);
+            break;
+
         case TAPEDEVT_SCSITAPE:
             rc = bsf_scsitape (dev, unitstat);
             break;
@@ -2945,6 +3502,10 @@ long		locblock;		/* Block Id for Locate Block */
         default:
         case TAPEDEVT_AWSTAPE:
             rc = fsb_awstape (dev, unitstat);
+            break;
+
+        case TAPEDEVT_HET:
+            rc = fsb_het (dev, unitstat);
             break;
 
         case TAPEDEVT_SCSITAPE:
@@ -2984,6 +3545,10 @@ long		locblock;		/* Block Id for Locate Block */
         default:
         case TAPEDEVT_AWSTAPE:
             rc = fsf_awstape (dev, unitstat);
+            break;
+
+        case TAPEDEVT_HET:
+            rc = fsf_het (dev, unitstat);
             break;
 
         case TAPEDEVT_SCSITAPE:
@@ -3083,6 +3648,23 @@ long		locblock;		/* Block Id for Locate Block */
             }
         } /* end if(AWSTAPE) */
 
+        /* For HET file, issue rewind */
+        if (dev->tapedevt == TAPEDEVT_HET)
+        {
+            rc = het_rewind (dev->hetb);
+            if (rc < 0)
+            {
+                /* Handle seek error condition */
+                logmsg ("HHC285I Error seeking to start of %s: %s(%s)\n",
+                        dev->filename, het_error(rc), strerror(errno));
+
+                /* Set unit check with equipment check */
+                dev->sense[0] = SENSE_EC;
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                break;
+            }
+        } /* end if(HET) */
+
         /* Reset position counters to start of file */
         dev->curfilen = 1;
         dev->nxtblkpos = 0;
@@ -3101,6 +3683,12 @@ long		locblock;		/* Block Id for Locate Block */
 	    rc = 0;
 	    while ((dev->blockid < locblock) && (rc >= 0))
 		rc = fsb_awstape(dev, unitstat);
+            break;
+
+        case TAPEDEVT_HET:
+	    rc = 0;
+	    while ((dev->blockid < locblock) && (rc >= 0))
+		rc = fsb_het(dev, unitstat);
             break;
 
         case TAPEDEVT_SCSITAPE:

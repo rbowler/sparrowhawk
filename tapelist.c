@@ -1,9 +1,13 @@
-/* TAPEMAP.C   (c) Copyright Jay Maynard, 2000-2001                  */
-/*              Map AWSTAPE format tape image                        */
+/* TAPELIST.C   Portions (c) Copyright James M. Morrison, 2000-2001 */  
+/* Dump AWSTAPE format tape image                                   */ 
+/* Program heavily based on Jay Maynard's (c) 2000-2001 TAPEMAP     */
 
 /*-------------------------------------------------------------------*/
 /* This program reads an AWSTAPE format tape image file and produces */
-/* a map of the tape, printing any standard label records it finds.  */
+/* a dump of the tape, printing any standard label records it finds. */
+/*                                                                   */
+/* Each block is divided into 80 byte (or less at the end) records,  */
+/* translated from EBCDIC to ASCII, and printed to stdout.           */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -33,7 +37,7 @@ static BYTE eovlbl[] = "\xC5\xD6\xE5";  /* EBCDIC characters "EOV"   */
 static BYTE buf[65500];
 
 /*-------------------------------------------------------------------*/
-/* ASCII to EBCDIC translate tables                                  */
+/* EBCDIC to ASCII translate table                                   */
 /*-------------------------------------------------------------------*/
 static unsigned char
 ebcdic_to_ascii[] = {
@@ -56,11 +60,11 @@ ebcdic_to_ascii[] = {
         };
 
 /*-------------------------------------------------------------------*/
-/* TAPEMAP main entry point                                          */
+/* TAPELIST main entry point                                         */
 /*-------------------------------------------------------------------*/
 int main (int argc, char *argv[])
 {
-int             i;                      /* Array subscript           */
+int             i,j;                    /* Array subscript           */
 int             len;                    /* Block length              */
 int             prevlen;                /* Previous block length     */
 BYTE           *filename;               /* -> Input file name        */
@@ -70,7 +74,12 @@ int             blkcount;               /* Block count               */
 int             curblkl;                /* Current block length      */
 int             minblksz;               /* Minimum block size        */
 int             maxblksz;               /* Maximum block size        */
+int             dumprecs = 9999999; 	/* # blks to dump/file       */
+int             dumpedrecs;             /* # records dumped this file*/
+int		minlrecl;		/* min(len, sizeof(recbuf)-1)*/
+int		bufferoffset;		/* offset into buffer 	     */
 BYTE            labelrec[81];           /* Standard label (ASCIIZ)   */
+BYTE            recbuf[81];             /* EBCDIC->ASCII workarea    */
 AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
 
     /* The only argument is the tape image file name */
@@ -80,7 +89,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
     }
     else
     {
-        printf ("Usage: tapemap filename\n");
+        printf ("Usage: tapelist filename\n");
         exit (1);
     }
 
@@ -88,7 +97,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
     infd = open (filename, O_RDONLY | O_BINARY);
     if (infd < 0)
     {
-        printf ("tapemap: Error opening %s: %s\n",
+        printf ("tapelist: Error opening %s: %s\n",
                 filename, strerror(errno));
         exit (2);
     }
@@ -99,17 +108,18 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
     minblksz = 0;
     maxblksz = 0;
     len = 0;
+    dumpedrecs = 0;
 
     while (1)
     {
         /* Save previous block length */
         prevlen = len;
 
-        /* Read a block from the tape */
+        /* Read the AWSTAPE header block from the tape */
         len = read (infd, buf, sizeof(AWSTAPE_BLKHDR));
         if (len < 0)
         {
-            printf ("tapemap: error reading header block from %s: %s\n",
+            printf ("tapelist: error reading header block from %s: %s\n",
                     filename, strerror(errno));
             exit (3);
         }
@@ -117,7 +127,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
         /* Did we finish too soon? */
         if ((len > 0) && (len < sizeof(AWSTAPE_BLKHDR)))
         {
-            printf ("tapemap: incomplete block header on %s\n",
+            printf ("tapelist: incomplete block header on %s\n",
                     filename);
             exit(4);
         }
@@ -136,7 +146,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
         if ((awshdr.flags1 & AWSTAPE_FLAG1_TAPEMARK) != 0)
         {
             /* Print summary of current file */
-            printf ("File %u: Blocks=%u, block size min=%u, max=%u\n",
+            printf ("File %u: Blocks=%u, block size min=%u, max=%u\n\n",
                     fileno, blkcount, minblksz, maxblksz);
 
             /* Reset counters for next file */
@@ -144,6 +154,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
             minblksz = 0;
             maxblksz = 0;
             blkcount = 0;
+	    dumpedrecs = 0;
 
         }
         else /* if(tapemark) */
@@ -158,7 +169,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
             len = read (infd, buf, curblkl);
             if (len < 0)
             {
-                printf ("tapemap: error reading data block from %s: %s\n",
+                printf ("tapelist: error reading data block from %s: %s\n",
                         filename, strerror(errno));
                 exit (5);
             }
@@ -166,7 +177,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
             /* Did we finish too soon? */
             if ((len > 0) && (len < curblkl))
             {
-                printf ("tapemap: incomplete final data block on %s, "
+                printf ("tapelist: incomplete final data block on %s, "
                         "expected %d bytes, got %d\n",
                         filename, curblkl, len);
                 exit(6);
@@ -175,7 +186,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
             /* Check for end of tape */
             if (len == 0)
             {
-                printf ("tapemap: header block with no data on %s\n",
+                printf ("tapelist: header block with no data on %s\n",
                         filename);
                 exit(7);
             }
@@ -191,7 +202,27 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
                     labelrec[i] = ebcdic_to_ascii[buf[i]];
                 labelrec[i] = '\0';
                 printf ("%s\n", labelrec);
-            }
+            } else {
+	    	/* print records to be dumped */
+	    	if (dumpedrecs < dumprecs) {
+		   /* dump each 80 byte (or less) record from each block */
+		   for (bufferoffset = 0; 
+			bufferoffset < len;
+			bufferoffset += minlrecl) { 			
+
+			if (len < (sizeof(recbuf) - 1)) 			    
+			    minlrecl = len;
+			else
+			    minlrecl = sizeof(recbuf) - 1;
+			for (j = 0; j < minlrecl; j++)
+			    recbuf[j] = ebcdic_to_ascii[
+				*(&(buf[j])+ bufferoffset)];
+ 			dumpedrecs++;
+	        	recbuf[j] = '\0';
+	        	printf("%s\n", recbuf);
+		   }
+	    	}
+	    }
             
         } /* end if(tapemark) */
 

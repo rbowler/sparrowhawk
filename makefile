@@ -6,7 +6,7 @@
 #
 #
 
-VERSION  = 1.70
+VERSION  = 1.71
 
 # Change this if you want to install the Hercules executables somewhere
 #   besides /usr/bin. The $PREFIX (which defaults to nothing) can be
@@ -17,12 +17,12 @@ DESTDIR  = $(PREFIX)/usr/bin
 # Standard flags for all architectures
 CFLAGS	 = -O2 -Wall -fPIC -DARCH=390
 CFL_370  = -O2 -Wall -fPIC -DARCH=370
-LFLAGS	 = -lpthread
+LFLAGS	 = -lpthread -lz
 
 # Add default flags for Pentium compilations
 ifndef HOST_ARCH
-CFLAGS	 += -malign-double -march=pentiumpro
-CFL_370  += -malign-double -march=pentiumpro
+CFLAGS	 += -malign-double -march=pentium
+CFL_370  += -malign-double -march=pentium
 endif
 
 # Handle host architecture if specified
@@ -42,11 +42,15 @@ endif
 # Reverse the comments below to disable Compressed CKD Dasd support
 #CFLAGS	+= -DNO_CCKD
 #CFL_370	+= -DNO_CCKD
-LFLAGS	+= -lz
 
 # Uncomment these lines to enable Compressed CKD bzip2 compression
 #CFLAGS	+= -DCCKD_BZIP2
 #CFL_370	+= -DCCKD_BZIP2
+#LFLAGS	+= -lbz2
+
+# Uncomment these lines to enable HET bzip2 compression
+#CFLAGS	+= -DHET_BZIP2
+#CFL_370	+= -DHET_BZIP2
 #LFLAGS	+= -lbz2
 
 # Uncomment these lines for NetBSD, with either the unproven-pthreads
@@ -59,11 +63,12 @@ LFLAGS	+= -lz
 EXEFILES = hercules-370 hercules-390 \
 	   dasdinit dasdisup dasdload dasdls dasdpdsu \
 	   tapecopy tapemap tapesplit \
-	   cckd2ckd cckdcdsk ckd2cckd
+	   cckd2ckd cckdcdsk ckd2cckd cckdcomp \
+	   hetget hetinit hetmap hetupd
 
 TARFILES = makefile *.c *.h hercules.cnf tapeconv.jcl dasdlist \
 	   obj370 obj390 html zzsa.cnf zzsacard.bin \
-	   cckddump.bal
+	   cckddump.hla
 
 HRC_370_OBJS = obj370/impl.o obj370/config.o obj370/panel.o \
 	   obj370/ipl.o obj370/assist.o obj370/dat.o \
@@ -77,7 +82,8 @@ HRC_370_OBJS = obj370/impl.o obj370/config.o obj370/panel.o \
 	   obj370/float.o obj370/ctcadpt.o obj370/trace.o \
 	   obj370/machchk.o obj370/vector.o obj370/xstore.o \
 	   obj370/cmpsc.o obj370/ibuf.o \
-	   obj370/cckddasd.o obj370/cckdcdsk.o
+	   obj370/cckddasd.o obj370/cckdcdsk.o \
+	   obj370/parser.o obj370/hetlib.o
            
 
 HRC_390_OBJS = obj390/impl.o obj390/config.o obj390/panel.o \
@@ -92,7 +98,8 @@ HRC_390_OBJS = obj390/impl.o obj390/config.o obj390/panel.o \
 	   obj390/float.o obj390/ctcadpt.o obj390/trace.o \
 	   obj390/machchk.o obj390/vector.o obj390/xstore.o \
 	   obj390/cmpsc.o obj390/sie.o obj390/ibuf.o \
-	   obj390/cckddasd.o obj390/cckdcdsk.o
+	   obj390/cckddasd.o obj390/cckdcdsk.o \
+	   obj390/parser.o obj390/hetlib.o
            
 
 DIN_OBJS = dasdinit.o dasdutil.o
@@ -107,6 +114,8 @@ DPU_OBJS = dasdpdsu.o dasdutil.o
 
 TCY_OBJS = tapecopy.o
 
+TLS_OBJS = tapelist.o
+
 TMA_OBJS = tapemap.o
 
 TSP_OBJS = tapesplit.o
@@ -117,13 +126,17 @@ CCHK_OBJ = cckdcdsk.o
 
 C2CC_OBJ = ckd2cckd.o
 
-CC2C_OBJ = cckd2ckd.o
+COMP_OBJ = cckdcomp.o obj390/cckdcdsk.o
 
-CCHK_OBJ = cckdcdsk.o
+HGT_OBJS = hetget.o hetlib.o sllib.o
 
-C2CC_OBJ = ckd2cckd.o
+HIN_OBJS = hetinit.o hetlib.o sllib.o
 
-HEADERS  = hercules.h esa390.h version.h opcode.h inline.h ibuf.h
+HMA_OBJS = hetmap.o hetlib.o sllib.o
+
+HUP_OBJS = hetupd.o hetlib.o sllib.o
+
+HEADERS  = hercules.h esa390.h version.h opcode.h inline.h ibuf.h hetlib.h
 
 all:	   $(EXEFILES)
 
@@ -157,11 +170,26 @@ dasdpdsu:  $(DPU_OBJS)
 tapecopy:  $(TCY_OBJS)
 	$(CC) -o tapecopy $(TCY_OBJS)
 
+tapelist:  $(TLS_OBJS)
+	$(CC) -o tapemap $(TLS_OBJS)
+
 tapemap:  $(TMA_OBJS)
 	$(CC) -o tapemap $(TMA_OBJS)
 
 tapesplit:  $(TSP_OBJS)
 	$(CC) -o tapesplit $(TSP_OBJS)
+
+hetget:  $(HGT_OBJS)
+	$(CC) -o hetget $(HGT_OBJS) $(LFLAGS)
+
+hetinit:  $(HIN_OBJS)
+	$(CC) -o hetinit $(HGT_OBJS) $(LFLAGS)
+
+hetmap:  $(HMA_OBJS)
+	$(CC) -o hetmap $(HMA_OBJS) $(LFLAGS)
+
+hetupd:  $(HUP_OBJS)
+	$(CC) -o hetupd $(HUP_OBJS) $(LFLAGS)
 
 dasdinit.o: dasdinit.c $(HEADERS) dasdblks.h
 
@@ -177,11 +205,21 @@ dasdutil.o: dasdutil.c $(HEADERS) dasdblks.h
 
 tapecopy.o: tapecopy.c $(HEADERS)
 
+tapelist.o: tapelist.c $(HEADERS)
+
 tapemap.o: tapemap.c $(HEADERS)
 
 tapesplit.o: tapesplit.c $(HEADERS)
 
-cckd:      cckd2ckd cckdcdsk ckd2cckd
+hetget.o: hetget.c hetlib.h sllib.h
+
+hetinit.o: hetinit.c hetlib.h sllib.h
+
+hetmap.o: hetmap.c hetlib.h sllib.h
+
+hetupd.o: hetupd.c hetlib.h sllib.h
+
+cckd:      cckd2ckd cckdcdsk ckd2cckd cckd2comp
 
 cckd2ckd:  $(CC2C_OBJ)
 	$(CC) -o cckd2ckd $(CC2C_OBJ) $(LFLAGS)
@@ -192,8 +230,12 @@ cckdcdsk:  $(CCHK_OBJ)
 ckd2cckd:  $(C2CC_OBJ)
 	$(CC) -o ckd2cckd $(C2CC_OBJ) $(LFLAGS)
 
+cckdcomp:  $(COMP_OBJ)
+	$(CC) -o cckdcomp $(COMP_OBJ) $(LFLAGS)
+
 $(CCHK_OBJ): %.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -DCCKD_CHKDSK_MAIN -o $@ -c $<
+
 
 clean:
 	rm -rf $(EXEFILES) *.o obj370 obj390; mkdir obj370 obj390

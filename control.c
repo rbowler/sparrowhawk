@@ -1,7 +1,7 @@
-/* CONTROL.C    (c) Copyright Roger Bowler, 1994-2000                */
+/* CONTROL.C    (c) Copyright Roger Bowler, 1994-2001                */
 /*              ESA/390 CPU Emulator                                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all control instructions of the            */

@@ -1,4 +1,4 @@
-/* CCKD2CKD.C   (c) Copyright Roger Bowler, 1999                     */
+/* CCKD2CKD.C   (c) Copyright Roger Bowler, 1999-2001                */
 /*       Copy a Compressed CKD Direct Access Storage Device file to  */
 /*       a regular CKD Direct Access Storage Device file.            */
 
@@ -41,8 +41,8 @@ int main ( int argc, char *argv[])
 {
 CKDDASD_DEVHDR  devhdr;                 /* CKD device header         */
 CCKDDASD_DEVHDR cdevhdr;                /* Compressed CKD device hdr */
-CCKD_L1TAB     *l1;                     /* -> Primary lookup table   */
-CCKD_L2TAB      l2[256];                /* Secondary lookup table    */
+CCKD_L1ENT     *l1;                     /* -> Primary lookup table   */
+CCKD_L2ENT      l2[256];                /* Secondary lookup table    */
 int             rc;                     /* Return code               */
 int             i,j;                    /* Indices                   */
 int             cyls=-1;                /* Cylinders in output file  */
@@ -168,8 +168,8 @@ int             maxerrs=5;              /* Max errors allowed        */
 
     /* get area for primary lookup table and read it in */
     if (swapend) swapend4 ((unsigned char *)&cdevhdr.numl1tab);
-    l1 = malloc (cdevhdr.numl1tab * CCKD_L1TAB_SIZE);
-    rc = read (ifd, l1, cdevhdr.numl1tab * CCKD_L1TAB_SIZE);
+    l1 = malloc (cdevhdr.numl1tab * CCKD_L1ENT_SIZE);
+    rc = read (ifd, l1, cdevhdr.numl1tab * CCKD_L1ENT_SIZE);
     if (swapend)
         for (i = 0; i < cdevhdr.numl1tab; i++)
             swapend4 ((unsigned char *)&l1[i]);
@@ -191,11 +191,11 @@ int             maxerrs=5;              /* Max errors allowed        */
            if (l1[i] != 0) break;
         /* get the last secondary lookup table */
         if (l1[i] == 0)
-            memset (&l2, 0, 256*CCKD_L2TAB_SIZE);
+            memset (&l2, 0, CCKD_L2TAB_SIZE);
         else
         {
             rc = lseek (ifd, l1[i], SEEK_SET);
-            rc = read (ifd, &l2, 256*CCKD_L2TAB_SIZE);
+            rc = read (ifd, &l2, CCKD_L2TAB_SIZE);
         }
         /* find the last used entry in the level 2 table */
         for (j = 255; j > 0; j--)
@@ -231,15 +231,15 @@ int             maxerrs=5;              /* Max errors allowed        */
     buf2 = malloc (trksz);
 
     /* process each entry in the primary lookup table */
-    for (i = 0; i < cdevhdr.numl1tab && i * 256 < trks; i++)
+    for (i = 0; i * 256 < trks; i++)
     {
         /* get the secondary lookup table */
-        if (l1[i] == 0)
-            memset (&l2, 0, 256*CCKD_L2TAB_SIZE);
+        if (i >= cdevhdr.numl1tab || l1[i] == 0)
+            memset (&l2, 0, CCKD_L2TAB_SIZE);
         else
         {
             rc = lseek (ifd, l1[i], SEEK_SET);
-            rc = read (ifd, &l2, 256*CCKD_L2TAB_SIZE);
+            rc = read (ifd, &l2, CCKD_L2TAB_SIZE);
             if (swapend) /* fix byte order if necessary */
                 for (j = 0; j< 256; j++)
                 {
@@ -530,7 +530,7 @@ int valid_trk (int trk, unsigned char *buf, int heads, int len)
 {
 int             cyl;                    /* Cylinder                  */
 int             head;                   /* Head                      */
-char            cchh[4];                /* Cyl, head big-endian      */
+char            cchh[4], cchh2[4];      /* Cyl, head big-endian      */
 int             r;                      /* Record number             */
 int             sz;                     /* Track size                */
 int             kl,dl;                  /* Key/Data lengths          */
@@ -555,7 +555,8 @@ int             kl,dl;                  /* Key/Data lengths          */
     }
 
     /* validate record 0 */
-    if (memcmp (&buf[5], cchh, 4) != 0 ||  buf[9] != 0 ||
+    memcpy (cchh2, &buf[5], 4); cchh2[0] &= 0x7f; /* fix for ovflow */
+    if (memcmp (cchh, cchh2, 4) != 0   ||  buf[9] != 0 ||
         buf[10] != 0   || buf[11] != 0 || buf[12] != 8)
     {
         fprintf (stderr, "*** track %d R0 validation error !! "
@@ -574,7 +575,9 @@ int             kl,dl;                  /* Key/Data lengths          */
     {
         kl = buf[sz+5];
         dl = buf[sz+6] * 256 + buf[sz+7];
-        if (memcmp (&buf[sz], cchh, 4) != 0 || buf[sz+4] != r ||
+        /* fix for track overflow bit */
+        memcpy (cchh2, &buf[sz], 4); cchh2[0] &= 0x7f;
+        if (memcmp (cchh, cchh2, 4) != 0 || buf[sz+4] != r ||
             sz + 8 + kl + dl >= len)
         {
             fprintf (stderr, "*** track %d R%d validation error !! "

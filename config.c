@@ -1,7 +1,7 @@
-/* CONFIG.C     (c) Copyright Roger Bowler, 1999-2000                */
+/* CONFIG.C     (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 Configuration Builder                        */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* This module builds the configuration tables for the Hercules      */
@@ -782,7 +782,7 @@ BYTE    c;                              /* Work area for sscanf      */
 
     /* Display the version identifier on the control panel */
     logmsg ("Hercules %s version %s "
-            "(c)Copyright Roger Bowler, 1994-2000\n",
+            "(c)Copyright Roger Bowler, 1994-2001\n",
             ARCHITECTURE_NAME, MSTRING(VERSION));
 
 #ifdef FEATURE_VECTOR_FACILITY

@@ -1,4 +1,4 @@
-/* CKDDASD.C    (c) Copyright Roger Bowler, 1999-2000                */
+/* CKDDASD.C    (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 CKD Direct Access Storage Device Handler     */
 
 /*-------------------------------------------------------------------*/
@@ -12,6 +12,8 @@
 /*      Track overflow support added by Jay Maynard                  */
 /*      Track overflow fixes by Jay Maynard, suggested by Valery     */
 /*        Pogonchenko                                                */
+/*      Track overflow write fix by Roger Bowler, thanks to Valery   */
+/*        Pogonchenko and Volker Bandke             V1.71 16/01/2001 */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -222,6 +224,20 @@ int             cckd=0;                 /* 1 if compressed CKD       */
             dev->ckdnoftio = 1;
             continue;
         }
+        if (strcasecmp ("readonly", argv[i]) == 0 ||
+            strcasecmp ("rdonly",   argv[i]) == 0 ||
+            strcasecmp ("ro",       argv[i]) == 0)
+        {
+            dev->ckdrdonly = 1;
+            continue;
+        }
+        if (strcasecmp ("fakewrite", argv[i]) == 0 ||
+            strcasecmp ("fakewrt",   argv[i]) == 0 ||
+            strcasecmp ("fw",        argv[i]) == 0)
+        {
+            dev->ckdfakewrt = 1;
+            continue;
+        }
         if (strlen (argv[i]) > 6 &&
             memcmp ("cache=", argv[i], 6) == 0)
         {
@@ -230,6 +246,30 @@ int             cckd=0;                 /* 1 if compressed CKD       */
             if (op) dev->ckdcachenbr = atoi (op);
             continue;
         }
+        if (strlen (argv[i]) > 3 &&
+            memcmp ("sf=", argv[i], 3) == 0)
+        {
+            kw = strtok (argv[i], "=");
+            op = strtok (NULL, " \t");
+            if (op && strlen(op) < 256)
+                strcpy (dev->ckdsfn, op);
+            continue;
+        }
+
+        /* the following parameters are processed by cckd code */
+        if (strlen (argv[i]) > 8 &&  !memcmp ("l2cache=", argv[i], 8))
+            continue;
+        if (strlen (argv[i]) > 5 && !memcmp ("dfwq=", argv[i], 5))
+            continue;
+        if (strlen (argv[i]) > 3 && !memcmp ("wt=", argv[i], 3))
+            continue;
+        if (strlen (argv[i]) == 4 && !memcmp ("ra=", argv[i], 3)
+         && argv[i][3] >= '0' && argv[i][3] <= '0' + CCKD_MAX_RA)
+            continue;
+        if (strlen (argv[i]) == 5 && !memcmp ("dfw=", argv[i], 4)
+         && argv[i][4] >= '0' && argv[i][4] <= '0' + CCKD_MAX_DFW)
+            continue;
+
         logmsg ("HHC351I parameter %d is invalid: %s\n", 
                 i + 1, argv[i]);
         return -1;
@@ -243,14 +283,31 @@ int             cckd=0;                 /* 1 if compressed CKD       */
     dev->ckdtrkfd = dev->ckdlopos = dev->ckdhipos = -1;
 
     /* Open all of the CKD image files which comprise this volume */
+    if (dev->ckdrdonly)
+        logmsg ("ckddasd: opening %s readonly%s\n", dev->filename,
+                dev->ckdfakewrt ? " with fake writing" : "");
     for (fileseq = 1;;)
     {
         /* Open the CKD image file */
-        dev->fd = open (dev->filename, O_RDWR|O_BINARY);
+        dev->fd = open (dev->filename, dev->ckdrdonly ?
+                        O_RDONLY|O_BINARY : O_RDWR|O_BINARY);
         if (dev->fd < 0)
+        {   /* Try read-only if shadow file present */
+            if (!dev->ckdrdonly && dev->ckdsfn[0] != '\0')
+                dev->fd = open (dev->filename, O_RDONLY|O_BINARY);
+            if (dev->fd < 0)
+            {
+                logmsg ("HHC352I %s open error: %s\n",
+                        dev->filename, strerror(errno));
+                return -1;
+            }
+        }
+
+        /* If shadow file, only one base file is allowed */
+        if (fileseq > 1 && dev->ckdsfn[0] != '\0')
         {
-            logmsg ("HHC352I %s open error: %s\n",
-                    dev->filename, strerror(errno));
+            logmsg ("HHC362I %s not in a single file for shadowing\n",
+                    dev->filename);
             return -1;
         }
 
@@ -620,7 +677,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
        a single buffer before passing data to the device handler */
     dev->cdwmerge = 1;
 
-    if (cckd == 0)
+    if (cckd == 0 && dev->ckdsfn[0] == '\0')
         return 0;
     else
         return cckddasd_init_handler(dev, argc, argv);
@@ -670,7 +727,8 @@ int	i;				/* Index                     */
             free (dev->ckdcache);
         }
 
-        DEVTRACE("ckddasd: cache hits %d misses %d\n",
+        if (dev->ckdcachehits || dev->ckdcachemisses)
+            DEVTRACE("ckddasd: cache hits %d misses %d\n",
                  dev->ckdcachehits, dev->ckdcachemisses);
 
         /* clear full track/cache fields */
@@ -955,6 +1013,8 @@ ssize_t ckd_write (DEVBLK *dev, int fd, const void *buf, size_t N)
 {
 int             rc;                     /* Return code               */
 
+    if (dev->ckdrdonly)
+        return (dev->ckdfakewrt ? N : 0);
     if (dev->cckd_ext == NULL)
     {
         /* if we're not doing full track i/o, simply call write() */
@@ -1593,12 +1653,12 @@ int             skiplen;                /* Number of bytes to skip   */
     if (rc < CKDDASD_RECHDR_SIZE)
     {
         /* Handle write error condition */
-        logmsg ("ckddasd: write error: %s\n",
-                strerror(errno));
+        logmsg ("ckddasd: write error: %s\n", dev->ckdrdonly ?
+                         "read only file" : strerror(errno));
 
         /* Set unit check with equipment check */
-        ckd_build_sense (dev, SENSE_EC, 0, 0,
-                        FORMAT_1, MESSAGE_0);
+        ckd_build_sense (dev, SENSE_EC, dev->ckdrdonly ?
+                              SENSE1_WRI : 0, 0, FORMAT_1, MESSAGE_0);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -1676,13 +1736,13 @@ int             skiplen;                /* Number of bytes to skip   */
     curpos = ckd_lseek (dev, dev->fd, 0, SEEK_CUR);
     if (curpos == -1)
     {
-        /* Handle seek error condition */
-        logmsg ("ckddasd: lseek error: %s\n",
-                strerror(errno));
+        /* Handle write error condition */
+        logmsg ("ckddasd: write error: %s\n", dev->ckdrdonly ?
+                         "read only file" : strerror(errno));
 
         /* Set unit check with equipment check */
-        ckd_build_sense (dev, SENSE_EC, 0, 0,
-                        FORMAT_1, MESSAGE_0);
+        ckd_build_sense (dev, SENSE_EC, dev->ckdrdonly ?
+                              SENSE1_WRI : 0, 0, FORMAT_1, MESSAGE_0);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -1722,12 +1782,12 @@ int             skiplen;                /* Number of bytes to skip   */
     if (rc < ckdlen)
     {
         /* Handle write error condition */
-        logmsg ("ckddasd: write error: %s\n",
-                strerror(errno));
+        logmsg ("ckddasd: write error: %s\n", dev->ckdrdonly ?
+                         "read only file" : strerror(errno));
 
         /* Set unit check with equipment check */
-        ckd_build_sense (dev, SENSE_EC, 0, 0,
-                        FORMAT_1, MESSAGE_0);
+        ckd_build_sense (dev, SENSE_EC, dev->ckdrdonly ?
+                              SENSE1_WRI : 0, 0, FORMAT_1, MESSAGE_0);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -1743,12 +1803,12 @@ int             skiplen;                /* Number of bytes to skip   */
     if (rc < CKDDASD_RECHDR_SIZE)
     {
         /* Handle write error condition */
-        logmsg ("ckddasd: write error: %s\n",
-                strerror(errno));
+        logmsg ("ckddasd: write error: %s\n", dev->ckdrdonly ?
+                         "read only file" : strerror(errno));
 
         /* Set unit check with equipment check */
-        ckd_build_sense (dev, SENSE_EC, 0, 0,
-                        FORMAT_1, MESSAGE_0);
+        ckd_build_sense (dev, SENSE_EC, dev->ckdrdonly ?
+                              SENSE1_WRI : 0, 0, FORMAT_1, MESSAGE_0);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -1814,12 +1874,12 @@ U16             kdlen;                  /* Key+data length           */
     if (rc < kdlen)
     {
         /* Handle write error condition */
-        logmsg ("ckddasd: write error: %s\n",
-                strerror(errno));
+        logmsg ("ckddasd: write error: %s\n", dev->ckdrdonly ?
+                         "read only file" : strerror(errno));
 
         /* Set unit check with equipment check */
-        ckd_build_sense (dev, SENSE_EC, 0, 0,
-                        FORMAT_1, MESSAGE_0);
+        ckd_build_sense (dev, SENSE_EC, dev->ckdrdonly ?
+                              SENSE1_WRI : 0, 0, FORMAT_1, MESSAGE_0);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -1876,12 +1936,12 @@ int             skiplen;                /* Number of bytes to skip   */
     if (rc < dev->ckdcurdl)
     {
         /* Handle write error condition */
-        logmsg ("ckddasd: write error: %s\n",
-                strerror(errno));
+        logmsg ("ckddasd: write error: %s\n", dev->ckdrdonly ?
+                         "read only file" : strerror(errno));
 
         /* Set unit check with equipment check */
-        ckd_build_sense (dev, SENSE_EC, 0, 0,
-                        FORMAT_1, MESSAGE_0);
+        ckd_build_sense (dev, SENSE_EC, dev->ckdrdonly ?
+                              SENSE1_WRI : 0, 0, FORMAT_1, MESSAGE_0);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -3365,17 +3425,17 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             break;
         }
 
-        /* Write data */
-        rc = ckd_write_data (dev, iobuf, count, unitstat);
-        if (rc < 0) break;
-
         /* Calculate number of bytes written and set residual count */
         size = dev->ckdcurdl;
         num = (count < size) ? count : size;
         *residual = count - num;
-        offset = 0;
+
+        /* Write data */
+        rc = ckd_write_data (dev, iobuf, num, unitstat);
+        if (rc < 0) break;
 
 	/* If track overflow, keep writing */
+        offset = 0;
 	while (dev->ckdtrkof)
 	{
 	    /* Advance to next track */
@@ -3386,18 +3446,16 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
 	    rc = ckd_read_count (dev, code, &rechdr, unitstat);
 	    if (rc < 0) break;
 	
-	    /* Set offset into buffer for this read */
-	    offset += num;
+            /* Set offset into buffer for this write */
+            offset += size;
 
 	    /* Account for size of this overflow record */
 	    size = dev->ckdcurdl;
 	    num = (*residual < size) ? *residual : size;
-	    if (*residual < size) *more = 1;
-	    else *more = 0;
 	    *residual -= num;
 	
 	    /* Write the next data field */
-	    rc = ckd_write_data (dev, iobuf+offset, *residual, unitstat);
+            rc = ckd_write_data (dev, iobuf+offset, num, unitstat);
 	    if (rc < 0) break;
 	}
 
@@ -3453,17 +3511,17 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             break;
         }
 
-        /* Write data */
-        rc = ckd_write_data (dev, iobuf, count, unitstat);
-        if (rc < 0) break;
-
         /* Calculate number of bytes written and set residual count */
         size = dev->ckdcurdl;
         num = (count < size) ? count : size;
         *residual = count - num;
-        offset = 0;
+
+        /* Write data */
+        rc = ckd_write_data (dev, iobuf, num, unitstat);
+        if (rc < 0) break;
 
 	/* If track overflow, keep writing */
+        offset = 0;
 	while (dev->ckdtrkof)
 	{
 	    /* Advance to next track */
@@ -3474,18 +3532,16 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
 	    rc = ckd_read_count (dev, code, &rechdr, unitstat);
 	    if (rc < 0) break;
 	
-	    /* Set offset into buffer for this read */
-	    offset += num;
+            /* Set offset into buffer for this write */
+            offset += size;
 
 	    /* Account for size of this overflow record */
 	    size = dev->ckdcurdl;
 	    num = (*residual < size) ? *residual : size;
-	    if (*residual < size) *more = 1;
-	    else *more = 0;
 	    *residual -= num;
 	
 	    /* Write the next data field */
-	    rc = ckd_write_data (dev, iobuf+offset, *residual, unitstat);
+            rc = ckd_write_data (dev, iobuf+offset, num, unitstat);
 	    if (rc < 0) break;
 	}
 
@@ -3566,17 +3622,17 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             break;
         }
 
-        /* Write key and data */
-        rc = ckd_write_kd (dev, iobuf, count, unitstat);
-        if (rc < 0) break;
-
         /* Calculate number of bytes written and set residual count */
         size = dev->ckdcurkl + dev->ckdcurdl;
         num = (count < size) ? count : size;
         *residual = count - num;
-        offset = dev->ckdcurkl;
+
+        /* Write key and data */
+        rc = ckd_write_kd (dev, iobuf, num, unitstat);
+        if (rc < 0) break;
 
 	/* If track overflow, keep writing */
+        offset = dev->ckdcurkl;
 	while (dev->ckdtrkof)
 	{
 	    /* Advance to next track */
@@ -3587,18 +3643,16 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
 	    rc = ckd_read_count (dev, code, &rechdr, unitstat);
 	    if (rc < 0) break;
 	
-	    /* Set offset into buffer for this read */
-	    offset += num;
+            /* Set offset into buffer for this write */
+            offset += size;
 
 	    /* Account for size of this overflow record */
 	    size = dev->ckdcurdl;
 	    num = (*residual < size) ? *residual : size;
-	    if (*residual < size) *more = 1;
-	    else *more = 0;
 	    *residual -= num;
 	
 	    /* Write the next data field */
-	    rc = ckd_write_data (dev, iobuf+offset, *residual, unitstat);
+            rc = ckd_write_data (dev, iobuf+offset, num, unitstat);
 	    if (rc < 0) break;
 	}
 
@@ -3654,17 +3708,17 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             break;
         }
 
-        /* Write key and data */
-        rc = ckd_write_kd (dev, iobuf, count, unitstat);
-        if (rc < 0) break;
-
         /* Calculate number of bytes written and set residual count */
         size = dev->ckdcurkl + dev->ckdcurdl;
         num = (count < size) ? count : size;
         *residual = count - num;
-        offset = dev->ckdcurkl;
+
+        /* Write key and data */
+        rc = ckd_write_kd (dev, iobuf, num, unitstat);
+        if (rc < 0) break;
 
 	/* If track overflow, keep writing */
+        offset = dev->ckdcurkl;
 	while (dev->ckdtrkof)
 	{
 	    /* Advance to next track */
@@ -3675,18 +3729,16 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
 	    rc = ckd_read_count (dev, code, &rechdr, unitstat);
 	    if (rc < 0) break;
 	
-	    /* Set offset into buffer for this read */
-	    offset += num;
+            /* Set offset into buffer for this write */
+            offset += size;
 
 	    /* Account for size of this overflow record */
 	    size = dev->ckdcurdl;
 	    num = (*residual < size) ? *residual : size;
-	    if (*residual < size) *more = 1;
-	    else *more = 0;
 	    *residual -= num;
 	
 	    /* Write the next data field */
-	    rc = ckd_write_data (dev, iobuf+offset, *residual, unitstat);
+            rc = ckd_write_data (dev, iobuf+offset, num, unitstat);
 	    if (rc < 0) break;
 	}
 
@@ -4037,6 +4089,20 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
             break;
         }
+
+        /* Check for write operation on a read only disk */
+        if ( (dev->ckdrdonly && !dev->ckdfakewrt)
+             &&  ((dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRITE
+               || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_FORMAT
+               || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRTTRK)
+           )
+        {
+            ckd_build_sense (dev, SENSE_EC, SENSE1_WRI, 0,
+                            FORMAT_0, MESSAGE_4);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
 
         /* Byte 1 contains the locate record auxiliary byte */
         dev->ckdlaux = iobuf[1];

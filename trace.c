@@ -1,6 +1,6 @@
 /* TRACE.C      Implicit tracing functions - Jan Jaeger              */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
 
 #include "hercules.h"
 

@@ -1,6 +1,6 @@
 /* XSTORE.C   Expanded storage related instructions - Jan Jaeger     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /* MVPG moved from cpu.c to xstore.c   05/07/00 Jan Jaeger */
 /* Lock Page added                     29/07/00 Jan Jaeger */

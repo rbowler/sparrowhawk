@@ -1,6 +1,6 @@
-/* CTCADPT.C    (c) Copyright Roger Bowler, 2000                     */
+/* CTCADPT.C    (c) Copyright Roger Bowler, 2000-2001                */
 /*              ESA/390 Channel-to-Channel Adapter Device Handler    */
-/* vmnet modifications (c) Copyright Willem Konynenberg, 2000        */
+/* vmnet modifications (c) Copyright Willem Konynenberg, 2000-2001   */
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */

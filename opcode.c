@@ -1,6 +1,6 @@
 /* OPCODE.C     Instruction decoding functions - 02/07/00 Jan Jaeger */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
 
 #include "hercules.h"
 
@@ -1058,7 +1058,7 @@ zz_func opcode_e5xx[256] = {
  /*E500*/       &zz_load_address_space_parameters,      /* LASP      */
  /*E501*/       &zz_test_protection,                    /* TPROT     */
  /*E502*/       &operation_exception,            
- /*E503*/       &operation_exception,
+ /*E503*/       &dummy_assist_instruction,		/* Assist    */
  /*E504*/       &zz_obtain_local_lock,                  /* Assist    */
  /*E505*/       &zz_release_local_lock,                 /* Assist    */
  /*E506*/       &zz_obtain_cms_lock,                    /* Assist    */

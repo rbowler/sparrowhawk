@@ -11,6 +11,8 @@
 <P>Hercules is a software implementation of the System/370 and ESA/390
 hardware which runs under Linux on several hardware platforms including the
 Intel Pentium PC, and under Windows NT and Windows 2000.</P>
+<P>Hercules was created by Roger Bowler and is maintained by
+Jay Maynard.</P>
 <H4>So what exactly does that mean?</H4>
 <P>It means that your PC can emulate an IBM mainframe processor. The
 mainframe can range from a 360 to a 390 - running in "System/370" mode or
@@ -111,13 +113,15 @@ HREF="http://www.corestore.org/hercules.html">http://www.corestore.org/hercules.
 </P>
 <H4>What are the licensing restrictions for Hercules?</H4>
 
-<P>Hercules is a copyright work which has been made available for use by any
-individual, subject to the terms of the <A HREF="herclic.html">Q
-Public License</A>. In essence this allows private individuals to freely
-copy, modify, and execute the program for personal use. You may not sell the
-program, or copy any portion of the source code for use in any other
-program. Any modifications you make to the program are subject to the same
-restrictions.</p>
+<P>Hercules is a copyright work which has been made generally
+available, subject to the terms of the
+<A HREF="herclic.html">Q Public License</A>.
+In essence this allows free use and distribution of the program for
+personal and commercial use.  You may not distribute modified copies
+of the program, but you may distribute your own patches along with
+the program, provided that you also grant the maintainer permission
+to include those patches in future versions of the program.  You may
+not copy any portion of the source code for use in any other program.</p>
 <P>Hercules is <EM>not</EM>, repeat, <EM>not</EM> GPL software! The GNU
 General Public License is a Unix/Linux software licensing agreement, which
 we, the authors, will not participate in. We believe that the QPL, which has
@@ -168,22 +172,34 @@ platform.</P>
 below on this compiler. If you wish to rebuild the Windows version, you will
 need the <a href="http://sources.redhat.com/cygwin">Cygwin</a> tools from
 Red Hat.</P>
-<P>3. You will also need tn3270 client software, normally distributed with
-Linux, for the virtual 3270 console. This does not have to run on the Linux
-box. You can use any Windows tn3270 client (such as QWS3270, <A
-HREF="http://www.tombrennansoftware.com">Vista tn3270</A>, IBM Personal
-Communications, Attachmate Extra, or Dynacomm Elite), or any Unix tn3270
-client (such as x3270). If your Linux distribution does not include x3270,
-you can get it from <A
-HREF="http://www.geocities.com/SiliconValley?Peaks/7814">www.geocities.com/SiliconValley/Peaks/7814</A>
-which is the homepage for x3270. </P>
+<P>3. You will also need tn3270 client software for the virtual 3270
+console.  The tn3270 client can run on the same machine as Hercules, or
+on any Unix or Windows box with a TCP/IP connection to the Hercules
+machine.</P>
+<P>The supported and recommended tn3270 clients for Hercules are:
+<dl>
+<dt><B>x3270 for Unix</B>
+<dd>x3270 is included with most Linux distributions, or you can
+download it from
+<a HREF="http://www.geocities.com/SiliconValley?Peaks/7814">
+www.geocities.com/SiliconValley/Peaks/7814</A>
+<dt><B>Vista tn3270 for Windows</B>
+<dd>Vista tn3270 can be obtained from
+<a HREF="http://www.tombrennansoftware.com">
+www.tombrennansoftware.com</a>.  The very modest license fee charged
+for this excellent 3270 emulator helps to support an independent
+software developer.
+</dl>
+<P>Other tn3270 clients, such as QWS3270, IBM Personal Communications,
+Attachmate Extra, or Dynacomm Elite should also work in most cases, but
+be aware that some tn3270 clients have bugs which make them unusable
+as OS/360 or MVS consoles.</P>
 <H4>What sort of MIPS rate can I expect?</H4>
 <P>Don't get excited... On a Pentium Pro 200, I am seeing an execution speed
-of around 0.5 MIPS. That's enough to run OS/360 (MFT or MVT) with
-a response time similar to that of a 370/145 from the 1970's. It's also fast
-enough to run VSE/ESA with a slow but acceptable response time. If you want
-to run OS/390 instead of OS/360, you'd better wait until Intel processor
-speeds get into the gigahertz range (which isn't that far off, now).
+of around 0.5 MIPS. That's enough to run OS/360 (MFT or MVT) with a response
+time similar to that of a 370/145 from the 1970's. It's also fast enough to
+run VSE/ESA with a slow but acceptable response time. If you want to run
+OS/390 instead of OS/360, you'd better get a gigahertz or so Pentium III.
 Releases 1.60 and above of Hercules incorporated many performance
 improvements, and on a fast Pentium III, it's now not unusual to see 5 MIPS
 or better.</P>
@@ -203,12 +219,13 @@ of egcs produce strange results too. </P>
 parameter on the "make" command to force it to choose the correct compiler:
 <BR> <CODE>make CC=egcs</CODE> ...</P>
 <p>Red Hat 7.0 ships with two versions of gcc. If you don't do anything
-special, you get gcc 2.95, which will not compile the Linux kernel, so they
+special, you get gcc 2.96, which will not compile the Linux kernel, so they
 included 2.91 as well as <code>kgcc</code>. If you encounter problems when
-building Hercules with the 2.95 compiler, try <code>make CC=kgcc</code>
-instead. I would appreciate reports as to how well the 2.95 compiler works,
-as it is a development snapshot, and the GCC development team was very
-unhappy that Red Hat included it in their distribution.</p>
+building Hercules with the 2.96 compiler, try <code>make CC=kgcc</code>
+instead. I would appreciate reports as to how well the 2.96 compiler works,
+as it is a development snapshot, and lots of folks, including the GCC
+development team ad Linus Torvalds, were very unhappy that Red Hat included
+it in their distribution.</p>
 <H4>Why do I get an unexpected fixed-point divide exception (program check
 0009 or abend 0C9) on a CVB instruction?</H4>
 <P>You are using an old gcc compiler. You must use the newer egcs-based
@@ -332,8 +349,7 @@ September 1999 issue of NaSPA Technical Support magazine. </P>
 <LI>Concurrent Sense </LI>
 <LI>Suppression on Protection with Virtual-Address enhancement </LI>
 <LI>Extended TOD clock </LI>
-<li>Compression (minimal function only by default; full function can be
-built, but has not been tested fully)</li>
+<li>Compression</li>
 <LI>Perform Locked Operation </LI>
 <li>Vector Facility</li>
 <LI>Extended Translation </LI>
@@ -418,6 +434,7 @@ maintainer)
 <li>John Kozak
 <li>Brandon Hill
 <li>Ronen Tzur
+<li>Willem Konynenberg
 </sl></p>
 <P>And thanks for support and encouragement from:
 <sl>
@@ -447,5 +464,5 @@ HREF="http://www.onelist.com/community/hercules-390">http://www.onelist.com/comm
 <P ALIGN="CENTER"><hr width="15%" noshade><A
 HREF="hercules.html"><IMG SRC="gifs/back.gif" BORDER=0 ALT="back"></A></P>
 <P><small>
-Last updated 03 December 2000</P></BODY>
+Last updated 18 January 2001</P></BODY>
 </HTML>

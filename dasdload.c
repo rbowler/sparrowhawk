@@ -1,4 +1,4 @@
-/* DASDLOAD.C   (c) Copyright Roger Bowler, 1999-2000                */
+/* DASDLOAD.C   (c) Copyright Roger Bowler, 1999-2001                */
 /*              Hercules DASD Utilities: DASD image loader           */
 
 /*-------------------------------------------------------------------*/
@@ -18,9 +18,9 @@
 /*-------------------------------------------------------------------*/
 /* Internal table sizes                                              */
 /*-------------------------------------------------------------------*/
-#define MAXDBLK 3000                    /* Maximum number of directory
+#define MAXDBLK 40000                    /* Maximum number of directory
                                            blocks per dataset        */
-#define MAXTTR  10000                   /* Maximum number of TTRs
+#define MAXTTR  40000                   /* Maximum number of TTRs
                                            per dataset               */
 #define MAXDSCB 500                     /* Maximum number of DSCBs   */
 

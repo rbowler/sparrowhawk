@@ -1,4 +1,4 @@
-/* CKD2CCKD.C   (c) Copyright Roger Bowler, 1999                     */
+/* CKD2CCKD.C   (c) Copyright Roger Bowler, 1999-2001                */
 /*       Copy a regular CKD Direct Access Storage Device file to     */
 /*       a compressed CKD Direct Access Storage Device file.         */
 
@@ -39,8 +39,8 @@ int main ( int argc, char *argv[])
 {
 CKDDASD_DEVHDR  devhdr;                 /* CKD device header         */
 CCKDDASD_DEVHDR cdevhdr;                /* Compressed CKD device hdr */
-CCKD_L1TAB     *l1;                     /* -> Primary lookup table   */
-CCKD_L2TAB      l2[256];                /* Secondary lookup table    */
+CCKD_L1ENT     *l1;                     /* -> Primary lookup table   */
+CCKD_L2ENT      l2[256];                /* Secondary lookup table    */
 struct stat     statbuf;                /* File information          */
 int             rc;                     /* Return code               */
 int             i;                      /* Index                     */
@@ -73,7 +73,7 @@ unsigned char  *obuf;                   /* Output buffer             */
 int             obuflen;                /* Output buffer length      */
 int             quiet=0;                /* Don't display status      */
 int             maxerrs=5;              /* Max errors allowed        */
-int             nofudge=0;              /* Disable fudge factor      */
+int             nofudge=1;              /* Disable fudge factor      */
 unsigned int    c=CCKD_COMPRESS_ZLIB;   /* Compression algorithm     */
 int             z=-1;                   /* Compression value         */
 
@@ -360,8 +360,8 @@ int             z=-1;                   /* Compression value         */
     rc = write (ofd, &cdevhdr, CCKDDASD_DEVHDR_SIZE);
 
     /* Build and write the primary lookup table */
-    l1 = calloc (cdevhdr.numl1tab, CCKD_L1TAB_SIZE);
-    rc = write (ofd, l1, cdevhdr.numl1tab * CCKD_L1TAB_SIZE);
+    l1 = calloc (cdevhdr.numl1tab, CCKD_L1ENT_SIZE);
+    rc = write (ofd, l1, cdevhdr.numl1tab * CCKD_L1ENT_SIZE);
 
     /* get buffers */
     buf = malloc (trksz);
@@ -370,7 +370,7 @@ int             z=-1;                   /* Compression value         */
     /* Start reading/writing tracks */
     fileseq = 0;
     ifd = ckdfd[fileseq];
-    pos = CCKD_L1TAB_POS + cdevhdr.numl1tab * CCKD_L1TAB_SIZE;
+    pos = CCKD_L1TAB_POS + cdevhdr.numl1tab * CCKD_L1ENT_SIZE;
     l1x = 0;
     l2pos = 0;
     for (i = 0; i < ckdtrks; i++)
@@ -387,21 +387,21 @@ int             z=-1;                   /* Compression value         */
         {
             if (l2pos > 0)
             { /* write the old secondary table if it's not empty */
-                if (l2pos + 256 * CCKD_L2TAB_SIZE == pos)
+                if (l2pos + CCKD_L2TAB_SIZE == pos)
                     pos = l2pos;
                 else
                 {
                     l1[l1x] = l2pos;
                     rc = lseek (ofd, l2pos, SEEK_SET);
-                    rc = write (ofd, &l2, 256 * CCKD_L2TAB_SIZE);
+                    rc = write (ofd, &l2, CCKD_L2TAB_SIZE);
                 }
                 l1x++;
             }
             l2pos = pos;
-            memset (&l2, 0, 256 * CCKD_L2TAB_SIZE);
+            memset (&l2, 0, CCKD_L2TAB_SIZE);
             rc = lseek (ofd, l2pos, SEEK_SET);
-            rc = write (ofd, &l2, 256 * CCKD_L2TAB_SIZE);
-            pos += 256 * CCKD_L2TAB_SIZE;
+            rc = write (ofd, &l2, CCKD_L2TAB_SIZE);
+            pos += CCKD_L2TAB_SIZE;
         }
 
         /* read the track image */
@@ -410,7 +410,7 @@ int             z=-1;                   /* Compression value         */
         /* get track image length */
         buflen = trk_len (buf, i, heads, trksz);
 
-        if (buflen != CCKD_NULLRCD_SIZE)
+        if (buflen != CCKD_NULLTRK_SIZE)
         {
             switch (c)
             {
@@ -498,19 +498,19 @@ int             z=-1;                   /* Compression value         */
     /* update the last secondary lookup table */
     if (l2pos > 0)
     {
-        if (l2pos + 256 * CCKD_L2TAB_SIZE == pos)
+        if (l2pos + CCKD_L2TAB_SIZE == pos)
             pos = l2pos;
         else
         {
             l1[l1x] = l2pos;
             rc = lseek (ofd, l2pos, SEEK_SET);
-            rc = write (ofd, &l2, 256 * CCKD_L2TAB_SIZE);
+            rc = write (ofd, &l2, CCKD_L2TAB_SIZE);
         }
     }
 
     /* update the primary lookup table */
     rc = lseek (ofd, CCKD_L1TAB_POS, SEEK_SET);
-    rc = write (ofd, l1, cdevhdr.numl1tab * CCKD_L1TAB_SIZE);
+    rc = write (ofd, l1, cdevhdr.numl1tab * CCKD_L1ENT_SIZE);
 
     /* update the compressed device header */
     cdevhdr.size = pos;

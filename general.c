@@ -1,9 +1,10 @@
-/* GENERAL.C    (c) Copyright Roger Bowler, 1994-2000                */
+/* GENERAL.C    (c) Copyright Roger Bowler, 1994-2001                */
 /*              ESA/390 CPU Emulator                                 */
 
-/*              (c) Copyright Peter Kuschnerus, 1999 (UPT & CFC)     */
+/*              (c) Copyright Peter Kuschnerus, 1999-2001            */
+/*                                                   (UPT & CFC)     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all general instructions of the            */
@@ -1933,7 +1934,7 @@ U32     len1, len2;                     /* Operand lengths           */
 int     pair;                           /* 1=Store Unicode pair      */
 U16     uvwxy;                          /* Unicode work area         */
 U16     unicode1;                       /* Unicode character         */
-U16     unicode2;                       /* Unicode low surrogate     */
+U16     unicode2 = 0;                   /* Unicode low surrogate     */
 int     n;                              /* Number of UTF-8 bytes - 1 */
 BYTE    utf[4];                         /* UTF-8 bytes               */
 

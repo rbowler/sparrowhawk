@@ -1,7 +1,7 @@
-/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2000                */
+/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 Service Processor                            */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements service processor functions                */

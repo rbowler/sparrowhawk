@@ -1,4 +1,4 @@
-/* FLOAT.C      (c) Copyright Peter Kuschnerus, 2000                 */
+/* FLOAT.C      (c) Copyright Peter Kuschnerus, 2000-2001            */
 /*              ESA/390 Hex Floatingpoint Instructions               */
 
 /*-------------------------------------------------------------------*/

@@ -96,16 +96,7 @@ int             heads, cyls, devt;
 //      cdevhdr.compress = CCKD_COMPRESS_BZIP2;
 //      cdevhdr.compress_parm = 5;
 
-        /* garbage collection parameters:
-           algorithm, interval, iterations, size */
-
-//      cdevhdr.gcol[0] = {GC_COMBINE,    2, 8, 256*1024}; /* Critcal  */
-//      cdevhdr.gcol[1] = {GC_COMBINE,    4, 4, 128*1024}; /* Severe   */
-//      cdevhdr.gcol[2] = {GC_PERCOLATE,  8, 4,        0}; /* Moderate */
-//      cdevhdr.gcol[3] = {GC_PERCOLATE, 10, 2,        0}; /* Light    */
-//      cdevhdr.gcol[4] = {GC_PERCOLATE, 20, 1,  32*1024}; /* None     */
-
-//      memset (&cdevhdr.resv2, 0, 384);
+//      memset (&cdevhdr.resv2, 0, 464);
 
         lseek (fd, 0, SEEK_SET);
         write (fd, &devhdr, CKDDASD_DEVHDR_SIZE);

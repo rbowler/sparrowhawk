@@ -1,6 +1,6 @@
 /* OPCODE.H     Instruction decoding functions - 02/07/00 Jan Jaeger */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
 
 #if 0
 typedef void (*zz_func) (BYTE inst[], int execflag, REGS *regs);
@@ -784,6 +784,7 @@ void zz_obtain_local_lock (BYTE inst[], int execflag, REGS *regs);
 void zz_release_local_lock (BYTE inst[], int execflag, REGS *regs);
 void zz_obtain_cms_lock (BYTE inst[], int execflag, REGS *regs);
 void zz_release_cms_lock (BYTE inst[], int execflag, REGS *regs);
+void dummy_assist_instruction (BYTE inst[], int execflag, REGS *regs);
 
 /* Instructions in cmpsc.c */
 void zz_compression_call (BYTE inst[], int execflag, REGS *regs);

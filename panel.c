@@ -1,4 +1,4 @@
-/* PANEL.C      (c) Copyright Roger Bowler, 1999-2000                */
+/* PANEL.C      (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 Control Panel Commands                       */
 /*                                                                   */
 /*              Modified for New Panel Display =NP=                  */
@@ -777,9 +777,9 @@ int     n;                              /* Number of bytes in buffer */
 
 #if 0 /*ZZBUG*/
 
-         /* fetching operands from storage can go terribly wrong 
-            if either a addressing exception or a translation 
-            specification occurs.  This will cause a loop between 
+         /* fetching operands from storage can go terribly wrong
+            if either a addressing exception or a translation
+            specification occurs.  This will cause a loop between
             display_inst and progam_interrupt.  - Jan Jaeger  */
 
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
@@ -982,6 +982,10 @@ BYTE    c;                              /* Character work area       */
     return 0;
 } /* end function parse_range */
 
+void    cckd_sf_add (DEVBLK *);
+void    cckd_sf_remove (DEVBLK *, int);
+void    cckd_sf_newname (DEVBLK *, BYTE *);
+void    cckd_sf_stats (DEVBLK *);
 void    cckd_print_itrace (DEVBLK *);
 
 /*-------------------------------------------------------------------*/
@@ -1186,24 +1190,24 @@ BYTE   *cmdarg;                         /* -> Command argument       */
     if (memcmp(cmd,"panrate",7)==0)
     {
         int trate = 0;
-        switch (cmd[8]) 
+        switch (cmd[8])
         {
-            case 'f': 
+            case 'f':
                 sysblk.panrate = PANEL_REFRESH_RATE_FAST;
                 break;
-            case 's': 
+            case 's':
                 sysblk.panrate = PANEL_REFRESH_RATE_SLOW;
                 break;
             default:
                 sscanf(cmd+7,"%d", &trate);
                 if (trate >= (1000 / CLK_TCK) && trate < 5001)
                     sysblk.panrate = trate;
-        } 
+        }
         logmsg ("Panel refresh rate = %d millisecond(s)\n",sysblk.panrate);
         return NULL;
     }
 #endif /*PANEL_REFRESH_RATE */
-	    
+	
 
 #ifdef FEATURE_SYSTEM_CONSOLE
     /* .xxx and !xxx commands - send command or priority message
@@ -1796,7 +1800,65 @@ BYTE   *cmdarg;                         /* -> Command argument       */
             sysblk.pgminttr &= ~((U64)1 << (n - 1));
         else
             sysblk.pgminttr |= ((U64)1 << (n - 1));
-        
+
+        return NULL;
+    }
+
+    /* sf commands - shadow file add/remove/set/display */
+    if (memcmp(cmd,"sf",2)==0)
+    {
+        devascii = strtok(cmd+3," \t");
+
+        /* if `sfd*' then display status for all cckd disks */
+        if (memcmp (cmd, "sfd", 3) == 0 && strcmp (devascii, "*") == 0)
+        {
+            for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+                if (dev->cckd_ext) cckd_sf_stats (dev);
+            return NULL;
+        }
+
+        if (devascii == NULL
+            || sscanf(devascii, "%hx%c", &devnum, &c) != 1)
+        {
+            logmsg ("Device number %s is invalid\n", devascii);
+            return NULL;
+        }
+
+        devascii = strtok(NULL," \t");
+
+        dev = find_device_by_devnum (devnum);
+        if (dev == NULL)
+        {
+            logmsg ("Device number %4.4X not found\n", devnum);
+            return NULL;
+        }
+
+        switch (cmd[2]) {
+        case '+': cckd_sf_add (dev);
+                  break;
+
+        case '-': if (devascii == NULL
+                   || strcmp(devascii, "merge") == 0)
+                      cckd_sf_remove (dev, 1);
+                  else if (strcmp(devascii, "nomerge") == 0)
+                      cckd_sf_remove (dev, 0);
+                  else
+                      logmsg ("Operand must be `merge' or `nomerge'\n");
+                  break;
+
+        case '=': if (devascii != NULL)
+                      cckd_sf_newname (dev, devascii);
+                  else
+                      logmsg ("Shadow file name not specified\n");
+                  break;
+
+        case 'd': cckd_sf_stats (dev);
+                  break;
+
+        default:  logmsg ("Command must be `sf+', `sf-', `sf=' or `sfd'\n");
+                  break;
+        }
+
         return NULL;
     }
 
@@ -1931,6 +1993,7 @@ TID     cmdtid;                         /* Command thread identifier */
 BYTE    c;                              /* Character work area       */
 FILE   *confp;                          /* Console file pointer      */
 FILE   *logfp;                          /* Log file pointer          */
+FILE   *rcfp;                           /* RC file pointer           */
 struct termios kbattr;                  /* Terminal I/O structure    */
 BYTE    kbbuf[6];                       /* Keyboard input buffer     */
 int     kblen;                          /* Number of chars in kbbuf  */
@@ -1976,6 +2039,7 @@ struct  timeval tv;                     /* Select timeout structure  */
     /* Set up the input file descriptors */
     pipefd = sysblk.msgpiper;
     keybfd = STDIN_FILENO;
+    rcfp = fopen("hercules.rc", "r");
 
     /* Register the system cleanup exit routine */
     atexit (system_cleanup);
@@ -2002,7 +2066,7 @@ struct  timeval tv;                     /* Select timeout structure  */
         regs = sysblk.regs + sysblk.pcpu;
         /* If the requested CPU is offline, then take the first available CPU*/
         if(!regs->cpuonline)
-            for(sysblk.pcpu = 0, regs = sysblk.regs + sysblk.pcpu; 
+            for(sysblk.pcpu = 0, regs = sysblk.regs + sysblk.pcpu;
                 !regs->cpuonline; regs = sysblk.regs + ++sysblk.pcpu);
 
         /* Set the file descriptors for select */
@@ -2027,18 +2091,35 @@ struct  timeval tv;                     /* Select timeout structure  */
         }
 
         /* If keyboard input has arrived then process it */
-        if (FD_ISSET(keybfd, &readset))
+        if (rcfp || FD_ISSET(keybfd, &readset))
         {
-            /* Read character(s) from the keyboard */
-            kblen = read (keybfd, kbbuf, sizeof(kbbuf)-1);
-            if (kblen < 0)
+            kblen = 0;
+            if (rcfp)
             {
-                fprintf (stderr,
-                        "panel: keyboard read: %s\n",
-                        strerror(errno));
-                break;
+                /* Read a character from the RC file */
+                if ((rc = fgetc (rcfp)) == EOF)
+                {
+                    fclose(rcfp);
+                    rcfp = 0;
+                } else {
+                    kbbuf[0] = rc & 0xff;
+                    kblen = 1;
+                    kbbuf[kblen] = '\0';
+                }
             }
-            kbbuf[kblen] = '\0';
+            if (kblen == 0 && FD_ISSET(keybfd, &readset))
+            {
+                /* Read character(s) from the keyboard */
+                kblen = read (keybfd, kbbuf, sizeof(kbbuf)-1);
+                if (kblen < 0)
+                {
+                    fprintf (stderr,
+                            "panel: keyboard read: %s\n",
+                            strerror(errno));
+                    break;
+                }
+                kbbuf[kblen] = '\0';
+            }
 
             /* =NP= : Intercept NP commands & process */
 

@@ -1,7 +1,7 @@
-/* HERCULES.H	(c) Copyright Roger Bowler, 1999-2000		     */
+/* HERCULES.H	(c) Copyright Roger Bowler, 1999-2001		     */
 /*		ESA/390 Emulator Header File			     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* Header file containing Hercules internal data structures	     */
@@ -34,6 +34,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include "version.h"
+#include "hetlib.h"
 
 /*-------------------------------------------------------------------*/
 /* Macro definitions for implementation options 		     */
@@ -177,8 +178,6 @@
 #define _WINDOWS_H
 #define _WINSOCK_H
 #define HANDLE int
-#define NO_CCKD		/* disable cckd support for windows for the
-			   time being */
 #undef CLK_TCK
 #define CLK_TCK 100	/* fix timer tick rate */
 #endif
@@ -564,13 +563,13 @@ typedef struct _LASTPAGE {		/* Vector Facility Registers*/
             } \
         }
 #else
-#define CHECK_FRAGPTR(_r, _s) 
+#define CHECK_FRAGPTR(_r, _s)
 #endif
 #define LOAD_INST(_r) ibuf_loadinst(_r)
 #else
 #define REASSIGN_FRAG(_r)
 #define GET_FRAGENTRY(_r)
-#define CHECK_FRAGPTR(_r, _s) 
+#define CHECK_FRAGPTR(_r, _s)
 #define LOAD_INST(_r)
 #endif
 
@@ -610,7 +609,7 @@ typedef struct _LASTPAGE {		/* Vector Facility Registers*/
            } \
        };
 #else
-#define WATCH(_s) 
+#define WATCH(_s)
 #endif
 /*-------------------------------------------------------------------*/
 /* Structure definition for CPU register context		     */
@@ -949,6 +948,14 @@ typedef struct _DEVBLK {
 	/* Device dependent fields for tapedev */
 	unsigned int			/* Flags		     */
 		readonly:1;		/* 1=Tape is write-protected */
+	struct				/* HET device parms	     */
+	{
+		U16	compress:1;	/* 1=Compression enabled     */
+		U16	method:3;	/* Compression method	     */
+		U16	level:4;	/* Compression level	     */
+		U16	chksize;	/* Chunk size                */
+	}	tdparms;		/* HET device parms	     */
+	HETB	*hetb;			/* HET control block	     */
 	BYTE	tapedevt;		/* Tape device type	     */
 	void   *omadesc;		/* -> OMA descriptor array   */
 	U16	omafiles;		/* Number of OMA tape files  */
@@ -997,7 +1004,10 @@ typedef struct _DEVBLK {
 		ckdwckd:1,		/* 1=Write R0 or Write CKD   */
 		ckdtrkof:1,		/* 1=Track ovfl on this blk  */
 		ckdlazywrt:1,		/* 1=Lazy write on trk update*/
-		ckdnoftio:1; 		/* 1=No full track i/o       */
+		ckdnoftio:1, 		/* 1=No full track i/o       */
+		ckdrdonly:1, 		/* 1=Open read only          */
+		ckdfakewrt:1; 		/* 1=Fake successful write
+					     for read only file      */
 	U16	ckdcyls;		/* Number of cylinders	     */
 	U16	ckdtrks;		/* Number of tracks	     */
 	U16	ckdheads;		/* #of heads per cylinder    */
@@ -1045,6 +1055,7 @@ typedef struct _DEVBLK {
 	int 	ckdcachenbr;		/* Cache table size          */
 	int	ckdcachehits;		/* Cache hits                */
 	int	ckdcachemisses;		/* Cache misses              */
+	BYTE	ckdsfn[256];		/* Shadow file name	     */
 	void   *cckd_ext;		/* -> Compressed ckddasd
 					   extension otherwise NULL  */
     } DEVBLK;
@@ -1101,15 +1112,6 @@ typedef struct _CKDDASD_CACHE {		/* Cache entry               */
 /*-------------------------------------------------------------------*/
 /* Structure definitions for Compressed CKD devices                  */
 /*-------------------------------------------------------------------*/
-typedef struct _CCKD_GCOL {             /* Garbage collection parms  */
-        U32              algorithm;     /* Algorithm                 */
-        U32              interval;      /* Collection interval (sec) */
-        U32              iterations;    /* Iterations per interval   */
-        U32              size;          /* Bytes per iteration       */
-    } CCKD_GCOL;
-#define GC_PERCOLATE 0                  /*    Percolate free space   */
-#define GC_COMBINE   1                  /*    Combine free space     */
-
 typedef struct _CCKDDASD_DEVHDR {       /* Compress device header    */
 /*  0 */BYTE             vrm[3];        /* Version Release Modifier  */
 /*  3 */BYTE             options;       /* Options byte              */
@@ -1121,20 +1123,19 @@ typedef struct _CCKDDASD_DEVHDR {       /* Compress device header    */
 /* 24 */U32              free_total;    /* Total free space          */
 /* 28 */U32              free_largest;  /* Largest free space        */
 /* 32 */U32              free_number;   /* Number free spaces        */
-/* 36 */U32              free_imbed;    /* Imbedded free space       */
+/* 36 */U32              free_imbed;    /* [deprecated]              */
 /* 40 */FWORD            cyls;          /* Cylinders on device       */
 /* 44 */BYTE             resv1;         /* Reserved                  */
 /* 45 */BYTE             compress;      /* Compression algorithm     */
 /* 46 */S16              compress_parm; /* Compression parameter     */
-/* 48 */CCKD_GCOL        gcol[5];       /* Garbage collection parms  */
-/*128 */BYTE             resv2[384];    /* Reserved                  */
+/* 48 */BYTE             resv2[464];    /* Reserved                  */
     } CCKDDASD_DEVHDR;
 
 #define CCKD_VERSION           0
-#define CCKD_RELEASE           1
-#define CCKD_MODLVL            2
+#define CCKD_RELEASE           2
+#define CCKD_MODLVL            1
 
-#define CCKD_NOFUDGE           1
+#define CCKD_NOFUDGE           1         /* [deprecated]             */
 #define CCKD_BIGENDIAN         2
 #define CCKD_OPENED            128
 
@@ -1142,10 +1143,6 @@ typedef struct _CCKDDASD_DEVHDR {       /* Compress device header    */
 #define CCKD_FREEHDR           size
 #define CCKD_FREEHDR_SIZE      28
 #define CCKD_FREEHDR_POS       CKDDASD_DEVHDR_SIZE+12
-
-#define CCKD_GCHDR             gcol[0]
-#define CCKD_GCHDR_SIZE        80
-#define CCKD_GCHDR_POS         CKDDASD_DEVHDR_SIZE+48
 
 #define CCKD_COMPRESS_NONE     0
 #define CCKD_COMPRESS_ZLIB     1
@@ -1158,106 +1155,159 @@ typedef struct _CCKDDASD_DEVHDR {       /* Compress device header    */
 
 typedef struct _CCKD_DFWQE {            /* Defferred write queue elem*/
         struct _CCKD_DFWQE *next;       /* -> next queue element     */
-        void            *buf;           /* Buffer address            */
-        unsigned int     buflen;        /* Buffer length             */
         unsigned int     trk;           /* Track number              */
+        void            *buf;           /* Buffer                    */
         unsigned int     busy:1,        /* Busy indicator            */
                          retry:1;       /* Retry write               */
-        BYTE             compress;      /* Compression algorithm     */
     } CCKD_DFWQE;
 
-typedef struct _CCKD_L2TAB {            /* Level 2 table entry       */
-        U32              pos;           /* Track image positon       */
-        U16              len;           /* Track image length        */
-        U16              size;          /* Track image size          */
-    } CCKD_L2TAB;
+typedef struct _CCKD_L2ENT {            /* Level 2 table entry       */
+        U32              pos;           /* Track offset              */
+        U16              len;           /* Track length              */
+        U16              size;          /* Track size [deprecated]   */
+    } CCKD_L2ENT;
+typedef CCKD_L2ENT     CCKD_L2TAB[256]; /* Level 2 table             */
 
-typedef U32              CCKD_L1TAB;    /* Level 1 table entry       */
+typedef U32            CCKD_L1ENT;      /* Level 1 table entry       */
+typedef CCKD_L1ENT     CCKD_L1TAB[];    /* Level 1 table             */
 
 typedef struct _CCKD_FREEBLK {          /* Free block                */
         U32              pos;           /* Position next free blk    */
         U32              len;           /* Length this free blk      */
+	int		 prev;          /* Index to prev free blk    */
+        int              next;          /* Index to next free blk    */
+        int              cnt;           /* Garbage Collection count  */
     } CCKD_FREEBLK;
 
 typedef struct _CCKD_CACHE {		/* Cache structure           */
-	unsigned int     trk;		/* Cached track number       */
-	unsigned char   *buf;		/* Cached buffer address     */
+	int		 trk;		/* Cached track number       */
+	int		 sfx;		/* Cached l2tab file index   */
+	int		 l1x;		/* Cached l2tab index        */
+	BYTE		*buf;		/* Cached buffer address     */
 	struct timeval	 tv;		/* Time last used            */
-        unsigned int     active:1,      /* Cache buf is the active 1 */
-                         used:1,        /* Cache buf was used        */
+        unsigned int     used:1,        /* Cache entry was used      */
                          updated:1,     /* Cache buf was updated     */
-                         wrtpending:1,  /* Cache buf pending write   */
-                         writing:1,     /* Cache buf being written   */
                          reading:1,     /* Cache buf being read      */
+                         writing:1,     /* Cache buf being written   */
                          waiting:1;     /* Thread waiting for i/o    */
-        BYTE             compress;      /* Compression for track     */
     } CCKD_CACHE;
 
+#define CCKDDASD_DEVHDR_SIZE   sizeof(CCKDDASD_DEVHDR)
+#define CCKD_L1ENT_SIZE        sizeof(CCKD_L1ENT)
+#define CCKD_L1TAB_POS         CKDDASD_DEVHDR_SIZE+CCKDDASD_DEVHDR_SIZE
+#define CCKD_L2ENT_SIZE        sizeof(CCKD_L2ENT)
+#define CCKD_L2TAB_SIZE        sizeof(CCKD_L2TAB)
+#define CCKD_DFWQE_SIZE        sizeof(CCKD_DFWQE)
+#define CCKD_FREEBLK_SIZE      8
+#define CCKD_FREEBLK_ISIZE     sizeof(CCKD_FREEBLK)
+#define CCKD_CACHE_SIZE        sizeof(CCKD_CACHE)
+#define CCKD_NULLTRK_SIZE      37
+#define GC_COMBINE_LO          0
+#define GC_COMBINE_HI          1
+
+/* adjustable values */
+
+#define CCKD_L2CACHE_NBR       32       /* Number of secondary lookup
+                                           tables that will be cached
+                                           in storage                */
+#define CCKD_MAX_WRITE_TIME    60       /* Number of seconds a track
+                                           image remains idle until
+                                           it is written             */ 
+#define CCKD_COMPRESS_MIN      512      /* Track images smaller than
+                                           this won't be compressed  */
+#define CCKD_MAX_SF            8        /* Maximum number of shadow
+                                           files: 0 to 9 [0 disables
+                                           shadow file support]      */
+#define CCKD_MAX_RA            9        /* Number of readahead
+                                           threads: 1 - 9            */ 
+#define CCKD_MAX_DFW           9        /* Number of deferred write
+                                           threads: 1 - 9            */
+#define CCKD_MAX_DFWQ_DEPTH    64       /* Track reads will be locked
+                                           when the deferred-write-
+                                           queue gets this large     */
+
 typedef struct _CCKDDASD_EXT {          /* Ext for compressed ckd    */
-        off_t            curpos;        /* Current ckd file position */
-        CCKD_CACHE      *active;        /* Active cache entry        */
-        unsigned int     lasttrk;       /* Previous track            */
-        unsigned int     curtrk;        /* Current track             */
-        unsigned int     nexttrk;       /* Next track                */
-        off_t            trkpos;        /* Current track position    */
-        unsigned char    compress;      /* Compression algorithm     */
+        unsigned int     curpos;        /* Current ckd file position */
+        unsigned int     trkpos;        /* Current track position    */
+        int              curtrk;        /* Current track             */
         unsigned int     writeinit:1,   /* Write threads init'd      */
                          gcinit:1,      /* Garbage collection init'd */
-                         rainit:1,      /* Read-ahead thread init'd  */
                          threading:1,   /* Threading is active       */
-                         write:1;       /* Deprecated                */
-        unsigned int     writetime;     /* Deprecated                */
-        int              ramisses;      /* Deprecated                */
-        unsigned int     reads;         /* Total number reads        */
-        unsigned int     writes;        /* Total number writes       */
+                         l1updated:1,   /* Level 1 table updated     */
+                         l2updated:1;   /* Level 2 table updated     */
         LOCK             filelock;      /* File lock                 */
-        CCKDDASD_DEVHDR  cdevhdr;       /* Cckd device header        */
-        CCKD_L1TAB      *l1tab;         /* Level 1 table address     */
-        unsigned char   *buf;           /* Buffer address            */
-        unsigned char   *cbuf;          /* Compressed buffer address */
+        CCKDDASD_DEVHDR  cdevhdr[CCKD_MAX_SF+1];/* cckd device hdr   */
+        CCKD_L1ENT      *l1[CCKD_MAX_SF+1]; /* Level 1 tables        */
+        int              fd[CCKD_MAX_SF+1]; /* File descriptors      */
+        BYTE             swapend[CCKD_MAX_SF+1]; /* Swap endian flag */
+        BYTE             open[CCKD_MAX_SF+1];    /* Open flag        */
+        int              sfn;           /* Number active shadow files*/
+        int              sfx;           /* Active level 2 file index */
+        int              l1x;           /* Active level 2 table index*/
+        CCKD_L2ENT      *l2;            /* Active level 2 table      */
+        CCKD_CACHE      *l2cache;       /* Level 2 table cache       */
+        CCKD_FREEBLK    *free;          /* Internal free space chain */
+        int              freenbr;       /* Number free space entries */
+        int              free1st;       /* Index of 1st entry        */
+        int              freeavail;     /* Index of available entry  */
         COND             gccond;        /* GC condition              */
         LOCK             gclock;        /* GC lock                   */
         ATTR             gcattr;        /* GC thread attribute       */
         TID              gctid;         /* GC thread id              */
         time_t           gctime;        /* GC last collection        */
-        char            *gcbuf;         /* GC buffer address         */
-        unsigned int     gcbuflen;      /* GC buffer length          */
+        BYTE            *gcbuf;         /* GC buffer address         */
+        int              gcbuflen;      /* GC buffer length          */
         int              gcl1x;         /* GC lvl 1 index (see gclen)*/
         int              gcl2x;         /* GC lvl 2 index (see gclen)*/
-        CCKD_L2TAB       gcl2tab;       /* GC lvl 2 entry (see gclen)*/
-        unsigned int     gctrkgrp;      /* GC lvl 1 index for trim   */
+        int              dfwid;         /* Deferred write id         */
+        int              dfwaiting;     /* Deferred write waiting    */
         ATTR             dfwattr;       /* Deferred write thread attr*/
         TID              dfwtid;        /* Deferred write thread id  */
         LOCK             dfwlock;       /* Deferred write lock       */
         COND             dfwcond;       /* Deferred write condition  */
         CCKD_DFWQE      *dfwq;          /* Deffered write queue      */
-        ATTR             raattr;        /* Read-ahead thread attr    */
-        TID              ratid;         /* Read-ahead thread id      */
-        LOCK             ralock;        /* Read-ahead lock           */
-        COND             racond;        /* Read-ahead condition      */
+        int              dfwqdepth;     /* Deffered write q depth    */
+	int		 ra;		/* Readahead index           */
+#if (CCKD_MAX_RA > 0)
+        int              rainit[CCKD_MAX_RA]; /* Readahead init'd    */
+        ATTR             raattr[CCKD_MAX_RA]; /* Readahead attr      */
+        TID              ratid[CCKD_MAX_RA];  /* Readahead thread id */
+        LOCK             ralock[CCKD_MAX_RA]; /* Readahead lock      */
+        COND             racond[CCKD_MAX_RA]; /* Readahead condition */
+        int              ratrk[CCKD_MAX_RA];  /* Readahead track     */
+#endif
         COND             rtcond;        /* Read track condition      */
 	LOCK		 cachelock;	/* Cache lock                */
-	int		 cachenbr;      /* Cache number entries      */
-        int              cachemisses;   /* Cache misses              */
-        int     	 cachehits;     /* Cache hits                */
-        int              cacheunused;   /* Cache entries not used    */
 	CCKD_CACHE	*cache;		/* Cache pointer             */
-	unsigned int	 readaheads;    /* Number trks read ahead    */
+        CCKD_CACHE      *active;        /* Active cache entry        */
+        BYTE            *cachebuf[CCKD_MAX_RA+1];/* Buffers for read */
+        int              reads[CCKD_MAX_SF+1];   /* Nbr track reads  */
+        int              l2reads[CCKD_MAX_SF+1]; /* Nbr l2 reads     */
+        int              writes[CCKD_MAX_SF+1];  /* Nbr track writes */
+        int              totreads;      /* Total nbr trk reads       */
+        int              totwrites;     /* Total nbr trk writes      */
+        int              totl2reads;    /* Total nbr l2 reads        */
+        int              cachehits;     /* Cache hits                */
+	int     	 readaheads;    /* Number trks read ahead    */
+        int              switches;      /* Number trk switches       */
+        int              misses;        /* Number readahead misses   */
+        int              l2cachenbr;    /* Size of level 2 cache     */
+        int              max_dfwq;      /* Max size of dfw queue     */
+        int              max_ra;        /* Max nbr readahead threads */
+        int              max_dfw;       /* Max nbr dfw threads       */
+        int              max_wt;        /* Max write wait time       */
+        LOCK             termlock;      /* Termination lock          */
+        COND             termcond;      /* Termination condition     */
 #ifdef  CCKD_ITRACEMAX
         char            *itrace;        /* Internal trace table      */
         int              itracex;       /* Internal trace index      */
 #endif
     } CCKDDASD_EXT;
 
-#define CCKDDASD_DEVHDR_SIZE   sizeof(CCKDDASD_DEVHDR)
-#define CCKD_L1TAB_SIZE        sizeof(CCKD_L1TAB)
-#define CCKD_L1TAB_POS         CKDDASD_DEVHDR_SIZE+CCKDDASD_DEVHDR_SIZE
-#define CCKD_L2TAB_SIZE        sizeof(CCKD_L2TAB)
-#define CCKD_DFQWE_SIZE        sizeof(CCKD_DFWQE)
-#define CCKD_FREEBLK_SIZE      sizeof(CCKD_FREEBLK)
-#define CCKD_CACHE_SIZE        sizeof(CCKD_CACHE)
-#define CCKD_NULLRCD_SIZE      37
-#define CCKD_MAX_WRITE_TIME    5
+#define CCKD_OPEN_NONE         0
+#define CCKD_OPEN_RO           1
+#define CCKD_OPEN_RD           2
+#define CCKD_OPEN_RW           3
 
 /*-------------------------------------------------------------------*/
 /* Global data areas in module config.c 			     */

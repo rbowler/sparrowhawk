@@ -294,7 +294,7 @@ the device record is:
 <p>
 <a name="tapedev">
 <dt><em>Emulated tape devices</em>
-<dd>Three type of emulation are supported:
+<dd>Four types of emulation are supported:
     <dl>
     <p><dt><b>SCSI tapes</b>
     <dd>The argument specifies the tape device name (usually
@@ -338,6 +338,53 @@ the device record is:
         used by the P/390.
         The argument specifies the location of the AWSTAPE file
         (for example <b><i>ickdsf.ipl</i></b>)
+    <p><dt><b>HET files</b>
+    <dd>These contain a complete tape in one file and have the same
+        structure as the AWSTAPE format with the added ability to have
+        compressed data.
+        The first argument specifies the location of the HET file.  The
+        filename must end with ".het" to be recognized by Hercules as an
+        HET file.
+        (for example <b><i>023178.het</i></b>)
+        <p>Additional arguments that allow you to control various HET settings
+        are:
+        <dl>
+            <dt><code>AWSTAPE</code>
+            <dd>The <b><i>AWSTAPE</i></b> argument causes HET files to
+                be written in AWSTAPE format.  This basically, disables
+                the additional features provided by the HET format.
+            <dt><code>COMPRESS=<em>n</em></code>
+            <dt><code>IDRC=<em>n</em></code>
+            <dd><b><i>COMPRESS</i></b> and <b><i>IDRC</i></b> control
+                whether compression should be used when writing to HET
+                files.  The value <code><em>n</em></code> can be <b>1</b>
+                to turn on compression (the default) or <b>0</b> to turn
+                it off.  <b><i>IDRC</i></b> is a currently a synonym for
+                <b><i>COMPRESS</i></b>, but may be used in the future to
+                control other emulated tape drive features.
+            <dt><code>METHOD=<em>n</em></code>
+            <dd>The <b><i>METHOD</i></b> option allows you to specify
+                which compression method to use.  You may specify
+                <b><i>1</i></b> for ZLIB compression or <b><i>2</i></b>
+                for BZIP2 compression.  The default is <b><i>1</i></b>.
+            <dt><code>LEVEL=<em>n</em></code>
+            <dd>The <b><i>LEVEL</i></b> option controls the level of
+                compression.  It ranges from <b><i>1</i></b> for fastest
+                compression to <b><i>9</i></b> for best compression.
+                The default is <b><i>4</i></b>.
+            <dt><code>CHUNKSIZE=<em>nnnnn</em></code>
+            <dd>The <b><i>CHUNKSIZE</i></b> option allows you to create
+				HET files that contain different chunk sizes.  The AWSTAPE
+				(and therefore the HET) format allows each tape block to be
+				logically broken up into smaller chunks.  For instance, if
+				your S/3x0 application creates tapes with a block size of
+				27998, those blocks would be broken down into
+				<code><em>nnnnn</em></code> sized chunks.  To be honest, I
+				can't think of a reason you'd want to change this since 
+				decreasing it may reduce compression performance, but it's
+				there if you want it.  The range is from <b><i>4096</i></b>
+				to <b><i>65535</i></b>.  The latter being the default.
+        </dl>
     </dl>
 <p>
 <a name="ctca">
@@ -405,6 +452,6 @@ If you have a question about Hercules, see the
 <a href="hercinst.html"><img src="gifs/back.gif" border=0 alt="back"></a>
 </center>
 <small>
-<p>Last updated 3 September 2000
+<p>Last updated 18 January 2001
 </BODY>
 </HTML>

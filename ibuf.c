@@ -1,4 +1,4 @@
-/* IBUF.C       (c) Copyright Juergen Dobrinski, 1994-2000                */
+/* IBUF.C       (c) Copyright Juergen Dobrinski, 1994-2001                */
 /*              Instruction prefetch and buffering                        */
 
 #include "hercules.h"

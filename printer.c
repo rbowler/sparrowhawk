@@ -1,4 +1,4 @@
-/* PRINTER.C    (c) Copyright Roger Bowler, 1999                     */
+/* PRINTER.C    (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 Line Printer Device Handler                  */
 
 /*-------------------------------------------------------------------*/
@@ -264,7 +264,7 @@ BYTE            c;                      /* Print character           */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
-    case 0x03:
+    case 0x03: case 0x37:
     /*---------------------------------------------------------------*/
     /* CONTROL NO-OPERATION                                          */
     /*---------------------------------------------------------------*/

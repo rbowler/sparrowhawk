@@ -8,7 +8,7 @@
 /* copy function. Compress and expand just copies the data. So  */
 /* compressed on hercules will also expand ;-).                 */
 /*                                                              */
-/*                      2000 (c) Copyright Bernard van der Helm */
+/*                      2001 (c) Copyright Bernard van der Helm */
 /*--------------------------------------------------------------*/
 
 #include "hercules.h"

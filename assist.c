@@ -1,4 +1,4 @@
-/* ASSIST.C     (c) Copyright Roger Bowler, 1999                     */
+/* ASSIST.C     (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 MVS Assist Routines                          */
 
 /*-------------------------------------------------------------------*/
@@ -8,6 +8,8 @@
 
 /*              Instruction decode rework - Jan Jaeger               */
 /*              Correct address wraparound - Jan Jaeger              */
+/*              Add dummy assist instruction - Jay Maynard,          */
+/*                  suggested by Brandon Hill                        */
 
 #include "hercules.h"
 
@@ -393,3 +395,23 @@ U32     newia;                          /* Unsuccessful branch addr  */
 
 } /* end function release_cms_lock */
 
+/*-------------------------------------------------------------------*/
+/* E5xx       - Dummy assist instruction                       [SSE] */
+/*-------------------------------------------------------------------*/
+/* This routine may be used to no-op any instruction desired, while  */
+/* making SIE happy. It was originally used to dummy out the MVS/XA- */
+/* specific instruction E503.                                        */
+/*-------------------------------------------------------------------*/
+void dummy_assist_instruction (BYTE inst[], int execflag, REGS *regs)
+{
+    LOAD_INST(regs);
+
+    if( !execflag )
+    {
+        regs->psw.ilc = (inst[0] < 0x40) ? 2 :
+                        (inst[0] < 0xC0) ? 4 : 6;
+        regs->psw.ia += regs->psw.ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
+
+} /* end function dummy_assist_instruction */

@@ -1,7 +1,7 @@
-/* STACK.C      (c) Copyright Roger Bowler, 1999-2000                */
+/* STACK.C      (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 Linkage Stack Operations                     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the linkage stack functions of ESA/390     */
