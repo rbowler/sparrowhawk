@@ -65,6 +65,9 @@ int     i;                              /* Array subscript           */
     dev->cardpos = 0;
     dev->cardrem = CARD_LENGTH;
 
+    if(!sscanf(dev->typname,"%hx",&(dev->devtype)))
+        dev->devtype = 0x3525;
+
     /* Process the driver arguments */
     for (i = 1; i < argc; i++)
     {
@@ -297,10 +300,40 @@ BYTE            c;                      /* Output character          */
 } /* end function cardpch_execute_ccw */
 
 
+#if defined(OPTION_DYNAMIC_LOAD)
+static
+#endif
 DEVHND cardpch_device_hndinfo = {
         &cardpch_init_handler,
         &cardpch_execute_ccw,
         &cardpch_close_device,
         &cardpch_query_device,
-        NULL, NULL, NULL, NULL
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 };
+
+/* Libtool static name colision resolution */
+/* note : lt_dlopen will look for symbol & modulename_LTX_symbol */
+#if !defined(HDL_BUILD_SHARED) && defined(HDL_USE_LIBTOOL)
+#define hdl_ddev hdt3525_LTX_hdl_ddev
+#define hdl_depc hdt3525_LTX_hdl_depc
+#define hdl_reso hdt3525_LTX_hdl_reso
+#define hdl_init hdt3525_LTX_hdl_init
+#define hdl_fini hdt3525_LTX_hdl_fini
+#endif
+
+
+#if defined(OPTION_DYNAMIC_LOAD)
+HDL_DEPENDENCY_SECTION;
+{
+     HDL_DEPENDENCY(HERCULES);
+     HDL_DEPENDENCY(DEVBLK);
+}
+END_DEPENDENCY_SECTION;
+
+
+HDL_DEVICE_SECTION;
+{
+    HDL_DEVICE(3525, cardpch_device_hndinfo );
+}
+END_DEVICE_SECTION;
+#endif

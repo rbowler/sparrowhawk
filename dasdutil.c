@@ -27,8 +27,11 @@ static BYTE eighthexFF[] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
 static BYTE iplpsw[8]    = {0x00,0x06,0x00,0x00,0x00,0x00,0x00,0x0F};
 static BYTE iplccw1[8]   = {0x03,0x00,0x00,0x00,0x00,0x00,0x00,0x01};
 static BYTE iplccw2[8]   = {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+static int  nextnum = 0;
 
-SYSBLK sysblk; /* Currently only used for codepage mapping */
+#if 0
+SYSBLK sysblk; /* Currently required for shared.c */
+#endif
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to convert a null-terminated string to upper case      */
@@ -59,18 +62,9 @@ int     i;                              /* Array subscript           */
 /*-------------------------------------------------------------------*/
 void convert_to_ebcdic (BYTE *dest, int len, BYTE *source)
 {
-char   *scodepage;
 int     i;                              /* Array subscript           */
 
-    /* set_codepage() uses the logmsg macro which requires msgpipew */
-    sysblk.msgpipew = stdout;
-    if(!sysblk.codepage)
-    {
-        if((scodepage = getenv("HERCULES_CP")))
-            set_codepage(scodepage);
-        else
-            set_codepage("default");
-    }
+    set_codepage(NULL);
 
     for (i = 0; i < len && source[i] != '\0'; i++)
         dest[i] = host_to_guest(source[i]);
@@ -88,17 +82,8 @@ int     i;                              /* Array subscript           */
 int make_asciiz (BYTE *dest, int destlen, BYTE *src, int srclen)
 {
 int             len;                    /* Result length             */
-char   *scodepage;
 
-    /* set_codepage() uses the logmsg macro which requires msgpipew */
-    sysblk.msgpipew = stdout;
-    if(!sysblk.codepage)
-    {
-        if((scodepage = getenv("HERCULES_CP")))
-            set_codepage(scodepage);
-        else
-            set_codepage("default");
-    }
+    set_codepage(NULL);
 
 
     for (len=0; len < srclen && len < destlen-1; len++)
@@ -124,18 +109,8 @@ BYTE            hex_chars[64];
 BYTE            prev_hex[64] = "";
 int             firstsame = 0;
 int             lastsame = 0;
-char   *scodepage;
 
-    /* set_codepage() uses the logmsg macro which requires msgpipew */
-    sysblk.msgpipew = stdout;
-    if(!sysblk.codepage)
-    {
-        if((scodepage = getenv("HERCULES_CP")))
-            set_codepage(scodepage);
-        else
-            set_codepage("default");
-    }
-
+    set_codepage(NULL);
 
     pchar = (unsigned char*)addr;
 
@@ -214,6 +189,7 @@ char   *scodepage;
 int read_track (CIFBLK *cif, int cyl, int head)
 {
 int             rc;                     /* Return code               */
+int             trk;                    /* Track number              */
 DEVBLK         *dev;                    /* -> CKD device block       */
 BYTE            unitstat;               /* Unit status               */
 
@@ -227,24 +203,26 @@ BYTE            unitstat;               /* Unit status               */
     {
         cif->trkmodif = 0;
         if (verbose) /* Issue progress message */
-           fprintf (stdout, "HHCDU001I Updating cyl %d head %d\n",
+           fprintf (stdout, _("HHCDU001I Updating cyl %d head %d\n"),
                     cif->curcyl, cif->curhead);
-        rc = (dev->ckdupdtrk)(dev, NULL, cif->trksz, &unitstat);
+        trk = (cif->curcyl * cif->heads) + cif->curhead;
+        rc = (dev->hnd->write)(dev, trk, 0, NULL, cif->trksz, &unitstat);
         if (rc < 0)
         {
-            fprintf (stderr, "HHCDU002E %s write track error: stat=%2.2X\n",
+            fprintf (stderr, _("HHCDU002E %s write track error: stat=%2.2X\n"),
                     cif->fname, unitstat);
             return -1;
         }
     }
 
     if (verbose) /* Issue progress message */
-       fprintf (stdout, "HHCDU003I Reading cyl %d head %d\n", cyl, head);
+       fprintf (stdout, _("HHCDU003I Reading cyl %d head %d\n"), cyl, head);
 
-    rc = (dev->ckdrdtrk)(dev, cyl, head, &unitstat);
+    trk = (cyl * cif->heads) + head;
+    rc = (dev->hnd->read)(dev, trk, &unitstat);
     if (rc < 0)
     {
-        fprintf (stderr, "HHCDU004E %s read track error: stat=%2.2X\n",
+        fprintf (stderr, _("HHCDU004E %s read track error: stat=%2.2X\n"),
                 cif->fname, unitstat);
         return -1;
     }
@@ -365,7 +343,7 @@ int             dl;                     /* Data length               */
     if (verbose)
     {
        fprintf (stdout,
-               "HHCDU005I Searching extent %d begin (%d,%d) end (%d,%d)\n",
+               _("HHCDU005I Searching extent %d begin (%d,%d) end (%d,%d)\n"),
                cext, ccyl, chead, ecyl, ehead);
     }
 
@@ -437,7 +415,7 @@ int             dl;                     /* Data length               */
        if (verbose)
        {
            fprintf (stdout,
-                   "HHCDU006I Searching extent %d begin (%d,%d) end (%d,%d)\n",
+                   _("HHCDU006I Searching extent %d begin (%d,%d) end (%d,%d)\n"),
                    cext, ccyl, chead, ecyl, ehead);
        }
 
@@ -498,7 +476,7 @@ int             extsize;                /* Extent size in tracks     */
     } /* end for(i) */
 
     fprintf (stderr,
-            "HHCDU007E Track %d not found in extent table\n",
+            _("HHCDU007E Track %d not found in extent table\n"),
             tt);
     return -1;
 
@@ -525,30 +503,31 @@ CKDDASD_DEVHDR  devhdr;                 /* CKD device header         */
 CIFBLK         *cif;                    /* CKD image file descriptor */
 DEVBLK         *dev;                    /* CKD device block          */
 CKDDEV         *ckd;                    /* CKD DASD table entry      */
-BYTE           *sfxptr;                 /* -> Last char of file name */
-U16             devnum;                 /* Device number             */
-BYTE            c;                      /* Work area for sscanf      */
+BYTE           *rmtdev;                 /* Possible remote device    */
 BYTE           *argv[2];                /* Arguments to              */
 int             argc=0;                 /*                           */
 BYTE            sfxname[1024];          /* Suffixed file name        */
+BYTE            typname[64];
 
     /* Obtain storage for the file descriptor structure */
     cif = (CIFBLK*) calloc (sizeof(CIFBLK), 1);
     if (cif == NULL)
     {
         fprintf (stderr,
-                "HHCDU008E Cannot obtain storage for device descriptor "
-                "buffer: %s\n",
+                _("HHCDU008E Cannot obtain storage for device descriptor "
+                "buffer: %s\n"),
                 strerror(errno));
         return NULL;
     }
 
     /* Initialize the devblk */
     dev = &cif->devblk;
-    dev->msgpipew = stderr;
     if ((omode & O_RDWR) == 0) dev->ckdrdonly = 1;
     dev->batch = 1;
     dev->dasdcopy = dasdcopy;
+
+    /* If the filename has a `:' then it may be a remote device */
+    rmtdev = strchr(fname, ':');
 
     /* Read the device header so we can determine the device type */
     strcpy (sfxname, fname);
@@ -585,63 +564,66 @@ BYTE            sfxname[1024];          /* Suffixed file name        */
             }
             else
             {
-                if (strlen(sfxname) < 2 || sfname[strlen(sfxname)-2] == '_')
+                if (strlen(sfxname) < 2 || sfxname[strlen(sfxname)-2] != '_')
                     strcat (sfxname, "_1");
                 suffix = sfxname + strlen(sfxname) - 1;
             }
             *suffix = '1';
             fd = open (sfxname, omode);
         }
-        if (fd<0)
+        if (fd < 0 && rmtdev == NULL)
         {
-            fprintf (stderr, "HHCDU009E Cannot open %s: %s\n",
+            fprintf (stderr, _("HHCDU009E Cannot open %s: %s\n"),
                      fname, strerror(errno));
             free (cif);
             return NULL;
         }
-    }
-    len = read (fd, &devhdr, CKDDASD_DEVHDR_SIZE);
-    if (len < 0)
-    {
-        fprintf (stderr, "HHCDU010E %s read error: %s\n",
-                 fname, strerror(errno));
-        close (fd);
-        free (cif);
-        return NULL;
-    }
-    close (fd);
-    if (len < (int)CKDDASD_DEVHDR_SIZE
-     || (memcmp(devhdr.devid, "CKD_P370", 8)
-      && memcmp(devhdr.devid, "CKD_C370", 8)))
-    {
-        fprintf (stderr, "HHCDU011E %s CKD header invalid\n", fname);
-        free (cif);
-        return NULL;
+        else if (fd < 0) strcpy (sfxname, fname);
     }
 
-    /* Set the device type */
-    ckd = dasd_lookup (DASD_CKDDEV, NULL, devhdr.devtype, 0);
-    if (ckd == NULL)
+    /* If not a possible remote devic, check the dasd header
+       and set the device type */
+    if (fd >= 0)
     {
-        fprintf(stderr, "HHCDU012E DASD table entry not found for "
-                        "devtype 0x%2.2X\n",
-                devhdr.devtype);
-        free (cif);
-        return NULL;
+        len = read (fd, &devhdr, CKDDASD_DEVHDR_SIZE);
+        if (len < 0)
+        {
+            fprintf (stderr, _("HHCDU010E %s read error: %s\n"),
+                     fname, strerror(errno));
+            close (fd);
+            free (cif);
+            return NULL;
+        }
+        close (fd);
+        if (len < (int)CKDDASD_DEVHDR_SIZE
+         || (memcmp(devhdr.devid, "CKD_P370", 8)
+          && memcmp(devhdr.devid, "CKD_C370", 8)))
+        {
+            fprintf (stderr, _("HHCDU011E %s CKD header invalid\n"), fname);
+            free (cif);
+            return NULL;
+        }
+
+        /* Set the device type */
+        ckd = dasd_lookup (DASD_CKDDEV, NULL, devhdr.devtype, 0);
+        if (ckd == NULL)
+        {
+            fprintf(stderr, _("HHCDU012E DASD table entry not found for "
+                        "devtype 0x%2.2X\n"),
+                    devhdr.devtype);
+            free (cif);
+            return NULL;
+        }
+        dev->devtype = ckd->devt;
+        snprintf(typname,64,"%4.4X",dev->devtype);
+        dev->typname=typname;   /* Makes HDL Happy */
     }
-    dev->devtype = ckd->devt;
 
     /* Set the device handlers */
     dev->hnd = &ckddasd_device_hndinfo;
 
-    /* If the end of the filename is a valid device address then
-       use that as the device number, otherwise default to 0x0000 */
-    sfxptr = strrchr (fname, '/');
-    if (sfxptr == NULL) sfxptr = fname + 1;
-    sfxptr = strchr (sfxptr, '.');
-    if (sfxptr != NULL)
-        if (sscanf(sfxptr+1, "%hx%c", &devnum, &c) == 1)
-            dev->devnum = devnum;
+    /* Set the device number */
+    dev->devnum = ++nextnum;
 
     /* Build arguments for ckddasd_init_handler */
     argv[0] = sfxname;
@@ -656,11 +638,14 @@ BYTE            sfxname[1024];          /* Suffixed file name        */
     rc = (dev->hnd->init)(dev, argc, argv);
     if (rc < 0)
     {
-        fprintf (stderr, "HHCDU013E CKD initialization failed for %s\n",
+        fprintf (stderr, _("HHCDU013E CKD initialization failed for %s\n"),
                  fname);
         free (cif);
         return NULL;
     }
+
+    /* Call the device start exit */
+    if (dev->hnd->start) (dev->hnd->start) (dev);
 
     /* Set CIF fields */
     cif->fname = fname;
@@ -675,7 +660,7 @@ BYTE            sfxname[1024];          /* Suffixed file name        */
     if (verbose)
     {
        fprintf (stderr,
-               "HHCDU014I %s heads=%d trklen=%d\n",
+               _("HHCDU014I %s heads=%d trklen=%d\n"),
                cif->fname, cif->heads, cif->trksz);
     }
 
@@ -699,6 +684,7 @@ BYTE            sfxname[1024];          /* Suffixed file name        */
 int close_ckd_image (CIFBLK *cif)
 {
 int             rc;                     /* Return code               */
+int             trk;                    /* Track number              */
 DEVBLK         *dev;                    /* -> CKD device block       */
 BYTE            unitstat;               /* Unit status               */
 
@@ -708,15 +694,19 @@ BYTE            unitstat;               /* Unit status               */
     if (cif->trkmodif)
     {
         if (verbose) /* Issue progress message */
-           fprintf (stdout, "HHCDU015I Updating cyl %d head %d\n",
+           fprintf (stdout, _("HHCDU015I Updating cyl %d head %d\n"),
                     cif->curcyl, cif->curhead);
-        rc = (dev->ckdupdtrk)(dev, NULL, cif->trksz, &unitstat);
+        trk = (cif->curcyl * cif->heads) + cif->curhead;
+        rc = (dev->hnd->write)(dev, trk, 0, NULL, cif->trksz, &unitstat);
         if (rc < 0)
         {
-            fprintf (stderr, "HHCDU016E %s write track error: stat=%2.2X\n",
+            fprintf (stderr, _("HHCDU016E %s write track error: stat=%2.2X\n"),
                     cif->fname, unitstat);
         }
     }
+
+    /* Call the END exit */
+    if (dev->hnd->end) (dev->hnd->end) (dev);
 
     /* Close the CKD image file */
     (dev->hnd->close)(dev);
@@ -745,9 +735,6 @@ int             rc;                     /* Return code               */
 CIFBLK         *cif;                    /* FBA image file descriptor */
 DEVBLK         *dev;                    /* FBA device block          */
 FBADEV         *fba;                    /* FBA DASD table entry      */
-BYTE           *sfxptr;                 /* -> Last char of file name */
-U16             devnum;                 /* Device number             */
-BYTE            c;                      /* Work area for sscanf      */
 BYTE           *argv[2];                /* Arguments to              */
 int             argc=0;                 /*  device open              */
 
@@ -756,15 +743,14 @@ int             argc=0;                 /*  device open              */
     if (cif == NULL)
     {
         fprintf (stderr,
-                "HHCDU017E Cannot obtain storage for device descriptor "
-                "buffer: %s\n",
+                _("HHCDU017E Cannot obtain storage for device descriptor "
+                "buffer: %s\n"),
                 strerror(errno));
         return NULL;
     }
 
     /* Initialize the devblk */
     dev = &cif->devblk;
-    dev->msgpipew = stderr;
     if ((omode & O_RDWR) == 0) dev->ckdrdonly = 1;
     dev->batch = 1;
     dev->dasdcopy = dasdcopy;
@@ -773,8 +759,8 @@ int             argc=0;                 /*  device open              */
     fba = dasd_lookup (DASD_FBADEV, NULL, DEFAULT_FBA_TYPE, 0);
     if (fba == NULL)
     {
-        fprintf(stderr, "HHCDU018E DASD table entry not found for "
-                        "devtype 0x%2.2X\n",
+        fprintf(stderr, _("HHCDU018E DASD table entry not found for "
+                        "devtype 0x%2.2X\n"),
                 DEFAULT_FBA_TYPE);
         free (cif);
         return NULL;
@@ -784,14 +770,8 @@ int             argc=0;                 /*  device open              */
     /* Set the device handlers */
     dev->hnd = &fbadasd_device_hndinfo;
 
-    /* If the end of the filename is a valid device address then
-       use that as the device number, otherwise default to 0x0000 */
-    sfxptr = strrchr (fname, '/');
-    if (sfxptr == NULL) sfxptr = fname + 1;
-    sfxptr = strchr (sfxptr, '.');
-    if (sfxptr != NULL)
-        if (sscanf(sfxptr+1, "%hx%c", &devnum, &c) == 1)
-            dev->devnum = devnum;
+    /* Set the device number */
+    dev->devnum = ++nextnum;
 
     /* Build arguments for fbadasd_init_handler */
     argv[0] = fname;
@@ -806,7 +786,7 @@ int             argc=0;                 /*  device open              */
     rc = (dev->hnd->init)(dev, argc, argv);
     if (rc < 0)
     {
-        fprintf (stderr, "HHCDU019E FBA initialization failed for %s\n",
+        fprintf (stderr, _("HHCDU019E FBA initialization failed for %s\n"),
                  fname);
         free (cif);
         return NULL;
@@ -822,7 +802,7 @@ int             argc=0;                 /*  device open              */
     if (verbose)
     {
        fprintf (stderr,
-               "HHCDU020I %s sectors=%d size=%d\n",
+               _("HHCDU020I %s sectors=%d size=%d\n"),
                cif->fname, cif->heads, cif->trksz);
     }
 
@@ -868,7 +848,7 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
     if (rc < 0) return -1;
     if (rc > 0)
     {
-        fprintf (stderr, "HHCDU021E VOL1 record not found\n");
+        fprintf (stderr, _("HHCDU021E VOL1 record not found\n"));
         return -1;
     }
 
@@ -881,7 +861,7 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
     if (verbose)
     {
        fprintf (stdout,
-               "HHCDU022I VOLSER=%s VTOC=%4.4X%4.4X%2.2X\n",
+               _("HHCDU022I VOLSER=%s VTOC=%4.4X%4.4X%2.2X\n"),
                 volser, cyl, head, rec);
     }
 
@@ -891,15 +871,15 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
     if (rc < 0) return -1;
     if (rc > 0)
     {
-        fprintf (stderr, "HHCDU023E F4DSCB record not found\n");
+        fprintf (stderr, _("HHCDU023E F4DSCB record not found\n"));
         return -1;
     }
 
     if (verbose)
     {
        fprintf (stdout,
-               "HHCDU023I VTOC start %2.2X%2.2X%2.2X%2.2X "
-               "end %2.2X%2.2X%2.2X%2.2X\n",
+               _("HHCDU023I VTOC start %2.2X%2.2X%2.2X%2.2X "
+               "end %2.2X%2.2X%2.2X%2.2X\n"),
                f4dscb->ds4vtoce.xtbcyl[0], f4dscb->ds4vtoce.xtbcyl[1],
                f4dscb->ds4vtoce.xtbtrk[0], f4dscb->ds4vtoce.xtbtrk[1],
                f4dscb->ds4vtoce.xtecyl[0], f4dscb->ds4vtoce.xtecyl[1],
@@ -914,7 +894,7 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
     if (rc > 0)
     {
         fprintf (stderr,
-                "HHCDU024E Dataset %s not found in VTOC\n",
+                _("HHCDU024E Dataset %s not found in VTOC\n"),
                 dsnama);
         return -1;
     }
@@ -922,7 +902,7 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
     if (verbose)
     {
        fprintf (stdout,
-               "HHCDU025I DSNAME=%s F1DSCB CCHHR=%4.4X%4.4X%2.2X\n",
+               _("HHCDU025I DSNAME=%s F1DSCB CCHHR=%4.4X%4.4X%2.2X\n"),
                dsnama, cyl, head, rec);
     }
 
@@ -932,7 +912,7 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
     if (rc < 0) return -1;
     if (rc > 0)
     {
-        fprintf (stderr, "HHCDU026E F1DSCB record not found\n");
+        fprintf (stderr, _("HHCDU026E F1DSCB record not found\n"));
         return -1;
     }
 
@@ -954,7 +934,7 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
         if (rc < 0) return -1;
         if (rc > 0)
         {
-            fprintf (stderr, "HHCDU027E F3DSCB record not found\n");
+            fprintf (stderr, _("HHCDU027E F3DSCB record not found\n"));
             return -1;
         }
 
@@ -1177,7 +1157,7 @@ int             x=O_EXCL;               /* Open option               */
                 S_IRUSR | S_IWUSR | S_IRGRP);
     if (fd < 0)
     {
-        fprintf (stderr, "HHCDU028E %s open error: %s\n",
+        fprintf (stderr, _("HHCDU028E %s open error: %s\n"),
                 fname, strerror(errno));
         return -1;
     }
@@ -1205,7 +1185,7 @@ int             x=O_EXCL;               /* Open option               */
     rc = write (fd, &devhdr, CKDDASD_DEVHDR_SIZE);
     if (rc < (int)CKDDASD_DEVHDR_SIZE)
     {
-        fprintf (stderr, "HHCDU029E %s device header write error: %s\n",
+        fprintf (stderr, _("HHCDU029E %s device header write error: %s\n"),
                 fname, errno ? strerror(errno) : "incomplete");
         return -1;
     }
@@ -1233,8 +1213,8 @@ int             x=O_EXCL;               /* Open option               */
         rc = write (fd, &cdevhdr, CCKDDASD_DEVHDR_SIZE);
         if (rc < (int)CCKDDASD_DEVHDR_SIZE)
         {
-            fprintf (stderr, "HHCDU030E %s compressed device header "
-                             "write error: %s\n",
+            fprintf (stderr, _("HHCDU030E %s compressed device header "
+                             "write error: %s\n"),
                     fname, errno ? strerror(errno) : "incomplete");
             return -1;
         }
@@ -1243,7 +1223,7 @@ int             x=O_EXCL;               /* Open option               */
         l1 = calloc (cdevhdr.numl1tab, CCKD_L1ENT_SIZE);
         if (l1 == NULL)
         {
-            fprintf (stderr, "HHCDU031E Cannot obtain l1tab buffer: %s\n",
+            fprintf (stderr, _("HHCDU031E Cannot obtain l1tab buffer: %s\n"),
                     strerror(errno));
             return -1;
         }
@@ -1253,8 +1233,8 @@ int             x=O_EXCL;               /* Open option               */
         rc = write (fd, l1, cdevhdr.numl1tab * CCKD_L1ENT_SIZE);
         if (rc < (int)(cdevhdr.numl1tab * CCKD_L1ENT_SIZE))
         {
-            fprintf (stderr, "HHCDU032E %s primary lookup table "
-                             "write error: %s\n",
+            fprintf (stderr, _("HHCDU032E %s primary lookup table "
+                             "write error: %s\n"),
                     fname, errno ? strerror(errno) : "incomplete");
             return -1;
         }
@@ -1268,8 +1248,8 @@ int             x=O_EXCL;               /* Open option               */
         rc = write (fd, &l2, CCKD_L2TAB_SIZE);
         if (rc < (int)CCKD_L2TAB_SIZE)
         {
-            fprintf (stderr, "HHCDU033E %s secondary lookup table "
-                             "write error: %s\n",
+            fprintf (stderr, _("HHCDU033E %s secondary lookup table "
+                             "write error: %s\n"),
                     fname, errno ? strerror(errno) : "incomplete");
             return -1;
         }
@@ -1282,7 +1262,7 @@ int             x=O_EXCL;               /* Open option               */
         rc = ftruncate (fd, sz);
         if (rc < 0)
         {
-            fprintf (stderr, "HHCDU034E %s dasdcopy ftruncate error: %s\n",
+            fprintf (stderr, _("HHCDU034E %s dasdcopy ftruncate error: %s\n"),
                     fname, strerror(errno));
             return -1;
         }
@@ -1398,8 +1378,8 @@ int             x=O_EXCL;               /* Open option               */
                 if (rc != len)
                 {
                     fprintf (stderr,
-                            "HHCDU035E %s cylinder %u head %u "
-                            "write error: %s\n",
+                            _("HHCDU035E %s cylinder %u head %u "
+                            "write error: %s\n"),
                             fname, cyl, head,
                             errno ? strerror(errno) : "incomplete");
                     return -1;
@@ -1416,22 +1396,22 @@ int             x=O_EXCL;               /* Open option               */
     {
         cdevhdr.size = cdevhdr.used = CCKD_L1TAB_POS +
                                       cdevhdr.numl1tab * CCKD_L1ENT_SIZE +
-                                      CCKD_L2TAB_SIZE + trksize;
+                                      CCKD_L2TAB_SIZE + len;
 
         /* Rewrite the compressed device header */
         rc = lseek (fd, CKDDASD_DEVHDR_SIZE, SEEK_SET);
         if (rc == -1)
         {
-            fprintf (stderr, "HHCDU036E %s compressed device header "
-                             "lseek error: %s\n",
+            fprintf (stderr, _("HHCDU036E %s compressed device header "
+                             "lseek error: %s\n"),
                     fname, strerror(errno));
             return -1;
         }
         rc = write (fd, &cdevhdr, CCKDDASD_DEVHDR_SIZE);
         if (rc < (int)CCKDDASD_DEVHDR_SIZE)
         {
-            fprintf (stderr, "HHCDU037E %s compressed device header "
-                             "write error: %s\n",
+            fprintf (stderr, _("HHCDU037E %s compressed device header "
+                             "write error: %s\n"),
                     fname, errno ? strerror(errno) : "incomplete");
             return -1;
         }
@@ -1442,16 +1422,16 @@ int             x=O_EXCL;               /* Open option               */
         rc = lseek (fd, CCKD_L1TAB_POS + cdevhdr.numl1tab * CCKD_L1ENT_SIZE, SEEK_SET);
         if (rc == -1)
         {
-            fprintf (stderr, "HHCDU038E %s secondary lookup table "
-                             "lseek error: %s\n",
+            fprintf (stderr, _("HHCDU038E %s secondary lookup table "
+                             "lseek error: %s\n"),
                     fname, strerror(errno));
             return -1;
         }
         rc = write (fd, &l2, CCKD_L2TAB_SIZE);
         if (rc < (int)CCKD_L2TAB_SIZE)
         {
-            fprintf (stderr, "HHCDU039E %s secondary lookup table "
-                             "write error: %s\n",
+            fprintf (stderr, _("HHCDU039E %s secondary lookup table "
+                             "write error: %s\n"),
                     fname, errno ? strerror(errno) : "incomplete");
             return -1;
         }
@@ -1465,14 +1445,14 @@ int             x=O_EXCL;               /* Open option               */
     rc = close (fd);
     if (rc < 0)
     {
-        fprintf (stderr, "HHCDU040E %s close error: %s\n",
+        fprintf (stderr, _("HHCDU040E %s close error: %s\n"),
                 fname, strerror(errno));
         return -1;
     }
 
     /* Display completion message */
     fprintf (stderr,
-            "HHCDU041I %u cylinders successfully written to file %s\n",
+            _("HHCDU041I %u cylinders successfully written to file %s\n"),
             cyl - start, fname);
     return 0;
 
@@ -1539,7 +1519,7 @@ U32             trksize;                /* DASD image track length   */
     if (volcyls < mincyls || volcyls > maxcyls)
     {
         fprintf (stderr,
-                "HHCDU042E Cylinder count %u is outside range %u-%u\n",
+                _("HHCDU042E Cylinder count %u is outside range %u-%u\n"),
                 volcyls, mincyls, maxcyls);
         return -1;
     }
@@ -1548,15 +1528,15 @@ U32             trksize;                /* DASD image track length   */
     buf = malloc(trksize);
     if (buf == NULL)
     {
-        fprintf (stderr, "HHCDU043E Cannot obtain track buffer: %s\n",
+        fprintf (stderr, _("HHCDU043E Cannot obtain track buffer: %s\n"),
                 strerror(errno));
         return -1;
     }
 
     /* Display progress message */
     fprintf (stderr,
-            "HHCDU044I Creating %4.4X volume %s: %u cyls, "
-            "%u trks/cyl, %u bytes/track\n",
+            _("HHCDU044I Creating %4.4X volume %s: %u cyls, "
+            "%u trks/cyl, %u bytes/track\n"),
             devtype, volser, volcyls, heads, trksize);
 
     /* Copy the unsuffixed DASD image file name */
@@ -1660,7 +1640,7 @@ int             x=O_EXCL;               /* Open option               */
     if (sectors < minsect || (!lfs && sectors > maxsect))
     {
         fprintf (stderr,
-                "HHCDU045E Sector count %u is outside range %u-%u\n",
+                _("HHCDU045E Sector count %u is outside range %u-%u\n"),
                 sectors, minsect, maxsect);
         return -1;
     }
@@ -1669,15 +1649,15 @@ int             x=O_EXCL;               /* Open option               */
     buf = malloc(sectsz);
     if (buf == NULL)
     {
-        fprintf (stderr, "HHCDU046E Cannot obtain sector buffer: %s\n",
+        fprintf (stderr, _("HHCDU046E Cannot obtain sector buffer: %s\n"),
                 strerror(errno));
         return -1;
     }
 
     /* Display progress message */
     fprintf (stderr,
-            "HHCDU047I Creating %4.4X volume %s: "
-            "%u sectors, %u bytes/sector\n",
+            _("HHCDU047I Creating %4.4X volume %s: "
+            "%u sectors, %u bytes/sector\n"),
             devtype, volser, sectors, sectsz);
 
     /* if `dasdcopy' > 1 then we can replace the existing file */
@@ -1688,7 +1668,7 @@ int             x=O_EXCL;               /* Open option               */
                 S_IRUSR | S_IWUSR | S_IRGRP);
     if (fd < 0)
     {
-        fprintf (stderr, "HHCDU048I %s open error: %s\n",
+        fprintf (stderr, _("HHCDU048I %s open error: %s\n"),
                 fname, strerror(errno));
         return -1;
     }
@@ -1700,11 +1680,10 @@ int             x=O_EXCL;               /* Open option               */
         rc = ftruncate (fd, sz);
         if (rc < 0)
         {
-            fprintf (stderr, "HHCDU049E %s dasdcopy ftruncate error: %s\n",
+            fprintf (stderr, _("HHCDU049E %s dasdcopy ftruncate error: %s\n"),
                     fname, strerror(errno));
             return -1;
         }
-        sectnum = sectors + 1;
     }
     /* Write each sector */
     else
@@ -1736,7 +1715,7 @@ int             x=O_EXCL;               /* Open option               */
             rc = write (fd, buf, sectsz);
             if (rc < (int)sectsz)
             {
-                fprintf (stderr, "HHCDU050E %s sector %u write error: %s\n",
+                fprintf (stderr, _("HHCDU050E %s sector %u write error: %s\n"),
                         fname, sectnum,
                         errno ? strerror(errno) : "incomplete");
                 return -1;
@@ -1748,7 +1727,7 @@ int             x=O_EXCL;               /* Open option               */
     rc = close (fd);
     if (rc < 0)
     {
-        fprintf (stderr, "HHCDU051E %s close error: %s\n",
+        fprintf (stderr, _("HHCDU051E %s close error: %s\n"),
                 fname, strerror(errno));
         return -1;
     }
@@ -1758,8 +1737,8 @@ int             x=O_EXCL;               /* Open option               */
 
     /* Display completion message */
     fprintf (stderr,
-            "HHCDU052I %u sectors successfully written to file %s\n",
-            sectnum, fname);
+            _("HHCDU052I %u sectors successfully written to file %s\n"),
+            sectors, fname);
 
     return 0;
 } /* end function create_fba */
@@ -1800,7 +1779,7 @@ int             x=O_EXCL;               /* Open option               */
     l1tabsz = numl1tab * CCKD_L1ENT_SIZE;
     if (l1tabsz > 65536)
     {
-        fprintf (stderr, "HHCDU053E File size too large: %lld [%d]\n",
+        fprintf (stderr, _("HHCDU053E File size too large: %lld [%d]\n"),
                  (long long)(sectors * sectsz), numl1tab);
         return -1;
     }
@@ -1813,15 +1792,15 @@ int             x=O_EXCL;               /* Open option               */
                 S_IRUSR | S_IWUSR | S_IRGRP);
     if (fd < 0)
     {
-        fprintf (stderr, "HHCDU054E %s open error: %s\n",
+        fprintf (stderr, _("HHCDU054E %s open error: %s\n"),
                 fname, strerror(errno));
         return -1;
     }
 
     /* Display progress message */
     fprintf (stderr,
-            "HHCDU055I Creating %4.4X compressed volume %s: "
-            "%u sectors, %u bytes/sector\n",
+            _("HHCDU055I Creating %4.4X compressed volume %s: "
+            "%u sectors, %u bytes/sector\n"),
             devtype, volser, sectors, sectsz);
 
     /* Write the device header */
@@ -1830,7 +1809,7 @@ int             x=O_EXCL;               /* Open option               */
     rc = write (fd, &devhdr, CKDDASD_DEVHDR_SIZE);
     if (rc < (int)CKDDASD_DEVHDR_SIZE)
     {
-        fprintf (stderr, "HHCDU056E %s devhdr write error: %s\n",
+        fprintf (stderr, _("HHCDU056E %s devhdr write error: %s\n"),
                  fname, errno ? strerror(errno) : "incomplete");
             return -1;
     }
@@ -1853,7 +1832,7 @@ int             x=O_EXCL;               /* Open option               */
     rc = write (fd, &cdevhdr, CCKDDASD_DEVHDR_SIZE);
     if (rc < (int)CCKDDASD_DEVHDR_SIZE)
     {
-        fprintf (stderr, "HHCDU057E %s cdevhdr write error: %s\n",
+        fprintf (stderr, _("HHCDU057E %s cdevhdr write error: %s\n"),
                  fname, errno ? strerror(errno) : "incomplete");
         return -1;
     }
@@ -1865,7 +1844,7 @@ int             x=O_EXCL;               /* Open option               */
     rc = write (fd, l1, l1tabsz);
     if (rc < l1tabsz)
     {
-        fprintf (stderr, "HHCDU058E %s l1tab write error: %s\n",
+        fprintf (stderr, _("HHCDU058E %s l1tab write error: %s\n"),
                  fname, errno ? strerror(errno) : "incomplete");
         return -1;
     }
@@ -1877,7 +1856,7 @@ int             x=O_EXCL;               /* Open option               */
     rc = write (fd, &l2, CCKD_L2TAB_SIZE);
     if (rc < (int)CCKD_L2TAB_SIZE)
     {
-        fprintf (stderr, "HHCDU059E %s l2tab write error: %s\n",
+        fprintf (stderr, _("HHCDU059E %s l2tab write error: %s\n"),
                  fname, errno ? strerror(errno) : "incomplete");
         return -1;
     }
@@ -1887,7 +1866,7 @@ int             x=O_EXCL;               /* Open option               */
     convert_to_ebcdic (&buf[CKDDASD_TRKHDR_SIZE+sectsz], 4, "VOL1");
     convert_to_ebcdic (&buf[CKDDASD_TRKHDR_SIZE+sectsz+4], 6, volser);
     len2 = sizeof(buf2);
-#ifdef CCKD_COMPRESS_ZLIB
+#ifdef HAVE_LIBZ
     rc = compress2 (&buf2[0], &len2, &buf[CKDDASD_TRKHDR_SIZE],
                     CFBA_BLOCK_SIZE, -1);
     if (comp && rc == Z_OK)
@@ -1896,14 +1875,14 @@ int             x=O_EXCL;               /* Open option               */
         rc = write (fd, &buf, CKDDASD_TRKHDR_SIZE);
         if (rc < (int)CKDDASD_TRKHDR_SIZE)
         {
-            fprintf (stderr, "HHCDU060E %s block header write error: %s\n",
+            fprintf (stderr, _("HHCDU060E %s block header write error: %s\n"),
                      fname, errno ? strerror(errno) : "incomplete");
             return -1;
         }
         rc = write (fd, &buf2, len2);
         if (rc < (int)len2)
         {
-            fprintf (stderr, "HHCDU061E %s block write error: %s\n",
+            fprintf (stderr, _("HHCDU061E %s block write error: %s\n"),
                      fname, errno ? strerror(errno) : "incomplete");
             return -1;
         }
@@ -1913,12 +1892,12 @@ int             x=O_EXCL;               /* Open option               */
                        CKDDASD_TRKHDR_SIZE + len2;
     }
     else
-#endif // defined(CCKD_COMPRESS_ZLIB)
+#endif // defined(HAVE_LIBZ)
     {
         rc = write (fd, &buf, CKDDASD_TRKHDR_SIZE + CFBA_BLOCK_SIZE);
         if (rc < (int)(CKDDASD_TRKHDR_SIZE + CFBA_BLOCK_SIZE))
         {
-            fprintf (stderr, "HHCDU062E %s block write error: %s\n",
+            fprintf (stderr, _("HHCDU062E %s block write error: %s\n"),
                      fname, errno ? strerror(errno) : "incomplete");
             return -1;
         }
@@ -1932,14 +1911,14 @@ int             x=O_EXCL;               /* Open option               */
     rcoff = lseek (fd, CKDDASD_DEVHDR_SIZE, SEEK_SET);
     if (rcoff < 0)
     {
-        fprintf (stderr, "HHCDU063E %s cdevhdr lseek error: %s\n",
+        fprintf (stderr, _("HHCDU063E %s cdevhdr lseek error: %s\n"),
                  fname, strerror(errno));
         return -1;
     }
     rc = write (fd, &cdevhdr, CCKDDASD_DEVHDR_SIZE);
     if (rc < (int)CCKDDASD_DEVHDR_SIZE)
     {
-        fprintf (stderr, "HHCDU064E %s cdevhdr rewrite error: %s\n",
+        fprintf (stderr, _("HHCDU064E %s cdevhdr rewrite error: %s\n"),
                  fname, errno ? strerror(errno) : "incomplete");
         return -1;
     }
@@ -1948,14 +1927,14 @@ int             x=O_EXCL;               /* Open option               */
     rcoff = lseek (fd, CKDDASD_DEVHDR_SIZE + CCKDDASD_DEVHDR_SIZE + l1tabsz, SEEK_SET);
     if (rcoff < 0)
     {
-        fprintf (stderr, "HHCDU065E %s l2tab lseek error: %s\n",
+        fprintf (stderr, _("HHCDU065E %s l2tab lseek error: %s\n"),
                  fname, strerror(errno));
         return -1;
     }
     rc = write (fd, &l2, CCKD_L2TAB_SIZE);
     if (rc < (int)CCKD_L2TAB_SIZE)
     {
-        fprintf (stderr, "HHCDU066E %s l2tab rewrite error: %s\n",
+        fprintf (stderr, _("HHCDU066E %s l2tab rewrite error: %s\n"),
                  fname, errno ? strerror(errno) : "incomplete");
         return -1;
     }
@@ -1964,14 +1943,14 @@ int             x=O_EXCL;               /* Open option               */
     rc = close (fd);
     if (rc < 0)
     {
-        fprintf (stderr, "HHCDU067E %s close error: %s\n",
+        fprintf (stderr, _("HHCDU067E %s close error: %s\n"),
                 fname, strerror(errno));
         return -1;
     }
 
     /* Display completion message */
     fprintf (stderr,
-            "HHCDU068I %u sectors successfully written to file %s\n",
+            _("HHCDU068I %u sectors successfully written to file %s\n"),
             sectors, fname);
 
     return 0;

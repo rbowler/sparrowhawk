@@ -80,8 +80,7 @@ extern void     LCS_SDC( DEVBLK* pDEVBLK,   BYTE   bOpCode,
 
 extern void     AddDevice( DEVBLK**    ppDEVBLK, 
                            U16         sDevNum,  
-                           const char* szDevType,
-                           DEVHND*     pDevHnd );
+                           DEVBLK*     pDevBlk );
 
 extern int      ParseMAC( char* pszMACAddr, BYTE* pbMACAddr );
 extern void     packet_trace( BYTE *addr, int len );
@@ -93,6 +92,10 @@ extern void     packet_trace( BYTE *addr, int len );
 #define FRAME_TYPE_IP   0x0800
 #define FRAME_TYPE_ARP  0x0806
 #define FRAME_TYPE_SNA  0x80D5
+
+#if !(defined(IFHWADDRLEN))             // Only predefined on Linux
+#define IFHWADDRLEN 6                   // Ethernet MAC address length
+#endif /* !(defined(IFHWADDRLEN)) */
 
 typedef uint8_t MAC[IFHWADDRLEN];       // Data Type for MAC Addresses
 
@@ -199,8 +202,9 @@ struct  _CTCBLK
         fOldFormat:1,                     // Old Config Format
         fCreated:1,                       // Interface Created
         fStarted:1,                       // Startup Received
-        fDataPending:1;                   // Data is pending for
+        fDataPending:1,                   // Data is pending for
                                           //   read device
+        fCloseInProgress:1;               // Close in progress
 
     int         iKernBuff;                // Kernel buffer in K bytes.
     int         iIOBuff;                  // I/O buffer in K bytes.

@@ -173,6 +173,8 @@ BYTE            unitstat = 0;           /* Device status             */
 BYTE            chanstat = 0;           /* Subchannel status         */
 BYTE            skey1, skey2;           /* Storage keys of first and
                                            last byte of I/O buffer   */
+//FIXME: code not right for shared devices
+
     UNREFERENCED(r2);
 
     /* Register R1 contains the real address of the parameter list */
@@ -276,7 +278,7 @@ BYTE            skey1, skey2;           /* Storage keys of first and
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
     /* Return code 5 and condition code 1 if device is busy */
-    if (dev->busy || dev->pending)
+    if (dev->busy || dev->pending || dev->pcipending)
     {
         release_lock (&dev->lock);
         regs->GR_L(15) = 5;
@@ -368,9 +370,7 @@ BYTE            skey1, skey2;           /* Storage keys of first and
     } /* end for(blkcount) */
 
     /* Reset the device busy indicator */
-    obtain_lock (&dev->lock);
     dev->busy = 0;
-    release_lock (&dev->lock);
 
     /* Store the block count in the parameter list */
     ioparm.blkcount[0] = (blkcount >> 24) & 0xFF;
@@ -430,6 +430,8 @@ U32             lastccw;                /* CCW address at interrupt  */
 BYTE            accum;                  /* Work area                 */
 BYTE            unitstat = 0;           /* Device status             */
 BYTE            chanstat = 0;           /* Subchannel status         */
+
+//FIXME: code not right for shared devices
 
     UNREFERENCED(r2);
 
@@ -509,7 +511,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
         return 0;
     }
 
-    /* Obtain the device lock */
+    /* Obtain the interrupt lock */
     obtain_lock (&dev->lock);
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
@@ -524,7 +526,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
     /* Return code 5 and condition code 1 if device is busy */
-    if (dev->busy || dev->pending)
+    if (dev->busy || dev->pending || dev->pcipending)
     {
         release_lock (&dev->lock);
         regs->GR_L(15) = 5;
@@ -568,8 +570,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
 
     /* Clear the interrupt pending and device busy conditions */
     obtain_lock (&dev->lock);
-    dev->pending = 0;
-    dev->busy = 0;
+    dev->busy = dev->pending = 0;
     dev->scsw.flag2 = 0;
     dev->scsw.flag3 = 0;
     release_lock (&dev->lock);
@@ -715,7 +716,7 @@ BYTE            c;                      /* Character work area       */
         idlen = sizeof(buf);
 
     /* Store the extended identification code at operand address */
-    ARCH_DEP(vstorec) (buf, idlen-1, idaddr, r1, regs);
+    ARCH_DEP(vstorec) (buf, idlen-1, idaddr, USE_REAL_ADDR, regs);
 
     /* Deduct number of bytes from the R2 register */
     regs->GR_L(r2) -= idlen;
@@ -741,6 +742,9 @@ BYTE    cmdflags;                       /* Command flags             */
 #define CMDFLAGS_RESERVED       0x1F    /* Reserved bits, must be 0  */
 BYTE    buf[256];                       /* Command buffer (ASCIIZ)   */
 BYTE    resp[256];                      /* Response buffer (ASCIIZ)  */
+BYTE    *dresp;                         /* Default response (ASCIIZ) */
+int     freeresp;                       /* Flag to free resp bfr     */
+int     j,k;
 
     /* Obtain command address from R1 register */
     cmdaddr = regs->GR_L(r1);
@@ -770,37 +774,78 @@ BYTE    resp[256];                      /* Response buffer (ASCIIZ)  */
     }
 
     /* Obtain the command string from storage */
-    ARCH_DEP(vfetchc) (buf, cmdlen-1, cmdaddr, r1, regs);
+    ARCH_DEP(vfetchc) (buf, cmdlen-1, cmdaddr, USE_REAL_ADDR, regs);
 
-    /* Display the command on the console */
+    /* Translate EBCDIC command to ASCII */
     for (i = 0; i < cmdlen; i++)
+    {
         buf[i] = guest_to_host(buf[i]);
+    }
     buf[i] = '\0';
-    logmsg ("HHC660I %s\n", buf);
+    dresp="";
+    freeresp=0;
+
+    if(buf && *buf)
+    {
+#ifdef FEATURE_HERCULES_DIAGCALLS
+        if(sysblk.diag8cmd)
+        {
+            logmsg (_("HHCVM001I *%s* panel command issued by guest\n"), buf);
+            if (cmdflags & CMDFLAGS_RESPONSE)
+            {
+                dresp=log_capture(panel_command,buf);
+                if(dresp!=NULL)
+                {
+                    freeresp=1;
+                }
+                else
+                {
+                    dresp="";
+                }
+            }
+            else
+            {
+                panel_command(buf);
+                logmsg (_("HHCVM002I *%s* command complete\n"), buf);
+            }
+        }
+        else
+            dresp=_("HHCVM003I Host command processing disabled by configuration statement");
+#else
+            dresp=_("HHCVM004E Host command processing not included in engine build");
+#endif
+    }
 
     /* Store the response and set length if response requested */
     if (cmdflags & CMDFLAGS_RESPONSE)
     {
-        strcpy (resp, "HHC661I Command complete");
-        resplen = strlen(resp);
+        if(!freeresp)
+        {
+                strncpy (resp, dresp,256);
+                dresp=resp;
+        }
+        resplen = strlen(dresp);
         for (i = 0; i < resplen; i++)
-            resp[i] = host_to_guest(resp[i]);
+            dresp[i] = host_to_guest(dresp[i]);
 
         respadr = regs->GR_L(r1+1);
         maxrlen = regs->GR_L(r2+1);
 
-        if (resplen <= maxrlen)
+        i=(resplen<=maxrlen) ? resplen : maxrlen;
+        j=0;
+        while(i>0)
         {
-            ARCH_DEP(vstorec) (resp, resplen-1, respadr, r1+1, regs);
-            regs->GR_L(r2+1) = resplen;
-            cc = 0;
+            k=(i<255 ? i : 255);
+            ARCH_DEP(vstorec) (&dresp[j], k , respadr+j, USE_REAL_ADDR, regs);
+            i-=k;
+            j+=k;
         }
-        else
-        {
-            ARCH_DEP(vstorec) (resp, maxrlen-1, respadr, r1+1, regs);
-            regs->GR_L(r2+1) = resplen - maxrlen;
-            cc = 1;
-        }
+        regs->GR_L(r2+1) = (resplen<=maxrlen) ? resplen : resplen-maxrlen;
+        cc = (resplen<=maxrlen) ? 0 : 1;
+    }
+    if(freeresp)
+    {
+        free(dresp);
     }
 
     /* Set R2 register to CP completion code */
@@ -1029,6 +1074,13 @@ int     b2;                             /* Effective addr base       */
 VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
+#if defined(FEATURE_ECPSVM)
+    if(ecpsvm_doiucv(regs,b2,effective_addr2)==0)
+    {
+        return;
+    }
+#endif
+
 
     /* Program check if in problem state,
        the IUCV instruction generates an operation exception

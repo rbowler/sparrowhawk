@@ -10,10 +10,21 @@
 #include <config.h>
 #endif
 
+#define _IMPORT
+#if defined(WIN32)
+#if defined(HDL_BUILD_SHARED)
+#undef _IMPORT
+#define _IMPORT __declspec(dllimport)
+#endif
+#endif
+
 #include "hercnls.h"
 #include "feature.h"
 #include "hostinfo.h"
 #include "version.h"
+#if defined(EXTERNALGUI)
+extern _IMPORT int extgui;
+#endif
 
 /*--------------------------------*/
 /*   "Unusual" build options...   */
@@ -49,7 +60,7 @@ static const char *build_info[] = {
     "Win32 (Windows) build",
 #else
     #if defined(NO_SETUID)
-        "No setuid support"
+        "No setuid support",
     #else
       "Using "
       #if defined(HAVE_SETRESUID)
@@ -63,23 +74,21 @@ static const char *build_info[] = {
     #endif
 #endif
 
-#if defined(HAVE_LINUX_IF_TUN_H)
-    "Linux TUN driver support",
+#if defined(OPTION_FTHREADS)
+    "Using fthreads instead of pthreads",
 #endif
-
-#if defined(OPTION_W32_CTCI)
-    "Windows CTCI-W32 support",
-#endif
-
-#if defined(NOTHREAD)
-    "No threading support",
+#if defined(OPTION_DYNAMIC_LOAD)
+    "With Dynamic loading support",
 #else
-    #if defined(OPTION_FTHREADS)
-        "Using fthreads instead of pthreads",
-    #endif
+    "Without Dynamic loading support",
+#endif
+#if defined(HDL_BUILD_SHARED)
+    "Using shared libraries",
+#else
+    "Using static libraries",
 #endif
 
-#if !defined(EXTERNALGUI) && defined(WIN32)
+#if !defined(EXTERNALGUI)
     "No external GUI support",
 #endif
 
@@ -116,7 +125,9 @@ static const char *build_info[] = {
 };
 
 #if defined(EXTERNALGUI)
+#if 0
 extern int extgui;              /* external gui present */
+#endif
 #endif /*EXTERNALGUI*/
 
 /*-------------------------------------------------------------------*/

@@ -278,7 +278,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
 #endif /*FEATURE_TRACING*/
 
 #if defined(FEATURE_PER)
-    if( EN_IC_PER_SB(regs) 
+    if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
       && ( !(regs->CR(9) & CR9_BAC)
        || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
@@ -552,7 +552,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
     INVALIDATE_AEA_ALL(regs);
 
 #if defined(FEATURE_PER)
-    if( EN_IC_PER_SB(regs) 
+    if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
       && ( !(regs->CR(9) & CR9_BAC)
        || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
@@ -652,7 +652,7 @@ VADR    n = 0;                          /* Work area                 */
     {
         regs->psw.IA = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
 #if defined(FEATURE_PER)
-        if( EN_IC_PER_SB(regs) 
+        if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
           && ( !(regs->CR(9) & CR9_BAC)
            || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
@@ -675,6 +675,7 @@ DEF_INST(compare_and_swap_and_purge)
 int     r1, r2;                         /* Values of R fields        */
 U64     n2;                             /* virtual address of op2    */
 RADR    abs2;                           /* absolute address of op2   */
+U32     old;                            /* old value                 */
 
     RRE(inst, execflag, regs, r1, r2);
 
@@ -703,11 +704,13 @@ RADR    abs2;                           /* absolute address of op2   */
     n2 = regs->GR(r2) & 0xFFFFFFFFFFFFFFFCULL & ADDRESS_MAXWRAP(regs);
     abs2 = LOGICAL_TO_ABS (n2, r2, regs, ACCTYPE_WRITE, regs->psw.pkey);
 
+    old = CSWAP32 (regs->GR_L(r1));
+
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
     /* Attempt to exchange the values */
-    regs->psw.cc = cmpxchg4 (&regs->GR_L(r1), regs->GR_L(r1+1), regs->mainstor + abs2);
+    regs->psw.cc = cmpxchg4 (&old, CSWAP32(regs->GR_L(r1+1)), regs->mainstor + abs2);
 
     /* Release main-storage access lock */
     RELEASE_MAINLOCK(regs);
@@ -721,6 +724,7 @@ RADR    abs2;                           /* absolute address of op2   */
     else
     {
         /* Otherwise yield */
+        regs->GR_L(r1) = CSWAP32(old);
         if (sysblk.numcpu > 1)
             sched_yield();
     }
@@ -743,6 +747,13 @@ VADR    effective_addr2;                /* Effective address         */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
+#if defined(FEATURE_ECPSVM)
+    if(ecpsvm_dodiag(regs,r1,r3,b2,effective_addr2)==0)
+    {
+        return;
+    }
+#endif
+
 #ifdef FEATURE_HERCULES_DIAGCALLS
     if (
 #if defined(_FEATURE_SIE)
@@ -756,7 +767,7 @@ VADR    effective_addr2;                /* Effective address         */
     SIE_INTERCEPT(regs);
 
     /* Process diagnose instruction */
-    ARCH_DEP(diagnose_call) (effective_addr2, r1, r3, regs);
+    ARCH_DEP(diagnose_call) (effective_addr2, b2, r1, r3, regs);
 
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
@@ -847,7 +858,10 @@ VADR    lsea;                           /* Linkage stack entry addr  */
     /* Load registers from the stack entry */
     ARCH_DEP(unstack_registers) (0, lsea, r1, r2, regs);
 
-    INVALIDATE_AEA_ALL(regs);
+    if (r1 == r2)
+        INVALIDATE_AEA_AR(r1, regs);
+    else
+        INVALIDATE_AEA_ARALL(regs);
 
 }
 #endif /*defined(FEATURE_LINKAGE_STACK)*/
@@ -1045,7 +1059,7 @@ BYTE    storkey;
                     /* Convert real address to absolute address */
                     rcpa = APPLY_PREFIXING (rcpa, regs->hostregs->PX);
 
-                    /* The reference and change byte is located directly 
+                    /* The reference and change byte is located directly
                        beyond the page table and is located at offset 1 in
                        the entry. S/370 mode cannot be emulated in ESAME
                mode, so no provision is made for ESAME mode tables */
@@ -1056,7 +1070,7 @@ BYTE    storkey;
                 {
                     /* Obtain address of the RCP area from the state desc */
                     rcpa = regs->sie_rcpo &= 0x7FFFF000;
-    
+
                     /* frame index as byte offset to 4K keys in RCP area */
                     rcpa += n >> 12;
 
@@ -1190,7 +1204,7 @@ BYTE    storkey;
                  stid;
             RADR rcpa;
             BYTE rcpkey;
-    
+
 #if defined(_FEATURE_STORAGE_KEY_ASSIST)
                 if((regs->siebk->rcpo[0] & SIE_RCPO0_SKA)
 #if defined(_FEATURE_ZSIE)
@@ -1207,7 +1221,7 @@ BYTE    storkey;
                     /* Convert real address to absolute address */
                     rcpa = APPLY_PREFIXING (rcpa, regs->hostregs->PX);
 
-                    /* For ESA/390 the RCP byte entry is at offset 1 in a 
+                    /* For ESA/390 the RCP byte entry is at offset 1 in a
                        four byte entry directly beyond the page table,
                for ESAME mode, this entry is eight bytes long */
                     rcpa += regs->hostregs->arch_mode == ARCH_900 ? 2049 : 1025;
@@ -1336,7 +1350,7 @@ int     sr;                             /* SIE_TRANSLATE_ADDR rc     */
 
 #if defined(_FEATURE_STORAGE_KEY_ASSIST)
     /* When running under SIE, and the guest absolute address
-       is paged out, then obtain the storage key from the 
+       is paged out, then obtain the storage key from the
        SPGTE rather then causing a host page fault. */
     if(regs->sie_state
       && !regs->sie_pref
@@ -1355,10 +1369,10 @@ int     sr;                             /* SIE_TRANSLATE_ADDR rc     */
 
         if(sr != 0 && sr != 2)
             ARCH_DEP(program_interrupt) (regs->hostregs, xcode);
-    
+
         if(sr == 2)
         {
-            /* For ESA/390 the RCP byte entry is at offset 0 in a 
+            /* For ESA/390 the RCP byte entry is at offset 0 in a
                four byte entry directly beyond the page table,
                for ESAME mode, this entry is eight bytes long */
             n += regs->hostregs->arch_mode == ARCH_900 ? 2048 : 1024;
@@ -1639,8 +1653,15 @@ int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 int     i, d;                           /* Integer work areas        */
 BYTE    rwork[64];                      /* Register work areas       */
+int     inval = 0;                      /* Invalidation flag        */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
+#if defined(FEATURE_ECPSVM)
+    if(ecpsvm_dolctl(regs,r1,r3,b2,effective_addr2)==0)
+    {
+        return;
+    }
+#endif
 
     PRIV_CHECK(regs);
 
@@ -1668,13 +1689,40 @@ BYTE    rwork[64];                      /* Register work areas       */
     /* Fetch new control register contents from operand address */
     ARCH_DEP(vfetchc) ( rwork, d-1, effective_addr2, b2, regs );
 
-    INVALIDATE_AIA(regs);
-
-    INVALIDATE_AEA_ALL(regs);
-
     /* Load control registers from work area */
     for ( i = r1, d = 0; ; )
     {
+        /* Check for invalidation */
+        if (!inval) {
+            switch (i) {
+            case  0:
+                if ((fetch_fw(rwork + d) & CR0_TRAN_FMT) != (regs->CR_L(0) & CR0_TRAN_FMT))
+                    inval = 1;
+                break;
+            case  1:
+            case  2:
+            case  3:
+            case  4:
+            case  5:
+            case  7:
+            case 13:
+                if (fetch_fw(rwork + d) != regs->CR_L(i))
+                    inval = 1;
+                break;
+            case  8:
+                if ((fetch_fw(rwork + d) & CR8_EAX) != (regs->CR_L(8) & CR8_EAX))
+                    inval = 1;
+                break;
+            case 14:
+                if ((fetch_fw(rwork + d) & (CR14_ASN_TRAN|CR14_AFTO))
+                  != (regs->CR_L(14) & (CR14_ASN_TRAN|CR14_AFTO)))
+                    inval = 1;
+                break;
+            default:
+                break;
+            }
+        }
+
         /* Load control register bits 32-63 from work area */
         FETCH_FW(regs->CR_L(i), rwork + d); d += 4;
 
@@ -1683,6 +1731,13 @@ BYTE    rwork[64];                      /* Register work areas       */
 
         /* Update register number, wrapping from 15 to 0 */
         i++; i &= 15;
+    }
+
+    /* Conditionally invalidate the AIA and AEA buffers */
+    if (inval)
+    {
+        INVALIDATE_AIA(regs);
+        INVALIDATE_AEA_ALL(regs);
     }
 
     SET_IC_EXTERNAL_MASK(regs);
@@ -1709,6 +1764,13 @@ int     amode64;
 #endif /*defined(FEATURE_ESAME)*/
 
     S(inst, execflag, regs, b2, effective_addr2);
+#if defined(FEATURE_ECPSVM)
+    if(ecpsvm_dolpsw(regs,b2,effective_addr2)==0)
+    {
+        return;
+    }
+#endif
+
 
     PRIV_CHECK(regs);
 
@@ -1727,18 +1789,27 @@ int     amode64;
     STORE_DW ( dword, ARCH_DEP(vfetch8) ( effective_addr2, b2, regs ) );
 
     /* Load updated PSW (ESA/390 Format in ESAME mode) */
-    obtain_lock(&sysblk.intlock);
 #if defined(FEATURE_ESAME)
     /* save amode64 flag */
     amode64 = dword[3] & 0x01;
     /* make psw valid for esa390 mode */
     dword[3] &= ~0x01;
     rc = s390_load_psw ( regs, dword );
-    if (rc) regs->psw.notesame = 0;
+    /* Set the notesame bit to zero as it has been set,
+       and set the amode64 bit according to byte 3 */
+    regs->psw.notesame = regs->psw.notesame ? 0 : 1;
+    regs->psw.amode64 = amode64;
+    /* s390_load_psw will not have set the AMASK correctly for amode64 */
+    if(amode64)
+    {
+        regs->psw.AMASK = AMASK64;
+        /* amode31 bit must be set when amode64 is set */
+        if(!regs->psw.amode)
+            rc = PGM_SPECIFICATION_EXCEPTION;
+    }
 #else /*!defined(FEATURE_ESAME)*/
     rc = ARCH_DEP(load_psw) ( regs, dword );
 #endif /*!defined(FEATURE_ESAME)*/
-    release_lock(&sysblk.intlock);
     if (rc)
     {
         ARCH_DEP(program_interrupt) (regs, rc);
@@ -1749,11 +1820,8 @@ int     amode64;
     regs->psw.ilc = 4;
 
 #if defined(FEATURE_ESAME)
-    /* Set the notesame bit to zero as it has been set, 
-       and clear the high word of the instruction address,
+    /* Clear the high word of the instruction address,
        as it has not been touched by s390_load_psw */
-    regs->psw.notesame = 0;
-    regs->psw.amode64 = amode64;
     regs->psw.IA_H = 0;
 #endif /*defined(FEATURE_ESAME)*/
 
@@ -1774,14 +1842,26 @@ DEF_INST(load_real_address)
 int     r1;                             /* Register number           */
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
+
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+
+    ARCH_DEP(load_real_address_proc) (regs, r1, b2, effective_addr2);
+
+} /* end DEF_INST(load_real_address) */
+
+
+/*-------------------------------------------------------------------*/
+/* Common processing routine for the LRA and LRAY instructions       */
+/*-------------------------------------------------------------------*/
+void ARCH_DEP(load_real_address_proc) (REGS *regs,
+                int r1, int b2, VADR effective_addr2)
+{
 U16     xcode;                          /* Exception code            */
 int     private;                        /* 1=Private address space   */
 int     protect;                        /* 1=ALE or page protection  */
 int     stid;                           /* Segment table indication  */
 int     cc;                             /* Condition code            */
 RADR    n;                              /* 32-bit operand values     */
-
-    RX(inst, execflag, regs, r1, b2, effective_addr2);
 
     SIE_MODE_XC_OPEX(regs);
 
@@ -1839,7 +1919,7 @@ RADR    n;                              /* 32-bit operand values     */
 
     regs->psw.cc = cc;
 
-} /* end DEF_INST(load_real_address) */
+} /* end ARCH_DEP(load_real_address_proc) */
 
 
 /*-------------------------------------------------------------------*/
@@ -2726,7 +2806,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
 #endif /*FEATURE_TRACING*/
 
 #if defined(FEATURE_PER)
-    if( EN_IC_PER_SB(regs) 
+    if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
       && ( !(regs->CR(9) & CR9_BAC)
        || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
@@ -2741,7 +2821,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         /* [6.5.2.34] Set the translation exception address equal
            to the old primary ASN, with the high-order bit set if
            the old primary space-switch-event control bit is one */
-        regs->TEA = oldpasn; 
+        regs->TEA = oldpasn;
         if (oldpstd & SSEVENT_BIT)
             regs->TEA |= TEA_SSEVENT;
 
@@ -2942,7 +3022,7 @@ int     rc;                             /* return code from load_psw */
         regs->perc = newregs.perc;
     }
 
-    if( EN_IC_PER_SB(regs) 
+    if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
       && ( !(regs->CR(9) & CR9_BAC)
        || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
@@ -3184,7 +3264,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
 #endif /*FEATURE_TRACING*/
 
 #if defined(FEATURE_PER)
-    if( EN_IC_PER_SB(regs) 
+    if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
       && ( !(regs->CR(9) & CR9_BAC)
        || PER_RANGE_CHECK(ia,regs->CR(10),regs->CR(11)) )
@@ -3376,7 +3456,7 @@ BYTE    storkey;                        /* Storage key               */
                     /* Convert real address to absolute address */
                     rcpa = APPLY_PREFIXING (rcpa, regs->hostregs->PX);
 
-                    /* The reference and change byte is located directly 
+                    /* The reference and change byte is located directly
                        beyond the page table and is located at offset 1 in
                        the entry. S/370 mode cannot be emulated in ESAME
                mode, so no provision is made for ESAME mode tables */
@@ -3387,7 +3467,7 @@ BYTE    storkey;                        /* Storage key               */
                 {
                     /* Obtain address of the RCP area from the state desc */
                     rcpa = regs->sie_rcpo &= 0x7FFFF000;
-    
+
                     /* frame index as byte offset to 4K keys in RCP area */
                     rcpa += n >> 12;
 
@@ -3561,7 +3641,7 @@ BYTE    storkey;                        /* Storage key               */
                     /* Convert real address to absolute address */
                     rcpa = APPLY_PREFIXING (rcpa, regs->hostregs->PX);
 
-                    /* For ESA/390 the RCP byte entry is at offset 1 in a 
+                    /* For ESA/390 the RCP byte entry is at offset 1 in a
                        four byte entry directly beyond the page table,
                for ESAME mode, this entry is eight bytes long */
                     rcpa += regs->hostregs->arch_mode == ARCH_900 ? 2049 : 1025;
@@ -3687,8 +3767,6 @@ int     ssevent = 0;                    /* 1=space switch event      */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
-    INVALIDATE_AEA_ALL(regs);
-
     if(inst[1] == 0x19)
     {
         /* Perform serialization and checkpoint-synchronization */
@@ -3737,7 +3815,17 @@ int     ssevent = 0;                    /* 1=space switch event      */
     regs->psw.space = mode & 1;
     regs->psw.armode = mode >> 1;
 
-    INVALIDATE_AIA(regs);
+    /* Invalidate if space mode changed */
+    if (mode != oldmode)
+    {
+        if ( (mode & 1) || (oldmode & 1) )
+        {
+            INVALIDATE_AIA(regs);
+            INVALIDATE_AEA_ALL(regs);
+        }
+        else
+            SET_AENOARN(regs);
+    }
 
     /* If switching into or out of home-space mode, and also:
        primary space-switch-event control bit is set; or
@@ -4010,8 +4098,6 @@ int     n;                              /* Storage key workarea      */
 
     INVALIDATE_AIA(regs);
 
-    INVALIDATE_AEA_ALL(regs);
-
     /* Set PSW key */
     regs->psw.pkey = n;
 
@@ -4158,6 +4244,10 @@ RADR    n;                              /* Absolute storage addr     */
 #if defined(_FEATURE_SIE)
     if(regs->sie_state)
     {
+        /* Perform aia and aea invalidation */
+        INVALIDATE_AIA(regs);
+        INVALIDATE_AEA_ALL(regs);
+
         if(regs->siebk->ic[2] & SIE_IC2_SSKE)
             longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 
@@ -4191,7 +4281,7 @@ RADR    n;                              /* Absolute storage addr     */
                     /* Convert real address to absolute address */
                     rcpa = APPLY_PREFIXING (rcpa, regs->hostregs->PX);
 
-                    /* The reference and change byte is located directly 
+                    /* The reference and change byte is located directly
                        beyond the page table and is located at offset 1 in
                        the entry. S/370 mode cannot be emulated in ESAME
                mode, so no provision is made for ESAME mode tables */
@@ -4231,7 +4321,7 @@ RADR    n;                              /* Absolute storage addr     */
                 {
                     /* host real to host absolute */
                     n = APPLY_PREFIXING(n, regs->hostregs->PX);
-    
+
                     realkey =
 #if !defined(_FEATURE_2K_STORAGE_KEYS)
                               STORAGE_KEY(n, regs)
@@ -4301,6 +4391,9 @@ RADR    n;                              /* Absolute storage addr     */
         STORAGE_KEY2(n, regs) &= STORKEY_BADFRM;
         STORAGE_KEY2(n, regs) |= regs->GR_LHLCL(r1) & ~(STORKEY_BADFRM);
 #endif
+        /* Perform aia and aea invalidation */
+        INVALIDATE_AIA_ABS(n, regs);
+        INVALIDATE_AEA_ABS(n, regs);
     }
 
 //  /*debug*/logmsg("SSK storage block %8.8X key %2.2X\n",
@@ -4323,10 +4416,6 @@ RADR    n;                              /* Abs frame addr stor key   */
 
     PRIV_CHECK(regs);
 
-    INVALIDATE_AIA(regs);
-
-    INVALIDATE_AEA_ALL(regs);
-
     /* Load 4K block address from R2 register */
     n = regs->GR(r2) & ADDRESS_MAXWRAP_E(regs);
 
@@ -4344,6 +4433,9 @@ RADR    n;                              /* Abs frame addr stor key   */
 #if defined(_FEATURE_SIE)
     if(regs->sie_state)
     {
+        INVALIDATE_AIA(regs);
+        INVALIDATE_AEA_ALL(regs);
+
         if(regs->siebk->ic[2] & SIE_IC2_SSKE)
             longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 
@@ -4384,7 +4476,7 @@ RADR    n;                              /* Abs frame addr stor key   */
                     /* Convert real address to absolute address */
                     rcpa = APPLY_PREFIXING (rcpa, regs->hostregs->PX);
 
-                    /* For ESA/390 the RCP byte entry is at offset 1 in a 
+                    /* For ESA/390 the RCP byte entry is at offset 1 in a
                        four byte entry directly beyond the page table,
                for ESAME mode, this entry is eight bytes long */
                     rcpa += regs->hostregs->arch_mode == ARCH_900 ? 2049 : 1025;
@@ -4423,7 +4515,7 @@ RADR    n;                              /* Abs frame addr stor key   */
 #endif /*defined(_FEATURE_STORAGE_KEY_ASSIST)*/
               )
                     longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-    
+
 #if defined(_FEATURE_STORAGE_KEY_ASSIST)
         if(sr)
                     realkey = 0;
@@ -4432,7 +4524,7 @@ RADR    n;                              /* Abs frame addr stor key   */
                 {
                     /* host real to host absolute */
                     n = APPLY_PREFIXING(n, regs->hostregs->PX);
-    
+
                     realkey =
 #if !defined(_FEATURE_2K_STORAGE_KEYS)
                               STORAGE_KEY(n, regs)
@@ -4506,6 +4598,9 @@ RADR    n;                              /* Abs frame addr stor key   */
         STORAGE_KEY2(n, regs) &= STORKEY_BADFRM;
         STORAGE_KEY2(n, regs) |= regs->GR_LHLCL(r1) & ~(STORKEY_BADFRM);
 #endif
+        /* Perform aia and aea invalidation */
+        INVALIDATE_AIA_ABS(n, regs);
+        INVALIDATE_AEA_ABS(n, regs);
     }
 
     /* Perform serialization and checkpoint-synchronization */
@@ -4523,21 +4618,29 @@ DEF_INST(set_system_mask)
 {
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
-#if defined(OPTION_REDUCED_INVAL)
 int     realmode;
 int     space;
 int     armode;
-#endif
 
     S(inst, execflag, regs, b2, effective_addr2);
+    /*
+     * ECPS:VM - Before checking for prob/priv
+     * Check CR6 to see if S-ASSIST is requested
+     *
+     * If we can process it, then do it
+    */
+#if defined(FEATURE_ECPSVM)
+    if(ecpsvm_dossm(regs,b2,effective_addr2)==0)
+    {
+        return;
+    }
+#endif
 
     PRIV_CHECK(regs);
 
-#if defined(OPTION_REDUCED_INVAL)
     realmode = REAL_MODE(&regs->psw);
     armode = (regs->psw.armode == 1);
     space = (regs->psw.space == 1);
-#endif
 
     /* Special operation exception if SSM-suppression is active */
     if ( (regs->CR(0) & CR0_SSM_SUPP)
@@ -4570,7 +4673,10 @@ int     armode;
         regs->psw.ecmode &&
 #endif /*defined(FEATURE_BCMODE)*/
                             (regs->psw.sysmask & 0xB8) != 0)
+    {
+        logmsg("SSM Specification\n");
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+    }
 
     SET_IC_EXTERNAL_MASK(regs);
     SET_IC_MCK_MASK(regs);
@@ -4578,7 +4684,6 @@ int     armode;
     SET_IC_PER_MASK(regs);
 
     INVALIDATE_AIA(regs);
-#if defined(OPTION_REDUCED_INVAL)
     if ((realmode  != REAL_MODE(&regs->psw)) ||
         (armode    != (regs->psw.armode == 1)) ||
         (space     != (regs->psw.space == 1))
@@ -4587,9 +4692,6 @@ int     armode;
 #endif /*defined(FEATURE_PER)*/
          )
         INVALIDATE_AEA_ALL(regs);
-#else
-    INVALIDATE_AEA_ALL(regs);
-#endif
 
     RETURN_INTCHECK(regs);
 
@@ -5168,6 +5270,12 @@ int     i, d;                           /* Integer work areas        */
 BYTE    rwork[64];                      /* Register work areas       */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
+#if defined(FEATURE_ECPSVM)
+    if(ecpsvm_dostctl(regs,r1,r3,b2,effective_addr2)==0)
+    {
+        return;
+    }
+#endif
 
     PRIV_CHECK(regs);
 
@@ -5502,47 +5610,43 @@ DEF_INST(store_then_and_system_mask)
 BYTE    i2;                             /* Immediate byte of opcode  */
 int     b1;                             /* Base of effective addr    */
 VADR    effective_addr1;                /* Effective address         */
-#if defined(OPTION_REDUCED_INVAL)
 int     realmode;
-int     space;
-int     armode;
-#endif
+int     permode;
 
     SI(inst, execflag, regs, i2, b1, effective_addr1);
+#ifdef FEATURE_ECPSVM
+    if(ecpsvm_dostnsm(regs,b1,effective_addr1,i2)==0)
+    {
+        return;
+    }
+#endif
 
     PRIV_CHECK(regs);
-
-#if defined(OPTION_REDUCED_INVAL)
-    realmode = REAL_MODE(&regs->psw);
-    armode = (regs->psw.armode == 1);
-    space = (regs->psw.space == 1);
-#endif
 
 #if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[1] & SIE_IC1_STNSM))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 #endif /*defined(_FEATURE_SIE)*/
 
+    realmode = REAL_MODE(&regs->psw);
+    permode = PER_MODE(regs);
+
     /* Store current system mask value into storage operand */
     ARCH_DEP(vstoreb) ( regs->psw.sysmask, effective_addr1, b1, regs );
-
-    INVALIDATE_AIA(regs);
-#if !defined(OPTION_REDUCED_INVAL)
-    INVALIDATE_AEA_ALL(regs);
-#endif
 
     /* AND system mask with immediate operand */
     regs->psw.sysmask &= i2;
 
-#if defined(OPTION_REDUCED_INVAL)
-    if ((realmode  != REAL_MODE(&regs->psw)) ||
-        (armode    != (regs->psw.armode == 1)) ||
-        (space     != (regs->psw.space == 1)))
+    /* Check for invalidation */
+    if (realmode != REAL_MODE(&regs->psw)
+     || permode  != PER_MODE(regs))
+    {
+        INVALIDATE_AIA(regs);
         INVALIDATE_AEA_ALL(regs);
-#endif
+    }
 
     SET_IC_EXTERNAL_MASK(regs);
-    SET_IC_MCK_MASK(regs);
+//  SET_IC_MCK_MASK(regs);  machine check is bit 13
     SET_IC_IO_MASK(regs);
     SET_IC_PER_MASK(regs);
 
@@ -5559,8 +5663,17 @@ DEF_INST(store_then_or_system_mask)
 BYTE    i2;                             /* Immediate byte of opcode  */
 int     b1;                             /* Base of effective addr    */
 VADR    effective_addr1;                /* Effective address         */
+int     realmode;
+int     permode;
 
     SI(inst, execflag, regs, i2, b1, effective_addr1);
+
+#ifdef FEATURE_ECPSVM
+    if(ecpsvm_dostosm(regs,b1,effective_addr1,i2)==0)
+    {
+        return;
+    }
+#endif
 
     PRIV_CHECK(regs);
 
@@ -5568,6 +5681,9 @@ VADR    effective_addr1;                /* Effective address         */
     if(regs->sie_state && (regs->siebk->ic[1] & SIE_IC1_STOSM))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 #endif /*defined(_FEATURE_SIE)*/
+
+    realmode = REAL_MODE(&regs->psw);
+    permode = PER_MODE(regs);
 
     /* Store current system mask value into storage operand */
     ARCH_DEP(vstoreb) ( regs->psw.sysmask, effective_addr1, b1, regs );
@@ -5591,13 +5707,18 @@ VADR    effective_addr1;                /* Effective address         */
                             (regs->psw.sysmask & 0xB8) != 0)
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
+    /* Check for invalidation */
+    if (realmode != REAL_MODE(&regs->psw)
+     || permode  != PER_MODE(regs))
+    {
+        INVALIDATE_AIA(regs);
+        INVALIDATE_AEA_ALL(regs);
+    }
+
     SET_IC_EXTERNAL_MASK(regs);
-    SET_IC_MCK_MASK(regs);
+//  SET_IC_MCK_MASK(regs);  machine check is bit 13
     SET_IC_IO_MASK(regs);
     SET_IC_PER_MASK(regs);
-
-    INVALIDATE_AIA(regs);
-    INVALIDATE_AEA_ALL(regs);
 
     RETURN_INTCHECK(regs);
 

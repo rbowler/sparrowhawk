@@ -33,6 +33,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+typedef unsigned long long uintmax_t;  // fishfix
+
 #ifdef __GNUC__
 # define alloca __builtin_alloca
 # define HAVE_ALLOCA 1

@@ -4,12 +4,8 @@
 /*              Modified for New Panel Display =NP=                  */
 /*-------------------------------------------------------------------*/
 /* This module is the control panel for the ESA/390 emulator.        */
-/* It provides functions for displaying the PSW and registers        */
-/* and a command line for requesting control operations such         */
-/* as IPL, stop, start, single stepping, instruction tracing,        */
-/* and storage displays. It displays messages issued by other        */
-/* threads via the logmsg macro, and optionally also writes          */
-/* all messages to a log file if stdout is redirected.               */
+/* It provides a command interface into hercules, and it displays    */
+/* messages that are issued by various hercules components.          */
 /*-------------------------------------------------------------------*/
 
 /*-------------------------------------------------------------------*/
@@ -30,37 +26,11 @@
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
-
 #include "devtype.h"
-
 #include "opcode.h"
-
 // #include "inline.h"
 
-#if defined(OPTION_FISHIO)
-#include "w32chan.h"
-#endif /* defined(OPTION_FISHIO) */
-
-#if defined(FISH_HANG)
-extern  int   bFishHangAtExit;  // (set to true when shutting down)
-extern  void  FishHangInit(char* pszFileCreated, int nLineCreated);
-extern  void  FishHangReport();
-extern  void  FishHangAtExit();
-#endif // defined(FISH_HANG)
-
 #define  DISPLAY_INSTRUCTION_OPERANDS
-
-
-/* (Socket Devices...) */
-int bind_device (DEVBLK* dev, char* spec);
-int unbind_device (DEVBLK* dev);
-int unix_socket (char* path);
-int inet_socket (char* spec);
-int add_socket_devices_to_fd_set (fd_set* mask, int maxfd);
-void check_socket_devices_for_connections (fd_set* mask);
-void socket_device_connection_handler (bind_struct* bs);
-char* safe_strdup (char* str);
-
 
 /*=NP================================================================*/
 /* Global data for new panel display                                 */
@@ -109,6 +79,50 @@ char* safe_strdup (char* str);
 #define ANSI_CLEAR_EOL "\x1B[K"
 #define ANSI_CURSOR "\x1B[%d;%dH"
 
+/*-------------------------------------------------------------------*/
+/* Definitions for ANSI control sequences                            */
+/*-------------------------------------------------------------------*/
+#define ANSI_SAVE_CURSOR        "\x1B[s"
+#define ANSI_CURSOR_UP          "\x1B[1A"
+#define ANSI_CURSOR_DOWN        "\x1B[1B"
+#define ANSI_CURSOR_FORWARD     "\x1B[1C"
+#define ANSI_CURSOR_BACKWARD    "\x1B[1D"
+#define ANSI_POSITION_CURSOR    "\x1B[%d;%dH"
+#define ANSI_ROW1_COL1          "\x1B[1;1H"
+#define ANSI_ROW1_COL80         "\x1B[1;80H"
+#define ANSI_ROW22_COL80        "\x1B[22;80H"
+#define ANSI_ROW23_COL1         "\x1B[23;1H"
+#define ANSI_ROW24_COL1         "\x1B[24;1H"
+#define ANSI_ROW24_COL79        "\x1B[24;79H"
+#define ANSI_BLACK_GREEN        "\x1B[30;42m"
+#define ANSI_YELLOW_RED         "\x1B[33;1;41m"
+#define ANSI_WHITE_BLACK        "\x1B[0m"
+#define ANSI_HIGH_INTENSITY     "\x1B[1m"
+#define ANSI_ERASE_EOL          "\x1B[K"
+#define ANSI_ERASE_SCREEN       "\x1B[2J"
+#define ANSI_RESTORE_CURSOR     "\x1B[u"
+
+/*-------------------------------------------------------------------*/
+/* Definitions for keyboard input sequences                          */
+/*-------------------------------------------------------------------*/
+#define KBD_HOME                "\x1B[1~"
+#define KBD_INSERT              "\x1B[2~"
+#define KBD_DELETE              "\x1B[3~"
+#define KBD_END                 "\x1B[4~"
+#define KBD_PAGE_UP             "\x1B[5~"
+#define KBD_PAGE_DOWN           "\x1B[6~"
+#define KBD_UP_ARROW            "\x1B[A"
+#define KBD_DOWN_ARROW          "\x1B[B"
+#define KBD_RIGHT_ARROW         "\x1B[C"
+#define KBD_LEFT_ARROW          "\x1B[D"
+#define xKBD_UP_ARROW           "\x1BOA"
+#define xKBD_DOWN_ARROW         "\x1BOB"
+#define xKBD_RIGHT_ARROW        "\x1BOC"
+#define xKBD_LEFT_ARROW         "\x1BOD"
+
+#define ANSI_RESET_WHT_BLK   "\x1B[0;37;40m"
+#define ANSI_CLEAR_SCREEN    "\x1B[2J"
+
 int NPDup = 0;          /* 1 when new panel is up */
 int NPDinit = 0;        /* 1 when new panel is initialized */
 int NPhelpup = 0;       /* 1 when displaying help panel */
@@ -152,27 +166,98 @@ char NPcurprompt1[40];
 char NPcurprompt2[40];
 U32 NPaaddr;
 
-#ifdef EXTERNALGUI
-/*-------------------------------------------------------------------*/
-/* External GUI control                                              */
-/*-------------------------------------------------------------------*/
-#ifdef OPTION_MIPS_COUNTING
-U32     mipsrate = 0;
-U32     siosrate = 0;
-U32     prevmipsrate = 0;
-U32     prevsiosrate = 0;
-int     gui_cpupct = 0;                 /* 1=cpu percentage active   */
-#endif /*OPTION_MIPS_COUNTING*/
-int     gui_gregs = 1;                  /* 1=gregs status active     */
-int     gui_cregs = 1;                  /* 1=cregs status active     */
-int     gui_aregs = 1;                  /* 1=aregs status active     */
-int     gui_fregs = 1;                  /* 1=fregs status active     */
-int     gui_devlist = 1;                /* 1=devlist status active   */
-DEVBLK* dev;
-BYTE*   devclass;
-char    devnam[256];
-int     stat_online, stat_busy, stat_pend, stat_open;
-#endif /*EXTERNALGUI*/
+#define MAX_MSGS                800     /* Number of slots in buffer */
+#define MSG_SIZE                80      /* Size of one message       */
+#define BUF_SIZE    (MAX_MSGS*MSG_SIZE) /* Total size of buffer      */
+#define NUM_LINES               22      /* Number of scrolling lines */
+#define CMD_SIZE             32767      /* Length of command line    */
+
+static int     firstmsgn = 0;           /* Number of first message to
+                                           be displayed relative to
+                                           oldest message in buffer  */
+static BYTE   *msgbuf;                  /* Circular message buffer   */
+static int     msgslot = 0;             /* Next available buffer slot*/
+static int     nummsgs = 0;             /* Number of msgs in buffer  */
+
+#if 1
+//
+//
+//  THE FOLLOWING CODE IS HERE TO PROVIDE COMPATIBILIY WITH THE CURRENT 
+//  PANEL IMPLEMENTATION
+//
+//  THE PANEL DISPLAY SHOULD AT SOME POINT BE REWRITTEN TO USE LOG_LINE
+//  AND LOG_READ RATHER THEN THE MESSAGE PIPE PROVIDED HERE
+//
+//
+FILE   *compat_msgpipew;                /* Message pipe write handle */
+int     compat_msgpiper;                /* Message pipe read handle  */
+int     compat_shutdown;                /* Shutdown flag             */
+
+#if defined(OPTION_DYNAMIC_LOAD)
+void *(*panel_command) (void *);
+void (*panel_display) (void);
+void (*daemon_task) (void);
+int (*config_command) (int argc, char *argv[], char *cmdline);
+int (*system_command) (int argc, char *argv[], char *cmdline);
+void *(*debug_cpu_state) (REGS *);
+void *(*debug_device_state) (DEVBLK *);
+void *(*debug_program_interrupt) (REGS *, int);
+void *(*debug_diagnose) (U32, int, int, REGS *);
+void *(*debug_sclp_unknown_command) (U32, void *, REGS *);
+void *(*debug_sclp_unknown_event) (void *, void *, REGS *);
+void *(*debug_sclp_event_data) (void *, void *, REGS *);
+void *(*debug_chsc_unknown_request) (void *, void *, REGS *);
+#endif
+
+static char *lmsbuf;
+static int  lmsnum;
+static int  lmscnt;
+static void *panel_compat_thread(void *arg)
+{
+
+    UNREFERENCED(arg);
+
+    while(!compat_shutdown) 
+        if((lmscnt = log_read(&lmsbuf, &lmsnum, LOG_BLOCK)))
+            fwrite(lmsbuf,lmscnt,1,compat_msgpipew);
+
+    fclose(compat_msgpipew);
+
+    return NULL;
+}
+
+
+static void panel_compat_init()
+{
+ATTR compat_attr;
+int rc, pfd[2];
+TID compat_tid;
+
+    rc = pipe (pfd);
+    if (rc < 0)
+    {
+        logmsg(_("HHCLG013S Message pipe creation failed: %s\n"),
+                strerror(errno));
+        exit(1);
+    }
+
+    compat_shutdown = 0;
+    compat_msgpiper = pfd[0];
+    compat_msgpipew = fdopen (pfd[1], "w");
+    if (compat_msgpipew == NULL)
+    {
+        compat_msgpipew = stderr;
+        logmsg(_("HHCLG014S Message pipe open failed: %s\n"),
+                strerror(errno));
+        exit(1);
+    }
+    setvbuf (compat_msgpipew, NULL, _IOLBF, 0);
+
+    initialize_detach_attr (&compat_attr);
+
+    create_thread(&compat_tid, &compat_attr, panel_compat_thread, NULL);
+}
+#endif
 
 /*=NP================================================================*/
 /*  Initialize the NP data                                           */
@@ -219,7 +304,7 @@ static void NP_screen(FILE *confp)
     fprintf(confp, ANSI_CLEAR);
     fprintf(confp, ANSI_WHT_BLU);
     fprintf(confp, ANSI_CURSOR, 1, 1);
-    fprintf(confp, " Hercules        CPU         %7.7s ",
+    fprintf(confp, " Hercules   CPU              %7.7s ",
                                         get_arch_mode_string(NULL));
     fprintf(confp, ANSI_CURSOR, 1, 38);
     fprintf(confp, "|             Peripherals                  ");
@@ -401,6 +486,16 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
 
     memset (curpsw, 0x00, sizeof(curpsw));
     store_psw (regs, curpsw);
+    if( regs->arch_mode == ARCH_900 )
+    {
+        curpsw[1] |= 0x08;
+        curpsw[4] |= curpsw[12];
+        curpsw[5] |= curpsw[13];
+        curpsw[6] |= curpsw[14];
+        curpsw[7] |= curpsw[15];
+        if(regs->psw.IA_G > 0x7FFFFFFFULL)
+            curpsw[7] |= 0x01;
+    }
     pswwait = curpsw[1] & 0x02;
     fprintf (confp, ANSI_YLW_BLK);
     fprintf (confp, ANSI_CURSOR, 3, 2);
@@ -452,7 +547,7 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
                 }
                 break;
             case 4:
-                aaddr = APPLY_PREFIXING (NPaddress, regs->PX);
+                aaddr = APPLY_PREFIXING ((U32)NPaddress, regs->PX);
                 if (aaddr > regs->mainlim)
                     break;
                 curreg[i] = 0;
@@ -495,6 +590,9 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
         mipsrate += sysblk.regs[i].mipsrate;
         siosrate += sysblk.regs[i].siosrate;
     }
+#ifdef OPTION_SHARED_DEVICES
+    siosrate += sysblk.shrdrate;
+#endif
     if (mipsrate > 100000) mipsrate = 0;        /* ignore wildly high rate */
     fprintf(confp, "%2.1d.%2.2d  %5d",
             mipsrate / 1000, (mipsrate % 1000) / 10,
@@ -565,7 +663,7 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
                   (strlen(dev->filename) > 0))
                        online = 1;
          if (dev->busy) busy = 1;
-         if (dev->pending) pend = 1;
+         if (dev->pending || dev->pcipending) pend = 1;
          if (dev->fd > 2) open = 1;
          if (online != NPonline[a - 1]) {
               fprintf(confp, ANSI_CURSOR, p, 40);
@@ -658,226 +756,62 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
 /* ==============   End of the main NP block of code    =============*/
 
 
-/*-------------------------------------------------------------------*/
-/* Definitions for ANSI control sequences                            */
-/*-------------------------------------------------------------------*/
-#define ANSI_SAVE_CURSOR        "\x1B[s"
-#define ANSI_CURSOR_UP          "\x1B[1A"
-#define ANSI_CURSOR_DOWN        "\x1B[1B"
-#define ANSI_CURSOR_FORWARD     "\x1B[1C"
-#define ANSI_CURSOR_BACKWARD    "\x1B[1D"
-#define ANSI_POSITION_CURSOR    "\x1B[%d;%dH"
-#define ANSI_ROW1_COL1          "\x1B[1;1H"
-#define ANSI_ROW1_COL80         "\x1B[1;80H"
-#define ANSI_ROW22_COL80        "\x1B[22;80H"
-#define ANSI_ROW23_COL1         "\x1B[23;1H"
-#define ANSI_ROW24_COL1         "\x1B[24;1H"
-#define ANSI_ROW24_COL79        "\x1B[24;79H"
-#define ANSI_BLACK_GREEN        "\x1B[30;42m"
-#define ANSI_YELLOW_RED         "\x1B[33;1;41m"
-#define ANSI_WHITE_BLACK        "\x1B[0m"
-#define ANSI_HIGH_INTENSITY     "\x1B[1m"
-#define ANSI_ERASE_EOL          "\x1B[K"
-#define ANSI_ERASE_SCREEN       "\x1B[2J"
-#define ANSI_RESTORE_CURSOR     "\x1B[u"
-
-/*-------------------------------------------------------------------*/
-/* Definitions for keyboard input sequences                          */
-/*-------------------------------------------------------------------*/
-#define KBD_HOME                "\x1B[1~"
-#define KBD_INSERT              "\x1B[2~"
-#define KBD_DELETE              "\x1B[3~"
-#define KBD_END                 "\x1B[4~"
-#define KBD_PAGE_UP             "\x1B[5~"
-#define KBD_PAGE_DOWN           "\x1B[6~"
-#define KBD_UP_ARROW            "\x1B[A"
-#define KBD_DOWN_ARROW          "\x1B[B"
-#define KBD_RIGHT_ARROW         "\x1B[C"
-#define KBD_LEFT_ARROW          "\x1B[D"
-
-/*-------------------------------------------------------------------*/
-/* Cleanup routine                                                   */
-/*-------------------------------------------------------------------*/
-static void system_cleanup (void)
+static void panel_cleanup(void *unused __attribute__ ((unused)) )
 {
 struct termios kbattr;                  /* Terminal I/O structure    */
+int i,n;
+char c;
+
+    compat_shutdown = 1;
 
     /* Restore the terminal mode */
     tcgetattr (STDIN_FILENO, &kbattr);
     kbattr.c_lflag |= (ECHO | ICANON);
     tcsetattr (STDIN_FILENO, TCSANOW, &kbattr);
 
-#ifdef EXTERNALGUI
-    if (!extgui)
-#endif /*EXTERNALGUI*/
-    /* Reset the cursor position */
-    fprintf (stderr,
-            ANSI_ROW24_COL79
-            ANSI_WHITE_BLACK
-            "\n");
-    fprintf (stderr,
-            "HHCIN007I Hercules terminated\n");
+    fprintf(stderr, ANSI_RESET_WHT_BLK ANSI_CLEAR_SCREEN );
 
-} /* end function system_cleanup */
+    /* Reset the first line to be displayed (i.e.
+       "scroll down to the most current message") */
+    firstmsgn = nummsgs - NUM_LINES;
+    if (firstmsgn < 0) firstmsgn = 0;
 
-/*-------------------------------------------------------------------*/
-/* Process .RC file thread                                           */
-/*-------------------------------------------------------------------*/
-
-int rc_thread_done = 0;                 /* 1 = RC file processed     */
-
-void* process_rc_file (void* dummy)
-{
-BYTE   *rcname;                         /* hercules.rc name pointer  */
-FILE   *rcfp;                           /* RC file pointer           */
-size_t  rcbufsize = 1024;               /* Size of RC file  buffer   */
-BYTE   *rcbuf = NULL;                   /* RC file input buffer      */
-int     rclen;                          /* length of RC file record  */
-int     rc_pause_amt = 0;               /* seconds to pause RC file  */
-BYTE   *p;                              /* (work)                    */
-
-    UNREFERENCED(dummy);
-
-    /* Obtain the name of the hercules.rc file or default */
-
-    if(!(rcname = getenv("HERCULES_RC")))
-        rcname = "hercules.rc";
-
-    /* Open RC file. If it doesn't exist,
-       then there's nothing for us to do */
-
-    if (!(rcfp = fopen(rcname, "r")))
+    /* Display messages in scrolling area */
+    for (i=0; i < NUM_LINES && firstmsgn + i < nummsgs; i++)
     {
-        if (ENOENT != errno)
-            logmsg(_("HHCPN007E RC file %s open failed: %s\n"),
-                rcname, strerror(errno));
-        rc_thread_done = 1;
-        return NULL;
+        n = (nummsgs < MAX_MSGS) ? 0 : msgslot;
+        n += firstmsgn + i;
+        if (n >= MAX_MSGS) n -= MAX_MSGS;
+        fprintf (stderr,
+                ANSI_POSITION_CURSOR
+                ANSI_WHITE_BLACK,
+                i+1, 1);
+        fwrite (msgbuf + (n * MSG_SIZE), MSG_SIZE, 1, stderr);
     }
 
-    logmsg(_("HHCPN008I RC file processing thread started using file %s\n"),
-           rcname);
+    /* Read any remaining msgs from the msg pipe */
+    while(read (compat_msgpiper, &c, 1) > 0)
+        fputc(c,stderr);
 
-    /* Obtain storage for the RC file buffer */
-
-    if (!(rcbuf = malloc (rcbufsize)))
-    {
-        logmsg(_("HHCPN009E RC file buffer malloc failed: %s\n"),
-            strerror(errno));
-        fclose(rcfp);
-        rc_thread_done = 1;
-        return NULL;
-    }
-
-    for (;;)
-    {
-        /* Read a complete line from the RC file */
-
-        if (!fgets(rcbuf, rcbufsize, rcfp)) break;
-
-        /* Remove trailing whitespace */
-
-        for (rclen = strlen(rcbuf); rclen && isspace(rcbuf[rclen-1]); rclen--);
-        rcbuf[rclen] = 0;
-
-        /* '#' == silent comment, '*' == loud comment */
-
-        if ('#' == rcbuf[0] || '*' == rcbuf[0])
-        {
-            if ('*' == rcbuf[0])
-                logmsg ("> %s",rcbuf);
-            continue;
-        }
-
-        /* Remove any # comments on the line before processing */
-
-        if ((p = strchr(rcbuf,'#')) && p > rcbuf)
-            do *p = 0; while (isspace(*--p) && p >= rcbuf);
-
-        if (strncasecmp(rcbuf,"pause",5) == 0)
-        {
-            sscanf(rcbuf+5, "%d", &rc_pause_amt);
-
-            if (rc_pause_amt < 0 || rc_pause_amt > 999)
-            {
-                logmsg(_("HHCPN010W Ignoring invalid RC file pause "
-                         "statement: %s\n"),
-                         rcbuf+5);
-                continue;
-            }
-
-            logmsg (_("HHCPN011I Pausing RC file processing for %d "
-                      "seconds...\n"),
-                      rc_pause_amt);
-            sleep(rc_pause_amt);
-            logmsg (_("HHCPN012I Resuming RC file processing...\n"));
-
-            continue;
-        }
-
-        /* Process the command */
-
-        for (p = rcbuf; isspace(*p); p++);
-
-        SYNCHRONOUS_PANEL_CMD(p);
-    }
-
-    if (feof(rcfp))
-        logmsg (_("HHCPN013I EOF reached on RC file. Processing complete.\n"));
-    else
-        logmsg (_("HHCPN014E I/O error reading RC file: %s\n"),
-                 strerror(errno));
-
-    fclose(rcfp);
-
-    rc_thread_done = 1;
-
-    return NULL;
+    /* Read any remaining msgs from the system log */
+    while((lmscnt = log_read(&lmsbuf, &lmsnum, LOG_NOBLOCK)))
+        fwrite(lmsbuf,lmscnt,1,stderr);
 }
 
 /*-------------------------------------------------------------------*/
 /* Panel display thread                                              */
 /*                                                                   */
 /* This function runs on the main thread.  It receives messages      */
-/* from other threads and displays them on the screen.  It accepts   */
+/* from the log task and displays them on the screen.  It accepts    */
 /* panel commands from the keyboard and executes them.  It samples   */
 /* the PSW periodically and displays it on the screen status line.   */
-/*                                                                   */
-/* Note that this routine must not attempt to write messages into    */
-/* the message pipe by calling the logmsg function, because this     */
-/* will cause a deadlock when the pipe becomes full during periods   */
-/* of high message activity.  For this reason a separate thread is   */
-/* created to process all commands entered.                          */
 /*-------------------------------------------------------------------*/
 
-int volatile initdone = 0;           /* Initialization complete flag */
-
-#define MAX_MSGS                800     /* Number of slots in buffer */
-#define MSG_SIZE                80      /* Size of one message       */
-#define BUF_SIZE    (MAX_MSGS*MSG_SIZE) /* Total size of buffer      */
-#define NUM_LINES               22      /* Number of scrolling lines */
-#define CMD_SIZE             32767      /* Length of command line    */
-BYTE   *msgbuf;                         /* Circular message buffer   */
-int     msgslot = 0;                    /* Next available buffer slot*/
-int     nummsgs = 0;                    /* Number of msgs in buffer  */
-int     msg_size = MSG_SIZE;
-int     max_msgs = MAX_MSGS;
-
-void get_msgbuf(BYTE **_msgbuf, int *_msgslot, int *_nummsgs, int *_msg_size, int *_max_msgs)
-{
-    *_msgbuf = msgbuf;
-    *_msgslot = msgslot;
-    *_nummsgs = nummsgs;
-    *_msg_size = msg_size;
-    *_max_msgs = max_msgs;
-}
-
-/* (forward references) */
-#ifdef EXTERNALGUI
-void gui_devlist_status (FILE *confp);
-#endif
-
+#if defined(OPTION_DYNAMIC_LOAD)
+void panel_display_r (void)
+#else
 void panel_display (void)
+#endif
 {
 int     rc;                             /* Return code               */
 int     i, n;                           /* Array subscripts          */
@@ -886,28 +820,19 @@ QWORD   curpsw;                         /* Current PSW               */
 QWORD   prvpsw;                         /* Previous PSW              */
 BYTE    prvstate = 0xFF;                /* Previous stopped state    */
 U64     prvicount = 0;                  /* Previous instruction count*/
+#if defined(OPTION_SHARED_DEVICES)
+U32     prvscount = 0;                  /* Previous shrdcount        */
+#endif
 BYTE    pswwait;                        /* PSW wait state bit        */
-int     firstmsgn = 0;                  /* Number of first message to
-                                           be displayed relative to
-                                           oldest message in buffer  */
-#ifdef EXTERNALGUI
-BYTE    redraw_msgs = 0;                /* 1=Redraw message area     */
-BYTE    redraw_cmd = 0;                 /* 1=Redraw command line     */
-BYTE    redraw_status = 0;              /* 1=Redraw status line      */
-#else /*!EXTERNALGUI*/
 BYTE    redraw_msgs;                    /* 1=Redraw message area     */
 BYTE    redraw_cmd;                     /* 1=Redraw command line     */
 BYTE    redraw_status;                  /* 1=Redraw status line      */
-#endif /*EXTERNALGUI*/
 BYTE    readbuf[MSG_SIZE];              /* Message read buffer       */
 int     readoff = 0;                    /* Number of bytes in readbuf*/
 BYTE    cmdline[CMD_SIZE+1];            /* Command line buffer       */
 int     cmdoff = 0;                     /* Number of bytes in cmdline*/
-TID     cmdtid;                         /* Command thread identifier */
-TID     rctid;                          /* RC file thread identifier */
 BYTE    c;                              /* Character work area       */
 FILE   *confp;                          /* Console file pointer      */
-FILE   *logfp;                          /* Log file pointer          */
 struct termios kbattr;                  /* Terminal I/O structure    */
 size_t  kbbufsize = CMD_SIZE;           /* Size of keyboard buffer   */
 BYTE   *kbbuf = NULL;                   /* Keyboard input buffer     */
@@ -917,6 +842,10 @@ int     keybfd;                         /* Keyboard file descriptor  */
 int     maxfd;                          /* Highest file descriptor   */
 fd_set  readset;                        /* Select file descriptors   */
 struct  timeval tv;                     /* Select timeout structure  */
+
+#if 1
+    panel_compat_init();
+#endif
 
     /* Display thread started message on control panel */
     logmsg (_("HHCPN001I Control panel thread started: "
@@ -941,32 +870,15 @@ struct  timeval tv;                     /* Select timeout structure  */
         return;
     }
 
-    /* If stdout is not redirected, then write screen output
-       to stdout and do not produce a log file.  If stdout is
-       redirected, then write screen output to stderr and
-       write the logfile to stdout */
-    if (isatty(STDOUT_FILENO))
-    {
-        confp = stdout;
-        logfp = NULL;
-    }
-    else
-    {
-        confp = stderr;
-        logfp = stdout;
-        /* Logfile should be unbuffered to be always in sync */
-        setvbuf(logfp, NULL, _IONBF, 0);
-    }
+    /* Set up the input file descriptors */
+    confp = stderr;
+    pipefd = compat_msgpiper;
+    keybfd = STDIN_FILENO;
+
+    hdl_adsc(panel_cleanup, NULL);
 
     /* Set screen output stream to fully buffered */
     setvbuf (confp, NULL, _IOFBF, 0);
-
-    /* Set up the input file descriptors */
-    pipefd = sysblk.msgpiper;
-    keybfd = STDIN_FILENO;
-
-    /* Register the system cleanup exit routine */
-    atexit (system_cleanup);
 
     /* Put the terminal into cbreak mode */
     tcgetattr (keybfd, &kbattr);
@@ -975,50 +887,20 @@ struct  timeval tv;                     /* Select timeout structure  */
     kbattr.c_cc[VTIME] = 0;
     tcsetattr (keybfd, TCSANOW, &kbattr);
 
-#ifdef EXTERNALGUI
-    if (!extgui)
-#endif /*EXTERNALGUI*/
     /* Clear the screen */
     fprintf (confp,
             ANSI_WHT_BLK
             ANSI_ERASE_SCREEN);
 
-#ifdef EXTERNALGUI
-    if (!extgui)
-    {
-#endif /*EXTERNALGUI*/
     redraw_msgs = 1;
     redraw_cmd = 1;
-#ifdef EXTERNALGUI
-    }
-#endif /*EXTERNALGUI*/
     redraw_status = 1;
-
-    /* Wait for system to finish coming up */
-    while (!initdone) sleep(1);
-
-    /* Start up the RC file processing thread */
-    create_thread(&rctid,&sysblk.detattr,process_rc_file,NULL);
 
     /* Process messages and commands */
     while (1)
     {
         /* Set target CPU for commands and displays */
         regs = sysblk.regs + sysblk.pcpu;
-        /* If the requested CPU is offline, then take the first available CPU*/
-        if(!regs->cpuonline)
-          /* regs = first online CPU
-           * sysblk.pcpu = number of online CPUs
-           */
-          for(regs = 0, sysblk.pcpu = 0, i = 0 ;
-              i < MAX_CPU_ENGINES ; ++i )
-            if (sysblk.regs[i].cpuonline) {
-              if (!regs)
-                regs = sysblk.regs + i;
-              ++sysblk.pcpu;
-            }
-
-        if (!regs) regs = sysblk.regs;
 
 #if defined(_FEATURE_SIE)
         /* Point to SIE copy in SIE state */
@@ -1032,7 +914,6 @@ struct  timeval tv;                     /* Select timeout structure  */
         FD_SET (pipefd, &readset);
         maxfd = keybfd;
         if (pipefd > maxfd) maxfd = pipefd;
-        maxfd = add_socket_devices_to_fd_set (&readset, maxfd);
 
         /* Wait for a message to arrive, a key to be pressed,
            or the inactivity interval to expire */
@@ -1089,24 +970,24 @@ struct  timeval tv;                     /* Select timeout structure  */
                             break;
                         case 'S':                   /* START */
                         case 's':
-                            ASYNCHRONOUS_PANEL_CMD("start");
+                            panel_command("start");
                             break;
                         case 'P':                   /* STOP */
                         case 'p':
-                            ASYNCHRONOUS_PANEL_CMD("stop");
+                            panel_command("stop");
                             break;
                         case 'T':                   /* RESTART */
                         case 't':
-                            ASYNCHRONOUS_PANEL_CMD("restart");
+                            panel_command("restart");
                             break;
                         case 'E':                   /* Ext int */
                         case 'e':
-                            ASYNCHRONOUS_PANEL_CMD("ext");
+                            panel_command("ext");
                             redraw_status = 1;
                             break;
                         case 'O':                   /* Store */
                         case 'o':
-                            NPaaddr = APPLY_PREFIXING (NPaddress, regs->PX);
+                            NPaaddr = APPLY_PREFIXING ((U32)NPaddress, regs->PX);
                             if (NPaaddr > regs->mainlim)
                                 break;
                             regs->mainstor[NPaaddr] = 0;
@@ -1185,7 +1066,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                             sprintf(NPdevstr, "%x", NPdevaddr[i]);
                             strcpy(cmdline, "ipl ");
                             strcat(cmdline, NPdevstr);
-                            ASYNCHRONOUS_PANEL_CMD(cmdline);
+                            panel_command(cmdline);
                             strcpy(NPprompt2, "");
                             redraw_status = 1;
                             break;
@@ -1206,7 +1087,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                             sprintf(NPdevstr, "%x", NPdevaddr[i]);
                             strcpy(cmdline, "i ");
                             strcat(cmdline, NPdevstr);
-                            ASYNCHRONOUS_PANEL_CMD(cmdline);
+                            panel_command(cmdline);
                             strcpy(NPprompt2, "");
                             redraw_status = 1;
                             break;
@@ -1241,9 +1122,12 @@ struct  timeval tv;                     /* Select timeout structure  */
                             strcpy(NPprompt1, "Confirm Powerdown Y or N");
                             redraw_status = 1;
                             break;
-                        case 4:                     /* IPL - 2nd part */
+                        case 4:                     /* POWER - 2nd part */
                             if (NPdevice == 'y' || NPdevice == 'Y')
-                                ASYNCHRONOUS_PANEL_CMD("quit");
+                            {
+                                panel_command("quit");
+                                while (1) sched_yield();
+                            }
                             strcpy(NPprompt1, "");
                             redraw_status = 1;
                             break;
@@ -1282,7 +1166,8 @@ struct  timeval tv;                     /* Select timeout structure  */
                 }
 
                 /* Test for line up command */
-                if (strcmp(kbbuf+i, KBD_UP_ARROW) == 0)
+                if (strcmp(kbbuf+i, KBD_UP_ARROW) == 0
+                    || strcmp(kbbuf+i, xKBD_UP_ARROW) == 0)
                 {
                     if (firstmsgn == 0) break;
                     firstmsgn--;
@@ -1291,7 +1176,8 @@ struct  timeval tv;                     /* Select timeout structure  */
                 }
 
                 /* Test for line down command */
-                if (strcmp(kbbuf+i, KBD_DOWN_ARROW) == 0)
+                if (strcmp(kbbuf+i, KBD_DOWN_ARROW) == 0
+                    || strcmp(kbbuf+i, xKBD_DOWN_ARROW) == 0)
                 {
                     if (firstmsgn + NUM_LINES >= nummsgs) break;
                     firstmsgn++;
@@ -1320,6 +1206,30 @@ struct  timeval tv;                     /* Select timeout structure  */
                     break;
                 }
 
+                /* Process backspace character               */
+                /* DEL (\x7F), KBD_LEFT_ARROW and KBD_DELETE */
+                /* are all equivalent to backspace           */
+                if (kbbuf[i] == '\b' || kbbuf[i] == '\x7F'
+                    || strcmp(kbbuf+i, KBD_LEFT_ARROW) == 0
+                    || strcmp(kbbuf+i, xKBD_LEFT_ARROW) == 0
+                    || strcmp(kbbuf+i, KBD_DELETE) == 0)
+                {
+                    if (cmdoff > 0) cmdoff--;
+                    i++;
+                    redraw_cmd = 1;
+                    break;
+                }
+
+                /* Test for other KBD_* strings           */
+                /* Just ignore them, no function assigned */
+                if (strcmp(kbbuf+i, KBD_RIGHT_ARROW) == 0
+                    || strcmp(kbbuf+i, xKBD_RIGHT_ARROW) == 0
+                    || strcmp(kbbuf+i, KBD_INSERT) == 0)
+                {
+                    redraw_msgs = 1;
+                    break;
+                }
+
                 /* Process escape key */
                 if (kbbuf[i] == '\x1B')
                 {
@@ -1330,80 +1240,17 @@ struct  timeval tv;                     /* Select timeout structure  */
                     break;
                 }
 
-                /* Process backspace character */
-                if (kbbuf[i] == '\b' || kbbuf[i] == '\x7F'
-                    || strcmp(kbbuf+i, KBD_LEFT_ARROW) == 0)
-                {
-                    if (cmdoff > 0) cmdoff--;
-                    i++;
-                    redraw_cmd = 1;
-                    break;
-                }
-
                 /* Process the command if newline was read */
                 if (kbbuf[i] == '\n')
                 {
                     cmdline[cmdoff] = '\0';
                     /* =NP= create_thread replaced with: */
                     if (NPDup == 0) {
-#ifdef EXTERNALGUI
-                        if (extgui && (cmdline[0] == ']'))
-                        {
-                            redraw_status = 1;
-
-                            if (strncmp(cmdline,"]GREGS=",7) == 0)
-                            {
-                                gui_gregs = atoi(cmdline+7);
-                            }
-                            else
-                            if (strncmp(cmdline,"]CREGS=",7) == 0)
-                            {
-                                gui_cregs = atoi(cmdline+7);
-                            }
-                            else
-                            if (strncmp(cmdline,"]AREGS=",7) == 0)
-                            {
-                                gui_aregs = atoi(cmdline+7);
-                            }
-                            else
-                            if (strncmp(cmdline,"]FREGS=",7) == 0)
-                            {
-                                gui_fregs = atoi(cmdline+7);
-                            }
-                            else
-                            if (strncmp(cmdline,"]DEVLIST=",9) == 0)
-                            {
-                                gui_devlist = atoi(cmdline+9);
-                            }
-                            else
-                            if (strncmp(cmdline,"]MAINSTOR=",10) == 0)
-                            {
-                                fprintf(stderr,"MAINSTOR=%d\n",(U32)regs->mainstor);
-                                fprintf(stderr,"MAINSIZE=%d\n",(U32)sysblk.mainsize);
-                            }
-#if defined(OPTION_MIPS_COUNTING)
-                            else
-                            if (strncmp(cmdline,"]CPUPCT=",8) == 0)
-                            {
-                                gui_cpupct = atoi(cmdline+8);
-                            }
-#endif /*defined(OPTION_MIPS_COUNTING)*/
-                        }
-                        else
-#endif /*EXTERNALGUI*/
-                        {
-                            if ('#' == cmdline[0] || '*' == cmdline[0])
-                            {
-                                if ('*' == cmdline[0])
-                                    logmsg("%s\n", cmdline);
-                            }
-                            else
-                            {
-                                if (rc_thread_done)
-                                {
-                                    ASYNCHRONOUS_PANEL_CMD(cmdline);
-                                }
-                            }
+                        if ('#' == cmdline[0] || '*' == cmdline[0]) {
+                            if ('*' == cmdline[0])
+                                logmsg("%s\n", cmdline);
+                        } else {
+                            panel_command(cmdline);
                         }
                     } else {
                         NPdataentry = 0;
@@ -1431,7 +1278,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                                 strcat(NPentered, NPdevstr);
                                 strcat(NPentered, " ");
                                 strcat(NPentered, cmdline);
-                                ASYNCHRONOUS_PANEL_CMD(NPentered);
+                                panel_command(NPentered);
                                 strcpy(NPprompt2, "");
                                 break;
                             default:
@@ -1441,10 +1288,6 @@ struct  timeval tv;                     /* Select timeout structure  */
                     }
                     /* =END= */
                     cmdoff = 0;
-#ifdef EXTERNALGUI
-                    /* Process *ALL* of the 'keyboard' (stdin) buffer data! */
-                    if (extgui) {i++; continue;}
-#endif /*EXTERNALGUI*/
                     redraw_cmd = 1;
                     break;
                 }
@@ -1468,91 +1311,84 @@ struct  timeval tv;                     /* Select timeout structure  */
         /* If a message has arrived then receive it */
         if (FD_ISSET(pipefd, &readset))
         {
-            /* Clear the message buffer */
-            memset (readbuf, SPACE, MSG_SIZE);
-
-            /* Read message bytes until newline */
-            while (1)
+            /* Read message bytes until newline... */
+            c = 0;
+            while (c != '\n' && c != '\r')
             {
-                /* Read a byte from the message pipe */
-                rc = read (pipefd, &c, 1);
-                if (rc < 1)
-                {
-                    fprintf (stderr,
-                            "HHCPN006E message pipe read: %s\n",
-                            strerror(errno));
-                    break;
+                /* Initialize the read buffer */
+                if (!readoff || readoff >= MSG_SIZE) {
+                    memset (readbuf, SPACE, MSG_SIZE);
+                    readoff = 0;
                 }
 
-
-                /* Exit if newline was read */
-                if (c == '\n') break;
-
-                /* Handle tab character */
-                if (c == '\t')
+                /* Read message bytes and copy into read buffer
+                   until we either encounter a newline character
+                   or our buffer is completely filled with data. */
+                while (c != '\n' && c != '\r')
                 {
-                    readoff += 8;
-                    readoff &= 0xFFFFFFF8;
-                    continue;
+                    /* Read a byte from the message pipe */
+                    rc = read (pipefd, &c, 1);
+                    if (rc < 1) {
+                        fprintf (stderr,
+                                _("HHCPN006E message pipe read: %s\n"),
+                                strerror(errno));
+                        break;
+                    }
+
+                    /* Break to process received message
+                       whenever a newline is encountered */
+                    if (c == '\n' || c == '\r') {
+                        readoff = 0;    /* (for next time) */
+                        break;
+                    }
+
+                    /* Handle tab character */
+                    if (c == '\t') {
+                        readoff += 8;
+                        readoff &= 0xFFFFFFF8;
+                        /* Messages longer than one screen line will
+                           be continued on the very next screen line */
+                        if (readoff >= MSG_SIZE)
+                            break;
+                        else continue;
+                    }
+
+                    /* Eliminate non-displayable characters */
+                    if (!isgraph(c)) c = SPACE;
+
+                    /* Stuff byte into message processing buffer */
+                    readbuf[readoff++] = c;
+
+                    /* Messages longer than one screen line will
+                       be continued on the very next screen line */
+                    if (readoff >= MSG_SIZE)
+                        break;
                 }
 
-                /* Eliminate non-printable characters */
-                if (!isprint(c)) c = SPACE;
+                /* If we have a message to be displayed (or a complete
+                   part of one), then copy it to the circular buffer. */
+                if (!readoff || readoff >= MSG_SIZE) {
+                    /* Set the display update indicator */
+                    redraw_msgs = 1;
 
-                /* Append the byte to the read buffer */
-                if (readoff < MSG_SIZE) readbuf[readoff++] = c;
+                    memcpy(msgbuf+(msgslot*MSG_SIZE),readbuf,MSG_SIZE);
 
-            } /* end while */
+                    /* Update message count and next available slot */
+                    if (nummsgs < MAX_MSGS)
+                        msgslot = ++nummsgs;
+                    else
+                        msgslot++;
+                    if (msgslot >= MAX_MSGS) msgslot = 0;
 
-            /* Exit if read was unsuccessful */
-            if (rc < 1) break;
-
-            /* Copy the message to the log file if present */
-            if (logfp != NULL)
-            {
-                fprintf (logfp, "%.*s\n", readoff, readbuf);
-                if (ferror(logfp))
-                {
-                    fclose (logfp);
-                    logfp = NULL;
+                    /* Calculate the first line to display */
+                    firstmsgn = nummsgs - NUM_LINES;
+                    if (firstmsgn < 0) firstmsgn = 0;
                 }
-            }
+                if (rc < 1) break; /* Exit if read was unsuccessful */
+            } /* end while read(pipefd) */
+            if (rc < 1) break; /* Exit if read was unsuccessful */
+        } /* end if (FD_ISSET(pipefd)) */
 
-            /* Copy message to circular buffer and empty read buffer */
-#if defined(EXTERNALGUI) && !defined(OPTION_HTTP_SERVER)
-            if (!extgui)
-#endif /*EXTERNALGUI*/
-            memcpy (msgbuf + (msgslot * MSG_SIZE), readbuf, MSG_SIZE);
-            readoff = 0;
-
-#if defined(EXTERNALGUI) && !defined(OPTION_HTTP_SERVER)
-            if (!extgui)
-            {
-#endif /*EXTERNALGUI*/
-            /* Update message count and next available slot number */
-            if (nummsgs < MAX_MSGS)
-                msgslot = ++nummsgs;
-            else
-                msgslot++;
-            if (msgslot == MAX_MSGS) msgslot = 0;
-
-            /* Calculate the first line to display */
-            firstmsgn = nummsgs - NUM_LINES;
-            if (firstmsgn < 0) firstmsgn = 0;
-
-            /* Set the display update indicator */
-            redraw_msgs = 1;
-#if defined(EXTERNALGUI) && !defined(OPTION_HTTP_SERVER)
-            }
-#endif /*EXTERNALGUI*/
-        }
-
-        /* Check if any sockets have received new connections */
-        check_socket_devices_for_connections (&readset);
-
-#ifdef EXTERNALGUI
-        if (!extgui)
-#endif /*EXTERNALGUI*/
         /* =NP= : Reinit traditional panel if NP is down */
         if (NPDup == 0 && NPDinit == 1) {
             NPDinit = 0;
@@ -1579,6 +1415,9 @@ struct  timeval tv;                     /* Select timeout structure  */
                   regs->sie_state ?  regs->hostregs->instcount :
 #endif /*defined(_FEATURE_SIE)*/
                   regs->instcount) != prvicount
+#if defined(OPTION_SHARED_DEVICES)
+            || sysblk.shrdcount != prvscount
+#endif
             || regs->cpustate != prvstate)
         {
             redraw_status = 1;
@@ -1589,6 +1428,9 @@ struct  timeval tv;                     /* Select timeout structure  */
 #endif /*defined(_FEATURE_SIE)*/
                         regs->instcount;
             prvstate = regs->cpustate;
+#if defined(OPTION_SHARED_DEVICES)
+            prvscount = sysblk.shrdcount;
+#endif
         }
 
         /* =NP= : Display the screen - traditional or NP */
@@ -1598,9 +1440,6 @@ struct  timeval tv;                     /* Select timeout structure  */
         /*        the NP display as an else after those ifs */
 
         if (NPDup == 0) {
-#ifdef EXTERNALGUI
-            if (!extgui)
-#endif /*EXTERNALGUI*/
             /* Rewrite the screen if display update indicators are set */
             if (redraw_msgs && !sysblk.npquiet)
             {
@@ -1626,23 +1465,17 @@ struct  timeval tv;                     /* Select timeout structure  */
 
             if (redraw_status && !sysblk.npquiet)
             {
+                if(sysblk.regs[sysblk.pcpu].cpuonline)
                 /* Display the PSW and instruction counter for CPU 0 */
                 fprintf (confp,
                     "%s"
-#if MAX_CPU_ENGINES > 1
                     "CPU%4.4X "
-#endif
                     "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X"
                        " %2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X"
                     " %c%c%c%c%c%c%c%c instcount=%llu"
                     "%s",
-#ifdef EXTERNALGUI
-                    extgui ? ("STATUS=") :
-#endif /*EXTERNALGUI*/
                     (ANSI_ROW24_COL1 ANSI_YELLOW_RED),
-#if MAX_CPU_ENGINES > 1
                     regs->cpuad,
-#endif
                     curpsw[0], curpsw[1], curpsw[2], curpsw[3],
                     curpsw[4], curpsw[5], curpsw[6], curpsw[7],
                     curpsw[8], curpsw[9], curpsw[10], curpsw[11],
@@ -1667,127 +1500,15 @@ struct  timeval tv;                     /* Select timeout structure  */
                     regs->sie_state ?  (long long) regs->hostregs->instcount :
 #endif /*defined(_FEATURE_SIE)*/
                     (long long)regs->instcount,
-#ifdef EXTERNALGUI
-                    extgui ? "\n" :
-#endif /*EXTERNALGUI*/
                     ANSI_ERASE_EOL);
-
-#ifdef EXTERNALGUI
-                if (extgui)
-                {
-                    /* SYS / WAIT lights */
-                    if (!(regs->cpustate == CPUSTATE_STOPPING ||
-                        regs->cpustate == CPUSTATE_STOPPED))
-                        fprintf(confp,"SYS=%c\n",pswwait?'0':'1');
-#ifdef OPTION_MIPS_COUNTING
-                    /* Calculate MIPS rate */
-#ifdef FEATURE_CPU_RECONFIG
-                    for (mipsrate = siosrate = i = 0; i < MAX_CPU_ENGINES; i++)
-                        if(sysblk.regs[i].cpuonline)
-#else /*!FEATURE_CPU_RECONFIG*/
-                        for(mipsrate = siosrate = i = 0; i < sysblk.numcpu; i++)
-#endif /*!FEATURE_CPU_RECONFIG*/
-                        {
-                            mipsrate += sysblk.regs[i].mipsrate;
-                            siosrate += sysblk.regs[i].siosrate;
-                        }
-
-                    if (mipsrate > 100000) mipsrate = 0;        /* ignore wildly high rate */
-
-                    /* MIPS rate */
-                    if (prevmipsrate != mipsrate)
-                    {
-                        prevmipsrate = mipsrate;
-                        fprintf(confp, "MIPS=%2.1d.%2.2d\n",
-                            prevmipsrate / 1000, (prevmipsrate % 1000) / 10);
-                    }
-
-                    /* SIO rate */
-                    if (prevsiosrate != siosrate)
-                    {
-                        prevsiosrate = siosrate;
-                        fprintf(confp, "SIOS=%5d\n",prevsiosrate);
-                    }
-
-#endif /*OPTION_MIPS_COUNTING*/
-                    if (gui_gregs)  /* GP regs */
-                    {
-                        fprintf(confp,"GR0-3=%8.8X %8.8X %8.8X %8.8X\n",
-                            regs->GR_L(0),regs->GR_L(1),regs->GR_L(2),regs->GR_L(3));
-                        fprintf(confp,"GR4-7=%8.8X %8.8X %8.8X %8.8X\n",
-                            regs->GR_L(4),regs->GR_L(5),regs->GR_L(6),regs->GR_L(7));
-                        fprintf(confp,"GR8-B=%8.8X %8.8X %8.8X %8.8X\n",
-                            regs->GR_L(8),regs->GR_L(9),regs->GR_L(10),regs->GR_L(11));
-                        fprintf(confp,"GRC-F=%8.8X %8.8X %8.8X %8.8X\n",
-                            regs->GR_L(12),regs->GR_L(13),regs->GR_L(14),regs->GR_L(15));
-                    }
-
-                    if (gui_cregs)  /* CR regs */
-                    {
-                        fprintf(confp,"CR0-3=%8.8X %8.8X %8.8X %8.8X\n",
-                            regs->CR_L(0),regs->CR_L(1),regs->CR_L(2),regs->CR_L(3));
-                        fprintf(confp,"CR4-7=%8.8X %8.8X %8.8X %8.8X\n",
-                            regs->CR_L(4),regs->CR_L(5),regs->CR_L(6),regs->CR_L(7));
-                        fprintf(confp,"CR8-B=%8.8X %8.8X %8.8X %8.8X\n",
-                            regs->CR_L(8),regs->CR_L(9),regs->CR_L(10),regs->CR_L(11));
-                        fprintf(confp,"CRC-F=%8.8X %8.8X %8.8X %8.8X\n",
-                            regs->CR_L(12),regs->CR_L(13),regs->CR_L(14),regs->CR_L(15));
-                    }
-
-                    if (gui_aregs)  /* AR regs */
-                    {
-                        fprintf(confp,"AR0-3=%8.8X %8.8X %8.8X %8.8X\n",
-                            regs->AR(0),regs->AR(1),regs->AR(2),regs->AR(3));
-                        fprintf(confp,"AR4-7=%8.8X %8.8X %8.8X %8.8X\n",
-                            regs->AR(4),regs->AR(5),regs->AR(6),regs->AR(7));
-                        fprintf(confp,"AR8-B=%8.8X %8.8X %8.8X %8.8X\n",
-                            regs->AR(8),regs->AR(9),regs->AR(10),regs->AR(11));
-                        fprintf(confp,"ARC-F=%8.8X %8.8X %8.8X %8.8X\n",
-                            regs->AR(12),regs->AR(13),regs->AR(14),regs->AR(15));
-                    }
-
-                    if (gui_fregs)  /* FP regs */
-                    {
-                        fprintf(confp,"FR0-2=%8.8X %8.8X %8.8X %8.8X\n",
-                            regs->fpr[0],regs->fpr[1],regs->fpr[2],regs->fpr[3]);
-                        fprintf(confp,"FR4-6=%8.8X %8.8X %8.8X %8.8X\n",
-                            regs->fpr[4],regs->fpr[5],regs->fpr[6],regs->fpr[7]);
-                    }
-
-#if defined(OPTION_MIPS_COUNTING)
-                    if (gui_cpupct)  /* CPU Utilization */
-                        fprintf(confp,"CPUPCT=%d\n",(int)(100.0 * regs->cpupct));
-#endif /*defined(OPTION_MIPS_COUNTING)*/
-
-                    if (gui_devlist)  /* device status */
-                        gui_devlist_status (confp);
-                }
-#endif /*EXTERNALGUI*/
+                else
+                fprintf (confp,
+                    ANSI_ROW24_COL1 ANSI_YELLOW_RED
+                    "CPU%4.4X Offline"
+                    ANSI_ERASE_EOL,
+                    regs->cpuad);
             } /* end if(redraw_status) */
-#ifdef EXTERNALGUI
-                        else /* !redraw_status */
-                        {
-                    /* If we're under the control of an external GUI,
-                       some status info we need to send ALL the time. */
-                    if (extgui)
-                                {
-                    /* SYS / WAIT lights */
-                    if (!(regs->cpustate == CPUSTATE_STOPPING ||
-                        regs->cpustate == CPUSTATE_STOPPED))
-                        fprintf(confp,"SYS=%c\n",pswwait?'0':'1');
 
-#if defined(OPTION_MIPS_COUNTING)
-                    if (gui_cpupct)  /* CPU Utilization */
-                        fprintf(confp,"CPUPCT=%d\n",(int)(100.0 * regs->cpupct));
-#endif /*defined(OPTION_MIPS_COUNTING)*/
-
-                    if (gui_devlist)  /* device status */
-                        gui_devlist_status (confp);
-                                }
-                        }
-
-            if (!extgui)
-#endif /*EXTERNALGUI*/
             if (redraw_cmd)
             {
                 /* Display the command line */
@@ -1809,9 +1530,6 @@ struct  timeval tv;                     /* Select timeout structure  */
             /* Flush screen buffer and reset display update indicators */
             if (redraw_msgs || redraw_cmd || redraw_status)
             {
-#ifdef EXTERNALGUI
-                if (!extgui)
-#endif /*EXTERNALGUI*/
                 fprintf (confp,
                     ANSI_POSITION_CURSOR,
                     23, 13+cmdoff);
@@ -1827,14 +1545,8 @@ struct  timeval tv;                     /* Select timeout structure  */
                    || (redraw_cmd && NPdataentry == 1)) {
                 if (NPDinit == 0) {
                     NPDinit = 1;
-#ifdef EXTERNALGUI
-                    if (!extgui)
-#endif /*EXTERNALGUI*/
                     NP_screen(confp);
                 }
-#ifdef EXTERNALGUI
-                if (!extgui)
-#endif /*EXTERNALGUI*/
                 NP_update(confp, cmdline, cmdoff);
                 fflush (confp);
                 redraw_msgs = 0;
@@ -1850,548 +1562,3 @@ struct  timeval tv;                     /* Select timeout structure  */
     return;
 
 } /* end function panel_display */
-
-#if defined(EXTERNALGUI)
-
-void gui_devlist_status (FILE *confp)
-{
-    DEVBLK *dev;
-
-    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
-    {
-        if (!(dev->pmcw.flag5 & PMCW5_V)) continue;
-
-        stat_online = stat_busy = stat_pend = stat_open = 0;
-
-        (dev->hnd->query)(dev, &devclass, sizeof(devnam), devnam);
-
-        devnam[255] = 0;   /* (ensure null termination) */
-
-        if ((dev->console && dev->connected) ||
-            (strlen(dev->filename) > 0))
-            stat_online = 1;
-        if (dev->busy) stat_busy = 1;
-        if (dev->pending) stat_pend = 1;
-        if (dev->fd > 2) stat_open = 1;
-
-        fprintf(confp, "DEV=%4.4X %4.4X %-4.4s %d%d%d%d %s\n",
-            dev->devnum,
-            dev->devtype,
-            devclass,
-            stat_online,
-            stat_busy,
-            stat_pend,
-            stat_open,
-            devnam);
-    }
-
-    fprintf(confp, "DEV=X\n");    /* (indicate end of list) */
-}
-
-#endif /*defined(EXTERNALGUI)*/
-
-
-/*===================================================================*/
-/*              S o c k e t  D e v i c e s ...                       */
-/*===================================================================*/
-
-// #define DEBUG_SOCKDEV
-
-#ifdef DEBUG_SOCKDEV
-    #define logdebug(args...) logmsg(## args)
-#else
-    #define logdebug(args...) do {} while (0)
-#endif /* DEBUG_SOCKDEV */
-
-/* Linked list of bind structures for bound socket devices */
-
-LIST_ENTRY  bind_head;      /* (bind_struct list anchor) */
-LOCK        bind_lock;      /* (lock for accessing list) */
-
-/*-------------------------------------------------------------------*/
-/* bind_device   bind a device to a socket (adds entry to our list   */
-/*               of bound devices) (1=success, 0=failure)            */
-/*-------------------------------------------------------------------*/
-int bind_device (DEVBLK* dev, char* spec)
-{
-    bind_struct* bs;
-
-    logdebug("bind_device (%4.4X, %s)\n", dev->devnum, spec);
-
-    /* Error if device already bound */
-
-    if (dev->bs)
-    {
-        logmsg (_("HHCSD001E Device %4.4X already bound to socket %s\n"),
-            dev->devnum, dev->bs->spec);
-        return 0;   /* (failure) */
-    }
-
-    /* Create a new bind_struct entry */
-
-    bs = malloc(sizeof(bind_struct));
-
-    if (!bs)
-    {
-        logmsg (_("HHCSD002E bind_device malloc() failed for device %4.4X\n"),
-            dev->devnum);
-        return 0;   /* (failure) */
-    }
-
-    memset(bs,0,sizeof(bind_struct));
-
-    if (!(bs->spec = safe_strdup(spec)))
-    {
-        logmsg (_("HHCSD003E bind_device safe_strdup() failed for device %4.4X\n"),
-            dev->devnum);
-        free (bs);
-        return 0;   /* (failure) */
-    }
-
-    /* Create a listening socket */
-
-    if (bs->spec[0] == '/') bs->sd = unix_socket (bs->spec);
-    else                    bs->sd = inet_socket (bs->spec);
-
-    if (bs->sd == -1)
-    {
-        /* (error message already issued) */
-        free (bs);
-        return 0; /* (failure) */
-    }
-
-    /* Chain device and socket to each other */
-
-    dev->bs = bs;
-    bs->dev = dev;
-
-    /* Add the new entry to our list of bound devices */
-
-    obtain_lock(&bind_lock);
-    InsertListTail(&bind_head,&bs->bind_link);
-    release_lock(&bind_lock);
-
-    logmsg (_("HHCSD004I Device %4.4X bound to socket %s\n"),
-        dev->devnum, dev->bs->spec);
-
-    return 1;   /* (success) */
-}
-
-/*-------------------------------------------------------------------*/
-/* unbind_device   unbind a device from a socket (removes entry from */
-/*                 our list and discards it) (1=success, 0=failure)  */
-/*-------------------------------------------------------------------*/
-int unbind_device (DEVBLK* dev)
-{
-    bind_struct* bs;
-
-    logdebug("unbind_device(%4.4X)\n", dev->devnum);
-
-    /* Error if device not bound */
-
-    if (!(bs = dev->bs))
-    {
-        logmsg (_("HHCSD005E Device %4.4X not bound to any socket\n"),
-            dev->devnum);
-        return 0;   /* (failure) */
-    }
-
-    /* Error if someone still connected */
-
-    if (dev->fd != -1)
-    {
-        logmsg (_("HHCSD006E Client %s (%s) still connected to device %4.4X (%s)\n"),
-            dev->bs->clientip, dev->bs->clientname, dev->devnum, dev->bs->spec);
-        return 0;   /* (failure) */
-    }
-
-    /* IMPORTANT! it's bad form to close a listening socket (and it
-     * happens to crash the Cygwin build) while another thread is still
-     * listening for connections on that socket (i.e. is in its FD_SET
-     * 'select' list). Thus we always issue a message (any message)
-     * immediately AFTER removing the entry from the sockdev (bind_struct)
-     * list and BEFORE closing our listening socket, thereby forcing
-     * the panel thread to rebuild its FD_SET 'select' list. (It wakes up
-     * from its 'select' as a result of our sending it our message and
-     * then before issuing another 'select' before going back to sleep,
-     * it then rebuilds its FD_SET 'select' list based on the current
-     * state of the sockdev (bind_struct) list, and since we just removed
-     * our entry from that list, the panel thread will thus not add our
-     * listening socket to its FD_SET 'select' list and thus we can then
-     * SAFELY close the listening socket).
-     */
-
-    /* Remove the entry from our list */
-
-    obtain_lock(&bind_lock);
-    RemoveListEntry(&bs->bind_link);
-    release_lock(&bind_lock);
-
-    /* Issue message to wake up panel thread from its 'select' */
-
-    logmsg (_("HHCSD007I Device %4.4X unbound from socket %s\n"),
-        dev->devnum, bs->spec);
-
-    /* Give panel thread time to process our message
-     * and rebuild its select list. */
-
-    usleep(100000);
-
-    /* Now safe to close the listening socket */
-
-    if (bs->sd != -1)
-        close (bs->sd);
-
-    /* Unchain device and socket from each another */
-
-    dev->bs = NULL;
-    bs->dev = NULL;
-
-    /* Discard the entry */
-
-    if (bs->clientname)
-        free(bs->clientname);
-    bs->clientname = NULL;
-
-    if (bs->clientip)
-        free(bs->clientip);
-    bs->clientip = NULL;
-
-    free (bs->spec);
-    free (bs);
-
-    return 1;   /* (success) */
-}
-
-/*-------------------------------------------------------------------*/
-/* unix_socket   create and bind a Unix domain socket                */
-/*-------------------------------------------------------------------*/
-
-#include <sys/un.h>     /* (need "sockaddr_un") */
-
-int unix_socket (char* path)
-{
-    struct sockaddr_un addr;
-    int sd;
-
-    logdebug ("unix_socket(%s)\n", path);
-
-    if (strlen (path) > sizeof(addr.sun_path) - 1)
-    {
-        logmsg (_("HHCSD008E Socket pathname \"%s\" exceeds limit of %d\n"),
-            path, (int) sizeof(addr.sun_path) - 1);
-        return -1;
-    }
-
-    addr.sun_family = AF_UNIX;
-    strcpy (addr.sun_path, path); /* guaranteed room by above check */
-    sd = socket (PF_UNIX, SOCK_STREAM, 0);
-
-    if (sd == -1)
-    {
-        logmsg (_("HHCSD009E Error creating socket for %s: %s\n"),
-            path, strerror(errno));
-        return -1;
-    }
-
-    unlink (path);
-    fchmod (sd, 0700);
-
-    if (0
-        || bind (sd, (struct sockaddr*) &addr, sizeof(addr)) == -1
-        || listen (sd, 5) == -1
-        )
-    {
-        logmsg (_("HHCSD010E Failed to bind or listen on socket %s: %s\n"),
-            path, strerror(errno));
-        return -1;
-    }
-
-    return sd;
-}
-
-/*-------------------------------------------------------------------*/
-/* inet_socket   create and bind a regular TCP/IP socket             */
-/*-------------------------------------------------------------------*/
-int inet_socket (char* spec)
-{
-    /* We need a copy of the path to overwrite a ':' with '\0' */
-
-    char buf[sizeof(((DEVBLK*)0)->filename)];
-    char* colon;
-    char* node;
-    char* service;
-    int sd;
-    int one = 1;
-    struct sockaddr_in sin;
-
-    logdebug("inet_socket(%s)\n", spec);
-
-    memset(&sin, 0, sizeof(sin));
-    sin.sin_family = AF_INET;
-    strcpy(buf, spec);
-    colon = strchr(buf, ':');
-
-    if (colon)
-    {
-        *colon = '\0';
-        node = buf;
-        service = colon + 1;
-    }
-    else
-    {
-        node = NULL;
-        service = buf;
-    }
-
-    if (!node)
-        sin.sin_addr.s_addr = INADDR_ANY;
-    else
-    {
-        struct hostent* he = gethostbyname(node);
-
-        if (!he)
-        {
-            logmsg (_("HHCSD011E Failed to determine IP address from %s\n"),
-                node);
-            return -1;
-        }
-
-        memcpy(&sin.sin_addr, he->h_addr_list[0], sizeof(sin.sin_addr));
-    }
-
-    if (isdigit(service[0]))
-    {
-        sin.sin_port = htons(atoi(service));
-    }
-    else
-    {
-        struct servent* se = getservbyname(service, "tcp");
-
-        if (!se)
-        {
-            logmsg (_("HHCSD012E Failed to determine port number from %s\n"),
-                service);
-            return -1;
-        }
-
-        sin.sin_port = se->s_port;
-    }
-
-    sd = socket (PF_INET, SOCK_STREAM, 0);
-
-    if (sd == -1)
-    {
-        logmsg (_("HHCSD013E Error creating socket for %s: %s\n"),
-            spec, strerror(errno));
-        return -1;
-    }
-
-    setsockopt (sd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-
-    if (0
-        || bind (sd, (struct sockaddr*) &sin, sizeof(sin)) == -1
-        || listen (sd, 5) == -1
-        )
-    {
-        logmsg (_("HHCSD014E Failed to bind or listen on socket %s: %s\n"),
-            spec, strerror(errno));
-        return -1;
-    }
-
-    return sd;
-}
-
-/*-------------------------------------------------------------------*/
-/* add_socket_devices_to_fd_set   add all bound socket devices'      */
-/*                                listening sockets to the FD_SET    */
-/*-------------------------------------------------------------------*/
-int add_socket_devices_to_fd_set (fd_set* readset, int maxfd)
-{
-    DEVBLK* dev;
-    bind_struct* bs;
-    LIST_ENTRY*  pListEntry;
-
-    obtain_lock(&bind_lock);
-
-    pListEntry = bind_head.Flink;
-
-    while (pListEntry != &bind_head)
-    {
-        bs = CONTAINING_RECORD(pListEntry,bind_struct,bind_link);
-
-        if (bs->sd != -1)           /* if listening for connections, */
-        {
-            dev = bs->dev;
-
-            if (dev->fd == -1)      /* and not already connected, */
-            {
-                FD_SET(bs->sd, readset);    /* then add file to set */
-
-                if (bs->sd > maxfd)
-                    maxfd = bs->sd;
-            }
-        }
-
-        pListEntry = pListEntry->Flink;
-    }
-
-    release_lock(&bind_lock);
-
-    return maxfd;
-}
-
-/*-------------------------------------------------------------------*/
-/* check_socket_devices_for_connections                              */
-/*-------------------------------------------------------------------*/
-void check_socket_devices_for_connections (fd_set* readset)
-{
-    bind_struct* bs;
-    LIST_ENTRY*  pListEntry;
-
-    obtain_lock(&bind_lock);
-
-    pListEntry = bind_head.Flink;
-
-    while (pListEntry != &bind_head)
-    {
-        bs = CONTAINING_RECORD(pListEntry,bind_struct,bind_link);
-
-        if (bs->sd != -1 && FD_ISSET(bs->sd, readset))
-        {
-            /* Note: there may be other connection requests
-             * waiting to be serviced, but we'll catch them
-             * the next time the panel thread calls us. */
-
-            release_lock(&bind_lock);
-            socket_device_connection_handler(bs);
-            return;
-        }
-
-        pListEntry = pListEntry->Flink;
-    }
-
-    release_lock(&bind_lock);
-}
-
-/*-------------------------------------------------------------------*/
-/* socket_device_connection_handler                                  */
-/*-------------------------------------------------------------------*/
-void socket_device_connection_handler (bind_struct* bs)
-{
-    struct sockaddr_in  client;         /* Client address structure  */
-    struct hostent*     pHE;            /* Addr of hostent structure */
-    socklen_t           namelen;        /* Length of client structure*/
-    char*               clientip;       /* Addr of client ip address */
-    char*               clientname;     /* Addr of client hostname   */
-    DEVBLK*             dev;            /* Device Block pointer      */
-    int                 csock;          /* Client socket             */
-
-    dev = bs->dev;
-
-    logdebug("socket_device_connection_handler(dev=%4.4X)\n",
-        dev->devnum);
-
-    /* Obtain the device lock */
-
-    obtain_lock (&dev->lock);
-
-    /* Reject if device is busy or interrupt pending */
-
-    if (dev->busy || dev->pending || (dev->scsw.flag3 & SCSW3_SC_PEND))
-    {
-        release_lock (&dev->lock);
-        logmsg (_("HHCSD015E Connect to device %4.4X (%s) rejected; "
-            "device busy or interrupt pending\n"),
-            dev->devnum, bs->spec);
-        return;
-    }
-
-    /* Reject if previous connection not closed (should not occur) */
-
-    if (dev->fd != -1)
-    {
-        release_lock (&dev->lock);
-        logmsg (_("HHCSD016E Connect to device %4.4X (%s) rejected; "
-            "client %s (%s) still connected\n"),
-            dev->devnum, bs->spec, bs->clientip, bs->clientname);
-        return;
-    }
-
-    /* Accept the connection... */
-
-    csock = accept(bs->sd, 0, 0);
-
-    if (csock == -1)
-    {
-        release_lock (&dev->lock);
-        logmsg (_("HHCSD017E Connect to device %4.4X (%s) failed: %s\n"),
-            dev->devnum, bs->spec, strerror(errno));
-        return;
-    }
-
-    /* Determine the connected client's IP address and hostname */
-
-    namelen = sizeof(client);
-    clientip = NULL;
-    clientname = "host name unknown";
-
-    if (1
-        && getpeername(csock, (struct sockaddr*) &client, &namelen) == 0
-        && (clientip = inet_ntoa(client.sin_addr)) != NULL
-        && (pHE = gethostbyaddr((unsigned char*)(&client.sin_addr),
-            sizeof(client.sin_addr), AF_INET)) != NULL
-        && pHE->h_name && *pHE->h_name
-        )
-    {
-        clientname = (char*) pHE->h_name;
-    }
-
-    /* Log the connection */
-
-    if (clientip)
-    {
-        logmsg (_("HHCSD018I %s (%s) connected to device %4.4X (%s)\n"),
-            clientip, clientname, dev->devnum, bs->spec);
-    }
-    else
-    {
-        logmsg (_("HHCSD019I <unknown> connected to device %4.4X (%s)\n"),
-            dev->devnum, bs->spec);
-    }
-
-    /* Save the connected client information in the bind_struct */
-
-    if (bs->clientip)   free(bs->clientip);
-    if (bs->clientname) free(bs->clientname);
-
-    bs->clientip   = safe_strdup(clientip);
-    bs->clientname = safe_strdup(clientname);
-
-    /* Indicate that a client is now connected to device (prevents
-     * listening for new connections until THIS client disconnects).
-     */
-
-    dev->fd = csock;        /* (indicate client connected to device) */
-
-    /* Release the device lock */
-
-    release_lock (&dev->lock);
-
-    /* Raise unsolicited device end interrupt for the device */
-
-    device_attention (dev, CSW_DE);
-}
-
-/*-------------------------------------------------------------------*/
-/* safe_strdup   make copy of string and return a pointer to it      */
-/*-------------------------------------------------------------------*/
-char* safe_strdup (char* str)
-{
-    char* newstr;
-    if (!str) return NULL;
-    newstr = malloc (strlen (str) + 1);
-    if (!newstr) return NULL;
-    strcpy (newstr, str);   /* (guaranteed room) */
-    return newstr;
-}

@@ -33,6 +33,19 @@
 static int      IFC_IOCtl( int fd, int iRequest, char* argp );
 #endif // !defined( WIN32 )
 
+static int ifc_fd[2] = { -1, -1 };
+static pid_t ifc_pid = 0;
+
+
+static void tuntap_term(void)
+{
+    close(ifc_fd[0]);
+    close(ifc_fd[1]);
+    ifc_fd[0] = ifc_fd[1] = -1;
+    kill(ifc_pid, SIGINT);
+}
+
+
 // ====================================================================
 // Primary Module Entry Points
 // ====================================================================
@@ -536,7 +549,6 @@ static int      IFC_IOCtl( int fd, int iRequest, char* argp )
 {
     char*       pszCfgCmd;     // Interface config command
     int         rc;
-    pid_t       ifc_pid   = 0;
     CTLREQ      ctlreq;
 
     UNREFERENCED( fd );
@@ -557,9 +569,9 @@ static int      IFC_IOCtl( int fd, int iRequest, char* argp )
       memcpy( &ctlreq.iru.ifreq, argp, sizeof( struct ifreq ) );
     }
 
-    if( sysblk.ifcfd[0] == -1 && sysblk.ifcfd[1] == -1 )
+    if( ifc_fd[0] == -1 && ifc_fd[1] == -1 )
     {
-        if( socketpair( AF_UNIX, SOCK_STREAM, 0, sysblk.ifcfd ) < 0 ) 
+        if( socketpair( AF_UNIX, SOCK_STREAM, 0, ifc_fd ) < 0 ) 
         {
             logmsg( _("HHCTU025E Call to socketpair failed: %s\n"),
                     strerror( errno ) );
@@ -583,9 +595,24 @@ static int      IFC_IOCtl( int fd, int iRequest, char* argp )
         // The child process executes the configuration command
         if( ifc_pid == 0 )
         {
-            dup2( sysblk.ifcfd[1], STDIN_FILENO  );
-            dup2( fileno( sysblk.msgpipew ), STDOUT_FILENO );
-            dup2( fileno( sysblk.msgpipew ), STDERR_FILENO );
+            /* @ISW@ Close all file descriptors 
+             * (except ifc_fd[1] and STDOUT FILENO)
+             * (otherwise some devices are never closed)
+             * (ex: SCSI tape devices can never be re-opened)
+            */
+            struct rlimit rlim;
+            int i;
+            getrlimit(RLIMIT_NOFILE,&rlim);
+            for(i=0;(unsigned int)i<rlim.rlim_max;i++)
+            {
+                if(i!=ifc_fd[1] && i!=STDOUT_FILENO)
+                {
+                    close(i);
+                }
+            }
+            /* @ISW@ Close spurious FDs END */
+            dup2( ifc_fd[1], STDIN_FILENO  );
+            dup2( STDOUT_FILENO, STDERR_FILENO );
             
             // Execute the interface configuration command
             rc = execlp( pszCfgCmd, pszCfgCmd, NULL );
@@ -597,13 +624,14 @@ static int      IFC_IOCtl( int fd, int iRequest, char* argp )
             exit( 127 );
         }
 
-        sysblk.ifcpid = ifc_pid;
+        /* Terminate TunTap on shutdown */
+        hdl_adsc(tuntap_term, NULL);
     }
 
     // Populate some common fields
     ctlreq.iType = 1;
         
-    write( sysblk.ifcfd[0], &ctlreq, CTLREQ_SIZE );
+    write( ifc_fd[0], &ctlreq, CTLREQ_SIZE );
 
     return 0;
 }

@@ -19,7 +19,14 @@
 #include "hercifc.h"
 
 #include "opcode.h"
+
+#if defined(HAVE_GETOPT_LONG)
 #include <getopt.h>
+#endif /* defined(HAVE_GETOPT_LONG) */
+
+/* getopt dynamic linking kludge */
+#include "herc_getopt.h"    
+
 
 // ====================================================================
 // Declarations
@@ -43,7 +50,7 @@ DEVHND ctci_device_hndinfo =
     &CTCI_ExecuteCCW,
     &CTCI_Close,
     &CTCI_Query,
-    NULL, NULL, NULL, NULL
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 };
 
 // ====================================================================
@@ -60,6 +67,8 @@ int  CTCI_Init( DEVBLK* pDEVBLK, int argc, BYTE *argv[] )
     PCTCBLK         pDevCTCBLK = NULL;  // Device  CTCBLK
     DEVBLK*         pDevPair = NULL;    // Paired  DEVBLK
     int             rc = 0;             // Return code
+
+    pDEVBLK->devtype = 0x3088;
 
     // Housekeeping
     pWrkCTCBLK = malloc( sizeof( CTCBLK ) );
@@ -103,10 +112,10 @@ int  CTCI_Init( DEVBLK* pDEVBLK, int argc, BYTE *argv[] )
         pDevCTCBLK->pDEVBLK[1] = pDEVBLK;
 
         AddDevice( &pDevCTCBLK->pDEVBLK[0], pDEVBLK->devnum,
-                   "CTCI", &ctci_device_hndinfo );
+                   pDEVBLK );
 
         AddDevice( &pDevCTCBLK->pDEVBLK[1], pDEVBLK->devnum + 1,
-                   "CTCI", &ctci_device_hndinfo );
+                   pDEVBLK );
 
         pDevCTCBLK->pDEVBLK[0]->dev_data = pDevCTCBLK;
         pDevCTCBLK->pDEVBLK[1]->dev_data = pDevCTCBLK;
@@ -114,8 +123,11 @@ int  CTCI_Init( DEVBLK* pDEVBLK, int argc, BYTE *argv[] )
         SetSIDInfo( pDevCTCBLK->pDEVBLK[0], 0x3088, 0x08, 0x3088, 0x01 );
         SetSIDInfo( pDevCTCBLK->pDEVBLK[1], 0x3088, 0x08, 0x3088, 0x01 );
 
-        pDEVBLK->ctctype    = CTC_CTCI;
-        pDEVBLK->ctcxmode   = 1;
+        pDevCTCBLK->pDEVBLK[0]->ctctype  = CTC_CTCI;
+        pDevCTCBLK->pDEVBLK[0]->ctcxmode = 1;
+
+        pDevCTCBLK->pDEVBLK[1]->ctctype  = CTC_CTCI;
+        pDevCTCBLK->pDEVBLK[1]->ctcxmode = 1;
 
         pDevPair = pDEVBLK;
     }
@@ -451,6 +463,8 @@ int  CTCI_Close( DEVBLK* pDEVBLK )
     // Close the device file (if not already closed)
     if( pCTCBLK->fd >= 0 )
     {
+        pCTCBLK->fCloseInProgress = 1;
+
         TUNTAP_Close( pCTCBLK->fd );
 
         pCTCBLK->fd = -1;
@@ -458,6 +472,8 @@ int  CTCI_Close( DEVBLK* pDEVBLK )
 
         if( pDevPair )              // if paired device exists,
             pDevPair->fd = -1;      // then it's now closed too.
+
+        pCTCBLK->fCloseInProgress = 0;
     }
 
     return 0;
@@ -808,11 +824,22 @@ static void*  CTCI_ReadThread( PCTCBLK pCTCBLK )
         // Check for error condition
         if( iLength < 0 )
         {
-            if( pCTCBLK->fd != -1 )
+            if( pCTCBLK->fd != -1 && !pCTCBLK->fCloseInProgress )
+            {
                 logmsg( _("HHCCT048E %4.4X: Error reading from %s: %s\n"),
                     pDEVBLK->devnum, pCTCBLK->szTUNDevName,
                     strerror( errno ) );
+                sleep(1);
+                continue;
+            }
 
+            // Wait for close to complete
+            while( pCTCBLK->fCloseInProgress )
+            {
+                usleep(10000);  // (give it time to complete)
+            }
+
+            ASSERT( pCTCBLK->fd == -1 );    // (sanity check)
             break;
         }
 
@@ -936,24 +963,53 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
 
     // Initialize getopt's counter. This is necessary in the case
     // that getopt was used previously for another device.
-    optind      = 0;
 
+    OPTRESET();
+    optind      = 0;
+    // Check for correct number of arguments
+    if( argc < 2 )
+    {
+        logmsg( _("HHCCT056E %4.4X: Incorrect number of parameters\n"),
+               pDEVBLK->devnum );
+        return -1;
+    }
     // Compatability with old format configuration files needs to be
     // maintained. Old format statements have the tun character device
     // name as the second argument on Linux, or CTCI-W32 as the first
     // argument on Windows.
-    if( ( strncasecmp( argv[1], "/", 1 ) == 0 ) ||
-        ( strncasecmp( argv[0], "ctci-w32", 8 ) == 0 ) )
+    if( ( strncasecmp( argv[0], "/", 1 ) == 0 ) ||
+        ( strncasecmp( pDEVBLK->typname, "CTCI-W32", 8 ) == 0 ) )
     {
         pCTCBLK->fOldFormat = 1;
-        argc--; argv++;
     }
-	
+    else
+    {
+        // Build new argv list.
+        // getopt_long used to work on old format configuration statements
+        // because LCS was the first argument passed to the device
+        // initialization routine (and was interpreted by getopt*
+        // as the program name and ignored). Now that argv[0] is a valid
+        // argument, we need to shift the arguments and insert a dummy
+        // argv[0];
+
+        // Don't allow us to exceed the allocated storage (sanity check)
+        if( argc > (MAX_ARGS-1) )
+            argc = (MAX_ARGS-1);
+
+        for( i = argc; i > 0; i-- )
+            argv[i] = argv[i - 1];
+
+        argc++;
+        argv[0] = pDEVBLK->typname;
+    }
+
     // Parse any optional arguments if not old format
     while( !pCTCBLK->fOldFormat )
     {
-        int     iOpt;
         int     c;
+
+#if defined(HAVE_GETOPT_LONG)
+        int     iOpt;
 
         static struct option options[] =
         {
@@ -970,6 +1026,9 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
         c = getopt_long( argc, argv,
                  "n:k:i:t:s:m:d",
                  options, &iOpt );
+#else /* defined(HAVE_GETOPT_LONG) */
+        c = getopt( argc, argv, "n:k:i:t:s:m:d");
+#endif /* defined(HAVE_GETOPT_LONG) */
 
         if( c == -1 ) // No more options found
             break;
@@ -990,7 +1049,7 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
                     return -1;
                 }
             }
-#else // !defined( WIN32 )
+#endif // defined( WIN32 )
             // This is the file name of the special TUN/TAP character device
             if( strlen( optarg ) > sizeof( pCTCBLK->szTUNCharName ) - 1 )
             {
@@ -998,7 +1057,6 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
                     pDEVBLK->devnum, optarg );
                 return -1;
             }
-#endif // defined( WIN32 )
             strcpy( pCTCBLK->szTUNCharName, optarg );
             break;
 
@@ -1054,7 +1112,7 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
             strcpy( pCTCBLK->szNetMask, optarg );
             break;
 
-        case 'm':
+        case 'm':     // (ignored if not Windows)
             if( ParseMAC( optarg, mac ) != 0 )
             {
                 logmsg( _("HHCCT056E %4.4X: Invalid MAC address %s\n"),
@@ -1240,17 +1298,17 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
 
                 strcpy( pCTCBLK->szTUNCharName, *argv );
 
-                // Kludge: This may look strange at first, but with 
-                // TunTap32, only the last byte of the "driver IP 
-                // address" is actually used. It's purpose is to 
-                // generate a unique MAC for the virtual interface. 
-                // Thus, having the same address for the adapter and 
-                // destination is not an issue. This used to be 
-                // generated from the guest IP address, I screwed up 
+                // Kludge: This may look strange at first, but with
+                // TunTap32, only the last 3 bytes of the "driver IP
+                // address" is actually used. It's purpose is to
+                // generate a unique MAC for the virtual interface.
+                // Thus, having the same address for the adapter and
+                // destination is not an issue. This used to be
+                // generated from the guest IP address, I screwed up
                 // TunTap32 V2. (JAP)
                 // This also fixes the confusing error messages from
                 // TunTap.c when a MAC is given for this argument.
-                
+
                 strcpy( pCTCBLK->szDriveIPAddr,
                         pCTCBLK->szGuestIPAddr );
 

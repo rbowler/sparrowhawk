@@ -188,20 +188,21 @@ PMCW    pmcw;                           /* Path management ctl word  */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
+    /* Obtain the device lock */
+    obtain_lock (&dev->lock);
+
     /* Condition code 1 if subchannel is status pending
        with other than intermediate status */
     if ((dev->scsw.flag3 & SCSW3_SC_PEND)
       && !(dev->scsw.flag3 & SCSW3_SC_INTER))
     {
         regs->psw.cc = 1;
+        release_lock (&dev->lock);
         return;
     }
 
-    /* Obtain the device lock */
-    obtain_lock (&dev->lock);
-
     /* Condition code 2 if subchannel is busy */
-    if (dev->busy || dev->pending)
+    if (dev->busy || dev->pending || dev->pcipending || dev->attnpending)
     {
         regs->psw.cc = 2;
         release_lock (&dev->lock);
@@ -234,6 +235,7 @@ PMCW    pmcw;                           /* Path management ctl word  */
     dev->pmcw.flag26 = pmcw.flag26;
     dev->pmcw.flag27 = pmcw.flag27;
 
+#if defined(_FEATURE_IO_ASSIST)
     /* Relate the device storage view to the requested zone */
     { RADR mso, msl;
         mso = sysblk.zpb[dev->pmcw.zone].mso << 20;
@@ -247,6 +249,7 @@ PMCW    pmcw;                           /* Path management ctl word  */
         dev->mainlim = msl - mso;
         dev->storkeys = &(STORAGE_KEY(mso, &sysblk));
     }
+#endif /*defined(_FEATURE_IO_ASSIST)*/
 
     /* Set device priority from the interruption subclass bits */
     dev->priority = (dev->pmcw.flag4 & PMCW4_ISC) >> 3;
@@ -868,6 +871,15 @@ VADR    ccwaddr;                        /* CCW address for start I/O */
 BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
 
     S(inst, execflag, regs, b2, effective_addr2);
+#if defined(FEATURE_ECPSVM)
+    if((inst[1])!=0x02)
+    {
+        if(ecpsvm_dosio(regs,b2,effective_addr2)==0)
+        {
+            return;
+        }
+    }
+#endif
 
     PRIV_CHECK(regs);
 

@@ -506,7 +506,7 @@ int     r1, r2;                         /* Values of R fields        */
     /* Copy R2 general register to R1 access register */
     regs->AR(r1) = regs->GR_L(r2);
 
-    INVALIDATE_AEA(r1, regs);
+    INVALIDATE_AEA_AR(r1, regs);
 }
 #endif /*defined(FEATURE_ACCESS_REGISTERS)*/
 
@@ -1105,7 +1105,6 @@ U32     n;                              /* 32-bit operand values     */
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
-
 }
 
 
@@ -1133,7 +1132,6 @@ U32     n;                              /* 32-bit operand values     */
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
-
 }
 
 
@@ -1154,9 +1152,9 @@ int     r1, r2;                         /* Values of R fields        */
 }
 
 
-/*---------------------------------------------------------------*/
+/*-------------------------------------------------------------------*/
 /* 5F   SL    - Subtract Logical                                [RX] */
-/*---------------------------------------------------------------*/
+/*-------------------------------------------------------------------*/
 DEF_INST(subtract_logical)
 {
 int     r1;                             /* Value of R field          */
@@ -1189,6 +1187,12 @@ int     rc;                             /* Return code               */
 int     new_ilc;                        /* New ilc to set            */
 
     RR_SVC(inst, execflag, regs, i);
+#if defined(FEATURE_ECPSVM)
+    if(ecpsvm_dosvc(regs,i)==0)
+    {
+        return;
+    }
+#endif
 
 #if defined(_FEATURE_SIE)
     if(regs->sie_state &&
@@ -1248,10 +1252,7 @@ int     new_ilc;                        /* New ilc to set            */
     ARCH_DEP(store_psw) ( regs, psa->svcold );
 
     /* Load new PSW from PSA+X'60' */
-    obtain_lock(&sysblk.intlock);
-    rc = ARCH_DEP(load_psw) ( regs, psa->svcnew );
-    release_lock(&sysblk.intlock);
-    if ( rc )
+    if ( (rc = ARCH_DEP(load_psw) ( regs, psa->svcnew ) ) )
         ARCH_DEP(program_interrupt) (regs, rc);
 
     /* load_psw() has set the ILC to zero.  This needs to
@@ -1495,7 +1496,7 @@ int     i;                              /* Integer work areas        */
         dbyte = ARCH_DEP(vfetchb) ( effective_addr1, b1, regs );
 
         /* Fetch function byte from second operand */
-        sbyte = ARCH_DEP(vfetchb) ( (effective_addr2 + dbyte) 
+        sbyte = ARCH_DEP(vfetchb) ( (effective_addr2 + dbyte)
                                    & ADDRESS_MAXWRAP(regs), b2, regs );
 
         /* Test for non-zero function byte */
@@ -1727,7 +1728,7 @@ int     ar1 = 4;                        /* Access register number    */
         tempword2 = ARCH_DEP(vfetch4) ( tempaddress, ar1, regs );
         tempword3 = ARCH_DEP(vfetch4) ( tempaddress + 4, ar1, regs );
 
-        
+
 
         if ( regs->GR_L(0) == tempword2 )
         {

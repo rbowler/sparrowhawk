@@ -4,7 +4,7 @@
 || HETMAP.C     (c) Copyright Leland Lucius, 2000-2003
 ||              Released under terms of the Q Public License.
 ||
-|| Displays information about the structure of a Hercules Emulated Tape. 
+|| Displays information about the structure of a Hercules Emulated Tape.
 ||
 || ----------------------------------------------------------------------------
 */
@@ -20,6 +20,7 @@
 #include "hetlib.h"
 #include "sllib.h"
 #include "hercules.h"
+#include "herc_getopt.h"
 
 /*
 || Local constant data
@@ -38,7 +39,9 @@ static const char help[] =
 #ifdef EXTERNALGUI
 /* Special flag to indicate whether or not we're being
    run under the control of the external GUI facility. */
+#if 0
 int extgui = 0;
+#endif
 /* Previous reported file position */
 static long prevpos = 0;
 /* Report progress every this many bytes */
@@ -297,7 +300,7 @@ main( int argc, char *argv[] )
             cminsz = 0;
             cmaxsz = 0;
             cbytes = 0;
-            
+
             continue;
         }
 

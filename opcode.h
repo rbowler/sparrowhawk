@@ -126,6 +126,7 @@ extern zz_func opcode_e3xx[][GEN_MAXARCH];
 extern zz_func opcode_e4xx[][GEN_MAXARCH];
 extern zz_func v_opcode_e4xx[][GEN_MAXARCH];
 extern zz_func opcode_e5xx[][GEN_MAXARCH];
+extern zz_func opcode_e6xx[][GEN_MAXARCH];
 extern zz_func opcode_ebxx[][GEN_MAXARCH];
 extern zz_func opcode_ecxx[][GEN_MAXARCH];
 extern zz_func opcode_edxx[][GEN_MAXARCH];
@@ -206,28 +207,12 @@ int used; \
 
 #endif
 
-
-#define UNROLLED_EXECUTE(_regs) \
-do { \
-    (_regs)->instvalid = 0; \
-    INSTRUCTION_FETCH((_regs)->inst, (_regs)->psw.IA, (_regs)); \
-    (_regs)->instvalid = 1; \
-    EXECUTE_INSTRUCTION ((_regs)->inst, 0, (_regs)); \
-} while(0)
-
-
-/* Main storage access locking 
-   This routine will ensure that a given CPU 
+/* Main storage access locking
+   This routine will ensure that a given CPU
    has exclusive access to main storage and hence
    will be able to perform as what appears as an
    interlocked update to other CPU's - Jan Jaeger */
 
-/* OBTAIN_MAINLOCK() may cause a retry of the instruction */
-
-#if MAX_CPU_ENGINES == 1
- #define OBTAIN_MAINLOCK(_regs)
- #define RELEASE_MAINLOCK(_regs)
-#else
 #define OBTAIN_MAINLOCK(_register_context) \
 do { \
     obtain_lock(&sysblk.mainlock); \
@@ -239,42 +224,94 @@ do { \
     (_register_context)->mainlock = 0; \
     release_lock(&sysblk.mainlock); \
 } while(0)
-#endif
-
 
 /* The footprint_buffer option saves a copy of the register context
    every time an instruction is executed.  This is for problem
-   determination only, as it severely impacts performance.	 *JJ */
+   determination only, as it severely impacts performance.       *JJ */
 
-#if !defined(OPTION_FOOTPRINT_BUFFER)
-
-#define EXECUTE_INSTRUCTION(_instruction, _execflag, _regs) \
-do { \
-    COUNT_INST((_instruction), (_regs)); \
-    opcode_table[((_instruction)[0])][ARCH_MODE]((_instruction), (_execflag), (_regs)); \
-} while(0)
-
-#else /*defined(OPTION_FOOTPRINT_BUFFER)*/
-
-#define EXECUTE_INSTRUCTION(_instruction, _execflag, _regs) \
+#if defined(OPTION_FOOTPRINT_BUFFER)
+#define FOOTPRINT(_regs) \
 do { \
     sysblk.footprregs[(_regs)->cpuad][sysblk.footprptr[(_regs)->cpuad]] = *(_regs); \
-    memcpy(&sysblk.footprregs[(_regs)->cpuad][sysblk.footprptr[(_regs)->cpuad]++].inst,(_instruction),6); \
+    memcpy(&sysblk.footprregs[(_regs)->cpuad][sysblk.footprptr[(_regs)->cpuad]++].inst,(_inst),6); \
     sysblk.footprptr[(_regs)->cpuad] &= OPTION_FOOTPRINT_BUFFER - 1; \
+} while(0)
+#endif
+
+#if !defined(FOOTPRINT)
+#define FOOTPRINT(_regs)
+#endif
+
+/* Instruction fetching */
+#define INSTRUCTION_FETCH(_dest, _addr, _regs) \
+do { \
+    if( (_regs)->VI == ((_addr) & PAGEFRAME_PAGEMASK) \
+      && ((_addr) & 0x7FF) <= (0x800 - 6)) \
+    { \
+        if((_addr) & 0x01) \
+            ARCH_DEP(program_interrupt)((_regs), PGM_SPECIFICATION_EXCEPTION); \
+        memcpy ((_dest), (_regs)->mainstor + (_regs)->AI + \
+                    ((_addr) & PAGEFRAME_BYTEMASK) , 6); \
+    } \
+    else \
+        ARCH_DEP(instfetch) ((_dest), (_addr), (_regs)); \
+} while(0)
+
+#define FAST_INSTRUCTION_FETCH(_dest, _addr, _regs, _pe, _if) \
+do { \
+    if ( (_regs)->VI == ((_addr) & (PAGEFRAME_PAGEMASK | 0x01)) \
+      && (_addr) <= (_pe)) \
+      (_dest) =  pagestart + ((_addr) & PAGEFRAME_BYTEMASK); \
+    else goto _if; \
+} while(0)
+
+#define FAST_IFETCH(_regs, _pe, _ip, _if, _ex) \
+do { \
+_if: \
+    (_regs)->instvalid = 0; \
+    (_ip) = (_regs)->inst; \
+    (_regs)->ip = (_ip); \
+    ARCH_DEP(instfetch) ((_regs)->inst, (_regs)->psw.IA, (_regs));  \
+    (regs)->instvalid = 1; \
+    (_pe) = ((_regs)->psw.IA & ~0x7FF) + (0x800 - 6); \
+    pagestart = (_regs)->mainstor + (_regs)->AI; \
+    goto _ex; \
+} while(0)
+
+/* Instruction execution */
+#define EXECUTE_INSTRUCTION(_instruction, _execflag, _regs) \
+do { \
+    FOOTPRINT((_regs)); \
     COUNT_INST((_instruction), (_regs)); \
     opcode_table[((_instruction)[0])][ARCH_MODE]((_instruction), (_execflag), (_regs)); \
 } while(0)
 
-#endif /*defined(OPTION_FOOTPRINT_BUFFER)*/
+#define FAST_EXECUTE_INSTRUCTION(_inst, _execflag, _regs) \
+do { \
+    FOOTPRINT ((_regs)); \
+    COUNT_INST ((_inst), (_regs)); \
+    (_regs)->ip = (_inst); \
+    (ARCH_DEP(opcode_table)[_inst[0]]) ((_inst), 0, (_regs)); \
+} while(0)
 
-#if defined(OPTION_CPU_UNROLL)
+/* Unrolled execution */
+#define UNROLLED_EXECUTE(_regs) \
+do { \
+    (_regs)->instvalid = 0; \
+    INSTRUCTION_FETCH((_regs)->inst, (_regs)->psw.IA, (_regs)); \
+    (_regs)->instvalid = 1; \
+    EXECUTE_INSTRUCTION ((_regs)->inst, 0, (_regs)); \
+} while(0)
+
+#define FAST_UNROLLED_EXECUTE(_regs, _pe, _ip, _if, _ex) \
+do { \
+    FAST_INSTRUCTION_FETCH((_ip), (_regs)->psw.IA, (_regs), (_pe), _if); \
+_ex: \
+    FAST_EXECUTE_INSTRUCTION((_ip), 0, (_regs)); \
+} while(0)
+
 #define RETURN_INTCHECK(_regs) \
         longjmp((_regs)->progjmp, SIE_NO_INTERCEPT)
-#else
-#define RETURN_INTCHECK(_regs) \
-        return
-#endif
-
 
 #define ODD_CHECK(_r, _regs) \
     if( (_r) & 1 ) \
@@ -340,6 +377,42 @@ do { \
 #define STORE_DW(_storage, _value) store_dw(_storage, _value)
 
 #include "machdep.h"
+
+/* Bit manipulation macros; if HAVE_CMPXCHG is defined then
+   the routines are architecture dependent but SMP safe */
+#ifdef HAVE_CMPXCHG
+
+#define set_bits(_ptr, _mask, _bits) \
+do { \
+ U32 old = *(U32 *)(_ptr); \
+ while ( cmpxchg4 (&old, (old & (_mask)) | (_bits), (U32 *)(_ptr)) ); \
+} while (0)
+
+#define or_bits(_ptr, _bits) \
+do { \
+ U32 old = *(U32 *)(_ptr); \
+ while ( cmpxchg4 (&old, old | (_bits), (U32 *)(_ptr)) ); \
+} while (0)
+
+#define and_bits(_ptr, _mask) \
+do { \
+ U32 old = *(U32 *)(_ptr); \
+ while ( cmpxchg4 (&old, old & (_mask), (U32 *)(_ptr)) ); \
+} while (0)
+
+#else /* HAVE_CMPXCHG */
+
+#define set_bits(_ptr, _mask, _bits) \
+do { \
+ *(U32 *)(_ptr) &= (_mask); \
+ *(U32 *)(_ptr) |= (_bits); \
+} while (0)
+
+#define or_bits(_ptr, _bits)  *(U32 *)(_ptr) |= (_bits)
+
+#define and_bits(_ptr, _mask) *(U32 *)(_ptr) &= (_mask)
+
+#endif /* HAVE_CMPXCHG */
 
 #endif /*!defined(_OPCODE_H)*/
 
@@ -453,7 +526,7 @@ do { \
         } \
     }
 
-#endif /*!defined(_FEATURE_SIE)*/ 
+#endif /*!defined(_FEATURE_SIE)*/
 
 
     /* Convert fpr to index */
@@ -494,227 +567,200 @@ do { \
 
 #endif /*!defined(FEATURE_BASIC_FP_EXTENSIONS)*/
 
-
-#if defined(OPTION_AIA_BUFFER)
-
-#undef	INSTRUCTION_FETCH
-#undef	INVALIDATE_AIA
-
-#define INSTRUCTION_FETCH(_dest, _addr, _regs) \
-do { \
-    if( (_regs)->VI == ((_addr) & PAGEFRAME_PAGEMASK) \
-      && ((_addr) & 0x7FF) <= (0x800 - 6)) \
-    { \
-        if((_addr) & 0x01) \
-            ARCH_DEP(program_interrupt)((_regs), PGM_SPECIFICATION_EXCEPTION); \
-        memcpy ((_dest), (_regs)->mainstor + (_regs)->AI + \
-                    ((_addr) & PAGEFRAME_BYTEMASK) , 6); \
-    } \
-    else \
-        ARCH_DEP(instfetch) ((_dest), (_addr), (_regs)); \
-} while(0)
-
 #define INVALIDATE_AIA(_regs) \
     (_regs)->VI = 1
 
-#else /*!defined(OPTION_AIA_BUFFER)*/
-
-#define INSTRUCTION_FETCH(_dest, _addr, _regs) \
-    ARCH_DEP(instfetch) ((_dest), (_addr), (_regs))
-
-#define INVALIDATE_AIA(_regs)
-
-#endif /*!defined(OPTION_AIA_BUFFER)*/
-
-
-#if defined(OPTION_AEA_BUFFER)
-
-#if !defined(OPTION_FAST_LOGICAL)
-#define LOGICAL_TO_ABS(_addr, _arn, _regs, _acctype, _akey)	      \
-    (((_addr) & PAGEFRAME_PAGEMASK) == (_regs)->VE((_arn))) &&	    \
-    ((_arn) >= 0) &&						      \
-    (((_regs)->aekey[(_arn)] == (_akey)) || (_akey) == 0) &&	      \
-    ((_regs)->aeacc[(_arn)] >= (_acctype)) ?			      \
-    ((_acctype) == ACCTYPE_READ) ?				      \
-    (STORAGE_KEY((_regs)->AE((_arn)), (_regs)) |= STORKEY_REF,		      \
-	((_regs)->AE((_arn)) | ((_addr) & PAGEFRAME_BYTEMASK)) ) :  \
-    (STORAGE_KEY((_regs)->AE((_arn)), (_regs)) |= (STORKEY_REF | STORKEY_CHANGE), \
-	((_regs)->AE((_arn)) | ((_addr) & PAGEFRAME_BYTEMASK)) ) :  \
-    ARCH_DEP(logical_to_abs) ((_addr), (_arn), (_regs), (_acctype), (_akey))
-
-#define LOGICAL_TO_ABS_SKP(_addr, _arn, _regs, _acctype, _akey)	      \
-    (((_addr) & PAGEFRAME_PAGEMASK) == (_regs)->VE((_arn))) &&	    \
-    ((_arn) >= 0) &&						      \
-    (((_regs)->aekey[(_arn)] == (_akey)) || (_akey) == 0) &&	      \
-    ((_regs)->aeacc[(_arn)] >= (_acctype)) ?			      \
-    ((_regs)->AE((_arn)) | ((_addr) & PAGEFRAME_BYTEMASK))  :  \
-    ARCH_DEP(logical_to_abs) ((_addr), (_arn), (_regs), (_acctype), (_akey))
-
-#define INVALIDATE_AEA(_arn, _regs) \
-	(_regs)->VE((_arn)) = 1
-
-#define INVALIDATE_AEA_ALL(_regs) \
+#define INVALIDATE_AIA_ABS(_addr, _regs) \
 do { \
-    int i; \
-    for(i = 0; i < 16; i++) \
-    		(_regs)->VE(i) = 1; \
-} while(0)
+  if (((_addr) & PAGEFRAME_PAGEMASK) == (_regs)->AI) \
+    (_regs)->VI = 1; \
+} while (0)
 
-#else
-
-#if defined(OPTION_REDUCED_INVAL)
 #define AEIND(_addr) (((_addr) >> PAGEFRAME_PAGESHIFT) & 0xff)
 #define MAXAEA 256
-#else
-#define AEIND(_addr) (((_addr) >> PAGEFRAME_PAGESHIFT) & 0xf)
-#define MAXAEA 16
-#endif
 
 #define LOGICAL_TO_ABS(_addr, _arn, _regs, _acctype, _akey)       \
-    (((_addr) & PAGEFRAME_PAGEMASK) == (_regs)->VE((AEIND(_addr)))) &&      \
-    ((_arn) >= 0) &&                              \
-    (((_regs)->aekey[(AEIND(_addr))] == (_akey)) || (_akey) == 0) &&          \
-    (((_regs)->aenoarn) || ((_regs)->aearn[AEIND(_addr)] == (_arn))) && \
-    ((_regs)->aeacc[(AEIND(_addr))] >= (_acctype)) ?                  \
-    ((_acctype) == ACCTYPE_READ) ?                    \
-    (STORAGE_KEY((_regs)->AE((AEIND(_addr))), (_regs)) |= STORKEY_REF,             \
-    ((_regs)->AE((AEIND(_addr))) | ((_addr) & PAGEFRAME_BYTEMASK)) ) :  \
-    (STORAGE_KEY((_regs)->AE((AEIND(_addr))), (_regs)) |= (STORKEY_REF | STORKEY_CHANGE), \
-    ((_regs)->AE((AEIND(_addr))) | ((_addr) & PAGEFRAME_BYTEMASK)) ) :  \
-    ARCH_DEP(logical_to_abs) ((_addr), (_arn), (_regs), (_acctype), (_akey))
+      (((_addr) & PAGEFRAME_PAGEMASK) | (_regs)->aeID) == (_regs)->VE(AEIND(_addr)) \
+  &&  (_arn) >= 0 \
+  &&  ((_akey) == 0 || (_regs)->aekey[AEIND(_addr)] == (_akey)) \
+  &&  ( ( (_regs)->aenoarn && (_regs)->aearn[AEIND(_addr)] == 0 ) \
+    ||  ( !(_regs)->aenoarn \
+      && ( (_regs)->aearn[AEIND(_addr)] == (_arn) \
+        || ((_regs)->aearn[AEIND(_addr)] == 0 && (_regs)->AR(_arn) == 0) \
+         ) \
+        ) \
+      ) \
+  &&  (_regs)->aeacc[AEIND(_addr)] >= (_acctype) \
+  ?   (_acctype) == ACCTYPE_READ \
+      ? ( STORAGE_KEY((_regs)->AE(AEIND(_addr)), (_regs)) |= STORKEY_REF, \
+          (_regs)->AE(AEIND(_addr)) | ((_addr) & PAGEFRAME_BYTEMASK) \
+        ) \
+      : ( STORAGE_KEY((_regs)->AE(AEIND(_addr)), (_regs)) |= (STORKEY_REF|STORKEY_CHANGE), \
+          (_regs)->AE(AEIND(_addr)) | ((_addr) & PAGEFRAME_BYTEMASK) \
+        ) \
+  :   ARCH_DEP(logical_to_abs) ((_addr), (_arn), (_regs), (_acctype), (_akey))
 
 #define LOGICAL_TO_ABS_SKP(_addr, _arn, _regs, _acctype, _akey)       \
-    (((_addr) & PAGEFRAME_PAGEMASK) == (_regs)->VE((AEIND(_addr)))) &&      \
-    ((_arn) >= 0) &&                              \
-    (((_regs)->aekey[(AEIND(_addr))] == (_akey)) || (_akey) == 0) &&          \
-    (((_regs)->aenoarn) || ((_regs)->aearn[AEIND(_addr)] == (_arn))) && \
-    ((_regs)->aeacc[(AEIND(_addr))] >= (_acctype)) ?                  \
-    ((_regs)->AE((AEIND(_addr))) | ((_addr) & PAGEFRAME_BYTEMASK))  :  \
-    ARCH_DEP(logical_to_abs) ((_addr), (_arn), (_regs), (_acctype), (_akey))
+      (((_addr) & PAGEFRAME_PAGEMASK) | (_regs)->aeID) == (_regs)->VE(AEIND(_addr)) \
+  &&  (_arn) >= 0 \
+  &&  ((_akey) == 0 || (_regs)->aekey[AEIND(_addr)] == (_akey)) \
+  &&  ( ( (_regs)->aenoarn && (_regs)->aearn[AEIND(_addr)] == 0 ) \
+    ||  ( !(_regs)->aenoarn \
+      && ( (_regs)->aearn[AEIND(_addr)] == (_arn) \
+        || ((_regs)->aearn[AEIND(_addr)] == 0 && (_regs)->AR(_arn) == 0) \
+         ) \
+        ) \
+      ) \
+  &&  (_regs)->aeacc[AEIND(_addr)] >= (_acctype) \
+  ?   ( \
+        (_regs)->AE(AEIND(_addr)) | ((_addr) & PAGEFRAME_BYTEMASK) \
+      ) \
+  :   ( \
+        ARCH_DEP(logical_to_abs) ((_addr), (_arn), (_regs), (_acctype), (_akey)) \
+      )
 
-#define INVALIDATE_AEA(_arn, _regs) \
+#undef SET_AENOARN
+#if defined(FEATURE_ACCESS_REGISTERS)
+#define SET_AENOARN(_regs) \
+  (_regs)->aenoarn = !(ACCESS_REGISTER_MODE(&regs->psw))
+#else
+#define SET_AENOARN(_regs) \
+  (_regs)->aenoarn = 1
+#endif
+
+#define INVALIDATE_AEA_AR(_arn, _regs) \
 do { \
     int i; \
-    (_regs)->aenoarn = 0; \
+    if ((_regs)->aearvalid) \
+      for(i = 0; i < MAXAEA; i++) \
+        if ((_regs)->aearn[i] == (_arn)) \
+          (_regs)->VE(i) = 0; \
+} while(0)
+
+#define INVALIDATE_AEA_ARALL(_regs) \
+do { \
+    int i; \
+    if ((_regs)->aearvalid) \
+    { \
+      (_regs)->aearvalid = 0; \
+      for(i = 0; i < MAXAEA; i++) \
+        if ((_regs)->aearn[i] != 0) \
+          (_regs)->VE(i) = 0; \
+    } \
+} while(0)
+
+#define INVALIDATE_AEA_ABS(_addr, _regs) \
+do { \
+    int i; \
     for(i = 0; i < MAXAEA; i++) \
-        (_regs)->VE(i) = 1; \
+      if (((_addr) & PAGEFRAME_PAGEMASK) == (_regs)->AE(i)) \
+        (_regs)->VE(i) = 0; \
 } while(0)
 
 #define INVALIDATE_AEA_ALL(_regs) \
 do { \
-    int i; \
-    (_regs)->aenoarn = 0; \
-    for(i = 0; i < MAXAEA; i++) \
-        (_regs)->VE(i) = 1; \
-} while(0)
-#endif
+    (_regs)->aeID++; \
+    (_regs)->aearvalid = 0; \
+    if ((_regs)->aeID == PAGEFRAME_PAGESIZE) \
+    { \
+        (_regs)->aeID = 1; \
+        memset((_regs)->ve, 0, 256*sizeof(DW)); \
+    } \
+} while (0)
 
-#else /*!defined(OPTION_AEA_BUFFER)*/
-
-#define LOGICAL_TO_ABS(_addr, _arn, _regs, _acctype, _akey) \
-    ARCH_DEP(logical_to_abs) ((_addr), (_arn), (_regs), (_acctype), (_akey))
-
-#define LOGICAL_TO_ABS_SKP(_addr, _arn, _regs, _acctype, _akey) \
-    ARCH_DEP(logical_to_abs) ((_addr), (_arn), (_regs), (_acctype), (_akey))
-
-#define INVALIDATE_AEA(_arn, _regs)
-
-#define INVALIDATE_AEA_ALL(_regs)
-
-#endif /*!defined(OPTION_AEA_BUFFER)*/
 
 #define INST_UPDATE_PSW(_regs, _len, _execflag) \
-	{ \
-	    if( !(_execflag) ) \
-	    { \
-		(_regs)->psw.ilc = (_len); \
-		(_regs)->psw.IA += (_len); \
-		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
-	    } \
-	}
+        { \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = (_len); \
+                (_regs)->psw.IA += (_len); \
+                (_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        }
 
 /* E implied operands and extended op code */
 #undef E
 #define E(_inst, _execflag, _regs) \
-	{ \
+        { \
             INST_UPDATE_PSW((_regs), 2, (_execflag)); \
-	}
+        }
 
 /* RR register to register */
 #undef RR
 #if defined(FETCHIBYTE1)
 #define RR(_inst, _execflag, _regs, _r1, _r2) \
-	{ \
+        { \
             register U32 ib; \
             FETCHIBYTE1(ib, (_inst)) \
-	    (_r1) = ib >> 4; \
-	    (_r2) = ib & 0x0F; \
+            (_r1) = ib >> 4; \
+            (_r2) = ib & 0x0F; \
             INST_UPDATE_PSW((_regs), 2, (_execflag)); \
-	}
+        }
 #else
 #define RR(_inst, _execflag, _regs, _r1, _r2) \
-	{ \
-	    (_r1) = (_inst)[1] >> 4; \
-	    (_r2) = (_inst)[1] & 0x0F; \
+        { \
+            (_r1) = (_inst)[1] >> 4; \
+            (_r2) = (_inst)[1] & 0x0F; \
             INST_UPDATE_PSW((_regs), 2, (_execflag)); \
-	}
+        }
 #endif
 
 /* RR special format for SVC instruction */
 #undef RR_SVC
 #if defined(FETCHIBYTE1)
 #define RR_SVC(_inst, _execflag, _regs, _svc) \
-	{ \
+        { \
             FETCHIBYTE1((_svc), (_inst)) \
             INST_UPDATE_PSW((_regs), 2, (_execflag)); \
-	}
+        }
 #else
 #define RR_SVC(_inst, _execflag, _regs, _svc) \
-	{ \
-	    (_svc) = (_inst)[1]; \
+        { \
+            (_svc) = (_inst)[1]; \
             INST_UPDATE_PSW((_regs), 2, (_execflag)); \
-	}
+        }
 #endif
 
 /* RRE register to register with extended op code */
 #undef RRE
 #define RRE(_inst, _execflag, _regs, _r1, _r2) \
-	{   U32 temp; \
+        {   U32 temp; \
             memcpy (&temp, (_inst), 4); \
             temp = CSWAP32(temp); \
             (_r1) = (temp >> 4) & 0xf; \
             (_r2) = temp & 0xf; \
             INST_UPDATE_PSW((_regs), 4, (_execflag)); \
-	}
+        }
 
 /* RRF register to register with additional R3 field */
 #undef RRF_R
 #define RRF_R(_inst, _execflag, _regs, _r1, _r2, _r3) \
-	{   U32 temp; \
+        {   U32 temp; \
             memcpy (&temp, (_inst), 4); \
             temp = CSWAP32(temp); \
             (_r1) = (temp >> 12) & 0xf; \
             (_r3) = (temp >> 4) & 0xf; \
             (_r2) = temp & 0xf; \
             INST_UPDATE_PSW((_regs), 4, (_execflag)); \
-	}
+        }
 
 /* RRF register to register with additional M3 field */
 #undef RRF_M
 #define RRF_M(_inst, _execflag, _regs, _r1, _r2, _m3) \
-	{   U32 temp; \
+        {   U32 temp; \
             memcpy (&temp, (_inst), 4); \
             temp = CSWAP32(temp); \
             (_m3) = (temp >> 12) & 0xf; \
             (_r1) = (temp >> 4) & 0xf; \
             (_r2) = temp & 0xf; \
             INST_UPDATE_PSW((_regs), 4, (_execflag)); \
-	}
+        }
 
 /* RRF register to register with additional R3 and M4 fields */
 #undef RRF_RM
 #define RRF_RM(_inst, _execflag, _regs, _r1, _r2, _r3, _m4) \
-	{   U32 temp; \
+        {   U32 temp; \
             memcpy (&temp, (_inst), 4); \
             temp = CSWAP32(temp); \
             (_r3) = (temp >> 12) & 0xf; \
@@ -794,6 +840,49 @@ do { \
             INST_UPDATE_PSW((_regs), 6, (_execflag)); \
     }
 
+/* RXY register and indexed storage with extended op code
+   and long displacement */
+#undef RXY
+#if defined(FEATURE_LONG_DISPLACEMENT)
+#define RXY(_inst, _execflag, _regs, _r1, _b2, _effective_addr2) \
+    {   U32 temp; S32 temp2; int tempx; \
+            memcpy (&temp, (_inst), 4); \
+            temp = CSWAP32(temp); \
+            (_r1) = (temp >> 20) & 0xf; \
+            tempx = (temp >> 16) & 0xf; \
+            (_b2) = (temp >> 12) & 0xf; \
+            temp2 = (_inst[4] << 12) | (temp & 0xfff); \
+            if (temp2 & 0x80000) temp2 |= 0xfff00000; \
+            (_effective_addr2) = \
+                        (tempx ? (_regs)->GR(tempx) : (GREG)0) + \
+                        ((_b2) ? (_regs)->GR((_b2)) : (GREG)0) + \
+                        temp2; \
+            (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+            INST_UPDATE_PSW((_regs), 6, (_execflag)); \
+    }
+#else /*!defined(FEATURE_LONG_DISPLACEMENT)*/
+#define RXY(_inst, _execflag, _regs, _r1, _b2, _effective_addr2) \
+    {   U32 temp; \
+            memcpy (&temp, (_inst), 4); \
+            temp = CSWAP32(temp); \
+            (_r1) = (temp >> 20) & 0xf; \
+            (_b2) = (temp >> 16) & 0xf; \
+            (_effective_addr2) = temp & 0xfff; \
+        if((_b2)) \
+        { \
+        (_effective_addr2) += (_regs)->GR((_b2)); \
+        (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+        } \
+            (_b2) = (temp >> 12) & 0xf; \
+        if((_b2)) \
+        { \
+        (_effective_addr2) += (_regs)->GR((_b2)); \
+        (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+        } \
+            INST_UPDATE_PSW((_regs), 6, (_execflag)); \
+    }
+#endif /*!defined(FEATURE_LONG_DISPLACEMENT)*/
+
 /* RS register and storage with additional R3 or M3 field */
 #undef RS
 #define RS(_inst, _execflag, _regs, _r1, _r3, _b2, _effective_addr2) \
@@ -814,6 +903,7 @@ do { \
 
 /* RSE register and storage with extended op code and additional
    R3 or M3 field (note, this is NOT the ESA/390 vector RSE format) */
+/* Note: Effective June 2003, RSE is retired and replaced by RSY */
 #undef RSE
 #define RSE(_inst, _execflag, _regs, _r1, _r3, _b2, _effective_addr2) \
     {   U32 temp; \
@@ -830,6 +920,43 @@ do { \
         } \
             INST_UPDATE_PSW((_regs), 6, (_execflag)); \
     }
+
+/* RSY register and storage with extended op code, long displacement,
+   and additional R3 or M3 field */
+#undef RSY
+#if defined(FEATURE_LONG_DISPLACEMENT)
+#define RSY(_inst, _execflag, _regs, _r1, _r3, _b2, _effective_addr2) \
+    {   U32 temp; S32 temp2; \
+            memcpy (&temp, (_inst), 4); \
+            temp = CSWAP32(temp); \
+            (_r1) = (temp >> 20) & 0xf; \
+            (_r3) = (temp >> 16) & 0xf; \
+            (_b2) = (temp >> 12) & 0xf; \
+            temp2 = (_inst[4] << 12) | (temp & 0xfff); \
+            if (temp2 & 0x80000) temp2 |= 0xfff00000; \
+            (_effective_addr2) = \
+                        ((_b2) ? (_regs)->GR((_b2)) : (GREG)0) + \
+                        temp2; \
+            (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+            INST_UPDATE_PSW((_regs), 6, (_execflag)); \
+    }
+#else /*!defined(FEATURE_LONG_DISPLACEMENT)*/
+#define RSY(_inst, _execflag, _regs, _r1, _r3, _b2, _effective_addr2) \
+    {   U32 temp; \
+            memcpy (&temp, (_inst), 4); \
+            temp = CSWAP32(temp); \
+            (_r1) = (temp >> 20) & 0xf; \
+            (_r3) = (temp >> 16) & 0xf; \
+            (_b2) = (temp >> 12) & 0xf; \
+            (_effective_addr2) = temp & 0xfff; \
+        if((_b2) != 0) \
+        { \
+        (_effective_addr2) += (_regs)->GR((_b2)); \
+        (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+        } \
+            INST_UPDATE_PSW((_regs), 6, (_execflag)); \
+    }
+#endif /*!defined(FEATURE_LONG_DISPLACEMENT)*/
 
 /* RSL storage operand with extended op code and 4-bit L field */
 #undef RSL
@@ -914,6 +1041,25 @@ do { \
         } \
             INST_UPDATE_PSW((_regs), 4, (_execflag)); \
     }
+
+/* SIY storage and immediate with long displacement */
+#undef SIY
+#if defined(FEATURE_LONG_DISPLACEMENT)
+#define SIY(_inst, _execflag, _regs, _i2, _b1, _effective_addr1) \
+    {   U32 temp; S32 temp1; \
+            memcpy (&temp, (_inst), 4); \
+            temp = CSWAP32(temp); \
+            (_i2) = (temp >> 16) & 0xff; \
+            (_b1) = (temp >> 12) & 0xf; \
+            temp1 = (_inst[4] << 12) | (temp & 0xfff); \
+            if (temp1 & 0x80000) temp1 |= 0xfff00000; \
+            (_effective_addr1) = \
+                        ((_b1) ? (_regs)->GR((_b1)) : (GREG)0) + \
+                        temp1; \
+            (_effective_addr1) &= ADDRESS_MAXWRAP((_regs)); \
+            INST_UPDATE_PSW((_regs), 6, (_execflag)); \
+    }
+#endif /*defined(FEATURE_LONG_DISPLACEMENT)*/
 
 /* S storage operand only */
 #undef S
@@ -1225,37 +1371,20 @@ do { \
 #endif /*defined(FEATURE_VECTOR_FACILITY)*/
 
 
-#undef PERFORM_SERIALIZATION
-#if MAX_CPU_ENGINES > 1 && defined(SMP_SERIALIZATION)
-	/* In order to syncronize mainstorage access we need to flush
-	   the cache on all processors, this needs special case when
-	   running on an SMP machine, as the physical CPU's actually
-	   need to perform this function.  This is accomplished by
-	   obtaining and releasing a mutex lock, which is intended to
-	   serialize storage access */
-#define PERFORM_SERIALIZATION(_regs) \
-	{ \
-	    obtain_lock(&regs->serlock); \
-	    release_lock(&regs->serlock); \
-	}
-#else  /*!SERIALIZATION*/
 #define PERFORM_SERIALIZATION(_regs)
-#endif /*SERIALIZATION*/
-
-
 #define PERFORM_CHKPT_SYNC(_regs)
 
 
 #if !defined(NO_SETUID)
 
-/* SETMODE(INIT) 
+/* SETMODE(INIT)
  *   sets the saved uid to the effective uid, and
  *   sets the effective uid to the real uid, such
  *   that the program is running with normal user
  *   attributes, other then that it may switch to
  *   the saved uid by SETMODE(ROOT). This call is
  *   usually made upon entry to the setuid program.
- * 
+ *
  * SETMODE(ROOT)
  *   sets the saved uid to the real uid, and
  *   sets the real and effective uid to the saved uid.
@@ -1263,15 +1392,15 @@ do { \
  *   will have all the appropriate access.
  *
  * SETMODE(USER)
- *   sets the real and effective uid to the uid of the 
- *   caller.  The saved uid will be the effective uid 
+ *   sets the real and effective uid to the uid of the
+ *   caller.  The saved uid will be the effective uid
  *   upon entry to the program (as before SETMODE(INIT))
  *
  * SETMODE(TERM)
  *   sets real, effective and saved uid to the real uid
- *   upon entry to the program.  This call will revoke 
+ *   upon entry to the program.  This call will revoke
  *   any setuid access that the thread/process has.  It
- *   is important to issue this call before an exec to a 
+ *   is important to issue this call before an exec to a
  *   shell or other program that could introduce integrity
  *   exposures when running with root access.
  */
@@ -1363,7 +1492,7 @@ int  haltio (REGS *regs, DEVBLK *dev, BYTE ibyte);
 int  resume_subchan (REGS *regs, DEVBLK *dev);
 int  ARCH_DEP(present_io_interrupt) (REGS *regs, U32 *ioid,
         U32 *ioparm, U32 *iointid, BYTE *csw);
-int ARCH_DEP(present_zone_io_interrupt) (U32 *ioid, U32 *ioparm, 
+int ARCH_DEP(present_zone_io_interrupt) (U32 *ioid, U32 *ioparm,
                                               U32 *iointid, BYTE zone);
 void io_reset (void);
 int  chp_reset(BYTE chpid);
@@ -1407,8 +1536,19 @@ void ARCH_DEP(access_reipl_data) (int r1, int r2, REGS *regs);
 int  ARCH_DEP(diag_ppagerel) (int r1, int r2, REGS *regs);
 
 
+/* Functions in module control.c */
+void ARCH_DEP(load_real_address_proc) (REGS *regs,
+    int r1, int b2, VADR effective_addr2);
+
+
+/* Functions in module decimal.c */
+void packed_to_binary (BYTE *dec, int len, U64 *result,
+    int *ovf, int *dxf);
+void binary_to_packed (S64 bin, BYTE *result);
+
+
 /* Functions in module diagnose.c */
-void ARCH_DEP(diagnose_call) (U32 effective_addr2, int r1, int r3,
+void ARCH_DEP(diagnose_call) (VADR effective_addr2, int b2, int r1, int r3,
     REGS *regs);
 
 
@@ -1573,6 +1713,14 @@ DEF_INST(trace_svc_return);
 DEF_INST(compression_call);
 
 
+/* Instructions in crypto.c */
+DEF_INST(cipher_message_r);
+DEF_INST(cipher_message_with_chaining_r);
+DEF_INST(compute_intermediate_message_digest_r);
+DEF_INST(compute_last_message_digest_r);
+DEF_INST(compute_message_authentication_code_r);
+
+
 /* Instructions in control.c */
 DEF_INST(branch_and_set_authority);
 DEF_INST(branch_in_subspace_group);
@@ -1659,6 +1807,10 @@ DEF_INST(set_zone_parameter);
 DEF_INST(test_pending_zone_interrupt);
 
 
+/* Instructions in qdio.c */
+DEF_INST(signal_adapter);
+
+
 /* Instructions in float.c */
 DEF_INST(load_positive_float_long_reg);
 DEF_INST(load_negative_float_long_reg);
@@ -1740,6 +1892,26 @@ DEF_INST(loadlength_float_short_to_ext);
 DEF_INST(squareroot_float_short);
 DEF_INST(squareroot_float_long);
 DEF_INST(multiply_float_short);
+DEF_INST(load_float_ext_reg);
+DEF_INST(load_zero_float_short_reg);
+DEF_INST(load_zero_float_long_reg);
+DEF_INST(load_zero_float_ext_reg);
+DEF_INST(convert_bfp_long_to_float_long_reg);
+DEF_INST(convert_bfp_short_to_float_long_reg);
+DEF_INST(convert_float_long_to_bfp_long_reg);
+DEF_INST(convert_float_long_to_bfp_short_reg);
+DEF_INST(multiply_add_float_short_reg);
+DEF_INST(multiply_add_float_long_reg);
+DEF_INST(multiply_add_float_short);
+DEF_INST(multiply_add_float_long);
+DEF_INST(multiply_subtract_float_short_reg);
+DEF_INST(multiply_subtract_float_long_reg);
+DEF_INST(multiply_subtract_float_short);
+DEF_INST(multiply_subtract_float_long);
+DEF_INST(load_float_long_y);
+DEF_INST(load_float_short_y);
+DEF_INST(store_float_long_y);
+DEF_INST(store_float_short_y);
 
 
 /* Instructions in general.c */
@@ -2107,6 +2279,72 @@ DEF_INST(translate_one_to_two);
 DEF_INST(translate_one_to_one);
 DEF_INST(move_long_unicode);
 DEF_INST(compare_logical_long_unicode);
+DEF_INST(add_y);
+DEF_INST(add_halfword_y);
+DEF_INST(add_logical_y);
+DEF_INST(and_immediate_y);
+DEF_INST(and_y);
+DEF_INST(compare_y);
+DEF_INST(compare_and_swap_y);
+DEF_INST(compare_double_and_swap_y);
+DEF_INST(compare_halfword_y);
+DEF_INST(compare_logical_y);
+DEF_INST(compare_logical_immediate_y);
+DEF_INST(compare_logical_characters_under_mask_y);
+DEF_INST(convert_to_binary_y);
+DEF_INST(convert_to_decimal_y);
+DEF_INST(exclusive_or_immediate_y);
+DEF_INST(exclusive_or_y);
+DEF_INST(insert_character_y);
+DEF_INST(insert_characters_under_mask_y);
+DEF_INST(load_y);
+DEF_INST(load_access_multiple_y);
+DEF_INST(load_address_y);
+DEF_INST(load_byte);
+DEF_INST(load_byte_long);
+DEF_INST(load_halfword_y);
+DEF_INST(load_multiple_y);
+DEF_INST(load_real_address_y);
+DEF_INST(move_immediate_y);
+DEF_INST(multiply_single_y);
+DEF_INST(or_immediate_y);
+DEF_INST(or_y);
+DEF_INST(store_y);
+DEF_INST(store_access_multiple_y);
+DEF_INST(store_character_y);
+DEF_INST(store_characters_under_mask_y);
+DEF_INST(store_halfword_y);
+DEF_INST(store_multiple_y);
+DEF_INST(subtract_y);
+DEF_INST(subtract_halfword_y);
+DEF_INST(subtract_logical_y);
+DEF_INST(test_under_mask_y);
+
+
+/* Instructions in ecpsvm.c */
+DEF_INST(ecpsvm_basic_freex);
+DEF_INST(ecpsvm_basic_fretx);
+DEF_INST(ecpsvm_lock_page);
+DEF_INST(ecpsvm_unlock_page);
+DEF_INST(ecpsvm_decode_next_ccw);
+DEF_INST(ecpsvm_free_ccwstor);
+DEF_INST(ecpsvm_locate_vblock);
+DEF_INST(ecpsvm_disp1);
+DEF_INST(ecpsvm_tpage);
+DEF_INST(ecpsvm_tpage_lock);
+DEF_INST(ecpsvm_inval_segtab);
+DEF_INST(ecpsvm_inval_ptable);
+DEF_INST(ecpsvm_decode_first_ccw);
+DEF_INST(ecpsvm_dispatch_main);
+DEF_INST(ecpsvm_locate_rblock);
+DEF_INST(ecpsvm_comm_ccwproc);
+DEF_INST(ecpsvm_unxlate_ccw);
+DEF_INST(ecpsvm_disp2);
+DEF_INST(ecpsvm_store_level);
+DEF_INST(ecpsvm_loc_chgshrpg);
+DEF_INST(ecpsvm_extended_freex);
+DEF_INST(ecpsvm_extended_fretx);
+DEF_INST(ecpsvm_prefmach_assist);
 
 
 /* Instructions in ieee.c */

@@ -7,6 +7,7 @@
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
+#include "opcode.h"
 
 #define ENDMSG(m, format, a...) \
    if(m!=NULL) fprintf (m, "cckdend: " format, ## a)
@@ -675,10 +676,19 @@ int             ckddasd;                /* 1=CKD dasd   0=FBA dasd   */
 U32             trkavg=0, trksum=0, trknum=0;
                                         /* Used to compute avg trk sz*/
 int             trys;                   /* Nbr recovery trys for trk */
+int             comps = 0;              /* Supported compressions    */
+int             badcomps[] = {0, 0, 0}; /* Bad compression counts    */
 char            msg[256];               /* Message                   */
 BYTE *space[]     = {"none", "devhdr", "cdevhdr", "l1tab", "l2tab",
                      "trkimg", "free_blk", "file_end"};
 BYTE *compression[] = {"none", "zlib", "bzip2"};
+
+#if defined(HAVE_LIBZ)
+    comps |= CCKD_COMPRESS_ZLIB;
+#endif
+#if defined(CCKD_BZIP2)
+    comps |= CCKD_COMPRESS_BZIP2;
+#endif
 
 #ifdef EXTERNALGUI
     /* The number of "steps" (checks) we'll be doing... */
@@ -845,16 +855,8 @@ BYTE *compression[] = {"none", "zlib", "bzip2"};
             goto cdsk_return;
         }
 
-        /* Check number of cylinders */
-        if (hdrcyls < ckd->cyls || hdrcyls > ckd->cyls + ckd->altcyls)
-        {
-            CDSKMSG (m, "Invalid number of cylinders in header: %d, "
-                     "expecting %d - %d\n",
-                     hdrcyls, ckd->cyls, ckd->cyls + ckd->altcyls);
-            goto cdsk_return;
-        }
-
-        if (cdevhdr.numl1tab != ((hdrcyls * heads) + 255) / 256)
+        if (cdevhdr.numl1tab < ((hdrcyls * heads) + 255) / 256
+         || cdevhdr.numl1tab > ((hdrcyls * heads) + 255) / 256 + 1)
         {
             CDSKMSG (m, "Invalid number of l1 table entries in header: "
                      "%d, expecting %d\n",
@@ -866,19 +868,18 @@ BYTE *compression[] = {"none", "zlib", "bzip2"};
     }
     else
     {
-        int numl1;
         trks = ((U32)(cdevhdr.cyls[3]) << 24)
              | ((U32)(cdevhdr.cyls[2]) << 16)
              | ((U32)(cdevhdr.cyls[1]) << 8)
              | (U32)(cdevhdr.cyls[0]);
         trks = (trks / CFBA_BLOCK_NUM) + 1;
-        numl1 = (trks + 255) / 256;
         trksz = CFBA_BLOCK_SIZE + CKDDASD_TRKHDR_SIZE;
         cyls = heads = -1;
-        if (cdevhdr.numl1tab != numl1)
+        if (cdevhdr.numl1tab < (trks + 255) / 256
+         || cdevhdr.numl1tab > (trks + 255) / 256 + 1)
         {
             CDSKMSG (m, "Invalid number of l1 table entries in header: "
-                     "%d, expecting %d\n", cdevhdr.numl1tab, numl1);
+                     "%d, expecting %d\n", cdevhdr.numl1tab, (trks + 255) / 256);
             goto cdsk_return;
         }
     }
@@ -1269,11 +1270,10 @@ space_check:
                 /* consistency check on track header */
                 if (ckddasd)
                 {
-                  if ( buf[0] > CCKD_COMPRESS_MAX
-                   || (buf[1] * 256 + buf[2]) >= cyls
-                   || (buf[3] * 256 + buf[4]) >= heads
-                   || (buf[1] * 256 + buf[2]) * heads +
-                      (buf[3] * 256 + buf[4]) != trk)
+                  if ((buf[0] & ~CCKD_COMPRESS_MASK)
+                   || fetch_hw (buf + 1) >= cyls
+                   || fetch_hw (buf + 3) >= heads
+                   || fetch_hw (buf + 1) * heads + fetch_hw (buf + 3) != trk)
                   {
                       sprintf (msg, "track %d invalid header "
                                "0x%2.2x%2.2x%2.2x%2.2x%2.2x", trk,
@@ -1283,14 +1283,27 @@ space_check:
                 }
                 else
                 {
-                  if ((buf[0] & CCKD_COMPRESS_MASK) > CCKD_COMPRESS_MAX
-                   || (buf[1] << 24) + (buf[2] << 16) + (buf[3] << 8) + buf[4] != trk)
+                  if ((buf[0] & ~CCKD_COMPRESS_MASK)
+                     || (int)fetch_fw (buf + 1) != trk)
                   {
                       sprintf (msg, "block %d invalid header "
                                "0x%2.2x%2.2x%2.2x%2.2x%2.2x", trk,
                                buf[0], buf[1], buf[2], buf[3], buf[4]);
                       goto bad_trk;
                   }
+                }
+
+                /* Check for unsupported compression */
+                if (buf[0] & ~comps)
+                {
+                      sprintf (msg, "%s %d compressed using %s"
+                               " which is not configured",
+                               ckddasd ? "track" : "block", trk,
+                               compression[buf[0]]);
+                      if (badcomps[buf[0]]++ < 10)
+                          goto bad_trk;
+                      CDSKMSG (m, "Unsupported compression threshold exceeded, aborting\n");
+                      goto cdsk_return;
                 }
             }
 
@@ -2008,6 +2021,15 @@ int             kl,dl;                  /* Key/Data lengths          */
 BYTE           *bufp;                   /* Buffer pointer            */
 int             bufl;                   /* Buffer length             */
 BYTE            buf2[65536];            /* Uncompressed buffer       */
+int             comps = 0;              /* Supported compressions    */
+BYTE           *compression[] = {"none", "zlib", "bzip2", "????"};
+
+#if defined(HAVE_LIBZ)
+    comps |= CCKD_COMPRESS_ZLIB;
+#endif
+#if defined(CCKD_BZIP2)
+    comps |= CCKD_COMPRESS_BZIP2;
+#endif
 
     /* Check for extraneous bits in the first byte */
     if (buf[0] & ~CCKD_COMPRESS_MASK)
@@ -2020,6 +2042,16 @@ BYTE            buf2[65536];            /* Uncompressed buffer       */
         return -1;
     }
 
+    /* Check for unsupported compression */
+    if (buf[0] & ~comps)
+    {
+        if (msg)
+            sprintf(msg,"%s %d compression %s not configured",
+                   heads >= 0 ? "trk" : "blk", trk,
+                   compression[buf[0]]);
+        return -1;
+    }
+
     /* Uncompress the track/block image */
     switch (buf[0] & CCKD_COMPRESS_MASK) {
 
@@ -2028,7 +2060,7 @@ BYTE            buf2[65536];            /* Uncompressed buffer       */
         bufl = len;
         break;
 
-#ifdef CCKD_COMPRESS_ZLIB
+#ifdef HAVE_LIBZ
     case CCKD_COMPRESS_ZLIB:
         bufp = (BYTE *)&buf2;
         memcpy (&buf2, buf, CKDDASD_TRKHDR_SIZE);
@@ -2048,7 +2080,7 @@ BYTE            buf2[65536];            /* Uncompressed buffer       */
         break;
 #endif
 
-#ifdef CCKD_COMPRESS_BZIP2
+#ifdef CCKD_BZIP2
     case CCKD_COMPRESS_BZIP2:
         bufp = (BYTE *)&buf2;
         memcpy (&buf2, buf, CKDDASD_TRKHDR_SIZE);
@@ -2105,7 +2137,7 @@ BYTE            buf2[65536];            /* Uncompressed buffer       */
 
     /* validate record 0 */
     memcpy (cchh2, &bufp[5], 4); cchh2[0] &= 0x7f; /* fix for ovflow */
-    if (memcmp (cchh, cchh2, 4) != 0 ||  bufp[9] != 0 ||
+    if (/* memcmp (cchh, cchh2, 4) != 0 ||*/  bufp[9] != 0 ||
         bufp[10] != 0 || bufp[11] != 0 || bufp[12] != 8)
     {
         if (msg)
@@ -2126,9 +2158,11 @@ BYTE            buf2[65536];            /* Uncompressed buffer       */
         memcpy (cchh2, &bufp[sz], 4); cchh2[0] &= 0x7f;
 
         /* fix for funny formatted vm disks */
+        /*
         if (r == 1) memcpy (cchh, cchh2, 4);
+        */
 
-        if (memcmp (cchh, cchh2, 4) != 0 || bufp[sz+4] == 0 ||
+        if (/*memcmp (cchh, cchh2, 4) != 0 ||*/ bufp[sz+4] == 0 ||
             sz + 8 + kl + dl >= bufl)
         {
              if (msg)

@@ -93,23 +93,8 @@ pid_t           pid;                    /* Child process identifier  */
         /* Close the original descriptor now duplicated to STDIN */
         close (pipefd[0]);
 
-        /* Redirect STDOUT to the control panel message pipe */
-        rc = dup2 (fileno(sysblk.msgpipew), STDOUT_FILENO);
-        if (rc != STDOUT_FILENO)
-        {
-            logmsg (_("HHCPR009E %4.4X dup2 error: %s\n"),
-                    dev->devnum, strerror(errno));
-            _exit(127);
-        }
-
-        /* Redirect STDERR to the control panel message pipe */
-        rc = dup2 (fileno(sysblk.msgpipew), STDERR_FILENO);
-        if (rc != STDERR_FILENO)
-        {
-            logmsg (_("HHCPR010E %4.4X dup2 error: %s\n"),
-                    dev->devnum, strerror(errno));
-            _exit(127);
-        }
+        /* Redirect stderr (screen) to hercules log task */
+        dup2(STDOUT_FILENO, STDERR_FILENO);
 
         /* Relinquish any ROOT authority before calling shell */
         SETMODE(TERM);
@@ -123,17 +108,8 @@ pid_t           pid;                    /* Child process identifier  */
 
             BYTE  cmdline[256];
 
-            snprintf(cmdline,256,"\"%s\" pid=%d dev=%4.4X extgui=%d",
-                dev->filename+1,getpid(),dev->devnum,
-#ifdef EXTERNALGUI
-                extgui
-#else /*!EXTERNALGUI*/
-                0
-#endif /*EXTERNALGUI*/
-                );
-
-            fclose(stderr);
-            fclose(sysblk.msgpipew);
+            snprintf(cmdline,256,"\"%s\" pid=%d dev=%4.4X",
+                dev->filename+1,getpid(),dev->devnum);
 
             rc = system (cmdline);
         }
@@ -205,13 +181,16 @@ int     i;                              /* Array subscript           */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
     {
         fprintf (stderr,
-                "HHCPR001E File name missing or invalid for printer %4.4X\n",
+                _("HHCPR001E File name missing or invalid for printer %4.4X\n"),
                  dev->devnum);
         return -1;
     }
 
     /* Save the file name in the device block */
     strcpy (dev->filename, argv[0]);
+
+    if(!sscanf(dev->typname,"%hx",&(dev->devtype)))
+        dev->devtype = 0x1403;
 
     /* Initialize device dependent fields */
     dev->fd = -1;
@@ -231,7 +210,7 @@ int     i;                              /* Array subscript           */
             continue;
         }
 
-        fprintf (stderr, "HHCPR002E Invalid argument for printer %4.4X: %s\n",
+        fprintf (stderr, _("HHCPR002E Invalid argument for printer %4.4X: %s\n"),
                 dev->devnum, argv[i]);
         return -1;
     }
@@ -704,10 +683,40 @@ BYTE            c;                      /* Print character           */
 } /* end function printer_execute_ccw */
 
 
+#if defined(OPTION_DYNAMIC_LOAD)
+static
+#endif
 DEVHND printer_device_hndinfo = {
         &printer_init_handler,
         &printer_execute_ccw,
         &printer_close_device,
         &printer_query_device,
-        NULL, NULL, NULL, NULL
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 };
+
+/* Libtool static name colision resolution */
+/* note : lt_dlopen will look for symbol & modulename_LTX_symbol */
+#if !defined(HDL_BUILD_SHARED) && defined(HDL_USE_LIBTOOL)
+#define hdl_ddev hdt1403_LTX_hdl_ddev
+#define hdl_depc hdt1403_LTX_hdl_depc
+#define hdl_reso hdt1403_LTX_hdl_reso
+#define hdl_init hdt1403_LTX_hdl_init
+#define hdl_fini hdt1403_LTX_hdl_fini
+#endif
+
+#if defined(OPTION_DYNAMIC_LOAD)
+HDL_DEPENDENCY_SECTION;
+{
+     HDL_DEPENDENCY(HERCULES);
+     HDL_DEPENDENCY(DEVBLK);
+}
+END_DEPENDENCY_SECTION;
+
+
+HDL_DEVICE_SECTION;
+{
+    HDL_DEVICE(1403, printer_device_hndinfo );
+    HDL_DEVICE(3211, printer_device_hndinfo );
+}
+END_DEVICE_SECTION;
+#endif

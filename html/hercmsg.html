@@ -1,12 +1,12 @@
 <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 3.0//EN" "html.dtd">
 <HTML>
 <HEAD><TITLE>
-Hercules Version 2: System Message Overview</TITLE>
+Hercules Version 3: System Message Overview</TITLE>
 <LINK REL=STYLESHEET TYPE="text/css" HREF="hercules.css">
 </HEAD>
 <BODY BGCOLOR="#ffffcc" TEXT="#000000" LINK="#0000A0"
       VLINK="#008040" ALINK="#000000">
-<h1>Hercules Version 2: System Message Overview</h1>
+<h1>Hercules Version 3: System Message Overview</h1>
 <p>
 This page describes the system messages for the Hercules S/370,
 ESA/390, and z/Architecture emulator.
@@ -21,6 +21,8 @@ this prefix.
 <dt><code><em>mm</em></code>
 <dd>specifies the function that issued the message, from the following list:
   <dl>
+  <dt><code><a href="hercmsca.html">CA</a></code>
+  <dd>Communication Adapter emulation
   <dt><code><a href="hercmscf.html">CF</a></code>
   <dd>Configuration file processing
   <dt><code><a href="hercmscp.html">CP</a></code>
@@ -31,6 +33,8 @@ this prefix.
   <dd>DASD emulation (both CKD and FBA)
   <dt><code><a href="hercmsdc.html">DC</a></code>
   <dd><code>dasdcopy</code>
+  <dt><code><a href="hercmsdg.html">DG</a></code>
+  <dd><code>dyngui.dll</code>
   <dt><code><a href="hercmsdi.html">DI</a></code>
   <dd><code>dasdinit</code>
   <dt><code><a href="hercmsdl.html">DL</a></code>
@@ -40,6 +44,8 @@ this prefix.
   <dt><code><a href="hercmsdt.html">DT</a></code>
   <dd><code>dasdcat</code>
   <dt><code><a href="hercmsdu.html">DU</a></code>
+  <dd>Hercules Dynamic Loader
+  <dt><code><a href="hercmshd.html">HD</a></code>
   <dd>DASD utilities common functions
   <dt><code><a href="hercmshe.html">HE</a></code>
   <dd><code>hetinit</code>
@@ -56,6 +62,8 @@ this prefix.
   <dt><code><a href="hercmsin.html">IN</a></code>
   <dd>Hercules initialization
   <dt><code><a href="hercmslc.html">LC</a></code>
+  <dd>System Log functions
+  <dt><code><a href="hercmslg.html">LG</a></code>
   <dd>LCS emulation
   <dt><code><a href="hercmspn.html">PN</a></code>
   <dd>Hercules control panel command messages
@@ -77,8 +85,12 @@ this prefix.
   <dd><code>tapemap</code>
   <dt><code><a href="hercmsts.html">TS</a></code>
   <dd><code>tapesplt</code>
+  <dt><code><a href="hercmstt.html">TT</a></code>
+  <dd>TOD Clock and Timer Services
   <dt><code><a href="hercmstu.html">TU</a></code>
   <dd>TUN/TAP driver support
+  <dt><code><a href="hercmsvm.html">VM</a></code>
+  <dd>VM/CP emulation facility
   </dl>
 <dt><code><em>nnn</em></code>
 <dd>Specific message number, assigned more or less sequentially.
@@ -111,6 +123,6 @@ If you have a question about Hercules, see the
 <a href="hercinst.html"><img src="gifs/back.gif" border=0 alt="back"></a>
 </center>
 <small>
-<p>Last updated 19 December 2002
+<p>Last updated 3 October 2003
 </BODY>
 </HTML>

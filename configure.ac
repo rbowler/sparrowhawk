@@ -1,33 +1,91 @@
 AC_INIT(hercules.h)
 AC_CONFIG_AUX_DIR(autoconf)
 
-AM_INIT_AUTOMAKE(hercules,2.17.1)
+AM_INIT_AUTOMAKE(hercules,3.00)
 AM_CONFIG_HEADER(config.h)
 AM_MAINTAINER_MODE
 
-AC_CANONICAL_HOST
+##------------------------------------------------------------
+## Begin JAP unwanted "-g -O2" optimization flags fix...
+##
+## AM_GNU_GETTEXT()
+##
+## AC_CANONICAL_HOST
+##
+## # Initialization
+## CFLAGS="-W -Wall $CFLAGS"
+##
+## # Programs
+## AC_PROG_CC
+## AC_PROG_LIBTOOL
+##
 
 # Initialization
 CFLAGS="-W -Wall $CFLAGS"
+# ISW20030826-2 : add -I./intl as specified by gettext/info - Maintainers - Adjusting files - src/Makefile.in - Paragraph before last
+# added line below
+CPPFLAGS="-I ./intl"
 
-# Programs
-AC_PROG_CC
+# Programs  (Note use "HC_PROG_CC" and not "AC_PROG_CC". We now
+#            have our own "hercules.m4" macro defined in the
+#            autoconf directory that fixes an undesired compiler
+#            optimization flags issue)
+
+HC_PROG_CC
+
+##
+## End JAP unwanted "-g -O2" optimization flags fix...
+##------------------------------------------------------------
+
+AC_DISABLE_STATIC
+
+modexecdir=${libdir}/${PACKAGE}
+AC_SUBST(modexecdir)
+
+# ISW20030827-1 : Enable use of embedded libltdl 1 Line added
+AC_LIBTOOL_DLOPEN
+AC_LIBTOOL_WIN32_DLL
+AC_PROG_LIBTOOL
+# ISW20030827-1 : Enable use of embedded libltdl 1 Line added
+AC_LIB_LTDL
+AC_SUBST([LIBTOOL_DEPS])
+
+AM_GNU_GETTEXT(use-libtool)
+
+
+
+##
+## ISW - Add flag to warn about duplicates (if necessary)
+##
+HC_LD_DISALLOWDUPS()
+
+HC_LD_DUPSHAREGETOPT()
+HC_HAVE_OPTERR()
 
 # OS-specific settings that we can't figure out any other way (yet)
 
+build_hercifc=false
+use_dlltool=false
+is_cygwin=false
+
 case "$host_os" in
-        darwin*)    
+        darwin*)
                if test $host_vendor = apple ; then
                    CPPFLAGS=-traditional-cpp
-                   AC_DEFINE([_BSD_SOCKLEN_T_],[int])     
-                   AC_DEFINE([_INTL_REDIRECT_MACROS])     
+                   AC_DEFINE([_BSD_SOCKLEN_T_],[int])
+                   AC_DEFINE([_INTL_REDIRECT_MACROS])
+##            Do whatever is necessary to get the following symbol defined
+##               so the included libltdl will be built and used
+##                 AC_PROVIDE_AC_LIBTOOL_DLOPEN
                fi
                ;;
         linux*)
                 build_hercifc=true
                 ;;
         *cygwin*)
+                is_cygwin=true
                 build_hercifc=false
+                use_dlltool=true
                 AC_DEFINE([WIN32])
                 AC_DEFINE([NO_SIGABEND_HANDLER])
                 ;;
@@ -35,6 +93,8 @@ case "$host_os" in
                 build_hercifc=false
                 ;;
 esac
+
+AM_CONDITIONAL(BUILD_HERCIFC, [test "x$build_hercifc" = "xtrue"])
 
 # Arch-specific settings that we can't figure out any other way (yet)
 
@@ -44,7 +104,6 @@ case "$host_cpu-$GCC" in
         ;;
 esac
 
-AM_CONDITIONAL(BUILD_HERCIFC, [test "x$build_hercifc" = "xtrue"])
 
 # System Services
 AC_SYS_LARGEFILE
@@ -60,7 +119,103 @@ AC_CHECK_LIB(z, main)
 AC_CHECK_LIB(bz2, BZ2_bzBuffToBuffDecompress,
 [have_libbz2=yes],[have_libbz2=no])
 
-AM_GNU_GETTEXT()
+# OPTION_DYNAMIC_LOAD requires availability of either dlopen
+# or libtool. If neither available OPTION_DYNAMIC_LOAD is not
+# possible and USE_DLLTOOL shouldn't be set either. (Each test
+# done twice; first time to cause default autoconf behavior,
+# the second time to set our flag)
+
+# Leave this one so ltdl doesn't get to think dlopen is not available
+AC_CHECK_LIB(dl,dlopen)
+# ISW : Following lines commented out - UNCONDITIONALLY use libtool
+# AC_CHECK_LIB(dl,dlopen, have_dlopen=true, have_dlopen=false )
+# ISW20030827-1 : 1 lines added, 2 lines commented out
+have_lt_dlopen=true
+# ISW : Following lines - UNCONDITIONALLY use libtool
+have_dlopen=false
+# AC_CHECK_LIB(ltdl,lt_dlopen)
+# AC_CHECK_LIB(ltdl,lt_dlopen, have_lt_dlopen=true, have_lt_dlopen=false )
+
+opt_dynamic_load=true
+
+AC_ARG_ENABLE(dynamic-load,
+              AC_HELP_STRING([--disable-dynamic-load],
+                             [disable/enable dynamic loader option]),
+              [case "${enableval}" in
+                yes) opt_dynamic_load=true ;;
+                no) opt_dynamic_load=false ;;
+                *) opt_dynamic_load=true ;;
+               esac],[opt_dynamic_load=true])
+
+if test $opt_dynamic_load = true; then
+  if test $have_dlopen = true || test $have_lt_dlopen = true; then
+    AC_DEFINE([OPTION_DYNAMIC_LOAD])
+    if test $have_dlopen != true; then
+      AC_DEFINE([HDL_USE_LIBTOOL])
+    fi
+  else
+    opt_dynamic_load=false
+    use_dlltool=false
+  fi
+else
+  opt_dynamic_load=false
+  use_dlltool=false
+fi
+
+AM_CONDITIONAL(OPTION_DYNAMIC_LOAD, [test "x$opt_dynamic_load" = "xtrue"])
+AM_CONDITIONAL(USE_DLLTOOL,         [test "x$use_dlltool"      = "xtrue"])
+AM_CONDITIONAL(BUILD_SHARED,        [test "x$enable_shared"    = "xyes"])
+
+if test x$enable_shared = xyes; then
+    AC_DEFINE(HDL_BUILD_SHARED)
+fi
+
+AC_ARG_ENABLE(external-gui,
+              AC_HELP_STRING([--disable-external-gui],
+                             [disable interface to external Windows GUI]),
+              [case "${enableval}" in
+                 yes) build_external_gui=true ;;
+                 no) build_external_gui=false ;;
+                 *) AC_MSG_ERROR(bad value ${enableval} for --enable-external-gui) ;;
+               esac],
+              [case "$host_os" in
+                 *cygwin*) build_external_gui=true ;;
+                 *) build_external_gui=false ;;
+               esac])
+
+if test x$build_external_gui = xtrue; then
+  if test $is_cygwin = true && test $opt_dynamic_load != true; then
+    AC_MSG_ERROR([dynamic loader option required for external gui support on win32])
+  else
+    if test $is_cygwin = true && test $use_dlltool != true; then
+      AC_MSG_ERROR([internal error: external gui specified for win32 but use_dlltool not set])
+    else
+      AC_DEFINE([EXTERNALGUI])
+    fi
+  fi
+fi
+
+max_num_cpus=8
+default_num_cpus=2
+num_cpus_error=no
+
+AC_ARG_ENABLE(multi-cpu,
+              AC_HELP_STRING([--enable-multi-cpu=NUMBER|no],
+                             [enable/disable multi-cpu support (valid range is 1-8, default is 2)]),
+              [case "${enableval}" in
+                no)              num_cpu_engines=1 ;;
+                yes)             num_cpu_engines=${default_num_cpus} ;;
+                0|9)             num_cpus_error=yes ;;
+                1|2|3|4|5|6|7|8) num_cpu_engines=${enableval} ;;
+                *)               num_cpus_error=yes ;;
+               esac],
+              [num_cpu_engines=${default_num_cpus}])
+
+if test $num_cpus_error = no; then
+  AC_DEFINE_UNQUOTED(MAX_CPU_ENGINES,${num_cpu_engines})
+else
+  AC_MSG_ERROR(bad value "${enableval}" for --enable-multi-cpu)
+fi
 
 AC_ARG_ENABLE(fthreads,
               AC_HELP_STRING([--enable-fthreads],
@@ -105,13 +260,13 @@ AC_ARG_ENABLE(fishhang,
                esac],
               [fishhang=false])
 
-AM_CONDITIONAL(BUILD_FISHHANG, [test x$fishhang = xtrue])
-
 if test x$fishhang = xtrue; then
   if test x$build_fthreads != xtrue; then
     AC_MSG_ERROR(fishhang requested but fthreads not specified)
   fi
 fi
+
+AM_CONDITIONAL(BUILD_FISHHANG, [test x$fishhang = xtrue])
 
 dnl AC_MSG_NOTICE([Checking to see if -pthread is needed to compile])
 
@@ -143,17 +298,13 @@ if test x$build_fthreads != xtrue; then
                      *cygwin*)
                        # Alternate pthreads location for older cygwin
                        AC_MSG_NOTICE([Looking for pthread.h in /usr/Pthreads])
-                       CFLAGS_SAVE="$CFLAGS"
                        CFLAGS="$CFLAGS -I/usr/Pthreads"
                        AC_CHECK_HEADER(pthread.h,
                                        [],
-                                       [CFLAGS="$CFLAGS_SAVE"
-                                        AC_DEFINE([NOTHREAD])
-                                        AC_MSG_WARN([Unable to find pthread.h, disabling threads]) ])
+                                       [AC_MSG_ERROR([Unable to find pthread.h]) ])
                        ;;
                      *)
-                       AC_MSG_WARN([Unable to find pthread.h, disabling threads])
-                       AC_DEFINE([NOTHREAD])
+                       AC_MSG_ERROR([Unable to find pthread.h])
                        ;;
                    esac])
 fi
@@ -165,9 +316,12 @@ AC_CHECK_HEADER(inttypes.h,
                                [AC_DEFINE([HAVE_U_INT])],
                                [AC_MSG_ERROR([Unable to find fixed-size data types])] )] )
 
+AC_CHECK_HEADERS(linux/if_tun.h)
+
 # Compiler characteristics
 
 AC_C_BIGENDIAN
+
 
 # GCC only seems to support regparm on i386 right now, but that could
 # change in the future.
@@ -185,23 +339,23 @@ AC_CACHE_CHECK([whether gcc supports __attribute__((regparm(n)))],
                   CFLAGS="$SAVE_CFLAGS"
                 fi])
 
-if test x$ac_cv_attr_regparm = xyes; then
+if test "$GCC" = "yes" && test x$ac_cv_attr_regparm = xyes; then
    case "$host_os" in
         *cygwin*)
-                AC_CACHE_CHECK([for cygwin regparm bug],
-                               [ac_cv_attr_regparm_cygwin_bug],
+                AC_CACHE_CHECK([for cygwin __attribute__ ((regparm(3))) bug],
+                               [ac_cv_cygwin_gcc_attr_regparm_bug],
                                [AC_TRY_RUN([
 /* from Fish */
 
 typedef struct _REGS
 {
         int a, b, c, d;
-        char e[4000];
+        char e[5000];
 }
 REGS;
 
-__attribute__ ((regparm(3))) int func1 (int a, int b, int c, REGS *regs);
-__attribute__ ((regparm(3))) int func2 (int a, int b, int c, REGS *regs);
+int func1 (int a, int b, int c, REGS *regs) __attribute__ ((regparm(3)));
+int func2 (int a, int b, int c, REGS *regs) __attribute__ ((regparm(3)));
 
 int main ( int argc, char *argv[] )
 {
@@ -209,24 +363,24 @@ int main ( int argc, char *argv[] )
         exit(func1 (1, 2, 3, regs));
 }
 
-__attribute__ ((regparm(3))) int func1 (int a, int b, int c, REGS *regs)
+int func1 (int a, int b, int c, REGS *regs)
 {
         REGS iregs;
         return func2 (a, b, c, &iregs);
 }
 
-__attribute__ ((regparm(3))) int func2 (int a, int b, int c, REGS *regs)
+int func2 (int a, int b, int c, REGS *regs)
 {
         return ((a == 1 && b == 2 && c == 3) ? 0 : 1);
 }
 ],
-        ac_cv_attr_regparm_cygwin_bug=no,
-        ac_cv_attr_regparm_cygwin_bug=yes,
-        true)])
+        ac_cv_cygwin_gcc_attr_regparm_bug=no,
+        ac_cv_cygwin_gcc_attr_regparm_bug=yes,
+        ac_cv_cygwin_gcc_attr_regparm_bug=yes)])
         ;;
    esac
 
-   if test x$ac_cv_attr_regparm_cygwin_bug = xyes; then
+   if test x$ac_cv_cygwin_gcc_attr_regparm_bug = xyes; then
       ac_cv_attr_regparm=no
    fi
 fi
@@ -234,6 +388,54 @@ fi
 if test x$ac_cv_attr_regparm != xyes; then
   AC_DEFINE(NO_ATTR_REGPARM)
 fi
+
+
+if test "$GCC" = "yes"; then
+case "$host_os" in
+      *cygwin*)
+          AC_CACHE_CHECK([for cygwin gcc __builtin_alloca bug],
+                         [ac_cv_cygwin_gcc_alloca_bug],
+                         [SAVE_CFLAGS="$CFLAGS"
+                          CFLAGS="-O2 -fomit-frame-pointer"
+                          AC_TRY_RUN([
+/*
+ * Test for presence of gcc 3.2 compiler bug.
+ *
+ *  Required compiler options:
+ *
+ *      -O2 -fomit-frame-pointer
+ *
+ *  Note: using any other -O option other than
+ *  -O2 DOES NOT cause the bug to occur!, nor
+ *  does using -fno-omit-frame-pointer! In fact,
+ *  using "-fno-omit-frame-pointer" is the sug-
+ *  gested workaround for this particular bug.
+ */
+
+int foo ()
+{
+    char a[5000+16];
+    memset(a,0xCD,5000);
+    a[5000]=0;
+    return strlen(a);
+}
+
+int main ( int argc, char* argv[] )
+{
+    return (foo() != 5000);
+}
+],
+          ac_cv_cygwin_gcc_alloca_bug=no,
+          ac_cv_cygwin_gcc_alloca_bug=yes,
+          ac_cv_cygwin_gcc_alloca_bug=yes)
+          CFLAGS="$SAVE_CFLAGS"])
+          ;;
+      *)
+          AC_CACHE_VAL(ac_cv_cygwin_gcc_alloca_bug, ac_cv_cygwin_gcc_alloca_bug=no)
+          ;;
+esac
+fi
+
 
 case "$host_cpu" in
           i486|i586|i686) ;;
@@ -279,11 +481,23 @@ if test $het_bzip2 = yes; then
   AC_DEFINE(HET_BZIP2)
 fi
 
+
 # Library functions
 
+# Check for presence of memrchr in system
+AC_CHECK_FUNCS(memrchr,[have_memrchr=yes],[have_memrchr=no])
+if test $have_memrchr = no; then
+    AC_DEFINE(BUILTIN_MEMRCHR)
+fi
+AM_CONDITIONAL(USE_BUILTIN_MEMRCHR, [test x$have_memrchr = xno])
+
+AC_CHECK_FUNCS(strerror_r,,[AC_DEFINE(BUILTIN_STRERROR_R)])
+
 AC_CHECK_FUNCS(sqrtl ldexpl fabsl fmodl frexpl)
-AC_CHECK_FUNCS(strsignal)
-AC_CHECK_FUNC(InitializeCriticalSectionAndSpinCount)
+AC_CHECK_FUNCS(strsignal getopt_long)
+AC_CHECK_FUNCS(InitializeCriticalSectionAndSpinCount)
+AC_CHECK_FUNCS(iconv)
+AC_CHECK_FUNCS(strlcpy strlcat)
 
 # If we have setresuid AND getresuid, we can do setuid stuff
 AC_CHECK_FUNCS([setresuid getresuid],
@@ -301,17 +515,6 @@ if test x$enable_setuid != xtrue; then
 fi
 
 # User-definable settings
-
-AC_ARG_ENABLE(profiling,
-              AC_HELP_STRING([--enable-profiling], [enable execution profiling]),
-              [case "${enableval}" in
-                yes)
-                  enable_profiling=true
-                  CFLAGS="-pg -DPROFILE_CPU $CFLAGS"
-                ;;
-                no) ;;
-                *) AC_MSG_ERROR([bad value ${enableval} for --enable-profiling]) ;;
-               esac])
 
 AC_ARG_ENABLE(debug,
               AC_HELP_STRING([--enable-debug], [enable debugging (TRACE/VERIFY/ASSERT macros)]),
@@ -349,6 +552,18 @@ AC_ARG_ENABLE(optimization,
                esac],
               [test x$debug != xtrue && auto_optimize=true])
 
+AC_ARG_ENABLE(configsymbols,
+              AC_HELP_STRING([--disable-configsymbols],
+                             [enable/disable symbolic substitutions in configuration file]),
+              [case "${enableval}" in
+                yes) opt_configsymbols=true ;;
+                no) opt_configsymbols=false ;;
+                *) opt_configsymbols=true;;
+               esac],[opt_configsymbols=true])
+if test x$opt_configsymbols = xtrue; then
+    AC_DEFINE([OPTION_CONFIG_SYMBOLS])
+fi
+
 if test x$auto_optimize = xtrue; then
   case "$host_cpu" in
           powerpc)
@@ -357,8 +572,10 @@ if test x$auto_optimize = xtrue; then
           i586|i686)
             if test "$GCC" = "yes"; then
                 OFLAGS="-O3 -march=$host_cpu $OFLAGS"
-                if test x$enable_profiling != xtrue && test x$debug != xtrue; then
+                if test x$debug != xtrue && test x$ac_cv_cygwin_gcc_alloca_bug != xyes; then
                   OFLAGS="-fomit-frame-pointer $OFLAGS"
+                elif test x$ac_cv_cygwin_gcc_alloca_bug = xyes; then
+                  OFLAGS="-fno-omit-frame-pointer $OFLAGS"
                 fi
             else
                 OFLAGS="$OFLAGS"
@@ -368,6 +585,8 @@ if test x$auto_optimize = xtrue; then
             OFLAGS="$OFLAGS"
             ;;
   esac
+elif test x$ac_cv_cygwin_gcc_alloca_bug = xyes; then
+  OFLAGS="-fno-omit-frame-pointer $OFLAGS"
 fi
 
 if test "x$OFLAGS" = x; then
@@ -377,22 +596,6 @@ else
   CFLAGS="$OFLAGS $CFLAGS"
 fi
 
-AC_ARG_ENABLE(external-gui,
-              AC_HELP_STRING([--disable-external-gui],
-                             [disable interface to external Windows GUI]),
-              [case "${enableval}" in
-                 yes) build_external_gui=true ;;
-                 no) build_external_gui=false ;;
-                 *) AC_MSG_ERROR(bad value ${enableval} for --enable-external-gui) ;;
-               esac],
-              [case "$host_os" in
-                 *cygwin*) build_external_gui=true ;;
-                 *) build_external_gui=false ;;
-               esac])
-
-if test x$build_external_gui = xtrue; then
-  AC_DEFINE([EXTERNALGUI])
-fi
 
 AC_ARG_ENABLE(custom,
               AC_HELP_STRING([--enable-custom=STRING],
@@ -404,18 +607,26 @@ dnl config.h, but this is the only way I've found to do so. The incantation
 dnl "${prefix}/share" is needed because ${datadir} doesn't expand to the
 dnl desired data directory. If there's a better way to get there, PLEASE
 dnl replace this. --JRM
-if test "x$prefix" = "xNONE"; then
-  PKGDATADIR="/usr/local/share/${PACKAGE}"
-else
-  PKGDATADIR="${prefix}/share/${PACKAGE}"
+
+dnl If DEST is set, we're doing an RPM build, and we want to use that
+dnl value. If it's not set, and prefix is set and not equal to NONE, then
+dnl we'll use that. If prefix is NONE, then default to /usr/local.
+
+if test "x${DESTPREFIX}" = "x"; then
+  if test "x$prefix" = "xNONE"; then
+    DESTPREFIX="/usr/local/share"
+  else
+    DESTPREFIX="${prefix}"
+  fi
 fi
+
+PKGDATADIR="${DESTPREFIX}/share/${PACKAGE}"
 AC_DEFINE_UNQUOTED([PKGDATADIR], "${PKGDATADIR}")
-if test "x$prefix" = "xNONE"; then
-  LOCALEDIR="/usr/local/share/locale"
-else
-  PKGDATADIR="${prefix}/share/locale}"
-fi
+LOCALEDIR="${DESTPREFIX}/share/locale"
 AC_DEFINE_UNQUOTED([LOCALEDIR], "${LOCALEDIR}")
+MODULESDIR="${DESTPREFIX}/lib/${PACKAGE}"
+AC_DEFINE_UNQUOTED([MODULESDIR], "${MODULESDIR}")
+AC_MSG_NOTICE([Package destination directory prefix is ${DESTPREFIX}])
 
 AH_TEMPLATE([NO_ATTR_REGPARM],
             [Define if your gcc does not support __attribute__((regparm(n)))])
@@ -455,5 +666,25 @@ AH_TEMPLATE([_BSD_SOCKLEN_T_],
             [Define missing macro on apple darwin (osx) platform])
 AH_TEMPLATE([_INTL_REDIRECT_MACROS],
             [Define to 1 if non-Intel architecture (gettext)])
+AH_TEMPLATE([BUILTIN_MEMRCHR],
+            [Define to use built-in memrchr implementation])
+AH_TEMPLATE([BUILTIN_STRERROR_R],
+            [Define to use built-in strerror_r implementation])
+AH_TEMPLATE([OPTION_CONFIG_SYMBOLS],
+            [Define to enable symbolic substitutions in configuration file])
+AH_TEMPLATE([OPTION_DYNAMIC_LOAD],
+            [Define to enable Hercules Dynamic Loader feature])
+AH_TEMPLATE([HDL_USE_LIBTOOL],
+            [Define to cause dynamic loader to use libtool instead of dlopen])
+AH_TEMPLATE([MAX_CPU_ENGINES],
+            [Defines the maximum number of emulated CPU engines])
+AH_TEMPLATE([HDL_BUILD_SHARED],
+            [Define to to indicate shared libraries are being used])
+AH_TEMPLATE([NEED_GETOPT_WRAPPER],
+            [Define to indicate a wrapper for getopt is needed])
+AH_TEMPLATE([NEED_GETOPT_OPTRESET],
+            [Define to indicate optreset exists])
+AH_TEMPLATE([MODULESDIR],
+            [Directory where HERCULES modules are installed])
 
-AC_OUTPUT([Makefile util/Makefile html/Makefile po/Makefile.in po/Makefile intl/Makefile m4/Makefile ])
+AC_OUTPUT([Makefile util/Makefile html/Makefile po/Makefile.in po/Makefile man/Makefile intl/Makefile m4/Makefile ])

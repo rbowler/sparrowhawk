@@ -33,32 +33,37 @@ extern  void  FishHangReport();
 extern  void  FishHangAtExit();
 #endif // defined(FISH_HANG)
 
+#if defined(FEATURE_ECPSVM)
+extern void ecpsvm_command(int argc,char **argv);
+#endif
+
+/* Added forward declaration to process_script_file ISW20030220-3 */
+int process_script_file(char *,int);
+
 ///////////////////////////////////////////////////////////////////////
 /* quit or exit command - terminate the emulator */
 
-int quit_cmd(char* cmdline, int argc, char *argv[])
+int quit_cmd(int argc, char *argv[],char *cmdline)
 {
     UNREFERENCED(cmdline);
 
+    /* ZZ FIXME: 'now' has a few nasty side-effects, it does not
+                 flush any buffers (DASD), and it does not terminate
+                 any threads which might leave hercules in a 'hanging'
+                 state.  The 'now' option should probably be removed
+                 in a future version */
     if (!(argc > 1 && !strcasecmp("now",argv[1])))
-        usleep(100000);
+    {
+//      usleep(10000); /* (fix by new shutdown sequence) */
+        system_shutdown();
+    }
 
 #if defined(FISH_HANG)
     FishHangAtExit();
 #endif
 
-    sysblk.msgpipew = stderr;
-
-#if defined(OPTION_FISHIO)
-    ios_msgpipew = sysblk.msgpipew;
-#endif
-
-#if defined(OPTION_W32_CTCI)
-    g_tt32_msgpipew = sysblk.msgpipew;
-#endif
-
-    if (argc < 2 || strcasecmp("now",argv[1]))
-        release_config();
+    fprintf(stderr, _("HHCIN099I Hercules terminated\n"));
+    fflush(stderr);
 
     exit(0);
 
@@ -68,7 +73,7 @@ int quit_cmd(char* cmdline, int argc, char *argv[])
 ///////////////////////////////////////////////////////////////////////
 /* start command (or just Enter) - start CPU (or printer device if argument given) */
 
-int start_cmd(char* cmdline, int argc, char *argv[])
+int start_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 
@@ -147,7 +152,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
                              "subchannel not enabled\n"), devnum);
                     break;
         }
-                    
+
     }
 
     return 0;
@@ -156,7 +161,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 ///////////////////////////////////////////////////////////////////////
 /* g command - turn off single stepping and start CPU */
 
-int g_cmd(char* cmdline, int argc, char *argv[])
+int g_cmd(int argc, char *argv[], char *cmdline)
 {
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
@@ -165,13 +170,13 @@ int g_cmd(char* cmdline, int argc, char *argv[])
     sysblk.inststep = 0;
     SET_IC_TRACE;
 
-    return  start_cmd(NULL,0,NULL);
+    return  start_cmd(0,NULL,NULL);
 }
 
 ///////////////////////////////////////////////////////////////////////
 /* stop command - stop CPU (or printer device if argument given) */
 
-int stop_cmd(char* cmdline, int argc, char *argv[])
+int stop_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 
@@ -226,12 +231,10 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
     return 0;
 }
 
-#if MAX_CPU_ENGINES > 1
-
 ///////////////////////////////////////////////////////////////////////
 /* startall command - start all CPU's */
 
-int startall_cmd(char* cmdline, int argc, char *argv[])
+int startall_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
     unsigned i;
@@ -256,7 +259,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 ///////////////////////////////////////////////////////////////////////
 /* stopall command - stop all CPU's */
 
-int stopall_cmd(char* cmdline, int argc, char *argv[])
+int stopall_cmd(int argc, char *argv[], char *cmdline)
 {
     unsigned i;
 
@@ -279,12 +282,10 @@ int stopall_cmd(char* cmdline, int argc, char *argv[])
     return 0;
 }
 
-#endif /*MAX_CPU_ENGINES > 1*/
-
 ///////////////////////////////////////////////////////////////////////
 /* quiet command - quiet PANEL */
 
-int quiet_cmd(char* cmdline, int argc, char *argv[])
+int quiet_cmd(int argc, char *argv[], char *cmdline)
 {
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
@@ -305,7 +306,7 @@ int quiet_cmd(char* cmdline, int argc, char *argv[])
 ///////////////////////////////////////////////////////////////////////
 /* clocks command - display tod clkc and cpu timer */
 
-int clocks_cmd(char* cmdline, int argc, char *argv[])
+int clocks_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 
@@ -313,7 +314,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
     UNREFERENCED(argc);
     UNREFERENCED(argv);
 
-    logmsg( "HHCPN028I tod = %16.16llX\n",
+    logmsg( _("HHCPN028I tod = %16.16llX\n"),
         (long long)(sysblk.todclk + regs->todoffset) << 8
         );
 
@@ -336,7 +337,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 ///////////////////////////////////////////////////////////////////////
 /* iodelay command - display or set I/O delay value */
 
-int iodelay_cmd(char* cmdline, int argc, char *argv[])
+int iodelay_cmd(int argc, char *argv[], char *cmdline)
 {
     UNREFERENCED(cmdline);
 
@@ -361,7 +362,7 @@ int iodelay_cmd(char* cmdline, int argc, char *argv[])
 ///////////////////////////////////////////////////////////////////////
 /* cckd command */
 
-int cckd_cmd(char* cmdline, int argc, char *argv[])
+int cckd_cmd(int argc, char *argv[], char *cmdline)
 {
     BYTE* p = strtok(cmdline+4," \t");
 
@@ -376,7 +377,7 @@ int cckd_cmd(char* cmdline, int argc, char *argv[])
 ///////////////////////////////////////////////////////////////////////
 /* tt32stats command - display CTCI-W32 statistics */
 
-int tt32stats_cmd(char* cmdline, int argc, char *argv[])
+int tt32stats_cmd(int argc, char *argv[], char *cmdline)
 {
     int      rc = 0;
     U16      devnum;
@@ -397,7 +398,8 @@ int tt32stats_cmd(char* cmdline, int argc, char *argv[])
         return -1;
     }
 
-    if (!(dev = find_device_by_devnum (devnum)))
+    if (!(dev = find_device_by_devnum (devnum)) &&
+        !(dev = find_device_by_devnum (devnum ^ 0x01)))
     {
         logmsg( _("HHCPN033E Device number %4.4X not found\n"), devnum );
         return -1;
@@ -410,12 +412,13 @@ int tt32stats_cmd(char* cmdline, int argc, char *argv[])
         return -1;
     }
 
-    if (display_tt32_stats(dev->fd) < 0)
+    if (debug_tt32_stats)
+        rc = debug_tt32_stats (dev->fd);
+    else
     {
         logmsg( _("(error)\n") );
         rc = -1;
     }
-    else rc = 0;
 
     return rc;
 }
@@ -425,7 +428,7 @@ int tt32stats_cmd(char* cmdline, int argc, char *argv[])
 ///////////////////////////////////////////////////////////////////////
 /* store command - store CPU status at absolute zero */
 
-int store_cmd(char* cmdline, int argc, char *argv[])
+int store_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 
@@ -451,7 +454,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 ///////////////////////////////////////////////////////////////////////
 /* toddrag command - display or set TOD clock drag factor */
 
-int toddrag_cmd(char* cmdline, int argc, char *argv[])
+int toddrag_cmd(int argc, char *argv[], char *cmdline)
 {
     UNREFERENCED(cmdline);
 
@@ -477,7 +480,7 @@ int toddrag_cmd(char* cmdline, int argc, char *argv[])
 ///////////////////////////////////////////////////////////////////////
 /* panrate command - display or set rate at which console refreshes */
 
-int panrate_cmd(char* cmdline, int argc, char *argv[])
+int panrate_cmd(int argc, char *argv[], char *cmdline)
 {
     UNREFERENCED(cmdline);
 
@@ -509,7 +512,7 @@ int panrate_cmd(char* cmdline, int argc, char *argv[])
 ///////////////////////////////////////////////////////////////////////
 /* shell command */
 
-int sh_cmd(char* cmdline, int argc, char *argv[])
+int sh_cmd(int argc, char *argv[], char *cmdline)
 {
     UNREFERENCED(argc);
     UNREFERENCED(argv);
@@ -519,7 +522,7 @@ int sh_cmd(char* cmdline, int argc, char *argv[])
 ///////////////////////////////////////////////////////////////////////
 /* gpr command - display general purpose registers */
 
-int gpr_cmd(char* cmdline, int argc, char *argv[])
+int gpr_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 
@@ -533,7 +536,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 ///////////////////////////////////////////////////////////////////////
 /* fpr command - display floating point registers */
 
-int fpr_cmd(char* cmdline, int argc, char *argv[])
+int fpr_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 
@@ -547,7 +550,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 ///////////////////////////////////////////////////////////////////////
 /* cr command - display control registers */
 
-int cr_cmd(char* cmdline, int argc, char *argv[])
+int cr_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 
@@ -561,7 +564,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 ///////////////////////////////////////////////////////////////////////
 /* ar command - display access registers */
 
-int ar_cmd(char* cmdline, int argc, char *argv[])
+int ar_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 
@@ -575,7 +578,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 ///////////////////////////////////////////////////////////////////////
 /* pr command - display prefix register */
 
-int pr_cmd(char* cmdline, int argc, char *argv[])
+int pr_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 
@@ -592,7 +595,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 ///////////////////////////////////////////////////////////////////////
 /* psw command - display program status word */
 
-int psw_cmd(char* cmdline, int argc, char *argv[])
+int psw_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 
@@ -606,7 +609,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 ///////////////////////////////////////////////////////////////////////
 /* restart command - generate restart interrupt */
 
-int restart_cmd(char* cmdline, int argc, char *argv[])
+int restart_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 
@@ -640,7 +643,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 ///////////////////////////////////////////////////////////////////////
 /* r command - display or alter real storage */
 
-int r_cmd(char* cmdline, int argc, char *argv[])
+int r_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 
@@ -651,9 +654,22 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 }
 
 ///////////////////////////////////////////////////////////////////////
+/* u command - disassemble */
+
+int u_cmd(int argc, char *argv[], char *cmdline)
+{
+REGS *regs = sysblk.regs + sysblk.pcpu;
+
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
+    disasm_stor (regs, cmdline+2);
+    return 0;
+}
+
+///////////////////////////////////////////////////////////////////////
 /* v command - display or alter virtual storage */
 
-int v_cmd(char* cmdline, int argc, char *argv[])
+int v_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 
@@ -666,7 +682,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 ///////////////////////////////////////////////////////////////////////
 /* b command - set breakpoint */
 
-int bset_cmd(char* cmdline, int argc, char *argv[])
+int bset_cmd(int argc, char *argv[], char *cmdline)
 {
 BYTE c;                                 /* Character work area       */
 
@@ -693,7 +709,7 @@ BYTE c;                                 /* Character work area       */
 ///////////////////////////////////////////////////////////////////////
 /* b- command - delete breakpoint */
 
-int bdelete_cmd(char* cmdline, int argc, char *argv[])
+int bdelete_cmd(int argc, char *argv[], char *cmdline)
 {
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
@@ -707,7 +723,7 @@ int bdelete_cmd(char* cmdline, int argc, char *argv[])
 ///////////////////////////////////////////////////////////////////////
 /* i command - generate I/O attention interrupt for device */
 
-int i_cmd(char* cmdline, int argc, char *argv[])
+int i_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 BYTE c;                                 /* Character work area       */
@@ -752,7 +768,7 @@ BYTE c;                                 /* Character work area       */
                          devnum);
                 break;
     }
-                    
+
     if (rc == 3 && CPUSTATE_STOPPED == regs->cpustate)
         logmsg( _("HHCPN049W Are you sure you didn't mean 'ipl %4.4X' "
                   "instead?\n"), devnum );
@@ -763,7 +779,7 @@ BYTE c;                                 /* Character work area       */
 ///////////////////////////////////////////////////////////////////////
 /* ext command - generate external interrupt */
 
-int ext_cmd(char* cmdline, int argc, char *argv[])
+int ext_cmd(int argc, char *argv[], char *cmdline)
 {
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
@@ -786,7 +802,7 @@ int ext_cmd(char* cmdline, int argc, char *argv[])
 ///////////////////////////////////////////////////////////////////////
 /* loadparm xxxxxxxx command - set IPL parameter */
 
-int loadparm_cmd(char* cmdline, int argc, char *argv[])
+int loadparm_cmd(int argc, char *argv[], char *cmdline)
 {
 BYTE c;                                 /* Character work area       */
 
@@ -809,7 +825,7 @@ BYTE c;                                 /* Character work area       */
     }
 
     /* Display IPL parameter */
-    logmsg( "HHCPN051I LOADPARM=%c%c%c%c%c%c%c%c\n",
+    logmsg( _("HHCPN051I LOADPARM=%c%c%c%c%c%c%c%c\n"),
             guest_to_host(sysblk.loadparm[0]),
             guest_to_host(sysblk.loadparm[1]),
             guest_to_host(sysblk.loadparm[2]),
@@ -826,7 +842,7 @@ BYTE c;                                 /* Character work area       */
 ///////////////////////////////////////////////////////////////////////
 /* ipl xxxx command - IPL from device xxxx */
 
-int ipl_cmd(char* cmdline, int argc, char *argv[])
+int ipl_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 BYTE c;                                 /* Character work area       */
@@ -860,7 +876,7 @@ BYTE c;                                 /* Character work area       */
 ///////////////////////////////////////////////////////////////////////
 /* cpu command - define target cpu for panel display and commands */
 
-int cpu_cmd(char* cmdline, int argc, char *argv[])
+int cpu_cmd(int argc, char *argv[], char *cmdline)
 {
 BYTE c;                                 /* Character work area       */
 
@@ -900,7 +916,7 @@ BYTE c;                                 /* Character work area       */
 ///////////////////////////////////////////////////////////////////////
 /* FishHangReport - verify/debug proper Hercules LOCK handling...    */
 
-int FishHangReport_cmd(char* cmdline, int argc, char *argv[])
+int FishHangReport_cmd(int argc, char *argv[], char *cmdline)
 {
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
@@ -917,19 +933,79 @@ int FishHangReport_cmd(char* cmdline, int argc, char *argv[])
 ///////////////////////////////////////////////////////////////////////
 /* devlist command - list devices */
 
-int devlist_cmd(char* cmdline, int argc, char *argv[])
+int SortDevBlkPtrsAscendingByDevnum(const void* pDevBlkPtr1, const void* pDevBlkPtr2)
+{
+    return
+        ((int)((*(DEVBLK**)pDevBlkPtr1)->devnum) -
+         (int)((*(DEVBLK**)pDevBlkPtr2)->devnum));
+}
+
+#define MAX_DEVLIST_DEVICES  1024
+
+int devlist_cmd(int argc, char *argv[], char *cmdline)
 {
     DEVBLK*  dev;
-    BYTE    *devclass;
-    BYTE     devnam[256];
+    BYTE*    devclass;
+    BYTE     devnam[1024];
+    DEVBLK** pDevBlkPtr;
+    DEVBLK** orig_pDevBlkPtrs;
+    size_t   nDevCount, i;
+    int      bTooMany = 0;
 
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
     UNREFERENCED(argv);
 
-    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+    // Since we wish to display the list of devices in ascending device
+    // number order, we build our own private a sorted array of DEVBLK
+    // pointers and use that instead to make the devlist command wholly
+    // immune from the actual order/sequence of the actual DEVBLK chain.
+
+    // Note too that there is no lock to lock access to ALL device blocks
+    // (even though there really SHOULD be), only one to lock an individual
+    // DEVBLK (which doesn't do us much good here).
+
+    if (!(orig_pDevBlkPtrs = malloc(sizeof(DEVBLK*) * MAX_DEVLIST_DEVICES)))
     {
-        if (!(dev->pmcw.flag5 & PMCW5_V)) continue;
+        logmsg( _("HHCPN146E Work buffer malloc failed: %s\n"),
+            strerror(errno) );
+        return -1;
+    }
+
+    nDevCount = 0;
+    pDevBlkPtr = orig_pDevBlkPtrs;
+
+    for (dev = sysblk.firstdev; dev && nDevCount <= MAX_DEVLIST_DEVICES; dev = dev->nextdev)
+    {
+        if (dev->pmcw.flag5 & PMCW5_V)  // (valid device?)
+        {
+            if (nDevCount < MAX_DEVLIST_DEVICES)
+            {
+                *pDevBlkPtr = dev;      // (save ptr to DEVBLK)
+                nDevCount++;            // (count array entries)
+                pDevBlkPtr++;           // (bump to next entry)
+            }
+            else
+            {
+                bTooMany = 1;           // (no more room)
+                break;                  // (no more room)
+            }
+        }
+    }
+
+    ASSERT(nDevCount <= MAX_DEVLIST_DEVICES);   // (sanity check)
+
+    // Sort the DEVBLK pointers into ascending sequence by device number.
+
+    qsort(orig_pDevBlkPtrs, nDevCount, sizeof(DEVBLK*), SortDevBlkPtrsAscendingByDevnum);
+
+    // Now use our sorted array of DEVBLK pointers
+    // to display our sorted list of devices...
+
+    for (i = nDevCount, pDevBlkPtr = orig_pDevBlkPtrs; i; --i, pDevBlkPtr++)
+    {
+        dev = *pDevBlkPtr;                  // --> DEVBLK
+        ASSERT(dev->pmcw.flag5 & PMCW5_V);  // (sanity check)
 
         /* Call device handler's query definition function */
         (dev->hnd->query)(dev, &devclass, sizeof(devnam), devnam);
@@ -964,13 +1040,23 @@ int devlist_cmd(char* cmdline, int argc, char *argv[])
         }
     }
 
+    free ( orig_pDevBlkPtrs );
+
+    if (bTooMany)
+    {
+        logmsg( _("HHCPN147W Warning: not all devices shown (max %d)\n"),
+            MAX_DEVLIST_DEVICES);
+
+        return -1;      // (treat as error)
+    }
+
     return 0;
 }
 
 ///////////////////////////////////////////////////////////////////////
 /* attach command - configure a device */
 
-int attach_cmd(char* cmdline, int argc, char *argv[])
+int attach_cmd(int argc, char *argv[], char *cmdline)
 {
 U16  devnum /* , dummy_devtype */;
 BYTE c;                                 /* Character work area       */
@@ -1003,7 +1089,7 @@ BYTE c;                                 /* Character work area       */
 ///////////////////////////////////////////////////////////////////////
 /* detach command - remove device */
 
-int detach_cmd(char* cmdline, int argc, char *argv[])
+int detach_cmd(int argc, char *argv[], char *cmdline)
 {
 U16  devnum;
 BYTE c;                                 /* Character work area       */
@@ -1028,7 +1114,7 @@ BYTE c;                                 /* Character work area       */
 ///////////////////////////////////////////////////////////////////////
 /* define command - rename a device */
 
-int define_cmd(char* cmdline, int argc, char *argv[])
+int define_cmd(int argc, char *argv[], char *cmdline)
 {
 U16  devnum, newdevn;
 BYTE c;                                 /* Character work area       */
@@ -1059,7 +1145,7 @@ BYTE c;                                 /* Character work area       */
 ///////////////////////////////////////////////////////////////////////
 /* pgmtrace command - trace program interrupts */
 
-int pgmtrace_cmd(char* cmdline, int argc, char *argv[])
+int pgmtrace_cmd(int argc, char *argv[], char *cmdline)
 {
 int abs_rupt_num, rupt_num;
 BYTE    c;                              /* Character work area       */
@@ -1099,46 +1185,12 @@ BYTE    c;                              /* Character work area       */
 ///////////////////////////////////////////////////////////////////////
 /* k command - print out cckd internal trace */
 
-int k_cmd(char* cmdline, int argc, char *argv[])
+int k_cmd(int argc, char *argv[], char *cmdline)
 {
     UNREFERENCED(cmdline);
-
-#ifndef CKDTRACE
     UNREFERENCED(argc);
     UNREFERENCED(argv);
-#else
-    if (argc > 1)
-    {
-        DEVBLK*  dev;
-        U16      devnum;
-        int      start, i;
 
-        if (sscanf(argv[1], "%hx%c", &devnum, &c) != 1
-            || !(dev = find_device_by_devnum (devnum)) || !dev->cckd_ext)
-        {
-            logmsg( _("HHCPN068E Device number %s is invalid\n"), argv[1]);
-            return -1;
-        }
-
-        i = start = dev->ckdtracex;
-
-        do
-        {
-            if (i >= (128 * CKDTRACE)) i = 0;
-
-            if (dev->ckdtrace[i] != '\0')
-                fprintf(dev->msgpipew, "%s", &dev->ckdtrace[i]);
-
-            i += 128;
-        }
-        while (i != start);
-
-        fflush (dev->msgpipew);
-
-        sleep (2);
-    }
-    else
-#endif
     cckd_print_itrace ();
 
     return 0;
@@ -1147,7 +1199,7 @@ int k_cmd(char* cmdline, int argc, char *argv[])
 ///////////////////////////////////////////////////////////////////////
 /* ds - display subchannel */
 
-int ds_cmd(char* cmdline, int argc, char *argv[])
+int ds_cmd(int argc, char *argv[], char *cmdline)
 {
 DEVBLK*  dev;
 U16      devnum;
@@ -1178,12 +1230,11 @@ BYTE c;                                 /* Character work area       */
     return 0;
 }
 
-#ifdef OPTION_SYNCIO
 
 ///////////////////////////////////////////////////////////////////////
 /* syncio command - list syncio devices statistics */
 
-int syncio_cmd(char* cmdline, int argc, char *argv[])
+int syncio_cmd(int argc, char *argv[], char *cmdline)
 {
     DEVBLK*   dev;
     U64       syncios = 0, asyncios = 0;
@@ -1221,16 +1272,14 @@ int syncio_cmd(char* cmdline, int argc, char *argv[])
     return 0;
 }
 
-#endif
-
 ///////////////////////////////////////////////////////////////////////
 /* devtmax command - display or set max device threads */
 
 #if !defined(OPTION_FISHIO)
-void    device_thread();
+void *device_thread(void *arg);
 #endif /* !defined(OPTION_FISHIO) */
 
-int devtmax_cmd(char* cmdline, int argc, char *argv[])
+int devtmax_cmd(int argc, char *argv[], char *cmdline)
 {
     int devtmax = -2;
 
@@ -1292,18 +1341,8 @@ int devtmax_cmd(char* cmdline, int argc, char *argv[])
     if (sysblk.ioq && (!sysblk.devtmax || sysblk.devtnbr < sysblk.devtmax))
         create_thread(&tid, &sysblk.detattr, device_thread, NULL);
 
-    /* Terminate threads while the number of threads exceeds
-       the maximum and threads are waiting */
-
-    while (1
-        && sysblk.devtmax
-        && sysblk.devtnbr > sysblk.devtmax
-        && sysblk.devtwait
-    )
-    {
-        signal_condition (&sysblk.ioqcond);
-        sched_yield();
-    }
+    /* Wakeup threads in case they need to terminate */
+    broadcast_condition (&sysblk.ioqcond);
 
     logmsg( _("HHCPN078E Max device threads %d current %d most %d "
             "waiting %d total I/Os queued %d\n"),
@@ -1319,7 +1358,7 @@ int devtmax_cmd(char* cmdline, int argc, char *argv[])
 ///////////////////////////////////////////////////////////////////////
 /* sf commands - shadow file add/remove/set/compress/display */
 
-int ShadowFile_cmd(char* cmdline, int argc, char *argv[])
+int ShadowFile_cmd(int argc, char *argv[], char *cmdline)
 {
 BYTE   *cmd = (BYTE*) cmdline;      /* Copy of panel command     */
 BYTE   *devascii;                   /* ASCII text device number  */
@@ -1460,7 +1499,7 @@ BYTE c;                                 /* Character work area       */
 ///////////////////////////////////////////////////////////////////////
 /* devinit command - assign/open a file for a configured device */
 
-int devinit_cmd(char* cmdline, int argc, char *argv[])
+int devinit_cmd(int argc, char *argv[], char *cmdline)
 {
 DEVBLK*  dev;
 U16      devnum;
@@ -1490,8 +1529,8 @@ BYTE c;                                 /* Character work area       */
     obtain_lock (&dev->lock);
 
     /* Reject if device is busy or interrupt pending */
-    if (dev->busy || dev->pending
-        || (dev->scsw.flag3 & SCSW3_SC_PEND))
+    if (dev->busy || dev->pending || dev->pcipending
+     || (dev->scsw.flag3 & SCSW3_SC_PEND))
     {
         release_lock (&dev->lock);
         logmsg( _("HHCPN096E Device %4.4X busy or interrupt pending\n"),
@@ -1527,7 +1566,7 @@ BYTE c;                                 /* Character work area       */
 ///////////////////////////////////////////////////////////////////////
 /* savecore filename command - save a core image to file */
 
-int savecore_cmd(char* cmdline, int argc, char *argv[])
+int savecore_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 
@@ -1627,7 +1666,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 ///////////////////////////////////////////////////////////////////////
 /* loadcore filename command - load a core image file */
 
-int loadcore_cmd(char* cmdline, int argc, char *argv[])
+int loadcore_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs = sysblk.regs + sysblk.pcpu;
 
@@ -1687,7 +1726,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 ///////////////////////////////////////////////////////////////////////
 /* loadtext filename command - load a text deck file */
 
-int loadtext_cmd(char* cmdline, int argc, char *argv[])
+int loadtext_cmd(int argc, char *argv[], char *cmdline)
 {
     BYTE   *fname;                      /* -> File name (ASCIIZ)     */
     BYTE   *loadaddr;                   /* loadcore memory address   */
@@ -1780,11 +1819,13 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 ///////////////////////////////////////////////////////////////////////
 /* ipending command - display pending interrupts */
 
-int ipending_cmd(char* cmdline, int argc, char *argv[])
+int ipending_cmd(int argc, char *argv[], char *cmdline)
 {
     BYTE   *cmdarg;                     /* -> Command argument       */
     DEVBLK *dev;                        /* -> Device block           */
+    IOINT  *io;                         /* -> I/O interrupt entry    */
     unsigned i;
+    char    sysid[12];
     char *states[] = {"?", "STOPPED", "STOPPING", "?", "STARTED",
                       "?", "?", "?", "STARTING"};
 REGS *regs = sysblk.regs + sysblk.pcpu;
@@ -1858,10 +1899,6 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
             sysblk.regs[i].cpuad,
             IS_IC_EMERSIG(sysblk.regs + i) ? "" : _("not ")
             );
-        logmsg( _("          CPU%4.4X: CPU %swaiting for interlock\n"),
-            sysblk.regs[i].cpuad,
-            sysblk.regs[i].mainsync ? "" : _("not ")
-            );
         logmsg( _("          CPU%4.4X: CPU interlock %sheld\n"),
             sysblk.regs[i].cpuad,
             sysblk.regs[i].mainlock ? "" : _("not ")
@@ -1888,11 +1925,9 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
     logmsg( _("          Started mask %8.8X waiting mask %8.8X\n"),
         sysblk.started_mask, sysblk.waitmask
         );
-#if MAX_CPU_ENGINES > 1
-    logmsg( _("          Broadcast mask %8.8X code %d\n"),
-        sysblk.broadcast_mask, sysblk.broadcast_code
+    logmsg( _("          Broadcast count %d code %d\n"),
+        sysblk.broadcast_count, sysblk.broadcast_code
         );
-#endif
     logmsg( _("          Machine check interrupt %spending\n"),
         IS_IC_MCKPENDING ? "" : _("not ")
         );
@@ -1922,6 +1957,18 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
     {
+        if (dev->ioactive == DEV_SYS_NONE)
+            strcpy (sysid, "(none)");
+        else if (dev->ioactive == DEV_SYS_LOCAL)
+            strcpy (sysid, "local");
+        else
+            sprintf (sysid, "id=%d", dev->ioactive);
+        if (dev->busy && !(dev->suspended && dev->ioactive == DEV_SYS_NONE))
+            logmsg( _("          DEV%4.4X: busy %s\n"), dev->devnum, sysid );
+        if (dev->reserved)
+            logmsg( _("          DEV%4.4X: reserved %s\n"), dev->devnum, sysid );
+        if (dev->suspended)
+            logmsg( _("          DEV%4.4X: suspended\n"), dev->devnum );
         if (dev->pending && (dev->pmcw.flag5 & PMCW5_V))
             logmsg( _("          DEV%4.4X: I/O pending\n"), dev->devnum );
         if (dev->pcipending && (dev->pmcw.flag5 & PMCW5_V))
@@ -1935,10 +1982,11 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
     logmsg( _("          I/O interrupt queue: ") );
 
     if (!sysblk.iointq)
-        logmsg( _("(NULL)\n") );
+        logmsg( _("(NULL)") );
+    logmsg("\n");
 
-    for (dev = sysblk.iointq; dev; dev = dev->iointq)
-        logmsg( _("          DEV%4.4X\n"), dev->devnum );
+    for (io = sysblk.iointq; io; io = io->next)
+        logmsg( _("          DEV%4.4X\n"), io->dev->devnum );
 
     return 0;
 }
@@ -1948,7 +1996,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 ///////////////////////////////////////////////////////////////////////
 /* icount command - display instruction counts */
 
-int icount_cmd(char* cmdline, int argc, char *argv[])
+int icount_cmd(int argc, char *argv[], char *cmdline)
 {
     int i1, i2;
 
@@ -2068,10 +2116,213 @@ int icount_cmd(char* cmdline, int argc, char *argv[])
 
 #endif /*defined(OPTION_INSTRUCTION_COUNTING)*/
 
+/* PATCH ISW20030220 - Script command support */
+
+static int scr_recursion=0;     /* Recursion count (set to 0) */
+static int scr_aborted=0;          /* Script abort flag */
+static int scr_uaborted=0;          /* Script user abort flag */
+TID scr_tid=0;
+
+int cscript_cmd(int argc, char *argv[], char *cmdline)
+{
+    UNREFERENCED(cmdline);
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
+    if(scr_tid!=0)
+    {
+        scr_uaborted=1;
+    }
+    return 0;
+}
+
+int script_cmd(int argc, char *argv[], char *cmdline)
+{
+
+    int i;
+
+    UNREFERENCED(cmdline);
+    if(argc<2)
+    {
+        logmsg(_("HHCPN996E The script command requires a filename\n"));
+        return 1;
+    }
+    if(scr_tid==0)
+    {
+        scr_tid=thread_id();
+        scr_aborted=0;
+        scr_uaborted=0;
+    }
+    else
+    {
+        if(scr_tid!=thread_id())
+        {
+            logmsg(_("HHCPN997E Only 1 script may be invoked from the panel at any time\n"));
+            return 1;
+        }
+    }
+
+    for(i=1;i<argc;i++)
+    {
+        process_script_file(argv[i],0);
+    }
+    return(0);
+}
+void script_test_userabort()
+{
+        if(scr_uaborted)
+        {
+           logmsg(_("HHCPN998E Script aborted : user cancel request\n"));
+           scr_aborted=1;
+        }
+}
+
+int process_script_file(char *script_name,int isrcfile)
+{
+FILE   *scrfp;                           /* RC file pointer           */
+size_t  scrbufsize = 1024;               /* Size of RC file  buffer   */
+BYTE   *scrbuf = NULL;                   /* RC file input buffer      */
+int     scrlen;                          /* length of RC file record  */
+int     scr_pause_amt = 0;               /* seconds to pause RC file  */
+BYTE   *p;                              /* (work)                    */
+
+
+    /* Check the recursion level - if it exceeds a certain amount
+       abort the script stack
+    */
+    if(scr_recursion>=10)
+    {
+        logmsg(_("HHCPN998E Script aborted : Script recursion level exceeded\n"));
+        scr_aborted=1;
+        return 0;
+    }
+    /* Open RC file. If it doesn't exist, then issue error message
+       only if this is NOT the RuntimeConfiguration (rc) file */
+
+    if (!(scrfp = fopen(script_name, "r")))
+    {
+        if (ENOENT != errno && !isrcfile)
+            logmsg(_("HHCPN007E Script file %s open failed: %s\n"),
+                script_name, strerror(errno));
+        return 0;
+        if(errno==ENOENT)
+        {
+            logmsg(_("HHCPN995E Script file %s not found\n"),
+                script_name);
+        }
+    }
+    scr_recursion++;
+
+    if(isrcfile)
+    {
+        logmsg(_("HHCPN008I Script file processing started using file %s\n"),
+           script_name);
+    }
+
+    /* Obtain storage for the SCRIPT file buffer */
+
+    if (!(scrbuf = malloc (scrbufsize)))
+    {
+        logmsg(_("HHCPN009E Script file buffer malloc failed: %s\n"),
+            strerror(errno));
+        fclose(scrfp);
+        return 0;
+    }
+
+    for (;;)
+    {
+        script_test_userabort();
+        if(scr_aborted)
+        {
+           break;
+        }
+        /* Read a complete line from the SCRIPT file */
+
+        if (!fgets(scrbuf, scrbufsize, scrfp)) break;
+
+        /* Remove trailing whitespace */
+
+        for (scrlen = strlen(scrbuf); scrlen && isspace(scrbuf[scrlen-1]); scrlen--);
+        scrbuf[scrlen] = 0;
+
+        /* '#' == silent comment, '*' == loud comment */
+
+        if ('#' == scrbuf[0] || '*' == scrbuf[0])
+        {
+            if ('*' == scrbuf[0])
+                logmsg ("> %s",scrbuf);
+            continue;
+        }
+
+        /* Remove any # comments on the line before processing */
+
+        if ((p = strchr(scrbuf,'#')) && p > scrbuf)
+            do *p = 0; while (isspace(*--p) && p >= scrbuf);
+
+        if (strncasecmp(scrbuf,"pause",5) == 0)
+        {
+            sscanf(scrbuf+5, "%d", &scr_pause_amt);
+
+            if (scr_pause_amt < 0 || scr_pause_amt > 999)
+            {
+                logmsg(_("HHCPN010W Ignoring invalid SCRIPT file pause "
+                         "statement: %s\n"),
+                         scrbuf+5);
+                continue;
+            }
+
+            logmsg (_("HHCPN011I Pausing SCRIPT file processing for %d "
+                      "seconds...\n"),
+                      scr_pause_amt);
+            sleep(scr_pause_amt);
+            logmsg (_("HHCPN012I Resuming SCRIPT file processing...\n"));
+
+            continue;
+        }
+
+        /* Process the command */
+
+        for (p = scrbuf; isspace(*p); p++);
+
+        panel_command(p);
+        script_test_userabort();
+        if(scr_aborted)
+        {
+           break;
+        }
+    }
+
+    if (feof(scrfp))
+        logmsg (_("HHCPN013I EOF reached on SCRIPT file. Processing complete.\n"));
+    else
+    {
+        if(!scr_aborted)
+        {
+           logmsg (_("HHCPN014E I/O error reading SCRIPT file: %s\n"),
+                 strerror(errno));
+        }
+        else
+        {
+           logmsg (_("HHCPN999I Script %s aborted due to previous conditions\n"),script_name);
+           scr_uaborted=1;
+        }
+    }
+
+    fclose(scrfp);
+    scr_recursion--;    /* Decrement recursion count */
+    if(scr_recursion==0)
+    {
+      scr_aborted=0;    /* reset abort flag */
+      scr_tid=0;    /* reset script thread id */
+    }
+
+    return 0;
+}
+/* END PATCH ISW20030220 */
+
 ///////////////////////////////////////////////////////////////////////
 /* archmode command - set architecture mode */
 
-int archmode_cmd(char* cmdline, int argc, char *argv[])
+int archmode_cmd(int argc, char *argv[], char *cmdline)
 {
     unsigned i;
 
@@ -2128,7 +2379,7 @@ int archmode_cmd(char* cmdline, int argc, char *argv[])
 ///////////////////////////////////////////////////////////////////////
 /* x+ and x- commands - turn switches on or off */
 
-int OnOffCommand(char* cmdline, int argc, char *argv[])
+int OnOffCommand(int argc, char *argv[], char *cmdline)
 {
     BYTE   *cmd = (BYTE*) cmdline;      /* Copy of panel command     */
     int     oneorzero;                  /* 1=x+ command, 0=x-        */
@@ -2241,9 +2492,141 @@ BYTE c;                                 /* Character work area       */
 }
 
 ///////////////////////////////////////////////////////////////////////
+/* aea - display aea tables */
+
+int aea_cmd(int argc, char *argv[], char *cmdline)
+{
+    int     i;                          /* Index                     */
+    int     matches = 0;                /* Number aeID matches       */
+    REGS   *regs;
+
+    UNREFERENCED(cmdline);
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
+
+    regs = sysblk.regs + 0;
+    logmsg ("aenoarn %d aeID 0x%3.3x\n",regs->aenoarn,regs->aeID);
+    logmsg (" ix               ve key ar a               ae\n");
+    for (i = 0; i < MAXAEA; i++)
+    {
+        logmsg("%s%2.2x %16.16llx  %2.2x %2d %d %16.16llx\n",
+         (regs->VE_G(i) & 0xfff) == regs->aeID ? "*" : " ", i, regs->VE_G(i),
+         regs->aekey[i], regs->aearn[i], regs->aeacc[i], regs->AE_G(i));
+        if ((regs->VE_G(i) & 0xfff) == regs->aeID) matches++;
+    }
+    logmsg("%d aeID matches\n", matches);
+
+    return 0;
+}
+
+#if defined(OPTION_DYNAMIC_LOAD)
+///////////////////////////////////////////////////////////////////////
+/* ldmod - load a module */
+
+int ldmod_cmd(int argc, char *argv[], char *cmdline)
+{
+    int     i;                          /* Index                     */
+
+    UNREFERENCED(cmdline);
+
+    if(argc <= 1)
+    {
+        logmsg("Usage: %s <module>\n",argv[0]);
+        return -1;
+    }
+
+    for(i = 1; i < argc; i++)
+    {
+        logmsg(_("HHCHD100I Loading %s ...\n"),argv[i]);
+        if(!hdl_load(argv[i], 0))
+            logmsg(_("HHCHD101I Module %s loaded\n"),argv[i]);
+    }
+
+    return 0;
+}
+
+///////////////////////////////////////////////////////////////////////
+/* rmmod - delete a module */
+
+int rmmod_cmd(int argc, char *argv[], char *cmdline)
+{
+    int     i;                          /* Index                     */
+
+    UNREFERENCED(cmdline);
+
+    if(argc <= 1)
+    {
+        logmsg("Usage: %s <module>\n",argv[0]);
+        return -1;
+    }
+
+    for(i = 1; i < argc; i++)
+    {
+        logmsg(_("HHCHD102I Unloading %s ...\n"),argv[i]);
+        if(!hdl_dele(argv[i]))
+            logmsg(_("HHCHD103I Module %s unloaded\n"),argv[i]);
+    }
+
+    return 0;
+}
+
+///////////////////////////////////////////////////////////////////////
+/* lsmod - list dynamic modules */
+
+int lsmod_cmd(int argc, char *argv[], char *cmdline)
+{
+    UNREFERENCED(cmdline);
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
+
+    hdl_list(HDL_LIST_DEFAULT);
+
+    return 0;
+}
+
+///////////////////////////////////////////////////////////////////////
+/* lsdep - list module dependencies */
+
+int lsdep_cmd(int argc, char *argv[], char *cmdline)
+{
+    UNREFERENCED(cmdline);
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
+
+    hdl_dlst();
+
+    return 0;
+}
+#endif /*defined(OPTION_DYNAMIC_LOAD)*/
+
+///////////////////////////////////////////////////////////////////////
+/* evm - ECPS:VM command */
+
+#ifdef FEATURE_ECPSVM
+int evm_cmd_1(int argc, char *argv[], char *cmdline)
+{
+    UNREFERENCED(cmdline);
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
+
+    logmsg(_("HHCPN150W evm command is deprecated. Use \"ecpsvm\" instead\n"));
+    ecpsvm_command(argc,argv);
+    return 0;
+}
+int evm_cmd(int argc, char *argv[], char *cmdline)
+{
+    UNREFERENCED(cmdline);
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
+
+    ecpsvm_command(argc,argv);
+    return 0;
+}
+#endif
+///////////////////////////////////////////////////////////////////////
 // Layout of command routing table...
 
-typedef int CMDFUNC(char* cmdline, int argc, char *argv[]);
+typedef int CMDFUNC(int argc, char *argv[], char *cmdline);
 
 typedef struct _CMDTAB
 {
@@ -2260,8 +2643,8 @@ CMDTAB;
 ///////////////////////////////////////////////////////////////////////
 // Define all panel command here...
 
-int  ListAllCommands (char* cmdline, int argc, char *argv[]);  /*(forward reference)*/
-int  HelpCommand     (char* cmdline, int argc, char *argv[]);  /*(forward reference)*/
+int  ListAllCommands (int argc, char *argv[], char *cmdline);  /*(forward reference)*/
+int  HelpCommand     (int argc, char *argv[], char *cmdline);  /*(forward reference)*/
 
 CMDTAB Commands[] =
 {
@@ -2278,10 +2661,8 @@ COMMAND ( "cpu",       cpu_cmd,       "define target cpu for panel display and c
 
 COMMAND ( "start",     start_cmd,     "start CPU (or printer device if argument given)" )
 COMMAND ( "stop",      stop_cmd,      "stop CPU (or printer device if argument given)\n" )
-#if MAX_CPU_ENGINES > 1
 COMMAND ( "startall",  startall_cmd,  "start all CPU's" )
 COMMAND ( "stopall",   stopall_cmd,   "stop all CPU's\n" )
-#endif
 
 #ifdef _FEATURE_SYSTEM_CONSOLE
 COMMAND ( ".reply",    g_cmd,         "scp command" )
@@ -2308,6 +2689,7 @@ COMMAND ( "ipending",  ipending_cmd,  "display pending interrupts" )
 COMMAND ( "ds",        ds_cmd,        "display subchannel" )
 COMMAND ( "r",         r_cmd,         "display or alter real storage" )
 COMMAND ( "v",         v_cmd,         "display or alter virtual storage" )
+COMMAND ( "u",         u_cmd,         "disassemble storage" )
 COMMAND ( "devtmax",   devtmax_cmd,   "display or set max device threads" )
 COMMAND ( "k",         k_cmd,         "display cckd internal trace\n" )
 
@@ -2318,7 +2700,9 @@ COMMAND ( "devinit",   devinit_cmd,   "reinitialize device" )
 COMMAND ( "devlist",   devlist_cmd,   "list all devices\n" )
 
 COMMAND ( "sh",        sh_cmd,        "shell command" )
+COMMAND ( "cache",     cache_cmd,     "cache command" )
 COMMAND ( "cckd",      cckd_cmd,      "cckd command" )
+COMMAND ( "shrd",      shared_cmd,    "shrd command" )
 COMMAND ( "quiet",     quiet_cmd,     "toggle automatic refresh of panel display data\n" )
 
 COMMAND ( "b",         bset_cmd,      "set breakpoint" )
@@ -2329,6 +2713,13 @@ COMMAND ( "pgmtrace",  pgmtrace_cmd,  "trace program interrupts" )
 COMMAND ( "savecore",  savecore_cmd,  "save a core image to file" )
 COMMAND ( "loadcore",  loadcore_cmd,  "load a core image file" )
 COMMAND ( "loadtext",  loadtext_cmd,  "load a text deck file\n" )
+
+#if defined(OPTION_DYNAMIC_LOAD)
+COMMAND ( "ldmod",     ldmod_cmd,     "load a module" )
+COMMAND ( "rmmod",     rmmod_cmd,     "delete a module" )
+COMMAND ( "lsmod",     lsmod_cmd,     "list dynamic modules\n" )
+COMMAND ( "lsdep",     lsdep_cmd,     "list module dependencies\n" )
+#endif /*defined(OPTION_DYNAMIC_LOAD)*/
 
 #ifdef OPTION_IODELAY_KLUDGE
 COMMAND ( "iodelay",   iodelay_cmd,   "display or set I/O delay value" )
@@ -2342,15 +2733,21 @@ COMMAND ( "toddrag",   toddrag_cmd,   "display or set TOD clock drag factor" )
 #ifdef PANEL_REFRESH_RATE
 COMMAND ( "panrate",   panrate_cmd,   "display or set rate at which console refreshes" )
 #endif
-#ifdef OPTION_SYNCIO
 COMMAND ( "syncio",    syncio_cmd,    "display syncio devices statistics" )
-#endif
 #if defined(OPTION_INSTRUCTION_COUNTING)
 COMMAND ( "icount",    icount_cmd,    "display instruction counts" )
 #endif
 #if defined(FISH_HANG)
 COMMAND ( "FishHangReport", FishHangReport_cmd, "(DEBUG) display thread/lock/event objects" )
 #endif
+COMMAND ( "script",    script_cmd,    "Run a sequence of panel commands contained in a file" )
+COMMAND ( "cscript",   cscript_cmd,   "Cancels a running script thread" )
+#if defined(FEATURE_ECPSVM)
+COMMAND ( "evm",   evm_cmd_1,   "ECPS:VM Commands (Deprecated)" )
+COMMAND ( "ecpsvm",   evm_cmd,   "ECPS:VM Commands" )
+#endif
+
+COMMAND ( "aea",       aea_cmd,       "Display AEA tables" )
 
 COMMAND ( NULL, NULL, NULL )         /* (end of table) */
 };
@@ -2358,10 +2755,8 @@ COMMAND ( NULL, NULL, NULL )         /* (end of table) */
 ///////////////////////////////////////////////////////////////////////
 // Main panel command processing function...
 
-#define MAX_CMD_ARGS  12
-
 int    cmd_argc;
-BYTE*  cmd_argv[MAX_CMD_ARGS];
+BYTE*  cmd_argv[MAX_ARGS];
 
 int ProcessPanelCommand (const char* pszCmdLine)
 {
@@ -2373,7 +2768,7 @@ int ProcessPanelCommand (const char* pszCmdLine)
     {
         /* (enter) - start CPU (ignore if not instruction stepping) */
         if (sysblk.inststep)
-            rc = start_cmd(NULL,0,NULL);
+            rc = start_cmd(0,NULL,NULL);
         return rc;
     }
 
@@ -2383,7 +2778,13 @@ int ProcessPanelCommand (const char* pszCmdLine)
 
     /* Parse the command line into its individual arguments...
        Note: original command line now sprinkled with nulls */
-    parse_args((BYTE*)pszCmdLine, MAX_CMD_ARGS, cmd_argv, &cmd_argc);
+    parse_args((BYTE*)pszCmdLine, MAX_ARGS, cmd_argv, &cmd_argc);
+
+#if defined(OPTION_DYNAMIC_LOAD)
+    if( system_command )
+        if( (rc = system_command(cmd_argc, (char**)cmd_argv,pszSaveCmdLine) ) )
+            return rc;
+#endif
 
     /* Route standard formatted commands from our routing table... */
     if (cmd_argc)
@@ -2391,7 +2792,7 @@ int ProcessPanelCommand (const char* pszCmdLine)
         {
             if (!strcasecmp(cmd_argv[0],pCmdTab->pszCommand))
             {
-                rc = pCmdTab->pfnCommand(pszSaveCmdLine,cmd_argc,(char**)cmd_argv);
+                rc = pCmdTab->pfnCommand(cmd_argc,(char**)cmd_argv,pszSaveCmdLine);
                 free(pszSaveCmdLine);
                 return rc;
             }
@@ -2408,7 +2809,7 @@ int ProcessPanelCommand (const char* pszCmdLine)
         || !strncasecmp(pszSaveCmdLine,"sfd",3)
     )
     {
-        rc = ShadowFile_cmd(pszSaveCmdLine,cmd_argc,(char**)cmd_argv);
+        rc = ShadowFile_cmd(cmd_argc,(char**)cmd_argv,pszSaveCmdLine);
         free(pszSaveCmdLine);
         return rc;
     }
@@ -2416,7 +2817,7 @@ int ProcessPanelCommand (const char* pszCmdLine)
     /* x+ and x- commands - turn switches on or off */
     if ('+' == pszSaveCmdLine[1] || '-' == pszSaveCmdLine[1])
     {
-        rc = OnOffCommand(pszSaveCmdLine,cmd_argc,(char**)cmd_argv);
+        rc = OnOffCommand(cmd_argc,(char**)cmd_argv,pszSaveCmdLine);
         free(pszSaveCmdLine);
         return rc;
     }
@@ -2434,7 +2835,7 @@ int ProcessPanelCommand (const char* pszCmdLine)
 ///////////////////////////////////////////////////////////////////////
 /* ? command - list all commands */
 
-int ListAllCommands(char* cmdline, int argc, char *argv[])
+int ListAllCommands(int argc, char *argv[], char *cmdline)
 {
     CMDTAB* pCmdTab;
 
@@ -2442,35 +2843,35 @@ int ListAllCommands(char* cmdline, int argc, char *argv[])
     UNREFERENCED(argc);
     UNREFERENCED(argv);
 
-    logmsg( _("HHCPN140I Valid panel commands are...\n \n") );
-    logmsg( "  %-9.9s    %s \n \n", "Command", "Description..." );
-    logmsg( "  %-9.9s    %s \n \n", "-------", "-----------------------------------------------" );
+    logmsg( _("HHCPN140I Valid panel commands are...\n\n") );
+    logmsg( "  %-9.9s    %s \n", "Command", "Description..." );
+    logmsg( "  %-9.9s    %s \n", "-------", "-----------------------------------------------" );
 
     /* List standard formatted commands from our routing table... */
 
     for (pCmdTab = Commands; pCmdTab->pszCommand; pCmdTab++)
-        logmsg( "  %-9.9s    %s \n \n", pCmdTab->pszCommand, _(pCmdTab->pszCmdDesc) );
+        logmsg( _("  %-9.9s    %s \n"), pCmdTab->pszCommand, pCmdTab->pszCmdDesc );
 
     // List non-standard formatted commands...
 
     /* sf commands - shadow file add/remove/set/compress/display */
 
-    logmsg( "  %-9.9s    %s \n \n", "sf+", _("add shadow file") );
-    logmsg( "  %-9.9s    %s \n \n", "sf-", _("delete shadow file") );
-    logmsg( "  %-9.9s    %s \n \n", "sf=", _("rename shadow file") );
-    logmsg( "  %-9.9s    %s \n \n", "sfc", _("compress shadow files") );
-    logmsg( "  %-9.9s    %s \n \n", "sfd", _("display shadow file stats") );
+    logmsg( "  %-9.9s    %s \n", "sf+", _("add shadow file") );
+    logmsg( "  %-9.9s    %s \n", "sf-", _("delete shadow file") );
+    logmsg( "  %-9.9s    %s \n", "sf=", _("rename shadow file") );
+    logmsg( "  %-9.9s    %s \n", "sfc", _("compress shadow files") );
+    logmsg( "  %-9.9s    %s \n", "sfd", _("display shadow file stats") );
 
     /* x+ and x- commands - turn switches on or off */
 
-    logmsg( "  %-9.9s    %s \n \n", "t{+/-}",    _("turn instruction tracing on/off") );
-    logmsg( "  %-9.9s    %s \n \n", "s{+/-}",    _("turn instruction stepping on/off") );
-    logmsg( "  %-9.9s    %s \n \n", "t{+/-}dev", _("turn CCW tracing on/off") );
-    logmsg( "  %-9.9s    %s \n \n", "s{+/-}dev", _("turn CCW stepping on/off") );
+    logmsg( "  %-9.9s    %s \n", "t{+/-}",    _("turn instruction tracing on/off") );
+    logmsg( "  %-9.9s    %s \n", "s{+/-}",    _("turn instruction stepping on/off") );
+    logmsg( "  %-9.9s    %s \n", "t{+/-}dev", _("turn CCW tracing on/off") );
+    logmsg( "  %-9.9s    %s \n", "s{+/-}dev", _("turn CCW stepping on/off") );
 #ifdef OPTION_CKD_KEY_TRACING
-    logmsg( "  %-9.9s    %s \n \n", "t{+/-}CKD", _("turn CKD_KEY tracing on/off") );
+    logmsg( "  %-9.9s    %s \n", "t{+/-}CKD", _("turn CKD_KEY tracing on/off") );
 #endif
-    logmsg( "  %-9.9s    %s \n \n", "f{+/-}adr", _("mark frames unusable/usable") );
+    logmsg( "  %-9.9s    %s \n", "f{+/-}adr", _("mark frames unusable/usable") );
 
     return 0;
 }
@@ -2592,6 +2993,24 @@ CMDHELP ( "loadtext",  "Format: \"loadtext filename [address]\". This command is
                        "to the 'loadcore' command except that it loads a text deck file with \"TXT\"\n"
                        "and \"END\" 80 byte records (i.e. an object deck).\n"
                        )
+CMDHELP ( "script",    "Format: \"script filename [...filename...]\". Sequentially executes the commands contained\n"
+                       "within the file -filename-. The script file may also contain \"script\" commands,\n"
+                       "but the system ensures that no more than 10 levels of script are invoked at any\n"
+                       "one time (to avoid a recursion loop)\n"
+                       )
+
+CMDHELP ( "cscript",   "Format: \"cscript\". This command will cancel the currently running script.\n"
+                       "if no script is running, no action is taken\n"
+                       )
+
+#if defined(FEATURE_ECPSVM)
+CMDHELP ( "ecpsvm",   "Format: \"ecpsvm\". This command invokes ECPS:VM Subcommands.\n"
+                       "Type \"ecpsvm help\" to see a list of available commands\n"
+                       )
+CMDHELP ( "evm",      "Format: \"evm\". This command is deprecated.\n"
+                       "use \"ecpsvm\" instead\n"
+                       )
+#endif
 
 #if defined(FISH_HANG)
 CMDHELP ( "FishHangReport", "When built with --enable-fthreads --enable-fishhang, a detailed record of\n"
@@ -2611,7 +3030,7 @@ CMDHELP ( NULL, NULL )         /* (end of table) */
 ///////////////////////////////////////////////////////////////////////
 /* help command - display additional help for a given command */
 
-int HelpCommand(char* cmdline, int argc, char *argv[])
+int HelpCommand(int argc, char *argv[], char *cmdline)
 {
     HELPTAB* pHelpTab;
 
@@ -2627,7 +3046,7 @@ int HelpCommand(char* cmdline, int argc, char *argv[])
     {
         if (!strcasecmp(pHelpTab->pszCommand,argv[1]))
         {
-            logmsg( _(pHelpTab->pszCmdHelp) );
+            logmsg( _("%s"),pHelpTab->pszCmdHelp );
             return 0;
         }
     }
@@ -2638,7 +3057,11 @@ int HelpCommand(char* cmdline, int argc, char *argv[])
 
 ///////////////////////////////////////////////////////////////////////
 
+#if defined(OPTION_DYNAMIC_LOAD)
+void *panel_command_r (void *cmdline)
+#else
 void *panel_command (void *cmdline)
+#endif
 {
 #define MAX_CMD_LEN (32768)
     BYTE  cmd[MAX_CMD_LEN];             /* Copy of panel command     */
@@ -2687,43 +3110,6 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
     ProcessPanelCommand(cmd);
     return NULL;
+}
 
-#ifdef OPTION_CKD_KEY_TRACING
- #define TSPLUS_CMD \
-  "t+=trace, s+=step, t+ckd=CKD_KEY trace, t+devn=CCW trace, s+devn=CCW step\n"
-#else
- #define TSPLUS_CMD \
-  "t+=trace, s+=step, t+devn=CCW trace, s+devn=CCW step\n"
-#endif /*OPTION_CKD_KEY_TRACING*/
-
-#if MAX_CPU_ENGINES > 1
- #define STSPALL_CMD "startall/stopall=start/stop all CPUs\n"
-#else
- #define STSPALL_CMD
-#endif /*MAX_CPU_ENGINES>1*/
-
-#ifdef _FEATURE_SYSTEM_CONSOLE
- #define SYSCONS_CMD ".xxx=scp command, !xxx=scp priority messsage\n"
-#else
- #define SYSCONS_CMD
-#endif /*_FEATURE_SYSTEM_CONSOLE*/
-
-#ifdef OPTION_TODCLOCK_DRAG_FACTOR
- #define TODDRAG_CMD "toddrag nnn = display or set TOD clock drag factor\n"
-#else
- #define TODDRAG_CMD
-#endif /*OPTION_TODCLOCK_DRAG_FACTOR*/
-
-#ifdef PANEL_REFRESH_RATE
- #define PANRATE_CMD "panrate [fast|slow|nnnn] = display or set panel refresh rate\n"
-#else
- #define PANRATE_CMD
-#endif /*PANEL_REFRESH_RATE*/
-
-#if defined(OPTION_INSTRUCTION_COUNTING)
- #define ICOUNT_CMD "icount [clear] = display instruction counters\n"
-#else
- #define ICOUNT_CMD
-#endif
-
-        }
+///////////////////////////////////////////////////////////////////////

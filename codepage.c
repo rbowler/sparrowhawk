@@ -3,8 +3,12 @@
 
 #include "hercules.h"
 
+#if defined(HAVE_ICONV)
+ #include <iconv.h>
+#endif /*defined(HAVE_ICONV)*/
 
-unsigned char
+
+static unsigned char
 ascii_to_ebcdic[] = {
     "\x00\x01\x02\x03\x37\x2D\x2E\x2F\x16\x05\x25\x0B\x0C\x0D\x0E\x0F"
     "\x10\x11\x12\x13\x3C\x3D\x32\x26\x18\x19\x1A\x27\x22\x1D\x35\x1F"
@@ -25,7 +29,7 @@ ascii_to_ebcdic[] = {
 };
 
 
-unsigned char
+static unsigned char
 ebcdic_to_ascii[] = {
     "\x00\x01\x02\x03\xA6\x09\xA7\x7F\xA9\xB0\xB1\x0B\x0C\x0D\x0E\x0F"
     "\x10\x11\x12\x13\xB2\x0A\x08\xB7\x18\x19\x1A\xB8\xBA\x1D\xBB\x1F"
@@ -46,7 +50,7 @@ ebcdic_to_ascii[] = {
 };
 
 
-unsigned char
+static unsigned char
 cp_437_to_037[] = {
     "\x00\x01\x02\x03\x37\x2D\x2E\x2F\x16\x05\x15\x0B\x0C\x0D\x0E\x0F"
     "\x10\x11\x12\x13\x3C\x3D\x32\x26\x18\x19\x3F\x27\x22\x1D\x1E\x1F"
@@ -67,7 +71,7 @@ cp_437_to_037[] = {
 };
 
 
-unsigned char
+static unsigned char
 cp_037_to_437[] = {
     "\x00\x01\x02\x03\x07\x09\x07\x7F\x07\x07\x07\x0B\x0C\x0D\x0E\x0F"
     "\x10\x11\x12\x13\x07\x0A\x08\x07\x18\x19\x07\x07\x07\x07\x07\x07"
@@ -88,7 +92,7 @@ cp_037_to_437[] = {
 };
 
 
-unsigned char
+static unsigned char
 cp_437_to_500[] = {
     "\x00\x01\x02\x03\x37\x2D\x2E\x2F\x16\x05\x15\x0B\x0C\x0D\x0E\x0F"
     "\x10\x11\x12\x13\x3C\x3D\x32\x26\x18\x19\x3F\x27\x22\x1D\x1E\x1F"
@@ -109,7 +113,7 @@ cp_437_to_500[] = {
 };
 
 
-unsigned char
+static unsigned char
 cp_500_to_437[] = {
     "\x00\x01\x02\x03\x07\x09\x07\x7F\x07\x07\x07\x0B\x0C\x0D\x0E\x0F"
     "\x10\x11\x12\x13\x07\x0A\x08\x07\x18\x19\x07\x07\x07\x07\x07\x07"
@@ -129,7 +133,8 @@ cp_500_to_437[] = {
     "\x30\x31\x32\x33\x34\x35\x36\x37\x38\x39\x07\x07\x9A\x07\x07\x07"
 };
 
-unsigned char
+
+static unsigned char
 cp_850_to_273[] = {
     "\x00\x01\x02\x03\x37\x2D\x2E\x2F\x16\x05\x25\x0B\x0C\x0D\x0E\x0F"
     "\x10\x11\x12\x13\x3C\x3D\x32\x26\x18\x19\x3F\x27\x1C\x1D\x1E\x1F"
@@ -149,7 +154,8 @@ cp_850_to_273[] = {
     "\xCA\x8F\x1B\xB9\xB6\x7C\xE1\x9D\x90\xBD\xB3\xDA\xFA\xEA\x3E\x41"
     };
 
-unsigned char
+
+static unsigned char
 cp_273_to_850[] = {
     "\x00\x01\x02\x03\xDC\x09\xC3\x7F\xCA\xB2\xD5\x0B\x0C\x0D\x0E\x0F"
     "\x10\x11\x12\x13\xDB\xDA\x08\xC1\x18\x19\xC8\xF2\x1C\x1D\x1E\x1F"
@@ -169,7 +175,15 @@ cp_273_to_850[] = {
     "\x30\x31\x32\x33\x34\x35\x36\x37\x38\x39\xFC\xEA\x5D\xEB\xE9\x9F"
     };
 
-CPCONV cpconv[] = {
+
+typedef struct _CPCONV {
+    char *name;
+    unsigned char *h2g;
+    unsigned char *g2h;
+} CPCONV;
+
+
+static CPCONV cpconv[] = {
     { "default",  ascii_to_ebcdic, ebcdic_to_ascii },
     { "437/037",  cp_437_to_037, cp_037_to_437 },
     { "437/500",  cp_437_to_500, cp_500_to_437 },
@@ -177,13 +191,139 @@ CPCONV cpconv[] = {
     { NULL,       ascii_to_ebcdic, ebcdic_to_ascii } };
 
 
+static CPCONV *codepage_conv = cpconv;
+
+#if defined(HAVE_ICONV)
+static iconv_t codepage_g2h = NULL;
+static iconv_t codepage_h2g = NULL;
+
+static int set_iconv_cp(char *name)
+{
+char *codepage;
+char *fcp, *tcp;
+char *strtok_str;
+
+char ibyte, obyte;
+char *ibytes ,*obytes;
+size_t nibytes, nobytes;
+
+    if(codepage_g2h)
+        iconv_close(codepage_g2h);
+    if(codepage_h2g)
+        iconv_close(codepage_h2g);
+
+    codepage_g2h = codepage_h2g = NULL;
+
+    codepage = strdup(name);
+
+    if(!(fcp = strtok_r(codepage,"/,:",&strtok_str)))
+    {
+        free(codepage);
+        return -1;
+    }
+    if(!(tcp = strtok_r(NULL,"/,:",&strtok_str)))
+    {
+        free(codepage);
+        return -1;
+    }
+
+    if((codepage_g2h = iconv_open (fcp,tcp)) == (iconv_t)(-1))
+    {
+        codepage_g2h = NULL;
+        free(codepage);
+        return -1;
+    }
+    if((codepage_h2g = iconv_open (tcp,fcp)) == (iconv_t)(-1))
+    {
+        iconv_close(codepage_g2h);
+        codepage_g2h = codepage_h2g = NULL;
+        free(codepage);
+        return -1;
+    }
+
+    free(codepage);
+
+    ibytes = &ibyte; obytes = &obyte;
+    nibytes = nobytes = 1;
+    if(iconv(codepage_g2h, &ibytes, &nibytes, &obytes, &nobytes) == (size_t)(-1) )
+    
+    {
+        iconv_close(codepage_g2h);
+        iconv_close(codepage_h2g);
+        codepage_g2h = codepage_h2g = NULL;
+        return -1;
+    }
+
+    ibytes = &ibyte; obytes = &obyte;
+    nibytes = nobytes = 1;
+    if(iconv(codepage_h2g, &ibytes, &nibytes, &obytes, &nobytes) == (size_t)(-1) )
+    
+    {
+        iconv_close(codepage_g2h);
+        iconv_close(codepage_h2g);
+        codepage_g2h = codepage_h2g = NULL;
+        return -1;
+    }
+   
+    return 0;
+}
+#endif /*defined(HAVE_ICONV)*/
+
+
 void set_codepage(char *name)
 {
-    for(sysblk.codepage = cpconv; 
-        sysblk.codepage->name && strcasecmp(sysblk.codepage->name,name);
-        sysblk.codepage++);
+    if(name == NULL)
+        if(!(name = getenv("HERCULES_CP")))
+             name = "default";
 
-    if(!sysblk.codepage->name)
-        logmsg(_("HHCCF051E CodePage conversion table %s is not defined\n"),
+    for(codepage_conv = cpconv; 
+        codepage_conv->name && strcasecmp(codepage_conv->name,name);
+        codepage_conv++);
+
+    if(!codepage_conv->name)
+    {
+#if defined(HAVE_ICONV)
+        if(set_iconv_cp(name))
+#endif /*defined(HAVE_ICONV)*/
+            logmsg(_("HHCCF051E CodePage conversion table %s is not defined\n"),
                  name);
+    }
+}
+
+
+unsigned char host_to_guest (unsigned char byte)
+{
+#if defined(HAVE_ICONV)
+char obyte;
+char *gbyte = &obyte;
+char *hbyte = &byte;
+size_t inbytes = 1, outbytes = 1;
+
+    if(codepage_h2g)
+    {
+        iconv(codepage_h2g, &hbyte, &inbytes, &gbyte, &outbytes);
+        return obyte;
+    }
+    else
+#endif /*defined(HAVE_ICONV)*/
+        return codepage_conv->h2g[byte];
+}
+
+
+unsigned char guest_to_host (unsigned char byte)
+{
+#if defined(HAVE_ICONV)
+char obyte;
+char *hbyte = &obyte;
+char *gbyte = &byte;
+size_t inbytes = 1, outbytes = 1;
+
+    if(codepage_g2h)
+    {
+        iconv(codepage_g2h, &gbyte, &inbytes, &hbyte, &outbytes);
+        return obyte;
+    }
+    else
+#endif /*defined(HAVE_ICONV)*/
+        return codepage_conv->g2h[byte];
 }

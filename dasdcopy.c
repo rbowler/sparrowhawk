@@ -7,21 +7,27 @@
 
 #include "hercules.h"
 #include "dasdblks.h"
+#include "devtype.h"
+
+#define FBA_BLKGRP_SIZE  (120 * 512)    /* Size of block group       */
+#define FBA_BLKS_PER_GRP        120     /* Blocks per group          */
 
 int syntax (char *);
 void status (int, int);
 int nulltrk(BYTE *, int, int);
 
 #ifdef EXTERNALGUI
+#if 0
 /* Special flag to indicate whether or not we're being
    run under the control of the external GUI facility. */
 int  extgui = 0;
+#endif
 #endif /*EXTERNALGUI*/
 
 #define CKD      0x01
 #define CCKD     0x02
 #define FBA      0x04
-#define CFBA     0x06
+#define CFBA     0x08
 #define CKDMASK  0x03
 #define FBAMASK  0x0c
 #define COMPMASK 0x0a
@@ -50,7 +56,8 @@ CKDDEV         *ckd=NULL;               /* -> CKD device table entry */
 FBADEV         *fba=NULL;               /* -> FBA device table entry */
 int             i, n, max;              /* Loop index, limits        */
 BYTE            unitstat;               /* Device unit status        */
-char            buf[512];               /* FBA i/o buffer            */
+BYTE            msgbuf[512];            /* Message buffer            */
+size_t          fba_bytes_remaining;    /* FBA bytes to be copied    */
 
 #if defined(ENABLE_NLS)
     setlocale(LC_ALL, "");
@@ -98,8 +105,8 @@ char            buf[512];               /* FBA i/o buffer            */
         if (argv[0][0] != '-') break;
         if (strcmp(argv[0], "-v") == 0)
         {
-             snprintf (buf, 512, _("Hercules %s copy program "), pgm);
-             display_version (stderr, buf);
+             snprintf (msgbuf, 512, _("Hercules %s copy program "), pgm);
+             display_version (stderr, msgbuf);
              return 0;
         }
         else if (strcmp(argv[0], "-h") == 0)
@@ -109,7 +116,7 @@ char            buf[512];               /* FBA i/o buffer            */
         }
         else if (strcmp(argv[0], "-q") == 0
               || strcmp(argv[0], "-quiet") == 0)
-            quiet = 1;  
+            quiet = 1;
         else if (strcmp(argv[0], "-r") == 0)
             r = 1;
 #ifdef CCKD_COMPRESS_ZLIB
@@ -178,6 +185,7 @@ char            buf[512];               /* FBA i/o buffer            */
     /* If we don't know what the input file is then find out */
     if (in == 0)
     {
+        BYTE buf[8];
         fd = open (ifile, O_RDONLY|O_BINARY);
         if (fd < 0)
         {
@@ -233,7 +241,7 @@ char            buf[512];               /* FBA i/o buffer            */
 
     /* Perform sanity checks on the options */
     if ((in & CKDMASK) && !(out & CKDMASK)) return syntax(pgm);
-    if ((in & FBAMASK) && !(out & FBAMASK)) return syntax(pgm);        
+    if ((in & FBAMASK) && !(out & FBAMASK)) return syntax(pgm);
     if (sfile && !(in & COMPMASK)) return syntax(pgm);
     if (comp != 255 && !(out & COMPMASK)) return syntax(pgm);
     if (lfs && (out & COMPMASK)) return syntax(pgm);
@@ -260,7 +268,7 @@ char            buf[512];               /* FBA i/o buffer            */
     if (ckddasd)
     {
         if (cyls < 0) cyls = idev->ckdcyls;
-        else if (cyls == 0) cyls = (idev->ckdused)(idev);
+        else if (cyls == 0) cyls = (idev->hnd->used)(idev);
         ckd = dasd_lookup (DASD_CKDDEV, NULL, idev->devtype, cyls);
         if (ckd == NULL)
         {
@@ -278,8 +286,9 @@ char            buf[512];               /* FBA i/o buffer            */
     }
     else
     {
+        fba_bytes_remaining = idev->fbanumblk * idev->fbablksiz;
         if (blks < 0) blks = idev->fbanumblk;
-        else if (blks == 0) blks = (idev->fbaused)(idev);
+        else if (blks == 0) blks = (idev->hnd->used)(idev);
         fba = dasd_lookup (DASD_FBADEV, NULL, idev->devtype, blks);
         if (fba == NULL)
         {
@@ -291,6 +300,8 @@ char            buf[512];               /* FBA i/o buffer            */
         n = blks;
         max = idev->fbanumblk;
         if (max < n && out == CFBA) n = max;
+        n = (n + FBA_BLKS_PER_GRP - 1) / FBA_BLKS_PER_GRP;
+        max = (max + FBA_BLKS_PER_GRP - 1) / FBA_BLKS_PER_GRP;
     }
 
     /* Create the output file */
@@ -321,6 +332,12 @@ char            buf[512];               /* FBA i/o buffer            */
     odev = &ocif->devblk;
 
     /* Copy the files */
+#ifdef EXTERNALGUI
+    if (extgui)
+        /* Notify GUI of total #of tracks or blocks being copied... */
+        fprintf (stderr, "TRKS=%d\n", n);
+    else
+#endif /*EXTERNALGUI*/
     if (!quiet) printf (_("  %3d%% %7d of %d"), 0, 0, n);
     for (i = 0; i < n; i++)
     {
@@ -328,16 +345,15 @@ char            buf[512];               /* FBA i/o buffer            */
         if (ckddasd)
         {
             if (i < max)
-                rc = (idev->ckdrdtrk)(idev, i / idev->ckdheads,
-                                      i % idev->ckdheads, &unitstat);
-            else rc = nulltrk(&idev->buf[idev->bufoff], i, idev->ckdheads);
+                rc = (idev->hnd->read)(idev, i, &unitstat);
+            else rc = nulltrk(idev->buf, i, idev->ckdheads);
         }
         else
         {
             if (i < max)
-                rc = (idev->fbardblk)(idev, buf, fba->size, &unitstat);
+                rc = (idev->hnd->read)(idev, i, &unitstat);
             else
-                memset (buf, 0, 512);
+                memset (idev->buf, 0, FBA_BLKGRP_SIZE);
                 rc = 0;
         }
         if (rc < 0)
@@ -352,14 +368,25 @@ char            buf[512];               /* FBA i/o buffer            */
         /* Write the track or block just read */
         if (ckddasd)
         {
-            rc = (odev->ckdrdtrk)(odev, i / idev->ckdheads,
-                  i % idev->ckdheads, &unitstat);
-            if (rc == 0)
-                rc = (odev->ckdupdtrk)(odev, &idev->buf[idev->bufoff],
+            rc = (odev->hnd->write)(odev, i, 0, idev->buf,
                       idev->ckdtrksz, &unitstat);
         }
         else
-            rc = (odev->fbawrblk)(odev, buf, fba->size, &unitstat);
+        {
+            if (fba_bytes_remaining >= (size_t)idev->buflen)
+            {
+                rc = (odev->hnd->write)(odev,  i, 0, idev->buf,
+                          idev->buflen, &unitstat);
+                fba_bytes_remaining -= (size_t)idev->buflen;
+            }
+            else
+            {
+                ASSERT(fba_bytes_remaining > 0 && (i+1) >= n);
+                rc = (odev->hnd->write)(odev,  i, 0, idev->buf,
+                          (int)fba_bytes_remaining, &unitstat);
+                fba_bytes_remaining = 0;
+            }
+        }
         if (rc < 0)
         {
             fprintf (stderr, _("HHCDC009E %s: %s write error %s %d "
@@ -375,7 +402,6 @@ char            buf[512];               /* FBA i/o buffer            */
 
     if (!quiet) printf (_("\nHHCDC010I Copy successful !!!       \n"));
     close_image_file(icif); close_image_file(ocif);
-
     return 0;
 }
 
@@ -578,8 +604,8 @@ static char indic[] = "|/-\\";
     {
         if (i % 100) return;
         fprintf (stderr, "TRK=%d\n", i);
-        return; 
-    } 
+        return;
+    }
 #endif /*EXTERNALGUI*/
 //  if (i % 101 != 1) return;
     printf ("\r%c %3d%% %7d", indic[i%4], (int)((i*100.0)/n), i);

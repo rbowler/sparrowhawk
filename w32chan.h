@@ -17,14 +17,13 @@ extern void  InitIOScheduler    // initialize i/o scheduler vars
 //      then on, just set the variables directly as needed.
 
 (
-    FILE*  msgpipew,        // (for issuing msgs to Herc console)
     int    arch_mode,       // (for calling execute_ccw_chain)
-    int    devt_priority,   // (for calling fthread_create)
+    int*   devt_prio,       // (ptr to device thread priority)
     int    devt_timeout,    // (maximum device thread wait time)
     long   devt_max         // (maximum #of device threads allowed)
 );
 
-extern int   ScheduleIORequest(void* pDevBlk, unsigned short wDevNum);
+extern int   ScheduleIORequest(void* pDevBlk, unsigned short wDevNum, int* pnDevPrio);
 extern void  TrimDeviceThreads();
 extern void  KillAllDeviceThreads();
 
@@ -38,7 +37,6 @@ extern void  PrintAllDEVTHREADPARMSs();
 /////////////////////////////////////////////////////////////////////////////
 // I/O Scheduler variables...
 
-extern FILE*  ios_msgpipew;     // pipe write handle (for logging messages)
 extern long   ios_devtwait;     // #of threads currently idle
 extern int    ios_devtnbr;      // #of threads currently active
 extern int    ios_devthwm;      // max #of threads that WERE active

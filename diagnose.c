@@ -16,6 +16,8 @@
 
 #include "opcode.h"
 
+#include "inline.h"
+
 #if !defined(_DIAGNOSE_H)
 
 #define _DIAGNOSE_H
@@ -27,14 +29,63 @@
 
 #endif /*!defined(_DIAGNOSE_H)*/
 
+#if defined(OPTION_DYNAMIC_LOAD) && defined(FEATURE_HERCULES_DIAGCALLS)
+
+void ARCH_DEP(diagf14_call)(int r1, int r3, REGS *regs)
+{
+BYTE name[32+1];
+char entry[64];
+unsigned int  i;
+void (*dllcall)(int, int, REGS *);
+
+static char *prefix[] = {
+#if defined(_370)
+    "s370_diagf14_",
+#endif
+#if defined(_390)
+    "s390_diagf14_",
+#endif
+#if defined(_900)
+    "z900_diagf14_"
+#endif
+    };
+
+    ARCH_DEP(vfetchc) (name,sizeof(name)-2, regs->GR(r1), USE_REAL_ADDR, regs);
+
+    for(i = 0; i < sizeof(name)-1; i++)
+    {
+        name[i] = guest_to_host(name[i]);
+        if(!isprint(name[i]) || isspace(name[i]))
+        {
+            name[i] = '\0';
+            break;
+        }
+    }
+    /* Ensure string terminator */
+    name[i] = '\0';
+    strcpy(entry,prefix[regs->arch_mode]);
+    strcat(entry,name);
+
+    if( (dllcall = HDL_FINDSYM(entry)) )
+        dllcall(r1, r3, regs);
+    else
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+}
+#endif /*defined(OPTION_DYNAMIC_LOAD)*/
+
 /*-------------------------------------------------------------------*/
 /* Diagnose instruction                                              */
 /*-------------------------------------------------------------------*/
-void ARCH_DEP(diagnose_call) (U32 code, int r1, int r2, REGS *regs)
+void ARCH_DEP(diagnose_call) (VADR effective_addr2, int b2,
+                              int r1, int r2, REGS *regs)
 {
 #ifdef FEATURE_HERCULES_DIAGCALLS
-U32             n;                      /* 32-bit operand value      */
+U32   n;                                /* 32-bit operand value      */
 #endif /*FEATURE_HERCULES_DIAGCALLS*/
+U32   code;
+
+    code = effective_addr2;
 
     switch(code) {
 
@@ -50,13 +101,14 @@ U32             n;                      /* 32-bit operand value      */
         break;
 #endif
 
+
     case 0x01F:
     /*---------------------------------------------------------------*/
     /* Diagnose 01F: Power Off                                       */
     /*---------------------------------------------------------------*/
 
         /* The poweroff diagnose is only valid on the 9221 */
-        if((sysblk.cpuid >> 16 & 0xFFFF) != 0x9221
+        if(((sysblk.cpuid >> 16 & 0xFFFF) != 0x9221 )
           /* and r1/r2 must contain C'POWEROFF' in EBCDIC */
           || regs->GR_L(r1) != 0xD7D6E6C5
           || regs->GR_L(r2) != 0xD9D6C6C6)
@@ -297,6 +349,15 @@ U32             n;                      /* 32-bit operand value      */
         ON_IC_CPU_NOT_STARTED(regs);
         break;
 
+#if defined(OPTION_DYNAMIC_LOAD)
+    case 0xF14:
+    /*---------------------------------------------------------------*/
+    /* Diagnose F14: Hercules DLL interface                          */
+    /*---------------------------------------------------------------*/
+        ARCH_DEP(diagf14_call) (r1, r2, regs);
+        break;
+#endif /*defined(OPTION_DYNAMIC_LOAD)*/
+
 #if !defined(NO_SIGABEND_HANDLER)
     /* The following diagnose calls cause a exigent (non-repressible)
        machine check, and are used for test purposes only *JJ */
@@ -349,10 +410,42 @@ U32             n;                      /* 32-bit operand value      */
     /*---------------------------------------------------------------*/
     /* Diagnose xxx: Invalid function code                           */
     /*---------------------------------------------------------------*/
+
+        if( HDC(debug_diagnose, code, r1, r2, regs) )
+            return;
+
+    /*  Power Off diagnose on 4361, 9371, 9373, 9375, 9377, 9221:    */
+    /*                                                               */
+    /*          DS 0H                                                */
+    /*          DC X'8302',S(SHUTDATA)     MUST BE R1 AND R2         */
+    /*          ...                                                  */
+    /*          DS 0H                                                */
+    /* SHUTDATA DC X'0000FFFF'             MUST BE X'0000FFFF'       */
+
+    if (0 == r1 && 2 == r2
+         && (sysblk.cpuid >> 56 & 0xFF) != 0xFF
+         && ((sysblk.cpuid >> 16 & 0xFFFF) == 0x4361
+          || (sysblk.cpuid >> 16 & 0xFFF9) == 0x9371    /* (937X) */
+          || (sysblk.cpuid >> 16 & 0xFFFF) == 0x9221)
+       )
+    {
+        if (0x0000FFFF == ARCH_DEP(vfetch4)(effective_addr2, b2, regs))
+        {
+            regs->cpustate = CPUSTATE_STOPPING;
+            ON_IC_CPU_NOT_STARTED(regs);
+
+            /* Release the configuration */
+            release_config();
+
+            /* Power Off: exit hercules */
+            exit(0);
+        }
+    }
+
 #if defined(FEATURE_S370_CHANNEL) && defined(OPTION_NOP_MODEL158_DIAGNOSE)
-      if((sysblk.cpuid >> 16 & 0xFFFF) != 0x0158)
+        if((sysblk.cpuid >> 16 & 0xFFFF) != 0x0158)
 #endif
-        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
         return;
 
     } /* end switch(code) */

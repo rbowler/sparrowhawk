@@ -715,10 +715,8 @@ int     r1;                             /* Value of R field          */
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 
-    r1 = inst[1] >> 4;
-
     /* Branch to operand address if r1 mask bit is set */
-    if ((0x08 >> regs->psw.cc) & r1)
+    if ((0x80 >> regs->psw.cc) & inst[1])
     {
         RX(inst, execflag, regs, r1, b2, effective_addr2);
         regs->psw.IA = effective_addr2;
@@ -1299,6 +1297,7 @@ int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
 RADR    abs2;                           /* absolute address          */
+U32     old;                            /* old value                 */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -1311,11 +1310,13 @@ RADR    abs2;                           /* absolute address          */
     abs2 = LOGICAL_TO_ABS (effective_addr2, b2, regs,
                            ACCTYPE_WRITE, regs->psw.pkey);
 
+    old = CSWAP32(regs->GR_L(r1));
+
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
     /* Attempt to exchange the values */
-    regs->psw.cc = cmpxchg4 (&regs->GR_L(r1), regs->GR_L(r3), regs->mainstor + abs2);
+    regs->psw.cc = cmpxchg4 (&old, CSWAP32(regs->GR_L(r3)), regs->mainstor + abs2);
 
     /* Release main-storage access lock */
     RELEASE_MAINLOCK(regs);
@@ -1325,6 +1326,7 @@ RADR    abs2;                           /* absolute address          */
 
     if (regs->psw.cc == 1)
     {
+        regs->GR_L(r1) = CSWAP32(old);
 #if defined(_FEATURE_SIE)
         if((regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CS1)))
         {
@@ -1365,8 +1367,8 @@ U64     old, new;                       /* old, new values           */
                            ACCTYPE_WRITE, regs->psw.pkey);
 
     /* Get old, new values */
-    old = ((U64)(regs->GR_L(r1)) << 32) | regs->GR_L(r1+1);
-    new = ((U64)(regs->GR_L(r3)) << 32) | regs->GR_L(r3+1);
+    old = CSWAP64(((U64)(regs->GR_L(r1)) << 32) | regs->GR_L(r1+1));
+    new = CSWAP64(((U64)(regs->GR_L(r3)) << 32) | regs->GR_L(r3+1));
 
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
@@ -1382,8 +1384,8 @@ U64     old, new;                       /* old, new values           */
 
     if (regs->psw.cc == 1)
     {
-        regs->GR_L(r1) = old >> 32;
-        regs->GR_L(r1+1) = old & 0xffffffff;
+        regs->GR_L(r1) = CSWAP64(old) >> 32;
+        regs->GR_L(r1+1) = CSWAP64(old) & 0xffffffff;
 #if defined(_FEATURE_SIE)
         if((regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CS1)))
         {
@@ -2331,84 +2333,41 @@ BYTE    utf[4];                         /* UTF-8 bytes               */
 /*-------------------------------------------------------------------*/
 DEF_INST(convert_to_binary)
 {
-int     r1;                             /* Values of R fields        */
+U64     dreg;                           /* 64-bit result accumulator */
+int     r1;                             /* Value of R1 field         */
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
-U64     dreg;                           /* 64-bit result accumulator */
-int     i;                              /* Loop counter              */
-int     h, d;                           /* Decimal digits            */
-BYTE    sbyte;                          /* Source operand byte       */
+int     ovf;                            /* 1=overflow                */
+int     dxf;                            /* 1=data exception          */
+BYTE    dec[8];                         /* Packed decimal operand    */
 
     RX(inst, execflag, regs, r1, b2, effective_addr2);
 
-    /* Initialize binary result */
-    dreg = 0;
+    /* Fetch 8-byte packed decimal operand */
+    ARCH_DEP(vfetchc) (dec, 8-1, effective_addr2, b2, regs);
 
-    /* Convert digits to binary */
-    for (i = 0; i < 8; i++)
+    /* Convert 8-byte packed decimal to 64-bit signed binary */
+    packed_to_binary (dec, 8-1, &dreg, &ovf, &dxf);
+
+    /* Data exception if invalid digits or sign */
+    if (dxf)
     {
-        /* Load next byte of operand */
-        sbyte = ARCH_DEP(vfetchb) ( effective_addr2, b2, regs );
-
-        /* Isolate high-order and low-order digits */
-        h = (sbyte & 0xF0) >> 4;
-        d = sbyte & 0x0F;
-
-        /* Check for valid high-order digit */
-        if (h > 9)
-        {
-            regs->dxc = DXC_DECIMAL;
-            ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
-        }
-
-        /* Accumulate high-order digit into result */
-        dreg *= 10;
-        dreg += h;
-
-        /* Check for valid low-order digit or sign */
-        if (i < 7)
-        {
-            /* Check for valid low-order digit */
-            if (d > 9)
-            {
-                regs->dxc = DXC_DECIMAL;
-                ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
-            }
-
-            /* Accumulate low-order digit into result */
-            dreg *= 10;
-            dreg += d;
-        }
-        else
-        {
-            /* Check for valid sign */
-            if (d < 10)
-            {
-                regs->dxc = DXC_DECIMAL;
-                ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
-            }
-        }
-
-        /* Increment operand address */
-        effective_addr2++;
-        effective_addr2 &= ADDRESS_MAXWRAP(regs);
-
-    } /* end for(i) */
-
-    /* Result is negative if sign is X'B' or X'D' */
-    if (d == 0x0B || d == 0x0D)
-    {
-        (S64)dreg = -((S64)dreg);
+        regs->dxc = DXC_DECIMAL;
+        ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
     }
+
+    /* Overflow if result exceeds 31 bits plus sign */
+    if ((S64)dreg < -2147483648LL || (S64)dreg > 2147483647LL)
+       ovf = 1;
 
     /* Store low-order 32 bits of result into R1 register */
     regs->GR_L(r1) = dreg & 0xFFFFFFFF;
 
-    /* Program check if overflow */
-    if ((S64)dreg < -2147483648LL || (S64)dreg > 2147483647LL)
+    /* Program check if overflow (R1 contains rightmost 32 bits) */
+    if (ovf)
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
 
-}
+} /* end DEF_INST(convert_to_binary) */
 
 
 /*-------------------------------------------------------------------*/
@@ -2416,48 +2375,24 @@ BYTE    sbyte;                          /* Source operand byte       */
 /*-------------------------------------------------------------------*/
 DEF_INST(convert_to_decimal)
 {
-int     r1;                             /* Values of R fields        */
+S64     bin;                            /* 64-bit signed binary value*/
+int     r1;                             /* Value of R1 field         */
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
-U64     dreg;                           /* 64-bit result accumulator */
-int     i;                              /* Loop counter              */
-int     d;                              /* Decimal digit             */
-U32     n;                              /* Absolute value to convert */
+BYTE    dec[16];                        /* Packed decimal result     */
 
     RX(inst, execflag, regs, r1, b2, effective_addr2);
 
-    /* Load absolute value and generate sign */
-    if (regs->GR_L(r1) < 0x80000000)
-    {
-        /* Value is positive */
-        n = regs->GR_L(r1);
-        dreg = 0x0C;
-    }
-    else if (regs->GR_L(r1) > 0x80000000 )
-    {
-        /* Value is negative */
-        n = -((S32)(regs->GR_L(r1)));
-        dreg = 0x0D;
-    }
-    else
-    {
-        /* Special case when R1 is maximum negative value */
-        n = 0;
-        dreg = 0x2147483648DULL;
-    }
+    /* Load value of register and sign-extend to 64 bits */
+    bin = (S64)((S32)(regs->GR_L(r1)));
 
-    /* Generate decimal digits */
-    for (i = 4; n != 0; i += 4)
-    {
-        d = n % 10;
-        n /= 10;
-        dreg |= (U64)d << i;
-    }
+    /* Convert to 16-byte packed decimal number */
+    binary_to_packed (bin, dec);
 
-    /* Store packed decimal result at operand address */
-    ARCH_DEP(vstore8) ( dreg, effective_addr2, b2, regs );
+    /* Store low 8 bytes of result at operand address */
+    ARCH_DEP(vstorec) ( dec+8, 8-1, effective_addr2, b2, regs );
 
-}
+} /* end DEF_INST(convert_to_decimal) */
 
 
 #if defined(FEATURE_ACCESS_REGISTERS)
@@ -2473,7 +2408,7 @@ int     r1, r2;                         /* Values of R fields        */
     /* Copy R2 access register to R1 access register */
     regs->AR(r1) = regs->AR(r2);
 
-    INVALIDATE_AEA(r1, regs);
+    INVALIDATE_AEA_AR(r1, regs);
 }
 #endif /*defined(FEATURE_ACCESS_REGISTERS)*/
 
@@ -2904,13 +2839,17 @@ BYTE    rwork[64];                      /* Register work area        */
         /* Load one access register from work area */
         FETCH_FW(regs->AR(n), rwork + d); d += 4;
 
-        INVALIDATE_AEA(n, regs);
         /* Instruction is complete when r3 register is done */
         if ( n == r3 ) break;
 
         /* Update register number, wrapping from 15 to 0 */
         n++; n &= 15;
     }
+
+    if (r1 == r3)
+        INVALIDATE_AEA_AR(r1, regs);
+    else
+        INVALIDATE_AEA_ARALL(regs);
 
 }
 #endif /*defined(FEATURE_ACCESS_REGISTERS)*/
@@ -2957,7 +2896,7 @@ VADR    effective_addr2;                /* Effective address         */
     else /* ACCESS_REGISTER_MODE(&(regs->psw)) */
         regs->AR(r1) = (b2 == 0) ? 0 : regs->AR(b2);
 
-    INVALIDATE_AEA(r1, regs);
+    INVALIDATE_AEA_AR(r1, regs);
 }
 #endif /*defined(FEATURE_ACCESS_REGISTERS)*/
 
@@ -3248,7 +3187,7 @@ GREG    n;                              /* Work area                 */
 BYTE    obyte;                          /* Operand byte              */
 BYTE    pad;                            /* Padding byte              */
 #ifdef OPTION_FAST_MOVELONG
-RADR	abs1, abs2;
+RADR    abs1, abs2;
 GREG    len3;
 #endif
 
@@ -3973,12 +3912,12 @@ U32     n;                              /* 32-bit operand values     */
 #if defined(_ARCHMODE2)
  #define  _GEN_ARCH _ARCHMODE2
  #include "general1.c"
-#endif 
+#endif
 
 #if defined(_ARCHMODE3)
  #undef   _GEN_ARCH
  #define  _GEN_ARCH _ARCHMODE3
  #include "general1.c"
-#endif 
+#endif
 
 #endif /*!defined(_GEN_ARCH)*/

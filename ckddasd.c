@@ -17,31 +17,7 @@
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
-
 #include "devtype.h"
-
-#ifdef CKDTRACE
-#undef DEVTRACE
-#define DEVTRACE(format, a...) \
-do { \
- if (dev->ccwtrace||dev->ccwstep) \
- { \
-  int n; \
-  if (!dev->ckdtrace) dev->ckdtrace = calloc (128, CKDTRACE); \
-  if (dev->ckdtracex >= 128 * CKDTRACE) \
-  { \
-   n = 0; \
-   dev->ckdtracex = 128; \
-  } \
-  else \
-  { \
-    n = dev->ckdtracex; \
-    dev->ckdtracex += 128; \
-  } \
-  sprintf(&dev->ckdtrace[n], "%4.4X:" format, dev->devnum, a); \
- } \
-} while (0)
-#endif
 
 /*-------------------------------------------------------------------*/
 /* Bit definitions for File Mask                                     */
@@ -197,13 +173,6 @@ do { \
 static  BYTE eighthexFF[] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
 
 /*-------------------------------------------------------------------*/
-/* Internal functions                                                */
-/*-------------------------------------------------------------------*/
-static int ckd_read_track (DEVBLK *, int, int, BYTE *);
-static int ckd_update_track (DEVBLK *, BYTE *, int, BYTE *);
-static int ckd_used (DEVBLK *);
-
-/*-------------------------------------------------------------------*/
 /* Initialize the device handler                                     */
 /*-------------------------------------------------------------------*/
 int ckddasd_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
@@ -222,21 +191,44 @@ int             trks;                   /* #of tracks in CKD file    */
 int             cyls;                   /* #of cylinders in CKD file */
 int             highcyl;                /* Highest cyl# in CKD file  */
 BYTE           *cu = NULL;              /* Specified control unit    */
-char           *kw, *op;                /* Argument keyword/option   */
+char           *kw;                     /* Argument keyword          */
 int             cckd=0;                 /* 1 if compressed CKD       */
+
+    if(!sscanf(dev->typname,"%hx",&(dev->devtype)))
+        dev->devtype = 0x3380;
 
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
     {
-        devmsg (_("HHCDA001E File name missing or invalid\n"));
+        logmsg (_("HHCDA001E File name missing or invalid\n"));
         return -1;
     }
 
     /* Save the file name in the device block */
     strcpy (dev->filename, argv[0]);
 
+    /* Device is shareable */
+    dev->shared = 1;
+
+    /* Check for possible remote device */
+    if (stat(dev->filename, &statbuf) < 0)
+    {
+        rc = shared_ckd_init ( dev, argc, argv);
+        if (rc < 0)
+        {
+            logmsg (_("HHCDA002E %4.4X:File not found or invalid\n"),
+                    dev->devnum);
+            return -1;
+        }
+        else
+            return rc;
+    }
+
     /* Default to synchronous I/O */
     dev->syncio = 1;
+
+    /* No active track or cache entry */
+    dev->bufcur = dev->cache = -1;
 
     /* Locate and save the last character of the file name */
     sfxptr = strrchr (dev->filename, '/');
@@ -287,14 +279,6 @@ int             cckd=0;                 /* 1 if compressed CKD       */
             dev->ckdfakewr = 1;
             continue;
         }
-        if (strlen (argv[i]) > 6 &&
-            memcmp ("cache=", argv[i], 6) == 0)
-        {
-            kw = strtok (argv[i], "=");
-            op = strtok (NULL, " \t");
-            if (op) dev->ckdcachenbr = atoi (op);
-            continue;
-        }
         if (strlen (argv[i]) > 3 &&
             memcmp ("sf=", argv[i], 3) == 0)
         {
@@ -323,20 +307,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
             continue;
         }
 
-        /* the following parameters are processed by cckd code */
-        if (strlen (argv[i]) > 8 &&  !memcmp ("l2cache=", argv[i], 8))
-            continue;
-        if (strlen (argv[i]) > 5 && !memcmp ("dfwq=", argv[i], 5))
-            continue;
-        if (strlen (argv[i]) > 3 && !memcmp ("wt=", argv[i], 3))
-            continue;
-        if (strlen (argv[i]) == 4 && !memcmp ("ra=", argv[i], 3)
-         && argv[i][3] >= '0' && argv[i][3] <= '0' + CCKD_MAX_RA)
-            continue;
-        if (strlen (argv[i]) == 5 && !memcmp ("dfw=", argv[i], 4))
-            continue;
-
-        devmsg (_("HHCDA002E parameter %d is invalid: %s\n"),
+        logmsg (_("HHCDA003E parameter %d is invalid: %s\n"),
                 i + 1, argv[i]);
         return -1;
     }
@@ -347,7 +318,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
 
     /* Open all of the CKD image files which comprise this volume */
     if (dev->ckdrdonly)
-        devmsg (_("HHCDA003I opening %s readonly%s\n"), dev->filename,
+        logmsg (_("HHCDA004I opening %s readonly%s\n"), dev->filename,
                 dev->ckdfakewr ? " with fake writing" : "");
     for (fileseq = 1;;)
     {
@@ -360,7 +331,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
                 dev->fd = open (dev->filename, O_RDONLY|O_BINARY);
             if (dev->fd < 0)
             {
-                devmsg (_("HHCDA004E %s open error: %s\n"),
+                logmsg (_("HHCDA005E %s open error: %s\n"),
                         dev->filename, strerror(errno));
                 return -1;
             }
@@ -375,7 +346,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
         /* If shadow file, only one base file is allowed */
         if (fileseq > 1 && dev->dasdsfn[0] != '\0')
         {
-            devmsg (_("HHCDA005E %s not in a single file for shadowing\n"),
+            logmsg (_("HHCDA006E %s not in a single file for shadowing\n"),
                     dev->filename);
             return -1;
         }
@@ -384,7 +355,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
         rc = fstat (dev->fd, &statbuf);
         if (rc < 0)
         {
-            devmsg (_("HHCDA006E %s fstat error: %s\n"),
+            logmsg (_("HHCDA007E %s fstat error: %s\n"),
                     dev->filename, strerror(errno));
             return -1;
         }
@@ -394,10 +365,10 @@ int             cckd=0;                 /* 1 if compressed CKD       */
         if (rc < (int)CKDDASD_DEVHDR_SIZE)
         {
             if (rc < 0)
-                devmsg (_("HHCDA007E %s read error: %s\n"),
+                logmsg (_("HHCDA008E %s read error: %s\n"),
                         dev->filename, strerror(errno));
             else
-                devmsg (_("HHCDA08E %s CKD header incomplete\n"),
+                logmsg (_("HHCDA09E %s CKD header incomplete\n"),
                         dev->filename);
             return -1;
         }
@@ -407,7 +378,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
         {
             if (memcmp(devhdr.devid, "CKD_C370", 8) != 0)
             {
-                devmsg (_("HHCDA009E %s CKD header invalid\n"),
+                logmsg (_("HHCDA010E %s CKD header invalid\n"),
                         dev->filename);
                 return -1;
             }
@@ -416,7 +387,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
                 cckd = 1;
                 if (fileseq != 1)
                 {
-                    devmsg (_("HHCDA010E %s Only 1 CCKD file allowed\n"),
+                    logmsg (_("HHCDA011E %s Only 1 CCKD file allowed\n"),
                             dev->filename);
                     return -1;
                 }
@@ -431,12 +402,12 @@ int             cckd=0;                 /* 1 if compressed CKD       */
             {
                 if (rc < 0)
                 {
-                    devmsg (_("HHCDA011E %s read error: %s\n"),
+                    logmsg (_("HHCDA012E %s read error: %s\n"),
                             dev->filename, strerror(errno));
                 }
                 else
                 {
-                    devmsg (_("HHCDA012E %s CCKD header incomplete\n"),
+                    logmsg (_("HHCDA013E %s CCKD header incomplete\n"),
                             dev->filename);
                 }
                 return -1;
@@ -447,13 +418,13 @@ int             cckd=0;                 /* 1 if compressed CKD       */
         if (devhdr.fileseq != fileseq
             && !(devhdr.fileseq == 0 && fileseq == 1))
         {
-            devmsg (_("HHCDA013E %s CKD file out of sequence\n"),
+            logmsg (_("HHCDA014E %s CKD file out of sequence\n"),
                     dev->filename);
             return -1;
         }
 
         /* Extract fields from device header */
-        heads = ((U32)(devhdr.heads[3]) << 24)
+        heads   = ((U32)(devhdr.heads[3]) << 24)
                 | ((U32)(devhdr.heads[2]) << 16)
                 | ((U32)(devhdr.heads[1]) << 8)
                 | (U32)(devhdr.heads[0]);
@@ -479,7 +450,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
 
         if (devhdr.fileseq > 0)
         {
-            devmsg (_("HHCDA014I %s seq=%d cyls=%d-%d\n"),
+            logmsg (_("HHCDA015I %s seq=%d cyls=%d-%d\n"),
                     dev->filename, devhdr.fileseq, dev->ckdcyls,
                     (highcyl > 0 ? highcyl : dev->ckdcyls + cyls - 1));
         }
@@ -493,7 +464,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
         }
         else if (heads != dev->ckdheads || trksize != dev->ckdtrksz)
         {
-            devmsg (_("HHCDA015E %s heads=%d trklen=%d, "
+            logmsg (_("HHCDA016E %s heads=%d trklen=%d, "
                     "expected heads=%d trklen=%d\n"),
                     dev->filename, heads, trksize,
                     dev->ckdheads, dev->ckdtrksz);
@@ -506,7 +477,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
                             != statbuf.st_size
             || (highcyl != 0 && highcyl != dev->ckdcyls + cyls - 1)))
         {
-            devmsg (_("HHCDA016E %s CKD header inconsistent with file size\n"),
+            logmsg (_("HHCDA017E %s CKD header inconsistent with file size\n"),
                     dev->filename);
             return -1;
         }
@@ -514,7 +485,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
         /* Check for correct high cylinder number */
         if (highcyl != 0 && highcyl != dev->ckdcyls + cyls - 1)
         {
-            devmsg (_("HHCDA017E %s CKD header high cylinder incorrect\n"),
+            logmsg (_("HHCDA018E %s CKD header high cylinder incorrect\n"),
                     dev->filename);
             return -1;
         }
@@ -540,7 +511,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
         /* Check that maximum files has not been exceeded */
         if (fileseq > CKD_MAXFILES)
         {
-            devmsg (_("HHCDA018E %s exceeds maximum %d CKD files\n"),
+            logmsg (_("HHCDA019E %s exceeds maximum %d CKD files\n"),
                     dev->filename, CKD_MAXFILES);
             return -1;
         }
@@ -551,7 +522,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
     *sfxptr = sfxchar;
 
     /* Log the device geometry */
-    devmsg (_("HHCDA019I %s cyls=%d heads=%d tracks=%d trklen=%d\n"),
+    logmsg (_("HHCDA020I %s cyls=%d heads=%d tracks=%d trklen=%d\n"),
             dev->filename, dev->ckdcyls,
             dev->ckdheads, dev->ckdtrks, dev->ckdtrksz);
 
@@ -562,7 +533,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
     dev->ckdtab = dasd_lookup (DASD_CKDDEV, NULL, dev->devtype, dev->ckdcyls);
     if (dev->ckdtab == NULL)
     {
-        devmsg (_("HHCDA020E %4.4X device type %4.4X not found in dasd table\n"),
+        logmsg (_("HHCDA021E %4.4X device type %4.4X not found in dasd table\n"),
                 dev->devnum, dev->devtype);
         return -1;
     }
@@ -571,7 +542,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
     dev->ckdcu = dasd_lookup (DASD_CKDCU, cu ? cu : dev->ckdtab->cu, 0, 0);
     if (dev->ckdcu == NULL)
     {
-        devmsg (_("HHCDA021E %4.4X control unit %s not found in dasd table\n"),
+        logmsg (_("HHCDA022E %4.4X control unit %s not found in dasd table\n"),
                 dev->devnum, cu ? cu : dev->ckdtab->cu);
         return -1;
     }
@@ -598,11 +569,6 @@ int             cckd=0;                 /* 1 if compressed CKD       */
        a single buffer before passing data to the device handler */
     dev->cdwmerge = 1;
 
-    /* Set the routine addresses for read_track and write_track */
-    dev->ckdrdtrk = &ckd_read_track;
-    dev->ckdupdtrk = &ckd_update_track;
-    dev->ckdused = &ckd_used;
-
     if (!cckd) return 0;
     else return cckddasd_init_handler(dev, argc, argv);
 
@@ -624,28 +590,43 @@ void ckddasd_query_device (DEVBLK *dev, BYTE **class,
 } /* end function ckddasd_query_device */
 
 /*-------------------------------------------------------------------*/
+/* Release cache entries                                             */
+/*-------------------------------------------------------------------*/
+int ckddasd_purge_cache (int *answer, int ix, int i, void *data)
+{
+U16             devnum;                 /* Cached device number      */
+int             trk;                    /* Cached track              */
+DEVBLK         *dev = data;             /* -> device block           */
+
+    UNREFERENCED(answer);
+    CKD_CACHE_GETKEY(i, devnum, trk);
+    if (dev->devnum == devnum)
+        cache_release (ix, i, CACHE_FREEBUF);
+    return 0;
+}
+
+
+static int ckddasd_read_track (DEVBLK *dev, int trk, BYTE *unitstat);
+/*-------------------------------------------------------------------*/
 /* Close the device                                                  */
 /*-------------------------------------------------------------------*/
 int ckddasd_close_device ( DEVBLK *dev )
 {
-int i;                              /* Index                     */
+int     i;                              /* Index                     */
 BYTE    unitstat;                       /* Unit Status               */
 
     /* Write the last track image if it's modified */
-    if (dev->bufupd) ckd_read_track (dev, -1, -1, &unitstat);
+    ckddasd_read_track (dev, -1, &unitstat);
 
     /* Free the cache */
-    if (dev->ckdcache)
-    {
-        for (i = 0; i < dev->ckdcachenbr; i++)
-            if (dev->ckdcache[i].buf)
-                free (dev->ckdcache[i].buf);
-        free (dev->ckdcache);
-    }
+    cache_lock(CACHE_DEVBUF);
+    cache_scan(CACHE_DEVBUF, ckddasd_purge_cache, dev);
+    cache_unlock(CACHE_DEVBUF);
 
     if (!dev->batch)
-        devmsg (_("HHCDA022I %4.4X cache hits %d, misses %d\n"),
-                dev->devnum, dev->ckdcachehits, dev->ckdcachemisses);
+        logmsg (_("HHCDA023I %4.4X cache hits %d, misses %d, waits %d\n"),
+                dev->devnum, dev->cachehits, dev->cachemisses,
+                dev->cachewaits);
 
     /* Close all of the CKD image files */
     for (i = 0; i < dev->ckdnumfd; i++)
@@ -658,34 +639,91 @@ BYTE    unitstat;                       /* Unit Status               */
     return 0;
 } /* end function ckddasd_close_device */
 
+
 /*-------------------------------------------------------------------*/
-/* Read a track image                                                */
+/* Read a track image at CCHH                                        */
 /*-------------------------------------------------------------------*/
 static
-int ckd_read_track (DEVBLK *dev, int cyl, int head, BYTE *unitstat)
+int ckd_read_cchh (DEVBLK *dev, int cyl, int head, BYTE *unitstat)
 {
 int             rc;                     /* Return code               */
-off_t           offset;                 /* File offsets              */
-int             trk;                    /* New track number          */
-int             i,o;                    /* Indexes                   */
-int             active;                 /* 1=Synchronous I/O active  */
-CKDDASD_TRKHDR *trkhdr;                 /* -> New track header       */
+int             trk;                    /* Track number              */
+
+    /* Command reject if seek position is outside volume */
+    if (cyl >= dev->ckdcyls || head >= dev->ckdheads)
+    {
+        ckd_build_sense (dev, SENSE_CR, 0, 0,
+                        FORMAT_0, MESSAGE_4);
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
 
     /* Calculate the track number */
     trk = cyl * dev->ckdheads + head;
 
-    DEVTRACE ("HHCDA023I read trk %d cur trk %d\n", trk, dev->dasdcur);
+    /* Call the read exit */
+    rc = (dev->hnd->read) (dev, trk, unitstat);
+
+    return rc;
+} /* end function ckd_read_cchh */
+
+/*-------------------------------------------------------------------*/
+/* Return track image length                                         */
+/*-------------------------------------------------------------------*/
+static int ckd_trklen (DEVBLK *dev, BYTE *buf)
+{
+int             sz;                     /* Size so far               */
+
+    for (sz = CKDDASD_TRKHDR_SIZE;
+         memcmp (buf + sz, &eighthexFF, 8) != 0; )
+    {
+        /* add length of count, key, and data fields */
+        sz += CKDDASD_RECHDR_SIZE +
+                buf[sz+5] +
+                (buf[sz+6] << 8) + buf[sz+7];
+        if (sz > dev->ckdtrksz - 8) break;
+    }
+
+    /* add length for end-of-track indicator */
+    sz += CKDDASD_RECHDR_SIZE;
+
+    if (sz > dev->ckdtrksz)
+        sz = dev->ckdtrksz;
+
+    return sz;
+}
+
+/*-------------------------------------------------------------------*/
+/* Read a track image                                                */
+/*-------------------------------------------------------------------*/
+static
+int ckddasd_read_track (DEVBLK *dev, int trk, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+int             cyl;                    /* Cylinder                  */
+int             head;                   /* Head                      */
+off_t           offset;                 /* File offsets              */
+int             i,o,f;                  /* Indexes                   */
+int             active;                 /* 1=Synchronous I/O active  */
+CKDDASD_TRKHDR *trkhdr;                 /* -> New track header       */
+
+    DEVTRACE (_("HHCDA024I read trk %d cur trk %d\n"), trk, dev->bufcur);
+
+    /* Calculate cylinder and head */
+    cyl = trk / dev->ckdheads;
+    head = trk % dev->ckdheads;
 
     /* Reset buffer offsets */
     dev->bufoff = 0;
     dev->bufoffhi = dev->ckdtrksz;
 
     /* Return if reading the same track image */
-    if (trk >= 0 && trk == dev->dasdcur && dev->buf) return 0;
+    if (trk >= 0 && trk == dev->bufcur)
+        return 0;
 
     /* Turn off the synchronous I/O bit if trk overflow or trk 0 */
     active = dev->syncio_active;
-    if (dev->ckdtrkof || (cyl <= 0 && head <= 0))
+    if (dev->ckdtrkof || trk <= 0)
         dev->syncio_active = 0;
 
     /* Write the previous track image if modified */
@@ -698,8 +736,8 @@ CKDDASD_TRKHDR *trkhdr;                 /* -> New track header       */
             return -1;
         }
 
-        DEVTRACE ("HHCDA024I read track: updating track %d\n",
-                  dev->dasdcur);
+        DEVTRACE (_("HHCDA025I read track: updating track %d\n"),
+                  dev->bufcur);
 
         dev->bufupd = 0;
 
@@ -709,11 +747,16 @@ CKDDASD_TRKHDR *trkhdr;                 /* -> New track header       */
         if (offset < 0)
         {
             /* Handle seek error condition */
-            devmsg (_("HHCDA025E error writing trk %d: lseek error: %s\n"),
-                    dev->dasdcur, strerror(errno));
+            logmsg (_("HHCDA026E error writing trk %d: lseek error: %s\n"),
+                    dev->bufcur, strerror(errno));
             ckd_build_sense (dev, SENSE_EC, 0, 0,
                             FORMAT_1, MESSAGE_0);
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            cache_lock(CACHE_DEVBUF);
+            cache_setflag(CACHE_DEVBUF, dev->cache, ~CKD_CACHE_ACTIVE, 0);
+            cache_unlock(CACHE_DEVBUF);
+            dev->bufupdlo = dev->bufupdhi = 0;
+            dev->bufcur = dev->cache = -1;
             return -1;
         }
 
@@ -723,113 +766,118 @@ CKDDASD_TRKHDR *trkhdr;                 /* -> New track header       */
         if (rc < dev->bufupdhi - dev->bufupdlo)
         {
             /* Handle seek error condition */
-            devmsg (_("HHCDA026E error writing trk %d: write error: %s\n"),
-                    dev->dasdcur, strerror(errno));
+            logmsg (_("HHCDA027E error writing trk %d: write error: %s\n"),
+                    dev->bufcur, strerror(errno));
             ckd_build_sense (dev, SENSE_EC, 0, 0,
                             FORMAT_1, MESSAGE_0);
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            cache_lock(CACHE_DEVBUF);
+            cache_setflag(CACHE_DEVBUF, dev->cache, ~CKD_CACHE_ACTIVE, 0);
+            cache_unlock(CACHE_DEVBUF);
+            dev->bufupdlo = dev->bufupdhi = 0;
+            dev->bufcur = dev->cache = -1;
             return -1;
         }
 
         dev->bufupdlo = dev->bufupdhi = 0;
     }
 
+    cache_lock (CACHE_DEVBUF);
+
+    /* Make the previous cache entry inactive */
+    if (dev->cache >= 0)
+        cache_setflag(CACHE_DEVBUF, dev->cache, ~CKD_CACHE_ACTIVE, 0);
+    dev->bufcur = dev->cache = -1;
+
     /* Return on special case when called by the close handler */
-    if (cyl < 0 && head < 0) return 0;
-
-    /* Command reject if seek position is outside volume */
-    if (cyl >= dev->ckdcyls || head >= dev->ckdheads)
+    if (trk < 0)
     {
-        ckd_build_sense (dev, SENSE_CR, 0, 0,
-                        FORMAT_0, MESSAGE_4);
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
-        return -1;
+        cache_unlock (CACHE_DEVBUF);
+        return 0;
     }
 
-    /* Get the cache if it doesn't exist */
-    if (dev->ckdcache == NULL)
-    {
-        /* default cache size is number of heads (trks/cyl) */
-        if (dev->ckdcachenbr < 1)
-            dev->ckdcachenbr = dev->ckdheads;
-
-        dev->ckdcache = calloc (dev->ckdcachenbr, CKDDASD_CACHE_SIZE);
-        if (dev->ckdcache == NULL)
-        {
-            /* Handle calloc error condition */
-            devmsg (_("HHCDA027E calloc error for cache table "
-                    "size %d: %s\n"),
-                    dev->ckdcachenbr * CKDDASD_CACHE_SIZE,
-                    strerror(errno));
-            return (SENSE_EC << 8);
-        }
-    }
+ckd_read_track_retry:
 
     /* Search the cache */
-    for (i = 0, o = -1; i < dev->ckdcachenbr; i++)
+    i = cache_lookup (CACHE_DEVBUF, CKD_CACHE_SETKEY(dev->devnum, trk), &o);
+
+    /* Cache hit */
+    if (i >= 0)
     {
-        if (dev->ckdcache[i].trk == trk && dev->ckdcache[i].buf)
-        {
-            DEVTRACE ("HHCDA028I read trk %d found in cache[%d]\n",
-                      trk, i);
-            dev->fd = dev->ckdcache[i].fd;
-            dev->buf = dev->ckdcache[i].buf;
-            dev->ckdtrkoff = dev->ckdcache[i].off;
-            dev->ckdcache[i].age = ++dev->ckdcacheage;
-            dev->dasdcur = trk;
-            dev->ckdcachehits++;
-            return 0;
-        }
-        if (o < 0 || dev->ckdcache[i].age < dev->ckdcache[o].age)
-            o = i;
-    }
+        cache_setflag(CACHE_DEVBUF, dev->cache, ~0, FBA_CACHE_ACTIVE);
+        cache_setage(CACHE_DEVBUF, dev->cache);
+        cache_unlock(CACHE_DEVBUF);
+
+        DEVTRACE (_("HHCDA028I read trk %d cache hit, using cache[%d]\n"),
+                  trk, i);
+
+        dev->cachehits++;
+        dev->cache = i;
+        dev->buf = cache_getbuf(CACHE_DEVBUF, dev->cache, 0);
+        dev->bufcur = trk;
+        dev->bufoff = 0;
+        dev->bufoffhi = dev->ckdtrksz; 
+        dev->buflen = ckd_trklen (dev, dev->buf);
+        dev->bufsize = cache_getlen(CACHE_DEVBUF, dev->cache);
+
+        /* Set the file descriptor */
+        for (f = 0; f < dev->ckdnumfd; f++)
+            if (trk < dev->ckdhitrk[f]) break;
+        dev->fd = dev->ckdfd[f];
+
+        /* Calculate the track offset */
+        dev->ckdtrkoff = CKDDASD_DEVHDR_SIZE +
+             (off_t)(trk - (f ? dev->ckdhitrk[f-1] : 0)) * dev->ckdtrksz;
+
+        dev->syncio_active = active;
+
+        return 0;
+     }
 
     /* Retry if synchronous I/O */
     if (dev->syncio_active)
     {
+        cache_unlock(CACHE_DEVBUF);
         dev->syncio_retry = 1;
         return -1;
     }
-    dev->syncio_active = active;
 
-    DEVTRACE ("HHCDA029I read trk %d cache miss, using cache[%d]\n",
-              trk, o);
-
-    /* Cache miss */
-    dev->ckdcachemisses++;
-
-    /* Get a track image buffer if one doesn't exist */
-    if (dev->ckdcache[o].buf == NULL)
+    /* Wait if no available cache entry */
+    if (o < 0)
     {
-        dev->ckdcache[o].buf = malloc(dev->ckdtrksz);
-        if (dev->ckdcache[o].buf == NULL)
-        {
-            /* Handle calloc error condition */
-            devmsg (_("HHCDA030E malloc error for cache entry buffer "
-                    "size %d: %s\n"),
-                    dev->ckdtrksz, strerror(errno));
-            dev->syncio_active = active;
-            return (SENSE_EC << 8);
-        }
+        DEVTRACE (_("HHCDA029I read trk %d no available cache entry, waiting\n"),
+                  trk); 
+        dev->cachewaits++;
+        cache_wait(CACHE_DEVBUF);
+        goto ckd_read_track_retry;
     }
 
-    dev->ckdcache[o].trk = trk;
-    dev->ckdcache[o].age = ++dev->ckdcacheage;
-    dev->buf = dev->ckdcache[o].buf;
-    
-    /* Calculate the file number */
-    for (i = 0; i < dev->ckdnumfd; i++)
-        if (trk < dev->ckdhitrk[i]) break;
-    dev->fd = dev->ckdfd[i];
-    dev->ckdcache[o].fd = dev->fd;
+    /* Cache miss */
+    DEVTRACE (_("HHCDA030I read trk %d cache miss, using cache[%d]\n"),
+              trk, o);
+
+    dev->cachemisses++;
+
+    /* Make this cache entry active */
+    cache_setkey (CACHE_DEVBUF, o, CKD_CACHE_SETKEY(dev->devnum, trk));
+    cache_setflag(CACHE_DEVBUF, o, 0, CKD_CACHE_ACTIVE|DEVBUF_TYPE_CKD);
+    cache_setage (CACHE_DEVBUF, o);
+    dev->buf = cache_getbuf(CACHE_DEVBUF, o, dev->ckdtrksz);
+    cache_unlock (CACHE_DEVBUF);
+  
+    /* Set the file descriptor */
+    for (f = 0; f < dev->ckdnumfd; f++)
+        if (trk < dev->ckdhitrk[f]) break;
+    dev->fd = dev->ckdfd[f];
 
     /* Calculate the track offset */
     dev->ckdtrkoff = CKDDASD_DEVHDR_SIZE +
-             (off_t)(trk - (i ? dev->ckdhitrk[i-1] : 0)) * dev->ckdtrksz;
-    dev->ckdcache[o].off = dev->ckdtrkoff;
+         (off_t)(trk - (f ? dev->ckdhitrk[f-1] : 0)) * dev->ckdtrksz;
 
-    DEVTRACE ("HHCDA031I read trk %d reading file %d offset %lld len %d\n",
-              trk, i+1, (long long)dev->ckdtrkoff, dev->ckdtrksz);  
+    dev->syncio_active = active;
+
+    DEVTRACE (_("HHCDA031I read trk %d reading file %d offset %lld len %d\n"),
+              trk, f+1, (long long)dev->ckdtrkoff, dev->ckdtrksz);  
 
     /* Seek to the track image offset */
     offset = (off_t)dev->ckdtrkoff;
@@ -837,11 +885,14 @@ CKDDASD_TRKHDR *trkhdr;                 /* -> New track header       */
     if (offset < 0)
     {
         /* Handle seek error condition */
-        devmsg (_("HHCDA032E error reading trk %d: lseek error: %s\n"),
+        logmsg (_("HHCDA032E error reading trk %d: lseek error: %s\n"),
                 trk, strerror(errno));
-        ckd_build_sense (dev, SENSE_EC, 0, 0,
-                        FORMAT_1, MESSAGE_0);
+        ckd_build_sense (dev, SENSE_EC, 0, 0, FORMAT_1, MESSAGE_0);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        dev->bufcur = dev->cache = -1;
+        cache_lock(CACHE_DEVBUF);
+        cache_release(CACHE_DEVBUF, o, 0);
+        cache_unlock(CACHE_DEVBUF);
         return -1;
     }
 
@@ -850,16 +901,19 @@ CKDDASD_TRKHDR *trkhdr;                 /* -> New track header       */
     if (rc < dev->ckdtrksz)
     {
         /* Handle read error condition */
-        devmsg (_("HHCDA033E error reading trk %d: read error: %s\n"),
+        logmsg (_("HHCDA033E error reading trk %d: read error: %s\n"),
            trk, (rc < 0 ? strerror(errno) : "unexpected end of file"));
-        ckd_build_sense (dev, SENSE_EC, 0, 0,
-                        FORMAT_1, MESSAGE_0);
+        ckd_build_sense (dev, SENSE_EC, 0, 0, FORMAT_1, MESSAGE_0);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        dev->bufcur = dev->cache = -1;
+        cache_lock(CACHE_DEVBUF);
+        cache_release(CACHE_DEVBUF, o, 0);
+        cache_unlock(CACHE_DEVBUF);
         return -1;
     }
 
     /* Validate the track header */
-    DEVTRACE ("HHCDA034I read trk %d trkhdr %2.2x %2.2x%2.2x %2.2x%2.2x\n",
+    DEVTRACE (_("HHCDA034I read trk %d trkhdr %2.2x %2.2x%2.2x %2.2x%2.2x\n"),
        trk, dev->buf[0], dev->buf[1], dev->buf[2], dev->buf[3], dev->buf[4]);
     trkhdr = (CKDDASD_TRKHDR *)dev->buf;
     if ((trkhdr->bin != 0
@@ -869,27 +923,38 @@ CKDDASD_TRKHDR *trkhdr;                 /* -> New track header       */
       || trkhdr->head[1] != (head & 0xFF))
      && !dev->dasdcopy)
     {
-        devmsg (_("HHCDA035E %4.4X invalid track header for cyl %d head %d "
+        logmsg (_("HHCDA035E %4.4X invalid track header for cyl %d head %d "
                 " %2.2x%2.2x%2.2x%2.2x%2.2x\n"), dev->devnum, cyl, head,
                 trkhdr->bin,trkhdr->cyl[0],trkhdr->cyl[1],trkhdr->head[0],trkhdr->head[1]);
         ckd_build_sense (dev, 0, SENSE1_ITF, 0, 0, 0);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        dev->bufcur = dev->cache = -1;
+        cache_lock(CACHE_DEVBUF);
+        cache_release(CACHE_DEVBUF, o, 0);
+        cache_unlock(CACHE_DEVBUF);
         return -1;
     }
 
-    dev->dasdcur = trk;
+    dev->cache = o;
+    dev->buf = cache_getbuf(CACHE_DEVBUF, dev->cache, 0);
+    dev->bufcur = trk;
+    dev->bufoff = 0;
+    dev->bufoffhi = dev->ckdtrksz; 
+    dev->buflen = ckd_trklen (dev, dev->buf);
+    dev->bufsize = cache_getlen(CACHE_DEVBUF, dev->cache);
 
     return 0;
-} /* end function ckd_read_track */
+} /* end function ckdread_read_track */
+
 
 /*-------------------------------------------------------------------*/
 /* Update a track image                                              */
 /*-------------------------------------------------------------------*/
 static
-int ckd_update_track (DEVBLK *dev, BYTE *buf, int len, BYTE *unitstat)
+int ckddasd_update_track (DEVBLK *dev, int trk, int off,
+                      BYTE *buf, int len, BYTE *unitstat)
 {
 int             rc;                     /* Return code               */
-off_t           offset;                 /* File offsets              */
 
     /* Immediately return if fake writing */
     if (dev->ckdfakewr)
@@ -904,8 +969,19 @@ off_t           offset;                 /* File offsets              */
         return -1;
     }
 
+    /* Read the track if it's not current */
+    if (trk != dev->bufcur)
+    {
+        rc = (dev->hnd->read) (dev, trk, unitstat);
+        if (rc < 0)
+        {
+            dev->bufcur = dev->cache = -1;
+            return -1;
+        }
+    }
+
     /* Invalid track format if going past buffer end */
-    if (dev->bufoff + len > dev->bufoffhi)
+    if (off + len > dev->bufoffhi)
     {
         ckd_build_sense (dev, 0, SENSE1_ITF, 0, 0, 0);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -913,64 +989,50 @@ off_t           offset;                 /* File offsets              */
     }
 
     /* Copy the data into the buffer */
-    if (buf) memcpy (&dev->buf[dev->bufoff], buf, len);
+    if (buf) memcpy (dev->buf + off, buf, len);
 
-    /* Write the updated data now if lazy write turned off */
-    if (dev->ckdnolazywr)
+    /* Set low and high updated offsets */
+    if (!dev->bufupd || off < dev->bufupdlo)
+        dev->bufupdlo = off;
+    if (off + len > dev->bufupdhi)
+        dev->bufupdhi = off + len;
+
+    /* Indicate track image has been modified */
+    if (!dev->bufupd)
     {
-        /* Retry if synchronous I/O and not track overflow */
-        if (dev->syncio_active && !dev->ckdtrkof)
-        {
-            dev->syncio_retry = 1;
-            return -1;
-        }
-
-        offset = (off_t)(dev->ckdtrkoff + dev->bufoff);
-        offset = lseek (dev->fd, offset, SEEK_SET);
-        if (offset < 0)
-        {
-            /* Handle seek error condition */
-            devmsg (_("HHCDA036E error writing trk %d: lseek error: %s\n"),
-                    dev->dasdcur, strerror(errno));
-            ckd_build_sense (dev, SENSE_EC, 0, 0,
-                            FORMAT_1, MESSAGE_0);
-            *unitstat = CSW_CE | CSW_DE | CSW_UC;
-            return -1;
-        }
-
-        /* Write the portion of the track image that was modified */
-        rc = write (dev->fd, &dev->buf[dev->bufoff], len);
-        if (rc < len)
-        {
-            /* Handle seek error condition */
-            devmsg (_("HHCDA037E error writing trk %d: write error: %s\n"),
-                    dev->dasdcur, strerror(errno));
-            ckd_build_sense (dev, SENSE_EC, 0, 0,
-                            FORMAT_1, MESSAGE_0);
-            *unitstat = CSW_CE | CSW_DE | CSW_UC;
-            return -1;
-        }
-    }
-    else
-    {
-        /* Set low and high updated offsets */
-        if (!dev->bufupd || dev->bufoff < dev->bufupdlo)
-            dev->bufupdlo = dev->bufoff;
-        if (dev->bufoff + len > dev->bufupdhi)
-            dev->bufupdhi = dev->bufoff + len;
-
-        /* Indicate track image has been modified */
         dev->bufupd = 1;
+        shared_update_notify (dev, trk);
     }
 
     return len;
 } /* end function ckd_update_track */
 
 /*-------------------------------------------------------------------*/
+/* CKD start/resume channel program                                  */
+/*-------------------------------------------------------------------*/
+void ckddasd_start (DEVBLK *dev)
+{
+    /* Reset buffer offsets */
+    dev->bufoff = 0;
+    dev->bufoffhi = dev->ckdtrksz;
+}
+
+/*-------------------------------------------------------------------*/
+/* CKD end/suspend channel program                                   */
+/*-------------------------------------------------------------------*/
+void ckddasd_end (DEVBLK *dev)
+{
+BYTE    unitstat;                       /* Unit Status               */
+
+    /* Write the last track image if it's modified */
+    ckddasd_read_track (dev, -1, &unitstat);
+}
+
+/*-------------------------------------------------------------------*/
 /* Return used cylinders                                             */
 /*-------------------------------------------------------------------*/
 static
-int ckd_used (DEVBLK *dev)
+int ckddasd_used (DEVBLK *dev)
 {
     return dev->ckdcyls;
 }
@@ -1057,10 +1119,10 @@ static int ckd_seek ( DEVBLK *dev, int cyl, int head,
 {
 int             rc;                     /* Return code               */
 
-    DEVTRACE("HHCDA038I seeking to cyl %d head %d\n", cyl, head);
+    DEVTRACE(_("HHCDA038I seeking to cyl %d head %d\n"), cyl, head);
 
     /* Read the track image */
-    rc = (dev->ckdrdtrk) (dev, cyl, head, unitstat);
+    rc = ckd_read_cchh (dev, cyl, head, unitstat);
     if (rc < 0) return -1;
 
     /* Set device orientation fields */
@@ -1096,8 +1158,8 @@ int             head;                   /* Next head for multitrack  */
     if (dev->ckdlcount == 0 &&
         (dev->ckdfmask & CKDMASK_SKCTL) == CKDMASK_SKCTL_INHSMT)
     {
-        DEVTRACE("HHCDA039E MT advance error: "
-                 "locate record %d file mask %2.2X\n",
+        DEVTRACE(_("HHCDA039E MT advance error: "
+                 "locate record %d file mask %2.2X\n"),
                  dev->ckdlcount, dev->ckdfmask);
        if (dev->ckdtrkof)
             ckd_build_sense (dev, 0, SENSE1_FP | SENSE1_IE, 0, 0, 0);
@@ -1128,7 +1190,7 @@ int             head;                   /* Next head for multitrack  */
         head = 0;
         cyl++;
     }
-    DEVTRACE("HHCDA040I MT advance to cyl %d head %d\n", cyl, head);
+    DEVTRACE(_("HHCDA040I MT advance to cyl %d head %d\n"), cyl, head);
 
     /* File protect error if next track is outside the
        limits of the device or outside the defined extent */
@@ -1180,7 +1242,7 @@ char           *orient[] = {"none", "index", "count", "key", "data", "eot"};
         && code != 0x9D)
         skipr0 = 1;
 
-    DEVTRACE ("HHCDA041I read count orientation is %s\n",
+    DEVTRACE (_("HHCDA041I read count orientation is %s\n"),
               orient[dev->ckdorient]);
 
     /* If orientation is at End-Of_Track then a multi-track advance
@@ -1204,7 +1266,8 @@ char           *orient[] = {"none", "index", "count", "key", "data", "eot"};
         if (dev->bufoff + CKDDASD_RECHDR_SIZE >= dev->bufoffhi)
         {
             /* Handle error condition */
-            devmsg (_("HHCDA042E attempt to read past end of track\n"));
+            logmsg (_("HHCDA042E attempt to read past end of track %d %d\n"),
+                    dev->bufoff, dev->bufoffhi);
 
             /* Set unit check with equipment check */
             ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -1225,7 +1288,7 @@ char           *orient[] = {"none", "index", "count", "key", "data", "eot"};
         dev->ckdcurdl = (rechdr->dlen[0] << 8) + rechdr->dlen[1];
         dev->ckdtrkof = (rechdr->cyl[0] == 0xFF) ? 0 : rechdr->cyl[0] >> 7;
 
-        DEVTRACE("HHCDA043I cyl %d head %d record %d kl %d dl %d of %d\n",
+        DEVTRACE(_("HHCDA043I cyl %d head %d record %d kl %d dl %d of %d\n"),
                 dev->ckdcurcyl, dev->ckdcurhead, dev->ckdcurrec,
                 dev->ckdcurkl, dev->ckdcurdl, dev->ckdtrkof);
 
@@ -1313,7 +1376,7 @@ CKDDASD_RECHDR  rechdr;                 /* CKD record header         */
         if (rc < 0) return rc;
     }
 
-    DEVTRACE("HHCDA044I read key %d bytes\n", dev->ckdcurkl);
+    DEVTRACE(_("HHCDA044I read key %d bytes\n"), dev->ckdcurkl);
 
     /* Read key field */
     if (dev->ckdcurkl > 0)
@@ -1321,7 +1384,7 @@ CKDDASD_RECHDR  rechdr;                 /* CKD record header         */
         if (dev->bufoffhi - dev->bufoff < dev->ckdcurkl)
         {
             /* Handle error condition */
-            devmsg (_("ckddasd: attempt to read past end of track\n"));
+            logmsg (_("ckddasd: attempt to read past end of track\n"));
 
             /* Set unit check with equipment check */
             ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -1363,7 +1426,7 @@ CKDDASD_RECHDR  rechdr;                 /* Record header             */
     if (dev->ckdorient == CKDORIENT_COUNT)
         dev->bufoff += dev->ckdcurkl;
 
-    DEVTRACE("HHCDA045I read data %d bytes\n", dev->ckdcurdl);
+    DEVTRACE(_("HHCDA045I read data %d bytes\n"), dev->ckdcurdl);
 
     /* Read data field */
     if (dev->ckdcurdl > 0)
@@ -1371,7 +1434,7 @@ CKDDASD_RECHDR  rechdr;                 /* Record header             */
         if (dev->bufoff + dev->ckdcurdl >= dev->bufoffhi)
         {
             /* Handle error condition */
-            devmsg (_("HHCDA046E attempt to read past end of track\n"));
+            logmsg (_("HHCDA046E attempt to read past end of track\n"));
 
             /* Set unit check with equipment check */
             ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -1432,7 +1495,7 @@ int             ckdlen;                 /* Count+key+data length     */
     }
 
     /* Logically erase rest of track by writing end of track marker */
-    rc = (dev->ckdupdtrk) (dev, eighthexFF, 8, unitstat);
+    rc = (dev->hnd->write) (dev, dev->bufcur, dev->bufoff, eighthexFF, 8, unitstat);
     if (rc < 0) return -1;
 
     /* Return total count key and data size */
@@ -1489,20 +1552,20 @@ int             ckdlen;                 /* Count+key+data length     */
     /* Pad the I/O buffer with zeroes if necessary */
     while (len < ckdlen) buf[len++] = '\0';
 
-    DEVTRACE("HHCDA047I writing cyl %d head %d record %d kl %d dl %d\n",
+    DEVTRACE(_("HHCDA047I writing cyl %d head %d record %d kl %d dl %d\n"),
             dev->ckdcurcyl, dev->ckdcurhead, recnum, keylen, datalen);
 
     /* Set track overflow flag if called for */
     if (trk_ovfl)
     {
-        DEVTRACE("HHCDA048I setting track overflow flag for "
-                 "cyl %d head %d record %d\n",
+        DEVTRACE(_("HHCDA048I setting track overflow flag for "
+                 "cyl %d head %d record %d\n"),
                  dev->ckdcurcyl, dev->ckdcurhead, recnum);
         buf[0] |= 0x80;
     }
 
     /* Write count key and data */
-    rc = (dev->ckdupdtrk) (dev, buf, ckdlen, unitstat);
+    rc = (dev->hnd->write) (dev, dev->bufcur, dev->bufoff, buf, ckdlen, unitstat);
     if (rc < 0) return -1;
     dev->bufoff += ckdlen;
 
@@ -1513,7 +1576,7 @@ int             ckdlen;                 /* Count+key+data length     */
     }
 
     /* Logically erase rest of track by writing end of track marker */
-    rc = (dev->ckdupdtrk) (dev, eighthexFF, 8, unitstat);
+    rc = (dev->hnd->write) (dev, dev->bufcur, dev->bufoff, eighthexFF, 8, unitstat);
     if (rc < 0) return -1;
 
     /* Set the device orientation fields */
@@ -1540,7 +1603,7 @@ int             kdlen;                  /* Key+data length           */
     /* Unit check if not oriented to count area */
     if (dev->ckdorient != CKDORIENT_COUNT)
     {
-        devmsg (_("HHCDA049E Write KD orientation error\n"));
+        logmsg (_("HHCDA049E Write KD orientation error\n"));
         ckd_build_sense (dev, SENSE_CR, 0, 0,
                         FORMAT_0, MESSAGE_2);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -1553,12 +1616,12 @@ int             kdlen;                  /* Key+data length           */
     /* Pad the I/O buffer with zeroes if necessary */
     while (len < kdlen) buf[len++] = '\0';
 
-    DEVTRACE("HHCDA050I updating cyl %d head %d record %d kl %d dl %d\n",
+    DEVTRACE(_("HHCDA050I updating cyl %d head %d record %d kl %d dl %d\n"),
             dev->ckdcurcyl, dev->ckdcurhead, dev->ckdcurrec,
             dev->ckdcurkl, dev->ckdcurdl);
 
     /* Write key and data */
-    rc = (dev->ckdupdtrk) (dev, buf, kdlen, unitstat);
+    rc = (dev->hnd->write) (dev, dev->bufcur, dev->bufoff, buf, kdlen, unitstat);
     if (rc < 0) return -1;
     dev->bufoff += kdlen;
 
@@ -1582,7 +1645,7 @@ int             rc;                     /* Return code               */
     if (dev->ckdorient != CKDORIENT_COUNT
         && dev->ckdorient != CKDORIENT_KEY)
     {
-        devmsg (_("HHCDA051E Write data orientation error\n"));
+        logmsg (_("HHCDA051E Write data orientation error\n"));
         ckd_build_sense (dev, SENSE_CR, 0, 0,
                         FORMAT_0, MESSAGE_2);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -1596,12 +1659,12 @@ int             rc;                     /* Return code               */
     /* Pad the I/O buffer with zeroes if necessary */
     while (len < dev->ckdcurdl) buf[len++] = '\0';
 
-    DEVTRACE("HHCDA052I updating cyl %d head %d record %d dl %d\n",
+    DEVTRACE(_("HHCDA052I updating cyl %d head %d record %d dl %d\n"),
             dev->ckdcurcyl, dev->ckdcurhead, dev->ckdcurrec,
             dev->ckdcurdl);
 
     /* Write data */
-    rc = (dev->ckdupdtrk) (dev, buf, dev->ckdcurdl, unitstat);
+    rc = (dev->hnd->write) (dev, dev->bufcur, dev->bufoff, buf, dev->ckdcurdl, unitstat);
     if (rc < 0) return -1;
     dev->bufoff += dev->ckdcurdl;
 
@@ -1655,7 +1718,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         && (code & 0x7F) != 0x16 && (code & 0x7F) != 0x12
         && (code & 0x7F) != 0x0E && (code & 0x7F) != 0x06)
     {
-        devmsg(_("HHCDA053E Data chaining not supported for CCW %2.2X\n"),
+        logmsg(_("HHCDA053E Data chaining not supported for CCW %2.2X\n"),
                 code);
         ckd_build_sense (dev, SENSE_CR, 0, 0,
                         FORMAT_0, MESSAGE_1);
@@ -1682,8 +1745,10 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         dev->ckdwckd = 0;
         dev->ckdlcount = 0;
         dev->ckdtrkof = 0;
+        /* ISW20030819-1 : Clear Write HA flag */
+        dev->ckdwrha = 0;
     }
-    else dev->syncio_retry = 0;
+    dev->syncio_retry = 0;
 
     /* Reset index marker flag if sense or control command,
        or any write command (other search ID or search key),
@@ -2262,6 +2327,8 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         num = (count < size) ? count : size;
     /* FIXME: what devices want 5 bytes, what ones want 7, and what
         ones want 11? Do this right when we figure that out */
+        /* ISW20030819-1 Indicate WRHA performed */
+        dev->ckdwrha=1;
         *residual = 0;
 
         /* Return normal status */
@@ -2774,7 +2841,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
 
         /* Extract the file mask from the I/O buffer */
         dev->ckdfmask = iobuf[0];
-        DEVTRACE("HHCDA054I set file mask %2.2X\n", dev->ckdfmask);
+        DEVTRACE(_("HHCDA054I set file mask %2.2X\n"), dev->ckdfmask);
 
         /* Command reject if file mask is invalid */
         if ((dev->ckdfmask & CKDMASK_RESV) != 0)
@@ -2942,7 +3009,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             for (i=0; i < (ssize_t)sizeof(module)-1 && i < num; i++)
                 module[i] = guest_to_host(iobuf[i]);
             module[i] = '\0';
-            devmsg (_("HHCDA055I search key %s\n"), module);
+            logmsg (_("HHCDA055I search key %s\n"), module);
         }
 #endif /*OPTION_CKD_KEY_TRACING*/
 
@@ -3547,6 +3614,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            logmsg("DEBUG : WR0 OUTSIDE PACK\n");
             break;
         }
 
@@ -3554,11 +3622,13 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
            and not preceded by either a Search Home Address that
            compared equal on all 4 bytes, or a Write Home Address not
            within the domain of a Locate Record */
-        if (dev->ckdlcount == 0 && dev->ckdhaeq == 0)
+        /* ISW20030819-1 : Added check for previously issued WRHA */
+        if (dev->ckdlcount == 0 && dev->ckdhaeq == 0 && dev->ckdwrha==0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            logmsg("DEBUG : WR0 CASE 2\n");
             break;
         }
 
@@ -3568,6 +3638,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            logmsg("DEBUG : WR0 BAD FM\n");
             break;
         }
 
@@ -3584,6 +3655,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
                 ckd_build_sense (dev, SENSE_CR, 0, 0,
                                 FORMAT_0, MESSAGE_2);
                 *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                logmsg("DEBUG : LOC REC 2\n");
                 break;
             }
         }
@@ -4247,6 +4319,13 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             break;
         }
 
+        /* Call the release exit and mark the device not reserved */
+        if (dev->hnd->release) (dev->hnd->release) (dev);
+
+        obtain_lock (&dev->lock);
+        dev->reserved = 0;
+        release_lock (&dev->lock);
+
         /* Perform the operation of a sense command */
         goto sense;
 
@@ -4255,13 +4334,6 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
     /*---------------------------------------------------------------*/
     /* DEVICE RESERVE                                                */
     /*---------------------------------------------------------------*/
-        /* If synchronous I/O then retry asynchronously */
-        if (dev->syncio_active)
-        {
-            dev->syncio_retry = 1;
-            break;
-        }
-
         /* Command reject if within the domain of a Locate Record,
            or indeed if preceded by any command at all apart from
            Suspend Multipath Reconnection */
@@ -4274,6 +4346,14 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
             break;
         }
+
+        /* Mark the device reserved and call the reserve exit */
+
+        obtain_lock (&dev->lock);
+        dev->reserved = 1;
+        release_lock (&dev->lock);
+
+        if (dev->hnd->reserve) (dev->hnd->reserve) (dev);
 
         /* Perform the operation of a sense command */
         goto sense;
@@ -4447,12 +4527,12 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         }
 
         /* Calculate residual byte count */
-        num = (count < 24) ? count : 24;
+        num = (count < 32) ? count : 32;
         *residual = count - num;
-        if (count < 24) *more = 1;
+        if (count < 32) *more = 1;
 
         /* Build the buffered error log in the I/O area */
-        memset (iobuf, 0x00, 24);
+        memset (iobuf, 0x00, 32);
 
         /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;
@@ -4595,5 +4675,13 @@ DEVHND ckddasd_device_hndinfo = {
         &ckddasd_execute_ccw,
         &ckddasd_close_device,
         &ckddasd_query_device,
-        NULL, NULL, NULL, NULL
+        &ckddasd_start,
+        &ckddasd_end,
+        &ckddasd_start,
+        &ckddasd_end,
+        &ckddasd_read_track,
+        &ckddasd_update_track,
+        &ckddasd_used,
+        NULL,
+        NULL
 };

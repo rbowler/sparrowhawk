@@ -14,24 +14,30 @@ typedef struct _DEVHND {
         DEVSF *end;                    /* Device End channel pgm     */
         DEVSF *resume;                 /* Device Resume channel pgm  */
         DEVSF *suspend;                /* Device Suspend channel pgm */
+        DEVRF *read;                   /* Device Read                */
+        DEVWF *write;                  /* Device Write               */
+        DEVUF *used;                   /* Device Query used          */
+        DEVRR *reserve;                /* Device Reserve             */
+        DEVRR *release;                /* Device Release             */
 } DEVHND;
 
 
-typedef struct _DEVENT {
-        char  *name;
-        U16   type;
-        DEVHND *hnd;                        /* Device handlers       */
-} DEVENT;
-
-
+#if !defined(OPTION_DYNAMIC_LOAD)
 extern DEVHND constty_device_hndinfo;
+extern DEVHND loc3270_device_hndinfo;
+extern DEVHND comadpt_device_hndinfo;
 extern DEVHND cardrdr_device_hndinfo;
 extern DEVHND cardpch_device_hndinfo;
 extern DEVHND printer_device_hndinfo;
 extern DEVHND tapedev_device_hndinfo;
+#endif /*!defined(OPTION_DYNAMIC_LOAD)*/
 extern DEVHND ckddasd_device_hndinfo;
 extern DEVHND fbadasd_device_hndinfo;
-extern DEVHND loc3270_device_hndinfo;
 extern DEVHND ctcadpt_device_hndinfo;
+extern DEVHND ctci_device_hndinfo;
+extern DEVHND ctct_device_hndinfo;
+extern DEVHND lcs_device_hndinfo;
+extern DEVHND vmnet_device_hndinfo;
+
 
 #endif /*!defined(_DEVICES_H)*/

@@ -283,12 +283,27 @@ BYTE    len1;                           /* Length to end of page     */
 BYTE    len2;                           /* Length after next page    */
 BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
+#ifdef FEATURE_INTERVAL_TIMER
+int     intaccess = 0;                  /* Access interval timer     */
+#endif /*FEATURE_INTERVAL_TIMER*/
+
     /* Obtain current access key from PSW */
     akey = regs->psw.pkey;
 
     /* Calculate page address of last byte of operand */
     addr2 = (addr + len) & ADDRESS_MAXWRAP(regs);
     addr2 &= ~0x7FF;
+
+#ifdef FEATURE_INTERVAL_TIMER
+    /* Check for interval timer access */
+    if (addr == 80)
+        if (len == 3)
+          {
+            intaccess = 1;
+            obtain_lock( &sysblk.todlock );
+            update_TOD_clock ();
+          }
+#endif /*FEATURE_INTERVAL_TIMER*/
 
     /* Copy data from real storage in either one or two parts
        depending on whether operand crosses a page boundary
@@ -304,6 +319,16 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         memcpy (dest, regs->mainstor+addr, len1);
         memcpy (dest+len1, regs->mainstor+addr2, len2);
     }
+
+#ifdef FEATURE_INTERVAL_TIMER
+    /* Release todlock, if held */
+    if (intaccess)
+      {
+        release_lock( &sysblk.todlock );
+        intaccess = 0;
+      }
+#endif /*FEATURE_INTERVAL_TIMER*/
+
 } /* end function ARCH_DEP(vfetchc) */
 
 /*-------------------------------------------------------------------*/
@@ -400,7 +425,19 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     /* Fetch 4 bytes when operand does not cross page boundary
        (Page boundary test at 800 to catch FPO crosser too) */
     if((abs & 0x000007FF) <= (2048 - 4))
+#ifdef FEATURE_INTERVAL_TIMER
+      {
+        if (abs == 80)
+          {
+            obtain_lock( &sysblk.todlock );
+            update_TOD_clock ();
+            release_lock( &sysblk.todlock );
+          }
+#endif /*FEATURE_INTERVAL_TIMER*/
         return fetch_fw(regs->mainstor + abs);
+#ifdef FEATURE_INTERVAL_TIMER
+      }
+#endif /*FEATURE_INTERVAL_TIMER*/
 
     /* Operand is not fullword aligned and may cross a page boundary */
 
@@ -556,7 +593,6 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     if ((addr & 0x7FF) <= (0x800 - 6))
     {
         abs = LOGICAL_TO_ABS (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
-#if defined(OPTION_AIA_BUFFER)
 #if defined(FEATURE_PER)
         if( !EN_IC_PER(regs) )
 #endif /*defined(FEATURE_PER)*/
@@ -568,14 +604,12 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         else
             INVALIDATE_AIA(regs);
 #endif /*defined(FEATURE_PER)*/
-#endif /*defined(OPTION_AIA_BUFFER)*/
         memcpy (dest, regs->mainstor+abs, 6);
         return;
     }
 
     /* Fetch first two bytes of instruction */
     abs = LOGICAL_TO_ABS (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
-#if defined(OPTION_AIA_BUFFER)
 #if defined(FEATURE_PER)
     if( !EN_IC_PER(regs) )
 #endif /*defined(FEATURE_PER)*/
@@ -587,7 +621,6 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         else
             INVALIDATE_AIA(regs);
 #endif /*defined(FEATURE_PER)*/
-#endif /*defined(OPTION_AIA_BUFFER)*/
     memcpy (dest, regs->mainstor+abs, 2);
 
     /* Return if two-byte instruction */
@@ -704,11 +737,15 @@ BYTE    *a1, *a2;
 
 #ifdef FEATURE_INTERVAL_TIMER
     /* Special case for mvc to/from interval timer */
-    if ( (len == 3) && ((abs1 == 0x50) || (abs2 == 0x50)) && ~((abs1 | abs2) & 3) )
+    if ( ((len == 3) || (len == 7)) &&
+         ((abs1 == 0x50) || (abs2 == 0x50)) &&
+         ~((abs1 | abs2) & 3) )
     {
-        /* We've got a 4-byte wide, 4-byte aligned access of the interval timer */
+        /* We've got a 4/8-byte wide, 4/8-byte aligned access of the interval timer */
         obtain_lock( &sysblk.todlock );
 
+        if (abs2 == 0x50)
+           update_TOD_clock ();
         *(U32 *)&regs->mainstor[abs1] = *(U32 *)&regs->mainstor[abs2];
 
         release_lock( &sysblk.todlock );
@@ -722,7 +759,7 @@ BYTE    *a1, *a2;
         a1 = regs->mainstor+abs1;
     a2 = regs->mainstor+abs2;
     for (i = 0; i < len + 1; i++) a1 [i] = a2 [i];
-/*  
+/*
     for (i = 0; i < len + 1; i++)
             regs->mainstor[abs1++] = regs->mainstor[abs2++];
 */

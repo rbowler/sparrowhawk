@@ -4,6 +4,7 @@
  * Binary (IEEE) Floating Point Instructions
  * Copyright (c) 2001 Willem Konynenberg <wfk@xos.nl>
  * TCEB, TCDB and TCXB contributed by Per Jessen, 20 September 2001.
+ * THDER,THDR by Roger Bowler, 19 July 2003.
  * Licensed under the Q Public License
  * For details, see html/herclic.html
  */
@@ -49,6 +50,13 @@
  */
 
 #define _GNU_SOURCE 1
+
+/* COMMENT OUT THE FOLLOWING DEFINE    */
+/* (_ISW_PREVENT_COMPWARN)             */
+/* IF IEEE FP INSTRUCTIONS ARE GIVING  */
+/* INCOHERENT RESULTS IN RESPECT TO    */
+/* INFINITY.                           */
+#define _ISW_PREVENT_COMPWARN
 
 
 #include "hercules.h"
@@ -114,7 +122,7 @@ struct sbfp {
 #ifndef HAVE_FMODL
 #define fmodl(x,y) fmod(x,y)
 #endif
-#ifndef HAVE_FREXPL  
+#ifndef HAVE_FREXPL
 #define frexpl(x,y) frexp(x,y)
 #endif
 
@@ -268,13 +276,13 @@ int sbfpclassify(struct sbfp *op)
 int ebfpissnan(struct ebfp *op)
 {
     return ebfpclassify(op) == FP_NAN
-        && (op->fracth & 0x0000800000000000L) == 0;
+        && (op->fracth & 0x0000800000000000ULL) == 0;
 }
 
 int lbfpissnan(struct lbfp *op)
 {
     return lbfpclassify(op) == FP_NAN
-        && (op->fract & 0x0008000000000000L) == 0;
+        && (op->fract & 0x0008000000000000ULL) == 0;
 }
 
 int sbfpissnan(struct sbfp *op)
@@ -293,14 +301,14 @@ void ebfpdnan(struct ebfp *op)
 {
     op->sign = 0;
     op->exp = 0x7FFF;
-    op->fracth = 0x0000800000000000L;
+    op->fracth = 0x0000800000000000ULL;
     op->fractl = 0;
 }
 void lbfpdnan(struct lbfp *op)
 {
     op->sign = 0;
     op->exp = 0x7FF;
-    op->fract = 0x0008000000000000L;
+    op->fract = 0x0008000000000000ULL;
 }
 void sbfpdnan(struct sbfp *op)
 {
@@ -310,11 +318,11 @@ void sbfpdnan(struct sbfp *op)
 }
 void ebfpstoqnan(struct ebfp *op)
 {
-    op->fracth |= 0x0000800000000000L;
+    op->fracth |= 0x0000800000000000ULL;
 }
 void lbfpstoqnan(struct lbfp *op)
 {
-    op->fract |= 0x0008000000000000L;
+    op->fract |= 0x0008000000000000ULL;
 }
 void sbfpstoqnan(struct sbfp *op)
 {
@@ -386,6 +394,9 @@ void sbfpinfinity(struct sbfp *op, int sign)
 void ebfpston(struct ebfp *op)
 {
     long double h, l;
+#if defined(_ISW_PREVENT_COMPWARN)
+    int dummyzero;
+#endif
 
     switch (ebfpclassify(op)) {
     case FP_NAN:
@@ -397,7 +408,12 @@ void ebfpston(struct ebfp *op)
         if (op->sign) {
             op->v = log(0);
         } else {
+#if defined(_ISW_PREVENT_COMPWARN)
+            dummyzero=0;
+            op->v = 1/dummyzero;
+#else
             op->v = 1/0;
+#endif
         }
         break;
     case FP_ZERO:
@@ -422,7 +438,7 @@ void ebfpston(struct ebfp *op)
         op->v = ldexpl(h + l, op->exp - 16383);
         break;
     case FP_NORMAL:
-        h = ldexpl((long double)(op->fracth | 0x1000000000000L), -48);
+        h = ldexpl((long double)(op->fracth | 0x1000000000000ULL), -48);
         l = ldexpl((long double)op->fractl, -112);
         if (op->sign) {
             h = -h;
@@ -437,6 +453,9 @@ void ebfpston(struct ebfp *op)
 void lbfpston(struct lbfp *op)
 {
     double t;
+#if defined(_ISW_PREVENT_COMPWARN)
+    int dummyzero;
+#endif
 
     switch (lbfpclassify(op)) {
     case FP_NAN:
@@ -448,7 +467,12 @@ void lbfpston(struct lbfp *op)
         if (op->sign) {
             op->v = log(0);
         } else {
+#if defined(_ISW_PREVENT_COMPWARN)
+            dummyzero=0;
+            op->v = 1/dummyzero;
+#else
             op->v = 1/0;
+#endif
         }
         break;
     case FP_ZERO:
@@ -470,7 +494,7 @@ void lbfpston(struct lbfp *op)
         op->v = ldexp(t, op->exp - 1023);
         break;
     case FP_NORMAL:
-        t = ldexp((double)(op->fract | 0x10000000000000L), -52);
+        t = ldexp((double)(op->fract | 0x10000000000000ULL), -52);
         if (op->sign)
             t = -t;
         op->v = ldexp(t, op->exp - 1023);
@@ -482,6 +506,9 @@ void lbfpston(struct lbfp *op)
 void sbfpston(struct sbfp *op)
 {
     float t;
+#if defined(_ISW_PREVENT_COMPWARN)
+    int dummyzero;
+#endif
 
     switch (sbfpclassify(op)) {
     case FP_NAN:
@@ -493,7 +520,12 @@ void sbfpston(struct sbfp *op)
         if (op->sign) {
             op->v = log(0);
         } else {
+#if defined(_ISW_PREVENT_COMPWARN)
+            dummyzero=0;
+            op->v = 1/dummyzero;
+#else
             op->v = 1/0;
+#endif
         }
         break;
     case FP_ZERO:
@@ -550,7 +582,7 @@ void ebfpntos(struct ebfp *op)
         f = frexpl(op->v, &(op->exp));
         op->sign = signbit(op->v);
         op->exp += 16383 - 1;
-        op->fracth = (U64)ldexp(fabsl(f), 49) & 0xFFFFFFFFFFFFL;
+        op->fracth = (U64)ldexp(fabsl(f), 49) & 0xFFFFFFFFFFFFULL;
         op->fractl = (U64)fmodl(ldexp(fabsl(f), 113), pow(2, 64));
         break;
     }
@@ -580,7 +612,7 @@ void lbfpntos(struct lbfp *op)
         f = frexp(op->v, &(op->exp));
         op->sign = signbit(op->v);
         op->exp += 1023 - 1;
-        op->fract = (U64)ldexp(fabs(f), 53) & 0xFFFFFFFFFFFFFL;
+        op->fract = (U64)ldexp(fabs(f), 53) & 0xFFFFFFFFFFFFFULL;
         break;
     }
     //logmsg("exp=%d fract=%llx v=%g\n", op->exp, op->fract, op->v);
@@ -623,7 +655,7 @@ static void get_ebfp(struct ebfp *op, U32 *fpr)
     op->sign = (fpr[0] & 0x80000000) != 0;
     op->exp = (fpr[0] & 0x7FFF0000) >> 16;
     op->fracth = (((U64)fpr[0] & 0x0000FFFF) << 32) | fpr[1];
-    op->fractl = ((U64)fpr[4] << 32) | fpr[5];
+    op->fractl = ((U64)fpr[FPREX] << 32) | fpr[FPREX+1];
 }
 
 static void get_lbfp(struct lbfp *op, U32 *fpr)
@@ -641,9 +673,9 @@ static void vfetch_lbfp(struct lbfp *op, VADR addr, int arn, REGS *regs)
 
     v = vfetch8(addr, arn, regs);
 
-    op->sign = (v & 0x8000000000000000L) != 0;
-    op->exp = (v & 0x7FF0000000000000L) >> 52;
-    op->fract = v & 0x000FFFFFFFFFFFFFL;
+    op->sign = (v & 0x8000000000000000ULL) != 0;
+    op->exp = (v & 0x7FF0000000000000ULL) >> 52;
+    op->fract = v & 0x000FFFFFFFFFFFFFULL;
     //logmsg("lfetch m=%16.16llx exp=%d fract=%llx\n", v, op->exp, op->fract);
 }
 
@@ -677,8 +709,8 @@ static void put_ebfp(struct ebfp *op, U32 *fpr)
 {
     fpr[0] = (op->sign ? 1<<31 : 0) | (op->exp<<16) | (op->fracth>>32);
     fpr[1] = op->fracth & 0xFFFFFFFF;
-    fpr[4] = op->fractl>>32;
-    fpr[5] = op->fractl & 0xFFFFFFFF;
+    fpr[FPREX] = op->fractl>>32;
+    fpr[FPREX+1] = op->fractl & 0xFFFFFFFF;
 }
 
 static void put_lbfp(struct lbfp *op, U32 *fpr)
@@ -700,22 +732,168 @@ static void put_sbfp(struct sbfp *op, U32 *fpr)
  * Chapter 9. Floating-Point Overview and Support Instructions
  */
 
+#if defined(FEATURE_FPS_EXTENSIONS)
+#if !defined(_CBH_FUNC)
+/*
+ * Convert binary floating point to hexadecimal long floating point
+ * save result into long register and return condition code
+ * Roger Bowler, 19 July 2003
+ */
+static int cnvt_bfp_to_hfp (struct lbfp *op, int class, U32 *fpr)
+{
+    short exp;
+    U64 fract;
+    U32 r0, r1;
+    int cc;
+
+    switch (class) {
+    default:
+    case FP_NAN:
+        r0 = 0x7FFFFFFF;
+        r1 = 0xFFFFFFFF;
+        cc = 3;
+        break;
+    case FP_INFINITE:
+        r0 = op->sign ? 0xFFFFFFFF : 0x7FFFFFFF;
+        r1 = 0xFFFFFFFF;
+        cc = 3;
+        break;
+    case FP_ZERO:
+        r0 = op->sign ? 0x80000000 : 0;
+        r1 = 0;
+        cc = 0;
+        break;
+    case FP_SUBNORMAL:
+        r0 = op->sign ? 0x80000000 : 0;
+        r1 = 0;
+        cc = op->sign ? 1 : 2;
+        break;
+    case FP_NORMAL:
+        /* Insert an implied 1. in front of the 52 bit binary
+           fraction and lengthen the result to 56 bits */
+        fract = (U64)(op->fract | 0x8000000000000) << 4;
+
+        /* The binary exponent is equal to the biased exponent - 1023
+           and we subtract another 1 to account for the implied 1. */
+        exp = op->exp - 1024;
+
+        /* Shift the fraction right one bit at a time until
+           the binary exponent becomes a multiple of 4 */
+        while (exp & 3)
+        {
+            exp++;
+            fract >>= 1;
+        }
+
+        /* Convert the binary exponent into a hexadecimal exponent
+           by dropping the last two bits (which are now zero) */
+        exp >>= 2;
+
+        /* If the hexadecimal exponent is less than -64 then return
+           a signed zero result with a non-zero condition code */
+        if (exp < -64) {
+            r0 = op->sign ? 0x80000000 : 0;
+            r1 = 0;
+            cc = op->sign ? 1 : 2;
+            break;
+        }
+
+        /* If the hexadecimal exponent exceeds +63 then return
+           a signed maximum result with condition code 3 */
+        if (exp > 63) {
+            r0 = op->sign ? 0xFFFFFFFF : 0x7FFFFFFF;
+            r1 = 0xFFFFFFFF;
+            cc = 3;
+            break;
+        }
+
+        /* Convert the hexadecimal exponent to a characteristic
+           by adding 64 */
+        exp += 64;
+
+        /* Pack the exponent and the fraction into the result */
+        r0 = (op->sign ? 1<<31 : 0) | (exp << 24) | (fract >> 32);
+        r1 = fract & 0xFFFFFFFF;
+        cc = op->sign ? 1 : 2;
+        break;
+    }
+    /* Store high and low halves of result into fp register array
+       and return condition code */
+    fpr[0] = r0;
+    fpr[1] = r1;
+    return cc;
+}
+#define _CBH_FUNC
+#endif /*!defined(_CBH_FUNC)*/
+
 /*
  * B359 THDR  - CONVERT BFP TO HFP (long)                      [RRE]
- * B358 THDER - CONVERT BFP TO HFP (short to long)             [RRE]
- * B351 TBDR  - CONVERT HFP TO BFP (long)                      [RRF]
- * B350 TBEDR - CONVERT HFP TO BFP (long to short)             [RRF]
- * B365 LXR   - LOAD (extended)                                [RRE]
- * 28   LDR   - LOAD (long)                                    [RR]
- * 68   LD    - LOAD (long)                                    [RX]
- * 38   LER   - LOAD (short)                                   [RR]
- * 78   LE    - LOAD (short)                                   [RX]
- * B376 LZXR  - LOAD ZERO (extended)                           [RRE]
- * B375 LZDR  - LOAD ZERO (long)                               [RRE]
- * B374 LZER  - LOAD ZERO (short)                              [RRE]
- * 60   STD   - STORE (long)                                   [RX]
- * 70   STE   - STORE (short)                                  [RX]
+ * Roger Bowler, 19 July 2003
  */
+DEF_INST(convert_bfp_long_to_float_long_reg)
+{
+    int r1, r2;
+    struct lbfp op2;
+
+    RRE(inst, execflag, regs, r1, r2);
+    //logmsg("THDR r1=%d r2=%d\n", r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
+
+    /* Load lbfp operand from R2 register */
+    get_lbfp(&op2, regs->fpr + FPR2I(r2));
+
+    /* Convert to hfp register and set condition code */
+    regs->psw.cc =
+        cnvt_bfp_to_hfp (&op2,
+                         lbfpclassify(&op2),
+                         regs->fpr + FPR2I(r1));
+
+}
+
+/*
+ * B358 THDER - CONVERT BFP TO HFP (short to long)             [RRE]
+ * Roger Bowler, 19 July 2003
+ */
+DEF_INST(convert_bfp_short_to_float_long_reg)
+{
+    int r1, r2;
+    struct sbfp op2;
+    struct lbfp lbfp_op2;
+
+    RRE(inst, execflag, regs, r1, r2);
+    //logmsg("THDER r1=%d r2=%d\n", r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
+
+    /* Load sbfp operand from R2 register */
+    get_sbfp(&op2, regs->fpr + FPR2I(r2));
+
+    /* Lengthen sbfp operand to lbfp */
+    lbfp_op2.sign = op2.sign;
+    lbfp_op2.exp = op2.exp - 127 + 1023;
+    lbfp_op2.fract = op2.fract << (52 - 23);
+
+    /* Convert lbfp to hfp register and set condition code */
+    regs->psw.cc =
+        cnvt_bfp_to_hfp (&lbfp_op2,
+                         sbfpclassify(&op2),
+                         regs->fpr + FPR2I(r1));
+
+}
+
+
+/* The following instructions are not yet implemented */
+#define UNDEF_INST(_x) \
+        DEF_INST(_x) { ARCH_DEP(operation_exception) \
+        (inst,execflag,regs); }
+/*
+ * B351 TBDR  - CONVERT HFP TO BFP (long)                      [RRF]
+ */
+ UNDEF_INST(convert_float_long_to_bfp_long_reg)
+/*
+ * B350 TBEDR - CONVERT HFP TO BFP (long to short)             [RRF]
+ */
+ UNDEF_INST(convert_float_long_to_bfp_short_reg)
+#endif /*defined(FEATURE_FPS_EXTENSIONS)*/
 
 /*
  * Chapter 19. Binary-Floating-Point Instructions
@@ -1744,7 +1922,7 @@ DEF_INST(convert_bfp_long_to_fix64_reg)
     case FP_NAN:
         pgm_check = ieee_exception(FE_INVALID, regs);
         regs->psw.cc = 3;
-        regs->GR_G(r1) = 0x8000000000000000L;
+        regs->GR_G(r1) = 0x8000000000000000ULL;
         if (regs->fpc & FPC_MASK_IMX) {
             pgm_check = ieee_exception(FE_INEXACT, regs);
             if (pgm_check) {
@@ -1759,9 +1937,9 @@ DEF_INST(convert_bfp_long_to_fix64_reg)
         pgm_check = ieee_exception(FE_INVALID, regs);
         regs->psw.cc = 3;
         if (op2.sign) {
-            regs->GR_G(r1) = 0x8000000000000000L;
+            regs->GR_G(r1) = 0x8000000000000000ULL;
         } else {
-            regs->GR_G(r1) = 0x7FFFFFFFFFFFFFFFL;
+            regs->GR_G(r1) = 0x7FFFFFFFFFFFFFFFULL;
         }
         if (regs->fpc & FPC_MASK_IMX) {
             pgm_check = ieee_exception(FE_INEXACT, regs);
@@ -1807,7 +1985,7 @@ DEF_INST(convert_bfp_short_to_fix64_reg)
     case FP_NAN:
         pgm_check = ieee_exception(FE_INVALID, regs);
         regs->psw.cc = 3;
-        regs->GR_G(r1) = 0x8000000000000000L;
+        regs->GR_G(r1) = 0x8000000000000000ULL;
         if (regs->fpc & FPC_MASK_IMX) {
             pgm_check = ieee_exception(FE_INEXACT, regs);
             if (pgm_check) {
@@ -1821,9 +1999,9 @@ DEF_INST(convert_bfp_short_to_fix64_reg)
         pgm_check = ieee_exception(FE_INVALID, regs);
         regs->psw.cc = 3;
         if (op2.sign) {
-            regs->GR_G(r1) = 0x8000000000000000L;
+            regs->GR_G(r1) = 0x8000000000000000ULL;
         } else {
-            regs->GR_G(r1) = 0x7FFFFFFFFFFFFFFFL;
+            regs->GR_G(r1) = 0x7FFFFFFFFFFFFFFFULL;
         }
         if (regs->fpc & FPC_MASK_IMX) {
             pgm_check = ieee_exception(FE_INEXACT, regs);
@@ -2347,7 +2525,7 @@ DEF_INST(load_and_test_bfp_short_reg)
  * B303 LCEBR - LOAD COMPLEMENT (extended BFP)                 [RRE]
  */
 
-/* 
+/*
  * B357 FIEBR - LOAD FP INTEGER (extended BFP)                 [RRF]
  */
 DEF_INST(load_fp_int_short_reg)
@@ -2379,16 +2557,16 @@ DEF_INST(load_fp_int_short_reg)
 
         feclearexcept(FE_ALL_EXCEPT);
         sbfpston(&op);
-	    op.v = rint(op.v);
+            op.v = rint(op.v);
 
-    	if (regs->fpc & FPC_MASK_IMX) {
+        if (regs->fpc & FPC_MASK_IMX) {
             ieee_exception(FE_INEXACT, regs);
         } else {
             ieee_exception(FE_INVALID, regs);
         }
 
-	    sbfpston(&op);
-    
+            sbfpston(&op);
+
         raised = fetestexcept(FE_ALL_EXCEPT);
 
         if (raised) {
@@ -2435,16 +2613,16 @@ DEF_INST(load_fp_int_long_reg)
 
         feclearexcept(FE_ALL_EXCEPT);
         lbfpston(&op);
-	    op.v = rint(op.v);
+            op.v = rint(op.v);
 
-    	if (regs->fpc & FPC_MASK_IMX) {
+        if (regs->fpc & FPC_MASK_IMX) {
             ieee_exception(FE_INEXACT, regs);
         } else {
             ieee_exception(FE_INVALID, regs);
         }
 
-	    lbfpston(&op);
-    
+            lbfpston(&op);
+
         raised = fetestexcept(FE_ALL_EXCEPT);
 
         if (raised) {
@@ -2492,16 +2670,16 @@ DEF_INST(load_fp_int_ext_reg)
 
         feclearexcept(FE_ALL_EXCEPT);
         ebfpston(&op);
-	    op.v = rint(op.v);
+            op.v = rint(op.v);
 
-    	if (regs->fpc & FPC_MASK_IMX) {
+        if (regs->fpc & FPC_MASK_IMX) {
             ieee_exception(FE_INEXACT, regs);
         } else {
             ieee_exception(FE_INVALID, regs);
         }
 
-	    ebfpston(&op);
-    
+            ebfpston(&op);
+
         raised = fetestexcept(FE_ALL_EXCEPT);
 
         if (raised) {
@@ -3676,7 +3854,7 @@ DEF_INST(testdataclass_bfp_short)
     get_sbfp(&op1, regs->fpr + FPR2I(r1));
 
     switch ( sbfpclassify(&op1) )
-    { 
+    {
     case FP_ZERO:
         bit=20+op1.sign; break;
     case FP_NORMAL:
@@ -3686,8 +3864,8 @@ DEF_INST(testdataclass_bfp_short)
     case FP_INFINITE:
         bit=26+op1.sign; break;
     case FP_NAN:
-        if ( !sbfpissnan(&op1) ) bit=28+op1.sign; 
-        else                     bit=30+op1.sign; 
+        if ( !sbfpissnan(&op1) ) bit=28+op1.sign;
+        else                     bit=30+op1.sign;
         break;
     default:
         bit=0; break;
@@ -3719,7 +3897,7 @@ DEF_INST(testdataclass_bfp_long)
     get_lbfp(&op1, regs->fpr + FPR2I(r1));
 
     switch ( lbfpclassify(&op1) )
-    { 
+    {
     case FP_ZERO:
         bit=20+op1.sign; break;
     case FP_NORMAL:
@@ -3729,8 +3907,8 @@ DEF_INST(testdataclass_bfp_long)
     case FP_INFINITE:
         bit=26+op1.sign; break;
     case FP_NAN:
-        if ( !lbfpissnan(&op1) ) bit=28+op1.sign; 
-        else                     bit=30+op1.sign; 
+        if ( !lbfpissnan(&op1) ) bit=28+op1.sign;
+        else                     bit=30+op1.sign;
         break;
     default:
         bit=0; break;
@@ -3762,7 +3940,7 @@ DEF_INST(testdataclass_bfp_ext)
     get_ebfp(&op1, regs->fpr + FPR2I(r1));
 
     switch ( ebfpclassify(&op1) )
-    { 
+    {
     case FP_ZERO:
         bit=20+op1.sign; break;
     case FP_NORMAL:
@@ -3772,8 +3950,8 @@ DEF_INST(testdataclass_bfp_ext)
     case FP_INFINITE:
         bit=26+op1.sign; break;
     case FP_NAN:
-        if ( !ebfpissnan(&op1) ) bit=28+op1.sign; 
-        else                     bit=30+op1.sign; 
+        if ( !ebfpissnan(&op1) ) bit=28+op1.sign;
+        else                     bit=30+op1.sign;
         break;
     default:
         bit=0; break;

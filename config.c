@@ -19,15 +19,15 @@
 /*      OSTAILOR parameter by Jay Maynard                            */
 /*      PANRATE parameter by Reed H. Petty                           */
 /*      CPUPRIO parameter by Jan Jaeger                              */
+/*      HERCPRIO, TODPRIO, DEVPRIO parameters by Mark L. Gaubatz     */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
 /*-------------------------------------------------------------------*/
 
-
 #include "hercules.h"
-
 #include "devtype.h"
-
 #include "opcode.h"
+#include "httpmisc.h"
+#include "hostinfo.h"
 
 #if !defined(_GEN_ARCH)
 
@@ -47,7 +47,12 @@
 #include "w32chan.h"
 #endif // defined(OPTION_FISHIO)
 
-extern DEVENT device_handler_table[];
+typedef struct _DEVARRAY
+{
+    U16 cuu1;
+    U16 cuu2;
+} DEVARRAY;
+
 
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
@@ -57,14 +62,16 @@ extern DEVENT device_handler_table[];
 /*-------------------------------------------------------------------*/
 /* Global data areas                                                 */
 /*-------------------------------------------------------------------*/
-SYSBLK  sysblk;
 
 /*-------------------------------------------------------------------*/
 /* External GUI control                                              */
 /*-------------------------------------------------------------------*/
+/* Now defined in hsys.c */
+#if 0
 #ifdef EXTERNALGUI
 int extgui = 0;             /* 1=external gui active                */
 #endif /*EXTERNALGUI*/
+#endif
 
 /*-------------------------------------------------------------------*/
 /* Static data areas                                                 */
@@ -77,9 +84,9 @@ static BYTE buf[256];                   /* Config statement buffer   */
 #endif /*EXTERNALGUI*/
 static BYTE *keyword;                   /* -> Statement keyword      */
 static BYTE *operand;                   /* -> First argument         */
-#define MAX_ARGS 12                     /* Max #of additional args   */
 static int  addargc;                    /* Number of additional args */
 static BYTE *addargv[MAX_ARGS];         /* Additional argument array */
+
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to parse an argument string. The string that is passed */
@@ -129,13 +136,136 @@ int parse_args (BYTE* p, int maxargc, BYTE** pargv, int* pargc)
     return *pargc;
 }
 
-static void delayed_exit (int exit_code)
+void delayed_exit (int exit_code)
 {
     /* Delay exiting is to give the system
      * time to display the error message. */
     usleep(100000);
     exit(exit_code);
 }
+
+
+/* storage configuration routine. To be moved *JJ */
+static void config_storage(int mainsize, int xpndsize)
+{
+    /* Obtain main storage */
+    sysblk.mainsize = mainsize * 1024 * 1024;
+
+#if defined(NO_CYGWIN_MALLOC_BUG) || !defined(WIN32)
+    sysblk.mainstor = malloc(sysblk.mainsize + 8192);
+
+    if (sysblk.mainstor == NULL)
+#else
+    /*
+               Windows "double memory consumption" bug fix
+               (which should work on all other systems too)
+
+        =============================================================
+        From: golden_dog98 [golden_dog98@yahoo.com]
+        Sent: Monday, July 07, 2003 1:08 AM
+        To: hercules-390@yahoogroups.com
+        Subject: [hercules-390] To "Fish" (was: "Re: How can I use all my
+        physical memory")
+
+        This problem is caused by how CYGWIN allocates memory under Windows 
+        2000.  In malloc.cc, malloc() calls sYSMALLOc() to allocate chunks of 
+        memory.  sYSMALLOc calls mmap() with flags MAP_PRIVATE and 
+        MAP_ANONYMOUS.  mmap() calls mmap64() with the same flags.  Around 
+        line 540 of mmap.cc, mmap64() checks to see if MAP_PRIVATE is set and 
+        if has_working_copy_on_write() is true (which it is for Win2000) and 
+        sets access to FILE_MAP_COPY.  mmap64() then calls 
+        fhandler_disk_file::mmap() in mmap.cc.  Because access is set to 
+        FILE_MAP_COPY, protect is set to PAGE_WRITECOPY when CreateFileMapping
+        () is called.  Then MapViewOfFileEx() is called with access set to 
+        FILE_MAP_COPY.  This allocates the storage with "copy on write 
+        acess", which essentially doubles the storage usage.  See 
+        http://msdn.microsoft.com/library/default.asp?url=/library/en-
+        us/fileio/base/mapviewoffileex.asp.
+
+        I changed line 1299 of Hercules' config.c to fix the problem:
+
+            sysblk.mainstor = mmap(0, sysblk.mainsize + 8192, PROT_READ | 
+        PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+
+        I also had to include at the top of config.c:
+
+        #include <sys/mmap.h>
+
+        I tested this with a 512MB system and all went well....
+
+        Mark D.
+        =============================================================
+    */
+#if !defined(MAP_ANONYMOUS)    /* (see NOTE just below) */
+
+    /*  ***  NOTE: we can't use the "HAVE_MMAP" test above  ***
+        ***  because of a "Unix-ism" bug in autoconf that   ***
+        ***  causes mmap tests to always fail on Windows    ***
+        ***  systems as explained in the below Cygwin post  ***
+        ***  mailing list post:
+
+         http://www.cygwin.com/ml/cygwin/2002-04/msg00412.html
+    */
+    sysblk.mainstor = malloc(sysblk.mainsize + 8192);
+/* ISW20030828-1 : Check for MALLOC result */
+    if (sysblk.mainstor == NULL)
+#else /* !defined(MAP_ANONYMOUS) */
+    sysblk.mainstor = mmap(0, sysblk.mainsize + 8192,
+        PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+/* ISW20030828-1 : Check for MMAP result */
+    if (sysblk.mainstor == ((void *)-1))
+#endif /* !defined(MAP_ANONYMOUS) */
+#endif /* NO_CYGWIN_MALLOC_BUG */
+    {
+        fprintf(stderr, _("HHCCF031S Cannot obtain %dMB main storage: %s\n"),
+                mainsize, strerror(errno));
+        delayed_exit(1);
+    }
+
+    /* Obtain main storage key array */
+    sysblk.storkeys = malloc(sysblk.mainsize / STORAGE_KEY_UNITSIZE);
+    if (sysblk.storkeys == NULL)
+    {
+        fprintf(stderr, _("HHCCF032S Cannot obtain storage key array: %s\n"),
+                strerror(errno));
+        delayed_exit(1);
+    }
+
+    /* Initial power-on reset for main storage */
+    memset(sysblk.mainstor,0,sysblk.mainsize);
+    memset(sysblk.storkeys,0,sysblk.mainsize / STORAGE_KEY_UNITSIZE);
+
+#if 0   /*DEBUG-JJ-20/03/2000*/
+    /* Mark selected frames invalid for debugging purposes */
+    for (i = 64 ; i < (sysblk.mainsize / STORAGE_KEY_UNITSIZE); i += 2)
+        if (i < (sysblk.mainsize / STORAGE_KEY_UNITSIZE) - 64)
+            sysblk.storkeys[i] = STORKEY_BADFRM;
+        else
+            sysblk.storkeys[i++] = STORKEY_BADFRM;
+#endif
+
+    if (xpndsize != 0)
+    {
+#ifdef _FEATURE_EXPANDED_STORAGE
+
+        /* Obtain expanded storage */
+        sysblk.xpndsize = xpndsize * (1024*1024 / XSTORE_PAGESIZE);
+        sysblk.xpndstor = malloc(sysblk.xpndsize * XSTORE_PAGESIZE);
+        if (sysblk.xpndstor == NULL)
+        {
+            fprintf(stderr, _("HHCCF033S Cannot obtain %dMB expanded storage: "
+                    "%s\n"),
+                    xpndsize, strerror(errno));
+            delayed_exit(1);
+        }
+        /* Initial power-on reset for expanded storage */
+        memset(sysblk.xpndstor,0,sysblk.xpndsize * XSTORE_PAGESIZE);
+#else /*!_FEATURE_EXPANDED_STORAGE*/
+        logmsg(_("HHCCF034W Expanded storage support not installed\n"));
+#endif /*!_FEATURE_EXPANDED_STORAGE*/
+    } /* end if(sysblk.xpndsize) */
+}
+
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to read a statement from the configuration file        */
@@ -152,6 +282,9 @@ static int read_config (BYTE *fname, FILE *fp)
 int     i;                              /* Array subscript           */
 int     c;                              /* Character work area       */
 int     stmtlen;                        /* Statement length          */
+int     lstarted;                       /* Indicate if non-whitespace*/
+char   *cnfline;
+                                        /* has been seen yet in line */
 
     while (1)
     {
@@ -159,7 +292,7 @@ int     stmtlen;                        /* Statement length          */
         stmt++;
 
         /* Read next statement from configuration file */
-        for (stmtlen = 0; ;)
+        for (stmtlen = 0, lstarted = 0; ;)
         {
             /* Read character from configuration file */
             c = fgetc(fp);
@@ -167,7 +300,7 @@ int     stmtlen;                        /* Statement length          */
             /* Check for I/O error */
             if (ferror(fp))
             {
-                logmsg(_("HHCCF001S Error reading file %s line %d: %s\n"),
+                fprintf(stderr, _("HHCCF001S Error reading file %s line %d: %s\n"),
                     fname, stmt, strerror(errno));
                 delayed_exit(1);
             }
@@ -183,10 +316,14 @@ int     stmtlen;                        /* Statement length          */
             /* Ignore nulls and carriage returns */
             if (c == '\0' || c == '\r') continue;
 
+        /* Check if it is a white space and no other character yet */
+        if(!lstarted && isspace(c)) continue;
+        lstarted=1;
+
             /* Check that statement does not overflow buffer */
             if (stmtlen >= (int)(sizeof(buf) - 1))
             {
-                logmsg(_("HHCCF002S File %s line %d is too long\n"),
+                fprintf(stderr, _("HHCCF002S File %s line %d is too long\n"),
                     fname, stmt);
                 delayed_exit(1);
             }
@@ -205,9 +342,23 @@ int     stmtlen;                        /* Statement length          */
         if (stmtlen == 0 || buf[0] == '*' || buf[0] == '#')
            continue;
 
+        cnfline = strdup(buf);
+
         /* Parse the statement just read */
 
         parse_args (buf, MAX_ARGS, addargv, &addargc);
+#if defined(OPTION_DYNAMIC_LOAD)
+        if(config_command)
+        {
+            if( config_command(addargc, (char**)addargv, cnfline) )
+            {
+                free(cnfline);
+                continue;
+            }
+        }
+#endif /*defined(OPTION_DYNAMIC_LOAD)*/
+
+        free(cnfline);
 
         /* Move the first two arguments to separate variables */
 
@@ -227,68 +378,242 @@ int     stmtlen;                        /* Statement length          */
 
     return 0;
 } /* end function read_config */
+/*-------------------------------------------------------------------*/
+/* Function to Parse compound device numbers                         */
+/* Syntax : CCUU[-CUU][,CUU..][.nn][...]                             */
+/* Examples : 200-23F                                                */
+/*            200,201                                                */
+/*            200.16                                                 */
+/*            200-23F,280.8                                          */
+/*            etc...                                                 */
+/* - is the range specification (from CUU to CUU)                    */
+/* , is the separator                                                */
+/* . is the count indicator (nn is decimal)                          */
+/* 1st parm is the specification string as specified above           */
+/* 2nd parm is the address of an array of DEVARRAY                   */
+/* Return value : 0 - Parsing error, etc..                           */
+/*                >0 - Size of da                                    */
+/*                                                                   */
+/* NOTE : A basic validity check is made for the following :         */
+/*        All CUUs must belong on the same channel                   */
+/*        (this check is to eventually pave the way to a formal      */
+/*         channel/cu/device architecture)                           */
+/*        no 2 identical CCUUs                                       */
+/*   ex : 200,300 : WRONG                                            */
+/*        200.12,200.32 : WRONG                                      */
+/*        2FF.2 : WRONG                                              */
+/* NOTE : caller should free the array returned in da if the return  */
+/*        value is not 0                                             */
+/*-------------------------------------------------------------------*/
+static size_t parse_devnums(const char *spec,DEVARRAY **da)
+{
+    size_t gcount;      /* Group count                     */
+    size_t i;           /* Index runner                    */
+    char *grps;         /* Pointer to current devnum group */
+    char *sc;           /* Specification string copy       */
+    DEVARRAY *dgrs;     /* Device groups                   */
+    U16  cuu1,cuu2;     /* CUUs                            */
+    char *strptr;       /* strtoul ptr-ptr                 */
+// FIXME: gcc 2.96 for BYTE causes invalid HHCCF057E ... WTF ??
+//  BYTE basechan=0;    /* Channel for all CUUs            */
+    int  basechan=0;    /* Channel for all CUUs            */
+    int  duplicate;     /* duplicated CUU indicator        */
+    int badcuu;         /* offending CUU                   */
 
+    sc=malloc(strlen(spec)+1);
+    strcpy(sc,spec);
+
+    /* Split by ',' groups */
+    gcount=0;
+    grps=strtok(sc,",");
+    dgrs=NULL;
+    while(grps!=NULL)
+    {
+        if(dgrs==NULL)
+        {
+            dgrs=malloc(sizeof(DEVARRAY));
+        }
+        else
+        {
+            dgrs=realloc(dgrs,(sizeof(DEVARRAY))*(gcount+1));
+        }
+        cuu1=strtoul(grps,&strptr,16);
+        switch(*strptr)
+        {
+            case 0:     /* Single CUU */
+                cuu2=cuu1;
+                break;
+            case '-':   /* CUU Range */
+                cuu2=strtoul(&strptr[1],&strptr,16);
+                if(*strptr!=0)
+                {
+                    fprintf(stderr,_("HHCCF053E Incorrect second device number in device range near character %c\n"),*strptr);
+                    free(dgrs);
+                    return(0);
+                }
+                break;
+            case '.':   /* CUU Count */
+                cuu2=cuu1+strtoul(&strptr[1],&strptr,10);
+                cuu2--;
+                if(*strptr!=0)
+                {
+                    fprintf(stderr,_("HHCCF054E Incorrect Device count near character %c\n"),*strptr);
+                    free(dgrs);
+                    return(0);
+                }
+                break;
+            default:
+                fprintf(stderr,_("HHCCF055E Incorrect device address specification near character %c\n"),*strptr);
+                free(dgrs);
+                return(0);
+        }
+        /* Check cuu1 <= cuu2 */
+        if(cuu1>cuu2)
+        {
+            fprintf(stderr,_("HHCCF056E Incorrect device address range. %4.4X < %4.4X\n"),cuu2,cuu1);
+            free(dgrs);
+            return(0);
+        }
+        if(gcount==0)
+        {
+            basechan=(cuu1 >> 8) & 0xff;
+        }
+        badcuu=-1;
+        if(((cuu1 >> 8) & 0xff) != basechan)
+        {
+            badcuu=cuu1;
+        }
+        else
+        {
+            if(((cuu2 >> 8) & 0xff) != basechan)
+            {
+                badcuu=cuu2;
+            }
+        }
+        if(badcuu>=0)
+        {
+            fprintf(stderr,_("HHCCF057E %4.4X is on wrong channel (1st device defined on channel %2.2X)\n"),badcuu,basechan);
+            free(dgrs);
+            return(0);
+        }
+        /* Check for duplicates */
+        duplicate=0;
+        for(i=0;i<gcount;i++)
+        {
+            /* check 1st cuu not within existing range */
+            if(cuu1>=dgrs[i].cuu1 && cuu1<=dgrs[i].cuu2)
+            {
+                duplicate=1;
+                break;
+            }
+            /* check 2nd cuu not within existing range */
+            if(cuu2>=dgrs[i].cuu1 && cuu1<=dgrs[i].cuu2)
+            {
+                duplicate=1;
+                break;
+            }
+            /* check current range doesn't completelly overlap existing range */
+            if(cuu1<dgrs[i].cuu1 && cuu2>dgrs[i].cuu2)
+            {
+                duplicate=1;
+                break;
+            }
+        }
+        if(duplicate)
+        {
+            fprintf(stderr,_("HHCCF058E Some or all devices in %4.4X-%4.4X duplicate devices already defined\n"),cuu1,cuu2);
+            free(dgrs);
+            return(0);
+        }
+        dgrs[gcount].cuu1=cuu1;
+        dgrs[gcount].cuu2=cuu2;
+        gcount++;
+        grps=strtok(NULL,",");
+    }
+    free(sc);
+    *da=dgrs;
+    return(gcount);
+}
+
+char *config_cnslport = "3270";
 /*-------------------------------------------------------------------*/
 /* Function to build system configuration                            */
 /*-------------------------------------------------------------------*/
 void build_config (BYTE *fname)
 {
 int     rc;                             /* Return code               */
-int     i;                              /* Array subscript           */
+int     i,j;                            /* Array subscript           */
 int     scount;                         /* Statement counter         */
 int     cpu;                            /* CPU number                */
-int     pfd[2];                         /* Message pipe handles      */
-DEVBLK *dev;                            /* -> Device block           */
 FILE   *fp;                             /* Configuration file pointer*/
 BYTE   *sserial;                        /* -> CPU serial string      */
 BYTE   *smodel;                         /* -> CPU model string       */
+BYTE   *sversion;                       /* -> CPU version string     */
 BYTE   *smainsize;                      /* -> Main size string       */
 BYTE   *sxpndsize;                      /* -> Expanded size string   */
-BYTE   *scnslport;                      /* -> Console port number    */
 BYTE   *snumcpu;                        /* -> Number of CPUs         */
 BYTE   *snumvec;                        /* -> Number of VFs          */
 BYTE   *sarchmode;                      /* -> Architectural mode     */
 BYTE   *sloadparm;                      /* -> IPL load parameter     */
 BYTE   *ssysepoch;                      /* -> System epoch           */
 BYTE   *stzoffset;                      /* -> System timezone offset */
+BYTE   *sdiag8cmd;                      /* -> Allow diagnose 8       */
 BYTE   *stoddrag;                       /* -> TOD clock drag factor  */
 BYTE   *sostailor;                      /* -> OS to tailor system to */
 BYTE   *spanrate;                       /* -> Panel refresh rate     */
 BYTE   *sdevtmax;                       /* -> Max device threads     */
+BYTE   *shercprio;                      /* -> Hercules base priority */
+BYTE   *stodprio;                       /* -> Timer thread priority  */
 BYTE   *scpuprio;                       /* -> CPU thread priority    */
+BYTE   *sdevprio;                       /* -> Device thread priority */
 BYTE   *spgmprdos;                      /* -> Program product OS OK  */
-BYTE   *scodepage;                      /* -> Code page              */
-#if defined(OPTION_HTTP_SERVER)
-BYTE   *shttpport;                      /* -> HTTP port number       */
-#endif /*defined(OPTION_HTTP_SERVER)*/
+#if defined(_FEATURE_ECPSVM)
+BYTE   *secpsvmlevel;                   /* -> ECPS:VM Keyword        */
+BYTE   *secpsvmlvl;                     /* -> ECPS:VM level (or 'no')*/
+int    ecpsvmac;                        /* -> ECPS:VM add'l arg cnt  */
+#endif /*defined(_FEATURE_ECPSVM)*/
+#if defined(OPTION_SHARED_DEVICES)
+BYTE   *sshrdport;                      /* -> Shared device port nbr */
+#endif /*defined(OPTION_SHARED_DEVICES)*/
 #ifdef OPTION_IODELAY_KLUDGE
 BYTE   *siodelay;                       /* -> I/O delay value        */
 #endif /*OPTION_IODELAY_KLUDGE*/
 BYTE   *scckd;                          /* -> CCKD parameters        */
 BYTE    loadparm[8];                    /* Load parameter (EBCDIC)   */
 BYTE    version = 0x00;                 /* CPU version code          */
+int     dfltver = 1;                    /* Default version code      */
 U32     serial;                         /* CPU serial number         */
 U16     model;                          /* CPU model number          */
-U16     mainsize;                       /* Main storage size (MB)    */
-U16     xpndsize;                       /* Expanded storage size (MB)*/
-U16     cnslport;                       /* Console port number       */
+int     mainsize;                       /* Main storage size (MB)    */
+int     xpndsize;                       /* Expanded storage size (MB)*/
 U16     numcpu;                         /* Number of CPUs            */
 U16     numvec;                         /* Number of VFs             */
-#if defined(OPTION_HTTP_SERVER)
-U16     httpport;                       /* HTTP port number          */
-#endif /*defined(OPTION_HTTP_SERVER)*/
+#if defined(OPTION_SHARED_DEVICES)
+U16     shrdport;                       /* Shared device port number */
+#endif /*defined(OPTION_SHARED_DEVICES)*/
 int     archmode;                       /* Architectural mode        */
 S32     sysepoch;                       /* System epoch year         */
 S32     tzoffset;                       /* System timezone offset    */
+int     diag8cmd;                       /* Allow diagnose 8 commands */
 int     toddrag;                        /* TOD clock drag factor     */
 U64     ostailor;                       /* OS to tailor system to    */
 int     panrate;                        /* Panel refresh rate        */
+int     hercprio;                       /* Hercules base priority    */
+int     todprio;                        /* Timer thread priority     */
 int     cpuprio;                        /* CPU thread priority       */
+int     devprio;                        /* Device thread priority    */
 BYTE    pgmprdos;                       /* Program product OS OK     */
 BYTE   *sdevnum;                        /* -> Device number string   */
 BYTE   *sdevtype;                       /* -> Device type string     */
 U16     devnum;                         /* Device number             */
+DEVARRAY *devnarray;                    /* Compound device numbers   */
+size_t  devncount;                      /* size of comp devnum array */
+int     baddev;                         /* devblk attach failed ind  */
 int     devtmax;                        /* Max number device threads */
+#if defined(_FEATURE_ECPSVM)
+int     ecpsvmavail;                    /* ECPS:VM Available flag    */
+int     ecpsvmlevel;                    /* ECPS:VM declared level    */
+#endif /*defined(_FEATURE_ECPSVM)*/
 #ifdef OPTION_IODELAY_KLUDGE
 int     iodelay=-1;                     /* I/O delay value           */
 #endif /*OPTION_IODELAY_KLUDGE*/
@@ -301,23 +626,19 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
                                            cygwin from thrashing in
                                            select(). sigh            */
 #endif
+#if defined(OPTION_CONFIG_SYMBOLS)
+BYTE **newargv;
+BYTE **orig_newargv;
+#endif
 
-    /* Clear the system configuration block */
-    memset (&sysblk, 0, sizeof(SYSBLK));
+    SET_IC_INITIAL_STATE;
 
-    /* Gabor Hoffer (performance option) */
-    for (i = 0; i < 256; i++)
-    {
-        s370_opcode_table [i] = opcode_table [i][0];
-        s390_opcode_table [i] = opcode_table [i][1];
-        z900_opcode_table [i] = opcode_table [i][2];
-    }
+#if !defined(OPTION_CONFIG_SYMBOLS)
+    UNREFERENCED(j);
+#endif
 
     /* Initialize SETMODE and set user authority */
     SETMODE(INIT);
-
-    /* Direct logmsg output to stderr during initialization */
-    sysblk.msgpipew = stderr;
 
 #ifdef OPTION_SELECT_KLUDGE
     /* Reserve some fd's to be used later for the message pipes */
@@ -325,31 +646,26 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
         dummyfd[i] = dup(fileno(stderr));
 #endif
 
-    if((scodepage = getenv("HERCULES_CP")))
-        set_codepage(scodepage);
-    else
-        set_codepage("default");
-
     /* Open the configuration file */
     fp = fopen (fname, "r");
     if (fp == NULL)
     {
-        logmsg(_("HHCCF003S Cannot open file %s: %s\n"),
+        fprintf(stderr, _("HHCCF003S Cannot open file %s: %s\n"),
                 fname, strerror(errno));
         delayed_exit(1);
     }
-    
+
     /* Set the default system parameter values */
     serial = 0x000001;
     model = 0x0586;
     mainsize = 2;
     xpndsize = 0;
-    cnslport = 3270;
-    numcpu = 1;
+    numcpu = 0;
     numvec = MAX_CPU_ENGINES;
     memset (loadparm, 0x4B, 8);
     sysepoch = 1900;
     tzoffset = 0;
+    diag8cmd = 0;
     toddrag = 1;
 #if defined(_390)
     archmode = ARCH_390;
@@ -358,12 +674,38 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
 #endif
     ostailor = OS_NONE;
     panrate = PANEL_REFRESH_RATE_SLOW;
-    cpuprio = 15;
+    hercprio = DEFAULT_HERCPRIO;
+    todprio  = DEFAULT_TOD_PRIO;
+    cpuprio  = DEFAULT_CPU_PRIO;
+    devprio  = DEFAULT_DEV_PRIO;
     pgmprdos = PGM_PRD_OS_RESTRICTED;
     devtmax = MAX_DEVICE_THREADS;
-#if defined(OPTION_HTTP_SERVER)
-    httpport = 0;
-#endif /*defined(OPTION_HTTP_SERVER)*/
+#if defined(_FEATURE_ECPSVM)
+    ecpsvmavail = 0;
+    ecpsvmlevel = 20;
+#endif /*defined(_FEATURE_ECPSVM)*/
+#if defined(OPTION_SHARED_DEVICES)
+    shrdport = 0;
+#endif /*defined(OPTION_SHARED_DEVICES)*/
+
+
+        /* Cap the default priorities at zero if setuid not available */
+#if !defined(NO_SETUID)
+        if (sysblk.suid != 0)
+        {
+#endif /*!defined(NO_SETUID)*/
+            if (hercprio < 0)
+                hercprio = 0;
+            if (todprio < 0)
+                todprio = 0;
+            if (cpuprio < 0)
+                cpuprio = 0;
+            if (devprio < 0)
+                devprio = 0;
+#if !defined(NO_SETUID)
+        }
+#endif /*!defined(NO_SETUID)*/
+
 
     /* Read records from the configuration file */
     for (scount = 0; ; scount++)
@@ -371,7 +713,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
         /* Read next record from the configuration file */
         if ( read_config (fname, fp) )
         {
-            logmsg(_("HHCCF004S No device records in file %s\n"),
+            fprintf(stderr, _("HHCCF004S No device records in file %s\n"),
                     fname);
             delayed_exit(1);
         }
@@ -380,29 +722,52 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
         if (strlen(keyword) <= 4
             && sscanf(keyword, "%x%c", &rc, &c) == 1)
             break;
+        /* ISW */
+        /* Also exit if keyword contains '-', ',' or '.' */
+        /* Added because device statements may now be a compound device number specification */
+        if(strchr(keyword,'-'))
+        {
+            break;
+        }
+        if(strchr(keyword,'.'))
+        {
+            break;
+        }
+        if(strchr(keyword,','))
+        {
+            break;
+        }
 
         /* Clear the operand value pointers */
         sserial = NULL;
         smodel = NULL;
+        sversion = NULL;
         smainsize = NULL;
         sxpndsize = NULL;
-        scnslport = NULL;
         snumcpu = NULL;
         snumvec = NULL;
         sarchmode = NULL;
         sloadparm = NULL;
         ssysepoch = NULL;
         stzoffset = NULL;
+        sdiag8cmd = NULL;
         stoddrag = NULL;
         sostailor = NULL;
         spanrate = NULL;
+        shercprio = NULL;
+        stodprio = NULL;
         scpuprio = NULL;
+        sdevprio = NULL;
         sdevtmax = NULL;
         spgmprdos = NULL;
-        scodepage = NULL;
-#if defined(OPTION_HTTP_SERVER)
-        shttpport = NULL;
-#endif /*defined(OPTION_HTTP_SERVER)*/
+#if defined(_FEATURE_ECPSVM)
+        secpsvmlevel = NULL;
+        secpsvmlvl = NULL;
+        ecpsvmac = 0;
+#endif /*defined(_FEATURE_ECPSVM)*/
+#if defined(OPTION_SHARED_DEVICES)
+        sshrdport = NULL;
+#endif /*defined(OPTION_SHARED_DEVICES)*/
 #ifdef OPTION_IODELAY_KLUDGE
         siodelay = NULL;
 #endif /*OPTION_IODELAY_KLUDGE*/
@@ -416,12 +781,29 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
             smodel = operand;
             smainsize = addargv[0];
             sxpndsize = addargv[1];
-            scnslport = addargv[2];
+            config_cnslport = strdup(addargv[2]);
             snumcpu = addargv[3];
             sloadparm = addargv[4];
         }
         else
         {
+#if defined(OPTION_DYNAMIC_LOAD)
+            if (!strcasecmp (keyword, "modpath"))
+            {
+                hdl_setpath(strdup(operand));
+            }
+            else
+            if (!strcasecmp (keyword, "ldmod"))
+            {
+                hdl_load(operand, 0);
+
+                for(i = 0; i < addargc; i++)
+                    hdl_load(addargv[i], 0);
+
+                addargc = 0;
+            }
+            else
+#endif /*defined(OPTION_DYNAMIC_LOAD)*/
             if (strcasecmp (keyword, "cpuserial") == 0)
             {
                 sserial = operand;
@@ -440,7 +822,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
             }
             else if (strcasecmp (keyword, "cnslport") == 0)
             {
-                scnslport = operand;
+                config_cnslport = strdup(operand);
             }
             else if (strcasecmp (keyword, "numcpu") == 0)
             {
@@ -462,6 +844,10 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
             {
                 stzoffset = operand;
             }
+            else if (strcasecmp (keyword, "diag8cmd") == 0)
+            {
+                sdiag8cmd = operand;
+            }
 #ifdef OPTION_TODCLOCK_DRAG_FACTOR
             else if (strcasecmp (keyword, "toddrag") == 0)
             {
@@ -482,9 +868,25 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
             {
                 sarchmode = operand;
             }
+            else if (strcasecmp (keyword, "cpuverid") == 0)
+            {
+                sversion = operand;
+            }
+            else if (strcasecmp (keyword, "hercprio") == 0)
+            {
+                shercprio = operand;
+            }
+            else if (strcasecmp (keyword, "todprio") == 0)
+            {
+                stodprio = operand;
+            }
             else if (strcasecmp (keyword, "cpuprio") == 0)
             {
                 scpuprio = operand;
+            }
+            else if (strcasecmp (keyword, "devprio") == 0)
+            {
+                sdevprio = operand;
             }
             else if (strcasecmp (keyword, "devtmax") == 0)
             {
@@ -496,84 +898,156 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
             }
             else if (strcasecmp (keyword, "codepage") == 0)
             {
-                scodepage = operand;
+                set_codepage(operand);
             }
+#if defined(_FEATURE_ECPSVM)
+            /* ECPS:VM support */
+            else if(strcasecmp(keyword, "ecps:vm") == 0)
+            {
+                secpsvmlevel=operand;
+                secpsvmlvl=addargv[0];
+                ecpsvmac=addargc;
+                fprintf(stderr, _("HHCCF061W Warning in %s line %d: "
+                    "ECPS:VM Statement deprecated. Use ECPSVM instead\n"),
+                    fname, stmt);
+            }
+            else if(strcasecmp(keyword, "ecpsvm") == 0)
+            {
+                secpsvmlevel=operand;
+                secpsvmlvl=addargv[0];
+                ecpsvmac=addargc;
+            }
+#endif /*defined(_FEATURE_ECPSVM)*/
 #ifdef OPTION_IODELAY_KLUDGE
             else if (strcasecmp (keyword, "iodelay") == 0)
             {
                 siodelay = operand;
             }
 #endif /*OPTION_IODELAY_KLUDGE*/
-#if defined(OPTION_HTTP_SERVER)
-            else if (strcasecmp (keyword, "httpport") == 0)
+#if defined(OPTION_CONFIG_SYMBOLS)
+            else if (strcasecmp(keyword,"defsym")==0)
             {
-                shttpport = operand;
-                if(addargc > 0)
+                char *subval;
+                /* Execute this operation immediatelly */
+                if(operand==NULL)
                 {
-                    if(!strcasecmp(addargv[0],"auth"))
-                        sysblk.httpauth = 1;
-                    else if(strcasecmp(addargv[0],"noauth"))
-                    {
-                        logmsg(_("HHCCF005S Error in %s line %d: "
-                        "Unrecognized argument %s\n"),
-                        fname, stmt, addargv[0]);
-                        delayed_exit(1);
-                    }
-                    addargc--;
-                }
-                if(addargc > 0)
-                {
-                    sysblk.httpuser = strdup(addargv[1]);
-                    if(--addargc)
-                        sysblk.httppass = strdup(addargv[2]);
-                    else
-                    {
-                        logmsg(_("HHCCF006S Error in %s line %d: "
-                        "Userid, but no password given %s\n"),
-                        fname, stmt, addargv[1]);
-                        delayed_exit(1);
-                    }
-                    addargc--;
-                }
-                    
-            }
-            else if (strcasecmp (keyword, "httproot") == 0)
-            {
-                if (operand)
-                    sysblk.httproot = strdup(operand);
-                else
-                {
-                    logmsg(_("HHCCF007S Error in %s line %d: "
-                    "Missing argument.\n"),
+                    fprintf(stderr, _("HHCCF059S Error in %s line %d: "
+                        "Missing symbol name on DEFSYM statement\n"),
                         fname, stmt);
                     delayed_exit(1);
                 }
+                if(addargc!=1)
+                {
+                    fprintf(stderr, _("HHCCF060S Error in %s line %d: "
+                        "DEFSYM requires a single symbol value (include quotation marks if necessary)\n"),
+                        fname, stmt);
+                    delayed_exit(1);
+                }
+                subval=resolve_symbol_string(addargv[0]);
+                if(subval!=NULL)
+                {
+                    set_symbol(operand,subval);
+                    free(subval);
+                }
+                else
+                {
+                    set_symbol(operand,addargv[0]);
+                }
+                addargc--;
+            }
+#endif /* defined(OPTION_CONFIG_SYMBOLS) */
+#if defined(OPTION_HTTP_SERVER)
+            else if (strcasecmp (keyword, "httpport") == 0)
+            {
+                if (!operand)
+                {
+                    fprintf(stderr, _("HHCCF007S Error in %s line %d: "
+                        "Missing argument.\n"),
+                        fname, stmt);
+                    delayed_exit(1);
+                }
+                if (sscanf(operand, "%hu%c", &sysblk.httpport, &c) != 1
+                    || sysblk.httpport == 0 || (sysblk.httpport < 1024 && sysblk.httpport != 80) )
+                {
+                    fprintf(stderr, _("HHCCF029S Error in %s line %d: "
+                            "Invalid HTTP port number %s\n"),
+                            fname, stmt, operand);
+                    delayed_exit(1);
+                }
+                if (addargc > 0)
+                {
+                    if (!strcasecmp(addargv[0],"auth"))
+                        sysblk.httpauth = 1;
+                    else if (strcasecmp(addargv[0],"noauth"))
+                    {
+                        fprintf(stderr, _("HHCCF005S Error in %s line %d: "
+                            "Unrecognized argument %s\n"),
+                            fname, stmt, addargv[0]);
+                        delayed_exit(1);
+                    }
+                    addargc--;
+                }
+                if (addargc > 0)
+                {
+                    if (sysblk.httpuser) free(sysblk.httpuser);
+                    sysblk.httpuser = strdup(addargv[1]);
+                    if (--addargc)
+                    {
+                        if (sysblk.httppass) free(sysblk.httppass);
+                        sysblk.httppass = strdup(addargv[2]);
+                    }
+                    else
+                    {
+                        fprintf(stderr, _("HHCCF006S Error in %s line %d: "
+                            "Userid, but no password given %s\n"),
+                            fname, stmt, addargv[1]);
+                        delayed_exit(1);
+                    }
+                    addargc--;
+                }
+
+            }
+            else if (strcasecmp (keyword, "httproot") == 0)
+            {
+                if (!operand)
+                {
+                    fprintf(stderr, _("HHCCF007S Error in %s line %d: "
+                        "Missing argument.\n"),
+                        fname, stmt);
+                    delayed_exit(1);
+                }
+                if (sysblk.httproot) free(sysblk.httproot);
+                sysblk.httproot = strdup(operand);
+                /* (will be validated later) */
             }
 #endif /*defined(OPTION_HTTP_SERVER)*/
+#if defined(OPTION_SHARED_DEVICES)
+            else if (strcasecmp (keyword, "shrdport") == 0)
+            {
+                sshrdport = operand;
+            }
+#endif /*defined(OPTION_SHARED_DEVICES)*/
             else if (strcasecmp (keyword, "cckd") == 0)
             {
                 scckd = operand;
             }
             else
             {
-                logmsg(_("HHCCF008S Error in %s line %d: "
+                logmsg( _("HHCCF008E Error in %s line %d: "
                         "Unrecognized keyword %s\n"),
                         fname, stmt, keyword);
-                delayed_exit(1);
+                operand = "";
+                addargc = 0;
             }
 
             /* Check for one and only one operand */
             if (operand == NULL || addargc != 0)
             {
-                logmsg(_("HHCCF009S Error in %s line %d: "
+                logmsg( _("HHCCF009E Error in %s line %d: "
                         "Incorrect number of operands\n"),
                         fname, stmt);
-                delayed_exit(1);
             }
         }
-
-        if(scodepage)
-            set_codepage(scodepage);
 
         if (sarchmode != NULL)
         {
@@ -599,7 +1073,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
             else
 #endif
             {
-                logmsg(_("HHCCF010S Error in %s line %d: "
+                fprintf(stderr, _("HHCCF010S Error in %s line %d: "
                         "Unknown or unsupported ARCHMODE specification %s\n"),
                         fname, stmt, sarchmode);
                 delayed_exit(1);
@@ -611,13 +1085,27 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
         sysblk.arch_z900 = sysblk.arch_mode != ARCH_390;
 #endif
 
+        /* Parse CPU version number operand */
+        if (sversion != NULL)
+        {
+            if (strlen(sversion) != 2
+                || sscanf(sversion, "%hhx%c", &version, &c) != 1)
+            {
+                fprintf(stderr, _("HHCCF012S Error in %s line %d: "
+                        "%s is not a valid CPU version code\n"),
+                        fname, stmt, sversion);
+                delayed_exit(1);
+            }
+            dfltver = 0;
+        }
+
         /* Parse CPU serial number operand */
         if (sserial != NULL)
         {
             if (strlen(sserial) != 6
                 || sscanf(sserial, "%x%c", &serial, &c) != 1)
             {
-                logmsg(_("HHCCF011S Error in %s line %d: "
+                fprintf(stderr, _("HHCCF051S Error in %s line %d: "
                         "%s is not a valid serial number\n"),
                         fname, stmt, sserial);
                 delayed_exit(1);
@@ -630,7 +1118,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
             if (strlen(smodel) != 4
                 || sscanf(smodel, "%hx%c", &model, &c) != 1)
             {
-                logmsg(_("HHCCF012S Error in %s line %d: "
+                fprintf(stderr, _("HHCCF012S Error in %s line %d: "
                         "%s is not a valid CPU model\n"),
                         fname, stmt, smodel);
                 delayed_exit(1);
@@ -640,10 +1128,10 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
         /* Parse main storage size operand */
         if (smainsize != NULL)
         {
-            if (sscanf(smainsize, "%hu%c", &mainsize, &c) != 1
+            if (sscanf(smainsize, "%u%c", &mainsize, &c) != 1
                 || mainsize < 2 || mainsize > 1024)
             {
-                logmsg(_("HHCCF013S Error in %s line %d: "
+                fprintf(stderr, _("HHCCF013S Error in %s line %d: "
                         "Invalid main storage size %s\n"),
                         fname, stmt, smainsize);
                 delayed_exit(1);
@@ -653,35 +1141,63 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
         /* Parse expanded storage size operand */
         if (sxpndsize != NULL)
         {
-            if (sscanf(sxpndsize, "%hu%c", &xpndsize, &c) != 1
+            if (sscanf(sxpndsize, "%u%c", &xpndsize, &c) != 1
                 || xpndsize > 1024)
             {
-                logmsg(_("HHCCF014S Error in %s line %d: "
+                fprintf(stderr, _("HHCCF014S Error in %s line %d: "
                         "Invalid expanded storage size %s\n"),
                         fname, stmt, sxpndsize);
                 delayed_exit(1);
             }
         }
 
-        /* Parse console port number operand */
-        if (scnslport != NULL)
-        {
-            if (sscanf(scnslport, "%hu%c", &cnslport, &c) != 1
-                || cnslport == 0)
+        /* Parse Hercules priority operand */
+        if (shercprio != NULL)
+            if (sscanf(shercprio, "%d%c", &hercprio, &c) != 1)
             {
-                logmsg(_("HHCCF015S Error in %s line %d: "
-                        "Invalid console port number %s\n"),
-                        fname, stmt, scnslport);
+                fprintf(stderr, _("HHCCF016S Error in %s line %d: "
+                        "Invalid Hercules process group thread priority %s\n"),
+                        fname, stmt, shercprio);
                 delayed_exit(1);
             }
+
+#if !defined(NO_SETUID)
+        if(sysblk.suid != 0 && hercprio < 0)
+        {
+            logmsg(_("HHCCF017W Hercules is not running as setuid root, "
+                    "cannot raise Hercules process group thread priority\n"));
+            hercprio = 0;               /* Set priority to Normal     */
         }
+#endif /*!defined(NO_SETUID)*/
+
+        sysblk.hercprio = hercprio;
+
+        /* Parse TOD Clock priority operand */
+        if (stodprio != NULL)
+            if (sscanf(stodprio, "%d%c", &todprio, &c) != 1)
+            {
+                fprintf(stderr, _("HHCCF016S Error in %s line %d: "
+                        "Invalid TOD Clock thread priority %s\n"),
+                        fname, stmt, stodprio);
+                delayed_exit(1);
+            }
+
+#if !defined(NO_SETUID)
+        if(sysblk.suid != 0 && todprio < 0)
+        {
+            logmsg(_("HHCCF017W Hercules is not running as setuid root, "
+                    "cannot raise TOD Clock thread priority\n"));
+            todprio = 0;                /* Set priority to Normal     */
+        }
+#endif /*!defined(NO_SETUID)*/
+
+        sysblk.todprio = todprio;
 
         /* Parse CPU thread priority operand */
         if (scpuprio != NULL)
-        {
             if (sscanf(scpuprio, "%d%c", &cpuprio, &c) != 1)
             {
-                logmsg(_("HHCCF016S Error in %s line %d: "
+                fprintf(stderr, _("HHCCF016S Error in %s line %d: "
                         "Invalid CPU thread priority %s\n"),
                         fname, stmt, scpuprio);
                 delayed_exit(1);
@@ -689,21 +1205,58 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
 
 #if !defined(NO_SETUID)
         if(sysblk.suid != 0 && cpuprio < 0)
+        {
             logmsg(_("HHCCF017W Hercules is not running as setuid root, "
                     "cannot raise CPU priority\n"));
+            cpuprio = 0;                /* Set priority to Normal     */
+        }
 #endif /*!defined(NO_SETUID)*/
 
-        }
-        else
             sysblk.cpuprio = cpuprio;
+
+        /* Parse Device thread priority operand */
+        if (sdevprio != NULL)
+            if (sscanf(sdevprio, "%d%c", &devprio, &c) != 1)
+            {
+                fprintf(stderr, _("HHCCF016S Error in %s line %d: "
+                        "Invalid device thread priority %s\n"),
+                        fname, stmt, sdevprio);
+                delayed_exit(1);
+            }
+
+#if !defined(NO_SETUID)
+        if(sysblk.suid != 0 && devprio < 0)
+            logmsg(_("HHCCF017W Hercules is not running as setuid root, "
+                    "cannot raise device thread priority\n"));
+#endif /*!defined(NO_SETUID)*/
+
+        sysblk.devprio = devprio;
+
+        /* Parse Device thread priority operand */
+        if (sdevprio != NULL)
+            if (sscanf(sdevprio, "%d%c", &devprio, &c) != 1)
+            {
+                fprintf(stderr, _("HHCCF016S Error in %s line %d: "
+                        "Invalid device thread priority %s\n"),
+                        fname, stmt, sdevprio);
+                delayed_exit(1);
+            }
+
+#if !defined(NO_SETUID)
+        if(sysblk.suid != 0 && devprio < 0)
+            logmsg(_("HHCCF017W Hercules is not running as setuid root, "
+                    "cannot raise device thread priority\n"));
+#endif /*!defined(NO_SETUID)*/
+
+        sysblk.devprio = devprio;
 
         /* Parse number of CPUs operand */
         if (snumcpu != NULL)
         {
             if (sscanf(snumcpu, "%hu%c", &numcpu, &c) != 1
-                || numcpu < 1 || numcpu > MAX_CPU_ENGINES)
+                || numcpu > MAX_CPU_ENGINES)
             {
-                logmsg(_("HHCCF018S Error in %s line %d: "
+                fprintf(stderr, _("HHCCF018S Error in %s line %d: "
                         "Invalid number of CPUs %s\n"),
                         fname, stmt, snumcpu);
                 delayed_exit(1);
@@ -717,7 +1270,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
             if (sscanf(snumvec, "%hu%c", &numvec, &c) != 1
                 || numvec > MAX_CPU_ENGINES)
             {
-                logmsg(_("HHCCF019S Error in %s line %d: "
+                fprintf(stderr, _("HHCCF019S Error in %s line %d: "
                         "Invalid number of VFs %s\n"),
                         fname, stmt, snumvec);
                 delayed_exit(1);
@@ -732,7 +1285,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
         {
             if (strlen(sloadparm) > 8)
             {
-                logmsg(_("HHCCF021S Error in %s line %d: "
+                fprintf(stderr, _("HHCCF021S Error in %s line %d: "
                         "Load parameter %s exceeds 8 characters\n"),
                         fname, stmt, sloadparm);
                 delayed_exit(1);
@@ -754,7 +1307,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
                  && (sysepoch != 1970)
                     ))
             {
-                logmsg(_("HHCCF022S Error in %s line %d: "
+                fprintf(stderr, _("HHCCF022S Error in %s line %d: "
                         "%s is not a valid system epoch.\n"
                         "Patch config.c to expand the table\n"),
                         fname, stmt, ssysepoch);
@@ -769,9 +1322,26 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
                 || sscanf(stzoffset, "%d%c", &tzoffset, &c) != 1
                 || (tzoffset < -2359) || (tzoffset > 2359))
             {
-                logmsg(_("HHCCF023S Error in %s line %d: "
+                fprintf(stderr, _("HHCCF023S Error in %s line %d: "
                         "%s is not a valid timezone offset\n"),
                         fname, stmt, stzoffset);
+                delayed_exit(1);
+            }
+        }
+
+        /* Parse diag8cmd operand */
+        if (sdiag8cmd != NULL)
+        {
+            if (strcasecmp (sdiag8cmd, "enable") == 0)
+                diag8cmd = 1;
+            else
+            if (strcasecmp (sdiag8cmd, "disable") == 0)
+                diag8cmd = 0;
+            else
+            {
+                fprintf(stderr, _("HHCCF052S Error in %s line %d: "
+                        "%s: invalid argument\n"),
+                        fname, stmt, sdiag8cmd);
                 delayed_exit(1);
             }
         }
@@ -783,7 +1353,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
             if (sscanf(stoddrag, "%u%c", &toddrag, &c) != 1
                 || toddrag < 1 || toddrag > 10000)
             {
-                logmsg(_("HHCCF024S Error in %s line %d: "
+                fprintf(stderr, _("HHCCF024S Error in %s line %d: "
                         "Invalid TOD clock drag factor %s\n"),
                         fname, stmt, stoddrag);
                 delayed_exit(1);
@@ -807,7 +1377,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
                     if (sscanf(spanrate, "%u%c", &panrate, &c) != 1
                         || panrate < (1000/CLK_TCK) || panrate > 5000)
                     {
-                        logmsg(_("HHCCF025S Error in %s line %d: "
+                        fprintf(stderr, _("HHCCF025S Error in %s line %d: "
                                 "Invalid panel refresh rate %s\n"),
                                 fname, stmt, spanrate);
                         delayed_exit(1);
@@ -846,7 +1416,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
             }
             else
             {
-                logmsg(_("HHCCF026S Error in %s line %d: "
+                fprintf(stderr, _("HHCCF026S Error in %s line %d: "
                         "Unknown OS tailor specification %s\n"),
                         fname, stmt, sostailor);
                 delayed_exit(1);
@@ -859,7 +1429,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
             if (sscanf(sdevtmax, "%d%c", &devtmax, &c) != 1
                 || devtmax < -1)
             {
-                logmsg(_("HHCCF027S Error in %s line %d: "
+                fprintf(stderr, _("HHCCF027S Error in %s line %d: "
                         "Invalid maximum device threads %s\n"),
                         fname, stmt, sdevtmax);
                 delayed_exit(1);
@@ -884,27 +1454,93 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
             }
             else
             {
-                logmsg(_("HHCCF028S Error in %s line %d: "
+                fprintf(stderr, _("HHCCF028S Error in %s line %d: "
                         "Invalid program product OS permission %s\n"),
                         fname, stmt, spgmprdos);
                 delayed_exit(1);
             }
         }
 
-#if defined(OPTION_HTTP_SERVER)
-        /* Parse http port number operand */
-        if (shttpport != NULL)
+#if defined(_FEATURE_ECPSVM)
+        /* Parse ECPS:VM level */
+        if(secpsvmlevel != NULL)
         {
-            if (sscanf(shttpport, "%hu%c", &httpport, &c) != 1
-                || httpport == 0 || (httpport < 1024 && httpport != 80) )
+            while(1)        /* Dummy while loop for break support */
             {
-                logmsg(_("HHCCF029S Error in %s line %d: "
-                        "Invalid HTTP port number %s\n"),
-                        fname, stmt, shttpport);
+                ecpsvmavail=0;
+                ecpsvmlevel=0;
+                if(strcasecmp(secpsvmlevel,"no")==0)
+                {
+                    ecpsvmavail=0;
+                    break;
+                }
+                if(strcasecmp(secpsvmlevel,"yes")==0)
+                {
+                    ecpsvmavail=1;
+                    ecpsvmlevel=20;
+                    break;
+                }
+                if(strcasecmp(secpsvmlevel,"level")==0)
+                {
+                    ecpsvmavail=1;
+                    if(ecpsvmac==0)
+                    {
+                        fprintf(stderr, _("HHCCF062W Warning in %s line %d: "
+                                "Missing ECPSVM level value. 20 Assumed\n"),
+                                fname, stmt);
+                        ecpsvmavail=1;
+                        ecpsvmlevel=20;
+                        break;
+                    }
+                    if (sscanf(secpsvmlvl, "%d%c", &ecpsvmlevel, &c) != 1)
+                    {
+                        fprintf(stderr, _("HHCCF051W Warning in %s line %d: "
+                                "Invalid ECPSVM level value : %s. 20 Assumed\n"),
+                                fname, stmt, secpsvmlevel);
+                        ecpsvmavail=1;
+                        ecpsvmlevel=20;
+                        break;
+                    }
+                    break;
+                }
+                ecpsvmavail=1;
+                if (sscanf(secpsvmlevel, "%d%c", &ecpsvmlevel, &c) != 1)
+                {
+                    fprintf(stderr, _("HHCCF051W Error in %s line %d: "
+                            "Invalid ECPSVM keyword : %s. NO Assumed\n"),
+                            fname, stmt, secpsvmlevel);
+                    ecpsvmavail=0;
+                    ecpsvmlevel=0;
+                    break;
+                }
+                else
+                {
+                    fprintf(stderr, _("HHCCF063W Warning in %s line %d: "
+                            "Specifying ECPSVM level directly is deprecated. Use the 'LEVEL' keyword instead.\n"),
+                            fname, stmt);
+                    break;
+                }
+                break;
+            }
+            sysblk.ecpsvm.available=ecpsvmavail;
+            sysblk.ecpsvm.level=ecpsvmlevel;
+        }
+#endif /*defined(_FEATURE_ECPSVM)*/
+
+#if defined(OPTION_SHARED_DEVICES)
+        /* Parse shared device port number operand */
+        if (sshrdport != NULL)
+        {
+            if (sscanf(sshrdport, "%hu%c", &shrdport, &c) != 1
+                || shrdport < 1024 )
+            {
+                fprintf(stderr, _("HHCCF029S Error in %s line %d: "
+                        "Invalid SHRDPORT port number %s\n"),
+                        fname, stmt, sshrdport);
                 delayed_exit(1);
             }
         }
-#endif /*defined(OPTION_HTTP_SERVER)*/
+#endif /*defined(OPTION_SHARED_DEVICES)*/
 
 #ifdef OPTION_IODELAY_KLUDGE
         /* Parse I/O delay value */
@@ -912,7 +1548,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
         {
             if (sscanf(siodelay, "%d%c", &iodelay, &c) != 1)
             {
-                logmsg(_("HHCCF030S Error in %s line %d: "
+                fprintf(stderr, _("HHCCF030S Error in %s line %d: "
                         "Invalid I/O delay value: %s\n"),
                         fname, stmt, siodelay);
                 delayed_exit(1);
@@ -922,66 +1558,44 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
 
         /* Parse cckd value value */
         if (scckd)
-            if (cckd_command (scckd, 0))
-                delayed_exit(1);
+            cckd_command (scckd, 0);
 
     } /* end for(scount) */
 
 
-    /* Obtain main storage */
-    sysblk.mainsize = mainsize * 1024 * 1024;
-    sysblk.mainstor = malloc(sysblk.mainsize);
-    if (sysblk.mainstor == NULL)
-    {
-        logmsg(_("HHCCF031S Cannot obtain %dMB main storage: %s\n"),
-                mainsize, strerror(errno));
-        delayed_exit(1);
-    }
+    /* Set root mode in order to set priority */
+    SETMODE(ROOT);
 
-    /* Obtain main storage key array */
-    sysblk.storkeys = malloc(sysblk.mainsize / STORAGE_KEY_UNITSIZE);
-    if (sysblk.storkeys == NULL)
-    {
-        logmsg(_("HHCCF032S Cannot obtain storage key array: %s\n"),
-                strerror(errno));
-        delayed_exit(1);
-    }
+    /* Set Hercules base priority */
+    if (setpriority(PRIO_PGRP, 0, hercprio))
+        logmsg (_("HHCCF064W Hercules set priority %d failed: %s\n"),
+                hercprio, strerror(errno));
 
-#if 0   /*DEBUG-JJ-20/03/2000*/
-    /* Mark selected frames invalid for debugging purposes */
-    for (i = 64 ; i < (sysblk.mainsize / STORAGE_KEY_UNITSIZE); i += 2)
-        if (i < (sysblk.mainsize / STORAGE_KEY_UNITSIZE) - 64)
-            sysblk.storkeys[i] = STORKEY_BADFRM;
-        else
-            sysblk.storkeys[i++] = STORKEY_BADFRM;
+    /* Back to user mode */
+    SETMODE(USER);
+
+    /* Display Hercules thread information on control panel */
+    logmsg (_("HHCCF065I Hercules: tid="TIDPAT", pid=%d, pgid=%d, "
+              "priority=%d\n"),
+            thread_id(), getpid(), getpgid(0),
+            getpriority(PRIO_PGRP,0));
+
+    config_storage(mainsize, xpndsize);
+
+#if defined(OPTION_SHARED_DEVICES)
+    sysblk.shrdport = shrdport;
+#endif /*defined(OPTION_SHARED_DEVICES)*/
+
+    sysblk.diag8cmd = diag8cmd;
+
+#if defined(_370) || defined(_390)
+    if(dfltver)
+        version =
+#if defined(_900)
+                  (sysblk.arch_mode == ARCH_900) ? 0x00 :
 #endif
-
-    if (xpndsize != 0)
-    {
-#ifdef _FEATURE_EXPANDED_STORAGE
-
-        /* Obtain expanded storage */
-        sysblk.xpndsize = xpndsize * (1024*1024 / XSTORE_PAGESIZE);
-        sysblk.xpndstor = malloc(sysblk.xpndsize * XSTORE_PAGESIZE);
-        if (sysblk.xpndstor == NULL)
-        {
-            logmsg(_("HHCCF033S Cannot obtain %dMB expanded storage: "
-                    "%s\n"),
-                    xpndsize, strerror(errno));
-            delayed_exit(1);
-        }
-#else /*!_FEATURE_EXPANDED_STORAGE*/
-        logmsg(_("HHCCF034W Expanded storage support not installed\n"));
-#endif /*!_FEATURE_EXPANDED_STORAGE*/
-    } /* end if(sysblk.xpndsize) */
-
-    /* Save the console port number */
-    sysblk.cnslport = cnslport;
-
-#if defined(OPTION_HTTP_SERVER)
-    sysblk.httpport = httpport;
-#endif /*defined(OPTION_HTTP_SERVER)*/
-
+                                                          0xFD;
+#endif
     /* Build CPU identifier */
     sysblk.cpuid = ((U64)version << 56)
                  | ((U64)serial << 32)
@@ -995,33 +1609,21 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
     initialize_lock (&sysblk.mainlock);
     initialize_lock (&sysblk.intlock);
     initialize_lock (&sysblk.sigplock);
-#if MAX_CPU_ENGINES == 1 || !defined(OPTION_FAST_INTCOND)
-    initialize_condition (&sysblk.intcond);
-#endif
-#if MAX_CPU_ENGINES > 1
     initialize_condition (&sysblk.broadcast_cond);
-#ifdef SMP_SERIALIZATION
-    for(i = 0; i < MAX_CPU_ENGINES; i++)
-        initialize_lock (&sysblk.regs[i].serlock);
-#endif /*SMP_SERIALIZATION*/
-#endif /*MAX_CPU_ENGINES > 1*/
     initialize_detach_attr (&sysblk.detattr);
 #if defined(OPTION_CPU_UTILIZATION)
     for(i = 0; i < MAX_CPU_ENGINES; i++)
         initialize_lock (&sysblk.regs[i].accum_wait_time_lock);
 #endif /*defined(OPTION_CPU_UTILIZATION)*/
-#if defined(OPTION_W32_CTCI)
-    tt32_init(sysblk.msgpipew);
-#endif /* defined(OPTION_W32_CTCI) */
+
 #if defined(OPTION_FISHIO)
-    InitIOScheduler                         // initialize i/o scheduler...
-        (
-            sysblk.msgpipew,                // (for issuing msgs to Herc console)
-            sysblk.arch_mode,               // (for calling execute_ccw_chain)
-            DEVICE_THREAD_PRIORITY,         // (for calling fthread_create)
-            MAX_DEVICE_THREAD_IDLE_SECS,    // (maximum device thread wait time)
-            devtmax                         // (maximum #of device threads allowed)
-        );
+    InitIOScheduler                     // initialize i/o scheduler...
+    (
+        sysblk.arch_mode,               // (for calling execute_ccw_chain)
+        &sysblk.devprio,                // (ptr to device thread priority)
+        MAX_DEVICE_THREAD_IDLE_SECS,    // (maximum device thread wait time)
+        devtmax                         // (maximum #of device threads allowed)
+    );
 #else // !defined(OPTION_FISHIO)
     initialize_lock (&sysblk.ioqlock);
     initialize_condition (&sysblk.ioqcond);
@@ -1030,11 +1632,6 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
     sysblk.devtwait = sysblk.devtnbr =
     sysblk.devthwm  = sysblk.devtunavail = 0;
 #endif // defined(OPTION_FISHIO)
-    InitializeListHead(&bind_head);
-    initialize_lock(&bind_lock);
-
-    /* Initialize HercIFC fd's */
-    sysblk.ifcfd[0] = sysblk.ifcfd[1] = -1;
 
     /* Set up the system TOD clock offset: compute the number of
        seconds from the designated year to 1970 for TOD clock
@@ -1093,7 +1690,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
     /* Set the panel refresh rate */
     sysblk.panrate = panrate;
 
-#if defined(FEATURE_REGION_RELOCATE)
+#if defined(_FEATURE_REGION_RELOCATE)
     /* Initialize base zone storage view (SIE compat) */
     for(i = 0; i < FEATURE_SIE_MAXZONES; i++)
     {
@@ -1111,6 +1708,20 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
         }
     }
 #endif
+
+    /* Gabor Hoffer (performance option) */
+    for (i = 0; i < 256; i++)
+    {
+#if defined(_370)
+        s370_opcode_table [i] = opcode_table [i][ARCH_370];
+#endif
+#if defined(_390)
+        s390_opcode_table [i] = opcode_table [i][ARCH_390];
+#endif
+#if defined(_900)
+        z900_opcode_table [i] = opcode_table [i][ARCH_900];
+#endif
+    }
 
     /* Initialize the CPU registers */
     for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
@@ -1136,9 +1747,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
         sysblk.regs[cpu].vf = &sysblk.vf[cpu];
 #endif /*defined(_FEATURE_VECTOR_FACILITY)*/
 
-#if MAX_CPU_ENGINES > 1 && defined(OPTION_FAST_INTCOND)
         initialize_condition (&sysblk.regs[cpu].intcond);
-#endif
 
 #if defined(_FEATURE_SIE)
         sysblk.sie_regs[cpu] = sysblk.regs[cpu];
@@ -1157,24 +1766,69 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
 
         if (sdevnum == NULL || sdevtype == NULL)
         {
-            logmsg(_("HHCCF035S Error in %s line %d: "
+            fprintf(stderr, _("HHCCF035S Error in %s line %d: "
                     "Missing device number or device type\n"),
                     fname, stmt);
             delayed_exit(1);
         }
+        /* Parse devnum */
+        devncount=parse_devnums(sdevnum,&devnarray);
 
-        if (strlen(sdevnum) > 4
-            || sscanf(sdevnum, "%hx%c", &devnum, &c) != 1)
+        if(devncount==0)
         {
-            logmsg(_("HHCCF036S Error in %s line %d: "
-                    "%s is not a valid device number\n"),
+            fprintf(stderr, _("HHCCF036S Error in %s line %d: "
+                    "%s is not a valid device number(s) specification\n"),
                     fname, stmt, sdevnum);
             delayed_exit(1);
         }
-
-        /* Build the device configuration block */
-        if (attach_device (devnum, sdevtype, addargc, addargv))
-            delayed_exit(1);
+#if defined(OPTION_CONFIG_SYMBOLS)
+        newargv=malloc(MAX_ARGS*sizeof(char *));
+        orig_newargv=malloc(MAX_ARGS*sizeof(char *));
+#endif /* #if defined(OPTION_CONFIG_SYMBOLS) */
+        for(baddev=0,i=0;i<(int)devncount;i++)
+        {
+            for(devnum=devnarray[i].cuu1;devnum<=devnarray[i].cuu2;devnum++)
+            {
+#if defined(OPTION_CONFIG_SYMBOLS)
+               char wrkbfr[16];
+               snprintf(wrkbfr,sizeof(wrkbfr),"%3.3x",devnum);
+               set_symbol("cuu",wrkbfr);
+               snprintf(wrkbfr,sizeof(wrkbfr),"%4.4x",devnum);
+               set_symbol("ccuu",wrkbfr);
+               snprintf(wrkbfr,sizeof(wrkbfr),"%3.3X",devnum);
+               set_symbol("CUU",wrkbfr);
+               snprintf(wrkbfr,sizeof(wrkbfr),"%4.4X",devnum);
+               set_symbol("CCUU",wrkbfr);
+               for(j=0;j<addargc;j++)
+               {
+                   orig_newargv[j]=newargv[j]=resolve_symbol_string(addargv[j]);
+               }
+                /* Build the device configuration block */
+               rc=attach_device(devnum, sdevtype, addargc, newargv);
+               for(j=0;j<addargc;j++)
+               {
+                   free(orig_newargv[j]);
+               }
+#else /* #if defined(OPTION_CONFIG_SYMBOLS) */
+                /* Build the device configuration block (no syms) */
+               rc=attach_device(devnum, sdevtype, addargc, addargv);
+#endif /* #if defined(OPTION_CONFIG_SYMBOLS) */
+               if(rc!=0)
+               {
+                   baddev=1;
+                   break;
+               }
+            }
+            if(baddev)
+            {
+                break;
+            }
+        }
+#if defined(OPTION_CONFIG_SYMBOLS)
+        free(newargv);
+        free(orig_newargv);
+#endif /* #if defined(OPTION_CONFIG_SYMBOLS) */
+        free(devnarray);
 
         /* Read next device record from the configuration file */
         if (read_config (fname, fp))
@@ -1188,46 +1842,9 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
         close(dummyfd[i]);
 #endif
 
-    /* Create the message pipe */
-    rc = pipe (pfd);
-    if (rc < 0)
-    {
-        logmsg(_("HHCCF037S Message pipe creation failed: %s\n"),
-                strerror(errno));
-        delayed_exit(1);
-    }
-
-    sysblk.msgpiper = pfd[0];
-#ifndef FLUSHLOG
-    sysblk.msgpipew = fdopen (pfd[1], "w");
-#else
-    sysblk.msgpipew = fopen("logfile", "w");
-#endif
-    if (sysblk.msgpipew == NULL)
-    {
-        sysblk.msgpipew = stderr;
-        logmsg(_("HHCCF038S Message pipe open failed: %s\n"),
-                strerror(errno));
-        delayed_exit(1);
-    }
-    setvbuf (sysblk.msgpipew, NULL, _IOLBF, 0);
-
-    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
-        dev->msgpipew = sysblk.msgpipew;
-    cckdblk.msgpipew = sysblk.msgpipew;
-
-#if defined(OPTION_FISHIO)
-    ios_msgpipew = sysblk.msgpipew;
-#endif // defined(OPTION_FISHIO)
-#if defined(OPTION_W32_CTCI)
-    g_tt32_msgpipew = sysblk.msgpipew;
-#endif // defined(OPTION_W32_CTCI)
-
-    /* Display the version identifier on the control panel */
-    display_version (sysblk.msgpipew, "Hercules ");
     if (sysblk.pgmprdos == PGM_PRD_OS_LICENSED)
     {
-        logmsg(_("HHCCF039W PGMPRDOS LICENSED specified.\n"
+        logmsg(_("\nHHCCF039W PGMPRDOS LICENSED specified.\n"
                 "           Licensed program product operating systems are "
                 "enabled.\n           You are "
                 "responsible for meeting all conditions of your\n"
@@ -1241,8 +1858,10 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
 #endif /*_FEATURE_VECTOR_FACILITY*/
 
 #ifndef PROFILE_CPU
+    obtain_lock (&sysblk.intlock);
     for(i = 0; i < numcpu; i++)
         configure_cpu(sysblk.regs + i);
+    release_lock (&sysblk.intlock);
 #endif
     /* close configuration file */
     rc = fclose(fp);
@@ -1268,20 +1887,23 @@ int     cpu;
         }
     release_lock (&sysblk.intlock);
 
+#if defined(OPTION_SHARED_DEVICES)
+    /* Terminate the shared device listener thread */
+    if (sysblk.shrdtid)
+        signal_thread (sysblk.shrdtid, SIGUSR2);
+#endif
+
     /* Detach all devices */
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
        if (dev->pmcw.flag5 & PMCW5_V)
            detach_device(dev->devnum);
 
-    /* Terminate HercIFC if necessary */
-    if( sysblk.ifcfd[0] != -1 || sysblk.ifcfd[1] != -1 )
-    {
-        close( sysblk.ifcfd[0] );
-        close( sysblk.ifcfd[1] );
-        sysblk.ifcfd[0] = sysblk.ifcfd[1] = -1;
-
-        kill( sysblk.ifcpid, SIGINT );
-    }
+#if !defined(OPTION_FISHIO)
+    /* Terminate device threads */
+    obtain_lock (&sysblk.ioqlock);
+    broadcast_condition (&sysblk.ioqcond);
+    release_lock (&sysblk.ioqlock);
+#endif
 
     /* Deconfigure all CPU's */
     for(cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
@@ -1293,6 +1915,7 @@ int     cpu;
 
 /*-------------------------------------------------------------------*/
 /* Function to start a new CPU thread                                */
+/* Caller MUST own the intlock                                       */
 /*-------------------------------------------------------------------*/
 int configure_cpu(REGS *regs)
 {
@@ -1312,6 +1935,10 @@ int configure_cpu(REGS *regs)
                 regs->cpuad, strerror(errno));
         return -1;
     }
+
+    /* Wait for CPU thread to initialize */
+    wait_condition (&regs->intcond, &sysblk.intlock);
+
     return 0;
 } /* end function configure_cpu */
 
@@ -1338,79 +1965,126 @@ int deconfigure_cpu(REGS *regs)
 } /* end function deconfigure_cpu */
 
 
-/*-------------------------------------------------------------------*/
-/* Function to build a device configuration block                    */
-/*-------------------------------------------------------------------*/
-int attach_device (U16 devnum, char *type,
-                   int addargc, BYTE *addargv[])
+/* 4 next functions used for fast device lookup cache management */
+#if defined(OPTION_FAST_DEVLOOKUP)
+static void AddDevnumFastLookup(DEVBLK *dev,U16 devnum)
 {
-DEVBLK *dev;                            /* -> Device block           */
-DEVBLK**dvpp;                           /* -> Device block address   */
-DEVENT *devent = device_handler_table;
-int     rc;                             /* Return code               */
-int     newdevblk = 0;                  /* 1=Newly created devblk    */
-
-    /* Check whether device number has already been defined */
-    if (find_device_by_devnum(devnum) != NULL)
+    unsigned int Channel;
+    if(sysblk.devnum_fl==NULL)
     {
-        logmsg (_("HHCCF041E Device %4.4X already exists\n"), devnum);
-        return 1;
+        sysblk.devnum_fl=(DEVBLK ***)malloc(sizeof(DEVBLK **)*256);
+        memset(sysblk.devnum_fl,0,sizeof(DEVBLK **)*256);
     }
-
-    for(;devent->hnd;devent++)
-        if(!strcasecmp(devent->name, type))
-            break;
-
-    if(!devent->hnd)
+    Channel=(devnum & 0xff00)>>8;
+    if(sysblk.devnum_fl[Channel]==NULL)
     {
-        logmsg (_("HHCCF042E Device type %s not recognized\n"),
-                type);
-        return 1;
+        sysblk.devnum_fl[Channel]=(DEVBLK **)malloc(sizeof(DEVBLK *)*256);
+        memset(sysblk.devnum_fl[Channel],0,sizeof(DEVBLK *)*256);
     }
-
-    /* Attempt to reuse an existing device block */
-    dev = find_unused_device();
-
-    /* If no device block is available, create a new one */
-    if (dev == NULL)
+    sysblk.devnum_fl[Channel][devnum & 0xff]=dev;
+}
+static void AddSubchanFastLookup(DEVBLK *dev,U16 subchan)
+{
+    unsigned int schw;
+#if 0
+    logmsg("DEBUG : ASFL Adding %d\n",subchan);
+#endif
+    if(sysblk.subchan_fl==NULL)
     {
-        /* Obtain a device block */
-        dev = (DEVBLK*)malloc(sizeof(DEVBLK));
-        if (dev == NULL)
+        sysblk.subchan_fl=(DEVBLK ***)malloc(sizeof(DEVBLK **)*256);
+        memset(sysblk.subchan_fl,0,sizeof(DEVBLK **)*256);
+    }
+    schw=(subchan & 0xff00)>>8;
+    if(sysblk.subchan_fl[schw]==NULL)
+    {
+        sysblk.subchan_fl[schw]=(DEVBLK **)malloc(sizeof(DEVBLK *)*256);
+        memset(sysblk.subchan_fl[schw],0,sizeof(DEVBLK *)*256);
+    }
+    sysblk.subchan_fl[schw][subchan & 0xff]=dev;
+}
+static void DelDevnumFastLookup(U16 devnum)
+{
+    unsigned int Channel;
+    if(sysblk.devnum_fl==NULL)
+    {
+        return;
+    }
+    Channel=(devnum & 0xff00)>>8;
+    if(sysblk.devnum_fl[Channel]==NULL)
+    {
+        return;
+    }
+    sysblk.devnum_fl[Channel][devnum & 0xff]=NULL;
+}
+static void DelSubchanFastLookup(U16 subchan)
+{
+    unsigned int schw;
+#if 0
+    logmsg("DEBUG : DSFL Removing %d\n",subchan);
+#endif
+    if(sysblk.subchan_fl==NULL)
+    {
+        return;
+    }
+    schw=(subchan & 0xff00)>>8;
+    if(sysblk.subchan_fl[schw]==NULL)
+    {
+        return;
+    }
+    sysblk.subchan_fl[schw][subchan & 0xff]=NULL;
+}
+#endif
+
+DEVBLK *get_devblk(U16 devnum)
+{
+DEVBLK *dev;
+DEVBLK**dvpp;
+
+    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+        if (!(dev->pmcw.flag5 & PMCW5_V)) break;
+
+    if(!dev)
+    {
+        if (!(dev = (DEVBLK*)malloc(sizeof(DEVBLK))))
         {
-            logmsg (_("HHCCF043E Cannot obtain device block "
-                    "for device %4.4X: %s\n"),
-                    devnum, strerror(errno));
-            return 1;
+            logmsg (_("HHCCF043E Cannot obtain device block\n"),
+                    strerror(errno));
+            return NULL;
         }
         memset (dev, 0, sizeof(DEVBLK));
-
-        /* Indicate a newly allocated devblk */
-        newdevblk = 1;
 
         /* Initialize the device lock and conditions */
         initialize_lock (&dev->lock);
         initialize_condition (&dev->resumecond);
+        initialize_condition (&dev->iocond);
 
-        /* Assign new subchannel number */
+        /* Search for the last device block on the chain */
+        for (dvpp = &(sysblk.firstdev); *dvpp != NULL;
+            dvpp = &((*dvpp)->nextdev));
+
+        /* Add the new device block to the end of the chain */
+        *dvpp = dev;
+
         dev->subchan = sysblk.highsubchan++;
-
     }
 
-    /* Obtain the device lock */
-    obtain_lock(&dev->lock);
-
     /* Initialize the device block */
-    dev->hnd = devent->hnd;
-    dev->msgpipew = sysblk.msgpipew;
+    obtain_lock (&dev->lock);
+
     dev->cpuprio = sysblk.cpuprio;
+    dev->devprio = sysblk.devprio;
+    dev->hnd = NULL;
     dev->devnum = devnum;
     dev->chanset = devnum >> 12;
     if( dev->chanset >= MAX_CPU_ENGINES )
         dev->chanset = MAX_CPU_ENGINES - 1;
-    dev->devtype = devent->type;
-    dev->typname = devent->name;
     dev->fd = -1;
+    dev->ioint.dev = dev;
+    dev->ioint.pending = 1;
+    dev->pciioint.dev = dev;
+    dev->pciioint.pcipending = 1;
+    dev->attnioint.dev = dev;
+    dev->attnioint.attnpending = 1;
 
     /* Initialize storage view */
     dev->mainstor = sysblk.mainstor;
@@ -1418,6 +2092,7 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
     dev->mainlim = sysblk.mainsize - 1;
 
     /* Initialize the path management control word */
+    memset (&dev->pmcw, 0, sizeof(PMCW));
     dev->pmcw.devnum[0] = dev->devnum >> 8;
     dev->pmcw.devnum[1] = dev->devnum & 0xFF;
     dev->pmcw.lpm = 0x80;
@@ -1426,17 +2101,75 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
     dev->pmcw.pam = 0x80;
     dev->pmcw.chpid[0] = dev->devnum >> 8;
 
+#if defined(OPTION_SHARED_DEVICES)
+    dev->shrdwait = -1;
+#endif /*defined(OPTION_SHARED_DEVICES)*/
+
+    /* Mark device valid */
+    dev->pmcw.flag5 |= PMCW5_V;
+
+#ifdef _FEATURE_CHANNEL_SUBSYSTEM
+    /* Indicate a CRW is pending for this device */
+    dev->crwpending = 1;
+#endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
+
+    return dev;
+}
+
+
+void ret_devblk(DEVBLK *dev)
+{
+    /* Mark device invalid */
+    dev->pmcw.flag5 &= ~PMCW5_V;
+#if defined(OPTION_FAST_DEVLOOKUP)
+    DelSubchanFastLookup(dev->subchan);
+    DelDevnumFastLookup(dev->devnum);
+#endif
+    release_lock(&dev->lock);
+}
+
+
+/*-------------------------------------------------------------------*/
+/* Function to build a device configuration block                    */
+/*-------------------------------------------------------------------*/
+int attach_device (U16 devnum, char *type,
+                   int addargc, BYTE *addargv[])
+{
+DEVBLK *dev;                            /* -> Device block           */
+int     rc;                             /* Return code               */
+
+    /* Check whether device number has already been defined */
+    if (find_device_by_devnum(devnum) != NULL)
+    {
+        logmsg (_("HHCCF041E Device %4.4X already exists\n"), devnum);
+        return 1;
+    }
+
+    /* obtain device block */
+    dev = get_devblk(devnum);
+
+    if(!(dev->hnd = hdl_ghnd(type)))
+    {
+        logmsg (_("HHCCF042E Device type %s not recognized\n"), type);
+
+        ret_devblk(dev);
+
+        return 1;
+    }
+
+    dev->typname = strdup(type);
+
     /* Call the device handler initialization function */
     rc = (dev->hnd->init)(dev, addargc, addargv);
+
     if (rc < 0)
     {
         logmsg (_("HHCCF044E Initialization failed for device %4.4X\n"),
                 devnum);
-        release_lock(&dev->lock);
 
-        /* Release the device block if we just acquired it */
-        if (newdevblk)
-            free(dev);
+        free(dev->typname);
+
+        ret_devblk(dev);
 
         return 1;
     }
@@ -1450,35 +2183,12 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
             logmsg (_("HHCCF045E Cannot obtain buffer "
                     "for device %4.4X: %s\n"),
                     dev->devnum, strerror(errno));
-            release_lock(&dev->lock);
 
-            /* Release the device block if we just acquired it */
-            if(newdevblk)
-                free(dev);
+            ret_devblk(dev);
 
             return 1;
         }
     }
-
-    /* If we acquired a new device block, add it to the chain */
-    if (newdevblk)
-    {
-        /* Search for the last device block on the chain */
-        for (dvpp = &(sysblk.firstdev); *dvpp != NULL;
-                dvpp = &((*dvpp)->nextdev));
-
-        /* Add the new device block to the end of the chain */
-        *dvpp = dev;
-        dev->nextdev = NULL;
-    }
-
-    /* Mark device valid */
-    dev->pmcw.flag5 |= PMCW5_V;
-
-#ifdef _FEATURE_CHANNEL_SUBSYSTEM
-    /* Indicate a CRW is pending for this device */
-    dev->crwpending = 1;
-#endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
 
     /* Release device lock */
     release_lock(&dev->lock);
@@ -1511,21 +2221,19 @@ DEVBLK *dev;                            /* -> Device block           */
     /* Obtain the device lock */
     obtain_lock(&dev->lock);
 
-    /* Mark device invalid */
-    dev->pmcw.flag5 &= ~(PMCW5_E | PMCW5_V);
+    /* Close file or socket */
+    if ((dev->fd > 2) || dev->console)
+        /* Call the device close handler */
+        (dev->hnd->close)(dev);
+
+    free(dev->typname);
 
 #ifdef _FEATURE_CHANNEL_SUBSYSTEM
     /* Indicate a CRW is pending for this device */
     dev->crwpending = 1;
 #endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
 
-    /* Close file or socket */
-    if ((dev->fd > 2) || dev->console)
-        /* Call the device close handler */
-        (dev->hnd->close)(dev);
-
-    /* Release device lock */
-    release_lock(&dev->lock);
+    ret_devblk(dev);
 
 #ifdef _FEATURE_CHANNEL_SUBSYSTEM
     /* Signal machine check */
@@ -1573,6 +2281,10 @@ DEVBLK *dev;                            /* -> Device block           */
 
     /* Disable the device */
     dev->pmcw.flag5 &= ~PMCW5_E;
+#if defined(OPTION_FAST_DEVLOOKUP)
+    DelSubchanFastLookup(olddevn);
+    DelSubchanFastLookup(newdevn);
+#endif
 
 #ifdef _FEATURE_CHANNEL_SUBSYSTEM
     /* Indicate a CRW is pending for this device */
@@ -1587,26 +2299,11 @@ DEVBLK *dev;                            /* -> Device block           */
     machine_check_crwpend();
 #endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
 
-    logmsg (_("HHCCF050I Device %4.4X defined as %4.4X\n"),
-            olddevn, newdevn);
+//  logmsg (_("HHCCF050I Device %4.4X defined as %4.4X\n"),
+//          olddevn, newdevn);
 
     return 0;
 } /* end function define_device */
-
-
-/*-------------------------------------------------------------------*/
-/* Function to find an unused device block entry                     */
-/*-------------------------------------------------------------------*/
-DEVBLK *find_unused_device ()
-{
-DEVBLK *dev;
-
-    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
-        if (!(dev->pmcw.flag5 & PMCW5_V)) break;
-
-    return dev;
-
-} /* end function find_unused_device */
 
 
 /*-------------------------------------------------------------------*/
@@ -1615,12 +2312,38 @@ DEVBLK *dev;
 DEVBLK *find_device_by_devnum (U16 devnum)
 {
 DEVBLK *dev;
+#if defined(OPTION_FAST_DEVLOOKUP)
+DEVBLK **devtab;
+int Chan;
 
+    Chan=(devnum & 0xff00)>>8;
+    if(sysblk.devnum_fl!=NULL)
+    {
+        devtab=sysblk.devnum_fl[(devnum & 0xff00)>>8];
+        if(devtab!=NULL)
+        {
+            dev=devtab[devnum & 0xff];
+            if(dev && dev->pmcw.flag5 & PMCW5_V && dev->devnum==devnum)
+            {
+                return dev;
+            }
+            else
+            {
+                DelDevnumFastLookup(devnum);
+            }
+        }
+    }
+
+#endif
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
         if (dev->devnum == devnum && dev->pmcw.flag5 & PMCW5_V) break;
-
+#if defined(OPTION_FAST_DEVLOOKUP)
+    if(dev)
+    {
+        AddDevnumFastLookup(dev,devnum);
+    }
+#endif
     return dev;
-
 } /* end function find_device_by_devnum */
 
 
@@ -1629,15 +2352,42 @@ DEVBLK *dev;
 /*-------------------------------------------------------------------*/
 DEVBLK *find_device_by_subchan (U16 subchan)
 {
-DEVBLK *dev;
-
+    DEVBLK *dev;
+#if defined(OPTION_FAST_DEVLOOKUP)
+#if 0
+    logmsg("DEBUG : FDBS FL Looking for %d\n",subchan);
+#endif
+    if(sysblk.subchan_fl!=NULL)
+    {
+        if(sysblk.subchan_fl[(subchan & 0xff00)>>8]!=NULL)
+        {
+            dev=sysblk.subchan_fl[(subchan & 0xff00)>>8][subchan & 0xff];
+            if(dev)
+            {
+                return dev;
+            }
+        }
+    }
+#endif
+#if 0
+    logmsg("DEBUG : FDBS SL Looking for %d\n",subchan);
+#endif
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
         if (dev->subchan == subchan) break;
 
+#if defined(OPTION_FAST_DEVLOOKUP)
+    if(dev)
+    {
+        AddSubchanFastLookup(dev,subchan);
+    }
+    else
+    {
+        DelSubchanFastLookup(subchan);
+    }
+#endif
+
     return dev;
-
 } /* end function find_device_by_subchan */
-
 
 #endif /*!defined(_GEN_ARCH)*/
 

@@ -1,12 +1,12 @@
 <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 3.0//EN" "html.dtd">
 <HTML>
 <HEAD><TITLE>
-Hercules Version 2: System Messages: CF - Configuration Processing</TITLE>
+Hercules Version 3: System Messages: CF - Configuration Processing</TITLE>
 <LINK REL=STYLESHEET TYPE="text/css" HREF="hercules.css">
 </HEAD>
 <BODY BGCOLOR="#ffffcc" TEXT="#000000" LINK="#0000A0"
       VLINK="#008040" ALINK="#000000">
-<h1>Hercules Version 2: System Messages: CF: Configuration Processing</h1>
+<h1>Hercules Version 3: System Messages: CF: Configuration Processing</h1>
 <p>
 This page describes the terminal emulation messages for the Hercules S/370,
 ESA/390, and z/Architecture emulator.
@@ -233,29 +233,32 @@ the file named <code><em>filename</em></code> must be a valid nonzero decimal nu
   </dl>
 <dt><code><a name="HHCCF016S">
 HHCCF016S Error in <em>filename</em> line <em>lineno</em>:
-Invalid CPU thread priority <em>priority</em>
+Invalid <em>threadname</em> thread priority <em>priority</em>
 </a></code>
 <dd><dl>
   <dt>Meaning
-  <dd>The CPU thread priority <code><em>priority</em></code> specified on the
-<code>CPUPRIO</code> configuration statement at line number <code><em>lineno</em></code> of
-the file named <code><em>filename</em></code> must be a valid decimal number.
+  <dd>The thread priority <code><em>priority</em></code> specified on
+      the <code><em>xxx</em>PRIO</code> configuration statement at line
+      number <code><em>lineno</em></code> of the file named
+      <code><em>filename</em></code> must be a valid decimal number.
   <dt>Action
-  <dd>Correct the CPU thread priority and restart Hercules.
+  <dd>Correct the priority on the statement and restart Hercules.
   <dt>Issued by
   <dd>config.c, function build_config
   </dl>
 <dt><code><a name="HHCCF017W">
-HHCCF017W Hercules is not running as setuid root, cannot raise CPU priority
+HHCCF017W Hercules is not running as setuid root, cannot raise
+          <em>threadname</em> priority
 </a></code>
 <dd><dl>
   <dt>Meaning
-  <dd>A negative value for the CPU thread priority parameter
-<code>CPUPRIO</code> was specified, but Hercules is not running as the
-root user (either directly or via the setuid mechanism).
-This parameter value would cause the priority of the CPU execution thread
-to be raised above the normal level if Hercules were running
-as root. Since it is not, however, the parameter will have no effect.
+  <dd>A negative value for the <em>threadname</em> thread priority
+      parameter <code><em>xxx</em>PRIO</code> was specified, but
+      Hercules is not running as the root user (either directly or via
+      the setuid mechanism).  This parameter value would cause the
+      priority of the CPU execution thread to be raised above the normal
+      level if Hercules were running as root. Since it is not, however,
+      the parameter will have no effect.
   <dt>Action
   <dd>Either specify a positive value to lower the CPU thread priority,
 zero to not alter the priority, or omit the statement entirely
@@ -617,9 +620,13 @@ HHCCF042E Device type <em>type</em> not recognized
 <dd><dl>
   <dt>Meaning
   <dd>An attempt was made to define a device of type <code><em>type</em></code>. This
-device type is not supported by Hercules.
+  device type is not supported by Hercules. It may also indicate that the system was
+  unable to load the device handler for the specified device type.
   <dt>Action
-  <dd>Specify a supported device type.
+  <dd>Specify a supported device type. If the device type is supported, make sure the
+  the system can load the load modules necessary for device operations. Either use
+  the LD_LIBRARY_PATH environment variable or use ldconfig(8) to customize the library
+  search path.
   <dt>Issued by
   <dd>config.c, function attach_device
   </dl>
@@ -720,6 +727,173 @@ with the address <code><em>oldaddr</em></code> has been changed to the address
   <dt>Issued by
   <dd>config.c, function define_device
   </dl>
+<dt><code><a name="HHCCF051S">
+HHCCF051S Error in <em>filename</em> line <em>lineno</em>:
+<em>verid</em> is not a valid CPU version code
+</a></code>
+<dd><dl>
+  <dt>Meaning
+  <dd>The version code <code><em>verid</em></code> specified on the <code>CPUVERID</code>
+configuration statement at line number <code><em>lineno</em></code> of the
+file named <code><em>filename</em></code> must be exactly two digits long,
+and must be a valid hexadecimal number.
+  <dt>Action
+  <dd>Correct the model number and restart Hercules.
+  <dt>Issued by
+  <dd>config.c, function build_config
+  </dl>
+<dt><code><a name="HHCCF052S">
+HHCCF052S Error in <em>filename</em> line <em>lineno</em>:
+<em>option</em>: invalid argument
+</a></code>
+<dd><dl>
+  <dt>Meaning
+  <dd>The argument <em>option</em> on the DIAG8CMD is invalid.  Valid options are <code><em>enable</em></code> and <code><em>disable</em></code>.
+  <dt>Action
+  <dd>Correct the statement and restart Hercules.
+  <dt>Issued by
+  <dd>config.c, function build_config
+  </dl>
+<dt><code><a name="HHCCF053E">
+        HHCCF053E Incorrect second device number in device range near character <em>c</em>
+</a></code>
+<dd><dl>
+  <dt>Meaning
+  <dd>The 2nd argument of a device range contains an incorrect device number
+  <dt>Action
+  <dd>Correct the statement and restart Hercules.
+  <dt>Issued by
+  <dd>config.c, function parse_devnums
+  </dl>
+<dt><code><a name="HHCCF054E">
+HHCCF054E Incorrect Device count near character <em>c</em>
+</a></code>
+<dd><dl>
+  <dt>Meaning
+  <dd>The count field in a device count specification is invalid
+  <dt>Action
+  <dd>Correct the statement and restart Hercules.
+  <dt>Issued by
+  <dd>config.c, function parse_devnums
+  </dl>
+<dt><code><a name="HHCCF055E">
+HHCCF055E Incorrect device address specification near character <em>c</em>
+</a></code>
+<dd><dl>
+  <dt>Meaning
+  <dd>The first or only CUU in a device specification statement is invalid
+  <dt>Action
+  <dd>Correct the statement and restart Hercules.
+  <dt>Issued by
+  <dd>config.c, function parse_devnums
+  </dl>
+<dt><code><a name="HHCCF056E">
+HHCCF056E Incorrect device address range. <em>CUU1</em>&gt;<em>CUU2</em>
+</a></code>
+<dd><dl>
+  <dt>Meaning
+  <dd>The first device number of a range is greater than the last device number
+  <dt>Action
+  <dd>Correct the statement and restart Hercules.
+  <dt>Issued by
+  <dd>config.c, function parse_devnums
+  </dl>
+<dt><code><a name="HHCCF057E">
+HHCCF057E <em>CUU</em> is on wrong channel (1st device defined on channel <em>CC</em>)
+</a></code>
+<dd><dl>
+  <dt>Meaning
+  <dd>At least one of the devices in a device number specification is on a different channel than a previously defined device number within the same specification. All device numbers on a single configuration line must be on a single channel (Group of 256 devices)
+  <dt>Action
+  <dd>Correct the statement and restart Hercules.
+  <dt>Issued by
+  <dd>config.c, function parse_devnums
+  </dl>
+<dt><code><a name="HHCCF058E">
+HHCCF058E Some or all devices in <em>CUU</em>-<em>CUU</em> duplicate devices already defined
+</a></code>
+<dd><dl>
+  <dt>Meaning
+  <dd>At least one of the device numbers on a device specification statement defines a device number that is already specified on that same statement.
+  <dt>Action
+  <dd>Correct the statement and restart Hercules.
+  <dt>Issued by
+  <dd>config.c, function parse_devnums
+  </dl>
+<dt><code><a name="HHCCF061W">
+HHCCF061W ECPS:VM Statement deprecated. Use ECPSVM instead
+</a></code>
+<dd><dl>
+  <dt>Meaning
+  <dd>The "ECPS:VM" statement was encountered. This statement is deprecated in favor of the "ECPSVM" statement.
+  <dt>Action
+  <dd>The configuration statement is still carried out, but the statement syntax should be changed as soon as possible.
+  <dt>Issued by
+  <dd>config.c
+  </dl>
+<dt><code><a name="HHCCF062W">
+HHCCF062W Missing ECPSVM level value. 20 Assumed
+</a></code>
+<dd><dl>
+  <dt>Meaning
+  <dd>The "ECPSVM" statement keyword "LEVEL" was encountered, but no numeric level followed it
+  <dt>Action
+  <dd>The default level of 20 is used, and the ECPS:VM feature is made available. The statement should be corrected as soon as possible.
+  <dt>Issued by
+  <dd>config.c
+  </dl>
+<dt><code><a name="HHCCF063W">
+HHCCF063W Specifying ECPSVM level directly is deprecated. Use the 'LEVEL' keyword instead
+</a></code>
+<dd><dl>
+  <dt>Meaning
+  <dd>The deprecated "ECPSVM" level syntax form (without the LEVEL keyword) was found.
+  <dt>Action
+  <dd>The ECPS:VM Level is set to the specified value. The configuration statement should be updated to include the "LEVEL" keyword.
+  <dt>Issued by
+  <dd>config.c
+  </dl>
+<dt><code><a name="HHCCF064W">
+HHCCF064W Hercules set priority <em>priority</em> failed: <em>error</em>
+</a></code>
+<dd><dl>
+  <dt>Meaning
+      <dd>An attempt to change the priority of the Hercules process to
+          <code><em>priority</em></code> failed.  The error is described
+          by <code><em>error</em></code>.  The process priority has not
+          been changed.  Hercules overall performance may be impaired as
+          a result.
+  <dt>Action
+      <dd>If performance problems are noted, correct the error and
+          restart Hercules.
+  <dt>Issued by
+      <dd>config.c, function build_config
+  </dl>
+<dt><code><a name="HHCCF065I">
+HHCCF065I Hercules: tid=<em>threadid</em>, pid=<em>processid</em>,
+          pgid=<em>processgroupid</em>, priority=<em>priority</em>
+</a></code>
+<dd><dl>
+  <dt>Meaning
+      <dd>Hercules thread id is <code><em>threadid</em></code>, its
+      process id is <code><em>processid</em></code>, its process group
+      id is <code><em>processgroupid</em></code> and its execution
+      priority is <code><em>priority</em></code>.
+  <dt>Issued by
+      <dd>config.c, function build_config
+  </dl>
+<dt><code><a name="HHCCF066E">
+HHCCF066E Invalid HTTPROOT: <em>error</em>
+</a></code>
+<dd><dl>
+  <dt>Meaning
+  <dd>The pathname specified on your HTTPROOT statement is invalid.
+The error is described by <code><em>error</em></code>.
+  <dt>Action
+  <dd>Correct the error and restart Hercules.
+  <dt>Issued by
+  <dd>config.c, function build_config
+  </dl>
 </dl>
 <p><center><hr width=15% noshade></center>
 <p>
@@ -729,6 +903,6 @@ If you have a question about Hercules, see the
 <a href="hercmsg.html"><img src="gifs/back.gif" border=0 alt="back"></a>
 </center>
 <small>
-<p>Last updated 16 December 2002
+<p>Last updated 3 October 2003
 </BODY>
 </HTML>

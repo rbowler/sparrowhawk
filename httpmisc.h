@@ -1,6 +1,9 @@
 /* HTTPMISC.C   (c)Copyright Jan Jaeger, 2002-2003                   */
 /*              HTTP Server                                          */
 
+#if !defined(_HTTPMISC_H)
+#define _HTTPMISC_H
+
 
 #if !defined(PKGDATADIR)
  #define HTTP_ROOT   "/usr/local/share/hercules/"
@@ -16,6 +19,7 @@
 
 #define HTML_STATIC_EXPIRY_TIME (60*60*24*7)
 
+#define HTTP_PATH_LENGTH 1024
 
 typedef struct _CGIVAR {
     struct _CGIVAR *next;
@@ -53,6 +57,8 @@ typedef struct _CONTYP {
 
 
 typedef struct _WEBBLK {
+#define HDL_VERS_WEBBLK "2.17"
+#define HDL_SIZE_WEBBLK sizeof(WEBBLK)
     FILE *hsock;
     int request_type;
 #define REQTYPE_NONE   0
@@ -82,3 +88,5 @@ int html_include(WEBBLK *webblk, char *filename);
 
 char *http_variable(WEBBLK *webblk, char *name, int type);
 void *http_server (void *arg);
+
+#endif /*!defined(_HTTPMISC_H)*/

@@ -51,6 +51,18 @@
 
 #include "opcode.h"
 
+
+#if defined(OPTION_DYNAMIC_LOAD) && defined(WIN32) && !defined(HDL_USE_LIBTOOL)
+ SYSBLK *psysblk;
+ #define sysblk (*psysblk)
+ #define config_cnslport (*config_cnslport)
+static 
+#else
+extern
+#endif
+       char *config_cnslport;
+
+
 /*-------------------------------------------------------------------*/
 /* Telnet command definitions                                        */
 /*-------------------------------------------------------------------*/
@@ -244,6 +256,81 @@ unsigned char print_chars[17];
 #endif
 
 
+#if 1
+struct sockaddr_in * get_inet_socket(char *host_serv)
+{
+char *host = NULL;
+char *serv;
+struct sockaddr_in *sin;
+
+    if((serv = strchr(host_serv,':')))
+    {
+        *serv++ = '\0';
+        if(*host_serv)
+            host = host_serv;
+    }
+    else
+        serv = host_serv;
+
+    if(!(sin = malloc(sizeof(struct sockaddr_in))))
+        return sin;
+
+    sin->sin_family = AF_INET;
+
+    if(host) 
+    {
+    struct hostent *hostent;
+
+        hostent = gethostbyname(host);
+
+        if(!hostent)
+        {
+            logmsg(_("HHCGI001I Unable to determine IP address from %s\n"),
+                host);
+            free(sin);
+            return NULL;
+        }
+
+        memcpy(&sin->sin_addr,*hostent->h_addr_list,sizeof(sin->sin_addr));
+    }
+    else
+        sin->sin_addr.s_addr = INADDR_ANY;
+
+    if(serv)
+    {
+        if(!isdigit(*serv))
+        {
+        struct servent *servent;
+
+            servent = getservbyname(serv, "tcp");
+
+            if(!servent)
+            {
+                logmsg(_("HHCGI002I Unable to determine port number from %s\n"),
+                    host);
+                free(sin);
+                return NULL;
+            }
+
+            sin->sin_port = servent->s_port;
+        }
+        else
+            sin->sin_port = htons(atoi(serv));
+
+    }
+    else
+    {
+        logmsg(_("HHCGI003E Invalid parameter: %s\n"),
+            host_serv);
+        free(sin);
+        return NULL;
+    }
+
+    return sin;
+
+}
+
+#endif
 /*-------------------------------------------------------------------*/
 /* SUBROUTINE TO REMOVE ANY IAC SEQUENCES FROM THE DATA STREAM       */
 /* Returns the new length after deleting IAC commands                */
@@ -801,10 +888,10 @@ BYTE            buf[32];                /* tn3270 write buffer       */
     /* Close the connection if an error occurred */
     if (rc & CSW_UC)
     {
-        close (dev->fd);
-        dev->fd = -1;
         dev->connected = 0;
+        dev->fd = -1;
         dev->sense[0] = SENSE_DC;
+
         return (CSW_UC);
     }
 
@@ -977,6 +1064,12 @@ BYTE    c;                              /* Character work area       */
 
 } /* end function recv_1052_data */
 
+ 
+/* o_rset identifies the filedescriptors of all known connections    */
+
+static fd_set o_rset;
+static int    o_mfd;
+
 
 /*-------------------------------------------------------------------*/
 /* NEW CLIENT CONNECTION THREAD                                      */
@@ -998,9 +1091,9 @@ BYTE                    class;          /* D=3270, P=3287, K=3215/1052 */
 BYTE                    model;          /* 3270 model (2,3,4,5,X)    */
 BYTE                    extended;       /* Extended attributes (Y,N) */
 BYTE                    buf[256];       /* Message buffer            */
-BYTE                    conmsg[80];     /* Connection message        */
-BYTE                    hostmsg[80];    /* Host ID message           */
-BYTE                    rejmsg[80];     /* Rejection message         */
+BYTE                    conmsg[256];     /* Connection message        */
+BYTE                    hostmsg[256];    /* Host ID message           */
+BYTE                    rejmsg[256];     /* Rejection message         */
 
     /* Load the socket address from the thread parameter */
     csock = *csockp;
@@ -1074,13 +1167,18 @@ BYTE                    rejmsg[80];     /* Rejection message         */
             dev->readpending = 0;
             dev->rlen3270 = 0;
             dev->keybdrem = 0;
-            dev->busy = 0;
-            dev->pending = 0;
-            dev->pcipending = 0;
+
             memset (&dev->scsw, 0, sizeof(SCSW));
             memset (&dev->pciscsw, 0, sizeof(SCSW));
+            dev->busy = dev->pending = dev->pcipending = 0;
+
+            /* Set device in old readset such that the associated 
+               file descriptor will be closed after detach */
+            FD_SET (dev->fd, &o_rset);
+            if (dev->fd > o_mfd) o_mfd = dev->fd;
 
             release_lock (&dev->lock);
+
             break;
         }
 
@@ -1166,7 +1264,8 @@ BYTE                    rejmsg[80];     /* Rejection message         */
 
     /* Raise attention interrupt for the device */
     if (class != 'P')  /* do not raise attention for  3287 */
-    rc = device_attention (dev, CSW_ATTN);
+    /* rc = device_attention (dev, CSW_ATTN); *ISW3274DR* - Removed */
+    rc = device_attention (dev, CSW_DE);        /* *ISW3274DR - Added */
 
     /* Signal connection thread to redrive its select loop */
     signal_thread (sysblk.cnsltid, SIGUSR2);
@@ -1180,21 +1279,32 @@ BYTE                    rejmsg[80];     /* Rejection message         */
 /*-------------------------------------------------------------------*/
 /* CONSOLE CONNECTION AND ATTENTION HANDLER THREAD                   */
 /*-------------------------------------------------------------------*/
+static int console_cnslcnt;
+
+static void console_shutdown(void * unused __attribute__ ((unused)) )
+{
+    console_cnslcnt = 0;
+}
+
 static void *
 console_connection_handler (void *arg)
 {
 int                     rc = 0;         /* Return code               */
 int                     lsock;          /* Socket for listening      */
 int                     csock;          /* Socket for conversation   */
-struct sockaddr_in      server;         /* Server address structure  */
+struct sockaddr_in     *server;         /* Server address structure  */
 fd_set                  readset;        /* Read bit map for select   */
+fd_set                  c_rset;         /* Currently valid dev->fd's */
 int                     maxfd;          /* Highest fd for select     */
+int                     fd, c_mfd = 0;
 int                     optval;         /* Argument for setsockopt   */
 TID                     tidneg;         /* Negotiation thread id     */
 DEVBLK                 *dev;            /* -> Device block           */
 BYTE                    unitstat;       /* Status after receive data */
 
     UNREFERENCED(arg);
+
+    hdl_adsc(console_shutdown, NULL);
 
     /* Display thread started message on control panel */
     logmsg (_("HHCTE001I Console connection thread started: "
@@ -1203,9 +1313,6 @@ BYTE                    unitstat;       /* Status after receive data */
 
     /* Get information about this system */
     uname (&hostinfo);
-
-    /* Wait for system to finish coming up */
-    while (!initdone) sleep(1);
 
     /* Obtain a socket */
     lsock = socket (AF_INET, SOCK_STREAM, 0);
@@ -1222,21 +1329,22 @@ BYTE                    unitstat;       /* Status after receive data */
                 &optval, sizeof(optval));
 
     /* Prepare the sockaddr structure for the bind */
-    memset (&server, 0, sizeof(server));
-    server.sin_family = AF_INET;
-    server.sin_addr.s_addr = INADDR_ANY;
-    server.sin_port = sysblk.cnslport;
-    server.sin_port = htons(server.sin_port);
+    if(!( server = get_inet_socket(config_cnslport) ))
+    {
+        logmsg(_("HHCTE010E CNSLPORT statement invalid: %s\n"),
+            config_cnslport);
+        return NULL;
+    }
 
     /* Attempt to bind the socket to the port */
-    while (sysblk.cnslcnt)
+    while (console_cnslcnt)
     {
-        rc = bind (lsock, (struct sockaddr *)&server, sizeof(server));
+        rc = bind (lsock, (struct sockaddr *)server, sizeof(struct sockaddr_in));
 
         if (rc == 0 || errno != EADDRINUSE) break;
 
         logmsg (_("HHCTE002W Waiting for port %u to become free\n"),
-                sysblk.cnslport);
+                ntohs(server->sin_port));
         sleep(10);
     } /* end while */
 
@@ -1256,31 +1364,55 @@ BYTE                    unitstat;       /* Status after receive data */
     }
 
     logmsg (_("HHCTE003I Waiting for console connection on port %u\n"),
-            sysblk.cnslport);
+            ntohs(server->sin_port));
+
+    FD_ZERO(&o_rset);
+    o_mfd = 0;
 
     /* Handle connection requests and attention interrupts */
-    while (sysblk.cnslcnt) {
+    while (console_cnslcnt) {
 
         /* Initialize the select parameters */
         maxfd = lsock;
         FD_ZERO (&readset);
         FD_SET (lsock, &readset);
 
+        FD_ZERO(&c_rset);
+        c_mfd = 0;
+
         /* Include the socket for each connected console */
         for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
         {
             if (dev->console
                 && dev->connected
-                && (dev->busy == 0 || (dev->scsw.flag3 & SCSW3_AC_SUSP))
-                && dev->pending == 0
-                && (dev->pmcw.flag5 & PMCW5_V)
-// NOT S/370    && (dev->pmcw.flag5 & PMCW5_E)
-                && (dev->scsw.flag3 & SCSW3_SC_PEND) == 0)
+// NOT S/370    && (dev->pmcw.flag5 & PMCW5_E) 
+                && (dev->pmcw.flag5 & PMCW5_V) )
             {
-                FD_SET (dev->fd, &readset);
-                if (dev->fd > maxfd) maxfd = dev->fd;
+                FD_SET (dev->fd, &c_rset);
+                if (dev->fd > c_mfd) c_mfd = dev->fd;
+
+                if( (!dev->busy || (dev->scsw.flag3 & SCSW3_AC_SUSP))
+                && !(dev->pending || dev->pcipending)
+                && (dev->scsw.flag3 & SCSW3_SC_PEND) == 0)
+                {
+                    FD_SET (dev->fd, &readset);
+                    if (dev->fd > maxfd) maxfd = dev->fd;
+                }
             }
         } /* end for(dev) */
+
+
+        /* Close any no longer existing connections */
+        for(fd = 1; fd <= (c_mfd < o_mfd ? c_mfd : o_mfd); fd++)
+            if(FD_ISSET(fd, &o_rset) && !FD_ISSET(fd, &c_rset))
+                close(fd);
+        if(o_mfd > c_mfd)
+            for(; fd <= o_mfd; fd++)
+                if(FD_ISSET(fd, &o_rset))
+                    close(fd);
+        memcpy(&o_rset, &c_rset, sizeof(o_rset));
+        o_mfd = c_mfd;
+
 
         /* Wait for a file descriptor to become ready */
 #ifdef WIN32
@@ -1334,8 +1466,8 @@ BYTE                    unitstat;       /* Status after receive data */
             if (dev->console
                 && dev->connected
                 && FD_ISSET (dev->fd, &readset)
-                && (dev->busy == 0 || (dev->scsw.flag3 & SCSW3_AC_SUSP))
-                && dev->pending == 0
+                && (!dev->busy || (dev->scsw.flag3 & SCSW3_AC_SUSP))
+                && !(dev->pending || dev->pcipending)
                 && (dev->pmcw.flag5 & PMCW5_V)
 // NOT S/370    && (dev->pmcw.flag5 & PMCW5_E)
                 && (dev->scsw.flag3 & SCSW3_SC_PEND) == 0)
@@ -1359,6 +1491,7 @@ BYTE                    unitstat;       /* Status after receive data */
                     close (dev->fd);
                     dev->fd = -1;
                     dev->connected = 0;
+                    FD_CLR(fd, &o_rset);
                 }
 
                 /* Indicate that data is available at the device */
@@ -1380,7 +1513,10 @@ BYTE                    unitstat;       /* Status after receive data */
                 /* console: CCUU attention requests raised */
                 if (dev->devtype != 0x3287)
                 {
-                rc = device_attention (dev, unitstat);
+                    if(dev->connected)  /* *ISW3274DR* - Added */
+                    { /* *ISW3274DR - Added */
+                                rc = device_attention (dev, unitstat);
+                    } /* *ISW3274DR - Added */
 
                 /* Trace the attention request */
                 TNSDEBUG2("%4.4X attention request %s\n",
@@ -1397,8 +1533,13 @@ BYTE                    unitstat;       /* Status after receive data */
 
     } /* end while */
 
+    for(fd = 1; fd <= c_mfd; fd++)
+        if(FD_ISSET(fd, &c_rset))
+            close(fd);
+
     /* Close the listening socket */
     close (lsock);
+    free(server);
 
     logmsg (_("HHCTE004I Console connection thread terminated\n"));
 
@@ -1410,7 +1551,7 @@ BYTE                    unitstat;       /* Status after receive data */
 static int
 console_initialise()
 {
-    if(!(sysblk.cnslcnt++))
+    if(!(console_cnslcnt++))
     {
         if ( create_thread (&sysblk.cnsltid, &sysblk.detattr,
                             console_connection_handler, NULL) )
@@ -1427,15 +1568,12 @@ console_initialise()
 static void
 console_remove(DEVBLK *dev)
 {
-    if(dev->fd > 2)
-        close (dev->fd);
-    dev->fd = -1;
-
-    /* Reset device dependent flags */
     dev->connected = 0;
     dev->console = 0;
 
-    if(!sysblk.cnslcnt--)
+    dev->fd = -1;
+
+    if(!console_cnslcnt--)
         logmsg(_("console_remove() error\n"));
 
     signal_thread (sysblk.cnsltid, SIGUSR2);
@@ -1462,6 +1600,9 @@ loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 
     /* Set the size of the device buffer */
     dev->bufsize = BUFLEN_3270;
+
+    if(!sscanf(dev->typname,"%hx",&(dev->devtype)))
+        dev->devtype = 0x3270;
 
     /* Initialize the device identifier bytes */
     dev->devid[0] = 0xFF;
@@ -1546,6 +1687,9 @@ constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
             dev->prompt1052 = 0;
     }
     
+    if(!sscanf(dev->typname,"%hx",&(dev->devtype)))
+        dev->devtype = 0x1052;
+
     /* Initialize the device identifier bytes */
     dev->devid[0] = 0xFF;
     dev->devid[1] = dev->devtype >> 8;
@@ -1798,7 +1942,8 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
     if (!dev->connected && !IS_CCW_SENSE(code))
     {
         dev->sense[0] = SENSE_IR;
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        /* *unitstat = CSW_CE | CSW_DE | CSW_UC; */
+        *unitstat = CSW_UC; /* *ISW3274DR* (as per GA23-0218-11 3.1.3.2.2 Table 5-5) */
         return;
     }
 
@@ -2284,8 +2429,8 @@ BYTE    stat;                           /* Unit status               */
             if (dev->prompt1052 == 1)
             {
                 len = sprintf (dev->buf,
-                        "HHCTE006A Enter input for console device %4.4X\r\n",
-                        dev->devnum);
+                        _("HHCTE006A Enter input for console device %4.4X%c\n"),
+                        dev->devnum,'\r');
                 rc = send_packet (dev->fd, dev->buf, len, NULL);
                 if (rc < 0)
                 {
@@ -2396,20 +2541,68 @@ BYTE    stat;                           /* Unit status               */
 
 } /* end function constty_execute_ccw */
 
-
+#if defined(OPTION_DYNAMIC_LOAD)
+static
+#endif
 DEVHND constty_device_hndinfo = {
         &constty_init_handler,
         &constty_execute_ccw,
         &constty_close_device,
         &constty_query_device,
-        NULL, NULL, NULL, NULL
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 };
 
+/* Libtool static name colision resolution */
+/* note : lt_dlopen will look for symbol & modulename_LTX_symbol */
+#if !defined(HDL_BUILD_SHARED) && defined(HDL_USE_LIBTOOL)
+#define hdl_ddev hdt3270_LTX_hdl_ddev
+#define hdl_depc hdt3270_LTX_hdl_depc
+#define hdl_reso hdt3270_LTX_hdl_reso
+#define hdl_init hdt3270_LTX_hdl_init
+#define hdl_fini hdt3270_LTX_hdl_fini
+#endif
 
+
+#if defined(OPTION_DYNAMIC_LOAD)
+static
+#endif
 DEVHND loc3270_device_hndinfo = {
         &loc3270_init_handler,
         &loc3270_execute_ccw,
         &loc3270_close_device,
         &loc3270_query_device,
-        NULL, NULL, NULL, NULL
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 };
+
+
+#if defined(OPTION_DYNAMIC_LOAD)
+HDL_DEPENDENCY_SECTION;
+{
+     HDL_DEPENDENCY(HERCULES);
+     HDL_DEPENDENCY(DEVBLK);
+     HDL_DEPENDENCY(SYSBLK);
+}
+END_DEPENDENCY_SECTION;
+
+
+#if defined(WIN32) && !defined(HDL_USE_LIBTOOL)
+#undef sysblk
+#undef config_cnslport
+HDL_RESOLVER_SECTION;
+{
+    HDL_RESOLVE_PTRVAR( psysblk, sysblk );
+    HDL_RESOLVE( config_cnslport );
+}
+END_RESOLVER_SECTION;
+#endif
+
+
+HDL_DEVICE_SECTION;
+{
+    HDL_DEVICE(1052, constty_device_hndinfo );
+    HDL_DEVICE(3215, constty_device_hndinfo );
+    HDL_DEVICE(3270, loc3270_device_hndinfo );
+    HDL_DEVICE(3287, loc3270_device_hndinfo );
+}
+END_DEVICE_SECTION;
+#endif

@@ -20,9 +20,12 @@ int dummy = 0;
 #include <stdarg.h>     // (need "va_list", etc)
 #include <stdio.h>      // (need "FILE", "vfprintf", etc)
 #include <malloc.h>     // (need "malloc", etc)
+#include "logger.h"
 #include "fthreads.h"   // (need "fthread_create")
 #include "w32chan.h"    // (function prototypes for this module)
 #include "linklist.h"   // (linked list macros)
+#include "hercnls.h"    // (need NLS support)
+#include "hscutl.h"     // (need setpriority)
 
 /////////////////////////////////////////////////////////////////////////////
 // (helper macros...)
@@ -59,12 +62,6 @@ int dummy = 0;
 
 #endif // defined(FISH_HANG)
 
-#define logmsg(fmt...)           \
-{                                \
-    fprintf(ios_msgpipew, fmt);  \
-    fflush(ios_msgpipew);        \
-}
-
 #define IsEventSet(hEventHandle) (WaitForSingleObject(hEventHandle,0) == WAIT_OBJECT_0)
 
 /////////////////////////////////////////////////////////////////////////////
@@ -91,10 +88,9 @@ int dummy = 0;
 /////////////////////////////////////////////////////////////////////////////
 // i/o scheduler variables...  (some private, some externally visible)
 
-FILE*  ios_msgpipew           = NULL;
-int    ios_arch_mode          = 0;
-int    ios_devthread_priority = THREAD_PRIORITY_NORMAL;
-int    ios_devthread_timeout  = 30;
+int    ios_arch_mode          = 0;          // current architecture mode
+int    ios_devthread_timeout  = 30;         // max device thread wait time
+int*   ios_devthread_prio     = NULL;       // pointer to sysblk.devprio
 
 LIST_ENTRY        ThreadListHeadListEntry;  // anchor for DEVTHREADPARMS linked list
 CRITICAL_SECTION  IOSchedulerLock;          // lock for accessing above list
@@ -111,16 +107,14 @@ int  ios_devtunavail = 0;   // #of times 'idle' thread unavailable
 
 void  InitIOScheduler
 (
-    FILE*  msgpipew,        // (for issuing msgs to Herc console)
     int    arch_mode,       // (for calling execute_ccw_chain)
-    int    devt_priority,   // (for calling fthread_create)
+    int*   devt_prio,       // (ptr to device thread priority)
     int    devt_timeout,    // (MAX_DEVICE_THREAD_IDLE_SECS)
     long   devt_max         // (maximum #of device threads allowed)
 )
 {
-    ios_msgpipew           = msgpipew;
     ios_arch_mode          = arch_mode;
-    ios_devthread_priority = devt_priority;
+    ios_devthread_prio     = devt_prio;
     ios_devthread_timeout  = devt_timeout;
     ios_devtmax            = devt_max;
 
@@ -150,6 +144,7 @@ typedef struct _DevIORequest
 {
     LIST_ENTRY      IORequestListLinkingListEntry;  // (just a link in the chain)
     void*           pDevBlk;                        // (ptr to device block)
+    int*            pnDevPrio;                      // (ptr to device i/o priority)
     unsigned short  wDevNum;                        // (device number for debugging)
 }
 DEVIOREQUEST;
@@ -160,6 +155,7 @@ DEVIOREQUEST;
 DEVTHREADPARMS*  SelectDeviceThread();
 DEVTHREADPARMS*  CreateDeviceThread(unsigned short wDevNum);
 
+void   AdjustThreadPriority(int* pCurPrio, int* pNewPrio);
 void*  DeviceThread(void* pThreadParms);
 void   RemoveDeadThreadsFromList();
 void   RemoveThisThreadFromOurList(DEVTHREADPARMS* pThreadParms);
@@ -168,7 +164,7 @@ void   RemoveThisThreadFromOurList(DEVTHREADPARMS* pThreadParms);
 // Schedule a DeviceThread for this i/o request... (called by the 'startio'
 // function whenever the startio or start subchannel instruction is executed)
 
-int  ScheduleIORequest(void* pDevBlk, unsigned short wDevNum)
+int  ScheduleIORequest(void* pDevBlk, unsigned short wDevNum, int* pnDevPrio)
 {
     /////////////////////////////////////////////////////////////////
     // PROGRAMMING NOTE: The various errors that can occur in this
@@ -189,7 +185,7 @@ int  ScheduleIORequest(void* pDevBlk, unsigned short wDevNum)
 
     if (!pIORequest)
     {
-        logmsg("HHC762I malloc(DEVIOREQUEST) failed; device=%4.4X, strerror=\"%s\"\n",
+        logmsg(_("HHC762I malloc(DEVIOREQUEST) failed; device=%4.4X, strerror=\"%s\"\n"),
             wDevNum,strerror(errno));
         return 2;
     }
@@ -197,6 +193,7 @@ int  ScheduleIORequest(void* pDevBlk, unsigned short wDevNum)
     InitializeListLink(&pIORequest->IORequestListLinkingListEntry);
     pIORequest->pDevBlk = pDevBlk;
     pIORequest->wDevNum = wDevNum;
+    pIORequest->pnDevPrio = pnDevPrio;
 
     // Schedule a device_thread to process this i/o request
 
@@ -251,7 +248,7 @@ int  ScheduleIORequest(void* pDevBlk, unsigned short wDevNum)
 
             if (ios_devtmax && ios_devtnbr >= ios_devtmax)  // max threads already created?
             {
-                logmsg("HHC765I *WARNING* max device threads exceeded.\n");
+                logmsg(_("HHC765I *WARNING* max device threads exceeded.\n"));
                 ios_devtunavail++;          // (count occurrences)
             }
 
@@ -348,7 +345,7 @@ DEVTHREADPARMS*  CreateDeviceThread(unsigned short wDevNum)
 
     if (!pThreadParms)
     {
-        logmsg("HHC761I malloc(DEVTHREADPARMS) failed; device=%4.4X, strerror=\"%s\"\n",
+        logmsg(_("HHC761I malloc(DEVTHREADPARMS) failed; device=%4.4X, strerror=\"%s\"\n"),
             wDevNum,strerror(errno));
         return NULL;    // (error)
     }
@@ -357,7 +354,7 @@ DEVTHREADPARMS*  CreateDeviceThread(unsigned short wDevNum)
 
     if (!pThreadParms->hShutdownEvent)
     {
-        logmsg("HHC763I CreateEvent(hShutdownEvent) failed; device=%4.4X, strerror=\"%s\"\n",
+        logmsg(_("HHC763I CreateEvent(hShutdownEvent) failed; device=%4.4X, strerror=\"%s\"\n"),
             wDevNum,strerror(errno));
         free(pThreadParms);
         return NULL;    // (error)
@@ -367,7 +364,7 @@ DEVTHREADPARMS*  CreateDeviceThread(unsigned short wDevNum)
 
     if (!pThreadParms->hRequestQueuedEvent)
     {
-        logmsg("HHC764I CreateEvent(hRequestQueuedEvent) failed; device=%4.4X, strerror=\"%s\"\n",
+        logmsg(_("HHC764I CreateEvent(hRequestQueuedEvent) failed; device=%4.4X, strerror=\"%s\"\n"),
             wDevNum,strerror(errno));
         MyCloseHandle(pThreadParms->hShutdownEvent);
         free(pThreadParms);
@@ -383,12 +380,12 @@ DEVTHREADPARMS*  CreateDeviceThread(unsigned short wDevNum)
     pThreadParms->dwThreadID = 0;
 
 #ifdef FISH_HANG
-    if (fthread_create(__FILE__,__LINE__,&dwThreadID,NULL,DeviceThread,pThreadParms,ios_devthread_priority) != 0)
+    if (fthread_create(__FILE__,__LINE__,&dwThreadID,NULL,DeviceThread,pThreadParms) != 0)
 #else
-    if (fthread_create(&dwThreadID,NULL,DeviceThread,pThreadParms,ios_devthread_priority) != 0)
+    if (fthread_create(&dwThreadID,NULL,DeviceThread,pThreadParms) != 0)
 #endif
     {
-        logmsg("HHC760I fthread_create(DeviceThread) failed; device=%4.4X, strerror=\"%s\"\n",
+        logmsg(_("HHC760I fthread_create(DeviceThread) failed; device=%4.4X, strerror=\"%s\"\n"),
             wDevNum,strerror(errno));
         MyCloseHandle(pThreadParms->hShutdownEvent);
         MyCloseHandle(pThreadParms->hRequestQueuedEvent);
@@ -409,6 +406,18 @@ DEVTHREADPARMS*  CreateDeviceThread(unsigned short wDevNum)
 }
 
 /////////////////////////////////////////////////////////////////////////////
+//  helper function to set a thread's priority to its proper value
+
+void AdjustThreadPriority(int* pCurPrio, int* pNewPrio)
+{
+    if (*pCurPrio != *pNewPrio)
+    {
+        setpriority(PRIO_PROCESS, 0, *pNewPrio);
+        *pCurPrio = *pNewPrio;
+    }
+}
+
+/////////////////////////////////////////////////////////////////////////////
 // the device_thread itself...  (processes queued i/o request
 // by calling "execute_ccw_chain" function in channel.c...)
 
@@ -420,10 +429,15 @@ void*  DeviceThread (void* pArg)
     LIST_ENTRY*      pListEntry;        // (work)
     DEVIOREQUEST*    pIORequest;        // ptr to i/o request
     void*            pDevBlk;           // ptr to device block
+    int*             pnDevPrio;         // ptr to device i/o priority
+    int              nCurPrio;          // current thread priority
 
     pThreadParms = (DEVTHREADPARMS*) pArg;
 
     pThreadParms->dwThreadID = GetCurrentThreadId();
+
+    nCurPrio = getpriority(PRIO_PROCESS, 0);
+    AdjustThreadPriority(&nCurPrio,ios_devthread_prio);
 
     for (;;)
     {
@@ -432,6 +446,7 @@ void*  DeviceThread (void* pArg)
         InterlockedIncrement(&ios_devtwait);
         MyWaitForSingleObject(pThreadParms->hRequestQueuedEvent,ios_devthread_timeout * 1000);
         InterlockedDecrement(&ios_devtwait);
+
 
         if (IsEventSet(pThreadParms->hShutdownEvent)) break;
 
@@ -461,13 +476,22 @@ void*  DeviceThread (void* pArg)
         UnlockThreadParms(pThreadParms);    // (done with thread parms for now)
 
         pIORequest = CONTAINING_RECORD(pListEntry,DEVIOREQUEST,IORequestListLinkingListEntry);
-        pDevBlk = pIORequest->pDevBlk;      // (this is all we need)
+        pDevBlk   = pIORequest->pDevBlk;    // (need ptr to devblk)
+        pnDevPrio = pIORequest->pnDevPrio;  // (need ptr to devprio)
         free(pIORequest);                   // (not needed anymore)
 
         // Process the i/o request by calling the proper 'execute_ccw_chain'
         // function (based on architectural mode) in source module channel.c
 
+        // Set thread priority to requested device level
+        AdjustThreadPriority(&nCurPrio,pnDevPrio);
+
         call_execute_ccw_chain(ios_arch_mode, pDevBlk); // (process i/o request)
+
+        // Reset thread priority, if necessary
+        if (nCurPrio > *ios_devthread_prio)
+            AdjustThreadPriority(&nCurPrio,ios_devthread_prio);
+
 
         ////////////////////////////////////////////////////////////////////////////
         //

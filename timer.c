@@ -9,6 +9,8 @@
 #include "feat390.h"
 #include "feat370.h"
 
+int ecpsvm_testvtimer(REGS *,int);
+
 void check_timer_event(void);
 
 /*-------------------------------------------------------------------*/
@@ -85,8 +87,8 @@ REGS           *regs;                   /* -> CPU register context   */
 PSA_3XX        *psa;                    /* -> Prefixed storage area  */
 S32             itimer;                 /* Interval timer value      */
 S32             olditimer;              /* Previous interval timer   */
-#if defined(OPTION_MIPS_COUNTING) && defined(_FEATURE_SIE)
-int             itimer_diff;            /* TOD difference in TU      */
+#if defined(OPTION_MIPS_COUNTING) && ( defined(_FEATURE_SIE) || defined(_FEATURE_ECPSVM) )
+S32             itimer_diff;            /* TOD difference in TU      */
 #endif
 U32             intmask = 0;            /* Interrupt CPU mask        */
 
@@ -176,9 +178,11 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
          * [3] Check for interval timer interrupt    *
          *-------------------------------------------*/
 
-#if defined(OPTION_MIPS_COUNTING) && defined(_FEATURE_SIE)
-        /* Calculate diff in interval timer units */
-        itimer_diff = (int)((3*sysblk.todclock_diff)/625);
+#if defined(OPTION_MIPS_COUNTING) && ( defined(_FEATURE_SIE) || defined(_FEATURE_ECPSVM) )
+        /* Calculate diff in interval timer units plus rounding to improve accuracy */
+        itimer_diff = (S32) ((((6*sysblk.todclock_diff)/625)+1) >> 1);
+        if (itimer_diff <= 0)           /* Handle gettimeofday low */
+            itimer_diff = 1;            /* resolution problems     */
 #endif
 
         if(regs->arch_mode == ARCH_370)
@@ -189,7 +193,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
                     /* Decrement the location 80 timer */
             FETCH_FW(itimer,psa->inttimer);
                     olditimer = itimer;
-            
+
                     /* The interval timer is decremented as though bit 23 is
                        decremented by one every 1/300 of a second. This comes
                        out to subtracting 768 (X'300') every 1/100 of a second.
@@ -198,20 +202,35 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
                        comes out to 75 on the Alpha, with its 1024/second
                        tick interval. See 370 POO page 4-29. (ESA doesn't
                        even have an interval timer.) */
-#if defined(OPTION_MIPS_COUNTING) && defined(_FEATURE_SIE)
+#if defined(OPTION_MIPS_COUNTING) && ( defined(_FEATURE_SIE) || defined(_FEATURE_ECPSVM) )
             itimer -= itimer_diff;
 #else
             itimer -= 76800 / CLK_TCK;
 #endif
             STORE_FW(psa->inttimer,itimer);
-        
+
             /* Set interrupt flag and interval timer interrupt pending
                if the interval timer went from positive to negative */
             if (itimer < 0 && olditimer >= 0)
             {
+#if defined(_FEATURE_ECPSVM)
+                regs->rtimerint=1;      /* To resolve concurrent V/R Int Timer Ints */
+#endif
                 ON_IC_ITIMER(regs);
                 intmask |= regs->cpumask;
             }
+#if defined(_FEATURE_ECPSVM)
+#if defined(OPTION_MIPS_COUNTING)
+            if(ecpsvm_testvtimer(regs,itimer_diff)==0)
+#else /* OPTION_MIPS_COUNTING */
+            if(ecpsvm_testvtimer(regs,76800 / CLK_TCK)==0)
+#endif /* OPTION_MIPS_COUNTING */
+            {
+                ON_IC_ITIMER(regs);
+                intmask |= regs->cpumask;
+            }
+#endif /* _FEATURE_ECPSVM */
+
         } /*if(regs->arch_mode == ARCH_370)*/
 
 #if defined(_FEATURE_SIE)
@@ -224,7 +243,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
                 /* Decrement the location 80 timer */
                 FETCH_FW(itimer,regs->guestregs->sie_psa->inttimer);
                 olditimer = itimer;
-            
+
 #if defined(OPTION_MIPS_COUNTING)
                 itimer -= itimer_diff;
 #else
@@ -242,6 +261,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
             }
         }
 #endif /*defined(_FEATURE_SIE)*/
+
 
     } /* end for(cpu) */
 
@@ -280,9 +300,21 @@ struct  timeval tv;                     /* Structure for gettimeofday
                                            and select function calls */
   UNREFERENCED(argp);
 
+    /* Set root mode in order to set priority */
+    SETMODE(ROOT);
+
+    /* Set CPU thread priority */
+    if (setpriority(PRIO_PROCESS, 0, sysblk.todprio))
+        logmsg (_("HHCTT001W Timer thread set priority %d failed: %s\n"),
+                sysblk.todprio, strerror(errno));
+
+    /* Back to user mode */
+    SETMODE(USER);
+
     /* Display thread started message on control panel */
-    logmsg (_("HHCCP012I Timer thread started: tid="TIDPAT", pid=%d\n"),
-            thread_id(), getpid());
+    logmsg (_("HHCTT002I Timer thread started: tid="TIDPAT", pid=%d, "
+            "priority=%d\n"),
+            thread_id(), getpid(), getpriority(PRIO_PROCESS,0));
 
 #ifdef OPTION_TODCLOCK_DRAG_FACTOR
     /* Get current time */
@@ -327,6 +359,11 @@ struct  timeval tv;                     /* Structure for gettimeofday
             now = (U64)tv.tv_sec;
             now = now * 1000000 + tv.tv_usec;
             interval = (int)(now - then);
+
+#if defined(OPTION_SHARED_DEVICES)
+            sysblk.shrdrate = sysblk.shrdcount;
+            sysblk.shrdcount = 0;
+#endif
 
             for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
             {
@@ -382,7 +419,7 @@ struct  timeval tv;                     /* Structure for gettimeofday
 
     } /* end while */
 
-    logmsg (_("HHCCP013I Timer thread ended\n"));
+    logmsg (_("HHCTT003I Timer thread ended\n"));
 
     return NULL;
 

@@ -25,7 +25,7 @@
  #endif
 #endif
 
-/* _FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE is used for host 
+/* _FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE is used for host
    related processing issues, FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE
    is defined only in ESA/390 mode. MCDS is an ESA/390
    feature that is supported under z/Architecture SIE */
@@ -55,6 +55,10 @@
 
 #if defined(FEATURE_EXPANDED_STORAGE)
  #define _FEATURE_EXPANDED_STORAGE
+#endif
+
+#if defined(FEATURE_ECPSVM)
+ #define _FEATURE_ECPSVM
 #endif
 
 #if defined(_FEATURE_SIE) && defined(FEATURE_STORAGE_KEY_ASSIST)
@@ -91,6 +95,10 @@
 
 #if defined(FEATURE_EXTERNAL_INTERRUPT_ASSIST)
  #define _FEATURE_EXTERNAL_INTERRUPT_ASSIST
+#endif
+
+#if defined(FEATURE_MESSAGE_SECURITY_ASSIST)
+ #define _FEATURE_MESSAGE_SECURITY_ASSIST
 #endif
 
 #undef _VSTORE_C_STATIC
@@ -168,7 +176,7 @@
  #define GEN_MAXARCH    3+2
 #elif defined(_ARCHMODE2)
  #define GEN_MAXARCH    2+2
-#else 
+#else
  #define GEN_MAXARCH    1+2
 #endif
 
@@ -176,14 +184,15 @@
  #error OPTION_390_MODE must be enabled for OPTION_900_MODE
 #endif
 
+
 #else /*!defined(FEATCHK_CHECK_ALL)*/
 
 /* When ESAME is installed then all instructions
    marked N3 in the reference are also available
    in ESA/390 mode */
-#if defined(_900)
+#if defined(_900) && (__GEN_ARCH == 390)
  #define FEATURE_ESAME_N3_ESA390
-#endif /*defined(_900)*/
+#endif
 
 #if !defined(FEATURE_2K_STORAGE_KEYS) \
  && !defined(FEATURE_4K_STORAGE_KEYS)
@@ -204,7 +213,7 @@
 #if defined(_900) && defined(FEATURE_VECTOR_FACILITY)
  #error Vector Facility not supported on ESAME capable processors
 #endif
- 
+
 #if defined(FEATURE_MOVE_PAGE_FACILITY_2) \
  && !defined(FEATURE_4K_STORAGE_KEYS)
  #error Move page facility cannot be defined with 2K storage keys
@@ -251,6 +260,11 @@
  #error I/O Assist Feature only supported with SIE
 #endif
 
+#if defined(FEATURE_IO_ASSIST) \
+ && !defined(_FEATURE_REGION_RELOCATE)
+ #error Region Relocate Facility required for IO Assist
+#endif
+
 #if defined(FEATURE_EXTERNAL_INTERRUPT_ASSIST) \
  && !defined(_FEATURE_SIE)
  #error External Interruption assist only supported with SIE
@@ -284,9 +298,32 @@
  #endif
 #endif
 
+#if defined(FEATURE_FPS_EXTENSIONS) \
+ && !defined(FEATURE_BINARY_FLOATING_POINT)
+ #error FP support extensions requires binary floating point
+#endif
+
+#if defined(FEATURE_HFP_MULTIPLY_ADD_SUBTRACT) \
+ && !defined(FEATURE_HEXADECIMAL_FLOATING_POINT)
+ #error HFP multiply add/subtract requires hexadecimal floating point
+#endif
+
 #if defined(FEATURE_PER2) && !defined(FEATURE_PER)
  #error FEATURE_PER must be defined when using FEATURE_PER2
 #endif
+
+
+#if defined(FEATURE_MESSAGE_SECURITY_ASSIST)
+ #if defined(_370)
+  #define _370_FEATURE_MESSAGE_SECURITY_ASSIST
+ #endif
+ #if defined(_390)
+  #define _390_FEATURE_MESSAGE_SECURITY_ASSIST
+ #endif
+ #if defined(_900)
+  #define _900_FEATURE_MESSAGE_SECURITY_ASSIST
+ #endif
+#endif /*defined(FEATURE_MESSAGE_SECURITY_ASSIST)*/
 
 
 #endif /*!defined(FEATALL_CHECKALL)*/

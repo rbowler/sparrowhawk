@@ -14,9 +14,11 @@
 #define OPT_PDS_LISTONLY 0x8
 
 #ifdef EXTERNALGUI
+#if 0
 /* Special flag to indicate whether or not we're being
    run under the control of the external GUI facility. */
 int  extgui = 0;
+#endif
 #endif /*EXTERNALGUI*/
 
 int end_of_track(char *ptr)
@@ -55,18 +57,8 @@ int process_member(CIFBLK *cif, int noext, DSXTENT extent[],
 {
  int rc, trk, len, cyl, head, rec;
  BYTE *buf;
- char   *scodepage;
 
-    /* set_codepage() uses the logmsg macro which requires msgpipew */
-    sysblk.msgpipew = stdout;
-    if(!sysblk.codepage)
-    {
-        if((scodepage = getenv("HERCULES_CP")))
-            set_codepage(scodepage);
-        else
-            set_codepage("default");
-    }
-
+ set_codepage(NULL);
 
  trk = (ttr[0] << 8) | ttr[1];
  rec = ttr[2];

@@ -189,15 +189,12 @@ U32     xdmg = 0;
 RADR    fsta = 0;
 
     /* Release mainlock if held */
-#if MAX_CPU_ENGINES > 1
-    /* Unlock the main storage lock if held */
     if (regs->mainlock)
         RELEASE_MAINLOCK(regs);
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
     if(regs->sie_active && regs->guestregs->mainlock)
         RELEASE_MAINLOCK(regs->guestregs);
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
-#endif /*MAX_CPU_ENGINES > 1*/
 
     /* Exit SIE when active */
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
@@ -260,13 +257,15 @@ RADR    fsta = 0;
 
 #if defined(_ARCHMODE3)
  #undef   _GEN_ARCH
- #if !defined(HAVE_STRSIGNAL)
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "machchk.c"
+#endif
+
+
+#if !defined(HAVE_STRSIGNAL)
     char * strsignal( int sig ) {
         return sys_siglist[sig];
     }
- #endif
- #define  _GEN_ARCH _ARCHMODE3
- #include "machchk.c"
 #endif
 
 
@@ -283,10 +282,10 @@ int i;
     {
     DEVBLK *dev;
 
-        if(tid == sysblk.cnsltid)
+        if(tid == sysblk.cnsltid || tid == sysblk.socktid)
             return;
         for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
-            if (dev->tid == tid) break;
+            if (dev->tid == tid || dev->shrdtid == tid) break;
         if( dev == NULL)
             logmsg(_("HHCCP020E signal USR2 received for undetermined "
                      "device\n"));

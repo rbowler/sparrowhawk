@@ -52,12 +52,14 @@ static CONTYP mime_types[] = {
 int html_include(WEBBLK *webblk, char *filename)
 {
     FILE *inclfile;
-    char fullname[1024];
-    char buffer[1024];
+    char fullname[HTTP_PATH_LENGTH];
+    char buffer[HTTP_PATH_LENGTH];
     int ret;
 
-    strncpy(fullname,sysblk.httproot,1024);
-    inclfile = fopen(strncat(fullname,filename,1024),"r");
+    strlcpy( fullname, sysblk.httproot, sizeof(fullname) );
+    strlcat( fullname, filename,        sizeof(fullname) );
+
+    inclfile = fopen(fullname,"r");
 
     if (!inclfile)
     {
@@ -277,22 +279,27 @@ char *http_variable(WEBBLK *webblk, char *name, int type)
 
 static void http_verify_path(WEBBLK *webblk, char *path)
 {
-    char resolved_base[1024];
-    char resolved_path[1024];
+    char resolved_path[HTTP_PATH_LENGTH];
     int i;
-
-    realpath(sysblk.httproot,resolved_base); strncat(resolved_base,"/",1024);
-    realpath(path,resolved_path);
 
     for (i = 0; path[i]; i++)
         if (!isalnum((int)path[i]) && !strchr("/.-_", path[i]))
             http_error(webblk, "404 File Not Found","",
                                "Illegal character in filename");
 
-    if(strncmp(resolved_base,resolved_path,strlen(resolved_base)))
+    if (!realpath( path, resolved_path ))
+    {
         http_error(webblk, "404 File Not Found","",
                            "Invalid pathname");
+    }
 
+    // The following verifies the specified file does not lie
+    // outside the specified httproot (Note: sysblk.httproot
+    // was previously resolved to an absolute path by config.c)
+
+    if (strncmp( sysblk.httproot, resolved_path, strlen(sysblk.httproot)))
+        http_error(webblk, "404 File Not Found","",
+                           "Invalid pathname");
 }
 
 
@@ -355,16 +362,16 @@ static int http_authenticate(WEBBLK *webblk, char *type, char *userpass)
 
 static void http_download(WEBBLK *webblk, char *filename)
 {
-    char buffer[1024];
+    char buffer[HTTP_PATH_LENGTH];
     char tbuf[80];
     int fd, length;
     char *filetype;
-    char fullname[1024];
+    char fullname[HTTP_PATH_LENGTH];
     struct stat st;
     CONTYP *mime_type = mime_types;
 
-    strncpy(fullname,sysblk.httproot,1024);
-    strncat(fullname,filename,1024);
+    strlcpy( fullname, sysblk.httproot, sizeof(fullname) );
+    strlcat( fullname, filename,        sizeof(fullname) );
 
     http_verify_path(webblk,fullname);
 
@@ -404,7 +411,7 @@ static void *http_request(FILE *hsock)
 {
     WEBBLK *webblk;
     int authok = !sysblk.httpauth;
-    char line[1024];
+    char line[HTTP_PATH_LENGTH];
     char *url = NULL;
     char *pointer;
     char *strtok_str;
@@ -537,6 +544,22 @@ static void *http_request(FILE *hsock)
         }
     }
 
+#if defined(OPTION_DYNAMIC_LOAD)
+    {
+    zz_cgibin dyncgi;
+
+        if( (dyncgi = HDL_FINDSYM(webblk->baseurl)) )
+        {
+        char tbuf[80];
+            fprintf(webblk->hsock,"HTTP/1.0 200 OK\nConnection: close\n");
+            fprintf(webblk->hsock,"Date: %s\n",
+              http_timestring(tbuf,sizeof(tbuf),time(NULL)));
+            dyncgi(webblk);
+            http_exit(webblk);
+        }
+    }
+#endif /*defined(OPTION_DYNAMIC_LOAD)*/
+
     http_error(webblk, "404 File Not Found","",
                        "The requested file was not found");
 
@@ -561,6 +584,54 @@ TID                     httptid;        /* Negotiation thread id     */
     logmsg (_("HHCHT001I HTTP listener thread started: "
             "tid="TIDPAT", pid=%d\n"),
             thread_id(), getpid());
+
+
+    /* If the HTTP root directory is not specified,
+       use a reasonable default */
+    if (!sysblk.httproot)
+        {
+#if defined(WIN32)
+        char process_dir[HTTP_PATH_LENGTH];
+        if (get_process_directory(process_dir,HTTP_PATH_LENGTH) > 0)
+            sysblk.httproot = strdup(process_dir);
+        else
+#endif /*defined(WIN32)*/
+        sysblk.httproot = strdup(HTTP_ROOT);
+    }
+#if defined(WIN32)
+    if (is_win32_directory(sysblk.httproot))
+    {
+        char  posix_dir[HTTP_PATH_LENGTH];
+        convert_win32_directory_to_posix_directory(sysblk.httproot,posix_dir);
+        free(sysblk.httproot); sysblk.httproot = strdup(posix_dir);
+    }
+#endif /*defined(WIN32)*/
+    /* Convert the specified HTTPROOT value to an absolute path
+       ending with a '/' and save in sysblk.httproot. */
+    {
+        char absolute_httproot_path[HTTP_PATH_LENGTH];
+        char save_working_directory[HTTP_PATH_LENGTH];
+        int  rc;
+        if (!realpath(sysblk.httproot,absolute_httproot_path))
+        {
+            logmsg( _("HHCCF066E Invalid HTTPROOT: %s\n"),
+                   strerror(errno));
+            return NULL;
+        }
+        VERIFY(getcwd(save_working_directory,sizeof(save_working_directory)));
+        rc = chdir(absolute_httproot_path);     // (verify path)
+        VERIFY(!chdir(save_working_directory)); // (restore cwd)
+        if (rc != 0)
+        {
+            logmsg( _("HHCCF066E Invalid HTTPROOT: %s\n"),
+                   strerror(errno));
+            return NULL;
+        }
+        strlcat(absolute_httproot_path,"/",sizeof(absolute_httproot_path));
+        free(sysblk.httproot); sysblk.httproot = strdup(absolute_httproot_path);
+        TRACE("HTTPROOT = %s\n",sysblk.httproot);// (debug display)
+    }
+
 
     /* Obtain a socket */
     lsock = socket (AF_INET, SOCK_STREAM, 0);
@@ -613,7 +684,7 @@ TID                     httptid;        /* Negotiation thread id     */
     logmsg(_("HHCHT006I Waiting for HTTP requests on port %u\n"),
             sysblk.httpport);
 
-    /* Handle connection requests and attention interrupts */
+    /* Handle http requests */
     while (TRUE) {
 
         /* Initialize the select parameters */
@@ -639,10 +710,10 @@ TID                     httptid;        /* Negotiation thread id     */
             break;
         }
 
-        /* If a client connection request has arrived then accept it */
+        /* If a http request has arrived then accept it */
         if (FD_ISSET(lsock, &selset))
         {
-            /* Accept a connection and create conversation socket */
+            /* Accept the connection and create conversation socket */
             csock = accept (lsock, NULL, NULL);
 
             if (csock < 0)
@@ -658,7 +729,7 @@ TID                     httptid;        /* Negotiation thread id     */
                 continue;
             }
 
-            /* Create a thread to complete the client connection */
+            /* Create a thread to execute the http request */
             if ( create_thread (&httptid, &sysblk.detattr,
                                 http_request, hsock) )
             {

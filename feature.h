@@ -89,21 +89,17 @@
 #undef F_AREG
 #undef STORE_W
 #undef FETCH_W
-#if defined(OPTION_AIA_BUFFER)
 #undef VI
 #undef AI
-#endif /*defined(OPTION_AIA_BUFFER)*/
-#if defined(OPTION_AEA_BUFFER)
 #undef AE
 #undef VE
-#endif /*defined(OPTION_AEA_BUFFER)*/
 #undef SIEBK
 #undef ZPB
 #undef TLB_STD
 #undef TLB_VADDR
 #undef TLB_PTE
 
-#if !defined(NO_ATTR_REGPARM) && !defined(PROFILE_CPU)
+#if !defined(NO_ATTR_REGPARM)
 #define ATTR_REGPARM(n) __attribute__ ((regparm(n)))
 #else
 #define ATTR_REGPARM(n) /* nothing */
@@ -129,7 +125,7 @@ s370_ ## _name
     (AMASK24)
 
 #define ADDRESS_MAXWRAP_E(_register_context) \
-	(AMASK31)
+    (AMASK31)
 
 #define REAL_MODE(p) \
     ((p)->ecmode==0 || ((p)->sysmask & PSW_DATMODE)==0)
@@ -143,57 +139,53 @@ s370_ ## _name
         ((_regs)->psw.ecmode && ((_regs)->psw.sysmask & PSW_PERMODE))
 #endif
 
-#define ASF_ENABLED(_regs)	0 /* ASF is never enabled for S/370 */
+#define ASF_ENABLED(_regs)  0 /* ASF is never enabled for S/370 */
 
 #define ASTE_AS_DESIGNATOR(_aste) \
-	((_aste)[2])
+    ((_aste)[2])
 
 #define ASTE_LT_DESIGNATOR(_aste) \
-	((_aste)[3])
+    ((_aste)[3])
 
-#define SAEVENT_BIT	STD_SAEVENT
-#define SSEVENT_BIT	STD_SSEVENT
-#define SSGROUP_BIT	STD_GROUP
+#define SAEVENT_BIT STD_SAEVENT
+#define SSEVENT_BIT STD_SSEVENT
+#define SSGROUP_BIT STD_GROUP
 
-#define PSA	PSA_3XX
+#define PSA PSA_3XX
 #define PSA_SIZE 4096
-#define IA	IA_L
-#define PX	PX_L
-#define CR(_r)	CR_L(_r)
-#define GR(_r)	GR_L(_r)
+#define IA  IA_L
+#define PX  PX_L
+#define CR(_r)  CR_L(_r)
+#define GR(_r)  GR_L(_r)
 #define GR_A(_r, _regs) ((_regs)->GR_L((_r)))
 #define MONCODE MC_L
-#define TEA	EA_L
+#define TEA EA_L
 #define DXC     tea
-#define ET 	ET_L
+#define ET  ET_L
 #define PX_MASK 0x7FFFF000
 #define RSTOLD  iplccw1
 #define RSTNEW  iplpsw
 #if !defined(_FEATURE_ZSIE)
-#define RADR	U32
+#define RADR    U32
 #define F_RADR  "%8.8X"
 #else
-#define RADR	U64
-#define F_RADR  "%16.16llX"
+#define RADR    U64
+#define F_RADR  "%8.8llX"
 #endif
-#define VADR	U32
+#define VADR    U32
 #define F_VADR  "%8.8X"
-#define GREG	U32
+#define GREG    U32
 #define F_GREG  "%8.8X"
-#define CREG	U32
+#define CREG    U32
 #define F_CREG  "%8.8X"
-#define AREG	U32
+#define AREG    U32
 #define F_AREG  "%8.8X"
 #define STORE_W STORE_FW
 #define FETCH_W FETCH_FW
-#if defined(OPTION_AIA_BUFFER)
-#define VI	VI_L
-#define AI	AI_L
-#endif /*defined(OPTION_AIA_BUFFER)*/
-#if defined(OPTION_AEA_BUFFER)
-#define AE(_r)	AE_L(_r)
-#define VE(_r)	VE_L(_r)
-#endif /*defined(OPTION_AEA_BUFFER)*/
+#define VI  VI_L
+#define AI  AI_L
+#define AE(_r)  AE_L(_r)
+#define VE(_r)  VE_L(_r)
 #define SIEBK                   SIE1BK
 #define ZPB                     ZPB1
 #define TLB_STD   TLB_STD_L
@@ -211,8 +203,8 @@ void (ATTR_REGPARM(3) s390_ ## _name) (BYTE inst[], int execflag, REGS *regs)
 s390_ ## _name
 
 #define APPLY_PREFIXING(addr,pfx) \
-    ((((addr)&0x7FFFF000)==0)?((addr)&0xFFF)|pfx:\
-    (((addr)&0x7FFFF000)==pfx)?(addr)&0xFFF:(addr))
+    (((U32)((addr)&0x7FFFF000)==(U32)0)    ?((addr)&0xFFF)|(pfx):\
+     ((U32)((addr)&0x7FFFF000)==(U32)(pfx))?((addr)&0xFFF):(addr))
 
 #define AMASK   AMASK_L
 
@@ -220,7 +212,7 @@ s390_ ## _name
     ((_register_context)->psw.AMASK)
 
 #define ADDRESS_MAXWRAP_E(_register_context) \
-	((_register_context)->psw.AMASK)
+    ((_register_context)->psw.AMASK)
 
 #define REAL_MODE(p) \
     (((p)->sysmask & PSW_DATMODE)==0)
@@ -234,66 +226,62 @@ s390_ ## _name
         ((_regs)->psw.sysmask & PSW_PERMODE)
 #endif
 
-#define ASF_ENABLED(_regs)	((_regs)->CR(0) & CR0_ASF)
+#define ASF_ENABLED(_regs)  ((_regs)->CR(0) & CR0_ASF)
 
 #define ASTE_AS_DESIGNATOR(_aste) \
-	((_aste)[2])
+    ((_aste)[2])
 
 #define ASTE_LT_DESIGNATOR(_aste) \
-	((_aste)[3])
+    ((_aste)[3])
 
-#define SAEVENT_BIT	STD_SAEVENT
-#define SSEVENT_BIT	STD_SSEVENT
-#define SSGROUP_BIT	STD_GROUP
+#define SAEVENT_BIT STD_SAEVENT
+#define SSEVENT_BIT STD_SSEVENT
+#define SSGROUP_BIT STD_GROUP
 
-#define LSED_UET_HDR	S_LSED_UET_HDR
-#define LSED_UET_TLR	S_LSED_UET_TLR
-#define LSED_UET_BAKR	S_LSED_UET_BAKR
-#define LSED_UET_PC	S_LSED_UET_PC
+#define LSED_UET_HDR    S_LSED_UET_HDR
+#define LSED_UET_TLR    S_LSED_UET_TLR
+#define LSED_UET_BAKR   S_LSED_UET_BAKR
+#define LSED_UET_PC S_LSED_UET_PC
 #define CR12_BRTRACE    S_CR12_BRTRACE
 #define CR12_TRACEEA    S_CR12_TRACEEA
 
 #define CHM_GPR2_RESV   S_CHM_GPR2_RESV
 
-#define PSA	PSA_3XX
+#define PSA PSA_3XX
 #define PSA_SIZE 4096
-#define IA	IA_L
-#define PX	PX_L
-#define CR(_r)	CR_L(_r)
-#define GR(_r)	GR_L(_r)
+#define IA  IA_L
+#define PX  PX_L
+#define CR(_r)  CR_L(_r)
+#define GR(_r)  GR_L(_r)
 #define GR_A(_r, _regs) ((_regs)->GR_L((_r)))
 #define MONCODE MC_L
-#define TEA	EA_L
+#define TEA EA_L
 #define DXC     tea
-#define ET 	ET_L
+#define ET  ET_L
 #define PX_MASK 0x7FFFF000
 #define RSTNEW  iplpsw
 #define RSTOLD  iplccw1
 #if !defined(_FEATURE_ZSIE)
-#define RADR	U32
+#define RADR    U32
 #define F_RADR  "%8.8X"
 #else
-#define RADR	U64
-#define F_RADR  "%16.16llX"
+#define RADR    U64
+#define F_RADR  "%8.8llX"
 #endif
-#define VADR	U32
+#define VADR    U32
 #define F_VADR  "%8.8X"
-#define GREG	U32
+#define GREG    U32
 #define F_GREG  "%8.8X"
-#define CREG	U32
+#define CREG    U32
 #define F_CREG  "%8.8X"
-#define AREG	U32
+#define AREG    U32
 #define F_AREG  "%8.8X"
 #define STORE_W STORE_FW
 #define FETCH_W FETCH_FW
-#if defined(OPTION_AIA_BUFFER)
-#define VI	VI_L
-#define AI	AI_L
-#endif /*defined(OPTION_AIA_BUFFER)*/
-#if defined(OPTION_AEA_BUFFER)
-#define AE(_r)	AE_L(_r)
-#define VE(_r)	VE_L(_r)
-#endif /*defined(OPTION_AEA_BUFFER)*/
+#define VI  VI_L
+#define AI  AI_L
+#define AE(_r)  AE_L(_r)
+#define VE(_r)  VE_L(_r)
 #define SIEBK                   SIE1BK
 #define ZPB                     ZPB1
 #define TLB_STD   TLB_STD_L
@@ -305,8 +293,8 @@ s390_ ## _name
 #define ARCH_MODE   ARCH_900
 
 #define APPLY_PREFIXING(addr,pfx) \
-    ((((addr)&0xFFFFFFFFFFFFE000ULL)==0)?((addr)&0x1FFF)|pfx:\
-    (((addr)&0xFFFFFFFFFFFFE000ULL)==pfx)?(addr)&0x1FFF:(addr))
+    (((U64)((addr)&0xFFFFFFFFFFFFE000ULL)==(U64)0)?((addr)&0x1FFF)|(pfx):\
+    ((U64)((addr)&0xFFFFFFFFFFFFE000ULL)==(U64)(pfx))?(addr)&0x1FFF:(addr))
 
 #define AMASK   AMASK_G
 
@@ -314,7 +302,7 @@ s390_ ## _name
     ((_register_context)->psw.AMASK)
 
 #define ADDRESS_MAXWRAP_E(_register_context) \
-	((_register_context)->psw.AMASK)
+    ((_register_context)->psw.AMASK)
 
 #define REAL_MODE(p) \
     (((p)->sysmask & PSW_DATMODE)==0)
@@ -355,40 +343,36 @@ void (ATTR_REGPARM(3) z900_ ## _name) (BYTE inst[], int execflag, REGS *regs)
 #define ARCH_DEP(_name) \
 z900_ ## _name
 
-#define PSA	PSA_900
+#define PSA PSA_900
 #define PSA_SIZE 8192
-#define IA	IA_G
-#define PX	PX_L
-#define CR(_r)	CR_G(_r)
-#define GR(_r)	GR_G(_r)
+#define IA  IA_G
+#define PX  PX_L
+#define CR(_r)  CR_G(_r)
+#define GR(_r)  GR_G(_r)
 #define GR_A(_r, _regs) ((_regs)->psw.amode64 ? (_regs)->GR_G((_r)) : (_regs)->GR_L((_r)))
 #define MONCODE MC_G
-#define TEA	EA_G
+#define TEA EA_G
 #define DXC     dataexc
-#define ET 	ET_G
+#define ET  ET_G
 #define PX_MASK 0x7FFFE000
 #define RSTOLD  rstold
 #define RSTNEW  rstnew
-#define RADR	U64
+#define RADR    U64
 #define F_RADR  "%16.16llX"
-#define VADR	U64
+#define VADR    U64
 #define F_VADR  "%16.16llX"
-#define GREG	U64
+#define GREG    U64
 #define F_GREG  "%16.16llX"
-#define CREG	U64
+#define CREG    U64
 #define F_CREG  "%16.16llX"
-#define AREG	U32
+#define AREG    U32
 #define F_AREG  "%8.8X"
 #define STORE_W STORE_DW
 #define FETCH_W FETCH_DW
-#if defined(OPTION_AIA_BUFFER)
-#define VI	VI_G
-#define AI	AI_G
-#endif /*defined(OPTION_AIA_BUFFER)*/
-#if defined(OPTION_AEA_BUFFER)
-#define AE(_r)	AE_G(_r)
-#define VE(_r)	VE_G(_r)
-#endif /*defined(OPTION_AEA_BUFFER)*/
+#define VI  VI_G
+#define AI  AI_G
+#define AE(_r)  AE_G(_r)
+#define VE(_r)  VE_G(_r)
 #define SIEBK                   SIE2BK
 #define ZPB                     ZPB2
 #define TLB_STD   TLB_STD_G

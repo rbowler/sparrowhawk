@@ -1,3 +1,259 @@
+#### Don't forget to change the version number in configure.ac! ####
+
+02 Oct 2003 Issue warning message when restoring non-IEBCOPY xmit file
+            using dasdload - Greg Smith
+01 Oct 2003 Fix segmentation fault using NPTL threads and no console
+            device is specified - Greg Smith
+29 Sep 2003 Backout STUPID (dangerous) 16 Aug 2003 het changes now that
+            configure.ac detects the bug that was causing it - Fish
+            (I can't believe I did that; I must have been tired)
+27 Sep 2003 Correct Makefile.am Transient variable names to not end
+            with automake primaries - Ivan Warren
+25 Sep 2003 PowerOff diagnose for 4361 & 937X processors - Tomas Masek by Fish
+25 Sep 2003 Fix DASDCOPY bug copying too much to uncompressed FBA o/p - Fish
+25 Sep 2003 Fix dasdtab entry for 3310 FBA device type - Fish
+25 Sep 2003 Initial power-on reset for mainstor & expanded storage - Fish
+25 Sep 2003 Resolve & verify HTTPROOT in config.c before startup - Fish
+25 Sep 2003 Fix bug in fbadasd_init_handler causing DASDCOPY crash - Fish
+21 Sep 2003 Complete overhaul to the build process  (merge of libtool_exp)
+            version set to 2.17.c0
+            - A Lot of People (commit by Ivan Warren)
+21 Sep 2003 Added test for cygwin gcc alloca bug to configure.ac to fix
+            issue of http server (and possibly other things) crashing - Fish
+20 Sep 2003 Add disassemble command (u [r|v|p|h] addr range) - Jan Jaeger
+16 Sep 2003 Tape read backward fixes contributed by Jay Jaeger - Fish
+16 Sep 2003 Repair DEVPRIO handling - Mark L. Gaubatz
+28 Aug 2003 Check mmap return value when allocating main storg - Ivan Warren
+24 Aug 2003 fix for Asynch I/O Status stacking race condition - Ivan Warren
+24 Aug 2003 Add modpath configuration statement - Jan Jaeger
+22 Aug 2003 Remove setpriority from execute_ccw_chain and instead
+            move it directly into the device thread itself - Fish
+22 Aug 2003 Add support for strlcpy/strlcat and use in httpserv.c
+            (please use where possible instead of strncpy/strncat) - Fish
+22 Aug 2003 Define default priorities for WIN32 / non-WIN32 - Fish
+20 Aug 2003 Correct interval timer references and resolution - Mark L. Gaubatz
+19 Aug 2003 Make devlist command immune from DEVBLK chain sequence - Fish
+19 Aug 2003 Windows "double memory consumption" fix contributed by
+            Mark D. (golden_dog98 [golden_dog98@yahoo.com]) - Fish
+19 Aug 2003 Committed Jim Pierson's "-g -O2" optimization flags fix - Fish
+19 Aug 2003 Fix dasdtab to provide correct model numbers for
+            sense ID on 3340-1 (35M) and 3340-2 (70M) - Ivan Warren
+19 Aug 2003 Removed W32 only symbol from linux build in ctcadpt - Ivan Warren
+19 Aug 2003 Fixed nested lock issue in LCS freezing on Linux - Ivan Warren
+19 Aug 2003 Fixed herc crash when "attach" CTCI with no parm - Jim Pierson
+19 Aug 2003 Allow Write Record 0 after Write Home Address on CKDs
+            problem initially reported by Jay Jaeger(cube1us) - Ivan Warren
+18 Aug 2003 Re-instated fast dev lookup as a cache facility
+            Thanks Fish for the suggestions - Ivan Warren
+17 Aug 2003 Added HERCPRIO, DEVPRIO and TODPRIO - Mark L. Gaubatz
+17 Aug 2003 Disabled Fast devnum & subchan lookup because of
+            some incompatibilities / reported by yvangamache - Ivan Warren
+16 Aug 2003 fix tt32stats command when OPTION_DYNAMIC_LOAD - Fish
+16 Aug 2003 fix CTCI segfault caused by bug in build_config when
+            OPTION_CONFIG_SYMBOLS specified - Fish
+16 Aug 2003 fix 'make install-strip' issue with dyn devices identified
+            by yvangamache [yvangamache@hotmail.com]  -- Fish
+16 Aug 2003 copytape (hetupd.c), main (hetmap.c), het_read, het_write
+            (hetlib.c): define global static I/O buffers to work around
+            pre gcc 3.2 bug #8750 identified on "04 Jan 2003" - Fish
+            http://gcc.gnu.org/bugzilla/show_bug.cgi?id=8750
+15 Aug 2003 Compress ESAME psw in semi graphic panel - Jan Jaeger
+14 Aug 2003 Updated dasdutil.c for HDL compatibility - Ivan Warren
+14 Aug 2003 Added D/T 3422,3430 to hdteq & tapedev(hdt3420) - Ivan Warren
+14 Aug 2003 Cosmetics : Correct HHCTE006A Prompt - Ivan Warren
+14 Aug 2003 Fast Devnum & Subchannel lookup algorithm - Ivan Warren
+11 Aug 2003 Dequeued IOINT struct off of sysblk.iointq during
+            TIO/TSCH to prevent incorrect PCI/Final irpt reordering.
+            OS360/MVT Now IPLs correctly.
+            All changed marked with "ISW20030812" - Ivan Warren
+08 Aug 2003 2.17.b2: fixed incorrectly typed thread functions - Fish
+            all thread functions s/b "void *thread(void *arg)", not
+            void thread(void *arg) or void *thread() or anything else
+08 Aug 2003 Increased 2311 Alt Cyl count from 2 to 3 - Ivan Warren
+07 Aug 2003 Codepage extensions (iconv) - Jan Jaeger
+05 Aug 2003 Dynamic loadable device support - Jan Jaeger
+01 Aug 2003 Created RELEASE.NOTES member - Fish
+01 Aug 2003 Added Hercules VERSION to dyngui - Fish
+01 Aug 2003 Various OMA tape processing fixes - Ivan Warren
+29 Jul 2003 Fix shared device open to not set `connecting' bit on
+            until after parameter verification - Greg Smith
+26 Jul 2003 Minor change to codepage conversion logic - Jan Jaeger
+21 Jul 2003 CVD fix by Viktor Shkamerda - Jan Jaeger
+20 Jul 2003 Defer tuntap32 dll load to device alloc - Jan Jaeger
+19 Jul 2003 THDER,THDR instructions - Roger Bowler
+18 Jul 2003 NLS translation updates - Jan Jaeger
+18 Jul 2003 Fix bug in config.c causing segfault on lcs devices - Fish
+18 Jul 2003 Fix race conditions in console detach/close - Jan Jaeger
+17 Jul 2003 Allow address:port on CNSLPORT statement - Jan Jaeger
+17 Jul 2003 make console threads high priority, remove trylock - Fish
+17 Jul 2003 logger_init: 1) consistent stdxxx dup'ing,
+            2) make logger_thread high priority - Fish
+17 Jul 2003 Bugfix: destroy LOCK & COND in cache_destroy - Fish
+16 Jul 2003 Allow specifying a native block device as an FBA
+            * Linux only, <2Gb Only - Ivan Warren
+15 Jul 2003 Fix s/370 testio race condition - Greg Smith as reported
+            by Victor Shkamerda
+14 Jul 2003 Fixes for compiler weirdness - Greg Smith
+12 Jul 2003 Optimize HDL_FINDNXT call - Jan Jaeger
+12 Jul 2003 Correct archmode check in cmpsc and featchk - Jan Jaeger
+12 Jul 2003 Restructure service and facility features - Jan Jaeger
+11 Jul 2003 Fix bogus HHCCT048E error message - Fish
+11 Jul 2003 Fix "console: select: Bad file number" -- 2nd try - Fish
+10 Jul 2003 fix tape label issue in hetinit.c & slib.c - Fish
+10 Jul 2003 HFP Multiply-Add/Subtract Facility - Roger Bowler
+09 Jul 2003 UC Only in status for CTL NO-OP on tape devices - Ivan Warren
+09 Jul 2003 added check to configure.ac to ensure dynamic load support
+            available if external-gui support requested on win32 - Fish
+07 Jul 2003 configure.ac now correctly sets USE_DLLTOOL to false if
+            OPTION_DYNAMIC_LOAD not possible (so dyninst/dyngui don't
+            get built), and OPTION_DYNAMIC_LOAD and HDL_USE_LIBTOOL
+            are now both handled automatically in configure.ac - Fish
+07 Jul 2003 ECPS:VM config Statement and EVM panel command retired.
+            both replaced with ECPSVM - Ivan Warren
+07 Jul 2003 #undef OPTION_DYNAMIC_LOAD in featall.h if neither dlopen
+            nor libtool is available - Fish
+06 Jul 2003 LXR,LZER,LZDR,LZXR instructions - Roger Bowler
+04 Jul 2003 Allow NUMCPU=0 - Jan Jaeger
+03 Jul 2003 Long Displacement Facility - Roger Bowler
+30 Jun 2003 Display all messages on shutdown - Jan Jaeger
+30 Jun 2003 Removed incorrect locks in console attach/detach - Jan Jaeger
+29 Jun 2003 Added shutdown logic - Jan Jaeger
+28 Jun 2003 Fix "console: select: Bad file number" - Fish
+28 Jun 2003 Updated hercinst.html with panel command info - Fish
+28 Jun 2003 Loadable crypto support (US export regulations) - Jan Jaeger
+27 Jun 2003 Allow unload reject in hdl final processing - Jan Jaeger
+27 Jun 2003 Support dynamic loadable cgi routines - Jan Jaeger
+27 Jun 2003 Panel.c + hsccmd.c: clear/reset screen before exiting - Fish
+27 Jun 2003 Panel.c: 1) removed all external-gui logic, 2) long
+            messages now wrap to the next screen line - Fish
+27 Jun 2003 Fixed some "integer constant is too large for "long" type"
+            warnings - Fish
+27 Jun 2003 Added addt'l instructions/info to autogen.sh - Fish
+27 Jun 2003 Added README.HDL to EXTRA_DIST in makefile.am - Fish
+27 Jun 2003 Updated makefile.am to add Windows resource definitions
+            to dyngui.dll - Fish
+27 Jun 2003 Framework for ALS4 features - Roger Bowler
+26 Jun 2003 Check for physical shared object when loading dll - Jan Jaeger
+26 Jun 2003 Fix Win32 hdl case-sensitivity bug - Fish
+26 Jun 2003 TT32 CTCI fixes: 1) fix ACCESS_VIOLATION caused by NULL ptr
+            being returned by 'tt32_get_default_iface', 2) 'tt32stats_cmd'
+            temporarily fixed by fixing bug in 'CTCI_Init' and adding temp
+            workaround code to 'display_tt32_stats' function to work around
+            bug in TunTap32.dll, 3) add some code to try and resolve bogus
+            "HHCCT048E" message being issued at close/shutdown.
+25 Jun 2003 shared device version/release checking - Greg Smith
+25 Jun 2003 micro performance update in branch on condition - Bernard van der Helm
+25 Jun 2003 Fix unlikely but serious fthreads bug in wait_condition - Fish
+25 Jun 2003 Move external gui logic from panel_display to dyngui.c, and
+            modify build process (makefile.am) to automatically build
+            new dyngui.dll (and dyninst.dll too) - Fish
+25 Jun 2003 Add dyninst qualifier to dynamic instr. symbol names - Jan Jaeger
+23 Jun 2003 Fix interrupt queue problem in haltio - Fish (by Greg Smith)
+17 Jun 2003 dyninst now supports dynamic instruction update - Jan Jaeger
+15 Jun 2003 Add dynamic module preloading - Jan Jaeger
+15 Jun 2003 Add version and dependency checks to dynamic loader - Jan Jaeger
+11 Jun 2003 More message numbers - Greg Smith
+05 Jun 2003 Dynamic loader support - Jan Jaeger
+05 Jun 2003 Preliminary substitution capabilities in config file.
+            Substitution format is $(varname).
+            Current vars are cuu,ccuu,CUU,CCUU - Ivan Warren
+04 Jun 2003 Device number specification extension. Device numbers are now
+            CUU or CUU-CUU or CUU.count or CUU,CUU or a combination
+            of the above - Ivan Warren
+01 Jun 2003 Updated hercconf.html page to include ECPS:VM,
+            2703, 3410, 3490, 9347 D/T and explanation for
+            2703 parameters - Ivan Warren
+29 May 2003 Correction to diagnose 0 to use real address - Jan Jaeger
+28 May 2003 Use unix sockets for localhost shared devices - Greg Smith
+26 May 2003 Yet another round for channel.c locking - Greg Smith
+26 May 2003 Fixes and performance enhancements for shared devices - Greg Smith
+23 May 2003 Locate Block logic fix - Ivan Warren, Suggested by *Anonymous*
+23 May 2003 Provide command response in DIAG 8 resp buffer - Ivan Warren
+22 May 2003 Add CPUVERID config statement to set version code - Jan Jaeger
+22 May 2003 Add DIAG8CMD config statement to enable diag 8 commands - Jan Jaeger
+21 May 2003 Fix spec exception in LPSW on incorrect amode settings - Jan Jaeger
+19 May 2003 Close all FDs before forking hercifc - Ivan Warren
+18 May 2003 Fix incorrect amask in LPSW in 64 bit mode - Jan Jaeger
+15 May 2003 Fixed cygwin regparm bug check bug in configure.ac:
+            __attribute__ ((regparm(3))) in wrong place - Fish
+15 May 2003 Created "destroy_lock" and "destroy_condition" macros;
+            added support destroying locks/conds to fthreads - Fish
+15 May 2003 Fixed impl.c so FishHang doesn't crash - Fish
+14 May 2003 Update in cmpsc.c store_ch - Scott Blackledge/Bernard van der Helm
+09 May 2003 Update dasdtab.c 3380 entries - Jesper by Greg Smith
+05 May 2003 Write zeroes at end of file to increase its size if ftruncate
+            doesn't work - Greg Smith, suggested by Andy Kane
+05 May 2003 Meaningful error messages for invalid or unsupported parms
+            to dasdinit - Greg Smith, suggested by John Summerfield
+05 May 2003 Meaningful error messages for unconfigured compression - Greg Smith,
+            suggestions by John McKown & Davud Booher
+05 May 2003 Allow arbitrary number cckd cylinders - Greg Smith, suggested by
+            Romain Capron
+05 May 2003 Remove cckd zlib dependencies - Greg Smith, suggested by John Summerfield
+28 Apr 2003 Changed 3270 Disconnect/Reconnect status presentation
+            logic (should allow terminal disc/recon on MVS) - Ivan Warren
+24 Apr 2003 Set PGID/Sense PGID/Assign/Unassign Corr to Tape Devices
+            (fixes device Boxing when varied on twice) - Ivan Warren
+23 Apr 2003 Shared devices fixes - Greg Smith
+19 Apr 2003 Shared devices - Greg Smith
+18 Apr 2003 270X Poll CCW Implementation - Ivan Warren
+16 Apr 2003 Rework channel.c serialization - Greg Smith
+16 Apr 2003 memrchr.[ch] added for Cygwin - Volker Bandke
+15 Apr 2003 LCTL VM Assist - Ivan Warren
+10 Apr 2003 DISP0/DISP1/DISP2 CP Assists - Ivan Warren
+05 Apr 2003 Virtual Timer Assist - Ivan Warren
+04 Apr 2003 Return IntReq on Card Read unsolicited Sense when
+            the card reader is empty - Ivan Warren
+03 Apr 2003 ECPS:VM SSM Correction, panel command rework (evm)
+            and conditional debug messages - Ivan Warren
+02 Apr 2003 Reordered int/dev locks in channel handler
+            to avoid race conditions in certain situations - Ivan Warren
+29 Mar 2003 Addl VM Assist support : SVC + SSM VM Assists
+            new evmstat panel command
+            No Timer Assist (do #CP SET ASSIST ON NOTMR) - Ivan Warren
+27 Mar 2003 Initial minimal CPASSIST ECPS:VM/370 support - Ivan Warren
+26 Mar 2003 Fix cckd locking problems, esp. during sf- and sfc - Greg Smith
+26 Mar 2003 CKD now uses the same shared cache as cckd - Greg Smith
+26 Mar 2003 Divorced cache management code from cckd code - Greg Smith
+21 Mar 2003 BSC/2703 Line emulation - Ivan Warren
+20 Mar 2003 Rework system logger functions - Jan Jaeger
+19 Mar 2003 Tape : Present DE on IntReq for non-data motion CCWs
+            Added deonirq=0|1 for 3410/3420 tapes in relation with MVS 3.8j
+            issues - Ivan Warren
+14 Mar 2003 Increased tbuf in het_write due specs compress2 - Bernard van der Helm
+13 Mar 2003 Tape support update - see README.TAPE - Ivan Warren
+13 Mar 2003 Call build_config even if NO_SIGABEND_HANDLER is defined - Ivan Warren
+13 Mar 2003 Define extgui in dasdseq for Windows build - Ivan Warren
+13 Mar 2003 AEA invalidation reduction - Greg Smith
+13 Mar 2003 Gabor performance patch - optimize AEA invalidation - Greg Smith
+13 Mar 2003 detab dasdseq.c - Jim Morrison
+13 Mar 2003 New dasdseq.c and man/dasdseq.1 - Jim Morrison
+10 Mar 2003 New man/cckddiag.1 manpage - Jim Morrison
+10 Mar 2003 New man/Makefile.am (manpage support) - Jim Morrison
+10 Mar 2003 New man/cckd.4 manpage - Jim Morrison
+08 Mar 2003 Remove panel/socketdevice dependency - Jan Jaeger
+08 Mar 2003 Increased tape max blk sz to 64K-1 in hercules for
+            DFDSS support - Ivan Warren
+08 Mar 2003 Increased max block size to 64k-1 for tapecopy - Ivan Warren
+08 Mar 2003 Set Byte 1 Bit 3 on IntReq for D/T 3505 to prevent
+            Reader tasks from dying and filling ERDS + set
+            sense size to 4 - Ivan Warren
+08 Mar 2003 correct decomptrk() no-compression cckddiag - Jim Morrison
+07 Mar 2003 correct cckddiag build for Win - Jim Morrison
+06 Mar 2003 Add cckddiag to build - Jim Morrison
+06 Mar 2003 Relax numl1tab check - Greg Smith
+03 Mar 2003 New cckddiag command; CCKD diagnostic tool - Jim Morrison
+03 Mar 2003 Relax CCKD track validation algorithm - Ivan Warren
+02 Mar 2003 Set ref and change bits on store status - Jan Jaeger
+01 Mar 2003 IA32 assemler reduction - Greg Smith
+01 Mar 2003 Remove dead code - Greg Smith
+01 Mar 2003 Fix to cckdload - somitcw (by Greg)
+01 Mar 2003 More SMP fixes - Greg Smith
+01 Mar 2003 Fix configuration parser error - Ivan Warren
+27 Feb 2003 3390 jumbo (-27) definition - Adam Thornton (by Greg)
+26 Feb 2003 Add util/cvslvlck cvs level check by Jim Morrison
+26 Feb 2003 Add Signal Adapter instruction - Jan Jaeger
+20 Feb 2003 FBA devtype update + script command support - Ivan Warren (by Greg)
 08 Feb 2003 Fix dasdload message verbosity test (was backwards) - Jay
             Maynard
 08 Feb 2003 Fix eof/intrq mode saving in card reader initialization, add *
@@ -45,7 +301,7 @@
 27 Dec 2002 Added comprehensive details to README.CVS document - Fish
 27 Dec 2002 Fix bug ctc logic to accept MAC addr in lieu of IP addr - Fish
 27 Dec 2002 Fix warning about IFC_IOCtl in tuntap.c - Fish
-27 Dec 2002 obtain_lock not needed to signal_condition in ctc logic - Fish 
+27 Dec 2002 obtain_lock not needed to signal_condition in ctc logic - Fish
 27 Dec 2002 Use sched_yield (not usleep) if can't enqueue ctc frame - Fish
 27 Dec 2002 Rewrote ParseMAC function to fix subtle bug - Fish
 27 Dec 2002 Fixed tt32stats command to work with new LCS CTC logic - Fish

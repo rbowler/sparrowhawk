@@ -1,4 +1,3 @@
-// ====================================================================
 // Hercules Channel-to-Channel Emulation Support
 // ====================================================================
 //
@@ -72,7 +71,7 @@ DEVHND ctcadpt_device_hndinfo =
     &CTCX_ExecuteCCW,
     &CTCX_Close,
     &CTCX_Query,
-    NULL, NULL, NULL, NULL
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 };
 
 DEVHND ctct_device_hndinfo =
@@ -81,7 +80,7 @@ DEVHND ctct_device_hndinfo =
     &CTCX_ExecuteCCW,
     &CTCX_Close,
     &CTCX_Query,
-    NULL, NULL, NULL, NULL
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 };
 
 DEVHND vmnet_device_hndinfo =
@@ -90,12 +89,11 @@ DEVHND vmnet_device_hndinfo =
     &CTCX_ExecuteCCW,
     &CTCX_Close,
     &CTCX_Query,
-    NULL, NULL, NULL, NULL
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 };
 
 extern DEVHND ctci_device_hndinfo;
 extern DEVHND lcs_device_hndinfo;
-extern DEVENT device_handler_table[];
 
 // ====================================================================
 // Primary Module Entry Points
@@ -107,49 +105,25 @@ extern DEVENT device_handler_table[];
 
 int  CTCX_Init( DEVBLK* pDEVBLK, int argc, BYTE *argv[] )
 {
-    // Allow for depreciated 3088 device type
-    if( strcasecmp( pDEVBLK->typname, "3088" ) == 0 )
-    {
-        // The first argument is the device emulation type
-        if( argc < 1 )
-        {
-            logmsg( _("HHCCT001E %4.4X: Incorrect number of parameters\n"),
-                pDEVBLK->devnum );
-            return -1;
-        }
+    pDEVBLK->devtype = 0x3088;
 
-        // Replace typname in DEVBLK with actual type.
-        if( strcasecmp( argv[0], "CTCI"     ) == 0 ||
-            strcasecmp( argv[0], "CTCI-W32" ) == 0 )
-            pDEVBLK->typname = "CTCI";
-        else if( strcasecmp( argv[0], "CTCT" ) == 0 )
-            pDEVBLK->typname = "CTCT";
-        else if( strcasecmp( argv[0], "LCS" ) == 0 )
-            pDEVBLK->typname = "LCS";
-        else
-            pDEVBLK->typname = "VMNET";
+    // The first argument is the device emulation type
+    if( argc < 1 )
+    {
+        logmsg( _("HHCCT001E %4.4X: Incorrect number of parameters\n"),
+            pDEVBLK->devnum );
+        return -1;
     }
 
-    // A little slight of hand here...
-    //
-    // The table in devtype.c points all CTC emulation types
-    // to ctcadpt_device_hndinfo. Based on the typnam member
-    // of DEVBLK, substitute the proper handler entries for
-    // this device.
-
-    if     ( strcasecmp( pDEVBLK->typname, "CTCI" ) == 0 )
-        pDEVBLK->hnd = &ctci_device_hndinfo;
-    else if( strcasecmp( pDEVBLK->typname, "CTCT"  ) == 0 )
-        pDEVBLK->hnd = &ctct_device_hndinfo;
-    else if( strcasecmp( pDEVBLK->typname, "LCS"   ) == 0 )
-        pDEVBLK->hnd = &lcs_device_hndinfo;
-    else if( strcasecmp( pDEVBLK->typname, "VMNET" ) == 0 )
-        pDEVBLK->hnd = &vmnet_device_hndinfo;
-    else
-        return -1;
-
-    // Now call the proper device init function
-    return (pDEVBLK->hnd->init)( pDEVBLK, argc, argv );
+    if((pDEVBLK->hnd = hdl_ghnd(argv[0])))
+    {
+        if(pDEVBLK->hnd->init == &CTCX_Init)
+            return -1;
+        free(pDEVBLK->typname);
+        pDEVBLK->typname = strdup(argv[0]);
+        return (pDEVBLK->hnd->init)( pDEVBLK, --argc, ++argv );
+    }
+    return -1;
 }
 
 // -------------------------------------------------------------------
@@ -442,15 +416,11 @@ static int  CTCT_Init( DEVBLK *dev, int argc, BYTE *argv[] )
     CTCG_PARMBLK   parm;               // Parameters for the server
     BYTE           address[20]="";     // temp space for IP address
 
+    dev->devtype = 0x3088;
+
     dev->ctctype = CTC_CTCT;
 
     SetSIDInfo( dev, 0x3088, 0x08, 0x3088, 0x01 );
-
-    if( strcasecmp( argv[0], "CTCT" ) == 0 )
-    {
-        // Shift past emulation type
-        argc--; argv++;
-    }
 
     // Check for correct number of arguments
     if (argc != 4)
@@ -885,7 +855,8 @@ static void  CTCT_Read( DEVBLK* pDEVBLK,   U16   sCount,
     memset( pSegment, 0, iLength + sizeof( CTCISEG ) );
 
     // Update next frame offset
-    STORE_HW( pFrame->hwOffset, iLength + sizeof( CTCIHDR ) );
+    STORE_HW( pFrame->hwOffset, 
+              iLength + sizeof( CTCIHDR ) + sizeof( CTCISEG ) );
 
     // Store segment length
     STORE_HW( pSegment->hwLength, iLength + sizeof( CTCISEG ) );
@@ -897,7 +868,8 @@ static void  CTCT_Read( DEVBLK* pDEVBLK,   U16   sCount,
     memcpy( pSegment->bData, pDEVBLK->buf, iLength );
 
     // Fix-up frame pointer and terminate block
-    pFrame = (PCTCIHDR)( pIOBuf + sizeof( CTCIHDR ) + iLength );
+    pFrame = (PCTCIHDR)( pIOBuf + sizeof( CTCIHDR ) + 
+                         sizeof( CTCISEG ) + iLength );
     STORE_HW( pFrame->hwOffset, 0x0000 );
 
     // Calculate #of bytes returned including two slack bytes
@@ -950,9 +922,9 @@ static void*  CTCT_ListenThread( void* argp )
 
         if( strcmp( str, parm.dev->filename ) != 0 )
         {
-            logmsg( _("HHCCT023E %4.4X: Incorrect client or config error\n"),
-                    parm.dev->devnum );
-            logmsg( _("                 Config=%s, connecting client=%s\n"),
+            logmsg( _("HHCCT023E %4.4X: Incorrect client or config error\n"
+                      "                 Config=%s, connecting client=%s\n"),
+                    parm.dev->devnum,
                     parm.dev->filename, str);
             close( connfd );
         }
@@ -968,6 +940,8 @@ static void*  CTCT_ListenThread( void* argp )
         // see the possibility for bad things to occur (eg if another
         // Hercules tries to connect).  This will also be fixed RSN.
     }
+
+    return NULL;    // make compiler happy
 }
 
 // ====================================================================
@@ -992,7 +966,7 @@ int r, i;
 BYTE *ipaddress;
 
     if (argc < 2) {
-        logmsg (_("HHCCT024E 4.4X: Not enough arguments to start vmnet\n"),
+        logmsg (_("HHCCT024E %4.4X: Not enough arguments to start vmnet\n"),
                         dev->devnum);
         return -1;
     }
@@ -1048,6 +1022,8 @@ static int VMNET_Init(DEVBLK *dev, int argc, BYTE *argv[])
 U16             xdevnum;                /* Pair device devnum        */
 BYTE            c;                      /* tmp for scanf             */
 DEVBLK          *xdev;                  /* Pair device               */
+
+    dev->devtype = 0x3088;
 
     /* parameters for network CTC are:
      *    devnum of the other CTC device of the pair
@@ -1316,136 +1292,31 @@ int             lastlen = 2;            /* block length at last pckt */
 
 void  AddDevice( DEVBLK**    ppDEVBLK,
                  U16         sDevNum,
-                 const char* szDevType,
-                 DEVHND*     pDevHnd )
+                 DEVBLK*     pDevBlk )
 {
-    DEVBLK*   pDev;                     // -> Device block
-    DEVBLK**  ppDev;                    // -> Device block address
-    DEVENT*   pDevEntry  = NULL;
-    int       fNewDEVBLK = 0;           // 1=Newly created devblk
 
     // Check whether device number has already been defined
-    if( find_device_by_devnum( sDevNum ) != NULL )
+    if( *ppDEVBLK != NULL && find_device_by_devnum( sDevNum ) != NULL )
     {
         logmsg( _("HHCCT034E device %4.4X already exists\n"), sDevNum );
         return;
     }
 
-    for( pDevEntry = device_handler_table; pDevEntry->hnd; pDevEntry++ )
-        if( !strcasecmp( pDevEntry->name, szDevType ) )
-            break;
-
-    if( !pDevEntry )
-    {
-        logmsg ( _("HHCCT035E AddDevice internal error (%s).\n" ),
-         szDevType );
-        return;
-    }
-
     if( *ppDEVBLK == NULL )
     {
-        // Attempt to reuse an existing device block
-        pDev = find_unused_device();
-
-        // If no device block is available, create a new one
-        if( pDev == NULL )
-        {
-            // Obtain a device block
-            pDev = (DEVBLK*)malloc( sizeof( DEVBLK ) );
-
-            if( pDev == NULL )
-            {
-                logmsg( _("HHCCT036E Cannot obtain device block "
-                          "for device %4.4X: %s\n"),
-                        sDevNum, strerror( errno ) );
-                return;
-            }
-
-            memset( pDev, 0, sizeof( DEVBLK ) );
-
-            // Indicate a newly allocated devblk
-            fNewDEVBLK = 1;
-
-            // Initialize the device lock and conditions
-            initialize_lock( &pDev->lock );
-            initialize_condition( &pDev->resumecond );
-
-            // Assign new subchannel number
-            pDev->subchan = sysblk.highsubchan++;
-        }
-
-        // Obtain the device lock
-        obtain_lock( &pDev->lock );
+        (*ppDEVBLK) = get_devblk(sDevNum);
+        (*ppDEVBLK)->hnd = pDevBlk->hnd;
+        (*ppDEVBLK)->devtype = pDevBlk->devtype;
+        (*ppDEVBLK)->typname = strdup(pDevBlk->typname);
+        // Release the just aquired devblk
+        release_lock( &(*ppDEVBLK)->lock );
     }
     else
-        pDev = *ppDEVBLK;
-
-    // Initialize the device block
-    if( pDevHnd != NULL )
-        pDev->hnd = pDevHnd;
-    else
-        pDev->hnd = pDevEntry->hnd;
-
-    pDev->msgpipew = sysblk.msgpipew;
-    pDev->cpuprio  = sysblk.cpuprio;
-    pDev->devnum   = sDevNum;
-    pDev->chanset  = sDevNum >> 12;
-
-    if( pDev->chanset >= MAX_CPU_ENGINES )
-        pDev->chanset = MAX_CPU_ENGINES - 1;
-
-    pDev->devtype  = pDevEntry->type;
-    pDev->typname  = pDevEntry->name;
-
-    pDev->fd = -1;
-
-    // Initialize storage view
-    pDev->mainstor = sysblk.mainstor;
-    pDev->storkeys = sysblk.storkeys;
-    pDev->mainlim  = sysblk.mainsize - 1;
-
-    // Initialize the path management control word
-    pDev->pmcw.devnum[0] = pDev->devnum >> 8;
-    pDev->pmcw.devnum[1] = pDev->devnum & 0xFF;
-    pDev->pmcw.lpm       = 0x80;
-    pDev->pmcw.pim       = 0x80;
-    pDev->pmcw.pom       = 0xFF;
-    pDev->pmcw.pam       = 0x80;
-    pDev->pmcw.chpid[0]  = pDev->devnum >> 8;
-
-    // If we acquired a new device block, add it to the chain
-    if( fNewDEVBLK )
     {
-        // Search for the last device block on the chain
-        for( ppDev   = &(sysblk.firstdev);
-             *ppDev != NULL;
-             ppDev   = &((*ppDev)->nextdev) );
-
-        // Add the new device block to the end of the chain
-        *ppDev = pDev;
-        pDev->nextdev = NULL;
+        release_lock( &(*ppDEVBLK)->lock );
+        if((*ppDEVBLK)->devnum != sDevNum)
+            define_device((*ppDEVBLK)->devnum, sDevNum);
     }
-
-    // Mark device valid
-    pDev->pmcw.flag5 |= PMCW5_V;
-
-#ifdef _FEATURE_CHANNEL_SUBSYSTEM
-    // Indicate a CRW is pending for this device
-    pDev->crwpending = 1;
-#endif // _FEATURE_CHANNEL_SUBSYSTEM
-
-    if( *ppDEVBLK == NULL )
-    {
-        // Release device lock
-        release_lock( &pDev->lock );
-    }
-
-#ifdef _FEATURE_CHANNEL_SUBSYSTEM
-    // Signal machine check
-    machine_check_crwpend();
-#endif // _FEATURE_CHANNEL_SUBSYSTEM
-
-    *ppDEVBLK = pDev;
 
     return;
 }

@@ -1,15 +1,16 @@
 dist_pkgdata_DATA =   cckddasd.html hercinst.html hercnew.html \
-	hercconf.html herclic.html  hercrdr.html  herctcp.html \
-	hercfaq.html  hercload.html index.html    hercules.css \
+        hercconf.html herclic.html  hercrdr.html  herctcp.html \
+        hercfaq.html  hercload.html index.html    hercules.css \
         hercules.html tasks.html    fishgui.html  hercmsg.html \
         hercmscf.html hercmscp.html hercmsct.html hercmsda.html \
-        hercmsdc.html hercmsdi.html hercmsdl.html hercmsds.html \
+        hercmsdc.html hercmsdg.html hercmsdi.html hercmsdl.html hercmsds.html \
         hercmsdt.html hercmsdu.html hercmshe.html hercmshg.html \
         hercmshm.html hercmsht.html hercmshu.html hercmsif.html \
         hercmsin.html hercmslc.html hercmspn.html hercmspr.html \
         hercmspu.html hercmsrd.html hercmssd.html hercmsta.html \
         hercmstc.html hercmste.html hercmstm.html hercmsts.html \
-        hercmstu.html
+        hercmstt.html hercmstu.html hercmslg.html hercmsca.html \
+        hercrnot.html
 
 include_sources = include/header.htmlpart include/footer.htmlpart
 

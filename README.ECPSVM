@@ -1,0 +1,170 @@
+ECPS:VM : Extended Control Program Support : VM/370
+               - AND -
+Extended VM Assists - Partial Privop Simulation And Virtual Interval Timer
+
+************ CHANGE LOG ****************
+07/07/03 : Changed description for configuration and commands
+           ECPS:VM changed to ECPSVM (config)
+           ecpsvm changed to ecpsvm (command)
+
+     - PARTIAL IMPLEMENTATION DOCUMENTATION -
+
+*************************
+
+Affected operating systems :
+
+VM/370 Release 6 (PTFs required - PLC 029 works fine)
+
+up to
+
+VM/SP 6 (with or without HPO option)
+
+--- VM/XA SF, VM/XA SP, VM/ESA and z/VM do NOT use these Assists,
+    but rely on the SIE instruction to perform some of these functions.
+
+A VM/SP Guest (or VM/370 Guest with 4K Storage key updates) running under
+[z/]VM[/[XA|ESA]] can theorically use the VM and CP Assists. This implementation
+is not finalized yet (see BUGS section)
+
+************************
+
+How to enable VM Assists :
+
+In the HERCULES.CNF file, in the configuration section :
+
+ECPSVM YES|NO|LEVEL n (where n is the requested level.)
+
+If "YES" is specified, the most appropriate level is returned (Level 20)
+
+n Doesn't affect the operations of the assist but what level is reported to
+        the program.
+
+    - CAUTION - Use the 'n' form is not recommended, and is only provided
+                for engineering use.
+
+**********
+
+New panel command : 'ecpsvm'
+
+Subcommands :
+
+ecpsvm stats : Shows ECPS:VM Call/Hit statistics
+ecpsvm enable/disable feature : Enable/Disable named feature
+ecpsvm help : (guess)
+ecpsvm debug [feature|ALL|CPASSIST|VMASSIST] : Turn on debugging messages for a specific feature
+ecpsvm nodebug [feature|ALL|CPASSIST|VMASSIST] : Turn off...
+ecpsvm level [nn] : Force ECPS:VM to report a certain support level
+        (or display the current support level)
+
+NOTE : ecpsvm disable does NOT entirelly disables CP ASSISTS. If it did (i.e. generate a program interrupt whenever a E6xx instruction is invoked) VM would abend immediatelly. Rather, ommit the ECPSVM statement in the configuration file.
+
+To determine the feature names, type "ecpsvm enable ALL".
+        All the enabled features will be listed.
+
+the ecpsvm command is NOT case sensitive
+
+**********
+
+Determining if the assist is used by VM :
+
+Use the 2 following CLASS A commands :
+
+CP QUERY CPASSIST
+CP QUERY SASSIST
+
+Both queries should return 'ON'.
+
+Also use the following CLASS G Command :
+
+CP QUERY SET
+
+2nd line should indicate :
+
+ASSIST ON SVC TMR
+
+***********
+
+Technical information
+
+the CP Assists provides The VM SCP with various microcoded instructions to shorten the supervisor pathlength. All microcoded instructions are priviledged instructions and have an opcode of E6xx. They are native representation of what the SCP would do in a similar case. For all cases where the assist is not able to resolve a situation, the E6XX instructions resolve to a no-op, thus leaving the responsability of the task to the original CP Code.
+
+The VM Assists alters the behaviour of certain priviledged instructions when executed in problem state (controled by the Problem State bit in the PSW) either by completely simulating the instruction (when feasable), Branching directly to the CP support module for that instruction (therefore bypassing Program interruption processing and instruction decoding), or generating a Program interruption otherwise.
+
+The VM Virtual Interval Timer assist allows updating of a Virtual Machine virtual interval timer directly by the microcode.
+
+Both CP And VM Assists are controled by real Control Register 6 which control availability, and behaviour of the assists.
+
+************
+
+Troubleshooting
+
+In the event that a certain CP or VM Assist disrupts normal operations, it is possible to selectivelly disable each discrete component. The best method is to disable ALL VM and CP Assists (Except STEVL and SSM if done prior to IPL) and to enable each feature until the problem occurs. If it is unknown whether the problem lies in the VM or CP Assist, it is also possible to enable/disable the entire group of assists.
+
+See the EVM ENA|DISA Commands.
+
+EVM STA allows to see how often each assist is invoked. The hit and hit ration makes it possible to determine how effective the assists are.
+
+A Low hit ratio may be normal in some situations (for example, the LPSW Hit ration will be very low when running VM under VM, because most PSW switches cannot be resolved by the assist)
+
+A Low invocation count simply shows that in THAT particular situation, the related assist is not used often (For example, there are very few LCTLs when running CMS).
+
+Some assists are just invoked once at IPL (STEVL). This is normal behaviour.
+
+************
+
+Implemented Assists :
+
+CP ASSISTS :
+FREEX, FRETX (CP Free Storage management)
+DISP0, DISP1, DISP2 (CP Dispatching)
+PGLOCK, PGULOCK (Real frame locking/unlocking)
+TRANBRNG, TRANLOCK (Virtual frame addressing/locking)
+SCNRU, SCNVU (Real/Virtual Device control block scan)
+STEVL (Store ECPS:VM support level)
+
+VM ASSISTS :
+Virtual Interval Timer
+LPSW Simulation
+SSM Simulation
+SVC Simulation
+LCTL Simulation
+
+Non-Implemented assists :
+
+CP ASSISTS :
+FREE/FRET : (Original (up to level 19)
+            CP Storage Management - replaced by FREEX/FRETX)
+CCWGN, DFCCW, DNCCW, UXCCW : CCW/CSW Translation assists (Soon)
+LCSPG : Locate Changed Shared Page (Soon)
+VIPT, VIST : Virtual Translation Page/Segment Invalidation (Soon)
+LINK/RETURN (SVC 8/SVC 12) (Soon)
+Prefered Machine Assists (Insufficient information)
+.. Maybe others ...
+
+VM ASSISTS :
+V=R Shadow Table Bypass assists (Including LRA instruction)
+        (note : The V=R Shadow Table Bypass assist is a feature which requires the guest program
+        to be aware of the feature (Page 0 Relocation))
+SIO (In progress - Partial sim)
+DIAG (In progress - Partial sim)
+IUCV (In Progress - Partial sim - VM/SP4 or later only)
+STxSM (Almost never invoked - ECMODE Only)
+ISK/SSK/ISKE/SSKE/IVSK (Extended Key Ops assist)
+VM Assists for MVS
+.. Maybe others ...
+
+*****************
+BUGS & Caveats :
+
+ECPS:VM Has not been tested in a AP/MP System.
+My belief is that they WILL NOT WORK.
+ECPS:VM Should be disabled if the system is MP or AP generated
+
+For the time being, ECPS:VM Should be disabled on the host system when running VM/SP Under [z/]VM/[XA/ESA]
+because ECPS:VM Under SIE is still not finalized
+
+*****************
+
+Have Fun,
+
+--Ivan

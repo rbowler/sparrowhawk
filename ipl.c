@@ -35,9 +35,14 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 BYTE    unitstat;                       /* IPL device unit status    */
 BYTE    chanstat;                       /* IPL device channel status */
 
-#ifdef EXTERNALGUI
-    if (extgui) logmsg("LOAD=1\n");
-#endif /*EXTERNALGUI*/
+    if(!regs->cpuonline)
+    {
+        obtain_lock (&sysblk.intlock);
+        configure_cpu(regs);
+        release_lock(&sysblk.intlock);
+    }
+
+    HDC(debug_cpu_state, regs);
 
     /* Reset external interrupts */
     OFF_IC_SERVSIG;
@@ -62,9 +67,9 @@ BYTE    chanstat;                       /* IPL device channel status */
     {
         logmsg (_("HHCCP027E Device %4.4X not in configuration\n"),
                 devnum);
-#ifdef EXTERNALGUI
-        if (extgui) logmsg("LOAD=0\n");
-#endif /*EXTERNALGUI*/
+
+        HDC(debug_cpu_state, regs);
+
         return -1;
     }
 
@@ -72,9 +77,9 @@ BYTE    chanstat;                       /* IPL device channel status */
       && dev->chanset != regs->chanset)
     {
         logmsg(_("HHCCP028E Device not connected to channelset\n"));
-#ifdef EXTERNALGUI
-        if (extgui) logmsg("LOAD=0\n");
-#endif /*EXTERNALGUI*/
+
+        HDC(debug_cpu_state, regs);
+
         return -1;
     }
     /* Point to the PSA in main storage */
@@ -100,12 +105,13 @@ BYTE    chanstat;                       /* IPL device channel status */
     /* Build the operation request block */                    /*@IWZ*/
     memset (&dev->orb, 0, sizeof(ORB));                        /*@IWZ*/
 
+    dev->busy = 1;
+
     /* Execute the IPL channel program */
     ARCH_DEP(execute_ccw_chain) (dev);
 
     /* Clear the interrupt pending and device busy conditions */
-    dev->pending = 0;
-    dev->busy = 0;
+    dev->busy = dev->pending = dev->pcipending = 0;
     dev->scsw.flag2 = 0;
     dev->scsw.flag3 = 0;
 
@@ -121,18 +127,18 @@ BYTE    chanstat;                       /* IPL device channel status */
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
     if (unitstat != (CSW_CE | CSW_DE) || chanstat != 0) {
-        logmsg (_("HHCCP029E %s mode IPL failed: CSW status=%2.2X%2.2X\n"),
+        logmsg (_("HHCCP029E %s mode IPL failed: CSW status=%2.2X%2.2X\n"
+                  "           Sense="),
                 get_arch_mode_string(regs), unitstat, chanstat);
-        logmsg (_("           Sense="));
         for (i=0; i < (int)dev->numsense; i++)
         {
             logmsg ("%2.2X", dev->sense[i]);
             if ((i & 3) == 3) logmsg(" ");
         }
         logmsg ("\n");
-#ifdef EXTERNALGUI
-        if (extgui) logmsg("LOAD=0\n");
-#endif /*EXTERNALGUI*/
+
+        HDC(debug_cpu_state, regs);
+
         return -1;
     }
 
@@ -166,9 +172,7 @@ BYTE    chanstat;                       /* IPL device channel status */
     psa = (PSA*)(regs->mainstor + regs->PX);
 
     /* Load IPL PSW from PSA+X'0' */
-    obtain_lock(&sysblk.intlock);
     rc = ARCH_DEP(load_psw) (regs, psa->iplpsw);
-    release_lock(&sysblk.intlock);
     if ( rc )
     {
         logmsg (_("HHCCP030E %s mode IPL failed: Invalid IPL PSW: "
@@ -177,17 +181,14 @@ BYTE    chanstat;                       /* IPL device channel status */
                 psa->iplpsw[0], psa->iplpsw[1], psa->iplpsw[2],
                 psa->iplpsw[3], psa->iplpsw[4], psa->iplpsw[5],
                 psa->iplpsw[6], psa->iplpsw[7]);
-#ifdef EXTERNALGUI
-        if (extgui) logmsg("LOAD=0\n");
-#endif /*EXTERNALGUI*/
+
+        HDC(debug_cpu_state, regs);
+
         return -1;
     }
 
-#if defined(OPTION_REDUCED_INVAL)
     INVALIDATE_AIA(regs);
-
     INVALIDATE_AEA_ALL(regs);
-#endif
 
     /* Set the CPU into the started state */
     regs->cpustate = CPUSTATE_STARTED;
@@ -205,9 +206,8 @@ BYTE    chanstat;                       /* IPL device channel status */
     WAKEUP_CPU (regs->cpuad);
     release_lock (&sysblk.intlock);
 
-#ifdef EXTERNALGUI
-    if (extgui) logmsg("LOAD=0\n");
-#endif /*EXTERNALGUI*/
+    HDC(debug_cpu_state, regs);
+
     return 0;
 } /* end function load_ipl */
 
@@ -246,9 +246,14 @@ U32     fileaddr;
     if(fname == NULL)                   /* Default ipl from DASD     */
         fname = "hercules.ins";         /*   from hercules.ins       */
 
-#ifdef EXTERNALGUI
-    if (extgui) logmsg("LOAD=1\n");
-#endif /*EXTERNALGUI*/
+    if(!regs->cpuonline)
+    {
+        obtain_lock (&sysblk.intlock);
+        configure_cpu(regs);
+        release_lock(&sysblk.intlock);
+    }
+
+    HDC(debug_cpu_state, regs);
 
     /* Reset external interrupts */
     OFF_IC_SERVSIG;
@@ -303,9 +308,9 @@ U32     fileaddr;
             if( ARCH_DEP(load_main) (pathname, fileaddr) < 0 )
             {
                 fclose(fp);
-#ifdef EXTERNALGUI
-                if (extgui) logmsg("LOAD=0\n");
-#endif /*EXTERNALGUI*/
+
+                HDC(debug_cpu_state, regs);
+
                 return -1;
             }
         }
@@ -331,17 +336,14 @@ U32     fileaddr;
                 psa->iplpsw[0], psa->iplpsw[1], psa->iplpsw[2],
                 psa->iplpsw[3], psa->iplpsw[4], psa->iplpsw[5],
                 psa->iplpsw[6], psa->iplpsw[7]);
-#ifdef EXTERNALGUI
-        if (extgui) logmsg("LOAD=0\n");
-#endif /*EXTERNALGUI*/
+
+        HDC(debug_cpu_state, regs);
+
         return -1;
     }
 
-#if defined(OPTION_REDUCE_INVAL)
     INVALIDATE_AIA(regs);
-
     INVALIDATE_AEA_ALL(regs);
-#endif
 
     /* Set the CPU into the started state */
     regs->cpustate = CPUSTATE_STARTED;
@@ -355,9 +357,8 @@ U32     fileaddr;
     WAKEUP_CPU (regs->cpuad);
     release_lock (&sysblk.intlock);
 
-#ifdef EXTERNALGUI
-    if (extgui) logmsg("LOAD=0\n");
-#endif /*EXTERNALGUI*/
+    HDC(debug_cpu_state, regs);
+
     return 0;
 } /* end function load_hmc */
 /*-------------------------------------------------------------------*/
@@ -460,6 +461,10 @@ void ARCH_DEP(initial_cpu_reset) (REGS *regs)
    if(regs->guestregs)
         ARCH_DEP(initial_cpu_reset)(regs->guestregs);
 #endif /*defined(_FEATURE_SIE)*/
+#if defined(FEATURE_ECPSVM)
+   regs->vtimerint=0;
+   regs->rtimerint=0;
+#endif
 
 } /* end function initial_cpu_reset */
 

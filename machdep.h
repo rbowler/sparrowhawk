@@ -13,60 +13,16 @@
 /*-------------------------------------------------------------------*/
 /* Intel pentiumpro/i686                                             */
 /*-------------------------------------------------------------------*/
-#if defined(__i686__) | defined(__pentiumpro__)
+#if defined(__i686__) | defined(__pentiumpro__) 
+#if !defined(PIC)
 
 #define FETCHIBYTE1(_ib, _inst) \
-        { \
-            __asm__("movzbl 1(%%esi),%%eax" : \
-                    "=a" (_ib) : "S" (_inst)); \
-        }
-
-#define fetch_dw(x) fetch_dw_i686(x)
-static __inline__ U64 fetch_dw_i686(void *ptr)
-{
- U64 value;
- __asm__ __volatile__ (
-         "movl    (%1),%%eax\n\t"
-         "movl    4(%1),%%edx\n"
-         "1:\t"
-         "movl    %%eax,%%ebx\n\t"
-         "movl    %%edx,%%ecx\n\t"
-         "lock    cmpxchg8b (%1)\n\t"
-         "jnz     1b\n\t"
-         "bswap   %%eax\n\t"
-         "bswap   %%edx\n\t"
-         "xchgl   %%eax,%%edx"
-       : "=A"(value)
-       : "D"(ptr)
-       : "bx","cx","memory");
- return value;
-}
-
-#define store_dw(x,y) store_dw_i686(x,y)
-static __inline__ void store_dw_i686(void *ptr, U64 value)
-{
- U32 high,low;
- low = value & 0xffffffff;
- high = value >> 32;
- __asm__ __volatile__ (
-         "bswap   %0\n\t"
-         "bswap   %1\n\t"
-         "movl    (%2),%%eax\n\t"
-         "movl    4(%2),%%edx\n"
-         "1:\t"
-         "lock    cmpxchg8b (%2)\n\t"
-         "jnz     1b"
-       : /* no output */
-       : "b"(high),
-         "c"(low),
-         "D"(ptr)
-       : "ax","dx","memory");
-}
+  __asm__("movzbl 1(%%esi),%%eax" : "=a" (_ib) : "S" (_inst));
 
 #define cmpxchg1(x,y,z) cmpxchg1_i686(x,y,z)
-static __inline__ int cmpxchg1_i686(BYTE *old, BYTE new, void *ptr) {
+static __inline__ BYTE cmpxchg1_i686(BYTE *old, BYTE new, void *ptr) {
 /* returns zero on success otherwise returns 1 */
- unsigned char code;
+ BYTE code;
  __asm__ __volatile__ (
          "movb    (%2),%%al\n\t"
          "lock;   cmpxchgb %b1,(%3)\n\t"
@@ -81,16 +37,13 @@ static __inline__ int cmpxchg1_i686(BYTE *old, BYTE new, void *ptr) {
 }
 
 #define cmpxchg4(x,y,z) cmpxchg4_i686(x,y,z)
-static __inline__ int cmpxchg4_i686(U32 *old, U32 new, void *ptr) {
+static __inline__ BYTE cmpxchg4_i686(U32 *old, U32 new, void *ptr) {
 /* returns zero on success otherwise returns 1 */
- int code;
+ BYTE code;
  __asm__ __volatile__ (
          "movl    (%2),%%eax\n\t"
-         "bswap   %%eax\n\t"
-         "bswap   %1\n\t"
          "lock;   cmpxchgl %1,(%3)\n\t"
          "setnz   %b0\n\t"
-         "bswap   %%eax\n\t"
          "movl    %%eax,(%2)"
          : "=q"(code)
          : "q"(new),
@@ -99,30 +52,24 @@ static __inline__ int cmpxchg4_i686(U32 *old, U32 new, void *ptr) {
          : "ax", "memory");
  return code;
 }
+#define HAVE_CMPXCHG
 
 #define cmpxchg8(x,y,z) cmpxchg8_i686(x,y,z)
-static __inline__ int cmpxchg8_i686(U64 *old, U64 new, void *ptr) {
+static __inline__ BYTE cmpxchg8_i686(U64 *old, U64 new, void *ptr) {
 /* returns zero on success otherwise returns 1 */
- int code;
- U32 high,low;
- high = new >> 32;
- low = new & 0xffffffff;
+ BYTE code;
+ U32 high = new >> 32;
+ U32 low = new & 0xffffffff;
  __asm__ __volatile__ (
-         "bswap   %1\n\t"
-         "bswap   %2\n\t"
-         "movl    (%3),%%edx\n\t"
-         "movl    4(%3),%%eax\n\t"
-         "bswap   %%edx\n\t"
-         "bswap   %%eax\n\t"
+         "movl    (%3),%%eax\n\t"
+         "movl    4(%3),%%edx\n\t"
          "lock;   cmpxchg8b (%4)\n\t"
          "setnz   %b0\n\t"
-         "bswap   %%edx\n\t"
-         "bswap   %%eax\n\t"
-         "movl    %%edx,(%3)\n\t"
-         "movl    %%eax,4(%3)"
+         "movl    %%eax,(%3)\n\t"
+         "movl    %%edx,4(%3)"
          : "=b"(code)
-         : "b"(high),
-           "c"(low),
+         : "b"(low),
+           "c"(high),
            "S"(old),
            "D"(ptr)
          : "ax", "dx", "memory");
@@ -135,10 +82,10 @@ static __inline__ int cmpxchg16_i686(U64 *old1, U64 *old2, U64 new1, U64 new2, v
 //FIXME: not smp safe; an attempt is made to minimize the number of cycles
  int code;
  union { BYTE buf[32]; U64 dw[4]; } u;
- u.dw[0] = bswap_64(*old1);
- u.dw[1] = bswap_64(*old2);
- u.dw[2] = bswap_64(new1);
- u.dw[3] = bswap_64(new2);
+ u.dw[0] = *old1;
+ u.dw[1] = *old2;
+ u.dw[2] = new1;
+ u.dw[3] = new2;
  __asm__ __volatile__ (
          "movl    %1,%0\n\t"
          "movl    %2,%%ebx\n\t"
@@ -163,12 +110,28 @@ static __inline__ int cmpxchg16_i686(U64 *old1, U64 *old2, U64 new1, U64 new2, v
          "D"(ptr)
        : "bx","cx","memory");
  if (code == 1) {
-     *old1 = bswap_64(u.dw[0]);
-     *old2 = bswap_64(u.dw[1]); 
+   *old1 = u.dw[0];
+   *old2 = u.dw[1];
  }
  return code;
 }
 
+#define fetch_dw(x) fetch_dw_i686(x)
+static __inline__ U64 fetch_dw_i686(void *ptr)
+{
+ U64 value = *(U64 *)ptr;
+ while ( cmpxchg8 (&value, value, (U64 *)ptr) );
+ return CSWAP64 (value);
+}
+
+#define store_dw(x,y) store_dw_i686(x,y)
+static __inline__ void store_dw_i686(void *ptr, U64 value)
+{
+ U64 orig = *(U64 *)ptr;
+ while ( cmpxchg8 (&orig, CSWAP64(value), (U64 *)ptr) );
+}
+
+#endif /* !defined(PIC) */
 #endif /* defined(__i686__) | defined(__pentiumpro__) */
 
 /*-------------------------------------------------------------------*/
@@ -221,12 +184,12 @@ static __inline__ void store_dw(volatile void *ptr, U64 value) {
 #endif
 
 #ifndef cmpxchg1
-static __inline__ int cmpxchg1(BYTE *old, BYTE new, volatile void *ptr) {
+static __inline__ BYTE cmpxchg1(BYTE *old, BYTE new, volatile void *ptr) {
  BYTE tmp;
- int code;
- if (*old == (tmp = *((BYTE *)ptr)))
+ BYTE code;
+ if (*old == (tmp = *(BYTE *)ptr))
  {
-     *((BYTE *)ptr) = new;
+     *(BYTE *)ptr = new;
      code = 0;
  }
  else
@@ -239,17 +202,17 @@ static __inline__ int cmpxchg1(BYTE *old, BYTE new, volatile void *ptr) {
 #endif
 
 #ifndef cmpxchg4
-static __inline__ int cmpxchg4(U32 *old, U32 new, volatile void *ptr) {
+static __inline__ BYTE cmpxchg4(U32 *old, U32 new, volatile void *ptr) {
  U32 tmp;
- int code;
- if (CSWAP32(*old) == (tmp = *((U32 *)ptr)))
+ BYTE code;
+ if (*old == (tmp = *(U32 *)ptr))
  {
-     *((U32 *)ptr) = CSWAP32(new);
+     *(U32 *)ptr = new;
      code = 0;
  }
  else
  {
-     *old = CSWAP32(tmp);
+     *old = tmp;
      code = 1;
  }
  return code;
@@ -257,17 +220,17 @@ static __inline__ int cmpxchg4(U32 *old, U32 new, volatile void *ptr) {
 #endif
 
 #ifndef cmpxchg8
-static __inline__ int cmpxchg8(U64 *old, U64 new, volatile void *ptr) {
+static __inline__ BYTE cmpxchg8(U64 *old, U64 new, volatile void *ptr) {
  U64 tmp;
- int code;
- if (CSWAP64(*old) == (tmp = *((U64 *)ptr)))
+ BYTE code;
+ if (*old == (tmp = *(U64 *)ptr))
  {
-     *((U64 *)ptr) = CSWAP64(new);
+     *(U64 *)ptr = new;
      code = 0;
  }
  else
  {
-     *old = CSWAP64(tmp);
+     *old = tmp;
      code = 1;
  }
  return code;
@@ -277,16 +240,16 @@ static __inline__ int cmpxchg8(U64 *old, U64 new, volatile void *ptr) {
 #ifndef cmpxchg16
 static __inline__ int cmpxchg16(U64 *old1, U64 *old2, U64 new1, U64 new2, volatile void *ptr) {
  int code;
- if (CSWAP64(*old1) == *((U64 *)ptr) && CSWAP64(*old2) == *((U64 *)(ptr + 8)))
+ if (*old1 == *(U64 *)ptr && *old2 == *(U64 *)(ptr + 8))
  {
-     *((U64 *)ptr) = CSWAP64(new1);
-     *((U64 *)(ptr + 8)) = CSWAP64(new2);
+     *(U64 *)ptr = new1;
+     *(U64 *)(ptr + 8) = new2;
      code = 0;
  }
  else
  {
-     *old1 = CSWAP64(*((U64 *)ptr));
-     *old2 = CSWAP64(*((U64 *)(ptr + 8)));
+     *old1 = *((U64 *)ptr);
+     *old2 = *((U64 *)(ptr + 8));
      code = 1;
  }
  return code;

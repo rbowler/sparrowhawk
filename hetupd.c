@@ -24,6 +24,7 @@
 #include "hetlib.h"
 #include "sllib.h"
 #include "hercules.h"
+#include "herc_getopt.h"
 
 /*
 || Local volatile data
@@ -42,7 +43,9 @@ static HETB *d_hetb     = NULL;
 #ifdef EXTERNALGUI
 /* Special flag to indicate whether or not we're being
    run under the control of the external GUI facility. */
+#if 0
 int extgui = 0;
+#endif
 /* Previous reported file position */
 static long prevpos = 0;
 /* Report progress every this many bytes */
@@ -53,7 +56,7 @@ static long prevpos = 0;
 || Local constant data
 */
 static const char help[] =
-    "%s - Print a map of an HET tape file\n\n"
+    "%s - Updates the compression of a Hercules Emulated Tape file.\n\n"
     "Usage: %s [options] source [dest]\n\n"
     "Options:\n"
     "  -1   compress fast\n"
@@ -97,7 +100,7 @@ closetapes( int rc )
 
     het_close( &d_hetb );
     het_close( &s_hetb );
-    
+
     if( dorename )
     {
         if( rc >= 0 )
@@ -241,7 +244,7 @@ opentapes( void )
         printf( "Compression level  : %d\n",
             het_cntl( d_hetb, HETCNTL_LEVEL, 0 ) );
     }
-        
+
 exit:
 
     if( rc < 0 )
@@ -357,11 +360,11 @@ main( int argc, char *argv[] )
             o_dname = toname;
             dorename = TRUE;
         break;
-        
+
         case 2:
             o_dname = argv[ optind + 1 ];
         break;
-        
+
         default:
             usage( argv[ 0 ] );
             exit( 1 );
@@ -388,6 +391,6 @@ main( int argc, char *argv[] )
     }
 
     closetapes( rc );
-            
+
     return 0;
 }

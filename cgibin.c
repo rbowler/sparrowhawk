@@ -183,26 +183,21 @@ void cgibin_psw(WEBBLK *webblk)
 }
 
 
-void get_msgbuf(BYTE **msgbuf, int *msgslot, int *nummsgs, int *msg_size, int *max_msgs);
-
 void cgibin_syslog(WEBBLK *webblk)
 {
-BYTE   *msgbuf;                         /* Circular message buffer   */
-int     msgslot;                        /* Next available buffer slot*/
-int     nummsgs;                        /* Number of msgs in buffer  */
-int     msg_size;
-int     max_msgs;
-BYTE   *pointer;
-int     currmsgn;
+int     msgcnt;
+int     msgnum;
+char   *msgbuf;
+
 char   *command;
 
-char *value;
-int autorefresh = 0;
-int refresh_interval = 5;
-int msgcount = 22;
+char   *value;
+int     autorefresh = 0;
+int     refresh_interval = 5;
+int     msgcount = 22;
 
     if ((command = cgi_variable(webblk,"command")))
-        SYNCHRONOUS_PANEL_CMD(command);
+        panel_command(command);
 
     if((value = cgi_variable(webblk,"msgcount")))
         msgcount = atoi(value);
@@ -232,22 +227,9 @@ int msgcount = 22;
     fprintf(webblk->hsock, "<H2>Hercules System Log</H2>\n");
     fprintf(webblk->hsock, "<PRE>\n");
 
-    get_msgbuf(&msgbuf, &msgslot, &nummsgs, &msg_size, &max_msgs);
-
-    for(currmsgn = 0; currmsgn < nummsgs; currmsgn++) {
-        if(!msgcount || currmsgn >= (nummsgs - msgcount))
-        {
-            if(nummsgs < max_msgs)
-                pointer = msgbuf + (currmsgn * msg_size);
-            else
-                if(currmsgn + msgslot < max_msgs) 
-                    pointer = msgbuf + ((currmsgn + msgslot) * msg_size);
-                else
-                    pointer = msgbuf + ((currmsgn + msgslot - max_msgs) * msg_size);
-    
-            fprintf(webblk->hsock,"%80.80s\n",pointer);
-        }
-    }
+    msgnum = msgcount ? log_line(msgcount) : -1;
+    while((msgcnt = log_read(&msgbuf, &msgnum, LOG_NOBLOCK)))
+        fwrite(msgbuf,msgcnt,1,webblk->hsock);
 
     fprintf(webblk->hsock, "</PRE>\n");
 
@@ -751,9 +733,8 @@ BYTE   buf[80];
                                    class,
                                    dev->devtype,
                                    (dev->fd > 2 ? "open " : ""),
-                                   (dev->busy ? "busy " : ""),
-                                   ((dev->pending || dev->pcipending) ?
-                                     "pending " : ""));
+                                   (dev-> busy ? "busy " : ""),
+                                   ((dev->pending || dev->pcipending) ? "pending " : ""));
         }
 
     fprintf(webblk->hsock,"</table>\n");
@@ -810,7 +791,8 @@ int subchan;
                               dev->pmcw.intparm[0], dev->pmcw.intparm[1],
                               dev->pmcw.intparm[2], dev->pmcw.intparm[3]);
 
-        fprintf(webblk->hsock,"<tr><th colspan=2>00</th>"
+        fprintf(webblk->hsock,"<tr><th>Q</th>"
+                              "<th>0</th>"
                               "<th colspan=3>ISC</th>"
                               "<th colspan=2>00</th>"
                               "<th>A</th>"
@@ -822,7 +804,8 @@ int subchan;
                               "<th>V</th>"
                               "<th colspan=16>DEVNUM</th></tr>\n");
 
-        fprintf(webblk->hsock,"<tr><td colspan=2></td>"
+        fprintf(webblk->hsock,"<tr><td>%d</td>"
+                              "<td></td>"
                               "<td colspan=3>%d</td>"
                               "<td colspan=2></td>"
                               "<td>%d</td>"
@@ -833,6 +816,7 @@ int subchan;
                               "<td>%d</td>"
                               "<td>%d</td>"
                               "<td colspan=16>%2.2X%2.2X</td></tr>\n",
+                              ((dev->pmcw.flag4 & PMCW4_Q) >> 7),
                               ((dev->pmcw.flag4 & PMCW4_ISC) >> 3),
                               (dev->pmcw.flag4 & 1),
                               ((dev->pmcw.flag5 >> 7) & 1),

@@ -65,16 +65,27 @@ EXEEXT = @EXEEXT@
 OBJEXT = @OBJEXT@
 PATH_SEPARATOR = @PATH_SEPARATOR@
 AMTAR = @AMTAR@
+AR = @AR@
+AS = @AS@
 AWK = @AWK@
 BUILD_INCLUDED_LIBINTL = @BUILD_INCLUDED_LIBINTL@
 CATOBJEXT = @CATOBJEXT@
 CC = @CC@
+CXX = @CXX@
+CXXCPP = @CXXCPP@
 DATADIRNAME = @DATADIRNAME@
 DEPDIR = @DEPDIR@
+DLLTOOL = @DLLTOOL@
+ECHO = @ECHO@
+EGREP = @EGREP@
+F77 = @F77@
+GCJ = @GCJ@
+GCJFLAGS = @GCJFLAGS@
 GENCAT = @GENCAT@
 GLIBC21 = @GLIBC21@
 GMSGFMT = @GMSGFMT@
 HAVE_LIB = @HAVE_LIB@
+INCLTDL = @INCLTDL@
 INSTALL_STRIP_PROGRAM = @INSTALL_STRIP_PROGRAM@
 INSTOBJEXT = @INSTOBJEXT@
 INTLBISON = @INTLBISON@
@@ -82,16 +93,23 @@ INTLLIBS = @INTLLIBS@
 INTLOBJS = @INTLOBJS@
 INTL_LIBTOOL_SUFFIX_PREFIX = @INTL_LIBTOOL_SUFFIX_PREFIX@
 LIB = @LIB@
+LIBADD_DL = @LIBADD_DL@
 LIBICONV = @LIBICONV@
 LIBINTL = @LIBINTL@
+LIBLTDL = @LIBLTDL@
+LIBTOOL = @LIBTOOL@
+LIBTOOL_DEPS = @LIBTOOL_DEPS@
+LN_S = @LN_S@
 LTLIB = @LTLIB@
 LTLIBICONV = @LTLIBICONV@
 LTLIBINTL = @LTLIBINTL@
 MAINT = @MAINT@
 MKINSTALLDIRS = @MKINSTALLDIRS@
+OBJDUMP = @OBJDUMP@
 PACKAGE = @PACKAGE@
 POSUB = @POSUB@
 RANLIB = @RANLIB@
+RC = @RC@
 STRIP = @STRIP@
 USE_INCLUDED_LIBINTL = @USE_INCLUDED_LIBINTL@
 USE_NLS = @USE_NLS@
@@ -99,18 +117,20 @@ VERSION = @VERSION@
 am__include = @am__include@
 am__quote = @am__quote@
 install_sh = @install_sh@
+modexecdir = @modexecdir@
 dist_pkgdata_DATA = cckddasd.html hercinst.html hercnew.html \
-	hercconf.html herclic.html  hercrdr.html  herctcp.html \
-	hercfaq.html  hercload.html index.html    hercules.css \
+        hercconf.html herclic.html  hercrdr.html  herctcp.html \
+        hercfaq.html  hercload.html index.html    hercules.css \
         hercules.html tasks.html    fishgui.html  hercmsg.html \
         hercmscf.html hercmscp.html hercmsct.html hercmsda.html \
-        hercmsdc.html hercmsdi.html hercmsdl.html hercmsds.html \
+        hercmsdc.html hercmsdg.html hercmsdi.html hercmsdl.html hercmsds.html \
         hercmsdt.html hercmsdu.html hercmshe.html hercmshg.html \
         hercmshm.html hercmsht.html hercmshu.html hercmsif.html \
         hercmsin.html hercmslc.html hercmspn.html hercmspr.html \
         hercmspu.html hercmsrd.html hercmssd.html hercmsta.html \
         hercmstc.html hercmste.html hercmstm.html hercmsts.html \
-        hercmstu.html
+        hercmstt.html hercmstu.html hercmslg.html hercmsca.html \
+        hercrnot.html
 
 
 include_sources = include/header.htmlpart include/footer.htmlpart
@@ -152,6 +172,15 @@ $(srcdir)/Makefile.in: @MAINTAINER_MODE_TRUE@ Makefile.am  $(top_srcdir)/configu
 	  $(AUTOMAKE) --gnu  html/Makefile
 Makefile: @MAINTAINER_MODE_TRUE@ $(srcdir)/Makefile.in  $(top_builddir)/config.status
 	cd $(top_builddir) && $(SHELL) ./config.status $(subdir)/$@ $(am__depfiles_maybe)
+
+mostlyclean-libtool:
+	-rm -f *.lo
+
+clean-libtool:
+	-rm -rf .libs _libs
+
+distclean-libtool:
+	-rm -f libtool
 uninstall-info-am:
 dist_images_pkgdataDATA_INSTALL = $(INSTALL_DATA)
 install-dist_images_pkgdataDATA: $(dist_images_pkgdata_DATA)
@@ -270,11 +299,11 @@ maintainer-clean-generic:
 	@echo "it deletes files that may require special tools to rebuild."
 clean: clean-am
 
-clean-am: clean-generic mostlyclean-am
+clean-am: clean-generic clean-libtool mostlyclean-am
 
 distclean: distclean-am
 
-distclean-am: clean-am distclean-generic
+distclean-am: clean-am distclean-generic distclean-libtool
 
 dvi: dvi-am
 
@@ -301,22 +330,22 @@ maintainer-clean-am: distclean-am maintainer-clean-generic
 
 mostlyclean: mostlyclean-am
 
-mostlyclean-am: mostlyclean-generic
+mostlyclean-am: mostlyclean-generic mostlyclean-libtool
 
 uninstall-am: uninstall-dist_images_pkgdataDATA \
 	uninstall-dist_include_pkgdataDATA uninstall-dist_pkgdataDATA \
 	uninstall-info-am
 
-.PHONY: all all-am check check-am clean clean-generic distclean \
-	distclean-generic distdir dvi dvi-am info info-am install \
-	install-am install-data install-data-am \
-	install-dist_images_pkgdataDATA \
+.PHONY: all all-am check check-am clean clean-generic clean-libtool \
+	distclean distclean-generic distclean-libtool distdir dvi \
+	dvi-am info info-am install install-am install-data \
+	install-data-am install-dist_images_pkgdataDATA \
 	install-dist_include_pkgdataDATA install-dist_pkgdataDATA \
 	install-exec install-exec-am install-info install-info-am \
 	install-man install-strip installcheck installcheck-am \
 	installdirs maintainer-clean maintainer-clean-generic \
-	mostlyclean mostlyclean-generic uninstall uninstall-am \
-	uninstall-dist_images_pkgdataDATA \
+	mostlyclean mostlyclean-generic mostlyclean-libtool uninstall \
+	uninstall-am uninstall-dist_images_pkgdataDATA \
 	uninstall-dist_include_pkgdataDATA uninstall-dist_pkgdataDATA \
 	uninstall-info-am
 

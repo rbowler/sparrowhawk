@@ -129,9 +129,11 @@ BYTE noiplccw2[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 int  infolvl = 1;
 
 #ifdef EXTERNALGUI
+#if 0
 /* Special flag to indicate whether or not we're being
    run under the control of the external GUI facility. */
 int  extgui = 0;
+#endif
 #endif /*EXTERNALGUI*/
 
 /*-------------------------------------------------------------------*/
@@ -143,10 +145,23 @@ argexit ( int code )
     fprintf (stderr,
             "dasdload creates a DASD image file from a list "
             "of TSO XMIT files\n"
-            "Syntax:\tdasdload ctlfile outfile [msglevel]\n"
+            "Syntax:\tdasdload [options] ctlfile outfile [msglevel]\n"
             "where:\tctlfile  = name of input control file\n"
             "\toutfile  = name of DASD image file to be created\n"
-            "\tmsglevel = Value 0-5 controls output verbosity\n");
+            "\tmsglevel = Value 0-5 controls output verbosity\n"
+            "\noptions:\n"
+            "\t-0:   no compression (default)\n"
+            "\t-a:   output disk will include alternate cylinders\n"
+#ifdef CCKD_COMPRESS_ZLIB
+            "\t-z:   compress using zlib\n"
+#endif
+#ifdef CCKD_COMPRESS_BZIP2
+            "\t-bz2: compress using bzip2\n"
+#endif
+#if _FILE_OFFSET_BITS == 64 || defined(_LARGE_FILES)
+            "\t-lfs: create single large output file\n"
+#endif
+            );
     exit(code);
 } /* end function argexit */
 
@@ -501,6 +516,10 @@ int             rc;                     /* Return code               */
 
     UNREFERENCED(ofname);
     UNREFERENCED(trklen);
+
+    /* Don't overwrite HA */
+    if (*usedv == 0)
+        *usedv = CKDDASD_TRKHDR_SIZE;
 
     /* Build end of track marker at end of buffer */
     memcpy (cif->trkbuf + *usedv, eighthexFF, 8);
@@ -1519,17 +1538,8 @@ int     offset;                         /* Offset into text unit     */
 U16     len;                            /* Field length              */
 BYTE   *name;                           /* Text unit name            */
 BYTE    c, hex[17], chars[9];           /* Character work areas      */
-char   *scodepage;
 
-    /* set_codepage() uses the logmsg macro which requires msgpipew */
-    sysblk.msgpipew = stdout;
-    if(!sysblk.codepage)
-    {
-        if((scodepage = getenv("HERCULES_CP")))
-            set_codepage(scodepage);
-        else
-            set_codepage("default");
-    }
+    set_codepage(NULL);
 
     /* Error if remaining length is insufficient for header */
     if (bufrem < 4)
@@ -2152,17 +2162,8 @@ int             dirrem;                 /* Number of bytes remaining */
 PDSDIR         *dirent;                 /* -> Directory entry        */
 BYTE            memname[9];             /* Member name (ASCIIZ)      */
 BYTE            c, hex[49], chars[25];  /* Character work areas      */
-char   *scodepage;
 
-    /* set_codepage() uses the logmsg macro which requires msgpipew */
-    sysblk.msgpipew = stdout;
-    if(!sysblk.codepage)
-    {
-        if((scodepage = getenv("HERCULES_CP")))
-            set_codepage(scodepage);
-        else
-            set_codepage("default");
-    }
+    set_codepage(NULL);
 
 
     /* Check for end of directory */
@@ -2894,6 +2895,13 @@ COPYR1         *copyr1;                 /* -> header record 1        */
         } /* end while(xreclen) */
 
     } /* end while(1) */
+
+    /* Check for unsupported xmit utility */
+    if (method == METHOD_XMIT && copyfiln == 0)
+    {
+        XMERRF ("HHCDL130W WARNING -- XMIT file utility is not IEBCOPY;"
+                " file %s not loaded\n", xfname);
+    }
 
     /* Return the last record number and track balance */
     *lastrec = outrec;

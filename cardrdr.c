@@ -10,6 +10,23 @@
 
 #include "devtype.h"
 
+#include "sockdev.h"
+
+
+#if defined(OPTION_DYNAMIC_LOAD) && defined(WIN32) && !defined(HDL_USE_LIBTOOL)
+ SYSBLK *psysblk;
+ #define sysblk (*psysblk)
+#endif
+
+
+/*-------------------------------------------------------------------*/
+/* ISW 2003/03/07                                                    */
+/* 3505 Byte 1 Sense Codes                                           */
+/*-------------------------------------------------------------------*/
+#define SENSE1_RDR_PERM         0x80 /* Permanent Err key depressed  */
+#define SENSE1_RDR_AUTORETRY    0x40 /* Don't know                   */
+#define SENSE1_RDR_MOTIONMF     0x20 /* Motion Malfunction           */
+#define SENSE1_RDR_RAIC         0x10 /* Retry After Intreq Cleared   */
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
 /*-------------------------------------------------------------------*/
@@ -46,6 +63,9 @@ int     fc;                             /* File counter              */
     dev->cardpos = 0;
     dev->cardrem = 0;
     dev->autopad = 0;
+
+    if(!sscanf(dev->typname,"%hx",&(dev->devtype)))
+        dev->devtype = 0x2501;
 
     fc = 0;
 
@@ -263,7 +283,9 @@ int     fc;                             /* File counter              */
 
     /* Set number of sense bytes */
 
-    dev->numsense = 1;
+    /* ISW 20030307 : Empirical knowledge : DOS/VS R34 Erep */
+    /*                indicates 4 bytes in 3505 sense       */
+    dev->numsense = 4;
 
     /* Initialize the device identifier bytes */
 
@@ -390,7 +412,13 @@ BYTE    buf[160];                       /* Auto-detection buffer     */
 
         if (dev->fd == -1)
         {
+            if(dev->rdreof)
+            {
+                *unitstat=CSW_CE|CSW_DE|CSW_UX;
+                return -1;
+            }
             dev->sense[0] = SENSE_IR;
+            dev->sense[1] = SENSE1_RDR_RAIC; /* Retry when IntReq Cleared */
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
             return -1;
         }
@@ -445,7 +473,13 @@ BYTE    buf[160];                       /* Auto-detection buffer     */
     /* Intervention required if device has no file name */
     if (dev->filename[0] == '\0')
     {
+        if(dev->rdreof)
+        {
+            *unitstat=CSW_CE|CSW_DE|CSW_UX;
+            return -1;
+        }
         dev->sense[0] = SENSE_IR;
+        dev->sense[1] = SENSE1_RDR_RAIC; /* Retry when IntReq Cleared */
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -559,6 +593,7 @@ int     rc;                             /* Return code               */
       else
         {
           dev->sense[0] = SENSE_IR;
+          dev->sense[1] = SENSE1_RDR_RAIC; /* Retry when IntReq Cleared */
           *unitstat = CSW_CE | CSW_DE | CSW_UC;
         }
 
@@ -628,6 +663,7 @@ BYTE    c;                              /* Input character           */
             else
             {
                 dev->sense[0] = SENSE_IR;
+                dev->sense[1] = SENSE1_RDR_RAIC; /* Retry when IntReq Cleared */
                 *unitstat = CSW_CE | CSW_DE | CSW_UC;
             }
 
@@ -784,6 +820,18 @@ int     num;                            /* Number of bytes to move   */
         *residual = count - num;
         if (count < dev->numsense) *more = 1;
 
+        /* If sense is clear AND filename = "" OR sockdev and fd=-1 */
+        /* Put an IR sense - so that an unsolicited sense can see the intreq */
+        if(dev->sense[0]==0)
+        {
+            if(dev->filename[0]==0x00 ||
+                    (dev->bs && dev->fd==-1))
+            {
+                dev->sense[0] = SENSE_IR;
+                dev->sense[1] = SENSE1_RDR_RAIC; /* Retry when IntReq Cleared */
+            }
+        }
+
         /* Copy device sense bytes to channel I/O buffer */
         memcpy (iobuf, dev->sense, num);
 
@@ -823,10 +871,53 @@ int     num;                            /* Number of bytes to move   */
 } /* end function cardrdr_execute_ccw */
 
 
+#if defined(OPTION_DYNAMIC_LOAD)
+static
+#endif
 DEVHND cardrdr_device_hndinfo = {
         &cardrdr_init_handler,
         &cardrdr_execute_ccw,
         &cardrdr_close_device,
         &cardrdr_query_device,
-        NULL, NULL, NULL, NULL
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 };
+
+/* Libtool static name colision resolution */
+/* note : lt_dlopen will look for symbol & modulename_LTX_symbol */
+#if !defined(HDL_BUILD_SHARED) && defined(HDL_USE_LIBTOOL)
+#define hdl_ddev hdt3505_LTX_hdl_ddev
+#define hdl_depc hdt3505_LTX_hdl_depc
+#define hdl_reso hdt3505_LTX_hdl_reso
+#define hdl_init hdt3505_LTX_hdl_init
+#define hdl_fini hdt3505_LTX_hdl_fini
+#endif
+
+
+#if defined(OPTION_DYNAMIC_LOAD)
+HDL_DEPENDENCY_SECTION;
+{
+     HDL_DEPENDENCY(HERCULES);
+     HDL_DEPENDENCY(DEVBLK);
+     HDL_DEPENDENCY(SYSBLK);
+}
+END_DEPENDENCY_SECTION;
+
+
+#if defined(WIN32) && !defined(HDL_USE_LIBTOOL)
+#undef sysblk
+HDL_RESOLVER_SECTION;
+{
+    HDL_RESOLVE_PTRVAR( psysblk, sysblk );
+}
+END_RESOLVER_SECTION;
+#endif
+
+
+HDL_DEVICE_SECTION;
+{
+    HDL_DEVICE(1442, cardrdr_device_hndinfo );
+    HDL_DEVICE(2501, cardrdr_device_hndinfo );
+    HDL_DEVICE(3505, cardrdr_device_hndinfo );
+}
+END_DEVICE_SECTION;
+#endif
