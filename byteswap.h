@@ -9,6 +9,7 @@
 #define _BYTESWAP_H
 
 #if !defined(NO_ASM_BYTESWAP)
+
 extern __inline__ __attribute__ ((regparm(1))) u_int16_t bswap_16(u_int16_t x)
 {
         __asm__("xchgb %b0,%h0" : "=q" (x) :  "0" (x));

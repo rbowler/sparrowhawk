@@ -1,7 +1,7 @@
-/* CONFIG.C     (c) Copyright Roger Bowler, 1999-2000                */
+/* CONFIG.C     (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 Configuration Builder                        */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* This module builds the configuration tables for the Hercules      */
@@ -19,7 +19,7 @@
 /*      OSTAILOR parameter by Jay Maynard                            */
 /*      PANRATE parameter by Reed H. Petty                           */
 /*      CFCC hardware loader by Jan Jaeger                           */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 /*-------------------------------------------------------------------*/
 
 
@@ -830,7 +830,7 @@ BYTE    c;                              /* Work area for sscanf      */
     setvbuf (sysblk.msgpipew, NULL, _IOLBF, 0);
 
     /* Display the version identifier on the control panel */
-    logmsg ("Hercules version %s build at %s %s\n"
+    logmsg ("Hercules version %s built at %s %s\n"
             "(c)Copyright 1999-2001 by "
             "Roger Bowler, Jan Jaeger, and others\n",
             MSTRING(VERSION), __DATE__, __TIME__);

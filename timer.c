@@ -1,6 +1,6 @@
 /* TIMER.C   */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 #include "hercules.h"
 

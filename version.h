@@ -1,4 +1,4 @@
-/*  VERSION.H 	(c) Copyright Roger Bowler, 1999-2000		     */
+/*  VERSION.H 	(c) Copyright Roger Bowler, 1999-2001		     */
 /*		ESA/390 Emulator Version definition                  */
 
 /*-------------------------------------------------------------------*/
@@ -6,5 +6,5 @@
 /*-------------------------------------------------------------------*/
 
 #if !defined(VERSION)
-#define	VERSION	2.10c                   /* Hercules version number   */
+#define	VERSION	2.11a                   /* Hercules version number   */
 #endif

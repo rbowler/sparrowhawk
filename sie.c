@@ -1,4 +1,4 @@
-/* SIE.C        (c) Copyright Jan Jaeger, 1999-2000                  */
+/* SIE.C        (c) Copyright Jan Jaeger, 1999-2001                  */
 /*              Interpretive Execution                               */
 
 /*      This module contains the SIE instruction as                  */
@@ -8,7 +8,7 @@
 /*      Enterprise Systems Architecture / Extended Configuration     */
 /*      Principles of Operation, SC24-5594-02                        */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 #include "hercules.h"
 
@@ -307,6 +307,8 @@ int     n;
               then backup the psw and exit */
             regs->psw.IA -= regs->psw.ilc;
             regs->psw.IA &= 0x7FFFFFFF;
+            break;
+        case SIE_HOST_PGMINT:
             break;
         case SIE_INTERCEPT_PER:
             STATEBK->f |= SIE_F_IF;

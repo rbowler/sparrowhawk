@@ -1,8 +1,8 @@
 /* DAT.H        (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 Dynamic Address Translation                  */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the DAT, ALET, and ASN translation         */
@@ -196,7 +196,12 @@ asn_asx_tran_excp:
 /*                                                                   */
 /*      A program check may be generated for addressing exception    */
 /*      if the authority table entry address is invalid, and in      */
-/*      this case the function does not return.                      */
+/*      this case the function does not return.  However, if the     */
+/*      regs->panelregs flag is set, indicating that translation     */
+/*      is being performed by the control panel for the purpose      */
+/*      of instruction display, then an addressing exception will    */
+/*      cause the function to return as if authorization had been    */
+/*      unsuccessful, and no program check will occur.               */
 /*-------------------------------------------------------------------*/
 _DAT_C_STATIC int ARCH_DEP(authorize_asn) (U16 ax, U32 aste[],
                                                int atemask, REGS *regs)
@@ -246,10 +251,14 @@ BYTE    ate;                            /* Authority table entry     */
     /* Exit with successful return code */
     return 0;
 
+/* Conditions which always cause program check, except
+   when performing translation for the control panel */
 auth_addr_excp:
-    ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+    if (regs->panelregs == 0)
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-    return -1; /* prevent warning from compiler */
+    /* Exit with unsuccessful return code if called by control panel */
+    return 1;
 } /* end function authorize_asn */
 #endif /*defined(FEATURE_DUAL_ADDRESS_SPACE)*/
 
@@ -290,7 +299,11 @@ auth_addr_excp:
 /*                                                                   */
 /*      A program check may be generated for addressing and ASN      */
 /*      translation specification exceptions, in which case the      */
-/*      function does not return.                                    */
+/*      function does not return.  However, if the special flag      */
+/*      regs->panelregs is set, which indicates that translation     */
+/*      is being performed by the control panel for the purpose      */
+/*      of instruction display, then ALL exceptions are returned     */
+/*      with an exception code, and no program checks occur.         */
 /*-------------------------------------------------------------------*/
 _DAT_C_STATIC U16 ARCH_DEP(translate_alet) (U32 alet, U16 eax,
             int acctype, REGS *regs, U32 *asteo, U32 aste[], int *prot)
@@ -427,7 +440,8 @@ int     code;                           /* Exception code            */
     *asteo = aste_addr;
     return 0;
 
-/* Conditions which always cause program check */
+/* Conditions which always cause program check, except
+   when performing translation for the control panel */
 alet_addr_excp:
     code = PGM_ADDRESSING_EXCEPTION;
     goto alet_prog_check;
@@ -439,7 +453,11 @@ alet_asn_tran_spec_excp:
 #endif /*!defined(FEATURE_ESAME)*/
 
 alet_prog_check:
-    ARCH_DEP(program_interrupt) (regs, code);
+    if (regs->panelregs == 0)
+        ARCH_DEP(program_interrupt) (regs, code);
+
+    /* Return exception code to control panel */
+    return code;
 
 /* Conditions which the caller may or may not program check */
 alet_spec_excp:
@@ -708,7 +726,13 @@ U16     xcode;                          /* ALET tran.exception code  */
 /*                                                                   */
 /*      A program check may be generated for addressing and          */
 /*      translation specification exceptions, in which case the      */
-/*      function does not return.                                    */
+/*      function does not return.  However, if the special flag      */
+/*      regs->panelregs is set, which indicates that translation     */
+/*      is being performed by the control panel for the purpose      */
+/*      of instruction display, then no program checks occur, and    */
+/*      addressing and translation specification exceptions are      */
+/*      indicated by return code 4 and the exception code may be     */
+/*      set to X'0005', X'0012', or X'0017'.                         */
 /*-------------------------------------------------------------------*/
 _DAT_C_STATIC int ARCH_DEP(translate_addr) (VADR vaddr, int arn,
            REGS *regs, int acctype, RADR *raddr, U16 *xcode, int *priv,
@@ -1371,7 +1395,8 @@ U16     sx, px;                         /* Segment and page index,
     *xcode = 0;
     return 0;
 
-/* Conditions which always cause program check */
+/* Conditions which always cause program check, except
+   when performing translation for the control panel */
 address_excp:
 //    logmsg("dat.c: addressing exception: %8.8X %8.8X %4.4X %8.8X\n",
 //        regs->CR(0),std,pte,vaddr);
@@ -1392,7 +1417,11 @@ tran_spec_excp:
     goto tran_prog_check;
 
 tran_prog_check:
-    ARCH_DEP(program_interrupt) (regs, *xcode);
+    if (regs->panelregs == 0)
+        ARCH_DEP(program_interrupt) (regs, *xcode);
+
+    /* Return to control panel with exception code already set */
+    return 4;
 
 /* Conditions which the caller may or may not program check */
 seg_tran_invalid:

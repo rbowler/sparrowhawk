@@ -1,8 +1,8 @@
-/* CPU.C        (c) Copyright Roger Bowler, 1994-2000                */
+/* CPU.C        (c) Copyright Roger Bowler, 1994-2001                */
 /*              ESA/390 CPU Emulator                                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the CPU instruction execution function of  */
@@ -162,7 +162,6 @@ int ARCH_DEP(load_psw) (REGS *regs, BYTE *addr)
 #if !defined(FEATURE_ESAME)
     } else {
 
-#if defined(FEATURE_BCMODE)
         /* Processing for S/370 BC mode PSW */
         regs->psw.space = 0;
         regs->psw.armode = 0;
@@ -176,7 +175,8 @@ int ARCH_DEP(load_psw) (REGS *regs, BYTE *addr)
         regs->psw.amode = 0;
         FETCH_FW(regs->psw.IA, addr + 4);
         regs->psw.IA &= 0x00FFFFFF;
-#else /*!FEATURE_BCMODE*/
+
+#if !defined(FEATURE_BCMODE)
         /* BC mode is not valid for 370-XA, ESA/370, or ESA/390 */
         return PGM_SPECIFICATION_EXCEPTION;
 #endif /*!FEATURE_BCMODE*/
@@ -388,7 +388,7 @@ static char *pgmintname[] = {
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
     /* If this is a host exception in SIE state then leave SIE */
     if(realregs->sie_active)
-        ARCH_DEP(sie_exit) (realregs, SIE_HOST_INTERRUPT);
+        ARCH_DEP(sie_exit) (realregs, SIE_HOST_PGMINT);
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Absolute address of prefix page */

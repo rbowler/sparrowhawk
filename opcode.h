@@ -1,8 +1,8 @@
 /* OPCODE.H	(c) Copyright Jan Jaeger, 2000-2001		     */
 /*		Instruction decoding macros and prototypes	     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 #if !defined(_OPCODE_H)
 
@@ -615,6 +615,26 @@ int used; \
 	    } \
 	}
 
+/* RSL storage operand with extended op code and 4-bit L field */
+#undef RSL
+#define RSL(_inst, _execflag, _regs, _l1, _b1, _effective_addr1) \
+        { \
+            (_l1) = (_inst)[1] >> 4; \
+            (_b1) = (_inst)[2] >> 4; \
+            (_effective_addr1) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
+            if((_b1) != 0) \
+            { \
+                (_effective_addr1) += (_regs)->GR((_b1)); \
+                (_effective_addr1) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 6; \
+                (_regs)->psw.IA += 6; \
+                (_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        }
+
 /* RSI register and immediate with additional R3 field */
 #undef RSI
 #define RSI(_inst, _execflag, _regs, _r1, _r3, _i2) \
@@ -1111,6 +1131,7 @@ void ARCH_DEP(sie_exit) (REGS *regs, int code);
 
 
 /* Functions in module stack.c */
+void ARCH_DEP(trap_x) (int trap_is_trap4, int execflag, REGS *regs, U32 trap_operand);
 RADR ARCH_DEP(abs_stack_addr) (VADR vaddr, REGS *regs, int acctype);
 void ARCH_DEP(form_stack_entry) (BYTE etype, VADR retna, VADR calla,
 	U32 csi, U32 pcnum, REGS *regs);
@@ -1242,13 +1263,14 @@ DEF_INST(multiply_decimal);
 DEF_INST(shift_and_round_decimal);
 DEF_INST(subtract_decimal);
 DEF_INST(zero_and_add);
+DEF_INST(test_decimal);
 
 
 /* Instructions in vm.c */
 DEF_INST(inter_user_communication_vehicle);
 
 
-/* Instructions in vm.c */
+/* Instructions in sie.c */
 DEF_INST(start_interpretive_execution);
 
 
@@ -1554,6 +1576,16 @@ DEF_INST(ses_opcode_B2F6);
 
 
 /* Instructions in esame.c */
+DEF_INST(store_floating_point_control_register);
+DEF_INST(load_floating_point_control_register);
+DEF_INST(set_floating_point_control_register);
+DEF_INST(trap2);
+DEF_INST(trap4);
+DEF_INST(resume_program);
+DEF_INST(divide_logical);
+DEF_INST(divide_logical_long);
+DEF_INST(divide_logical_register);
+DEF_INST(divide_logical_long_register);
 DEF_INST(add_logical_carry_long_register);
 DEF_INST(subtract_logical_borrow_long_register);
 DEF_INST(add_logical_carry_long);
@@ -1692,5 +1724,9 @@ DEF_INST(load_reversed_half);
 DEF_INST(store_reversed_long);
 DEF_INST(store_reversed);
 DEF_INST(store_reversed_half);
+DEF_INST(pack_ascii);
+DEF_INST(pack_unicode);
+DEF_INST(unpack_ascii);
+DEF_INST(unpack_unicode);
 
 /* end of OPCODE.H */

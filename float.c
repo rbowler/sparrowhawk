@@ -10,7 +10,7 @@
 /* Incorporated all floating point instructions from cpu.c in order  */
 /* to implement revised instruction decoding.                        */
 /*                                               Jan Jaeger 01/07/00 */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 /*-------------------------------------------------------------------*/
 
 /*-------------------------------------------------------------------*/

@@ -1,4 +1,4 @@
-/* CONSOLE.C    (c)Copyright Roger Bowler, 1999-2000                 */
+/* CONSOLE.C    (c)Copyright Roger Bowler, 1999-2001                 */
 /*              ESA/390 Console Device Handler                       */
 
 /*-------------------------------------------------------------------*/
@@ -1080,7 +1080,7 @@ BYTE                    rejmsg[80];     /* Rejection message         */
                 hostinfo.nodename, hostinfo.sysname,
                 hostinfo.release);
     len = snprintf (conmsg, sizeof(conmsg),
-                "Hercules version %s build at %s %s",
+                "Hercules version %s built at %s %s",
                 MSTRING(VERSION), __DATE__, __TIME__);
 
     if (dev != NULL)

@@ -1,8 +1,8 @@
 /* STACK.C      (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 Linkage Stack Operations                     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the linkage stack functions of ESA/390     */
@@ -17,6 +17,7 @@
 /* Modifications for Interpretive Execution (SIE)         Jan Jaeger */
 /* ESAME low-address protection                   v208d Roger Bowler */
 /* ESAME linkage stack operations                 v208e Roger Bowler */
+/* TRAP support added                                     Jan Jaeger */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -105,6 +106,159 @@
 
 
 #if defined(FEATURE_LINKAGE_STACK)
+void ARCH_DEP(trap_x) (int trap_is_trap4, int execflag, REGS *regs, U32 trap_operand)
+{
+RADR ducto;
+U32  duct11;
+U32  tcba;
+#if defined(FEATURE_ESAME)
+int  notesame_save;
+U32  tcba0;
+#endif /*defined(FEATURE_ESAME)*/
+U32  tsao;
+RADR tsaa1;
+RADR tsaa2;
+U32  trap_ia;
+U32  trap_flags;
+QWORD trap_psw;
+int  i;
+
+    if(!PRIMARY_SPACE_MODE(&(regs->psw)) 
+      && !HOME_SPACE_MODE(&(regs->psw)))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+
+    /* Obtain the DUCT origin from control register 2 */
+    ducto = regs->CR(2) & CR2_DUCTO;
+
+    /* Program check if DUCT origin address is invalid */
+    if (ducto >= regs->mainsize)
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+
+    /* Fetch DUCT bytes 44-47 */
+    duct11 = ARCH_DEP(fetch_fullword_absolute) (ducto + 44, regs);
+
+    if(!(duct11 & DUCT11_TE))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+
+    /* Isolate the Trap Control Block Address */
+    tcba = duct11 & DUCT11_TCBA;
+
+    /* Program check if Trap Control Block address is invalid */
+    if (tcba + 24 >= regs->mainsize)
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+
+#if defined(FEATURE_ESAME)
+    /* Fetch word 0 of the TCB */
+    tcba0 = ARCH_DEP(fetch_fullword_absolute) (tcba, regs);
+#endif /*defined(FEATURE_ESAME)*/
+
+    /* Fetch word 3 of the TCB */
+    tsao = ARCH_DEP(fetch_fullword_absolute) (tcba + 12, regs)
+                                                     & 0x7FFFFFF8;
+
+    /* Fetch word 3 of the TCB */
+    trap_ia = ARCH_DEP(fetch_fullword_absolute) (tcba + 20, regs);
+
+    /* Use abs_stack_addr as it conforms to trap save area access */
+    tsaa1 = tsaa2 = ARCH_DEP(abs_stack_addr) (tsao, regs, ACCTYPE_WRITE);
+    if((tsaa1 & PAGEFRAME_PAGEMASK) != ((tsaa1 + 255) & PAGEFRAME_PAGEMASK))
+        tsaa2 = ARCH_DEP(abs_stack_addr) (tsao, regs, ACCTYPE_WRITE);
+
+#if defined(FEATURE_ESAME)
+    /* Special operation exception if P == 0 and EA == 1 */
+    if(!(tcba0 & TCB0_P) && regs->psw.amode64)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+#endif /*defined(FEATURE_ESAME)*/
+
+    trap_flags = regs->psw.ilc << 16;
+
+    if(execflag)
+        trap_flags |= TRAP0_EXECUTE;
+
+    if(trap_is_trap4)
+        trap_flags |= TRAP0_TRAP4;
+
+    /* Trap flags at offset +0 */
+    STORE_FW(sysblk.mainstor + tsaa1, trap_flags);
+    /* Reserved zero's stored at offset +4 */
+    STORE_FW(sysblk.mainstor + tsaa1 + 4, 0);
+
+    tsaa1 += 8;
+    if((tsaa1 & PAGEFRAME_BYTEMASK) == 0)
+        tsaa1 = tsaa2;
+
+    /* Bits 33-63 of Second-Op address of TRAP4 at offset +8 */
+    STORE_FW(sysblk.mainstor + tsaa1, trap_operand);
+    /* Access register 15 at offset +12 */
+    STORE_FW(sysblk.mainstor + tsaa1 + 4, regs->AR(15));
+
+    tsaa1 += 8;
+    if((tsaa1 & PAGEFRAME_BYTEMASK) == 0)
+        tsaa1 = tsaa2;
+
+#if defined(FEATURE_ESAME)
+    /* Save the current EC bit from the PSW */
+    notesame_save = regs->psw.notesame;
+
+    /* If the P bit is zero then store the PSW in esa390 format */
+    if(!(tcba0 & TCB0_P))
+        regs->psw.notesame = 1;
+#endif /*defined(FEATURE_ESAME)*/
+
+    /* Store the PSW in mode specified in psw.notesame */
+    ARCH_DEP(store_psw) (regs, trap_psw);
+
+#if defined(FEATURE_ESAME)
+    /* Restore the EC bit in the PSW */
+    regs->psw.notesame = notesame_save;
+#endif /*defined(FEATURE_ESAME)*/
+
+    /* bits 0-63 of PSW at offset +16 */
+    memcpy(sysblk.mainstor + tsaa1, trap_psw, 8);
+    tsaa1 += 8;
+    if((tsaa1 & PAGEFRAME_BYTEMASK) == 0)
+        tsaa1 = tsaa2;
+
+#if defined(FEATURE_ESAME)
+    /* bits 64-127 of PSW at offset +24 */
+    if(!regs->psw.notesame)
+        memcpy(sysblk.mainstor + tsaa1, trap_psw + 8, 8);
+    else
+#endif /*defined(FEATURE_ESAME)*/
+        memset(sysblk.mainstor + tsaa1, 0, 8);
+    tsaa1 += 8;
+    if((tsaa1 & PAGEFRAME_BYTEMASK) == 0)
+        tsaa1 = tsaa2;
+
+#if defined(FEATURE_ESAME)
+    /* General registers at offset +32 */
+    if(tcba0 & TCB0_R)
+        for(i = 0; i < 16; i++)
+        {
+            STORE_DW(sysblk.mainstor + tsaa1, regs->GR_G(i));
+            tsaa1 += 8;
+            if((tsaa1 & PAGEFRAME_BYTEMASK) == 0)
+                tsaa1 = tsaa2;
+        }
+    else
+#endif /*defined(FEATURE_ESAME)*/
+        for(i = 0; i < 16; i++)
+        {
+            STORE_FW(sysblk.mainstor + tsaa1, regs->GR_L(i));
+            tsaa1 += 4;
+            if((tsaa1 & PAGEFRAME_BYTEMASK) == 0)
+                tsaa1 = tsaa2;
+        }
+ 
+    /* Set the Trap program address as a 31 bit instruction address */
+#if defined(FEATURE_ESAME)
+    regs->psw.amode64 = 0; 
+#endif /*defined(FEATURE_ESAME)*/
+    regs->psw.amode = 1;
+    regs->psw.IA = trap_ia & 0x7FFFFFFF;
+}
+
+
 /*-------------------------------------------------------------------*/
 /* Convert linkage stack virtual address to absolute address         */
 /*                                                                   */

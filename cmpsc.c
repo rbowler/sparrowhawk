@@ -36,12 +36,9 @@
 /* Don't touch high order bits in ESAME when not 64-bit addressing            */
 /*----------------------------------------------------------------------------*/
 #if !defined(_GEN_ARCH)
-#define _GR(r, regs) 		((regs)->psw.amode64 ? (regs)->GR ((r)) : (regs)->GR_L ((r)))
 #define ADRFMT			"%016llX"
 #else
-#undef _GR
 #undef ADRFMT
-#define _GR(r, regs)		(regs)->GR ((r))
 #define ADRFMT			"%08X"
 #endif /* !defined(_GEN_ARCH) */
 
@@ -136,7 +133,7 @@
 /* sttoff: symbol-translation-table offset                                    */
 /*----------------------------------------------------------------------------*/
 #define GR1_cbn(regs)           (((regs)->GR_L (1) & 0x00000007))
-#define GR1_dictor(regs)        (_GR (1, regs) & ((GREG) 0xFFFFFFFFFFFFF000ULL))
+#define GR1_dictor(regs)        (GR_A (1, regs) & ((GREG) 0xFFFFFFFFFFFFF000ULL))
 #define GR1_setcbn(regs, cbn) 	((regs)->GR_L (1) = ((regs)->GR_L (1) & 0xFFFFFFF8) | ((cbn) & 0x00000007))
 #define GR1_sttoff(regs)        (((regs)->GR_L (1) & 0x00000FF8) >> 3)
 
@@ -145,8 +142,8 @@
 /*----------------------------------------------------------------------------*/
 #define ADJUSTREGS(r, regs, len) \
 { \
-  _GR ((r), (regs)) = (_GR ((r), (regs)) + (len)) & ADDRESS_MAXWRAP((regs)); \
-  _GR ((r) + 1, (regs)) -= (len); \
+  GR_A ((r), (regs)) = (GR_A ((r), (regs)) + (len)) & ADDRESS_MAXWRAP((regs)); \
+  GR_A ((r) + 1, (regs)) -= (len); \
 }
 
 /*----------------------------------------------------------------------------*/
@@ -208,7 +205,7 @@ static void ARCH_DEP (compress) (int r1, int r2, REGS * regs)
 	{
 
 	  /* Can we write an interchange symbol */
-	  if (_GR (r1 + 1, regs) < 2)
+	  if (GR_A (r1 + 1, regs) < 2)
 	    {
 	      regs->psw.cc = 1;
 	      return;
@@ -218,7 +215,7 @@ static void ARCH_DEP (compress) (int r1, int r2, REGS * regs)
 	{
 
 	  /* Can we write an index symbol */
-	  if (((GR1_cbn (regs) + GR0_symbol_size (regs)) / 8) > _GR (r1 + 1, regs))
+	  if (((GR1_cbn (regs) + GR0_symbol_size (regs)) / 8) > GR_A (r1 + 1, regs))
 	    {
 	      regs->psw.cc = 1;
 	      return;
@@ -509,7 +506,7 @@ static void ARCH_DEP (fetch_cce) (REGS * regs, BYTE * cce, int index)
 /*----------------------------------------------------------------------------*/
 static int ARCH_DEP (fetch_ch) (int r2, REGS * regs, BYTE * ch, int offset)
 {
-  if (_GR (r2 + 1, regs) <= offset)
+  if (GR_A (r2 + 1, regs) <= offset)
     {
 
 #if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1
@@ -519,10 +516,10 @@ static int ARCH_DEP (fetch_ch) (int r2, REGS * regs, BYTE * ch, int offset)
       regs->psw.cc = 0;
       return (1);
     }
-  *ch = ARCH_DEP (vfetchb) ((_GR (r2, regs) + offset) & ADDRESS_MAXWRAP (regs), r2, regs);
+  *ch = ARCH_DEP (vfetchb) ((GR_A (r2, regs) + offset) & ADDRESS_MAXWRAP (regs), r2, regs);
 
 #if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1
-  logmsg ("fetch_ch : %02X at " ADRFMT "\n", *ch, (_GR (r2, regs) + offset));
+  logmsg ("fetch_ch : %02X at " ADRFMT "\n", *ch, (GR_A (r2, regs) + offset));
 #endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1 */
 
   return (0);
@@ -585,7 +582,7 @@ static int ARCH_DEP (fetch_is) (int r2, REGS * regs, U16 * index_symbol)
   BYTE work[3];
 
   /* Check if we can read an index symbol */
-  if (((GR1_cbn (regs) + GR0_symbol_size (regs)) / 8) > _GR (r2 + 1, regs))
+  if (((GR1_cbn (regs) + GR0_symbol_size (regs)) / 8) > GR_A (r2 + 1, regs))
     {
       regs->psw.cc = 0;
       return (1);
@@ -593,7 +590,7 @@ static int ARCH_DEP (fetch_is) (int r2, REGS * regs, U16 * index_symbol)
 
   /* Get the storage */
   memset (work, 0, 3);
-  ARCH_DEP (vfetchc) (&work, (GR0_symbol_size (regs) + GR1_cbn (regs) - 1) / 8, _GR (r2, regs) & ADDRESS_MAXWRAP (regs), r2, regs);
+  ARCH_DEP (vfetchc) (&work, (GR0_symbol_size (regs) + GR1_cbn (regs) - 1) / 8, GR_A (r2, regs) & ADDRESS_MAXWRAP (regs), r2, regs);
 
   /* Get the bits */
   mask = work[0] << 16 | work[1] << 8 | work[3];
@@ -683,7 +680,7 @@ static int ARCH_DEP (store_ch) (int r1, int r2, REGS * regs, BYTE * data, int le
 {
 
   /* Check destination size */
-  if (_GR (r1 + 1, regs) + offset < length)
+  if (GR_A (r1 + 1, regs) + offset < length)
     {
 
 #if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 2
@@ -701,7 +698,7 @@ static int ARCH_DEP (store_ch) (int r1, int r2, REGS * regs, BYTE * data, int le
     }
 
   /* Store the data */
-  ARCH_DEP (vstorec) (data, length - 1, (_GR (r1, regs) + offset) & ADDRESS_MAXWRAP (regs), r1, regs);
+  ARCH_DEP (vstorec) (data, length - 1, (GR_A (r1, regs) + offset) & ADDRESS_MAXWRAP (regs), r1, regs);
 
 #if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 2
   logmsg ("expand_store: at " ADRFMT "\n", (regs->GR (r1) + offset));
@@ -727,7 +724,7 @@ static void ARCH_DEP (store_is) (int r1, REGS * regs, U16 index_symbol)
       ARCH_DEP (vfetchc) (work, 1, (GR1_dictor (regs) + GR0_dictor_size (regs) + GR1_sttoff (regs) + index_symbol * 2) & ADDRESS_MAXWRAP (regs), 1, regs);
 
       /* Store the 2 bytes interchange symbol */
-      ARCH_DEP (vstorec) (work, 1, (_GR (r1, regs)) & ADDRESS_MAXWRAP (regs), r1, regs);
+      ARCH_DEP (vstorec) (work, 1, (GR_A (r1, regs)) & ADDRESS_MAXWRAP (regs), r1, regs);
 
       /* Adjust destination registers */
       ADJUSTREGS (r1, regs, 2);
@@ -742,9 +739,9 @@ static void ARCH_DEP (store_is) (int r1, REGS * regs, U16 index_symbol)
 
   /* Get the storage */
   if (set_mask & 0xFF)
-    ARCH_DEP (vfetchc) (work, 2, _GR (r1, regs) & ADDRESS_MAXWRAP (regs), r1, regs);
+    ARCH_DEP (vfetchc) (work, 2, GR_A (r1, regs) & ADDRESS_MAXWRAP (regs), r1, regs);
   else
-    ARCH_DEP (vfetchc) (work, 1, _GR (r1, regs) & ADDRESS_MAXWRAP (regs), r1, regs);
+    ARCH_DEP (vfetchc) (work, 1, GR_A (r1, regs) & ADDRESS_MAXWRAP (regs), r1, regs);
 
   /* Do the job */
   work[0] &= clear_mask >> 16;
@@ -759,9 +756,9 @@ static void ARCH_DEP (store_is) (int r1, REGS * regs, U16 index_symbol)
 
   /* Set the storage */
   if (set_mask & 0xFF)
-    ARCH_DEP (vstorec) (work, 2, _GR (r1, regs) & ADDRESS_MAXWRAP (regs), r1, regs);
+    ARCH_DEP (vstorec) (work, 2, GR_A (r1, regs) & ADDRESS_MAXWRAP (regs), r1, regs);
   else
-    ARCH_DEP (vstorec) (work, 1, _GR (r1, regs) & ADDRESS_MAXWRAP (regs), r1, regs);
+    ARCH_DEP (vstorec) (work, 1, GR_A (r1, regs) & ADDRESS_MAXWRAP (regs), r1, regs);
 
   /* Adjust destination registers */
   ADJUSTREGS (r1, regs, (GR1_cbn (regs) + GR0_symbol_size (regs)) / 8);

@@ -1,63 +1,59 @@
 #
 # Makefile for Hercules S/370, ESA/390 and z/Architecture emulator
+# modified to build hercules under windows (VB)
 #
 
-VERSION  = 2.11
+VERSION  = 2.11a
 
 # Change this if you want to install the Hercules executables somewhere
 #   besides /usr/bin. The $PREFIX (which defaults to nothing) can be
 #   overridden in the make command line, as in "PREFIX=/foo make install"
 #   (the directory is only used when installing).
-DESTDIR  = $(PREFIX)/usr/bin
+DESTDIR  = $(PREFIX)/hercules2
 
-# Standard flags for all architectures
-CFLAGS	 = -Wall -fomit-frame-pointer -DVERSION=$(VERSION) -DNO_BYTESWAP_H
-LFLAGS	 = -lpthread
+# Directory where the pthreads-win32 library was installed.
+PTHREADS_W32DIR = /usr
+CC = gcc -I$(PTHREADS_W32DIR)/Pthreads
 
-# Add default flags for Pentium compilations
-ifndef HOST_ARCH
-HOST_ARCH = i586
-endif
 
-# Handle host architecture if specified
-ifeq ($(HOST_ARCH),i386)
-CFLAGS	 += -O3 -malign-double -DNO_ASM_BYTESWAP
-endif
-ifeq ($(HOST_ARCH),i586)
-CFLAGS	 += -O3 -malign-double -march=pentium
-endif
-ifeq ($(HOST_ARCH),i686)
-CFLAGS	 += -O3 -malign-double -march=pentiumpro
-endif
-ifeq ($(HOST_ARCH),alpha)
-CFLAGS	 += -O2 -DNO_ASM_BYTESWAP
-endif
-ifeq ($(HOST_ARCH),other)
-CFLAGS	 += -O3 -DNO_ASM_BYTESWAP
-endif
+# For Linux use:
+#CFLAGS  = -O3 -Wall -malign-double -march=pentium -fomit-frame-pointer \
+	   -DVERSION=$(VERSION)
+# For older Linux versions use:
+CFLAGS	 = -O3 -Wall -malign-double -march=pentium -fomit-frame-pointer \
+           -DVERSION=$(VERSION) -DWIN32 -DCCKD -DNO_BYTESWAP_H \
+           -D__BYTE_ORDER="__LITTLE_ENDIAN"
 
-# Uncomment these lines for NetBSD, with either the unproven-pthreads
-#   or pth packages
-#CFLAGS  += -I/usr/pkg/pthreads/include -I/usr/pkg/include
-#LFLAGS	 += -L/usr/pkg/pthreads/lib -R/usr/pkg/pthreads
-#LFLAGS	 += -L/usr/pkg/lib -R/usr/pkg/pthreads/lib
+# For Linux/390 use:
+#CFLAGS  = -O3 -DVERSION=$(VERSION) -DNO_BYTESWAP_H -DNO_ASM_BYTESWAP
+
+LFLAGS   = -L$(PTHREADS_W32DIR)/DLL -lpthreadw32
 
 # Reverse the comments below to disable Compressed CKD Dasd support
 #CFLAGS  += -DNO_CCKD
+#CFL_370 += -DNO_CCKD
 LFLAGS	 += -lz
 
 # Uncomment these lines to enable Compressed CKD bzip2 compression
 #CFLAGS  += -DCCKD_BZIP2
+#CFL_370 += -DCCKD_BZIP2
 
 # Uncomment these lines to enable HET bzip2 compression
 #CFLAGS	+= -DHET_BZIP2
+#CFL_370	+= -DHET_BZIP2
 #LFLAGS	+= -lbz2
 
-EXEFILES = hercules hercifc \
+EXEFILES = hercules \
 	   dasdinit dasdisup dasdload dasdls dasdpdsu \
-	   tapecopy tapelist tapemap tapesplit \
+	   tapecopy tapemap tapesplit \
 	   cckd2ckd cckdcdsk ckd2cckd cckdcomp \
 	   hetget hetinit hetmap hetupd
+
+EXFILES = hercules.exe \
+           dasdinit.exe dasdisup.exe dasdload.exe dasdls.exe dasdpdsu.exe \
+           tapecopy.exe tapemap.exe tapesplit.exe \
+           cckd2ckd.exe cckdcdsk.exe ckd2cckd.exe cckdcomp.exe \
+           hetget.exe hetinit.exe hetmap.exe hetupd.exe
 
 TARFILES = makefile *.c *.h hercules.cnf tapeconv.jcl dasdlist \
 	   html zzsa.cnf zzsacard.bin
@@ -77,7 +73,7 @@ HRC_OBJS = impl.o config.o panel.o \
 	   esame.o cckddasd.o cckdcdsx.o \
 	   parser.o hetlib.o
 
-HIFC_OBJ = hercifc.o
+#HIFC_OBJ = hercifc.o
 
 DIN_OBJS = dasdinit.o dasdutil.o
 
@@ -90,8 +86,6 @@ DLS_OBJS = dasdls.o dasdutil.o
 DPU_OBJS = dasdpdsu.o dasdutil.o
 
 TCY_OBJS = tapecopy.o
-
-TLS_OBJS = tapelist.o
 
 TMA_OBJS = tapemap.o
 
@@ -130,8 +124,8 @@ hercules:  $(HRC_OBJS)
 $(HRC_OBJS): %.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -o $@ -c $<
 
-hercifc:  $(HIFC_OBJ)
-	$(CC) -o hercifc $(HIFC_OBJ)
+#hercifc:  $(HIFC_OBJ)
+#        $(CC) -o hercifc $(HIFC_OBJ)
 
 dasdinit:  $(DIN_OBJS)
 	$(CC) -o dasdinit $(DIN_OBJS)
@@ -150,9 +144,6 @@ dasdpdsu:  $(DPU_OBJS)
 
 tapecopy:  $(TCY_OBJS)
 	$(CC) -o tapecopy $(TCY_OBJS)
-
-tapelist:  $(TLS_OBJS)
-	$(CC) -o tapelist $(TLS_OBJS)
 
 tapemap:  $(TMA_OBJS)
 	$(CC) -o tapemap $(TMA_OBJS)
@@ -185,8 +176,6 @@ dasdpdsu.o: dasdpdsu.c $(HEADERS) dasdblks.h
 dasdutil.o: dasdutil.c $(HEADERS) dasdblks.h
 
 tapecopy.o: tapecopy.c $(HEADERS)
-
-tapelist.o: tapelist.c $(HEADERS)
 
 tapemap.o: tapemap.c $(HEADERS)
 
@@ -225,8 +214,3 @@ tar:	clean
 
 install:  $(EXEFILES)
 	cp $(EXEFILES) $(DESTDIR)
-	cp dasdlist $(DESTDIR)
-	chown root $(DESTDIR)/hercifc
-	chmod 0751 $(DESTDIR)/hercifc
-	chmod +s $(DESTDIR)/hercifc
-	rm hercifc

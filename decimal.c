@@ -1,4 +1,4 @@
-/* DECIMAL.C    (c) Copyright Roger Bowler, 1991-2000                */
+/* DECIMAL.C    (c) Copyright Roger Bowler, 1991-2001                */
 /*              ESA/390 Packed Decimal Routines                      */
 
 /*-------------------------------------------------------------------*/
@@ -16,7 +16,8 @@
 /* Add trialrun to ED and EDMK                   Jan Jaeger 19/07/00 */
 /* Fix random MP bug - Mario Bezzi                                   */
 /* Clear TEA on data exception - Peter Kuschnerus                V209*/
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* TP instruction - Roger Bowler                            08/02/01 */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -465,13 +466,14 @@ BYTE    pack[MAX_DECIMAL_LENGTH];       /* Packed decimal work area  */
 
 } /* end function ARCH_DEP(store_decimal) */
 
+
 /*-------------------------------------------------------------------*/
 /* FA   AP    - Add Decimal                                     [SS] */
 /*-------------------------------------------------------------------*/
 DEF_INST(add_decimal)
 {
-int     l1, l2;                         /* Lenght values             */
-int     b1, b2;                         /* Values of base registers  */
+int     l1, l2;                         /* Length values             */
+int     b1, b2;                         /* Base register numbers     */
 VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 int     cc;                             /* Condition code            */
@@ -537,7 +539,7 @@ int     sign1, sign2, sign3;            /* Sign of operands & result */
     if (cc == 3 && regs->psw.domask)
         ARCH_DEP(program_interrupt) (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
 
-}
+} /* end DEF_INST(add_decimal) */
 
 
 /*-------------------------------------------------------------------*/
@@ -545,8 +547,8 @@ int     sign1, sign2, sign3;            /* Sign of operands & result */
 /*-------------------------------------------------------------------*/
 DEF_INST(compare_decimal)
 {
-int     l1, l2;                         /* Lenght values             */
-int     b1, b2;                         /* Values of base registers  */
+int     l1, l2;                         /* Length values             */
+int     b1, b2;                         /* Base register numbers     */
 VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 BYTE    dec1[MAX_DECIMAL_DIGITS];       /* Work area for operand 1   */
@@ -595,7 +597,7 @@ int     rc;                             /* Return code               */
         else
             regs->psw.cc = 0;
 
-}
+} /* end DEF_INST(compare_decimal) */
 
 
 /*-------------------------------------------------------------------*/
@@ -603,8 +605,8 @@ int     rc;                             /* Return code               */
 /*-------------------------------------------------------------------*/
 DEF_INST(divide_decimal)
 {
-int     l1, l2;                         /* Lenght values             */
-int     b1, b2;                         /* Values of base registers  */
+int     l1, l2;                         /* Length values             */
+int     b1, b2;                         /* Base register numbers     */
 VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 BYTE    dec1[MAX_DECIMAL_DIGITS];       /* Operand 1 (dividend)      */
@@ -662,7 +664,7 @@ int     signq, signr;                   /* Sign of quotient/remainder*/
     /* Store quotient in leftmost bytes of first operand location */
     ARCH_DEP(store_decimal) (effective_addr1, l1-l2-1, b1, regs, quot, signq);
 
-}
+} /* end DEF_INST(divide_decimal) */
 
 
 /*-------------------------------------------------------------------*/
@@ -671,8 +673,8 @@ int     signq, signr;                   /* Sign of quotient/remainder*/
 /*-------------------------------------------------------------------*/
 DEF_INST(edit_x_edit_and_mark)
 {
-int     l;                              /* Lenght value              */
-int     b1, b2;                         /* Values of base registers  */
+int     l;                              /* Length value              */
+int     b1, b2;                         /* Base register numbers     */
 VADR    effective_addr1,
         effective_addr2,                /* Effective addresses       */
         addr1,
@@ -837,7 +839,7 @@ BYTE    rbyte;                          /* Result byte               */
     /* Set condition code */
     regs->psw.cc = cc;
 
-}
+} /* end DEF_INST(edit_x_edit_and_mark) */
 
 
 /*-------------------------------------------------------------------*/
@@ -845,8 +847,8 @@ BYTE    rbyte;                          /* Result byte               */
 /*-------------------------------------------------------------------*/
 DEF_INST(multiply_decimal)
 {
-int     l1, l2;                         /* Lenght values             */
-int     b1, b2;                         /* Values of base registers  */
+int     l1, l2;                         /* Length values             */
+int     b1, b2;                         /* Base register numbers     */
 VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 BYTE    dec1[MAX_DECIMAL_DIGITS];       /* Work area for operand 1   */
@@ -904,7 +906,7 @@ int     carry;                          /* Carry indicator           */
     /* Store result into first operand location */
     ARCH_DEP(store_decimal) (effective_addr1, l1, b1, regs, dec3, sign3);
 
-}
+} /* end DEF_INST(multiply_decimal) */
 
 
 /*-------------------------------------------------------------------*/
@@ -912,8 +914,8 @@ int     carry;                          /* Carry indicator           */
 /*-------------------------------------------------------------------*/
 DEF_INST(shift_and_round_decimal)
 {
-int     l1, i3;                         /* Lenght and rounding       */
-int     b1, b2;                         /* Values of base registers  */
+int     l1, i3;                         /* Length and rounding       */
+int     b1, b2;                         /* Base register numbers     */
 VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 int     cc;                             /* Condition code            */
@@ -996,7 +998,7 @@ int     carry;                          /* Carry indicator           */
     if (cc == 3 && regs->psw.domask)
         ARCH_DEP(program_interrupt) (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
 
-}
+} /* end DEF_INST(shift_and_round_decimal) */
 
 
 /*-------------------------------------------------------------------*/
@@ -1004,8 +1006,8 @@ int     carry;                          /* Carry indicator           */
 /*-------------------------------------------------------------------*/
 DEF_INST(subtract_decimal)
 {
-int     l1, l2;                         /* Lenght values             */
-int     b1, b2;                         /* Values of base registers  */
+int     l1, l2;                         /* Length values             */
+int     b1, b2;                         /* Base register numbers     */
 VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 int     cc;                             /* Condition code            */
@@ -1071,7 +1073,7 @@ int     sign1, sign2, sign3;            /* Sign of operands & result */
     if (cc == 3 && regs->psw.domask)
         ARCH_DEP(program_interrupt) (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
 
-}
+} /* end DEF_INST(subtract_decimal) */
 
 
 /*-------------------------------------------------------------------*/
@@ -1079,8 +1081,8 @@ int     sign1, sign2, sign3;            /* Sign of operands & result */
 /*-------------------------------------------------------------------*/
 DEF_INST(zero_and_add)
 {
-int     l1, l2;                         /* Lenght values             */
-int     b1, b2;                         /* Values of base registers  */
+int     l1, l2;                         /* Length values             */
+int     b1, b2;                         /* Base register numbers     */
 VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 int     cc;                             /* Condition code            */
@@ -1115,7 +1117,51 @@ int     sign;                           /* Sign                      */
     if (cc == 3 && regs->psw.domask)
         ARCH_DEP(program_interrupt) (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
 
-}
+} /* end DEF_INST(zero_and_add) */
+
+
+#if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+/*-------------------------------------------------------------------*/
+/* EBC0 TP    - Test Decimal                                   [RSL] */
+/*-------------------------------------------------------------------*/
+DEF_INST(test_decimal)
+{
+int     l1;                             /* Length value              */
+int     b1;                             /* Base register number      */
+VADR    effective_addr1;                /* Effective address         */
+int     i;                              /* Array subscript           */
+int     cc = 0;                         /* Condition code            */
+BYTE    pack[MAX_DECIMAL_LENGTH];       /* Packed decimal work area  */
+
+    RSL(inst, execflag, regs, l1, b1, effective_addr1);
+
+    /* Fetch the packed decimal operand into the work area */
+    ARCH_DEP(vfetchc) (pack, l1, effective_addr1, b1, regs);
+
+    /* Test each byte of the operand */
+    for (i=0; ; i++)
+    {
+        /* Test the high-order digit of the byte */
+        if ((pack[i] & 0xF0) > 0x90)
+            cc = 2;
+
+        /* Exit if this is the last byte */
+        if (i == l1) break;
+
+        /* Test the low-order digit of the byte */
+        if ((pack[i] & 0x0F) > 0x09)
+            cc = 2;
+    }
+
+    /* Test the sign in the last byte */
+    if ((pack[i] & 0x0F) < 0x0A)
+        cc |= 1;
+
+    /* Return condition code */
+    regs->psw.cc = cc;
+
+} /* end DEF_INST(test_decimal) */
+#endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
 
 
 #if !defined(_GEN_ARCH)

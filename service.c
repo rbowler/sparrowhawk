@@ -1,8 +1,8 @@
-/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2000                */
+/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 Service Processor                            */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements service processor functions                */
@@ -734,8 +734,13 @@ int             obj_type;               /* Object type               */
 SCCB_MTO_BK    *mto_bk;                 /* Message Text Object       */
 BYTE           *event_msg;              /* Message Text pointer      */
 int             event_msglen;           /* Message Text length       */
+#ifndef NO_CYGWIN_STACK_BUG
+BYTE           *message = NULL;         /* Maximum event data buffer
+                                           length plus one for \0    */
+#else
 BYTE            message[4089];          /* Maximum event data buffer
                                            length plus one for \0    */
+#endif
 static BYTE     const1_template[] = {
         0x13,0x10,                      /* MDS message unit          */
         0x00,0x25,0x13,0x11,            /* MDS routine info          */
@@ -999,7 +1004,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 #endif /*FEATURE_CHECKSUM_INSTRUCTION*/
                         ;
         sccbscp->cfg[3] = 0
-//                      | SCCB_CFG3_RESUME_PROGRAM
+#if defined(FEATURE_RESUME_PROGRAM)
+                        | SCCB_CFG3_RESUME_PROGRAM
+#endif /*defined(FEATURE_RESUME_PROGRAM)*/
 #if defined(FEATURE_PERFORM_LOCKED_OPERATION)
                         | SCCB_CFG3_PERFORM_LOCKED_OPERATION
 #endif /*defined(FEATURE_PERFORM_LOCKED_OPERATION)*/
@@ -1025,7 +1032,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 #if defined(FEATURE_LOAD_REVERSED)
                         | SCCB_CFG4_LOAD_REVERSED_FACILITY            
 #endif /*defined(FEATURE_LOAD_REVERSED)*/
-//                      | SCCB_CFG4_EXTENDED_TRANSLATION_FACILITY2   
+#if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+                        | SCCB_CFG4_EXTENDED_TRANSLATION_FACILITY2   
+#endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
 #if defined(FEATURE_STORE_SYSTEM_INFORMATION)
                         | SCCB_CFG4_STORE_SYSTEM_INFORMATION
 #endif /*FEATURE_STORE_SYSTEM_INFORMATION*/
@@ -1267,7 +1276,12 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                     /* Print line unless it is a response prompt */
                     if (!(mto_bk->ltflag[0] & SCCB_MTO_LTFLG0_PROMPT))
                     {
+#ifndef NO_CYGWIN_STACK_BUG
+                        message = malloc (4089);
+                        for (i = 0, j = 0; i < event_msglen && message; i++)
+#else
                         for (i = 0, j = 0; i < event_msglen; i++)
+#endif
                         {
                             message[j++] = isprint(ebcdic_to_ascii[event_msg[i]]) ?
                                 ebcdic_to_ascii[event_msg[i]] : 0x20;
@@ -1289,6 +1303,10 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                 (BYTE*)obj_hdr += obj_len;
             }
     
+#ifndef NO_CYGWIN_STACK_BUG
+            if(message) free(message);
+#endif
+
             /* Indicate Event Processed */
             evd_hdr->flag |= SCCB_EVD_FLAG_PROC;
 

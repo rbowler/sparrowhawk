@@ -1,4 +1,4 @@
-/* DASDPDSU.C   (c) Copyright Roger Bowler, 1999                     */
+/* DASDPDSU.C   (c) Copyright Roger Bowler, 1999-2001                */
 /*              Hercules DASD Utilities: PDS unloader                */
 
 /*-------------------------------------------------------------------*/
@@ -231,7 +231,7 @@ CIFBLK         *cif;                    /* CKD image file descriptor */
     /* Display the program identification message */
     fprintf (stderr,
             "Hercules PDS unload program %s "
-            "(c)Copyright Roger Bowler, 1999\n",
+            "(c)Copyright Roger Bowler, 1999-2001\n",
             MSTRING(VERSION));
 
     /* Check the number of arguments */

@@ -1,8 +1,8 @@
-/* HERCULES.H	(c) Copyright Roger Bowler, 1999-2000		     */
+/* HERCULES.H	(c) Copyright Roger Bowler, 1999-2001		     */
 /*		ESA/390 Emulator Header File			     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* Header file containing Hercules internal data structures	     */
@@ -106,6 +106,9 @@
 /* Macro definitions for thread functions			     */
 /*-------------------------------------------------------------------*/
 #ifndef NOTHREAD
+#ifdef WIN32
+#define HAVE_STRUCT_TIMESPEC
+#endif
 #include <pthread.h>
 #ifdef WIN32
 #undef DWORD
@@ -274,6 +277,10 @@ typedef struct _REGS {			/* Processor registers	     */
 	U32	ar[16]; 		/* Access registers	     */
 #define AR(_r)	ar[(_r)]
 	U32	fpr[32];		/* Floating point registers  */
+// #if defined(FEATURE_BINARY_FLOATING_POINT)
+        U32     fpc;                    /* IEEE Floating Point 
+                                                    Control Register */
+// #endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
 	U32	todpr;			/* TOD programmable register */
 	U16	monclass;		/* Monitor event class	     */
 	U16	cpuad;			/* CPU address for STAP      */
@@ -322,6 +329,7 @@ typedef struct _REGS {			/* Processor registers	     */
 		storstat:1,		/* 1=Stop and store status   */
 		sigpreset:1,		/* 1=SIGP cpu reset received */
 		sigpireset:1,		/* 1=SIGP initial cpu reset  */
+		panelregs:1,		/* 1=Disallow program checks */
 		instvalid:1;		/* 1=Inst field is valid     */
 	BYTE	emercpu 		/* Emergency signal flags    */
 		    [MAX_CPU_ENGINES];	/* for each CPU (1=pending)  */
@@ -473,7 +481,7 @@ typedef struct _SYSBLK {
 #define OS_OS390	0x7FF673FFF7DE7FFFULL	/* OS/390	     */
 #define OS_VSE		0x7FF673FFF7DE7FFFULL	/* VSE		     */
 #define OS_VM		0x7FFFFFFFF7DE7FFCULL	/* VM		     */
-#define OS_LINUX	0x7FFFFFFFF7DE7FD6ULL	/* Linux	     */
+#define OS_LINUX	0x7CFFFFFFF7DE7FD6ULL	/* Linux	     */
 
 /*-------------------------------------------------------------------*/
 /* Device configuration block					     */
@@ -978,17 +986,18 @@ void panel_display (void);
 /* Interception codes used by longjmp/SIE */
 #define SIE_NO_INTERCEPT	(-1)	/* Continue (after pgmint)   */
 #define SIE_HOST_INTERRUPT	(-2)	/* Host interrupt pending    */
-#define SIE_INTERCEPT_INST	(-3)	/* Instruction interception  */
-#define SIE_INTERCEPT_INSTCOMP	(-4)	/* Instr. int TS/CS/CDS      */
-#define SIE_INTERCEPT_EXTREQ	(-5)	/* External interrupt	     */
-#define SIE_INTERCEPT_IOREQ	(-6)	/* I/O interrupt	     */
-#define SIE_INTERCEPT_WAIT	(-7)	/* Wait state loaded	     */
-#define SIE_INTERCEPT_STOPREQ	(-8)	/* STOP reqeust 	     */
-#define SIE_INTERCEPT_RESTART	(-9)	/* Restart interrupt	     */
-#define SIE_INTERCEPT_MCK      (-10)	/* Machine Check interrupt   */
-#define SIE_INTERCEPT_EXT      (-11)	/* External interrupt pending*/
-#define SIE_INTERCEPT_VALIDITY (-12)	/* SIE validity check	     */
-#define SIE_INTERCEPT_PER      (-13)	/* SIE guest per event	     */
+#define SIE_HOST_PGMINT         (-3)	/* Host program interrupt    */
+#define SIE_INTERCEPT_INST	(-4)	/* Instruction interception  */
+#define SIE_INTERCEPT_INSTCOMP	(-5)	/* Instr. int TS/CS/CDS      */
+#define SIE_INTERCEPT_EXTREQ	(-6)	/* External interrupt	     */
+#define SIE_INTERCEPT_IOREQ	(-7)	/* I/O interrupt	     */
+#define SIE_INTERCEPT_WAIT	(-8)	/* Wait state loaded	     */
+#define SIE_INTERCEPT_STOPREQ	(-9)	/* STOP reqeust 	     */
+#define SIE_INTERCEPT_RESTART  (-10)	/* Restart interrupt	     */
+#define SIE_INTERCEPT_MCK      (-11)	/* Machine Check interrupt   */
+#define SIE_INTERCEPT_EXT      (-12)	/* External interrupt pending*/
+#define SIE_INTERCEPT_VALIDITY (-13)	/* SIE validity check	     */
+#define SIE_INTERCEPT_PER      (-14)	/* SIE guest per event	     */
 
 /* Architectural mode definitions */
 #define ARCH_370	0		/* S/370 mode		     */

@@ -1,4 +1,4 @@
-/* DASDISUP.C   (c) Copyright Roger Bowler, 1999                     */
+/* DASDISUP.C   (c) Copyright Roger Bowler, 1999-2001                */
 /*              Hercules DASD Utilities: IEHIOSUP                    */
 
 /*-------------------------------------------------------------------*/
@@ -607,7 +607,7 @@ int             nmem = 0;               /* Number of array entries   */
     /* Display the program identification message */
     fprintf (stdout,
             "Hercules IEHIOSUP program %s "
-            "(c)Copyright Roger Bowler, 1999\n",
+            "(c)Copyright Roger Bowler, 1999-2001\n",
             MSTRING(VERSION));
 
     /* Check the number of arguments */

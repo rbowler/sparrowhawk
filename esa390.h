@@ -1,8 +1,8 @@
 /* ESA390.H	(c) Copyright Roger Bowler, 1994-2001		     */
 /*		ESA/390 Data Areas				     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 #if !defined(_ESA390_H)
 
@@ -405,6 +405,12 @@ typedef struct _TLBE {
 /* Bit definitions for DUCT word 9 (ESAME) or word 8 (ESA/390) */
 #define DUCT_AM31       0x80000000      /* 1=31-bit, 0=24-bit address*/
 #define DUCT_IA31       0x7FFFFFFF      /* 24/31 return address      */
+
+#define TCB0_P          0x00040000      /* Bit 13 PSW Control (P)    */
+#define TCB0_R          0x00020000      /* Bit 14 GR Control (R)     */
+
+#define TRAP0_EXECUTE   0x80000000      /* TRAP is target of execute */
+#define TRAP0_TRAP4     0x40000000      /* TRAP is TRAP4             */
 
 /* Linkage stack entry descriptor structure definition */
 typedef struct _LSED {
@@ -1285,5 +1291,24 @@ typedef struct _SYSIBVMDB {	/* Virtual Machine Desc Block	*/
 	BYTE	vmcaf[4*1];	/* VM capability adjustment	*/
 	BYTE	cpid[4*4];	/* Control Program ID		*/
 	}	SYSIBVMDB;
+
+#define FPC_MASK_IMI    0x80000000
+#define FPC_MASK_IMZ    0x40000000
+#define FPC_MASK_IMO    0x20000000
+#define FPC_MASK_IMU    0x10000000
+#define FPC_MASK_IMX    0x08000000
+#define FPC_FLAG_SFI    0x00800000
+#define FPC_FLAG_SFZ    0x00400000
+#define FPC_FLAG_SFO    0x00200000
+#define FPC_FLAG_SFU    0x00100000
+#define FPC_FLAG_SFX    0x00080000
+#define FPC_DXC_I       0x00008000
+#define FPC_DXC_Z       0x00004000
+#define FPC_DXC_O       0x00002000
+#define FPC_DXC_U       0x00001000
+#define FPC_DXC_X       0x00000800
+#define FPC_DXC_Y       0x00000400
+#define FPC_RM          0x00000003
+#define FPC_RESERVED    0x070700FC
 
 #endif /*!defined(_ESA390_H)*/

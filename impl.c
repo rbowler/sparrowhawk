@@ -1,4 +1,4 @@
-/* IMPL.C       (c) Copyright Roger Bowler, 1999-2000                */
+/* IMPL.C       (c) Copyright Roger Bowler, 1999-2001                */
 /*              Hercules Initialization Module                       */
 
 /*-------------------------------------------------------------------*/
@@ -55,7 +55,7 @@ int     c;                              /* Work area for getopt      */
 
     /* Display the version identifier */
     fprintf (stderr,
-            "Hercules version %s build at %s %s\n",
+            "Hercules version %s built at %s %s\n",
             MSTRING(VERSION), __DATE__, __TIME__);
 
     /* Process the command line options */

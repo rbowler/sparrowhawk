@@ -1,4 +1,4 @@
-/* PANEL.C      (c) Copyright Roger Bowler, 1999-2000                */
+/* PANEL.C      (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 Control Panel Commands                       */
 /*                                                                   */
 /*              Modified for New Panel Display =NP=                  */
@@ -21,7 +21,7 @@
 /*      Set/reset bad frame indicator command by Jan Jaeger          */
 /*      attach/detach/define commands by Jan Jaeger                  */
 /*      Panel refresh rate triva by Reed H. Petty                    */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -30,7 +30,14 @@
 
 #include "inline.h"
 
-#undef   DISPLAY_INSTRUCTION_OPERANDS
+#define  DISPLAY_INSTRUCTION_OPERANDS
+
+/*-------------------------------------------------------------------*/
+/* Internal function prototypes                                      */
+/*-------------------------------------------------------------------*/
+static U16 virt_to_real (U32 *raptr, U32 vaddr, int arn, REGS *regs,
+                        int acctype);
+
 
 /*=NP================================================================*/
 /* Global data for new panel display                                 */
@@ -705,44 +712,6 @@ BYTE    c;                              /* Character work area       */
     return n;
 
 } /* end function display_real */
-
-/*-------------------------------------------------------------------*/
-/* Convert virtual address to real address                           */
-/*                                                                   */
-/* Input:                                                            */
-/*      vaddr   Virtual address to be translated                     */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
-/*      acctype Type of access (ACCTYPE_INSTFETCH, ACCTYPE_READ,     */
-/*              or ACCTYPE_LRA)                                      */
-/* Output:                                                           */
-/*      raptr   Points to word in which real address is returned     */
-/* Return value:                                                     */
-/*      0=translation successful, non-zero=exception code            */
-/*-------------------------------------------------------------------*/
-static U16 virt_to_real (U32 *raptr, U32 vaddr, int arn, REGS *regs,
-                        int acctype)
-{
-int     rc;                             /* Return code               */
-U64     raddr;                          /* Real address           ZZ */
-U16     xcode;                          /* Exception code            */
-int     private = 0;                    /* 1=Private address space   */
-int     protect = 0;                    /* 1=ALE or page protection  */
-int     stid;                           /* Segment table indication  */
-REGS    wrkregs = *regs;                /* Working copy of CPU regs  */
-
-    if (REAL_MODE(&wrkregs.psw) && acctype != ACCTYPE_LRA) {
-        *raptr = vaddr;
-        return 0;
-    }
-
-    rc = ARCH_DEP(translate_addr) (vaddr, arn, &wrkregs, acctype, &raddr, &xcode,
-                        &private, &protect, &stid, NULL, NULL);
-    if (rc) return xcode;
-
-    *raptr = raddr;
-    return 0;
-} /* end function virt_to_real */
 
 /*-------------------------------------------------------------------*/
 /* Display instruction                                               */
@@ -2208,6 +2177,7 @@ TID     cmdtid;                         /* Command thread identifier */
 BYTE    c;                              /* Character work area       */
 FILE   *confp;                          /* Console file pointer      */
 FILE   *logfp;                          /* Log file pointer          */
+FILE   *rcfp;                           /* RC file pointer           */
 struct termios kbattr;                  /* Terminal I/O structure    */
 BYTE    kbbuf[6];                       /* Keyboard input buffer     */
 int     kblen;                          /* Number of chars in kbbuf  */
@@ -2253,6 +2223,7 @@ struct  timeval tv;                     /* Select timeout structure  */
     /* Set up the input file descriptors */
     pipefd = sysblk.msgpiper;
     keybfd = STDIN_FILENO;
+    rcfp = fopen("hercules.rc", "r");
 
     /* Register the system cleanup exit routine */
     atexit (system_cleanup);
@@ -2310,18 +2281,35 @@ struct  timeval tv;                     /* Select timeout structure  */
         }
 
         /* If keyboard input has arrived then process it */
-        if (FD_ISSET(keybfd, &readset))
+        if (rcfp || FD_ISSET(keybfd, &readset))
         {
-            /* Read character(s) from the keyboard */
-            kblen = read (keybfd, kbbuf, sizeof(kbbuf)-1);
-            if (kblen < 0)
+            kblen = 0;
+            if (rcfp)
             {
-                fprintf (stderr,
-                        "panel: keyboard read: %s\n",
-                        strerror(errno));
-                break;
+                /* Read a character from the RC file */
+                if ((rc = fgetc (rcfp)) == EOF)
+                {
+                    fclose(rcfp);
+                    rcfp = 0;
+                } else {
+                    kbbuf[0] = rc & 0xff;
+                    kblen = 1;
+                    kbbuf[kblen] = '\0';
+                }
             }
-            kbbuf[kblen] = '\0';
+            if (kblen == 0 && FD_ISSET(keybfd, &readset))
+            {
+                /* Read character(s) from the keyboard */
+                kblen = read (keybfd, kbbuf, sizeof(kbbuf)-1);
+                if (kblen < 0)
+                {
+                    fprintf (stderr,
+                            "panel: keyboard read: %s\n",
+                            strerror(errno));
+                    break;
+                }
+                kbbuf[kblen] = '\0';
+            }
 
             /* =NP= : Intercept NP commands & process */
 
@@ -2905,8 +2893,61 @@ struct  timeval tv;                     /* Select timeout structure  */
 
 } /* end function panel_display */
 
-
 #endif /*!defined(_PANEL_C)*/
+
+
+/*-------------------------------------------------------------------*/
+/* Convert virtual address to real address                           */
+/*                                                                   */
+/* Input:                                                            */
+/*      vaddr   Virtual address to be translated                     */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/*      acctype Type of access (ACCTYPE_INSTFETCH, ACCTYPE_READ,     */
+/*              or ACCTYPE_LRA)                                      */
+/* Output:                                                           */
+/*      raptr   Points to word in which real address is returned     */
+/* Return value:                                                     */
+/*      0=translation successful, non-zero=exception code            */
+/* Note:                                                             */
+/*      To avoid unwanted alteration of the CPU register context     */
+/*      during translation (for example, the TEA will be updated     */
+/*      if a translation exception occurs), the translation is       */
+/*      performed using a temporary copy of the CPU registers.       */
+/*      The panelregs flag is set in the copy of the register        */
+/*      structure, to indicate to the translation functions          */
+/*      that ALL exception conditions are to be reported back        */
+/*      via the exception code.  The control panel must not be       */
+/*      allowed to generate a program check, since this could        */
+/*      result in a recursive interrupt condition if the             */
+/*      program_interrupt function attempts to display the           */
+/*      instruction which caused the program check.                  */
+/*-------------------------------------------------------------------*/
+static U16 ARCH_DEP(virt_to_real) (U32 *raptr, U32 vaddr, int arn,
+                                        REGS *regs, int acctype)
+{
+int     rc;                             /* Return code               */
+RADR    raddr;                          /* Real address              */
+U16     xcode;                          /* Exception code            */
+int     private = 0;                    /* 1=Private address space   */
+int     protect = 0;                    /* 1=ALE or page protection  */
+int     stid;                           /* Segment table indication  */
+REGS    wrkregs = *regs;                /* Working copy of CPU regs  */
+
+    if (REAL_MODE(&wrkregs.psw) && acctype != ACCTYPE_LRA) {
+        *raptr = vaddr;
+        return 0;
+    }
+
+    wrkregs.panelregs = 1;
+
+    rc = ARCH_DEP(translate_addr) (vaddr, arn, &wrkregs, acctype,
+                &raddr, &xcode, &private, &protect, &stid, NULL, NULL);
+    if (rc) return xcode;
+
+    *raptr = raddr;
+    return 0;
+} /* end function virt_to_real */
 
 
 #if !defined(_GEN_ARCH)
@@ -2921,5 +2962,22 @@ struct  timeval tv;                     /* Select timeout structure  */
 #undef   _GEN_ARCH
 #define  _GEN_ARCH 370
 #include "panel.c"
+
+/*-------------------------------------------------------------------*/
+/* Wrappers for architecture-dependent functions                     */
+/*-------------------------------------------------------------------*/
+static U16 virt_to_real (U32 *raptr, U32 vaddr, int arn, REGS *regs,
+                        int acctype)
+{
+    switch(sysblk.arch_mode) {
+        case ARCH_370:
+            return s370_virt_to_real(raptr,vaddr,arn,regs,acctype);
+        case ARCH_390:
+            return s390_virt_to_real(raptr,vaddr,arn,regs,acctype);
+        case ARCH_900:
+            return z900_virt_to_real(raptr,vaddr,arn,regs,acctype);
+    }
+    return 0xFFFF;
+}
 
 #endif /*!defined(_GEN_ARCH)*/

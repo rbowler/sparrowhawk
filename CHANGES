@@ -1,3 +1,18 @@
+09 Feb 2001 LFPC/SFPC/STFPC IEEE floating point instructions - Jan Jaeger
+09 Feb 2001 Fixes to CMPSC - Bernard van der Helm
+09 Feb 2001 Extended translation fac. 2 (PKA/PKU/UNPKA/UNPKU) - Roger Bowler
+09 Feb 2001 Divide logical (DL/DLR/DLG/DLGR) instructions - Vic Cross
+09 Feb 2001 Display instruction operands - Roger Bowler
+09 Feb 2001 Fix to load_psw - Roger Bowler
+08 Feb 2001 Add hercules.rc initialization file - Willem Konynenberg
+08 Feb 2001 Fix SIE host interrupt IA backup - Jan Jaeger
+08 Feb 2001 Fix SSKE RCP index error - Jan Jaeger
+08 Feb 2001 TP instruction - Roger Bowler
+06 Feb 2001 Tape datachaining patch - Brandon Hill
+06 Feb 2001 Patch to bypass Cygwin stack problem (service.c) - Greg Smith
+06 Feb 2001 Fixes for windows port - Volker Bandke
+06 Feb 2001 SSK/ISK/RRB fix for 2K storage keys - Valery Pogonchenko/Jan Jaeger
+06 Feb 2001 TRAP2 TRAP4 and RP instructions - Jan Jaeger
 04 Feb 2001 Varous fixes for panel.c - Roger Bowler
 04 Feb 2001 Interval Timer fix - Bob Abeles
 04 Feb 2001 Deconfigure CPU's in release_config() - Greg Smith

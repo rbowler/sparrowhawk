@@ -2932,6 +2932,10 @@ union
         dev->numdevchar = 64;
     }
 
+    /* Request the channel to merge data chained write CCWs into
+       a single buffer before passing data to the device handler */
+    dev->cdwmerge = 1;
+
     return 0;
 } /* end function tapedev_init_handler */
 

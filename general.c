@@ -1,10 +1,10 @@
-/* GENERAL.C    (c) Copyright Roger Bowler, 1994-2000                */
+/* GENERAL.C    (c) Copyright Roger Bowler, 1994-2001                */
 /*              ESA/390 CPU Emulator                                 */
 
 /*              (c) Copyright Peter Kuschnerus, 1999 (UPT & CFC)     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all general instructions of the            */
@@ -974,7 +974,7 @@ U32     n;                              /* 32-bit operand values     */
 
 /*-------------------------------------------------------------------*/
 /* B21A CFC   - Compare and Form Codeword                        [S] */
-/*              (c) Copyright Peter Kuschnerus, 1999                 */
+/*              (c) Copyright Peter Kuschnerus, 1999-2001            */
 /*-------------------------------------------------------------------*/
 DEF_INST(compare_and_form_codeword)
 {
@@ -5798,7 +5798,7 @@ BYTE    lbyte;                          /* Left result byte of pair  */
 
 /*-------------------------------------------------------------------*/
 /* 0102 UPT   - Update Tree                                      [E] */
-/*              (c) Copyright Peter Kuschnerus, 1999                 */
+/*              (c) Copyright Peter Kuschnerus, 1999-2001            */
 /*-------------------------------------------------------------------*/
 DEF_INST(update_tree)
 {

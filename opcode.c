@@ -1,9 +1,9 @@
 /* OPCODE.C     (c) Copyright Jan Jaeger, 2000-2001                  */
 /*              Instruction decoding functions                       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 #if !defined(_GEN_ARCH)
 
@@ -298,6 +298,11 @@
 #endif /*!defined(FEATURE_EMULATE_VM)*/
 
 
+#if !defined(FEATURE_RESUME_PROGRAM)
+ #define s370_resume_program                      s370_operation_exception
+#endif /*!defined(FEATURE_RESUME_PROGRAM)*/
+
+
 #if !defined(FEATURE_COMPRESSION)
  #define s370_compression_call                    s370_operation_exception
 #endif /*!defined(FEATURE_COMPRESSION)*/
@@ -356,6 +361,22 @@
  #define s370_convert_unicode_to_utf8             s370_operation_exception
  #define s370_convert_utf8_to_unicode             s370_operation_exception
 #endif /*!defined(FEATURE_EXTENDED_TRANSLATION)*/
+
+
+#if !defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+ #define s370_compare_logical_long_unicode        s370_operation_exception
+ #define s370_move_long_unicode                   s370_operation_exception
+ #define s370_pack_ascii                          s370_operation_exception
+ #define s370_pack_unicode                        s370_operation_exception
+ #define s370_test_decimal                        s370_operation_exception
+ #define s370_translate_one_to_one                s370_operation_exception
+ #define s370_translate_one_to_two                s370_operation_exception
+ #define s370_translate_two_to_one                s370_operation_exception
+ #define s370_translate_two_to_two                s370_operation_exception
+ #define s370_unpack_ascii                        s370_operation_exception
+ #define s370_unpack_unicode                      s370_operation_exception
+#endif /*!defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
+
 
 #if !defined(FEATURE_LOAD_REVERSED)
  #define s370_load_reversed_long_register         s370_operation_exception
@@ -646,6 +667,11 @@
 #endif /*!defined(FEATURE_EMULATE_VM)*/
 
 
+#if !defined(FEATURE_RESUME_PROGRAM)
+ #define s390_resume_program                      s390_operation_exception
+#endif /*!defined(FEATURE_RESUME_PROGRAM)*/
+
+
 #if !defined(FEATURE_COMPRESSION)
  #define s390_compression_call                    s390_operation_exception
 #endif /*!defined(FEATURE_COMPRESSION)*/
@@ -704,6 +730,21 @@
  #define s390_convert_unicode_to_utf8             s390_operation_exception
  #define s390_convert_utf8_to_unicode             s390_operation_exception
 #endif /*!defined(FEATURE_EXTENDED_TRANSLATION)*/
+
+
+#if !defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+ #define s390_compare_logical_long_unicode        s390_operation_exception
+ #define s390_move_long_unicode                   s390_operation_exception
+ #define s390_pack_ascii                          s390_operation_exception
+ #define s390_pack_unicode                        s390_operation_exception
+ #define s390_test_decimal                        s390_operation_exception
+ #define s390_translate_one_to_one                s390_operation_exception
+ #define s390_translate_one_to_two                s390_operation_exception
+ #define s390_translate_two_to_one                s390_operation_exception
+ #define s390_translate_two_to_two                s390_operation_exception
+ #define s390_unpack_ascii                        s390_operation_exception
+ #define s390_unpack_unicode                      s390_operation_exception
+#endif /*!defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
 
 
 #if !defined(FEATURE_LOAD_REVERSED)
@@ -996,6 +1037,11 @@
 #endif /*!defined(FEATURE_EMULATE_VM)*/
 
 
+#if !defined(FEATURE_RESUME_PROGRAM)
+ #define z964_resume_program                      z964_operation_exception
+#endif /*!defined(FEATURE_RESUME_PROGRAM)*/
+
+
 #if !defined(FEATURE_COMPRESSION)
  #define z964_compression_call                    z964_operation_exception
 #endif /*!defined(FEATURE_COMPRESSION)*/
@@ -1054,6 +1100,22 @@
  #define z964_convert_unicode_to_utf8             z964_operation_exception
  #define z964_convert_utf8_to_unicode             z964_operation_exception
 #endif /*!defined(FEATURE_EXTENDED_TRANSLATION)*/
+
+
+#if !defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+ #define z964_compare_logical_long_unicode        z964_operation_exception
+ #define z964_move_long_unicode                   z964_operation_exception
+ #define z964_pack_ascii                          z964_operation_exception
+ #define z964_pack_unicode                        z964_operation_exception
+ #define z964_test_decimal                        z964_operation_exception
+ #define z964_translate_one_to_one                z964_operation_exception
+ #define z964_translate_one_to_two                z964_operation_exception
+ #define z964_translate_two_to_one                z964_operation_exception
+ #define z964_translate_two_to_two                z964_operation_exception
+ #define z964_unpack_ascii                        z964_operation_exception
+ #define z964_unpack_unicode                      z964_operation_exception
+#endif /*!defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
+
 
 #if !defined(FEATURE_LOAD_REVERSED)
  #define z964_load_reversed_long_register         z964_operation_exception
@@ -1345,6 +1407,11 @@
 #endif /*!defined(FEATURE_EMULATE_VM)*/
 
 
+#if !defined(FEATURE_RESUME_PROGRAM)
+ #define z900_resume_program                      z900_operation_exception
+#endif /*!defined(FEATURE_RESUME_PROGRAM)*/
+
+
 #if !defined(FEATURE_COMPRESSION)
  #define z900_compression_call                    z900_operation_exception
 #endif /*!defined(FEATURE_COMPRESSION)*/
@@ -1403,6 +1470,21 @@
  #define z900_convert_unicode_to_utf8             z900_operation_exception
  #define z900_convert_utf8_to_unicode             z900_operation_exception
 #endif /*!defined(FEATURE_EXTENDED_TRANSLATION)*/
+
+
+#if !defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+ #define z900_compare_logical_long_unicode        z900_operation_exception
+ #define z900_move_long_unicode                   z900_operation_exception
+ #define z900_pack_ascii                          z900_operation_exception
+ #define z900_pack_unicode                        z900_operation_exception
+ #define z900_test_decimal                        z900_operation_exception
+ #define z900_translate_one_to_one                z900_operation_exception
+ #define z900_translate_one_to_two                z900_operation_exception
+ #define z900_translate_two_to_one                z900_operation_exception
+ #define z900_translate_two_to_two                z900_operation_exception
+ #define z900_unpack_ascii                        z900_operation_exception
+ #define z900_unpack_unicode                      z900_operation_exception
+#endif /*!defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
 
 
 #if !defined(FEATURE_LOAD_REVERSED)
@@ -1797,16 +1879,16 @@ zz_func opcode_table[256][GEN_MAXARCH] = {
  /*DE*/   GENx370x390x900 (edit_x_edit_and_mark),               /* ED        */
  /*DF*/   GENx370x390x900 (edit_x_edit_and_mark),               /* EDMK      */
  /*E0*/   GENx___x___x___ ,
- /*E1*/   GENx___x___x900 (dummy_instruction),                  /*!PKU       */
- /*E2*/   GENx___x___x900 (dummy_instruction),                  /*!UNPKU     */
+ /*E1*/   GENx___x___x900 (pack_unicode),                       /*!PKU       */
+ /*E2*/   GENx___x___x900 (unpack_unicode),                     /*!UNPKU     */
  /*E3*/   GENx___x___x900 (execute_e3xx),                       /*!ESAME     */
  /*E4*/   GENx___x390x___ (execute_e4xx),                       /* Vector    */
  /*E5*/   GENx370x390x900 (execute_e5xx),
  /*E6*/   GENx___x___x___ ,
  /*E7*/   GENx___x___x___ ,
  /*E8*/   GENx370x390x900 (move_inverse),                       /* MVCIN     */
- /*E9*/   GENx___x___x900 (dummy_instruction),                  /*!PKA       */
- /*EA*/   GENx___x___x900 (dummy_instruction),                  /*!UNPKA     */
+ /*E9*/   GENx___x___x900 (pack_ascii),                         /*!PKA       */
+ /*EA*/   GENx___x___x900 (unpack_ascii),                       /*!UNPKA     */
  /*EB*/   GENx___x___x900 (execute_ebxx),                       /*!ESAME     */
  /*EC*/   GENx___x___x900 (execute_ecxx),                       /*!ESAME     */
  /*ED*/   GENx___x390x900 (execute_edxx),                       /* Ext float */
@@ -2086,7 +2168,7 @@ zz_func opcode_01xx[256][GEN_MAXARCH] = {
  /*01FC*/ GENx___x___x___ ,
  /*01FD*/ GENx___x___x___ ,
  /*01FE*/ GENx___x___x___ ,
- /*01FF*/ GENx___x___x___  };
+ /*01FF*/ GENx___x390x900 (trap2) };                            /* TRAP2     */
 
 
 // #if defined(FEATURE_ESAME)
@@ -2512,7 +2594,7 @@ zz_func opcode_b2xx[256][GEN_MAXARCH] = {
  /*B274*/ GENx___x___x___ ,
  /*B275*/ GENx___x___x___ ,
  /*B276*/ GENx___x___x900 (dummy_instruction),                  /*!XSCH      */
- /*B277*/ GENx___x___x___ ,
+ /*B277*/ GENx___x390x900 (resume_program),                     /* RP        */
  /*B278*/ GENx___x390x900 (store_clock_extended),               /* STCKE     */
  /*B279*/ GENx___x390x900 (set_address_space_control_x),        /* SACF      */
  /*B27A*/ GENx___x390x900 (ses_opcode_B27A),                    /* Sysplex   */
@@ -2549,8 +2631,8 @@ zz_func opcode_b2xx[256][GEN_MAXARCH] = {
  /*B299*/ GENx___x___x___ ,
  /*B29A*/ GENx___x___x___ ,
  /*B29B*/ GENx___x___x___ ,
- /*B29C*/ GENx___x___x___ ,
- /*B29D*/ GENx___x___x___ ,
+ /*B29C*/ GENx___x___x900 (store_floating_point_control_register), /* STFPC  */
+ /*B29D*/ GENx___x___x900 (load_floating_point_control_register),  /* LFPC   */
  /*B29E*/ GENx___x___x___ ,
  /*B29F*/ GENx___x___x___ ,
  /*B2A0*/ GENx___x___x___ ,
@@ -2648,7 +2730,7 @@ zz_func opcode_b2xx[256][GEN_MAXARCH] = {
  /*B2FC*/ GENx___x___x___ ,
  /*B2FD*/ GENx___x___x___ ,
  /*B2FE*/ GENx___x___x___ ,
- /*B2FF*/ GENx___x___x___  };
+ /*B2FF*/ GENx___x390x900 (trap4) };                            /* TRAP4     */
 
 
 // #if defined(FEATURE_BASIC_FP_EXTENSIONS)
@@ -2786,7 +2868,7 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B381*/ GENx___x___x___ ,
  /*B382*/ GENx___x___x___ ,
  /*B383*/ GENx___x___x___ ,
- /*B384*/ GENx___x___x___ ,
+ /*B384*/ GENx___x___x900 (set_floating_point_control_register), /* SFPC     */
  /*B385*/ GENx___x___x___ ,
  /*B386*/ GENx___x___x___ ,
  /*B387*/ GENx___x___x___ ,
@@ -3051,7 +3133,7 @@ zz_func opcode_b9xx[256][GEN_MAXARCH] = {
  /*B984*/ GENx___x___x___ ,
  /*B985*/ GENx___x___x___ ,
  /*B986*/ GENx___x___x900 (dummy_instruction),                  /*!MLGR      */
- /*B987*/ GENx___x___x900 (dummy_instruction),                  /*!DLGR      */
+ /*B987*/ GENx___x___x900 (divide_logical_long_register),       /*!DLGR      */
  /*B988*/ GENx___x___x900 (add_logical_carry_long_register),    /*!ALCGR     */
  /*B989*/ GENx___x___x900 (subtract_logical_borrow_long_register), /*!SLBGR  */
  /*B98A*/ GENx___x___x___ ,
@@ -3067,7 +3149,7 @@ zz_func opcode_b9xx[256][GEN_MAXARCH] = {
  /*B994*/ GENx___x___x___ ,
  /*B995*/ GENx___x___x___ ,
  /*B996*/ GENx___x___x900 (dummy_instruction),                  /*!MLR       */
- /*B997*/ GENx___x___x900 (dummy_instruction),                  /*!DLR       */
+ /*B997*/ GENx___x___x900 (divide_logical_register),            /*!DLR       */
  /*B998*/ GENx___x___x900 (add_logical_carry_register),         /*!ALCR      */
  /*B999*/ GENx___x___x900 (subtract_logical_borrow_register),   /*!SLBR      */
  /*B99A*/ GENx___x___x___ ,
@@ -3335,7 +3417,7 @@ zz_func opcode_e3xx[256][GEN_MAXARCH] = {
  /*E384*/ GENx___x___x___ ,
  /*E385*/ GENx___x___x___ ,
  /*E386*/ GENx___x___x900 (dummy_instruction),                  /*!MLG       */
- /*E387*/ GENx___x___x900 (dummy_instruction),                  /*!DLG       */
+ /*E387*/ GENx___x___x900 (divide_logical_long),                /*!DLG       */
  /*E388*/ GENx___x___x900 (add_logical_carry_long),             /*!ALCG      */
  /*E389*/ GENx___x___x900 (subtract_logical_borrow_long),       /*!SLBG      */
  /*E38A*/ GENx___x___x___ ,
@@ -3351,7 +3433,7 @@ zz_func opcode_e3xx[256][GEN_MAXARCH] = {
  /*E394*/ GENx___x___x___ ,
  /*E395*/ GENx___x___x___ ,
  /*E396*/ GENx___x___x900 (dummy_instruction),                  /*!ML        */
- /*E397*/ GENx___x___x900 (dummy_instruction),                  /*!DL        */
+ /*E397*/ GENx___x___x900 (divide_logical),                     /*!DL        */
  /*E398*/ GENx___x___x900 (add_logical_carry),                  /*!ALC       */
  /*E399*/ GENx___x___x900 (subtract_logical_borrow),            /*!SLB       */
  /*E39A*/ GENx___x___x___ ,
@@ -3914,7 +3996,7 @@ zz_func opcode_ebxx[256][GEN_MAXARCH] = {
  /*EBBD*/ GENx___x___x___ ,
  /*EBBE*/ GENx___x___x___ ,
  /*EBBF*/ GENx___x___x___ ,
- /*EBC0*/ GENx___x___x900 (dummy_instruction),                  /*!TP        */
+ /*EBC0*/ GENx___x___x900 (test_decimal),                       /*!TP        */
  /*EBC1*/ GENx___x___x___ ,
  /*EBC2*/ GENx___x___x___ ,
  /*EBC3*/ GENx___x___x___ ,

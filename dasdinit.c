@@ -1,4 +1,4 @@
-/* DASDINIT.C   (c) Copyright Roger Bowler, 1999-2000                */
+/* DASDINIT.C   (c) Copyright Roger Bowler, 1999-2001                */
 /*              Hercules DASD Utilities: DASD image builder          */
 
 /*-------------------------------------------------------------------*/
@@ -502,7 +502,7 @@ BYTE    c;                              /* Character work area       */
     /* Display the program identification message */
     fprintf (stderr,
             "Hercules DASD image file creation program %s "
-            "(c)Copyright Roger Bowler, 1999\n",
+            "(c)Copyright Roger Bowler, 1999-2001\n",
             MSTRING(VERSION));
 
     /* Check the number of arguments */

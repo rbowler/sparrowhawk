@@ -52,10 +52,418 @@ static inline int sub_signed_long(U64 *result, U64 op1, U64 op2)
                                              (S64)*result < 0 ? 1 :
                                              (S64)*result > 0 ? 2 : 0;
 }
+
+static inline int div_logical_long
+                  (U64 *rem, U64 *quot, U64 high, U64 lo, U64 d)
+{
+    int i;
+
+    *quot = 0;
+    if (high >= d) return(1);
+    for (i = 0; i < 64; i++)
+    {
+      high = (high << 1) | (lo >> 63);
+      lo = (lo << 1);
+      *quot <<= 1;
+      if (high >= d)
+      {
+        *quot += 1;
+        high -= d;
+      }
+    }
+    *rem = high;
+    return 0;
+}
+
 #endif /*!defined(_LONG_MATH)*/
 
 
+// #if defined(FEATURE_BINARY_FLOATING_POINT)
+/*-------------------------------------------------------------------*/
+/* B29C STFPC - Store Floating Point Control register            [S] */
+/*-------------------------------------------------------------------*/
+DEF_INST(store_floating_point_control_register)
+{
+int     b2;                             /* Base of effective addr    */
+VADR    effective_addr2;                /* Effective address         */
+
+    S(inst, execflag, regs, b2, effective_addr2);
+
+    /* Store register contents at operand address */
+    ARCH_DEP(vstore4) ( regs->fpc, effective_addr2, b2, regs );
+}
+
+
+/*-------------------------------------------------------------------*/
+/* B29D LFPC  - Load Floating Point Control register             [S] */
+/*-------------------------------------------------------------------*/
+DEF_INST(load_floating_point_control_register)
+{
+int     b2;                             /* Base of effective addr    */
+VADR    effective_addr2;                /* Effective address         */
+U32     tmp_fpc;
+
+    S(inst, execflag, regs, b2, effective_addr2);
+
+    /* Load second operand from operand address */
+    tmp_fpc = ARCH_DEP(vfetch4) (effective_addr2, b2, regs);
+
+    if(tmp_fpc & FPC_RESERVED)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+    else
+        regs->fpc = tmp_fpc;
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* B384 SFPC  - Set Floating Point Control register            [RRE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(set_floating_point_control_register)
+{
+int     r1, unused;                     /* Values of R fields        */
+
+    RRE(inst, execflag, regs, r1, unused);
+
+    if(regs->GR_L(r1) & FPC_RESERVED)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+    else
+        regs->fpc = regs->GR_L(r1);
+
+}
+// #endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
+
+
+#if defined(FEATURE_LINKAGE_STACK)
+/*-------------------------------------------------------------------*/
+/* 01FF TRAP2 - Trap                                             [E] */
+/*-------------------------------------------------------------------*/
+DEF_INST(trap2)
+{
+    E(inst, execflag, regs);
+
+    ARCH_DEP(trap_x) (0, execflag, regs, 0);
+}
+
+
+/*-------------------------------------------------------------------*/
+/* B2FF TRAP4 - Trap                                             [S] */
+/*-------------------------------------------------------------------*/
+DEF_INST(trap4)
+{
+int     b2;                             /* Base of effective addr    */
+VADR    effective_addr2;                /* Effective address         */
+
+    S(inst, execflag, regs, b2, effective_addr2);
+
+    ARCH_DEP(trap_x) (1, execflag, regs, effective_addr2);
+}
+#endif /*defined(FEATURE_LINKAGE_STACK)*/
+
+
+#if defined(FEATURE_RESUME_PROGRAM)
+/*-------------------------------------------------------------------*/
+/* B277 RP    - Resume Program                                   [S] */
+/*-------------------------------------------------------------------*/
+DEF_INST(resume_program)
+{
+int     b2;                             /* Base of effective addr    */
+VADR    effective_addr2;                /* Effective address         */
+VADR    pl_addr;                        /* Address of parmlist       */
+U16     flags;                          /* Flags in parmfield        */
+U16     psw_offset;                     /* Offset to new PSW         */
+U16     ar_offset;                      /* Offset to new AR          */
+U16     gr_offset;                      /* Offset to new GR          */
+FWORD   ar;                             /* Copy of new AR            */
 #if defined(FEATURE_ESAME)
+U16     grd_offset;                     /* Offset of disjoint GR_H   */
+BYTE    psw[16];                        /* Copy of new PSW           */
+DWORD   gr;                             /* Copy of new GR            */
+#else /*!defined(FEATURE_ESAME)*/
+BYTE    psw[8];                         /* Copy of new PSW           */
+FWORD   gr;                             /* Copy of new GR            */
+#endif /*!defined(FEATURE_ESAME)*/
+PSW     save_psw;                       /* Saved copy of current PSW */
+RADR    abs;                            /* Absolute address of parm  */
+int     i;
+
+    S(inst, execflag, regs, b2, effective_addr2);
+
+    /* Determine the address of the parameter list */
+    pl_addr = !execflag ? regs->psw.IA : regs->ET + 4;
+    
+    /* Fetch flags from the instruction address space */
+    abs = LOGICAL_TO_ABS (pl_addr, 0, regs,
+            ACCTYPE_INSTFETCH, regs->psw.pkey);
+    FETCH_HW(flags, sysblk.mainstor + abs);
+
+    /* Bits 0-12 must be zero */
+    if(flags & 0xFFF8)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /* Fetch the offset to the new psw */
+    abs = LOGICAL_TO_ABS (pl_addr + 2, 0, regs,
+            ACCTYPE_INSTFETCH, regs->psw.pkey);
+    FETCH_HW(psw_offset, sysblk.mainstor + abs);
+
+    /* Fetch the offset to the new ar */
+    abs = LOGICAL_TO_ABS (pl_addr + 4, 0, regs,
+            ACCTYPE_INSTFETCH, regs->psw.pkey);
+    FETCH_HW(ar_offset, sysblk.mainstor + abs);
+
+    /* Fetch the offset to the new gr */
+    abs = LOGICAL_TO_ABS (pl_addr + 6, 0, regs,
+            ACCTYPE_INSTFETCH, regs->psw.pkey);
+    FETCH_HW(gr_offset, sysblk.mainstor + abs);
+
+#if defined(FEATURE_ESAME)
+    /* Fetch the offset to the new disjoint gr_h */
+    if((flags & 0x0003) == 0x0003)
+    {
+        abs = LOGICAL_TO_ABS (pl_addr + 8, 0, regs,
+            ACCTYPE_INSTFETCH, regs->psw.pkey);
+        FETCH_HW(grd_offset, sysblk.mainstor + abs);
+    }
+#endif /*defined(FEATURE_ESAME)*/
+
+    /* Fetch the PSW from the instruction address space */
+#if defined(FEATURE_ESAME)
+    for(i = 0; i < (flags & 0x0004) ? 16 : 8; i++)
+#else /*!defined(FEATURE_ESAME)*/
+    for(i = 0; i < 8; i++)
+#endif /*defined(FEATURE_ESAME)*/
+    {
+        abs = LOGICAL_TO_ABS (pl_addr - 2 + psw_offset + i, 0, regs,
+            ACCTYPE_INSTFETCH, regs->psw.pkey);
+        psw[i] = sysblk.mainstor[abs];
+    }
+
+    /* Fetch the new ar from the instruction address space */
+    for(i = 0; i < 4; i++)
+    {
+        abs = LOGICAL_TO_ABS (pl_addr - 2 + ar_offset + i, 0, regs,
+            ACCTYPE_INSTFETCH, regs->psw.pkey);
+        ar[i] = sysblk.mainstor[abs];
+    }
+
+    /* Fetch the new gr from the instruction address space */
+#if defined(FEATURE_ESAME)
+    if(flags & 0x0002)
+    {
+        if(flags & 0x0001)
+        {
+            /* Fetch GR disjoint */
+            for(i = 0; i < 4; i++)
+            {
+                abs = LOGICAL_TO_ABS (pl_addr - 2 + gr_offset + i, 0, regs,
+                    ACCTYPE_INSTFETCH, regs->psw.pkey);
+                gr[i+4] = sysblk.mainstor[abs];
+            }
+            for(i = 0; i < 4; i++)
+            {
+                abs = LOGICAL_TO_ABS (pl_addr - 2 + grd_offset + i, 0, regs,
+                    ACCTYPE_INSTFETCH, regs->psw.pkey);
+                gr[i] = sysblk.mainstor[abs];
+            }
+        }
+        else
+        {
+            for(i = 0; i < 8; i++)
+            {
+                abs = LOGICAL_TO_ABS (pl_addr - 2 + gr_offset + i, 0, regs,
+                    ACCTYPE_INSTFETCH, regs->psw.pkey);
+                gr[i] = sysblk.mainstor[abs];
+            }
+        }
+    }
+    else
+#endif /*defined(FEATURE_ESAME)*/
+    {
+        for(i = 0; i < 4; i++)
+        {
+            abs = LOGICAL_TO_ABS (pl_addr - 2 + gr_offset + i, 0, regs,
+                ACCTYPE_INSTFETCH, regs->psw.pkey);
+            gr[i] = sysblk.mainstor[abs];
+        }
+    }
+
+    /* Save current PSW */
+    save_psw = regs->psw;
+
+    /* Specification exception when setting home 
+       space mode in problem state */
+    if(regs->psw.prob && (psw[2] & 0xC0))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    if( ARCH_DEP(load_psw) (regs, psw) )
+    {
+        /* restore the psw */
+        regs->psw = save_psw;
+        /* And generate a program interrupt */
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+    }
+
+    regs->psw.prob = save_psw.prob;
+    regs->psw.wait = save_psw.wait;
+    regs->psw.mach = save_psw.mach;
+    regs->psw.sysmask = save_psw.sysmask;
+    regs->psw.pkey = save_psw.pkey;
+
+    /* Update access register b2 */
+    FETCH_FW(regs->AR(b2), ar);
+
+    /* Update general register b2 */
+#if defined(FEATURE_ESAME)
+    if(flags & 0x0002)
+        FETCH_DW(regs->GR_G(b2), gr);
+    else
+#endif /*defined(FEATURE_ESAME)*/
+        FETCH_FW(regs->GR_L(b2), gr);
+
+    /* Space switch event when switching into or
+       out of home space mode */
+    if(HOME_SPACE_MODE(&(regs->psw)) ^ HOME_SPACE_MODE(&save_psw))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPACE_SWITCH_EVENT);
+}
+#endif /*defined(FEATURE_RESUME_PROGRAM)*/
+
+
+#if defined(FEATURE_ESAME)
+/*-------------------------------------------------------------------*/
+/* E397 DL    - Divide Logical                                 [RXE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(divide_logical)
+{
+int     r1;                             /* Values of R fields        */
+int     b2;                             /* Base of effective addr    */
+VADR    effective_addr2;                /* Effective Address         */
+U32     d; 
+U64     n;
+
+    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+
+    ODD_CHECK(r1, regs);
+
+    /* Load second operand from operand address */
+    d = ARCH_DEP(vfetch4) (effective_addr2, b2, regs);
+
+    n = regs->GR_L(r1); 
+    n = (n << 32) | (U32)regs->GR_L(r1 + 1); 
+
+    if (d == 0
+      || (d == 1LL &&
+         n == 0x8000000000000000ULL))
+        ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
+
+    /* Divide unsigned registers */
+    regs->GR_L(r1) = n % d;
+    regs->GR_L(r1 + 1) = n / d;
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* E387 DLG   - Divide Logical Long                            [RXE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(divide_logical_long)
+{
+int     r1;                             /* Values of R fields        */
+int     b2;                             /* Base of effective addr    */
+VADR    effective_addr2;                /* Effective Address         */
+U64     d, r, q;
+
+    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+
+    ODD_CHECK(r1, regs);
+
+    /* Load second operand from operand address */
+    d = ARCH_DEP(vfetch8) (effective_addr2, b2, regs);
+
+    if (regs->GR_G(r1) == 0)            /* check for the simple case */
+    {
+      if (d == 0)
+          ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
+
+      /* Divide signed registers */
+      regs->GR_G(r1) = regs->GR_G(r1 + 1) % d;
+      regs->GR_G(r1 + 1) = regs->GR_G(r1 + 1) / d;
+    }
+    else
+    {
+      if (div_logical_long(&r, &q, regs->GR_G(r1), regs->GR_G(r1 + 1), d) )
+          ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
+      else 
+      {
+        regs->GR_G(r1) = r;
+        regs->GR_G(r1 + 1) = q;
+      }
+
+    }
+}
+
+
+/*-------------------------------------------------------------------*/
+/* B997 DLR   - Divide Logical Register                        [RRE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(divide_logical_register)
+{
+int     r1, r2;                         /* Values of R fields        */
+U64     n;
+
+    RRE(inst, execflag, regs, r1, r2);
+
+    ODD_CHECK(r1, regs);
+
+    n = regs->GR_L(r1);
+    n = (n << 32) | (U32)regs->GR_L(r1 + 1);
+
+    if(regs->GR_G(r2) == 0
+      || (regs->GR_L(r2) == 1L &&
+          n == 0x8000000000000000UL))
+        ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
+
+    /* Divide signed registers */
+    regs->GR_L(r1) = n % regs->GR_L(r2);
+    regs->GR_L(r1 + 1) = n / regs->GR_L(r2);
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* B987 DLGR  - Divide Logical Long Register                   [RRE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(divide_logical_long_register)
+{
+int     r1, r2;                         /* Values of R fields        */
+U64     r, q;
+
+    RRE(inst, execflag, regs, r1, r2);
+
+    ODD_CHECK(r1, regs);
+
+    if (regs->GR_G(r1) == 0)            /* check for the simple case */
+    {
+      if(regs->GR_G(r2) == 0)
+          ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
+
+      /* Divide signed registers */
+      regs->GR_G(r1) = regs->GR_G(r1 + 1) % regs->GR_G(r2);
+      regs->GR_G(r1 + 1) = regs->GR_G(r1 + 1) / regs->GR_G(r2);
+    }
+    else
+    {
+      if (div_logical_long(&r, &q, regs->GR_G(r1), regs->GR_G(r1 + 1),
+                           regs->GR_G(r2) ) )
+          ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
+      else 
+      {
+        regs->GR_G(r1) = r;
+        regs->GR_G(r1 + 1) = q;
+      }
+    }
+}
+
+
 /*-------------------------------------------------------------------*/
 /* B988 ALCGR - Add Logical with Carry Long Register           [RRE] */
 /*-------------------------------------------------------------------*/
@@ -1538,7 +1946,6 @@ U32     n;                              /* 32-bit operand values     */
 
 
 /*-------------------------------------------------------------------*/
-/*-------------------------------------------------------------------*/
 /* E309 SG    - Subtract Long                                  [RXE] */
 /*-------------------------------------------------------------------*/
 DEF_INST(subtract_long)
@@ -1718,9 +2125,9 @@ int     r1, r2;                         /* Values of R fields        */
     RRE(inst, execflag, regs, r1, r2);
 
     /* Load negative value of second operand and set cc */
-    (S64)regs->GR_G(r1) = (S64)regs->GR_L(r2) > 0 ?
-                            -((S64)regs->GR_L(r2)) :
-                            (S64)regs->GR_L(r2);
+    (S64)regs->GR_G(r1) = (S32)regs->GR_L(r2) > 0 ?
+                            -((S32)regs->GR_L(r2)) :
+                            (S32)regs->GR_L(r2);
 
     regs->psw.cc = (S64)regs->GR_G(r1) == 0 ? 0 : 1;
 }
@@ -1797,7 +2204,7 @@ int     r1, r2;                         /* Values of R fields        */
     RRE(inst, execflag, regs, r1, r2);
 
     /* Load complement of second operand and set condition code */
-    (S64)regs->GR_G(r1) = -((S64)regs->GR_L(r2));
+    (S64)regs->GR_G(r1) = -((S32)regs->GR_L(r2));
 
     regs->psw.cc = (S64)regs->GR_G(r1) < 0 ? 1 :
                    (S64)regs->GR_G(r1) > 0 ? 2 : 0;
@@ -1997,12 +2404,12 @@ U64     n;                              /* Integer work areas        */
 
     RSE(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
-    /* Use rightmost six bits of operand address as shift count */
-    n = effective_addr2 & 0x3F;
+    /* Use rightmost five bits of operand address as shift count */
+    n = effective_addr2 & 0x1F;
 
     /* Rotate and copy contents of r3 to r1 */
     regs->GR_L(r1) = regs->GR_L(r3) << n
-                   | regs->GR_L(r3) >> (64 - n);
+                   | regs->GR_L(r3) >> (32 - n);
 
 }
 
@@ -2440,7 +2847,7 @@ int     r1, r2;                         /* Values of R fields        */
 
 
 /*-------------------------------------------------------------------*/
-/* B91A ALGFR - Add Logical Long Fullword Register    1         [RRE] */
+/* B91A ALGFR - Add Logical Long Fullword Register             [RRE] */
 /*-------------------------------------------------------------------*/
 DEF_INST(add_logical_long_fullword_register)
 {
@@ -3180,7 +3587,7 @@ VADR    effective_addr2;                /* Effective address         */
     RXE(inst, execflag, regs, r1, b2, effective_addr2);
 
     /* Load R1 register from second operand */
-    (S16)regs->GR_LHL(r1) = (S16)bswap_16(ARCH_DEP(vfetch2) ( effective_addr2, b2, regs ));
+    regs->GR_LHL(r1) = bswap_16(ARCH_DEP(vfetch2) ( effective_addr2, b2, regs ));
 }
 #endif /*defined(FEATURE_ESAME)*/
 
@@ -3236,6 +3643,192 @@ VADR    effective_addr2;                /* Effective address         */
 }
 #endif /*defined(FEATURE_ESAME)*/
 #endif /*defined(FEATURE_LOAD_REVERSED)*/
+
+
+#if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+/*-------------------------------------------------------------------*/
+/* E9   PKA   - Pack ASCII                                      [SS] */
+/*-------------------------------------------------------------------*/
+DEF_INST(pack_ascii)
+{
+int     len;                            /* Second operand length     */
+int     b1, b2;                         /* Base registers            */
+VADR    addr1, addr2;                   /* Effective addresses       */
+BYTE    source[33];                     /* 32 digits + implied sign  */
+BYTE    result[16];                     /* 31-digit packed result    */
+int     i, j;                           /* Array subscripts          */
+
+    SS_L(inst, execflag, regs, len, b1, addr1, b2, addr2);
+
+    /* Program check if operand length (len+1) exceeds 32 bytes */
+    if (len > 31)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /* Fetch the second operand and right justify */
+    memset (source, 0, sizeof(source));
+    ARCH_DEP(vfetchc) ( source+31-len, len, addr2, b2, regs );
+
+    /* Append an implied plus sign */
+    source[32] = 0x0C;
+
+    /* Pack the rightmost 31 digits and sign into the result */
+    for (i = 1, j = 0; j < 16; i += 2, j++)
+    {
+        result[j] = (source[i] << 4) | (source[i+1] & 0x0F);
+    }
+
+    /* Store 16-byte packed decimal result at operand address */
+    ARCH_DEP(vstorec) ( result, 15, addr1, b1, regs );
+
+} /* end DEF_INST(pack_ascii) */
+#endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
+
+
+#if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+/*-------------------------------------------------------------------*/
+/* E1   PKU   - Pack Unicode                                    [SS] */
+/*-------------------------------------------------------------------*/
+DEF_INST(pack_unicode)
+{
+int     len;                            /* Second operand length     */
+int     b1, b2;                         /* Base registers            */
+VADR    addr1, addr2;                   /* Effective addresses       */
+BYTE    source[66];                     /* 32 digits + implied sign  */
+BYTE    result[16];                     /* 31-digit packed result    */
+int     i, j;                           /* Array subscripts          */
+
+    SS_L(inst, execflag, regs, len, b1, addr1, b2, addr2);
+
+    /* Program check if byte count (len+1) exceeds 64 or is odd */
+    if (len > 63 || (len & 1) == 0)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /* Fetch the second operand and right justify */
+    memset (source, 0, sizeof(source));
+    ARCH_DEP(vfetchc) ( source+63-len, len, addr2, b2, regs );
+
+    /* Append an implied plus sign */
+    source[64] = 0x00;
+    source[65] = 0x0C;
+
+    /* Pack the rightmost 31 digits and sign into the result */
+    for (i = 2, j = 0; j < 16; i += 4, j++)
+    {
+        result[j] = (source[i+1] << 4) | (source[i+3] & 0x0F);
+    }
+
+    /* Store 16-byte packed decimal result at operand address */
+    ARCH_DEP(vstorec) ( result, 15, addr1, b1, regs );
+
+} /* end DEF_INST(pack_unicode) */
+#endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
+
+
+#if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+/*-------------------------------------------------------------------*/
+/* EA   UNPKA - Unpack ASCII                                    [SS] */
+/*-------------------------------------------------------------------*/
+DEF_INST(unpack_ascii)
+{
+int     len;                            /* First operand length      */
+int     b1, b2;                         /* Base registers            */
+VADR    addr1, addr2;                   /* Effective addresses       */
+BYTE    result[32];                     /* 32-digit result           */
+BYTE    source[16];                     /* 31-digit packed operand   */
+int     i, j;                           /* Array subscripts          */
+int     cc;                             /* Condition code            */
+
+    SS_L(inst, execflag, regs, len, b1, addr1, b2, addr2);
+
+    /* Program check if operand length (len+1) exceeds 32 bytes */
+    if (len > 31)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /* Fetch the 16-byte second operand */
+    ARCH_DEP(vfetchc) ( source, 15, addr2, b2, regs );
+
+    /* Set high-order result byte to ASCII zero */
+    result[0] = 0x30;
+
+    /* Unpack remaining 31 digits into the result */
+    for (j = 1, i = 0; ; i++)
+    {
+        result[j++] = (source[i] >> 4) | 0x30;
+        if (i == 15) break;
+        result[j++] = (source[i] & 0x0F) | 0x30;
+    }
+
+    /* Store rightmost digits of result at first operand address */
+    ARCH_DEP(vstorec) ( result+31-len, len, addr1, b1, regs );
+
+    /* Set the condition code according to the sign */
+    switch (source[15] & 0x0F) {
+    case 0x0A: case 0x0C: case 0x0E: case 0x0F:
+        cc = 0; break;
+    case 0x0B: case 0x0D:
+        cc = 1; break;
+    default:
+        cc = 3;
+    } /* end switch */
+    regs->psw.cc = cc;
+
+} /* end DEF_INST(unpack_ascii) */
+#endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
+
+
+#if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+/*-------------------------------------------------------------------*/
+/* E2   UNPKU - Unpack Unicode                                  [SS] */
+/*-------------------------------------------------------------------*/
+DEF_INST(unpack_unicode)
+{
+int     len;                            /* First operand length      */
+int     b1, b2;                         /* Base registers            */
+VADR    addr1, addr2;                   /* Effective addresses       */
+BYTE    result[64];                     /* 32-digit result           */
+BYTE    source[16];                     /* 31-digit packed operand   */
+int     i, j;                           /* Array subscripts          */
+int     cc;                             /* Condition code            */
+
+    SS_L(inst, execflag, regs, len, b1, addr1, b2, addr2);
+
+    /* Program check if byte count (len+1) exceeds 64 or is odd */
+    if (len > 63 || (len & 1) == 0)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /* Fetch the 16-byte second operand */
+    ARCH_DEP(vfetchc) ( source, 15, addr2, b2, regs );
+
+    /* Set high-order result pair to Unicode zero */
+    result[0] = 0x00;
+    result[1] = 0x30;
+
+    /* Unpack remaining 31 digits into the result */
+    for (j = 2, i = 0; ; i++)
+    {
+        result[j++] = 0x00;
+        result[j++] = (source[i] >> 4) | 0x30;
+        if (i == 15) break;
+        result[j++] = 0x00;
+        result[j++] = (source[i] & 0x0F) | 0x30;
+    }
+
+    /* Store rightmost digits of result at first operand address */
+    ARCH_DEP(vstorec) ( result+63-len, len, addr1, b1, regs );
+
+    /* Set the condition code according to the sign */
+    switch (source[15] & 0x0F) {
+    case 0x0A: case 0x0C: case 0x0E: case 0x0F:
+        cc = 0; break;
+    case 0x0B: case 0x0D:
+        cc = 1; break;
+    default:
+        cc = 3;
+    } /* end switch */
+    regs->psw.cc = cc;
+
+} /* end DEF_INST(unpack_unicode) */
+#endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
 
 
 #if !defined(_GEN_ARCH)
