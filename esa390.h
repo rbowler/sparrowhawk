@@ -151,7 +151,7 @@ typedef struct _REGS {                  /* Processor registers       */
 #define CR14_AFTO       0x0007FFFF      /* ASN first table origin    */
 
 /* Bit definitions for control register 15 */
-#define CR15_LSEA       0x7FFFFFF0      /* Linkage stack entry addr  */
+#define CR15_LSEA       0x7FFFFFF8      /* Linkage stack entry addr  */
 
 /* Linkage table designation bit definitions */
 #define LTD_SSLINK      0x80000000      /* Subsystem-Linkage control */
@@ -240,6 +240,41 @@ typedef struct _REGS {                  /* Processor registers       */
 /* Authority table entry bit definitions */
 #define ATE_PRIMARY     0x80            /* Primary authority bit     */
 #define ATE_SECONDARY   0x40            /* Secondary authority bit   */
+
+/* Linkage stack entry descriptor structure definition */
+typedef struct _LSED {
+        BYTE    uet;                    /* U-bit and entry type      */
+        BYTE    si;                     /* Section identification    */
+        HWORD   rfs;                    /* Remaining free space      */
+        HWORD   nes;                    /* Next entry size           */
+        HWORD   resv;                   /* Reserved bits - must be 0 */
+    } LSED;
+
+/* Linkage stack entry descriptor bit definitions */
+#define LSED_UET_U      0x80            /* Unstack suppression bit   */
+#define LSED_UET_ET     0x7F            /* Entry type...             */
+#define LSED_UET_HDR    0x01            /* ...header entry           */
+#define LSED_UET_TLR    0x02            /* ...trailer entry          */
+#define LSED_UET_BAKR   0x04            /* ...branch state entry     */
+#define LSED_UET_PC     0x05            /* ...call state entry       */
+
+/* Linkage stack header entry bit definitions */
+/* LSHE word 0 is reserved for control program use */
+#define LSHE1_BVALID    0x80000000      /* Backward address is valid */
+#define LSHE1_BSEA      0x7FFFFFF8      /* Backward stack entry addr */
+#define LSHE1_RESV      0x00000007      /* Reserved bits - must be 0 */
+/* LSHE words 2 and 3 contain a linkage stack entry descriptor */
+
+/* Linkage stack trailer entry bit definitions */
+/* LSTE word 0 is reserved for control program use */
+#define LSTE1_FVALID    0x80000000      /* Forward address is valid  */
+#define LSTE1_FSHA      0x7FFFFFF8      /* Forward section hdr addr  */
+#define LSTE1_RESV      0x00000007      /* Reserved bits - must be 0 */
+/* LSTE words 2 and 3 contain a linkage stack entry descriptor */
+
+/* Linkage stack state entry definitions */
+#define LSSE_SIZE       168             /* Size of linkage stack state
+                                           entry (incl. descriptor)  */
 
 /* SIGP order codes */
 #define SIGP_SENSE      0x01            /* Sense                     */

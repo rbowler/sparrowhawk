@@ -564,7 +564,7 @@ void purge_alb (REGS *regs)
 /*              treated as containing ALET value 0)                  */
 /*      regs    Pointer to the CPU register context                  */
 /*      acctype Type of access requested: READ, WRITE, INSTFETCH,    */
-/*              LRA, or TPROT                                        */
+/*              LRA, IVSK, TPROT, or STACK                           */
 /*      raddr   Pointer to field to receive real address             */
 /*      xcode   Pointer to field to receive exception code           */
 /*      priv    Pointer to field to receive private indicator        */
@@ -620,6 +620,8 @@ TLBE   *tlbp;                           /* -> TLB entry              */
     if (acctype == ACCTYPE_INSTFETCH)
         std = (HOME_SPACE_MODE(&regs->psw)) ? regs->cr[13] :
             regs->cr[1];
+    else if (acctype == ACCTYPE_STACK)
+        std = regs->cr[13];
     else if (PRIMARY_SPACE_MODE(&regs->psw))
         std = regs->cr[1];
     else if (SECONDARY_SPACE_MODE(&regs->psw))
@@ -646,7 +648,7 @@ TLBE   *tlbp;                           /* -> TLB entry              */
 
     /* Only a single entry in the TLB will be looked up, namely the
        entry associated with the base/access register being used */
-    tlbp = &(regs->tlb[arn]);
+    tlbp = &(regs->tlb[arn & 0x0F]);
     if ((vaddr & 0x7FFFF000) == tlbp->vaddr
         && tlbp->valid
         && (tlbp->common || std == tlbp->std)
@@ -844,7 +846,7 @@ U32     aaddr;                          /* Absolute address          */
 BYTE    skey;                           /* Storage key               */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=ALE or page protection  */
-U16     code;                           /* Exception code            */
+U16     xcode;                          /* Exception code            */
 
     /* Convert logical address to real address */
     if (REAL_MODE(&regs->psw))
@@ -852,7 +854,7 @@ U16     code;                           /* Exception code            */
     else {
         /* Return condition code 3 if translation exception */
         if (translate_addr (addr, arn, regs, ACCTYPE_TPROT, &raddr,
-                            &code, &private, &protect))
+                            &xcode, &private, &protect))
             return 3;
     }
 
@@ -919,13 +921,13 @@ U32     block;                          /* 4K block number           */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=ALE or page protection  */
 PSA    *psa;                            /* -> Prefixed storage area  */
-U16     code;                           /* Exception code            */
+U16     xcode;                          /* Exception code            */
 
     /* Convert logical address to real address */
     if (REAL_MODE(&regs->psw) || arn == USE_REAL_ADDR)
         raddr = addr;
     else {
-        if (translate_addr (addr, arn, regs, acctype, &raddr, &code,
+        if (translate_addr (addr, arn, regs, acctype, &raddr, &xcode,
                             &private, &protect))
             goto vabs_prog_check;
     }
@@ -979,16 +981,16 @@ vabs_prog_check:
     /* Point to the PSA in main storage */
     psa = (PSA*)(sysblk.mainstor + regs->pxr);
 
-    if (code == PGM_ALEN_TRANSLATION_EXCEPTION
-        || code == PGM_ALE_SEQUENCE_EXCEPTION
-        || code == PGM_ASTE_VALIDITY_EXCEPTION
-        || code == PGM_ASTE_SEQUENCE_EXCEPTION
-        || code == PGM_EXTENDED_AUTHORITY_EXCEPTION)
+    if (xcode == PGM_ALEN_TRANSLATION_EXCEPTION
+        || xcode == PGM_ALE_SEQUENCE_EXCEPTION
+        || xcode == PGM_ASTE_VALIDITY_EXCEPTION
+        || xcode == PGM_ASTE_SEQUENCE_EXCEPTION
+        || xcode == PGM_EXTENDED_AUTHORITY_EXCEPTION)
         /* Store the access register number at PSA+160 */
         psa->excarid = arn;
 
-    if (code == PGM_PAGE_TRANSLATION_EXCEPTION
-        || code == PGM_SEGMENT_TRANSLATION_EXCEPTION)
+    if (xcode == PGM_PAGE_TRANSLATION_EXCEPTION
+        || xcode == PGM_SEGMENT_TRANSLATION_EXCEPTION)
     {
         /* Store the access register number at PSA+160 */
         psa->excarid = (acctype == ACCTYPE_INSTFETCH) ? 0 : arn;
@@ -1002,7 +1004,7 @@ vabs_prog_check:
             && acctype != ACCTYPE_INSTFETCH)
             psa->tea[0] |= 0x80;
     }
-    program_check (code);
+    program_check (xcode);
     return 0;
 
 } /* end function logical_to_abs */

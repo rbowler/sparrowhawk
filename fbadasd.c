@@ -51,7 +51,7 @@ struct  stat statbuf;                   /* File information          */
     strcpy (dev->filename, argv[0]);
 
     /* Open the device file */
-    dev->fd = open (dev->filename, O_RDONLY);
+    dev->fd = open (dev->filename, O_RDWR);
     if (dev->fd < 0)
     {
         printf ("HHC302I File %s open error: %s\n",

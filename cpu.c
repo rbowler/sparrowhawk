@@ -335,16 +335,10 @@ int     ccwfmt;                         /* CCW format (0 or 1)       */
 BYTE    ccwkey;                         /* Protection key for SIO    */
 U32     ioparm;                         /* I/O interruption parameter*/
 struct  timeval tv;                     /* Structure for gettimeofday*/
-U32     aste[16];                       /* ASN second table entry    */
 U16     ax;                             /* Authorization index       */
 U16     pkm;                            /* PSW key mask              */
 U16     pasn;                           /* Primary ASN               */
 U16     sasn;                           /* Secondary ASN             */
-U32     pstd;                           /* Primary STD               */
-U32     sstd;                           /* Secondary STD             */
-U32     ltd;                            /* Linkage table descriptor  */
-U32     pasteo;                         /* Primary ASTE origin       */
-U32     sasteo;                         /* Secondary ASTE origin     */
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
 U32     ioid;                           /* I/O interruption address  */
 PMCW    pmcw;                           /* Path management ctl word  */
@@ -404,6 +398,17 @@ static BYTE module[8];                  /* Module name               */
     /* Turn on trace for specific instructions */
 //  if (opcode == 0xB2 && ibyte == 0x20) sysblk.inststep = 1;
 //  if (opcode == 0xB1 && memcmp(module,"????????",8)==0) tracethis = 1;
+    if (opcode == 0xB2 && ibyte == 0x25) sysblk.inststep = 1; /*SSAR*/
+    if (opcode == 0xB2 && ibyte == 0x40) sysblk.inststep = 1; /*BAKR*/
+    if (opcode == 0xB2 && ibyte == 0x18) sysblk.inststep = 1; /*PC*/
+    if (opcode == 0xB2 && ibyte == 0x28) sysblk.inststep = 1; /*PT*/
+    if (opcode == 0xB2 && ibyte == 0x47) sysblk.inststep = 1; /*MSTA*/
+    if (opcode == 0xB2 && ibyte == 0x49) sysblk.inststep = 1; /*EREG*/
+    if (opcode == 0xB2 && ibyte == 0x4A) sysblk.inststep = 1; /*ESTA*/
+    if (opcode == 0x01 && ibyte == 0x01) sysblk.inststep = 1; /*PR*/
+    if (opcode == 0xE5 && ibyte == 0x00) sysblk.inststep = 1; /*LASP*/
+    if (opcode == 0xFC) sysblk.inststep = 1; /*MP*/
+    if (opcode == 0xFD) sysblk.inststep = 1; /*DP*/
 
     /* Display the instruction */
     if (sysblk.insttrace || sysblk.inststep || tracethis)
@@ -423,6 +428,47 @@ static BYTE module[8];                  /* Module name               */
     }
 
     switch (opcode) {
+
+    case 0x01:
+    /*---------------------------------------------------------------*/
+    /* Extended instructions (opcode 01xx)                           */
+    /*---------------------------------------------------------------*/
+
+        /* The immediate byte determines the instruction opcode */
+        switch ( ibyte ) {
+
+        case 0x01:
+        /*-----------------------------------------------------------*/
+        /* 0101: PR - Program Return                             [E] */
+        /*-----------------------------------------------------------*/
+
+            /* Perform serialization and checkpoint-synchronization */
+            perform_serialization ();
+            perform_chkpt_sync ();
+
+            /* Perform unstacking process */
+            rc = program_return (regs);
+
+            /* Perform serialization and checkpoint-synchronization */
+            perform_serialization ();
+            perform_chkpt_sync ();
+
+            /* Generate space switch event if required */
+            if (rc) {
+                program_check (PGM_SPACE_SWITCH_EVENT);
+            }
+
+            break;
+
+        default:
+        /*-----------------------------------------------------------*/
+        /* 01xx: Invalid operation                                   */
+        /*-----------------------------------------------------------*/
+            program_check (PGM_OPERATION_EXCEPTION);
+            goto terminate;
+
+        } /* end switch(ibyte) */
+        break;
 
     case 0x04:
     /*---------------------------------------------------------------*/
@@ -3070,7 +3116,7 @@ static BYTE module[8];                  /* Module name               */
             /* Convert to TOD clock format */
             dreg <<= 12;
 
-//          /*debug*/printf("Store TOD clock=%16.16llX\n", dreg);
+            /*debug*/printf("Store TOD clock=%16.16llX\n", dreg);
 
             /*INCOMPLETE*/ /* Set TOD clock */
             sysblk.todclk = dreg;
@@ -3351,82 +3397,24 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
         /* B219: SAC - Set Address Space Control                 [S] */
         /*-----------------------------------------------------------*/
-        case 0x79:
-        /*-----------------------------------------------------------*/
-        /* B279: SACF - Set Address Space Control Fast           [S] */
-        /*-----------------------------------------------------------*/
 
             /* Isolate bits 20-23 of effective address */
-            n = (effective_addr & 0x00000F00) >> 8;
+            obyte = (effective_addr & 0x00000F00) >> 8;
 
-            /* Special operation exception if DAT is off or
-               secondary-space control bit is zero */
-            if ( (regs->psw.sysmask & PSW_DATMODE) == 0
-                 || (regs->cr[0] & CR0_SEC_SPACE) == 0)
-            {
-                program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
-                goto terminate;
-            }
+            /* Perform serialization and checkpoint-synchronization */
+            perform_serialization ();
+            perform_chkpt_sync ();
 
-            /* Privileged operation exception if setting home-space
-               mode while in problem state */
-            if ( n == 3 && regs->psw.prob )
-            {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
-                goto terminate;
-            }
+            /* Set the address-space control bits in the PSW */
+            rc = set_address_space_control (obyte, regs);
 
-            /* Special operation exception if setting AR mode
-               and address-space function control bit is zero */
-            if ( n == 1 && (regs->cr[0] & CR0_ASF) == 0)
-            {
-                program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
-                goto terminate;
-            }
+            /* Perform serialization and checkpoint-synchronization */
+            perform_serialization ();
+            perform_chkpt_sync ();
 
-            /* Specification exception if mode is invalid */
-            if ( n > 3 )
-            {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
-                goto terminate;
-            }
-
-            /* Perform serialization and checkpoint-synchronization
-               if extended operation code is SAC (not SACF) */
-            if ( ibyte == 0x19 )
-            {
-                perform_serialization ();
-                perform_chkpt_sync ();
-            }
-
-            /* Save the current address-space control bits */
-            m = (regs->psw.armode << 1) & (regs->psw.space);
-
-            /* Reset the address-space control bits in the PSW */
-            regs->psw.space = n & 1;
-            regs->psw.armode = n >> 1;
-
-            /* Perform serialization and checkpoint-synchronization
-               if extended operation code is SAC (not SACF) */
-            if ( ibyte == 0x19 )
-            {
-                perform_serialization ();
-                perform_chkpt_sync ();
-            }
-
-            /* If switching into or out of home-space mode, and also:
-               primary space-switch-event control bit is set; or
-               home space-switch-event control bit is set; or
-               PER event is to be indicated
-               then generate a space-switch-event program interrupt */
-            if ( ( (m != 3 && n == 3) || (m == 3 && n != 3) )
-                 && ( regs->cr[1] & STD_SSEVENT
-                      || regs->cr[13] & STD_SSEVENT
-                      || regs->psw.sysmask & PSW_PERMODE ) )
-            {
+            /* Generate a space-switch-event if indicated */
+            if (rc)
                 program_check (PGM_SPACE_SWITCH_EVENT);
-                goto terminate;
-            }
 
             break;
 
@@ -3617,15 +3605,6 @@ static BYTE module[8];                  /* Module name               */
         /* B225: SSAR - Set Secondary ASN                      [RRE] */
         /*-----------------------------------------------------------*/
 
-            /* Special operation exception if ASN translation control
-               (bit 12 of control register 14) is zero or DAT is off */
-            if ( (regs->cr[14] & CR14_ASN_TRAN) == 0
-                || REAL_MODE(&(regs->psw)) )
-            {
-                program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
-                goto terminate;
-            }
-
             /* Perform serialization and checkpoint-synchronization */
             perform_serialization ();
             perform_chkpt_sync ();
@@ -3633,61 +3612,8 @@ static BYTE module[8];                  /* Module name               */
             /* Load the new ASN from R1 register bits 16-31 */
             sasn = regs->gpr[r1] & CR3_SASN;
 
-            /* Test for SSAR to current primary */
-            if ( sasn == (regs->cr[4] & CR4_PASN) )
-            {
-                /* Set new secondary STD equal to primary STD */
-                sstd = regs->cr[1];
-
-            } /* end if(SSAR-cp) */
-            else
-            { /* SSAR with space-switch */
-
-                /* Perform ASN translation to obtain ASTE */
-                xcode = translate_asn ( sasn, regs, &sasteo, aste );
-
-                /* Program check if ASN translation exception */
-                if ( xcode != 0 )
-                {
-                    program_check (xcode);
-                    goto suppress;
-                }
-
-                /* Perform ASN authorization using current AX */
-                    ax = (regs->cr[4] & CR4_AX) >> 16;
-                if ( authorize_asn (ax, aste, ATE_SECONDARY, regs) )
-                {
-                    program_check (PGM_SECONDARY_AUTHORITY_EXCEPTION);
-                    goto suppress;
-                }
-
-                /* Load new secondary STD from ASTE word 2 */
-                sstd = aste[2];
-
-            } /* end if(SSAR-ss) */
-
-            /* Load the new secondary ASN into control register 3 */
-            regs->cr[3] &= ~CR3_SASN;
-            regs->cr[3] |= sasn;
-
-            /* Load the new secondary STD into control register 7 */
-            regs->cr[7] = sstd;
-
-#ifdef FEATURE_SUBSPACE_GROUP
-            if ( regs->cr[0] & CR0_ASF )
-            {
-The description in this paragraph applies if the  subspace-group  facility
-is  installed  and  the  address-space-function control, bit 15 of control
-register 0, is one.   After the  new  SSTD  has  been  placed  in  control
-register  7, if (1) the subspace-group-control bit, bit 22, in the SSTD is
-one, (2) the dispatchable unit  is  subspace  active,  and  (3)  the  ASTE
-obtained  by  ASN  translation  is  the  ASTE  for  the  base space of the
-dispatchable unit, then bits   1-23 and  25-31  of  the  SSTD  in  control
-register  7 are replaced by bits 1-23 and 25-31 of the STD in the ASTE for
-the subspace in which the dispatchable unit last  had  control.    Further
-details are in "Subspace-Replacement Operations" in topic 5.9.2.
-            } /* end if(CR0_ASF) */
-#endif /*FEATURE_SUBSPACE_GROUP*/
+            /* Update control registers 3 and 7 with new SASN */
+            set_secondary_asn (sasn, regs);
 
             /* Perform serialization and checkpoint-synchronization */
             perform_serialization ();
@@ -3756,163 +3682,31 @@ details are in "Subspace-Replacement Operations" in topic 5.9.2.
             perform_serialization ();
             perform_chkpt_sync ();
 
-            /* Special operation exception if DAT is off, or
-               not in primary space mode */
-            if ( REAL_MODE(&(regs->psw))
-                || !PRIMARY_SPACE_MODE(&(regs->psw)) )
-            {
-                program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
-                goto terminate;
-            }
-
-            /* Load the linkage table designation */
-            if ( (regs->cr[0] & CR0_ASF) == 0 )
-            {
-                /* Obtain the LTD from control register 5 */
-                ltd = regs->cr[5];
-            }
-            else
-            {
-                /* Obtain the primary ASTE origin from control reg 5 */
-                pasteo = regs->cr[5] & CR5_PASTEO;
-                pasteo = APPLY_PREFIXING (pasteo, regs->pxr);
-
-                /* Program check if PASTE is outside main storage */
-                if (pasteo >= sysblk.mainsize)
-                {
-                    program_check (PGM_ADDRESSING_EXCEPTION);
-                    goto suppress;
-                }
-
-                /* Fetch LTD from PASTE word 3 */
-                ltd = sysblk.mainstor[pasteo+12] << 24
-                    | sysblk.mainstor[pasteo+13] << 16
-                    | sysblk.mainstor[pasteo+14] << 8
-                    | sysblk.mainstor[pasteo+15];
-            }
-
-            /* Special operation exception if subsystem linkage
-               control bit in linkage table designation is zero */
-            if ( (ltd & LTD_SSLINK) == 0 )
-            {
-                program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
-                goto terminate;
-            }
-
-            /* Privileged operation exception if in problem state and
-               P-bit in r2 indicates a change to supervisor state */
-            if ( regs->psw.prob && (regs->gpr[r2] & 0x00000001) == 0 )
-            {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
-                goto terminate;
-            }
-
-            /* Specification exception if A-bit in r2 is zero and
-               new instruction address is not a 24-bit address */
-            if ( (regs->gpr[r2] & 0x80000000) == 0
-                && regs->gpr[r2] > 0x00FFFFFF )
-            {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
-                goto terminate;
-            }
+            /* Extract the PSW key mask from R1 register bits 0-15 */
+            pkm = regs->gpr[r1] >> 16;
 
             /* Extract the ASN from R1 register bits 16-31 */
             pasn = regs->gpr[r1] & 0xFFFF;
 
-            /* Space switch if ASN not equal to current PASN */
-            if ( pasn != (regs->cr[4] & CR4_PASN) )
-            {
-                /* Special operation exception if ASN translation
-                   control (control register 14 bit 12) is zero */
-                if ( (regs->cr[14] & CR14_ASN_TRAN) == 0 )
-                {
-                    program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
-                    goto terminate;
-                }
+            /* Extract the amode bit from R2 register bit 0 */
+            i = (regs->gpr[r2] & 0x80000000) ? 1 : 0;
 
-                /* Translate ASN and generate program check if
-                   AFX- or ASX-translation exception condition */
-                xcode = translate_asn (pasn, regs, &pasteo, aste);
-                if ( xcode != 0 )
-                {
-                    program_check (xcode);
-                    goto terminate;
-                }
+            /* Extract the instruction address from R2 bits 1-30 */
+            n = regs->gpr[r2] & 0x7FFFFFFE;
 
-                /* Perform primary address space authorization
-                   using current authorization index */
-                ax = (regs->cr[4] & CR4_AX) >> 16;
-                if (authorize_asn(ax, aste, ATE_PRIMARY, regs))
-                {
-                    program_check (PGM_PRIMARY_AUTHORITY_EXCEPTION);
-                    goto terminate;
-                }
+            /* Extract the problem state bit from R2 register bit 31 */
+            j = regs->gpr[r2] & 0x00000001;
 
-#ifdef FEATURE_SUBSPACE_GROUP
-                if (regs->cr[0] & CR0_ASF)
-                {
-The description in this paragraph applies if the  subspace-group  facility
-is  installed  and  the  ASF control is one.   After the new PSTD has been
-placed in control register 1 and the  new  primary-ASTE  origin  has  been
-placed  in  control register 5, if (1) the subspace-group-control bit, bit
-22, in the PSTD is one, (2) the dispatchable unit is subspace active,  and
-(3)  the primary-ASTE origin designates the ASTE for the base space of the
-dispatchable unit, then bits   1-23 and  25-31  of  the  PSTD  in  control
-register  1 are replaced by bits 1-23 and 25-31 of the STD in the ASTE for
-the subspace in which the  dispatchable  unit  last  had  control.    This
-replacement  occurs before a replacement of the SSTD in control register 7
-by the PSTD.  Further details are in "Subspace-Replacement Operations"  in
-topic 5.9.2.
-                }
-#endif /*FEATURE_SUBSPACE_GROUP*/
-
-                /* Obtain new primary STD from the ASTE */
-                pstd = aste[2];
-
-                /* Set flag if either current PSTD or new PSTD
-                   space switch event bit is set to 1 */
-                h = (regs->cr[1] & STD_SSEVENT) || (pstd & STD_SSEVENT);
-
-                /* Load new primary STD into control register 1 */
-                regs->cr[1] = pstd;
-
-                /* Load new AX and PASN into control register 4 */
-                regs->cr[4] = (aste[1] & ASTE1_AX) | pasn;
-
-                /* Load new LTD or PASTEO into control register 5 */
-                regs->cr[5] = ((regs->cr[0] & CR0_ASF) == 0) ?
-                                        aste[3] : pasteo;
-
-            } /* end if(PT-ss) */
-            else
-            {
-                /* For PT-cp use current primary STD */
-                pstd = regs->cr[1];
-
-                /* Clear space switch event flag */
-                h = 0;
-            }
-
-            /* Replace PSW addressing mode, instruction address,
-               and problem state bit from R2 register */
-            regs->psw.amode = (regs->gpr[r2] & 0x80000000) ? 1 : 0;
-            regs->psw.ia = regs->gpr[r2] & 0x7FFFFFFE;
-            regs->psw.prob = (regs->gpr[r2] & 0x00000001) ? 1 : 0;
-
-            /* AND the current PKM with R1 register bits 0-15 and
-               replace the current SASN with R1 bits 16-31 */
-            regs->cr[3] &= ~CR3_SASN;
-            regs->cr[3] |= regs->gpr[r1];
-
-            /* Set secondary STD equal to new primary STD */
-            regs->cr[7] = pstd;
+            /* Set new PKM, PASN, SASN, PSTD, SSTD, amode,
+               instruction address, and problem state bit */
+            rc = program_transfer (pkm, pasn, i, n, j, regs);
 
             /* Perform serialization and checkpoint-synchronization */
             perform_serialization ();
             perform_chkpt_sync ();
 
             /* Generate space switch event if required */
-            if (h) {
+            if (rc) {
                 program_check (PGM_SPACE_SWITCH_EVENT);
             }
 
@@ -4413,6 +4207,48 @@ topic 5.9.2.
             break;
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
+        case 0x40:
+        /*-----------------------------------------------------------*/
+        /* B240: BAKR - Branch and Stack Register              [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Obtain the return address and addressing mode from
+               the R1 register, or use updated PSW if R1 is zero */
+            if ( r1 != 0 )
+            {
+                n1 = regs->gpr[r1];
+                if ( (n1 & 0x80000000) == 0 )
+                    n1 &= 0x00FFFFFF;
+            }
+            else
+            {
+                n1 = regs->psw.ia;
+                if ( regs->psw.amode )
+                    n1 |= 0x80000000;
+            }
+
+            /* Obtain the branch address from the R2 register, or use
+               the updated PSW instruction address if R2 is zero */
+            n2 = (r2 != 0) ? regs->gpr[r2] : regs->psw.ia;
+
+            /* Set the addressing mode bit in the branch address */
+            if ( regs->psw.amode )
+                n2 |= 0x80000000;
+            else
+                n2 &= 0x00FFFFFF;
+
+            /* Form the linkage stack entry */
+            form_stack_entry (LSED_UET_BAKR, n1, n2, regs);
+
+            /* Execute the branch unless R2 specifies register 0 */
+            if ( r2 != 0 )
+            {
+                newia = regs->gpr[r2];
+                goto setia;
+            } /* end if(r2!=0) */
+
+            break;
+
         case 0x46:
         /*-----------------------------------------------------------*/
         /* B246: STURA - Store Using Real Address              [RRE] */
@@ -4441,6 +4277,16 @@ topic 5.9.2.
 
             break;
 
+        case 0x47:
+        /*-----------------------------------------------------------*/
+        /* B247: MSTA - Modify Stacked State                   [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Modify the current linkage stack entry */
+            modify_stacked_state (r1, regs);
+
+            break;
+
         case 0x48:
         /*-----------------------------------------------------------*/
         /* B248: PALB - Purge ALB                              [RRE] */
@@ -4455,6 +4301,31 @@ topic 5.9.2.
 
             /* Purge the ART lookaside buffer for this CPU */
             purge_alb (regs);
+
+            break;
+
+        case 0x49:
+        /*-----------------------------------------------------------*/
+        /* B249: EREG - Extract Stacked Registers              [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Extract registers from current linkage stack entry */
+            extract_stacked_registers (r1, r2, regs);
+
+            break;
+
+        case 0x4A:
+        /*-----------------------------------------------------------*/
+        /* B24A: ESTA - Extract Stacked State                  [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Load the extraction code from R2 register bits 24-31 */
+            obyte = regs->gpr[r2] & 0xFF;
+
+            /* Extract state from current linkage stack entry
+               and set condition code */
+            regs->psw.cc =
+                extract_stacked_state (r1, obyte, regs);
 
             break;
 
@@ -4632,6 +4503,23 @@ topic 5.9.2.
                 regs->gpr[r1] = effective_addr;
                 regs->gpr[r2] = effective_addr2;
             }
+
+            break;
+
+        case 0x79:
+        /*-----------------------------------------------------------*/
+        /* B279: SACF - Set Address Space Control Fast           [S] */
+        /*-----------------------------------------------------------*/
+
+            /* Isolate bits 20-23 of effective address */
+            obyte = (effective_addr & 0x00000F00) >> 8;
+
+            /* Set the address-space control bits in the PSW */
+            rc = set_address_space_control (obyte, regs);
+
+            /* Generate a space-switch-event if indicated */
+            if (rc)
+                program_check (PGM_SPACE_SWITCH_EVENT);
 
             break;
 
@@ -5408,147 +5296,10 @@ topic 5.9.2.
             ax = (dreg & 0xFFFF0000) >> 16;
             pasn = dreg & 0xFFFF;
 
-            /* PASN translation */
-
-            /* Perform PASN translation if PASN not equal to current
-               PASN, or if bit 29 of second operand address is set */
-            if ( (effective_addr2 & 0x00000004)
-                || pasn != (regs->cr[4] & CR4_PASN) )
-            {
-                /* Translate PASN and set condition code 1 if
-                   AFX- or ASX-translation exception condition */
-                if (translate_asn (pasn, regs, &pasteo, aste))
-                {
-                    regs->psw.cc = 1;
-                    break;
-                }
-
-#ifdef FEATURE_SUBSPACE_GROUP
-                if (regs->cr[0] & CR0_ASF)
-                {
-The  description  in this paragraph applies if the subspace-group facility
-is installed, the ASF control is one, and PASN translation  is  performed.
-After  STD-p has been obtained, if (1) the subspace-group-control bit, bit
-22, in STD-p is one, (2) the dispatchable unit is subspace active, and (3)
-PASTEO-p designates the ASTE for the base space of the dispatchable  unit,
-then  a copy of STD-p, called STD-rp, is made, and bits  1-23 and 25-31 of
-STD-rp are replaced by bits 1-23 and 25-31 of the STD in the ASTE for  the
-subspace in which the dispatchable unit last had control.  Further details
-are  in "Subspace-Replacement Operations" in topic 5.9.2.  If bit 0 in the
-subspace ASTE is one, or if the  ASTE  sequence  number  (ASTESN)  in  the
-subspace  ASTE does not equal the subspace ASTESN in the dispatchable-unit
-control table, an exception is not recognized; instead, condition  code  1
-is set, and the control registers remain unchanged.
-                } /* end if(CR0_ASF) */
-#endif /*FEATURE_SUBSPACE_GROUP*/
-
-                /* Set condition code 3 if either current STD or
-                   new STD indicates a space switch event */
-                if ( (regs->cr[1] & STD_SSEVENT)
-                    || (aste[2] & STD_SSEVENT) )
-                {
-                    regs->psw.cc = 3;
-                    break;
-                }
-
-                /* Obtain new PSTD and LTD from ASTE */
-                pstd = aste[2];
-                ltd = aste[3];
-
-                /* If bit 30 of the second operand address is zero,
-                   use the AX from the primary ASTE instead of the
-                   AX specified in the first operand */
-                if ((effective_addr2 & 0x00000002) == 0)
-                    ax = (aste[1] & ASTE1_AX) >> 16;
-            }
-            else
-            {
-                /* Load current PSTD and LTD or PASTEO */
-                pstd = regs->cr[1];
-                ltd = regs->cr[5];
-                pasteo = regs->cr[5];
-
-                /* If bit 30 of the second operand address is zero,
-                   use the current AX instead of the AX specified
-                   in the first operand */
-                if ((effective_addr2 & 0x00000002) == 0)
-                    ax = (regs->cr[4] & CR4_AX) >> 16;
-            }
-
-            /* SASN translation */
-
-            /* If new SASN = new PASN then set new SSTD = new PSTD */
-            if ( sasn == pasn )
-            {
-                sstd = pstd;
-            }
-            else
-
-            /* If new SASN = current SASN, and bit 29 of the second
-               operand address is 0, and bit 31 of the second operand
-               address is 1, use current SSTD in control register 7 */
-            if ( (effective_addr2 & 0x00000004) == 0
-                || (effective_addr2 & 0x00000001)
-                || sasn == (regs->cr[3] & CR3_SASN) )
-            {
-                sstd = regs->cr[7];
-            }
-            else
-            {
-                /* Translate SASN and set condition code 2 if
-                   AFX- or ASX-translation exception condition */
-                if (translate_asn (sasn, regs, &sasteo, aste))
-                {
-                    regs->psw.cc = 2;
-                    break;
-                }
-
-                /* Obtain new SSTD from secondary ASTE */
-                sstd = aste[2];
-
-#ifdef FEATURE_SUBSPACE_GROUP
-                if (regs->cr[0] & CR0_ASF)
-                {
-The  description  in this paragraph applies if the subspace-group facility
-is installed, the ASF control is one, and SASN translation  is  performed.
-After  STD-s has been obtained, if (1) the subspace-group-control bit, bit
-22, in STD-s is one, (2) the dispatchable unit is subspace active, and (3)
-SASTEO-s designates the ASTE for the base space of the dispatchable  unit,
-then  a copy of STD-s, called STD-rs, is made, and bits  1-23 and 25-31 of
-STD-rs are replaced by bits 1-23 and 25-31 of the STD in the ASTE for  the
-subspace in which the dispatchable unit last had control.  Further details
-are  in "Subspace-Replacement Operations" in topic 5.9.2.  If bit 0 in the
-subspace ASTE is one, or if the  ASTE  sequence  number  (ASTESN)  in  the
-subspace  ASTE does not equal the subspace ASTESN in the dispatchable-unit
-control table, an exception is not recognized; instead, condition  code  2
-is set, and the control registers remain unchanged.
-                } /* end if(CR0_ASF) */
-#endif /*FEATURE_SUBSPACE_GROUP*/
-
-                /* Perform SASN authorization if bit 31 of the
-                   second operand address is not 0 */
-                if (effective_addr2 & 0x00000001)
-                {
-                    /* Condition code 2 if SASN authorization fails */
-                    if (authorize_asn(ax, aste, ATE_SECONDARY, regs))
-                    {
-                        regs->psw.cc = 2;
-                        break;
-                    } /* end if(SASN not authorized) */
-
-                } /* end if(SASN authorization) */
-
-            } /* end if(SASN translation) */
-
-            /* Perform control-register loading */
-            regs->cr[1] = pstd;
-            regs->cr[3] = (pkm << 16) | sasn;
-            regs->cr[4] = (ax << 16) | pasn;
-            regs->cr[5] = (regs->cr[0] & CR0_ASF) ? pasteo : ltd;
-            regs->cr[7] = sstd;
-
-            /* Set condition code zero */
-            regs->psw.cc = 0;
+            /* Load control registers and set condition code */
+            regs->psw.cc =
+                load_address_space_parameters (pkm, sasn, ax, pasn,
+                                effective_addr2, regs);
 
             break;
 

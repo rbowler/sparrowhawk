@@ -315,6 +315,7 @@ void instfetch (BYTE *dest, U32 addr, REGS *regs);
 #define ACCTYPE_LRA             5       /* Load Real Address         */
 #define ACCTYPE_TPROT           6       /* Test Protection           */
 #define ACCTYPE_IVSK            7       /* Insert Virtual Storage Key*/
+#define ACCTYPE_STACK           8       /* Linkage stack operations  */
 
 /* Special value for arn parameter for translate functions in dat.c */
 #define USE_REAL_ADDR           (-1)    /* LURA/STURA instruction    */
@@ -338,6 +339,22 @@ void divide_packed (U32 addr1, int len1, int arn1,
 /* Functions in module service.c */
 void perform_external_interrupt (REGS *regs);
 int  service_call (U32 sclp_command, U32 sccb_absolute_addr);
+
+/* Functions in module stack.c */
+void form_stack_entry (BYTE etype, U32 retna, U32 calla, REGS *regs);
+int  program_return_unstack (REGS *regs, U32 *lsedap);
+void extract_stacked_registers (int r1, int r2, REGS *regs);
+int  extract_stacked_state (int rn, BYTE code, REGS *regs);
+void modify_stacked_state (int rn, REGS *regs);
+
+/* Functions in module xmem.c */
+int  set_address_space_control (BYTE mode, REGS *regs);
+void set_secondary_asn (U16 sasn, REGS *regs);
+int  load_address_space_parameters (U16 pkm, U16 sasn, U16 ax,
+        U16 pasn, U32 func, REGS *regs);
+int  program_transfer (U16 pkm, U16 pasn, int amode, U32 ia,
+        int prob, REGS *regs);
+int  program_return (REGS *regs);
 
 /* Functions in module channel.c */
 int  start_io (DEVBLK *dev, U32 ccwaddr, int ccwfmt, BYTE ccwkey,
