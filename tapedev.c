@@ -2326,6 +2326,20 @@ U32             stat;                   /* SCSI tape status bits     */
     else
         dev->sense[3] = 0x29;
 
+    /* Set sense bytes for 3420 */
+    if (dev->devtype != 0x3480)
+    {
+//      dev->sense[4] |= 0x20;
+        dev->sense[5] |= 0xC0;
+        dev->sense[6] |= 0x03;
+        dev->sense[13] = 0x80;
+        dev->sense[14] = 0x01;
+        dev->sense[15] = 0x00;
+        dev->sense[16] = 0x01;
+        dev->sense[19] = 0xFF;
+        dev->sense[20] = 0xFF;
+    }
+
 } /* end function build_sense */
 
 /*-------------------------------------------------------------------*/

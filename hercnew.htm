@@ -10,6 +10,31 @@ What's new in Hercules</TITLE>
 <h1>What's new in Hercules</h1>
 
 <hr noshade>
+<h2>What's new in release 1.60</h2>
+<p>Release date: 14 May 2000
+<ul>
+<li>Multiprocessor locking improvements (by Jan Jaeger)
+<li>Machine check and channel report word (by Jan Jaeger)
+<li>Store Channel Report Word (STCRW) instruction (by Jan Jaeger)
+<li>New attach/detach/define commands to allow dynamic addition
+    and deletion of devices from the configuration (by Jan Jaeger)
+<li>Compare and Swap and Purge (CSP) instruction (by Jan Jaeger)
+<li>Broadcasted purging (by Jan Jaeger)
+<li>Fix LASP instruction SASN authorization using wrong AX if bits 29-31
+    are 010 and SASN \= PASN (by Izzeb Oiram)
+<li>Fix SAC instruction special operation exception setting secondary
+    space mode when ASF=0 (by Izzeb Oiram)
+<li>Remove intdrag option and replace drag command by toddrag command
+<li>New extpending flag to improve performance (originally contributed
+    by Valery Pogonchenko and enhanced by Jan Jaeger)
+<li>Allow longer host name in console connected message (by Jay Maynard)
+<li>Floating point version 5
+    including fixes for bugs reported by Izzeb Oiram
+    (contributed by Peter Kuschnerus)
+</ul>
+<p>Download
+<a href="hercules/hercules-1.60.tar.gz">hercules-1.60.tar.gz</a>
+
 <h2>What's new in release 1.59</h2>
 <p>Release date: 30 Apr 2000
 <ul>
@@ -25,6 +50,8 @@ What's new in Hercules</TITLE>
 <li>New toddrag and intdrag config options and drag control panel
     command allow drag factors to be set (by Roger Bowler)
 <li>Light optimization on CPU critical path (by Valery Pogonchenko)
+<li>Eliminate fetch protection override in S/370 mode
+    (by Valery Pogonchenko)
 </ul>
 <p>Download
 <a href="hercules/hercules-1.59.tar.gz">hercules-1.59.tar.gz</a>
@@ -490,7 +517,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 30 Apr 2000
+<p>Last updated 14 May 2000
 </BODY>
 </HTML>
 

@@ -13,6 +13,7 @@
 /*-------------------------------------------------------------------*/
 /* Additional credits:                                               */
 /*      TOD clock offset contributed by Jay Maynard                  */
+/*      Dynamic device attach/detach by Jan Jaeger                   */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -178,7 +179,6 @@ BYTE   *sloadparm;                      /* -> IPL load parameter     */
 BYTE   *ssysepoch;                      /* -> System epoch           */
 BYTE   *stzoffset;                      /* -> System timezone offset */
 BYTE   *stoddrag;                       /* -> TOD clock drag factor  */
-BYTE   *sintdrag;                       /* -> Interrupt drag factor  */
 BYTE    loadparm[8];                    /* Load parameter (EBCDIC)   */
 BYTE    version = 0x00;                 /* CPU version code          */
 U32     serial;                         /* CPU serial number         */
@@ -190,18 +190,11 @@ U16     numcpu;                         /* Number of CPUs            */
 S32     sysepoch;                       /* System epoch year         */
 S32     tzoffset;                       /* System timezone offset    */
 int     toddrag;                        /* TOD clock drag factor     */
-int     intdrag;                        /* Interrupt drag factor     */
 BYTE   *sdevnum;                        /* -> Device number string   */
 BYTE   *sdevtype;                       /* -> Device type string     */
 U16     devnum;                         /* Device number             */
 U16     devtype;                        /* Device type               */
 BYTE    c;                              /* Work area for sscanf      */
-DEVBLK *dev;                            /* -> Device block           */
-DEVBLK**dvpp;                           /* -> Device block address   */
-DEVIF  *devinit;                        /* -> Device init function   */
-DEVQF  *devqdef;                        /* -> Device query function  */
-DEVXF  *devexec;                        /* -> Device exec function   */
-int     subchan;                        /* Subchannel number         */
 
     /* Open the configuration file */
     fp = fopen (fname, "r");
@@ -224,7 +217,6 @@ int     subchan;                        /* Subchannel number         */
     sysepoch = 1900;
     tzoffset = 0;
     toddrag = 1;
-    intdrag = 100;
 
     /* Read records from the configuration file */
     for (scount = 0; ; scount++)
@@ -254,7 +246,6 @@ int     subchan;                        /* Subchannel number         */
         ssysepoch = NULL;
         stzoffset = NULL;
         stoddrag = NULL;
-        sintdrag = NULL;
 
         /* Check for old-style CPU statement */
         if (scount == 0 && addargc == 5 && strlen(keyword) == 6
@@ -306,14 +297,12 @@ int     subchan;                        /* Subchannel number         */
             {
                 stzoffset = operand;
             }
+#ifdef TODCLOCK_DRAG_FACTOR
             else if (strcasecmp (keyword, "toddrag") == 0)
             {
                 stoddrag = operand;
             }
-            else if (strcasecmp (keyword, "intdrag") == 0)
-            {
-                sintdrag = operand;
-            }
+#endif /*TODCLOCK_DRAG_FACTOR*/
             else
             {
                 fprintf (stderr,
@@ -466,6 +455,7 @@ int     subchan;                        /* Subchannel number         */
             }
         }
 
+#ifdef TODCLOCK_DRAG_FACTOR
         /* Parse TOD clock drag factor operand */
         if (stoddrag != NULL)
         {
@@ -479,25 +469,15 @@ int     subchan;                        /* Subchannel number         */
                 exit(1);
             }
         }
-
-        /* Parse interrupt drag factor operand */
-        if (sintdrag != NULL)
-        {
-            if (sscanf(sintdrag, "%u%c", &intdrag, &c) != 1
-                || intdrag < 1 || intdrag > 10000)
-            {
-                fprintf (stderr,
-                        "HHC017I Error in %s line %d: "
-                        "Invalid interrupt drag factor %s\n",
-                        fname, stmt, sintdrag);
-                exit(1);
-            }
-        }
+#endif /*TODCLOCK_DRAG_FACTOR*/
 
     } /* end for(scount) */
 
     /* Clear the system configuration block */
     memset (&sysblk, 0, sizeof(SYSBLK));
+
+    /* Direct logmsg output to stderr during initialization */
+    sysblk.msgpipew = stderr;
 
     /* Initialize the CPU registers */
     sysblk.numcpu = numcpu;
@@ -581,32 +561,6 @@ int     subchan;                        /* Subchannel number         */
     initialize_condition (&sysblk.intcond);
     initialize_detach_attr (&sysblk.detattr);
 
-    /* Create the message pipe */
-    rc = pipe (pfd);
-    if (rc < 0)
-    {
-        fprintf (stderr,
-                "HHC025I Message pipe creation failed: %s\n",
-                strerror(errno));
-        exit(1);
-    }
-
-    sysblk.msgpiper = pfd[0];
-    sysblk.msgpipew = fdopen (pfd[1], "w");
-    if (sysblk.msgpipew == NULL)
-    {
-        fprintf (stderr,
-                "HHC026I Message pipe open failed: %s\n",
-                strerror(errno));
-        exit(1);
-    }
-    setvbuf (sysblk.msgpipew, NULL, _IOLBF, 0);
-
-    /* Display the version identifier on the control panel */
-    logmsg ("Hercules %s version %s "
-            "(c)Copyright Roger Bowler, 1994-2000\n",
-            ARCHITECTURE_NAME, MSTRING(VERSION));
-
     /* Set up the system TOD clock offset: compute the number of
        seconds from the designated year to 1970 for TOD clock
        adjustment, then add in the specified time zone offset */
@@ -620,13 +574,11 @@ int     subchan;                        /* Subchannel number         */
     /* Convert the TOD clock offset to microseconds */
     sysblk.todoffset *= 1000000;
 
-    /* Set the system drag factors */
+    /* Set the TOD clock drag factor */
     sysblk.toddrag = toddrag;
-    sysblk.intdrag = intdrag;
 
-    /* Build the device configuration blocks */
-    dvpp = &(sysblk.firstdev);
-    for (subchan = 0; subchan <= 0xFFFF; subchan++)
+    /* Parse the device configuration statements */
+    while(1)
     {
         /* First two fields are device number and device type */
         sdevnum = keyword;
@@ -660,181 +612,405 @@ int     subchan;                        /* Subchannel number         */
             exit(1);
         }
 
-        /* Determine which device handler to use for this device */
-        switch (devtype) {
-
-        case 0x1052:
-        case 0x3215:
-            devinit = &constty_init_handler;
-            devqdef = &constty_query_device;
-            devexec = &constty_execute_ccw;
-            break;
-
-        case 0x1442:
-        case 0x2501:
-        case 0x3505:
-            devinit = &cardrdr_init_handler;
-            devqdef = &cardrdr_query_device;
-            devexec = &cardrdr_execute_ccw;
-            break;
-
-        case 0x3525:
-            devinit = &cardpch_init_handler;
-            devqdef = &cardpch_query_device;
-            devexec = &cardpch_execute_ccw;
-            break;
-
-        case 0x1403:
-        case 0x3211:
-            devinit = &printer_init_handler;
-            devqdef = &printer_query_device;
-            devexec = &printer_execute_ccw;
-            break;
-
-        case 0x3420:
-        case 0x3480:
-            devinit = &tapedev_init_handler;
-            devqdef = &tapedev_query_device;
-            devexec = &tapedev_execute_ccw;
-            break;
-
-        case 0x2311:
-        case 0x2314:
-        case 0x3330:
-        case 0x3350:
-        case 0x3380:
-        case 0x3390:
-            devinit = &ckddasd_init_handler;
-            devqdef = &ckddasd_query_device;
-            devexec = &ckddasd_execute_ccw;
-            break;
-
-        case 0x3310:
-        case 0x3370:
-        case 0x9336:
-            devinit = &fbadasd_init_handler;
-            devqdef = &fbadasd_query_device;
-            devexec = &fbadasd_execute_ccw;
-            break;
-
-        case 0x3270:
-            devinit = &loc3270_init_handler;
-            devqdef = &loc3270_query_device;
-            devexec = &loc3270_execute_ccw;
-            break;
-
-        case 0x3088:
-            devinit = &ctcadpt_init_handler;
-            devqdef = &ctcadpt_query_device;
-            devexec = &ctcadpt_execute_ccw;
-            break;
-
-        default:
-            fprintf (stderr,
-                    "HHC033I Error in %s line %d: "
-                    "Device type %4.4X not recognized\n",
-                    fname, stmt, devtype);
-            devinit = NULL;
-            devqdef = NULL;
-            devexec = NULL;
+        /* Build the device configuration block */
+        if (attach_device (devnum, devtype, addargc, addargv))
             exit(1);
-        } /* end switch(devtype) */
 
+        /* Read next device record from the configuration file */
+        if (read_config (fname, fp))
+            break;
+
+    } /* end while(1) */
+
+    /* Create the message pipe */
+    rc = pipe (pfd);
+    if (rc < 0)
+    {
+        fprintf (stderr,
+                "HHC033I Message pipe creation failed: %s\n",
+                strerror(errno));
+        exit(1);
+    }
+
+    sysblk.msgpiper = pfd[0];
+    sysblk.msgpipew = fdopen (pfd[1], "w");
+    if (sysblk.msgpipew == NULL)
+    {
+        fprintf (stderr,
+                "HHC034I Message pipe open failed: %s\n",
+                strerror(errno));
+        exit(1);
+    }
+    setvbuf (sysblk.msgpipew, NULL, _IOLBF, 0);
+
+    /* Display the version identifier on the control panel */
+    logmsg ("Hercules %s version %s "
+            "(c)Copyright Roger Bowler, 1994-2000\n",
+            ARCHITECTURE_NAME, MSTRING(VERSION));
+
+} /* end function build_config */
+
+/*-------------------------------------------------------------------*/
+/* Function to build a device configuration block                    */
+/*-------------------------------------------------------------------*/
+int attach_device (U16 devnum, U16 devtype,
+                   int addargc, BYTE *addargv[])
+{
+DEVBLK *dev;                            /* -> Device block           */
+DEVBLK**dvpp;                           /* -> Device block address   */
+DEVIF  *devinit;                        /* -> Device init function   */
+DEVQF  *devqdef;                        /* -> Device query function  */
+DEVXF  *devexec;                        /* -> Device exec function   */
+int     rc;                             /* Return code               */
+int     newdevblk = 0;                  /* 1=Newly created devblk    */
+
+    /* Check whether device number has already been defined */
+    if (find_device_by_devnum(devnum) != NULL)
+    {
+        logmsg ("HHC035I device %4.4X already exists\n", devnum);
+        return 1;
+    }
+
+    /* Determine which device handler to use for this device */
+    switch (devtype) {
+
+    case 0x1052:
+    case 0x3215:
+        devinit = &constty_init_handler;
+        devqdef = &constty_query_device;
+        devexec = &constty_execute_ccw;
+        break;
+
+    case 0x1442:
+    case 0x2501:
+    case 0x3505:
+        devinit = &cardrdr_init_handler;
+        devqdef = &cardrdr_query_device;
+        devexec = &cardrdr_execute_ccw;
+        break;
+
+    case 0x3525:
+        devinit = &cardpch_init_handler;
+        devqdef = &cardpch_query_device;
+        devexec = &cardpch_execute_ccw;
+        break;
+
+    case 0x1403:
+    case 0x3211:
+        devinit = &printer_init_handler;
+        devqdef = &printer_query_device;
+        devexec = &printer_execute_ccw;
+        break;
+
+    case 0x3420:
+    case 0x3480:
+        devinit = &tapedev_init_handler;
+        devqdef = &tapedev_query_device;
+        devexec = &tapedev_execute_ccw;
+        break;
+
+    case 0x2311:
+    case 0x2314:
+    case 0x3330:
+    case 0x3350:
+    case 0x3380:
+    case 0x3390:
+        devinit = &ckddasd_init_handler;
+        devqdef = &ckddasd_query_device;
+        devexec = &ckddasd_execute_ccw;
+        break;
+
+    case 0x3310:
+    case 0x3370:
+    case 0x9336:
+        devinit = &fbadasd_init_handler;
+        devqdef = &fbadasd_query_device;
+        devexec = &fbadasd_execute_ccw;
+        break;
+
+    case 0x3270:
+        devinit = &loc3270_init_handler;
+        devqdef = &loc3270_query_device;
+        devexec = &loc3270_execute_ccw;
+        break;
+
+    case 0x3088:
+        devinit = &ctcadpt_init_handler;
+        devqdef = &ctcadpt_query_device;
+        devexec = &ctcadpt_execute_ccw;
+        break;
+
+    default:
+        logmsg ("HHC036I Device type %4.4X not recognized\n",
+                devtype);
+        return 1;
+    } /* end switch(devtype) */
+
+    /* Attempt to reuse an existing device block */
+    dev = find_unused_device();
+
+    /* If no device block is available, create a new one */
+    if (dev == NULL)
+    {
         /* Obtain a device block */
         dev = (DEVBLK*)malloc(sizeof(DEVBLK));
         if (dev == NULL)
         {
-            fprintf (stderr,
-                    "HHC034I Cannot obtain device block "
+            logmsg ("HHC037I Cannot obtain device block "
                     "for device %4.4X: %s\n",
                     devnum, strerror(errno));
-            exit(1);
+            return 1;
         }
         memset (dev, 0, sizeof(DEVBLK));
 
-        /* Initialize the device block */
-        dev->subchan = subchan;
-        dev->devnum = devnum;
-        dev->devtype = devtype;
-        dev->devinit = devinit;
-        dev->devqdef = devqdef;
-        dev->devexec = devexec;
-        dev->fd = -1;
-
-        /* Initialize the path management control word */
-        dev->pmcw.flag5 |= PMCW5_V;
-        dev->pmcw.devnum[0] = dev->devnum >> 8;
-        dev->pmcw.devnum[1] = dev->devnum & 0xFF;
-        dev->pmcw.lpm = 0x80;
-        dev->pmcw.pim = 0x80;
-        dev->pmcw.pom = 0xFF;
-        dev->pmcw.pam = 0x80;
-        dev->pmcw.chpid[0] = dev->devnum >> 8;
+        /* Indicate a newly allocated devblk */
+        newdevblk = 1;
 
         /* Initialize the device lock and condition */
         initialize_lock (&dev->lock);
         initialize_condition (&dev->resumecond);
 
-        /* Call the device handler initialization function */
-        rc = (*devinit)(dev, addargc, addargv);
-        if (rc < 0)
-        {
-            fprintf (stderr,
-                    "HHC035I Error in %s line %d: "
-                    "Initialization failed for device %4.4X\n",
-                    fname, stmt, devnum);
-            exit(1);
-        }
+        /* Assign new subchannel number */
+        dev->subchan = sysblk.highsubchan++;
+    }
 
-        /* Obtain device data buffer */
-        if (dev->bufsize != 0)
-        {
-            dev->buf = malloc (dev->bufsize);
-            if (dev->buf == NULL)
-            {
-                fprintf (stderr,
-                        "HHC036I Cannot obtain buffer "
-                        "for device %4.4X: %s\n",
-                        dev->devnum, strerror(errno));
-                exit(1);
-            }
-        }
+    /* Obtain the device lock */
+    obtain_lock(&dev->lock);
 
-        /* Chain the device block to the previous block */
+    /* Initialize the device block */
+    dev->devnum = devnum;
+    dev->devtype = devtype;
+    dev->devinit = devinit;
+    dev->devqdef = devqdef;
+    dev->devexec = devexec;
+    dev->fd = -1;
+
+    /* Initialize the path management control word */
+    dev->pmcw.devnum[0] = dev->devnum >> 8;
+    dev->pmcw.devnum[1] = dev->devnum & 0xFF;
+    dev->pmcw.lpm = 0x80;
+    dev->pmcw.pim = 0x80;
+    dev->pmcw.pom = 0xFF;
+    dev->pmcw.pam = 0x80;
+    dev->pmcw.chpid[0] = dev->devnum >> 8;
+
+    /* Call the device handler initialization function */
+    rc = (*devinit)(dev, addargc, addargv);
+    if (rc < 0)
+    {
+        logmsg ("HHC038I Initialization failed for device %4.4X\n",
+                devnum);
+        release_lock(&dev->lock);
+
+        /* Release the device block if we just acquired it */
+        if (newdevblk)
+            free(dev);
+
+        return 1;
+    }
+
+    /* Obtain device data buffer */
+    if (dev->bufsize != 0)
+    {
+        dev->buf = malloc (dev->bufsize);
+        if (dev->buf == NULL)
+        {
+            logmsg ("HHC039I Cannot obtain buffer "
+                    "for device %4.4X: %s\n",
+                    dev->devnum, strerror(errno));
+            release_lock(&dev->lock);
+
+            /* Release the device block if we just acquired it */
+            if(newdevblk)
+                free(dev);
+
+            return 1;
+        }
+    }
+
+    /* If we acquired a new device block, add it to the chain */
+    if (newdevblk)
+    {
+        /* Search for the last device block on the chain */
+        for (dvpp = &(sysblk.firstdev); *dvpp != NULL;
+                dvpp = &((*dvpp)->nextdev));
+
+        /* Add the new device block to the end of the chain */
         *dvpp = dev;
         dev->nextdev = NULL;
-        dvpp = &(dev->nextdev);
+    }
 
-        /* Read next device record from the configuration file */
-        if ( read_config (fname, fp) )
-            break;
+    /* Mark device valid */
+    dev->pmcw.flag5 |= PMCW5_V;
 
-    } /* end for(subchan) */
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+    /* Indicate a CRW is pending for this device */
+    dev->crwpending = 1;
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
-} /* end function build_config */
+    /* Release device lock */
+    release_lock(&dev->lock);
 
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+    /* Signal machine check */
+    machine_check_crwpend();
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    return 0;
+} /* end function attach_device */
+
+/*-------------------------------------------------------------------*/
+/* Function to delete a device configuration block                   */
+/*-------------------------------------------------------------------*/
+int detach_device (U16 devnum)
+{
+DEVBLK *dev;                            /* -> Device block           */
+int     fileseq;                        /* File seq num for ckddasd  */
+
+    /* Find the device block */
+    dev = find_device_by_devnum (devnum);
+
+    if (dev == NULL)
+    {
+        logmsg ("HHC040I device %4.4X does not exist\n", devnum);
+        return 1;
+    }
+
+    /* Obtain the device lock */
+    obtain_lock(&dev->lock);
+
+    /* Mark device invalid */
+    dev->pmcw.flag5 &= ~(PMCW5_E | PMCW5_V);
+
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+    /* Indicate a CRW is pending for this device */
+    dev->crwpending = 1;
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    /* Close file or socket */
+    if (dev->fd > 2)
+    {
+        close (dev->fd);
+        dev->fd = -1;
+
+        /* Signal console thread to redrive select */
+        if (dev->console)
+        {
+            dev->console = 0;
+            signal_thread (sysblk.cnsltid, SIGHUP);
+        }
+    }
+
+    /* For CKD devices, close additional files */
+    for (fileseq = 1; fileseq <= dev->ckdnumfd; fileseq++)
+    {
+        if (dev->ckdfd[fileseq-1] > 2)
+            close (dev->ckdfd[fileseq-1]);
+    }
+    dev->ckdnumfd = 0;
+
+    /* Release device lock */
+    release_lock(&dev->lock);
+
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+    /* Signal machine check */
+    machine_check_crwpend();
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    logmsg ("HHC041I device %4.4X detached\n", devnum);
+
+    return 0;
+} /* end function detach_device */
+
+/*-------------------------------------------------------------------*/
+/* Function to rename a device configuration block                   */
+/*-------------------------------------------------------------------*/
+int define_device (U16 olddevn, U16 newdevn)
+{
+DEVBLK *dev;                            /* -> Device block           */
+
+    /* Find the device block */
+    dev = find_device_by_devnum (olddevn);
+
+    if (dev == NULL)
+    {
+        logmsg ("HHC042I device %4.4X does not exist\n", olddevn);
+        return 1;
+    }
+
+    /* Check that new device number does not already exist */
+    if (find_device_by_devnum(newdevn) != NULL)
+    {
+        logmsg ("HHC043I device %4.4X already exists\n", newdevn);
+        return 1;
+    }
+
+    /* Obtain the device lock */
+    obtain_lock(&dev->lock);
+
+    /* Update the device number in the DEVBLK */
+    dev->devnum = newdevn;
+
+    /* Update the device number in the PMCW */
+    dev->pmcw.devnum[0] = newdevn >> 8;
+    dev->pmcw.devnum[1] = newdevn & 0xFF;
+
+    /* Disable the device */
+    dev->pmcw.flag5 &= ~PMCW5_E;
+
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+    /* Indicate a CRW is pending for this device */
+    dev->crwpending = 1;
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    /* Release device lock */
+    release_lock(&dev->lock);
+
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+    /* Signal machine check */
+    machine_check_crwpend();
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    logmsg ("HHC044I device %4.4X defined as %4.4X\n",
+            olddevn, newdevn);
+
+    return 0;
+} /* end function define_device */
+
+/*-------------------------------------------------------------------*/
+/* Function to find an unused device block entry                     */
+/*-------------------------------------------------------------------*/
+DEVBLK *find_unused_device ()
+{
+DEVBLK *dev;
+
+    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+        if (!(dev->pmcw.flag5 & PMCW5_V)) break;
+
+    return dev;
+
+} /* end function find_unused_device */
 
 /*-------------------------------------------------------------------*/
 /* Function to find a device block given the device number           */
 /*-------------------------------------------------------------------*/
-DEVBLK *find_device_by_devnum ( U16 devnum )
+DEVBLK *find_device_by_devnum (U16 devnum)
 {
-DEVBLK  *dev;
+DEVBLK *dev;
 
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
-        if (dev->devnum == devnum) break;
+        if (dev->devnum == devnum && dev->pmcw.flag5 & PMCW5_V) break;
 
     return dev;
 
 } /* end function find_device_by_devnum */
 
-
 /*-------------------------------------------------------------------*/
 /* Function to find a device block given the subchannel number       */
 /*-------------------------------------------------------------------*/
-DEVBLK *find_device_by_subchan ( U16 subchan )
+DEVBLK *find_device_by_subchan (U16 subchan)
 {
-DEVBLK  *dev;
+DEVBLK *dev;
 
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
         if (dev->subchan == subchan) break;
@@ -842,5 +1018,4 @@ DEVBLK  *dev;
     return dev;
 
 } /* end function find_device_by_subchan */
-
 

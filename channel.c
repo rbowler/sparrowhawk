@@ -1678,7 +1678,8 @@ DEVBLK *dev;                            /* -> Device control block   */
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
     {
         obtain_lock (&dev->lock);
-        if (dev->pending || dev->pcipending)
+        if ((dev->pending || dev->pcipending)
+            && (dev->pmcw.flag5 & PMCW5_V))
         {
             /* Turn on the I/O interrupt pending flag */
             sysblk.iopending = 1;
@@ -1759,6 +1760,7 @@ DEVBLK *dev;                            /* -> Device control block   */
         dev->busy = 0;
         dev->readpending = 0;
         dev->pcipending = 0;
+        dev->crwpending = 0;
         dev->pmcw.intparm[0] = 0;
         dev->pmcw.intparm[1] = 0;
         dev->pmcw.intparm[2] = 0;
@@ -1777,6 +1779,9 @@ DEVBLK *dev;                            /* -> Device control block   */
         release_lock (&dev->lock);
 
     } /* end for(dev) */
+
+    /* No crws pending anymore */
+    sysblk.crwpending = 0;
 
     /* Signal console thread to redrive select */
     signal_thread (sysblk.cnsltid, SIGHUP);

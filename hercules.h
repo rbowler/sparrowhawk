@@ -40,9 +40,7 @@
 #define CKD_MAXFILES		4	/* Max files per CKD volume  */
 #define CKD_KEY_TRACING 		/* Trace CKD search keys     */
 #define MIPS_COUNTING			/* Display MIPS on ctl panel */
-
-/* Uncomment the following to speed up OS/390 */
-//#define TODCLOCK_DRAG_FACTOR 10	/* Slow down TOD clock	     */
+#define TODCLOCK_DRAG_FACTOR		/* Enable toddrag feature    */
 
 /* Uncomment the following to reduce messages from Linux/390 */
 //#define NO_PROTECTION_EXCEPTION_TRACE /* Suppress 0C4 trace message*/
@@ -58,6 +56,7 @@
 #undef	FEATURE_BIMODAL_ADDRESSING
 #undef	FEATURE_BINARY_FLOATING_POINT
 #undef	FEATURE_BRANCH_AND_SET_AUTHORITY
+#undef	FEATURE_BROADCASTED_PURGING
 #undef	FEATURE_CHANNEL_SUBSYSTEM
 #undef	FEATURE_CHECKSUM_INSTRUCTION
 #undef	FEATURE_COMPARE_AND_MOVE_EXTENDED
@@ -100,6 +99,7 @@
  #define FEATURE_ACCESS_REGISTERS
  #define FEATURE_BIMODAL_ADDRESSING
  #define FEATURE_BRANCH_AND_SET_AUTHORITY
+ #define FEATURE_BROADCASTED_PURGING
  #define FEATURE_CHANNEL_SUBSYSTEM
  #define FEATURE_CHECKSUM_INSTRUCTION
  #define FEATURE_COMPARE_AND_MOVE_EXTENDED
@@ -200,13 +200,19 @@ typedef pthread_attr_t			ATTR;
 #define obtain_lock(plk) \
 	pthread_mutex_lock((plk))
 #if MAX_CPU_ENGINES == 1
- #define OBTAIN_MAINLOCK()
- #define RELEASE_MAINLOCK()
+ #define OBTAIN_MAINLOCK(_register_context)
+ #define RELEASE_MAINLOCK(_register_context)
 #else
- #define OBTAIN_MAINLOCK() \
-	 pthread_mutex_lock(&sysblk.mainlock)
- #define RELEASE_MAINLOCK() \
-	 pthread_mutex_unlock(&sysblk.mainlock)
+ #define OBTAIN_MAINLOCK(_register_context) \
+	{ \
+	    pthread_mutex_lock(&sysblk.mainlock); \
+	    (_register_context)->mainlock = 1; \
+	}
+ #define RELEASE_MAINLOCK(_register_context) \
+	{ \
+	    (_register_context)->mainlock = 0; \
+	    pthread_mutex_unlock(&sysblk.mainlock); \
+	}
 #endif
 #define release_lock(plk) \
 	pthread_mutex_unlock((plk))
@@ -276,18 +282,28 @@ typedef struct _REGS {			/* Processor registers	     */
 	U16	cpuad;			/* CPU address for STAP      */
 	PSW	psw;			/* Program status word	     */
 	BYTE	excarid;		/* Exception access register */
-	BYTE	itimer_pending; 	/* 1=Interrupt is pending for
-					     the interval timer      */
+
 	BYTE	cpustate;		/* CPU stopped/started state */
-	BYTE	restart;		/* 1=Restart interrpt pending*/
-	BYTE	extcall;		/* 1=Extcall interrpt pending*/
-	U16	extccpu;		/* CPU causing external call */
-	BYTE	emersig;		/* 1=Emersig interrpt pending*/
+	unsigned int			/* Flags		     */
+		cpuint:1,		/* 1=There is an interrupt
+					     pending for this CPU    */
+		itimer_pending:1,	/* 1=Interrupt is pending for
+					     the interval timer      */
+		restart:1,		/* 1=Restart interrpt pending*/
+		extcall:1,		/* 1=Extcall interrpt pending*/
+		emersig:1,		/* 1=Emersig interrpt pending*/
+		storstat:1,		/* 1=Stop and store status   */
+		instvalid:1;		/* 1=Inst field is valid     */
 	BYTE	emercpu 		/* Emergency signal flags    */
 		    [MAX_CPU_ENGINES];	/* for each CPU (1=pending)  */
-	BYTE	storstat;		/* 1=Stop and store status   */
-	BYTE	instvalid;		/* 1=Inst field is valid     */
+	U16	extccpu;		/* CPU causing external call */
 	BYTE	inst[6];		/* Last-fetched instruction  */
+#if MAX_CPU_ENGINES > 1
+	U64	broadcast;		/* Broadcast request pending */
+	U64	brdcstpalb;		/* purge_alb() pending	     */
+	U64	brdcstptlb;		/* purge_tlb() pending	     */
+	unsigned int mainlock:1;	/* MAINLOCK held indicator   */
+#endif /*MAX_CPU_ENGINES > 1*/
 	jmp_buf progjmp;		/* longjmp destination for
 					   program check return      */
     } REGS;
@@ -328,9 +344,9 @@ typedef struct _SYSBLK {
 	BYTE	mbk;			/* Measurement block key     */
 	int	mbm;			/* Measurement block mode    */
 	int	mbd;			/* Device connect time mode  */
-	int	intdrag;		/* Interrupt drag factor     */
 	int	toddrag;		/* TOD clock drag factor     */
 	struct _DEVBLK *firstdev;	/* -> First device block     */
+	U16	highsubchan;		/* Highest subchannel + 1    */
 	U32	servparm;		/* Service signal parameter  */
 	U32	cp_recv_mask;		/* Syscons CP receive mask   */
 	U32	cp_send_mask;		/* Syscons CP send mask      */
@@ -340,6 +356,9 @@ typedef struct _SYSBLK {
 	int	scpcmdtype;		/* Operator command type     */
 	unsigned int			/* Flags		     */
 		iopending:1,		/* 1=I/O interrupt pending   */
+		mckpending:1,		/* 1=MCK interrupt pending   */
+		extpending:1,		/* 1=EXT interrupt pending   */
+		crwpending:1,		/* 1=Channel report pending  */
 		sigpbusy:1,		/* 1=Signal facility in use  */
 		servsig:1,		/* 1=Service signal pending  */
 		intkey:1,		/* 1=Interrupt key pending   */
@@ -347,6 +366,11 @@ typedef struct _SYSBLK {
 		insttrace:1,		/* 1=Instruction trace	     */
 		inststep:1,		/* 1=Instruction step	     */
 		instbreak:1;		/* 1=Have breakpoint	     */
+#if MAX_CPU_ENGINES > 1
+	U64	broadcast;		/* Broadcast request pending */
+	U64	brdcstpalb;		/* purge_alb() pending	     */
+	U64	brdcstptlb;		/* purge_tlb() pending	     */
+#endif /*MAX_CPU_ENGINES > 1*/
 	U32	breakaddr;		/* Breakpoint address	     */
 	FILE   *msgpipew;		/* Message pipe write handle */
 	int	msgpiper;		/* Message pipe read handle  */
@@ -374,8 +398,9 @@ typedef struct _DEVBLK {
 		pcipending:1,		/* 1=PCI interrupt pending   */
 		ccwtrace:1,		/* 1=CCW trace		     */
 		ccwstep:1,		/* 1=CCW single step	     */
-		cdwmerge:1;		/* 1=Channel will merge data
+		cdwmerge:1,		/* 1=Channel will merge data
 					     chained write CCWs      */
+		crwpending:1;		/* 1=CRW pending	     */
 	PMCW	pmcw;			/* Path management ctl word  */
 	SCSW	scsw;			/* Subchannel status word(XA)*/
 	SCSW	pciscsw;		/* PCI subchannel status word*/
@@ -397,9 +422,8 @@ typedef struct _DEVBLK {
 	BYTE   *buf;			/* -> Device data buffer     */
 	int	bufsize;		/* Device data buffer size   */
 	BYTE	filename[256];		/* Unix file name	     */
-	int	fd;			/* File descriptor	     */
+	int	fd;			/* File desc / socket number */
 	/* Device dependent fields for console */
-	int	csock;			/* Client socket number      */
 	struct	in_addr ipaddr; 	/* Client IP address	     */
 	int	rlen3270;		/* Length of data in buffer  */
 	int	pos3270;		/* Current screen position   */
@@ -579,6 +603,11 @@ void release_cms_lock (U32 addr1, int ar1, U32 addr2, int ar2,
 void build_config (BYTE *fname);
 DEVBLK *find_device_by_devnum (U16 devnum);
 DEVBLK *find_device_by_subchan (U16 subchan);
+DEVBLK *find_unused_device ();
+int  attach_device (U16 devnum, U16 devtype, int addargc,
+	BYTE *addargv[]);
+int  detach_device (U16 devnum);
+int  define_device (U16 olddev, U16 newdev);
 
 /* Functions in module panel.c */
 void display_inst (REGS *regs, BYTE *inst);
@@ -745,6 +774,14 @@ void perform_external_interrupt (REGS *regs);
 void *timer_update_thread (void *argp);
 void store_status (REGS *ssreg, U32 aaddr);
 int  signal_processor (int r1, int r3, U32 eaddr, REGS *regs);
+void issue_broadcast_request (U64 *type);
+void perform_broadcast_request (REGS *regs);
+
+/* Functions in module machchk.c */
+int  present_mck_interrupt (REGS *regs, U64 *mcic, U32 *xdmg,
+	U32 *fsta);
+U32  channel_report (void);
+void machine_check_crwpend (void);
 
 /* Functions in module service.c */
 int  service_call (U32 sclp_command, U32 sccb_real_addr, REGS *regs);

@@ -367,7 +367,10 @@ typedef struct _LSED {
 #define SIGP_START	0x04		/* Start		     */
 #define SIGP_STOP	0x05		/* Stop 		     */
 #define SIGP_RESTART	0x06		/* Restart		     */
+#define SIGP_IPR	0x07		/* Initial program reset 370 */
+#define SIGP_PR 	0x08		/* Program reset	 370 */
 #define SIGP_STOPSTORE	0x09		/* Stop and store status     */
+#define SIGP_IMPL	0x0A		/* Initial uprogram load 370 */
 #define SIGP_INITRESET	0x0B		/* Initial CPU reset	     */
 #define SIGP_RESET	0x0C		/* CPU reset		     */
 #define SIGP_SETPREFIX	0x0D		/* Set prefix		     */
@@ -464,6 +467,69 @@ typedef struct _PSA {			/* Prefixed storage area     */
 #define TEA_SSEVENT	0x80000000	/* Space switch event bit    */
 #define TEA_ASN 	0x0000FFFF	/* Address space number      */
 #define TEA_PCN 	0x000FFFFF	/* Program call number	     */
+
+/* Bit settings for machine check interruption code */
+#define MCIC_SD  0x8000000000000000ULL	/* System damage	     */
+#define MCIC_P	 0x4000000000000000ULL	/* Instruction proc damage   */
+#define MCIC_SR  0x2000000000000000ULL	/* System recovery	     */
+#define MCIC_CD  0x0800000000000000ULL	/* Timing facility damage    */
+#define MCIC_ED  0x0400000000000000ULL	/* External damage	     */
+#define MCIC_VF  0x0200000000000000ULL	/* Vector facility failure   */
+#define MCIC_DG  0x0100000000000000ULL	/* Degradation		     */
+
+#define MCIC_W	 0x0080000000000000ULL	/* Warning		     */
+#define MCIC_CP  0x0040000000000000ULL	/* Channel report pending    */
+#define MCIC_SP  0x0020000000000000ULL	/* Service processor damage  */
+#define MCIC_CK  0x0010000000000000ULL	/* Channel subsystem damage  */
+#define MCIC_VS  0x0004000000000000ULL	/* Vector facility source    */
+#define MCIC_B	 0x0002000000000000ULL	/* Backed up		     */
+
+#define MCIC_SE  0x0000800000000000ULL	/* Storage error uncorrected */
+#define MCIC_SC  0x0000400000000000ULL	/* Storage error corrected   */
+#define MCIC_KE  0x0000200000000000ULL	/* Storkey error uncorrected */
+#define MCIC_DS  0x0000100000000000ULL	/* Storage degradation	     */
+#define MCIC_WP  0x0000080000000000ULL	/* PSW-MWP validity	     */
+#define MCIC_MS  0x0000040000000000ULL	/* PSW mask and key validity */
+#define MCIC_PM  0x0000020000000000ULL	/* PSW pm and cc validity    */
+#define MCIC_IA  0x0000010000000000ULL	/* PSW ia validity	     */
+
+#define MCIC_FA  0x0000008000000000ULL	/* Failing stor addr validity*/
+#define MCIC_EC  0x0000002000000000ULL	/* External damage code val. */
+#define MCIC_FP  0x0000001000000000ULL	/* Floating point reg val.   */
+#define MCIC_GR  0x0000000800000000ULL	/* General register validity */
+#define MCIC_CR  0x0000000400000000ULL	/* Control register validity */
+#define MCIC_ST  0x0000000100000000ULL	/* Storage logical validity  */
+
+#define MCIC_IE  0x0000000080000000ULL	/* Indirect storage error    */
+#define MCIC_AR  0x0000000040000000ULL	/* Access register validity  */
+#define MCIC_DA  0x0000000020000000ULL	/* Delayed access exeption   */
+
+#define MCIC_XF  0x0000000000100000ULL	/* Extended float reg val.   */
+#define MCIC_AP  0x0000000000080000ULL	/* Ancillary report	     */
+#define MCIC_CT  0x0000000000020000ULL	/* CPU timer validity	     */
+#define MCIC_CC  0x0000000000010000ULL	/* Clock comparator validity */
+
+/* Channel Report Word definitions */
+#define CRW_SOL 	0x40000000	/* Solicited CRW	     */
+#define CRW_OVER	0x20000000	/* Overflow, CRW's lost      */
+#define CRW_CHAIN	0x10000000	/* More CRW's describe event */
+#define CRW_RSC 	0x0F000000	/* Reporting resource mask   */
+#define CRW_MONIT	0x02000000	/* Channel monitor is source */
+#define CRW_SUBCH	0x03000000	/* Subchannel is source      */
+#define CRW_CHPID	0x04000000	/* Channel path is source    */
+#define CRW_CAF 	0x09000000	/* Configuration alert	     */
+#define CRW_CSS 	0x0B000000	/* Channel subsys is source  */
+#define CRW_AR		0x00800000	/* Ancillary report indicator*/
+#define CRW_ERC 	0x003F0000	/* Error recovery code	     */
+#define CRW_AVAIL	0x00010000	/* Available		     */
+#define CRW_INIT	0x00020000	/* Initialized no parm. chg. */
+#define CRW_TEMP	0x00030000	/* Temporary error	     */
+#define CRW_ALERT	0x00040000	/* Installed, subch changed  */
+#define CRW_TERM	0x00050000	/* Terminal		     */
+#define CRW_PERM	0x00060000	/* Permanent error / not init*/
+#define CRW_PERMI	0x00070000	/* Permanent, initialized    */
+#define CRW_IPM 	0x00080000	/* PIM / PAM / CHPIDs changed*/
+#define CRW_RSID	0x0000FFFF	/* Resource identifier	     */
 
 /* Bit settings for channel id */
 #define CHANNEL_TYPE	0xF0000000	/* Bits 0-3=Channel type...  */

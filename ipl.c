@@ -25,8 +25,7 @@ BYTE    unitstat;                       /* IPL device unit status    */
 BYTE    chanstat;                       /* IPL device channel status */
 
     /* Reset external interrupts */
-    sysblk.servsig = 0;
-    sysblk.intkey = 0;
+    sysblk.extpending = sysblk.servsig = sysblk.intkey = 0;
 
     /* Perform initial reset on the IPL CPU */
     initial_cpu_reset (regs);
@@ -173,7 +172,7 @@ void cpu_reset (REGS *regs)
 int             i;                      /* Array subscript           */
 
     /* Clear pending interrupts and indicators */
-    regs->itimer_pending = 0;
+    regs->itimer_pending = 0; 
     regs->restart = 0;
     regs->extcall = 0;
     regs->extccpu = 0;
@@ -181,6 +180,7 @@ int             i;                      /* Array subscript           */
     for (i = 0; i < MAX_CPU_ENGINES; i++)
         regs->emercpu[i] = 0;
     regs->storstat = 0;
+    regs->cpuint = 0;
     regs->instvalid = 0;
     regs->instcount = 0;
 

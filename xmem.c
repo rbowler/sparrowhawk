@@ -215,7 +215,7 @@ int     ssevent = 0;                    /* 1=space switch event      */
 
     /* Special operation exception if setting AR mode
        and address-space function control bit is zero */
-    if (mode == 1 && (regs->cr[0] & CR0_ASF) == 0)
+    if (mode == 2 && (regs->cr[0] & CR0_ASF) == 0)
     {
         program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return 0;
@@ -479,6 +479,12 @@ U16     xcode;                          /* Exception code            */
         ax = (regs->cr[4] & CR4_AX) >> 16;
     }
 
+    /* If bit 30 of the LASP function bits is zero,
+       use the current AX instead of the AX specified
+       in the first operand */
+    if ((func & 0x00000002))
+        ax = ax_d;
+
     /* SASN translation */
 
     /* If new SASN = new PASN then set new SSTD = new PSTD */
@@ -530,12 +536,6 @@ U16     xcode;                          /* Exception code            */
         } /* end if(SASN translation) */
 
     } /* end if(SASN = PASN) */
-
-    /* If bit 30 of the LASP function bits is zero,
-       use the current AX instead of the AX specified
-       in the first operand */
-    if ((func & 0x00000002))
-        ax = ax_d;
 
     /* Perform control-register loading */
     regs->cr[1] = pstd;

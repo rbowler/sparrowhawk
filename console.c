@@ -1,4 +1,4 @@
-/* CONSOLE.C    (c)Copyright Roger Bowler, 1999                      */
+/* CONSOLE.C    (c)Copyright Roger Bowler, 1999-2000                 */
 /*              ESA/390 Console Device Handler                       */
 
 /*-------------------------------------------------------------------*/
@@ -555,7 +555,7 @@ int     eor = 0;                        /* 1=End of record received  */
     }
 
     /* Receive bytes from client */
-    rc = recv (dev->csock, dev->buf + dev->rlen3270,
+    rc = recv (dev->fd, dev->buf + dev->rlen3270,
                BUFLEN_3270 - dev->rlen3270, 0);
 
     if (rc < 0) {
@@ -659,7 +659,7 @@ BYTE            buf[32];                /* tn3270 write buffer       */
     buf[len++] = EOR_MARK;
 
     /* Send the 3270 read command to the client */
-    rc = send_packet(dev->csock, buf, len, "3270 Read Command");
+    rc = send_packet(dev->fd, buf, len, "3270 Read Command");
     if (rc < 0)
     {
         dev->sense[0] = SENSE_DC;
@@ -677,8 +677,8 @@ BYTE            buf[32];                /* tn3270 write buffer       */
     /* Close the connection if an error occurred */
     if (rc & CSW_UC)
     {
-        close (dev->csock);
-        dev->csock = 0;
+        close (dev->fd);
+        dev->fd = 0;
         dev->connected = 0;
         dev->sense[0] = SENSE_DC;
         return (CSW_UC);
@@ -718,7 +718,7 @@ BYTE    buf[LINE_LENGTH];               /* Receive buffer            */
 BYTE    c;                              /* Character work area       */
 
     /* Receive bytes from client */
-    num = recv (dev->csock, buf, LINE_LENGTH, 0);
+    num = recv (dev->fd, buf, LINE_LENGTH, 0);
 
     /* Return unit check if error on receive */
     if (num < 0) {
@@ -873,8 +873,9 @@ U16                     devnum;         /* Requested device number   */
 BYTE                    class;          /* D=3270, K=3215/1052       */
 BYTE                    model;          /* 3270 model (2,3,4,5,X)    */
 BYTE                    extended;       /* Extended attributes (Y,N) */
-BYTE                    buf[200];       /* Message buffer            */
+BYTE                    buf[256];       /* Message buffer            */
 BYTE                    conmsg[80];     /* Connection message        */
+BYTE                    hostmsg[80];    /* Host ID message           */
 BYTE                    rejmsg[80];     /* Rejection message         */
 
     /* Load the socket address from the thread parameter */
@@ -911,6 +912,10 @@ BYTE                    rejmsg[80];     /* Rejection message         */
     /* Look for an available console device */
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
     {
+        /* Loop if the device is invalid */
+        if(!(dev->pmcw.flag5 & PMCW5_V))
+            continue;
+
         /* Loop if non-matching device type */
         if (class == 'D' && dev->devtype != 0x3270)
             continue;
@@ -932,7 +937,7 @@ BYTE                    rejmsg[80];     /* Rejection message         */
         {
             /* Claim this device for the client */
             dev->connected = 1;
-            dev->csock = csock;
+            dev->fd = csock;
             dev->ipaddr = client.sin_addr;
             dev->mod3270 = model;
             dev->eab3270 = (extended == 'Y' ? 1 : 0);
@@ -957,11 +962,13 @@ BYTE                    rejmsg[80];     /* Rejection message         */
     } /* end for(dev) */
 
     /* Build connection message for client */
-    len = sprintf (conmsg,
-                "Hercules %s version %s at %s (%s %s)",
-                ARCHITECTURE_NAME, MSTRING(VERSION),
+    len = snprintf (hostmsg, sizeof(hostmsg),
+                "running on %s (%s %s)",
                 hostinfo.nodename, hostinfo.sysname,
                 hostinfo.release);
+    len = snprintf (conmsg, sizeof(conmsg),
+                "Hercules %s version %s",
+                ARCHITECTURE_NAME, MSTRING(VERSION));
 
     if (dev != NULL)
         len += sprintf (conmsg + len, " device %4.4X", dev->devnum);
@@ -986,15 +993,17 @@ BYTE                    rejmsg[80];     /* Rejection message         */
         {
             len = sprintf (buf,
                         "\xF5\x40\x11\x40\x40\x1D\x60%s"
-                        "\x11\xC1\x50\x1D\x60%s",
+                        "\x11\xC1\x50\x1D\x60%s"
+                        "\x11\xC2\x60\x1D\x60%s",
                         translate_to_ebcdic(conmsg),
+                        translate_to_ebcdic(hostmsg),
                         translate_to_ebcdic(rejmsg));
             buf[len++] = IAC;
             buf[len++] = EOR_MARK;
         }
         else
         {
-            len = sprintf (buf, "%s\r\n%s\r\n", conmsg, rejmsg);
+            len = sprintf (buf, "%s\r\n%s\r\n%s\r\n", conmsg, hostmsg, rejmsg);
         }
         rc = send_packet (csock, buf, len, "CONNECTION RESPONSE");
 
@@ -1011,14 +1020,16 @@ BYTE                    rejmsg[80];     /* Rejection message         */
     if (class == 'D')
     {
         len = sprintf (buf,
-                    "\xF5\x40\x11\x40\x40\x1D\x60%s",
-                    translate_to_ebcdic(conmsg));
+                    "\xF5\x40\x11\x40\x40\x1D\x60%s"
+                    "\x11\xC1\x50\x1D\x60%s",
+                    translate_to_ebcdic(conmsg),
+                    translate_to_ebcdic(hostmsg));
         buf[len++] = IAC;
         buf[len++] = EOR_MARK;
     }
     else
     {
-        len = sprintf (buf, "%s\r\n", conmsg);
+        len = sprintf (buf, "%s\r\n%s\r\n", conmsg, hostmsg);
     }
     rc = send_packet (csock, buf, len, "CONNECTION RESPONSE");
 
@@ -1124,10 +1135,11 @@ BYTE                    unitstat;       /* Status after receive data */
                 && dev->connected
                 && dev->busy == 0
                 && dev->pending == 0
+                && (dev->pmcw.flag5 & PMCW5_V)
                 && (dev->scsw.flag3 & SCSW3_SC_PEND) == 0)
             {
-                FD_SET (dev->csock, &readset);
-                if (dev->csock > maxfd) maxfd = dev->csock;
+                FD_SET (dev->fd, &readset);
+                if (dev->fd > maxfd) maxfd = dev->fd;
             }
         } /* end for(dev) */
 
@@ -1175,9 +1187,10 @@ BYTE                    unitstat;       /* Status after receive data */
             /* Test for connected console with data available */
             if (dev->console
                 && dev->connected
-                && FD_ISSET (dev->csock, &readset)
+                && FD_ISSET (dev->fd, &readset)
                 && dev->busy == 0
                 && dev->pending == 0
+                && (dev->pmcw.flag5 & PMCW5_V)
                 && (dev->scsw.flag3 & SCSW3_SC_PEND) == 0)
             {
                 /* Receive console input data from the client */
@@ -1196,8 +1209,8 @@ BYTE                    unitstat;       /* Status after receive data */
                 /* Close the connection if an error occurred */
                 if (unitstat & CSW_UC)
                 {
-                    close (dev->csock);
-                    dev->csock = 0;
+                    close (dev->fd);
+                    dev->fd = 0;
                     dev->connected = 0;
                 }
 
@@ -1240,6 +1253,9 @@ int loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 {
     /* Indicate that this is a console device */
     dev->console = 1;
+
+    /* Set device 'free' */
+    dev->connected = 0;
 
     /* Set number of sense bytes */
     dev->numsense = 1;
@@ -1458,7 +1474,7 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
         }
 
         /* Send the data to the client */
-        rc = send_packet(dev->csock, buf, len, "3270 data");
+        rc = send_packet(dev->fd, buf, len, "3270 data");
         if (rc < 0)
         {
             dev->sense[0] = SENSE_DC;
@@ -1789,7 +1805,7 @@ BYTE    stat;                           /* Unit status               */
         } /* end if(!data-chaining) */
 
         /* Send the data to the client */
-        rc = send_packet (dev->csock, iobuf, len, NULL);
+        rc = send_packet (dev->fd, iobuf, len, NULL);
         if (rc < 0)
         {
             dev->sense[0] = SENSE_EC;
@@ -1820,7 +1836,7 @@ BYTE    stat;                           /* Unit status               */
             len = sprintf (dev->buf,
                     "HHC901I Enter input for console device %4.4X\r\n",
                     dev->devnum);
-            rc = send_packet (dev->csock, dev->buf, len, NULL);
+            rc = send_packet (dev->fd, dev->buf, len, NULL);
             if (rc < 0)
             {
                 dev->sense[0] = SENSE_EC;
@@ -1877,7 +1893,7 @@ BYTE    stat;                           /* Unit status               */
     /*---------------------------------------------------------------*/
     /* AUDIBLE ALARM                                                 */
     /*---------------------------------------------------------------*/
-        rc = send_packet (dev->csock, "\a", 1, NULL);
+        rc = send_packet (dev->fd, "\a", 1, NULL);
         *residual = 0;
         *unitstat = CSW_CE | CSW_DE;
         break;

@@ -19,6 +19,7 @@
 /*      Corrections to program check by Jan Jaeger                   */
 /*      Branch tracing by Jan Jaeger                                 */
 /*      Light optimization on critical path by Valery Pogonchenko    */
+/*      STCRW and CSP instructions by Jan Jaeger                     */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -290,7 +291,13 @@ REGS   *realregs;                       /* True regs structure       */
        regs structure, realregs is the pointer to the real structure
        which must be used when loading/storing the psw, or backing up
        the instruction address in case of nullification */
-    realregs = &sysblk.regs[regs->cpuad];
+    realregs = sysblk.regs + regs->cpuad;
+
+#if MAX_CPU_ENGINES > 1
+    /* Unlock the main storage lock if held */
+    if (realregs->mainlock)
+        RELEASE_MAINLOCK(realregs);
+#endif /*MAX_CPU_ENGINES > 1*/
 
     /* Set the main storage reference and change bits */
     STORAGE_KEY(regs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
@@ -3133,7 +3140,7 @@ static BYTE module[8];                  /* Module name               */
         perform_serialization ();
 
         /* Obtain main-storage access lock */
-        OBTAIN_MAINLOCK();
+        OBTAIN_MAINLOCK(regs);
 
         /* Fetch byte from operand address */
         obyte = vfetchb ( effective_addr, b1, regs );
@@ -3142,7 +3149,7 @@ static BYTE module[8];                  /* Module name               */
         vstoreb ( 0xFF, effective_addr, b1, regs );
 
         /* Release main-storage access lock */
-        RELEASE_MAINLOCK();
+        RELEASE_MAINLOCK(regs);
 
         /* Set condition code from leftmost bit of operand byte */
         regs->psw.cc = obyte >> 7;
@@ -4901,6 +4908,13 @@ static BYTE module[8];                  /* Module name               */
                 break;
             }
 
+            /* If the subchannel is invalid then return cc0 */
+            if (!(dev->pmcw.flag5 & PMCW5_V))
+            {
+                regs->psw.cc = 0;
+                break;
+            }
+
             /* Perform serialization and checkpoint-synchronization */
             perform_serialization ();
             perform_chkpt_sync ();
@@ -5222,6 +5236,36 @@ static BYTE module[8];                  /* Module name               */
 
             /* Perform resume subchannel and set condition code */
             regs->psw.cc = resume_subchan (regs, dev);
+
+            break;
+
+        case 0x39:
+        /*-----------------------------------------------------------*/
+        /* B239: STCRW - Store Channel Report Word               [S] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Program check if operand not on a fullword boundary */
+            if ( effective_addr & 0x00000003 )
+            {
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Obtain any pending channel report */
+            n = channel_report();
+
+            /* Store channel report word at operand address */
+            vstore4 ( n, effective_addr, b1, regs );
+
+            /* Indicate if channel report or zeros were stored */
+            regs->psw.cc = (n == 0) ? 1 : 0;
 
             break;
 
@@ -5550,6 +5594,82 @@ static BYTE module[8];                  /* Module name               */
             break;
 #endif /*FEATURE_ACCESS_REGISTERS*/
 
+#ifdef FEATURE_BROADCASTED_PURGING
+        case 0x50:
+        /*-----------------------------------------------------------*/
+        /* B250: CSP - Compare and Swap and Purge              [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Program check if r1 is odd */
+            if ( r1 & 1 )
+            {
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Perform serialization before starting operation */
+            perform_serialization ();
+
+            /* Obtain main-storage access lock */
+            OBTAIN_MAINLOCK(regs);
+
+            /* Obtain 2nd operand address from r2 */
+            n2 = regs->gpr[r2] & 0x7FFFFFFC & ADDRESS_MAXWRAP(regs);
+
+            /* Load second operand from operand address  */
+            n = vfetch4 ( n2, r2, regs );
+
+            /* Compare operand with R1 register contents */
+            if ( regs->gpr[r1] == n )
+            {
+                /* If equal, store R1+1 at operand location and set cc=0 */
+                vstore4 ( regs->gpr[r1+1], n2, r2, regs );
+                regs->psw.cc = 0;
+
+                /* Purge the TLB if bit 31 of r2 register is set */
+                if (regs->gpr[r2] & 0x00000001)
+                {
+#if MAX_CPU_ENGINES == 1
+                    purge_tlb(regs);
+#else /*!MAX_CPU_ENGINES == 1*/
+                    issue_broadcast_request(&sysblk.brdcstptlb);
+#endif /*!MAX_CPU_ENGINES == 1*/
+                }
+
+                /* Purge the ALB if bit 30 of r2 register is set */
+                if (regs->gpr[r2] & 0x00000002)
+                {
+#if MAX_CPU_ENGINES == 1
+                    purge_alb(regs);
+#else /*!MAX_CPU_ENGINES == 1*/
+                    issue_broadcast_request(&sysblk.brdcstpalb);
+#endif /*!MAX_CPU_ENGINES == 1*/
+                }
+
+            }
+            else
+            {
+                /* If unequal, load R1 from operand and set cc=1 */
+                regs->gpr[r1] = n;
+                regs->psw.cc = 1;
+            }
+
+            /* Release main-storage access lock */
+            RELEASE_MAINLOCK(regs);
+
+            /* Perform serialization after completing operation */
+            perform_serialization ();
+
+            break;
+#endif /*FEATURE_BROADCASTED_PURGING*/
+
         case 0x52:
         /*-----------------------------------------------------------*/
         /* B252: MSR - Multiply Single Register                [RRE] */
@@ -5622,13 +5742,13 @@ static BYTE module[8];                  /* Module name               */
             perform_serialization ();
 
             /* Update page table entry interlocked */
-            OBTAIN_MAINLOCK();
+            OBTAIN_MAINLOCK(regs);
 
             /* Invalidate page table entry */
             invalidate_pte (ibyte, r1, r2, regs);
 
             /* Release mainstore interlock */
-            RELEASE_MAINLOCK();
+            RELEASE_MAINLOCK(regs);
 
             /* Perform serialization after operation */
             perform_serialization ();
@@ -5667,6 +5787,18 @@ static BYTE module[8];                  /* Module name               */
             regs->psw.cc = search_string (r1, r2, regs);
 
             break;
+
+#if 0
+        case 0x65:
+        /*-----------------------------------------------------------*/
+        /* B265: ???? - Coupling Facility                      [???] */
+        /*-----------------------------------------------------------*/
+
+            /* Set condition code 3 indicating no CF attached */
+            regs->psw.cc = 3;
+
+            break;
+#endif
 
 #ifdef FEATURE_EXTENDED_TOD_CLOCK
         case 0x78:
@@ -5865,7 +5997,7 @@ static BYTE module[8];                  /* Module name               */
         perform_serialization ();
 
         /* Obtain main-storage access lock */
-        OBTAIN_MAINLOCK();
+        OBTAIN_MAINLOCK(regs);
 
         /* Load second operand from operand address  */
         n = vfetch4 ( effective_addr, b1, regs );
@@ -5885,7 +6017,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Release main-storage access lock */
-        RELEASE_MAINLOCK();
+        RELEASE_MAINLOCK(regs);
 
         /* Perform serialization after completing operation */
         perform_serialization ();
@@ -5915,7 +6047,7 @@ static BYTE module[8];                  /* Module name               */
         perform_serialization ();
 
         /* Obtain main-storage access lock */
-        OBTAIN_MAINLOCK();
+        OBTAIN_MAINLOCK(regs);
 
         /* Load second operand from operand address  */
         n1 = vfetch4 ( effective_addr, b1, regs );
@@ -5938,7 +6070,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Release main-storage access lock */
-        RELEASE_MAINLOCK();
+        RELEASE_MAINLOCK(regs);
 
         /* Perform serialization after completing operation */
         perform_serialization ();
@@ -6872,12 +7004,84 @@ DWORD   csw;                            /* CSW for S/370 channels    */
 } /* end function perform_io_interrupt */
 
 /*-------------------------------------------------------------------*/
+/* Perform Machine Check interrupt if pending                        */
+/* Note: The caller MUST hold the interrupt lock (sysblk.intlock)    */
+/*-------------------------------------------------------------------*/
+static void perform_mck_interrupt (REGS *regs)
+{
+int     rc;                             /* Return code               */
+PSA    *psa;                            /* -> Prefixed storage area  */
+U64     mcic;                           /* Mach.check interrupt code */
+U32     xdmg;                           /* External damage code      */
+U32     fsta;                           /* Failing storage address   */
+
+    /* Test and clear pending machine check interrupt */
+    rc = present_mck_interrupt (regs, &mcic, &xdmg, &fsta);
+
+    /* Exit if no machine check was presented */
+    if (rc == 0) return;
+
+    /* Set the main storage reference and change bits */
+    STORAGE_KEY(regs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
+
+    /* Point to the PSA in main storage */
+    psa = (PSA*)(sysblk.mainstor + regs->pxr);
+
+    /* Store registers in machine check save area */
+    store_status(regs, regs->pxr);
+
+    /* Set the extended logout area to zeros */
+    memset(psa->storepsw, 0, 16);
+
+    /* Store the machine check interrupt code at PSA+232 */
+    psa->mckint[0] = mcic >> 56;
+    psa->mckint[1] = (mcic >> 48) & 0xFF;
+    psa->mckint[2] = (mcic >> 40) & 0xFF;
+    psa->mckint[3] = (mcic >> 32) & 0xFF;
+    psa->mckint[4] = (mcic >> 24) & 0xFF;
+    psa->mckint[5] = (mcic >> 16) & 0xFF;
+    psa->mckint[6] = (mcic >> 8) & 0xFF;
+    psa->mckint[7] = mcic & 0xFF;
+
+    /* Trace the machine check interrupt */
+    if (sysblk.insttrace || sysblk.inststep)
+        logmsg ("Machine Check code=%2.2X%2.2X%2.2X%2.2X."
+                "%2.2X%2.2X%2.2X%2.2X\n",
+                psa->mckint[0], psa->mckint[1],
+                psa->mckint[2], psa->mckint[3],
+                psa->mckint[4], psa->mckint[5],
+                psa->mckint[6], psa->mckint[7]);
+
+    /* Store the external damage code at PSA+244 */
+    psa->xdmgcode[0] = xdmg > 24;
+    psa->xdmgcode[1] = (xdmg > 16) & 0xFF;
+    psa->xdmgcode[2] = (xdmg > 8) & 0xFF;
+    psa->xdmgcode[3] = xdmg & 0xFF;
+
+    /* Store the failing storage address at PSA+248 */
+    psa->mcstorad[0] = fsta > 24;
+    psa->mcstorad[1] = (fsta > 16) & 0xFF;
+    psa->mcstorad[2] = (fsta > 8) & 0xFF;
+    psa->mcstorad[3] = fsta & 0xFF;
+
+    /* Store current PSW at PSA+X'30' */
+    store_psw ( &(regs->psw), psa->mckold );
+
+    /* Load new PSW from PSA+X'70' */
+    rc = load_psw ( &(regs->psw), psa->mcknew );
+    if ( rc )
+    {
+        program_check (regs, rc);
+    }
+
+} /* end function perform_mck_interrupt */
+
+/*-------------------------------------------------------------------*/
 /* CPU instruction execution thread                                  */
 /*-------------------------------------------------------------------*/
 void *cpu_thread (REGS *regs)
 {
 int     rc;                             /* Return code               */
-int     xdefer;                         /* Interrupt defer counter   */
 int     tracethis;                      /* Trace this instruction    */
 int     stepthis;                       /* Stop on this instruction  */
 int     diswait;                        /* 1=Disabled wait state     */
@@ -6927,9 +7131,6 @@ int     icidx;                          /* Instruction counter index */
     /* Clear the disabled wait state flag */
     diswait = 0;
 
-    /* Clear the interrupt defer counter */
-    xdefer = 0;
-
     /* Execute the program */
     while (1) {
 
@@ -6937,13 +7138,36 @@ int     icidx;                          /* Instruction counter index */
         tracethis = 0;
         stepthis = 0;
 
-        /* Test for interrupts every n instructions */
-        if (xdefer++ >= sysblk.intdrag
+        /* Test for interrupts if it appears that one may be pending */
+        if ((sysblk.mckpending && regs->psw.mach)
+            || ((sysblk.extpending || regs->cpuint)
+                && (regs->psw.sysmask & PSW_EXTMASK))
+            || regs->restart
+#ifndef FEATURE_BCMODE
+            || (sysblk.iopending && (regs->psw.sysmask & PSW_IOMASK))
+#else /*FEATURE_BCMODE*/
+            ||  (sysblk.iopending &&
+              (regs->psw.sysmask & (regs->psw.ecmode ? PSW_IOMASK : 0xFE)))
+#endif /*FEATURE_BCMODE*/
+#if MAX_CPU_ENGINES > 1
+            || (sysblk.broadcast != regs->broadcast)
+#endif /*MAX_CPU_ENGINES > 1*/
             || regs->psw.wait
             || regs->cpustate != CPUSTATE_STARTED)
         {
             /* Obtain the interrupt lock */
             obtain_lock (&sysblk.intlock);
+
+#if MAX_CPU_ENGINES > 1
+            /* Perform broadcasted purge of ALB and TLB if requested */
+            if (sysblk.broadcast != regs->broadcast)
+                perform_broadcast_request(regs);
+#endif /*MAX_CPU_ENGINES > 1*/
+
+            /* If a machine check is pending and we are enabled for
+               machine checks then take the interrupt */
+            if (sysblk.mckpending && regs->psw.mach)
+                perform_mck_interrupt (regs);
 
             /* If enabled for external interrupts, invite the
                service processor to present a pending interrupt */
@@ -7033,9 +7257,7 @@ int     icidx;                          /* Instruction counter index */
             /* Release the interrupt lock */
             release_lock (&sysblk.intlock);
 
-            /* Reset the interrupt defer counter */
-            xdefer = 0;
-        } /* end if(xdefer) */
+        } /* end if(interrupt) */
 
         /* Clear the instruction validity flag in case an access
            error occurs while attempting to fetch next instruction */
@@ -7093,6 +7315,7 @@ int     icidx;                          /* Instruction counter index */
 #endif /*INSTRUCTION_COUNTING*/
 
         /* Turn on trace for specific instructions */
+//      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x50) tracethis = 1; /*CSP*/
 //      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x2E) tracethis = 1; /*PGIN*/
 //      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x2F) tracethis = 1; /*PGOUT*/
 //      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x54) tracethis = 1; /*MVPG*/

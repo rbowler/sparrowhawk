@@ -761,8 +761,10 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
             chpbit = (dev->devnum >> 8) & 7;
 
             sccbchp->installed[chpbyte] |= 0x80 >> chpbit;
-//          sccbchp->standby[chpbyte] &= ~(0x80 >> chpbit);
-            sccbchp->online[chpbyte] |= 0x80 >> chpbit;
+            if (dev->pmcw.flag5 & PMCW5_V)
+                sccbchp->online[chpbyte] |= 0x80 >> chpbit;
+            else
+                sccbchp->standby[chpbyte] |= 0x80 >> chpbit;
         }
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
@@ -1140,7 +1142,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
     /* Set service signal external interrupt pending */
     sysblk.servparm = sccb_absolute_addr;
-    sysblk.servsig = 1;
+    sysblk.extpending = sysblk.servsig = 1;
 
     /* Release the interrupt lock */
     release_lock (&sysblk.intlock);
@@ -1209,7 +1211,7 @@ void scp_command (BYTE *command, int priomsg)
 
     /* Set service signal interrupt pending for read event data */
     sysblk.servparm = 1;
-    sysblk.servsig = 1;
+    sysblk.extpending = sysblk.servsig = 1;
 
     /* Release the interrupt lock */
     release_lock (&sysblk.intlock);

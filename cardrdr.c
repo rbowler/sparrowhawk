@@ -27,7 +27,7 @@ int     i;                              /* Array subscript           */
         /* Check for valid file name */
         if (strlen(argv[0]) > sizeof(dev->filename)-1)
         {
-            fprintf (stderr, "HHC401I File name too long\n");
+            logmsg ("HHC401I File name too long\n");
             return -1;
         }
 
@@ -87,8 +87,7 @@ int     i;                              /* Array subscript           */
             continue;
         }
 
-        fprintf (stderr,
-                "HHC402I Invalid argument: %s\n",
+        logmsg ("HHC402I Invalid argument: %s\n",
                 argv[i]);
         return -1;
     }
@@ -96,8 +95,7 @@ int     i;                              /* Array subscript           */
     /* Check for conflicting arguments */
     if (dev->ebcdic && dev->ascii)
     {
-        fprintf (stderr,
-                "HHC403I Specify ASCII or EBCDIC but not both\n");
+        logmsg ("HHC403I Specify ASCII or EBCDIC but not both\n");
         return -1;
     }
 

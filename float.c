@@ -58,7 +58,7 @@ typedef struct _EXTENDED_FLOAT {
 /*	msb 	most significant 64 bit of operand b                 */
 /*	lsb 	least significant 64 bit of operand b                */
 /*-------------------------------------------------------------------*/
-static void add_U128 ( U64 *msa, U64 *lsa, U64 msb, U64 lsb )
+static inline void add_U128 ( U64 *msa, U64 *lsa, U64 msb, U64 lsb )
 {
 U64 wk;
 U32 sum;
@@ -86,7 +86,7 @@ U32 c;
 /*	msb 	most significant 64 bit of operand b                 */
 /*	lsb 	least significant 64 bit of operand b                */
 /*-------------------------------------------------------------------*/
-static void sub_U128 ( U64 *msa, U64 *lsa, U64 msb, U64 lsb )
+static inline void sub_U128 ( U64 *msa, U64 *lsa, U64 msb, U64 lsb )
 {
 S64 wk;
 U32 sum;
@@ -114,7 +114,7 @@ int c;
 /*	msb 	most significant 64 bit of operand b                 */
 /*	lsb 	least significant 64 bit of operand b                */
 /*-------------------------------------------------------------------*/
-static void sub_reverse_U128 ( U64 *msa, U64 *lsa, U64 msb, U64 lsb )
+static inline void sub_reverse_U128 ( U64 *msa, U64 *lsa, U64 msb, U64 lsb )
 {
 S64 wk;
 U32 sum;
@@ -138,7 +138,7 @@ int c;
 /*      fl	Internal float format to be converted to	     */
 /*	fpr	Register to be converted from			     */
 /*-------------------------------------------------------------------*/
-static void get_sf ( SHORT_FLOAT *fl, U32 *fpr )
+static inline void get_sf ( SHORT_FLOAT *fl, U32 *fpr )
 {
     fl->sign = *fpr >> 31;
     fl->expo = (*fpr >> 24) & 0x007F;
@@ -154,7 +154,7 @@ static void get_sf ( SHORT_FLOAT *fl, U32 *fpr )
 /*      fl	Internal float format to be converted from	     */
 /*	fpr	Register to be converted to			     */
 /*-------------------------------------------------------------------*/
-static void store_sf ( SHORT_FLOAT *fl, U32 *fpr )
+static inline void store_sf ( SHORT_FLOAT *fl, U32 *fpr )
 {
     *fpr = ((U32)fl->sign << 31) 
 	 | ((U32)fl->expo << 24) 
@@ -170,7 +170,7 @@ static void store_sf ( SHORT_FLOAT *fl, U32 *fpr )
 /*      fl	Internal float format to be converted to	     */
 /*	fpr	Register to be converted from			     */
 /*-------------------------------------------------------------------*/
-static void get_lf ( LONG_FLOAT *fl, U32 *fpr )
+static inline void get_lf ( LONG_FLOAT *fl, U32 *fpr )
 {
     fl->sign = *fpr >> 31;
     fl->expo = (*fpr >> 24) & 0x007F;
@@ -187,7 +187,7 @@ static void get_lf ( LONG_FLOAT *fl, U32 *fpr )
 /*      fl	Internal float format to be converted from	     */
 /*	fpr	Register to be converted to			     */
 /*-------------------------------------------------------------------*/
-static void store_lf ( LONG_FLOAT *fl, U32 *fpr )
+static inline void store_lf ( LONG_FLOAT *fl, U32 *fpr )
 {
     fpr[0] = ((U32)fl->sign << 31) 
 	   | ((U32)fl->expo << 24) 
@@ -204,7 +204,7 @@ static void store_lf ( LONG_FLOAT *fl, U32 *fpr )
 /*      fl	Internal float format to be converted to	     */
 /*	fpr	Register to be converted from			     */
 /*-------------------------------------------------------------------*/
-static void get_ef ( EXTENDED_FLOAT *fl, U32 *fpr )
+static inline void get_ef ( EXTENDED_FLOAT *fl, U32 *fpr )
 {
     fl->sign = *fpr >> 31;
     fl->expo = (*fpr >> 24) & 0x007F;
@@ -224,7 +224,7 @@ static void get_ef ( EXTENDED_FLOAT *fl, U32 *fpr )
 /*      fl	Internal float format to be converted from	     */
 /*	fpr	Register to be converted to			     */
 /*-------------------------------------------------------------------*/
-static void store_ef ( EXTENDED_FLOAT *fl, U32 *fpr )
+static inline void store_ef ( EXTENDED_FLOAT *fl, U32 *fpr )
 {
 char ls_sign;
 
@@ -255,7 +255,7 @@ char ls_sign;
 /*      causes an addressing, translation, or fetch protection       */
 /*      exception, and in this case the function does not return.    */
 /*-------------------------------------------------------------------*/
-static void vfetch_sf ( SHORT_FLOAT *fl, U32 addr, int arn, REGS *regs )
+static inline void vfetch_sf ( SHORT_FLOAT *fl, U32 addr, int arn, REGS *regs )
 {
 U32     value;                          /* Operand value             */
 
@@ -285,7 +285,7 @@ U32     value;                          /* Operand value             */
 /*      causes an addressing, translation, or fetch protection       */
 /*      exception, and in this case the function does not return.    */
 /*-------------------------------------------------------------------*/
-static void vfetch_lf ( LONG_FLOAT *fl, U32 addr, int arn, REGS *regs )
+static inline void vfetch_lf ( LONG_FLOAT *fl, U32 addr, int arn, REGS *regs )
 {
 U64     value;                          /* Operand value             */
 
@@ -308,7 +308,7 @@ U64     value;                          /* Operand value             */
 /* Input:                                                            */
 /*      fl	Internal float					     */
 /*-------------------------------------------------------------------*/
-static void normal_sf ( SHORT_FLOAT *fl )
+static inline void normal_sf ( SHORT_FLOAT *fl )
 {
     if (fl->short_fract) {
 	while ((fl->short_fract & 0x00F00000) == 0) {
@@ -329,7 +329,7 @@ static void normal_sf ( SHORT_FLOAT *fl )
 /* Input:                                                            */
 /*      fl	Internal float					     */
 /*-------------------------------------------------------------------*/
-static void normal_lf ( LONG_FLOAT *fl )
+static inline void normal_lf ( LONG_FLOAT *fl )
 {
     if (fl->long_fract) {
 	while ((fl->long_fract & 0x00F0000000000000ULL) == 0) {
@@ -350,7 +350,7 @@ static void normal_lf ( LONG_FLOAT *fl )
 /* Input:                                                            */
 /*      fl	Internal float					     */
 /*-------------------------------------------------------------------*/
-static void normal_ef ( EXTENDED_FLOAT *fl )
+static inline void normal_ef ( EXTENDED_FLOAT *fl )
 {
     if (fl->ms_fract || fl->ls_fract) {
 	while (fl->ms_fract == 0) {
@@ -384,12 +384,13 @@ static void normal_ef ( EXTENDED_FLOAT *fl )
 /*      fl	Internal float					     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void overflow_sf ( SHORT_FLOAT *fl, REGS *regs )
+static inline int overflow_sf ( SHORT_FLOAT *fl, REGS *regs )
 {
     if (fl->expo > 127) {
 	fl->expo &= 0x007F;
-	program_check (regs, PGM_EXPONENT_OVERFLOW_EXCEPTION);
+	return (PGM_EXPONENT_OVERFLOW_EXCEPTION);
     }
+    return (0);
     
 } /* end function overflow_sf */
 
@@ -401,12 +402,13 @@ static void overflow_sf ( SHORT_FLOAT *fl, REGS *regs )
 /*      fl	Internal float					     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void overflow_lf ( LONG_FLOAT *fl, REGS *regs )
+static inline int overflow_lf ( LONG_FLOAT *fl, REGS *regs )
 {
     if (fl->expo > 127) {
 	fl->expo &= 0x007F;
-	program_check (regs, PGM_EXPONENT_OVERFLOW_EXCEPTION);
+	return (PGM_EXPONENT_OVERFLOW_EXCEPTION);
     }
+    return (0);
     
 } /* end function overflow_lf */
 
@@ -418,12 +420,13 @@ static void overflow_lf ( LONG_FLOAT *fl, REGS *regs )
 /*      fl	Internal float					     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void overflow_ef ( EXTENDED_FLOAT *fl, REGS *regs )
+static inline int overflow_ef ( EXTENDED_FLOAT *fl, REGS *regs )
 {
     if (fl->expo > 127) {
 	fl->expo &= 0x007F;
-	program_check (regs, PGM_EXPONENT_OVERFLOW_EXCEPTION);
+	return (PGM_EXPONENT_OVERFLOW_EXCEPTION);
     }
+    return (0);
     
 } /* end function overflow_ef */
 
@@ -435,12 +438,12 @@ static void overflow_ef ( EXTENDED_FLOAT *fl, REGS *regs )
 /*      fl	Internal float					     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void underflow_sf ( SHORT_FLOAT *fl, REGS *regs )
+static inline int underflow_sf ( SHORT_FLOAT *fl, REGS *regs )
 {
     if (fl->expo < 0) {
 	if (regs->psw.eumask) {
 	    fl->expo &= 0x007F;
-	    program_check (regs, PGM_EXPONENT_UNDERFLOW_EXCEPTION);
+	    return (PGM_EXPONENT_UNDERFLOW_EXCEPTION);
 	} else {
 	    /* set true 0 */
 
@@ -449,6 +452,7 @@ static void underflow_sf ( SHORT_FLOAT *fl, REGS *regs )
 	    fl->expo = 0;
 	}
     }
+    return (0);
 
 } /* end function underflow_sf */
 
@@ -460,12 +464,12 @@ static void underflow_sf ( SHORT_FLOAT *fl, REGS *regs )
 /*      fl	Internal float					     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void underflow_lf ( LONG_FLOAT *fl, REGS *regs )
+static inline int underflow_lf ( LONG_FLOAT *fl, REGS *regs )
 {
     if (fl->expo < 0) {
 	if (regs->psw.eumask) {
 	    fl->expo &= 0x007F;
-	    program_check (regs, PGM_EXPONENT_UNDERFLOW_EXCEPTION);
+	    return (PGM_EXPONENT_UNDERFLOW_EXCEPTION);
 	} else {
 	    /* set true 0 */
 
@@ -474,6 +478,7 @@ static void underflow_lf ( LONG_FLOAT *fl, REGS *regs )
 	    fl->expo = 0;
 	}
     }
+    return (0);
 
 } /* end function underflow_lf */
 
@@ -485,12 +490,12 @@ static void underflow_lf ( LONG_FLOAT *fl, REGS *regs )
 /*      fl	Internal float					     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void underflow_ef ( EXTENDED_FLOAT *fl, REGS *regs )
+static inline int underflow_ef ( EXTENDED_FLOAT *fl, REGS *regs )
 {
     if (fl->expo < 0) {
 	if (regs->psw.eumask) {
 	    fl->expo &= 0x007F;
-	    program_check (regs, PGM_EXPONENT_UNDERFLOW_EXCEPTION);
+	    return (PGM_EXPONENT_UNDERFLOW_EXCEPTION);
 	} else {
 	    /* set true 0 */
 
@@ -500,8 +505,103 @@ static void underflow_ef ( EXTENDED_FLOAT *fl, REGS *regs )
 	    fl->expo = 0;
 	}
     }
+    return (0);
 
 } /* end function underflow_ef */
+
+
+/*-------------------------------------------------------------------*/
+/* Overflow and underflow of short float                             */
+/*                                                                   */
+/* Input:                                                            */
+/*      fl	Internal float					     */
+/*      regs    CPU register context                                 */
+/*-------------------------------------------------------------------*/
+static inline int over_under_flow_sf ( SHORT_FLOAT *fl, REGS *regs )
+{
+    if (fl->expo > 127) {
+	fl->expo &= 0x007F;
+	return (PGM_EXPONENT_OVERFLOW_EXCEPTION);
+    } else {
+	if (fl->expo < 0) {
+	    if (regs->psw.eumask) {
+		fl->expo &= 0x007F;
+		return (PGM_EXPONENT_UNDERFLOW_EXCEPTION);
+	    } else {
+		/* set true 0 */
+
+		fl->short_fract = 0;
+		fl->sign = POS;
+		fl->expo = 0;
+	    }
+	}
+    }
+    return (0);
+
+} /* end function over_under_flow_sf */
+    
+
+/*-------------------------------------------------------------------*/
+/* Overflow and underflow of long float                              */
+/*                                                                   */
+/* Input:                                                            */
+/*      fl	Internal float					     */
+/*      regs    CPU register context                                 */
+/*-------------------------------------------------------------------*/
+static inline int over_under_flow_lf ( LONG_FLOAT *fl, REGS *regs )
+{
+    if (fl->expo > 127) {
+	fl->expo &= 0x007F;
+	return (PGM_EXPONENT_OVERFLOW_EXCEPTION);
+    } else {
+	if (fl->expo < 0) {
+	    if (regs->psw.eumask) {
+		fl->expo &= 0x007F;
+		return (PGM_EXPONENT_UNDERFLOW_EXCEPTION);
+	    } else {
+		/* set true 0 */
+
+		fl->long_fract = 0;
+		fl->sign = POS;
+		fl->expo = 0;
+	    }
+	}
+    }
+    return (0);
+    
+} /* end function over_under_flow_lf */
+
+
+/*-------------------------------------------------------------------*/
+/* Overflow and underflow of extended float                          */
+/*                                                                   */
+/* Input:                                                            */
+/*      fl	Internal float					     */
+/*      regs    CPU register context                                 */
+/*-------------------------------------------------------------------*/
+static inline int over_under_flow_ef ( EXTENDED_FLOAT *fl, REGS *regs )
+{
+    if (fl->expo > 127) {
+	fl->expo &= 0x007F;
+	return (PGM_EXPONENT_OVERFLOW_EXCEPTION);
+    } else {
+	if (fl->expo < 0) {
+	    if (regs->psw.eumask) {
+		fl->expo &= 0x007F;
+		return (PGM_EXPONENT_UNDERFLOW_EXCEPTION);
+	    } else {
+		/* set true 0 */
+
+		fl->ms_fract = 0;
+		fl->ls_fract = 0;
+		fl->sign = POS;
+		fl->expo = 0;
+	    }
+	}
+    }
+    return (0);
+    
+} /* end function over_under_flow_ef */
 
 
 /*-------------------------------------------------------------------*/
@@ -512,16 +612,16 @@ static void underflow_ef ( EXTENDED_FLOAT *fl, REGS *regs )
 /*      fl	Internal float					     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void significance_sf ( SHORT_FLOAT *fl, REGS *regs )
+static inline int significance_sf ( SHORT_FLOAT *fl, REGS *regs )
 {
     fl->sign = POS;
     if (regs->psw.sgmask) {
-        program_check (regs, PGM_SIGNIFICANCE_EXCEPTION);
-    } else {
-        /* set true 0 */
-
-        fl->expo = 0;
+	return (PGM_SIGNIFICANCE_EXCEPTION);
     }
+    /* set true 0 */
+
+    fl->expo = 0;
+    return (0);
 
 } /* end function significance_sf */
 
@@ -534,16 +634,16 @@ static void significance_sf ( SHORT_FLOAT *fl, REGS *regs )
 /*      fl	Internal float					     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void significance_lf ( LONG_FLOAT *fl, REGS *regs )
+static inline int significance_lf ( LONG_FLOAT *fl, REGS *regs )
 {
     fl->sign = POS;
     if (regs->psw.sgmask) {
-        program_check (regs, PGM_SIGNIFICANCE_EXCEPTION);
-    } else {
-        /* set true 0 */
-
-        fl->expo = 0;
+	return (PGM_SIGNIFICANCE_EXCEPTION);
     }
+    /* set true 0 */
+
+    fl->expo = 0;
+    return (0);
 
 } /* end function significance_lf */
 
@@ -556,16 +656,16 @@ static void significance_lf ( LONG_FLOAT *fl, REGS *regs )
 /*      fl	Internal float					     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void significance_ef ( EXTENDED_FLOAT *fl, REGS *regs )
+static inline int significance_ef ( EXTENDED_FLOAT *fl, REGS *regs )
 {
     fl->sign = POS;
     if (regs->psw.sgmask) {
-        program_check (regs, PGM_SIGNIFICANCE_EXCEPTION);
-    } else {
-        /* set true 0 */
-
-        fl->expo = 0;
+	return (PGM_SIGNIFICANCE_EXCEPTION);
     }
+    /* set true 0 */
+
+    fl->expo = 0;
+    return (0);
 
 } /* end function significance_ef */
 
@@ -579,11 +679,13 @@ static void significance_ef ( EXTENDED_FLOAT *fl, REGS *regs )
 /*	normal	Normalize if true				     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void add_sf ( SHORT_FLOAT *fl, SHORT_FLOAT *add_fl, BYTE normal, 
+static int add_sf ( SHORT_FLOAT *fl, SHORT_FLOAT *add_fl, BYTE normal, 
 		REGS *regs )
 {
-BYTE shift;
+int	pgm_check;
+BYTE	shift;
 
+    pgm_check = 0;
     if (add_fl->short_fract || add_fl->expo) {	/* add_fl not 0 */
 	if (fl->short_fract || fl->expo) {	/* fl not 0 */
 	    /* both not 0 */
@@ -609,11 +711,15 @@ BYTE shift;
 			    fl->sign = add_fl->sign;
 			    fl->short_fract = add_fl->short_fract;
 
-			    if (normal == NORMAL) {
-				normal_sf (fl);
-				underflow_sf (fl, regs);
+			    if (fl->short_fract == 0) {
+	 			pgm_check = significance_sf (fl, regs);
+			    } else {
+				if (normal == NORMAL) {
+				    normal_sf (fl);
+				    pgm_check = underflow_sf (fl, regs);
+				}
 			    }
-			    return;
+			    return (pgm_check);
 			}
 		    }
 		    /* guard digit */
@@ -626,11 +732,15 @@ BYTE shift;
 		    	if (shift >= 6 || ((add_fl->short_fract >>= (shift * 4)) == 0)) {
 			    /* 0, nothing to add */
 
-			    if (normal == NORMAL) {
-				normal_sf (fl);
-				underflow_sf (fl, regs);
+			    if (fl->short_fract == 0) {
+	 			pgm_check = significance_sf (fl, regs);
+			    } else {
+				if (normal == NORMAL) {
+				    normal_sf (fl);
+				    pgm_check = underflow_sf (fl, regs);
+				}
 			    }
-			    return;
+			    return (pgm_check);
 			}
 		    }
 		    /* guard digit */
@@ -646,8 +756,7 @@ BYTE shift;
 		    /* true 0 */
 
 		    fl->short_fract = 0;
-		    significance_sf (fl, regs);
-		    return;
+		    return ( significance_sf (fl, regs) );
 
 		} else if (fl->short_fract > add_fl->short_fract) {
 		    fl->short_fract -= add_fl->short_fract;
@@ -661,7 +770,7 @@ BYTE shift;
 	    if (fl->short_fract & 0xF0000000) {
 		fl->short_fract >>= 8;
 		(fl->expo)++;
-		overflow_sf (fl, regs);
+		pgm_check = overflow_sf (fl, regs);
 	    } else {
 
 	 	if (normal == NORMAL) {
@@ -675,22 +784,22 @@ BYTE shift;
 		        } else {
 			    (fl->expo)--;
 			    normal_sf (fl);
-			    underflow_sf (fl, regs);
+			    pgm_check = underflow_sf (fl, regs);
 		        }
 		    } else {
 		        /* true 0 */
 
-		 	significance_sf (fl, regs);
+		 	pgm_check = significance_sf (fl, regs);
 		    }
 	        } else {
 		    /* not normalize, just guard digit */
 		    fl->short_fract >>= 4;
 	    	    if (fl->short_fract == 0) {
-		 	significance_sf (fl, regs);
+		 	pgm_check = significance_sf (fl, regs);
 		    }
 	        }
 	    }
-	    return;
+	    return (pgm_check);
 	} else { /* fl 0, add_fl not 0 */
 	    /* copy summand */
 
@@ -702,14 +811,14 @@ BYTE shift;
 	if (fl->short_fract == 0) { /* fl 0 */
 	    /* both 0 */
 
-	    significance_sf (fl, regs);
-	    return;
+	    return ( significance_sf (fl, regs) );
 	}
     }
     if (normal == NORMAL) {
 	normal_sf (fl);
-	underflow_sf (fl, regs);
+	pgm_check = underflow_sf (fl, regs);
     }
+    return (pgm_check);
 
 } /* end function add_sf */
 
@@ -723,11 +832,13 @@ BYTE shift;
 /*	normal	Normalize if true				     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void add_lf ( LONG_FLOAT *fl, LONG_FLOAT *add_fl, BYTE normal, 
+static int add_lf ( LONG_FLOAT *fl, LONG_FLOAT *add_fl, BYTE normal, 
 		REGS *regs )
 {
-BYTE shift;
+int	pgm_check;
+BYTE	shift;
 
+    pgm_check = 0;
     if (add_fl->long_fract || add_fl->expo) {	/* add_fl not 0 */
 	if (fl->long_fract || fl->expo) {	/* fl not 0 */
 	    /* both not 0 */
@@ -753,11 +864,15 @@ BYTE shift;
 			    fl->sign = add_fl->sign;
 			    fl->long_fract = add_fl->long_fract;
 
-			    if (normal == NORMAL) {
-				normal_lf (fl);
-				underflow_lf (fl, regs);
+			    if (fl->long_fract == 0) {
+				pgm_check = significance_lf (fl, regs);
+			    } else {
+				if (normal == NORMAL) {
+				    normal_lf (fl);
+				    pgm_check = underflow_lf (fl, regs);
+				}
 			    }
-			    return;
+			    return (pgm_check);
 			}
 		    }
 		    /* guard digit */
@@ -770,11 +885,15 @@ BYTE shift;
 		    	if (shift >= 14 || ((add_fl->long_fract >>= (shift * 4)) == 0)) {
 			    /* 0, nothing to add */
 
-			    if (normal == NORMAL) {
-				normal_lf (fl);
-				underflow_lf (fl, regs);
+			    if (fl->long_fract == 0) {
+				pgm_check = significance_lf (fl, regs);
+			    } else {
+				if (normal == NORMAL) {
+				    normal_lf (fl);
+				    pgm_check = underflow_lf (fl, regs);
+				}
 			    }
-			    return;
+			    return (pgm_check);
 			}
 		    }
 		    /* guard digit */
@@ -790,8 +909,7 @@ BYTE shift;
 		    /* true 0 */
 
 		    fl->long_fract = 0;
-		    significance_lf (fl, regs);
-		    return;
+		    return ( significance_lf (fl, regs) );
 
 		} else if (fl->long_fract > add_fl->long_fract) {
 		    fl->long_fract -= add_fl->long_fract;
@@ -805,7 +923,7 @@ BYTE shift;
             if (fl->long_fract & 0xF000000000000000ULL) {
                 fl->long_fract >>= 8;
                 (fl->expo)++;
-		overflow_lf (fl, regs);
+		pgm_check = overflow_lf (fl, regs);
             } else {
 
                 if (normal == NORMAL) {
@@ -819,22 +937,22 @@ BYTE shift;
                         } else {
 			    (fl->expo)--;
 			    normal_lf (fl);
-			    underflow_lf (fl, regs);
+			    pgm_check = underflow_lf (fl, regs);
                         }
                     } else {
                         /* true 0 */
 
-                        significance_lf (fl, regs);
+                        pgm_check = significance_lf (fl, regs);
                     }
                 } else {
                     /* not normalize, just guard digit */
                     fl->long_fract >>= 4;
                     if (fl->long_fract == 0) {
-                        significance_lf (fl, regs);
+                        pgm_check = significance_lf (fl, regs);
                     }
                 }
             }
-	    return;
+	    return (pgm_check);
 	} else { /* fl 0, add_fl not 0 */
 	    /* copy summand */
 
@@ -846,15 +964,15 @@ BYTE shift;
         if (fl->long_fract == 0) { /* fl 0 */
             /* both 0 */
 
-            significance_lf (fl, regs);
-            return;
+            return ( significance_lf (fl, regs) );
         }
     }
     if (normal == NORMAL) {
 	normal_lf (fl);
-	underflow_lf (fl, regs);
+	pgm_check = underflow_lf (fl, regs);
     }
-
+    return (pgm_check);
+	
 } /* end function add_lf */
 
 
@@ -866,10 +984,12 @@ BYTE shift;
 /*      add_fl	Float to be added				     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void add_ef ( EXTENDED_FLOAT *fl, EXTENDED_FLOAT *add_fl, REGS *regs )
+static int add_ef ( EXTENDED_FLOAT *fl, EXTENDED_FLOAT *add_fl, REGS *regs )
 {
-BYTE shift;
+int	pgm_check;
+BYTE	shift;
 
+    pgm_check = 0;
     if (add_fl->ms_fract || add_fl->ls_fract || add_fl->expo) {	/* add_fl not 0 */
 	if (fl->ms_fract || fl->ls_fract || fl->expo) 	{	/* fl not 0 */
 	    /* both not 0 */
@@ -900,9 +1020,13 @@ BYTE shift;
 			    fl->ms_fract = add_fl->ms_fract;
 			    fl->ls_fract = add_fl->ls_fract;
 
-			    normal_ef (fl);
-			    underflow_ef (fl, regs);
-			    return;
+			    if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) {	
+				pgm_check = significance_ef (fl, regs);
+			    } else {
+				normal_ef (fl);
+				pgm_check =  underflow_ef (fl, regs);
+			    }
+			    return (pgm_check);
 			} else if (shift >= 16) {
 			    fl->ls_fract = fl->ms_fract;
 			    if (shift > 16) {
@@ -923,9 +1047,13 @@ BYTE shift;
 			    fl->ms_fract = add_fl->ms_fract;
 			    fl->ls_fract = add_fl->ls_fract;
 
-			    normal_ef (fl);
-			    underflow_ef (fl, regs);
-			    return;
+			    if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) {	
+				pgm_check = significance_ef (fl, regs);
+			    } else {
+				normal_ef (fl);
+				pgm_check = underflow_ef (fl, regs);
+			    }
+			    return (pgm_check);
 			}
 		    }
 		    /* guard digit */
@@ -940,9 +1068,13 @@ BYTE shift;
 		    	if (shift >= 28) {
 			    /* 0, nothing to add */
 
-			    normal_ef (fl);
-			    underflow_ef (fl, regs);
-			    return;
+			    if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) {	
+				pgm_check = significance_ef (fl, regs);
+			    } else {
+				normal_ef (fl);
+				pgm_check = underflow_ef (fl, regs);
+			    }
+			    return (pgm_check);
 			} else if (shift >= 16) {
 			    add_fl->ls_fract = add_fl->ms_fract;
 			    if (shift > 16) {
@@ -959,9 +1091,13 @@ BYTE shift;
 			if ((add_fl->ms_fract == 0) && (add_fl->ls_fract == 0)) {	
 			    /* 0, nothing to add */
 
-			    normal_ef (fl);
-			    underflow_ef (fl, regs);
-			    return;
+			    if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) {	
+				pgm_check = significance_ef (fl, regs);
+			    } else {
+				normal_ef (fl);
+				pgm_check = underflow_ef (fl, regs);
+			    }
+			    return (pgm_check);
 			}
 		    }
 		    /* guard digit */
@@ -984,8 +1120,7 @@ BYTE shift;
 
 		    fl->ms_fract = 0;
 		    fl->ls_fract = 0;
-		    significance_ef (fl, regs);
-		    return;
+		    return ( significance_ef (fl, regs) );
 
 		} else if ((fl->ms_fract > add_fl->ms_fract) 
 			|| ((fl->ms_fract == add_fl->ms_fract) 
@@ -1009,7 +1144,7 @@ BYTE shift;
 			 | (fl->ls_fract >> 8);
 		fl->ms_fract >>= 8;
                 (fl->expo)++;
-		overflow_ef (fl, regs);
+		pgm_check = overflow_ef (fl, regs);
             } else {
 		/* normalize with guard digit */
 		if (fl->ms_fract || fl->ls_fract) {
@@ -1023,15 +1158,15 @@ BYTE shift;
 		    } else {
 			(fl->expo)--;
 			normal_ef (fl);
-			underflow_ef (fl, regs);
+			pgm_check = underflow_ef (fl, regs);
 		    }
 		} else {
 		    /* true 0 */
 
-		    significance_ef (fl, regs);
+		    pgm_check = significance_ef (fl, regs);
 		}
 	    }
-	    return;
+	    return (pgm_check);
 	} else { /* fl 0, add_fl not 0 */
 	    /* copy summand */
 
@@ -1044,13 +1179,12 @@ BYTE shift;
 	if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) { /* fl 0 */
 	    /* both 0 */
 
-	    significance_ef (fl, regs);
-	    return;
+	    return ( significance_ef (fl, regs) );
 	}
     }
     normal_ef (fl);
-    underflow_ef (fl, regs);
-
+    return ( underflow_ef (fl, regs) );
+  
 } /* end function add_ef */
 
 
@@ -1064,10 +1198,10 @@ BYTE shift;
 /*-------------------------------------------------------------------*/
 static void cmp_sf ( SHORT_FLOAT *fl, SHORT_FLOAT *cmp_fl, REGS *regs )
 {
-BYTE shift;
+BYTE	shift;
 
-    if (cmp_fl->short_fract) {	/* cmp_fl not 0 */
-	if (fl->short_fract) {	/* fl not 0 */
+    if (cmp_fl->short_fract || cmp_fl->expo) {	/* cmp_fl not 0 */
+	if (fl->short_fract || fl->expo) {	/* fl not 0 */
 	    /* both not 0 */
 
 	    if (fl->expo == cmp_fl->expo) {
@@ -1091,7 +1225,6 @@ BYTE shift;
 			    } else {
 			    	regs->psw.cc = 0;
 			    }
-
 			    return;
 			}
 		    }
@@ -1109,7 +1242,6 @@ BYTE shift;
 			    } else {
 			    	regs->psw.cc = 0;
 			    }
-
 			    return;
 			}
 		    }
@@ -1142,12 +1274,10 @@ BYTE shift;
 	    } else {
 	    	regs->psw.cc = 0;
 	    }
-
 	    return;
 	} else { /* fl 0, cmp_fl not 0 */
 	    /* Set condition code */
 	    regs->psw.cc = cmp_fl->sign ? 2 : 1;
-
 	    return;
 	}
     } else { 			    /* cmp_fl 0 */
@@ -1157,7 +1287,6 @@ BYTE shift;
 	} else {
 	    regs->psw.cc = 0;
 	}
-
 	return;
     }
 
@@ -1174,10 +1303,10 @@ BYTE shift;
 /*-------------------------------------------------------------------*/
 static void cmp_lf ( LONG_FLOAT *fl, LONG_FLOAT *cmp_fl, REGS *regs )
 {
-BYTE shift;
+BYTE	shift;
 
-    if (cmp_fl->long_fract) {	/* cmp_fl not 0 */
-	if (fl->long_fract) {	/* fl not 0 */
+    if (cmp_fl->long_fract || cmp_fl->expo) {	/* cmp_fl not 0 */
+	if (fl->long_fract || fl->expo) {	/* fl not 0 */
 	    /* both not 0 */
 
 	    if (fl->expo == cmp_fl->expo) {
@@ -1201,7 +1330,6 @@ BYTE shift;
 			    } else {
 			    	regs->psw.cc = 0;
 			    }
-
 			    return;
 			}
 		    }
@@ -1219,7 +1347,6 @@ BYTE shift;
 			    } else {
 			    	regs->psw.cc = 0;
 			    }
-
 			    return;
 			}
 		    }
@@ -1252,12 +1379,10 @@ BYTE shift;
 	    } else {
 	    	regs->psw.cc = 0;
 	    }
-
 	    return;
 	} else { /* fl 0, cmp_fl not 0 */
 	    /* Set condition code */
 	    regs->psw.cc = cmp_fl->sign ? 2 : 1;
-
 	    return;
 	}
     } else { 			    /* cmp_fl 0 */
@@ -1267,7 +1392,6 @@ BYTE shift;
 	} else {
 	    regs->psw.cc = 0;
 	}
-
 	return;
     }
 
@@ -1283,7 +1407,7 @@ BYTE shift;
 /*      result_fl	Result long float			     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void mul_sf_to_lf ( SHORT_FLOAT *fl, SHORT_FLOAT *mul_fl, 
+static int mul_sf_to_lf ( SHORT_FLOAT *fl, SHORT_FLOAT *mul_fl, 
 		LONG_FLOAT *result_fl, REGS *regs )
 {
     if (fl->short_fract && mul_fl->short_fract) {
@@ -1303,19 +1427,20 @@ static void mul_sf_to_lf ( SHORT_FLOAT *fl, SHORT_FLOAT *mul_fl,
 	    result_fl->expo = fl->expo + mul_fl->expo - 65;
 	}
 
-	/* handle overflow and underflow */
-	overflow_lf (result_fl, regs);
-	underflow_lf (result_fl, regs);
-
 	/* determine sign */
 	result_fl->sign = (fl->sign == mul_fl->sign) ? POS : NEG;
+
+	/* handle overflow and underflow */
+	return ( over_under_flow_lf (result_fl, regs) );
     } else {
     	/* set true 0 */
 
     	result_fl->sign = POS;
     	result_fl->expo = 0;
     	result_fl->long_fract = 0;
+	return (0);
     }
+
 } /* end function mul_sf_to_lf */
 
 
@@ -1328,10 +1453,10 @@ static void mul_sf_to_lf ( SHORT_FLOAT *fl, SHORT_FLOAT *mul_fl,
 /*      result_fl	Result extended float			     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void mul_lf_to_ef ( LONG_FLOAT *fl, LONG_FLOAT *mul_fl, 
+static int mul_lf_to_ef ( LONG_FLOAT *fl, LONG_FLOAT *mul_fl, 
 		EXTENDED_FLOAT *result_fl, REGS *regs )
 {
-U64 wk;
+U64	wk;
 
     if (fl->long_fract && mul_fl->long_fract) {
 	/* normalize operands */
@@ -1358,12 +1483,11 @@ U64 wk;
 	    result_fl->expo = fl->expo + mul_fl->expo - 65;
 	}
 
-	/* handle overflow and underflow */
-	overflow_ef (result_fl, regs);
-	underflow_ef (result_fl, regs);
-
 	/* determine sign */
 	result_fl->sign = (fl->sign == mul_fl->sign) ? POS : NEG;
+
+	/* handle overflow and underflow */
+	return ( over_under_flow_ef (result_fl, regs) );
     } else {
     	/* set true 0 */
 
@@ -1371,7 +1495,9 @@ U64 wk;
     	result_fl->expo = 0;
     	result_fl->ms_fract = 0;
     	result_fl->ls_fract = 0;
+	return (0);
     }
+
 } /* end function mul_lf_to_ef */
 
 
@@ -1383,10 +1509,10 @@ U64 wk;
 /*      mul_fl	Multiplicator long float			     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void mul_lf ( LONG_FLOAT *fl, LONG_FLOAT *mul_fl, REGS *regs )
+static int mul_lf ( LONG_FLOAT *fl, LONG_FLOAT *mul_fl, REGS *regs )
 {
-U64 wk;
-U32 v;
+U64	wk;
+U32	v;
 
     if (fl->long_fract && mul_fl->long_fract) {
 	/* normalize operands */
@@ -1411,19 +1537,20 @@ U32 v;
 	    fl->expo = fl->expo + mul_fl->expo - 65;
 	}
 
-	/* handle overflow and underflow */
-	overflow_lf (fl, regs);
-	underflow_lf (fl, regs);
-
 	/* determine sign */
 	fl->sign = (fl->sign == mul_fl->sign) ? POS : NEG;
+
+	/* handle overflow and underflow */
+	return ( over_under_flow_lf (fl, regs) );
     } else {
     	/* set true 0 */
 
     	fl->sign = POS;
     	fl->expo = 0;
     	fl->long_fract = 0;
+	return (0);
     }
+
 } /* end function mul_lf */
 
 
@@ -1435,10 +1562,10 @@ U32 v;
 /*      mul_fl	Multiplicator extended float			     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void mul_ef ( EXTENDED_FLOAT *fl, EXTENDED_FLOAT *mul_fl, REGS *regs )
+static int mul_ef ( EXTENDED_FLOAT *fl, EXTENDED_FLOAT *mul_fl, REGS *regs )
 {
-U64 wk;
-U32 v;
+U64	wk;
+U32	v;
 
     if ((fl->ms_fract || fl->ls_fract)
      && (mul_fl->ms_fract || mul_fl->ls_fract)) {
@@ -1488,12 +1615,11 @@ U32 v;
 	    fl->expo = fl->expo + mul_fl->expo - 65;
 	}
 
-	/* handle overflow and underflow */
-	overflow_ef (fl, regs);
-	underflow_ef (fl, regs);
-
 	/* determine sign */
 	fl->sign = (fl->sign == mul_fl->sign) ? POS : NEG;
+
+	/* handle overflow and underflow */
+	return ( over_under_flow_ef (fl, regs) );
     } else {
     	/* set true 0 */
 
@@ -1501,7 +1627,9 @@ U32 v;
     	fl->expo = 0;
     	fl->ms_fract = 0;
     	fl->ls_fract = 0;
+	return (0);
     }
+
 } /* end function mul_ef */
 
 
@@ -1513,9 +1641,9 @@ U32 v;
 /*      mul_fl	Divisor short float				     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void div_sf ( SHORT_FLOAT *fl, SHORT_FLOAT *div_fl, REGS *regs )
+static int div_sf ( SHORT_FLOAT *fl, SHORT_FLOAT *div_fl, REGS *regs )
 {
-U64 wk;
+U64	wk;
 
     if (div_fl->short_fract) {
 	if (fl->short_fract) {
@@ -1533,13 +1661,12 @@ U64 wk;
 	    }
 	    /* divide fractions */
 	    fl->short_fract = wk / div_fl->short_fract;
-		
-	    /* handle overflow and underflow */
-	    overflow_sf (fl, regs);
-	    underflow_sf (fl, regs);
 
 	    /* determine sign */
 	    fl->sign = (fl->sign == div_fl->sign) ? POS : NEG;
+		
+	    /* handle overflow and underflow */
+	    return ( over_under_flow_sf (fl, regs) );
 	} else {
     	    /* fraction of dividend 0, set true 0 */
 
@@ -1552,6 +1679,8 @@ U64 wk;
 
         program_check (regs, PGM_FLOATING_POINT_DIVIDE_EXCEPTION);
     }
+    return (0);
+
 } /* end function div_sf */
 
 
@@ -1563,11 +1692,11 @@ U64 wk;
 /*      mul_fl	Divisor long float				     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void div_lf ( LONG_FLOAT *fl, LONG_FLOAT *div_fl, REGS *regs )
+static int div_lf ( LONG_FLOAT *fl, LONG_FLOAT *div_fl, REGS *regs )
 {
-U64 wk;
-U64 wk2;
-int i;
+U64	wk;
+U64	wk2;
+int	i;
 
     if (div_fl->long_fract) {
 	if (fl->long_fract) {
@@ -1597,12 +1726,11 @@ int i;
 	    /* partial divide last hex digit */
 	    fl->long_fract = (wk2 << 4) | (wk / div_fl->long_fract);
 
-	    /* handle overflow and underflow */
-	    overflow_lf (fl, regs);
-	    underflow_lf (fl, regs);
-
 	    /* determine sign */
 	    fl->sign = (fl->sign == div_fl->sign) ? POS : NEG;
+
+	    /* handle overflow and underflow */
+	    return ( over_under_flow_lf (fl, regs) );
 	} else {
     	    /* fraction of dividend 0, set true 0 */
 
@@ -1615,6 +1743,8 @@ int i;
 
         program_check (regs, PGM_FLOATING_POINT_DIVIDE_EXCEPTION);
     }
+    return (0);
+
 } /* end function div_lf */
 
 
@@ -1626,11 +1756,11 @@ int i;
 /*      mul_fl	Divisor extended float				     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void div_ef ( EXTENDED_FLOAT *fl, EXTENDED_FLOAT *div_fl, REGS *regs )
+static int div_ef ( EXTENDED_FLOAT *fl, EXTENDED_FLOAT *div_fl, REGS *regs )
 {
-U64 wkm;
-U64 wkl;
-int i;
+U64	wkm;
+U64	wkl;
+int	i;
 
     if (div_fl->ms_fract || div_fl->ls_fract) {
 	if (fl->ms_fract || fl->ls_fract) {
@@ -1688,12 +1818,11 @@ int i;
 		fl->ls_fract |= 1;
 	    }
 
-	    /* handle overflow and underflow */
-	    overflow_ef (fl, regs);
-	    underflow_ef (fl, regs);
-
 	    /* determine sign */
 	    fl->sign = (fl->sign == div_fl->sign) ? POS : NEG;
+
+	    /* handle overflow and underflow */
+	    return ( over_under_flow_ef (fl, regs) );
 	} else {
     	    /* fraction of dividend 0, set true 0 */
 
@@ -1707,6 +1836,8 @@ int i;
 
         program_check (regs, PGM_FLOATING_POINT_DIVIDE_EXCEPTION);
     }
+    return (0);
+
 } /* end function div_ef */
 
 
@@ -1726,6 +1857,7 @@ int i;
 void halve_float_long_reg (int r1, int r2, REGS *regs)
 {
 LONG_FLOAT fl;
+int	pgm_check;
 
     /* Get register content */
     get_lf (&fl, regs->fpr + r2);
@@ -1733,16 +1865,22 @@ LONG_FLOAT fl;
     /* Halve the value */
     if (fl.long_fract & 0x00E0000000000000ULL) {
 	fl.long_fract >>= 1;
+	pgm_check = 0;
     } else {
 	fl.long_fract <<= 3;
 	(fl.expo)--;
 	normal_lf (&fl);
-	underflow_lf (&fl, regs);
+	pgm_check = underflow_lf (&fl, regs);
     }
 
     /* Back to register */
     store_lf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function halve_float_long_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -1756,6 +1894,7 @@ LONG_FLOAT fl;
 void round_float_long_reg (int r1, int r2, REGS *regs)
 {
 LONG_FLOAT fl;
+int	pgm_check;
 
     /* Get register content */
     get_lf (&fl, regs->fpr + r2);
@@ -1767,12 +1906,19 @@ LONG_FLOAT fl;
     if (fl.long_fract & 0x0F00000000000000ULL) {
 	fl.long_fract >>= 4;
 	(fl.expo)++;
-	overflow_lf (&fl, regs);
+	pgm_check = overflow_lf (&fl, regs);
+    } else {
+	pgm_check = 0;
     }
 
     /* Back to register */
     store_lf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function round_float_long_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -1787,17 +1933,23 @@ void multiply_float_ext_reg (int r1, int r2, REGS *regs)
 {
 EXTENDED_FLOAT fl;
 EXTENDED_FLOAT mul_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_ef (&fl, regs->fpr + r1);
     get_ef (&mul_fl, regs->fpr + r2);
 
     /* multiply extended */
-    mul_ef (&fl, &mul_fl, regs);
+    pgm_check = mul_ef (&fl, &mul_fl, regs);
 
     /* Back to register */
     store_ef (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function multiply_float_ext_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -1813,17 +1965,23 @@ void multiply_float_long_to_ext_reg (int r1, int r2, REGS *regs)
 LONG_FLOAT fl;
 LONG_FLOAT mul_fl;
 EXTENDED_FLOAT result_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
     get_lf (&mul_fl, regs->fpr + r2);
 
     /* multiply long to extended */
-    mul_lf_to_ef (&fl, &mul_fl, &result_fl, regs);
+    pgm_check = mul_lf_to_ef (&fl, &mul_fl, &result_fl, regs);
 
     /* Back to register */
     store_ef (&result_fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function multiply_float_long_to_ext_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -1845,7 +2003,8 @@ LONG_FLOAT cmp_fl;
 
     /* Compare long */
     cmp_lf (&fl, &cmp_fl, regs);
-}
+
+} /* end function compare_float_long_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -1860,13 +2019,14 @@ void add_float_long_reg (int r1, int r2, REGS *regs)
 {
 LONG_FLOAT fl;
 LONG_FLOAT add_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
     get_lf (&add_fl, regs->fpr + r2);
 
     /* Add long with normalization */
-    add_lf (&fl, &add_fl, NORMAL, regs);
+    pgm_check = add_lf (&fl, &add_fl, NORMAL, regs);
 
     /* Set condition code */
     if (fl.long_fract) {
@@ -1877,7 +2037,12 @@ LONG_FLOAT add_fl;
 
     /* Back to register */
     store_lf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function add_float_long_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -1892,6 +2057,7 @@ void subtract_float_long_reg (int r1, int r2, REGS *regs)
 {
 LONG_FLOAT fl;
 LONG_FLOAT sub_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
@@ -1901,7 +2067,7 @@ LONG_FLOAT sub_fl;
     sub_fl.sign = ! (sub_fl.sign);
 
     /* Add long with normalization */
-    add_lf (&fl, &sub_fl, NORMAL, regs);
+    pgm_check = add_lf (&fl, &sub_fl, NORMAL, regs);
 
     /* Set condition code */
     if (fl.long_fract) {
@@ -1912,7 +2078,12 @@ LONG_FLOAT sub_fl;
 
     /* Back to register */
     store_lf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function subtract_float_long_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -1927,17 +2098,23 @@ void multiply_float_long_reg (int r1, int r2, REGS *regs)
 {
 LONG_FLOAT fl;
 LONG_FLOAT mul_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
     get_lf (&mul_fl, regs->fpr + r2);
 
     /* multiply long */
-    mul_lf (&fl, &mul_fl, regs);
+    pgm_check = mul_lf (&fl, &mul_fl, regs);
 
     /* Back to register */
     store_lf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function multiply_float_long_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -1952,17 +2129,23 @@ void divide_float_long_reg (int r1, int r2, REGS *regs)
 {
 LONG_FLOAT fl;
 LONG_FLOAT div_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
     get_lf (&div_fl, regs->fpr + r2);
 
     /* divide long */
-    div_lf (&fl, &div_fl, regs);
+    pgm_check = div_lf (&fl, &div_fl, regs);
 
     /* Back to register */
     store_lf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function divide_float_long_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -1977,13 +2160,14 @@ void add_unnormal_float_long_reg (int r1, int r2, REGS *regs)
 {
 LONG_FLOAT fl;
 LONG_FLOAT add_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
     get_lf (&add_fl, regs->fpr + r2);
 
     /* Add long without normalization */
-    add_lf (&fl, &add_fl, UNNORMAL, regs);
+    pgm_check = add_lf (&fl, &add_fl, UNNORMAL, regs);
 
     /* Set condition code */
     if (fl.long_fract) {
@@ -1994,7 +2178,12 @@ LONG_FLOAT add_fl;
 
     /* Back to register */
     store_lf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function add_unnormal_float_long_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -2009,6 +2198,7 @@ void subtract_unnormal_float_long_reg (int r1, int r2, REGS *regs)
 {
 LONG_FLOAT fl;
 LONG_FLOAT sub_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
@@ -2018,7 +2208,7 @@ LONG_FLOAT sub_fl;
     sub_fl.sign = ! (sub_fl.sign);
 
     /* Add long without normalization */
-    add_lf (&fl, &sub_fl, UNNORMAL, regs);
+    pgm_check = add_lf (&fl, &sub_fl, UNNORMAL, regs);
 
     /* Set condition code */
     if (fl.long_fract) {
@@ -2029,7 +2219,12 @@ LONG_FLOAT sub_fl;
 
     /* Back to register */
     store_lf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function subtract_unnormal_float_long_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -2043,6 +2238,7 @@ LONG_FLOAT sub_fl;
 void halve_float_short_reg (int r1, int r2, REGS *regs)
 {
 SHORT_FLOAT fl;
+int	pgm_check;
 
     /* Get register content */
     get_sf (&fl, regs->fpr + r2);
@@ -2050,16 +2246,22 @@ SHORT_FLOAT fl;
     /* Halve the value */
     if (fl.short_fract & 0x00E00000) {
 	fl.short_fract >>= 1;
+	pgm_check = 0;
     } else {
 	fl.short_fract <<= 3;
 	(fl.expo)--;
 	normal_sf (&fl);
-	underflow_sf (&fl, regs);
+	pgm_check = underflow_sf (&fl, regs);
     }
 
     /* Back to register */
     store_sf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function halve_float_short_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -2074,6 +2276,7 @@ void round_float_short_reg (int r1, int r2, REGS *regs)
 {
 LONG_FLOAT from_fl;
 SHORT_FLOAT to_fl;
+int	pgm_check;
 
     /* Get register content */
     get_lf (&from_fl, regs->fpr + r2);
@@ -2087,12 +2290,19 @@ SHORT_FLOAT to_fl;
     if (to_fl.short_fract & 0x0F000000) {
 	to_fl.short_fract >>= 4;
 	(to_fl.expo)++;
-	overflow_sf (&to_fl, regs);
+	pgm_check = overflow_sf (&to_fl, regs);
+    } else {
+	pgm_check = 0;
     }
 
     /* To register */
     store_sf (&to_fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function round_float_short_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -2107,13 +2317,14 @@ void add_float_ext_reg (int r1, int r2, REGS *regs)
 {
 EXTENDED_FLOAT fl;
 EXTENDED_FLOAT add_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_ef (&fl, regs->fpr + r1);
     get_ef (&add_fl, regs->fpr + r2);
 
     /* Add extended */
-    add_ef (&fl, &add_fl, regs);
+    pgm_check = add_ef (&fl, &add_fl, regs);
 
     /* Set condition code */
     if (fl.ms_fract || fl.ls_fract) {
@@ -2124,7 +2335,12 @@ EXTENDED_FLOAT add_fl;
 
     /* Back to register */
     store_ef (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function add_float_ext_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -2139,6 +2355,7 @@ void subtract_float_ext_reg (int r1, int r2, REGS *regs)
 {
 EXTENDED_FLOAT fl;
 EXTENDED_FLOAT sub_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_ef (&fl, regs->fpr + r1);
@@ -2148,7 +2365,7 @@ EXTENDED_FLOAT sub_fl;
     sub_fl.sign = ! (sub_fl.sign);
 
     /* Add extended */
-    add_ef (&fl, &sub_fl, regs);
+    pgm_check = add_ef (&fl, &sub_fl, regs);
 
     /* Set condition code */
     if (fl.ms_fract || fl.ls_fract) {
@@ -2159,7 +2376,12 @@ EXTENDED_FLOAT sub_fl;
 
     /* Back to register */
     store_ef (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function subtract_float_ext_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -2181,7 +2403,8 @@ SHORT_FLOAT cmp_fl;
 
     /* Compare short */
     cmp_sf (&fl, &cmp_fl, regs);
-}
+
+} /* end function compare_float_short_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -2196,13 +2419,14 @@ void add_float_short_reg (int r1, int r2, REGS *regs)
 {
 SHORT_FLOAT fl;
 SHORT_FLOAT add_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
     get_sf (&add_fl, regs->fpr + r2);
 
     /* Add short with normalization */
-    add_sf (&fl, &add_fl, NORMAL, regs);
+    pgm_check = add_sf (&fl, &add_fl, NORMAL, regs);
 
     /* Set condition code */
     if (fl.short_fract) {
@@ -2213,7 +2437,12 @@ SHORT_FLOAT add_fl;
 
     /* Back to register */
     store_sf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function add_float_short_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -2228,6 +2457,7 @@ void subtract_float_short_reg (int r1, int r2, REGS *regs)
 {
 SHORT_FLOAT fl;
 SHORT_FLOAT sub_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
@@ -2237,7 +2467,7 @@ SHORT_FLOAT sub_fl;
     sub_fl.sign = ! (sub_fl.sign);
 
     /* Subtract short with normalization */
-    add_sf (&fl, &sub_fl, NORMAL, regs);
+    pgm_check = add_sf (&fl, &sub_fl, NORMAL, regs);
 
     /* Set condition code */
     if (fl.short_fract) {
@@ -2248,7 +2478,12 @@ SHORT_FLOAT sub_fl;
 
     /* Back to register */
     store_sf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function subtract_float_short_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -2264,17 +2499,23 @@ void multiply_float_short_to_long_reg (int r1, int r2, REGS *regs)
 SHORT_FLOAT fl;
 SHORT_FLOAT mul_fl;
 LONG_FLOAT result_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
     get_sf (&mul_fl, regs->fpr + r2);
 
     /* multiply short to long */
-    mul_sf_to_lf (&fl, &mul_fl, &result_fl, regs);
+    pgm_check = mul_sf_to_lf (&fl, &mul_fl, &result_fl, regs);
 
     /* Back to register */
     store_lf (&result_fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function multiply_float_short_to_long_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -2289,17 +2530,23 @@ void divide_float_short_reg (int r1, int r2, REGS *regs)
 {
 SHORT_FLOAT fl;
 SHORT_FLOAT div_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
     get_sf (&div_fl, regs->fpr + r2);
 
     /* divide short */
-    div_sf (&fl, &div_fl, regs);
+    pgm_check = div_sf (&fl, &div_fl, regs);
 
     /* Back to register */
     store_sf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function divide_float_short_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -2314,13 +2561,14 @@ void add_unnormal_float_short_reg (int r1, int r2, REGS *regs)
 {
 SHORT_FLOAT fl;
 SHORT_FLOAT add_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
     get_sf (&add_fl, regs->fpr + r2);
 
     /* Add short without normalization */
-    add_sf (&fl, &add_fl, UNNORMAL, regs);
+    pgm_check = add_sf (&fl, &add_fl, UNNORMAL, regs);
 
     /* Set condition code */
     if (fl.short_fract) {
@@ -2331,7 +2579,12 @@ SHORT_FLOAT add_fl;
 
     /* Back to register */
     store_sf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function add_unnormal_float_short_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -2346,6 +2599,7 @@ void subtract_unnormal_float_short_reg (int r1, int r2, REGS *regs)
 {
 SHORT_FLOAT fl;
 SHORT_FLOAT sub_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
@@ -2355,7 +2609,7 @@ SHORT_FLOAT sub_fl;
     sub_fl.sign = ! (sub_fl.sign);
 
     /* Add short without normalization */
-    add_sf (&fl, &sub_fl, UNNORMAL, regs);
+    pgm_check = add_sf (&fl, &sub_fl, UNNORMAL, regs);
 
     /* Set condition code */
     if (fl.short_fract) {
@@ -2366,7 +2620,12 @@ SHORT_FLOAT sub_fl;
 
     /* Back to register */
     store_sf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function subtract_unnormal_float_short_reg */
 
 
 /*-------------------------------------------------------------------*/
@@ -2383,17 +2642,23 @@ void multiply_float_long_to_ext (int r1, U32 addr, int arn, REGS *regs)
 LONG_FLOAT fl;
 LONG_FLOAT mul_fl;
 EXTENDED_FLOAT result_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
     vfetch_lf (&mul_fl, addr, arn, regs );
 
     /* multiply long to extended */
-    mul_lf_to_ef (&fl, &mul_fl, &result_fl, regs);
+    pgm_check = mul_lf_to_ef (&fl, &mul_fl, &result_fl, regs);
 
     /* Back to register */
     store_ef (&result_fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function multiply_float_long_to_ext */
 
 
 /*-------------------------------------------------------------------*/
@@ -2416,7 +2681,8 @@ LONG_FLOAT cmp_fl;
 
     /* Compare long */
     cmp_lf (&fl, &cmp_fl, regs);
-}
+
+} /* end function compare_float_long */
 
 
 /*-------------------------------------------------------------------*/
@@ -2432,13 +2698,14 @@ void add_float_long (int r1, U32 addr, int arn, REGS *regs)
 {
 LONG_FLOAT fl;
 LONG_FLOAT add_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
     vfetch_lf (&add_fl, addr, arn, regs );
 
     /* Add long with normalization */
-    add_lf (&fl, &add_fl, NORMAL, regs);
+    pgm_check = add_lf (&fl, &add_fl, NORMAL, regs);
 
     /* Set condition code */
     if (fl.long_fract) {
@@ -2449,7 +2716,12 @@ LONG_FLOAT add_fl;
 
     /* Back to register */
     store_lf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function add_float_long */
 
 
 /*-------------------------------------------------------------------*/
@@ -2465,6 +2737,7 @@ void subtract_float_long (int r1, U32 addr, int arn, REGS *regs)
 {
 LONG_FLOAT fl;
 LONG_FLOAT sub_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
@@ -2474,7 +2747,7 @@ LONG_FLOAT sub_fl;
     sub_fl.sign = ! (sub_fl.sign);
 
     /* Add long with normalization */
-    add_lf (&fl, &sub_fl, NORMAL, regs);
+    pgm_check = add_lf (&fl, &sub_fl, NORMAL, regs);
 
     /* Set condition code */
     if (fl.long_fract) {
@@ -2485,7 +2758,12 @@ LONG_FLOAT sub_fl;
 
     /* Back to register */
     store_lf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function subtract_float_long */
 
 
 /*-------------------------------------------------------------------*/
@@ -2501,17 +2779,23 @@ void multiply_float_long (int r1, U32 addr, int arn, REGS *regs)
 {
 LONG_FLOAT fl;
 LONG_FLOAT mul_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
     vfetch_lf (&mul_fl, addr, arn, regs );
 
     /* multiply long */
-    mul_lf (&fl, &mul_fl, regs);
+    pgm_check = mul_lf (&fl, &mul_fl, regs);
 
     /* Back to register */
     store_lf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function multiply_float_long */
 
 
 /*-------------------------------------------------------------------*/
@@ -2527,17 +2811,23 @@ void divide_float_long (int r1, U32 addr, int arn, REGS *regs)
 {
 LONG_FLOAT fl;
 LONG_FLOAT div_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
     vfetch_lf (&div_fl, addr, arn, regs );
 
     /* divide long */
-    div_lf (&fl, &div_fl, regs);
+    pgm_check = div_lf (&fl, &div_fl, regs);
 
     /* Back to register */
     store_lf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function divide_float_long */
 
 
 /*-------------------------------------------------------------------*/
@@ -2553,13 +2843,14 @@ void add_unnormal_float_long (int r1, U32 addr, int arn, REGS *regs)
 {
 LONG_FLOAT fl;
 LONG_FLOAT add_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
     vfetch_lf (&add_fl, addr, arn, regs );
 
     /* Add long without normalization */
-    add_lf (&fl, &add_fl, UNNORMAL, regs);
+    pgm_check = add_lf (&fl, &add_fl, UNNORMAL, regs);
 
     /* Set condition code */
     if (fl.long_fract) {
@@ -2570,7 +2861,12 @@ LONG_FLOAT add_fl;
 
     /* Back to register */
     store_lf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function add_unnormal_float_long */
 
 
 /*-------------------------------------------------------------------*/
@@ -2586,6 +2882,7 @@ void subtract_unnormal_float_long (int r1, U32 addr, int arn, REGS *regs)
 {
 LONG_FLOAT fl;
 LONG_FLOAT sub_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
@@ -2595,7 +2892,7 @@ LONG_FLOAT sub_fl;
     sub_fl.sign = ! (sub_fl.sign);
 
     /* Add long without normalization */
-    add_lf (&fl, &sub_fl, UNNORMAL, regs);
+    pgm_check = add_lf (&fl, &sub_fl, UNNORMAL, regs);
 
     /* Set condition code */
     if (fl.long_fract) {
@@ -2606,7 +2903,12 @@ LONG_FLOAT sub_fl;
 
     /* Back to register */
     store_lf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function subtract_unnormal_float_long */
 
 
 /*-------------------------------------------------------------------*/
@@ -2629,7 +2931,8 @@ SHORT_FLOAT cmp_fl;
 
     /* Compare long */
     cmp_sf (&fl, &cmp_fl, regs);
-}
+
+} /* end function compare_float_short */
 
 
 /*-------------------------------------------------------------------*/
@@ -2645,13 +2948,14 @@ void add_float_short (int r1, U32 addr, int arn, REGS *regs)
 {
 SHORT_FLOAT fl;
 SHORT_FLOAT add_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
     vfetch_sf (&add_fl, addr, arn, regs );
 
     /* Add short with normalization */
-    add_sf (&fl, &add_fl, NORMAL, regs);
+    pgm_check = add_sf (&fl, &add_fl, NORMAL, regs);
 
     /* Set condition code */
     if (fl.short_fract) {
@@ -2662,7 +2966,12 @@ SHORT_FLOAT add_fl;
 
     /* Back to register */
     store_sf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function add_float_short */
 
 
 /*-------------------------------------------------------------------*/
@@ -2678,6 +2987,7 @@ void subtract_float_short (int r1, U32 addr, int arn, REGS *regs)
 {
 SHORT_FLOAT fl;
 SHORT_FLOAT sub_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
@@ -2687,7 +2997,7 @@ SHORT_FLOAT sub_fl;
     sub_fl.sign = ! (sub_fl.sign);
 
     /* Add short with normalization */
-    add_sf (&fl, &sub_fl, NORMAL, regs);
+    pgm_check = add_sf (&fl, &sub_fl, NORMAL, regs);
 
     /* Set condition code */
     if (fl.short_fract) {
@@ -2698,7 +3008,12 @@ SHORT_FLOAT sub_fl;
 
     /* Back to register */
     store_sf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function subtract_float_short */
 
 
 /*-------------------------------------------------------------------*/
@@ -2715,17 +3030,23 @@ void multiply_float_short_to_long (int r1, U32 addr, int arn, REGS *regs)
 SHORT_FLOAT fl;
 SHORT_FLOAT mul_fl;
 LONG_FLOAT result_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
     vfetch_sf (&mul_fl, addr, arn, regs );
 
     /* multiply short to long */
-    mul_sf_to_lf (&fl, &mul_fl, &result_fl, regs);
+    pgm_check = mul_sf_to_lf (&fl, &mul_fl, &result_fl, regs);
 
     /* Back to register */
     store_lf (&result_fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function multiply_float_short_to_long */
 
 
 /*-------------------------------------------------------------------*/
@@ -2741,17 +3062,23 @@ void divide_float_short (int r1, U32 addr, int arn, REGS *regs)
 {
 SHORT_FLOAT fl;
 SHORT_FLOAT div_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
     vfetch_sf (&div_fl, addr, arn, regs );
 
     /* divide short */
-    div_sf (&fl, &div_fl, regs);
+    pgm_check = div_sf (&fl, &div_fl, regs);
 
     /* Back to register */
     store_sf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function divide_float_short */
 
 
 /*-------------------------------------------------------------------*/
@@ -2767,13 +3094,14 @@ void add_unnormal_float_short (int r1, U32 addr, int arn, REGS *regs)
 {
 SHORT_FLOAT fl;
 SHORT_FLOAT add_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
     vfetch_sf (&add_fl, addr, arn, regs );
 
     /* Add short without normalization */
-    add_sf (&fl, &add_fl, UNNORMAL, regs);
+    pgm_check = add_sf (&fl, &add_fl, UNNORMAL, regs);
 
     /* Set condition code */
     if (fl.short_fract) {
@@ -2784,7 +3112,12 @@ SHORT_FLOAT add_fl;
 
     /* Back to register */
     store_sf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function add_unnormal_float_short */
 
 
 /*-------------------------------------------------------------------*/
@@ -2800,6 +3133,7 @@ void subtract_unnormal_float_short (int r1, U32 addr, int arn, REGS *regs)
 {
 SHORT_FLOAT fl;
 SHORT_FLOAT sub_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
@@ -2809,7 +3143,7 @@ SHORT_FLOAT sub_fl;
     sub_fl.sign = ! (sub_fl.sign);
 
     /* Add short without normalization */
-    add_sf (&fl, &sub_fl, UNNORMAL, regs);
+    pgm_check = add_sf (&fl, &sub_fl, UNNORMAL, regs);
 
     /* Set condition code */
     if (fl.short_fract) {
@@ -2820,7 +3154,12 @@ SHORT_FLOAT sub_fl;
 
     /* Back to register */
     store_sf (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function subtract_unnormal_float_short */
 
 
 /*-------------------------------------------------------------------*/
@@ -2835,17 +3174,23 @@ void divide_float_ext_reg (int r1, int r2, REGS *regs)
 {
 EXTENDED_FLOAT fl;
 EXTENDED_FLOAT div_fl;
+int	pgm_check;
 
     /* Get the operands */
     get_ef (&fl, regs->fpr + r1);
     get_ef (&div_fl, regs->fpr + r2);
 
     /* divide extended */
-    div_ef (&fl, &div_fl, regs);
+    pgm_check = div_ef (&fl, &div_fl, regs);
 
     /* Back to register */
     store_ef (&fl, regs->fpr + r1);
-}
+
+    /* Program check ? */
+    if (pgm_check)
+        program_check (regs, pgm_check);
+
+} /* end function divide_float_ext_reg */
 
 
 /* end of float.c */

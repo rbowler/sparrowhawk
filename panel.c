@@ -19,6 +19,7 @@
 /*      New Panel Display contributed by Dutch Owen                  */
 /*      HMC system console commands contributed by Jan Jaeger        */
 /*      Set/reset bad frame indicator command by Jan Jaeger          */
+/*      attach/detach/define commands by Jan Jaeger                  */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -190,7 +191,10 @@ static void NP_screen(FILE *confp)
 
     p = 3;
     a = 1;
-    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev) {
+    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+    {
+      if(dev->pmcw.flag5 & PMCW5_V)
+      {
          fprintf(confp, ANSI_CURSOR, p, 40);
          c[0] = a | 0x40;
          c[1] = '\0';
@@ -204,6 +208,7 @@ static void NP_screen(FILE *confp)
          p++;
          a++;
          if (p > 23) break;
+      }
     }
     NPlastdev = a;
     fprintf(confp, ANSI_WHT_BLK);
@@ -277,6 +282,9 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
     char ch[2];
     U32 aaddr;
     int savadr;
+#ifdef MIPS_COUNTING
+    U32 mipsrate;
+#endif
 
     if (NPhelpup == 1) {
         if (NPhelpdown == 1) {
@@ -393,8 +401,10 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
     fprintf(confp, ANSI_CURSOR, 19, 2);
     fprintf(confp, ANSI_YLW_BLK);
 #ifdef MIPS_COUNTING
+    for(mipsrate = i = 0; i < sysblk.numcpu; i++)
+        mipsrate += sysblk.regs[i].mipsrate;
     fprintf(confp, "%1.1d.%2.2d",
-            regs->mipsrate / 1000, (regs->mipsrate % 1000) / 10);
+            mipsrate / 1000, (mipsrate % 1000) / 10);
 #else
     fprintf(confp, "%12.12u", (unsigned)regs->instcount);
 #endif
@@ -449,7 +459,9 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
     }
     p = 3;
     a = 1;
-    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev) {
+    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+      if(dev->pmcw.flag5 & PMCW5_V)
+      {
          online = busy = pend = open = 0;
          if ((dev->console && dev->connected) ||
                   (strlen(dev->filename) > 0))
@@ -943,6 +955,8 @@ U32     raddr;                          /* Real storage address      */
 U32     eaddr;                          /* Storage ending address    */
 U16     xcode;                          /* Exception code            */
 U16     devnum;                         /* Device number             */
+U16     newdevn;                        /* Device number             */
+U16     devtype;                        /* Device type               */
 DEVBLK *dev;                            /* -> Device block           */
 BYTE    c;                              /* Character work area       */
 int     rc;                             /* Return code               */
@@ -955,7 +969,9 @@ int     len;                            /* Number of bytes read      */
 BYTE   *loadparm;                       /* -> IPL parameter (ASCIIZ) */
 BYTE    buf[100];                       /* Message buffer            */
 int     n;                              /* Number of bytes in buffer */
-int     toddrag, intdrag;               /* Drag factors              */
+#ifdef TODCLOCK_DRAG_FACTOR
+int     toddrag;                        /* TOD clock drag factor     */
+#endif /*TODCLOCK_DRAG_FACTOR*/
 BYTE    newval[32];                     /* Storage alteration value  */
 BYTE   *devascii;                       /* ASCII text device number  */
 #define MAX_ARGS 10                     /* Max num of devinit args   */
@@ -981,6 +997,12 @@ BYTE   *devclass;                       /* -> Device class name      */
  #define SYSCONS_CMD
 #endif /*FEATURE_SYSTEM_CONSOLE*/
 
+#ifdef TODCLOCK_DRAG_FACTOR
+ #define TODDRAG_CMD "toddrag nnn = display or set TOD clock drag factor\n"
+#else
+ #define TODDRAG_CMD
+#endif /*TODCLOCK_DRAG_FACTOR*/
+
     /* ? command - display help text */
     if (cmd[0] == '?')
     {
@@ -1000,9 +1022,12 @@ BYTE   *devclass;                       /* -> Device class name      */
             "loadparm xxxxxxxx=set IPL parameter, ipl devn=IPL\n"
             "devinit devn arg [arg...] = reinitialize device\n"
             "devlist=list devices\n"
+            "attach devn type [arg...] = initialize device\n"
+            "detach devn = remove device\n"
+            "define olddevn newdevn = rename device\n"
             SYSCONS_CMD
             "f-addr=mark frame unusable, f+addr=mark frame usable\n"
-            "drag [tod,int] = display or set drag factors\n"
+            TODDRAG_CMD
             "quit/exit=terminate, Esc=alternate panel display, ?=Help\n");
         return NULL;
     }
@@ -1017,12 +1042,16 @@ BYTE   *devclass;                       /* -> Device class name      */
     /* start command (or just Enter) - start CPU */
     if (cmd[0] == '\0' || strcmp(cmd,"start") == 0)
     {
+        /* Obtain the interrupt lock */
+        obtain_lock (&sysblk.intlock);
+
         /* Restart the CPU if it is in the stopped state */
         regs->cpustate = CPUSTATE_STARTED;
 
         /* Signal stopped CPUs to retest stopped indicator */
-        obtain_lock (&sysblk.intlock);
         signal_condition (&sysblk.intcond);
+
+        /* Release the interrupt lock */
         release_lock (&sysblk.intlock);
 
         return NULL;
@@ -1050,18 +1079,17 @@ BYTE   *devclass;                       /* -> Device class name      */
         return NULL;
     }
 
-    /* drag command - display or set drag factors */
-    if (memcmp(cmd,"drag",4)==0)
+#ifdef TODCLOCK_DRAG_FACTOR
+    /* toddrag command - display or set TOD clock drag factor */
+    if (memcmp(cmd,"toddrag",7)==0)
     {
         toddrag = 0;
-        intdrag = 0;
-        sscanf(cmd+4, "%d,%d", &toddrag, &intdrag);
+        sscanf(cmd+7, "%d", &toddrag);
         if (toddrag > 0 && toddrag <= 10000) sysblk.toddrag = toddrag;
-        if (intdrag > 0 && intdrag <= 10000) sysblk.intdrag = intdrag;
         logmsg ("TOD clock drag factor = %d\n", sysblk.toddrag);
-        logmsg ("Interrupt drag factor = %d\n", sysblk.intdrag);
         return NULL;
     }
+#endif /*TODCLOCK_DRAG_FACTOR*/
 
 #ifdef FEATURE_SYSTEM_CONSOLE
     /* .xxx and !xxx commands - send command or priority message
@@ -1189,13 +1217,18 @@ BYTE   *devclass;                       /* -> Device class name      */
     /* restart command - generate restart interrupt */
     if (strcmp(cmd,"restart") == 0)
     {
-        /* Indicate that a restart interrupt is pending */
-        regs->restart = 1;
         logmsg ("Restart key depressed\n");
 
-        /* Signal waiting CPUs that an interrupt is pending */
+        /* Obtain the interrupt lock */
         obtain_lock (&sysblk.intlock);
+
+        /* Indicate that a restart interrupt is pending */
+        regs->restart = 1;
+
+        /* Signal waiting CPUs that an interrupt is pending */
         signal_condition (&sysblk.intcond);
+
+        /* Release the interrupt lock */
         release_lock (&sysblk.intlock);
 
         return NULL;
@@ -1323,7 +1356,9 @@ BYTE   *devclass;                       /* -> Device class name      */
     /* ext command - generate external interrupt */
     if (strcmp(cmd,"ext") == 0)
     {
-        sysblk.intkey = 1;
+        obtain_lock(&sysblk.intlock);
+        sysblk.extpending = sysblk.intkey = 1;
+        release_lock(&sysblk.intlock);
         logmsg ("Interrupt key depressed\n");
         return NULL;
     }
@@ -1431,16 +1466,19 @@ BYTE   *devclass;                       /* -> Device class name      */
     {
         for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
         {
-            /* Call the device handler's query definition function */
-            (dev->devqdef)(dev, &devclass, sizeof(buf), buf);
+            if(dev->pmcw.flag5 & PMCW5_V)
+            {
+                /* Call device handler's query definition function */
+                (dev->devqdef)(dev, &devclass, sizeof(buf), buf);
 
-            /* Display the device definition and status */
-            logmsg ("%4.4X %4.4X %s %s%s%s\n",
-                    dev->devnum, dev->devtype, buf,
-                    (dev->fd > 2 ? "open " : ""),
-                    (dev->busy ? "busy " : ""),
-                    ((dev->pending || dev->pcipending) ?
-                        "pending " : ""));
+                /* Display the device definition and status */
+                logmsg ("%4.4X %4.4X %s %s%s%s\n",
+                        dev->devnum, dev->devtype, buf,
+                        (dev->fd > 2 ? "open " : ""),
+                        (dev->busy ? "busy " : ""),
+                        ((dev->pending || dev->pcipending) ?
+                            "pending " : ""));
+            } /* end if(PMCW5_V) */
         } /* end for(dev) */
         return NULL;
     }
@@ -1511,6 +1549,78 @@ BYTE   *devclass;                       /* -> Device class name      */
 
         /* Raise unsolicited device end interrupt for the device */
         device_attention (dev, CSW_DE);
+
+        return NULL;
+    }
+
+    /* attach command - configure a device */
+    if (memcmp(cmd,"attach",6)==0)
+    {
+        devascii = strtok(cmd+6," \t");
+        if (devascii == NULL
+            || sscanf(devascii, "%hx%c", &devnum, &c) != 1)
+        {
+            logmsg ("Device number %s is invalid\n", devascii);
+            return NULL;
+        }
+
+        devascii = strtok(NULL," \t");
+        if (devascii == NULL
+            || sscanf(devascii, "%hx%c", &devtype, &c) != 1)
+        {
+            logmsg ("Device type %s is invalid\n", devascii);
+            return NULL;
+        }
+
+        /* Set up remaining arguments for initialization handler */
+        for (devargc = 0; devargc < MAX_ARGS &&
+            (devargv[devargc] = strtok(NULL," \t")) != NULL;
+            devargc++);
+
+        /* Attach the device */
+        attach_device(devnum, devtype, devargc, devargv);
+
+        return NULL;
+    }
+
+    /* detach command - configure a device */
+    if (memcmp(cmd,"detach",6)==0)
+    {
+        devascii = strtok(cmd+6," \t");
+        if (devascii == NULL
+            || sscanf(devascii, "%hx%c", &devnum, &c) != 1)
+        {
+            logmsg ("Device number %s is invalid\n", devascii);
+            return NULL;
+        }
+
+        /* Detach the device */
+        detach_device(devnum);
+
+        return NULL;
+    }
+
+    /* define command - rename a device */
+    if (memcmp(cmd,"define",6)==0)
+    {
+        devascii = strtok(cmd+6," \t");
+        if (devascii == NULL
+            || sscanf(devascii, "%hx%c", &devnum, &c) != 1)
+        {
+            logmsg ("Device number %s is invalid\n", devascii);
+            return NULL;
+        }
+
+        devascii = strtok(NULL," \t");
+        if (devascii == NULL
+            || sscanf(devascii, "%hx%c", &newdevn, &c) != 1)
+        {
+            logmsg ("Device number %s is invalid\n", devascii);
+            return NULL;
+        }
+
+        /* Rename the device */
+        define_device(devnum,newdevn);
 
         return NULL;
     }

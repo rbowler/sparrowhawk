@@ -12,7 +12,7 @@ Installing and Operating Hercules</TITLE>
 <h2>Installation Procedure</h2>
 <ol>
 <li>Download the distribution file
-<a href="hercules/hercules-1.59.tar.gz">hercules-1.59.tar.gz</a>
+<a href="hercules/hercules-1.60.tar.gz">hercules-1.60.tar.gz</a>
 <p>
 <em>Notes:</em>
 <ol>
@@ -27,7 +27,7 @@ Installing and Operating Hercules</TITLE>
 <li>Use these commands to unzip the distribution file:
 <pre>mkdir hercules
 cd hercules
-tar xvzf ../hercules-1.59.tar.gz</pre>
+tar xvzf ../hercules-1.60.tar.gz</pre>
 <li>Build the executable files:
 <br><code>make</code>
 </ol>
@@ -130,25 +130,37 @@ store   Store status
 quit    Terminate Hercules
 
 devlist Display configured devices
+attach <em>xxxx</em> <em>type</em> [ <em>args</em> ]  Create device xxxx
+detach <em>xxxx</em>  Delete device xxxx
+define <em>xxxx</em> <em>yyyy</em>  Rename device number xxxx to yyyy
 devinit <em>xxxx</em> [ <em>args</em> ]  Reinitialize device xxxx
 
 .<em>text</em>   Enter an SCP command via the HMC system console
 !<em>text</em>   Enter an SCP priority message via the HMC system console
+
+toddrag [<em>n</em>]  Display or set TOD clock drag factor
 </pre>
 
 <p>
-The <em>devinit</em> command can be used to to rewind a tape, to
-change the file attached to a disk or tape device, or to load a new
-card deck into a reader.
+The <em>attach</em> and <em>detach</em> commands are used to dynamically
+add or remove devices from the configuration,
+and the <em>define</em> command can be used to alter the device number
+of an existing device.
+<p>
+The <em>devinit</em> command can be used to reopen an existing device.
 The <em>args</em> (if specified) override the arguments
 specified in the configuration file for this device.
 The device type cannot be changed and must not be specified.
+This command can be used to rewind a tape, to mount a new tape or
+disk image file on an existing device, to load a new card deck
+into a reader, or to close and reopen a printer or punch device.
 <p>
 In single-step mode, pressing the enter key will advance to the
 next instruction.
 <p>
 There is also an alternate semi-graphical control panel.  Press Esc to
 switch between the command line format and the semi-graphical format.
+Press ? to obtain help in either control panel.
 
 <p><center><hr width=15% noshade></center>
 <p>
@@ -160,7 +172,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 23 Apr 2000
+<p>Last updated 14 May 2000
 </BODY>
 </HTML>
 

@@ -336,7 +336,7 @@ DEVBLK            *dev;                /* Device block pointer       */
 
     /* Set service signal external interrupt pending */
     sysblk.servparm = spccb_absolute_addr;
-    sysblk.servsig = 1;
+    sysblk.extpending = sysblk.servsig = 1; 
 
     /* Release the interrupt lock */
     release_lock (&sysblk.intlock);

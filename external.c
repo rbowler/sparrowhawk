@@ -85,6 +85,7 @@ U16     cpuad;                          /* Originating CPU address   */
 
         /* Reset interrupt key pending */
         sysblk.intkey = 0;
+        sysblk.extpending = sysblk.servsig;
 
         /* Generate interrupt key interrupt */
         external_interrupt (EXT_INTERRUPT_KEY_INTERRUPT, regs);
@@ -101,6 +102,9 @@ U16     cpuad;                          /* Originating CPU address   */
             if (cpuad >= MAX_CPU_ENGINES)
             {
                 regs->emersig = 0;
+                regs->cpuint = regs->itimer_pending
+                                || regs->extcall
+                                || regs->storstat;
                 return;
             }
         } /* end for(cpuad) */
@@ -119,11 +123,14 @@ U16     cpuad;                          /* Originating CPU address   */
         /* Reset emergency signal pending flag if there are
            no other CPUs which generated emergency signal */
         regs->emersig = 0;
+        regs->cpuint = regs->itimer_pending
+                        || regs->extcall
+                        || regs->storstat;
         while (++cpuad < MAX_CPU_ENGINES)
         {
             if (regs->emercpu[cpuad])
             {
-                regs->emersig = 1;
+                regs->cpuint = regs->emersig = 1;
                 break;
             }
         } /* end while */
@@ -137,11 +144,14 @@ U16     cpuad;                          /* Originating CPU address   */
     if (regs->extcall
         && (regs->cr[0] & CR0_XM_EXTCALL))
     {
-        logmsg ("External interrupt: External Call from CPU %d\n",
-                regs->extccpu);
+//  /*debug*/logmsg ("External interrupt: External Call from CPU %d\n",
+//  /*debug*/       regs->extccpu);
 
         /* Reset external call pending */
         regs->extcall = 0;
+        regs->cpuint = regs->itimer_pending
+                        || regs->emersig
+                        || regs->storstat;
 
         /* Store originating CPU address at PSA+X'84' */
         psa = (PSA*)(sysblk.mainstor + regs->pxr);
@@ -191,6 +201,10 @@ U16     cpuad;                          /* Originating CPU address   */
         }
         external_interrupt (EXT_INTERVAL_TIMER_INTERRUPT, regs);
         regs->itimer_pending = 0;
+        regs->cpuint = regs->extcall
+                        || regs->emersig
+                        || regs->storstat;
+
         return;
     }
 #endif /*FEATURE_INTERVAL_TIMER*/
@@ -216,6 +230,7 @@ U16     cpuad;                          /* Originating CPU address   */
 
         /* Reset service signal pending */
         sysblk.servsig = 0;
+        sysblk.extpending = sysblk.intkey;
 
         /* Generate service signal interrupt */
         external_interrupt (EXT_SERVICE_SIGNAL_INTERRUPT, regs);
@@ -329,7 +344,12 @@ struct  timeval tv;                     /* Structure for gettimeofday
                if the TOD clock value exceeds the clock comparator */
             if ((S64)regs->ptimer < 0
                 || sysblk.todclk > regs->clkc)
+            {
                 intflag = 1;
+                obtain_lock(&sysblk.intlock);
+                regs->cpuint = 1;
+                release_lock(&sysblk.intlock);
+            }
 
 #ifdef FEATURE_INTERVAL_TIMER
             /* Point to PSA in main storage */
@@ -352,7 +372,9 @@ struct  timeval tv;                     /* Structure for gettimeofday
             if (itimer < 0 && olditimer >= 0)
             {
                 intflag = 1;
-                regs->itimer_pending = 1;
+                obtain_lock(&sysblk.intlock);
+                regs->cpuint = regs->itimer_pending = 1;
+                release_lock(&sysblk.intlock);
             }
 #endif /*FEATURE_INTERVAL_TIMER*/
 
@@ -529,8 +551,8 @@ BYTE    order;                          /* SIGP order code           */
     if (cpad >= sysblk.numcpu)
         return 3;
 
-    /*debug*/logmsg("SIGP CPU %4.4X ORDER %2.2X PARM %8.8X\n",
-                    cpad, order, parm);
+//  /*debug*/logmsg("SIGP CPU %4.4X ORDER %2.2X PARM %8.8X\n",
+//  /*debug*/       cpad, order, parm);
 
     /* [4.9.2.1] Claim the use of the CPU signaling and response
        facility, and return condition code 2 if the facility is
@@ -549,28 +571,14 @@ BYTE    order;                          /* SIGP order code           */
     /* Point to CPU register context for the target CPU */
     tregs = sysblk.regs + cpad;
 
-    /* Except for the reset order, return condition code 2 if the
+    /* Except for the reset orders, return condition code 2 if the
        target CPU is executing a previous start, stop, restart,
        stop and store status, set prefix, or store status order */
     if ((order != SIGP_RESET && order != SIGP_INITRESET)
         && (tregs->cpustate == CPUSTATE_STOPPING
             || tregs->restart))
     {
-        obtain_lock (&sysblk.sigplock);
         sysblk.sigpbusy = 0;
-        release_lock (&sysblk.sigplock);
-        return 2;
-    }
-
-    /* Except for the reset order, return condition code 2 if
-       the target CPU is executing a previous reset order */
-    if ((order != SIGP_RESET && order != SIGP_INITRESET)
-        && (tregs->cpustate == CPUSTATE_STOPPING
-            || tregs->restart))
-    {
-        obtain_lock (&sysblk.sigplock);
-        sysblk.sigpbusy = 0;
-        release_lock (&sysblk.sigplock);
         return 2;
     }
 
@@ -601,14 +609,14 @@ BYTE    order;                          /* SIGP order code           */
         }
 
         /* Raise an external call interrupt pending condition */
-        tregs->extcall = 1;
+        tregs->cpuint = tregs->extcall = 1;
         tregs->extccpu = regs->cpuad;
 
         break;
 
     case SIGP_EMERGENCY:
         /* Raise an emergency signal interrupt pending condition */
-        tregs->emersig = 1;
+        tregs->cpuint = tregs->emersig = 1;
         tregs->emercpu[regs->cpuad] = 1;
 
         break;
@@ -657,7 +665,6 @@ BYTE    order;                          /* SIGP order code           */
         if (tregs->cpustate != CPUSTATE_STOPPED)
         {
             status |= SIGP_STATUS_INCORRECT_STATE;
-            release_lock (&sysblk.intlock);
             break;
         }
 
@@ -668,7 +675,6 @@ BYTE    order;                          /* SIGP order code           */
         if (abs >= sysblk.mainsize)
         {
             status |= SIGP_STATUS_INVALID_PARAMETER;
-            release_lock (&sysblk.intlock);
             break;
         }
 
@@ -690,7 +696,6 @@ BYTE    order;                          /* SIGP order code           */
         if (tregs->cpustate != CPUSTATE_STOPPED)
         {
             status |= SIGP_STATUS_INCORRECT_STATE;
-            release_lock (&sysblk.intlock);
             break;
         }
 
@@ -701,7 +706,6 @@ BYTE    order;                          /* SIGP order code           */
         if (abs >= sysblk.mainsize)
         {
             status |= SIGP_STATUS_INVALID_PARAMETER;
-            release_lock (&sysblk.intlock);
             break;
         }
 
@@ -718,17 +722,13 @@ BYTE    order;                          /* SIGP order code           */
         status = SIGP_STATUS_INVALID_ORDER;
     } /* end switch(order) */
 
-    /* Release the interrupt lock */
-    release_lock (&sysblk.intlock);
-
     /* Release the use of the signalling and response facility */
-    obtain_lock (&sysblk.sigplock);
     sysblk.sigpbusy = 0;
-    release_lock (&sysblk.sigplock);
 
     /* Wake up any CPUs waiting for an interrupt or start */
-    obtain_lock (&sysblk.intlock);
     signal_condition (&sysblk.intcond);
+
+    /* Release the interrupt lock */
     release_lock (&sysblk.intlock);
 
     /* If status is non-zero, load the status word into
@@ -744,3 +744,61 @@ BYTE    order;                          /* SIGP order code           */
 
 } /* end function signal_processor */
 
+#if MAX_CPU_ENGINES > 1
+/*-------------------------------------------------------------------*/
+/* Issue Broadcast Request                                           */
+/* Input:                                                            */
+/*      type    A pointer to the request counter in the sysblk for   */
+/*              the requested function (brdcstptlb or brdcstpalb).   */
+/*                                                                   */
+/* Signals all other CPU's to perform a requested function           */
+/* synchronously, such as purging the ALB and TLB buffers.  In       */
+/* theory the CPU issuing the broadcast request should wait until    */
+/* all other CPU's have performed the requested action.  In this     */
+/* implementation, the issuing CPU will continue, and all other      */
+/* CPU's will finish the currently executing instruction before      */
+/* performing the requsted action.  This mode of operation is        */
+/* probably within tolerance limits. *JJ*                            */
+/*-------------------------------------------------------------------*/
+void issue_broadcast_request (U64 *type)
+{
+    /* Obtain the interrupt lock */
+    obtain_lock(&sysblk.intlock);
+
+    /* Increment the broadcast request counter */
+    sysblk.broadcast++;
+
+    /* Increment the counter for the specified function */
+    (*type)++;
+
+    /* Release the interrupt lock */
+    release_lock(&sysblk.intlock);
+
+} /* end function issue_broadcast request */
+
+/*-------------------------------------------------------------------*/
+/* Perform Broadcast Request                                         */
+/*                                                                   */
+/* Note: The caller MUST hold the interrupt lock (sysblk.intlock)    */
+/*-------------------------------------------------------------------*/
+void perform_broadcast_request (REGS *regs)
+{
+    /* Purge ALB if requested */
+    if (sysblk.brdcstpalb != regs->brdcstpalb)
+    {
+        purge_alb(regs);
+        regs->brdcstpalb = sysblk.brdcstpalb;
+    }
+
+    /* Purge TLB if requested */
+    if (sysblk.brdcstptlb != regs->brdcstptlb)
+    {
+        purge_tlb(regs);
+        regs->brdcstptlb = sysblk.brdcstptlb;
+    }
+
+    /* Reset broadcast counter for this CPU */
+    regs->broadcast = sysblk.broadcast;
+
+} /* end function perform_broadcast request */
+#endif /*MAX_CPU_ENGINES > 1*/

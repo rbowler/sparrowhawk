@@ -1,4 +1,4 @@
-/* CKDDASD.C    (c) Copyright Roger Bowler, 1999                     */
+/* CKDDASD.C    (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 CKD Direct Access Storage Device Handler     */
 
 /*-------------------------------------------------------------------*/
@@ -182,8 +182,7 @@ U32             highcyl;                /* Highest cyl# in CKD file  */
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
     {
-        fprintf (stderr,
-                "HHC351I File name missing or invalid\n");
+        logmsg ("HHC351I File name missing or invalid\n");
         return -1;
     }
 
@@ -209,8 +208,7 @@ U32             highcyl;                /* Highest cyl# in CKD file  */
         dev->fd = open (dev->filename, O_RDWR);
         if (dev->fd < 0)
         {
-            fprintf (stderr,
-                    "HHC352I %s open error: %s\n",
+            logmsg ("HHC352I %s open error: %s\n",
                     dev->filename, strerror(errno));
             return -1;
         }
@@ -219,8 +217,7 @@ U32             highcyl;                /* Highest cyl# in CKD file  */
         rc = fstat (dev->fd, &statbuf);
         if (rc < 0)
         {
-            fprintf (stderr,
-                    "HHC353I %s fstat error: %s\n",
+            logmsg ("HHC353I %s fstat error: %s\n",
                     dev->filename, strerror(errno));
             return -1;
         }
@@ -230,12 +227,10 @@ U32             highcyl;                /* Highest cyl# in CKD file  */
         if (rc < CKDDASD_DEVHDR_SIZE)
         {
             if (rc < 0)
-                fprintf (stderr,
-                        "HHC354I %s read error: %s\n",
+                logmsg ("HHC354I %s read error: %s\n",
                         dev->filename, strerror(errno));
             else
-                fprintf (stderr,
-                        "HHC355I %s CKD header incomplete\n",
+                logmsg ("HHC355I %s CKD header incomplete\n",
                         dev->filename);
             return -1;
         }
@@ -243,8 +238,7 @@ U32             highcyl;                /* Highest cyl# in CKD file  */
         /* Check the device header identifier */
         if (memcmp(devhdr.devid, "CKD_P370", 8) != 0)
         {
-            fprintf (stderr,
-                    "HHC356I %s CKD header invalid\n",
+            logmsg ("HHC356I %s CKD header invalid\n",
                     dev->filename);
             return -1;
         }
@@ -253,8 +247,7 @@ U32             highcyl;                /* Highest cyl# in CKD file  */
         if (devhdr.fileseq != fileseq
             && !(devhdr.fileseq == 0 && fileseq == 1))
         {
-            fprintf (stderr,
-                    "HHC357I %s CKD file out of sequence\n",
+            logmsg ("HHC357I %s CKD file out of sequence\n",
                     dev->filename);
             return -1;
         }
@@ -289,8 +282,7 @@ U32             highcyl;                /* Highest cyl# in CKD file  */
         }
         else if (heads != dev->ckdheads || trksize != dev->ckdtrksz)
         {
-            fprintf (stderr,
-                    "HHC358I %s heads=%d trklen=%d, "
+            logmsg ("HHC358I %s heads=%d trklen=%d, "
                     "expected heads=%d trklen=%d\n",
                     dev->filename, heads, trksize,
                     dev->ckdheads, dev->ckdtrksz);
@@ -303,8 +295,7 @@ U32             highcyl;                /* Highest cyl# in CKD file  */
                             != statbuf.st_size
             || (highcyl != 0 && highcyl != dev->ckdcyls + cyls - 1))
         {
-            fprintf (stderr,
-                    "HHC359I %s CKD header inconsistent with file size\n",
+            logmsg ("HHC359I %s CKD header inconsistent with file size\n",
                     dev->filename);
             return -1;
         }
@@ -312,8 +303,7 @@ U32             highcyl;                /* Highest cyl# in CKD file  */
         /* Check for correct high cylinder number */
         if (highcyl != 0 && highcyl != dev->ckdcyls + cyls - 1)
         {
-            fprintf (stderr,
-                    "HHC360I %s CKD header high cylinder incorrect\n",
+            logmsg ("HHC360I %s CKD header high cylinder incorrect\n",
                     dev->filename);
             return -1;
         }
@@ -340,8 +330,7 @@ U32             highcyl;                /* Highest cyl# in CKD file  */
         /* Check that maximum files has not been exceeded */
         if (fileseq > CKD_MAXFILES)
         {
-            fprintf (stderr,
-                    "HHC361I %s exceeds maximum %d CKD files\n",
+            logmsg ("HHC361I %s exceeds maximum %d CKD files\n",
                     dev->filename, CKD_MAXFILES);
             return -1;
         }

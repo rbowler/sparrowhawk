@@ -1099,7 +1099,9 @@ void purge_tlb (REGS *regs)
 /*-------------------------------------------------------------------*/
 void invalidate_pte (BYTE ibyte, int r1, int r2, REGS *regs)
 {
+#if MAX_CPU_ENGINES == 1
 int     i;                              /* Array subscript           */
+#endif /*MAX_CPU_ENGINES == 1*/
 U32     raddr;                          /* Addr of page table entry  */
 #ifdef FEATURE_S390_DAT
 U32     pte;                            /* Page table entry          */
@@ -1159,6 +1161,7 @@ U16     pte;                            /* Page table entry          */
     vstore2 ( pte, raddr, USE_REAL_ADDR, regs );
 #endif
 
+#if MAX_CPU_ENGINES == 1
     /* Clear the TLB of any entries with matching PFRA */
     for (i = 0; i < (sizeof(regs->tlb)/sizeof(TLBE)); i++)
     {
@@ -1169,13 +1172,18 @@ U16     pte;                            /* Page table entry          */
 // /*debug*/logmsg ("dat: TLB entry %d invalidated\n", i); /*debug*/
         }
     } /* end for(i) */
-
-    /* Signal each CPU to perform the same invalidation.
+#else /*MAX_CPU_ENGINES > 1*/
+    /* Signal each CPU to perform TLB invalidation.
        IPTE must not complete until all CPUs have indicated
        that they have cleared their TLB and have completed
        any storage accesses using the invalidated entries */
-    /*INCOMPLETE*/ /* Not yet designed a way of doing this
-    without adversely impacting TLB performance */
+
+    /* This is a sledgehammer approach but clearing all tlb's seems
+       to be the only viable alternative at the moment, short of
+       building queues and waiting for all other cpu's to clear their
+       entries - JJ 09/05/2000 */
+    issue_broadcast_request(&sysblk.brdcstptlb);
+#endif /*MAX_CPU_ENGINES > 1*/
 
 } /* end function invalidate_pte */
 

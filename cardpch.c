@@ -49,8 +49,7 @@ int     i;                              /* Array subscript           */
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
     {
-        fprintf (stderr,
-                "HHC421I File name missing or invalid\n");
+        logmsg ("HHC421I File name missing or invalid\n");
         return -1;
     }
 
@@ -85,7 +84,7 @@ int     i;                              /* Array subscript           */
             continue;
         }
 
-        fprintf (stderr, "HHC422I Invalid argument: %s\n",
+        logmsg ("HHC422I Invalid argument: %s\n",
                 argv[i]);
         return -1;
     }
