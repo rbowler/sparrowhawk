@@ -1,4 +1,4 @@
-/* VERSION.C    (c) Copyright Roger Bowler, 1999-2001                */
+/* VERSION.C    (c) Copyright Roger Bowler, 1999-2002                */
 /*              Hercules Initialization Module                       */
 
 /*-------------------------------------------------------------------*/
@@ -10,6 +10,7 @@
 #include <config.h>
 #endif
 
+#include "feature.h"
 #include "version.h"
 #include <stdio.h>
 
@@ -19,9 +20,29 @@
 
 static const char *build_info[] = {
 
+#if defined(CUSTOM_BUILD_STRING)
+    CUSTOM_BUILD_STRING,
+#endif
+
 #if defined(DEBUG)
     "**DEBUG**",
 #endif
+
+#if !defined(_ARCHMODE2)
+    "Mode:"
+#else
+    "Modes:"
+#endif
+#if defined(_370)
+    " " _ARCH_370_NAME
+#endif
+#if defined(_390)
+    " " _ARCH_390_NAME
+#endif
+#if defined(_900)
+    " " _ARCH_900_NAME
+#endif
+    ,
 
 #if defined(WIN32)
     "Win32 (Windows) build",
@@ -45,6 +66,10 @@ static const char *build_info[] = {
     "Linux TUN driver support",
 #endif
 
+#if defined(OPTION_W32_CTCI)
+    "Windows CTCI-W32 support",
+#endif
+
 #if defined(NOTHREAD)
     "No threading support",
 #else
@@ -53,8 +78,12 @@ static const char *build_info[] = {
     #endif
 #endif
 
-#if !defined(EXTERNALGUI)
+#if !defined(EXTERNALGUI) && defined(WIN32)
     "No external GUI support",
+#endif
+
+#if defined(OPTION_HTTP_SERVER)
+    "HTTP Server support",
 #endif
 
 #if defined(NO_IEEE_SUPPORT)
@@ -77,13 +106,13 @@ static const char *build_info[] = {
     "No HET BZIP2 support",
 #endif
 
-#if defined(CUSTOM_BUILD_STRING)
-    CUSTOM_BUILD_STRING,
-#endif
-
   " "
 
 };
+
+#if defined(EXTERNALGUI)
+extern int extgui;              /* external gui present */
+#endif /*EXTERNALGUI*/
 
 /*-------------------------------------------------------------------*/
 /* Display version and copyright                                     */
@@ -92,8 +121,33 @@ void display_version (FILE *f, char *prog)
 {
     unsigned int i;
 
-    fprintf (f, "%sVersion %s built at %s %s\nBuild information:\n",
-             prog, VERSION, __DATE__, __TIME__);
+#if defined(EXTERNALGUI)
+    /* If external gui being used, set stdout & stderr streams
+       to unbuffered so we don't have to flush them all the time
+       in order to ensure consistent sequence of log messages.
+    */
+    if (extgui)
+    {
+        setvbuf(stderr, NULL, _IONBF, 0);
+        setvbuf(stdout, NULL, _IONBF, 0);
+    }
+#endif /*EXTERNALGUI*/
+
+        /* Log version */
+
+    fprintf (f, "%sVersion %s\n", prog, VERSION);
+
+        /* Log Copyright */
+
+    fprintf(f, "%s\n", HERCULES_COPYRIGHT);
+
+        /* Log build date/time */
+
+    fprintf (f, "Built on %s at %s\n", __DATE__, __TIME__);
+
+        /* Log "unusual" build options */
+
+    fprintf (f, "Build information:\n");
 
     if (sizeof(build_info) == 0)
       fprintf(f, "  (none)\n");
@@ -101,5 +155,4 @@ void display_version (FILE *f, char *prog)
       for( i = 0 ; i < sizeof(build_info) / sizeof(build_info[0]) ; ++i )
         fprintf(f, "  %s\n", build_info[i]);
 
-    fprintf(f, "%s\n", HERCULES_COPYRIGHT);
 } /* end function display_version */

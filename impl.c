@@ -1,4 +1,4 @@
-/* IMPL.C       (c) Copyright Roger Bowler, 1999-2001                */
+/* IMPL.C       (c) Copyright Roger Bowler, 1999-2002                */
 /*              Hercules Initialization Module                       */
 
 /*-------------------------------------------------------------------*/
@@ -11,6 +11,7 @@
 #include "hercules.h"
 #include "opcode.h"
 #include <unistd.h>
+#include "httpmisc.h"
 
 /*-------------------------------------------------------------------*/
 /* Signal handler for SIGINT signal                                  */
@@ -51,7 +52,7 @@ int i;
 
 #ifndef WIN32
     /* Set watchdog priority just below cpu priority
-       such that it will not invalidly detect an 
+       such that it will not invalidly detect an
        inoperable cpu */
     if(sysblk.cpuprio >= 0)
         setpriority(PRIO_PROCESS, 0, sysblk.cpuprio+1);
@@ -68,13 +69,17 @@ int i;
             if(sysblk.regs[i].cpustate == CPUSTATE_STARTED
               && !sysblk.regs[i].psw.wait)
             {
-                /* If the cpu is running but not executing 
+                /* If the cpu is running but not executing
                    instructions then it must be malfunctioning */
                 if(sysblk.regs[i].instcount == savecount[i])
                 {
-                    /* Send signal to looping CPU */
-                    signal_thread(sysblk.regs[i].cputid, SIGUSR1);
-                    savecount[i] = -1;
+                    if(!try_obtain_lock(&sysblk.intlock))
+                    {
+                        /* Send signal to looping CPU */
+                        signal_thread(sysblk.regs[i].cputid, SIGUSR1);
+                        savecount[i] = -1;
+                        release_lock(&sysblk.intlock);
+                    }
                 }
                 else
                     /* Save current instcount */
@@ -98,9 +103,19 @@ int main (int argc, char *argv[])
 {
 BYTE   *cfgfile;                        /* -> Configuration filename */
 int     c;                              /* Work area for getopt      */
+int     arg_error = 0;                  /* 1=Invalid arguments       */
 #ifdef PROFILE_CPU
 TID paneltid;
 #endif
+
+#ifdef EXTERNALGUI
+    /* Set GUI flag if specified as final argument */
+    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
+    {
+        extgui = 1;
+        argc--;
+    }
+#endif /*EXTERNALGUI*/
 
     /* Get name of configuration file or default to hercules.cnf */
     if(!(cfgfile = getenv("HERCULES_CNF")))
@@ -110,13 +125,6 @@ TID paneltid;
     display_version (stderr, "Hercules ");
 
     /* Process the command line options */
-#ifdef EXTERNALGUI
-    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
-    {
-        extgui = 1;
-        argc--;
-    }
-#endif /*EXTERNALGUI*/
     while ((c = getopt(argc, argv, "f:")) != EOF)
     {
         switch (c) {
@@ -124,12 +132,25 @@ TID paneltid;
             cfgfile = optarg;
             break;
         default:
-            fprintf (stderr,
-                    "usage: %s [-f config-filename]\n",
-                    argv[0]);
-            exit (1);
+            arg_error = 1;
+
         } /* end switch(c) */
     } /* end while */
+
+    /* The getopt function sets the external variable optind
+       to the index in argv of the first non-option argument.
+       There should not be any non-option arguments */
+    if (optind < argc)
+        arg_error = 1;
+
+    /* Terminate if invalid arguments were detected */
+    if (arg_error)
+    {
+        fprintf (stderr,
+                "usage: %s [-f config-filename]\n",
+                argv[0]);
+        exit(1);
+    }
 
     /* Build system configuration */
     build_config (cfgfile);
@@ -138,9 +159,18 @@ TID paneltid;
     if ( signal (SIGINT, sigint_handler) == SIG_ERR )
     {
         fprintf (stderr,
-                "HHC031I Cannot register SIGINT handler: %s\n",
+                "HHC131I Cannot register SIGINT handler: %s\n",
                 strerror(errno));
         exit(1);
+    }
+
+    /* Ignore the SIGPIPE signal, otherwise Hercules may terminate with
+       Broken Pipe error if the printer driver writes to a closed pipe */
+    if ( signal (SIGPIPE, SIG_IGN) == SIG_ERR )
+    {
+        fprintf (stderr,
+                "HHC132I Cannot suppress SIGPIPE signal: %s\n",
+                strerror(errno));
     }
 
 #if !defined(NO_SIGABEND_HANDLER)
@@ -157,7 +187,7 @@ TID paneltid;
          || sigaction(SIGUSR2, &sa, NULL) )
         {
             fprintf (stderr,
-                    "HHC031I Cannot register SIG ILL/FPE/SEGV/BUS handler: %s\n",
+                    "HHC133I Cannot register SIGILL/FPE/SEGV/BUS/USR handler: %s\n",
                     strerror(errno));
             exit(1);
         }
@@ -168,18 +198,32 @@ TID paneltid;
                         watchdog_thread, NULL) )
     {
         fprintf (stderr,
-                "HHC033I Cannot watchdog thread: %s\n",
+                "HHC134I Cannot create watchdog thread: %s\n",
                 strerror(errno));
         exit(1);
     }
 #endif /*!defined(NO_SIGABEND_HANDLER)*/
+
+#if defined(OPTION_HTTP_SERVER)
+    if(sysblk.httpport) {
+        /* Start the http server connection thread */
+        if ( create_thread (&sysblk.httptid, &sysblk.detattr,
+                            http_server, NULL) )
+        {
+            fprintf (stderr,
+                    "HHS001E Cannot create http_server thread: %s\n",
+                    strerror(errno));
+            exit(1);
+        }
+    }
+#endif /*defined(OPTION_HTTP_SERVER)*/
 
     /* Start the console connection thread */
     if ( create_thread (&sysblk.cnsltid, &sysblk.detattr,
                         console_connection_handler, NULL) )
     {
         fprintf (stderr,
-                "HHC032I Cannot create console thread: %s\n",
+                "HHC135I Cannot create console thread: %s\n",
                 strerror(errno));
         exit(1);
     }
@@ -189,7 +233,7 @@ TID paneltid;
                         timer_update_thread, NULL) )
     {
         fprintf (stderr,
-                "HHC033I Cannot create timer thread: %s\n",
+                "HHC136I Cannot create timer thread: %s\n",
                 strerror(errno));
         exit(1);
     }
@@ -208,7 +252,7 @@ TID paneltid;
                         panel_display, NULL) )
     {
         fprintf (stderr,
-                "HHC033I Cannot create panel thread: %s\n",
+                "HHC137I Cannot create panel thread: %s\n",
                 strerror(errno));
         exit(1);
     }

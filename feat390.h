@@ -1,8 +1,9 @@
-/* FEAT390.H	(c) Copyright Jan Jaeger, 2000-2001		     */
+/* FEAT390.H	(c) Copyright Jan Jaeger, 2000-2002		     */
 /*		ESA/390 feature definitions			     */
 
 /* This file MUST NOT contain #undef statements */
-#define FEATURE_ESAME_INSTALLED
+#if defined(OPTION_390_MODE)
+#define _ARCH_390_NAME "ESA/390"
 
 #define FEATURE_4K_STORAGE_KEYS
 #define FEATURE_ACCESS_REGISTERS
@@ -42,6 +43,7 @@
 #define FEATURE_MVS_ASSIST
 #define FEATURE_PAGE_PROTECTION
 #define FEATURE_PERFORM_LOCKED_OPERATION
+#define FEATURE_PER
 #define FEATURE_PER2
 #define FEATURE_PRIVATE_SPACE
 #define FEATURE_RESUME_PROGRAM
@@ -56,6 +58,8 @@
 #define FEATURE_SUPPRESSION_ON_PROTECTION
 #define FEATURE_SYSTEM_CONSOLE
 #define FEATURE_TRACING
+
 // #define FEATURE_VECTOR_FACILITY
 
+#endif /*defined(OPTION_390_MODE)*/
 /* end of FEAT390.H */

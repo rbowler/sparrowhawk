@@ -1,8 +1,8 @@
-/* HERCULES.H   (c) Copyright Roger Bowler, 1999-2001                */
+/* HERCULES.H   (c) Copyright Roger Bowler, 1999-2002                */
 /*              ESA/390 Emulator Header File                         */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 
 /*-------------------------------------------------------------------*/
 /* Header file containing Hercules internal data structures          */
@@ -17,12 +17,14 @@
 #define _THREAD_SAFE            /* Some systems use this instead *JJ */
 
 #include "feature.h"
+
 #if !defined(_GNU_SOURCE)
  #define _GNU_SOURCE                   /* required by strsignal() *JJ */
 #endif
 
-#if !defined(_HERCULES_H)
 #include "cpuint.h"
+
+#if !defined(_HERCULES_H)
 
 #include "machdep.h"
 
@@ -59,6 +61,11 @@
 #include <net/if.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sched.h>
+#include <zlib.h>
+#if defined(CCKD_BZIP2) || defined(HET_BZIP2)
+#include <bzlib.h>
+#endif
 #include "version.h"
 #include "hetlib.h"
 
@@ -83,6 +90,8 @@ int setresgid(gid_t rgid, gid_t egid, gid_t sgid);
 
 #define _HERCULES_H
 
+#include "dasdtab.h"
+
 /*-------------------------------------------------------------------*/
 /* Windows 32-specific definitions                                   */
 /*-------------------------------------------------------------------*/
@@ -105,6 +114,15 @@ int setresgid(gid_t rgid, gid_t egid, gid_t sgid);
 #define DWORD int       /* will be undefined later */
 #endif
 
+/*-------------------------------------------------------------------*/
+/* Macro for issuing panel commands                                  */
+/*-------------------------------------------------------------------*/
+
+#define SYNCHRONOUS_PANEL_CMD(cmdline) \
+    panel_command((cmdline))
+
+#define ASYNCHRONOUS_PANEL_CMD(cmdline) \
+    create_thread(&cmdtid,&sysblk.detattr,panel_command,(cmdline))
 
 /*-------------------------------------------------------------------*/
 /* Macro definitions for tracing                                     */
@@ -114,17 +132,26 @@ int setresgid(gid_t rgid, gid_t egid, gid_t sgid);
     do { \
         fprintf(sysblk.msgpipew, a); \
     } while(0)
+#define devmsg(a...) \
+    do { \
+        fprintf(dev->msgpipew, a); \
+    } while(0)
 #else
 #define logmsg(a...) \
     do { \
         fprintf(sysblk.msgpipew, a); \
         fflush(sysblk.msgpipew); \
     } while(0)
+#define devmsg(a...) \
+    do { \
+        fprintf(dev->msgpipew, a); \
+        fflush(dev->msgpipew); \
+    } while(0)
 #endif
 #define DEVTRACE(format, a...) \
     do { \
         if(dev->ccwtrace||dev->ccwstep) \
-            fprintf(sysblk.msgpipew, "%4.4X:" format, dev->devnum, a); \
+            fprintf(dev->msgpipew, "%4.4X:" format, dev->devnum, a); \
     } while(0)
 
 /* Debugging */
@@ -180,6 +207,8 @@ typedef fthread_attr_t    ATTR;
 #define initialize_lock(plk)                   fthread_mutex_init((plk))
 #define obtain_lock(plk)                       fthread_mutex_lock((plk))
 #define try_obtain_lock(plk)                   fthread_mutex_trylock((plk))
+#define test_lock(plk) \
+        (fthread_mutex_trylock((plk)) ? 1 : fthread_mutex_unlock((plk)) )
 #define wait_condition(pcond,plk)              fthread_cond_wait((pcond),(plk))
 #define timed_wait_condition(pcond,plk,tm)     fthread_cond_timedwait((pcond),(plk),(tm))
 #define initialize_condition(pcond)            fthread_cond_init((pcond))
@@ -189,7 +218,7 @@ typedef fthread_attr_t    ATTR;
 #define initialize_detach_attr(pat)            /* unsupported */
 #define signal_thread(tid,signo)               fthread_kill((tid),(signo))
 #define thread_id()                            fthread_self()
-#define exit_thread(exitcode)                  fthread_exit((exitcode))
+#define exit_thread(exitvar_ptr)               fthread_exit((exitvar_ptr))
 #else // !defined(OPTION_FTHREADS)
 typedef pthread_t                       TID;
 typedef pthread_mutex_t                 LOCK;
@@ -203,6 +232,8 @@ typedef pthread_attr_t                  ATTR;
         pthread_mutex_trylock((plk))
 #define release_lock(plk) \
         pthread_mutex_unlock((plk))
+#define test_lock(plk) \
+        (pthread_mutex_trylock((plk)) ? 1 : pthread_mutex_unlock((plk)) )
 #define initialize_condition(pcond) \
         pthread_cond_init((pcond),NULL)
 #define signal_condition(pcond) \
@@ -215,12 +246,15 @@ typedef pthread_attr_t                  ATTR;
         pthread_cond_timedwait((pcond),(plk),(timeout))
 #define initialize_detach_attr(pat) \
         pthread_attr_init((pat)); \
+		pthread_attr_setstacksize((pat),1048576); \
         pthread_attr_setdetachstate((pat),PTHREAD_CREATE_DETACHED)
 typedef void*THREAD_FUNC(void*);
 #define create_thread(ptid,pat,fn,arg) \
         pthread_create(ptid,pat,(THREAD_FUNC*)&(fn),arg)
 #define create_device_thread(ptid,pat,fn,arg) \
         pthread_create(ptid,pat,(THREAD_FUNC*)&(fn),arg)
+#define exit_thread(_code) \
+        pthread_exit((_code))
 #if !defined(WIN32)
 #define signal_thread(tid,signo) \
         pthread_kill(tid,signo)
@@ -229,6 +263,8 @@ typedef void*THREAD_FUNC(void*);
 #endif // !defined(WIN32)
 #define thread_id() \
         pthread_self()
+#define exit_thread(exitvar_ptr) \
+        pthread_exit((exitvar_ptr))
 #endif // defined(OPTION_FTHREADS)
 #else
 typedef int                             TID;
@@ -239,6 +275,7 @@ typedef int                             ATTR;
 #define obtain_lock(plk)                *(plk)=1
 #define try_obtain_lock(plk)            *(plk)=1
 #define release_lock(plk)               *(plk)=0
+#define test_lock(plk)                  (*(plk)!=0)
 #define initialize_condition(pcond)     *(pcond)=0
 #define signal_condition(pcond)         *(pcond)=1
 #define broadcast_condition(pcond)      *(pcond)=1
@@ -248,6 +285,7 @@ typedef int                             ATTR;
 #define create_thread(ptid,pat,fn,arg)  (*(ptid)=0,fn(arg),0)
 #define signal_thread(tid,signo)        raise(signo)
 #define thread_id()                     0
+#define exit_thread(exitvar_ptr)        (exit(0)) /* (should not ever be used with NOTHREAD!) */
 #endif
 
 /* Pattern for displaying the thread_id */
@@ -268,6 +306,7 @@ typedef void DEVXF (struct _DEVBLK *dev, BYTE code, BYTE flags,
         BYTE chained, U16 count, BYTE prevcode, int ccwseq,
         BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual);
 typedef int DEVCF (struct _DEVBLK *dev);
+
 
 /*-------------------------------------------------------------------*/
 /* Structure definition for the Vector Facility                      */
@@ -352,6 +391,7 @@ typedef struct _REGS {                  /* Processor registers       */
 #define CR_HHL(_r) cr[(_r)].F.H.H.L.H    /* Halfword low, bits 16-31 */
 #define CR_L(_r)   cr[(_r)].F.L.F        /* Fullword low, bits 32-63 */
 #define CR_LHH(_r) cr[(_r)].F.L.H.H.H    /* Halfword bits 32-47      */
+#define CR_LHHCH(_r) cr[(_r)].F.L.H.H.B.H   /* Character, bits 32-39 */
 #define CR_LHL(_r) cr[(_r)].F.L.H.L.H    /* Halfword low, bits 48-63 */
 #define MC_G    mc.D
 #define MC_L    mc.F.L.F
@@ -381,6 +421,7 @@ typedef struct _REGS {                  /* Processor registers       */
                                                     Control Register */
         U32     dxc;                    /* Data exception code       */
 // #endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
+        U16     chanset;                /* Connected channel set     */
         U32     todpr;                  /* TOD programmable register */
         U16     monclass;               /* Monitor event class       */
         U16     cpuad;                  /* CPU address for STAP      */
@@ -413,6 +454,12 @@ typedef struct _REGS {                  /* Processor registers       */
                 sie_active:1,           /* Sie active (host only)    */
                 sie_pref:1;             /* Preferred-storage mode    */
 #endif /*defined(_FEATURE_SIE)*/
+
+// #if defined(FEATURE_PER)
+        U16     perc;                   /* PER code                  */
+        RADR    peradr;                 /* PER address               */
+        BYTE    peraid;                 /* PER access id             */
+// #endif /*defined(FEATURE_PER)*/
 
         BYTE    cpustate;               /* CPU stopped/started state */
         unsigned int                    /* Flags                     */
@@ -515,7 +562,6 @@ typedef struct _REGS {                  /* Processor registers       */
 #define INTCOND       sysblk.intcond
 #endif /* MAX_CPU_ENGINES > 1 && defined(OPTION_FAST_INTCOND) */
 
-#ifdef OPTION_IOINTQ
 /* Macros to queue/dequeue a device on the I/O interrupt queue */
 #define QUEUE_IO_INTERRUPT(dev) \
  { \
@@ -526,15 +572,23 @@ typedef struct _REGS {                  /* Processor registers       */
    } \
    else if (sysblk.iointq != (dev)) \
    { \
+     if (sysblk.iointq->priority > (dev)->priority) \
+     { \
+       (dev)->iointq = sysblk.iointq; \
+       sysblk.iointq = (dev); \
+     } \
+     else \
+     { \
      DEVBLK *prev; \
      for (prev = sysblk.iointq; prev->iointq != NULL; prev = prev->iointq) \
        if (prev->iointq == (dev) \
-        || prev->iointq->priority < dev->priority) break; \
+          || prev->iointq->priority > dev->priority) break; \
      if (prev->iointq != (dev)) \
      { \
        (dev)->iointq = prev->iointq; \
        prev->iointq = (dev); \
      } \
+   } \
    } \
  }
 #define DEQUEUE_IO_INTERRUPT(dev) \
@@ -543,14 +597,10 @@ typedef struct _REGS {                  /* Processor registers       */
      sysblk.iointq = (dev)->iointq; \
    else { \
      DEVBLK *prev; \
-     for (prev = sysblk.iointq; prev->iointq != (dev); prev = prev->iointq); \
-     prev->iointq = (dev)->iointq; \
+     for (prev = sysblk.iointq; prev && prev->iointq != (dev); prev = prev->iointq); \
+     if (prev) prev->iointq = (dev)->iointq; \
    } \
  }
-#else
-#define QUEUE_IO_INTERRUPT(dev)
-#define DEQUEUE_IO_INTERRUPT(dev)
-#endif
 
 /*-------------------------------------------------------------------*/
 /* System configuration block                                        */
@@ -613,9 +663,7 @@ typedef struct _SYSBLK {
         struct _DEVBLK *firstdev;       /* -> First device block     */
         U16     highsubchan;            /* Highest subchannel + 1    */
         U32     chp_reset[8];           /* Channel path reset masks  */
-#ifdef OPTION_IOINTQ
         struct _DEVBLK *iointq;         /* I/O interrupt queue       */
-#endif
 #if !defined(OPTION_FISHIO)
         struct _DEVBLK *ioq;            /* I/O queue                 */
         LOCK    ioqlock;                /* I/O queue lock            */
@@ -643,14 +691,13 @@ typedef struct _SYSBLK {
                 servsig:1,              /* 1=Service signal pending  */
                 crwpending:1,           /* 1=Channel report pending  */
 #endif /*INTERRUPTS_FAST_CHECK*/
-                sigpbusy:1,             /* 1=Signal facility in use  */
                 sigintreq:1,            /* 1=SIGINT request pending  */
-#ifdef OPTION_CKD_KEY_TRACING
-                ckdkeytrace:1,          /* 1=Log CKD_KEY_TRACE       */
-#endif /*OPTION_CKD_KEY_TRACING*/
                 insttrace:1,            /* 1=Instruction trace       */
                 inststep:1,             /* 1=Instruction step        */
-                instbreak:1;            /* 1=Have breakpoint         */
+                instbreak:1,            /* 1=Have breakpoint         */
+				inststop:1,        		/* 1 = stop on program check */ /*VMA*/
+				vmactive:1,       		/* 1 = vma active            */ /*VMA*/
+				mschdelay:1;			/* 1 = delay MSCH instruction*/ /*LNX*/
 #ifdef INTERRUPTS_FAST_CHECK
         U32     ints_state;             /* Common Interrupts Status  */
 #endif /*INTERRUPTS_FAST_CHECK*/
@@ -672,6 +719,17 @@ typedef struct _SYSBLK {
         int     pcpu;                   /* Tgt CPU panel cmd & displ */
 
         int     cpuprio;                /* CPU thread priority       */
+        int     pgmprdos;               /* Program product OS flag   */
+// #if defined(OPTION_HTTP_SERVER)
+        TID     httptid;                /* HTTP listener thread id   */
+        U16     httpport;               /* HTTP port number or zero  */
+        int     httpauth;               /* HTTP auth required flag   */
+        char   *httpuser;               /* HTTP userid               */
+        char   *httppass;               /* HTTP password             */
+// #endif /*defined(OPTION_HTTP_SERVER)*/
+#ifdef OPTION_IODELAY_KLUDGE
+        int     iodelay;                /* I/O delay kludge for linux*/
+#endif /*OPTION_IODELAY_KLUDGE*/
 #if !defined(NO_SETUID)
         uid_t   ruid, euid, suid;
         gid_t   rgid, egid, sgid;
@@ -726,6 +784,13 @@ typedef struct _SYSBLK {
 #else
 #define OS_LINUX        0x78FFFFFFF7DE7FD6ULL   /* Linux             */
 #endif
+
+/* Definitions for program product OS restriction flag. This flag is ORed
+   with the SCLP READ CPU INFO response code. A 4 here makes the CPU look
+   like an IFL (Integrated Facility for Linux) engine, which cannot run
+   licensed ESA/390 or z/Architecture OSes. */
+#define PGM_PRD_OS_RESTRICTED 4                 /* Restricted        */
+#define PGM_PRD_OS_LICENSED   0                 /* Licensed          */
 
 #ifndef WIN32
 #define MAX_DEVICE_THREADS 0
@@ -790,19 +855,22 @@ typedef struct _bind_struct
 }
 bind_struct;
 
+struct _DEVDATA;                                /* Forward reference */
 /*-------------------------------------------------------------------*/
 /* Device configuration block                                        */
 /*-------------------------------------------------------------------*/
 typedef struct _DEVBLK {
         struct _DEVBLK *nextdev;        /* -> next device block      */
         LOCK    lock;                   /* Device block lock         */
+        FILE   *msgpipew;               /* Message pipe write handle */
 
         /*  device identification                                    */
 
         U16     subchan;                /* Subchannel number         */
         U16     devnum;                 /* Device number             */
         U16     devtype;                /* Device type               */
-        U16     reserved0;              /* (alignment)               */
+        U16     chanset;                /* Channel Set to which this   
+                                           device is connected S/370 */
 
 #if defined(WIN32)
         BYTE    filename[1024];         /* Windows pathname          */
@@ -824,16 +892,21 @@ typedef struct _DEVBLK {
         TID     tid;                    /* Thread-id executing CCW   */
         int     priority;               /* I/O q scehduling priority */
         struct _DEVBLK *nextioq;        /* -> next device in I/O q   */
-#ifdef OPTION_IOINTQ
+
         struct _DEVBLK *iointq;         /* -> next device in I/O
                                            interrupt queue           */
-#endif
+        /*  fields used during ccw execution...                      */
+        BYTE    chained;                /* Command chain and data chain
+                                           bits from previous CCW    */
+        BYTE    prev_chained;           /* Chaining flags from CCW
+                                           preceding the data chain  */
+        BYTE    code;                   /* Current CCW opcode        */
+        BYTE    prevcode;               /* Previous CCW opcode       */
+        int     ccwseq;                 /* CCW sequence number       */
+
         /*  device handler function pointers...                      */
 
-        DEVIF  *devinit;                /* -> Init device function   */
-        DEVQF  *devqdef;                /* -> Query device function  */
-        DEVXF  *devexec;                /* -> Execute CCW function   */
-        DEVCF  *devclos;                /* -> Close device function  */
+        struct _DEVHND *hnd;            /* -> Device handlers        */
 
         /*  emulated architecture fields...   (MUST be aligned!)     */
 
@@ -849,7 +922,7 @@ typedef struct _DEVBLK {
         int     numsense;               /* Number of sense bytes     */
         BYTE    sense[32];              /* Sense bytes               */
         int     numdevid;               /* Number of device id bytes */
-        BYTE    devid[32];              /* Device identifier bytes   */
+        BYTE    devid[256];             /* Device identifier bytes   */
         int     numdevchar;             /* Number of devchar bytes   */
         BYTE    devchar[64];            /* Device characteristics    */
         BYTE    pgid[11];               /* Path Group ID             */
@@ -866,9 +939,13 @@ typedef struct _DEVBLK {
                 nosyncio:1,             /* 1=No synchronous I/Os     */
                 syncio:1,               /* 1=Synchronous I/Os allowed*/
 #endif /*OPTION_SYNCIO*/
+#ifdef OPTION_CKD_KEY_TRACING
+                ckdkeytrace:1,          /* 1=Log CKD_KEY_TRACE       */
+#endif /*OPTION_CKD_KEY_TRACING*/
                 console:1,              /* 1=Console device          */
                 connected:1,            /* 1=Console client connected*/
                 readpending:2,          /* 1=Console read pending    */
+                batch:1,                /* 1=Called by dasdutil      */
                 ccwtrace:1,             /* 1=CCW trace               */
                 ccwstep:1,              /* 1=CCW single step         */
                 cdwmerge:1;             /* 1=Channel will merge data
@@ -929,9 +1006,17 @@ typedef struct _DEVBLK {
         int     ctclastpos;             /* last packet read          */
         int     ctclastrem;             /* last packet read          */
         unsigned int                    /* Flags                     */
-                ctcxmode:1;             /* 0=Basic mode, 1=Extended  */
+                ctcxmode:1,             /* 0=Basic mode, 1=Extended  */
+				lcscmd:1, 		        /* lcs cmd response pending  */ /*LCS*/
+				readpnd:1,         		/* read pending on thread    */ /*LCS*/
+				readstrt:1,     	    /* read thread started       */ /*LCS*/
+				readerr:1;        		/* read error                */ /*LCS*/
         BYTE    ctctype;                /* CTC_xxx device type       */
         BYTE    netdevname[IFNAMSIZ];   /* network device name       */
+		FWORD	ctcipsrc;    			/* LCS source IP address     */ /*LCS*/
+		int lcslen;           			/* LCS read length           */ /*LCS*/
+		int lcscmdlen;        			/* LCS command length        */ /*LCS*/
+		BYTE   *lcsbuf;   				/* -> to lcs command buffer  */ /*LCS*/
 
         /*  Device dependent fields for printer                      */
 
@@ -939,6 +1024,7 @@ typedef struct _DEVBLK {
                                            placed in print buffer    */
         int     printrem;               /* Number of bytes remaining
                                            in print buffer           */
+        int     stopprt;                /* 1=stopped; 0=started      */
         unsigned int                    /* Flags                     */
                 crlf:1,                 /* 1=CRLF delimiters, 0=LF   */
                 diaggate:1,             /* 1=Diagnostic gate command */
@@ -967,11 +1053,13 @@ typedef struct _DEVBLK {
             U16 chksize;                /* Chunk size                */
         }       tdparms;                /* HET device parms          */
         unsigned int                    /* Flags                     */
-                readonly:1;             /* 1=Tape is write-protected */
+                readonly:1,             /* 1=Tape is write-protected */
+                longfmt:1;              /* 1=Long record format (DDR)*/ /*DDR*/
         BYTE    tapedevt;               /* Tape device type          */
 
         /*  Device dependent fields for fbadasd                      */
 
+        FBADEV *fbatab;                 /* Device table entry        */
         U32     fbaorigin;              /* Device origin block number*/
         U32     fbanumblk;              /* Number of blocks in device*/
         U32     fbaxblkn;               /* Offset from start of device
@@ -997,6 +1085,8 @@ typedef struct _DEVBLK {
                                            in each CKD image file    */
         U16     ckdhicyl[CKD_MAXFILES]; /* Highest cylinder number
                                            in each CKD image file    */
+        CKDDEV *ckdtab;                 /* Device table entry        */
+        CKDCU  *ckdcu;                  /* Control unit entry        */ 
         BYTE   *ckdtrkbuf;              /* Track image buffer        */
         int     ckdtrkfd;               /* Track image fd            */
         int     ckdtrkfn;               /* Track image file nbr      */
@@ -1008,8 +1098,6 @@ typedef struct _DEVBLK {
         U16     ckdtrks;                /* Number of tracks          */
         U16     ckdheads;               /* #of heads per cylinder    */
         U16     ckdtrksz;               /* Track size                */
-        U16     ckdmaxr0len;            /* Maximum length of R0 data */
-        U16     ckdmaxr1len;            /* Maximum length of R1 data */
         U16     ckdcurcyl;              /* Current cylinder          */
         U16     ckdcurhead;             /* Current head              */
         BYTE    ckdcurrec;              /* Current record id         */
@@ -1033,8 +1121,6 @@ typedef struct _DEVBLK {
         BYTE    ckdloper;               /* Locate record operation   */
         BYTE    ckdlaux;                /* Locate record aux byte    */
         BYTE    ckdlcount;              /* Locate record count       */
-        BYTE    ckdsectors;             /* Number of sectors         */
-
         struct _CKDDASD_CACHE *ckdcache;/* Cache table               */
         int     ckdcachenbr;            /* Cache table size          */
         int     ckdcachehits;           /* Cache hits                */
@@ -1064,6 +1150,20 @@ typedef struct _DEVBLK {
                 ckdfakewrt:1;           /* 1=Fake successful write
                                              for read only file      */
     } DEVBLK;
+
+/*-------------------------------------------------------------------*/
+/* Definitions for CTC protocol types                                */
+/*-------------------------------------------------------------------*/
+#define CTC_XCA         1               /* XCA device                */
+#define CTC_LCS         2               /* LCS device                */
+#define CTC_CETI        3               /* CETI device               */
+#define CTC_CLAW        4               /* CLAW device               */
+#define CTC_CTCN        5               /* CTC link via NETBIOS      */
+#define CTC_CTCT        6               /* CTC link via TCP          */
+#define CTC_CTCI        7               /* CTC link to TCP/IP stack  */
+#define CTC_CTCI_W32    8               /* (Win32 CTCI)              */
+#define CTC_VMNET       9               /* CTC link via wfk's vmnet  */
+#define CTC_CFC        10               /* Coupling facility channel */
 
 /*-------------------------------------------------------------------*/
 /* Structure definitions for CKD headers                             */
@@ -1138,6 +1238,8 @@ typedef struct _CCKDDASD_DEVHDR {       /* Compress device header    */
 
 #define CCKD_NOFUDGE           1         /* [deprecated]             */
 #define CCKD_BIGENDIAN         2
+#define CCKD_ORDWR             64        /* Opened read/write since
+                                            last chkdsk              */
 #define CCKD_OPENED            128
 
 
@@ -1203,7 +1305,8 @@ typedef struct _CCKD_CACHE {            /* Cache structure           */
 #define CCKD_FREEBLK_SIZE      8
 #define CCKD_FREEBLK_ISIZE     sizeof(CCKD_FREEBLK)
 #define CCKD_CACHE_SIZE        sizeof(CCKD_CACHE)
-#define CCKD_NULLTRK_SIZE      37
+#define CCKD_NULLTRK_SIZE1     37       /* ha r0 r1 ffff */
+#define CCKD_NULLTRK_SIZE0     29       /* ha r0 ffff */
 #define GC_COMBINE_LO          0
 #define GC_COMBINE_HI          1
 
@@ -1212,7 +1315,7 @@ typedef struct _CCKD_CACHE {            /* Cache structure           */
 #define CCKD_L2CACHE_NBR       32       /* Number of secondary lookup
                                            tables that will be cached
                                            in storage                */
-#define CCKD_MAX_WRITE_TIME    60       /* Number of seconds a track
+#define CCKD_MAX_WRITE_TIME    5        /* Number of seconds a track
                                            image remains idle until
                                            it is written             */
 #define CCKD_COMPRESS_MIN      512      /* Track images smaller than
@@ -1332,6 +1435,12 @@ extern int extgui;              /* external gui present */
 extern const char* arch_name[];
 extern const char* get_arch_mode_string(REGS* regs);
 
+
+/*-------------------------------------------------------------------*/
+/* Global data areas and functions in module eightxff.c              */
+/*-------------------------------------------------------------------*/
+extern BYTE eighthexFF[8];
+
 /*-------------------------------------------------------------------*/
 /* Function prototypes                                               */
 /*-------------------------------------------------------------------*/
@@ -1348,9 +1457,9 @@ int  detach_device (U16 devnum);
 int  define_device (U16 olddev, U16 newdev);
 int  configure_cpu (REGS *regs);
 int  deconfigure_cpu (REGS *regs);
-#ifdef EXTERNALGUI
+//#ifdef EXTERNALGUI
 int parse_args (BYTE* p, int maxargc, BYTE** pargv, int* pargc);
-#endif /*EXTERNALGUI*/
+//#endif /*EXTERNALGUI*/
 
 /* Global data areas and functions in module panel.c */
 extern int volatile initdone;    /* Initialization complete flag */
@@ -1396,11 +1505,9 @@ extern int unbind_device (DEVBLK* dev);
 #define SIE_INTERCEPT_VALIDITY (-13)    /* SIE validity check        */
 #define SIE_INTERCEPT_PER      (-14)    /* SIE guest per event       */
 
-/* Architectural mode definitions */
-#define ARCH_370        0               /* S/370 mode                */
-#define ARCH_390        1               /* ESA/390 mode              */
-#define ARCH_900        2               /* ESAME mode                */
 
+/* Functions in module panel.c */
+void *panel_command (void *cmdline);
 
 /* Functions in module timer.c */
 void update_TOD_clock (void);
@@ -1409,58 +1516,12 @@ void *timer_update_thread (void *argp);
 /* Functions in module service.c */
 void scp_command (BYTE *command, int priomsg);
 
-/* Functions in module cardrdr.c */
-DEVIF cardrdr_init_handler;
-DEVQF cardrdr_query_device;
-DEVXF cardrdr_execute_ccw;
-DEVCF cardrdr_close_device;
-
-/* Functions in module cardpch.c */
-DEVIF cardpch_init_handler;
-DEVQF cardpch_query_device;
-DEVXF cardpch_execute_ccw;
-DEVCF cardpch_close_device;
-
 /* Functions in module console.c */
 void *console_connection_handler (void *arg);
-DEVIF loc3270_init_handler;
-DEVQF loc3270_query_device;
-DEVXF loc3270_execute_ccw;
-DEVCF loc3270_close_device;
-DEVIF constty_init_handler;
-DEVQF constty_query_device;
-DEVXF constty_execute_ccw;
-DEVCF constty_close_device;
+off_t   ckd_lseek (DEVBLK *, int, off_t, int);
+ssize_t ckd_read (DEVBLK *, int, void *, size_t);
+ssize_t ckd_write (DEVBLK *, int, const void *, size_t);
 
-/* Functions in module ctcadpt.c */
-DEVIF ctcadpt_init_handler;
-DEVQF ctcadpt_query_device;
-DEVXF ctcadpt_execute_ccw;
-DEVCF ctcadpt_close_device;
-
-/* Functions in module printer.c */
-DEVIF printer_init_handler;
-DEVQF printer_query_device;
-DEVXF printer_execute_ccw;
-DEVCF printer_close_device;
-
-/* Functions in module tapedev.c */
-DEVIF tapedev_init_handler;
-DEVQF tapedev_query_device;
-DEVXF tapedev_execute_ccw;
-DEVCF tapedev_close_device;
-
-/* Functions in module ckddasd.c */
-DEVIF ckddasd_init_handler;
-DEVQF ckddasd_query_device;
-DEVXF ckddasd_execute_ccw;
-DEVCF ckddasd_close_device;
-
-/* Functions in module fbadasd.c */
-DEVIF fbadasd_init_handler;
-DEVQF fbadasd_query_device;
-DEVXF fbadasd_execute_ccw;
-DEVCF fbadasd_close_device;
 void fbadasd_syncblk_io (DEVBLK *dev, BYTE type, U32 blknum,
         U32 blksize, BYTE *iobuf, BYTE *unitstat, U16 *residual);
 
@@ -1474,12 +1535,10 @@ void    cckd_sf_add (DEVBLK *);
 void    cckd_sf_remove (DEVBLK *, int);
 void    cckd_sf_newname (DEVBLK *, BYTE *);
 void    cckd_sf_stats (DEVBLK *);
+void    cckd_sf_comp (DEVBLK *);
 void    cckd_print_itrace (DEVBLK *);
 
-/* Functions in module cckdcdsk.c */
-int     cckd_chkdsk(int, FILE *, int);
-
-/* Functions in module cckdend.c */
+/* Functions in module cckutil.c */
 int     cckd_swapend (int, FILE *);
 void    cckd_swapend_chdr (CCKDDASD_DEVHDR *);
 void    cckd_swapend_l1 (CCKD_L1ENT *, int);
@@ -1488,5 +1547,13 @@ void    cckd_swapend_free (CCKD_FREEBLK *);
 void    cckd_swapend4 (char *);
 void    cckd_swapend2 (char *);
 int     cckd_endian ();
+int     cckd_comp (int, FILE *);
+int     cckd_chkdsk(int, FILE *, int);
+
+#if defined(OPTION_W32_CTCI)
+/* Functions in module w32ctca.c */
+#include "w32ctca.h"
+#endif // defined(OPTION_W32_CTCI)
+
 
 #endif /*!defined(_HERCULES_H)*/

@@ -1,8 +1,8 @@
 /*
  * dasdls
  *
- * Copyright 2000-2001 by Malcolm Beattie
- * Based on code copyright by Roger Bowler, 1999-2001
+ * Copyright 2000-2002 by Malcolm Beattie
+ * Based on code copyright by Roger Bowler, 1999-2002
  */
 #include "hercules.h"
 #include "dasdblks.h"
@@ -107,9 +107,9 @@ int do_ls_cif(CIFBLK *cif)
     return list_contents(cif, volser, &f4dscb->ds4vtoce);
 }
 
-int do_ls(char *file)
+int do_ls(char *file, char *sfile)
 {
-    CIFBLK *cif = open_ckd_image(file, O_RDONLY|O_BINARY);
+    CIFBLK *cif = open_ckd_image(file, sfile, O_RDONLY|O_BINARY);
 
     if (!cif || do_ls_cif(cif) || close_ckd_image(cif))
         return -1;
@@ -119,9 +119,7 @@ int do_ls(char *file)
 int main(int argc, char **argv)
 {
     int rc = 0;
-
-    /* Display program info message */
-    display_version (stderr, "Hercules DASD list program ");
+    char *fn, *sfn;
 
 #ifdef EXTERNALGUI
     if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
@@ -131,8 +129,11 @@ int main(int argc, char **argv)
     }
 #endif /*EXTERNALGUI*/
 
+    /* Display program info message */
+    display_version (stderr, "Hercules DASD list program ");
+
     if (argc < 2) {
-        fprintf(stderr, "Usage: dasdls dasd_image...\n");
+        fprintf(stderr, "Usage: dasdls dasd_image [sf=shadow-file-name]...\n");
         exit(2);
     }
 
@@ -145,8 +146,14 @@ int main(int argc, char **argv)
     set_verbose_util(0);
 
     while (*++argv)
-        if (do_ls(*argv))
+    {
+        fn = *argv;
+        if (*(argv+1) && strlen (*(argv+1)) > 3 && !memcmp(*(argv+1), "sf=", 3))
+            sfn = *++argv;
+        else sfn = NULL;
+        if (do_ls(fn, sfn))
             rc = 1;
+    }
 
     return rc;
 }

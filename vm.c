@@ -1,14 +1,14 @@
-/* VM.C         (c) Copyright Roger Bowler, 2000-2001                */
+/* VM.C         (c) Copyright Roger Bowler, 2000-2002                */
 /*              ESA/390 VM Diagnose calls and IUCV instruction       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements miscellaneous diagnose functions           */
 /* described in SC24-5670 VM/ESA CP Programming Services             */
 /* and SC24-5855 VM/ESA CP Diagnosis Reference.                      */
 /*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -1046,11 +1046,15 @@ VADR    effective_addr2;                /* Effective address         */
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "vm.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "vm.c"
+#endif
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "vm.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "vm.c"
+#endif
 
 #endif /*!defined(_GEN_ARCH)*/

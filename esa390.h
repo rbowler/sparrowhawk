@@ -1,8 +1,8 @@
-/* ESA390.H	(c) Copyright Roger Bowler, 1994-2001		     */
+/* ESA390.H	(c) Copyright Roger Bowler, 1994-2002		     */
 /*		ESA/390 Data Areas				     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 
 #if !defined(_ESA390_H)
 
@@ -172,6 +172,9 @@ typedef struct _TLBE {
 #define CR0_PC_FAST	0x00000008	/* PC fast control	  390*/
 #define CR0_CRYPTO	0x00000004	/* Crypto control	ESAME*/
 
+#define SERVSIG_PEND    0x00000001      /* Event buffer pending      */
+#define SERVSIG_ADDR    0xFFFFFFF8      /* Parameter address         */
+
 /* Bit definitions for control register 1 */
 /* CR1 is the primary segment table descriptor or primary ASCE */
 
@@ -212,6 +215,8 @@ typedef struct _TLBE {
 #define CR9_GRA 	0x10000000	/* General Register Alt.     */
 #define CR9_STURA	0x08000000	/* Store using real addr     */
 #define CR9_GRMASK	0x0000FFFF	/* GR mask bits 	     */
+#define CR9_BAC         0x00800000      /* Br addr control PER2 only */
+#define CR9_SAC         0x00200000      /* Stor. alter. c. PER2 only */
 
 /* Bit definitions for control register 12 */
 #define S_CR12_BRTRACE	0x80000000	/* Branch trace control      */
@@ -311,12 +316,12 @@ typedef struct _TLBE {
 
 /* Page table entry bit definitions (ESA/390 mode) */
 #define PAGETAB_PFRA	0x7FFFF000	/* Page frame real address   */
+#define PAGETAB_ESNK    0x00000800      /* ES NK bit                 */
 #define PAGETAB_INVALID 0x00000400	/* Invalid page 	     */
 #define PAGETAB_PROT	0x00000200	/* Protected page	     */
 #define PAGETAB_ESVALID 0x00000100	/* Valid in expanded storage */
-#define PAGETAB_ESREF   0x00000080      /* ES Referenced             */
-#define PAGETAB_ESCHA   0x00000040      /* ES Changed                */
-#define PAGETAB_ESLCK   0x00000020      /* ES Locked                 */
+#define PAGETAB_ESREF   0x00000004      /* ES Referenced             */
+#define PAGETAB_ESCHA   0x00000002      /* ES Changed                */
 #define PAGETAB_PGLOCK	0x00000001	/* Page lock (LKPG)	     */
 #define PAGETAB_RESV	0x80000900	/* Reserved bits - must be 0 */
 
@@ -353,7 +358,7 @@ typedef struct _TLBE {
 #define ALET_ALEN	0x0000FFFF	/* Access-list entry number  */
 
 /* Access-list designation bit definitions */
-#if FEATURE_ALD_FORMAT == 0 || defined(FEATURE_ESAME)
+#if FEATURE_ALD_FORMAT == 0 || defined(_900)
 #define ALD_ALO 	0x7FFFFF80	/* Access-list origin (fmt0) */
 #define ALD_ALL 	0x0000007F	/* Access-list length (fmt0) */
 #define ALD_ALL_SHIFT	3		/* Length units are 2**3     */
@@ -1177,7 +1182,7 @@ typedef struct _SIE1BK { 		/* SIE State Descriptor      */
 #define SIE_M_370	0x10		/* 370 mode guest	     */
 #define SIE_M_VR	0x08		/* V=R mode guest	     */
 #define SIE_M_ITMOF	0x04		/* Guest ival timer disabled */
-#define SIE_M_GPE	0x02		/* Guest per enhancement     */
+#define SIE_M_GPE	0x01		/* Guest per enhancement     */
 /*004*/	FWORD prefix;			/* Guest prefix register     */
 /*008*/	HWORD mso;			/* Main Storage Origin	     */
 /*00A*/	HWORD mse;			/* Main Storage Extent	     */
@@ -1309,7 +1314,7 @@ typedef struct _SIE2BK { 		/* SIE State Descriptor      */
 #define SIE_M_370	0x10		/* 370 mode guest	     */
 #define SIE_M_VR	0x08		/* V=R mode guest	     */
 #define SIE_M_ITMOF	0x04		/* Guest ival timer disabled */
-#define SIE_M_GPE	0x02		/* Guest per enhancement     */
+#define SIE_M_GPE	0x01		/* Guest per enhancement     */
 /*004*/	FWORD prefix;			/* Guest prefix register     */
 /*008*/ FWORD resv008f;
 /*00C*/	FWORD resv00cf;
@@ -1390,6 +1395,10 @@ typedef struct _SIE2BK { 		/* SIE State Descriptor      */
 /*052*/	HWORD lhcpu;			/* Last Host CPU addr	     */
 /*054*/	HWORD resv054h;
 /*056*/	HWORD ipa;			/* Instruction parameter A   */
+#define vi_who  ipa[0]
+#define vi_when ipa[1]
+#define vi_why  ipb
+#define vi_zero ipb+2
 /*058*/	FWORD ipb;			/* Instruction parameter B   */
 /*05C*/	FWORD ipc;			/* Instruction parameter C   */
 /*060*/	FWORD rcpo;			/* RCP area origin	     */
@@ -1426,6 +1435,113 @@ typedef struct _SIE2BK { 		/* SIE State Descriptor      */
 /*100*/ DWORD cr[16];                   /* Control registers         */
 /*180*/ BYTE  resv180b[128];
 } SIE2BK;
+
+
+#define SIE_VI_WHO_LVLM   0xF0     /* Mask for "source level" field:
+                                      If non-zero, this is the inter-
+                                      pretive-execution depth at which
+                                      the problem was originally
+                                      detected.  It is set to 1 (or 2
+                                      for Interpreted SIE) by the
+                                      entity (hardware or vSIE software)
+                                      that reports the problem, and is
+                                      incremented (to a max of 15) by
+                                      every level of vSIE that passes
+                                      the interception along.        */
+#define SIE_VI_WHO_LVL1   0x10     /* Condition recognized one level
+                                      down in interpretive execution */
+#define SIE_VI_WHO_LVLMX  0xF0     /* Maximum source level reported  */
+#define SIE_VI_WHO_INITM  0x0F     /* Mask for "initiator" field,
+                                      identifying the type of entity
+                                      that detected the problem.     */
+#define SIE_VI_WHO_CPU    0x01     /* Initiator was a CPU            */
+#define SIE_VI_WHO_VSIE   0x08     /* Initiator was vSIE software    */
+#define SIE_VI_WHEN_RECPM 0xF0     /* Mask for "recognition point" field
+                                      the normal processing that
+                                      recognized the condition
+                                      necessitating the validity
+                                      interception.                  */
+#define SIE_VI_WHEN_SIENT 0x10     /* Condition recognized during SIE
+                                      entry                          */
+#define SIE_VI_WHEN_INST  0x20     /* Condition recognized during
+                                      instruction interpretation     */
+#define SIE_VI_WHEN_IRPT  0x30     /* Condition recognized during
+                                      interruption interpretation    */
+#define SIE_VI_WHEN_SIEXT 0x40     /* Condition recognized during SIE
+                                      exit                           */
+#define SIE_VI_WHY_MODE  0x0001    /* Invalid guest mode or invalid
+                                      combination of modes           */
+#define SIE_VI_WHY_ARCHM 0x0002    /* Invalid architecture mode specified
+                                      (neither or both S/370 and ESA/390) */
+#define SIE_VI_WHY_370NI 0x0003    /* S/370 interpretation requested but
+                                      not installed                  */
+#define SIE_VI_WHY_PRMCS 0x0004    /* Preferred and MCDS modes specified
+                                      together                       */
+#define SIE_VI_WHY_MCS37 0x0005    /* MCDS and S/370 modes specified
+                                      together                       */
+#define SIE_VI_WHY_RRFNI 0x0006    /* RRF requested but not installed */
+#define SIE_VI_WHY_ISINI 0x0007    /* iSIE requested but not installed */
+#define SIE_VI_WHY_PFOUT 0x0010    /* Guest prefix outside guest extent */
+#define SIE_VI_WHY_SCHPF 0x0011    /* SCA origin nonzero and its frame
+                                      address matches host prefix reg */
+#define SIE_VI_WHY_SDOVL 0x0030    /* State description overlaps guest
+                                      storage                        */
+#define SIE_VI_WHY_SCOVL 0x0031    /* SCA overlaps guest storage     */
+#define SIE_VI_WHY_APOVL 0x0032    /* APCB overlaps guest storage    */
+#define SIE_VI_WHY_SCADR 0x0034    /* SCA at invalid host address    */
+#define SIE_VI_WHY_APADR 0x0035    /* APCB at invalid host address   */
+#define SIE_VI_WHY_PFACC 0x0037    /* Access exception on guest prefix
+                                      area                           */
+#define SIE_VI_WHY_SCZER 0x0038    /* SCA origin nonzero but under 4K
+                                      (8K for ESAME host)            */
+#define SIE_VI_WHY_APZER 0x0039    /* APCB origin is zero when an
+                                      APCB is needed                 */
+#define SIE_VI_WHY_PSADR 0x003A    /* PGSTE at invalid host address  */
+#define SIE_VI_WHY_SCBDY 0x003B    /* SCA crosses 4KB boundary       */
+#define SIE_VI_WHY_APBDY 0x003C    /* APCB crosses 4KB boundary      */
+#define SIE_VI_WHY_MSLEX 0x003D    /* MSL exceeds maximum host
+                                      address supported for guest      
+                                      storage (ESAME SIE only)       */
+#define SIE_VI_WHY_MSDEF 0x0041    /* MSO exceeds MSL (ESAME SIE only) */
+#define SIE_VI_WHY_MSDF2 0x0042    /* Alternate for MSDEF detected
+                                      during guest prefix access     */
+#define SIE_VI_WHY_RRHPF 0x0046    /* RRF guest extent (zone) includes
+                                      host prefix area               */
+#define SIE_VI_WHY_PRHPF 0x0050    /* Preferred guest extent includes
+                                      host prefix area               */
+#define SIE_VI_WHY_MSONZ 0x0051    /* MSO not zero for preferred guest */
+#define SIE_VI_WHY_CDXNI 0x0070    /* Crypto Domain Index not installed */
+#define SIE_VI_WHY_DRFNI 0x1001    /* DRF requested but not installed */
+#define SIE_VI_WHY_PRALE 0x1002    /* Alerting enabled for preferred
+                                      non-DRF guest                  */
+#define SIE_VI_WHY_AZNNI 0x1005    /* Zone identified by AZN is not
+                                      installed                      */
+#define SIE_VI_WHY_AZNNZ 0x1006    /* Nonzero AZN for non-RRF/DRF guest
+                                      (or level-1 DSC nonzero for
+                                      pageable guest)                */
+/* The following occur only under ESA/390 SIE: */
+#define SIE_VI_WHY_MSSTL 0x0043    /* Guest extent exceeds host STL  */
+#define SIE_VI_WHY_HOSTF 0x0060    /* Invalid host translation format
+                                      (CR0.8-12)                     */
+#define SIE_VI_WHY_MSOFL 0x0061    /* Pageable guest extent exceeds
+                                      2G-1                           */
+#define SIE_VI_WHY_RCOFL 0x0062    /* RCP area extends beyond 2G-1 in
+                                      host virtual                   */
+#define SIE_VI_WHY_RCSTL 0x0063    /* RCP area exceeds host STL      */
+#define SIE_VI_WHY_SCOFL 0x0064    /* SCA extends beyond 2G-1        */
+#define SIE_VI_WHY_APOFL 0x0065    /* APCB extends beyond 2G-1       */
+#define SIE_VI_WHY_RCZER 0x0067    /* RCP area origin is zero        */
+#define SIE_VI_WHY_PFSTL 0x0068    /* Guest prefix exceeds host STL  */
+#define SIE_VI_WHY_PTBDY 0x0069    /* PTO/PGST not on 2K boundary    */
+#define SIE_VI_WHY_MSODS 0x006A    /* MSO nonzero for MCDS guest     */
+#define SIE_VI_WHY_SNOVL 0x1009    /* SNT overlaps guest storage     */
+#define SIE_VI_WHY_SNHPF 0x100C    /* SNT overlaps host prefix area  */
+/* The following occur only in virtual machines under VM/ESA: */
+#define SIE_VI_WHY_PFRDO 0xF000    /* Guest prefix maps to read-only
+                                      storage (e.g. in a DCSS)       */
+#define SIE_VI_WHY_SCRDO 0xF001    /* SCA in read-only storage       */
+#define SIE_VI_WHY_OBMSB 0xF003    /* MSO/MSE not multiple of 1Meg...
+                                      ..not supported in ESAME gen   */
 
 
 #define LKPG_GPR0_LOCKBIT	0x00000200

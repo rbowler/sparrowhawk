@@ -1,7 +1,7 @@
-/* CONFIG.C     (c) Copyright Roger Bowler, 1999-2001                */
+/* CONFIG.C     (c) Copyright Roger Bowler, 1999-2002                */
 /*              ESA/390 Configuration Builder                        */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
 
 /*-------------------------------------------------------------------*/
 /* This module builds the configuration tables for the Hercules      */
@@ -19,27 +19,35 @@
 /*      OSTAILOR parameter by Jay Maynard                            */
 /*      PANRATE parameter by Reed H. Petty                           */
 /*      CPUPRIO parameter by Jan Jaeger                              */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 /*-------------------------------------------------------------------*/
 
 
 #include "hercules.h"
 
+#include "devtype.h"
+
 #include "opcode.h"
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "config.c"
-#undef   _GEN_ARCH
+#if defined(_ARCHMODE3)
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "config.c"
+ #undef   _GEN_ARCH
+#endif
 
-#define  _GEN_ARCH 370
-#include "config.c"
-#undef   _GEN_ARCH
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "config.c"
+ #undef   _GEN_ARCH
+#endif
 
 #if defined(OPTION_FISHIO)
 #include "w32chan.h"
 #endif // defined(OPTION_FISHIO)
+
+extern DEVENT device_handler_table[];
 
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
@@ -78,7 +86,7 @@ static BYTE *addargv[MAX_ARGS];         /* Additional argument array */
 /*-------------------------------------------------------------------*/
 #include "codeconv.h"
 
-#ifdef EXTERNALGUI
+//#ifdef EXTERNALGUI
 /*-------------------------------------------------------------------*/
 /* Subroutine to parse an argument string. The string that is passed */
 /* is modified in-place by inserting null characters at the end of   */
@@ -101,37 +109,32 @@ int parse_args (BYTE* p, int maxargc, BYTE** pargv, int* pargc)
 {
     for (*pargc = 0; *pargc < MAX_ARGS; ++*pargc) addargv[*pargc] = NULL;
 
-    *pargc = 0; p--;
+    *pargc = 0;
+    *pargv = NULL;
 
-    while (*pargc < maxargc)
+    while (*p && *pargc < maxargc)
     {
-        if (!*(p+1)) break;             // exit at end-of-string
-        while (isspace(*++p));          // advance to next arg
-        if (!*p) break;                 // exit at end-of-string
-        if (*p == '\"')                 // begin of quoted string?
+        while (*p && isspace(*p)) p++; if (!*p) break; // find start of arg
+
+        if (*p == '#') break; // stop on comments
+
+        *pargv = p; ++*pargc; // count new arg
+
+        while (*p && !isspace(*p) && *p != '\"') p++; if (!*p) break; // find end of arg
+
+        if (*p == '\"')
         {
-            *pargv++ = ++p;             // save ptr to next arg
-            while (*p && *++p != '\"'); // advance to ending quote
-            if (!*p)                    // end quote not found?
-            {
-                --pargv;                // backup to quote arg
-                while (*--(*pargv) != '\"'); // backup to quote
-                ++*pargc;               // count last arg
-                break;                  // end quote not found
-            }
-            *p = 0;                     // mark end of arg
+            if (p == *pargv) *pargv = p+1;
+            while (*++p && *p != '\"'); if (!*p) break; // find end of quoted string
         }
-        else *pargv++ = p;              // save ptr to next arg
-        if ('#' == *p) break;           // exit at beg-of-comments
-        ++*pargc;                       // count args
-        while (!isspace(*++p) && *p);   // skip to end of arg
-        if (!*p) break;                 // exit at end-of-string
-        *p = 0;                         // mark end of arg
+
+        *p++ = 0; // mark end of arg
+        pargv++; // next arg ptr
     }
 
-    return *pargc;                      // return #of arguments
+    return *pargc;
 }
-#endif /*EXTERNALGUI*/
+//#endif /*EXTERNALGUI*/
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to read a statement from the configuration file        */
@@ -201,7 +204,7 @@ int     stmtlen;                        /* Statement length          */
         if (stmtlen == 0 || buf[0] == '*' || buf[0] == '#')
            continue;
 
-#ifdef EXTERNALGUI
+#if 1 // def EXTERNALGUI
 
         /* Parse the statement just read */
 
@@ -253,6 +256,7 @@ int     i;                              /* Array subscript           */
 int     scount;                         /* Statement counter         */
 int     cpu;                            /* CPU number                */
 int     pfd[2];                         /* Message pipe handles      */
+DEVBLK *dev;                            /* -> Device block           */
 FILE   *fp;                             /* Configuration file pointer*/
 BYTE   *sserial;                        /* -> CPU serial string      */
 BYTE   *smodel;                         /* -> CPU model string       */
@@ -270,6 +274,13 @@ BYTE   *sostailor;                      /* -> OS to tailor system to */
 BYTE   *spanrate;                       /* -> Panel refresh rate     */
 BYTE   *sdevtmax;                       /* -> Max device threads     */
 BYTE   *scpuprio;                       /* -> CPU thread priority    */
+BYTE   *spgmprdos;                      /* -> Program product OS OK  */
+#if defined(OPTION_HTTP_SERVER)
+BYTE   *shttpport;                      /* -> HTTP port number       */
+#endif /*defined(OPTION_HTTP_SERVER)*/
+#ifdef OPTION_IODELAY_KLUDGE
+BYTE   *siodelay;                       /* -> I/O delay value        */
+#endif /*OPTION_IODELAY_KLUDGE*/
 BYTE    loadparm[8];                    /* Load parameter (EBCDIC)   */
 BYTE    version = 0x00;                 /* CPU version code          */
 U32     serial;                         /* CPU serial number         */
@@ -279,6 +290,9 @@ U16     xpndsize;                       /* Expanded storage size (MB)*/
 U16     cnslport;                       /* Console port number       */
 U16     numcpu;                         /* Number of CPUs            */
 U16     numvec;                         /* Number of VFs             */
+#if defined(OPTION_HTTP_SERVER)
+U16     httpport;                       /* HTTP port number          */
+#endif /*defined(OPTION_HTTP_SERVER)*/
 int     archmode;                       /* Architectural mode        */
 S32     sysepoch;                       /* System epoch year         */
 S32     tzoffset;                       /* System timezone offset    */
@@ -286,15 +300,27 @@ int     toddrag;                        /* TOD clock drag factor     */
 U64     ostailor;                       /* OS to tailor system to    */
 int     panrate;                        /* Panel refresh rate        */
 int     cpuprio;                        /* CPU thread priority       */
+BYTE    pgmprdos;                       /* Program product OS OK     */
 BYTE   *sdevnum;                        /* -> Device number string   */
 BYTE   *sdevtype;                       /* -> Device type string     */
 U16     devnum;                         /* Device number             */
 U16     devtype;                        /* Device type               */
 int     devtmax;                        /* Max number device threads */
+#ifdef OPTION_IODELAY_KLUDGE
+int     iodelay=-1;                     /* I/O delay value           */
+#endif /*OPTION_IODELAY_KLUDGE*/
 BYTE    c;                              /* Work area for sscanf      */
 
     /* Clear the system configuration block */
     memset (&sysblk, 0, sizeof(SYSBLK));
+
+    /* Gabor Hoffer (performance option) */
+    for (i = 0; i < 256; i++)
+    {
+        s370_opcode_table [i] = opcode_table [i][0];
+        s390_opcode_table [i] = opcode_table [i][1];
+        z900_opcode_table [i] = opcode_table [i][2];
+    }
 
     /* Initialize SETMODE and set user authority */
     SETMODE(INIT);
@@ -323,11 +349,19 @@ BYTE    c;                              /* Work area for sscanf      */
     sysepoch = 1900;
     tzoffset = 0;
     toddrag = 1;
+#if defined(_390)
     archmode = ARCH_390;
+#else
+    archmode = ARCH_370;
+#endif
     ostailor = OS_NONE;
     panrate = PANEL_REFRESH_RATE_SLOW;
     cpuprio = 15;
+    pgmprdos = PGM_PRD_OS_RESTRICTED;
     devtmax = MAX_DEVICE_THREADS;
+#if defined(OPTION_HTTP_SERVER)
+    httpport = 0;
+#endif /*defined(OPTION_HTTP_SERVER)*/
 
     /* Read records from the configuration file */
     for (scount = 0; ; scount++)
@@ -362,6 +396,13 @@ BYTE    c;                              /* Work area for sscanf      */
         spanrate = NULL;
         scpuprio = NULL;
         sdevtmax = NULL;
+        spgmprdos = NULL;
+#if defined(OPTION_HTTP_SERVER)
+        shttpport = NULL;
+#endif /*defined(OPTION_HTTP_SERVER)*/
+#ifdef OPTION_IODELAY_KLUDGE
+        siodelay = NULL;
+#endif /*OPTION_IODELAY_KLUDGE*/
 
         /* Check for old-style CPU statement */
         if (scount == 0 && addargc == 5 && strlen(keyword) == 6
@@ -433,10 +474,6 @@ BYTE    c;                              /* Work area for sscanf      */
             {
                 sostailor = operand;
             }
-            else if (strcasecmp (keyword, "cfccimage") == 0)
-            {
-                addargc = 0;
-            }
             else if (strcasecmp (keyword, "archmode") == 0)
             {
                 sarchmode = operand;
@@ -449,6 +486,50 @@ BYTE    c;                              /* Work area for sscanf      */
             {
                 sdevtmax = operand;
             }
+            else if (strcasecmp (keyword, "pgmprdos") == 0)
+            {
+                spgmprdos = operand;
+            }
+#ifdef OPTION_IODELAY_KLUDGE
+            else if (strcasecmp (keyword, "iodelay") == 0)
+            {
+                siodelay = operand;
+            }
+#endif /*OPTION_IODELAY_KLUDGE*/
+#if defined(OPTION_HTTP_SERVER)
+            else if (strcasecmp (keyword, "httpport") == 0)
+            {
+                shttpport = operand;
+                if(addargc > 0)
+                {
+                    if(!strcasecmp(addargv[0],"auth"))
+                        sysblk.httpauth = 1;
+                    else if(strcasecmp(addargv[0],"noauth"))
+                    {
+                        logmsg("HHS009E Error in %s line %d: "
+                        "Unrecognized argument %s\n",
+                        fname, stmt, addargv[0]);
+                        exit(1);
+                    }
+                    addargc--;
+                }
+                if(addargc > 0)
+                {
+                    sysblk.httpuser = strdup(addargv[1]);
+                    if(--addargc)
+                        sysblk.httppass = strdup(addargv[2]);
+                    else
+                    {
+                        logmsg("HHS008E Error in %s line %d: "
+                        "Userid, but no password given %s\n",
+                        fname, stmt, addargv[1]);
+                        exit(1);
+                    }
+                    addargc--;
+                }
+                    
+            }
+#endif /*defined(OPTION_HTTP_SERVER)*/
             else
             {
                 logmsg( "HHC006I Error in %s line %d: "
@@ -469,29 +550,39 @@ BYTE    c;                              /* Work area for sscanf      */
 
         if (sarchmode != NULL)
         {
-            if (strcasecmp (sarchmode, "S/370") == 0)
+#if defined(_370)
+            if (strcasecmp (sarchmode, arch_name[ARCH_370]) == 0)
             {
                 archmode = ARCH_370;
             }
-            else if (strcasecmp (sarchmode, "ESA/390") == 0)
+            else
+#endif
+#if defined(_390)
+            if (strcasecmp (sarchmode, arch_name[ARCH_390]) == 0)
             {
                 archmode = ARCH_390;
             }
-            else if (strcasecmp (sarchmode, "ESAME") == 0)
+            else
+#endif
+#if defined(_900)
+            if (strcasecmp (sarchmode, arch_name[ARCH_900]) == 0)
             {
                 archmode = ARCH_900;
             }
             else
+#endif
             {
                 logmsg( "HHC017I Error in %s line %d: "
-                        "Unknown ARCHMODE specification %s\n",
+                        "Unknown or unsupported ARCHMODE specification %s\n",
                         fname, stmt, sarchmode);
                 exit(1);
             }
         }
         sysblk.arch_mode = archmode;
+#if defined(_900)
         /* Indicate if z/Architecture is supported */
         sysblk.arch_z900 = sysblk.arch_mode != ARCH_390;
+#endif
 
         /* Parse CPU serial number operand */
         if (sserial != NULL)
@@ -631,12 +722,12 @@ BYTE    c;                              /* Work area for sscanf      */
             if (strlen(ssysepoch) != 4
                 || sscanf(ssysepoch, "%d%c", &sysepoch, &c) != 1
                 || ((sysepoch != 1900) && (sysepoch != 1928)
-		 && (sysepoch != 1960) && (sysepoch != 1988)
+                 && (sysepoch != 1960) && (sysepoch != 1988)
                  && (sysepoch != 1970)
-		    ))
+                    ))
             {
                 logmsg( "HHC014I Error in %s line %d: "
-                        "%s is not a valid system epoch\npatch the config.c to expand the table\n",
+                        "%s is not a valid system epoch\npatch config.c to expand the table\n",
                         fname, stmt, ssysepoch);
                 exit(1);
             }
@@ -746,7 +837,62 @@ BYTE    c;                              /* Work area for sscanf      */
             }
         }
 
+        /* Parse program product OS allowed */
+        if (spgmprdos != NULL)
+        {
+            if (strcasecmp (spgmprdos, "LICENSED") == 0)
+            {
+                pgmprdos = PGM_PRD_OS_LICENSED;
+            }
+            /* Handle silly British spelling. */
+            else if (strcasecmp (spgmprdos, "LICENCED") == 0)
+            {
+                pgmprdos = PGM_PRD_OS_LICENSED;
+            }
+            else if (strcasecmp (spgmprdos, "RESTRICTED") == 0)
+            {
+                pgmprdos = PGM_PRD_OS_RESTRICTED;
+            }
+            else
+            {
+                logmsg( "HHC047I Error in %s line %d: "
+                        "Invalid program product OS permission %s\n",
+                        fname, stmt, spgmprdos);
+                exit(1);
+            }
+        }
+
+#if defined(OPTION_HTTP_SERVER)
+        /* Parse console port number operand */
+        if (shttpport != NULL)
+        {
+            if (sscanf(shttpport, "%hu%c", &httpport, &c) != 1
+                || httpport == 0)
+            {
+                logmsg( "HHS002E Error in %s line %d: "
+                        "Invalid HTTP port number %s\n",
+                        fname, stmt, shttpport);
+                exit(1);
+            }
+        }
+#endif /*defined(OPTION_HTTP_SERVER)*/
+
+#ifdef OPTION_IODELAY_KLUDGE
+        /* Parse I/O delay value */
+        if (siodelay != NULL)
+        {
+            if (sscanf(siodelay, "%d%c", &iodelay, &c) != 1)
+            {
+                logmsg( "HHC012I Error in %s line %d: "
+                        "Invalid I/O delay value: %s\n",
+                        fname, stmt, siodelay);
+                exit(1);
+            }
+        }
+#endif /*OPTION_IODELAY_KLUDGE*/
+
     } /* end for(scount) */
+
 
     /* Obtain main storage */
     sysblk.mainsize = mainsize * 1024 * 1024;
@@ -797,6 +943,10 @@ BYTE    c;                              /* Work area for sscanf      */
     /* Save the console port number */
     sysblk.cnslport = cnslport;
 
+#if defined(OPTION_HTTP_SERVER)
+    sysblk.httpport = httpport;
+#endif /*defined(OPTION_HTTP_SERVER)*/
+
     /* Build CPU identifier */
     sysblk.cpuid = ((U64)version << 56)
                  | ((U64)serial << 32)
@@ -821,6 +971,9 @@ BYTE    c;                              /* Work area for sscanf      */
 #endif /*SMP_SERIALIZATION*/
 #endif /*MAX_CPU_ENGINES > 1*/
     initialize_detach_attr (&sysblk.detattr);
+#if defined(OPTION_W32_CTCI)
+    tt32_init(sysblk.msgpipew);
+#endif /* defined(OPTION_W32_CTCI) */
 #if defined(OPTION_FISHIO)
     InitIOScheduler                         // initialize i/o scheduler...
         (
@@ -844,28 +997,28 @@ BYTE    c;                              /* Work area for sscanf      */
     /* Set up the system TOD clock offset: compute the number of
        seconds from the designated year to 1970 for TOD clock
        adjustment, then add in the specified time zone offset
-    
+
        The problem here, is that no formular can do it right, as
        we have to do it wrong in 1928 and 1988 case !
     */
     switch (sysepoch) {
-	case 1988:
-	    sysblk.todoffset = (18*365 + 4) * -86400ULL;
-	    break;
-	case 1960:
-	    sysblk.todoffset = (10*365 + 3) * 86400ULL;
-	    break;
-	case 1928:
-	    sysblk.todoffset = (42*365 + 10) * 86400ULL;
-	    break;
+        case 1988:
+            sysblk.todoffset = (18*365 + 4) * -86400ULL;
+            break;
+        case 1960:
+            sysblk.todoffset = (10*365 + 3) * 86400ULL;
+            break;
+        case 1928:
+            sysblk.todoffset = (42*365 + 10) * 86400ULL;
+            break;
         case 1970:
             sysblk.todoffset = 0;
             break;
-	default:
+        default:
             sysepoch = 1900;
-	case 1900:
-	    sysblk.todoffset = (70*365 + 17) * 86400ULL;
-	    break;
+        case 1900:
+            sysblk.todoffset = (70*365 + 17) * 86400ULL;
+            break;
     }
 
     /* Compute the timezone offset in seconds and crank that in */
@@ -883,6 +1036,17 @@ BYTE    c;                              /* Work area for sscanf      */
 
     /* Set the system OS tailoring value */
     sysblk.pgminttr = ostailor;
+
+    /* Set the system program product OS restriction flag */
+    sysblk.pgmprdos = pgmprdos;
+
+#ifdef OPTION_IODELAY_KLUDGE
+    /* Set I/O delay value */
+    if (iodelay > 0)
+        sysblk.iodelay = iodelay;
+    else if (ostailor == OS_LINUX)
+        sysblk.iodelay = OPTION_IODELAY_LINUX_DEFAULT;
+#endif /*OPTION_IODELAY_KLUDGE*/
 
     /* Set the panel refresh rate */
     sysblk.panrate = panrate;
@@ -986,12 +1150,26 @@ BYTE    c;                              /* Work area for sscanf      */
     }
     setvbuf (sysblk.msgpipew, NULL, _IOLBF, 0);
 
+    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+        dev->msgpipew = sysblk.msgpipew;
+
 #if defined(OPTION_FISHIO)
     ios_msgpipew = sysblk.msgpipew;
 #endif // defined(OPTION_FISHIO)
+#if defined(OPTION_W32_CTCI)
+    g_tt32_msgpipew = sysblk.msgpipew;
+#endif // defined(OPTION_W32_CTCI)
 
     /* Display the version identifier on the control panel */
     display_version (sysblk.msgpipew, "Hercules ");
+    if (sysblk.pgmprdos == PGM_PRD_OS_LICENSED)
+    {
+        logmsg( "HHC046W PGMPRDOS LICENSED specified.\n"
+                "        Licensed program product operating systems are "
+                "enabled.\n        You are "
+                "responsible for meeting all conditions of your software "
+                "license.\n\n");
+    }
 
 #ifdef _FEATURE_VECTOR_FACILITY
     for(i = 0; i < numvec && i < numcpu; i++)
@@ -1002,6 +1180,8 @@ BYTE    c;                              /* Work area for sscanf      */
     for(i = 0; i < numcpu; i++)
         configure_cpu(sysblk.regs + i);
 #endif
+    /* close configuration file */
+    rc = fclose(fp);
 
 } /* end function build_config */
 
@@ -1092,10 +1272,7 @@ int attach_device (U16 devnum, U16 devtype,
 {
 DEVBLK *dev;                            /* -> Device block           */
 DEVBLK**dvpp;                           /* -> Device block address   */
-DEVIF  *devinit;                        /* -> Device init function   */
-DEVQF  *devqdef;                        /* -> Device query function  */
-DEVXF  *devexec;                        /* -> Device exec function   */
-DEVCF  *devclos;                        /* -> Device close function  */
+DEVENT *devent = device_handler_table;
 int     rc;                             /* Return code               */
 int     newdevblk = 0;                  /* 1=Newly created devblk    */
 
@@ -1106,89 +1283,12 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
         return 1;
     }
 
-    /* Determine which device handler to use for this device */
-    switch (devtype) {
+    for(;devent->hnd;devent++)
+        if(devent->type == devtype)
+            break;
 
-    case 0x1052:
-    case 0x3215:
-        devinit = &constty_init_handler;
-        devqdef = &constty_query_device;
-        devexec = &constty_execute_ccw;
-        devclos = &constty_close_device;
-        break;
-
-    case 0x1442:
-    case 0x2501:
-    case 0x3505:
-        devinit = &cardrdr_init_handler;
-        devqdef = &cardrdr_query_device;
-        devexec = &cardrdr_execute_ccw;
-        devclos = &cardrdr_close_device;
-        break;
-
-    case 0x3525:
-        devinit = &cardpch_init_handler;
-        devqdef = &cardpch_query_device;
-        devexec = &cardpch_execute_ccw;
-        devclos = &cardpch_close_device;
-        break;
-
-    case 0x1403:
-    case 0x3211:
-        devinit = &printer_init_handler;
-        devqdef = &printer_query_device;
-        devexec = &printer_execute_ccw;
-        devclos = &printer_close_device;
-        break;
-
-    case 0x3420:
-    case 0x3480:
-        devinit = &tapedev_init_handler;
-        devqdef = &tapedev_query_device;
-        devexec = &tapedev_execute_ccw;
-        devclos = &tapedev_close_device;
-        break;
-
-    case 0x2311:
-    case 0x2314:
-    case 0x3330:
-    case 0x3340:
-    case 0x3350:
-    case 0x3375:
-    case 0x3380:
-    case 0x3390:
-    case 0x9345:
-        devinit = &ckddasd_init_handler;
-        devqdef = &ckddasd_query_device;
-        devexec = &ckddasd_execute_ccw;
-        devclos = &ckddasd_close_device;
-        break;
-
-    case 0x0671:
-    case 0x3310:
-    case 0x3370:
-    case 0x9336:
-        devinit = &fbadasd_init_handler;
-        devqdef = &fbadasd_query_device;
-        devexec = &fbadasd_execute_ccw;
-        devclos = &fbadasd_close_device;
-        break;
-
-    case 0x3270:
-        devinit = &loc3270_init_handler;
-        devqdef = &loc3270_query_device;
-        devexec = &loc3270_execute_ccw;
-        devclos = &loc3270_close_device;
-        break;
-
-    case 0x3088:
-        devinit = &ctcadpt_init_handler;
-        devqdef = &ctcadpt_query_device;
-        devexec = &ctcadpt_execute_ccw;
-        devclos = &ctcadpt_close_device;
-        break;
-
-    default:
+    if(!devent->hnd)
+    {
         logmsg ("HHC036I Device type %4.4X not recognized\n",
                 devtype);
         return 1;
@@ -1227,12 +1327,13 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
     obtain_lock(&dev->lock);
 
     /* Initialize the device block */
+    dev->hnd = devent->hnd;
+    dev->msgpipew = sysblk.msgpipew;
     dev->devnum = devnum;
+    dev->chanset = devnum >> 12;
+    if( dev->chanset >= MAX_CPU_ENGINES )
+        dev->chanset = MAX_CPU_ENGINES - 1;
     dev->devtype = devtype;
-    dev->devinit = devinit;
-    dev->devqdef = devqdef;
-    dev->devexec = devexec;
-    dev->devclos = devclos;
     dev->fd = -1;
 
     /* Initialize the path management control word */
@@ -1245,7 +1346,7 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
     dev->pmcw.chpid[0] = dev->devnum >> 8;
 
     /* Call the device handler initialization function */
-    rc = (*devinit)(dev, addargc, addargv);
+    rc = (dev->hnd->init)(dev, addargc, addargv);
     if (rc < 0)
     {
         logmsg ("HHC038I Initialization failed for device %4.4X\n",
@@ -1341,7 +1442,7 @@ DEVBLK *dev;                            /* -> Device block           */
     if (dev->fd > 2)
     {
         /* Call the device close handler */
-        (*(dev->devclos))(dev);
+        (dev->hnd->close)(dev);
 
         /* Signal console thread to redrive select */
         if (dev->console)

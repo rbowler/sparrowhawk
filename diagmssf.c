@@ -1,4 +1,4 @@
-/* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2001                  */
+/* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2002                  */
 /*              ESA/390 Diagnose Functions                           */
 
 /*-------------------------------------------------------------------*/
@@ -8,7 +8,7 @@
 /* LPAR RMF interface call                                           */
 /*                                                                   */
 /*                                             04/12/1999 Jan Jaeger */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -230,7 +230,7 @@ DEVBLK            *dev;                /* Device block pointer       */
     obtain_lock (&sysblk.intlock);
 
     /* If a service signal is pending then we cannot process the request */
-    if( IS_IC_SERVSIG ) {
+    if( IS_IC_SERVSIG && (sysblk.servparm & SERVSIG_ADDR)) {
         release_lock (&sysblk.intlock);
         return 2;   /* Service Processor Busy */
     }
@@ -344,7 +344,8 @@ DEVBLK            *dev;                /* Device block pointer       */
     STORAGE_KEY(spccb_absolute_addr) |= STORKEY_CHANGE;
 
     /* Set service signal external interrupt pending */
-    sysblk.servparm = spccb_absolute_addr;
+    sysblk.servparm &= ~SERVSIG_ADDR;
+    sysblk.servparm |= spccb_absolute_addr;
     ON_IC_SERVSIG; 
 
     /* Release the interrupt lock */
@@ -478,11 +479,15 @@ static U64        diag204tod;          /* last diag204 tod           */
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "diagmssf.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "diagmssf.c"
+#endif
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "diagmssf.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "diagmssf.c"
+#endif
 
 #endif /*!defined(_GEN_ARCH)*/

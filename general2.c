@@ -1,11 +1,11 @@
-/* GENERAL2.C   (c) Copyright Roger Bowler, 1994-2001                */
+/* GENERAL2.C   (c) Copyright Roger Bowler, 1994-2002                */
 /*              ESA/390 CPU Emulator                                 */
 /*              Instructions N-Z                                     */
 
 /*              (c) Copyright Peter Kuschnerus, 1999 (UPT & CFC)     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all general instructions of the            */
@@ -1194,6 +1194,7 @@ BYTE    i;                              /* Instruction byte 1        */
 PSA    *psa;                            /* -> prefixed storage area  */
 RADR    px;                             /* prefix                    */
 int     rc;                             /* Return code               */
+int     new_ilc;                        /* New ilc to set            */
 
     RR_SVC(inst, execflag, regs, i);
 
@@ -1240,6 +1241,17 @@ int     rc;                             /* Return code               */
         psa->svcint[3] = i;
     }
 
+    /* If there is a pending PER event and the PER addr is not
+       pointing to this SVC, then it must be EX to SVC case and
+       the new ILC needs to be set to 4 */
+
+#if defined(FEATURE_PER)
+    if (IS_IC_PER_IF(regs) && (regs->peradr != (regs->psw.IA - 2)))
+         new_ilc = 4;
+    else
+#endif /*defined(FEATURE_PER)*/
+         new_ilc = 2;
+
     /* Store current PSW at PSA+X'20' */
     ARCH_DEP(store_psw) ( regs, psa->svcold );
 
@@ -1247,6 +1259,12 @@ int     rc;                             /* Return code               */
     rc = ARCH_DEP(load_psw) ( regs, psa->svcnew );
     if ( rc )
         ARCH_DEP(program_interrupt) (regs, rc);
+
+    /* load_psw() has set the ILC to zero.  This needs to
+       be reset to 2 for an eventual PER event
+       OR set to 4 if this is EX to SVC case */
+
+    regs->psw.ilc = new_ilc;
 
     /* Perform serialization and checkpoint synchronization */
     PERFORM_SERIALIZATION (regs);
@@ -1264,52 +1282,38 @@ DEF_INST(test_and_set)
 {
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
-RADR    abs;                            /* Absolute address          */
-BYTE    obyte;                          /* Operand byte              */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
     /* Perform serialization before starting operation */
     PERFORM_SERIALIZATION (regs);
 
-    abs = LOGICAL_TO_ABS (effective_addr2, b2, regs,
-					ACCTYPE_WRITE, regs->psw.pkey);
-
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
-    /* Fetch byte from operand address */
-    obyte = sysblk.mainstor[abs];
-
-    /* Set all bits of operand to ones */
-    if(obyte != 0xFF)
-        sysblk.mainstor[abs] = 0xFF;
+    TEST_AND_SET(effective_addr2, b2, regs);
 
     /* Release main-storage access lock */
     RELEASE_MAINLOCK(regs);
 
-    /* Set condition code from leftmost bit of operand byte */
-    regs->psw.cc = obyte >> 7;
-
     /* Perform serialization after completing operation */
     PERFORM_SERIALIZATION (regs);
 
+    if (regs->psw.cc == 1)
+    {
 #if defined(_FEATURE_SIE)
-    if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_TS1))
-        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+        if((regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_TS1)))
+        {
+            if( !OPEN_IC_PERINT(regs) )
+                longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+            else
+                longjmp(regs->progjmp, SIE_INTERCEPT_INSTCOMP);
+        }
+        else
 #endif /*defined(_FEATURE_SIE)*/
-
-#if MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP)
-        /* It this is a failed locked operation
-           and there is more then 1 CPU in the configuration
-           and there is no broadcast synchronization in progress
-           then call the hypervisor to end this timeslice,
-           this to prevent this virtual CPU monopolizing
-           the physical CPU on a spinlock */
-        if(regs->psw.cc && sysblk.numcpu > 1)
-            usleep(1L);
-#endif /* MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP) */
-
+            if (sysblk.numcpu > 1)
+                sched_yield();
+    }
 }
 
 
@@ -1672,7 +1676,7 @@ BYTE    lbyte;                          /* Left result byte of pair  */
 
 /*-------------------------------------------------------------------*/
 /* 0102 UPT   - Update Tree                                      [E] */
-/*              (c) Copyright Peter Kuschnerus, 1999-2001            */
+/*              (c) Copyright Peter Kuschnerus, 1999-2002            */
 /* 64BIT INCOMPLETE                                                  */
 /*-------------------------------------------------------------------*/
 DEF_INST(update_tree)
@@ -1723,7 +1727,7 @@ int     ar1 = 4;                        /* Access register number    */
             /* Load GR2 and GR3 from tempword2 and tempword3 */
             regs->GR_L(2) = tempword2;
             regs->GR_L(3) = tempword3;
-           regs->GR_L(5) = tempword1;
+            regs->GR_L(5) = tempword1;
             cc = 0;
             break;
         }
@@ -1747,11 +1751,15 @@ int     ar1 = 4;                        /* Access register number    */
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "general2.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "general2.c"
+#endif
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "general2.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "general2.c"
+#endif
 
 #endif /*!defined(_GEN_ARCH)*/

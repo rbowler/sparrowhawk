@@ -1,8 +1,8 @@
-/* DAT.H        (c) Copyright Roger Bowler, 1999-2001                */
+/* DAT.H        (c) Copyright Roger Bowler, 1999-2002                */
 /*              ESA/390 Dynamic Address Translation                  */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the DAT, ALET, and ASN translation         */
@@ -632,7 +632,6 @@ U16     xcode;                          /* ALET tran.exception code  */
             /* [5.8.4.9] Obtain the STD or ASCE from the ASTE */
             *pstid = TEA_ST_ARMODE;
             *pasd = ASTE_AS_DESIGNATOR(aste);
-
         } /* end switch(alet) */
 
     } /* end if(ACCESS_REGISTER_MODE) */
@@ -1415,10 +1414,11 @@ seg_tran_invalid:
 page_tran_invalid:
     *xcode = PGM_PAGE_TRANSLATION_EXCEPTION;
     *raddr = pto;
-    if(acctype != ACCTYPE_PTE)
-        cc = 2;
-    else
-	return 0;
+    if(acctype == ACCTYPE_PTE) return 0;
+    /* MVPG needs the protect flag and stid value even for PIC 11 */
+    if (protect) *prot = protect;
+    *pstid = stid;
+    cc = 2;
     goto tran_excp_addr;
 
 #if !defined(FEATURE_ESAME)
@@ -1665,6 +1665,31 @@ RADR    pte;
 } /* end function invalidate_pte */
 
 #endif /*!defined(OPTION_NO_INLINE_DAT) || defined(_DAT_C) */
+
+#if defined(FEATURE_PER2)
+/* ZZTEMP: FIXME: This is a bad way of checking SA PER events for
+   virtual storage, but for the moment it will have to do */
+static inline int ARCH_DEP(check_sa_per2) (VADR addr, int arn, int acctype,  REGS *regs)
+{
+RADR std;
+int stid = 0;
+int protect = 0;
+
+    if(ARCH_DEP(load_address_space_designator) (arn, regs, acctype,
+      &std, &stid, &protect))
+        return 0;
+
+    if((std & SAEVENT_BIT) || !(regs->CR(9) & CR9_SAC))
+    {
+        regs->peraid = arn > 0 ? arn : 0;
+        regs->perc |= stid;
+        return 1;
+    }
+
+    return 0;
+}
+#endif /*defined(FEATURE_PER2)*/
+
 #if !defined(OPTION_NO_INLINE_LOGICAL) || defined(_DAT_C) 
 /*-------------------------------------------------------------------*/
 /* Convert logical address to absolute address and check protection  */
@@ -1800,6 +1825,17 @@ U16     xcode;                          /* Exception code            */
 
         /* Set the reference and change bits in the storage key */
         STORAGE_KEY(aaddr) |= (STORKEY_REF | STORKEY_CHANGE);
+
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SA(regs) && (arn != USE_REAL_ADDR)
+#if defined(FEATURE_PER2)
+          && ( REAL_MODE(&regs->psw) ||
+               ARCH_DEP(check_sa_per2) (addr, arn, acctype, regs) )
+#endif /*defined(FEATURE_PER2)*/
+          && PER_RANGE_CHECK(addr,regs->CR(10),regs->CR(11)) )
+            ON_IC_PER_SA(regs);
+#endif /*defined(FEATURE_PER)*/
+
         break;
 
     case ACCTYPE_WRITE_SKP:
@@ -1807,6 +1843,16 @@ U16     xcode;                          /* Exception code            */
         if (ARCH_DEP(is_store_protected) (addr, STORAGE_KEY(aaddr), akey,
                                 private, protect, regs))
             goto vabs_prot_excp;
+
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SA(regs) && (arn != USE_REAL_ADDR)
+#if defined(FEATURE_PER2)
+          && ( REAL_MODE(&regs->psw) ||
+               ARCH_DEP(check_sa_per2) (addr, arn, acctype, regs) )
+#endif /*defined(FEATURE_PER2)*/
+          && PER_RANGE_CHECK(addr,regs->CR(10),regs->CR(11)) )
+            ON_IC_PER_SA(regs);
+#endif /*defined(FEATURE_PER)*/
 
         break;
 
@@ -1846,7 +1892,7 @@ U16     xcode;                          /* Exception code            */
 #endif /*FEATURE_INTERVAL_TIMER*/
 
 #if defined(OPTION_AEA_BUFFER)
-    if(arn >= 0 && acctype <= ACCTYPE_WRITE)
+    if(arn >= 0 && acctype <= ACCTYPE_WRITE && !EN_IC_PER_SA(regs) )
     {
         regs->AE(arn) = aaddr & STORAGE_KEY_PAGEMASK;
         regs->VE(arn) = addr & STORAGE_KEY_PAGEMASK;
@@ -1994,6 +2040,15 @@ int     aeind;
 
         /* Set the reference and change bits in the storage key */
         STORAGE_KEY(aaddr) |= (STORKEY_REF | STORKEY_CHANGE);
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SA(regs) && (arn != USE_REAL_ADDR)
+#if defined(FEATURE_PER2)
+          && ( REAL_MODE(&regs->psw) ||
+               ARCH_DEP(check_sa_per2) (addr, arn, acctype, regs) )
+#endif /*defined(FEATURE_PER2)*/
+          && PER_RANGE_CHECK(addr,regs->CR(10),regs->CR(11)) )
+            ON_IC_PER_SA(regs);
+#endif /*defined(FEATURE_PER)*/
         break;
 
     case ACCTYPE_WRITE_SKP:
@@ -2001,13 +2056,22 @@ int     aeind;
         if (ARCH_DEP(is_store_protected) (addr, STORAGE_KEY(aaddr), akey,
                                 private, protect, regs))
             goto vabs_prot_excp;
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SA(regs) && (arn != USE_REAL_ADDR)
+#if defined(FEATURE_PER2)
+          && ( REAL_MODE(&regs->psw) ||
+               ARCH_DEP(check_sa_per2) (addr, arn, acctype, regs) )
+#endif /*defined(FEATURE_PER2)*/
+          && PER_RANGE_CHECK(addr,regs->CR(10),regs->CR(11)) )
+            ON_IC_PER_SA(regs);
+#endif /*defined(FEATURE_PER)*/
 
         break;
 
     } /* end switch */
 
 #if defined(OPTION_AEA_BUFFER)
-    if(arn >= 0 && acctype <= ACCTYPE_WRITE)
+    if(arn >= 0 && acctype <= ACCTYPE_WRITE && !EN_IC_PER_SA(regs) )
     {
 #if defined(FEATURE_ACCESS_REGISTERS)
         if(ACCESS_REGISTER_MODE(&regs->psw))

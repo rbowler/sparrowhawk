@@ -1,25 +1,35 @@
-/* OPCODE.C     (c) Copyright Jan Jaeger, 2000-2001                  */
+/* OPCODE.C     (c) Copyright Jan Jaeger, 2000-2002                  */
 /*              Instruction decoding functions                       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
+
+
+#include "feature.h"
+
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 370
-#include "opcode.c"
-#undef   _GEN_ARCH
+#if defined(_ARCHMODE3)
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "opcode.c"
+ #undef   _GEN_ARCH
+#endif
 
-#define  _GEN_ARCH 390
-#include "opcode.c"
-#undef   _GEN_ARCH
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "opcode.c"
+ #undef   _GEN_ARCH
+#endif
 
 #endif /*!defined(_GEN_ARCH)*/
+
 
 #include "hercules.h"
 
 #include "opcode.h"
+
 
 #define UNDEF_INST(_x) \
         DEF_INST(_x) { ARCH_DEP(operation_exception) \
@@ -129,6 +139,9 @@
  UNDEF_INST(modify_stacked_state)
  UNDEF_INST(extract_stacked_registers)
  UNDEF_INST(extract_stacked_state)
+ UNDEF_INST(program_return)
+ UNDEF_INST(trap2)
+ UNDEF_INST(trap4)
 #endif /*!defined(FEATURE_LINKAGE_STACK)*/
 
 
@@ -166,6 +179,11 @@
  UNDEF_INST(set_clock_programmable_field)
  UNDEF_INST(store_clock_extended)
 #endif /*!defined(FEATURE_EXTENDED_TOD_CLOCK)*/
+
+
+#if !defined(FEATURE_STORE_SYSTEM_INFORMATION)
+ UNDEF_INST(store_system_information)
+#endif /*!defined(FEATURE_STORE_SYSTEM_INFORMATION)*/
 
 
 #if !defined(FEATURE_VECTOR_FACILITY)
@@ -435,10 +453,10 @@
 #endif /*!defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
 
-#if !defined(_FEATURE_SIE)
+#if !defined(FEATURE_CHANNEL_SWITCHING)
  UNDEF_INST(connect_channel_set)
  UNDEF_INST(disconnect_channel_set)
-#endif /*!defined(_FEATURE_SIE)*/
+#endif /*!defined(FEATURE_CHANNEL_SWITCHING)*/
 
 
 #if !defined(FEATURE_EXTENDED_TRANSLATION)
@@ -506,9 +524,9 @@
 #endif /*!defined(FEATURE_ESAME_N3_ESA390) && !defined(FEATURE_ESAME)*/
 
 
-#if !defined(FEATURE_ESAME_N3_ESA390) && !defined(FEATURE_ESAME_INSTALLED) && !defined(FEATURE_ESAME)
+#if !defined(FEATURE_ESAME_N3_ESA390) && !defined(_900) && !defined(FEATURE_ESAME)
  UNDEF_INST(store_facilities_list);
-#endif /*!defined(FEATURE_ESAME_N3_ESA390) && !defined(FEATURE_ESAME_INSTALLED)*/
+#endif /*!defined(FEATURE_ESAME_N3_ESA390) && !defined(_900)*/
 
 
 #if !defined(FEATURE_CANCEL_IO_FACILITY)
@@ -986,6 +1004,10 @@ int d2,b2;
     logmsg("%-6.6s%d(%d)\n",mnemonic,d2,b2);
 }
 
+/* Gabor Hoffer (performance option) */
+zz_func s370_opcode_table[256];
+zz_func s390_opcode_table[256];
+zz_func z900_opcode_table[256];
 
 zz_func opcode_table[256][GEN_MAXARCH] = {
  /*00*/   GENx___x___x___ ,

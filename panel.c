@@ -1,4 +1,4 @@
-/* PANEL.C      (c) Copyright Roger Bowler, 1999-2001                */
+/* PANEL.C      (c) Copyright Roger Bowler, 1999-2002                */
 /*              ESA/390 Control Panel Commands                       */
 /*                                                                   */
 /*              Modified for New Panel Display =NP=                  */
@@ -21,7 +21,7 @@
 /*      Set/reset bad frame indicator command by Jan Jaeger          */
 /*      attach/detach/define commands by Jan Jaeger                  */
 /*      Panel refresh rate triva by Reed H. Petty                    */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 /*      64-bit address support by Roger Bowler                       */
 /*      Display subchannel command by Nobumichi Kozawa               */
 /*      External GUI logic contributed by "Fish" (David B. Trout)    */
@@ -31,13 +31,15 @@
 
 #include "hercules.h"
 
+#include "devtype.h"
+
 #include "opcode.h"
 
 #include "inline.h"
 
 #if defined(OPTION_FISHIO)
 #include "w32chan.h"
-#endif // defined(OPTION_FISHIO)
+#endif /* defined(OPTION_FISHIO) */
 
 #define  DISPLAY_INSTRUCTION_OPERANDS
 
@@ -46,7 +48,7 @@
 /*-------------------------------------------------------------------*/
 static void alter_display_real (BYTE *opnd, REGS *regs);
 static void alter_display_virt (BYTE *opnd, REGS *regs);
-// (Socket Devices...)
+/* (Socket Devices...) */
 int bind_device (DEVBLK* dev, char* spec);
 int unbind_device (DEVBLK* dev);
 int unix_socket (char* path);
@@ -138,7 +140,7 @@ char NPdevstr[16];      /* device - stringed */
 /* the following fields are current states, to detect changes and redisplay */
 
 char NPstate[24];       /* Current displayed CPU state */
-int NPregs[16];         /* Current displayed reg values */
+U32 NPregs[16];         /* Current displayed reg values */
 int NPbusy[24];         /* Current busy state of displayed devices */
 int NPpend[24];         /* Current int pending state */
 int NPopen[24];         /* Current open state */
@@ -261,7 +263,7 @@ static void NP_screen(FILE *confp)
          fprintf(confp, ANSI_CURSOR, p, 40);
          c[0] = a | 0x40;
          c[1] = '\0';
-         (dev->devqdef)(dev, &devclass, sizeof(devnam), devnam);
+         (dev->hnd->query)(dev, &devclass, sizeof(devnam), devnam);
          fprintf(confp, "%s %4.4X %4.4X %-4.4s %.24s",
                  c, dev->devnum, dev->devtype, devclass, devnam);
          strcpy(NPdevname[a - 1], devnam);
@@ -332,7 +334,7 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
     int s, i, r, c;
     int online, busy, pend, open;
     QWORD curpsw;
-    int curreg[16];
+    U32 curreg[16];
     char state[24];
     char dclear[128];
     char devnam[128];
@@ -412,7 +414,11 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
 #else /*!defined(_FEATURE_SIE)*/
                     '.',
 #endif /*!defined(_FEATURE_SIE)*/
-                    regs->arch_mode > ARCH_390 ? 'Z' : '.');
+#if defined(_900)
+                    regs->arch_mode == ARCH_900 ? 'Z' : '.');
+#else
+                    ' ');
+#endif
     s = 20 + ((17 - strlen(state)) / 2);
     if (strcmp(state, NPstate) != 0) {
         fprintf (confp, ANSI_CURSOR, 3, 20);
@@ -589,7 +595,7 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
               fprintf(confp, "%4.4X", dev->devtype);
               NPopen[a - 1] = open;
          }
-         (dev->devqdef)(dev, &devclass, sizeof(devnam), devnam);
+         (dev->hnd->query)(dev, &devclass, sizeof(devnam), devnam);
          if (strcmp(NPdevname[a - 1], devnam) != 0) {
              fprintf(confp, ANSI_GRY_BLK);
              fprintf(confp, ANSI_CURSOR, p, 57);
@@ -655,13 +661,13 @@ static void display_regs (REGS *regs)
 {
 int     i;
 
-    if(regs->arch_mode < ARCH_900)
+    if(regs->arch_mode != ARCH_900)
         for (i = 0; i < 16; i++)
             logmsg ("GR%2.2d=%8.8X%s", i, regs->GR_L(i),
                 ((i & 0x03) == 0x03) ? "\n" : "\t");
     else
         for (i = 0; i < 16; i++)
-            logmsg ("R%1.1X=%16.16llX%s", i, regs->GR_G(i),
+            logmsg ("R%1.1X=%16.16llX%s", i, (long long)regs->GR_G(i),
                 ((i & 0x03) == 0x03) ? "\n" : " ");
 
 } /* end function display_regs */
@@ -673,13 +679,13 @@ static void display_cregs (REGS *regs)
 {
 int     i;
 
-    if(regs->arch_mode < ARCH_900)
+    if(regs->arch_mode != ARCH_900)
         for (i = 0; i < 16; i++)
             logmsg ("CR%2.2d=%8.8X%s", i, regs->CR_L(i),
                 ((i & 0x03) == 0x03) ? "\n" : "\t");
     else
         for (i = 0; i < 16; i++)
-            logmsg ("C%1.1X=%16.16llX%s", i, regs->CR_G(i),
+            logmsg ("C%1.1X=%16.16llX%s", i, (long long)regs->CR_G(i),
                 ((i & 0x03) == 0x03) ? "\n" : " ");
 
 } /* end function display_cregs */
@@ -703,14 +709,7 @@ int     i;
 static void display_fregs (REGS *regs)
 {
 
-#if !defined(FEATURE_BASIC_FP_EXTENSIONS)
-
-    logmsg ("FPR0=%8.8X %8.8X\t\tFPR2=%8.8X %8.8X\n"
-            "FPR4=%8.8X %8.8X\t\tFPR6=%8.8X %8.8X\n",
-            regs->fpr[0], regs->fpr[1], regs->fpr[2], regs->fpr[3],
-            regs->fpr[4], regs->fpr[5], regs->fpr[6], regs->fpr[7]);
-
-#else /*defined(FEATURE_BASIC_FP_EXTENSIONS)*/
+    if(regs->CR(0) & CR0_AFP)
 
     logmsg ("FPR0=%8.8X %8.8X\t\tFPR1=%8.8X %8.8X\n"
             "FPR2=%8.8X %8.8X\t\tFPR3=%8.8X %8.8X\n"
@@ -728,8 +727,12 @@ static void display_fregs (REGS *regs)
             regs->fpr[20], regs->fpr[21], regs->fpr[22], regs->fpr[23],
             regs->fpr[24], regs->fpr[25], regs->fpr[26], regs->fpr[27],
             regs->fpr[28], regs->fpr[29], regs->fpr[30], regs->fpr[31]);
+    else
 
-#endif /*defined(FEATURE_BASIC_FP_EXTENSIONS)*/
+    logmsg ("FPR0=%8.8X %8.8X\t\tFPR2=%8.8X %8.8X\n"
+            "FPR4=%8.8X %8.8X\t\tFPR6=%8.8X %8.8X\n",
+            regs->fpr[0], regs->fpr[1], regs->fpr[2], regs->fpr[3],
+            regs->fpr[4], regs->fpr[5], regs->fpr[6], regs->fpr[7]);
 
 } /* end function display_fregs */
 
@@ -765,18 +768,18 @@ BYTE   *s;                              /* Alteration value pointer  */
 BYTE    delim;                          /* Operand delimiter         */
 BYTE    c;                              /* Character work area       */
 
-    rc = sscanf(operand, "%llx%c%llx%c", &opnd1, &delim, &opnd2, &c);
+    rc = sscanf(operand, "%Lx%c%Lx%c", &opnd1, &delim, &opnd2, &c);
 
     /* Process storage alteration operand */
     if (rc > 2 && delim == '=')
     {
         s = strchr (operand, '=');
-        for (n = 0;;)
+        for (n = 0; n < 32;)
         {
             h1 = *(++s);
-            h1 = toupper(h1);
-            if (h1 == '\0') break;
+            if (h1 == '\0'  || h1 == '#' ) break;
             if (h1 == SPACE || h1 == '\t') continue;
+            h1 = toupper(h1);
             h2 = *(++s);
             h2 = toupper(h2);
             h1 = (h1 >= '0' && h1 <= '9') ? h1 - '0' :
@@ -785,7 +788,7 @@ BYTE    c;                              /* Character work area       */
                  (h2 >= 'A' && h2 <= 'F') ? h2 - 'A' + 10 : -1;
             if (h1 < 0 || h2 < 0 || n >= 32)
             {
-                logmsg ("Invalid value: %s\n", operand);
+                logmsg ("Invalid value: %s\n", s);
                 return -1;
             }
             newval[n++] = (h1 << 4) | h2;
@@ -882,16 +885,17 @@ static void display_subchannel (DEVBLK *dev)
 
 #if !defined(OPTION_FISHIO)
 void    device_thread();
-#endif // !defined(OPTION_FISHIO)
+#endif /* !defined(OPTION_FISHIO) */
 
+/*-------------------------------------------------------------------*/
+/* Execute a Unix or Windows command                                 */
+/* Returns the system command status code                            */
+/*-------------------------------------------------------------------*/
+static int herc_system (char* command)
+{
 #ifdef WIN32
-int herc_system (char* command)
-{
-	return system(command);
-}
-#else // !WIN32
-int herc_system (char *command)
-{
+    return system(command);
+#else /* !WIN32 */
 extern char **environ;
 int pid, status;
 
@@ -903,7 +907,8 @@ int pid, status;
     if (pid == -1)
         return -1;
 
-    if (pid == 0) {
+    if (pid == 0)
+    {
         char *argv[4];
 
         dup2(sysblk.msgpiper, STDIN_FILENO);
@@ -921,21 +926,27 @@ int pid, status;
 
         exit(127);
     }
-    do {
-        if (waitpid(pid, &status, 0) == -1) {
+
+    do
+    {
+        if (waitpid(pid, &status, 0) == -1)
+        {
             if (errno != EINTR)
                 return -1;
         } else
             return status;
     } while(1);
-}
-#endif // WIN32
+#endif /* !WIN32 */
+} /* end function herc_system */
 
 
 /*-------------------------------------------------------------------*/
 /* Execute a panel command                                           */
 /*-------------------------------------------------------------------*/
-static void *panel_command (void *cmdline)
+
+BYTE    rc_cmd = 0;                     /* 1=command is from RC file */
+
+void *panel_command (void *cmdline)
 {
 BYTE    cmd[32767];                     /* Copy of panel command     */
 int     cpu;                            /* CPU engine number         */
@@ -969,6 +980,7 @@ BYTE   *devascii;                       /* ASCII text device number  */
 int     devargc;                        /* Arg count for devinit     */
 BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
 BYTE   *devclass;                       /* -> Device class name      */
+BYTE    devnam[256];                    /* devqdef(...) buffer       */
 BYTE   *cmdarg;                         /* -> Command argument       */
 
     /* Copy panel command to work area */
@@ -977,7 +989,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
 
     /* Echo the command to the control panel */
     if (cmd[0] != '\0')
-        logmsg ("%s\n", cmd);
+        logmsg ("%s%s\n", rc_cmd? "> " : "", cmd);
 
     /* Set target CPU for commands and displays */
     regs = sysblk.regs + sysblk.pcpu;
@@ -996,11 +1008,11 @@ BYTE   *cmdarg;                         /* -> Command argument       */
  #define STSPALL_CMD
 #endif /*MAX_CPU_ENGINES>1*/
 
-#ifdef FEATURE_SYSTEM_CONSOLE
+#ifdef _FEATURE_SYSTEM_CONSOLE
  #define SYSCONS_CMD ".xxx=scp command, !xxx=scp priority messsage\n"
 #else
  #define SYSCONS_CMD
-#endif /*FEATURE_SYSTEM_CONSOLE*/
+#endif /*_FEATURE_SYSTEM_CONSOLE*/
 
 #ifdef OPTION_TODCLOCK_DRAG_FACTOR
  #define TODDRAG_CMD "toddrag nnn = display or set TOD clock drag factor\n"
@@ -1063,24 +1075,33 @@ BYTE   *cmdarg;                         /* -> Command argument       */
     }
 
 /*********************************************************************/
+
     /* g command - turn off single stepping and start CPU */
-    if (strcmp(cmd,"g") == 0)
+
+    if (strcasecmp(cmd,"g") == 0)
     {
         sysblk.inststep = 0;
         SET_IC_TRACE;
         strcpy (cmd, "start");
+
+        /* (fall through to "start" command....) */
     }
 
+/*********************************************************************/
+
+    /* (NOTE: below logic must follow "g" command) */
+
     /* start command (or just Enter) - start CPU */
+
     if ((cmd[0] == '\0' && sysblk.inststep)
-        || strcmp(cmd,"start") == 0)
+        || strcasecmp(cmd,"start") == 0)
     {
         /* Obtain the interrupt lock */
         obtain_lock (&sysblk.intlock);
 
         /* Restart the CPU if it is in the stopped state */
         regs->cpustate = CPUSTATE_STARTED;
-        
+
         /* Reset checkstop indicator */
         regs->checkstop = 0;
 
@@ -1096,14 +1117,135 @@ BYTE   *cmdarg;                         /* -> Command argument       */
     }
 
 /*********************************************************************/
-    /* stop command - stop CPU */
-    if (strcmp(cmd,"stop") == 0)
+#if MAX_CPU_ENGINES > 1
+    /* startall command - start all CPU's */
+    if (strcmp(cmd,"startall") == 0)
     {
         obtain_lock (&sysblk.intlock);
-        regs->cpustate = CPUSTATE_STOPPING;
-        ON_IC_CPU_NOT_STARTED(regs);
-        WAKEUP_CPU (regs->cpuad);
+        for (i = 0; i < MAX_CPU_ENGINES; i++)
+            if(sysblk.regs[i].cpuonline && !regs->checkstop)
+                sysblk.regs[i].cpustate = CPUSTATE_STARTED;
+        WAKEUP_WAITING_CPUS (ALL_CPUS, CPUSTATE_ALL);
         release_lock (&sysblk.intlock);
+        return NULL;
+    }
+
+/*********************************************************************/
+    /* stopall command - stop all CPU's */
+    if (strcmp(cmd,"stopall") == 0)
+    {
+        obtain_lock (&sysblk.intlock);
+        for (i = 0; i < MAX_CPU_ENGINES; i++)
+            if(sysblk.regs[i].cpuonline)
+        {
+            sysblk.regs[i].cpustate = CPUSTATE_STOPPING;
+            ON_IC_CPU_NOT_STARTED(sysblk.regs + i);
+            WAKEUP_CPU(i);
+        }
+        release_lock (&sysblk.intlock);
+        return NULL;
+    }
+#endif /*MAX_CPU_ENGINES > 1*/
+
+/*********************************************************************/
+
+    /* start command w/argument: start specified printer device */
+
+    if (strncasecmp(cmd,"start",5) == 0)
+    {
+        int stopprt;
+
+        devascii = strtok(cmd+5," \t");
+
+        if (devascii)
+        {
+            if (sscanf(devascii, "%hx%c", &devnum, &c) != 1)
+            {
+                logmsg ("Invalid device number\n");
+                return NULL;
+            }
+
+            dev = find_device_by_devnum (devnum);
+
+            if (dev == NULL)
+            {
+                logmsg("Device number %4.4X not found\n", devnum);
+                return NULL;
+            }
+
+            (dev->hnd->query)(dev, &devclass, sizeof(devnam), devnam);
+
+            if (strcasecmp(devclass,"PRT") != 0)
+            {
+                logmsg("Device %4.4X is not a printer device\n", devnum);
+                return NULL;
+            }
+
+            /* un-stop the printer and raise attention interrupt */
+
+            stopprt = dev->stopprt; dev->stopprt = 0;
+            rc = device_attention (dev, CSW_ATTN);
+            if (rc != 0) dev->stopprt = stopprt;
+
+            logmsg ("HHC425%c Printer %4.4X %s\n",
+                    (rc ? 'E' : 'I'),
+                    devnum,
+                    rc == 0 ? "started" :
+                    rc == 1 ? "busy or interrupt pending" :
+                    rc == 3 ? "subchannel not enabled" :
+                    "attention request rejected");
+
+            return NULL;
+        }
+    }
+
+/*********************************************************************/
+
+    /* stop command - stop CPU (or printer device) */
+
+    if (strncasecmp(cmd,"stop",4) == 0)
+    {
+        devascii = strtok(cmd+4," \t");
+
+        if (!devascii)
+        {
+            /* stop the CPU */
+
+            obtain_lock (&sysblk.intlock);
+            regs->cpustate = CPUSTATE_STOPPING;
+            ON_IC_CPU_NOT_STARTED(regs);
+            WAKEUP_CPU (regs->cpuad);
+            release_lock (&sysblk.intlock);
+            return NULL;
+        }
+
+        /* stop specified printer device */
+
+        if (sscanf(devascii, "%hx%c", &devnum, &c) != 1)
+        {
+            logmsg ("Invalid device number\n");
+            return NULL;
+        }
+
+        dev = find_device_by_devnum (devnum);
+
+        if (dev == NULL)
+        {
+            logmsg("Device number %4.4X not found\n", devnum);
+            return NULL;
+        }
+
+        (dev->hnd->query)(dev, &devclass, sizeof(devnam), devnam);
+
+        if (strcasecmp(devclass,"PRT") != 0)
+        {
+            logmsg("Device %4.4X is not a printer device\n", devnum);
+            return NULL;
+        }
+
+        dev->stopprt = 1;
+
+        logmsg("HHC424I Printer %4.4X stopped\n", devnum);
         return NULL;
     }
 
@@ -1134,13 +1276,21 @@ BYTE   *cmdarg;                         /* -> Command argument       */
                     logmsg("archmode: All CPU's must be stopped to change architecture\n");
                     return NULL;
                 }
+#if defined(_370)
             if (strcasecmp (archmode, arch_name[ARCH_370]) == 0)
                 sysblk.arch_mode = ARCH_370;
-            else if (strcasecmp (archmode, arch_name[ARCH_390]) == 0)
+            else
+#endif
+#if defined(_390)
+            if (strcasecmp (archmode, arch_name[ARCH_390]) == 0)
                 sysblk.arch_mode = ARCH_390;
-            else if (strcasecmp (archmode, arch_name[ARCH_900]) == 0)
+            else
+#endif
+#if defined(_900)
+            if (strcasecmp (archmode, arch_name[ARCH_900]) == 0)
                 sysblk.arch_mode = ARCH_900;
             else
+#endif
             {
                 logmsg("Invalid architecture mode %s\n",archmode);
                 return NULL;
@@ -1148,7 +1298,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
 
 #if defined(OPTION_FISHIO)
             ios_arch_mode = sysblk.arch_mode;
-#endif // defined(OPTION_FISHIO)
+#endif /* defined(OPTION_FISHIO) */
 
             logmsg("Architecture successfully set to %s mode.\n",get_arch_mode_string(NULL));
 
@@ -1283,12 +1433,12 @@ BYTE   *cmdarg;                         /* -> Command argument       */
                           "?", "?", "?", "STARTING"};
 
         cmdarg = strtok(cmd+8," \t");
-        if (cmdarg != NULL && (memcmp(cmdarg+1,"debug",5) != 0 
-	    		    || (*cmdarg!='+' && *cmdarg!='-')))
-	{
+        if (cmdarg != NULL && (memcmp(cmdarg+1,"debug",5) != 0
+                            || (*cmdarg!='+' && *cmdarg!='-')))
+        {
             logmsg ("ipending expects {+|-}debug as operand."
-		        " %s is invalid\n", cmdarg);
-	    cmdarg=NULL;
+                        " %s is invalid\n", cmdarg);
+            cmdarg=NULL;
         }
 
 #ifdef _FEATURE_CPU_RECONFIG
@@ -1299,49 +1449,58 @@ BYTE   *cmdarg;                         /* -> Command argument       */
 #endif /*!_FEATURE_CPU_RECONFIG*/
         {
             if(cmdarg != NULL)
-	    {
-	        logmsg("Interrupt checking debug mode set to ");
-	        if(*cmdarg=='+')
-		{
-		    ON_IC_DEBUG(sysblk.regs+i);
-		    logmsg("ON\n");
-		}
-		else
-		{
-		    OFF_IC_DEBUG(sysblk.regs+i);
-		    logmsg("OFF\n");
-		}
-	    }
+            {
+                logmsg("Interrupt checking debug mode set to ");
+                if(*cmdarg=='+')
+                {
+                    ON_IC_DEBUG(sysblk.regs+i);
+                    logmsg("ON\n");
+                }
+                else
+                {
+                    OFF_IC_DEBUG(sysblk.regs+i);
+                    logmsg("OFF\n");
+                }
+            }
 // /*DEBUG*/logmsg("CPU%4.4X: Any cpu interrupt %spending\n",
 // /*DEBUG*/    sysblk.regs[i].cpuad, sysblk.regs[i].cpuint ? "" : "not ");
             logmsg("CPU%4.4X: CPUint=%8.8X (r:%8.8X|s:%8.8X)&(Mask:%8.8X)\n",
                 sysblk.regs[i].cpuad, IC_INTERRUPT_CPU(sysblk.regs+i),
-		         sysblk.regs[i].ints_state,
-		         sysblk.ints_state, regs[i].ints_mask);
+                         sysblk.regs[i].ints_state,
+                         sysblk.ints_state, regs[i].ints_mask);
             logmsg("CPU%4.4X: Clock comparator %spending\n",
                 sysblk.regs[i].cpuad,
-		         IS_IC_CLKC(sysblk.regs+i) ? "" : "not ");
+                         IS_IC_CLKC(sysblk.regs+i) ? "" : "not ");
             logmsg("CPU%4.4X: CPU timer %spending\n",
                 sysblk.regs[i].cpuad,
-		         IS_IC_PTIMER(sysblk.regs+i) ? "" : "not ");
+                         IS_IC_PTIMER(sysblk.regs+i) ? "" : "not ");
             logmsg("CPU%4.4X: Interval timer %spending\n",
                 sysblk.regs[i].cpuad,
-		         IS_IC_ITIMER(sysblk.regs+i) ? "" : "not ");
+                         IS_IC_ITIMER(sysblk.regs+i) ? "" : "not ");
             logmsg("CPU%4.4X: External call %spending\n",
                 sysblk.regs[i].cpuad,
-		         IS_IC_EXTCALL(sysblk.regs+i) ? "" : "not ");
+                         IS_IC_EXTCALL(sysblk.regs+i) ? "" : "not ");
             logmsg("CPU%4.4X: Emergency signal %spending\n",
                 sysblk.regs[i].cpuad,
-		         IS_IC_EMERSIG(sysblk.regs+i) ? "" : "not ");
+                         IS_IC_EMERSIG(sysblk.regs+i) ? "" : "not ");
             logmsg("CPU%4.4X: CPU %swaiting for interlock\n",
                 sysblk.regs[i].cpuad,
-		         sysblk.regs[i].mainsync ? "" : "not ");
+                         sysblk.regs[i].mainsync ? "" : "not ");
             logmsg("CPU%4.4X: CPU interlock %sheld\n",
                 sysblk.regs[i].cpuad,
-		         sysblk.regs[i].mainlock ? "" : "not ");
+                         sysblk.regs[i].mainlock ? "" : "not ");
             logmsg("CPU%4.4X: CPU state is %s\n",
                 sysblk.regs[i].cpuad,
                          states[sysblk.regs[i].cpustate]);
+            if(sysblk.arch_mode == ARCH_370)
+            {
+                if(sysblk.regs[i].chanset == 0xFFFF)
+                    logmsg("CPU%4.4X: No channelset connected\n",
+                      sysblk.regs[i].cpuad);
+                else
+                    logmsg("CPU%4.4X: Connected to channelset %4.4X\n",
+                      sysblk.regs[i].cpuad,sysblk.regs[i].chanset);
+            }
         }
         logmsg("Started mask %8.8X waiting mask %8.8X\n",
                                 sysblk.started_mask, sysblk.waitmask);
@@ -1354,7 +1513,17 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         logmsg("Service signal %spending\n",
                                 IS_IC_SERVSIG ? "" : "not ");
         logmsg("Signaling facility %sbusy\n",
-                                sysblk.sigpbusy ? "" : "not ");
+                                test_lock(&sysblk.sigplock) ? "" : "not ");
+        logmsg("TOD lock %sheld\n",
+                                test_lock(&sysblk.todlock) ? "" : "not ");
+        logmsg("Main lock %sheld\n",
+                                test_lock(&sysblk.mainlock) ? "" : "not ");
+        logmsg("Int lock %sheld\n",
+                                test_lock(&sysblk.intlock) ? "" : "not ");
+#ifndef OPTION_FISHIO
+        logmsg("Ioq lock %sheld\n",
+                                test_lock(&sysblk.ioqlock) ? "" : "not ");
+#endif
         logmsg("I/O interrupt %spending\n",
                                 IS_IC_IOPENDING ? "" : "not ");
         for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
@@ -1365,49 +1534,18 @@ BYTE   *cmdarg;                         /* -> Command argument       */
                 logmsg("DEV%4.4X: PCI pending\n",dev->devnum);
             if ((dev->crwpending) && (dev->pmcw.flag5 & PMCW5_V))
                 logmsg("DEV%4.4X: CRW pending\n",dev->devnum);
+            if (test_lock(&dev->lock) && (dev->pmcw.flag5 & PMCW5_V))
+                logmsg("DEV%4.4X: lock held\n",dev->devnum);
         }
 
-#ifdef OPTION_IOINTQ
         logmsg ("I/O interrupt queue: ");
         if (!sysblk.iointq)
             logmsg(" (NULL)\n");
         for (dev = sysblk.iointq; dev != NULL; dev = dev->iointq)
             logmsg("DEV%4.4X\n",dev->devnum);
-#endif /*OPTION_IOINTQ*/
 
         return NULL;
     }
-
-/*********************************************************************/
-#if MAX_CPU_ENGINES > 1
-    /* startall command - start all CPU's */
-    if (strcmp(cmd,"startall") == 0)
-    {
-        obtain_lock (&sysblk.intlock);
-        for (i = 0; i < MAX_CPU_ENGINES; i++)
-            if(sysblk.regs[i].cpuonline && !regs->checkstop)
-                sysblk.regs[i].cpustate = CPUSTATE_STARTED;
-        WAKEUP_WAITING_CPUS (ALL_CPUS, CPUSTATE_ALL);
-        release_lock (&sysblk.intlock);
-        return NULL;
-    }
-
-/*********************************************************************/
-    /* stopall command - stop all CPU's */
-    if (strcmp(cmd,"stopall") == 0)
-    {
-        obtain_lock (&sysblk.intlock);
-        for (i = 0; i < MAX_CPU_ENGINES; i++)
-            if(sysblk.regs[i].cpuonline)
-        {
-            sysblk.regs[i].cpustate = CPUSTATE_STOPPING;
-            ON_IC_CPU_NOT_STARTED(sysblk.regs + i);
-            WAKEUP_CPU(i);
-        }
-        release_lock (&sysblk.intlock);
-        return NULL;
-    }
-#endif /*MAX_CPU_ENGINES > 1*/
 
 /*********************************************************************/
     /* store command - store CPU status at absolute zero */
@@ -1429,9 +1567,10 @@ BYTE   *cmdarg;                         /* -> Command argument       */
     /* clocks command - display tod clkc and cpu timer */
     if(memcmp(cmd,"clocks",6)==0)
     {
-        logmsg("tod = %16.16llX\n",(sysblk.todclk + regs->todoffset) << 8);
-        logmsg("ckc = %16.16llX\n",regs->clkc << 8);
-        logmsg("cpt = %16.16llX\n",regs->ptimer);
+        logmsg("tod = %16.16llX\n",
+            (long long)(sysblk.todclk + regs->todoffset) << 8);
+        logmsg("ckc = %16.16llX\n",(long long)regs->clkc << 8);
+        logmsg("cpt = %16.16llX\n",(long long)regs->ptimer);
         if(regs->arch_mode == ARCH_370)
         {
         U32 itimer;
@@ -1483,7 +1622,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
 
 
 /*********************************************************************/
-#ifdef FEATURE_SYSTEM_CONSOLE
+#ifdef _FEATURE_SYSTEM_CONSOLE
     /* .xxx and !xxx commands - send command or priority message
        to SCP via the HMC system console facility */
     if (cmd[0] == '.' || cmd[0] == '!')
@@ -1491,7 +1630,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
        scp_command (cmd+1, cmd[0] == '!');
        return NULL;
     }
-#endif /*FEATURE_SYSTEM_CONSOLE*/
+#endif /*_FEATURE_SYSTEM_CONSOLE*/
 
 /*********************************************************************/
     if (!strncmp(cmd,"sh",2))
@@ -1534,7 +1673,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         if (cmd[0]=='t' && cmd[2]=='\0')
         {
             sysblk.insttrace = oneorzero;
-	    SET_IC_TRACE;
+            SET_IC_TRACE;
             logmsg ("Instruction tracing is now %s\n", onoroff);
             return NULL;
         }
@@ -1544,7 +1683,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         if (cmd[0]=='s' && cmd[2]=='\0')
         {
             sysblk.inststep = oneorzero;
-	    SET_IC_TRACE;
+            SET_IC_TRACE;
             logmsg ("Instruction stepping is now %s\n", onoroff);
             return NULL;
         }
@@ -1554,7 +1693,11 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         /* t+ckd and t-ckd commands - turn CKD_KEY tracing on/off */
         if ((cmd[0] == 't') && (memcmp(cmd+2, "ckd", 3) == 0))
         {
-            sysblk.ckdkeytrace = oneorzero;
+            for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+            {
+                if (dev->devchar[10] == 0x20)
+                    dev->ckdkeytrace = oneorzero;
+            }
             logmsg("CKD KEY trace is now %s\n",onoroff);
             return NULL;
         }
@@ -1624,8 +1767,8 @@ BYTE   *cmdarg;                         /* -> Command argument       */
     /* pr command - display prefix register */
     if (strcmp(cmd,"pr") == 0)
     {
-        if(regs->arch_mode > ARCH_390)
-            logmsg ("Prefix=%16.16llX\n", regs->PX_G);
+        if(regs->arch_mode == ARCH_900)
+            logmsg ("Prefix=%16.16llX\n", (long long)regs->PX_G);
         else
             logmsg ("Prefix=%8.8X\n", regs->PX_L);
         return NULL;
@@ -1698,7 +1841,8 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         {
             sysblk.instbreak = 1;
             ON_IC_TRACE;
-            logmsg ("Setting breakpoint at %16.16llX\n", sysblk.breakaddr);
+            logmsg ("Setting breakpoint at %16.16llX\n",
+                (long long)sysblk.breakaddr);
             return NULL;
         }
     }
@@ -1757,9 +1901,9 @@ BYTE   *cmdarg;                         /* -> Command argument       */
             return NULL;
         }
 
-	loadaddr = strtok (NULL, " \t");
+        loadaddr = strtok (NULL, " \t");
 
-	if (loadaddr == NULL || *loadaddr == '*' )
+        if (loadaddr == NULL || *loadaddr == '*' )
         {
             for(aaddr = 0; aaddr < sysblk.mainsize
               && !(STORAGE_KEY(aaddr)&STORKEY_CHANGE); aaddr += 4096) ;
@@ -1768,15 +1912,15 @@ BYTE   *cmdarg;                         /* -> Command argument       */
             else
                 aaddr &= ~0xFFF;
         }
-	else if (sscanf(loadaddr, "%x", &aaddr) !=1)
-	{
-	    logmsg ("savecore: invalid starting address: %s \n",loadaddr);
-	    return NULL;
-	}
+        else if (sscanf(loadaddr, "%x", &aaddr) !=1)
+        {
+            logmsg ("savecore: invalid starting address: %s \n",loadaddr);
+            return NULL;
+        }
 
-	loadaddr = strtok (NULL, " \t");
+        loadaddr = strtok (NULL, " \t");
 
-	if (loadaddr == NULL || *loadaddr == '*' )
+        if (loadaddr == NULL || *loadaddr == '*' )
         {
             for(aaddr2 = sysblk.mainsize - 4096; aaddr2 > 0
               && !(STORAGE_KEY(aaddr2)&STORKEY_CHANGE); aaddr2 -= 4096) ;
@@ -1784,11 +1928,11 @@ BYTE   *cmdarg;                         /* -> Command argument       */
                 aaddr2 |= 0xFFF;
 
         }
-	else if (sscanf(loadaddr, "%x", &aaddr2) !=1)
-	{
-	    logmsg ("savecore: invalid ending address: %s \n",loadaddr);
-	    return NULL;
-	}
+        else if (sscanf(loadaddr, "%x", &aaddr2) !=1)
+        {
+            logmsg ("savecore: invalid ending address: %s \n",loadaddr);
+            return NULL;
+        }
 
         /* Command is valid only when CPU is stopped */
         if (regs->cpustate != CPUSTATE_STOPPED)
@@ -1835,16 +1979,16 @@ BYTE   *cmdarg;                         /* -> Command argument       */
             return NULL;
         }
 
-	loadaddr = strtok (NULL, " \t");
+        loadaddr = strtok (NULL, " \t");
 
-	if (loadaddr == NULL)
+        if (loadaddr == NULL)
             aaddr = 0;
-	else if (sscanf(loadaddr, "%x", &aaddr) !=1)
-	
-	{
-	    logmsg ("invalid address: %s \n",loadaddr);
-	    return NULL;
-	}
+        else if (sscanf(loadaddr, "%x", &aaddr) !=1)
+
+        {
+            logmsg ("invalid address: %s \n",loadaddr);
+            return NULL;
+        }
 
         /* Command is valid only when CPU is stopped */
         if (regs->cpustate != CPUSTATE_STOPPED)
@@ -1875,22 +2019,22 @@ BYTE   *cmdarg;                         /* -> Command argument       */
             return NULL;
         }
 
-	loadaddr = strtok (NULL, " \t");
+        loadaddr = strtok (NULL, " \t");
 
-	if (loadaddr == NULL)
+        if (loadaddr == NULL)
             aaddr = 0;
-	else if (sscanf(loadaddr, "%x", &aaddr) !=1)
-	
-	{
-	    logmsg ("invalid address: %s \n",loadaddr);
-	    return NULL;
-	}
+        else if (sscanf(loadaddr, "%x", &aaddr) !=1)
 
-	if (aaddr >= regs->mainsize)
-	{ 
-	    logmsg ("Address greater than mainstore size. \n");
-	    return NULL;
-	}
+        {
+            logmsg ("invalid address: %s \n",loadaddr);
+            return NULL;
+        }
+
+        if (aaddr >= regs->mainsize)
+        {
+            logmsg ("Address greater than mainstore size. \n");
+            return NULL;
+        }
 
         /* Command is valid only when CPU is stopped */
         if (regs->cpustate != CPUSTATE_STOPPED)
@@ -1931,6 +2075,8 @@ BYTE   *cmdarg;                         /* -> Command argument       */
                 n   = buf[5]*65536 + buf[6]*256 + buf[7];
                 len = buf[11];
                 memcpy(sysblk.mainstor + aaddr + n, &buf[16], len);
+                STORAGE_KEY(aaddr + n) |= (STORKEY_REF | STORKEY_CHANGE);
+                STORAGE_KEY(aaddr + n + len - 1) |= (STORKEY_REF | STORKEY_CHANGE);
             }
         }
 
@@ -2023,7 +2169,10 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         sysblk.msgpipew = stderr;
 #if defined(OPTION_FISHIO)
         ios_msgpipew = sysblk.msgpipew;
-#endif // defined(OPTION_FISHIO)
+#endif /* defined(OPTION_FISHIO) */
+#if defined(OPTION_W32_CTCI)
+        g_tt32_msgpipew = sysblk.msgpipew;
+#endif /* defined(OPTION_W32_CTCI) */
         devascii = strtok(cmd+5," \t");
         if (devascii == NULL || strcmp("now",devascii))
             release_config();
@@ -2040,7 +2189,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
             {
                 /* Call device handler's query definition function */
 
-                (dev->devqdef)(dev, &devclass, sizeof(buf), buf);
+                (dev->hnd->query)(dev, &devclass, sizeof(buf), buf);
 
                 /* Display the device definition and status */
 
@@ -2066,11 +2215,14 @@ BYTE   *cmdarg;                         /* -> Command argument       */
                     {
                         logmsg ("     (no one currently connected)\n");
                     }
+
+                    if (clientip)   free(clientip);
+                    if (clientname) free(clientname);
                 }
             }
-            // end if(PMCW5_V)
+            /* end if(PMCW5_V) */
         }
-        // end for(dev)
+        /* end for(dev) */
 
         return NULL;
     }
@@ -2094,7 +2246,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         }
 
         /* Set up remaining arguments for initialization handler */
-#ifndef EXTERNALGUI
+#if 0 // ndef EXTERNALGUI
         for (devargc = 0; devargc < MAX_ARGS &&
             (devargv[devargc] = strtok(NULL," \t")) != NULL;
             devargc++);
@@ -2118,13 +2270,13 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         /* Close the existing file, if any */
         if (dev->fd < 0 || dev->fd > 2)
         {
-            (*(dev->devclos))(dev);
+            (dev->hnd->close)(dev);
         }
 
         /* Call the device init routine to do the hard work */
         if (devargc > 0)
         {
-            rc = (*(dev->devinit))(dev, devargc, devargv);
+            rc = (dev->hnd->init)(dev, devargc, devargv);
             if (rc < 0)
             {
                 logmsg ("Initialization failed for device %4.4X\n",
@@ -2165,7 +2317,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         }
 
         /* Set up remaining arguments for initialization handler */
-#ifndef EXTERNALGUI
+#if 0 // ndef EXTERNALGUI
         for (devargc = 0; devargc < MAX_ARGS &&
             (devargv[devargc] = strtok(NULL," \t")) != NULL;
             devargc++);
@@ -2252,60 +2404,118 @@ BYTE   *cmdarg;                         /* -> Command argument       */
     }
 
 /*********************************************************************/
-    /* sf commands - shadow file add/remove/set/display */
-    if (memcmp(cmd,"sf",2)==0)
+    /* sf commands - shadow file add/remove/set/compress/display */
+    if (memcmp(cmd,"sf",2)==0 && strlen(cmd) > 3)
     {
-        devascii = strtok(cmd+3," \t");
+        int  scan = 0, n = 0;
+        BYTE action = cmd[2];
 
-        /* if `sfd*' then display status for all cckd disks */
-        if (memcmp (cmd, "sfd", 3) == 0 && strcmp (devascii, "*") == 0)
+        /* Get device number or "*" */
+        devascii = strtok(cmd+3," \t");
+        if (devascii == NULL || strcmp (devascii, "") == 0)
         {
-            for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
-                if (dev->cckd_ext) cckd_sf_stats (dev);
+            logmsg ("Missing device number\n");
             return NULL;
         }
-
-        if (devascii == NULL
-            || sscanf(devascii, "%hx%c", &devnum, &c) != 1)
+        if (strcmp (devascii, "*") == 0)
         {
-            logmsg ("Device number %s is invalid\n", devascii);
-            return NULL;
+            if (action == '=')
+            {
+                logmsg ("Invalid device number\n");
+                return NULL;
+            }
+            for (dev=sysblk.firstdev; dev && !dev->cckd_ext; dev=dev->nextdev);
+            if (!dev)
+            {
+                logmsg ("No cckd devices found\n");
+                return NULL;
+            }
+            scan = 1;
+        }
+        else
+        {
+            if (sscanf (devascii, "%hx%c", &devnum, &c) != 1)
+            {
+                logmsg ("Invalid device number\n");
+                return NULL;
+            }
+            dev = find_device_by_devnum (devnum);
+            if (dev == NULL)
+            {
+                logmsg ("Device number %4.4X not found\n", devnum);
+                return NULL;
+            }
+            if (dev->cckd_ext == NULL)
+            {
+                logmsg ("Device number %4.4X is not a cckd device\n", devnum);
+                return NULL;
+            }
         }
 
         devascii = strtok(NULL," \t");
 
-        dev = find_device_by_devnum (devnum);
-        if (dev == NULL)
-        {
-            logmsg ("Device number %4.4X not found\n", devnum);
-            return NULL;
-        }
+        /* Perform the action */
+        do {
+            n++;
+            if (scan) logmsg("Processing device %4.4X\n", dev->devnum);
 
-        switch (cmd[2]) {
-        case '+': cckd_sf_add (dev);
-                  break;
+            switch (action) {
+            case '+': if (devascii != NULL)
+                      {
+                          logmsg ("Unexpected operand: %s\n", devascii);
+                          return NULL;
+                      }
+                      cckd_sf_add (dev);
+                      break;
 
-        case '-': if (devascii == NULL
-                   || strcmp(devascii, "merge") == 0)
-                      cckd_sf_remove (dev, 1);
-                  else if (strcmp(devascii, "nomerge") == 0)
-                      cckd_sf_remove (dev, 0);
-                  else
-                      logmsg ("Operand must be `merge' or `nomerge'\n");
-                  break;
+            case '-': if (devascii == NULL
+                       || strcmp(devascii, "merge") == 0)
+                          cckd_sf_remove (dev, 1);
+                      else if (strcmp(devascii, "nomerge") == 0)
+                          cckd_sf_remove (dev, 0);
+                      else
+                      {
+                          logmsg ("Operand must be `merge' or `nomerge'\n");
+                          return NULL;
+                      }
+                      break;
 
-        case '=': if (devascii != NULL)
-                      cckd_sf_newname (dev, devascii);
-                  else
-                      logmsg ("Shadow file name not specified\n");
-                  break;
+            case '=': if (devascii != NULL)
+                          cckd_sf_newname (dev, devascii);
+                      else
+                          logmsg ("Shadow file name not specified\n");
+                      break;
 
-        case 'd': cckd_sf_stats (dev);
-                  break;
+            case 'c': if (devascii != NULL)
+                      {
+                          logmsg ("Unexpected operand: %s\n", devascii);
+                          return NULL;
+                      }
+                      cckd_sf_comp (dev);
+                      break;
 
-        default:  logmsg ("Command must be `sf+', `sf-', `sf=' or `sfd'\n");
-                  break;
-        }
+            case 'd': if (devascii != NULL)
+                      {
+                          logmsg ("Unexpected operand: %s\n", devascii);
+                          return NULL;
+                      }
+                      cckd_sf_stats (dev);
+                      break;
+
+            default:  logmsg ("Command must be `sf+', `sf-', `sf=' or `sfd'\n");
+                      return NULL;
+            }
+
+            /* Next cckd device if scanning */
+            if (scan)
+            {
+                for (dev=dev->nextdev; dev && !dev->cckd_ext; dev=dev->nextdev);
+            }
+            else dev = NULL;
+
+        } while (dev);
+
+        if (scan) logmsg("%d devices processed\n", n);
 
         return NULL;
     }
@@ -2353,9 +2563,11 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         int devtmax = -2;
 #if defined(OPTION_FISHIO)
 
-        // Note: no need to lock scheduler vars since WE are the only one
-        // that updates "ios_devtmax" (the scheduler just references it)
-        // and we only display (but not update) all the other variables.
+        /* Note: no need to lock scheduler vars since WE are
+         * the only one that updates "ios_devtmax" (the scheduler
+         * just references it) and we only display (but not update)
+         * all the other variables.
+         */
 
         if (cmd[7] == '=')
             sscanf(cmd+8, "%d", &devtmax);
@@ -2370,14 +2582,14 @@ BYTE   *cmdarg;                         /* -> Command argument       */
             return NULL;
         }
 
-        TrimDeviceThreads();	// (enforce newly defined threshold)
+        TrimDeviceThreads();    /* (enforce newly defined threshold) */
 
         logmsg ("Max device threads: %d, current: %d, most: %d, "
                 "waiting: %d, max exceeded: %d\n",
                 ios_devtmax, ios_devtnbr, ios_devthwm,
                 (int)ios_devtwait, ios_devtunavail);
 
-#else // !defined(OPTION_FISHIO)
+#else /* !defined(OPTION_FISHIO) */
         TID tid;
 
         if (cmd[7] == '=')
@@ -2415,7 +2627,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
                 sysblk.devtmax, sysblk.devtnbr, sysblk.devthwm,
                 sysblk.devtwait, sysblk.devtunavail);
 
-#endif // defined(OPTION_FISHIO)
+#endif /* defined(OPTION_FISHIO) */
         return NULL;
     }
 
@@ -2431,16 +2643,65 @@ BYTE   *cmdarg;                         /* -> Command argument       */
             if(!dev->syncio) continue;
             i++;
             logmsg ("%4.4X  synchronous: %12lld asynchronous: %12lld\n",
-                    dev->devnum, dev->syncios, dev->asyncios);
+                    dev->devnum, (long long)dev->syncios,
+                    (long long)dev->asyncios);
             syncios += dev->syncios; asyncios += dev->asyncios;
         } /* end for(dev) */
         if (i == 0) { logmsg ("No synchronous I/O devices found\n"); }
         else
             logmsg ("TOTAL synchronous: %12lld asynchronous: %12lld  %3lld%%\n",
-                syncios, asyncios, (syncios * 100) / (syncios + asyncios + 1));
+                   (long long)syncios, (long long)asyncios,
+                   (long long)((syncios * 100) / (syncios + asyncios + 1)));
         return NULL;
     }
 #endif
+
+#if defined(OPTION_W32_CTCI)
+/*********************************************************************/
+    /* tt32stats command - display CTCI-W32 statistics */
+    if (memcmp(cmd,"tt32stats",9)==0)
+    {
+        devascii = strtok(cmd+9," \t");
+        if (devascii == NULL
+            || sscanf(devascii, "%hx%c", &devnum, &c) != 1)
+        {
+            logmsg("Device number %s is invalid\n",devascii);
+            return NULL;
+        }
+        dev = find_device_by_devnum (devnum);
+        if (dev == NULL)
+        {
+            logmsg("Device number %4.4X not found\n", devnum);
+            return NULL;
+        }
+        if (CTC_CTCI_W32 != dev->ctctype)
+        {
+            logmsg("Device %4.4X is not a CTCI-W32 device\n", devnum);
+            return NULL;
+        }
+        if (display_tt32_stats(dev->fd) < 0)
+            logmsg("(error)\n");
+        return NULL;
+    }
+#endif /* defined(OPTION_W32_CTCI) */
+
+#ifdef OPTION_IODELAY_KLUDGE
+/*********************************************************************/
+    /* iodelay command - display or set I/O delay value */
+    if (memcmp(cmd,"iodelay",7)==0)
+    {
+        int iodelay = 0;
+        if (cmd[7] == '=' || cmd[7] == ' ')
+        {
+            if (sscanf(cmd+8, "%d%c", &iodelay, &c) != 1)
+                logmsg( "Invalid I/O delay value: %s\n", cmd+8);
+            else
+                sysblk.iodelay = iodelay;
+        }
+        logmsg ("I/O delay = %d\n", sysblk.iodelay);
+        return NULL;
+    }
+#endif /*OPTION_IODELAY_KLUDGE*/
 
 /*********************************************************************/
     /* Ignore just enter */
@@ -2516,6 +2777,114 @@ struct termios kbattr;                  /* Terminal I/O structure    */
 } /* end function system_cleanup */
 
 /*-------------------------------------------------------------------*/
+/* Process .RC file thread                                           */
+/*-------------------------------------------------------------------*/
+
+int rc_thread_done = 0;                 /* 1 = RC file processed     */
+
+void* process_rc_file (void* dummy)
+{
+BYTE   *rcname;                         /* hercules.rc name pointer  */
+FILE   *rcfp;                           /* RC file pointer           */
+size_t  rcbufsize = 1024;               /* Size of RC file  buffer   */
+BYTE   *rcbuf = NULL;                   /* RC file input buffer      */
+int     rclen;                          /* length of RC file record  */
+int     rc_pause_amt = 0;               /* seconds to pause RC file  */
+BYTE   *p;                              /* (work)                    */
+
+    /* Obtain the name of the hercules.rc file or default */
+
+    if(!(rcname = getenv("HERCULES_RC")))
+        rcname = "hercules.rc";
+
+    /* Open RC file. If it doesn't exist,
+       then there's nothing for us to do */
+
+    if (!(rcfp = fopen(rcname, "r")))
+    {
+        if (ENOENT != errno)
+            logmsg("HHC432E: RC file open failed: %s\n",
+                strerror(errno));
+        rc_thread_done = 1;
+        return NULL;
+    }
+
+    logmsg("HHC430I: RC file processing thread started...\n");
+
+    /* Obtain storage for the RC file buffer */
+
+    if (!(rcbuf = malloc (rcbufsize)))
+    {
+        logmsg("HHC431E: RC file buffer malloc failed: %s\n",
+            strerror(errno));
+        fclose(rcfp);
+        rc_thread_done = 1;
+        return NULL;
+    }
+
+    for (;;)
+    {
+        /* Read a complete line from the RC file */
+
+        if (!fgets(rcbuf, rcbufsize, rcfp)) break;
+
+        /* Remove trailing whitespace */
+
+        for (rclen = strlen(rcbuf); rclen && isspace(rcbuf[rclen-1]); rclen--);
+        rcbuf[rclen] = 0;
+
+        /* '#' == silent comment, '*' == loud comment */
+
+        if ('#' == rcbuf[0] || '*' == rcbuf[0])
+        {
+            if ('*' == rcbuf[0])
+                logmsg ("> %s",rcbuf);
+            continue;
+        }
+
+        /* Remove any # comments on the line before processing */
+
+        if ((p = strchr(rcbuf,'#')) && p > rcbuf)
+            do *p = 0; while (isspace(*--p) && p >= rcbuf);
+
+        if (strncasecmp(rcbuf,"pause",5) == 0)
+        {
+            sscanf(rcbuf+5, "%d", &rc_pause_amt);
+
+            if (rc_pause_amt < 0 || rc_pause_amt > 999)
+            {
+                logmsg("HHC428W Ignoring invalid .RC file pause statement\n");
+                continue;
+            }
+
+            logmsg ("HHC426I Pausing .RC file processing for %d seconds...\n", rc_pause_amt);
+            sleep(rc_pause_amt);
+            logmsg ("HHC427I Resuming .RC file processing...\n");
+
+            continue;
+        }
+
+        /* Process the command */
+
+        for (p = rcbuf; isspace(*p); p++);
+
+        rc_cmd = 1;
+        SYNCHRONOUS_PANEL_CMD(p);
+    }
+
+    if (feof(rcfp))
+        logmsg ("HHC429I EOF reached on .RC file.\n");
+    else
+        logmsg ("HHC429E I/O reading .RC file: %s\n",strerror(errno));
+
+    fclose(rcfp);
+
+    rc_thread_done = 1;
+
+    return NULL;
+}
+
+/*-------------------------------------------------------------------*/
 /* Panel display thread                                              */
 /*                                                                   */
 /* This function runs on the main thread.  It receives messages      */
@@ -2532,27 +2901,39 @@ struct termios kbattr;                  /* Terminal I/O structure    */
 
 int volatile initdone = 0;           /* Initialization complete flag */
 
-void panel_display (void)
-{
-int     rc;                             /* Return code               */
-int     i, n;                           /* Array subscripts          */
-BYTE   *msgbuf;                         /* Circular message buffer   */
-int     msgslot = 0;                    /* Next available buffer slot*/
-int     nummsgs = 0;                    /* Number of msgs in buffer  */
-int     firstmsgn = 0;                  /* Number of first message to
-                                           be displayed relative to
-                                           oldest message in buffer  */
 #define MAX_MSGS                800     /* Number of slots in buffer */
 #define MSG_SIZE                80      /* Size of one message       */
 #define BUF_SIZE    (MAX_MSGS*MSG_SIZE) /* Total size of buffer      */
 #define NUM_LINES               22      /* Number of scrolling lines */
 #define CMD_SIZE             32767      /* Length of command line    */
+BYTE   *msgbuf;                         /* Circular message buffer   */
+int     msgslot = 0;                    /* Next available buffer slot*/
+int     nummsgs = 0;                    /* Number of msgs in buffer  */
+int     msg_size = MSG_SIZE;
+int     max_msgs = MAX_MSGS;
+
+void get_msgbuf(BYTE **_msgbuf, int *_msgslot, int *_nummsgs, int *_msg_size, int *_max_msgs)
+{
+    *_msgbuf = msgbuf;
+    *_msgslot = msgslot;
+    *_nummsgs = nummsgs;
+    *_msg_size = msg_size;
+    *_max_msgs = max_msgs;
+}
+
+void panel_display (void)
+{
+int     rc;                             /* Return code               */
+int     i, n;                           /* Array subscripts          */
 REGS   *regs;                           /* -> CPU register context   */
 QWORD   curpsw;                         /* Current PSW               */
 QWORD   prvpsw;                         /* Previous PSW              */
 BYTE    prvstate = 0xFF;                /* Previous stopped state    */
 U64     prvicount = 0;                  /* Previous instruction count*/
 BYTE    pswwait;                        /* PSW wait state bit        */
+int     firstmsgn = 0;                  /* Number of first message to
+                                           be displayed relative to
+                                           oldest message in buffer  */
 #ifdef EXTERNALGUI
 BYTE    redraw_msgs = 0;                /* 1=Redraw message area     */
 BYTE    redraw_cmd = 0;                 /* 1=Redraw command line     */
@@ -2567,17 +2948,13 @@ int     readoff = 0;                    /* Number of bytes in readbuf*/
 BYTE    cmdline[CMD_SIZE+1];            /* Command line buffer       */
 int     cmdoff = 0;                     /* Number of bytes in cmdline*/
 TID     cmdtid;                         /* Command thread identifier */
+TID     rctid;                          /* RC file thread identifier */
 BYTE    c;                              /* Character work area       */
 FILE   *confp;                          /* Console file pointer      */
 FILE   *logfp;                          /* Log file pointer          */
-FILE   *rcfp;                           /* RC file pointer           */
-BYTE   *rcname;                         /* hercules.rc name pointer  */
 struct termios kbattr;                  /* Terminal I/O structure    */
-#ifdef EXTERNALGUI
-BYTE    kbbuf[CMD_SIZE];                /* Keyboard input buffer     */
-#else /*!EXTERNALGUI*/
-BYTE    kbbuf[6];                       /* Keyboard input buffer     */
-#endif /*EXTERNALGUI*/
+size_t  kbbufsize = CMD_SIZE;           /* Size of keyboard buffer   */
+BYTE   *kbbuf = NULL;                   /* Keyboard input buffer     */
 int     kblen;                          /* Number of chars in kbbuf  */
 int     pipefd;                         /* Pipe file descriptor      */
 int     keybfd;                         /* Keyboard file descriptor  */
@@ -2589,6 +2966,15 @@ struct  timeval tv;                     /* Select timeout structure  */
     logmsg ("HHC650I Control panel thread started: "
             "tid="TIDPAT", pid=%d\n",
             thread_id(), getpid());
+
+    /* Obtain storage for the keyboard buffer */
+    if (!(kbbuf = malloc (kbbufsize)))
+    {
+        fprintf (stderr,
+                "panel: Cannot obtain keyboard buffer: %s\n",
+                strerror(errno));
+        return;
+    }
 
     /* Obtain storage for the circular message buffer */
     msgbuf = malloc (BUF_SIZE);
@@ -2613,8 +2999,8 @@ struct  timeval tv;                     /* Select timeout structure  */
     {
         confp = stderr;
         logfp = stdout;
-	/* Logfile should be unbuffered to be always in sync */
-	setvbuf(logfp, NULL, _IONBF, 0);
+        /* Logfile should be unbuffered to be always in sync */
+        setvbuf(logfp, NULL, _IONBF, 0);
     }
 
     /* Set screen output stream to fully buffered */
@@ -2623,12 +3009,6 @@ struct  timeval tv;                     /* Select timeout structure  */
     /* Set up the input file descriptors */
     pipefd = sysblk.msgpiper;
     keybfd = STDIN_FILENO;
-
-    /* Obtain the name of the hercules.rc file or default */
-    if(!(rcname = getenv("HERCULES_RC")))
-        rcname = "hercules.rc";
-
-    rcfp = fopen(rcname, "r");
 
     /* Register the system cleanup exit routine */
     atexit (system_cleanup);
@@ -2662,6 +3042,9 @@ struct  timeval tv;                     /* Select timeout structure  */
     /* Wait for system to finish coming up */
     while (!initdone) sleep(1);
 
+    /* Start up the RC file processing thread */
+    create_thread(&rctid,&sysblk.detattr,process_rc_file,NULL);
+
     /* Process messages and commands */
     while (1)
     {
@@ -2669,16 +3052,16 @@ struct  timeval tv;                     /* Select timeout structure  */
         regs = sysblk.regs + sysblk.pcpu;
         /* If the requested CPU is offline, then take the first available CPU*/
         if(!regs->cpuonline)
-	  /* regs = first online CPU
-	   * sysblk.pcpu = number of online CPUs
-	   */
-	  for(regs = 0, sysblk.pcpu = 0, i = 0 ;
-	      i < MAX_CPU_ENGINES ; ++i )
-	    if (sysblk.regs[i].cpuonline) {
-	      if (!regs)
-		regs = &sysblk.regs[i];
-	      ++sysblk.pcpu;
-	    }
+          /* regs = first online CPU
+           * sysblk.pcpu = number of online CPUs
+           */
+          for(regs = 0, sysblk.pcpu = 0, i = 0 ;
+              i < MAX_CPU_ENGINES ; ++i )
+            if (sysblk.regs[i].cpuonline) {
+              if (!regs)
+                regs = &sysblk.regs[i];
+              ++sysblk.pcpu;
+            }
 
         if (!regs)
             /* No CPUs are online! The 'quit' or 'exit'
@@ -2714,35 +3097,20 @@ struct  timeval tv;                     /* Select timeout structure  */
         }
 
         /* If keyboard input has arrived then process it */
-        if (rcfp || FD_ISSET(keybfd, &readset))
+
+        if (FD_ISSET(keybfd, &readset))
         {
-            kblen = 0;
-            if (rcfp)
+            /* Read character(s) from the keyboard */
+
+            kblen = read (keybfd, kbbuf, kbbufsize-1);
+            if (kblen < 0)
             {
-                /* Read a character from the RC file */
-                if ((rc = fgetc (rcfp)) == EOF)
-                {
-                    fclose(rcfp);
-                    rcfp = 0;
-                } else {
-                    kbbuf[0] = rc & 0xff;
-                    kblen = 1;
-                    kbbuf[kblen] = '\0';
-                }
+                fprintf (stderr,
+                        "panel: keyboard read: %s\n",
+                        strerror(errno));
+                break;
             }
-            if (kblen == 0 && FD_ISSET(keybfd, &readset))
-            {
-                /* Read character(s) from the keyboard */
-                kblen = read (keybfd, kbbuf, sizeof(kbbuf)-1);
-                if (kblen < 0)
-                {
-                    fprintf (stderr,
-                            "panel: keyboard read: %s\n",
-                            strerror(errno));
-                    break;
-                }
-                kbbuf[kblen] = '\0';
-            }
+            kbbuf[kblen] = '\0';
 
             /* =NP= : Intercept NP commands & process */
 
@@ -2769,23 +3137,19 @@ struct  timeval tv;                     /* Select timeout structure  */
                             break;
                         case 'S':                   /* START */
                         case 's':
-                            create_thread (&cmdtid, &sysblk.detattr,
-                                        panel_command, "start");
+                            ASYNCHRONOUS_PANEL_CMD("start");
                             break;
                         case 'P':                   /* STOP */
                         case 'p':
-                            create_thread (&cmdtid, &sysblk.detattr,
-                                        panel_command, "stop");
+                            ASYNCHRONOUS_PANEL_CMD("stop");
                             break;
                         case 'T':                   /* RESTART */
                         case 't':
-                            create_thread (&cmdtid, &sysblk.detattr,
-                                        panel_command, "restart");
+                            ASYNCHRONOUS_PANEL_CMD("restart");
                             break;
                         case 'E':                   /* Ext int */
                         case 'e':
-                            create_thread (&cmdtid, &sysblk.detattr,
-                                        panel_command, "ext");
+                            ASYNCHRONOUS_PANEL_CMD("ext");
                             redraw_status = 1;
                             break;
                         case 'O':                   /* Store */
@@ -2869,8 +3233,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                             sprintf(NPdevstr, "%x", NPdevaddr[i]);
                             strcpy(cmdline, "ipl ");
                             strcat(cmdline, NPdevstr);
-                            create_thread (&cmdtid, &sysblk.detattr,
-                                        panel_command, cmdline);
+                            ASYNCHRONOUS_PANEL_CMD(cmdline);
                             strcpy(NPprompt2, "");
                             redraw_status = 1;
                             break;
@@ -2891,8 +3254,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                             sprintf(NPdevstr, "%x", NPdevaddr[i]);
                             strcpy(cmdline, "i ");
                             strcat(cmdline, NPdevstr);
-                            create_thread (&cmdtid, &sysblk.detattr,
-                                        panel_command, cmdline);
+                            ASYNCHRONOUS_PANEL_CMD(cmdline);
                             strcpy(NPprompt2, "");
                             redraw_status = 1;
                             break;
@@ -2929,8 +3291,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                             break;
                         case 4:                     /* IPL - 2nd part */
                             if (NPdevice == 'y' || NPdevice == 'Y')
-                                create_thread (&cmdtid, &sysblk.detattr,
-                                        panel_command, "quit");
+                                ASYNCHRONOUS_PANEL_CMD("quit");
                             strcpy(NPprompt1, "");
                             redraw_status = 1;
                             break;
@@ -3071,8 +3432,21 @@ struct  timeval tv;                     /* Select timeout structure  */
                         }
                         else
 #endif /*EXTERNALGUI*/
-                        create_thread (&cmdtid, &sysblk.detattr,
-                                panel_command, cmdline);
+                        {
+                            if ('#' == cmdline[0] || '*' == cmdline[0])
+                            {
+                                if ('*' == cmdline[0])
+                                    logmsg("%s\n", cmdline);
+                            }
+                            else
+                            {
+                                if (rc_thread_done)
+                                {
+                                    rc_cmd = 0;
+                                    ASYNCHRONOUS_PANEL_CMD(cmdline);
+                                }
+                            }
+                        }
                     } else {
                         NPdataentry = 0;
                         NPcurpos[0] = 24;
@@ -3099,8 +3473,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                                 strcat(NPentered, NPdevstr);
                                 strcat(NPentered, " ");
                                 strcat(NPentered, cmdline);
-                                create_thread (&cmdtid, &sysblk.detattr,
-                                       panel_command, NPentered);
+                                ASYNCHRONOUS_PANEL_CMD(NPentered);
                                 strcpy(NPprompt2, "");
                                 break;
                             default:
@@ -3188,13 +3561,13 @@ struct  timeval tv;                     /* Select timeout structure  */
             }
 
             /* Copy message to circular buffer and empty read buffer */
-#ifdef EXTERNALGUI
+#if defined(EXTERNALGUI) && !defined(OPTION_HTTP_SERVER)
             if (!extgui)
 #endif /*EXTERNALGUI*/
             memcpy (msgbuf + (msgslot * MSG_SIZE), readbuf, MSG_SIZE);
             readoff = 0;
 
-#ifdef EXTERNALGUI
+#if defined(EXTERNALGUI) && !defined(OPTION_HTTP_SERVER)
             if (!extgui)
             {
 #endif /*EXTERNALGUI*/
@@ -3211,7 +3584,7 @@ struct  timeval tv;                     /* Select timeout structure  */
 
             /* Set the display update indicator */
             redraw_msgs = 1;
-#ifdef EXTERNALGUI
+#if defined(EXTERNALGUI) && !defined(OPTION_HTTP_SERVER)
             }
 #endif /*EXTERNALGUI*/
         }
@@ -3327,11 +3700,15 @@ struct  timeval tv;                     /* Select timeout structure  */
 #else /*!defined(_FEATURE_SIE)*/
                     '.',
 #endif /*!defined(_FEATURE_SIE)*/
-                    regs->arch_mode > ARCH_390 ? 'Z' : '.',
+#if defined(_900)
+                    regs->arch_mode == ARCH_900 ? 'Z' : '.',
+#else
+                    ' ',
+#endif
 #if defined(_FEATURE_SIE)
-                    regs->sie_state ?  regs->hostregs->instcount :
+                    regs->sie_state ?  (long long) regs->hostregs->instcount :
 #endif /*defined(_FEATURE_SIE)*/
-                    regs->instcount,
+                    (long long)regs->instcount,
 #ifdef EXTERNALGUI
                     extgui ? "\n" :
 #endif /*EXTERNALGUI*/
@@ -3359,7 +3736,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                             siosrate += sysblk.regs[i].siosrate;
                         }
 
-                    if (mipsrate > 100000) mipsrate = 0;	/* ignore wildly high rate */
+                    if (mipsrate > 100000) mipsrate = 0;        /* ignore wildly high rate */
 
                     /* MIPS rate */
                     if (prevmipsrate != mipsrate)
@@ -3429,9 +3806,9 @@ struct  timeval tv;                     /* Select timeout structure  */
 
                             stat_online = stat_busy = stat_pend = stat_open = 0;
 
-                            (dev->devqdef)(dev, &devclass, sizeof(devnam), devnam);
+                            (dev->hnd->query)(dev, &devclass, sizeof(devnam), devnam);
 
-                            devnam[255] = 0;   // (ensure string is null terminated)
+                            devnam[255] = 0;   /* (ensure null termination) */
 
                             if ((dev->console && dev->connected) ||
                                 (strlen(dev->filename) > 0))
@@ -3457,12 +3834,12 @@ struct  timeval tv;                     /* Select timeout structure  */
 #endif /*EXTERNALGUI*/
             } /* end if(redraw_status) */
 #ifdef EXTERNALGUI
-			else /* !redraw_status */
-			{
-	            /* If we're under the control of an external GUI,
-	               some status info we need to send ALL the time. */
-	            if (extgui)
-				{
+                        else /* !redraw_status */
+                        {
+                    /* If we're under the control of an external GUI,
+                       some status info we need to send ALL the time. */
+                    if (extgui)
+                                {
                     /* (for system activity meter) */
                     if (!(regs->cpustate == CPUSTATE_STOPPING ||
                         regs->cpustate == CPUSTATE_STOPPED))
@@ -3478,9 +3855,9 @@ struct  timeval tv;                     /* Select timeout structure  */
 
                             stat_online = stat_busy = stat_pend = stat_open = 0;
 
-                            (dev->devqdef)(dev, &devclass, sizeof(devnam), devnam);
+                            (dev->hnd->query)(dev, &devclass, sizeof(devnam), devnam);
 
-                            devnam[255] = 0;   // (ensure string is null terminated)
+                            devnam[255] = 0;   /* (ensure null terminated) */
 
                             if ((dev->console && dev->connected) ||
                                 (strlen(dev->filename) > 0))
@@ -3502,8 +3879,8 @@ struct  timeval tv;                     /* Select timeout structure  */
 
                         fprintf(confp, "DEV=X\n");    /* (indicate end of list) */
                     }
-				}
-			}
+                                }
+                        }
 
             if (!extgui)
 #endif /*EXTERNALGUI*/
@@ -3644,7 +4021,7 @@ BYTE    c;                              /* Character work area       */
     if (draflag)
     {
       #if defined(FEATURE_ESAME)
-        n = sprintf (buf, "R:%16.16llX:", raddr);
+        n = sprintf (buf, "R:%16.16llX:", (long long)raddr);
       #else /*!defined(FEATURE_ESAME)*/
         n = sprintf (buf, "R:%8.8X:", (U32)raddr);
       #endif /*!defined(FEATURE_ESAME)*/
@@ -3691,7 +4068,7 @@ int     stid;                           /* Segment table indication  */
 U16     xcode;                          /* Exception code            */
 
   #if defined(FEATURE_ESAME)
-    n = sprintf (buf, "V:%16.16llX:", vaddr);
+    n = sprintf (buf, "V:%16.16llX:", (long long)vaddr);
   #else /*!defined(FEATURE_ESAME)*/
     n = sprintf (buf, "V:%8.8X:", vaddr);
   #endif /*!defined(FEATURE_ESAME)*/
@@ -3812,7 +4189,7 @@ BYTE    buf[100];                       /* Message buffer            */
             xcode = ARCH_DEP(virt_to_real) (&raddr, &stid, vaddr, arn,
                                             regs, ACCTYPE_LRA);
           #if defined(FEATURE_ESAME)
-            n = sprintf (buf, "V:%16.16llX ", vaddr);
+            n = sprintf (buf, "V:%16.16llX ", (long long)vaddr);
           #else /*!defined(FEATURE_ESAME)*/
             n = sprintf (buf, "V:%8.8X ", vaddr);
           #endif /*!defined(FEATURE_ESAME)*/
@@ -3826,7 +4203,7 @@ BYTE    buf[100];                       /* Message buffer            */
                 n += sprintf (buf+n, "(AR%2.2d)", arn);
             if (xcode == 0)
           #if defined(FEATURE_ESAME)
-                n += sprintf (buf+n, " R:%16.16llX", raddr);
+                n += sprintf (buf+n, " R:%16.16llX", (long long)raddr);
           #else /*!defined(FEATURE_ESAME)*/
                 n += sprintf (buf+n, " R:%8.8X", (U32)raddr);
           #endif /*!defined(FEATURE_ESAME)*/
@@ -3901,7 +4278,7 @@ int     n;                              /* Number of bytes in buffer */
     if (ilc > 4) n += sprintf (buf+n, "%2.2X%2.2X", inst[4], inst[5]);
     logmsg ("%s %s", buf,(ilc<4) ? "        " : (ilc<6) ? "    " : "");
     DISASM_INSTRUCTION(inst);
-    
+
 
 #ifdef DISPLAY_INSTRUCTION_OPERANDS
 
@@ -4029,12 +4406,16 @@ int     n;                              /* Number of bytes in buffer */
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "panel.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "panel.c"
+#endif
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "panel.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "panel.c"
+#endif
 
 /*-------------------------------------------------------------------*/
 /* Wrappers for architecture-dependent functions                     */
@@ -4042,12 +4423,18 @@ int     n;                              /* Number of bytes in buffer */
 static void alter_display_real (BYTE *opnd, REGS *regs)
 {
     switch(sysblk.arch_mode) {
+#if defined(_370)
         case ARCH_370:
             s370_alter_display_real (opnd, regs); break;
+#endif
+#if defined(_390)
         case ARCH_390:
             s390_alter_display_real (opnd, regs); break;
+#endif
+#if defined(_900)
         case ARCH_900:
             z900_alter_display_real (opnd, regs); break;
+#endif
     }
     return;
 } /* end function alter_display_real */
@@ -4055,12 +4442,18 @@ static void alter_display_real (BYTE *opnd, REGS *regs)
 static void alter_display_virt (BYTE *opnd, REGS *regs)
 {
     switch(sysblk.arch_mode) {
+#if defined(_370)
         case ARCH_370:
             s370_alter_display_virt (opnd, regs); break;
+#endif
+#if defined(_390)
         case ARCH_390:
             s390_alter_display_virt (opnd, regs); break;
+#endif
+#if defined(_900)
         case ARCH_900:
             z900_alter_display_virt (opnd, regs); break;
+#endif
     }
     return;
 } /* end function alter_display_virt */
@@ -4068,16 +4461,21 @@ static void alter_display_virt (BYTE *opnd, REGS *regs)
 void display_inst(REGS *regs, BYTE *inst)
 {
     switch(regs->arch_mode) {
+#if defined(_370)
         case ARCH_370:
             s370_display_inst(regs,inst);
             break;
+#endif
+#if defined(_390)
+        case ARCH_390:
+            s390_display_inst(regs,inst);
+            break;
+#endif
+#if defined(_900)
         case ARCH_900:
             z900_display_inst(regs,inst);
             break;
-        case ARCH_390:
-        default:
-            s390_display_inst(regs,inst);
-            break;
+#endif
     }
 }
 
@@ -4091,12 +4489,12 @@ void display_inst(REGS *regs, BYTE *inst)
     #define logdebug(args...) logmsg(## args)
 #else
     #define logdebug(args...) do {} while (0)
-#endif // DEBUG_SOCKDEV
+#endif /* DEBUG_SOCKDEV */
 
 /* Linked list of bind structures for bound socket devices */
 
-LIST_ENTRY  bind_head;      // (bind_struct list anchor)
-LOCK        bind_lock;      // (lock for accessing list)
+LIST_ENTRY  bind_head;      /* (bind_struct list anchor) */
+LOCK        bind_lock;      /* (lock for accessing list) */
 
 /*-------------------------------------------------------------------*/
 /* bind_device   bind a device to a socket (adds entry to our list   */
@@ -4108,16 +4506,16 @@ int bind_device (DEVBLK* dev, char* spec)
 
     logdebug("bind_device (%4.4X, %s)\n", dev->devnum, spec);
 
-    // Error if device already bound
+    /* Error if device already bound */
 
     if (dev->bs)
     {
         logmsg ("HHC416I Device %4.4X already bound to socket %s\n",
             dev->devnum, dev->bs->spec);
-        return 0;   // (failure)
+        return 0;   /* (failure) */
     }
 
-    // Create a new bind_struct entry
+    /* Create a new bind_struct entry */
 
     bs = malloc(sizeof(bind_struct));
 
@@ -4125,7 +4523,7 @@ int bind_device (DEVBLK* dev, char* spec)
     {
         logmsg ("HHC415I bind_device malloc() failed for device %4.4X\n",
             dev->devnum);
-        return 0;   // (failure)
+        return 0;   /* (failure) */
     }
 
     memset(bs,0,sizeof(bind_struct));
@@ -4135,27 +4533,27 @@ int bind_device (DEVBLK* dev, char* spec)
         logmsg ("HHC415I bind_device safe_strdup() failed for device %4.4X\n",
             dev->devnum);
         free (bs);
-        return 0;   // (failure)
+        return 0;   /* (failure) */
     }
 
-    // Create a listening socket
+    /* Create a listening socket */
 
     if (bs->spec[0] == '/') bs->sd = unix_socket (bs->spec);
     else                    bs->sd = inet_socket (bs->spec);
 
     if (bs->sd == -1)
     {
-        // (error message already issued)
+        /* (error message already issued) */
         free (bs);
-        return 0; // (failure)
+        return 0; /* (failure) */
     }
 
-    // Chain device and socket to each other
+    /* Chain device and socket to each other */
 
     dev->bs = bs;
     bs->dev = dev;
 
-    // Add the new entry to our list of bound devices
+    /* Add the new entry to our list of bound devices */
 
     obtain_lock(&bind_lock);
     InsertListTail(&bind_head,&bs->bind_link);
@@ -4164,7 +4562,7 @@ int bind_device (DEVBLK* dev, char* spec)
     logmsg ("HHC416I Device %4.4X bound to socket %s\n",
         dev->devnum, dev->bs->spec);
 
-    return 1;   // (success)
+    return 1;   /* (success) */
 }
 
 /*-------------------------------------------------------------------*/
@@ -4177,36 +4575,36 @@ int unbind_device (DEVBLK* dev)
 
     logdebug("unbind_device(%4.4X)\n", dev->devnum);
 
-    // Error if device not bound
+    /* Error if device not bound */
 
     if (!(bs = dev->bs))
     {
         logmsg ("HHC416I Device %4.4X not bound to any socket\n",
             dev->devnum);
-        return 0;   // (failure)
+        return 0;   /* (failure) */
     }
 
-    // Error if someone still connected
+    /* Error if someone still connected */
 
     if (dev->fd != -1)
     {
         logmsg ("HHC416I Client %s (%s) still connected to device %4.4X (%s)\n",
             dev->bs->clientip, dev->bs->clientname, dev->devnum, dev->bs->spec);
-        return 0;   // (failure)
+        return 0;   /* (failure) */
     }
 
-    // Remove the entry from our list
+    /* Remove the entry from our list */
 
     obtain_lock(&bind_lock);
     RemoveListEntry(&bs->bind_link);
     release_lock(&bind_lock);
 
-    // Unchain device and socket from each another
+    /* Unchain device and socket from each another */
 
     dev->bs = NULL;
     bs->dev = NULL;
 
-    // Close the listening socket
+    /* Close the listening socket */
 
     if (bs->sd != -1)
         close (bs->sd);
@@ -4214,19 +4612,27 @@ int unbind_device (DEVBLK* dev)
     logmsg ("HHC422I Device %4.4X unbound from socket %s\n",
         dev->devnum, bs->spec);
 
-    // Discard the entry
+    /* Discard the entry */
+
+    if (bs->clientname)
+        free(bs->clientname);
+    bs->clientname = NULL;
+
+    if (bs->clientip)
+        free(bs->clientip);
+    bs->clientip = NULL;
 
     free (bs->spec);
     free (bs);
 
-    return 1;   // (success)
+    return 1;   /* (success) */
 }
 
 /*-------------------------------------------------------------------*/
 /* unix_socket   create and bind a Unix domain socket                */
 /*-------------------------------------------------------------------*/
 
-#include <sys/un.h>     // (need "sockaddr_un")
+#include <sys/un.h>     /* (need "sockaddr_un") */
 
 int unix_socket (char* path)
 {
@@ -4237,13 +4643,13 @@ int unix_socket (char* path)
 
     if (strlen (path) > sizeof(addr.sun_path) - 1)
     {
-        logmsg ("HHC411I Socket pathname \"%s\" exceeds limit of %ul\n",
-            path, sizeof(addr.sun_path) - 1);
+        logmsg ("HHC411I Socket pathname \"%s\" exceeds limit of %d\n",
+            path, (int) sizeof(addr.sun_path) - 1);
         return -1;
     }
 
     addr.sun_family = AF_UNIX;
-    strcpy (addr.sun_path, path); // guaranteed room by above check
+    strcpy (addr.sun_path, path); /* guaranteed room by above check */
     sd = socket (PF_UNIX, SOCK_STREAM, 0);
 
     if (sd == -1)
@@ -4274,7 +4680,7 @@ int unix_socket (char* path)
 /*-------------------------------------------------------------------*/
 int inet_socket (char* spec)
 {
-    // We need a copy of the path to overwrite a ':' with '\0'
+    /* We need a copy of the path to overwrite a ':' with '\0' */
 
     char buf[sizeof(((DEVBLK*)0)->filename)];
     char* colon;
@@ -4379,13 +4785,13 @@ int add_socket_devices_to_fd_set (fd_set* readset, int maxfd)
     {
         bs = CONTAINING_RECORD(pListEntry,bind_struct,bind_link);
 
-        if (bs->sd != -1)           // if listening for connections
+        if (bs->sd != -1)           /* if listening for connections, */
         {
             dev = bs->dev;
 
-            if (dev->fd == -1)      // and not already connected
+            if (dev->fd == -1)      /* and not already connected, */
             {
-                FD_SET(bs->sd, readset);    // then add file to set
+                FD_SET(bs->sd, readset);    /* then add file to set */
 
                 if (bs->sd > maxfd)
                     maxfd = bs->sd;
@@ -4418,6 +4824,10 @@ void check_socket_devices_for_connections (fd_set* readset)
 
         if (bs->sd != -1 && FD_ISSET(bs->sd, readset))
         {
+            /* Note: there may be other connection requests
+             * waiting to be serviced, but we'll catch them
+             * the next time the panel thread calls us. */
+
             release_lock(&bind_lock);
             socket_device_connection_handler(bs);
             return;
@@ -4447,11 +4857,11 @@ void socket_device_connection_handler (bind_struct* bs)
     logdebug("socket_device_connection_handler(dev=%4.4X)\n",
         dev->devnum);
 
-    // Obtain the device lock
+    /* Obtain the device lock */
 
     obtain_lock (&dev->lock);
 
-    // Reject if device is busy or interrupt pending
+    /* Reject if device is busy or interrupt pending */
 
     if (dev->busy || dev->pending || (dev->scsw.flag3 & SCSW3_SC_PEND))
     {
@@ -4462,7 +4872,7 @@ void socket_device_connection_handler (bind_struct* bs)
         return;
     }
 
-    // Reject if previous connection not closed (should not occur)
+    /* Reject if previous connection not closed (should not occur) */
 
     if (dev->fd != -1)
     {
@@ -4473,7 +4883,7 @@ void socket_device_connection_handler (bind_struct* bs)
         return;
     }
 
-    // Accept the connection...
+    /* Accept the connection... */
 
     csock = accept(bs->sd, 0, 0);
 
@@ -4485,7 +4895,7 @@ void socket_device_connection_handler (bind_struct* bs)
         return;
     }
 
-    // Determine the connected client's IP address and hostname
+    /* Determine the connected client's IP address and hostname */
 
     namelen = sizeof(client);
     clientip = NULL;
@@ -4502,7 +4912,7 @@ void socket_device_connection_handler (bind_struct* bs)
         clientname = (char*) pHE->h_name;
     }
 
-    // Log the connection
+    /* Log the connection */
 
     if (clientip)
     {
@@ -4515,7 +4925,7 @@ void socket_device_connection_handler (bind_struct* bs)
             dev->devnum, bs->spec);
     }
 
-    // Save the connected client information in the bind_struct
+    /* Save the connected client information in the bind_struct */
 
     if (bs->clientip)   free(bs->clientip);
     if (bs->clientname) free(bs->clientname);
@@ -4523,16 +4933,17 @@ void socket_device_connection_handler (bind_struct* bs)
     bs->clientip   = safe_strdup(clientip);
     bs->clientname = safe_strdup(clientname);
 
-    // Indicate that a client is now connected to device (prevents
-    // listening for new connections until THIS client disconnects).
+    /* Indicate that a client is now connected to device (prevents
+     * listening for new connections until THIS client disconnects).
+     */
 
-    dev->fd = csock;        // (indicate client connected to device)
+    dev->fd = csock;        /* (indicate client connected to device) */
 
-    // Release the device lock
+    /* Release the device lock */
 
     release_lock (&dev->lock);
 
-    // Raise unsolicited device end interrupt for the device
+    /* Raise unsolicited device end interrupt for the device */
 
     device_attention (dev, CSW_DE);
 }
@@ -4548,8 +4959,8 @@ void get_connected_client (DEVBLK* dev, char** pclientip, char** pclientname)
 
     obtain_lock (&dev->lock);
 
-    if (dev->bs             // if device is a socket device
-        && dev->fd != -1)   // and a client is connected to it
+    if (dev->bs             /* if device is a socket device,   */
+        && dev->fd != -1)   /* and a client is connected to it */
     {
         *pclientip   = safe_strdup(dev->bs->clientip);
         *pclientname = safe_strdup(dev->bs->clientname);
@@ -4567,7 +4978,7 @@ char* safe_strdup (char* str)
     if (!str) return NULL;
     newstr = malloc (strlen (str) + 1);
     if (!newstr) return NULL;
-    strcpy (newstr, str);   // (guaranteed room)
+    strcpy (newstr, str);   /* (guaranteed room) */
     return newstr;
 }
 

@@ -1,8 +1,8 @@
-/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2001                */
+/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2002                */
 /*              ESA/390 Service Processor                            */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements service processor functions                */
@@ -267,19 +267,20 @@ typedef struct _SCCB_MPF_INFO {
 
 /* Channel path information data area */
 typedef struct _SCCB_CHP_INFO {
-#ifdef FEATURE_CHANNEL_SUBSYSTEM
         BYTE    installed[32];          /* Channels installed bits   */
         BYTE    standby[32];            /* Channels standby bits     */
         BYTE    online[32];             /* Channels online bits      */
-#else /*!FEATURE_CHANNEL_SUBSYSTEM*/
+    } SCCB_CHP_INFO;
+
+/* Channel path information data area */
+typedef struct _SCCB_CHSET {
         BYTE    chanset0a[32];          /* 370 channel set 0A        */
         BYTE    chanset1a[32];          /* 370 channel set 1A        */
         BYTE    chanset0b[32];          /* 370 channel set 0B        */
         BYTE    chanset1b[32];          /* 370 channel set 1B        */
         BYTE    csconfig;               /* Channel set configuration */
         BYTE    resv[23];               /* Reserved, set to zero     */
-#endif /*!FEATURE_CHANNEL_SUBSYSTEM*/
-    } SCCB_CHP_INFO;
+    } SCCB_CHSET_INFO;
 
 /* Read Channel Subsystem Information data area */
 typedef struct _SCCB_CSI_INFO {
@@ -458,7 +459,7 @@ typedef struct _SCCB_XST_MAP {
 // #endif /*FEATURE_EXPANDED_STORAGE*/
 
 
-#if defined(FEATURE_CHSC)
+// #if defined(FEATURE_CHSC)
 typedef struct _CHSC_REQ {
         HWORD   length;                 /* Offset to response field  */
         HWORD   req;                    /* Request code              */
@@ -471,7 +472,7 @@ typedef struct _CHSC_RSP {
 #define CHSC_REQ_INVALID        0x0002  /* Invalid request           */
         FWORD   info;
     } CHSC_RSP;
-#endif /*defined(FEATURE_CHSC)*/
+// #endif /*defined(FEATURE_CHSC)*/
 
 
 // #ifdef FEATURE_SYSTEM_CONSOLE
@@ -513,9 +514,9 @@ void scp_command (BYTE *command, int priomsg)
     /* Obtain the interrupt lock */
     obtain_lock (&sysblk.intlock);
 
-    /* If a service signal is pending then reject the command
-       with message indicating that service processor is busy */
-    if (IS_IC_SERVSIG)
+    /* If an event buffer available signal is pending then reject the
+       command with message indicating that service processor is busy */
+    if (IS_IC_SERVSIG && (sysblk.servparm & SERVSIG_PEND))
     {
         logmsg ("HHC706I Service Processor busy\n");
 
@@ -531,10 +532,15 @@ void scp_command (BYTE *command, int priomsg)
     /* Ensure termination of the command string */
     sysblk.scpcmdstr[sizeof(sysblk.scpcmdstr)-1] = '\0';
 
+    /* Set event pending flag in service parameter */
+    sysblk.servparm |= SERVSIG_PEND;
+    
     /* Set service signal interrupt pending for read event data */
-    sysblk.servparm = 1;
-    ON_IC_SERVSIG;
-    WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
+    if (!IS_IC_SERVSIG)
+    {
+        ON_IC_SERVSIG;
+        WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
+    }
 
     /* Release the interrupt lock */
     release_lock (&sysblk.intlock);
@@ -562,7 +568,11 @@ int             sccblen;                /* Length of SCCB            */
 SCCB_HEADER    *sccb;                   /* -> SCCB header            */
 SCCB_SCP_INFO  *sccbscp;                /* -> SCCB SCP information   */
 SCCB_CPU_INFO  *sccbcpu;                /* -> SCCB CPU information   */
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
 SCCB_CHP_INFO  *sccbchp;                /* -> SCCB channel path info */
+#else
+SCCB_CHSET_INFO *sccbchp;               /* -> SCCB channel path info */
+#endif
 SCCB_CSI_INFO  *sccbcsi;                /* -> SCCB channel subsys inf*/
 U16             offset;                 /* Offset from start of SCCB */
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
@@ -695,7 +705,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
         /* If a service signal is pending then return condition
            code 2 to indicate that service processor is busy */
-        if (IS_IC_SERVSIG)
+        if (IS_IC_SERVSIG && (sysblk.servparm & SERVSIG_ADDR))
         {
             release_lock (&sysblk.intlock);
             regs->psw.cc = 2;
@@ -746,14 +756,14 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccbscp->realbszk = 4;
         STORE_HW(sccbscp->realiint, 1);
 
-#if defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)
+#if defined(_900) || defined(FEATURE_ESAME)
         /* SIE supports the full address range */
         sccbscp->maxvm = 0;  
         /* realiszm is valid */
         STORE_FW(sccbscp->grzm, 0);
         /* Number of storage increments installed in esame mode */
         STORE_DW(sccbscp->grnmx, realmb);
-#endif /*defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)*/
+#endif /*defined(_900) || defined(FEATURE_ESAME)*/
 
 #ifdef FEATURE_EXPANDED_STORAGE
         /* Set expanded storage size in SCCB */
@@ -897,9 +907,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                         ;
 
         sccbscp->cfg[5] = 0
-#if defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)
+#if defined(_900) || defined(FEATURE_ESAME)
                         | (sysblk.arch_z900 ? SCCB_CFG5_ESAME : 0)
-#endif /*defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)*/
+#endif /*defined(_900) || defined(FEATURE_ESAME)*/
                         ;
 
         /* Build the CPU information array after the SCP info */
@@ -915,9 +925,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
             sccbcpu->tod = 0;
             sccbcpu->cpf[0] = 0
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
-#if !defined(FEATURE_ESAME)
+#if defined(_370) && !defined(FEATURE_ESAME)
                             | SCCB_CPF0_SIE_370_MODE
-#endif /*!defined(FEATURE_ESAME)*/
+#endif /*defined(_370) && !defined(FEATURE_ESAME)*/
                             | SCCB_CPF0_SIE_XA_MODE
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 //                          | SCCB_CPF0_SIE_SET_II_370_MODE
@@ -934,7 +944,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                             ;
             sccbcpu->cpf[1] = 0
 //                          | SCCB_CPF1_IO_INTERPRETATION_LEVEL_2
-//                          | SCCB_CPF1_GUEST_PER_ENHANCED
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+                            | SCCB_CPF1_GUEST_PER_ENHANCED
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 //                          | SCCB_CPF1_SIGP_INTERPRETATION_ASSIST
 #if defined(FEATURE_STORAGE_KEY_ASSIST)
                             | SCCB_CPF1_RCP_BYPASS_FACILITY
@@ -990,6 +1002,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccb->reas = SCCB_REAS_NONE;
         sccb->resp = SCCB_RESP_INFO;
 
+        /* OR in program product OS restriction flag. */
+        sccb->resp |= sysblk.pgmprdos;
+
         break;
 
     case SCLP_READ_CHP_INFO:
@@ -1015,9 +1030,15 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
             break;
         }
 
+#ifdef FEATURE_S370_CHANNEL
+        /* Point to SCCB data area following SCCB header */
+        sccbchp = (SCCB_CHSET_INFO*)(sccb+1);
+        memset (sccbchp, 0, sizeof(SCCB_CHSET_INFO));
+#else
         /* Point to SCCB data area following SCCB header */
         sccbchp = (SCCB_CHP_INFO*)(sccb+1);
         memset (sccbchp, 0, sizeof(SCCB_CHP_INFO));
+#endif
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
         /* Identify CHPIDs installed, standby, and online */
@@ -1609,7 +1630,8 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     }
 
     /* Set service signal external interrupt pending */
-    sysblk.servparm = sccb_absolute_addr;
+    sysblk.servparm &= ~SERVSIG_ADDR;
+    sysblk.servparm |= sccb_absolute_addr;
     ON_IC_SERVSIG;
 
     /* Release the interrupt lock */
@@ -1685,11 +1707,15 @@ CHSC_RSP *chsc_rsp;                             /* Response structure*/
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "service.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "service.c"
+#endif
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "service.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "service.c"
+#endif
 
 #endif /*!defined(_GEN_ARCH)*/

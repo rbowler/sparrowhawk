@@ -1,8 +1,8 @@
-/* VSTORE.H     (c) Copyright Roger Bowler, 1999-2001                */
+/* VSTORE.H     (c) Copyright Roger Bowler, 1999-2002                */
 /*              ESA/390 Dynamic Address Translation                  */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the DAT, ALET, and ASN translation         */
@@ -116,7 +116,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     abs1 = LOGICAL_TO_ABS_SKP (addr, arn, regs, ACCTYPE_WRITE_SKP, regs->psw.pkey);
 
     /* Check if store crosses page or not */
-    if (!(addr & 1) || (addr & PAGEFRAME_BYTEMASK) <= (PAGEFRAME_PAGESIZE - 2))
+    if ((addr & PAGEFRAME_BYTEMASK) <= (PAGEFRAME_PAGESIZE - 2))
     {
         STORAGE_KEY(abs1) |= (STORKEY_REF | STORKEY_CHANGE);
         STORE_HW(sysblk.mainstor + abs1, value);
@@ -165,7 +165,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     abs = LOGICAL_TO_ABS_SKP (addr, arn, regs, ACCTYPE_WRITE_SKP, regs->psw.pkey);
 
     /* Check if store crosses page or not */
-    if (!(addr & 3) || (addr & PAGEFRAME_BYTEMASK) <= (PAGEFRAME_PAGESIZE - 4))
+    if ((addr & PAGEFRAME_BYTEMASK) <= (PAGEFRAME_PAGESIZE - 4))
     {
         STORAGE_KEY(abs) |= (STORKEY_REF | STORKEY_CHANGE);
         STORE_FW(sysblk.mainstor + abs, value);
@@ -226,7 +226,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
     abs = LOGICAL_TO_ABS_SKP (addr, arn, regs, ACCTYPE_WRITE_SKP, regs->psw.pkey);
     /* Check if store crosses page or not */
-    if (!(addr & 7) || (addr & PAGEFRAME_BYTEMASK) <= (PAGEFRAME_PAGESIZE - 8))
+    if ((addr & PAGEFRAME_BYTEMASK) <= (PAGEFRAME_PAGESIZE - 8))
     {
         STORAGE_KEY(abs) |= (STORKEY_REF | STORKEY_CHANGE);
         STORE_DW(sysblk.mainstor + abs, value);
@@ -356,7 +356,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
     /* Fetch 2 bytes when operand does not cross page boundary
        (Page boundary test at 800 to catch FPO crosser too) */
-    if(!(addr & 1) || (abs1 & 0x000007FF) <= (2048 - 2))
+    if((abs1 & 0x000007FF) <= (2048 - 2))
         return fetch_hw(sysblk.mainstor + abs1);
 
     /* Calculate address of second byte of operand */
@@ -399,7 +399,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
     /* Fetch 4 bytes when operand does not cross page boundary
        (Page boundary test at 800 to catch FPO crosser too) */
-    if(!(addr & 3) || (abs & 0x000007FF) <= (2048 - 4))
+    if((abs & 0x000007FF) <= (2048 - 4))
         return fetch_fw(sysblk.mainstor + abs);
 
     /* Operand is not fullword aligned and may cross a page boundary */
@@ -460,7 +460,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
     /* Fetch 8 bytes when operand does not cross page boundary
        (Page boundary test at 800 to catch FPO crosser too) */
-    if(!(addr & 7) || (abs & 0x000007FF) <= (2048 - 8))
+    if((abs & 0x000007FF) <= (2048 - 8))
         return fetch_dw(sysblk.mainstor + abs);
 
     /* Calculate page address of last byte of operand */
@@ -515,20 +515,59 @@ _VFETCH_C_STATIC void ARCH_DEP(instfetch) (BYTE *dest, VADR addr,
 RADR    abs;                            /* Absolute storage address  */
 BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
-    /* Obtain current access key from PSW */
-    akey = regs->psw.pkey;
 
     /* Program check if instruction address is odd */
     if (addr & 0x01)
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+
+#if defined(FEATURE_PER)
+    /* Save the address address used to fetch the instruction */
+    if( EN_IC_PER(regs) )
+    {
+#if defined(FEATURE_PER2)
+        regs->perc = 0x40    /* ATMID-validity */
+                   | (regs->psw.amode64 << 7)
+                   | (regs->psw.amode << 5)
+                   | (!REAL_MODE(&regs->psw) ? 0x10 : 0)
+                   | (regs->psw.space << 3)
+                   | (regs->psw.armode << 2);
+#else /*!defined(FEATURE_PER2)*/
+        regs->perc = 0;
+#endif /*!defined(FEATURE_PER2)*/
+
+        /* For EXecute instvalid will be true */
+        if(!regs->instvalid)
+            regs->peradr = addr;
+    }
+
+
+    if( EN_IC_PER_IF(regs)
+      && PER_RANGE_CHECK(addr,regs->CR(10),regs->CR(11)) )
+        ON_IC_PER_IF(regs);
+#endif /*defined(FEATURE_PER)*/
+
+    /* Obtain current access key from PSW */
+    akey = regs->psw.pkey;
+
+
 
     /* Fetch six bytes if instruction cannot cross a page boundary */
     if ((addr & 0x7FF) <= (0x800 - 6))
     {
         abs = LOGICAL_TO_ABS (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
 #if defined(OPTION_AIA_BUFFER)
-        regs->AI = abs & PAGEFRAME_PAGEMASK;
-        regs->VI = addr & PAGEFRAME_PAGEMASK;
+#if defined(FEATURE_PER)
+        if( !EN_IC_PER(regs) )
+#endif /*defined(FEATURE_PER)*/
+        {
+            regs->AI = abs & PAGEFRAME_PAGEMASK;
+            regs->VI = addr & PAGEFRAME_PAGEMASK;
+        }
+#if defined(FEATURE_PER)
+        else
+            INVALIDATE_AIA(regs);
+#endif /*defined(FEATURE_PER)*/
 #endif /*defined(OPTION_AIA_BUFFER)*/
         memcpy (dest, sysblk.mainstor+abs, 6);
         return;
@@ -537,8 +576,17 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     /* Fetch first two bytes of instruction */
     abs = LOGICAL_TO_ABS (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
 #if defined(OPTION_AIA_BUFFER)
-    regs->AI = abs & PAGEFRAME_PAGEMASK;
-    regs->VI = addr & PAGEFRAME_PAGEMASK;
+#if defined(FEATURE_PER)
+    if( !EN_IC_PER(regs) )
+#endif /*defined(FEATURE_PER)*/
+    {
+        regs->AI = abs & PAGEFRAME_PAGEMASK;
+        regs->VI = addr & PAGEFRAME_PAGEMASK;
+    }
+#if defined(FEATURE_PER)
+        else
+            INVALIDATE_AIA(regs);
+#endif /*defined(FEATURE_PER)*/
 #endif /*defined(OPTION_AIA_BUFFER)*/
     memcpy (dest, sysblk.mainstor+abs, 2);
 
@@ -616,6 +664,7 @@ int     i;                              /* Loop counter              */
 BYTE    obyte;                          /* Operand byte              */
 #ifdef OPTION_FAST_MOVECHAR
 BYTE    slow = 0;
+BYTE	*a1, *a2;
 #endif
 
     /* Translate addresses of leftmost operand bytes */
@@ -669,8 +718,14 @@ BYTE    slow = 0;
 #ifdef OPTION_FAST_MOVECHAR
     if (!slow)
     {
-        for (i = 0; i < len + 1; i++)
+	/* Gabor Hoffer (performance option) */
+        a1 = sysblk.mainstor+abs1;
+	a2 = sysblk.mainstor+abs2;
+	for (i = 0; i < len + 1; i++) a1 [i] = a2 [i];
+/*	
+	for (i = 0; i < len + 1; i++)
             sysblk.mainstor[abs1++] = sysblk.mainstor[abs2++];
+*/
         return;
     }
 #endif

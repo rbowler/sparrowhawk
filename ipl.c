@@ -1,8 +1,8 @@
-/* IPL.C        (c) Copyright Roger Bowler, 1999-2001                */
+/* IPL.C        (c) Copyright Roger Bowler, 1999-2002                */
 /*              ESA/390 Initial Program Loader                       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the Initial Program Load (IPL) function    */
@@ -68,6 +68,15 @@ BYTE    chanstat;                       /* IPL device channel status */
         return -1;
     }
 
+    if(sysblk.arch_mode == ARCH_370
+      && dev->chanset != regs->chanset)
+    {
+        logmsg("HHC023I Device not connected to channelset\n");
+#ifdef EXTERNALGUI
+        if (extgui) logmsg("LOAD=0\n");
+#endif /*EXTERNALGUI*/
+        return -1;
+    }
     /* Point to the PSA in main storage */
     psa = (PSA*)(sysblk.mainstor + regs->PX);
 
@@ -224,6 +233,9 @@ BYTE    filename[256];                  /* filename of image file    */
 BYTE    pathname[256];                  /* pathname of image file    */
 U32     fileaddr;
 
+    if(fname == NULL)                   /* Default ipl from DASD     */
+        fname = "hercules.ins";         /*   from hercules.ins       */
+
 #ifdef EXTERNALGUI
     if (extgui) logmsg("LOAD=1\n");
 #endif /*EXTERNALGUI*/
@@ -247,7 +259,7 @@ U32     fileaddr;
 
     /* remove filename from pathname */
     strcpy(dirname,fname);
-    dirbase = strchr(dirname,'/');
+    dirbase = rindex(dirname,'/');
     if(dirbase) *(++dirbase) = '\0';
     
     fp = fopen(fname, "r");
@@ -475,24 +487,32 @@ U32  pagesize;
 }
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "ipl.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "ipl.c"
+#endif
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "ipl.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "ipl.c"
+#endif
 
 
 int load_ipl (U16 devnum, REGS *regs)
 {
-    if(sysblk.arch_mode > ARCH_390)
+    if(sysblk.arch_mode == ARCH_900)
         sysblk.arch_mode = ARCH_390;
 #if defined(OPTION_FISHIO)
     ios_arch_mode = sysblk.arch_mode;
 #endif // defined(OPTION_FISHIO)
     switch(sysblk.arch_mode) {
+#if defined(_370)
         case ARCH_370: return s370_load_ipl(devnum, regs);
+#endif
+#if defined(_390)
         default:       return s390_load_ipl(devnum, regs);
+#endif
     }
     return -1;
 }
@@ -500,14 +520,18 @@ int load_ipl (U16 devnum, REGS *regs)
 
 int load_hmc (char *fname, REGS *regs)
 {
-    if(sysblk.arch_mode > ARCH_390)
+    if(sysblk.arch_mode == ARCH_900)
         sysblk.arch_mode = ARCH_390;
 #if defined(OPTION_FISHIO)
     ios_arch_mode = sysblk.arch_mode;
 #endif // defined(OPTION_FISHIO)
     switch(sysblk.arch_mode) {
+#if defined(_370)
         case ARCH_370: return s370_load_hmc(fname, regs);
+#endif
+#if defined(_390)
         default:       return s390_load_hmc(fname, regs);
+#endif
     }
     return -1;
 }
@@ -517,12 +541,16 @@ void initial_cpu_reset(REGS *regs)
 {
     /* Perform initial CPU reset */
     switch(sysblk.arch_mode) {
+#if defined(_370)
         case ARCH_370:
             s370_initial_cpu_reset (regs);
             break;
+#endif
+#if defined(_390)
         default:
             s390_initial_cpu_reset (regs);
             break;
+#endif
     }
     regs->arch_mode = sysblk.arch_mode;
 }
@@ -531,9 +559,15 @@ void initial_cpu_reset(REGS *regs)
 int load_main(char *fname, RADR startloc)
 {
     switch(sysblk.arch_mode) {
+#if defined(_370)
         case ARCH_370: return s370_load_main(fname, startloc);
+#endif
+#if defined(_390)
         case ARCH_390: return s390_load_main(fname, startloc);
+#endif
+#if defined(_900)
         case ARCH_900: return z900_load_main(fname, startloc);
+#endif
     }
     return -1;
 }

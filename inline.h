@@ -1,8 +1,8 @@
-/* INLINE.H	(c) Copyright Jan Jaeger, 2000-2001		     */
+/* INLINE.H	(c) Copyright Jan Jaeger, 2000-2002		     */
 /*		Inline function definitions			     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 
 /* Storage protection override fix		 Jan Jaeger 31/08/00 */
 /* ESAME low-address protection 	 v208d Roger Bowler 20/01/01 */
@@ -106,10 +106,17 @@ static inline int add_signed(U32 *result, U32 op1, U32 op2)
 {
     *result = (S32)op1 + (S32)op2;
 
-    return (((S32)op1 < 0 && (S32)op2 < 0 && (S32)*result >= 0)
+
+    return	((S32)*result >  0) ?
+		    ((S32)op1 <  0 && (S32)op2 <  0) ? 3 : 2 :
+		((S32)*result <  0) ?
+		    ((S32)op1 >= 0 && (S32)op2 >= 0) ? 3 : 1 :
+		    ((S32)op1 <  0 && (S32)op2 <  0) ? 3 : 0;
+		    
+/*    return (((S32)op1 < 0 && (S32)op2 < 0 && (S32)*result >= 0)
       || ((S32)op1 >= 0 && (S32)op2 >= 0 && (S32)*result < 0)) ? 3 :
                                               (S32)*result < 0 ? 1 :
-                                              (S32)*result > 0 ? 2 : 0;
+                                              (S32)*result > 0 ? 2 : 0; */
 }
         
 
@@ -117,10 +124,16 @@ static inline int sub_signed(U32 *result, U32 op1, U32 op2)
 {
     *result = (S32)op1 - (S32)op2;
 
-    return (((S32)op1 < 0 && (S32)op2 >= 0 && (S32)*result >= 0)
+    return 	((S32)*result >  0) ? 
+		    ((S32)op1 <  0 && (S32)op2 >= 0) ? 3 : 2 :
+		((S32)*result <  0) ?
+    		    ((S32)op1 >= 0 && (S32)op2 <  0) ? 3 : 1 :
+		    ((S32)op1 <  0 && (S32)op2 >= 0) ? 3 : 0;
+
+/*    return (((S32)op1 < 0 && (S32)op2 >= 0 && (S32)*result >= 0)
       || ((S32)op1 >= 0 && (S32)op2 < 0 && (S32)*result < 0)) ? 3 :
                                              (S32)*result < 0 ? 1 :
-                                             (S32)*result > 0 ? 2 : 0;
+                                             (S32)*result > 0 ? 2 : 0; */
 }
 
 

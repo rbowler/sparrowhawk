@@ -1,8 +1,8 @@
-/* CPU.C        (c) Copyright Roger Bowler, 1994-2001                */
+/* CPU.C        (c) Copyright Roger Bowler, 1994-2002                */
 /*              ESA/390 CPU Emulator                                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the CPU instruction execution function of  */
@@ -106,6 +106,7 @@ int     armode;
     SET_IC_EXTERNAL_MASK(regs);
     SET_IC_MCK_MASK(regs);
     SET_IC_PSW_WAIT(regs);
+    SET_IC_PER_MASK(regs);
 
     regs->psw.zerobyte = addr[3];
 
@@ -132,7 +133,11 @@ int     armode;
 #if defined(OPTION_REDUCED_INVAL)
         if ((realmode  != REAL_MODE(&regs->psw)) ||
             (armode    != (regs->psw.armode == 1)) ||
-            (space     != (regs->psw.space == 1)))
+            (space     != (regs->psw.space == 1))
+#if defined (FEATURE_PER)
+           || PER_MODE(regs)
+#endif /* defined (FEATURE_PER) */
+            )
             INVALIDATE_AEA_ALL(regs);
 #endif
 #if defined(FEATURE_ESAME)
@@ -257,11 +262,12 @@ int     armode;
 /*-------------------------------------------------------------------*/
 /* Load program interrupt new PSW                                    */
 /*-------------------------------------------------------------------*/
-void ARCH_DEP(program_interrupt) (REGS *regs, int code)
+void ARCH_DEP(program_interrupt) (REGS *regs, int pcode)
 {
 PSA    *psa;                            /* -> Prefixed storage area  */
 REGS   *realregs;                       /* True regs structure       */
 RADR    px;                             /* host real address of pfx  */
+int     code;                           /* pcode without PER ind.    */
 #if defined(_FEATURE_SIE)
 int     nointercept;                    /* True for virtual pgmint   */
 #endif /*defined(_FEATURE_SIE)*/
@@ -356,6 +362,17 @@ static char *pgmintname[] = {
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 #endif /*MAX_CPU_ENGINES > 1*/
 
+    /* Remove PER indication from program interrupt code
+       such that interrupt code specific tests may be done.
+       The PER indication will be stored in the PER handling
+       code */
+    code = pcode & ~PGM_PER_EVENT;
+
+    /* If this is a concurrent PER event then we must add the PER
+       bit to the interrupts code */
+    if( OPEN_IC_PERINT(realregs) )
+        pcode |= PGM_PER_EVENT;
+
     /* Perform serialization and checkpoint synchronization */
     PERFORM_SERIALIZATION (realregs);
     PERFORM_CHKPT_SYNC (realregs);
@@ -373,12 +390,12 @@ static char *pgmintname[] = {
         ) )
     {
 #if defined(SIE_DEBUG)
-        logmsg("program_int() passing to guest code=%4.4X\n",code);
+        logmsg("program_int() passing to guest code=%4.4X\n",pcode);
 #endif /*defined(SIE_DEBUG)*/
         realregs->guestregs->TEA = realregs->TEA;
         realregs->guestregs->excarid = realregs->excarid;
         realregs->guestregs->opndrid = realregs->opndrid;
-        (realregs->guestregs->sie_guestpi) (realregs->guestregs, code);
+        (realregs->guestregs->sie_guestpi) (realregs->guestregs, pcode);
     }
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
@@ -440,11 +457,11 @@ static char *pgmintname[] = {
     }
         
     /* Store the interrupt code in the PSW */
-    realregs->psw.intcode = code;
+    realregs->psw.intcode = pcode;
 
-    /* Trace the program check */
-    if(sysblk.insttrace || sysblk.inststep
-        || sysblk.pgminttr & ((U64)1 << ((code - 1) & 0x3F)))
+    /* Trace program checks other then PER event */
+    if(code && (sysblk.insttrace || sysblk.inststep
+        || sysblk.pgminttr & ((U64)1 << ((code - 1) & 0x3F))))
     {
 #if defined(OPTION_FOOTPRINT_BUFFER)
         if(!(sysblk.insttrace || sysblk.inststep))
@@ -463,7 +480,7 @@ static char *pgmintname[] = {
         logmsg (MSTRING(_GEN_ARCH) " ");
 #endif /*defined(SIE_DEBUG)*/
         logmsg ("CPU%4.4X: %s CODE=%4.4X ILC=%d\n", realregs->cpuad,
-                pgmintname[ (code - 1) & 0x3F], code, realregs->psw.ilc);
+                pgmintname[ (code - 1) & 0x3F], pcode, realregs->psw.ilc);
         ARCH_DEP(display_inst) (realregs, realregs->instvalid ?
                                                 realregs->ip : NULL);
     }
@@ -491,15 +508,20 @@ static char *pgmintname[] = {
       && code != PGM_VECTOR_OPERATION_EXCEPTION
 #endif /*FEATURE_VECTOR_FACILITY*/
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
-      && !( regs->sie_state
-        && (regs->siebk->mx & SIE_MX_XC)
-        && code == PGM_ALEN_TRANSLATION_EXCEPTION )
+      && !(code == PGM_ALEN_TRANSLATION_EXCEPTION
+        && (regs->siebk->mx & SIE_MX_XC))
 #endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
       /* And conditional for the following exceptions */
       && !(code == PGM_OPERATION_EXCEPTION
         && (regs->siebk->ic[0] & SIE_IC0_OPEREX))
       && !(code == PGM_PRIVILEGED_OPERATION_EXCEPTION
         && (regs->siebk->ic[0] & SIE_IC0_PRIVOP))
+#ifdef FEATURE_BASIC_FP_EXTENSIONS
+      && !(code == PGM_DATA_EXCEPTION
+        && (regs->dxc == 1 || regs->dxc == 2)
+        && (regs->CR(0) & CR0_AFP)
+        && !(regs->hostregs->CR(0) & CR0_AFP))
+#endif /*FEATURE_BASIC_FP_EXTENSIONS*/
       /* Or all exceptions if requested as such */
       && !(regs->siebk->ic[0] & SIE_IC0_PGMALL) )
     )
@@ -537,6 +559,50 @@ static char *pgmintname[] = {
     }
 #endif /*defined(_FEATURE_SIE)*/
 
+
+#if defined(_FEATURE_PER)
+    /* Handle PER or concurrent PER event */
+
+    /* Throw out Stor Alter PER if merged with nullified/suppressed rupt */
+    if ( IS_IC_PER_SA(realregs) && !IS_IC_PER_STURA(realregs) &&
+                                   (realregs->inst[0] != 0x0E) &&
+         !(code == 0x00 || code == 0x06 || code == 0x08 || code == 0x0A ||
+           code == 0x0C || code == 0x0D || code == 0x0E || code == 0x1C ||
+           code == 0x40) )
+              OFF_IC_PER_SA(realregs);
+
+    if( OPEN_IC_PERINT(realregs) )
+    {
+        if( IS_IC_TRACE )
+            logmsg("CPU%4.4X PER event: code=%4.4X perc=%2.2X addr=" F_VADR "\n",
+              regs->cpuad, pcode, IS_IC_PER(realregs) >> 16,
+              (realregs->psw.IA - realregs->psw.ilc) & ADDRESS_MAXWRAP(realregs) );
+
+        realregs->perc |= OPEN_IC_PERINT(realregs) >> ((32 - IC_CR9_SHIFT) - 16);
+        /* Positions 14 and 15 contain zeros if a storage alteration
+           event was not indicated */
+        if( !(OPEN_IC_PERINT(realregs) & IC_PER_SA)
+          || (OPEN_IC_PERINT(realregs) & IC_PER_STURA) )
+            realregs->perc &= 0xFFFC;
+
+        STORE_HW(psa->perint, realregs->perc);
+
+        STORE_W(psa->peradr, realregs->peradr);
+
+        if( IS_IC_PER_SA(realregs) && ACCESS_REGISTER_MODE(&realregs->psw) )
+            psa->perarid = realregs->peraid;
+
+        /* Reset PER pending indication */
+        OFF_IC_PER(realregs);
+
+    }
+    else
+    {
+        pcode &= 0xFF7F;
+    }
+#endif /*defined(_FEATURE_PER)*/
+
+
 #if defined(FEATURE_BCMODE)
     /* For ECMODE, store extended interrupt information in PSA */
     if ( realregs->psw.ecmode )
@@ -545,7 +611,7 @@ static char *pgmintname[] = {
         /* Store the program interrupt code at PSA+X'8C' */
         psa->pgmint[0] = 0;
         psa->pgmint[1] = realregs->psw.ilc;
-        STORE_HW(psa->pgmint + 2, code);
+        STORE_HW(psa->pgmint + 2, pcode);
 
         /* Store the access register number at PSA+160 */
         if ( code == PGM_PAGE_TRANSLATION_EXCEPTION
@@ -567,6 +633,7 @@ static char *pgmintname[] = {
            )
             psa->excarid = regs->excarid;
             psa->opndrid = regs->opndrid;
+            regs->opndrid = 0;
 
 #if defined(FEATURE_ESAME)
         /* Store the translation exception address at PSA+168 */
@@ -652,7 +719,7 @@ static char *pgmintname[] = {
         {
 #if defined(_FEATURE_SIE)
             if(realregs->sie_state)
-                longjmp(realregs->progjmp, code);
+                longjmp(realregs->progjmp, pcode);
             else
 #endif /*defined(_FEATURE_SIE)*/
             {
@@ -668,7 +735,7 @@ static char *pgmintname[] = {
 #if defined(_FEATURE_SIE)
     }
 
-    longjmp (realregs->progjmp, code);
+    longjmp (realregs->progjmp, pcode);
 #endif /*defined(_FEATURE_SIE)*/
 
 } /* end function ARCH_DEP(program_interrupt) */
@@ -829,7 +896,7 @@ RADR    fsta;                           /* Failing storage address   */
 
     /* Trace the machine check interrupt */
     if (sysblk.insttrace || sysblk.inststep)
-        logmsg ("Machine Check code=%16.16llu\n", mcic);
+        logmsg ("Machine Check code=%16.16llu\n", (long long)mcic);
 
     /* Store the external damage code at PSA+244 */
     STORE_FW(psa->xdmgcode, xdmg);
@@ -864,7 +931,17 @@ void s370_run_cpu (REGS *regs);
 void s390_run_cpu (REGS *regs);
 void z900_run_cpu (REGS *regs);
 static void (* run_cpu[GEN_MAXARCH]) (REGS *regs) =
-                { s370_run_cpu, s390_run_cpu, z900_run_cpu };
+                {
+#if defined(_370)
+                    s370_run_cpu,
+#endif
+#if defined(_390)
+                    s390_run_cpu,
+#endif
+#if defined(_900)
+                    z900_run_cpu
+#endif
+                };
 
 void *cpu_thread (REGS *regs)
 {
@@ -952,9 +1029,6 @@ void *cpu_thread (REGS *regs)
 
 void ARCH_DEP(process_interrupt)(REGS *regs)
 {
-            /* Obtain the interrupt lock */
-            obtain_lock (&sysblk.intlock);
-
             if( OPEN_IC_DEBUG(regs) )
             {
             U32 prevmask;
@@ -962,6 +1036,7 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
 	        SET_IC_EXTERNAL_MASK(regs);
 	        SET_IC_IO_MASK(regs);
 	        SET_IC_MCK_MASK(regs);
+	        SET_IC_PER_MASK(regs);
 	        if(prevmask != regs->ints_mask)
 		{
 	            logmsg("CPU MASK MISMATCH: %8.8X - %8.8X. Last instruction:\n",
@@ -969,6 +1044,13 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
 		       ARCH_DEP(display_inst) (regs, regs->ip);
 		}
 	    }
+
+            /* Process PER program interrupts */
+            if( OPEN_IC_PERINT(regs) )
+                ARCH_DEP(program_interrupt) (regs, PGM_PER_EVENT);
+
+            /* Obtain the interrupt lock */
+            obtain_lock (&sysblk.intlock);
 
 #if MAX_CPU_ENGINES > 1
             /* Perform broadcasted purge of ALB and TLB if requested
@@ -982,6 +1064,7 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
             /* Take interrupts if CPU is not stopped */
             if (regs->cpustate == CPUSTATE_STARTED)
             {
+
                 /* If a machine check is pending and we are enabled for
                    machine checks then take the interrupt */
                 if (OPEN_IC_MCKPENDING(regs))
@@ -1203,18 +1286,12 @@ int     shouldbreak;                    /* 1=Stop at breakpoint      */
 
 
 #ifdef OPTION_FAST_INSTFETCH
-#define FAST_INSTRUCTION_FETCH(_dest, _addr, _regs, _pe, _if, _se) \
+#define FAST_INSTRUCTION_FETCH(_dest, _addr, _regs, _pe, _if) \
         { \
-            if ( regs->VI == ((_addr) & PAGEFRAME_PAGEMASK) \
+            if ( regs->VI == ((_addr) & (PAGEFRAME_PAGEMASK | 0x01)) \
                && ((_addr) <= (_pe))) \
-            { \
-                if ((_addr) & 0x01) \
-                    goto _se; \
-                (_dest) =  sysblk.mainstor + regs->AI + \
-                         ((_addr) & PAGEFRAME_BYTEMASK); \
-            } \
-            else \
-                goto _if; \
+                (_dest) =  pagestart + ((_addr) & PAGEFRAME_BYTEMASK); \
+            else goto _if; \
         } 
 
 #if !defined(OPTION_FOOTPRINT_BUFFER)
@@ -1222,8 +1299,7 @@ int     shouldbreak;                    /* 1=Stop at breakpoint      */
         { \
         COUNT_INST ((_inst), (_regs)); \
         (_regs)->ip = (_inst); \
-        (opcode_table[_inst[0]][ARCH_MODE]) \
-                               ((_inst), 0, (_regs)); \
+        (ARCH_DEP(opcode_table)[_inst[0]]) ((_inst), 0, (_regs)); \
         }
 #else
 #define FAST_EXECUTE_INSTRUCTION(_inst, _execflag, _regs) \
@@ -1247,13 +1323,14 @@ _if: \
     ARCH_DEP(instfetch) (regs->inst, regs->psw.IA, regs);  \
     (regs)->instvalid = 1; \
     (_pe) = (regs->psw.IA & ~0x7FF) + (0x800 - 6); \
+    pagestart = sysblk.mainstor + regs->AI; \
     goto _ex; \
     }
 
-#define FAST_UNROLLED_EXECUTE(_regs, _pe, _ip, _if, _ex, _se) \
+#define FAST_UNROLLED_EXECUTE(_regs, _pe, _ip, _if, _ex) \
         { \
             FAST_INSTRUCTION_FETCH((_ip), (_regs)->psw.IA, (_regs), \
-                                 (_pe), _if, _se); \
+                                 (_pe), _if); \
          _ex: \
             FAST_EXECUTE_INSTRUCTION((_ip), 0, (_regs)); \
         }
@@ -1263,7 +1340,7 @@ void ARCH_DEP(run_cpu) (REGS *regs)
 int     tracethis;                      /* Trace this instruction    */
 int     stepthis;                       /* Stop on this instruction  */
 VADR    pageend;
-BYTE    *ip;
+BYTE    *ip, *pagestart = NULL;
 
     /* Set started bit on and wait bit off for this CPU */
     obtain_lock (&sysblk.intlock);
@@ -1281,6 +1358,13 @@ BYTE    *ip;
     ip = regs->inst;
     regs->ip = ip;
 
+    pagestart = sysblk.mainstor + regs->AI; 
+
+#ifdef FEATURE_PER
+    if (PER_MODE(regs))
+        goto slowloop;
+#endif
+
     while (1)
     {
         /* Test for interrupts if it appears that one may be pending */
@@ -1293,14 +1377,8 @@ BYTE    *ip;
 
         /* Fetch the next sequential instruction */
         FAST_INSTRUCTION_FETCH(ip, regs->psw.IA, regs, pageend,
-                            ifetch0, specexception);
+                            ifetch0);
 exec0:
-
-
-#ifndef OPTION_CPU_UNROLL
-        /* Count instruction usage */
-        regs->instcount++;
-#endif
 
         if( IS_IC_TRACE )
         {
@@ -1328,19 +1406,19 @@ exec0:
 
 #ifdef OPTION_CPU_UNROLL
         FAST_UNROLLED_EXECUTE(regs, pageend, ip, 
-                           ifetch1, exec1, specexception);
+                           ifetch1, exec1);
         FAST_UNROLLED_EXECUTE(regs, pageend, ip, 
-                           ifetch2, exec2, specexception);
+                           ifetch2, exec2);
         FAST_UNROLLED_EXECUTE(regs, pageend, ip, 
-                           ifetch3, exec3, specexception);
+                           ifetch3, exec3);
         FAST_UNROLLED_EXECUTE(regs, pageend, ip, 
-                           ifetch4, exec4, specexception);
+                           ifetch4, exec4);
         FAST_UNROLLED_EXECUTE(regs, pageend, ip, 
-                           ifetch5, exec5, specexception);
+                           ifetch5, exec5);
         FAST_UNROLLED_EXECUTE(regs, pageend, ip, 
-                           ifetch6, exec6, specexception);
+                           ifetch6, exec6);
         FAST_UNROLLED_EXECUTE(regs, pageend, ip, 
-                           ifetch7, exec7, specexception);
+                           ifetch7, exec7);
 #endif
 
     }
@@ -1354,10 +1432,44 @@ FAST_IFETCH(regs, pageend, ip, ifetch5, exec5);
 FAST_IFETCH(regs, pageend, ip, ifetch6, exec6);
 FAST_IFETCH(regs, pageend, ip, ifetch7, exec7);
 
-specexception:
-    regs->ip = ip;
-    regs->instvalid = 0;
-    ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION); 
+#ifdef FEATURE_PER
+slowloop:
+    while (1)
+    {
+        /* Test for interrupts if it appears that one may be pending */
+        if( IC_INTERRUPT_CPU(regs) )
+        {
+            ARCH_DEP(process_interrupt)(regs);
+            if (!regs->cpuonline)
+                 return;
+        }
+
+        /* Clear the instruction validity flag in case an access
+           error occurs while attempting to fetch next instruction */
+        regs->instvalid = 0;
+
+        /* Fetch the next sequential instruction */
+        INSTRUCTION_FETCH(regs->inst, regs->psw.IA, regs);
+
+        /* Set the instruction validity flag */
+        regs->instvalid = 1;
+
+        if( IS_IC_TRACE )
+        {
+            regs->ip = ip;
+            ARCH_DEP(process_trace)(regs, tracethis, stepthis);
+
+    
+            /* Reset instruction trace indicators */
+            tracethis = 0;
+            stepthis = 0;
+        }
+
+        /* Execute the instruction */
+        regs->instcount++;
+        EXECUTE_INSTRUCTION (regs->ip, 0, regs);
+    }
+#endif
 
 } /* end function cpu_thread */
 #else
@@ -1379,6 +1491,11 @@ int     stepthis;                       /* Stop on this instruction  */
     tracethis = 0;
     stepthis = 0;
 
+#ifdef FEATURE_PER
+    if (PER_MODE(regs))
+        goto slowloop;
+#endif
+
     while (1)
     {
         
@@ -1399,11 +1516,6 @@ int     stepthis;                       /* Stop on this instruction  */
 
         /* Set the instruction validity flag */
         regs->instvalid = 1;
-
-#ifndef OPTION_CPU_UNROLL
-        /* Count instruction usage */
-        regs->instcount++;
-#endif
 
         if( IS_IC_TRACE )
         {
@@ -1439,18 +1551,61 @@ int     stepthis;                       /* Stop on this instruction  */
 #endif
 
     }
+
+#ifdef FEATURE_PER
+slowloop:
+    while (1)
+    {
+        /* Test for interrupts if it appears that one may be pending */
+        if( IC_INTERRUPT_CPU(regs) )
+        {
+            ARCH_DEP(process_interrupt)(regs);
+            if (!regs->cpuonline)
+                 return;
+        }
+
+        /* Clear the instruction validity flag in case an access
+           error occurs while attempting to fetch next instruction */
+        regs->instvalid = 0;
+
+        /* Fetch the next sequential instruction */
+        INSTRUCTION_FETCH(regs->inst, regs->psw.IA, regs);
+
+        /* Set the instruction validity flag */
+        regs->instvalid = 1;
+
+        if( IS_IC_TRACE )
+        {
+            ARCH_DEP(process_trace)(regs, tracethis, stepthis);
+
+    
+            /* Reset instruction trace indicators */
+            tracethis = 0;
+            stepthis = 0;
+        }
+
+        /* Execute the instruction */
+        regs->instcount++;
+        EXECUTE_INSTRUCTION (regs->ip, 0, regs);
+    }
+#endif
+
 } /* end function cpu_thread */
 #endif
 
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "cpu.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "cpu.c"
+#endif
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "cpu.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "cpu.c"
+#endif
 
 
 /*-------------------------------------------------------------------*/
@@ -1459,15 +1614,21 @@ int     stepthis;                       /* Stop on this instruction  */
 void store_psw (REGS *regs, BYTE *addr)
 {
     switch(regs->arch_mode) {
+#if defined(_370)
         case ARCH_370:
             s370_store_psw(regs, addr);
             break;
+#endif
+#if defined(_390)
         case ARCH_390:
             s390_store_psw(regs, addr);
             break;
+#endif
+#if defined(_900)
         case ARCH_900:
             z900_store_psw(regs, addr);
             break;
+#endif
     }
 } /* end function store_psw */
 
@@ -1481,7 +1642,7 @@ QWORD   qword;                            /* quadword work area      */
 
     memset(qword, 0, sizeof(qword));
 
-    if( regs->arch_mode < ARCH_900 )
+    if( regs->arch_mode != ARCH_900 )
     {
         store_psw (regs, qword);
         logmsg ("PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
@@ -1503,7 +1664,17 @@ QWORD   qword;                            /* quadword work area      */
 } /* end function display_psw */
 
 const char* arch_name[GEN_MAXARCH] =
-	{ "S/370", "ESA/390", "ESAME" };
+    {
+#if defined(_370)
+        _ARCH_370_NAME,
+#endif
+#if defined(_390)
+        _ARCH_390_NAME,
+#endif
+#if defined(_900)
+        _ARCH_900_NAME
+#endif
+    };
 
 const char* get_arch_mode_string(REGS* regs)
 {

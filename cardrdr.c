@@ -1,4 +1,4 @@
-/* CARDRDR.C    (c) Copyright Roger Bowler, 1999-2001                */
+/* CARDRDR.C    (c) Copyright Roger Bowler, 1999-2002                */
 /*              ESA/390 Card Reader Device Handler                   */
 
 /*-------------------------------------------------------------------*/
@@ -7,6 +7,8 @@
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
+
+#include "devtype.h"
 
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
@@ -143,8 +145,8 @@ int     fc;                             /* File counter              */
 
         if (strlen(argv[i]) > sizeof(dev->filename)-1)
         {
-            logmsg ("HHC401I File name too long (max=%d): \"%s\"\n",
-                sizeof(dev->filename)-1,argv[i]);
+            logmsg ("HHC401I File name too long (max=%ud): \"%s\"\n",
+                (unsigned int)sizeof(dev->filename)-1,argv[i]);
             return -1;
         }
 
@@ -212,8 +214,8 @@ int     fc;                             /* File counter              */
 
         if (strlen(argv[0]) > sizeof(dev->filename)-1)
         {
-            logmsg ("HHC401I File name too long (max=%d): \"%s\"\n",
-                sizeof(dev->filename)-1,argv[0]);
+            logmsg ("HHC401I File name too long (max=%ud): \"%s\"\n",
+                (unsigned int)sizeof(dev->filename)-1,argv[0]);
             return -1;
         }
 
@@ -428,11 +430,7 @@ BYTE    buf[160];                       /* Auto-detection buffer     */
     }
 
     /* Open the device file */
-#ifdef WIN32
     rc = open (dev->filename, O_RDONLY | O_BINARY);
-#else /* WIN32 */
-    rc = open (dev->filename, O_RDONLY);
-#endif /* WIN32 */
     if (rc < 0)
     {
         /* Handle open failure */
@@ -799,3 +797,10 @@ int     num;                            /* Number of bytes to move   */
 
 } /* end function cardrdr_execute_ccw */
 
+
+DEVHND cardrdr_device_hndinfo = {
+        &cardrdr_init_handler,
+        &cardrdr_execute_ccw,
+        &cardrdr_close_device,
+        &cardrdr_query_device
+};

@@ -1,4 +1,4 @@
-/* PRINTER.C    (c) Copyright Roger Bowler, 1999-2001                */
+/* PRINTER.C    (c) Copyright Roger Bowler, 1999-2002                */
 /*              ESA/390 Line Printer Device Handler                  */
 
 /*-------------------------------------------------------------------*/
@@ -8,11 +8,167 @@
 
 #include "hercules.h"
 
+#include "devtype.h"
+
+#include "opcode.h"
+
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
 /*-------------------------------------------------------------------*/
 #define LINE_LENGTH     150
 #define SPACE           ((BYTE)' ')
+
+/*-------------------------------------------------------------------*/
+/* Subroutine to open the printer file or pipe                       */
+/*-------------------------------------------------------------------*/
+static int
+open_printer (DEVBLK *dev)
+{
+int             fd;                     /* File descriptor           */
+int             rc;                     /* Return code               */
+int             pipefd[2];              /* Pipe descriptors          */
+pid_t           pid;                    /* Child process identifier  */
+
+    /* Regular open if 1st char of filename is not vertical bar */
+    if (dev->filename[0] != '|')
+    {
+        fd = open (dev->filename,
+                    O_WRONLY | O_CREAT | O_TRUNC /* | O_SYNC */,
+                    S_IRUSR | S_IWUSR | S_IRGRP);
+        if (fd < 0)
+        {
+            logmsg ("HHC413I Error opening file %s: %s\n",
+                    dev->filename, strerror(errno));
+            return -1;
+        }
+
+        /* Save file descriptor in device block and return */
+        dev->fd = fd;
+        return 0;
+    }
+
+    /* Filename is in format |xxx, set up pipe to program xxx */
+
+    /* Create a pipe */
+    rc = pipe (pipefd);
+    if (rc < 0)
+    {
+        logmsg ("HHC415I %4.4X device initialization error: pipe: %s\n",
+                dev->devnum, strerror(errno));
+        return -1;
+    }
+
+    /* Fork a child process to receive the pipe data */
+    pid = fork();
+    if (pid < 0)
+    {
+        logmsg ("HHC416I %4.4X device initialization error: fork: %s\n",
+                dev->devnum, strerror(errno));
+        return -1;
+    }
+
+    /* The child process executes the pipe receiver program... */
+    if (pid == 0)
+    {
+        /* Log start of child process */
+        logmsg ("HHC417I pipe receiver (pid=%d) starting for %4.4X\n",
+                getpid(), dev->devnum);
+
+        /* Close the write end of the pipe */
+        close (pipefd[1]);
+
+        /* Duplicate the read end of the pipe onto STDIN */
+        if (pipefd[0] != STDIN_FILENO)
+        {
+            rc = dup2 (pipefd[0], STDIN_FILENO);
+            if (rc != STDIN_FILENO)
+            {
+                logmsg ("HHC418I %4.4X dup2 error: %s\n",
+                        dev->devnum, strerror(errno));
+                close (pipefd[0]);
+                _exit(127);
+            }
+        } /* end if(pipefd[0] != STDIN_FILENO) */
+
+        /* Close the original descriptor now duplicated to STDIN */
+        close (pipefd[0]);
+
+        /* Redirect STDOUT to the control panel message pipe */
+        rc = dup2 (fileno(sysblk.msgpipew), STDOUT_FILENO);
+        if (rc != STDOUT_FILENO)
+        {
+            logmsg ("HHC419I %4.4X dup2 error: %s\n",
+                    dev->devnum, strerror(errno));
+            _exit(127);
+        }
+
+        /* Redirect STDERR to the control panel message pipe */
+        rc = dup2 (fileno(sysblk.msgpipew), STDERR_FILENO);
+        if (rc != STDERR_FILENO)
+        {
+            logmsg ("HHC420I %4.4X dup2 error: %s\n",
+                    dev->devnum, strerror(errno));
+            _exit(127);
+        }
+
+        /* Relinquish any ROOT authority before calling shell */
+        SETMODE(TERM);
+
+        /* Execute the specified pipe receiver program */
+
+#if defined(WIN32)
+        {
+            /* The dev=, pid= and extgui= arguments are for informational
+               purposes only so the spooler knows who/what it's spooling. */
+
+            BYTE  cmdline[256];
+
+            snprintf(cmdline,256,"\"%s\" pid=%d dev=%4.4X extgui=%d",
+                dev->filename+1,getpid(),dev->devnum,
+#ifdef EXTERNALGUI
+                extgui
+#else /*!EXTERNALGUI*/
+                0
+#endif /*EXTERNALGUI*/
+                );
+
+            fclose(stderr);
+            fclose(sysblk.msgpipew);
+
+            rc = system (cmdline);
+        }
+#else
+        rc = system (dev->filename+1);
+#endif
+        if (rc == 0)
+        {
+            /* Log end of child process */
+            logmsg ("HHC423I pipe receiver (pid=%d) terminating for %4.4X\n",
+                    getpid(), dev->devnum);
+        }
+        else
+        {
+            /* Log error */
+            logmsg ("HHC422I %4.4X Unable to execute %s: %s\n",
+                    dev->devnum, dev->filename+1, strerror(errno));
+        }
+
+        /* The child process terminates using _exit instead of exit
+           to avoid invoking the panel atexit cleanup routine */
+        _exit(rc);
+
+    } /* end if(pid==0) */
+
+    /* The parent process continues as the pipe sender */
+
+    /* Close the read end of the pipe */
+    close (pipefd[0]);
+
+    /* Save pipe write descriptor in the device block */
+    dev->fd = pipefd[1];
+
+    return 0;
+} /* end function open_printer */
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to write data to the printer                           */
@@ -28,8 +184,8 @@ int             rc;                     /* Return code               */
     /* Equipment check if error writing to printer file */
     if (rc < len)
     {
-        logmsg ("HHC414I Error writing to %s: %s\n",
-                dev->filename,
+        logmsg ("HHC414I %4.4X Error writing to %s: %s\n",
+                dev->devnum, dev->filename,
                 (errno == 0 ? "incomplete": strerror(errno)));
         dev->sense[0] = SENSE_EC;
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -63,6 +219,7 @@ int     i;                              /* Array subscript           */
     dev->diaggate = 0;
     dev->fold = 0;
     dev->crlf = 0;
+    dev->stopprt = 0;
 
     /* Process the driver arguments */
     for (i = 1; i < argc; i++)
@@ -106,11 +263,11 @@ int     i;                              /* Array subscript           */
 void printer_query_device (DEVBLK *dev, BYTE **class,
                 int buflen, BYTE *buffer)
 {
-
     *class = "PRT";
-    snprintf (buffer, buflen, "%s%s",
+    snprintf (buffer, buflen, "%s%s%s",
                 dev->filename,
-                (dev->crlf ? " crlf" : ""));
+                (dev->crlf ? " crlf" : ""),
+                (dev->stopprt ? " (stopped)" : ""));
 
 } /* end function printer_query_device */
 
@@ -122,6 +279,7 @@ int printer_close_device ( DEVBLK *dev )
     /* Close the device file */
     close (dev->fd);
     dev->fd = -1;
+    dev->stopprt = 0;
 
     return 0;
 } /* end function printer_close_device */
@@ -133,7 +291,7 @@ void printer_execute_ccw (DEVBLK *dev, BYTE code, BYTE flags,
         BYTE chained, U16 count, BYTE prevcode, int ccwseq,
         BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual)
 {
-int             rc;                     /* Return code               */
+int             rc = 0;                 /* Return code               */
 int             i;                      /* Loop counter              */
 int             num;                    /* Number of bytes to move   */
 char           *eor;                    /* -> end of record string   */
@@ -147,22 +305,22 @@ BYTE            c;                      /* Print character           */
 
     /* Open the device file if necessary */
     if (dev->fd < 0 && !IS_CCW_SENSE(code))
+        rc = open_printer (dev);
+    else
     {
-        rc = open (dev->filename,
-                    O_WRONLY | O_CREAT | O_TRUNC /* | O_SYNC */,
-                    S_IRUSR | S_IWUSR | S_IRGRP);
-        if (rc < 0)
-        {
-            /* Handle open failure */
-            logmsg ("HHC413I Error opening file %s: %s\n",
-                    dev->filename, strerror(errno));
+        /* If printer stopped, return intervention required */
+        if (dev->stopprt && !IS_CCW_SENSE(code))
+            rc = -1;
+        else
+            rc = 0;
+    }
 
-            /* Set unit check with intervention required */
-            dev->sense[0] = SENSE_IR;
-            *unitstat = CSW_CE | CSW_DE | CSW_UC;
-            return;
-        }
-        dev->fd = rc;
+    if (rc < 0)
+    {
+        /* Set unit check with intervention required */
+        dev->sense[0] = SENSE_IR;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return;
     }
 
     /* Process depending on CCW opcode */
@@ -544,3 +702,10 @@ BYTE            c;                      /* Print character           */
 
 } /* end function printer_execute_ccw */
 
+
+DEVHND printer_device_hndinfo = {
+        &printer_init_handler,
+        &printer_execute_ccw,
+        &printer_close_device,
+        &printer_query_device
+};

@@ -1,8 +1,8 @@
-/* STACK.C      (c) Copyright Roger Bowler, 1999-2001                */
+/* STACK.C      (c) Copyright Roger Bowler, 1999-2002                */
 /*              ESA/390 Linkage Stack Operations                     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the linkage stack functions of ESA/390     */
@@ -114,7 +114,6 @@ U32  duct11;
 U32  tcba;
 RADR atcba;
 #if defined(FEATURE_ESAME)
-int  notesame_save;
 U32  tcba0;
 #endif /*defined(FEATURE_ESAME)*/
 U32  tsao;
@@ -200,6 +199,16 @@ int  i;
         regs->CR(12) = ARCH_DEP(trace_br) (1, trap_ia, regs);
   #endif /*FEATURE_TRACING*/
 
+#if defined(FEATURE_PER)
+    if( EN_IC_PER_SB(regs) 
+#if defined(FEATURE_PER2)
+      && ( !(regs->CR(9) & CR9_BAC)
+       || PER_RANGE_CHECK(trap_ia,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+        )
+        ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+
     trap_flags = regs->psw.ilc << 16;
 
     if(execflag)
@@ -227,21 +236,18 @@ int  i;
         tsaa1 = tsaa2;
 
 #if defined(FEATURE_ESAME)
-    /* Save the current EC bit from the PSW */
-    notesame_save = regs->psw.notesame;
-
-    /* If the P bit is zero then store the PSW in esa390 format */
-    if(!(tcba0 & TCB0_P))
-        regs->psw.notesame = 1;
+    /* If the P bit is one then store the PSW in esame format */
+    if(tcba0 & TCB0_P)
+        ARCH_DEP(store_psw) (regs, trap_psw);
+    else
 #endif /*defined(FEATURE_ESAME)*/
-
-    /* Store the PSW in mode specified in psw.notesame */
-    ARCH_DEP(store_psw) (regs, trap_psw);
-
+    {
+        s390_store_psw(regs, trap_psw);
 #if defined(FEATURE_ESAME)
-    /* Restore the EC bit in the PSW */
-    regs->psw.notesame = notesame_save;
+        /* Set the notesame mode bit for a esa/390 psw */
+        trap_psw[1] |= 0x08;
 #endif /*defined(FEATURE_ESAME)*/
+    }
 
     /* bits 0-63 of PSW at offset +16 */
     memcpy(sysblk.mainstor + tsaa1, trap_psw, 8);
@@ -250,8 +256,9 @@ int  i;
         tsaa1 = tsaa2;
 
 #if defined(FEATURE_ESAME)
+    /* If the P bit is one then store the PSW in esame format */
     /* bits 64-127 of PSW at offset +24 */
-    if(!regs->psw.notesame)
+    if(tcba0 & TCB0_P)
         memcpy(sysblk.mainstor + tsaa1, trap_psw + 8, 8);
     else
 #endif /*defined(FEATURE_ESAME)*/
@@ -348,7 +355,27 @@ U16     xcode;                          /* Exception code            */
     if (aaddr >= regs->mainsize)
         ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-    SIE_TRANSLATE(&aaddr, acctype, regs);
+#if defined(_FEATURE_SIE)
+    if(regs->sie_state  && !regs->sie_pref)
+    {
+    U32 sie_stid;
+    U16 sie_xcode;
+    int sie_private;
+
+        if (SIE_TRANSLATE_ADDR (regs->sie_mso + aaddr,
+                USE_PRIMARY_SPACE,
+                regs->hostregs, ACCTYPE_SIE, &aaddr, &sie_xcode,
+                &sie_private, &protect, &sie_stid))
+            (regs->sie_hostpi) (regs->hostregs, sie_xcode);
+
+        /* Convert host real address to host absolute address */
+        aaddr = APPLY_PREFIXING (aaddr, regs->hostregs->PX);
+    }
+
+    /* Check for HOST Page protection */
+    if (acctype == ACCTYPE_WRITE && protect)
+        goto trap_prot;
+#endif /*defined(_FEATURE_SIE)*/
 
     if (!((regs->psw.pkey == 0) 
         || ((regs->CR(0) & CR0_STORE_OVRD)
@@ -368,6 +395,19 @@ U16     xcode;                          /* Exception code            */
     }
     /* Set the reference bits in the storage key */
     STORAGE_KEY(aaddr) |= STORKEY_REF;
+
+#if defined(FEATURE_PER)
+    if (acctype == ACCTYPE_WRITE)
+    {
+        if( EN_IC_PER_SA(regs)
+#if defined(FEATURE_PER2)
+          && ( REAL_MODE(&regs->psw) ||
+               ARCH_DEP(check_sa_per2) (vaddr, 0, ACCTYPE_STACK, regs) )
+#endif /*defined(FEATURE_PER2)*/
+          && PER_RANGE_CHECK(vaddr,regs->CR(10),regs->CR(11)) )
+            ON_IC_PER_SA(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 
     /* Return absolute address */
     return aaddr;
@@ -448,12 +488,51 @@ U16     xcode;                          /* Exception code            */
     if (aaddr >= regs->mainsize)
         ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-    SIE_TRANSLATE(&aaddr, acctype, regs);
+#if defined(_FEATURE_SIE)
+    if(regs->sie_state  && !regs->sie_pref)
+    {
+    U32 sie_stid;
+    U16 sie_xcode;
+    int sie_private;
+
+        if (SIE_TRANSLATE_ADDR (regs->sie_mso + aaddr,
+                USE_PRIMARY_SPACE,
+                regs->hostregs, ACCTYPE_SIE, &aaddr, &sie_xcode,
+                &sie_private, &protect, &sie_stid))
+            (regs->sie_hostpi) (regs->hostregs, sie_xcode);
+
+        /* Convert host real address to host absolute address */
+        aaddr = APPLY_PREFIXING (aaddr, regs->hostregs->PX);
+    }
+
+    /* Check for HOST Page protection */
+    if (acctype == ACCTYPE_WRITE && protect)
+    {
+#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
+        regs->TEA = (vaddr & STORAGE_KEY_PAGEMASK)
+                        | TEA_PROT_AP | TEA_ST_HOME;
+        regs->excarid = 0;
+#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
+        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
+    }
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Set the reference and change bits in the storage key */
     STORAGE_KEY(aaddr) |= STORKEY_REF;
     if (acctype == ACCTYPE_WRITE)
+    {
         STORAGE_KEY(aaddr) |= STORKEY_CHANGE;
+
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SA(regs)
+#if defined(FEATURE_PER2)
+          && ( REAL_MODE(&regs->psw) ||
+               ARCH_DEP(check_sa_per2) (vaddr, 0, ACCTYPE_STACK, regs) )
+#endif /*defined(FEATURE_PER2)*/
+          && PER_RANGE_CHECK(vaddr,regs->CR(10),regs->CR(11)) )
+            ON_IC_PER_SA(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 
     /* Return absolute address */
     return aaddr;
@@ -1431,6 +1510,9 @@ VADR    lsep;                           /* Virtual addr of entry desc.
     else
         regs->psw.sysmask &= ~PSW_PERMODE;
 
+    /* restore PER masks which could have been wiped out by load_psw */
+    SET_IC_PER_MASK(regs);
+
     /* [5.12.4.4] Pass back the absolute address of the entry
        descriptor of the preceding linkage stack entry.  The
        next entry size field of this entry will be cleared on
@@ -1455,11 +1537,15 @@ VADR    lsep;                           /* Virtual addr of entry desc.
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "stack.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "stack.c"
+#endif
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "stack.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "stack.c"
+#endif
 
 #endif /*!defined(_GEN_ARCH)*/

@@ -17,7 +17,7 @@
  */
 
 /*
- * Based very loosely on float.c by Peter Kuschnerus, (c) 2000-2001.
+ * Based very loosely on float.c by Peter Kuschnerus, (c) 2000-2002.
  */
 
 /*
@@ -58,9 +58,13 @@
 #if defined(FEATURE_BINARY_FLOATING_POINT) && !defined(NO_IEEE_SUPPORT)
 
 #include <math.h>
+#ifndef WIN32
 #include <fenv.h>
+#else
+#include "ieee-w32.h"
+#endif
 
-#if !defined(_GEN_ARCH)
+#if !defined(_IEEE_C)
 /* Architecture independent code goes within this ifdef */
 
 /* move this into an appropriate header file */
@@ -71,6 +75,9 @@
 #define DXC_DIVBYZERO	(0x40)
 #define DXC_INVALID	(0x80)
 
+#ifndef FE_INEXACT
+#define FE_INEXACT 0x00
+#endif
 
 struct ebfp {
 	char	sign;
@@ -108,7 +115,7 @@ struct sbfp {
 #define fmodl(x,y) fmod(x,y)
 #endif
 
-#endif	/* !defined(_GEN_ARCH) */
+#endif	/* !defined(_IEEE_C) */
 
 /* externally defined architecture-dependent functions */
 /* I guess this could go into an include file... */
@@ -200,7 +207,7 @@ static inline int ieee_exception(int raised, REGS * regs)
 	}
 }
 
-#if !defined(_GEN_ARCH)
+#if !defined(_IEEE_C)
 /*
  * Classify emulated fp values
  */
@@ -532,12 +539,12 @@ void ebfpntos(struct ebfp *op)
 		ebfpzero(op, signbit(op->v));
 		break;
 	case FP_SUBNORMAL:
-		/* This may need special handling, but I don't
+		/* This may need special handling, but I don't know
 		 * exactly how yet.  I suspect I need to do something
 		 * to deal with the different implied unit bit.
 		 */
 	case FP_NORMAL:
-		f = frexpf(op->v, &(op->exp));
+		f = frexpl(op->v, &(op->exp));
 		op->sign = signbit(op->v);
 		op->exp += 16383 - 1;
 		op->fracth = (U64)ldexp(fabsl(f), 49) & 0xFFFFFFFFFFFFL;
@@ -549,7 +556,7 @@ void ebfpntos(struct ebfp *op)
 
 void lbfpntos(struct lbfp *op)
 {
-	double f = 0;
+	double f;
 
 	switch (fpclassify(op->v)) {
 	case FP_NAN:
@@ -562,12 +569,12 @@ void lbfpntos(struct lbfp *op)
 		lbfpzero(op, signbit(op->v));
 		break;
 	case FP_SUBNORMAL:
-		/* This may need special handling, but I don't
+		/* This may need special handling, but I don't know
 		 * exactly how yet.  I suspect I need to do something
 		 * to deal with the different implied unit bit.
 		 */
 	case FP_NORMAL:
-		f = frexpf(op->v, &(op->exp));
+		f = frexp(op->v, &(op->exp));
 		op->sign = signbit(op->v);
 		op->exp += 1023 - 1;
 		op->fract = (U64)ldexp(fabs(f), 53) & 0xFFFFFFFFFFFFFL;
@@ -578,7 +585,7 @@ void lbfpntos(struct lbfp *op)
 
 void sbfpntos(struct sbfp *op)
 {
-	float f = frexpf(op->v, &(op->exp));
+	float f;
 
 	switch (fpclassify(op->v)) {
 	case FP_NAN:
@@ -623,7 +630,7 @@ static void get_lbfp(struct lbfp *op, U32 *fpr)
 	op->fract = (((U64)fpr[0] & 0x000FFFFF) << 32) | fpr[1];
 	//logmsg("lget r=%8.8x%8.8x exp=%d fract=%llx\n", fpr[0], fpr[1], op->exp, op->fract);
 }
-#endif	/* !defined(_GEN_ARCH) */
+#endif	/* !defined(_IEEE_C) */
 
 static void vfetch_lbfp(struct lbfp *op, VADR addr, int arn, REGS *regs)
 {
@@ -637,7 +644,7 @@ static void vfetch_lbfp(struct lbfp *op, VADR addr, int arn, REGS *regs)
 	//logmsg("lfetch m=%16.16llx exp=%d fract=%llx\n", v, op->exp, op->fract);
 }
 
-#if !defined(_GEN_ARCH)
+#if !defined(_IEEE_C)
 static void get_sbfp(struct sbfp *op, U32 *fpr)
 {
 	op->sign = (*fpr & 0x80000000) != 0;
@@ -645,7 +652,7 @@ static void get_sbfp(struct sbfp *op, U32 *fpr)
 	op->fract = *fpr & 0x007FFFFF;
 	//logmsg("sget r=%8.8x exp=%d fract=%x\n", *fpr, op->exp, op->fract);
 }
-#endif	/* !defined(_GEN_ARCH) */
+#endif	/* !defined(_IEEE_C) */
 
 static void vfetch_sbfp(struct sbfp *op, VADR addr, int arn, REGS *regs)
 {
@@ -659,7 +666,7 @@ static void vfetch_sbfp(struct sbfp *op, VADR addr, int arn, REGS *regs)
 	//logmsg("sfetch m=%8.8x exp=%d fract=%x\n", v, op->exp, op->fract);
 }
 
-#if !defined(_GEN_ARCH)
+#if !defined(_IEEE_C)
 /*
  * Put binary float in registers
  */
@@ -683,7 +690,8 @@ static void put_sbfp(struct sbfp *op, U32 *fpr)
 	fpr[0] = (op->sign ? 1<<31 : 0) | (op->exp<<23) | op->fract;
 	//logmsg("sput exp=%d fract=%x r=%8.8x\n", op->exp, op->fract, *fpr);
 }
-#endif	/* !defined(_GEN_ARCH) */
+#define _IEEE_C
+#endif	/* !defined(_IEEE_C) */
 
 /*
  * Chapter 9. Floating-Point Overview and Support Instructions
@@ -3607,12 +3615,16 @@ DEF_INST(testdataclass_bfp_ext)
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "ieee.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "ieee.c"
+#endif
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "ieee.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "ieee.c"
+#endif
 
 #endif	/*!defined(_GEN_ARCH) */
 

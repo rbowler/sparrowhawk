@@ -1,4 +1,4 @@
-/* DIAGNOSE.C   (c) Copyright Roger Bowler, 2000-2001                */
+/* DIAGNOSE.C   (c) Copyright Roger Bowler, 2000-2002                */
 /*              ESA/390 Diagnose Functions                           */
 
 /*-------------------------------------------------------------------*/
@@ -9,7 +9,7 @@
 /* Additional credits:                                               */
 /*      Hercules-specific diagnose calls by Jay Maynard.             */
 /*      Set/reset bad frame indicator call by Jan Jaeger.            */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -338,6 +338,9 @@ U32             n;                      /* 32-bit operand value      */
     /*---------------------------------------------------------------*/
     /* Diagnose xxx: Invalid function code                           */
     /*---------------------------------------------------------------*/
+#if defined(FEATURE_S370_CHANNEL) && defined(OPTION_NOP_MODEL158_DIAGNOSE)
+      if((sysblk.cpuid >> 16 & 0xFFFF) != 0x0158)
+#endif
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
 
@@ -350,11 +353,15 @@ U32             n;                      /* 32-bit operand value      */
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "diagnose.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "diagnose.c"
+#endif
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "diagnose.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "diagnose.c"
+#endif
 
 #endif /*!defined(_GEN_ARCH)*/

@@ -1,8 +1,8 @@
-/* IO.C         (c) Copyright Roger Bowler, 1994-2001                */
+/* IO.C         (c) Copyright Roger Bowler, 1994-2002                */
 /*              ESA/390 CPU Emulator                                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all I/O instructions of the                */
@@ -213,6 +213,9 @@ PMCW    pmcw;                           /* Path management ctl word  */
     /* Update the concurrent sense (S) field */
     dev->pmcw.flag27 &= ~PMCW27_S;
     dev->pmcw.flag27 |= (pmcw.flag27 & PMCW27_S);
+
+    /* Set device priority from the interruption subclass bits */
+    dev->priority = (dev->pmcw.flag4 & PMCW4_ISC) >> 3;
 
     release_lock (&dev->lock);
 
@@ -695,7 +698,7 @@ DEVBLK *dev;                            /* -> device block           */
         return;
     }
 
-    /* Perform halt subchannel and set condition code */
+    /* Perform cancel subchannel and set condition code */
     regs->psw.cc = cancel_subchan (regs, dev);
 
 }
@@ -730,7 +733,11 @@ BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
     dev = find_device_by_devnum (effective_addr2);
 
     /* Set condition code 3 if device does not exist */
-    if (dev == NULL)
+    if (dev == NULL
+#if defined(FEATURE_CHANNEL_SWITCHING)
+        || regs->chanset != dev->chanset
+#endif /*defined(FEATURE_CHANNEL_SWITCHING)*/
+        )
     {
         regs->psw.cc = 3;
         return;
@@ -775,7 +782,11 @@ DEVBLK *dev;                            /* -> device block for SIO   */
     dev = find_device_by_devnum (effective_addr2);
 
     /* Set condition code 3 if device does not exist */
-    if (dev == NULL)
+    if (dev == NULL
+#if defined(FEATURE_CHANNEL_SWITCHING)
+        || regs->chanset != dev->chanset
+#endif /*defined(FEATURE_CHANNEL_SWITCHING)*/
+       )
     {
         regs->psw.cc = 3;
         return;
@@ -807,7 +818,11 @@ DEVBLK *dev;                            /* -> device block for SIO   */
     dev = find_device_by_devnum (effective_addr2);
 
     /* Set condition code 3 if device does not exist */
-    if (dev == NULL)
+    if (dev == NULL
+#if defined(FEATURE_CHANNEL_SWITCHING)
+        || regs->chanset != dev->chanset
+#endif /*defined(FEATURE_CHANNEL_SWITCHING)*/
+       )
     {
         regs->psw.cc = 3;
         return;
@@ -879,7 +894,7 @@ VADR    effective_addr2;                /* Effective address         */
 }
 
 
-#if defined(_FEATURE_SIE)
+#if defined(FEATURE_CHANNEL_SWITCHING)
 /*-------------------------------------------------------------------*/
 /* B200 CONCS - Connect Channel Set                              [S] */
 /*-------------------------------------------------------------------*/
@@ -887,14 +902,59 @@ DEF_INST(connect_channel_set)
 {
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
+int     i;
 
     S(inst, execflag, regs, b2, effective_addr2);
 
-    SIE_ONLY_INSTRUCTION(regs);
+// ZZTEMP ARCH_DEP(display_inst) (regs, inst);
 
     PRIV_CHECK(regs);
 
     SIE_INTERCEPT(regs);
+
+    effective_addr2 &= 0xFFFF;
+
+    /* Hercules has as many channelsets as CPU's */
+    if(effective_addr2 >= MAX_CPU_ENGINES)
+    {
+        regs->psw.cc = 3;
+        return;
+    }
+
+    /* If the addressed channel set is currently connected
+       then return with cc0 */
+    if(regs->chanset == effective_addr2)
+    {
+        regs->psw.cc = 0;
+        return;
+    }
+
+    /* Disconnect channel set */
+    regs->chanset = 0xFFFF;
+
+    obtain_lock(&sysblk.intlock);
+
+    /* If the addressed channelset is connected to another
+       CPU then return with cc1 */
+    for(i = 0; i < MAX_CPU_ENGINES; i++)
+    {
+        if(sysblk.regs[i].chanset == effective_addr2)
+        {
+            release_lock(&sysblk.intlock);
+            regs->psw.cc = 1;
+            return;
+        }
+    }
+
+    /* Set channel set connected to current CPU */
+    regs->chanset = effective_addr2;
+
+    /* Interrupts may be pending on this channelset */
+    ON_IC_IOPENDING;
+
+    release_lock(&sysblk.intlock);
+
+    regs->psw.cc = 0;
 
 }
 
@@ -906,27 +966,75 @@ DEF_INST(disconnect_channel_set)
 {
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
+int     i;
 
     S(inst, execflag, regs, b2, effective_addr2);
 
-    SIE_ONLY_INSTRUCTION(regs);
+// ZZTEMP ARCH_DEP(display_inst) (regs, inst);
 
     PRIV_CHECK(regs);
 
     SIE_INTERCEPT(regs);
 
+    /* Hercules has as many channelsets as CPU's */
+    if(effective_addr2 >= MAX_CPU_ENGINES)
+    {
+        regs->psw.cc = 3;
+        return;
+    }
+
+    /* If the addressed channel set is currently connected
+       then disconect channel set and return with cc0 */
+    if(regs->chanset == effective_addr2 && regs->chanset != 0xFFFF)
+    {
+        regs->chanset = 0xFFFF;
+        regs->psw.cc = 0;
+        return;
+    }
+
+    obtain_lock(&sysblk.intlock);
+
+    /* If the addressed channelset is connected to another
+       CPU then return with cc0 */
+    for(i = 0; i < MAX_CPU_ENGINES; i++)
+    {
+        if(sysblk.regs[i].chanset == effective_addr2)
+        {
+            if(sysblk.regs[i].cpustate != CPUSTATE_STARTED)
+            {
+                sysblk.regs[i].chanset = 0xFFFF;
+                regs->psw.cc = 0;
+            }
+            else
+                regs->psw.cc = 1;
+            release_lock(&sysblk.intlock);
+            return;
+        }
+    }
+
+    release_lock(&sysblk.intlock);
+
+    /* The channel set is not connected, no operation
+       is performed */
+    regs->psw.cc = 0;
+
 }
-#endif /*defined(_FEATURE_SIE)*/
+#endif /*defined(FEATURE_CHANNEL_SWITCHING)*/
+
 #endif /*defined(FEATURE_S370_CHANNEL)*/
 
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "io.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "io.c"
+#endif
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "io.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "io.c"
+#endif
 
 #endif /*!defined(_GEN_ARCH)*/

@@ -7,7 +7,7 @@
 /* Mario Bezzi. Thanks Mario! Also special thanks to Greg Smith who           */
 /* introduced iregs, needed when a page fault occurs.                         */
 /*                                                                            */
-/*                              (c) Copyright Bernard van der Helm, 2000-2001 */
+/*                              (c) Copyright Bernard van der Helm, 2000-2002 */
 /*                              Noordwijkerhout, The Netherlands.             */
 /*                                                                            */
 /*----------------------------------------------------------------------------*/
@@ -241,12 +241,6 @@
 /*----------------------------------------------------------------------------*/
 #define PROCESS_MAX             4096	/* CPU-determined amount of data      */
 #define TRUEFALSE(boolean)	((boolean) ? "True" : "False")
-#if !defined(_GEN_ARCH)
-#define ADRFMT			"%016llX"
-#else
-#undef ADRFMT
-#define ADRFMT			"%08X"
-#endif /* !defined(_GEN_ARCH) */
 
 /*----------------------------------------------------------------------------*/
 /* Compression status structure                                               */
@@ -528,7 +522,7 @@ static int ARCH_DEP (fetch_ch) (int r2, REGS * regs, REGS * iregs, BYTE * ch, in
   *ch = ARCH_DEP (vfetchb) ((GR_A (r2, iregs) + offset) & ADDRESS_MAXWRAP (regs), r2, regs);
 
 #if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1
-  logmsg ("fetch_ch : %02X at " ADRFMT "\n", *ch, (GR_A (r2, iregs) + offset));
+  logmsg ("fetch_ch : %02X at " F_VADR "\n", *ch, (GR_A (r2, iregs) + offset));
 #endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1 */
 
   return (0);
@@ -616,7 +610,7 @@ static int ARCH_DEP (fetch_is) (int r2, REGS * regs, REGS * iregs, U16 * index_s
   GR1_setcbn (iregs, (GR1_cbn (iregs) + GR0_smbsz (iregs)) % 8);
 
 #if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 2
-  logmsg ("fetch_is : %04X, cbn=%d, GR%02d=" ADRFMT ", GR%02d=" ADRFMT "\n", *index_symbol, GR1_cbn (iregs), r2, iregs->GR (r2), r2 + 1, iregs->GR (r2 + 1));
+  logmsg ("fetch_is : %04X, cbn=%d, GR%02d=" F_GREG ", GR%02d=" F_GREG "\n", *index_symbol, GR1_cbn (iregs), r2, iregs->GR (r2), r2 + 1, iregs->GR (r2 + 1));
 #endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 2 */
 
   return (0);
@@ -887,7 +881,7 @@ static int ARCH_DEP (store_ch) (int r1, REGS * regs, REGS * iregs, BYTE * data, 
   ARCH_DEP (vstorec) (data, length - 1, (GR_A (r1, iregs) + offset) & ADDRESS_MAXWRAP (regs), r1, regs);
 
 #if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 2
-  logmsg ("store_ch : at " ADRFMT ", len %04d: ", (iregs->GR (r1) + offset), length);
+  logmsg ("store_ch : at " F_VADR ", len %04d: ", (iregs->GR (r1) + offset), length);
   {
     int i;
 
@@ -963,7 +957,7 @@ static void ARCH_DEP (store_is) (int r1, int r2, REGS * regs, REGS * iregs, U16 
   GR1_setcbn (iregs, (GR1_cbn (iregs) + GR0_smbsz (iregs)) % 8);
 
 #if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1
-  logmsg ("store_is : %04X, cbn=%d, GR%02d=" ADRFMT ", GR%02d=" ADRFMT "\n", index_symbol, GR1_cbn (iregs), r1, iregs->GR (r1), r1 + 1, iregs->GR (r1 + 1));
+  logmsg ("store_is : %04X, cbn=%d, GR%02d=" F_GREG ", GR%02d=" F_GREG "\n", index_symbol, GR1_cbn (iregs), r1, iregs->GR (r1), r1 + 1, iregs->GR (r1 + 1));
 #endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1 */
 
 }
@@ -995,27 +989,27 @@ DEF_INST (compression_call)
 {
   int r1;
   int r2;
-  REGS iregs;
+  REGS *iregs;
 
   RRE (inst, execflag, regs, r1, r2);
 
 #ifdef OPTION_CMPSC_DEBUGLVL
   logmsg ("CMPSC: compression call\n");
   logmsg ("  r1      : GR%02d\n", r1);
-  logmsg ("  address : " ADRFMT "\n", regs->GR (r1));
-  logmsg ("  length  : " ADRFMT "\n", regs->GR (r1 + 1));
+  logmsg ("  address : " F_VADR "\n", regs->GR (r1));
+  logmsg ("  length  : " F_GREG "\n", regs->GR (r1 + 1));
   logmsg ("  r2      : GR%02d\n", r2);
-  logmsg ("  address : " ADRFMT "\n", regs->GR (r2));
-  logmsg ("  length  : " ADRFMT "\n", regs->GR (r2 + 1));
-  logmsg ("  GR00    : " ADRFMT "\n", (regs)->GR (0));
+  logmsg ("  address : " F_VADR "\n", regs->GR (r2));
+  logmsg ("  length  : " F_GREG "\n", regs->GR (r2 + 1));
+  logmsg ("  GR00    : " F_GREG "\n", (regs)->GR (0));
   logmsg ("    st    : %s\n", TRUEFALSE (GR0_st ((regs))));
   logmsg ("    cdss  : %d\n", GR0_cdss ((regs)));
   logmsg ("    f1    : %s\n", TRUEFALSE (GR0_f1 ((regs))));
   logmsg ("    e     : %s\n", TRUEFALSE (GR0_e ((regs))));
   logmsg ("    smbsz > %d\n", GR0_smbsz ((regs)));
   logmsg ("    dctsz > %08X\n", GR0_dctsz ((regs)));
-  logmsg ("  GR01    : " ADRFMT "\n", (regs)->GR (1));
-  logmsg ("    dictor: " ADRFMT "\n", GR1_dictor ((regs)));
+  logmsg ("  GR01    : " F_GREG "\n", (regs)->GR (1));
+  logmsg ("    dictor: " F_GREG "\n", GR1_dictor ((regs)));
   logmsg ("    sttoff: %08X\n", GR1_sttoff ((regs)));
   logmsg ("    cbn   : %d\n", GR1_cbn ((regs)));
 #endif /* OPTION_CMPSC_DEBUGLVL */
@@ -1025,24 +1019,32 @@ DEF_INST (compression_call)
     ARCH_DEP (program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
   /* Initialize the intermediate registers */
-  memcpy (&iregs, regs, sizeof (REGS));
+  iregs = malloc (sizeof (REGS));
+  memcpy (iregs, regs, sizeof (REGS));
 
   /* Now go to the requested function */
   if (GR0_e (regs))
-    ARCH_DEP (expand) (r1, r2, regs, &iregs);
+    ARCH_DEP (expand) (r1, r2, regs, iregs);
   else
-    ARCH_DEP (compress) (r1, r2, regs, &iregs);
+    ARCH_DEP (compress) (r1, r2, regs, iregs);
+
+  /* Free the intermediate registers */
+  free (iregs);
 }
 
 #endif /* FEATURE_COMPRESSION */
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "cmpsc.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "cmpsc.c"
+#endif
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "cmpsc.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "cmpsc.c"
+#endif
 
 #endif /*!defined(_GEN_ARCH) */

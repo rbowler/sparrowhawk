@@ -1,4 +1,4 @@
-/* DECIMAL.C    (c) Copyright Roger Bowler, 1991-2001                */
+/* DECIMAL.C    (c) Copyright Roger Bowler, 1991-2002                */
 /*              ESA/390 Packed Decimal Routines                      */
 
 /*-------------------------------------------------------------------*/
@@ -16,7 +16,7 @@
 /* Add trialrun to ED and EDMK                   Jan Jaeger 19/07/00 */
 /* Fix random MP bug - Mario Bezzi                                   */
 /* Clear DXC on data exception - Peter Kuschnerus                V209*/
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 /* TP instruction - Roger Bowler                            08/02/01 */
 /*-------------------------------------------------------------------*/
 
@@ -1183,11 +1183,15 @@ BYTE    pack[MAX_DECIMAL_LENGTH];       /* Packed decimal work area  */
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "decimal.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "decimal.c"
+#endif
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "decimal.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "decimal.c"
+#endif
 
 #endif /*!defined(_GEN_ARCH)*/

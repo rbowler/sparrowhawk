@@ -1,7 +1,7 @@
-/* MACHCHK.C    (c) Copyright Jan Jaeger, 2000-2001                  */
+/* MACHCHK.C    (c) Copyright Jan Jaeger, 2000-2002                  */
 /*              ESA/390 Machine Check Functions                      */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 
 /*-------------------------------------------------------------------*/
 /* The machine check function supports dynamic I/O configuration.    */
@@ -221,7 +221,7 @@ RADR    fsta = 0;
 
     /* Trace the machine check interrupt */
     if (sysblk.insttrace || sysblk.inststep)
-        logmsg ("Machine Check code=%16.16llu\n", mcic);
+        logmsg ("Machine Check code=%16.16llu\n", (long long)mcic);
 
     /* Store the external damage code at PSA+244 */
     STORE_FW(psa->xdmgcode, xdmg);
@@ -247,12 +247,16 @@ RADR    fsta = 0;
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "machchk.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "machchk.c"
+#endif
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "machchk.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "machchk.c"
+#endif
 
 
 #if !defined(NO_SIGABEND_HANDLER)
@@ -302,41 +306,70 @@ int i;
     
     if(regs->psw.mach)
     {
+#if defined(_FEATURE_SIE)
         logmsg("CPU%4.4X: Machine check due to host error: %s\n",
           regs->sie_active ? regs->guestregs->cpuad : regs->cpuad,
           strsignal(signo));
+#else /*!defined(_FEATURE_SIE)*/
+        logmsg("CPU%4.4X: Machine check due to host error: %s\n",
+          regs->cpuad, strsignal(signo));
+#endif /*!defined(_FEATURE_SIE)*/
 
-        display_inst(regs->sie_active ? regs->guestregs : regs,
-          regs->sie_active ? regs->guestregs->ip : regs->ip);
+        display_inst(
+#if defined(_FEATURE_SIE)
+                     regs->sie_active ? regs->guestregs :
+#endif /*defined(_FEATURE_SIE)*/
+                                                          regs,
+#if defined(_FEATURE_SIE)
+          regs->sie_active ? regs->guestregs->ip :
+#endif /*defined(_FEATURE_SIE)*/
+                                                   regs->ip);
 
         switch(regs->arch_mode) {
+#if defined(_370)
             case ARCH_370:
                 s370_sync_mck_interrupt(regs);
                 break;
+#endif
+#if defined(_390)
+            case ARCH_390:
+                s390_sync_mck_interrupt(regs);
+                break;
+#endif
+#if defined(_900)
             case ARCH_900:
                 z900_sync_mck_interrupt(regs);
                 break;
-            case ARCH_390:
-            default:
-                s390_sync_mck_interrupt(regs);
-                break;
+#endif
         }
     }
     else
     {
+#if defined(_FEATURE_SIE)
         logmsg("CPU%4.4X: Check-Stop due to host error: %s\n",
           regs->sie_active ? regs->guestregs->cpuad : regs->cpuad,
           strsignal(signo));
-        display_inst(regs->sie_active ? regs->guestregs : regs, 
-          regs->sie_active ? regs->guestregs->ip : regs->ip);
+#else /*!defined(_FEAURE_SIE)*/
+        logmsg("CPU%4.4X: Check-Stop due to host error: %s\n",
+          regs->cpuad, strsignal(signo));
+#endif /*!defined(_FEAURE_SIE)*/
+        display_inst(
+#if defined(_FEATURE_SIE)
+                     regs->sie_active ? regs->guestregs :
+#endif /*defined(_FEAURE_SIE)*/
+                                                          regs, 
+#if defined(_FEATURE_SIE)
+          regs->sie_active ? regs->guestregs->ip :
+#endif /*defined(_FEAURE_SIE)*/
+                                                   regs->ip);
         regs->cpustate = CPUSTATE_STOPPING;
         regs->checkstop = 1;
         ON_IC_CPU_NOT_STARTED(regs);
 
         /* Notify other CPU's by means of a malfuction alert if possible */
-        if (!try_obtain_lock(&sysblk.intlock))
+        if (!try_obtain_lock(&sysblk.sigplock))
         {
-            if(!sysblk.sigpbusy)
+            if(!try_obtain_lock(&sysblk.intlock))
             {
 #ifdef FEATURE_CPU_RECONFIG
                 for (i = 0; i < MAX_CPU_ENGINES; i++)
@@ -348,8 +381,9 @@ int i;
                         ON_IC_MALFALT(&sysblk.regs[i]);
                         sysblk.regs[i].malfcpu[regs->cpuad] = 1;
                     }
+                release_lock(&sysblk.intlock);
             }
-            release_lock(&sysblk.intlock);
+            release_lock(&sysblk.sigplock);
         }
 
     }

@@ -1,7 +1,7 @@
 AC_INIT(hercules.h)
 AC_CONFIG_AUX_DIR(autoconf)
 
-AM_INIT_AUTOMAKE(hercules,2.15)
+AM_INIT_AUTOMAKE(hercules,2.16)
 AM_CONFIG_HEADER(config.h)
 AM_MAINTAINER_MODE
 
@@ -27,6 +27,14 @@ case "$host_os" in
 	*)
 		build_hercifc=false
 		;;
+esac
+
+# Arch-specific settings that we can't figure out any other way (yet)
+
+case "$host_cpu-$GCC" in
+        hppa*-yes)
+                CFLAGS="$CFLAGS -ffunction-sections"
+        ;;
 esac
 
 AM_CONDITIONAL(BUILD_HERCIFC, [test "x$build_hercifc" = "xtrue"])
@@ -72,9 +80,28 @@ AC_ARG_ENABLE(fthreads,
 
 AM_CONDITIONAL(BUILD_FTHREADS, [test x$build_fthreads = xtrue])
 
+dnl AC_MSG_NOTICE([Checking to see if -pthread is needed to compile])
+
+AC_MSG_CHECKING([whether ${CC-cc} accepts -pthread])
+
+echo 'void f(){}' >conftest.c
+if test -z "`${CC-cc} -pthread -c conftest.c 2>&1`"; then
+        LIBS="-pthread $LIBS"
+        AC_MSG_RESULT([yes])
+else
+        AC_MSG_RESULT([no])
+fi
+rm -f conftest*
+
 # Headers
 AC_CHECK_HEADERS(byteswap.h)
-AC_CHECK_HEADER(fenv.h,,[AC_DEFINE([NO_IEEE_SUPPORT])])
+case "$host_os" in
+        *cygwin*)
+                ;;
+        *)
+                AC_CHECK_HEADER(fenv.h,,[AC_DEFINE([NO_IEEE_SUPPORT])])
+                ;;
+esac
 
 if test x$build_fthreads != xtrue; then
   AC_CHECK_HEADER(pthread.h,
@@ -278,6 +305,23 @@ AC_ARG_ENABLE(custom,
                              [provide a custom description for this build]),
               [AC_DEFINE_UNQUOTED([CUSTOM_BUILD_STRING], "${enableval}") ])
 
+dnl This is ugly. The object is to get the value of PKGDATADIR into
+dnl config.h, but this is the only way I've found to do so. The incantation
+dnl "${prefix}/share" is needed because ${datadir} doesn't expand to the
+dnl desired data directory. The sed is necessary to remove the
+dnl RPM_BUILD_ROOT portion of the pathname if we're building under RPM.
+dnl If there's a better way to get there, PLEASE replace this. --JRM
+if test "x$prefix" = "xNONE"; then
+  PKGDATADIR="/usr/local/share/${PACKAGE}"
+else
+  if test "x$RPM_BUILD_ROOT" = "x"; then
+    PKGDATADIR="${prefix}/share/${PACKAGE}"
+  else
+    PKGDATADIR=`echo ${prefix} | sed "s!${RPM_BUILD_ROOT}!!"`/share/${PACKAGE}
+  fi
+fi
+AC_DEFINE_UNQUOTED([PKGDATADIR], "${PKGDATADIR}")
+
 AH_TEMPLATE([NO_ATTR_REGPARM],
 	    [Define if your gcc does not support __attribute__((regparm(n)))])
 AH_TEMPLATE([NO_ASM_BYTESWAP],
@@ -306,5 +350,7 @@ AH_TEMPLATE([CUSTOM_BUILD_STRING],
             [Define to provide additional information about this build])
 AH_TEMPLATE([DEBUG],
             [Define to enable extra debugging code])
+AH_TEMPLATE([PKGDATADIR],
+            [Directory where the HTTP server will find documents])
 
 AC_OUTPUT(Makefile util/Makefile html/Makefile)

@@ -1,11 +1,11 @@
-/* GENERAL1.C   (c) Copyright Roger Bowler, 1994-2001                */
+/* GENERAL1.C   (c) Copyright Roger Bowler, 1994-2002                */
 /*              ESA/390 CPU Emulator                                 */
 /*              Instructions A-M                                     */
 
 /*              (c) Copyright Peter Kuschnerus, 1999 (UPT & CFC)     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all general instructions of the            */
@@ -362,7 +362,18 @@ VADR    newia;                          /* New instruction address   */
 
     /* Execute the branch unless R2 specifies register 0 */
     if ( r2 != 0 )
+    {
         regs->psw.IA = newia;
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 }
 
 
@@ -394,6 +405,16 @@ VADR    effective_addr2;                /* Effective address         */
             | regs->psw.IA_L;
 
     regs->psw.IA = effective_addr2;
+
+#if defined(FEATURE_PER)
+    if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+      && ( !(regs->CR(9) & CR9_BAC)
+       || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+        )
+        ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
 
 }
 
@@ -430,7 +451,18 @@ VADR    newia;                          /* New instruction address   */
 
     /* Execute the branch unless R2 specifies register 0 */
     if ( r2 != 0 )
+    {
         regs->psw.IA = newia;
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 }
 
 
@@ -457,6 +489,17 @@ VADR    effective_addr2;                /* Effective address         */
         regs->GR_L(r1) = regs->psw.IA_LA24;
 
     regs->psw.IA = effective_addr2;
+
+#if defined(FEATURE_PER)
+    if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+      && ( !(regs->CR(9) & CR9_BAC)
+       || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+        )
+        ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+
 }
 
 
@@ -475,6 +518,12 @@ VADR    newia;                          /* New instruction address   */
     newia = regs->GR(r2);
 
 #if defined(FEATURE_TRACING)
+#if defined(FEATURE_ESAME)
+    /* Add a mode trace entry when switching in/out of 64 bit mode */
+    if((regs->CR(12) & CR12_MTRACE) && (r2 != 0) && regs->psw.amode64 != (newia & 1))
+        ARCH_DEP(trace_ms) (regs->CR(12) & CR12_BRTRACE, newia | regs->psw.amode64 ? newia & 0x80000000 : 0, regs);
+    else
+#endif /*defined(FEATURE_ESAME)*/
     /* Add a branch trace entry to the trace table */
     if ((regs->CR(12) & CR12_BRTRACE) && (r2 != 0))
         regs->CR(12) = ARCH_DEP(trace_br) (regs->GR_L(r2) & 0x80000000,
@@ -522,7 +571,19 @@ VADR    newia;                          /* New instruction address   */
             regs->psw.AMASK = AMASK24;
             regs->psw.IA = newia & 0x00FFFFFF;
         }
+
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+
     }
+
 }
 #endif /*defined(FEATURE_BIMODAL_ADDRESSING)*/
 
@@ -540,6 +601,12 @@ VADR    newia;                          /* New instruction address   */
 
     /* Compute the branch address from the R2 operand */
     newia = regs->GR(r2);
+
+#if defined(FEATURE_ESAME)
+    /* Add a mode trace entry when switching in/out of 64 bit mode */
+    if((regs->CR(12) & CR12_MTRACE) && (r2 != 0) && regs->psw.amode64 != (newia & 1))
+        ARCH_DEP(trace_ms) (0, newia, regs);
+#endif /*defined(FEATURE_ESAME)*/
 
     /* Insert addressing mode into bit 0 of R1 operand */
     if ( r1 != 0 )
@@ -588,7 +655,18 @@ VADR    newia;                          /* New instruction address   */
             regs->psw.AMASK = AMASK24;
             regs->psw.IA = newia & 0x00FFFFFF;
         }
+
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
     }
+
 }
 #endif /*defined(FEATURE_BIMODAL_ADDRESSING)*/
 
@@ -604,7 +682,18 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* Branch if R1 mask bit is set and R2 is not register 0 */
     if (((0x08 >> regs->psw.cc) & r1) && r2 != 0)
+    {
         regs->psw.IA = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
     else
         /* Perform serialization and checkpoint synchronization if
            the mask is all ones and the register is all zeroes */
@@ -626,12 +715,29 @@ int     r1;                             /* Value of R field          */
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 
-    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    r1 = inst[1] >> 4;
 
     /* Branch to operand address if r1 mask bit is set */
     if ((0x08 >> regs->psw.cc) & r1)
+    {
+        RX(inst, execflag, regs, r1, b2, effective_addr2);
         regs->psw.IA = effective_addr2;
-
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    } else
+        if (!(execflag))
+        {
+            regs->psw.ilc = 4;
+            regs->psw.IA += 4;
+            regs->psw.IA &= ADDRESS_MAXWRAP(regs);
+        }
 }
 
 
@@ -644,14 +750,24 @@ int     r1, r2;                         /* Values of R fields        */
 VADR    newia;                          /* New instruction address   */
 
     RR(inst, execflag, regs, r1, r2);
-
-    /* Compute the branch address from the R2 operand */
-    newia = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
+    newia = regs->GR(r2);
 
     /* Subtract 1 from the R1 operand and branch if result
            is non-zero and R2 operand is not register zero */
     if ( --(regs->GR_L(r1)) && r2 != 0 )
-        regs->psw.IA = newia;
+    {
+        /* Compute the branch address from the R2 operand */
+        regs->psw.IA = newia & ADDRESS_MAXWRAP(regs);
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 
 }
 
@@ -669,7 +785,19 @@ VADR    effective_addr2;                /* Effective address         */
 
     /* Subtract 1 from the R1 operand and branch if non-zero */
     if ( --(regs->GR_L(r1)) )
+    {
         regs->psw.IA = effective_addr2;
+
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 
 }
 
@@ -697,7 +825,18 @@ S32     i, j;                           /* Integer work areas        */
 
     /* Branch if result compares high */
     if ( (S32)regs->GR_L(r1) > j )
+    {
         regs->psw.IA = effective_addr2;
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 
 }
 
@@ -725,7 +864,18 @@ S32     i, j;                           /* Integer work areas        */
 
     /* Branch if result compares low or equal */
     if ( (S32)regs->GR_L(r1) <= j )
+    {
         regs->psw.IA = effective_addr2;
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 
 }
 
@@ -744,9 +894,20 @@ U16     i2;                             /* 16-bit operand values     */
 
     /* Branch if R1 mask bit is set */
     if ((0x08 >> regs->psw.cc) & r1)
+    {
         /* Calculate the relative branch address */
         regs->psw.IA = ((!execflag ? (regs->psw.IA - 4) : regs->ET)
                                   + 2*(S16)i2) & ADDRESS_MAXWRAP(regs);
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 }
 #endif /*defined(FEATURE_IMMEDIATE_AND_RELATIVE)*/
 
@@ -777,6 +938,15 @@ U16     i2;                             /* 16-bit operand values     */
     /* Calculate the relative branch address */
     regs->psw.IA = ((!execflag ? (regs->psw.IA - 4) : regs->ET)
                                   + 2*(S16)i2) & ADDRESS_MAXWRAP(regs);
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
 }
 #endif /*defined(FEATURE_IMMEDIATE_AND_RELATIVE)*/
 
@@ -795,8 +965,19 @@ U16     i2;                             /* 16-bit operand values     */
 
     /* Subtract 1 from the R1 operand and branch if non-zero */
     if ( --(regs->GR_L(r1)) )
+    {
         regs->psw.IA = ((!execflag ? (regs->psw.IA - 4) : regs->ET)
                                   + 2*(S16)i2) & ADDRESS_MAXWRAP(regs);
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 }
 #endif /*defined(FEATURE_IMMEDIATE_AND_RELATIVE)*/
 
@@ -824,8 +1005,19 @@ S32     i,j;                            /* Integer workareas         */
 
     /* Branch if result compares high */
     if ( (S32)regs->GR_L(r1) > j )
+    {
         regs->psw.IA = ((!execflag ? (regs->psw.IA - 4) : regs->ET)
                                   + 2*(S16)i2) & ADDRESS_MAXWRAP(regs);
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 
 }
 #endif /*defined(FEATURE_IMMEDIATE_AND_RELATIVE)*/
@@ -854,8 +1046,19 @@ S32     i,j;                            /* Integer workareas         */
 
     /* Branch if result compares low or equal */
     if ( (S32)regs->GR_L(r1) <= j )
+    {
         regs->psw.IA = ((!execflag ? (regs->psw.IA - 4) : regs->ET)
                                   + 2*(S16)i2) & ADDRESS_MAXWRAP(regs);
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs)
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 
 }
 #endif /*defined(FEATURE_IMMEDIATE_AND_RELATIVE)*/
@@ -985,7 +1188,7 @@ U32     n;                              /* 32-bit operand values     */
 
 /*-------------------------------------------------------------------*/
 /* B21A CFC   - Compare and Form Codeword                        [S] */
-/*              (c) Copyright Peter Kuschnerus, 1999-2001            */
+/*              (c) Copyright Peter Kuschnerus, 1999-2002            */
 /* 64BIT INCOMPLETE                                                  */
 /*-------------------------------------------------------------------*/
 DEF_INST(compare_and_form_codeword)
@@ -1095,7 +1298,6 @@ DEF_INST(compare_and_swap)
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
-U32     n;                              /* 32-bit operand value      */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -1107,51 +1309,26 @@ U32     n;                              /* 32-bit operand value      */
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
-#if defined(MODEL_DEPENDENT_CS)
-    /* Some models always store, so validate as a store operand, if desired */
-    n = LOGICAL_TO_ABS (effective_addr2, b2, regs, ACCTYPE_WRITE,
-                                                       regs->psw.pkey);
-#endif /*defined(MODEL_DEPENDENT_CS)*/
-
-    /* Load second operand from operand address  */
-    n = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
-
-    /* Compare operand with R1 register contents */
-    if ( regs->GR_L(r1) == n )
-    {
-        /* If equal, store R3 at operand location and set cc=0 */
-        ARCH_DEP(vstore4) ( regs->GR_L(r3), effective_addr2, b2, regs );
-        regs->psw.cc = 0;
-    }
-    else
-    {
-        /* If unequal, load R1 from operand and set cc=1 */
-        regs->GR_L(r1) = n;
-        regs->psw.cc = 1;
-    }
+    COMPARE_AND_SWAP(r1, r3, effective_addr2, b2, regs );
 
     /* Release main-storage access lock */
     RELEASE_MAINLOCK(regs);
 
-    /* Perform serialization after completing operation */
-    PERFORM_SERIALIZATION (regs);
-
-#if MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP)
-    /* It this is a failed compare and swap
-       and there is more then 1 CPU in the configuration
-       and there is no broadcast synchronization in progress
-       then call the hypervisor to end this timeslice,
-       this to prevent this virtual CPU monopolizing
-       the physical CPU on a spinlock */
-    if(regs->psw.cc && sysblk.numcpu > 1)
-        usleep(1L);
-#endif /* MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP) */
-
+    if (regs->psw.cc == 1)
+    {
 #if defined(_FEATURE_SIE)
-    if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CS1))
-        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+        if((regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CS1)))
+        {
+            if( !OPEN_IC_PERINT(regs) )
+                longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+            else
+                longjmp(regs->progjmp, SIE_INTERCEPT_INSTCOMP);
+        }
+        else
 #endif /*defined(_FEATURE_SIE)*/
-
+            if (sysblk.numcpu > 1)
+                sched_yield();
+    }
 }
 
 /*-------------------------------------------------------------------*/
@@ -1162,7 +1339,6 @@ DEF_INST(compare_double_and_swap)
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
-U32     n1, n2;                         /* 32-bit operand values     */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -1176,31 +1352,7 @@ U32     n1, n2;                         /* 32-bit operand values     */
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
-#if defined(MODEL_DEPENDENT_CS)
-    /* Some models always store, so validate as a store operand, if desired */
-    n1 = LOGICAL_TO_ABS (effective_addr2, b2, regs, ACCTYPE_WRITE,
-                                                       regs->psw.pkey);
-#endif /*defined(MODEL_DEPENDENT_CS)*/
-
-    /* Load second operand from operand address  */
-    n1 = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
-    n2 = ARCH_DEP(vfetch4) ( effective_addr2 + 4, b2, regs );
-
-    /* Compare doubleword operand with R1:R1+1 register contents */
-    if ( regs->GR_L(r1) == n1 && regs->GR_L(r1+1) == n2 )
-    {
-        /* If equal, store R3:R3+1 at operand location and set cc=0 */
-        ARCH_DEP(vstore4) ( regs->GR_L(r3), effective_addr2, b2, regs );
-        ARCH_DEP(vstore4) ( regs->GR_L(r3+1), effective_addr2 + 4, b2, regs );
-        regs->psw.cc = 0;
-    }
-    else
-    {
-        /* If unequal, load R1:R1+1 from operand and set cc=1 */
-        regs->GR_L(r1) = n1;
-        regs->GR_L(r1+1) = n2;
-        regs->psw.cc = 1;
-    }
+    COMPARE_DOUBLE_AND_SWAP(r1, r3, effective_addr2, b2, regs );
 
     /* Release main-storage access lock */
     RELEASE_MAINLOCK(regs);
@@ -1208,23 +1360,23 @@ U32     n1, n2;                         /* 32-bit operand values     */
     /* Perform serialization after completing operation */
     PERFORM_SERIALIZATION (regs);
 
-#if MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP)
-    /* It this is a failed compare and swap
-       and there is more then 1 CPU in the configuration
-       and there is no broadcast synchronization in progress
-       then call the hypervisor to end this timeslice,
-       this to prevent this virtual CPU monopolizing
-       the physical CPU on a spinlock */
-    if(regs->psw.cc && sysblk.numcpu > 1)
-        usleep(1L);
-#endif /* MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP) */
-
+    if (regs->psw.cc == 1)
+    {
 #if defined(_FEATURE_SIE)
-    if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CDS1))
-        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+        if((regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CS1)))
+        {
+            if( !OPEN_IC_PERINT(regs) )
+                longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+            else
+                longjmp(regs->progjmp, SIE_INTERCEPT_INSTCOMP);
+        }
+        else
 #endif /*defined(_FEATURE_SIE)*/
-
+            if (sysblk.numcpu > 1)
+                sched_yield();
+    }
 }
+
 
 
 /*-------------------------------------------------------------------*/
@@ -1530,7 +1682,7 @@ BYTE    pad;                            /* Padding byte              */
     /* Load operand lengths from bits 0-31 of R1+1 and R3+1 */
     len1 = GR_A(r1+1, regs);
     len2 = GR_A(r3+1, regs);
-    
+
     /* Process operands from left to right */
     for (i = 0; len1 > 0 || len2 > 0 ; i++)
     {
@@ -1733,13 +1885,13 @@ S32     remlen1, remlen2;               /* Lengths remaining         */
         regs->psw.cc = 2;
         return;
     }
- 
-    /* If r1=r2, exit with condition code 0 or 1*/ 
-    if (r1 == r2) 
-    { 
-        regs->psw.cc = (len1 < sublen) ? 1 : 0; 
-        return; 
-    } 
+
+    /* If r1=r2, exit with condition code 0 or 1*/
+    if (r1 == r2)
+    {
+        regs->psw.cc = (len1 < sublen) ? 1 : 0;
+        return;
+    }
 
     /* Process operands from left to right */
     for (i = 0; len1 > 0 || len2 > 0 ; i++)
@@ -1969,7 +2121,7 @@ BYTE    utf[4];                         /* UTF-8 bytes               */
         addr1 += n + 1;
         addr1 &= ADDRESS_MAXWRAP(regs);
         len1 -= n + 1;
-        
+
         /* Update operand 2 address and length */
         addr2 = naddr2;
         len2 = nlen2;
@@ -2536,7 +2688,7 @@ VADR    effective_addr2;                /* Effective address         */
     if ( regs->exinst[0] == 0x44 )
         ARCH_DEP(program_interrupt) (regs, PGM_EXECUTE_EXCEPTION);
 
-    /* Save the execute target address for use with relative 
+    /* Save the execute target address for use with relative
                                                         instructions */
     regs->ET = effective_addr2;
 
@@ -3110,7 +3262,7 @@ GREG    len3;
             GR_A(r2, regs) = addr2;
             regs->psw.cc =  3;
             logmsg ("MVCL destructive overlap: ");
-	    ARCH_DEP(display_inst) (regs, inst);
+            ARCH_DEP(display_inst) (regs, inst);
             return;
         }
     }
@@ -3130,22 +3282,36 @@ GREG    len3;
             else
                 len3 = len1;
 
-            abs1 = LOGICAL_TO_ABS (addr1, r1, regs, ACCTYPE_WRITE, 
+            abs1 = LOGICAL_TO_ABS (addr1, r1, regs, ACCTYPE_WRITE,
                                    regs->psw.pkey);
             memset(sysblk.mainstor+abs1, pad, len3);
 
+#if defined(FEATURE_PER)
+            if( EN_IC_PER_SA(regs)
+#if defined(FEATURE_PER2)
+              && ( REAL_MODE(&regs->psw) ||
+                   ARCH_DEP(check_sa_per2) (addr1, r1, ACCTYPE_WRITE, regs) )
+#endif /*defined(FEATURE_PER2)*/
+              && PER_RANGE_CHECK2(addr1, addr1+len3, regs->CR(10), regs->CR(11)) )
+                ON_IC_PER_SA(regs);
+#endif /*defined(FEATURE_PER)*/
+
             len1 -= len3;
             addr1 += len3;
+            addr1 &= ADDRESS_MAXWRAP(regs);
 
             /* Update the registers */
             GR_A(r1, regs) = addr1;
             regs->GR_LA24(r1+1) = len1;
+
             /* The instruction can be interrupted when a CPU determined
                number of bytes have been processed.  The instruction
                address will be backed up, and the instruction will
                be re-executed.  This is consistent with operation
                under a hypervisor such as LPAR or VM.                *JJ */
-            if ((len1 > 255) && !(addr1 & 0xFFF))
+            if ( (len1 > 255) && !(addr1 & 0xFFF) &&
+                (OPEN_IC_EXTPENDING(regs) ||
+                 OPEN_IC_IOPENDING(regs)) )
             {
                 regs->psw.IA -= regs->psw.ilc;
                 regs->psw.IA &= ADDRESS_MAXWRAP(regs);
@@ -3155,10 +3321,10 @@ GREG    len3;
         regs->psw.cc = cc;
         return;
     }
-    
-    if ((len2) && (len1 == len2) && 
+
+    if ((len2) && (len1 == len2) &&
                   ((addr1 & PAGEFRAME_PAGEMASK) ==
-                   ((addr1 + len1 - 1) & PAGEFRAME_PAGEMASK)) && 
+                   ((addr1 + len1 - 1) & PAGEFRAME_PAGEMASK)) &&
                   ((addr2 & PAGEFRAME_PAGEMASK) ==
                    ((addr2 + len2 - 1) & PAGEFRAME_PAGEMASK)))
     {
@@ -3166,6 +3332,16 @@ GREG    len3;
         abs2 = LOGICAL_TO_ABS (addr2, r2, regs, ACCTYPE_READ, regs->psw.pkey);
 
         memcpy(sysblk.mainstor+abs1, sysblk.mainstor+abs2, len1);
+
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SA(regs)
+#if defined(FEATURE_PER2)
+          && ( REAL_MODE(&regs->psw) ||
+               ARCH_DEP(check_sa_per2) (addr1, r1, ACCTYPE_WRITE, regs) )
+#endif /*defined(FEATURE_PER2)*/
+          && PER_RANGE_CHECK2(addr1, addr1+len1, regs->CR(10), regs->CR(11)) )
+            ON_IC_PER_SA(regs);
+#endif /*defined(FEATURE_PER)*/
 
         /* Update the registers */
         GR_A(r1, regs) = addr1 + len1;
@@ -3176,9 +3352,9 @@ GREG    len3;
         return;
     }
 
-    if ((len1 >= 256) && (len2 >= 256) && 
+    while ((len1 >= 256) && (len2 >= 256) &&
                   ((addr1 & PAGEFRAME_PAGEMASK) ==
-                   ((addr1 + 255) & PAGEFRAME_PAGEMASK)) && 
+                   ((addr1 + 255) & PAGEFRAME_PAGEMASK)) &&
                   ((addr2 & PAGEFRAME_PAGEMASK) ==
                    ((addr2 + 255) & PAGEFRAME_PAGEMASK)))
     {
@@ -3187,23 +3363,42 @@ GREG    len3;
 
         memcpy(sysblk.mainstor+abs1, sysblk.mainstor+abs2, 256);
 
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SA(regs)
+#if defined(FEATURE_PER2)
+          && ( REAL_MODE(&regs->psw) ||
+               ARCH_DEP(check_sa_per2) (addr1, r1, ACCTYPE_WRITE, regs) )
+#endif /*defined(FEATURE_PER2)*/
+          && PER_RANGE_CHECK2(addr1, addr1+255, regs->CR(10), regs->CR(11)) )
+            ON_IC_PER_SA(regs);
+#endif /*defined(FEATURE_PER)*/
+
+        addr1 += 256;
+        addr2 += 256;
+        addr1 &= ADDRESS_MAXWRAP(regs);
+        addr1 &= ADDRESS_MAXWRAP(regs);
+        len1 -= 256;
+        len2 -= 256;
+
         /* Update the registers */
-        GR_A(r1, regs) = addr1 + 256;
-        regs->GR_LA24(r1+1) -= 256;
-        if (r1 != r2)
-        {
-            GR_A(r2, regs) = addr2 + 256;
-            regs->GR_LA24(r2+1) -= 256;
-        }
-        if (regs->GR_LA24(r1+1) ||
-            regs->GR_LA24(r2+1))
+        GR_A(r1, regs) = addr1;
+        GR_A(r2, regs) = addr2;
+        regs->GR_LA24(r1+1) = len1;
+        regs->GR_LA24(r2+1) = len2;
+
+        /* The instruction can be interrupted when a CPU determined
+           number of bytes have been processed.  The instruction
+           address will be backed up, and the instruction will
+           be re-executed.  This is consistent with operation
+           under a hypervisor such as LPAR or VM.                *JJ */
+        if ((regs->GR_LA24(r1+1) || regs->GR_LA24(r2+1)) &&
+            (OPEN_IC_EXTPENDING(regs) ||
+             OPEN_IC_IOPENDING(regs)) )
         {
             regs->psw.IA -= regs->psw.ilc;
             regs->psw.IA &= ADDRESS_MAXWRAP(regs);
+            return;
         }
-        else
-            regs->psw.cc = cc;
-        return;
     }
 
 #endif
@@ -3239,7 +3434,9 @@ GREG    len3;
            address will be backed up, and the instruction will
            be re-executed.  This is consistent with operation
            under a hypervisor such as LPAR or VM.                *JJ */
-        if ((len1 > 255) && !(addr1 & 0xFFF))
+        if ((len1 > 255) && !(addr1 & 0xFFF) &&
+            (OPEN_IC_EXTPENDING(regs) ||
+             OPEN_IC_IOPENDING(regs)) )
         {
             regs->psw.IA -= regs->psw.ilc;
             regs->psw.IA &= ADDRESS_MAXWRAP(regs);
@@ -3749,11 +3946,15 @@ U32     n;                              /* 32-bit operand values     */
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "general1.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "general1.c"
+#endif 
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "general1.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "general1.c"
+#endif 
 
 #endif /*!defined(_GEN_ARCH)*/

@@ -1,4 +1,4 @@
-/* CCKDSWAP.C   (c) Copyright Roger Bowler, 1999-2001                */
+/* CCKDSWAP.C   (c) Copyright Roger Bowler, 1999-2002                */
 /*       Swap the `endianess' of a compressed CKD file.              */
 
 /*-------------------------------------------------------------------*/
@@ -7,7 +7,11 @@
 
 #include "hercules.h"
 
-#ifndef NO_CCKD
+#ifdef EXTERNALGUI
+/* Special flag to indicate whether or not we're being
+   run under the control of the external GUI facility. */
+int  extgui = 0;
+#endif /*EXTERNALGUI*/
 
 /*-------------------------------------------------------------------*/
 /* Swap the `endianess' of  cckd file                                */
@@ -23,6 +27,14 @@ int             rc;                     /* Return code               */
 char           *fn;                     /* File name                 */
 int             fd;                     /* File descriptor           */
 int             bigend;                 /* 1 = big-endian file       */
+
+#ifdef EXTERNALGUI
+    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
+    {
+        extgui = 1;
+        argc--;
+    }
+#endif /*EXTERNALGUI*/
 
     /* Display the program identification message */
     display_version (stderr, "Hercules cckd swap-endian program ");
@@ -96,12 +108,3 @@ void syntax ()
     exit (1);
 } /* end function syntax */
 
-#else /* NO_CCKD */
-
-int main ( int argc, char *argv[])
-{
-    fprintf (stderr, "cckdswap support not generated\n");
-    return -1;
-}
-
-#endif

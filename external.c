@@ -1,8 +1,8 @@
-/* EXTERNAL.C   (c) Copyright Roger Bowler, 1999-2001                */
+/* EXTERNAL.C   (c) Copyright Roger Bowler, 1999-2002                */
 /*              ESA/390 External Interrupt and Timer                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements external interrupt, timer, and signalling  */
@@ -340,7 +340,7 @@ U16     cpuad;                          /* Originating CPU address   */
         if (sysblk.insttrace || sysblk.inststep)
         {
             logmsg ("External interrupt: CPU timer=%16.16llX\n",
-                    regs->ptimer);
+                    (long long)regs->ptimer);
         }
         ARCH_DEP(external_interrupt) (EXT_CPU_TIMER_INTERRUPT, regs);
     }
@@ -371,7 +371,7 @@ U16     cpuad;                          /* Originating CPU address   */
         )
     {
         /* Apply prefixing if the parameter is a storage address */
-        if ((sysblk.servparm & 0x00000007) == 0)
+        if ( (sysblk.servparm & SERVSIG_ADDR) )
             sysblk.servparm =
                 APPLY_PREFIXING (sysblk.servparm, regs->PX);
 
@@ -381,6 +381,9 @@ U16     cpuad;                          /* Originating CPU address   */
         /* Store service signal parameter at PSA+X'80' */
         psa = (void*)(sysblk.mainstor + regs->PX);
         STORE_FW(psa->extparm,sysblk.servparm);
+
+        /* Reset service parameter */
+        sysblk.servparm = 0;
 
         /* Reset service signal pending */
         OFF_IC_SERVSIG;
@@ -436,9 +439,9 @@ PSA     *sspsa;                         /* -> Store status area      */
     sspsa->arch = 1;
 #endif /*defined(FEATURE_ESAME)*/
 
-#if defined(FEATURE_ESAME_INSTALLED)
+#if defined(_900)
     sspsa->arch = 0;
-#endif /*defined(FEATURE_ESAME_INSTALLED)*/
+#endif /*defined(_900)*/
 
     /* Store access registers in bytes 288-351 */
     for (i = 0; i < 16; i++)
@@ -465,28 +468,38 @@ PSA     *sspsa;                         /* -> Store status area      */
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "external.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "external.c"
+#endif
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "external.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "external.c"
+#endif
 
 
 void store_status (REGS *ssreg, U64 aaddr)
 {
     switch(ssreg->arch_mode) {
+#if defined(_370)
         case ARCH_370:
             aaddr &= 0x7FFFFFFF;
             s370_store_status (ssreg, aaddr);
             break;
+#endif
+#if defined(_390)
         case ARCH_390:
             aaddr &= 0x7FFFFFFF;
             s390_store_status (ssreg, aaddr);
             break;
+#endif
+#if defined(_900)
         case ARCH_900:
             z900_store_status (ssreg, aaddr);
             break;
+#endif
     }
 }
 #endif /*!defined(_GEN_ARCH)*/

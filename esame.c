@@ -1,4 +1,4 @@
-/* ESAME.C      (c) Copyright Jan Jaeger, 2000-2001                  */
+/* ESAME.C      (c) Copyright Jan Jaeger, 2000-2002                  */
 /*              ESAME (z/Architecture) instructions                  */
 
 /*-------------------------------------------------------------------*/
@@ -365,6 +365,12 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
     amode = psw[4] & 0x80;
 #endif /*!defined(FEATURE_ESAME)*/
 
+#if defined(FEATURE_ESAME)
+    /* Add a mode trace entry when switching in/out of 64 bit mode */
+    if((regs->CR(12) & CR12_MTRACE)  && regs->psw.amode64 != amode)
+        ARCH_DEP(trace_ms) (regs->CR(12) & CR12_BRTRACE, ia | regs->psw.amode64 ? amode << 31 : 0, regs);
+    else
+#endif /*defined(FEATURE_ESAME)*/
     if (regs->CR(12) & CR12_BRTRACE)
         newcr12 = ARCH_DEP(trace_br) (amode, ia, regs);
 #endif /*defined(FEATURE_TRACING)*/
@@ -396,13 +402,41 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
  
-    if( ARCH_DEP(load_psw) (regs, psw) )/* only check invalid IA not odd */
+#if defined(FEATURE_ESAME)
+    if(flags & 0x0004) 
     {
-        /* restore the psw */
-        regs->psw = save_psw;
-        /* And generate a program interrupt */
-        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+        /* Do not check esame bit (force to zero) */
+        psw[1] &= ~0x08;
+        if( ARCH_DEP(load_psw) (regs, psw) )/* only check invalid IA not odd */
+        {
+            /* restore the psw */
+            regs->psw = save_psw;
+            /* And generate a program interrupt */
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+        }
     }
+    else
+#endif /*defined(FEATURE_ESAME)*/
+    {
+#if defined(FEATURE_ESAME)
+        /* Do not check amode64 bit (force to zero) */
+        psw[3] &= ~0x01;
+#endif /*defined(FEATURE_ESAME)*/
+        if( s390_load_psw(regs, psw) )
+        {
+            /* restore the psw */
+            regs->psw = save_psw;
+            /* And generate a program interrupt */
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+        }
+#if defined(FEATURE_ESAME)
+        regs->psw.notesame = 0;
+#endif /*defined(FEATURE_ESAME)*/
+    }
+
+    /* load_psw() has set the ILC to zero.  This needs to
+       be reset to 4 for an eventual PER event */
+    regs->psw.ilc = 4;
 
     /* Check for odd IA in psw */
     if(regs->psw.IA & 0x01)
@@ -436,10 +470,22 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         regs->CR(12) = newcr12;
 #endif /*FEATURE_TRACING*/
 
+#if defined(FEATURE_PER)
+    if( EN_IC_PER_SB(regs) 
+#if defined(FEATURE_PER2)
+      && ( !(regs->CR(9) & CR9_BAC)
+       || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+        )
+        ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+
     /* Space switch event when switching into or
        out of home space mode AND space-switch-event on in CR1 or CR13 */
     if((HOME_SPACE_MODE(&(regs->psw)) ^ HOME_SPACE_MODE(&save_psw))
-     && ((regs->CR(1) & SSEVENT_BIT) || (regs->CR(13) & SSEVENT_BIT)))
+     && (!REAL_MODE(&regs->psw))
+     && ((regs->CR(1) & SSEVENT_BIT) || (regs->CR(13) & SSEVENT_BIT)
+      || OPEN_IC_PERINT(regs) ))
     {
         if (HOME_SPACE_MODE(&(regs->psw)))
         {
@@ -480,6 +526,9 @@ DEF_INST(trace_long)
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
+#if defined(FEATURE_TRACING)
+U32     op;                             /* Operand                   */
+#endif /*defined(FEATURE_TRACING)*/
 
     RSE(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -487,7 +536,26 @@ VADR    effective_addr2;                /* effective address         */
 
     FW_CHECK(effective_addr2, regs);
 
-    /*INCOMPLETE*/
+    /* Exit if explicit tracing (control reg 12 bit 31) is off */
+    if ( (regs->CR(12) & CR12_EXTRACE) == 0 )
+        return;
+
+    /* Fetch the trace operand */
+    op = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
+
+    /* Exit if bit zero of the trace operand is one */
+    if ( (op & 0x80000000) )
+        return;
+
+    /* Perform serialization and checkpoint-synchronization */
+    PERFORM_SERIALIZATION (regs);
+    PERFORM_CHKPT_SYNC (regs);
+
+    regs->CR(12) = ARCH_DEP(trace_tg) (r1, r3, op, regs);
+
+    /* Perform serialization and checkpoint-synchronization */
+    PERFORM_SERIALIZATION (regs);
+    PERFORM_CHKPT_SYNC (regs);
 
 } /* end DEF_INST(trace_long) */
 #endif /*defined(FEATURE_ESAME) && defined(FEATURE_TRACING)*/
@@ -568,6 +636,7 @@ U64     oreg = 0;                       /* 64 bit overflow work reg  */
 
         /* Increment operand address */
         effective_addr2++;
+        effective_addr2 &= ADDRESS_MAXWRAP(regs);              
 
     } /* end for(i) */
 
@@ -1788,10 +1857,20 @@ U32     i2;                             /* 32-bit operand values     */
 
     /* Branch if R1 mask bit is set */
     if ((0x08 >> regs->psw.cc) & r1)
+    {
         /* Calculate the relative branch address */
         regs->psw.IA = ((!execflag ? (regs->psw.IA - 6) : regs->ET)
                                 + 2LL*(S32)i2) & ADDRESS_MAXWRAP(regs);
-
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs) 
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 } /* end DEF_INST(branch_relative_on_condition_long) */
 #endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 
@@ -1822,6 +1901,15 @@ U32     i2;                             /* 32-bit operand values     */
     regs->psw.IA = ((!execflag ? (regs->psw.IA - 6) : regs->ET)
                                 + 2LL*(S32)i2) & ADDRESS_MAXWRAP(regs);
 
+#if defined(FEATURE_PER)
+    if( EN_IC_PER_SB(regs) 
+#if defined(FEATURE_PER2)
+      && ( !(regs->CR(9) & CR9_BAC)
+       || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+        )
+        ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
 } /* end DEF_INST(branch_relative_and_save_long) */
 #endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 
@@ -1846,6 +1934,10 @@ int     i;                              /* Integer work areas        */
     /* Load value from register */
     n = regs->GR_H(r1);
 
+    /* if mask is zero, access rupts recognized for 1 byte */
+    if (r3 == 0)
+            sbyte = ARCH_DEP(vfetchb) ( effective_addr2, b2, regs );
+                                                                                
     /* Compare characters in register with operand characters */
     for ( i = 0; i < 4; i++ )
     {
@@ -2024,8 +2116,19 @@ S64     i,j;                            /* Integer workareas         */
 
     /* Branch if result compares high */
     if ( (S64)regs->GR_G(r1) > j )
+    {
         regs->psw.IA = ((!execflag ? (regs->psw.IA - 6) : regs->ET)
                                 + 2LL*(S32)i2) & ADDRESS_MAXWRAP(regs);
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs) 
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 
 } /* end DEF_INST(branch_relative_on_index_high_long) */
 #endif /*defined(FEATURE_ESAME)*/
@@ -2054,8 +2157,19 @@ S64     i,j;                            /* Integer workareas         */
 
     /* Branch if result compares low or equal */
     if ( (S64)regs->GR_G(r1) <= j )
+    {
         regs->psw.IA = ((!execflag ? (regs->psw.IA - 6) : regs->ET)
                                 + 2LL*(S32)i2) & ADDRESS_MAXWRAP(regs);
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs) 
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 
 } /* end DEF_INST(branch_relative_on_index_low_or_equal_long) */
 #endif /*defined(FEATURE_ESAME)*/
@@ -2085,7 +2199,18 @@ S64     i, j;                           /* Integer work areas        */
 
     /* Branch if result compares high */
     if ( (S64)regs->GR_G(r1) > j )
+    {
         regs->psw.IA = effective_addr2;
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs) 
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(effective_addr2,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 
 } /* end DEF_INST(branch_on_index_high_long) */
 #endif /*defined(FEATURE_ESAME)*/
@@ -2115,7 +2240,18 @@ S64     i, j;                           /* Integer work areas        */
 
     /* Branch if result compares low or equal */
     if ( (S64)regs->GR_G(r1) <= j )
+    {
         regs->psw.IA = effective_addr2;
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs) 
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(effective_addr2,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 
 } /* end DEF_INST(branch_on_index_low_or_equal_long) */
 #endif /*defined(FEATURE_ESAME)*/
@@ -2177,8 +2313,14 @@ U64     n;                              /* 64-bit operand value      */
 #endif /* MAX_CPU_ENGINES > 1 && defined)OPTION_CS_USLEEP) */
 
 #if defined(_FEATURE_ZSIE)
-    if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CS1))
-        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+    if((regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CS1))
+      && regs->psw.cc == 1)
+    {
+        if( !OPEN_IC_PERINT(regs) )
+            longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+        else
+            longjmp(regs->progjmp, SIE_INTERCEPT_INSTCOMP);
+    }
 #endif /*defined(_FEATURE_ZSIE)*/
 
 } /* end DEF_INST(compare_and_swap_long) */
@@ -2248,8 +2390,14 @@ U64     n1, n2;                         /* 64-bit operand values     */
 #endif /* MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP) */
 
 #if defined(_FEATURE_ZSIE)
-    if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CDS1))
-        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+    if((regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CDS1))
+      && regs->psw.cc == 1)
+    {
+        if( !OPEN_IC_PERINT(regs) )
+            longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+        else
+            longjmp(regs->progjmp, SIE_INTERCEPT_INSTCOMP);
+    }
 #endif /*defined(_FEATURE_ZSIE)*/
 
 } /* end DEF_INST(compare_double_and_swap_long) */
@@ -2270,7 +2418,18 @@ VADR    effective_addr2;                /* Effective address         */
 
     /* Subtract 1 from the R1 operand and branch if non-zero */
     if ( --(regs->GR_G(r1)) )
+    {
         regs->psw.IA = effective_addr2;
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs) 
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(effective_addr2,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 
 } /* end DEF_INST(branch_on_count_long) */
 #endif /*defined(FEATURE_ESAME)*/
@@ -2293,7 +2452,18 @@ VADR    newia;                          /* New instruction address   */
     /* Subtract 1 from the R1 operand and branch if result
            is non-zero and R2 operand is not register zero */
     if ( --(regs->GR_G(r1)) && r2 != 0 )
+    {
         regs->psw.IA = newia;
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs) 
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(newia,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 
 } /* end DEF_INST(branch_on_count_long_register) */
 #endif /*defined(FEATURE_ESAME)*/
@@ -2960,9 +3130,19 @@ U16     i2;                             /* 16-bit operand values     */
 
     /* Subtract 1 from the R1 operand and branch if non-zero */
     if ( --(regs->GR_G(r1)) )
+    {
         regs->psw.IA = ((!execflag ? (regs->psw.IA - 4) : regs->ET)
                                   + 2*(S16)i2) & ADDRESS_MAXWRAP(regs);
-
+#if defined(FEATURE_PER)
+        if( EN_IC_PER_SB(regs) 
+#if defined(FEATURE_PER2)
+          && ( !(regs->CR(9) & CR9_BAC)
+           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
+#endif /*defined(FEATURE_PER2)*/
+            )
+            ON_IC_PER_SB(regs);
+#endif /*defined(FEATURE_PER)*/
+    }
 } /* end DEF_INST(branch_relative_on_count_long) */
 #endif /*defined(FEATURE_ESAME)*/
 
@@ -3826,6 +4006,7 @@ int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 int     i, d;                           /* Integer work areas        */
 BYTE    rwork[128];                     /* Register work areas       */
+BYTE    dism;                           /* Disabled int subcl mask   */
 
     RSE(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -3837,8 +4018,9 @@ BYTE    rwork[128];                     /* Register work areas       */
     if(regs->sie_state)
     {
     U32 n;
-        for(i = r1, n = 0x8000 >> r1; ; )
+        for(i = r1; ; )
         {
+            n = 0x8000 >> i;
             if(regs->siebk->lctl_ctl[i < 8 ? 0 : 1] & ((i < 8) ? n >> 8 : n))
                 longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 
@@ -3858,6 +4040,9 @@ BYTE    rwork[128];                     /* Register work areas       */
 
     INVALIDATE_AEA_ALL(regs);
 
+    /* Save disabled I/O subclasses */
+    dism = ~regs->CR_LHHCH(6);
+
     /* Load control registers from work area */
     for ( i = r1, d = 0; ; )
     {
@@ -3871,8 +4056,17 @@ BYTE    rwork[128];                     /* Register work areas       */
         i++; i &= 15;
     }
 
+    /* Force I/O interrupt check when enabling an I/O subclass */
+    if(dism & regs->CR_LHHCH(6))
+    {
+        obtain_lock(&sysblk.intlock);
+        ON_IC_IOPENDING;
+        release_lock(&sysblk.intlock);
+    }
+
     SET_IC_EXTERNAL_MASK(regs);
     SET_IC_MCK_MASK(regs);
+    SET_IC_PER_MASK(regs);
 
     RETURN_INTCHECK(regs);
 
@@ -3996,6 +4190,15 @@ RADR    n;                              /* Unsigned work             */
     /* Store R1 register at second operand location */
     ARCH_DEP(vstore8) (regs->GR_G(r1), n, USE_REAL_ADDR, regs );
 
+#if defined(FEATURE_PER2)
+    /* Storage alteration must be enabled for STURA to be recognised */
+    if( EN_IC_PER_SA(regs) && EN_IC_PER_STURA(regs) )
+    {
+        ON_IC_PER_SA(regs) ;
+        ON_IC_PER_STURA(regs) ;
+    }
+#endif /*defined(FEATURE_PER2)*/
+
 } /* end DEF_INST(store_using_real_address_long) */
 #endif /*defined(FEATURE_ESAME)*/
 
@@ -4024,16 +4227,19 @@ DEF_INST(test_addressing_mode)
 /*-------------------------------------------------------------------*/
 DEF_INST(set_addressing_mode_24)
 {
-VADR    ia;                             /* Unupdated instruction addr*/
+VADR    ia = regs->psw.IA;              /* Unupdated instruction addr*/
 
     E(inst, execflag, regs);
-
-    /* Calculate the unupdated instruction address */
-    ia = (regs->psw.IA - regs->psw.ilc) & ADDRESS_MAXWRAP(regs);
 
     /* Program check if instruction is located above 16MB */
     if (ia > 0xFFFFFFULL)
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+#if defined(FEATURE_ESAME)
+    /* Add a mode trace entry when switching in/out of 64 bit mode */
+    if((regs->CR(12) & CR12_MTRACE) && regs->psw.amode64)
+        ARCH_DEP(trace_ms) (0, regs->psw.IA, regs);
+#endif /*defined(FEATURE_ESAME)*/
 
 #if defined(FEATURE_ESAME)
     regs->psw.amode64 =
@@ -4051,16 +4257,19 @@ VADR    ia;                             /* Unupdated instruction addr*/
 /*-------------------------------------------------------------------*/
 DEF_INST(set_addressing_mode_31)
 {
-VADR    ia;                             /* Unupdated instruction addr*/
+VADR    ia = regs->psw.IA;              /* Unupdated instruction addr*/
 
     E(inst, execflag, regs);
-
-    /* Calculate the unupdated instruction address */
-    ia = (regs->psw.IA - regs->psw.ilc) & ADDRESS_MAXWRAP(regs);
 
     /* Program check if instruction is located above 2GB */
     if (ia > 0x7FFFFFFFULL)
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+#if defined(FEATURE_ESAME)
+    /* Add a mode trace entry when switching in/out of 64 bit mode */
+    if((regs->CR(12) & CR12_MTRACE) && regs->psw.amode64)
+        ARCH_DEP(trace_ms) (0, regs->psw.IA, regs);
+#endif /*defined(FEATURE_ESAME)*/
 
 #if defined(FEATURE_ESAME)
     regs->psw.amode64 = 0;
@@ -4079,6 +4288,12 @@ VADR    ia;                             /* Unupdated instruction addr*/
 DEF_INST(set_addressing_mode_64)
 {
     E(inst, execflag, regs);
+
+#if defined(FEATURE_ESAME)
+    /* Add a mode trace entry when switching in/out of 64 bit mode */
+    if((regs->CR(12) & CR12_MTRACE) && !regs->psw.amode64)
+        ARCH_DEP(trace_ms) (0, regs->psw.IA, regs);
+#endif /*defined(FEATURE_ESAME)*/
 
     regs->psw.amode = regs->psw.amode64 = 1;
     regs->psw.AMASK = AMASK64;
@@ -4269,6 +4484,10 @@ int     rc;
     if ( rc )
         ARCH_DEP(program_interrupt) (regs, rc);
 
+    /* load_psw() has set the ILC to zero.  This needs to
+       be reset to 4 for an eventual PER event */
+    regs->psw.ilc = 4;
+
     /* Perform serialization and checkpoint synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
@@ -4335,7 +4554,7 @@ RADR    n;                              /* 64-bit operand values     */
 #endif /*defined(FEATURE_ESAME)*/
 
 
-#if defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390)
+#if defined(_900) || defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390)
 /*-------------------------------------------------------------------*/
 /* B2B1 STFL  - Store Facilities List                            [S] */
 /*-------------------------------------------------------------------*/
@@ -4361,9 +4580,9 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 #if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
                  | STFL_0_N3
 #endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
-#if defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)
+#if defined(_900) || defined(FEATURE_ESAME)
                  | (sysblk.arch_z900 ? STFL_0_ESAME_INSTALLED : 0)
-#endif /*defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)*/
+#endif /*defined(_900) || defined(FEATURE_ESAME)*/
 #if defined(FEATURE_ESAME)
                  | STFL_0_ESAME_ACTIVE
 #endif /*defined(FEATURE_ESAME)*/
@@ -4377,7 +4596,7 @@ PSA    *psa;                            /* -> Prefixed storage area  */
     psa->stfl[3] = 0;
 
 } /* end DEF_INST(store_facilities_list) */
-#endif /*defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)*/
+#endif /*defined(_900) || defined(FEATURE_ESAME)*/
 
 
 #if defined(FEATURE_LOAD_REVERSED) && defined(FEATURE_ESAME)
@@ -4715,11 +4934,16 @@ int     cc;                             /* Condition code            */
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 390
-#include "esame.c"
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "esame.c"
+#endif
 
-#undef   _GEN_ARCH
-#define  _GEN_ARCH 370
-#include "esame.c"
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "esame.c"
+#endif
+
 
 #endif /*!defined(_GEN_ARCH)*/

@@ -1,4 +1,4 @@
-/* CARDPCH.C    (c) Copyright Roger Bowler, 1999-2001                */
+/* CARDPCH.C    (c) Copyright Roger Bowler, 1999-2002                */
 /*              ESA/390 Card Punch Device Handler                    */
 
 /*-------------------------------------------------------------------*/
@@ -7,6 +7,8 @@
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
+
+#include "devtype.h"
 
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
@@ -154,11 +156,7 @@ BYTE            c;                      /* Output character          */
     if (dev->fd < 0 && !IS_CCW_SENSE(code))
     {
         rc = open (dev->filename,
-#ifdef WIN32
                     O_WRONLY | O_CREAT | O_TRUNC /* | O_SYNC */ |  O_BINARY,
-#else /* WIN32 */
-                    O_WRONLY | O_CREAT | O_TRUNC /* | O_SYNC */,
-#endif /* WIN32 */
                     S_IRUSR | S_IWUSR | S_IRGRP);
         if (rc < 0)
         {
@@ -295,3 +293,10 @@ BYTE            c;                      /* Output character          */
 
 } /* end function cardpch_execute_ccw */
 
+
+DEVHND cardpch_device_hndinfo = {
+        &cardpch_init_handler,
+        &cardpch_execute_ccw,
+        &cardpch_close_device,
+        &cardpch_query_device
+};
