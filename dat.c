@@ -561,7 +561,8 @@ void purge_alb (REGS *regs)
 /* Input:                                                            */
 /*      vaddr   31-bit virtual address to be translated              */
 /*      arn     Access register number containing ALET (AR0 is       */
-/*              treated as containing ALET value 0)                  */
+/*              treated as containing ALET value 0), or special      */
+/*              value USE_PRIMARY_SPACE or USE_SECONDARY_SPACE)      */
 /*      regs    Pointer to the CPU register context                  */
 /*      acctype Type of access requested: READ, WRITE, INSTFETCH,    */
 /*              LRA, IVSK, TPROT, or STACK                           */
@@ -622,9 +623,11 @@ TLBE   *tlbp;                           /* -> TLB entry              */
             regs->cr[1];
     else if (acctype == ACCTYPE_STACK)
         std = regs->cr[13];
-    else if (PRIMARY_SPACE_MODE(&regs->psw))
+    else if (PRIMARY_SPACE_MODE(&regs->psw)
+            || arn == USE_PRIMARY_SPACE)
         std = regs->cr[1];
-    else if (SECONDARY_SPACE_MODE(&regs->psw))
+    else if (SECONDARY_SPACE_MODE(&regs->psw)
+            || arn == USE_SECONDARY_SPACE)
         std = regs->cr[7];
     else if (HOME_SPACE_MODE(&regs->psw))
         std = regs->cr[13];
@@ -648,12 +651,16 @@ TLBE   *tlbp;                           /* -> TLB entry              */
 
     /* Only a single entry in the TLB will be looked up, namely the
        entry associated with the base/access register being used */
-    tlbp = &(regs->tlb[arn & 0x0F]);
-    if ((vaddr & 0x7FFFF000) == tlbp->vaddr
+    if (acctype == ACCTYPE_LRA || arn < 0)
+        tlbp = NULL;
+    else
+        tlbp = &(regs->tlb[arn & 0x0F]);
+
+    if (tlbp != NULL
+        && (vaddr & 0x7FFFF000) == tlbp->vaddr
         && tlbp->valid
         && (tlbp->common || std == tlbp->std)
-        && !(tlbp->common && private)
-        && acctype != ACCTYPE_LRA)
+        && !(tlbp->common && private))
     {
         pte = tlbp->pte;
     }
@@ -723,7 +730,7 @@ TLBE   *tlbp;                           /* -> TLB entry              */
             goto tran_spec_excp;
 
         /* [3.11.4.2] Place the translated address in the TLB */
-        if (acctype != ACCTYPE_LRA)
+        if (tlbp != NULL)
         {
             tlbp->std = std;
             tlbp->vaddr = vaddr & 0x7FFFF000;
@@ -890,9 +897,11 @@ tprot_addr_excp:
 /*                                                                   */
 /* Input:                                                            */
 /*      addr    Logical address to be translated                     */
-/*      arn     Access register number (or USE_REAL_ADDR)            */
+/*      arn     Access register number (or USE_REAL_ADDR,            */
+/*                      USE_PRIMARY_SPACE, USE_SECONDARY_SPACE)      */
 /*      regs    CPU register context                                 */
 /*      acctype Type of access requested: READ, WRITE, or INSTFETCH  */
+/*      akey    Bits 0-3=access key, 4-7=zeroes                      */
 /* Returns:                                                          */
 /*      Absolute storage address.                                    */
 /*                                                                   */
@@ -912,11 +921,11 @@ tprot_addr_excp:
 /*      or translation exception then a program check is generated   */
 /*      and the function does not return.                            */
 /*-------------------------------------------------------------------*/
-static U32 logical_to_abs (U32 addr, int arn, REGS *regs, int acctype)
+static U32 logical_to_abs (U32 addr, int arn, REGS *regs,
+                                int acctype, BYTE akey)
 {
 U32     raddr;                          /* Real address              */
 U32     aaddr;                          /* Absolute address          */
-BYTE    akey;                           /* Access key from PSW       */
 U32     block;                          /* 4K block number           */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=ALE or page protection  */
@@ -940,7 +949,6 @@ U16     xcode;                          /* Exception code            */
         goto vabs_addr_excp;
 
     /* Check protection and set reference and change bits */
-    akey = regs->psw.key << 4;
     block = aaddr >> 12;
     switch (acctype) {
 
@@ -1029,6 +1037,10 @@ void vstorec (void *src, BYTE len, U32 addr, int arn, REGS *regs)
 U32     addr2;                          /* Page address of last byte */
 BYTE    len1;                           /* Length to end of page     */
 BYTE    len2;                           /* Length after next page    */
+BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+
+    /* Obtain current access key from PSW */
+    akey = regs->psw.pkey;
 
     /* Calculate page address of last byte of operand */
     addr2 = (addr + len) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
@@ -1037,13 +1049,13 @@ BYTE    len2;                           /* Length after next page    */
     /* Copy data to real storage in either one or two parts
        depending on whether operand crosses a page boundary */
     if (addr2 == (addr & 0xFFFFF000)) {
-        addr = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE);
+        addr = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE, akey);
         memcpy (sysblk.mainstor+addr, src, len+1);
     } else {
         len1 = addr2 - addr;
         len2 = len - len1 + 1;
-        addr = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE);
-        addr2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE);
+        addr = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE, akey);
+        addr2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE, akey);
         memcpy (sysblk.mainstor+addr, src, len1);
         memcpy (sysblk.mainstor+addr, src+len1, len2);
     }
@@ -1064,7 +1076,8 @@ BYTE    len2;                           /* Length after next page    */
 /*-------------------------------------------------------------------*/
 void vstoreb (BYTE value, U32 addr, int arn, REGS *regs)
 {
-    addr = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE);
+    addr = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE,
+                                regs->psw.pkey);
     sysblk.mainstor[addr] = value;
 } /* end function vstoreb */
 
@@ -1085,16 +1098,20 @@ void vstore2 (U16 value, U32 addr, int arn, REGS *regs)
 {
 U32     addr2;                          /* Address of second byte    */
 U32     abs1, abs2;                     /* Absolute addresses        */
+BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+
+    /* Obtain current access key from PSW */
+    akey = regs->psw.pkey;
 
     /* Calculate address of second byte of operand */
     addr2 = (addr + 1) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
 
     /* Get absolute address of first byte of operand */
-    abs1 = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE);
+    abs1 = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE, akey);
 
     /* Repeat address translation if operand crosses a page boundary */
     if ((addr2 & 0xFFF) == 0x000)
-        abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE);
+        abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE, akey);
     else
         abs2 = abs1 + 1;
 
@@ -1123,9 +1140,13 @@ int     i;                              /* Loop counter              */
 int     k;                              /* Shift counter             */
 U32     addr2;                          /* Page address of last byte */
 U32     abs, abs2;                      /* Absolute addresses        */
+BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+
+    /* Obtain current access key from PSW */
+    akey = regs->psw.pkey;
 
     /* Get absolute address of first byte of operand */
-    abs = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE);
+    abs = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE, akey);
 
     /* Store 4 bytes when operand is fullword aligned */
     if ((addr & 0x03) == 0) {
@@ -1141,7 +1162,7 @@ U32     abs, abs2;                      /* Absolute addresses        */
     /* Calculate page address of last byte of operand */
     addr2 = (addr + 3) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
     addr2 &= 0xFFFFF000;
-    abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE);
+    abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE, akey);
 
     /* Store integer value byte by byte at operand location */
     for (i=0, k=24; i < 4; i++, k -= 8) {
@@ -1181,9 +1202,13 @@ int     i;                              /* Loop counter              */
 int     k;                              /* Shift counter             */
 U32     addr2;                          /* Page address of last byte */
 U32     abs, abs2;                      /* Absolute addresses        */
+BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+
+    /* Obtain current access key from PSW */
+    akey = regs->psw.pkey;
 
     /* Get absolute address of first byte of operand */
-    abs = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE);
+    abs = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE, akey);
 
     /* Store 8 bytes when operand is doubleword aligned */
     if ((addr & 0x07) == 0) {
@@ -1203,7 +1228,7 @@ U32     abs, abs2;                      /* Absolute addresses        */
     /* Calculate page address of last byte of operand */
     addr2 = (addr + 7) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
     addr2 &= 0xFFFFF000;
-    abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE);
+    abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE, akey);
 
     /* Store integer value byte by byte at operand location */
     for (i=0, k=56; i < 8; i++, k -= 8) {
@@ -1244,6 +1269,10 @@ void vfetchc (void *dest, BYTE len, U32 addr, int arn, REGS *regs)
 U32     addr2;                          /* Page address of last byte */
 BYTE    len1;                           /* Length to end of page     */
 BYTE    len2;                           /* Length after next page    */
+BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+
+    /* Obtain current access key from PSW */
+    akey = regs->psw.pkey;
 
     /* Calculate page address of last byte of operand */
     addr2 = (addr + len) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
@@ -1252,13 +1281,13 @@ BYTE    len2;                           /* Length after next page    */
     /* Copy data from real storage in either one or two parts
        depending on whether operand crosses a page boundary */
     if (addr2 == (addr & 0xFFFFF000)) {
-        addr = logical_to_abs (addr, arn, regs, ACCTYPE_READ);
+        addr = logical_to_abs (addr, arn, regs, ACCTYPE_READ, akey);
         memcpy (dest, sysblk.mainstor+addr, len+1);
     } else {
         len1 = addr2 - addr;
         len2 = len - len1 + 1;
-        addr = logical_to_abs (addr, arn, regs, ACCTYPE_READ);
-        addr2 = logical_to_abs (addr2, arn, regs, ACCTYPE_READ);
+        addr = logical_to_abs (addr, arn, regs, ACCTYPE_READ, akey);
+        addr2 = logical_to_abs (addr2, arn, regs, ACCTYPE_READ, akey);
         memcpy (dest, sysblk.mainstor+addr, len1);
         memcpy (dest+len1, sysblk.mainstor+addr, len2);
     }
@@ -1280,7 +1309,8 @@ BYTE    len2;                           /* Length after next page    */
 /*-------------------------------------------------------------------*/
 BYTE vfetchb (U32 addr, int arn, REGS *regs)
 {
-    addr = logical_to_abs (addr, arn, regs, ACCTYPE_READ);
+    addr = logical_to_abs (addr, arn, regs, ACCTYPE_READ,
+                                regs->psw.pkey);
     return sysblk.mainstor[addr];
 } /* end function vfetchb */
 
@@ -1302,16 +1332,20 @@ U16 vfetch2 (U32 addr, int arn, REGS *regs)
 {
 U32     addr2;                          /* Address of second byte    */
 U32     abs1, abs2;                     /* Absolute addresses        */
+BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+
+    /* Obtain current access key from PSW */
+    akey = regs->psw.pkey;
 
     /* Calculate address of second byte of operand */
     addr2 = (addr + 1) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
 
     /* Get absolute address of first byte of operand */
-    abs1 = logical_to_abs (addr, arn, regs, ACCTYPE_READ);
+    abs1 = logical_to_abs (addr, arn, regs, ACCTYPE_READ, akey);
 
     /* Repeat address translation if operand crosses a page boundary */
     if ((addr2 & 0xFFF) == 0x000)
-        abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_READ);
+        abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_READ, akey);
     else
         abs2 = abs1 + 1;
 
@@ -1337,10 +1371,15 @@ U32 vfetch4 (U32 addr, int arn, REGS *regs)
 {
 int     i;                              /* Loop counter              */
 U32     value;                          /* Accumulated value         */
-U32     abs;                            /* Absolute storage location */
+U32     addr2;                          /* Page address of last byte */
+U32     abs, abs2;                      /* Absolute addresses        */
+BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+
+    /* Obtain current access key from PSW */
+    akey = regs->psw.pkey;
 
     /* Get absolute address of first byte of operand */
-    abs = logical_to_abs (addr, arn, regs, ACCTYPE_READ);
+    abs = logical_to_abs (addr, arn, regs, ACCTYPE_READ, akey);
 
     /* Fetch 4 bytes when operand is fullword aligned */
     if ((addr & 0x03) == 0) {
@@ -1350,8 +1389,14 @@ U32     abs;                            /* Absolute storage location */
                 | sysblk.mainstor[abs+3];
     }
 
-    /* Fetch 4 bytes when operand is not fullword aligned
-       and may therefore cross a page boundary */
+    /* Operand is not fullword aligned and may cross a page boundary */
+
+    /* Calculate page address of last byte of operand */
+    addr2 = (addr + 3) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr2 &= 0xFFFFF000;
+    abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_READ, akey);
+
+    /* Fetch integer value byte by byte from operand location */
     for (i=0, value=0; i < 4; i++) {
 
         /* Fetch byte from absolute storage */
@@ -1363,9 +1408,9 @@ U32     abs;                            /* Absolute storage location */
         addr++;
         addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
 
-        /* Translation required again if page boundary crossed */
-        if ((addr & 0xFFF) == 0x000)
-            abs = logical_to_abs (addr, arn, regs, ACCTYPE_READ);
+        /* Adjust absolute address if page boundary crossed */
+        if (addr == addr2)
+            abs = abs2;
 
     } /* end for */
     return value;
@@ -1390,10 +1435,15 @@ U64 vfetch8 (U32 addr, int arn, REGS *regs)
 {
 int     i;                              /* Loop counter              */
 U64     value;                          /* Accumulated value         */
-U32     abs;                            /* Absolute storage location */
+U32     addr2;                          /* Page address of last byte */
+U32     abs, abs2;                      /* Absolute addresses        */
+BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+
+    /* Obtain current access key from PSW */
+    akey = regs->psw.pkey;
 
     /* Get absolute address of first byte of operand */
-    abs = logical_to_abs (addr, arn, regs, ACCTYPE_READ);
+    abs = logical_to_abs (addr, arn, regs, ACCTYPE_READ, akey);
 
     /* Fetch 8 bytes when operand is doubleword aligned */
     if ((addr & 0x07) == 0) {
@@ -1407,8 +1457,14 @@ U32     abs;                            /* Absolute storage location */
                 | (U64)sysblk.mainstor[abs+7];
     }
 
-    /* Fetch 8 bytes when operand is not doubleword aligned
-       and may therefore cross a page boundary */
+    /* Non-doubleword aligned operand may cross a page boundary */
+
+    /* Calculate page address of last byte of operand */
+    addr2 = (addr + 7) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr2 &= 0xFFFFF000;
+    abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_READ, akey);
+
+    /* Fetch integer value byte by byte from operand location */
     for (i=0, value=0; i < 8; i++) {
 
         /* Fetch byte from absolute storage */
@@ -1420,9 +1476,9 @@ U32     abs;                            /* Absolute storage location */
         addr++;
         addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
 
-        /* Translation required again if page boundary crossed */
-        if ((addr & 0xFFF) == 0x000)
-            abs = logical_to_abs (addr, arn, regs, ACCTYPE_READ);
+        /* Adjust absolute address if page boundary crossed */
+        if (addr == addr2)
+            abs = abs2;
 
     } /* end for */
     return value;
@@ -1448,7 +1504,11 @@ U32     abs;                            /* Absolute storage location */
 /*-------------------------------------------------------------------*/
 void instfetch (BYTE *dest, U32 addr, REGS *regs)
 {
-U32 abs;                                /* Absolute storage address  */
+U32     abs;                            /* Absolute storage address  */
+BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+
+    /* Obtain current access key from PSW */
+    akey = regs->psw.pkey;
 
     /* Program check if instruction address is odd */
     if (addr & 0x01) {
@@ -1457,7 +1517,7 @@ U32 abs;                                /* Absolute storage address  */
     }
 
     /* Fetch first two bytes of instruction */
-    abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH);
+    abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
     memcpy (dest, sysblk.mainstor+abs, 2);
 
     /* Return if two-byte instruction */
@@ -1468,7 +1528,7 @@ U32 abs;                                /* Absolute storage address  */
     addr += 2;
     addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
     if ((addr & 0xFFF) == 0x000) {
-        abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH);
+        abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
     }
     memcpy (dest+2, sysblk.mainstor+abs, 2);
 
@@ -1480,8 +1540,102 @@ U32 abs;                                /* Absolute storage address  */
     addr += 2;
     addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
     if ((addr & 0xFFF) == 0x000) {
-        abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH);
+        abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
     }
     memcpy (dest+4, sysblk.mainstor+abs, 2);
 
 } /* end function instfetch */
+
+/*-------------------------------------------------------------------*/
+/* Move characters using specified keys and address spaces           */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr1   Effective address of first operand                   */
+/*      arn1    Access register number for first operand,            */
+/*              or USE_PRIMARY_SPACE or USE_SECONDARY_SPACE          */
+/*      key1    Bits 0-3=first operand access key, 4-7=zeroes        */
+/*      addr2   Effective address of second operand                  */
+/*      arn2    Access register number for second operand,           */
+/*              or USE_PRIMARY_SPACE or USE_SECONDARY_SPACE          */
+/*      key2    Bits 0-3=second operand access key, 4-7=zeroes       */
+/*      len     Operand length minus 1 (range 0-255)                 */
+/*      regs    Pointer to the CPU register context                  */
+/*                                                                   */
+/*      This function implements the MVC, MVCP, MVCS, MVCK, MVCSK,   */
+/*      and MVCDK instructions.  These instructions move up to 256   */
+/*      characters using the address space and key specified by      */
+/*      the caller for each operand.                                 */
+/*                                                                   */
+/*      The arn parameter for each operand may be an access          */
+/*      register number, in which case the operand is in the         */
+/*      primary, secondary, or home space, or in the space           */
+/*      designated by the specified access register, according to    */
+/*      the current PSW addressing mode.                             */
+/*                                                                   */
+/*      Alternatively the arn parameter may be one of the special    */
+/*      values USE_PRIMARY_SPACE or USE_SECONDARY_SPACE in which     */
+/*      case the operand is in the specified space regardless of     */
+/*      the current PSW addressing mode.                             */
+/*                                                                   */
+/*      A program check may be generated if either logical address   */
+/*      causes an addressing, protection, or translation exception,  */
+/*      and in this case the function does not return.               */
+/*-------------------------------------------------------------------*/
+void move_chars (U32 addr1, int arn1, BYTE key1, U32 addr2,
+                int arn2, BYTE key2, int len, REGS *regs)
+{
+U32     abs1, abs2;                     /* Absolute addresses        */
+U32     npv1, npv2;                     /* Next page virtual addrs   */
+U32     npa1 = 0, npa2 = 0;             /* Next page absolute addrs  */
+int     i;                              /* Loop counter              */
+BYTE    obyte;                          /* Operand byte              */
+
+    /* Translate addresses of leftmost operand bytes */
+    abs1 = logical_to_abs (addr1, arn1, regs, ACCTYPE_WRITE, key1);
+    abs2 = logical_to_abs (addr2, arn2, regs, ACCTYPE_READ, key2);
+
+    /* Calculate page addresses of rightmost operand bytes */
+    npv1 = (addr1 + len)
+                & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    npv1 &= 0xFFFFF000;
+    npv2 = (addr2 + len)
+                & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    npv2 &= 0xFFFFF000;
+
+    /* Translate next page addresses if page boundary crossed */
+    if (npv1 != (addr1 & 0xFFFFF000))
+        npa1 = logical_to_abs (npv1, arn1, regs, ACCTYPE_WRITE, key1);
+    if (npv2 != (addr2 & 0xFFFFF000))
+        npa2 = logical_to_abs (npv2, arn2, regs, ACCTYPE_READ, key2);
+
+    /* Process operands from left to right */
+    for ( i = 0; i < len+1; i++ )
+    {
+        /* Fetch a byte from the source operand */
+        obyte = sysblk.mainstor[abs2];
+
+        /* Store the byte in the destination operand */
+        sysblk.mainstor[abs1] = obyte;
+
+        /* Increment first operand address */
+        addr1++;
+        addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        abs1++;
+
+        /* Adjust absolute address if page boundary crossed */
+        if ((addr1 & 0xFFF) == 0x000)
+            abs1 = npa1;
+
+        /* Increment second operand address */
+        addr2++;
+        addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        abs2++;
+
+        /* Adjust absolute address if page boundary crossed */
+        if ((addr2 & 0xFFF) == 0x000)
+            abs2 = npa2;
+
+    } /* end for(i) */
+
+} /* end function move_chars */
+

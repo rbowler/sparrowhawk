@@ -81,7 +81,7 @@ static void display_scsw (DEVBLK *dev)
 /* FETCH AN INDIRECT DATA ADDRESS WORD FROM MAIN STORAGE             */
 /*-------------------------------------------------------------------*/
 static void fetch_idaw (BYTE code,      /* CCW operation code        */
-                        BYTE ccwkey,    /* Protection key            */
+                        BYTE ccwkey,    /* Bits 0-3=key, 4-7=zeroes  */
                         int idaseq,     /* 0=1st IDAW                */
                         U32 idawaddr,   /* Main storage addr of IDAW */
                         U32 *addr,      /* Returned IDAW contents    */

@@ -562,14 +562,10 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
            write, sense, or control command */
         if (dev->ckdxmark)
         {
-            ckd_build_sense (dev, SENSE_CR, SENSE1_NRF, 0,
-                            FORMAT_1, MESSAGE_0);
+            ckd_build_sense (dev, 0, SENSE1_NRF, 0, 0, 0);
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
             return -1;
         }
-
-        /* Set index marker found flag */
-        dev->ckdxmark = 1;
 
         /* Test for multitrack operation */
         if ((code & 0x80) == 0)
@@ -579,12 +575,24 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
             head = dev->ckdcurhead;
             rc = ckd_seek (dev, cyl, head, &trkhdr, unitstat);
             if (rc < 0) return -1;
+
+            /* Set index marker found flag */
+            dev->ckdxmark = 1;
         }
         else
         {
             /* If multitrack, attempt to advance to next track */
             rc = mt_advance (dev, unitstat);
             if (rc < 0) return -1;
+
+            /* Set index marker flag if non-search command */
+            if ((code & 0x7F) != 0x31
+                && (code & 0x7F) != 0x51
+                && (code & 0x7F) != 0x71
+                && (code & 0x7F) != 0x29
+                && (code & 0x7F) != 0x49
+                && (code & 0x7F) != 0x69)
+                dev->ckdxmark = 1;
         }
 
     } /* end for */
@@ -945,10 +953,17 @@ BYTE            key[256];               /* Key for search operations */
         dev->ckdwckd = 0;
     }
 
-    /* Reset index marker flag if write, sense, or control command,
+    /* Reset index marker flag if sense or control command,
+       or any write command (other search ID or search key),
        or any read command except read count or read sector */
-    if (IS_CCW_WRITE(code) || IS_CCW_SENSE(code)
-        || IS_CCW_CONTROL(code)
+    if (IS_CCW_SENSE(code) || IS_CCW_CONTROL(code)
+        || (IS_CCW_WRITE(code)
+            && (code & 0x7F) != 0x31
+            && (code & 0x7F) != 0x51
+            && (code & 0x7F) != 0x71
+            && (code & 0x7F) != 0x29
+            && (code & 0x7F) != 0x49
+            && (code & 0x7F) != 0x69)
         || (IS_CCW_READ(code)
             && (code & 0x7F) != 0x12
             && (code & 0x7F) != 0x22))

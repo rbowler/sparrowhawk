@@ -136,8 +136,8 @@ static inline void perform_chkpt_sync (void)
 void store_psw (PSW *psw, BYTE *addr)
 {
     addr[0] = psw->sysmask;
-    addr[1] = (psw->key << 4) | (psw->ecmode << 3) | (psw->mach << 2)
-                | (psw->wait << 2) | psw->prob;
+    addr[1] = (psw->pkey & 0xF0) | (psw->ecmode << 3)
+                | (psw->mach << 2) | (psw->wait << 1) | psw->prob;
 
     if ( psw->ecmode ) {
         addr[2] = (psw->space << 7) | (psw->armode << 6)
@@ -168,7 +168,7 @@ void store_psw (PSW *psw, BYTE *addr)
 int load_psw (PSW *psw, BYTE *addr)
 {
     psw->sysmask = addr[0];
-    psw->key = addr[1] >> 4;
+    psw->pkey = addr[1] & 0xF0;
     psw->ecmode = (addr[1] & 0x08) >> 3;
     psw->mach = (addr[1] & 0x04) >> 2;
     psw->wait = (addr[1] & 0x02) >> 1;
@@ -332,13 +332,17 @@ int     rc;                             /* Return code               */
 DEVBLK *dev;                            /* -> device block for SIO   */
 U32     ccwaddr;                        /* CCW address for start I/O */
 int     ccwfmt;                         /* CCW format (0 or 1)       */
-BYTE    ccwkey;                         /* Protection key for SIO    */
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
 U32     ioparm;                         /* I/O interruption parameter*/
 struct  timeval tv;                     /* Structure for gettimeofday*/
 U16     ax;                             /* Authorization index       */
 U16     pkm;                            /* PSW key mask              */
 U16     pasn;                           /* Primary ASN               */
 U16     sasn;                           /* Secondary ASN             */
+#ifdef FEATURE_MVS_ASSIST
+U32     lock;                           /* Lock value                */
+U32     lcpa;                           /* Logical CPU address       */
+#endif /*FEATURE_MVS_ASSIST*/
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
 U32     ioid;                           /* I/O interruption address  */
 PMCW    pmcw;                           /* Path management ctl word  */
@@ -398,15 +402,15 @@ static BYTE module[8];                  /* Module name               */
     /* Turn on trace for specific instructions */
 //  if (opcode == 0xB2 && ibyte == 0x20) sysblk.inststep = 1;
 //  if (opcode == 0xB1 && memcmp(module,"????????",8)==0) tracethis = 1;
-    if (opcode == 0xB2 && ibyte == 0x25) sysblk.inststep = 1; /*SSAR*/
-    if (opcode == 0xB2 && ibyte == 0x40) sysblk.inststep = 1; /*BAKR*/
-    if (opcode == 0xB2 && ibyte == 0x18) sysblk.inststep = 1; /*PC*/
-    if (opcode == 0xB2 && ibyte == 0x28) sysblk.inststep = 1; /*PT*/
-    if (opcode == 0xB2 && ibyte == 0x47) sysblk.inststep = 1; /*MSTA*/
-    if (opcode == 0xB2 && ibyte == 0x49) sysblk.inststep = 1; /*EREG*/
-    if (opcode == 0xB2 && ibyte == 0x4A) sysblk.inststep = 1; /*ESTA*/
-    if (opcode == 0x01 && ibyte == 0x01) sysblk.inststep = 1; /*PR*/
-    if (opcode == 0xE5 && ibyte == 0x00) sysblk.inststep = 1; /*LASP*/
+//  if (opcode == 0xB2 && ibyte == 0x25) sysblk.inststep = 1; /*SSAR*/
+//  if (opcode == 0xB2 && ibyte == 0x40) sysblk.inststep = 1; /*BAKR*/
+//  if (opcode == 0xB2 && ibyte == 0x18) sysblk.inststep = 1; /*PC*/
+//  if (opcode == 0xB2 && ibyte == 0x28) sysblk.inststep = 1; /*PT*/
+//  if (opcode == 0xB2 && ibyte == 0x47) sysblk.inststep = 1; /*MSTA*/
+//  if (opcode == 0xB2 && ibyte == 0x49) sysblk.inststep = 1; /*EREG*/
+//  if (opcode == 0xB2 && ibyte == 0x4A) sysblk.inststep = 1; /*ESTA*/
+//  if (opcode == 0x01 && ibyte == 0x01) sysblk.inststep = 1; /*PR*/
+//  if (opcode == 0xE5) sysblk.inststep = 1; /*LASP & MVS assists*/
     if (opcode == 0xFC) sysblk.inststep = 1; /*MP*/
     if (opcode == 0xFD) sysblk.inststep = 1; /*DP*/
 
@@ -3244,19 +3248,19 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
 
             /* Isolate the key from bits 24-27 of effective address */
-            n = (effective_addr & 0x000000F0) >> 4;
+            n = effective_addr & 0x000000F0;
 
             /* Privileged operation exception if in problem state
                and the corresponding PSW key mask bit is zero */
             if ( regs->psw.prob
-                 && ((regs->cr[3] << n) & 0x80) == 0 )
+                && ((regs->cr[3] << (n >> 4)) & 0x80000000) == 0 )
             {
                 program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Set PSW key */
-            regs->psw.key = n;
+            regs->psw.pkey = n;
 
             break;
 
@@ -3277,7 +3281,7 @@ static BYTE module[8];                  /* Module name               */
             /* Insert PSW key into bits 24-27 of general register 2
                and set bits 28-31 of general register 2 to zero */
             regs->gpr[2] &= 0xFFFFFF00;
-            regs->gpr[2] |= regs->psw.key << 4;
+            regs->gpr[2] |= (regs->psw.pkey & 0xF0);
 
             break;
 
@@ -4859,24 +4863,9 @@ static BYTE module[8];                  /* Module name               */
     /* MVC      Move Characters                                 [SS] */
     /*---------------------------------------------------------------*/
 
-        /* Process operands from left to right */
-        for ( i = 0; i < ibyte+1; i++ )
-        {
-            /* Fetch a byte from the source operand */
-            sbyte = vfetchb ( effective_addr2, ar2, regs );
-
-            /* Store the byte in the destination operand */
-            vstoreb ( sbyte, effective_addr, ar1, regs );
-
-            /* Increment operand addresses */
-            effective_addr++;
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            effective_addr2++;
-            effective_addr2 &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-        } /* end for(i) */
+        /* Move characters using current addressing mode and key */
+        move_chars (effective_addr, ar1, regs->psw.pkey,
+                effective_addr2, ar2, regs->psw.pkey, ibyte, regs);
 
         break;
 
@@ -5040,6 +5029,148 @@ static BYTE module[8];                  /* Module name               */
                     (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
 
         } /* end for(i) */
+
+        break;
+
+    case 0xD9:
+    /*---------------------------------------------------------------*/
+    /* MVCK     Move with Key                                   [SS] */
+    /*---------------------------------------------------------------*/
+
+        /* Load true length from R1 register */
+        h = regs->gpr[r1];
+
+        /* If the true length does not exceed 256, set condition code
+           zero, otherwise set cc=3 and use effective length of 256 */
+        if (h <= 256)
+            cc = 0;
+        else {
+            cc = 3;
+            h = 256;
+        }
+
+        /* Load source key from R3 register bits 24-27 */
+        j = regs->gpr[r3] & 0xF0;
+
+        /* Program check if in problem state and key mask in
+           CR3 bits 0-15 is not 1 for the specified key */
+        if ( regs->psw.prob
+            && ((regs->cr[3] << (j >> 4)) & 0x80000000) == 0 )
+        {
+            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Move characters using source key for second operand */
+        if (h > 0)
+            move_chars (effective_addr, ar1, regs->psw.pkey,
+                        effective_addr2, ar2, j, h-1, regs);
+
+        /* Set condition code */
+        regs->psw.cc = cc;
+
+        break;
+
+    case 0xDA:
+    /*---------------------------------------------------------------*/
+    /* MVCP     Move to Primary                                 [SS] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if secondary space control (CR0 bit 5) is 0,
+           or if DAT is off, or if in AR mode or home-space mode */
+        if ((regs->cr[0] & CR0_SEC_SPACE) == 0
+            || REAL_MODE(&regs->psw)
+            || regs->psw.armode)
+        {
+            program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Load true length from R1 register */
+        h = regs->gpr[r1];
+
+        /* If the true length does not exceed 256, set condition code
+           zero, otherwise set cc=3 and use effective length of 256 */
+        if (h <= 256)
+            cc = 0;
+        else {
+            cc = 3;
+            h = 256;
+        }
+
+        /* Load secondary space key from R3 register bits 24-27 */
+        j = regs->gpr[r3] & 0xF0;
+
+        /* Program check if in problem state and key mask in
+           CR3 bits 0-15 is not 1 for the specified key */
+        if ( regs->psw.prob
+            && ((regs->cr[3] << (j >> 4)) & 0x80000000) == 0 )
+        {
+            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Move characters from secondary address space to primary
+           address space using secondary key for second operand */
+        if (h > 0)
+            move_chars (effective_addr, USE_PRIMARY_SPACE,
+                        regs->psw.pkey,
+                        effective_addr2, USE_SECONDARY_SPACE,
+                        j, h-1, regs);
+
+        /* Set condition code */
+        regs->psw.cc = cc;
+
+        break;
+
+    case 0xDB:
+    /*---------------------------------------------------------------*/
+    /* MVCS     Move to Secondary                               [SS] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if secondary space control (CR0 bit 5) is 0,
+           or if DAT is off, or if in AR mode or home-space mode */
+        if ((regs->cr[0] & CR0_SEC_SPACE) == 0
+            || REAL_MODE(&regs->psw)
+            || regs->psw.armode)
+        {
+            program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Load true length from R1 register */
+        h = regs->gpr[r1];
+
+        /* If the true length does not exceed 256, set condition code
+           zero, otherwise set cc=3 and use effective length of 256 */
+        if (h <= 256)
+            cc = 0;
+        else {
+            cc = 3;
+            h = 256;
+        }
+
+        /* Load secondary space key from R3 register bits 24-27 */
+        j = regs->gpr[r3] & 0xF0;
+
+        /* Program check if in problem state and key mask in
+           CR3 bits 0-15 is not 1 for the specified key */
+        if ( regs->psw.prob
+            && ((regs->cr[3] << (j >> 4)) & 0x80000000) == 0 )
+        {
+            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Move characters from primary address space to secondary
+           address space using secondary key for first operand */
+        if (h > 0)
+            move_chars (effective_addr, USE_SECONDARY_SPACE, j,
+                        effective_addr2, USE_PRIMARY_SPACE,
+                        regs->psw.pkey, h-1, regs);
+
+        /* Set condition code */
+        regs->psw.cc = cc;
 
         break;
 
@@ -5321,6 +5452,185 @@ static BYTE module[8];                  /* Module name               */
             /* Test protection and set condition code */
             regs->psw.cc =
                 test_prot (effective_addr, ar1, regs, dbyte);
+
+            break;
+
+#ifdef FEATURE_MVS_ASSIST
+        case 0x04:
+        /*-----------------------------------------------------------*/
+        /* E504: Obtain Local Lock                             [SSE] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Obtain main-storage access lock */
+            obtain_lock (&sysblk.mainlock);
+
+            /* Load ASCB address from first operand location */
+            n1 = vfetch4 ( effective_addr, ar1, regs );
+
+            /* Load locks held bits from second operand location */
+            n2 = vfetch4 ( effective_addr2, ar2, regs );
+
+            /* Test if any higher lock is already held by this CPU */
+            if (n2 & ~PSALCLLI)
+            {
+                printf ("Lock hierarchy error\n");
+                instfetch (dword, regs->psw.ia - regs->psw.ilc, regs);
+                display_inst (regs, dword);
+                panel_command (regs);
+                /*INCOMPLETE*/
+                release_lock (&sysblk.mainlock);
+                break;
+            }
+
+            /* Load our logical CPU address from PSALCPUA */
+            lcpa = vfetch4 ( PSALCPUA, USE_REAL_ADDR, regs );
+
+            /* Test if local lock is already held by any CPU */
+            lock = vfetch4 ( n1 + ASCBLOCK, 0, regs );
+            if (lock != 0)
+            {
+                printf ("Local lock requested by CPU %8.8lX"
+                        " held by CPU %8.8lX\n", lcpa, lock);
+                instfetch (dword, regs->psw.ia - regs->psw.ilc, regs);
+                display_inst (regs, dword);
+                panel_command (regs);
+                /*INCOMPLETE*/
+                release_lock (&sysblk.mainlock);
+                break;
+            }
+
+            /* Store our logical CPU address in ASCBLOCK */
+            vstore4 ( lcpa, n1 + ASCBLOCK, 0, regs );
+
+            /* Store the local lock held bit in the second operand */
+            n2 |= PSALCLLI;
+            vstore4 ( n2, effective_addr2, ar2, regs );
+
+            /* Release main-storage access lock */
+            release_lock (&sysblk.mainlock);
+
+            break;
+
+        case 0x05:
+        /*-----------------------------------------------------------*/
+        /* E505: Release Local Lock                            [SSE] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Obtain main-storage access lock */
+            obtain_lock (&sysblk.mainlock);
+
+            /* Load ASCB address from first operand location */
+            n1 = vfetch4 ( effective_addr, ar1, regs );
+
+            /* Load locks held bits from second operand location */
+            n2 = vfetch4 ( effective_addr2, ar2, regs );
+
+            /* Test if any higher lock is already held by this CPU */
+            if (n2 & ~PSALCLLI)
+            {
+                printf ("Lock hierarchy error\n");
+                instfetch (dword, regs->psw.ia - regs->psw.ilc, regs);
+                display_inst (regs, dword);
+                panel_command (regs);
+                /*INCOMPLETE*/
+                release_lock (&sysblk.mainlock);
+                break;
+            }
+
+            /* Load our logical CPU address from PSALCPUA */
+            lcpa = vfetch4 ( PSALCPUA, USE_REAL_ADDR, regs );
+
+            /* Check that local lock is indeed held by our CPU */
+            lock = vfetch4 ( n1 + ASCBLOCK, 0, regs );
+            if (lock != lcpa)
+            {
+                printf ("Local lock release by CPU %8.8lX"
+                        " but held by CPU %8.8lX\n", lcpa, lock);
+                instfetch (dword, regs->psw.ia - regs->psw.ilc, regs);
+                display_inst (regs, dword);
+                panel_command (regs);
+                /*INCOMPLETE*/
+                release_lock (&sysblk.mainlock);
+                break;
+            }
+
+            /* Remove our logical CPU address from ASCBLOCK */
+            vstore4 ( 0, n1 + ASCBLOCK, 0, regs );
+
+            /* Reset the local lock held bit in the second operand */
+            n2 &= ~PSALCLLI;
+            vstore4 ( n2, effective_addr2, ar2, regs );
+
+            /* Release main-storage access lock */
+            release_lock (&sysblk.mainlock);
+
+            break;
+#endif /*FEATURE_MVS_ASSIST*/
+
+        case 0x0E:
+        /*-----------------------------------------------------------*/
+        /* E50E: MVCSK - Move with Source Key                  [SSE] */
+        /*-----------------------------------------------------------*/
+
+            /* Load operand length-1 from register 0 bits 24-31 */
+            h = regs->gpr[0] & 0xFF;
+
+            /* Load source key from register 1 bits 24-27 */
+            j = regs->gpr[1] & 0xF0;
+
+            /* Program check if in problem state and key mask in
+               CR3 bits 0-15 is not 1 for the specified key */
+            if ( regs->psw.prob
+                && ((regs->cr[3] << (j >> 4)) & 0x80000000) == 0 )
+            {
+                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Move characters using source key for second operand */
+            move_chars (effective_addr, ar1, regs->psw.pkey,
+                        effective_addr2, ar2, j, h, regs);
+
+            break;
+
+        case 0x0F:
+        /*-----------------------------------------------------------*/
+        /* E50F: MVCDK - Move with Destination Key             [SSE] */
+        /*-----------------------------------------------------------*/
+
+            /* Load operand length-1 from register 0 bits 24-31 */
+            h = regs->gpr[0] & 0xFF;
+
+            /* Load destination key from register 1 bits 24-27 */
+            j = regs->gpr[1] & 0xF0;
+
+            /* Program check if in problem state and key mask in
+               CR3 bits 0-15 is not 1 for the specified key */
+            if ( regs->psw.prob
+                && ((regs->cr[3] << (j >> 4)) & 0x80000000) == 0 )
+            {
+                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Move characters using destination key for operand 1 */
+            move_chars (effective_addr, ar1, j,
+                        effective_addr2, ar2, regs->psw.pkey,
+                        h, regs);
 
             break;
 

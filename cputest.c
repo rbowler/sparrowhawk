@@ -74,7 +74,7 @@ REGS   *regs;
     /* Build the initial PSW */
     memset (&psw, 0, sizeof(psw));
     psw.sysmask = PSW_IOMASK | PSW_EXTMASK;
-    psw.key = 0;
+    psw.pkey = 0x00;
     psw.ecmode = 1;
     psw.mach = 1;
     psw.prob = 0;
