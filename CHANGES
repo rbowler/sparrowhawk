@@ -1,3 +1,7 @@
+20 May 2002 Fix attach command broken in 2.16.1 - Jay Maynard
+14 May 2002 Fix S/370 timer problem - Valery Pogonchenko
+13 May 2002 Possible fix for `timed_wait_condition' loop - Greg Smith
+09 May 2002 Fix 3350 dasdtab entry - Greg Smith
 29 Apr 2002 Fix fthreads "trylock" for REAL this time - Fish
 25 Apr 2002 Hot fix for fthreads "trylock" oversight - Fish
 21 Apr 2002 Fix various backwards merge problems with cckd - Greg Smith

@@ -3013,6 +3013,7 @@ CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
 int             dfw_locked;             /* Dfw lock obtained         */
 int             size;                   /* File size                 */
 int             wait;                   /* Seconds to wait           */
+struct timeval  now;                    /* Time-of-day               */
 struct timespec tm;                     /* Time-of-day to wait       */
 int             gc;                     /* Garbage states            */
 struct          CCKD_GCOL {             /* Garbage collection parms  */
@@ -3102,17 +3103,13 @@ int             size;                   /* Bytes per iteration       */
 
     gc_wait:
 #ifndef CCKD_NOTHREAD
-        time (&cckd->gctime);
-        DEVTRACE ( "cckddasd: gcol waiting %d seconds at %s",
-                   wait, ctime(&cckd->gctime));
-
-        tm.tv_sec = cckd->gctime + wait;
-        tm.tv_nsec = 0;
+        DEVTRACE ( "cckddasd: gcol waiting %d seconds\n", wait);
         obtain_lock (&cckd->gclock);
+        gettimeofday (&now, NULL);
+        tm.tv_sec = now.tv_sec + wait;
+        tm.tv_nsec = now.tv_usec * 1000;
         timed_wait_condition ( &cckd->gccond, &cckd->gclock, &tm);
         release_lock (&cckd->gclock);
-        time (&cckd->gctime);
-        DEVTRACE ( "cckddasd: gcol waking up at %s", ctime(&cckd->gctime));
 #endif
     } while (cckd->threading);
 
