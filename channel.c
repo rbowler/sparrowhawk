@@ -910,9 +910,11 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             || (more && ((flags & CCW_FLAGS_CD) == 0)))
         {
             /* Set incorrect length status if data chaining or
-               or if suppress length indication flag is off */
-            if ((flags & CCW_FLAGS_CD)
+               or if suppress length indication flag is off
+               for non-NOP CCWs */
+            if (((flags & CCW_FLAGS_CD)
                 || (flags & CCW_FLAGS_SLI) == 0)
+                && (code != 0x03))
                 chanstat |= CSW_IL;
         }
 
@@ -1228,6 +1230,72 @@ PSA    *psa;                            /* -> Prefixed storage area  */
     return cc;
 
 } /* end function test_io */
+
+/*-------------------------------------------------------------------*/
+/* HALT I/O                                                          */
+/*-------------------------------------------------------------------*/
+int halt_io (REGS *regs, DEVBLK *dev, BYTE ibyte)
+{
+int     cc;                             /* Condition code            */
+PSA    *psa;                            /* -> Prefixed storage area  */
+
+    /* Obtain the device lock */
+    obtain_lock (&dev->lock);
+
+    /* Test device status and set condition code */
+    if (dev->busy)
+    {
+        /* Set condition code 2 if device is busy */
+        cc = 2;
+        
+        /* Tell channel and device to halt */
+        dev->scsw.flag2 |= SCSW2_FC_HALT;
+        
+        /* Clear pending interrupts */
+        dev->pending = 0;
+        dev->pcipending = 0;
+
+    }
+    else if (!(dev->pcipending) && !(dev->pending))
+    {
+        /* Set condition code 1 */
+        cc = 1;
+
+        /* Store the channel status word at PSA+X'40' */
+        psa = (PSA*)(sysblk.mainstor + regs->pxr);
+        memcpy (psa->csw, dev->csw, 8);
+        if (dev->ccwtrace || dev->ccwstep)
+            display_csw (dev, dev->csw);
+
+	/* Signal pending interrupt */
+	dev->pending = 1;
+    }
+    else
+    {
+        /* Set condition code 0 if interrupt is pending */
+        cc = 0;
+    }
+
+    /* For 3270 device, clear any pending input */
+    if (dev->devtype == 0x3270)
+    {
+        dev->readpending = 0;
+        dev->rlen3270 = 0;
+    }
+
+    /* Signal console thread to redrive select */
+    if (dev->console)
+    {
+        signal_thread (sysblk.cnsltid, SIGHUP);
+    }
+
+    /* Release the device lock */
+    release_lock (&dev->lock);
+
+    /* Return the condition code */
+    return cc;
+
+} /* end function halt_io */
 #endif /*FEATURE_S370_CHANNEL*/
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
@@ -1376,7 +1444,7 @@ int     cc;                             /* Condition code            */
 /*-------------------------------------------------------------------*/
 void clear_subchan (REGS *regs, DEVBLK *dev)
 {
-    /*debug*/ logmsg ("%4.4X: Clear subchannel\n", dev->devnum);
+//  /*debug*/ logmsg ("%4.4X: Clear subchannel\n", dev->devnum);
 
     /* Obtain the device lock */
     obtain_lock (&dev->lock);

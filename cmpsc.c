@@ -13,6 +13,8 @@
 
 #include "hercules.h"
 
+#include "opcode.h"
+
 /* Comment next four lines if you want to try the code that is
    still under construction */
 #ifdef FEATURE_CMPSC
@@ -368,8 +370,10 @@ void
 zz_compression_call (BYTE inst[], int execflag, REGS * regs)
 {
   int cdss = CMPGR0_cdss (regs);
-  int r1 = CMPRRE_r1 (inst);
-  int r2 = CMPRRE_r2 (inst);
+  int r1;
+  int r2;
+
+  RRE(inst, execflag, regs, r1, r2);
 
 #ifdef CMPDEBUG
   CMPRRE_prt (inst);
@@ -619,20 +623,30 @@ cmpsymbol_translate (int r1, int r2, REGS * regs)
 /* implementation.                                              */
 /*--------------------------------------------------------------*/
 void
-cmpsc (BYTE inst[], REGS * regs)
+zz_compression_call (BYTE inst[], int execflag, REGS * regs)
 {
   BYTE cdss = CMPGR0_cdss (regs);
   U32 length;
-  int r1 = CMPRRE_r1 (inst);
-  U32 dst_addr = CMP_addr (r1, regs);
-  int r2 = CMPRRE_r2 (inst);
-  U32 src_addr = CMP_addr (r2, regs);
+  int r1;
+  int r2;
+  U32 dst_addr;
+  U32 src_addr;
 
-#ifdef CMPDEBUG
-  CMPRRE_prt (inst);
-  CMPGR0_prt (regs);
-  CMPGR1_prt (regs);
+#if 1
+logmsg("CMPSC: ");
+display_inst (regs, regs->inst);
 #endif
+
+  RRE(inst, execflag, regs, r1, r2);
+
+  dst_addr = CMP_addr (r1, regs);
+  src_addr = CMP_addr (r2, regs);
+
+// #ifdef CMPDEBUG
+//   CMPRRE_prt (inst);
+//   CMPGR0_prt (regs);
+//   CMPGR1_prt (regs);
+// #endif
 
   /* Check if R1 and R2 are even-odd pairs and if compressed-data symbol
      size is valid */

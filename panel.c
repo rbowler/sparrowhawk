@@ -846,14 +846,13 @@ int     n;                              /* Number of bytes in buffer */
     /* Display the general purpose registers */
     display_regs (regs);
 
-    /* Display control registers and access registers if appropriate */
-    if (!REAL_MODE(&regs->psw))
-    {
+    /* Display control registers if appropriate */
+    if (!REAL_MODE(&regs->psw) || regs->inst[0] == 0xB2)
         display_cregs (regs);
 
-        if (ACCESS_REGISTER_MODE(&regs->psw))
-            display_aregs (regs);
-    }
+    /* Display access registers if appropriate */
+    if (!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        display_aregs (regs);
 
 } /* end function display_inst */
 

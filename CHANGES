@@ -1,3 +1,24 @@
+03 Aug 2000 Simplify logmsg and DEVTRACE macro definitions (Jay Maynard)
+03 Aug 2000 Prevent incorrect length indication on CONTROL NOP CCW (Jay
+            Maynard)
+01 Aug 2000 Complete 370 HIO processing (Jay Maynard)
+25 Jul 2000 Correct nullification of TPI and TSCH (Jan Jaeger)
+25 Jul 2000 Add device locking to MSCH (Jan Jaeger)
+25 Jul 2000 Correct TPROT instruction (Jan Jaeger)
+22 Jul 2000 Correct address wrapping on assist instructions (Jan Jaeger)
+22 Jul 2000 Change interrupt logic to use longjmp on all interrupts (Jan
+            Jaeger)
+22 Jul 2000 Clear remainder of ASTE when loading ASTE with ASF=0 
+            in translace_asn (Jan Jaeger)
+22 Jul 2000 Add (incomplete) PLO instruction (Jan Jaeger)
+22 Jul 2000 Fix CLCL interruption problem (Jan Jaeger)
+22 Jul 2000 Fix addresswrap in MVO (Jan Jaeger)
+19 Jul 2000 Make ED and EDMK perform a trial run (Jan Jaeger)
+16 Jul 2000 Fix address wraparound in MVO (Jan Jaeger)
+15 Jul 2000 Fix CR15 corruption in form_stack_entry,
+            fix nullification in form_stack_entry and
+	    unstack_registers (Jan Jaeger)
+10 Jul 2000 Fix loss of interrupts in PR (Jan Jaeger)
 22 Jul 2000 Track overflow processing fixes (by Jay Maynard, suggested by
             Valery Pogonchenko)
 21 Jul 2000 Added TOD clock update to STCK, STCKE, DIAG 204, and TRACE

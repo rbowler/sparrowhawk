@@ -164,7 +164,7 @@ REGS   *realregs;                       /* True regs structure       */
 U32     n;
 #endif /*defined(FOOTPRINT_BUFFER)*/
 
-static char *pgmintname[] = { "Unassigned exception",
+static char *pgmintname[] = { 
         /* 01 */        "Operation exception",
         /* 02 */        "Priviledged-operation exception",
         /* 03 */        "Execute exception",
@@ -193,7 +193,7 @@ static char *pgmintname[] = { "Unassigned exception",
         /* 1A */        "Unassigned exception",
         /* 1B */        "Unassigned exception",
         /* 1C */        "Space-switch event",
-        /* 1D */        "Unassigned exception",
+        /* 1D */        "Square-root exception",
         /* 1E */        "Unnormalized-operand exception",
         /* 1F */        "PC-translation specification exception",
         /* 20 */        "AFX-translation exception",
@@ -227,7 +227,8 @@ static char *pgmintname[] = { "Unassigned exception",
         /* 3C */        "Unassigned exception",
         /* 3D */        "Unassigned exception",
         /* 3E */        "Unassigned exception",
-        /* 3F */        "Unassigned exception" };
+        /* 3F */        "Unassigned exception",
+        /* 40 */        "Monitor event" };
 
     /* program_check() may be called with a shadow copy of the
        regs structure, realregs is the pointer to the real structure
@@ -242,11 +243,11 @@ static char *pgmintname[] = { "Unassigned exception",
 #endif /*MAX_CPU_ENGINES > 1*/
 
     /* Perform serialization and checkpoint synchronization */
-    PERFORM_SERIALIZATION (regs);
-    PERFORM_CHKPT_SYNC (regs);
+    PERFORM_SERIALIZATION (realregs);
+    PERFORM_CHKPT_SYNC (realregs);
 
     /* Set the main storage reference and change bits */
-    STORAGE_KEY(regs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(realregs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Back up the PSW for exceptions which cause nullification,
        unless the exception occurred during instruction fetch */
@@ -270,14 +271,14 @@ static char *pgmintname[] = { "Unassigned exception",
         || code == PGM_STACK_TYPE_EXCEPTION
         || code == PGM_STACK_OPERATION_EXCEPTION
         || code == PGM_VECTOR_OPERATION_EXCEPTION)
-        && regs->instvalid)
+        && realregs->instvalid)
     {
         realregs->psw.ia -= realregs->psw.ilc;
         realregs->psw.ia &= ADDRESS_MAXWRAP(realregs);
     }
 
     /* Store the interrupt code in the PSW */
-    regs->psw.intcode = code;
+    realregs->psw.intcode = code;
 
     /* Trace the program check */
     if (sysblk.insttrace || sysblk.inststep
@@ -285,23 +286,23 @@ static char *pgmintname[] = { "Unassigned exception",
     {
 #if defined(FOOTPRINT_BUFFER)
         if(!(sysblk.insttrace || sysblk.inststep))
-            for(n = sysblk.footprptr[regs->cpuad] + 1 ; n != sysblk.footprptr[regs->cpuad]; n++, n &= FOOTPRINT_BUFFER - 1)
-                display_inst (&sysblk.footprregs[regs->cpuad][n], sysblk.footprregs[regs->cpuad][n].inst);
+            for(n = sysblk.footprptr[realregs->cpuad] + 1 ; n != sysblk.footprptr[realregs->cpuad]; n++, n &= FOOTPRINT_BUFFER - 1)
+                display_inst (&sysblk.footprregs[realregs->cpuad][n], sysblk.footprregs[realregs->cpuad][n].inst);
 #endif /*defined(FOOTPRINT_BUFFER)*/
-        logmsg ("CPU%4.4X: %s CODE=%4.4X ILC=%d\n", regs->cpuad,
-                pgmintname[ code & 0x3F], code, regs->psw.ilc);
-        display_inst (regs, regs->instvalid ? regs->inst : NULL);
+        logmsg ("CPU%4.4X: %s CODE=%4.4X ILC=%d\n", realregs->cpuad,
+                pgmintname[ (code - 1) & 0x3F], code, realregs->psw.ilc);
+        display_inst (realregs, realregs->instvalid ? realregs->inst : NULL);
     }
 
     /* Point to PSA in main storage */
-    psa = (PSA*)(sysblk.mainstor + regs->pxr);
+    psa = (PSA*)(sysblk.mainstor + realregs->pxr);
 
     /* For ECMODE, store extended interrupt information in PSA */
-    if ( regs->psw.ecmode )
+    if ( realregs->psw.ecmode )
     {
         /* Store the program interrupt code at PSA+X'8C' */
         psa->pgmint[0] = 0;
-        psa->pgmint[1] = regs->psw.ilc;
+        psa->pgmint[1] = realregs->psw.ilc;
         psa->pgmint[2] = code >> 8;
         psa->pgmint[3] = code & 0xFF;
 
@@ -357,14 +358,14 @@ static char *pgmintname[] = { "Unassigned exception",
     }
 
     /* Return directly to cpu_thread function */
-    longjmp (regs->progjmp, code);
+    longjmp (realregs->progjmp, code);
 
 } /* end function program_check */
 
 /*-------------------------------------------------------------------*/
 /* Load restart new PSW                                              */
 /*-------------------------------------------------------------------*/
-static int psw_restart (REGS *regs)
+static void restart_interrupt (REGS *regs)
 {
 int     rc;                             /* Return code               */
 PSA    *psa;                            /* -> Prefixed storage area  */
@@ -383,6 +384,9 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 
     /* Load new PSW from PSA+X'0' */
     rc = load_psw (&(regs->psw), psa->iplpsw);
+
+    release_lock(&sysblk.intlock);
+
     if ( rc )
     {
         logmsg ("CPU%4.4X: Invalid restart new PSW: "
@@ -391,11 +395,13 @@ PSA    *psa;                            /* -> Prefixed storage area  */
                 psa->iplpsw[0], psa->iplpsw[1], psa->iplpsw[2],
                 psa->iplpsw[3], psa->iplpsw[4], psa->iplpsw[5],
                 psa->iplpsw[6], psa->iplpsw[7]);
-        return rc;
+        program_check(regs, rc);
     }
+    else
+        regs->cpustate = CPUSTATE_STARTED;
 
-    return 0;
-} /* end function psw_restart */
+    longjmp (regs->progjmp, 0);
+} /* end function restart_interrupt */
 
 
 /*-------------------------------------------------------------------*/
@@ -475,9 +481,11 @@ DWORD   csw;                            /* CSW for S/370 channels    */
 
     /* Load new PSW from PSA+X'78' */
     rc = load_psw ( &(regs->psw), psa->iopnew );
+
+    release_lock(&sysblk.intlock);
+
     if ( rc )
     {
-        release_lock(&sysblk.intlock);
         logmsg ("CPU%4.4X: Invalid I/O new PSW: "
                 "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
                 regs->cpuad,
@@ -487,6 +495,7 @@ DWORD   csw;                            /* CSW for S/370 channels    */
         program_check (regs, rc);
     }
 
+    longjmp (regs->progjmp, 0);
 } /* end function perform_io_interrupt */
 
 /*-------------------------------------------------------------------*/
@@ -555,9 +564,11 @@ U32     fsta;                           /* Failing storage address   */
 
     /* Load new PSW from PSA+X'70' */
     rc = load_psw ( &(regs->psw), psa->mcknew );
+
+    release_lock(&sysblk.intlock);
+
     if ( rc )
     {
-        release_lock(&sysblk.intlock);
         logmsg ("CPU%4.4X: Invalid machine check new PSW: "
                 "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
                 regs->cpuad,
@@ -567,6 +578,7 @@ U32     fsta;                           /* Failing storage address   */
         program_check (regs, rc);
     }
 
+    longjmp (regs->progjmp, 0);
 } /* end function perform_mck_interrupt */
 
 /*-------------------------------------------------------------------*/
@@ -574,7 +586,6 @@ U32     fsta;                           /* Failing storage address   */
 /*-------------------------------------------------------------------*/
 void *cpu_thread (REGS *regs)
 {
-int     rc;                             /* Return code               */
 int     tracethis;                      /* Trace this instruction    */
 int     stepthis;                       /* Stop on this instruction  */
 int     diswait;                        /* 1=Disabled wait state     */
@@ -797,8 +808,7 @@ int     icidx;                          /* Instruction counter index */
                 PERFORM_SERIALIZATION (regs);
                 PERFORM_CHKPT_SYNC (regs);
                 regs->restart = 0;
-                rc = psw_restart (regs);
-                if (rc == 0) regs->cpustate = CPUSTATE_STARTED;
+                restart_interrupt (regs);
             } /* end if(restart) */
 
             /* This is where a stopped CPU will wait */
@@ -929,6 +939,7 @@ int     icidx;                          /* Instruction counter index */
          || regs->inst[0] == 0xA6
          || regs->inst[0] == 0xE4) tracethis = 1;
 #endif
+// if (regs->inst[0] == 0x0A && regs->inst[1] == 0x38 && regs->gpr[1] == 0x7F7731D0) sysblk.inststep = 1;
 
         /* Test for breakpoint */
         shouldbreak = sysblk.instbreak
@@ -953,7 +964,10 @@ int     icidx;                          /* Instruction counter index */
         }
 
         /* Execute the instruction */
-        EXECUTE_INSTRUCTION (regs->inst, 0, regs);
+//      if(regs->inst[0] < 0x80)
+            EXECUTE_INSTRUCTION (regs->inst, 0, regs);
+//      else
+//          execute_instruction (regs->inst, 0, regs);
     }
 
     return NULL;

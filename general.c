@@ -275,7 +275,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         npa2 = logical_to_abs (npv2, b2, regs, ACCTYPE_READ, akey);
 
     /* Process operands from left to right */
-    for ( i = 0; i < l+1; i++ )
+    for ( i = 0; i <= l; i++ )
     {
         /* Fetch a byte from each operand */
         byte1 = sysblk.mainstor[abs1];
@@ -616,7 +616,7 @@ void zz_branch_on_index_high (BYTE inst[], int execflag, REGS *regs)
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
 U32     effective_addr2;                /* effective address         */
-int     i, j;                           /* Integer work areas        */
+S32     i, j;                           /* Integer work areas        */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -644,7 +644,7 @@ void zz_branch_on_index_low_or_equal (BYTE inst[], int execflag, REGS *regs)
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
 U32     effective_addr2;                /* effective address         */
-int     i, j;                           /* Integer work areas        */
+S32     i, j;                           /* Integer work areas        */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -2005,7 +2005,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         npa2 = logical_to_abs (npv2, b2, regs, ACCTYPE_READ, akey);
 
     /* Process operands from left to right */
-    for ( i = 0; i < l+1; i++ )
+    for ( i = 0; i <= l; i++ )
     {
         /* Fetch a byte from each operand */
         byte1 = sysblk.mainstor[abs1];
@@ -2098,13 +2098,15 @@ void zz_insert_character (BYTE inst[], int execflag, REGS *regs)
 int     r1;                             /* Value of R field          */
 int     b2;                             /* Base of effective addr    */
 U32     effective_addr2;                /* Effective address         */
-U32     n;                              /* 32-bit operand values     */
+BYTE    obyte;                          /* Operand byte              */
 
     RX(inst, execflag, regs, r1, b2, effective_addr2);
 
+    /* fetch the byte to be inserted */
+    obyte = vfetchb ( effective_addr2, b2, regs );
+
     /* Load rightmost byte of R1 register from operand address */
-    n = regs->gpr[r1] & 0xFFFFFF00;
-    regs->gpr[r1] = n | vfetchb ( effective_addr2, b2, regs );
+    regs->gpr[r1] = (regs->gpr[r1] & 0xFFFFFF00) | obyte;
 }
 
 
@@ -2236,8 +2238,7 @@ void zz_load_access_multiple (BYTE inst[], int execflag, REGS *regs)
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
 U32     effective_addr2;                /* effective address         */
-U32     n;                              /* 32-bit operand values     */
-int     d;                              /* Integer work areas        */
+int     n, d;                           /* Integer work areas        */
 BYTE    rwork[64];                      /* Register work area        */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
@@ -2306,7 +2307,7 @@ U32     effective_addr2;                /* Effective address         */
     else if ( HOME_SPACE_MODE(&(regs->psw)) )
         regs->ar[r1] = ALET_HOME;
     else /* ACCESS_REGISTER_MODE(&(regs->psw)) */
-        regs->ar[r1] = (b2 == 0)? 0 : regs->ar[b2];
+        regs->ar[r1] = (b2 == 0) ? 0 : regs->ar[b2];
 }
 
 
@@ -2805,14 +2806,14 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         npa2 = logical_to_abs (npv2, b2, regs, ACCTYPE_READ, akey);
 
     /* Process operands from left to right */
-    for ( i = 0; i < l+1; i++ )
+    for ( i = 0; i <= l; i++ )
     {
         /* Fetch a byte from each operand */
         byte1 = sysblk.mainstor[abs1];
         byte2 = sysblk.mainstor[abs2];
 
         /* Copy low digit of operand 2 to operand 1 */
-        byte1 = (byte1 & 0xF0) | ( byte2 & 0x0F);
+        byte1 = (byte1 & 0xF0) | (byte2 & 0x0F);
 
         /* Store the result in the destination operand */
         sysblk.mainstor[abs1] = byte1;
@@ -2924,16 +2925,18 @@ BYTE    dbyte;                          /* Destination operand byte  */
 
     /* Fetch the rightmost byte from the source operand */
     effective_addr2 += l2;
-    sbyte = vfetchb ( effective_addr2, b2, regs );
+    effective_addr2 &= ADDRESS_MAXWRAP(regs);
+    sbyte = vfetchb ( effective_addr2--, b2, regs );
 
     /* Fetch the rightmost byte from the destination operand */
     effective_addr1 += l1;
+    effective_addr1 &= ADDRESS_MAXWRAP(regs);
     dbyte = vfetchb ( effective_addr1, b1, regs );
 
     /* Move low digit of source byte to high digit of destination */
     dbyte &= 0x0F;
     dbyte |= sbyte << 4;
-    vstoreb ( dbyte, effective_addr1, b1, regs );
+    vstoreb ( dbyte, effective_addr1--, b1, regs );
 
     /* Process remaining bytes from right to left */
     for (i = l1, j = l2; i > 0; i--)
@@ -2942,18 +2945,17 @@ BYTE    dbyte;                          /* Destination operand byte  */
         dbyte = sbyte >> 4;
 
         /* Fetch next byte from second operand */
-        if ( j-- > 0 )
-            sbyte = vfetchb ( --effective_addr2, b2, regs );
+        if ( j-- > 0 ) {
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+            sbyte = vfetchb ( effective_addr2--, b2, regs );
+        }
         else
             sbyte = 0x00;
 
         /* Move low digit to destination high digit */
         dbyte |= sbyte << 4;
-        vstoreb ( dbyte, --effective_addr1, b1, regs );
-
-        /* Wraparound according to addressing mode */
         effective_addr1 &= ADDRESS_MAXWRAP(regs);
-        effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        vstoreb ( dbyte, effective_addr1--, b1, regs );
 
     } /* end for(i) */
 
@@ -2999,14 +3001,14 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         npa2 = logical_to_abs (npv2, b2, regs, ACCTYPE_READ, akey);
 
     /* Process operands from left to right */
-    for ( i = 0; i < l+1; i++ )
+    for ( i = 0; i <= l; i++ )
     {
         /* Fetch a byte from each operand */
         byte1 = sysblk.mainstor[abs1];
         byte2 = sysblk.mainstor[abs2];
 
         /* Copy high digit of operand 2 to operand 1 */
-        byte1 = (byte1 & 0x0F) | ( byte2 & 0xF0);
+        byte1 = (byte1 & 0x0F) | (byte2 & 0xF0);
 
         /* Store the result in the destination operand */
         sysblk.mainstor[abs1] = byte1;
@@ -3142,7 +3144,7 @@ void zz_multiply_single (BYTE inst[], int execflag, REGS *regs)
 {
 int     r1;                             /* Value of R field          */
 int     b2;                             /* Base of effective addr    */
-int     effective_addr2;                /* Effective address         */
+U32     effective_addr2;                /* Effective address         */
 U32     n;                              /* 32-bit operand values     */
 
     RX(inst, execflag, regs, r1, b2, effective_addr2);
@@ -3256,7 +3258,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         npa2 = logical_to_abs (npv2, b2, regs, ACCTYPE_READ, akey);
 
     /* Process operands from left to right */
-    for ( i = 0; i < l+1; i++ )
+    for ( i = 0; i <= l; i++ )
     {
         /* Fetch a byte from each operand */
         byte1 = sysblk.mainstor[abs1];
@@ -3354,6 +3356,210 @@ BYTE    dbyte;                          /* Destination operand byte  */
 
     } /* end for(i) */
 
+}
+
+
+/*-------------------------------------------------------------------*/
+/* EE   PLO   - Perform Locked Operation                        [SS] */
+/*-------------------------------------------------------------------*/
+void zz_perform_locked_operation (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1, r3;                         /* Lenght values             */
+int     b2, b4;                         /* Values of base registers  */
+U32     effective_addr2,
+        effective_addr4;                /* Effective addresses       */
+
+    SS(inst, execflag, regs, r1, r3, b2, effective_addr2,
+                                     b4, effective_addr4);
+
+    if(regs->gpr[0] & PLO_GPR0_RESV)
+        program_check(regs, PGM_SPECIFICATION_EXCEPTION);
+
+    if(regs->gpr[0] & PLO_GPR0_T)
+        switch(regs->gpr[0] & PLO_GPR0_FC) 
+        {
+            case PLO_CL:
+//INCOMLETE case PLO_CLG:
+            case PLO_CS:
+//INCOMLETE case PLO_CSG:
+            case PLO_DCS:
+//INCOMLETE case PLO_DCSG:
+            case PLO_CSST:
+//INCOMLETE case PLO_CSSTG:
+//INCOMLETE case PLO_CSDST:
+//INCOMLETE case PLO_CSDSTG:
+//INCOMLETE case PLO_CSTST:
+//INCOMLETE case PLO_CSTSTG:
+
+                /* Indicate function supported */
+                regs->psw.cc = 0;   
+                break;
+            default:
+                /* indicate function not supported */
+                regs->psw.cc = 3;
+                break;
+        }
+    else
+    {
+        /* Obtain main storage access lock */
+        OBTAIN_MAINLOCK(regs);
+
+        switch(regs->gpr[0] & PLO_GPR0_FC) 
+        {
+            case PLO_CL:
+                {
+                U32     n2, n4;
+
+                    FW_CHECK(effective_addr2, regs);
+                    FW_CHECK(effective_addr4, regs);
+
+                    /* Load second operand from operand address  */
+                    n2 = vfetch4 ( effective_addr2, b2, regs );
+
+                    if(regs->gpr[r1] == n2)
+                    {
+                        n4 = vfetch4 ( effective_addr4, b4, regs );
+                        regs->gpr[r3] = n4;
+                        regs->psw.cc = 0;
+                    }
+                    else
+                    {
+                        regs->gpr[r1] = n2;
+                        regs->psw.cc = 1;
+                    }
+
+                }
+                break;
+
+//INCOMLETE case PLO_CLG:
+
+            case PLO_CS:
+                {
+                U32     n2;
+        
+                    ODD_CHECK(r1, regs);
+                    FW_CHECK(effective_addr2, regs);
+
+                    /* Load second operand from operand address  */
+                    n2 = vfetch4 ( effective_addr2, b2, regs );
+
+                    /* Compare operand with R1 register contents */
+                    if ( regs->gpr[r1] == n2 )
+                    {
+                        /* If equal, store R1+1 at operand loc and set cc=0 */
+                        vstore4 ( regs->gpr[r1+1], effective_addr2, b2, regs );
+                        regs->psw.cc = 0;
+                    }
+                    else
+                    {
+                        /* If unequal, load R1 from operand and set cc=1 */
+                        regs->gpr[r1] = n2;
+                        regs->psw.cc = 1;
+                    }
+
+                }
+                break;
+
+//INCOMLETE case PLO_CSG:
+
+            case PLO_DCS:
+                {
+                U32     n2, n4;
+        
+                    ODD2_CHECK(r1, r3, regs);
+                    FW_CHECK(effective_addr2, regs);
+                    FW_CHECK(effective_addr4, regs);
+
+                    /* Load second operands from operand addresses  */
+                    n2 = vfetch4 ( effective_addr2, b2, regs );
+                    n4 = vfetch4 ( effective_addr4, b4, regs );
+
+                    /* Compare operand with register contents */
+                    if ( regs->gpr[r1] == n2 && regs->gpr[r3] == n4)
+                    {
+                        /* Verify access to 4th operand */
+                        validate_operand (effective_addr4, b4, 4-1,
+                            ACCTYPE_WRITE, regs);
+                        /* If equal, store replacement and set cc=0 */
+                        vstore4 ( regs->gpr[r1+1], effective_addr2, b2, regs );
+                        vstore4 ( regs->gpr[r3+1], effective_addr4, b4, regs );
+                        regs->psw.cc = 0;
+                    }
+                    else
+                    {
+                        /* If unequal, load R1 & R3 from op and set cc=1 */
+                        regs->gpr[r1] = n2;
+                        regs->gpr[r3] = n4;
+                        regs->psw.cc = 1;
+                    }
+
+                }
+                break;
+
+//INCOMLETE case PLO_DCSG:
+
+            case PLO_CSST:
+                {
+                U32     n2;
+
+                    ODD_CHECK(r1, regs);
+                    FW_CHECK(effective_addr2, regs);
+                    FW_CHECK(effective_addr4, regs);
+
+                    /* Load second operand from operand address  */
+                    n2 = vfetch4 ( effective_addr2, b2, regs );
+
+                    /* Compare operand with register contents */
+                    if ( regs->gpr[r1] == n2)
+                    {
+                        /* Verify access to 4th operand */
+                        validate_operand (effective_addr4, b4, 4-1,
+                            ACCTYPE_WRITE, regs);
+                        /* If equal, store replacement and set cc=0 */
+                        vstore4 ( regs->gpr[r1+1], effective_addr2, b2, regs );
+                        vstore4 ( regs->gpr[r3], effective_addr4, b4, regs );
+                        regs->psw.cc = 0;
+                    }
+                    else
+                    {
+                        regs->gpr[r1] = n2;
+                        regs->psw.cc = 1;
+                    }
+
+                }
+                break;
+
+//INCOMLETE case PLO_CSSTG:
+
+//INCOMLETE case PLO_CSDST:
+
+//INCOMLETE case PLO_CSDSTG:
+
+//INCOMLETE case PLO_CSTST:
+
+//INCOMLETE case PLO_CSTSTG:
+
+            default:
+                program_check(regs, PGM_SPECIFICATION_EXCEPTION);
+                
+        }
+
+        /* Release main-storage access lock */
+        RELEASE_MAINLOCK(regs);
+
+#if MAX_CPU_ENGINES > 1
+        /* It this is a failed locked operation
+           and there is more then 1 CPU in the configuration
+           and there is no broadcast synchronization in progress
+           then call the hypervisor to end this timeslice,
+           this to prevent this virtual CPU monopolizing
+           the physical CPU on a spinlock */
+        if(regs->psw.cc && sysblk.numcpu > 1
+            && sysblk.brdcstncpu == 0)
+            usleep(1L);
+#endif MAX_CPU_ENGINES > 1
+
+    }
 }
 
 
@@ -3733,8 +3939,7 @@ void zz_store_access_multiple (BYTE inst[], int execflag, REGS *regs)
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
 U32     effective_addr2;                /* effective address         */
-U32     n;                              /* 32-bit operand values     */
-int     d;                              /* Integer work area         */
+int     n, d;                           /* Integer work area         */
 BYTE    rwork[64];                      /* Register work area        */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
@@ -3818,8 +4023,7 @@ BYTE    cwork[4];                       /* Character work areas      */
     if (j == 0)
     {
 // /*debug*/logmsg ("Model dependent STCM use\n");
-        validate_operand (effective_addr2, b2, 0,
-                                  ACCTYPE_WRITE, regs);
+        validate_operand (effective_addr2, b2, 0, ACCTYPE_WRITE, regs);
         return;
     }
 
@@ -3897,8 +4101,7 @@ U64     dreg;                           /* Double word work area     */
     release_lock (&sysblk.todlock);
 
     /* Check that all 16 bytes of the operand are accessible */
-    validate_operand (effective_addr2, b2, 15,
-                        ACCTYPE_WRITE, regs);
+    validate_operand (effective_addr2, b2, 15, ACCTYPE_WRITE, regs);
 
 //  /*debug*/logmsg("Store TOD clock extended: +0=%16.16llX\n",
 //  /*debug*/       dreg);
@@ -4082,7 +4285,7 @@ void zz_subtract_logical (BYTE inst[], int execflag, REGS *regs)
 {
 int     r1;                             /* Value of R field          */
 int     b2;                             /* Base of effective addr    */
-int     effective_addr2;                /* Effective address         */
+U32     effective_addr2;                /* Effective address         */
 U32     n;                              /* 32-bit operand values     */
 
     RX(inst, execflag, regs, r1, b2, effective_addr2);
@@ -4148,7 +4351,7 @@ int     rc;                             /* Return code               */
 void zz_test_and_set (BYTE inst[], int execflag, REGS *regs)
 {
 int     b2;                             /* Base of effective addr    */
-int     effective_addr2;                /* Effective address         */
+U32     effective_addr2;                /* Effective address         */
 BYTE    obyte;                          /* Operand byte              */
 
     S(inst, execflag, regs, b2, effective_addr2);
@@ -4183,7 +4386,7 @@ void zz_test_under_mask (BYTE inst[], int execflag, REGS *regs)
 {
 BYTE    i2;                             /* Immediate operand         */
 int     b1;                             /* Base of effective addr    */
-int     effective_addr1;                /* Effective address         */
+U32     effective_addr1;                /* Effective address         */
 BYTE    tbyte;                          /* Work byte                 */
 
     SI(inst, execflag, regs, i2, b1, effective_addr1);

@@ -7,6 +7,30 @@ Hercules: What's new</TITLE>
       VLINK="#008040" ALINK="#000000">
 <h1>What's new in Hercules</h1>
 <hr noshade>
+<h2>What's new in release 1.66</h2>
+<p>Release date: 3 August 2000
+<ul>
+<li>Simplify logmsg and DEVTRACE macro definitions (Jay Maynard)
+<li>Prevent incorrect length indication on CONTROL NOP CCW (Jay Maynard)
+<li>Complete 370 HIO processing (Jay Maynard)
+<li>Correct nullification of TPI and TSCH (Jan Jaeger)
+<li>Add device locking to MSCH (Jan Jaeger)
+<li>Correct TPROT instruction (Jan Jaeger)
+<li>Correct address wrapping on assist instructions (Jan Jaeger)
+<li>Change interrupt logic to use longjmp on all interrupts (Jan Jaeger)
+<li>Clear remainder of ASTE when loading ASTE with ASF=0 in translate_asn
+(Jan Jaeger)
+<li>Add (incomplete) PLO instruction (Jan Jaeger)
+<li>Fix CLCL interruption problem (Jan Jaeger)
+<li>Fix addresswrap in MVO (Jan Jaeger)
+<li>Make ED and EDMK perform a trial run (Jan Jaeger)
+<li>Fix address wraparound in MVO (Jan Jaeger)
+<li>Fix CR15 corruption in form_stack_entry, fix nullification in
+form_stack_entry and unstack_registers (Jan Jaeger)
+<li>Fix loss of interrupts in PR (Jan Jaeger)
+</ul>
+<p>Download
+<a href="hercules-1.66.tar.gz">hercules-1.66.tar.gz</a>
 <h2>What's new in release 1.65</h2>
 <p>Release date: 22 July 2000
 <ul>
@@ -15,7 +39,7 @@ Pogonchenko)
 <li> Added TOD clock update to STCK, STCKE, DIAG 204, and TRACE processing
 (by Jay Maynard)
 <li> Fixed READ DEVICE CHARACTERISTICS alternate track values for 3380 and
-3390 (by petermac@ase.com.au)
+3390 (by Peter Macdonald)
 <li> Skeletal CMPSC instruction (by Bernard van der Helm)
 <li> Added support for 3340 and 3375 DASD (by Jay Maynard, with help from
 Rick Fochtman and David Cole)
@@ -548,6 +572,6 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 22 July 2000
+<p>Last updated 3 August 2000
 </BODY>
 </HTML>

@@ -30,7 +30,7 @@ void operation_exception (BYTE inst[], int execflag, REGS *regs);
 #if !defined(FOOTPRINT_BUFFER)
 
 #define EXECUTE_INSTRUCTION(_instruction, _execflag, _regs) \
-        opcode_table[((_instruction)[0])](_instruction, _execflag, _regs)
+        opcode_table[((_instruction)[0])]((_instruction), (_execflag), (_regs))
 
 #else /*defined(FOOTPRINT_BUFFER)*/
 
@@ -39,7 +39,7 @@ void operation_exception (BYTE inst[], int execflag, REGS *regs);
             sysblk.footprregs[(_regs)->cpuad][sysblk.footprptr[(_regs)->cpuad]] = *(_regs); \
             memcpy(&sysblk.footprregs[(_regs)->cpuad][sysblk.footprptr[(_regs)->cpuad]++].inst,(_instruction),6); \
             sysblk.footprptr[(_regs)->cpuad] &= FOOTPRINT_BUFFER - 1; \
-            opcode_table[((_instruction)[0])](_instruction, _execflag, _regs); \
+            opcode_table[((_instruction)[0])]((_instruction), (_execflag), (_regs)); \
         }
 
 #endif /*defined(FOOTPRINT_BUFFER)*/
@@ -427,7 +427,7 @@ void operation_exception (BYTE inst[], int execflag, REGS *regs);
             obtain_lock(&regs->serlock); \
             release_lock(&regs->serlock); \
         }
-#else  /*!SEREALIZATION*/
+#else  /*!SERIALIZATION*/
 #define PERFORM_SERIALIZATION(_regs)
 #endif /*SERIALIZATION*/
 
@@ -442,7 +442,7 @@ void zz_obtain_cms_lock (BYTE inst[], int execflag, REGS *regs);
 void zz_release_cms_lock (BYTE inst[], int execflag, REGS *regs);
 
 /* Instructions in cmpsc.c */
-void zz_compressionn_call (BYTE inst[], int execflag, REGS *regs);
+void zz_compression_call (BYTE inst[], int execflag, REGS *regs);
 
 /* Instructions in control.c */
 void zz_branch_and_set_authority (BYTE inst[], int execflag, REGS *regs);
@@ -666,6 +666,7 @@ void zz_or_register (BYTE inst[], int execflag, REGS *regs);
 void zz_or (BYTE inst[], int execflag, REGS *regs);
 void zz_or_immediate (BYTE inst[], int execflag, REGS *regs);
 void zz_or_character (BYTE inst[], int execflag, REGS *regs);
+void zz_perform_locked_operation (BYTE inst[], int execflag, REGS *regs);
 void zz_pack (BYTE inst[], int execflag, REGS *regs);
 void zz_search_string (BYTE inst[], int execflag, REGS *regs);
 void zz_set_access_register (BYTE inst[], int execflag, REGS *regs);
@@ -730,6 +731,7 @@ void zz_page_in (BYTE inst[], int execflag, REGS *regs);
 void zz_page_out (BYTE inst[], int execflag, REGS *regs);
 void zz_invalidate_expanded_storage_block_entry (BYTE inst[], int execflag, REGS *regs);
 void zz_move_page (BYTE inst[], int execflag, REGS *regs);
+
 
 /* Instructions in vector.c */
 void zz_v_test_vmr (BYTE inst[], int execflag, REGS *regs);

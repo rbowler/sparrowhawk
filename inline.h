@@ -82,8 +82,8 @@ static inline void mul_signed ( U32 *resulthi, U32 *resultlo,
 S64     r;
 
     r = (S64)(S32)op1 * (S32)op2;
-    *resulthi = (U64)r >> 32;
-    *resultlo = (U64)r & 0xFFFFFFFF;
+    *resulthi = (U32)((U64)r >> 32);
+    *resultlo = (U32)((U64)r & 0xFFFFFFFF);
 } /* end function mul_signed */
 
 /*-------------------------------------------------------------------*/
@@ -325,10 +325,7 @@ U32     ssaste5;                        /* Subspace ASTE word 5      */
 
     /* Program check if DUCT origin address is invalid */
     if (ducto >= sysblk.mainsize)
-    {
         program_check (regs, PGM_ADDRESSING_EXCEPTION);
-        return 0;
-    }
 
     /* Fetch DUCT words 0, 1, and 3 from absolute storage
        (note: the DUCT cannot cross a page boundary) */
@@ -349,10 +346,7 @@ U32     ssaste5;                        /* Subspace ASTE word 5      */
 
     /* Program check if ASTE origin address is invalid */
     if (ssasteo >= sysblk.mainsize)
-    {
         program_check (regs, PGM_ADDRESSING_EXCEPTION);
-        return 0;
-    }
 
     /* Fetch subspace ASTE words 0, 2, and 5 from absolute storage
        (note: the ASTE cannot cross a page boundary) */

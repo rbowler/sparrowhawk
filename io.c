@@ -55,6 +55,7 @@ DEVBLK *dev;                            /* -> device block           */
 
     /* Perform clear subchannel and set condition code zero */
     clear_subchan (regs, dev);
+
     regs->psw.cc = 0;
 
 }
@@ -154,10 +155,14 @@ PMCW    pmcw;                           /* Path management ctl word  */
         return;
     }
 
+    /* Obtain the device lock */
+    obtain_lock (&dev->lock);
+
     /* Condition code 2 if subchannel is busy */
     if (dev->busy || dev->pending)
     {
         regs->psw.cc = 2;
+        release_lock (&dev->lock);
         return;
     }
 
@@ -185,6 +190,8 @@ PMCW    pmcw;                           /* Path management ctl word  */
     /* Update the concurrent sense (S) field */
     dev->pmcw.flag27 &= ~PMCW27_S;
     dev->pmcw.flag27 |= (pmcw.flag27 & PMCW27_S);
+
+    release_lock (&dev->lock);
 
     /* Set condition code 0 */
     regs->psw.cc = 0;
@@ -469,6 +476,10 @@ U32     ioparm;                         /* I/O interruption parameter*/
 
     FW_CHECK(effective_addr2, regs);
 
+    /* validate operand before taking any action */
+    if ( effective_addr2 != 0 )
+        validate_operand (effective_addr2, b2, 8-1, ACCTYPE_WRITE, regs);
+
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
@@ -540,6 +551,10 @@ IRB     irb;                            /* Interruption response blk */
         return;
     }
 
+    /* validate operand before taking any action */
+    validate_operand (effective_addr2, b2, sizeof(IRB)-1,
+                                        ACCTYPE_WRITE, regs);
+
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
@@ -568,7 +583,6 @@ U32     effective_addr2;                /* Effective address         */
 PSA    *psa;                            /* -> prefixed storage area  */
 DEVBLK *dev;                            /* -> device block for SIO   */
 U32     ccwaddr;                        /* CCW address for start I/O */
-U32     ioparm;                         /* I/O interruption parameter*/
 BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
 
     S(inst, execflag, regs, b2, effective_addr2);
@@ -590,11 +604,10 @@ BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
     ccwkey = psa->caw[0] & 0xF0;
     ccwaddr = (psa->caw[1] << 16) | (psa->caw[2] << 8)
                     | psa->caw[3];
-    ioparm = 0;
 
     /* Start the channel program and set the condition code */
     regs->psw.cc =
-        start_io (dev, ioparm, ccwkey, 0, 0, 0, ccwaddr);
+        start_io (dev, 0, ccwkey, 0, 0, 0, ccwaddr);
 
 }
 
@@ -653,9 +666,8 @@ DEVBLK *dev;                            /* -> device block for SIO   */
         return;
     }
 
-    /* FIXME: for now, just return CC 0 */
-    regs->psw.cc = 0;
-
+    /* Test the device and set the condition code */
+    regs->psw.cc = halt_io (regs, dev, inst[1]);
 }
 
 

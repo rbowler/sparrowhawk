@@ -58,9 +58,11 @@ int     rc;
 
     /* Load new PSW from PSA+X'58' */
     rc = load_psw (&(regs->psw), psa->extnew);
+
+    release_lock(&sysblk.intlock);
+
     if ( rc )
     {
-        release_lock(&sysblk.intlock);
         logmsg ("CPU%4.4X: Invalid external new PSW: "
                 "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
                 regs->cpuad,
@@ -70,6 +72,7 @@ int     rc;
         program_check(regs, rc);
     }
 
+    longjmp (regs->progjmp, 0);
 } /* end function external_interrupt */
 
 /*-------------------------------------------------------------------*/
@@ -105,7 +108,6 @@ U16     cpuad;                          /* Originating CPU address   */
 
         /* Generate interrupt key interrupt */
         external_interrupt (EXT_INTERRUPT_KEY_INTERRUPT, regs);
-        return;
     }
 
     /* External interrupt if emergency signal is pending */
@@ -147,7 +149,6 @@ U16     cpuad;                          /* Originating CPU address   */
 
         /* Generate emergency signal interrupt */
         external_interrupt (EXT_EMERGENCY_SIGNAL_INTERRUPT, regs);
-        return;
     }
 
     /* External interrupt if external call is pending */
@@ -167,7 +168,6 @@ U16     cpuad;                          /* Originating CPU address   */
 
         /* Generate external call interrupt */
         external_interrupt (EXT_EXTERNAL_CALL_INTERRUPT, regs);
-        return;
     }
 
     /* External interrupt if TOD clock exceeds clock comparator */
@@ -181,7 +181,6 @@ U16     cpuad;                          /* Originating CPU address   */
             logmsg ("External interrupt: Clock comparator\n");
         }
         external_interrupt (EXT_CLOCK_COMPARATOR_INTERRUPT, regs);
-        return;
     }
 
     /* External interrupt if CPU timer is negative */
@@ -194,7 +193,6 @@ U16     cpuad;                          /* Originating CPU address   */
                     regs->ptimer);
         }
         external_interrupt (EXT_CPU_TIMER_INTERRUPT, regs);
-        return;
     }
 
     /* External interrupt if interval timer interrupt is pending */
@@ -208,8 +206,6 @@ U16     cpuad;                          /* Originating CPU address   */
         }
         regs->itimer_pending = 0;
         external_interrupt (EXT_INTERVAL_TIMER_INTERRUPT, regs);
-
-        return;
     }
 #endif /*FEATURE_INTERVAL_TIMER*/
 
@@ -238,7 +234,6 @@ U16     cpuad;                          /* Originating CPU address   */
 
         /* Generate service signal interrupt */
         external_interrupt (EXT_SERVICE_SIGNAL_INTERRUPT, regs);
-        return;
     }
 
     /* reset the cpuint indicator */
@@ -380,9 +375,9 @@ struct  timeval tv;                     /* Structure for gettimeofday
 
     while (1)
     {
-	/* Save the old TOD clock value */
+        /* Save the old TOD clock value */
         prev = sysblk.todclk;
-        
+
         /* Update TOD clock */
         update_TOD_clock();
 
@@ -392,8 +387,9 @@ struct  timeval tv;                     /* Structure for gettimeofday
         /* Shift the epoch out of the difference for the CPU timer */
         diff <<= 8;
 
-        /* Access the diffent register contexts with the intlock held */
-        obtain_lock(&sysblk.intlock);
+        /* Obtain the TOD clock update lock when manipulating the 
+           cpu timers */
+        obtain_lock (&sysblk.todlock);
 
         /* Decrement the CPU timer for each CPU */
 #ifdef FEATURE_CPU_RECONFIG 
@@ -448,6 +444,12 @@ struct  timeval tv;                     /* Structure for gettimeofday
 #endif /*FEATURE_INTERVAL_TIMER*/
 
         } /* end for(cpu) */
+
+        /* Release the TOD clock update lock */
+        release_lock (&sysblk.todlock);
+
+        /* ZZ Access the diffent register contexts with the intlock held */
+        obtain_lock(&sysblk.intlock);
 
         /* If a CPU timer or clock comparator interrupt condition
            was detected for any CPU, then wake up all waiting CPUs */

@@ -197,10 +197,10 @@
 /* Macro definitions for tracing				     */
 /*-------------------------------------------------------------------*/
 #define logmsg(a...) \
-	fprintf(sysblk.msgpipew, ## a)
+	fprintf(sysblk.msgpipew, a)
 #define DEVTRACE(format, a...) \
 	if(dev->ccwtrace||dev->ccwstep) \
-	logmsg("%4.4X:" format, dev->devnum, ## a)
+	fprintf(sysblk.msgpipew, "%4.4X:" format, dev->devnum, a)
 
 /*-------------------------------------------------------------------*/
 /* Macro definitions for version number 			     */
@@ -668,16 +668,6 @@ extern BYTE	ebcdic_to_ascii[];	/* Translate table	     */
 /* Function prototypes						     */
 /*-------------------------------------------------------------------*/
 
-/* Functions in module assist.c */
-void obtain_local_lock (U32 addr1, int ar1, U32 addr2, int ar2,
-	REGS *regs);
-void release_local_lock (U32 addr1, int ar1, U32 addr2, int ar2,
-	REGS *regs);
-void obtain_cms_lock (U32 addr1, int ar1, U32 addr2, int ar2,
-	REGS *regs);
-void release_cms_lock (U32 addr1, int ar1, U32 addr2, int ar2,
-	REGS *regs);
-
 /* Functions in module config.c */
 void build_config (BYTE *fname);
 DEVBLK *find_device_by_devnum (U16 devnum);
@@ -806,6 +796,7 @@ void *execute_ccw_chain (DEVBLK *dev);
 int  store_channel_id (REGS *regs, U16 chan);
 int  test_channel (REGS *regs, U16 chan);
 int  test_io (REGS *regs, DEVBLK *dev, BYTE ibyte);
+int  halt_io (REGS *regs, DEVBLK *dev, BYTE ibyte);
 int  test_subchan (REGS *regs, DEVBLK *dev, IRB *irb);
 void clear_subchan (REGS *regs, DEVBLK *dev);
 int  halt_subchan (REGS *regs, DEVBLK *dev);
@@ -869,6 +860,3 @@ DEVXF fbadasd_execute_ccw;
 DEVCF fbadasd_close_device;
 void fbadasd_syncblk_io (DEVBLK *dev, BYTE type, U32 blknum,
 	U32 blksize, BYTE *iobuf, BYTE *unitstat, U16 *residual);
-
-/* Functions in module cmpsc.c */
-void cmpsc(BYTE inst[], REGS * regs);

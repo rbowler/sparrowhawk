@@ -13,6 +13,7 @@
 /*-------------------------------------------------------------------*/
 /* Complete rework for reworked instruction decode/execution code    */
 /*                                               Jan Jaeger 01/07/00 */
+/* Add trialrun to ED and EDMK                   Jan Jaeger 19/07/00 */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -659,123 +660,156 @@ void zz_edit_x_edit_and_mark (BYTE inst[], int execflag, REGS *regs)
 int     l;                              /* Lenght value              */
 int     b1, b2;                         /* Values of base registers  */
 U32     effective_addr1,
-        effective_addr2;                /* Effective addresses       */
+        effective_addr2,                /* Effective addresses       */
+        addr1,
+        addr2;
 int     cc = 0;                         /* Condition code            */
 int     sig = 0;                        /* Significance indicator    */
+int     trial_run;                      /* 1=trial run               */
 int     i;                              /* Loop counter              */
 int     d;                              /* 1=Use right source digit  */
 int     h;                              /* Hexadecimal digit         */
-BYTE    sbyte = 0;                      /* Source operand byte       */
-BYTE    fbyte = 0;                      /* Fill byte                 */
+BYTE    sbyte;                          /* Source operand byte       */
+BYTE    fbyte;                          /* Fill byte                 */
 BYTE    pbyte;                          /* Pattern byte              */
 BYTE    rbyte;                          /* Result byte               */
 
     SS_L(inst, execflag, regs, l, b1, effective_addr1,
                                   b2, effective_addr2);
 
-    /* Process first operand from left to right */
-    for (i = 0, d = 0; i < l+1; i++)
+    /* Determine if trial run is needed */
+    if((effective_addr1 & STORAGE_KEY_PAGEMASK) !=
+        ((effective_addr1 + l) & STORAGE_KEY_PAGEMASK))
+        trial_run = 1;
+    else
+        trial_run = 0;
+
+    for(;trial_run >= 0; trial_run--)
     {
-        /* Fetch pattern byte from first operand */
-        pbyte = vfetchb ( effective_addr1, b1, regs );
+        /* Initialize variables */
+        addr1 = effective_addr1;
+        addr2 = effective_addr2;
+        cc = 0;
+        sig = 0;
+        sbyte = 0;
+        fbyte = 0;
 
-        /* The first pattern byte is also the fill byte */
-        if (i == 0) fbyte = pbyte;
-
-        /* If pattern byte is digit selector (X'20') or
-           significance starter (X'21') then fetch next
-           hexadecimal digit from the second operand */
-        if (pbyte == 0x20 || pbyte == 0x21)
+        /* Process first operand from left to right */
+        for (i = 0, d = 0; i < l+1; i++)
         {
-            if (d == 0)
+            /* Fetch pattern byte from first operand */
+            pbyte = vfetchb ( addr1, b1, regs );
+    
+            /* The first pattern byte is also the fill byte */
+            if (i == 0) fbyte = pbyte;
+    
+            /* If pattern byte is digit selector (X'20') or
+               significance starter (X'21') then fetch next
+               hexadecimal digit from the second operand */
+            if (pbyte == 0x20 || pbyte == 0x21)
             {
-                /* Fetch source byte and extract left digit */
-                sbyte = vfetchb ( effective_addr2, b2, regs );
-                h = sbyte >> 4;
-                sbyte &= 0x0F;
-                d = 1;
-
-                /* Increment second operand address */
-                effective_addr2++;
-                effective_addr2 &= ADDRESS_MAXWRAP(regs);
-
-                /* Program check if left digit is not numeric */
-                if (h > 9)
-                    program_check (regs, PGM_DATA_EXCEPTION);
-
-            }
-            else
-            {
-                /* Use right digit of source byte */
-                h = sbyte;
-                d = 0;
-            }
-
-            /* For the EDMK instruction only, insert address of
-               result byte into general register 1 if the digit
-               is non-zero and significance indicator was off */
-            if ((inst[0] == 0xDF) && h > 0 && sig == 0)
-            {
-                if ( regs->psw.amode )
+                if (d == 0)
                 {
-                    regs->gpr[1] = effective_addr1;
-                } else {
-                    regs->gpr[1] &= 0xFF000000;
-                    regs->gpr[1] |= effective_addr1;
+                    /* Fetch source byte and extract left digit */
+                    sbyte = vfetchb ( addr2, b2, regs );
+                    h = sbyte >> 4;
+                    sbyte &= 0x0F;
+                    d = 1;
+    
+                    /* Increment second operand address */
+                    addr2++;
+                    addr2 &= ADDRESS_MAXWRAP(regs);
+    
+                    /* Program check if left digit is not numeric */
+                    if (h > 9)
+                        program_check (regs, PGM_DATA_EXCEPTION);
+    
+                }
+                else
+                {
+                    /* Use right digit of source byte */
+                    h = sbyte;
+                    d = 0;
+                }
+    
+                /* For the EDMK instruction only, insert address of
+                   result byte into general register 1 if the digit
+                   is non-zero and significance indicator was off */
+                if (!trial_run && (inst[0] == 0xDF) && h > 0 && sig == 0)
+                {
+                    if ( regs->psw.amode )
+                    {
+                        regs->gpr[1] = addr1;
+                    } else {
+                        regs->gpr[1] &= 0xFF000000;
+                        regs->gpr[1] |= addr1;
+                    }
+                }
+    
+                /* Replace the pattern byte by the fill character
+                   or by a zoned decimal digit */
+                rbyte = (sig == 0 && h == 0) ? fbyte : (0xF0 | h);
+                if(!trial_run)
+                    vstoreb ( rbyte, addr1, b1, regs );
+                else
+                    validate_operand (addr1, b1, 0, ACCTYPE_WRITE, regs);
+    
+                /* Set condition code 2 if digit is non-zero */
+                if (h > 0) cc = 2;
+    
+                /* Turn on significance indicator if pattern
+                   byte is significance starter or if source
+                   digit is non-zero */
+                if (pbyte == 0x21 || h > 0)
+                    sig = 1;
+    
+                /* Examine right digit for sign code */
+                if (d == 1 && sbyte > 9)
+                {
+                    /* Turn off the significance indicator if
+                       the right digit is a plus sign code */
+                    if (sbyte != 0x0B && sbyte != 0x0D)
+                        sig = 0;
+    
+                    /* Take next digit from next source byte */
+                    d = 0;
                 }
             }
-
-            /* Replace the pattern byte by the fill character
-               or by a zoned decimal digit */
-            rbyte = (sig == 0 && h == 0) ? fbyte : (0xF0 | h);
-            vstoreb ( rbyte, effective_addr1, b1, regs );
-
-            /* Set condition code 2 if digit is non-zero */
-            if (h > 0) cc = 2;
-
-            /* Turn on significance indicator if pattern
-               byte is significance starter or if source
-               digit is non-zero */
-            if (pbyte == 0x21 || h > 0)
-                sig = 1;
-
-            /* Examine right digit for sign code */
-            if (d == 1 && sbyte > 9)
+    
+            /* If pattern byte is field separator (X'22') then
+               replace it by the fill character, turn off the
+               significance indicator, and zeroize conditon code  */
+            else if (pbyte == 0x22)
             {
-                /* Turn off the significance indicator if
-                   the right digit is a plus sign code */
-                if (sbyte != 0x0B && sbyte != 0x0D)
-                    sig = 0;
-
-                /* Take next digit from next source byte */
-                d = 0;
+                if(!trial_run)
+                    vstoreb ( fbyte, addr1, b1, regs );
+                else
+                    validate_operand (addr1, b1, 0, ACCTYPE_WRITE, regs);
+                sig = 0;
+                cc = 0;
             }
-        }
-
-        /* If pattern byte is field separator (X'22') then
-           replace it by the fill character, turn off the
-           significance indicator, and zeroize conditon code  */
-        else if (pbyte == 0x22)
-        {
-            vstoreb ( fbyte, effective_addr1, b1, regs );
-            sig = 0;
-            cc = 0;
-        }
-
-        /* If pattern byte is a message byte (anything other
-           than X'20', X'21', or X'22') then replace it by
-           the fill byte if the significance indicator is off */
-        else
-        {
-            if (sig == 0)
-                vstoreb ( fbyte, effective_addr1, b1, regs );
-        }
-
-        /* Increment first operand address */
-        effective_addr1++;
-        effective_addr1 &= ADDRESS_MAXWRAP(regs);
-
-    } /* end for(i) */
+    
+            /* If pattern byte is a message byte (anything other
+               than X'20', X'21', or X'22') then replace it by
+               the fill byte if the significance indicator is off */
+            else
+            {
+                if (sig == 0)
+                {
+                    if (!trial_run)
+                        vstoreb ( fbyte, addr1, b1, regs );
+                    else
+                        validate_operand (addr1, b1, 0, ACCTYPE_WRITE, regs);
+                }
+            }
+    
+            /* Increment first operand address */
+            addr1++;
+            addr1 &= ADDRESS_MAXWRAP(regs);
+    
+        } /* end for(i) */
+    
+    } /* end for(trial_run) */
 
     /* Replace condition code 2 by condition code 1 if the
        significance indicator is on at the end of editing */
@@ -783,7 +817,7 @@ BYTE    rbyte;                          /* Result byte               */
 
     /* Set condition code */
     regs->psw.cc = cc;
-
+    
 }
 
 

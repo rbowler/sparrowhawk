@@ -56,6 +56,11 @@
 #endif /*!defined(FEATURE_CHECKSUM_INSTRUCTION)*/
 
 
+#if !defined(FEATURE_PLO)
+ #define zz_perform_locked_operation            operation_exception
+#endif /*!defined(FEATURE_PLO)*/
+
+
 #if !defined(FEATURE_SUBSPACE_GROUP)
  #define zz_branch_in_subspace_group            operation_exception
 #endif /*!defined(FEATURE_SUBSPACE_GROUP)*/
@@ -453,7 +458,7 @@ zz_func opcode_table[256] = {
  /*EB*/         &operation_exception,            
  /*EC*/         &operation_exception,            
  /*ED*/         &operation_exception,            
- /*EE*/         &operation_exception,            
+ /*EE*/         &zz_perform_locked_operation,           /* PLO       */
  /*EF*/         &operation_exception,            
  /*F0*/         &zz_shift_and_round_decimal,            /* SRP       */
  /*F1*/         &zz_move_with_offset,                   /* MVO       */
@@ -2376,4 +2381,19 @@ void operation_exception (BYTE inst[], int execflag, REGS *regs)
         regs->psw.ia &= ADDRESS_MAXWRAP(regs);
     }
     program_check(regs, PGM_OPERATION_EXCEPTION);
+}
+
+
+void dummy_instruction (BYTE inst[], int execflag, REGS *regs)
+{
+    logmsg("Dummy instruction: ");
+    display_inst (regs, regs->inst);
+
+    if( !execflag )
+    {
+        regs->psw.ilc = (inst[0] < 0x40) ? 2 :
+                        (inst[0] < 0xC0) ? 4 : 6;
+        regs->psw.ia += regs->psw.ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 }

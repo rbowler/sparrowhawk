@@ -6,7 +6,7 @@
 #
 #
 
-VERSION  = 1.65
+VERSION  = 1.66
 
 # Change this if you want to install the Hercules executables somewhere
 #   besides /usr/bin. The $PREFIX (which defaults to nothing) can be
@@ -15,10 +15,10 @@ VERSION  = 1.65
 DESTDIR  = $(PREFIX)/usr/bin
 
 #CFLAGS	 = -O0 -Wall -DARCH=390
-CFLAGS	 = -O3 -Wall -fPIC -fomit-frame-pointer -DARCH=390
+CFLAGS	 = -O2 -Wall -fPIC -DARCH=390
 #	   -march=pentium -malign-double -mwide-multiply
 #CFL_370  = -O0 -Wall -DARCH=370
-CFL_370  = -O3 -Wall -fPIC -fomit-frame-pointer -DARCH=370
+CFL_370  = -O2 -Wall -fPIC -DARCH=370
 #	   -march=pentium -malign-double -mwide-multiply
 LFLAGS	 = -lpthread
 

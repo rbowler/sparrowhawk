@@ -7,6 +7,12 @@
 /* The numbers in square brackets refer to sections in the manual.   */
 /*-------------------------------------------------------------------*/
 
+/*-------------------------------------------------------------------*/
+/* Fix CR15 corruption in form_stack_entry                Jan Jaeger */
+/* Fix nullification in form_stack_entry                  Jan Jaeger */
+/* Fix nullification in unstack_registers                 Jan Jaeger */
+/*-------------------------------------------------------------------*/
+
 #include "hercules.h"
 
 #undef  STACK_DEBUG
@@ -108,7 +114,7 @@ U16     xcode;                          /* Exception code            */
 void form_stack_entry (BYTE etype, U32 retna, U32 calla, U32 csi, REGS *regs)
 {
 U32     lsea;                           /* Linkage stack entry addr  */
-U32     abs;                            /* Absolute addr new entry   */
+U32     abs, abs2 = 0;                  /* Absolute addr new entry   */
 U32     absold;                         /* Absolute addr old entry   */
 LSED    lsed;                           /* Linkage stack entry desc. */
 LSED    lsed2;                          /* New entry descriptor      */
@@ -205,7 +211,7 @@ int     i;                              /* Array subscript           */
         /* Update CR15 to contain the virtual address of the entry
            descriptor of the new section's header entry */
         lsea = fsha;
-        regs->cr[15] = lsea & CR15_LSEA;
+//      regs->cr[15] = lsea & CR15_LSEA;
 
     } /* end if(rfs<LSSE_SIZE) */
 
@@ -215,12 +221,19 @@ int     i;                              /* Array subscript           */
     lsea += sizeof(LSED);
     lsea &= 0x7FFFFFFF;
 
+    /* Real address of the new stack entry */
+    abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
+        
+    if(((lsea + (LSSE_SIZE - 1)) & STORAGE_KEY_PAGEMASK)
+                                != (lsea & STORAGE_KEY_PAGEMASK))
+        abs2 = abs_stack_addr ((lsea + (LSSE_SIZE - 1)), regs,
+                                ACCTYPE_WRITE) & STORAGE_KEY_PAGEMASK;
+
 #ifdef STACK_DEBUG
     logmsg ("stack: New stack entry at %8.8lX\n", lsea);
 #endif /*STACK_DEBUG*/
 
     /* Store general registers 0-15 in bytes 0-63 of the new entry */
-    abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
     for (i = 0; i < 16; i++)
     {
         /* Store the general register in the stack entry */
@@ -241,7 +254,7 @@ int     i;                              /* Array subscript           */
 
         /* Recalculate absolute address if page boundary crossed */
         if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
-            abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
+            abs = abs2;
 
     } /* end for(i) */
 
@@ -266,7 +279,7 @@ int     i;                              /* Array subscript           */
 
         /* Recalculate absolute address if page boundary crossed */
         if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
-            abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
+            abs = abs2;
 
     } /* end for(i) */
 
@@ -287,7 +300,7 @@ int     i;                              /* Array subscript           */
 
     /* Recalculate absolute address if page boundary crossed */
     if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
-        abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
+        abs = abs2;
 
     /* Store the current PSW in bytes 136-143 */
     store_psw (&regs->psw, sysblk.mainstor+abs);
@@ -315,7 +328,7 @@ int     i;                              /* Array subscript           */
 
     /* Recalculate absolute address if page boundary crossed */
     if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
-        abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
+        abs = abs2;
 
     /* Set the called space id */
     sysblk.mainstor[abs+0] = (csi >> 24) & 0xFF;
@@ -336,7 +349,7 @@ int     i;                              /* Array subscript           */
 
     /* Recalculate absolute address if page boundary crossed */
     if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
-        abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
+        abs = abs2;
 
     /* Store zeroes in bytes 152-159 */
     memset (sysblk.mainstor+abs, 0, 8);
@@ -348,7 +361,7 @@ int     i;                              /* Array subscript           */
 
     /* Recalculate absolute address if page boundary crossed */
     if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
-        abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
+        abs = abs2;
 
     /* Build the new linkage stack entry descriptor */
     memset (&lsed2, 0, sizeof(LSED));
@@ -534,16 +547,18 @@ U32     bsea;                           /* Backward stack entry addr */
 /*-------------------------------------------------------------------*/
 void unstack_registers (U32 lsea, int r1, int r2, REGS *regs)
 {
-U32     abs = 0;                        /* Absolute address          */
+U32     abs, abs2 = 0;                  /* Absolute address          */
 int     i;                              /* Array subscript           */
-int     tranreqd;                       /* 1=Translation required    */
 
     /* Point back to byte 0 of the state entry */
     lsea -= LSSE_SIZE - sizeof(LSED);
     lsea &= 0x7FFFFFFF;
 
-    /* Set indicator to force calculation of absolute address */
-    tranreqd = 1;
+    abs = abs_stack_addr (lsea, regs, ACCTYPE_READ);
+    if(((lsea + 127) & STORAGE_KEY_PAGEMASK) !=
+                                        (lsea & STORAGE_KEY_PAGEMASK))
+        abs2 = abs_stack_addr ((lsea + 127) & STORAGE_KEY_PAGEMASK,
+                                                regs, ACCTYPE_READ);
 
 #ifdef STACK_DEBUG
     logmsg ("stack: Unstacking registers %d-%d from %8.8lX\n",
@@ -553,17 +568,6 @@ int     tranreqd;                       /* 1=Translation required    */
     /* Load general registers from bytes 0-63 of the state entry */
     for (i = 0; i < 16; i++)
     {
-        /* Recalculate absolute address if page boundary crossed */
-        if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
-            tranreqd = 1;
-
-        /* Calculate absolute address if required */
-        if (tranreqd)
-        {
-            abs = abs_stack_addr (lsea, regs, ACCTYPE_READ);
-            tranreqd = 0;
-        }
-
         /* Load the general register from the stack entry */
         if ((r1 <= r2 && i >= r1 && i <= r2)
             || (r1 > r2 && (i >= r1 || i <= r2)))
@@ -585,22 +589,15 @@ int     tranreqd;                       /* 1=Translation required    */
         lsea &= 0x7FFFFFFF;
         abs += 4;
 
+        /* Recalculate absolute address if page boundary crossed */
+        if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
+            abs = abs2;
+
     } /* end for(i) */
 
     /* Load access registers from bytes 64-127 of the state entry */
     for (i = 0; i < 16; i++)
     {
-        /* Recalculate absolute address if page boundary crossed */
-        if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
-            tranreqd = 1;
-
-        /* Calculate absolute address if required */
-        if (tranreqd)
-        {
-            abs = abs_stack_addr (lsea, regs, ACCTYPE_READ);
-            tranreqd = 0;
-        }
-
         /* Load the access register from the stack entry */
         if ((r1 <= r2 && i >= r1 && i <= r2)
             || (r1 > r2 && (i >= r1 || i <= r2)))
@@ -621,6 +618,10 @@ int     tranreqd;                       /* 1=Translation required    */
         lsea += 4;
         lsea &= 0x7FFFFFFF;
         abs += 4;
+
+        /* Recalculate absolute address if page boundary crossed */
+        if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
+            abs = abs2;
 
     } /* end for(i) */
 

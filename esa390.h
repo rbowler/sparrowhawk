@@ -879,6 +879,23 @@ typedef struct _MBK {
 #define CHM_GPR2_MBO	0x7FFFFFE0	/* Measurement Block Origin  */
 #define CHM_GPR2_RESV	0x8000001F	/* Reserved, must be zero    */
 
+/* Definitions for PLO instruction */
+#define PLO_GPR0_FC     0x000000FF      /* Function code mask        */
+#define PLO_GPR0_T      0x00000100      /* Function test mask        */
+#define PLO_GPR0_RESV   0xFFFFFE00      /* Reserved bits             */
+#define PLO_CL                   0      /* Compare and load          */
+#define PLO_CLG                  1      /* Compare and load          */
+#define PLO_CS                   4      /* Compare and swap          */
+#define PLO_CSG                  5      /* Compare and swap          */
+#define PLO_DCS                  8      /* Double compare and swap   */
+#define PLO_DCSG                 9      /* Double compare and swap   */
+#define PLO_CSST                12      /* Compare and swap and store*/
+#define PLO_CSSTG               13      /* Compare and swap and store*/
+#define PLO_CSDST               16      /* C/S and double store      */
+#define PLO_CSDSTG              17      /* C/S and double store      */
+#define PLO_CSTST               20      /* C/S and triple store      */
+#define PLO_CSTSTG              21      /* C/S and triple store      */
+
 /* Bit definitions for the Vector Facility */
 #define VSR_M    0x0001000000000000ULL	/* Vector mask mode bit      */
 #define VSR_VCT  0x0000FFFF00000000ULL	/* Vector count              */

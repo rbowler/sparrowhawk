@@ -110,6 +110,9 @@ int     i;                              /* Array subscript           */
         aste[i] = fetch_fullword_absolute (aste_addr);
         aste_addr += 4;
     }
+    /* Clear remaining words if fewer than 16 words were loaded */
+    while (i < 16) aste[i++] = 0;
+
 
     /* Check the ASX invalid bit in the ASTE */
     if (aste[0] & ASTE0_INVALID)
@@ -137,7 +140,6 @@ asn_asn_tran_spec_excp:
 
 asn_prog_check:
     program_check (regs, code);
-    return code;
 
 /* Conditions which the caller may or may not program check */
 asn_afx_tran_excp:
@@ -227,7 +229,8 @@ BYTE    ate;                            /* Authority table entry     */
 
 auth_addr_excp:
     program_check (regs, PGM_ADDRESSING_EXCEPTION);
-    return 1;
+
+    return -1; /* prevent warning from compiler */
 } /* end function authorize_asn */
 
 /*-------------------------------------------------------------------*/
@@ -412,7 +415,6 @@ alet_asn_tran_spec_excp:
 
 alet_prog_check:
     program_check (regs, code);
-    return code;
 
 /* Conditions which the caller may or may not program check */
 alet_spec_excp:
@@ -860,7 +862,6 @@ tran_spec_excp:
 
 tran_prog_check:
     program_check (regs, *xcode);
-    return 4;
 
 /* Conditions which the caller may or may not program check */
 seg_tran_invalid:
@@ -984,10 +985,7 @@ U16     pte;                            /* Page table entry          */
        (((regs->cr[0] & CR0_SEG_SIZE) != CR0_SEG_SZ_64K) &&
        ((regs->cr[0] & CR0_SEG_SIZE) != CR0_SEG_SZ_1M)))
 #endif
-    {
         program_check (regs, PGM_TRANSLATION_SPECIFICATION_EXCEPTION);
-        return;
-    }
 
     /* Combine the page table origin in the R1 register with
        the page index in the R2 register, ignoring carry, to
@@ -1193,7 +1191,6 @@ U16     xcode;                          /* Exception code            */
 
 vabs_addr_excp:
     program_check (regs, PGM_ADDRESSING_EXCEPTION);
-    return 0;
 
 vabs_prot_excp:
 #ifdef FEATURE_SUPPRESSION_ON_PROTECTION
@@ -1204,12 +1201,11 @@ vabs_prot_excp:
     regs->excarid = (arn > 0 ? arn : 0);
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
     program_check (regs, PGM_PROTECTION_EXCEPTION);
-    return 0;
 
 vabs_prog_check:
     program_check (regs, xcode);
-    return 0;
 
+    return -1; /* prevent warning from compiler */
 } /* end function logical_to_abs */
 
 /*-------------------------------------------------------------------*/
@@ -1700,10 +1696,8 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     akey = regs->psw.pkey;
 
     /* Program check if instruction address is odd */
-    if (addr & 0x01) {
+    if (addr & 0x01)
         program_check (regs, PGM_SPECIFICATION_EXCEPTION);
-        return;
-    }
 
     /* Fetch six bytes if instruction cannot cross a page boundary */
     if ((addr & STORAGE_KEY_BYTEMASK) <= STORAGE_KEY_PAGESIZE - 6)

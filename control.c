@@ -16,6 +16,7 @@
 /*      Instruction decode by macros - Jan Jaeger                    */
 /*      Prevent TOD from going backwards in time - Jan Jaeger        */
 /*      Instruction decode rework - Jan Jaeger                       */
+/*      PR may lose pending interrupts - Jan Jaeger                  */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -925,9 +926,9 @@ U16     xcode;                          /* Exception code            */
 
     /* Fetch PKM, SASN, AX, and PASN from first operand */
     dreg = vfetch8 ( effective_addr1, b1, regs );
-    pkm_d = (dreg & 0xFFFF000000000000ULL) >> 48;
-    sasn_d = (dreg & 0xFFFF00000000ULL) >> 32;
-    ax_d = (dreg & 0xFFFF0000) >> 16;
+    pkm_d = (dreg >> 48) & 0xFFFF;
+    sasn_d = (dreg >> 32) & 0xFFFF;
+    ax_d = (dreg >> 16) & 0xFFFF;
     pasn_d = dreg & 0xFFFF;
 
     /* PASN translation */
@@ -1247,8 +1248,8 @@ int     b1, b2;                         /* Values of base registers  */
 U32     effective_addr1,
         effective_addr2;                /* Effective addresses       */
 int     cc;                             /* Condition code            */
-int     j;                              /* Integer workarea          */
-U32     n;                              /* Unsigned workarea         */
+int     k;                              /* Integer workarea          */
+U32     l;                              /* Unsigned workarea         */
 
     SS(inst, execflag, regs, r1, r3, b1, effective_addr1,
                                      b2, effective_addr2);
@@ -1262,33 +1263,33 @@ U32     n;                              /* Unsigned workarea         */
         program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Load true length from R1 register */
-    n = regs->gpr[r1];
+    l = regs->gpr[r1];
 
     /* If the true length does not exceed 256, set condition code
        zero, otherwise set cc=3 and use effective length of 256 */
-    if (n <= 256)
+    if (l <= 256)
         cc = 0;
     else {
         cc = 3;
-        n = 256;
+        l = 256;
     }
 
     /* Load secondary space key from R3 register bits 24-27 */
-    j = regs->gpr[r3] & 0xF0;
+    k = regs->gpr[r3] & 0xF0;
 
     /* Program check if in problem state and key mask in
        CR3 bits 0-15 is not 1 for the specified key */
     if ( regs->psw.prob
-        && ((regs->cr[3] << (j >> 4)) & 0x80000000) == 0 )
+        && ((regs->cr[3] << (k >> 4)) & 0x80000000) == 0 )
         program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Move characters from secondary address space to primary
        address space using secondary key for second operand */
-    if (n > 0)
+    if (l > 0)
         move_chars (effective_addr1, USE_PRIMARY_SPACE,
                     regs->psw.pkey,
                     effective_addr2, USE_SECONDARY_SPACE,
-                    j, n-1, regs);
+                    k, l-1, regs);
 
     /* Set condition code */
     regs->psw.cc = cc;
@@ -1306,8 +1307,8 @@ int     b1, b2;                         /* Values of base registers  */
 U32     effective_addr1,
         effective_addr2;                /* Effective addresses       */
 int     cc;                             /* Condition code            */
-int     j;                              /* Integer workarea          */
-U32     n;                              /* Unsigned workarea         */
+int     k;                              /* Integer workarea          */
+U32     l;                              /* Unsigned workarea         */
 
     SS(inst, execflag, regs, r1, r3, b1, effective_addr1,
                                      b2, effective_addr2);
@@ -1320,32 +1321,32 @@ U32     n;                              /* Unsigned workarea         */
         program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Load true length from R1 register */
-    n = regs->gpr[r1];
+    l = regs->gpr[r1];
 
     /* If the true length does not exceed 256, set condition code
        zero, otherwise set cc=3 and use effective length of 256 */
-    if (n <= 256)
+    if (l <= 256)
         cc = 0;
     else {
         cc = 3;
-        n = 256;
+        l = 256;
     }
 
     /* Load secondary space key from R3 register bits 24-27 */
-    j = regs->gpr[r3] & 0xF0;
+    k = regs->gpr[r3] & 0xF0;
 
     /* Program check if in problem state and key mask in
        CR3 bits 0-15 is not 1 for the specified key */
     if ( regs->psw.prob
-        && ((regs->cr[3] << (j >> 4)) & 0x80000000) == 0 )
+        && ((regs->cr[3] << (k >> 4)) & 0x80000000) == 0 )
         program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Move characters from primary address space to secondary
        address space using secondary key for first operand */
-    if (n > 0)
-        move_chars (effective_addr1, USE_SECONDARY_SPACE, j,
+    if (l > 0)
+        move_chars (effective_addr1, USE_SECONDARY_SPACE, k,
                     effective_addr2, USE_PRIMARY_SPACE,
-                    regs->psw.pkey, n-1, regs);
+                    regs->psw.pkey, l-1, regs);
 
     /* Set condition code */
     regs->psw.cc = cc;
@@ -1361,26 +1362,26 @@ void zz_move_with_destination_key (BYTE inst[], int execflag, REGS *regs)
 int     b1, b2;                         /* Values of base registers  */
 U32     effective_addr1,
         effective_addr2;                /* Effective addresses       */
-int     i, j;                           /* Integer workarea          */
+int     k, l;                           /* Integer workarea          */
 
     SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2); 
 
     /* Load operand length-1 from register 0 bits 24-31 */
-    i = regs->gpr[0] & 0xFF;
+    l = regs->gpr[0] & 0xFF;
 
     /* Load destination key from register 1 bits 24-27 */
-    j = regs->gpr[1] & 0xF0;
+    k = regs->gpr[1] & 0xF0;
 
     /* Program check if in problem state and key mask in
        CR3 bits 0-15 is not 1 for the specified key */
     if ( regs->psw.prob
-        && ((regs->cr[3] << (j >> 4)) & 0x80000000) == 0 )
+        && ((regs->cr[3] << (k >> 4)) & 0x80000000) == 0 )
         program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Move characters using destination key for operand 1 */
-    move_chars (effective_addr1, b1, j,
+    move_chars (effective_addr1, b1, k,
                 effective_addr2, b2, regs->psw.pkey,
-                i, regs);
+                l, regs);
 
 }
 
@@ -1395,37 +1396,37 @@ int     b1, b2;                         /* Values of base registers  */
 U32     effective_addr1,
         effective_addr2;                /* Effective addresses       */
 int     cc;                             /* Condition code            */
-int     j;                              /* Integer workarea          */
-U32     n;                              /* Unsigned workarea         */
+int     k;                              /* Integer workarea          */
+U32     l;                              /* Unsigned workarea         */
 
     SS(inst, execflag, regs, r1, r3, b1, effective_addr1,
                                      b2, effective_addr2);
 
     /* Load true length from R1 register */
-    n = regs->gpr[r1];
+    l = regs->gpr[r1];
 
     /* If the true length does not exceed 256, set condition code
        zero, otherwise set cc=3 and use effective length of 256 */
-    if (n <= 256)
+    if (l <= 256)
         cc = 0;
     else {
         cc = 3;
-        n = 256;
+        l = 256;
     }
 
     /* Load source key from R3 register bits 24-27 */
-    j = regs->gpr[r3] & 0xF0;
+    k = regs->gpr[r3] & 0xF0;
 
     /* Program check if in problem state and key mask in
        CR3 bits 0-15 is not 1 for the specified key */
     if ( regs->psw.prob
-        && ((regs->cr[3] << (j >> 4)) & 0x80000000) == 0 )
+        && ((regs->cr[3] << (k >> 4)) & 0x80000000) == 0 )
         program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Move characters using source key for second operand */
-    if (n > 0)
+    if (l > 0)
         move_chars (effective_addr1, b1, regs->psw.pkey,
-                    effective_addr2, b2, j, n-1, regs);
+                    effective_addr2, b2, k, l-1, regs);
 
     /* Set condition code */
     regs->psw.cc = cc;
@@ -1441,25 +1442,25 @@ void zz_move_with_source_key (BYTE inst[], int execflag, REGS *regs)
 int     b1, b2;                         /* Values of base registers  */
 U32     effective_addr1,
         effective_addr2;                /* Effective addresses       */
-int     i, j;                           /* Integer workarea          */
+int     k, l;                           /* Integer workarea          */
 
     SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2); 
 
     /* Load operand length-1 from register 0 bits 24-31 */
-    i = regs->gpr[0] & 0xFF;
+    l = regs->gpr[0] & 0xFF;
 
     /* Load source key from register 1 bits 24-27 */
-    j = regs->gpr[1] & 0xF0;
+    k = regs->gpr[1] & 0xF0;
 
     /* Program check if in problem state and key mask in
        CR3 bits 0-15 is not 1 for the specified key */
     if ( regs->psw.prob
-        && ((regs->cr[3] << (j >> 4)) & 0x80000000) == 0 )
+        && ((regs->cr[3] << (k >> 4)) & 0x80000000) == 0 )
         program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Move characters using source key for second operand */
     move_chars (effective_addr1, b1, regs->psw.pkey,
-                effective_addr2, b2, j, i, regs);
+                effective_addr2, b2, k, l, regs);
 
 }
 
@@ -1848,7 +1849,7 @@ U16     xcode;                          /* Exception code            */
             /* Special operation exception if ASN translation
                control (control register 14 bit 12) is zero */
             if ((regs->cr[14] & CR14_ASN_TRAN) == 0)
-                program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+                program_check (&newregs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
             /* Translate new primary ASN to obtain ASTE */
             xcode = translate_asn (pasn, &newregs, &pasteo, aste);
@@ -1932,7 +1933,6 @@ U16     xcode;                          /* Exception code            */
     } /* end if(LSED_UET_PC) */
 
     /* Update the updated CPU registers from the working copy */
-    /* *regs = newregs;   ZZDEBUG */
     memcpy(regs->gpr, &newregs.gpr, sizeof(newregs.gpr));
     memcpy(regs->ar, &newregs.ar, sizeof(newregs.ar));
     memcpy(regs->cr, &newregs.cr, sizeof(newregs.cr));
@@ -3428,8 +3428,10 @@ U16     xcode;                          /* Exception code            */
         /* Return condition code 3 if translation exception */
         if (translate_addr (effective_addr1, b1, regs, ACCTYPE_TPROT, &raddr,
                 &xcode, &private, &protect, &stid, NULL, NULL))
+        {
             regs->psw.cc = 3;
             return;
+        }
     }
 
     /* Convert real address to absolute address */

@@ -4230,7 +4230,8 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
 
         /* Command reject with incomplete domain if CCWs remain
            but command chaining is not specified */
-        if (dev->ckdlcount > 0 && (flags & CCW_FLAGS_CC) == 0)
+        if (dev->ckdlcount > 0 && (flags & CCW_FLAGS_CC) == 0 &&
+            code != 0x02)
         {
             ckd_build_sense (dev, SENSE_CR | SENSE_OC, 0, 0, 0, 0);
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
