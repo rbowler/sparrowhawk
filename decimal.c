@@ -1235,8 +1235,8 @@ BYTE    dbyte;                          /* Destination operand byte  */
         vstoreb ( dbyte, --addr1, arn1, regs );
 
         /* Wraparound according to addressing mode */
-        addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr1 &= ADDRESS_MAXWRAP(regs);
+        addr2 &= ADDRESS_MAXWRAP(regs);
 
     } /* end for(i) */
 
@@ -1291,7 +1291,7 @@ BYTE    dbyte;                          /* Destination operand byte  */
 
             if (j-- > 0)
             {
-                addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+                addr2 &= ADDRESS_MAXWRAP(regs);
                 sbyte = vfetchb ( --addr2, arn2, regs );
                 dbyte |= sbyte << 4;
             }
@@ -1305,8 +1305,8 @@ BYTE    dbyte;                          /* Destination operand byte  */
         vstoreb ( dbyte, --addr1, arn1, regs );
 
         /* Wraparound according to addressing mode */
-        addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr1 &= ADDRESS_MAXWRAP(regs);
+        addr2 &= ADDRESS_MAXWRAP(regs);
 
     } /* end for(i) */
 
@@ -1371,13 +1371,13 @@ BYTE    lbyte;                          /* Left result byte of pair  */
         vstoreb ( rbyte, --addr1, arn1, regs );
         if (--i > 0)
         {
-            addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            addr1 &= ADDRESS_MAXWRAP(regs);
             vstoreb ( lbyte, --addr1, arn1, regs );
         }
 
         /* Wraparound according to addressing mode */
-        addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr1 &= ADDRESS_MAXWRAP(regs);
+        addr2 &= ADDRESS_MAXWRAP(regs);
 
     } /* end for(i) */
 
@@ -1448,7 +1448,7 @@ BYTE    rbyte;                          /* Result byte               */
 
                 /* Increment second operand address */
                 addr2++;
-                addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+                addr2 &= ADDRESS_MAXWRAP(regs);
 
                 /* Program check if left digit is not numeric */
                 if (h > 9)
@@ -1527,7 +1527,7 @@ BYTE    rbyte;                          /* Result byte               */
 
         /* Increment first operand address */
         addr1++;
-        addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr1 &= ADDRESS_MAXWRAP(regs);
 
     } /* end for(i) */
 

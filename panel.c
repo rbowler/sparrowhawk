@@ -750,7 +750,7 @@ int     n;                              /* Number of bytes in buffer */
         if (b1 != 0)
         {
             addr1 += regs->gpr[b1];
-            addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            addr1 &= ADDRESS_MAXWRAP(regs);
         }
 
         /* Apply indexing for RX instructions */
@@ -760,7 +760,7 @@ int     n;                              /* Number of bytes in buffer */
             if (x1 != 0)
             {
                 addr1 += regs->gpr[x1];
-                addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+                addr1 &= ADDRESS_MAXWRAP(regs);
             }
         }
     }
@@ -774,7 +774,7 @@ int     n;                              /* Number of bytes in buffer */
         if (b2 != 0)
         {
             addr2 += regs->gpr[b2];
-            addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            addr2 &= ADDRESS_MAXWRAP(regs);
         }
     }
 
@@ -783,11 +783,9 @@ int     n;                              /* Number of bytes in buffer */
         || opcode == 0xA8 || opcode == 0xA9)
     {
         b1 = inst[1] >> 4;
-        addr1 = regs->gpr[b1] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr1 = regs->gpr[b1] & ADDRESS_MAXWRAP(regs);
         b2 = inst[1] & 0x0F;
-        addr2 = regs->gpr[b2] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr2 = regs->gpr[b2] & ADDRESS_MAXWRAP(regs);
     }
 
     /* Calculate the operand addresses for RRE instructions */
@@ -796,11 +794,9 @@ int     n;                              /* Number of bytes in buffer */
             || (inst[1] >= 0x40 && inst[1] <= 0x5F)))
     {
         b1 = inst[3] >> 4;
-        addr1 = regs->gpr[b1] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr1 = regs->gpr[b1] & ADDRESS_MAXWRAP(regs);
         b2 = inst[3] & 0x0F;
-        addr2 = regs->gpr[b2] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr2 = regs->gpr[b2] & ADDRESS_MAXWRAP(regs);
     }
 
     /* Display storage at first storage operand location */

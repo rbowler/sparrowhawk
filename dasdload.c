@@ -809,7 +809,8 @@ CKDDASD_RECHDR  rechdr;                 /* Record header             */
     if (rc < CKDDASD_TRKHDR_SIZE)
     {
         XMERRF ("%s cyl %d head %d read error: %s\n",
-                ofname, cyl, head, strerror(errno));
+                ofname, cyl, head,
+                (rc < 0 ? strerror(errno) : "Unexpected end of file"));
         return -1;
     }
 
@@ -836,7 +837,9 @@ CKDDASD_RECHDR  rechdr;                 /* Record header             */
         if (rc < CKDDASD_RECHDR_SIZE)
         {
             XMERRF ("%s cyl %d head %d read error: %s\n",
-                    ofname, cyl, head, strerror(errno));
+                    ofname, cyl, head,
+                    (rc < 0 ? strerror(errno) :
+                    "Unexpected end of file"));
             return -1;
         }
 
@@ -1640,7 +1643,9 @@ BYTE            seghdr[2];              /* Segment length and flags  */
         if (rc < 2)
         {
             XMERRF ("%s read error: %s\n",
-                    xfname, strerror(errno));
+                    xfname,
+                    (rc < 0 ? strerror(errno) :
+                    "Unexpected end of file"));
             return -1;
         }
 
@@ -1693,7 +1698,9 @@ BYTE            seghdr[2];              /* Segment length and flags  */
         if (rc < seglen)
         {
             XMERRF ("%s read error: %s\n",
-                    xfname, strerror(errno));
+                    xfname,
+                    (rc < 0 ? strerror(errno) :
+                    "Unexpected end of file"));
             return -1;
         }
 
@@ -2294,7 +2301,8 @@ BYTE            notelist[1024];         /* Note list                 */
     if (rc < CKDDASD_TRKHDR_SIZE)
     {
         XMERRF ("%s cyl %d head %d read error: %s\n",
-                ofname, cyl, head, strerror(errno));
+                ofname, cyl, head,
+                (rc < 0 ? strerror(errno) : "Unexpected end of file"));
         return -1;
     }
 
@@ -2321,7 +2329,9 @@ BYTE            notelist[1024];         /* Note list                 */
         if (rc < CKDDASD_RECHDR_SIZE)
         {
             XMERRF ("%s cyl %d head %d read error: %s\n",
-                    ofname, cyl, head, strerror(errno));
+                    ofname, cyl, head,
+                    (rc < 0 ? strerror(errno) :
+                    "Unexpected end of file"));
             return -1;
         }
 

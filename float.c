@@ -1,10 +1,9 @@
 /* FLOAT.C      (c) Copyright Peter Kuschnerus, 2000                 */
-/*              ESA/390 Floatingpoint Instructions                   */
+/*              ESA/390 Hex Floatingpoint Instructions               */
 
 /*-------------------------------------------------------------------*/
-/* This module implements the ESA/390 Floatingpoint Instructions     */
-/* described in the manual                                           */
-/* SA22-7201-04 ESA/390 Principles of Operation.                     */
+/* This module implements the ESA/390 Hex Floatingpoint Instructions */
+/* described in the manual ESA/390 Principles of Operation.          */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -40,6 +39,8 @@ typedef struct _EXTENDED_FLOAT {
 
 #define	POS	0			/* Positive value of sign    */
 #define NEG	1			/* Negative value of sign    */
+#define UNNORMAL 0			/* Without normalisation     */
+#define NORMAL	1			/* With normalisation	     */
 
 
 /*-------------------------------------------------------------------*/
@@ -88,7 +89,7 @@ U32 c;
 static void sub_U128 ( U64 *msa, U64 *lsa, U64 msb, U64 lsb )
 {
 S64 wk;
-int sum;
+U32 sum;
 int c;
 
     wk = (*lsa & 0x00000000FFFFFFFFULL) - (lsb & 0x00000000FFFFFFFFULL);
@@ -116,7 +117,7 @@ int c;
 static void sub_reverse_U128 ( U64 *msa, U64 *lsa, U64 msb, U64 lsb )
 {
 S64 wk;
-int sum;
+U32 sum;
 int c;
 
     wk = (lsb & 0x00000000FFFFFFFFULL) - (*lsa & 0x00000000FFFFFFFFULL);
@@ -304,7 +305,7 @@ U64     value;                          /* Operand value             */
 /*-------------------------------------------------------------------*/
 /* Normalize short float                                             */
 /* The fraction is expected to be non zero                           */
-/* If zero an enless loop is caused !!!!!!                           */ 
+/* If zero an endles loop is caused !!!!!!                           */ 
 /*                                                                   */
 /* Input:                                                            */
 /*      fl	Internal float					     */
@@ -322,7 +323,7 @@ static void normal_sf ( SHORT_FLOAT *fl )
 /*-------------------------------------------------------------------*/
 /* Normalize long float                                              */
 /* The fraction is expected to be non zero                           */
-/* If zero an enless loop is caused !!!!!!                           */ 
+/* If zero an endles loop is caused !!!!!!                           */ 
 /*                                                                   */
 /* Input:                                                            */
 /*      fl	Internal float					     */
@@ -340,7 +341,7 @@ static void normal_lf ( LONG_FLOAT *fl )
 /*-------------------------------------------------------------------*/
 /* Normalize extended float                                          */
 /* The fraction is expected to be non zero                           */
-/* If zero an enless loop is caused !!!!!!                           */ 
+/* If zero an endles loop is caused !!!!!!                           */ 
 /*                                                                   */
 /* Input:                                                            */
 /*      fl	Internal float					     */
@@ -364,7 +365,7 @@ static void normal_ef ( EXTENDED_FLOAT *fl )
 	(fl->expo)--;
     }
 
-} /* end function normal_lf */
+} /* end function normal_ef */
 
 
 /*-------------------------------------------------------------------*/
@@ -564,14 +565,13 @@ static void significance_ef ( EXTENDED_FLOAT *fl, REGS *regs )
 /* Add short float                                                   */
 /*                                                                   */
 /* Input:                                                            */
-/*      fl	Internal float					     */
+/*      fl	Float						     */
 /*      add_fl	Float to be added				     */
-/*	sub	Operator: add or subtract			     */
-/*	norm	Normalize if true				     */
+/*	normal	Normalize if true				     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void add_sf ( SHORT_FLOAT *fl, SHORT_FLOAT *add_fl, 
-		BYTE sub, BYTE normal, REGS *regs )
+static void add_sf ( SHORT_FLOAT *fl, SHORT_FLOAT *add_fl, BYTE normal, 
+		REGS *regs )
 {
 BYTE shift;
 
@@ -597,10 +597,10 @@ BYTE shift;
 		    	if (shift >= 6 || ((fl->short_fract >>= (shift * 4)) == 0)) {	
 			    /* 0, copy summand */
 
-			    fl->sign = sub ? (! add_fl->sign) : add_fl->sign;
+			    fl->sign = add_fl->sign;
 			    fl->short_fract = add_fl->short_fract;
 
-			    if (normal) {
+			    if (normal == NORMAL) {
 				normal_sf (fl);
 				underflow_sf (fl, regs);
 			    }
@@ -617,7 +617,7 @@ BYTE shift;
 		    	if (shift >= 6 || ((add_fl->short_fract >>= (shift * 4)) == 0)) {
 			    /* 0, nothing to add */
 
-			    if (normal) {
+			    if (normal == NORMAL) {
 				normal_sf (fl);
 				underflow_sf (fl, regs);
 			    }
@@ -630,12 +630,13 @@ BYTE shift;
 	    }
 
 	    /* compute with guard digit */
-	    if (fl->sign == sub) {
+	    if (fl->sign == add_fl->sign) {
 		fl->short_fract += add_fl->short_fract;
 	    } else {
 		if (fl->short_fract == add_fl->short_fract) {
 		    /* true 0 */
 
+		    fl->short_fract = 0;
 		    significance_sf (fl, regs);
 		    return;
 
@@ -643,7 +644,7 @@ BYTE shift;
 		    fl->short_fract -= add_fl->short_fract;
 		} else {
 		    fl->short_fract = add_fl->short_fract - fl->short_fract;
-		    fl->sign = sub;
+		    fl->sign = add_fl->sign;
 		}
 	    }
 
@@ -654,7 +655,7 @@ BYTE shift;
 		overflow_sf (fl, regs);
 	    } else {
 
-	 	if (normal) {
+	 	if (normal == NORMAL) {
 		    /* normalize with guard digit */
 	    	    if (fl->short_fract) {
 		        /* not 0 */
@@ -663,6 +664,7 @@ BYTE shift;
 			    /* not normalize, just guard digit */
 		            fl->short_fract >>= 4;
 		        } else {
+			    (fl->expo)--;
 			    normal_sf (fl);
 			    underflow_sf (fl, regs);
 		        }
@@ -684,7 +686,7 @@ BYTE shift;
 	    /* copy summand */
 
 	    fl->expo = add_fl->expo;
-	    fl->sign = sub ? (! add_fl->sign) : add_fl->sign;
+	    fl->sign = add_fl->sign;
 	    fl->short_fract = add_fl->short_fract;
 	}
     } else { 			    /* add_fl 0 */
@@ -695,7 +697,7 @@ BYTE shift;
 	    return;
 	}
     }
-    if (normal) {
+    if (normal == NORMAL) {
 	normal_sf (fl);
 	underflow_sf (fl, regs);
     }
@@ -707,14 +709,13 @@ BYTE shift;
 /* Add long float                                                    */
 /*                                                                   */
 /* Input:                                                            */
-/*      fl	Internal float					     */
+/*      fl	Float						     */
 /*      add_fl	Float to be added				     */
-/*	sub	Operator: add or subtract			     */
-/*	norm	Normalize if true				     */
+/*	normal	Normalize if true				     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void add_lf ( LONG_FLOAT *fl, LONG_FLOAT *add_fl, 
-		BYTE sub, BYTE normal, REGS *regs )
+static void add_lf ( LONG_FLOAT *fl, LONG_FLOAT *add_fl, BYTE normal, 
+		REGS *regs )
 {
 BYTE shift;
 
@@ -740,10 +741,10 @@ BYTE shift;
 		    	if (shift >= 14 || ((fl->long_fract >>= (shift * 4)) == 0)) {	
 			    /* 0, copy summand */
 
-			    fl->sign = sub ? (! add_fl->sign) : add_fl->sign;
+			    fl->sign = add_fl->sign;
 			    fl->long_fract = add_fl->long_fract;
 
-			    if (normal) {
+			    if (normal == NORMAL) {
 				normal_lf (fl);
 				underflow_lf (fl, regs);
 			    }
@@ -760,7 +761,7 @@ BYTE shift;
 		    	if (shift >= 14 || ((add_fl->long_fract >>= (shift * 4)) == 0)) {
 			    /* 0, nothing to add */
 
-			    if (normal) {
+			    if (normal == NORMAL) {
 				normal_lf (fl);
 				underflow_lf (fl, regs);
 			    }
@@ -773,12 +774,13 @@ BYTE shift;
 	    }
 
 	    /* compute with guard digit */
-	    if (fl->sign == sub) {
+	    if (fl->sign == add_fl->sign) {
 		fl->long_fract += add_fl->long_fract;
 	    } else {
 		if (fl->long_fract == add_fl->long_fract) {
 		    /* true 0 */
 
+		    fl->long_fract = 0;
 		    significance_lf (fl, regs);
 		    return;
 
@@ -786,7 +788,7 @@ BYTE shift;
 		    fl->long_fract -= add_fl->long_fract;
 		} else {
 		    fl->long_fract = add_fl->long_fract - fl->long_fract;
-		    fl->sign = sub;
+		    fl->sign = add_fl->sign;
 		}
 	    }
 
@@ -797,7 +799,7 @@ BYTE shift;
 		overflow_lf (fl, regs);
             } else {
 
-                if (normal) {
+                if (normal == NORMAL) {
                     /* normalize with guard digit */
                     if (fl->long_fract) {
                         /* not 0 */
@@ -806,6 +808,7 @@ BYTE shift;
                             /* not normalize, just guard digit */
                             fl->long_fract >>= 4;
                         } else {
+			    (fl->expo)--;
 			    normal_lf (fl);
 			    underflow_lf (fl, regs);
                         }
@@ -827,7 +830,7 @@ BYTE shift;
 	    /* copy summand */
 
 	    fl->expo = add_fl->expo;
-	    fl->sign = sub ? (! add_fl->sign) : add_fl->sign;
+	    fl->sign = add_fl->sign;
 	    fl->long_fract = add_fl->long_fract;
 	}
     } else {                       /* add_fl 0 */
@@ -838,7 +841,7 @@ BYTE shift;
             return;
         }
     }
-    if (normal) {
+    if (normal == NORMAL) {
 	normal_lf (fl);
 	underflow_lf (fl, regs);
     }
@@ -850,13 +853,11 @@ BYTE shift;
 /* Add extended float normalized                                     */
 /*                                                                   */
 /* Input:                                                            */
-/*      fl	Internal float					     */
+/*      fl	Float						     */
 /*      add_fl	Float to be added				     */
-/*	sub	Operator: add or subtract			     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
-static void add_ef ( EXTENDED_FLOAT *fl, EXTENDED_FLOAT *add_fl, 
-		BYTE sub, REGS *regs )
+static void add_ef ( EXTENDED_FLOAT *fl, EXTENDED_FLOAT *add_fl, REGS *regs )
 {
 BYTE shift;
 
@@ -886,7 +887,7 @@ BYTE shift;
 		    	if (shift >= 28) {
 			    /* 0, copy summand */
 
-			    fl->sign = sub ? (! add_fl->sign) : add_fl->sign;
+			    fl->sign = add_fl->sign;
 			    fl->ms_fract = add_fl->ms_fract;
 			    fl->ls_fract = add_fl->ls_fract;
 
@@ -909,7 +910,7 @@ BYTE shift;
 			if ((fl->ms_fract == 0) && (fl->ls_fract == 0)) {	
 			    /* 0, copy summand */
 
-			    fl->sign = sub ? (! add_fl->sign) : add_fl->sign;
+			    fl->sign = add_fl->sign;
 			    fl->ms_fract = add_fl->ms_fract;
 			    fl->ls_fract = add_fl->ls_fract;
 
@@ -962,7 +963,7 @@ BYTE shift;
 	    }
 
 	    /* compute with guard digit */
-	    if (fl->sign == sub) {
+	    if (fl->sign == add_fl->sign) {
 		add_U128 (&(fl->ms_fract), 
 			  &(fl->ls_fract), 
 			  add_fl->ms_fract, 
@@ -972,6 +973,8 @@ BYTE shift;
 		    && (fl->ls_fract == add_fl->ls_fract)) {
 		    /* true 0 */
 
+		    fl->ms_fract = 0;
+		    fl->ls_fract = 0;
 		    significance_ef (fl, regs);
 		    return;
 
@@ -987,7 +990,7 @@ BYTE shift;
 			  &(fl->ls_fract), 
 			  add_fl->ms_fract, 
 			  add_fl->ls_fract);
-		    fl->sign = sub;
+		    fl->sign = add_fl->sign;
 		}
 	    }
 
@@ -1009,6 +1012,7 @@ BYTE shift;
 				     | (fl->ls_fract >> 4);
 			fl->ms_fract >>= 4;
 		    } else {
+			(fl->expo)--;
 			normal_ef (fl);
 			underflow_ef (fl, regs);
 		    }
@@ -1023,7 +1027,7 @@ BYTE shift;
 	    /* copy summand */
 
 	    fl->expo = add_fl->expo;
-	    fl->sign = sub ? (! add_fl->sign) : add_fl->sign;
+	    fl->sign = add_fl->sign;
 	    fl->ms_fract = add_fl->ms_fract;
 	    fl->ls_fract = add_fl->ls_fract;
 	}
@@ -1045,7 +1049,7 @@ BYTE shift;
 /* Compare short float                                               */
 /*                                                                   */
 /* Input:                                                            */
-/*      fl	Internal float					     */
+/*      fl	Float						     */
 /*      cmp_fl	Float to be compared				     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
@@ -1155,7 +1159,7 @@ BYTE shift;
 /* Compare long float                                                */
 /*                                                                   */
 /* Input:                                                            */
-/*      fl	Internal float					     */
+/*      fl	Float						     */
 /*      cmp_fl	Float to be compared				     */
 /*      regs    CPU register context                                 */
 /*-------------------------------------------------------------------*/
@@ -1303,7 +1307,7 @@ static void mul_sf_to_lf ( SHORT_FLOAT *fl, SHORT_FLOAT *mul_fl,
     	result_fl->expo = 0;
     	result_fl->long_fract = 0;
     }
-}
+} /* end function mul_sf_to_lf */
 
 
 /*-------------------------------------------------------------------*/
@@ -1359,7 +1363,7 @@ U64 wk;
     	result_fl->ms_fract = 0;
     	result_fl->ls_fract = 0;
     }
-}
+} /* end function mul_lf_to_ef */
 
 
 /*-------------------------------------------------------------------*/
@@ -1411,7 +1415,7 @@ U32 v;
     	fl->expo = 0;
     	fl->long_fract = 0;
     }
-}
+} /* end function mul_lf */
 
 
 /*-------------------------------------------------------------------*/
@@ -1489,7 +1493,7 @@ U32 v;
     	fl->ms_fract = 0;
     	fl->ls_fract = 0;
     }
-}
+} /* end function mul_ef */
 
 
 /*-------------------------------------------------------------------*/
@@ -1511,12 +1515,12 @@ U64 wk;
 	    normal_sf ( div_fl );
 
 	    /* position fracts and compute expo */
-	    if (fl->short_fract > div_fl->short_fract) {
-		wk = (U64) fl->short_fract << 20;
-		fl->expo = fl->expo - div_fl->expo + 65;
-	    } else {
+	    if (fl->short_fract < div_fl->short_fract) {
 		wk = (U64) fl->short_fract << 24;
 		fl->expo = fl->expo - div_fl->expo + 64;
+	    } else {
+		wk = (U64) fl->short_fract << 20;
+		fl->expo = fl->expo - div_fl->expo + 65;
 	    }
 	    /* divide fractions */
 	    fl->short_fract = wk / div_fl->short_fract;
@@ -1539,7 +1543,7 @@ U64 wk;
 
         program_check (regs, PGM_FLOATING_POINT_DIVIDE_EXCEPTION);
     }
-}
+} /* end function div_sf */
 
 
 /*-------------------------------------------------------------------*/
@@ -1563,19 +1567,19 @@ int i;
 	    normal_lf ( div_fl );
 
 	    /* position fracts and compute expo */
-	    if (fl->long_fract > div_fl->long_fract) {
+	    if (fl->long_fract < div_fl->long_fract) {
+		fl->expo = fl->expo - div_fl->expo + 64;
+	    } else {
 		fl->expo = fl->expo - div_fl->expo + 65;
 		div_fl->long_fract <<= 4;
-	    } else {
-		fl->expo = fl->expo - div_fl->expo + 64;
 	    }
 
 	    /* partial divide first hex digit */
 	    wk2 = fl->long_fract / div_fl->long_fract;
 	    wk = (fl->long_fract % div_fl->long_fract) << 4;
 
-	    /* partial divide middle 12 hex digits */
-	    i = 12;
+	    /* partial divide middle hex digits */
+	    i = 13;
 	    while (i--) {
 		wk2 = (wk2 << 4) | (wk / div_fl->long_fract);
 		wk = (wk % div_fl->long_fract) << 4;
@@ -1602,7 +1606,7 @@ int i;
 
         program_check (regs, PGM_FLOATING_POINT_DIVIDE_EXCEPTION);
     }
-}
+} /* end function div_lf */
 
 
 /*-------------------------------------------------------------------*/
@@ -1626,13 +1630,13 @@ int i;
 	    normal_ef ( div_fl );
 
 	    /* position fracts and compute expo */
-	    if ((fl->ms_fract > div_fl->ms_fract)
-	     || ((fl->ms_fract == div_fl->ms_fract) && (fl->ls_fract > div_fl->ls_fract))) {
+	    if ((fl->ms_fract < div_fl->ms_fract)
+	     || ((fl->ms_fract == div_fl->ms_fract) && (fl->ls_fract < div_fl->ls_fract))) {
+		fl->expo = fl->expo - div_fl->expo + 64;
+	    } else {
 		fl->expo = fl->expo - div_fl->expo + 65;
 		div_fl->ms_fract = (div_fl->ms_fract << 4) | (div_fl->ls_fract >> 60);
 		div_fl->ls_fract <<= 4;
-	    } else {
-		fl->expo = fl->expo - div_fl->expo + 64;
 	    }
 
 	    /* divide fractions */
@@ -1644,7 +1648,7 @@ int i;
 	    wkm = (wkm << 1) | (wkl >> 63);
 	    wkl <<= 1;
 	    fl->ms_fract = 0;
-	    if (((S64)wkm) <= 0) {
+	    if (((S64)wkm) >= 0) {
 		fl->ls_fract = 1;
 		sub_U128 (&wkm, &wkl, div_fl->ms_fract, div_fl->ls_fract);
 	    } else {
@@ -1652,15 +1656,15 @@ int i;
 		add_U128 (&wkm, &wkl, div_fl->ms_fract, div_fl->ls_fract);
 	    }
 
-	    /* the middle 110 binary digits */
-	    i = 110;
+	    /* the middle binary digits */
+	    i = 111;
 	    while (i--) {
 		wkm = (wkm << 1) | (wkl >> 63);
 		wkl <<= 1;
 
 		fl->ms_fract = (fl->ms_fract << 1) | (fl->ls_fract >> 63);
 		fl->ls_fract <<= 1;
-		if (((S64)wkm) <= 0) {
+		if (((S64)wkm) >= 0) {
 		    fl->ls_fract |= 1;
 		    sub_U128 (&wkm, &wkl, div_fl->ms_fract, div_fl->ls_fract);
 		} else {
@@ -1671,7 +1675,7 @@ int i;
 	    /* the last binary digit */
 	    fl->ms_fract = (fl->ms_fract << 1) | (fl->ls_fract >> 63);
 	    fl->ls_fract <<= 1;
-	    if (((S64)wkm) <= 0) {
+	    if (((S64)wkm) >= 0) {
 		fl->ls_fract |= 1;
 	    }
 
@@ -1694,7 +1698,7 @@ int i;
 
         program_check (regs, PGM_FLOATING_POINT_DIVIDE_EXCEPTION);
     }
-}
+} /* end function div_ef */
 
 
 /*-------------------------------------------------------------------*/
@@ -1850,7 +1854,7 @@ LONG_FLOAT add_fl;
     get_lf (&add_fl, regs->fpr + r2);
 
     /* Add long with normalization */
-    add_lf (&fl, &add_fl, add_fl.sign, 1, regs);
+    add_lf (&fl, &add_fl, NORMAL, regs);
 
     /* Set condition code */
     if (fl.long_fract) {
@@ -1881,8 +1885,11 @@ LONG_FLOAT sub_fl;
     get_lf (&fl, regs->fpr + r1);
     get_lf (&sub_fl, regs->fpr + r2);
 
-    /* Subtract long with normalization */
-    add_lf (&fl, &sub_fl, ! sub_fl.sign, 1, regs);
+    /* Invert the sign of 2nd operand */
+    sub_fl.sign = ! (sub_fl.sign);
+
+    /* Add long with normalization */
+    add_lf (&fl, &sub_fl, NORMAL, regs);
 
     /* Set condition code */
     if (fl.long_fract) {
@@ -1964,7 +1971,7 @@ LONG_FLOAT add_fl;
     get_lf (&add_fl, regs->fpr + r2);
 
     /* Add long without normalization */
-    add_lf (&fl, &add_fl, add_fl.sign, 0, regs);
+    add_lf (&fl, &add_fl, UNNORMAL, regs);
 
     /* Set condition code */
     if (fl.long_fract) {
@@ -1995,8 +2002,11 @@ LONG_FLOAT sub_fl;
     get_lf (&fl, regs->fpr + r1);
     get_lf (&sub_fl, regs->fpr + r2);
 
-    /* Subtract long without normalization */
-    add_lf (&fl, &sub_fl, ! sub_fl.sign, 0, regs);
+    /* Invert the sign of 2nd operand */
+    sub_fl.sign = ! (sub_fl.sign);
+
+    /* Add long without normalization */
+    add_lf (&fl, &sub_fl, UNNORMAL, regs);
 
     /* Set condition code */
     if (fl.long_fract) {
@@ -2088,7 +2098,7 @@ EXTENDED_FLOAT add_fl;
     get_ef (&add_fl, regs->fpr + r2);
 
     /* Add extended */
-    add_ef (&fl, &add_fl, add_fl.sign, regs);
+    add_ef (&fl, &add_fl, regs);
 
     /* Set condition code */
     if (fl.ms_fract || fl.ls_fract) {
@@ -2119,8 +2129,11 @@ EXTENDED_FLOAT sub_fl;
     get_ef (&fl, regs->fpr + r1);
     get_ef (&sub_fl, regs->fpr + r2);
 
-    /* Subtract extended */
-    add_ef (&fl, &sub_fl, ! sub_fl.sign, regs);
+    /* Invert the sign of 2nd operand */
+    sub_fl.sign = ! (sub_fl.sign);
+
+    /* Add extended */
+    add_ef (&fl, &sub_fl, regs);
 
     /* Set condition code */
     if (fl.ms_fract || fl.ls_fract) {
@@ -2174,7 +2187,7 @@ SHORT_FLOAT add_fl;
     get_sf (&add_fl, regs->fpr + r2);
 
     /* Add short with normalization */
-    add_sf (&fl, &add_fl, add_fl.sign, 1, regs);
+    add_sf (&fl, &add_fl, NORMAL, regs);
 
     /* Set condition code */
     if (fl.short_fract) {
@@ -2205,8 +2218,11 @@ SHORT_FLOAT sub_fl;
     get_sf (&fl, regs->fpr + r1);
     get_sf (&sub_fl, regs->fpr + r2);
 
+    /* Invert the sign of 2nd operand */
+    sub_fl.sign = ! (sub_fl.sign);
+
     /* Subtract short with normalization */
-    add_sf (&fl, &sub_fl, ! sub_fl.sign, 1, regs);
+    add_sf (&fl, &sub_fl, NORMAL, regs);
 
     /* Set condition code */
     if (fl.short_fract) {
@@ -2289,7 +2305,7 @@ SHORT_FLOAT add_fl;
     get_sf (&add_fl, regs->fpr + r2);
 
     /* Add short without normalization */
-    add_sf (&fl, &add_fl, add_fl.sign, 0, regs);
+    add_sf (&fl, &add_fl, UNNORMAL, regs);
 
     /* Set condition code */
     if (fl.short_fract) {
@@ -2320,8 +2336,11 @@ SHORT_FLOAT sub_fl;
     get_sf (&fl, regs->fpr + r1);
     get_sf (&sub_fl, regs->fpr + r2);
 
-    /* Subtract short without normalization */
-    add_sf (&fl, &sub_fl, sub_fl.sign, 0, regs);
+    /* Invert the sign of 2nd operand */
+    sub_fl.sign = ! (sub_fl.sign);
+
+    /* Add short without normalization */
+    add_sf (&fl, &sub_fl, UNNORMAL, regs);
 
     /* Set condition code */
     if (fl.short_fract) {
@@ -2404,7 +2423,7 @@ LONG_FLOAT add_fl;
     vfetch_lf (&add_fl, addr, arn, regs );
 
     /* Add long with normalization */
-    add_lf (&fl, &add_fl, add_fl.sign, 1, regs);
+    add_lf (&fl, &add_fl, NORMAL, regs);
 
     /* Set condition code */
     if (fl.long_fract) {
@@ -2436,8 +2455,11 @@ LONG_FLOAT sub_fl;
     get_lf (&fl, regs->fpr + r1);
     vfetch_lf (&sub_fl, addr, arn, regs );
 
-    /* Subtract long with normalization */
-    add_lf (&fl, &sub_fl, ! sub_fl.sign, 1, regs);
+    /* Invert the sign of 2nd operand */
+    sub_fl.sign = ! (sub_fl.sign);
+
+    /* Add long with normalization */
+    add_lf (&fl, &sub_fl, NORMAL, regs);
 
     /* Set condition code */
     if (fl.long_fract) {
@@ -2522,7 +2544,7 @@ LONG_FLOAT add_fl;
     vfetch_lf (&add_fl, addr, arn, regs );
 
     /* Add long without normalization */
-    add_lf (&fl, &add_fl, add_fl.sign, 0, regs);
+    add_lf (&fl, &add_fl, UNNORMAL, regs);
 
     /* Set condition code */
     if (fl.long_fract) {
@@ -2554,8 +2576,11 @@ LONG_FLOAT sub_fl;
     get_lf (&fl, regs->fpr + r1);
     vfetch_lf (&sub_fl, addr, arn, regs );
 
-    /* Subtract long without normalization */
-    add_lf (&fl, &sub_fl, ! sub_fl.sign, 0, regs);
+    /* Invert the sign of 2nd operand */
+    sub_fl.sign = ! (sub_fl.sign);
+
+    /* Add long without normalization */
+    add_lf (&fl, &sub_fl, UNNORMAL, regs);
 
     /* Set condition code */
     if (fl.long_fract) {
@@ -2610,8 +2635,8 @@ SHORT_FLOAT add_fl;
     get_sf (&fl, regs->fpr + r1);
     vfetch_sf (&add_fl, addr, arn, regs );
 
-    /* Add long with normalization */
-    add_sf (&fl, &add_fl, add_fl.sign, 1, regs);
+    /* Add short with normalization */
+    add_sf (&fl, &add_fl, NORMAL, regs);
 
     /* Set condition code */
     if (fl.short_fract) {
@@ -2643,8 +2668,11 @@ SHORT_FLOAT sub_fl;
     get_sf (&fl, regs->fpr + r1);
     vfetch_sf (&sub_fl, addr, arn, regs );
 
-    /* Add long with normalization */
-    add_sf (&fl, &sub_fl, ! sub_fl.sign, 1, regs);
+    /* Invert the sign of 2nd operand */
+    sub_fl.sign = ! (sub_fl.sign);
+
+    /* Add short with normalization */
+    add_sf (&fl, &sub_fl, NORMAL, regs);
 
     /* Set condition code */
     if (fl.short_fract) {
@@ -2729,8 +2757,8 @@ SHORT_FLOAT add_fl;
     get_sf (&fl, regs->fpr + r1);
     vfetch_sf (&add_fl, addr, arn, regs );
 
-    /* Add long without normalization */
-    add_sf (&fl, &add_fl, add_fl.sign, 0, regs);
+    /* Add short without normalization */
+    add_sf (&fl, &add_fl, UNNORMAL, regs);
 
     /* Set condition code */
     if (fl.short_fract) {
@@ -2762,8 +2790,11 @@ SHORT_FLOAT sub_fl;
     get_sf (&fl, regs->fpr + r1);
     vfetch_sf (&sub_fl, addr, arn, regs );
 
-    /* Add long without normalization */
-    add_sf (&fl, &sub_fl, ! sub_fl.sign, 0, regs);
+    /* Invert the sign of 2nd operand */
+    sub_fl.sign = ! (sub_fl.sign);
+
+    /* Add short without normalization */
+    add_sf (&fl, &sub_fl, UNNORMAL, regs);
 
     /* Set condition code */
     if (fl.short_fract) {

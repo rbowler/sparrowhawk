@@ -38,10 +38,8 @@ BYTE    pad;                            /* Padding byte              */
     }
 
     /* Determine the destination and source addresses */
-    addr1 = regs->gpr[r1] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    addr2 = regs->gpr[r2] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr1 = regs->gpr[r1] & ADDRESS_MAXWRAP(regs);
+    addr2 = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
 
     /* Load padding byte from bits 0-7 of R2+1 register */
     pad = regs->gpr[r2+1] >> 24;
@@ -57,7 +55,7 @@ BYTE    pad;                            /* Padding byte              */
                != (r2 == 0 ? 0 : regs->ar[r2])))
     {
         n = addr2 + ((len2 < len1) ? len2 : len1) - 1;
-        n &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        n &= ADDRESS_MAXWRAP(regs);
         if ((n > addr2
                 && (addr1 > addr2 && addr1 <= n))
           || (n <= addr2
@@ -86,7 +84,7 @@ BYTE    pad;                            /* Padding byte              */
         {
             obyte = vfetchb ( addr2, r2, regs );
             addr2++;
-            addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            addr2 &= ADDRESS_MAXWRAP(regs);
             len2--;
         }
         else
@@ -95,7 +93,7 @@ BYTE    pad;                            /* Padding byte              */
         /* Store the byte in the destination operand */
         vstoreb ( obyte, addr1, r1, regs );
         addr1++;
-        addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr1 &= ADDRESS_MAXWRAP(regs);
         len1--;
 
         /* Update the registers */
@@ -114,7 +112,7 @@ BYTE    pad;                            /* Padding byte              */
         if ((len1 > 255) && !(addr1 & 0xFFF))
         {
             regs->psw.ia -= regs->psw.ilc;
-            regs->psw.ia &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            regs->psw.ia &= ADDRESS_MAXWRAP(regs);
             break;
         }
 
@@ -152,10 +150,8 @@ BYTE    pad;                            /* Padding byte              */
     }
 
     /* Determine the destination and source addresses */
-    addr1 = regs->gpr[r1] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    addr2 = regs->gpr[r2] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr1 = regs->gpr[r1] & ADDRESS_MAXWRAP(regs);
+    addr2 = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
 
     /* Load padding byte from bits 0-7 of R2+1 register */
     pad = regs->gpr[r2+1] >> 24;
@@ -182,7 +178,7 @@ BYTE    pad;                            /* Padding byte              */
         if (len1 > 0)
         {
             addr1++;
-            addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            addr1 &= ADDRESS_MAXWRAP(regs);
             len1--;
         }
 
@@ -190,7 +186,7 @@ BYTE    pad;                            /* Padding byte              */
         if (len2 > 0)
         {
             addr2++;
-            addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            addr2 &= ADDRESS_MAXWRAP(regs);
             len2--;
         }
 
@@ -202,7 +198,7 @@ BYTE    pad;                            /* Padding byte              */
         if ((len1 + len2 > 255) && !((addr1 - len2) & 0xFFF))
         {
             regs->psw.ia -= regs->psw.ilc;
-            regs->psw.ia &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            regs->psw.ia &= ADDRESS_MAXWRAP(regs);
             break;
         }
 
@@ -253,10 +249,8 @@ BYTE    pad;                            /* Padding byte              */
     pad = effect & 0xFF;
 
     /* Determine the destination and source addresses */
-    addr1 = regs->gpr[r1] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    addr2 = regs->gpr[r3] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr1 = regs->gpr[r1] & ADDRESS_MAXWRAP(regs);
+    addr2 = regs->gpr[r3] & ADDRESS_MAXWRAP(regs);
 
     /* Load operand lengths from bits 0-31 of R1+1 and R3+1 */
     len1 = regs->gpr[r1+1];
@@ -280,7 +274,7 @@ BYTE    pad;                            /* Padding byte              */
         {
             obyte = vfetchb ( addr2, r3, regs );
             addr2++;
-            addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            addr2 &= ADDRESS_MAXWRAP(regs);
             len2--;
         }
         else
@@ -289,7 +283,7 @@ BYTE    pad;                            /* Padding byte              */
         /* Store the byte in the destination operand */
         vstoreb ( obyte, addr1, r1, regs );
         addr1++;
-        addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr1 &= ADDRESS_MAXWRAP(regs);
         len1--;
 
         /* Update the registers */
@@ -337,10 +331,8 @@ BYTE    pad;                            /* Padding byte              */
     pad = effect & 0xFF;
 
     /* Determine the destination and source addresses */
-    addr1 = regs->gpr[r1] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    addr2 = regs->gpr[r3] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr1 = regs->gpr[r1] & ADDRESS_MAXWRAP(regs);
+    addr2 = regs->gpr[r3] & ADDRESS_MAXWRAP(regs);
 
     /* Load operand lengths from bits 0-31 of R1+1 and R3+1 */
     len1 = regs->gpr[r1+1];
@@ -371,7 +363,7 @@ BYTE    pad;                            /* Padding byte              */
         if (len1 > 0)
         {
             addr1++;
-            addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            addr1 &= ADDRESS_MAXWRAP(regs);
             len1--;
         }
 
@@ -379,7 +371,7 @@ BYTE    pad;                            /* Padding byte              */
         if (len2 > 0)
         {
             addr2++;
-            addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            addr2 &= ADDRESS_MAXWRAP(regs);
             len2--;
         }
 
@@ -453,10 +445,8 @@ BYTE    akey;                           /* Access key                */
     }
 
     /* Determine the logical addresses of each operand */
-    vaddr1 = regs->gpr[r1] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    vaddr2 = regs->gpr[r2] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    vaddr1 = regs->gpr[r1] & ADDRESS_MAXWRAP(regs);
+    vaddr2 = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
 
     /* Isolate the page addresses of each operand */
     vaddr1 &= 0x7FFFF000;
@@ -595,8 +585,7 @@ U64     dreg;                           /* Checksum accumulator      */
     }
 
     /* Obtain the second operand address and length from R2, R2+1 */
-    addr2 = regs->gpr[r2] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr2 = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
     len = regs->gpr[r2+1];
 
     /* Initialize the checksum from the first operand register */
@@ -617,8 +606,7 @@ U64     dreg;                           /* Checksum accumulator      */
         {
             n = vfetch4 ( addr2, r2, regs );
             addr2 += 4;
-            addr2 &=
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            addr2 &= ADDRESS_MAXWRAP(regs);
             len -= 4;
         }
         else
@@ -631,8 +619,7 @@ U64     dreg;                           /* Checksum accumulator      */
                 {
                     n |= vfetchb ( addr2, r2, regs );
                     addr2++;
-                    addr2 &=
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+                    addr2 &= ADDRESS_MAXWRAP(regs);
                     len--;
                 }
             } /* end for(j) */
@@ -691,10 +678,8 @@ BYTE    termchar;                       /* Terminating character     */
     termchar = regs->gpr[0] & 0xFF;
 
     /* Determine the destination and source addresses */
-    addr1 = regs->gpr[r1] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    addr2 = regs->gpr[r2] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr1 = regs->gpr[r1] & ADDRESS_MAXWRAP(regs);
+    addr2 = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
 
     /* Move up to 4096 bytes until terminating character */
     for (i = 0; i < 4096; i++)
@@ -717,9 +702,9 @@ BYTE    termchar;                       /* Terminating character     */
 
         /* Increment operand addresses */
         addr1++;
-        addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr1 &= ADDRESS_MAXWRAP(regs);
         addr2++;
-        addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr2 &= ADDRESS_MAXWRAP(regs);
 
     } /* end for(i) */
 
@@ -763,10 +748,8 @@ BYTE    termchar;                       /* Terminating character     */
     termchar = regs->gpr[0] & 0xFF;
 
     /* Determine the operand addresses */
-    addr1 = regs->gpr[r1] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    addr2 = regs->gpr[r2] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr1 = regs->gpr[r1] & ADDRESS_MAXWRAP(regs);
+    addr2 = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
 
     /* Initialize the condition code to 3 */
     cc = 3;
@@ -804,9 +787,9 @@ BYTE    termchar;                       /* Terminating character     */
 
         /* Increment operand addresses */
         addr1++;
-        addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr1 &= ADDRESS_MAXWRAP(regs);
         addr2++;
-        addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr2 &= ADDRESS_MAXWRAP(regs);
 
     } /* end for(i) */
 
@@ -849,10 +832,8 @@ BYTE    termchar;                       /* Terminating character     */
     termchar = regs->gpr[0] & 0xFF;
 
     /* Determine the operand end and start addresses */
-    addr1 = regs->gpr[r1] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    addr2 = regs->gpr[r2] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr1 = regs->gpr[r1] & ADDRESS_MAXWRAP(regs);
+    addr2 = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
 
     /* Search up to 4096 bytes until end of operand */
     for (i = 0; i < 4096; i++)
@@ -875,7 +856,7 @@ BYTE    termchar;                       /* Terminating character     */
 
         /* Increment operand address */
         addr2++;
-        addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr2 &= ADDRESS_MAXWRAP(regs);
 
     } /* end for(i) */
 
@@ -926,10 +907,8 @@ S32     remlen1, remlen2;               /* Lengths remaining         */
     pad = regs->gpr[1] & 0xFF;
 
     /* Determine the destination and source addresses */
-    addr1 = regs->gpr[r1] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    addr2 = regs->gpr[r2] &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr1 = regs->gpr[r1] & ADDRESS_MAXWRAP(regs);
+    addr2 = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
 
     /* Load signed operand lengths from R1+1 and R2+1 */
     len1 = (S32)(regs->gpr[r1+1]);
@@ -1010,7 +989,7 @@ S32     remlen1, remlen2;               /* Lengths remaining         */
         if (len1 > 0)
         {
             addr1++;
-            addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            addr1 &= ADDRESS_MAXWRAP(regs);
             len1--;
         }
 
@@ -1018,7 +997,7 @@ S32     remlen1, remlen2;               /* Lengths remaining         */
         if (len2 > 0)
         {
             addr2++;
-            addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            addr2 &= ADDRESS_MAXWRAP(regs);
             len2--;
         }
 

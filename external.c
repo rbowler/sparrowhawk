@@ -9,6 +9,7 @@
 /*-------------------------------------------------------------------*/
 /* Additional credits:                                               */
 /*      TOD clock offset contributed by Jay Maynard                  */
+/*      Correction to timer interrupt by Valery Pogonchenko          */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -330,7 +331,7 @@ struct  timeval tv;                     /* Structure for gettimeofday
 
             /* Set interrupt flag and interval timer interrupt pending
                if the interval timer went from positive to negative */
-            if (itimer < 0 && olditimer > 0)
+            if (itimer < 0 && olditimer >= 0)
             {
                 intflag = 1;
                 regs->itimer_pending = 1;

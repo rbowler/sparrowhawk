@@ -211,7 +211,7 @@ int             rc;                     /* Return code               */
     if (rc < 0)
     {
         /* Handle seek error condition */
-        logmsg ("HHC230I Error seeking to offset %8.8lX "
+        logmsg ("HHC202I Error seeking to offset %8.8lX "
                 "in file %s: %s\n",
                 blkpos, dev->filename, strerror(errno));
 
@@ -227,11 +227,11 @@ int             rc;                     /* Return code               */
     {
         /* Handle read error condition */
         if (rc < 0)
-            logmsg ("HHC202I Error reading block header "
+            logmsg ("HHC203I Error reading block header "
                     "at offset %8.8lX in file %s: %s\n",
                     blkpos, dev->filename, strerror(errno));
         else
-            logmsg ("HHC203I Unexpected end of file in block header "
+            logmsg ("HHC204I Unexpected end of file in block header "
                     "at offset %8.8lX in file %s\n",
                     blkpos, dev->filename);
 
@@ -289,11 +289,11 @@ U16             blklen;                 /* Data length of block      */
     {
         /* Handle read error condition */
         if (rc < 0)
-            logmsg ("HHC204I Error reading data block "
+            logmsg ("HHC205I Error reading data block "
                     "at offset %8.8lX in file %s: %s\n",
                     blkpos, dev->filename, strerror(errno));
         else
-            logmsg ("HHC205I Unexpected end of file in data block "
+            logmsg ("HHC206I Unexpected end of file in data block "
                     "at offset %8.8lX in file %s\n",
                     blkpos, dev->filename);
 
@@ -338,7 +338,7 @@ U16             prvblkl;                /* Length of previous block  */
     if (rc < 0)
     {
         /* Handle seek error condition */
-        logmsg ("HHC230I Error seeking to offset %8.8lX "
+        logmsg ("HHC207I Error seeking to offset %8.8lX "
                 "in file %s: %s\n",
                 blkpos, dev->filename, strerror(errno));
 
@@ -361,7 +361,7 @@ U16             prvblkl;                /* Length of previous block  */
     if (rc < sizeof(awshdr))
     {
         /* Handle write error condition */
-        logmsg ("HHC210I Error writing block header "
+        logmsg ("HHC208I Error writing block header "
                 "at offset %8.8lX in file %s: %s\n",
                 blkpos, dev->filename, strerror(errno));
 
@@ -380,7 +380,7 @@ U16             prvblkl;                /* Length of previous block  */
     if (rc < blklen)
     {
         /* Handle write error condition */
-        logmsg ("HHC211I Error writing data block "
+        logmsg ("HHC209I Error writing data block "
                 "at offset %8.8lX in file %s: %s\n",
                 blkpos, dev->filename, strerror(errno));
 
@@ -424,7 +424,7 @@ U16             prvblkl;                /* Length of previous block  */
     if (rc < 0)
     {
         /* Handle seek error condition */
-        logmsg ("HHC230I Error seeking to offset %8.8lX "
+        logmsg ("HHC210I Error seeking to offset %8.8lX "
                 "in file %s: %s\n",
                 blkpos, dev->filename, strerror(errno));
 
@@ -447,7 +447,7 @@ U16             prvblkl;                /* Length of previous block  */
     if (rc < sizeof(awshdr))
     {
         /* Handle write error condition */
-        logmsg ("HHC212I Error writing block header "
+        logmsg ("HHC211I Error writing block header "
                 "at offset %8.8lX in file %s: %s\n",
                 blkpos, dev->filename, strerror(errno));
 
@@ -645,7 +645,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     /* Check for successful open */
     if (rc < 0)
     {
-        logmsg ("HHC220I Error opening %s: %s\n",
+        logmsg ("HHC212I Error opening %s: %s\n",
                 dev->filename, strerror(errno));
 
         dev->sense[0] = SENSE_IR;
@@ -662,7 +662,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     rc = ioctl (dev->fd, MTIOCTOP, (char*)&opblk);
     if (rc < 0)
     {
-        logmsg ("HHC221I Error setting attributes for %s: %s\n",
+        logmsg ("HHC213I Error setting attributes for %s: %s\n",
                 dev->filename, strerror(errno));
 
         dev->sense[0] = SENSE_EC;
@@ -676,7 +676,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     rc = ioctl (dev->fd, MTIOCTOP, (char*)&opblk);
     if (rc < 0)
     {
-        logmsg ("HHC222I Error rewinding %s: %s\n",
+        logmsg ("HHC214I Error rewinding %s: %s\n",
                 dev->filename, strerror(errno));
 
         dev->sense[0] = SENSE_EC;
@@ -705,7 +705,7 @@ int             rc;                     /* Return code               */
     if (rc < 0)
     {
         /* Handle read error condition */
-        logmsg ("HHC223I Error reading data block from %s: %s\n",
+        logmsg ("HHC215I Error reading data block from %s: %s\n",
                 dev->filename, strerror(errno));
 
         /* Set unit check with equipment check */
@@ -739,7 +739,7 @@ int             rc;                     /* Return code               */
     if (rc < len)
     {
         /* Handle write error condition */
-        logmsg ("HHC224I Error writing data block to %s: %s\n",
+        logmsg ("HHC216I Error writing data block to %s: %s\n",
                 dev->filename, strerror(errno));
 
         /* Set unit check with equipment check */
@@ -771,7 +771,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     if (rc < 0)
     {
         /* Handle write error condition */
-        logmsg ("HHC225I Error writing tapemark to %s: %s\n",
+        logmsg ("HHC217I Error writing tapemark to %s: %s\n",
                 dev->filename, strerror(errno));
 
         /* Set unit check with equipment check */
@@ -803,7 +803,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     if (rc < 0)
     {
         /* Handle error condition */
-        logmsg ("HHC226I Forward space block error on %s: %s\n",
+        logmsg ("HHC218I Forward space block error on %s: %s\n",
                 dev->filename, strerror(errno));
 
         /* Set unit check with equipment check */
@@ -835,7 +835,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     if (rc < 0)
     {
         /* Handle error condition */
-        logmsg ("HHC226I Backspace block error on %s: %s\n",
+        logmsg ("HHC219I Backspace block error on %s: %s\n",
                 dev->filename, strerror(errno));
 
         /* Set unit check with equipment check */
@@ -868,7 +868,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     if (rc < 0)
     {
         /* Handle error condition */
-        logmsg ("HHC226I Forward space file error on %s: %s\n",
+        logmsg ("HHC220I Forward space file error on %s: %s\n",
                 dev->filename, strerror(errno));
 
         /* Set unit check with equipment check */
@@ -904,7 +904,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     if (rc < 0)
     {
         /* Handle error condition */
-        logmsg ("HHC226I Backspace file error on %s: %s\n",
+        logmsg ("HHC221I Backspace file error on %s: %s\n",
                 dev->filename, strerror(errno));
 
         /* Set unit check with equipment check */
@@ -956,7 +956,7 @@ BYTE            c;                      /* Work area for sscanf      */
     if (pathlen < 7
         || strncasecmp(dev->filename+pathlen-7, "/tapes/", 7) != 0)
     {
-        logmsg ("HHC243I Invalid filename %s: "
+        logmsg ("HHC222I Invalid filename %s: "
                 "TDF files must be in the TAPES subdirectory\n",
                 dev->filename+pathlen);
         return -1;
@@ -967,7 +967,7 @@ BYTE            c;                      /* Work area for sscanf      */
     fd = open (dev->filename, O_RDONLY);
     if (fd < 0)
     {
-        logmsg ("HHC244I Error opening TDF file %s: %s\n",
+        logmsg ("HHC223I Error opening TDF file %s: %s\n",
                 dev->filename, strerror(errno));
         return -1;
     }
@@ -976,7 +976,7 @@ BYTE            c;                      /* Work area for sscanf      */
     rc = fstat (fd, &statbuf);
     if (rc < 0)
     {
-        logmsg ("HHC245I %s fstat error: %s\n",
+        logmsg ("HHC224I %s fstat error: %s\n",
                 dev->filename, strerror(errno));
         close (fd);
         return -1;
@@ -987,7 +987,7 @@ BYTE            c;                      /* Work area for sscanf      */
     tdfbuf = malloc (tdfsize);
     if (tdfbuf == NULL)
     {
-        logmsg ("HHC246I Cannot obtain buffer for TDF file %s: %s\n",
+        logmsg ("HHC225I Cannot obtain buffer for TDF file %s: %s\n",
                 dev->filename, strerror(errno));
         close (fd);
         return -1;
@@ -997,7 +997,7 @@ BYTE            c;                      /* Work area for sscanf      */
     rc = read (fd, tdfbuf, tdfsize);
     if (rc < tdfsize)
     {
-        logmsg ("HHC247I Error reading TDF file %s: %s\n",
+        logmsg ("HHC226I Error reading TDF file %s: %s\n",
                 dev->filename, strerror(errno));
         free (tdfbuf);
         close (fd);
@@ -1010,7 +1010,7 @@ BYTE            c;                      /* Work area for sscanf      */
     /* Check that the first record is a TDF header */
     if (memcmp(tdfbuf, "@TDF", 4) != 0)
     {
-        logmsg ("HHC248I %s is not a valid TDF file\n",
+        logmsg ("HHC227I %s is not a valid TDF file\n",
                 dev->filename);
         free (tdfbuf);
         return -1;
@@ -1027,7 +1027,7 @@ BYTE            c;                      /* Work area for sscanf      */
     tdftab = (OMATAPE_DESC*)malloc (filecount * sizeof(OMATAPE_DESC));
     if (tdftab == NULL)
     {
-        logmsg ("HHC249I Cannot obtain buffer for TDF array: %s\n",
+        logmsg ("HHC228I Cannot obtain buffer for TDF array: %s\n",
                 strerror(errno));
         free (tdfbuf);
         return -1;
@@ -1067,7 +1067,7 @@ BYTE            c;                      /* Work area for sscanf      */
         /* Check for missing fields */
         if (tdffilenm == NULL || tdfformat == NULL)
         {
-            logmsg ("HHC250I Filename or format missing in "
+            logmsg ("HHC229I Filename or format missing in "
                     "line %d of file %s\n",
                     stmt, dev->filename);
             free (tdftab);
@@ -1079,7 +1079,7 @@ BYTE            c;                      /* Work area for sscanf      */
         if (pathlen + 1 + strlen(tdffilenm)
                 > sizeof(tdftab[filecount].filename) - 1)
         {
-            logmsg ("HHC251I Filename %s too long in "
+            logmsg ("HHC230I Filename %s too long in "
                     "line %d of file %s\n",
                     tdffilenm, stmt, dev->filename);
             free (tdftab);
@@ -1118,7 +1118,7 @@ BYTE            c;                      /* Work area for sscanf      */
             if (tdfreckwd == NULL
                 || strcasecmp(tdfreckwd, "RECSIZE") != 0)
             {
-                logmsg ("HHC252I RECSIZE keyword missing in "
+                logmsg ("HHC231I RECSIZE keyword missing in "
                         "line %d of file %s\n",
                         stmt, dev->filename);
                 free (tdftab);
@@ -1131,7 +1131,7 @@ BYTE            c;                      /* Work area for sscanf      */
                 || sscanf(tdfblklen, "%u%c", &blklen, &c) != 1
                 || blklen < 1 || blklen > MAX_BLKLEN)
             {
-                logmsg ("HHC253I Invalid record size %s in "
+                logmsg ("HHC232I Invalid record size %s in "
                         "line %d of file %s\n",
                         tdfblklen, stmt, dev->filename);
                 free (tdftab);
@@ -1145,7 +1145,7 @@ BYTE            c;                      /* Work area for sscanf      */
         }
         else
         {
-            logmsg ("HHC254I Invalid record format %s in "
+            logmsg ("HHC233I Invalid record format %s in "
                     "line %d of file %s\n",
                     tdfformat, stmt, dev->filename);
             free (tdftab);
@@ -1191,7 +1191,7 @@ OMATAPE_DESC   *omadesc;                /* -> OMA descriptor entry   */
     /* Unit exception if beyond end of tape */
     if (dev->curfilen >= dev->omafiles)
     {
-        logmsg ("HHC255I Attempt to access beyond end of tape %s\n",
+        logmsg ("HHC234I Attempt to access beyond end of tape %s\n",
                 dev->filename);
 
         *unitstat = CSW_CE | CSW_DE | CSW_UX;
@@ -1208,7 +1208,7 @@ OMATAPE_DESC   *omadesc;                /* -> OMA descriptor entry   */
     /* Check for successful open */
     if (rc < 0)
     {
-        logmsg ("HHC256I Error opening %s: %s\n",
+        logmsg ("HHC235I Error opening %s: %s\n",
                 omadesc->filename, strerror(errno));
 
         dev->sense[0] = SENSE_EC;
@@ -1248,7 +1248,7 @@ S32             nxthdro;                /* Offset of next header     */
     if (rc < 0)
     {
         /* Handle seek error condition */
-        logmsg ("HHC230I Error seeking to offset %8.8lX "
+        logmsg ("HHC236I Error seeking to offset %8.8lX "
                 "in file %s: %s\n",
                 blkpos, omadesc->filename, strerror(errno));
 
@@ -1264,12 +1264,12 @@ S32             nxthdro;                /* Offset of next header     */
     {
         /* Handle read error condition */
         if (rc < 0)
-            logmsg ("HHC231I Error reading block header "
+            logmsg ("HHC237I Error reading block header "
                     "at offset %8.8lX in file %s: %s\n",
                     blkpos, omadesc->filename,
                     strerror(errno));
         else
-            logmsg ("HHC232I Unexpected end of file in block header "
+            logmsg ("HHC238I Unexpected end of file in block header "
                     "at offset %8.8lX in file %s\n",
                     blkpos, omadesc->filename);
 
@@ -1293,7 +1293,7 @@ S32             nxthdro;                /* Offset of next header     */
     if (curblkl < -1 || curblkl == 0 || curblkl > MAX_BLKLEN
         || memcmp(omahdr.omaid, "@HDF", 4) != 0)
     {
-        logmsg ("HHC233I Invalid block header "
+        logmsg ("HHC239I Invalid block header "
                 "at offset %8.8lX in file %s\n",
                 blkpos, omadesc->filename);
 
@@ -1362,12 +1362,12 @@ S32             nxthdro;                /* Offset of next header     */
     {
         /* Handle read error condition */
         if (rc < 0)
-            logmsg ("HHC234I Error reading data block "
+            logmsg ("HHC240I Error reading data block "
                     "at offset %8.8lX in file %s: %s\n",
                     blkpos, omadesc->filename,
                     strerror(errno));
         else
-            logmsg ("HHC235I Unexpected end of file in data block "
+            logmsg ("HHC241I Unexpected end of file in data block "
                     "at offset %8.8lX in file %s\n",
                     blkpos, omadesc->filename);
 
@@ -1406,7 +1406,7 @@ long            blkpos;                 /* Offset of block in file   */
     if (rc < 0)
     {
         /* Handle seek error condition */
-        logmsg ("HHC230I Error seeking to offset %8.8lX "
+        logmsg ("HHC242I Error seeking to offset %8.8lX "
                 "in file %s: %s\n",
                 blkpos, omadesc->filename, strerror(errno));
 
@@ -1422,7 +1422,7 @@ long            blkpos;                 /* Offset of block in file   */
     /* Handle read error condition */
     if (blklen < 0)
     {
-        logmsg ("HHC236I Error reading data block "
+        logmsg ("HHC243I Error reading data block "
                 "at offset %8.8lX in file %s: %s\n",
                 blkpos, omadesc->filename,
                 strerror(errno));
@@ -1482,7 +1482,7 @@ BYTE            c;                      /* Character work area       */
     if (rc < 0)
     {
         /* Handle seek error condition */
-        logmsg ("HHC230I Error seeking to offset %8.8lX "
+        logmsg ("HHC244I Error seeking to offset %8.8lX "
                 "in file %s: %s\n",
                 blkpos, omadesc->filename, strerror(errno));
 
@@ -1541,12 +1541,12 @@ BYTE            c;                      /* Character work area       */
     if (rc < 1)
     {
         if (rc < 0)
-            logmsg ("HHC240I Error reading data block "
+            logmsg ("HHC245I Error reading data block "
                     "at offset %8.8lX in file %s: %s\n",
                     blkpos, omadesc->filename,
                     strerror(errno));
         else
-            logmsg ("HHC241I Unexpected end of file in data block "
+            logmsg ("HHC246I Unexpected end of file in data block "
                     "at offset %8.8lX in file %s\n",
                     blkpos, omadesc->filename);
 
@@ -1559,7 +1559,7 @@ BYTE            c;                      /* Character work area       */
     /* Check for invalid zero length block */
     if (pos == 0)
     {
-        logmsg ("HHC242I Invalid zero length block "
+        logmsg ("HHC247I Invalid zero length block "
                 "at offset %8.8lX in file %s\n",
                 blkpos, omadesc->filename);
 
@@ -1680,7 +1680,7 @@ S32             curblkl;                /* Length of current block   */
     if (eofpos < 0)
     {
         /* Handle seek error condition */
-        logmsg ("HHC230I Error seeking to end of file %s: %s\n",
+        logmsg ("HHC248I Error seeking to end of file %s: %s\n",
                 omadesc->filename, strerror(errno));
 
         /* Set unit check with equipment check */
@@ -1802,7 +1802,7 @@ S32             nxthdro;                /* Offset of next header     */
     if (pos < 0)
     {
         /* Handle seek error condition */
-        logmsg ("HHC230I Error seeking to end of file %s: %s\n",
+        logmsg ("HHC249I Error seeking to end of file %s: %s\n",
                 omadesc->filename, strerror(errno));
 
         /* Set unit check with equipment check */
@@ -1966,7 +1966,7 @@ BYTE            fcb;                    /* Format Control Byte       */
         }
 
         /* Display message on console */
-        logmsg ("HHC260I Tape msg %4.4X: %c %s %s\n",
+        logmsg ("HHC250I Tape msg %4.4X: %c %s %s\n",
                 dev->devnum,
                 (fcb & FCB_BM) ? '*' : ' ',   /* Indicate blinking */
                 msg1,
@@ -2000,7 +2000,7 @@ U32             sctlfeat;               /* Storage control features  */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
     {
         fprintf (stderr,
-                "HHC261I File name missing or invalid\n");
+                "HHC251I File name missing or invalid\n");
         return -1;
     }
 
@@ -2124,7 +2124,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     /* Command reject if data chaining and command is not READ */
     if ((flags & CCW_FLAGS_CD) && code != 0x02)
     {
-        logmsg("HHC262I Data chaining not supported for CCW %2.2X\n",
+        logmsg("HHC252I Data chaining not supported for CCW %2.2X\n",
                 code);
         dev->sense[0] = SENSE_CR;
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -2275,7 +2275,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
             rc = ioctl (dev->fd, MTIOCTOP, (char*)&opblk);
             if (rc < 0)
             {
-                logmsg ("HHC263I Error rewinding %s: %s\n",
+                logmsg ("HHC253I Error rewinding %s: %s\n",
                         dev->filename, strerror(errno));
                 dev->sense[0] = SENSE_EC;
                 *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -2297,7 +2297,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
             if (rc < 0)
             {
                 /* Handle seek error condition */
-                logmsg ("HHC264I Error seeking to start of %s: %s\n",
+                logmsg ("HHC254I Error seeking to start of %s: %s\n",
                         dev->filename, strerror(errno));
 
                 /* Set unit check with equipment check */
@@ -2329,7 +2329,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
             rc = ioctl (dev->fd, MTIOCTOP, (char*)&opblk);
             if (rc < 0)
             {
-                logmsg ("HHC265I Error unloading %s: %s\n",
+                logmsg ("HHC255I Error unloading %s: %s\n",
                         dev->filename, strerror(errno));
                 dev->sense[0] = SENSE_EC;
                 *unitstat = CSW_CE | CSW_DE | CSW_UC;

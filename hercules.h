@@ -72,8 +72,9 @@
  #define FEATURE_BCMODE
  #define FEATURE_HEXADECIMAL_FLOATING_POINT
  #define FEATURE_INTERVAL_TIMER
- #define FEATURE_S370_CHANNEL
  #define FEATURE_SEGMENT_PROTECTION
+ #define FEATURE_SYSTEM_CONSOLE
+ #define FEATURE_S370_CHANNEL
 #elif	ARCH == 390
  #define ARCHITECTURE_NAME	"ESA/390"
  #define FEATURE_ACCESS_REGISTERS
@@ -116,6 +117,17 @@
  #define STORAGE_KEY_PAGESIZE	2048
  #define STORAGE_KEY_PAGEMASK	0x7FFFF800
  #define STORAGE_KEY_BYTEMASK	0x000007FF
+#endif
+
+/*-------------------------------------------------------------------*/
+/* Macro definitions for address wraparound			     */
+/*-------------------------------------------------------------------*/
+#ifdef FEATURE_BIMODAL_ADDRESSING
+ #define ADDRESS_MAXWRAP(_register_context) \
+	 ((_register_context)->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF)
+#else
+ #define ADDRESS_MAXWRAP(_register_context) \
+	 (0x00FFFFFF)
 #endif
 
 /*-------------------------------------------------------------------*/

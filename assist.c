@@ -148,8 +148,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
         regs->gpr[13] = newia;
 
         /* Update the PSW instruction address */
-        regs->psw.ia = newia &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
     }
 
     /* Release main-storage access lock */
@@ -243,8 +242,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
         regs->gpr[13] = newia;
 
         /* Update the PSW instruction address */
-        regs->psw.ia = newia &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
     }
 
     /* Release main-storage access lock */
@@ -288,8 +286,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
     }
 
     /* General register 11 contains the lock address */
-    lock_addr = regs->gpr[11] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    lock_addr = regs->gpr[11] & ADDRESS_MAXWRAP(regs);
     lock_arn = 11;
 
     /* Obtain main-storage access lock */
@@ -338,8 +335,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
         regs->gpr[13] = newia;
 
         /* Update the PSW instruction address */
-        regs->psw.ia = newia &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
     }
 
     /* Release main-storage access lock */
@@ -384,8 +380,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
     }
 
     /* General register 11 contains the lock address */
-    lock_addr = regs->gpr[11] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    lock_addr = regs->gpr[11] & ADDRESS_MAXWRAP(regs);
     lock_arn = 11;
 
     /* Obtain main-storage access lock */
@@ -436,8 +431,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
         regs->gpr[13] = newia;
 
         /* Update the PSW instruction address */
-        regs->psw.ia = newia &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
     }
 
     /* Release main-storage access lock */

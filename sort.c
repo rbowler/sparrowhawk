@@ -53,13 +53,11 @@ BYTE    operand_control;                /* Operand control bit       */
         }
 
         /* fetch 1st operand */
-        addr1 = (regs->gpr[1] + index) &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr1 = (regs->gpr[1] + index) & ADDRESS_MAXWRAP(regs);
         op1 = vfetch2 ( addr1, ar1, regs );
 
         /* fetch 3rd operand */
-        addr3 = (regs->gpr[3] + index) &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr3 = (regs->gpr[3] + index) & ADDRESS_MAXWRAP(regs);
         op3 = vfetch2 ( addr3, ar1, regs );
 
         regs->gpr[2] += 2;
@@ -166,7 +164,7 @@ int     ar1 = 4;                        /* Access register number    */
         tempaddress = regs->gpr[4] + tempword1;
 
         /* Fetch doubleword from tempaddress to tempword2 and tempword3 */
-        tempaddress &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        tempaddress &= ADDRESS_MAXWRAP(regs);
         tempword2 = vfetch4 ( tempaddress, ar1, regs );
         tempword3 = vfetch4 ( tempaddress + 4, ar1, regs );
 

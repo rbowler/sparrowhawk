@@ -1143,7 +1143,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     akey = regs->psw.pkey;
 
     /* Calculate page address of last byte of operand */
-    addr2 = (addr + len) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr2 = (addr + len) & ADDRESS_MAXWRAP(regs);
     addr2 &= STORAGE_KEY_PAGEMASK;
 
     /* Copy data to real storage in either one or two parts
@@ -1204,7 +1204,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     akey = regs->psw.pkey;
 
     /* Calculate address of second byte of operand */
-    addr2 = (addr + 1) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr2 = (addr + 1) & ADDRESS_MAXWRAP(regs);
 
     /* Get absolute address of first byte of operand */
     abs1 = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE, akey);
@@ -1260,7 +1260,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     /* Operand is not fullword aligned and may cross a page boundary */
 
     /* Calculate page address of last byte of operand */
-    addr2 = (addr + 3) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr2 = (addr + 3) & ADDRESS_MAXWRAP(regs);
     addr2 &= STORAGE_KEY_PAGEMASK;
     abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE, akey);
 
@@ -1273,7 +1273,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         /* Increment absolute address and virtual address */
         abs++;
         addr++;
-        addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr &= ADDRESS_MAXWRAP(regs);
 
         /* Adjust absolute address if page boundary crossed */
         if (addr == addr2)
@@ -1326,7 +1326,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     /* Non-doubleword aligned operand may cross a page boundary */
 
     /* Calculate page address of last byte of operand */
-    addr2 = (addr + 7) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr2 = (addr + 7) & ADDRESS_MAXWRAP(regs);
     addr2 &= STORAGE_KEY_PAGEMASK;
     abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE, akey);
 
@@ -1339,7 +1339,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         /* Increment absolute address and virtual address */
         abs++;
         addr++;
-        addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr &= ADDRESS_MAXWRAP(regs);
 
         /* Adjust absolute address if page boundary crossed */
         if (addr == addr2)
@@ -1375,7 +1375,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     akey = regs->psw.pkey;
 
     /* Calculate page address of last byte of operand */
-    addr2 = (addr + len) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr2 = (addr + len) & ADDRESS_MAXWRAP(regs);
     addr2 &= STORAGE_KEY_PAGEMASK;
 
     /* Copy data from real storage in either one or two parts
@@ -1438,7 +1438,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     akey = regs->psw.pkey;
 
     /* Calculate address of second byte of operand */
-    addr2 = (addr + 1) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr2 = (addr + 1) & ADDRESS_MAXWRAP(regs);
 
     /* Get absolute address of first byte of operand */
     abs1 = logical_to_abs (addr, arn, regs, ACCTYPE_READ, akey);
@@ -1492,7 +1492,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     /* Operand is not fullword aligned and may cross a page boundary */
 
     /* Calculate page address of last byte of operand */
-    addr2 = (addr + 3) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr2 = (addr + 3) & ADDRESS_MAXWRAP(regs);
     addr2 &= STORAGE_KEY_PAGEMASK;
     abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_READ, akey);
 
@@ -1506,7 +1506,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         /* Increment absolute address and virtual address */
         abs++;
         addr++;
-        addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr &= ADDRESS_MAXWRAP(regs);
 
         /* Adjust absolute address if page boundary crossed */
         if (addr == addr2)
@@ -1560,7 +1560,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     /* Non-doubleword aligned operand may cross a page boundary */
 
     /* Calculate page address of last byte of operand */
-    addr2 = (addr + 7) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr2 = (addr + 7) & ADDRESS_MAXWRAP(regs);
     addr2 &= STORAGE_KEY_PAGEMASK;
     abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_READ, akey);
 
@@ -1574,7 +1574,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         /* Increment absolute address and virtual address */
         abs++;
         addr++;
-        addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr &= ADDRESS_MAXWRAP(regs);
 
         /* Adjust absolute address if page boundary crossed */
         if (addr == addr2)
@@ -1634,7 +1634,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     /* Fetch next two bytes of instruction */
     abs += 2;
     addr += 2;
-    addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr &= ADDRESS_MAXWRAP(regs);
     if ((addr & STORAGE_KEY_BYTEMASK) == 0x000) {
         abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
     }
@@ -1646,7 +1646,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     /* Fetch next two bytes of instruction */
     abs += 2;
     addr += 2;
-    addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr &= ADDRESS_MAXWRAP(regs);
     if ((addr & STORAGE_KEY_BYTEMASK) == 0x000) {
         abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
     }
@@ -1704,11 +1704,9 @@ BYTE    obyte;                          /* Operand byte              */
     abs2 = logical_to_abs (addr2, arn2, regs, ACCTYPE_READ, key2);
 
     /* Calculate page addresses of rightmost operand bytes */
-    npv1 = (addr1 + len)
-                & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    npv1 = (addr1 + len) & ADDRESS_MAXWRAP(regs);
     npv1 &= STORAGE_KEY_PAGEMASK;
-    npv2 = (addr2 + len)
-                & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    npv2 = (addr2 + len) & ADDRESS_MAXWRAP(regs);
     npv2 &= STORAGE_KEY_PAGEMASK;
 
     /* Translate next page addresses if page boundary crossed */
@@ -1728,7 +1726,7 @@ BYTE    obyte;                          /* Operand byte              */
 
         /* Increment first operand address */
         addr1++;
-        addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr1 &= ADDRESS_MAXWRAP(regs);
         abs1++;
 
         /* Adjust absolute address if page boundary crossed */
@@ -1737,7 +1735,7 @@ BYTE    obyte;                          /* Operand byte              */
 
         /* Increment second operand address */
         addr2++;
-        addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr2 &= ADDRESS_MAXWRAP(regs);
         abs2++;
 
         /* Adjust absolute address if page boundary crossed */
@@ -1792,11 +1790,9 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     abs2 = logical_to_abs (addr2, arn2, regs, ACCTYPE_READ, akey);
 
     /* Calculate page addresses of rightmost operand bytes */
-    npv1 = (addr1 + len)
-                & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    npv1 = (addr1 + len) & ADDRESS_MAXWRAP(regs);
     npv1 &= STORAGE_KEY_PAGEMASK;
-    npv2 = (addr2 + len)
-                & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    npv2 = (addr2 + len) & ADDRESS_MAXWRAP(regs);
     npv2 &= STORAGE_KEY_PAGEMASK;
 
     /* Translate next page addresses if page boundary crossed */
@@ -1850,7 +1846,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
         /* Increment first operand address */
         addr1++;
-        addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr1 &= ADDRESS_MAXWRAP(regs);
         abs1++;
 
         /* Adjust absolute address if page boundary crossed */
@@ -1859,7 +1855,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
         /* Increment second operand address */
         addr2++;
-        addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr2 &= ADDRESS_MAXWRAP(regs);
         abs2++;
 
         /* Adjust absolute address if page boundary crossed */
@@ -1905,8 +1901,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     logical_to_abs (addr, arn, regs, acctype, akey);
 
     /* Calculate page address of rightmost operand byte */
-    npv = (addr + len)
-                & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    npv = (addr + len) & ADDRESS_MAXWRAP(regs);
     npv &= STORAGE_KEY_PAGEMASK;
 
     /* Translate next page address if page boundary crossed */

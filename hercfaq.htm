@@ -101,9 +101,7 @@ and execute the program for personal use.  You may not sell the
 program, or copy any portion of the source code for use in any other
 program.  Any modifications you make to the program are subject to
 the same restrictions.  The Hercules Public Licence does not permit
-any form of commercial use or distribution &#150; if this is
-something you want to do, then you will need to contact me to
-negotiate a special license.
+any form of commercial use or distribution.
 <p>
 Hercules is <em>not</em>, repeat, <em>not</em> GPL software!
 
@@ -147,7 +145,11 @@ I haven't measured the I/O rate, but I would imagine it is
 abysmal.
 
 
-<h4>What software do I need to run Hercules?</h4>
+<h4>
+<a name="software">
+What software do I need to run Hercules?
+</a>
+</h4>
 <p>
 You need a Linux system with Posix Threads (pthread) support.
 I will only provide support for Linux 2.2.x kernels with glibc2
@@ -158,6 +160,32 @@ You will also need tn3270 client software.  This does not have to run
 on the Linux box, you can use any Windows tn3270 client (such as
 QWS3270, IBM Personal Communications, Attachmate Extra, or Dynacomm
 Elite), or any Unix tn3270 client (such as x3270).
+
+
+<h4>Which compiler should I use to build Hercules?</h4>
+<p>
+You <em>must</em> use the egcs compiler.
+I am using the version that came with SuSE 6.1
+and it seems to work OK.  The version number reported by cc -v
+is: egcs-2.91.66 19990314 (egcs-1.1.2 release).
+<p>
+The older gcc compiler is known to produce incorrect code for some
+64-bit (unsigned long long) integer operations.
+I have had reports that earlier versions of egcs produce
+strange results too.
+<p>
+If you have both the gcc and egcs compilers installed, use the CC
+parameter on the make command to force it to choose
+the correct compiler:
+<br><code>make CC=egcs</code>
+
+
+<h4>Why do I get an unexpected fixed-point divide exception
+    (program check 0009 or abend 0C9) on a CVB instruction?</h4>
+<p>
+You are using the gcc compiler.
+You must use the egcs compiler instead.
+See previous question for the required compiler level.
 
 
 <h4>Do you plan to port Hercules to other platforms?</h4>
@@ -177,31 +205,10 @@ hardware (Sparc, Alpha, PPC, ...) under Linux 2.2, then I'm likely
 to be more receptive to fixing that sort of problem than fixing
 issues related to Unix variants.
 <p>
-I'm certainly not trying to promote Linux as the be-all and end-all
+While I'm not trying to promote Linux as the be-all and end-all
 of everything (there are plenty of people doing that at the moment),
-I just think that Linux happens to be a suitable platform for this
+I chose Linux because I believe it is a suitable platform for this
 particular application.
-
-
-<h4>Which compiler should I use to build Hercules?</h4>
-<p>
-You <em>must</em> use the egcs compiler.
-I am using the version that came with SuSE 6.1
-and it seems to work OK.  The version number reported by cc -v
-is: egcs-2.91.66 19990314 (egcs-1.1.2 release).
-<p>
-The older gcc compiler is known to produce incorrect code for some
-64-bit (unsigned long long) integer operations.
-I have had reports that earlier versions of egcs produce
-strange results too.
-
-
-<h4>Why do I get an unexpected fixed-point divide exception
-    (program check 0009 or abend 0C9) on a CVB instruction?</h4>
-<p>
-You are using the gcc compiler.
-You must use the egcs compiler instead.
-See previous question for the required compiler level.
 
 
 <h4>How can I create a DASD volume?</h4>
@@ -364,13 +371,40 @@ The features are not implemented, and are unlikely to be:
 </ul>
 
 
+<h4>Who are the Herculeans?</h4>
+<p>
+The following people are among those who have contributed
+to this project, either as coders or as testers or both:
+<sl>
+<li>Roger Bowler (author)
+<li>Jay Maynard
+<li>Jan Jaeger
+<li>Dutch Owen
+<li>Peter Kuschnerus
+<li>Malcolm Beattie
+<li>Mario Bezzi
+<li>Adam Thornton
+<li>Daniel Seagraves
+<li>Rick McKelvy
+<li>Dan Horak
+<li>Roland Goetschi
+<li>Axel Schwarzer
+<li>Valery Pogonchenko
+<li>Steve Gay
+<li>Reed H.Petty
+<li>Glen Herrmannsfeldt
+</sl>
+<p>
+If anyone feels they have been unfairly omitted from this
+list, please let me (Roger) know.
+
+
 
 <p><center><hr width=15% noshade></center>
 <p>
 <img src="gifs/note.gif">
-Send any comments and questions to
-<em>rbowler </em>&#064;<em> snipix.freeserve.co.uk</em>
-or join the Hercules discussion group at
+If you have any comments and questions,
+join the Hercules discussion group at
 <a href="http://www.onelist.com/community/hercules-390">
 http://www.onelist.com/community/hercules-390</a>
 
@@ -379,7 +413,7 @@ http://www.onelist.com/community/hercules-390</a>
 </center>
 
 <small>
-<p>Last updated 25 Feb 2000
+<p>Last updated 18 Mar 2000
 </BODY>
 </HTML>
 

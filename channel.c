@@ -1129,7 +1129,7 @@ PSA    *psa;                            /* -> Prefixed storage area  */
     if (dev->busy)
     {
         /* Wait for one microsecond */
-        yield ();
+//      yield ();
 
         /* Set condition code 2 if device is busy */
         cc = 2;
@@ -1306,7 +1306,7 @@ int     cc;                             /* Condition code            */
     else
     {
         /* Wait for one microsecond */
-        yield ();
+//      yield ();
 
         /* Set condition code 1 if status not pending */
         cc = 1;

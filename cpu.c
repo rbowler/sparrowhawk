@@ -12,7 +12,8 @@
 /* Additional credits:                                               */
 /*      Floating point instructions by Peter Kuschnerus              */
 /*      Nullification corrections by Jan Jaeger                      */
-/*      Corrections to shift instructions by Jay Maynard             */
+/*      Corrections to shift instructions by Jay Maynard, Jan Jaeger */
+/*      Set priority by Reed H. Petty from an idea by Steve Gay      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -21,6 +22,7 @@
 //#define INSTRUCTION_COUNTING
 //#define SVC_TRACE
 //#define NO_PROTECTION_EXCEPTION_TRACE
+//#define NO_BINARY_FP_OPERATION_EXCEPTION_TRACE
 
 /*-------------------------------------------------------------------*/
 /* Add two signed fullwords giving a signed fullword result          */
@@ -107,7 +109,7 @@ mul_signed ( U32 *resulthi, U32 *resultlo, U32 op1, U32 op2 )
 {
 S64     r;
 
-    r = (S64)op1 * (S32)op2;
+    r = (S64)(S32)op1 * (S32)op2;
     *resulthi = (U64)r >> 32;
     *resultlo = (U64)r & 0xFFFFFFFF;
 } /* end function mul_signed */
@@ -314,7 +316,7 @@ BYTE    excarid;                        /* Exception access reg id   */
         && regs->instvalid)
     {
         regs->psw.ia -= regs->psw.ilc;
-        regs->psw.ia &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
     }
 
     /* Store the interrupt code in the PSW */
@@ -327,6 +329,10 @@ BYTE    excarid;                        /* Exception access reg id   */
 #ifdef NO_PROTECTION_EXCEPTION_TRACE
             && code != PGM_PROTECTION_EXCEPTION
 #endif /*NO_PROTECTION_EXCEPTION_TRACE*/
+#ifdef NO_BINARY_FP_OPERATION_EXCEPTION_TRACE
+            && (!(code == PGM_OPERATION_EXCEPTION
+                && regs->inst[0] == 0xB3))
+#endif /*NO_BINARY_FP_OPERATION_EXCEPTION_TRACE*/
             && code != PGM_TRACE_TABLE_EXCEPTION
             && code != PGM_MONITOR_EVENT))
     {
@@ -518,8 +524,7 @@ static BYTE module[8];                  /* Module name               */
         if (b1 != 0)
         {
             effective_addr += regs->gpr[b1];
-            effective_addr &=
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            effective_addr &= ADDRESS_MAXWRAP(regs);
         }
         ar1 = b1;
     }
@@ -529,8 +534,7 @@ static BYTE module[8];                  /* Module name               */
         if (x2 != 0)
         {
             effective_addr += regs->gpr[x2];
-            effective_addr &=
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            effective_addr &= ADDRESS_MAXWRAP(regs);
         }
     }
 
@@ -541,8 +545,7 @@ static BYTE module[8];                  /* Module name               */
         if (b2 != 0)
         {
             effective_addr2 += regs->gpr[b2];
-            effective_addr2 &=
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
         }
         ar2 = b2;
     }
@@ -553,7 +556,7 @@ static BYTE module[8];                  /* Module name               */
     {
         regs->psw.ilc = ilc;
         regs->psw.ia += ilc;
-        regs->psw.ia &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
     }
 
     switch (opcode) {
@@ -825,7 +828,7 @@ static BYTE module[8];                  /* Module name               */
             BYTE memname[8];
             n = regs->gpr[0];
             if ((regs->gpr[1] & 0x80000000) == 0) n += 4;
-            n &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            n &= ADDRESS_MAXWRAP(regs);
             vfetchc (memname, 7, n, 0, regs);
             for (i=0; i < 8; i++)
                 memname[i] = ebcdic_to_ascii[memname[i]];
@@ -841,9 +844,9 @@ static BYTE module[8];                  /* Module name               */
         {
             BYTE epname[8];
             n = regs->gpr[15];
-            n &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            n &= ADDRESS_MAXWRAP(regs);
             n = vfetch4 (n, 0, regs);
-            n &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            n &= ADDRESS_MAXWRAP(regs);
             vfetchc (epname, 7, n, 0, regs);
             for (i=0; i < 8; i++)
                 epname[i] = ebcdic_to_ascii[epname[i]];
@@ -856,7 +859,7 @@ static BYTE module[8];                  /* Module name               */
         {
             BYTE message[256];
             n = regs->gpr[1];
-            n &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            n &= ADDRESS_MAXWRAP(regs);
             n = vfetch2 (n, 0, regs);
             if (n > 130) n = 130;
             if (n > 0)
@@ -2723,7 +2726,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Program check if in problem state */
-        if ( regs->psw.prob )
+        if ( regs->psw.prob && (effective_addr < 0xF00))
         {
             program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
@@ -2735,7 +2738,6 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
         /* Diagnose 044: SCPEND                                      */
         /*-----------------------------------------------------------*/
-
             scpend_call();
 
             break;
@@ -2745,7 +2747,6 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
         /* Diagnose 080: MSSFCALL                                    */
         /*-----------------------------------------------------------*/
-
             /* R1 contains the real address of the SPCCB */
             n1 = APPLY_PREFIXING ( regs->gpr[r1], regs->pxr );
 
@@ -2766,9 +2767,32 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
         /* Diagnose 204: LPAR RMF Interface                          */
         /*-----------------------------------------------------------*/
-
             diag204_call (r1, r2, regs);
             regs->psw.cc = 0;
+
+            break;
+
+        case 0xF00:
+        /*-----------------------------------------------------------*/
+        /* Diagnose F00: Hercules normal mode                        */
+        /*-----------------------------------------------------------*/
+            sysblk.inststep = 0;
+
+            break;
+
+        case 0xF01:
+        /*-----------------------------------------------------------*/
+        /* Diagnose F01: Hercules single step mode                   */
+        /*-----------------------------------------------------------*/
+            sysblk.inststep = 1;
+
+            break;
+
+        case 0xF02:
+        /*-----------------------------------------------------------*/
+        /* Diagnose F02: Hercules get instruction counter            */
+        /*-----------------------------------------------------------*/
+            regs->gpr[r1] = (U32)regs->instcount;
 
             break;
 
@@ -2919,7 +2943,7 @@ static BYTE module[8];                  /* Module name               */
 
         /* Shift the signed value of the R1 register */
         (S32)regs->gpr[r1] = n > 30 ?
-                        ((S32)regs->gpr[r1] > 0 ? 0 : -1) :
+                        ((S32)regs->gpr[r1] < 0 ? -1 : 0) :
                         (S32)regs->gpr[r1] >> n;
 
         /* Set the condition code */
@@ -3076,7 +3100,8 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Load updated value into the R1 and R1+1 registers */
-        regs->gpr[r1] = dreg >> 32;
+        regs->gpr[r1] = (dreg >> 32) & 0x7FFFFFFF;
+        if (m) regs->gpr[r1] |= 0x80000000;
         regs->gpr[r1+1] = dreg & 0xFFFFFFFF;
 
         /* Condition code 3 and program check if overflow occurred */
@@ -4552,8 +4577,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Load virtual storage address from R2 register */
-            effective_addr = regs->gpr[r2] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            effective_addr = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
 
             /* Translate virtual address to real address */
             if (translate_addr (effective_addr, r2, regs, ACCTYPE_IVSK,
@@ -4730,8 +4754,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Load 4K block address from R2 register */
-            n = regs->gpr[r2] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            n = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
 
             /* Convert real address to absolute address */
             n = APPLY_PREFIXING (n, regs->pxr);
@@ -4762,8 +4785,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Load 4K block address from R2 register */
-            n = regs->gpr[r2] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            n = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
 
             /* Convert real address to absolute address */
             n = APPLY_PREFIXING (n, regs->pxr);
@@ -4799,8 +4821,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Load 4K block address from R2 register */
-            n = regs->gpr[r2] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            n = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
 
             /* Perform serialization and checkpoint-synchronization */
             perform_serialization ();
@@ -4839,8 +4860,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Load 4K block address from R2 register */
-            n = regs->gpr[r2] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            n = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
             n &= 0xFFFFF000;
 
             /* Perform serialization */
@@ -5417,8 +5437,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* R2 register contains operand real storage address */
-            n = regs->gpr[r2] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            n = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
 
             /* Program check if operand not on fullword boundary */
             if ( n & 0x00000003 )
@@ -5503,8 +5522,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* R2 register contains operand real storage address */
-            n = regs->gpr[r2] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            n = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
 
             /* Program check if operand not on fullword boundary */
             if ( n & 0x00000003 )
@@ -5715,8 +5733,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Store second doubleword value at operand+8 */
             effective_addr += 8;
-            effective_addr &=
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            effective_addr &= ADDRESS_MAXWRAP(regs);
             vstore8 ( dreg, effective_addr + 8, ar1, regs );
 
             /* Perform serialization after storing clock */
@@ -6060,8 +6077,7 @@ static BYTE module[8];                  /* Module name               */
 
                 /* Increment the operand address */
                 effective_addr++;
-                effective_addr &=
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+                effective_addr &= ADDRESS_MAXWRAP(regs);
             }
 
             /* Shift mask and register for next byte */
@@ -6319,8 +6335,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Validate the referenced portion of the second operand */
-        n = (effective_addr2 + d) &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        n = (effective_addr2 + d) & ADDRESS_MAXWRAP(regs);
         validate_operand (n, ar2, h-d, ACCTYPE_READ, regs);
 
         /* Process first operand from left to right, refetching
@@ -6329,8 +6344,7 @@ static BYTE module[8];                  /* Module name               */
         for ( i = 0; i <= ibyte; i++ )
         {
             /* Fetch byte from second operand */
-            n = (effective_addr2 + cwork1[i]) &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            n = (effective_addr2 + cwork1[i]) & ADDRESS_MAXWRAP(regs);
             sbyte = vfetchb ( n, ar2, regs );
 
             /* Store result at first operand address */
@@ -6338,8 +6352,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Increment first operand address */
             effective_addr++;
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            effective_addr &= ADDRESS_MAXWRAP(regs);
 
         } /* end for(i) */
 
@@ -6389,8 +6402,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Increment first operand address */
             effective_addr++;
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            effective_addr &= ADDRESS_MAXWRAP(regs);
 
         } /* end for(i) */
 
@@ -6624,8 +6636,7 @@ static BYTE module[8];                  /* Module name               */
         /* Validate the operands for addressing and protection */
         validate_operand (effective_addr, ar1, ibyte,
                         ACCTYPE_WRITE, regs);
-        n = (effective_addr2 - ibyte) &
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        n = (effective_addr2 - ibyte) & ADDRESS_MAXWRAP(regs);
         validate_operand (n, ar2, ibyte, ACCTYPE_READ, regs);
 
         /* Process the destination operand from left to right,
@@ -6642,13 +6653,11 @@ static BYTE module[8];                  /* Module name               */
 
             /* Increment destination operand address */
             effective_addr++;
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            effective_addr &= ADDRESS_MAXWRAP(regs);
 
             /* Decrement source operand address */
             effective_addr2--;
-            effective_addr2 &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
 
         } /* end for(i) */
 
@@ -6773,8 +6782,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
     /* Set PSW instruction address from newia                        */
     /*---------------------------------------------------------------*/
-        regs->psw.ia = newia &
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
         break;
 
     /*---------------------------------------------------------------*/
@@ -6900,10 +6908,21 @@ struct {
 int    *picta;                          /* -> Inst counter array     */
 int     icidx;                          /* Instruction counter index */
 #endif /*INSTRUCTION_COUNTING*/
+#define CPU_PRIORITY    15              /* CPU thread priority       */
 
     /* Display thread started message on control panel */
-    logmsg ("HHC620I CPU%d thread started: tid=%8.8lX, pid=%d\n",
-            regs->cpuad, thread_id(), getpid());
+    logmsg ("HHC620I CPU%d thread started: tid=%8.8lX, pid=%d, "
+            "priority=%d\n",
+            regs->cpuad, thread_id(), getpid(),
+            getpriority(PRIO_PROCESS,0));
+
+    /* Set CPU thread priority */
+    if (setpriority(PRIO_PROCESS, 0, CPU_PRIORITY))
+        logmsg ("HHC621I CPU thread set priority failed: %s\n",
+                strerror(errno));
+
+    logmsg ("HHC622I CPU%d priority adjusted to %d\n",
+            regs->cpuad, getpriority(PRIO_PROCESS,0));
 
 #ifdef INSTRUCTION_COUNTING
     /* Clear instruction counters */

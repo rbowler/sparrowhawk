@@ -218,12 +218,13 @@ BYTE    buf[160];                       /* Auto-detection buffer     */
             return -1;
         }
 
-        /* Assume ASCII format if first 160 bytes contain only
-           valid ASCII characters, carriage return, and line feed */
-        for (i = 0, dev->ascii = 1; i < len; i++)
+        /* Assume ASCII format if first 160 bytes contain only ASCII
+           characters, carriage return, line feed, tab, or EOF */
+        for (i = 0, dev->ascii = 1; i < len && buf[i] != '\x1A'; i++)
         {
             if ((buf[i] < 0x20 || buf[i] > 0x7F)
-                && buf[i] != 0x0A && buf[i] != 0x0D)
+                && buf[i] != '\r' && buf[i] != '\n'
+                && buf[i] != '\t')
             {
                 dev->ascii = 0;
                 dev->ebcdic = 1;
@@ -324,7 +325,7 @@ BYTE    c;                              /* Input character           */
         rc = read (dev->fd, &c, 1);
 
         /* Handle end-of-file condition */
-        if (rc == 0)
+        if (rc == 0 || c == '\x1A')
         {
             /* End of record if there is any data in buffer */
             if (i > 0) break;
@@ -363,6 +364,13 @@ BYTE    c;                              /* Input character           */
 
         /* Line-feed indicates end of variable length record */
         if (c == '\n') break;
+
+        /* Expand tabs to spaces */
+        if (c == '\t')
+        {
+            do {i++;} while ((i & 7) && (i < CARD_SIZE));
+            continue;
+        }
 
         /* Test for overlength record */
         if (i >= CARD_SIZE)

@@ -10,13 +10,30 @@ What's new in Hercules</TITLE>
 <h1>What's new in Hercules</h1>
 
 <hr noshade>
+<h2>What's new in release 1.54</h2>
+<p>Release date: 18 Mar 2000
+<ul>
+<li>Address wraparound improvement (contributed by Jan Jaeger)
+<li>Floating point version 3 (contributed by Peter Kuschnerus)
+<li>Correction to SLDA/SRA instructions (contributed by Jan Jaeger)
+<li>Recognize tabs and end-of-file character in ASCII cardrdr files
+<li>Hercules-specific diagnose instructions (contributed by Jay Maynard)
+<li>Correct missing timer interrupt when interval timer goes from
+    zero to negative (by Valery Pogonchenko)
+<li>Enable HMC system console in S/370 mode
+<li>Correct sign propagation in multiply instruction
+<li>Reduce CPU thread priority (thanks to Steve Gay and Reed H.Petty)
+</ul>
+<p>Download
+<a href="hercules/hercules-1.54.tar.gz">hercules-1.54.tar.gz</a>
+
 <h2>What's new in release 1.53</h2>
 <p>Release date: 01 Mar 2000
 <ul>
 <li>Add BSF/FSF/BSB/FSB CCW support for tape devices
 <li>Allow final short block in OMA fixed block files
 <li>Allow processing of read-only AWSTAPE files and SCSI tapes
-<li>Skeleton ctcadpt.c module for future 3088 support
+<li>Skeleton ctcadpt module for future 3088 support
 <li>Correctly nullify IC/NI/OI/XI/CLM/STCM/ICM/TRT instructions
     on page translation exception (thanks to Jan Jaeger)
 <li>Improved floating point support (contributed by Peter Kuschnerus)
@@ -27,6 +44,7 @@ What's new in Hercules</TITLE>
 <p>Download
 <a href="hercules/hercules-1.53.tar.gz">hercules-1.53.tar.gz</a>
 
+<h2>What's new in release 1.52</h2>
 <p>Release date: 19 Feb 2000
 <ul>
 <li>Prevent incorrect length indication on 3270 Select CCW
@@ -328,7 +346,8 @@ What's new in Hercules</TITLE>
 <ul>
 <li>Write support for SCSI tapes and AWSTAPE files
 <li>Correct handling of REWIND command for AWSTAPE files
-<li>Correct nasty bug in Subtract Logical instruction
+<li>Correct nasty bug in Subtract Logical instruction (thanks
+    to Roland Goetschi for finding this bug)
 <li>Ensure unique TOD clock values for Store Clock
 <li>Correction to unstacking process for PR instruction
 <li>Implementation of Read Multiple CKD command
@@ -357,7 +376,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 01 Mar 2000
+<p>Last updated 18 Mar 2000
 </BODY>
 </HTML>
 
