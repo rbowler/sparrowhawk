@@ -1,4 +1,4 @@
-/* STACK.C      (c) Copyright Roger Bowler, 1999                     */
+/* STACK.C      (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 Linkage Stack Operations                     */
 
 /*-------------------------------------------------------------------*/
@@ -190,8 +190,8 @@ int     i;                              /* Array subscript           */
         fsha &= LSTE1_FSHA;
 
         /* Fetch the entry descriptor of the next section's header */
-        abs = abs_stack_addr (fsha, regs, ACCTYPE_READ);
-        memcpy (&lsed, sysblk.mainstor+abs, sizeof(LSED));
+        absold = abs_stack_addr (fsha, regs, ACCTYPE_READ);
+        memcpy (&lsed, sysblk.mainstor+absold, sizeof(LSED));
 
 #ifdef STACK_DEBUG
         logmsg ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X "

@@ -15,6 +15,7 @@
 /*      Corrections to shift instructions by Jay Maynard, Jan Jaeger */
 /*      Set priority by Reed H. Petty from an idea by Steve Gay      */
 /*      Bad frame support by Jan Jaeger                              */
+/*      STCPS and SCHM instructions by Jan Jaeger                    */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -334,6 +335,7 @@ BYTE    excarid;                        /* Exception access reg id   */
             && (!(code == PGM_OPERATION_EXCEPTION
                 && regs->inst[0] == 0xB3))
 #endif /*NO_BINARY_FP_OPERATION_EXCEPTION_TRACE*/
+            && code != PGM_STACK_FULL_EXCEPTION
             && code != PGM_TRACE_TABLE_EXCEPTION
             && code != PGM_MONITOR_EVENT))
     {
@@ -3114,7 +3116,7 @@ static BYTE module[8];                  /* Module name               */
         perform_serialization ();
 
         /* Obtain main-storage access lock */
-        obtain_lock (&sysblk.mainlock);
+        OBTAIN_MAINLOCK();
 
         /* Fetch byte from operand address */
         obyte = vfetchb ( effective_addr, ar1, regs );
@@ -3123,7 +3125,7 @@ static BYTE module[8];                  /* Module name               */
         vstoreb ( 0xFF, effective_addr, ar1, regs );
 
         /* Release main-storage access lock */
-        release_lock (&sysblk.mainlock);
+        RELEASE_MAINLOCK();
 
         /* Set condition code from leftmost bit of operand byte */
         regs->psw.cc = obyte >> 7;
@@ -5292,6 +5294,65 @@ static BYTE module[8];                  /* Module name               */
             regs->psw.cc = resume_subchan (regs, dev);
 
             break;
+
+        case 0x3A:
+        /*-----------------------------------------------------------*/
+        /* B23A: STCPS - Store Channel Path Status               [S] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Program check if operand not on 32 byte boundary */
+            if ( effective_addr & 0x0000001F )
+            {
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /*INCOMPLETE, SET TO ALL ZEROS*/
+            memset(cwork1,0x00,32);
+
+            /* Store channel path status word at operand address */
+            vstorec ( cwork1, 32-1, effective_addr, ar1, regs );
+
+            break;
+
+        case 0x3C:
+        /*-----------------------------------------------------------*/
+        /* B23C: SCHM - Set Channel Monitor                      [S] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Reserved bits in gpr1 must be zero */
+            if (regs->gpr[1] & CHM_GPR1_RESV)
+            {
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Program check if M bit one and gpr2 address not on
+               a 32 byte boundary or highorder bit set */
+            if ((regs->gpr[1] & CHM_GPR1_M)
+             && (regs->gpr[2] & CHM_GPR2_RESV))
+            {
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /*INCOMPLETE*/
+
+            break;
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
 #ifdef FEATURE_LINKAGE_STACK
@@ -5590,7 +5651,7 @@ static BYTE module[8];                  /* Module name               */
             break;
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
-#ifdef FEATURE_EXPANDED_STORAGE
+#ifdef FEATURE_MOVE_PAGE_FACILITY_2
         case 0x59:
         /*-----------------------------------------------------------*/
         /* B259: IESBE - Invalidate Expanded Storage Blk Entry [RRE] */
@@ -5606,15 +5667,20 @@ static BYTE module[8];                  /* Module name               */
             /* Perform serialization before operation */
             perform_serialization ();
 
+            /* Update page table entry interlocked */
+            OBTAIN_MAINLOCK();
+
             /* Invalidate page table entry */
             invalidate_pte (ibyte, r1, r2, regs);
+
+            /* Release mainstore interlock */
+            RELEASE_MAINLOCK();
 
             /* Perform serialization after operation */
             perform_serialization ();
 
             break;
-
-#endif /*FEATURE_EXPANDED_STORAGE*/
+#endif /*FEATURE_MOVE_PAGE_FACILITY_2*/
 
 #ifdef FEATURE_BRANCH_AND_SET_AUTHORITY
         case 0x5A:
@@ -5845,7 +5911,7 @@ static BYTE module[8];                  /* Module name               */
         perform_serialization ();
 
         /* Obtain main-storage access lock */
-        obtain_lock (&sysblk.mainlock);
+        OBTAIN_MAINLOCK();
 
         /* Load second operand from operand address  */
         n = vfetch4 ( effective_addr, ar1, regs );
@@ -5865,7 +5931,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Release main-storage access lock */
-        release_lock (&sysblk.mainlock);
+        RELEASE_MAINLOCK();
 
         /* Perform serialization after completing operation */
         perform_serialization ();
@@ -5895,7 +5961,7 @@ static BYTE module[8];                  /* Module name               */
         perform_serialization ();
 
         /* Obtain main-storage access lock */
-        obtain_lock (&sysblk.mainlock);
+        OBTAIN_MAINLOCK();
 
         /* Load second operand from operand address  */
         n1 = vfetch4 ( effective_addr, ar1, regs );
@@ -5918,7 +5984,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Release main-storage access lock */
-        release_lock (&sysblk.mainlock);
+        RELEASE_MAINLOCK();
 
         /* Perform serialization after completing operation */
         perform_serialization ();
@@ -7057,9 +7123,9 @@ int     icidx;                          /* Instruction counter index */
 #endif /*INSTRUCTION_COUNTING*/
 
         /* Turn on trace for specific instructions */
-        if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x2E) tracethis = 1; /*PGIN*/
-        if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x2F) tracethis = 1; /*PGOUT*/
-        if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x54) tracethis = 1; /*MVPG*/
+//      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x2E) tracethis = 1; /*PGIN*/
+//      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x2F) tracethis = 1; /*PGOUT*/
+//      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x54) tracethis = 1; /*MVPG*/
 //      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x20) sysblk.inststep = 1; /*SERVC*/
 //      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x25) sysblk.inststep = 1; /*SSAR*/
 //      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x40) sysblk.inststep = 1; /*BAKR*/

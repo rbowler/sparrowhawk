@@ -236,6 +236,15 @@ to choose <em>binary</em> format for the download), and then add the
 downloaded filename to the Hercules configuration file as a virtual
 tape device.
 
+<p>
+<em>Note: the tapeconv program will not correctly
+process input tapes whose blocksize exceeds 32760!</em>
+One symptom of this may be
+<code>ADRY011E I/O ERROR - DEVICE NOT ATTACHED.0000,NA,00...00,0000</code>
+when attempting to restore from tape originally created
+using the default DF/DSS blocksize.  The solution is to recreate
+the dump tape with DCB=BLKSIZE=32760.
+
 
 <h4>Can I attach a tape drive to Hercules?</h4>
 <p>
@@ -314,6 +323,7 @@ The following standard features have been implemented:
 <li>Branch and Set Authority
 <li>Checksum instruction
 <li>Compare and Move Extended instructions
+<li>Expanded Storage
 <li>Halfword-Immediate instructions
 <li>Branch-Relative instructions
 <li>Move Inverse
@@ -342,7 +352,6 @@ will be in due course:
 <li>Address-Limit Checking
 <li>Compression
 <li>Incorrect-Length-Indication Suppression
-<li>Expanded Storage
 <li>Perform Locked Operation
 <li>Square Root
 <li>MVS assists
@@ -420,7 +429,7 @@ http://www.onelist.com/community/hercules-390</a>
 </center>
 
 <small>
-<p>Last updated 26 Mar 2000
+<p>Last updated 30 Mar 2000
 </BODY>
 </HTML>
 

@@ -102,7 +102,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
     }
 
     /* Obtain main-storage access lock */
-    obtain_lock (&sysblk.mainlock);
+    OBTAIN_MAINLOCK();
 
     /* Load ASCB address from first operand location */
     ascb_addr = vfetch4 ( addr1, ar1, regs );
@@ -152,7 +152,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
     }
 
     /* Release main-storage access lock */
-    release_lock (&sysblk.mainlock);
+    RELEASE_MAINLOCK();
 
 } /* end function obtain_local_lock */
 
@@ -192,7 +192,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
     }
 
     /* Obtain main-storage access lock */
-    obtain_lock (&sysblk.mainlock);
+    OBTAIN_MAINLOCK();
 
     /* Load ASCB address from first operand location */
     ascb_addr = vfetch4 ( addr1, ar1, regs );
@@ -246,7 +246,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
     }
 
     /* Release main-storage access lock */
-    release_lock (&sysblk.mainlock);
+    RELEASE_MAINLOCK();
 
 } /* end function release_local_lock */
 
@@ -290,7 +290,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
     lock_arn = 11;
 
     /* Obtain main-storage access lock */
-    obtain_lock (&sysblk.mainlock);
+    OBTAIN_MAINLOCK();
 
     /* Load ASCB address from first operand location */
     ascb_addr = vfetch4 ( addr1, ar1, regs );
@@ -339,7 +339,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
     }
 
     /* Release main-storage access lock */
-    release_lock (&sysblk.mainlock);
+    RELEASE_MAINLOCK();
 
 } /* end function obtain_cms_lock */
 
@@ -384,7 +384,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
     lock_arn = 11;
 
     /* Obtain main-storage access lock */
-    obtain_lock (&sysblk.mainlock);
+    OBTAIN_MAINLOCK();
 
     /* Load ASCB address from first operand location */
     ascb_addr = vfetch4 ( addr1, ar1, regs );
@@ -435,7 +435,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
     }
 
     /* Release main-storage access lock */
-    release_lock (&sysblk.mainlock);
+    RELEASE_MAINLOCK();
 
 } /* end function release_cms_lock */
 

@@ -1,9 +1,9 @@
-/* HERCULES.H	(c) Copyright Roger Bowler, 1999-2000		     */
-/*		ESA/390 Emulator Header File			     */
+/* HERCULES.H   (c) Copyright Roger Bowler, 1999-2000                */
+/*              ESA/390 Emulator Header File                         */
 
 /*-------------------------------------------------------------------*/
-/* Header file containing Hercules internal data structures	     */
-/* and function prototypes.					     */
+/* Header file containing Hercules internal data structures          */
+/* and function prototypes.                                          */
 /*-------------------------------------------------------------------*/
 
 #include <unistd.h>
@@ -34,42 +34,42 @@
 #include "esa390.h"
 
 /*-------------------------------------------------------------------*/
-/* ESA/390 features implemented 				     */
+/* ESA/390 features implemented                                      */
 /*-------------------------------------------------------------------*/
-#define MAX_CPU_ENGINES 	4
-#define FEATURE_ALD_FORMAT	0
-#undef	FEATURE_ACCESS_REGISTERS
-#undef	FEATURE_BASIC_STORAGE_KEYS
-#undef	FEATURE_BCMODE
-#undef	FEATURE_BIMODAL_ADDRESSING
-#undef	FEATURE_BINARY_FLOATING_POINT
-#undef	FEATURE_BRANCH_AND_SET_AUTHORITY
-#undef	FEATURE_CHANNEL_SUBSYSTEM
-#undef	FEATURE_DIRECT_CONTROL
-#undef	FEATURE_DUAL_ADDRESS_SPACE
-#undef	FEATURE_EXPANDED_STORAGE
-#undef	FEATURE_EXTENDED_STORAGE_KEYS
-#undef	FEATURE_EXTENDED_TOD_CLOCK
-#undef	FEATURE_HEXADECIMAL_FLOATING_POINT
-#undef	FEATURE_IMMEDIATE_AND_RELATIVE
-#undef	FEATURE_INTERVAL_TIMER
-#undef	FEATURE_LINKAGE_STACK
-#undef	FEATURE_MOVE_PAGE_FACILITY_2
-#undef	FEATURE_MSSF_CALL
-#undef	FEATURE_MVS_ASSIST
-#undef	FEATURE_PAGE_PROTECTION
-#undef	FEATURE_PRIVATE_SPACE
-#undef	FEATURE_S370_CHANNEL
-#undef	FEATURE_SEGMENT_PROTECTION
-#undef	FEATURE_STORAGE_PROTECTION_OVERRIDE
-#undef	FEATURE_SUBSPACE_GROUP
-#undef	FEATURE_SUPPRESSION_ON_PROTECTION
-#undef	FEATURE_SYSTEM_CONSOLE
-#undef	FEATURE_TRACING
-#undef	FEATURE_4K_STORAGE_KEYS
+#define MAX_CPU_ENGINES         1
+#define FEATURE_ALD_FORMAT      0
+#undef  FEATURE_ACCESS_REGISTERS
+#undef  FEATURE_BASIC_STORAGE_KEYS
+#undef  FEATURE_BCMODE
+#undef  FEATURE_BIMODAL_ADDRESSING
+#undef  FEATURE_BINARY_FLOATING_POINT
+#undef  FEATURE_BRANCH_AND_SET_AUTHORITY
+#undef  FEATURE_CHANNEL_SUBSYSTEM
+#undef  FEATURE_DIRECT_CONTROL
+#undef  FEATURE_DUAL_ADDRESS_SPACE
+#undef  FEATURE_EXPANDED_STORAGE
+#undef  FEATURE_EXTENDED_STORAGE_KEYS
+#undef  FEATURE_EXTENDED_TOD_CLOCK
+#undef  FEATURE_HEXADECIMAL_FLOATING_POINT
+#undef  FEATURE_IMMEDIATE_AND_RELATIVE
+#undef  FEATURE_INTERVAL_TIMER
+#undef  FEATURE_LINKAGE_STACK
+#undef  FEATURE_MOVE_PAGE_FACILITY_2
+#undef  FEATURE_MSSF_CALL
+#undef  FEATURE_MVS_ASSIST
+#undef  FEATURE_PAGE_PROTECTION
+#undef  FEATURE_PRIVATE_SPACE
+#undef  FEATURE_S370_CHANNEL
+#undef  FEATURE_SEGMENT_PROTECTION
+#undef  FEATURE_STORAGE_PROTECTION_OVERRIDE
+#undef  FEATURE_SUBSPACE_GROUP
+#undef  FEATURE_SUPPRESSION_ON_PROTECTION
+#undef  FEATURE_SYSTEM_CONSOLE
+#undef  FEATURE_TRACING
+#undef  FEATURE_4K_STORAGE_KEYS
 
-#if	ARCH == 370
- #define ARCHITECTURE_NAME	"S/370"
+#if     ARCH == 370
+ #define ARCHITECTURE_NAME      "S/370"
  #define FEATURE_BASIC_STORAGE_KEYS
  #define FEATURE_BCMODE
  #define FEATURE_HEXADECIMAL_FLOATING_POINT
@@ -77,8 +77,8 @@
  #define FEATURE_SEGMENT_PROTECTION
  #define FEATURE_SYSTEM_CONSOLE
  #define FEATURE_S370_CHANNEL
-#elif	ARCH == 390
- #define ARCHITECTURE_NAME	"ESA/390"
+#elif   ARCH == 390
+ #define ARCHITECTURE_NAME      "ESA/390"
  #define FEATURE_ACCESS_REGISTERS
  #define FEATURE_BIMODAL_ADDRESSING
  #define FEATURE_BRANCH_AND_SET_AUTHORITY
@@ -90,7 +90,7 @@
  #define FEATURE_HEXADECIMAL_FLOATING_POINT
  #define FEATURE_IMMEDIATE_AND_RELATIVE
  #define FEATURE_LINKAGE_STACK
- #define FEATURE_MOVE_PAGE_FACILITY_2
+ #undef  FEATURE_MOVE_PAGE_FACILITY_2
  #define FEATURE_MSSF_CALL
  #define FEATURE_MVS_ASSIST
  #define FEATURE_PAGE_PROTECTION
@@ -106,29 +106,29 @@
 #endif
 
 /*-------------------------------------------------------------------*/
-/* Macro definitions for storage keys				     */
+/* Macro definitions for storage keys                                */
 /*-------------------------------------------------------------------*/
 #ifdef FEATURE_4K_STORAGE_KEYS
  #define STORAGE_KEY(absaddr) sysblk.storkeys[(absaddr)>>12]
- #define STORAGE_KEY_PAGESHIFT	12
- #define STORAGE_KEY_PAGESIZE	4096
- #define STORAGE_KEY_PAGEMASK	0x7FFFF000
- #define STORAGE_KEY_BYTEMASK	0x00000FFF
+ #define STORAGE_KEY_PAGESHIFT  12
+ #define STORAGE_KEY_PAGESIZE   4096
+ #define STORAGE_KEY_PAGEMASK   0x7FFFF000
+ #define STORAGE_KEY_BYTEMASK   0x00000FFF
 #else
  #define STORAGE_KEY(absaddr) sysblk.storkeys[(absaddr)>>11]
- #define STORAGE_KEY_PAGESHIFT	11
- #define STORAGE_KEY_PAGESIZE	2048
- #define STORAGE_KEY_PAGEMASK	0x7FFFF800
- #define STORAGE_KEY_BYTEMASK	0x000007FF
+ #define STORAGE_KEY_PAGESHIFT  11
+ #define STORAGE_KEY_PAGESIZE   2048
+ #define STORAGE_KEY_PAGEMASK   0x7FFFF800
+ #define STORAGE_KEY_BYTEMASK   0x000007FF
 #endif
 
 /*-------------------------------------------------------------------*/
-/* Macro definitions for expanded storage			     */
+/* Macro definitions for expanded storage                            */
 /*-------------------------------------------------------------------*/
-#define XSTORE_INCREMENT_SIZE	0x00100000
-#define XSTORE_PAGESHIFT	12
-#define XSTORE_PAGESIZE 	4096
-#define XSTORE_PAGEMASK 	0x7FFFF000
+#define XSTORE_INCREMENT_SIZE   0x00100000
+#define XSTORE_PAGESHIFT        12
+#define XSTORE_PAGESIZE         4096
+#define XSTORE_PAGEMASK         0x7FFFF000
 #if defined(FEATURE_EXPANDED_STORAGE) \
     && !defined(FEATURE_4K_STORAGE_KEYS)
  #error Expanded storage cannot be defined with 2K storage keys
@@ -139,396 +139,405 @@
 #endif
 
 /*-------------------------------------------------------------------*/
-/* Macro definitions for address wraparound			     */
+/* Macro definitions for address wraparound                          */
 /*-------------------------------------------------------------------*/
 #ifdef FEATURE_BIMODAL_ADDRESSING
  #define ADDRESS_MAXWRAP(_register_context) \
-	 ((_register_context)->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF)
+         ((_register_context)->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF)
 #else
  #define ADDRESS_MAXWRAP(_register_context) \
-	 (0x00FFFFFF)
+         (0x00FFFFFF)
 #endif
 
 /*-------------------------------------------------------------------*/
-/* Macro definitions for tracing				     */
+/* Macro definitions for tracing                                     */
 /*-------------------------------------------------------------------*/
 #define logmsg(a...) \
-	fprintf(sysblk.msgpipew, ## a)
+        fprintf(sysblk.msgpipew, ## a)
 #define DEVTRACE(format, a...) \
-	if(dev->ccwtrace||dev->ccwstep) \
-	logmsg("%4.4X:" format, dev->devnum, ## a)
+        if(dev->ccwtrace||dev->ccwstep) \
+        logmsg("%4.4X:" format, dev->devnum, ## a)
 
 /*-------------------------------------------------------------------*/
-/* Macro definitions for version number 			     */
+/* Macro definitions for version number                              */
 /*-------------------------------------------------------------------*/
-#define STRINGMAC(x)	#x
-#define MSTRING(x)	STRINGMAC(x)
+#define STRINGMAC(x)    #x
+#define MSTRING(x)      STRINGMAC(x)
 
 /*-------------------------------------------------------------------*/
-/* Macro definitions for thread functions			     */
+/* Macro definitions for thread functions                            */
 /*-------------------------------------------------------------------*/
 #ifndef NOTHREAD
 #include <pthread.h>
-typedef pthread_t			TID;
-typedef pthread_mutex_t 		LOCK;
-typedef pthread_cond_t			COND;
-typedef pthread_attr_t			ATTR;
+typedef pthread_t                       TID;
+typedef pthread_mutex_t                 LOCK;
+typedef pthread_cond_t                  COND;
+typedef pthread_attr_t                  ATTR;
 #define initialize_lock(plk) \
-	pthread_mutex_init((plk),NULL)
+        pthread_mutex_init((plk),NULL)
 #define obtain_lock(plk) \
-	pthread_mutex_lock((plk))
+        pthread_mutex_lock((plk))
+#if MAX_CPU_ENGINES == 1
+ #define OBTAIN_MAINLOCK()
+ #define RELEASE_MAINLOCK()
+#else
+ #define OBTAIN_MAINLOCK() \
+         pthread_mutex_lock(&sysblk.mainlock)
+ #define RELEASE_MAINLOCK() \
+         pthread_mutex_unlock(&sysblk.mainlock)
+#endif
 #define release_lock(plk) \
-	pthread_mutex_unlock((plk))
+        pthread_mutex_unlock((plk))
 #define initialize_condition(pcond) \
-	pthread_cond_init((pcond),NULL)
+        pthread_cond_init((pcond),NULL)
 #define signal_condition(pcond) \
-	pthread_cond_broadcast((pcond))
+        pthread_cond_broadcast((pcond))
 #define wait_condition(pcond,plk) \
-	pthread_cond_wait((pcond),(plk))
+        pthread_cond_wait((pcond),(plk))
 #define initialize_detach_attr(pat) \
-	pthread_attr_init((pat)); \
-	pthread_attr_setdetachstate((pat),PTHREAD_CREATE_DETACHED)
+        pthread_attr_init((pat)); \
+        pthread_attr_setdetachstate((pat),PTHREAD_CREATE_DETACHED)
 typedef void*THREAD_FUNC(void*);
 #define create_thread(ptid,pat,fn,arg) \
-	pthread_create(ptid,pat,(THREAD_FUNC*)&fn,arg)
+        pthread_create(ptid,pat,(THREAD_FUNC*)&fn,arg)
 #define signal_thread(tid,signo) \
-	pthread_kill(tid,signo)
+        pthread_kill(tid,signo)
 #define thread_id() \
-	pthread_self()
+        pthread_self()
 #else
-typedef int				TID;
-typedef int				LOCK;
-typedef int				COND;
-typedef int				ATTR;
-#define initialize_lock(plk)		*(plk)=0
-#define obtain_lock(plk)		*(plk)=1
-#define release_lock(plk)		*(plk)=0
-#define initialize_condition(pcond)	*(pcond)=0
-#define signal_condition(pcond) 	*(pcond)=1
-#define wait_condition(pcond,plk)	*(pcond)=1
-#define initialize_detach_attr(pat)	*(pat)=1
-#define create_thread(ptid,pat,fn,arg)	(*(ptid)=0,fn(arg),0)
-#define signal_thread(tid,signo)	raise(signo)
-#define thread_id()			0
+typedef int                             TID;
+typedef int                             LOCK;
+typedef int                             COND;
+typedef int                             ATTR;
+#define initialize_lock(plk)            *(plk)=0
+#define obtain_lock(plk)                *(plk)=1
+#define release_lock(plk)               *(plk)=0
+#define initialize_condition(pcond)     *(pcond)=0
+#define signal_condition(pcond)         *(pcond)=1
+#define wait_condition(pcond,plk)       *(pcond)=1
+#define initialize_detach_attr(pat)     *(pat)=1
+#define create_thread(ptid,pat,fn,arg)  (*(ptid)=0,fn(arg),0)
+#define signal_thread(tid,signo)        raise(signo)
+#define thread_id()                     0
 #endif
 
 /*-------------------------------------------------------------------*/
-/* Prototype definitions for device handler functions		     */
+/* Prototype definitions for device handler functions                */
 /*-------------------------------------------------------------------*/
 struct _DEVBLK;
 typedef int DEVIF (struct _DEVBLK *dev, int argc, BYTE *argv[]);
 typedef void DEVQF (struct _DEVBLK *dev, BYTE **class, int buflen,
-	BYTE *buffer);
+        BYTE *buffer);
 typedef void DEVXF (struct _DEVBLK *dev, BYTE code, BYTE flags,
-	BYTE chained, U16 count, BYTE prevcode, int ccwseq,
-	BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual);
+        BYTE chained, U16 count, BYTE prevcode, int ccwseq,
+        BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual);
 
 /*-------------------------------------------------------------------*/
-/* Structure definition for CPU register context		     */
+/* Structure definition for CPU register context                     */
 /*-------------------------------------------------------------------*/
-typedef struct _REGS {			/* Processor registers	     */
-	U64	ptimer; 		/* CPU timer		     */
-	U64	clkc;			/* 0-7=Clock comparator epoch,
-					   8-63=Comparator bits 0-55 */
-	U64	instcount;		/* Instruction counter	     */
-	U64	prevcount;		/* Previous instruction count*/
-	U32	mipsrate;		/* Instructions/millisecond  */
-	TLBE	tlb[256];		/* Translation lookaside buf */
-	TID	cputid; 		/* CPU thread identifier     */
-	U32	gpr[16];		/* General purpose registers */
-	U32	cr[16]; 		/* Control registers	     */
-	U32	ar[16]; 		/* Access registers	     */
-	U32	fpr[8]; 		/* Floating point registers  */
-	U32	pxr;			/* Prefix register	     */
-	U32	todpr;			/* TOD programmable register */
-	U32	tea;			/* Translation exception addr*/
-	U16	cpuad;			/* CPU address for STAP      */
-	PSW	psw;			/* Program status word	     */
-	BYTE	excarid;		/* Exception access register */
-	BYTE	itimer_pending; 	/* 1=Interrupt is pending for
-					     the interval timer      */
-	BYTE	cpustate;		/* CPU stopped/started state */
-	BYTE	restart;		/* 1=Restart interrpt pending*/
-	BYTE	extcall;		/* 1=Extcall interrpt pending*/
-	U16	extccpu;		/* CPU causing external call */
-	BYTE	emersig;		/* 1=Emersig interrpt pending*/
-	BYTE	emercpu 		/* Emergency signal flags    */
-		    [MAX_CPU_ENGINES];	/* for each CPU (1=pending)  */
-	BYTE	storstat;		/* 1=Stop and store status   */
-	BYTE	instvalid;		/* 1=Inst field is valid     */
-	BYTE	inst[6];		/* Last-fetched instruction  */
-	jmp_buf progjmp;		/* longjmp destination for
-					   program check return      */
+typedef struct _REGS {                  /* Processor registers       */
+        U64     ptimer;                 /* CPU timer                 */
+        U64     clkc;                   /* 0-7=Clock comparator epoch,
+                                           8-63=Comparator bits 0-55 */
+        U64     instcount;              /* Instruction counter       */
+        U64     prevcount;              /* Previous instruction count*/
+        U32     mipsrate;               /* Instructions/millisecond  */
+        TLBE    tlb[256];               /* Translation lookaside buf */
+        TID     cputid;                 /* CPU thread identifier     */
+        U32     gpr[16];                /* General purpose registers */
+        U32     cr[16];                 /* Control registers         */
+        U32     ar[16];                 /* Access registers          */
+        U32     fpr[8];                 /* Floating point registers  */
+        U32     pxr;                    /* Prefix register           */
+        U32     todpr;                  /* TOD programmable register */
+        U32     tea;                    /* Translation exception addr*/
+        U16     cpuad;                  /* CPU address for STAP      */
+        PSW     psw;                    /* Program status word       */
+        BYTE    excarid;                /* Exception access register */
+        BYTE    itimer_pending;         /* 1=Interrupt is pending for
+                                             the interval timer      */
+        BYTE    cpustate;               /* CPU stopped/started state */
+        BYTE    restart;                /* 1=Restart interrpt pending*/
+        BYTE    extcall;                /* 1=Extcall interrpt pending*/
+        U16     extccpu;                /* CPU causing external call */
+        BYTE    emersig;                /* 1=Emersig interrpt pending*/
+        BYTE    emercpu                 /* Emergency signal flags    */
+                    [MAX_CPU_ENGINES];  /* for each CPU (1=pending)  */
+        BYTE    storstat;               /* 1=Stop and store status   */
+        BYTE    instvalid;              /* 1=Inst field is valid     */
+        BYTE    inst[6];                /* Last-fetched instruction  */
+        jmp_buf progjmp;                /* longjmp destination for
+                                           program check return      */
     } REGS;
 
 /* Definitions for CPU state */
-#define CPUSTATE_STOPPED	0	/* CPU is stopped	     */
-#define CPUSTATE_STOPPING	1	/* CPU is stopping	     */
-#define CPUSTATE_STARTED	2	/* CPU is started	     */
+#define CPUSTATE_STOPPED        0       /* CPU is stopped            */
+#define CPUSTATE_STOPPING       1       /* CPU is stopping           */
+#define CPUSTATE_STARTED        2       /* CPU is started            */
 
 /*-------------------------------------------------------------------*/
-/* System configuration block					     */
+/* System configuration block                                        */
 /*-------------------------------------------------------------------*/
 typedef struct _SYSBLK {
-	U32	mainsize;		/* Main storage size (bytes) */
-	BYTE   *mainstor;		/* -> Main storage	     */
-	BYTE   *storkeys;		/* -> Main storage key array */
-	U32	xpndsize;		/* Expanded size (4K pages)  */
-	BYTE   *xpndstor;		/* -> Expanded storage	     */
-	U64	cpuid;			/* CPU identifier for STIDP  */
-	U64	todclk; 		/* 0-7=TOD clock epoch,
-					   8-63=TOD clock bits 0-55  */
-	S64	todoffset;		/* Difference in microseconds
-					   between TOD and Unix time */
-	LOCK	todlock;		/* TOD clock update lock     */
-	TID	todtid; 		/* Thread-id for TOD update  */
-	U32	toduniq;		/* TOD clock uniqueness value*/
-	BYTE	loadparm[8];		/* IPL load parameter	     */
-	U16	numcpu; 		/* Number of CPUs installed  */
-	REGS	regs[MAX_CPU_ENGINES];	/* Registers for each CPU    */
-	LOCK	mainlock;		/* Main storage lock	     */
-	COND	intcond;		/* Interrupt condition	     */
-	LOCK	intlock;		/* Interrupt lock	     */
-	LOCK	sigplock;		/* Signal processor lock     */
-	ATTR	detattr;		/* Detached thread attribute */
-	TID	cnsltid;		/* Thread-id for console     */
-	U16	cnslport;		/* Port number for console   */
-	struct _DEVBLK *firstdev;	/* -> First device block     */
-	U32	servparm;		/* Service signal parameter  */
-	U32	cp_recv_mask;		/* Syscons CP receive mask   */
-	U32	cp_send_mask;		/* Syscons CP send mask      */
-	U32	sclp_recv_mask; 	/* Syscons SCLP receive mask */
-	U32	sclp_send_mask; 	/* Syscons SCLP send mask    */
-	BYTE	scpcmdstr[123+1];	/* Operator command string   */
-	int	scpcmdtype;		/* Operator command type     */
-	unsigned int			/* Flags		     */
-		iopending:1,		/* 1=I/O interrupt pending   */
-		sigpbusy:1,		/* 1=Signal facility in use  */
-		servsig:1,		/* 1=Service signal pending  */
-		intkey:1,		/* 1=Interrupt key pending   */
-		sigintreq:1,		/* 1=SIGINT request pending  */
-		insttrace:1,		/* 1=Instruction trace	     */
-		inststep:1,		/* 1=Instruction step	     */
-		instbreak:1;		/* 1=Have breakpoint	     */
-	U32	breakaddr;		/* Breakpoint address	     */
-	FILE   *msgpipew;		/* Message pipe write handle */
-	int	msgpiper;		/* Message pipe read handle  */
+        U32     mainsize;               /* Main storage size (bytes) */
+        BYTE   *mainstor;               /* -> Main storage           */
+        BYTE   *storkeys;               /* -> Main storage key array */
+        U32     xpndsize;               /* Expanded size (4K pages)  */
+        BYTE   *xpndstor;               /* -> Expanded storage       */
+        U64     cpuid;                  /* CPU identifier for STIDP  */
+        U64     todclk;                 /* 0-7=TOD clock epoch,
+                                           8-63=TOD clock bits 0-55  */
+        S64     todoffset;              /* Difference in microseconds
+                                           between TOD and Unix time */
+        LOCK    todlock;                /* TOD clock update lock     */
+        TID     todtid;                 /* Thread-id for TOD update  */
+        U32     toduniq;                /* TOD clock uniqueness value*/
+        BYTE    loadparm[8];            /* IPL load parameter        */
+        U16     numcpu;                 /* Number of CPUs installed  */
+        REGS    regs[MAX_CPU_ENGINES];  /* Registers for each CPU    */
+        LOCK    mainlock;               /* Main storage lock         */
+        COND    intcond;                /* Interrupt condition       */
+        LOCK    intlock;                /* Interrupt lock            */
+        LOCK    sigplock;               /* Signal processor lock     */
+        ATTR    detattr;                /* Detached thread attribute */
+        TID     cnsltid;                /* Thread-id for console     */
+        U16     cnslport;               /* Port number for console   */
+        struct _DEVBLK *firstdev;       /* -> First device block     */
+        U32     servparm;               /* Service signal parameter  */
+        U32     cp_recv_mask;           /* Syscons CP receive mask   */
+        U32     cp_send_mask;           /* Syscons CP send mask      */
+        U32     sclp_recv_mask;         /* Syscons SCLP receive mask */
+        U32     sclp_send_mask;         /* Syscons SCLP send mask    */
+        BYTE    scpcmdstr[123+1];       /* Operator command string   */
+        int     scpcmdtype;             /* Operator command type     */
+        unsigned int                    /* Flags                     */
+                iopending:1,            /* 1=I/O interrupt pending   */
+                sigpbusy:1,             /* 1=Signal facility in use  */
+                servsig:1,              /* 1=Service signal pending  */
+                intkey:1,               /* 1=Interrupt key pending   */
+                sigintreq:1,            /* 1=SIGINT request pending  */
+                insttrace:1,            /* 1=Instruction trace       */
+                inststep:1,             /* 1=Instruction step        */
+                instbreak:1;            /* 1=Have breakpoint         */
+        U32     breakaddr;              /* Breakpoint address        */
+        FILE   *msgpipew;               /* Message pipe write handle */
+        int     msgpiper;               /* Message pipe read handle  */
     } SYSBLK;
 
 /*-------------------------------------------------------------------*/
-/* Device configuration block					     */
+/* Device configuration block                                        */
 /*-------------------------------------------------------------------*/
 typedef struct _DEVBLK {
-	U16	subchan;		/* Subchannel number	     */
-	U16	devnum; 		/* Device number	     */
-	U16	devtype;		/* Device type		     */
-	DEVIF  *devinit;		/* -> Init device function   */
-	DEVQF  *devqdef;		/* -> Query device function  */
-	DEVXF  *devexec;		/* -> Execute CCW function   */
-	LOCK	lock;			/* Device block lock	     */
-	COND	resumecond;		/* Resume condition	     */
-	struct _DEVBLK *nextdev;	/* -> next device block      */
-	unsigned int			/* Flags		     */
-		pending:1,		/* 1=Interrupt pending	     */
-		busy:1, 		/* 1=Device busy	     */
-		console:1,		/* 1=Console device	     */
-		connected:1,		/* 1=Console client connected*/
-		readpending:1,		/* 1=Console read pending    */
-		pcipending:1,		/* 1=PCI interrupt pending   */
-		ccwtrace:1,		/* 1=CCW trace		     */
-		ccwstep:1,		/* 1=CCW single step	     */
-		cdwmerge:1;		/* 1=Channel will merge data
-					     chained write CCWs      */
-	PMCW	pmcw;			/* Path management ctl word  */
-	SCSW	scsw;			/* Subchannel status word(XA)*/
-	SCSW	pciscsw;		/* PCI subchannel status word*/
-	BYTE	csw[8]; 		/* Channel status word(S/370)*/
-	BYTE	pcicsw[8];		/* PCI channel status word   */
-	ESW	esw;			/* Extended status word      */
-	BYTE	ecw[32];		/* Extended control word     */
-	int	numsense;		/* Number of sense bytes     */
-	BYTE	sense[32];		/* Sense bytes		     */
-	int	numdevid;		/* Number of device id bytes */
-	BYTE	devid[32];		/* Device identifier bytes   */
-	int	numdevchar;		/* Number of devchar bytes   */
-	BYTE	devchar[64];		/* Device characteristics    */
-	BYTE	pgid[11];		/* Path Group ID	     */
-	TID	tid;			/* Thread-id executing CCW   */
-	U32	ccwaddr;		/* Address of first CCW      */
-	int	ccwfmt; 		/* CCW format (0 or 1)	     */
-	BYTE	ccwkey; 		/* Bits 0-3=key, 4-7=zeroes  */
-	BYTE   *buf;			/* -> Device data buffer     */
-	int	bufsize;		/* Device data buffer size   */
-	BYTE	filename[256];		/* Unix file name	     */
-	int	fd;			/* File descriptor	     */
-	/* Device dependent fields for console */
-	int	csock;			/* Client socket number      */
-	struct	in_addr ipaddr; 	/* Client IP address	     */
-	int	rlen3270;		/* Length of data in buffer  */
-	int	pos3270;		/* Current screen position   */
-	/* Device dependent fields for cardrdr */
-	unsigned int			/* Flags		     */
-		rdreof:1,		/* 1=Unit exception at EOF   */
-		ebcdic:1,		/* 1=Card deck is EBCDIC     */
-		ascii:1,		/* 1=Convert ASCII to EBCDIC */
-		trunc:1;		/* Truncate overlength record*/
-	int	cardpos;		/* Offset of next byte to be
-					   read from data buffer     */
-	int	cardrem;		/* Number of bytes remaining
-					   in data buffer	     */
-	/* Device dependent fields for console */
-	int	keybdrem;		/* Number of bytes remaining
-					   in keyboard read buffer   */
-	/* Device dependent fields for ctcadpt */
-	unsigned int			/* Flags		     */
-		ctcxmode:1;		/* 0=Basic mode, 1=Extended  */
-	/* Device dependent fields for printer */
-	unsigned int			/* Flags		     */
-		crlf:1, 		/* 1=CRLF delimiters, 0=LF   */
-		diaggate:1,		/* 1=Diagnostic gate command */
-		fold:1; 		/* 1=Fold to upper case      */
-	int	printpos;		/* Number of bytes already
-					   placed in print buffer    */
-	int	printrem;		/* Number of bytes remaining
-					   in print buffer	     */
-	/* Device dependent fields for tapedev */
-	unsigned int			/* Flags		     */
-		readonly:1;		/* 1=Tape is write-protected */
-	BYTE	tapedevt;		/* Tape device type	     */
-	void   *omadesc;		/* -> OMA descriptor array   */
-	U16	omafiles;		/* Number of OMA tape files  */
-	U16	curfilen;		/* Current file number	     */
-	long	nxtblkpos;		/* Offset from start of file
-					   to next block	     */
-	long	prvblkpos;		/* Offset from start of file
-					   to previous block	     */
-	U16	curblkrem;		/* Number of bytes unread
-					   from current block	     */
-	U16	curbufoff;		/* Offset into buffer of data
-					   for next data chained CCW */
-	/* Device dependent fields for fbadasd */
-	unsigned int			/* Flags		     */
-		fbaxtdef:1;		/* 1=Extent defined	     */
-	U16	fbablksiz;		/* Physical block size	     */
-	U32	fbaorigin;		/* Device origin block number*/
-	U32	fbanumblk;		/* Number of blocks in device*/
-	BYTE	fbaoper;		/* Locate operation byte     */
-	BYTE	fbamask;		/* Define extent file mask   */
-	U32	fbaxblkn;		/* Offset from start of device
-					   to first block of extent  */
-	U32	fbaxfirst;		/* Block number within dataset
-					   of first block of extent  */
-	U32	fbaxlast;		/* Block number within dataset
-					   of last block of extent   */
-	U32	fbalcblk;		/* Block number within dataset
-					   of first block for locate */
-	U16	fbalcnum;		/* Block count for locate    */
-	/* Device dependent fields for ckddasd */
-	unsigned int			/* Flags		     */
-		ckd3990:1,		/* 1=Control unit is 3990    */
-		ckdxtdef:1,		/* 1=Define Extent processed */
-		ckdsetfm:1,		/* 1=Set File Mask processed */
-		ckdlocat:1,		/* 1=Locate Record processed */
-		ckdspcnt:1,		/* 1=Space Count processed   */
-		ckdseek:1,		/* 1=Seek command processed  */
-		ckdskcyl:1,		/* 1=Seek cylinder processed */
-		ckdrecal:1,		/* 1=Recalibrate processed   */
-		ckdrdipl:1,		/* 1=Read IPL processed      */
-		ckdxmark:1,		/* 1=End of track mark found */
-		ckdhaeq:1,		/* 1=Search Home Addr Equal  */
-		ckdideq:1,		/* 1=Search ID Equal	     */
-		ckdkyeq:1,		/* 1=Search Key Equal	     */
-		ckdwckd:1;		/* 1=Write R0 or Write CKD   */
-	U16	ckdcyls;		/* Number of cylinders	     */
-	U16	ckdtrks;		/* Number of tracks	     */
-	U16	ckdheads;		/* #of heads per cylinder    */
-	U16	ckdtrksz;		/* Track size		     */
-	U16	ckdmaxr0len;		/* Maximum length of R0 data */
-	U16	ckdmaxr1len;		/* Maximum length of R1 data */
-	BYTE	ckdsectors;		/* Number of sectors	     */
-	BYTE	ckdfmask;		/* Define extent file mask   */
-	BYTE	ckdxgattr;		/* Define extent global attr */
-	U16	ckdxblksz;		/* Define extent block size  */
-	U16	ckdxbcyl;		/* Define extent begin cyl   */
-	U16	ckdxbhead;		/* Define extent begin head  */
-	U16	ckdxecyl;		/* Define extent end cyl     */
-	U16	ckdxehead;		/* Define extent end head    */
-	BYTE	ckdloper;		/* Locate record operation   */
-	BYTE	ckdlaux;		/* Locate record aux byte    */
-	BYTE	ckdlcount;		/* Locate record count	     */
-	U16	ckdltranlf;		/* Locate record transfer
-					   length factor	     */
-	U16	ckdcurcyl;		/* Current cylinder	     */
-	U16	ckdcurhead;		/* Current head 	     */
-	BYTE	ckdcurrec;		/* Current record id	     */
-	BYTE	ckdcurkl;		/* Current record key length */
-	U16	ckdcurdl;		/* Current record data length*/
-	BYTE	ckdorient;		/* Current orientation	     */
-	U16	ckdrem; 		/* #of bytes from current
-					   position to end of field  */
-	U16	ckdpos; 		/* Offset into buffer of data
-					   for next data chained CCW */
+        U16     subchan;                /* Subchannel number         */
+        U16     devnum;                 /* Device number             */
+        U16     devtype;                /* Device type               */
+        DEVIF  *devinit;                /* -> Init device function   */
+        DEVQF  *devqdef;                /* -> Query device function  */
+        DEVXF  *devexec;                /* -> Execute CCW function   */
+        LOCK    lock;                   /* Device block lock         */
+        COND    resumecond;             /* Resume condition          */
+        struct _DEVBLK *nextdev;        /* -> next device block      */
+        unsigned int                    /* Flags                     */
+                pending:1,              /* 1=Interrupt pending       */
+                busy:1,                 /* 1=Device busy             */
+                console:1,              /* 1=Console device          */
+                connected:1,            /* 1=Console client connected*/
+                readpending:1,          /* 1=Console read pending    */
+                pcipending:1,           /* 1=PCI interrupt pending   */
+                ccwtrace:1,             /* 1=CCW trace               */
+                ccwstep:1,              /* 1=CCW single step         */
+                cdwmerge:1;             /* 1=Channel will merge data
+                                             chained write CCWs      */
+        PMCW    pmcw;                   /* Path management ctl word  */
+        SCSW    scsw;                   /* Subchannel status word(XA)*/
+        SCSW    pciscsw;                /* PCI subchannel status word*/
+        BYTE    csw[8];                 /* Channel status word(S/370)*/
+        BYTE    pcicsw[8];              /* PCI channel status word   */
+        ESW     esw;                    /* Extended status word      */
+        BYTE    ecw[32];                /* Extended control word     */
+        int     numsense;               /* Number of sense bytes     */
+        BYTE    sense[32];              /* Sense bytes               */
+        int     numdevid;               /* Number of device id bytes */
+        BYTE    devid[32];              /* Device identifier bytes   */
+        int     numdevchar;             /* Number of devchar bytes   */
+        BYTE    devchar[64];            /* Device characteristics    */
+        BYTE    pgid[11];               /* Path Group ID             */
+        TID     tid;                    /* Thread-id executing CCW   */
+        U32     ccwaddr;                /* Address of first CCW      */
+        int     ccwfmt;                 /* CCW format (0 or 1)       */
+        BYTE    ccwkey;                 /* Bits 0-3=key, 4-7=zeroes  */
+        BYTE   *buf;                    /* -> Device data buffer     */
+        int     bufsize;                /* Device data buffer size   */
+        BYTE    filename[256];          /* Unix file name            */
+        int     fd;                     /* File descriptor           */
+        /* Device dependent fields for console */
+        int     csock;                  /* Client socket number      */
+        struct  in_addr ipaddr;         /* Client IP address         */
+        int     rlen3270;               /* Length of data in buffer  */
+        int     pos3270;                /* Current screen position   */
+        /* Device dependent fields for cardrdr */
+        unsigned int                    /* Flags                     */
+                rdreof:1,               /* 1=Unit exception at EOF   */
+                ebcdic:1,               /* 1=Card deck is EBCDIC     */
+                ascii:1,                /* 1=Convert ASCII to EBCDIC */
+                trunc:1;                /* Truncate overlength record*/
+        int     cardpos;                /* Offset of next byte to be
+                                           read from data buffer     */
+        int     cardrem;                /* Number of bytes remaining
+                                           in data buffer            */
+        /* Device dependent fields for console */
+        int     keybdrem;               /* Number of bytes remaining
+                                           in keyboard read buffer   */
+        /* Device dependent fields for ctcadpt */
+        unsigned int                    /* Flags                     */
+                ctcxmode:1;             /* 0=Basic mode, 1=Extended  */
+        /* Device dependent fields for printer */
+        unsigned int                    /* Flags                     */
+                crlf:1,                 /* 1=CRLF delimiters, 0=LF   */
+                diaggate:1,             /* 1=Diagnostic gate command */
+                fold:1;                 /* 1=Fold to upper case      */
+        int     printpos;               /* Number of bytes already
+                                           placed in print buffer    */
+        int     printrem;               /* Number of bytes remaining
+                                           in print buffer           */
+        /* Device dependent fields for tapedev */
+        unsigned int                    /* Flags                     */
+                readonly:1;             /* 1=Tape is write-protected */
+        BYTE    tapedevt;               /* Tape device type          */
+        void   *omadesc;                /* -> OMA descriptor array   */
+        U16     omafiles;               /* Number of OMA tape files  */
+        U16     curfilen;               /* Current file number       */
+        long    nxtblkpos;              /* Offset from start of file
+                                           to next block             */
+        long    prvblkpos;              /* Offset from start of file
+                                           to previous block         */
+        U16     curblkrem;              /* Number of bytes unread
+                                           from current block        */
+        U16     curbufoff;              /* Offset into buffer of data
+                                           for next data chained CCW */
+        /* Device dependent fields for fbadasd */
+        unsigned int                    /* Flags                     */
+                fbaxtdef:1;             /* 1=Extent defined          */
+        U16     fbablksiz;              /* Physical block size       */
+        U32     fbaorigin;              /* Device origin block number*/
+        U32     fbanumblk;              /* Number of blocks in device*/
+        BYTE    fbaoper;                /* Locate operation byte     */
+        BYTE    fbamask;                /* Define extent file mask   */
+        U32     fbaxblkn;               /* Offset from start of device
+                                           to first block of extent  */
+        U32     fbaxfirst;              /* Block number within dataset
+                                           of first block of extent  */
+        U32     fbaxlast;               /* Block number within dataset
+                                           of last block of extent   */
+        U32     fbalcblk;               /* Block number within dataset
+                                           of first block for locate */
+        U16     fbalcnum;               /* Block count for locate    */
+        /* Device dependent fields for ckddasd */
+        unsigned int                    /* Flags                     */
+                ckd3990:1,              /* 1=Control unit is 3990    */
+                ckdxtdef:1,             /* 1=Define Extent processed */
+                ckdsetfm:1,             /* 1=Set File Mask processed */
+                ckdlocat:1,             /* 1=Locate Record processed */
+                ckdspcnt:1,             /* 1=Space Count processed   */
+                ckdseek:1,              /* 1=Seek command processed  */
+                ckdskcyl:1,             /* 1=Seek cylinder processed */
+                ckdrecal:1,             /* 1=Recalibrate processed   */
+                ckdrdipl:1,             /* 1=Read IPL processed      */
+                ckdxmark:1,             /* 1=End of track mark found */
+                ckdhaeq:1,              /* 1=Search Home Addr Equal  */
+                ckdideq:1,              /* 1=Search ID Equal         */
+                ckdkyeq:1,              /* 1=Search Key Equal        */
+                ckdwckd:1;              /* 1=Write R0 or Write CKD   */
+        U16     ckdcyls;                /* Number of cylinders       */
+        U16     ckdtrks;                /* Number of tracks          */
+        U16     ckdheads;               /* #of heads per cylinder    */
+        U16     ckdtrksz;               /* Track size                */
+        U16     ckdmaxr0len;            /* Maximum length of R0 data */
+        U16     ckdmaxr1len;            /* Maximum length of R1 data */
+        BYTE    ckdsectors;             /* Number of sectors         */
+        BYTE    ckdfmask;               /* Define extent file mask   */
+        BYTE    ckdxgattr;              /* Define extent global attr */
+        U16     ckdxblksz;              /* Define extent block size  */
+        U16     ckdxbcyl;               /* Define extent begin cyl   */
+        U16     ckdxbhead;              /* Define extent begin head  */
+        U16     ckdxecyl;               /* Define extent end cyl     */
+        U16     ckdxehead;              /* Define extent end head    */
+        BYTE    ckdloper;               /* Locate record operation   */
+        BYTE    ckdlaux;                /* Locate record aux byte    */
+        BYTE    ckdlcount;              /* Locate record count       */
+        U16     ckdltranlf;             /* Locate record transfer
+                                           length factor             */
+        U16     ckdcurcyl;              /* Current cylinder          */
+        U16     ckdcurhead;             /* Current head              */
+        BYTE    ckdcurrec;              /* Current record id         */
+        BYTE    ckdcurkl;               /* Current record key length */
+        U16     ckdcurdl;               /* Current record data length*/
+        BYTE    ckdorient;              /* Current orientation       */
+        U16     ckdrem;                 /* #of bytes from current
+                                           position to end of field  */
+        U16     ckdpos;                 /* Offset into buffer of data
+                                           for next data chained CCW */
 
     } DEVBLK;
 
 /*-------------------------------------------------------------------*/
-/* Structure definitions for CKD headers			     */
+/* Structure definitions for CKD headers                             */
 /*-------------------------------------------------------------------*/
-typedef struct _CKDDASD_DEVHDR {	/* Device header	     */
-	BYTE	devid[8];		/* Device identifier	     */
-	FWORD	heads;			/* #of heads per cylinder
-					   (bytes in reverse order)  */
-	FWORD	trksize;		/* Track size (reverse order)*/
-	BYTE	devtype;		/* Last 2 digits of device type
-					   (0x80=3380, 0x90=3390)    */
-	BYTE	fileseq;		/* CKD image file sequence no.
-					   (0x00=only file, 0x01=first
-					   file of multiple files)   */
-	HWORD	highcyl;		/* Highest cylinder number on
-					   this file, or zero if this
-					   is the last or only file
-					   (bytes in reverse order)  */
-	BYTE	resv[492];		/* Reserved		     */
+typedef struct _CKDDASD_DEVHDR {        /* Device header             */
+        BYTE    devid[8];               /* Device identifier         */
+        FWORD   heads;                  /* #of heads per cylinder
+                                           (bytes in reverse order)  */
+        FWORD   trksize;                /* Track size (reverse order)*/
+        BYTE    devtype;                /* Last 2 digits of device type
+                                           (0x80=3380, 0x90=3390)    */
+        BYTE    fileseq;                /* CKD image file sequence no.
+                                           (0x00=only file, 0x01=first
+                                           file of multiple files)   */
+        HWORD   highcyl;                /* Highest cylinder number on
+                                           this file, or zero if this
+                                           is the last or only file
+                                           (bytes in reverse order)  */
+        BYTE    resv[492];              /* Reserved                  */
     } CKDDASD_DEVHDR;
 
-typedef struct _CKDDASD_TRKHDR {	/* Track header 	     */
-	BYTE	bin;			/* Bin number		     */
-	HWORD	cyl;			/* Cylinder number	     */
-	HWORD	head;			/* Head number		     */
+typedef struct _CKDDASD_TRKHDR {        /* Track header              */
+        BYTE    bin;                    /* Bin number                */
+        HWORD   cyl;                    /* Cylinder number           */
+        HWORD   head;                   /* Head number               */
     } CKDDASD_TRKHDR;
 
-typedef struct _CKDDASD_RECHDR {	/* Record header	     */
-	HWORD	cyl;			/* Cylinder number	     */
-	HWORD	head;			/* Head number		     */
-	BYTE	rec;			/* Record number	     */
-	BYTE	klen;			/* Key length		     */
-	HWORD	dlen;			/* Data length		     */
+typedef struct _CKDDASD_RECHDR {        /* Record header             */
+        HWORD   cyl;                    /* Cylinder number           */
+        HWORD   head;                   /* Head number               */
+        BYTE    rec;                    /* Record number             */
+        BYTE    klen;                   /* Key length                */
+        HWORD   dlen;                   /* Data length               */
     } CKDDASD_RECHDR;
 
-#define CKDDASD_DEVHDR_SIZE	sizeof(CKDDASD_DEVHDR)
-#define CKDDASD_TRKHDR_SIZE	sizeof(CKDDASD_TRKHDR)
-#define CKDDASD_RECHDR_SIZE	sizeof(CKDDASD_RECHDR)
+#define CKDDASD_DEVHDR_SIZE     sizeof(CKDDASD_DEVHDR)
+#define CKDDASD_TRKHDR_SIZE     sizeof(CKDDASD_TRKHDR)
+#define CKDDASD_RECHDR_SIZE     sizeof(CKDDASD_RECHDR)
 
 /*-------------------------------------------------------------------*/
-/* Global data areas in module config.c 			     */
+/* Global data areas in module config.c                              */
 /*-------------------------------------------------------------------*/
-extern SYSBLK	sysblk; 		/* System control block      */
-extern BYTE	ascii_to_ebcdic[];	/* Translate table	     */
-extern BYTE	ebcdic_to_ascii[];	/* Translate table	     */
+extern SYSBLK   sysblk;                 /* System control block      */
+extern BYTE     ascii_to_ebcdic[];      /* Translate table           */
+extern BYTE     ebcdic_to_ascii[];      /* Translate table           */
 
 /*-------------------------------------------------------------------*/
-/* Function prototypes						     */
+/* Function prototypes                                               */
 /*-------------------------------------------------------------------*/
 
 /* Functions in module assist.c */
 void obtain_local_lock (U32 addr1, int ar1, U32 addr2, int ar2,
-	REGS *regs);
+        REGS *regs);
 void release_local_lock (U32 addr1, int ar1, U32 addr2, int ar2,
-	REGS *regs);
+        REGS *regs);
 void obtain_cms_lock (U32 addr1, int ar1, U32 addr2, int ar2,
-	REGS *regs);
+        REGS *regs);
 void release_cms_lock (U32 addr1, int ar1, U32 addr2, int ar2,
-	REGS *regs);
+        REGS *regs);
 
 /* Functions in module config.c */
 void build_config (BYTE *fname);
@@ -554,16 +563,16 @@ void *cpu_thread (REGS *regs);
 U16  translate_asn (U16 asn, REGS *regs, U32 *asteo, U32 aste[]);
 int  authorize_asn (U16 ax, U32 aste[], int atemask, REGS *regs);
 U16  translate_alet (U32 alet, U16 eax, int acctype, REGS *regs,
-	U32 *asteo, U32 aste[], int *prot);
+        U32 *asteo, U32 aste[], int *prot);
 int  translate_addr (U32 vaddr, int arn, REGS *regs, int acctype,
-	U32 *raddr, U16 *xcode, int *priv, int *prot, int *pstid,
-	U32 *xpblk, BYTE *xpkey);
+        U32 *raddr, U16 *xcode, int *priv, int *prot, int *pstid,
+        U32 *xpblk, BYTE *xpkey);
 void purge_alb (REGS *regs);
 void purge_tlb (REGS *regs);
 void invalidate_pte (BYTE ibyte, int r1, int r2, REGS *regs);
 int  test_prot (U32 addr, int arn, REGS *regs, BYTE akey);
 U32  logical_to_abs (U32 addr, int arn, REGS *regs, int acctype,
-	BYTE akey);
+        BYTE akey);
 void vstorec (void *src, BYTE len, U32 addr, int arn, REGS *regs);
 void vstoreb (BYTE value, U32 addr, int arn, REGS *regs);
 void vstore2 (U16 value, U32 addr, int arn, REGS *regs);
@@ -576,53 +585,53 @@ U32  vfetch4 (U32 addr, int arn, REGS *regs);
 U64  vfetch8 (U32 addr, int arn, REGS *regs);
 void instfetch (BYTE *dest, U32 addr, REGS *regs);
 void move_chars (U32 addr1, int arn1, BYTE key1, U32 addr2,
-	int arn2, BYTE key2, int len, REGS *regs);
+        int arn2, BYTE key2, int len, REGS *regs);
 int  ss_operation (BYTE opcode, U32 addr1, int arn1, U32 addr2,
-	int arn2, int len, REGS *regs);
+        int arn2, int len, REGS *regs);
 void validate_operand (U32 addr, int arn, int len,
-	int acctype, REGS *regs);
+        int acctype, REGS *regs);
 
 /* Access type parameter passed to translate functions in dat.c */
-#define ACCTYPE_READ		1	/* Read operand data	     */
-#define ACCTYPE_WRITE		2	/* Write operand data	     */
-#define ACCTYPE_INSTFETCH	3	/* Instruction fetch	     */
-#define ACCTYPE_TAR		4	/* Test Access		     */
-#define ACCTYPE_LRA		5	/* Load Real Address	     */
-#define ACCTYPE_TPROT		6	/* Test Protection	     */
-#define ACCTYPE_IVSK		7	/* Insert Virtual Storage Key*/
-#define ACCTYPE_STACK		8	/* Linkage stack operations  */
-#define ACCTYPE_BSG		9	/* Branch in Subspace Group  */
+#define ACCTYPE_READ            1       /* Read operand data         */
+#define ACCTYPE_WRITE           2       /* Write operand data        */
+#define ACCTYPE_INSTFETCH       3       /* Instruction fetch         */
+#define ACCTYPE_TAR             4       /* Test Access               */
+#define ACCTYPE_LRA             5       /* Load Real Address         */
+#define ACCTYPE_TPROT           6       /* Test Protection           */
+#define ACCTYPE_IVSK            7       /* Insert Virtual Storage Key*/
+#define ACCTYPE_STACK           8       /* Linkage stack operations  */
+#define ACCTYPE_BSG             9       /* Branch in Subspace Group  */
 
 /* Special value for arn parameter for translate functions in dat.c */
-#define USE_REAL_ADDR		(-1)	/* LURA/STURA instruction    */
-#define USE_PRIMARY_SPACE	(-2)	/* MVCS/MVCP instructions    */
-#define USE_SECONDARY_SPACE	(-3)	/* MVCS/MVCP instructions    */
+#define USE_REAL_ADDR           (-1)    /* LURA/STURA instruction    */
+#define USE_PRIMARY_SPACE       (-2)    /* MVCS/MVCP instructions    */
+#define USE_SECONDARY_SPACE     (-3)    /* MVCS/MVCP instructions    */
 
 /* Functions in module decimal.c */
 int  shift_and_round_packed (U32 addr, int len, int arn, REGS *regs,
-	BYTE round, BYTE shift);
+        BYTE round, BYTE shift);
 int  zero_and_add_packed (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
+        U32 addr2, int len2, int arn2, REGS *regs);
 int  compare_packed (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
+        U32 addr2, int len2, int arn2, REGS *regs);
 int  add_packed (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
+        U32 addr2, int len2, int arn2, REGS *regs);
 int  subtract_packed (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
+        U32 addr2, int len2, int arn2, REGS *regs);
 void multiply_packed (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
+        U32 addr2, int len2, int arn2, REGS *regs);
 void divide_packed (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
+        U32 addr2, int len2, int arn2, REGS *regs);
 void convert_to_decimal (int r1, U32 addr, int arn, REGS *regs);
 void convert_to_binary (int r1, U32 addr, int arn, REGS *regs);
 void move_with_offset (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
+        U32 addr2, int len2, int arn2, REGS *regs);
 void zoned_to_packed (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
+        U32 addr2, int len2, int arn2, REGS *regs);
 void packed_to_zoned (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
+        U32 addr2, int len2, int arn2, REGS *regs);
 int  edit_packed (int edmk, U32 addr1, int len1, int arn1,
-	U32 addr2, int arn2, REGS *regs);
+        U32 addr2, int arn2, REGS *regs);
 
 /* Functions in module float.c */
 void halve_float_long_reg (int r1, int r2, REGS *regs);
@@ -648,7 +657,7 @@ void divide_float_short_reg (int r1, int r2, REGS *regs);
 void add_unnormal_float_short_reg (int r1, int r2, REGS *regs);
 void subtract_unnormal_float_short_reg (int r1, int r2, REGS *regs);
 void multiply_float_long_to_ext (int r1, U32 addr, int arn,
-	REGS *regs);
+        REGS *regs);
 void compare_float_long (int r1, U32 addr, int arn, REGS *regs);
 void add_float_long (int r1, U32 addr, int arn, REGS *regs);
 void subtract_float_long (int r1, U32 addr, int arn, REGS *regs);
@@ -656,16 +665,16 @@ void multiply_float_long (int r1, U32 addr, int arn, REGS *regs);
 void divide_float_long (int r1, U32 addr, int arn, REGS *regs);
 void add_unnormal_float_long (int r1, U32 addr, int arn, REGS *regs);
 void subtract_unnormal_float_long (int r1, U32 addr, int arn,
-	REGS *regs);
+        REGS *regs);
 void compare_float_short (int r1, U32 addr, int arn, REGS *regs);
 void add_float_short (int r1, U32 addr, int arn, REGS *regs);
 void subtract_float_short (int r1, U32 addr, int arn, REGS *regs);
 void multiply_float_short_to_long (int r1, U32 addr, int arn,
-	REGS *regs);
+        REGS *regs);
 void divide_float_short (int r1, U32 addr, int arn, REGS *regs);
 void add_unnormal_float_short (int r1, U32 addr, int arn, REGS *regs);
 void subtract_unnormal_float_short (int r1, U32 addr, int arn,
-	REGS *regs);
+        REGS *regs);
 void divide_float_ext_reg (int r1, int r2, REGS *regs);
 
 /* Functions in module block.c */
@@ -721,9 +730,9 @@ int  set_address_space_control (BYTE mode, REGS *regs);
 int  insert_address_space_control (REGS *regs);
 void set_secondary_asn (U16 sasn, REGS *regs);
 int  load_address_space_parameters (U16 pkm, U16 sasn, U16 ax,
-	U16 pasn, U32 func, REGS *regs);
+        U16 pasn, U32 func, REGS *regs);
 int  program_transfer (U16 pkm, U16 pasn, int amode, U32 ia,
-	int prob, REGS *regs);
+        int prob, REGS *regs);
 int  program_return (REGS *regs);
 int  program_call (U32 pcnum, REGS *regs);
 void branch_and_set_authority (int r1, int r2, REGS *regs);
@@ -731,7 +740,7 @@ void branch_in_subspace_group (int r1, int r2, REGS *regs);
 
 /* Functions in module channel.c */
 int  start_io (DEVBLK *dev, U32 ioparm, BYTE orb4, BYTE orb5,
-	BYTE orb6, BYTE orb7, U32 ccwaddr);
+        BYTE orb6, BYTE orb7, U32 ccwaddr);
 void *execute_ccw_chain (DEVBLK *dev);
 int  store_channel_id (REGS *regs, U16 chan);
 int  test_channel (REGS *regs, U16 chan);
@@ -741,7 +750,7 @@ void clear_subchan (REGS *regs, DEVBLK *dev);
 int  halt_subchan (REGS *regs, DEVBLK *dev);
 int  resume_subchan (REGS *regs, DEVBLK *dev);
 int  present_io_interrupt (REGS *regs, U32 *ioid, U32 *ioparm,
-	BYTE *csw);
+        BYTE *csw);
 void io_reset (void);
 int  device_attention (DEVBLK *dev, BYTE unitstat);
 
@@ -789,5 +798,5 @@ DEVIF fbadasd_init_handler;
 DEVQF fbadasd_query_device;
 DEVXF fbadasd_execute_ccw;
 void fbadasd_syncblk_io (DEVBLK *dev, BYTE type, U32 blknum,
-	U32 blksize, BYTE *iobuf, BYTE *unitstat, U16 *residual);
+        U32 blksize, BYTE *iobuf, BYTE *unitstat, U16 *residual);
 

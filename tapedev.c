@@ -70,6 +70,13 @@
 #define SENSE1_TAPE_FP          0x02    /* File protect status       */
 #define SENSE1_TAPE_NCA         0x01    /* Not capable               */
 
+#define SENSE4_TAPE_EOT         0x20    /* Tape indicate (EOT)       */
+
+#define SENSE5_TAPE_SRDCHK      0x08    /* Start read check          */
+#define SENSE5_TAPE_PARTREC     0x04    /* Partial record            */
+
+#define SENSE7_TAPE_LOADFAIL    0x01    /* Load failure              */
+
 /*-------------------------------------------------------------------*/
 /* Definitions for 3480 commands                                     */
 /*-------------------------------------------------------------------*/
@@ -231,6 +238,8 @@ int             rc;                     /* Return code               */
                 dev->filename, strerror(errno));
 
         dev->sense[0] = SENSE_IR;
+        dev->sense[1] = SENSE1_TAPE_TUB;
+        dev->sense[7] = SENSE7_TAPE_LOADFAIL;
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -269,20 +278,44 @@ int             rc;                     /* Return code               */
 
     /* Read the 6-byte block header */
     rc = read (dev->fd, buf, sizeof(AWSTAPE_BLKHDR));
-    if (rc < sizeof(AWSTAPE_BLKHDR))
+
+    /* Handle read error condition */
+    if (rc < 0)
     {
-        /* Handle read error condition */
-        if (rc < 0)
-            logmsg ("HHC203I Error reading block header "
-                    "at offset %8.8lX in file %s: %s\n",
-                    blkpos, dev->filename, strerror(errno));
-        else
-            logmsg ("HHC204I Unexpected end of file in block header "
-                    "at offset %8.8lX in file %s\n",
-                    blkpos, dev->filename);
+        logmsg ("HHC203I Error reading block header "
+                "at offset %8.8lX in file %s: %s\n",
+                blkpos, dev->filename, strerror(errno));
 
         /* Set unit check with equipment check */
         dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Handle end of file (uninitialized tape) condition */
+    if (rc == 0)
+    {
+        logmsg ("HHC203I End of file (uninitialized tape) "
+                "at offset %8.8lX in file %s\n",
+                blkpos, dev->filename);
+
+        /* Set unit exception with tape indicate (end of tape) */
+        dev->sense[4] = SENSE4_TAPE_EOT;
+        *unitstat = CSW_CE | CSW_DE | CSW_UX;
+        return -1;
+    }
+
+    /* Handle end of file within block header */
+    if (rc < sizeof(AWSTAPE_BLKHDR))
+    {
+        logmsg ("HHC204I Unexpected end of file in block header "
+                "at offset %8.8lX in file %s\n",
+                blkpos, dev->filename);
+
+        /* Set unit check with data check and partial record */
+        dev->sense[0] = SENSE_DC;
+        dev->sense[1] = SENSE1_TAPE_NOISE;
+        dev->sense[5] = SENSE5_TAPE_PARTREC;
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -331,20 +364,31 @@ U16             blklen;                 /* Data length of block      */
 
     /* Read data block from tape file */
     rc = read (dev->fd, buf, blklen);
-    if (rc < blklen)
+
+    /* Handle read error condition */
+    if (rc < 0)
     {
-        /* Handle read error condition */
-        if (rc < 0)
-            logmsg ("HHC205I Error reading data block "
-                    "at offset %8.8lX in file %s: %s\n",
-                    blkpos, dev->filename, strerror(errno));
-        else
-            logmsg ("HHC206I Unexpected end of file in data block "
-                    "at offset %8.8lX in file %s\n",
-                    blkpos, dev->filename);
+        logmsg ("HHC205I Error reading data block "
+                "at offset %8.8lX in file %s: %s\n",
+                blkpos, dev->filename, strerror(errno));
 
         /* Set unit check with equipment check */
         dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Handle end of file within data block */
+    if (rc < blklen)
+    {
+        logmsg ("HHC206I Unexpected end of file in data block "
+                "at offset %8.8lX in file %s\n",
+                blkpos, dev->filename);
+
+        /* Set unit check with data check and partial record */
+        dev->sense[0] = SENSE_DC;
+        dev->sense[1] = SENSE1_TAPE_NOISE;
+        dev->sense[5] = SENSE5_TAPE_PARTREC;
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -772,6 +816,8 @@ long            density;                /* Tape density code         */
                 dev->filename, strerror(errno));
 
         dev->sense[0] = SENSE_IR;
+        dev->sense[1] = SENSE1_TAPE_TUB;
+        dev->sense[7] = SENSE7_TAPE_LOADFAIL;
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -787,6 +833,15 @@ long            density;                /* Tape density code         */
                 dev->filename, strerror(errno));
 
         dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Intervention required if no tape is mounted */
+    if (GMT_DR_OPEN(stblk.mt_gstat))
+    {
+        dev->sense[0] = SENSE_IR;
+        dev->sense[1] = SENSE1_TAPE_TUB;
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -1004,6 +1059,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
 static int bsb_scsitape (DEVBLK *dev, BYTE *unitstat)
 {
 int             rc;                     /* Return code               */
+int             bsrerrno;               /* Value of errno after MTBSR*/
 U32             stat;                   /* Tape status bits          */
 struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
 
@@ -1023,11 +1079,16 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     opblk.mt_op = MTBSR;
     opblk.mt_count = 1;
     rc = ioctl (dev->fd, MTIOCTOP, (char*)&opblk);
+    bsrerrno = errno;
 
-    /* If I/O error and status before backspace indicated EOF,
-       then a tapemark was detected, so decrement the file
-       number and return 0 */
-    if (rc < 0 && errno == EIO && GMT_EOF(stat))
+    /* Obtain tape status after backspace */
+    stat = status_scsitape (dev);
+
+    /* Since the MT driver does not set EOF status when backspacing
+       over a tapemark, the best we can do is to assume that an I/O
+       error means that a tapemark was detected, in which case we
+       decrement the file number and return 0 */
+    if (rc < 0 && bsrerrno == EIO)
     {
         dev->curfilen--;
         return 0;
@@ -1037,7 +1098,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     if (rc < 0)
     {
         logmsg ("HHC229I Backspace block error on %s: %s\n",
-                dev->filename, strerror(errno));
+                dev->filename, strerror(bsrerrno));
 
         /* Set unit check with equipment check */
         dev->sense[0] = SENSE_EC;
@@ -1384,6 +1445,8 @@ OMATAPE_DESC   *omadesc;                /* -> OMA descriptor entry   */
         if (rc < 0)
         {
             dev->sense[0] = SENSE_IR;
+            dev->sense[1] = SENSE1_TAPE_TUB;
+            dev->sense[7] = SENSE7_TAPE_LOADFAIL;
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
             return -1;
         }
@@ -1461,21 +1524,32 @@ S32             nxthdro;                /* Offset of next header     */
 
     /* Read the 16-byte block header */
     rc = read (dev->fd, &omahdr, sizeof(omahdr));
-    if (rc < sizeof(omahdr))
+
+    /* Handle read error condition */
+    if (rc < 0)
     {
-        /* Handle read error condition */
-        if (rc < 0)
-            logmsg ("HHC254I Error reading block header "
-                    "at offset %8.8lX in file %s: %s\n",
-                    blkpos, omadesc->filename,
-                    strerror(errno));
-        else
-            logmsg ("HHC255I Unexpected end of file in block header "
-                    "at offset %8.8lX in file %s\n",
-                    blkpos, omadesc->filename);
+        logmsg ("HHC254I Error reading block header "
+                "at offset %8.8lX in file %s: %s\n",
+                blkpos, omadesc->filename,
+                strerror(errno));
 
         /* Set unit check with equipment check */
         dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Handle end of file within block header */
+    if (rc < sizeof(omahdr))
+    {
+        logmsg ("HHC255I Unexpected end of file in block header "
+                "at offset %8.8lX in file %s\n",
+                blkpos, omadesc->filename);
+
+        /* Set unit check with data check and partial record */
+        dev->sense[0] = SENSE_DC;
+        dev->sense[1] = SENSE1_TAPE_NOISE;
+        dev->sense[5] = SENSE5_TAPE_PARTREC;
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -1559,21 +1633,32 @@ S32             nxthdro;                /* Offset of next header     */
 
     /* Read data block from tape file */
     rc = read (dev->fd, buf, curblkl);
-    if (rc < curblkl)
+
+    /* Handle read error condition */
+    if (rc < 0)
     {
-        /* Handle read error condition */
-        if (rc < 0)
-            logmsg ("HHC257I Error reading data block "
-                    "at offset %8.8lX in file %s: %s\n",
-                    blkpos, omadesc->filename,
-                    strerror(errno));
-        else
-            logmsg ("HHC258I Unexpected end of file in data block "
-                    "at offset %8.8lX in file %s\n",
-                    blkpos, omadesc->filename);
+        logmsg ("HHC257I Error reading data block "
+                "at offset %8.8lX in file %s: %s\n",
+                blkpos, omadesc->filename,
+                strerror(errno));
 
         /* Set unit check with equipment check */
         dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Handle end of file within data block */
+    if (rc < curblkl)
+    {
+        logmsg ("HHC258I Unexpected end of file in data block "
+                "at offset %8.8lX in file %s\n",
+                blkpos, omadesc->filename);
+
+        /* Set unit check with data check and partial record */
+        dev->sense[0] = SENSE_DC;
+        dev->sense[1] = SENSE1_TAPE_NOISE;
+        dev->sense[5] = SENSE5_TAPE_PARTREC;
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -1739,20 +1824,30 @@ BYTE            c;                      /* Character work area       */
     }
 
     /* Handle read error condition */
-    if (rc < 1)
+    if (rc < 0)
     {
-        if (rc < 0)
-            logmsg ("HHC270I Error reading data block "
-                    "at offset %8.8lX in file %s: %s\n",
-                    blkpos, omadesc->filename,
-                    strerror(errno));
-        else
-            logmsg ("HHC271I Unexpected end of file in data block "
-                    "at offset %8.8lX in file %s\n",
-                    blkpos, omadesc->filename);
+        logmsg ("HHC270I Error reading data block "
+                "at offset %8.8lX in file %s: %s\n",
+                blkpos, omadesc->filename,
+                strerror(errno));
 
         /* Set unit check with equipment check */
         dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Check for block not terminated by newline */
+    if (rc < 1)
+    {
+        logmsg ("HHC271I Unexpected end of file in data block "
+                "at offset %8.8lX in file %s\n",
+                blkpos, omadesc->filename);
+
+        /* Set unit check with data check and partial record */
+        dev->sense[0] = SENSE_DC;
+        dev->sense[1] = SENSE1_TAPE_NOISE;
+        dev->sense[5] = SENSE5_TAPE_PARTREC;
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -2368,7 +2463,9 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     }
 
     /* Open the device file if necessary */
-    if (dev->fd < 0 && !IS_CCW_SENSE(code) && code != 0x03)
+    if (dev->fd < 0 && !IS_CCW_SENSE(code)
+        && !(code == 0x03 || code == 0x9F || code == 0xAF
+                || code == 0xB7 || code == 0xC7))
     {
         /* Open the device file according to device type */
         switch (dev->tapedevt)
@@ -2927,12 +3024,12 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     /* ASSIGN/UNASSIGN                                               */
     /*---------------------------------------------------------------*/
         /* Command reject if path assignment is not supported */
-        if (dev->devtype != 0x3480)
-        {
-            dev->sense[0] = SENSE_CR;
-            *unitstat = CSW_CE | CSW_DE | CSW_UC;
-            break;
-        }
+//      if (dev->devtype != 0x3480)
+//      {
+//          dev->sense[0] = SENSE_CR;
+//          *unitstat = CSW_CE | CSW_DE | CSW_UC;
+//          break;
+//      }
 
         /* Calculate residual byte count */
         num = (count < 11) ? count : 11;

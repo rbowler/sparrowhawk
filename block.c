@@ -436,7 +436,7 @@ U32     xaddr;                          /* Expanded storage address  */
             XSTORE_PAGESIZE);
 
     /* cc0 means pgin ok, cc1 means storage error */
-    return 1;
+    return 0;
 
 } /* end function page_in */
 

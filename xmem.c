@@ -1,10 +1,15 @@
-/* XMEM.C       (c) Copyright Roger Bowler, 1999                     */
+/* XMEM.C       (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 Cross Memory Routines                        */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the cross-memory instructions of the       */
 /* ESA/390 architecture, described in the manual SA22-7201-04.       */
 /* The numbers in square brackets refer to sections in the manual.   */
+/*-------------------------------------------------------------------*/
+
+/*-------------------------------------------------------------------*/
+/* Additional credits:                                               */
+/*      Correction to LASP instruction by Jan Jaeger                 */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -479,8 +484,8 @@ U16     xcode;                          /* Exception code            */
        function bits is 0, and bit 31 of the LASP function bits
        is 1, use current SSTD in control register 7 */
     if ((func & 0x00000004) == 0
-        || (func & 0x00000001)
-        || sasn == (regs->cr[3] & CR3_SASN))
+        && (func & 0x00000001)
+        && sasn == (regs->cr[3] & CR3_SASN))
     {
         sstd = regs->cr[7];
     }
