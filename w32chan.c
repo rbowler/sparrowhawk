@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //         w32chan.c           Fish's new i/o scheduling logic
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2001. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2001, 2002. Released under the Q Public License
 // (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
@@ -40,8 +40,8 @@ int dummy = 0;
 	#define MyCloseHandle(handle)                   (FishHang_CloseHandle(__FILE__,__LINE__,(handle)))
 	#define LockScheduler()                         (FishHang_EnterCriticalSection(__FILE__,__LINE__,&IOSchedulerLock))
 	#define LockThreadParms(pThreadParms)           (FishHang_EnterCriticalSection(__FILE__,__LINE__,&pThreadParms->IORequestListLock))
-	#define UnlockScheduler()                       (FishHang_LeaveCriticalSection(&IOSchedulerLock))
-	#define UnlockThreadParms(pThreadParms)         (FishHang_LeaveCriticalSection(&pThreadParms->IORequestListLock))
+	#define UnlockScheduler()                       (FishHang_LeaveCriticalSection(__FILE__,__LINE__,&IOSchedulerLock))
+	#define UnlockThreadParms(pThreadParms)         (FishHang_LeaveCriticalSection(__FILE__,__LINE__,&pThreadParms->IORequestListLock))
 
 #else // !defined(FISH_HANG)
 
@@ -71,21 +71,21 @@ int dummy = 0;
 // Debugging
 
 #if defined(DEBUG) || defined(_DEBUG)
-	#define TRACE(a...) logmsg(a)
-	#define ASSERT(a) \
-		do \
-		{ \
-			if (!(a)) \
-			{ \
-				logmsg("** Assertion Failed: %s(%d)\n",__FILE__,__LINE__); \
-			} \
-		} \
-		while(0)
-	#define VERIFY(a) ASSERT(a)
+    #define TRACE(a...) logmsg(a)
+    #define ASSERT(a) \
+        do \
+        { \
+            if (!(a)) \
+            { \
+                logmsg("** Assertion Failed: %s(%d)\n",__FILE__,__LINE__); \
+            } \
+        } \
+        while(0)
+    #define VERIFY(a) ASSERT((a))
 #else
-	#define TRACE(a...)
-	#define ASSERT(a)
-	#define VERIFY(a) ((void)(a))
+    #define TRACE(a...)
+    #define ASSERT(a)
+    #define VERIFY(a) ((void)(a))
 #endif
 
 /////////////////////////////////////////////////////////////////////////////
@@ -520,7 +520,8 @@ void*  DeviceThread (void* pArg)
 	// were manually "cancelled" or asked to stop processing; i.e. the i/o subsystem
 	// was reset). Discard all i/o requests that may still be remaining in our queue.
 
-	TRACE("** DeviceThread %8.8lX: shutdown detected\n",pThreadParms->dwThreadID);
+	TRACE("** DeviceThread %8.8X: shutdown detected\n",
+		(unsigned int)pThreadParms->dwThreadID);
 
 	LockThreadParms(pThreadParms);			// (freeze moving target)
 
@@ -532,15 +533,16 @@ void*  DeviceThread (void* pArg)
 
 		pIORequest = CONTAINING_RECORD(pListEntry,DEVIOREQUEST,IORequestListLinkingListEntry);
 
-		TRACE("** DeviceThread %8.8lX: discarding i/o request for device %4.4X\n",
-			pThreadParms->dwThreadID,pIORequest->wDevNum);
+		TRACE("** DeviceThread %8.8X: discarding i/o request for device %4.4X\n",
+			(unsigned int)pThreadParms->dwThreadID,pIORequest->wDevNum);
 
 		free(pIORequest);
 	}
 
 	pThreadParms->bThreadIsDead = TRUE;		// (tell scheduler we've died)
 
-	TRACE("** DeviceThread %8.8lX: shutdown complete\n",pThreadParms->dwThreadID);
+	TRACE("** DeviceThread %8.8X: shutdown complete\n",
+		(unsigned int)pThreadParms->dwThreadID);
 
 	UnlockThreadParms(pThreadParms);		// (thaw moving target)
 
@@ -678,6 +680,7 @@ void  RemoveThisThreadFromOurList(DEVTHREADPARMS* pThreadParms)
 }
 
 /////////////////////////////////////////////////////////////////////////////
+// Debugging...
 
 #if defined(FISH_HANG)
 
@@ -694,7 +697,7 @@ char*  PrintDEVIOREQUEST(DEVIOREQUEST* pIORequest, DEVTHREADPARMS* pDEVTHREADPAR
 	{
 		pNextDEVIOREQUEST = CONTAINING_RECORD(pListEntry,DEVIOREQUEST,IORequestListLinkingListEntry);
 	}
-	else pNextDEVIOREQUEST = NULL;
+	else pNextDEVIOREQUEST = (DEVIOREQUEST*) &pDEVTHREADPARMS->IORequestListHeadListEntry;
 
 	sprintf(PrintDEVIOREQUESTBuffer,
 		"DEVIOREQUEST @ %8.8X\n"
@@ -747,29 +750,38 @@ char*  PrintDEVTHREADPARMS(DEVTHREADPARMS* pDEVTHREADPARMS)
 
 	pListEntry = pDEVTHREADPARMS->ThreadListLinkingListEntry.Flink;
 
-	pNextDEVTHREADPARMS = CONTAINING_RECORD(pListEntry,DEVTHREADPARMS,ThreadListLinkingListEntry);
+	if (pListEntry != &ThreadListHeadListEntry)
+	{
+		pNextDEVTHREADPARMS = CONTAINING_RECORD(pListEntry,DEVTHREADPARMS,ThreadListLinkingListEntry);
+	}
+	else pNextDEVTHREADPARMS = (DEVTHREADPARMS*) &ThreadListHeadListEntry;
 
 	sprintf(PrintDEVTHREADPARMSBuffer,
+
 		"DEVTHREADPARMS @ %8.8X\n"
 		"                 dwThreadID                 = %8.8X\n"
-		"                 hShutdownEvent             = %s\n"
-		"                 hRequestQueuedEvent        = %s\n"
 		"                 bThreadIsDead              = %s\n"
+		"                 hShutdownEvent             = %8.8X  %s\n"
+		"                 hRequestQueuedEvent        = %8.8X  %s\n"
 		"                 IORequestListHeadListEntry = %8.8X\n"
-		"                 ThreadListLinkingListEntry = %8.8X\n",
-		(int)pDEVTHREADPARMS,
-			(int)pDEVTHREADPARMS->dwThreadID,
-			IsEventSet(pDEVTHREADPARMS->hShutdownEvent)      ? "** SIGNALED **" : "(not signaled)",
-			IsEventSet(pDEVTHREADPARMS->hRequestQueuedEvent) ? "** SIGNALED **" : "(not signaled)",
-			pDEVTHREADPARMS->bThreadIsDead                   ?      "TRUE"      :      "false",
-			(int)pDEVIOREQUEST,
-			(int)pNextDEVTHREADPARMS
+		"                 ThreadListLinkingListEntry = %8.8X\n"
+
+		,(int)pDEVTHREADPARMS
+			,(int)pDEVTHREADPARMS->dwThreadID
+			,pDEVTHREADPARMS->bThreadIsDead                      ?      "TRUE"      :      "false"
+			,(unsigned int)pDEVTHREADPARMS->hShutdownEvent
+			,   IsEventSet(pDEVTHREADPARMS->hShutdownEvent)      ? "** SIGNALED **" : "(not signaled)"
+			,(unsigned int)pDEVTHREADPARMS->hRequestQueuedEvent
+			,   IsEventSet(pDEVTHREADPARMS->hRequestQueuedEvent) ? "** SIGNALED **" : "(not signaled)"
+			,(int)pDEVIOREQUEST
+			,(int)pNextDEVTHREADPARMS
 		);
 
 	return PrintDEVTHREADPARMSBuffer;
 }
 
 /////////////////////////////////////////////////////////////////////////////
+// (called by panel.c "FishHangReport" command...)
 
 void  PrintAllDEVTHREADPARMSs()
 {
@@ -795,8 +807,8 @@ void  PrintAllDEVTHREADPARMSs()
 
 		LockThreadParms(pDEVTHREADPARMS);
 
-			fprintf(stdout,"%s\n",PrintDEVTHREADPARMS(pDEVTHREADPARMS));
-			PrintAllDEVIOREQUESTs(pDEVTHREADPARMS);
+		fprintf(stdout,"%s\n",PrintDEVTHREADPARMS(pDEVTHREADPARMS));
+		PrintAllDEVIOREQUESTs(pDEVTHREADPARMS);
 
 		UnlockThreadParms(pDEVTHREADPARMS);
 
@@ -807,8 +819,6 @@ void  PrintAllDEVTHREADPARMSs()
 }
 
 /////////////////////////////////////////////////////////////////////////////
-
-#include "fishhang.c"
 
 #endif // defined(FISH_HANG)
 

@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //         w32chan.h           Fish's new i/o scheduling logic
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2001. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2001, 2002. Released under the Q Public License
 // (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
@@ -27,6 +27,13 @@ extern void  InitIOScheduler	// initialize i/o scheduler vars
 extern int   ScheduleIORequest(void* pDevBlk, unsigned short wDevNum);
 extern void  TrimDeviceThreads();
 extern void  KillAllDeviceThreads();
+
+/////////////////////////////////////////////////////////////////////////////
+// Debugging...   (called by panel.c "FishHangReport" command...)
+
+#if defined(FISH_HANG)
+extern void  PrintAllDEVTHREADPARMSs();
+#endif // defined(FISH_HANG)
 
 /////////////////////////////////////////////////////////////////////////////
 // I/O Scheduler variables...

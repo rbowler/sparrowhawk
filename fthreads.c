@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //         fthreads.c           Fish's WIN32 version of pthreads
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2001. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2001, 2002. Released under the Q Public License
 // (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
@@ -13,13 +13,16 @@
 int dummy = 0;
 #else // defined(OPTION_FTHREADS)
 
-#include <windows.h>
+#define _WIN32_WINNT  0x0403	// (so "InitializeCriticalSectionAndSpinCount" gets defined)
+#include <windows.h>			// (defines "InitializeCriticalSectionAndSpinCount")
+
 #include <stdio.h>
 #include <errno.h>
 #include <malloc.h>
 #include <sys/time.h>
 
 #include "fthreads.h"
+#include "hostinfo.h"
 
 ////////////////////////////////////////////////////////////////////////////////////
 
@@ -27,14 +30,14 @@ int dummy = 0;
 
 	#include "fishhang.h"	// (function definitions)
 
-	#define MyCreateThread(secat,stack,start,parm,flags,tid)  (FishHang_CreateThread(pszFile,nLine,(secat),(stack),(start),(parm),(flags),(tid)))
-	#define MyExitThread(code)                                (FishHang_ExitThread((code)))
-
 	#define MyInitializeCriticalSection(lock)                 (FishHang_InitializeCriticalSection(pszFile,nLine,(CRITICAL_SECTION*)(lock)))
 	#define MyEnterCriticalSection(lock)                      (FishHang_EnterCriticalSection(pszFile,nLine,(CRITICAL_SECTION*)(lock)))
-    #define MyTryEnterCriticalSection(lock)                   (FishHang_TryEnterCriticalSection(pszFile,nLine,(CRITICAL_SECTION*)(lock)))
-	#define MyLeaveCriticalSection(lock)                      (FishHang_LeaveCriticalSection((CRITICAL_SECTION*)(lock)))
+	#define MyTryEnterCriticalSection(lock)                   (FishHang_TryEnterCriticalSection(pszFile,nLine,(CRITICAL_SECTION*)(lock)))
+	#define MyLeaveCriticalSection(lock)                      (FishHang_LeaveCriticalSection(pszFile,nLine,(CRITICAL_SECTION*)(lock)))
 	#define MyDeleteCriticalSection(lock)                     (FishHang_DeleteCriticalSection(pszFile,nLine,(CRITICAL_SECTION*)(lock)))
+
+	#define MyCreateThread(secat,stack,start,parm,flags,tid)  (FishHang_CreateThread(pszFile,nLine,(secat),(stack),(start),(parm),(flags),(tid)))
+	#define MyExitThread(code)                                (FishHang_ExitThread((code)))
 
 	#define MyCreateEvent(sec,man,set,name)                   (FishHang_CreateEvent(pszFile,nLine,(sec),(man),(set),(name)))
 	#define MySetEvent(handle)                                (FishHang_SetEvent(pszFile,nLine,(handle)))
@@ -45,14 +48,14 @@ int dummy = 0;
 
 #else // !defined(FISH_HANG)
 
+	#define MyInitializeCriticalSection(pCS)                  (InitializeCriticalSectionAndSpinCount((CRITICAL_SECTION*)(pCS),3000))
+	#define MyEnterCriticalSection(pCS)                       (EnterCriticalSection((CRITICAL_SECTION*)(pCS)))
+	#define MyTryEnterCriticalSection(pCS)                    (TryEnterCriticalSection((CRITICAL_SECTION*)(pCS)))
+	#define MyLeaveCriticalSection(pCS)                       (LeaveCriticalSection((CRITICAL_SECTION*)(pCS)))
+	#define MyDeleteCriticalSection(pCS)                      (DeleteCriticalSection((CRITICAL_SECTION*)(pCS)))
+
 	#define MyCreateThread(secat,stack,start,parm,flags,tid)  (CreateThread((secat),(stack),(start),(parm),(flags),(tid)))
 	#define MyExitThread(code)                                (ExitThread((code)))
-
-	#define MyInitializeCriticalSection(lock)                 (InitializeCriticalSection((CRITICAL_SECTION*)(lock)))
-	#define MyEnterCriticalSection(lock)                      (EnterCriticalSection((CRITICAL_SECTION*)(lock)))
-    #define MyTryEnterCriticalSection(lock)                   (TryEnterCriticalSection((CRITICAL_SECTION*)(lock)))
-	#define MyLeaveCriticalSection(lock)                      (LeaveCriticalSection((CRITICAL_SECTION*)(lock)))
-	#define MyDeleteCriticalSection(lock)                     (DeleteCriticalSection((CRITICAL_SECTION*)(lock)))
 
 	#define MyCreateEvent(sec,man,set,name)                   (CreateEvent((sec),(man),(set),(name)))
 	#define MySetEvent(handle)                                (SetEvent((handle)))
@@ -63,35 +66,182 @@ int dummy = 0;
 
 #endif // defined(FISH_HANG)
 
-#define _fthreadmsg(fmt...)     \
-{                          \
-	fprintf(stderr, fmt);  \
-	fflush(stderr);        \
-}
+#define IsEventSet(hEventHandle)                          (WaitForSingleObject(hEventHandle,0) == WAIT_OBJECT_0)
 
-#define IsEventSet(hEventHandle) (WaitForSingleObject(hEventHandle,0) == WAIT_OBJECT_0)
+#define _fthreadmsg(fmt...)   \
+	do                        \
+	{                         \
+		fprintf(stderr, fmt); \
+		fflush(stderr);       \
+	}                         \
+	while (0)
 
 /////////////////////////////////////////////////////////////////////////////
 // Debugging
 
 #if defined(DEBUG) || defined(_DEBUG)
-    #define TRACE(a...) _fthreadmsg(a)
-    #define ASSERT(a) \
-        do \
-        { \
-            if (!(a)) \
-            { \
-                _fthreadmsg("** Assertion Failed: %s(%d)\n",__FILE__,__LINE__); \
-            } \
-        } \
-        while(0)
-    #define VERIFY(a) ASSERT(a)
+	#define TRACE(a...) _fthreadmsg(a)
+	#define ASSERT(a) \
+		do \
+		{ \
+			if (!(a)) \
+			{ \
+				_fthreadmsg("** Assertion Failed: %s(%d)\n",__FILE__,__LINE__); \
+			} \
+		} \
+		while(0)
+	#define VERIFY(a) ASSERT((a))
 #else
-    #define TRACE(a...)
-    #define ASSERT(a)
-    #define VERIFY(a) ((void)(a))
+	#define TRACE(a...)
+	#define ASSERT(a)
+	#define VERIFY(a) ((void)(a))
 #endif
 
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+// private internal fthreads CRITICAL_SECTION functions...
+
+void
+InitializeFT_MUTEX
+(
+#ifdef FISH_HANG
+	char*  pszFile,
+	int    nLine,
+#endif
+	fthread_mutex_t* pFT_MUTEX
+)
+{
+	MyInitializeCriticalSection(&pFT_MUTEX->MutexLock);
+	pFT_MUTEX->hUnlockedEvent = MyCreateEvent(NULL,TRUE,TRUE,NULL); // (initially signalled)
+	pFT_MUTEX->nLockedCount = 0;
+	pFT_MUTEX->dwLockOwner = 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void
+DeleteFT_MUTEX
+(
+#ifdef FISH_HANG
+	char*  pszFile,
+	int    nLine,
+#endif
+	fthread_mutex_t* pFT_MUTEX
+)
+{
+	ASSERT(IsEventSet(pFT_MUTEX->hUnlockedEvent) && !pFT_MUTEX->nLockedCount);
+	pFT_MUTEX->dwLockOwner = 0;
+	pFT_MUTEX->nLockedCount = 0;
+	MyDeleteEvent(pFT_MUTEX->hUnlockedEvent);
+	MyDeleteCriticalSection(&pFT_MUTEX->MutexLock);
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void
+EnterFT_MUTEX
+(
+#ifdef FISH_HANG
+	char*  pszFile,
+	int    nLine,
+#endif
+	fthread_mutex_t* pFT_MUTEX
+)
+{
+	if (hostinfo.trycritsec_avail)
+	{
+		MyEnterCriticalSection(&pFT_MUTEX->MutexLock);
+	}
+	else
+	{
+		FT_W32_DWORD dwThreadId = GetCurrentThreadId();
+
+		for (;;)
+		{
+			MyEnterCriticalSection(&pFT_MUTEX->MutexLock);
+			ASSERT(pFT_MUTEX->nLockedCount >= 0);
+			if (pFT_MUTEX->nLockedCount <= 0 || pFT_MUTEX->dwLockOwner == dwThreadId) break;
+			MyLeaveCriticalSection(&pFT_MUTEX->MutexLock);
+			MyWaitForSingleObject(pFT_MUTEX->hUnlockedEvent,INFINITE);
+		}
+
+		MyResetEvent(pFT_MUTEX->hUnlockedEvent);
+		pFT_MUTEX->dwLockOwner = dwThreadId;
+		VERIFY(++pFT_MUTEX->nLockedCount > 0);
+		MyLeaveCriticalSection(&pFT_MUTEX->MutexLock);
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+void
+LeaveFT_MUTEX
+(
+#ifdef FISH_HANG
+	char*  pszFile,
+	int    nLine,
+#endif
+	fthread_mutex_t* pFT_MUTEX
+)
+{
+	if (hostinfo.trycritsec_avail)
+	{
+		MyLeaveCriticalSection(&pFT_MUTEX->MutexLock);
+	}
+	else
+	{
+		MyEnterCriticalSection(&pFT_MUTEX->MutexLock);
+		ASSERT(pFT_MUTEX->nLockedCount >= 0);
+		if (--pFT_MUTEX->nLockedCount <= 0)
+			MySetEvent(pFT_MUTEX->hUnlockedEvent);
+		MyLeaveCriticalSection(&pFT_MUTEX->MutexLock);
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+FT_W32_BOOL
+TryEnterFT_MUTEX
+(
+#ifdef FISH_HANG
+	char*  pszFile,
+	int    nLine,
+#endif
+	fthread_mutex_t* pFT_MUTEX
+)
+{
+	FT_W32_BOOL  bSuccess;
+
+	if (hostinfo.trycritsec_avail)
+	{
+		bSuccess = MyTryEnterCriticalSection(&pFT_MUTEX->MutexLock);
+	}
+	else
+	{
+		FT_W32_DWORD dwThreadId = GetCurrentThreadId();
+
+		MyEnterCriticalSection(&pFT_MUTEX->MutexLock);
+
+		ASSERT(pFT_MUTEX->nLockedCount >= 0);
+
+		bSuccess = (pFT_MUTEX->nLockedCount <= 0 || pFT_MUTEX->dwLockOwner == dwThreadId);
+
+		if (bSuccess)
+		{
+			VERIFY(++pFT_MUTEX->nLockedCount > 0);
+			pFT_MUTEX->dwLockOwner = dwThreadId;
+			MyResetEvent(pFT_MUTEX->hUnlockedEvent);
+		}
+
+		MyLeaveCriticalSection(&pFT_MUTEX->MutexLock);
+	}
+
+	return bSuccess;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////
 // (thread signalling not supported...)
 
@@ -242,15 +392,17 @@ fthread_mutex_init
 	char*  pszFile,
 	int    nLine,
 #endif
-	fthread_mutex_t*  pLock
+	fthread_mutex_t*  pFT_MUTEX
 )
 {
-	// Note: "InitializeCriticalSectionAndSpinCount" is more efficient
-	// and is supported on all Windows platforms starting with Windows 98,
-	// but unfortunately cygwin doesn't support it yet.
-
-//	InitializeCriticalSectionAndSpinCount((CRITICAL_SECTION*)pLock,4000);
-	MyInitializeCriticalSection((CRITICAL_SECTION*)pLock);
+	InitializeFT_MUTEX
+	(
+#ifdef FISH_HANG
+		pszFile,
+		nLine,
+#endif
+		pFT_MUTEX
+	);
 	return 0;
 }
 
@@ -264,10 +416,17 @@ fthread_mutex_lock
 	char*  pszFile,
 	int    nLine,
 #endif
-	fthread_mutex_t*  pLock
+	fthread_mutex_t*  pFT_MUTEX
 )
 {
-	MyEnterCriticalSection((CRITICAL_SECTION*)pLock);
+	EnterFT_MUTEX
+	(
+#ifdef FISH_HANG
+		pszFile,
+		nLine,
+#endif
+		pFT_MUTEX
+	);
 	return 0;
 }
 
@@ -281,11 +440,18 @@ fthread_mutex_trylock
 	char*  pszFile,
 	int    nLine,
 #endif
-	fthread_mutex_t*  pLock
+	fthread_mutex_t*  pFT_MUTEX
 )
 {
-	// Note: POSIX defines 0 == success, ~0 == failure
-	return !MyTryEnterCriticalSection((CRITICAL_SECTION*)pLock);
+	// Note: POSIX defines success as 0, failure as !0
+	return !TryEnterFT_MUTEX
+	(
+#ifdef FISH_HANG
+		pszFile,
+		nLine,
+#endif
+		pFT_MUTEX
+	);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
@@ -294,10 +460,21 @@ fthread_mutex_trylock
 int
 fthread_mutex_unlock
 (
-	fthread_mutex_t*  pLock
+#ifdef FISH_HANG
+	char*  pszFile,
+	int    nLine,
+#endif
+	fthread_mutex_t*  pFT_MUTEX
 )
 {
-	MyLeaveCriticalSection((CRITICAL_SECTION*)pLock);
+	LeaveFT_MUTEX
+	(
+#ifdef FISH_HANG
+		pszFile,
+		nLine,
+#endif
+		pFT_MUTEX
+	);
 	return 0;
 }
 
@@ -311,20 +488,20 @@ fthread_cond_init
 	char*  pszFile,
 	int    nLine,
 #endif
-	fthread_cond_t*  pCond
+	fthread_cond_t*  pFT_COND_VAR
 )
 {
-	if ((pCond->hSigXmitEvent = MyCreateEvent(NULL,TRUE,FALSE,NULL)))
+	if ((pFT_COND_VAR->hSigXmitEvent = MyCreateEvent(NULL,TRUE,FALSE,NULL)))
 	{
-		if ((pCond->hSigRecvdEvent = MyCreateEvent(NULL,TRUE,TRUE,NULL)))
+		if ((pFT_COND_VAR->hSigRecvdEvent = MyCreateEvent(NULL,TRUE,TRUE,NULL)))
 		{
-			MyInitializeCriticalSection(&pCond->CondVarLock);
-			pCond->bBroadcastSig = FALSE;
-			pCond->nNumWaiting = 0;
+			MyInitializeCriticalSection(&pFT_COND_VAR->CondVarLock);
+			pFT_COND_VAR->bBroadcastSig = FALSE;
+			pFT_COND_VAR->nNumWaiting = 0;
 			return 0;
 		}
 
-		MyDeleteEvent(pCond->hSigXmitEvent);
+		MyDeleteEvent(pFT_COND_VAR->hSigXmitEvent);
 	}
 
 #ifdef FISH_HANG
@@ -346,34 +523,34 @@ fthread_cond_signal
 	char*  pszFile,
 	int    nLine,
 #endif
-	fthread_cond_t*  pCond
+	fthread_cond_t*  pFT_COND_VAR
 )
 {
-	if (!pCond) { errno = EINVAL; return -1; }
+	if (!pFT_COND_VAR) { errno = EINVAL; return -1; }
 
 	// Wait for everyone to finish receiving prior signal..
 
 	for (;;)
 	{
-		MyEnterCriticalSection(&pCond->CondVarLock);
-		if (IsEventSet(pCond->hSigRecvdEvent)) break;
-		MyLeaveCriticalSection(&pCond->CondVarLock);
-		MyWaitForSingleObject(pCond->hSigRecvdEvent,INFINITE);
+		MyEnterCriticalSection(&pFT_COND_VAR->CondVarLock);
+		if (IsEventSet(pFT_COND_VAR->hSigRecvdEvent)) break;
+		MyLeaveCriticalSection(&pFT_COND_VAR->CondVarLock);
+		MyWaitForSingleObject(pFT_COND_VAR->hSigRecvdEvent,INFINITE);
 	}
 
 	// Begin transmitting our new signal...
 
-	pCond->bBroadcastSig = FALSE;
-	MySetEvent(pCond->hSigXmitEvent);
+	pFT_COND_VAR->bBroadcastSig = FALSE;
+	MySetEvent(pFT_COND_VAR->hSigXmitEvent);
 
-	if (pCond->nNumWaiting)
+	if (pFT_COND_VAR->nNumWaiting)
 	{
 		// Serialize signal reception...
 
-		MyResetEvent(pCond->hSigRecvdEvent);
+		MyResetEvent(pFT_COND_VAR->hSigRecvdEvent);
 	}
 
-	MyLeaveCriticalSection(&pCond->CondVarLock);
+	MyLeaveCriticalSection(&pFT_COND_VAR->CondVarLock);
 
 	return 0;
 }
@@ -388,34 +565,34 @@ fthread_cond_broadcast
 	char*  pszFile,
 	int    nLine,
 #endif
-	fthread_cond_t*  pCond
+	fthread_cond_t*  pFT_COND_VAR
 )
 {
-	if (!pCond) { errno = EINVAL; return -1; }
+	if (!pFT_COND_VAR) { errno = EINVAL; return -1; }
 
 	// Wait for everyone to finish receiving prior signal..
 
 	for (;;)
 	{
-		MyEnterCriticalSection(&pCond->CondVarLock);
-		if (IsEventSet(pCond->hSigRecvdEvent)) break;
-		MyLeaveCriticalSection(&pCond->CondVarLock);
-		MyWaitForSingleObject(pCond->hSigRecvdEvent,INFINITE);
+		MyEnterCriticalSection(&pFT_COND_VAR->CondVarLock);
+		if (IsEventSet(pFT_COND_VAR->hSigRecvdEvent)) break;
+		MyLeaveCriticalSection(&pFT_COND_VAR->CondVarLock);
+		MyWaitForSingleObject(pFT_COND_VAR->hSigRecvdEvent,INFINITE);
 	}
 
 	// Begin transmitting our new signal...
 
-	pCond->bBroadcastSig = TRUE;
-	MySetEvent(pCond->hSigXmitEvent);
+	pFT_COND_VAR->bBroadcastSig = TRUE;
+	MySetEvent(pFT_COND_VAR->hSigXmitEvent);
 
-	if (pCond->nNumWaiting)
+	if (pFT_COND_VAR->nNumWaiting)
 	{
 		// Serialize signal reception...
 
-		MyResetEvent(pCond->hSigRecvdEvent);
+		MyResetEvent(pFT_COND_VAR->hSigRecvdEvent);
 	}
 
-	MyLeaveCriticalSection(&pCond->CondVarLock);
+	MyLeaveCriticalSection(&pFT_COND_VAR->CondVarLock);
 
 	return 0;
 }
@@ -430,29 +607,36 @@ fthread_cond_wait
 	char*  pszFile,
 	int    nLine,
 #endif
-	fthread_cond_t*   pCond,
-	fthread_mutex_t*  pLock
+	fthread_cond_t*   pFT_COND_VAR,
+	fthread_mutex_t*  pFT_MUTEX
 )
 {
-	if (!pCond || !pLock) { errno = EINVAL; return -1; }
+	if (!pFT_COND_VAR || !pFT_MUTEX) { errno = EINVAL; return -1; }
 
 	// Release lock (and thus any potential signalers)...
 
-	MyLeaveCriticalSection(pLock);
+	LeaveFT_MUTEX
+	(
+#ifdef FISH_HANG
+		pszFile,
+		nLine,
+#endif
+		pFT_MUTEX
+	);
 
 	// Wait for everyone to finish receiving prior signal (if any)..
 
 	for (;;)
 	{
-		MyEnterCriticalSection(&pCond->CondVarLock);
-		if (IsEventSet(pCond->hSigRecvdEvent)) break;
-		MyLeaveCriticalSection(&pCond->CondVarLock);
-		MyWaitForSingleObject(pCond->hSigRecvdEvent,INFINITE);
+		MyEnterCriticalSection(&pFT_COND_VAR->CondVarLock);
+		if (IsEventSet(pFT_COND_VAR->hSigRecvdEvent)) break;
+		MyLeaveCriticalSection(&pFT_COND_VAR->CondVarLock);
+		MyWaitForSingleObject(pFT_COND_VAR->hSigRecvdEvent,INFINITE);
 	}
 
 	// Indicate new signal reception desired...
 
-	pCond->nNumWaiting++;
+	pFT_COND_VAR->nNumWaiting++;
 
 	// Wait for condition variable to be signalled...
 
@@ -460,19 +644,19 @@ fthread_cond_wait
 	{
 		// Allow signal to be transmitted...
 
-		MyLeaveCriticalSection(&pCond->CondVarLock);
+		MyLeaveCriticalSection(&pFT_COND_VAR->CondVarLock);
 
 		// Wait for signal transmission...
 
-		MyWaitForSingleObject(pCond->hSigXmitEvent,INFINITE);
+		MyWaitForSingleObject(pFT_COND_VAR->hSigXmitEvent,INFINITE);
 
 		// Our condition was signalled...
 
-		MyEnterCriticalSection(&pCond->CondVarLock);
+		MyEnterCriticalSection(&pFT_COND_VAR->CondVarLock);
 
 		// Make sure signal still being transmitted...
 
-		if (IsEventSet(pCond->hSigXmitEvent)) break;
+		if (IsEventSet(pFT_COND_VAR->hSigXmitEvent)) break;
 
 		// If signal no longer being transmitted, then
 		// some other waiter received it; keep waiting
@@ -481,25 +665,32 @@ fthread_cond_wait
 
 	// Indicate we received the signal...
 
-	pCond->nNumWaiting--;
+	pFT_COND_VAR->nNumWaiting--;
 
 	// If we were the only one that was supposed to
 	// receive it, or if no one remains to receive it,
 	// then stop transmitting the signal.
 
-	if (!pCond->bBroadcastSig || pCond->nNumWaiting == 0)
+	if (!pFT_COND_VAR->bBroadcastSig || pFT_COND_VAR->nNumWaiting == 0)
 	{
-		MyResetEvent(pCond->hSigXmitEvent);
-		MySetEvent(pCond->hSigRecvdEvent);
+		MyResetEvent(pFT_COND_VAR->hSigXmitEvent);
+		MySetEvent(pFT_COND_VAR->hSigRecvdEvent);
 	}
 
 	// Unlock condition variable...
 
-	MyLeaveCriticalSection(&pCond->CondVarLock);
+	MyLeaveCriticalSection(&pFT_COND_VAR->CondVarLock);
 
 	// Re-acquire the original lock before returning...
 
-	MyEnterCriticalSection(pLock);
+	EnterFT_MUTEX
+	(
+#ifdef FISH_HANG
+		pszFile,
+		nLine,
+#endif
+		pFT_MUTEX
+	);
 
 	return 0;
 }
@@ -514,33 +705,40 @@ fthread_cond_timedwait
 	char*  pszFile,
 	int    nLine,
 #endif
-	fthread_cond_t*   pCond,
-	fthread_mutex_t*  pLock,
+	fthread_cond_t*   pFT_COND_VAR,
+	fthread_mutex_t*  pFT_MUTEX,
 	struct timespec*  pTimeTimeout
 )
 {
 	struct timeval  TimeNow;
 	FT_W32_DWORD  dwWaitRetCode, dwWaitMilliSecs;
 
-	if (!pCond || !pLock) { errno = EINVAL; return -1; }
+	if (!pFT_COND_VAR || !pFT_MUTEX) { errno = EINVAL; return -1; }
 
 	// Release lock (and thus any potential signalers)...
 
-	MyLeaveCriticalSection(pLock);
+	LeaveFT_MUTEX
+	(
+#ifdef FISH_HANG
+		pszFile,
+		nLine,
+#endif
+		pFT_MUTEX
+	);
 
 	// Wait for everyone to finish receiving prior signal..
 
 	for (;;)
 	{
-		MyEnterCriticalSection(&pCond->CondVarLock);
-		if (IsEventSet(pCond->hSigRecvdEvent)) break;
-		MyLeaveCriticalSection(&pCond->CondVarLock);
-		MyWaitForSingleObject(pCond->hSigRecvdEvent,INFINITE);
+		MyEnterCriticalSection(&pFT_COND_VAR->CondVarLock);
+		if (IsEventSet(pFT_COND_VAR->hSigRecvdEvent)) break;
+		MyLeaveCriticalSection(&pFT_COND_VAR->CondVarLock);
+		MyWaitForSingleObject(pFT_COND_VAR->hSigRecvdEvent,INFINITE);
 	}
 
 	// Indicate new signal reception desired...
 
-	pCond->nNumWaiting++;
+	pFT_COND_VAR->nNumWaiting++;
 
 	// Wait for condition variable to be signalled...
 
@@ -548,7 +746,7 @@ fthread_cond_timedwait
 	{
 		// Allow signal to be transmitted...
 
-		MyLeaveCriticalSection(&pCond->CondVarLock);
+		MyLeaveCriticalSection(&pFT_COND_VAR->CondVarLock);
 
 		// Wait for signal transmission...
 
@@ -568,16 +766,16 @@ fthread_cond_timedwait
 		}
 
 		dwWaitRetCode =
-			MyWaitForSingleObject(pCond->hSigXmitEvent,dwWaitMilliSecs);
+			MyWaitForSingleObject(pFT_COND_VAR->hSigXmitEvent,dwWaitMilliSecs);
 
 		// Our condition was signalled...
 		// Or we got tired of waiting for it...
 
-		MyEnterCriticalSection(&pCond->CondVarLock);
+		MyEnterCriticalSection(&pFT_COND_VAR->CondVarLock);
 
 		// Make sure signal still being transmitted...
 
-		if (IsEventSet(pCond->hSigXmitEvent)) break;
+		if (IsEventSet(pFT_COND_VAR->hSigXmitEvent)) break;
 
 		// If signal no longer being transmitted, then
 		// some other waiter received it; keep waiting
@@ -588,7 +786,7 @@ fthread_cond_timedwait
 			// We either got tired of waiting for it,
 			// or there was an error...
 
-			pCond->nNumWaiting--;
+			pFT_COND_VAR->nNumWaiting--;
 
 			// If we were the only one that was waiting to
 			// receive it, then indicate signal received
@@ -596,18 +794,25 @@ fthread_cond_timedwait
 			// timed out) to allow late signal to eventually
 			// be sent [to a different future waiter].
 
-			if (pCond->nNumWaiting == 0)
+			if (pFT_COND_VAR->nNumWaiting == 0)
 			{
-				MySetEvent(pCond->hSigRecvdEvent);
+				MySetEvent(pFT_COND_VAR->hSigRecvdEvent);
 			}
 
 			// Unlock condition variable...
 
-			MyLeaveCriticalSection(&pCond->CondVarLock);
+			MyLeaveCriticalSection(&pFT_COND_VAR->CondVarLock);
 
 			// Re-acquire the original lock before returning...
 
-			MyEnterCriticalSection(pLock);
+			EnterFT_MUTEX
+			(
+#ifdef FISH_HANG
+				pszFile,
+				nLine,
+#endif
+				pFT_MUTEX
+			);
 
 			if (WAIT_TIMEOUT == dwWaitRetCode)
 			{
@@ -627,25 +832,32 @@ fthread_cond_timedwait
 
 	// Indicate we received the signal...
 
-	pCond->nNumWaiting--;
+	pFT_COND_VAR->nNumWaiting--;
 
 	// If we were the only one that was supposed to
 	// receive it, or if no one remains to receive it,
 	// then stop transmitting the signal.
 
-	if (!pCond->bBroadcastSig || pCond->nNumWaiting == 0)
+	if (!pFT_COND_VAR->bBroadcastSig || pFT_COND_VAR->nNumWaiting == 0)
 	{
-		MyResetEvent(pCond->hSigXmitEvent);
-		MySetEvent(pCond->hSigRecvdEvent);
+		MyResetEvent(pFT_COND_VAR->hSigXmitEvent);
+		MySetEvent(pFT_COND_VAR->hSigRecvdEvent);
 	}
 
 	// Unlock condition variable...
 
-	MyLeaveCriticalSection(&pCond->CondVarLock);
+	MyLeaveCriticalSection(&pFT_COND_VAR->CondVarLock);
 
 	// Re-acquire the original lock before returning...
 
-	MyEnterCriticalSection(pLock);
+	EnterFT_MUTEX
+	(
+#ifdef FISH_HANG
+		pszFile,
+		nLine,
+#endif
+		pFT_MUTEX
+	);
 
 	return 0;
 }

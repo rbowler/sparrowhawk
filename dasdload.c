@@ -2349,7 +2349,7 @@ BYTE            notelist[1024];         /* Note list                 */
 
     /* Seek to start of track header */
     rc = read_track (cif, cyl, head);
-    if (rc < CKDDASD_TRKHDR_SIZE)
+    if (rc < 0)
     {
         XMERRF ("%s cyl %d head %d read error\n",
                 ofname, cyl, head);

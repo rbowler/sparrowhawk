@@ -1,7 +1,7 @@
 AC_INIT(hercules.h)
 AC_CONFIG_AUX_DIR(autoconf)
 
-AM_INIT_AUTOMAKE(hercules,2.16)
+AM_INIT_AUTOMAKE(hercules,2.16.1)
 AM_CONFIG_HEADER(config.h)
 AM_MAINTAINER_MODE
 
@@ -79,6 +79,27 @@ AC_ARG_ENABLE(fthreads,
                 esac]) ])
 
 AM_CONDITIONAL(BUILD_FTHREADS, [test x$build_fthreads = xtrue])
+
+AC_ARG_ENABLE(fishhang,
+              AC_HELP_STRING([--enable-fishhang], [debug correct lock handling (fthreads only)]),
+              [case "${enableval}" in
+                yes)
+                  fishhang=true
+                  CFLAGS="-DFISH_HANG $CFLAGS"
+		  AC_DEFINE([FISH_HANG])
+                  ;;
+                no) fishhang=false ;;
+                *) AC_MSG_ERROR([bad value ${enableval} for --enable-fishhang]) ;;
+               esac],
+              [fishhang=false])
+
+AM_CONDITIONAL(BUILD_FISHHANG, [test x$fishhang = xtrue])
+
+if test x$fishhang = xtrue; then
+  if test x$build_fthreads != xtrue; then
+    AC_MSG_ERROR(fishhang requested but fthreads not specified)
+  fi
+fi
 
 dnl AC_MSG_NOTICE([Checking to see if -pthread is needed to compile])
 
@@ -223,7 +244,7 @@ AC_ARG_ENABLE(profiling,
                esac])
 
 AC_ARG_ENABLE(debug,
-              AC_HELP_STRING([--enable-debug], [enable debugging]),
+              AC_HELP_STRING([--enable-debug], [enable debugging (TRACE/VERIFY/ASSERT macros)]),
               [case "${enableval}" in
                 yes)
                   debug=true
@@ -349,7 +370,9 @@ AH_TEMPLATE([OPTION_FTHREADS],
 AH_TEMPLATE([CUSTOM_BUILD_STRING],
             [Define to provide additional information about this build])
 AH_TEMPLATE([DEBUG],
-            [Define to enable extra debugging code])
+            [Define to enable extra debugging code (TRACE/VERIFY/ASSERT macros)])
+AH_TEMPLATE([FISH_HANG],
+            [Define to debug correct fthreads LOCK handling (requires fthreads)])
 AH_TEMPLATE([PKGDATADIR],
             [Directory where the HTTP server will find documents])
 
