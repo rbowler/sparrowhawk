@@ -549,6 +549,14 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         /* Exit if fetch_ccw detected channel program check */
         if (chanstat != 0) break;
 
+        /* Test for halt subchannel request */
+        if (dev->scsw.flag2 & SCSW2_FC_HALT)
+        {
+            /* Clear the halt pending flag and exit */
+            dev->scsw.flag2 &= SCSW2_AC_HALT;
+            break;
+        }
+
         /* Display the CCW */
         if (dev->ccwtrace || dev->ccwstep)
             display_ccw (dev, ccw, addr);
@@ -859,8 +867,9 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         }
 
         /* Force tracing for this CCW if any unusual status occurred */
-        if (chanstat != 0
-            || (unitstat & ~(CSW_SM | CSW_UX)) != (CSW_CE | CSW_DE))
+        if ((chanstat & (CSW_PROGC | CSW_PROTC | CSW_CDC | CSW_CCC
+                                | CSW_ICC | CSW_CHC))
+            || ((unitstat & CSW_UC) && dev->sense[0] != 0))
         {
             /* Trace the CCW if not already done */
             if (!(dev->ccwtrace || dev->ccwstep || tracethis))
@@ -1307,12 +1316,100 @@ void clear_subchan (REGS *regs, DEVBLK *dev)
     /* Release the device lock */
     release_lock (&dev->lock);
 
-    /* Signal waiting CPUs that an interrupt is pending */
+    /* Signal waiting CPUs that an interrupt may be pending */
     obtain_lock (&sysblk.intlock);
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 
 } /* end function clear_subchan */
+
+/*-------------------------------------------------------------------*/
+/* HALT SUBCHANNEL                                                   */
+/*-------------------------------------------------------------------*/
+/* Input                                                             */
+/*      regs    -> CPU register context                              */
+/*      dev     -> Device control block                              */
+/* Return value                                                      */
+/*      The return value is the condition code for the HSCH          */
+/*      instruction:  0=Halt initiated, 1=Non-intermediate status    */
+/*      pending, 2=Busy                                              */
+/*-------------------------------------------------------------------*/
+int halt_subchan (REGS *regs, DEVBLK *dev)
+{
+
+    /* Obtain the device lock */
+    obtain_lock (&dev->lock);
+
+    /* Set condition code 1 if subchannel is status pending alone or
+       is status pending with alert, primary, or secondary status */
+    if ((dev->scsw.flag3 & SCSW3_SC) == SCSW3_SC_PEND
+        || ((dev->scsw.flag3 & SCSW3_SC_PEND)
+            && (dev->scsw.flag3 &
+                    (SCSW3_SC_ALERT | SCSW3_SC_PRI | SCSW3_SC_SEC))))
+    {
+        logmsg ("%4.4X: Halt subchannel: cc=1\n", dev->devnum);
+        release_lock (&dev->lock);
+        return 1;
+    }
+
+    /* Set condition code 2 if the halt function or the clear
+       function is already in progress at the subchannel */
+    if (dev->scsw.flag2 & (SCSW2_FC_HALT | SCSW2_FC_CLEAR))
+    {
+        logmsg ("%4.4X: Halt subchannel: cc=2\n", dev->devnum);
+        release_lock (&dev->lock);
+        return 2;
+    }
+
+    /* [15.4.2] Perform halt function signaling and completion */
+    dev->scsw.flag2 |= SCSW2_FC_HALT;
+    dev->scsw.flag3 &= ~SCSW3_SC_PEND;
+
+    /* If the device is busy then signal subchannel to halt */
+    if (dev->busy)
+    {
+        /* Set halt pending condition */
+        dev->scsw.flag2 |= SCSW2_AC_HALT;
+
+        /* Clear any pending interrupt */
+        dev->pcipending = 0;
+        dev->pending = 0;
+
+        /* Signal the subchannel to resume if it is suspended */
+        if (dev->scsw.flag3 & SCSW3_AC_SUSP)
+        {
+            dev->scsw.flag2 |= SCSW2_AC_RESUM;
+            signal_condition (&dev->resumecond);
+        }
+    }
+    else
+    {
+        /* If device is idle, make subchannel status pending */
+        dev->scsw.flag3 |= SCSW3_SC_PEND;
+        dev->scsw.unitstat = 0;
+        dev->scsw.chanstat = 0;
+        dev->pending = 1;
+    }
+
+    /* Signal console thread to redrive select */
+    if (dev->console)
+    {
+        signal_thread (sysblk.cnsltid, SIGHUP);
+    }
+
+    /* Release the device lock */
+    release_lock (&dev->lock);
+
+    /* Signal waiting CPUs that an interrupt may be pending */
+    obtain_lock (&sysblk.intlock);
+    signal_condition (&sysblk.intcond);
+    release_lock (&sysblk.intlock);
+
+    /* Return condition code zero */
+    logmsg ("%4.4X: Halt subchannel: cc=0\n", dev->devnum);
+    return 0;
+
+} /* end function halt_subchan */
 
 /*-------------------------------------------------------------------*/
 /* RESUME SUBCHANNEL                                                 */

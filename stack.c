@@ -46,7 +46,7 @@ U16     xcode;                          /* Exception code            */
                             &xcode, &private, &protect, &stid);
     if (rc != 0)
     {
-        program_check (xcode);
+        program_check (regs, xcode);
         return 0;
     }
 
@@ -61,7 +61,7 @@ U16     xcode;                          /* Exception code            */
         regs->tea = (vaddr & TEA_EFFADDR) | TEA_ST_HOME;
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_check (PGM_PROTECTION_EXCEPTION);
+        program_check (regs, PGM_PROTECTION_EXCEPTION);
         return 0;
     }
 
@@ -72,7 +72,7 @@ U16     xcode;                          /* Exception code            */
         regs->tea = (vaddr & TEA_EFFADDR) | TEA_PROT_AP | TEA_ST_HOME;
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_check (PGM_PROTECTION_EXCEPTION);
+        program_check (regs, PGM_PROTECTION_EXCEPTION);
         return 0;
     }
 
@@ -82,7 +82,7 @@ U16     xcode;                          /* Exception code            */
     /* Program check if absolute address is outside main storage */
     if (aaddr >= sysblk.mainsize)
     {
-        program_check (PGM_ADDRESSING_EXCEPTION);
+        program_check (regs, PGM_ADDRESSING_EXCEPTION);
         return 0;
     }
 
@@ -134,7 +134,7 @@ int     i;                              /* Array subscript           */
         || REAL_MODE(&regs->psw)
         || regs->psw.space == 1)
     {
-        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return;
     }
 
@@ -162,7 +162,7 @@ int     i;                              /* Array subscript           */
         /* Program check if remaining free space not a multiple of 8 */
         if ((rfs & 0x07) != 0)
         {
-            program_check (PGM_STACK_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_STACK_SPECIFICATION_EXCEPTION);
             return;
         }
 
@@ -183,7 +183,7 @@ int     i;                              /* Array subscript           */
         /* Stack full exception if forward address is not valid */
         if ((fsha & LSTE1_FVALID) == 0)
         {
-            program_check (PGM_STACK_FULL_EXCEPTION);
+            program_check (regs, PGM_STACK_FULL_EXCEPTION);
             return;
         }
 
@@ -207,7 +207,7 @@ int     i;                              /* Array subscript           */
         rfs = (lsed.rfs[0] << 8) | lsed.rfs[1];
         if (rfs < size)
         {
-            program_check (PGM_STACK_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_STACK_SPECIFICATION_EXCEPTION);
             return;
         }
 
@@ -440,14 +440,14 @@ U32     bsea;                           /* Backward stack entry addr */
         || REAL_MODE(&regs->psw)
         || SECONDARY_SPACE_MODE(&regs->psw))
     {
-        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return 0;
     }
 
     /* Special operation exception if home space mode PR instruction */
     if (prinst && HOME_SPACE_MODE(&regs->psw))
     {
-        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return 0;
     }
 
@@ -474,7 +474,7 @@ U32     bsea;                           /* Backward stack entry addr */
            if the unstack suppression bit in the header entry is set */
         if (prinst && (lsedptr->uet & LSED_UET_U))
         {
-            program_check (PGM_STACK_OPERATION_EXCEPTION);
+            program_check (regs, PGM_STACK_OPERATION_EXCEPTION);
             return 0;
         }
 
@@ -493,7 +493,7 @@ U32     bsea;                           /* Backward stack entry addr */
         /* Stack empty exception if backward address is not valid */
         if ((bsea & LSHE1_BVALID) == 0)
         {
-            program_check (PGM_STACK_EMPTY_EXCEPTION);
+            program_check (regs, PGM_STACK_EMPTY_EXCEPTION);
             return 0;
         }
 
@@ -516,7 +516,7 @@ U32     bsea;                           /* Backward stack entry addr */
         /* Stack specification exception if this is also a header */
         if ((lsedptr->uet & LSED_UET_ET) == LSED_UET_HDR)
         {
-            program_check (PGM_STACK_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_STACK_SPECIFICATION_EXCEPTION);
             return 0;
         }
 
@@ -534,7 +534,7 @@ U32     bsea;                           /* Backward stack entry addr */
     if ((lsedptr->uet & LSED_UET_ET) != LSED_UET_BAKR
         && (lsedptr->uet & LSED_UET_ET) != LSED_UET_PC)
     {
-        program_check (PGM_STACK_TYPE_EXCEPTION);
+        program_check (regs, PGM_STACK_TYPE_EXCEPTION);
         return 0;
     }
 
@@ -542,7 +542,7 @@ U32     bsea;                           /* Backward stack entry addr */
        if the unstack suppression bit in the state entry is set */
     if (prinst && (lsedptr->uet & LSED_UET_U))
     {
-        program_check (PGM_STACK_OPERATION_EXCEPTION);
+        program_check (regs, PGM_STACK_OPERATION_EXCEPTION);
         return 0;
     }
 
@@ -780,7 +780,7 @@ U16     pasn;                           /* Primary ASN               */
     /* Load new PSW from bytes 136-143 of the stack entry */
     rc = load_psw (&regs->psw, sysblk.mainstor+abs);
     if (rc) {
-        program_check(rc);
+        program_check (regs, rc);
         return 0;
     }
 
@@ -867,7 +867,7 @@ U32     abs;                            /* Absolute address          */
     /* Program check if rn is odd, or if extraction code is invalid */
     if ((rn & 1) || code > 3)
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 3;
     }
 
@@ -922,7 +922,7 @@ U32     abs;                            /* Absolute address          */
     /* Program check if rn is odd */
     if (rn & 1)
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 

@@ -342,6 +342,18 @@ typedef struct _LSED {
 #define SIGP_SETPREFIX	0x0D		/* Set prefix		     */
 #define SIGP_STORE	0x0E		/* Store status at address   */
 
+/* SIGP status codes */
+#define SIGP_STATUS_EQUIPMENT_CHECK		0x80000000
+#define SIGP_STATUS_INCORRECT_STATE		0x00000200
+#define SIGP_STATUS_INVALID_PARAMETER		0x00000100
+#define SIGP_STATUS_EXTERNAL_CALL_PENDING	0x00000080
+#define SIGP_STATUS_STOPPED			0x00000040
+#define SIGP_STATUS_OPERATOR_INTERVENING	0x00000020
+#define SIGP_STATUS_CHECK_STOP			0x00000010
+#define SIGP_STATUS_INOPERATIVE 		0x00000004
+#define SIGP_STATUS_INVALID_ORDER		0x00000002
+#define SIGP_STATUS_RECEIVER_CHECK		0x00000001
+
 /* Storage key bit definitions */
 #define STORKEY_KEY	0xF0		/* Storage key		     */
 #define STORKEY_FETCH	0x08		/* Fetch protect bit	     */
@@ -388,9 +400,22 @@ typedef struct _PSA {			/* Prefixed storage area     */
 /*0C0*/ DWORD resv0C0;			/* Reserved		     */
 /*0C8*/ DWORD resv0C8;			/* Reserved		     */
 /*0D0*/ DWORD resv0D0;			/* Reserved		     */
-/*0D8*/ DWORD ptimer;			/* CPU timer save area	     */
-/*0E0*/ DWORD clkc;			/* Clock comparator save area*/
+/*0D8*/ DWORD storeptmr;		/* CPU timer save area	     */
+/*0E0*/ DWORD storeclkc;		/* Clock comparator save area*/
 /*0E8*/ DWORD mckint;			/* Machine check int code    */
+/*0F0*/ FWORD resv0F0;			/* Reserved		     */
+/*0F4*/ FWORD xdmgcode; 		/* External damage code      */
+/*0F8*/ FWORD mcstorad; 		/* Failing storage address   */
+/*0FC*/ FWORD resv0FC;			/* Reserved		     */
+/*100*/ DWORD storepsw; 		/* Store status PSW save area*/
+/*108*/ FWORD storepfx; 		/* Prefix register save area */
+/*10C*/ FWORD resv10C;			/* Reserved		     */
+/*110*/ DWORD resv110;			/* Reserved		     */
+/*118*/ DWORD resv118;			/* Reserved		     */
+/*120*/ FWORD storear[16];		/* Access register save area */
+/*160*/ FWORD storefpr[8];		/* FP register save area     */
+/*180*/ FWORD storegpr[16];		/* General register save area*/
+/*1C0*/ FWORD storecr[16];		/* Control register save area*/
 } PSA;
 
 /* Bit settings for translation exception address */

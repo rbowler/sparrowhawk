@@ -187,6 +187,12 @@ typedef struct _REGS {			/* Processor registers	     */
 					     the interval timer      */
 	BYTE	cpustate;		/* CPU stopped/started state */
 	BYTE	restart;		/* 1=Restart interrpt pending*/
+	BYTE	extcall;		/* 1=Extcall interrpt pending*/
+	U16	extccpu;		/* CPU causing external call */
+	BYTE	emersig;		/* 1=Emersig interrpt pending*/
+	BYTE	emercpu 		/* Emergency signal flags    */
+		    [MAX_CPU_ENGINES];	/* for each CPU (1=pending)  */
+	BYTE	storstat;		/* 1=Stop and store status   */
 	BYTE	instvalid;		/* 1=Inst field is valid     */
 	BYTE	inst[6];		/* Last-fetched instruction  */
 	jmp_buf progjmp;		/* longjmp destination for
@@ -218,12 +224,14 @@ typedef struct _SYSBLK {
 	LOCK	mainlock;		/* Main storage lock	     */
 	COND	intcond;		/* Interrupt condition	     */
 	LOCK	intlock;		/* Interrupt lock	     */
+	LOCK	sigplock;		/* Signal processor lock     */
 	ATTR	detattr;		/* Detached thread attribute */
 	TID	cnsltid;		/* Thread-id for console     */
 	U16	cnslport;		/* Port number for console   */
 	struct _DEVBLK *firstdev;	/* -> First device block     */
 	U32	servparm;		/* Service signal parameter  */
 	unsigned int			/* Flags		     */
+		sigpbusy:1,		/* 1=Signal facility in use  */
 		servsig:1,		/* 1=Service signal pending  */
 		intkey:1,		/* 1=Interrupt key pending   */
 		sigintreq:1,		/* 1=SIGINT request pending  */
@@ -451,11 +459,12 @@ void panel_display (void);
 /* Functions in module ipl.c */
 int  load_ipl (U16 devnum, REGS *regs);
 void cpu_reset (REGS *regs);
+void initial_cpu_reset (REGS *regs);
 
 /* Functions in module cpu.c */
 void store_psw (PSW *psw, BYTE *addr);
 int  load_psw (PSW *psw, BYTE *addr);
-void program_check (int code);
+void program_check (REGS *regs, int code);
 void *cpu_thread (REGS *regs);
 
 /* Functions in module dat.c */
@@ -543,15 +552,18 @@ int  compare_until_substring_equal (int r1, int r2, REGS *regs);
 
 /* Functions in module diagnose.c */
 void scpend_call (void);
-int  mssf_call (U32 mssf_command, U32 spccb_absolute_addr);
+int  mssf_call (U32 mssf_command, U32 spccb_absolute_addr, REGS *regs);
 void diag204_call (int r1, int r2, REGS *regs);
 
 /* Functions in module external.c */
 void perform_external_interrupt (REGS *regs);
 void *timer_update_thread (void *argp);
+void store_status (REGS *ssreg, U32 aaddr);
+int  signal_processor (int r1, int r3, U32 eaddr, REGS *regs);
 
 /* Functions in module service.c */
-int  service_call (U32 sclp_command, U32 sccb_absolute_addr);
+int  service_call (U32 sclp_command, U32 sccb_absolute_addr,
+	REGS *regs);
 
 /* Functions in module sort.c */
 int  compare_and_form_codeword (REGS *regs, U32 eaddr);
@@ -585,6 +597,7 @@ int  test_channel (REGS *regs, U16 chan);
 int  test_io (REGS *regs, DEVBLK *dev, BYTE ibyte);
 int  test_subchan (REGS *regs, DEVBLK *dev, IRB *irb);
 void clear_subchan (REGS *regs, DEVBLK *dev);
+int  halt_subchan (REGS *regs, DEVBLK *dev);
 int  resume_subchan (REGS *regs, DEVBLK *dev);
 int  present_io_interrupt (REGS *regs, U32 *ioid, U32 *ioparm,
 	BYTE *csw);

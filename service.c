@@ -209,7 +209,7 @@ typedef struct _SCCB_CSI_INFO {
 /*-------------------------------------------------------------------*/
 /* Process service call instruction and return condition code        */
 /*-------------------------------------------------------------------*/
-int service_call (U32 sclp_command, U32 sccb_absolute_addr)
+int service_call (U32 sclp_command, U32 sccb_absolute_addr, REGS *regs)
 {
 int             i;                      /* Array subscript           */
 int             realmb;                 /* Real storage size in MB   */
@@ -227,14 +227,14 @@ int             chpbit;                 /* Bit number for CHPID      */
     /* Program check if SCCB is not on a doubleword boundary */
     if ( sccb_absolute_addr & 0x00000007 )
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 3;
     }
 
     /* Program check if SCCB is outside main storage */
     if ( sccb_absolute_addr >= sysblk.mainsize )
     {
-        program_check (PGM_ADDRESSING_EXCEPTION);
+        program_check (regs, PGM_ADDRESSING_EXCEPTION);
         return 3;
     }
 
@@ -253,7 +253,7 @@ int             chpbit;                 /* Bit number for CHPID      */
     /* Program check if end of SCCB falls outside main storage */
     if ( sysblk.mainsize - sccblen < sccb_absolute_addr )
     {
-        program_check (PGM_ADDRESSING_EXCEPTION);
+        program_check (regs, PGM_ADDRESSING_EXCEPTION);
         return 3;
     }
 

@@ -33,7 +33,7 @@ BYTE    pad;                            /* Padding byte              */
     /* Program check if either R1 or R2 register is odd */
     if ((r1 & 1) || (r2 & 1))
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -142,7 +142,7 @@ BYTE    pad;                            /* Padding byte              */
     /* Program check if either R1 or R2 register is odd */
     if ((r1 & 1) || (r2 & 1))
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -240,7 +240,7 @@ BYTE    pad;                            /* Padding byte              */
     /* Program check if either R1 or R3 register is odd */
     if ((r1 & 1) || (r3 & 1))
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -324,7 +324,7 @@ BYTE    pad;                            /* Padding byte              */
     /* Program check if either R1 or R3 register is odd */
     if ((r1 & 1) || (r3 & 1))
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -423,7 +423,7 @@ BYTE    akey;                           /* Access key                */
     if ((regs->gpr[0] & 0x0000F000) != 0
         || (regs->gpr[0] & 0x00000C00) == 0x00000C00)
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 3;
     }
 
@@ -442,7 +442,7 @@ BYTE    akey;                           /* Access key                */
         if ( regs->psw.prob
             && ((regs->cr[3] << (akey >> 4)) & 0x80000000) == 0 )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             return 3;
         }
     }
@@ -556,7 +556,7 @@ mvpg_progck:
         return (xaddr == vaddr2 ? 2 : 1)
 
     /* Otherwise generate program check */
-    program_check (xcode);
+    program_check (regs, xcode);
     return 3;
 } /* end function move_page */
 #endif /*INCOMPLETE*/
@@ -585,7 +585,7 @@ U64     dreg;                           /* Checksum accumulator      */
     /* Specification exception if R2 is odd */
     if (r2 & 1)
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -678,7 +678,7 @@ BYTE    termchar;                       /* Terminating character     */
     /* Program check if bits 0-23 of register 0 not zero */
     if ((regs->gpr[0] & 0xFFFFFF00) != 0)
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -750,7 +750,7 @@ BYTE    termchar;                       /* Terminating character     */
     /* Program check if bits 0-23 of register 0 not zero */
     if ((regs->gpr[0] & 0xFFFFFF00) != 0)
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -836,7 +836,7 @@ BYTE    termchar;                       /* Terminating character     */
     /* Program check if bits 0-23 of register 0 not zero */
     if ((regs->gpr[0] & 0xFFFFFF00) != 0)
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -910,7 +910,7 @@ S32     remlen1, remlen2;               /* Lengths remaining         */
     /* Program check if either R1 or R2 register is odd */
     if ((r1 & 1) || (r2 & 1))
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 

@@ -33,7 +33,7 @@ BYTE    operand_control;                /* Operand control bit       */
     /* Check GR1, GR2, GR3 even */
     if ( regs->gpr[1] & 1 || regs->gpr[2] & 1 || regs->gpr[3] & 1 )
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 3;
     }
 
@@ -139,7 +139,7 @@ int     ar1 = 4;                        /* Access register number    */
     /* Check GR4, GR5 doubleword alligned */
     if ( regs->gpr[4] & 0x00000007 || regs->gpr[5] & 0x00000007 )
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 

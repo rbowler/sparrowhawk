@@ -242,7 +242,7 @@ asn_asn_tran_spec_excp:
     goto asn_prog_check;
 
 asn_prog_check:
-    program_check (code);
+    program_check (regs, code);
     return code;
 
 /* Conditions which the caller may or may not program check */
@@ -332,7 +332,7 @@ BYTE    ate;                            /* Authority table entry     */
     return 0;
 
 auth_addr_excp:
-    program_check (PGM_ADDRESSING_EXCEPTION);
+    program_check (regs, PGM_ADDRESSING_EXCEPTION);
     return 1;
 } /* end function authorize_asn */
 
@@ -517,7 +517,7 @@ alet_asn_tran_spec_excp:
     goto alet_prog_check;
 
 alet_prog_check:
-    program_check (code);
+    program_check (regs, code);
     return code;
 
 /* Conditions which the caller may or may not program check */
@@ -847,7 +847,7 @@ tran_spec_excp:
     goto tran_prog_check;
 
 tran_prog_check:
-    program_check (*xcode);
+    program_check (regs, *xcode);
     return 4;
 
 /* Conditions which the caller may or may not program check */
@@ -992,7 +992,7 @@ U16     xcode;                          /* Exception code            */
     return 0;
 
 tprot_addr_excp:
-    program_check (PGM_ADDRESSING_EXCEPTION);
+    program_check (regs, PGM_ADDRESSING_EXCEPTION);
     return 3;
 
 } /* end function test_prot */
@@ -1098,7 +1098,7 @@ U16     xcode;                          /* Exception code            */
     return aaddr;
 
 vabs_addr_excp:
-    program_check (PGM_ADDRESSING_EXCEPTION);
+    program_check (regs, PGM_ADDRESSING_EXCEPTION);
     return 0;
 
 vabs_prot_excp:
@@ -1109,11 +1109,11 @@ vabs_prot_excp:
     regs->tea |= stid;
     regs->excarid = (arn > 0 ? arn : 0);
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-    program_check (PGM_PROTECTION_EXCEPTION);
+    program_check (regs, PGM_PROTECTION_EXCEPTION);
     return 0;
 
 vabs_prog_check:
-    program_check (xcode);
+    program_check (regs, xcode);
     return 0;
 
 } /* end function logical_to_abs */
@@ -1613,7 +1613,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
     /* Program check if instruction address is odd */
     if (addr & 0x01) {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 

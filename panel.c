@@ -305,6 +305,15 @@ int     n;                              /* Number of bytes in buffer */
     /* Display the general purpose registers */
     display_regs (regs);
 
+    /* Display control registers and access registers if appropriate */
+    if (!REAL_MODE(&regs->psw))
+    {
+        display_cregs (regs);
+
+        if (ACCESS_REGISTER_MODE(&regs->psw))
+            display_aregs (regs);
+    }
+
 } /* end function display_inst */
 
 /*-------------------------------------------------------------------*/
@@ -453,6 +462,7 @@ BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
             "b addr = set breakpoint, b- = delete breakpoint\n"
             "i devn=I/O attention interrupt, ext=external interrupt\n"
             "stop=stop CPU, start=start CPU, restart=PSW restart\n"
+            "store=store status\n"
             "loadcore filename=load core image from file\n"
             "loadparm xxxxxxxx=set IPL parameter, ipl devn=IPL\n"
             "devinit devn arg [arg...] = reinitialize device\n"
@@ -486,6 +496,21 @@ BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
     if (strcmp(cmd,"stop") == 0)
     {
         regs->cpustate = CPUSTATE_STOPPING;
+        return NULL;
+    }
+
+    /* store command - store CPU status at absolute zero */
+    if (strcmp(cmd,"store") == 0)
+    {
+        /* Command is valid only when CPU is stopped */
+        if (regs->cpustate != CPUSTATE_STOPPED)
+        {
+            logmsg ("store status rejected: CPU not stopped\n");
+            return NULL;
+        }
+
+        /* Store status in 512 byte block at absolute location 0 */
+        store_status (regs, 0);
         return NULL;
     }
 

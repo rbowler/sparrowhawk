@@ -67,7 +67,7 @@ BYTE    pack[MAX_DECIMAL_LENGTH];       /* Packed decimal work area  */
 
         /* Check for valid numeric */
         if (h > 9) {
-            program_check (PGM_DATA_EXCEPTION);
+            program_check (regs, PGM_DATA_EXCEPTION);
             return;
         }
 
@@ -83,7 +83,7 @@ BYTE    pack[MAX_DECIMAL_LENGTH];       /* Packed decimal work area  */
     /* Check for valid sign */
     h = pack[MAX_DECIMAL_LENGTH-1] & 0x0F;
     if ( h < 0x0A ) {
-        program_check (PGM_DATA_EXCEPTION);
+        program_check (regs, PGM_DATA_EXCEPTION);
         return;
     }
 
@@ -480,7 +480,7 @@ int     carry;                          /* Carry indicator           */
     /* Program check if rounding digit is invalid */
     if (round > 9)
     {
-        program_check (PGM_DATA_EXCEPTION);
+        program_check (regs, PGM_DATA_EXCEPTION);
         return 3;
     }
 
@@ -540,7 +540,7 @@ int     carry;                          /* Carry indicator           */
     /* Program check if overflow and PSW program mask is set */
     if (cc == 3 && regs->psw.domask)
     {
-        program_check (PGM_DECIMAL_OVERFLOW_EXCEPTION);
+        program_check (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
     }
 
     /* Return condition code */
@@ -598,7 +598,7 @@ int     sign;                           /* Sign                      */
     /* Program check if overflow and PSW program mask is set */
     if (cc == 3 && regs->psw.domask)
     {
-        program_check (PGM_DECIMAL_OVERFLOW_EXCEPTION);
+        program_check (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
     }
 
     /* Return condition code */
@@ -744,7 +744,7 @@ int     sign1, sign2, sign3;            /* Sign of operands & result */
     /* Program check if overflow and PSW program mask is set */
     if (cc == 3 && regs->psw.domask)
     {
-        program_check (PGM_DECIMAL_OVERFLOW_EXCEPTION);
+        program_check (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
     }
 
     /* Return condition code */
@@ -833,7 +833,7 @@ int     sign1, sign2, sign3;            /* Sign of operands & result */
     /* Program check if overflow and PSW program mask is set */
     if (cc == 3 && regs->psw.domask)
     {
-        program_check (PGM_DECIMAL_OVERFLOW_EXCEPTION);
+        program_check (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
     }
 
     /* Return condition code */
@@ -883,7 +883,7 @@ int     carry;                          /* Carry indicator           */
        or is equal to or greater than the first operand length */
     if (len2 > 7 || len2 >= len1)
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 
@@ -892,7 +892,7 @@ int     carry;                          /* Carry indicator           */
        first operand; this ensures that overflow cannot occur */
     if (len2 > len1 - (count1/2 + 1))
     {
-        program_check (PGM_DATA_EXCEPTION);
+        program_check (regs, PGM_DATA_EXCEPTION);
         return;
     }
 
@@ -968,14 +968,14 @@ int     signq, signr;                   /* Sign of quotient/remainder*/
        or is equal to or greater than the first operand length */
     if (len2 > 7 || len2 >= len1)
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 
     /* Program check if second operand value is zero */
     if (count2 == 0)
     {
-        program_check (PGM_DECIMAL_DIVIDE_EXCEPTION);
+        program_check (regs, PGM_DECIMAL_DIVIDE_EXCEPTION);
         return;
     }
 
@@ -990,7 +990,7 @@ int     signq, signr;                   /* Sign of quotient/remainder*/
                 dec1 + (MAX_DECIMAL_DIGITS - len1*2 - 1),
                 len2*2 + 2) <= 0)
     {
-        program_check (PGM_DECIMAL_DIVIDE_EXCEPTION);
+        program_check (regs, PGM_DECIMAL_DIVIDE_EXCEPTION);
         return;
     }
 
@@ -1115,7 +1115,7 @@ BYTE    sbyte;                          /* Source operand byte       */
         /* Check for valid high-order digit */
         if (h > 9)
         {
-            program_check (PGM_DATA_EXCEPTION);
+            program_check (regs, PGM_DATA_EXCEPTION);
             return;
         }
 
@@ -1129,7 +1129,7 @@ BYTE    sbyte;                          /* Source operand byte       */
             /* Check for valid low-order digit */
             if (d > 9)
             {
-                program_check (PGM_DATA_EXCEPTION);
+                program_check (regs, PGM_DATA_EXCEPTION);
                 return;
             }
 
@@ -1142,7 +1142,7 @@ BYTE    sbyte;                          /* Source operand byte       */
             /* Check for valid sign */
             if (d < 10)
             {
-                program_check (PGM_DATA_EXCEPTION);
+                program_check (regs, PGM_DATA_EXCEPTION);
                 return;
             }
         }
@@ -1164,7 +1164,7 @@ BYTE    sbyte;                          /* Source operand byte       */
     /* Program check if overflow */
     if ((S64)dreg < -2147483648LL || (S64)dreg > 2147483647LL)
     {
-        program_check (PGM_FIXED_POINT_DIVIDE_EXCEPTION);
+        program_check (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
         return;
     }
 
@@ -1449,7 +1449,7 @@ BYTE    rbyte;                          /* Result byte               */
                 /* Program check if left digit is not numeric */
                 if (h > 9)
                 {
-                    program_check (PGM_DATA_EXCEPTION);
+                    program_check (regs, PGM_DATA_EXCEPTION);
                     return 0;
                 }
 

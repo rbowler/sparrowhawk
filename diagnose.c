@@ -173,7 +173,7 @@ void scpend_call(void)
 /*-------------------------------------------------------------------*/
 /* Process MSSF call (Function code 0x080)                           */
 /*-------------------------------------------------------------------*/
-int mssf_call (U32 spccb_absolute_addr, U32 mssf_command)
+int mssf_call (U32 spccb_absolute_addr, U32 mssf_command, REGS *regs)
 {
 int               spccblen;            /* Length of SPCCB            */
 SPCCB_HEADER      *spccb;              /* -> SPCCB header            */
@@ -187,14 +187,14 @@ DEVBLK            *dev;                /* Device block pointer       */
     /* Program check if SPCCB is not on a doubleword boundary */
     if ( spccb_absolute_addr & 0x00000007 )
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 3;
     }
 
     /* Program check if SPCCB is outside main storage */
     if ( spccb_absolute_addr >= sysblk.mainsize )
     {
-        program_check (PGM_ADDRESSING_EXCEPTION);
+        program_check (regs, PGM_ADDRESSING_EXCEPTION);
         return 3;
     }
 
@@ -213,7 +213,7 @@ DEVBLK            *dev;                /* Device block pointer       */
     /* Program check if end of SPCCB falls outside main storage */
     if ( sysblk.mainsize - spccblen < spccb_absolute_addr )
     {
-        program_check (PGM_ADDRESSING_EXCEPTION);
+        program_check (regs, PGM_ADDRESSING_EXCEPTION);
         return 3;
     }
 
@@ -360,14 +360,14 @@ static U64        diag204tod;          /* last diag204 tod           */
     /* Program check if RMF data is not on a page boundary */
     if ( abs & 0x00000FFF )
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 
     /* Program check if RMF data area is outside main storage */
     if ( abs >= sysblk.mainsize )
     {
-        program_check (PGM_ADDRESSING_EXCEPTION);
+        program_check (regs, PGM_ADDRESSING_EXCEPTION);
         return;
     }
 

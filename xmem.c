@@ -107,7 +107,7 @@ U32     ssaste5;                        /* Subspace ASTE word 5      */
     /* Program check if DUCT origin address is invalid */
     if (ducto >= sysblk.mainsize)
     {
-        program_check (PGM_ADDRESSING_EXCEPTION);
+        program_check (regs, PGM_ADDRESSING_EXCEPTION);
         return 0;
     }
 
@@ -131,7 +131,7 @@ U32     ssaste5;                        /* Subspace ASTE word 5      */
     /* Program check if ASTE origin address is invalid */
     if (ssasteo >= sysblk.mainsize)
     {
-        program_check (PGM_ADDRESSING_EXCEPTION);
+        program_check (regs, PGM_ADDRESSING_EXCEPTION);
         return 0;
     }
 
@@ -145,7 +145,7 @@ U32     ssaste5;                        /* Subspace ASTE word 5      */
     if (ssaste0 & ASTE0_INVALID)
     {
         if (xcode == NULL)
-            program_check (PGM_ASTE_VALIDITY_EXCEPTION);
+            program_check (regs, PGM_ASTE_VALIDITY_EXCEPTION);
         else
             *xcode = PGM_ASTE_VALIDITY_EXCEPTION;
         return 0;
@@ -156,7 +156,7 @@ U32     ssaste5;                        /* Subspace ASTE word 5      */
     if ((ssaste5 & ASTE5_ASTESN) != (duct3 & DUCT3_SSASTESN))
     {
         if (xcode == NULL)
-            program_check (PGM_ASTE_SEQUENCE_EXCEPTION);
+            program_check (regs, PGM_ASTE_SEQUENCE_EXCEPTION);
         else
             *xcode = PGM_ASTE_SEQUENCE_EXCEPTION;
         return 0;
@@ -195,7 +195,7 @@ int     ssevent = 0;                    /* 1=space switch event      */
     if (REAL_MODE(&(regs->psw))
          || (regs->cr[0] & CR0_SEC_SPACE) == 0)
     {
-        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return 0;
     }
 
@@ -203,7 +203,7 @@ int     ssevent = 0;                    /* 1=space switch event      */
        mode while in problem state */
     if (mode == 3 && regs->psw.prob)
     {
-        program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
         return 0;
     }
 
@@ -211,14 +211,14 @@ int     ssevent = 0;                    /* 1=space switch event      */
        and address-space function control bit is zero */
     if (mode == 1 && (regs->cr[0] & CR0_ASF) == 0)
     {
-        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return 0;
     }
 
     /* Specification exception if mode is invalid */
     if (mode > 3)
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -290,7 +290,7 @@ int     mode;                           /* Current addressing mode   */
     /* Special operation exception if DAT is off */
     if (REAL_MODE(&(regs->psw)))
     {
-        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return 0;
     }
 
@@ -299,7 +299,7 @@ int     mode;                           /* Current addressing mode   */
     if ( regs->psw.prob
          && (regs->cr[0] & CR0_EXT_AUTH) == 0 )
     {
-        program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
         return 0;
     }
 
@@ -333,7 +333,7 @@ U16     ax;                             /* Authorization index       */
     if ((regs->cr[14] & CR14_ASN_TRAN) == 0
         || REAL_MODE(&(regs->psw)))
     {
-        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return;
     }
 
@@ -353,7 +353,7 @@ U16     ax;                             /* Authorization index       */
         /* Program check if ASN translation exception */
         if (xcode != 0)
         {
-            program_check (xcode);
+            program_check (regs, xcode);
             return;
         }
 
@@ -362,7 +362,7 @@ U16     ax;                             /* Authorization index       */
         if (authorize_asn (ax, aste, ATE_SECONDARY, regs))
         {
             regs->tea = sasn;
-            program_check (PGM_SECONDARY_AUTHORITY_EXCEPTION);
+            program_check (regs, PGM_SECONDARY_AUTHORITY_EXCEPTION);
             return;
         }
 
@@ -558,7 +558,7 @@ int     ssevent = 0;                    /* 1=space switch event      */
     if (REAL_MODE(&(regs->psw))
         || !PRIMARY_SPACE_MODE(&(regs->psw)))
     {
-        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return 0;
     }
 
@@ -577,7 +577,7 @@ int     ssevent = 0;                    /* 1=space switch event      */
         /* Program check if PASTE is outside main storage */
         if (pasteo >= sysblk.mainsize)
         {
-            program_check (PGM_ADDRESSING_EXCEPTION);
+            program_check (regs, PGM_ADDRESSING_EXCEPTION);
             return 0;
         }
 
@@ -589,7 +589,7 @@ int     ssevent = 0;                    /* 1=space switch event      */
        control bit in linkage table designation is zero */
     if ((ltd & LTD_SSLINK) == 0)
     {
-        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return 0;
     }
 
@@ -597,7 +597,7 @@ int     ssevent = 0;                    /* 1=space switch event      */
        problem bit indicates a change to supervisor state */
     if (regs->psw.prob && prob == 0)
     {
-        program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
         return 0;
     }
 
@@ -605,7 +605,7 @@ int     ssevent = 0;                    /* 1=space switch event      */
        new instruction address is not a 24-bit address */
     if (amode == 0 && ia > 0x00FFFFFF)
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -616,7 +616,7 @@ int     ssevent = 0;                    /* 1=space switch event      */
            control (control register 14 bit 12) is zero */
         if ((regs->cr[14] & CR14_ASN_TRAN) == 0)
         {
-            program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+            program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
             return 0;
         }
 
@@ -625,7 +625,7 @@ int     ssevent = 0;                    /* 1=space switch event      */
         xcode = translate_asn (pasn, regs, &pasteo, aste);
         if (xcode != 0)
         {
-            program_check (xcode);
+            program_check (regs, xcode);
             return 0;
         }
 
@@ -635,7 +635,7 @@ int     ssevent = 0;                    /* 1=space switch event      */
         if (authorize_asn (ax, aste, ATE_PRIMARY, regs))
         {
             regs->tea = pasn;
-            program_check (PGM_PRIMARY_AUTHORITY_EXCEPTION);
+            program_check (regs, PGM_PRIMARY_AUTHORITY_EXCEPTION);
             return 0;
         }
 
@@ -745,7 +745,7 @@ U16     xcode;                          /* Exception code            */
                control (control register 14 bit 12) is zero */
             if ((regs->cr[14] & CR14_ASN_TRAN) == 0)
             {
-                program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+                program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
                 return 0;
             }
 
@@ -755,7 +755,7 @@ U16     xcode;                          /* Exception code            */
             /* Program check if ASN translation exception */
             if (xcode != 0)
             {
-                program_check (xcode);
+                program_check (regs, xcode);
                 return 0;
             }
 
@@ -804,7 +804,7 @@ U16     xcode;                          /* Exception code            */
                control (control register 14 bit 12) is zero */
             if ((regs->cr[14] & CR14_ASN_TRAN) == 0)
             {
-                program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+                program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
                 return 0;
             }
 
@@ -814,7 +814,7 @@ U16     xcode;                          /* Exception code            */
             /* Program check if ASN translation exception */
             if (xcode != 0)
             {
-                program_check (xcode);
+                program_check (regs, xcode);
                 return 0;
             }
 
@@ -826,7 +826,7 @@ U16     xcode;                          /* Exception code            */
             if (authorize_asn (ax, aste, ATE_SECONDARY, &newregs))
             {
                 regs->tea = sasn;
-                program_check (PGM_SECONDARY_AUTHORITY_EXCEPTION);
+                program_check (regs, PGM_SECONDARY_AUTHORITY_EXCEPTION);
                 return 0;
             }
 
@@ -892,7 +892,7 @@ U16     pasn;                           /* Primary ASN               */
        in secondary space mode or home space mode */
     if (REAL_MODE(&(regs->psw)) || regs->psw.space == 1)
     {
-        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return 0;
     }
 
@@ -911,7 +911,7 @@ U16     pasn;                           /* Primary ASN               */
         /* Program check if PASTE is outside main storage */
         if (pasteo >= sysblk.mainsize)
         {
-            program_check (PGM_ADDRESSING_EXCEPTION);
+            program_check (regs, PGM_ADDRESSING_EXCEPTION);
             return 0;
         }
 
@@ -923,7 +923,7 @@ U16     pasn;                           /* Primary ASN               */
        control bit in linkage table designation is zero */
     if ((ltd & LTD_SSLINK) == 0)
     {
-        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return 0;
     }
 
@@ -937,7 +937,7 @@ U16     pasn;                           /* Primary ASN               */
     if (ltl < ((pcnum & PC_LX) >> 13))
     {
         regs->tea = pcnum;
-        program_check (PGM_LX_TRANSLATION_EXCEPTION);
+        program_check (regs, PGM_LX_TRANSLATION_EXCEPTION);
         return 0;
     }
 
@@ -948,7 +948,7 @@ U16     pasn;                           /* Primary ASN               */
     /* Program check if linkage table entry is outside real storage */
     if (lto >= sysblk.mainsize)
     {
-        program_check (PGM_ADDRESSING_EXCEPTION);
+        program_check (regs, PGM_ADDRESSING_EXCEPTION);
         return 0;
     }
 
@@ -961,7 +961,7 @@ U16     pasn;                           /* Primary ASN               */
     if (lte & LTE_INVALID)
     {
         regs->tea = pcnum;
-        program_check (PGM_LX_TRANSLATION_EXCEPTION);
+        program_check (regs, PGM_LX_TRANSLATION_EXCEPTION);
         return 0;
     }
 
@@ -975,7 +975,7 @@ U16     pasn;                           /* Primary ASN               */
     if (etl < ((pcnum & PC_EX) >> 2))
     {
         regs->tea = pcnum;
-        program_check (PGM_EX_TRANSLATION_EXCEPTION);
+        program_check (regs, PGM_EX_TRANSLATION_EXCEPTION);
         return 0;
     }
 
@@ -995,7 +995,7 @@ U16     pasn;                           /* Primary ASN               */
         abs = APPLY_PREFIXING (eto, regs->pxr);
         if (abs >= sysblk.mainsize)
         {
-            program_check (PGM_ADDRESSING_EXCEPTION);
+            program_check (regs, PGM_ADDRESSING_EXCEPTION);
             return 0;
         }
 
@@ -1011,7 +1011,7 @@ U16     pasn;                           /* Primary ASN               */
     /* Program check if basic program call in AR mode */
     if ((ete[4] & ETE4_T) == 0 && regs->psw.armode)
     {
-        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return 0;
     }
 
@@ -1020,7 +1020,7 @@ U16     pasn;                           /* Primary ASN               */
     if ((ete[1] & ETE1_AMODE) == 0
         && (ete[1] & ETE1_EIA) > 0x00FFFFFF)
     {
-        program_check (PGM_PC_TRANSLATION_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_PC_TRANSLATION_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -1029,7 +1029,7 @@ U16     pasn;                           /* Primary ASN               */
     if (regs->psw.prob
         && ((regs->cr[3] & CR3_KEYMASK) & (ete[0] & ETE0_AKM)) == 0)
     {
-        program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
         return 0;
     }
 
@@ -1042,7 +1042,7 @@ U16     pasn;                           /* Primary ASN               */
         /* Program check if ASN translation control is zero */
         if ((regs->cr[14] & CR14_ASN_TRAN) == 0)
         {
-            program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+            program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
             return 0;
         }
 
@@ -1052,7 +1052,7 @@ U16     pasn;                           /* Primary ASN               */
         /* Program check if ASN translation exception */
         if (xcode != 0)
         {
-            program_check (xcode);
+            program_check (regs, xcode);
             return 0;
         }
 
@@ -1214,7 +1214,7 @@ BYTE    key;                            /* New PSW key               */
     /* Special operation exception if CR0 bit 15 is zero */
     if ((regs->cr[0] & CR0_ASF) == 0)
     {
-        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return;
     }
 
@@ -1228,7 +1228,7 @@ BYTE    key;                            /* New PSW key               */
         regs->tea = (ducto & TEA_EFFADDR);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_check (PGM_PROTECTION_EXCEPTION);
+        program_check (regs, PGM_PROTECTION_EXCEPTION);
         return;
     }
 
@@ -1238,7 +1238,7 @@ BYTE    key;                            /* New PSW key               */
     /* Program check if DUCT origin address is invalid */
     if (ducto >= sysblk.mainsize)
     {
-        program_check (PGM_ADDRESSING_EXCEPTION);
+        program_check (regs, PGM_ADDRESSING_EXCEPTION);
         return;
     }
 
@@ -1252,7 +1252,7 @@ BYTE    key;                            /* New PSW key               */
         /* In base authority state R2 cannot specify register zero */
         if (r2 == 0)
         {
-            program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+            program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
             return;
         }
 
@@ -1264,7 +1264,7 @@ BYTE    key;                            /* New PSW key               */
         if (regs->psw.prob
             && ((regs->cr[3] << (key >> 4)) & 0x80000000) == 0 )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             return;
         }
 
@@ -1310,7 +1310,7 @@ BYTE    key;                            /* New PSW key               */
         /* In reduced authority state R2 must specify register zero */
         if (r2 != 0)
         {
-            program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+            program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
             return;
         }
 
@@ -1345,7 +1345,7 @@ BYTE    key;                            /* New PSW key               */
             || (regs->psw.amode == 0 && regs->psw.ia > 0x00FFFFFF))
         {
             regs->psw.ilc = 0;
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             return;
         }
 
@@ -1383,7 +1383,7 @@ U16     xcode;                          /* Exception code            */
     if (REAL_MODE(&(regs->psw))
         || (regs->cr[0] & CR0_ASF) == 0)
     {
-        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return;
     }
 
@@ -1397,7 +1397,7 @@ U16     xcode;                          /* Exception code            */
         regs->tea = (ducto & TEA_EFFADDR);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_check (PGM_PROTECTION_EXCEPTION);
+        program_check (regs, PGM_PROTECTION_EXCEPTION);
         return;
     }
 
@@ -1407,7 +1407,7 @@ U16     xcode;                          /* Exception code            */
     /* Program check if DUCT origin address is invalid */
     if (ducto >= sysblk.mainsize)
     {
-        program_check (PGM_ADDRESSING_EXCEPTION);
+        program_check (regs, PGM_ADDRESSING_EXCEPTION);
         return;
     }
 
@@ -1421,7 +1421,7 @@ U16     xcode;                          /* Exception code            */
        is not the same as the base ASTE for the dispatchable unit */
     if ((regs->cr[5] & CR5_PASTEO) != (duct0 & DUCT0_BASTEO))
     {
-        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return;
     }
 
@@ -1443,7 +1443,7 @@ U16     xcode;                          /* Exception code            */
         /* Program check if ASTE origin address is invalid */
         if (abs >= sysblk.mainsize)
         {
-            program_check (PGM_ADDRESSING_EXCEPTION);
+            program_check (regs, PGM_ADDRESSING_EXCEPTION);
             return;
         }
 
@@ -1461,7 +1461,7 @@ U16     xcode;                          /* Exception code            */
         /* Special operation exception if SSASTEO is zero */
         if (dasteo == 0)
         {
-            program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+            program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
             return;
         }
 
@@ -1471,7 +1471,7 @@ U16     xcode;                          /* Exception code            */
         /* Program check if ASTE origin address is invalid */
         if (abs >= sysblk.mainsize)
         {
-            program_check (PGM_ADDRESSING_EXCEPTION);
+            program_check (regs, PGM_ADDRESSING_EXCEPTION);
             return;
         }
 
@@ -1484,7 +1484,7 @@ U16     xcode;                          /* Exception code            */
         /* ASTE validity exception if ASTE invalid bit is one */
         if (daste[0] & ASTE0_INVALID)
         {
-            program_check (PGM_ASTE_VALIDITY_EXCEPTION);
+            program_check (regs, PGM_ASTE_VALIDITY_EXCEPTION);
             return;
         }
 
@@ -1492,7 +1492,7 @@ U16     xcode;                          /* Exception code            */
            number does not match the sequence number in the DUCT */
         if ((daste[5] & ASTE5_ASTESN) != (duct3 & DUCT3_SSASTESN))
         {
-            program_check (PGM_ASTE_SEQUENCE_EXCEPTION);
+            program_check (regs, PGM_ASTE_SEQUENCE_EXCEPTION);
             return;
         }
 
@@ -1507,7 +1507,7 @@ U16     xcode;                          /* Exception code            */
         /* Program check if ALET translation error */
         if (xcode != 0)
         {
-            program_check (xcode);
+            program_check (regs, xcode);
             return;
         }
 
@@ -1517,7 +1517,7 @@ U16     xcode;                          /* Exception code            */
                 && ((daste[2] & STD_GROUP) == 0
                     || (daste[0] & ASTE0_BASE) == 0))
         {
-            program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+            program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
             return;
         }
 

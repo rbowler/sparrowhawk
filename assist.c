@@ -82,14 +82,14 @@ U32     newia;                          /* Unsuccessful branch addr  */
     /* Privileged operation exception if in problem state */
     if (regs->psw.prob)
     {
-        program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
         return;
     }
 
     /* Specification exception if operands are not on word boundary */
     if ((addr1 & 0x00000003) || (addr2 & 0x00000003))
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 
@@ -173,14 +173,14 @@ U32     newia;                          /* Unsuccessful branch addr  */
     /* Privileged operation exception if in problem state */
     if (regs->psw.prob)
     {
-        program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
         return;
     }
 
     /* Specification exception if operands are not on word boundary */
     if ((addr1 & 0x00000003) || (addr2 & 0x00000003))
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 
@@ -268,14 +268,14 @@ U32     newia;                          /* Unsuccessful branch addr  */
     /* Privileged operation exception if in problem state */
     if (regs->psw.prob)
     {
-        program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
         return;
     }
 
     /* Specification exception if operands are not on word boundary */
     if ((addr1 & 0x00000003) || (addr2 & 0x00000003))
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 
@@ -364,14 +364,14 @@ U32     newia;                          /* Unsuccessful branch addr  */
     /* Privileged operation exception if in problem state */
     if (regs->psw.prob)
     {
-        program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
         return;
     }
 
     /* Specification exception if operands are not on word boundary */
     if ((addr1 & 0x00000003) || (addr2 & 0x00000003))
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 

@@ -282,8 +282,8 @@ int     subchan;                        /* Subchannel number         */
         /* Initialize the processor address register for STAP */
         sysblk.regs[cpu].cpuad = cpu;
 
-        /* Perform CPU reset */
-        cpu_reset (sysblk.regs + cpu);
+        /* Perform initial CPU reset */
+        initial_cpu_reset (sysblk.regs + cpu);
 
     } /* end for(cpu) */
 
@@ -357,6 +357,7 @@ int     subchan;                        /* Subchannel number         */
     initialize_lock (&sysblk.todlock);
     initialize_lock (&sysblk.mainlock);
     initialize_lock (&sysblk.intlock);
+    initialize_lock (&sysblk.sigplock);
     initialize_condition (&sysblk.intcond);
     initialize_detach_attr (&sysblk.detattr);
 

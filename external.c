@@ -2,7 +2,7 @@
 /*              ESA/390 External Interrupt and Timer                 */
 
 /*-------------------------------------------------------------------*/
-/* This module implements external interrupt and timer               */
+/* This module implements external interrupt, timer, and signalling  */
 /* functions for the Hercules ESA/390 emulator.                      */
 /*-------------------------------------------------------------------*/
 
@@ -24,10 +24,6 @@ int     rc;
 
     /* Store current PSW at PSA+X'18' */
     store_psw (&(regs->psw), psa->extold);
-
-    /* Store CPU address at PSA+X'84' */
-    psa->extcpad[0] = regs->cpuad >> 8;
-    psa->extcpad[1] = regs->cpuad & 0xFF;
 
     /* For ECMODE, store external interrupt code at PSA+X'86' */
     if ( regs->psw.ecmode )
@@ -52,14 +48,116 @@ int     rc;
 
 /*-------------------------------------------------------------------*/
 /* Perform external interrupt if pending                             */
+/*                                                                   */
+/* This function is called by the CPU to check whether any           */
+/* external interrupt conditions are pending, and to perform         */
+/* an external interrupt if so.  If multiple external interrupts     */
+/* are pending, then only the highest priority interrupt is taken,   */
+/* and any other interrupts remain pending.  Remaining interrupts    */
+/* will be processed one-by-one during subsequent calls.             */
+/*                                                                   */
+/* Important notes:                                                  */
+/* (i)  This function must NOT be called if the CPU is disabled      */
+/*      for external interrupts (PSW bit 7 is zero).                 */
+/* (ii) The caller MUST hold the interrupt lock (sysblk.intlock)     */
+/*      to ensure correct serialization of interrupt pending bits.   */
 /*-------------------------------------------------------------------*/
 void perform_external_interrupt (REGS *regs)
 {
 PSA    *psa;                            /* -> Prefixed storage area  */
+U16     cpuad;                          /* Originating CPU address   */
+
+    /* External interrupt if console interrupt key was depressed */
+    if (sysblk.intkey
+        && (regs->cr[0] & CR0_XM_INTKEY))
+    {
+        logmsg ("External interrupt: Interrupt key\n");
+
+        /* Reset interrupt key pending */
+        sysblk.intkey = 0;
+
+        /* Generate interrupt key interrupt */
+        external_interrupt (EXT_INTERRUPT_KEY_INTERRUPT, regs);
+        return;
+    }
+
+    /* External interrupt if emergency signal is pending */
+    if (regs->emersig
+        && (regs->cr[0] & CR0_XM_EMERSIG))
+    {
+        /* Find first CPU which generated an emergency signal */
+        for (cpuad = 0; regs->emercpu[cpuad] == 0; cpuad++)
+        {
+            if (cpuad >= MAX_CPU_ENGINES)
+            {
+                regs->emersig = 0;
+                return;
+            }
+        } /* end for(cpuad) */
+
+        logmsg ("External interrupt: Emergency Signal from CPU %d\n",
+                cpuad);
+
+        /* Reset the indicator for the CPU which was found */
+        regs->emercpu[cpuad] = 0;
+
+        /* Store originating CPU address at PSA+X'84' */
+        psa = (PSA*)(sysblk.mainstor + regs->pxr);
+        psa->extcpad[0] = cpuad >> 8;
+        psa->extcpad[1] = cpuad & 0xFF;
+
+        /* Reset emergency signal pending flag if there are
+           no other CPUs which generated emergency signal */
+        regs->emersig = 0;
+        while (++cpuad < MAX_CPU_ENGINES)
+        {
+            if (regs->emercpu[cpuad])
+            {
+                regs->emersig = 1;
+                break;
+            }
+        } /* end while */
+
+        /* Generate emergency signal interrupt */
+        external_interrupt (EXT_EMERGENCY_SIGNAL_INTERRUPT, regs);
+        return;
+    }
+
+    /* External interrupt if external call is pending */
+    if (regs->extcall
+        && (regs->cr[0] & CR0_XM_EXTCALL))
+    {
+        logmsg ("External interrupt: External Call from CPU %d\n",
+                regs->extccpu);
+
+        /* Reset external call pending */
+        regs->extcall = 0;
+
+        /* Store originating CPU address at PSA+X'84' */
+        psa = (PSA*)(sysblk.mainstor + regs->pxr);
+        psa->extcpad[0] = regs->extccpu >> 8;
+        psa->extcpad[1] = regs->extccpu & 0xFF;
+
+        /* Generate external call interrupt */
+        external_interrupt (EXT_EXTERNAL_CALL_INTERRUPT, regs);
+        return;
+    }
+
+    /* External interrupt if TOD clock exceeds clock comparator */
+    if (sysblk.todclk > regs->clkc
+        && sysblk.inststep == 0
+        && (regs->cr[0] & CR0_XM_CLKC))
+    {
+        if (sysblk.insttrace || sysblk.inststep)
+        {
+            logmsg ("External interrupt: Clock comparator\n");
+        }
+        external_interrupt (EXT_CLOCK_COMPARATOR_INTERRUPT, regs);
+        return;
+    }
 
     /* External interrupt if CPU timer is negative */
     if ((S64)regs->ptimer < 0
-        && (regs->psw.sysmask & PSW_EXTMASK)
         && (regs->cr[0] & CR0_XM_PTIMER))
     {
         if (sysblk.insttrace || sysblk.inststep)
@@ -71,23 +169,9 @@ PSA    *psa;                            /* -> Prefixed storage area  */
         return;
     }
 
-    /* External interrupt if TOD clock exceeds clock comparator */
-    if (sysblk.todclk > regs->clkc
-        && sysblk.inststep == 0
-        && (regs->psw.sysmask & PSW_EXTMASK)
-        && (regs->cr[0] & CR0_XM_CLKC))
-    {
-        if (sysblk.insttrace || sysblk.inststep)
-        {
-            logmsg ("External interrupt: Clock comparator\n");
-        }
-        external_interrupt (EXT_CLOCK_COMPARATOR_INTERRUPT, regs);
-        return;
-    }
-
+    /* External interrupt if interval timer interrupt is pending */
 #ifdef FEATURE_INTERVAL_TIMER
     if (regs->itimer_pending
-        && (regs->psw.sysmask & PSW_EXTMASK)
         && (regs->cr[0] & CR0_XM_ITIMER))
     {
         if (sysblk.insttrace || sysblk.inststep)
@@ -102,7 +186,6 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 
     /* External interrupt if service signal is pending */
     if (sysblk.servsig
-        && (regs->psw.sysmask & PSW_EXTMASK)
         && (regs->cr[0] & CR0_XM_SERVSIG))
     {
         sysblk.servparm = APPLY_PREFIXING (sysblk.servparm, regs->pxr);
@@ -122,21 +205,6 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 
         /* Generate service signal interrupt */
         external_interrupt (EXT_SERVICE_SIGNAL_INTERRUPT, regs);
-        return;
-    }
-
-    /* External interrupt if console interrupt key was depressed */
-    if (sysblk.intkey
-        && (regs->psw.sysmask & PSW_EXTMASK)
-        && (regs->cr[0] & CR0_XM_INTKEY))
-    {
-        logmsg ("External interrupt: Interrupt key\n");
-
-        /* Reset interrupt key pending */
-        sysblk.intkey = 0;
-
-        /* Generate interrupt key interrupt */
-        external_interrupt (EXT_INTERRUPT_KEY_INTERRUPT, regs);
         return;
     }
 
@@ -266,4 +334,350 @@ struct  timeval tv;                     /* Structure for gettimeofday
     return NULL;
 
 } /* end function timer_update_thread */
+
+/*-------------------------------------------------------------------*/
+/* Store Status                                                      */
+/* Input:                                                            */
+/*      sregs   Register context of CPU whose status is to be stored */
+/*      aaddr   A valid absolute address of a 512-byte block into    */
+/*              which status is to be stored                         */
+/*-------------------------------------------------------------------*/
+void store_status (REGS *ssreg, U32 aaddr)
+{
+U64     dreg;                           /* Double register work area */
+U32     n;                              /* 32 bit work area          */
+int     i;                              /* Array subscript           */
+PSA    *sspsa;                          /* -> Store status area      */
+
+    /* Point to the PSA into which status is to be stored */
+    sspsa = (PSA*)(sysblk.mainstor + aaddr);
+
+    /* Store CPU timer in bytes 216-223 */
+    dreg = ssreg->ptimer;
+    sspsa->storeptmr[0] = (dreg >> 56) & 0xFF;
+    sspsa->storeptmr[1] = (dreg >> 48) & 0xFF;
+    sspsa->storeptmr[2] = (dreg >> 40) & 0xFF;
+    sspsa->storeptmr[3] = (dreg >> 32) & 0xFF;
+    sspsa->storeptmr[4] = (dreg >> 24) & 0xFF;
+    sspsa->storeptmr[5] = (dreg >> 16) & 0xFF;
+    sspsa->storeptmr[6] = (dreg >> 8) & 0xFF;
+    sspsa->storeptmr[7] = dreg & 0xFF;
+
+    /* Store clock comparator in bytes 224-231 */
+    dreg = ssreg->clkc;
+    sspsa->storeclkc[0] = (dreg >> 56) & 0xFF;
+    sspsa->storeclkc[1] = (dreg >> 48) & 0xFF;
+    sspsa->storeclkc[2] = (dreg >> 40) & 0xFF;
+    sspsa->storeclkc[3] = (dreg >> 32) & 0xFF;
+    sspsa->storeclkc[4] = (dreg >> 24) & 0xFF;
+    sspsa->storeclkc[5] = (dreg >> 16) & 0xFF;
+    sspsa->storeclkc[6] = (dreg >> 8) & 0xFF;
+    sspsa->storeclkc[7] = dreg & 0xFF;
+
+    /* Store PSW in bytes 256-263 */
+    store_psw (&(ssreg->psw), sspsa->storepsw);
+
+    /* Store prefix register in bytes 264-267 */
+    sspsa->storepfx[0] = (ssreg->pxr >> 24) & 0xFF;
+    sspsa->storepfx[1] = (ssreg->pxr >> 16) & 0xFF;
+    sspsa->storepfx[2] = (ssreg->pxr >> 8) & 0xFF;
+    sspsa->storepfx[3] = ssreg->pxr & 0xFF;
+
+    /* Store access registers in bytes 288-351 */
+    for (i = 0; i < 16; i++)
+    {
+        n = ssreg->ar[i];
+        sspsa->storear[i][0] = (n >> 24) & 0xFF;
+        sspsa->storear[i][1] = (n >> 16) & 0xFF;
+        sspsa->storear[i][2] = (n >> 8) & 0xFF;
+        sspsa->storear[i][3] = n & 0xFF;
+    } /* end for(i) */
+
+    /* Store floating-point registers in bytes 352-383 */
+    for (i = 0; i < 8; i++)
+    {
+        n = ssreg->fpr[i];
+        sspsa->storefpr[i][0] = (n >> 24) & 0xFF;
+        sspsa->storefpr[i][1] = (n >> 16) & 0xFF;
+        sspsa->storefpr[i][2] = (n >> 8) & 0xFF;
+        sspsa->storefpr[i][3] = n & 0xFF;
+    } /* end for(i) */
+
+    /* Store general-purpose registers in bytes 384-447 */
+    for (i = 0; i < 16; i++)
+    {
+        n = ssreg->gpr[i];
+        sspsa->storegpr[i][0] = (n >> 24) & 0xFF;
+        sspsa->storegpr[i][1] = (n >> 16) & 0xFF;
+        sspsa->storegpr[i][2] = (n >> 8) & 0xFF;
+        sspsa->storegpr[i][3] = n & 0xFF;
+    } /* end for(i) */
+
+    /* Store control registers in bytes 448-511 */
+    for (i = 0; i < 16; i++)
+    {
+        n = ssreg->cr[i];
+        sspsa->storecr[i][0] = (n >> 24) & 0xFF;
+        sspsa->storecr[i][1] = (n >> 16) & 0xFF;
+        sspsa->storecr[i][2] = (n >> 8) & 0xFF;
+        sspsa->storecr[i][3] = n & 0xFF;
+    } /* end for(i) */
+
+    logmsg ("HHC611I CPU %d status stored "
+            "at absolute location %8.8X\n",
+            ssreg->cpuad, aaddr);
+
+} /* end function store_status */
+
+/*-------------------------------------------------------------------*/
+/* Signal processor                                                  */
+/* Input:                                                            */
+/*      r1      Register number for status and parameter operand     */
+/*      r3      Register number for target CPU address operand       */
+/*      eaddr   Effective address operand of SIGP instruction        */
+/*      regs    Register context of CPU executing SIGP instruction   */
+/* Output:                                                           */
+/*      Return value is the condition code for the SIGP instruction. */
+/*-------------------------------------------------------------------*/
+int signal_processor (int r1, int r3, U32 eaddr, REGS *regs)
+{
+REGS   *tregs;                          /* -> Target CPU registers   */
+U32     parm;                           /* Signal parameter          */
+U32     status = 0;                     /* Signal status             */
+U32     abs;                            /* Absolute address          */
+U16     cpad;                           /* Target CPU address        */
+BYTE    order;                          /* SIGP order code           */
+
+    /* Load the target CPU address from R3 bits 16-31 */
+    cpad = regs->gpr[r3] & 0xFFFF;
+
+    /* Load the order code from operand address bits 24-31 */
+    order = eaddr & 0xFF;
+
+    /* Load the parameter from R1 (if R1 odd), or R1+1 (if even) */
+    parm = (r1 & 1) ? regs->gpr[r1] : regs->gpr[r1+1];
+
+    /*debug*/logmsg("SIGP CPU %4.4X ORDER %2.2X PARM %8.8X\n",
+                    cpad, order, parm);
+
+    /* [4.9.2.1] Claim the use of the CPU signaling and response
+       facility, and return condition code 2 if the facility is
+       busy.  The sigpbusy bit is set while the facility is in
+       use by any CPU.  The sigplock must be held while testing
+       or changing the value of the sigpbusy bit. */
+    obtain_lock (&sysblk.sigplock);
+    if (sysblk.sigpbusy)
+    {
+        release_lock (&sysblk.sigplock);
+        return 2;
+    }
+    sysblk.sigpbusy = 1;
+    release_lock (&sysblk.sigplock);
+
+    /* Return condition code 3 if target CPU does not exist */
+    if (cpad > sysblk.numcpu)
+    {
+        obtain_lock (&sysblk.sigplock);
+        sysblk.sigpbusy = 0;
+        release_lock (&sysblk.sigplock);
+        return 3;
+    }
+
+    /* Point to CPU register context for the target CPU */
+    tregs = sysblk.regs + cpad;
+
+    /* Except for the reset order, return condition code 2 if the
+       target CPU is executing a previous start, stop, restart,
+       stop and store status, set prefix, or store status order */
+    if ((order != SIGP_RESET && order != SIGP_INITRESET)
+        && (tregs->cpustate == CPUSTATE_STOPPING
+            || tregs->restart))
+    {
+        obtain_lock (&sysblk.sigplock);
+        sysblk.sigpbusy = 0;
+        release_lock (&sysblk.sigplock);
+        return 2;
+    }
+
+    /* Except for the reset order, return condition code 2 if
+       the target CPU is executing a previous reset order */
+    if ((order != SIGP_RESET && order != SIGP_INITRESET)
+        && (tregs->cpustate == CPUSTATE_STOPPING
+            || tregs->restart))
+    {
+        obtain_lock (&sysblk.sigplock);
+        sysblk.sigpbusy = 0;
+        release_lock (&sysblk.sigplock);
+        return 2;
+    }
+
+    /* Obtain the interrupt lock */
+    obtain_lock (&sysblk.intlock);
+
+    /* Process signal according to order code */
+    switch (order)
+    {
+    case SIGP_SENSE:
+        /* Set status bit 24 if external call interrupt pending */
+        if (tregs->extcall)
+            status |= SIGP_STATUS_EXTERNAL_CALL_PENDING;
+
+        /* Set status bit 25 if target CPU is stopped */
+        if (tregs->cpustate == CPUSTATE_STOPPED)
+            status |= SIGP_STATUS_STOPPED;
+
+        break;
+
+    case SIGP_EXTCALL:
+        /* Exit with status bit 24 set if a previous external
+           call interrupt is still pending in the target CPU */
+        if (tregs->extcall)
+        {
+            status |= SIGP_STATUS_EXTERNAL_CALL_PENDING;
+            break;
+        }
+
+        /* Raise an external call interrupt pending condition */
+        tregs->extcall = 1;
+        tregs->extccpu = regs->cpuad;
+
+        break;
+
+    case SIGP_EMERGENCY:
+        /* Raise an emergency signal interrupt pending condition */
+        tregs->emersig = 1;
+        tregs->emercpu[regs->cpuad] = 1;
+
+        break;
+
+    case SIGP_START:
+        /* Restart the target CPU if it is in the stopped state */
+        tregs->cpustate = CPUSTATE_STARTED;
+
+        break;
+
+    case SIGP_STOP:
+        /* Put the the target CPU into the stopping state */
+        tregs->cpustate = CPUSTATE_STOPPING;
+
+        break;
+
+    case SIGP_RESTART:
+        /* Make restart interrupt pending in the target CPU */
+        regs->restart = 1;
+
+        break;
+
+    case SIGP_STOPSTORE:
+        /* Indicate store status is required when stopped */
+        tregs->storstat = 1;
+
+        /* Put the the target CPU into the stopping state */
+        tregs->cpustate = CPUSTATE_STOPPING;
+
+        break;
+
+    case SIGP_INITRESET:
+        /* Perform initial CPU reset function */
+        initial_cpu_reset (tregs);
+
+        break;
+
+    case SIGP_RESET:
+        /* Perform CPU reset function */
+        cpu_reset (tregs);
+
+        break;
+
+    case SIGP_SETPREFIX:
+        /* Exit with status bit 22 set if CPU is not stopped */
+        if (tregs->cpustate != CPUSTATE_STOPPED)
+        {
+            status |= SIGP_STATUS_INCORRECT_STATE;
+            release_lock (&sysblk.intlock);
+            break;
+        }
+
+        /* Obtain new prefix from parameter register bits 1-19 */
+        abs = parm & 0x7FFFF000;
+
+        /* Exit with status bit 23 set if new prefix is invalid */
+        if (abs >= sysblk.mainsize)
+        {
+            status |= SIGP_STATUS_INVALID_PARAMETER;
+            release_lock (&sysblk.intlock);
+            break;
+        }
+
+        /* Load new value into prefix register of target CPU */
+        tregs->pxr = abs;
+
+        /* Invalidate the ALB and TLB of the target CPU */
+        purge_alb (tregs);
+        purge_tlb (tregs);
+
+        /* Perform serialization and checkpoint-sync on target CPU */
+//      perform_serialization (tregs);
+//      perform_chkpt_sync (tregs);
+
+        break;
+
+    case SIGP_STORE:
+        /* Exit with status bit 22 set if CPU is not stopped */
+        if (tregs->cpustate != CPUSTATE_STOPPED)
+        {
+            status |= SIGP_STATUS_INCORRECT_STATE;
+            release_lock (&sysblk.intlock);
+            break;
+        }
+
+        /* Obtain status address from parameter register bits 1-22 */
+        abs = parm & 0x7FFFFE00;
+
+        /* Exit with status bit 23 set if status address invalid */
+        if (abs >= sysblk.mainsize)
+        {
+            status |= SIGP_STATUS_INVALID_PARAMETER;
+            release_lock (&sysblk.intlock);
+            break;
+        }
+
+        /* Store status at specified main storage address */
+        store_status (tregs, abs);
+
+        /* Perform serialization and checkpoint-sync on target CPU */
+//      perform_serialization (tregs);
+//      perform_chkpt_sync (tregs);
+
+        break;
+
+    default:
+        status = SIGP_STATUS_INVALID_ORDER;
+    } /* end switch(order) */
+
+    /* Release the interrupt lock */
+    release_lock (&sysblk.intlock);
+
+    /* Release the use of the signalling and response facility */
+    obtain_lock (&sysblk.sigplock);
+    sysblk.sigpbusy = 0;
+    release_lock (&sysblk.sigplock);
+
+    /* Wake up any CPUs waiting for an interrupt or start */
+    obtain_lock (&sysblk.intlock);
+    signal_condition (&sysblk.intcond);
+    release_lock (&sysblk.intlock);
+
+    /* If status is non-zero, load the status word into
+       the R1 register and return condition code 1 */
+    if (status != 0)
+    {
+        regs->gpr[r1] = status;
+        return 1;
+    }
+
+    /* Return condition code zero */
+    return 0;
+
+} /* end function signal_processor */
 

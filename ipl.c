@@ -28,7 +28,10 @@ BYTE    chanstat;                       /* IPL device channel status */
     sysblk.servsig = 0;
     sysblk.intkey = 0;
 
-    /* Perform CPU reset */
+    /* Perform initial reset on the IPL CPU */
+    initial_cpu_reset (regs);
+
+    /* Perform CPU reset on all other CPUs */
     for (cpu = 0; cpu < sysblk.numcpu; cpu++)
         cpu_reset (sysblk.regs + cpu);
 
@@ -167,6 +170,41 @@ BYTE    chanstat;                       /* IPL device channel status */
 /*-------------------------------------------------------------------*/
 void cpu_reset (REGS *regs)
 {
+int             i;                      /* Array subscript           */
+
+    /* Clear pending interrupts and indicators */
+    regs->itimer_pending = 0;
+    regs->restart = 0;
+    regs->extcall = 0;
+    regs->extccpu = 0;
+    regs->emersig = 0;
+    for (i = 0; i < MAX_CPU_ENGINES; i++)
+        regs->emercpu[i] = 0;
+    regs->storstat = 0;
+    regs->instvalid = 0;
+    regs->instcount = 0;
+
+    /* Clear the translation exception identification */
+    regs->tea = 0;
+    regs->excarid = 0;
+
+    /* Purge the lookaside buffers */
+    purge_tlb (regs);
+    purge_alb (regs);
+
+    /* Put the CPU into the stopped state */
+    regs->cpustate = CPUSTATE_STOPPED;
+
+} /* end function cpu_reset */
+
+/*-------------------------------------------------------------------*/
+/* Function to perform initial CPU reset                             */
+/*-------------------------------------------------------------------*/
+void initial_cpu_reset (REGS *regs)
+{
+    /* Perform a CPU reset */
+    cpu_reset (regs);
+
     /* Clear the registers */
     memset (&regs->psw, 0, sizeof(PSW));
     memset (regs->gpr, 0, sizeof(regs->gpr));
@@ -174,11 +212,8 @@ void cpu_reset (REGS *regs)
     memset (regs->ar, 0, sizeof(regs->ar));
     memset (regs->fpr, 0, sizeof(regs->fpr));
     regs->pxr = 0;
-    regs->itimer_pending = 0;
-    regs->restart = 0;
     regs->ptimer = 0;
     regs->clkc = 0;
-    regs->instcount = 0;
 
     /* Initialize external interrupt masks in control register 0 */
     regs->cr[0] = CR0_XM_ITIMER | CR0_XM_INTKEY | CR0_XM_EXTSIG;
@@ -196,11 +231,5 @@ void cpu_reset (REGS *regs)
     regs->cr[15] = 512;
 #endif /*!FEATURE_LINKAGE_STACK*/
 
-    /* Purge the lookaside buffers */
-    purge_tlb (regs);
-    purge_alb (regs);
+} /* end function initial_cpu_reset */
 
-    /* Put the CPU into the stopped state */
-    regs->cpustate = CPUSTATE_STOPPED;
-
-} /* end function cpu_reset */

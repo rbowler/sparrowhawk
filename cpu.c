@@ -260,11 +260,16 @@ int load_psw (PSW *psw, BYTE *addr)
 /*-------------------------------------------------------------------*/
 /* Load program check new PSW                                        */
 /*-------------------------------------------------------------------*/
-void program_check (int code)
+void program_check (REGS *regs, int code)
 {
-REGS   *regs = &(sysblk.regs[0]);       /* -> CPU register context   */
 PSA    *psa;                            /* -> Prefixed storage area  */
 int     rc;                             /* Return code               */
+U32     tea;                            /* Translation exception addr*/
+BYTE    excarid;                        /* Exception access reg id   */
+
+    /* Save the translation exception address and AR identifier */
+    tea = regs->tea;
+    excarid = regs->excarid;
 
     /* Back up the PSW for exceptions which cause nullification,
        unless the exception occurred during instruction fetch */
@@ -297,7 +302,11 @@ int     rc;                             /* Return code               */
     regs->psw.intcode = code;
 
     /* Trace the program check */
-    if (code != PGM_TRACE_TABLE_EXCEPTION)
+    if (sysblk.insttrace || sysblk.inststep
+        || (code != PGM_PAGE_TRANSLATION_EXCEPTION
+            && code != PGM_SEGMENT_TRANSLATION_EXCEPTION
+            && code != PGM_TRACE_TABLE_EXCEPTION
+            && code != PGM_MONITOR_EVENT))
     {
         logmsg ("Program check CODE=%4.4X ILC=%d ",
                 code, regs->psw.ilc);
@@ -328,7 +337,7 @@ int     rc;                             /* Return code               */
             || code == PGM_PROTECTION_EXCEPTION
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
            )
-            psa->excarid = regs->excarid;
+            psa->excarid = excarid;
 
         /* Store the translation exception address at PSA+144 */
         if (code == PGM_PAGE_TRANSLATION_EXCEPTION
@@ -345,10 +354,10 @@ int     rc;                             /* Return code               */
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
            )
         {
-            psa->tea[0] = (regs->tea & 0xFF000000) >> 24;
-            psa->tea[1] = (regs->tea & 0xFF0000) >> 16;
-            psa->tea[2] = (regs->tea & 0xFF00) >> 8;
-            psa->tea[3] = regs->tea & 0xFF;
+            psa->tea[0] = (tea & 0xFF000000) >> 24;
+            psa->tea[1] = (tea & 0xFF0000) >> 16;
+            psa->tea[2] = (tea & 0xFF00) >> 8;
+            psa->tea[3] = tea & 0xFF;
         }
     }
 
@@ -551,7 +560,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Generate space switch event if required */
             if (rc) {
-                program_check (PGM_SPACE_SWITCH_EVENT);
+                program_check (regs, PGM_SPACE_SWITCH_EVENT);
             }
 
             break;
@@ -570,7 +579,7 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
         /* 01xx: Invalid operation                                   */
         /*-----------------------------------------------------------*/
-            program_check (PGM_OPERATION_EXCEPTION);
+            program_check (regs, PGM_OPERATION_EXCEPTION);
             goto terminate;
 
         } /* end switch(ibyte) */
@@ -670,14 +679,14 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if in problem state */
         if ( regs->psw.prob )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
         /* Program check if R2 bits 28-31 are not zeroes */
         if ( regs->gpr[r2] & 0x0000000F )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -690,7 +699,7 @@ static BYTE module[8];                  /* Module name               */
         /* Addressing exception if block is outside main storage */
         if ( n >= sysblk.mainsize )
         {
-            program_check (PGM_ADDRESSING_EXCEPTION);
+            program_check (regs, PGM_ADDRESSING_EXCEPTION);
             goto terminate;
         }
 
@@ -711,14 +720,14 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if in problem state */
         if ( regs->psw.prob )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
         /* Program check if R2 bits 28-31 are not zeroes */
         if ( regs->gpr[r2] & 0x0000000F )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -731,7 +740,7 @@ static BYTE module[8];                  /* Module name               */
         /* Addressing exception if block is outside main storage */
         if ( n >= sysblk.mainsize )
         {
-            program_check (PGM_ADDRESSING_EXCEPTION);
+            program_check (regs, PGM_ADDRESSING_EXCEPTION);
             goto terminate;
         }
 
@@ -836,7 +845,7 @@ static BYTE module[8];                  /* Module name               */
         rc = load_psw ( &(regs->psw), psa->svcnew );
         if ( rc )
         {
-            program_check (rc);
+            program_check (regs, rc);
             goto terminate;
         }
 
@@ -966,7 +975,7 @@ static BYTE module[8];                  /* Module name               */
             regs->psw.cc = 3;
             if ( regs->psw.fomask )
             {
-                program_check (PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+                program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
                 goto terminate;
             }
             break;
@@ -1020,7 +1029,7 @@ static BYTE module[8];                  /* Module name               */
             regs->psw.cc = 3;
             if ( regs->psw.fomask )
             {
-                program_check (PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+                program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
                 goto terminate;
             }
             break;
@@ -1111,7 +1120,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if fixed-point overflow */
         if ( regs->psw.cc == 3 && regs->psw.fomask )
         {
-            program_check (PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+            program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
             goto terminate;
         }
 
@@ -1131,7 +1140,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if fixed-point overflow */
         if ( regs->psw.cc == 3 && regs->psw.fomask )
         {
-            program_check (PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+            program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
             goto terminate;
         }
 
@@ -1145,7 +1154,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if R1 is odd */
         if ( r1 & 1 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -1164,7 +1173,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if R1 is odd */
         if ( r1 & 1 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -1178,7 +1187,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if overflow */
         if ( divide_overflow )
         {
-            program_check (PGM_FIXED_POINT_DIVIDE_EXCEPTION);
+            program_check (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
             goto terminate;
         }
 
@@ -1218,7 +1227,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if ( r1 & 1 || r1 > 6 || r2 & 1 || r2 > 6)
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -1236,7 +1245,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if ( r1 & 1 || r1 > 6 || r2 & 1 || r2 > 6)
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -1254,7 +1263,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if ( r1 & 1 || r1 > 6 || r2 & 1 || r2 > 6)
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -1312,7 +1321,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if operand is not on a halfword boundary */
         if ( effective_addr & 0x00000001 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -1322,7 +1331,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if recursive execute */
         if ( dword[0] == 0x44 )
         {
-            program_check (PGM_EXECUTE_EXCEPTION);
+            program_check (regs, PGM_EXECUTE_EXCEPTION);
             goto terminate;
         }
 
@@ -1460,7 +1469,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if fixed-point overflow */
         if ( regs->psw.cc == 3 && regs->psw.fomask )
         {
-            program_check (PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+            program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
             goto terminate;
         }
 
@@ -1487,7 +1496,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if fixed-point overflow */
         if ( regs->psw.cc == 3 && regs->psw.fomask )
         {
-            program_check (PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+            program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
             goto terminate;
         }
 
@@ -1675,7 +1684,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if fixed-point overflow */
         if ( regs->psw.cc == 3 && regs->psw.fomask )
         {
-            program_check (PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+            program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
             goto terminate;
         }
 
@@ -1698,7 +1707,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if fixed-point overflow */
         if ( regs->psw.cc == 3 && regs->psw.fomask )
         {
-            program_check (PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+            program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
             goto terminate;
         }
 
@@ -1712,7 +1721,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if R1 is odd */
         if ( r1 & 1 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -1734,7 +1743,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if R1 is odd */
         if ( r1 & 1 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -1751,7 +1760,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if overflow */
         if ( divide_overflow )
         {
-            program_check (PGM_FIXED_POINT_DIVIDE_EXCEPTION);
+            program_check (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
             goto terminate;
         }
 
@@ -1797,7 +1806,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 1 || r1 > 6 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -1815,7 +1824,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 1 || r1 > 6 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -1836,7 +1845,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 1 || r1 > 6 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -1866,7 +1875,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 1 || r1 > 6 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -1883,14 +1892,14 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if in problem state */
         if ( regs->psw.prob )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
         /* Special operation exception if SSM-suppression is active */
         if ( regs->cr[0] & CR0_SSM_SUPP )
         {
-            program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+            program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
             goto terminate;
         }
 
@@ -1900,7 +1909,7 @@ static BYTE module[8];                  /* Module name               */
         /* For ECMODE, bits 0 and 2-4 of system mask must be zero */
         if (regs->psw.ecmode && (regs->psw.sysmask & 0xB8) != 0)
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -1914,14 +1923,14 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if in problem state */
         if ( regs->psw.prob )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
         /* Program check if operand is not on a doubleword boundary */
         if ( effective_addr & 0x00000007 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -1936,7 +1945,7 @@ static BYTE module[8];                  /* Module name               */
         rc = load_psw ( &(regs->psw), dword );
         if ( rc )
         {
-            program_check (rc);
+            program_check (regs, rc);
             goto terminate;
         }
 
@@ -1954,7 +1963,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if in problem state */
         if ( regs->psw.prob )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
@@ -1982,7 +1991,7 @@ static BYTE module[8];                  /* Module name               */
             n2 = regs->gpr[r3];
 
             /* Call MSSF and set condition code */
-            regs->psw.cc = mssf_call (n1, n2);
+            regs->psw.cc = mssf_call (n1, n2, regs);
 
             /* Perform serialization and checkpoint-synchronization */
             perform_serialization ();
@@ -2005,7 +2014,7 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
         /* Diagnose xxx: Invalid function code                       */
         /*-----------------------------------------------------------*/
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
 
         } /* end switch(effective_addr) */
@@ -2187,7 +2196,7 @@ static BYTE module[8];                  /* Module name               */
             regs->psw.cc = 3;
             if ( regs->psw.fomask )
             {
-                program_check (PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+                program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
                 goto terminate;
             }
             break;
@@ -2207,7 +2216,7 @@ static BYTE module[8];                  /* Module name               */
         /* Specification exception if R1 is odd */
         if ( r1 & 1 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -2230,7 +2239,7 @@ static BYTE module[8];                  /* Module name               */
         /* Specification exception if R1 is odd */
         if ( r1 & 1 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -2253,7 +2262,7 @@ static BYTE module[8];                  /* Module name               */
         /* Specification exception if R1 is odd */
         if ( r1 & 1 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -2279,7 +2288,7 @@ static BYTE module[8];                  /* Module name               */
         /* Specification exception if R1 is odd */
         if ( r1 & 1 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -2312,7 +2321,7 @@ static BYTE module[8];                  /* Module name               */
             regs->psw.cc = 3;
             if ( regs->psw.fomask )
             {
-                program_check (PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+                program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
                 goto terminate;
             }
             break;
@@ -2505,14 +2514,14 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if in problem state */
         if ( regs->psw.prob )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
         /* Program check if operand is not on a fullword boundary */
         if ( effective_addr & 0x00000003 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -2542,7 +2551,7 @@ static BYTE module[8];                  /* Module name               */
             regs->tea = (n & TEA_EFFADDR);
             regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-            program_check (PGM_PROTECTION_EXCEPTION);
+            program_check (regs, PGM_PROTECTION_EXCEPTION);
             goto terminate;
         }
 
@@ -2552,7 +2561,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if trace entry is outside main storage */
         if ( n >= sysblk.mainsize )
         {
-            program_check (PGM_ADDRESSING_EXCEPTION);
+            program_check (regs, PGM_ADDRESSING_EXCEPTION);
             goto terminate;
         }
 
@@ -2560,7 +2569,7 @@ static BYTE module[8];                  /* Module name               */
            entry (76 bytes) would overflow a 4K page boundary */
         if ( ((n + 76) & 0xFFFFF000) != (n & 0xFFFFF000) )
         {
-            program_check (PGM_TRACE_TABLE_EXCEPTION);
+            program_check (regs, PGM_TRACE_TABLE_EXCEPTION);
             goto terminate;
         }
 
@@ -2628,7 +2637,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if operand is not on a fullword boundary */
         if ( effective_addr & 0x00000003 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -2663,7 +2672,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if operand is not on a fullword boundary */
         if ( effective_addr & 0x00000003 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -2699,7 +2708,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if in problem state */
         if ( regs->psw.prob )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
@@ -2735,7 +2744,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if in problem state */
         if ( regs->psw.prob )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
@@ -2762,7 +2771,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if in problem state */
         if ( regs->psw.prob )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
@@ -2923,7 +2932,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if fixed-point overflow */
             if ( regs->psw.cc == 3 && regs->psw.fomask )
             {
-                program_check (PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+                program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
                 goto terminate;
             }
 
@@ -2962,7 +2971,7 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
         /* A7xx: Invalid operation                                   */
         /*-----------------------------------------------------------*/
-            program_check (PGM_OPERATION_EXCEPTION);
+            program_check (regs, PGM_OPERATION_EXCEPTION);
             goto terminate;
 
         } /* end switch(r3) */
@@ -2999,7 +3008,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if in problem state */
         if ( regs->psw.prob )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
@@ -3019,7 +3028,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if in problem state */
         if ( regs->psw.prob )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
@@ -3032,7 +3041,7 @@ static BYTE module[8];                  /* Module name               */
         /* For ECMODE, bits 0 and 2-4 of system mask must be zero */
         if (regs->psw.ecmode && (regs->psw.sysmask & 0xB8) != 0)
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -3046,34 +3055,16 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if in problem state */
         if ( regs->psw.prob )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
-        }
-
-        /* Load the target CPU address from R3 bits 16-31 */
-        i = regs->gpr[r3] & 0xFFFF;
-
-        /* Load the order code from operand address bits 24-31 */
-        d = effective_addr & 0xFF;
-
-        /* Load the parameter from R1 (if R1 odd), or R1+1 (if even) */
-        n = (r1 & 1) ? regs->gpr[r1] : regs->gpr[r1+1];
-
-        /*debug*/logmsg("SIGP CPU %4.4X OPERATION %2.2X PARM %8.8X\n",
-                        i, d, n);
-
-        /* Set condition code 3 if target CPU does not exist */
-        if (i > 0)
-        {
-            regs->psw.cc = 3;
-            break;
         }
 
         /* Perform serialization before starting operation */
         perform_serialization ();
 
-        /* Set condition code 3 because SIGP is not implemented yet */
-        regs->psw.cc = 3;
+        /* Signal processor and set condition code */
+        regs->psw.cc =
+            signal_processor (r1, r3, effective_addr, regs);
 
         /* Perform serialization after completing operation */
         perform_serialization ();
@@ -3088,7 +3079,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if monitor class exceeds 15 */
         if ( ibyte > 0x0F )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -3109,7 +3100,7 @@ static BYTE module[8];                  /* Module name               */
         psa->moncode[3] = effective_addr & 0xFF;
 
         /* Generate a monitor event program interruption */
-        program_check (PGM_MONITOR_EVENT);
+        program_check (regs, PGM_MONITOR_EVENT);
 
         break;
 
@@ -3121,7 +3112,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if in problem state */
         if ( regs->psw.prob )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
@@ -3159,14 +3150,14 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if operand not on doubleword boundary */
             if ( effective_addr & 0x00000007 )
             {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3216,14 +3207,14 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if operand not on doubleword boundary */
             if ( effective_addr & 0x00000007 )
             {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3243,14 +3234,14 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if operand not on doubleword boundary */
             if ( effective_addr & 0x00000007 )
             {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3269,14 +3260,14 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if operand not on doubleword boundary */
             if ( effective_addr & 0x00000007 )
             {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3295,14 +3286,14 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if operand not on doubleword boundary */
             if ( effective_addr & 0x00000007 )
             {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3325,7 +3316,7 @@ static BYTE module[8];                  /* Module name               */
             if ( regs->psw.prob
                 && ((regs->cr[3] << (n >> 4)) & 0x80000000) == 0 )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3344,7 +3335,7 @@ static BYTE module[8];                  /* Module name               */
             if ( regs->psw.prob
                  && (regs->cr[0] & CR0_EXT_AUTH) == 0 )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3363,7 +3354,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3380,14 +3371,14 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if operand not on fullword boundary */
             if ( effective_addr & 0x00000003 )
             {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3403,7 +3394,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if prefix is invalid absolute address */
             if ( n >= sysblk.mainsize )
             {
-                program_check (PGM_ADDRESSING_EXCEPTION);
+                program_check (regs, PGM_ADDRESSING_EXCEPTION);
                 goto terminate;
             }
 
@@ -3427,14 +3418,14 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if operand not on fullword boundary */
             if ( effective_addr & 0x00000003 )
             {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3451,14 +3442,14 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if operand not on halfword boundary */
             if ( effective_addr & 0x00000001 )
             {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3476,7 +3467,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3489,7 +3480,7 @@ static BYTE module[8];                  /* Module name               */
             /* Addressing exception if block is outside main storage */
             if ( n >= sysblk.mainsize )
             {
-                program_check (PGM_ADDRESSING_EXCEPTION);
+                program_check (regs, PGM_ADDRESSING_EXCEPTION);
                 goto terminate;
             }
 
@@ -3525,7 +3516,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Generate space switch event if required */
             if (rc) {
-                program_check (PGM_SPACE_SWITCH_EVENT);
+                program_check (regs, PGM_SPACE_SWITCH_EVENT);
             }
 
             break;
@@ -3551,7 +3542,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Generate a space-switch-event if indicated */
             if (rc)
-                program_check (PGM_SPACE_SWITCH_EVENT);
+                program_check (regs, PGM_SPACE_SWITCH_EVENT);
 
             break;
 #endif /*FEATURE_DUAL_ADDRESS_SPACE*/
@@ -3575,7 +3566,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3587,7 +3578,7 @@ static BYTE module[8];                  /* Module name               */
             n2 = APPLY_PREFIXING (n2, regs->pxr);
 
             /* Call service processor and set condition code */
-            regs->psw.cc = service_call ( n1, n2 );
+            regs->psw.cc = service_call ( n1, n2, regs );
 
             break;
 
@@ -3599,7 +3590,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3609,7 +3600,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if translation format is invalid */
             if ((regs->cr[0] & CR0_TRAN_FMT) != CR0_TRAN_ESA390)
             {
-                program_check (PGM_TRANSLATION_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_TRANSLATION_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3669,7 +3660,7 @@ static BYTE module[8];                  /* Module name               */
             /* Special operation exception if DAT is off */
             if ( (regs->psw.sysmask & PSW_DATMODE) == 0 )
             {
-                program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+                program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3678,7 +3669,7 @@ static BYTE module[8];                  /* Module name               */
             if ( regs->psw.prob
                  && (regs->cr[0] & CR0_EXT_AUTH) == 0 )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3690,7 +3681,7 @@ static BYTE module[8];                  /* Module name               */
             if (translate_addr (effective_addr, r2, regs, ACCTYPE_IVSK,
                 &n, &xcode, &private, &protect, &stid))
             {
-                program_check (xcode);
+                program_check (regs, xcode);
                 goto terminate;
             }
 
@@ -3700,7 +3691,7 @@ static BYTE module[8];                  /* Module name               */
             /* Addressing exception if block is outside main storage */
             if ( n >= sysblk.mainsize )
             {
-                program_check (PGM_ADDRESSING_EXCEPTION);
+                program_check (regs, PGM_ADDRESSING_EXCEPTION);
                 goto terminate;
             }
 
@@ -3763,7 +3754,7 @@ static BYTE module[8];                  /* Module name               */
             /* Special operation exception if DAT is off */
             if ( (regs->psw.sysmask & PSW_DATMODE) == 0 )
             {
-                program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+                program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3772,7 +3763,7 @@ static BYTE module[8];                  /* Module name               */
             if ( regs->psw.prob
                  && (regs->cr[0] & CR0_EXT_AUTH) == 0 )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3789,7 +3780,7 @@ static BYTE module[8];                  /* Module name               */
             /* Special operation exception if DAT is off */
             if ( (regs->psw.sysmask & PSW_DATMODE) == 0 )
             {
-                program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+                program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3798,7 +3789,7 @@ static BYTE module[8];                  /* Module name               */
             if ( regs->psw.prob
                  && (regs->cr[0] & CR0_EXT_AUTH) == 0 )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3841,7 +3832,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Generate space switch event if required */
             if (rc) {
-                program_check (PGM_SPACE_SWITCH_EVENT);
+                program_check (regs, PGM_SPACE_SWITCH_EVENT);
             }
 
             break;
@@ -3857,7 +3848,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3871,7 +3862,7 @@ static BYTE module[8];                  /* Module name               */
             /* Addressing exception if block is outside main storage */
             if ( n >= sysblk.mainsize )
             {
-                program_check (PGM_ADDRESSING_EXCEPTION);
+                program_check (regs, PGM_ADDRESSING_EXCEPTION);
                 goto terminate;
             }
 
@@ -3890,7 +3881,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3904,7 +3895,7 @@ static BYTE module[8];                  /* Module name               */
             /* Addressing exception if block is outside main storage */
             if ( n >= sysblk.mainsize )
             {
-                program_check (PGM_ADDRESSING_EXCEPTION);
+                program_check (regs, PGM_ADDRESSING_EXCEPTION);
                 goto terminate;
             }
 
@@ -3928,7 +3919,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3946,7 +3937,7 @@ static BYTE module[8];                  /* Module name               */
             /* Addressing exception if block is outside main storage */
             if ( n >= sysblk.mainsize )
             {
-                program_check (PGM_ADDRESSING_EXCEPTION);
+                program_check (regs, PGM_ADDRESSING_EXCEPTION);
                 goto terminate;
             }
 
@@ -3969,7 +3960,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -3984,7 +3975,7 @@ static BYTE module[8];                  /* Module name               */
             /* Addressing exception if block is outside main storage */
             if ( n >= sysblk.mainsize )
             {
-                program_check (PGM_ADDRESSING_EXCEPTION);
+                program_check (regs, PGM_ADDRESSING_EXCEPTION);
                 goto terminate;
             }
 
@@ -3995,7 +3986,7 @@ static BYTE module[8];                  /* Module name               */
                 regs->tea = (n & TEA_EFFADDR);
                 regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-                program_check (PGM_PROTECTION_EXCEPTION);
+                program_check (regs, PGM_PROTECTION_EXCEPTION);
                 goto terminate;
             }
 
@@ -4025,14 +4016,14 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if reg 1 bits 0-15 not X'0001' */
             if ( (regs->gpr[1] >> 16) != 0x0001 )
             {
-                program_check (PGM_OPERAND_EXCEPTION);
+                program_check (regs, PGM_OPERAND_EXCEPTION);
                 goto terminate;
             }
 
@@ -4055,6 +4046,43 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 
+        case 0x31:
+        /*-----------------------------------------------------------*/
+        /* B231: HSCH - Halt Subchannel                          [S] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Program check if reg 1 bits 0-15 not X'0001' */
+            if ( (regs->gpr[1] >> 16) != 0x0001 )
+            {
+                program_check (regs, PGM_OPERAND_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Locate the device block for this subchannel */
+            dev = find_device_by_subchan (regs->gpr[1] & 0xFFFF);
+
+            /* Condition code 3 if subchannel does not exist,
+               is not valid, or is not enabled */
+            if (dev == NULL
+                || (dev->pmcw.flag5 & PMCW5_V) == 0
+                || (dev->pmcw.flag5 & PMCW5_E) == 0)
+            {
+                regs->psw.cc = 3;
+                break;
+            }
+
+            /* Perform halt subchannel and set condition code */
+            regs->psw.cc = halt_subchan (regs, dev);
+
+            break;
+
         case 0x32:
         /*-----------------------------------------------------------*/
         /* B232: MSCH - Modify Subchannel                        [S] */
@@ -4063,14 +4091,14 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if operand not on fullword boundary */
             if ( effective_addr & 0x00000003 )
             {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -4084,14 +4112,14 @@ static BYTE module[8];                  /* Module name               */
                 || pmcw.flag24 != 0 || pmcw.flag25 != 0
                 || pmcw.flag26 != 0 || (pmcw.flag27 & PMCW27_RESV))
             {
-                program_check (PGM_OPERAND_EXCEPTION);
+                program_check (regs, PGM_OPERAND_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if reg 1 bits 0-15 not X'0001' */
             if ( (regs->gpr[1] >> 16) != 0x0001 )
             {
-                program_check (PGM_OPERAND_EXCEPTION);
+                program_check (regs, PGM_OPERAND_EXCEPTION);
                 goto terminate;
             }
 
@@ -4160,14 +4188,14 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if operand not on fullword boundary */
             if ( effective_addr & 0x00000003 )
             {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -4181,21 +4209,21 @@ static BYTE module[8];                  /* Module name               */
                 || orb.flag7 & ORB7_RESV
                 || orb.ccwaddr[0] & 0x80)
             {
-                program_check (PGM_OPERAND_EXCEPTION);
+                program_check (regs, PGM_OPERAND_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if incorrect length suppression */
             if (orb.flag7 & ORB7_L)
             {
-                program_check (PGM_OPERAND_EXCEPTION);
+                program_check (regs, PGM_OPERAND_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if reg 1 bits 0-15 not X'0001' */
             if ( (regs->gpr[1] >> 16) != 0x0001 )
             {
-                program_check (PGM_OPERAND_EXCEPTION);
+                program_check (regs, PGM_OPERAND_EXCEPTION);
                 goto terminate;
             }
 
@@ -4240,14 +4268,14 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if reg 1 bits 0-15 not X'0001' */
             if ( (regs->gpr[1] >> 16) != 0x0001 )
             {
-                program_check (PGM_OPERAND_EXCEPTION);
+                program_check (regs, PGM_OPERAND_EXCEPTION);
                 goto terminate;
             }
 
@@ -4264,7 +4292,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if operand not on fullword boundary */
             if ( effective_addr & 0x00000003 )
             {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -4293,21 +4321,21 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if operand not on fullword boundary */
             if ( effective_addr & 0x00000003 )
             {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if reg 1 bits 0-15 not X'0001' */
             if ( (regs->gpr[1] >> 16) != 0x0001 )
             {
-                program_check (PGM_OPERAND_EXCEPTION);
+                program_check (regs, PGM_OPERAND_EXCEPTION);
                 goto terminate;
             }
 
@@ -4344,14 +4372,14 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if operand not on fullword boundary */
             if ( effective_addr & 0x00000003 )
             {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -4394,14 +4422,14 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if reg 1 bits 0-15 not X'0001' */
             if ( (regs->gpr[1] >> 16) != 0x0001 )
             {
-                program_check (PGM_OPERAND_EXCEPTION);
+                program_check (regs, PGM_OPERAND_EXCEPTION);
                 goto terminate;
             }
 
@@ -4487,7 +4515,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -4498,7 +4526,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if operand not on fullword boundary */
             if ( n & 0x00000003 )
             {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -4528,7 +4556,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -4573,7 +4601,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -4584,7 +4612,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if operand not on fullword boundary */
             if ( n & 0x00000003 )
             {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -4602,7 +4630,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if ASF control bit is zero */
             if ((regs->cr[0] & CR0_ASF) == 0)
             {
-                program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+                program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -4756,7 +4784,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Generate a space-switch-event if indicated */
             if (rc)
-                program_check (PGM_SPACE_SWITCH_EVENT);
+                program_check (regs, PGM_SPACE_SWITCH_EVENT);
 
             break;
 #endif /*FEATURE_DUAL_ADDRESS_SPACE*/
@@ -4765,7 +4793,7 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
         /* B2xx: Invalid operation                                   */
         /*-----------------------------------------------------------*/
-            program_check (PGM_OPERATION_EXCEPTION);
+            program_check (regs, PGM_OPERATION_EXCEPTION);
             goto terminate;
 
         } /* end switch(ibyte) */
@@ -4779,14 +4807,14 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if in problem state */
         if ( regs->psw.prob )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
         /* Program check if operand is not on a fullword boundary */
         if ( effective_addr & 0x00000003 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -4819,14 +4847,14 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if in problem state */
         if ( regs->psw.prob )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
         /* Program check if operand is not on a fullword boundary */
         if ( effective_addr & 0x00000003 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -4861,7 +4889,7 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if operand is not on a fullword boundary */
         if ( effective_addr & 0x00000003 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -4904,14 +4932,14 @@ static BYTE module[8];                  /* Module name               */
         /* Program check if either R1 or R3 is odd */
         if ( ( r1 & 1 ) || ( r3 & 1 ) )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
         /* Program check if operand is not on a doubleword boundary */
         if ( effective_addr & 0x00000007 )
         {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
@@ -5179,7 +5207,7 @@ static BYTE module[8];                  /* Module name               */
         if ( regs->psw.prob
             && ((regs->cr[3] << (j >> 4)) & 0x80000000) == 0 )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
@@ -5204,7 +5232,7 @@ static BYTE module[8];                  /* Module name               */
             || REAL_MODE(&regs->psw)
             || regs->psw.armode)
         {
-            program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+            program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
             goto terminate;
         }
 
@@ -5228,7 +5256,7 @@ static BYTE module[8];                  /* Module name               */
         if ( regs->psw.prob
             && ((regs->cr[3] << (j >> 4)) & 0x80000000) == 0 )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
@@ -5256,7 +5284,7 @@ static BYTE module[8];                  /* Module name               */
             || REAL_MODE(&regs->psw)
             || regs->psw.armode)
         {
-            program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+            program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
             goto terminate;
         }
 
@@ -5280,7 +5308,7 @@ static BYTE module[8];                  /* Module name               */
         if ( regs->psw.prob
             && ((regs->cr[3] << (j >> 4)) & 0x80000000) == 0 )
         {
-            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             goto terminate;
         }
 
@@ -5436,7 +5464,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -5444,14 +5472,14 @@ static BYTE module[8];                  /* Module name               */
                (bit 12 of control register 14) is zero */
             if ( (regs->cr[14] & CR14_ASN_TRAN) == 0 )
             {
-                program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+                program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
             /* Program check if operand not on doubleword boundary */
             if ( effective_addr & 0x00000007 )
             {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -5478,7 +5506,7 @@ static BYTE module[8];                  /* Module name               */
             /* Program check if in problem state */
             if ( regs->psw.prob )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -5565,7 +5593,7 @@ static BYTE module[8];                  /* Module name               */
             if ( regs->psw.prob
                 && ((regs->cr[3] << (j >> 4)) & 0x80000000) == 0 )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -5591,7 +5619,7 @@ static BYTE module[8];                  /* Module name               */
             if ( regs->psw.prob
                 && ((regs->cr[3] << (j >> 4)) & 0x80000000) == 0 )
             {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
                 goto terminate;
             }
 
@@ -5606,7 +5634,7 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
         /* E5xx: Invalid operation                                   */
         /*-----------------------------------------------------------*/
-            program_check (PGM_OPERATION_EXCEPTION);
+            program_check (regs, PGM_OPERATION_EXCEPTION);
             goto terminate;
 
         } /* end switch(ibyte) */
@@ -5777,7 +5805,7 @@ static BYTE module[8];                  /* Module name               */
     /* Invalid instruction operation code                            */
     /*---------------------------------------------------------------*/
     default:
-        program_check (PGM_OPERATION_EXCEPTION);
+        program_check (regs, PGM_OPERATION_EXCEPTION);
     terminate:
         break;
     } /* end switch(opcode) */
@@ -5859,7 +5887,7 @@ DWORD   csw;                            /* CSW for S/370 channels    */
     rc = load_psw ( &(regs->psw), psa->iopnew );
     if ( rc )
     {
-        program_check (rc);
+        program_check (regs, rc);
     }
 
 } /* end function perform_io_interrupt */
@@ -5944,6 +5972,13 @@ int     icidx;                          /* Instruction counter index */
         /* Test for stopped state */
         if (regs->cpustate == CPUSTATE_STOPPED)
         {
+            /* Store status at absolute location 0 if requested */
+            if (regs->storstat)
+            {
+                regs->storstat = 0;
+                store_status (regs, 0);
+            }
+
             /* Wait for start command from panel */
             wait_condition (&sysblk.intcond, &sysblk.intlock);
             release_lock (&sysblk.intlock);
@@ -6054,7 +6089,7 @@ int     icidx;                          /* Instruction counter index */
 //      if (regs->inst[0] == 0x01 && regs->inst[1] == 0x01) sysblk.inststep = 1; /*PR*/
 //      if (regs->inst[0] == 0xE5) sysblk.inststep = 1; /*LASP & MVS assists*/
 //      if (regs->inst[0] == 0xFC) sysblk.inststep = 1; /*MP*/
-        if (regs->inst[0] == 0xFD) sysblk.inststep = 1; /*DP*/
+        if (regs->inst[0] == 0xFD) tracethis = 1; /*DP*/
 
         /* Test for breakpoint */
         shouldbreak = sysblk.instbreak
