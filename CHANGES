@@ -1,3 +1,4 @@
+03 Jul 2002 Fix tape to include read backwards support - Volker Bandke
 02 Jul 2002 CTC fix for TurboLinux bug - Jim Pierson
 02 Jul 2002 3287 printer support via TN3270 - Tomas Masek
 02 Jul 2002 S/370 extended memory fixes - Tomas Masek

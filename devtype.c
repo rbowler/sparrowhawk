@@ -45,6 +45,9 @@ DEVENT device_handler_table[] = {
     { 0x0671, &fbadasd_device_hndinfo },
     { 0x3310, &fbadasd_device_hndinfo },
     { 0x3370, &fbadasd_device_hndinfo },
+    { 0x9313, &fbadasd_device_hndinfo },
+    { 0x9332, &fbadasd_device_hndinfo },
+    { 0x9335, &fbadasd_device_hndinfo },
     { 0x9336, &fbadasd_device_hndinfo },
 
     /* Local Non-SNA 3270 devices */

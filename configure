@@ -1460,7 +1460,7 @@ fi
 
 # Define the identity of the package.
  PACKAGE=hercules
- VERSION=2.16.3
+ VERSION=2.16.4
 
 
 cat >>confdefs.h <<_ACEOF
