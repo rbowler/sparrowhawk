@@ -6,7 +6,7 @@
 #	make ARCH=390
 #
 
-VERSION  = 1.37
+VERSION  = 1.38
 
 CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=$(ARCH)
 #	   -march=pentium -malign-double -mwide-multiply

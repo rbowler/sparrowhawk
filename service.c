@@ -454,15 +454,6 @@ U16             offset;                 /* Offset from start of SCCB */
         /* Set the bits which indicate channels online */
         memset (sccbchp->online, 0xFF, sizeof(sccbchp->online));
 
-#ifdef FEATURE_CHANNEL_SUBSYSTEM
-        /* For ESA, clear the channel set identifiers */
-        memset (sccbchp->chanset0a, 0x00, sizeof(sccbchp->chanset0a));
-        memset (sccbchp->chanset1a, 0x00, sizeof(sccbchp->chanset1a));
-        memset (sccbchp->chanset0b, 0x00, sizeof(sccbchp->chanset0b));
-        memset (sccbchp->chanset1b, 0x00, sizeof(sccbchp->chanset1b));
-        sccbchp->csconfig = 0;
-#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
-
 #ifdef FEATURE_S370_CHANNEL
         /* For S/370, initialize identifiers for channel set 0A */
         for (i = 0; i < 16; i++)
@@ -470,11 +461,6 @@ U16             offset;                 /* Offset from start of SCCB */
             sccbchp->chanset0a[2*i] = 0x80;
             sccbchp->chanset0a[2*i+1] = i;
         } /* end for(i) */
-
-        /* Clear the remaining channel set identifiers */
-        memset (sccbchp->chanset1a, 0x00, sizeof(sccbchp->chanset1a));
-        memset (sccbchp->chanset0b, 0x00, sizeof(sccbchp->chanset0b));
-        memset (sccbchp->chanset1b, 0x00, sizeof(sccbchp->chanset1b));
 
         /* Set the channel set configuration byte */
         sccbchp->csconfig = 0xC0;

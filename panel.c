@@ -262,22 +262,71 @@ int     n;                              /* Number of bytes in buffer */
 } /* end function display_inst */
 
 /*-------------------------------------------------------------------*/
-/* Parse a storage range operand                                     */
-/* Valid formats for a storage range are:                            */
+/* Parse a storage range or storage alteration operand               */
+/*                                                                   */
+/* Valid formats for a storage range operand are:                    */
 /*      startaddr                                                    */
 /*      startaddr-endaddr                                            */
 /*      startaddr.length                                             */
 /* where startaddr, endaddr, and length are hexadecimal values.      */
-/* Return code is 0 if range is valid, or -1 if error message issued */
+/*                                                                   */
+/* Valid format for a storage alteration operand is:                 */
+/*      startaddr=hexstring (up to 32 pairs of digits)               */
+/*                                                                   */
+/* Return values:                                                    */
+/*      0  = operand contains valid storage range display syntax;    */
+/*           start/end of range is returned in saddr and eaddr       */
+/*      >0 = operand contains valid storage alteration syntax;       */
+/*           return value is number of bytes to be altered;          */
+/*           start/end/value are returned in saddr, eaddr, newval    */
+/*      -1 = error message issued                                    */
 /*-------------------------------------------------------------------*/
-static int parse_range (BYTE *operand, U32 *saddr, U32 *eaddr)
+static int parse_range (BYTE *operand, U32 *saddr, U32 *eaddr,
+                        BYTE *newval)
 {
 int     rc;                             /* Return code               */
+int     n;                              /* Number of bytes altered   */
+int     h1, h2;                         /* Hexadecimal digits        */
+BYTE   *s;                              /* Alteration value pointer  */
 BYTE    delim;                          /* Operand delimiter         */
 BYTE    c;                              /* Character work area       */
 
     rc = sscanf(operand, "%lx%c%lx%c", saddr, &delim, eaddr, &c);
 
+    /* Process storage alteration operand */
+    if (rc > 2 && delim == '=')
+    {
+        s = strchr (operand, '=');
+        for (n = 0;;)
+        {
+            h1 = *(++s);
+            h1 = toupper(h1);
+            if (h1 == '\0') break;
+            if (h1 == SPACE || h1 == '\t') continue;
+            h2 = *(++s);
+            h2 = toupper(h2);
+            h1 = (h1 >= '0' && h1 <= '9') ? h1 - '0' :
+                 (h1 >= 'A' && h1 <= 'F') ? h1 - 'A' + 10 : -1;
+            h2 = (h2 >= '0' && h2 <= '9') ? h2 - '0' :
+                 (h2 >= 'A' && h2 <= 'F') ? h2 - 'A' + 10 : -1;
+            if (h1 < 0 || h2 < 0 || n >= 32)
+            {
+                logmsg ("Invalid value: %s\n", operand);
+                return -1;
+            }
+            newval[n++] = (h1 << 4) | h2;
+        } /* end for(n) */
+        *saddr &= 0x7FFFFFFF;
+        *eaddr = *saddr + n - 1;
+        if (*eaddr > 0x7FFFFFFF)
+        {
+            logmsg ("Invalid wrap: %s\n", operand);
+            return -1;
+        }
+        return n;
+    }
+
+    /* Process storage range operand */
     if (rc == 1)
         *eaddr = *saddr + 0x3F;
     else
@@ -293,6 +342,7 @@ BYTE    c;                              /* Character work area       */
     *saddr &= 0x7FFFFFFF;
     *eaddr &= 0x7FFFFFFF;
 
+    /* Check for valid range */
     if (*eaddr < *saddr)
     {
         logmsg ("Invalid range: %s\n", operand);
@@ -310,6 +360,7 @@ static void *panel_command (void *cmdline)
 BYTE    cmd[80];                        /* Copy of panel command     */
 int     cpu;                            /* CPU engine number         */
 REGS   *regs;                           /* -> CPU register context   */
+U32     aaddr;                          /* Absolute storage address  */
 U32     vaddr;                          /* Virtual storage address   */
 U32     raddr;                          /* Real storage address      */
 U32     eaddr;                          /* Storage ending address    */
@@ -317,6 +368,7 @@ U16     xcode;                          /* Exception code            */
 U16     devnum;                         /* Device number             */
 DEVBLK *dev;                            /* -> Device block           */
 BYTE    c;                              /* Character work area       */
+int     rc;                             /* Return code               */
 int     i;                              /* Loop counter              */
 int     oneorzero;                      /* 1=x+ command, 0=x-        */
 BYTE   *onoroff;                        /* "on" or "off"             */
@@ -326,6 +378,7 @@ int     len;                            /* Number of bytes read      */
 BYTE   *loadparm;                       /* -> IPL parameter (ASCIIZ) */
 BYTE    buf[100];                       /* Message buffer            */
 int     n;                              /* Number of bytes in buffer */
+BYTE    newval[32];                     /* Storage alteration value  */
 
     /* Copy panel command to work area */
     memset (cmd, 0, sizeof(cmd));
@@ -347,12 +400,13 @@ int     n;                              /* Number of bytes in buffer */
             "g=go, psw=display psw, pr=prefix reg\n"
             "gpr=general purpose regs, cr=control regs\n"
             "ar=access regs, fpr=floating point regs\n"
-            "vxxxxxxxx=display virtual storage location xxxxxxxx\n"
-            "rxxxxxxxx=display real storage location xxxxxxxx\n"
-            "bxxxxxxxx=set breakpoint at location xxxxxxxx b-=delete breakpoint\n"
-            "idevn=I/O attention interrupt, ext=external interrupt\n"
+            "v addr[.len] or v addr-addr = display virtual storage\n"
+            "r addr[.len] or r addr-addr = display real storage\n"
+            "v addr=value or r addr=value = alter storage\n"
+            "b addr = set breakpoint, b- = delete breakpoint\n"
+            "i devn=I/O attention interrupt, ext=external interrupt\n"
             "stop=stop CPU, start=start CPU, restart=PSW restart\n"
-            "loadcore xxxx=load core image from file xxxx\n"
+            "loadcore filename=load core image from file\n"
             "loadparm xxxxxxxx=set IPL parameter, ipl devn=IPL\n"
             "quit=terminate\n");
         return NULL;
@@ -482,27 +536,75 @@ int     n;                              /* Number of bytes in buffer */
         return NULL;
     }
 
-    /* r command - display real storage */
+    /* restart command - generate restart interrupt */
+    if (strcmp(cmd,"restart") == 0)
+    {
+        /* Indicate that a restart interrupt is pending */
+        regs->restart = 1;
+        logmsg ("Restart key depressed\n");
+
+        /* Signal waiting CPUs that an interrupt is pending */
+        obtain_lock (&sysblk.intlock);
+        signal_condition (&sysblk.intcond);
+        release_lock (&sysblk.intlock);
+
+        return NULL;
+    }
+
+    /* r command - display or alter real storage */
     if (cmd[0] == 'r')
     {
-        if (parse_range (cmd+1, &raddr, &eaddr) != 0)
-            return NULL;
+        /* Parse the range or alteration operand */
+        rc = parse_range (cmd+1, &raddr, &eaddr, newval);
+        if (rc < 0) return NULL;
 
+        /* Alter real storage */
+        if (rc > 0)
+        {
+            for (i = 0; i < rc && raddr+i < sysblk.mainsize; i++)
+            {
+                aaddr = raddr + i;
+                aaddr = APPLY_PREFIXING (aaddr, regs->pxr);
+                sysblk.mainstor[aaddr] = newval[i];
+                sysblk.storkeys[aaddr >> 12] |=
+                                (STORKEY_REF | STORKEY_CHANGE);
+            } /* end for(i) */
+        }
+
+        /* Display real storage */
         for (i = 0; i < 999 && raddr <= eaddr; i++)
         {
             display_real (regs, raddr, buf);
             logmsg ("%s\n", buf);
             raddr += 16;
         } /* end for(i) */
+
         return NULL;
     }
 
-    /* v command - display virtual storage */
+    /* v command - display or alter virtual storage */
     if (cmd[0] == 'v')
     {
-        if (parse_range (cmd+1, &vaddr, &eaddr) != 0)
-            return NULL;
+        /* Parse the range or alteration operand */
+        rc = parse_range (cmd+1, &vaddr, &eaddr, newval);
+        if (rc < 0) return NULL;
 
+        /* Alter virtual storage */
+        if (rc > 0
+            && virt_to_real (&raddr, vaddr, 0, regs, ACCTYPE_LRA) == 0
+            && virt_to_real (&raddr, eaddr, 0, regs, ACCTYPE_LRA) == 0)
+        {
+            for (i = 0; i < rc && raddr+i < sysblk.mainsize; i++)
+            {
+                virt_to_real (&raddr, vaddr+i, 0, regs, ACCTYPE_LRA);
+                aaddr = APPLY_PREFIXING (raddr, regs->pxr);
+                sysblk.mainstor[aaddr] = newval[i];
+                sysblk.storkeys[aaddr >> 12] |=
+                                (STORKEY_REF | STORKEY_CHANGE);
+            } /* end for(i) */
+        }
+
+        /* Display virtual storage */
         for (i = 0; i < 999 && vaddr <= eaddr; i++)
         {
             n = sprintf (buf, "V:%8.8lX:", vaddr);
@@ -517,6 +619,7 @@ int     n;                              /* Number of bytes in buffer */
             logmsg ("%s\n", buf);
             vaddr += 16;
         } /* end for(i) */
+
         return NULL;
     }
 
@@ -610,21 +713,6 @@ int     n;                              /* Number of bytes in buffer */
     {
         sysblk.intkey = 1;
         logmsg ("Interrupt key depressed\n");
-        return NULL;
-    }
-
-    /* restart command - generate restart interrupt */
-    if (strcmp(cmd,"restart") == 0)
-    {
-        /* Indicate that a restart interrupt is pending */
-        regs->restart = 1;
-        logmsg ("Restart key depressed\n");
-
-        /* Signal waiting CPUs that an interrupt is pending */
-        obtain_lock (&sysblk.intlock);
-        signal_condition (&sysblk.intcond);
-        release_lock (&sysblk.intlock);
-
         return NULL;
     }
 

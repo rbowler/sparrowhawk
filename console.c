@@ -1135,11 +1135,11 @@ int loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 
     /* Initialize the device identifier bytes */
     dev->devid[0] = 0xFF;
-    dev->devid[1] = 0x32; /* Control unit type is 3272-1 */
-    dev->devid[2] = 0x72;
-    dev->devid[3] = 0x01;
-    dev->devid[4] = dev->devtype >> 8;
-    dev->devid[5] = dev->devtype & 0xFF;
+    dev->devid[1] = 0x32; /* Control unit type is 3274-1D */
+    dev->devid[2] = 0x74;
+    dev->devid[3] = 0x1D;
+    dev->devid[4] = 0x32; /* Device type is 3278-2 */
+    dev->devid[5] = 0x78;
     dev->devid[6] = 0x02;
     dev->numdevid = 7;
 

@@ -24,6 +24,10 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 BYTE    unitstat;                       /* IPL device unit status    */
 BYTE    chanstat;                       /* IPL device channel status */
 
+    /* Reset external interrupts */
+    sysblk.servsig = 0;
+    sysblk.intkey = 0;
+
     /* Perform CPU reset */
     for (cpu = 0; cpu < sysblk.numcpu; cpu++)
         cpu_reset (sysblk.regs + cpu);

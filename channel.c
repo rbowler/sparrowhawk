@@ -296,14 +296,17 @@ int start_io (DEVBLK *dev, U32 ccwaddr, int ccwfmt, BYTE ccwkey,
         signal_thread (sysblk.cnsltid, SIGHUP);
     }
 
-    /* Release the device lock */
-    release_lock (&dev->lock);
-
     /* Store the start I/O parameters in the device block */
     dev->ccwaddr = ccwaddr;
     dev->ccwfmt = ccwfmt;
     dev->ccwkey = ccwkey;
-    dev->ioparm = ioparm;
+    dev->pmcw.intparm[0] = (ioparm >> 24) & 0xFF;
+    dev->pmcw.intparm[1] = (ioparm >> 16) & 0xFF;
+    dev->pmcw.intparm[2] = (ioparm >> 8) & 0xFF;
+    dev->pmcw.intparm[3] = ioparm & 0xFF;
+
+    /* Release the device lock */
+    release_lock (&dev->lock);
 
     /* Execute the CCW chain on a separate thread */
     if ( create_thread (&dev->tid, &sysblk.detattr,
@@ -1098,7 +1101,10 @@ DEVBLK *dev;                            /* -> Device control block   */
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
     /* Extract the I/O address and interrupt parameter */
     *ioid = 0x00010000 | dev->subchan;
-    *ioparm = dev->ioparm;
+    *ioparm = (dev->pmcw.intparm[0] << 24)
+            | (dev->pmcw.intparm[1] << 16)
+            | (dev->pmcw.intparm[2] << 8)
+            | dev->pmcw.intparm[3];
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
     /* Reset the interrupt pending and busy flags for the device */
@@ -1148,7 +1154,17 @@ DEVBLK *dev;                            /* -> Device control block   */
         dev->busy = 0;
         dev->readpending = 0;
         dev->pcipending = 0;
-        dev->pmcw.flag5 &= ~PMCW5_E;
+        dev->pmcw.intparm[0] = 0;
+        dev->pmcw.intparm[1] = 0;
+        dev->pmcw.intparm[2] = 0;
+        dev->pmcw.intparm[3] = 0;
+        dev->pmcw.flag4 &= ~PMCW4_ISC;
+        dev->pmcw.flag5 &= ~(PMCW5_E | PMCW5_LM | PMCW5_MM | PMCW5_D);
+        dev->pmcw.pnom = 0;
+        dev->pmcw.lpum = 0;
+        dev->pmcw.mbi[0] = 0;
+        dev->pmcw.mbi[1] = 0;
+        dev->pmcw.flag27 &= ~PMCW27_S;
         memset (&dev->scsw, 0, sizeof(SCSW));
         memset (&dev->pciscsw, 0, sizeof(SCSW));
         memset (dev->sense, 0, sizeof(dev->sense));
