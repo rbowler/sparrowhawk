@@ -469,8 +469,8 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             /* Set PCI interrupt pending flag */
             dev->pcipending = 1;
 
-/*debug*/   logmsg ("%4.4X: PCI flag on CCW %2.2X\n",
-/*debug*/           dev->devnum, code);
+// /*debug*/logmsg ("%4.4X: PCI flag on CCW %2.2X\n",
+// /*debug*/        dev->devnum, code);
 #ifdef FEATURE_S370_CHANNEL
             /* Save the PCI CSW replacing any previous pending PCI */
             dev->pcicsw[0] = ccwkey;
@@ -481,7 +481,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             dev->pcicsw[5] = CSW_PCI;
             dev->pcicsw[6] = 0;
             dev->pcicsw[7] = 0;
-/*debug*/   display_csw (dev, dev->pcicsw);
+// /*debug*/display_csw (dev, dev->pcicsw);
 #endif /*FEATURE_S370_CHANNEL*/
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
@@ -489,7 +489,8 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             dev->pciscsw.flag1 = (ccwfmt == 1 ? SCSW1_F : 0);
             dev->pciscsw.flag2 = SCSW2_FC_START;
             dev->pciscsw.flag3 = SCSW3_AC_SCHAC | SCSW3_AC_DEVAC
-                                | SCSW3_SC_INTER | SCSW3_SC_PEND;
+                                | SCSW3_SC_INTER | SCSW3_SC_PRI
+                                | SCSW3_SC_PEND;
             dev->pciscsw.ccwaddr[0] = (ccwaddr & 0xFF000000) >> 24;
             dev->pciscsw.ccwaddr[1] = (ccwaddr & 0xFF0000) >> 16;
             dev->pciscsw.ccwaddr[2] = (ccwaddr & 0xFF00) >> 8;
@@ -498,11 +499,16 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             dev->pciscsw.chanstat = CSW_PCI;
             dev->pciscsw.count[0] = 0;
             dev->pciscsw.count[1] = 0;
-/*debug*/   display_scsw (dev, dev->pciscsw);
+// /*debug*/display_scsw (dev, dev->pciscsw);
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
             /* Release the device lock */
             release_lock (&dev->lock);
+
+            /* Signal waiting CPUs that an interrupt is pending */
+            obtain_lock (&sysblk.intlock);
+            signal_condition (&sysblk.intcond);
+            release_lock (&sysblk.intlock);
         }
 
         /* Channel program check if invalid count */
@@ -876,7 +882,7 @@ int     cc;                             /* Condition code            */
     /* Return PCI SCSW if PCI status is pending */
     if (dev->pciscsw.flag3 & SCSW3_SC_PEND)
     {
-        /*debug*/logmsg ("%4.4X: PCI SCSW stored\n", dev->devnum);
+//      /*debug*/logmsg ("%4.4X: PCI SCSW stored\n", dev->devnum);
 
         /* Copy the PCI SCSW to the IRB */
         irb->scsw = dev->pciscsw;
@@ -935,6 +941,54 @@ int     cc;                             /* Condition code            */
     return cc;
 
 } /* end function test_subchan */
+
+/*-------------------------------------------------------------------*/
+/* CLEAR SUBCHANNEL                                                  */
+/*-------------------------------------------------------------------*/
+/* Input                                                             */
+/*      regs    -> CPU register context                              */
+/*      dev     -> Device control block                              */
+/*-------------------------------------------------------------------*/
+void clear_subchan (REGS *regs, DEVBLK *dev)
+{
+
+    /* Obtain the device lock */
+    obtain_lock (&dev->lock);
+
+    /* [15.3.2] Perform clear function subchannel modification */
+    dev->pmcw.pom = 0xFF;
+    dev->pmcw.lpum = 0x00;
+    dev->pmcw.pnom = 0x00;
+
+    /* [15.3.3] Perform clear function signaling and completion */
+    dev->scsw.flag2 &= ~(SCSW2_FC | SCSW2_AC);
+    dev->scsw.flag2 |= SCSW2_FC_CLEAR;
+    dev->scsw.flag3 &= ~(SCSW3_AC | SCSW3_SC);
+    dev->scsw.flag3 = SCSW3_SC_PRI | SCSW3_SC_PEND;
+
+    /* If the device is busy then set a clear pending condition */
+    if (dev->busy)
+        dev->scsw.flag2 |= SCSW2_AC_CLEAR;
+
+    /* Clear any pending interrupt */
+    dev->pcipending = 0;
+    dev->pending = 0;
+
+    /* Signal console thread to redrive select */
+    if (dev->console)
+    {
+        signal_thread (sysblk.cnsltid, SIGHUP);
+    }
+
+    /* Release the device lock */
+    release_lock (&dev->lock);
+
+    /* Signal waiting CPUs that an interrupt is pending */
+    obtain_lock (&sysblk.intlock);
+    signal_condition (&sysblk.intcond);
+    release_lock (&sysblk.intlock);
+
+} /* end function clear_subchan */
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
 /*-------------------------------------------------------------------*/
@@ -1044,8 +1098,8 @@ DEVBLK *dev;                            /* -> Device control block   */
     /* Reset the interrupt pending and busy flags for the device */
     if (dev->pcipending)
     {
-        /*debug*/logmsg ("%4.4X: PCI interrupt presented\n",
-        /*debug*/       dev->devnum);
+//      /*debug*/logmsg ("%4.4X: PCI interrupt presented\n",
+//      /*debug*/       dev->devnum);
         dev->pcipending = 0;
     }
     else

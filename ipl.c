@@ -192,6 +192,10 @@ void cpu_reset (REGS *regs)
     regs->cr[15] = 512;
 #endif /*!FEATURE_LINKAGE_STACK*/
 
+    /* Purge the lookaside buffers */
+    purge_tlb (regs);
+    purge_alb (regs);
+
     /* Put the CPU into the stopped state */
     regs->cpustate = CPUSTATE_STOPPED;
 

@@ -303,7 +303,7 @@ REGS   *regs = &(sysblk.regs[0]);
     display_inst (regs, dword);
 //  if (code != PGM_PAGE_TRANSLATION_EXCEPTION
 //      && code != PGM_SEGMENT_TRANSLATION_EXCEPTION)
-//      panel_command (regs);
+//      regs->cpustate = CPUSTATE_STOPPING;
 
     /* Point to PSA in main storage */
     psa = (PSA*)(sysblk.mainstor + regs->pxr);
@@ -766,7 +766,7 @@ static BYTE module[8];                  /* Module name               */
         if (ibyte == 13)
         {
             display_inst (regs, inst);
-//          panel_command (regs);
+            regs->cpustate = CPUSTATE_STOPPING;
         }
 #endif /*SVC_TRACE*/
 
@@ -3802,6 +3802,44 @@ static BYTE module[8];                  /* Module name               */
             break;
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
+        case 0x30:
+        /*-----------------------------------------------------------*/
+        /* B230: CSCH - Clear Subchannel                         [S] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Program check if reg 1 bits 0-15 not X'0001' */
+            if ( (regs->gpr[1] >> 16) != 0x0001 )
+            {
+                program_check (PGM_OPERAND_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Locate the device block for this subchannel */
+            dev = find_device_by_subchan (regs->gpr[1] & 0xFFFF);
+
+            /* Condition code 3 if subchannel does not exist,
+               is not valid, or is not enabled */
+            if (dev == NULL
+                || (dev->pmcw.flag5 & PMCW5_V) == 0
+                || (dev->pmcw.flag5 & PMCW5_E) == 0)
+            {
+                regs->psw.cc = 3;
+                break;
+            }
+
+            /* Perform clear subchannel and set condition code zero */
+            clear_subchan (regs, dev);
+            regs->psw.cc = 0;
+
+            break;
+
         case 0x32:
         /*-----------------------------------------------------------*/
         /* B232: MSCH - Modify Subchannel                        [S] */
@@ -4062,8 +4100,11 @@ static BYTE module[8];                  /* Module name               */
             /* Locate the device block for this subchannel */
             dev = find_device_by_subchan (regs->gpr[1] & 0xFFFF);
 
-            /* Set condition code 3 if subchannel does not exist */
-            if (dev == NULL)
+            /* Condition code 3 if subchannel does not exist,
+               is not valid, or is not enabled */
+            if (dev == NULL
+                || (dev->pmcw.flag5 & PMCW5_V) == 0
+                || (dev->pmcw.flag5 & PMCW5_E) == 0)
             {
                 regs->psw.cc = 3;
                 break;
@@ -5752,14 +5793,6 @@ int     icidx;                          /* Instruction counter index */
         /* Test for enabled wait state */
         if (regs->psw.wait)
         {
-//          /* Accept panel command if instruction stepping */
-//          if (sysblk.inststep)
-//          {
-//              release_lock (&sysblk.intlock);
-//              panel_command (regs);
-//              continue;
-//          }
-
             /* Wait for I/O or external interrupt */
             wait_condition (&sysblk.intcond, &sysblk.intlock);
             release_lock (&sysblk.intlock);

@@ -1027,7 +1027,7 @@ struct  timeval tv;                     /* Select timeout structure  */
             {
                 n = (nummsgs < MAX_MSGS) ? 0 : msgslot;
                 n += firstmsgn + i;
-                if (n > MAX_MSGS) n -= MAX_MSGS;
+                if (n >= MAX_MSGS) n -= MAX_MSGS;
                 fprintf (confp,
                         ANSI_POSITION_CURSOR
                         ANSI_WHITE_BLACK,
