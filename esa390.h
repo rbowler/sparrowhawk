@@ -595,3 +595,18 @@ typedef struct _SCSW {
 #define SENSE1_FP       0x04            /* File Protected            */
 #define SENSE1_WRI      0x02            /* Write Inhibited           */
 #define SENSE1_IE       0x01            /* Imprecise Ending          */
+
+/* Subchannel information block structure definition */
+typedef struct _SCHIB {
+        PMCW    pmcw;                   /* Path management ctl word  */
+        SCSW    scsw;                   /* Subchannel status word    */
+        BYTE    moddep[12];             /* Model dependent area      */
+    } SCHIB;
+
+/* Interruption response block structure definition */
+typedef struct _IRB {
+        SCSW    scsw;                   /* Subchannel status word    */
+        ESW     esw;                    /* Extended status word      */
+        BYTE    ecw[32];                /* Extended control word     */
+    } IRB;
+

@@ -290,10 +290,13 @@ int  translate_addr (U32 vaddr, int arn, REGS *regs, int acctype,
 void purge_alb (void);
 void purge_tlb (void);
 void vstorei (U64 value, int len, U32 addr, int arn, REGS *regs);
-U64  vfetchi (int len, U32 addr, int arn, REGS *regs);
-void vstoref (void *src, U32 addr, int arn, REGS *regs);
-void vfetchf (void *dest, U32 addr, int arn, REGS *regs);
-void vfetchd (void *dest, U32 addr, int arn, REGS *regs);
+void vstorec (void *src, BYTE len, U32 addr, int arn, REGS *regs);
+void vstoreb (BYTE value, U32 addr, int arn, REGS *regs);
+void vfetchc (void *dest, BYTE len, U32 addr, int arn, REGS *regs);
+BYTE vfetchb (U32 addr, int arn, REGS *regs);
+U16  vfetch2 (U32 addr, int arn, REGS *regs);
+U32  vfetch4 (U32 addr, int arn, REGS *regs);
+U64  vfetch8 (U32 addr, int arn, REGS *regs);
 void instfetch (BYTE *dest, U32 addr, REGS *regs);
 
 /* Access type parameter passed to translate functions in dat.c */
@@ -304,6 +307,16 @@ void instfetch (BYTE *dest, U32 addr, REGS *regs);
 #define ACCTYPE_LRA             5       /* Load Real Address         */
 #define ACCTYPE_TPROT           6       /* Test Protection           */
 
+/* Functions in module decimal.c */
+int  compare_packed (U32 addr1, int len1, int arn1,
+        U32 addr2, int len2, int arn2, REGS *regs);
+int  add_packed (U32 addr1, int len1, int arn1,
+        U32 addr2, int len2, int arn2, REGS *regs);
+int  subtract_packed (U32 addr1, int len1, int arn1,
+        U32 addr2, int len2, int arn2, REGS *regs);
+int  zero_and_add_packed (U32 addr1, int len1, int arn1,
+        U32 addr2, int len2, int arn2, REGS *regs);
+
 /* Functions in module service.c */
 void perform_external_interrupt (REGS *regs);
 int  service_call (U32 sclp_command, U32 sccb_absolute_addr);
@@ -313,7 +326,7 @@ int  start_io (DEVBLK *dev, U32 ccwaddr, int ccwfmt, BYTE ccwkey,
         U32 ioparm);
 void *execute_ccw_chain (DEVBLK *dev);
 int  test_io (REGS *regs, DEVBLK *dev, BYTE ibyte);
-int  test_subchan (REGS *regs, DEVBLK *dev, SCSW *scsw, ESW *esw);
+int  test_subchan (REGS *regs, DEVBLK *dev, IRB *irb);
 int  present_io_interrupt (REGS *regs, U32 *ioid, U32 *ioparm,
         BYTE *csw);
 

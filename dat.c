@@ -839,23 +839,193 @@ int tran = 1;                           /* 1=Translation required    */
 } /* end function vstorei */
 
 /*-------------------------------------------------------------------*/
-/* Fetch an integer value from virtual storage. The value is fetched */
-/* byte by byte because otherwise the Intel processor would fetch    */
-/* the bytes in reverse order.                                       */
+/* Store 1 to 256 characters into virtual storage operand            */
+/*                                                                   */
+/* Input:                                                            */
+/*      src     1 to 256 byte input buffer                           */
+/*      len     Size of operand minus 1                              */
+/*      addr    Logical address of leftmost character of operand     */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      range causes an addressing, translation, or protection       */
+/*      exception, and in this case no real storage locations are    */
+/*      updated, and the function does not return.                   */
 /*-------------------------------------------------------------------*/
-U64 vfetchi (int len, U32 addr, int arn, REGS *regs)
+void vstorec (void *src, BYTE len, U32 addr, int arn, REGS *regs)
 {
-int i;                                  /* Loop counter              */
-U64 value = 0;                          /* Accumulated value         */
-U32 abs = 0;                            /* Absolute storage location */
-int tran = 1;                           /* 1=Translation required    */
+U32     addr2;                          /* Page address of last byte */
+BYTE    len1;                           /* Length to end of page     */
+BYTE    len2;                           /* Length after next page    */
 
-    for (i=0; i < len; i++) {
+    /* Calculate page address of last byte of operand */
+    addr2 = (addr + len) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr2 &= 0xFFFFF000;
 
-        /* Translate virtual address to absolute address */
-        if (tran) {
-            abs = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
-        }
+    /* Copy data to real storage in either one or two parts
+       depending on whether operand crosses a page boundary */
+    if (addr2 == (addr & 0xFFFFF000)) {
+        addr = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
+        memcpy (sysblk.mainstor+addr, src, len+1);
+    } else {
+        len1 = addr2 - addr;
+        len2 = len - len1 + 1;
+        addr = virt_to_abs (addr, arn, regs, ACCTYPE_WRITE);
+        addr2 = virt_to_abs (addr2, arn, regs, ACCTYPE_WRITE);
+        memcpy (sysblk.mainstor+addr, src, len1);
+        memcpy (sysblk.mainstor+addr, src+len1, len2);
+    }
+} /* end function vstorec */
+
+/*-------------------------------------------------------------------*/
+/* Store a single byte into virtual storage operand                  */
+/*                                                                   */
+/* Input:                                                            */
+/*      value   Byte value to be stored                              */
+/*      addr    Logical address of operand byte                      */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or protection             */
+/*      exception, and in this case the function does not return.    */
+/*-------------------------------------------------------------------*/
+void vstoreb (BYTE value, U32 addr, int arn, REGS *regs)
+{
+    addr = virt_to_abs (addr, arn, regs, ACCTYPE_WRITE);
+    sysblk.mainstor[addr] = value;
+} /* end function vstoreb */
+
+/*-------------------------------------------------------------------*/
+/* Fetch a 1 to 256 character operand from virtual storage           */
+/*                                                                   */
+/* Input:                                                            */
+/*      len     Size of operand minus 1                              */
+/*      addr    Logical address of leftmost character of operand     */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/* Output:                                                           */
+/*      dest    1 to 256 byte output buffer                          */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or fetch protection       */
+/*      exception, and in this case the function does not return.    */
+/*-------------------------------------------------------------------*/
+void vfetchc (void *dest, BYTE len, U32 addr, int arn, REGS *regs)
+{
+U32     addr2;                          /* Page address of last byte */
+BYTE    len1;                           /* Length to end of page     */
+BYTE    len2;                           /* Length after next page    */
+
+    /* Calculate page address of last byte of operand */
+    addr2 = (addr + len) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr2 &= 0xFFFFF000;
+
+    /* Copy data from real storage in either one or two parts
+       depending on whether operand crosses a page boundary */
+    if (addr2 == (addr & 0xFFFFF000)) {
+        addr = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
+        memcpy (dest, sysblk.mainstor+addr, len+1);
+    } else {
+        len1 = addr2 - addr;
+        len2 = len - len1 + 1;
+        addr = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
+        addr2 = virt_to_abs (addr2, arn, regs, ACCTYPE_READ);
+        memcpy (dest, sysblk.mainstor+addr, len1);
+        memcpy (dest+len1, sysblk.mainstor+addr, len2);
+    }
+} /* end function vfetchc */
+
+/*-------------------------------------------------------------------*/
+/* Fetch a single byte operand from virtual storage                  */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr    Logical address of operand character                 */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/* Returns:                                                          */
+/*      Operand byte                                                 */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or fetch protection       */
+/*      exception, and in this case the function does not return.    */
+/*-------------------------------------------------------------------*/
+BYTE vfetchb (U32 addr, int arn, REGS *regs)
+{
+    addr = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
+    return sysblk.mainstor[addr];
+} /* end function vfetchb */
+
+/*-------------------------------------------------------------------*/
+/* Fetch a two-byte integer operand from virtual storage             */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr    Logical address of leftmost byte of operand          */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/* Returns:                                                          */
+/*      Operand in 16-bit integer format                             */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or fetch protection       */
+/*      exception, and in this case the function does not return.    */
+/*-------------------------------------------------------------------*/
+U16 vfetch2 (U32 addr, int arn, REGS *regs)
+{
+U32     addr2;                          /* Address of second byte    */
+U32     abs1, abs2;                     /* Absolute addresses        */
+
+    /* Calculate address of second byte of operand */
+    addr2 = (addr + 1) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+
+    /* Get absolute addresses of first byte of operand */
+    abs1 = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
+
+    /* Repeat address translation if operand crosses a page boundary */
+    if ((addr2 & 0xFFF) == 0x000)
+        abs2 = virt_to_abs (addr2, arn, regs, ACCTYPE_READ);
+    else
+        abs2 = abs1 + 1;
+
+    /* Return integer value of operand */
+    return (sysblk.mainstor[abs1] << 8) | sysblk.mainstor[abs2];
+} /* end function vfetch2 */
+
+/*-------------------------------------------------------------------*/
+/* Fetch a four-byte integer operand from virtual storage            */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr    Logical address of leftmost byte of operand          */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/* Returns:                                                          */
+/*      Operand in 32-bit integer format                             */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or fetch protection       */
+/*      exception, and in this case the function does not return.    */
+/*-------------------------------------------------------------------*/
+U32 vfetch4 (U32 addr, int arn, REGS *regs)
+{
+int     i;                              /* Loop counter              */
+U32     value;                          /* Accumulated value         */
+U32     abs;                            /* Absolute storage location */
+
+    /* Get absolute addresses of first byte of operand */
+    abs = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
+
+    /* Fetch 4 bytes when operand is fullword aligned */
+    if ((addr & 0x03) == 0) {
+        return (sysblk.mainstor[abs] << 24)
+                | (sysblk.mainstor[abs+1] << 16)
+                | (sysblk.mainstor[abs+2] << 8)
+                | sysblk.mainstor[abs+3];
+    }
+
+    /* Fetch 4 bytes when operand is not fullword aligned
+       and may therefore cross a page boundary */
+    for (i=0, value=0; i < 4; i++) {
 
         /* Fetch byte from absolute storage */
         value <<= 8;
@@ -867,39 +1037,70 @@ int tran = 1;                           /* 1=Translation required    */
         addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
 
         /* Translation required again if page boundary crossed */
-        tran = ((addr & 0xFFF) == 0x000);
+        if ((addr & 0xFFF) == 0x000)
+            abs = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
 
     } /* end for */
     return value;
 
-} /* end function vfetchi */
+} /* end function vfetch4 */
 
 /*-------------------------------------------------------------------*/
-/* Store 4 bytes at fullword-aligned location in virtual storage     */
+/* Fetch an eight-byte integer operand from virtual storage          */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr    Logical address of leftmost byte of operand          */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/* Returns:                                                          */
+/*      Operand in 64-bit integer format                             */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or fetch protection       */
+/*      exception, and in this case the function does not return.    */
 /*-------------------------------------------------------------------*/
-void vstoref (void *src, U32 addr, int arn, REGS *regs)
+U64 vfetch8 (U32 addr, int arn, REGS *regs)
 {
-    addr = virt_to_abs (addr, arn, regs, ACCTYPE_WRITE);
-    memcpy (sysblk.mainstor+addr, src, 4);
-} /* end function vstoref */
+int     i;                              /* Loop counter              */
+U64     value;                          /* Accumulated value         */
+U32     abs;                            /* Absolute storage location */
 
-/*-------------------------------------------------------------------*/
-/* Fetch 4 bytes from fullword-aligned location in virtual storage   */
-/*-------------------------------------------------------------------*/
-void vfetchf (void *dest, U32 addr, int arn, REGS *regs)
-{
-    addr = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
-    memcpy (dest, sysblk.mainstor+addr, 4);
-} /* end function vfetchf */
+    /* Get absolute addresses of first byte of operand */
+    abs = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
 
-/*-------------------------------------------------------------------*/
-/* Fetch 8 bytes from doubleword-aligned location in virtual storage */
-/*-------------------------------------------------------------------*/
-void vfetchd (void *dest, U32 addr, int arn, REGS *regs)
-{
-    addr = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
-    memcpy (dest, sysblk.mainstor+addr, 8);
-} /* end function vfetchd */
+    /* Fetch 8 bytes when operand is doubleword aligned */
+    if ((addr & 0x07) == 0) {
+        return ((U64)sysblk.mainstor[abs] << 56)
+                | ((U64)sysblk.mainstor[abs+1] << 48)
+                | ((U64)sysblk.mainstor[abs+2] << 40)
+                | ((U64)sysblk.mainstor[abs+3] << 32)
+                | (sysblk.mainstor[abs+4] << 24)
+                | (sysblk.mainstor[abs+5] << 16)
+                | (sysblk.mainstor[abs+6] << 8)
+                | sysblk.mainstor[abs+7];
+    }
+
+    /* Fetch 8 bytes when operand is not doubleword aligned
+       and may therefore cross a page boundary */
+    for (i=0, value=0; i < 8; i++) {
+
+        /* Fetch byte from absolute storage */
+        value <<= 8;
+        value |= sysblk.mainstor[abs];
+
+        /* Increment absolute address and virtual address */
+        abs++;
+        addr++;
+        addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+
+        /* Translation required again if page boundary crossed */
+        if ((addr & 0xFFF) == 0x000)
+            abs = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
+
+    } /* end for */
+    return value;
+
+} /* end function vfetch8 */
 
 /*-------------------------------------------------------------------*/
 /* Fetch instruction from halfword-aligned virtual storage location  */
@@ -920,7 +1121,7 @@ void vfetchd (void *dest, U32 addr, int arn, REGS *regs)
 /*-------------------------------------------------------------------*/
 void instfetch (BYTE *dest, U32 addr, REGS *regs)
 {
-U32 abs;                                /* Absolute storage location */
+U32 abs;                                /* Absolute storage address  */
 
     /* Program check if instruction address is odd */
     if (addr & 0x01) {

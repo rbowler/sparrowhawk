@@ -2,18 +2,18 @@
 # Makefile for Hercules ESA/390 emulator
 #
 
-VERSION  = 1.18
+VERSION  = 1.20
 
-CFLAGS	 = -O -Wall -fPIC -DVERSION=$(VERSION)
+CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION)
 LFLAGS	 = -lpthread
 
 all:	   cpu ipl
 
 TARFILES = makefile *.c *.h hercules.cnf cpu ipl
 
-ALL_OBJS = config.o panel.o cpu.o dat.o channel.o service.o \
-	   simtape.o loc3270.o cardrdr.o printer.o \
-	   ckddasd.o fbadasd.o
+ALL_OBJS = config.o panel.o cpu.o dat.o decimal.o \
+	   channel.o service.o ckddasd.o fbadasd.o \
+	   simtape.o loc3270.o cardrdr.o printer.o
 
 CPU_OBJS = cputest.o $(ALL_OBJS)
 
@@ -38,6 +38,8 @@ printer.o: printer.c $(HEADERS)
 cpu.o:	   cpu.c $(HEADERS)
 
 cputest.o: cputest.c $(HEADERS)
+
+decimal.o: decimal.c $(HEADERS)
 
 dat.o:	   dat.c $(HEADERS)
 

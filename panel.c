@@ -86,10 +86,16 @@ U32     aaddr;                          /* Absolute storage address  */
 int     blkid;                          /* Main storage 4K block id  */
 int     i;                              /* Loop counter              */
 
+    printf ("R:%8.8lX:", raddr);
     aaddr = APPLY_PREFIXING (raddr, regs->pxr);
-    if (aaddr >= sysblk.mainsize) return 0;
+    if (aaddr >= sysblk.mainsize)
+    {
+        printf (" Real address is not valid\n");
+        return 0;
+    }
+
     blkid = aaddr >> 12;
-    printf ("R:%8.8lX:K:%2.2X=", raddr, sysblk.storkeys[blkid]);
+    printf ("K:%2.2X=", sysblk.storkeys[blkid]);
 
     for (i = 0; i < 16; i++)
     {
@@ -106,8 +112,20 @@ int     i;                              /* Loop counter              */
 
 /*-------------------------------------------------------------------*/
 /* Convert virtual address to real address                           */
+/*                                                                   */
+/* Input:                                                            */
+/*      vaddr   Virtual address to be translated                     */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/*      acctype Type of access (ACCTYPE_INSTFETCH, ACCTYPE_READ,     */
+/*              or ACCTYPE_LRA)                                      */
+/* Output:                                                           */
+/*      raptr   Points to word in which real address is returned     */
+/* Return value:                                                     */
+/*      0=translation successful, non-zero=exception code            */
 /*-------------------------------------------------------------------*/
-static U32 virt_to_real (U32 vaddr, int arn, REGS *regs, int acctype)
+static U16 virt_to_real (U32 *raptr, U32 vaddr, int arn, REGS *regs,
+                        int acctype)
 {
 int     rc;                             /* Return code               */
 U32     raddr;                          /* Real address              */
@@ -115,14 +133,17 @@ U16     xcode;                          /* Exception code            */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=ALE or page protection  */
 
-    if (REAL_MODE(&regs->psw))
-        return vaddr;
+    if (REAL_MODE(&regs->psw) && acctype != ACCTYPE_LRA) {
+        *raptr = vaddr;
+        return 0;
+    }
 
     rc = translate_addr (vaddr, arn, regs, acctype,
                         &raddr, &xcode, &private, &protect);
-    if (rc) return 0;
+    if (rc) return xcode;
 
-    return raddr;
+    *raptr = raddr;
+    return 0;
 } /* end function virt_to_real */
 
 /*-------------------------------------------------------------------*/
@@ -136,6 +157,7 @@ int     b1, b2, x1;                     /* Register numbers          */
 int     ilc;                            /* Instruction length        */
 U32     addr1, addr2;                   /* Operand addresses         */
 U32     raddr;                          /* Real address              */
+U16     xcode;                          /* Exception code            */
 
     /* Display the PSW */
     store_psw (&regs->psw, dword);
@@ -174,10 +196,14 @@ U32     raddr;                          /* Real address              */
 
         /* Display storage at first storage operand location */
         printf ("V:%8.8lX:", addr1);
-        raddr = virt_to_real (addr1, b1, regs,
-                                (opcode == 0x44 ? ACCTYPE_INSTFETCH
-                                                : ACCTYPE_READ));
-        display_real (regs, raddr);
+        xcode = virt_to_real (&raddr, addr1, b1, regs,
+                                (opcode == 0x44 ? ACCTYPE_INSTFETCH :
+                                 opcode == 0xB1 ? ACCTYPE_LRA :
+                                                  ACCTYPE_READ));
+        if (xcode == 0)
+            display_real (regs, raddr);
+        else
+            printf (" Translation exception %4.4hX\n", xcode);
     }
 
     /* Process the second storage operand */
@@ -192,8 +218,11 @@ U32     raddr;                          /* Real address              */
 
         /* Display storage at second storage operand location */
         printf ("V:%8.8lX:", addr2);
-        raddr = virt_to_real (addr2, b2, regs, ACCTYPE_READ);
-        display_real (regs, raddr);
+        xcode = virt_to_real (&raddr, addr2, b2, regs, ACCTYPE_READ);
+        if (xcode == 0)
+            display_real (regs, raddr);
+        else
+            printf (" Translation exception %4.4hX\n", xcode);
     }
 
     /* Display the general purpose registers */
@@ -208,6 +237,7 @@ void panel_command (REGS *regs)
 {
 U32     vaddr;                          /* Virtual storage address   */
 U32     raddr;                          /* Real storage address      */
+U16     xcode;                          /* Exception code            */
 U16     devnum;                         /* Device number             */
 DEVBLK *dev;                            /* -> Device block           */
 BYTE    c;                              /* Character work area       */
@@ -365,8 +395,13 @@ BYTE   *onoroff;                        /* "on" or "off"             */
             for (i = 0; i < 4; i++)
             {
                 printf ("V:%8.8lX:", vaddr);
-                raddr = virt_to_real (vaddr, 0, regs, ACCTYPE_READ);
-                display_real (regs, raddr);
+                xcode = virt_to_real (&raddr, vaddr, 0, regs,
+                        ACCTYPE_READ);
+                if (xcode == 0)
+                    display_real (regs, raddr);
+                else
+                    printf (" Translation exception %4.4hX\n",
+                            xcode);
                 vaddr += 16;
             } /* end for(i) */
             continue;

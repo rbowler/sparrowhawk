@@ -21,6 +21,8 @@ BYTE *a;
                 " %2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X",
                 a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7],
                 a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15]);
+//      if (memcmp(a+5, "\xc9\xc5\xc1\xc9\xd7\xd3\xf0\xf5", 8)==0)
+//          sysblk.insttrace = 1;
     }
     printf("\n");
 
@@ -682,12 +684,34 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 /*-------------------------------------------------------------------*/
 /* TEST SUBCHANNEL                                                   */
 /*-------------------------------------------------------------------*/
-int test_subchan (REGS *regs, DEVBLK *dev, SCSW *scsw, ESW *esw)
+/* Input                                                             */
+/*      regs    -> CPU register context                              */
+/*      dev     -> Device control block                              */
+/* Output                                                            */
+/*      irb     -> Interruption response block                       */
+/* Return value                                                      */
+/*      The return value is the condition code for the TSCH          */
+/*      instruction:  0=status was pending and is now cleared,       */
+/*      1=no status was pending.  The IRB is updated in both cases.  */
+/*-------------------------------------------------------------------*/
+int test_subchan (REGS *regs, DEVBLK *dev, IRB *irb)
 {
 int     cc;                             /* Condition code            */
 
     /* Obtain the device lock */
     obtain_lock (&dev->lock);
+
+    /* Copy the subchannel status word to the IRB */
+    irb->scsw = dev->scsw;
+
+    /* Build the extended status word in the IRB */
+    memset (&irb->esw, 0, sizeof(ESW));
+    irb->esw.lpum = 0x80;
+    irb->esw.scl2 = SCL2_FVF_LPUM
+                    | SCL2_FVF_USTAT | SCL2_FVF_CCWAD;
+
+    /* Zeroize the extended control word in the IRB */
+    memset (irb->ecw, 0, sizeof(irb->ecw));
 
     /* Clear any pending interrupt */
     dev->pending = 0;
@@ -702,16 +726,7 @@ int     cc;                             /* Condition code            */
         if (dev->ccwtrace || dev->ccwstep)
             display_scsw (dev);
 
-        /* Copy the subchannel status word */
-        *scsw = dev->scsw;
-
-        /* Build the extended status word */
-        memset (esw, 0, sizeof(ESW));
-        esw->lpum = 0x80;
-        esw->scl2 = SCL2_FVF_LPUM
-                        | SCL2_FVF_USTAT | SCL2_FVF_CCWAD;
-
-        /* Clear the subchannel status bits */
+        /* Clear the subchannel status bits in the device block */
         dev->scsw.flag2 &= ~(SCSW2_FC | SCSW2_AC);
         dev->scsw.flag3 &= ~(SCSW3_SC);
 
@@ -726,10 +741,6 @@ int     cc;                             /* Condition code            */
 
         /* Set condition code 1 if status not pending */
         cc = 1;
-
-        /* Clear the caller's SCSW and ESW */
-        memset (scsw, 0, sizeof(SCSW));
-        memset (esw, 0, sizeof(ESW));
     }
 
     /* Release the device lock */

@@ -9,6 +9,9 @@
 
 #include "hercules.h"
 
+#define MODULE_TRACE
+#undef  INSTRUCTION_COUNTING
+
 /*-------------------------------------------------------------------*/
 /* Add two signed fullwords giving a signed fullword result          */
 /* and return condition code                                         */
@@ -262,7 +265,9 @@ REGS   *regs = &(sysblk.regs[0]);
             code, regs->psw.ilc);
     instfetch (dword, regs->psw.ia - regs->psw.ilc, regs);
     display_inst (regs, dword);
-    panel_command (regs);
+    if (code != PGM_PAGE_TRANSLATION_EXCEPTION
+        && code != PGM_SEGMENT_TRANSLATION_EXCEPTION)
+        panel_command (regs);
 
     /* Point to PSA in main storage */
     psa = (PSA*)(sysblk.mainstor + regs->pxr);
@@ -321,7 +326,6 @@ int     divide_overflow;                /* 1=divide overflow         */
 int     sig;                            /* Significance indicator    */
 int     effective_addr = 0;             /* Effective address         */
 int     effective_addr2 = 0;            /* Effective address         */
-U32     alet, alet2;                    /* ALET for effective addrs  */
 int     ar1, ar2;                       /* Access register numbers   */
 PSA    *psa;                            /* -> prefixed storage area  */
 int     rc;                             /* Return code               */
@@ -345,10 +349,13 @@ U32     sasteo;                         /* Secondary ASTE origin     */
 U32     ioid;                           /* I/O interruption address  */
 PMCW    pmcw;                           /* Path management ctl word  */
 ORB     orb;                            /* Operation request block   */
-SCSW    scsw;                           /* Subchannel status word    */
-ESW     esw;                            /* Extended status word      */
-FWORD   fword;                          /* Fullword work area        */
+SCHIB   schib;                          /* Subchannel information blk*/
+IRB     irb;                            /* Interruption response blk */
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+int     tracethis = 0;                  /* Trace this instruction    */
+#ifdef MODULE_TRACE
+static BYTE module[8];                  /* Module name               */
+#endif /*MODULE_TRACE*/
 
     /* Extract the opcode and R1/R2/I fields */
     opcode = inst[0];
@@ -375,7 +382,6 @@ FWORD   fword;                          /* Fullword work area        */
             effective_addr += regs->gpr[b1] &
                         (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
         ar1 = b1;
-        alet = regs->ar[ar1];
     }
 
     /* Apply indexing for RX instructions */
@@ -393,13 +399,14 @@ FWORD   fword;                          /* Fullword work area        */
             effective_addr2 += regs->gpr[b2] &
                         (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
         ar2 = b2;
-        alet2 = regs->ar[ar2];
     }
 
-    if (opcode == 0xB2 && ibyte == 0x20) sysblk.inststep = 1;
+    /* Turn on trace for specific instructions */
+//  if (opcode == 0xB2 && ibyte == 0x20) sysblk.inststep = 1;
+//  if (opcode == 0xB1 && memcmp(module,"????????",8)==0) tracethis = 1;
 
     /* Display the instruction */
-    if (sysblk.insttrace || sysblk.inststep)
+    if (sysblk.insttrace || sysblk.inststep || tracethis)
     {
         display_inst (regs, inst);
         if (sysblk.inststep)
@@ -644,8 +651,6 @@ FWORD   fword;                          /* Fullword work area        */
                     (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
         ar1 = r1;
         ar2 = r2;
-        alet = regs->ar[ar1];
-        alet2 = regs->ar[ar2];
 
         /* Load padding byte from bits 0-7 of register r2+1 */
         obyte = regs->gpr[r2+1] >> 24;
@@ -655,15 +660,10 @@ FWORD   fword;                          /* Fullword work area        */
         n2 = regs->gpr[r2+1] & 0x00FFFFFF;
 
         /* Test for destructive overlap */
-        if (ACCESS_REGISTER_MODE(&(regs->psw)))
-        {
-            alet = (r1 == 0) ? 0 : regs->ar[r1];
-            alet2 = (r2 == 0) ? 0 : regs->ar[r2];
-        }
-        else
-            alet = alet2 = 0;
-
-        if ( alet == alet2 && n2 > 1)
+        if ( n2 > 1
+            && (!ACCESS_REGISTER_MODE(&(regs->psw))
+                || (r1 == 0 ? 0 : regs->ar[r1])
+                   != (r2 == 0 ? 0 : regs->ar[r2])))
         {
             n = effective_addr2 + ((n2<n1)?n2:n1) - 1;
             n &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
@@ -690,7 +690,7 @@ FWORD   fword;                          /* Fullword work area        */
             /* Fetch byte from source operand, or use padding byte */
             if ( n2 > 0 )
             {
-                sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
+                sbyte = vfetchb ( effective_addr2, ar2, regs );
                 effective_addr2++;
                 effective_addr2 &=
                     (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
@@ -700,7 +700,7 @@ FWORD   fword;                          /* Fullword work area        */
                 sbyte = obyte;
 
             /* Store the byte in the destination operand */
-            vstorei ( sbyte, 1, effective_addr, ar1, regs );
+            vstoreb ( sbyte, effective_addr, ar1, regs );
             effective_addr++;
             effective_addr &=
                     (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
@@ -737,8 +737,6 @@ FWORD   fword;                          /* Fullword work area        */
                     (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
         ar1 = r1;
         ar2 = r2;
-        alet = regs->gpr[ar1];
-        alet2 = regs->gpr[ar2];
 
         /* Load padding byte from bits 0-7 of register r2+1 */
         obyte = regs->gpr[r2+1] >> 24;
@@ -756,7 +754,7 @@ FWORD   fword;                          /* Fullword work area        */
             /* Fetch byte from first operand, or use padding byte */
             if ( n1 > 0 )
             {
-                dbyte = vfetchi ( 1, effective_addr, ar1, regs );
+                dbyte = vfetchb ( effective_addr, ar1, regs );
                 effective_addr++;
                 effective_addr &=
                     (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
@@ -768,7 +766,7 @@ FWORD   fword;                          /* Fullword work area        */
             /* Fetch byte from second operand, or use padding byte */
             if ( n2 > 0 )
             {
-                sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
+                sbyte = vfetchb ( effective_addr2, ar2, regs );
                 effective_addr2++;
                 effective_addr2 &=
                     (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
@@ -1113,7 +1111,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Store rightmost byte of register at operand address */
-        vstorei ( regs->gpr[r1], 1, effective_addr, ar1, regs );
+        vstoreb ( regs->gpr[r1] & 0xFF, effective_addr, ar1, regs );
 
         break;
 
@@ -1124,7 +1122,7 @@ FWORD   fword;                          /* Fullword work area        */
 
         /* Load rightmost byte of register from operand address */
         regs->gpr[r1] &= 0xFFFFFF00;
-        regs->gpr[r1] |= vfetchi ( 1, effective_addr, ar1, regs );
+        regs->gpr[r1] |= vfetchb ( effective_addr, ar1, regs );
 
         break;
 
@@ -1205,6 +1203,20 @@ FWORD   fword;                          /* Fullword work area        */
         /* Use the operand address as the branch address */
         newia = effective_addr;
 
+#ifdef MODULE_TRACE
+        /* Test for module entry */
+        if (inst[1] == 0xF0 && inst[2] == 0xF0
+            && inst[3] == ((vfetchb(regs->psw.ia, 0, regs) + 6) & 0xFE))
+        {
+            vfetchc (module, 7, regs->psw.ia + 1, 0, regs);
+            for (i=0; i < 8; i++)
+                module[i] = ebcdic_to_ascii[module[i]];
+            printf ("Entering %8.8s at %8.8lX\n",
+                    module, regs->psw.ia - 4);
+//          if (memcmp(module, "????????", 8) == 0) sysblk.inststep = 1;
+        }
+#endif /*MODULE_TRACE*/
+
         /* Generate a bit mask from the condition code value */
         m = ( regs->psw.cc == 0 ) ? 0x08
           : ( regs->psw.cc == 1 ) ? 0x04
@@ -1222,7 +1234,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Load rightmost 2 bytes of register from operand address */
-        regs->gpr[r1] = vfetchi ( 2, effective_addr, ar1, regs );
+        regs->gpr[r1] = vfetch2 ( effective_addr, ar1, regs );
 
         /* Propagate sign bit to leftmost 2 bytes of register */
         if ( regs->gpr[r1] > 0x7FFF )
@@ -1236,7 +1248,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Load rightmost 2 bytes of comparand from operand address */
-        n = vfetchi ( 2, effective_addr, ar1, regs );
+        n = vfetch2 ( effective_addr, ar1, regs );
 
         /* Propagate sign bit to leftmost 2 bytes of comparand */
         if ( n > 0x7FFF )
@@ -1255,7 +1267,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Load 2 bytes from operand address */
-        n = vfetchi ( 2, effective_addr, ar1, regs );
+        n = vfetch2 ( effective_addr, ar1, regs );
 
         /* Propagate sign bit to leftmost 2 bytes of operand */
         if ( n > 0x7FFF )
@@ -1282,7 +1294,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Load 2 bytes from operand address */
-        n = vfetchi ( 2, effective_addr, ar1, regs );
+        n = vfetch2 ( effective_addr, ar1, regs );
 
         /* Propagate sign bit to leftmost 2 bytes of operand */
         if ( n > 0x7FFF )
@@ -1309,7 +1321,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Load 2 bytes from operand address */
-        n = vfetchi ( 2, effective_addr, ar1, regs );
+        n = vfetch2 ( effective_addr, ar1, regs );
 
         /* Propagate sign bit to leftmost 2 bytes of operand */
         if ( n > 0x7FFF )
@@ -1390,7 +1402,7 @@ FWORD   fword;                          /* Fullword work area        */
         for( i = 0; i < 8; i++ )
         {
             /* Load next byte of operand */
-            sbyte = vfetchi ( 1, effective_addr, ar1, regs );
+            sbyte = vfetchb ( effective_addr, ar1, regs );
 
             /* Isolate high-order and low-order digits */
             h = (sbyte & 0xF0) >> 4;
@@ -1490,7 +1502,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetchi ( 4, effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, ar1, regs );
 
         /* AND second operand with first and set condition code */
         regs->psw.cc = ( regs->gpr[r1] &= n ) ? 1 : 0;
@@ -1503,7 +1515,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetchi ( 4, effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, ar1, regs );
 
         /* Compare unsigned operands and set condition code */
         regs->psw.cc = regs->gpr[r1] < n ? 1 :
@@ -1517,7 +1529,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetchi ( 4, effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, ar1, regs );
 
         /* OR second operand with first and set condition code */
         regs->psw.cc = ( regs->gpr[r1] |= n ) ? 1 : 0;
@@ -1530,7 +1542,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetchi ( 4, effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, ar1, regs );
 
         /* XOR second operand with first and set condition code */
         regs->psw.cc = ( regs->gpr[r1] ^= n ) ? 1 : 0;
@@ -1543,7 +1555,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Load R1 register from second operand */
-        regs->gpr[r1] = vfetchi ( 4, effective_addr, ar1, regs );
+        regs->gpr[r1] = vfetch4 ( effective_addr, ar1, regs );
 
         break;
 
@@ -1553,7 +1565,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetchi ( 4, effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, ar1, regs );
 
         /* Compare signed operands and set condition code */
         regs->psw.cc =
@@ -1568,7 +1580,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetchi ( 4, effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, ar1, regs );
 
         /* Add signed operands and set condition code */
         regs->psw.cc =
@@ -1591,7 +1603,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetchi ( 4, effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, ar1, regs );
 
         /* Subtract signed operands and set condition code */
         regs->psw.cc =
@@ -1621,7 +1633,7 @@ FWORD   fword;                          /* Fullword work area        */
         }
 
         /* Load second operand from operand address */
-        n = vfetchi ( 4, effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, ar1, regs );
 
         /* Multiply r1+1 by n and place result in r1 and r1+1 */
         mul_signed (&(regs->gpr[r1]), &(regs->gpr[r1+1]),
@@ -1643,7 +1655,7 @@ FWORD   fword;                          /* Fullword work area        */
         }
 
         /* Load second operand from operand address */
-        n = vfetchi ( 4, effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, ar1, regs );
 
         /* Divide r1::r1+1 by n, remainder in r1, dividend in r1+1 */
         divide_overflow =
@@ -1667,7 +1679,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetchi ( 4, effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, ar1, regs );
 
         /* Add signed operands and set condition code */
         regs->psw.cc =
@@ -1683,7 +1695,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetchi ( 4, effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, ar1, regs );
 
         /* Subtract unsigned operands and set condition code */
         regs->psw.cc =
@@ -1724,7 +1736,7 @@ FWORD   fword;                          /* Fullword work area        */
         }
 
         /* Fetch value from operand address */
-        dreg = vfetchi ( 8, effective_addr, ar1, regs );
+        dreg = vfetch8 ( effective_addr, ar1, regs );
 
         /* Update register contents */
         regs->fpr[r1] = dreg >> 32;
@@ -1755,7 +1767,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetchi ( 4, effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, ar1, regs );
 
         /* Multiply signed operands ignoring overflow */
         (S32)regs->gpr[r1] *= (S32)n;
@@ -1775,7 +1787,7 @@ FWORD   fword;                          /* Fullword work area        */
         }
 
         /* Update first 32 bits of register from operand address */
-        regs->fpr[r1] = vfetchi ( 4, effective_addr, ar1, regs );
+        regs->fpr[r1] = vfetch4 ( effective_addr, ar1, regs );
 
         break;
 
@@ -1799,7 +1811,7 @@ FWORD   fword;                          /* Fullword work area        */
         }
 
         /* Load new system mask value from operand address */
-        regs->psw.sysmask = vfetchi ( 1, effective_addr, ar1, regs );
+        regs->psw.sysmask = vfetchb ( effective_addr, ar1, regs );
 
         /* For ECMODE, bits 0 and 2-4 of system mask must be zero */
         if (regs->psw.ecmode && (regs->psw.sysmask & 0xB8) != 0)
@@ -1834,7 +1846,7 @@ FWORD   fword;                          /* Fullword work area        */
         perform_chkpt_sync ();
 
         /* Fetch new PSW from operand address */
-        vfetchd ( dword, effective_addr, ar1, regs );
+        vfetchc ( dword, 7, effective_addr, ar1, regs );
 
         /* Load updated PSW */
         rc = load_psw ( &(regs->psw), dword );
@@ -2127,7 +2139,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Fetch byte from operand address */
-        obyte = vfetchi ( 1, effective_addr, ar1, regs );
+        obyte = vfetchb ( effective_addr, ar1, regs );
 
         /* AND with immediate operand mask */
         obyte &= ibyte;
@@ -2146,7 +2158,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Store immediate operand at operand address */
-        vstorei ( ibyte, 1, effective_addr, ar1, regs );
+        vstoreb ( ibyte, effective_addr, ar1, regs );
 
         break;
 
@@ -2162,10 +2174,10 @@ FWORD   fword;                          /* Fullword work area        */
         obtain_lock (&sysblk.mainlock);
 
         /* Fetch byte from operand address */
-        obyte = vfetchi ( 1, effective_addr, ar1, regs );
+        obyte = vfetchb ( effective_addr, ar1, regs );
 
         /* Set all bits of operand to ones */
-        vstorei ( 0xFF, 1, effective_addr, ar1, regs );
+        vstoreb ( 0xFF, effective_addr, ar1, regs );
 
         /* Release main-storage access lock */
         release_lock (&sysblk.mainlock);
@@ -2184,13 +2196,13 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Fetch byte from operand address */
-        obyte = vfetchi ( 1, effective_addr, ar1, regs );
+        obyte = vfetchb ( effective_addr, ar1, regs );
 
         /* AND with immediate operand and set condition code */
         regs->psw.cc = ( obyte &= ibyte ) ? 1 : 0;
 
         /* Store result at operand address */
-        vstorei ( obyte, 1, effective_addr, ar1, regs );
+        vstoreb ( obyte, effective_addr, ar1, regs );
 
         break;
 
@@ -2200,7 +2212,7 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Fetch byte from operand address */
-        obyte = vfetchi ( 1, effective_addr, ar1, regs );
+        obyte = vfetchb ( effective_addr, ar1, regs );
 
         /* Compare with immediate operand and set condition code */
         regs->psw.cc = (obyte < ibyte) ? 1 :
@@ -2214,13 +2226,13 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Fetch byte from operand address */
-        obyte = vfetchi ( 1, effective_addr, ar1, regs );
+        obyte = vfetchb ( effective_addr, ar1, regs );
 
         /* OR with immediate operand and set condition code */
         regs->psw.cc = ( obyte |= ibyte ) ? 1 : 0;
 
         /* Store result at operand address */
-        vstorei ( obyte, 1, effective_addr, ar1, regs );
+        vstoreb ( obyte, effective_addr, ar1, regs );
 
         break;
 
@@ -2230,13 +2242,13 @@ FWORD   fword;                          /* Fullword work area        */
     /*---------------------------------------------------------------*/
 
         /* Fetch byte from operand address */
-        obyte = vfetchi ( 1, effective_addr, ar1, regs );
+        obyte = vfetchb ( effective_addr, ar1, regs );
 
         /* XOR with immediate operand and set condition code */
         regs->psw.cc = ( obyte ^= ibyte ) ? 1 : 0;
 
         /* Store result at operand address */
-        vstorei ( obyte, 1, effective_addr, ar1, regs );
+        vstoreb ( obyte, effective_addr, ar1, regs );
 
         break;
 
@@ -2248,7 +2260,7 @@ FWORD   fword;                          /* Fullword work area        */
         for ( n = r1; ; )
         {
             /* Load register from operand address */
-            regs->gpr[n] = vfetchi ( 4, effective_addr, ar1, regs );
+            regs->gpr[n] = vfetch4 ( effective_addr, ar1, regs );
 
             /* Instruction is complete when r3 register is done */
             if ( n == r3 ) break;
@@ -2286,7 +2298,7 @@ FWORD   fword;                          /* Fullword work area        */
             break;
 
         /* Fetch the trace operand */
-        n2 = vfetchi ( 4, effective_addr, ar1, regs );
+        n2 = vfetch4 ( effective_addr, ar1, regs );
 
         /* Exit if bit zero of the trace operand is one */
         if ( (n2 & 0x80000000) )
@@ -2383,7 +2395,7 @@ FWORD   fword;                          /* Fullword work area        */
         for ( n = r1; ; )
         {
             /* Load access register from operand address */
-            regs->ar[n] = vfetchi ( 4, effective_addr, ar1, regs );
+            regs->ar[n] = vfetch4 ( effective_addr, ar1, regs );
 
             /* Instruction is complete when r3 register is done */
             if ( n == r3 ) break;
@@ -2705,8 +2717,6 @@ FWORD   fword;                          /* Fullword work area        */
                     (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
         ar1 = r1;
         ar2 = r3;
-        alet = regs->ar[ar1];
-        alet2 = regs->ar[ar2];
 
         /* Load operand lengths from bits 0-31 of r1+1 and r3+1 */
         n1 = regs->gpr[r1+1];
@@ -2728,7 +2738,7 @@ FWORD   fword;                          /* Fullword work area        */
             /* Fetch byte from source operand, or use padding byte */
             if ( n2 > 0 )
             {
-                sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
+                sbyte = vfetchb ( effective_addr2, ar2, regs );
                 effective_addr2++;
                 effective_addr2 &=
                     (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
@@ -2738,7 +2748,7 @@ FWORD   fword;                          /* Fullword work area        */
                 sbyte = obyte;
 
             /* Store the byte in the destination operand */
-            vstorei ( sbyte, 1, effective_addr, ar1, regs );
+            vstoreb ( sbyte, effective_addr, ar1, regs );
             effective_addr++;
             effective_addr &=
                     (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
@@ -2776,8 +2786,6 @@ FWORD   fword;                          /* Fullword work area        */
                     (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
         ar1 = r1;
         ar2 = r3;
-        alet = regs->ar[ar1];
-        alet2 = regs->ar[ar2];
 
         /* Load operand lengths from bits 0-31 of r1+1 and r3+1 */
         n1 = regs->gpr[r1+1];
@@ -2799,7 +2807,7 @@ FWORD   fword;                          /* Fullword work area        */
             /* Fetch byte from first operand, or use padding byte */
             if ( n1 > 0 )
             {
-                dbyte = vfetchi ( 1, effective_addr, ar1, regs );
+                dbyte = vfetchb ( effective_addr, ar1, regs );
                 effective_addr++;
                 effective_addr &=
                     (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
@@ -2811,7 +2819,7 @@ FWORD   fword;                          /* Fullword work area        */
             /* Fetch byte from second operand, or use padding byte */
             if ( n2 > 0 )
             {
-                sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
+                sbyte = vfetchb ( effective_addr2, ar2, regs );
                 effective_addr2++;
                 effective_addr2 &=
                     (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
@@ -2850,7 +2858,7 @@ FWORD   fword;                          /* Fullword work area        */
         }
 
         /* Store current system mask value into storage operand */
-        vstorei ( regs->psw.sysmask, 1, effective_addr, ar1, regs );
+        vstoreb ( regs->psw.sysmask, effective_addr, ar1, regs );
 
         /* AND system mask with immediate operand */
         regs->psw.sysmask &= ibyte;
@@ -2870,7 +2878,7 @@ FWORD   fword;                          /* Fullword work area        */
         }
 
         /* Store current system mask value into storage operand */
-        vstorei ( regs->psw.sysmask, 1, effective_addr, ar1, regs );
+        vstoreb ( regs->psw.sysmask, effective_addr, ar1, regs );
 
         /* OR system mask with immediate operand */
         regs->psw.sysmask |= ibyte;
@@ -3080,7 +3088,7 @@ FWORD   fword;                          /* Fullword work area        */
             }
 
             /* Fetch clock comparator value from operand location */
-            regs->clkc = vfetchi ( 8, effective_addr, ar1, regs )
+            regs->clkc = vfetch8 ( effective_addr, ar1, regs )
                         & 0xFFFFFFFFFFFFF000ULL;
             /*debug*/printf("Set clock comparator=%16.16llX\n",
             /*debug*/       regs->clkc);
@@ -3134,7 +3142,7 @@ FWORD   fword;                          /* Fullword work area        */
             }
 
             /* Fetch the CPU timer value from operand location */
-            regs->timer = vfetchi ( 8, effective_addr, ar1, regs )
+            regs->timer = vfetch8 ( effective_addr, ar1, regs )
                         & 0xFFFFFFFFFFFFF000ULL;
             /*debug*/printf("Set CPU timer=%16.16llX\n", regs->timer);
 
@@ -3249,7 +3257,7 @@ FWORD   fword;                          /* Fullword work area        */
             perform_serialization ();
 
             /* Load new prefix value from operand address */
-            n = vfetchi ( 4, effective_addr, ar1, regs );
+            n = vfetch4 ( effective_addr, ar1, regs );
 
             /* Isolate bits 1-19 of new prefix value */
             n &= 0x7FFFF000;
@@ -3971,8 +3979,7 @@ topic 5.9.2.
             }
 
             /* Fetch the updated path management control word */
-            for (i=0; i < sizeof(PMCW); i += 4, effective_addr += 4)
-                vfetchf ( ((BYTE*)&pmcw)+i, effective_addr,
+            vfetchc ( &pmcw, sizeof(PMCW)-1, effective_addr,
                         ar1, regs );
 
             /* Program check if reserved bits are not zero */
@@ -4069,8 +4076,7 @@ topic 5.9.2.
             }
 
             /* Fetch the operation request block */
-            for (i=0; i < sizeof(ORB); i += 4, effective_addr += 4)
-                vfetchf ( ((BYTE*)&orb)+i, effective_addr,
+            vfetchc ( &orb, sizeof(ORB)-1, effective_addr,
                         ar1, regs );
 
             /* Program check if reserved bits are not zero */
@@ -4171,20 +4177,14 @@ topic 5.9.2.
             perform_serialization ();
             perform_chkpt_sync ();
 
-            /* Store the path management control word */
-            for (i=0; i < sizeof(PMCW); i += 4, effective_addr += 4)
-                vstoref ( ((BYTE*)&dev->pmcw)+i, effective_addr,
-                        ar1, regs );
+            /* Build the subchannel information block */
+            schib.pmcw = dev->pmcw;
+            schib.scsw = dev->scsw;
+            memset (schib.moddep, 0, sizeof(schib.moddep));
 
-            /* Store the subchannel status word */
-            for (i=0; i < sizeof(SCSW); i += 4, effective_addr += 4)
-                vstoref ( ((BYTE*)&dev->scsw)+i, effective_addr,
+            /* Store the subchannel information block */
+            vstorec ( &schib, sizeof(SCHIB)-1, effective_addr,
                         ar1, regs );
-
-            /* Store the model dependent words */
-            memset (fword, 0, sizeof(fword));
-            for (i=0; i < 12; i += 4, effective_addr += 4)
-                vstoref ( fword, effective_addr, ar1, regs );
 
             /* Set condition code 0 */
             regs->psw.cc = 0;
@@ -4231,15 +4231,10 @@ topic 5.9.2.
             perform_chkpt_sync ();
 
             /* Test and clear pending status, set condition code */
-            regs->psw.cc = test_subchan (regs, dev, &scsw, &esw);
+            regs->psw.cc = test_subchan (regs, dev, &irb);
 
-            /* Store the subchannel status word */
-            for (i=0; i < sizeof(SCSW); i += 4, effective_addr += 4)
-                vstoref ( ((BYTE*)&scsw)+i, effective_addr, ar1, regs );
-
-            /* Store the extended status word */
-            for (i=0; i < sizeof(ESW); i += 4, effective_addr += 4)
-                vstoref ( ((BYTE*)&esw)+i, effective_addr, ar1, regs );
+            /* Store the interruption response block */
+            vstorec ( &irb, sizeof(IRB)-1, effective_addr, ar1, regs );
 
             break;
 
@@ -4287,8 +4282,8 @@ topic 5.9.2.
             else
             {
                 /* Otherwise store at operand location */
-                vstorei ( ioid, 4, effective_addr, ar1, regs );
-                vstorei ( ioparm, 4, effective_addr + 4, ar1, regs );
+                dreg = ((U64)ioid << 32) | ioparm;
+                vstorei ( dreg, 8, effective_addr, ar1, regs );
             }
 
             break;
@@ -4348,7 +4343,7 @@ topic 5.9.2.
 
             /* Set condition code 1 or 2 according to whether
                the ALET designates the DUCT or the PASTE */
-            regs->psw.cc = (alet & ALET_PRI_LIST) ? 2 : 1;
+            regs->psw.cc = (regs->ar[r1] & ALET_PRI_LIST) ? 2 : 1;
 
             break;
 
@@ -4415,8 +4410,6 @@ topic 5.9.2.
                         (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
             ar1 = r1;
             ar2 = r2;
-            alet = regs->ar[ar1];
-            alet2 = regs->ar[ar2];
 
             /* Initialize condition code to 3 */
             regs->psw.cc = 3;
@@ -4425,10 +4418,10 @@ topic 5.9.2.
             for ( i = 0; i < 4096; i++ )
             {
                 /* Fetch a byte from the source operand */
-                sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
+                sbyte = vfetchb ( effective_addr2, ar2, regs );
 
                 /* Store the byte in the destination operand */
-                vstorei ( sbyte, 1, effective_addr, ar1, regs );
+                vstoreb ( sbyte, effective_addr, ar1, regs );
 
                 /* Check if string terminating character was moved */
                 if ( sbyte == obyte )
@@ -4530,7 +4523,7 @@ topic 5.9.2.
         for ( n = r1; ; )
         {
             /* Load control register from operand address */
-            regs->cr[n] = vfetchi ( 4, effective_addr, ar1, regs );
+            regs->cr[n] = vfetch4 ( effective_addr, ar1, regs );
 
             /* Instruction is complete when r3 register is done */
             if ( n == r3 ) break;
@@ -4563,7 +4556,7 @@ topic 5.9.2.
         obtain_lock (&sysblk.mainlock);
 
         /* Load second operand from operand address  */
-        n = vfetchi ( 4, effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, ar1, regs );
 
         /* Compare operand with R1 register contents */
         if ( regs->gpr[r1] == n )
@@ -4613,8 +4606,8 @@ topic 5.9.2.
         obtain_lock (&sysblk.mainlock);
 
         /* Load second operand from operand address  */
-        n = vfetchi ( 4, effective_addr, ar1, regs );
-        d = vfetchi ( 4, effective_addr + 4, ar1, regs );
+        n = vfetch4 ( effective_addr, ar1, regs );
+        d = vfetch4 ( effective_addr + 4, ar1, regs );
 
         /* Compare doubleword operand with R1:R1+1 register contents */
         if ( regs->gpr[r1] == n && regs->gpr[r1+1] == d )
@@ -4659,7 +4652,7 @@ topic 5.9.2.
             {
                 /* Fetch character from register and operand */
                 dbyte = n >> 24;
-                sbyte = vfetchi ( 1, effective_addr++, ar1, regs );
+                sbyte = vfetchb ( effective_addr++, ar1, regs );
 
                 /* Compare bytes, set condition code if unequal */
                 if ( dbyte != sbyte )
@@ -4693,7 +4686,7 @@ topic 5.9.2.
             {
                 /* Store character from register to operand */
                 dbyte = n >> 24;
-                vstorei ( dbyte, 1, effective_addr++, ar1, regs );
+                vstoreb ( dbyte, effective_addr++, ar1, regs );
             }
 
             /* Shift mask and register for next byte */
@@ -4717,11 +4710,11 @@ topic 5.9.2.
            to recognize an access exception on the first byte */
         if ( r3 == 0 )
         {
-            sbyte = vfetchi ( 1, effective_addr, ar1, regs );
+            sbyte = vfetchb ( effective_addr, ar1, regs );
             break;
         }
 
-        /* Load existing register value into 64-bit work are */
+        /* Load existing register value into 64-bit work area */
         dreg = regs->gpr[r1];
 
         /* Insert characters into register from operand address */
@@ -4731,7 +4724,7 @@ topic 5.9.2.
             if ( r3 & 0x08 )
             {
                 /* Fetch the source byte from the operand */
-                sbyte = vfetchi ( 1, effective_addr, ar1, regs );
+                sbyte = vfetchb ( effective_addr, ar1, regs );
 
                 /* If this is the first byte fetched then test the
                    high-order bit to determine the condition code */
@@ -4772,8 +4765,8 @@ topic 5.9.2.
         for ( i = 0; i < ibyte+1; i++ )
         {
             /* Fetch bytes from source and destination operands */
-            sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
-            dbyte = vfetchi ( 1, effective_addr, ar1, regs );
+            sbyte = vfetchb ( effective_addr2, ar2, regs );
+            dbyte = vfetchb ( effective_addr, ar1, regs );
 
             /* Copy low digit of source byte to destination byte */
             dbyte = (dbyte & 0xF0) | ( sbyte & 0x0F);
@@ -4802,7 +4795,7 @@ topic 5.9.2.
         for ( i = 0; i < ibyte+1; i++ )
         {
             /* Fetch a byte from the source operand */
-            sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
+            sbyte = vfetchb ( effective_addr2, ar2, regs );
 
             /* Store the byte in the destination operand */
             vstorei ( sbyte, 1, effective_addr, ar1, regs );
@@ -4828,8 +4821,8 @@ topic 5.9.2.
         for ( i = 0; i < ibyte+1; i++ )
         {
             /* Fetch bytes from source and destination operands */
-            sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
-            dbyte = vfetchi ( 1, effective_addr, ar1, regs );
+            sbyte = vfetchb ( effective_addr2, ar2, regs );
+            dbyte = vfetchb ( effective_addr, ar1, regs );
 
             /* Copy high digit of source byte to destination byte */
             dbyte = (dbyte & 0x0F) | ( sbyte & 0xF0);
@@ -4861,8 +4854,8 @@ topic 5.9.2.
         for ( i = 0; i < ibyte+1; i++ )
         {
             /* Fetch bytes from source and destination operands */
-            sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
-            dbyte = vfetchi ( 1, effective_addr, ar1, regs );
+            sbyte = vfetchb ( effective_addr2, ar2, regs );
+            dbyte = vfetchb ( effective_addr, ar1, regs );
 
             /* AND operand bytes and set condition code */
             if ( dbyte &= sbyte ) regs->psw.cc = 1;
@@ -4894,8 +4887,8 @@ topic 5.9.2.
         for ( i = 0; i < ibyte+1; i++ )
         {
             /* Fetch bytes from first and second operands */
-            dbyte = vfetchi ( 1, effective_addr, ar1, regs );
-            sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
+            dbyte = vfetchb ( effective_addr, ar1, regs );
+            sbyte = vfetchb ( effective_addr2, ar2, regs );
 
             /* Compare operand bytes, set condition code if unequal */
             if ( dbyte != sbyte )
@@ -4928,8 +4921,8 @@ topic 5.9.2.
         for ( i = 0; i < ibyte+1; i++ )
         {
             /* Fetch bytes from source and destination operands */
-            sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
-            dbyte = vfetchi ( 1, effective_addr, ar1, regs );
+            sbyte = vfetchb ( effective_addr2, ar2, regs );
+            dbyte = vfetchb ( effective_addr, ar1, regs );
 
             /* OR operand bytes and set condition code */
             if ( dbyte |= sbyte ) regs->psw.cc = 1;
@@ -4961,8 +4954,8 @@ topic 5.9.2.
         for ( i = 0; i < ibyte+1; i++ )
         {
             /* Fetch bytes from source and destination operands */
-            sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
-            dbyte = vfetchi ( 1, effective_addr, ar1, regs );
+            sbyte = vfetchb ( effective_addr2, ar2, regs );
+            dbyte = vfetchb ( effective_addr, ar1, regs );
 
             /* XOR operand bytes and set condition code */
             if ( dbyte ^= sbyte ) regs->psw.cc = 1;
@@ -4991,10 +4984,10 @@ topic 5.9.2.
         for ( i = 0; i < ibyte+1; i++ )
         {
             /* Fetch byte from first operand address */
-            dbyte = vfetchi ( 1, effective_addr, ar1, regs );
+            dbyte = vfetchb ( effective_addr, ar1, regs );
 
             /* Fetch byte from translate table */
-            sbyte = vfetchi ( 1, effective_addr2 + dbyte, ar2, regs );
+            sbyte = vfetchb ( effective_addr2 + dbyte, ar2, regs );
 
             /* Store result at first operand address */
             vstorei ( sbyte, 1, effective_addr, ar1, regs );
@@ -5020,10 +5013,10 @@ topic 5.9.2.
         for ( i = 0; i < ibyte+1; i++ )
         {
             /* Fetch argument byte from first operand */
-            dbyte = vfetchi ( 1, effective_addr, ar1, regs );
+            dbyte = vfetchb ( effective_addr, ar1, regs );
 
             /* Fetch function byte from second operand */
-            sbyte = vfetchi ( 1, effective_addr2 + dbyte, ar2, regs );
+            sbyte = vfetchb ( effective_addr2 + dbyte, ar2, regs );
 
             /* Test for non-zero function byte */
             if (sbyte != 0) {
@@ -5082,7 +5075,7 @@ topic 5.9.2.
         for ( i = 0, d = 0; i < ibyte+1; i++ )
         {
             /* Fetch pattern byte from first operand */
-            dbyte = vfetchi ( 1, effective_addr, ar1, regs );
+            dbyte = vfetchb ( effective_addr, ar1, regs );
 
             /* The first pattern byte is also the fill byte */
             if (i == 0) fbyte = dbyte;
@@ -5095,7 +5088,7 @@ topic 5.9.2.
                 if (d == 0)
                 {
                     /* Fetch source byte and extract left digit */
-                    sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
+                    sbyte = vfetchb ( effective_addr2, ar2, regs );
                     h = sbyte >> 4;
                     sbyte &= 0x0F;
                     d = 1;
@@ -5229,7 +5222,7 @@ topic 5.9.2.
             }
 
             /* Fetch PKM, SASN, AX, and PASN from first operand */
-            dreg = vfetchi ( 8, effective_addr, ar1, regs );
+            dreg = vfetch8 ( effective_addr, ar1, regs );
             pkm = (dreg & 0xFFFF000000000000) >> 48;
             sasn = (dreg & 0xFFFF00000000) >> 32;
             ax = (dreg & 0xFFFF0000) >> 16;
@@ -5401,7 +5394,7 @@ is set, and the control registers remain unchanged.
         for ( i = 0; i < ibyte+1; i++ )
         {
             /* Fetch a byte from the source operand */
-            sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
+            sbyte = vfetchb ( effective_addr2, ar2, regs );
 
             /* Store the byte in the destination operand */
             vstorei ( sbyte, 1, effective_addr, ar1, regs );
@@ -5427,11 +5420,11 @@ is set, and the control registers remain unchanged.
 
         /* Fetch the rightmost byte from the source operand */
         effective_addr2 += r2;
-        sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
+        sbyte = vfetchb ( effective_addr2, ar2, regs );
 
         /* Fetch the rightmost byte from the destination operand */
         effective_addr += r1;
-        dbyte = vfetchi ( 1, effective_addr, ar1, regs );
+        dbyte = vfetchb ( effective_addr, ar1, regs );
 
         /* Move low digit of source byte to high digit of destination */
         dbyte &= 0x0F;
@@ -5446,7 +5439,7 @@ is set, and the control registers remain unchanged.
 
             /* Fetch next byte from second operand */
             if ( j-- > 0 )
-                sbyte = vfetchi ( 1, --effective_addr2, ar2, regs );
+                sbyte = vfetchb ( --effective_addr2, ar2, regs );
             else
                 sbyte = 0x00;
 
@@ -5472,7 +5465,7 @@ is set, and the control registers remain unchanged.
         /* Exchange the digits in the rightmost byte */
         effective_addr += r1;
         effective_addr2 += r2;
-        sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
+        sbyte = vfetchb ( effective_addr2, ar2, regs );
         dbyte = (sbyte << 4) | (sbyte >> 4);
         vstorei ( dbyte, 1, effective_addr, ar1, regs );
 
@@ -5482,14 +5475,14 @@ is set, and the control registers remain unchanged.
             /* Fetch source bytes from second operand */
             if ( j-- > 0 )
             {
-                sbyte = vfetchi ( 1, --effective_addr2, ar2, regs );
+                sbyte = vfetchb ( --effective_addr2, ar2, regs );
                 dbyte = sbyte & 0x0F;
 
                 if ( j-- > 0 )
                 {
                     effective_addr2 &=
                         (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-                    sbyte = vfetchi ( 1, --effective_addr2, ar2, regs );
+                    sbyte = vfetchb ( --effective_addr2, ar2, regs );
                     dbyte |= sbyte << 4;
                 }
             }
@@ -5519,7 +5512,7 @@ is set, and the control registers remain unchanged.
         /* Exchange the digits in the rightmost byte */
         effective_addr += r1;
         effective_addr2 += r2;
-        sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
+        sbyte = vfetchb ( effective_addr2, ar2, regs );
         dbyte = (sbyte << 4) | (sbyte >> 4);
         vstorei ( dbyte, 1, effective_addr, ar1, regs );
 
@@ -5529,7 +5522,7 @@ is set, and the control registers remain unchanged.
             /* Fetch source byte from second operand */
             if ( j-- > 0 )
             {
-                sbyte = vfetchi ( 1, --effective_addr2, ar2, regs );
+                sbyte = vfetchb ( --effective_addr2, ar2, regs );
                 dbyte = (sbyte & 0x0F) | 0xF0;
                 obyte = (sbyte >> 4) | 0xF0;
             }
@@ -5563,110 +5556,46 @@ is set, and the control registers remain unchanged.
     /* ZAP      Zero and Add Decimal                            [SS] */
     /*---------------------------------------------------------------*/
 
-        /* Clear the condition code */
-        regs->psw.cc = 0;
+        /* Copy packed decimal operand and set condition code */
+        regs->psw.cc =
+            zero_and_add_packed (effective_addr, r1, ar1,
+                                effective_addr2, r2, ar2, regs );
 
-        /* Fetch the rightmost byte from the source operand */
-        effective_addr2 += r2;
-        effective_addr2 &=
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        sbyte = vfetchi ( 1, effective_addr2, ar2, regs );
+        break;
 
-        /* Check for valid sign and set sign to X'C' or X'D' */
-        d = sbyte & 0x0F;
-        if ( d < 0x0A ) {
-            program_check (PGM_DATA_EXCEPTION);
-            goto terminate;
-        }
-        d = (d == 0x0B || d == 0x0D) ? 0x0D : 0x0C;
+    case 0xF9:
+    /*---------------------------------------------------------------*/
+    /* CP       Compare Decimal                                 [SS] */
+    /*---------------------------------------------------------------*/
 
-        /* Check for valid numeric */
-        h = sbyte & 0xF0;
-        if ( h > 0x90 ) {
-            program_check (PGM_DATA_EXCEPTION);
-            goto terminate;
-        }
+        /* Compare packed decimal operands and set condition code */
+        regs->psw.cc =
+            compare_packed (effective_addr, r1, ar1,
+                                effective_addr2, r2, ar2, regs );
 
-        /* Store the rightmost byte in the destination operand */
-        dbyte = h | d;
-        effective_addr += r1;
-        effective_addr &=
-                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        vstorei ( dbyte, 1, effective_addr, ar1, regs );
+        break;
 
-        /* Process remaining bytes from right to left */
-        for ( i = r1, j = r2; i > 0 || j > 0; )
-        {
-            if ( j-- > 0 )
-            {
-                /* Fetch source byte from second operand */
-                sbyte = vfetchi ( 1, --effective_addr2, ar2, regs );
+    case 0xFA:
+    /*---------------------------------------------------------------*/
+    /* AP       Add Decimal                                     [SS] */
+    /*---------------------------------------------------------------*/
 
-                /* Check for valid numerics */
-                if ( (sbyte & 0xF0) > 0x90 || (sbyte & 0x0F) > 0x09 )
-                {
-                    program_check (PGM_DATA_EXCEPTION);
-                    goto terminate;
-                }
+        /* Add packed decimal operands and set condition code */
+        regs->psw.cc =
+            add_packed (effective_addr, r1, ar1,
+                                effective_addr2, r2, ar2, regs );
 
-                /* Accumulate digits for eventual non-zero test */
-                h |= sbyte;
-            }
-            else
-            {
-                sbyte = 0x00;
-            }
+        break;
 
-            if ( i-- > 0 )
-            {
-                /* Store byte in destination operand */
-                vstorei ( sbyte, 1, --effective_addr, ar1, regs );
-            }
-            else
-            {
-                /* Destination is full, check for overflow */
-                if ( sbyte != 0 )
-                {
-                    /* Program check if decimal overflow mask is set */
-                    if ( regs->psw.domask )
-                    {
-                        program_check (PGM_DECIMAL_OVERFLOW_EXCEPTION);
-                        goto terminate;
-                    }
+    case 0xFB:
+    /*---------------------------------------------------------------*/
+    /* SP       Subtract Decimal                                [SS] */
+    /*---------------------------------------------------------------*/
 
-                    /* Otherwise set condition code 3 */
-                    regs->psw.cc = 3;
-                    break;
-                }
-            }
-
-            /* Wraparound according to addressing mode */
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            effective_addr2 &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-        } /* end for(i) */
-
-        /* Set the condition code */
-        if ( regs->psw.cc != 3 )
-        {
-            /* If result was all zero, set cc=0 and reset sign */
-            if ( h == 0 )
-            {
-                if ( d == 0x0D )
-                {
-                    effective_addr += r1;
-                    effective_addr &=
-                            (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-                    vstorei ( 0x0C, 1, effective_addr, ar1, regs );
-                }
-            }
-            else
-            {
-                regs->psw.cc = (d == 0x0d) ? 1 : 2;
-            }
-        }
+        /* Subtract packed decimal operands and set condition code */
+        regs->psw.cc =
+            subtract_packed (effective_addr, r1, ar1,
+                                effective_addr2, r2, ar2, regs );
 
         break;
 
@@ -5770,13 +5699,11 @@ DWORD   csw;                            /* CSW for S/370 channels    */
 
 } /* end function perform_io_interrupt */
 
-#undef  INSTRUCTION_COUNTING
 /*-------------------------------------------------------------------*/
 /* Start executing CPU instructions                                  */
 /*-------------------------------------------------------------------*/
 void start_cpu (U32 pswaddr, REGS *regs)
 {
-PSA    *psa;                            /* -> Prefixed storage area  */
 DWORD   dword;                          /* Doubleword work area      */
 #ifdef INSTRUCTION_COUNTING
 struct {
@@ -5788,8 +5715,11 @@ struct {
     int opA6[256];                      /* A6xx instruction counters */
     int opA7[16];                       /* A70x instruction counters */
     int opB2[256];                      /* B2xx instruction counters */
+    int opB3[256];                      /* B3xx instruction counters */
     int opE4[256];                      /* E4xx instruction counters */
     int opE5[256];                      /* E5xx instruction counters */
+    int opE6[256];                      /* E6xx instruction counters */
+    int opED[256];                      /* EDxx instruction counters */
         } instcount;
 int    *picta;                          /* -> Inst counter array     */
 int     icidx;                          /* Instruction counter index */
@@ -5855,8 +5785,11 @@ int     icidx;                          /* Instruction counter index */
         case 0xA7: picta = instcount.opA7; icidx = dword[1] & 0x0F;
                    break;
         case 0xB2: picta = instcount.opB2; icidx = dword[1]; break;
+        case 0xB3: picta = instcount.opB3; icidx = dword[1]; break;
         case 0xE4: picta = instcount.opE4; icidx = dword[1]; break;
         case 0xE5: picta = instcount.opE5; icidx = dword[1]; break;
+        case 0xE6: picta = instcount.opE6; icidx = dword[1]; break;
+        case 0xED: picta = instcount.opED; icidx = dword[1]; break;
         default: picta = instcount.general; icidx = dword[0];
         } /* end switch */
 
@@ -5874,6 +5807,8 @@ int     icidx;                          /* Instruction counter index */
         /* Count instruction usage by opcode and overall */
         picta[icidx]++;
         instcount.overall++;
+        if (instcount.overall % 1000000 == 0)
+            printf ("%d instructions executed\n", instcount.overall);
 #endif /*INSTRUCTION_COUNTING*/
 
         /* Execute the instruction */

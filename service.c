@@ -110,11 +110,14 @@ typedef struct _SCCB_SCP_INFO {
 #define SCCB_IFM4_READ_RESOURCE_GROUP_INFO              0x08
 
 /* Bit definitions for configuration characteristics */
-#define SCCB_CFG1_CONFIG_RUNNING_UNDER_BFY              0x80
+#define SCCB_CFG1_LOGICALLY_PARTITIONED                 0x80
 #define SCCB_CFG1_SUPPRESSION_ON_PROTECTION             0x20
 #define SCCB_CFG1_INITIATE_RESET                        0x10
 #define SCCB_CFG1_STORE_CHANNEL_SUBSYS_CHARACTERISTICS  0x08
 #define SCCB_CFG2_CSLO                                  0x40
+#define SCCB_CFG3_DEVICE_ACTIVE_ONLY_MEASUREMENT        0x40
+#define SCCB_CFG3_CHECKSUM_INSTRUCTION                  0x01
+#define SCCB_CFG4_PERFORM_LOCKED_OPERATION              0x40
 
 /* CPU information array entry */
 typedef struct _SCCB_CPU_INFO {
