@@ -887,6 +887,9 @@ int             rc;                     /* Return code               */
 CKDDASD_RECHDR  rechdr;                 /* CKD record header         */
 BYTE            keylen;                 /* Key length                */
 U16             datalen;                /* Data length               */
+U16             ckdlen;                 /* Count+key+data length     */
+off_t           curpos;                 /* Current position in file  */
+off_t           nxtpos;                 /* Position of next track    */
 int             skiplen;                /* Number of bytes to skip   */
 
     /* If oriented to count or key field, skip key and data */
@@ -912,8 +915,38 @@ int             skiplen;                /* Number of bytes to skip   */
     keylen = rechdr.klen;
     datalen = (rechdr.dlen[0] << 8) + rechdr.dlen[1];
 
-    /* Return total count key and data size */
-    *size = CKDDASD_RECHDR_SIZE + keylen + datalen;
+    /* Calculate total count key and data size */
+    ckdlen = CKDDASD_RECHDR_SIZE + keylen + datalen;
+
+    /* Determine the current position in the file */
+    curpos = lseek (dev->fd, 0, SEEK_CUR);
+    if (curpos < 0)
+    {
+        /* Handle seek error condition */
+        logmsg ("ckddasd: lseek error: %s\n",
+                strerror(errno));
+
+        /* Set unit check with equipment check */
+        ckd_build_sense (dev, SENSE_EC, 0, 0,
+                        FORMAT_1, MESSAGE_0);
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Calculate the position of the next track in the file */
+    nxtpos = CKDDASD_DEVHDR_SIZE
+            + (((dev->ckdcurcyl * dev->ckdheads) + dev->ckdcurhead)
+                * dev->ckdtrksz) + dev->ckdtrksz;
+
+    /* Check that there is enough space on the current track to
+       contain the complete erase plus an end of track marker */
+    if (curpos + ckdlen + 8 >= nxtpos)
+    {
+        /* Unit check with invalid track format */
+        ckd_build_sense (dev, 0, SENSE1_ITF, 0, 0, 0);
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
 
     /* Logically erase rest of track by writing end of track marker */
     rc = write (dev->fd, eighthexFF, 8);
@@ -944,6 +977,9 @@ int             skiplen;                /* Number of bytes to skip   */
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
+
+    /* Return total count key and data size */
+    *size = ckdlen;
 
     /* Set the device orientation fields */
     dev->ckdrem = 0;

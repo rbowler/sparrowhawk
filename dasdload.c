@@ -2054,20 +2054,241 @@ int             i;                      /* Array subscript           */
 } /* end function replace_ttr */
 
 /*-------------------------------------------------------------------*/
+/* Subroutine to update a note list record                           */
+/* Input:                                                            */
+/*      ofd     Output file descriptor                               */
+/*      ofname  Output file name                                     */
+/*      heads   Number of tracks per cylinder on output device       */
+/*      trklen  Track length of virtual output device                */
+/*      dsstart Relative track number of start of dataset            */
+/*      memname Member name (ASCIIZ)                                 */
+/*      ttrn    Pointer to TTRN of note list record                  */
+/*      ttrtab  Pointer to TTR conversion table                      */
+/*      numttr  Number of entries in TTR conversion table            */
+/* Output:                                                           */
+/*      Each original TTR in the note list record is replaced by the */
+/*      corresponding output TTR from the TTR conversion table.      */
+/*                                                                   */
+/* Return value is 0 if successful, or -1 if error.                  */
+/*-------------------------------------------------------------------*/
+static int
+update_note_list (int ofd, BYTE *ofname, int heads, int trklen,
+                int dsstart, BYTE *memname, BYTE *ttrn,
+                TTRCONV *ttrtab, int numttr)
+{
+int             rc;                     /* Return code               */
+int             i;                      /* Loop counter              */
+int             trk;                    /* Relative track number     */
+int             cyl;                    /* Cylinder number           */
+int             head;                   /* Head number               */
+int             rec;                    /* Record number             */
+int             klen;                   /* Record key length         */
+int             dlen;                   /* Record data length        */
+int             numnl;                  /* Number of note list TTRs  */
+int             nllen;                  /* Note list length          */
+BYTE           *ttrptr;                 /* -> Note list TTR          */
+off_t           currpos;                /* Current position in file  */
+off_t           seekpos;                /* Seek position for lseek   */
+off_t           skiplen;                /* Number of bytes to skip   */
+CKDDASD_TRKHDR  trkhdr;                 /* Track header              */
+CKDDASD_RECHDR  rechdr;                 /* Record header             */
+BYTE            notelist[1024];         /* Note list                 */
+
+    /* Load the TTR of the note list record */
+    trk = (ttrn[0] << 8) | ttrn[1];
+    rec = ttrn[2];
+
+    /* Load number of note list TTRs and calculate note list length */
+    numnl = ttrn[3];
+    nllen = numnl * 4;
+
+    /* Calculate the CCHHR of the note list record */
+    cyl = (dsstart + trk) / heads;
+    head = (dsstart + trk) % heads;
+
+    XMINFF (4, "Updating note list for member %s "
+            "at TTR=%4.4X%2.2X CCHHR=%4.4X%4.4X%2.2X\n",
+            memname, trk, rec, cyl, head, rec);
+
+    /* Save the current position in the output file */
+    currpos = lseek (ofd, 0, SEEK_CUR);
+
+    /* Seek to start of track header */
+    seekpos = CKDDASD_DEVHDR_SIZE
+            + (((cyl * heads) + head) * trklen);
+
+    rc = lseek (ofd, seekpos, SEEK_SET);
+    if (rc < 0)
+    {
+        XMERRF ("%s cyl %d head %d seek error: %s\n",
+                ofname, cyl, head, strerror(errno));
+        return -1;
+    }
+
+    /* Read the track header */
+    rc = read (ofd, &trkhdr, CKDDASD_TRKHDR_SIZE);
+    if (rc < CKDDASD_TRKHDR_SIZE)
+    {
+        XMERRF ("%s cyl %d head %d read error: %s\n",
+                ofname, cyl, head, strerror(errno));
+        return -1;
+    }
+
+    /* Validate the track header */
+    if (trkhdr.bin != 0
+        || trkhdr.cyl[0] != (cyl >> 8)
+        || trkhdr.cyl[1] != (cyl & 0xFF)
+        || trkhdr.head[0] != (head >> 8)
+        || trkhdr.head[1] != (head & 0xFF))
+    {
+        XMERRF ("%s cyl %d head %d invalid track header "
+                "%2.2X%2.2X%2.2X%2.2X%2.2X at offset %8.8lX\n",
+                ofname, cyl, head,
+                trkhdr.bin, trkhdr.cyl[0], trkhdr.cyl[1],
+                trkhdr.head[0], trkhdr.head[1], seekpos);
+        return -1;
+    }
+
+    /* Search for the note list record */
+    while (1)
+    {
+        /* Read the next record header */
+        rc = read (ofd, &rechdr, CKDDASD_RECHDR_SIZE);
+        if (rc < CKDDASD_RECHDR_SIZE)
+        {
+            XMERRF ("%s cyl %d head %d read error: %s\n",
+                    ofname, cyl, head, strerror(errno));
+            return -1;
+        }
+
+        /* Check for end of track */
+        if (memcmp(&rechdr, eighthexFF, 8) == 0)
+        {
+            XMERRF ("%s cyl %d head %d rec %d "
+                    "note list record not found\n",
+                    ofname, cyl, head, rec);
+            return -1;
+        }
+
+        /* Extract record key length and data length */
+        klen = rechdr.klen;
+        dlen = (rechdr.dlen[0] << 8) | rechdr.dlen[1];
+
+        /* Exit loop if matching record number */
+        if (rechdr.rec == rec)
+            break;
+
+        /* Skip the key and data areas */
+        skiplen = klen + dlen;
+        rc = lseek (ofd, skiplen, SEEK_CUR);
+        if (rc < 0)
+        {
+            XMERRF ("%s cyl %d head %d rec %d seek %ld error: %s\n",
+                    ofname, cyl, head, rec, skiplen, strerror(errno));
+            return -1;
+        }
+
+    } /* end while */
+
+    /* Check that the data length is sufficient */
+    if (dlen < nllen)
+    {
+        XMERRF ("Member %s note list at cyl %d head %d rec %d "
+                "dlen %d is too short for %d TTRs",
+                memname, cyl, head, rec, dlen, numnl);
+        return -1;
+    }
+
+    /* Skip the key area if present */
+    skiplen = klen;
+    if (skiplen > 0)
+    {
+        rc = lseek (ofd, skiplen, SEEK_CUR);
+        if (rc < 0)
+        {
+            XMERRF ("%s cyl %d head %d rec %d seek %ld error: %s\n",
+                    ofname, cyl, head, rec, skiplen, strerror(errno));
+            return -1;
+        }
+    }
+
+    /* Read the note list from the data area */
+    rc = read (ofd, notelist, nllen);
+    if (rc < nllen)
+    {
+        XMERRF ("%s cyl %d head %d read error: %s\n",
+                ofname, cyl, head,
+                (rc < 0 ? strerror(errno) : "Unexpected end of file"));
+        return -1;
+    }
+
+    /* Replace the TTRs in the note list record */
+    ttrptr = notelist;
+    for (i = 0; i < numnl; i++)
+    {
+        rc = replace_ttr (memname, ttrptr, ttrtab, numttr);
+        if (rc < 0) return -1;
+        ttrptr += 4;
+    } /* end for(i) */
+
+    /* Seek back to start of data area */
+    skiplen = -nllen;
+    rc = lseek (ofd, skiplen, SEEK_CUR);
+    if (rc < 0)
+    {
+        XMERRF ("%s cyl %d head %d rec %d seek %ld error: %s\n",
+                ofname, cyl, head, rec, skiplen, strerror(errno));
+        return -1;
+    }
+
+    /* Write the updated note list to the file */
+    rc = write (ofd, notelist, nllen);
+    if (rc < nllen)
+    {
+        XMERRF ("%s cyl %u head %u rec %d write error: %s\n",
+                ofname, cyl, head, rec, strerror(errno));
+        return -1;
+    }
+
+    /* Restore original file position */
+    rc = lseek (ofd, currpos, SEEK_SET);
+    if (rc < 0)
+    {
+        XMERRF ("%s offset %8.8lX seek error: %s\n",
+                ofname, currpos, strerror(errno));
+        return -1;
+    }
+
+    XMINFF (4, "Updating cyl %u head %u rec %d kl %d dl %d\n",
+                cyl, head, rec, klen, dlen);
+
+    return 0;
+} /* end function update_note_list */
+
+/*-------------------------------------------------------------------*/
 /* Subroutine to update a directory block record                     */
 /* Input:                                                            */
+/*      ofd     Output file descriptor                               */
+/*      ofname  Output file name                                     */
+/*      heads   Number of tracks per cylinder on output device       */
+/*      trklen  Track length of virtual output device                */
+/*      dsstart Relative track number of start of dataset            */
 /*      xbuf    Pointer to directory block                           */
 /*      ttrtab  Pointer to TTR conversion table                      */
 /*      numttr  Number of entries in TTR conversion table            */
 /* Output:                                                           */
 /*      Each original TTR in the directory block is replaced by the  */
 /*      corresponding output TTR from the TTR conversion table.      */
+/*      For any module which has note list entries, the note list    */
+/*      TTRs in the note list record are also updated.               */
 /*                                                                   */
 /* Return value is 0 if successful, or -1 if any directory entry     */
 /* contains a TTR which is not found in the TTR conversion table.    */
 /*-------------------------------------------------------------------*/
 static int
-update_dirblk (DATABLK *xbuf, TTRCONV *ttrtab, int numttr)
+update_dirblk (int ofd, BYTE *ofname, int heads, int trklen,
+                int dsstart, DATABLK *xbuf,
+                TTRCONV *ttrtab, int numttr)
 {
 int             rc;                     /* Return code               */
 int             size;                   /* Size of directory entry   */
@@ -2077,6 +2298,7 @@ int             dirrem;                 /* Number of bytes remaining */
 PDSDIR         *dirent;                 /* -> Directory entry        */
 BYTE           *ttrptr;                 /* -> User TTR               */
 int             n;                      /* Number of user TTRs       */
+int             i;                      /* Loop counter              */
 BYTE            memname[9];             /* Member name (ASCIIZ)      */
 
     /* Load number of bytes in directory block */
@@ -2114,13 +2336,22 @@ BYTE            memname[9];             /* Member name (ASCIIZ)      */
 
         /* Replace the user TTRs */
         ttrptr = dirent->pds2usrd;
-        while (n > 0)
+        for (i = 0; i < n; i++)
         {
             rc = replace_ttr (memname, ttrptr, ttrtab, numttr);
             if (rc < 0) return -1;
             ttrptr += 4;
-            n--;
-        } /* end while(n) */
+        } /* end for(i) */
+
+        /* Update the note list record if note list TTRs exist */
+        if ((dirent->pds2indc & PDS2INDC_ALIAS) == 0
+            && n >= 2 && dirent->pds2usrd[7] != 0)
+        {
+            rc = update_note_list (ofd, ofname, heads, trklen,
+                                dsstart, memname, dirent->pds2usrd+4,
+                                ttrtab, numttr);
+            if (rc < 0) return -1;
+        }
 
         /* Load the user data halfword count */
         k = dirent->pds2indc & PDS2INDC_LUSR;
@@ -2171,6 +2402,8 @@ process_xmit_file (BYTE *xfname, BYTE *ofname, int ofd, BYTE *trkbuf,
 {
 int             rc = 0;                 /* Return code               */
 int             xfd;                    /* XMIT file descriptor      */
+int             dsstart;                /* Relative track number of
+                                           start of output dataset   */
 BYTE           *xbuf;                   /* -> Logical record buffer  */
 int             xreclen;                /* Logical record length     */
 BYTE            xctl;                   /* 0x20=Control record       */
@@ -2240,6 +2473,9 @@ int             numttr = 0;             /* TTR table array index     */
         close (xfd);
         return -1;
     }
+
+    /* Calculate the relative track number of the dataset */
+    dsstart = (outcyl * heads) + outhead;
 
     /* Display the file information message */
     XMINFF (1, "Processing file %s\n", xfname);
@@ -2410,7 +2646,8 @@ int             numttr = 0;             /* TTR table array index     */
                 datablk = (DATABLK*)(datablk->header))
     {
         /* Update TTR pointers in this directory block */
-        rc = update_dirblk (datablk, ttrtab, numttr);
+        rc = update_dirblk (ofd, ofname, heads, trklen, dsstart,
+                            datablk, ttrtab, numttr);
         if (rc < 0) return -1;
 
         /* Rewrite the updated directory block */
@@ -3562,7 +3799,7 @@ BYTE            stmt[256];              /* Control file statement    */
 int             stmtno;                 /* Statement number          */
 
     /* Display the program identification message */
-    fprintf (stderr,
+    fprintf (stdout,
             "Hercules DASD loader program %s "
             "(c)Copyright Roger Bowler, 1999\n",
             MSTRING(VERSION));

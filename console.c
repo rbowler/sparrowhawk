@@ -57,6 +57,18 @@
 #define IAC             255     /* Interpret as Command */
 
 /*-------------------------------------------------------------------*/
+/* 3270 definitions                                                  */
+/*-------------------------------------------------------------------*/
+#define R3270_EAU       0x6F            /* Erase All Unprotected     */
+#define R3270_EW        0xF5            /* Erase/Write               */
+#define R3270_EWA       0x7E            /* Erase/Write Alternate     */
+#define R3270_RB        0xF2            /* Read Buffer               */
+#define R3270_RM        0xF6            /* Read Modified             */
+#define R3270_RMA       0x6E            /* Read Modified All         */
+#define R3270_WRT       0xF1            /* Write                     */
+#define R3270_WSF       0xF3            /* Write Structured Field    */
+
+/*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
 /*-------------------------------------------------------------------*/
 #define TNSDEBUG(lvl,format,a...) \
@@ -591,6 +603,75 @@ int     eor = 0;                        /* 1=End of record received  */
     return (CSW_ATTN);
 
 } /* end function recv_3270_data */
+
+
+/*-------------------------------------------------------------------*/
+/* SUBROUTINE TO SOLICIT 3270 DATA FROM THE CLIENT                   */
+/* This subroutine sends a Read or Read Modified command to the      */
+/* client and then receives the data into the 3270 receive buffer.   */
+/* This subroutine is called by loc3270_execute_ccw as a result of   */
+/* processing a Read Buffer CCW, or a Read Modified CCW when no      */
+/* data is waiting in the 3270 read buffer.  It waits until the      */
+/* client sends end of record.  Certain tn3270 clients fail to       */
+/* flush their buffer until the user presses an attention key;       */
+/* these clients cause this routine to hang and are not supported.   */
+/* Since this routine is only called while a channel program is      */
+/* active on the device, we can rely on the dev->busy flag to        */
+/* prevent the connection thread from issuing a read and capturing   */
+/* the incoming data intended for this routine.                      */
+/* The caller MUST hold the device lock.                             */
+/* Returns zero status if successful, or unit check if error.        */
+/*-------------------------------------------------------------------*/
+static BYTE
+solicit_3270_data (DEVBLK *dev, BYTE cmd)
+{
+int             rc;                     /* Return code               */
+int             len;                    /* Data length               */
+BYTE            buf[32];                /* tn3270 write buffer       */
+
+    /* Clear the inbound buffer of any unsolicited
+       data accumulated by the connection thread */
+    dev->rlen3270 = 0;
+    dev->readpending = 0;
+
+    /* Construct a 3270 read command in the outbound buffer */
+    len = 0;
+    buf[len++] = cmd;
+
+    /* Append telnet EOR marker to outbound buffer */
+    buf[len++] = IAC;
+    buf[len++] = EOR_MARK;
+
+    /* Send the 3270 read command to the client */
+    rc = send_packet(dev->csock, buf, len, "3270 Read Command");
+    if (rc < 0)
+    {
+        dev->sense[0] = SENSE_DC;
+        return (CSW_UC);
+    }
+
+    /* Receive response data from the client */
+    do {
+        len = dev->rlen3270;
+        rc = recv_3270_data (dev);
+        TNSDEBUG(1, "read buffer: %d bytes received\n",
+                dev->rlen3270 - len);
+    } while(rc == 0);
+
+    /* Close the connection if an error occurred */
+    if (rc & CSW_UC)
+    {
+        close (dev->csock);
+        dev->csock = 0;
+        dev->connected = 0;
+        dev->sense[0] = SENSE_DC;
+        return (CSW_UC);
+    }
+
+    /* Return zero status to indicate response received */
+    return 0;
+
+} /* end function solicit_3270_data */
 
 
 /*-------------------------------------------------------------------*/
@@ -1220,35 +1301,35 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
     /*---------------------------------------------------------------*/
     /* ERASE ALL UNPROTECTED                                         */
     /*---------------------------------------------------------------*/
-        cmd = 0x6F;
+        cmd = R3270_EAU;
         goto write;
 
     case 0x01:
     /*---------------------------------------------------------------*/
     /* WRITE                                                         */
     /*---------------------------------------------------------------*/
-        cmd = 0xF1;
+        cmd = R3270_WRT;
         goto write;
 
     case 0x05:
     /*---------------------------------------------------------------*/
     /* ERASE/WRITE                                                   */
     /*---------------------------------------------------------------*/
-        cmd = 0xF5;
+        cmd = R3270_EW;
         goto write;
 
     case 0x0D:
     /*---------------------------------------------------------------*/
     /* ERASE/WRITE ALTERNATE                                         */
     /*---------------------------------------------------------------*/
-        cmd = 0x7E;
+        cmd = R3270_EWA;
         goto write;
 
     case 0x11:
     /*---------------------------------------------------------------*/
     /* WRITE STRUCTURED FIELD                                        */
     /*---------------------------------------------------------------*/
-        cmd = 0xF3;
+        cmd = R3270_WSF;
         goto write;
 
     write:
@@ -1304,47 +1385,11 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
         /* Receive buffer data from client if not data chained */
         if ((chained & CCW_FLAGS_CD) == 0)
         {
-            /* Clear the inbound buffer of any unsolicited
-               data accumulated by the connection thread */
-            dev->rlen3270 = 0;
-            dev->readpending = 0;
-
-            /* Construct a 3270 read buffer command in outbound buffer */
-            len = 0;
-            buf[len++] = 0xF2;
-
-            /* Append telnet EOR marker to outbound buffer */
-            buf[len++] = IAC;
-            buf[len++] = EOR_MARK;
-
-            /* Send the read buffer command to the client */
-            rc = send_packet(dev->csock, buf, len, "Read Buffer Command");
-            if (rc < 0)
-            {
-                dev->sense[0] = SENSE_DC;
-                *unitstat = CSW_CE | CSW_DE | CSW_UC;
-                release_lock (&dev->lock);
-                break;
-            }
-
-            /* Receive response data from the client (note that we
-               rely on the connection thread not to read
-               this data because the dev->busy flag is set while
-               a channel program is active on this device) */
-            do {
-                len = dev->rlen3270;
-                rc = recv_3270_data (dev);
-                TNSDEBUG(1, "read buffer: %d bytes received\n",
-                        dev->rlen3270 - len);
-            } while(rc == 0);
-
-            /* Close the connection if an error occurred */
+            /* Send read buffer command to client and await response */
+            rc = solicit_3270_data (dev, R3270_RB);
             if (rc & CSW_UC)
             {
                 *unitstat = CSW_CE | CSW_DE | CSW_UC;
-                close (dev->csock);
-                dev->csock = 0;
-                dev->connected = 0;
                 release_lock (&dev->lock);
                 break;
             }
@@ -1386,13 +1431,26 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
         /* Obtain the device lock */
         obtain_lock (&dev->lock);
 
-        /* Get length of data available at the device */
-        if (dev->readpending)
-            len = dev->rlen3270;
-        else
-            len = 0;
+        /* If not data chained from previous Read Modified CCW,
+           and if the connection thread has not already accumulated
+           a complete Read Modified record in the inbound buffer,
+           then solicit a Read Modified operation at the client */
+        if ((chained & CCW_FLAGS_CD) == 0
+            && dev->readpending == 0)
+        {
+            /* Send read modified command to client, await response */
+            rc = solicit_3270_data (dev, R3270_RM);
+            if (rc & CSW_UC)
+            {
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                release_lock (&dev->lock);
+                break;
+            }
+
+        } /* end if(!CCW_FLAGS_CD) */
 
         /* Calculate number of bytes to move and residual byte count */
+        len = dev->rlen3270;
         num = (count < len) ? count : len;
         *residual = count - num;
         if (count < len) *more = 1;

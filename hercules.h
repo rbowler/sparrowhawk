@@ -237,6 +237,7 @@ typedef struct _SYSBLK {
 	struct _DEVBLK *firstdev;	/* -> First device block     */
 	U32	servparm;		/* Service signal parameter  */
 	unsigned int			/* Flags		     */
+		iopending:1,		/* 1=I/O interrupt pending   */
 		sigpbusy:1,		/* 1=Signal facility in use  */
 		servsig:1,		/* 1=Service signal pending  */
 		intkey:1,		/* 1=Interrupt key pending   */

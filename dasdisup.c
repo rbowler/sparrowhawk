@@ -122,7 +122,7 @@ BYTE            card[81];               /* Logical record (ASCIIZ)   */
     trk = (ttr[0] << 8) | ttr[1];
     rec = ttr[2];
 
-    fprintf (stderr,
+    fprintf (stdout,
             "Member %s TTR=%4.4X%2.2X\n",
             memname, trk, rec);
 
@@ -133,7 +133,7 @@ BYTE            card[81];               /* Logical record (ASCIIZ)   */
         rc = convert_tt (trk, noext, extent, cif->heads, &cyl, &head);
         if (rc < 0) return -1;
 
-//      fprintf (stderr,
+//      fprintf (stdout,
 //              "CCHHR=%4.4X%4.4X%2.2X\n",
 //              cyl, head, rec);
 
@@ -155,7 +155,7 @@ BYTE            card[81];               /* Logical record (ASCIIZ)   */
         /* Check length of data block */
         if (len % 80 != 0)
         {
-            fprintf (stderr,
+            fprintf (stdout,
                     "Bad block length %d at cyl %d head %d rec %d\n",
                     len, cyl, head, rec);
             return -1;
@@ -176,7 +176,7 @@ BYTE            card[81];               /* Logical record (ASCIIZ)   */
 
             if (ferror(ofp))
             {
-                fprintf (stderr,
+                fprintf (stdout,
                         "Error writing %s: %s\n",
                         ofname, strerror(errno));
                 return -1;
@@ -231,7 +231,7 @@ BYTE            memnama[9];             /* Member name (ASCIIZ)      */
     dirrem = (dirptr[0] << 8) | dirptr[1];
     if (dirrem < 2 || dirrem > 256)
     {
-        fprintf (stderr, "Directory block byte count is invalid\n");
+        fprintf (stdout, "Directory block byte count is invalid\n");
         return -1;
     }
 
@@ -275,7 +275,7 @@ BYTE            memnama[9];             /* Member name (ASCIIZ)      */
             /* If not in second table then skip member */
             if (secondload[i] == NULL)
             {
-                fprintf (stderr,
+                fprintf (stdout,
                         "%s %s skipped\n",
                         memnama,
                         ((dirent->pds2indc & PDS2INDC_ALIAS) ?
@@ -288,7 +288,7 @@ BYTE            memnama[9];             /* Member name (ASCIIZ)      */
         /* Check that member information array is not full */
         if (n >= MAX_MEMBERS)
         {
-            fprintf (stderr,
+            fprintf (stdout,
                     "Error: Number of members exceeds MAX_MEMBERS\n");
             return -1;
         }
@@ -297,7 +297,7 @@ BYTE            memnama[9];             /* Member name (ASCIIZ)      */
         if (((dirent->pds2indc & PDS2INDC_NTTR) >> PDS2INDC_NTTR_SHIFT)
                 < 1)
         {
-            fprintf (stderr,
+            fprintf (stdout,
                     "Error: Member %s TTR count is zero\n", memnama);
             return -1;
         }
@@ -326,7 +326,7 @@ BYTE            memnama[9];             /* Member name (ASCIIZ)      */
         /* Check that the member has a single text record */
         if ((dirent->pds2usrd[8] & 0x01) == 0 || totlen != txtlen)
         {
-            fprintf (stderr,
+            fprintf (stdout,
                     "Warning: Member %s is not single text record\n",
                     memnama);
             memtab[n].multitxt = 1;
@@ -335,7 +335,7 @@ BYTE            memnama[9];             /* Member name (ASCIIZ)      */
         /* Check that the total module length does not exceed X'7F8' */
         if (totlen > 255*8)
         {
-            fprintf (stderr,
+            fprintf (stdout,
                     "Warning: Member %s size %4.4X "
                     "exceeds X\'7F8\' bytes\n",
                     memnama, totlen);
@@ -344,7 +344,7 @@ BYTE            memnama[9];             /* Member name (ASCIIZ)      */
         /* Check that the total module length is a multiple of 8 */
         if (totlen & 0x7)
         {
-            fprintf (stderr,
+            fprintf (stdout,
                     "Warning: Member %s size %4.4X "
                     "is not a multiple of 8\n",
                     memnama, totlen);
@@ -399,21 +399,21 @@ BYTE            refnama[9];             /* Referred name (ASCIIZ)    */
     /* Skip the member if it is an alias */
     if (memp->alias)
     {
-        fprintf (stderr, "Alias %s skipped\n", memnama);
+        fprintf (stdout, "Alias %s skipped\n", memnama);
         return 0;
     }
 
     /* Skip the member if it has no XCTL table */
     if (memp->notable)
     {
-        fprintf (stderr, "Member %s skipped\n", memnama);
+        fprintf (stdout, "Member %s skipped\n", memnama);
         return 0;
     }
 
     /* Error if member is not a single text record */
     if (memp->multitxt)
     {
-        fprintf (stderr,
+        fprintf (stdout,
                 "Error: Member %s has multiple text records\n",
                 memnama);
         return -1;
@@ -425,13 +425,13 @@ BYTE            refnama[9];             /* Referred name (ASCIIZ)    */
     rc = convert_tt (trk, noext, extent, cif->heads, &cyl, &head);
     if (rc < 0)
     {
-        fprintf (stderr,
+        fprintf (stdout,
                 "Error: Member %s has invalid TTR %4.4X%2.2X\n",
                 memnama, trk, rec);
         return -1;
     }
 
-    fprintf (stderr,
+    fprintf (stdout,
             "Processing member %s text record TTR=%4.4X%2.2X "
             "CCHHR=%4.4X%4.4X%2.2X\n",
             memnama, trk, rec, cyl, head, rec);
@@ -441,7 +441,7 @@ BYTE            refnama[9];             /* Referred name (ASCIIZ)    */
                     NULL, NULL, &blkptr, &len);
     if (rc != 0)
     {
-        fprintf (stderr,
+        fprintf (stdout,
                 "Error: Member %s error reading TTR %4.4X%2.2X\n",
                 memnama, trk, rec);
         return -1;
@@ -450,7 +450,7 @@ BYTE            refnama[9];             /* Referred name (ASCIIZ)    */
     /* Check for incorrect length record */
     if (len < 8 || len > 1024 || (len & 0x7))
     {
-        fprintf (stderr,
+        fprintf (stdout,
                 "Error: Member %s TTR %4.4X%2.2X "
                 "text record length %4.4X is not valid\n",
                 memnama, trk, rec, len);
@@ -460,7 +460,7 @@ BYTE            refnama[9];             /* Referred name (ASCIIZ)    */
     /* Check that text record length matches directory entry */
     if (len != memp->dwdsize * 8)
     {
-        fprintf (stderr,
+        fprintf (stdout,
                 "Error: Member %s TTR %4.4X%2.2X "
                 "text record length %4.4X does not match "
                 "length %4.4X in directory\n",
@@ -505,7 +505,7 @@ BYTE            refnama[9];             /* Referred name (ASCIIZ)    */
         /* Error if XCTL table overflows text record */
         if (xctloff >= len - 10)
         {
-            fprintf (stderr,
+            fprintf (stdout,
                     "Error: Member %s TTR %4.4X%2.2X "
                     "XTCL table improperly terminated\n",
                     memnama, trk, rec);
@@ -527,7 +527,7 @@ BYTE            refnama[9];             /* Referred name (ASCIIZ)    */
         make_asciiz (refnama, sizeof(refnama), refname, 8);
 
         /* Display XCTL table entry */
-        fprintf (stderr,
+        fprintf (stdout,
                 "In member %s: %s TTRL=%2.2X%2.2X%2.2X%2.2X",
                 memnama, refnama,
                 blkptr[xctloff+2], blkptr[xctloff+3],
@@ -543,7 +543,7 @@ BYTE            refnama[9];             /* Referred name (ASCIIZ)    */
         /* Loop if member not found */
         if (i == nmem)
         {
-            fprintf (stderr, " ** Member %s not found **\n", refnama);
+            fprintf (stdout, " ** Member %s not found **\n", refnama);
             xctloff += 6;
             continue;
         }
@@ -552,7 +552,7 @@ BYTE            refnama[9];             /* Referred name (ASCIIZ)    */
         if (memcmp(blkptr+xctloff+2, memtab[i].ttrtext, 3) == 0
             && blkptr[xctloff+5] == memtab[i].dwdsize)
         {
-            fprintf (stderr, "\n");
+            fprintf (stdout, "\n");
             xctloff += 6;
             continue;
         }
@@ -567,7 +567,7 @@ BYTE            refnama[9];             /* Referred name (ASCIIZ)    */
         memcpy (blkptr+xctloff+2, memtab[i].ttrtext, 3);
         blkptr[xctloff+5] = memtab[i].dwdsize;
 
-        fprintf (stderr,
+        fprintf (stdout,
                 " replaced by TTRL=%2.2X%2.2X%2.2X%2.2X %s\n",
                 blkptr[xctloff+2], blkptr[xctloff+3],
                 blkptr[xctloff+4], blkptr[xctloff+5],
@@ -605,7 +605,7 @@ MEMINFO        *memtab;                 /* -> Member info array      */
 int             nmem = 0;               /* Number of array entries   */
 
     /* Display the program identification message */
-    fprintf (stderr,
+    fprintf (stdout,
             "Hercules IEHIOSUP program %s "
             "(c)Copyright Roger Bowler, 1999\n",
             MSTRING(VERSION));
@@ -613,7 +613,7 @@ int             nmem = 0;               /* Number of array entries   */
     /* Check the number of arguments */
     if (argc != 2)
     {
-        fprintf (stderr,
+        fprintf (stdout,
                 "Usage: %s ckdfile\n",
                 argv[0]);
         return -1;
@@ -626,7 +626,7 @@ int             nmem = 0;               /* Number of array entries   */
     memtab = (MEMINFO*) malloc (sizeof(MEMINFO) * MAX_MEMBERS);
     if (memtab == NULL)
     {
-        fprintf (stderr,
+        fprintf (stdout,
                 "Cannot obtain storage for member array: %s\n",
                 strerror(errno));
         return -1;
@@ -678,7 +678,7 @@ int             nmem = 0;               /* Number of array entries   */
 
     } /* end while */
 
-    fprintf (stderr,
+    fprintf (stdout,
             "End of directory: %d members selected\n",
             nmem);
 

@@ -518,6 +518,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
         /* Signal waiting CPUs that interrupt is pending */
         obtain_lock (&sysblk.intlock);
+        sysblk.iopending = 1;
         signal_condition (&sysblk.intcond);
         release_lock (&sysblk.intlock);
     }
@@ -665,6 +666,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
                     /* Signal waiting CPUs that interrupt is pending */
                     obtain_lock (&sysblk.intlock);
+                    sysblk.iopending = 1;
                     signal_condition (&sysblk.intcond);
                     release_lock (&sysblk.intlock);
 
@@ -763,6 +765,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
             /* Signal waiting CPUs that an interrupt is pending */
             obtain_lock (&sysblk.intlock);
+            sysblk.iopending = 1;
             signal_condition (&sysblk.intcond);
             release_lock (&sysblk.intlock);
 
@@ -1017,6 +1020,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
     /* Signal waiting CPUs that an interrupt is pending */
     obtain_lock (&sysblk.intlock);
+    sysblk.iopending = 1;
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 
@@ -1366,6 +1370,7 @@ void clear_subchan (REGS *regs, DEVBLK *dev)
 
     /* Signal waiting CPUs that an interrupt may be pending */
     obtain_lock (&sysblk.intlock);
+    sysblk.iopending = 1;
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 
@@ -1457,6 +1462,7 @@ int halt_subchan (REGS *regs, DEVBLK *dev)
 
     /* Signal waiting CPUs that an interrupt may be pending */
     obtain_lock (&sysblk.intlock);
+    sysblk.iopending = 1;
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 
@@ -1584,28 +1590,35 @@ int     i;                              /* Interruption subclass     */
 /* This routine does not perform a PSW switch.                       */
 /* The return value is the condition code for the TPI instruction:   */
 /* 0 if no allowable pending interrupt exists, otherwise 1.          */
+/* Note: The caller MUST hold the interrupt lock (sysblk.intlock).   */
 /*-------------------------------------------------------------------*/
 int
 present_io_interrupt (REGS *regs, U32 *ioid, U32 *ioparm, BYTE *csw)
 {
 DEVBLK *dev;                            /* -> Device control block   */
 
+    /* Turn off the I/O interrupt pending flag */
+    sysblk.iopending = 0;
+
     /* Find a device with pending interrupt */
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
     {
         obtain_lock (&dev->lock);
-        if ((dev->pending || dev->pcipending)
-            && interrupt_enabled(regs, dev))
-            break;
+        if (dev->pending || dev->pcipending)
+        {
+            /* Turn on the I/O interrupt pending flag */
+            sysblk.iopending = 1;
+
+            /* Exit loop if enabled for interrupts from this device */
+            if (interrupt_enabled(regs, dev))
+                break;
+        }
         release_lock (&dev->lock);
     } /* end for(dev) */
 
-    /* If no interrupt pending, exit with condition code 0 */
+    /* If no enabled interrupt pending, exit with condition code 0 */
     if (dev == NULL)
     {
-        /* Wait for one microsecond */
-        yield ();
-
         return 0;
     }
 
@@ -1749,6 +1762,7 @@ device_attention (DEVBLK *dev, BYTE unitstat)
 
     /* Signal waiting CPUs that an interrupt is pending */
     obtain_lock (&sysblk.intlock);
+    sysblk.iopending = 1;
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 

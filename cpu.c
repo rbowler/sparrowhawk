@@ -21,13 +21,18 @@
 static inline int
 add_signed ( U32 *result, U32 op1, U32 op2 )
 {
-S64     r;
+U64     r;
+U32     x;
+int     carry_in, carry_out;
 int     cc;
 
-    r = (S64)(S32)op1 + (S64)(S32)op2;
-    *result = (U32)r;
-    cc = (r < -2147483648LL || r > 2147483647LL)? 3 :
-        (r == 0)? 0 : (r < 0)? 1 : 2;
+    r = (U64)op1 + op2;
+    x = (U32)r;
+    carry_in = ((op1 & 0x7FFFFFFF) + (op2 & 0x7FFFFFFF)) >> 31;
+    carry_out = r >> 32;
+    *result = x;
+    cc = (carry_out != carry_in)? 3 :
+        (x == 0)? 0 : ((S32)x < 0)? 1 : 2;
     return cc;
 } /* end function add_signed */
 
@@ -38,13 +43,18 @@ int     cc;
 static inline int
 sub_signed ( U32 *result, U32 op1, U32 op2 )
 {
-S64     r;
+U64     r;
+U32     x;
+int     carry_in, carry_out;
 int     cc;
 
-    r = (S64)(S32)op1 - (S64)(S32)op2;
-    *result = (U32)r;
-    cc = (r < -2147483648LL || r > 2147483647LL)? 3 :
-        (r == 0)? 0 : (r < 0)? 1 : 2;
+    r = (U64)op1 + ~op2 + 1;
+    x = (U32)r;
+    carry_in = ((op1 & 0x7FFFFFFF) + (~op2 & 0x7FFFFFFF) + 1) >> 31;
+    carry_out = r >> 32;
+    *result = x;
+    cc = (carry_out != carry_in)? 3 :
+        (x == 0)? 0 : ((S32)x < 0)? 1 : 2;
     return cc;
 } /* end function sub_signed */
 
@@ -4474,9 +4484,15 @@ static BYTE module[8];                  /* Module name               */
             perform_serialization ();
             perform_chkpt_sync ();
 
+            /* Obtain the interrupt lock */
+            obtain_lock (&sysblk.intlock);
+
             /* Test and clear pending interrupt, set condition code */
             regs->psw.cc =
                 present_io_interrupt (regs, &ioid, &ioparm, NULL);
+
+            /* Release the interrupt lock */
+            release_lock (&sysblk.intlock);
 
             /* Store the SSID word and I/O parameter */
             if ( effective_addr == 0 )
@@ -5962,6 +5978,7 @@ static BYTE module[8];                  /* Module name               */
 
 /*-------------------------------------------------------------------*/
 /* Perform I/O interrupt if pending                                  */
+/* Note: The caller MUST hold the interrupt lock (sysblk.intlock)    */
 /*-------------------------------------------------------------------*/
 static void perform_io_interrupt (REGS *regs)
 {
@@ -6099,10 +6116,17 @@ int     icidx;                          /* Instruction counter index */
         if (regs->psw.sysmask & PSW_EXTMASK)
             perform_external_interrupt (regs);
 
-        /* If enabled for I/O interrupts, invite the channel
+        /* If an I/O interrupt is pending, and this CPU is
+           enabled for I/O interrupts, invite the channel
            subsystem to present a pending interrupt */
-        if (regs->psw.sysmask &
+        if (sysblk.iopending &&
+#ifdef FEATURE_BCMODE
+            (regs->psw.sysmask &
                 (regs->psw.ecmode ? PSW_IOMASK : 0xFE))
+#else /*!FEATURE_BCMODE*/
+            (regs->psw.sysmask & PSW_IOMASK)
+#endif /*!FEATURE_BCMODE*/
+           )
             perform_io_interrupt (regs);
 
         /* Perform restart interrupt if pending */
