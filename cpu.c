@@ -3847,7 +3847,7 @@ static BYTE module[8];                  /* Module name               */
 
         /* Translate the effective address to a real address */
         cc = translate_addr (effective_addr, ar1, regs, ACCTYPE_LRA,
-                &n, &xcode, &private, &protect, &stid);
+                &n, &xcode, &private, &protect, &stid, NULL, NULL);
 
         /* If ALET exception, set exception code in R1 bits 16-31
            set high order bit of R1, and set condition code 3 */
@@ -4429,38 +4429,8 @@ static BYTE module[8];                  /* Module name               */
             /* Perform serialization before operation */
             perform_serialization ();
 
-            /* Program check if translation format is invalid */
-            if ((regs->cr[0] & CR0_TRAN_FMT) != CR0_TRAN_ESA390)
-            {
-                program_check (regs, PGM_TRANSLATION_SPECIFICATION_EXCEPTION);
-                goto terminate;
-            }
-
-            /* Combine the page table origin in the R1 register with
-               the page index in the R2 register, ignoring carry, to
-               form the 31-bit real address of the page table entry */
-            n = (regs->gpr[r1] & SEGTAB_PTO)
-                + ((regs->gpr[r2] & 0x000FF000) >> 10);
-            n &= 0x7FFFFFFF;
-
-            /* Fetch the page table entry from real storage, subject
-               to normal storage protection mechanisms */
-            n1 = vfetch4 ( n, USE_REAL_ADDR, regs );
-
-            /* Set the page invalid bit in the page table entry,
-               again subject to storage protection mechansims */
-            n1 |= PAGETAB_INVALID;
-            vstore4 ( n1, n, USE_REAL_ADDR, regs );
-
-            /* Clear the TLB of any entries with matching PFRA */
-            invalidate_tlb_entry (n1, regs);
-
-            /* Signal each CPU to perform the same invalidation.
-               IPTE must not complete until all CPUs have indicated
-               that they have cleared their TLB and have completed
-               any storage accesses using the invalidated entries */
-            /*INCOMPLETE*/ /* Not yet designed a way of doing this
-            without adversely impacting TLB performance */
+            /* Invalidate page table entry */
+            invalidate_pte (ibyte, r1, r2, regs);
 
             /* Perform serialization after operation */
             perform_serialization ();
@@ -4510,7 +4480,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Translate virtual address to real address */
             if (translate_addr (effective_addr, r2, regs, ACCTYPE_IVSK,
-                &n, &xcode, &private, &protect, &stid))
+                &n, &xcode, &private, &protect, &stid, NULL, NULL))
             {
                 program_check (regs, xcode);
                 goto terminate;
@@ -4850,6 +4820,28 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 #endif /*FEATURE_HEXADECIMAL_FLOATING_POINT*/
+
+#ifdef FEATURE_EXPANDED_STORAGE
+        case 0x2E:
+        /*-----------------------------------------------------------*/
+        /* B22E: PGIN - Page in from expanded storage          [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Copy page from expanded storage and set cond code */
+            regs->psw.cc = page_in (r1, r2, regs);
+
+            break;
+
+        case 0x2F:
+        /*-----------------------------------------------------------*/
+        /* B22F: PGOUT - Page out to expanded storage          [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Copy page to expanded storage and set cond code */
+            regs->psw.cc = page_out (r1, r2, regs);
+
+            break;
+#endif /*FEATURE_EXPANDED_STORAGE*/
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
         case 0x30:
@@ -5553,6 +5545,18 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 
+#ifdef FEATURE_MOVE_PAGE_FACILITY_2
+        case 0x54:
+        /*-----------------------------------------------------------*/
+        /* B254: MVPG - Move Page                              [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Perform move page and set condition code */
+            regs->psw.cc = move_page (r1, r2, regs);
+
+            break;
+#endif /*FEATURE_MOVE_PAGE_FACILITY_2*/
+
         case 0x55:
         /*-----------------------------------------------------------*/
         /* B255: MVST - Move String                            [RRE] */
@@ -5585,6 +5589,32 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 #endif /*FEATURE_SUBSPACE_GROUP*/
+
+#ifdef FEATURE_EXPANDED_STORAGE
+        case 0x59:
+        /*-----------------------------------------------------------*/
+        /* B259: IESBE - Invalidate Expanded Storage Blk Entry [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Perform serialization before operation */
+            perform_serialization ();
+
+            /* Invalidate page table entry */
+            invalidate_pte (ibyte, r1, r2, regs);
+
+            /* Perform serialization after operation */
+            perform_serialization ();
+
+            break;
+
+#endif /*FEATURE_EXPANDED_STORAGE*/
 
 #ifdef FEATURE_BRANCH_AND_SET_AUTHORITY
         case 0x5A:
@@ -6120,15 +6150,15 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load true length from R1 register */
-        h = regs->gpr[r1];
+        n = regs->gpr[r1];
 
         /* If the true length does not exceed 256, set condition code
            zero, otherwise set cc=3 and use effective length of 256 */
-        if (h <= 256)
+        if (n <= 256)
             cc = 0;
         else {
             cc = 3;
-            h = 256;
+            n = 256;
         }
 
         /* Load source key from R3 register bits 24-27 */
@@ -6144,9 +6174,9 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Move characters using source key for second operand */
-        if (h > 0)
+        if (n > 0)
             move_chars (effective_addr, ar1, regs->psw.pkey,
-                        effective_addr2, ar2, j, h-1, regs);
+                        effective_addr2, ar2, j, n-1, regs);
 
         /* Set condition code */
         regs->psw.cc = cc;
@@ -6169,15 +6199,15 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Load true length from R1 register */
-        h = regs->gpr[r1];
+        n = regs->gpr[r1];
 
         /* If the true length does not exceed 256, set condition code
            zero, otherwise set cc=3 and use effective length of 256 */
-        if (h <= 256)
+        if (n <= 256)
             cc = 0;
         else {
             cc = 3;
-            h = 256;
+            n = 256;
         }
 
         /* Load secondary space key from R3 register bits 24-27 */
@@ -6194,11 +6224,11 @@ static BYTE module[8];                  /* Module name               */
 
         /* Move characters from secondary address space to primary
            address space using secondary key for second operand */
-        if (h > 0)
+        if (n > 0)
             move_chars (effective_addr, USE_PRIMARY_SPACE,
                         regs->psw.pkey,
                         effective_addr2, USE_SECONDARY_SPACE,
-                        j, h-1, regs);
+                        j, n-1, regs);
 
         /* Set condition code */
         regs->psw.cc = cc;
@@ -6221,15 +6251,15 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Load true length from R1 register */
-        h = regs->gpr[r1];
+        n = regs->gpr[r1];
 
         /* If the true length does not exceed 256, set condition code
            zero, otherwise set cc=3 and use effective length of 256 */
-        if (h <= 256)
+        if (n <= 256)
             cc = 0;
         else {
             cc = 3;
-            h = 256;
+            n = 256;
         }
 
         /* Load secondary space key from R3 register bits 24-27 */
@@ -6246,10 +6276,10 @@ static BYTE module[8];                  /* Module name               */
 
         /* Move characters from primary address space to secondary
            address space using secondary key for first operand */
-        if (h > 0)
+        if (n > 0)
             move_chars (effective_addr, USE_SECONDARY_SPACE, j,
                         effective_addr2, USE_PRIMARY_SPACE,
-                        regs->psw.pkey, h-1, regs);
+                        regs->psw.pkey, n-1, regs);
 
         /* Set condition code */
         regs->psw.cc = cc;
@@ -7027,6 +7057,9 @@ int     icidx;                          /* Instruction counter index */
 #endif /*INSTRUCTION_COUNTING*/
 
         /* Turn on trace for specific instructions */
+        if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x2E) tracethis = 1; /*PGIN*/
+        if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x2F) tracethis = 1; /*PGOUT*/
+        if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x54) tracethis = 1; /*MVPG*/
 //      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x20) sysblk.inststep = 1; /*SERVC*/
 //      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x25) sysblk.inststep = 1; /*SSAR*/
 //      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x40) sysblk.inststep = 1; /*BAKR*/

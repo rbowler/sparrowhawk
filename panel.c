@@ -694,8 +694,8 @@ REGS    wrkregs = *regs;                /* Working copy of CPU regs  */
         return 0;
     }
 
-    rc = translate_addr (vaddr, arn, &wrkregs, acctype,
-                        &raddr, &xcode, &private, &protect, &stid);
+    rc = translate_addr (vaddr, arn, &wrkregs, acctype, &raddr, &xcode,
+                        &private, &protect, &stid, NULL, NULL);
     if (rc) return xcode;
 
     *raptr = raddr;

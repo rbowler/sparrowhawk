@@ -1,4 +1,4 @@
-/* DECIMAL.C    (c) Copyright Roger Bowler, 1991-1999                */
+/* DECIMAL.C    (c) Copyright Roger Bowler, 1991-2000                */
 /*              ESA/390 Packed Decimal Routines                      */
 
 /*-------------------------------------------------------------------*/
@@ -319,9 +319,9 @@ int     temp3, temp4, temp5, qtest;     /* Work areas for algorithm  */
 
     /* If dividend is less than divisor then return zero quotient
        and set remainder equal to dividend */
-    if (memcmp(dec1, dec2, MAX_DECIMAL_DIGITS) < 0)
+    if (memcmp (dec1, dec2, MAX_DECIMAL_DIGITS) < 0)
     {
-        strcpy(rem, dec1);
+        memcpy (rem, dec1, MAX_DECIMAL_DIGITS);
         return;
     }
 
@@ -494,11 +494,8 @@ int     carry;                          /* Carry indicator           */
         cc = (count == 0) ? 0 : (sign < 0) ? 1 : 2;
 
         /* Set cc=3 if non-zero digits will be lost on left shift */
-        for (j=0; j < shift; j++)
-        {
-            if (dec[j] != 0)
-                cc = 3;
-        }
+        if (shift > (len+1)*2 - 1 - count)
+            cc = 3;
 
         /* Shift operand left */
         for (i=0, j=shift; i < MAX_DECIMAL_DIGITS; i++, j++)
@@ -964,10 +961,6 @@ int     count1, count2;                 /* Significant digit counters*/
 int     sign1, sign2;                   /* Sign of operands          */
 int     signq, signr;                   /* Sign of quotient/remainder*/
 
-    /* Load operands into work areas */
-    load_decimal (addr1, len1, arn1, regs, dec1, &count1, &sign1);
-    load_decimal (addr2, len2, arn2, regs, dec2, &count2, &sign2);
-
     /* Program check if the second operand length exceeds 15 digits
        or is equal to or greater than the first operand length */
     if (len2 > 7 || len2 >= len1)
@@ -975,6 +968,10 @@ int     signq, signr;                   /* Sign of quotient/remainder*/
         program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
+
+    /* Load operands into work areas */
+    load_decimal (addr1, len1, arn1, regs, dec1, &count1, &sign1);
+    load_decimal (addr2, len2, arn2, regs, dec2, &count2, &sign2);
 
     /* Program check if second operand value is zero */
     if (count2 == 0)

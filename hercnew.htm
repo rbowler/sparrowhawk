@@ -10,6 +10,27 @@ What's new in Hercules</TITLE>
 <h1>What's new in Hercules</h1>
 
 <hr noshade>
+<h2>What's new in release 1.56</h2>
+<p>Release date: 28 Mar 2000
+<ul>
+<li>Fix incorrect unit exception on SCSI tape FSB/BSB CCW
+    (reported by Daniel Rudin)
+<li>Fix unit check on AWSTAPE write (reported by Axel Schwarzer)
+<li>Close SCSI tape after tape is ejected
+<li>Detect tapemark during SCSI tape FSB/BSB CCW
+<li>Suppress HMC response prompt (by Jan Jaeger)
+<li>Expanded storage support (by Jan Jaeger)
+<li>Move Page Facility 2
+<li>Correct signed length error in MVCK/MVCS/MVCP (by Jan Jaeger)
+<li>Undetected CC=3 in SRP instruction
+<li>Wrong remainder in DP instruction when dividend is less
+    than divisor
+<li>Specification exception in DP instruction should have higher
+    priority than data exception
+</ul>
+<p>Download
+<a href="hercules/hercules-1.56.tar.gz">hercules-1.56.tar.gz</a>
+
 <h2>What's new in release 1.55</h2>
 <p>Release date: 22 Mar 2000
 <ul>
@@ -386,7 +407,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 22 Mar 2000
+<p>Last updated 28 Mar 2000
 </BODY>
 </HTML>
 

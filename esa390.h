@@ -182,6 +182,7 @@ typedef struct _TLBE {
 #define PAGETAB_PFRA	0x7FFFF000	/* Page frame real address   */
 #define PAGETAB_INVALID 0x00000400	/* Invalid page 	     */
 #define PAGETAB_PROT	0x00000200	/* Protected page	     */
+#define PAGETAB_ESVALID 0x00000100	/* Valid in expanded storage */
 #define PAGETAB_RESV	0x80000900	/* Reserved bits - must be 0 */
 
 /* Access-list entry token special value definitions */

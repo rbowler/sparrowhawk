@@ -10,6 +10,7 @@
 /* Additional credits:                                               */
 /*      Corrections contributed by Jan Jaeger                        */
 /*      HMC system console functions by Jan Jaeger 2000-02-08        */
+/*      Expanded storage support by Jan Jaeger                       */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -20,6 +21,8 @@
 #define SCLP_READ_SCP_INFO      0x00020001
 #define SCLP_READ_CHP_INFO      0x00030001
 #define SCLP_READ_CSI_INFO      0x001C0001
+
+#define SCLP_READ_XST_MAP       0x00250001
 
 #define SCLP_WRITE_EVENT_DATA   0x00760005
 #define SCLP_READ_EVENT_DATA    0x00770005
@@ -49,6 +52,7 @@ typedef struct _SCCB_HEADER {
 #define SCCB_REAS_ODD_LENGTH    0x02    /* Length not multiple of 8  */
 #define SCCB_REAS_TOO_SHORT     0x03    /* Length is inadequate      */
 #define SCCB_REAS_INVALID_CMD   0x01    /* Invalid SCLP command code */
+#define SCCB_REAS_INVALID_RSC   0x09    /* Invalid resource          */
 
 /* Bit definitions for SCCB header response class code */
 #define SCCB_RESP_BLOCK_ERROR   0x00    /* Data block error          */
@@ -356,6 +360,26 @@ typedef struct _SCCB_NLS_BK {
     } SCCB_NLS_BK;
 #endif /*FEATURE_SYSTEM_CONSOLE*/
 
+#ifdef FEATURE_EXPANDED_STORAGE
+typedef struct _SCCB_XST_INFO {
+        HWORD   elmid;                  /* Extended storage element
+                                                                id   */
+        BYTE    resv1[6];
+        FWORD   elmsin;                 /* Starting increment number */
+        FWORD   elmein;                 /* Ending increment number   */
+        BYTE    elmchar;                /* Element characteristics   */
+#define SCCB_XST_INFO_ELMCHAR_REQ 0x80; /* Required element          */
+        BYTE    resv2[39];
+    } SCCB_XST_INFO;
+
+typedef struct _SCCB_XST_MAP {
+        FWORD   incnum;                 /* Increment number          */
+        FWORD   resv;
+//      BYTE    map[];                  /* Bitmap of all usable
+//                                         expanded storage blocks   */
+    } SCCB_XST_MAP;
+#endif /*FEATURE_EXPANDED_STORAGE*/
+
 /*-------------------------------------------------------------------*/
 /* Process service call instruction and return condition code        */
 /*-------------------------------------------------------------------*/
@@ -431,6 +455,16 @@ static BYTE    const5_template = {
 
 int             masklen;                /* Length of event mask      */
 #endif /*FEATURE_SYSTEM_CONSOLE*/
+
+#ifdef FEATURE_EXPANDED_STORAGE
+SCCB_XST_MAP    *sccbxmap;              /* Xstore usability map      */
+int             xstincnum;              /* Number of expanded storage
+                                                         increments  */
+int             xstblkinc;              /* Number of expanded storage
+                                               blocks per increment  */
+BYTE            *xstmap;                /* Xstore bitmap, zero means
+                                                           available */
+#endif /*FEATURE_EXPANDED_STORAGE*/
 
     /* Obtain the absolute address of the SCCB */
     sccb_absolute_addr = APPLY_PREFIXING (sccb_real_addr, regs->pxr);
@@ -525,16 +559,17 @@ int             masklen;                /* Length of event mask      */
 
 #ifdef FEATURE_EXPANDED_STORAGE
         /* Set expanded storage size in SCCB */
-        sccbscp->xpndinum[0] = 0;
-        sccbscp->xpndinum[1] = 0;
-        sccbscp->xpndinum[2] = 0;
-        sccbscp->xpndinum[3] = 1;
-        sccbscp->xpndsz4K[0] = (sysblk.xpndsize & 0xFF000000) >> 24;
-        sccbscp->xpndsz4K[1] = (sysblk.xpndsize & 0xFF0000) >> 16;
-        sccbscp->xpndsz4K[2] = (sysblk.xpndsize & 0xFF00) >> 8;
-        sccbscp->xpndsz4K[3] = sysblk.xpndsize & 0xFF;
-        sccbscp->xpndenum[0] = 0;
-        sccbscp->xpndenum[1] = 1;
+        xstincnum = (sysblk.xpndsize << XSTORE_PAGESHIFT)
+                        / XSTORE_INCREMENT_SIZE;
+        sccbscp->xpndinum[0] = (xstincnum & 0xFF0000) >> 24;
+        sccbscp->xpndinum[1] = (xstincnum & 0xFF00) >> 16;
+        sccbscp->xpndinum[2] = (xstincnum & 0xFF) >> 8;
+        sccbscp->xpndinum[3] = xstincnum & 0xFF;
+        xstblkinc = XSTORE_INCREMENT_SIZE >> XSTORE_PAGESHIFT;
+        sccbscp->xpndsz4K[0] = (xstblkinc & 0xFF000000) >> 24;
+        sccbscp->xpndsz4K[1] = (xstblkinc & 0xFF0000) >> 16;
+        sccbscp->xpndsz4K[2] = (xstblkinc & 0xFF00) >> 8;
+        sccbscp->xpndsz4K[3] = xstblkinc & 0xFF;
 #endif /*FEATURE_EXPANDED_STORAGE*/
 
         /* Set CPU array count and offset in SCCB */
@@ -575,7 +610,9 @@ int             masklen;                /* Length of event mask      */
 //                      | SCCB_IFM2_REAL_STORAGE_ELEMENT_INFO
 //                      | SCCB_IFM2_REAL_STORAGE_ELEMENT_RECONFIG
 //                      | SCCB_IFM2_COPY_AND_REASSIGN_STORAGE
-//                      | SCCB_IFM2_EXTENDED_STORAGE_USABILITY_MAP
+#ifdef FEATURE_EXPANDED_STORAGE
+                        | SCCB_IFM2_EXTENDED_STORAGE_USABILITY_MAP
+#endif /*FEATURE_EXPANDED_STORAGE*/
 //                      | SCCB_IFM2_EXTENDED_STORAGE_ELEMENT_INFO
 //                      | SCCB_IFM2_EXTENDED_STORAGE_ELEMENT_RECONFIG
                         ;
@@ -827,10 +864,14 @@ int             masklen;                /* Length of event mask      */
                     break;
                 }
 
-                for (i = 0; i < event_msglen; i++)
-                    message[i] = ebcdic_to_ascii[event_msg[i]];
-                message[event_msglen] = '\0';
-                logmsg ("%s\n", message);
+                /* Print line unless it is a response prompt */
+                if (!(mto_bk->ltflag[0] & SCCB_MTO_LTFLG0_PROMPT))
+                {
+                    for (i = 0; i < event_msglen; i++)
+                        message[i] = ebcdic_to_ascii[event_msg[i]];
+                    message[event_msglen] = '\0';
+                    logmsg ("%s\n", message);
+                }
             }
             mcd_len -= obj_len;
             (BYTE*)obj_hdr += obj_len;
@@ -1009,6 +1050,63 @@ int             masklen;                /* Length of event mask      */
 
         break;
 #endif /*FEATURE_SYSTEM_CONSOLE*/
+
+#ifdef FEATURE_EXPANDED_STORAGE
+   case SCLP_READ_XST_MAP:
+
+        /* Set the main storage change bit */
+        STORAGE_KEY(sccb_absolute_addr) |= STORKEY_CHANGE;
+
+        /* Set response code X'0100' if SCCB crosses a page boundary */
+        if ((sccb_absolute_addr & STORAGE_KEY_PAGEMASK) !=
+            ((sccb_absolute_addr + sccblen - 1) & STORAGE_KEY_PAGEMASK))
+        {
+            sccb->reas = SCCB_REAS_NOT_PGBNDRY;
+            sccb->resp = SCCB_RESP_BLOCK_ERROR;
+            break;
+        }
+
+        /* Calculate number of blocks per increment */
+        xstblkinc = XSTORE_INCREMENT_SIZE / XSTORE_PAGESIZE;
+
+        /* Set response code X'0300' if SCCB length
+           is insufficient to contain xstore info */
+        if ( sccblen < sizeof(SCCB_HEADER) + sizeof(SCCB_XST_MAP)
+                + xstblkinc/8)
+        {
+            sccb->reas = SCCB_REAS_TOO_SHORT;
+            sccb->resp = SCCB_RESP_BLOCK_ERROR;
+            break;
+        }
+
+        /* Point to SCCB data area following SCCB header */
+        sccbxmap = (SCCB_XST_MAP*)(sccb+1);
+
+        /* Verify expanded storage increment number */
+        xstincnum = (sysblk.xpndsize << XSTORE_PAGESHIFT)
+                        / XSTORE_INCREMENT_SIZE;
+        i = sccbxmap->incnum[0] << 24 | sccbxmap->incnum[1] << 16
+          | sccbxmap->incnum[2] << 8 | sccbxmap->incnum[3];
+        if ( i < 1 || i > xstincnum )
+        {
+            sccb->reas = SCCB_REAS_INVALID_RSC;
+            sccb->resp = SCCB_RESP_REJECT;
+            break;
+        }
+
+        /* Point to bitmap */
+        xstmap = (BYTE*)(sccbxmap+1);
+
+        /* Set all blocks available */
+        memset (xstmap, 0x00, xstblkinc/8);
+
+        /* Set response code X'0010' in SCCB header */
+        sccb->reas = SCCB_REAS_NONE;
+        sccb->resp = SCCB_RESP_INFO;
+
+        break;
+
+#endif /*FEATURE_EXPANDED_STORAGE*/
 
     default:
         /* Set response code X'01F0' for invalid SCLP command */

@@ -42,7 +42,7 @@ U16     xcode;                          /* Exception code            */
 
     /* Convert to real address using home segment table */
     rc = translate_addr (vaddr, 0, regs, ACCTYPE_STACK, &raddr,
-                            &xcode, &private, &protect, &stid);
+                &xcode, &private, &protect, &stid, NULL, NULL);
     if (rc != 0)
     {
         program_check (regs, xcode);

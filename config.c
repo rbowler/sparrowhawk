@@ -501,25 +501,14 @@ int     subchan;                        /* Subchannel number         */
     {
 #ifdef FEATURE_EXPANDED_STORAGE
         /* Obtain expanded storage */
-        sysblk.xpndsize = xpndsize * 256;
-        sysblk.xpndstor = malloc(sysblk.xpndsize * 4096);
+        sysblk.xpndsize = xpndsize * (1024*1024 / XSTORE_PAGESIZE);
+        sysblk.xpndstor = malloc(sysblk.xpndsize * XSTORE_PAGESIZE);
         if (sysblk.xpndstor == NULL)
         {
             fprintf (stderr,
                     "HHC022I Cannot obtain %dMB expanded storage: "
                     "%s\n",
                     xpndsize, strerror(errno));
-            exit(1);
-        }
-
-        /* Obtain main storage key array */
-        sysblk.xpndkeys = malloc(sysblk.xpndsize);
-        if (sysblk.xpndkeys == NULL)
-        {
-            fprintf (stderr,
-                    "HHC023I Cannot obtain expanded storage key "
-                    "array: %s\n",
-                    strerror(errno));
             exit(1);
         }
 #else /*!FEATURE_EXPANDED_STORAGE*/

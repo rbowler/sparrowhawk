@@ -486,7 +486,7 @@ U32             n;                      /* 32-bit operand value      */
 
     case 0x060:
     /*---------------------------------------------------------------*/
-    /* Diagnose 060: Virtual Console Function                        */
+    /* Diagnose 060: Virtual Machine Storage Size                    */
     /*---------------------------------------------------------------*/
         /* Load main storage size in bytes into R1 register */
         regs->gpr[r1] = sysblk.mainsize;

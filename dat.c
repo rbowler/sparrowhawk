@@ -571,6 +571,9 @@ void purge_alb (REGS *regs)
 /*      prot    Pointer to field to receive protection indicator     */
 /*      pstid   Pointer to field to receive indication of which      */
 /*              segment table was used for the translation           */
+/*      xpblk   Pointer to field to receive expanded storage         */
+/*              block number, or NULL                                */
+/*      xpkey   Pointer to field to receive expanded storage key     */
 /*                                                                   */
 /* Output:                                                           */
 /*      The return value is set to facilitate the setting of the     */
@@ -591,6 +594,11 @@ void purge_alb (REGS *regs)
 /*      4 = ALET translation error; real address field is not        */
 /*          set; exception code is set to X'0028' through X'002D'.   */
 /*          The LRA instruction converts this to condition code 3.   */
+/*      5 = Page table entry invalid and xpblk pointer is not NULL   */
+/*          and page exists in expanded storage; xpblk field is set  */
+/*          to the expanded storage block number and xpkey field     */
+/*          is set to the protection key of the block.  This is      */
+/*          used by the MVPG instruction.                            */
 /*                                                                   */
 /*      The private indicator is set to 1 if translation was         */
 /*      successful and the STD indicates a private address space;    */
@@ -613,7 +621,7 @@ void purge_alb (REGS *regs)
 /*-------------------------------------------------------------------*/
 int translate_addr (U32 vaddr, int arn, REGS *regs, int acctype,
                     U32 *raddr, U16 *xcode, int *priv, int *prot,
-                    int *pstid)
+                    int *pstid, U32 *xpblk, BYTE *xpkey)
 {
 U32     std;                            /* Segment table descriptor  */
 U32     sto;                            /* Segment table origin      */
@@ -858,6 +866,21 @@ seg_tran_invalid:
     goto tran_excp_addr;
 
 page_tran_invalid:
+#ifdef FEATURE_EXPANDED_STORAGE
+    /* If page is valid in expanded storage, and expanded storage
+       block number is requested, return the block number and key */
+    #if 0 /* Do not yet know how to find the block number */
+    if ((pte & PAGETAB_ESVALID) && xpblk != NULL)
+    {
+        *xpblk = 0;
+        *xpkey = pte & 0xFF;
+        if (pte & PAGETAB_PROT)
+            protect = 1;
+        if (protect) *prot = 1;
+        return 5;
+    }
+    #endif/* Do not yet know how to find the block number */
+#endif /*FEATURE_EXPANDED_STORAGE*/
     *xcode = PGM_PAGE_TRANSLATION_EXCEPTION;
     *raddr = pto;
     cc = 2;
@@ -911,16 +934,51 @@ void purge_tlb (REGS *regs)
 /* Invalidate page table entry                                       */
 /*                                                                   */
 /* Input:                                                            */
-/*      pte     Page table entry to be invalidated                   */
+/*      ibyte   0x21=IPTE instruction, 0x59=IESBE instruction        */
+/*      r1      First operand register number                        */
+/*      r2      Second operand register number                       */
 /*      regs    CPU register context                                 */
 /*                                                                   */
-/*      This subroutine clears the TLB of all entries whose PFRA     */
-/*      matches the PFRA of the supplied page table entry.           */
+/*      This function is called by the IPTE and IESBE instructions.  */
+/*      It sets the PAGETAB_INVALID bit (for IPTE) or resets the     */
+/*      PAGETAB_ESVALID bit (for IESBE) in the page table entry      */
+/*      addressed by the page table origin in the R1 register and    */
+/*      the page index in the R2 register.  It clears the TLB of     */
+/*      all entries whose PFRA matches the page table entry.         */
 /*-------------------------------------------------------------------*/
-void invalidate_tlb_entry (U32 pte, REGS *regs)
+void invalidate_pte (BYTE ibyte, int r1, int r2, REGS *regs)
 {
 int     i;                              /* Array subscript           */
+U32     raddr;                          /* Addr of page table entry  */
+U32     pte;                            /* Page table entry          */
 
+    /* Program check if translation format is invalid */
+    if ((regs->cr[0] & CR0_TRAN_FMT) != CR0_TRAN_ESA390)
+    {
+        program_check (regs, PGM_TRANSLATION_SPECIFICATION_EXCEPTION);
+        return;
+    }
+
+    /* Combine the page table origin in the R1 register with
+       the page index in the R2 register, ignoring carry, to
+       form the 31-bit real address of the page table entry */
+    raddr = (regs->gpr[r1] & SEGTAB_PTO)
+                + ((regs->gpr[r2] & 0x000FF000) >> 10);
+    raddr &= 0x7FFFFFFF;
+
+    /* Fetch the page table entry from real storage, subject
+       to normal storage protection mechanisms */
+    pte = vfetch4 ( raddr, USE_REAL_ADDR, regs );
+
+    /* Set the page invalid bit in the page table entry,
+       again subject to storage protection mechansims */
+    if(ibyte == 0x59)
+        pte &= ~PAGETAB_ESVALID;
+    else
+        pte |= PAGETAB_INVALID;
+    vstore4 ( pte, raddr, USE_REAL_ADDR, regs );
+
+    /* Clear the TLB of any entries with matching PFRA */
     for (i = 0; i < (sizeof(regs->tlb)/sizeof(TLBE)); i++)
     {
         if ((regs->tlb[i].pte & PAGETAB_PFRA) == (pte & PAGETAB_PFRA)
@@ -931,7 +989,14 @@ int     i;                              /* Array subscript           */
         }
     } /* end for(i) */
 
-} /* end function invalidate_tlb_entry */
+    /* Signal each CPU to perform the same invalidation.
+       IPTE must not complete until all CPUs have indicated
+       that they have cleared their TLB and have completed
+       any storage accesses using the invalidated entries */
+    /*INCOMPLETE*/ /* Not yet designed a way of doing this
+    without adversely impacting TLB performance */
+
+} /* end function invalidate_pte */
 
 /*-------------------------------------------------------------------*/
 /* Test protection and return condition code                         */
@@ -966,7 +1031,7 @@ U16     xcode;                          /* Exception code            */
     else {
         /* Return condition code 3 if translation exception */
         if (translate_addr (addr, arn, regs, ACCTYPE_TPROT, &raddr,
-                            &xcode, &private, &protect, &stid))
+                &xcode, &private, &protect, &stid, NULL, NULL))
             return 3;
     }
 
@@ -1026,8 +1091,8 @@ tprot_addr_excp:
 /*      or translation exception then a program check is generated   */
 /*      and the function does not return.                            */
 /*-------------------------------------------------------------------*/
-static U32 logical_to_abs (U32 addr, int arn, REGS *regs,
-                                int acctype, BYTE akey)
+U32 logical_to_abs (U32 addr, int arn, REGS *regs,
+                    int acctype, BYTE akey)
 {
 U32     raddr;                          /* Real address              */
 U32     aaddr;                          /* Absolute address          */
@@ -1044,7 +1109,7 @@ U16     xcode;                          /* Exception code            */
         raddr = addr;
     else {
         if (translate_addr (addr, arn, regs, acctype, &raddr, &xcode,
-                            &private, &protect, &stid))
+                            &private, &protect, &stid, NULL, NULL))
             goto vabs_prog_check;
     }
 
