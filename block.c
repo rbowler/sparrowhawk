@@ -51,7 +51,7 @@ BYTE    pad;                            /* Padding byte              */
     len2 = regs->gpr[r2+1] & 0x00FFFFFF;
 
     /* Test for destructive overlap */
-    if ( len2 > 1
+    if ( len2 > 1 && len1 > 1
         && (!ACCESS_REGISTER_MODE(&(regs->psw))
             || (r1 == 0 ? 0 : regs->ar[r1])
                != (r2 == 0 ? 0 : regs->ar[r2])))
@@ -66,6 +66,11 @@ BYTE    pad;                            /* Padding byte              */
             regs->gpr[r1] = addr1;
             regs->gpr[r2] = addr2;
             cc = 3;
+            logmsg ("MVCL destructive overlap\n");
+            logmsg ("R%2.2d=%8.8X  R%2.2d=%8.8X  "
+                    "R%2.2d=%8.8X  R%2.2d=%8.8X\n",
+                    r1, regs->gpr[r1], r1+1, regs->gpr[r1+1],
+                    r2, regs->gpr[r2], r2+1, regs->gpr[r2+1]);
             return cc;
         }
     }

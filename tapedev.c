@@ -1,4 +1,4 @@
-/* TAPEDEV.C    (c) Copyright Roger Bowler, 1999                     */
+/* TAPEDEV.C    (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 Tape Device Handler                          */
 
 /*-------------------------------------------------------------------*/
@@ -9,9 +9,8 @@
 /* 1. AWSTAPE   This is the format used by the P/390.                */
 /*              The entire tape is contained in a single flat file.  */
 /*              Each tape block is preceded by a 6-byte header.      */
-/*              Files are separated by tape marks, which consist     */
+/*              Files are separated by tapemarks, which consist      */
 /*              of headers with zero block length.                   */
-/*              The file can reside on disk, CDROM, or 4mm DAT tape. */
 /*              AWSTAPE files are readable and writable.             */
 /* 2. OMATAPE   This is the Optical Media Attach device format.      */
 /*              Each physical file on the tape is represented by     */
@@ -120,9 +119,9 @@
  * OMATAPE blocks are followed by padding bytes if necessary so that
  * the next header starts on a 16-byte boundary.
  *
- * For the AWSTAPE format, a tape mark is indicated by a header with
+ * For the AWSTAPE format, a tapemark is indicated by a header with
  * a block length of zero.
- * For the OMATAPE format, a tape mark is indicated by a header with
+ * For the OMATAPE format, a tapemark is indicated by a header with
  * a block length of X'FFFFFFFF'.
  *
  */
@@ -172,6 +171,13 @@ int             rc;                     /* Return code               */
     /* Open the AWSTAPE file */
     rc = open (dev->filename, O_RDWR);
 
+    /* If file is read-only, attempt to open again */
+    if (rc < 0 && errno == EROFS)
+    {
+        dev->readonly = 1;
+        rc = open (dev->filename, O_RDONLY);
+    }
+
     /* Check for successful open */
     if (rc < 0)
     {
@@ -190,73 +196,106 @@ int             rc;                     /* Return code               */
 } /* end function open_awstape */
 
 /*-------------------------------------------------------------------*/
+/* Read an AWSTAPE block header                                      */
+/*                                                                   */
+/* If successful, return value is zero, and buffer contains header.  */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int readhdr_awstape (DEVBLK *dev, long blkpos,
+                        AWSTAPE_BLKHDR *buf, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+
+    /* Reposition file to the requested block header */
+    rc = lseek (dev->fd, blkpos, SEEK_SET);
+    if (rc < 0)
+    {
+        /* Handle seek error condition */
+        logmsg ("HHC230I Error seeking to offset %8.8lX "
+                "in file %s: %s\n",
+                blkpos, dev->filename, strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Read the 6-byte block header */
+    rc = read (dev->fd, buf, sizeof(AWSTAPE_BLKHDR));
+    if (rc < sizeof(AWSTAPE_BLKHDR))
+    {
+        /* Handle read error condition */
+        if (rc < 0)
+            logmsg ("HHC202I Error reading block header "
+                    "at offset %8.8lX in file %s: %s\n",
+                    blkpos, dev->filename, strerror(errno));
+        else
+            logmsg ("HHC203I Unexpected end of file in block header "
+                    "at offset %8.8lX in file %s\n",
+                    blkpos, dev->filename);
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Successful return */
+    return 0;
+
+} /* end function readhdr_awstape */
+
+/*-------------------------------------------------------------------*/
 /* Read a block from an AWSTAPE format file                          */
 /*                                                                   */
 /* If successful, return value is block length read.                 */
-/* If tapemark, return value is zero and unitstat is set to CE+DE+UX */
+/* If a tapemark was read, the return value is zero, and the         */
+/* current file number in the device block is incremented.           */
 /* If error, return value is -1 and unitstat is set to CE+DE+UC      */
 /*-------------------------------------------------------------------*/
 static int read_awstape (DEVBLK *dev, BYTE *buf, BYTE *unitstat)
 {
 int             rc;                     /* Return code               */
 AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
-U16             curblkl;                /* Length of current block   */
-U16             prvblkl;                /* Length of previous block  */
+long            blkpos;                 /* Offset of block header    */
+U16             blklen;                 /* Data length of block      */
 
     /* Initialize current block position */
-    dev->curblkpos = dev->nxtblkpos;
+    blkpos = dev->nxtblkpos;
 
     /* Read the 6-byte block header */
-    rc = read (dev->fd, &awshdr, sizeof(awshdr));
-    if (rc < sizeof(awshdr))
-    {
-        /* Handle read error condition */
-        if (rc < 0)
-            logmsg ("HHC202I Error reading block header "
-                    "at offset %8.8lX in file %s: %s\n",
-                    dev->curblkpos, dev->filename, strerror(errno));
-        else
-            logmsg ("HHC203I Unexpected end of file in block header "
-                    "at offset %8.8lX in file %s\n",
-                    dev->curblkpos, dev->filename);
+    rc = readhdr_awstape (dev, blkpos, &awshdr, unitstat);
+    if (rc < 0) return -1;
 
-        /* Set unit check with equipment check */
-        dev->sense[0] = SENSE_EC;
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
-        return -1;
-    }
-
-    /* Extract the block lengths from the block header */
-    curblkl = ((U16)(awshdr.curblkl[1]) << 8)
+    /* Extract the block length from the block header */
+    blklen = ((U16)(awshdr.curblkl[1]) << 8)
                 | awshdr.curblkl[0];
-    prvblkl = ((U16)(awshdr.prvblkl[1]) << 8)
-                | awshdr.prvblkl[0];
 
     /* Calculate the offsets of the next and previous blocks */
-    dev->curblklen = curblkl;
-    dev->nxtblkpos = dev->curblkpos + sizeof(awshdr) + curblkl;
-    dev->prvblkpos = dev->curblkpos - sizeof(awshdr) - prvblkl;
+    dev->nxtblkpos = blkpos + sizeof(awshdr) + blklen;
+    dev->prvblkpos = blkpos;
 
-    /* Zero length block (tapemark) produces unit exception */
-    if (curblkl == 0)
+    /* Increment file number and return zero if tapemark was read */
+    if (blklen == 0)
     {
-        *unitstat = CSW_CE | CSW_DE | CSW_UX;
+        dev->curfilen++;
         return 0;
     }
 
     /* Read data block from tape file */
-    rc = read (dev->fd, buf, curblkl);
-    if (rc < curblkl)
+    rc = read (dev->fd, buf, blklen);
+    if (rc < blklen)
     {
         /* Handle read error condition */
         if (rc < 0)
             logmsg ("HHC204I Error reading data block "
                     "at offset %8.8lX in file %s: %s\n",
-                    dev->curblkpos, dev->filename, strerror(errno));
+                    blkpos, dev->filename, strerror(errno));
         else
             logmsg ("HHC205I Unexpected end of file in data block "
                     "at offset %8.8lX in file %s\n",
-                    dev->curblkpos, dev->filename);
+                    blkpos, dev->filename);
 
         /* Set unit check with equipment check */
         dev->sense[0] = SENSE_EC;
@@ -264,9 +303,8 @@ U16             prvblkl;                /* Length of previous block  */
         return -1;
     }
 
-    /* Return normal status and block length */
-    *unitstat = CSW_CE | CSW_DE;
-    return curblkl;
+    /* Return block length */
+    return blklen;
 
 } /* end function read_awstape */
 
@@ -276,21 +314,43 @@ U16             prvblkl;                /* Length of previous block  */
 /* If successful, return value is zero.                              */
 /* If error, return value is -1 and unitstat is set to CE+DE+UC      */
 /*-------------------------------------------------------------------*/
-static int write_awstape (DEVBLK *dev, BYTE *buf, U16 curblkl,
+static int write_awstape (DEVBLK *dev, BYTE *buf, U16 blklen,
                         BYTE *unitstat)
 {
 int             rc;                     /* Return code               */
 AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
+long            blkpos;                 /* Offset of block header    */
 U16             prvblkl;                /* Length of previous block  */
 
-    /* Initialize current block position */
-    prvblkl = dev->curblklen;
-    dev->curblkpos = dev->nxtblkpos;
-    dev->curblklen = curblkl;
+    /* Reread the previous block header */
+    rc = readhdr_awstape (dev, dev->prvblkpos, &awshdr, unitstat);
+    if (rc < 0) return -1;
+
+    /* Extract the block length from the block header */
+    prvblkl = ((U16)(awshdr.curblkl[1]) << 8)
+                | awshdr.curblkl[0];
+
+    /* Recalculate the offset of the next block */
+    blkpos = dev->prvblkpos + sizeof(awshdr) + prvblkl;
+
+    /* Reposition file to the new block header */
+    rc = lseek (dev->fd, blkpos, SEEK_SET);
+    if (rc < 0)
+    {
+        /* Handle seek error condition */
+        logmsg ("HHC230I Error seeking to offset %8.8lX "
+                "in file %s: %s\n",
+                blkpos, dev->filename, strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
 
     /* Build the 6-byte block header */
-    awshdr.curblkl[0] = curblkl & 0xFF;
-    awshdr.curblkl[1] = (curblkl >> 8) & 0xFF;
+    awshdr.curblkl[0] = blklen & 0xFF;
+    awshdr.curblkl[1] = (blklen >> 8) & 0xFF;
     awshdr.prvblkl[0] = prvblkl & 0xFF;
     awshdr.prvblkl[1] = (prvblkl >>8) & 0xFF;
     awshdr.flags1 = AWSTAPE_FLAG1_NEWREC | AWSTAPE_FLAG1_ENDREC;
@@ -303,7 +363,7 @@ U16             prvblkl;                /* Length of previous block  */
         /* Handle write error condition */
         logmsg ("HHC210I Error writing block header "
                 "at offset %8.8lX in file %s: %s\n",
-                dev->curblkpos, dev->filename, strerror(errno));
+                blkpos, dev->filename, strerror(errno));
 
         /* Set unit check with equipment check */
         dev->sense[0] = SENSE_EC;
@@ -312,17 +372,17 @@ U16             prvblkl;                /* Length of previous block  */
     }
 
     /* Calculate the offsets of the next and previous blocks */
-    dev->nxtblkpos = dev->curblkpos + sizeof(awshdr) + curblkl;
-    dev->prvblkpos = dev->curblkpos - sizeof(awshdr) - prvblkl;
+    dev->nxtblkpos = blkpos + sizeof(awshdr) + blklen;
+    dev->prvblkpos = blkpos;
 
     /* Write the data block */
-    rc = write (dev->fd, buf, curblkl);
-    if (rc < curblkl)
+    rc = write (dev->fd, buf, blklen);
+    if (rc < blklen)
     {
         /* Handle write error condition */
         logmsg ("HHC211I Error writing data block "
                 "at offset %8.8lX in file %s: %s\n",
-                dev->curblkpos, dev->filename, strerror(errno));
+                blkpos, dev->filename, strerror(errno));
 
         /* Set unit check with equipment check */
         dev->sense[0] = SENSE_EC;
@@ -331,7 +391,6 @@ U16             prvblkl;                /* Length of previous block  */
     }
 
     /* Return normal status */
-    *unitstat = CSW_CE | CSW_DE;
     return 0;
 
 } /* end function write_awstape */
@@ -346,12 +405,34 @@ static int write_awsmark (DEVBLK *dev, BYTE *unitstat)
 {
 int             rc;                     /* Return code               */
 AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
+long            blkpos;                 /* Offset of block header    */
 U16             prvblkl;                /* Length of previous block  */
 
-    /* Initialize current block position */
-    prvblkl = dev->curblklen;
-    dev->curblkpos = dev->nxtblkpos;
-    dev->curblklen = 0;
+    /* Reread the previous block header */
+    rc = readhdr_awstape (dev, dev->prvblkpos, &awshdr, unitstat);
+    if (rc < 0) return -1;
+
+    /* Extract the block length from the block header */
+    prvblkl = ((U16)(awshdr.curblkl[1]) << 8)
+                | awshdr.curblkl[0];
+
+    /* Recalculate the offset of the next block */
+    blkpos = dev->prvblkpos + sizeof(awshdr) + prvblkl;
+
+    /* Reposition file to the new block header */
+    rc = lseek (dev->fd, blkpos, SEEK_SET);
+    if (rc < 0)
+    {
+        /* Handle seek error condition */
+        logmsg ("HHC230I Error seeking to offset %8.8lX "
+                "in file %s: %s\n",
+                blkpos, dev->filename, strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
 
     /* Build the 6-byte block header */
     awshdr.curblkl[0] = 0;
@@ -368,7 +449,7 @@ U16             prvblkl;                /* Length of previous block  */
         /* Handle write error condition */
         logmsg ("HHC212I Error writing block header "
                 "at offset %8.8lX in file %s: %s\n",
-                dev->curblkpos, dev->filename, strerror(errno));
+                blkpos, dev->filename, strerror(errno));
 
         /* Set unit check with equipment check */
         dev->sense[0] = SENSE_EC;
@@ -377,94 +458,168 @@ U16             prvblkl;                /* Length of previous block  */
     }
 
     /* Calculate the offsets of the next and previous blocks */
-    dev->nxtblkpos = dev->curblkpos + sizeof(awshdr);
-    dev->prvblkpos = dev->curblkpos - sizeof(awshdr) - prvblkl;
+    dev->nxtblkpos = blkpos + sizeof(awshdr);
+    dev->prvblkpos = blkpos;
 
     /* Return normal status */
-    *unitstat = CSW_CE | CSW_DE;
     return 0;
 
 } /* end function write_awsmark */
 
 /*-------------------------------------------------------------------*/
-/* Forward space to next logical file of AWSTAPE format file         */
+/* Forward space over next block of AWSTAPE format file              */
 /*                                                                   */
-/* If successful, return value is zero, and the current file         */
-/* number in the device block in incremented.                        */
+/* If successful, return value is the length of the block skipped.   */
+/* If the block skipped was a tapemark, the return value is zero,    */
+/* and the current file number in the device block is incremented.   */
 /* If error, return value is -1 and unitstat is set to CE+DE+UC      */
 /*-------------------------------------------------------------------*/
-static int fsf_awstape (DEVBLK *dev, BYTE *unitstat)
+static int fsb_awstape (DEVBLK *dev, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
+long            blkpos;                 /* Offset of block header    */
+U16             blklen;                 /* Data length of block      */
+
+    /* Initialize current block position */
+    blkpos = dev->nxtblkpos;
+
+    /* Read the 6-byte block header */
+    rc = readhdr_awstape (dev, blkpos, &awshdr, unitstat);
+    if (rc < 0) return -1;
+
+    /* Extract the block length from the block header */
+    blklen = ((U16)(awshdr.curblkl[1]) << 8)
+                | awshdr.curblkl[0];
+
+    /* Calculate the offsets of the next and previous blocks */
+    dev->nxtblkpos = blkpos + sizeof(awshdr) + blklen;
+    dev->prvblkpos = blkpos;
+
+    /* Increment current file number if tapemark was skipped */
+    if (blklen == 0)
+        dev->curfilen++;
+
+    /* Return block length or zero if tapemark */
+    return blklen;
+
+} /* end function fsb_awstape */
+
+/*-------------------------------------------------------------------*/
+/* Backspace to previous block of AWSTAPE format file                */
+/*                                                                   */
+/* If successful, return value is the length of the block.           */
+/* If the block is a tapemark, the return value is zero,             */
+/* and the current file number in the device block is decremented.   */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int bsb_awstape (DEVBLK *dev, BYTE *unitstat)
 {
 int             rc;                     /* Return code               */
 AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
 U16             curblkl;                /* Length of current block   */
 U16             prvblkl;                /* Length of previous block  */
+long            blkpos;                 /* Offset of block header    */
+
+    /* Unit check if already at start of tape */
+    if (dev->nxtblkpos == 0)
+    {
+        dev->sense[0] = 0;
+        dev->sense[1] = SENSE1_NRF;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Backspace to previous block position */
+    blkpos = dev->prvblkpos;
+
+    /* Read the 6-byte block header */
+    rc = readhdr_awstape (dev, blkpos, &awshdr, unitstat);
+    if (rc < 0) return -1;
+
+    /* Extract the block lengths from the block header */
+    curblkl = ((U16)(awshdr.curblkl[1]) << 8)
+                | awshdr.curblkl[0];
+    prvblkl = ((U16)(awshdr.prvblkl[1]) << 8)
+                | awshdr.prvblkl[0];
+
+    /* Calculate the offset of the previous block */
+    dev->prvblkpos = blkpos - sizeof(awshdr) - prvblkl;
+    dev->nxtblkpos = blkpos;
+
+    /* Decrement current file number if backspaced over tapemark */
+    if (curblkl == 0)
+        dev->curfilen--;
+
+    /* Return block length or zero if tapemark */
+    return curblkl;
+
+} /* end function bsb_awstape */
+
+/*-------------------------------------------------------------------*/
+/* Forward space to next logical file of AWSTAPE format file         */
+/*                                                                   */
+/* For AWSTAPE files, the forward space file operation is achieved   */
+/* by forward spacing blocks until positioned just after a tapemark. */
+/*                                                                   */
+/* If successful, return value is zero, and the current file number  */
+/* in the device block is incremented by fsb_awstape.                */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int fsf_awstape (DEVBLK *dev, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
 
     while (1)
     {
-        /* Initialize current block position */
-        dev->curblkpos = dev->nxtblkpos;
+        /* Forward space over next block */
+        rc = fsb_awstape (dev, unitstat);
+        if (rc < 0) return -1;
 
-        /* Read the 6-byte block header */
-        rc = read (dev->fd, &awshdr, sizeof(awshdr));
-        if (rc < sizeof(awshdr))
-        {
-            /* Handle read error condition */
-            if (rc < 0)
-                logmsg ("HHC213I Error reading block header "
-                        "at offset %8.8lX in file %s: %s\n",
-                        dev->curblkpos, dev->filename,
-                        strerror(errno));
-            else
-                logmsg ("HHC214I Unexpected end of file in block "
-                        "header at offset %8.8lX in file %s\n",
-                        dev->curblkpos, dev->filename);
-
-            /* Set unit check with equipment check */
-            dev->sense[0] = SENSE_EC;
-            *unitstat = CSW_CE | CSW_DE | CSW_UC;
-            return -1;
-        }
-
-        /* Extract the block lengths from the block header */
-        curblkl = ((U16)(awshdr.curblkl[1]) << 8)
-                    | awshdr.curblkl[0];
-        prvblkl = ((U16)(awshdr.prvblkl[1]) << 8)
-                    | awshdr.prvblkl[0];
-
-        /* Calculate the offsets of the next and previous blocks */
-        dev->curblklen = curblkl;
-        dev->nxtblkpos = dev->curblkpos + sizeof(awshdr) + curblkl;
-        dev->prvblkpos = dev->curblkpos - sizeof(awshdr) - prvblkl;
-
-        /* Exit loop if zero length block (tapemark) was read */
-        if (curblkl == 0) break;
-
-        /* Skip past data block to next block header */
-        rc = lseek (dev->fd, curblkl, SEEK_CUR);
-        if (rc < 0)
-        {
-            /* Handle seek error condition */
-            logmsg ("HHC215I Error seeking past data block "
-                    "at offset %8.8lX in file %s: %s\n",
-                    dev->curblkpos, dev->filename, strerror(errno));
-
-            /* Set unit check with equipment check */
-            dev->sense[0] = SENSE_EC;
-            *unitstat = CSW_CE | CSW_DE | CSW_UC;
-            return -1;
-        }
+        /* Exit loop if spaced over a tapemark */
+        if (rc == 0) break;
 
     } /* end while */
 
-    /* Increment current file number */
-    dev->curfilen++;
-
     /* Return normal status */
-    *unitstat = CSW_CE | CSW_DE;
     return 0;
 
 } /* end function fsf_awstape */
+
+/*-------------------------------------------------------------------*/
+/* Backspace to previous logical file of AWSTAPE format file         */
+/*                                                                   */
+/* For AWSTAPE files, the backspace file operation is achieved       */
+/* by backspacing blocks until positioned just before a tapemark     */
+/* or until positioned at start of tape.                             */
+/*                                                                   */
+/* If successful, return value is zero, and the current file number  */
+/* in the device block is decremented by bsb_awstape.                */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int bsf_awstape (DEVBLK *dev, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+
+    while (1)
+    {
+        /* Exit if now at start of tape */
+        if (dev->nxtblkpos == 0)
+            break;
+
+        /* Backspace to previous block position */
+        rc = bsb_awstape (dev, unitstat);
+        if (rc < 0) return -1;
+
+        /* Exit loop if backspaced over a tapemark */
+        if (rc == 0) break;
+
+    } /* end while */
+
+    /* Return normal status */
+    return 0;
+
+} /* end function bsf_awstape */
 
 /*-------------------------------------------------------------------*/
 /* Open a SCSI tape device                                           */
@@ -478,7 +633,14 @@ int             rc;                     /* Return code               */
 struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
 
     /* Open the SCSI tape device */
-    rc = open (dev->filename, O_RDONLY);
+    rc = open (dev->filename, O_RDWR);
+
+    /* If file is read-only, attempt to open again */
+    if (rc < 0 && errno == EROFS)
+    {
+        dev->readonly = 1;
+        rc = open (dev->filename, O_RDONLY);
+    }
 
     /* Check for successful open */
     if (rc < 0)
@@ -530,7 +692,8 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
 /* Read a block from a SCSI tape device                              */
 /*                                                                   */
 /* If successful, return value is block length read.                 */
-/* If tapemark, return value is zero and unitstat is set to CE+DE+UX */
+/* If a tapemark was read, the return value is zero, and the         */
+/* current file number in the device block is incremented.           */
 /* If error, return value is -1 and unitstat is set to CE+DE+UC      */
 /*-------------------------------------------------------------------*/
 static int read_scsitape (DEVBLK *dev, BYTE *buf, BYTE *unitstat)
@@ -551,15 +714,11 @@ int             rc;                     /* Return code               */
         return -1;
     }
 
-    /* Zero length block (tapemark) produces unit exception */
+    /* Increment current file number if tapemark was read */
     if (rc == 0)
-    {
-        *unitstat = CSW_CE | CSW_DE | CSW_UX;
-        return 0;
-    }
+        dev->curfilen++;
 
-    /* Return normal status and block length */
-    *unitstat = CSW_CE | CSW_DE;
+    /* Return block length or zero if tapemark  */
     return rc;
 
 } /* end function read_scsitape */
@@ -590,7 +749,6 @@ int             rc;                     /* Return code               */
     }
 
     /* Return normal status */
-    *unitstat = CSW_CE | CSW_DE;
     return 0;
 
 } /* end function write_scsitape */
@@ -623,16 +781,79 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     }
 
     /* Return normal status */
-    *unitstat = CSW_CE | CSW_DE;
     return 0;
 
 } /* end function write_scsimark */
 
 /*-------------------------------------------------------------------*/
+/* Forward space over next block of SCSI tape device                 */
+/*                                                                   */
+/* If successful, return value is zero.                              */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int fsb_scsitape (DEVBLK *dev, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
+
+    /* Forward space block on SCSI tape */
+    opblk.mt_op = MTFSR;
+    opblk.mt_count = 1;
+    rc = ioctl (dev->fd, MTIOCTOP, (char*)&opblk);
+    if (rc < 0)
+    {
+        /* Handle error condition */
+        logmsg ("HHC226I Forward space block error on %s: %s\n",
+                dev->filename, strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Return normal status */
+    return 0;
+
+} /* end function fsb_scsitape */
+
+/*-------------------------------------------------------------------*/
+/* Backspace to previous block of SCSI tape device                   */
+/*                                                                   */
+/* If successful, return value is zero.                              */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int bsb_scsitape (DEVBLK *dev, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
+
+    /* Backspace block on SCSI tape */
+    opblk.mt_op = MTBSR;
+    opblk.mt_count = 1;
+    rc = ioctl (dev->fd, MTIOCTOP, (char*)&opblk);
+    if (rc < 0)
+    {
+        /* Handle error condition */
+        logmsg ("HHC226I Backspace block error on %s: %s\n",
+                dev->filename, strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Return normal status */
+    return 0;
+
+} /* end function bsb_scsitape */
+
+/*-------------------------------------------------------------------*/
 /* Forward space to next file of SCSI tape device                    */
 /*                                                                   */
-/* If successful, return value is zero, and the current file         */
-/* number in the device block in incremented.                        */
+/* If successful, the return value is zero, and the current file     */
+/* number in the device block is incremented.                        */
 /* If error, return value is -1 and unitstat is set to CE+DE+UC      */
 /*-------------------------------------------------------------------*/
 static int fsf_scsitape (DEVBLK *dev, BYTE *unitstat)
@@ -660,37 +881,31 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     dev->curfilen++;
 
     /* Return normal status */
-    *unitstat = CSW_CE | CSW_DE;
     return 0;
 
 } /* end function fsf_scsitape */
 
 /*-------------------------------------------------------------------*/
-/* Read a block from an OMA tape file in OMA headers format          */
+/* Backspace to previous file of SCSI tape device                    */
 /*                                                                   */
-/* If successful, return value is block length read.                 */
-/* If tapemark, return value is zero and unitstat is set to CE+DE+UX */
+/* If successful, the return value is zero, and the current file     */
+/* number in the device block is decremented.                        */
 /* If error, return value is -1 and unitstat is set to CE+DE+UC      */
 /*-------------------------------------------------------------------*/
-static int read_omaheaders (DEVBLK *dev, OMATAPE_DESC *omadesc,
-                        BYTE *buf, BYTE *unitstat)
+static int bsf_scsitape (DEVBLK *dev, BYTE *unitstat)
 {
 int             rc;                     /* Return code               */
-OMATAPE_BLKHDR  omahdr;                 /* OMATAPE block header      */
-S32             curblkl;                /* Length of current block   */
-S32             prvhdro;                /* Offset of previous header */
-int             padding;                /* Number of padding bytes   */
+struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
 
-    /* Seek to start of block header */
-    dev->curblkpos = dev->nxtblkpos;
-
-    rc = lseek (dev->fd, dev->curblkpos, SEEK_SET);
+    /* Backspace file on SCSI tape */
+    opblk.mt_op = MTBSF;
+    opblk.mt_count = 1;
+    rc = ioctl (dev->fd, MTIOCTOP, (char*)&opblk);
     if (rc < 0)
     {
-        /* Handle seek error condition */
-        logmsg ("HHC230I Error seeking to offset %8.8lX "
-                "in file %s: %s\n",
-                dev->curblkpos, dev->filename, strerror(errno));
+        /* Handle error condition */
+        logmsg ("HHC226I Backspace file error on %s: %s\n",
+                dev->filename, strerror(errno));
 
         /* Set unit check with equipment check */
         dev->sense[0] = SENSE_EC;
@@ -698,263 +913,14 @@ int             padding;                /* Number of padding bytes   */
         return -1;
     }
 
-    /* Read the 16-byte block header */
-    rc = read (dev->fd, &omahdr, sizeof(omahdr));
-    if (rc < sizeof(omahdr))
-    {
-        /* Handle read error condition */
-        if (rc < 0)
-            logmsg ("HHC231I Error reading block header "
-                    "at offset %8.8lX in file %s: %s\n",
-                    dev->curblkpos, omadesc->filename,
-                    strerror(errno));
-        else
-            logmsg ("HHC232I Unexpected end of file in block header "
-                    "at offset %8.8lX in file %s\n",
-                    dev->curblkpos, omadesc->filename);
-
-        /* Set unit check with equipment check */
-        dev->sense[0] = SENSE_EC;
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
-        return -1;
-    }
-
-    /* Extract the current block length and previous header offset */
-    curblkl = (S32)(((U32)(omahdr.curblkl[3]) << 24)
-                    | ((U32)(omahdr.curblkl[2]) << 16)
-                    | ((U32)(omahdr.curblkl[1]) << 8)
-                    | omahdr.curblkl[0]);
-    prvhdro = (S32)((U32)(omahdr.prvhdro[3]) << 24)
-                    | ((U32)(omahdr.prvhdro[2]) << 16)
-                    | ((U32)(omahdr.prvhdro[1]) << 8)
-                    | omahdr.prvhdro[0];
-
-    /* Check for valid block header */
-    if (curblkl < -1 || curblkl == 0 || curblkl > MAX_BLKLEN
-        || memcmp(omahdr.omaid, "@HDF", 4) != 0)
-    {
-        logmsg ("HHC233I Invalid block header "
-                "at offset %8.8lX in file %s\n",
-                dev->curblkpos, omadesc->filename);
-
-        /* Set unit check with equipment check */
-        dev->sense[0] = SENSE_EC;
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
-        return -1;
-    }
-
-    /* Calculate the number of padding bytes which follow the data */
-    padding = (16 - (curblkl & 15)) & 15;
-
-    /* Calculate the offsets of the next and previous blocks */
-    dev->curblklen = curblkl;
-    dev->nxtblkpos = dev->curblkpos
-                        + sizeof(omahdr) + curblkl + padding;
-    dev->prvblkpos = prvhdro;
-
-    /* Block length -1 (tapemark) produces unit exception */
-    if (curblkl == -1)
-    {
-        *unitstat = CSW_CE | CSW_DE | CSW_UX;
-        return 0;
-    }
-
-    /* Read data block from tape file */
-    rc = read (dev->fd, buf, curblkl);
-    if (rc < curblkl)
-    {
-        /* Handle read error condition */
-        if (rc < 0)
-            logmsg ("HHC234I Error reading data block "
-                    "at offset %8.8lX in file %s: %s\n",
-                    dev->curblkpos, omadesc->filename,
-                    strerror(errno));
-        else
-            logmsg ("HHC235I Unexpected end of file in data block "
-                    "at offset %8.8lX in file %s\n",
-                    dev->curblkpos, omadesc->filename);
-
-        /* Set unit check with equipment check */
-        dev->sense[0] = SENSE_EC;
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
-        return -1;
-    }
-
-    /* Return normal status and block length */
-    *unitstat = CSW_CE | CSW_DE;
-    return curblkl;
-
-} /* end function read_omaheaders */
-
-/*-------------------------------------------------------------------*/
-/* Read a block from an OMA tape file in fixed block format          */
-/*                                                                   */
-/* If successful, return value is block length read.                 */
-/* If tapemark, return value is zero and unitstat is set to CE+DE+UX */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int read_omafixed (DEVBLK *dev, OMATAPE_DESC *omadesc,
-                        BYTE *buf, BYTE *unitstat)
-{
-int             rc;                     /* Return code               */
-
-    /* Initialize current block position */
-    dev->curblkpos = dev->nxtblkpos;
-
-    /* Calculate the offsets of the next and previous blocks */
-    dev->curblklen = omadesc->blklen;
-    dev->nxtblkpos = dev->curblkpos + omadesc->blklen;
-    dev->prvblkpos = dev->curblkpos - omadesc->blklen;
-
-    /* Read fixed length data block from tape file */
-    rc = read (dev->fd, buf, omadesc->blklen);
-    if (rc < omadesc->blklen)
-    {
-        /* End of file (tapemark) produces unit exception */
-        if (rc == 0)
-        {
-            *unitstat = CSW_CE | CSW_DE | CSW_UX;
-            return 0;
-        }
-
-        /* Handle read error condition */
-        if (rc < 0)
-            logmsg ("HHC236I Error reading data block "
-                    "at offset %8.8lX in file %s: %s\n",
-                    dev->curblkpos, omadesc->filename,
-                    strerror(errno));
-        else
-            logmsg ("HHC237I Unexpected end of file in data block "
-                    "at offset %8.8lX in file %s\n",
-                    dev->curblkpos, omadesc->filename);
-
-        /* Set unit check with equipment check */
-        dev->sense[0] = SENSE_EC;
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
-        return -1;
-    }
-
-    /* Return normal status and block length */
-    *unitstat = CSW_CE | CSW_DE;
-    return omadesc->blklen;
-
-} /* end function read_omafixed */
-
-/*-------------------------------------------------------------------*/
-/* Read a block from an OMA tape file in ASCII text format           */
-/*                                                                   */
-/* If successful, return value is block length read.                 */
-/* If tapemark, return value is zero and unitstat is set to CE+DE+UX */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int read_omatext (DEVBLK *dev, OMATAPE_DESC *omadesc,
-                        BYTE *buf, BYTE *unitstat)
-{
-int             rc;                     /* Return code               */
-int             num;                    /* Number of characters read */
-int             pos;                    /* Position in I/O buffer    */
-BYTE            c;                      /* Character work area       */
-
-    /* Initialize current block position */
-    dev->curblkpos = dev->nxtblkpos;
-
-    /* Read data from tape file until end of line */
-    for (num = 0, pos = 0; ; num++)
-    {
-        rc = read (dev->fd, &c, 1);
-        if (rc < 1) break;
-
-        /* Ignore carriage return character */
-        if (c == '\r') continue;
-
-        /* Exit if newline character */
-        if (c == '\n') break;
-
-        /* Ignore characters in excess of I/O buffer length */
-        if (pos >= MAX_BLKLEN) continue;
-
-        /* Translate character to EBCDIC and copy to I/O buffer */
-        buf[pos++] = ascii_to_ebcdic[c];
-
-    } /* end for(num) */
-
-    /* Calculate the offsets of the next and previous blocks */
-    dev->curblklen = num;
-    dev->nxtblkpos = dev->curblkpos + num;
-    dev->prvblkpos = -1;
-
-    /* End of file (tapemark) produces unit exception */
-    if (rc == 0 && num == 0)
-    {
-        *unitstat = CSW_CE | CSW_DE | CSW_UX;
-        return 0;
-    }
-
-    /* Handle read error condition */
-    if (rc < 1)
-    {
-        if (rc < 0)
-            logmsg ("HHC240I Error reading data block "
-                    "at offset %8.8lX in file %s: %s\n",
-                    dev->curblkpos, omadesc->filename,
-                    strerror(errno));
-        else
-            logmsg ("HHC241I Unexpected end of file in data block "
-                    "at offset %8.8lX in file %s\n",
-                    dev->curblkpos, omadesc->filename);
-
-        /* Set unit check with equipment check */
-        dev->sense[0] = SENSE_EC;
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
-        return -1;
-    }
-
-    /* Check for invalid zero length block */
-    if (pos == 0)
-    {
-        logmsg ("HHC242I Invalid zero length block "
-                "at offset %8.8lX in file %s\n",
-                dev->curblkpos, omadesc->filename);
-
-        /* Set unit check with equipment check */
-        dev->sense[0] = SENSE_EC;
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
-        return -1;
-    }
-
-    /* Return normal status and block length */
-    *unitstat = CSW_CE | CSW_DE;
-    return pos;
-
-} /* end function read_omatext */
-
-/*-------------------------------------------------------------------*/
-/* Forward space to next file of OMA tape device                     */
-/*                                                                   */
-/* For OMA tape devices, the forward space file operation is         */
-/* achieved by closing the current file and incrementing the         */
-/* current file number in the device block.  This will cause         */
-/* the next file to be opened when the next CCW is processed.        */
-/*-------------------------------------------------------------------*/
-static int fsf_omatape (DEVBLK *dev, BYTE *unitstat)
-{
-    /* Close the current OMA file */
-    close (dev->fd);
-    dev->fd = -1;
-    dev->nxtblkpos = 0;
-    dev->curblklen = 0;
-    dev->curblkpos = -1;
-    dev->nxtblkpos = 0;
-    dev->prvblkpos = -1;
-
-    /* Increment current file number */
-    dev->curfilen++;
+    /* Decrement current file number */
+    if (dev->curfilen > 1)
+        dev->curfilen--;
 
     /* Return normal status */
-    *unitstat = CSW_CE | CSW_DE;
     return 0;
 
-} /* end function fsf_omatape */
+} /* end function bsf_scsitape */
 
 /*-------------------------------------------------------------------*/
 /* Read the OMA tape descriptor file                                 */
@@ -1250,11 +1216,721 @@ OMATAPE_DESC   *omadesc;                /* -> OMA descriptor entry   */
         return -1;
     }
 
+    /* OMA tapes are always read-only */
+    dev->readonly = 1;
+
     /* Store the file descriptor in the device block */
     dev->fd = rc;
     return 0;
 
 } /* end function open_omatape */
+
+/*-------------------------------------------------------------------*/
+/* Read a block header from an OMA tape file in OMA headers format   */
+/*                                                                   */
+/* If successful, return value is zero, and the current block        */
+/* length and previous and next header offsets are returned.         */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int readhdr_omaheaders (DEVBLK *dev, OMATAPE_DESC *omadesc,
+                        long blkpos, S32 *pcurblkl, S32 *pprvhdro,
+                        S32 *pnxthdro, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+int             padding;                /* Number of padding bytes   */
+OMATAPE_BLKHDR  omahdr;                 /* OMATAPE block header      */
+S32             curblkl;                /* Length of current block   */
+S32             prvhdro;                /* Offset of previous header */
+S32             nxthdro;                /* Offset of next header     */
+
+    /* Seek to start of block header */
+    rc = lseek (dev->fd, blkpos, SEEK_SET);
+    if (rc < 0)
+    {
+        /* Handle seek error condition */
+        logmsg ("HHC230I Error seeking to offset %8.8lX "
+                "in file %s: %s\n",
+                blkpos, omadesc->filename, strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Read the 16-byte block header */
+    rc = read (dev->fd, &omahdr, sizeof(omahdr));
+    if (rc < sizeof(omahdr))
+    {
+        /* Handle read error condition */
+        if (rc < 0)
+            logmsg ("HHC231I Error reading block header "
+                    "at offset %8.8lX in file %s: %s\n",
+                    blkpos, omadesc->filename,
+                    strerror(errno));
+        else
+            logmsg ("HHC232I Unexpected end of file in block header "
+                    "at offset %8.8lX in file %s\n",
+                    blkpos, omadesc->filename);
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Extract the current block length and previous header offset */
+    curblkl = (S32)(((U32)(omahdr.curblkl[3]) << 24)
+                    | ((U32)(omahdr.curblkl[2]) << 16)
+                    | ((U32)(omahdr.curblkl[1]) << 8)
+                    | omahdr.curblkl[0]);
+    prvhdro = (S32)((U32)(omahdr.prvhdro[3]) << 24)
+                    | ((U32)(omahdr.prvhdro[2]) << 16)
+                    | ((U32)(omahdr.prvhdro[1]) << 8)
+                    | omahdr.prvhdro[0];
+
+    /* Check for valid block header */
+    if (curblkl < -1 || curblkl == 0 || curblkl > MAX_BLKLEN
+        || memcmp(omahdr.omaid, "@HDF", 4) != 0)
+    {
+        logmsg ("HHC233I Invalid block header "
+                "at offset %8.8lX in file %s\n",
+                blkpos, omadesc->filename);
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Calculate the number of padding bytes which follow the data */
+    padding = (16 - (curblkl & 15)) & 15;
+
+    /* Calculate the offset of the next block header */
+    nxthdro = blkpos + sizeof(OMATAPE_BLKHDR) + curblkl + padding;
+
+    /* Return current block length and previous/next header offsets */
+    *pcurblkl = curblkl;
+    *pprvhdro = prvhdro;
+    *pnxthdro = nxthdro;
+    return 0;
+
+} /* end function readhdr_omaheaders */
+
+/*-------------------------------------------------------------------*/
+/* Read a block from an OMA tape file in OMA headers format          */
+/*                                                                   */
+/* If successful, return value is block length read.                 */
+/* If a tapemark was read, the file is closed, the current file      */
+/* number in the device block is incremented so that the next file   */
+/* will be opened by the next CCW, and the return value is zero.     */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int read_omaheaders (DEVBLK *dev, OMATAPE_DESC *omadesc,
+                        BYTE *buf, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+long            blkpos;                 /* Offset to block header    */
+S32             curblkl;                /* Length of current block   */
+S32             prvhdro;                /* Offset of previous header */
+S32             nxthdro;                /* Offset of next header     */
+
+    /* Read the 16-byte block header */
+    blkpos = dev->nxtblkpos;
+    rc = readhdr_omaheaders (dev, omadesc, blkpos, &curblkl,
+                            &prvhdro, &nxthdro, unitstat);
+    if (rc < 0) return -1;
+
+    /* Update the offsets of the next and previous blocks */
+    dev->nxtblkpos = nxthdro;
+    dev->prvblkpos = blkpos;
+
+    /* Increment file number and return zero if tapemark */
+    if (curblkl == -1)
+    {
+        close (dev->fd);
+        dev->fd = -1;
+        dev->curfilen++;
+        dev->nxtblkpos = 0;
+        dev->prvblkpos = -1;
+        return 0;
+    }
+
+    /* Read data block from tape file */
+    rc = read (dev->fd, buf, curblkl);
+    if (rc < curblkl)
+    {
+        /* Handle read error condition */
+        if (rc < 0)
+            logmsg ("HHC234I Error reading data block "
+                    "at offset %8.8lX in file %s: %s\n",
+                    blkpos, omadesc->filename,
+                    strerror(errno));
+        else
+            logmsg ("HHC235I Unexpected end of file in data block "
+                    "at offset %8.8lX in file %s\n",
+                    blkpos, omadesc->filename);
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Return block length */
+    return curblkl;
+
+} /* end function read_omaheaders */
+
+/*-------------------------------------------------------------------*/
+/* Read a block from an OMA tape file in fixed block format          */
+/*                                                                   */
+/* If successful, return value is block length read.                 */
+/* If a tapemark was read, the file is closed, the current file      */
+/* number in the device block is incremented so that the next file   */
+/* will be opened by the next CCW, and the return value is zero.     */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int read_omafixed (DEVBLK *dev, OMATAPE_DESC *omadesc,
+                        BYTE *buf, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+int             blklen;                 /* Block length              */
+long            blkpos;                 /* Offset of block in file   */
+
+    /* Initialize current block position */
+    blkpos = dev->nxtblkpos;
+
+    /* Seek to new current block position */
+    rc = lseek (dev->fd, blkpos, SEEK_SET);
+    if (rc < 0)
+    {
+        /* Handle seek error condition */
+        logmsg ("HHC230I Error seeking to offset %8.8lX "
+                "in file %s: %s\n",
+                blkpos, omadesc->filename, strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Read fixed length block or short final block */
+    blklen = read (dev->fd, buf, omadesc->blklen);
+
+    /* Handle read error condition */
+    if (blklen < 0)
+    {
+        logmsg ("HHC236I Error reading data block "
+                "at offset %8.8lX in file %s: %s\n",
+                blkpos, omadesc->filename,
+                strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* At end of file return zero to indicate tapemark */
+    if (blklen == 0)
+    {
+        close (dev->fd);
+        dev->fd = -1;
+        dev->curfilen++;
+        dev->nxtblkpos = 0;
+        dev->prvblkpos = -1;
+        return 0;
+    }
+
+    /* Calculate the offsets of the next and previous blocks */
+    dev->nxtblkpos = blkpos + blklen;
+    dev->prvblkpos = blkpos;
+
+    /* Return block length, or zero to indicate tapemark */
+    return blklen;
+
+} /* end function read_omafixed */
+
+/*-------------------------------------------------------------------*/
+/* Read a block from an OMA tape file in ASCII text format           */
+/*                                                                   */
+/* If successful, return value is block length read.                 */
+/* If a tapemark was read, the file is closed, the current file      */
+/* number in the device block is incremented so that the next file   */
+/* will be opened by the next CCW, and the return value is zero.     */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*                                                                   */
+/* The buf parameter points to the I/O buffer during a read          */
+/* operation, or is NULL for a forward space block operation.        */
+/*-------------------------------------------------------------------*/
+static int read_omatext (DEVBLK *dev, OMATAPE_DESC *omadesc,
+                        BYTE *buf, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+int             num;                    /* Number of characters read */
+int             pos;                    /* Position in I/O buffer    */
+long            blkpos;                 /* Offset of block in file   */
+BYTE            c;                      /* Character work area       */
+
+    /* Initialize current block position */
+    blkpos = dev->nxtblkpos;
+
+    /* Seek to new current block position */
+    rc = lseek (dev->fd, blkpos, SEEK_SET);
+    if (rc < 0)
+    {
+        /* Handle seek error condition */
+        logmsg ("HHC230I Error seeking to offset %8.8lX "
+                "in file %s: %s\n",
+                blkpos, omadesc->filename, strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Read data from tape file until end of line */
+    for (num = 0, pos = 0; ; )
+    {
+        rc = read (dev->fd, &c, 1);
+        if (rc < 1) break;
+
+        /* Treat X'1A' as end of file */
+        if (c == '\x1A')
+        {
+            rc = 0;
+            break;
+        }
+
+        /* Count characters read */
+        num++;
+
+        /* Ignore carriage return character */
+        if (c == '\r') continue;
+
+        /* Exit if newline character */
+        if (c == '\n') break;
+
+        /* Ignore characters in excess of I/O buffer length */
+        if (pos >= MAX_BLKLEN) continue;
+
+        /* Translate character to EBCDIC and copy to I/O buffer */
+        if (buf != NULL)
+            buf[pos] = ascii_to_ebcdic[c];
+
+        /* Count characters copied or skipped */
+        pos++;
+
+    } /* end for(num) */
+
+    /* At end of file return zero to indicate tapemark */
+    if (rc == 0 && num == 0)
+    {
+        close (dev->fd);
+        dev->fd = -1;
+        dev->curfilen++;
+        dev->nxtblkpos = 0;
+        dev->prvblkpos = -1;
+        return 0;
+    }
+
+    /* Handle read error condition */
+    if (rc < 1)
+    {
+        if (rc < 0)
+            logmsg ("HHC240I Error reading data block "
+                    "at offset %8.8lX in file %s: %s\n",
+                    blkpos, omadesc->filename,
+                    strerror(errno));
+        else
+            logmsg ("HHC241I Unexpected end of file in data block "
+                    "at offset %8.8lX in file %s\n",
+                    blkpos, omadesc->filename);
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Check for invalid zero length block */
+    if (pos == 0)
+    {
+        logmsg ("HHC242I Invalid zero length block "
+                "at offset %8.8lX in file %s\n",
+                blkpos, omadesc->filename);
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Calculate the offsets of the next and previous blocks */
+    dev->nxtblkpos = blkpos + num;
+    dev->prvblkpos = blkpos;
+
+    /* Return block length */
+    return pos;
+
+} /* end function read_omatext */
+
+/*-------------------------------------------------------------------*/
+/* Forward space to next file of OMA tape device                     */
+/*                                                                   */
+/* For OMA tape devices, the forward space file operation is         */
+/* achieved by closing the current file, and incrementing the        */
+/* current file number in the device block, which causes the         */
+/* next file will be opened when the next CCW is processed.          */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int fsf_omatape (DEVBLK *dev, BYTE *unitstat)
+{
+    /* Close the current OMA file */
+    close (dev->fd);
+    dev->fd = -1;
+    dev->nxtblkpos = 0;
+    dev->prvblkpos = -1;
+
+    /* Increment the current file number */
+    dev->curfilen++;
+
+    /* Return normal status */
+    return 0;
+
+} /* end function fsf_omatape */
+
+/*-------------------------------------------------------------------*/
+/* Forward space over next block of OMA file in OMA headers format   */
+/*                                                                   */
+/* If successful, return value is the length of the block skipped.   */
+/* If the block skipped was a tapemark, the return value is zero,    */
+/* the file is closed, and the current file number in the device     */
+/* block is incremented so that the next file belonging to the OMA   */
+/* tape will be opened when the next CCW is executed.                */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int fsb_omaheaders (DEVBLK *dev, OMATAPE_DESC *omadesc,
+                        BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+long            blkpos;                 /* Offset of block header    */
+S32             curblkl;                /* Length of current block   */
+S32             prvhdro;                /* Offset of previous header */
+S32             nxthdro;                /* Offset of next header     */
+
+    /* Initialize current block position */
+    blkpos = dev->nxtblkpos;
+
+    /* Read the 16-byte block header */
+    rc = readhdr_omaheaders (dev, omadesc, blkpos, &curblkl,
+                            &prvhdro, &nxthdro, unitstat);
+    if (rc < 0) return -1;
+
+    /* Check if tapemark was skipped */
+    if (curblkl == -1)
+    {
+        /* Close the current OMA file */
+        close (dev->fd);
+        dev->fd = -1;
+        dev->nxtblkpos = 0;
+        dev->prvblkpos = -1;
+
+        /* Increment the file number */
+        dev->curfilen++;
+
+        /* Return zero to indicate tapemark */
+        return 0;
+    }
+
+    /* Update the offsets of the next and previous blocks */
+    dev->nxtblkpos = nxthdro;
+    dev->prvblkpos = blkpos;
+
+    /* Return block length */
+    return curblkl;
+
+} /* end function fsb_omaheaders */
+
+/*-------------------------------------------------------------------*/
+/* Forward space over next block of OMA file in fixed block format   */
+/*                                                                   */
+/* If successful, return value is the length of the block skipped.   */
+/* If already at end of file, the return value is zero,              */
+/* the file is closed, and the current file number in the device     */
+/* block is incremented so that the next file belonging to the OMA   */
+/* tape will be opened when the next CCW is executed.                */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int fsb_omafixed (DEVBLK *dev, OMATAPE_DESC *omadesc,
+                        BYTE *unitstat)
+{
+long            eofpos;                 /* Offset of end of file     */
+long            blkpos;                 /* Offset of current block   */
+S32             curblkl;                /* Length of current block   */
+
+    /* Initialize current block position */
+    blkpos = dev->nxtblkpos;
+
+    /* Seek to end of file to determine file size */
+    eofpos = lseek (dev->fd, 0, SEEK_END);
+    if (eofpos < 0)
+    {
+        /* Handle seek error condition */
+        logmsg ("HHC230I Error seeking to end of file %s: %s\n",
+                omadesc->filename, strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Check if already at end of file */
+    if (blkpos >= eofpos)
+    {
+        /* Close the current OMA file */
+        close (dev->fd);
+        dev->fd = -1;
+        dev->nxtblkpos = 0;
+        dev->prvblkpos = -1;
+
+        /* Increment the file number */
+        dev->curfilen++;
+
+        /* Return zero to indicate tapemark */
+        return 0;
+    }
+
+    /* Calculate current block length */
+    curblkl = eofpos - blkpos;
+    if (curblkl > omadesc->blklen)
+        curblkl = omadesc->blklen;
+
+    /* Update the offsets of the next and previous blocks */
+    dev->nxtblkpos = blkpos + curblkl;
+    dev->prvblkpos = blkpos;
+
+    /* Return block length */
+    return curblkl;
+
+} /* end function fsb_omafixed */
+
+/*-------------------------------------------------------------------*/
+/* Forward space to next block of OMA file                           */
+/*                                                                   */
+/* If successful, return value is the length of the block skipped.   */
+/* If forward spaced over end of file, return value is 0.            */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int fsb_omatape (DEVBLK *dev, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+OMATAPE_DESC   *omadesc;                /* -> OMA descriptor entry   */
+
+    /* Point to the current file entry in the OMA descriptor table */
+    omadesc = (OMATAPE_DESC*)(dev->omadesc);
+    omadesc += dev->curfilen;
+
+    /* Forward space block depending on OMA file type */
+    switch (omadesc->format)
+    {
+    default:
+    case 'H':
+        rc = fsb_omaheaders (dev, omadesc, unitstat);
+        break;
+    case 'F':
+        rc = fsb_omafixed (dev, omadesc, unitstat);
+        break;
+    case 'T':
+        rc = read_omatext (dev, omadesc, NULL, unitstat);
+        break;
+    } /* end switch(omadesc->format) */
+
+    return rc;
+
+} /* end function fsb_omatape */
+
+/*-------------------------------------------------------------------*/
+/* Backspace to previous file of OMA tape device                     */
+/*                                                                   */
+/* If the current file number is 1, then backspace file simply       */
+/* closes the file, setting the current position to start of tape.   */
+/* Otherwise, the current file is closed, the current file number    */
+/* is decremented, the new file is opened, and the new file is       */
+/* repositioned to just before the tape mark at the end of the file. */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+static int bsf_omatape (DEVBLK *dev, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+long            pos;                    /* File position             */
+OMATAPE_DESC   *omadesc;                /* -> OMA descriptor entry   */
+S32             curblkl;                /* Length of current block   */
+S32             prvhdro;                /* Offset of previous header */
+S32             nxthdro;                /* Offset of next header     */
+
+    /* Close the current OMA file */
+    close (dev->fd);
+    dev->fd = -1;
+    dev->nxtblkpos = 0;
+    dev->prvblkpos = -1;
+
+    /* Exit with tape at load point if currently on first file */
+    if (dev->curfilen <= 1)
+        return 0;
+
+    /* Decrement current file number */
+    dev->curfilen--;
+
+    /* Point to the current file entry in the OMA descriptor table */
+    omadesc = (OMATAPE_DESC*)(dev->omadesc);
+    omadesc += dev->curfilen;
+
+    /* Open the new current file */
+    rc = open_omatape (dev, unitstat);
+    if (rc < 0) return rc;
+
+    /* Reposition before tapemark header at end of file, or
+       to end of file for fixed block or ASCII text files */
+    pos = (omadesc->format == 'H' ? -(sizeof(OMATAPE_BLKHDR)) : 0);
+
+    pos = lseek (dev->fd, pos, SEEK_END);
+    if (pos < 0)
+    {
+        /* Handle seek error condition */
+        logmsg ("HHC230I Error seeking to end of file %s: %s\n",
+                omadesc->filename, strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+    dev->nxtblkpos = pos;
+    dev->prvblkpos = -1;
+
+    /* Determine the offset of the previous block */
+    switch (omadesc->format)
+    {
+    case 'H':
+        /* For OMA headers files, read the tapemark header
+           and extract the previous block offset */
+        rc = readhdr_omaheaders (dev, omadesc, pos, &curblkl,
+                                &prvhdro, &nxthdro, unitstat);
+        if (rc < 0) return -1;
+        dev->prvblkpos = prvhdro;
+        break;
+    case 'F':
+        /* For OMA fixed block files, calculate the previous block
+           offset allowing for a possible short final block */
+        pos = (pos + omadesc->blklen - 1) / omadesc->blklen;
+        dev->prvblkpos = (pos > 0 ? (pos - 1) * omadesc->blklen : -1);
+        break;
+    case 'T':
+        /* For OMA ASCII text files, the previous block is unknown */
+        dev->prvblkpos = -1;
+        break;
+    } /* end switch(omadesc->format) */
+
+    /* Return normal status */
+    return 0;
+
+} /* end function bsf_omatape */
+
+/*-------------------------------------------------------------------*/
+/* Backspace to previous block of OMA file                           */
+/*                                                                   */
+/* If successful, return value is +1.                                */
+/* If current position is at start of a file, then a backspace file  */
+/* operation is performed to reset the position to the end of the    */
+/* previous file, and the return value is zero.                      */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*                                                                   */
+/* Note that for ASCII text files, the previous block position is    */
+/* known only if the previous CCW was a read or a write, so any      */
+/* attempt to issue more than one consecutive backspace block on     */
+/* an ASCII text file will fail with unit check status.              */
+/*-------------------------------------------------------------------*/
+static int bsb_omatape (DEVBLK *dev, BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+OMATAPE_DESC   *omadesc;                /* -> OMA descriptor entry   */
+long            blkpos;                 /* Offset of block header    */
+S32             curblkl;                /* Length of current block   */
+S32             prvhdro;                /* Offset of previous header */
+S32             nxthdro;                /* Offset of next header     */
+
+    /* Point to the current file entry in the OMA descriptor table */
+    omadesc = (OMATAPE_DESC*)(dev->omadesc);
+    omadesc += dev->curfilen;
+
+    /* Backspace file if current position is at start of file */
+    if (dev->nxtblkpos == 0)
+    {
+        /* Unit check if already at start of tape */
+        if (dev->curfilen <= 1)
+        {
+            dev->sense[0] = 0;
+            dev->sense[1] = SENSE1_NRF;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            return -1;
+        }
+
+        /* Perform backspace file operation */
+        rc = bsf_omatape (dev, unitstat);
+        if (rc < 0) return -1;
+
+        /* Return zero to indicate tapemark detected */
+        return 0;
+    }
+
+    /* Unit check if previous block position is unknown */
+    if (dev->prvblkpos < 0)
+    {
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Backspace to previous block position */
+    blkpos = dev->prvblkpos;
+
+    /* Determine new previous block position */
+    switch (omadesc->format)
+    {
+    case 'H':
+        /* For OMA headers files, read the previous block header to
+           extract the block length and new previous block offset */
+        rc = readhdr_omaheaders (dev, omadesc, blkpos, &curblkl,
+                                &prvhdro, &nxthdro, unitstat);
+        if (rc < 0) return -1;
+        break;
+    case 'F':
+        /* For OMA fixed block files, calculate the new previous
+           block offset by subtracting the fixed block length */
+        if (blkpos >= omadesc->blklen)
+            prvhdro = blkpos - omadesc->blklen;
+        else
+            prvhdro = -1;
+        break;
+    case 'T':
+        /* For OMA ASCII text files, new previous block is unknown */
+        prvhdro = -1;
+        break;
+    } /* end switch(omadesc->format) */
+
+    /* Update the offsets of the next and previous blocks */
+    dev->nxtblkpos = blkpos;
+    dev->prvblkpos = prvhdro;
+
+    /* Return +1 to indicate backspace successful */
+    return +1;
+
+} /* end function bsb_omatape */
 
 /*-------------------------------------------------------------------*/
 /* Issue mount message as result of load display channel command     */
@@ -1345,12 +2021,11 @@ U32             sctlfeat;               /* Storage control features  */
     dev->omadesc = NULL;
     dev->omafiles = 0;
     dev->curfilen = 1;
-    dev->curblklen = 0;
-    dev->curblkpos = -1;
     dev->nxtblkpos = 0;
     dev->prvblkpos = -1;
     dev->curblkrem = 0;
     dev->curbufoff = 0;
+    dev->readonly = 0;
 
     /* Set number of sense bytes */
     dev->numsense = 24;
@@ -1404,7 +2079,6 @@ U32             sctlfeat;               /* Storage control features  */
     return 0;
 } /* end function tapedev_init_handler */
 
-
 /*-------------------------------------------------------------------*/
 /* Query the device definition                                       */
 /*-------------------------------------------------------------------*/
@@ -1413,10 +2087,12 @@ void tapedev_query_device (DEVBLK *dev, BYTE **class,
 {
 
     *class = "TAPE";
-    snprintf (buffer, buflen, "%s", dev->filename);
+    snprintf (buffer, buflen, "%s%s [%d:%8.8lX]",
+            dev->filename,
+            (dev->readonly ? " ro" : ""),
+            dev->curfilen, dev->nxtblkpos);
 
 } /* end function tapedev_query_device */
-
 
 /*-------------------------------------------------------------------*/
 /* Execute a Channel Command Word                                    */
@@ -1486,6 +2162,15 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     /*---------------------------------------------------------------*/
     /* WRITE                                                         */
     /*---------------------------------------------------------------*/
+        /* Unit check if tape is write-protected */
+        if (dev->readonly)
+        {
+            dev->sense[0] = SENSE_CR;
+            dev->sense[1] = SENSE1_WRI;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
         /* Write a block from the tape according to device type */
         switch (dev->tapedevt)
         {
@@ -1496,13 +2181,6 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
 
         case TAPEDEVT_SCSITAPE:
             rc = write_scsitape (dev, iobuf, count, unitstat);
-            break;
-
-        case TAPEDEVT_OMATAPE:
-            dev->sense[0] = SENSE_CR;
-            dev->sense[1] = SENSE1_FP;
-            *unitstat = CSW_CE | CSW_DE | CSW_UC;
-            rc = -1;
             break;
 
         } /* end switch(dev->tapedevt) */
@@ -1567,26 +2245,10 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         dev->curblkrem = len - num;
         dev->curbufoff = num;
 
-        /* Handle tape mark condition */
+        /* Exit with unit exception status if tapemark was read */
         if (len == 0)
         {
-            /* Increment current file number */
-            dev->curfilen++;
-
-            /* For OMA tapes, close current tape image file.  The next
-               file will be opened when the next CCW is processed */
-            if (dev->tapedevt == TAPEDEVT_OMATAPE)
-            {
-                close (dev->fd);
-                dev->fd = -1;
-                dev->nxtblkpos = 0;
-                dev->curblklen = 0;
-                dev->curblkpos = -1;
-                dev->nxtblkpos = 0;
-                dev->prvblkpos = -1;
-            } /* end if(OMATAPE) */
-
-            /* Exit with unit exception status */
+            *unitstat = CSW_CE | CSW_DE | CSW_UX;
             break;
         }
 
@@ -1646,10 +2308,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         } /* end if(AWSTAPE) */
 
         /* Reset position counters to start of file */
-        dev->nxtblkpos = 0;
         dev->curfilen = 1;
-        dev->curblklen = 0;
-        dev->curblkpos = -1;
         dev->nxtblkpos = 0;
         dev->prvblkpos = -1;
 
@@ -1681,10 +2340,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         /* Close the file and reset position counters */
         close (dev->fd);
         dev->fd = -1;
-        dev->nxtblkpos = 0;
         dev->curfilen = 1;
-        dev->curblklen = 0;
-        dev->curblkpos = -1;
         dev->nxtblkpos = 0;
         dev->prvblkpos = -1;
 
@@ -1697,6 +2353,15 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     /*---------------------------------------------------------------*/
     /* WRITE TAPE MARK                                               */
     /*---------------------------------------------------------------*/
+        /* Unit check if tape is write-protected */
+        if (dev->readonly)
+        {
+            dev->sense[0] = SENSE_CR;
+            dev->sense[1] = SENSE1_WRI;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
         /* Write a tapemark according to device type */
         switch (dev->tapedevt)
         {
@@ -1707,13 +2372,6 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
 
         case TAPEDEVT_SCSITAPE:
             rc = write_scsimark (dev, unitstat);
-            break;
-
-        case TAPEDEVT_OMATAPE:
-            dev->sense[0] = SENSE_CR;
-            dev->sense[1] = SENSE1_FP;
-            *unitstat = CSW_CE | CSW_DE | CSW_UC;
-            rc = -1;
             break;
 
         } /* end switch(dev->tapedevt) */
@@ -1734,24 +2392,109 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     /*---------------------------------------------------------------*/
     /* BACKSPACE BLOCK                                               */
     /*---------------------------------------------------------------*/
-        dev->sense[0] = SENSE_CR;
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        /* Backspace to previous block according to device type */
+        switch (dev->tapedevt)
+        {
+        default:
+        case TAPEDEVT_AWSTAPE:
+            rc = bsb_awstape (dev, unitstat);
+            break;
+
+        case TAPEDEVT_SCSITAPE:
+            rc = bsb_scsitape (dev, unitstat);
+            break;
+
+        case TAPEDEVT_OMATAPE:
+            rc = bsb_omatape (dev, unitstat);
+            break;
+
+        } /* end switch(dev->tapedevt) */
+
+        /* Exit with unit check status if error condition */
+        if (rc < 0)
+            break;
+
+        /* Exit with unit exception status if tapemark was sensed */
+        if (rc == 0)
+        {
+            *residual = 0;
+            *unitstat = CSW_CE | CSW_DE | CSW_UX;
+            break;
+        }
+
+        /* Set normal status */
+        *residual = 0;
+        *unitstat = CSW_CE | CSW_DE;
         break;
 
     case 0x2F:
     /*---------------------------------------------------------------*/
     /* BACKSPACE FILE                                                */
     /*---------------------------------------------------------------*/
-        dev->sense[0] = SENSE_CR;
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        /* Backspace to previous file according to device type */
+        switch (dev->tapedevt)
+        {
+        default:
+        case TAPEDEVT_AWSTAPE:
+            rc = bsf_awstape (dev, unitstat);
+            break;
+
+        case TAPEDEVT_SCSITAPE:
+            rc = bsf_scsitape (dev, unitstat);
+            break;
+
+        case TAPEDEVT_OMATAPE:
+            rc = bsf_omatape (dev, unitstat);
+            break;
+
+        } /* end switch(dev->tapedevt) */
+
+        /* Exit with unit check status if error condition */
+        if (rc < 0)
+            break;
+
+        /* Set normal status */
+        *residual = 0;
+        *unitstat = CSW_CE | CSW_DE;
         break;
 
     case 0x37:
     /*---------------------------------------------------------------*/
     /* FORWARD SPACE BLOCK                                           */
     /*---------------------------------------------------------------*/
-        dev->sense[0] = SENSE_CR;
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        /* Forward space to next block according to device type */
+        switch (dev->tapedevt)
+        {
+        default:
+        case TAPEDEVT_AWSTAPE:
+            rc = fsb_awstape (dev, unitstat);
+            break;
+
+        case TAPEDEVT_SCSITAPE:
+            rc = fsb_scsitape (dev, unitstat);
+            break;
+
+        case TAPEDEVT_OMATAPE:
+            rc = fsb_omatape (dev, unitstat);
+            break;
+
+        } /* end switch(dev->tapedevt) */
+
+        /* Exit with unit check status if error condition */
+        if (rc < 0)
+            break;
+
+        /* Exit with unit exception status if tapemark was sensed */
+        if (rc == 0)
+        {
+            *residual = 0;
+            *unitstat = CSW_CE | CSW_DE | CSW_UX;
+            break;
+        }
+
+        /* Set normal status */
+        *residual = 0;
+        *unitstat = CSW_CE | CSW_DE;
         break;
 
     case 0x3F:

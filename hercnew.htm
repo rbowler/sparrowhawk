@@ -10,7 +10,23 @@ What's new in Hercules</TITLE>
 <h1>What's new in Hercules</h1>
 
 <hr noshade>
-<h2>What's new in release 1.52</h2>
+<h2>What's new in release 1.53</h2>
+<p>Release date: 01 Mar 2000
+<ul>
+<li>Add BSF/FSF/BSB/FSB CCW support for tape devices
+<li>Allow final short block in OMA fixed block files
+<li>Allow processing of read-only AWSTAPE files and SCSI tapes
+<li>Skeleton ctcadpt.c module for future 3088 support
+<li>Correctly nullify IC/NI/OI/XI/CLM/STCM/ICM/TRT instructions
+    on page translation exception (thanks to Jan Jaeger)
+<li>Improved floating point support (contributed by Peter Kuschnerus)
+<li>Correct shift result when shift count exceeds 31 (thanks to
+    Glen Herrmannsfeldt and Jay Maynard)
+<li>Fix incorrect MVCL cc=3 when destination length is 1
+</ul>
+<p>Download
+<a href="hercules/hercules-1.53.tar.gz">hercules-1.53.tar.gz</a>
+
 <p>Release date: 19 Feb 2000
 <ul>
 <li>Prevent incorrect length indication on 3270 Select CCW
@@ -29,7 +45,7 @@ What's new in Hercules</TITLE>
 <ul>
 <li>3270 read buffer fix for OS/360 NIP
 <li>Floating point instructions (contributed by Peter Kuschnerus)
-<li>Remove 32-bit pointer dependency from dasdload
+<li>Remove 32-bit pointer dependency from dasdload for Alpha
 <li>HMC system console support (contributed by Jan Jaeger)
 <li>Correct condition code after decimal overflow (thanks to Jan Jaeger)
 <li>Set reference and change bits for PSA access (thanks to Jan Jaeger)
@@ -341,7 +357,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 19 Feb 2000
+<p>Last updated 01 Mar 2000
 </BODY>
 </HTML>
 

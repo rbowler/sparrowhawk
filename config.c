@@ -144,7 +144,8 @@ int     stmtlen;                        /* Statement length          */
 
         /* Extract any additional operands */
         for (addargc = 0; addargc < MAX_ARGS &&
-            (addargv[addargc] = strtok (NULL, " \t")) != NULL;
+            (addargv[addargc] = strtok (NULL, " \t")) != NULL
+                && addargv[addargc][0] != '#';
             addargc++);
 
         /* Clear any unused additional operand pointers */
@@ -674,6 +675,12 @@ int     subchan;                        /* Subchannel number         */
             devinit = &loc3270_init_handler;
             devqdef = &loc3270_query_device;
             devexec = &loc3270_execute_ccw;
+            break;
+
+        case 0x3088:
+            devinit = &ctcadpt_init_handler;
+            devqdef = &ctcadpt_query_device;
+            devexec = &ctcadpt_execute_ccw;
             break;
 
         default:

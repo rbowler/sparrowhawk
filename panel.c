@@ -22,7 +22,7 @@
 
 #include "hercules.h"
 
-#undef  MIPS_COUNTING
+//#define MIPS_COUNTING
 
 /*=NP================================================================*/
 /* Global data for new panel display                                 */

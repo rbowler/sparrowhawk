@@ -2,21 +2,17 @@
 # Configuration file for Hercules ESA/390 emulator
 #
 
-# .--------------------------------------------------CPU serial number
-# |     .---------------------------------------------CPU model number
-# |     |       .------------------------------------Main storage (MB)
-# |     |       |       .------------------------Expanded storage (MB)
-# |     |       |       |       .-------------------tn3270 port number
-# |     |       |       |       |       .---------------Number of CPUs
-# |     |       |       |       |       |       .-------Load parameter
-# |     |       |       |       |       |       |
-# V     V       V       V       V       V       V
-#-----  ----    ----    ----    ----    -       --------
-000611  3090    64      0       3270    1       0120....
+CPUSERIAL 002623        # CPU serial number
+CPUMODEL  3090          # CPU model number
+MAINSIZE  64            # Main storage size in megabytes
+XPNDSIZE  0             # Expanded storage size in megabytes
+CNSLPORT  3270          # TCP port number to which consoles connect
+NUMCPU    1             # Number of CPUs
+LOADPARM  0120....      # IPL parameter
 
-# .-----------------------------Device number
-# |     .-----------------------Device type
-# |     |       .---------------File name
+# .-----------------------Device number
+# |     .-----------------Device type
+# |     |       .---------File name and parameters
 # |     |       |
 # V     V       V
 #---    ----    --------------------

@@ -11,13 +11,16 @@
 /*-------------------------------------------------------------------*/
 /* Additional credits:                                               */
 /*      Floating point instructions by Peter Kuschnerus              */
+/*      Nullification corrections by Jan Jaeger                      */
+/*      Corrections to shift instructions by Jay Maynard             */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
 
-#undef  MODULE_TRACE
-#undef  INSTRUCTION_COUNTING
-#undef  SVC_TRACE
+//#define MODULE_TRACE
+//#define INSTRUCTION_COUNTING
+//#define SVC_TRACE
+//#define NO_PROTECTION_EXCEPTION_TRACE
 
 /*-------------------------------------------------------------------*/
 /* Add two signed fullwords giving a signed fullword result          */
@@ -321,6 +324,9 @@ BYTE    excarid;                        /* Exception access reg id   */
     if (sysblk.insttrace || sysblk.inststep
         || (code != PGM_PAGE_TRANSLATION_EXCEPTION
             && code != PGM_SEGMENT_TRANSLATION_EXCEPTION
+#ifdef NO_PROTECTION_EXCEPTION_TRACE
+            && code != PGM_PROTECTION_EXCEPTION
+#endif /*NO_PROTECTION_EXCEPTION_TRACE*/
             && code != PGM_TRACE_TABLE_EXCEPTION
             && code != PGM_MONITOR_EVENT))
     {
@@ -1837,8 +1843,8 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load rightmost byte of R1 register from operand address */
-        regs->gpr[r1] &= 0xFFFFFF00;
-        regs->gpr[r1] |= vfetchb ( effective_addr, ar1, regs );
+        n = regs->gpr[r1] & 0xFFFFFF00;
+        regs->gpr[r1] = n | vfetchb ( effective_addr, ar1, regs );
 
         break;
 
@@ -2327,6 +2333,7 @@ static BYTE module[8];                  /* Module name               */
 
         break;
 
+#ifdef FEATURE_HEXADECIMAL_FLOATING_POINT
     case 0x60:
     /*---------------------------------------------------------------*/
     /* STD      Store Floating Point Long                       [RX] */
@@ -2499,6 +2506,7 @@ static BYTE module[8];                  /* Module name               */
         vstore4 (regs->fpr[r1], effective_addr, ar1, regs);
 
         break;
+#endif /*FEATURE_HEXADECIMAL_FLOATING_POINT*/
 
 #ifdef FEATURE_IMMEDIATE_AND_RELATIVE
     case 0x71:
@@ -2515,6 +2523,7 @@ static BYTE module[8];                  /* Module name               */
         break;
 #endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
 
+#ifdef FEATURE_HEXADECIMAL_FLOATING_POINT
     case 0x78:
     /*---------------------------------------------------------------*/
     /* LE       Load Floating Point Short                       [RX] */
@@ -2635,6 +2644,7 @@ static BYTE module[8];                  /* Module name               */
         subtract_unnormal_float_short (r1, effective_addr, ar1, regs);
 
         break;
+#endif /*FEATURE_HEXADECIMAL_FLOATING_POINT*/
 
     case 0x80:
     /*---------------------------------------------------------------*/
@@ -2882,7 +2892,7 @@ static BYTE module[8];                  /* Module name               */
         n = effective_addr & 0x3F;
 
         /* Shift the R1 register */
-        regs->gpr[r1] >>= n;
+        regs->gpr[r1] = n > 31 ? 0 : regs->gpr[r1] >> n;
 
         break;
 
@@ -2895,7 +2905,7 @@ static BYTE module[8];                  /* Module name               */
         n = effective_addr & 0x3F;
 
         /* Shift the R1 register */
-        regs->gpr[r1] <<= n;
+        regs->gpr[r1] = n > 31 ? 0 : regs->gpr[r1] << n;
 
         break;
 
@@ -2908,7 +2918,9 @@ static BYTE module[8];                  /* Module name               */
         n = effective_addr & 0x3F;
 
         /* Shift the signed value of the R1 register */
-        (S32)regs->gpr[r1] >>= n;
+        (S32)regs->gpr[r1] = n > 30 ?
+                        ((S32)regs->gpr[r1] > 0 ? 0 : -1) :
+                        (S32)regs->gpr[r1] >> n;
 
         /* Set the condition code */
         regs->psw.cc = (S32)regs->gpr[r1] > 0 ? 2 :
@@ -3175,11 +3187,14 @@ static BYTE module[8];                  /* Module name               */
         /* Fetch byte from operand address */
         obyte = vfetchb ( effective_addr, ar1, regs );
 
-        /* AND with immediate operand and set condition code */
-        regs->psw.cc = ( obyte &= ibyte ) ? 1 : 0;
+        /* AND with immediate operand */
+        obyte &= ibyte;
 
         /* Store result at operand address */
         vstoreb ( obyte, effective_addr, ar1, regs );
+
+        /* Set condition code */
+        regs->psw.cc = obyte ? 1 : 0;
 
         break;
 
@@ -3205,11 +3220,14 @@ static BYTE module[8];                  /* Module name               */
         /* Fetch byte from operand address */
         obyte = vfetchb ( effective_addr, ar1, regs );
 
-        /* OR with immediate operand and set condition code */
-        regs->psw.cc = ( obyte |= ibyte ) ? 1 : 0;
+        /* OR with immediate operand */
+        obyte |= ibyte;
 
         /* Store result at operand address */
         vstoreb ( obyte, effective_addr, ar1, regs );
+
+        /* Set condition code */
+        regs->psw.cc = obyte ? 1 : 0;
 
         break;
 
@@ -3221,11 +3239,14 @@ static BYTE module[8];                  /* Module name               */
         /* Fetch byte from operand address */
         obyte = vfetchb ( effective_addr, ar1, regs );
 
-        /* XOR with immediate operand and set condition code */
-        regs->psw.cc = ( obyte ^= ibyte ) ? 1 : 0;
+        /* XOR with immediate operand */
+        obyte ^= ibyte;
 
         /* Store result at operand address */
         vstoreb ( obyte, effective_addr, ar1, regs );
+
+        /* Set condition code */
+        regs->psw.cc = obyte ? 1 : 0;
 
         break;
 
@@ -5920,7 +5941,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Clear the condition code */
-        regs->psw.cc = 0;
+        cc = 0;
 
         /* Load value from register */
         n = regs->gpr[r1];
@@ -5938,7 +5959,7 @@ static BYTE module[8];                  /* Module name               */
                 /* Compare bytes, set condition code if unequal */
                 if ( dbyte != sbyte )
                 {
-                    regs->psw.cc = (dbyte < sbyte) ? 1 : 2;
+                    cc = (dbyte < sbyte) ? 1 : 2;
                     break;
                 } /* end if */
             }
@@ -5948,6 +5969,9 @@ static BYTE module[8];                  /* Module name               */
             n <<= 8;
 
         } /* end for(i) */
+
+        /* Update the condition code */
+        regs->psw.cc = cc;
 
         break;
 
@@ -5975,8 +5999,16 @@ static BYTE module[8];                  /* Module name               */
 
         } /* end for(i) */
 
-        /* Exit if mask is all zero */
-        if (j == 0) break;
+        /* If the mask is all zero, we nevertheless access one byte
+           from the storage operand, because POP states that an
+           access exception may be recognized on the first byte */
+        if (j == 0)
+        {
+   /*debug*/logmsg ("Model dependent STCM use\n");
+            validate_operand (effective_addr, ar1, 0,
+                                ACCTYPE_WRITE, regs);
+            break;
+        }
 
         /* Store result at operand location */
         vstorec ( cwork1, j-1, effective_addr, ar1, regs );
@@ -5988,8 +6020,8 @@ static BYTE module[8];                  /* Module name               */
     /* ICM      Insert Characters under Mask                    [RS] */
     /*---------------------------------------------------------------*/
 
-        /* Clear the condition code */
-        regs->psw.cc = 0;
+        /* Clear condition code */
+        cc = 0;
 
         /* If the mask is all zero, we must nevertheless load one
            byte from the storage operand, because POP requires us
@@ -5997,6 +6029,7 @@ static BYTE module[8];                  /* Module name               */
         if ( r3 == 0 )
         {
             sbyte = vfetchb ( effective_addr, ar1, regs );
+            regs->psw.cc = 0;
             break;
         }
 
@@ -6019,7 +6052,7 @@ static BYTE module[8];                  /* Module name               */
 
                 /* If byte is non-zero then set the condition code */
                 if ( sbyte != 0 )
-                    regs->psw.cc = h;
+                     cc = h;
 
                 /* Insert the byte into the register */
                 dreg &= 0xFFFFFFFF00FFFFFFULL;
@@ -6039,6 +6072,9 @@ static BYTE module[8];                  /* Module name               */
 
         /* Load the register with the updated value */
         regs->gpr[r1] = dreg >> 32;
+
+        /* Set condition code */
+        regs->psw.cc = cc;
 
         break;
 
@@ -6267,7 +6303,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Validate the first operand for write access */
-        validate_operand ( effective_addr, ar1, ibyte,
+        validate_operand (effective_addr, ar1, ibyte,
                         ACCTYPE_WRITE, regs);
 
         /* Fetch first operand into work area */
@@ -6285,7 +6321,7 @@ static BYTE module[8];                  /* Module name               */
         /* Validate the referenced portion of the second operand */
         n = (effective_addr2 + d) &
                 (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        validate_operand ( n, ar2, h-d, ACCTYPE_READ, regs);
+        validate_operand (n, ar2, h-d, ACCTYPE_READ, regs);
 
         /* Process first operand from left to right, refetching
            second operand and storing the result byte by byte
@@ -6314,8 +6350,8 @@ static BYTE module[8];                  /* Module name               */
     /* TRT      Translate and Test                              [SS] */
     /*---------------------------------------------------------------*/
 
-        /* Clear the condition code */
-        regs->psw.cc = 0;
+        /* Clear condition code */
+        cc = 0;
 
         /* Process first operand from left to right */
         for ( i = 0; i <= ibyte; i++ )
@@ -6344,7 +6380,7 @@ static BYTE module[8];                  /* Module name               */
 
                 /* Set condition code 2 if argument byte was last byte
                    of first operand, otherwise set condition code 1 */
-                regs->psw.cc = (i == ibyte) ? 2 : 1;
+                cc = (i == ibyte) ? 2 : 1;
 
                 /* Terminate the operation at this point */
                 break;
@@ -6357,6 +6393,9 @@ static BYTE module[8];                  /* Module name               */
                     (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
 
         } /* end for(i) */
+
+        /* Update the condition code */
+        regs->psw.cc = cc;
 
         break;
 

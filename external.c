@@ -13,7 +13,7 @@
 
 #include "hercules.h"
 
-#undef  MIPS_COUNTING
+//#define MIPS_COUNTING
 
 /*-------------------------------------------------------------------*/
 /* Load external interrupt new PSW                                   */
