@@ -11,6 +11,7 @@
 /*      Corrections contributed by Jan Jaeger                        */
 /*      HMC system console functions by Jan Jaeger 2000-02-08        */
 /*      Expanded storage support by Jan Jaeger                       */
+/*      Suppress superflous HHC701I/HHC702I messages - Jan Jaeger    */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -474,6 +475,8 @@ static BYTE    const5_template = {
         };
 
 int             masklen;                /* Length of event mask      */
+U32             old_cp_recv_mask;       /* Masks before write event  */
+U32             old_cp_send_mask;       /*              mask command */
 #endif /*FEATURE_SYSTEM_CONSOLE*/
 
 #ifdef FEATURE_EXPANDED_STORAGE
@@ -1087,6 +1090,10 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         /* Get length of single mask field */
         masklen = (evd_mask->length[0] << 8) | evd_mask->length[1];
 
+        /* Save old mask settings in order to suppress superflous messages */
+        old_cp_recv_mask = sysblk.cp_recv_mask;
+        old_cp_send_mask = sysblk.cp_send_mask;
+
         for (i = 0; i < 4; i++)
         {
             sysblk.cp_recv_mask <<= 8;
@@ -1115,10 +1122,15 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                 (sysblk.sclp_send_mask >> ((3-i)*8)) & 0xFF;
         }
 
-        if (sysblk.cp_recv_mask != 0 || sysblk.cp_send_mask != 0)
-            logmsg ("HHC701I SYSCONS interface active\n");
-        else
-            logmsg ("HHC702I SYSCONS interface inactive\n");
+        /* Issue message only when mask has changed */
+        if (sysblk.cp_recv_mask != old_cp_recv_mask
+         || sysblk.cp_send_mask != old_cp_send_mask)
+        {
+            if (sysblk.cp_recv_mask != 0 || sysblk.cp_send_mask != 0)
+                logmsg ("HHC701I SYSCONS interface active\n");
+            else
+                logmsg ("HHC702I SYSCONS interface inactive\n");
+        }
 
         /* Set response code X'0020' in SCCB header */
         sccb->reas = SCCB_REAS_NONE;

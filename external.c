@@ -14,6 +14,8 @@
 /*      Synchronized broadcasting contributed by Jan Jaeger          */
 /*      CPU timer and clock comparator interrupt improvements by     */
 /*          Jan Jaeger, after a suggestion by Willem Koynenberg      */
+/*      /dev/rtc interface by Jay Maynard                            */
+/*      Prevent TOD clock and CPU timer from going back - Jan Jaeger */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -179,10 +181,6 @@ U16     cpuad;                          /* Originating CPU address   */
         {
             logmsg ("External interrupt: Clock comparator\n");
         }
-        regs->cpuint = regs->itimer_pending
-                        || regs->emersig
-                        || regs->extcall
-                        || regs->storstat;
         external_interrupt (EXT_CLOCK_COMPARATOR_INTERRUPT, regs);
         return;
     }
@@ -196,10 +194,6 @@ U16     cpuad;                          /* Originating CPU address   */
             logmsg ("External interrupt: CPU timer=%16.16llX\n",
                     regs->ptimer);
         }
-        regs->cpuint = regs->itimer_pending
-                        || regs->emersig
-                        || regs->extcall
-                        || regs->storstat;
         external_interrupt (EXT_CPU_TIMER_INTERRUPT, regs);
         return;
     }
@@ -291,13 +285,11 @@ U64     diff;                           /* Difference between new and
 U64     dreg;                           /* Double register work area */
 struct  timeval tv;                     /* Structure for gettimeofday
                                            and select function calls */
-#define CLOCK_RESOLUTION        10      /* TOD clock resolution in
-                                           milliseconds              */
 
     /* Display thread started message on control panel */
     logmsg ("HHC610I Timer thread started: tid=%8.8lX, pid=%d\n",
             thread_id(), getpid());
-
+    
 #ifdef TODCLOCK_DRAG_FACTOR
     /* Get current time */
     gettimeofday (&tv, NULL);
@@ -340,11 +332,15 @@ struct  timeval tv;                     /* Structure for gettimeofday
         prev = sysblk.todclk;
         diff = (prev == 0 ? 0 : dreg - prev);
 
-        /* Update the TOD clock */
-        sysblk.todclk = dreg;
+        /* ensure that the clock does not go backwards */
+        if( dreg > (sysblk.todclk + (sysblk.toduniq >> 8)) )
+        {
+            /* Update the TOD clock */
+            sysblk.todclk = dreg;
 
-        /* Reset the TOD clock uniqueness value */
-        sysblk.toduniq = 0;
+            /* Reset the TOD clock uniqueness value */
+            sysblk.toduniq = 0;
+        }
 
         /* Release the TOD clock update lock */
         release_lock (&sysblk.todlock);
@@ -367,8 +363,8 @@ struct  timeval tv;                     /* Structure for gettimeofday
             regs = sysblk.regs + cpu;
 
             /* Decrement the CPU timer if the CPU is running */
-            if(regs->cpustate == CPUSTATE_STARTED)
-                (S64)regs->ptimer -= diff;
+            if(regs->cpustate == CPUSTATE_STARTED && (S64)diff > 0)
+                (S64)regs->ptimer -= (S64)diff;
 
             /* Set interrupt flag if the CPU timer is negative or
                if the TOD clock value exceeds the clock comparator */
@@ -386,13 +382,13 @@ struct  timeval tv;                     /* Structure for gettimeofday
             /* Point to PSA in main storage */
             psa = (PSA*)(sysblk.mainstor + regs->pxr);
 
-            /* Decrement bit position 26 of the location 80 timer */
+            /* Decrement the location 80 timer */
             itimer = (S32)(((U32)(psa->inttimer[0]) << 24)
                                 | ((U32)(psa->inttimer[1]) << 16)
                                 | ((U32)(psa->inttimer[2]) << 8)
                                 | (U32)(psa->inttimer[3]));
             olditimer = itimer;
-            itimer -= 32 * CLOCK_RESOLUTION;
+            itimer -= 32 * (1024 / CLK_TCK);
             psa->inttimer[0] = ((U32)itimer >> 24) & 0xFF;
             psa->inttimer[1] = ((U32)itimer >> 16) & 0xFF;
             psa->inttimer[2] = ((U32)itimer >> 8) & 0xFF;
@@ -404,7 +400,6 @@ struct  timeval tv;                     /* Structure for gettimeofday
                 regs->cpuint = regs->itimer_pending = intflag = 1;
 #endif /*FEATURE_INTERVAL_TIMER*/
 
-
         } /* end for(cpu) */
 
         /* If a CPU timer or clock comparator interrupt condition
@@ -415,8 +410,9 @@ struct  timeval tv;                     /* Structure for gettimeofday
         release_lock(&sysblk.intlock);
 
 #ifdef MIPS_COUNTING
-        /* Calculate MIPS rate */
-        msecctr += CLOCK_RESOLUTION;
+        /* Calculate MIPS rate...allow for the Alpha's 1024 ticks/second
+           internal clock, as well as everyone else's 100/second */
+        msecctr += 1024 / CLK_TCK;
         if (msecctr > 999)
         {
 #ifdef FEATURE_CPU_RECONFIG 
@@ -444,9 +440,10 @@ struct  timeval tv;                     /* Structure for gettimeofday
         } /* end if(msecctr) */
 #endif /*MIPS_COUNTING*/
 
-        /* Sleep for CLOCK_RESOLUTION milliseconds */
-        tv.tv_sec = CLOCK_RESOLUTION / 1000;
-        tv.tv_usec = (CLOCK_RESOLUTION * 1000) % 1000000;
+        /* Sleep for one system clock tick by specifying a one-microsecond
+           delay, which will get stretched out to the next clock tick */
+        tv.tv_sec = 0;
+        tv.tv_usec = 1;
         select (0, NULL, NULL, NULL, &tv);
 
     } /* end while */
@@ -879,20 +876,9 @@ int     i;                              /* Array subscript           */
         (*type)++;
     }
 
-#if 0
-    logmsg ("CPU%4.4X: synchronize_broadcast() type %c= NULL, ncpu = %d\n",
-            regs->cpuad, type == NULL ? '=' : '!', sysblk.brdcstncpu);
-#endif
-
     /* Initiate synchronization if this is the initiating CPU */
     if (sysblk.brdcstncpu == 0)
     {
-#if 0
-        if (type == NULL)
-            logmsg ("CPU%4.4X: synchronize_broadcast() logic error\n",
-                    regs->cpuad);
-#endif
-
         /* Set number of CPU's to synchronize */
         sysblk.brdcstncpu = sysblk.numcpu;
 
@@ -915,11 +901,6 @@ int     i;                              /* Array subscript           */
         signal_condition (&sysblk.brdcstcond);
     else
         wait_condition (&sysblk.brdcstcond, &sysblk.intlock);
-
-#if 0
-    logmsg ("CPU%4.4X: synchronize_broadcast() brdcstwait ended, ncpu = %d\n",
-            regs->cpuad, sysblk.brdcstncpu);
-#endif
 
     /* Purge ALB if requested */
     if (sysblk.brdcstpalb != regs->brdcstpalb)

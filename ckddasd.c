@@ -9,6 +9,7 @@
 /*-------------------------------------------------------------------*/
 /* Additional credits:                                               */
 /*      Write Update Key and Data CCW by Jan Jaeger                  */
+/*      Track overflow support added by Jay Maynard                  */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -861,10 +862,11 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
         dev->ckdorient = CKDORIENT_COUNT;
         dev->ckdcurkl = rechdr->klen;
         dev->ckdcurdl = (rechdr->dlen[0] << 8) + rechdr->dlen[1];
+        dev->ckdtrkof = rechdr->cyl[0] >> 7;
 
-        DEVTRACE("ckddasd: cyl %d head %d record %d kl %d dl %d\n",
-                dev->ckdcurcyl, dev->ckdcurhead,
-                dev->ckdcurrec, dev->ckdcurkl, dev->ckdcurdl);
+        DEVTRACE("ckddasd: cyl %d head %d record %d kl %d dl %d of %d\n",
+                dev->ckdcurcyl, dev->ckdcurhead, dev->ckdcurrec,
+                dev->ckdcurkl, dev->ckdcurdl, dev->ckdtrkof);
 
         /* Skip record zero if user data record required */
         if (skipr0 && rechdr->rec == 0)
@@ -1288,6 +1290,7 @@ int             skiplen;                /* Number of bytes to skip   */
     dev->ckdcurdl = datalen;
     dev->ckdrem = 0;
     dev->ckdorient = CKDORIENT_DATA;
+    dev->ckdtrkof = trk_ovfl & 1;
 
     return 0;
 } /* end function ckd_write_ckd */
@@ -1420,6 +1423,7 @@ CKDDASD_RECHDR  rechdr;                 /* CKD record header (count) */
 int             size;                   /* Number of bytes available */
 int             num;                    /* Number of bytes to move   */
 int             skiplen;                /* Number of bytes to skip   */
+int		offset;			/* Offset into buf for I/O   */
 U16             bin;                    /* Bin number                */
 U16             cyl;                    /* Cylinder number           */
 U16             head;                   /* Head number               */
@@ -1474,6 +1478,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         dev->ckdkyeq = 0;
         dev->ckdwckd = 0;
         dev->ckdlcount = 0;
+        dev->ckdtrkof = 0;
     }
 
     /* Reset index marker flag if sense or control command,
@@ -1637,10 +1642,47 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         num = (count < size) ? count : size;
         *residual = count - num;
         if (count < size) *more = 1;
+        offset = 0;
 
         /* Read data field */
         rc = ckd_read_data (dev, code, iobuf, unitstat);
         if (rc < 0) break;
+
+	/* If track overflow and more data requested, read it too */
+	while (dev->ckdtrkof && (*residual > 0))
+	{
+	    /* Advance to next track */
+	    rc = mt_advance (dev, unitstat);
+	    if (rc < 0) break;
+	    
+	    /* Read the first count field */
+	    rc = ckd_read_count (dev, code, &rechdr, unitstat);
+	    if (rc < 0) break;
+	    
+	    /* Skip the key field if present */
+	    if (dev->ckdcurkl > 0)
+	    {
+        	rc = ckd_skip (dev, dev->ckdcurkl, unitstat);
+        	if (rc < 0) break;
+	    }
+	    
+	    /* Set offset into buffer for this read */
+	    offset += num;
+
+	    /* Account for size of this overflow record */
+	    size = dev->ckdcurdl;
+	    num = (*residual < size) ? *residual : size;
+	    if (*residual < size) *more = 1;
+	    else *more = 0;
+	    *residual -= num;
+	    
+	    /* Read the next data field */
+	    rc = ckd_read_data (dev, code, iobuf+offset, unitstat);
+	    if (rc < 0) break;
+	}
+	
+	/* Bail out if track overflow produced I/O error */
+	if (rc < 0) break;
 
         /* Save size and offset of data not used by this CCW */
         dev->ckdrem = size - num;
@@ -1698,6 +1740,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         num = (count < size) ? count : size;
         *residual = count - num;
         if (count < size) *more = 1;
+        offset = dev->ckdcurkl;
 
         /* Read key field */
         rc = ckd_read_key (dev, code, iobuf, unitstat);
@@ -1706,6 +1749,42 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         /* Read data field */
         rc = ckd_read_data (dev, code, iobuf+dev->ckdcurkl, unitstat);
         if (rc < 0) break;
+
+	/* If track overflow and more data requested, read it too */
+	while (dev->ckdtrkof && (*residual > 0))
+	{
+	    /* Advance to next track */
+	    rc = mt_advance (dev, unitstat);
+	    if (rc < 0) break;
+	    
+	    /* Read the first count field */
+	    rc = ckd_read_count (dev, code, &rechdr, unitstat);
+	    if (rc < 0) break;
+	    
+	    /* Skip the key field if present */
+	    if (dev->ckdcurkl > 0)
+	    {
+        	rc = ckd_skip (dev, dev->ckdcurkl, unitstat);
+        	if (rc < 0) break;
+	    }
+	    
+	    /* Set offset into buffer for this read */
+	    offset += num;
+
+	    /* Account for size of this overflow record */
+	    size = dev->ckdcurdl;
+	    num = (*residual < size) ? *residual : size;
+	    if (*residual < size) *more = 1;
+	    else *more = 0;
+	    *residual -= num;
+	    
+	    /* Read the next data field */
+	    rc = ckd_read_data (dev, code, iobuf+offset, unitstat);
+	    if (rc < 0) break;
+	}
+
+	/* Bail out if track overflow produced I/O error */
+	if (rc < 0) break;
 
         /* Save size and offset of data not used by this CCW */
         dev->ckdrem = size - num;
@@ -1766,6 +1845,9 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
 
         /* Copy count field to I/O buffer */
         memcpy (iobuf, &rechdr, CKDDASD_RECHDR_SIZE);
+
+	/* Turn off track overflow flag in read record header */
+	*iobuf &= 0x7F;
 
         /* Save size and offset of data not used by this CCW */
         dev->ckdrem = size - num;
@@ -1836,6 +1918,9 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
 
         /* Copy count field to I/O buffer */
         memcpy (iobuf, &rechdr, CKDDASD_RECHDR_SIZE);
+
+	/* Turn off track overflow flag in read record header */
+	*iobuf &= 0x7F;
 
         /* Read key field */
         rc = ckd_read_key (dev, code,
@@ -1966,9 +2051,13 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         num = (count < size) ? count : size;
         *residual = count - num;
         if (count < size) *more = 1;
-
+        offset = CKDDASD_RECHDR_SIZE + dev->ckdcurkl;
+        
         /* Copy count field to I/O buffer */
         memcpy (iobuf, &rechdr, CKDDASD_RECHDR_SIZE);
+
+        /* Turn off track overflow flag in read record header */
+        *iobuf &= 0x7F;
 
         /* Read key field */
         rc = ckd_read_key (dev, code,
@@ -1980,6 +2069,42 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
                             iobuf + CKDDASD_RECHDR_SIZE + dev->ckdcurkl,
                             unitstat);
         if (rc < 0) break;
+
+	/* If track overflow and more data requested, read it too */
+	while (dev->ckdtrkof && (*residual > 0))
+	{
+	    /* Advance to next track */
+	    rc = mt_advance (dev, unitstat);
+	    if (rc < 0) break;
+	    
+	    /* Read the first count field */
+	    rc = ckd_read_count (dev, code, &rechdr, unitstat);
+	    if (rc < 0) break;
+	    
+	    /* Skip the key field if present */
+	    if (dev->ckdcurkl > 0)
+	    {
+        	rc = ckd_skip (dev, dev->ckdcurkl, unitstat);
+        	if (rc < 0) break;
+	    }
+
+	    /* Set offset into buffer for this read */
+	    offset += num;
+
+	    /* Account for size of this overflow record */
+	    size = dev->ckdcurdl;
+	    num = (*residual < size) ? *residual : size;
+	    if (*residual < size) *more = 1;
+	    else *more = 0;
+	    *residual -= num;
+	    
+	    /* Read the next data field */
+	    rc = ckd_read_data (dev, code, iobuf+offset, unitstat);
+	    if (rc < 0) break;
+	}
+
+	/* Bail out if track overflow produced I/O error */
+	if (rc < 0) break;
 
         /* Save size and offset of data not used by this CCW */
         dev->ckdrem = size - num;
@@ -2029,10 +2154,13 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             /* Exit if end of track marker was read */
             if (memcmp (&rechdr, eighthexFF, 8) == 0)
                 break;
-
+            
             /* Copy count field to I/O buffer */
             memcpy (iobuf + size, &rechdr, CKDDASD_RECHDR_SIZE);
             size += CKDDASD_RECHDR_SIZE;
+
+            /* Turn off track overflow flag */
+            *(iobuf + size) &= 0x7F;
 
             /* Read key field */
             rc = ckd_read_key (dev, code, iobuf + size, unitstat);
@@ -2103,6 +2231,9 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             /* Copy count field to I/O buffer */
             memcpy (iobuf + size, &rechdr, CKDDASD_RECHDR_SIZE);
             size += CKDDASD_RECHDR_SIZE;
+            
+            /* Turn off track overflow flag */
+            *(iobuf+size) &= 0x7F;
 
             /* Exit if end of track marker was read */
             if (memcmp (&rechdr, eighthexFF, 8) == 0)
@@ -2527,6 +2658,9 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         num = (count < 5) ? count : 5;
         *residual = count - num;
 
+	/* Turn off track overflow flag in record header if present */
+	rechdr.cyl[0] &= 0x7F;
+
         /* Compare count with search argument */
         rc = memcmp(&rechdr, iobuf, num);
 
@@ -2694,6 +2828,36 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         size = dev->ckdcurdl;
         num = (count < size) ? count : size;
         *residual = count - num;
+        offset = 0;
+
+	/* If track overflow and more data requested, read it too */
+	while (dev->ckdtrkof && (*residual > 0))
+	{
+	    /* Advance to next track */
+	    rc = mt_advance (dev, unitstat);
+	    if (rc < 0) break;
+	    
+	    /* Read the first count field */
+	    rc = ckd_read_count (dev, code, &rechdr, unitstat);
+	    if (rc < 0) break;
+	    
+	    /* Set offset into buffer for this read */
+	    offset += num;
+
+	    /* Account for size of this overflow record */
+	    size = dev->ckdcurdl;
+	    num = (*residual < size) ? *residual : size;
+	    if (*residual < size) *more = 1;
+	    else *more = 0;
+	    *residual -= num;
+	    
+	    /* Write the next data field */
+	    rc = ckd_write_data (dev, iobuf+offset, *residual, unitstat);
+	    if (rc < 0) break;
+	}
+
+	/* Bail out if track overflow produced I/O error */
+	if (rc < 0) break;
 
         /* Return normal status */
         *unitstat = CSW_CE | CSW_DE;
@@ -2752,6 +2916,36 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         size = dev->ckdcurdl;
         num = (count < size) ? count : size;
         *residual = count - num;
+        offset = 0;
+
+	/* If track overflow and more data requested, read it too */
+	while (dev->ckdtrkof && (*residual > 0))
+	{
+	    /* Advance to next track */
+	    rc = mt_advance (dev, unitstat);
+	    if (rc < 0) break;
+	    
+	    /* Read the first count field */
+	    rc = ckd_read_count (dev, code, &rechdr, unitstat);
+	    if (rc < 0) break;
+	    
+	    /* Set offset into buffer for this read */
+	    offset += num;
+
+	    /* Account for size of this overflow record */
+	    size = dev->ckdcurdl;
+	    num = (*residual < size) ? *residual : size;
+	    if (*residual < size) *more = 1;
+	    else *more = 0;
+	    *residual -= num;
+	    
+	    /* Write the next data field */
+	    rc = ckd_write_data (dev, iobuf+offset, *residual, unitstat);
+	    if (rc < 0) break;
+	}
+
+	/* Bail out if track overflow produced I/O error */
+	if (rc < 0) break;
 
         /* Return normal status */
         *unitstat = CSW_CE | CSW_DE;
@@ -2835,6 +3029,36 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         size = dev->ckdcurkl + dev->ckdcurdl;
         num = (count < size) ? count : size;
         *residual = count - num;
+        offset = dev->ckdcurkl;
+
+	/* If track overflow and more data requested, write it too */
+	while (dev->ckdtrkof && (*residual > 0))
+	{
+	    /* Advance to next track */
+	    rc = mt_advance (dev, unitstat);
+	    if (rc < 0) break;
+	    
+	    /* Read the first count field */
+	    rc = ckd_read_count (dev, code, &rechdr, unitstat);
+	    if (rc < 0) break;
+	    
+	    /* Set offset into buffer for this read */
+	    offset += num;
+
+	    /* Account for size of this overflow record */
+	    size = dev->ckdcurdl;
+	    num = (*residual < size) ? *residual : size;
+	    if (*residual < size) *more = 1;
+	    else *more = 0;
+	    *residual -= num;
+	    
+	    /* Write the next data field */
+	    rc = ckd_write_data (dev, iobuf+offset, *residual, unitstat);
+	    if (rc < 0) break;
+	}
+
+	/* Bail out if track overflow produced I/O error */
+	if (rc < 0) break;
 
         /* Return normal status */
         *unitstat = CSW_CE | CSW_DE;
@@ -2893,6 +3117,36 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         size = dev->ckdcurkl + dev->ckdcurdl;
         num = (count < size) ? count : size;
         *residual = count - num;
+        offset = dev->ckdcurkl;
+
+	/* If track overflow and more data requested, write it too */
+	while (dev->ckdtrkof && (*residual > 0))
+	{
+	    /* Advance to next track */
+	    rc = mt_advance (dev, unitstat);
+	    if (rc < 0) break;
+	    
+	    /* Read the first count field */
+	    rc = ckd_read_count (dev, code, &rechdr, unitstat);
+	    if (rc < 0) break;
+	    
+	    /* Set offset into buffer for this read */
+	    offset += num;
+
+	    /* Account for size of this overflow record */
+	    size = dev->ckdcurdl;
+	    num = (*residual < size) ? *residual : size;
+	    if (*residual < size) *more = 1;
+	    else *more = 0;
+	    *residual -= num;
+	    
+	    /* Write the next data field */
+	    rc = ckd_write_data (dev, iobuf+offset, *residual, unitstat);
+	    if (rc < 0) break;
+	}
+
+	/* Bail out if track overflow produced I/O error */
+	if (rc < 0) break;
 
         /* Return normal status */
         *unitstat = CSW_CE | CSW_DE;
@@ -3371,6 +3625,9 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
                    with sense data indicating no record found */
                 rc = ckd_read_count (dev, code, &rechdr, unitstat);
                 if (rc < 0) break;
+                
+                /* Turn off track overflow flag */
+                rechdr.cyl[0] &= 0x7F;
 
                 /* Compare the count field with the search CCHHR */
                 if (memcmp (&rechdr, cchhr, 5) == 0)

@@ -713,7 +713,6 @@ int     repcnt;                         /* Replication count         */
         /* Validate the extent description by checking that the
            ending block is not less than the starting block and
            that the ending block does not exceed the device size */
-#if 0
         if (dev->fbaxlast < dev->fbaxfirst
             || dev->fbaxblkn > dev->fbanumblk
             || dev->fbaxlast - dev->fbaxfirst
@@ -727,7 +726,6 @@ int     repcnt;                         /* Replication count         */
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
             break;
         }
-#endif
 
         /* Set extent defined flag and return normal status */
         dev->fbaxtdef = 1;

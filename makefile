@@ -6,17 +6,26 @@
 #
 #
 
-VERSION  = 1.63
+VERSION  = 1.64
 
 # Change this if you want to install the Hercules executables somewhere
-#   besides /usr/bin.
-DESTDIR  = /usr/bin
+#   besides /usr/bin. The $PREFIX (which defaults to nothing) can be
+#   overridden in the make command line, as in "PREFIX=/foo make install"
+#   (the directory is only used when installing).
+DESTDIR  = $(PREFIX)/usr/bin
 
-CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=390
+CFLAGS	 = -O3 -Wall -fPIC -DARCH=390
 #	   -march=pentium -malign-double -mwide-multiply
-CFL_370  = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=370
+CFL_370  = -O3 -Wall -fPIC -DARCH=370
 #	   -march=pentium -malign-double -mwide-multiply
 LFLAGS	 = -lpthread
+
+# Uncomment these lines for NetBSD, with either the unproven-pthreads
+#   or pth packages
+#CFLAGS += -I/usr/pkg/pthreads/include -I/usr/pkg/include
+#CFL_370	+= -I/usr/pkg/pthreads/include -I/usr/pkg/include
+#LFLAGS += -L/usr/pkg/pthreads/lib -R/usr/pkg/pthreads
+#LFLAGS += -L/usr/pkg/lib -R/usr/pkg/pthreads/lib
 
 EXEFILES = hercules-370 hercules-390 \
 	   dasdinit dasdisup dasdload dasdls dasdpdsu \
@@ -63,7 +72,7 @@ TMA_OBJS = tapemap.o
 
 TSP_OBJS = tapesplit.o
 
-HEADERS  = hercules.h esa390.h
+HEADERS  = hercules.h esa390.h version.h
 
 all:	   $(EXEFILES)
 
@@ -73,10 +82,10 @@ hercules-370:  $(HRC_370_OBJS)
 hercules-390:  $(HRC_390_OBJS)
 	$(CC) -o hercules-390 $(HRC_390_OBJS) $(LFLAGS)
 
-$(HRC_370_OBJS): obj370/%.o: %.c $(HEADERS) makefile
+$(HRC_370_OBJS): obj370/%.o: %.c $(HEADERS)
 	$(CC) $(CFL_370) -o $@ -c $<
 
-$(HRC_390_OBJS): obj390/%.o: %.c $(HEADERS) makefile
+$(HRC_390_OBJS): obj390/%.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -o $@ -c $<
 
 dasdinit:  $(DIN_OBJS)
@@ -103,29 +112,29 @@ tapemap:  $(TMA_OBJS)
 tapesplit:  $(TSP_OBJS)
 	$(CC) -o tapesplit $(TSP_OBJS)
 
-dasdinit.o: dasdinit.c $(HEADERS) dasdblks.h makefile
+dasdinit.o: dasdinit.c $(HEADERS) dasdblks.h
 
-dasdisup.o: dasdisup.c $(HEADERS) dasdblks.h makefile
+dasdisup.o: dasdisup.c $(HEADERS) dasdblks.h
 
-dasdload.o: dasdload.c $(HEADERS) dasdblks.h makefile
+dasdload.o: dasdload.c $(HEADERS) dasdblks.h
 
-dasdls.o: dasdls.c $(HEADERS) dasdblks.h makefile
+dasdls.o: dasdls.c $(HEADERS) dasdblks.h
 
-dasdpdsu.o: dasdpdsu.c $(HEADERS) dasdblks.h makefile
+dasdpdsu.o: dasdpdsu.c $(HEADERS) dasdblks.h
 
 dasdutil.o: dasdutil.c $(HEADERS) dasdblks.h
 
-tapecopy.o: tapecopy.c $(HEADERS) makefile
+tapecopy.o: tapecopy.c $(HEADERS)
 
-tapemap.o: tapemap.c $(HEADERS) makefile
+tapemap.o: tapemap.c $(HEADERS)
 
-tapesplit.o: tapesplit.c $(HEADERS) makefile
+tapesplit.o: tapesplit.c $(HEADERS)
 
 clean:
 	rm -rf $(EXEFILES) *.o obj370 obj390; mkdir obj370 obj390
 
-tar:
-	tar cvzf hercules-$(VERSION).tar.gz --exclude \*.o $(TARFILES)
+tar:    clean
+	(cd ..; tar cvzf hercules-$(VERSION).tar.gz hercules-$(VERSION))
 
 install:  $(EXEFILES)
 	cp $(EXEFILES) $(DESTDIR)

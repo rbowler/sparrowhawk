@@ -7,6 +7,24 @@ Hercules: What's new</TITLE>
       VLINK="#008040" ALINK="#000000">
 <h1>What's new in Hercules</h1>
 <hr noshade>
+<h2>What's new in release 1.64</h2>
+<p>Release date: 4 July 2000
+<ul>
+<li> Added track overflow processing for CKD DASD (by Jay Maynard)
+<li> Makefile change to allow RPM building with RPM_BUILD_ROOT
+(by David Barth)
+<li> Added NetBSD build definitions to makefile (by Soren Jorvang)
+<li> Moved version definition to version.h and removed
+makefile dependency for source modules (by Jay Maynard)
+<li> Package change: tarball now explodes into hercules-<version>
+subdirectory (by Jay Maynard, suggested by Soren Jorvang)
+<li> Fix backward going TOD clock (by Jan Jaeger)
+<li> Suppress superflous HHC701/HHC702 messages (by Jan Jaeger)
+<li> Rework cpu.c to decode instructions by macro (by Jan Jaeger)
+<li> Bypass bug in IBM telnet client (by Jan Jaeger) 
+</ul>
+<p>Download
+<a href="hercules-1.64.tar.gz">hercules-1.64.tar.gz</a>
 <h2>What's new in release 1.63</h2>
 <p>Release date: 18 June 2000
 <ul>
@@ -506,6 +524,6 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 3 June 2000
+<p>Last updated 4 July 2000
 </BODY>
 </HTML>

@@ -32,6 +32,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include "esa390.h"
+#include "version.h"
 
 /*-------------------------------------------------------------------*/
 /* Macro definitions for implementation options 		     */
@@ -261,6 +262,226 @@ typedef int				ATTR;
 #define signal_thread(tid,signo)	raise(signo)
 #define thread_id()			0
 #endif
+
+/*-------------------------------------------------------------------*/
+/* Macro definitions for instruction decoding                        */
+/*-------------------------------------------------------------------*/
+#define ODD_CHECK(_r, _regs) \
+        if( (_r) & 1 ) \
+            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
+ 
+#define FW_CHECK(_value, _regs) \
+        if( (_value) & 3 ) \
+            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
+ 
+#define DW_CHECK(_value, _regs) \
+        if( (_value) & 7 ) \
+            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
+ 
+        /* Program check if r1 is not 0, 2, 4, or 6 */
+#define HFPREG_CHECK(_r, _regs) \
+        if( (_r) & 9 ) \
+            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
+
+        /* Program check if r1 and r2 are not 0, 2, 4, or 6 */
+#define HFPREG2_CHECK(_r1, _r2, _regs) \
+        if( ((_r1) & 9) || ((_r2) & 9) ) \
+            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
+ 
+        /* Program check if r1 is not 0 or 4 */
+#define HFPODD_CHECK(_r, _regs) \
+        if( (_r) & 11 ) \
+            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
+
+        /* Program check if r1 and r2 are not 0 or 4 */
+#define HFPODD2_CHECK(_r1, _r2, _regs) \
+        if( ((_r1) & 11) || ((_r2) & 11) ) \
+            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
+ 
+#define PRIV_CHECK(_regs) \
+        if( (_regs)->psw.prob ) \
+            program_check( (_regs), PGM_PRIVILEGED_OPERATION_EXCEPTION)
+
+#define E(_inst, _execflag, _regs, _ibyte) \
+        { \
+            (_ibyte) = (_inst)[1]; \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 2; \
+                (_regs)->psw.ia += 2; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        }
+
+#define RR(_inst, _execflag, _regs, _r1, _r2) \
+        { \
+            (_r1) = (_inst)[1] >> 4; \
+            (_r2) = (_inst)[1] & 0x0F; \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 2; \
+                (_regs)->psw.ia += 2; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        }
+
+#define RX(_inst, _execflag, _regs, _r1, _b2, _effective_addr2) \
+        { \
+            (_r1) = (_inst)[1] >> 4; \
+            (_b2) = (_inst)[1] & 0x0F; \
+            (_effective_addr2) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
+            if((_b2) != 0) \
+            { \
+                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
+                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            (_b2) = (_inst)[2] >> 4; \
+            if((_b2) != 0) \
+            { \
+                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
+                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 4; \
+                (_regs)->psw.ia += 4; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        }
+
+#define S(_inst, _execflag, _regs, _ibyte, _b2, _effective_addr2) \
+        { \
+            (_ibyte) = (_inst)[1]; \
+            (_b2) = (_inst)[2] >> 4; \
+            (_effective_addr2) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
+            if((_b2) != 0) \
+            { \
+                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
+                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 4; \
+                (_regs)->psw.ia += 4; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        }
+
+#define RS(_inst, _execflag, _regs, _r1, _r3, _b2, _effective_addr2) \
+        { \
+            (_r1) = (_inst)[1] >> 4; \
+            (_r3) = (_inst)[1] & 0x0F; \
+            (_b2) = (_inst)[2] >> 4; \
+            (_effective_addr2) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
+            if((_b2) != 0) \
+            { \
+                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
+                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 4; \
+                (_regs)->psw.ia += 4; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        }
+
+#define RI(_inst, _execflag, _regs, _r1, _r3, _i2) \
+        { \
+            (_r1) = (_inst)[1] >> 4; \
+            (_r3) = (_inst)[1] & 0x0F; \
+            (_i2) = ((_inst)[2] << 8) | (_inst)[3]; \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 4; \
+                (_regs)->psw.ia += 4; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        }
+
+#define SI(_inst, _execflag, _regs, _i2, _b1, _effective_addr1) \
+        { \
+            (_i2) = (_inst)[1]; \
+            (_b1) = (_inst)[2] >> 4; \
+            (_effective_addr1) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
+            if((_b1) != 0) \
+            { \
+                (_effective_addr1) += (_regs)->gpr[(_b1)]; \
+                (_effective_addr1) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 4; \
+                (_regs)->psw.ia += 4; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        }
+
+#define RRE(_inst, _execflag, _regs, _ibyte, _r1, _r2) \
+        { \
+            (_ibyte) = (_inst)[1]; \
+            (_r1) = (_inst)[3] >> 4; \
+            (_r2) = (_inst)[3] & 0x0F; \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 4; \
+                (_regs)->psw.ia += 4; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        }
+
+#define SS(_inst, _execflag, _regs, _r1, _r3, \
+            _b1, _effective_addr1, _b2, _effective_addr2) \
+        { \
+            (_r1) = (_inst)[1] >> 4; \
+            (_r3) = (_inst)[1] & 0x0F; \
+            (_b1) = (_inst)[2] >> 4; \
+            (_effective_addr1) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
+            if((_b1) != 0) \
+            { \
+                (_effective_addr1) += (_regs)->gpr[(_b1)]; \
+                (_effective_addr1) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            (_b2) = (_inst)[4] >> 4; \
+            (_effective_addr2) = (((_inst)[4] & 0x0F) << 8) | (_inst)[5]; \
+            if((_b2) != 0) \
+            { \
+                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
+                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 6; \
+                (_regs)->psw.ia += 6; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        }
+
+#define SSE(_inst, _execflag, _regs, _ibyte, \
+            _b1, _effective_addr1, _b2, _effective_addr2) \
+        { \
+            (_ibyte) = (_inst)[1]; \
+            (_b1) = (_inst)[2] >> 4; \
+            (_effective_addr1) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
+            if((_b1) != 0) \
+            { \
+                (_effective_addr1) += (_regs)->gpr[(_b1)]; \
+                (_effective_addr1) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            (_b2) = (_inst)[4] >> 4; \
+            (_effective_addr2) = (((_inst)[4] & 0x0F) << 8) | (_inst)[5]; \
+            if((_b2) != 0) \
+            { \
+                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
+                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 6; \
+                (_regs)->psw.ia += 6; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        }
 
 /*-------------------------------------------------------------------*/
 /* Prototype definitions for device handler functions		     */
@@ -563,7 +784,8 @@ typedef struct _DEVBLK {
 		ckdhaeq:1,		/* 1=Search Home Addr Equal  */
 		ckdideq:1,		/* 1=Search ID Equal	     */
 		ckdkyeq:1,		/* 1=Search Key Equal	     */
-		ckdwckd:1;		/* 1=Write R0 or Write CKD   */
+		ckdwckd:1,		/* 1=Write R0 or Write CKD   */
+		ckdtrkof:1;		/* 1=Track ovfl on this blk  */
 	U16	ckdcyls;		/* Number of cylinders	     */
 	U16	ckdtrks;		/* Number of tracks	     */
 	U16	ckdheads;		/* #of heads per cylinder    */
@@ -689,7 +911,7 @@ void program_check (REGS *regs, int code);
 void *cpu_thread (REGS *regs);
 
 /* Functions in vector.c */
-void vector_inst (BYTE *inst, REGS *regs);
+void vector_inst (BYTE *inst, int execflag, REGS *regs);
 
 /* Functions in module dat.c */
 U16  translate_asn (U16 asn, REGS *regs, U32 *asteo, U32 aste[]);

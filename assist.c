@@ -87,12 +87,7 @@ U32     lock;                           /* Lock value                */
 U32     lcpa;                           /* Logical CPU address       */
 U32     newia;                          /* Unsuccessful branch addr  */
 
-    /* Privileged operation exception if in problem state */
-    if (regs->psw.prob)
-    {
-        program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
-        return;
-    }
+    PRIV_CHECK(regs);
 
     /* Specification exception if operands are not on word boundary */
     if ((addr1 & 0x00000003) || (addr2 & 0x00000003))
@@ -177,12 +172,7 @@ U32     susp;                           /* Lock suspend queue        */
 U32     lcpa;                           /* Logical CPU address       */
 U32     newia;                          /* Unsuccessful branch addr  */
 
-    /* Privileged operation exception if in problem state */
-    if (regs->psw.prob)
-    {
-        program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
-        return;
-    }
+    PRIV_CHECK(regs);
 
     /* Specification exception if operands are not on word boundary */
     if ((addr1 & 0x00000003) || (addr2 & 0x00000003))
@@ -271,12 +261,7 @@ int     lock_arn;                       /* Lock access register      */
 U32     lock;                           /* Lock value                */
 U32     newia;                          /* Unsuccessful branch addr  */
 
-    /* Privileged operation exception if in problem state */
-    if (regs->psw.prob)
-    {
-        program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
-        return;
-    }
+    PRIV_CHECK(regs);
 
     /* Specification exception if operands are not on word boundary */
     if ((addr1 & 0x00000003) || (addr2 & 0x00000003))
@@ -365,12 +350,7 @@ U32     lock;                           /* Lock value                */
 U32     susp;                           /* Lock suspend queue        */
 U32     newia;                          /* Unsuccessful branch addr  */
 
-    /* Privileged operation exception if in problem state */
-    if (regs->psw.prob)
-    {
-        program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
-        return;
-    }
+    PRIV_CHECK(regs);
 
     /* Specification exception if operands are not on word boundary */
     if ((addr1 & 0x00000003) || (addr2 & 0x00000003))

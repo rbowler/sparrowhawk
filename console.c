@@ -20,7 +20,24 @@
 /* In order to achieve this, this module will keep track of the      */
 /* buffer location, and ajust the buffer address on chained read and */
 /* write operations.                                                 */
+/*                                                                   */
 /*                                           03/06/00 Jan Jaeger.    */
+/*-------------------------------------------------------------------*/
+
+/*-------------------------------------------------------------------*/
+/* Add code to bypass bug in telnet client from TCP/IP for OS/390    */
+/* where telnet responds with the server response rather then the    */
+/* client response as documented in RCF1576.                         */
+/*                                           20/06/00 Jan Jaeger.    */
+/*-------------------------------------------------------------------*/
+
+/*-------------------------------------------------------------------*/
+/*                                                                   */
+/* When using VTAM with local non-SNA 3270 devices, ensure that      */
+/* enough bufferspace is available when doing IND$FILE type          */
+/* filetransfers.  Code IOBUF=(,3992) in ATCSTRxx, and/or BUFNUM=xxx */
+/* on the LBUILD LOCAL statement defining the 3270 device.    JJ     */
+/*                                                                   */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -404,11 +421,26 @@ expect (int csock, BYTE *expected, int len, char *caption)
 {
 int     rc;                             /* Return code               */
 BYTE    buf[512];                       /* Receive buffer            */
+#if 1
+/* TCP/IP for MVS returns the server sequence rather then 
+   the client sequence during bin negotiation    19/06/00 Jan Jaeger */
+static BYTE do_bin[] = { IAC, DO, BINARY, IAC, WILL, BINARY };
+static BYTE will_bin[] = { IAC, WILL, BINARY, IAC, DO, BINARY };
+#endif
 
     rc = recv_packet (csock, buf, len, 0);
     if (rc < 0) return -1;
 
-    if (memcmp(buf, expected, len) != 0) {
+#if 1
+        /* TCP/IP FOR MVS DOES NOT COMPLY TO RFC 1576 THIS IS A BYPASS */
+        if(memcmp(buf, expected, len) != 0
+          && !(len == sizeof(will_bin) 
+              && memcmp(expected, will_bin, len) == 0
+              && memcmp(buf, do_bin, len) == 0) )
+#else 
+    if (memcmp(buf, expected, len) != 0)
+#endif
+    {
         TNSDEBUG2( "Expected %s\n", caption);
         return -1;
     }
