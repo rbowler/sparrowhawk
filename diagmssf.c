@@ -263,8 +263,13 @@ DEVBLK            *dev;                /* Device block pointer       */
             spccbconfig->hex01 = 0x01;
 
             /* Set CPU array count and offset in SPCCB */
+#ifdef FEATURE_CPU_RECONFIG
+            spccbconfig->toticpu[0] = (MAX_CPU_ENGINES & 0xFF00) >> 8;
+            spccbconfig->toticpu[1] = MAX_CPU_ENGINES & 0xFF;
+#else /*!FEATURE_CPU_RECONFIG*/
             spccbconfig->toticpu[0] = (sysblk.numcpu & 0xFF00) >> 8;
             spccbconfig->toticpu[1] = sysblk.numcpu & 0xFF;
+#endif /*!FEATURE_CPU_RECONFIG*/
             offset = sizeof(SPCCB_HEADER) + sizeof(SPCCB_CONFIG_INFO);
             spccbconfig->officpu[0] = (offset & 0xFF00) >> 8;
             spccbconfig->officpu[1] = offset & 0xFF;
@@ -272,7 +277,11 @@ DEVBLK            *dev;                /* Device block pointer       */
             /* Set HSA array count and offset in SPCCB */
             spccbconfig->tothsa[0] = 0;
             spccbconfig->tothsa[1] = 0;
+#ifdef FEATURE_CPU_RECONFIG
+            offset += sizeof(SPCCB_CPU_INFO) * MAX_CPU_ENGINES;
+#else /*!FEATURE_CPU_RECONFIG*/
             offset += sizeof(SPCCB_CPU_INFO) * sysblk.numcpu;
+#endif /*!FEATURE_CPU_RECONFIG*/
             spccbconfig->offhsa[0] = (offset & 0xFF00) >> 8;
             spccbconfig->offhsa[1] = offset & 0xFF;
 
@@ -281,7 +290,11 @@ DEVBLK            *dev;                /* Device block pointer       */
 
             /* Build the CPU information array after the SCP info */
             spccbcpu = (SPCCB_CPU_INFO*)(spccbconfig+1);
+#ifdef FEATURE_CPU_RECONFIG
+            for (i = 0; i < MAX_CPU_ENGINES; i++, spccbcpu++)
+#else /*!FEATURE_CPU_RECONFIG*/
             for (i = 0; i < sysblk.numcpu; i++, spccbcpu++)
+#endif /*!FEATURE_CPU_RECONFIG*/
             {
                 memset (spccbcpu, 0, sizeof(SPCCB_CPU_INFO));
                 spccbcpu->cpuaddr = sysblk.regs[i].cpuad;
@@ -435,7 +448,13 @@ static U64        diag204tod;          /* last diag204 tod           */
         /* hercules cpu's */
         getrusage(RUSAGE_SELF,&usage);
         cpuinfo = (DIAG204_PART_CPU*)(partinfo + 1);
-        for(i = 0; i < sysblk.numcpu;i++) {
+#ifdef FEATURE_CPU_RECONFIG
+        for(i = 0; i < MAX_CPU_ENGINES;i++)
+          if(sysblk.regs[i].cpuonline)
+#else /*!FEATURE_CPU_RECONFIG*/
+        for(i = 0; i < sysblk.numcpu;i++)
+#endif /*!FEATURE_CPU_RECONFIG*/
+        {
             memset(cpuinfo, 0, sizeof(DIAG204_PART_CPU));
             cpuinfo->cpaddr[0] = (sysblk.regs[i].cpuad & 0xFF00) >> 8;
             cpuinfo->cpaddr[1] = sysblk.regs[i].cpuad & 0xFF;

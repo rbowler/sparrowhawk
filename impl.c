@@ -51,8 +51,6 @@ int main (int argc, char *argv[])
 {
 BYTE   *cfgfile = "hercules.cnf";       /* -> Configuration filename */
 int     c;                              /* Work area for getopt      */
-int     cpu;                            /* CPU number                */
-REGS   *regs;                           /* -> CPU register context   */
 
     /* Display the version identifier */
     fprintf (stderr,
@@ -115,20 +113,6 @@ REGS   *regs;                           /* -> CPU register context   */
                 strerror(errno));
         exit(1);
     }
-
-    /* Start a thread for each configured CPU engine */
-    for (cpu = 0; cpu < sysblk.numcpu; cpu++)
-    {
-        regs = sysblk.regs + cpu;
-        if ( create_thread (&(regs->cputid), &sysblk.detattr,
-                            cpu_thread, regs) )
-        {
-            fprintf (stderr,
-                    "HHC034I Cannot create CPU%d thread: %s\n",
-                    cpu, strerror(errno));
-            exit(1);
-        }
-    } /* end for(cpu) */
 
     /* Activate the control panel */
     panel_display ();

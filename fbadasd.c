@@ -148,14 +148,14 @@ BYTE    c;                              /* Character work area       */
         break;
     case 0x9336:
         unittyp = 0x02;
-        unitmdl = 0x01;
+        unitmdl = 0x04;
         blkspcg = 64;
         blkspap = 960;
         blksufh = 0;
         break;
     case 0x0671:
         unittyp = 0x02;
-        unitmdl = 0x01;
+        unitmdl = 0x04;
         blkspcg = 63;
         blkspap = 630;
         blksufh = 0;
@@ -812,6 +812,22 @@ int     repcnt;                         /* Replication count         */
 
         /* Copy device identifier bytes to channel I/O buffer */
         memcpy (iobuf, dev->devid, num);
+
+        /* Return unit status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0xA4:
+    /*---------------------------------------------------------------*/
+    /* READ AND RESET BUFFERED LOG                                   */
+    /*---------------------------------------------------------------*/
+        /* Calculate residual byte count */
+        num = (count < 24) ? count : 24;
+        *residual = count - num;
+        if (count < 24) *more = 1;
+
+        /* Copy device identifier bytes to channel I/O buffer */
+        memset (iobuf, 0, num);
 
         /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;

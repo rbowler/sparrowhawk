@@ -28,6 +28,17 @@
 #define SCLP_READ_EVENT_DATA    0x00770005
 #define SCLP_WRITE_EVENT_MASK   0x00780005
 
+#define SCLP_DECONFIGURE_CPU    0x00100001
+#define SCLP_CONFIGURE_CPU      0x00110001
+
+#define SCLP_DISCONNECT_VF      0x001A0001
+#define SCLP_CONNECT_VF         0x001B0001
+
+#define SCLP_COMMAND_MASK       0xFFFF00FF
+#define SCLP_COMMAND_CLASS      0x000000FF
+#define SCLP_RESOURCE_MASK      0x0000FF00
+#define SCLP_RESOURCE_SHIFT     8
+
 /*-------------------------------------------------------------------*/
 /* Service Call Control Block structure definitions                  */
 /*-------------------------------------------------------------------*/
@@ -51,7 +62,11 @@ typedef struct _SCCB_HEADER {
 #define SCCB_REAS_NOT_PGBNDRY   0x01    /* SCCB crosses page boundary*/
 #define SCCB_REAS_ODD_LENGTH    0x02    /* Length not multiple of 8  */
 #define SCCB_REAS_TOO_SHORT     0x03    /* Length is inadequate      */
+#define SCCB_REAS_NOACTION      0x02    /* Resource in req. state    */
+#define SCCB_REAS_STANDBY       0x04    /* Resource in standby state */
 #define SCCB_REAS_INVALID_CMD   0x01    /* Invalid SCLP command code */
+#define SCCB_REAS_INVALID_RSCP  0x03    /* Invalid resource in parm  */
+#define SCCB_REAS_IMPROPER_RSC  0x05    /* Resource in improper state*/
 #define SCCB_REAS_INVALID_RSC   0x09    /* Invalid resource          */
 
 /* Bit definitions for SCCB header response class code */
@@ -508,7 +523,8 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     }
 
     /* Obtain lock if immediate response is not requested */
-    if (!(sccb->flag & SCCB_FLAG_SYNC))
+    if (!(sccb->flag & SCCB_FLAG_SYNC)
+        || (sclp_command & SCLP_COMMAND_CLASS) == 0x01)
     {
         /* Obtain the interrupt lock */
         obtain_lock (&sysblk.intlock);
@@ -523,7 +539,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     }
 
     /* Test SCLP command word */
-    switch (sclp_command) {
+    switch (sclp_command & SCLP_COMMAND_MASK) {
 
     case SCLP_READ_SCP_INFO:
 
@@ -541,8 +557,13 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
         /* Set response code X'0300' if SCCB length
            is insufficient to contain SCP info */
+#ifdef FEATURE_CPU_RECONFIG
+        if ( sccblen < sizeof(SCCB_HEADER) + sizeof(SCCB_SCP_INFO)
+                + (sizeof(SCCB_CPU_INFO) * MAX_CPU_ENGINES))
+#else /*!FEATURE_CPU_RECONFIG*/
         if ( sccblen < sizeof(SCCB_HEADER) + sizeof(SCCB_SCP_INFO)
                 + (sizeof(SCCB_CPU_INFO) * sysblk.numcpu))
+#endif /*!FEATURE_CPU_RECONFIG*/
         {
             sccb->reas = SCCB_REAS_TOO_SHORT;
             sccb->resp = SCCB_RESP_BLOCK_ERROR;
@@ -577,9 +598,24 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccbscp->xpndsz4K[3] = xstblkinc & 0xFF;
 #endif /*FEATURE_EXPANDED_STORAGE*/
 
+#ifdef FEATURE_VECTOR_FACILITY
+        /* Set the Vector section size in the SCCB */
+        sccbscp->vectssiz[0] = (VECTOR_SECTION_SIZE & 0xFF00) >> 8;
+        sccbscp->vectssiz[1] = VECTOR_SECTION_SIZE & 0xFF;
+        /* Set the Vector partial sum number in the SCCB */
+        sccbscp->vectpsum[0] = (VECTOR_PARTIAL_SUM_NUMBER & 0xFF00) >> 8;
+        sccbscp->vectpsum[1] = VECTOR_PARTIAL_SUM_NUMBER & 0xFF;
+#endif /*FEATURE_VECTOR_FACILITY*/
+
+#ifdef FEATURE_CPU_RECONFIG
+        /* Set CPU array count and offset in SCCB */
+        sccbscp->numcpu[0] = (MAX_CPU_ENGINES & 0xFF00) >> 8;
+        sccbscp->numcpu[1] = MAX_CPU_ENGINES & 0xFF;
+#else /*!FEATURE_CPU_RECONFIG*/
         /* Set CPU array count and offset in SCCB */
         sccbscp->numcpu[0] = (sysblk.numcpu & 0xFF00) >> 8;
         sccbscp->numcpu[1] = sysblk.numcpu & 0xFF;
+#endif /*!FEATURE_CPU_RECONFIG*/
         offset = sizeof(SCCB_HEADER) + sizeof(SCCB_SCP_INFO);
         sccbscp->offcpu[0] = (offset & 0xFF00) >> 8;
         sccbscp->offcpu[1] = offset & 0xFF;
@@ -587,7 +623,11 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         /* Set HSA array count and offset in SCCB */
         sccbscp->numhsa[0] = 0;
         sccbscp->numhsa[1] = 0;
+#ifdef FEATURE_CPU_RECONFIG
+        offset += sizeof(SCCB_CPU_INFO) * MAX_CPU_ENGINES;
+#else /*!FEATURE_CPU_RECONFIG*/
         offset += sizeof(SCCB_CPU_INFO) * sysblk.numcpu;
+#endif /*!FEATURE_CPU_RECONFIG*/
         sccbscp->offhsa[0] = (offset & 0xFF00) >> 8;
         sccbscp->offhsa[1] = offset & 0xFF;
 
@@ -600,7 +640,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                         | SCCB_IFM0_CHANNEL_PATH_SUBSYSTEM_COMMAND
 //                      | SCCB_IFM0_CHANNEL_PATH_RECONFIG
 //                      | SCCB_IFM0_CPU_INFORMATION
-//                      | SCCB_IFM0_CPU_RECONFIG
+#ifdef FEATURE_CPU_RECONFIG
+                        | SCCB_IFM0_CPU_RECONFIG
+#endif /*FEATURE_CPU_RECONFIG*/
                         ;
         sccbscp->ifm[1] = 0
 //                      | SCCB_IFM1_SIGNAL_ALARM
@@ -622,7 +664,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 //                      | SCCB_IFM2_EXTENDED_STORAGE_ELEMENT_RECONFIG
                         ;
         sccbscp->ifm[3] = 0
-//                      | SCCB_IFM3_VECTOR_FEATURE_RECONFIG
+#if defined(FEATURE_VECTOR_FACILITY) && defined(FEATURE_CPU_RECONFIG)
+                        | SCCB_IFM3_VECTOR_FEATURE_RECONFIG
+#endif /*FEATURE_VECTOR_FACILITY*/
 #ifdef FEATURE_SYSTEM_CONSOLE
                         | SCCB_IFM3_READ_WRITE_EVENT_FEATURE
 #endif /*FEATURE_SYSTEM_CONSOLE*/
@@ -643,7 +687,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                         ;
         sccbscp->cfg[2] = 0
 //                      | SCCB_CFG2_DEVICE_ACTIVE_ONLY_MEASUREMENT
-//                      | SCCB_CFG2_CALLED_SPACE_IDENTIFICATION
+#ifdef FEATURE_CALLED_SPACE_IDENTIFICATION
+                        | SCCB_CFG2_CALLED_SPACE_IDENTIFICATION
+#endif /*FEATURE_CALLED_SPACE_IDENTIFICATION*/
 #ifdef FEATURE_CHECKSUM_INSTRUCTION
                         | SCCB_CFG2_CHECKSUM_INSTRUCTION
 #endif /*FEATURE_CHECKSUM_INSTRUCTION*/
@@ -673,7 +719,11 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
         /* Build the CPU information array after the SCP info */
         sccbcpu = (SCCB_CPU_INFO*)(sccbscp+1);
+#ifdef FEATURE_CPU_RECONFIG
+        for (i = 0; i < MAX_CPU_ENGINES; i++, sccbcpu++)
+#else /*!FEATURE_CPU_RECONFIG*/
         for (i = 0; i < sysblk.numcpu; i++, sccbcpu++)
+#endif /*!FEATURE_CPU_RECONFIG*/
         {
             memset (sccbcpu, 0, sizeof(SCCB_CPU_INFO));
             sccbcpu->cpa = sysblk.regs[i].cpuad;
@@ -696,12 +746,23 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 //                          | SCCB_CPF1_EXPEDITE_TIMER_PROCESSING
                             ;
             sccbcpu->cpf[2] = 0
-//                          | SCCB_CPF2_VECTOR_FEATURE_INSTALLED
-//                          | SCCB_CPF2_VECTOR_FEATURE_CONNECTED
-//                          | SCCB_CPF2_VECTOR_FEATURE_STANDBY_STATE
 //                          | SCCB_CPF2_CRYPTO_FEATURE_ACCESSED
 //                          | SCCB_CPF2_EXPEDITE_RUN_PROCESSING
                             ;
+
+#ifdef FEATURE_VECTOR_FACILITY
+#ifndef FEATURE_CPU_RECONFIG
+            if(sysblk.regs[i].vf.online)
+#endif /*!FEATURE_CPU_RECONFIG*/
+              sccbcpu->cpf[2] |= SCCB_CPF2_VECTOR_FEATURE_INSTALLED;
+            if(sysblk.regs[i].vf.online)
+                sccbcpu->cpf[2] |= SCCB_CPF2_VECTOR_FEATURE_CONNECTED;
+#ifdef FEATURE_CPU_RECONFIG
+            else
+                sccbcpu->cpf[2] |= SCCB_CPF2_VECTOR_FEATURE_STANDBY_STATE;
+#endif /*FEATURE_CPU_RECONFIG*/
+#endif /*FEATURE_VECTOR_FACILITY*/
+
             sccbcpu->cpf[3] = 0
 #ifdef FEATURE_PRIVATE_SPACE
                             | SCCB_CPF3_PRIVATE_SPACE_FEATURE
@@ -1123,10 +1184,127 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
 #endif /*FEATURE_EXPANDED_STORAGE*/
 
+#ifdef FEATURE_CPU_RECONFIG
+
+    case SCLP_CONFIGURE_CPU:
+
+        i = (sclp_command & SCLP_RESOURCE_MASK) >> SCLP_RESOURCE_SHIFT;
+
+        /* Return invalid resource in parm if target does not exist */
+        if(i >= MAX_CPU_ENGINES)
+        {
+            sccb->reas = SCCB_REAS_INVALID_RSCP;
+            sccb->resp = SCCB_RESP_REJECT;
+            break;
+        }
+
+        /* Add cpu to the configuration */
+        configure_cpu(sysblk.regs + i);
+
+        /* Set response code X'0020' in SCCB header */
+        sccb->reas = SCCB_REAS_NONE;
+        sccb->resp = SCCB_RESP_COMPLETE;
+        break;
+
+    case SCLP_DECONFIGURE_CPU:
+
+        i = (sclp_command & SCLP_RESOURCE_MASK) >> SCLP_RESOURCE_SHIFT;
+
+        /* Return invalid resource in parm if target does not exist */
+        if(i >= MAX_CPU_ENGINES)
+        {
+            sccb->reas = SCCB_REAS_INVALID_RSCP;
+            sccb->resp = SCCB_RESP_REJECT;
+            break;
+        }
+
+        /* Take cpu out of the configuration */
+        deconfigure_cpu(sysblk.regs + i);
+
+        /* Set response code X'0020' in SCCB header */
+        sccb->reas = SCCB_REAS_NONE;
+        sccb->resp = SCCB_RESP_COMPLETE;
+        break;
+
+#ifdef FEATURE_VECTOR_FACILITY
+
+    case SCLP_DISCONNECT_VF:
+
+        i = (sclp_command & SCLP_RESOURCE_MASK) >> SCLP_RESOURCE_SHIFT;
+
+        /* Return invalid resource in parm if target does not exist */
+        if(i >= MAX_CPU_ENGINES)
+        {
+            sccb->reas = SCCB_REAS_INVALID_RSCP;
+            sccb->resp = SCCB_RESP_REJECT;
+            break;
+        }
+
+        if(sysblk.regs[i].vf.online)
+            logmsg("CPU%4.4X: Vector Facility configured offline\n",i);
+
+        /* Take the VF out of the configuration */
+        sysblk.regs[i].vf.online = 0;
+
+        /* Set response code X'0020' in SCCB header */
+        sccb->reas = SCCB_REAS_NONE;
+        sccb->resp = SCCB_RESP_COMPLETE;
+        break;
+
+    case SCLP_CONNECT_VF:
+
+        i = (sclp_command & SCLP_RESOURCE_MASK) >> SCLP_RESOURCE_SHIFT;
+
+        /* Return invalid resource in parm if target does not exist */
+        if(i >= MAX_CPU_ENGINES)
+        {
+            sccb->reas = SCCB_REAS_INVALID_RSCP;
+            sccb->resp = SCCB_RESP_REJECT;
+            break;
+        }
+
+        /* Return improper state if associated cpu is offline */
+        if(!sysblk.regs[i].cpuonline)
+        {
+            sccb->reas = SCCB_REAS_IMPROPER_RSC;
+            sccb->resp = SCCB_RESP_REJECT;
+            break;
+        }
+
+        if(!sysblk.regs[i].vf.online)
+            logmsg("CPU%4.4X: Vector Facility configured online\n",i);
+
+        /* Mark the VF online to the CPU */
+        sysblk.regs[i].vf.online = 1;
+
+        /* Set response code X'0020' in SCCB header */
+        sccb->reas = SCCB_REAS_NONE;
+        sccb->resp = SCCB_RESP_COMPLETE;
+        break;
+
+#endif /*FEATURE_VECTOR_FACILITY*/
+
+#endif /*FEATURE_CPU_RECONFIG*/
+
     default:
 
-//      logmsg("Invalid service call command word:%8.8X SCCB=%8.8X\n",
-//          sclp_command, sccb_absolute_addr);
+#if 0
+        logmsg("Invalid service call command word:%8.8X SCCB=%8.8X\n",
+            sclp_command, sccb_absolute_addr);
+
+        logmsg("SCCB data area:\n");
+        for(i = 0; i < sccblen; i++)
+        {
+            logmsg("%2.2X",sysblk.mainstor[sccb_real_addr + i]);
+            if(i % 32 == 31)
+                logmsg("\n");
+            else
+                if(i % 4 == 3)
+                    logmsg(" ");
+        }
+        if(i % 32 != 31)
+            logmsg("\n");
+#endif    
 
         /* Set response code X'01F0' for invalid SCLP command */
         sccb->reas = SCCB_REAS_INVALID_CMD;
@@ -1137,7 +1315,8 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     } /* end switch(sclp_command) */
 
     /* If immediate response is requested, return condition code 1 */
-    if (sccb->flag & SCCB_FLAG_SYNC)
+    if ((sccb->flag & SCCB_FLAG_SYNC)
+        && (sclp_command & SCLP_COMMAND_CLASS) != 0x01)
         return 1;
 
     /* Set service signal external interrupt pending */

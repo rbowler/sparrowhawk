@@ -89,6 +89,7 @@ typedef struct _TLBE {
 #define CR0_SEG_SIZE	0x00380000	/* Segment size for S/370... */
 #define CR0_SEG_SZ_64K	0x00000000	/* ...64K segments	     */
 #define CR0_SEG_SZ_1M	0x00100000	/* ...1M segments	     */
+#define CR0_VOP 	0x00020000	/* Vector-Operation Control  */
 #define CR0_ASF 	0x00010000	/* Addrspc function control  */
 #define CR0_XM_MALFALT	0x00008000	/* Malfunction alert mask    */
 #define CR0_XM_EMERSIG	0x00004000	/* Emergency signal mask     */
@@ -877,3 +878,14 @@ typedef struct _MBK {
 #define CHM_GPR2_MBO	0x7FFFFFE0	/* Measurement Block Origin  */
 #define CHM_GPR2_RESV	0x8000001F	/* Reserved, must be zero    */
 
+/* Bit definitions for the Vector Facility */
+#define VSR_M    0x0001000000000000ULL	/* Vector mask mode bit      */
+#define VSR_VCT  0x0000FFFF00000000ULL	/* Vector count              */
+#define VSR_VIX  0x00000000FFFF0000ULL	/* Vector interruption index */
+#define VSR_VIU  0x000000000000FF00ULL	/* Vector in-use bits        */
+#define VSR_VIU0 0x0000000000008000ULL	/* Vector in-use bit vr0     */
+#define VSR_VCH  0x00000000000000FFULL	/* Vector change bits        */
+#define VSR_VCH0 0x0000000000000080ULL	/* Vector change bit vr0     */
+#define VSR_RESV 0xFFFE000000000000ULL	/* Reserved bits             */
+
+#define VAC_MASK 0x00FFFFFFFFFFFFFFULL	/* Vector Activity Count mask*/

@@ -266,7 +266,7 @@ static void NP_screen(FILE *confp)
 
 static void NP_update(FILE *confp, char *cmdline, int cmdoff)
 {
-    int cpu, s, i, r, c;
+    int s, i, r, c;
     int online, busy, pend, open;
     DWORD curpsw;
     int curreg[16];
@@ -323,8 +323,7 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
         return;
         }
     }
-    cpu = 0;
-    regs = sysblk.regs + cpu;
+    regs = sysblk.regs + sysblk.pcpu;
 
     store_psw (&regs->psw, curpsw);
     pswmask = (curpsw[1] & 0x08) ?
@@ -401,7 +400,12 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
     fprintf(confp, ANSI_CURSOR, 19, 2);
     fprintf(confp, ANSI_YLW_BLK);
 #ifdef MIPS_COUNTING
+#ifdef FEATURE_CPU_RECONFIG
+    for(mipsrate = i = 0; i < MAX_CPU_ENGINES; i++)
+      if(sysblk.regs[i].cpuonline)
+#else /*!FEATURE_CPU_RECONFIG*/
     for(mipsrate = i = 0; i < sysblk.numcpu; i++)
+#endif /*!FEATURE_CPU_RECONFIG*/
         mipsrate += sysblk.regs[i].mipsrate;
     fprintf(confp, "%1.1d.%2.2d",
             mipsrate / 1000, (mipsrate % 1000) / 10);
@@ -988,8 +992,7 @@ BYTE   *devclass;                       /* -> Device class name      */
         logmsg ("%s\n", cmd);
 
     /* Set target CPU for commands and displays */
-    cpu = 0;
-    regs = sysblk.regs + cpu;
+    regs = sysblk.regs + sysblk.pcpu;
 
 #if MAX_CPU_ENGINES > 1
  #define STSPALL_CMD "startall/stopall=start/stop all CPUs\n"
@@ -1077,8 +1080,9 @@ BYTE   *devclass;                       /* -> Device class name      */
     if (strcmp(cmd,"startall") == 0)
     {
         obtain_lock (&sysblk.intlock);
-        for (i = 0; i < sysblk.numcpu; i++)
-            sysblk.regs[i].cpustate = CPUSTATE_STARTED;
+        for (i = 0; i < MAX_CPU_ENGINES; i++)
+            if(sysblk.regs[i].cpuonline)
+                sysblk.regs[i].cpustate = CPUSTATE_STARTED;
         signal_condition (&sysblk.intcond);
         release_lock (&sysblk.intlock);
         return NULL;
@@ -1088,8 +1092,9 @@ BYTE   *devclass;                       /* -> Device class name      */
     if (strcmp(cmd,"stopall") == 0)
     {
         obtain_lock (&sysblk.intlock);
-        for (i = 0; i < sysblk.numcpu; i++)
-            sysblk.regs[i].cpustate = CPUSTATE_STOPPING;
+        for (i = 0; i < MAX_CPU_ENGINES; i++)
+            if(sysblk.regs[i].cpuonline)
+                sysblk.regs[i].cpustate = CPUSTATE_STOPPING;
         release_lock (&sysblk.intlock);
         return NULL;
     }
@@ -1490,6 +1495,26 @@ BYTE   *devclass;                       /* -> Device class name      */
         return NULL;
     }
 
+    /* cpu command - define target cpu for panel display and commands */
+    if (memcmp(cmd,"cpu",3)==0)
+    {
+        if (sscanf(cmd+3, "%x%c", &cpu, &c) != 1)
+        {
+            logmsg ("Target CPU %s is invalid\n", cmd+3);
+            return NULL;
+        }
+#ifdef FEATURE_CPU_RECONFIG
+        if(cpu < 0 || cpu > MAX_CPU_ENGINES
+           || !sysblk.regs[cpu].cpuonline)
+#else /*!FEATURE_CPU_RECONFIG*/
+        if(cpu < 0 || cpu > sysblk.numcpu)
+#endif /*!FEATURE_CPU_RECONFIG*/
+            logmsg ("CPU%4.4X not configured\n",cpu);
+        else
+            sysblk.pcpu = cpu;
+        return NULL;
+    }
+
     /* quit or exit command - terminate the emulator */
     if (strcmp(cmd,"quit") == 0 || strcmp(cmd,"exit") == 0)
     {
@@ -1753,7 +1778,6 @@ int     firstmsgn = 0;                  /* Number of first message to
 #define BUF_SIZE    (MAX_MSGS*MSG_SIZE) /* Total size of buffer      */
 #define NUM_LINES               22      /* Number of scrolling lines */
 #define CMD_SIZE                60      /* Length of command line    */
-int     cpu;                            /* CPU engine number         */
 REGS   *regs;                           /* -> CPU register context   */
 DWORD   curpsw;                         /* Current PSW               */
 DWORD   prvpsw;                         /* Previous PSW              */
@@ -1837,13 +1861,16 @@ struct  timeval tv;                     /* Select timeout structure  */
     redraw_cmd = 1;
     redraw_status = 1;
 
-    /* Set target CPU for commands and displays */
-    cpu = 0;
-    regs = sysblk.regs + cpu;
-
     /* Process messages and commands */
     while (1)
     {
+        /* Set target CPU for commands and displays */
+        regs = sysblk.regs + sysblk.pcpu;
+        /* If the requested CPU is offline, then take the first available CPU*/
+        if(!regs->cpuonline)
+            for(sysblk.pcpu = 0, regs = sysblk.regs + sysblk.pcpu; 
+                !regs->cpuonline; regs = sysblk.regs + ++sysblk.pcpu);
+
         /* Set the file descriptors for select */
         FD_ZERO (&readset);
         FD_SET (keybfd, &readset);
@@ -2370,9 +2397,15 @@ struct  timeval tv;                     /* Select timeout structure  */
                 fprintf (confp,
                     ANSI_ROW24_COL1
                     ANSI_YELLOW_RED
+#if MAX_CPU_ENGINES > 1
+                    "CPU%4.4X "
+#endif
                     "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X"
                     " %-13.13s %llu instructions executed"
                     ANSI_ERASE_EOL,
+#if MAX_CPU_ENGINES > 1
+                    regs->cpuad,
+#endif
                     curpsw[0], curpsw[1], curpsw[2], curpsw[3],
                     curpsw[4], curpsw[5], curpsw[6], curpsw[7],
                     (regs->cpustate == CPUSTATE_STOPPING ? "STOPPING" :

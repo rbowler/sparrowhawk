@@ -113,7 +113,8 @@ U16     xcode;                          /* Exception code            */
 /*      In the event of any stack error, this function generates     */
 /*      a program check and does not return.                         */
 /*-------------------------------------------------------------------*/
-void form_stack_entry (BYTE etype, U32 retna, U32 calla, REGS *regs)
+void form_stack_entry (BYTE etype, U32 retna, U32 calla, REGS *regs,
+                                U32 csi)
 {
 U32     lsea;                           /* Linkage stack entry addr  */
 U32     abs;                            /* Absolute addr new entry   */
@@ -337,9 +338,11 @@ int     i;                              /* Array subscript           */
     if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
         abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
 
-    /* Clear the called space id */
-    /* Flag SCCB_CFG2_CALLED_SPACE_IDENTIFICATION is off */
-    memset (sysblk.mainstor+abs, 0, 4);
+    /* Set the called space id */
+    sysblk.mainstor[abs+0] = (csi >> 24) & 0xFF;
+    sysblk.mainstor[abs+1] = (csi >> 16) & 0xFF;
+    sysblk.mainstor[abs+2] = (csi >> 8) & 0xFF;
+    sysblk.mainstor[abs+3] = csi & 0xFF;
 
     /* Store the called address or PC number in bytes 148-151 */
     sysblk.mainstor[abs+4] = (calla >> 24) & 0xFF;

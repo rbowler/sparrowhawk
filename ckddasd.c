@@ -747,6 +747,9 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
     if (dev->ckdlcount == 0 &&
         (dev->ckdfmask & CKDMASK_SKCTL) == CKDMASK_SKCTL_INHSMT)
     {
+        DEVTRACE("ckddasd: MT advance error: "
+                 "locate record %d file mask %2.2X\n",
+                 dev->ckdlcount, dev->ckdfmask);
         ckd_build_sense (dev, 0, SENSE1_FP, 0, 0, 0);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
@@ -1144,7 +1147,7 @@ int             skiplen;                /* Number of bytes to skip   */
 /* Write count key and data fields                                   */
 /*-------------------------------------------------------------------*/
 static int ckd_write_ckd ( DEVBLK *dev, BYTE *buf, U16 len,
-                BYTE *unitstat)
+                BYTE *unitstat, BYTE trk_ovfl)
 {
 int             rc;                     /* Return code               */
 CKDDASD_RECHDR  rechdr;                 /* CKD record header         */
@@ -1219,6 +1222,15 @@ int             skiplen;                /* Number of bytes to skip   */
     DEVTRACE("ckddasd: writing cyl %d head %d record %d kl %d dl %d\n",
             dev->ckdcurcyl, dev->ckdcurhead, recnum, keylen, datalen);
 
+    /* Set track overflow flag if called for */
+    if (trk_ovfl)
+    {
+        DEVTRACE("ckddasd: setting track overflow flag for "
+                 "cyl %d head %d record %d\n",
+                 dev->ckdcurcyl, dev->ckdcurhead, recnum);
+        buf[0] |= 0x80;
+    }
+
     /* Write count key and data */
     rc = write (dev->fd, buf, ckdlen);
     if (rc < ckdlen)
@@ -1232,6 +1244,12 @@ int             skiplen;                /* Number of bytes to skip   */
                         FORMAT_1, MESSAGE_0);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
+    }
+    
+    /* Clear track overflow flag if we set it above */
+    if (trk_ovfl)
+    {
+        buf[0] &= 0x7F;
     }
 
     /* Logically erase rest of track by writing end of track marker */
@@ -1408,6 +1426,7 @@ U16             head;                   /* Head number               */
 BYTE            cchhr[5];               /* Search argument           */
 BYTE            sector;                 /* Sector number             */
 BYTE            key[256];               /* Key for search operations */
+BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
 
     /* If this is a data-chained READ, then return any data remaining
        in the buffer which was not used by the previous CCW */
@@ -2292,6 +2311,7 @@ BYTE            key[256];               /* Key for search operations */
 
         /* Extract the file mask from the I/O buffer */
         dev->ckdfmask = iobuf[0];
+        DEVTRACE("ckddasd: set file mask %2.2X\n", dev->ckdfmask);
 
         /* Command reject if file mask is invalid */
         if ((dev->ckdfmask & CKDMASK_RESV) != 0)
@@ -2992,7 +3012,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Write R0 count key and data */
-        rc = ckd_write_ckd (dev, iobuf, count, unitstat);
+        rc = ckd_write_ckd (dev, iobuf, count, unitstat, 0);
         if (rc < 0) break;
 
         /* Calculate number of bytes written and set residual count */
@@ -3011,7 +3031,8 @@ BYTE            key[256];               /* Key for search operations */
 
         break;
 
-    case 0x1D:
+    case 0x1D: /* WRITE CKD */
+    case 0x01: /* WRITE SPECIAL CKD */
     /*---------------------------------------------------------------*/
     /* WRITE COUNT KEY AND DATA                                      */
     /*---------------------------------------------------------------*/
@@ -3050,6 +3071,16 @@ BYTE            key[256];               /* Key for search operations */
             break;
         }
 
+        /* Command reject if WRITE SPECIAL CKD to a 3380 or 3390 */
+        if ((code == 0x01)
+            && ((dev->devtype == 0x3380) || (dev->devtype == 0x3390)))
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
         /* Check operation code if within domain of a Locate Record */
         if (dev->ckdlcount > 0)
         {
@@ -3062,9 +3093,12 @@ BYTE            key[256];               /* Key for search operations */
                 break;
             }
         }
+        
+        /* Set track overflow flag if WRITE SPECIAL CKD */
+        trk_ovfl = (code==0x01) ? 1 : 0;
 
         /* Write count key and data */
-        rc = ckd_write_ckd (dev, iobuf, count, unitstat);
+        rc = ckd_write_ckd (dev, iobuf, count, unitstat, trk_ovfl);
         if (rc < 0) break;
 
         /* Calculate number of bytes written and set residual count */
@@ -3118,7 +3152,7 @@ BYTE            key[256];               /* Key for search operations */
         if (rc < 0) break;
 
         /* Write count key and data */
-        rc = ckd_write_ckd (dev, iobuf, count, unitstat);
+        rc = ckd_write_ckd (dev, iobuf, count, unitstat, 0);
         if (rc < 0) break;
 
         /* Calculate number of bytes written and set residual count */
@@ -3703,6 +3737,38 @@ BYTE            key[256];               /* Key for search operations */
         /* Build the subsystem status data in the I/O area */
         memset (iobuf, 0x00, 40);
         iobuf[1] = dev->devnum & 0xFF;
+
+        /* Return unit status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0xA4:
+    /*---------------------------------------------------------------*/
+    /* READ AND RESET BUFFERED LOG                                   */
+    /*---------------------------------------------------------------*/
+        /* Command reject if within the domain of a Locate Record,
+           or if chained from any command unless the preceding command
+           is Read Device Characteristics, Read Configuration Data, or
+           a Suspend Multipath Reconnection command that was the first
+           command in the chain */
+        if (dev->ckdlcount > 0
+            || (chained && prevcode != 0x64 && prevcode != 0xFA
+                && prevcode != 0x5B)
+            || (chained && prevcode == 0x5B && ccwseq > 1))
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Calculate residual byte count */
+        num = (count < 24) ? count : 24;
+        *residual = count - num;
+        if (count < 24) *more = 1;
+
+        /* Build the buffered error log in the I/O area */
+        memset (iobuf, 0x00, 24);
 
         /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;

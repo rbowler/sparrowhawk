@@ -226,18 +226,18 @@ static inline void get_ef ( EXTENDED_FLOAT *fl, U32 *fpr )
 /*-------------------------------------------------------------------*/
 static inline void store_ef ( EXTENDED_FLOAT *fl, U32 *fpr )
 {
-char ls_sign;
-
-    ls_sign = (fl->expo - 14) & 0x007F;
     fpr[0] = ((U32)fl->sign << 31) 
 	   | ((U32)fl->expo << 24) 
 	   | (fl->ms_fract >> 24);
     fpr[1] = (fl->ms_fract << 8) 
 	   | (fl->ls_fract >> 56);
     fpr[2] = ((U32)fl->sign << 31) 
-	   | ((U32)ls_sign << 24) 
 	   | ((fl->ls_fract >> 32) & 0x00FFFFFF);
     fpr[3] = fl->ls_fract;
+
+    if ( fpr[0] || fpr[1] || fpr[2] || fpr[3] ) {
+	fpr[2] |= ((((U32)fl->expo - 14) << 24) & 0x7f000000);
+    }
 
 } /* end function store_ef */
 
@@ -1262,9 +1262,6 @@ BYTE	shift;
 
 	    /* handle overflow with guard digit */
 	    if (fl->short_fract & 0xF0000000) {
-		fl->short_fract >>= 8;
-	    } else {
-		/* guard digit */
 		fl->short_fract >>= 4;
 	    }
 
@@ -1367,9 +1364,6 @@ BYTE	shift;
 
 	    /* handle overflow with guard digit */
 	    if (fl->long_fract & 0xF0000000) {
-		fl->long_fract >>= 8;
-	    } else {
-		/* guard digit */
 		fl->long_fract >>= 4;
 	    }
 

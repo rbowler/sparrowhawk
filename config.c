@@ -176,6 +176,7 @@ BYTE   *smainsize;                      /* -> Main size string       */
 BYTE   *sxpndsize;                      /* -> Expanded size string   */
 BYTE   *scnslport;                      /* -> Console port number    */
 BYTE   *snumcpu;                        /* -> Number of CPUs         */
+BYTE   *snumvec;                        /* -> Number of VFs          */
 BYTE   *sloadparm;                      /* -> IPL load parameter     */
 BYTE   *ssysepoch;                      /* -> System epoch           */
 BYTE   *stzoffset;                      /* -> System timezone offset */
@@ -189,6 +190,7 @@ U16     mainsize;                       /* Main storage size (MB)    */
 U16     xpndsize;                       /* Expanded storage size (MB)*/
 U16     cnslport;                       /* Console port number       */
 U16     numcpu;                         /* Number of CPUs            */
+U16     numvec;                         /* Number of VFs             */
 S32     sysepoch;                       /* System epoch year         */
 S32     tzoffset;                       /* System timezone offset    */
 int     toddrag;                        /* TOD clock drag factor     */
@@ -216,6 +218,7 @@ BYTE    c;                              /* Work area for sscanf      */
     xpndsize = 0;
     cnslport = 3270;
     numcpu = 1;
+    numvec = MAX_CPU_ENGINES;
     memset (loadparm, 0x4B, 8);
     sysepoch = 1900;
     tzoffset = 0;
@@ -246,6 +249,7 @@ BYTE    c;                              /* Work area for sscanf      */
         sxpndsize = NULL;
         scnslport = NULL;
         snumcpu = NULL;
+        snumvec = NULL;
         sloadparm = NULL;
         ssysepoch = NULL;
         stzoffset = NULL;
@@ -289,6 +293,10 @@ BYTE    c;                              /* Work area for sscanf      */
             else if (strcasecmp (keyword, "numcpu") == 0)
             {
                 snumcpu = operand;
+            }
+            else if (strcasecmp (keyword, "numvec") == 0)
+            {
+                snumvec = operand;
             }
             else if (strcasecmp (keyword, "loadparm") == 0)
             {
@@ -416,6 +424,24 @@ BYTE    c;                              /* Work area for sscanf      */
             }
         }
 
+        /* Parse number of VFs operand */
+        if (snumvec != NULL)
+        {
+#ifdef FEATURE_VECTOR_FACILITY
+            if (sscanf(snumvec, "%hu%c", &numvec, &c) != 1
+                || numvec > MAX_CPU_ENGINES)
+            {
+                logmsg( "HHC018I Error in %s line %d: "
+                        "Invalid number of VFs %s\n",
+                        fname, stmt, snumvec);
+                exit(1);
+            }
+#else /*!FEATURE_VECTOR_FACILITY*/
+            logmsg("HHC019I Vector Facility Support not configured\n");
+            exit(1);
+#endif /*!FEATURE_VECTOR_FACILITY*/
+        }
+
         /* Parse load parameter operand */
         if (sloadparm != NULL)
         {
@@ -514,7 +540,6 @@ BYTE    c;                              /* Work area for sscanf      */
     sysblk.msgpipew = stderr;
 
     /* Initialize the CPU registers */
-    sysblk.numcpu = numcpu;
     for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
     {
         /* Initialize the processor address register for STAP */
@@ -692,8 +717,54 @@ BYTE    c;                              /* Work area for sscanf      */
             "(c)Copyright Roger Bowler, 1994-2000\n",
             ARCHITECTURE_NAME, MSTRING(VERSION));
 
+#ifdef FEATURE_VECTOR_FACILITY
+    for(i = 0; i < numvec && i < numcpu; i++)
+        sysblk.regs[i].vf.online = 1;
+#endif /*FEATURE_VECTOR_FACILITY*/
+
+    for(i = 0; i < numcpu; i++)
+        configure_cpu(sysblk.regs + i);
+
 } /* end function build_config */
 
+int configure_cpu(REGS *regs)
+{
+    if(regs->cpuonline)
+        return -1;
+    regs->cpuonline = 1;
+    regs->cpustate = CPUSTATE_STARTING;
+    if ( create_thread (&(regs->cputid), &sysblk.detattr,
+                        cpu_thread, regs) )
+    {
+        regs->cpuonline = 0;
+#ifdef FEATURE_VECTOR_FACILITY
+        regs->vf.online = 0;
+#endif /*FEATURE_VECTOR_FACILITY*/
+        logmsg( "HHC034I Cannot create CPU%4.4X thread: %s\n",
+                regs->cpuad, strerror(errno));
+        return -1;
+    }
+    return 0;
+} /* end configure_cpu */
+
+/* Remove CPU from the configuration 
+   This routine MUST be called with the intlock held */
+int deconfigure_cpu(REGS *regs)
+{
+    if(regs->cpuonline)
+    {
+        regs->cpuonline = 0;
+        regs->cpustate = CPUSTATE_STOPPING;
+
+        /* Wake up CPU as it may be waiting */
+        signal_condition (&sysblk.intcond);
+
+        return 0;
+    }
+    else
+        return -1;
+    
+}
 /*-------------------------------------------------------------------*/
 /* Function to build a device configuration block                    */
 /*-------------------------------------------------------------------*/

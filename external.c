@@ -335,13 +335,19 @@ struct  timeval tv;                     /* Structure for gettimeofday
         diff <<= 8;
 
         /* Decrement the CPU timer for each CPU */
+#ifdef FEATURE_CPU_RECONFIG 
+        for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
+          if(sysblk.regs[cpu].cpuonline)
+#else /*!FEATURE_CPU_RECONFIG*/
         for (cpu = 0; cpu < sysblk.numcpu; cpu++)
+#endif /*!FEATURE_CPU_RECONFIG*/
         {
             /* Point to the CPU register context */
             regs = sysblk.regs + cpu;
 
-            /* Decrement the CPU timer */
-            (S64)regs->ptimer -= diff;
+            /* Decrement the CPU timer if the CPU is running */
+            if(regs->cpustate == CPUSTATE_STARTED)
+                (S64)regs->ptimer -= diff;
 
             /* Set interrupt flag if the CPU timer is negative or
                if the TOD clock value exceeds the clock comparator */
@@ -397,7 +403,12 @@ struct  timeval tv;                     /* Structure for gettimeofday
         msecctr += CLOCK_RESOLUTION;
         if (msecctr > 999)
         {
+#ifdef FEATURE_CPU_RECONFIG 
+            for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
+              if(sysblk.regs[cpu].cpuonline)
+#else /*!FEATURE_CPU_RECONFIG*/
             for (cpu = 0; cpu < sysblk.numcpu; cpu++)
+#endif /*!FEATURE_CPU_RECONFIG*/
             {
                 /* Point to the CPU register context */
                 regs = sysblk.regs + cpu;
@@ -569,11 +580,19 @@ static char *ordername[] = {    "Unassigned",
     parm = (r1 & 1) ? regs->gpr[r1] : regs->gpr[r1+1];
 
     /* Return condition code 3 if target CPU does not exist */
+#ifdef FEATURE_CPU_RECONFIG 
+    if (cpad >= MAX_CPU_ENGINES)
+#else /*!FEATURE_CPU_RECONFIG*/
     if (cpad >= sysblk.numcpu)
+#endif /*!FEATURE_CPU_RECONFIG*/
         return 3;
 
-    /* Trace SIGP unless Sense, External Call, or Emergency Signal */
-    if (order > SIGP_EMERGENCY)
+    /* Point to CPU register context for the target CPU */
+    tregs = sysblk.regs + cpad;
+
+    /* Trace SIGP unless Sense, External Call, Emergency Signal,
+       or the target CPU is configured offline */
+    if (order > SIGP_EMERGENCY || !tregs->cpuonline)
         logmsg ("CPU%4.4X: SIGP CPU%4.4X %s PARM %8.8X\n",
                 regs->cpuad, cpad,
                 order > SIGP_STOREX ? ordername[0] : ordername[order],
@@ -593,8 +612,19 @@ static char *ordername[] = {    "Unassigned",
     sysblk.sigpbusy = 1;
     release_lock (&sysblk.sigplock);
 
-    /* Point to CPU register context for the target CPU */
-    tregs = sysblk.regs + cpad;
+    /* Obtain the interrupt lock */
+    obtain_lock (&sysblk.intlock);
+
+    /* If the cpu is not part of the configuration then return cc3
+       Initial CPU reset may IML a processor that is currently not
+       part of the configuration, ie configure the cpu implicitly 
+       online */
+    if (order != SIGP_INITRESET && !tregs->cpuonline)
+    {
+        sysblk.sigpbusy = 0;
+        release_lock(&sysblk.intlock);
+        return 3;
+    }
 
     /* Except for the reset orders, return condition code 2 if the
        target CPU is executing a previous start, stop, restart,
@@ -604,157 +634,182 @@ static char *ordername[] = {    "Unassigned",
             || tregs->restart))
     {
         sysblk.sigpbusy = 0;
+        release_lock(&sysblk.intlock);
         return 2;
     }
 
-    /* Obtain the interrupt lock */
-    obtain_lock (&sysblk.intlock);
-
-    /* Process signal according to order code */
-    switch (order)
-    {
-    case SIGP_SENSE:
-        /* Set status bit 24 if external call interrupt pending */
-        if (tregs->extcall)
-            status |= SIGP_STATUS_EXTERNAL_CALL_PENDING;
-
-        /* Set status bit 25 if target CPU is stopped */
-        if (tregs->cpustate != CPUSTATE_STARTED)
-            status |= SIGP_STATUS_STOPPED;
-
-        break;
-
-    case SIGP_EXTCALL:
-        /* Exit with status bit 24 set if a previous external
-           call interrupt is still pending in the target CPU */
-        if (tregs->extcall)
+    /* If the CPU thread is still starting, ie CPU is still performing
+       the IML process then relect an operator intervening status 
+       to the caller */
+    if(tregs->cpustate == CPUSTATE_STARTING)
+        status |= SIGP_STATUS_OPERATOR_INTERVENING;
+    else
+        /* Process signal according to order code */
+        switch (order)
         {
-            status |= SIGP_STATUS_EXTERNAL_CALL_PENDING;
+        case SIGP_SENSE:
+            /* Set status bit 24 if external call interrupt pending */
+            if (tregs->extcall)
+                status |= SIGP_STATUS_EXTERNAL_CALL_PENDING;
+    
+            /* Set status bit 25 if target CPU is stopped */
+            if (tregs->cpustate != CPUSTATE_STARTED)
+                status |= SIGP_STATUS_STOPPED;
+    
             break;
-        }
-
-        /* Raise an external call interrupt pending condition */
-        tregs->cpuint = tregs->extcall = 1;
-        tregs->extccpu = regs->cpuad;
-
-        break;
-
-    case SIGP_EMERGENCY:
-        /* Raise an emergency signal interrupt pending condition */
-        tregs->cpuint = tregs->emersig = 1;
-        tregs->emercpu[regs->cpuad] = 1;
-
-        break;
-
-    case SIGP_START:
-        /* Restart the target CPU if it is in the stopped state */
-        tregs->cpustate = CPUSTATE_STARTED;
-
-        break;
-
-    case SIGP_STOP:
-        /* Put the the target CPU into the stopping state */
-        tregs->cpustate = CPUSTATE_STOPPING;
-
-        break;
-
-    case SIGP_RESTART:
-        /* Make restart interrupt pending in the target CPU */
-        tregs->restart = 1;
-        /* Set cpustate to stopping. If the restart is successful,
-           then the cpustate will be set to started in cpu.c */
-        if(tregs->cpustate == CPUSTATE_STOPPED)
+    
+        case SIGP_EXTCALL:
+            /* Exit with status bit 24 set if a previous external
+               call interrupt is still pending in the target CPU */
+            if (tregs->extcall)
+            {
+                status |= SIGP_STATUS_EXTERNAL_CALL_PENDING;
+                break;
+            }
+    
+            /* Raise an external call interrupt pending condition */
+            tregs->cpuint = tregs->extcall = 1;
+            tregs->extccpu = regs->cpuad;
+    
+            break;
+    
+        case SIGP_EMERGENCY:
+            /* Raise an emergency signal interrupt pending condition */
+            tregs->cpuint = tregs->emersig = 1;
+            tregs->emercpu[regs->cpuad] = 1;
+    
+            break;
+    
+        case SIGP_START:
+            /* Restart the target CPU if it is in the stopped state */
+            tregs->cpustate = CPUSTATE_STARTED;
+    
+            break;
+    
+        case SIGP_STOP:
+            /* Put the the target CPU into the stopping state */
             tregs->cpustate = CPUSTATE_STOPPING;
-
-        break;
-
-    case SIGP_STOPSTORE:
-        /* Indicate store status is required when stopped */
-        tregs->storstat = 1;
-
-        /* Put the the target CPU into the stopping state */
-        tregs->cpustate = CPUSTATE_STOPPING;
-
-        break;
-
-    case SIGP_INITRESET:
-        /* Signal initial CPU reset function */
-        tregs->sigpireset = 1;
-        tregs->cpustate = CPUSTATE_STOPPING;
-
-        break;
-
-    case SIGP_RESET:
-        /* Signal CPU reset function */
-        tregs->sigpreset = 1;
-        tregs->cpustate = CPUSTATE_STOPPING;
-
-        break;
-
-    case SIGP_SETPREFIX:
-        /* Exit with status bit 22 set if CPU is not stopped */
-        if (tregs->cpustate != CPUSTATE_STOPPED)
-        {
-            status |= SIGP_STATUS_INCORRECT_STATE;
+    
             break;
-        }
-
-        /* Obtain new prefix from parameter register bits 1-19 */
-        abs = parm & 0x7FFFF000;
-
-        /* Exit with status bit 23 set if new prefix is invalid */
-        if (abs >= sysblk.mainsize)
-        {
-            status |= SIGP_STATUS_INVALID_PARAMETER;
+    
+        case SIGP_RESTART:
+            /* Make restart interrupt pending in the target CPU */
+            tregs->restart = 1;
+            /* Set cpustate to stopping. If the restart is successful,
+               then the cpustate will be set to started in cpu.c */
+            if(tregs->cpustate == CPUSTATE_STOPPED)
+                tregs->cpustate = CPUSTATE_STOPPING;
+    
             break;
-        }
-
-        /* Load new value into prefix register of target CPU */
-        tregs->pxr = abs;
-
-        /* Invalidate the ALB and TLB of the target CPU */
-        purge_alb (tregs);
-        purge_tlb (tregs);
-
-        /* Perform serialization and checkpoint-sync on target CPU */
-//      perform_serialization (tregs);
-//      perform_chkpt_sync (tregs);
-
-        break;
-
-    case SIGP_STORE:
-        /* Exit with status bit 22 set if CPU is not stopped */
-        if (tregs->cpustate != CPUSTATE_STOPPED)
-        {
-            status |= SIGP_STATUS_INCORRECT_STATE;
+    
+        case SIGP_STOPSTORE:
+            /* Indicate store status is required when stopped */
+            tregs->storstat = 1;
+    
+            /* Put the the target CPU into the stopping state */
+            tregs->cpustate = CPUSTATE_STOPPING;
+    
             break;
-        }
-
-        /* Obtain status address from parameter register bits 1-22 */
-        abs = parm & 0x7FFFFE00;
-
-        /* Exit with status bit 23 set if status address invalid */
-        if (abs >= sysblk.mainsize)
-        {
-            status |= SIGP_STATUS_INVALID_PARAMETER;
+    
+        case SIGP_INITRESET:
+            if(tregs->cpuonline) 
+            {
+                /* Signal initial CPU reset function */
+                tregs->sigpireset = 1;
+                tregs->cpustate = CPUSTATE_STOPPING;
+            }
+            else
+                configure_cpu(tregs);
+    
             break;
-        }
+    
+        case SIGP_RESET:
+            /* Signal CPU reset function */
+            tregs->sigpreset = 1;
+            tregs->cpustate = CPUSTATE_STOPPING;
+    
+            break;
+    
+        case SIGP_SETPREFIX:
+            /* Exit with operator intervening if the status is 
+               stopping, such that a retry can be attempted */
+            if(tregs->cpustate == CPUSTATE_STOPPING)
+            {
+                status |= SIGP_STATUS_OPERATOR_INTERVENING;
+                break;
+            }
 
-        /* Store status at specified main storage address */
-        store_status (tregs, abs);
+            /* Exit with status bit 22 set if CPU is not stopped */
+            if (tregs->cpustate != CPUSTATE_STOPPED)
+            {
+                status |= SIGP_STATUS_INCORRECT_STATE;
+                break;
+            }
+    
+            /* Obtain new prefix from parameter register bits 1-19 */
+            abs = parm & 0x7FFFF000;
+    
+            /* Exit with status bit 23 set if new prefix is invalid */
+            if (abs >= sysblk.mainsize)
+            {
+                status |= SIGP_STATUS_INVALID_PARAMETER;
+                break;
+            }
+    
+            /* Load new value into prefix register of target CPU */
+            tregs->pxr = abs;
+    
+            /* Invalidate the ALB and TLB of the target CPU */
+            purge_alb (tregs);
+            purge_tlb (tregs);
+    
+            /* Perform serialization and checkpoint-sync on target CPU */
+//          perform_serialization (tregs);
+//          perform_chkpt_sync (tregs);
+    
+            break;
+    
+        case SIGP_STORE:
+            /* Exit with operator intervening if the status is 
+               stopping, such that a retry can be attempted */
+            if(tregs->cpustate == CPUSTATE_STOPPING)
+            {
+                status |= SIGP_STATUS_OPERATOR_INTERVENING;
+                break;
+            }
 
-        /* Perform serialization and checkpoint-sync on target CPU */
-//      perform_serialization (tregs);
-//      perform_chkpt_sync (tregs);
-
-        break;
-
-    case SIGP_STOREX:
-
-    default:
-        status = SIGP_STATUS_INVALID_ORDER;
-    } /* end switch(order) */
-
+            /* Exit with status bit 22 set if CPU is not stopped */
+            if (tregs->cpustate != CPUSTATE_STOPPED)
+            {
+                status |= SIGP_STATUS_INCORRECT_STATE;
+                break;
+            }
+    
+            /* Obtain status address from parameter register bits 1-22 */
+            abs = parm & 0x7FFFFE00;
+    
+            /* Exit with status bit 23 set if status address invalid */
+            if (abs >= sysblk.mainsize)
+            {
+                status |= SIGP_STATUS_INVALID_PARAMETER;
+                break;
+            }
+    
+            /* Store status at specified main storage address */
+            store_status (tregs, abs);
+    
+            /* Perform serialization and checkpoint-sync on target CPU */
+//          perform_serialization (tregs);
+//          perform_chkpt_sync (tregs);
+    
+            break;
+    
+        case SIGP_STOREX:
+    
+        default:
+            status = SIGP_STATUS_INVALID_ORDER;
+        } /* end switch(order) */
+    
     /* Release the use of the signalling and response facility */
     sysblk.sigpbusy = 0;
 
@@ -826,7 +881,12 @@ int     i;                              /* Array subscript           */
         sysblk.brdcstncpu = sysblk.numcpu;
 
         /* Redrive all stopped CPU's */
+#ifdef FEATURE_CPU_RECONFIG 
+        for (i = 0; i < MAX_CPU_ENGINES; i++)
+          if(sysblk.regs[i].cpuonline)
+#else /*!FEATURE_CPU_RECONFIG*/
         for (i = 0; i < sysblk.numcpu; i++)
+#endif /*!FEATURE_CPU_RECONFIG*/
             if (sysblk.regs[i].cpustate == CPUSTATE_STOPPED)
                 sysblk.regs[i].cpustate = CPUSTATE_STOPPING;
         signal_condition (&sysblk.intcond);

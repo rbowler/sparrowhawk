@@ -42,6 +42,9 @@
 #define MIPS_COUNTING			/* Display MIPS on ctl panel */
 #define TODCLOCK_DRAG_FACTOR		/* Enable toddrag feature    */
 
+#define VECTOR_SECTION_SIZE     128     /* Vector section size       */
+#define VECTOR_PARTIAL_SUM_NUMBER 1     /* Vector partial sum number */
+
 /*-------------------------------------------------------------------*/
 /* ESA/390 features implemented 				     */
 /*-------------------------------------------------------------------*/
@@ -53,9 +56,11 @@
 #undef	FEATURE_BINARY_FLOATING_POINT
 #undef	FEATURE_BRANCH_AND_SET_AUTHORITY
 #undef	FEATURE_BROADCASTED_PURGING
+#undef  FEATURE_CALLED_SPACE_IDENTIFICATION
 #undef	FEATURE_CHANNEL_SUBSYSTEM
 #undef	FEATURE_CHECKSUM_INSTRUCTION
 #undef	FEATURE_COMPARE_AND_MOVE_EXTENDED
+#undef	FEATURE_CPU_RECONFIG
 #undef	FEATURE_DIRECT_CONTROL
 #undef	FEATURE_DUAL_ADDRESS_SPACE
 #undef	FEATURE_EXPANDED_STORAGE
@@ -79,6 +84,7 @@
 #undef	FEATURE_SUPPRESSION_ON_PROTECTION
 #undef	FEATURE_SYSTEM_CONSOLE
 #undef	FEATURE_TRACING
+#undef	FEATURE_VECTOR_FACILITY
 #undef	FEATURE_4K_STORAGE_KEYS
 
 #if	ARCH == 370
@@ -93,14 +99,16 @@
  #define FEATURE_S370_CHANNEL
 #elif	ARCH == 390
  #define ARCHITECTURE_NAME	"ESA/390"
- #define MAX_CPU_ENGINES	16
+ #define MAX_CPU_ENGINES	6
  #define FEATURE_ACCESS_REGISTERS
  #define FEATURE_BIMODAL_ADDRESSING
  #define FEATURE_BRANCH_AND_SET_AUTHORITY
  #define FEATURE_BROADCASTED_PURGING
+ #define FEATURE_CALLED_SPACE_IDENTIFICATION
  #define FEATURE_CHANNEL_SUBSYSTEM
  #define FEATURE_CHECKSUM_INSTRUCTION
  #define FEATURE_COMPARE_AND_MOVE_EXTENDED
+ #define FEATURE_CPU_RECONFIG
  #define FEATURE_DUAL_ADDRESS_SPACE
  #define FEATURE_EXPANDED_STORAGE
  #define FEATURE_EXTENDED_STORAGE_KEYS
@@ -120,6 +128,7 @@
  #define FEATURE_SUPPRESSION_ON_PROTECTION
  #define FEATURE_SYSTEM_CONSOLE
  #define FEATURE_TRACING
+ #define FEATURE_VECTOR_FACILITY
  #define FEATURE_4K_STORAGE_KEYS
 #else
  #error Either ARCH=370 or ARCH=390 must be specified
@@ -260,6 +269,20 @@ typedef void DEVXF (struct _DEVBLK *dev, BYTE code, BYTE flags,
 typedef int DEVCF (struct _DEVBLK *dev);
 
 /*-------------------------------------------------------------------*/
+/* Structure definition for the Vector Facility 		     */
+/*-------------------------------------------------------------------*/
+#ifdef FEATURE_VECTOR_FACILITY
+typedef struct _VFREGS {		/* Vector Facility Registers*/
+        unsigned int
+                online:1;               /* 1=VF is online            */
+        U64     vsr;                    /* Vector Status Register    */
+        U64     vac;                    /* Vector Activity Count     */
+        BYTE    vmr[VECTOR_SECTION_SIZE/8];  /* Vector Mask Register */
+        U32     vr[16][VECTOR_SECTION_SIZE]; /* Vector Registers     */
+    } VFREGS;
+#endif /*FEATURE_VECTOR_FACILITY*/
+
+/*-------------------------------------------------------------------*/
 /* Structure definition for CPU register context		     */
 /*-------------------------------------------------------------------*/
 typedef struct _REGS {			/* Processor registers	     */
@@ -284,6 +307,7 @@ typedef struct _REGS {			/* Processor registers	     */
 
 	BYTE	cpustate;		/* CPU stopped/started state */
 	unsigned int			/* Flags		     */
+		cpuonline:1,		/* 1=CPU is online           */
 		cpuint:1,		/* 1=There is an interrupt
 					     pending for this CPU    */
 		itimer_pending:1,	/* 1=Interrupt is pending for
@@ -312,6 +336,11 @@ typedef struct _REGS {			/* Processor registers	     */
 	LOCK	serlock;		/* Serialization lock	     */
 #endif /*SMP_SERIALIZATION*/
 #endif /*MAX_CPU_ENGINES > 1*/
+
+#ifdef FEATURE_VECTOR_FACILITY
+        VFREGS  vf;                     /* Vector Facility           */
+#endif /*FEATURE_VECTOR_FACILITY*/
+
 	jmp_buf progjmp;		/* longjmp destination for
 					   program check return      */
     } REGS;
@@ -320,6 +349,7 @@ typedef struct _REGS {			/* Processor registers	     */
 #define CPUSTATE_STOPPED	0	/* CPU is stopped	     */
 #define CPUSTATE_STOPPING	1	/* CPU is stopping	     */
 #define CPUSTATE_STARTED	2	/* CPU is started	     */
+#define CPUSTATE_STARTING       3	/* CPU is starting           */
 
 /*-------------------------------------------------------------------*/
 /* System configuration block					     */
@@ -384,6 +414,7 @@ typedef struct _SYSBLK {
 	FILE   *msgpipew;		/* Message pipe write handle */
 	int	msgpiper;		/* Message pipe read handle  */
 	BYTE	ostailor;		/* OS tailoring setting      */
+        int     pcpu;                   /* Tgt CPU panel cmd & displ */
     } SYSBLK;
 
 /* Definitions for OS tailoring */
@@ -625,6 +656,8 @@ int  attach_device (U16 devnum, U16 devtype, int addargc,
 	BYTE *addargv[]);
 int  detach_device (U16 devnum);
 int  define_device (U16 olddev, U16 newdev);
+int  configure_cpu (REGS *regs);
+int  deconfigure_cpu (REGS *regs);
 
 /* Functions in module panel.c */
 void display_inst (REGS *regs, BYTE *inst);
@@ -640,6 +673,9 @@ void store_psw (PSW *psw, BYTE *addr);
 int  load_psw (PSW *psw, BYTE *addr);
 void program_check (REGS *regs, int code);
 void *cpu_thread (REGS *regs);
+
+/* Functions in vector.c */
+void vector_inst (BYTE *inst, REGS *regs);
 
 /* Functions in module dat.c */
 U16  translate_asn (U16 asn, REGS *regs, U32 *asteo, U32 aste[]);
@@ -808,7 +844,7 @@ int  compare_and_form_codeword (REGS *regs, U32 eaddr);
 int  update_tree (REGS *regs);
 
 /* Functions in module stack.c */
-void form_stack_entry (BYTE etype, U32 retna, U32 calla, REGS *regs);
+void form_stack_entry (BYTE etype, U32 retna, U32 calla, REGS *regs, U32 csi);
 int  program_return_unstack (REGS *regs, U32 *lsedap);
 void extract_stacked_registers (int r1, int r2, REGS *regs);
 int  extract_stacked_state (int rn, BYTE code, REGS *regs);

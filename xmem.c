@@ -946,6 +946,7 @@ U32     retn;                           /* Return address and amode  */
 U32     aste[16];                       /* ASN second table entry    */
 U16     xcode;                          /* Exception code            */
 U16     pasn;                           /* Primary ASN               */
+U32     csi = 0;                        /* Called Space ID           */
 #ifdef FEATURE_TRACING
 U32     newcr12 = 0;                    /* CR12 upon completion      */
 #endif /*FEATURE_TRACING*/
@@ -1167,10 +1168,15 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
     else
     { /* stacking PC */
 
+#ifdef FEATURE_CALLED_SPACE_IDENTIFICATION
+        /* Set the called space identification */
+        csi = (pasn == 0) ? 0 : pasn << 16 || (aste[5] & 0x0000FFFF);
+#endif /*FEATURE_CALLED_SPACE_IDENTIFICATION*/
+
         /* Perform the stacking process */
         retn = regs->psw.ia;
         if (regs->psw.amode) retn |= 0x80000000;
-        form_stack_entry (LSED_UET_PC, retn, pcnum, regs);
+        form_stack_entry (LSED_UET_PC, retn, pcnum, regs, csi);
 
         /* Update the PSW from the entry table */
         regs->psw.amode = (ete[1] & ETE1_AMODE) ? 1 : 0;

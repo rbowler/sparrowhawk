@@ -147,6 +147,12 @@ S64     quot, rem;
 static inline void perform_serialization (REGS *regs)
 {
 #if MAX_CPU_ENGINES > 1 && defined(SMP_SERIALIZATION)
+    /* In order to syncronize mainstorage access we need to flush
+       the cache on all processors, this needs special case when 
+       running on an SMP machine, as the physical CPU's actually
+       need to perform this function.  This is accomplished by
+       obtaining and releasing a mutex lock, which is intended to
+       serialize storage access */
     obtain_lock(&regs->serlock);
     release_lock(&regs->serlock);
 #endif /*SERIALIZATION*/
@@ -304,6 +310,10 @@ REGS   *realregs;                       /* True regs structure       */
         RELEASE_MAINLOCK(realregs);
 #endif /*MAX_CPU_ENGINES > 1*/
 
+    /* Perform serialization and checkpoint synchronization */
+    perform_serialization (regs);
+    perform_chkpt_sync (regs);
+
     /* Set the main storage reference and change bits */
     STORAGE_KEY(regs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
 
@@ -327,7 +337,8 @@ REGS   *realregs;                       /* True regs structure       */
         || code == PGM_STACK_EMPTY_EXCEPTION
         || code == PGM_STACK_SPECIFICATION_EXCEPTION
         || code == PGM_STACK_TYPE_EXCEPTION
-        || code == PGM_STACK_OPERATION_EXCEPTION)
+        || code == PGM_STACK_OPERATION_EXCEPTION
+        || code == PGM_VECTOR_OPERATION_EXCEPTION)
         && regs->instvalid)
     {
         realregs->psw.ia -= realregs->psw.ilc;
@@ -3494,6 +3505,20 @@ static BYTE module[8];                  /* Module name               */
         break;
 #endif /*FEATURE_S370_CHANNEL*/
 
+#ifdef FEATURE_VECTOR_FACILITY
+    case 0xA4:
+    case 0xA5:
+    case 0xA6:
+    case 0xE4:
+    /*---------------------------------------------------------------*/
+    /* Vector Facility instructions                                  */
+    /*---------------------------------------------------------------*/
+
+        vector_inst(inst, regs);
+
+        break;
+#endif /*FEATURE_VECTOR_FACILITY*/
+            
 #ifdef FEATURE_IMMEDIATE_AND_RELATIVE
     case 0xA7:
     /*---------------------------------------------------------------*/
@@ -5422,7 +5447,7 @@ static BYTE module[8];                  /* Module name               */
 #endif /*FEATURE_TRACING*/
 
             /* Form the linkage stack entry */
-            form_stack_entry (LSED_UET_BAKR, n1, n2, regs);
+            form_stack_entry (LSED_UET_BAKR, n1, n2, regs, 0);
 
 #ifdef FEATURE_TRACING
             /* Update CR12 to reflect the new branch trace entry */
@@ -6073,6 +6098,17 @@ static BYTE module[8];                  /* Module name               */
         /* Perform serialization after completing operation */
         perform_serialization (regs);
 
+#if MAX_CPU_ENGINES > 1
+        /* It this is a failed compare and swap
+           and there is more then 1 CPU in the configuration 
+           and there is no broadcast synchronization in progress
+           then call the hypervisor to end this timeslice,
+           this to prevent this virtual CPU monopolizing 
+           the physical CPU on a spinlock */
+        if(regs->psw.cc && sysblk.numcpu > 1 && sysblk.brdcstncpu == 0)
+            usleep(1L);
+#endif MAX_CPU_ENGINES > 1
+
         break;
 
     case 0xBB:
@@ -6125,6 +6161,17 @@ static BYTE module[8];                  /* Module name               */
 
         /* Perform serialization after completing operation */
         perform_serialization (regs);
+
+#if MAX_CPU_ENGINES > 1
+        /* It this is a failed compare and swap
+           and there is more then 1 CPU in the configuration 
+           and there is no broadcast synchronization in progress
+           then call the hypervisor to end this timeslice,
+           this to prevent this virtual CPU monopolizing 
+           the physical CPU on a spinlock */
+        if(regs->psw.cc && sysblk.numcpu > 1 && sysblk.brdcstncpu == 0)
+            usleep(1L);
+#endif MAX_CPU_ENGINES > 1
 
         break;
 
@@ -7185,10 +7232,40 @@ int     icidx;                          /* Instruction counter index */
     logmsg ("HHC622I CPU%4.4X priority adjusted to %d\n",
             regs->cpuad, getpriority(PRIO_PROCESS,0));
 
+#ifdef FEATURE_VECTOR_FACILITY
+    if (regs->vf.online)
+        logmsg ("HHC625I CPU%4.4X Vector Facility online\n",
+                regs->cpuad);
+#endif /*FEATURE_VECTOR_FACILITY*/
+
 #ifdef INSTRUCTION_COUNTING
     /* Clear instruction counters */
     memset (&instcount, 0, sizeof(instcount));
 #endif /*INSTRUCTION_COUNTING*/
+
+    /* Add this CPU to the configuration. Also ajust  
+       the number of CPU's to perform synchronisation as the 
+       synchonization process relies on the number of CPU's
+       in the configuration to accurate */
+    obtain_lock(&sysblk.intlock);
+    if(regs->cpustate != CPUSTATE_STARTING)
+    {
+        logmsg("HHC623I CPU%4.4X thread already started\n",
+            regs->cpuad);
+        release_lock(&sysblk.intlock);
+        return NULL;
+    }
+    sysblk.numcpu++;
+#if MAX_CPU_ENGINES > 1
+    if (sysblk.brdcstncpu != 0)
+        sysblk.brdcstncpu++;
+#endif /*MAX_CPU_ENGINES > 1*/
+
+    /* Perform initial cpu reset */
+    initial_cpu_reset(regs);
+
+    /* release the intlock */
+    release_lock(&sysblk.intlock);
 
     /* Establish longjmp destination for program check */
     setjmp(regs->progjmp);
@@ -7237,13 +7314,21 @@ int     icidx;                          /* Instruction counter index */
             {
                 /* If a machine check is pending and we are enabled for
                    machine checks then take the interrupt */
-                if (sysblk.mckpending && regs->psw.mach)
+                if (sysblk.mckpending && regs->psw.mach) 
+                {
+                    perform_serialization (regs);
+                    perform_chkpt_sync (regs);
                     perform_mck_interrupt (regs);
+                }
 
                 /* If enabled for external interrupts, invite the
                    service processor to present a pending interrupt */
                 if (regs->psw.sysmask & PSW_EXTMASK)
+                {
+                    perform_serialization (regs);
+                    perform_chkpt_sync (regs);
                     perform_external_interrupt (regs);
+                }
 
                 /* If an I/O interrupt is pending, and this CPU is
                    enabled for I/O interrupts, invite the channel
@@ -7256,17 +7341,13 @@ int     icidx;                          /* Instruction counter index */
                     (regs->psw.sysmask & PSW_IOMASK)
 #endif /*!FEATURE_BCMODE*/
                    )
+                {
+                    perform_serialization (regs);
+                    perform_chkpt_sync (regs);
                     perform_io_interrupt (regs);
+                }
 
             } /*if(cpustate == CPU_STARTED)*/
-
-            /* Perform restart interrupt if pending */
-            if (regs->restart)
-            {
-                regs->restart = 0;
-                rc = psw_restart (regs);
-                if (rc == 0) regs->cpustate = CPUSTATE_STARTED;
-            }
 
             /* If CPU is stopping, change status to stopped */
             if (regs->cpustate == CPUSTATE_STOPPING)
@@ -7274,13 +7355,52 @@ int     icidx;                          /* Instruction counter index */
                 /* Change CPU status to stopped */
                 regs->cpustate = CPUSTATE_STOPPED;
 
+                if (!regs->cpuonline)
+                {
+                    /* Remove this CPU from the configuration. Only do this
+                       when no synchronization is in progress as the 
+                       synchonization process relies on the number of CPU's
+                       in the configuration to accurate. The first thing
+                       we do during interrupt processing is synchronize
+                       the broadcast functions so we are safe to manipulate
+                       the number of CPU's in the configuration.  */
+
+                    sysblk.numcpu--;
+
+#ifdef FEATURE_VECTOR_FACILITY
+                    /* Mark Vector Facility offline */
+                    regs->vf.online = 0;
+#endif /*FEATURE_VECTOR_FACILITY*/
+    
+                    /* Clear all regs */
+                    initial_cpu_reset(regs);
+
+                    /* Display thread ended message on control panel */
+                    logmsg ("HHC624I CPU%4.4X thread ended: tid=%8.8lX, pid=%d\n",
+                            regs->cpuad, thread_id(), getpid());
+
+                    release_lock(&sysblk.intlock);
+
+                    /* Thread exit */
+                    regs->cputid = 0;
+                    return NULL;
+                }
+
                 /* If initial CPU reset pending then perform reset */
                 if (regs->sigpireset)
+                {
+                    perform_serialization (regs);
+                    perform_chkpt_sync (regs);
                     initial_cpu_reset(regs);
+                }
 
                 /* If a CPU reset is pending then perform the reset */
                 if (regs->sigpreset)
+                {
+                    perform_serialization (regs);
+                    perform_chkpt_sync (regs);
                     cpu_reset(regs);
+                }
 
                 /* Store status at absolute location 0 if requested */
                 if (regs->storstat)
@@ -7288,7 +7408,17 @@ int     icidx;                          /* Instruction counter index */
                     regs->storstat = 0;
                     store_status (regs, 0);
                 }
-            }
+            } /* end if(cpustate == STOPPING) */
+
+            /* Perform restart interrupt if pending */
+            if (regs->restart)
+            {
+                perform_serialization (regs);
+                perform_chkpt_sync (regs);
+                regs->restart = 0;
+                rc = psw_restart (regs);
+                if (rc == 0) regs->cpustate = CPUSTATE_STARTED;
+            } /* end if(restart) */
 
             /* This is where a stopped CPU will wait */
             if (regs->cpustate == CPUSTATE_STOPPED)
@@ -7298,7 +7428,7 @@ int     icidx;                          /* Instruction counter index */
                     wait_condition (&sysblk.intcond, &sysblk.intlock);
                 release_lock (&sysblk.intlock);
                 continue;
-            }
+            } /* end if(cpustate == STOPPED) */
 
             /* Test for wait state */
             if (regs->psw.wait)
@@ -7327,7 +7457,7 @@ int     icidx;                          /* Instruction counter index */
                 wait_condition (&sysblk.intcond, &sysblk.intlock);
                 release_lock (&sysblk.intlock);
                 continue;
-            }
+            } /* end if(wait) */
 
             /* Reset disabled wait state indicator */
             diswait = 0;
@@ -7411,6 +7541,13 @@ int     icidx;                          /* Instruction counter index */
 //      if (regs->inst[0] == 0xFC) sysblk.inststep = 1; /*MP*/
 //      if (regs->inst[0] == 0xFD) tracethis = 1; /*DP*/
 //      if (regs->inst[0] == 0x83 && regs->inst[2] == 0x02 && regs->inst[3] == 0x14) sysblk.inststep = 1; /*Diagnose 214*/
+
+#if 0
+        if (regs->inst[0] == 0xA4  /* Trace the Vector Facility */
+         || regs->inst[0] == 0xA5
+         || regs->inst[0] == 0xA6
+         || regs->inst[0] == 0xE4) tracethis = 1;
+#endif
 
         /* Test for breakpoint */
         shouldbreak = sysblk.instbreak
