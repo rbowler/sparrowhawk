@@ -6,7 +6,11 @@
 /* instructions described in the manual GA22-7079-01.                */
 /*-------------------------------------------------------------------*/
 
+/*              Instruction decode rework - Jan Jaeger               */
+
 #include "hercules.h"
+
+#include "opcode.h"
 
 /*-------------------------------------------------------------------*/
 /* Control block offsets fixed by architecture                       */
@@ -32,53 +36,13 @@
 
 
 /*-------------------------------------------------------------------*/
-/* Fetch a fullword from absolute storage.                           */
-/* All bytes of the word are fetched concurrently as observed by     */
-/* other CPUs.  The fullword is first fetched as an integer, then    */
-/* the bytes are reversed into host byte order if necessary.         */
+/* E504       - Obtain Local Lock                              [SSE] */
 /*-------------------------------------------------------------------*/
-static inline U32 fetch_fullword_absolute (U32 addr)
+void zz_obtain_local_lock (BYTE inst[], int execflag, REGS *regs)
 {
-U32     i;
-
-    /* Set the main storage reference bit */
-    STORAGE_KEY(addr) |= STORKEY_REF;
-
-    /* Fetch the fullword from absolute storage */
-    i = *((U32*)(sysblk.mainstor + addr));
-    return ntohl(i);
-} /* end function fetch_fullword_absolute */
-
-/*-------------------------------------------------------------------*/
-/* Store a fullword into absolute storage.                           */
-/* All bytes of the word are stored concurrently as observed by      */
-/* other CPUs.  The bytes of the word are reversed if necessary      */
-/* and the word is then stored as an integer in absolute storage.    */
-/*-------------------------------------------------------------------*/
-static inline void store_fullword_absolute (U32 value, U32 addr)
-{
-U32     i;
-
-    /* Set the main storage reference and change bits */
-    STORAGE_KEY(addr) |= (STORKEY_REF | STORKEY_CHANGE);
-
-    /* Store the fullword into absolute storage */
-    i = htonl(value);
-    *((U32*)(sysblk.mainstor + addr)) = i;
-} /* end function store_fullword_absolute */
-
-/*-------------------------------------------------------------------*/
-/* Obtain Local Lock                                                 */
-/*                                                                   */
-/* Input:                                                            */
-/*      addr1   Logical address of ASCB pointer                      */
-/*      ar1     Access register number associated with operand 1     */
-/*      addr2   Logical address of highest lock held indicators      */
-/*      ar2     Access register number associated with operand 1     */
-/*-------------------------------------------------------------------*/
-void obtain_local_lock (U32 addr1, int ar1, U32 addr2, int ar2,
-                        REGS *regs)
-{
+int     b1, b2;                         /* Values of base field      */
+U32     effective_addr1,
+        effective_addr2;                /* Effective addresses       */
 U32     ascb_addr;                      /* Virtual address of ASCB   */
 U32     hlhi_word;                      /* Highest lock held word    */
 U32     lit_addr;                       /* Virtual address of lock
@@ -87,43 +51,45 @@ U32     lock;                           /* Lock value                */
 U32     lcpa;                           /* Logical CPU address       */
 U32     newia;                          /* Unsuccessful branch addr  */
 
+    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+
     PRIV_CHECK(regs);
 
     /* Specification exception if operands are not on word boundary */
-    if ((addr1 & 0x00000003) || (addr2 & 0x00000003))
-    {
+    if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
         program_check (regs, PGM_SPECIFICATION_EXCEPTION);
-        return;
-    }
+
+    PERFORM_SERIALIZATION(regs);
 
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
     /* Load ASCB address from first operand location */
-    ascb_addr = vfetch4 ( addr1, ar1, regs );
+    ascb_addr = vfetch4 ( effective_addr1, b1, regs );
 
     /* Load locks held bits from second operand location */
-    hlhi_word = vfetch4 ( addr2, ar2, regs );
+    hlhi_word = vfetch4 ( effective_addr2, b2, regs );
 
     /* Fetch our logical CPU address from PSALCPUA */
-    lcpa = fetch_fullword_absolute ( PSALCPUA + regs->pxr);
+    lcpa = vfetch4 ( PSALCPUA, 0, regs );
 
     /* Fetch the local lock from the ASCB */
     lock = vfetch4 ( ascb_addr + ASCBLOCK, 0, regs );
 
     /* Obtain the local lock if not already held by any CPU */
-    if (lock == 0 && (hlhi_word & PSALCLLI) == 0)
+    if (lock == 0
+        && (hlhi_word & PSALCLLI) == 0)
     {
         /* Store the unchanged value into the second operand to
            ensure suppression in the event of an access exception */
-        vstore4 ( hlhi_word, addr2, ar2, regs );
+        vstore4 ( hlhi_word, effective_addr2, b2, regs );
 
         /* Store our logical CPU address in ASCBLOCK */
         vstore4 ( lcpa, ascb_addr + ASCBLOCK, 0, regs );
 
         /* Set the local lock held bit in the second operand */
         hlhi_word |= PSALCLLI;
-        vstore4 ( hlhi_word, addr2, ar2, regs );
+        vstore4 ( hlhi_word, effective_addr2, b2, regs );
 
         /* Set register 13 to zero to indicate lock obtained */
         regs->gpr[13] = 0;
@@ -133,7 +99,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
         /* Fetch the lock interface table address from the
            second word of the second operand, and load the
            new instruction address and amode from LITOLOC */
-        lit_addr = vfetch4 ( addr2 + 4, ar2, regs );
+        lit_addr = vfetch4 ( effective_addr2 + 4, b2, regs );
         newia = vfetch4 ( lit_addr + LITOLOC, 0, regs );
 
         /* Save the link information in register 12 */
@@ -149,20 +115,19 @@ U32     newia;                          /* Unsuccessful branch addr  */
     /* Release main-storage access lock */
     RELEASE_MAINLOCK(regs);
 
+    PERFORM_SERIALIZATION(regs);
+
 } /* end function obtain_local_lock */
 
+
 /*-------------------------------------------------------------------*/
-/* Release Local Lock                                                */
-/*                                                                   */
-/* Input:                                                            */
-/*      addr1   Logical address of ASCB pointer                      */
-/*      ar1     Access register number associated with operand 1     */
-/*      addr2   Logical address of highest lock held indicators      */
-/*      ar2     Access register number associated with operand 1     */
+/* E505       - Release Local Lock                             [SSE] */
 /*-------------------------------------------------------------------*/
-void release_local_lock (U32 addr1, int ar1, U32 addr2, int ar2,
-                        REGS *regs)
+void zz_release_local_lock (BYTE inst[], int execflag, REGS *regs)
 {
+int     b1, b2;                         /* Values of base field      */
+U32     effective_addr1,
+        effective_addr2;                /* Effective addresses       */
 U32     ascb_addr;                      /* Virtual address of ASCB   */
 U32     hlhi_word;                      /* Highest lock held word    */
 U32     lit_addr;                       /* Virtual address of lock
@@ -172,26 +137,25 @@ U32     susp;                           /* Lock suspend queue        */
 U32     lcpa;                           /* Logical CPU address       */
 U32     newia;                          /* Unsuccessful branch addr  */
 
+    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+
     PRIV_CHECK(regs);
 
     /* Specification exception if operands are not on word boundary */
-    if ((addr1 & 0x00000003) || (addr2 & 0x00000003))
-    {
+    if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
         program_check (regs, PGM_SPECIFICATION_EXCEPTION);
-        return;
-    }
 
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
     /* Load ASCB address from first operand location */
-    ascb_addr = vfetch4 ( addr1, ar1, regs );
+    ascb_addr = vfetch4 ( effective_addr1, b1, regs );
 
     /* Load locks held bits from second operand location */
-    hlhi_word = vfetch4 ( addr2, ar2, regs );
+    hlhi_word = vfetch4 ( effective_addr2, b2, regs );
 
     /* Fetch our logical CPU address from PSALCPUA */
-    lcpa = fetch_fullword_absolute ( PSALCPUA + regs->pxr );
+    lcpa = vfetch4 ( PSALCPUA, 0, regs );
 
     /* Fetch the local lock and the suspend queue from the ASCB */
     lock = vfetch4 ( ascb_addr + ASCBLOCK, 0, regs );
@@ -205,14 +169,14 @@ U32     newia;                          /* Unsuccessful branch addr  */
     {
         /* Store the unchanged value into the second operand to
            ensure suppression in the event of an access exception */
-        vstore4 ( hlhi_word, addr2, ar2, regs );
+        vstore4 ( hlhi_word, effective_addr2, b2, regs );
 
         /* Set the local lock to zero */
         vstore4 ( 0, ascb_addr + ASCBLOCK, 0, regs );
 
         /* Clear the local lock held bit in the second operand */
         hlhi_word &= ~PSALCLLI;
-        vstore4 ( hlhi_word, addr2, ar2, regs );
+        vstore4 ( hlhi_word, effective_addr2, b2, regs );
 
         /* Set register 13 to zero to indicate lock released */
         regs->gpr[13] = 0;
@@ -222,7 +186,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
         /* Fetch the lock interface table address from the
            second word of the second operand, and load the
            new instruction address and amode from LITRLOC */
-        lit_addr = vfetch4 ( addr2 + 4, ar2, regs );
+        lit_addr = vfetch4 ( effective_addr2 + 4, b2, regs );
         newia = vfetch4 ( lit_addr + LITRLOC, 0, regs );
 
         /* Save the link information in register 12 */
@@ -240,18 +204,15 @@ U32     newia;                          /* Unsuccessful branch addr  */
 
 } /* end function release_local_lock */
 
+
 /*-------------------------------------------------------------------*/
-/* Obtain CMS Lock                                                   */
-/*                                                                   */
-/* Input:                                                            */
-/*      addr1   Logical address of ASCB pointer                      */
-/*      ar1     Access register number associated with operand 1     */
-/*      addr2   Logical address of highest lock held indicators      */
-/*      ar2     Access register number associated with operand 1     */
+/* E506       - Obtain CMS Lock                                [SSE] */
 /*-------------------------------------------------------------------*/
-void obtain_cms_lock (U32 addr1, int ar1, U32 addr2, int ar2,
-                        REGS *regs)
+void zz_obtain_cms_lock (BYTE inst[], int execflag, REGS *regs)
 {
+int     b1, b2;                         /* Values of base field      */
+U32     effective_addr1,
+        effective_addr2;                /* Effective addresses       */
 U32     ascb_addr;                      /* Virtual address of ASCB   */
 U32     hlhi_word;                      /* Highest lock held word    */
 U32     lit_addr;                       /* Virtual address of lock
@@ -261,14 +222,15 @@ int     lock_arn;                       /* Lock access register      */
 U32     lock;                           /* Lock value                */
 U32     newia;                          /* Unsuccessful branch addr  */
 
+    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+
     PRIV_CHECK(regs);
 
     /* Specification exception if operands are not on word boundary */
-    if ((addr1 & 0x00000003) || (addr2 & 0x00000003))
-    {
+    if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
         program_check (regs, PGM_SPECIFICATION_EXCEPTION);
-        return;
-    }
+
+    PERFORM_SERIALIZATION(regs);
 
     /* General register 11 contains the lock address */
     lock_addr = regs->gpr[11] & ADDRESS_MAXWRAP(regs);
@@ -278,10 +240,10 @@ U32     newia;                          /* Unsuccessful branch addr  */
     OBTAIN_MAINLOCK(regs);
 
     /* Load ASCB address from first operand location */
-    ascb_addr = vfetch4 ( addr1, ar1, regs );
+    ascb_addr = vfetch4 ( effective_addr1, b1, regs );
 
     /* Load locks held bits from second operand location */
-    hlhi_word = vfetch4 ( addr2, ar2, regs );
+    hlhi_word = vfetch4 ( effective_addr2, b2, regs );
 
     /* Fetch the lock addressed by general register 11 */
     lock = vfetch4 ( lock_addr, lock_arn, regs );
@@ -293,14 +255,14 @@ U32     newia;                          /* Unsuccessful branch addr  */
     {
         /* Store the unchanged value into the second operand to
            ensure suppression in the event of an access exception */
-        vstore4 ( hlhi_word, addr2, ar2, regs );
+        vstore4 ( hlhi_word, effective_addr2, b2, regs );
 
         /* Store the ASCB address in the CMS lock */
         vstore4 ( ascb_addr, lock_addr, lock_arn, regs );
 
         /* Set the CMS lock held bit in the second operand */
         hlhi_word |= PSACMSLI;
-        vstore4 ( hlhi_word, addr2, ar2, regs );
+        vstore4 ( hlhi_word, effective_addr2, b2, regs );
 
         /* Set register 13 to zero to indicate lock obtained */
         regs->gpr[13] = 0;
@@ -310,7 +272,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
         /* Fetch the lock interface table address from the
            second word of the second operand, and load the
            new instruction address and amode from LITOCMS */
-        lit_addr = vfetch4 ( addr2 + 4, ar2, regs );
+        lit_addr = vfetch4 ( effective_addr2 + 4, b2, regs );
         newia = vfetch4 ( lit_addr + LITOCMS, 0, regs );
 
         /* Save the link information in register 12 */
@@ -326,20 +288,19 @@ U32     newia;                          /* Unsuccessful branch addr  */
     /* Release main-storage access lock */
     RELEASE_MAINLOCK(regs);
 
+    PERFORM_SERIALIZATION(regs);
+
 } /* end function obtain_cms_lock */
 
+
 /*-------------------------------------------------------------------*/
-/* Release CMS Lock                                                  */
-/*                                                                   */
-/* Input:                                                            */
-/*      addr1   Logical address of ASCB pointer                      */
-/*      ar1     Access register number associated with operand 1     */
-/*      addr2   Logical address of highest lock held indicators      */
-/*      ar2     Access register number associated with operand 1     */
+/* E507       - Release CMS Lock                               [SSE] */
 /*-------------------------------------------------------------------*/
-void release_cms_lock (U32 addr1, int ar1, U32 addr2, int ar2,
-                        REGS *regs)
+void zz_release_cms_lock (BYTE inst[], int execflag, REGS *regs)
 {
+int     b1, b2;                         /* Values of base field      */
+U32     effective_addr1,
+        effective_addr2;                /* Effective addresses       */
 U32     ascb_addr;                      /* Virtual address of ASCB   */
 U32     hlhi_word;                      /* Highest lock held word    */
 U32     lit_addr;                       /* Virtual address of lock
@@ -350,14 +311,13 @@ U32     lock;                           /* Lock value                */
 U32     susp;                           /* Lock suspend queue        */
 U32     newia;                          /* Unsuccessful branch addr  */
 
+    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+
     PRIV_CHECK(regs);
 
     /* Specification exception if operands are not on word boundary */
-    if ((addr1 & 0x00000003) || (addr2 & 0x00000003))
-    {
+    if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
         program_check (regs, PGM_SPECIFICATION_EXCEPTION);
-        return;
-    }
 
     /* General register 11 contains the lock address */
     lock_addr = regs->gpr[11] & ADDRESS_MAXWRAP(regs);
@@ -367,10 +327,10 @@ U32     newia;                          /* Unsuccessful branch addr  */
     OBTAIN_MAINLOCK(regs);
 
     /* Load ASCB address from first operand location */
-    ascb_addr = vfetch4 ( addr1, ar1, regs );
+    ascb_addr = vfetch4 ( effective_addr1, b1, regs );
 
     /* Load locks held bits from second operand location */
-    hlhi_word = vfetch4 ( addr2, ar2, regs );
+    hlhi_word = vfetch4 ( effective_addr2, b2, regs );
 
     /* Fetch the CMS lock and the suspend queue word */
     lock = vfetch4 ( lock_addr, lock_arn, regs );
@@ -384,14 +344,14 @@ U32     newia;                          /* Unsuccessful branch addr  */
     {
         /* Store the unchanged value into the second operand to
            ensure suppression in the event of an access exception */
-        vstore4 ( hlhi_word, addr2, ar2, regs );
+        vstore4 ( hlhi_word, effective_addr2, b2, regs );
 
         /* Set the CMS lock to zero */
         vstore4 ( 0, lock_addr, lock_arn, regs );
 
         /* Clear the CMS lock held bit in the second operand */
         hlhi_word &= ~PSACMSLI;
-        vstore4 ( hlhi_word, addr2, ar2, regs );
+        vstore4 ( hlhi_word, effective_addr2, b2, regs );
 
         /* Set register 13 to zero to indicate lock released */
         regs->gpr[13] = 0;
@@ -401,7 +361,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
         /* Fetch the lock interface table address from the
            second word of the second operand, and load the
            new instruction address and amode from LITRCMS */
-        lit_addr = vfetch4 ( addr2 + 4, ar2, regs );
+        lit_addr = vfetch4 ( effective_addr2 + 4, b2, regs );
         newia = vfetch4 ( lit_addr + LITRCMS, 0, regs );
 
         /* Save the link information in register 12 */

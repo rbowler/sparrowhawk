@@ -10,6 +10,8 @@
 /* Additional credits:                                               */
 /*      Write Update Key and Data CCW by Jan Jaeger                  */
 /*      Track overflow support added by Jay Maynard                  */
+/*      Track overflow fixes by Jay Maynard, suggested by Valery     */
+/*        Pogonchenko                                                */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -380,7 +382,20 @@ U32             highcyl;                /* Highest cyl# in CKD file  */
         tracklen = 47968;
         har0len = 1088;
         formula = 1;
-        f1 = 32; f2 = 1; f3 = 0xEC; f4 = 0; f5 = 0xEC; f6 = 0;
+        f1 = 32; f2 = 1; f3 = 236; f4 = 0; f5 = 236; f6 = 0;
+        rpscalc = 0x5007;
+        break;
+    case 0x3375:
+        cutype = 0x3880; cumodel = 0x03; cucode = 0x10;
+        devmodel = 0x02; sctlfeat = 0x50000003;
+        devtcode = 0x0E;
+        dev->ckdsectors = 196;
+        dev->ckdmaxr0len = 36000;
+        dev->ckdmaxr1len = 35616;
+        tracklen = 36000;
+        har0len = 832;
+        formula = 1;
+        f1 = 32; f2 = 1; f3 = 160; f4 = 0; f5 = 160; f6 = 0;
         rpscalc = 0x5007;
         break;
     case 0x3350:
@@ -391,6 +406,19 @@ U32             highcyl;                /* Highest cyl# in CKD file  */
         dev->ckdmaxr1len = 19069;
         tracklen = 19254;
         har0len = 185;
+        sctlfeat = 0x50000103;
+        formula = 0;
+        f1 = 0; f2 = 0; f3 = 0; f4 = 0; f5 = 0; f6 = 0;
+        rpscalc = 0x0000;
+        break;
+    case 0x3340:
+        cutype = 0x3830; cumodel = 0x02; cucode = 0x00;
+        devmodel = 0x00; devtcode = 0x00;
+        dev->ckdsectors = 64;
+        dev->ckdmaxr0len = 8535;
+        dev->ckdmaxr1len = 8368;
+        tracklen = 8535;
+        har0len = 167;
         sctlfeat = 0x50000103;
         formula = 0;
         f1 = 0; f2 = 0; f3 = 0; f4 = 0; f5 = 0; f6 = 0;
@@ -467,16 +495,16 @@ U32             highcyl;                /* Highest cyl# in CKD file  */
     dev->devchar[25] = f3;
     dev->devchar[26] = f4;
     dev->devchar[27] = f5;
-    dev->devchar[28] = (dev->ckdcyls >> 8) & 0xFF;
-    dev->devchar[29] = dev->ckdcyls & 0xFF;
+    dev->devchar[28] = 0;	// alternate tracks
+    dev->devchar[29] = 0;	//   first cylinder
     dev->devchar[30] = 0;
     dev->devchar[31] = 0;
-    dev->devchar[32] = (dev->ckdcyls >> 8) & 0xFF;
-    dev->devchar[33] = dev->ckdcyls & 0xFF;
+    dev->devchar[32] = 0;	// diagnostic tracks
+    dev->devchar[33] = 0;	//   first cylinder
     dev->devchar[34] = 0;
     dev->devchar[35] = 0;
-    dev->devchar[36] = (dev->ckdcyls >> 8) & 0xFF;
-    dev->devchar[37] = dev->ckdcyls & 0xFF;
+    dev->devchar[36] = 0;	// device support tracks
+    dev->devchar[37] = 0;       //   first cylinder
     dev->devchar[38] = 0;
     dev->devchar[39] = 0;
     dev->devchar[40] = devtcode;
@@ -490,6 +518,8 @@ U32             highcyl;                /* Highest cyl# in CKD file  */
     dev->devchar[48] = f6;
     dev->devchar[49] = (rpscalc >> 8) & 0xFF;
     dev->devchar[50] = rpscalc & 0xFF;
+    dev->devchar[56] = 0xFF;	// real CU type code
+    dev->devchar[57] = 0xFF;	// real device type code
     dev->numdevchar = 64;
 
     /* Activate I/O tracing */
@@ -559,7 +589,12 @@ static void ckd_build_sense ( DEVBLK *dev, BYTE sense0, BYTE sense1,
     /* Sense byte 3 contains the residual locate record count
        if imprecise ending is indicated in sense byte 1 */
     if (sense1 & SENSE1_IE)
-        dev->sense[3] = dev->ckdlcount;
+    {
+        if (dev->ckdtrkof)
+            dev->sense[3] = dev->ckdcuroper;
+        else
+            dev->sense[3] = dev->ckdlcount;
+    }
 
     /* Sense byte 4 is the physical device address */
     dev->sense[4] = 0;
@@ -761,7 +796,10 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
     if (dev->ckdlcount == 0
         && dev->ckdcurhead >= dev->ckdheads - 1)
     {
-        ckd_build_sense (dev, 0, SENSE1_EOC, 0, 0, 0);
+	if (dev->ckdtrkof)
+            ckd_build_sense (dev, 0, SENSE1_EOC | SENSE1_IE, 0, 0, 0);
+        else
+            ckd_build_sense (dev, 0, SENSE1_EOC, 0, 0, 0);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -784,7 +822,10 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
                 || (cyl == dev->ckdxecyl && head > dev->ckdxehead)
             )))
     {
-        ckd_build_sense (dev, 0, SENSE1_FP, 0, 0, 0);
+	if (dev->ckdtrkof)
+            ckd_build_sense (dev, 0, SENSE1_FP | SENSE1_IE, 0, 0, 0);
+        else
+            ckd_build_sense (dev, 0, SENSE1_FP, 0, 0, 0);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -862,7 +903,7 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
         dev->ckdorient = CKDORIENT_COUNT;
         dev->ckdcurkl = rechdr->klen;
         dev->ckdcurdl = (rechdr->dlen[0] << 8) + rechdr->dlen[1];
-        dev->ckdtrkof = rechdr->cyl[0] >> 7;
+        dev->ckdtrkof = (rechdr->cyl[0] == 0xFF) ? 0 : rechdr->cyl[0] >> 7;
 
         DEVTRACE("ckddasd: cyl %d head %d record %d kl %d dl %d of %d\n",
                 dev->ckdcurcyl, dev->ckdcurhead, dev->ckdcurrec,
@@ -1496,6 +1537,10 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             && (code & 0x7F) != 0x22))
         dev->ckdxmark = 0;
 
+    /* Note current operation for track overflow sense byte 3 */
+    dev->ckdcuroper = (IS_CCW_READ(code)) ? 6 :
+        ((IS_CCW_WRITE(code)) ? 5 : 0);
+
     /* Process depending on CCW opcode */
     switch (code) {
 
@@ -1648,8 +1693,8 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         rc = ckd_read_data (dev, code, iobuf, unitstat);
         if (rc < 0) break;
 
-	/* If track overflow and more data requested, read it too */
-	while (dev->ckdtrkof && (*residual > 0))
+	/* If track overflow, keep reading */
+	while (dev->ckdtrkof)
 	{
 	    /* Advance to next track */
 	    rc = mt_advance (dev, unitstat);
@@ -1750,8 +1795,8 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         rc = ckd_read_data (dev, code, iobuf+dev->ckdcurkl, unitstat);
         if (rc < 0) break;
 
-	/* If track overflow and more data requested, read it too */
-	while (dev->ckdtrkof && (*residual > 0))
+	/* If track overflow, keep reading */
+	while (dev->ckdtrkof)
 	{
 	    /* Advance to next track */
 	    rc = mt_advance (dev, unitstat);
@@ -2010,6 +2055,64 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
 
         break;
 
+    case 0x19:
+    /*---------------------------------------------------------------*/
+    /* WRITE HOME ADDRESS                                            */
+    /*---------------------------------------------------------------*/
+        /* For 3990, command reject if not preceded by Seek, Seek Cyl,
+           Locate Record, Read IPL, or Recalibrate command */
+        if (dev->ckd3990
+            && dev->ckdseek == 0 && dev->ckdskcyl == 0
+            && dev->ckdlocat == 0 && dev->ckdrdipl == 0
+            && dev->ckdrecal == 0)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Check operation code if within domain of a Locate Record */
+        if (dev->ckdlcount > 0)
+        {
+            if (!((dev->ckdloper & CKDOPER_CODE) == CKDOPER_RDDATA
+                  || ((dev->ckdloper & CKDOPER_CODE) == CKDOPER_READ
+                      && (dev->ckdloper & CKDOPER_ORIENTATION)
+                                == CKDOPER_ORIENT_INDEX
+                    )))
+            {
+                ckd_build_sense (dev, SENSE_CR, 0, 0,
+                                FORMAT_0, MESSAGE_2);
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                break;
+            }
+        }
+
+        /* File protected if file mask does not allow Write HA */
+        if ((dev->ckdfmask & CKDMASK_WRCTL) != CKDMASK_WRCTL_ALLWRT)
+        {
+            ckd_build_sense (dev, 0, SENSE1_FP, 0, 0, 0);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Seek to beginning of track */
+        rc = ckd_seek (dev, dev->ckdcurcyl, dev->ckdcurhead,
+                        &trkhdr, unitstat);
+        if (rc < 0) break;
+
+        /* Calculate number of bytes to write and set residual count */
+        size = CKDDASD_TRKHDR_SIZE;
+        num = (count < size) ? count : size;
+	/* FIXME: what devices want 5 bytes, what ones want 7, and what
+		ones want 11? Do this right when we figure that out */
+        *residual = 0;
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+
+        break;
+
     case 0x1E:
     case 0x9E:
     /*---------------------------------------------------------------*/
@@ -2070,8 +2173,8 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
                             unitstat);
         if (rc < 0) break;
 
-	/* If track overflow and more data requested, read it too */
-	while (dev->ckdtrkof && (*residual > 0))
+	/* If track overflow, keep reading */
+	while (dev->ckdtrkof)
 	{
 	    /* Advance to next track */
 	    rc = mt_advance (dev, unitstat);
@@ -2830,8 +2933,8 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         *residual = count - num;
         offset = 0;
 
-	/* If track overflow and more data requested, read it too */
-	while (dev->ckdtrkof && (*residual > 0))
+	/* If track overflow, keep writing */
+	while (dev->ckdtrkof)
 	{
 	    /* Advance to next track */
 	    rc = mt_advance (dev, unitstat);
@@ -2918,8 +3021,8 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         *residual = count - num;
         offset = 0;
 
-	/* If track overflow and more data requested, read it too */
-	while (dev->ckdtrkof && (*residual > 0))
+	/* If track overflow, keep writing */
+	while (dev->ckdtrkof)
 	{
 	    /* Advance to next track */
 	    rc = mt_advance (dev, unitstat);
@@ -3031,8 +3134,8 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         *residual = count - num;
         offset = dev->ckdcurkl;
 
-	/* If track overflow and more data requested, write it too */
-	while (dev->ckdtrkof && (*residual > 0))
+	/* If track overflow, keep writing */
+	while (dev->ckdtrkof)
 	{
 	    /* Advance to next track */
 	    rc = mt_advance (dev, unitstat);
@@ -3119,8 +3222,8 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         *residual = count - num;
         offset = dev->ckdcurkl;
 
-	/* If track overflow and more data requested, write it too */
-	while (dev->ckdtrkof && (*residual > 0))
+	/* If track overflow, keep writing */
+	while (dev->ckdtrkof)
 	{
 	    /* Advance to next track */
 	    rc = mt_advance (dev, unitstat);
@@ -3776,6 +3879,15 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
     /*---------------------------------------------------------------*/
         /* Command reject if within the domain of a Locate Record */
         if (dev->ckdlcount > 0)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Command reject if not 3380 or 3390 */
+        if ((dev->devtype != 0x3380) && (dev->devtype != 0x3390))
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);

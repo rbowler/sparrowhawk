@@ -833,7 +833,9 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
     case 0x2311:
     case 0x2314:
     case 0x3330:
+    case 0x3340:
     case 0x3350:
+    case 0x3375:
     case 0x3380:
     case 0x3390:
         devinit = &ckddasd_init_handler;

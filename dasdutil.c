@@ -962,6 +962,15 @@ int             fl1, fl2, int1, int2;   /* 3380/3390 calculations    */
         devfg = 0x01;
         goto formula3;
 
+    case 0x3340:
+        heads = 12;
+        cyls = 696;
+        trklen = 8535;
+        maxlen = 8368;
+        c = 75; x = 167;
+        devfg = 0x01;
+        goto formula3;
+
     case 0x3350:
         heads = 30;
         cyls = 555;
@@ -998,6 +1007,21 @@ int             fl1, fl2, int1, int2;   /* 3380/3390 calculations    */
         trklen = 47968;
         maxlen = 47476;
         f1 = 32; f2 = 492; f3 = 236;
+        fl1 = datalen + f2;
+        fl2 = (keylen == 0 ? 0 : keylen + f3);
+        fl1 = ((fl1 + f1 - 1) / f1) * f1;
+        fl2 = ((fl2 + f1 - 1) / f1) * f1;
+        b1 = b2 = fl1 + fl2;
+        nrecs = trklen / b2;
+        devi = 0; devl = 0; devk = 0; devtl = 0; devfg = 0x30;
+        break;
+
+    case 0x3375:
+        heads = 12;
+        cyls = 962;
+        trklen = 36000;
+        maxlen = 35616;
+        f1 = 32; f2 = 384; f3 = 160;
         fl1 = datalen + f2;
         fl2 = (keylen == 0 ? 0 : keylen + f3);
         fl1 = ((fl1 + f1 - 1) / f1) * f1;

@@ -6,7 +6,7 @@
 #
 #
 
-VERSION  = 1.64
+VERSION  = 1.65
 
 # Change this if you want to install the Hercules executables somewhere
 #   besides /usr/bin. The $PREFIX (which defaults to nothing) can be
@@ -14,9 +14,11 @@ VERSION  = 1.64
 #   (the directory is only used when installing).
 DESTDIR  = $(PREFIX)/usr/bin
 
-CFLAGS	 = -O3 -Wall -fPIC -DARCH=390
+#CFLAGS	 = -O0 -Wall -DARCH=390
+CFLAGS	 = -O3 -Wall -fPIC -fomit-frame-pointer -DARCH=390
 #	   -march=pentium -malign-double -mwide-multiply
-CFL_370  = -O3 -Wall -fPIC -DARCH=370
+#CFL_370  = -O0 -Wall -DARCH=370
+CFL_370  = -O3 -Wall -fPIC -fomit-frame-pointer -DARCH=370
 #	   -march=pentium -malign-double -mwide-multiply
 LFLAGS	 = -lpthread
 
@@ -35,26 +37,32 @@ TARFILES = makefile *.c *.h hercules.cnf tapeconv.jcl dasdlist \
 	   obj370 obj390 html zzsa.cnf zzsacard.bin
 
 HRC_370_OBJS = obj370/impl.o obj370/config.o obj370/panel.o \
-	   obj370/ipl.o obj370/cpu.o obj370/assist.o obj370/dat.o \
-	   obj370/block.o obj370/stack.o obj370/xmem.o obj370/sort.o \
-	   obj370/decimal.o obj370/service.o \
-	   obj370/diagnose.o obj370/diagmssf.o obj370/diagvm.o \
+	   obj370/ipl.o obj370/assist.o obj370/dat.o \
+	   obj370/stack.o obj370/cpu.o \
+           obj370/general.o obj370/control.o obj370/io.o \
+	   obj370/decimal.o obj370/service.o obj370/opcode.o \
+	   obj370/diagnose.o obj370/diagmssf.o obj370/vm.o \
 	   obj370/channel.o obj370/ckddasd.o obj370/fbadasd.o \
 	   obj370/tapedev.o obj370/cardrdr.o obj370/cardpch.o \
 	   obj370/printer.o obj370/console.o obj370/external.o \
 	   obj370/float.o obj370/ctcadpt.o obj370/trace.o \
-	   obj370/machchk.o obj370/vector.o
+	   obj370/machchk.o obj370/vector.o obj370/xstore.o \
+	   obj370/cmpsc.o
+           
 
 HRC_390_OBJS = obj390/impl.o obj390/config.o obj390/panel.o \
-	   obj390/ipl.o obj390/cpu.o obj390/assist.o obj390/dat.o \
-	   obj390/block.o obj390/stack.o obj390/xmem.o obj390/sort.o \
-	   obj390/decimal.o obj390/service.o \
-	   obj390/diagnose.o obj390/diagmssf.o obj390/diagvm.o \
+	   obj390/ipl.o obj390/assist.o obj390/dat.o \
+	   obj390/stack.o obj390/cpu.o \
+           obj390/general.o obj390/control.o obj390/io.o \
+	   obj390/decimal.o obj390/service.o obj390/opcode.o \
+	   obj390/diagnose.o obj390/diagmssf.o obj390/vm.o \
 	   obj390/channel.o obj390/ckddasd.o obj390/fbadasd.o \
 	   obj390/tapedev.o obj390/cardrdr.o obj390/cardpch.o \
 	   obj390/printer.o obj390/console.o obj390/external.o \
 	   obj390/float.o obj390/ctcadpt.o obj390/trace.o \
-	   obj390/machchk.o obj390/vector.o
+	   obj390/machchk.o obj390/vector.o obj390/xstore.o \
+	   obj390/cmpsc.o
+           
 
 DIN_OBJS = dasdinit.o dasdutil.o
 
@@ -72,7 +80,7 @@ TMA_OBJS = tapemap.o
 
 TSP_OBJS = tapesplit.o
 
-HEADERS  = hercules.h esa390.h version.h
+HEADERS  = hercules.h esa390.h version.h opcode.h inline.h
 
 all:	   $(EXEFILES)
 

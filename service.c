@@ -11,10 +11,13 @@
 /*      Corrections contributed by Jan Jaeger                        */
 /*      HMC system console functions by Jan Jaeger 2000-02-08        */
 /*      Expanded storage support by Jan Jaeger                       */
+/*      Dynamic CPU reconfiguration - Jan Jaeger                     */
 /*      Suppress superflous HHC701I/HHC702I messages - Jan Jaeger    */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
+
+#include "opcode.h"
 
 /*-------------------------------------------------------------------*/
 /* Service Call Logical Processor command word definitions           */
@@ -400,10 +403,13 @@ typedef struct _SCCB_XST_MAP {
 #endif /*FEATURE_EXPANDED_STORAGE*/
 
 /*-------------------------------------------------------------------*/
-/* Process service call instruction and return condition code        */
+/* B220 SERVC - Service Call                                   [RRE] */
 /*-------------------------------------------------------------------*/
-int service_call (U32 sclp_command, U32 sccb_real_addr, REGS *regs)
+void zz_service_call (BYTE inst[], int execflag, REGS *regs)
 {
+int             r1, r2;                 /* Values of R fields        */
+U32             sclp_command;           /* SCLP command code         */
+U32             sccb_real_addr;         /* SCCB real address         */
 int             i;                      /* Array subscript           */
 int             realmb;                 /* Real storage size in MB   */
 U32             sccb_absolute_addr;     /* Absolute address of SCCB  */
@@ -489,22 +495,26 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                                                            available */
 #endif /*FEATURE_EXPANDED_STORAGE*/
 
+    RRE(inst, execflag, regs, r1, r2);
+
+    PRIV_CHECK(regs);
+
+    /* R1 is SCLP command word */
+    sclp_command = regs->gpr[r1];
+
+    /* R2 is real address of service call control block */
+    sccb_real_addr = regs->gpr[r2];
+
     /* Obtain the absolute address of the SCCB */
     sccb_absolute_addr = APPLY_PREFIXING (sccb_real_addr, regs->pxr);
 
     /* Program check if SCCB is not on a doubleword boundary */
     if ( sccb_absolute_addr & 0x00000007 )
-    {
         program_check (regs, PGM_SPECIFICATION_EXCEPTION);
-        return 3;
-    }
 
     /* Program check if SCCB is outside main storage */
     if ( sccb_absolute_addr >= sysblk.mainsize )
-    {
         program_check (regs, PGM_ADDRESSING_EXCEPTION);
-        return 3;
-    }
 
 //  /*debug*/logmsg("Service call %8.8X SCCB=%8.8X\n",
 //  /*debug*/       sclp_command, sccb_absolute_addr);
@@ -520,10 +530,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
     /* Program check if end of SCCB falls outside main storage */
     if ( sysblk.mainsize - sccblen < sccb_absolute_addr )
-    {
         program_check (regs, PGM_ADDRESSING_EXCEPTION);
-        return 3;
-    }
 
     /* Obtain lock if immediate response is not requested */
     if (!(sccb->flag & SCCB_FLAG_SYNC)
@@ -537,7 +544,8 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         if (sysblk.servsig)
         {
             release_lock (&sysblk.intlock);
-            return 2;
+            regs->psw.cc = 2;
+            return;
         }
     }
 
@@ -1329,7 +1337,10 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     /* If immediate response is requested, return condition code 1 */
     if ((sccb->flag & SCCB_FLAG_SYNC)
         && (sclp_command & SCLP_COMMAND_CLASS) != 0x01)
-        return 1;
+    {
+        regs->psw.cc = 1;
+        return;
+    }
 
     /* Set service signal external interrupt pending */
     sysblk.servparm = sccb_absolute_addr;
@@ -1338,8 +1349,8 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     /* Release the interrupt lock */
     release_lock (&sysblk.intlock);
 
-    /* Return condition code 0 */
-    return 0;
+    /* Set condition code 0 */
+    regs->psw.cc = 0;
 
 } /* end function service_call */
 

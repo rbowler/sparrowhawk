@@ -137,9 +137,17 @@
  #define FEATURE_4K_STORAGE_KEYS
  #define FEATURE_HERCULES_DIAGCALLS
  #define FEATURE_EMULATE_VM
+ #undef FEATURE_CMPSC
 #else
  #error Either ARCH=370 or ARCH=390 must be specified
 #endif
+
+
+/*-------------------------------------------------------------------*/
+/* Footprint trace buffer size, must be a power of 2                 */
+/*-------------------------------------------------------------------*/
+// #define FOOTPRINT_BUFFER        4096
+
 
 /*-------------------------------------------------------------------*/
 /* Macro definitions for storage keys				     */
@@ -264,226 +272,6 @@ typedef int				ATTR;
 #endif
 
 /*-------------------------------------------------------------------*/
-/* Macro definitions for instruction decoding                        */
-/*-------------------------------------------------------------------*/
-#define ODD_CHECK(_r, _regs) \
-        if( (_r) & 1 ) \
-            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
- 
-#define FW_CHECK(_value, _regs) \
-        if( (_value) & 3 ) \
-            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
- 
-#define DW_CHECK(_value, _regs) \
-        if( (_value) & 7 ) \
-            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
- 
-        /* Program check if r1 is not 0, 2, 4, or 6 */
-#define HFPREG_CHECK(_r, _regs) \
-        if( (_r) & 9 ) \
-            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
-
-        /* Program check if r1 and r2 are not 0, 2, 4, or 6 */
-#define HFPREG2_CHECK(_r1, _r2, _regs) \
-        if( ((_r1) & 9) || ((_r2) & 9) ) \
-            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
- 
-        /* Program check if r1 is not 0 or 4 */
-#define HFPODD_CHECK(_r, _regs) \
-        if( (_r) & 11 ) \
-            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
-
-        /* Program check if r1 and r2 are not 0 or 4 */
-#define HFPODD2_CHECK(_r1, _r2, _regs) \
-        if( ((_r1) & 11) || ((_r2) & 11) ) \
-            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
- 
-#define PRIV_CHECK(_regs) \
-        if( (_regs)->psw.prob ) \
-            program_check( (_regs), PGM_PRIVILEGED_OPERATION_EXCEPTION)
-
-#define E(_inst, _execflag, _regs, _ibyte) \
-        { \
-            (_ibyte) = (_inst)[1]; \
-            if( !(_execflag) ) \
-            { \
-                (_regs)->psw.ilc = 2; \
-                (_regs)->psw.ia += 2; \
-                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-        }
-
-#define RR(_inst, _execflag, _regs, _r1, _r2) \
-        { \
-            (_r1) = (_inst)[1] >> 4; \
-            (_r2) = (_inst)[1] & 0x0F; \
-            if( !(_execflag) ) \
-            { \
-                (_regs)->psw.ilc = 2; \
-                (_regs)->psw.ia += 2; \
-                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-        }
-
-#define RX(_inst, _execflag, _regs, _r1, _b2, _effective_addr2) \
-        { \
-            (_r1) = (_inst)[1] >> 4; \
-            (_b2) = (_inst)[1] & 0x0F; \
-            (_effective_addr2) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
-            if((_b2) != 0) \
-            { \
-                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
-                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-            (_b2) = (_inst)[2] >> 4; \
-            if((_b2) != 0) \
-            { \
-                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
-                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-            if( !(_execflag) ) \
-            { \
-                (_regs)->psw.ilc = 4; \
-                (_regs)->psw.ia += 4; \
-                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-        }
-
-#define S(_inst, _execflag, _regs, _ibyte, _b2, _effective_addr2) \
-        { \
-            (_ibyte) = (_inst)[1]; \
-            (_b2) = (_inst)[2] >> 4; \
-            (_effective_addr2) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
-            if((_b2) != 0) \
-            { \
-                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
-                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-            if( !(_execflag) ) \
-            { \
-                (_regs)->psw.ilc = 4; \
-                (_regs)->psw.ia += 4; \
-                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-        }
-
-#define RS(_inst, _execflag, _regs, _r1, _r3, _b2, _effective_addr2) \
-        { \
-            (_r1) = (_inst)[1] >> 4; \
-            (_r3) = (_inst)[1] & 0x0F; \
-            (_b2) = (_inst)[2] >> 4; \
-            (_effective_addr2) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
-            if((_b2) != 0) \
-            { \
-                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
-                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-            if( !(_execflag) ) \
-            { \
-                (_regs)->psw.ilc = 4; \
-                (_regs)->psw.ia += 4; \
-                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-        }
-
-#define RI(_inst, _execflag, _regs, _r1, _r3, _i2) \
-        { \
-            (_r1) = (_inst)[1] >> 4; \
-            (_r3) = (_inst)[1] & 0x0F; \
-            (_i2) = ((_inst)[2] << 8) | (_inst)[3]; \
-            if( !(_execflag) ) \
-            { \
-                (_regs)->psw.ilc = 4; \
-                (_regs)->psw.ia += 4; \
-                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-        }
-
-#define SI(_inst, _execflag, _regs, _i2, _b1, _effective_addr1) \
-        { \
-            (_i2) = (_inst)[1]; \
-            (_b1) = (_inst)[2] >> 4; \
-            (_effective_addr1) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
-            if((_b1) != 0) \
-            { \
-                (_effective_addr1) += (_regs)->gpr[(_b1)]; \
-                (_effective_addr1) &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-            if( !(_execflag) ) \
-            { \
-                (_regs)->psw.ilc = 4; \
-                (_regs)->psw.ia += 4; \
-                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-        }
-
-#define RRE(_inst, _execflag, _regs, _ibyte, _r1, _r2) \
-        { \
-            (_ibyte) = (_inst)[1]; \
-            (_r1) = (_inst)[3] >> 4; \
-            (_r2) = (_inst)[3] & 0x0F; \
-            if( !(_execflag) ) \
-            { \
-                (_regs)->psw.ilc = 4; \
-                (_regs)->psw.ia += 4; \
-                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-        }
-
-#define SS(_inst, _execflag, _regs, _r1, _r3, \
-            _b1, _effective_addr1, _b2, _effective_addr2) \
-        { \
-            (_r1) = (_inst)[1] >> 4; \
-            (_r3) = (_inst)[1] & 0x0F; \
-            (_b1) = (_inst)[2] >> 4; \
-            (_effective_addr1) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
-            if((_b1) != 0) \
-            { \
-                (_effective_addr1) += (_regs)->gpr[(_b1)]; \
-                (_effective_addr1) &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-            (_b2) = (_inst)[4] >> 4; \
-            (_effective_addr2) = (((_inst)[4] & 0x0F) << 8) | (_inst)[5]; \
-            if((_b2) != 0) \
-            { \
-                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
-                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-            if( !(_execflag) ) \
-            { \
-                (_regs)->psw.ilc = 6; \
-                (_regs)->psw.ia += 6; \
-                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-        }
-
-#define SSE(_inst, _execflag, _regs, _ibyte, \
-            _b1, _effective_addr1, _b2, _effective_addr2) \
-        { \
-            (_ibyte) = (_inst)[1]; \
-            (_b1) = (_inst)[2] >> 4; \
-            (_effective_addr1) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
-            if((_b1) != 0) \
-            { \
-                (_effective_addr1) += (_regs)->gpr[(_b1)]; \
-                (_effective_addr1) &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-            (_b2) = (_inst)[4] >> 4; \
-            (_effective_addr2) = (((_inst)[4] & 0x0F) << 8) | (_inst)[5]; \
-            if((_b2) != 0) \
-            { \
-                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
-                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-            if( !(_execflag) ) \
-            { \
-                (_regs)->psw.ilc = 6; \
-                (_regs)->psw.ia += 6; \
-                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
-            } \
-        }
-
-/*-------------------------------------------------------------------*/
 /* Prototype definitions for device handler functions		     */
 /*-------------------------------------------------------------------*/
 struct _DEVBLK;
@@ -594,12 +382,18 @@ typedef struct _SYSBLK {
 					   8-63=TOD clock bits 0-55  */
 	S64	todoffset;		/* Difference in microseconds
 					   between TOD and Unix time */
+#ifdef TODCLOCK_DRAG_FACTOR
+	U64	todclock_init;		/* TOD clock value at start  */
+#endif /* TODCLOCK_DRAG_FACTOR */
 	LOCK	todlock;		/* TOD clock update lock     */
 	TID	todtid; 		/* Thread-id for TOD update  */
-	U32	toduniq;		/* TOD clock uniqueness value*/
 	BYTE	loadparm[8];		/* IPL load parameter	     */
 	U16	numcpu; 		/* Number of CPUs installed  */
 	REGS	regs[MAX_CPU_ENGINES];	/* Registers for each CPU    */
+#if defined(FOOTPRINT_BUFFER)
+        REGS    footprregs[MAX_CPU_ENGINES][FOOTPRINT_BUFFER];
+        U32     footprptr[MAX_CPU_ENGINES];
+#endif
 	LOCK	mainlock;		/* Main storage lock	     */
 	COND	intcond;		/* Interrupt condition	     */
 	LOCK	intlock;		/* Interrupt lock	     */
@@ -671,7 +465,7 @@ typedef struct _DEVBLK {
 		busy:1, 		/* 1=Device busy	     */
 		console:1,		/* 1=Console device	     */
 		connected:1,		/* 1=Console client connected*/
-		readpending:1,		/* 1=Console read pending    */
+		readpending:2,		/* 1=Console read pending    */
 		pcipending:1,		/* 1=PCI interrupt pending   */
 		ccwtrace:1,		/* 1=CCW trace		     */
 		ccwstep:1,		/* 1=CCW single step	     */
@@ -811,6 +605,7 @@ typedef struct _DEVBLK {
 	BYTE	ckdcurkl;		/* Current record key length */
 	U16	ckdcurdl;		/* Current record data length*/
 	BYTE	ckdorient;		/* Current orientation	     */
+	BYTE	ckdcuroper;		/* Curr op: read=6, write=5  */
 	U16	ckdrem; 		/* #of bytes from current
 					   position to end of field  */
 	U16	ckdpos; 		/* Offset into buffer of data
@@ -910,9 +705,6 @@ int  load_psw (PSW *psw, BYTE *addr);
 void program_check (REGS *regs, int code);
 void *cpu_thread (REGS *regs);
 
-/* Functions in vector.c */
-void vector_inst (BYTE *inst, int execflag, REGS *regs);
-
 /* Functions in module dat.c */
 U16  translate_asn (U16 asn, REGS *regs, U32 *asteo, U32 aste[]);
 int  authorize_asn (U16 ax, U32 aste[], int atemask, REGS *regs);
@@ -924,7 +716,6 @@ int  translate_addr (U32 vaddr, int arn, REGS *regs, int acctype,
 void purge_alb (REGS *regs);
 void purge_tlb (REGS *regs);
 void invalidate_pte (BYTE ibyte, int r1, int r2, REGS *regs);
-int  test_prot (U32 addr, int arn, REGS *regs, BYTE akey);
 U32  logical_to_abs (U32 addr, int arn, REGS *regs, int acctype,
 	BYTE akey);
 void vstorec (void *src, BYTE len, U32 addr, int arn, REGS *regs);
@@ -938,12 +729,10 @@ U16  vfetch2 (U32 addr, int arn, REGS *regs);
 U32  vfetch4 (U32 addr, int arn, REGS *regs);
 U64  vfetch8 (U32 addr, int arn, REGS *regs);
 void instfetch (BYTE *dest, U32 addr, REGS *regs);
-void move_chars (U32 addr1, int arn1, BYTE key1, U32 addr2,
-	int arn2, BYTE key2, int len, REGS *regs);
-int  ss_operation (BYTE opcode, U32 addr1, int arn1, U32 addr2,
-	int arn2, int len, REGS *regs);
 void validate_operand (U32 addr, int arn, int len,
 	int acctype, REGS *regs);
+void move_chars (U32 addr1, int arn1, BYTE key1, U32 addr2,
+                int arn2, BYTE key2, int len, REGS *regs);
 
 /* Access type parameter passed to translate functions in dat.c */
 #define ACCTYPE_READ		1	/* Read operand data	     */
@@ -961,90 +750,6 @@ void validate_operand (U32 addr, int arn, int len,
 #define USE_PRIMARY_SPACE	(-2)	/* MVCS/MVCP instructions    */
 #define USE_SECONDARY_SPACE	(-3)	/* MVCS/MVCP instructions    */
 
-/* Functions in module decimal.c */
-int  shift_and_round_packed (U32 addr, int len, int arn, REGS *regs,
-	BYTE round, BYTE shift);
-int  zero_and_add_packed (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
-int  compare_packed (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
-int  add_packed (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
-int  subtract_packed (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
-void multiply_packed (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
-void divide_packed (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
-void convert_to_decimal (int r1, U32 addr, int arn, REGS *regs);
-void convert_to_binary (int r1, U32 addr, int arn, REGS *regs);
-void move_with_offset (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
-void zoned_to_packed (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
-void packed_to_zoned (U32 addr1, int len1, int arn1,
-	U32 addr2, int len2, int arn2, REGS *regs);
-int  edit_packed (int edmk, U32 addr1, int len1, int arn1,
-	U32 addr2, int arn2, REGS *regs);
-
-/* Functions in module float.c */
-void halve_float_long_reg (int r1, int r2, REGS *regs);
-void round_float_long_reg (int r1, int r2, REGS *regs);
-void multiply_float_ext_reg (int r1, int r2, REGS *regs);
-void multiply_float_long_to_ext_reg (int r1, int r2, REGS *regs);
-void compare_float_long_reg (int r1, int r2, REGS *regs);
-void add_float_long_reg (int r1, int r2, REGS *regs);
-void subtract_float_long_reg (int r1, int r2, REGS *regs);
-void multiply_float_long_reg (int r1, int r2, REGS *regs);
-void divide_float_long_reg (int r1, int r2, REGS *regs);
-void add_unnormal_float_long_reg (int r1, int r2, REGS *regs);
-void subtract_unnormal_float_long_reg (int r1, int r2, REGS *regs);
-void halve_float_short_reg (int r1, int r2, REGS *regs);
-void round_float_short_reg (int r1, int r2, REGS *regs);
-void add_float_ext_reg (int r1, int r2, REGS *regs);
-void subtract_float_ext_reg (int r1, int r2, REGS *regs);
-void compare_float_short_reg (int r1, int r2, REGS *regs);
-void add_float_short_reg (int r1, int r2, REGS *regs);
-void subtract_float_short_reg (int r1, int r2, REGS *regs);
-void multiply_float_short_to_long_reg (int r1, int r2, REGS *regs);
-void divide_float_short_reg (int r1, int r2, REGS *regs);
-void add_unnormal_float_short_reg (int r1, int r2, REGS *regs);
-void subtract_unnormal_float_short_reg (int r1, int r2, REGS *regs);
-void multiply_float_long_to_ext (int r1, U32 addr, int arn,
-	REGS *regs);
-void compare_float_long (int r1, U32 addr, int arn, REGS *regs);
-void add_float_long (int r1, U32 addr, int arn, REGS *regs);
-void subtract_float_long (int r1, U32 addr, int arn, REGS *regs);
-void multiply_float_long (int r1, U32 addr, int arn, REGS *regs);
-void divide_float_long (int r1, U32 addr, int arn, REGS *regs);
-void add_unnormal_float_long (int r1, U32 addr, int arn, REGS *regs);
-void subtract_unnormal_float_long (int r1, U32 addr, int arn,
-	REGS *regs);
-void compare_float_short (int r1, U32 addr, int arn, REGS *regs);
-void add_float_short (int r1, U32 addr, int arn, REGS *regs);
-void subtract_float_short (int r1, U32 addr, int arn, REGS *regs);
-void multiply_float_short_to_long (int r1, U32 addr, int arn,
-	REGS *regs);
-void divide_float_short (int r1, U32 addr, int arn, REGS *regs);
-void add_unnormal_float_short (int r1, U32 addr, int arn, REGS *regs);
-void subtract_unnormal_float_short (int r1, U32 addr, int arn,
-	REGS *regs);
-void divide_float_ext_reg (int r1, int r2, REGS *regs);
-
-/* Functions in module block.c */
-int  move_long (int r1, int r2, REGS *regs);
-int  compare_long (int r1, int r2, REGS *regs);
-int  move_long_extended (int r1, int r3, U32 effect, REGS *regs);
-int  compare_long_extended (int r1, int r3, U32 effect, REGS *regs);
-int  page_in (int r1, int r2, REGS *regs);
-int  page_out (int r1, int r2, REGS *regs);
-int  move_page (int r1, int r2, REGS *regs);
-int  compute_checksum (int r1, int r2, REGS *regs);
-int  move_string (int r1, int r2, REGS *regs);
-int  compare_string (int r1, int r2, REGS *regs);
-int  search_string (int r1, int r2, REGS *regs);
-int  compare_until_substring_equal (int r1, int r2, REGS *regs);
-
 /* Functions in module diagmssf.c */
 void scpend_call (void);
 int  mssf_call (int r1, int r2, REGS *regs);
@@ -1053,7 +758,7 @@ void diag204_call (int r1, int r2, REGS *regs);
 /* Functions in module diagnose.c */
 void diagnose_call (U32 code, int r1, int r2, REGS *regs);
 
-/* Functions in module diagvm.c */
+/* Functions in module vm.c */
 int  diag_devtype (int r1, int r2, REGS *regs);
 int  syncblk_io (int r1, int r2, REGS *regs);
 int  syncgen_io (int r1, int r2, REGS *regs);
@@ -1065,9 +770,9 @@ int  diag_ppagerel (int r1, int r2, REGS *regs);
 
 /* Functions in module external.c */
 void perform_external_interrupt (REGS *regs);
+void update_TOD_clock (void);
 void *timer_update_thread (void *argp);
 void store_status (REGS *ssreg, U32 aaddr);
-int  signal_processor (int r1, int r3, U32 eaddr, REGS *regs);
 void synchronize_broadcast (REGS *regs, U32 *type);
 
 /* Functions in module machchk.c */
@@ -1077,34 +782,16 @@ U32  channel_report (void);
 void machine_check_crwpend (void);
 
 /* Functions in module service.c */
-int  service_call (U32 sclp_command, U32 sccb_real_addr, REGS *regs);
 void scp_command (BYTE *command, int priomsg);
 
-/* Functions in module sort.c */
-int  compare_and_form_codeword (REGS *regs, U32 eaddr);
-int  update_tree (REGS *regs);
-
 /* Functions in module stack.c */
-void form_stack_entry (BYTE etype, U32 retna, U32 calla, REGS *regs, U32 csi);
+void form_stack_entry (BYTE etype, U32 retna, U32 calla, U32 csi, REGS *regs);
 int  program_return_unstack (REGS *regs, U32 *lsedap);
-void extract_stacked_registers (int r1, int r2, REGS *regs);
-int  extract_stacked_state (int rn, BYTE code, REGS *regs);
-void modify_stacked_state (int rn, REGS *regs);
-
-/* Functions in module xmem.c */
-int  set_address_space_control (BYTE mode, REGS *regs);
-int  insert_address_space_control (REGS *regs);
-void set_secondary_asn (U16 sasn, REGS *regs);
-int  load_address_space_parameters (U16 pkm, U16 sasn, U16 ax,
-	U16 pasn, U32 func, REGS *regs);
-int  program_transfer (int r1,int r2, REGS *regs);
-int  program_return (REGS *regs);
-int  program_call (U32 pcnum, REGS *regs);
-void branch_and_set_authority (int r1, int r2, REGS *regs);
-void branch_in_subspace_group (int r1, int r2, REGS *regs);
+U32 locate_stack_entry (int prinst, LSED *lsedptr, REGS *regs);
+void unstack_registers (U32 lsea, int r1, int r2, REGS *regs);
+U32 abs_stack_addr (U32 vaddr, REGS *regs, int acctype);
 
 /* Functions in module trace.c */
-void trace_tr (U32 n2, int r1, int r3, REGS *regs);
 U32  trace_br (int amode, U32 ia, REGS *regs);
 U32  trace_bsg (U32 alet, U32 ia, REGS *regs);
 U32  trace_ssar (U16 sasn, REGS *regs);
@@ -1183,3 +870,5 @@ DEVCF fbadasd_close_device;
 void fbadasd_syncblk_io (DEVBLK *dev, BYTE type, U32 blknum,
 	U32 blksize, BYTE *iobuf, BYTE *unitstat, U16 *residual);
 
+/* Functions in module cmpsc.c */
+void cmpsc(BYTE inst[], REGS * regs);

@@ -6,8 +6,14 @@
 /* described in the manual ESA/390 Principles of Operation.          */
 /*-------------------------------------------------------------------*/
 
-#include "hercules.h"
+/*-------------------------------------------------------------------*/
+/* Incorporated all floating point instructions from cpu.c in order  */
+/* to implement revised instruction decoding.                        */
+/*                                               Jan Jaeger 01/07/00 */
+/*-------------------------------------------------------------------*/
 
+#include "hercules.h"
+#include "opcode.h"
 
 /*-------------------------------------------------------------------*/
 /* Structure definition for internal short floatingpoint format      */
@@ -44,9 +50,8 @@ typedef struct _EXTENDED_FLOAT {
 
 
 /*-------------------------------------------------------------------*/
-/* Static functions                                                  */
+/* Static inline functions                                           */
 /*-------------------------------------------------------------------*/
-
 
 /*-------------------------------------------------------------------*/
 /* Add 128 bit integer                                               */
@@ -669,6 +674,10 @@ static inline int significance_ef ( EXTENDED_FLOAT *fl, REGS *regs )
 
 } /* end function significance_ef */
 
+
+/*-------------------------------------------------------------------*/
+/* Static functions                                                  */
+/*-------------------------------------------------------------------*/
 
 /*-------------------------------------------------------------------*/
 /* Add short float                                                   */
@@ -1839,19 +1848,105 @@ int	i;
 /* Extern functions                                                  */
 /*-------------------------------------------------------------------*/
 
+/*-------------------------------------------------------------------*/
+/* 20   LPDR  - Load Positive Floating Point Long Register      [RR] */
+/*-------------------------------------------------------------------*/
+void zz_load_positive_float_long_reg (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1, r2;                         /* Values of R fields        */
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
+
+    /* Copy register contents, clear the sign bit */
+    regs->fpr[r1] = regs->fpr[r2] & 0x7FFFFFFF;
+    regs->fpr[r1+1] = regs->fpr[r2+1];
+
+    /* Set condition code */
+    regs->psw.cc =
+        ((regs->fpr[r1] & 0x00FFFFFF) || regs->fpr[r1+1]) ? 2 : 0;
+
+}
+
 
 /*-------------------------------------------------------------------*/
-/* Halve float long register	                                     */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Result long float register			     */
-/*      r2	Input long float register			     */
-/*      regs    CPU register context                                 */
+/* 21   LNDR  - Load Negative Floating Point Long Register      [RR] */
 /*-------------------------------------------------------------------*/
-void halve_float_long_reg (int r1, int r2, REGS *regs)
+void zz_load_negative_float_long_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
+
+    /* Copy register contents, set the sign bit */
+    regs->fpr[r1] = regs->fpr[r2] | 0x80000000;
+    regs->fpr[r1+1] = regs->fpr[r2+1];
+
+    /* Set condition code */
+    regs->psw.cc =
+        ((regs->fpr[r1] & 0x00FFFFFF) || regs->fpr[r1+1]) ? 1 : 0;
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* 22   LTDR  - Load and Test Floating Point Long Register      [RR] */
+/*-------------------------------------------------------------------*/
+void zz_load_and_test_float_long_reg (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1, r2;                         /* Values of R fields        */
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
+
+    /* Copy register contents */
+    regs->fpr[r1] = regs->fpr[r2];
+    regs->fpr[r1+1] = regs->fpr[r2+1];
+
+    /* Set condition code */
+    if ((regs->fpr[r1] & 0x00FFFFFF) || regs->fpr[r1+1]) {
+        regs->psw.cc = (regs->fpr[r1] & 0x80000000) ? 1 : 2;
+    } else
+        regs->psw.cc = 0;
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* 23   LCDR  - Load Complement Floating Point Long Register    [RR] */
+/*-------------------------------------------------------------------*/
+void zz_load_complement_float_long_reg (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1, r2;                         /* Values of R fields        */
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
+
+    /* Copy register contents, invert sign bit */
+    regs->fpr[r1] = regs->fpr[r2] ^ 0x80000000;
+    regs->fpr[r1+1] = regs->fpr[r2+1];
+
+    /* Set condition code */
+    if ((regs->fpr[r1] & 0x00FFFFFF) || regs->fpr[r1+1]) {
+        regs->psw.cc = (regs->fpr[r1] & 0x80000000) ? 1 : 2;
+    } else
+        regs->psw.cc = 0;
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* 24   HDR   - Halve Floating Point Long Register              [RR] */
+/*-------------------------------------------------------------------*/
+void zz_halve_float_long_reg (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1, r2;                         /* Values of R fields        */
 LONG_FLOAT fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get register content */
     get_lf (&fl, regs->fpr + r2);
@@ -1874,21 +1969,24 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function halve_float_long_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Round float long register	                                     */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Result long float register			     */
-/*      r2	Input long float register			     */
-/*      regs    CPU register context                                 */
+/* 25   LRDR  - Load Rounded Floating Point Long Register       [RR] */
 /*-------------------------------------------------------------------*/
-void round_float_long_reg (int r1, int r2, REGS *regs)
+void zz_round_float_long_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 LONG_FLOAT fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+
+    /* Program check if R1 is not 0, 2, 4, or 6 */
+    /* or if R2 is not 0 or 4 */
+    if (( r1 & 9) || (r2 & 11))
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Get register content */
     get_lf (&fl, regs->fpr + r2);
@@ -1912,22 +2010,21 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function round_float_long_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Multiply float extended register                                  */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Multiplicand and result extended float register      */
-/*      r2	Multiplicator extended float register		     */
-/*      regs    CPU register context                                 */
+/* 26   MXR   - Multiply Floating Point Extended Register       [RR] */
 /*-------------------------------------------------------------------*/
-void multiply_float_ext_reg (int r1, int r2, REGS *regs)
+void zz_multiply_float_ext_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 EXTENDED_FLOAT fl;
 EXTENDED_FLOAT mul_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPODD2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_ef (&fl, regs->fpr + r1);
@@ -1943,23 +2040,26 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function multiply_float_ext_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Multiply float long to extended register                          */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Multiplicand long and result extended float register */
-/*      r2	Multiplicator long float register		     */
-/*      regs    CPU register context                                 */
+/* 27   MXDR  - Multiply Floating Point Long to Extended Reg.   [RR] */
 /*-------------------------------------------------------------------*/
-void multiply_float_long_to_ext_reg (int r1, int r2, REGS *regs)
-{ 
+void zz_multiply_float_long_to_ext_reg (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1, r2;                         /* Values of R fields        */
 LONG_FLOAT fl;
 LONG_FLOAT mul_fl;
 EXTENDED_FLOAT result_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+
+    /* Program check if R1 is not 0 or 4 */
+    /* or if R2 is not 0, 2, 4, or 6 */
+    if (( r1 & 11) || (r2 & 9))
+        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
@@ -1975,21 +2075,37 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function multiply_float_long_to_ext_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Compare float long to register                                    */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Long float register                                  */
-/*      r2	Long float register		                     */
-/*      regs    CPU register context                                 */
+/* 28   LDR   - Load Floating Point Long Register               [RR] */
 /*-------------------------------------------------------------------*/
-void compare_float_long_reg (int r1, int r2, REGS *regs)
+void zz_load_float_long_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
+
+    /* Copy register contents */
+    regs->fpr[r1] = regs->fpr[r2];
+    regs->fpr[r1+1] = regs->fpr[r2+1];
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* 29   CDR   - Compare Floating Point Long Register            [RR] */
+/*-------------------------------------------------------------------*/
+void zz_compare_float_long_reg (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1, r2;                         /* Values of R fields        */
 LONG_FLOAT fl;
 LONG_FLOAT cmp_fl;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
@@ -1998,22 +2114,21 @@ LONG_FLOAT cmp_fl;
     /* Compare long */
     cmp_lf (&fl, &cmp_fl, regs);
 
-} /* end function compare_float_long_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Add float long to register                                        */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Long float register                                  */
-/*      r2	Long float register		                     */
-/*      regs    CPU register context                                 */
+/* 2A   ADR   - Add Floating Point Long Register                [RR] */
 /*-------------------------------------------------------------------*/
-void add_float_long_reg (int r1, int r2, REGS *regs)
+void zz_add_float_long_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 LONG_FLOAT fl;
 LONG_FLOAT add_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
@@ -2036,22 +2151,21 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function add_float_long_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Subtract float long to register                                   */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Long float register                                  */
-/*      r2	Long float register		                     */
-/*      regs    CPU register context                                 */
+/* 2B   SDR   - Subtract Floating Point Long Register           [RR] */
 /*-------------------------------------------------------------------*/
-void subtract_float_long_reg (int r1, int r2, REGS *regs)
+void zz_subtract_float_long_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 LONG_FLOAT fl;
 LONG_FLOAT sub_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
@@ -2077,22 +2191,21 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function subtract_float_long_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Multiply float long register                                      */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Multiplicand and result long float register          */
-/*      r2	Multiplicator long float register		     */
-/*      regs    CPU register context                                 */
+/* 2C   MDR   - Multiply Floating Point Long Register           [RR] */
 /*-------------------------------------------------------------------*/
-void multiply_float_long_reg (int r1, int r2, REGS *regs)
+void zz_multiply_float_long_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 LONG_FLOAT fl;
 LONG_FLOAT mul_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
@@ -2108,22 +2221,21 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function multiply_float_long_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Divide float long register                                        */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Dividend and result long float register              */
-/*      r2	Divisor long float register		             */
-/*      regs    CPU register context                                 */
+/* 2D   DDR   - Divide Floating Point Long Register             [RR] */
 /*-------------------------------------------------------------------*/
-void divide_float_long_reg (int r1, int r2, REGS *regs)
+void zz_divide_float_long_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 LONG_FLOAT fl;
 LONG_FLOAT div_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
@@ -2139,22 +2251,21 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function divide_float_long_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Add unnormalized float long register                              */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Long float register                                  */
-/*      r2	Long float register		                     */
-/*      regs    CPU register context                                 */
+/* 2E   AWR   - Add Unnormalized Floating Point Long Register   [RR] */
 /*-------------------------------------------------------------------*/
-void add_unnormal_float_long_reg (int r1, int r2, REGS *regs)
+void zz_add_unnormal_float_long_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 LONG_FLOAT fl;
 LONG_FLOAT add_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
@@ -2177,22 +2288,21 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function add_unnormal_float_long_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Subtract unnormalized float long register                         */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Long float register                                  */
-/*      r2	Long float register		                     */
-/*      regs    CPU register context                                 */
+/* 2F   SWR   - Subtract Unnormalized Floating Point Long Reg.  [RR] */
 /*-------------------------------------------------------------------*/
-void subtract_unnormal_float_long_reg (int r1, int r2, REGS *regs)
+void zz_subtract_unnormal_float_long_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 LONG_FLOAT fl;
 LONG_FLOAT sub_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
@@ -2218,21 +2328,102 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function subtract_unnormal_float_long_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Halve float short register                                        */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Result short float register                          */
-/*      r2	Input short float register		             */
-/*      regs    CPU register context                                 */
+/* 30   LPER  - Load Positive Floating Point Short Register     [RR] */
 /*-------------------------------------------------------------------*/
-void halve_float_short_reg (int r1, int r2, REGS *regs)
+void zz_load_positive_float_short_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
+
+    /* Copy register contents, clear sign bit */
+    regs->fpr[r1] = regs->fpr[r2] & 0x7FFFFFFF;
+
+    /* Set condition code */
+    regs->psw.cc = (regs->fpr[r1] & 0x00FFFFFF) ? 2 : 0;
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* 31   LNER  - Load Negative Floating Point Short Register     [RR] */
+/*-------------------------------------------------------------------*/
+void zz_load_negative_float_short_reg (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1, r2;                         /* Values of R fields        */
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
+
+    /* Copy register contents, set sign bit */
+    regs->fpr[r1] = regs->fpr[r2] | 0x80000000;
+
+    /* Set condition code */
+    regs->psw.cc = (regs->fpr[r1] & 0x00FFFFFF) ? 1 : 0;
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* 32   LTER  - Load and Test Floating Point Short Register     [RR] */
+/*-------------------------------------------------------------------*/
+void zz_load_and_test_float_short_reg (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1, r2;                         /* Values of R fields        */
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
+
+    /* Copy register contents */
+    regs->fpr[r1] = regs->fpr[r2];
+
+    /* Set condition code */
+    if (regs->fpr[r1] & 0x00FFFFFF) {
+        regs->psw.cc = (regs->fpr[r1] & 0x80000000) ? 1 : 2;
+    } else
+        regs->psw.cc = 0;
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* 33   LCER  - Load Complement Floating Point Short Register   [RR] */
+/*-------------------------------------------------------------------*/
+void zz_load_complement_float_short_reg (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1, r2;                         /* Values of R fields        */
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
+
+    /* Copy register contents, invert sign bit */
+    regs->fpr[r1] = regs->fpr[r2] ^ 0x80000000;
+
+    /* Set condition code */
+    if (regs->fpr[r1] & 0x00FFFFFF) {
+        regs->psw.cc = (regs->fpr[r1] & 0x80000000) ? 1 : 2;
+    } else
+        regs->psw.cc = 0;
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* 34   HER   - Halve Floating Point Short Register             [RR] */
+/*-------------------------------------------------------------------*/
+void zz_halve_float_short_reg (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1, r2;                         /* Values of R fields        */
 SHORT_FLOAT fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get register content */
     get_sf (&fl, regs->fpr + r2);
@@ -2255,22 +2446,21 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function halve_float_short_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Round float short register                                        */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Result short float register                          */
-/*      r2	Input short float register		             */
-/*      regs    CPU register context                                 */
+/* 35   LRER  - Load Rounded Floating Point Short Register      [RR] */
 /*-------------------------------------------------------------------*/
-void round_float_short_reg (int r1, int r2, REGS *regs)
+void zz_round_float_short_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 LONG_FLOAT from_fl;
 SHORT_FLOAT to_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get register content */
     get_lf (&from_fl, regs->fpr + r2);
@@ -2296,22 +2486,21 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function round_float_short_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Add float extended register                                       */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Extended float register                              */
-/*      r2	Extended float register		                     */
-/*      regs    CPU register context                                 */
+/* 36   AXR   - Add Floating Point Extended Register            [RR] */
 /*-------------------------------------------------------------------*/
-void add_float_ext_reg (int r1, int r2, REGS *regs)
+void zz_add_float_ext_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 EXTENDED_FLOAT fl;
 EXTENDED_FLOAT add_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPODD2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_ef (&fl, regs->fpr + r1);
@@ -2334,22 +2523,21 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function add_float_ext_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Subtract float extended register                                  */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Extended float register                              */
-/*      r2	Extended float register		                     */
-/*      regs    CPU register context                                 */
+/* 37   SXR   - Subtract Floating Point Extended Register       [RR] */
 /*-------------------------------------------------------------------*/
-void subtract_float_ext_reg (int r1, int r2, REGS *regs)
+void zz_subtract_float_ext_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 EXTENDED_FLOAT fl;
 EXTENDED_FLOAT sub_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPODD2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_ef (&fl, regs->fpr + r1);
@@ -2375,21 +2563,36 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function subtract_float_ext_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Compare float short register                                      */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Short float register                                 */
-/*      r2	Short float register		                     */
-/*      regs    CPU register context                                 */
+/* 38   LER   - Load Floating Point Short Register              [RR] */
 /*-------------------------------------------------------------------*/
-void compare_float_short_reg (int r1, int r2, REGS *regs)
+void zz_load_float_short_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
+
+    /* Copy register content */
+    regs->fpr[r1] = regs->fpr[r2];
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* 39   CER   - Compare Floating Point Short Register           [RR] */
+/*-------------------------------------------------------------------*/
+void zz_compare_float_short_reg (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1, r2;                         /* Values of R fields        */
 SHORT_FLOAT fl;
 SHORT_FLOAT cmp_fl;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
@@ -2398,22 +2601,21 @@ SHORT_FLOAT cmp_fl;
     /* Compare short */
     cmp_sf (&fl, &cmp_fl, regs);
 
-} /* end function compare_float_short_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Add float short register                                          */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Short float register                                 */
-/*      r2	Short float register		                     */
-/*      regs    CPU register context                                 */
+/* 3A   AER   - Add Floating Point Short Register               [RR] */
 /*-------------------------------------------------------------------*/
-void add_float_short_reg (int r1, int r2, REGS *regs)
+void zz_add_float_short_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 SHORT_FLOAT fl;
 SHORT_FLOAT add_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
@@ -2436,22 +2638,21 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function add_float_short_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Subtract float short register                                     */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Short float register                                 */
-/*      r2	Short float register		                     */
-/*      regs    CPU register context                                 */
+/* 3B   SER   - Subtract Floating Point Short Register          [RR] */
 /*-------------------------------------------------------------------*/
-void subtract_float_short_reg (int r1, int r2, REGS *regs)
+void zz_subtract_float_short_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 SHORT_FLOAT fl;
 SHORT_FLOAT sub_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
@@ -2477,23 +2678,22 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function subtract_float_short_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Multiply float short to long register                             */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Multiplicand short and result long float register    */
-/*      r2	Multiplicator short float register		     */
-/*      regs    CPU register context                                 */
+/* 3C   MER   - Multiply Short to Long Floating Point Register  [RR] */
 /*-------------------------------------------------------------------*/
-void multiply_float_short_to_long_reg (int r1, int r2, REGS *regs)
+void zz_multiply_float_short_to_long_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 SHORT_FLOAT fl;
 SHORT_FLOAT mul_fl;
 LONG_FLOAT result_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
@@ -2509,22 +2709,21 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function multiply_float_short_to_long_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Divide float short register                                       */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Dividend and result short float register             */
-/*      r2	Divisor short float register		             */
-/*      regs    CPU register context                                 */
+/* 3D   DER   - Divide Floating Point Short Register            [RR] */
 /*-------------------------------------------------------------------*/
-void divide_float_short_reg (int r1, int r2, REGS *regs)
+void zz_divide_float_short_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 SHORT_FLOAT fl;
 SHORT_FLOAT div_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
@@ -2540,22 +2739,21 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function divide_float_short_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Add unnormalized float short register                             */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Short float register                                 */
-/*      r2	Short float register		                     */
-/*      regs    CPU register context                                 */
+/* 3E   AUR   - Add Unnormalized Floating Point Short Register  [RR] */
 /*-------------------------------------------------------------------*/
-void add_unnormal_float_short_reg (int r1, int r2, REGS *regs)
+void zz_add_unnormal_float_short_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 SHORT_FLOAT fl;
 SHORT_FLOAT add_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
@@ -2578,22 +2776,21 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function add_unnormal_float_short_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Subtract unnormalized float short register                        */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Short float register                                 */
-/*      r2	Short float register		                     */
-/*      regs    CPU register context                                 */
+/* 3F   SUR   - Subtract Unnormalized Floating Point Short Reg. [RR] */
 /*-------------------------------------------------------------------*/
-void subtract_unnormal_float_short_reg (int r1, int r2, REGS *regs)
+void zz_subtract_unnormal_float_short_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 SHORT_FLOAT fl;
 SHORT_FLOAT sub_fl;
 int	pgm_check;
+
+    RR(inst, execflag, regs, r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
@@ -2619,28 +2816,48 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function subtract_unnormal_float_short_reg */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Multiply float long to extended                                   */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Multiplicand long and result extended float register */
-/*      addr	Multiplicator long float			     */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
+/* 60   STD   - Store Floating Point Long                       [RX] */
 /*-------------------------------------------------------------------*/
-void multiply_float_long_to_ext (int r1, U32 addr, int arn, REGS *regs)
+void zz_store_float_long (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
+U64     dreg;                           /* Double word workarea      */
+
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
+    /* Store register contents at operand address */
+    dreg = ((U64)regs->fpr[r1] << 32) | regs->fpr[r1+1];
+    vstore8 (dreg, effective_addr2, b2, regs);
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* 67   MXD   - Multiply Floating Point Long to Extended        [RX] */
+/*-------------------------------------------------------------------*/
+void zz_multiply_float_long_to_ext (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
 LONG_FLOAT fl;
 LONG_FLOAT mul_fl;
 EXTENDED_FLOAT result_fl;
 int	pgm_check;
 
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPODD_CHECK(r1, regs);
+
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
-    vfetch_lf (&mul_fl, addr, arn, regs );
+    vfetch_lf (&mul_fl, effective_addr2, b2, regs );
 
     /* multiply long to extended */
     pgm_check = mul_lf_to_ef (&fl, &mul_fl, &result_fl, regs);
@@ -2652,51 +2869,74 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function multiply_float_long_to_ext */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Compare float long                                                */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Long float register                                  */
-/*      addr	Long float			                     */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
+/* 68   LD    - Load Floating Point Long                        [RX] */
 /*-------------------------------------------------------------------*/
-void compare_float_long (int r1, U32 addr, int arn, REGS *regs)
+void zz_load_float_long (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
+U64     dreg;                           /* Double word workarea      */
+
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
+    /* Fetch value from operand address */
+    dreg = vfetch8 (effective_addr2, b2, regs);
+
+    /* Update register contents */
+    regs->fpr[r1] = dreg >> 32;
+    regs->fpr[r1+1] = dreg;
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* 69   CD    - Compare Floating Point Long                     [RX] */
+/*-------------------------------------------------------------------*/
+void zz_compare_float_long (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
 LONG_FLOAT fl;
 LONG_FLOAT cmp_fl;
 
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
-    vfetch_lf (&cmp_fl, addr, arn, regs );
+    vfetch_lf (&cmp_fl, effective_addr2, b2, regs );
 
     /* Compare long */
     cmp_lf (&fl, &cmp_fl, regs);
 
-} /* end function compare_float_long */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Add float long                                                    */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Long float register                                  */
-/*      addr	Long float			                     */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
+/* 6A   AD    - Add Floating Point Long                         [RX] */
 /*-------------------------------------------------------------------*/
-void add_float_long (int r1, U32 addr, int arn, REGS *regs)
+void zz_add_float_long (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
 LONG_FLOAT fl;
 LONG_FLOAT add_fl;
 int	pgm_check;
 
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
-    vfetch_lf (&add_fl, addr, arn, regs );
+    vfetch_lf (&add_fl, effective_addr2, b2, regs );
 
     /* Add long with normalization */
     pgm_check = add_lf (&fl, &add_fl, NORMAL, regs);
@@ -2715,27 +2955,27 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function add_float_long */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Subtract float long                                               */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Long float register                                  */
-/*      addr	Long float			                     */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
+/* 6B   SD    - Subtract Floating Point Long                    [RX] */
 /*-------------------------------------------------------------------*/
-void subtract_float_long (int r1, U32 addr, int arn, REGS *regs)
+void zz_subtract_float_long (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
 LONG_FLOAT fl;
 LONG_FLOAT sub_fl;
 int	pgm_check;
 
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
-    vfetch_lf (&sub_fl, addr, arn, regs );
+    vfetch_lf (&sub_fl, effective_addr2, b2, regs );
 
     /* Invert the sign of 2nd operand */
     sub_fl.sign = ! (sub_fl.sign);
@@ -2757,27 +2997,27 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function subtract_float_long */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Multiply float long                                               */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Multiplicand and result long float register          */
-/*      addr	Multiplicator long float			     */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
+/* 6C   MD    - Multiply Floating Point Long                    [RX] */
 /*-------------------------------------------------------------------*/
-void multiply_float_long (int r1, U32 addr, int arn, REGS *regs)
+void zz_multiply_float_long (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
 LONG_FLOAT fl;
 LONG_FLOAT mul_fl;
 int	pgm_check;
 
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
-    vfetch_lf (&mul_fl, addr, arn, regs );
+    vfetch_lf (&mul_fl, effective_addr2, b2, regs );
 
     /* multiply long */
     pgm_check = mul_lf (&fl, &mul_fl, regs);
@@ -2789,27 +3029,27 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function multiply_float_long */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Divide float long                                                 */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Dividend and result long float register              */
-/*      addr	Divisor long float				     */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
+/* 6D   DD    - Divide Floating Point Long                      [RX] */
 /*-------------------------------------------------------------------*/
-void divide_float_long (int r1, U32 addr, int arn, REGS *regs)
+void zz_divide_float_long (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
 LONG_FLOAT fl;
 LONG_FLOAT div_fl;
 int	pgm_check;
 
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
-    vfetch_lf (&div_fl, addr, arn, regs );
+    vfetch_lf (&div_fl, effective_addr2, b2, regs );
 
     /* divide long */
     pgm_check = div_lf (&fl, &div_fl, regs);
@@ -2821,27 +3061,27 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function divide_float_long */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Add unnormalized float long                                       */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Long float register                                  */
-/*      addr	Long float			                     */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
+/* 6E   AW    - Add Unnormalized Floating Point Long            [RX] */
 /*-------------------------------------------------------------------*/
-void add_unnormal_float_long (int r1, U32 addr, int arn, REGS *regs)
+void zz_add_unnormal_float_long (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
 LONG_FLOAT fl;
 LONG_FLOAT add_fl;
 int	pgm_check;
 
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
-    vfetch_lf (&add_fl, addr, arn, regs );
+    vfetch_lf (&add_fl, effective_addr2, b2, regs );
 
     /* Add long without normalization */
     pgm_check = add_lf (&fl, &add_fl, UNNORMAL, regs);
@@ -2860,27 +3100,27 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function add_unnormal_float_long */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Subtract unnormalized float long                                  */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Long float register                                  */
-/*      addr	Long float			                     */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
+/* 6F   SW    - Subtract Unnormalized Floating Point Long       [RX] */
 /*-------------------------------------------------------------------*/
-void subtract_unnormal_float_long (int r1, U32 addr, int arn, REGS *regs)
+void zz_subtract_unnormal_float_long (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
 LONG_FLOAT fl;
 LONG_FLOAT sub_fl;
 int	pgm_check;
 
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
     /* Get the operands */
     get_lf (&fl, regs->fpr + r1);
-    vfetch_lf (&sub_fl, addr, arn, regs );
+    vfetch_lf (&sub_fl, effective_addr2, b2, regs );
 
     /* Invert the sign of 2nd operand */
     sub_fl.sign = ! (sub_fl.sign);
@@ -2902,51 +3142,87 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function subtract_unnormal_float_long */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Compare float short                                               */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Short float register                                 */
-/*      addr	Short float			                     */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
+/* 70   STE   - Store Floating Point Short                      [RX] */
 /*-------------------------------------------------------------------*/
-void compare_float_short (int r1, U32 addr, int arn, REGS *regs)
+void zz_store_float_short (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
+
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
+    /* Store register contents at operand address */
+    vstore4 (regs->fpr[r1], effective_addr2, b2, regs);
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* 78   LE    - Load Floating Point Short                       [RX] */
+/*-------------------------------------------------------------------*/
+void zz_load_float_short (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
+
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
+    /* Update first 32 bits of register from operand address */
+    regs->fpr[r1] = vfetch4 (effective_addr2, b2, regs);
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* 79   CE    - Compare Floating Point Short                    [RX] */
+/*-------------------------------------------------------------------*/
+void zz_compare_float_short (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
 SHORT_FLOAT fl;
 SHORT_FLOAT cmp_fl;
 
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
-    vfetch_sf (&cmp_fl, addr, arn, regs );
+    vfetch_sf (&cmp_fl, effective_addr2, b2, regs );
 
     /* Compare long */
     cmp_sf (&fl, &cmp_fl, regs);
 
-} /* end function compare_float_short */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Add float short                                                   */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Short float register                                 */
-/*      addr	Short float			                     */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
+/* 7A   AE    - Add Floating Point Short                        [RX] */
 /*-------------------------------------------------------------------*/
-void add_float_short (int r1, U32 addr, int arn, REGS *regs)
+void zz_add_float_short (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
 SHORT_FLOAT fl;
 SHORT_FLOAT add_fl;
 int	pgm_check;
 
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
-    vfetch_sf (&add_fl, addr, arn, regs );
+    vfetch_sf (&add_fl, effective_addr2, b2, regs );
 
     /* Add short with normalization */
     pgm_check = add_sf (&fl, &add_fl, NORMAL, regs);
@@ -2965,27 +3241,27 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function add_float_short */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Subtract float short                                              */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Short float register                                 */
-/*      addr	Short float			                     */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
+/* 7B   SE    - Subtract Floating Point Short                   [RX] */
 /*-------------------------------------------------------------------*/
-void subtract_float_short (int r1, U32 addr, int arn, REGS *regs)
+void zz_subtract_float_short (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
 SHORT_FLOAT fl;
 SHORT_FLOAT sub_fl;
 int	pgm_check;
 
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
-    vfetch_sf (&sub_fl, addr, arn, regs );
+    vfetch_sf (&sub_fl, effective_addr2, b2, regs );
 
     /* Invert the sign of 2nd operand */
     sub_fl.sign = ! (sub_fl.sign);
@@ -3007,28 +3283,28 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function subtract_float_short */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Multiply float short to long                                      */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Multiplicand short and result long float register    */
-/*      addr	Multiplicator short float			     */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
+/* 7C   ME    - Multiply Floating Point Short to Long           [RX] */
 /*-------------------------------------------------------------------*/
-void multiply_float_short_to_long (int r1, U32 addr, int arn, REGS *regs)
+void zz_multiply_float_short_to_long (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
 SHORT_FLOAT fl;
 SHORT_FLOAT mul_fl;
 LONG_FLOAT result_fl;
 int	pgm_check;
 
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
-    vfetch_sf (&mul_fl, addr, arn, regs );
+    vfetch_sf (&mul_fl, effective_addr2, b2, regs );
 
     /* multiply short to long */
     pgm_check = mul_sf_to_lf (&fl, &mul_fl, &result_fl, regs);
@@ -3040,27 +3316,27 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function multiply_float_short_to_long */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Divide float short                                                */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Dividend and result short float register             */
-/*      addr	Multiplicator short float			     */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
+/* 7D   DE    - Divide Floating Point Short                     [RX] */
 /*-------------------------------------------------------------------*/
-void divide_float_short (int r1, U32 addr, int arn, REGS *regs)
+void zz_divide_float_short (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
 SHORT_FLOAT fl;
 SHORT_FLOAT div_fl;
 int	pgm_check;
 
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
-    vfetch_sf (&div_fl, addr, arn, regs );
+    vfetch_sf (&div_fl, effective_addr2, b2, regs );
 
     /* divide short */
     pgm_check = div_sf (&fl, &div_fl, regs);
@@ -3072,27 +3348,27 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function divide_float_short */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Add unnormalized float short                                      */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Short float register                                 */
-/*      addr	Short float			                     */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
+/* 7E   AU    - Add Unnormalized Floating Point Short           [RX] */
 /*-------------------------------------------------------------------*/
-void add_unnormal_float_short (int r1, U32 addr, int arn, REGS *regs)
+void zz_add_unnormal_float_short (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
 SHORT_FLOAT fl;
 SHORT_FLOAT add_fl;
 int	pgm_check;
 
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
-    vfetch_sf (&add_fl, addr, arn, regs );
+    vfetch_sf (&add_fl, effective_addr2, b2, regs );
 
     /* Add short without normalization */
     pgm_check = add_sf (&fl, &add_fl, UNNORMAL, regs);
@@ -3111,27 +3387,27 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function add_unnormal_float_short */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Subtract unnormalized float short                                 */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Short float register                                 */
-/*      addr	Short float			                     */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
+/* 7F   SU    - Subtract Unnormalized Floating Point Short      [RX] */
 /*-------------------------------------------------------------------*/
-void subtract_unnormal_float_short (int r1, U32 addr, int arn, REGS *regs)
+void zz_subtract_unnormal_float_short (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+U32     effective_addr2;                /* Effective address         */
 SHORT_FLOAT fl;
 SHORT_FLOAT sub_fl;
 int	pgm_check;
 
+    RX(inst, execflag, regs, r1, b2, effective_addr2);
+    HFPREG_CHECK(r1, regs);
+
     /* Get the operands */
     get_sf (&fl, regs->fpr + r1);
-    vfetch_sf (&sub_fl, addr, arn, regs );
+    vfetch_sf (&sub_fl, effective_addr2, b2, regs );
 
     /* Invert the sign of 2nd operand */
     sub_fl.sign = ! (sub_fl.sign);
@@ -3153,22 +3429,21 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function subtract_unnormal_float_short */
+}
 
 
 /*-------------------------------------------------------------------*/
-/* Divide float extended register                                    */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1	Dividend and result extended float register          */
-/*      r2	Multiplicator extended float register		     */
-/*      regs    CPU register context                                 */
+/* B22D DXR   - Divide Float Extended Register                 [RRE] */
 /*-------------------------------------------------------------------*/
-void divide_float_ext_reg (int r1, int r2, REGS *regs)
+void zz_divide_float_ext_reg (BYTE inst[], int execflag, REGS *regs)
 {
+int     r1, r2;                         /* Values of R fields        */
 EXTENDED_FLOAT fl;
 EXTENDED_FLOAT div_fl;
 int	pgm_check;
+
+    RRE(inst, execflag, regs, r1, r2);
+    HFPODD2_CHECK(r1, r2, regs);
 
     /* Get the operands */
     get_ef (&fl, regs->fpr + r1);
@@ -3184,7 +3459,6 @@ int	pgm_check;
     if (pgm_check)
         program_check (regs, pgm_check);
 
-} /* end function divide_float_ext_reg */
-
+}
 
 /* end of float.c */

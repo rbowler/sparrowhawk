@@ -397,6 +397,9 @@ static U64        diag204tod;          /* last diag204 tod           */
 
     case 0x04:
 
+	/* Update the TOD clock */
+	update_TOD_clock();
+
         /* Obtain the TOD clock update lock */
         obtain_lock (&sysblk.todlock);
 
@@ -405,12 +408,6 @@ static U64        diag204tod;          /* last diag204 tod           */
 
         /* Retrieve the TOD clock value and shift out the epoch */
         diag204tod = sysblk.todclk << 8;
-
-        /* Insert the uniqueness value in bits 52-63 */
-        diag204tod |= (sysblk.toduniq & 0xFFF);
-
-        /* Increment the TOD clock uniqueness value */
-        sysblk.toduniq++;
 
         /* Release the TOD clock update lock */
         release_lock (&sysblk.todlock);

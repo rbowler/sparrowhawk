@@ -231,9 +231,11 @@ dasd_name (FWORD ucbtype)
     case 0x07: return "2305-2";
     case 0x08: return "2314";
     case 0x09: return "3330";
-    case 0x0A: return "3350";
-    case 0x0B: return "3380";
+    case 0x0A: return "3340";
+    case 0x0B: return "3350";
+    case 0x0C: return "3375";
     case 0x0D: return "3330-11";
+    case 0x0E: return "3380";
     case 0x0F: return "3390";
     } /* end switch(key) */
 
@@ -256,8 +258,10 @@ ucbtype_code (U16 devtype)
     case 0x2305: return 0x30002006;
     case 0x2314: return 0x30C02008;
     case 0x3330: return 0x30502009;
-    case 0x3350: return 0x3050200A;
-    case 0x3380: return 0x3050200B;
+    case 0x3340: return 0x3050200A;
+    case 0x3350: return 0x3050200B;
+    case 0x3375: return 0x3050200C;
+    case 0x3380: return 0x3050200E;
     case 0x3390: return 0x3050200F;
     } /* end switch(key) */
 

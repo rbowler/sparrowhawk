@@ -30,7 +30,7 @@
 /*      an addressing, protection, or translation exception, and in  */
 /*      this case the function does not return.                      */
 /*-------------------------------------------------------------------*/
-static U32 abs_stack_addr (U32 vaddr, REGS *regs, int acctype)
+U32 abs_stack_addr (U32 vaddr, REGS *regs, int acctype)
 {
 int     rc;                             /* Return code               */
 U32     raddr;                          /* Real address              */
@@ -44,10 +44,7 @@ U16     xcode;                          /* Exception code            */
     rc = translate_addr (vaddr, 0, regs, ACCTYPE_STACK, &raddr,
                 &xcode, &private, &protect, &stid, NULL, NULL);
     if (rc != 0)
-    {
         program_check (regs, xcode);
-        return 0;
-    }
 
     /* Low-address protection prohibits stores into locations
        0-511 of non-private address spaces if CR0 bit 3 is set */
@@ -61,7 +58,6 @@ U16     xcode;                          /* Exception code            */
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
         program_check (regs, PGM_PROTECTION_EXCEPTION);
-        return 0;
     }
 
     /* Page protection prohibits all stores into the page */
@@ -72,7 +68,6 @@ U16     xcode;                          /* Exception code            */
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
         program_check (regs, PGM_PROTECTION_EXCEPTION);
-        return 0;
     }
 
     /* Convert real address to absolute address */
@@ -80,10 +75,7 @@ U16     xcode;                          /* Exception code            */
 
     /* Program check if absolute address is outside main storage */
     if (aaddr >= sysblk.mainsize)
-    {
         program_check (regs, PGM_ADDRESSING_EXCEPTION);
-        return 0;
-    }
 
     /* Set the reference and change bits in the storage key */
     STORAGE_KEY(aaddr) |= STORKEY_REF;
@@ -113,8 +105,7 @@ U16     xcode;                          /* Exception code            */
 /*      In the event of any stack error, this function generates     */
 /*      a program check and does not return.                         */
 /*-------------------------------------------------------------------*/
-void form_stack_entry (BYTE etype, U32 retna, U32 calla, REGS *regs,
-                                U32 csi)
+void form_stack_entry (BYTE etype, U32 retna, U32 calla, U32 csi, REGS *regs)
 {
 U32     lsea;                           /* Linkage stack entry addr  */
 U32     abs;                            /* Absolute addr new entry   */
@@ -131,10 +122,7 @@ int     i;                              /* Array subscript           */
     if ((regs->cr[0] & CR0_ASF) == 0
         || REAL_MODE(&regs->psw)
         || regs->psw.space == 1)
-    {
         program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
-        return;
-    }
 
     /* [5.12.3.1] Locate space for a new linkage stack entry */
 
@@ -159,10 +147,7 @@ int     i;                              /* Array subscript           */
     {
         /* Program check if remaining free space not a multiple of 8 */
         if ((rfs & 0x07) != 0)
-        {
             program_check (regs, PGM_STACK_SPECIFICATION_EXCEPTION);
-            return;
-        }
 
         /* Not enough space, so fetch the second word of the
            trailer entry of the current linkage stack section */
@@ -180,10 +165,7 @@ int     i;                              /* Array subscript           */
 
         /* Stack full exception if forward address is not valid */
         if ((fsha & LSTE1_FVALID) == 0)
-        {
             program_check (regs, PGM_STACK_FULL_EXCEPTION);
-            return;
-        }
 
         /* Extract the forward section header address, which points to
            the entry descriptor (words 2-3) of next section's header */
@@ -204,10 +186,7 @@ int     i;                              /* Array subscript           */
            have enough free space to contain the new stack entry */
         rfs = (lsed.rfs[0] << 8) | lsed.rfs[1];
         if (rfs < LSSE_SIZE)
-        {
             program_check (regs, PGM_STACK_SPECIFICATION_EXCEPTION);
-            return;
-        }
 
         /* Calculate the virtual address of the new section's header
            entry, which is 8 bytes before the entry descriptor */
@@ -432,7 +411,7 @@ int     i;                              /* Array subscript           */
 /*      In the event of any stack error, this function generates     */
 /*      a program check and does not return.                         */
 /*-------------------------------------------------------------------*/
-static U32 locate_stack_entry (int prinst, LSED *lsedptr, REGS *regs)
+U32 locate_stack_entry (int prinst, LSED *lsedptr, REGS *regs)
 {
 U32     lsea;                           /* Linkage stack entry addr  */
 U32     abs;                            /* Absolute address          */
@@ -443,17 +422,11 @@ U32     bsea;                           /* Backward stack entry addr */
     if ((regs->cr[0] & CR0_ASF) == 0
         || REAL_MODE(&regs->psw)
         || SECONDARY_SPACE_MODE(&regs->psw))
-    {
         program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
-        return 0;
-    }
 
     /* Special operation exception if home space mode PR instruction */
     if (prinst && HOME_SPACE_MODE(&regs->psw))
-    {
         program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
-        return 0;
-    }
 
     /* [5.12.4.1] Locate current entry and process header entry */
 
@@ -477,10 +450,7 @@ U32     bsea;                           /* Backward stack entry addr */
         /* For PR instruction only, generate stack operation exception
            if the unstack suppression bit in the header entry is set */
         if (prinst && (lsedptr->uet & LSED_UET_U))
-        {
             program_check (regs, PGM_STACK_OPERATION_EXCEPTION);
-            return 0;
-        }
 
         /* Calculate the virtual address of the header entry,
            which is 8 bytes before the entry descriptor */
@@ -496,10 +466,7 @@ U32     bsea;                           /* Backward stack entry addr */
 
         /* Stack empty exception if backward address is not valid */
         if ((bsea & LSHE1_BVALID) == 0)
-        {
             program_check (regs, PGM_STACK_EMPTY_EXCEPTION);
-            return 0;
-        }
 
         /* Extract the virtual address of the entry descriptor
            of the last entry in the previous section */
@@ -519,10 +486,7 @@ U32     bsea;                           /* Backward stack entry addr */
 
         /* Stack specification exception if this is also a header */
         if ((lsedptr->uet & LSED_UET_ET) == LSED_UET_HDR)
-        {
             program_check (regs, PGM_STACK_SPECIFICATION_EXCEPTION);
-            return 0;
-        }
 
     } /* end if(LSED_UET_HDR) */
 
@@ -531,18 +495,12 @@ U32     bsea;                           /* Backward stack entry addr */
     /* Stack type exception if this is not a state entry */
     if ((lsedptr->uet & LSED_UET_ET) != LSED_UET_BAKR
         && (lsedptr->uet & LSED_UET_ET) != LSED_UET_PC)
-    {
         program_check (regs, PGM_STACK_TYPE_EXCEPTION);
-        return 0;
-    }
 
     /* [5.12.4.3] For PR instruction only, stack operation exception
        if the unstack suppression bit in the state entry is set */
     if (prinst && (lsedptr->uet & LSED_UET_U))
-    {
         program_check (regs, PGM_STACK_OPERATION_EXCEPTION);
-        return 0;
-    }
 
     /* Return the virtual address of the entry descriptor */
     return lsea;
@@ -574,7 +532,7 @@ U32     bsea;                           /* Backward stack entry addr */
 /*      attempting to load the first register, in which case the     */
 /*      operation is nullified with all registers unchanged.         */
 /*-------------------------------------------------------------------*/
-static void unstack_registers (U32 lsea, int r1, int r2, REGS *regs)
+void unstack_registers (U32 lsea, int r1, int r2, REGS *regs)
 {
 U32     abs = 0;                        /* Absolute address          */
 int     i;                              /* Array subscript           */
@@ -777,10 +735,8 @@ U16     pasn;                           /* Primary ASN               */
 
     /* Load new PSW from bytes 136-143 of the stack entry */
     rc = load_psw (&regs->psw, sysblk.mainstor+abs);
-    if (rc) {
+    if (rc)
         program_check (regs, rc);
-        return 0;
-    }
 
     /* Restore the PER mode bit from the current PSW */
     if (permode)
@@ -808,141 +764,4 @@ U16     pasn;                           /* Primary ASN               */
 
 } /* end function program_return_unstack */
 
-/*-------------------------------------------------------------------*/
-/* Extract stacked registers                                         */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1      The number of the first register to be loaded        */
-/*      r2      The number of the last register to be loaded         */
-/*      regs    Pointer to the CPU register context                  */
-/*                                                                   */
-/*      This function loads a range of general registers and         */
-/*      access registers from the current linkage stack entry.       */
-/*                                                                   */
-/*      In the event of any stack error, this function generates     */
-/*      a program check and does not return.                         */
-/*-------------------------------------------------------------------*/
-void extract_stacked_registers (int r1, int r2, REGS *regs)
-{
-LSED    lsed;                           /* Linkage stack entry desc. */
-U32     lsea;                           /* Linkage stack entry addr  */
-
-    /* Find the virtual address of the entry descriptor
-       of the current state entry in the linkage stack */
-    lsea = locate_stack_entry (0, &lsed, regs);
-
-    /* Load registers from the stack entry */
-    unstack_registers (lsea, r1, r2, regs);
-
-} /* end function extract_stacked_registers */
-
-/*-------------------------------------------------------------------*/
-/* Extract stacked state                                             */
-/*                                                                   */
-/* Input:                                                            */
-/*      rn      The number of the even register in an even/odd pair  */
-/*      code    Extraction code:                                     */
-/*              0=Extract PKM/SASN/EAX/PASN, 1=Extract PSW,          */
-/*              2=Extract called address, 3=Extract modifiable area  */
-/*      regs    Pointer to the CPU register context                  */
-/* Return value:                                                     */
-/*      Returns the condition code for the ESTA instruction:         */
-/*      0=State entry is BAKR, 1=State entry is PC                   */
-/*                                                                   */
-/*      This function loads 8 bytes of information from the current  */
-/*      linkage stack state entry into a general register pair.      */
-/*      The extraction code indicates which bytes are to be loaded.  */
-/*                                                                   */
-/*      In the event of any stack error, this function generates     */
-/*      a program check and does not return.                         */
-/*-------------------------------------------------------------------*/
-int extract_stacked_state (int rn, BYTE code, REGS *regs)
-{
-LSED    lsed;                           /* Linkage stack entry desc. */
-U32     lsea;                           /* Linkage stack entry addr  */
-U32     abs;                            /* Absolute address          */
-
-    /* Program check if rn is odd, or if extraction code is invalid */
-    if ((rn & 1) || code > 3)
-    {
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
-        return 0;
-    }
-
-    /* Find the virtual address of the entry descriptor
-       of the current state entry in the linkage stack */
-    lsea = locate_stack_entry (0, &lsed, regs);
-
-    /* Point back to byte 128 of the state entry */
-    lsea -= LSSE_SIZE - sizeof(LSED);
-    lsea += 128;
-
-    /* Point to byte 128, 136, 144, or 152 depending on the code */
-    lsea += code * 8;
-    lsea &= 0x7FFFFFFF;
-
-    /* Load the general register pair from the state entry */
-    abs = abs_stack_addr (lsea, regs, ACCTYPE_READ);
-    regs->gpr[rn] = (sysblk.mainstor[abs] << 24)
-                        | (sysblk.mainstor[abs+1] << 16)
-                        | (sysblk.mainstor[abs+2] << 8)
-                        | sysblk.mainstor[abs+3];
-    regs->gpr[rn+1] = (sysblk.mainstor[abs+4] << 24)
-                        | (sysblk.mainstor[abs+5] << 16)
-                        | (sysblk.mainstor[abs+6] << 8)
-                        | sysblk.mainstor[abs+7];
-
-    /* Return condition code depending on entry type */
-    return ((lsed.uet & LSED_UET_ET) == LSED_UET_PC) ? 1 : 0;
-
-} /* end function extract_stacked_state */
-
-/*-------------------------------------------------------------------*/
-/* Modify stacked state                                              */
-/*                                                                   */
-/* Input:                                                            */
-/*      rn      The number of the even register in an even/odd pair  */
-/*      regs    Pointer to the CPU register context                  */
-/*                                                                   */
-/*      This function stores 8 bytes of information from a general   */
-/*      register pair into the modifiable area (bytes 152-159) of    */
-/*      the current linkage stack state entry.                       */
-/*                                                                   */
-/*      In the event of any stack error, this function generates     */
-/*      a program check and does not return.                         */
-/*-------------------------------------------------------------------*/
-void modify_stacked_state (int rn, REGS *regs)
-{
-LSED    lsed;                           /* Linkage stack entry desc. */
-U32     lsea;                           /* Linkage stack entry addr  */
-U32     abs;                            /* Absolute address          */
-
-    /* Program check if rn is odd */
-    if (rn & 1)
-    {
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
-        return;
-    }
-
-    /* Find the virtual address of the entry descriptor
-       of the current state entry in the linkage stack */
-    lsea = locate_stack_entry (0, &lsed, regs);
-
-    /* Point back to byte 152 of the state entry */
-    lsea -= LSSE_SIZE - sizeof(LSED);
-    lsea += 152;
-    lsea &= 0x7FFFFFFF;
-
-    /* Store the general register pair into the state entry */
-    abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
-    sysblk.mainstor[abs] = (regs->gpr[rn] >> 24) & 0xFF;
-    sysblk.mainstor[abs+1] = (regs->gpr[rn] >> 16) & 0xFF;
-    sysblk.mainstor[abs+2] = (regs->gpr[rn] >> 8) & 0xFF;
-    sysblk.mainstor[abs+3] = regs->gpr[rn] & 0xFF;
-    sysblk.mainstor[abs+4] = (regs->gpr[rn+1] >> 24) & 0xFF;
-    sysblk.mainstor[abs+5] = (regs->gpr[rn+1] >> 16) & 0xFF;
-    sysblk.mainstor[abs+6] = (regs->gpr[rn+1] >> 8) & 0xFF;
-    sysblk.mainstor[abs+7] = regs->gpr[rn+1] & 0xFF;
-
-} /* end function modify_stacked_state */
 

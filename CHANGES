@@ -1,3 +1,21 @@
+22 Jul 2000 Track overflow processing fixes (by Jay Maynard, suggested by
+            Valery Pogonchenko)
+21 Jul 2000 Added TOD clock update to STCK, STCKE, DIAG 204, and TRACE
+            processing (by Jay Maynard)
+19 Jul 2000 Added support for 3340 and 3375 DASD (by Jay Maynard, with help
+            from Rick Fochtman and David Cole)
+18 Jul 2000 Corrected interval timer update increment (by Jay Maynard)
+18 Jul 2000 Fixed READ DEVICE CHARACTERISTICS alternate track values for
+            3380 and 3390 DASD (by petermac@ase.com.au)
+10 Jul 2000 Skeletal CMPSC instruction (by Bernard van der Helm)
+07 Jul 2000 float.c optimization for new instruction decode 
+            and execution (by Peter Kuschnerus)
+07 Jul 2000 Fix program check on TIC ccw (by Jan Jaeger)
+07 Jul 2000 Fix program check on NOP ccw (by Jan Jaeger)
+05 Jul 2000 Instruction decode & execution restructure (by Jan Jaeger)
+05 Jul 2000 Added -fomit-frame-pointer to compiles for improved performance
+            (by Jan Jaeger)
+04 Jul 2000 Fix STCKE instruction (by Bernard van der Helm)
 04 Jul 2000 Added track overflow processing for CKD DASD (by Jay Maynard)
 04 Jul 2000 Makefile change to allow RPM building with RPM_BUILD_ROOT
             (by David Barth)

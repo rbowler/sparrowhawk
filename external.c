@@ -14,7 +14,6 @@
 /*      Synchronized broadcasting contributed by Jan Jaeger          */
 /*      CPU timer and clock comparator interrupt improvements by     */
 /*          Jan Jaeger, after a suggestion by Willem Koynenberg      */
-/*      /dev/rtc interface by Jay Maynard                            */
 /*      Prevent TOD clock and CPU timer from going back - Jan Jaeger */
 /*-------------------------------------------------------------------*/
 
@@ -255,6 +254,88 @@ U16     cpuad;                          /* Originating CPU address   */
 } /* end function perform_external_interrupt */
 
 /*-------------------------------------------------------------------*/
+/* Update TOD clock                                                  */
+/*                                                                   */
+/* This function updates the TOD clock. It is called by the timer    */
+/* thread, and by the STCK instruction handler. It depends on the    */
+/* timer update thread to process any interrupts except for a        */
+/* clock comparator interrupt which becomes pending during its       */
+/* execution; those are signaled by this routine before it finishes. */
+/*-------------------------------------------------------------------*/
+void update_TOD_clock(void)
+{
+struct timeval	tv;			/* Current time              */
+U64		dreg;			/* Double register work area */
+int		intflag = 0;		/* Need to signal interrupt  */
+int		cpu;			/* CPU counter               */
+REGS	       *regs;			/* -> CPU register context   */
+
+    /* Get current time */
+    gettimeofday (&tv, NULL);
+
+    /* Load number of seconds since 00:00:00 01 Jan 1970 */
+    dreg = (U64)tv.tv_sec;
+
+    /* Convert to microseconds */
+    dreg = dreg * 1000000 + tv.tv_usec;
+
+#ifdef TODCLOCK_DRAG_FACTOR
+    if (sysblk.toddrag > 1)
+        dreg = sysblk.todclock_init +
+		(dreg - sysblk.todclock_init) / sysblk.toddrag;
+#endif /*TODCLOCK_DRAG_FACTOR*/
+
+    /* Obtain the TOD clock update lock */
+    obtain_lock (&sysblk.todlock);
+
+    /* Add number of microseconds from TOD base to 1970 */
+    dreg += sysblk.todoffset;
+
+    /* Shift left 4 bits so that bits 0-7=TOD Clock Epoch,
+       bits 8-59=TOD Clock bits 0-51, bits 60-63=zero */
+    dreg <<= 4;
+
+    /* Ensure that the clock does not go backwards and always
+       returns a unique value in the microsecond range */
+    if( dreg > sysblk.todclk)
+        sysblk.todclk = dreg;
+    else sysblk.todclk += 16;
+
+    /* Release the TOD clock update lock */
+    release_lock (&sysblk.todlock);
+
+    /* Access the diffent register contexts with the intlock held */
+    obtain_lock (&sysblk.intlock);
+
+    /* Decrement the CPU timer for each CPU */
+#ifdef FEATURE_CPU_RECONFIG 
+    for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
+      if(sysblk.regs[cpu].cpuonline)
+#else /*!FEATURE_CPU_RECONFIG*/
+    for (cpu = 0; cpu < sysblk.numcpu; cpu++)
+#endif /*!FEATURE_CPU_RECONFIG*/
+    {
+        /* Point to the CPU register context */
+        regs = sysblk.regs + cpu;
+
+	/* Signal clock comparator interrupt if needed */
+        if(sysblk.todclk > regs->clkc)
+            regs->cpuint = regs->ckpend = intflag = 1;
+        else
+            regs->ckpend = 0;
+
+    } /* end for(cpu) */
+
+    /* If a CPU timer or clock comparator interrupt condition
+       was detected for any CPU, then wake up all waiting CPUs */
+    if (intflag)
+        signal_condition (&sysblk.intcond);
+
+    release_lock(&sysblk.intlock);
+
+} /* end function update_TOD_clock */
+
+/*-------------------------------------------------------------------*/
 /* TOD clock and timer thread                                        */
 /*                                                                   */
 /* This function runs as a separate thread.  It wakes up every       */
@@ -276,13 +357,9 @@ int     msecctr = 0;                    /* Millisecond counter       */
 int     cpu;                            /* CPU engine number         */
 REGS   *regs;                           /* -> CPU register context   */
 int     intflag = 0;                    /* 1=Interrupt possible      */
-#ifdef TODCLOCK_DRAG_FACTOR
-U64     init;                           /* Initial TOD value         */
-#endif /*TODCLOCK_DRAG_FACTOR*/
 U64     prev;                           /* Previous TOD clock value  */
 U64     diff;                           /* Difference between new and
                                            previous TOD clock values */
-U64     dreg;                           /* Double register work area */
 struct  timeval tv;                     /* Structure for gettimeofday
                                            and select function calls */
 
@@ -295,55 +372,22 @@ struct  timeval tv;                     /* Structure for gettimeofday
     gettimeofday (&tv, NULL);
 
     /* Load number of seconds since 00:00:00 01 Jan 1970 */
-    init = (U64)tv.tv_sec;
+    sysblk.todclock_init = (U64)tv.tv_sec;
 
     /* Convert to microseconds */
-    init = init * 1000000 + tv.tv_usec;
+    sysblk.todclock_init = sysblk.todclock_init * 1000000 + tv.tv_usec;
 #endif /*TODCLOCK_DRAG_FACTOR*/
 
     while (1)
     {
-        /* Get current time */
-        gettimeofday (&tv, NULL);
-
-        /* Load number of seconds since 00:00:00 01 Jan 1970 */
-        dreg = (U64)tv.tv_sec;
-
-        /* Convert to microseconds */
-        dreg = dreg * 1000000 + tv.tv_usec;
-
-#ifdef TODCLOCK_DRAG_FACTOR
-        if (sysblk.toddrag > 1)
-            dreg = init + (dreg - init) / sysblk.toddrag;
-#endif /*TODCLOCK_DRAG_FACTOR*/
-
-        /* Obtain the TOD clock update lock */
-        obtain_lock (&sysblk.todlock);
-
-        /* Add number of microseconds from TOD base to 1970 */
-        dreg += sysblk.todoffset;
-
-        /* Shift left 4 bits so that bits 0-7=TOD Clock Epoch,
-           bits 8-59=TOD Clock bits 0-51, bits 60-63=zero */
-        dreg <<= 4;
-
-        /* Calculate the difference between the new TOD clock
-           value and the previous value, if the clock is set */
+	/* Save the old TOD clock value */
         prev = sysblk.todclk;
-        diff = (prev == 0 ? 0 : dreg - prev);
+        
+        /* Update TOD clock */
+        update_TOD_clock();
 
-        /* ensure that the clock does not go backwards */
-        if( dreg > (sysblk.todclk + (sysblk.toduniq >> 8)) )
-        {
-            /* Update the TOD clock */
-            sysblk.todclk = dreg;
-
-            /* Reset the TOD clock uniqueness value */
-            sysblk.toduniq = 0;
-        }
-
-        /* Release the TOD clock update lock */
-        release_lock (&sysblk.todlock);
+        /* Get the difference between the last TOD saved and this one */
+        diff = (prev == 0 ? 0 : sysblk.todclk - prev);
 
         /* Shift the epoch out of the difference for the CPU timer */
         diff <<= 8;
@@ -366,17 +410,11 @@ struct  timeval tv;                     /* Structure for gettimeofday
             if(regs->cpustate == CPUSTATE_STARTED && (S64)diff > 0)
                 (S64)regs->ptimer -= (S64)diff;
 
-            /* Set interrupt flag if the CPU timer is negative or
-               if the TOD clock value exceeds the clock comparator */
+            /* Set interrupt flag if the CPU timer is negative */
             if ((S64)regs->ptimer < 0)
                 regs->cpuint = regs->ptpend = intflag = 1;
             else
                 regs->ptpend = 0;
-
-            if(sysblk.todclk > regs->clkc)
-                regs->cpuint = regs->ckpend = intflag = 1;
-            else
-                regs->ckpend = 0;
 
 #ifdef FEATURE_INTERVAL_TIMER
             /* Point to PSA in main storage */
@@ -388,7 +426,16 @@ struct  timeval tv;                     /* Structure for gettimeofday
                                 | ((U32)(psa->inttimer[2]) << 8)
                                 | (U32)(psa->inttimer[3]));
             olditimer = itimer;
-            itimer -= 32 * (1024 / CLK_TCK);
+            
+            /* The interval timer is decremented as though bit 23 is
+               decremented by one every 1/300 of a second. This comes
+               out to subtracting 768 (X'300') every 1/100 of a second.
+               76800/CLK_TCK comes out to 768 on Intel versions of
+               Linux, where the clock ticks every 1/100 second; it
+               comes out to 75 on the Alpha, with its 1024/second
+               tick interval. See 370 POO page 4-29. (ESA doesn't
+               even have an interval timer.) */
+            itimer -= 76800 / CLK_TCK;
             psa->inttimer[0] = ((U32)itimer >> 24) & 0xFF;
             psa->inttimer[1] = ((U32)itimer >> 16) & 0xFF;
             psa->inttimer[2] = ((U32)itimer >> 8) & 0xFF;
@@ -546,304 +593,6 @@ PSA    *sspsa;                          /* -> Store status area      */
 
 } /* end function store_status */
 
-/*-------------------------------------------------------------------*/
-/* Signal processor                                                  */
-/* Input:                                                            */
-/*      r1      Register number for status and parameter operand     */
-/*      r3      Register number for target CPU address operand       */
-/*      eaddr   Effective address operand of SIGP instruction        */
-/*      regs    Register context of CPU executing SIGP instruction   */
-/* Output:                                                           */
-/*      Return value is the condition code for the SIGP instruction. */
-/*-------------------------------------------------------------------*/
-int signal_processor (int r1, int r3, U32 eaddr, REGS *regs)
-{
-REGS   *tregs;                          /* -> Target CPU registers   */
-U32     parm;                           /* Signal parameter          */
-U32     status = 0;                     /* Signal status             */
-U32     abs;                            /* Absolute address          */
-U16     cpad;                           /* Target CPU address        */
-BYTE    order;                          /* SIGP order code           */
-static char *ordername[] = {    "Unassigned",
-        /* SIGP_SENSE     */    "Sense",
-        /* SIGP_EXTCALL   */    "External call",
-        /* SIGP_EMERGENCY */    "Emergency signal",
-        /* SIGP_START     */    "Start",
-        /* SIGP_STOP      */    "Stop",
-        /* SIGP_RESTART   */    "Restart",
-        /* SIGP_IPR       */    "Initial program reset",
-        /* SIGP_PR        */    "Program reset",
-        /* SIGP_STOPSTORE */    "Stop and store status",
-        /* SIGP_IMPL      */    "Initial microprogram load",
-        /* SIGP_INITRESET */    "Initial CPU reset",
-        /* SIGP_RESET     */    "CPU reset",
-        /* SIGP_SETPREFIX */    "Set prefix",
-        /* SIGP_STORE     */    "Store status",
-        /* 0x0F           */    "Unassigned",
-        /* 0x10           */    "Unassigned",
-        /* SIGP_STOREX    */    "Store extended status at address" };
-
-    /* Load the target CPU address from R3 bits 16-31 */
-    cpad = regs->gpr[r3] & 0xFFFF;
-
-    /* Load the order code from operand address bits 24-31 */
-    order = eaddr & 0xFF;
-
-    /* Load the parameter from R1 (if R1 odd), or R1+1 (if even) */
-    parm = (r1 & 1) ? regs->gpr[r1] : regs->gpr[r1+1];
-
-    /* Return condition code 3 if target CPU does not exist */
-#ifdef FEATURE_CPU_RECONFIG 
-    if (cpad >= MAX_CPU_ENGINES)
-#else /*!FEATURE_CPU_RECONFIG*/
-    if (cpad >= sysblk.numcpu)
-#endif /*!FEATURE_CPU_RECONFIG*/
-        return 3;
-
-    /* Point to CPU register context for the target CPU */
-    tregs = sysblk.regs + cpad;
-
-    /* Trace SIGP unless Sense, External Call, Emergency Signal,
-       or the target CPU is configured offline */
-    if (order > SIGP_EMERGENCY || !tregs->cpuonline)
-        logmsg ("CPU%4.4X: SIGP CPU%4.4X %s PARM %8.8X\n",
-                regs->cpuad, cpad,
-                order > SIGP_STOREX ? ordername[0] : ordername[order],
-                parm);
-
-    /* [4.9.2.1] Claim the use of the CPU signaling and response
-       facility, and return condition code 2 if the facility is
-       busy.  The sigpbusy bit is set while the facility is in
-       use by any CPU.  The sigplock must be held while testing
-       and setting the value of the sigpbusy bit to one. */
-    obtain_lock (&sysblk.sigplock);
-    if (sysblk.sigpbusy)
-    {
-        release_lock (&sysblk.sigplock);
-        return 2;
-    }
-    sysblk.sigpbusy = 1;
-    release_lock (&sysblk.sigplock);
-
-    /* Obtain the interrupt lock */
-    obtain_lock (&sysblk.intlock);
-
-    /* If the cpu is not part of the configuration then return cc3
-       Initial CPU reset may IML a processor that is currently not
-       part of the configuration, ie configure the cpu implicitly 
-       online */
-    if (order != SIGP_INITRESET && !tregs->cpuonline)
-    {
-        sysblk.sigpbusy = 0;
-        release_lock(&sysblk.intlock);
-        return 3;
-    }
-
-    /* Except for the reset orders, return condition code 2 if the
-       target CPU is executing a previous start, stop, restart,
-       stop and store status, set prefix, or store status order */
-    if ((order != SIGP_RESET && order != SIGP_INITRESET)
-        && (tregs->cpustate == CPUSTATE_STOPPING
-            || tregs->restart))
-    {
-        sysblk.sigpbusy = 0;
-        release_lock(&sysblk.intlock);
-        return 2;
-    }
-
-    /* If the CPU thread is still starting, ie CPU is still performing
-       the IML process then relect an operator intervening status 
-       to the caller */
-    if(tregs->cpustate == CPUSTATE_STARTING)
-        status |= SIGP_STATUS_OPERATOR_INTERVENING;
-    else
-        /* Process signal according to order code */
-        switch (order)
-        {
-        case SIGP_SENSE:
-            /* Set status bit 24 if external call interrupt pending */
-            if (tregs->extcall)
-                status |= SIGP_STATUS_EXTERNAL_CALL_PENDING;
-    
-            /* Set status bit 25 if target CPU is stopped */
-            if (tregs->cpustate != CPUSTATE_STARTED)
-                status |= SIGP_STATUS_STOPPED;
-    
-            break;
-    
-        case SIGP_EXTCALL:
-            /* Exit with status bit 24 set if a previous external
-               call interrupt is still pending in the target CPU */
-            if (tregs->extcall)
-            {
-                status |= SIGP_STATUS_EXTERNAL_CALL_PENDING;
-                break;
-            }
-    
-            /* Raise an external call interrupt pending condition */
-            tregs->cpuint = tregs->extcall = 1;
-            tregs->extccpu = regs->cpuad;
-    
-            break;
-    
-        case SIGP_EMERGENCY:
-            /* Raise an emergency signal interrupt pending condition */
-            tregs->cpuint = tregs->emersig = 1;
-            tregs->emercpu[regs->cpuad] = 1;
-    
-            break;
-    
-        case SIGP_START:
-            /* Restart the target CPU if it is in the stopped state */
-            tregs->cpustate = CPUSTATE_STARTED;
-    
-            break;
-    
-        case SIGP_STOP:
-            /* Put the the target CPU into the stopping state */
-            tregs->cpustate = CPUSTATE_STOPPING;
-    
-            break;
-    
-        case SIGP_RESTART:
-            /* Make restart interrupt pending in the target CPU */
-            tregs->restart = 1;
-            /* Set cpustate to stopping. If the restart is successful,
-               then the cpustate will be set to started in cpu.c */
-            if(tregs->cpustate == CPUSTATE_STOPPED)
-                tregs->cpustate = CPUSTATE_STOPPING;
-    
-            break;
-    
-        case SIGP_STOPSTORE:
-            /* Indicate store status is required when stopped */
-            tregs->storstat = 1;
-    
-            /* Put the the target CPU into the stopping state */
-            tregs->cpustate = CPUSTATE_STOPPING;
-    
-            break;
-    
-        case SIGP_INITRESET:
-            if(tregs->cpuonline) 
-            {
-                /* Signal initial CPU reset function */
-                tregs->sigpireset = 1;
-                tregs->cpustate = CPUSTATE_STOPPING;
-            }
-            else
-                configure_cpu(tregs);
-    
-            break;
-    
-        case SIGP_RESET:
-            /* Signal CPU reset function */
-            tregs->sigpreset = 1;
-            tregs->cpustate = CPUSTATE_STOPPING;
-    
-            break;
-    
-        case SIGP_SETPREFIX:
-            /* Exit with operator intervening if the status is 
-               stopping, such that a retry can be attempted */
-            if(tregs->cpustate == CPUSTATE_STOPPING)
-            {
-                status |= SIGP_STATUS_OPERATOR_INTERVENING;
-                break;
-            }
-
-            /* Exit with status bit 22 set if CPU is not stopped */
-            if (tregs->cpustate != CPUSTATE_STOPPED)
-            {
-                status |= SIGP_STATUS_INCORRECT_STATE;
-                break;
-            }
-    
-            /* Obtain new prefix from parameter register bits 1-19 */
-            abs = parm & 0x7FFFF000;
-    
-            /* Exit with status bit 23 set if new prefix is invalid */
-            if (abs >= sysblk.mainsize)
-            {
-                status |= SIGP_STATUS_INVALID_PARAMETER;
-                break;
-            }
-    
-            /* Load new value into prefix register of target CPU */
-            tregs->pxr = abs;
-    
-            /* Invalidate the ALB and TLB of the target CPU */
-            purge_alb (tregs);
-            purge_tlb (tregs);
-    
-            /* Perform serialization and checkpoint-sync on target CPU */
-//          perform_serialization (tregs);
-//          perform_chkpt_sync (tregs);
-    
-            break;
-    
-        case SIGP_STORE:
-            /* Exit with operator intervening if the status is 
-               stopping, such that a retry can be attempted */
-            if(tregs->cpustate == CPUSTATE_STOPPING)
-            {
-                status |= SIGP_STATUS_OPERATOR_INTERVENING;
-                break;
-            }
-
-            /* Exit with status bit 22 set if CPU is not stopped */
-            if (tregs->cpustate != CPUSTATE_STOPPED)
-            {
-                status |= SIGP_STATUS_INCORRECT_STATE;
-                break;
-            }
-    
-            /* Obtain status address from parameter register bits 1-22 */
-            abs = parm & 0x7FFFFE00;
-    
-            /* Exit with status bit 23 set if status address invalid */
-            if (abs >= sysblk.mainsize)
-            {
-                status |= SIGP_STATUS_INVALID_PARAMETER;
-                break;
-            }
-    
-            /* Store status at specified main storage address */
-            store_status (tregs, abs);
-    
-            /* Perform serialization and checkpoint-sync on target CPU */
-//          perform_serialization (tregs);
-//          perform_chkpt_sync (tregs);
-    
-            break;
-    
-        case SIGP_STOREX:
-    
-        default:
-            status = SIGP_STATUS_INVALID_ORDER;
-        } /* end switch(order) */
-    
-    /* Release the use of the signalling and response facility */
-    sysblk.sigpbusy = 0;
-
-    /* Wake up any CPUs waiting for an interrupt or start */
-    signal_condition (&sysblk.intcond);
-
-    /* Release the interrupt lock */
-    release_lock (&sysblk.intlock);
-
-    /* If status is non-zero, load the status word into
-       the R1 register and return condition code 1 */
-    if (status != 0)
-    {
-        regs->gpr[r1] = status;
-        return 1;
-    }
-
-    /* Return condition code zero */
-    return 0;
-
-} /* end function signal_processor */
 
 #if MAX_CPU_ENGINES > 1
 /*-------------------------------------------------------------------*/

@@ -9,6 +9,8 @@
 /*-------------------------------------------------------------------*/
 /* Additional credits:                                               */
 /*      Measurement block support by Jan Jaeger                      */
+/*      Fix program check on NOP due to addressing - Jan Jaeger      */
+/*      Fix program check on TIC as first ccw on RSCH - Jan Jaeger   */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -474,7 +476,7 @@ BYTE    unitstat;                       /* Unit status               */
 BYTE    chanstat;                       /* Channel status            */
 U16     residual;                       /* Residual byte count       */
 BYTE    more;                           /* 1=Count exhausted         */
-BYTE    tic = 1;                        /* Previous CCW was a TIC    */
+BYTE    tic = 0;                        /* Previous CCW was a TIC    */
 BYTE    chain = 1;                      /* 1=Chain to next CCW       */
 BYTE    chained = 0;                    /* Command chain and data chain
                                            bits from previous CCW    */
@@ -743,7 +745,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
             /* Reset fields as if starting a new channel program */
             code = 0;
-            tic = 1;
+            tic = 0;
             chain = 1;
             chained = 0;
             prev_chained = 0;
@@ -825,7 +827,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
         /* For WRITE and CONTROL operations, copy data
            from main storage into channel buffer */
-        if (IS_CCW_WRITE(code) || IS_CCW_CONTROL(code))
+        if (IS_CCW_WRITE(code) || (IS_CCW_CONTROL(code) && !IS_CCW_NOP(code)))
         {
             /* Channel program check if data exceeds buffer size */
             if (bufpos + count > sizeof(iobuf))
@@ -1374,7 +1376,7 @@ int     cc;                             /* Condition code            */
 /*-------------------------------------------------------------------*/
 void clear_subchan (REGS *regs, DEVBLK *dev)
 {
-    logmsg ("%4.4X: Clear subchannel\n", dev->devnum);
+    /*debug*/ logmsg ("%4.4X: Clear subchannel\n", dev->devnum);
 
     /* Obtain the device lock */
     obtain_lock (&dev->lock);

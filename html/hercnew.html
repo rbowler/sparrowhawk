@@ -7,6 +7,30 @@ Hercules: What's new</TITLE>
       VLINK="#008040" ALINK="#000000">
 <h1>What's new in Hercules</h1>
 <hr noshade>
+<h2>What's new in release 1.65</h2>
+<p>Release date: 22 July 2000
+<ul>
+<li> Track overflow processing fixes (by Jay Maynard, suggested by Valery
+Pogonchenko)
+<li> Added TOD clock update to STCK, STCKE, DIAG 204, and TRACE processing
+(by Jay Maynard)
+<li> Fixed READ DEVICE CHARACTERISTICS alternate track values for 3380 and
+3390 (by petermac@ase.com.au)
+<li> Skeletal CMPSC instruction (by Bernard van der Helm)
+<li> Added support for 3340 and 3375 DASD (by Jay Maynard, with help from
+Rick Fochtman and David Cole)
+<li> Corrected interval timer update increment (by Jay Maynard)
+<li> float.c optimization for new instruction decode and execution (by Peter
+Kuschnerus)
+<li> Fix program check on TIC ccw (by Jan Jaeger)
+<li> Fix program check on NOP ccw (by Jan Jaeger)
+<li> Instruction decode & execution restructure (by Jan Jaeger)
+<li> Added -fomit-frame-pointer to compiles for improved performance (by Jan
+Jaeger)
+<li> Fix STCKE instruction (by Bernard van der Helm)
+</ul>
+<p>Download
+<a href="hercules-1.65.tar.gz">hercules-1.65.tar.gz</a>
 <h2>What's new in release 1.64</h2>
 <p>Release date: 4 July 2000
 <ul>
@@ -16,7 +40,7 @@ Hercules: What's new</TITLE>
 <li> Added NetBSD build definitions to makefile (by Soren Jorvang)
 <li> Moved version definition to version.h and removed
 makefile dependency for source modules (by Jay Maynard)
-<li> Package change: tarball now explodes into hercules-<version>
+<li> Package change: tarball now explodes into hercules-&lt;version&gt;
 subdirectory (by Jay Maynard, suggested by Soren Jorvang)
 <li> Fix backward going TOD clock (by Jan Jaeger)
 <li> Suppress superflous HHC701/HHC702 messages (by Jan Jaeger)
@@ -524,6 +548,6 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 4 July 2000
+<p>Last updated 22 July 2000
 </BODY>
 </HTML>

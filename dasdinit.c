@@ -40,7 +40,8 @@ argexit ( int code )
     fprintf (stderr,
             "Syntax:\tdasdinit filename devtype volser size\n"
             "where:\tfilename = name of file to be created\n"
-            "\tdevtype  = 2311, 2314, 3330, 3350, 3380, 3390 (CKD)\n"
+            "\tdevtype  = 2311, 2314, 3330, 3340, 3350, 3375, 3380, "
+            "3390 (CKD)\n"
             "\t           3310, 3370 (FBA)\n"
             "\tvolser   = volume serial number (1-6 characters)\n"
             "\tsize     = volume size in cylinders (CKD devices)\n"
@@ -554,10 +555,22 @@ BYTE    c;                              /* Character work area       */
         maxdlen = 13030;
         break;
 
+    case 0x3340:
+        type = 'C';
+        heads = 12;
+        maxdlen = 8368;
+        break;
+
     case 0x3350:
         type = 'C';
         heads = 30;
         maxdlen = 19069;
+        break;
+
+    case 0x3375:
+        type = 'C';
+        heads = 12;
+        maxdlen = 35616;
         break;
 
     case 0x3380:

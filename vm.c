@@ -1,5 +1,5 @@
-/* DIAGVM.C     (c) Copyright Roger Bowler, 2000                     */
-/*              ESA/390 VM Diagnose calls                            */
+/* VM.C         (c) Copyright Roger Bowler, 2000                     */
+/*              ESA/390 VM Diagnose calls and IUCV instruction       */
 
 /*-------------------------------------------------------------------*/
 /* This module implements miscellaneous diagnose functions           */
@@ -83,7 +83,7 @@ U32     effective_addr2;                /* Effective address         */
     /* Program check if in problem state,
        the IUCV instruction generates an operation exception
        rather then a priviliged operation exception when
-       executed in problem state                                     */
+       executed in problem state                                 *JJ */
     if ( regs->psw.prob )
         program_check (regs, PGM_OPERATION_EXCEPTION);
 

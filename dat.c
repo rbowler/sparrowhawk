@@ -16,141 +16,7 @@
 
 #include "hercules.h"
 
-/*-------------------------------------------------------------------*/
-/* Test for fetch protected storage location.                        */
-/*                                                                   */
-/* Input:                                                            */
-/*      addr    31-bit logical address of storage location           */
-/*      skey    Storage key with fetch, reference, and change bits   */
-/*              and one low-order zero appended                      */
-/*      akey    Access key with 4 low-order zeroes appended          */
-/*      private 1=Location is in a private address space             */
-/*      regs    Pointer to the CPU register context                  */
-/* Return value:                                                     */
-/*      1=Fetch protected, 0=Not fetch protected                     */
-/*-------------------------------------------------------------------*/
-static inline int is_fetch_protected (U32 addr, BYTE skey, BYTE akey,
-                        int private, REGS *regs)
-{
-    /* [3.4.1] Fetch is allowed if access key is zero, regardless
-       of the storage key and fetch protection bit */
-    if (akey == 0)
-        return 0;
-
-#ifdef FEATURE_FETCH_PROTECTION_OVERRIDE
-    /* [3.4.1.2] Fetch protection override allows fetch from first
-       2K of non-private address spaces if CR0 bit 6 is set */
-    if (addr < 2048
-        && (regs->cr[0] & CR0_FETCH_OVRD)
-        && private == 0)
-        return 0;
-#endif /*FEATURE_FETCH_PROTECTION_OVERRIDE*/
-
-    /* [3.4.1] Fetch protection prohibits fetch if storage key fetch
-       protect bit is on and access key does not match storage key */
-    if ((skey & STORKEY_FETCH)
-        && akey != (skey & STORKEY_KEY))
-        return 1;
-
-    /* Return zero if location is not fetch protected */
-    return 0;
-
-} /* end function is_fetch_protected */
-
-/*-------------------------------------------------------------------*/
-/* Test for store protected storage location.                        */
-/*                                                                   */
-/* Input:                                                            */
-/*      addr    31-bit logical address of storage location           */
-/*      skey    Storage key with fetch, reference, and change bits   */
-/*              and one low-order zero appended                      */
-/*      akey    Access key with 4 low-order zeroes appended          */
-/*      private 1=Location is in a private address space             */
-/*      protect 1=Access list protection or page protection applies  */
-/*      regs    Pointer to the CPU register context                  */
-/* Return value:                                                     */
-/*      1=Store protected, 0=Not store protected                     */
-/*-------------------------------------------------------------------*/
-static inline int is_store_protected (U32 addr, BYTE skey, BYTE akey,
-                        int private, int protect, REGS *regs)
-{
-    /* [3.4.4] Low-address protection prohibits stores into locations
-       0-511 of non-private address spaces if CR0 bit 3 is set,
-       regardless of the access key and storage key */
-    if (addr < 512
-        && (regs->cr[0] & CR0_LOW_PROT)
-        && private == 0)
-        return 1;
-
-    /* Access-list controlled protection prohibits all stores into
-       the address space, and page protection prohibits all stores
-       into the page, regardless of the access key and storage key */
-    if (protect)
-        return 1;
-
-    /* [3.4.1] Store is allowed if access key is zero, regardless
-       of the storage key */
-    if (akey == 0)
-        return 0;
-
-#ifdef FEATURE_STORAGE_PROTECTION_OVERRIDE
-    /* [3.4.1.1] Storage protection override allows stores into
-       locations with storage key 9, regardless of the access key,
-       provided that CR0 bit 7 is set */
-    if ((skey & STORKEY_KEY) == 0x90
-        && (regs->cr[0] & CR0_STORE_OVRD))
-        return 0;
-#endif /*FEATURE_STORAGE_PROTECTION_OVERRIDE*/
-
-    /* [3.4.1] Store protection prohibits stores if the access
-       key does not match the storage key */
-    if (akey != (skey & STORKEY_KEY))
-        return 1;
-
-    /* Return zero if location is not store protected */
-    return 0;
-
-} /* end function is_store_protected */
-
-/*-------------------------------------------------------------------*/
-/* Fetch a fullword from absolute storage.                           */
-/* The caller is assumed to have already checked that the absolute   */
-/* address is within the limit of main storage.                      */
-/* All bytes of the word are fetched concurrently as observed by     */
-/* other CPUs.  The fullword is first fetched as an integer, then    */
-/* the bytes are reversed into host byte order if necessary.         */
-/*-------------------------------------------------------------------*/
-static inline U32 fetch_fullword_absolute (U32 addr)
-{
-U32     i;
-
-    /* Set the main storage reference bit */
-    STORAGE_KEY(addr) |= STORKEY_REF;
-
-    /* Fetch the fullword from absolute storage */
-    i = *((U32*)(sysblk.mainstor + addr));
-    return ntohl(i);
-} /* end function fetch_fullword_absolute */
-
-/*-------------------------------------------------------------------*/
-/* Fetch a halfword from absolute storage.                           */
-/* The caller is assumed to have already checked that the absolute   */
-/* address is within the limit of main storage.                      */
-/* All bytes of the halfword are fetched concurrently as observed by */
-/* other CPUs.  The halfword is first fetched as an integer, then    */
-/* the bytes are reversed into host byte order if necessary.         */
-/*-------------------------------------------------------------------*/
-static inline U16 fetch_halfword_absolute (U32 addr)
-{
-U16     i;
-
-    /* Set the main storage reference bit */
-    STORAGE_KEY(addr) |= STORKEY_REF;
-
-    /* Fetch the fullword from absolute storage */
-    i = *((U16*)(sysblk.mainstor + addr));
-    return ntohs(i);
-} /* end function fetch_fullword_absolute */
+#include "inline.h"
 
 /*-------------------------------------------------------------------*/
 /* Translate ASN to produce address-space control parameters         */
@@ -1196,69 +1062,6 @@ U16     pte;                            /* Page table entry          */
 
 } /* end function invalidate_pte */
 
-/*-------------------------------------------------------------------*/
-/* Test protection and return condition code                         */
-/*                                                                   */
-/* Input:                                                            */
-/*      addr    Logical address to be tested                         */
-/*      arn     Access register number                               */
-/*      regs    CPU register context                                 */
-/*      akey    Access key with 4 low-order zeroes appended          */
-/* Returns:                                                          */
-/*      Condition code for TPROT instruction:                        */
-/*      0=Fetch and store allowed, 1=Fetch allowed but not store,    */
-/*      2=No access allowed, 3=Translation not available.            */
-/*                                                                   */
-/*      If the logical address causes an addressing or translation   */
-/*      specification exception then a program check is generated    */
-/*      and the function does not return.                            */
-/*-------------------------------------------------------------------*/
-int test_prot (U32 addr, int arn, REGS *regs, BYTE akey)
-{
-U32     raddr;                          /* Real address              */
-U32     aaddr;                          /* Absolute address          */
-BYTE    skey;                           /* Storage key               */
-int     private = 0;                    /* 1=Private address space   */
-int     protect = 0;                    /* 1=ALE or page protection  */
-int     stid;                           /* Segment table indication  */
-U16     xcode;                          /* Exception code            */
-
-    /* Convert logical address to real address */
-    if (REAL_MODE(&regs->psw))
-        raddr = addr;
-    else {
-        /* Return condition code 3 if translation exception */
-        if (translate_addr (addr, arn, regs, ACCTYPE_TPROT, &raddr,
-                &xcode, &private, &protect, &stid, NULL, NULL))
-            return 3;
-    }
-
-    /* Convert real address to absolute address */
-    aaddr = APPLY_PREFIXING (raddr, regs->pxr);
-
-    /* Program check if absolute address is outside main storage */
-    if (aaddr >= sysblk.mainsize)
-        goto tprot_addr_excp;
-
-    /* Load the storage key for the absolute address */
-    skey = STORAGE_KEY(aaddr);
-
-    /* Return condition code 2 if location is fetch protected */
-    if (is_fetch_protected (addr, skey, akey, private, regs))
-        return 2;
-
-    /* Return condition code 1 if location is store protected */
-    if (is_store_protected (addr, skey, akey, private, protect, regs))
-        return 1;
-
-    /* Return condition code 0 if location is not protected */
-    return 0;
-
-tprot_addr_excp:
-    program_check (regs, PGM_ADDRESSING_EXCEPTION);
-    return 3;
-
-} /* end function test_prot */
 
 /*-------------------------------------------------------------------*/
 /* Convert logical address to absolute address and check protection  */
@@ -1299,6 +1102,8 @@ int     protect = 0;                    /* 1=ALE or page protection  */
 int     stid;                           /* Segment table indication  */
 #ifdef FEATURE_INTERVAL_TIMER
 PSA    *psa;                            /* -> Prefixed storage area  */
+S32     itimer;                         /* Interval timer value      */
+S32     olditimer;                      /* Previous interval timer   */
 #endif /*FEATURE_INTERVAL_TIMER*/
 U16     xcode;                          /* Exception code            */
 
@@ -1318,16 +1123,43 @@ U16     xcode;                          /* Exception code            */
     if (aaddr >= sysblk.mainsize)
         goto vabs_addr_excp;
 
-#ifdef FEATURE_INTERVAL_TIMER
-    /* Check for access to interval timer at location 80 */
-    if ((sysblk.insttrace || sysblk.inststep)
-        && raddr < 88 && raddr >= 76)
+#if defined(FEATURE_INTERVAL_TIMER)
+    if(raddr < 88 && raddr >= 76)
     {
+        /* Point to PSA in main storage */
         psa = (PSA*)(sysblk.mainstor + regs->pxr);
-        logmsg ("dat.c: Interval timer accessed: "
-                "%2.2X%2.2X%2.2X%2.2X\n",
-                psa->inttimer[0], psa->inttimer[1],
-                psa->inttimer[2], psa->inttimer[3]);
+
+        /* Obtain the TOD clock update lock */
+        obtain_lock (&sysblk.todlock);
+
+        /* Decrement the location 80 timer */
+        itimer = (S32)(((U32)(psa->inttimer[0]) << 24)
+                            | ((U32)(psa->inttimer[1]) << 16)
+                            | ((U32)(psa->inttimer[2]) << 8)
+                            | (U32)(psa->inttimer[3]));
+        olditimer = itimer--;
+        psa->inttimer[0] = ((U32)itimer >> 24) & 0xFF;
+        psa->inttimer[1] = ((U32)itimer >> 16) & 0xFF;
+        psa->inttimer[2] = ((U32)itimer >> 8) & 0xFF;
+        psa->inttimer[3] = (U32)itimer & 0xFF;
+
+        /* Set interrupt flag and interval timer interrupt pending
+           if the interval timer went from positive to negative */
+        if (itimer < 0 && olditimer >= 0)
+            regs->cpuint = regs->itimer_pending = 1;
+
+        /* Release the TOD clock update lock */
+        release_lock (&sysblk.todlock);
+
+        /* Check for access to interval timer at location 80 */
+        if (sysblk.insttrace || sysblk.inststep)
+        {
+            psa = (PSA*)(sysblk.mainstor + regs->pxr);
+            logmsg ("dat.c: Interval timer accessed: "
+                    "%2.2X%2.2X%2.2X%2.2X\n",
+                    psa->inttimer[0], psa->inttimer[1],
+                    psa->inttimer[2], psa->inttimer[3]);
+        }
     }
 #endif /*FEATURE_INTERVAL_TIMER*/
 
@@ -2003,128 +1835,6 @@ BYTE    obyte;                          /* Operand byte              */
 
 } /* end function move_chars */
 
-/*-------------------------------------------------------------------*/
-/* Storage-to-storage operation                                      */
-/*                                                                   */
-/* Input:                                                            */
-/*      opcode  Instruction operation code                           */
-/*      addr1   Effective address of first operand                   */
-/*      arn1    Access register number for first operand             */
-/*      addr2   Effective address of second operand                  */
-/*      arn2    Access register number for second operand            */
-/*      len     Operand length minus 1 (range 0-255)                 */
-/*      regs    Pointer to the CPU register context                  */
-/* Returns:                                                          */
-/*      0 if result is all zero, 1 if result is non zero.            */
-/*                                                                   */
-/*      This function implements the MVN, MVZ, NC, OC, and XC        */
-/*      instructions.  These instructions combine up to 256          */
-/*      characters from the first and second operands, and           */
-/*      store the result in the first operand.  The operands         */
-/*      are processed byte by byte to ensure correct handling        */
-/*      of overlapping operands.                                     */
-/*                                                                   */
-/*      A program check may be generated if either logical address   */
-/*      causes an addressing, protection, or translation exception,  */
-/*      and in this case the function does not return.               */
-/*-------------------------------------------------------------------*/
-int ss_operation (BYTE opcode, U32 addr1, int arn1, U32 addr2,
-                int arn2, int len, REGS *regs)
-{
-U32     abs1, abs2;                     /* Absolute addresses        */
-U32     npv1, npv2;                     /* Next page virtual addrs   */
-U32     npa1 = 0, npa2 = 0;             /* Next page absolute addrs  */
-int     i;                              /* Loop counter              */
-int     cc = 0;                         /* Condition code            */
-BYTE    byte1, byte2;                   /* Operand bytes             */
-BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
-
-    /* Obtain current access key from PSW */
-    akey = regs->psw.pkey;
-
-    /* Translate addresses of leftmost operand bytes */
-    abs1 = logical_to_abs (addr1, arn1, regs, ACCTYPE_WRITE, akey);
-    abs2 = logical_to_abs (addr2, arn2, regs, ACCTYPE_READ, akey);
-
-    /* Calculate page addresses of rightmost operand bytes */
-    npv1 = (addr1 + len) & ADDRESS_MAXWRAP(regs);
-    npv1 &= STORAGE_KEY_PAGEMASK;
-    npv2 = (addr2 + len) & ADDRESS_MAXWRAP(regs);
-    npv2 &= STORAGE_KEY_PAGEMASK;
-
-    /* Translate next page addresses if page boundary crossed */
-    if (npv1 != (addr1 & STORAGE_KEY_PAGEMASK))
-        npa1 = logical_to_abs (npv1, arn1, regs, ACCTYPE_WRITE, akey);
-    if (npv2 != (addr2 & STORAGE_KEY_PAGEMASK))
-        npa2 = logical_to_abs (npv2, arn2, regs, ACCTYPE_READ, akey);
-
-    /* Process operands from left to right */
-    for ( i = 0; i < len+1; i++ )
-    {
-        /* Fetch a byte from each operand */
-        byte1 = sysblk.mainstor[abs1];
-        byte2 = sysblk.mainstor[abs2];
-
-        /* Combine the bytes according to the operation code */
-        switch (opcode)
-        {
-        case 0xD1: /* MVN */
-            /* Copy low digit of operand 2 to operand 1 */
-            byte1 = (byte1 & 0xF0) | ( byte2 & 0x0F);
-            break;
-
-        case 0xD3: /* MVZ */
-            /* Copy high digit of operand 2 to operand 1 */
-            byte1 = (byte1 & 0x0F) | ( byte2 & 0xF0);
-            break;
-
-        case 0xD4: /* NC */
-            /* AND operand 1 with operand 2 */
-            byte1 &= byte2;
-            break;
-
-        case 0xD6: /* OC */
-            /* OR operand 1 with operand 2 */
-            byte1 |= byte2;
-            break;
-
-        case 0xD7: /* XC */
-            /* XOR operand 1 with operand 2 */
-            byte1 ^= byte2;
-            break;
-
-        } /* end switch(opcode) */
-
-        /* Set condition code 1 if result is non-zero */
-        if (byte1 != 0) cc = 1;
-
-        /* Store the result in the destination operand */
-        sysblk.mainstor[abs1] = byte1;
-
-        /* Increment first operand address */
-        addr1++;
-        addr1 &= ADDRESS_MAXWRAP(regs);
-        abs1++;
-
-        /* Adjust absolute address if page boundary crossed */
-        if ((addr1 & STORAGE_KEY_BYTEMASK) == 0x000)
-            abs1 = npa1;
-
-        /* Increment second operand address */
-        addr2++;
-        addr2 &= ADDRESS_MAXWRAP(regs);
-        abs2++;
-
-        /* Adjust absolute address if page boundary crossed */
-        if ((addr2 & STORAGE_KEY_BYTEMASK) == 0x000)
-            abs2 = npa2;
-
-    } /* end for(i) */
-
-    /* Return condition code */
-    return cc;
-
-} /* end function ss_operation */
 
 /*-------------------------------------------------------------------*/
 /* Validate operand                                                  */
