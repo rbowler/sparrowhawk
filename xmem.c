@@ -2,10 +2,26 @@
 /*              ESA/390 Cross Memory Routines                        */
 
 /*-------------------------------------------------------------------*/
-/* This module implements the ESA/390 cross-memory instructions.     */
+/* This module implements the cross-memory instructions of the       */
+/* ESA/390 architecture, described in the manual SA22-7201-04.       */
+/* The numbers in square brackets refer to sections in the manual.   */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
+
+/*-------------------------------------------------------------------*/
+/* Fetch a fullword from absolute storage.                           */
+/* All bytes of the word are fetched concurrently as observed by     */
+/* other CPUs.  The fullword is first fetched as an integer, then    */
+/* the bytes are reversed into host byte order if necessary.         */
+/*-------------------------------------------------------------------*/
+static inline U32 fetch_fullword_absolute (U32 addr)
+{
+U32     i;
+
+    i = *((U32*)(sysblk.mainstor + addr));
+    return ntohl(i);
+} /* end function fetch_fullword_absolute */
 
 /*-------------------------------------------------------------------*/
 /* Set Address Space Control                                         */
@@ -56,7 +72,7 @@ BYTE    oldmode;                        /* Current addressing mode   */
     }
 
     /* Save the current address-space control bits */
-    oldmode = (regs->psw.armode << 1) & (regs->psw.space);
+    oldmode = (regs->psw.armode << 1) | (regs->psw.space);
 
     /* Reset the address-space control bits in the PSW */
     regs->psw.space = mode & 1;
@@ -78,6 +94,47 @@ BYTE    oldmode;                        /* Current addressing mode   */
     return 0;
 
 } /* end function set_address_space_control */
+
+/*-------------------------------------------------------------------*/
+/* Insert Address Space Control                                      */
+/*                                                                   */
+/* Input:                                                            */
+/*      regs    Pointer to the CPU register context                  */
+/* Return value:                                                     */
+/*      Returns the addressing mode from the current PSW:            */
+/*      0=Primary, 1=Secondary, 2=AR mode, 3=Home                    */
+/*      The IAC instruction uses this value as its condition code    */
+/*      and also as the value inserted into register bits 16-23.     */
+/*                                                                   */
+/*      This function does not return if a program check occurs.     */
+/*-------------------------------------------------------------------*/
+int insert_address_space_control (REGS *regs)
+{
+int     mode;                           /* Current addressing mode   */
+
+    /* Special operation exception if DAT is off */
+    if (REAL_MODE(&(regs->psw)))
+    {
+        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        return 0;
+    }
+
+    /* Privileged operation exception if in problem state
+       and the extraction-authority control bit is zero */
+    if ( regs->psw.prob
+         && (regs->cr[0] & CR0_EXT_AUTH) == 0 )
+    {
+        program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        return 0;
+    }
+
+    /* Extract the address-space control bits from the PSW */
+    mode = (regs->psw.armode << 1) | (regs->psw.space);
+
+    /* Return the current addressing mode */
+    return mode;
+
+} /* end function insert_address_space_control */
 
 /*-------------------------------------------------------------------*/
 /* Set Secondary ASN                                                 */
@@ -148,16 +205,16 @@ U16     ax;                             /* Authorization index       */
 #ifdef FEATURE_SUBSPACE_GROUP
     if (regs->cr[0] & CR0_ASF)
     {
-The description in this paragraph applies if the  subspace-group
-facility is  installed  and  the  address-space-function control, bit
-15 of control register 0, is one.   After the  new  SSTD  has  been
-placed in  control register  7, if (1) the subspace-group-control bit,
-bit 22, in the SSTD is one, (2) the dispatchable unit  is  subspace
-active, and (3)  the  ASTE obtained  by  ASN  translation  is  the
-ASTE  for  the base space of the dispatchable unit, then bits   1-23
-and  25-31  of the SSTD  in  control register  7 are replaced by bits
+The description in this paragraph applies if the subspace-group
+facility is installed and the address-space-function control, bit
+15 of control register 0, is one. After the new SSTD has been
+placed in control register 7, if (1) the subspace-group-control bit,
+bit 22, in the SSTD is one, (2) the dispatchable unit is subspace
+active, and (3) the ASTE obtained by ASN translation is the
+ASTE for the base space of the dispatchable unit, then bits 1-23
+and 25-31 of the SSTD in control register 7 are replaced by bits
 1-23 and 25-31 of the STD in the ASTE for the subspace in which the
-dispatchable unit last had control.    Further details are in
+dispatchable unit last had control. Further details are in
 "Subspace-Replacement Operations" in topic 5.9.2.
     } /* end if(CR0_ASF) */
 #endif /*FEATURE_SUBSPACE_GROUP*/
@@ -206,20 +263,20 @@ U32     sasteo;                         /* Secondary ASTE origin     */
 #ifdef FEATURE_SUBSPACE_GROUP
         if (regs->cr[0] & CR0_ASF)
         {
-The  description  in this paragraph applies if the subspace-group
+The description in this paragraph applies if the subspace-group
 facility is installed, the ASF control is one, and PASN translation is
-performed.  After  STD-p has been obtained, if (1) the
+performed. After STD-p has been obtained, if (1) the
 subspace-group-control bit, bit 22, in STD-p is one, (2) the
 dispatchable unit is subspace active, and (3) PASTEO-p designates the
-ASTE for the base space of the dispatchable  unit, then  a copy of
-STD-p, called STD-rp, is made, and bits  1-23 and 25-31 of STD-rp are
-replaced by bits 1-23 and 25-31 of the STD in the ASTE for  the
-subspace in which the dispatchable unit last had control.  Further
-details are  in "Subspace-Replacement Operations" in topic 5.9.2.  If
-bit 0 in the subspace ASTE is one, or if the  ASTE  sequence  number
-(ASTESN)  in  the subspace  ASTE does not equal the subspace ASTESN in
+ASTE for the base space of the dispatchable unit, then a copy of
+STD-p, called STD-rp, is made, and bits 1-23 and 25-31 of STD-rp are
+replaced by bits 1-23 and 25-31 of the STD in the ASTE for the
+subspace in which the dispatchable unit last had control. Further
+details are in "Subspace-Replacement Operations" in topic 5.9.2. If
+bit 0 in the subspace ASTE is one, or if the ASTE sequence number
+(ASTESN) in the subspace ASTE does not equal the subspace ASTESN in
 the dispatchable-unit control table, an exception is not recognized;
-instead, condition  code  1 is set, and the control registers remain
+instead, condition code 1 is set, and the control registers remain
 unchanged.
         } /* end if(CR0_ASF) */
 #endif /*FEATURE_SUBSPACE_GROUP*/
@@ -285,20 +342,20 @@ unchanged.
 #ifdef FEATURE_SUBSPACE_GROUP
         if (regs->cr[0] & CR0_ASF)
         {
-The  description  in this paragraph applies if the subspace-group
+The description in this paragraph applies if the subspace-group
 facility is installed, the ASF control is one, and SASN translation is
-performed.  After  STD-s has been obtained, if (1) the
+performed. After STD-s has been obtained, if (1) the
 subspace-group-control bit, bit 22, in STD-s is one, (2) the
 dispatchable unit is subspace active, and (3) SASTEO-s designates the
-ASTE for the base space of the dispatchable  unit, then  a copy of
-STD-s, called STD-rs, is made, and bits  1-23 and 25-31 of STD-rs are
-replaced by bits 1-23 and 25-31 of the STD in the ASTE for  the
-subspace in which the dispatchable unit last had control.  Further
-details are  in "Subspace-Replacement Operations" in topic 5.9.2.  If
-bit 0 in the subspace ASTE is one, or if the  ASTE  sequence  number
-(ASTESN)  in  the subspace  ASTE does not equal the subspace ASTESN in
+ASTE for the base space of the dispatchable unit, then a copy of
+STD-s, called STD-rs, is made, and bits 1-23 and 25-31 of STD-rs are
+replaced by bits 1-23 and 25-31 of the STD in the ASTE for the
+subspace in which the dispatchable unit last had control. Further
+details are in "Subspace-Replacement Operations" in topic 5.9.2. If
+bit 0 in the subspace ASTE is one, or if the ASTE sequence number
+(ASTESN) in the subspace ASTE does not equal the subspace ASTESN in
 the dispatchable-unit control table, an exception is not recognized;
-instead, condition  code  2 is set, and the control registers remain
+instead, condition code 2 is set, and the control registers remain
 unchanged.
         } /* end if(CR0_ASF) */
 #endif /*FEATURE_SUBSPACE_GROUP*/
@@ -345,7 +402,7 @@ unchanged.
 int program_transfer (U16 pkm, U16 pasn, int amode, U32 ia, int prob,
                         REGS *regs)
 {
-U32     ltd;                            /* Linkage table descriptor  */
+U32     ltd;                            /* Linkage table designation */
 U32     pasteo;                         /* Primary ASTE origin       */
 U32     aste[16];                       /* ASN second table entry    */
 U32     pstd;                           /* Primary STD               */
@@ -362,7 +419,7 @@ int     ssevent;                        /* 1=space switch event      */
         return 0;
     }
 
-    /* Load the linkage table designation */
+    /* [5.5.3.1] Load the linkage table designation */
     if ((regs->cr[0] & CR0_ASF) == 0)
     {
         /* Obtain the LTD from control register 5 */
@@ -370,7 +427,7 @@ int     ssevent;                        /* 1=space switch event      */
     }
     else
     {
-        /* Obtain the primary ASTE origin from control reg 5 */
+        /* Obtain the primary ASTE origin from control register 5 */
         pasteo = regs->cr[5] & CR5_PASTEO;
         pasteo = APPLY_PREFIXING (pasteo, regs->pxr);
 
@@ -382,10 +439,7 @@ int     ssevent;                        /* 1=space switch event      */
         }
 
         /* Fetch LTD from PASTE word 3 */
-        ltd = sysblk.mainstor[pasteo+12] << 24
-            | sysblk.mainstor[pasteo+13] << 16
-            | sysblk.mainstor[pasteo+14] << 8
-            | sysblk.mainstor[pasteo+15];
+        ltd = fetch_fullword_absolute(pasteo+12);
     }
 
     /* Special operation exception if subsystem linkage
@@ -444,19 +498,18 @@ int     ssevent;                        /* 1=space switch event      */
 #ifdef FEATURE_SUBSPACE_GROUP
         if (regs->cr[0] & CR0_ASF)
         {
-The description in this paragraph applies if the  subspace-group
-facility is  installed  and  the  ASF control is one.   After the new
-PSTD has been placed in control register 1 and the  new  primary-ASTE
-origin  has  been placed  in  control register 5, if (1) the
+The description in this paragraph applies if the subspace-group
+facility is installed and the ASF control is one. After the new PSTD
+has been placed in control register 1 and the new primary-ASTE origin
+has been placed in control register 5, if (1) the
 subspace-group-control bit, bit 22, in the PSTD is one, (2) the
-dispatchable unit is subspace active,  and (3)  the primary-ASTE
-origin designates the ASTE for the base space of the dispatchable
-unit, then bits   1-23 and  25-31  of  the  PSTD  in  control register
-1 are replaced by bits 1-23 and 25-31 of the STD in the ASTE for the
-subspace in which the  dispatchable  unit  last  had  control.    This
-replacement  occurs before a replacement of the SSTD in control
-register 7 by the PSTD.  Further details are in "Subspace-Replacement
-Operations"  in topic 5.9.2.
+dispatchable unit is subspace active, and (3) the primary-ASTE origin
+designates the ASTE for the base space of the dispatchable unit, then
+bits 1-23 and 25-31 of the PSTD in control register 1 are replaced by
+bits 1-23 and 25-31 of the STD in the ASTE for the subspace in which
+the dispatchable unit last had control. This replacement occurs before
+a replacement of the SSTD in control register 7 by the PSTD. Further
+details are in "Subspace-Replacement Operations" in topic 5.9.2.
         }
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
@@ -473,9 +526,8 @@ Operations"  in topic 5.9.2.
         /* Load new AX and PASN into control register 4 */
         regs->cr[4] = (aste[1] & ASTE1_AX) | pasn;
 
-        /* Load new LTD or PASTEO into control register 5 */
-        regs->cr[5] = ((regs->cr[0] & CR0_ASF) == 0) ?
-                                aste[3] : pasteo;
+        /* Load new PASTEO or LTD into control register 5 */
+        regs->cr[5] = (regs->cr[0] & CR0_ASF) ? pasteo : aste[3];
 
     } /* end if(PT-ss) */
     else
@@ -584,17 +636,17 @@ U16     xcode;                          /* Exception code            */
 #ifdef FEATURE_SUBSPACE_GROUP
             if (regs->cr[0] & CR0_ASF)
             {
-The description in this paragraph applies if the  subspace-group
-facility is installed   and   PASN   translation  has  occurred.  If
-(1)  the subspace-group-control bit, bit 22, in  the  new  PSTD  is
-one,  (2)  the dispatchable  unit is subspace active, and (3) the new
-primary-ASTE origin designates the ASTE for the base space of the
-dispatchable unit, then bits 1-23 and 25-31 of the new PSTD in control
-register 1 are replaced by bits 1-23  and 25-31  of  the  STD  in  the
-ASTE for the subspace in which the dispatchable unit last had control.
-This replacement occurs, in the case when  the  new SASN is equal to
-the new PASN, before the SSTD is set equal to the PSTD.  Further
-details are in "Subspace-Replacement Operations"  in topic 5.9.2.
+The description in this paragraph applies if the subspace-group
+facility is installed and PASN translation has occurred. If (1) the
+subspace-group-control bit, bit 22, in the new PSTD is one, (2) the
+dispatchable unit is subspace active, and (3) the new primary-ASTE
+origin designates the ASTE for the base space of the dispatchable
+unit, then bits 1-23 and 25-31 of the new PSTD in control register 1
+are replaced by bits 1-23 and 25-31 of the STD in the ASTE for the
+subspace in which the dispatchable unit last had control.  This
+replacement occurs, in the case when the new SASN is equal to the new
+PASN, before the SSTD is set equal to the PSTD. Further details are in
+"Subspace-Replacement Operations" in topic 5.9.2.
             } /* end if(CR0_ASF) */
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
@@ -642,16 +694,16 @@ details are in "Subspace-Replacement Operations"  in topic 5.9.2.
 #ifdef FEATURE_SUBSPACE_GROUP
             if (regs->cr[0] & CR0_ASF)
             {
-The description in this paragraph applies if the  subspace-group
+The description in this paragraph applies if the subspace-group
 facility is installed and SASN translation and authorization have
-occurred.  If (1) the  subspace-group-control  bit,  bit 22, in the
-new SSTD is one, (2) the dispatchable unit is subspace active, and (3)
-the ASTE origin obtained by SASN   translation   designates  the  ASTE
-for  the  base  space  of  the dispatchable unit, then bits  1-23 and
-25-31 of the new  SSTD  in control register  7 are replaced by bits
-1-23 and 25-31 of the STD in the ASTE for the subspace in which the
-dispatchable unit last  had  control.  Further details are in
-"Subspace-Replacement Operations" in topic 5.9.2.
+occurred. If (1) the subspace-group-control bit, bit 22, in the new
+SSTD is one, (2) the dispatchable unit is subspace active, and (3) the
+ASTE origin obtained by SASN translation designates the ASTE for the
+base space of the dispatchable unit, then bits 1-23 and 25-31 of the
+new SSTD in control register 7 are replaced by bits 1-23 and 25-31 of
+the STD in the ASTE for the subspace in which the dispatchable unit
+last had control. Further details are in "Subspace-Replacement
+Operations" in topic 5.9.2.
             } /* end if(CR0_ASF) */
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
@@ -672,4 +724,332 @@ dispatchable unit last  had  control.  Further details are in
     return ssevent;
 
 } /* end function program_return */
+
+/*-------------------------------------------------------------------*/
+/* Program Call                                                      */
+/*                                                                   */
+/* Input:                                                            */
+/*      pcnum   20-bit PC number                                     */
+/*      regs    Pointer to the CPU register context                  */
+/* Return value:                                                     */
+/*      1=Space switch event indicated, 0=No space switch event      */
+/*                                                                   */
+/*      This function does not return if a program check occurs.     */
+/*-------------------------------------------------------------------*/
+int program_call (U32 pcnum, REGS *regs)
+{
+U32     abs;                            /* Absolute address          */
+U32     ltd;                            /* Linkage table designation */
+U32     pasteo;                         /* Primary ASTE origin       */
+U32     lto;                            /* Linkage table origin      */
+int     ltl;                            /* Linkage table length      */
+U32     lte;                            /* Linkage table entry       */
+U32     eto;                            /* Entry table origin        */
+int     etl;                            /* Entry table length        */
+U32     ete[8];                         /* Entry table entry         */
+int     numwords;                       /* ETE size (4 or 8 words)   */
+int     i;                              /* Array subscript           */
+int     ssevent;                        /* 1=space switch event      */
+U32     retn;                           /* Return address and amode  */
+U32     aste[16];                       /* ASN second table entry    */
+U16     xcode;                          /* Exception code            */
+U16     asn;                            /* Address space number      */
+
+    /* Special operation exception if DAT is off, or if
+       in secondary space mode or home space mode */
+    if (REAL_MODE(&(regs->psw)) || regs->psw.space == 1)
+    {
+        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        return 0;
+    }
+
+    /* [5.5.3.1] Load the linkage table designation */
+    if ((regs->cr[0] & CR0_ASF) == 0)
+    {
+        /* Obtain the LTD from control register 5 */
+        ltd = regs->cr[5];
+    }
+    else
+    {
+        /* Obtain the primary ASTE origin from control register 5 */
+        pasteo = regs->cr[5] & CR5_PASTEO;
+        pasteo = APPLY_PREFIXING (pasteo, regs->pxr);
+
+        /* Program check if PASTE is outside main storage */
+        if (pasteo >= sysblk.mainsize)
+        {
+            program_check (PGM_ADDRESSING_EXCEPTION);
+            return 0;
+        }
+
+        /* Fetch LTD from PASTE word 3 */
+        ltd = fetch_fullword_absolute(pasteo+12);
+    }
+
+    /* Special operation exception if subsystem linkage
+       control bit in linkage table designation is zero */
+    if ((ltd & LTD_SSLINK) == 0)
+    {
+        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        return 0;
+    }
+
+    /* [5.5.3.2] Linkage table lookup */
+
+    /* Extract the linkage table origin and length from the LTD */
+    lto = ltd & LTD_LTO;
+    ltl = ltd & LTD_LTL;
+
+    /* Program check if linkage index is outside the linkage table */
+    if (ltl < ((pcnum & PC_LX) >> 13))
+    {
+        program_check (PGM_LX_TRANSLATION_EXCEPTION);
+        return 0;
+    }
+
+    /* Calculate the address of the linkage table entry */
+    lto += (pcnum & PC_LX) >> 6;
+    lto &= 0x7FFFFFFF;
+
+    /* Program check if linkage table entry is outside real storage */
+    if (lto >= sysblk.mainsize)
+    {
+        program_check (PGM_ADDRESSING_EXCEPTION);
+        return 0;
+    }
+
+    /* Fetch linkage table entry from real storage.  All bytes
+       must be fetched concurrently as observed by other CPUs */
+    lto = APPLY_PREFIXING (lto, regs->pxr);
+    lte = fetch_fullword_absolute(lto);
+
+    /* Program check if linkage entry invalid bit is set */
+    if (lte & LTE_INVALID)
+    {
+        program_check (PGM_LX_TRANSLATION_EXCEPTION);
+        return 0;
+    }
+
+    /* [5.5.3.3] Entry table lookup */
+
+    /* Extract the entry table origin and length from the LTE */
+    eto = lte & LTE_ETO;
+    etl = lte & LTE_ETL;
+
+    /* Program check if entry index is outside the entry table */
+    if (etl < ((pcnum & PC_EX) >> 2))
+    {
+        program_check (PGM_EX_TRANSLATION_EXCEPTION);
+        return 0;
+    }
+
+    /* Calculate the starting address of the entry table entry */
+    eto += (pcnum & PC_EX) << ((regs->cr[0] & CR0_ASF) ? 5 : 4);
+    eto &= 0x7FFFFFFF;
+
+    /* Determine the size of the entry table entry */
+    numwords = (regs->cr[0] & CR0_ASF) ? 8 : 4;
+
+    /* Fetch the 4- or 8-word entry table entry from real
+       storage.  Each fullword of the ETE must be fetched
+       concurrently as observed by other CPUs */
+    for (i = 0; i < numwords; i++)
+    {
+        /* Program check if address is outside main storage */
+        abs = APPLY_PREFIXING (eto, regs->pxr);
+        if (abs >= sysblk.mainsize)
+        {
+            program_check (PGM_ADDRESSING_EXCEPTION);
+            return 0;
+        }
+
+        /* Fetch one word of the entry table entry */
+        ete[i] = fetch_fullword_absolute (abs);
+        eto += 4;
+        eto &= 0x7FFFFFFF;
+    }
+
+    /* Clear remaining words if fewer than 8 words were loaded */
+    while (i < 8) ete[i] = 0;
+
+    /* Program check if basic program call in AR mode */
+    if ((ete[4] & ETE4_T) == 0 && regs->psw.armode)
+    {
+        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        return 0;
+    }
+
+    /* Program check if addressing mode is zero and the
+       entry instruction address is not a 24-bit address */
+    if ((ete[1] & ETE1_AMODE) == 0
+        && (ete[1] & ETE1_EIA) > 0x00FFFFFF)
+    {
+        program_check (PGM_PC_TRANSLATION_SPECIFICATION_EXCEPTION);
+        return 0;
+    }
+
+    /* Program check if in problem state and the PKM in control
+       register 3 produces zero when ANDed with the AKM in the ETE */
+    if (regs->psw.prob
+        && ((regs->cr[3] & CR3_KEYMASK) & (ete[0] & ETE0_AKM)) == 0)
+    {
+        program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        return 0;
+    }
+
+    /* Obtain the new ASN from the entry table */
+    asn = ete[0] & ETE0_ASN;
+
+    /* Perform ASN translation if new ASN is non-zero */
+    if (asn != 0)
+    {
+        /* Program check if ASN translation control is zero */
+        if ((regs->cr[14] & CR14_ASN_TRAN) == 0)
+        {
+            program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+            return 0;
+        }
+
+        /* Perform ASN translation to obtain ASTE */
+        xcode = translate_asn (asn, regs, &pasteo, aste);
+
+        /* Program check if ASN translation exception */
+        if (xcode != 0)
+        {
+            program_check (xcode);
+            return 0;
+        }
+
+    } /* end if(asn!=0) */
+
+    /* Perform basic or stacking program call */
+    if ((ete[4] & ETE4_T) == 0)
+    {
+        /* For basic PC, load linkage info into general register 14 */
+        regs->gpr[14] = (regs->psw.amode << 31)
+                        | regs->psw.ia | regs->psw.prob;
+
+        /* Update the PSW from the entry table */
+        regs->psw.amode = (ete[1] & ETE1_AMODE) ? 1 : 0;
+        regs->psw.ia = ete[1] & ETE1_EIA;
+        regs->psw.prob = (ete[1] & ETE1_PROB) ? 1 : 0;
+
+        /* Load the current PKM and PASN into general register 3 */
+        regs->gpr[3] = (regs->cr[3] & CR3_KEYMASK)
+                        | (regs->cr[4] & CR4_PASN);
+
+        /* OR the EKM into the current PKM */
+        regs->cr[3] |= (ete[3] & ETE3_EKM);
+
+        /* Load the entry parameter into general register 4 */
+        regs->gpr[4] = ete[2];
+
+    } /* end if(basic PC) */
+    else
+    { /* stacking PC */
+
+        /* Perform the stacking process */
+        retn = (regs->psw.amode << 31) | regs->psw.ia;
+        form_stack_entry (LSED_UET_PC, retn, pcnum, regs);
+
+        /* Update the PSW from the entry table */
+        regs->psw.amode = (ete[1] & ETE1_AMODE) ? 1 : 0;
+        regs->psw.ia = ete[1] & ETE1_EIA;
+        regs->psw.prob = (ete[1] & ETE1_PROB) ? 1 : 0;
+
+        /* Replace the PSW key by the entry key if the K bit is set */
+        if (ete[4] & ETE4_K)
+            regs->psw.pkey = (ete[4] & ETE4_EK) >> 16;
+
+        /* Replace the PSW key mask by the EKM if the M bit is set,
+           otherwise OR the EKM into the current PSW key mask */
+        if (ete[4] & ETE4_M)
+            regs->cr[3] &= ~CR3_KEYMASK;
+        regs->cr[3] |= (ete[3] & ETE3_EKM);
+
+        /* Replace the EAX key by the EEAX if the E bit is set */
+        if (ete[4] & ETE4_E)
+        {
+            regs->cr[8] &= ~CR8_EAX;
+            regs->cr[8] |= (ete[4] & ETE4_EEAX) << 16;
+        }
+
+        /* Set the access mode according to the C bit */
+        regs->psw.armode = (ete[4] & ETE4_C) ? 1 : 0;
+
+        /* Load the entry parameter into general register 4 */
+        regs->gpr[4] = ete[2];
+
+    } /* end if(stacking PC) */
+
+    /* If new ASN is zero, perform program call to current primary */
+    if (asn == 0)
+    {
+        /* Set SASN equal to PASN */
+        regs->cr[3] &= ~CR3_SASN;
+        regs->cr[3] |= (regs->cr[4] & CR4_PASN);
+
+        /* Set SSTD equal to PSTD */
+        regs->cr[7] = regs->cr[1];
+
+        /* Reset space switch event flag */
+        ssevent = 0;
+
+    } /* end if(PC-cp) */
+    else
+    { /* Program call with space switching */
+
+        /* Set SASN and SSTD equal to current PASN and PSTD */
+        regs->cr[3] &= ~CR3_SASN;
+        regs->cr[3] |= (regs->cr[4] & CR4_PASN);
+        regs->cr[7] = regs->cr[1];
+
+        /* Set flag if either the current or new PSTD indicates
+           a space switch event, or if PER mode is set */
+        ssevent = (regs->cr[1] & STD_SSEVENT)
+                        || (aste[2] & STD_SSEVENT)
+                        || (regs->psw.sysmask & PSW_PERMODE);
+
+        /* Obtain new AX from the ASTE and new PASN from the ET */
+        regs->cr[4] = (aste[1] & ASTE1_AX) | asn;
+
+        /* Obtain the new PSTD from the ASTE */
+        regs->cr[1] = aste[2];
+
+        /* Update control register 5 with the new PASTEO or LTD */
+        regs->cr[5] = (regs->cr[0] & CR0_ASF) ? pasteo : aste[3];
+
+        /* For stacking PC when the S-bit in the entry table is
+           one, set SASN and SSTD equal to new PASN and PSTD */
+        if ((ete[4] & ETE4_T) && (ete[4] & ETE4_S))
+        {
+            regs->cr[3] &= ~CR3_SASN;
+            regs->cr[3] |= (regs->cr[4] & CR4_PASN);
+            regs->cr[7] = regs->cr[1];
+        }
+
+#ifdef FEATURE_SUBSPACE_GROUP
+        if (regs->cr[0] & CR0_ASF)
+        {
+The description in this paragraph applies if the subspace-group
+facility is installed and the ASF control is one. After the new PSTD
+has been placed in control register 1 and the new primary-ASTE origin
+has been placed in control register 5, if (1) the
+subspace-group-control bit, bit 22, in the PSTD is one, (2) the
+dispatchable unit is subspace active, and (3) the primary-ASTE origin
+designates the ASTE for the base space of the dispatchable unit, then
+bits 1-23 and 25-31 of the PSTD in control register 1 are replaced by
+bits 1-23 and 25-31 of the STD in the ASTE for the subspace in which
+the dispatchable unit last had control. This replacement occurs before
+a replacement of the SSTD in control register 7 by the PSTD. Further
+details are in "Subspace-Replacement Operations" in topic 5.9.2.
+        } /* end if(CR0_ASF) */
+#endif /*FEATURE_SUBSPACE_GROUP*/
+
+    } /* end if(PC-ss) */
+
+    /* Return the space switch event flag */
+    return ssevent;
+
+} /* end function program_call */
 

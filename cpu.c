@@ -10,7 +10,7 @@
 #include "hercules.h"
 
 #define MODULE_TRACE
-#undef  INSTRUCTION_COUNTING
+#define INSTRUCTION_COUNTING
 
 /*-------------------------------------------------------------------*/
 /* Add two signed fullwords giving a signed fullword result          */
@@ -175,6 +175,8 @@ int load_psw (PSW *psw, BYTE *addr)
     psw->prob = addr[1] & 0x01;
 
     if ( psw->ecmode ) {
+
+        /* Processing for EC mode PSW */
         psw->space = (addr[2] & 0x80) >> 7;
         psw->armode = (addr[2] & 0x40) >> 6;
         psw->intcode = 0;
@@ -201,6 +203,9 @@ int load_psw (PSW *psw, BYTE *addr)
             return PGM_SPECIFICATION_EXCEPTION;
 
     } else {
+
+#ifdef FEATURE_S370
+        /* Processing for BC mode PSW */
         psw->intcode = (addr[2] << 8) | addr[3];
         psw->ilc = (addr[4] >> 6) * 2;
         psw->cc = (addr[4] & 0x30) >> 4;
@@ -210,6 +215,11 @@ int load_psw (PSW *psw, BYTE *addr)
         psw->sgmask = addr[4] & 0x01;
         psw->amode = 0;
         psw->ia = (addr[5] << 16) | (addr[6] << 8) | addr[7];
+#else /*!FEATURE_S370*/
+        /* BC mode is not valid for 370XA, ESA370, or ESA390 */
+        return PGM_SPECIFICATION_EXCEPTION;
+#endif /*!FEATURE_S370*/
+
     }
 
     /* Check for wait state PSW */
@@ -350,7 +360,7 @@ ORB     orb;                            /* Operation request block   */
 SCHIB   schib;                          /* Subchannel information blk*/
 IRB     irb;                            /* Interruption response blk */
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
-int     tracethis = 0;                  /* Trace this instruction    */
+BYTE    cwork1[256], cwork2[256];       /* Character work areas      */
 #ifdef MODULE_TRACE
 static BYTE module[8];                  /* Module name               */
 #endif /*MODULE_TRACE*/
@@ -397,29 +407,6 @@ static BYTE module[8];                  /* Module name               */
             effective_addr2 += regs->gpr[b2] &
                         (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
         ar2 = b2;
-    }
-
-    /* Turn on trace for specific instructions */
-//  if (opcode == 0xB2 && ibyte == 0x20) sysblk.inststep = 1;
-//  if (opcode == 0xB1 && memcmp(module,"????????",8)==0) tracethis = 1;
-//  if (opcode == 0xB2 && ibyte == 0x25) sysblk.inststep = 1; /*SSAR*/
-//  if (opcode == 0xB2 && ibyte == 0x40) sysblk.inststep = 1; /*BAKR*/
-//  if (opcode == 0xB2 && ibyte == 0x18) sysblk.inststep = 1; /*PC*/
-//  if (opcode == 0xB2 && ibyte == 0x28) sysblk.inststep = 1; /*PT*/
-//  if (opcode == 0xB2 && ibyte == 0x47) sysblk.inststep = 1; /*MSTA*/
-//  if (opcode == 0xB2 && ibyte == 0x49) sysblk.inststep = 1; /*EREG*/
-//  if (opcode == 0xB2 && ibyte == 0x4A) sysblk.inststep = 1; /*ESTA*/
-//  if (opcode == 0x01 && ibyte == 0x01) sysblk.inststep = 1; /*PR*/
-//  if (opcode == 0xE5) sysblk.inststep = 1; /*LASP & MVS assists*/
-    if (opcode == 0xFC) sysblk.inststep = 1; /*MP*/
-    if (opcode == 0xFD) sysblk.inststep = 1; /*DP*/
-
-    /* Display the instruction */
-    if (sysblk.insttrace || sysblk.inststep || tracethis)
-    {
-        display_inst (regs, inst);
-        if (sysblk.inststep)
-            panel_command (regs);
     }
 
     /* If this instruction was not the subject of an execute,
@@ -3397,6 +3384,29 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 
+        case 0x18:
+        /*-----------------------------------------------------------*/
+        /* B218: PC - Program Call                               [S] */
+        /*-----------------------------------------------------------*/
+
+            /* Perform serialization and checkpoint-synchronization */
+            perform_serialization ();
+            perform_chkpt_sync ();
+
+            /* Perform PC using operand address as PC number */
+            rc = program_call (effective_addr, regs);
+
+            /* Perform serialization and checkpoint-synchronization */
+            perform_serialization ();
+            perform_chkpt_sync ();
+
+            /* Generate space switch event if required */
+            if (rc) {
+                program_check (PGM_SPACE_SWITCH_EVENT);
+            }
+
+            break;
+
         case 0x19:
         /*-----------------------------------------------------------*/
         /* B219: SAC - Set Address Space Control                 [S] */
@@ -3574,33 +3584,17 @@ static BYTE module[8];                  /* Module name               */
         /* B224: IAC - Insert Address Space Control            [RRE] */
         /*-----------------------------------------------------------*/
 
-            /* Special operation exception if DAT is off */
-            if ( (regs->psw.sysmask & PSW_DATMODE) == 0 )
-            {
-                program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
-                goto terminate;
-            }
-
-            /* Privileged operation exception if in problem state
-               and the extraction-authority control bit is zero */
-            if ( regs->psw.prob
-                 && (regs->cr[0] & CR0_EXT_AUTH) == 0 )
-            {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
-                goto terminate;
-            }
-
-            /* Extract the address-space control bits from the PSW */
-            m = (regs->psw.armode << 1) & (regs->psw.space);
+            /* Obtain the current address-space mode */
+            cc = insert_address_space_control (regs);
 
             /* Clear bits 16-23 of the general purpose register */
             regs->gpr[r1] &= 0xFFFF00FF;
 
             /* Insert address-space mode into register bits 22-23 */
-            regs->gpr[r1] |= m << 8;
+            regs->gpr[r1] |= cc << 8;
 
             /* Set condition code equal to address-space mode */
-            regs->psw.cc = m;
+            regs->psw.cc = cc;
 
             break;
 
@@ -4937,32 +4931,15 @@ static BYTE module[8];                  /* Module name               */
     /* CLC      Compare Logical Characters                      [SS] */
     /*---------------------------------------------------------------*/
 
-        /* Clear the condition code */
-        regs->psw.cc = 0;
+        /* Fetch first and second operands into work areas */
+        vfetchc ( cwork1, ibyte, effective_addr, ar1, regs );
+        vfetchc ( cwork2, ibyte, effective_addr2, ar2, regs );
 
-        /* Process operands from left to right */
-        for ( i = 0; i < ibyte+1; i++ )
-        {
-            /* Fetch bytes from first and second operands */
-            dbyte = vfetchb ( effective_addr, ar1, regs );
-            sbyte = vfetchb ( effective_addr2, ar2, regs );
+        /* Compare first operand with second operand */
+        rc = memcmp (cwork1, cwork2, ibyte+1);
 
-            /* Compare operand bytes, set condition code if unequal */
-            if ( dbyte != sbyte )
-            {
-                regs->psw.cc = (dbyte < sbyte) ? 1 : 2;
-                break;
-            } /* end if */
-
-            /* Increment operand addresses */
-            effective_addr++;
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            effective_addr2++;
-            effective_addr2 &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-        } /* end for(i) */
+        /* Set the condition code */
+        regs->psw.cc = (rc == 0) ? 0 : (rc < 0) ? 1 : 2;
 
         break;
 
@@ -6001,6 +5978,8 @@ DWORD   csw;                            /* CSW for S/370 channels    */
 void start_cpu (U32 pswaddr, REGS *regs)
 {
 DWORD   dword;                          /* Doubleword work area      */
+int     tracethis;                      /* Trace this instruction    */
+int     stepthis;                       /* Stop on this instruction  */
 #ifdef INSTRUCTION_COUNTING
 struct {
     int overall;                        /* Overall inst counter      */
@@ -6034,6 +6013,10 @@ int     icidx;                          /* Instruction counter index */
 
     /* Execute the program */
     while (1) {
+
+        /* Reset instruction trace indicators */
+        tracethis = 0;
+        stepthis = 0;
 
         /* Test for disabled wait PSW */
         if (regs->psw.wait && (regs->psw.sysmask &
@@ -6100,7 +6083,7 @@ int     icidx;                          /* Instruction counter index */
             else
                 printf ("First use of instruction %2.2X%2.2X\n",
                         dword[0], icidx);
-//          sysblk.inststep = 1;
+            tracethis = 1;
         }
 
         /* Count instruction usage by opcode and overall */
@@ -6109,6 +6092,29 @@ int     icidx;                          /* Instruction counter index */
         if (instcount.overall % 1000000 == 0)
             printf ("%d instructions executed\n", instcount.overall);
 #endif /*INSTRUCTION_COUNTING*/
+
+        /* Turn on trace for specific instructions */
+//      if (dword[0] == 0xB2 && dword[1] == 0x20) sysblk.inststep = 1;
+//      if (dword[0] == 0xB2 && dword[1] == 0x25) sysblk.inststep = 1; /*SSAR*/
+//      if (dword[0] == 0xB2 && dword[1] == 0x40) sysblk.inststep = 1; /*BAKR*/
+//      if (dword[0] == 0xB2 && dword[1] == 0x18) sysblk.inststep = 1; /*PC*/
+//      if (dword[0] == 0xB2 && dword[1] == 0x28) sysblk.inststep = 1; /*PT*/
+//      if (dword[0] == 0xB2 && dword[1] == 0x47) sysblk.inststep = 1; /*MSTA*/
+//      if (dword[0] == 0xB2 && dword[1] == 0x49) sysblk.inststep = 1; /*EREG*/
+//      if (dword[0] == 0xB2 && dword[1] == 0x4A) sysblk.inststep = 1; /*ESTA*/
+//      if (dword[0] == 0x01 && dword[1] == 0x01) sysblk.inststep = 1; /*PR*/
+//      if (dword[0] == 0xE5) sysblk.inststep = 1; /*LASP & MVS assists*/
+        if (dword[0] == 0xFC) sysblk.inststep = 1; /*MP*/
+        if (dword[0] == 0xFD) sysblk.inststep = 1; /*DP*/
+
+        /* Display the instruction */
+        if (sysblk.insttrace || sysblk.inststep
+            || tracethis || stepthis)
+        {
+            display_inst (regs, dword);
+            if (sysblk.inststep || stepthis)
+                panel_command (regs);
+        }
 
         /* Execute the instruction */
         execute_instruction (dword, 0, regs);

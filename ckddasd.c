@@ -141,6 +141,14 @@ int             rc;                     /* Return code               */
 struct stat     statbuf;                /* File information          */
 CKDDASD_DEVHDR  devhdr;                 /* Device header             */
 int             har0len;                /* Length of HA + R0         */
+U16             cutype;                 /* Control unit type         */
+BYTE            cumodel;                /* Control unit model number */
+BYTE            cucode;                 /* Control unit type code    */
+BYTE            devmodel;               /* Device model number       */
+BYTE            devclass;               /* Device class              */
+BYTE            devtcode;               /* Device type code          */
+BYTE            scfeatures[4];          /* Storage control features  */
+BYTE            rpssects;               /* Number of RPS sectors     */
 
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
@@ -213,33 +221,62 @@ int             har0len;                /* Length of HA + R0         */
     /* Set number of sense bytes */
     dev->numsense = 32;
 
+    /* Set the device and control unit identifiers */
+    cutype = 0x3990;
+    cumodel = 0xC2;
+    cucode = 0x10;
+
+    memcpy (scfeatures, "\xD0\x00\x00\x02", 4);
+    devclass = 0x20;
+
+    switch (dev->devtype) {
+    case 0x3390:
+        devmodel = 0x06;
+        devtcode = 0x27;
+        rpssects = 224;
+        break;
+    case 0x3380:
+        devmodel = 0x02;
+        devtcode = 0x26;
+        rpssects = 222;
+        break;
+    default:
+        devmodel = 0x01;
+        devtcode = 0x00;
+        rpssects = 200;
+    } /* end switch(dev->devtype) */
+
     /* Initialize the device identifier bytes */
     dev->devid[0] = 0xFF;
-    dev->devid[1] = 0x39; /* Control unit type is 3990-C2 */
-    dev->devid[2] = 0x90;
-    dev->devid[3] = 0xC2;
+    dev->devid[1] = cutype >> 8;
+    dev->devid[2] = cutype & 0xFF;
+    dev->devid[3] = cumodel;
     dev->devid[4] = dev->devtype >> 8;
     dev->devid[5] = dev->devtype & 0xFF;
-    dev->devid[6] = 0x02;
+    dev->devid[6] = devmodel;
     dev->numdevid = 7;
 
     /* Initialize the device characteristics bytes */
     memset (dev->devchar, 0, sizeof(dev->devchar));
     memcpy (dev->devchar, dev->devid+1, 6);
-    memcpy (dev->devchar+6, "\xD0\x00\x00\x02", 4);
-    dev->devchar[10] = 0x20;            /* Device class */
-    dev->devchar[11] = 0x26;            /* Unit type */
+    memcpy (dev->devchar+6, scfeatures, 4);
+    dev->devchar[10] = devclass;
+    dev->devchar[11] = devtcode;
     dev->devchar[12] = dev->ckdcyls >> 8;
     dev->devchar[13] = dev->ckdcyls & 0xFF;
     dev->devchar[14] = dev->ckdheads >> 8;
     dev->devchar[15] = dev->ckdheads & 0xFF;
-    dev->devchar[16] = 240;             /* Number of sectors */
+    dev->devchar[16] = rpssects;
     dev->devchar[17] = (dev->ckdtrksz >> 16) & 0xFF;
     dev->devchar[18] = (dev->ckdtrksz >> 8) & 0xFF;
     dev->devchar[19] = dev->ckdtrksz & 0xFF;
     har0len = CKDDASD_TRKHDR_SIZE + CKDDASD_RECHDR_SIZE + 8;
     dev->devchar[20] = (har0len >> 8) & 0xFF;
     dev->devchar[21] = har0len & 0xFF;
+    dev->devchar[22] = 1;
+    dev->devchar[40] = devtcode;
+    dev->devchar[41] = devtcode;
+    dev->devchar[42] = cucode;
     dev->numdevchar = 64;
 
     /* Activate I/O tracing */

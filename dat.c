@@ -151,7 +151,7 @@ U32     afte_addr;                      /* Address of AFTE           */
 U32     afte;                           /* ASN first table entry     */
 U32     aste_addr;                      /* Address of ASTE           */
 int     code;                           /* Exception code            */
-int     numwords;                       /* ASTE size (16 or 64 words)*/
+int     numwords;                       /* ASTE size (4 or 16 words) */
 int     i;                              /* Array subscript           */
 
     /* [3.9.3.1] Use the AFX to obtain the real address of the AFTE */
