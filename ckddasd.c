@@ -547,7 +547,7 @@ off_t           seekpos;                /* Seek position for lseek   */
     {
         /* Handle read error condition */
         logmsg ("ckddasd: read error: %s\n",
-                strerror(errno));
+                (rc < 0 ? strerror(errno) : "unexpected end of file"));
 
         /* Set unit check with equipment check */
         ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -694,7 +694,8 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
         {
             /* Handle read error condition */
             logmsg ("ckddasd: read error: %s\n",
-                    strerror(errno));
+                    (rc < 0 ? strerror(errno) :
+                    "unexpected end of file"));
 
             /* Set unit check with equipment check */
             ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -801,7 +802,8 @@ CKDDASD_RECHDR  rechdr;                 /* CKD record header         */
         {
             /* Handle read error condition */
             logmsg ("ckddasd: read error: %s\n",
-                    strerror(errno));
+                    (rc < 0 ? strerror(errno) :
+                    "unexpected end of file"));
 
             /* Set unit check with equipment check */
             ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -859,7 +861,8 @@ int             skiplen;                /* Number of bytes to skip   */
         {
             /* Handle read error condition */
             logmsg ("ckddasd: read error: %s\n",
-                    strerror(errno));
+                    (rc < 0 ? strerror(errno) :
+                    "unexpected end of file"));
 
             /* Set unit check with equipment check */
             ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -1964,6 +1967,7 @@ BYTE            key[256];               /* Key for search operations */
 
         break;
 
+    case 0x27: /* SEEK AND SET SECTOR (Itel 7330 controller only) */
     case 0x07: /* SEEK */
     case 0x0B: /* SEEK CYLINDER */
     case 0x1B: /* SEEK HEAD */
@@ -1993,7 +1997,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* File protected if file mask does not allow requested seek */
-        if ((code == 0x07
+        if (((code == 0x07 || code == 0x27)
             && (dev->ckdfmask & CKDMASK_SKCTL) != CKDMASK_SKCTL_ALLSKR)
            || (code == 0x0B
             && (dev->ckdfmask & CKDMASK_SKCTL) != CKDMASK_SKCTL_ALLSKR

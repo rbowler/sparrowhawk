@@ -6,7 +6,7 @@
 #
 #
 
-VERSION  = 1.49
+VERSION  = 1.50
 
 CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=390
 #	   -march=pentium -malign-double -mwide-multiply
@@ -18,7 +18,7 @@ EXEFILES = hercules-370 hercules-390 \
 	   dasdinit dasdisup dasdload dasdpdsu tapecopy
 
 TARFILES = makefile *.c *.h hercules.cnf tapeconv.jcl dasdlist \
-	   obj370 obj390
+	   herc*.htm obj370 obj390
 
 HRC_370_OBJS = obj370/impl.o obj370/config.o obj370/panel.o \
 	   obj370/ipl.o obj370/cpu.o obj370/assist.o obj370/dat.o \

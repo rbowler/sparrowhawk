@@ -1,6 +1,7 @@
-/* PANEL.C      (c) Copyright Roger Bowler, 1999                     */
+/* PANEL.C      (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 Control Panel Commands                       */
-
+/*                                                                   */
+/*              Modified for New Panel Display =NP=                  */
 /*-------------------------------------------------------------------*/
 /* This module is the control panel for the ESA/390 emulator.        */
 /* It provides functions for displaying the PSW and registers        */
@@ -15,7 +16,7 @@
 /* Additional credits:                                               */
 /*      breakpoint command contributed by Dan Horak                  */
 /*      devinit command contributed by Jay Maynard                   */
-/*      New Panel Display =NP= contributed by Dutch Owen             */
+/*      New Panel Display contributed by Dutch Owen                  */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -69,6 +70,8 @@
 
 int NPDup = 0;          /* 1 when new panel is up */
 int NPDinit = 0;        /* 1 when new panel is initialized */
+int NPhelpup = 0;       /* 1 when displaying help panel */
+int NPhelpdown = 0;     /* 1 when the help panel is brought down */
 int NPregdisp = 0;      /* which regs are displayed 0=gpr, 1=cr, 2=ar, 3=fpr */
 int NPaddress = 0;      /* Address switches */
 int NPdata = 0;         /* Data switches */
@@ -225,10 +228,14 @@ static void NP_screen(FILE *confp)
          }
          strcpy(devnam, ((dev->console && dev->connected) ?
                   (BYTE*)inet_ntoa(dev->ipaddr) : dev->filename));
+         if (dev->ebcdic)
+             strcat(devnam, " ebcdic");
          if (dev->ascii)
              strcat(devnam, " ascii");
          if (dev->trunc)
              strcat(devnam, " trunc");
+         if (dev->rdreof)
+             strcat(devnam, " eof");
          fprintf(confp, "%.24s", devnam);
          strcpy(NPdevname[a - 1], devnam);
          NPbusy[a - 1] = 0;
@@ -286,8 +293,6 @@ static void NP_screen(FILE *confp)
     fprintf(confp, ANSI_WHT_RED);
     fprintf(confp, ANSI_CURSOR "P", 22, 12);
     fprintf(confp, ANSI_CURSOR "W", 22, 34);
-
-
 }
 
 /*=NP================================================================*/
@@ -312,6 +317,43 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
     U32 aaddr;
     int savadr;
 
+    if (NPhelpup == 1) {
+        if (NPhelpdown == 1) {
+             NP_init();
+             NP_screen(confp);
+             NPhelpup = 0;
+             NPhelpdown = 0;
+        } else {
+        fprintf(confp, ANSI_GRY_BLK);
+        fprintf(confp, ANSI_CLEAR);
+        fprintf(confp, ANSI_CURSOR, 1, 1);
+        fprintf(confp, "All commands consist of one character keypresses.  The various commands are\n");
+        fprintf(confp, "highlighted onscreen by bright white versus the gray of other lettering. \n");
+        fprintf(confp, "\n");
+        fprintf(confp, "Press the escape key to terminate the control panel and go to command mode.\n");
+        fprintf(confp, "\n");
+        fprintf(confp, "Display Controls:   G - General purpose regs    C - Control regs\n");
+        fprintf(confp, "                    A - Access registers        F - Floating Point regs\n");
+        fprintf(confp, "                    I - Display main memory at 'ADDRESS'\n");
+        fprintf(confp, "CPU controls:       L - IPL                     S - Start CPU\n");
+        fprintf(confp, "                    E - External interrupt      P - Stop CPU\n");
+        fprintf(confp, "                    W - Exit Hercules           T - Restart interrupt\n");
+        fprintf(confp, "Data Manipulation:  R - enter setting for the 'ADDRESS switches'\n");
+        fprintf(confp, "                    D - enter data for 'data' switches\n");
+        fprintf(confp, "                    O - place value in 'DATA' in memory at 'ADDRESS'.\n");
+        fprintf(confp, "\n");
+        fprintf(confp, "Peripherals:        N - enter a new name for the device file assignment\n");
+        fprintf(confp, "                    U - send an I/O attention interrupt\n");
+        fprintf(confp, "\n");
+        fprintf(confp, "In the display of devices, a green device letter means the device is online,\n");
+        fprintf(confp, "a lighted device address means the device is busy, and a green model number\n");
+        fprintf(confp, "means the attached UNIX file is open to the device.\n");
+        fprintf(confp, "\n");
+        fprintf(confp, ANSI_CURSOR, 24, 16);
+        fprintf(confp, "Press Escape to return to control panel operations");
+        return;
+        }
+    }
     cpu = 0;
     regs = sysblk.regs + cpu;
 
@@ -484,10 +526,14 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
          }
          strcpy(devnam, ((dev->console && dev->connected) ?
                   (BYTE*)inet_ntoa(dev->ipaddr) : dev->filename));
+         if (dev->ebcdic)
+             strcat(devnam, " ebcdic");
          if (dev->ascii)
              strcat(devnam, " ascii");
          if (dev->trunc)
              strcat(devnam, " trunc");
+         if (dev->rdreof)
+             strcat(devnam, " eof");
          if (strcmp(NPdevname[a - 1], devnam) != 0) {
              fprintf(confp, ANSI_GRY_BLK);
              fprintf(confp, ANSI_CURSOR, p, 57);
@@ -995,7 +1041,7 @@ BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
             "loadparm xxxxxxxx=set IPL parameter, ipl devn=IPL\n"
             "devinit devn arg [arg...] = reinitialize device\n"
             "devlist=list devices\n"
-            "quit/exit=terminate, Esc=switch to alternate panel\n");
+            "quit/exit=terminate, Esc=alternate panel display\n");
         return NULL;
     }
 
@@ -1693,9 +1739,19 @@ struct  timeval tv;                     /* Select timeout structure  */
                     kbbuf[0] = NPsel2;    /* setup for 2nd part of rtn */
                 }
                 if (NPdataentry == 0 && kblen == 1) {   /* We are in command mode */
+                    if (NPhelpup == 1) {
+                        if (kbbuf[0] == 0x1b)
+                            NPhelpdown = 1;
+                        kbbuf[0] = '\0';
+                        redraw_status = 1;
+                    }
                     switch(kbbuf[0]) {
                         case 0x1b:                  /* ESC */
                             NPDup = 0;
+                            break;
+                        case '?':
+                            NPhelpup = 1;
+                            redraw_status = 1;
                             break;
                         case 'S':                   /* START */
                         case 's':
@@ -2040,6 +2096,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                             strerror(errno));
                     break;
                 }
+
 
                 /* Exit if newline was read */
                 if (c == '\n') break;

@@ -465,6 +465,10 @@ BYTE    order;                          /* SIGP order code           */
     /* Load the parameter from R1 (if R1 odd), or R1+1 (if even) */
     parm = (r1 & 1) ? regs->gpr[r1] : regs->gpr[r1+1];
 
+    /* Return condition code 3 if target CPU does not exist */
+    if (cpad >= sysblk.numcpu)
+        return 3;
+
     /*debug*/logmsg("SIGP CPU %4.4X ORDER %2.2X PARM %8.8X\n",
                     cpad, order, parm);
 
@@ -481,15 +485,6 @@ BYTE    order;                          /* SIGP order code           */
     }
     sysblk.sigpbusy = 1;
     release_lock (&sysblk.sigplock);
-
-    /* Return condition code 3 if target CPU does not exist */
-    if (cpad > sysblk.numcpu)
-    {
-        obtain_lock (&sysblk.sigplock);
-        sysblk.sigpbusy = 0;
-        release_lock (&sysblk.sigplock);
-        return 3;
-    }
 
     /* Point to CPU register context for the target CPU */
     tregs = sysblk.regs + cpad;
@@ -572,7 +567,7 @@ BYTE    order;                          /* SIGP order code           */
 
     case SIGP_RESTART:
         /* Make restart interrupt pending in the target CPU */
-        regs->restart = 1;
+        tregs->restart = 1;
 
         break;
 

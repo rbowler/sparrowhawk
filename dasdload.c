@@ -87,6 +87,7 @@ typedef struct _TTRCONV {
 #define METHOD_XMIT     1
 #define METHOD_DIP      2
 #define METHOD_CVOL     3
+#define METHOD_VTOC     4
 
 /*-------------------------------------------------------------------*/
 /* Static data areas                                                 */
@@ -1160,69 +1161,143 @@ int             blklen;                 /* Size of data block        */
 /*      heads   Number of tracks per cylinder on output device       */
 /*      trklen  Track length of virtual output device                */
 /*      trkbuf  Pointer to track buffer                              */
-/*      outcyl  Starting cylinder number for VTOC                    */
-/*      outhead Starting head number for VTOC                        */
-/* Output:                                                           */
+/*      vtoctrk Starting relative track number for VTOC, or zero     */
+/*      vtocext Number of tracks in VTOC, or zero                    */
+/* Input/output:                                                     */
 /*      nxtcyl  Starting cylinder number for next dataset            */
 /*      nxthead Starting head number for next dataset                */
+/* Output:                                                           */
+/*      volvtoc VTOC starting CCHHR (5 bytes)                        */
 /*      The return value is 0 if successful, or -1 if error          */
+/*                                                                   */
+/* If vtoctrk and vtocext are non-zero, then the VTOC is written     */
+/* into the space previously reserved at the indicated location.     */
+/* Otherwise, the VTOC is written at the next available dataset      */
+/* location, using as many tracks as are necessary, and nextcyl      */
+/* and nexthead are updated to point past the end of the VTOC.       */
 /*-------------------------------------------------------------------*/
 static int
 write_vtoc (int numdscb, DATABLK *blkptr, int ofd, BYTE *ofname,
             U16 devtype, int reqcyls, int heads, int trklen,
-            BYTE *trkbuf, int outcyl, int outhead,
-            int *nxtcyl, int *nxthead)
+            BYTE *trkbuf, int vtoctrk, int vtocext,
+            int *nxtcyl, int *nxthead, BYTE volvtoc[])
 {
 int             rc;                     /* Return code               */
 int             i;                      /* Array subscript           */
 DATABLK        *datablk;                /* -> Data block structure   */
+FORMAT1_DSCB   *f1dscb;                 /* -> Format 1 DSCB          */
 FORMAT4_DSCB   *f4dscb;                 /* -> Format 4 DSCB          */
 int             dscbpertrk;             /* Number of DSCBs per track */
-int             numtrk;                 /* Size of VTOC in tracks    */
+int             mintrks;                /* Minimum VTOC size (tracks)*/
+int             numtrks;                /* Actual VTOC size (tracks) */
+int             highcyl;                /* Last used cylinder number */
+int             highhead;               /* Last used head number     */
+int             highrec;                /* Last used record number   */
 int             numf0dscb;              /* Number of unused DSCBs    */
 int             abstrk;                 /* Absolute track number     */
 int             endcyl;                 /* VTOC end cylinder number  */
 int             endhead;                /* VTOC end head number      */
-int             endrec;                 /* Last used record number   */
 int             numcyls;                /* Volume size in cylinders  */
 int             outusedv = 0;           /* Bytes used in track buffer*/
 int             outusedr = 0;           /* Bytes used on real track  */
 int             outtrkbr;               /* Bytes left on real track  */
+int             outcyl;                 /* Output cylinder number    */
+int             outhead;                /* Output head number        */
 int             outtrk = 0;             /* Relative track number     */
 int             outrec = 0;             /* Output record number      */
+int             prealloc = 0;           /* 1=VTOC is preallocated    */
 BYTE            blankblk[152];          /* Data block for blank DSCB */
+off_t           currpos;                /* Current position in file  */
+off_t           seekpos;                /* Seek position for lseek   */
+BYTE            dsnama[45];             /* Dataset name (ASCIIZ)     */
+
+    /* Determine if the VTOC is preallocated */
+    prealloc = (vtoctrk != 0 && vtocext != 0);
 
     /* Point to the format 4 DSCB within the first data block */
     f4dscb = (FORMAT4_DSCB*)(blkptr->kdarea);
 
     /* Calculate the minimum number of tracks required for the VTOC */
     dscbpertrk = f4dscb->ds4devdt;
-    numtrk = (numdscb + dscbpertrk - 1) / dscbpertrk;
+    mintrks = (numdscb + dscbpertrk - 1) / dscbpertrk;
 
-    XMINFF (1, "VTOC starts at cyl %d head %d and is %d tracks\n",
-            outcyl, outhead, numtrk);
+    /* Save the current position in the output file */
+    currpos = lseek (ofd, 0, SEEK_CUR);
+
+    /* Obtain the VTOC starting location and size */
+    if (prealloc)
+    {
+        /* Use preallocated VTOC location */
+        outcyl = vtoctrk / heads;
+        outhead = vtoctrk % heads;
+        numtrks = vtocext;
+
+        /* Seek to start of preallocated VTOC */
+        seekpos = CKDDASD_DEVHDR_SIZE
+                + (((outcyl * heads) + outhead) * trklen);
+
+        rc = lseek (ofd, seekpos, SEEK_SET);
+        if (rc < 0)
+        {
+            XMERRF ("%s cyl %d head %d seek error: %s\n",
+                    ofname, outcyl, outhead, strerror(errno));
+            return -1;
+        }
+
+    }
+    else
+    {
+        /* Use next available dataset location for VTOC */
+        outcyl = *nxtcyl;
+        outhead = *nxthead;
+        numtrks = mintrks;
+    }
+
+    /* Check that VTOC extent size is sufficient */
+    if (numtrks < mintrks)
+    {
+        XMERRF ("VTOC too small, %d track%s required\n",
+                mintrks, (mintrks == 1 ? "" : "s"));
+        return -1;
+    }
 
     /* Calculate the CCHHR of the last format 1 DSCB */
     abstrk = (outcyl * heads) + outhead;
-    abstrk += numtrk - 1;
-    endcyl = abstrk / heads;
-    endhead = abstrk % heads;
-    endrec = ((numdscb - 1) % dscbpertrk) + 1;
+    abstrk += mintrks - 1;
+    highcyl = abstrk / heads;
+    highhead = abstrk % heads;
+    highrec = ((numdscb - 1) % dscbpertrk) + 1;
 
     /* Update the last format 1 CCHHR in the format 4 DSCB */
-    f4dscb->ds4hpchr[0] = (endcyl >> 8) & 0xFF;
-    f4dscb->ds4hpchr[1] = endcyl & 0xFF;
-    f4dscb->ds4hpchr[2] = (endhead >> 8) & 0xFF;
-    f4dscb->ds4hpchr[3] = endhead & 0xFF;
-    f4dscb->ds4hpchr[4] = endrec;
+    f4dscb->ds4hpchr[0] = (highcyl >> 8) & 0xFF;
+    f4dscb->ds4hpchr[1] = highcyl & 0xFF;
+    f4dscb->ds4hpchr[2] = (highhead >> 8) & 0xFF;
+    f4dscb->ds4hpchr[3] = highhead & 0xFF;
+    f4dscb->ds4hpchr[4] = highrec;
+
+    /* Build the VTOC start CCHHR */
+    volvtoc[0] = (outcyl >> 8) & 0xFF;
+    volvtoc[1] = outcyl & 0xFF;
+    volvtoc[2] = (outhead >> 8) & 0xFF;
+    volvtoc[3] = outhead & 0xFF;
+    volvtoc[4] = 1;
+
+    XMINFF (1, "VTOC starts at cyl %d head %d and is %d track%s\n",
+            outcyl, outhead, numtrks, (numtrks == 1 ? "" : "s"));
 
     /* Calculate the number of format 0 DSCBs required to
        fill out the unused space at the end of the VTOC */
-    numf0dscb = (numtrk * dscbpertrk) - numdscb;
+    numf0dscb = (numtrks * dscbpertrk) - numdscb;
 
     /* Update the format 0 DSCB count in the format 4 DSCB */
     f4dscb->ds4dsrec[0] = (numf0dscb >> 8) & 0xFF;
     f4dscb->ds4dsrec[1] = numf0dscb & 0xFF;
+
+    /* Calculate the CCHH of the last track of the VTOC */
+    abstrk = (outcyl * heads) + outhead;
+    abstrk += numtrks - 1;
+    endcyl = abstrk / heads;
+    endhead = abstrk % heads;
 
     /* Update the VTOC extent descriptor in the format 4 DSCB */
     f4dscb->ds4vtoce.xttype =
@@ -1237,10 +1312,27 @@ BYTE            blankblk[152];          /* Data block for blank DSCB */
     f4dscb->ds4vtoce.xtetrk[0] = (endhead >> 8) & 0xFF;
     f4dscb->ds4vtoce.xtetrk[1] = endhead & 0xFF;
 
-    /* Assuming that the VTOC is the last dataset on the volume,
-       update the volume size in cylinders in the format 4 DSCB */
-    numcyls = endcyl + 1;
+    /* Calculate the mimimum volume size */
+    if (prealloc)
+    {
+        /* The VTOC was preallocated, so the minimum volume
+           size equals the next available cylinder number */
+        numcyls = *nxtcyl;
+        if (*nxthead != 0) numcyls++;
+    }
+    else
+    {
+        /* The VTOC will be written into the available space,
+           so the minimum volume size is one more than the
+           ending cylinder number of the VTOC */
+        numcyls = endcyl + 1;
+    }
+
+    /* If the minimum volume size is less than the requested
+       size then use the requested size as the actual size */
     if (numcyls < reqcyls) numcyls = reqcyls;
+
+    /* Update the volume size in cylinders in the format 4 DSCB */
     f4dscb->ds4devsz[0] = (numcyls >> 8) & 0xFF;
     f4dscb->ds4devsz[1] = numcyls & 0xFF;
 
@@ -1251,18 +1343,27 @@ BYTE            blankblk[152];          /* Data block for blank DSCB */
     datablk = blkptr;
     for (i = 0; i < numdscb; i++)
     {
+        /* Extract the dataset name from the format 1 DSCB */
+        memset (dsnama, 0, sizeof(dsnama));
+        f1dscb = (FORMAT1_DSCB*)(datablk->kdarea);
+        if (f1dscb->ds1fmtid == 0xF1)
+        {
+            make_asciiz (dsnama, sizeof(dsnama), f1dscb->ds1dsnam,
+                        sizeof(f1dscb->ds1dsnam));
+        }
+
         /* Add next DSCB to the track buffer */
         rc = write_block (ofd, ofname, datablk, 44, 96,
-                    devtype, heads, trklen, numtrk,
+                    devtype, heads, trklen, numtrks,
                     trkbuf, &outusedv, &outusedr, &outtrkbr,
                     &outtrk, &outcyl, &outhead, &outrec);
         if (rc < 0) return -1;
 
         XMINFF (4, "Format %d DSCB CCHHR=%4.4X%4.4X%2.2X "
-                "(TTR=%4.4X%2.2X)\n",
+                "(TTR=%4.4X%2.2X) %s\n",
                 datablk->kdarea[0] == 0x04 ? 4 :
                 datablk->kdarea[0] == 0x05 ? 5 : 1,
-                outcyl, outhead, outrec, outtrk, outrec);
+                outcyl, outhead, outrec, outtrk, outrec, dsnama);
         if (infolvl >= 5) data_dump (datablk, 152);
 
         datablk = (DATABLK*)(datablk->header);
@@ -1276,7 +1377,7 @@ BYTE            blankblk[152];          /* Data block for blank DSCB */
         memset (blankblk, 0, sizeof(blankblk));
         datablk = (DATABLK*)blankblk;
         rc = write_block (ofd, ofname, datablk, 44, 96,
-                    devtype, heads, trklen, numtrk,
+                    devtype, heads, trklen, numtrks,
                     trkbuf, &outusedv, &outusedr, &outtrkbr,
                     &outtrk, &outcyl, &outhead, &outrec);
         if (rc < 0) return -1;
@@ -1292,9 +1393,24 @@ BYTE            blankblk[152];          /* Data block for blank DSCB */
                     &outusedv, &outtrk, &outcyl, &outhead);
     if (rc < 0) return -1;
 
-    /* Return starting address of next dataset */
-    *nxtcyl = outcyl;
-    *nxthead = outhead;
+    /* Restore original file position if VTOC was preallocated */
+    if (prealloc)
+    {
+        /* Seek to next available dataset location */
+        rc = lseek (ofd, currpos, SEEK_SET);
+        if (rc < 0)
+        {
+            XMERRF ("%s offset %8.8lX seek error: %s\n",
+                    ofname, currpos, strerror(errno));
+            return -1;
+        }
+    }
+    else
+    {
+        /* Update next cyl and head if VTOC not preallocated */
+        *nxtcyl = outcyl;
+        *nxthead = outhead;
+    }
 
     return 0;
 } /* end function write_vtoc */
@@ -3351,6 +3467,7 @@ static int      stmtno = 0;             /* Statement number          */
 /*      EMPTY = create empty dataset (do not specify initfile)       */
 /*      DIP = initialize LOGREC dataset with IFCDIP00 header record  */
 /*      CVOL = initialize SYSCTLG dataset as an OS CVOL              */
+/*      VTOC = reserve space for the VTOC (dsname is ignored)        */
 /*      The space allocation can be:                                 */
 /*      CYL [pri [sec [dir]]]                                        */
 /*      TRK [pri [sec [dir]]]                                        */
@@ -3367,6 +3484,10 @@ static int      stmtno = 0;             /* Statement number          */
 /*      SYS1.NUCLEUS XMIT /cdrom/os360/reslibs/nucleus.xmi CYL       */
 /*      SYS1.SYSJOBQE EMPTY CYL 10 0 0 DA F 176 176 0                */
 /*      SYS1.DUMP EMPTY CYL 10 2 0 PS FB 4104 4104 0                 */
+/*      SYS1.OBJPDS EMPTY CYL 10 2 50 PO FB 80 3120 0                */
+/*      SYSVTOC VTOC CYL 1                                           */
+/*      SYSCTLG CVOL TRK 10                                          */
+/*      SYS1.LOGREC DIP CYL 1                                        */
 /*-------------------------------------------------------------------*/
 static int
 parse_ctrl_stmt (BYTE *stmt, BYTE *dsname, BYTE *method, BYTE **ifptr,
@@ -3425,6 +3546,8 @@ BYTE            c;                      /* Character work area       */
         *method = METHOD_DIP;
     else if (strcasecmp(pimeth, "CVOL") == 0)
         *method = METHOD_CVOL;
+    else if (strcasecmp(pimeth, "VTOC") == 0)
+        *method = METHOD_VTOC;
     else
     {
         XMERRF ("Invalid initialization method: %s\n", pimeth);
@@ -3635,6 +3758,8 @@ int             bcyl;                   /* Dataset begin cylinder    */
 int             bhead;                  /* Dataset begin head        */
 int             ecyl;                   /* Dataset end cylinder      */
 int             ehead;                  /* Dataset end head          */
+int             vtoctrk = 0;            /* VTOC start relative track */
+int             vtocext = 0;            /* VTOC extent size (tracks) */
 BYTE            volvtoc[5];             /* VTOC begin CCHHR          */
 off_t           seekpos;                /* Seek position for lseek   */
 int             fsflag = 0;             /* 1=Free space message sent */
@@ -3729,6 +3854,15 @@ int             fsflag = 0;             /* 1=Free space message sent */
             if (rc < 0) return -1;
             break;
 
+        case METHOD_VTOC:
+            /* Reserve space for VTOC */
+            vtoctrk = (outcyl * heads) + outhead;
+            vtocext = mintrks;
+            tracks = 0;
+            lastrec = 0;
+            trkbal = 0;
+            break;
+
         default:
         case METHOD_EMPTY:
             /* Create empty dataset */
@@ -3775,27 +3909,23 @@ int             fsflag = 0;             /* 1=Free space message sent */
         ehead = (outhead > 0 ? outhead - 1 : heads - 1);
 
         /* Create format 1 DSCB for the dataset */
-        rc = build_format1_dscb (&dscbpp, dsname, volser,
-                                dsorg, recfm, lrecl, blksz,
-                                keyln, dirblu, lasttrk, lastrec,
-                                trkbal, units, spsec,
-                                bcyl, bhead, ecyl, ehead);
-        if (rc < 0) return -1;
-        numdscb++;
+        if (method != METHOD_VTOC)
+        {
+            rc = build_format1_dscb (&dscbpp, dsname, volser,
+                                    dsorg, recfm, lrecl, blksz,
+                                    keyln, dirblu, lasttrk, lastrec,
+                                    trkbal, units, spsec,
+                                    bcyl, bhead, ecyl, ehead);
+            if (rc < 0) return -1;
+            numdscb++;
+        }
 
     } /* end while */
 
-    /* Build the VTOC start CCHHR */
-    volvtoc[0] = (outcyl >> 8) & 0xFF;
-    volvtoc[1] = outcyl & 0xFF;
-    volvtoc[2] = (outhead >> 8) & 0xFF;
-    volvtoc[3] = outhead & 0xFF;
-    volvtoc[4] = 1;
-
     /* Write the VTOC */
     rc = write_vtoc (numdscb, firstdscb, ofd, ofname, devtype,
-                    reqcyls, heads, trklen, trkbuf, outcyl, outhead,
-                    &outcyl, &outhead);
+                    reqcyls, heads, trklen, trkbuf, vtoctrk, vtocext,
+                    &outcyl, &outhead, volvtoc);
     if (rc < 0) return -1;
 
     /* Write empty tracks up to end of volume */

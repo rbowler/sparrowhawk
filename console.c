@@ -1272,8 +1272,14 @@ void loc3270_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
 int             rc;                     /* Return code               */
 int             num;                    /* Number of bytes to copy   */
 int             len;                    /* Data length               */
+int             off;                    /* Offset in device buffer   */
+int             pos;                    /* Position in screen        */
 BYTE            cmd;                    /* tn3270 command code       */
 BYTE            buf[32768];             /* tn3270 write buffer       */
+
+    /* Clear the current screen position at start of CCW chain */
+    if (chained == 0)
+        dev->pos3270 = 0;
 
     /* Unit check with intervention required if no client connected */
     if (dev->connected == 0 && !IS_CCW_SENSE(code))
@@ -1374,6 +1380,27 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
             break;
         }
 
+        /* == Start of special fix for OS/360 NIP == */
+
+        /* Save the screen position at completion of the write.
+           This is necessary in case a Read Buffer command is chained
+           from the write; the Read Buffer must then return data from
+           the current screen position instead of position zero.
+           Note that we only set this field correctly in the case
+           of a Write consisting only of a SBA order, because the only
+           known case where this matters is in OS/360 NIP where the
+           Read Buffer is preceded by a Write SBA with no data. */
+        if (code == 0x01
+            && (chained & CCW_FLAGS_CD) == 0
+            && (flags & CCW_FLAGS_CD) == 0
+            && (flags & CCW_FLAGS_CC)
+            && count == 4 && iobuf[1] == 0x11)
+            dev->pos3270 = ((iobuf[2] & 0x3F) << 6) | (iobuf[3] & 0x3F);
+        else
+            dev->pos3270 = 0;
+
+        /* == End of special fix for OS/360 NIP == */
+
         /* Return normal status */
         *unitstat = CSW_CE | CSW_DE;
         break;
@@ -1396,6 +1423,37 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
                 release_lock (&dev->lock);
                 break;
             }
+
+            /* == Start of special fix for OS/360 NIP == */
+
+            /* If chained to a Write, Erase/Write, Read Modified, or
+               Read Buffer command, then data transfer begins at the
+               screen position following completion of last command */
+            if (prevcode == 0x01 || prevcode == 0x05
+                || prevcode == 0x0D
+                || prevcode == 0x06 || prevcode == 0x02)
+            {
+                /* Screen position 0 is at offset 3 in the device
+                   buffer, following the AID and cursor address bytes */
+                pos = 0;
+                off = 3;
+
+                /* Search the buffer for the current screen position */
+                while (pos < dev->pos3270 && dev->rlen3270 > 3)
+                {
+                    /* Increment position unless Start Field order */
+                    if (dev->buf[off] != 0x1D) pos++;
+
+                    /* Skip to next character in device buffer */
+                    off++;
+                    dev->rlen3270--;
+                }
+
+                /* Shift out unwanted characters from buffer */
+                memmove (dev->buf + 3, dev->buf + off, dev->rlen3270 - 3);
+            }
+
+            /* == End of special fix for OS/360 NIP == */
 
         } /* end if(!CCW_FLAGS_CD) */
 

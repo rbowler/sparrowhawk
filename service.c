@@ -401,7 +401,9 @@ int             chpbit;                 /* Bit number for CHPID      */
 //                      | SCCB_CFG3_EXTENDED_FLOATING_POINT
                         ;
         sccbscp->cfg[4] = 0
-//                      | SCCB_CFG4_EXTENDED_TOD_CLOCK
+#ifdef FEATURE_EXTENDED_TOD_CLOCK
+                        | SCCB_CFG4_EXTENDED_TOD_CLOCK
+#endif /*FEATURE_EXTENDED_TOD_CLOCK*/
 //                      | SCCB_CFG4_EXTENDED_TRANSLATION
 //                      | SCCB_CFG4_STORE_SYSTEM_INFORMATION
                         ;

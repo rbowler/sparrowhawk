@@ -1704,6 +1704,9 @@ DEVBLK *dev;                            /* -> Device control block   */
 
     } /* end for(dev) */
 
+    /* Signal console thread to redrive select */
+    signal_thread (sysblk.cnsltid, SIGHUP);
+
 } /* end function io_reset */
 
 /*-------------------------------------------------------------------*/

@@ -1,4 +1,4 @@
-/* HERCULES.H	(c) Copyright Roger Bowler, 1999		     */
+/* HERCULES.H	(c) Copyright Roger Bowler, 1999-2000		     */
 /*		ESA/390 Emulator Header File			     */
 
 /*-------------------------------------------------------------------*/
@@ -299,8 +299,11 @@ typedef struct _DEVBLK {
 	int	csock;			/* Client socket number      */
 	struct	in_addr ipaddr; 	/* Client IP address	     */
 	int	rlen3270;		/* Length of data in buffer  */
+	int	pos3270;		/* Current screen position   */
 	/* Device dependent fields for cardrdr */
 	unsigned int			/* Flags		     */
+		rdreof:1,		/* 1=Unit exception at EOF   */
+		ebcdic:1,		/* 1=Card deck is EBCDIC     */
 		ascii:1,		/* 1=Convert ASCII to EBCDIC */
 		trunc:1;		/* Truncate overlength record*/
 	int	cardpos;		/* Offset of next byte to be

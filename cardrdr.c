@@ -1,4 +1,4 @@
-/* CARDRDR.C    (c) Copyright Roger Bowler, 1999                     */
+/* CARDRDR.C    (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 Card Reader Device Handler                   */
 
 /*-------------------------------------------------------------------*/
@@ -22,17 +22,25 @@ int cardrdr_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 int     i;                              /* Array subscript           */
 
     /* The first argument is the file name */
-    if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
+    if (argc > 0)
     {
-        fprintf (stderr, "HHC401I File name missing or invalid\n");
-        return -1;
-    }
+        /* Check for valid file name */
+        if (strlen(argv[0]) > sizeof(dev->filename)-1)
+        {
+            fprintf (stderr, "HHC401I File name too long\n");
+            return -1;
+        }
 
-    /* Save the file name in the device block */
-    strcpy (dev->filename, argv[0]);
+        /* Save the file name in the device block */
+        strcpy (dev->filename, argv[0]);
+    }
+    else
+        dev->filename[0] = '\0';
 
     /* Initialize device dependent fields */
     dev->fd = -1;
+    dev->rdreof = 0;
+    dev->ebcdic = 0;
     dev->ascii = 0;
     dev->trunc = 0;
     dev->cardpos = 0;
@@ -41,13 +49,27 @@ int     i;                              /* Array subscript           */
     /* Process the driver arguments */
     for (i = 1; i < argc; i++)
     {
+        /* eof means that unit exception will be returned at
+           end of file, instead of intervention required */
+        if (strcasecmp(argv[i], "eof") == 0)
+        {
+            dev->rdreof = 1;
+            continue;
+        }
+
+        /* ebcdic means that the card image file consists of
+           fixed length 80-byte EBCDIC card images with no
+           line-end delimiters */
+        if (strcasecmp(argv[i], "ebcdic") == 0)
+        {
+            dev->ebcdic = 1;
+            continue;
+        }
+
         /* ascii means that the card image file consists of
            variable length ASCII records delimited by either
-           line-feed or carriage-return line-feed sequences.
-           The default format is fixed length 80-byte EBCDIC
-           card images with no line-end delimiters. */
-
-        if (strcmp(argv[i], "ascii") == 0)
+           line-feed or carriage-return line-feed sequences */
+        if (strcasecmp(argv[i], "ascii") == 0)
         {
             dev->ascii = 1;
             continue;
@@ -57,16 +79,25 @@ int     i;                              /* Array subscript           */
            be silently truncated to 80 bytes when processing a
            variable length ASCII file.  The default behaviour
            is to present a data check if an overlength record
-           is encountered.  The trunc option is ignored unless
-           the ascii option is also specified. */
-
-        if (strcmp(argv[i], "trunc") == 0)
+           is encountered.  The trunc option is ignored except
+           when processing an ASCII card image file. */
+        if (strcasecmp(argv[i], "trunc") == 0)
         {
             dev->trunc = 1;
             continue;
         }
-        fprintf (stderr, "HHC402I Invalid argument: %s\n",
+
+        fprintf (stderr,
+                "HHC402I Invalid argument: %s\n",
                 argv[i]);
+        return -1;
+    }
+
+    /* Check for conflicting arguments */
+    if (dev->ebcdic && dev->ascii)
+    {
+        fprintf (stderr,
+                "HHC403I Specify ASCII or EBCDIC but not both\n");
         return -1;
     }
 
@@ -94,6 +125,121 @@ int     i;                              /* Array subscript           */
 
 
 /*-------------------------------------------------------------------*/
+/* Close the card image file                                         */
+/*-------------------------------------------------------------------*/
+static void close_cardrdr ( DEVBLK *dev )
+{
+    /* Close the card image file */
+    close (dev->fd);
+    dev->fd = -1;
+
+    /* Clear the file name */
+    dev->filename[0] = '\0';
+
+    /* Reset the device dependent flags */
+    dev->ascii = 0;
+    dev->ebcdic = 0;
+    dev->rdreof = 0;
+    dev->trunc = 0;
+
+} /* end function close_cardrdr */
+
+
+/*-------------------------------------------------------------------*/
+/* Open the card image file                                          */
+/*-------------------------------------------------------------------*/
+static int open_cardrdr ( DEVBLK *dev, BYTE *unitstat )
+{
+int     rc;                             /* Return code               */
+int     i;                              /* Array subscript           */
+int     len;                            /* Length of data            */
+BYTE    buf[160];                       /* Auto-detection buffer     */
+
+    /* Intervention required if device has no file name */
+    if (dev->filename[0] == '\0')
+    {
+        dev->sense[0] = SENSE_IR;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Open the device file */
+    rc = open (dev->filename, O_RDONLY);
+    if (rc < 0)
+    {
+        /* Handle open failure */
+        logmsg ("HHC404I Error opening file %s: %s\n",
+                dev->filename, strerror(errno));
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Save the file descriptor in the device block */
+    dev->fd = rc;
+
+    /* If neither EBCDIC nor ASCII was specified, attempt to
+       detect the format by inspecting the first 160 bytes */
+    if (dev->ebcdic == 0 && dev->ascii == 0)
+    {
+        /* Read first 160 bytes of file into the buffer */
+        len = read (dev->fd, buf, sizeof(buf));
+        if (len < 0)
+        {
+            /* Handle read error condition */
+            logmsg ("HHC405I Error reading file %s: %s\n",
+                    dev->filename, strerror(errno));
+
+            /* Close the file */
+            close (dev->fd);
+            dev->fd = -1;
+
+            /* Set unit check with equipment check */
+            dev->sense[0] = SENSE_EC;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            return -1;
+        }
+
+        /* Assume ASCII format if first 160 bytes contain only
+           valid ASCII characters, carriage return, and line feed */
+        for (i = 0, dev->ascii = 1; i < len; i++)
+        {
+            if ((buf[i] < 0x20 || buf[i] > 0x7F)
+                && buf[i] != 0x0A && buf[i] != 0x0D)
+            {
+                dev->ascii = 0;
+                dev->ebcdic = 1;
+                break;
+            }
+        } /* end for(i) */
+
+        /* Rewind to start of file */
+        rc = lseek (dev->fd, 0, SEEK_SET);
+        if (rc < 0)
+        {
+            /* Handle seek error condition */
+            logmsg ("HHC406I Seek error in file %s: %s\n",
+                    dev->filename, strerror(errno));
+
+            /* Close the file */
+            close (dev->fd);
+            dev->fd = -1;
+
+            /* Set unit check with equipment check */
+            dev->sense[0] = SENSE_EC;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            return -1;
+        }
+
+    } /* end if(auto-detect) */
+
+    return 0;
+} /* end function open_cardrdr */
+
+
+/*-------------------------------------------------------------------*/
 /* Read an 80-byte EBCDIC card image into the device buffer          */
 /*-------------------------------------------------------------------*/
 static int read_ebcdic ( DEVBLK *dev, BYTE *unitstat )
@@ -106,9 +252,20 @@ int     rc;                             /* Return code               */
     /* Handle end-of-file condition */
     if (rc == 0)
     {
-        close (dev->fd);
-        dev->fd = -1;
-        *unitstat = CSW_CE | CSW_DE | CSW_UX;
+        /* Return unit exception or intervention required */
+        if (dev->rdreof)
+        {
+            *unitstat = CSW_CE | CSW_DE | CSW_UX;
+        }
+        else
+        {
+            dev->sense[0] = SENSE_IR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        }
+
+        /* Close the file and clear the file name and flags */
+        close_cardrdr (dev);
+
         return -1;
     }
 
@@ -116,10 +273,10 @@ int     rc;                             /* Return code               */
     if (rc < CARD_SIZE)
     {
         if (rc < 0)
-            logmsg ("HHC403I Error reading file %s: %s\n",
+            logmsg ("HHC407I Error reading file %s: %s\n",
                     dev->filename, strerror(errno));
         else
-            logmsg ("HHC404I Unexpected end of file on %s\n",
+            logmsg ("HHC408I Unexpected end of file on %s\n",
                     dev->filename);
 
         /* Set unit check with equipment check */
@@ -156,17 +313,27 @@ BYTE    c;                              /* Input character           */
             /* End of record if there is any data in buffer */
             if (i > 0) break;
 
-            /* Set unit exception to signal end of file */
-            close (dev->fd);
-            dev->fd = -1;
-            *unitstat = CSW_CE | CSW_DE | CSW_UX;
+            /* Return unit exception or intervention required */
+            if (dev->rdreof)
+            {
+                *unitstat = CSW_CE | CSW_DE | CSW_UX;
+            }
+            else
+            {
+                dev->sense[0] = SENSE_IR;
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            }
+
+            /* Close the file and clear the file name and flags */
+            close_cardrdr (dev);
+
             return -1;
         }
 
         /* Handle read error condition */
         if (rc < 0)
         {
-            logmsg ("HHC405I Error reading file %s: %s\n",
+            logmsg ("HHC409I Error reading file %s: %s\n",
                     dev->filename, strerror(errno));
 
             /* Set unit check with equipment check */
@@ -186,6 +353,9 @@ BYTE    c;                              /* Input character           */
         {
             /* Ignore excess characters if trunc option specified */
             if (dev->trunc) continue;
+
+            logmsg ("HHC410I Card image exceeds %d bytes in file %s\n",
+                    CARD_SIZE, dev->filename);
 
             /* Set unit check with data check */
             dev->sense[0] = SENSE_DC;
@@ -215,19 +385,8 @@ int     num;                            /* Number of bytes to move   */
     /* Open the device file if necessary */
     if (dev->fd < 0 && !IS_CCW_SENSE(code))
     {
-        rc = open (dev->filename, O_RDONLY);
-        if (rc < 0)
-        {
-            /* Handle open failure */
-            logmsg ("HHC406I Error opening file %s: %s\n",
-                    dev->filename, strerror(errno));
-
-            /* Set unit check with intervention required */
-            dev->sense[0] = SENSE_IR;
-            *unitstat = CSW_CE | CSW_DE | CSW_UC;
-            return;
-        }
-        dev->fd = rc;
+        rc = open_cardrdr (dev, unitstat);
+        if (rc) return;
     }
 
     /* Process depending on CCW opcode */

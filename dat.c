@@ -1058,7 +1058,8 @@ U16     xcode;                          /* Exception code            */
 
 #ifdef FEATURE_INTERVAL_TIMER
     /* Check for access to interval timer at location 80 */
-    if (raddr < 88 && raddr >= 76)
+    if ((sysblk.insttrace || sysblk.inststep)
+        && raddr < 88 && raddr >= 76)
     {
         psa = (PSA*)(sysblk.mainstor + regs->pxr);
         logmsg ("dat.c: Interval timer accessed: "

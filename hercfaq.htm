@@ -1,0 +1,378 @@
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 3.0//EN" "html.dtd">
+<HTML>
+<HEAD><TITLE>Snipix Technologies:
+Hercules: Frequently-Asked Questions</TITLE>
+</HEAD>
+<BODY BGCOLOR="#ffffcc" TEXT="#000000" LINK="#0000A0"
+      VLINK="#008040" ALINK="#000000">
+
+<img src="gifs/snipix.gif" alt="Snipix Technologies" align=right hspace=15>
+<h1>Hercules: Frequently-Asked Questions</h1>
+
+<hr noshade>
+
+<h4>What is Hercules?</h4>
+<p>
+Hercules is a software implementation of S/370 and ESA/390
+which runs under Linux on a Pentium PC.
+
+
+<h4>So what exactly does that mean?</h4>
+<p>
+It means that your PC can emulate an IBM mainframe processor.
+Hercules executes S/370 and ESA/390 instructions and channel programs.
+It emulates mainframe I/O devices by using PC devices &#150; for
+example, 3390 DASD devices are emulated by large files on your hard
+disk, and local 3270 screens are emulated by tn3270 sessions.
+<p>
+Hercules only implements the raw S/370 and ESA/390 instruction set; it
+does not provide any operating system facilities.  This means that you
+need to provide a standalone program or operating system which Hercules
+can load from an emulated disk or tape device.  You will have to write
+the standalone program or operating system yourself, unless you can
+manage to obtain a licence from IBM to run one of their operating
+systems on your PC.
+
+
+<h4>Is it functional enough to run production work?</h4>
+<p>
+No.  At the moment it's a system programmer's toy.
+
+
+<h4>Can it run OS/390, VM/ESA, VSE/ESA?</h4>
+<p>
+Hercules is a software implementation of ESA/390 so in theory you
+could use it to run any ESA/390 operating system.  But in
+practice you cannot do this, because the licensing terms for
+these operating systems do not allow you to run them on your PC.
+
+
+<h4>So what <em>can</em> I run on it?</h4>
+<p>
+You can run OS/360 on Hercules in S/370 mode.  OS/360 is in the
+public domain and (if my understanding is correct) can be run
+without licensing problems.
+<p>
+Some standalone programs are known to run well.
+I can particularly recommend Jan Jaeger's excellent standalone
+editor (ZZSA) which you can download from
+<a href="http://home.worldonline.nl/~jjaeger">
+http://home.worldonline.nl/~jjaeger</a>.
+
+
+<h4>Where can I obtain OS/360?</h4>
+<p>
+Rick Fochtman's OS/360 archive CD is now obtainable by download from
+these locations:
+<ul>
+<li><a href="http://www.cyberdynesys.com/os360.tgz">
+    http://www.cyberdynesys.com/os360.tgz</a>
+<li><a href="ftp://upaya.soc.neu.edu/pub/os360.gz">
+    ftp://upaya.soc.neu.edu/pub/os360.gz</a>
+</ul>
+If you are interested in obtaining a copy of the CD itself, contact
+<em>Rick.Fochtman </em>&#064;<em> botcc.com</em>.
+<p>
+You can use the DASDLOAD and DASDISUP programs
+(see the <a href="hercload.htm">Creating Hercules DASD</a> page)
+to build an OS/360 IPL volume from the unloaded files on the
+archive CD.
+<p>
+Alternatively, you can download my
+<a href="hercules/mftr33.tar.gz">mftr33.tar.gz</a> package
+which contains a minimal MFT system on a 3330 image, with
+some minimal documentation.
+<p>
+Jay Maynard has produced an excellent document describing how
+to build an OS/360 system on Hercules.  It can be found at
+<a href="http://jmaynard.home.texas.net/hercos360">
+http://jmaynard.home.texas.net/hercos360</a>
+
+
+<h4>What are the licensing restrictions for Hercules?</h4>
+<p>
+Hercules is a copyright work which has been made available for use
+by any individual, subject to the terms of
+the <a href="herclic.htm">Hercules Public Licence</a>.
+In essence this allows private individuals to freely copy, modify,
+and execute the program for personal use.  You may not sell the
+program, or copy any portion of the source code for use in any other
+program.  Any modifications you make to the program are subject to
+the same restrictions.  The Hercules Public Licence does not permit
+any form of commercial use or distribution &#150; if this is
+something you want to do, then you will need to contact me to
+negotiate a special license.
+<p>
+Hercules is <em>not</em>, repeat, <em>not</em> GPL software!
+
+
+<h4>What hardware do I need to run Hercules?</h4>
+<p>
+It depends how fast you want it to run.
+A Pentium 166 with 16Mb RAM is probably the minimum practical
+requirement; 550MHz with 128Mb RAM would be much better.  Hercules
+doesn't use any fancy graphics, but it does need a fast processor to
+achieve a reasonable MIPS rate.  A Celeron processor (with as high a
+clock speed as you can afford) will probably give the best
+price/performance ratio.
+<p>
+You will need enough Linux swap space to accommodate your S/390
+real storage (main storage plus expanded storage).  For maximum
+throughput, you should set your main and expanded storage sizes high
+enough to eliminate S/390 paging.  S/390 storage is allocated out
+of Linux virtual storage, so if you can provide enough RAM to
+eliminate Linux paging as well, then so much the better.
+<p>
+You also need enough hard disk space to accommodate the emulated DASD.
+A 3380 will need about 650MB, and a 3390 model 2 needs about 2GB.
+<em>
+DASD volumes larger than 2GB (for example 3390 model 3) are not
+supported at the present time.
+</em>
+
+
+<h4>What sort of MIPS rate can I expect?</h4>
+<p>
+Don't get excited...
+on a Celeron 300 I am seeing an execution speed of around 0.3 MIPS.
+I suggest you get hold of a Pentium 600 if you can afford it.
+<p>
+I haven't measured the I/O rate, but I would imagine it is
+abysmal.
+
+
+<h4>What software do I need to run Hercules?</h4>
+<p>
+You need a Linux system with Posix Threads (pthread) support.
+I will only provide support for Linux 2.2.x kernels with glibc2
+(libc6) as supplied in popular distributions such as Red Hat 6.0 and
+SuSE Linux 6.1 or later.
+<p>
+You will also need tn3270 client software.  This does not have to run
+on the Linux box, you can use any Windows tn3270 client (such as
+QWS3270, IBM Personal Communications, Attachmate Extra, or Dynacomm
+Elite), or any Unix tn3270 client (such as x3270).
+
+
+<h4>Do you plan to port Hercules to other platforms?</h4>
+<p>
+No.  I do not have the resources to support more than one operating
+system.
+<p>
+If you want to make Hercules run on Windows, FreeBSD, Solaris,
+Linux 2.0.x, or whatever, then by all means go ahead.  I welcome
+reports of any bugs or problems you find, but I probably won't fix
+problems if it means introducing platform-specific code, and I
+will not be able to test new releases against other platforms.
+<p>
+The Hercules code is not intended to be specific to Intel hardware,
+so if you find any issues or faults related to running on other
+hardware (Sparc, Alpha, PPC, ...) under Linux 2.2, then I'm likely
+to be more receptive to fixing that sort of problem than fixing
+issues related to Unix variants.
+<p>
+I'm certainly not trying to promote Linux as the be-all and end-all
+of everything (there are plenty of people doing that at the moment),
+I just think that Linux happens to be a suitable platform for this
+particular application.
+
+
+<h4>Which compiler should I use to build Hercules?</h4>
+<p>
+You <em>must</em> use the egcs compiler.
+I am using the version that came with SuSE 6.1
+and it seems to work OK.  The version number reported by cc -v
+is: egcs-2.91.66 19990314 (egcs-1.1.2 release).
+<p>
+The older gcc compiler is known to produce incorrect code for some
+64-bit (unsigned long long) integer operations.
+I have had reports that earlier versions of egcs produce
+strange results too.
+
+
+<h4>Why do I get an unexpected fixed-point divide exception
+    (program check 0009 or abend 0C9) on a CVB instruction?</h4>
+<p>
+You are using the gcc compiler.
+You must use the egcs compiler instead.
+See previous question for the required compiler level.
+
+
+<h4>How can I create a DASD volume?</h4>
+<p>
+The <a href="hercload.htm">Creating Hercules DASD</a> page
+describes various methods of creating and loading virtual DASD
+volumes.
+
+
+<h4>How can I read a mainframe tape volume?</h4>
+<p>
+The <b><i>tapeconv.jcl</i></b> file in the Hercules directory
+contains a sample program which you can run under OS/390 on your
+mainframe system.  It reads a file from tape and converts it to
+AWSTAPE format.   Download the AWSTAPE file to your PC (making sure
+to choose <em>binary</em> format for the download), and then add the
+downloaded filename to the Hercules configuration file as a virtual
+tape device.
+
+
+<h4>Can I attach a tape drive to Hercules?</h4>
+<p>
+Hercules can now read and write SCSI tapes.  I have only tested this
+with 4mm DAT tapes, but it is possible to obtain 3420 and 3480 type
+drives which attach to the SCSI bus, so in theory it should be
+possible to read real mainframe tapes and cartridges using Hercules.
+Unfortunately these drives are shockingly expensive (about 10,000
+dollars apiece last time I enquired), so unless someone wants to
+donate one to me, this tantalising possibility will have to remain
+in the realms of fantasy for the time being.
+
+
+<h4>How can I create programs without a mainframe?</h4>
+<p>
+If you want to write standalone programs to run on Hercules, but
+you don't have access to a mainframe, then there are two interesting
+products which you can run on your PC:
+<dl>
+<dt>
+The "Tachyon 390 Cross Assembler"
+(<a href="http://www.tachyonsoft.com/tachyon">
+http://www.tachyonsoft.com/tachyon</a>)
+<dd>
+With this assembler you can produce S/390 compatible object decks
+using your Linux or Windows PC.  A high degree of HLASM
+compatibility, coupled with the ability to perform complex assemblies
+at lightning speed, make this a product which is well worth looking at.
+I have tried this assembler and it is truly amazing.
+<dt>
+The "Dignus Systems/C Compiler"
+(<a href="http://www.dignus.com">
+http://www.dignus.com</a>)
+<dd>This is a C compiler that runs under Windows or Linux and generates
+mainframe assembler code which you can then assemble using the
+Tachyon assembler.
+</dl>
+<p>
+Sam Golob wrote a fascinating review of these two products in
+the September 1999 issue of NaSPA Technical Support magazine.
+
+
+<h4>What ESA/390 features are implemented?</h4>
+<p>
+The following standard features have been implemented:
+<ul>
+<li>Commercial Instruction Set
+<li>Decimal instructions
+<li>24-bit and 31-bit addressing
+<li>Key-Controlled Protection (4K blocks only)
+<li>Page Protection
+<li>Low-Address Protection
+<li>Dynamic Address Translation (1M/4K only)
+<li>370-XA Channel Subsystem
+<li>Channel Indirect Data Addressing
+<li>Program Controlled Interruption (PCI)
+<li>Channel Program Suspend/Resume
+<li>Dual Address Space
+<li>Access Register Mode
+<li>Home Space Mode
+<li>Branch and Save
+<li>Conditional Swapping
+<li>TOD Clock, Clock Comparator, and CPU Timer
+<li>MVCS/MVCP/MVCK/MVCSK/MVCDK instructions
+<li>TB/TPROT instructions
+<li>LURA/STURA instructions
+<li>BAKR/PC/PR/PT instructions
+<li>Linkage Stack
+<li>Compare and Form Codeword and Update Tree instructions
+</ul>
+
+<p>The following optional features have been implemented:
+<ul>
+<li>Access-List-Controlled Protection
+<li>Branch and Set Authority
+<li>Checksum instruction
+<li>Compare and Move Extended instructions
+<li>Halfword-Immediate instructions
+<li>Branch-Relative instructions
+<li>Move Inverse
+<li>Private Space
+<li>Set Address Space Control Fast
+<li>Storage-Protection Override
+<li>String instructions
+<li>Subspace Group
+<li>Compare Until Substring Equal
+<li>Concurrent Sense
+<li>Suppression on Protection with Virtual-Address enhancement
+<li>Extended TOD clock
+</ul>
+
+<p>The following standard features have not yet been implemented:
+<ul>
+<li>Clear I/O and Halt I/O
+<li>Floating-Point instructions (except Load and Store)
+<li>Move Page instruction
+</ul>
+
+<p>
+The following optional features are not yet implemented but probably
+will be in due course:
+<ul>
+<li>Address-Limit Checking
+<li>Compression
+<li>Incorrect-Length-Indication Suppression
+<li>Move Page (Facility 2)
+<li>Expanded Storage
+<li>Perform Locked Operation
+<li>Square Root
+<li>MVS assists
+</ul>
+
+<p>
+The features are not implemented, and are unlikely to be:
+<ul>
+<li>Asynchronous Data Mover Facility
+<li>Asynchronous Pageout Facility
+<li>Broadcasted Purging
+<li>Cancel I/O
+<li>Channel-Subsystem Call
+<li>Coupling (Parallel Sysplex, Coupling Links, Integrated Coupling Migration Facility)
+<li>Dynamic Reconfiguration Management
+<li>ESCON
+<li>EMIF (ESCON Multiple Image Facility)
+<li>Extended Sorting
+<li>External Time Reference
+<li>ICRF (Cryptography)
+<li>Interpretive Execution
+<li>Operational extensions (Automatic reconfiguration, Storage reconfiguration,
+    SCP-initiated reset, Console integration, Processor Availability)
+<li>Program-Event Recording
+<li>PER extensions
+<li>PR/SM
+<li>SCLP (Service Call Logical Processor) Facility
+<li>SIE I/O Assist
+<li>Sysplex
+<li>Sysplex Timer (ETR)
+<li>Vector Facility
+<li>VM assists
+</ul>
+
+
+
+<p><center><hr width=15% noshade></center>
+<p>
+<img src="gifs/note.gif">
+Send any comments and questions to
+<em>rbowler </em>&#064;<em> snipix.freeserve.co.uk</em>
+or join the Hercules discussion group by sending a blank email to
+<a href="mailto:hercules-390-subscribe@onelist.com">
+hercules-390-subscribe@onelist.com</a>
+
+<p><center><hr width=15% noshade>
+<a href="hercules.htm"><img src="gifs/back.gif" border=0></a>
+</center>
+
+<small>
+<p>Last updated 08 Feb 2000
+</BODY>
+</HTML>
+

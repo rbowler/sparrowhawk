@@ -1,4 +1,4 @@
-/* IMPL.C       (c) Copyright Roger Bowler, 1999                     */
+/* IMPL.C       (c) Copyright Roger Bowler, 1999-2000                */
 /*              Hercules Initialization Module                       */
 
 /*-------------------------------------------------------------------*/
@@ -57,7 +57,7 @@ REGS   *regs;                           /* -> CPU register context   */
     /* Display the version identifier */
     fprintf (stderr,
             "Hercules %s version %s "
-            "(c)Copyright Roger Bowler, 1994-1999\n",
+            "(c)Copyright Roger Bowler, 1994-2000\n",
             ARCHITECTURE_NAME, MSTRING(VERSION));
 
     /* Process the command line options */

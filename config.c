@@ -1,4 +1,4 @@
-/* CONFIG.C     (c) Copyright Roger Bowler, 1999                     */
+/* CONFIG.C     (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 Configuration Builder                        */
 
 /*-------------------------------------------------------------------*/
@@ -384,7 +384,7 @@ int     subchan;                        /* Subchannel number         */
 
     /* Display the version identifier on the control panel */
     logmsg ("Hercules %s version %s "
-            "(c)Copyright Roger Bowler, 1994-1999\n",
+            "(c)Copyright Roger Bowler, 1994-2000\n",
             ARCHITECTURE_NAME, MSTRING(VERSION));
 
     /* Build the device configuration blocks */

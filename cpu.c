@@ -1,4 +1,4 @@
-/* CPU.C        (c) Copyright Roger Bowler, 1994-1999                */
+/* CPU.C        (c) Copyright Roger Bowler, 1994-2000                */
 /*              ESA/390 CPU Emulator                                 */
 
 /*-------------------------------------------------------------------*/
