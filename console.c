@@ -993,6 +993,9 @@ BYTE                    rejmsg[80];     /* Rejection message         */
     }
     rc = send_packet (csock, buf, len, "CONNECTION RESPONSE");
 
+    /* Raise attention interrupt for the device */
+    rc = device_attention (dev, CSW_ATTN);
+
     /* Signal connection thread to redrive its select loop */
     signal_thread (sysblk.cnsltid, SIGHUP);
 

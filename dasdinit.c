@@ -1,4 +1,4 @@
-/* DASDINIT.C   (c) Copyright Roger Bowler, 1999                     */
+/* DASDINIT.C   (c) Copyright Roger Bowler, 1999-2000                */
 /*              Hercules DASD Utilities: DASD image builder          */
 
 /*-------------------------------------------------------------------*/
@@ -86,8 +86,7 @@ U32             trksize;                /* DASD image track length   */
                 + sizeof(CKDDASD_RECHDR) + rec0len
                 + sizeof(CKDDASD_RECHDR) + maxdlen
                 + sizeof(eighthexFF);
-    trksize += 0x1FF;
-    trksize &= 0xFFFFFE00;
+    trksize = ROUND_UP(trksize,512);
 
     /* Compute minimum and maximum number of cylinders */
     cylsize = trksize * heads;
@@ -363,7 +362,7 @@ BYTE    c;                              /* Character work area       */
     /* Display the program identification message */
     fprintf (stderr,
             "Hercules DASD image file creation program %s "
-            "(c)Copyright Roger Bowler, 1999\n",
+            "(c)Copyright Roger Bowler, 1999-2000\n",
             MSTRING(VERSION));
 
     /* Check the number of arguments */

@@ -3222,6 +3222,23 @@ static BYTE module[8];                  /* Module name               */
             break;
 #endif /*FEATURE_S370_CHANNEL*/
 
+        case 0x04:
+        /*-----------------------------------------------------------*/
+        /* B204: SCK - Set Clock                                 [S] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Return condition code zero */
+            regs->psw.cc = 0;
+
+            break;
+
         case 0x05:
         /*-----------------------------------------------------------*/
         /* B205: STCK - Store Clock                              [S] */

@@ -1,9 +1,14 @@
-/* DASDLOAD.C   (c) Copyright Roger Bowler, 1999                     */
+/* DASDLOAD.C   (c) Copyright Roger Bowler, 1999-2000                */
 /*              Hercules DASD Utilities: DASD image loader           */
 
 /*-------------------------------------------------------------------*/
 /* This program creates a virtual DASD volume from a list of         */
 /* datasets previously unloaded using the TSO XMIT command.          */
+/*-------------------------------------------------------------------*/
+
+/*-------------------------------------------------------------------*/
+/* Additional credits:                                               */
+/*      Corrections to CVOL initialization logic by Jay Maynard      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -115,10 +120,9 @@ argexit ( int code )
     fprintf (stderr,
             "dasdload creates a DASD image file from a list "
             "of TSO XMIT files\n"
-            "Syntax:\tdasdload ctlfile outfile devtype [msglevel]\n"
+            "Syntax:\tdasdload ctlfile outfile [msglevel]\n"
             "where:\tctlfile  = name of input control file\n"
             "\toutfile  = name of DASD image file to be created\n"
-            "\tdevtype  = 2311, 2314, 3330, 3350, 3380, 3390\n"
             "\tmsglevel = Value 0-5 controls output verbosity\n");
     exit(code);
 } /* end function argexit */
@@ -1076,7 +1080,7 @@ int             tolfact;                /* Device tolerance          */
     f4dscb->ds4hcchh[3] = 0;
     f4dscb->ds4noatk[0] = 0;
     f4dscb->ds4noatk[1] = 0;
-    f4dscb->ds4vtoci = 0;
+    f4dscb->ds4vtoci = DS4VTOCI_DOS;
     f4dscb->ds4noext = 1;
     f4dscb->ds4devsz[0] = (numcyls >> 8) & 0xFF;
     f4dscb->ds4devsz[1] = numcyls & 0xFF;
@@ -1152,6 +1156,7 @@ int             blklen;                 /* Size of data block        */
 /*      ofd     Output file descriptor                               */
 /*      ofname  Output file name                                     */
 /*      devtype Output device type                                   */
+/*      reqcyls Requested device size in cylinders, or zero          */
 /*      heads   Number of tracks per cylinder on output device       */
 /*      trklen  Track length of virtual output device                */
 /*      trkbuf  Pointer to track buffer                              */
@@ -1164,8 +1169,9 @@ int             blklen;                 /* Size of data block        */
 /*-------------------------------------------------------------------*/
 static int
 write_vtoc (int numdscb, DATABLK *blkptr, int ofd, BYTE *ofname,
-            U16 devtype, int heads, int trklen, BYTE *trkbuf,
-            int outcyl, int outhead, int *nxtcyl, int *nxthead)
+            U16 devtype, int reqcyls, int heads, int trklen,
+            BYTE *trkbuf, int outcyl, int outhead,
+            int *nxtcyl, int *nxthead)
 {
 int             rc;                     /* Return code               */
 int             i;                      /* Array subscript           */
@@ -1193,7 +1199,7 @@ BYTE            blankblk[152];          /* Data block for blank DSCB */
     dscbpertrk = f4dscb->ds4devdt;
     numtrk = (numdscb + dscbpertrk - 1) / dscbpertrk;
 
-    XMINFF (2, "VTOC starts at cyl %d head %d and is %d tracks\n",
+    XMINFF (1, "VTOC starts at cyl %d head %d and is %d tracks\n",
             outcyl, outhead, numtrk);
 
     /* Calculate the CCHHR of the last format 1 DSCB */
@@ -1234,6 +1240,7 @@ BYTE            blankblk[152];          /* Data block for blank DSCB */
     /* Assuming that the VTOC is the last dataset on the volume,
        update the volume size in cylinders in the format 4 DSCB */
     numcyls = endcyl + 1;
+    if (numcyls < reqcyls) numcyls = reqcyls;
     f4dscb->ds4devsz[0] = (numcyls >> 8) & 0xFF;
     f4dscb->ds4devsz[1] = numcyls & 0xFF;
 
@@ -2787,14 +2794,14 @@ static BYTE    *sys1name[NUM_SYS1_DATASETS] =
     catent->pds2usrd[0] = ((extsize - 1) >> 8) & 0xFF;
     catent->pds2usrd[1] = (extsize - 1) & 0xFF;
     catent->pds2usrd[2] = blkptrk;
+    catent->pds2usrd[3] = 0;
 
-    /* The next byte contains the number of blocks per track */
-    catent->pds2usrd[3] = blkptrk;
-
-    /* The remaining 6 bytes of userdata are zeroes */
+    /* Set the TTR of the first unused block (X'000003') */
     catent->pds2usrd[4] = 0;
     catent->pds2usrd[5] = 0;
-    catent->pds2usrd[6] = 0;
+    catent->pds2usrd[6] = 3;
+
+    /* Remainder of user data is 0 */
     catent->pds2usrd[7] = 0;
     catent->pds2usrd[8] = 0;
     catent->pds2usrd[9] = 0;
@@ -2914,9 +2921,9 @@ static BYTE    *sys1name[NUM_SYS1_DATASETS] =
         /* The next six bytes contain the volume serial number */
         convert_to_ebcdic (catent->pds2usrd+6, 6, volser);
 
-        /* The next two bytes contain the volume seq.no. (X'0001') */
+        /* The next two bytes contain the volume seq.no. (X'0000') */
         catent->pds2usrd[12] = 0;
-        catent->pds2usrd[13] = 1;
+        catent->pds2usrd[13] = 0;
 
         /* Increment bytes used by the length of the dataset pointer */
         bytes += 26;
@@ -2955,24 +2962,6 @@ static BYTE    *sys1name[NUM_SYS1_DATASETS] =
     while (totblks > 0)
     {
         memset (datablk.kdarea, 0, keylen + datalen);
-
-        /* The key field contains all X'FF' */
-        memcpy (datablk.kdarea, eighthexFF, 8);
-
-        /* The first entry begins after the 2 byte count field */
-        bytes = 2;
-        catent = (PDSDIR*)(datablk.kdarea + keylen + bytes);
-
-        /* Set the last entry in block marker */
-        memcpy (catent->pds2name, eighthexFF, 8);
-
-        /* Increment bytes used by the last entry marker */
-        bytes += 12;
-        catent = (PDSDIR*)(datablk.kdarea + keylen + bytes);
-
-        /* Set the number of bytes used in this block */
-        datablk.kdarea[keylen+0] = (bytes >> 8) & 0xFF;
-        datablk.kdarea[keylen+1] = bytes & 0xFF;
 
         /* Write the volume index block to the output file */
         rc = write_block (ofd, ofname, &datablk, keylen, datalen,
@@ -3157,6 +3146,110 @@ DATABLK         datablk;                /* Data block                */
     return 0;
 
 } /* end function dip_initialize */
+
+/*-------------------------------------------------------------------*/
+/* Subroutine to initialize an empty dataset                         */
+/* Input:                                                            */
+/*      ofname  DASD image file name                                 */
+/*      ofd     DASD image file descriptor                           */
+/*      trkbuf  Pointer to output track buffer                       */
+/*      devtype Output device type                                   */
+/*      heads   Output device number of tracks per cylinder          */
+/*      trklen  Output device virtual track length                   */
+/*      outcyl  Output starting cylinder number                      */
+/*      outhead Output starting head number                          */
+/*      extsize Extent size in tracks                                */
+/*      dsorg   Dataset organization                                 */
+/*      dirblks Number of directory blocks                           */
+/* Output:                                                           */
+/*      dirblu  Bytes used in last directory block                   */
+/*      lastrec Record number of last block written                  */
+/*      trkbal  Number of bytes remaining on last track              */
+/*      numtrks Number of tracks written                             */
+/*      nxtcyl  Starting cylinder number for next dataset            */
+/*      nxthead Starting head number for next dataset                */
+/*-------------------------------------------------------------------*/
+static int
+empty_initialize (BYTE *ofname, int ofd, BYTE *trkbuf, U16 devtype,
+                int heads, int trklen, int outcyl, int outhead,
+                int extsize, BYTE dsorg, int dirblks,
+                int *dirblu, int *lastrec, int *trkbal,
+                int *numtrks, int *nxtcyl, int *nxthead)
+{
+int             rc;                     /* Return code               */
+int             i;                      /* Loop counter              */
+int             keylen;                 /* Key length of data block  */
+int             datalen;                /* Data length of data block */
+int             outusedv = 0;           /* Output bytes used on track
+                                           of virtual device         */
+int             outusedr = 0;           /* Output bytes used on track
+                                           of real device            */
+int             outtrkbr = 0;           /* Output bytes remaining on
+                                           track of real device      */
+int             outdblu = 0;            /* Output bytes used in last
+                                           directory block           */
+int             outtrk = 0;             /* Output relative track     */
+int             outrec = 0;             /* Output record number      */
+DATABLK         datablk;                /* Data block                */
+
+    /* Initialize the directory if dataset is a PDS */
+    if (dsorg & DSORG_PO)
+    {
+        /* Build the first directory block */
+        keylen = 8;
+        datalen = 256;
+        outdblu = 14;
+        memset (datablk.kdarea, 0, keylen + datalen);
+        memcpy (datablk.kdarea, eighthexFF, 8);
+        datablk.kdarea[keylen] = (outdblu >> 8);
+        datablk.kdarea[keylen+1] = outdblu & 0xFF;
+        memcpy (datablk.kdarea + keylen + 2, eighthexFF, 8);
+
+        /* Write directory blocks to output dataset */
+        for (i = 0; i < dirblks; i++)
+        {
+            /* Write a directory block */
+            rc = write_block (ofd, ofname, &datablk, keylen, datalen,
+                        devtype, heads, trklen, extsize,
+                        trkbuf, &outusedv, &outusedr, &outtrkbr,
+                        &outtrk, &outcyl, &outhead, &outrec);
+            if (rc < 0) return -1;
+
+            /* Clear subsequent directory blocks to zero */
+            memset (datablk.kdarea, 0, keylen + datalen);
+
+        } /* end for(i) */
+
+    } /* end if(DSORG_PO) */
+
+    /* Create the end of file record */
+    keylen = 0;
+    datalen = 0;
+    rc = write_block (ofd, ofname, &datablk, keylen, datalen,
+                devtype, heads, trklen, extsize,
+                trkbuf, &outusedv, &outusedr, &outtrkbr,
+                &outtrk, &outcyl, &outhead, &outrec);
+    if (rc < 0) return -1;
+
+    /* Return number of bytes used in last directory block */
+    *dirblu = outdblu;
+
+    /* Return the last record number and track balance */
+    *lastrec = outrec;
+    *trkbal = outtrkbr;
+
+    /* Write data remaining in track buffer */
+    rc = write_track (ofd, ofname, heads, trklen, trkbuf,
+                    &outusedv, &outtrk, &outcyl, &outhead);
+    if (rc < 0) return -1;
+
+    /* Return number of tracks and starting address of next dataset */
+    *numtrks = outtrk;
+    *nxtcyl = outcyl;
+    *nxthead = outhead;
+    return 0;
+
+} /* end function empty_initialize */
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to read a statement from the control file              */
@@ -3493,6 +3586,7 @@ BYTE            c;                      /* Character work area       */
 /*      ofd     DASD image file descriptor                           */
 /*      volser  Output volume serial number (ASCIIZ)                 */
 /*      devtype Output device type                                   */
+/*      reqcyls Requested device size in cylinders, or zero          */
 /*      heads   Output device number of tracks per cylinder          */
 /*      trklen  Output device virtual track length                   */
 /*      trkbuf  Pointer to output track buffer                       */
@@ -3504,7 +3598,7 @@ BYTE            c;                      /* Character work area       */
 /*-------------------------------------------------------------------*/
 static int
 process_control_file (FILE *cfp, BYTE *cfname, BYTE *ofname, int ofd,
-                BYTE *volser, U16 devtype, int heads,
+                BYTE *volser, U16 devtype, int reqcyls, int heads,
                 int trklen, BYTE *trkbuf, int outcyl, int outhead)
 {
 int             rc;                     /* Return code               */
@@ -3526,7 +3620,6 @@ int             stmtno;                 /* Statement number          */
 int             mintrks;                /* Minimum size of dataset   */
 int             maxtrks;                /* Maximum size of dataset   */
 int             outusedv;               /* Bytes used in track buffer*/
-int             outusedr;               /* Bytes used on real track  */
 int             tracks = 0;             /* Tracks used in dataset    */
 int             numdscb = 0;            /* Number of DSCBs           */
 DATABLK        *firstdscb = NULL;       /* -> First DSCB in chain    */
@@ -3542,9 +3635,9 @@ int             bcyl;                   /* Dataset begin cylinder    */
 int             bhead;                  /* Dataset begin head        */
 int             ecyl;                   /* Dataset end cylinder      */
 int             ehead;                  /* Dataset end head          */
-BYTE            nullblk[12];            /* Data block for EOF record */
 BYTE            volvtoc[5];             /* VTOC begin CCHHR          */
 off_t           seekpos;                /* Seek position for lseek   */
+int             fsflag = 0;             /* 1=Free space message sent */
 
     /* Initialize the DSCB chain with format 4 and format 5 DSCBs */
     rc = build_format4_dscb (&dscbpp, devtype);
@@ -3639,23 +3732,13 @@ off_t           seekpos;                /* Seek position for lseek   */
         default:
         case METHOD_EMPTY:
             /* Create empty dataset */
-            tracks = 0;
-            dirblu = 0;
-            lastrec = 0;
-
-            /* Create the end of file record */
-            datablk = (DATABLK*)nullblk;
-            rc = write_block (ofd, ofname, datablk, 0, 0, devtype,
-                            heads, trklen, mintrks, trkbuf, &outusedv,
-                            &outusedr, &trkbal, &tracks, &outcyl,
-                            &outhead, &lastrec);
+            rc = empty_initialize (ofname, ofd, trkbuf,
+                                    devtype, heads, trklen,
+                                    outcyl, outhead, mintrks,
+                                    dsorg, spdir,
+                                    &dirblu, &lastrec, &trkbal,
+                                    &tracks, &outcyl, &outhead);
             if (rc < 0) return -1;
-
-            /* Write track to output file */
-            rc = write_track (ofd, ofname, heads, trklen, trkbuf,
-                            &outusedv, &tracks, &outcyl, &outhead);
-            if (rc < 0) return -1;
-
             break;
 
         } /* end switch(method) */
@@ -3711,13 +3794,21 @@ off_t           seekpos;                /* Seek position for lseek   */
 
     /* Write the VTOC */
     rc = write_vtoc (numdscb, firstdscb, ofd, ofname, devtype,
-                    heads, trklen, trkbuf, outcyl, outhead,
+                    reqcyls, heads, trklen, trkbuf, outcyl, outhead,
                     &outcyl, &outhead);
     if (rc < 0) return -1;
 
-    /* Write empty tracks up to end of cylinder */
-    while (outhead != 0)
+    /* Write empty tracks up to end of volume */
+    while (outhead != 0 || outcyl < reqcyls)
     {
+        /* Issue free space information message */
+        if (fsflag == 0)
+        {
+            XMINFF (1, "Free space starts at cyl %d head %d\n",
+                    outcyl, outhead);
+            fsflag = 1;
+        }
+
         /* Initialize track buffer with empty track */
         init_track (trklen, trkbuf, outcyl, outhead, &outusedv);
 
@@ -3727,6 +3818,12 @@ off_t           seekpos;                /* Seek position for lseek   */
         if (rc < 0) return -1;
 
     } /* end while */
+
+    if (outcyl > reqcyls && reqcyls != 0)
+    {
+        XMINFF (0, "Warning: Volume exceeds %d cylinders\n",
+                reqcyls);
+    }
 
     XMINFF (0, "Total of %d cylinders written to %s\n",
             outcyl, ofname);
@@ -3782,11 +3879,16 @@ BYTE           *ofname;                 /* -> Output file name       */
 FILE           *cfp;                    /* Control file pointer      */
 int             ofd;                    /* Output file descriptor    */
 BYTE           *volser;                 /* -> Volume serial (ASCIIZ) */
+BYTE           *sdevtp;                 /* -> Device type (ASCIIZ)   */
+BYTE           *sdevsz;                 /* -> Device size (ASCIIZ)   */
 BYTE           *iplfnm;                 /* -> IPL text file or NULL  */
 BYTE            c;                      /* Character work area       */
 BYTE           *trkbuf;                 /* -> Output track buffer    */
 CKDDASD_DEVHDR  devhdr;                 /* Device header             */
 U16             devtype;                /* Output device type        */
+int             devcyls;                /* Default device size (cyls)*/
+int             reqcyls;                /* Requested device size (cyls)
+                                           or 0 = use minimum size   */
 int             outheads;               /* Output device trks/cyl    */
 int             outmaxdl;               /* Output device maximum size
                                            record data length value  */
@@ -3801,11 +3903,11 @@ int             stmtno;                 /* Statement number          */
     /* Display the program identification message */
     fprintf (stdout,
             "Hercules DASD loader program %s "
-            "(c)Copyright Roger Bowler, 1999\n",
+            "(c)Copyright Roger Bowler, 1999-2000\n",
             MSTRING(VERSION));
 
     /* Check the number of arguments */
-    if (argc < 4)
+    if (argc < 3 || argc > 4)
         argexit(4);
 
     /* The first argument is the control file name */
@@ -3818,35 +3920,13 @@ int             stmtno;                 /* Statement number          */
     if (argv[2] == NULL || strlen(argv[2]) == 0)
         argexit(2);
 
-    /* The third argument is the device type */
-    if (argv[3] == NULL || strlen(argv[3]) != 4
-        || sscanf(argv[3], "%hx%c", &devtype, &c) != 1)
-        argexit(3);
-
-    /* The optional fourth argument is the message level */
-    if (argc > 4 && argv[4] != NULL)
+    /* The optional third argument is the message level */
+    if (argc > 3 && argv[3] != NULL)
     {
-        if (sscanf(argv[4], "%u%c", &infolvl, &c) != 1)
-            argexit(4);
+        if (sscanf(argv[3], "%u%c", &infolvl, &c) != 1
+            || infolvl > 5)
+            argexit(3);
     }
-
-    /* Obtain number of heads and maximum data length for device */
-    rc = capacity_calc (devtype, 0, 0, 0, NULL, NULL, NULL,
-                        NULL, NULL, NULL, NULL, NULL,
-                        &outmaxdl, NULL, &outheads, NULL);
-    if (rc < 0)
-    {
-        XMERRF ("Unknown device type: %4.4X\n", devtype);
-        argexit(3);
-    }
-
-    /* Calculate the track size of the virtual device */
-    outtrklv = sizeof(CKDDASD_TRKHDR)
-                + sizeof(CKDDASD_RECHDR) + R0_DATALEN
-                + sizeof(CKDDASD_RECHDR) + outmaxdl
-                + sizeof(eighthexFF);
-    outtrklv += 0x1FF;
-    outtrklv &= 0xFFFFFE00;
 
     /* Open the control file */
     cfp = fopen (cfname, "r");
@@ -3871,15 +3951,61 @@ int             stmtno;                 /* Statement number          */
 
     /* Parse the volume serial statement */
     volser = strtok (stmt, " \t");
+    sdevtp = strtok (NULL, " \t");
+    sdevsz = strtok (NULL, " \t");
     iplfnm = strtok (NULL, " \t");
 
+    /* Validate the volume serial number */
     if (volser == NULL || strlen(volser) == 0 || strlen(volser) > 6)
     {
-        XMERRF ("Invalid volume serial in %s line %d\n",
-                cfname, stmtno);
+        XMERRF ("Volume serial %s in %s line %d is not valid\n",
+                volser, cfname, stmtno);
         return -1;
     }
     string_to_upper (volser);
+
+    /* Validate the device type */
+    if (sdevtp == NULL || strlen(sdevtp) != 4
+        || sscanf(sdevtp, "%hx%c", &devtype, &c) != 1)
+    {
+        XMERRF ("Device type %s in %s line %d is not recognized\n",
+                sdevtp, cfname, stmtno);
+        return -1;
+    }
+
+    /* Obtain number of heads per cylinder, maximum data length per
+       track, and default number of cylinders per device */
+    rc = capacity_calc (devtype, 0, 0, 0, NULL, NULL, NULL,
+                        NULL, NULL, NULL, NULL, NULL,
+                        &outmaxdl, NULL, &outheads, &devcyls);
+    if (rc < 0)
+    {
+        XMERRF ("Unknown device type: %4.4X\n", devtype);
+        argexit(3);
+    }
+
+    /* Use default device size if requested size is omitted or "*" */
+    if (sdevsz == NULL || strcmp(sdevsz, "*") == 0)
+    {
+        reqcyls = devcyls;
+    }
+    else
+    {
+        /* Validate the requested device size in cylinders */
+        if (sscanf(sdevsz, "%u%c", &reqcyls, &c) != 1)
+        {
+            XMERRF ("%s in %s line %d is not a valid cylinder count\n",
+                    sdevsz, cfname, stmtno);
+            return -1;
+        }
+    }
+
+    /* Calculate the track size of the virtual device */
+    outtrklv = sizeof(CKDDASD_TRKHDR)
+                + sizeof(CKDDASD_RECHDR) + R0_DATALEN
+                + sizeof(CKDDASD_RECHDR) + outmaxdl
+                + sizeof(eighthexFF);
+    outtrklv = ROUND_UP(outtrklv,512);
 
     /* Create the output file */
     ofd = open (ofname, O_RDWR | O_CREAT | O_TRUNC,
@@ -3938,8 +4064,8 @@ int             stmtno;                 /* Statement number          */
         return -1;
 
     /* Process the control file to create the datasets */
-    rc = process_control_file (cfp, cfname, ofname, ofd,
-                        volser, devtype, outheads, outtrklv, trkbuf,
+    rc = process_control_file (cfp, cfname, ofname, ofd, volser,
+                        devtype, reqcyls, outheads, outtrklv, trkbuf,
                         outcyl, outhead);
 
     /* Close files and release buffers */

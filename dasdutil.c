@@ -224,7 +224,7 @@ CKDDASD_TRKHDR *trkhdr;                 /* -> Track header           */
     if (rc < 0) return -1;
 
     /* Issue progress message */
-    fprintf (stderr,
+    fprintf (stdout,
             "Reading cyl %d head %d\n",
             cyl, head);
 
@@ -288,7 +288,7 @@ off_t           seekpos;                /* Seek position for lseek   */
         return 0;
 
     /* Issue progress message */
-    fprintf (stderr,
+    fprintf (stdout,
             "Writing cyl %d head %d\n",
             cif->curcyl, cif->curhead);
 
@@ -370,7 +370,7 @@ int             dl;                     /* Data length               */
             break;
 
         /* Issue progress message */
-//      fprintf (stderr,
+//      fprintf (stdout,
 //              "Skipping CCHHR=%2.2X%2.2X%2.2X%2.2X"
 //              "%2.2X KL=%2.2X DL=%2.2X%2.2X\n",
 //              rechdr->cyl[0], rechdr->cyl[1],
@@ -427,7 +427,7 @@ int             dl;                     /* Data length               */
     ecyl = (extent[cext].xtecyl[0] << 8) | extent[cext].xtecyl[1];
     ehead = (extent[cext].xtetrk[0] << 8) | extent[cext].xtetrk[1];
 
-    fprintf (stderr,
+    fprintf (stdout,
             "Searching extent %d begin (%d,%d) end (%d,%d)\n",
             cext, ccyl, chead, ecyl, ehead);
 
@@ -463,7 +463,7 @@ int             dl;                     /* Data length               */
             }
 
             /* Issue progress message */
-//          fprintf (stderr,
+//          fprintf (stdout,
 //                  "Skipping CCHHR=%2.2X%2.2X%2.2X%2.2X"
 //                  "%2.2X KL=%2.2X DL=%2.2X%2.2X\n",
 //                  rechdr->cyl[0], rechdr->cyl[1],
@@ -496,7 +496,7 @@ int             dl;                     /* Data length               */
         ecyl = (extent[cext].xtecyl[0] << 8) | extent[cext].xtecyl[1];
         ehead = (extent[cext].xtetrk[0] << 8) | extent[cext].xtetrk[1];
 
-        fprintf (stderr,
+        fprintf (stdout,
                 "Searching extent %d begin (%d,%d) end (%d,%d)\n",
                 cext, ccyl, chead, ecyl, ehead);
 
@@ -728,7 +728,7 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
     head = (vol1data[13] << 8) | vol1data[14];
     rec = vol1data[15];
 
-    fprintf (stderr,
+    fprintf (stdout,
             "VOLSER=%s VTOC=%4.4X%4.4X%2.2X\n",
              volser, cyl, head, rec);
 
@@ -742,7 +742,7 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
         return -1;
     }
 
-    fprintf (stderr,
+    fprintf (stdout,
             "VTOC start %2.2X%2.2X%2.2X%2.2X "
             "end %2.2X%2.2X%2.2X%2.2X\n",
             f4dscb->ds4vtoce.xtbcyl[0], f4dscb->ds4vtoce.xtbcyl[1],
@@ -763,7 +763,7 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
         return -1;
     }
 
-    fprintf (stderr,
+    fprintf (stdout,
             "DSNAME=%s F1DSCB CCHHR=%4.4X%4.4X%2.2X\n",
             dsnama, cyl, head, rec);
 

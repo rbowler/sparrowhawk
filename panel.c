@@ -15,9 +15,536 @@
 /* Additional credits:                                               */
 /*      breakpoint command contributed by Dan Horak                  */
 /*      devinit command contributed by Jay Maynard                   */
+/*      New Panel Display =NP= contributed by Dutch Owen             */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
+
+/*=NP================================================================*/
+/* Global data for new panel display                                 */
+/*   (Note: all NPD mods are identified by the string =NP=           */
+/*===================================================================*/
+
+#define BLK        30
+#define DGRY       1;30
+#define BLU        34
+#define LBLU       1;34
+#define GRN        32
+#define LGRN       1;32
+#define CYN        36
+#define LCYN       1;36
+#define RED        31
+#define LRED       1;31
+#define PUR        35
+#define LPUR       1;35
+#define YLW        33
+#define LYLW       1;33
+#define LGRY       37
+#define WHT        1;37
+#define BBLK       40
+#define BBLU       44
+#define BGRN       42
+#define BCYN       46
+#define BRED       41
+#define BPUR       45
+#define BBRN       43
+#define BLGRY      47
+#define ANSI_CYN_BLK "\x1B[0;36;40m"
+#define ANSI_WHT_BLU "\x1B[1;37;44m"
+#define ANSI_WHT_BLK "\x1B[1;37;40m"
+#define ANSI_GRN_BLK "\x1B[0;32;40m"
+#define ANSI_RED_BLK "\x1B[1;31;40m"
+#define ANSI_YLW_BLK "\x1B[1;33;40m"
+#define ANSI_GRY_BLU "\x1B[1;30;44m"
+#define ANSI_WHT_BLU "\x1B[1;37;44m"
+#define ANSI_WHT_GRN "\x1B[1;37;42m"
+#define ANSI_GRY_GRN "\x1B[1;30;42m"
+#define ANSI_WHT_RED "\x1B[1;37;41m"
+#define ANSI_GRY_RED "\x1B[1;30;41m"
+#define ANSI_GRY_BLK "\x1B[0m"
+#define ANSI_LGRN_BLK "\x1B[1;32;40m"
+#define ANSI_CLEAR "\x1B[2J"
+#define ANSI_CLEAR_EOL "\x1B[K"
+#define ANSI_CURSOR "\x1B[%d;%dH"
+
+int NPDup = 0;          /* 1 when new panel is up */
+int NPDinit = 0;        /* 1 when new panel is initialized */
+int NPregdisp = 0;      /* which regs are displayed 0=gpr, 1=cr, 2=ar, 3=fpr */
+int NPaddress = 0;      /* Address switches */
+int NPdata = 0;         /* Data switches */
+int NPipl = 0;          /* IPL address switches */
+
+int NPcmd = 0;          /* 1 when command mode for NP is in effect */
+int NPdataentry = 0;    /* 1 when data entry for NP is in progress */
+int NPdevsel = 0;       /* 1 when device selection is in progress */
+char NPpending;         /* Command which is pending data entry */
+char NPentered[128];    /* Data which was entered */
+char NPprompt1[40];     /* Prompts for left and right bottom of screen */
+char NPprompt2[40];
+char NPsel2;            /* Command letter to trigger 2nd phase of dev sel */
+char NPdevice;          /* Which device selected */
+int NPasgn;             /* Index to device being reassigned */
+int NPlastdev;          /* Number of devices */
+int NPdevaddr[24];      /* current device addresses */
+char NPdevstr[16];      /* device - stringed */
+
+/* the following fields are current states, to detect changes and redisplay */
+
+char NPstate[24];       /* Current displayed CPU state */
+int NPregs[16];         /* Current displayed reg values */
+int NPbusy[24];         /* Current busy state of displayed devices */
+int NPpend[24];         /* Current int pending state */
+int NPopen[24];         /* Current open state */
+int NPonline[24];       /* Current online state of devices */
+char NPdevname[24][128]; /* Current name assignments */
+int NPcuraddr;          /* current addr switches */
+int NPcurdata;          /* current data switches */
+int NPcurrg;            /* current register set displayed */
+int NPcuripl;           /* current IPL switches */
+int NPcurpos[2];        /* Cursor position (row, col) */
+char NPcolor[24];       /* color string */
+int NPdatalen;          /* Length of data */
+char NPcurprompt1[40];
+char NPcurprompt2[40];
+U32 NPaaddr;
+
+/*=NP================================================================*/
+/*  Initialize the NP data                                           */
+/*===================================================================*/
+
+static void NP_init()
+{
+    int i;
+
+    for (i = 0; i < 16; i++) {
+        NPregs[i] = -1;
+    }
+    for (i = 0; i < 24; i++) {
+        NPbusy[i] = NPpend[i] = NPopen[i] = 0;
+        NPonline[i] = 0;
+        strcpy(NPdevname[i], "");
+    }
+    strcpy(NPstate, "U");
+    NPcuraddr = NPcurdata = NPcurrg = -1;
+    NPcuripl = -1;
+    NPcurpos[0] = 1;
+    NPcurpos[1] = 1;
+    strcpy(NPcolor, "");
+    strcpy(NPprompt1, "");
+    strcpy(NPprompt2, "");
+    strcpy(NPcurprompt1, "");
+    strcpy(NPcurprompt2, "");
+}
+
+/*=NP================================================================*/
+/*  This draws the initial screen template                           */
+/*===================================================================*/
+
+static void NP_screen(FILE *confp)
+{
+
+    DEVBLK *dev;
+    int p, a;
+    char c[2];
+    char devnam[128];
+
+    fprintf(confp, ANSI_WHT_BLK);
+    fprintf(confp, ANSI_CLEAR);
+    fprintf(confp, ANSI_WHT_BLU);
+    fprintf(confp, ANSI_CURSOR, 1, 1);
+    fprintf(confp, " Hercules        CPU         %7.7s ", ARCHITECTURE_NAME);
+    fprintf(confp, ANSI_CURSOR, 1, 38);
+    fprintf(confp, "|             Peripherals                  ");
+    fprintf(confp, ANSI_GRY_BLK);
+    fprintf(confp, ANSI_CURSOR, 2, 39);
+    fprintf(confp, " # Addr Modl Type Assignment            ");
+    fprintf(confp, ANSI_CURSOR, 4, 9);
+    fprintf(confp, "PSW");
+    fprintf(confp, ANSI_CURSOR, 7, 9);
+    fprintf(confp, "0        1        2        3");
+    fprintf(confp, ANSI_CURSOR, 9, 9);
+    fprintf(confp, "4        5        6        7");
+    fprintf(confp, ANSI_CURSOR, 11, 9);
+    fprintf(confp, "8        9       10       11");
+    fprintf(confp, ANSI_CURSOR, 13, 8);
+    fprintf(confp, "12       13       14       15");
+    fprintf(confp, ANSI_CURSOR, 14, 6);
+    fprintf(confp, "GPR     CR      AR      FPR");
+    fprintf(confp, ANSI_CURSOR, 16, 2);
+    fprintf(confp, "ADDRESS:");
+    fprintf(confp, ANSI_CURSOR, 16, 22);
+    fprintf(confp, "DATA:");
+    fprintf(confp, ANSI_CURSOR, 20, 2);
+    fprintf(confp, "instructions");
+
+
+    p = 3;
+    a = 1;
+    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev) {
+         fprintf(confp, ANSI_CURSOR, p, 40);
+         c[0] = a | 0x40;
+         c[1] = '\0';
+         fprintf(confp, "%s %4.4X %4.4X ", c, dev->devnum, dev->devtype);
+         switch (dev->devtype) {
+             case 0x1052:
+             case 0x3215:
+                 fprintf(confp, "CON  ");
+                 break;
+             case 0x1442:
+             case 0x2501:
+             case 0x3505:
+                 fprintf(confp, "RDR  ");
+                 break;
+             case 0x3525:
+                 fprintf(confp, "PCH  ");
+                 break;
+             case 0x1403:
+             case 0x3211:
+                 fprintf(confp, "PRT  ");
+                 break;
+             case 0x3420:
+             case 0x3480:
+                 fprintf(confp, "TAPE ");
+                 break;
+             case 0x2311:
+             case 0x2314:
+             case 0x3330:
+             case 0x3350:
+             case 0x3380:
+             case 0x3390:
+             case 0x3310:
+             case 0x3370:
+             case 0x9336:
+                 fprintf(confp, "DASD ");
+                 break;
+             case 0x3270:
+                 fprintf(confp, "DSP  ");
+                 break;
+             default:
+                 break;
+         }
+         strcpy(devnam, ((dev->console && dev->connected) ?
+                  (BYTE*)inet_ntoa(dev->ipaddr) : dev->filename));
+         if (dev->ascii)
+             strcat(devnam, " ascii");
+         if (dev->trunc)
+             strcat(devnam, " trunc");
+         fprintf(confp, "%.24s", devnam);
+         strcpy(NPdevname[a - 1], devnam);
+         NPbusy[a - 1] = 0;
+         NPbusy[a - 1] = 0;
+         NPdevaddr[a - 1] = dev->devnum;
+         p++;
+         a++;
+         if (p > 23) break;
+    }
+    NPlastdev = a;
+    fprintf(confp, ANSI_WHT_BLK);
+    for (p = 2; p < 25; p++) {
+        fprintf(confp, ANSI_CURSOR, p, 38);
+        fprintf(confp, "|");
+    }
+    fprintf(confp, ANSI_CURSOR, 18, 1);
+    fprintf(confp, "-------------------------------------");
+    fprintf(confp, ANSI_CURSOR, 24, 1);
+    fprintf(confp, "-------------------------------------");
+    fprintf(confp, ANSI_CURSOR, 24, 39);
+    fprintf(confp, "------------------------------------------");
+    fprintf(confp, ANSI_GRY_BLU);
+    fprintf(confp, ANSI_CURSOR " STO ", 19, 16);
+    fprintf(confp, ANSI_GRY_BLU);
+    fprintf(confp, ANSI_CURSOR " DIS ", 19, 24);
+    fprintf(confp, ANSI_GRY_BLU);
+    fprintf(confp, ANSI_CURSOR " EXT ", 22, 16);
+    fprintf(confp, ANSI_GRY_BLU);
+    fprintf(confp, ANSI_CURSOR " IPL ", 22, 24);
+    fprintf(confp, ANSI_GRY_GRN);
+    fprintf(confp, ANSI_CURSOR " STR ", 22,  2);
+    fprintf(confp, ANSI_GRY_RED);
+    fprintf(confp, ANSI_CURSOR " STP ", 22,  9);
+    fprintf(confp, ANSI_GRY_BLU);
+    fprintf(confp, ANSI_CURSOR " RST ", 19, 32);
+    fprintf(confp, ANSI_GRY_RED);
+    fprintf(confp, ANSI_CURSOR " PWR ", 22, 32);
+    fprintf(confp, ANSI_WHT_BLK);
+    fprintf(confp, ANSI_CURSOR "G", 14, 6);
+    fprintf(confp, ANSI_CURSOR "C", 14, 14);
+    fprintf(confp, ANSI_CURSOR "A", 14, 22);
+    fprintf(confp, ANSI_CURSOR "F", 14, 30);
+    fprintf(confp, ANSI_CURSOR "U", 2, 40);
+    fprintf(confp, ANSI_CURSOR "n", 2, 62);
+    fprintf(confp, ANSI_CURSOR "R", 16, 5);
+    fprintf(confp, ANSI_CURSOR "D", 16, 22);
+    fprintf(confp, ANSI_WHT_BLU);
+    fprintf(confp, ANSI_CURSOR "O", 19, 19);
+    fprintf(confp, ANSI_CURSOR "I", 19, 26);
+    fprintf(confp, ANSI_CURSOR "E", 22, 17);
+    fprintf(confp, ANSI_CURSOR "L", 22, 27);
+    fprintf(confp, ANSI_CURSOR "T", 19, 35);
+    fprintf(confp, ANSI_WHT_GRN);
+    fprintf(confp, ANSI_CURSOR "S", 22, 3);
+    fprintf(confp, ANSI_WHT_RED);
+    fprintf(confp, ANSI_CURSOR "P", 22, 12);
+    fprintf(confp, ANSI_CURSOR "W", 22, 34);
+
+
+}
+
+/*=NP================================================================*/
+/*  This refreshes the screen with new data every cycle              */
+/*===================================================================*/
+
+static void NP_update(FILE *confp, char *cmdline, int cmdoff)
+{
+    int cpu, s, i, r, c;
+    int online, busy, pend, open;
+    DWORD curpsw;
+    int curreg[16];
+    char state[24];
+    char dclear[128];
+    char devnam[128];
+    REGS *regs;
+    BYTE pswmask;                        /* PSW interruption mask     */
+    BYTE pswwait;                        /* PSW wait state bit        */
+    DEVBLK *dev;
+    int p, a;
+    char ch[2];
+    U32 aaddr;
+    int savadr;
+
+    cpu = 0;
+    regs = sysblk.regs + cpu;
+
+    store_psw (&regs->psw, curpsw);
+    pswmask = (curpsw[1] & 0x08) ?
+                    (curpsw[0] & 0x03) : curpsw[0];
+    pswwait = curpsw[1] & 0x02;
+    fprintf (confp, ANSI_YLW_BLK);
+    fprintf (confp, ANSI_CURSOR, 3, 2);
+    fprintf (confp, "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X",
+                    curpsw[0], curpsw[1], curpsw[2], curpsw[3],
+                    curpsw[4], curpsw[5], curpsw[6], curpsw[7]);
+    strcpy(state, (regs->cpustate == CPUSTATE_STOPPING ? "STOPPING" :
+                        regs->cpustate == CPUSTATE_STOPPED ? "STOPPED" :
+                        (pswwait && pswmask == 0) ? "DISABLED WAIT" :
+                        pswwait ? "ENABLED WAIT" :
+                        "RUNNING"));
+    s = 20 + ((17 - strlen(state)) / 2);
+    if (strcmp(state, NPstate) != 0) {
+        fprintf (confp, ANSI_CURSOR, 3, 20);
+        fprintf (confp, "                 ");
+        fprintf (confp, ANSI_CURSOR, 3, s);
+        fprintf (confp, "%s", state);
+        strcpy(NPstate, state);
+    }
+    savadr = NPaddress;
+    for (i = 0; i < 16; i++) {
+        switch (NPregdisp) {
+            case 0:
+                curreg[i] = regs->gpr[i];
+                break;
+            case 1:
+                curreg[i] = regs->cr[i];
+                break;
+            case 2:
+                curreg[i] = regs->ar[i];
+                break;
+            case 3:
+                if (i < 8) {
+                    curreg[i] = regs->fpr[i];
+                } else {
+                    curreg[i] = 0;
+                }
+                break;
+            case 4:
+                aaddr = APPLY_PREFIXING (NPaddress, regs->pxr);
+                if (aaddr >= sysblk.mainsize)
+                    break;
+                curreg[i] = 0;
+                curreg[i] |= ((sysblk.mainstor[aaddr++] << 24) & 0xFF000000);
+                curreg[i] |= ((sysblk.mainstor[aaddr++] << 16) & 0x00FF0000);
+                curreg[i] |= ((sysblk.mainstor[aaddr++] <<  8) & 0x0000FF00);
+                curreg[i] |= ((sysblk.mainstor[aaddr++]) & 0x000000FF);
+                NPaddress += 4;
+                break;
+            default:
+                curreg[i] = 0;
+                break;
+        }
+    }
+    NPaddress = savadr;
+    r = 6;
+    c = 2;
+    for (i = 0; i < 16; i++) {
+        if (curreg[i] != NPregs[i]) {
+            fprintf(confp, ANSI_CURSOR, r, c);
+            fprintf(confp, "%8.8X", curreg[i]);
+            NPregs[i] = curreg[i];
+        }
+        c += 9;
+        if (c > 36) {
+            c = 2;
+            r += 2;
+        }
+    }
+    fprintf(confp, ANSI_CURSOR, 19, 2);
+    fprintf(confp, ANSI_YLW_BLK);
+    fprintf(confp, "%12.12u", (unsigned)regs->instcount);
+    if (NPaddress != NPcuraddr) {
+        fprintf(confp, ANSI_YLW_BLK);
+        fprintf(confp, ANSI_CURSOR, 16, 11);
+        fprintf(confp, "%8.8X", NPaddress);
+        NPcuraddr = NPaddress;
+    }
+    if (NPdata != NPcurdata) {
+        fprintf(confp, ANSI_YLW_BLK);
+        fprintf(confp, ANSI_CURSOR, 16, 29);
+        fprintf(confp, "%8.8X", NPdata);
+        NPcurdata = NPdata;
+    }
+    if (NPregdisp != NPcurrg) {
+        fprintf(confp, ANSI_WHT_BLK);
+        switch (NPcurrg) {
+            case 0:
+                fprintf(confp, ANSI_CURSOR "G" , 14, 6);
+                break;
+            case 1:
+                fprintf(confp, ANSI_CURSOR "C" , 14, 14);
+                break;
+            case 2:
+                fprintf(confp, ANSI_CURSOR "A" , 14, 22);
+                break;
+            case 3:
+                fprintf(confp, ANSI_CURSOR "F" , 14, 30);
+                break;
+            default:
+                break;
+        }
+        NPcurrg = NPregdisp;
+        fprintf(confp, ANSI_YLW_BLK);
+        switch (NPregdisp) {
+            case 0:
+                fprintf(confp, ANSI_CURSOR "G" , 14, 6);
+                break;
+            case 1:
+                fprintf(confp, ANSI_CURSOR "C" , 14, 14);
+                break;
+            case 2:
+                fprintf(confp, ANSI_CURSOR "A" , 14, 22);
+                break;
+            case 3:
+                fprintf(confp, ANSI_CURSOR "F" , 14, 30);
+                break;
+            default:
+                break;
+        }
+    }
+    p = 3;
+    a = 1;
+    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev) {
+         online = busy = pend = open = 0;
+         if ((dev->console && dev->connected) ||
+                  (strlen(dev->filename) > 0))
+                       online = 1;
+         if (dev->busy) busy = 1;
+         if (dev->pending) pend = 1;
+         if (dev->fd > 2) open = 1;
+         if (online != NPonline[a - 1]) {
+              fprintf(confp, ANSI_CURSOR, p, 40);
+              ch[0] = a | 0x40;
+              ch[1] = '\0';
+              if (online) {
+                  fprintf(confp, ANSI_LGRN_BLK);
+              } else {
+                  fprintf(confp, ANSI_GRY_BLK);
+              }
+              fprintf(confp, "%s", ch);
+              NPonline[a - 1] = online;
+         }
+         if (busy != NPbusy[a - 1] || pend != NPpend[a - 1]) {
+              fprintf(confp, ANSI_CURSOR, p, 42);
+              if (busy | pend) {
+                  fprintf(confp, ANSI_YLW_BLK);
+              } else {
+                  fprintf(confp, ANSI_GRY_BLK);
+              }
+              fprintf(confp, "%4.4X", dev->devnum);
+              NPbusy[a - 1] = busy;
+              NPpend[a - 1] = pend;
+         }
+         if (open != NPopen[a - 1]) {
+              fprintf(confp, ANSI_CURSOR, p, 47);
+              if (open) {
+                  fprintf(confp, ANSI_LGRN_BLK);
+              } else {
+                  fprintf(confp, ANSI_GRY_BLK);
+              }
+              fprintf(confp, "%4.4X", dev->devtype);
+              NPopen[a - 1] = open;
+         }
+         strcpy(devnam, ((dev->console && dev->connected) ?
+                  (BYTE*)inet_ntoa(dev->ipaddr) : dev->filename));
+         if (dev->ascii)
+             strcat(devnam, " ascii");
+         if (dev->trunc)
+             strcat(devnam, " trunc");
+         if (strcmp(NPdevname[a - 1], devnam) != 0) {
+             fprintf(confp, ANSI_GRY_BLK);
+             fprintf(confp, ANSI_CURSOR, p, 57);
+             fprintf(confp, "%.24s" ANSI_CLEAR_EOL, devnam);
+             strcpy(NPdevname[a - 1], devnam);
+         }
+         p++;
+         a++;
+         if (p > 23) break;
+    }
+    if (strcmp(NPprompt1, NPcurprompt1) != 0) {
+        strcpy(NPcurprompt1, NPprompt1);
+        if (strlen(NPprompt1) > 0) {
+            s = 2 + ((38 - strlen(NPprompt1)) / 2);
+            fprintf(confp, ANSI_CURSOR, 24, s);
+            fprintf(confp, ANSI_WHT_BLU);
+            fprintf(confp, NPprompt1);
+        } else {
+            fprintf(confp, ANSI_WHT_BLK);
+            fprintf(confp, ANSI_CURSOR, 24, 1);
+            fprintf(confp, "-------------------------------------");
+        }
+    }
+    if (strcmp(NPprompt2, NPcurprompt2) != 0) {
+        strcpy(NPcurprompt2, NPprompt2);
+        if (strlen(NPprompt2) > 0) {
+            s = 42 + ((38 - strlen(NPprompt2)) / 2);
+            fprintf(confp, ANSI_CURSOR, 24, s);
+            fprintf(confp, ANSI_WHT_BLU);
+            fprintf(confp, NPprompt2);
+        } else {
+            fprintf(confp, ANSI_WHT_BLK);
+            fprintf(confp, ANSI_CURSOR, 24, 39);
+            fprintf(confp, "------------------------------------------");
+        }
+    }
+    if (NPdataentry) {
+        fprintf(confp, ANSI_CURSOR, NPcurpos[0], NPcurpos[1]);
+        if (strlen(NPcolor) > 0) {
+            fprintf(confp, NPcolor);
+        }
+        strcpy(dclear, "");
+        for (i = 0; i < NPdatalen; i++) dclear[i] = ' ';
+        dclear[i] = '\0';
+        fprintf(confp, dclear);
+        fprintf(confp, ANSI_CURSOR, NPcurpos[0], NPcurpos[1]);
+        for (i = 0; i < cmdoff; i++) putc (cmdline[i], confp);
+    } else {
+            fprintf(confp, ANSI_CURSOR, 24, 80);
+            NPcurpos[0] = 24;
+            NPcurpos[1] = 80;
+   }
+}
+
+/* ==============   End of the main NP block of code    =============*/
+
+
 
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
@@ -468,7 +995,7 @@ BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
             "loadparm xxxxxxxx=set IPL parameter, ipl devn=IPL\n"
             "devinit devn arg [arg...] = reinitialize device\n"
             "devlist=list devices\n"
-            "quit/exit=terminate\n");
+            "quit/exit=terminate, Esc=switch to alternate panel\n");
         return NULL;
     }
 
@@ -1109,6 +1636,7 @@ struct  timeval tv;                     /* Select timeout structure  */
 
     /* Clear the screen */
     fprintf (confp,
+            ANSI_WHT_BLK
             ANSI_ERASE_SCREEN);
     redraw_msgs = 1;
     redraw_cmd = 1;
@@ -1155,6 +1683,199 @@ struct  timeval tv;                     /* Select timeout structure  */
                 break;
             }
             kbbuf[kblen] = '\0';
+
+            /* =NP= : Intercept NP commands & process */
+
+            if (NPDup == 1) {
+                if (NPdevsel == 1) {      /* We are in device select mode */
+                    NPdevsel = 0;
+                    NPdevice = kbbuf[0];  /* save the device selected */
+                    kbbuf[0] = NPsel2;    /* setup for 2nd part of rtn */
+                }
+                if (NPdataentry == 0 && kblen == 1) {   /* We are in command mode */
+                    switch(kbbuf[0]) {
+                        case 0x1b:                  /* ESC */
+                            NPDup = 0;
+                            break;
+                        case 'S':                   /* START */
+                        case 's':
+                            create_thread (&cmdtid, &sysblk.detattr,
+                                        panel_command, "start");
+                            break;
+                        case 'P':                   /* STOP */
+                        case 'p':
+                            create_thread (&cmdtid, &sysblk.detattr,
+                                        panel_command, "stop");
+                            break;
+                        case 'T':                   /* RESTART */
+                        case 't':
+                            create_thread (&cmdtid, &sysblk.detattr,
+                                        panel_command, "restart");
+                            break;
+                        case 'E':                   /* Ext int */
+                        case 'e':
+                            create_thread (&cmdtid, &sysblk.detattr,
+                                        panel_command, "ext");
+                            redraw_status = 1;
+                            break;
+                        case 'O':                   /* Store */
+                        case 'o':
+                            NPaaddr = APPLY_PREFIXING (NPaddress, regs->pxr);
+                            if (NPaaddr >= sysblk.mainsize)
+                                break;
+                            sysblk.mainstor[NPaaddr] = 0;
+                            sysblk.mainstor[NPaaddr++] |= ((NPdata >> 24) & 0xFF);
+                            sysblk.mainstor[NPaaddr] = 0;
+                            sysblk.mainstor[NPaaddr++] |= ((NPdata >> 16) & 0xFF);
+                            sysblk.mainstor[NPaaddr] = 0;
+                            sysblk.mainstor[NPaaddr++] |= ((NPdata >>  8) & 0xFF);
+                            sysblk.mainstor[NPaaddr] = 0;
+                            sysblk.mainstor[NPaaddr++] |= ((NPdata) & 0xFF);
+                            redraw_status = 1;
+                            break;
+                        case 'I':                   /* Display */
+                        case 'i':
+                            NPregdisp = 4;
+                            redraw_status = 1;
+                            break;
+                        case 'g':                   /* display GPR */
+                        case 'G':
+                            NPregdisp = 0;
+                            redraw_status = 1;
+                            break;
+                        case 'a':                   /* Display AR */
+                        case 'A':
+                            NPregdisp = 2;
+                            redraw_status = 1;
+                            break;
+                        case 'c':
+                        case 'C':                   /* Case CR */
+                            NPregdisp = 1;
+                            redraw_status = 1;
+                            break;
+                        case 'f':                   /* Case FPR */
+                        case 'F':
+                            NPregdisp = 3;
+                            redraw_status = 1;
+                            break;
+                        case 'r':                   /* Enter address */
+                        case 'R':
+                            NPdataentry = 1;
+                            NPpending = 'r';
+                            NPcurpos[0] = 16;
+                            NPcurpos[1] = 11;
+                            NPdatalen = 8;
+                            strcpy(NPcolor, ANSI_WHT_BLU);
+                            strcpy(NPentered, "");
+                            strcpy(NPprompt1, "Enter Address Switches");
+                            redraw_status = 1;
+                            break;
+                        case 'd':                   /* Enter data */
+                        case 'D':
+                            NPdataentry = 1;
+                            NPpending = 'd';
+                            NPcurpos[0] = 16;
+                            NPcurpos[1] = 29;
+                            NPdatalen = 8;
+                            strcpy(NPcolor, ANSI_WHT_BLU);
+                            strcpy(NPentered, "");
+                            strcpy(NPprompt1, "Enter Data Switches");
+                            redraw_status = 1;
+                            break;
+                        case 'l':                   /* IPL */
+                        case 'L':
+                            NPdevsel = 1;
+                            NPsel2 = 1;
+                            strcpy(NPprompt2, "Select Device for IPL");
+                            redraw_status = 1;
+                            break;
+                        case 1:                     /* IPL - 2nd part */
+                            i = (NPdevice & 0x1F) - 1;
+                            if (i < 0 || i > NPlastdev) {
+                                strcpy(NPprompt2, "");
+                                redraw_status = 1;
+                                break;
+                            }
+                            sprintf(NPdevstr, "%x", NPdevaddr[i]);
+                            strcpy(cmdline, "ipl ");
+                            strcat(cmdline, NPdevstr);
+                            create_thread (&cmdtid, &sysblk.detattr,
+                                        panel_command, cmdline);
+                            strcpy(NPprompt2, "");
+                            redraw_status = 1;
+                            break;
+                        case 'u':                   /* Device interrupt */
+                        case 'U':
+                            NPdevsel = 1;
+                            NPsel2 = 2;
+                            strcpy(NPprompt2, "Select Device for Interrupt");
+                            redraw_status = 1;
+                            break;
+                        case 2:                     /* Device int: part 2 */
+                            i = (NPdevice & 0x1F) - 1;
+                            if (i < 0 || i > NPlastdev) {
+                                strcpy(NPprompt2, "");
+                                redraw_status = 1;
+                                break;
+                            }
+                            sprintf(NPdevstr, "%x", NPdevaddr[i]);
+                            strcpy(cmdline, "i ");
+                            strcat(cmdline, NPdevstr);
+                            create_thread (&cmdtid, &sysblk.detattr,
+                                        panel_command, cmdline);
+                            strcpy(NPprompt2, "");
+                            redraw_status = 1;
+                            break;
+                        case 'n':                   /* Device Assignment */
+                        case 'N':
+                            NPdevsel = 1;
+                            NPsel2 = 3;
+                            strcpy(NPprompt2, "Select Device to Reassign");
+                            redraw_status = 1;
+                            break;
+                        case 3:                     /* Device asgn: part 2 */
+                            i = NPasgn = (NPdevice & 0x1F) - 1;
+                            if (i < 0 || i > NPlastdev) {
+                                strcpy(NPprompt2, "");
+                                redraw_status = 1;
+                                break;
+                            }
+                            NPdataentry = 1;
+                            NPpending = 'n';
+                            NPcurpos[0] = 3 + i;
+                            NPcurpos[1] = 57;
+                            NPdatalen = 24;
+                            strcpy(NPcolor, ANSI_WHT_BLU);
+                            strcpy(NPentered, "");
+                            strcpy(NPprompt2, "New Name, or [enter] to Reload");
+                            redraw_status = 1;
+                            break;
+                        case 'W':                   /* POWER */
+                        case 'w':
+                            NPdevsel = 1;
+                            NPsel2 = 4;
+                            strcpy(NPprompt1, "Confirm Powerdown Y or N");
+                            redraw_status = 1;
+                            break;
+                        case 4:                     /* IPL - 2nd part */
+                            if (NPdevice == 'y' || NPdevice == 'Y')
+                                create_thread (&cmdtid, &sysblk.detattr,
+                                        panel_command, "quit");
+                            strcpy(NPprompt1, "");
+                            redraw_status = 1;
+                            break;
+                        default:
+                            break;
+                    }
+                    NPcmd = 1;
+                } else {  /* We are in data entry mode */
+                    NPcmd = 0;
+                }
+                if (NPcmd == 1)
+                    kblen = 0;                  /* don't process as command */
+            }
+
+            /* =END= */
 
             /* Process characters in the keyboard buffer */
             for (i = 0; i < kblen; )
@@ -1216,9 +1937,15 @@ struct  timeval tv;                     /* Select timeout structure  */
                     break;
                 }
 
-                /* Ignore any other escape sequence */
+                /* Process escape key */
                 if (kbbuf[i] == '\x1B')
+                {
+                    /* =NP= : Switch to new panel display */
+                    NP_init();
+                    NPDup = 1;
+                    /* =END= */
                     break;
+                }
 
                 /* Process backspace character */
                 if (kbbuf[i] == '\b' || kbbuf[i] == '\x7F'
@@ -1234,8 +1961,46 @@ struct  timeval tv;                     /* Select timeout structure  */
                 if (kbbuf[i] == '\n')
                 {
                     cmdline[cmdoff] = '\0';
-                    create_thread (&cmdtid, &sysblk.detattr,
+                    /* =NP= create_thread replaced with: */
+                    if (NPDup == 0) {
+                        create_thread (&cmdtid, &sysblk.detattr,
                                 panel_command, cmdline);
+                    } else {
+                        NPdataentry = 0;
+                        NPcurpos[0] = 24;
+                        NPcurpos[1] = 80;
+                        strcpy(NPcolor, "");
+                        switch (NPpending) {
+                            case 'r':
+                                sscanf(cmdline, "%x", &NPaddress);
+                                NPcuraddr = -1;
+                                strcpy(NPprompt1, "");
+                                break;
+                            case 'd':
+                                sscanf(cmdline, "%x", &NPdata);
+                                NPcurdata = -1;
+                                strcpy(NPprompt1, "");
+                                break;
+                            case 'n':
+                                if (strlen(cmdline) < 1) {
+                                    strcpy(cmdline, NPdevname[NPasgn]);
+                                }
+                                strcpy(NPdevname[NPasgn], "");
+                                strcpy(NPentered, "devinit ");
+                                sprintf(NPdevstr, "%x", NPdevaddr[NPasgn]);
+                                strcat(NPentered, NPdevstr);
+                                strcat(NPentered, " ");
+                                strcat(NPentered, cmdline);
+                                create_thread (&cmdtid, &sysblk.detattr,
+                                       panel_command, NPentered);
+                                strcpy(NPprompt2, "");
+                                break;
+                            default:
+                                break;
+                        }
+                        redraw_status = 1;
+                    }
+                    /* =END= */
                     cmdoff = 0;
                     redraw_cmd = 1;
                     break;
@@ -1329,6 +2094,19 @@ struct  timeval tv;                     /* Select timeout structure  */
 
         }
 
+        /* =NP= : Reinit traditional panel if NP is down */
+
+        if (NPDup == 0 && NPDinit == 1) {
+            NPDinit = 0;
+            redraw_msgs = 1;
+            redraw_status = 1;
+            redraw_cmd = 1;
+            fprintf(confp, ANSI_WHT_BLK);
+            fprintf(confp, ANSI_ERASE_SCREEN);
+        }
+
+        /* =END= */
+
         /* Obtain the PSW for target CPU */
         store_psw (&regs->psw, curpsw);
 
@@ -1345,38 +2123,45 @@ struct  timeval tv;                     /* Select timeout structure  */
             prvstate = regs->cpustate;
         }
 
-        /* Rewrite the screen if display update indicators are set */
-        if (redraw_msgs)
-        {
-            /* Display messages in scrolling area */
-            for (i=0; i < NUM_LINES && firstmsgn + i < nummsgs; i++)
+        /* =NP= : Display the screen - traditional or NP */
+        /*        Note: this is the only code block modified rather */
+        /*        than inserted.  It makes the block of 3 ifs in the */
+        /*        original code dependent on NPDup == 0, and inserts */
+        /*        the NP display as an else after those ifs */
+
+        if (NPDup == 0) {
+            /* Rewrite the screen if display update indicators are set */
+            if (redraw_msgs)
             {
-                n = (nummsgs < MAX_MSGS) ? 0 : msgslot;
-                n += firstmsgn + i;
-                if (n >= MAX_MSGS) n -= MAX_MSGS;
-                fprintf (confp,
-                        ANSI_POSITION_CURSOR
-                        ANSI_WHITE_BLACK,
-                        i+1, 1);
-                fwrite (msgbuf + (n * MSG_SIZE), MSG_SIZE, 1, confp);
-            }
+                /* Display messages in scrolling area */
+                for (i=0; i < NUM_LINES && firstmsgn + i < nummsgs; i++)
+                {
+                    n = (nummsgs < MAX_MSGS) ? 0 : msgslot;
+                    n += firstmsgn + i;
+                    if (n >= MAX_MSGS) n -= MAX_MSGS;
+                    fprintf (confp,
+                            ANSI_POSITION_CURSOR
+                            ANSI_WHITE_BLACK,
+                            i+1, 1);
+                    fwrite (msgbuf + (n * MSG_SIZE), MSG_SIZE, 1, confp);
+                }
 
-            /* Display the scroll indicators */
-            if (firstmsgn > 0)
-                fprintf (confp, ANSI_ROW1_COL80 "+");
-            if (firstmsgn + i < nummsgs)
-                fprintf (confp, ANSI_ROW22_COL80 "V");
-        } /* end if(redraw_msgs) */
+                /* Display the scroll indicators */
+                if (firstmsgn > 0)
+                    fprintf (confp, ANSI_ROW1_COL80 "+");
+                if (firstmsgn + i < nummsgs)
+                    fprintf (confp, ANSI_ROW22_COL80 "V");
+            } /* end if(redraw_msgs) */
 
-        if (redraw_status)
-        {
-            /* Isolate the PSW interruption mask and wait bit */
-            pswmask = (curpsw[1] & 0x08) ?
+            if (redraw_status)
+            {
+                /* Isolate the PSW interruption mask and wait bit */
+                pswmask = (curpsw[1] & 0x08) ?
                             (curpsw[0] & 0x03) : curpsw[0];
-            pswwait = curpsw[1] & 0x02;
+                pswwait = curpsw[1] & 0x02;
 
-            /* Display the PSW and instruction counter for CPU 0 */
-            fprintf (confp,
+                /* Display the PSW and instruction counter for CPU 0 */
+                fprintf (confp,
                     ANSI_ROW24_COL1
                     ANSI_YELLOW_RED
                     "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X"
@@ -1390,37 +2175,55 @@ struct  timeval tv;                     /* Select timeout structure  */
                         pswwait ? "ENABLED WAIT" :
                         "RUNNING"),
                     regs->instcount);
-        } /* end if(redraw_status) */
+            } /* end if(redraw_status) */
 
-        if (redraw_cmd)
-        {
-            /* Display the command line */
-            fprintf (confp,
+            if (redraw_cmd)
+            {
+                /* Display the command line */
+                fprintf (confp,
                     ANSI_ROW23_COL1
                     ANSI_WHITE_BLACK
                     ANSI_HIGH_INTENSITY
                     "Command ==> "
                     ANSI_WHITE_BLACK);
 
-            for (i = 0; i < cmdoff; i++)
-                putc (cmdline[i], confp);
+                for (i = 0; i < cmdoff; i++)
+                    putc (cmdline[i], confp);
 
-            fprintf (confp,
+                fprintf (confp,
                     ANSI_ERASE_EOL);
 
-        } /* end if(redraw_cmd) */
+            } /* end if(redraw_cmd) */
 
-        /* Flush screen buffer and reset display update indicators */
-        if (redraw_msgs || redraw_cmd || redraw_status)
-        {
-            fprintf (confp,
+            /* Flush screen buffer and reset display update indicators */
+            if (redraw_msgs || redraw_cmd || redraw_status)
+            {
+                fprintf (confp,
                     ANSI_POSITION_CURSOR,
                     23, 13+cmdoff);
-            fflush (confp);
-            redraw_msgs = 0;
-            redraw_cmd = 0;
-            redraw_status = 0;
+                fflush (confp);
+                redraw_msgs = 0;
+                redraw_cmd = 0;
+                redraw_status = 0;
+            }
+
+        } else {
+
+            if (redraw_status || (NPDinit == 0 && NPDup == 1)
+                   || (redraw_cmd && NPdataentry == 1)) {
+                if (NPDinit == 0) {
+                    NPDinit = 1;
+                    NP_screen(confp);
+                }
+                NP_update(confp, cmdline, cmdoff);
+                fflush (confp);
+                redraw_msgs = 0;
+                redraw_cmd = 0;
+                redraw_status = 0;
+            }
         }
+
+    /* =END= */
 
     } /* end while */
 
