@@ -326,27 +326,33 @@ auth_addr_excp:
 } /* end function authorize_asn */
 
 /*-------------------------------------------------------------------*/
-/* Translate ALET value to produce segment table designation         */
+/* Translate an ALET to produce the corresponding ASTE               */
+/*                                                                   */
+/* This routine performs both ordinary ART (as used by DAT when      */
+/* operating in access register mode, and by the TAR instruction),   */
+/* and special ART (as used by the BSG instruction).  The caller     */
+/* is assumed to have already eliminated the special cases of ALET   */
+/* values 0 and 1 (which have different meanings depending on        */
+/* whether the caller is DAT, TAR, or BSG).                          */
 /*                                                                   */
 /* Input:                                                            */
-/*      arn     Access register number containing ALET (AR0 is       */
-/*              treated as containing ALET value 0 except when       */
-/*              processing the Test Access instruction in which      */
-/*              case the actual value in AR0 is used)                */
+/*      alet    ALET value                                           */
 /*      eax     The authorization index (normally obtained from      */
-/*              CR8, but obtained from R2 for Test Access)           */
-/*      regs    Pointer to the CPU register context                  */
+/*              CR8; obtained from R2 for TAR; not used for BSG)     */
 /*      acctype Type of access requested: READ, WRITE, INSTFETCH,    */
-/*              TAR, LRA, or TPROT                                   */
-/*      stdptr  Pointer to word to receive segment table designation */
+/*              TAR, LRA, TPROT, or BSG                              */
+/*      regs    Pointer to the CPU register context                  */
+/*      asteo   Pointer to word to receive ASTE origin address       */
+/*      aste    Pointer to 16-word area to receive a copy of the     */
+/*              ASN second table entry associated with the ALET      */
 /*      prot    Pointer to field to receive protection indicator     */
 /*                                                                   */
 /* Output:                                                           */
-/*      If successful, the segment table designation corresponding   */
-/*      to the ALET value will be stored into the word pointed to    */
-/*      by stdptr, and the return value is zero; the protection      */
-/*      indicator is set to 1 if access-list controlled protection   */
-/*      was detected, otherwise it remains unchanged.                */
+/*      If successful, the ASTE is copied into the 16-word area,     */
+/*      the real address of the ASTE is stored into the word pointed */
+/*      word pointed to by asteop, and the return value is zero;     */
+/*      the protection indicator is set to 1 if the fetch-only bit   */
+/*      in the ALE is set, otherwise it remains unchanged.           */
 /*                                                                   */
 /*      If unsuccessful, the return value is a non-zero exception    */
 /*      code in the range X'0028' through X'002D' (this is to allow  */
@@ -357,124 +363,109 @@ auth_addr_excp:
 /*      translation specification exceptions, in which case the      */
 /*      function does not return.                                    */
 /*-------------------------------------------------------------------*/
-U16 translate_alet (int arn, U16 eax, REGS *regs, int acctype,
-                    U32 *stdptr, int *prot)
+U16 translate_alet (U32 alet, U16 eax, int acctype, REGS *regs,
+                    U32 *asteo, U32 aste[], int *prot)
 {
-U32     std;                            /* Segment table designation */
-U32     alet;                           /* Address list entry token  */
 U32     cb;                             /* DUCT or PASTE address     */
 U32     ald;                            /* Access-list designation   */
 U32     alo;                            /* Access-list origin        */
 int     all;                            /* Access-list length        */
 U32     ale[4];                         /* Access-list entry         */
-U32     aste_addr;                      /* Address of ASTE           */
-U32     aste[16];                       /* ASN second table entry    */
+U32     aste_addr;                      /* Real address of ASTE      */
+U32     abs;                            /* Absolute address          */
 int     i;                              /* Array subscript           */
 int     code;                           /* Exception code            */
 
-    /* [5.8.4.1] Select the access-list-entry token */
-    alet = (arn == 0 && acctype != ACCTYPE_TAR) ? 0 :
-                regs->ar[arn];
+    /* [5.8.4.3] Check the reserved bits in the ALET */
+    if ( alet & ALET_RESV )
+        goto alet_spec_excp;
 
-    /* Use the ALET to determine the segment table origin */
-    switch (alet) {
+    /* [5.8.4.4] Obtain the effective access-list designation */
 
-    case ALET_PRIMARY:
-        /* [5.8.4.2] Obtain the primary segment table designation */
-        std = regs->cr[1];
-        break;
+    /* Obtain the real address of the control block containing
+       the effective access-list designation.  This is either
+       the Primary ASTE or the DUCT */
+    cb = (alet & ALET_PRI_LIST) ?
+            regs->cr[5] & CR5_PASTEO :
+            regs->cr[2] & CR2_DUCTO;
 
-    case ALET_SECONDARY:
-        /* [5.8.4.2] Obtain the secondary segment table designation */
-        std = regs->cr[7];
-        break;
+    /* Addressing exception if outside main storage */
+    if (cb >= sysblk.mainsize)
+        goto alet_addr_excp;
 
-    default:
-        /* [5.8.4.3] Check the reserved bits in the ALET */
-        if ( alet & ALET_RESV )
-            goto alet_spec_excp;
+    /* Load the effective access-list designation (ALD) from
+       offset 16 in the control block.  All four bytes must be
+       fetched concurrently as observed by other CPUs.  Note
+       that the DUCT and the PASTE cannot cross a page boundary */
+    cb = APPLY_PREFIXING (cb, regs->pxr);
+    ald = fetch_fullword_absolute (cb+16);
 
-        /* [5.8.4.4] Obtain the effective access-list designation */
+    /* [5.8.4.5] Access-list lookup */
 
-        /* Obtain the real address of the control block containing
-           the effective access-list designation.  This is either
-           the Primary ASTE or the DUCT */
-        cb = (alet & ALET_PRI_LIST) ?
-                regs->cr[5] & CR5_PASTEO :
-                regs->cr[2] & CR2_DUCTO;
+    /* Isolate the access-list origin and access-list length */
+    alo = ald & ALD_ALO;
+    all = ald & ALD_ALL;
 
-        /* Addressing exception if outside main storage */
-        if (cb >= sysblk.mainsize)
-            goto alet_addr_excp;
+    /* Check that the ALEN does not exceed the ALL */
+    if (((alet & ALET_ALEN) >> ALD_ALL_SHIFT) > all)
+        goto alen_tran_excp;
 
-        /* Load the effective access-list designation (ALD) from
-           offset 16 in the control block.  All four bytes must be
-           fetched concurrently as observed by other CPUs */
-        cb = APPLY_PREFIXING (cb, regs->pxr);
-        ald = fetch_fullword_absolute (cb+16);
+    /* Add the ALEN x 16 to the access list origin */
+    alo += (alet & ALET_ALEN) << 4;
 
-        /* [5.8.4.5] Access-list lookup */
+    /* Addressing exception if outside main storage */
+    if (alo >= sysblk.mainsize)
+        goto alet_addr_excp;
 
-        /* Isolate the access-list origin and access-list length */
-        alo = ald & ALD_ALO;
-        all = ald & ALD_ALL;
+    /* Fetch the 16-byte access list entry from absolute storage.
+       Each fullword of the ALE must be fetched concurrently as
+       observed by other CPUs */
+    alo = APPLY_PREFIXING (alo, regs->pxr);
+    for (i = 0; i < 4; i++)
+    {
+        ale[i] = fetch_fullword_absolute (alo);
+        alo += 4;
+    }
 
-        /* Check that the ALEN does not exceed the ALL */
-        if (((alet & ALET_ALEN) >> ALD_ALL_SHIFT) > all)
-            goto alen_tran_excp;
+    /* Check the ALEN invalid bit in the ALE */
+    if (ale[0] & ALE0_INVALID)
+        goto alen_tran_excp;
 
-        /* Add the ALEN x 16 to the access list origin */
-        alo += (alet & ALET_ALEN) << 4;
+    /* For ordinary ART (but not for special ART),
+       compare the ALE sequence number with the ALET */
+    if (acctype != ACCTYPE_BSG
+        && (ale[0] & ALE0_ALESN) != (alet & ALET_ALESN))
+        goto ale_seq_excp;
 
-        /* Addressing exception if outside main storage */
-        if (alo >= sysblk.mainsize)
-            goto alet_addr_excp;
+    /* [5.8.4.6] Locate the ASN-second-table entry */
+    aste_addr = ale[2] & ALE2_ASTE;
 
-        /* Fetch the 16-byte access list entry from absolute storage.
-           Each fullword of the ALE must be fetched concurrently as
-           observed by other CPUs */
-        alo = APPLY_PREFIXING (alo, regs->pxr);
-        for (i = 0; i < 4; i++)
-        {
-            ale[i] = fetch_fullword_absolute (alo);
-            alo += 4;
-        }
+    /* Addressing exception if ASTE is outside main storage */
+    abs = APPLY_PREFIXING (aste_addr, regs->pxr);
+    if (abs >= sysblk.mainsize)
+        goto alet_addr_excp;
 
-        /* Check the ALEN invalid bit in the ALE */
-        if (ale[0] & ALE0_INVALID)
-            goto alen_tran_excp;
+    /* Fetch the 64-byte ASN second table entry from real storage.
+       Each fullword of the ASTE must be fetched concurrently as
+       observed by other CPUs.  ASTE cannot cross a page boundary */
+    for (i = 0; i < 16; i++)
+    {
+        aste[i] = fetch_fullword_absolute (abs);
+        abs += 4;
+    }
 
-        /* Compare the ALE sequence number with the ALET */
-        if ((ale[0] & ALE0_ALESN) != (alet & ALET_ALESN))
-            goto ale_seq_excp;
+    /* Check the ASX invalid bit in the ASTE */
+    if (aste[0] & ASTE0_INVALID)
+        goto aste_vald_excp;
 
-        /* [5.8.4.6] Locate the ASN-second-table entry */
-        aste_addr = ale[2] & ALE2_ASTE;
+    /* Compare the ASTE sequence number with the ALE */
+    if ((aste[5] & ASTE5_ASTESN) != (ale[3] & ALE3_ASTESN))
+        goto aste_seq_excp;
 
-        /* Addressing exception if ASTE is outside real storage */
-        if (aste_addr >= sysblk.mainsize)
-            goto alet_addr_excp;
-
-        /* Fetch the 64-byte ASN second table entry from real storage.
-           Each fullword of the ASTE must be fetched concurrently as
-           observed by other CPUs */
-        aste_addr = APPLY_PREFIXING (aste_addr, regs->pxr);
-        for (i = 0; i < 16; i++)
-        {
-            aste[i] = fetch_fullword_absolute (aste_addr);
-            aste_addr += 4;
-        }
-
-        /* Check the ASX invalid bit in the ASTE */
-        if (aste[0] & ASTE0_INVALID)
-            goto aste_vald_excp;
-
-        /* Compare the ASTE sequence number with the ALE */
-        if ((aste[5] & ASTE5_ASTESN) != (ale[3] & ALE3_ASTESN))
-            goto aste_seq_excp;
-
-        /* [5.8.4.7] Authorize the use of the access-list entry */
-
+    /* [5.8.4.7] For ordinary ART (but not for special ART),
+       authorize the use of the access-list entry */
+    if (acctype != ACCTYPE_BSG)
+    {
         /* If ALE private bit is zero, or the ALE AX equals the
            EAX, then authorization succeeds.  Otherwise perform
            the extended authorization process. */
@@ -485,9 +476,9 @@ int     code;                           /* Exception code            */
             if ((aste[0] & ASTE0_RESV) || (aste[1] & ASTE1_RESV)
                 || ((aste[0] & ASTE0_BASE)
 #ifdef FEATURE_SUBSPACE_GROUP
-                        && (regs->cr[0] & CR0_ASF)
+                        && (regs->cr[0] & CR0_ASF) == 0
 #endif /*FEATURE_SUBSPACE_GROUP*/
-                    ))
+                   ))
                 goto alet_asn_tran_spec_excp;
 
             /* Perform extended authorization */
@@ -495,17 +486,14 @@ int     code;                           /* Exception code            */
                 goto ext_auth_excp;
         }
 
-        /* [5.8.4.8] Check for access-list controlled protection */
-        if (ale[0] & ALE0_FETCHONLY)
-            *prot = 1;
+    } /* end if(!ACCTYPE_BSG) */
 
-        /* [5.8.4.9] Obtain the STD from word 2 of the ASTE */
-        std = aste[2];
+    /* [5.8.4.8] Check for access-list controlled protection */
+    if (ale[0] & ALE0_FETCHONLY)
+        *prot = 1;
 
-    } /* end switch(alet) */
-
-    /* Set segment table designation and return exception code zero */
-    *stdptr = std;
+    /* Return the ASTE origin address */
+    *asteo = aste_addr;
     return 0;
 
 /* Conditions which always cause program check */
@@ -616,6 +604,10 @@ U32     pto;                            /* Page table origin         */
 int     ptl;                            /* Page table length         */
 U32     pte;                            /* Page table entry          */
 TLBE   *tlbp;                           /* -> TLB entry              */
+U32     alet;                           /* Access list entry token   */
+U32     asteo;                          /* Real address of ASTE      */
+U32     aste[16];                       /* ASN second table entry    */
+U16     eax;                            /* Authorization index       */
 
     /* [3.11.3.1] Load the effective segment table descriptor */
     if (acctype == ACCTYPE_INSTFETCH)
@@ -633,11 +625,40 @@ TLBE   *tlbp;                           /* -> TLB entry              */
         std = regs->cr[13];
     else /* ACCESS_REGISTER_MODE */
     {
-        *xcode = translate_alet (arn, ((regs->cr[8] & CR8_EAX) >> 16),
-                                regs, acctype, &std, &protect);
-        if (*xcode != 0)
-            goto tran_alet_excp;
-    }
+        /* [5.8.4.1] Select the access-list-entry token */
+        alet = (arn == 0) ? 0 : regs->ar[arn];
+
+        /* Use the ALET to determine the segment table origin */
+        switch (alet) {
+
+        case ALET_PRIMARY:
+            /* [5.8.4.2] Obtain primary segment table designation */
+            std = regs->cr[1];
+            break;
+
+        case ALET_SECONDARY:
+            /* [5.8.4.2] Obtain secondary segment table designation */
+            std = regs->cr[7];
+            break;
+
+        default:
+            /* Extract the extended AX from CR8 bits 0-15 */
+            eax = (regs->cr[8] & CR8_EAX) >> 16;
+
+            /* [5.8.4.3] Perform ALET translation to obtain ASTE */
+            *xcode = translate_alet (alet, eax, acctype, regs,
+                                    &asteo, aste, &protect);
+
+            /* Exit if ALET translation error */
+            if (*xcode != 0)
+                goto tran_alet_excp;
+
+            /* [5.8.4.9] Obtain the STD from word 2 of the ASTE */
+            std = aste[2];
+
+        } /* end switch(alet) */
+
+    } /* end if(ACCESS_REGISTER_MODE) */
 
     /* Extract the private space bit from segment table descriptor */
     private = std & STD_PRIVATE;

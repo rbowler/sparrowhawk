@@ -182,16 +182,20 @@ U16     xcode;                          /* Exception code            */
         b1 = inst[2] >> 4;
         addr1 = ((inst[2] & 0x0F) << 8) | inst[3];
         if (b1 != 0)
-            addr1 += regs->gpr[b1] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        {
+            addr1 += regs->gpr[b1];
+            addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        }
 
         /* Apply indexing for RX instructions */
         if ((opcode >= 0x40 && opcode <= 0x7F) || opcode == 0xB1)
         {
             x1 = inst[1] & 0x0F;
             if (x1 != 0)
-                addr1 += regs->gpr[x1] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            {
+                addr1 += regs->gpr[x1];
+                addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            }
         }
 
         /* Display storage at first storage operand location */
@@ -213,8 +217,10 @@ U16     xcode;                          /* Exception code            */
         b2 = inst[4] >> 4;
         addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
         if (b2 != 0)
-            addr2 += regs->gpr[b2] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        {
+            addr2 += regs->gpr[b2];
+            addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        }
 
         /* Display storage at second storage operand location */
         printf ("V:%8.8lX:", addr2);
@@ -269,7 +275,9 @@ BYTE   *onoroff;                        /* "on" or "off"             */
                 "gpr=general purpose regs, cr=control regs\n"
                 "ar=access regs, fpr=floating point regs\n"
                 "vxxxxxxxx=display virtual storage location xxxxxxxx\n"
-                "rxxxxxxxx=display real storage location xxxxxxxx\n");
+                "rxxxxxxxx=display real storage location xxxxxxxx\n"
+                "idevn=I/O attention interrupt, ext=external interrupt\n"
+                "quit=terminate\n");
             continue;
         }
 
@@ -405,6 +413,87 @@ BYTE   *onoroff;                        /* "on" or "off"             */
                 vaddr += 16;
             } /* end for(i) */
             continue;
+        }
+
+        /* i command - generate I/O attention interrupt for device */
+        if (buf[0] == 'i'
+            && sscanf(buf+1, "%hx%c", &devnum, &c) == 1)
+        {
+            dev = find_device_by_devnum (devnum);
+            if (dev == NULL)
+            {
+                printf ("Device number %4.4X not found\n", devnum);
+                continue;
+            }
+
+            /* Obtain the device lock */
+            obtain_lock (&dev->lock);
+
+            /* If device is already busy or interrupt pending or
+               status pending then do not present interrupt */
+            if (dev->busy || dev->pending
+                || (dev->scsw.flag3 & SCSW3_SC_PEND))
+            {
+                release_lock (&dev->lock);
+                printf ("Device %4.4X busy or interrupt pending\n",
+                        devnum);
+                continue;
+            }
+
+#ifdef FEATURE_S370_CHANNEL
+            /* Set CSW for attention interrupt */
+            dev->csw[0] = 0;
+            dev->csw[1] = 0;
+            dev->csw[2] = 0;
+            dev->csw[3] = 0;
+            dev->csw[4] = CSW_ATTN;
+            dev->csw[5] = 0;
+            dev->csw[6] = 0;
+            dev->csw[7] = 0;
+#endif /*FEATURE_S370_CHANNEL*/
+
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+            /* Set SCSW for attention interrupt */
+            dev->scsw.flag0 = SCSW0_CC_1;
+            dev->scsw.flag1 = 0;
+            dev->scsw.flag2 = 0;
+            dev->scsw.flag3 = SCSW3_SC_ALERT | SCSW3_SC_PEND;
+            dev->scsw.ccwaddr[0] = 0;
+            dev->scsw.ccwaddr[1] = 0;
+            dev->scsw.ccwaddr[2] = 0;
+            dev->scsw.ccwaddr[3] = 0;
+            dev->scsw.unitstat = CSW_ATTN;
+            dev->scsw.chanstat = 0;
+            dev->scsw.count[0] = 0;
+            dev->scsw.count[1] = 0;
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+            /* Set the interrupt pending flag for this device */
+            dev->pending = 1;
+
+            /* Signal waiting CPUs that an interrupt is pending */
+            obtain_lock (&sysblk.intlock);
+            signal_condition (&sysblk.intcond);
+            release_lock (&sysblk.intlock);
+
+            /* Release the device lock */
+            release_lock (&dev->lock);
+
+            continue;
+        } /* end if(i) */
+
+        /* ext command - generate external interrupt */
+        if (strcmp(buf,"ext") == 0)
+        {
+            sysblk.intkey = 1;
+            printf ("Interrupt key depressed\n");
+            continue;
+        }
+
+        /* quit command - terminate the emulator */
+        if (strcmp(buf,"quit") == 0)
+        {
+            exit(0);
         }
 
         /* Invalid command - display error message */

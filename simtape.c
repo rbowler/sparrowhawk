@@ -246,6 +246,16 @@ long            num;                    /* Number of bytes to read   */
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         break;
 
+    case 0xCB: /* 9-track 800 bpi */
+    case 0xC3: /* 9-track 1600 bpi */
+    case 0xD3: /* 9-track 6250 bpi */
+    /*---------------------------------------------------------------*/
+    /* MODE SET                                                      */
+    /*---------------------------------------------------------------*/
+        *residual = 0;
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
     default:
     /*---------------------------------------------------------------*/
     /* INVALID OPERATION                                             */

@@ -800,6 +800,9 @@ int loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     /* Set the size of the device buffer */
     dev->bufsize = RCV_BUFLEN;
 
+    /* Activate CCW tracing */
+    dev->ccwtrace = 1;
+
     return 0;
 } /* end function loc3270_init_handler */
 

@@ -132,11 +132,21 @@ REGS   *regs;                           /* -> CPU register context   */
     dev->scsw.flag3 = 0;
 
 #ifdef FEATURE_S370_CHANNEL
-    /* Store the I/O device address at locations 184-187 */
-    psa->ioid[0] = 0;
-    psa->ioid[1] = 0;
-    psa->ioid[2] = dev->devnum >> 8;
-    psa->ioid[3] = dev->devnum & 0xFF;
+    /* Test the EC mode bit in the IPL PSW */
+    if (psa->iplpsw[1] & 0x08)
+    {
+        /* In EC mode, store device address at locations 184-187 */
+        psa->ioid[0] = 0;
+        psa->ioid[1] = 0;
+        psa->ioid[2] = dev->devnum >> 8;
+        psa->ioid[3] = dev->devnum & 0xFF;
+    }
+    else
+    {
+        /* In BC mode, store device address at locations 2-3 */
+        psa->iplpsw[2] = dev->devnum >> 8;
+        psa->iplpsw[3] = dev->devnum & 0xFF;
+    }
 #endif /*FEATURE_S370_CHANNEL*/
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM

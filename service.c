@@ -157,6 +157,9 @@ static void external_interrupt (int code, REGS *regs)
 PSA    *psa;
 int     rc;
 
+    /* Store the interrupt code in the PSW */
+    regs->psw.intcode = code;
+
     /* Point to PSA in main storage */
     psa = (PSA*)(sysblk.mainstor + regs->pxr);
 
@@ -167,9 +170,12 @@ int     rc;
     psa->extcpad[0] = regs->cpuad >> 8;
     psa->extcpad[1] = regs->cpuad & 0xFF;
 
-    /* Store external interruption code at PSA+X'86' */
-    psa->extint[0] = code >> 8;
-    psa->extint[1] = code & 0xFF;
+    /* For ECMODE, store external interrupt code at PSA+X'86' */
+    if ( regs->psw.ecmode )
+    {
+        psa->extint[0] = code >> 8;
+        psa->extint[1] = code & 0xFF;
+    }
 
     /* Load new PSW from PSA+X'58' */
     rc = load_psw (&(regs->psw), psa->extnew);
@@ -234,6 +240,21 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 
         /* Generate service signal interrupt */
         external_interrupt (EXT_SERVICE_SIGNAL_INTERRUPT, regs);
+        return;
+    }
+
+    /* External interrupt if console interrupt key was depressed */
+    if (sysblk.intkey
+        && (regs->psw.sysmask & PSW_EXTMASK)
+        && (regs->cr[0] & CR0_XM_INTKEY))
+    {
+        printf ("External interrupt: Interrupt key\n");
+
+        /* Reset interrupt key pending */
+        sysblk.intkey = 0;
+
+        /* Generate interrupt key interrupt */
+        external_interrupt (EXT_INTERRUPT_KEY_INTERRUPT, regs);
         return;
     }
 

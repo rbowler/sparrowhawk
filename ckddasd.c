@@ -8,35 +8,7 @@
 
 #include "hercules.h"
 
-/*-------------------------------------------------------------------*/
-/* Structure definitions for CKD headers                             */
-/*-------------------------------------------------------------------*/
-typedef struct _CKDDASD_DEVHDR {        /* Device header             */
-        BYTE    devid[8];               /* Device identifier         */
-        U32     heads;                  /* #of heads per cylinder    */
-        U32     trksize;                /* Track size                */
-        U32     flags;                  /* Flags                     */
-        BYTE    resv[492];              /* Reserved                  */
-    } CKDDASD_DEVHDR;
-
-typedef struct _CKDDASD_TRKHDR {        /* Track header              */
-        BYTE    bin;                    /* Bin number                */
-        HWORD   cyl;                    /* Cylinder number           */
-        HWORD   head;                   /* Head number               */
-    } CKDDASD_TRKHDR;
-
-typedef struct _CKDDASD_RECHDR {        /* Record header             */
-        HWORD   cyl;                    /* Cylinder number           */
-        HWORD   head;                   /* Head number               */
-        BYTE    rec;                    /* Record number             */
-        BYTE    klen;                   /* Key length                */
-        HWORD   dlen;                   /* Data length               */
-    } CKDDASD_RECHDR;
-
-#define CKDDASD_DEVHDR_SIZE     sizeof(CKDDASD_DEVHDR)
-#define CKDDASD_TRKHDR_SIZE     sizeof(CKDDASD_TRKHDR)
-#define CKDDASD_RECHDR_SIZE     sizeof(CKDDASD_RECHDR)
-
+#define CKD_KEY_TRACING
 
 /*-------------------------------------------------------------------*/
 /* Bit definitions for File Mask                                     */
@@ -386,7 +358,7 @@ static int ckd_skip ( DEVBLK *dev, int skiplen, BYTE *unitstat )
 {
 int             rc;                     /* Return code               */
 
-    printf("ckddasd: skipping %d bytes\n", skiplen);
+    DEVTRACE("ckddasd: skipping %d bytes\n", skiplen);
 
     rc = lseek (dev->fd, skiplen, SEEK_CUR);
     if (rc < 0)
@@ -414,7 +386,7 @@ static int ckd_seek ( DEVBLK *dev, U16 cyl, U16 head,
 int             rc;                     /* Return code               */
 off_t           seekpos;                /* Seek position for lseek   */
 
-    printf("ckddasd: seeking to cyl %d head %d\n", cyl, head);
+    DEVTRACE("ckddasd: seeking to cyl %d head %d\n", cyl, head);
 
     if (cyl >= dev->ckdcyls || head >= dev->ckdheads)
     {
@@ -451,21 +423,6 @@ off_t           seekpos;                /* Seek position for lseek   */
         /* Set unit check with equipment check */
         ckd_build_sense (dev, SENSE_EC, 0, 0,
                         FORMAT_1, MESSAGE_0);
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
-        return -1;
-    }
-
-    /* Validate the track header */
-    if (trkhdr->bin != 0
-        || trkhdr->cyl[0] != ((cyl >> 8) & 0xFF)
-        || trkhdr->cyl[1] != (cyl & 0xFF)
-        || trkhdr->head[0] != ((head >> 8) & 0xFF)
-        || trkhdr->head[1] != (head & 0xFF))
-    {
-        printf("ckddasd: invalid track header\n");
-
-        /* Unit check with invalid track format */
-        ckd_build_sense (dev, 0, SENSE1_ITF, 0, 0, 0);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
@@ -559,12 +516,14 @@ U16             head;                   /* Head number for seek      */
 CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
 
     /* Skip record 0 for all operations except READ TRACK, READ R0,
-       SEARCH ID EQUAL, SEARCH ID HIGH, and SEARCH ID EQUAL OR HIGH */
+       SEARCH ID EQUAL, SEARCH ID HIGH, SEARCH ID EQUAL OR HIGH,
+       and LOCATE RECORD */
     if (code != 0xDE
         && (code & 0x7F) != 0x16
         && (code & 0x7F) != 0x31
         && (code & 0x7F) != 0x51
-        && (code & 0x7F) != 0x71)
+        && (code & 0x7F) != 0x71
+        && code != 0x47)
         skipr0 = 1;
 
     /* Search for next count field */
@@ -605,7 +564,7 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
         dev->ckdcurkl = rechdr->klen;
         dev->ckdcurdl = (rechdr->dlen[0] << 8) + rechdr->dlen[1];
 
-        printf("ckddasd: record %d kl %d dl %d\n",
+        DEVTRACE("ckddasd: record %d kl %d dl %d\n",
                 dev->ckdcurrec, dev->ckdcurkl, dev->ckdcurdl);
 
         /* Skip record zero if user data record required */
@@ -679,7 +638,7 @@ CKDDASD_RECHDR  rechdr;                 /* CKD record header         */
         if (rc < 0) return rc;
     }
 
-    printf("ckddasd: reading %d bytes\n", dev->ckdcurkl);
+    DEVTRACE("ckddasd: reading %d bytes\n", dev->ckdcurkl);
 
     /* Read key field */
     if (dev->ckdcurkl > 0)
@@ -736,7 +695,7 @@ int             skiplen;                /* Number of bytes to skip   */
         if (rc < 0) return rc;
     }
 
-    printf("ckddasd: reading %d bytes\n", dev->ckdcurdl);
+    DEVTRACE("ckddasd: reading %d bytes\n", dev->ckdcurdl);
 
     /* Read data field */
     if (dev->ckdcurdl > 0)
@@ -777,16 +736,20 @@ U16             datalen;                /* Data length               */
 U16             ckdlen;                 /* Count+key+data length     */
 off_t           curpos;                 /* Current position in file  */
 off_t           nxtpos;                 /* Position of next track    */
+int             skiplen;                /* Number of bytes to skip   */
 
-    /* Unit check if oriented to count or key areas */
-    if (dev->ckdorient == CKDORIENT_COUNT
-        || dev->ckdorient == CKDORIENT_KEY)
+    /* If oriented to count or key field, skip key and data */
+    if (dev->ckdorient == CKDORIENT_COUNT)
+        skiplen = dev->ckdcurkl + dev->ckdcurdl;
+    else if (dev->ckdorient == CKDORIENT_KEY)
+        skiplen = dev->ckdcurdl;
+    else
+        skiplen = 0;
+
+    if (skiplen > 0)
     {
-        printf("ckddasd: Write CKD orientation error\n");
-        ckd_build_sense (dev, SENSE_CR, 0, 0,
-                        FORMAT_0, MESSAGE_2);
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
-        return -1;
+        rc = ckd_skip (dev, skiplen, unitstat);
+        if (rc < 0) return rc;
     }
 
     /* Copy the count field from the buffer */
@@ -834,7 +797,7 @@ off_t           nxtpos;                 /* Position of next track    */
     /* Pad the I/O buffer with zeroes if necessary */
     while (len < ckdlen) buf[len++] = '\0';
 
-    printf("ckddasd: writing record %d kl %d dl %d\n",
+    DEVTRACE("ckddasd: writing record %d kl %d dl %d\n",
             recnum, keylen, datalen);
 
     /* Write count key and data */
@@ -915,7 +878,7 @@ U16             kdlen;                  /* Key+data length           */
     /* Pad the I/O buffer with zeroes if necessary */
     while (len < kdlen) buf[len++] = '\0';
 
-    printf("ckddasd: updating record %d kl %d dl %d\n",
+    DEVTRACE("ckddasd: updating record %d kl %d dl %d\n",
             dev->ckdcurrec, dev->ckdcurkl, dev->ckdcurdl);
 
     /* Write key and data */
@@ -975,7 +938,7 @@ int             skiplen;                /* Number of bytes to skip   */
     /* Pad the I/O buffer with zeroes if necessary */
     while (len < dev->ckdcurdl) buf[len++] = '\0';
 
-    printf("ckddasd: updating record %d dl %d\n",
+    DEVTRACE("ckddasd: updating record %d dl %d\n",
             dev->ckdcurrec, dev->ckdcurdl);
 
     /* Write data */
@@ -1020,10 +983,28 @@ BYTE            cchhr[5];               /* Search argument           */
 BYTE            sector;                 /* Sector number             */
 BYTE            key[256];               /* Key for search operations */
 
-    /* Command reject if data chaining */
-    if (flags & CCW_FLAGS_CD)
+    /* If this is a data-chained READ, then return any data remaining
+       in the buffer which was not used by the previous CCW */
+    if (chained & CCW_FLAGS_CD)
     {
-        printf ("ckddasd: CKD data chaining not supported\n");
+        memmove (iobuf, iobuf + dev->ckdpos, dev->ckdrem);
+        num = (count < dev->ckdrem) ? count : dev->ckdrem;
+        *residual = count - num;
+        if (count < dev->ckdrem) *more = 1;
+        dev->ckdrem -= num;
+        dev->ckdpos = num;
+        *unitstat = CSW_CE | CSW_DE;
+        return;
+    }
+
+    /* Command reject if data chaining and command is not READ */
+    if ((flags & CCW_FLAGS_CD) && code != 0x02
+        && (code & 0x7F) != 0x1E && (code & 0x7F) != 0x1A
+        && (code & 0x7F) != 0x16 && (code & 0x7F) != 0x12
+        && (code & 0x7F) != 0x0E && (code & 0x7F) != 0x06)
+    {
+        printf("ckddasd: Data chaining not supported for CCW %2.2X\n",
+                code);
         ckd_build_sense (dev, SENSE_CR, 0, 0,
                         FORMAT_0, MESSAGE_1);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -1109,9 +1090,10 @@ BYTE            key[256];               /* Key for search operations */
         if (rc < 0) break;
 
         /* Calculate number of bytes to read and set residual count */
-        num = (count < dev->ckdcurdl) ? count : dev->ckdcurdl;
+        size = dev->ckdcurdl;
+        num = (count < size) ? count : size;
         *residual = count - num;
-        if (count < dev->ckdcurdl) *more = 1;
+        if (count < size) *more = 1;
 
         /* Read data field */
         rc = ckd_read_data (dev, code, iobuf, unitstat);
@@ -1119,6 +1101,10 @@ BYTE            key[256];               /* Key for search operations */
 
         /* Set command processed flag */
         dev->ckdrdipl = 1;
+
+        /* Save size and offset of data not used by this CCW */
+        dev->ckdrem = size - num;
+        dev->ckdpos = num;
 
         /* Return unit exception if data length is zero */
         if (dev->ckdcurdl == 0)
@@ -1185,13 +1171,18 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Calculate number of bytes to read and set residual count */
-        num = (count < dev->ckdcurdl) ? count : dev->ckdcurdl;
+        size = dev->ckdcurdl;
+        num = (count < size) ? count : size;
         *residual = count - num;
-        if (count < dev->ckdcurdl) *more = 1;
+        if (count < size) *more = 1;
 
         /* Read data field */
         rc = ckd_read_data (dev, code, iobuf, unitstat);
         if (rc < 0) break;
+
+        /* Save size and offset of data not used by this CCW */
+        dev->ckdrem = size - num;
+        dev->ckdpos = num;
 
         /* Return unit exception if data length is zero */
         if (dev->ckdcurdl == 0)
@@ -1253,6 +1244,10 @@ BYTE            key[256];               /* Key for search operations */
         rc = ckd_read_data (dev, code, iobuf+dev->ckdcurkl, unitstat);
         if (rc < 0) break;
 
+        /* Save size and offset of data not used by this CCW */
+        dev->ckdrem = size - num;
+        dev->ckdpos = num;
+
         /* Return unit exception if data length is zero */
         if (dev->ckdcurdl == 0)
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
@@ -1299,13 +1294,17 @@ BYTE            key[256];               /* Key for search operations */
         if (rc < 0) break;
 
         /* Calculate number of bytes to read and set residual count */
-        num = (count < CKDDASD_RECHDR_SIZE) ?
-                                count : CKDDASD_RECHDR_SIZE;
+        size = CKDDASD_RECHDR_SIZE;
+        num = (count < size) ? count : size;
         *residual = count - num;
-        if (count < CKDDASD_RECHDR_SIZE) *more = 1;
+        if (count < size) *more = 1;
 
         /* Copy count field to I/O buffer */
-        memcpy (iobuf, &rechdr, num);
+        memcpy (iobuf, &rechdr, CKDDASD_RECHDR_SIZE);
+
+        /* Save size and offset of data not used by this CCW */
+        dev->ckdrem = size - num;
+        dev->ckdpos = num;
 
         /* Return normal status */
         *unitstat = CSW_CE | CSW_DE;
@@ -1383,6 +1382,10 @@ BYTE            key[256];               /* Key for search operations */
                             unitstat);
         if (rc < 0) break;
 
+        /* Save size and offset of data not used by this CCW */
+        dev->ckdrem = size - num;
+        dev->ckdpos = num;
+
         /* Return unit exception if data length is zero */
         if (dev->ckdcurdl == 0)
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
@@ -1446,6 +1449,10 @@ BYTE            key[256];               /* Key for search operations */
         /* Copy home address field to I/O buffer */
         memcpy (iobuf, &trkhdr, CKDDASD_TRKHDR_SIZE);
 
+        /* Save size and offset of data not used by this CCW */
+        dev->ckdrem = size - num;
+        dev->ckdpos = num;
+
         /* Return normal status */
         *unitstat = CSW_CE | CSW_DE;
 
@@ -1505,6 +1512,10 @@ BYTE            key[256];               /* Key for search operations */
                             iobuf + CKDDASD_RECHDR_SIZE + dev->ckdcurkl,
                             unitstat);
         if (rc < 0) break;
+
+        /* Save size and offset of data not used by this CCW */
+        dev->ckdrem = size - num;
+        dev->ckdpos = num;
 
         /* Return unit exception if data length is zero */
         if (dev->ckdcurdl == 0)
@@ -1774,6 +1785,19 @@ BYTE            key[256];               /* Key for search operations */
         else
             *unitstat = CSW_CE | CSW_DE;
 
+#ifdef CKD_KEY_TRACING
+        /* If the search was successful, trace the first 8 bytes of
+           the key, which will usually be a dataset name or member
+           name and can provide useful debugging information */
+        if (*unitstat & CSW_SM)
+        {
+            BYTE module[8]; int i;
+            for (i=0; i < 8; i++)
+                module[i] = ebcdic_to_ascii[iobuf[i]];
+            printf ("Search key %8.8s\n", module);
+        }
+#endif /*CKD_KEY_TRACING*/
+
         /* Set flag if entire key was equal for SEARCH KEY EQUAL */
         if (rc == 0 && num == dev->ckdcurkl && (code & 0x7F) == 0x29)
             dev->ckdkyeq = 1;
@@ -1968,6 +1992,11 @@ BYTE            key[256];               /* Key for search operations */
         rc = ckd_write_data (dev, iobuf, count, unitstat);
         if (rc < 0) break;
 
+        /* Calculate number of bytes written and set residual count */
+        size = dev->ckdcurdl;
+        num = (count < size) ? count : size;
+        *residual = count - num;
+
         /* Return normal status */
         *unitstat = CSW_CE | CSW_DE;
 
@@ -2046,6 +2075,11 @@ BYTE            key[256];               /* Key for search operations */
         rc = ckd_write_kd (dev, iobuf, count, unitstat);
         if (rc < 0) break;
 
+        /* Calculate number of bytes written and set residual count */
+        size = dev->ckdcurkl + dev->ckdcurdl;
+        num = (count < size) ? count : size;
+        *residual = count - num;
+
         /* Return normal status */
         *unitstat = CSW_CE | CSW_DE;
 
@@ -2105,6 +2139,11 @@ BYTE            key[256];               /* Key for search operations */
         /* Write R0 count key and data */
         rc = ckd_write_ckd (dev, iobuf, count, unitstat);
         if (rc < 0) break;
+
+        /* Calculate number of bytes written and set residual count */
+        size = CKDDASD_RECHDR_SIZE + dev->ckdcurkl + dev->ckdcurdl;
+        num = (count < size) ? count : size;
+        *residual = count - num;
 
         /* Return normal status */
         *unitstat = CSW_CE | CSW_DE;
@@ -2172,6 +2211,11 @@ BYTE            key[256];               /* Key for search operations */
         /* Write count key and data */
         rc = ckd_write_ckd (dev, iobuf, count, unitstat);
         if (rc < 0) break;
+
+        /* Calculate number of bytes written and set residual count */
+        size = CKDDASD_RECHDR_SIZE + dev->ckdcurkl + dev->ckdcurdl;
+        num = (count < size) ? count : size;
+        *residual = count - num;
 
         /* Return normal status */
         *unitstat = CSW_CE | CSW_DE;
@@ -2331,7 +2375,7 @@ BYTE            key[256];               /* Key for search operations */
         sector = iobuf[13];
 
         /* Command reject if sector number is not valid */
-        if (sector >= dev->ckdsectors)
+        if (sector != 0xFF && sector >= dev->ckdsectors)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_4);

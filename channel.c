@@ -632,6 +632,39 @@ static struct timeval tv_1usec = {0, 1};
 
 #ifdef FEATURE_S370_CHANNEL
 /*-------------------------------------------------------------------*/
+/* TEST CHANNEL                                                      */
+/*-------------------------------------------------------------------*/
+int test_channel (REGS *regs, U16 chan)
+{
+int     devcount = 0;                   /* #of devices on channel    */
+DEVBLK *dev;                            /* -> Device control block   */
+
+    /* Find a device on specified channel with pending interrupt */
+    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+    {
+        /* Skip the device if not on specified channel */
+        if ((dev->devnum & 0xFF00) != chan)
+            continue;
+
+        /* Count devices on channel */
+        devcount++;
+
+        /* Exit with condition code 1 if interrupt pending */
+        if (dev->pending)
+            return 1;
+
+    } /* end for(dev) */
+
+    /* Exit with condition code 3 if no devices on channel */
+    if (devcount == 0)
+        return 3;
+
+    /* Exit with condition code 0 indicating channel available */
+    return 0;
+
+} /* end function test_channel */
+
+/*-------------------------------------------------------------------*/
 /* TEST I/O                                                          */
 /*-------------------------------------------------------------------*/
 int test_io (REGS *regs, DEVBLK *dev, BYTE ibyte)
@@ -646,7 +679,7 @@ PSA    *psa;                            /* -> Prefixed storage area  */
     if (dev->busy)
     {
         /* Wait for one microsecond */
-        yield ();
+//      yield ();
 
         /* Set condition code 2 if device is busy */
         cc = 2;
@@ -737,7 +770,7 @@ int     cc;                             /* Condition code            */
     else
     {
         /* Wait for one microsecond */
-        yield ();
+//      yield ();
 
         /* Set condition code 1 if status not pending */
         cc = 1;

@@ -156,7 +156,7 @@ BYTE    c;                              /* Print character           */
         {
             /* Truncate trailing blanks from print line */
             for (i = dev->printpos; i > 0; i--)
-                if (dev->buf[i] != SPACE) break;
+                if (dev->buf[i-1] != SPACE) break;
 
             /* Write print line */
             fwrite (dev->buf, i, 1, dev->fp);

@@ -22,36 +22,6 @@
 #include "hercules.h"
 
 /*-------------------------------------------------------------------*/
-/* Structure definitions for CKD headers                             */
-/*-------------------------------------------------------------------*/
-typedef struct _CKDDASD_DEVHDR {        /* Device header             */
-        BYTE    devid[8];               /* Device identifier         */
-        U32     heads;                  /* #of heads per cylinder    */
-        U32     trksize;                /* Track size                */
-        U32     flags;                  /* Flags                     */
-        BYTE    resv[492];              /* Reserved                  */
-    } CKDDASD_DEVHDR;
-
-typedef struct _CKDDASD_TRKHDR {        /* Track header              */
-        BYTE    bin;                    /* Bin number                */
-        HWORD   cyl;                    /* Cylinder number           */
-        HWORD   head;                   /* Head number               */
-    } CKDDASD_TRKHDR;
-
-typedef struct _CKDDASD_RECHDR {        /* Record header             */
-        HWORD   cyl;                    /* Cylinder number           */
-        HWORD   head;                   /* Head number               */
-        BYTE    rec;                    /* Record number             */
-        BYTE    klen;                   /* Key length                */
-        HWORD   dlen;                   /* Data length               */
-    } CKDDASD_RECHDR;
-
-#define CKDDASD_DEVHDR_SIZE     sizeof(CKDDASD_DEVHDR)
-#define CKDDASD_TRKHDR_SIZE     sizeof(CKDDASD_TRKHDR)
-#define CKDDASD_RECHDR_SIZE     sizeof(CKDDASD_RECHDR)
-
-
-/*-------------------------------------------------------------------*/
 /* Static data areas                                                 */
 /*-------------------------------------------------------------------*/
 BYTE eighthexFF[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -428,8 +398,8 @@ int     i;                              /* Array subscript           */
     if (strcmp(devtype, "2314") == 0)
     {
         type = 'C';
-        heads = 10;
-        trksize = 6144 + trkovhd;
+        heads = 20;
+        trksize = 7294 + trkovhd;
     }
     else if (strcmp(devtype, "3330") == 0)
     {

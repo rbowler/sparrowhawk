@@ -9,8 +9,8 @@
 
 #include "hercules.h"
 
-#define MODULE_TRACE
-#define INSTRUCTION_COUNTING
+#undef  MODULE_TRACE
+#undef  INSTRUCTION_COUNTING
 
 /*-------------------------------------------------------------------*/
 /* Add two signed fullwords giving a signed fullword result          */
@@ -94,23 +94,23 @@ S64     r;
 }
 
 /*-------------------------------------------------------------------*/
-/* Divide a signed doubleword quotient by a signed fullword divisor  */
-/* giving a signed fullword remainder and a signed fullword dividend.*/
+/* Divide a signed doubleword dividend by a signed fullword divisor  */
+/* giving a signed fullword remainder and a signed fullword quotient.*/
 /* Returns 0 if successful, 1 if divide overflow.                    */
 /*-------------------------------------------------------------------*/
 static inline int
-div_signed ( U32 *remainder, U32 *dividend, U32 quotienthi,
-           U32 quotientlo, U32 divisor )
+div_signed ( U32 *remainder, U32 *quotient, U32 dividendhi,
+           U32 dividendlo, U32 divisor )
 {
-U64     quotient;
-S64     dvd, rem;
+U64     dividend;
+S64     quot, rem;
 
     if (divisor == 0) return 1;
-    quotient = (U64)quotienthi << 32 | quotientlo;
-    dvd = (S64)quotient / (S32)divisor;
-    rem = (S64)quotient % (S32)divisor;
-    if (dvd < -2147483648LL || dvd > 2147483647LL) return 1;
-    *dividend = (U32)dvd;
+    dividend = (U64)dividendhi << 32 | dividendlo;
+    quot = (S64)dividend / (S32)divisor;
+    rem = (S64)dividend % (S32)divisor;
+    if (quot < -2147483648LL || quot > 2147483647LL) return 1;
+    *quotient = (U32)quot;
     *remainder = (U32)rem;
     return 0;
 }
@@ -197,14 +197,21 @@ int load_psw (PSW *psw, BYTE *addr)
         if (addr[3] != 0)
             return PGM_SPECIFICATION_EXCEPTION;
 
-        /* If amode=24 then bits 33-39 must be zero */
+#ifdef FEATURE_S370
+        /* For S/370, bits 32-39 must be zero */
+        if (addr[4] != 0x00)
+            return PGM_SPECIFICATION_EXCEPTION;
+#else /*!FEATURE_S370*/
+        /* For 370-XA, ESA/370, and ESA/390,
+           if amode=24, bits 33-39 must be zero */
         if (addr[4] > 0x00 && addr[4] < 0x80)
             return PGM_SPECIFICATION_EXCEPTION;
+#endif /*!FEATURE_S370*/
 
     } else {
 
 #ifdef FEATURE_S370
-        /* Processing for BC mode PSW */
+        /* Processing for S/370 BC mode PSW */
         psw->intcode = (addr[2] << 8) | addr[3];
         psw->ilc = (addr[4] >> 6) * 2;
         psw->cc = (addr[4] & 0x30) >> 4;
@@ -215,15 +222,15 @@ int load_psw (PSW *psw, BYTE *addr)
         psw->amode = 0;
         psw->ia = (addr[5] << 16) | (addr[6] << 8) | addr[7];
 #else /*!FEATURE_S370*/
-        /* BC mode is not valid for 370XA, ESA370, or ESA390 */
+        /* BC mode is not valid for 370-XA, ESA/370, or ESA/390 */
         return PGM_SPECIFICATION_EXCEPTION;
 #endif /*!FEATURE_S370*/
 
     }
 
     /* Check for wait state PSW */
-    if (psw->wait && (sysblk.insttrace || sysblk.inststep
-        || psw->ia != 0)) {
+    if (psw->wait && (sysblk.insttrace || sysblk.inststep))
+    {
         printf("Wait state PSW loaded: "
                 "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
                 addr[0], addr[1], addr[2], addr[3],
@@ -268,6 +275,9 @@ REGS   *regs = &(sysblk.regs[0]);
         regs->psw.ia &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
         regs->psw.ilc = 0;
     }
+
+    /* Store the interrupt code in the PSW */
+    regs->psw.intcode = code;
 
     /* Trace the program check */
     printf ("Program check CODE=%4.4X ILC=%d ",
@@ -344,10 +354,14 @@ int     ccwfmt;                         /* CCW format (0 or 1)       */
 BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
 U32     ioparm;                         /* I/O interruption parameter*/
 struct  timeval tv;                     /* Structure for gettimeofday*/
+#ifndef FEATURE_S370
+U32     asteo;                          /* Real address of ASTE      */
+U32     aste[16];                       /* ASN second table entry    */
 U16     ax;                             /* Authorization index       */
 U16     pkm;                            /* PSW key mask              */
 U16     pasn;                           /* Primary ASN               */
 U16     sasn;                           /* Secondary ASN             */
+#endif /*!FEATURE_S370*/
 #ifdef FEATURE_MVS_ASSIST
 U32     lock;                           /* Lock value                */
 U32     lcpa;                           /* Logical CPU address       */
@@ -386,16 +400,22 @@ static BYTE module[8];                  /* Module name               */
         b1 = inst[2] >> 4;
         effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
         if (b1 != 0)
-            effective_addr += regs->gpr[b1] &
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &=
                         (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        }
         ar1 = b1;
     }
 
     /* Apply indexing for RX instructions */
     if ((opcode >= 0x40 && opcode <= 0x7F) || opcode == 0xB1) {
         if (x2 != 0)
-            effective_addr += regs->gpr[x2] &
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &=
                         (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        }
     }
 
     /* Calculate the 2nd effective address for SS instructions */
@@ -403,8 +423,11 @@ static BYTE module[8];                  /* Module name               */
         b2 = inst[4] >> 4;
         effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
         if (b2 != 0)
-            effective_addr2 += regs->gpr[b2] &
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &=
                         (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        }
         ar2 = b2;
     }
 
@@ -545,6 +568,95 @@ static BYTE module[8];                  /* Module name               */
 
         break;
 
+#ifdef FEATURE_S370
+    case 0x08:
+    /*---------------------------------------------------------------*/
+    /* SSK      Set Storage Key                                 [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if in problem state */
+        if ( regs->psw.prob )
+        {
+            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Program check if R2 bits 28-31 are not zeroes */
+        if ( regs->gpr[r2] & 0x0000000F )
+        {
+            program_check (PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Load 2K block address from R2 register */
+        n = regs->gpr[r2] & 0x00FFF800;
+
+        /* Convert real address to absolute address */
+        n = APPLY_PREFIXING (n, regs->pxr);
+
+        /* Addressing exception if block is outside main storage */
+        if ( n >= sysblk.mainsize )
+        {
+            program_check (PGM_ADDRESSING_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Update the storage key from R1 register bits 24-30 */
+        n >>= 12;
+        sysblk.storkeys[n] = regs->gpr[r1] & 0xFE;
+
+        /*debug*/printf("SSK storage block %8.8lX key %2.2lX\n",
+                        regs->gpr[r2], regs->gpr[r1] & 0xFE);
+
+        break;
+
+    case 0x09:
+    /*---------------------------------------------------------------*/
+    /* ISK      Insert Storage Key                              [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if in problem state */
+        if ( regs->psw.prob )
+        {
+            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Program check if R2 bits 28-31 are not zeroes */
+        if ( regs->gpr[r2] & 0x0000000F )
+        {
+            program_check (PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Load 2K block address from R2 register */
+        n = regs->gpr[r2] & 0x00FFF800;
+
+        /* Convert real address to absolute address */
+        n = APPLY_PREFIXING (n, regs->pxr);
+
+        /* Addressing exception if block is outside main storage */
+        if ( n >= sysblk.mainsize )
+        {
+            program_check (PGM_ADDRESSING_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Insert the storage key into R1 register bits 24-31 */
+        n >>= 12;
+        regs->gpr[r1] &= 0xFFFFFF00;
+        regs->gpr[r1] |= sysblk.storkeys[n];
+
+        /* In BC mode, clear bits 29-31 of R1 register */
+        if ( regs->psw.ecmode == 0 )
+            regs->gpr[r1] &= 0xFFFFFFF8;
+
+        /*debug*/printf("ISK storage block %8.8lX key %2.2lX\n",
+                        regs->gpr[r2], regs->gpr[r1] & 0xFE);
+
+        break;
+#endif /*FEATURE_S370*/
+
     case 0x0A:
     /*---------------------------------------------------------------*/
     /* SVC      Supervisor Call                                 [RR] */
@@ -552,6 +664,26 @@ static BYTE module[8];                  /* Module name               */
 
         /* Use the I-byte to set the SVC interruption code */
         regs->psw.intcode = ibyte;
+
+        /* Stop on selected SVC numbers */
+        if (ibyte == 13 || ibyte == 26)
+        {
+            display_inst (regs, inst);
+            panel_command (regs);
+        }
+
+#if 0
+        /* Fake camlst locate *//*debug*/
+        if (ibyte == 26)
+        {
+            n = vfetch4 (regs->gpr[1]+12, 0, regs);
+            memcpy(sysblk.mainstor+n,
+                   "\x00\x01\x30\x00\x20\x01\xE2\xE8\xE2\xD9\xC5\xE2",
+                  12);
+            regs->gpr[15] = 0;
+            break;
+        }
+#endif
 
         /* Point to PSA in main storage */
         psa = (PSA*)(sysblk.mainstor + regs->pxr);
@@ -582,6 +714,7 @@ static BYTE module[8];                  /* Module name               */
 
         break;
 
+#ifndef FEATURE_S370
     case 0x0B:
     /*---------------------------------------------------------------*/
     /* BSM      Branch and Set Mode                             [RR] */
@@ -645,6 +778,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         break;
+#endif /*!FEATURE_S370*/
 
     case 0x0D:
     /*---------------------------------------------------------------*/
@@ -720,7 +854,7 @@ static BYTE module[8];                  /* Module name               */
     /* LNR      Load Negative Register                          [RR] */
     /*---------------------------------------------------------------*/
 
-        /* Load positive value of second operand and set cc */
+        /* Load negative value of second operand and set cc */
         (S32)regs->gpr[r1] = (S32)regs->gpr[r2] > 0 ?
                                 -((S32)regs->gpr[r2]) :
                                 (S32)regs->gpr[r2];
@@ -902,7 +1036,7 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        /* Divide r1::r1+1 by r2, remainder in r1, dividend in r1+1 */
+        /* Divide r1::r1+1 by r2, remainder in r1, quotient in r1+1 */
         divide_overflow =
             div_signed (&(regs->gpr[r1]),&(regs->gpr[r1+1]),
                         regs->gpr[r1],
@@ -1569,7 +1703,7 @@ static BYTE module[8];                  /* Module name               */
         /* Load second operand from operand address */
         n = vfetch4 ( effective_addr, ar1, regs );
 
-        /* Divide r1::r1+1 by n, remainder in r1, dividend in r1+1 */
+        /* Divide r1::r1+1 by n, remainder in r1, quotient in r1+1 */
         divide_overflow =
             div_signed (&(regs->gpr[r1]), &(regs->gpr[r1+1]),
                         regs->gpr[r1],
@@ -1781,6 +1915,7 @@ static BYTE module[8];                  /* Module name               */
 
 //      break;
 
+#ifndef FEATURE_S370
     case 0x84:
     /*---------------------------------------------------------------*/
     /* BRXH     Branch Relative on Index High                  [RSI] */
@@ -1832,6 +1967,7 @@ static BYTE module[8];                  /* Module name               */
             goto setia;
 
         break;
+#endif /*!FEATURE_S370*/
 
     case 0x86:
     /*---------------------------------------------------------------*/
@@ -2412,6 +2548,23 @@ static BYTE module[8];                  /* Module name               */
 
         /* Test the device and set the condition code */
         regs->psw.cc = test_io (regs, dev, ibyte);
+
+        break;
+
+    case 0x9F:
+    /*---------------------------------------------------------------*/
+    /* TCH      Test Channel                                     [S] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if in problem state */
+        if ( regs->psw.prob )
+        {
+            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Test for pending interrupt and set condition code */
+        regs->psw.cc = test_channel (regs, effective_addr & 0xFF00);
 
         break;
 #endif /*FEATURE_S370_CHANNEL*/
@@ -3113,6 +3266,46 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 
+#ifdef FEATURE_S370
+        case 0x13:
+        /*-----------------------------------------------------------*/
+        /* B213: RRB - Reset Reference Bit                       [S] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Load 2K block real address from operand address */
+            n = effective_addr & 0x00FFF800;
+
+            /* Convert real address to absolute address */
+            n = APPLY_PREFIXING (n, regs->pxr);
+
+            /* Addressing exception if block is outside main storage */
+            if ( n >= sysblk.mainsize )
+            {
+                program_check (PGM_ADDRESSING_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Set the condition code according to the original state
+               of the reference and change bits in the storage key */
+            n >>= 12;
+            regs->psw.cc =
+               ((sysblk.storkeys[n] & STORKEY_REF) ? 2 : 0)
+               | ((sysblk.storkeys[n] & STORKEY_CHANGE) ? 1 : 0);
+
+            /* Reset the reference bit in the storage key */
+            sysblk.storkeys[n] &= ~(STORKEY_REF);
+
+            break;
+#endif /*FEATURE_S370*/
+
+#ifndef FEATURE_S370
         case 0x18:
         /*-----------------------------------------------------------*/
         /* B218: PC - Program Call                               [S] */
@@ -3600,6 +3793,7 @@ static BYTE module[8];                  /* Module name               */
             regs->gpr[0] = 0;
 
             break;
+#endif /*!FEATURE_S370*/
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
         case 0x32:
@@ -3932,6 +4126,7 @@ static BYTE module[8];                  /* Module name               */
             break;
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
+#ifndef FEATURE_S370
         case 0x40:
         /*-----------------------------------------------------------*/
         /* B240: BAKR - Branch and Stack Register              [RRE] */
@@ -4098,7 +4293,7 @@ static BYTE module[8];                  /* Module name               */
         /* B24C: TAR - Test Access                             [RRE] */
         /*-----------------------------------------------------------*/
 
-            /* Program check if function control bit is zero */
+            /* Program check if ASF control bit is zero */
             if ((regs->cr[0] & CR0_ASF) == 0)
             {
                 program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
@@ -4106,14 +4301,14 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Set condition code 0 if ALET value is 0 */
-            if (regs->ar[r1] == 0)
+            if (regs->ar[r1] == ALET_PRIMARY)
             {
                 regs->psw.cc = 0;
                 break;
             }
 
             /* Set condition code 3 if ALET value is 1 */
-            if (regs->ar[r1] == 1)
+            if (regs->ar[r1] == ALET_SECONDARY)
             {
                 regs->psw.cc = 3;
                 break;
@@ -4121,8 +4316,9 @@ static BYTE module[8];                  /* Module name               */
 
             /* Perform ALET translation using EAX value from register
                R2 bits 0-15, and set condition code 3 if exception */
-            if (translate_alet (r1, (regs->gpr[r2] >> 16),
-                                regs, ACCTYPE_TAR, &n, &protect));
+            if (translate_alet (regs->ar[r1], (regs->gpr[r2] >> 16),
+                                ACCTYPE_TAR, regs,
+                                &asteo, aste, &protect));
             {
                 regs->psw.cc = 3;
                 break;
@@ -4170,7 +4366,7 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
 
             /* Multiply signed registers ignoring overflow */
-            (S32)regs->gpr[r1] *= (S32)regs->ar[r2];
+            (S32)regs->gpr[r1] *= (S32)regs->gpr[r2];
 
             break;
 
@@ -4183,6 +4379,29 @@ static BYTE module[8];                  /* Module name               */
             regs->psw.cc = move_string (r1, r2, regs);
 
             break;
+
+        case 0x57:
+        /*-----------------------------------------------------------*/
+        /* B257: CUSE - Compare Until Substring Equal          [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Perform compare substring and set condition code */
+            regs->psw.cc =
+                compare_until_substring_equal (r1, r2, regs);
+
+            break;
+
+#ifdef FEATURE_SUBSPACE_GROUP
+        case 0x58:
+        /*-----------------------------------------------------------*/
+        /* B258: BSG - Branch in Subspace Group                [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Perform branch in subspace group */
+            branch_in_subspace_group (r1, r2, regs);
+
+            break;
+#endif /*FEATURE_SUBSPACE_GROUP*/
 
         case 0x5A:
         /*-----------------------------------------------------------*/
@@ -4230,6 +4449,7 @@ static BYTE module[8];                  /* Module name               */
                 program_check (PGM_SPACE_SWITCH_EVENT);
 
             break;
+#endif /*!FEATURE_S370*/
 
         default:
         /*-----------------------------------------------------------*/
@@ -5080,6 +5300,7 @@ static BYTE module[8];                  /* Module name               */
         /* The immediate byte determines the instruction opcode */
         switch ( ibyte ) {
 
+#ifndef FEATURE_S370
         case 0x00:
         /*-----------------------------------------------------------*/
         /* E500: LASP - Load Address Space Parameters          [SSE] */
@@ -5120,6 +5341,7 @@ static BYTE module[8];                  /* Module name               */
                                 effective_addr2, regs);
 
             break;
+#endif /*!FEATURE_S370*/
 
         case 0x01:
         /*-----------------------------------------------------------*/
@@ -5168,8 +5390,7 @@ static BYTE module[8];                  /* Module name               */
             if (n2 & ~PSALCLLI)
             {
                 printf ("Lock hierarchy error\n");
-                instfetch (dword, regs->psw.ia - regs->psw.ilc, regs);
-                display_inst (regs, dword);
+                display_inst (regs, inst);
                 panel_command (regs);
                 /*INCOMPLETE*/
                 release_lock (&sysblk.mainlock);
@@ -5185,8 +5406,7 @@ static BYTE module[8];                  /* Module name               */
             {
                 printf ("Local lock requested by CPU %8.8lX"
                         " held by CPU %8.8lX\n", lcpa, lock);
-                instfetch (dword, regs->psw.ia - regs->psw.ilc, regs);
-                display_inst (regs, dword);
+                display_inst (regs, inst);
                 panel_command (regs);
                 /*INCOMPLETE*/
                 release_lock (&sysblk.mainlock);
@@ -5230,8 +5450,7 @@ static BYTE module[8];                  /* Module name               */
             if (n2 & ~PSALCLLI)
             {
                 printf ("Lock hierarchy error\n");
-                instfetch (dword, regs->psw.ia - regs->psw.ilc, regs);
-                display_inst (regs, dword);
+                display_inst (regs, inst);
                 panel_command (regs);
                 /*INCOMPLETE*/
                 release_lock (&sysblk.mainlock);
@@ -5247,8 +5466,7 @@ static BYTE module[8];                  /* Module name               */
             {
                 printf ("Local lock release by CPU %8.8lX"
                         " but held by CPU %8.8lX\n", lcpa, lock);
-                instfetch (dword, regs->psw.ia - regs->psw.ilc, regs);
-                display_inst (regs, dword);
+                display_inst (regs, inst);
                 panel_command (regs);
                 /*INCOMPLETE*/
                 release_lock (&sysblk.mainlock);
@@ -5688,6 +5906,7 @@ DWORD   csw;                            /* CSW for S/370 channels    */
 void start_cpu (U32 pswaddr, REGS *regs)
 {
 DWORD   dword;                          /* Doubleword work area      */
+int     rc;                             /* Return code               */
 int     tracethis;                      /* Trace this instruction    */
 int     stepthis;                       /* Stop on this instruction  */
 #ifdef INSTRUCTION_COUNTING
@@ -5716,7 +5935,17 @@ int     icidx;                          /* Instruction counter index */
 #endif /*INSTRUCTION_COUNTING*/
 
     /* Load initial PSW from main storage */
-    load_psw ( &(regs->psw), sysblk.mainstor + pswaddr );
+    rc = load_psw (&(regs->psw), sysblk.mainstor + pswaddr);
+    if ( rc )
+    {
+        printf ("Invalid initial PSW: "
+                "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
+                sysblk.mainstor[pswaddr], sysblk.mainstor[pswaddr+1],
+                sysblk.mainstor[pswaddr+2], sysblk.mainstor[pswaddr+3],
+                sysblk.mainstor[pswaddr+4], sysblk.mainstor[pswaddr+5],
+                sysblk.mainstor[pswaddr+6], sysblk.mainstor[pswaddr+7]);
+        exit(1);
+    }
 
     /* Establish longjmp destination for program check */
     setjmp(regs->progjmp);
@@ -5754,7 +5983,16 @@ int     icidx;                          /* Instruction counter index */
             perform_io_interrupt (regs);
 
         /* Test for wait state */
-        if (regs->psw.wait) {
+        if (regs->psw.wait)
+        {
+            /* Accept panel command if instruction stepping */
+            if (sysblk.inststep)
+            {
+                release_lock (&sysblk.intlock);
+                panel_command (regs);
+                continue;
+            }
+
             /* Wait for I/O or external interrupt */
             wait_condition (&sysblk.intcond, &sysblk.intlock);
             release_lock (&sysblk.intlock);

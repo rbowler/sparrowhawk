@@ -388,7 +388,7 @@ int move_page (int r1, int r2, REGS *regs)
 int     rc;                             /* Return code               */
 U32     vaddr1, vaddr2;                 /* Virtual addresses         */
 U32     raddr1, raddr2;                 /* Real addresses            */
-U32     abs1, abs2;                     /* Absolute addresses        */
+U32     aaddr1, aaddr2;                 /* Absolute addresses        */
 int     xpvalid1 = 0, xpvalid2 = 0;     /* 1=Operand in expanded stg */
 U32     xpblk1, xpblk2;                 /* Expanded storage block#   */
 int     priv = 0;                       /* 1=Private address space   */
@@ -432,7 +432,7 @@ BYTE    akey;                           /* Access key                */
     vaddr2 = regs->gpr[r2] &
                 (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
 
-    /* Determine the page addresses of each operand */
+    /* Isolate the page addresses of each operand */
     vaddr1 &= 0x7FFFF000;
     vaddr2 &= 0x7FFFF000;
 
@@ -489,23 +489,44 @@ BYTE    akey;                           /* Access key                */
     }
 
     /* Perform addressing and protection checks */
-    abs1 = APPLY_PREFIXING (raddr1, regs->pxr);
     /*INCOMPLETE*/
 
     /* Perform page movement */
     if (xpvalid2)
     {
         /* Move 4K bytes from expanded storage to main storage */
+        memcpy (sysblk.mainstor + aaddr1,
+                sysblk.xpndstor + (xpblk2 << 12),
+                4096);
     }
     else if (xpvalid1)
     {
         /* Move 4K bytes from main storage to expanded storage */
+        memcpy (sysblk.xpndstor + (xpblk1 << 12),
+                sysblk.mainstor + aaddr2,
+                4096);
     }
     else
     {
         /* Move 4K bytes from main storage to main storage */
+        memcpy (sysblk.mainstor + aaddr1,
+                sysblk.mainstor + aaddr2,
+                4096);
     }
+
+    /* Return condition code zero */
+    return 0;
+
 mvpg_progck:
+    /* If page translation exception and condition code option
+       in register 0 bit 23 is set, return condition code */
+    if ((regs->gpr[0] & 0x00000100)
+        && xcode == PGM_PAGE_TRANSLATION_EXCEPTION)
+        return (xaddr == vaddr2 ? 2 : 1)
+
+    /* Otherwise generate program check */
+    program_check (xcode);
+    return 3;
 } /* end function move_page */
 #endif /*INCOMPLETE*/
 
@@ -829,4 +850,169 @@ BYTE    termchar;                       /* Terminating character     */
     return 3;
 
 } /* end function search_string */
+
+/*-------------------------------------------------------------------*/
+/* Compare Until Substring Equal                                     */
+/*                                                                   */
+/* Input:                                                            */
+/*      r1      First operand register number                        */
+/*      r2      Second operand register number                       */
+/*      regs    Pointer to the CPU register context                  */
+/* Return value:                                                     */
+/*      Returns the condition code for the CUSE instruction.         */
+/*                                                                   */
+/*      This function does not return if a program check occurs.     */
+/*-------------------------------------------------------------------*/
+int compare_until_substring_equal (int r1, int r2, REGS *regs)
+{
+int     i;                              /* Loop counter              */
+int     cc = 0;                         /* Condition code            */
+U32     addr1, addr2;                   /* Operand addresses         */
+S32     len1, len2;                     /* Operand lengths           */
+BYTE    byte1, byte2;                   /* Operand bytes             */
+BYTE    pad;                            /* Padding byte              */
+BYTE    sublen;                         /* Substring length          */
+BYTE    equlen = 0;                     /* Equal byte counter        */
+U32     eqaddr1, eqaddr2;               /* Address of equal substring*/
+S32     remlen1, remlen2;               /* Lengths remaining         */
+
+    /* Program check if either R1 or R2 register is odd */
+    if ((r1 & 1) || (r2 & 1))
+    {
+        program_check (PGM_SPECIFICATION_EXCEPTION);
+        return 0;
+    }
+
+    /* Load substring length from bits 24-31 of register 0 */
+    sublen = regs->gpr[0] & 0xFF;
+
+    /* Load padding byte from bits 24-31 of register 1 */
+    pad = regs->gpr[1] & 0xFF;
+
+    /* Determine the destination and source addresses */
+    addr1 = regs->gpr[r1] &
+                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr2 = regs->gpr[r2] &
+                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+
+    /* Load signed operand lengths from R1+1 and R2+1 */
+    len1 = (S32)(regs->gpr[r1+1]);
+    len2 = (S32)(regs->gpr[r2+1]);
+
+    /* Initialize equal string addresses and lengths */
+    eqaddr1 = addr1;
+    eqaddr2 = addr2;
+    remlen1 = len1;
+    remlen2 = len2;
+
+    /* If substring length is zero, exit with condition code 0 */
+    if (sublen == 0)
+        return 0;
+
+    /* If both operand lengths are zero, exit with condition code 2 */
+    if (len1 == 0 && len2 == 0)
+        return 2;
+
+    /* Process operands from left to right */
+    for (i = 0; len1 > 0 || len2 > 0 ; i++)
+    {
+        /* If equal byte count has reached substring length
+           exit with condition code zero */
+        if (equlen == sublen)
+        {
+            cc = 0;
+            break;
+        }
+
+        /* If 4096 bytes have been compared, and the last bytes
+           compared were unequal, exit with condition code 3 */
+        if (equlen == 0 && i >= 4096)
+        {
+            cc = 3;
+            break;
+        }
+
+        /* Fetch byte from first operand, or use padding byte */
+        if (len1 > 0)
+            byte1 = vfetchb ( addr1, r1, regs );
+        else
+            byte1 = pad;
+
+        /* Fetch byte from second operand, or use padding byte */
+        if (len2 > 0)
+            byte2 = vfetchb ( addr2, r2, regs );
+        else
+            byte2 = pad;
+
+        /* Test if bytes compare equal */
+        if (byte1 == byte2)
+        {
+            /* If this is the first equal byte, save the start of
+               substring addresses and remaining lengths */
+            if (equlen == 0)
+            {
+                eqaddr1 = addr1;
+                eqaddr2 = addr2;
+                remlen1 = len1;
+                remlen2 = len2;
+            }
+
+            /* Count the number of equal bytes */
+            equlen++;
+
+            /* Set condition code 1 */
+            cc = 1;
+        }
+        else
+        {
+            /* Reset equal byte count and set condition code 2 */
+            equlen = 0;
+            cc = 2;
+        }
+
+        /* Update the first operand address and length */
+        if (len1 > 0)
+        {
+            addr1++;
+            addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            len1--;
+        }
+
+        /* Update the second operand address and length */
+        if (len2 > 0)
+        {
+            addr2++;
+            addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            len2--;
+        }
+
+    } /* end for(i) */
+
+    /* Update the registers */
+    if (cc < 2)
+    {
+        /* Update R1 and R2 to point to the equal substring */
+        regs->gpr[r1] = eqaddr1;
+        regs->gpr[r2] = eqaddr2;
+
+        /* Set R1+1 and R2+1 to length remaining in each
+           operand after the start of the substring */
+        regs->gpr[r1+1] = (U32)remlen1;
+        regs->gpr[r2+1] = (U32)remlen2;
+    }
+    else
+    {
+        /* Update R1 and R2 to point to next bytes to compare */
+        regs->gpr[r1] = addr1;
+        regs->gpr[r2] = addr2;
+
+        /* Set R1+1 and R2+1 to remaining operand lengths */
+        regs->gpr[r1+1] = (U32)len1;
+        regs->gpr[r2+1] = (U32)len2;
+    }
+
+    /* Return condition code */
+    return cc;
+
+} /* end function compare_until_substring_equal */
 

@@ -37,6 +37,134 @@ U32     i;
     *((U32*)(sysblk.mainstor + addr)) = i;
 } /* end function store_fullword_absolute */
 
+#ifdef FEATURE_SUBSPACE_GROUP
+/*-------------------------------------------------------------------*/
+/* Perform subspace replacement                                      */
+/*                                                                   */
+/* Input:                                                            */
+/*      std     Original segment table designation (STD)             */
+/*      asteo   ASTE origin obtained by ASN translation              */
+/*      xcode   Pointer to field to receive exception code, or NULL  */
+/*      regs    Pointer to the CPU register context                  */
+/* Output:                                                           */
+/*      xcode   Exception code or zero (if xcode is not NULL)        */
+/* Return value:                                                     */
+/*      On successful completion, the exception code field (if not   */
+/*      NULL) is set to zero, and the function return value is the   */
+/*      STD resulting from subspace replacement, or is the original  */
+/*      STD if subspace replacement is not applicable.               */
+/* Operation:                                                        */
+/*      If the ASF control (CR0 bit 15) is one, and the STD is a     */
+/*      member of a subspace-group (STD bit 22 is one), and the      */
+/*      dispatchable unit is subspace active (DUCT word 1 bit 0 is   */
+/*      one), and the ASTE obtained by ASN translation is the ASTE   */
+/*      for the base space of the dispatchable unit, then bits 1-23  */
+/*      and 25-31 of the STD are replaced by bits 1-23 and 25-31 of  */
+/*      the STD in the ASTE for the subspace in which the            */
+/*      dispatchable unit last had control; otherwise the STD        */
+/*      remains unchanged.                                           */
+/* Error conditions:                                                 */
+/*      If an ASTE validity exception or ASTE sequence exception     */
+/*      occurs, and the xcode parameter is a non-NULL pointer,       */
+/*      then the exception code is returned in the xcode field       */
+/*      and the function return value is zero.                       */
+/*      For all other error conditions a program check is generated  */
+/*      and the function does not return.                            */
+/*-------------------------------------------------------------------*/
+U32 subspace_replace (U32 std, U32 asteo, U16 *xcode, REGS *regs)
+{
+U32     ducto;                          /* DUCT origin               */
+U32     duct0;                          /* DUCT word 0               */
+U32     duct1;                          /* DUCT word 1               */
+U32     duct3;                          /* DUCT word 3               */
+U32     ssasteo;                        /* Subspace ASTE origin      */
+U32     ssaste0;                        /* Subspace ASTE word 0      */
+U32     ssaste2;                        /* Subspace ASTE word 2      */
+U32     ssaste5;                        /* Subspace ASTE word 5      */
+
+    /* Clear the exception code field, if provided */
+    if (xcode != NULL) *xcode = 0;
+
+    /* Return the original STD unchanged if the address-space function
+       control (CR0 bit 15) is zero, or if the subspace-group control
+       (bit 22 of the STD) is zero */
+    if ((regs->cr[0] & CR0_ASF) == 0
+        || (std & STD_GROUP) == 0)
+        return std;
+
+    /* Load the DUCT origin address */
+    ducto = regs->cr[2] & CR2_DUCTO;
+    ducto = APPLY_PREFIXING (ducto, regs->pxr);
+
+    /* Program check if DUCT origin address is invalid */
+    if (ducto >= sysblk.mainsize)
+    {
+        program_check (PGM_ADDRESSING_EXCEPTION);
+        return 0;
+    }
+
+    /* Fetch DUCT words 0, 1, and 3 from absolute storage
+       (note: the DUCT cannot cross a page boundary) */
+    duct0 = fetch_fullword_absolute (ducto);
+    duct1 = fetch_fullword_absolute (ducto+4);
+    duct3 = fetch_fullword_absolute (ducto+12);
+
+    /* Return the original STD unchanged if the dispatchable unit is
+       not subspace active or if the ASTE obtained by ASN translation
+       is not the same as the base ASTE for the dispatchable unit */
+    if ((duct1 & DUCT1_SA) == 0
+        || asteo != (duct0 & DUCT0_BASTEO))
+        return std;
+
+    /* Load the subspace ASTE origin from the DUCT */
+    ssasteo = duct1 & DUCT1_SSASTEO;
+    ssasteo = APPLY_PREFIXING (ssasteo, regs->pxr);
+
+    /* Program check if ASTE origin address is invalid */
+    if (ssasteo >= sysblk.mainsize)
+    {
+        program_check (PGM_ADDRESSING_EXCEPTION);
+        return 0;
+    }
+
+    /* Fetch subspace ASTE words 0, 2, and 5 from absolute storage
+       (note: the ASTE cannot cross a page boundary) */
+    ssaste0 = fetch_fullword_absolute (ssasteo);
+    ssaste2 = fetch_fullword_absolute (ssasteo+8);
+    ssaste5 = fetch_fullword_absolute (ssasteo+20);
+
+    /* ASTE validity exception if subspace ASTE invalid bit is one */
+    if (ssaste0 & ASTE0_INVALID)
+    {
+        if (xcode == NULL)
+            program_check (PGM_ASTE_VALIDITY_EXCEPTION);
+        else
+            *xcode = PGM_ASTE_VALIDITY_EXCEPTION;
+        return 0;
+    }
+
+    /* ASTE sequence exception if the subspace ASTE sequence
+       number does not match the sequence number in the DUCT */
+    if ((ssaste5 & ASTE5_ASTESN) != (duct3 & DUCT3_SSASTESN))
+    {
+        if (xcode == NULL)
+            program_check (PGM_ASTE_SEQUENCE_EXCEPTION);
+        else
+            *xcode = PGM_ASTE_SEQUENCE_EXCEPTION;
+        return 0;
+    }
+
+    /* Replace bits 1-23 and 25-31 of the STD with the
+       corresponding bits from the subspace ASTE STD */
+    std &= (STD_SSEVENT | STD_SAEVENT);
+    std |= (ssaste2 & ~(STD_SSEVENT | STD_SAEVENT));
+
+    /* Return the STD resulting from subspace replacement */
+    return std;
+
+} /* end function subspace_replace */
+#endif /*FEATURE_SUBSPACE_GROUP*/
+
 /*-------------------------------------------------------------------*/
 /* Set Address Space Control                                         */
 /*                                                                   */
@@ -207,6 +335,11 @@ U16     ax;                             /* Authorization index       */
         /* Load new secondary STD from ASTE word 2 */
         sstd = aste[2];
 
+#ifdef FEATURE_SUBSPACE_GROUP
+        /* Perform subspace replacement on new SSTD */
+        sstd = subspace_replace (sstd, sasteo, NULL, regs);
+#endif /*FEATURE_SUBSPACE_GROUP*/
+
     } /* end if(SSAR-ss) */
 
     /* Load the new secondary ASN into control register 3 */
@@ -215,23 +348,6 @@ U16     ax;                             /* Authorization index       */
 
     /* Load the new secondary STD into control register 7 */
     regs->cr[7] = sstd;
-
-#ifdef FEATURE_SUBSPACE_GROUP
-    if (regs->cr[0] & CR0_ASF)
-    {
-The description in this paragraph applies if the subspace-group
-facility is installed and the address-space-function control, bit
-15 of control register 0, is one. After the new SSTD has been
-placed in control register 7, if (1) the subspace-group-control bit,
-bit 22, in the SSTD is one, (2) the dispatchable unit is subspace
-active, and (3) the ASTE obtained by ASN translation is the
-ASTE for the base space of the dispatchable unit, then bits 1-23
-and 25-31 of the SSTD in control register 7 are replaced by bits
-1-23 and 25-31 of the STD in the ASTE for the subspace in which the
-dispatchable unit last had control. Further details are in
-"Subspace-Replacement Operations" in topic 5.9.2.
-    } /* end if(CR0_ASF) */
-#endif /*FEATURE_SUBSPACE_GROUP*/
 
     return;
 
@@ -261,6 +377,9 @@ U32     sstd;                           /* Secondary STD             */
 U32     ltd;                            /* Linkage table descriptor  */
 U32     pasteo;                         /* Primary ASTE origin       */
 U32     sasteo;                         /* Secondary ASTE origin     */
+#ifdef FEATURE_SUBSPACE_GROUP
+U16     xcode;                          /* Exception code            */
+#endif /*FEATURE_SUBSPACE_GROUP*/
 
     /* PASN translation */
 
@@ -273,27 +392,6 @@ U32     sasteo;                         /* Secondary ASTE origin     */
            AFX- or ASX-translation exception condition */
         if (translate_asn (pasn, regs, &pasteo, aste))
             return 1;
-
-#ifdef FEATURE_SUBSPACE_GROUP
-        if (regs->cr[0] & CR0_ASF)
-        {
-The description in this paragraph applies if the subspace-group
-facility is installed, the ASF control is one, and PASN translation is
-performed. After STD-p has been obtained, if (1) the
-subspace-group-control bit, bit 22, in STD-p is one, (2) the
-dispatchable unit is subspace active, and (3) PASTEO-p designates the
-ASTE for the base space of the dispatchable unit, then a copy of
-STD-p, called STD-rp, is made, and bits 1-23 and 25-31 of STD-rp are
-replaced by bits 1-23 and 25-31 of the STD in the ASTE for the
-subspace in which the dispatchable unit last had control. Further
-details are in "Subspace-Replacement Operations" in topic 5.9.2. If
-bit 0 in the subspace ASTE is one, or if the ASTE sequence number
-(ASTESN) in the subspace ASTE does not equal the subspace ASTESN in
-the dispatchable-unit control table, an exception is not recognized;
-instead, condition code 1 is set, and the control registers remain
-unchanged.
-        } /* end if(CR0_ASF) */
-#endif /*FEATURE_SUBSPACE_GROUP*/
 
         /* Return condition code 3 if either current STD
            or new STD indicates a space switch event */
@@ -310,6 +408,15 @@ unchanged.
            AX specified in the first operand */
         if ((func & 0x00000002) == 0)
             ax = (aste[1] & ASTE1_AX) >> 16;
+
+#ifdef FEATURE_SUBSPACE_GROUP
+        /* Perform subspace replacement on new PSTD */
+        pstd = subspace_replace (pstd, pasteo, &xcode, regs);
+
+        /* Return condition code 1 if ASTE exception was recognized */
+        if (xcode != 0)
+            return 1;
+#endif /*FEATURE_SUBSPACE_GROUP*/
     }
     else
     {
@@ -354,24 +461,12 @@ unchanged.
         sstd = aste[2];
 
 #ifdef FEATURE_SUBSPACE_GROUP
-        if (regs->cr[0] & CR0_ASF)
-        {
-The description in this paragraph applies if the subspace-group
-facility is installed, the ASF control is one, and SASN translation is
-performed. After STD-s has been obtained, if (1) the
-subspace-group-control bit, bit 22, in STD-s is one, (2) the
-dispatchable unit is subspace active, and (3) SASTEO-s designates the
-ASTE for the base space of the dispatchable unit, then a copy of
-STD-s, called STD-rs, is made, and bits 1-23 and 25-31 of STD-rs are
-replaced by bits 1-23 and 25-31 of the STD in the ASTE for the
-subspace in which the dispatchable unit last had control. Further
-details are in "Subspace-Replacement Operations" in topic 5.9.2. If
-bit 0 in the subspace ASTE is one, or if the ASTE sequence number
-(ASTESN) in the subspace ASTE does not equal the subspace ASTESN in
-the dispatchable-unit control table, an exception is not recognized;
-instead, condition code 2 is set, and the control registers remain
-unchanged.
-        } /* end if(CR0_ASF) */
+        /* Perform subspace replacement on new SSTD */
+        sstd = subspace_replace (sstd, sasteo, &xcode, regs);
+
+        /* Return condition code 2 if ASTE exception was recognized */
+        if (xcode != 0)
+            return 2;
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
         /* Perform SASN authorization if bit 31 of the
@@ -509,26 +604,13 @@ int     ssevent;                        /* 1=space switch event      */
             return 0;
         }
 
-#ifdef FEATURE_SUBSPACE_GROUP
-        if (regs->cr[0] & CR0_ASF)
-        {
-The description in this paragraph applies if the subspace-group
-facility is installed and the ASF control is one. After the new PSTD
-has been placed in control register 1 and the new primary-ASTE origin
-has been placed in control register 5, if (1) the
-subspace-group-control bit, bit 22, in the PSTD is one, (2) the
-dispatchable unit is subspace active, and (3) the primary-ASTE origin
-designates the ASTE for the base space of the dispatchable unit, then
-bits 1-23 and 25-31 of the PSTD in control register 1 are replaced by
-bits 1-23 and 25-31 of the STD in the ASTE for the subspace in which
-the dispatchable unit last had control. This replacement occurs before
-a replacement of the SSTD in control register 7 by the PSTD. Further
-details are in "Subspace-Replacement Operations" in topic 5.9.2.
-        }
-#endif /*FEATURE_SUBSPACE_GROUP*/
-
         /* Obtain new primary STD from the ASTE */
         pstd = aste[2];
+
+#ifdef FEATURE_SUBSPACE_GROUP
+        /* Perform subspace replacement on new PSTD */
+        pstd = subspace_replace (pstd, pasteo, NULL, regs);
+#endif /*FEATURE_SUBSPACE_GROUP*/
 
         /* Set flag if either current PSTD or new PSTD
            space switch event bit is set to 1 */
@@ -648,20 +730,9 @@ U16     xcode;                          /* Exception code            */
             newregs.cr[5] = pasteo;
 
 #ifdef FEATURE_SUBSPACE_GROUP
-            if (regs->cr[0] & CR0_ASF)
-            {
-The description in this paragraph applies if the subspace-group
-facility is installed and PASN translation has occurred. If (1) the
-subspace-group-control bit, bit 22, in the new PSTD is one, (2) the
-dispatchable unit is subspace active, and (3) the new primary-ASTE
-origin designates the ASTE for the base space of the dispatchable
-unit, then bits 1-23 and 25-31 of the new PSTD in control register 1
-are replaced by bits 1-23 and 25-31 of the STD in the ASTE for the
-subspace in which the dispatchable unit last had control.  This
-replacement occurs, in the case when the new SASN is equal to the new
-PASN, before the SSTD is set equal to the PSTD. Further details are in
-"Subspace-Replacement Operations" in topic 5.9.2.
-            } /* end if(CR0_ASF) */
+            /* Perform subspace replacement on new PSTD */
+            newregs.cr[1] = subspace_replace (newregs.cr[1],
+                                            pasteo, NULL, regs);
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
         } /* end if(pasn!=oldpasn) */
@@ -706,19 +777,9 @@ PASN, before the SSTD is set equal to the PSTD. Further details are in
             }
 
 #ifdef FEATURE_SUBSPACE_GROUP
-            if (regs->cr[0] & CR0_ASF)
-            {
-The description in this paragraph applies if the subspace-group
-facility is installed and SASN translation and authorization have
-occurred. If (1) the subspace-group-control bit, bit 22, in the new
-SSTD is one, (2) the dispatchable unit is subspace active, and (3) the
-ASTE origin obtained by SASN translation designates the ASTE for the
-base space of the dispatchable unit, then bits 1-23 and 25-31 of the
-new SSTD in control register 7 are replaced by bits 1-23 and 25-31 of
-the STD in the ASTE for the subspace in which the dispatchable unit
-last had control. Further details are in "Subspace-Replacement
-Operations" in topic 5.9.2.
-            } /* end if(CR0_ASF) */
+            /* Perform subspace replacement on new SSTD */
+            newregs.cr[7] = subspace_replace (newregs.cr[7],
+                                            sasteo, NULL, regs);
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
         } /* end else(sasn!=pasn) */
@@ -754,6 +815,7 @@ int program_call (U32 pcnum, REGS *regs)
 {
 U32     abs;                            /* Absolute address          */
 U32     ltd;                            /* Linkage table designation */
+U32     pstd;                           /* Primary STD               */
 U32     pasteo;                         /* Primary ASTE origin       */
 U32     lto;                            /* Linkage table origin      */
 int     ltl;                            /* Linkage table length      */
@@ -934,7 +996,22 @@ U16     pasn;                           /* Primary ASN               */
             return 0;
         }
 
+        /* Obtain the new PSTD from the ASTE */
+        pstd = aste[2];
+
+#ifdef FEATURE_SUBSPACE_GROUP
+        /* Perform subspace replacement on new PSTD */
+        pstd = subspace_replace (pstd, pasteo, NULL, regs);
+#endif /*FEATURE_SUBSPACE_GROUP*/
+
     } /* end if(PC-ss) */
+    else
+    { /* PC-cp */
+
+        /* For PC to current primary, load current primary STD */
+        pstd = regs->cr[1];
+
+    } /* end if(PC-cp) */
 
     /* Perform basic or stacking program call */
     if ((ete[4] & ETE4_T) == 0)
@@ -1027,8 +1104,8 @@ U16     pasn;                           /* Primary ASN               */
         /* Obtain new AX from the ASTE and new PASN from the ET */
         regs->cr[4] = (aste[1] & ASTE1_AX) | pasn;
 
-        /* Obtain the new PSTD from the ASTE */
-        regs->cr[1] = aste[2];
+        /* Load the new primary STD */
+        regs->cr[1] = pstd;
 
         /* Update control register 5 with the new PASTEO or LTD */
         regs->cr[5] = (regs->cr[0] & CR0_ASF) ? pasteo : aste[3];
@@ -1041,24 +1118,6 @@ U16     pasn;                           /* Primary ASN               */
             regs->cr[3] |= (regs->cr[4] & CR4_PASN);
             regs->cr[7] = regs->cr[1];
         }
-
-#ifdef FEATURE_SUBSPACE_GROUP
-        if (regs->cr[0] & CR0_ASF)
-        {
-The description in this paragraph applies if the subspace-group
-facility is installed and the ASF control is one. After the new PSTD
-has been placed in control register 1 and the new primary-ASTE origin
-has been placed in control register 5, if (1) the
-subspace-group-control bit, bit 22, in the PSTD is one, (2) the
-dispatchable unit is subspace active, and (3) the primary-ASTE origin
-designates the ASTE for the base space of the dispatchable unit, then
-bits 1-23 and 25-31 of the PSTD in control register 1 are replaced by
-bits 1-23 and 25-31 of the STD in the ASTE for the subspace in which
-the dispatchable unit last had control. This replacement occurs before
-a replacement of the SSTD in control register 7 by the PSTD. Further
-details are in "Subspace-Replacement Operations" in topic 5.9.2.
-        } /* end if(CR0_ASF) */
-#endif /*FEATURE_SUBSPACE_GROUP*/
 
     } /* end if(PC-ss) */
 
@@ -1103,6 +1162,8 @@ BYTE    key;                            /* New PSW key               */
 
     /* Convert DUCT real address to absolute address */
     ducto = APPLY_PREFIXING (ducto, regs->pxr);
+
+    /* Program check if DUCT origin address is invalid */
     if (ducto >= sysblk.mainsize)
     {
         program_check (PGM_ADDRESSING_EXCEPTION);
@@ -1219,4 +1280,248 @@ BYTE    key;                            /* New PSW key               */
     } /* end if(BSA-ra) */
 
 } /* end branch_and_set_authority */
+
+#ifdef FEATURE_SUBSPACE_GROUP
+/*-------------------------------------------------------------------*/
+/* Branch in Subspace Group                                          */
+/*                                                                   */
+/* Input:                                                            */
+/*      r1      First operand register number                        */
+/*      r2      Second operand register number                       */
+/*      regs    Pointer to the CPU register context                  */
+/*                                                                   */
+/*      This function does not return if a program check occurs.     */
+/*-------------------------------------------------------------------*/
+void branch_in_subspace_group (int r1, int r2, REGS *regs)
+{
+U32     alet;                           /* Destination subspace ALET */
+U32     dasteo;                         /* Destination ASTE origin   */
+U32     daste[16];                      /* ASN second table entry    */
+U32     ducto;                          /* DUCT origin               */
+U32     duct0;                          /* DUCT word 0               */
+U32     duct1;                          /* DUCT word 1               */
+U32     duct3;                          /* DUCT word 3               */
+U32     abs;                            /* Absolute address          */
+U32     newia;                          /* New instruction address   */
+int     protect = 0;                    /* 1=ALE protection detected
+                                           by ART (ignored by BSG)   */
+U16     xcode;                          /* Exception code            */
+
+    /* Special operation exception if DAT is off or CR0 bit 15 is 0 */
+    if (REAL_MODE(&(regs->psw))
+        || (regs->cr[0] & CR0_ASF) == 0)
+    {
+        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        return;
+    }
+
+    /* Load real address of dispatchable unit control table */
+    ducto = regs->cr[2] & CR2_DUCTO;
+
+    /* Apply low-address protection to stores into the DUCT */
+    if (ducto < 512 && (regs->cr[0] & CR0_LOW_PROT))
+    {
+        program_check (PGM_PROTECTION_EXCEPTION);
+        return;
+    }
+
+    /* Convert DUCT real address to absolute address */
+    ducto = APPLY_PREFIXING (ducto, regs->pxr);
+
+    /* Program check if DUCT origin address is invalid */
+    if (ducto >= sysblk.mainsize)
+    {
+        program_check (PGM_ADDRESSING_EXCEPTION);
+        return;
+    }
+
+    /* Fetch DUCT words 0, 1, and 3 from absolute storage
+       (note: the DUCT cannot cross a page boundary) */
+    duct0 = fetch_fullword_absolute (ducto);
+    duct1 = fetch_fullword_absolute (ducto+4);
+    duct3 = fetch_fullword_absolute (ducto+12);
+
+    /* Special operation exception if the current primary ASTE origin
+       is not the same as the base ASTE for the dispatchable unit */
+    if ((regs->cr[5] & CR5_PASTEO) != (duct0 & DUCT0_BASTEO))
+    {
+        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        return;
+    }
+
+    /* Obtain the destination ALET from the R2 access register,
+       except that register zero means destination ALET is zero */
+    alet = (r2 == 0) ? 0 : regs->ar[r2];
+
+    /* Perform special ALET translation to obtain destination ASTE */
+    switch (alet) {
+
+    case ALET_PRIMARY: /* Branch to base space */
+
+        /* Load the base space ASTE origin from the DUCT */
+        dasteo = duct0 & DUCT0_BASTEO;
+
+        /* Convert the ASTE origin to an absolute address */
+        abs = APPLY_PREFIXING (dasteo, regs->pxr);
+
+        /* Program check if ASTE origin address is invalid */
+        if (abs >= sysblk.mainsize)
+        {
+            program_check (PGM_ADDRESSING_EXCEPTION);
+            return;
+        }
+
+        /* Fetch destination ASTE word 2 from absolute storage
+           (note: the ASTE cannot cross a page boundary) */
+        daste[2] = fetch_fullword_absolute (abs+8);
+
+        break;
+
+    case ALET_SECONDARY: /* Branch to last-used subspace */
+
+        /* Load the subspace ASTE origin from the DUCT */
+        dasteo = duct1 & DUCT1_SSASTEO;
+
+        /* Special operation exception if SSASTEO is zero */
+        if (dasteo == 0)
+        {
+            program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+            return;
+        }
+
+        /* Convert the ASTE origin to an absolute address */
+        abs = APPLY_PREFIXING (dasteo, regs->pxr);
+
+        /* Program check if ASTE origin address is invalid */
+        if (abs >= sysblk.mainsize)
+        {
+            program_check (PGM_ADDRESSING_EXCEPTION);
+            return;
+        }
+
+        /* Fetch subspace ASTE words 0, 2, and 5 from absolute
+           storage (note: the ASTE cannot cross a page boundary) */
+        daste[0] = fetch_fullword_absolute (abs);
+        daste[2] = fetch_fullword_absolute (abs+8);
+        daste[5] = fetch_fullword_absolute (abs+20);
+
+        /* ASTE validity exception if ASTE invalid bit is one */
+        if (daste[0] & ASTE0_INVALID)
+        {
+            program_check (PGM_ASTE_VALIDITY_EXCEPTION);
+            return;
+        }
+
+        /* ASTE sequence exception if the subspace ASTE sequence
+           number does not match the sequence number in the DUCT */
+        if ((daste[5] & ASTE5_ASTESN) != (duct3 & DUCT3_SSASTESN))
+        {
+            program_check (PGM_ASTE_SEQUENCE_EXCEPTION);
+            return;
+        }
+
+        break;
+
+    default: /* ALET not 0 or 1 */
+
+        /* Perform special ART to obtain destination ASTE */
+        xcode = translate_alet (alet, 0, ACCTYPE_BSG, regs,
+                                &dasteo, daste, &protect);
+
+        /* Program check if ALET translation error */
+        if (xcode != 0)
+        {
+            program_check (xcode);
+            return;
+        }
+
+        /* Special operation exception if the destination ASTE
+           is the base space of a different subspace group */
+        if (dasteo != (duct0 & DUCT0_BASTEO)
+                && ((daste[2] & STD_GROUP) == 0
+                    || (daste[0] & ASTE0_BASE) == 0))
+        {
+            program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+            return;
+        }
+
+    } /* end switch(alet) */
+
+    /* Update the primary STD from word 2 of the destination ASTE */
+    if (dasteo == (duct0 & DUCT0_BASTEO))
+    {
+        /* When the destination ASTE is the base space,
+           replace the primary STD by the STD in the ASTE*/
+        regs->cr[1] = daste[2];
+    }
+    else
+    {
+        /* When the destination ASTE is a subspace, replace
+           bits 1-23 and 25-31 of the primary STD with the
+           corresponding bits from the STD in the ASTE */
+        regs->cr[1] &= (STD_SSEVENT | STD_SAEVENT);
+        regs->cr[1] |= (daste[2] & ~(STD_SSEVENT | STD_SAEVENT));
+    }
+
+    /* Compute the branch address from the R2 operand */
+    newia = regs->gpr[r2];
+
+    /* If R1 is non-zero, save the current PSW addressing mode
+       and instruction address in the R1 register */
+    if (r1 != 0)
+    {
+        regs->gpr[r1] = regs->psw.ia;
+        if (regs->psw.amode) regs->gpr[r1] |= 0x80000000;
+    }
+
+    /* Set mode and branch to address specified by R2 operand */
+    if ( newia & 0x80000000 )
+    {
+        regs->psw.amode = 1;
+        regs->psw.ia = newia & 0x7FFFFFFF;
+    }
+    else
+    {
+        regs->psw.amode = 0;
+        regs->psw.ia = newia & 0x00FFFFFF;
+    }
+
+    /* Set SSTD equal to PSTD */
+    regs->cr[7] = regs->cr[1];
+
+    /* Set SASN equal to PASN */
+    regs->cr[3] &= ~CR3_SASN;
+    regs->cr[3] |= (regs->cr[4] & CR4_PASN);
+
+    /* Reset the subspace fields in the DUCT */
+    if (dasteo == (duct0 & DUCT0_BASTEO))
+    {
+        /* When the destination ASTE is the base space,
+           reset the subspace active bit in the DUCT */
+        duct1 &= ~DUCT1_SA;
+        store_fullword_absolute (duct1, ducto+4);
+    }
+    else if (alet == ALET_SECONDARY)
+    {
+        /* When the destination ASTE specifies a subspace by means
+           of ALET 1, set the subspace active bit in the DUCT */
+        duct1 |= DUCT1_SA;
+        store_fullword_absolute (duct1, ducto+4);
+    }
+    else
+    {
+        /* When the destination ASTE specifies a subspace by means
+           of an ALET other than ALET 1, set the subspace active
+           bit and store the subspace ASTE origin in the DUCT */
+        duct1 = DUCT1_SA | dasteo;
+        store_fullword_absolute (duct1, ducto+4);
+
+        /* Set the subspace ASTE sequence number in the DUCT
+           equal to the destination ASTE sequence number */
+        duct3 = daste[5];
+        store_fullword_absolute (duct3, ducto+12);
+    }
+
+} /* end branch_in_subspace_group */
+#endif /*FEATURE_SUBSPACE_GROUP*/
 

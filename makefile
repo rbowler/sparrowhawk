@@ -2,7 +2,7 @@
 # Makefile for Hercules ESA/390 emulator
 #
 
-VERSION  = 1.27
+VERSION  = 1.28
 
 CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION)
 #	   -march=pentium -malign-double -mwide-multiply
@@ -10,12 +10,13 @@ LFLAGS	 = -lpthread
 
 all:	   cpu ipl dasdinit
 
-TARFILES = makefile *.c *.h hercules.cnf cpu ipl dasdinit
+TARFILES = makefile *.c *.h hercules.cnf cpu ipl dasdinit \
+	   gentape.jcl
 
 ALL_OBJS = config.o panel.o cpu.o dat.o decimal.o \
 	   block.o stack.o xmem.o \
 	   channel.o service.o ckddasd.o fbadasd.o \
-	   simtape.o loc3270.o cardrdr.o printer.o
+	   simtape.o loc3270.o cardrdr.o printer.o console.o
 
 CPU_OBJS = cputest.o $(ALL_OBJS)
 
@@ -37,6 +38,8 @@ dasdinit:  $(DIN_OBJS)
 cardrdr.o: cardrdr.c $(HEADERS)
 
 config.o:  config.c $(HEADERS)
+
+console.o: console.c $(HEADERS)
 
 panel.o:   panel.c $(HEADERS)
 

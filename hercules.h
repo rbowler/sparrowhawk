@@ -48,10 +48,17 @@
 
 #define FEATURE_ALD_FORMAT      0
 #define FEATURE_STORAGE_PROTECTION_OVERRIDE
-#undef  FEATURE_SUBSPACE_GROUP
+#define FEATURE_SUBSPACE_GROUP
 #undef  FEATURE_SUPPRESSION_ON_PROTECTION
 #undef  FEATURE_EXPANDED_STORAGE
 #define FEATURE_MVS_ASSIST
+
+/*-------------------------------------------------------------------*/
+/* Macro definitions for tracing                                     */
+/*-------------------------------------------------------------------*/
+#define DEVTRACE(format, a...) \
+        if(dev->ccwtrace||dev->ccwstep) \
+        printf("%4.4X:" format, dev->devnum, ## a)
 
 /*-------------------------------------------------------------------*/
 /* Macro definitions for version number                              */
@@ -141,6 +148,7 @@ typedef struct _SYSBLK {
         U32     servparm;               /* Service signal parameter  */
         unsigned int                    /* Flags                     */
                 servsig:1,              /* 1=Service signal pending  */
+                intkey:1,               /* 1=Interrupt key pending   */
                 insttrace:1,            /* 1=Instruction trace       */
                 inststep:1;             /* 1=Instruction step        */
     } SYSBLK;
@@ -193,7 +201,10 @@ typedef struct _DEVBLK {
                                            read from data buffer     */
         int     cardrem;                /* Number of bytes remaining
                                            in data buffer            */
-        /* Device dependent fields for cardrdr */
+        /* Device dependent fields for console */
+        int     keybdrem;               /* Number of bytes remaining
+                                           in keyboard read buffer   */
+        /* Device dependent fields for printer */
         unsigned int                    /* Flags                     */
                 fold:1;                 /* 1=Fold to upper case      */
         FILE   *fp;                     /* File pointer              */
@@ -268,8 +279,39 @@ typedef struct _DEVBLK {
         BYTE    ckdorient;              /* Current orientation       */
         U16     ckdrem;                 /* #of bytes from current
                                            position to end of field  */
+        U16     ckdpos;                 /* Offset into buffer of data
+                                           for next data chained CCW */
 
     } DEVBLK;
+
+/*-------------------------------------------------------------------*/
+/* Structure definitions for CKD headers                             */
+/*-------------------------------------------------------------------*/
+typedef struct _CKDDASD_DEVHDR {        /* Device header             */
+        BYTE    devid[8];               /* Device identifier         */
+        U32     heads;                  /* #of heads per cylinder    */
+        U32     trksize;                /* Track size                */
+        U32     flags;                  /* Flags                     */
+        BYTE    resv[492];              /* Reserved                  */
+    } CKDDASD_DEVHDR;
+
+typedef struct _CKDDASD_TRKHDR {        /* Track header              */
+        BYTE    bin;                    /* Bin number                */
+        HWORD   cyl;                    /* Cylinder number           */
+        HWORD   head;                   /* Head number               */
+    } CKDDASD_TRKHDR;
+
+typedef struct _CKDDASD_RECHDR {        /* Record header             */
+        HWORD   cyl;                    /* Cylinder number           */
+        HWORD   head;                   /* Head number               */
+        BYTE    rec;                    /* Record number             */
+        BYTE    klen;                   /* Key length                */
+        HWORD   dlen;                   /* Data length               */
+    } CKDDASD_RECHDR;
+
+#define CKDDASD_DEVHDR_SIZE     sizeof(CKDDASD_DEVHDR)
+#define CKDDASD_TRKHDR_SIZE     sizeof(CKDDASD_TRKHDR)
+#define CKDDASD_RECHDR_SIZE     sizeof(CKDDASD_RECHDR)
 
 /*-------------------------------------------------------------------*/
 /* Global data areas in module config.c                              */
@@ -300,8 +342,8 @@ void start_cpu (U32 pswaddr, REGS *regs);
 /* Functions in module dat.c */
 U16  translate_asn (U16 asn, REGS *regs, U32 *asteo, U32 aste[]);
 int  authorize_asn (U16 ax, U32 aste[], int atemask, REGS *regs);
-U16  translate_alet (int arn, U16 eax, REGS *regs, int acctype,
-        U32 *stdptr, int *prot);
+U16  translate_alet (U32 alet, U16 eax, int acctype, REGS *regs,
+        U32 *asteo, U32 aste[], int *prot);
 int  translate_addr (U32 vaddr, int arn, REGS *regs, int acctype,
         U32 *raddr, U16 *xcode, int *priv, int *prot);
 void purge_alb (REGS *regs);
@@ -331,6 +373,7 @@ void move_chars (U32 addr1, int arn1, BYTE key1, U32 addr2,
 #define ACCTYPE_TPROT           6       /* Test Protection           */
 #define ACCTYPE_IVSK            7       /* Insert Virtual Storage Key*/
 #define ACCTYPE_STACK           8       /* Linkage stack operations  */
+#define ACCTYPE_BSG             9       /* Branch in Subspace Group  */
 
 /* Special value for arn parameter for translate functions in dat.c */
 #define USE_REAL_ADDR           (-1)    /* LURA/STURA instruction    */
@@ -363,6 +406,7 @@ int  compute_checksum (int r1, int r2, REGS *regs);
 int  move_string (int r1, int r2, REGS *regs);
 int  compare_string (int r1, int r2, REGS *regs);
 int  search_string (int r1, int r2, REGS *regs);
+int  compare_until_substring_equal (int r1, int r2, REGS *regs);
 
 /* Functions in module service.c */
 void perform_external_interrupt (REGS *regs);
@@ -386,11 +430,13 @@ int  program_transfer (U16 pkm, U16 pasn, int amode, U32 ia,
 int  program_return (REGS *regs);
 int  program_call (U32 pcnum, REGS *regs);
 void branch_and_set_authority (int r1, int r2, REGS *regs);
+void branch_in_subspace_group (int r1, int r2, REGS *regs);
 
 /* Functions in module channel.c */
 int  start_io (DEVBLK *dev, U32 ccwaddr, int ccwfmt, BYTE ccwkey,
         U32 ioparm);
 void *execute_ccw_chain (DEVBLK *dev);
+int  test_channel (REGS *regs, U16 chan);
 int  test_io (REGS *regs, DEVBLK *dev, BYTE ibyte);
 int  test_subchan (REGS *regs, DEVBLK *dev, IRB *irb);
 int  present_io_interrupt (REGS *regs, U32 *ioid, U32 *ioparm,
@@ -399,6 +445,10 @@ int  present_io_interrupt (REGS *regs, U32 *ioid, U32 *ioparm,
 /* Functions in module cardrdr.c */
 DEVIF cardrdr_init_handler;
 DEVXF cardrdr_execute_ccw;
+
+/* Functions in module console.c */
+DEVIF console_init_handler;
+DEVXF console_execute_ccw;
 
 /* Functions in module printer.c */
 DEVIF printer_init_handler;

@@ -117,6 +117,18 @@ static void sighup_handler (int signo)
 } /* end function sighup_handler */
 
 /*-------------------------------------------------------------------*/
+/* Signal handler for SIGINT signal                                  */
+/*-------------------------------------------------------------------*/
+static void sigint_handler (int signo)
+{
+    //printf ("config: sigint handler entered\n"); /*debug*/
+
+    /* Activate instruction stepping */
+    sysblk.inststep = 1;
+    return;
+} /* end function sigint_handler */
+
+/*-------------------------------------------------------------------*/
 /* Function to build system configuration                            */
 /*-------------------------------------------------------------------*/
 void build_config (BYTE *fname)
@@ -379,6 +391,12 @@ int     subchan;                        /* Subchannel number         */
         /* Determine which device handler to use for this device */
         switch (devtype) {
 
+        case 0x1052:
+        case 0x3215:
+            devinit = &console_init_handler;
+            devexec = &console_execute_ccw;
+            break;
+
         case 0x2501:
         case 0x3505:
             devinit = &cardrdr_init_handler;
@@ -397,6 +415,9 @@ int     subchan;                        /* Subchannel number         */
             devexec = &simtape_execute_ccw;
             break;
 
+        case 0x2314:
+        case 0x3330:
+        case 0x3350:
         case 0x3380:
         case 0x3390:
             devinit = &ckddasd_init_handler;
@@ -499,7 +520,18 @@ int     subchan;                        /* Subchannel number         */
     /* Register the SIGHUP handler */
     if ( signal (SIGHUP, sighup_handler) == SIG_ERR )
     {
-        perror("config: signal");
+        fprintf (stderr,
+                "HHC025I Cannot register SIGHUP handler: %s\n",
+                strerror(errno));
+        exit(1);
+    }
+
+    /* Register the SIGINT handler */
+    if ( signal (SIGINT, sigint_handler) == SIG_ERR )
+    {
+        fprintf (stderr,
+                "HHC026I Cannot register SIGINT handler: %s\n",
+                strerror(errno));
         exit(1);
     }
 
@@ -507,7 +539,9 @@ int     subchan;                        /* Subchannel number         */
     if ( create_thread (&sysblk.tid3270, &sysblk.detattr,
                         tn3270d, NULL) )
     {
-        perror("config: tn3270d create_thread");
+        fprintf (stderr,
+                "HHC027I Cannot create tn3270d thread: %s\n",
+                strerror(errno));
         exit(1);
     }
 
