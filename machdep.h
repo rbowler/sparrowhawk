@@ -14,7 +14,6 @@
 /* Intel pentiumpro/i686                                             */
 /*-------------------------------------------------------------------*/
 #if defined(__i686__) | defined(__pentiumpro__) 
-#if !defined(PIC)
 
 #define FETCHIBYTE1(_ib, _inst) \
   __asm__("movzbl 1(%%esi),%%eax" : "=a" (_ib) : "S" (_inst));
@@ -54,6 +53,8 @@ static __inline__ BYTE cmpxchg4_i686(U32 *old, U32 new, void *ptr) {
 }
 #define HAVE_CMPXCHG
 
+#if !defined(PIC)
+
 #define cmpxchg8(x,y,z) cmpxchg8_i686(x,y,z)
 static __inline__ BYTE cmpxchg8_i686(U64 *old, U64 new, void *ptr) {
 /* returns zero on success otherwise returns 1 */
@@ -67,7 +68,7 @@ static __inline__ BYTE cmpxchg8_i686(U64 *old, U64 new, void *ptr) {
          "setnz   %b0\n\t"
          "movl    %%eax,(%3)\n\t"
          "movl    %%edx,4(%3)"
-         : "=b"(code)
+         : "=q"(code)
          : "b"(low),
            "c"(high),
            "S"(old),
@@ -75,6 +76,37 @@ static __inline__ BYTE cmpxchg8_i686(U64 *old, U64 new, void *ptr) {
          : "ax", "dx", "memory");
  return code;
 }
+
+#else /* defined(PIC) */
+
+#define cmpxchg8(x,y,z) cmpxchg8_i686(x,y,z)
+static __inline__ BYTE cmpxchg8_i686(U64 *old, U64 new, void *ptr) {
+/* returns zero on success otherwise returns 1 */
+ BYTE code;
+ U32 high = new >> 32;
+ U32 low = new & 0xffffffff;
+ __asm__ __volatile__ (
+         "pushl   %%ebx\n\t"
+         "movl    %%eax,%%ebx\n\t"
+         "movl    (%3),%%eax\n\t"
+         "movl    4(%3),%%edx\n\t"
+         "lock;   cmpxchg8b (%4)\n\t"
+         "popl    %%ebx\n\t"
+         "movl    %%eax,(%3)\n\t"
+         "movl    %%edx,4(%3)\n\t"
+         "setnz   %b0"
+         : "=a"(code)
+         : "a"(low),
+           "c"(high),
+           "S"(old),
+           "D"(ptr)
+         : "dx", "memory");
+ return code;
+}
+
+#endif /* defined(PIC) */
+
+#if !defined(PIC)
 
 #define cmpxchg16(x1,x2,y1,y2,z) cmpxchg16_i686(x1,x2,y1,y2,z)
 static __inline__ int cmpxchg16_i686(U64 *old1, U64 *old2, U64 new1, U64 new2, void *ptr) {
@@ -116,6 +148,52 @@ static __inline__ int cmpxchg16_i686(U64 *old1, U64 *old2, U64 new1, U64 new2, v
  return code;
 }
 
+#else /* defined(PIC) */
+
+#define cmpxchg16(x1,x2,y1,y2,z) cmpxchg16_i686(x1,x2,y1,y2,z)
+static __inline__ int cmpxchg16_i686(U64 *old1, U64 *old2, U64 new1, U64 new2, void *ptr) {
+/* returns zero on success otherwise returns 1 */
+//FIXME: not smp safe; an attempt is made to minimize the number of cycles
+ int code;
+ union { BYTE buf[32]; U64 dw[4]; } u;
+ u.dw[0] = *old1;
+ u.dw[1] = *old2;
+ u.dw[2] = new1;
+ u.dw[3] = new2;
+ __asm__ __volatile__ (
+         "pushl   %%ebx\n\t"
+         "movl    %1,%0\n\t"
+         "movl    %2,%%ebx\n\t"
+         "movl    $4,%%ecx\n\t"
+         "cld\n\t"
+         "repe    cmpsl\n\t"
+         "jne     1f\n\t"
+         "movl    %%ebx,%2\n\t"
+         "movl    $4,%%ecx\n\t"
+         "rep     movsl\n\t"
+         "xorl    %0,%0\n\t"
+         "jmp     2f\n"
+         "1:\t"
+         "movl    %0,%2\n\t"
+         "movl    %%ebx,%1\n\t"
+         "movl    $4,%%ecx\n\t"
+         "rep     movsl\n\t"
+         "movl    $1,%0\n"
+         "2:\t"
+         "popl    %%ebx"
+       : "=q"(code)
+       : "S"(&u),
+         "D"(ptr)
+       : "cx","memory");
+ if (code == 1) {
+   *old1 = u.dw[0];
+   *old2 = u.dw[1];
+ }
+ return code;
+}
+
+#endif /* defined(PIC) */
+
 #define fetch_dw(x) fetch_dw_i686(x)
 static __inline__ U64 fetch_dw_i686(void *ptr)
 {
@@ -131,7 +209,42 @@ static __inline__ void store_dw_i686(void *ptr, U64 value)
  while ( cmpxchg8 (&orig, CSWAP64(value), (U64 *)ptr) );
 }
 
-#endif /* !defined(PIC) */
+#define MEMCPY(_to, _from, _n)                \
+ do {                                         \
+  void *to, *from; int n;                     \
+  int d0, d1;                                 \
+  to = (_to); from = (_from); n = (_n);       \
+  __asm__ __volatile__ (                      \
+         "cld\n\t"                            \
+         "movl    %0,%%edx\n\t"               \
+         "shrl    $2,%0\n\t"                  \
+         "rep     movsl\n\t"                  \
+         "movl    %%edx,%0\n\t"               \
+         "andl    $3,%0\n\t"                  \
+         "rep     movsb"                      \
+         : "=&c"(n), "=&D" (d0), "=&S" (d1)   \
+         : "1"(to), "2"(from), "0"(n)         \
+         : "edx", "memory");                  \
+} while (0)
+
+#define MEMSET(_to, _c, _n)                   \
+do {                                          \
+  void *to; int c, n;                         \
+  int d0;                                     \
+  to = (_to); c = (_c); n = (_n);             \
+  __asm__ __volatile__ (                      \
+         "cld\n\t"                            \
+         "movl    %0,%%edx\n\t"               \
+         "shrl    $2,%%ecx\n\t"               \
+         "rep     stosl\n\t"                  \
+         "movl    %%edx,%0\n\t"               \
+         "andl    $3,%0\n\t"                  \
+         "rep     stosb\n\t"                  \
+         : "=&c"(n), "=&D" (d0)               \
+         : "1"(to), "ax"(c), "0"(n)           \
+         : "edx", "memory");                  \
+} while (0)
+
 #endif /* defined(__i686__) | defined(__pentiumpro__) */
 
 /*-------------------------------------------------------------------*/
@@ -254,6 +367,14 @@ static __inline__ int cmpxchg16(U64 *old1, U64 *old2, U64 new1, U64 new2, volati
  }
  return code;
 }
+#endif
+
+#ifndef MEMCPY
+#define MEMCPY(_to, _from, _n) memcpy((_to), (_from), (_n))
+#endif
+
+#ifndef MEMSET
+#define MEMSET(_to, _c, _n) memset((_to), (_c), (_n))
 #endif
 
 #endif /* _HERCULES_MACHDEP_H */

@@ -8,8 +8,6 @@
 /*-------------------------------------------------------------------*/
 /* This module implements the various Hercules System Console        */
 /* (i.e. hardware console) commands that the emulator supports.      */
-/* It is not currently designed to be compiled directly, but rather  */
-/* is #included inline by the panel.c source module.                 */
 /* To define a new commmand, add an entry to the "Commands" CMDTAB   */
 /* table pointing to the command processing function, and optionally */
 /* add additional help text to the HelpTab HELPTAB. Both tables are  */
@@ -22,6 +20,8 @@
 
 #include "opcode.h"
 
+#include "history.h"
+
 #if defined(OPTION_FISHIO)
 #include "w32chan.h"
 #endif /* defined(OPTION_FISHIO) */
@@ -32,7 +32,7 @@ extern  void  FishHangInit(char* pszFileCreated, int nLineCreated);
 extern  void  FishHangReport();
 extern  void  FishHangAtExit();
 #endif // defined(FISH_HANG)
-
+ 
 #if defined(FEATURE_ECPSVM)
 extern void ecpsvm_command(int argc,char **argv);
 #endif
@@ -69,6 +69,53 @@ int quit_cmd(int argc, char *argv[],char *cmdline)
 
     return 0;   /* (make compiler happy) */
 }
+
+///////////////////////////////////////////////////////////////////////
+/* history command  */
+
+int History(int argc, char *argv[], char *cmdline)
+{
+    UNREFERENCED(cmdline);
+    /* last stored command is for sure command 'hst' so remove it 
+       this is the only place where history_remove is called */
+    history_remove();
+    history_requested = 1;
+    /* only 'hst' called */
+    if (argc == 1) {
+      if (history_relative_line(-1) == -1)
+        history_requested = 0;
+      return 0;
+    }
+    /* hst with argument called */
+    if (argc == 2) {
+      int x;
+      switch (argv[1][0]) {
+      case 'l':
+        history_show();
+        history_requested = 0;
+        break;
+      default:
+        x = atoi(argv[1]);
+        if (x>0) {
+          if (history_absolute_line(x) == -1)
+            history_requested = 0;
+        }
+        else {
+          if (x<0) { 
+            if (history_relative_line(x) == -1)
+              history_requested = 0;
+          }
+          else {
+            /* x == 0 */
+            history_show();
+            history_requested = 0;
+          }
+        }
+      }
+    }
+    return 0;
+}
+
 
 ///////////////////////////////////////////////////////////////////////
 /* start command (or just Enter) - start CPU (or printer device if argument given) */
@@ -320,6 +367,16 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
     logmsg( "          ckc = %16.16llX\n", (long long)regs->clkc << 8 );
     logmsg( "          cpt = %16.16llX\n", (long long)regs->ptimer );
+
+    if(regs->sie_active)
+    {
+        logmsg( _("         vtod = %16.16llX\n"),
+            (long long)(sysblk.todclk + regs->guestregs->todoffset) << 8
+            );
+
+        logmsg( "         vckc = %16.16llX\n", (long long)regs->guestregs->clkc << 8 );
+        logmsg( "         vcpt = %16.16llX\n", (long long)regs->guestregs->ptimer );
+    }
 
     if (regs->arch_mode == ARCH_370)
     {
@@ -1015,7 +1072,7 @@ int devlist_cmd(int argc, char *argv[], char *cmdline)
                 dev->devnum, dev->devtype, devnam,
                 (dev->fd > 2 ? _("open ") : ""),
                 (dev->busy ? _("busy ") : ""),
-                ((dev->pending || dev->pcipending) ? _("pending ") : "")
+                (IOPENDING(dev) ? _("pending ") : "")
             );
 
         if (dev->bs)
@@ -1529,7 +1586,7 @@ BYTE c;                                 /* Character work area       */
     obtain_lock (&dev->lock);
 
     /* Reject if device is busy or interrupt pending */
-    if (dev->busy || dev->pending || dev->pcipending
+    if (dev->busy || IOPENDING(dev)
      || (dev->scsw.flag3 & SCSW3_SC_PEND))
     {
         release_lock (&dev->lock);
@@ -1973,6 +2030,8 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
             logmsg( _("          DEV%4.4X: I/O pending\n"), dev->devnum );
         if (dev->pcipending && (dev->pmcw.flag5 & PMCW5_V))
             logmsg( _("          DEV%4.4X: PCI pending\n"), dev->devnum );
+        if (dev->attnpending && (dev->pmcw.flag5 & PMCW5_V))
+            logmsg( _("          DEV%4.4X: Attn pending\n"), dev->devnum );
         if ((dev->crwpending) && (dev->pmcw.flag5 & PMCW5_V))
             logmsg( _("          DEV%4.4X: CRW pending\n"), dev->devnum );
         if (test_lock(&dev->lock) && (dev->pmcw.flag5 & PMCW5_V))
@@ -1986,7 +2045,20 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
     logmsg("\n");
 
     for (io = sysblk.iointq; io; io = io->next)
-        logmsg( _("          DEV%4.4X\n"), io->dev->devnum );
+        logmsg
+        (
+            _("          DEV%4.4X,%s%s%s%s, pri %d\n")
+
+            ,io->dev->devnum
+
+            ,io->pending      ? " normal" : ""
+            ,io->pcipending   ? " PCI"    : ""
+            ,io->attnpending  ? " ATTN"   : ""
+
+            ,(!(io->attnpending || io->pcipending || io->attnpending)) ? " unknown" : ""
+
+            ,io->priority
+        );
 
     return 0;
 }
@@ -2499,13 +2571,16 @@ int aea_cmd(int argc, char *argv[], char *cmdline)
     int     i;                          /* Index                     */
     int     matches = 0;                /* Number aeID matches       */
     REGS   *regs;
+    int     cpu = 0;
 
     UNREFERENCED(cmdline);
-    UNREFERENCED(argc);
-    UNREFERENCED(argv);
 
-    regs = sysblk.regs + 0;
-    logmsg ("aenoarn %d aeID 0x%3.3x\n",regs->aenoarn,regs->aeID);
+    if (argc == 2) cpu = atoi (argv[1]);
+    if (cpu < 0 || cpu >= MAX_CPU_ENGINES)
+        cpu = 0;
+
+    regs = sysblk.regs + cpu;
+    logmsg ("cpu %d aenoarn %d aeID 0x%3.3x\n",cpu,regs->aenoarn,regs->aeID);
     logmsg (" ix               ve key ar a               ae\n");
     for (i = 0; i < MAXAEA; i++)
     {
@@ -2518,6 +2593,74 @@ int aea_cmd(int argc, char *argv[], char *cmdline)
 
     return 0;
 }
+
+///////////////////////////////////////////////////////////////////////
+/* tlb - display tlb table */
+
+int tlb_cmd(int argc, char *argv[], char *cmdline)
+{
+    int     i;                          /* Index                     */
+    int     matches = 0;                /* Number aeID matches       */
+    REGS   *regs;
+    int     cpu = 0;
+
+    UNREFERENCED(cmdline);
+
+    if (argc == 2) cpu = atoi (argv[1]);
+    if (cpu < 0 || cpu >= MAX_CPU_ENGINES)
+        cpu = 0;
+
+    regs = sysblk.regs + cpu;
+    logmsg ("cpu %d tlbID 0x%3.3x\n",cpu,regs->tlbID);
+    logmsg (" ix              std            vaddr              pte id c p\n");
+    for (i = 0; i < MAXAEA; i++)
+    {
+        logmsg("%s%2.2x %16.16llx %16.16llx %16.16llx %2.2x %1d %1d\n",
+         regs->tlb[i].valid == regs->tlbID ? "*" : " ",
+         i,regs->tlb[i].TLB_STD_G,regs->tlb[i].TLB_VADDR_G,
+         regs->tlb[i].TLB_PTE_G,regs->tlb[i].valid, regs->tlb[i].common,
+         regs->tlb[i].protect);
+        matches += (regs->tlb[i].valid == regs->tlbID);
+    }
+    logmsg("%d tlbID matches\n", matches);
+
+    return 0;
+}
+
+#if defined(SIE_DEBUG_PERFMON)
+///////////////////////////////////////////////////////////////////////
+/* spm - SIE performance monitor table */
+
+int spm_cmd(int argc, char *argv[], char *cmdline)
+{
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
+    UNREFERENCED(cmdline);
+
+    sie_perfmon_disp();
+
+    return 0;
+}
+#endif
+
+#if defined(OPTION_COUNTING)
+///////////////////////////////////////////////////////////////////////
+/* count - display counts */
+
+int count_cmd(int argc, char *argv[], char *cmdline)
+{
+    int     i;                          /* Index                     */
+
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
+    UNREFERENCED(cmdline);
+
+    for (i = 0; i < OPTION_COUNTING; i++)
+        logmsg ("%3d: %12lld\n", i, sysblk.count[i]);
+
+    return 0;
+}
+#endif
 
 #if defined(OPTION_DYNAMIC_LOAD)
 ///////////////////////////////////////////////////////////////////////
@@ -2653,6 +2796,7 @@ CMDTAB Commands[] =
 */
 COMMAND ( "?",         ListAllCommands, "list all commands" )
 COMMAND ( "help",      HelpCommand,   "command specific help\n" )
+COMMAND ( "hst",       History,       "history of commands\n" )
 
 COMMAND ( "quit",      quit_cmd,      "terminate the emulator" )
 COMMAND ( "exit",      quit_cmd,      "(synonym for 'quit')\n" )
@@ -2669,6 +2813,10 @@ COMMAND ( ".reply",    g_cmd,         "scp command" )
 COMMAND ( "!message",    g_cmd,       "scp priority messsage\n" )
 #endif
 
+#ifdef OPTION_PTTRACE
+COMMAND ( "ptt",       ptt_cmd,       "display pthread trace" )
+#endif
+ 
 COMMAND ( "i",         i_cmd,         "generate I/O attention interrupt for device" )
 COMMAND ( "ext",       ext_cmd,       "generate external interrupt" )
 COMMAND ( "restart",   restart_cmd,   "generate restart interrupt\n" )
@@ -2748,6 +2896,13 @@ COMMAND ( "ecpsvm",   evm_cmd,   "ECPS:VM Commands" )
 #endif
 
 COMMAND ( "aea",       aea_cmd,       "Display AEA tables" )
+COMMAND ( "tlb",       tlb_cmd,       "Display TLB tables" )
+#if defined(SIE_DEBUG_PERFMON)
+COMMAND ( "spm",       spm_cmd,       "SIE performance monitor" )
+#endif
+#if defined(OPTION_COUNTING)
+COMMAND ( "count",     count_cmd,     "Display counts" )
+#endif
 
 COMMAND ( NULL, NULL, NULL )         /* (end of table) */
 };
@@ -2904,6 +3059,12 @@ CMDHELP ( "help",      "Enter \"help cmd\" where cmd is the command you need hel
                        "the format of the command and its various required or optional\n"
                        "parameters and is not meant to replace reading the documentation.\n"
                        )
+
+CMDHELP ( "hst",       "Format: \"hst | hst n | hst l\". Command \"hst l\" or \"hst 0\" displays\n"
+                       "list of last ten commands entered from command line\n"
+                       "hst n, where n is a positive number retrieves n-th command from list\n"
+                       "hst n, where n is a negative number retrieves n-th last command\n"
+                       "hst without an argument works exactly as hst -1, it retrieves last command\n") 
 
 CMDHELP ( "quit",      "Format: \"quit [NOW]\". The optional 'NOW' argument\n"
                        "causes the emulator to immediately terminate without\n"
@@ -3070,6 +3231,8 @@ void *panel_command (void *cmdline)
 REGS *regs = sysblk.regs + sysblk.pcpu;
 
     pCmdLine = (BYTE*)cmdline; ASSERT(pCmdLine);
+    /* every command will be stored in history list */
+    history_add(cmdline);
 
     /* Copy panel command to work area, skipping leading blanks */
     while (*pCmdLine && isspace(*pCmdLine)) pCmdLine++;

@@ -202,7 +202,7 @@ PMCW    pmcw;                           /* Path management ctl word  */
     }
 
     /* Condition code 2 if subchannel is busy */
-    if (dev->busy || dev->pending || dev->pcipending || dev->attnpending)
+    if (dev->busy || IOPENDING(dev))
     {
         regs->psw.cc = 2;
         release_lock (&dev->lock);
@@ -281,7 +281,7 @@ BYTE    chpid;
     if(regs->GR_L(1) & 0xFFFFFF00)
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
 
-    chpid = effective_addr2 & 0xFF;
+    chpid = regs->GR_L(1) & 0xFF;
 
     if( !(regs->psw.cc = chp_reset(chpid)) )
     {

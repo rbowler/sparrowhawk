@@ -258,7 +258,7 @@ typedef fthread_attr_t    ATTR;
 
     #define create_thread(ptid,pat,fn,arg)         fthread_create(__FILE__,__LINE__,(ptid),(pat),(PFT_THREAD_FUNC)&(fn),(arg))
 
-    #define initialize_lock(plk)                   fthread_mutex_init(__FILE__,__LINE__,(plk))
+    #define initialize_lock(plk)                   fthread_mutex_init(__FILE__,__LINE__,(plk),NULL)
     #define destroy_lock(plk)                      fthread_mutex_destroy(__FILE__,__LINE__,(plk))
     #define obtain_lock(plk)                       fthread_mutex_lock(__FILE__,__LINE__,(plk))
     #define try_obtain_lock(plk)                   fthread_mutex_trylock(__FILE__,__LINE__,(plk))
@@ -277,7 +277,7 @@ typedef fthread_attr_t    ATTR;
 
     #define create_thread(ptid,pat,fn,arg)         fthread_create((ptid),(pat),(PFT_THREAD_FUNC)&(fn),(arg))
 
-    #define initialize_lock(plk)                   fthread_mutex_init((plk))
+    #define initialize_lock(plk)                   fthread_mutex_init((plk),NULL)
     #define destroy_lock(plk)                      fthread_mutex_destroy((plk))
     #define obtain_lock(plk)                       fthread_mutex_lock((plk))
     #define try_obtain_lock(plk)                   fthread_mutex_trylock((plk))
@@ -294,7 +294,14 @@ typedef fthread_attr_t    ATTR;
 
 #endif // defined(FISH_HANG)
 
-#define initialize_detach_attr(pat)            /* unsupported */
+#define initialize_detach_attr(pat)            fthread_attr_init((pat)); \
+                                               fthread_attr_setstacksize((pat),1048576); \
+                                               fthread_attr_setdetachstate((pat),FTHREAD_CREATE_DETACHED)
+#define initialize_join_attr(pat)              fthread_attr_init((pat)); \
+                                               fthread_attr_setstacksize((pat),1048576); \
+                                               fthread_attr_setdetachstate((pat),FTHREAD_CREATE_JOINABLE)
+#define join_thread(tid,pcode)                 fthread_join((tid),(pcode))
+#define detach_thread(tid)                     fthread_detach((tid))
 #define signal_thread(tid,signo)               fthread_kill((tid),(signo))
 #define thread_id()                            fthread_self()
 #define exit_thread(exitvar_ptr)               fthread_exit((exitvar_ptr))
@@ -331,27 +338,76 @@ typedef pthread_attr_t                  ATTR;
         pthread_attr_init((pat)); \
         pthread_attr_setstacksize((pat),1048576); \
         pthread_attr_setdetachstate((pat),PTHREAD_CREATE_DETACHED)
+#define initialize_join_attr(pat) \
+        pthread_attr_init((pat)); \
+        pthread_attr_setstacksize((pat),1048576); \
+        pthread_attr_setdetachstate((pat),PTHREAD_CREATE_JOINABLE)
+#define join_thread(tid,pcode) \
+        pthread_join((tid),(pcode))
+#define detach_thread(tid) \
+        pthread_detach((tid))
 typedef void*THREAD_FUNC(void*);
 #define create_thread(ptid,pat,fn,arg) \
         pthread_create(ptid,pat,(THREAD_FUNC*)&(fn),arg)
 #define exit_thread(_code) \
         pthread_exit((_code))
-#if !defined(WIN32)
+//#if !defined(WIN32) // (there's no reason for this that I can see! pthreads supports thread signaling! Fish)
 #define signal_thread(tid,signo) \
         pthread_kill(tid,signo)
-#else // defined(WIN32)
-#define signal_thread(tid,signo)
-#endif // !defined(WIN32)
+//#else // defined(WIN32)
+//#define signal_thread(tid,signo)
+//#endif // !defined(WIN32)
 #define thread_id() \
         pthread_self()
 #endif // defined(OPTION_FTHREADS)
 
+#ifdef OPTION_PTTRACE
+#include "pttrace.h"
+#undef  initialize_lock
+#define initialize_lock(plk) \
+        ptt_pthread_mutex_init((plk),NULL,__FILE__,__LINE__)
+#undef  obtain_lock
+#define obtain_lock(plk) \
+        ptt_pthread_mutex_lock((plk),__FILE__,__LINE__)
+#undef  release_lock
+#define release_lock(plk) \
+        ptt_pthread_mutex_unlock((plk),__FILE__,__LINE__)
+#undef  initialize_condition
+#define initialize_condition(pcond) \
+        ptt_pthread_cond_init((pcond),NULL,__FILE__,__LINE__)
+#undef  signal_condition
+#define signal_condition(pcond) \
+        ptt_pthread_cond_signal((pcond),__FILE__,__LINE__)
+#undef  broadcast_condition
+#define broadcast_condition(pcond) \
+        ptt_pthread_cond_broadcast((pcond),__FILE__,__LINE__)
+#undef  wait_condition
+#define wait_condition(pcond,plk) \
+        ptt_pthread_cond_wait((pcond),(plk),__FILE__,__LINE__)
+#undef  timed_wait_condition
+#define timed_wait_condition(pcond,plk,timeout) \
+        ptt_pthread_cond_timedwait((pcond),(plk),(timeout),__FILE__,__LINE__)
+#undef  create_thread
+#if     defined(OPTION_FTHREADS)
+#define create_thread(ptid,pat,fn,arg) \
+        ptt_pthread_create((ptid),(pat),(PFT_THREAD_FUNC)&(fn),(arg),__FILE__,__LINE__)
+#else
+#define create_thread(ptid,pat,fn,arg) \
+        ptt_pthread_create(ptid,pat,(THREAD_FUNC*)&(fn),arg,__FILE__,__LINE__)
+#endif
+#undef  join_thread
+#define join_thread(tid,pcode) \
+        ptt_pthread_join((tid),(pcode),__FILE__,__LINE__)
+#undef  detach_thread
+#define detach_thread(tid) \
+        ptt_pthread_detach((tid),__FILE__,__LINE__)
+#undef  signal_thread
+#define signal_thread(tid,signo) \
+        ptt_pthread_kill(tid,signo,__FILE__,__LINE__)
+#endif /* OPTION_PTTRACE */
+
 /* Pattern for displaying the thread_id */
 #define TIDPAT "%8.8lX"
-#if defined(WIN32) && !defined(OPTION_FTHREADS)
-#undef  TIDPAT
-#define TIDPAT "%p"
-#endif // defined(WIN32) && !defined(OPTION_FTHREADS)
 
 /*-------------------------------------------------------------------*/
 /* Prototype definitions for device handler functions                */
@@ -409,7 +465,8 @@ typedef struct _REGS {                  /* Processor registers       */
 #ifdef WIN32
         struct  timeval lasttod;        /* Last gettimeofday         */
 #endif
-        TLBE    tlb[256];               /* Translation lookaside buf */
+        int     tlbID;                  /* Validation identifier     */
+        TLBE    tlb[TLBN];              /* Translation lookaside buf */
         TID     cputid;                 /* CPU thread identifier     */
         DW      gr[16];                 /* General registers         */
         DW      cr[16];                 /* Control registers         */
@@ -727,10 +784,12 @@ typedef struct _SYSBLK {
         U32     waitmask;               /* Mask for waiting CPUs     */
         U32     started_mask;           /* Mask for started CPUs     */
         int     broadcast_code;         /* Broadcast code            */
-#define BROADCAST_PTLB 1                /* Broadcast purge tlb       */
-#define BROADCAST_PALB 2                /* Broadcast purge alb       */
-#define BROADCAST_ITLB 4                /* Broadcast invalidate tlb  */
-        U64     broadcast_pfra;         /* Broadcast pfra            */
+#define BROADCAST_PTLB  1               /* Broadcast purge tlb       */
+#define BROADCAST_PALB  2               /* Broadcast purge alb       */
+#define BROADCAST_PTLBE 4               /* Broadcast purge tlb entry */
+        DW      broadcast_pfra;         /* Broadcast pfra            */
+#define BROADCAST_PFRA_G broadcast_pfra.D
+#define BROADCAST_PFRA_L broadcast_pfra.F.L.F
         int     broadcast_count;        /* Broadcast CPU count       */
         COND    broadcast_cond;         /* Broadcast condition       */
         U64     breakaddr;              /* Breakpoint address        */
@@ -789,6 +848,13 @@ typedef struct _SYSBLK {
         uid_t   ruid, euid, suid;
         gid_t   rgid, egid, sgid;
 #endif /*!defined(NO_SETUID)*/
+
+#if defined(OPTION_COUNTING)
+        long long count[OPTION_COUNTING];
+#define COUNT(n) sysblk.count[(n)]++
+#else
+#define COUNT(n)
+#endif
 
 #if defined(OPTION_INSTRUCTION_COUNTING)
 #define IMAP_FIRST sysblk.imap01
@@ -1092,7 +1158,7 @@ typedef struct _DEVBLK {
                 pcipending:1,           /* 1=PCI interrupt pending   */
                 attnpending:1,          /* 1=ATTN interrupt pending  */
                 startpending:1;         /* 1=startio pending         */
-
+#define IOPENDING(_dev) ((_dev)->pending || (_dev)->pcipending || (_dev)->attnpending)
         int     crwpending;             /* 1=CRW pending             */
         int     syncio_active;          /* 1=Synchronous I/O active  */
         int     syncio_retry;           /* 1=Retry I/O asynchronously*/
@@ -1735,6 +1801,17 @@ int parse_args (BYTE* p, int maxargc, BYTE** pargv, int* pargc);
 #define SIE_INTERCEPT_IOINTP   (-16)    /* I/O Interruption pending  */
 #define SIE_INTERCEPT_IOINST   (-17)    /* I/O Instruction           */
 
+#if defined(SIE_DEBUG_PERFMON)
+#define SIE_PERF_ENTER          0       /* SIE performance monitor   */
+#define SIE_PERF_ENTER_F       -31      /* Enter Fast (retain state) */
+#define SIE_PERF_EXIT          -30      /* SIE exit                  */
+#define SIE_PERF_RUNSIE        -29      /* run_sie entered           */
+#define SIE_PERF_RUNLOOP_1     -28      /* run_sie runloop 1         */
+#define SIE_PERF_RUNLOOP_2     -27      /* run_sue runloop 2         */
+#define SIE_PERF_INTCHECK      -26      /* run_sie intcheck          */
+#define SIE_PERF_EXEC          -25      /* run_sie execute inst      */
+#define SIE_PERF_EXEC_U        -24      /* run_sie unrolled exec     */
+#endif /*defined(SIE_DEBUG_PERFMON)*/
 
 /* Functions in module panel.c */
 #if defined(OPTION_DYNAMIC_LOAD)

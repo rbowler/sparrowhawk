@@ -4182,6 +4182,13 @@ int             gctab[5]= {             /* default gcol parameters   */
                 continue;
             }
 
+            /* Bypass if not opened read-write */
+            if (cckd->open[cckd->sfn] != CCKD_OPEN_RW)
+            {
+                release_lock (&cckd->iolock);
+                continue;
+            }
+
             /* If OPENED bit not on then flush if updated */
             if (!(cckd->cdevhdr[cckd->sfn].options & CCKD_OPENED))
             {
@@ -4390,14 +4397,27 @@ int             asw;                    /* New spc after current spc */
             rcoff = lseek (fd, (off_t)bpos, SEEK_SET);
             if (rcoff < 0)
             {
-                logmsg ("%4.4X:",dev->devnum); logmsg (_("HHCCD180E gcperc lseek error file[%d] offset 0x%llx: %s\n"),
+                logmsg ("%4.4X:",dev->devnum);
+                logmsg (_("HHCCD180E gcperc lseek error file[%d] "
+                          "offset 0x%llx: %s\n"),
                         sfx, (long long)bpos, strerror(errno));
                 goto cckd_gc_perc_error;
             }
             rc = read (fd, &buf, blen);
+            if (rc < 0)
+            {
+                logmsg ("%4.4X:",dev->devnum);
+                logmsg (_("HHCCD181E gcperc read error file[%d] "
+                          "offset 0x%llx (expected %d bytes)\n"
+                           "         error: %s\n"),
+                        sfx, (long long)bpos, blen, strerror(errno));
+                goto cckd_gc_perc_error;
+            }
             if (rc < (int)blen)
             {
-                logmsg ("%4.4X:",dev->devnum); logmsg (_("HHCCD181E gcperc read error file[%d] offset 0x%llx: %d,%d %s\n"),
+                logmsg ("%4.4X:",dev->devnum);
+                logmsg (_("HHCCD184E gcperc read too few bytes in file[%d] "
+                          "offset 0x%llx: read %d, expected %d\n"),
                         sfx, (long long)bpos, rc, blen, strerror(errno));
                 goto cckd_gc_perc_error;
             }
@@ -5106,12 +5126,12 @@ CCKD_TRACE     *i, *p;                  /* Trace table pointers      */
     cckdblk.itrace = NULL;
     sleep (1);
     p = cckdblk.itracep;
+    if (p >= cckdblk.itracex) p = i;
     do
     {
-        if (p >= cckdblk.itracex) p = i;
         if (p[0] != '\0')
             logmsg ("%s", (char *)p);
-        ++p;
+        if (++p >= cckdblk.itracex) p = i;
     } while (p != cckdblk.itracep);
     memset (i, 0, cckdblk.itracen * sizeof(CCKD_TRACE));
     cckdblk.itracep = i;

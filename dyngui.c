@@ -57,9 +57,11 @@ SYSBLK   *psysblk;                      // (ptr to Herc's SYSBLK structure)
 #define sysblk (*psysblk)
 void *(*panel_command) (void *);
 #endif
-FILE*    fInputStream         = NULL;   // (stdin stream)
-FILE*    fStatusStream        = NULL;   // (stderr stream)
-int      nInputStreamFileNum  =  -1;    // (file descriptor for stdin stream)
+static FILE*    fInputStream         = NULL;   // (stdin stream)
+static FILE*    fStatusStream        = NULL;   // (stderr stream)
+static int      nInputStreamFileNum  =  -1;    // (file descriptor for stdin stream)
+
+static int      gui_nounload = 0;              // (nounload indicator)
 
 // The device query buffer SHOULD be the maximum device filename length
 // plus the maximum descriptive length of any/all options for the device,
@@ -770,7 +772,7 @@ void  UpdateDeviceStatus ()
 
         if (pDEVBLK->filename[0] || (pDEVBLK->console && pDEVBLK->connected)) chOnlineStat  = '1';
         if (pDEVBLK->busy)                                                    chBusyStat    = '1';
-        if (pDEVBLK->pending || pDEVBLK->pcipending)                          chPendingStat = '1';
+        if (IOPENDING(pDEVBLK))                                               chPendingStat = '1';
         if (pDEVBLK->fd > max(STDIN_FILENO,max(STDOUT_FILENO,STDERR_FILENO))) chOpenStat    = '1';
 
         // Send status message back to gui...
@@ -847,6 +849,9 @@ void *(*next_debug_call)(REGS *);
 
 void  Initialize ()
 {
+    // reject any unload attempt
+    gui_nounload = 1;
+
     // Initialize streams...
 
     fInputStream  = INPUT_STREAM_FILE_PTR;
@@ -1005,6 +1010,9 @@ HDL_FINAL_SECTION;
 {
     usleep(100000);             // (brief delay to give GUI time
                                 //  to display ALL shutdown msgs)
+    if(gui_nounload)
+        return gui_nounload;    // (reject unloads when activated)
+
     bDoneProcessing = TRUE;     // (now force main loop to exit)
 }
 END_FINAL_SECTION;

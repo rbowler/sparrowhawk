@@ -1,7 +1,7 @@
 AC_INIT(hercules.h)
 AC_CONFIG_AUX_DIR(autoconf)
 
-AM_INIT_AUTOMAKE(hercules,3.00)
+AM_INIT_AUTOMAKE(hercules,3.01)
 AM_CONFIG_HEADER(config.h)
 AM_MAINTAINER_MODE
 
@@ -71,7 +71,6 @@ is_cygwin=false
 case "$host_os" in
         darwin*)
                if test $host_vendor = apple ; then
-                   CPPFLAGS=-traditional-cpp
                    AC_DEFINE([_BSD_SOCKLEN_T_],[int])
                    AC_DEFINE([_INTL_REDIRECT_MACROS])
 ##            Do whatever is necessary to get the following symbol defined
@@ -135,6 +134,9 @@ have_lt_dlopen=true
 have_dlopen=false
 # AC_CHECK_LIB(ltdl,lt_dlopen)
 # AC_CHECK_LIB(ltdl,lt_dlopen, have_lt_dlopen=true, have_lt_dlopen=false )
+
+AC_CHECK_LIB(gcrypt,gcry_cipher_open, have_gcrypt=true, have_gcrypt=false )
+AM_CONDITIONAL(HAVE_GCRYPT, [test "x$have_gcrypt" = "xtrue"])
 
 opt_dynamic_load=true
 
@@ -436,6 +438,32 @@ int main ( int argc, char* argv[] )
 esac
 fi
 
+if test "$GCC" = "yes"; then
+case "$host_os" in
+      darwin*)
+          AC_CACHE_CHECK([for OS X gcc preprocessor macro argument count bug],
+                         [ac_cv_darwin_gcc_cpp_bug],
+                         [AC_COMPILE_IFELSE([
+#include <stdio.h>
+#define MACRO(_x,_args...)  printf(_x, ## _args)
+int  main( int argc, char **argv, char **arge )
+{
+        MACRO( "bare printf\n" );
+        return 0;
+}
+                         ],
+                         [ac_cv_darwin_gcc_cpp_bug=no],
+                         [ac_cv_darwin_gcc_cpp_bug=yes])])
+          ;;
+      *)
+          ac_cv_darwin_gcc_cpp_bug=no
+          ;;
+esac
+
+if test x$ac_cv_darwin_gcc_cpp_bug != xno; then
+  CPPFLAGS="${CPPFLAGS} -traditional-cpp"
+fi
+fi
 
 case "$host_cpu" in
           i486|i586|i686) ;;
@@ -569,9 +597,20 @@ if test x$auto_optimize = xtrue; then
           powerpc)
             OFLAGS="-O3 $OFLAGS"
             ;;
-          i586|i686)
+          i386|i486|i586|i686)
+            ac_xarch=$host_cpu
             if test "$GCC" = "yes"; then
-                OFLAGS="-O3 -march=$host_cpu $OFLAGS"
+                if ${CC-cc} -E - << __EOF | fgrep "yes" > /dev/null 2>&1
+#if __GNUC__ == 2 && __GNUC_MINOR__ == 96
+yes
+#endif
+__EOF
+                then
+                    if test $host_cpu = i686; then
+                        ac_xarch=i586
+                    fi
+                fi
+                OFLAGS="-O3 -march=$ac_xarch $OFLAGS"
                 if test x$debug != xtrue && test x$ac_cv_cygwin_gcc_alloca_bug != xyes; then
                   OFLAGS="-fomit-frame-pointer $OFLAGS"
                 elif test x$ac_cv_cygwin_gcc_alloca_bug = xyes; then
@@ -603,18 +642,21 @@ AC_ARG_ENABLE(custom,
               [AC_DEFINE_UNQUOTED([CUSTOM_BUILD_STRING], "${enableval}") ])
 
 dnl This is ugly. The object is to get the value of PKGDATADIR into
-dnl config.h, but this is the only way I've found to do so. The incantation
-dnl "${prefix}/share" is needed because ${datadir} doesn't expand to the
+dnl config.h, but this is the only way I've found to do so. All of this
+dnl rigamarole is needed because ${datadir} doesn't expand to the
 dnl desired data directory. If there's a better way to get there, PLEASE
 dnl replace this. --JRM
 
-dnl If DEST is set, we're doing an RPM build, and we want to use that
+dnl If DESTPREFIX is set, we're doing an RPM build, and we want to use that
 dnl value. If it's not set, and prefix is set and not equal to NONE, then
 dnl we'll use that. If prefix is NONE, then default to /usr/local.
+dnl Note: This prefix has /share/locale, /share/$PACKAGE, or /lib/$PACKAGE
+dnl appended in the next step, so it must NOT have those components included
+dnl in $DESTPREFIX itself.
 
 if test "x${DESTPREFIX}" = "x"; then
   if test "x$prefix" = "xNONE"; then
-    DESTPREFIX="/usr/local/share"
+    DESTPREFIX="/usr/local"
   else
     DESTPREFIX="${prefix}"
   fi
@@ -626,7 +668,10 @@ LOCALEDIR="${DESTPREFIX}/share/locale"
 AC_DEFINE_UNQUOTED([LOCALEDIR], "${LOCALEDIR}")
 MODULESDIR="${DESTPREFIX}/lib/${PACKAGE}"
 AC_DEFINE_UNQUOTED([MODULESDIR], "${MODULESDIR}")
-AC_MSG_NOTICE([Package destination directory prefix is ${DESTPREFIX}])
+AC_MSG_NOTICE([Package destination directory prefixes:])
+AC_MSG_NOTICE([Data:      ${PKGDATADIR}])
+AC_MSG_NOTICE([Locale:    ${LOCALEDIR}])
+AC_MSG_NOTICE([Libraries: ${MODULESDIR}])
 
 AH_TEMPLATE([NO_ATTR_REGPARM],
             [Define if your gcc does not support __attribute__((regparm(n)))])
@@ -687,4 +732,4 @@ AH_TEMPLATE([NEED_GETOPT_OPTRESET],
 AH_TEMPLATE([MODULESDIR],
             [Directory where HERCULES modules are installed])
 
-AC_OUTPUT([Makefile util/Makefile html/Makefile po/Makefile.in po/Makefile man/Makefile intl/Makefile m4/Makefile ])
+AC_OUTPUT([Makefile util/Makefile html/Makefile crypto/Makefile po/Makefile.in po/Makefile man/Makefile intl/Makefile m4/Makefile ])

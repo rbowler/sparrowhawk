@@ -79,6 +79,9 @@ static const char *build_info[] = {
 #endif
 #if defined(OPTION_DYNAMIC_LOAD)
     "With Dynamic loading support",
+#if defined(MODULESDIR)
+    "Loadable module default base directory is "MODULESDIR,
+#endif
 #else
     "Without Dynamic loading support",
 #endif
@@ -94,6 +97,9 @@ static const char *build_info[] = {
 
 #if defined(OPTION_HTTP_SERVER)
     "HTTP Server support",
+#if defined(PKGDATADIR)
+    "HTTP document default root directory is "PKGDATADIR,
+#endif
 #endif
 
 #if defined(NO_IEEE_SUPPORT)
@@ -133,7 +139,7 @@ extern int extgui;              /* external gui present */
 /*-------------------------------------------------------------------*/
 /* Display version and copyright                                     */
 /*-------------------------------------------------------------------*/
-void display_version (FILE *f, char *prog)
+void display_version (FILE *f, char *prog, const char verbose)
 {
     unsigned int i;
 
@@ -157,20 +163,25 @@ void display_version (FILE *f, char *prog)
 
     fprintf(f, "%s\n", HERCULES_COPYRIGHT);
 
-        /* Log build date/time */
+        /* If we're being verbose, display the rest of the info */
+    if (verbose)
+    {
+    
+            /* Log build date/time */
 
-    fprintf (f, _("Built on %s at %s\n"), __DATE__, __TIME__);
+        fprintf (f, _("Built on %s at %s\n"), __DATE__, __TIME__);
 
-        /* Log "unusual" build options */
+            /* Log "unusual" build options */
 
-    fprintf (f, _("Build information:\n"));
+        fprintf (f, _("Build information:\n"));
 
-    if (sizeof(build_info) == 0)
-      fprintf(f, "  (none)\n");
-    else
-      for( i = 0 ; i < sizeof(build_info) / sizeof(build_info[0]) ; ++i )
-        fprintf(f, "  %s\n", build_info[i]);
+        if (sizeof(build_info) == 0)
+          fprintf(f, "  (none)\n");
+        else
+        for( i = 0 ; i < sizeof(build_info) / sizeof(build_info[0]) ; ++i )
+          fprintf(f, "  %s\n", build_info[i]);
 
-    display_hostinfo(f);
+        display_hostinfo(f);
+    }    
 
 } /* end function display_version */

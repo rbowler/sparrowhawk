@@ -205,7 +205,7 @@ int     cc = 0;                         /* Returned condition code   */
         devcount++;
 
         /* Test for pending interrupt */
-        if (dev->pending || dev->pcipending)
+        if (IOPENDING(dev))
         {
             cc = 1;
             break;
@@ -247,7 +247,7 @@ IOINT *ioint=NULL;
     }
     else
     {
-        if (dev->pending || dev->pcipending || dev->attnpending)
+        if (IOPENDING(dev))
         {
             /* Set condition code 1 if interrupt pending */
             cc = 1;
@@ -360,10 +360,10 @@ int      pending = 0;                   /* New interrupt pending     */
             dev->scsw.flag2 |= SCSW2_FC_HALT;
 
             /* Clear pending interrupts */
-            dev->pending = dev->pcipending = 0;
+            dev->pending = dev->pcipending = dev->attnpending = 0;
         }
     }
-    else if (!dev->attnpending && !dev->pending && !dev->pcipending && dev->ctctype != CTC_LCS)
+    else if (!IOPENDING(dev) && dev->ctctype != CTC_LCS)
     {
         /* Set condition code 1 */
         cc = 1;
@@ -910,7 +910,7 @@ int pending = 0;
         dev->scsw.flag3 &= ~SCSW3_SC_PEND;
 
         /* Clear any pending interrupt */
-        dev->pending = dev->pcipending = 0;
+        dev->pending = dev->pcipending = dev->attnpending = 0;
 
         /* Signal the subchannel to resume if it is suspended */
         if (dev->scsw.flag3 & SCSW3_AC_SUSP)
@@ -1063,8 +1063,11 @@ int resume_subchan (REGS *regs, DEVBLK *dev)
 void device_reset (DEVBLK *dev)
 {
     obtain_lock (&dev->lock);
+    DEQUEUE_IO_INTERRUPT(&dev->ioint);
+    DEQUEUE_IO_INTERRUPT(&dev->pciioint);
+    DEQUEUE_IO_INTERRUPT(&dev->attnioint);
     dev->busy = dev->reserved = dev->pending = dev->pcipending =
-    dev->startpending = 0;
+    dev->attnpending = dev->startpending = 0;
     dev->ioactive = DEV_SYS_NONE;
     if (dev->suspended)
     {
@@ -1183,6 +1186,8 @@ int console = 0;
 /* Resets status of all devices ready for IPL.  Note that device     */
 /* positioning is not affected by I/O reset; thus the system can     */
 /* be IPLed from current position in a tape or card reader file.     */
+/*                                                                   */
+/* Caller holds `intlock'                                            */
 /*-------------------------------------------------------------------*/
 void
 io_reset (void)
@@ -1197,8 +1202,6 @@ int i;
         sysblk.regs[i].chanset = i;
 // #endif /*defined(FEATURE_CHANNEL_SWITCHING)*/
 
-    obtain_lock (&sysblk.intlock);
-
     /* Reset each device in the configuration */
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
     {
@@ -1208,8 +1211,6 @@ int i;
 
     /* No crws pending anymore */
     OFF_IC_CHANRPT;
-
-    release_lock (&sysblk.intlock);
 
     /* Signal console thread to redrive select */
     if (console)
@@ -1701,8 +1702,7 @@ int ARCH_DEP(device_attention) (DEVBLK *dev, BYTE unitstat)
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
     /* If device is already busy or interrupt pending */
-    if (dev->busy || dev->pending || dev->pcipending || dev->attnpending
-     || (dev->scsw.flag3 & SCSW3_SC_PEND))
+    if (dev->busy || IOPENDING(dev) || (dev->scsw.flag3 & SCSW3_SC_PEND))
     {
         /* Resume the suspended device with attention set */
         if(dev->scsw.flag3 & SCSW3_AC_SUSP)

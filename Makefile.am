@@ -10,8 +10,11 @@ ACLOCAL_AMFLAGS  = -I m4
 
 lns=@LN_S@
 
-SUBDIRS =    intl m4 \
-          po util html man
+if HAVE_GCRYPT
+SUBDIRS = intl m4 po util html man crypto
+else
+SUBDIRS = intl m4 po util html man
+endif
 
 LDADD = @LTLIBINTL@ @LTLIBICONV@ @LIBS@
 
@@ -279,7 +282,8 @@ endif
                         dasdtab.c   \
                         cache.c     \
                         dasdutil.c  \
-                        shared.c 
+                        shared.c    \
+                        pttrace.c
 
   libhercd_la_LDFLAGS = $(LIB_LD_FLAGS)
 
@@ -311,6 +315,7 @@ endif
   libherc_la_SOURCES = impl.c      \
                        config.c    \
                        panel.c     \
+                       history.c   \
                        ipl.c       \
                        assist.c    \
                        dat.c       \
@@ -585,6 +590,8 @@ noinst_HEADERS = fishhang.h \
                  ltdl.h     \
                  herc_getopt.h \
                  service.h  \
+                 pttrace.h  \
+                 history.h  \
                  $(extra_dynamic_SRC)
 
 #########################################################

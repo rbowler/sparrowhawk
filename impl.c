@@ -165,11 +165,14 @@ TID     rctid;                          /* RC file thread identifier */
     FishHangInit(__FILE__,__LINE__);
 #endif // defined(FISH_HANG)
 
+    /* Initialize 'hostinfo' BEFORE display_version is called */
+    init_hostinfo();
+
     if(isatty(STDERR_FILENO))
-        display_version (stderr, "Hercules ");
+        display_version (stderr, "Hercules ", TRUE);
     else
         if(isatty(STDOUT_FILENO))
-            display_version (stdout, "Hercules ");
+            display_version (stdout, "Hercules ", TRUE);
 
     /* Clear the system configuration block */
     memset (&sysblk, 0, sizeof(SYSBLK));
@@ -191,7 +194,7 @@ TID     rctid;                          /* RC file thread identifier */
     usleep(100000);     /* wait a bit before issuing messages */
 
     /* Display the version identifier */
-    display_version (stdout, "Hercules ");
+    display_version (stdout, "Hercules ", TRUE);
 
 #if defined(OPTION_DYNAMIC_LOAD)
     /* Initialize the hercules dynamic loader */
@@ -213,7 +216,14 @@ TID     rctid;                          /* RC file thread identifier */
     if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
     {
 #if defined(OPTION_DYNAMIC_LOAD)
-        hdl_load("dyngui",HDL_LOAD_NOUNLOAD);
+        if (hdl_load("dyngui",HDL_LOAD_DEFAULT) != 0)
+        {
+            usleep(10000); /* (give logger thread time to issue
+                               preceding HHCHD007E message) */
+            fprintf (stderr,
+                _("HHCIN008S DYNGUI.DLL load failed; Hercules terminated.\n"));
+            delayed_exit(1);
+        }
 #endif /* defined(OPTION_DYNAMIC_LOAD) */
         argc--;
     }
@@ -222,8 +232,6 @@ TID     rctid;                          /* RC file thread identifier */
 #if defined(BUILTIN_STRERROR_R)
     strerror_r_init();
 #endif /* defined(BUILTIN_STRERROR_R) */
-
-    init_hostinfo();
 
     /* Get name of configuration file or default to hercules.cnf */
     if(!(cfgfile = getenv("HERCULES_CNF")))
@@ -378,6 +386,8 @@ TID     rctid;                          /* RC file thread identifier */
 
     /* Start up the RC file processing thread */
     create_thread(&rctid,&sysblk.detattr,process_rc_file,NULL);
+
+    history_init();
 
     /* Activate the control panel */
     if(!daemon_mode)

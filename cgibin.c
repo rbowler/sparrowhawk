@@ -733,8 +733,8 @@ BYTE   buf[80];
                                    class,
                                    dev->devtype,
                                    (dev->fd > 2 ? "open " : ""),
-                                   (dev-> busy ? "busy " : ""),
-                                   ((dev->pending || dev->pcipending) ? "pending " : ""));
+                                   (dev->busy ? "busy " : ""),
+                                   (IOPENDING(dev) ? "pending " : ""));
         }
 
     fprintf(webblk->hsock,"</table>\n");
@@ -995,7 +995,7 @@ void cgibin_debug_version_info(WEBBLK *webblk)
 
     fprintf(webblk->hsock,"<h1>Hercules Version Information</h1>\n"
                           "<pre>\n");
-    display_version(webblk->hsock,"Hercules HTTP Server ");
+    display_version(webblk->hsock,"Hercules HTTP Server ", TRUE);
     fprintf(webblk->hsock,"</pre>\n");
 
     html_footer(webblk);

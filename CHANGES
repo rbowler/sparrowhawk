@@ -1,5 +1,50 @@
 #### Don't forget to change the version number in configure.ac! ####
 
+29 Nov 2003 Fix race condition in console.c recv_3270_data causing 100%
+            CPU utilization, zero MIPS" Hercules hang symptom (version
+            in configure.ac version bumped to 3.00a.5) - Fish
+29 Nov 2003 Fix "passing arg n of <function> from incompatible pointer type"
+            warnings in codepage.c, dat.h, stack.c, xstore.c - Fish
+29 Nov 2003 Fix reset_channel_path - Mark Drummond by Greg Smith
+28 Nov 2003 Flush Buffer On lost data condition in 2703 handler - Ivan Warren
+27 Nov 2003 CTCI/LCS: fix enqueue full frame buffer loop; enable thread
+            joining at LCS close - Fish
+26 Nov 2003 Performance enhancements for CLM/ICM/STCM and XC - Greg Smith
+26 Nov 2003 ia32 assists for virtual store memcpy - Greg Smith
+26 Nov 2003 console.c: ignore "Negotiate About Window Size" from telnet
+            client so e.g. WinNT telnet client works - Greg Price by Fish
+26 Nov 2003 Add missing 'filename' initialization for CTCI devices - Fish
+26 Nov 2003 Enable thread joining logic in logger_term - Fish
+24 Nov 2003 Fixed fthreads: basically almost a complete rewrite, involving
+            thread joining support and & mutex attribute support; version
+            number in configure.ac bumped to 3.00a.3 - Fish
+23 Nov 2003 TLB fixes - Greg Smith
+18 Nov 2003 ptt trace updates - Fish & Greg Smith
+17 Nov 2003 Bypass garbage collection if not opened read/write - Greg Smith
+13 Nov 2003 Additional checks for pending attention interrupt - Greg Smith
+11 Nov 2003 bumped configure.ac version to 3.00a.2 just for fun - Fish
+11 Nov 2003 fix hst command history logic buffer overflow bug - Fish
+11 Nov 2003 ieee.c floating point fixes: fix bug in FP_INFINITE, FP_NAN,
+            and FP_ZERO handling for CFDBR, CFEBR, CGDBR, and CGEBR,
+            fix int divide by zero crash preceded by msg "lbfpston:
+            unexpectedly converting an Infinite" - Willem & Fish
+10 Nov 2003 Clear attention interrupt pending during device reset - Greg Smith
+08 Nov 2003 Added command history to panel.c - Volker Bandke, code by Marian Gasparovic
+07 Nov 2003 Added optimization problem bypass for GCC 2.96 - Ivan Warren
+30 Oct 2003 Added crypto functions - Bernard van der Helm / Jan Jaeger
+24 Oct 2003 pttrace.c threads trace patch - Greg
+22 Oct 2003 shared_server tolerates unix socket problems - Greg
+20 Oct 2003 Prevent dyngui unload when gui active - Jan Jaeger
+17 Oct 2003 Make sure 'init_hostinfo' called BEFORE 'display_version' - Fish
+16 Oct 2003 Always updagte `ints_state' (except PER) with `intlock' held - Greg
+13 Oct 2003 fix 'ipending' cmd to display ALL pending interrupts - Fish
+13 Oct 2003 dequeue ALL i/o ints in device_reset - Fish
+13 Oct 2003 impl.c: terminate w/HHCIN008S if dyngui.dll load fails - Fish
+12 Oct 2003 dequeue i/o int fix in device_reset - Jan Jaeger
+11 Oct 2003 Added verbose flag to display_version, and set to FALSE on
+            standalone utilities - Jay Maynard
+07 Oct 2003 Shared library fix for dyninst.c - Jan Jaeger
+06 Oct 2003 Enable ia32 assembler assists for -fPIC - Greg Smith
 02 Oct 2003 Issue warning message when restoring non-IEBCOPY xmit file
             using dasdload - Greg Smith
 01 Oct 2003 Fix segmentation fault using NPTL threads and no console

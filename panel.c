@@ -28,6 +28,7 @@
 #include "hercules.h"
 #include "devtype.h"
 #include "opcode.h"
+#include "history.h"
 // #include "inline.h"
 
 #define  DISPLAY_INSTRUCTION_OPERANDS
@@ -123,48 +124,48 @@
 #define ANSI_RESET_WHT_BLK   "\x1B[0;37;40m"
 #define ANSI_CLEAR_SCREEN    "\x1B[2J"
 
-int NPDup = 0;          /* 1 when new panel is up */
-int NPDinit = 0;        /* 1 when new panel is initialized */
-int NPhelpup = 0;       /* 1 when displaying help panel */
-int NPhelpdown = 0;     /* 1 when the help panel is brought down */
-int NPregdisp = 0;      /* which regs are displayed 0=gpr, 1=cr, 2=ar, 3=fpr */
-int NPaddress = 0;      /* Address switches */
-int NPdata = 0;         /* Data switches */
-int NPipl = 0;          /* IPL address switches */
+int  NPDup = 0;         /* 1 when new panel is up */
+int  NPDinit = 0;       /* 1 when new panel is initialized */
+int  NPhelpup = 0;      /* 1 when displaying help panel */
+int  NPhelpdown = 0;    /* 1 when the help panel is brought down */
+int  NPregdisp = 0;     /* which regs are displayed 0=gpr, 1=cr, 2=ar, 3=fpr */
+int  NPaddress = 0;     /* Address switches */
+int  NPdata = 0;        /* Data switches */
+int  NPipl = 0;         /* IPL address switches */
 
-int NPcmd = 0;          /* 1 when command mode for NP is in effect */
-int NPdataentry = 0;    /* 1 when data entry for NP is in progress */
-int NPdevsel = 0;       /* 1 when device selection is in progress */
+int  NPcmd = 0;         /* 1 when command mode for NP is in effect */
+int  NPdataentry = 0;   /* 1 when data entry for NP is in progress */
+int  NPdevsel = 0;      /* 1 when device selection is in progress */
 char NPpending;         /* Command which is pending data entry */
 char NPentered[128];    /* Data which was entered */
 char NPprompt1[40];     /* Prompts for left and right bottom of screen */
 char NPprompt2[40];
 char NPsel2;            /* Command letter to trigger 2nd phase of dev sel */
 char NPdevice;          /* Which device selected */
-int NPasgn;             /* Index to device being reassigned */
-int NPlastdev;          /* Number of devices */
-int NPdevaddr[24];      /* current device addresses */
+int  NPasgn;            /* Index to device being reassigned */
+int  NPlastdev;         /* Number of devices */
+int  NPdevaddr[24];     /* current device addresses */
 char NPdevstr[16];      /* device - stringed */
 
 /* the following fields are current states, to detect changes and redisplay */
 
 char NPstate[24];       /* Current displayed CPU state */
-U32 NPregs[16];         /* Current displayed reg values */
-int NPbusy[24];         /* Current busy state of displayed devices */
-int NPpend[24];         /* Current int pending state */
-int NPopen[24];         /* Current open state */
-int NPonline[24];       /* Current online state of devices */
-char NPdevname[24][128]; /* Current name assignments */
-int NPcuraddr;          /* current addr switches */
-int NPcurdata;          /* current data switches */
-int NPcurrg;            /* current register set displayed */
-int NPcuripl;           /* current IPL switches */
-int NPcurpos[2];        /* Cursor position (row, col) */
+U32  NPregs[16];        /* Current displayed reg values */
+int  NPbusy[24];        /* Current busy state of displayed devices */
+int  NPpend[24];        /* Current int pending state */
+int  NPopen[24];        /* Current open state */
+int  NPonline[24];      /* Current online state of devices */
+char NPdevname[24][128];/* Current name assignments */
+int  NPcuraddr;         /* current addr switches */
+int  NPcurdata;         /* current data switches */
+int  NPcurrg;           /* current register set displayed */
+int  NPcuripl;          /* current IPL switches */
+int  NPcurpos[2];       /* Cursor position (row, col) */
 char NPcolor[24];       /* color string */
-int NPdatalen;          /* Length of data */
+int  NPdatalen;         /* Length of data */
 char NPcurprompt1[40];
 char NPcurprompt2[40];
-U32 NPaaddr;
+U32  NPaaddr;
 
 #define MAX_MSGS                800     /* Number of slots in buffer */
 #define MSG_SIZE                80      /* Size of one message       */
@@ -195,10 +196,10 @@ int     compat_shutdown;                /* Shutdown flag             */
 
 #if defined(OPTION_DYNAMIC_LOAD)
 void *(*panel_command) (void *);
-void (*panel_display) (void);
-void (*daemon_task) (void);
-int (*config_command) (int argc, char *argv[], char *cmdline);
-int (*system_command) (int argc, char *argv[], char *cmdline);
+void  (*panel_display) (void);
+void  (*daemon_task) (void);
+int   (*config_command) (int argc, char *argv[], char *cmdline);
+int   (*system_command) (int argc, char *argv[], char *cmdline);
 void *(*debug_cpu_state) (REGS *);
 void *(*debug_device_state) (DEVBLK *);
 void *(*debug_program_interrupt) (REGS *, int);
@@ -210,8 +211,8 @@ void *(*debug_chsc_unknown_request) (void *, void *, REGS *);
 #endif
 
 static char *lmsbuf;
-static int  lmsnum;
-static int  lmscnt;
+static int   lmsnum;
+static int   lmscnt;
 static void *panel_compat_thread(void *arg)
 {
 
@@ -663,7 +664,7 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
                   (strlen(dev->filename) > 0))
                        online = 1;
          if (dev->busy) busy = 1;
-         if (dev->pending || dev->pcipending) pend = 1;
+         if (IOPENDING(dev)) pend = 1;
          if (dev->fd > 2) open = 1;
          if (online != NPonline[a - 1]) {
               fprintf(confp, ANSI_CURSOR, p, 40);
@@ -830,7 +831,8 @@ BYTE    redraw_status;                  /* 1=Redraw status line      */
 BYTE    readbuf[MSG_SIZE];              /* Message read buffer       */
 int     readoff = 0;                    /* Number of bytes in readbuf*/
 BYTE    cmdline[CMD_SIZE+1];            /* Command line buffer       */
-int     cmdoff = 0;                     /* Number of bytes in cmdline*/
+int     cmdoff = 0;                     /* Cursor position in cmdline*/
+int     cmdlen = 0;                     /* Number of bytes in cmdline*/  
 BYTE    c;                              /* Character work area       */
 FILE   *confp;                          /* Console file pointer      */
 struct termios kbattr;                  /* Terminal I/O structure    */
@@ -845,6 +847,8 @@ struct  timeval tv;                     /* Select timeout structure  */
 
 #if 1
     panel_compat_init();
+    for (i=0; i < CMD_SIZE+1; i++)
+      cmdline[i] = 0;
 #endif
 
     /* Display thread started message on control panel */
@@ -934,8 +938,8 @@ struct  timeval tv;                     /* Select timeout structure  */
         if (FD_ISSET(keybfd, &readset))
         {
             /* Read character(s) from the keyboard */
-
             kblen = read (keybfd, kbbuf, kbbufsize-1);
+
             if (kblen < 0)
             {
                 fprintf (stderr,
@@ -943,6 +947,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                         strerror(errno));
                 break;
             }
+
             kbbuf[kblen] = '\0';
 
             /* =NP= : Intercept NP commands & process */
@@ -1169,9 +1174,14 @@ struct  timeval tv;                     /* Select timeout structure  */
                 if (strcmp(kbbuf+i, KBD_UP_ARROW) == 0
                     || strcmp(kbbuf+i, xKBD_UP_ARROW) == 0)
                 {
-                    if (firstmsgn == 0) break;
-                    firstmsgn--;
-                    redraw_msgs = 1;
+                    if (history_prev() != -1) {
+                        strcpy(cmdline, historyCmdLine);
+                        cmdoff = strlen(cmdline);
+                        cmdlen = cmdoff;
+                        NPDup = 0;
+                        NPDinit = 1;
+                        redraw_cmd = 1;
+                    }
                     break;
                 }
 
@@ -1179,9 +1189,14 @@ struct  timeval tv;                     /* Select timeout structure  */
                 if (strcmp(kbbuf+i, KBD_DOWN_ARROW) == 0
                     || strcmp(kbbuf+i, xKBD_DOWN_ARROW) == 0)
                 {
-                    if (firstmsgn + NUM_LINES >= nummsgs) break;
-                    firstmsgn++;
-                    redraw_msgs = 1;
+                    if (history_next() != -1) {
+                        strcpy(cmdline, historyCmdLine);
+                        cmdoff = strlen(cmdline);
+                        cmdlen = cmdoff;
+                        NPDup = 0;
+                        NPDinit = 1;
+                        redraw_cmd = 1;
+                    }
                     break;
                 }
 
@@ -1206,13 +1221,36 @@ struct  timeval tv;                     /* Select timeout structure  */
                     break;
                 }
 
-                /* Process backspace character               */
-                /* DEL (\x7F), KBD_LEFT_ARROW and KBD_DELETE */
-                /* are all equivalent to backspace           */
-                if (kbbuf[i] == '\b' || kbbuf[i] == '\x7F'
-                    || strcmp(kbbuf+i, KBD_LEFT_ARROW) == 0
-                    || strcmp(kbbuf+i, xKBD_LEFT_ARROW) == 0
-                    || strcmp(kbbuf+i, KBD_DELETE) == 0)
+                /* Process backspace character  */
+                if (kbbuf[i] == '\b' || kbbuf[i] == '\x7F')
+                {
+                    if (cmdoff > 0) {
+                        int j;
+                        for (j = cmdoff-1; j<cmdlen; j++)
+                            cmdline[j] = cmdline[j+1];
+                        cmdoff--;
+                        cmdlen--;
+                    }
+                    i++;
+                    redraw_cmd = 1;
+                    break;
+                }
+                /* Process DEL character              */
+                if (strcmp(kbbuf+i, KBD_DELETE) == 0) {
+                    if (cmdoff < cmdlen) {
+                        int j;
+                        for (j = cmdoff; j<cmdlen; j++)
+                            cmdline[j] = cmdline[j+1];
+                        cmdlen--;
+                    }
+                    i++;
+                    redraw_cmd = 1;
+                    break;
+                }
+                
+                /* Process LEFT_ARROW character              */
+                if (strcmp(kbbuf+i, KBD_LEFT_ARROW) == 0
+                    || strcmp(kbbuf+i, xKBD_LEFT_ARROW) == 0)
                 {
                     if (cmdoff > 0) cmdoff--;
                     i++;
@@ -1227,6 +1265,8 @@ struct  timeval tv;                     /* Select timeout structure  */
                     || strcmp(kbbuf+i, KBD_INSERT) == 0)
                 {
                     redraw_msgs = 1;
+                    if (cmdoff < cmdlen) 
+                        cmdoff++;
                     break;
                 }
 
@@ -1243,52 +1283,68 @@ struct  timeval tv;                     /* Select timeout structure  */
                 /* Process the command if newline was read */
                 if (kbbuf[i] == '\n')
                 {
-                    cmdline[cmdoff] = '\0';
-                    /* =NP= create_thread replaced with: */
-                    if (NPDup == 0) {
-                        if ('#' == cmdline[0] || '*' == cmdline[0]) {
-                            if ('*' == cmdline[0])
-                                logmsg("%s\n", cmdline);
-                        } else {
-                            panel_command(cmdline);
-                        }
+                    if (cmdlen == 0) {
+                        history_show();
                     } else {
-                        NPdataentry = 0;
-                        NPcurpos[0] = 24;
-                        NPcurpos[1] = 80;
-                        strcpy(NPcolor, "");
-                        switch (NPpending) {
-                            case 'r':
-                                sscanf(cmdline, "%x", &NPaddress);
-                                NPcuraddr = -1;
-                                strcpy(NPprompt1, "");
-                                break;
-                            case 'd':
-                                sscanf(cmdline, "%x", &NPdata);
-                                NPcurdata = -1;
-                                strcpy(NPprompt1, "");
-                                break;
-                            case 'n':
-                                if (strlen(cmdline) < 1) {
-                                    strcpy(cmdline, NPdevname[NPasgn]);
+                        cmdline[cmdlen] = '\0';
+                        /* =NP= create_thread replaced with: */
+                        if (NPDup == 0) {
+                            if ('#' == cmdline[0] || '*' == cmdline[0]) {
+                                if ('*' == cmdline[0])
+                                    logmsg("%s\n", cmdline);
+                            } else {
+                                history_requested = 0;
+                                panel_command(cmdline);
+                                cmdoff = 0;
+                                for (;cmdlen >=0; cmdlen--)
+                                    cmdline[cmdlen] = '\0';
+                                cmdlen = 0;
+                                if (history_requested == 1) {
+                                    strcpy(cmdline, historyCmdLine);
+                                    cmdoff = strlen(cmdline);
+                                    cmdlen = cmdoff;
+                                    NPDup = 0;
+                                    NPDinit = 1;
+                                    redraw_cmd = 1;
                                 }
-                                strcpy(NPdevname[NPasgn], "");
-                                strcpy(NPentered, "devinit ");
-                                sprintf(NPdevstr, "%x", NPdevaddr[NPasgn]);
-                                strcat(NPentered, NPdevstr);
-                                strcat(NPentered, " ");
-                                strcat(NPentered, cmdline);
-                                panel_command(NPentered);
-                                strcpy(NPprompt2, "");
-                                break;
-                            default:
-                                break;
+                            }
+                        } else {
+                            NPdataentry = 0;
+                            NPcurpos[0] = 24;
+                            NPcurpos[1] = 80;
+                            strcpy(NPcolor, "");
+                            switch (NPpending) {
+                                case 'r':
+                                    sscanf(cmdline, "%x", &NPaddress);
+                                    NPcuraddr = -1;
+                                    strcpy(NPprompt1, "");
+                                    break;
+                                case 'd':
+                                    sscanf(cmdline, "%x", &NPdata);
+                                    NPcurdata = -1;
+                                    strcpy(NPprompt1, "");
+                                    break;
+                                case 'n':
+                                    if (strlen(cmdline) < 1) {
+                                        strcpy(cmdline, NPdevname[NPasgn]);
+                                    }
+                                    strcpy(NPdevname[NPasgn], "");
+                                    strcpy(NPentered, "devinit ");
+                                    sprintf(NPdevstr, "%x", NPdevaddr[NPasgn]);
+                                    strcat(NPentered, NPdevstr);
+                                    strcat(NPentered, " ");
+                                    strcat(NPentered, cmdline);
+                                    panel_command(NPentered);
+                                    strcpy(NPprompt2, "");
+                                    break;
+                                default:
+                                    break;
+                            }
+                            redraw_status = 1;
                         }
-                        redraw_status = 1;
+                        /* =END= */
+                        redraw_cmd = 1;
                     }
-                    /* =END= */
-                    cmdoff = 0;
-                    redraw_cmd = 1;
                     break;
                 }
 
@@ -1301,10 +1357,19 @@ struct  timeval tv;                     /* Select timeout structure  */
                 }
 
                 /* Append the character to the command buffer */
-                if (cmdoff < CMD_SIZE-1) cmdline[cmdoff++] = kbbuf[i];
+                if (cmdoff < CMD_SIZE-1) {
+                    if (cmdoff < cmdlen) {
+                        int j;
+                        for (j=cmdlen-1; j>=cmdoff; j--)
+                            cmdline[j+1] = cmdline[j];
+                        cmdline[cmdoff++] = kbbuf[i];
+                    }
+                    else 
+                        cmdline[cmdoff++] = kbbuf[i];
+                    cmdlen++;
+                }
                 i++;
                 redraw_cmd = 1;
-
             } /* end for(i) */
         }
 
@@ -1519,7 +1584,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                     "Command ==> "
                     ANSI_WHITE_BLACK);
 
-                for (i = 0; i < cmdoff; i++)
+                for (i = 0; i < cmdlen; i++)
                     putc (cmdline[i], confp);
 
                 fprintf (confp,
@@ -1547,7 +1612,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                     NPDinit = 1;
                     NP_screen(confp);
                 }
-                NP_update(confp, cmdline, cmdoff);
+                NP_update(confp, cmdline, cmdlen);
                 fflush (confp);
                 redraw_msgs = 0;
                 redraw_cmd = 0;

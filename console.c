@@ -45,6 +45,11 @@
 /*                                                                   */
 /*-------------------------------------------------------------------*/
 
+/*-------------------------------------------------------------------*/
+/* Ignore "Negotiate About Window Size" client option (for now) so   */
+/* WinNT version of telnet works. -- Greg Price (implemted by Fish)  */
+/*-------------------------------------------------------------------*/
+
 #include "hercules.h"
 
 #include "devtype.h"
@@ -73,6 +78,7 @@ extern
 #define SUPPRESS_GA     3       /* Suppress go-ahead option */
 #define TIMING_MARK     6       /* Timing mark option */
 #define TERMINAL_TYPE   24      /* Terminal type option */
+#define NAWS            31      /* Negotiate About Window Size */
 #define EOR             25      /* End of record option */
 #define EOR_MARK        239     /* End of record marker */
 #define SE              240     /* End of subnegotiation parameters */
@@ -377,7 +383,7 @@ int     m, n, c;
     } /* end for */
 
     if (n < m) {
-        TNSDEBUG3("%d IAC bytes removed, newlen=%d\n", m-n, n);
+        TNSDEBUG3("DBG001: %d IAC bytes removed, newlen=%d\n", m-n, n);
         packet_trace (buf, n);
     }
 
@@ -404,7 +410,7 @@ int     m, n, x, newlen;
 
     /* Insert extra IAC bytes backwards from the end of the buffer */
     newlen = len + x;
-    TNSDEBUG3("%d IAC bytes added, newlen=%d\n", x, newlen);
+    TNSDEBUG3("DBG002: %d IAC bytes added, newlen=%d\n", x, newlen);
     for (n=newlen, m=len; n > m; ) {
         buf[--n] = buf[--m];
         if (buf[n] == IAC) buf[--n] = IAC;
@@ -443,14 +449,14 @@ send_packet (int csock, BYTE *buf, int len, char *caption)
 int     rc;                             /* Return code               */
 
     if (caption != NULL) {
-        TNSDEBUG2("Sending %s\n", caption);
+        TNSDEBUG2("DBG003: Sending %s\n", caption);
         packet_trace (buf, len);
     }
 
     rc = send (csock, buf, len, 0);
 
     if (rc < 0) {
-        TNSERROR("send: %s\n", strerror(errno));
+        TNSERROR("DBG021: send: %s\n", strerror(errno));
         return -1;
     } /* end if(rc) */
 
@@ -487,12 +493,12 @@ int     rcvlen=0;                       /* Length of data received   */
         rc = recv (csock, buf + rcvlen, reqlen - rcvlen, 0);
 
         if (rc < 0) {
-            TNSERROR("recv: %s\n", strerror(errno));
+            TNSERROR("DBG022: recv: %s\n", strerror(errno));
             return -1;
         }
 
         if (rc == 0) {
-            TNSDEBUG1("Connection closed by client\n");
+            TNSDEBUG1("DBG004: Connection closed by client\n");
             return -1;
         }
 
@@ -503,7 +509,7 @@ int     rcvlen=0;                       /* Length of data received   */
             break;
     }
 
-    TNSDEBUG2("Packet received length=%d\n", rcvlen);
+    TNSDEBUG2("DBG005: Packet received length=%d\n", rcvlen);
     packet_trace (buf, rcvlen);
 
     return rcvlen;
@@ -541,10 +547,10 @@ static BYTE will_bin[] = { IAC, WILL, BINARY, IAC, DO, BINARY };
     if (memcmp(buf, expected, len) != 0)
 #endif
     {
-        TNSDEBUG2("Expected %s\n", caption);
+        TNSDEBUG2("DBG006: Expected %s\n", caption);
         return -1;
     }
-    TNSDEBUG2("Received %s\n", caption);
+    TNSDEBUG2("DBG007: Received %s\n", caption);
 
     return 0;
 
@@ -606,6 +612,7 @@ static BYTE dont_sga[] = { IAC, DONT, SUPPRESS_GA };
 #endif
 static BYTE wont_echo[] = { IAC, WONT, ECHO_OPTION };
 static BYTE dont_echo[] = { IAC, DONT, ECHO_OPTION };
+static BYTE will_naws[] = { IAC, WILL, NAWS };
 
     /* Perform terminal-type negotiation */
     rc = send_packet (csock, do_term, sizeof(do_term),
@@ -624,15 +631,23 @@ static BYTE dont_echo[] = { IAC, DONT, ECHO_OPTION };
     rc = recv_packet (csock, buf, sizeof(buf)-2, SE);
     if (rc < 0) return -1;
 
+    /* Ignore Negotiate About Window Size */
+    if (rc >= sizeof(will_naws) &&
+        memcmp (buf, will_naws, sizeof(will_naws)) == 0)
+    {
+        memmove(buf, &buf[sizeof(will_naws)], (rc - sizeof(will_naws)));
+        rc -= sizeof(will_naws);
+    }
+
     if (rc < (int)(sizeof(type_is) + 2)
         || memcmp(buf, type_is, sizeof(type_is)) != 0
         || buf[rc-2] != IAC || buf[rc-1] != SE) {
-        TNSDEBUG2("Expected IAC SB TERMINAL_TYPE IS\n");
+        TNSDEBUG2("DBG008: Expected IAC SB TERMINAL_TYPE IS\n");
         return -1;
     }
     buf[rc-2] = '\0';
     termtype = buf + sizeof(type_is);
-    TNSDEBUG2("Received IAC SB TERMINAL_TYPE IS %s IAC SE\n",
+    TNSDEBUG2("DBG009: Received IAC SB TERMINAL_TYPE IS %s IAC SE\n",
             termtype);
 
     /* Check terminal type string for device name suffix */
@@ -765,12 +780,44 @@ int     eor = 0;                        /* 1=End of record received  */
         dev->readpending = 0;
     }
 
+    TNSDEBUG1("DBG031: verifying data is available...\n");
+    {
+
+        fd_set readset;
+        struct timeval tv = {0,0};      /* (non-blocking poll) */
+
+        FD_ZERO( &readset );
+        FD_SET( dev->fd, &readset );
+
+        while ( (rc = select ( dev->fd+1, &readset, NULL, NULL, &tv )) < 0
+            && EINTR == errno )
+            ;   /* NOP (keep retrying if EINTR) */
+
+        if (rc < 0)
+        {
+            TNSERROR("DBG032: select failed: %s\n", strerror(errno));
+            return 0;
+        }
+
+        ASSERT(rc <= 1);
+
+        if (!FD_ISSET(dev->fd, &readset))
+        {
+            ASSERT(rc == 0);
+            TNSDEBUG1("DBG033: no data available; returning 0...\n");
+            return 0;
+        }
+
+        ASSERT(rc == 1);
+    }
+    TNSDEBUG1("DBG034: data IS available; attempting recv...\n");
+
     /* Receive bytes from client */
     rc = recv (dev->fd, dev->buf + dev->rlen3270,
                BUFLEN_3270 - dev->rlen3270, 0);
 
     if (rc < 0) {
-        TNSERROR("recv: %s\n", strerror(errno));
+        TNSERROR("DBG023: recv: %s\n", strerror(errno));
         dev->sense[0] = SENSE_EC;
         return (CSW_ATTN | CSW_UC);
     }
@@ -807,16 +854,17 @@ int     eor = 0;                        /* 1=End of record received  */
     /* If record is incomplete, test for buffer full */
     if (eor == 0 && dev->rlen3270 >= BUFLEN_3270)
     {
-        TNSDEBUG1("3270 buffer overflow\n");
+        TNSDEBUG1("DBG010: 3270 buffer overflow\n");
         dev->sense[0] = SENSE_DC;
         return (CSW_ATTN | CSW_UC);
     }
 
     /* Return zero status if record is incomplete */
-    if (eor == 0) return 0;
+    if (eor == 0)
+        return 0;
 
     /* Trace the complete 3270 data packet */
-    TNSDEBUG2("Packet received length=%d\n", dev->rlen3270);
+    TNSDEBUG2("DBG011: Packet received length=%d\n", dev->rlen3270);
     packet_trace (dev->buf, dev->rlen3270);
 
     /* Strip off the telnet EOR marker */
@@ -881,7 +929,7 @@ BYTE            buf[32];                /* tn3270 write buffer       */
     do {
         len = dev->rlen3270;
         rc = recv_3270_data (dev);
-        TNSDEBUG2("read buffer: %d bytes received\n",
+        TNSDEBUG2("DBG012: read buffer: %d bytes received\n",
                 dev->rlen3270 - len);
     } while(rc == 0);
 
@@ -933,7 +981,7 @@ BYTE    c;                              /* Character work area       */
 
     /* Return unit check if error on receive */
     if (num < 0) {
-        TNSERROR("recv: %s\n", strerror(errno));
+        TNSERROR("DBG024: recv: %s\n", strerror(errno));
         dev->sense[0] = SENSE_EC;
         return (CSW_ATTN | CSW_UC);
     }
@@ -947,7 +995,7 @@ BYTE    c;                              /* Character work area       */
     }
 
     /* Trace the bytes received */
-    TNSDEBUG2("Bytes received length=%d\n", num);
+    TNSDEBUG2("DBG013: Bytes received length=%d\n", num);
     packet_trace (buf, num);
 
     /* Copy received bytes to keyboard buffer */
@@ -970,7 +1018,7 @@ BYTE    c;                              /* Character work area       */
         /* Return unit check if buffer is full */
         if (dev->keybdrem >= BUFLEN_1052)
         {
-            TNSDEBUG1("Console keyboard buffer overflow\n");
+            TNSDEBUG1("DBG014: Console keyboard buffer overflow\n");
             dev->keybdrem = 0;
             dev->sense[0] = SENSE_EC;
             return (CSW_ATTN | CSW_UC);
@@ -1027,7 +1075,7 @@ BYTE    c;                              /* Character work area       */
             && dev->buf[dev->keybdrem - 1] == '\n'
             && i < num - 1)
         {
-            TNSDEBUG1("Console keyboard buffer overrun\n");
+            TNSDEBUG1("DBG015: Console keyboard buffer overrun\n");
             dev->keybdrem = 0;
             dev->sense[0] = SENSE_OR;
             return (CSW_ATTN | CSW_UC);
@@ -1042,7 +1090,7 @@ BYTE    c;                              /* Character work area       */
         return 0;
 
     /* Trace the complete keyboard data packet */
-    TNSDEBUG2("Packet received length=%d\n", dev->keybdrem);
+    TNSDEBUG2("DBG016: Packet received length=%d\n", dev->keybdrem);
     packet_trace (dev->buf, dev->keybdrem);
 
     /* Strip off the CRLF sequence */
@@ -1056,7 +1104,7 @@ BYTE    c;                              /* Character work area       */
     } /* end for(i) */
 
     /* Trace the EBCDIC input data */
-    TNSDEBUG2("Input data line length=%d\n", dev->keybdrem);
+    TNSDEBUG2("DBG017: Input data line length=%d\n", dev->keybdrem);
     packet_trace (dev->buf, dev->keybdrem);
 
     /* Return attention status */
@@ -1115,7 +1163,7 @@ BYTE                    rejmsg[256];     /* Rejection message         */
         clientname = "host name unknown";
     }
 
-    TNSDEBUG1("Received connection from %s (%s)\n",
+    TNSDEBUG1("DBG018: Received connection from %s (%s)\n",
             clientip, clientname);
 
     /* Negotiate telnet parameters */
@@ -1170,7 +1218,8 @@ BYTE                    rejmsg[256];     /* Rejection message         */
 
             memset (&dev->scsw, 0, sizeof(SCSW));
             memset (&dev->pciscsw, 0, sizeof(SCSW));
-            dev->busy = dev->pending = dev->pcipending = 0;
+            dev->busy = dev->reserved = dev->suspended =
+            dev->pending = dev->pcipending = dev->attnpending = 0;
 
             /* Set device in old readset such that the associated 
                file descriptor will be closed after detach */
@@ -1212,7 +1261,7 @@ BYTE                    rejmsg[256];     /* Rejection message         */
                     "Connection rejected, device %4.4X unavailable",
                     devnum);
 
-        TNSDEBUG1( "%s\n", rejmsg);
+        TNSDEBUG1( "DBG019: %s\n", rejmsg);
 
         /* Send connection rejection message to client */
         if (class != 'K')
@@ -1319,7 +1368,7 @@ BYTE                    unitstat;       /* Status after receive data */
 
     if (lsock < 0)
     {
-        TNSERROR("socket: %s\n", strerror(errno));
+        TNSERROR("DBG025: socket: %s\n", strerror(errno));
         return NULL;
     }
 
@@ -1350,7 +1399,7 @@ BYTE                    unitstat;       /* Status after receive data */
 
     if (rc != 0)
     {
-        TNSERROR("bind: %s\n", strerror(errno));
+        TNSERROR("DBG026: bind: %s\n", strerror(errno));
         return NULL;
     }
 
@@ -1359,7 +1408,7 @@ BYTE                    unitstat;       /* Status after receive data */
 
     if (rc < 0)
     {
-        TNSERROR("listen: %s\n", strerror(errno));
+        TNSERROR("DBG027: listen: %s\n", strerror(errno));
         return NULL;
     }
 
@@ -1392,8 +1441,8 @@ BYTE                    unitstat;       /* Status after receive data */
                 if (dev->fd > c_mfd) c_mfd = dev->fd;
 
                 if( (!dev->busy || (dev->scsw.flag3 & SCSW3_AC_SUSP))
-                && !(dev->pending || dev->pcipending)
-                && (dev->scsw.flag3 & SCSW3_SC_PEND) == 0)
+                 && (!IOPENDING(dev))
+                 && (dev->scsw.flag3 & SCSW3_SC_PEND) == 0)
                 {
                     FD_SET (dev->fd, &readset);
                     if (dev->fd > maxfd) maxfd = dev->fd;
@@ -1429,7 +1478,7 @@ BYTE                    unitstat;       /* Status after receive data */
         if (rc < 0 )
         {
             if (errno == EINTR) continue;
-            TNSERROR("select: %s\n", strerror(errno));
+            TNSERROR("DBG028: select: %s\n", strerror(errno));
             break;
         }
 
@@ -1441,7 +1490,7 @@ BYTE                    unitstat;       /* Status after receive data */
 
             if (csock < 0)
             {
-                TNSERROR("accept: %s\n", strerror(errno));
+                TNSERROR("DBG029: accept: %s\n", strerror(errno));
                 continue;
             }
 
@@ -1449,7 +1498,7 @@ BYTE                    unitstat;       /* Status after receive data */
             if ( create_thread (&tidneg, &sysblk.detattr,
                                 connect_client, &csock) )
             {
-                TNSERROR("connect_client create_thread: %s\n",
+                TNSERROR("DBG030: connect_client create_thread: %s\n",
                         strerror(errno));
                 close (csock);
             }
@@ -1467,7 +1516,7 @@ BYTE                    unitstat;       /* Status after receive data */
                 && dev->connected
                 && FD_ISSET (dev->fd, &readset)
                 && (!dev->busy || (dev->scsw.flag3 & SCSW3_AC_SUSP))
-                && !(dev->pending || dev->pcipending)
+                && !IOPENDING(dev)
                 && (dev->pmcw.flag5 & PMCW5_V)
 // NOT S/370    && (dev->pmcw.flag5 & PMCW5_E)
                 && (dev->scsw.flag3 & SCSW3_SC_PEND) == 0)
@@ -1502,26 +1551,27 @@ BYTE                    unitstat;       /* Status after receive data */
                 release_lock (&dev->lock);
 
                 /* Raise attention interrupt for the device */
+
                 /* Do not raise attention interrupt for 3287  */
                 /* Otherwise zVM loops after ENABLE ccuu     */
                 /* Following 5 lines are repeated on Hercules console: */
                 /* console: sending 3270 data */
-                /* +0000   F5C2FFEF     */
-                /* console: Packet received length=7 */
-                /* +0000   016CD902 00FFEF */   
-                /*         I do not know what is this */
-                /* console: CCUU attention requests raised */
+                /*   +0000   F5C2FFEF     */
+                /*   console: Packet received length=7 */
+                /*   +0000   016CD902 00FFEF */   
+                /*           I do not know what is this */
+                /*   console: CCUU attention requests raised */
                 if (dev->devtype != 0x3287)
                 {
                     if(dev->connected)  /* *ISW3274DR* - Added */
                     { /* *ISW3274DR - Added */
-                                rc = device_attention (dev, unitstat);
+                        rc = device_attention (dev, unitstat);
                     } /* *ISW3274DR - Added */
 
-                /* Trace the attention request */
-                TNSDEBUG2("%4.4X attention request %s\n",
-                        dev->devnum,
-                        (rc == 0 ? "raised" : "rejected"));
+                    /* Trace the attention request */
+                    TNSDEBUG2("DBG020: %4.4X attention request %s; rc=%d\n",
+                            dev->devnum,
+                            (rc == 0 ? "raised" : "rejected"), rc);
                 }
                 continue;
             } /* end if(data available) */
@@ -2190,6 +2240,10 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
 
         /* Release the device lock */
         release_lock (&dev->lock);
+
+        /* Signal connection thread to redrive its select loop */
+        signal_thread (sysblk.cnsltid, SIGUSR2);
+
         break;
 
     case L3270_RM:
@@ -2217,6 +2271,9 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
                 release_lock (&dev->lock);
                 break;
             }
+
+            /* Set AID in buffer flag */
+            aid = 1;
 
             dev->aid3270 = dev->buf[0];
             if(dev->pos3270 != 0 && dev->aid3270 != SF3270_AID)

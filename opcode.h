@@ -272,7 +272,7 @@ _if: \
     (_ip) = (_regs)->inst; \
     (_regs)->ip = (_ip); \
     ARCH_DEP(instfetch) ((_regs)->inst, (_regs)->psw.IA, (_regs));  \
-    (regs)->instvalid = 1; \
+    (_regs)->instvalid = 1; \
     (_pe) = ((_regs)->psw.IA & ~0x7FF) + (0x800 - 6); \
     pagestart = (_regs)->mainstor + (_regs)->AI; \
     goto _ex; \
@@ -622,7 +622,7 @@ do { \
 #undef SET_AENOARN
 #if defined(FEATURE_ACCESS_REGISTERS)
 #define SET_AENOARN(_regs) \
-  (_regs)->aenoarn = !(ACCESS_REGISTER_MODE(&regs->psw))
+  (_regs)->aenoarn = !(ACCESS_REGISTER_MODE(&(_regs)->psw))
 #else
 #define SET_AENOARN(_regs) \
   (_regs)->aenoarn = 1
@@ -664,7 +664,7 @@ do { \
     if ((_regs)->aeID == PAGEFRAME_PAGESIZE) \
     { \
         (_regs)->aeID = 1; \
-        memset((_regs)->ve, 0, 256*sizeof(DW)); \
+        MEMSET((_regs)->ve, 0, 256*sizeof(DW)); \
     } \
 } while (0)
 
@@ -1559,7 +1559,7 @@ void ARCH_DEP(diag204_call) (int r1, int r2, REGS *regs);
 
 
 /* Functions in module external.c */
-void ARCH_DEP(synchronize_broadcast) (REGS *regs, int code, U64 pfra);
+void ARCH_DEP(synchronize_broadcast) (REGS *regs, int code, RADR pfra);
 void ARCH_DEP(perform_external_interrupt) (REGS *regs);
 void ARCH_DEP(store_status) (REGS *ssreg, RADR aaddr);
 void store_status (REGS *ssreg, U64 aaddr);

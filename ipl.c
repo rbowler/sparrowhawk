@@ -35,12 +35,10 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 BYTE    unitstat;                       /* IPL device unit status    */
 BYTE    chanstat;                       /* IPL device channel status */
 
+    obtain_lock (&sysblk.intlock);
+
     if(!regs->cpuonline)
-    {
-        obtain_lock (&sysblk.intlock);
         configure_cpu(regs);
-        release_lock(&sysblk.intlock);
-    }
 
     HDC(debug_cpu_state, regs);
 
@@ -70,6 +68,7 @@ BYTE    chanstat;                       /* IPL device channel status */
 
         HDC(debug_cpu_state, regs);
 
+        release_lock (&sysblk.intlock);
         return -1;
     }
 
@@ -80,6 +79,7 @@ BYTE    chanstat;                       /* IPL device channel status */
 
         HDC(debug_cpu_state, regs);
 
+        release_lock (&sysblk.intlock);
         return -1;
     }
     /* Point to the PSA in main storage */
@@ -107,11 +107,18 @@ BYTE    chanstat;                       /* IPL device channel status */
 
     dev->busy = 1;
 
+    release_lock (&sysblk.intlock);
+
     /* Execute the IPL channel program */
     ARCH_DEP(execute_ccw_chain) (dev);
 
+    obtain_lock (&sysblk.intlock);
+
     /* Clear the interrupt pending and device busy conditions */
-    dev->busy = dev->pending = dev->pcipending = 0;
+    DEQUEUE_IO_INTERRUPT(&dev->ioint);
+    DEQUEUE_IO_INTERRUPT(&dev->pciioint);
+    DEQUEUE_IO_INTERRUPT(&dev->attnioint);
+    dev->busy = dev->pending = dev->pcipending = dev->attnpending = 0;
     dev->scsw.flag2 = 0;
     dev->scsw.flag3 = 0;
 
@@ -139,6 +146,7 @@ BYTE    chanstat;                       /* IPL device channel status */
 
         HDC(debug_cpu_state, regs);
 
+        release_lock (&sysblk.intlock);
         return -1;
     }
 
@@ -184,6 +192,7 @@ BYTE    chanstat;                       /* IPL device channel status */
 
         HDC(debug_cpu_state, regs);
 
+        release_lock (&sysblk.intlock);
         return -1;
     }
 
@@ -202,8 +211,8 @@ BYTE    chanstat;                       /* IPL device channel status */
     sysblk.iplcpu = regs->cpuad;
 
     /* Signal the CPU to retest stopped indicator */
-    obtain_lock (&sysblk.intlock);
     WAKEUP_CPU (regs->cpuad);
+
     release_lock (&sysblk.intlock);
 
     HDC(debug_cpu_state, regs);
@@ -246,12 +255,10 @@ U32     fileaddr;
     if(fname == NULL)                   /* Default ipl from DASD     */
         fname = "hercules.ins";         /*   from hercules.ins       */
 
+    obtain_lock (&sysblk.intlock);
+
     if(!regs->cpuonline)
-    {
-        obtain_lock (&sysblk.intlock);
         configure_cpu(regs);
-        release_lock(&sysblk.intlock);
-    }
 
     HDC(debug_cpu_state, regs);
 
@@ -281,6 +288,7 @@ U32     fileaddr;
     if(fp == NULL)
     {
         logmsg(_("HHCCP031E Load from %s failed: %s\n"),fname,strerror(errno));
+        release_lock(&sysblk.intlock);
         return -1;
     }
 
@@ -311,6 +319,7 @@ U32     fileaddr;
 
                 HDC(debug_cpu_state, regs);
 
+                release_lock(&sysblk.intlock);
                 return -1;
             }
         }
@@ -325,9 +334,7 @@ U32     fileaddr;
     psa = (PSA*)(regs->mainstor + regs->PX);
 
     /* Load IPL PSW from PSA+X'0' */
-    obtain_lock(&sysblk.intlock);
     rc = ARCH_DEP(load_psw) (regs, psa->iplpsw);
-    release_lock(&sysblk.intlock);
     if ( rc )
     {
         logmsg (_("HHCCP032E %s mode IPL failed: Invalid IPL PSW: "
@@ -339,6 +346,7 @@ U32     fileaddr;
 
         HDC(debug_cpu_state, regs);
 
+        release_lock(&sysblk.intlock);
         return -1;
     }
 
@@ -353,8 +361,8 @@ U32     fileaddr;
     regs->loadstate = 0;
 
     /* Signal the CPU to retest stopped indicator */
-    obtain_lock (&sysblk.intlock);
     WAKEUP_CPU (regs->cpuad);
+
     release_lock (&sysblk.intlock);
 
     HDC(debug_cpu_state, regs);
@@ -396,6 +404,7 @@ int             i;                      /* Array subscript           */
     regs->MC_G = 0;
 
     /* Purge the lookaside buffers */
+    regs->tlbID = 255;
     ARCH_DEP(purge_tlb) (regs);
 #if defined(FEATURE_ACCESS_REGISTERS)
     ARCH_DEP(purge_alb) (regs);

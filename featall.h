@@ -40,8 +40,11 @@
 #define FEATURE_ALD_FORMAT            0
 #define FEATURE_SIE_MAXZONES          8
 
+// #define SIE_DEBUG_PERFMON
+
 #define OPTION_HTTP_SERVER              /* HTTP server support       */
 
+#define OPTION_PTTRACE                  /* Pthreads tracing          */
 
 // (handled automatically in configure.ac)
 // #define OPTION_DYNAMIC_LOAD
