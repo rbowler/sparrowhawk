@@ -717,8 +717,16 @@ BYTE    newval[32];                     /* Storage alteration value  */
     }
 
     /* loadcore filename command - load a core image file */
-    if (memcmp(cmd,"loadcore ",9)==0)
+    if (memcmp(cmd,"loadcore",8)==0)
     {
+        /* Locate the operand */
+        fname = strtok (cmd + 8, " \t");
+        if (fname == NULL)
+        {
+            logmsg ("loadcore rejected: filename missing\n");
+            return NULL;
+        }
+
         /* Command is valid only when CPU is stopped */
         if (regs->cpustate != CPUSTATE_STOPPED)
         {
@@ -727,7 +735,6 @@ BYTE    newval[32];                     /* Storage alteration value  */
         }
 
         /* Open the specified file name */
-        fname = cmd + 9;
         fd = open (fname, O_RDONLY);
         if (fd < 0)
         {
@@ -756,17 +763,26 @@ BYTE    newval[32];                     /* Storage alteration value  */
     }
 
     /* loadparm xxxxxxxx command - set IPL parameter */
-    if (memcmp(cmd,"loadparm ",9)==0)
+    if (memcmp(cmd,"loadparm",8)==0)
     {
-        loadparm = cmd + 9;
-        if (loadparm[0] == 0 || strlen(loadparm) > 8)
+        loadparm = strtok (cmd + 8, " \t");
+        /* Update IPL parameter if operand is specified */
+        if (loadparm != NULL)
         {
-            logmsg ("loadparm %s invalid\n", loadparm);
-            return NULL;
+            memset (sysblk.loadparm, 0x4B, 8);
+            for (i = 0; i < strlen(loadparm) && i < 8; i++)
+                sysblk.loadparm[i] = ascii_to_ebcdic[loadparm[i]];
         }
-        memset (sysblk.loadparm, 0x4B, 8);
-        for (i = 0; i < strlen(loadparm); i++)
-            sysblk.loadparm[i] = ascii_to_ebcdic[loadparm[i]];
+        /* Display IPL parameter */
+        logmsg ("Loadparm=%c%c%c%c%c%c%c%c\n",
+                ebcdic_to_ascii[sysblk.loadparm[0]],
+                ebcdic_to_ascii[sysblk.loadparm[1]],
+                ebcdic_to_ascii[sysblk.loadparm[2]],
+                ebcdic_to_ascii[sysblk.loadparm[3]],
+                ebcdic_to_ascii[sysblk.loadparm[4]],
+                ebcdic_to_ascii[sysblk.loadparm[5]],
+                ebcdic_to_ascii[sysblk.loadparm[6]],
+                ebcdic_to_ascii[sysblk.loadparm[7]]);
         return NULL;
     }
 

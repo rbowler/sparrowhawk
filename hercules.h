@@ -237,6 +237,7 @@ typedef struct _DEVBLK {
 	U16	devtype;		/* Device type		     */
 	DEVXF  *devexec;		/* -> Execute CCW function   */
 	LOCK	lock;			/* Device block lock	     */
+	COND	resumecond;		/* Resume condition	     */
 	struct _DEVBLK *nextdev;	/* -> next device block      */
 	unsigned int			/* Flags		     */
 		pending:1,		/* 1=Interrupt pending	     */
@@ -252,6 +253,8 @@ typedef struct _DEVBLK {
 	SCSW	pciscsw;		/* PCI subchannel status word*/
 	BYTE	csw[8]; 		/* Channel status word(S/370)*/
 	BYTE	pcicsw[8];		/* PCI channel status word   */
+	ESW	esw;			/* Extended status word      */
+	BYTE	ecw[32];		/* Extended control word     */
 	int	numsense;		/* Number of sense bytes     */
 	BYTE	sense[32];		/* Sense bytes		     */
 	int	numdevid;		/* Number of device id bytes */
@@ -550,12 +553,13 @@ void branch_in_subspace_group (int r1, int r2, REGS *regs);
 
 /* Functions in module channel.c */
 int  start_io (DEVBLK *dev, U32 ccwaddr, int ccwfmt, BYTE ccwkey,
-	U32 ioparm);
+	U32 ioparm, int suspctl, int suspsup, int intstat);
 void *execute_ccw_chain (DEVBLK *dev);
 int  test_channel (REGS *regs, U16 chan);
 int  test_io (REGS *regs, DEVBLK *dev, BYTE ibyte);
 int  test_subchan (REGS *regs, DEVBLK *dev, IRB *irb);
 void clear_subchan (REGS *regs, DEVBLK *dev);
+int  resume_subchan (REGS *regs, DEVBLK *dev);
 int  present_io_interrupt (REGS *regs, U32 *ioid, U32 *ioparm,
 	BYTE *csw);
 void io_reset (void);

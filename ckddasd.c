@@ -8,7 +8,7 @@
 
 #include "hercules.h"
 
-#undef  CKD_KEY_TRACING
+#define CKD_KEY_TRACING
 
 /*-------------------------------------------------------------------*/
 /* Bit definitions for File Mask                                     */
@@ -84,7 +84,7 @@
 /*-------------------------------------------------------------------*/
 /* Bit definitions for Diagnostic Control subcommand byte            */
 /*-------------------------------------------------------------------*/
-#define DIAGCTL_INHIBIT_WRITE   0x02    /* Inhibit Write             */                             ¦
+#define DIAGCTL_INHIBIT_WRITE   0x02    /* Inhibit Write             */
 #define DIAGCTL_SET_GUAR_PATH   0x04    /* Set Guaranteed Path       */
 #define DIAGCTL_ENABLE_WRITE    0x08    /* Enable Write              */
 #define DIAGCTL_3380_TC_MODE    0x09    /* 3380 Track Compat Mode    */
@@ -576,15 +576,13 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
 
     /* File protect error if not within domain of Locate Record
        and file mask inhibits seek and multitrack operations */
-    /* !!This test has been commented out as a temporary fix
-       to avoid 012033 wait state problem loading IEAVNP12!! */
-//  if (dev->ckdlocat == 0 &&
-//      (dev->ckdfmask & CKDMASK_SKCTL) == CKDMASK_SKCTL_INHSMT)
-//  {
-//      ckd_build_sense (dev, 0, SENSE1_FP, 0, 0, 0);
-//      *unitstat = CSW_CE | CSW_DE | CSW_UC;
-//      return -1;
-//  }
+    if (dev->ckdlocat == 0 &&
+        (dev->ckdfmask & CKDMASK_SKCTL) == CKDMASK_SKCTL_INHSMT)
+    {
+        ckd_build_sense (dev, 0, SENSE1_FP, 0, 0, 0);
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
 
     /* End of cylinder error if not within domain of Locate Record
        and current track is last track of cylinder */
@@ -2148,7 +2146,7 @@ BYTE            key[256];               /* Key for search operations */
             BYTE module[8]; int i;
             for (i=0; i < 8; i++)
                 module[i] = ebcdic_to_ascii[iobuf[i]];
-            logmsg ("Search key %8.8s\n", module);
+            logmsg ("ckddasd: search key %8.8s\n", module);
         }
 #endif /*CKD_KEY_TRACING*/
 
@@ -3197,8 +3195,9 @@ BYTE            key[256];               /* Key for search operations */
            a Suspend Multipath Reconnection command that was the first
            command in the chain */
         if (dev->ckdlocat
-            || (chained && prevcode != 0x64 && prevcode != 0xFA)
-            || (chained && (prevcode != 0x5B || ccwseq > 1)))
+            || (chained && prevcode != 0x64 && prevcode != 0xFA
+                && prevcode != 0x5B)
+            || (chained && prevcode == 0x5B && ccwseq > 1))
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);

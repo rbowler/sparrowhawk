@@ -1195,7 +1195,7 @@ int             rc;                     /* Return code               */
 int             num;                    /* Number of bytes to copy   */
 int             len;                    /* Data length               */
 BYTE            wcc;                    /* tn3270 write control char */
-BYTE            buf[4096];              /* tn3270 write buffer       */
+BYTE            buf[32768];             /* tn3270 write buffer       */
 
     /* Unit check with intervention required if no client connected */
     if (dev->connected == 0 && !IS_CCW_SENSE(code))

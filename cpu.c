@@ -297,13 +297,16 @@ REGS   *regs = &(sysblk.regs[0]);
     regs->psw.intcode = code;
 
     /* Trace the program check */
-    logmsg ("Program check CODE=%4.4X ILC=%d ",
-            code, regs->psw.ilc);
-    instfetch (dword, regs->psw.ia - regs->psw.ilc, regs);
-    display_inst (regs, dword);
-//  if (code != PGM_PAGE_TRANSLATION_EXCEPTION
-//      && code != PGM_SEGMENT_TRANSLATION_EXCEPTION)
-//      regs->cpustate = CPUSTATE_STOPPING;
+    if (code != PGM_TRACE_TABLE_EXCEPTION)
+    {
+        logmsg ("Program check CODE=%4.4X ILC=%d ",
+                code, regs->psw.ilc);
+        instfetch (dword, regs->psw.ia - regs->psw.ilc, regs);
+        display_inst (regs, dword);
+//      if (code != PGM_PAGE_TRANSLATION_EXCEPTION
+//          && code != PGM_SEGMENT_TRANSLATION_EXCEPTION)
+//          regs->cpustate = CPUSTATE_STOPPING;
+    }
 
     /* Point to PSA in main storage */
     psa = (PSA*)(sysblk.mainstor + regs->pxr);
@@ -399,6 +402,9 @@ U32     ccwaddr;                        /* CCW address for start I/O */
 int     ccwfmt;                         /* CCW format (0 or 1)       */
 BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
 U32     ioparm;                         /* I/O interruption parameter*/
+int     suspctl;                        /* 1=Suspend/Resume allowed  */
+int     suspsup;                        /* 1=Suppress suspend intrupt*/
+int     intstat;                        /* 1=Initial status interrupt*/
 U16     xcode;                          /* Exception code            */
 #if defined(FEATURE_HALFWORD_IMMEDIATE) \
     || defined(FEATURE_RELATIVE_BRANCH)
@@ -2520,9 +2526,13 @@ static BYTE module[8];                  /* Module name               */
                         | psa->caw[3];
         ccwfmt = 0;
         ioparm = 0;
+        suspctl = 0;
+        suspsup = 0;
+        intstat = 0;
 
         /* Start the channel program and set the condition code */
-        regs->psw.cc = start_io (dev, ccwaddr, ccwfmt, ccwkey, ioparm);
+        regs->psw.cc = start_io (dev, ccwaddr, ccwfmt, ccwkey,
+                                ioparm, suspctl, suspsup, intstat);
 
         break;
 
@@ -3867,7 +3877,7 @@ static BYTE module[8];                  /* Module name               */
             if (pmcw.flag4 & PMCW4_RESV
                 || (pmcw.flag5 & PMCW5_LM) == PMCW5_LM_RESV
                 || pmcw.flag24 != 0 || pmcw.flag25 != 0
-                || pmcw.flag26 != 0 || pmcw.flag27 != 0)
+                || pmcw.flag26 != 0 || (pmcw.flag27 & PMCW27_RESV))
             {
                 program_check (PGM_OPERAND_EXCEPTION);
                 goto terminate;
@@ -4012,9 +4022,16 @@ static BYTE module[8];                  /* Module name               */
             ioparm = (orb.intparm[0] << 24) | (orb.intparm[1] << 16)
                         | (orb.intparm[2] << 8) | orb.intparm[3];
 
+            /* Extract from the ORB the suspend control bit,
+               the suppress suspended interruption control bit,
+               and the initial status interruption control bit */
+            suspctl = (orb.flag4 & ORB4_S) ? 1 : 0;
+            suspsup = (orb.flag5 & ORB5_U) ? 1 : 0;
+            intstat = (orb.flag5 & ORB5_I) ? 1 : 0;
+
             /* Start the channel program and set the condition code */
-            regs->psw.cc =
-                start_io (dev, ccwaddr, ccwfmt, ccwkey, ioparm);
+            regs->psw.cc = start_io (dev, ccwaddr, ccwfmt, ccwkey,
+                                    ioparm, suspctl, suspsup, intstat);
 
             break;
 
@@ -4169,6 +4186,43 @@ static BYTE module[8];                  /* Module name               */
                 dreg = ((U64)ioid << 32) | ioparm;
                 vstore8 ( dreg, effective_addr, ar1, regs );
             }
+
+            break;
+
+        case 0x38:
+        /*-----------------------------------------------------------*/
+        /* B238: RSCH - Resume Subchannel                        [S] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Program check if reg 1 bits 0-15 not X'0001' */
+            if ( (regs->gpr[1] >> 16) != 0x0001 )
+            {
+                program_check (PGM_OPERAND_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Locate the device block for this subchannel */
+            dev = find_device_by_subchan (regs->gpr[1] & 0xFFFF);
+
+            /* Condition code 3 if subchannel does not exist,
+               is not valid, or is not enabled */
+            if (dev == NULL
+                || (dev->pmcw.flag5 & PMCW5_V) == 0
+                || (dev->pmcw.flag5 & PMCW5_E) == 0)
+            {
+                regs->psw.cc = 3;
+                break;
+            }
+
+            /* Perform resume subchannel and set condition code */
+            regs->psw.cc = resume_subchan (regs, dev);
 
             break;
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/

@@ -1004,6 +1004,9 @@ int             len;                    /* Length of file name       */
 U16             cutype;                 /* Control unit type         */
 BYTE            cumodel;                /* Control unit model number */
 BYTE            devmodel;               /* Device model number       */
+BYTE            devclass;               /* Device class              */
+BYTE            devtcode;               /* Device type code          */
+U32             sctlfeat;               /* Storage control features  */
 
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
@@ -1045,12 +1048,18 @@ BYTE            devmodel;               /* Device model number       */
         cutype = 0x3480;
         cumodel = 0x01;
         devmodel = 0x01;
+        devclass = 0x80;
+        devtcode = 0x80;
+        sctlfeat = 0x00000200;
     }
     else
     {
         cutype = 0x3803;
         cumodel = 0x02;
         devmodel = 0x06;
+        devclass = 0x80;
+        devtcode = 0x20;
+        sctlfeat = 0x00000000;
     }
 
     /* Initialize the device identifier bytes */
@@ -1062,6 +1071,22 @@ BYTE            devmodel;               /* Device model number       */
     dev->devid[5] = dev->devtype & 0xFF;
     dev->devid[6] = devmodel;
     dev->numdevid = 7;
+
+    /* Initialize the device characteristics bytes */
+    if (cutype != 0x3803)
+    {
+        memset (dev->devchar, 0, sizeof(dev->devchar));
+        memcpy (dev->devchar, dev->devid+1, 6);
+        dev->devchar[6] = (sctlfeat >> 24) & 0xFF;
+        dev->devchar[7] = (sctlfeat >> 16) & 0xFF;
+        dev->devchar[8] = (sctlfeat >> 8) & 0xFF;
+        dev->devchar[9] = sctlfeat & 0xFF;
+        dev->devchar[10] = devclass;
+        dev->devchar[11] = devtcode;
+        dev->devchar[40] = devtcode;
+        dev->devchar[41] = devtcode;
+        dev->numdevchar = 64;
+    }
 
     return 0;
 } /* end function tapedev_init_handler */
@@ -1467,6 +1492,29 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         memcpy (iobuf, dev->devid, num);
 
         /* Return unit status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0x64:
+    /*---------------------------------------------------------------*/
+    /* READ DEVICE CHARACTERISTICS                                   */
+    /*---------------------------------------------------------------*/
+        /* Command reject if device characteristics not available */
+        if (dev->numdevchar == 0)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Calculate residual byte count */
+        num = (count < dev->numdevchar) ? count : dev->numdevchar;
+        *residual = count - num;
+        if (count < dev->numdevchar) *more = 1;
+
+        /* Copy device characteristics bytes to channel buffer */
+        memcpy (iobuf, dev->devchar, num);
+
         *unitstat = CSW_CE | CSW_DE;
         break;
 

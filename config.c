@@ -506,8 +506,9 @@ int     subchan;                        /* Subchannel number         */
         dev->pmcw.pam = 0x80;
         dev->pmcw.chpid[0] = dev->devnum >> 8;
 
-        /* Initialize the device lock */
+        /* Initialize the device lock and condition */
         initialize_lock (&dev->lock);
+        initialize_condition (&dev->resumecond);
 
         /* Call the device handler initialization function */
         rc = (*devinit)(dev, devargc, devargv);

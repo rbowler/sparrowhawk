@@ -67,9 +67,11 @@ static void display_csw (DEVBLK *dev, BYTE csw[])
 /*-------------------------------------------------------------------*/
 static void display_scsw (DEVBLK *dev, SCSW scsw)
 {
-    logmsg ("%4.4X:Stat=%2.2X%2.2X Count=%2.2X%2.2X  "
+    logmsg ("%4.4X:SCSW=%2.2X%2.2X%2.2X%2.2X "
+            "Stat=%2.2X%2.2X Count=%2.2X%2.2X  "
             "CCW=%2.2X%2.2X%2.2X%2.2X\n",
             dev->devnum,
+            scsw.flag0, scsw.flag1, scsw.flag2, scsw.flag3,
             scsw.unitstat, scsw.chanstat,
             scsw.count[0], scsw.count[1],
             scsw.ccwaddr[0], scsw.ccwaddr[1],
@@ -262,9 +264,25 @@ BYTE    readcmd;                        /* 1=READ, SENSE, or RDBACK  */
 
 /*-------------------------------------------------------------------*/
 /* START A CHANNEL PROGRAM                                           */
+/* This function is called by the SIO and SSCH instructions          */
+/*-------------------------------------------------------------------*/
+/* Input                                                             */
+/*      dev     -> Device control block                              */
+/*      ccwaddr Absolute address of start of channel program         */
+/*      ccwfmt  1=Format-1 CCWs, 0=Format-0 CCWs                     */
+/*      ccwkey  Bits 0-3 = Protect key; Bits 4-7 = zeroes            */
+/*      ioparm  I/O interruption parameter from ORB                  */
+/*      suspctl 1=Suspend/Resume allowed, 0=Suspend/Resume prohibited*/
+/*      suspsup 1=Suppress interruption on suspend                   */
+/*      intstat 1=Initial status interruption requested              */
+/* Output                                                            */
+/*      The I/O parameters are stored in the device block, and a     */
+/*      thread is created to execute the CCW chain asynchronously.   */
+/*      The return value is the condition code for the SIO or        */
+/*      SSCH instruction.                                            */
 /*-------------------------------------------------------------------*/
 int start_io (DEVBLK *dev, U32 ccwaddr, int ccwfmt, BYTE ccwkey,
-                U32 ioparm)
+                U32 ioparm, int suspctl, int suspsup, int intstat)
 {
 
     /* Obtain the device lock */
@@ -300,6 +318,20 @@ int start_io (DEVBLK *dev, U32 ccwaddr, int ccwfmt, BYTE ccwkey,
     dev->ccwaddr = ccwaddr;
     dev->ccwfmt = ccwfmt;
     dev->ccwkey = ccwkey;
+
+    /* Initialize the subchannel status word */
+    memset (&dev->scsw, 0, sizeof(SCSW));
+    memset (&dev->pciscsw, 0, sizeof(SCSW));
+    dev->scsw.flag0 = (ccwkey & SCSW0_KEY);
+    if (suspctl) dev->scsw.flag0 |= SCSW0_S;
+    if (ccwfmt) dev->scsw.flag1 |= SCSW1_F;
+    if (suspsup) dev->scsw.flag1 |= SCSW1_U;
+    if (intstat) dev->scsw.flag1 |= SCSW1_Z;
+
+    /* Make the subchannel start-pending */
+    dev->scsw.flag2 = SCSW2_FC_START | SCSW2_AC_START;
+
+    /* Initialize the path management control word */
     dev->pmcw.intparm[0] = (ioparm >> 24) & 0xFF;
     dev->pmcw.intparm[1] = (ioparm >> 16) & 0xFF;
     dev->pmcw.intparm[2] = (ioparm >> 8) & 0xFF;
@@ -351,10 +383,49 @@ BYTE    area[64];                       /* Message area              */
 DEVXF  *devexec;                        /* -> Execute CCW function   */
 int     ccwseq = 0;                     /* CCW sequence number       */
 int     bufpos = 0;                     /* Position in I/O buffer    */
+int     n;                              /* Integer work area         */
 BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
     /* Point to the device handler for this device */
     devexec = dev->devexec;
+
+    /* Turn off the start pending bit in the SCSW */
+    dev->scsw.flag2 &= ~SCSW2_AC_START;
+
+    /* Set the subchannel active and device active bits in the SCSW */
+    dev->scsw.flag3 |= (SCSW3_AC_SCHAC | SCSW3_AC_DEVAC);
+
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+    /* Generate an initial status I/O interruption if requested */
+    if (dev->scsw.flag1 & SCSW1_Z)
+    {
+        /* Obtain the device lock */
+        obtain_lock (&dev->lock);
+
+        /* Update the CCW address in the SCSW */
+        dev->scsw.ccwaddr[0] = (ccwaddr & 0xFF000000) >> 24;
+        dev->scsw.ccwaddr[1] = (ccwaddr & 0xFF0000) >> 16;
+        dev->scsw.ccwaddr[2] = (ccwaddr & 0xFF00) >> 8;
+        dev->scsw.ccwaddr[3] = ccwaddr & 0xFF;
+
+        /* Set intermediate status in the SCSW */
+        dev->scsw.flag3 = SCSW3_SC_INTER | SCSW3_SC_PEND;
+
+        /* Set interrupt pending flag */
+        dev->pending = 1;
+
+        /* Release the device lock */
+        release_lock (&dev->lock);
+
+        logmsg ("channel: Device %4.4X initial status interrupt\n",
+                dev->devnum);
+
+        /* Signal waiting CPUs that interrupt is pending */
+        obtain_lock (&sysblk.intlock);
+        signal_condition (&sysblk.intcond);
+        release_lock (&sysblk.intlock);
+    }
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
     /* Execute the CCW chain */
     while ( chain )
@@ -385,6 +456,12 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
         /* Increment to next CCW address */
         ccwaddr += 8;
+
+        /* Update the CCW address in the SCSW */
+        dev->scsw.ccwaddr[0] = (ccwaddr & 0xFF000000) >> 24;
+        dev->scsw.ccwaddr[1] = (ccwaddr & 0xFF0000) >> 16;
+        dev->scsw.ccwaddr[2] = (ccwaddr & 0xFF00) >> 8;
+        dev->scsw.ccwaddr[3] = ccwaddr & 0xFF;
 
         /* Extract CCW flags, byte count, and data address */
         if (ccwfmt == 0)
@@ -454,14 +531,99 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             break;
         }
 
-        /* Channel program check if unsupported flags */
+#ifdef FEATURE_S370_CHANNEL
+        /* For S/370, channel program check if suspend flag is set */
         if (flags & CCW_FLAGS_SUSP)
         {
-            logmsg ("channel: Unsupported SUSP for device %4.4X\n",
-                    dev->devnum);
             chanstat = CSW_PROGC;
             break;
         }
+#endif /*FEATURE_S370_CHANNEL*/
+
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+        /* Suspend channel program if suspend flag is set */
+        if (flags & CCW_FLAGS_SUSP)
+        {
+/*debug*/   dev->ccwtrace = 1;
+            /* Channel program check if the ORB suspend control bit
+               was zero, or if this is a data chained CCW */
+            if ((dev->scsw.flag0 & SCSW0_S) == 0
+                || (chained & CCW_FLAGS_CD))
+            {
+                chanstat = CSW_PROGC;
+                break;
+            }
+
+            /* Obtain the device lock */
+            obtain_lock (&dev->lock);
+
+            /* Suspend the device if not already resume pending */
+            if ((dev->scsw.flag2 & SCSW2_AC_RESUM) == 0)
+            {
+                /* Set the subchannel status word to suspended */
+                dev->scsw.flag3 = SCSW3_AC_SUSP
+                                    | SCSW3_SC_ALERT | SCSW3_SC_INTER
+                                    | SCSW3_SC_PRI | SCSW3_SC_SEC
+                                    | SCSW3_SC_PEND;
+
+                /* Generate I/O interrupt unless the ORB specified
+                   that suspend interrupts are to be suppressed */
+                if ((dev->scsw.flag1 & SCSW1_U) == 0)
+                {
+                    /* Set interrupt pending flag */
+                    dev->pending = 1;
+
+                    /* Release the device lock */
+                    release_lock (&dev->lock);
+
+                    /* Signal waiting CPUs that interrupt is pending */
+                    obtain_lock (&sysblk.intlock);
+                    signal_condition (&sysblk.intcond);
+                    release_lock (&sysblk.intlock);
+
+                    /* Obtain the device lock */
+                    obtain_lock (&dev->lock);
+                }
+
+                /* Suspend the device until resume instruction */
+                if (dev->ccwtrace || dev->ccwstep)
+                    logmsg ("channel: Device %4.4X suspended\n",
+                            dev->devnum);
+
+                while ((dev->scsw.flag2 & SCSW2_AC_RESUM) == 0)
+                    wait_condition (&dev->resumecond, &dev->lock);
+
+                if (dev->ccwtrace || dev->ccwstep)
+                    logmsg ("channel: Device %4.4X resumed\n",
+                            dev->devnum);
+
+                /* Reset the suspended status in the SCSW */
+                dev->scsw.flag3 &= ~SCSW3_AC_SUSP;
+                dev->scsw.flag3 |= (SCSW3_AC_SCHAC | SCSW3_AC_DEVAC);
+            }
+
+            /* Reset the resume pending flag */
+            dev->scsw.flag2 &= ~SCSW2_AC_RESUM;
+
+            /* Release the device lock */
+            release_lock (&dev->lock);
+
+            /* Reset fields as if starting a new channel program */
+            code = 0;
+            tic = 1;
+            chain = 1;
+            chained = 0;
+            prev_chained = 0;
+            prevcode = 0;
+            ccwseq = 0;
+            bufpos = 0;
+
+            /* Go back and refetch the suspended CCW */
+            ccwaddr -= 8;
+            continue;
+
+        } /* end if(CCW_FLAGS_SUSP) */
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
         /* Signal I/O interrupt if PCI flag is set */
         if (flags & CCW_FLAGS_PCI)
@@ -512,7 +674,8 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             obtain_lock (&sysblk.intlock);
             signal_condition (&sysblk.intcond);
             release_lock (&sysblk.intlock);
-        }
+
+        } /* end if(CCW_FLAGS_PCI) */
 
         /* Channel program check if invalid count */
         if (count == 0 && (ccwfmt == 0 ||
@@ -708,9 +871,6 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
     /* Complete the subchannel status word */
-    dev->scsw.flag0 = ccwkey & 0xF0;
-    dev->scsw.flag1 = (ccwfmt == 1)? SCSW1_F : 0;
-    dev->scsw.flag2 = SCSW2_FC_START;
     dev->scsw.flag3 = SCSW3_SC_PRI | SCSW3_SC_SEC | SCSW3_SC_PEND;
     dev->scsw.ccwaddr[0] = (ccwaddr & 0x7F000000) >> 24;
     dev->scsw.ccwaddr[1] = (ccwaddr & 0xFF0000) >> 16;
@@ -720,6 +880,29 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
     dev->scsw.chanstat = chanstat;
     dev->scsw.count[0] = (residual & 0xFF00) >> 8;
     dev->scsw.count[1] = residual & 0xFF;
+
+    /* Set alert status if terminated by any unusual condition */
+    if (chanstat != 0 || unitstat != (CSW_CE | CSW_DE))
+        dev->scsw.flag3 |= SCSW3_SC_ALERT;
+
+    /* Build the format-1 extended status word */
+    memset (&dev->esw, 0, sizeof(ESW));
+    dev->esw.lpum = 0x80;
+
+    /* Clear the extended control word */
+    memset (dev->ecw, 0, sizeof(dev->ecw));
+
+    /* Return sense information if PMCW allows concurrent sense */
+    if ((unitstat & CSW_UC) && (dev->pmcw.flag27 & PMCW27_S))
+    {
+        dev->scsw.flag1 |= SCSW1_E;
+        dev->esw.erw0 |= ERW0_S;
+        n = (dev->numsense < sizeof(dev->ecw)) ?
+                dev->numsense : sizeof(dev->ecw);
+        dev->esw.erw1 = n;
+        memcpy (dev->ecw, dev->sense, n);
+        memset (dev->sense, 0, sizeof(dev->sense));
+    }
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
     /* Set the interrupt pending flag for this device */
@@ -879,15 +1062,6 @@ int     cc;                             /* Condition code            */
     /* Obtain the device lock */
     obtain_lock (&dev->lock);
 
-    /* Build the extended status word in the IRB */
-    memset (&irb->esw, 0, sizeof(ESW));
-    irb->esw.lpum = 0x80;
-    irb->esw.scl2 = SCL2_FVF_LPUM
-                    | SCL2_FVF_USTAT | SCL2_FVF_CCWAD;
-
-    /* Zeroize the extended control word in the IRB */
-    memset (irb->ecw, 0, sizeof(irb->ecw));
-
     /* Return PCI SCSW if PCI status is pending */
     if (dev->pciscsw.flag3 & SCSW3_SC_PEND)
     {
@@ -895,6 +1069,11 @@ int     cc;                             /* Condition code            */
 
         /* Copy the PCI SCSW to the IRB */
         irb->scsw = dev->pciscsw;
+
+        /* Clear the ESW and ECW in the IRB */
+        memset (&irb->esw, 0, sizeof(ESW));
+        irb->esw.lpum = 0x80;
+        memset (irb->ecw, 0, sizeof(irb->ecw));
 
         /* Clear the pending PCI status */
         dev->pciscsw.flag2 &= ~(SCSW2_FC | SCSW2_AC);
@@ -910,6 +1089,12 @@ int     cc;                             /* Condition code            */
 
     /* Copy the subchannel status word to the IRB */
     irb->scsw = dev->scsw;
+
+    /* Copy the extended status word to the IRB */
+    irb->esw = dev->esw;
+
+    /* Copy the extended control word to the IRB */
+    memcpy (irb->ecw, dev->ecw, sizeof(irb->ecw));
 
     /* Clear any pending interrupt */
     dev->pending = 0;
@@ -998,6 +1183,57 @@ void clear_subchan (REGS *regs, DEVBLK *dev)
     release_lock (&sysblk.intlock);
 
 } /* end function clear_subchan */
+
+/*-------------------------------------------------------------------*/
+/* RESUME SUBCHANNEL                                                 */
+/*-------------------------------------------------------------------*/
+/* Input                                                             */
+/*      regs    -> CPU register context                              */
+/*      dev     -> Device control block                              */
+/* Return value                                                      */
+/*      The return value is the condition code for the RSCH          */
+/*      instruction:  0=subchannel has been made resume pending,     */
+/*      1=status was pending, 2=resume not allowed                   */
+/*-------------------------------------------------------------------*/
+int resume_subchan (REGS *regs, DEVBLK *dev)
+{
+
+    /* Obtain the device lock */
+    obtain_lock (&dev->lock);
+
+    /* Set condition code 1 if subchannel has status pending */
+    if (dev->scsw.flag3 & SCSW3_SC_PEND)
+    {
+        release_lock (&dev->lock);
+        return 1;
+    }
+
+    /* Set condition code 2 if subchannel has any function other
+       than the start function alone, is already resume pending,
+       or the ORB for the SSCH did not specify suspend control */
+    if ((dev->scsw.flag2 & SCSW2_FC) != SCSW2_FC_START
+        || (dev->scsw.flag2 & SCSW2_AC_RESUM)
+        || (dev->scsw.flag0 & SCSW0_S) == 0)
+    {
+        release_lock (&dev->lock);
+        return 2;
+    }
+
+    /* Clear the path not-operational mask if in suspend state */
+    if (dev->scsw.flag3 & SCSW3_AC_SUSP)
+        dev->pmcw.pnom = 0x00;
+
+    /* Set the resume pending flag and signal the subchannel */
+    dev->scsw.flag2 |= SCSW2_AC_RESUM;
+    signal_condition (&dev->resumecond);
+
+    /* Release the device lock */
+    release_lock (&dev->lock);
+
+    /* Return condition code zero */
+    return 0;
+
+} /* end function resume_subchan */
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
 /*-------------------------------------------------------------------*/
@@ -1107,7 +1343,7 @@ DEVBLK *dev;                            /* -> Device control block   */
             | dev->pmcw.intparm[3];
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
-    /* Reset the interrupt pending and busy flags for the device */
+    /* Reset the interrupt pending flag for the device */
     if (dev->pcipending)
     {
 //      /*debug*/logmsg ("%4.4X: PCI interrupt presented\n",
@@ -1117,7 +1353,6 @@ DEVBLK *dev;                            /* -> Device control block   */
     else
     {
         dev->pending = 0;
-        dev->busy = 0;
     }
 
     /* Signal console thread to redrive select */

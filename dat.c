@@ -1090,7 +1090,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         addr = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE, akey);
         addr2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE, akey);
         memcpy (sysblk.mainstor+addr, src, len1);
-        memcpy (sysblk.mainstor+addr, src+len1, len2);
+        memcpy (sysblk.mainstor+addr2, src+len1, len2);
     }
 } /* end function vstorec */
 
@@ -1322,7 +1322,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         addr = logical_to_abs (addr, arn, regs, ACCTYPE_READ, akey);
         addr2 = logical_to_abs (addr2, arn, regs, ACCTYPE_READ, akey);
         memcpy (dest, sysblk.mainstor+addr, len1);
-        memcpy (dest+len1, sysblk.mainstor+addr, len2);
+        memcpy (dest+len1, sysblk.mainstor+addr2, len2);
     }
 } /* end function vfetchc */
 

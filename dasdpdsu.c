@@ -6,10 +6,14 @@
 /* a virtual DASD volume and copies each member to a flat file.      */
 /*                                                                   */
 /* The command format is:                                            */
-/*      dasdpdsu ckdfile dsname                                      */
-/* where ckdfile is the name of the CKD image file                   */
-/* and dsname is the name of the PDS to be unloaded.                 */
-/* Each member is copied to a file memname.mac                       */
+/*      dasdpdsu ckdfile dsname [ascii]                              */
+/* where: ckdfile is the name of the CKD image file                  */
+/*        dsname is the name of the PDS to be unloaded               */
+/*        ascii is an optional keyword which will cause the members  */
+/*        to be unloaded as ASCII variable length text files.        */
+/* Each member is copied to a file memname.mac in the current        */
+/* working directory. If the ascii keyword is not specified then     */
+/* the members are unloaded as fixed length binary files.            */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -18,6 +22,7 @@
 /*-------------------------------------------------------------------*/
 /* Static data areas                                                 */
 /*-------------------------------------------------------------------*/
+BYTE            asciiflag = 0;          /* 1=Translate to ASCII      */
 BYTE           *fname;                  /* -> CKD image file name    */
 int             fd;                     /* CKD image file descriptor */
 int             trksz;                  /* CKD image track size      */
@@ -408,8 +413,16 @@ BYTE            card[81];               /* Logical record (ASCIIZ)   */
         /* Process each record in the data block */
         for (offset = 0; offset < len; offset += 80)
         {
-            make_asciiz (card, sizeof(card), buf + offset, 72);
-            fprintf (ofp, "%s\n", card);
+            if (asciiflag)
+            {
+                make_asciiz (card, sizeof(card), buf + offset, 72);
+                fprintf (ofp, "%s\n", card);
+            }
+            else
+            {
+                fwrite (buf+offset, 80, 1, ofp);
+            }
+
             if (ferror(ofp))
             {
                 fprintf (stderr,
@@ -523,10 +536,10 @@ CKDDASD_DEVHDR  devhdr;                 /* CKD device header         */
             MSTRING(VERSION));
 
     /* Check the number of arguments */
-    if (argc != 3)
+    if (argc < 3 || argc > 4)
     {
         fprintf (stderr,
-                "Usage: %s ckdfile pdsname\n",
+                "Usage: %s ckdfile pdsname [ascii]\n",
                 argv[0]);
         return -1;
     }
@@ -538,6 +551,20 @@ CKDDASD_DEVHDR  devhdr;                 /* CKD device header         */
     strncpy (dsnama, argv[2], sizeof(dsnama)-1);
     string_to_upper (dsnama);
     convert_to_ebcdic (dsname, sizeof(dsname), dsnama);
+
+    /* The third argument is an optional keyword */
+    if (argc > 3 && argv[3] != NULL)
+    {
+        if (strcasecmp(argv[3], "ascii") == 0)
+            asciiflag = 1;
+        else
+        {
+            fprintf (stderr,
+                    "Keyword %s is not recognized\n",
+                    argv[3]);
+            return -1;
+        }
+    }
 
     /* Open the CKD image file */
     fd = open (fname, O_RDONLY);
