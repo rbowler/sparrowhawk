@@ -342,6 +342,14 @@ the device record is:
     followed by fixed length track images.  The length of each track
     image depends on the emulated device type, and is always rounded
     up to the next multiple of 512 bytes.
+    <p>
+    Volumes larger than 2GB (for example, the 3390 model 3)
+    are supported by spreading the data across more than one file.
+    Each file contains a whole number of cylinders.  The first file
+    (which contains cylinders 0-2518 in the case of a 3390) is the
+    file named in the configuration statement.  The ckddasd driver
+    allocates the remaining files by replacing the last character of
+    the file name by the characters 2, 3, etc.
 </dl>
 <p>
 A comment preceded by a hash sign may be appended to any device
@@ -358,7 +366,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 21 Mar 2000
+<p>Last updated 31 Mar 2000
 </BODY>
 </HTML>
 

@@ -905,17 +905,30 @@ tran_alet_excp:
 tran_excp_addr:
     /* Set the translation exception address */
     regs->tea = vaddr & TEA_EFFADDR;
-    regs->tea |= stid;
-
-    /* Set bit 0 of the translation exception address if primary
-       or secondary mode and secondary segment table was selected */
-    if ((PRIMARY_SPACE_MODE(&regs->psw)
-        || SECONDARY_SPACE_MODE(&regs->psw))
-        && stid == TEA_ST_SECNDRY)
-        regs->tea |= TEA_SECADDR;
+    if ((std & STD_STO) != (regs->cr[1] & STD_STO))
+    {
+        if ((std & STD_STO) == (regs->cr[7] & STD_STO))
+        {
+            if (PRIMARY_SPACE_MODE(&regs->psw)
+              || SECONDARY_SPACE_MODE(&regs->psw))
+            {
+                regs->tea |= TEA_SECADDR | TEA_ST_SECNDRY;
+            } else {
+                regs->tea |= TEA_ST_SECNDRY;
+            }
+        } else {
+            if ((std & STD_STO) == (regs->cr[13] & STD_STO))
+            {
+                regs->tea |= TEA_ST_HOME;
+            } else {
+                regs->tea |= TEA_ST_ARMODE;
+            }
+        }
+    }
 
     /* Set the exception access identification */
-    regs->excarid = (arn < 0 ? 0 : arn);
+    if (ACCESS_REGISTER_MODE(&regs->psw))
+      regs->excarid = (arn < 0 ? 0 : arn);
 
     /* Return condition code */
     return cc;

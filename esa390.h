@@ -763,6 +763,17 @@ typedef struct _IRB {
         BYTE    ecw[32];                /* Extended control word     */
     } IRB;
 
+/* Measurement Block */
+typedef struct _MBK {
+        HWORD   srcount;                /* SSCH + RSCH count         */
+        HWORD   samplecnt;              /* Sample count              */
+        FWORD   dct;                    /* Device connect time       */
+        FWORD   fpt;                    /* Function pending time     */
+        FWORD   ddt;                    /* Device disconnect time    */
+        FWORD   cuqt;                   /* Control unit queueing time*/
+        FWORD   resv[3];                /* Reserved                  */
+    } MBK;
+
 /* Bit definitions for SCHM instruction */
 #define CHM_GPR1_MBK    0xF0000000      /* Measurement Block Key     */
 #define CHM_GPR1_M      0x00000002      /* Measurement mode control  */

@@ -207,10 +207,7 @@ void initial_cpu_reset (REGS *regs)
 
     /* Clear the registers */
     memset (&regs->psw, 0, sizeof(PSW));
-    memset (regs->gpr, 0, sizeof(regs->gpr));
     memset (regs->cr, 0, sizeof(regs->cr));
-    memset (regs->ar, 0, sizeof(regs->ar));
-    memset (regs->fpr, 0, sizeof(regs->fpr));
     regs->pxr = 0;
     regs->todpr = 0;
     regs->ptimer = 0;

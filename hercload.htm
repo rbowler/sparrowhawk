@@ -45,6 +45,18 @@ where
     <dd>is the emulated size in cylinders for CKD devices, or in
         512-byte blocks for FBA devices
 </dl>
+
+<h5>Volumes exceeding 2GB</h5>
+<p>
+For CKD volumes which exceed 2GB, such as the 3390-3, the DASDINIT
+program will create multiple files by appending the characters
+<b><i>_1 _2</b></i> etc.
+to the file name specified on the command line.  Each file contains a
+whole number of cylinders.  Hercules CKD support recognizes the files
+as belonging to a single logical volume.
+<p>
+The DASDINIT program cannot create FBA volumes exceeding 2GB.
+
 <h5>Examples</h5>
 <p>
 To create a CKD volume of 411 cylinders with volume
@@ -56,11 +68,18 @@ To create an FBA volume of 920115 sectors with volume
 serial number DOSRES in a file called
 <b><i>dosres.140</b></i>:
 <pre><code>dasdinit dosres.140 3370 dosres 920115</code></pre>
+<p>
+To create a CKD volume of 3339 cylinders with volume
+serial number WORK02:
+<pre><code>dasdinit work02.A88 3390 work02 3339</code></pre>
+Because this volume exceeds 2GB, DASDINIT will create two files:
+<b><i>work02_1.A88</b></i> contains cylinders 0-2518
+<b><i>work02_2.A88</b></i> contains cylinders 2519-3339
 
 <h4>Formatting the empty DASD volume</h4>
 <p>
 After creating a DASD volume you can format it with a program
-such as standalone IBCDASDI.
+such as standalone IBCDASDI or ICKDSF.
 <p>
 Here is an example of the IBCDASDI control statements required
 to initialize a 3330 volume:
@@ -234,6 +253,10 @@ sys1.sysjobqe   empty   cyl 2 0 0       da f 176 176 0
 sys1.dump       empty   cyl 10 0 0      ps u 0 3625 0
 </pre></code>
 
+<p>
+<em>Note: the DASDLOAD program cannot create volumes exceeding
+2GB in size.</em>
+
 <h3>Fixing the XCTL tables in SVCLIB</h3>
 <p>
 On an OS/360 system, the Open/Close/EOV modules in SYS1.SVCLIB have
@@ -269,7 +292,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 10 Feb 2000
+<p>Last updated 31 Mar 2000
 </BODY>
 </HTML>
 

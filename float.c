@@ -304,17 +304,20 @@ U64     value;                          /* Operand value             */
 
 /*-------------------------------------------------------------------*/
 /* Normalize short float                                             */
-/* The fraction is expected to be non zero                           */
-/* If zero an endles loop is caused !!!!!!                           */ 
 /*                                                                   */
 /* Input:                                                            */
 /*      fl	Internal float					     */
 /*-------------------------------------------------------------------*/
 static void normal_sf ( SHORT_FLOAT *fl )
 {
-    while ((fl->short_fract & 0x00F00000) == 0) {
-	fl->short_fract <<= 4;
-	(fl->expo)--;
+    if (fl->short_fract) {
+	while ((fl->short_fract & 0x00F00000) == 0) {
+	    fl->short_fract <<= 4;
+	    (fl->expo)--;
+	}
+    } else {
+	fl->sign = POS;
+	fl->expo = 0;
     }
 
 } /* end function normal_sf */
@@ -322,17 +325,20 @@ static void normal_sf ( SHORT_FLOAT *fl )
 
 /*-------------------------------------------------------------------*/
 /* Normalize long float                                              */
-/* The fraction is expected to be non zero                           */
-/* If zero an endles loop is caused !!!!!!                           */ 
 /*                                                                   */
 /* Input:                                                            */
 /*      fl	Internal float					     */
 /*-------------------------------------------------------------------*/
 static void normal_lf ( LONG_FLOAT *fl )
 {
-    while ((fl->long_fract & 0x00F0000000000000ULL) == 0) {
-	fl->long_fract <<= 4;
-	(fl->expo)--;
+    if (fl->long_fract) {
+	while ((fl->long_fract & 0x00F0000000000000ULL) == 0) {
+	    fl->long_fract <<= 4;
+	    (fl->expo)--;
+	}
+    } else {
+	fl->sign = POS;
+	fl->expo = 0;
     }
 
 } /* end function normal_lf */
@@ -340,29 +346,32 @@ static void normal_lf ( LONG_FLOAT *fl )
 
 /*-------------------------------------------------------------------*/
 /* Normalize extended float                                          */
-/* The fraction is expected to be non zero                           */
-/* If zero an endles loop is caused !!!!!!                           */ 
 /*                                                                   */
 /* Input:                                                            */
 /*      fl	Internal float					     */
 /*-------------------------------------------------------------------*/
 static void normal_ef ( EXTENDED_FLOAT *fl )
 {
-    while (fl->ms_fract == 0) {
-	fl->ms_fract = fl->ls_fract >> 16;
-	fl->ls_fract <<= 48;
-	fl->expo -= 12;
-    }
-
-    while ((fl->ms_fract & 0x0000F00000000000ULL) == 0) {
-	if (fl->ls_fract) {
-	    fl->ms_fract = (fl->ms_fract << 4) 
-			 | (fl->ls_fract >> 60);
-	    fl->ls_fract <<= 4;
-	} else {
-	    fl->ms_fract <<= 4;
+    if (fl->ms_fract || fl->ls_fract) {
+	while (fl->ms_fract == 0) {
+	    fl->ms_fract = fl->ls_fract >> 16;
+	    fl->ls_fract <<= 48;
+	    fl->expo -= 12;
 	}
-	(fl->expo)--;
+
+	while ((fl->ms_fract & 0x0000F00000000000ULL) == 0) {
+	    if (fl->ls_fract) {
+		fl->ms_fract = (fl->ms_fract << 4) 
+			 | (fl->ls_fract >> 60);
+		fl->ls_fract <<= 4;
+	    } else {
+		fl->ms_fract <<= 4;
+	    }
+	    (fl->expo)--;
+	}
+    } else {
+	fl->sign = POS;
+	fl->expo = 0;
     }
 
 } /* end function normal_ef */
@@ -509,7 +518,7 @@ static void significance_sf ( SHORT_FLOAT *fl, REGS *regs )
     if (regs->psw.sgmask) {
         program_check (regs, PGM_SIGNIFICANCE_EXCEPTION);
     } else {
-        /* true 0 */
+        /* set true 0 */
 
         fl->expo = 0;
     }
@@ -531,7 +540,7 @@ static void significance_lf ( LONG_FLOAT *fl, REGS *regs )
     if (regs->psw.sgmask) {
         program_check (regs, PGM_SIGNIFICANCE_EXCEPTION);
     } else {
-        /* true 0 */
+        /* set true 0 */
 
         fl->expo = 0;
     }
@@ -553,7 +562,7 @@ static void significance_ef ( EXTENDED_FLOAT *fl, REGS *regs )
     if (regs->psw.sgmask) {
         program_check (regs, PGM_SIGNIFICANCE_EXCEPTION);
     } else {
-        /* true 0 */
+        /* set true 0 */
 
         fl->expo = 0;
     }
@@ -575,8 +584,8 @@ static void add_sf ( SHORT_FLOAT *fl, SHORT_FLOAT *add_fl, BYTE normal,
 {
 BYTE shift;
 
-    if (add_fl->short_fract) {	/* add_fl not 0 */
-	if (fl->short_fract) {	/* fl not 0 */
+    if (add_fl->short_fract || add_fl->expo) {	/* add_fl not 0 */
+	if (fl->short_fract || fl->expo) {	/* fl not 0 */
 	    /* both not 0 */
 
 	    if (fl->expo == add_fl->expo) {
@@ -719,8 +728,8 @@ static void add_lf ( LONG_FLOAT *fl, LONG_FLOAT *add_fl, BYTE normal,
 {
 BYTE shift;
 
-    if (add_fl->long_fract) {	/* add_fl not 0 */
-	if (fl->long_fract) {	/* fl not 0 */
+    if (add_fl->long_fract || add_fl->expo) {	/* add_fl not 0 */
+	if (fl->long_fract || fl->expo) {	/* fl not 0 */
 	    /* both not 0 */
 
 	    if (fl->expo == add_fl->expo) {	
@@ -861,8 +870,8 @@ static void add_ef ( EXTENDED_FLOAT *fl, EXTENDED_FLOAT *add_fl, REGS *regs )
 {
 BYTE shift;
 
-    if (add_fl->ms_fract || add_fl->ls_fract) {	/* not 0 */
-	if (fl->ms_fract || fl->ls_fract) {	/* not 0 */
+    if (add_fl->ms_fract || add_fl->ls_fract || add_fl->expo) {	/* add_fl not 0 */
+	if (fl->ms_fract || fl->ls_fract || fl->expo) 	{	/* fl not 0 */
 	    /* both not 0 */
 
 	    if (fl->expo == add_fl->expo) {	
@@ -1301,7 +1310,7 @@ static void mul_sf_to_lf ( SHORT_FLOAT *fl, SHORT_FLOAT *mul_fl,
 	/* determine sign */
 	result_fl->sign = (fl->sign == mul_fl->sign) ? POS : NEG;
     } else {
-    	/* true 0 */
+    	/* set true 0 */
 
     	result_fl->sign = POS;
     	result_fl->expo = 0;
@@ -1356,7 +1365,7 @@ U64 wk;
 	/* determine sign */
 	result_fl->sign = (fl->sign == mul_fl->sign) ? POS : NEG;
     } else {
-    	/* true 0 */
+    	/* set true 0 */
 
     	result_fl->sign = POS;
     	result_fl->expo = 0;
@@ -1409,7 +1418,7 @@ U32 v;
 	/* determine sign */
 	fl->sign = (fl->sign == mul_fl->sign) ? POS : NEG;
     } else {
-    	/* true 0 */
+    	/* set true 0 */
 
     	fl->sign = POS;
     	fl->expo = 0;
@@ -1486,7 +1495,7 @@ U32 v;
 	/* determine sign */
 	fl->sign = (fl->sign == mul_fl->sign) ? POS : NEG;
     } else {
-    	/* true 0 */
+    	/* set true 0 */
 
     	fl->sign = POS;
     	fl->expo = 0;
@@ -1532,7 +1541,7 @@ U64 wk;
 	    /* determine sign */
 	    fl->sign = (fl->sign == div_fl->sign) ? POS : NEG;
 	} else {
-    	    /* fraction of dividend 0, true 0 */
+    	    /* fraction of dividend 0, set true 0 */
 
     	    fl->sign = POS;
     	    fl->expo = 0;
@@ -1595,7 +1604,7 @@ int i;
 	    /* determine sign */
 	    fl->sign = (fl->sign == div_fl->sign) ? POS : NEG;
 	} else {
-    	    /* fraction of dividend 0, true 0 */
+    	    /* fraction of dividend 0, set true 0 */
 
     	    fl->sign = POS;
     	    fl->expo = 0;
@@ -1686,7 +1695,7 @@ int i;
 	    /* determine sign */
 	    fl->sign = (fl->sign == div_fl->sign) ? POS : NEG;
 	} else {
-    	    /* fraction of dividend 0, true 0 */
+    	    /* fraction of dividend 0, set true 0 */
 
     	    fl->sign = POS;
     	    fl->expo = 0;
@@ -1722,8 +1731,11 @@ LONG_FLOAT fl;
     get_lf (&fl, regs->fpr + r2);
 
     /* Halve the value */
-    fl.long_fract >>= 1;
-    if (fl.long_fract) {
+    if (fl.long_fract & 0x00E0000000000000ULL) {
+	fl.long_fract >>= 1;
+    } else {
+	fl.long_fract <<= 3;
+	(fl.expo)--;
 	normal_lf (&fl);
 	underflow_lf (&fl, regs);
     }
@@ -2036,8 +2048,11 @@ SHORT_FLOAT fl;
     get_sf (&fl, regs->fpr + r2);
 
     /* Halve the value */
-    fl.short_fract >>= 1;
-    if (fl.short_fract) {
+    if (fl.short_fract & 0x00E00000) {
+	fl.short_fract >>= 1;
+    } else {
+	fl.short_fract <<= 3;
+	(fl.expo)--;
 	normal_sf (&fl);
 	underflow_sf (&fl, regs);
     }

@@ -41,10 +41,21 @@ No.  At the moment it's a system programmer's toy.
 
 <h4>Can it run OS/390, VM/ESA, VSE/ESA?</h4>
 <p>
-Hercules is a software implementation of ESA/390 so in theory you
-could use it to run any ESA/390 operating system.  But in
-practice you cannot do this, because the licensing terms for
-these operating systems do not allow you to run them on your PC.
+Hercules is a software implementation of ESA/390, and so it is capable
+of running OS/390 and VSE/ESA.
+Hercules will not run VM/ESA because it does not implement the
+required VM Assist and SIE instructions.
+<p>
+In practise you cannot run any ESA operating system on your
+PC, unless you can obtain a licence from IBM allowing you to do so.
+It is believed that there are, however, two legal ways you could run
+OS/390 or VSE/ESA under Hercules:
+<ol>
+<li>running under Linux on the Pentium processor of a P/390 which is
+    licensed to run OS/390 or VSE/ESA
+<li>running under Linux/390 on a mainframe which is licensed to
+    run OS/390 or VSE/ESA
+</ol>
 
 
 <h4>So what <em>can</em> I run on it?</h4>
@@ -138,16 +149,17 @@ eliminate Linux paging as well, then so much the better.
 <p>
 You also need enough hard disk space to accommodate the emulated DASD.
 A 3380 will need about 650MB, and a 3390 model 2 needs about 2GB.
-<em>
-DASD volumes larger than 2GB (for example 3390 model 3) are not
-supported at the present time.
-</em>
 
 
 <h4>What sort of MIPS rate can I expect?</h4>
 <p>
 Don't get excited...
 on a Celeron 300 I am seeing an execution speed of around 0.3 MIPS.
+That's enough to run OS/360 (MFT or MVT) with a response time
+similar to that of a 370/145 from the 1970's.  It's also fast enough
+to run VSE/ESA with a slow but acceptable response time.  If you
+want to run OS/390 you'd better wait until Intel processor speeds
+get into the 2-4 gigahertz range.
 <p>
 I haven't measured the I/O rate, but I would imagine it is
 abysmal.
@@ -212,11 +224,6 @@ so if you find any issues or faults related to running on other
 hardware (Sparc, Alpha, PPC, ...) under Linux 2.2, then I'm likely
 to be more receptive to fixing that sort of problem than fixing
 issues related to Unix variants.
-<p>
-While I'm not trying to promote Linux as the be-all and end-all
-of everything (there are plenty of people doing that at the moment),
-I chose Linux because I believe it is a suitable platform for this
-particular application.
 
 
 <h4>How can I create a DASD volume?</h4>
@@ -315,6 +322,8 @@ The following standard features have been implemented:
 <li>BAKR/PC/PR/PT instructions
 <li>Linkage Stack
 <li>Compare and Form Codeword and Update Tree instructions
+<li>SCLP (Service Call Logical Processor) Facility
+<li>Operational Extensions: Console Integration
 </ul>
 
 <p>The following optional features have been implemented:
@@ -350,6 +359,7 @@ The following optional features are not yet implemented but probably
 will be in due course:
 <ul>
 <li>Address-Limit Checking
+<li>Broadcasted Purging
 <li>Compression
 <li>Incorrect-Length-Indication Suppression
 <li>Perform Locked Operation
@@ -362,7 +372,6 @@ The features are not implemented, and are unlikely to be:
 <ul>
 <li>Asynchronous Data Mover Facility
 <li>Asynchronous Pageout Facility
-<li>Broadcasted Purging
 <li>Cancel I/O
 <li>Channel-Subsystem Call
 <li>Coupling (Parallel Sysplex, Coupling Links, Integrated Coupling Migration Facility)
@@ -373,12 +382,11 @@ The features are not implemented, and are unlikely to be:
 <li>External Time Reference
 <li>ICRF (Cryptography)
 <li>Interpretive Execution
-<li>Operational extensions (Automatic reconfiguration, Storage reconfiguration,
-    SCP-initiated reset, Console integration, Processor Availability)
+<li>Operational Extensions: Automatic Reconfiguration, Storage
+    Reconfiguration, SCP-initiated Reset, Processor Availability
 <li>Program-Event Recording
 <li>PER extensions
 <li>PR/SM
-<li>SCLP (Service Call Logical Processor) Facility
 <li>SIE I/O Assist
 <li>Sysplex
 <li>Sysplex Timer (ETR)
@@ -429,7 +437,7 @@ http://www.onelist.com/community/hercules-390</a>
 </center>
 
 <small>
-<p>Last updated 30 Mar 2000
+<p>Last updated 21 Apr 2000
 </BODY>
 </HTML>
 

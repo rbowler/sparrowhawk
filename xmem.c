@@ -10,6 +10,7 @@
 /*-------------------------------------------------------------------*/
 /* Additional credits:                                               */
 /*      Correction to LASP instruction by Jan Jaeger                 */
+/*      Implicit tracing by Jan Jaeger                               */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -332,6 +333,9 @@ U32     sasteo;                         /* Secondary ASTE origin     */
 U32     aste[16];                       /* ASN second table entry    */
 U16     xcode;                          /* Exception code            */
 U16     ax;                             /* Authorization index       */
+#ifdef FEATURE_TRACING
+U32     newcr12 = 0;                    /* CR12 upon completion      */
+#endif /*FEATURE_TRACING*/
 
     /* Special operation exception if ASN translation control
        (bit 12 of control register 14) is zero or DAT is off */
@@ -341,6 +345,12 @@ U16     ax;                             /* Authorization index       */
         program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return;
     }
+
+#ifdef FEATURE_TRACING
+    /* Form trace entry if ASN tracing is on */
+    if (regs->cr[12] & CR12_ASNTRACE)
+        newcr12 = trace_ssar (sasn, regs);
+#endif /*FEATURE_TRACING*/
 
     /* Test for SSAR to current primary */
     if (sasn == (regs->cr[4] & CR4_PASN))
@@ -381,6 +391,12 @@ U16     ax;                             /* Authorization index       */
 
     } /* end if(SSAR-ss) */
 
+#ifdef FEATURE_TRACING
+    /* Update trace table address if ASN tracing is on */
+    if (regs->cr[12] & CR12_ASNTRACE)
+        regs->cr[12] = newcr12;
+#endif /*FEATURE_TRACING*/
+
     /* Load the new secondary ASN into control register 3 */
     regs->cr[3] &= ~CR3_SASN;
     regs->cr[3] |= sasn;
@@ -407,13 +423,14 @@ U16     ax;                             /* Authorization index       */
 /*                                                                   */
 /*      This function does not return if a program check occurs.     */
 /*-------------------------------------------------------------------*/
-int load_address_space_parameters (U16 pkm, U16 sasn, U16 ax,
-                                U16 pasn, U32 func, REGS *regs)
+int load_address_space_parameters (U16 pkm_d, U16 sasn_d, U16 ax_d,
+                                U16 pasn_d, U32 func, REGS *regs)
 {
 U32     aste[16];                       /* ASN second table entry    */
 U32     pstd;                           /* Primary STD               */
 U32     sstd;                           /* Secondary STD             */
 U32     ltd;                            /* Linkage table descriptor  */
+U32     ax;                             /* Authorisation index       */
 U32     pasteo;                         /* Primary ASTE origin       */
 U32     sasteo;                         /* Secondary ASTE origin     */
 #ifdef FEATURE_SUBSPACE_GROUP
@@ -425,28 +442,17 @@ U16     xcode;                          /* Exception code            */
     /* Perform PASN translation if PASN not equal to current
        PASN, or if LASP function bit 29 is set */
     if ((func & 0x00000004)
-        || pasn != (regs->cr[4] & CR4_PASN))
+        || pasn_d != (regs->cr[4] & CR4_PASN))
     {
         /* Translate PASN and return condition code 1 if
            AFX- or ASX-translation exception condition */
-        if (translate_asn (pasn, regs, &pasteo, aste))
+        if (translate_asn (pasn_d, regs, &pasteo, aste))
             return 1;
-
-        /* Return condition code 3 if either current STD
-           or new STD indicates a space switch event */
-        if ((regs->cr[1] & STD_SSEVENT)
-            || (aste[2] & STD_SSEVENT))
-            return 3;
 
         /* Obtain new PSTD and LTD from ASTE */
         pstd = aste[2];
         ltd = aste[3];
-
-        /* If bit 30 of the LASP function bits is zero,
-           use the AX from the primary ASTE instead of the
-           AX specified in the first operand */
-        if ((func & 0x00000002) == 0)
-            ax = (aste[1] & ASTE1_AX) >> 16;
+        ax = (aste[1] & ASTE1_AX) >> 16;
 
 #ifdef FEATURE_SUBSPACE_GROUP
         /* Perform subspace replacement on new PSTD */
@@ -456,6 +462,13 @@ U16     xcode;                          /* Exception code            */
         if (xcode != 0)
             return 1;
 #endif /*FEATURE_SUBSPACE_GROUP*/
+
+        /* Return condition code 3 if either current STD
+           or new STD indicates a space switch event */
+        if ((regs->cr[1] & STD_SSEVENT)
+            || (aste[2] & STD_SSEVENT))
+            return 3;
+
     }
     else
     {
@@ -463,67 +476,71 @@ U16     xcode;                          /* Exception code            */
         pstd = regs->cr[1];
         ltd = regs->cr[5];
         pasteo = regs->cr[5];
-
-        /* If bit 30 of the LASP function bits is zero,
-           use the current AX instead of the AX specified
-           in the first operand */
-        if ((func & 0x00000002) == 0)
-            ax = (regs->cr[4] & CR4_AX) >> 16;
+        ax = (regs->cr[4] & CR4_AX) >> 16;
     }
 
     /* SASN translation */
 
     /* If new SASN = new PASN then set new SSTD = new PSTD */
-    if (sasn == pasn)
+    if (sasn_d == pasn_d)
     {
         sstd = pstd;
+
     }
     else
-
-    /* If new SASN = current SASN, and bit 29 of the LASP
+    {
+        /* If new SASN = current SASN, and bit 29 of the LASP
        function bits is 0, and bit 31 of the LASP function bits
        is 1, use current SSTD in control register 7 */
-    if ((func & 0x00000004) == 0
-        && (func & 0x00000001)
-        && sasn == (regs->cr[3] & CR3_SASN))
-    {
-        sstd = regs->cr[7];
-    }
-    else
-    {
-        /* Translate SASN and return condition code 2 if
-           AFX- or ASX-translation exception condition */
-        if (translate_asn (sasn, regs, &sasteo, aste))
-            return 2;
-
-        /* Obtain new SSTD from secondary ASTE */
-        sstd = aste[2];
-
-#ifdef FEATURE_SUBSPACE_GROUP
-        /* Perform subspace replacement on new SSTD */
-        sstd = subspace_replace (sstd, sasteo, &xcode, regs);
-
-        /* Return condition code 2 if ASTE exception was recognized */
-        if (xcode != 0)
-            return 2;
-#endif /*FEATURE_SUBSPACE_GROUP*/
-
-        /* Perform SASN authorization if bit 31 of the
-           LASP function bits is not 0 */
-        if (func & 0x00000001)
+        if (!(func & 0x00000004)
+            && (func & 0x00000001)
+            && (sasn_d == (regs->cr[3] & CR3_SASN)))
         {
-            /* Condition code 2 if SASN authorization fails */
-            if (authorize_asn (ax, aste, ATE_SECONDARY, regs))
+            sstd = regs->cr[7];
+        }
+        else
+        {
+            /* Translate SASN and return condition code 2 if
+               AFX- or ASX-translation exception condition */
+            if (translate_asn (sasn_d, regs, &sasteo, aste))
                 return 2;
 
-        } /* end if(SASN authorization) */
+            /* Obtain new SSTD from secondary ASTE */
+            sstd = aste[2];
 
-    } /* end if(SASN translation) */
+#ifdef FEATURE_SUBSPACE_GROUP
+            /* Perform subspace replacement on new SSTD */
+            sstd = subspace_replace (sstd, sasteo, &xcode, regs);
+
+            /* Return condition code 2 if ASTE exception was recognized */
+            if (xcode != 0)
+                return 2;
+#endif /*FEATURE_SUBSPACE_GROUP*/
+
+            /* Perform SASN authorization if bit 31 of the
+               LASP function bits is 0 */
+            if (!(func & 0x00000001))
+            {
+                /* Condition code 2 if SASN authorization fails */
+                if (authorize_asn (ax, aste, ATE_SECONDARY, regs))
+                    return 2;
+
+            } /* end if(SASN authorization) */
+
+        } /* end if(SASN translation) */
+
+    } /* end if(SASN = PASN) */
+
+    /* If bit 30 of the LASP function bits is zero,
+       use the current AX instead of the AX specified
+       in the first operand */
+    if ((func & 0x00000002))
+        ax = ax_d;
 
     /* Perform control-register loading */
     regs->cr[1] = pstd;
-    regs->cr[3] = (pkm << 16) | sasn;
-    regs->cr[4] = (ax << 16) | pasn;
+    regs->cr[3] = (pkm_d << 16) | sasn_d;
+    regs->cr[4] = (ax << 16) | pasn_d;
     regs->cr[5] = (regs->cr[0] & CR0_ASF) ? pasteo : ltd;
     regs->cr[7] = sstd;
 
@@ -536,20 +553,21 @@ U16     xcode;                          /* Exception code            */
 /* Program Transfer                                                  */
 /*                                                                   */
 /* Input:                                                            */
-/*      pkm     PSW key mask                                         */
-/*      pasn    Primary address space number                         */
-/*      amode   Addressing mode (1=31, 0=24)                         */
-/*      ia      Instruction address                                  */
-/*      prob    Problem state (1=Problem state, 0=Supervisor state)  */
+/*      r1      First operand register number                        */
+/*      r2      Second operand register number                       */
 /*      regs    Pointer to the CPU register context                  */
 /* Return value:                                                     */
 /*      1=Space switch event indicated, 0=No space switch event      */
 /*                                                                   */
 /*      This function does not return if a program check occurs.     */
 /*-------------------------------------------------------------------*/
-int program_transfer (U16 pkm, U16 pasn, int amode, U32 ia, int prob,
-                        REGS *regs)
+int program_transfer (int r1, int r2, REGS *regs)
 {
+U16     pkm;                            /* New program key mask      */
+U16     pasn;                           /* New primary ASN           */
+int     amode;                          /* New amode                 */
+U32     ia;                             /* New instruction address   */
+int     prob;                           /* New problem state bit     */
 U32     ltd;                            /* Linkage table designation */
 U32     pasteo;                         /* Primary ASTE origin       */
 U32     aste[16];                       /* ASN second table entry    */
@@ -557,6 +575,9 @@ U32     pstd;                           /* Primary STD               */
 U16     ax;                             /* Authorization index       */
 U16     xcode;                          /* Exception code            */
 int     ssevent = 0;                    /* 1=space switch event      */
+#ifdef FEATURE_TRACING
+U32     newcr12 = 0;                    /* CR12 upon completion      */
+#endif /*FEATURE_TRACING*/
 
     /* Special operation exception if DAT is off, or
        not in primary space mode */
@@ -566,6 +587,27 @@ int     ssevent = 0;                    /* 1=space switch event      */
         program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return 0;
     }
+
+    /* Extract the PSW key mask from R1 register bits 0-15 */
+    pkm = regs->gpr[r1] >> 16;
+
+    /* Extract the ASN from R1 register bits 16-31 */
+    pasn = regs->gpr[r1] & 0xFFFF;
+
+#ifdef FEATURE_TRACING
+    /* Build trace entry if ASN tracing is on */
+    if (regs->cr[12] & CR12_ASNTRACE)
+        newcr12 = trace_pt (pasn, regs->gpr[r2], regs);
+#endif /*FEATURE_TRACING*/
+
+    /* Extract the amode bit from R2 register bit 0 */
+    amode = (regs->gpr[r2] & 0x80000000) ? 1 : 0;
+
+    /* Extract the instruction address from R2 bits 1-30 */
+    ia = regs->gpr[r2] & 0x7FFFFFFE;
+
+    /* Extract the problem state bit from R2 register bit 31 */
+    prob = regs->gpr[r2] & 0x00000001;
 
     /* [5.5.3.1] Load the linkage table designation */
     if ((regs->cr[0] & CR0_ASF) == 0)
@@ -683,6 +725,12 @@ int     ssevent = 0;                    /* 1=space switch event      */
         pstd = regs->cr[1];
     }
 
+#ifdef FEATURE_TRACING
+    /* Update trace table address if ASN tracing is on */
+    if (regs->cr[12] & CR12_ASNTRACE)
+        regs->cr[12] = newcr12;
+#endif /*FEATURE_TRACING*/
+
     /* Replace PSW amode, instruction address, and problem state bit */
     regs->psw.amode = amode;
     regs->psw.ia = ia;
@@ -743,6 +791,12 @@ U16     xcode;                          /* Exception code            */
         /* Extract the new primary ASN from CR4 bits 16-31 */
         pasn = newregs.cr[4] & CR4_PASN;
 
+#ifdef FEATURE_TRACING
+        /* Perform tracing if ASN tracing is on */
+        if (regs->cr[12] & CR12_ASNTRACE)
+            newregs.cr[12] = trace_pr (&newregs, regs);
+#endif /*FEATURE_TRACING*/
+
         /* Perform PASN translation if new PASN not equal old PASN */
         if (pasn != oldpasn)
         {
@@ -760,7 +814,7 @@ U16     xcode;                          /* Exception code            */
             /* Program check if ASN translation exception */
             if (xcode != 0)
             {
-                program_check (regs, xcode);
+                program_check (&newregs, xcode);
                 return 0;
             }
 
@@ -771,9 +825,9 @@ U16     xcode;                          /* Exception code            */
                 /* [6.5.2.34] Set translation exception address equal
                    to old primary ASN, and set high-order bit if old
                    primary space-switch-event control bit is one */
-                regs->tea = regs->cr[4] & CR4_PASN;
-                if (regs->cr[1] & STD_SSEVENT)
-                    regs->tea |= TEA_SSEVENT;
+                newregs.tea = regs->cr[4] & CR4_PASN;
+                if (newregs.cr[1] & STD_SSEVENT)
+                    newregs.tea |= TEA_SSEVENT;
 
                 /* Indicate space-switch event required */
                 ssevent = 1;
@@ -790,7 +844,7 @@ U16     xcode;                          /* Exception code            */
 #ifdef FEATURE_SUBSPACE_GROUP
             /* Perform subspace replacement on new PSTD */
             newregs.cr[1] = subspace_replace (newregs.cr[1],
-                                            pasteo, NULL, regs);
+                                            pasteo, NULL, &newregs);
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
         } /* end if(pasn!=oldpasn) */
@@ -809,7 +863,7 @@ U16     xcode;                          /* Exception code            */
                control (control register 14 bit 12) is zero */
             if ((regs->cr[14] & CR14_ASN_TRAN) == 0)
             {
-                program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+                program_check (&newregs, PGM_SPECIAL_OPERATION_EXCEPTION);
                 return 0;
             }
 
@@ -819,7 +873,7 @@ U16     xcode;                          /* Exception code            */
             /* Program check if ASN translation exception */
             if (xcode != 0)
             {
-                program_check (regs, xcode);
+                program_check (&newregs, xcode);
                 return 0;
             }
 
@@ -830,15 +884,15 @@ U16     xcode;                          /* Exception code            */
             ax = (newregs.cr[4] & CR4_AX) >> 16;
             if (authorize_asn (ax, aste, ATE_SECONDARY, &newregs))
             {
-                regs->tea = sasn;
-                program_check (regs, PGM_SECONDARY_AUTHORITY_EXCEPTION);
+                newregs.tea = sasn;
+                program_check (&newregs, PGM_SECONDARY_AUTHORITY_EXCEPTION);
                 return 0;
             }
 
 #ifdef FEATURE_SUBSPACE_GROUP
             /* Perform subspace replacement on new SSTD */
             newregs.cr[7] = subspace_replace (newregs.cr[7],
-                                            sasteo, NULL, regs);
+                                            sasteo, NULL, &newregs);
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
         } /* end else(sasn!=pasn) */
@@ -892,6 +946,9 @@ U32     retn;                           /* Return address and amode  */
 U32     aste[16];                       /* ASN second table entry    */
 U16     xcode;                          /* Exception code            */
 U16     pasn;                           /* Primary ASN               */
+#ifdef FEATURE_TRACING
+U32     newcr12 = 0;                    /* CR12 upon completion      */
+#endif /*FEATURE_TRACING*/
 
     /* Special operation exception if DAT is off, or if
        in secondary space mode or home space mode */
@@ -923,6 +980,12 @@ U16     pasn;                           /* Primary ASN               */
         /* Fetch LTD from PASTE word 3 */
         ltd = fetch_fullword_absolute(pasteo+12);
     }
+
+#ifdef FEATURE_TRACING
+    /* Form trace entry if ASN tracing is active */
+    if (regs->cr[12] & CR12_ASNTRACE)
+        newcr12 = trace_pc (pcnum, regs);
+#endif /*FEATURE_TRACING*/
 
     /* Special operation exception if subsystem linkage
        control bit in linkage table designation is zero */
@@ -1194,6 +1257,12 @@ U16     pasn;                           /* Primary ASN               */
 
     } /* end if(PC-ss) */
 
+#ifdef FEATURE_TRACING
+    /* Update trace table address if ASN tracing is active */
+    if (regs->cr[12] & CR12_ASNTRACE)
+        regs->cr[12] = newcr12;
+#endif /*FEATURE_TRACING*/
+
     /* Return the space switch event flag */
     return ssevent;
 
@@ -1215,6 +1284,9 @@ U32     ducto;                          /* DUCT origin               */
 U32     duct8;                          /* DUCT word 8               */
 U32     duct9;                          /* DUCT word 9               */
 BYTE    key;                            /* New PSW key               */
+#ifdef FEATURE_TRACING
+U32     newcr12 = 0;                    /* CR12 upon completion      */
+#endif /*FEATURE_TRACING*/
 
     /* Special operation exception if CR0 bit 15 is zero */
     if ((regs->cr[0] & CR0_ASF) == 0)
@@ -1222,6 +1294,13 @@ BYTE    key;                            /* New PSW key               */
         program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return;
     }
+
+#ifdef FEATURE_TRACING
+    /* Perform tracing */
+    if ((regs->cr[12] & CR12_BRTRACE) && (r2 != 0))
+        newcr12 = trace_br (regs->gpr[r2] & 0x80000000,
+                                regs->gpr[r2], regs);
+#endif /*FEATURE_TRACING*/
 
     /* Load real address of dispatchable unit control table */
     ducto = regs->cr[2] & CR2_DUCTO;
@@ -1356,7 +1435,13 @@ BYTE    key;                            /* New PSW key               */
 
     } /* end if(BSA-ra) */
 
-} /* end branch_and_set_authority */
+#ifdef FEATURE_TRACING
+    /* Update trace table address if branch tracing is on */
+    if ((regs->cr[12] & CR12_BRTRACE) && (r2 != 0))
+        regs->cr[12] = newcr12;
+#endif /*FEATURE_TRACING*/
+
+} /* end function branch_and_set_authority */
 
 #ifdef FEATURE_SUBSPACE_GROUP
 /*-------------------------------------------------------------------*/
@@ -1383,6 +1468,9 @@ U32     newia;                          /* New instruction address   */
 int     protect = 0;                    /* 1=ALE protection detected
                                            by ART (ignored by BSG)   */
 U16     xcode;                          /* Exception code            */
+#ifdef FEATURE_TRACING
+U32     newcr12 = 0;                    /* CR12 upon completion      */
+#endif /*FEATURE_TRACING*/
 
     /* Special operation exception if DAT is off or CR0 bit 15 is 0 */
     if (REAL_MODE(&(regs->psw))
@@ -1391,6 +1479,17 @@ U16     xcode;                          /* Exception code            */
         program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         return;
     }
+
+#ifdef FEATURE_TRACING
+    /* Perform tracing */
+    if (regs->cr[12] & CR12_ASNTRACE)
+        newcr12 = trace_bsg ((r2 == 0) ? 0 : regs->ar[r2],
+                                regs->gpr[r2], regs);
+    else
+        if (regs->cr[12] & CR12_BRTRACE)
+            newcr12 = trace_br (regs->gpr[r2] & 0x80000000,
+                                regs->gpr[r2], regs);
+#endif /*FEATURE_TRACING*/
 
     /* Load real address of dispatchable unit control table */
     ducto = regs->cr[2] & CR2_DUCTO;
@@ -1603,6 +1702,12 @@ U16     xcode;                          /* Exception code            */
         store_fullword_absolute (duct3, ducto+12);
     }
 
-} /* end branch_in_subspace_group */
+#ifdef FEATURE_TRACING
+    /* Update trace table address if ASN tracing or branch tracing */
+    if (regs->cr[12] & (CR12_ASNTRACE | CR12_BRTRACE))
+        regs->cr[12] = newcr12;
+#endif /*FEATURE_TRACING*/
+
+} /* end function branch_in_subspace_group */
 #endif /*FEATURE_SUBSPACE_GROUP*/
 

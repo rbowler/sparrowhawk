@@ -59,6 +59,8 @@
 /*-------------------------------------------------------------------*/
 /* 3270 definitions                                                  */
 /*-------------------------------------------------------------------*/
+
+/* 3270 remote commands */
 #define R3270_EAU       0x6F            /* Erase All Unprotected     */
 #define R3270_EW        0xF5            /* Erase/Write               */
 #define R3270_EWA       0x7E            /* Erase/Write Alternate     */
@@ -67,6 +69,18 @@
 #define R3270_RMA       0x6E            /* Read Modified All         */
 #define R3270_WRT       0xF1            /* Write                     */
 #define R3270_WSF       0xF3            /* Write Structured Field    */
+
+/* 3270 orders */
+#define O3270_SBA       0x11            /* Set Buffer Address        */
+#define O3270_SF        0x1D            /* Start Field               */
+#define O3270_SFE       0x29            /* Start Field Extended      */
+#define O3270_SA        0x28            /* Set Attribute             */
+#define O3270_IC        0x13            /* Insert Cursor             */
+#define O3270_MF        0x2C            /* Modify Field              */
+#define O3270_PT        0x05            /* Program Tab               */
+#define O3270_RA        0x3C            /* Repeat to Address         */
+#define O3270_EUA       0x12            /* Erase Unprotected to Addr */
+#define O3270_GE        0x08            /* Graphic Escape            */
 
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
@@ -455,6 +469,8 @@ static BYTE dont_echo[] = { IAC, DONT, ECHO_OPTION };
 
         /* Return printer-keyboard terminal class */
         *class = 'K';
+        *model = '-';
+        *extatr = '-';
         return 0;
     }
 
@@ -918,6 +934,19 @@ BYTE                    rejmsg[80];     /* Rejection message         */
             dev->connected = 1;
             dev->csock = csock;
             dev->ipaddr = client.sin_addr;
+            dev->mod3270 = model;
+            dev->eab3270 = (extended == 'Y' ? 1 : 0);
+
+            /* Reset the console device */
+            dev->readpending = 0;
+            dev->rlen3270 = 0;
+            dev->keybdrem = 0;
+            dev->busy = 0;
+            dev->pending = 0;
+            dev->pcipending = 0;
+            memset (&dev->scsw, 0, sizeof(SCSW));
+            memset (&dev->pciscsw, 0, sizeof(SCSW));
+
             release_lock (&dev->lock);
             break;
         }
@@ -1342,7 +1371,11 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
-    case 0x0B:
+    case 0x0B: /* SELECT (3274-1B) or SELECT RM (3274-1D) */
+    case 0x1B: /* SELECT RB (3274-1D) */
+    case 0x2B: /* SELECT RMP (3274-1D) */
+    case 0x3B: /* SELECT RBP (3274-1D) */
+    case 0x4B: /* SELECT WRT (3274-1D) */
     /*---------------------------------------------------------------*/
     /* SELECT                                                        */
     /*---------------------------------------------------------------*/
@@ -1382,8 +1415,17 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
     /*---------------------------------------------------------------*/
     /* WRITE STRUCTURED FIELD                                        */
     /*---------------------------------------------------------------*/
-        cmd = R3270_WSF;
-        goto write;
+        /* Process WSF command if device has extended attributes */
+        if (dev->eab3270)
+        {
+            cmd = R3270_WSF;
+            goto write;
+        }
+
+        /* Command reject, device does not have extended attributes */
+        dev->sense[0] = SENSE_CR;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        break;
 
     write:
     /*---------------------------------------------------------------*/
@@ -1438,8 +1480,14 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
             && (chained & CCW_FLAGS_CD) == 0
             && (flags & CCW_FLAGS_CD) == 0
             && (flags & CCW_FLAGS_CC)
-            && count == 4 && iobuf[1] == 0x11)
-            dev->pos3270 = ((iobuf[2] & 0x3F) << 6) | (iobuf[3] & 0x3F);
+            && count == 4 && iobuf[1] == O3270_SBA)
+        {
+            if ((iobuf[2] & 0xC0) == 0x00)
+                dev->pos3270 = (iobuf[2] << 8) | iobuf[3];
+            else
+                dev->pos3270 = ((iobuf[2] & 0x3F) << 6)
+                                | (iobuf[3] & 0x3F);
+        }
         else
             dev->pos3270 = 0;
 
@@ -1483,18 +1531,66 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
                 off = 3;
 
                 /* Search the buffer for the current screen position */
-                while (pos < dev->pos3270 && dev->rlen3270 > 3)
+                while (pos < dev->pos3270 && off < dev->rlen3270)
                 {
-                    /* Increment position unless Start Field order */
-                    if (dev->buf[off] != 0x1D) pos++;
+                    /* Start Field order is two bytes long and
+                       occupies one position on the screen */
+                    if (dev->buf[off] == O3270_SF)
+                    {
+                        pos++;
+                        off += 2;
+                        continue;
+                    }
 
-                    /* Skip to next character in device buffer */
+                    /* Start Field Extended order is two bytes plus
+                       a variable number of attribute type-value pairs
+                       and occupies one position on the screen */
+                    if (dev->buf[off] == O3270_SFE)
+                    {
+                        pos++;
+                        off += (2 + 2*dev->buf[off+1]);
+                        continue;
+                    }
+
+                    /* Set Attribute order is three bytes long and
+                       occupies no position on the screen */
+                    if (dev->buf[off] == O3270_SA)
+                    {
+                        off += 3;
+                        continue;
+                    }
+
+                    /* Graphic Escape order is two bytes long and
+                       occupies one position on the screen */
+                    if (dev->buf[off] == O3270_GE)
+                    {
+                        pos++;
+                        off += 2;
+                        continue;
+                    }
+
+                    /* Regular characters occupy one screen position */
+                    pos++;
                     off++;
-                    dev->rlen3270--;
                 }
 
+                /* == Extra fix for OS/390 consoles with EAB == */
+
+                /* I do not understand why, but the above algorithm
+                   ends up 8 bytes adrift of the entry area when an
+                   MCS console performs a read buffer operation in
+                   extended field mode.  The temporary bypass is to
+                   add 8 to the calculated buffer offset */
+                if (dev->eab3270 && dev->pos3270 == 0x0690
+                    && dev->buf[off+9] == O3270_SFE)
+                    off += 8;
+
+                /* == End of fix for OS/390 consoles with EAB == */
+
                 /* Shift out unwanted characters from buffer */
-                memmove (dev->buf + 3, dev->buf + off, dev->rlen3270 - 3);
+                num = (dev->rlen3270 > off ? dev->rlen3270 - off : 0);
+                memmove (dev->buf + 3, dev->buf + off, num);
+                dev->rlen3270 = 3 + num;
             }
 
             /* == End of special fix for OS/360 NIP == */

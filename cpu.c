@@ -16,6 +16,8 @@
 /*      Set priority by Reed H. Petty from an idea by Steve Gay      */
 /*      Bad frame support by Jan Jaeger                              */
 /*      STCPS and SCHM instructions by Jan Jaeger                    */
+/*      Corrections to program check by Jan Jaeger                   */
+/*      Branch tracing by Jan Jaeger                                 */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -23,8 +25,6 @@
 //#define MODULE_TRACE
 //#define INSTRUCTION_COUNTING
 //#define SVC_TRACE
-//#define NO_PROTECTION_EXCEPTION_TRACE
-//#define NO_BINARY_FP_OPERATION_EXCEPTION_TRACE
 
 /*-------------------------------------------------------------------*/
 /* Add two signed fullwords giving a signed fullword result          */
@@ -283,16 +283,16 @@ int load_psw (PSW *psw, BYTE *addr)
 void program_check (REGS *regs, int code)
 {
 PSA    *psa;                            /* -> Prefixed storage area  */
-int     rc;                             /* Return code               */
-U32     tea;                            /* Translation exception addr*/
-BYTE    excarid;                        /* Exception access reg id   */
+REGS   *realregs;                       /* True regs structure       */
+
+    /* program_check() may be called with a shadow copy of the
+       regs structure, realregs is the pointer to the real structure
+       which must be used when loading/storing the psw, or backing up
+       the instruction address in case of nullification */
+    realregs = &sysblk.regs[regs->cpuad];
 
     /* Set the main storage reference and change bits */
     STORAGE_KEY(regs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
-
-    /* Save the translation exception address and AR identifier */
-    tea = regs->tea;
-    excarid = regs->excarid;
 
     /* Back up the PSW for exceptions which cause nullification,
        unless the exception occurred during instruction fetch */
@@ -317,8 +317,8 @@ BYTE    excarid;                        /* Exception access reg id   */
         || code == PGM_STACK_OPERATION_EXCEPTION)
         && regs->instvalid)
     {
-        regs->psw.ia -= regs->psw.ilc;
-        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+        realregs->psw.ia -= realregs->psw.ilc;
+        realregs->psw.ia &= ADDRESS_MAXWRAP(realregs);
     }
 
     /* Store the interrupt code in the PSW */
@@ -335,6 +335,7 @@ BYTE    excarid;                        /* Exception access reg id   */
             && (!(code == PGM_OPERATION_EXCEPTION
                 && regs->inst[0] == 0xB3))
 #endif /*NO_BINARY_FP_OPERATION_EXCEPTION_TRACE*/
+            && code != PGM_SPACE_SWITCH_EVENT
             && code != PGM_STACK_FULL_EXCEPTION
             && code != PGM_TRACE_TABLE_EXCEPTION
             && code != PGM_MONITOR_EVENT))
@@ -368,7 +369,7 @@ BYTE    excarid;                        /* Exception access reg id   */
             || code == PGM_PROTECTION_EXCEPTION
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
            )
-            psa->excarid = excarid;
+            psa->excarid = regs->excarid;
 
         /* Store the translation exception address at PSA+144 */
         if (code == PGM_PAGE_TRANSLATION_EXCEPTION
@@ -385,26 +386,25 @@ BYTE    excarid;                        /* Exception access reg id   */
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
            )
         {
-            psa->tea[0] = (tea & 0xFF000000) >> 24;
-            psa->tea[1] = (tea & 0xFF0000) >> 16;
-            psa->tea[2] = (tea & 0xFF00) >> 8;
-            psa->tea[3] = tea & 0xFF;
+            psa->tea[0] = (regs->tea & 0xFF000000) >> 24;
+            psa->tea[1] = (regs->tea & 0xFF0000) >> 16;
+            psa->tea[2] = (regs->tea & 0xFF00) >> 8;
+            psa->tea[3] = regs->tea & 0xFF;
         }
     }
 
     /* Store current PSW at PSA+X'28' */
-    store_psw (&(regs->psw), psa->pgmold);
+    store_psw (&(realregs->psw), psa->pgmold);
 
     /* Load new PSW from PSA+X'68' */
-    rc = load_psw (&(regs->psw), psa->pgmnew);
-    if ( rc )
+    if ( load_psw (&(realregs->psw), psa->pgmnew) )
     {
         logmsg ("Invalid program-check new PSW: "
                 "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
                 psa->pgmnew[0], psa->pgmnew[1], psa->pgmnew[2],
                 psa->pgmnew[3], psa->pgmnew[4], psa->pgmnew[5],
                 psa->pgmnew[6], psa->pgmnew[7]);
-        regs->cpustate = CPUSTATE_STOPPED;
+        realregs->cpustate = CPUSTATE_STOPPED;
     }
 
     /* Return directly to cpu_thread function */
@@ -665,6 +665,13 @@ static BYTE module[8];                  /* Module name               */
         /* Compute the branch address from the R2 operand */
         newia = regs->gpr[r2];
 
+#ifdef FEATURE_TRACING
+        /* Add a branch trace entry to the trace table */
+        if ((regs->cr[12] & CR12_BRTRACE) && (r2 != 0))
+            regs->cr[12] = trace_br (regs->psw.amode,
+                                        regs->gpr[r2], regs);
+#endif /*FEATURE_TRACING*/
+
         /* Save the link information in the R1 operand */
         regs->gpr[r1] =
             ( regs->psw.amode ) ?
@@ -764,7 +771,7 @@ static BYTE module[8];                  /* Module name               */
         STORAGE_KEY(n) |= regs->gpr[r1] & ~(STORKEY_BADFRM);
 
 //      /*debug*/logmsg("SSK storage block %8.8X key %2.2X\n",
-//                      regs->gpr[r2], regs->gpr[r1] & 0xFE);
+//      /*debug*/       regs->gpr[r2], regs->gpr[r1] & 0xFE);
 
         break;
 
@@ -808,8 +815,8 @@ static BYTE module[8];                  /* Module name               */
         if ( regs->psw.ecmode == 0 )
             regs->gpr[r1] &= 0xFFFFFFF8;
 
-        /*debug*/logmsg("ISK storage block %8.8X key %2.2X\n",
-                        regs->gpr[r2], regs->gpr[r1] & 0xFE);
+//      /*debug*/logmsg("ISK storage block %8.8X key %2.2X\n",
+//                      regs->gpr[r2], regs->gpr[r1] & 0xFE);
 
         break;
 #endif /*FEATURE_BASIC_STORAGE_KEYS*/
@@ -955,6 +962,13 @@ static BYTE module[8];                  /* Module name               */
         /* Compute the branch address from the R2 operand */
         newia = regs->gpr[r2];
 
+#ifdef FEATURE_TRACING
+        /* Add a branch trace entry to the trace table */
+        if ((regs->cr[12] & CR12_BRTRACE) && (r2 != 0))
+            regs->cr[12] = trace_br (regs->gpr[r2] & 0x80000000,
+                                        regs->gpr[r2], regs);
+#endif /*FEATURE_TRACING*/
+
         /* Save the link information in the R1 operand */
         if ( regs->psw.amode )
             regs->gpr[r1] = 0x80000000 | regs->psw.ia;
@@ -986,6 +1000,13 @@ static BYTE module[8];                  /* Module name               */
 
         /* Compute the branch address from the R2 operand */
         newia = regs->gpr[r2];
+
+#ifdef FEATURE_TRACING
+        /* Add a branch trace entry to the trace table */
+        if ((regs->cr[12] & CR12_BRTRACE) && (r2 != 0))
+            regs->cr[12] = trace_br (regs->psw.amode,
+                                        regs->gpr[r2], regs);
+#endif /*FEATURE_TRACING*/
 
         /* Save the link information in the R1 operand */
         if ( regs->psw.amode )
@@ -3269,92 +3290,8 @@ static BYTE module[8];                  /* Module name               */
         perform_serialization ();
         perform_chkpt_sync ();
 
-        /* Obtain the trace entry address from control register 12 */
-        n = regs->cr[12] & CR12_TRACEEA;
-
-        /* Low-address protection program check if trace entry
-           address is 0-511 and bit 3 of control register 0 is set */
-        if ( n < 512 && (regs->cr[0] & CR0_LOW_PROT) )
-        {
-#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
-            regs->tea = (n & TEA_EFFADDR);
-            regs->excarid = 0;
-#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-            program_check (regs, PGM_PROTECTION_EXCEPTION);
-            goto terminate;
-        }
-
-        /* Convert trace entry real address to absolute address */
-        n = APPLY_PREFIXING (n, regs->pxr);
-
-        /* Program check if trace entry is outside main storage */
-        if ( n >= sysblk.mainsize )
-        {
-            program_check (regs, PGM_ADDRESSING_EXCEPTION);
-            goto terminate;
-        }
-
-        /* Program check if storing the maximum length trace
-           entry (76 bytes) would overflow a 4K page boundary */
-        if ( ((n + 76) & 0xFFFFF000) != (n & 0xFFFFF000) )
-        {
-            program_check (regs, PGM_TRACE_TABLE_EXCEPTION);
-            goto terminate;
-        }
-
-        /* Calculate the number of registers to be traced, minus 1 */
-        i = ( r3 < r1 ) ? r3 + 16 - r1 : r3 - r1;
-
-        /* Obtain the TOD clock update lock */
-        obtain_lock (&sysblk.todlock);
-
-        /* Retrieve the TOD clock value and shift out the epoch */
-        dreg = sysblk.todclk << 8;
-
-        /* Insert the uniqueness value in bits 52-63 */
-        dreg |= (sysblk.toduniq & 0xFFF);
-
-        /* Increment the TOD clock uniqueness value */
-        sysblk.toduniq++;
-
-        /* Release the TOD clock update lock */
-        release_lock (&sysblk.todlock);
-
-        /* Set the main storage change and reference bits */
-        STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
-
-        /* Build the explicit trace entry */
-        sysblk.mainstor[n++] = (0x70 | i);
-        sysblk.mainstor[n++] = 0x00;
-        sysblk.mainstor[n++] = ((dreg >> 40) & 0xFF);
-        sysblk.mainstor[n++] = ((dreg >> 32) & 0xFF);
-        sysblk.mainstor[n++] = ((dreg >> 24) & 0xFF);
-        sysblk.mainstor[n++] = ((dreg >> 16) & 0xFF);
-        sysblk.mainstor[n++] = ((dreg >> 8) & 0xFF);
-        sysblk.mainstor[n++] = (dreg & 0xFF);
-        sysblk.mainstor[n++] = ((n2 >> 24) & 0xFF);
-        sysblk.mainstor[n++] = ((n2 >> 16) & 0xFF);
-        sysblk.mainstor[n++] = ((n2 >> 8) & 0xFF);
-        sysblk.mainstor[n++] = (n2 & 0xFF);
-
-        /* Store general registers r1 through r3 in the trace entry */
-        for ( i = r1; ; )
-        {
-            sysblk.mainstor[n++] = ((regs->gpr[i] >> 24) & 0xFF);
-            sysblk.mainstor[n++] = ((regs->gpr[i] >> 16) & 0xFF);
-            sysblk.mainstor[n++] = ((regs->gpr[i] >> 8) & 0xFF);
-            sysblk.mainstor[n++] = (regs->gpr[i] & 0xFF);
-
-            /* Instruction is complete when r3 register is done */
-            if ( i == r3 ) break;
-
-            /* Update register number, wrapping from 15 to 0 */
-            i++; i &= 15;
-        }
-
-        /* Update trace entry address in control register 12 */
-        regs->cr[12] &= ~CR12_TRACEEA;
-        regs->cr[12] |= n;
+        /* Add a new trace table entry and update CR12 */
+        trace_tr (n2, r1, r3, regs);
 
         /* Perform serialization and checkpoint-synchronization */
         perform_serialization ();
@@ -3709,6 +3646,7 @@ static BYTE module[8];                  /* Module name               */
         break;
 #endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
 
+#ifdef FEATURE_COMPARE_AND_MOVE_EXTENDED
     case 0xA8:
     /*---------------------------------------------------------------*/
     /* MVCLE    Move Long Extended                              [RS] */
@@ -3730,6 +3668,7 @@ static BYTE module[8];                  /* Module name               */
             compare_long_extended (r1, r3, effective_addr, regs);
 
         break;
+#endif /*FEATURE_COMPARE_AND_MOVE_EXTENDED*/
 
     case 0xAC:
     /*---------------------------------------------------------------*/
@@ -3954,7 +3893,7 @@ static BYTE module[8];                  /* Module name               */
             /* Release the TOD clock update lock */
             release_lock (&sysblk.todlock);
 
-            /*debug*/logmsg("Set TOD clock=%16.16llX\n", dreg);
+//          /*debug*/logmsg("Set TOD clock=%16.16llX\n", dreg);
 
             /* Return condition code zero */
             regs->psw.cc = 0;
@@ -4609,24 +4548,9 @@ static BYTE module[8];                  /* Module name               */
             perform_serialization ();
             perform_chkpt_sync ();
 
-            /* Extract the PSW key mask from R1 register bits 0-15 */
-            pkm = regs->gpr[r1] >> 16;
-
-            /* Extract the ASN from R1 register bits 16-31 */
-            pasn = regs->gpr[r1] & 0xFFFF;
-
-            /* Extract the amode bit from R2 register bit 0 */
-            i = (regs->gpr[r2] & 0x80000000) ? 1 : 0;
-
-            /* Extract the instruction address from R2 bits 1-30 */
-            n = regs->gpr[r2] & 0x7FFFFFFE;
-
-            /* Extract the problem state bit from R2 register bit 31 */
-            j = regs->gpr[r2] & 0x00000001;
-
             /* Set new PKM, PASN, SASN, PSTD, SSTD, amode,
                instruction address, and problem state bit */
-            rc = program_transfer (pkm, pasn, i, n, j, regs);
+            rc = program_transfer (r1, r2, regs);
 
             /* Perform serialization and checkpoint-synchronization */
             perform_serialization ();
@@ -4638,7 +4562,6 @@ static BYTE module[8];                  /* Module name               */
             }
 
             break;
-
 #endif /*FEATURE_DUAL_ADDRESS_SPACE*/
 
 #ifdef FEATURE_EXTENDED_STORAGE_KEYS
@@ -5350,7 +5273,17 @@ static BYTE module[8];                  /* Module name               */
                 goto terminate;
             }
 
-            /*INCOMPLETE*/
+            /* Set the measurement block origin address */
+            if (regs->gpr[1] & CHM_GPR1_M)
+            {
+                sysblk.mbo = regs->gpr[2] & CHM_GPR2_MBO;
+                sysblk.mbk = (regs->gpr[1] & CHM_GPR1_MBK) >> 24;
+                sysblk.mbm = 1;
+            }
+            else
+                sysblk.mbm = 0;
+
+            sysblk.mbd = regs->gpr[1] & CHM_GPR1_D;
 
             break;
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
@@ -5386,8 +5319,20 @@ static BYTE module[8];                  /* Module name               */
             else
                 n2 &= 0x00FFFFFF;
 
+#ifdef FEATURE_TRACING
+            /* Form the branch trace entry */
+            if((regs->cr[12] & CR12_BRTRACE) && (r2 != 0))
+                n = trace_br(regs->psw.amode, regs->gpr[r2], regs);
+#endif /*FEATURE_TRACING*/
+
             /* Form the linkage stack entry */
             form_stack_entry (LSED_UET_BAKR, n1, n2, regs);
+
+#ifdef FEATURE_TRACING
+            /* Update CR12 to reflect the new branch trace entry */
+            if((regs->cr[12] & CR12_BRTRACE) && (r2 != 0))
+                regs->cr[12] = n;
+#endif /*FEATURE_TRACING*/
 
             /* Execute the branch unless R2 specifies register 0 */
             if ( r2 != 0 )
@@ -5399,6 +5344,7 @@ static BYTE module[8];                  /* Module name               */
             break;
 #endif /*FEATURE_LINKAGE_STACK*/
 
+#ifdef FEATURE_CHECKSUM_INSTRUCTION
         case 0x41:
         /*-----------------------------------------------------------*/
         /* B241: CKSM - Checksum                               [RRE] */
@@ -5409,6 +5355,7 @@ static BYTE module[8];                  /* Module name               */
                 compute_checksum (r1, r2, regs);
 
             break;
+#endif /*FEATURE_CHECKSUM_INSTRUCTION*/
 
         case 0x46:
         /*-----------------------------------------------------------*/
@@ -6060,7 +6007,7 @@ static BYTE module[8];                  /* Module name               */
            access exception may be recognized on the first byte */
         if (j == 0)
         {
-   /*debug*/logmsg ("Model dependent STCM use\n");
+// /*debug*/logmsg ("Model dependent STCM use\n");
             validate_operand (effective_addr, ar1, 0,
                                 ACCTYPE_WRITE, regs);
             break;
@@ -6680,8 +6627,6 @@ static BYTE module[8];                  /* Module name               */
 
         /* Process the destination operand from left to right,
            and the source operand from right to left */
-        effective_addr2 += ibyte;
-
         for ( i = 0; i <= ibyte; i++ )
         {
             /* Fetch a byte from the source operand */
@@ -7118,8 +7063,8 @@ int     icidx;                          /* Instruction counter index */
 
         /* Count instruction usage by opcode */
         picta[icidx]++;
-        if (regs->instcount % 1000000 == 0)
-            logmsg ("%llu instructions executed\n", regs->instcount);
+//      if (regs->instcount % 1000000 == 0)
+//          logmsg ("%llu instructions executed\n", regs->instcount);
 #endif /*INSTRUCTION_COUNTING*/
 
         /* Turn on trace for specific instructions */
@@ -7138,7 +7083,7 @@ int     icidx;                          /* Instruction counter index */
 //      if (regs->inst[0] == 0x01 && regs->inst[1] == 0x01) sysblk.inststep = 1; /*PR*/
 //      if (regs->inst[0] == 0xE5) sysblk.inststep = 1; /*LASP & MVS assists*/
 //      if (regs->inst[0] == 0xFC) sysblk.inststep = 1; /*MP*/
-        if (regs->inst[0] == 0xFD) tracethis = 1; /*DP*/
+//      if (regs->inst[0] == 0xFD) tracethis = 1; /*DP*/
 //      if (regs->inst[0] == 0x83 && regs->inst[2] == 0x02 && regs->inst[3] == 0x14) sysblk.inststep = 1; /*Diagnose 214*/
 
         /* Test for breakpoint */

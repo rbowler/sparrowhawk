@@ -10,8 +10,55 @@ What's new in Hercules</TITLE>
 <h1>What's new in Hercules</h1>
 
 <hr noshade>
+<h2>What's new in release 1.58</h2>
+<p>Release date: 22 Apr 2000
+<ul>
+<li>Support for CKD DASD volumes exceeding 2GB such as 3390-3
+    (by Roger Bowler)
+<li>3274-1D SELECT RB/RMP/RBP/WRT commands
+<li>Support for 3270 14-bit SBA addressing and inbound SFE order
+    (by Roger Bowler)
+<li>Fix missing CSW_IL indication when CCW count exhausted
+    (by Roger Bowler)
+<li>Do not set unit exception if CCW count is zero (by Jan Jaeger)
+<li>Suppress space switch event program check messages (by Jan Jaeger)
+<li>Branch tracing and cross memory tracing for
+    BALR, BASR, BASSM, BAKR, BSA, BSG, SSAR, PC, PT, PR instructions
+    (by Jan Jaeger)
+<li>New diagnose instruction to stop CPU (by Jan Jaeger)
+<li>Drag factor option slows down TOD clock, to decrease overhead
+    on very slow machines (by Jan Jaeger)
+<li>Correction to PR instruction (by Jan Jaeger)
+<li>Correction to LASP instruction (by Jan Jaeger)
+<li>Make CLCLE/MVCLE/CKSM instructions conditional features
+    (by Jan Jaeger)
+<li>Enable channel measurement mode (by Jan Jaeger)
+<li>Modify program_check() to handle shadow registers correctly
+    (by Jan Jaeger)
+<li>Change DAT to favour PSTD in TEA, to give reduction in page
+    fault path length (by Jan Jaeger)
+<li>Avoid clearing registers at CPU reset (by Jan Jaeger)
+<li>Leave GPR, AR and FPR intact during CPU reset for SADUMP
+    (by Jan Jaeger)
+<li>Zeroize field for called space identification in PC stack entry
+<li>New CCW X'8D' (Write Update Key and Data) required by STOW
+    (by Jan Jaeger)
+<li>Fix for 0B7 abend in D M=CHP command (by Jan Jaeger)
+<li>Floating point version 4 including fixes by Valery Pogonchenko
+    (contributed by Peter Kuschnerus)
+<li>Fix incorrect second operand address in MVCIN instruction
+    (by Roger Bowler)
+<li>Correct sign of zero result in SRP instruction
+    (by Roger Bowler)
+<li>Erase Gap (CCW X'17') for tape devices (by Roger Bowler)
+<li>Activate MIPS counter on control panel (by Dutch Owen)
+<li>Suppress tracing of ISK, SCK, and DP instructions
+</ul>
+<p>Download
+<a href="hercules/hercules-1.58.tar.gz">hercules-1.58.tar.gz</a>
+
 <h2>What's new in release 1.57</h2>
-<p>Release date: 31 Mar 2000
+<p>Release date: 30 Mar 2000
 <ul>
 <li>Fix program check 0032 due to wrong stack entry being updated
 <li>Fix wrong SSTD loaded by LASP instruction (found by Jan Jaeger)
@@ -19,7 +66,7 @@ What's new in Hercules</TITLE>
 <li>Fix incorrect condition code in PGIN instruction (by Jan Jaeger)
 <li>Corrections to expanded storage instructions (by Jan Jaeger)
 <li>New STCPS and SCHM instructions (by Jan Jaeger)
-<li>Set appropriate sense bytes for tape errors
+<li>Set more appropriate sense bytes for tape errors
 </ul>
 <p>Download
 <a href="hercules/hercules-1.57.tar.gz">hercules-1.57.tar.gz</a>
@@ -421,7 +468,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 31 Mar 2000
+<p>Last updated 22 Apr 2000
 </BODY>
 </HTML>
 

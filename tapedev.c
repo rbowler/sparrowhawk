@@ -2682,6 +2682,24 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
+    case 0x17:
+    /*---------------------------------------------------------------*/
+    /* ERASE GAP                                                     */
+    /*---------------------------------------------------------------*/
+        /* Unit check if tape is write-protected */
+        if (dev->readonly)
+        {
+            dev->sense[0] = SENSE_CR;
+            dev->sense[1] = SENSE1_TAPE_FP;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Set normal status */
+        *residual = 0;
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
     case 0x1F:
     /*---------------------------------------------------------------*/
     /* WRITE TAPE MARK                                               */

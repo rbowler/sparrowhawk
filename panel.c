@@ -23,8 +23,6 @@
 
 #include "hercules.h"
 
-//#define MIPS_COUNTING
-
 /*=NP================================================================*/
 /* Global data for new panel display                                 */
 /*   (Note: all NPD mods are identified by the string =NP=           */

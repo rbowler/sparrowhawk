@@ -6,9 +6,12 @@
 /* count-key-data direct access storage devices.                     */
 /*-------------------------------------------------------------------*/
 
-#include "hercules.h"
+/*-------------------------------------------------------------------*/
+/* Additional credits:                                               */
+/*      Write Update Key and Data CCW by Jan Jaeger                  */
+/*-------------------------------------------------------------------*/
 
-#define CKD_KEY_TRACING
+#include "hercules.h"
 
 /*-------------------------------------------------------------------*/
 /* Bit definitions for File Mask                                     */
@@ -158,6 +161,23 @@ BYTE            devmodel;               /* Device model number       */
 BYTE            devclass;               /* Device class              */
 BYTE            devtcode;               /* Device type code          */
 U32             sctlfeat;               /* Storage control features  */
+int             fileseq;                /* File sequence number      */
+BYTE           *sfxptr;                 /* -> Last char of file name */
+BYTE            sfxchar;                /* Last char of file name    */
+U32             heads;                  /* #of heads in CKD file     */
+U32             trksize;                /* Track size of CKD file    */
+U32             trks;                   /* #of tracks in CKD file    */
+U32             cyls;                   /* #of cylinders in CKD file */
+U32             highcyl;                /* Highest cyl# in CKD file  */
+
+    /* If this is a device reinitialization, close all of the CKD
+       image files still open from the previous initialization */
+    for (fileseq = 1; fileseq <= dev->ckdnumfd; fileseq++)
+    {
+        if (dev->ckdfd[fileseq-1] > 2)
+            close (dev->ckdfd[fileseq-1]);
+    }
+    dev->ckdnumfd = 0;
 
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
@@ -170,77 +190,171 @@ U32             sctlfeat;               /* Storage control features  */
     /* Save the file name in the device block */
     strcpy (dev->filename, argv[0]);
 
-    /* Open the device file */
-    dev->fd = open (dev->filename, O_RDWR);
-    if (dev->fd < 0)
-    {
-        fprintf (stderr,
-                "HHC352I %s open error: %s\n",
-                dev->filename, strerror(errno));
-        return -1;
-    }
+    /* Locate and save the last character of the file name */
+    sfxptr = strrchr (dev->filename, '/');
+    if (sfxptr == NULL) sfxptr = dev->filename + 1;
+    sfxptr = strchr (sfxptr, '.');
+    if (sfxptr == NULL) sfxptr = dev->filename + strlen(dev->filename);
+    sfxptr--;
+    sfxchar = *sfxptr;
 
-    /* Determine the device size */
-    rc = fstat (dev->fd, &statbuf);
-    if (rc < 0)
-    {
-        fprintf (stderr,
-                "HHC353I %s fstat error: %s\n",
-                dev->filename, strerror(errno));
-        return -1;
-    }
+    /* Initialize the total tracks and cylinders */
+    dev->ckdtrks = 0;
+    dev->ckdcyls = 0;
 
-    /* Read the device header */
-    rc = read (dev->fd, &devhdr, CKDDASD_DEVHDR_SIZE);
-    if (rc < CKDDASD_DEVHDR_SIZE)
+    /* Open all of the CKD image files which comprise this volume */
+    for (fileseq = 1;;)
     {
-        if (rc < 0)
+        /* Open the CKD image file */
+        dev->fd = open (dev->filename, O_RDWR);
+        if (dev->fd < 0)
+        {
             fprintf (stderr,
-                    "HHC354I %s read error: %s\n",
+                    "HHC352I %s open error: %s\n",
                     dev->filename, strerror(errno));
-        else
+            return -1;
+        }
+
+        /* Determine the device size */
+        rc = fstat (dev->fd, &statbuf);
+        if (rc < 0)
+        {
             fprintf (stderr,
-                    "HHC355I %s CKD header incomplete\n",
+                    "HHC353I %s fstat error: %s\n",
+                    dev->filename, strerror(errno));
+            return -1;
+        }
+
+        /* Read the device header */
+        rc = read (dev->fd, &devhdr, CKDDASD_DEVHDR_SIZE);
+        if (rc < CKDDASD_DEVHDR_SIZE)
+        {
+            if (rc < 0)
+                fprintf (stderr,
+                        "HHC354I %s read error: %s\n",
+                        dev->filename, strerror(errno));
+            else
+                fprintf (stderr,
+                        "HHC355I %s CKD header incomplete\n",
+                        dev->filename);
+            return -1;
+        }
+
+        /* Check the device header identifier */
+        if (memcmp(devhdr.devid, "CKD_P370", 8) != 0)
+        {
+            fprintf (stderr,
+                    "HHC356I %s CKD header invalid\n",
                     dev->filename);
-        return -1;
-    }
+            return -1;
+        }
 
-    /* Check the device header identifier */
-    if (memcmp(devhdr.devid, "CKD_P370", 8) != 0)
-    {
-        fprintf (stderr,
-                "HHC356I %s CKD header invalid\n",
-                dev->filename);
-        return -1;
-    }
+        /* Check for correct file sequence number */
+        if (devhdr.fileseq != fileseq
+            && !(devhdr.fileseq == 0 && fileseq == 1))
+        {
+            fprintf (stderr,
+                    "HHC357I %s CKD file out of sequence\n",
+                    dev->filename);
+            return -1;
+        }
 
-    /* Set device dependent fields */
-    dev->ckdheads = ((U32)(devhdr.heads[3]) << 24)
-                    | ((U32)(devhdr.heads[2]) << 16)
-                    | ((U32)(devhdr.heads[1]) << 8)
-                    | (U32)(devhdr.heads[0]);
-    dev->ckdtrksz = ((U32)(devhdr.trksize[3]) << 24)
-                    | ((U32)(devhdr.trksize[2]) << 16)
-                    | ((U32)(devhdr.trksize[1]) << 8)
-                    | (U32)(devhdr.trksize[0]);
-    dev->ckdtrks = (statbuf.st_size - CKDDASD_DEVHDR_SIZE)
-                        / dev->ckdtrksz;
-    dev->ckdcyls = dev->ckdtrks / dev->ckdheads;
+        /* Extract fields from device header */
+        heads = ((U32)(devhdr.heads[3]) << 24)
+                | ((U32)(devhdr.heads[2]) << 16)
+                | ((U32)(devhdr.heads[1]) << 8)
+                | (U32)(devhdr.heads[0]);
+        trksize = ((U32)(devhdr.trksize[3]) << 24)
+                | ((U32)(devhdr.trksize[2]) << 16)
+                | ((U32)(devhdr.trksize[1]) << 8)
+                | (U32)(devhdr.trksize[0]);
+        highcyl = ((U32)(devhdr.highcyl[1]) << 8)
+                | (U32)(devhdr.highcyl[0]);
+        trks = (statbuf.st_size - CKDDASD_DEVHDR_SIZE) / trksize;
+        cyls = trks / heads;
 
+        if (devhdr.fileseq > 0)
+        {
+            logmsg ("ckddasd: %s seq=%d cyls=%d-%d\n",
+                    dev->filename, devhdr.fileseq, dev->ckdcyls,
+                    (highcyl > 0 ? highcyl : dev->ckdcyls + cyls - 1));
+        }
+
+        /* Save device geometry of first file, or check that device
+           geometry of subsequent files matches that of first file */
+        if (fileseq == 1)
+        {
+            dev->ckdheads = heads;
+            dev->ckdtrksz = trksize;
+        }
+        else if (heads != dev->ckdheads || trksize != dev->ckdtrksz)
+        {
+            fprintf (stderr,
+                    "HHC358I %s heads=%d trklen=%d, "
+                    "expected heads=%d trklen=%d\n",
+                    dev->filename, heads, trksize,
+                    dev->ckdheads, dev->ckdtrksz);
+            return -1;
+        }
+
+        /* Consistency check device header */
+        if (cyls * heads != trks
+            || (trks * trksize) + CKDDASD_DEVHDR_SIZE
+                            != statbuf.st_size
+            || (highcyl != 0 && highcyl != dev->ckdcyls + cyls - 1))
+        {
+            fprintf (stderr,
+                    "HHC359I %s CKD header inconsistent with file size\n",
+                    dev->filename);
+            return -1;
+        }
+
+        /* Check for correct high cylinder number */
+        if (highcyl != 0 && highcyl != dev->ckdcyls + cyls - 1)
+        {
+            fprintf (stderr,
+                    "HHC360I %s CKD header high cylinder incorrect\n",
+                    dev->filename);
+            return -1;
+        }
+
+        /* Save file descriptor and low/high cylinder numbers */
+        dev->ckdfd[fileseq-1] = dev->fd;
+        dev->ckdlocyl[fileseq-1] = dev->ckdcyls;
+        dev->ckdhicyl[fileseq-1] = highcyl;
+        dev->ckdnumfd = fileseq;
+
+        /* Accumulate total volume size */
+        dev->ckdtrks += trks;
+        dev->ckdcyls += cyls;
+
+        /* Exit loop if this is the last file */
+        if (highcyl == 0) break;
+
+        /* Increment the file sequence number */
+        fileseq++;
+
+        /* Alter the file name suffix ready for the next file */
+        *sfxptr = '0' + fileseq;
+
+        /* Check that maximum files has not been exceeded */
+        if (fileseq > CKD_MAXFILES)
+        {
+            fprintf (stderr,
+                    "HHC361I %s exceeds maximum %d CKD files\n",
+                    dev->filename, CKD_MAXFILES);
+            return -1;
+        }
+
+    } /* end for(fileseq) */
+
+    /* Restore the last character of the file name */
+    *sfxptr = sfxchar;
+
+    /* Log the device geometry */
     logmsg ("ckddasd: %s cyls=%d heads=%d tracks=%d trklen=%d\n",
-            dev->filename, dev->ckdcyls, dev->ckdheads,
-            dev->ckdtrks, dev->ckdtrksz);
-
-    /* Consistency check device header */
-    if (dev->ckdcyls * dev->ckdheads != dev->ckdtrks
-        || (dev->ckdtrks * dev->ckdtrksz) + CKDDASD_DEVHDR_SIZE
-                        != statbuf.st_size)
-    {
-        fprintf (stderr,
-                "HHC357I %s CKD header inconsistent with file size\n",
-                dev->filename);
-        return -1;
-    }
+            dev->filename, dev->ckdcyls,
+            dev->ckdheads, dev->ckdtrks, dev->ckdtrksz);
 
     /* Set number of sense bytes */
     dev->numsense = 32;
@@ -525,10 +639,12 @@ static int ckd_seek ( DEVBLK *dev, U16 cyl, U16 head,
                 CKDDASD_TRKHDR *trkhdr, BYTE *unitstat )
 {
 int             rc;                     /* Return code               */
+int             i;                      /* Array subscript           */
 off_t           seekpos;                /* Seek position for lseek   */
 
     DEVTRACE("ckddasd: seeking to cyl %d head %d\n", cyl, head);
 
+    /* Command reject if seek position is outside volume */
     if (cyl >= dev->ckdcyls || head >= dev->ckdheads)
     {
         ckd_build_sense (dev, SENSE_CR, 0, 0,
@@ -537,9 +653,22 @@ off_t           seekpos;                /* Seek position for lseek   */
         return -1;
     }
 
+    /* Determine which file contains the requested cylinder */
+    for (i = 0; cyl > dev->ckdhicyl[i]; i++)
+    {
+        if (dev->ckdhicyl[i] == 0 || i == dev->ckdnumfd - 1)
+            break;
+    }
+
+    DEVTRACE("ckddasd: file %d selected for cyl %d\n", i+1, cyl);
+
+    /* Set the device file descriptor to the selected file */
+    dev->fd = dev->ckdfd[i];
+
     /* Seek to start of track header */
     seekpos = CKDDASD_DEVHDR_SIZE
-            + (((cyl * dev->ckdheads) + head) * dev->ckdtrksz);
+            + ((((cyl - dev->ckdlocyl[i]) * dev->ckdheads) + head)
+                * dev->ckdtrksz);
 
     rc = lseek (dev->fd, seekpos, SEEK_SET);
     if (rc < 0)
@@ -951,9 +1080,9 @@ int             skiplen;                /* Number of bytes to skip   */
     }
 
     /* Calculate the position of the next track in the file */
-    nxtpos = CKDDASD_DEVHDR_SIZE
-            + (((dev->ckdcurcyl * dev->ckdheads) + dev->ckdcurhead)
-                * dev->ckdtrksz) + dev->ckdtrksz;
+    nxtpos = (curpos - CKDDASD_DEVHDR_SIZE)
+                / dev->ckdtrksz * dev->ckdtrksz
+                + dev->ckdtrksz + CKDDASD_DEVHDR_SIZE;
 
     /* Check that there is enough space on the current track to
        contain the complete erase plus an end of track marker */
@@ -1065,9 +1194,9 @@ int             skiplen;                /* Number of bytes to skip   */
     }
 
     /* Calculate the position of the next track in the file */
-    nxtpos = CKDDASD_DEVHDR_SIZE
-            + (((dev->ckdcurcyl * dev->ckdheads) + dev->ckdcurhead)
-                * dev->ckdtrksz) + dev->ckdtrksz;
+    nxtpos = (curpos - CKDDASD_DEVHDR_SIZE)
+                / dev->ckdtrksz * dev->ckdtrksz
+                + dev->ckdtrksz + CKDDASD_DEVHDR_SIZE;
 
     /* Check that there is enough space on the current track to
        contain the complete record plus an end of track marker */
@@ -1398,7 +1527,7 @@ BYTE            key[256];               /* Key for search operations */
         dev->ckdpos = num;
 
         /* Return unit exception if data length is zero */
-        if (dev->ckdcurdl == 0)
+        if (dev->ckdcurdl == 0 && count != 0)
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
         else
             *unitstat = CSW_CE | CSW_DE;
@@ -1494,7 +1623,7 @@ BYTE            key[256];               /* Key for search operations */
         dev->ckdpos = num;
 
         /* Return unit exception if data length is zero */
-        if (dev->ckdcurdl == 0)
+        if (dev->ckdcurdl == 0 && count != 0)
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
         else
             *unitstat = CSW_CE | CSW_DE;
@@ -1559,7 +1688,7 @@ BYTE            key[256];               /* Key for search operations */
         dev->ckdpos = num;
 
         /* Return unit exception if data length is zero */
-        if (dev->ckdcurdl == 0)
+        if (dev->ckdcurdl == 0 && count != 0)
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
         else
             *unitstat = CSW_CE | CSW_DE;
@@ -1700,7 +1829,7 @@ BYTE            key[256];               /* Key for search operations */
         dev->ckdpos = num;
 
         /* Return unit exception if data length is zero */
-        if (dev->ckdcurdl == 0)
+        if (dev->ckdcurdl == 0 && count != 0)
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
         else
             *unitstat = CSW_CE | CSW_DE;
@@ -1833,7 +1962,7 @@ BYTE            key[256];               /* Key for search operations */
         dev->ckdpos = num;
 
         /* Return unit exception if data length is zero */
-        if (dev->ckdcurdl == 0)
+        if (dev->ckdcurdl == 0 && count != 0)
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
         else
             *unitstat = CSW_CE | CSW_DE;
@@ -2526,7 +2655,7 @@ BYTE            key[256];               /* Key for search operations */
         } /* end if(ckdlcount) */
 
         /* If data length is zero, terminate with unit exception */
-        if (dev->ckdcurdl == 0)
+        if (dev->ckdcurdl == 0 && count != 0)
         {
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
             break;
@@ -2584,7 +2713,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* If data length is zero, terminate with unit exception */
-        if (dev->ckdcurdl == 0)
+        if (dev->ckdcurdl == 0 && count != 0)
         {
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
             break;
@@ -2667,7 +2796,65 @@ BYTE            key[256];               /* Key for search operations */
         } /* end if(ckdlcount) */
 
         /* If data length is zero, terminate with unit exception */
-        if (dev->ckdcurdl == 0)
+        if (dev->ckdcurdl == 0 && count != 0)
+        {
+            *unitstat = CSW_CE | CSW_DE | CSW_UX;
+            break;
+        }
+
+        /* Write key and data */
+        rc = ckd_write_kd (dev, iobuf, count, unitstat);
+        if (rc < 0) break;
+
+        /* Calculate number of bytes written and set residual count */
+        size = dev->ckdcurkl + dev->ckdcurdl;
+        num = (count < size) ? count : size;
+        *residual = count - num;
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+
+        break;
+
+    case 0x8D:
+    /*---------------------------------------------------------------*/
+    /* WRITE UPDATE KEY AND DATA                                     */
+    /*---------------------------------------------------------------*/
+        /* Command reject if not within the domain of a Locate Record
+           that specifies the Write Data operation code */
+        if (dev->ckdlcount == 0
+            || (dev->ckdloper & CKDOPER_CODE) != CKDOPER_WRITE)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Orient to next user record count field */
+        if (dev->ckdorient != CKDORIENT_COUNT
+            || dev->ckdcurrec == 0)
+        {
+            /* Read next count field */
+            rc = ckd_read_count (dev, code, &rechdr, unitstat);
+            if (rc < 0) break;
+        }
+
+        /* If not operating in CKD conversion mode, check that the
+           data length is equal to the transfer length factor */
+        if ((dev->ckdxgattr & CKDGATR_CKDCONV) == 0)
+        {
+            if ((dev->ckdcurkl + dev->ckdcurdl) != dev->ckdltranlf)
+            {
+                /* Unit check with invalid track format */
+                ckd_build_sense (dev, 0, SENSE1_ITF, 0, 0, 0);
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                break;
+            }
+        }
+
+        /* If data length is zero, terminate with unit exception */
+        if (dev->ckdcurdl == 0 && count != 0)
         {
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
             break;

@@ -123,7 +123,6 @@ LSED    lsed2;                          /* New entry descriptor      */
 U16     rfs;                            /* Remaining free space      */
 U32     fsha;                           /* Forward section hdr addr  */
 U32     bsea;                           /* Backward stack entry addr */
-int     size = LSSE_SIZE;               /* Size of new stack entry   */
 int     i;                              /* Array subscript           */
 
     /* [5.12.3] Special operation exception if CR0 bit 15 is zero,
@@ -155,7 +154,7 @@ int     i;                              /* Array subscript           */
     /* Check whether the current linkage stack section has enough
        remaining free space to contain the new stack entry */
     rfs = (lsed.rfs[0] << 8) | lsed.rfs[1];
-    if (rfs < size)
+    if (rfs < LSSE_SIZE)
     {
         /* Program check if remaining free space not a multiple of 8 */
         if ((rfs & 0x07) != 0)
@@ -203,7 +202,7 @@ int     i;                              /* Array subscript           */
         /* Program check if the next linkage stack section does not
            have enough free space to contain the new stack entry */
         rfs = (lsed.rfs[0] << 8) | lsed.rfs[1];
-        if (rfs < size)
+        if (rfs < LSSE_SIZE)
         {
             program_check (regs, PGM_STACK_SPECIFICATION_EXCEPTION);
             return;
@@ -228,7 +227,7 @@ int     i;                              /* Array subscript           */
         lsea = fsha;
         regs->cr[15] = lsea & CR15_LSEA;
 
-    } /* end if(rfs<size) */
+    } /* end if(rfs<LSSE_SIZE) */
 
     /* [5.12.3.2] Form the new stack entry */
 
@@ -338,6 +337,10 @@ int     i;                              /* Array subscript           */
     if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
         abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
 
+    /* Clear the called space id */
+    /* Flag SCCB_CFG2_CALLED_SPACE_IDENTIFICATION is off */
+    memset (sysblk.mainstor+abs, 0, 4);
+
     /* Store the called address or PC number in bytes 148-151 */
     sysblk.mainstor[abs+4] = (calla >> 24) & 0xFF;
     sysblk.mainstor[abs+5] = (calla >> 16) & 0xFF;
@@ -369,7 +372,7 @@ int     i;                              /* Array subscript           */
     memset (&lsed2, 0, sizeof(LSED));
     lsed2.uet = etype & LSED_UET_ET;
     lsed2.si = lsed.si;
-    rfs -= size;
+    rfs -= LSSE_SIZE;
     lsed2.rfs[0] = (rfs >> 8) & 0xFF;
     lsed2.rfs[1] = rfs & 0xFF;
 
@@ -384,8 +387,8 @@ int     i;                              /* Array subscript           */
 #endif /*STACK_DEBUG*/
 
     /* [5.12.3.3] Update the current entry */
-    lsed.nes[0] = (size >> 8) & 0xFF;
-    lsed.nes[1] = size & 0xFF;
+    lsed.nes[0] = (LSSE_SIZE >> 8) & 0xFF;
+    lsed.nes[1] = LSSE_SIZE & 0xFF;
     memcpy (sysblk.mainstor+absold, &lsed, sizeof(LSED));
 
 #ifdef STACK_DEBUG
@@ -516,12 +519,6 @@ U32     bsea;                           /* Backward stack entry addr */
         {
             program_check (regs, PGM_STACK_SPECIFICATION_EXCEPTION);
             return 0;
-        }
-
-        /* For PR instruction only, update control register 15 */
-        if (prinst)
-        {
-            regs->cr[15] = lsea & CR15_LSEA;
         }
 
     } /* end if(LSED_UET_HDR) */
@@ -866,7 +863,7 @@ U32     abs;                            /* Absolute address          */
     if ((rn & 1) || code > 3)
     {
         program_check (regs, PGM_SPECIFICATION_EXCEPTION);
-        return 3;
+        return 0;
     }
 
     /* Find the virtual address of the entry descriptor

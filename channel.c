@@ -1,9 +1,14 @@
-/* CHANNEL.C    (c) Copyright Roger Bowler, 1999                     */
+/* CHANNEL.C    (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 Channel Emulator                             */
 
 /*-------------------------------------------------------------------*/
 /* This module contains the channel subsystem functions for the      */
 /* Hercules S/370 and ESA/390 emulator.                              */
+/*-------------------------------------------------------------------*/
+
+/*-------------------------------------------------------------------*/
+/* Additional credits:                                               */
+/*      Measurement block support by Jan Jaeger                      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -458,6 +463,11 @@ BYTE    ccwkey = dev->ccwkey;           /* Bits 0-3=key, 4-7=zero    */
 BYTE    opcode;                         /* CCW operation code        */
 BYTE    flags;                          /* CCW flags                 */
 U32     addr;                           /* CCW data address          */
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+U32     mbaddr;                         /* Measure block address     */
+MBK    *mbk;                            /* Measure block             */
+U16     mbcount;                        /* Measure block count       */
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 U16     count;                          /* CCW byte count            */
 BYTE   *ccw;                            /* CCW pointer               */
 BYTE    unitstat;                       /* Unit status               */
@@ -489,6 +499,32 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
     dev->scsw.flag3 |= (SCSW3_AC_SCHAC | SCSW3_AC_DEVAC);
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
+    /* Update the measurement block if applicable */
+    if (sysblk.mbm && (dev->pmcw.flag5 & PMCW5_MM_MBU))
+    {
+        mbaddr = sysblk.mbo;
+        mbaddr += (dev->pmcw.mbi[0] << 8 | dev->pmcw.mbi[1]) << 5;
+        if ((mbaddr < sysblk.mainsize)
+            && (((STORAGE_KEY(mbaddr) & STORKEY_KEY) == sysblk.mbk)
+                || (sysblk.mbk == 0)))
+        {
+            STORAGE_KEY(mbaddr) |= (STORKEY_REF | STORKEY_CHANGE);
+            mbk = (MBK*)&sysblk.mainstor[mbaddr];
+            mbcount = mbk->srcount[0] << 8 | mbk->srcount[1];
+            mbcount++;
+            mbk->srcount[0] = mbcount >> 8;
+            mbk->srcount[1] = mbcount & 0xFF;
+        } else {
+            /* Generate subchannel logout indicating program
+               check or protection check, and set the subchannel
+               measurement-block-update-enable to zero */
+            dev->pmcw.flag5 &= ~PMCW5_MM_MBU;
+            dev->esw.scl0 |= (mbaddr < sysblk.mainsize) ?
+                SCL0_ESF_MBPTK : SCL0_ESF_MBPGK;
+            /*INCOMPLETE*/
+        }
+    }
+
     /* Generate an initial status I/O interruption if requested */
     if (dev->scsw.flag1 & SCSW1_I)
     {
@@ -860,7 +896,8 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         }
 
         /* Check for incorrect length */
-        if (residual != 0 || (more && (CCW_FLAGS_CD == 0)))
+        if (residual != 0
+            || (more && ((flags & CCW_FLAGS_CD) == 0)))
         {
             /* Set incorrect length status if data chaining or
                or if suppress length indication flag is off */

@@ -494,7 +494,7 @@ int     carry;                          /* Carry indicator           */
         cc = (count == 0) ? 0 : (sign < 0) ? 1 : 2;
 
         /* Set cc=3 if non-zero digits will be lost on left shift */
-        if (shift > (len+1)*2 - 1 - count)
+        if (count > 0 && shift > (len+1)*2 - 1 - count)
             cc = 3;
 
         /* Shift operand left */
@@ -508,7 +508,9 @@ int     carry;                          /* Carry indicator           */
 
         /* Add the rounding digit to the leftmost of the digits
            to be shifted out and propagate the carry to the left */
-        carry = (dec[MAX_DECIMAL_DIGITS - shift] + round) / 10;
+        carry = (shift > MAX_DECIMAL_DIGITS) ? 0 :
+                (dec[MAX_DECIMAL_DIGITS - shift] + round) / 10;
+        count = 0;
 
         /* Shift operand right */
         for (i=MAX_DECIMAL_DIGITS-1, j=MAX_DECIMAL_DIGITS-1-shift;

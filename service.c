@@ -218,15 +218,18 @@ typedef struct _SCCB_MPF_INFO {
 
 /* Channel path information data area */
 typedef struct _SCCB_CHP_INFO {
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
         BYTE    installed[32];          /* Channels installed bits   */
-        BYTE    owned[32];              /* Channels owned bits       */
+        BYTE    standby[32];            /* Channels standby bits     */
         BYTE    online[32];             /* Channels online bits      */
+#else /*!FEATURE_CHANNEL_SUBSYSTEM*/
         BYTE    chanset0a[32];          /* 370 channel set 0A        */
         BYTE    chanset1a[32];          /* 370 channel set 1A        */
         BYTE    chanset0b[32];          /* 370 channel set 0B        */
         BYTE    chanset1b[32];          /* 370 channel set 1B        */
         BYTE    csconfig;               /* Channel set configuration */
         BYTE    resv[23];               /* Reserved, set to zero     */
+#endif /*!FEATURE_CHANNEL_SUBSYSTEM*/
     } SCCB_CHP_INFO;
 
 /* Read Channel Subsystem Information data area */
@@ -395,9 +398,11 @@ SCCB_CPU_INFO  *sccbcpu;                /* -> SCCB CPU information   */
 SCCB_CHP_INFO  *sccbchp;                /* -> SCCB channel path info */
 SCCB_CSI_INFO  *sccbcsi;                /* -> SCCB channel subsys inf*/
 U16             offset;                 /* Offset from start of SCCB */
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
 DEVBLK         *dev;                    /* Used to find CHPIDs       */
 int             chpbyte;                /* Offset to byte for CHPID  */
 int             chpbit;                 /* Bit number for CHPID      */
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 #ifdef FEATURE_SYSTEM_CONSOLE
 SCCB_EVENT_MASK*evd_mask;               /* Event mask                */
 SCCB_EVD_HDR   *evd_hdr;                /* Event header              */
@@ -639,7 +644,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccbscp->cfg[2] = 0
 //                      | SCCB_CFG2_DEVICE_ACTIVE_ONLY_MEASUREMENT
 //                      | SCCB_CFG2_CALLED_SPACE_IDENTIFICATION
+#ifdef FEATURE_CHECKSUM_INSTRUCTION
                         | SCCB_CFG2_CHECKSUM_INSTRUCTION
+#endif /*FEATURE_CHECKSUM_INSTRUCTION*/
                         ;
         sccbscp->cfg[3] = 0
 //                      | SCCB_CFG3_RESUME_PROGRAM
@@ -647,7 +654,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 #ifdef FEATURE_IMMEDIATE_AND_RELATIVE
                         | SCCB_CFG3_IMMEDIATE_AND_RELATIVE
 #endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_COMPARE_AND_MOVE_EXTENDED
                         | SCCB_CFG3_COMPARE_AND_MOVE_EXTENDED
+#endif /*FEATURE_COMPARE_AND_MOVE_EXTENDED*/
 #ifdef FEATURE_BRANCH_AND_SET_AUTHORITY
                         | SCCB_CFG3_BRANCH_AND_SET_AUTHORITY
 #endif /*FEATURE_BRANCH_AND_SET_AUTHORITY*/
@@ -744,16 +753,18 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccbchp = (SCCB_CHP_INFO*)(sccb+1);
         memset (sccbchp, 0, sizeof(SCCB_CHP_INFO));
 
-        /* Identify CHPIDs installed, owned, and online */
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+        /* Identify CHPIDs installed, standby, and online */
         for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
         {
             chpbyte = dev->devnum >> 11;
             chpbit = (dev->devnum >> 8) & 7;
 
             sccbchp->installed[chpbyte] |= 0x80 >> chpbit;
-            sccbchp->owned[chpbyte] |= 0x80 >> chpbit;
+//          sccbchp->standby[chpbyte] &= ~(0x80 >> chpbit);
             sccbchp->online[chpbyte] |= 0x80 >> chpbit;
         }
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
 #ifdef FEATURE_S370_CHANNEL
         /* For S/370, initialize identifiers for channel set 0A */
@@ -871,6 +882,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                         message[i] = ebcdic_to_ascii[event_msg[i]];
                     message[event_msglen] = '\0';
                     logmsg ("%s\n", message);
+// if(!memcmp(message,"*IEE479W",8)) regs->cpustate = CPUSTATE_STOPPING;
                 }
             }
             mcd_len -= obj_len;
@@ -1109,6 +1121,10 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 #endif /*FEATURE_EXPANDED_STORAGE*/
 
     default:
+
+//      logmsg("Invalid service call command word:%8.8X SCCB=%8.8X\n",
+//          sclp_command, sccb_absolute_addr);
+
         /* Set response code X'01F0' for invalid SCLP command */
         sccb->reas = SCCB_REAS_INVALID_CMD;
         sccb->resp = SCCB_RESP_REJECT;

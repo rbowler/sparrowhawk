@@ -634,6 +634,13 @@ U32             n;                      /* 32-bit operand value      */
 
         break;
 
+    case 0xF10:
+    /*---------------------------------------------------------------*/
+    /* Diagnose F10: Hercules CPU stop                               */
+    /*---------------------------------------------------------------*/
+        regs->cpustate = CPUSTATE_STOPPING;
+        break;
+
     default:
     /*---------------------------------------------------------------*/
     /* Diagnose xxx: Invalid function code                           */

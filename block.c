@@ -222,6 +222,7 @@ BYTE    pad;                            /* Padding byte              */
 
 } /* end function compare_long */
 
+#ifdef FEATURE_COMPARE_AND_MOVE_EXTENDED
 /*-------------------------------------------------------------------*/
 /* Move Long Extended                                                */
 /*                                                                   */
@@ -392,6 +393,7 @@ BYTE    pad;                            /* Padding byte              */
     return cc;
 
 } /* end function compare_long_extended */
+#endif /*FEATURE_COMPARE_AND_MOVE_EXTENDED*/
 
 #ifdef FEATURE_EXPANDED_STORAGE
 /*-------------------------------------------------------------------*/
@@ -718,6 +720,7 @@ mvpg_progck:
 } /* end function move_page */
 #endif /*FEATURE_MOVE_PAGE_FACILITY_2*/
 
+#ifdef FEATURE_CHECKSUM_INSTRUCTION
 /*-------------------------------------------------------------------*/
 /* Compute Checksum                                                  */
 /*                                                                   */
@@ -809,6 +812,7 @@ U64     dreg;                           /* Checksum accumulator      */
     return cc;
 
 } /* end function compute_checksum */
+#endif /*FEATURE_CHECKSUM_INSTRUCTION*/
 
 /*-------------------------------------------------------------------*/
 /* Move String                                                       */

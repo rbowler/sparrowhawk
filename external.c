@@ -10,11 +10,10 @@
 /* Additional credits:                                               */
 /*      TOD clock offset contributed by Jay Maynard                  */
 /*      Correction to timer interrupt by Valery Pogonchenko          */
+/*      TOD clock drag factor contributed by Jan Jaeger              */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
-
-//#define MIPS_COUNTING
 
 /*-------------------------------------------------------------------*/
 /* Load external interrupt new PSW                                   */
@@ -247,6 +246,9 @@ int     msecctr = 0;                    /* Millisecond counter       */
 int     cpu;                            /* CPU engine number         */
 REGS   *regs;                           /* -> CPU register context   */
 int     intflag = 0;                    /* 1=Interrupt possible      */
+#ifdef TODCLOCK_DRAG_FACTOR
+U64     init;                           /* Initial TOD value         */
+#endif /*TODCLOCK_DRAG_FACTOR*/
 U64     prev;                           /* Previous TOD clock value  */
 U64     diff;                           /* Difference between new and
                                            previous TOD clock values */
@@ -260,6 +262,17 @@ struct  timeval tv;                     /* Structure for gettimeofday
     logmsg ("HHC610I Timer thread started: tid=%8.8lX, pid=%d\n",
             thread_id(), getpid());
 
+#ifdef TODCLOCK_DRAG_FACTOR
+    /* Get current time */
+    gettimeofday (&tv, NULL);
+
+    /* Load number of seconds since 00:00:00 01 Jan 1970 */
+    init = (U64)tv.tv_sec;
+
+    /* Convert to microseconds */
+    init = init * 1000000 + tv.tv_usec;
+#endif /*TODCLOCK_DRAG_FACTOR*/
+
     while (1)
     {
         /* Get current time */
@@ -270,6 +283,10 @@ struct  timeval tv;                     /* Structure for gettimeofday
 
         /* Convert to microseconds */
         dreg = dreg * 1000000 + tv.tv_usec;
+
+#ifdef TODCLOCK_DRAG_FACTOR
+        dreg = init + (dreg - init) / TODCLOCK_DRAG_FACTOR;
+#endif /*TODCLOCK_DRAG_FACTOR*/
 
         /* Obtain the TOD clock update lock */
         obtain_lock (&sysblk.todlock);

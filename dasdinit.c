@@ -52,71 +52,58 @@ argexit ( int code )
 /* Subroutine to create a CKD DASD image file                        */
 /* Input:                                                            */
 /*      fname   DASD image file name                                 */
-/*      fd      DASD image file descriptor                           */
+/*      fseqn   Sequence number of this file (1=first)               */
 /*      devtype Device type                                          */
 /*      heads   Number of heads per cylinder                         */
-/*      maxdlen Maximum R1 record data length                        */
-/*      cyls    Number of cylinders                                  */
+/*      trksize DADS image track length                              */
+/*      buf     -> Track image buffer                                */
+/*      start   Starting cylinder number for this file               */
+/*      end     Ending cylinder number for this file                 */
+/*      volcyls Total number of cylinders on volume                  */
 /*      volser  Volume serial number                                 */
 /*-------------------------------------------------------------------*/
 static void
-create_ckd (BYTE *fname, int fd, U16 devtype, U32 heads,
-            U32 maxdlen, U32 cyls, BYTE *volser)
+create_ckd_file (BYTE *fname, int fseqn, U16 devtype, U32 heads,
+                U32 trksize, BYTE *buf, U32 start, U32 end,
+                U32 volcyls, BYTE *volser)
 {
 int             rc;                     /* Return code               */
+int             fd;                     /* File descriptor           */
 CKDDASD_DEVHDR  devhdr;                 /* Device header             */
 CKDDASD_TRKHDR *trkhdr;                 /* -> Track header           */
 CKDDASD_RECHDR *rechdr;                 /* -> Record header          */
 U32             cyl;                    /* Cylinder number           */
 U32             head;                   /* Head number               */
-U32             cylsize;                /* Cylinder size in bytes    */
-BYTE           *buf;                    /* -> Track data buffer      */
 BYTE           *pos;                    /* -> Next position in buffer*/
-U32             mincyls;                /* Minimum cylinder count    */
-U32             maxcyls;                /* Maximum cylinder count    */
 int             keylen = 4;             /* Length of keys            */
 int             ipl1len = 24;           /* Length of IPL1 data       */
 int             ipl2len = 144;          /* Length of IPL2 data       */
 int             vol1len = 80;           /* Length of VOL1 data       */
 int             rec0len = 8;            /* Length of R0 data         */
-U32             trksize;                /* DASD image track length   */
+int             fileseq;                /* CKD header sequence number*/
+int             highcyl;                /* CKD header high cyl number*/
 
-    /* Compute the DASD image track length */
-    trksize = sizeof(CKDDASD_TRKHDR)
-                + sizeof(CKDDASD_RECHDR) + rec0len
-                + sizeof(CKDDASD_RECHDR) + maxdlen
-                + sizeof(eighthexFF);
-    trksize = ROUND_UP(trksize,512);
+    /* Set file sequence number to zero if this is the only file */
+    if (fseqn == 1 && end + 1 == volcyls)
+        fileseq = 0;
+    else
+        fileseq = fseqn;
 
-    /* Compute minimum and maximum number of cylinders */
-    cylsize = trksize * heads;
-    mincyls = 1;
-    maxcyls = 0x80000000 / cylsize;
-    if (maxcyls > 65536) maxcyls = 65536;
+    /* Set high cylinder number to zero if this is the last file */
+    if (end + 1 == volcyls)
+        highcyl = 0;
+    else
+        highcyl = end;
 
-    /* Check for valid number of cylinders */
-    if (cyls < mincyls || cyls > maxcyls)
+    /* Create the DASD image file */
+    fd = open (fname, O_WRONLY | O_CREAT | O_EXCL,
+                S_IRUSR | S_IWUSR | S_IRGRP);
+    if (fd < 0)
     {
-        fprintf (stderr,
-                "Cylinder count %u is outside range %u-%u\n",
-                cyls, mincyls, maxcyls);
-        exit(4);
+        fprintf (stderr, "%s open error: %s\n",
+                fname, strerror(errno));
+        exit(8);
     }
-
-    /* Obtain track data buffer */
-    buf = malloc(trksize);
-    if (buf == NULL)
-    {
-        fprintf (stderr, "Cannot obtain track buffer: %s\n",
-                strerror(errno));
-        exit(6);
-    }
-
-    /* Display progress message */
-    fprintf (stderr,
-            "Creating %4.4X volume %s: %u cyls, "
-            "%u trks/cyl, %u bytes/track\n",
-            devtype, volser, cyls, heads, trksize);
 
     /* Create the device header */
     memset(&devhdr, 0, CKDDASD_DEVHDR_SIZE);
@@ -130,9 +117,9 @@ U32             trksize;                /* DASD image track length   */
     devhdr.trksize[1] = (trksize >> 8) & 0xFF;
     devhdr.trksize[0] = trksize & 0xFF;
     devhdr.devtype = devtype & 0xFF;
-    devhdr.fileseq = 0;
-    devhdr.highcyl[1] = 0;
-    devhdr.highcyl[0] = 0;
+    devhdr.fileseq = fileseq;
+    devhdr.highcyl[1] = (highcyl >> 8) & 0xFF;
+    devhdr.highcyl[0] = highcyl & 0xFF;
 
     /* Write the device header */
     rc = write (fd, &devhdr, CKDDASD_DEVHDR_SIZE);
@@ -144,7 +131,7 @@ U32             trksize;                /* DASD image track length   */
     }
 
     /* Write each cylinder */
-    for (cyl = 0; cyl < cyls; cyl++)
+    for (cyl = start; cyl <= end; cyl++)
     {
         /* Display progress message every 10 cylinders */
         if ((cyl % 10) == 0)
@@ -251,11 +238,143 @@ U32             trksize;                /* DASD image track length   */
 
     } /* end for(cyl) */
 
-    /* Release data buffer */
-    free (buf);
+    /* Close the DASD image file */
+    rc = close (fd);
+    if (rc < 0)
+    {
+        fprintf (stderr, "%s close error: %s\n",
+                fname, strerror(errno));
+        exit(10);
+    }
 
     /* Display completion message */
-    fprintf (stderr, "%u cylinders successfully written\n", cyl);
+    fprintf (stderr,
+            "%u cylinders successfully written to file %s\n",
+            cyl - start, fname);
+
+} /* end function create_ckd_file */
+
+/*-------------------------------------------------------------------*/
+/* Subroutine to create a CKD DASD image                             */
+/* Input:                                                            */
+/*      fname   DASD image file name                                 */
+/*      devtype Device type                                          */
+/*      heads   Number of heads per cylinder                         */
+/*      maxdlen Maximum R1 record data length                        */
+/*      volcyls Total number of cylinders on volume                  */
+/*      volser  Volume serial number                                 */
+/*                                                                   */
+/* If the total number of cylinders exceeds the capacity of a 2GB    */
+/* file, then multiple CKD image files will be created, with the     */
+/* suffix _1, _2, etc suffixed to the specified file name.           */
+/* Otherwise a single file is created without a suffix.              */
+/*-------------------------------------------------------------------*/
+static void
+create_ckd (BYTE *fname, U16 devtype, U32 heads,
+            U32 maxdlen, U32 volcyls, BYTE *volser)
+{
+int             i;                      /* Array subscript           */
+BYTE            *s;                     /* String pointer            */
+int             fileseq;                /* File sequence number      */
+BYTE            sfname[260];            /* Suffixed name of this file*/
+BYTE            *suffix;                /* -> Suffix character       */
+U32             endcyl;                 /* Last cylinder of this file*/
+U32             cyl;                    /* Cylinder number           */
+U32             cylsize;                /* Cylinder size in bytes    */
+BYTE           *buf;                    /* -> Track data buffer      */
+U32             mincyls;                /* Minimum cylinder count    */
+U32             maxcyls;                /* Maximum cylinder count    */
+U32             maxcpif;                /* Maximum number of cylinders
+                                           in each CKD image file    */
+int             rec0len = 8;            /* Length of R0 data         */
+U32             trksize;                /* DASD image track length   */
+
+    /* Compute the DASD image track length */
+    trksize = sizeof(CKDDASD_TRKHDR)
+                + sizeof(CKDDASD_RECHDR) + rec0len
+                + sizeof(CKDDASD_RECHDR) + maxdlen
+                + sizeof(eighthexFF);
+    trksize = ROUND_UP(trksize,512);
+
+    /* Compute minimum and maximum number of cylinders */
+    cylsize = trksize * heads;
+    mincyls = 1;
+    maxcpif = 0x80000000 / cylsize;
+    maxcyls = maxcpif * CKD_MAXFILES;
+    if (maxcyls > 65536) maxcyls = 65536;
+
+    /* Check for valid number of cylinders */
+    if (volcyls < mincyls || volcyls > maxcyls)
+    {
+        fprintf (stderr,
+                "Cylinder count %u is outside range %u-%u\n",
+                volcyls, mincyls, maxcyls);
+        exit(4);
+    }
+
+    /* Obtain track data buffer */
+    buf = malloc(trksize);
+    if (buf == NULL)
+    {
+        fprintf (stderr, "Cannot obtain track buffer: %s\n",
+                strerror(errno));
+        exit(6);
+    }
+
+    /* Display progress message */
+    fprintf (stderr,
+            "Creating %4.4X volume %s: %u cyls, "
+            "%u trks/cyl, %u bytes/track\n",
+            devtype, volser, volcyls, heads, trksize);
+
+    /* Copy the unsuffixed DASD image file name */
+    strcpy (sfname, fname);
+    suffix = NULL;
+
+    /* Create the suffixed file name if volume will exceed 2GB */
+    if (volcyls > maxcpif)
+    {
+        /* Look for last slash marking end of directory name */
+        s = strrchr (fname, '/');
+        if (s == NULL) s = fname;
+
+        /* Insert suffix before first dot in file name, or
+           append suffix to file name if there is no dot */
+        s = strchr (s, '.');
+        if (s != NULL)
+        {
+            i = s - fname;
+            strcpy (sfname + i, "_1");
+            strcat (sfname, fname + i);
+            suffix = sfname + i + 1;
+        }
+        else
+        {
+            strcat (sfname, "_1");
+            suffix = sfname + strlen(sfname) - 1;
+        }
+    }
+
+    /* Create the DASD image files */
+    for (cyl = 0, fileseq = 1; cyl < volcyls;
+            cyl += maxcpif, fileseq++)
+    {
+        /* Insert the file sequence number in the file name */
+        if (suffix) *suffix = '0' + fileseq;
+
+        /* Calculate the ending cylinder for this file */
+        if (cyl + maxcpif < volcyls)
+            endcyl = cyl + maxcpif - 1;
+        else
+            endcyl = volcyls - 1;
+
+        /* Create a CKD DASD image file */
+        create_ckd_file (sfname, fileseq, devtype, heads, trksize,
+                        buf, cyl, endcyl, volcyls, volser);
+    }
+
+    /* Release data buffer */
+    free (buf);
 
 } /* end function create_ckd */
 
@@ -263,17 +382,17 @@ U32             trksize;                /* DASD image track length   */
 /* Subroutine to create an FBA DASD image file                       */
 /* Input:                                                            */
 /*      fname   DASD image file name                                 */
-/*      fd      DASD image file descriptor                           */
 /*      devtype Device type                                          */
 /*      sectsz  Sector size                                          */
 /*      sectors Number of sectors                                    */
 /*      volser  Volume serial number                                 */
 /*-------------------------------------------------------------------*/
 static void
-create_fba (BYTE *fname, int fd, U16 devtype,
+create_fba (BYTE *fname, U16 devtype,
             U32 sectsz, U32 sectors, BYTE *volser)
 {
 int             rc;                     /* Return code               */
+int             fd;                     /* File descriptor           */
 U32             sectnum;                /* Sector number             */
 BYTE           *buf;                    /* -> Sector data buffer     */
 U32             minsect;                /* Minimum sector count      */
@@ -307,6 +426,16 @@ U32             maxsect;                /* Maximum sector count      */
             "%u sectors, %u bytes/sector\n",
             devtype, volser, sectors, sectsz);
 
+    /* Create the DASD image file */
+    fd = open (fname, O_WRONLY | O_CREAT | O_EXCL,
+                S_IRUSR | S_IWUSR | S_IRGRP);
+    if (fd < 0)
+    {
+        fprintf (stderr, "%s open error: %s\n",
+                fname, strerror(errno));
+        exit(7);
+    }
+
     /* Write each sector */
     for (sectnum = 0; sectnum < sectors; sectnum++)
     {
@@ -335,11 +464,22 @@ U32             maxsect;                /* Maximum sector count      */
         }
     } /* end for(sectnum) */
 
+    /* Close the DASD image file */
+    rc = close (fd);
+    if (rc < 0)
+    {
+        fprintf (stderr, "%s close error: %s\n",
+                fname, strerror(errno));
+        exit(11);
+    }
+
     /* Release data buffer */
     free (buf);
 
     /* Display completion message */
-    fprintf (stderr, "%u sectors successfully written\n", sectnum);
+    fprintf (stderr,
+            "%u sectors successfully written to file %s\n",
+            sectnum, fname);
 
 } /* end function create_fba */
 
@@ -348,7 +488,6 @@ U32             maxsect;                /* Maximum sector count      */
 /*-------------------------------------------------------------------*/
 int main ( int argc, char *argv[] )
 {
-int     fd;                             /* File descriptor           */
 U32     size;                           /* Volume size               */
 U32     heads = 0;                      /* Number of tracks/cylinder */
 U32     maxdlen = 0;                    /* Maximum R1 data length    */
@@ -362,7 +501,7 @@ BYTE    c;                              /* Character work area       */
     /* Display the program identification message */
     fprintf (stderr,
             "Hercules DASD image file creation program %s "
-            "(c)Copyright Roger Bowler, 1999-2000\n",
+            "(c)Copyright Roger Bowler, 1999\n",
             MSTRING(VERSION));
 
     /* Check the number of arguments */
@@ -450,21 +589,11 @@ BYTE    c;                              /* Character work area       */
 
     } /* end switch(devtype) */
 
-    /* Create the DASD image file */
-    fd = open (fname, O_WRONLY | O_CREAT | O_EXCL,
-                S_IRUSR | S_IWUSR | S_IRGRP);
-    if (fd < 0)
-    {
-        fprintf (stderr, "%s open error: %s\n",
-                fname, strerror(errno));
-        exit(1);
-    }
-
     /* Create the device */
     if (type == 'C')
-        create_ckd (fname, fd, devtype, heads, maxdlen, size, volser);
+        create_ckd (fname, devtype, heads, maxdlen, size, volser);
     else
-        create_fba (fname, fd, devtype, sectsize, size, volser);
+        create_fba (fname, devtype, sectsize, size, volser);
 
     /* Display completion message */
     fprintf (stderr, "DASD initialization successfully completed.\n");
