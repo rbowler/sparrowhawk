@@ -145,6 +145,7 @@ U16     cpuad;                          /* Originating CPU address   */
 
     /* External interrupt if TOD clock exceeds clock comparator */
     if (sysblk.todclk > regs->clkc
+        && sysblk.insttrace == 0
         && sysblk.inststep == 0
         && (regs->cr[0] & CR0_XM_CLKC))
     {
@@ -256,22 +257,29 @@ struct  timeval tv;                     /* Structure for gettimeofday
         /* Convert to microseconds */
         dreg = dreg * 1000000 + tv.tv_usec;
 
-        /* Convert to TOD clock format */
-        dreg <<= 12;
+        /* Shift left 4 bits so that bits 0-7=TOD Clock Epoch,
+           bits 8-59=TOD Clock bits 0-51, bits 60-63=zero */
+        dreg <<= 4;
 
         /* Obtain the TOD clock update lock */
         obtain_lock (&sysblk.todlock);
 
         /* Calculate the difference between the new TOD clock
            value and the previous value, if the clock is set */
-        prev = sysblk.todclk & 0xFFFFFFFFFFFFF000ULL;
+        prev = sysblk.todclk;
         diff = (prev == 0 ? 0 : dreg - prev);
 
         /* Update the TOD clock */
         sysblk.todclk = dreg;
 
+        /* Reset the TOD clock uniqueness value */
+        sysblk.toduniq = 0;
+
         /* Release the TOD clock update lock */
         release_lock (&sysblk.todlock);
+
+        /* Shift the epoch out of the difference for the CPU timer */
+        diff <<= 8;
 
         /* Decrement the CPU timer for each CPU */
         for (cpu = 0; cpu < sysblk.numcpu; cpu++)
@@ -364,7 +372,7 @@ PSA    *sspsa;                          /* -> Store status area      */
     sspsa->storeptmr[7] = dreg & 0xFF;
 
     /* Store clock comparator in bytes 224-231 */
-    dreg = ssreg->clkc;
+    dreg = ssreg->clkc << 8;
     sspsa->storeclkc[0] = (dreg >> 56) & 0xFF;
     sspsa->storeclkc[1] = (dreg >> 48) & 0xFF;
     sspsa->storeclkc[2] = (dreg >> 40) & 0xFF;

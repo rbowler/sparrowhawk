@@ -292,7 +292,7 @@ BYTE    area[64];                       /* Data display area         */
             if (dev->ccwtrace || dev->ccwstep)
             {
                 format_iobuf_data (idadata, area);
-                logmsg ("%4.4X:IDAW=%8.8X L=%4.4X %s\n",
+                logmsg ("%4.4X:IDAW=%8.8X Len=%3.3X%s\n",
                         dev->devnum, idadata, idalen, area);
             }
 
@@ -1037,6 +1037,47 @@ static struct timeval tv_1usec = {0, 1};
 
 #ifdef FEATURE_S370_CHANNEL
 /*-------------------------------------------------------------------*/
+/* STORE CHANNEL ID                                                  */
+/*-------------------------------------------------------------------*/
+int store_channel_id (REGS *regs, U16 chan)
+{
+U32     chanid;                         /* Channel identifier word   */
+int     devcount = 0;                   /* #of devices on channel    */
+DEVBLK *dev;                            /* -> Device control block   */
+PSA    *psa;                            /* -> Prefixed storage area  */
+
+    /* Find a device on specified channel with pending interrupt */
+    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+    {
+        /* Skip the device if not on specified channel */
+        if ((dev->devnum & 0xFF00) != chan)
+            continue;
+
+        /* Count devices on channel */
+        devcount++;
+
+    } /* end for(dev) */
+
+    /* Exit with condition code 3 if no devices on channel */
+    if (devcount == 0)
+        return 3;
+
+    /* Construct the channel id word */
+    chanid = CHANNEL_BMX;
+
+    /* Store the channel id word at PSA+X'A8' */
+    psa = (PSA*)(sysblk.mainstor + regs->pxr);
+    psa->chanid[0] = (chanid >> 24) & 0xFF;
+    psa->chanid[1] = (chanid >> 16) & 0xFF;
+    psa->chanid[2] = (chanid >> 8) & 0xFF;
+    psa->chanid[3] = chanid & 0xFF;
+
+    /* Exit with condition code 0 indicating channel id stored */
+    return 0;
+
+} /* end function test_channel */
+
+/*-------------------------------------------------------------------*/
 /* TEST CHANNEL                                                      */
 /*-------------------------------------------------------------------*/
 int test_channel (REGS *regs, U16 chan)
@@ -1307,6 +1348,13 @@ void clear_subchan (REGS *regs, DEVBLK *dev)
     dev->pcipending = 0;
     dev->pending = 0;
 
+    /* For 3270 device, clear any pending input */
+    if (dev->devtype == 0x3270)
+    {
+        dev->readpending = 0;
+        dev->rlen3270 = 0;
+    }
+
     /* Signal console thread to redrive select */
     if (dev->console)
     {
@@ -1389,6 +1437,13 @@ int halt_subchan (REGS *regs, DEVBLK *dev)
         dev->scsw.unitstat = 0;
         dev->scsw.chanstat = 0;
         dev->pending = 1;
+    }
+
+    /* For 3270 device, clear any pending input */
+    if (dev->devtype == 0x3270)
+    {
+        dev->readpending = 0;
+        dev->rlen3270 = 0;
     }
 
     /* Signal console thread to redrive select */

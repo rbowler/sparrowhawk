@@ -346,7 +346,7 @@ int     subchan;                        /* Subchannel number         */
     /* Build CPU identifier */
     sysblk.cpuid = ((U64)version << 56)
                  | ((U64)serial << 32)
-                 | (model << 16);
+                 | ((U64)model << 16);
 
     /* Set the load parameter */
     memset (sysblk.loadparm, 0x4B, 8);

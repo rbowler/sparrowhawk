@@ -157,13 +157,14 @@ U16     xcode;                          /* Exception code            */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=ALE or page protection  */
 int     stid;                           /* Segment table indication  */
+REGS    wrkregs = *regs;                /* Working copy of CPU regs  */
 
-    if (REAL_MODE(&regs->psw) && acctype != ACCTYPE_LRA) {
+    if (REAL_MODE(&wrkregs.psw) && acctype != ACCTYPE_LRA) {
         *raptr = vaddr;
         return 0;
     }
 
-    rc = translate_addr (vaddr, arn, regs, acctype,
+    rc = translate_addr (vaddr, arn, &wrkregs, acctype,
                         &raddr, &xcode, &private, &protect, &stid);
     if (rc) return xcode;
 
@@ -1379,7 +1380,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                     ANSI_ROW24_COL1
                     ANSI_YELLOW_RED
                     "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X"
-                    " %s (%llu instructions executed)"
+                    " %-13.13s %llu instructions executed"
                     ANSI_ERASE_EOL,
                     curpsw[0], curpsw[1], curpsw[2], curpsw[3],
                     curpsw[4], curpsw[5], curpsw[6], curpsw[7],

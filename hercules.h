@@ -47,6 +47,7 @@
 #undef	FEATURE_DUAL_ADDRESS_SPACE
 #undef	FEATURE_EXPANDED_STORAGE
 #undef	FEATURE_EXTENDED_STORAGE_KEYS
+#undef	FEATURE_EXTENDED_TOD_CLOCK
 #undef	FEATURE_INTERVAL_TIMER
 #undef	FEATURE_HALFWORD_IMMEDIATE
 #undef	FEATURE_LINKAGE_STACK
@@ -77,6 +78,7 @@
  #define FEATURE_CHANNEL_SUBSYSTEM
  #define FEATURE_DUAL_ADDRESS_SPACE
  #define FEATURE_EXTENDED_STORAGE_KEYS
+ #define FEATURE_EXTENDED_TOD_CLOCK
  #define FEATURE_HALFWORD_IMMEDIATE
  #define FEATURE_LINKAGE_STACK
  #define FEATURE_MSSF_CALL
@@ -170,7 +172,8 @@ typedef void DEVXF (struct _DEVBLK *dev, BYTE code, BYTE flags,
 /*-------------------------------------------------------------------*/
 typedef struct _REGS {			/* Processor registers	     */
 	U64	ptimer; 		/* CPU timer		     */
-	U64	clkc;			/* Clock comparator	     */
+	U64	clkc;			/* 0-7=Clock comparator epoch,
+					   8-63=Comparator bits 0-55 */
 	U64	instcount;		/* Instruction counter	     */
 	TLBE	tlb[256];		/* Translation lookaside buf */
 	TID	cputid; 		/* CPU thread identifier     */
@@ -179,6 +182,7 @@ typedef struct _REGS {			/* Processor registers	     */
 	U32	ar[16]; 		/* Access registers	     */
 	U32	fpr[8]; 		/* Floating point registers  */
 	U32	pxr;			/* Prefix register	     */
+	U32	todpr;			/* TOD programmable register */
 	U32	tea;			/* Translation exception addr*/
 	U16	cpuad;			/* CPU address for STAP      */
 	PSW	psw;			/* Program status word	     */
@@ -215,9 +219,11 @@ typedef struct _SYSBLK {
 	BYTE   *xpndstor;		/* -> Expanded storage	     */
 	BYTE   *xpndkeys;		/* -> Expanded storage keys  */
 	U64	cpuid;			/* CPU identifier for STIDP  */
-	U64	todclk; 		/* TOD clock		     */
+	U64	todclk; 		/* 0-7=TOD clock epoch,
+					   8-63=TOD clock bits 0-55  */
 	LOCK	todlock;		/* TOD clock update lock     */
 	TID	todtid; 		/* Thread-id for TOD update  */
+	U32	toduniq;		/* TOD clock uniqueness value*/
 	BYTE	loadparm[8];		/* IPL load parameter	     */
 	U16	numcpu; 		/* Number of CPUs installed  */
 	REGS	regs[MAX_CPU_ENGINES];	/* Registers for each CPU    */
@@ -305,6 +311,7 @@ typedef struct _DEVBLK {
 					   in keyboard read buffer   */
 	/* Device dependent fields for printer */
 	unsigned int			/* Flags		     */
+		diaggate:1,		/* 1=Diagnostic gate command */
 		fold:1; 		/* 1=Fold to upper case      */
 	int	printpos;		/* Number of bytes already
 					   placed in print buffer    */
@@ -395,16 +402,18 @@ typedef struct _DEVBLK {
 /*-------------------------------------------------------------------*/
 typedef struct _CKDDASD_DEVHDR {	/* Device header	     */
 	BYTE	devid[8];		/* Device identifier	     */
-	U32	heads;			/* #of heads per cylinder    */
-	U32	trksize;		/* Track size		     */
+	FWORD	heads;			/* #of heads per cylinder
+					   (bytes in reverse order)  */
+	FWORD	trksize;		/* Track size (reverse order)*/
 	BYTE	devtype;		/* Last 2 digits of device type
 					   (0x80=3380, 0x90=3390)    */
 	BYTE	fileseq;		/* CKD image file sequence no.
 					   (0x00=only file, 0x01=first
 					   file of multiple files)   */
-	U16	highcyl;		/* Highest cylinder number on
+	HWORD	highcyl;		/* Highest cylinder number on
 					   this file, or zero if this
-					   is the last or only file  */
+					   is the last or only file
+					   (bytes in reverse order)  */
 	BYTE	resv[492];		/* Reserved		     */
     } CKDDASD_DEVHDR;
 
@@ -593,6 +602,7 @@ void branch_in_subspace_group (int r1, int r2, REGS *regs);
 int  start_io (DEVBLK *dev, U32 ioparm, BYTE orb4, BYTE orb5,
 	BYTE orb6, BYTE orb7, U32 ccwaddr);
 void *execute_ccw_chain (DEVBLK *dev);
+int  store_channel_id (REGS *regs, U16 chan);
 int  test_channel (REGS *regs, U16 chan);
 int  test_io (REGS *regs, DEVBLK *dev, BYTE ibyte);
 int  test_subchan (REGS *regs, DEVBLK *dev, IRB *irb);

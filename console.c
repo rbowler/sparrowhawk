@@ -332,6 +332,8 @@ BYTE    buf[512];                       /* Receive buffer            */
 /* 5=27x132, X=determined by Read Partition Query command), and      */
 /* -E is an optional suffix indicating that the terminal supports    */
 /* extended attributes. Displays are negotiated into tn3270 mode.    */
+/* An optional device number suffix (example: IBM-3270@01F) may      */
+/* be specified to request allocation to a specific device number.   */
 /*                                                                   */
 /* Terminal types whose first four characters are not "IBM-" are     */
 /* handled as printer-keyboard consoles using telnet line mode.      */
@@ -342,14 +344,17 @@ BYTE    buf[512];                       /* Receive buffer            */
 /*      class   D=3270 display console, K=printer-keyboard console   */
 /*      model   3270 model indicator (2,3,4,5,X)                     */
 /*      extatr  3270 extended attributes (Y,N)                       */
+/*      devn    Requested device number, or FFFF=any device number   */
 /* Return value:                                                     */
 /*      0=negotiation successful, -1=negotiation error               */
 /*-------------------------------------------------------------------*/
 static int
-negotiate(int csock, BYTE *class, BYTE *model, BYTE *extatr)
+negotiate(int csock, BYTE *class, BYTE *model, BYTE *extatr, U16 *devn)
 {
 int    rc;                              /* Return code               */
 BYTE  *termtype;                        /* Pointer to terminal type  */
+BYTE  *s;                               /* String pointer            */
+U16    devnum;                          /* Requested device number   */
 BYTE   buf[512];                        /* Telnet negotiation buffer */
 static BYTE do_term[] = { IAC, DO, TERMINAL_TYPE };
 static BYTE will_term[] = { IAC, WILL, TERMINAL_TYPE };
@@ -395,6 +400,13 @@ static BYTE dont_echo[] = { IAC, DONT, ECHO_OPTION };
     termtype = buf + sizeof(type_is);
     TNSDEBUG(2, "Received IAC SB TERMINAL_TYPE IS %s IAC SE\n",
             termtype);
+
+    /* Check terminal type string for device name suffix */
+    s = strchr (termtype, '@');
+    if (s != NULL && sscanf (s, "@%hx", &devnum) == 1)
+        *devn = devnum;
+    else
+        *devn = 0xFFFF;
 
     /* Test for non-display terminal type */
     if (memcmp(termtype, "IBM-", 4) != 0)
@@ -526,7 +538,8 @@ int     eor = 0;                        /* 1=End of record received  */
 
     /* If zero bytes were received then client has closed connection */
     if (rc == 0) {
-        TNSDEBUG(1, "Connection closed by client\n");
+        TNSDEBUG(1, "Device %4.4X connection closed by client %s\n",
+                dev->devnum, inet_ntoa(dev->ipaddr));
         dev->sense[0] = SENSE_IR;
         return (CSW_ATTN | CSW_UC);
     }
@@ -619,7 +632,8 @@ BYTE    c;                              /* Character work area       */
 
     /* If zero bytes were received then client has closed connection */
     if (num == 0) {
-        TNSDEBUG(1, "Connection closed by client\n");
+        TNSDEBUG(1, "Device %4.4X connection closed by client %s\n",
+                dev->devnum, inet_ntoa(dev->ipaddr));
         dev->sense[0] = SENSE_IR;
         return (CSW_ATTN | CSW_UC);
     }
@@ -758,6 +772,7 @@ socklen_t               namelen;        /* Length of client structure*/
 struct hostent         *pHE;            /* Addr of hostent structure */
 char                   *clientip;       /* Addr of client ip address */
 char                   *clientname;     /* Addr of client hostname   */
+U16                     devnum;         /* Requested device number   */
 BYTE                    class;          /* D=3270, K=3215/1052       */
 BYTE                    model;          /* 3270 model (2,3,4,5,X)    */
 BYTE                    extended;       /* Extended attributes (Y,N) */
@@ -789,7 +804,7 @@ BYTE                    rejmsg[80];     /* Rejection message         */
             clientip, clientname);
 
     /* Negotiate telnet parameters */
-    rc = negotiate (csock, &class, &model, &extended);
+    rc = negotiate (csock, &class, &model, &extended, &devnum);
     if (rc != 0)
     {
         close (csock);
@@ -805,6 +820,11 @@ BYTE                    rejmsg[80];     /* Rejection message         */
 
         if (class == 'K' && dev->devtype != 0x1052
             && dev->devtype != 0x3215)
+            continue;
+
+        /* Loop if a specific device number was requested and
+           this device is not the requested device number */
+        if (devnum != 0xFFFF && dev->devnum != devnum)
             continue;
 
         /* Obtain the device lock */
@@ -840,9 +860,15 @@ BYTE                    rejmsg[80];     /* Rejection message         */
     if (dev == NULL)
     {
         /* Build the rejection message */
-        len = sprintf (rejmsg,
-                "Connection rejected, no available %s device",
-                (class=='D' ? "3270" : "1052 or 3215"));
+        if (devnum == 0xFFFF)
+            len = sprintf (rejmsg,
+                    "Connection rejected, no available %s device",
+                    (class=='D' ? "3270" : "1052 or 3215"));
+        else
+            len = sprintf (rejmsg,
+                    "Connection rejected, device %4.4X unavailable",
+                    devnum);
+
         TNSDEBUG(1, "%s\n", rejmsg);
 
         /* Send connection rejection message to client */
@@ -976,7 +1002,9 @@ BYTE                    unitstat;       /* Status after receive data */
         {
             if (dev->console
                 && dev->connected
-                && dev->busy == 0)
+                && dev->busy == 0
+                && dev->pending == 0
+                && (dev->scsw.flag3 & SCSW3_SC_PEND) == 0)
             {
                 FD_SET (dev->csock, &readset);
                 if (dev->csock > maxfd) maxfd = dev->csock;
@@ -1028,7 +1056,9 @@ BYTE                    unitstat;       /* Status after receive data */
             if (dev->console
                 && dev->connected
                 && FD_ISSET (dev->csock, &readset)
-                && dev->busy == 0)
+                && dev->busy == 0
+                && dev->pending == 0
+                && (dev->scsw.flag3 & SCSW3_SC_PEND) == 0)
             {
                 /* Receive console input data from the client */
                 if (dev->devtype == 0x3270)
@@ -1158,7 +1188,7 @@ void loc3270_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
 int             rc;                     /* Return code               */
 int             num;                    /* Number of bytes to copy   */
 int             len;                    /* Data length               */
-BYTE            wcc;                    /* tn3270 write control char */
+BYTE            cmd;                    /* tn3270 command code       */
 BYTE            buf[32768];             /* tn3270 write buffer       */
 
     /* Unit check with intervention required if no client connected */
@@ -1190,35 +1220,35 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
     /*---------------------------------------------------------------*/
     /* ERASE ALL UNPROTECTED                                         */
     /*---------------------------------------------------------------*/
-        wcc = 0x6F;
+        cmd = 0x6F;
         goto write;
 
     case 0x01:
     /*---------------------------------------------------------------*/
     /* WRITE                                                         */
     /*---------------------------------------------------------------*/
-        wcc = 0xF1;
+        cmd = 0xF1;
         goto write;
 
     case 0x05:
     /*---------------------------------------------------------------*/
     /* ERASE/WRITE                                                   */
     /*---------------------------------------------------------------*/
-        wcc = 0xF5;
+        cmd = 0xF5;
         goto write;
 
     case 0x0D:
     /*---------------------------------------------------------------*/
     /* ERASE/WRITE ALTERNATE                                         */
     /*---------------------------------------------------------------*/
-        wcc = 0x7E;
+        cmd = 0x7E;
         goto write;
 
     case 0x11:
     /*---------------------------------------------------------------*/
     /* WRITE STRUCTURED FIELD                                        */
     /*---------------------------------------------------------------*/
-        wcc = 0xF3;
+        cmd = 0xF3;
         goto write;
 
     write:
@@ -1228,10 +1258,10 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
         /* Initialize the data length */
         len = 0;
 
-        /* Move write control character to first byte of buffer
+        /* Move the 3270 command code to the first byte of the buffer
            unless data-chained from previous CCW */
         if ((chained & CCW_FLAGS_CD) == 0)
-            buf[len++] = wcc;
+            buf[len++] = cmd;
 
         /* Calculate number of bytes to move and residual byte count */
         num = sizeof(buf) / 2;
@@ -1264,14 +1294,94 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
-    case 0x06:
-    /*---------------------------------------------------------------*/
-    /* READ MODIFIED                                                 */
-    /*---------------------------------------------------------------*/
-
     case 0x02:
     /*---------------------------------------------------------------*/
     /* READ BUFFER                                                   */
+    /*---------------------------------------------------------------*/
+        /* Obtain the device lock */
+        obtain_lock (&dev->lock);
+
+        /* Receive buffer data from client if not data chained */
+        if ((chained & CCW_FLAGS_CD) == 0)
+        {
+            /* Clear the inbound buffer of any unsolicited
+               data accumulated by the connection thread */
+            dev->rlen3270 = 0;
+            dev->readpending = 0;
+
+            /* Construct a 3270 read buffer command in outbound buffer */
+            len = 0;
+            buf[len++] = 0xF2;
+
+            /* Append telnet EOR marker to outbound buffer */
+            buf[len++] = IAC;
+            buf[len++] = EOR_MARK;
+
+            /* Send the read buffer command to the client */
+            rc = send_packet(dev->csock, buf, len, "Read Buffer Command");
+            if (rc < 0)
+            {
+                dev->sense[0] = SENSE_DC;
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                release_lock (&dev->lock);
+                break;
+            }
+
+            /* Receive response data from the client (note that we
+               rely on the connection thread not to read
+               this data because the dev->busy flag is set while
+               a channel program is active on this device) */
+            do {
+                len = dev->rlen3270;
+                rc = recv_3270_data (dev);
+                TNSDEBUG(1, "read buffer: %d bytes received\n",
+                        dev->rlen3270 - len);
+            } while(rc == 0);
+
+            /* Close the connection if an error occurred */
+            if (rc & CSW_UC)
+            {
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                close (dev->csock);
+                dev->csock = 0;
+                dev->connected = 0;
+                release_lock (&dev->lock);
+                break;
+            }
+
+        } /* end if(!CCW_FLAGS_CD) */
+
+        /* Calculate number of bytes to move and residual byte count */
+        len = dev->rlen3270;
+        num = (count < len) ? count : len;
+        *residual = count - num;
+        if (count < len) *more = 1;
+
+        /* Copy data from device buffer to channel buffer */
+        memcpy (iobuf, dev->buf, num);
+
+        /* If data chaining is specified, save remaining data */
+        if ((flags & CCW_FLAGS_CD) && len > count)
+        {
+            memmove (dev->buf, dev->buf + count, len - count);
+            dev->rlen3270 = len - count;
+        }
+        else
+        {
+            dev->rlen3270 = 0;
+            dev->readpending = 0;
+        }
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+
+        /* Release the device lock */
+        release_lock (&dev->lock);
+        break;
+
+    case 0x06:
+    /*---------------------------------------------------------------*/
+    /* READ MODIFIED                                                 */
     /*---------------------------------------------------------------*/
         /* Obtain the device lock */
         obtain_lock (&dev->lock);

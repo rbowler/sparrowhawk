@@ -3671,11 +3671,18 @@ int             stmtno;                 /* Statement number          */
     /* Create the CKD device header */
     memset(&devhdr, 0, CKDDASD_DEVHDR_SIZE);
     memcpy(devhdr.devid, "CKD_P370", 8);
-    devhdr.heads = outheads;
-    devhdr.trksize = outtrklv;
+    devhdr.heads[3] = (outheads >> 24) & 0xFF;
+    devhdr.heads[2] = (outheads >> 16) & 0xFF;
+    devhdr.heads[1] = (outheads >> 8) & 0xFF;
+    devhdr.heads[0] = outheads & 0xFF;
+    devhdr.trksize[3] = (outtrklv >> 24) & 0xFF;
+    devhdr.trksize[2] = (outtrklv >> 16) & 0xFF;
+    devhdr.trksize[1] = (outtrklv >> 8) & 0xFF;
+    devhdr.trksize[0] = outtrklv & 0xFF;
     devhdr.devtype = devtype & 0xFF;
     devhdr.fileseq = 0;
-    devhdr.highcyl = 0;
+    devhdr.highcyl[1] = 0;
+    devhdr.highcyl[0] = 0;
 
     /* Write the CKD device header to the DASD image file */
     rc = write (ofd, &devhdr, CKDDASD_DEVHDR_SIZE);

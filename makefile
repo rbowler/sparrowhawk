@@ -6,11 +6,12 @@
 #
 #
 
-VERSION  = 1.46
+VERSION  = 1.47
 
-CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=390
-CFL_370  = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=370
-#	   -march=pentium -malign-double -mwide-multiply
+CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=390 \
+	   -march=pentium -malign-double -mwide-multiply
+CFL_370  = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=370 \
+	   -march=pentium -malign-double -mwide-multiply
 LFLAGS	 = -lpthread
 
 EXEFILES = hercules-370 hercules-390 \

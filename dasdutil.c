@@ -625,8 +625,14 @@ CIFBLK         *cif;                    /* CKD image file descriptor */
     }
 
     /* Extract the number of heads and the track size */
-    cif->heads = devhdr.heads;
-    cif->trksz = devhdr.trksize;
+    cif->heads = ((U32)(devhdr.heads[3]) << 24)
+                | ((U32)(devhdr.heads[2]) << 16)
+                | ((U32)(devhdr.heads[1]) << 8)
+                | (U32)(devhdr.heads[0]);
+    cif->trksz = ((U32)(devhdr.trksize[3]) << 24)
+                | ((U32)(devhdr.trksize[2]) << 16)
+                | ((U32)(devhdr.trksize[1]) << 8)
+                | (U32)(devhdr.trksize[0]);
     fprintf (stderr,
             "%s heads=%d trklen=%d\n",
             cif->fname, cif->heads, cif->trksz);

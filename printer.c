@@ -59,6 +59,7 @@ int printer_init_handler (DEVBLK *dev, int argc, BYTE *argv[])
     dev->fd = -1;
     dev->printpos = 0;
     dev->printrem = LINE_LENGTH;
+    dev->diaggate = 0;
     dev->fold = 0;
 
     /* Set length of print buffer */
@@ -95,6 +96,12 @@ int             i;                      /* Loop counter              */
 int             num;                    /* Number of bytes to move   */
 char           *eor;                    /* -> end of record string   */
 BYTE            c;                      /* Print character           */
+
+    /* Reset flags at start of CCW chain */
+    if (chained == 0)
+    {
+        dev->diaggate = 0;
+    }
 
     /* Open the device file if necessary */
     if (dev->fd < 0 && !IS_CCW_SENSE(code))
@@ -208,6 +215,73 @@ BYTE            c;                      /* Print character           */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
+    case 0x06:
+    /*---------------------------------------------------------------*/
+    /* DIAGNOSTIC CHECK READ                                         */
+    /*---------------------------------------------------------------*/
+        /* If not 1403, reject if not preceded by DIAGNOSTIC GATE */
+        if (dev->devtype != 0x1403 && dev->diaggate == 0)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0x07:
+    /*---------------------------------------------------------------*/
+    /* DIAGNOSTIC GATE                                               */
+    /*---------------------------------------------------------------*/
+        /* Command reject if 1403 or not first command in chain */
+        if (dev->devtype == 1403 || chained != 0)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Set diagnostic gate flag */
+        dev->diaggate = 1;
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0x0A:
+    /*---------------------------------------------------------------*/
+    /* DIAGNOSTIC READ UCS BUFFER                                    */
+    /*---------------------------------------------------------------*/
+        /* Reject if 1403 or not preceded by DIAGNOSTIC GATE */
+        if (dev->devtype == 0x1403 || dev->diaggate == 0)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0x12:
+    /*---------------------------------------------------------------*/
+    /* DIAGNOSTIC READ FCB                                           */
+    /*---------------------------------------------------------------*/
+        /* Reject if 1403 or not preceded by DIAGNOSTIC GATE */
+        if (dev->devtype == 0x1403 || dev->diaggate == 0)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
     case 0x0B:
     /*---------------------------------------------------------------*/
     /* SPACE 1 LINE IMMEDIATE                                        */
@@ -278,6 +352,15 @@ BYTE            c;                      /* Print character           */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
+    case 0x63:
+    /*---------------------------------------------------------------*/
+    /* LOAD FORMS CONTROL BUFFER                                     */
+    /*---------------------------------------------------------------*/
+        /* Return normal status */
+        *residual = 0;
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
     case 0xEB:
     /*---------------------------------------------------------------*/
     /* UCS GATE LOAD                                                 */
@@ -298,8 +381,8 @@ BYTE            c;                      /* Print character           */
     /*---------------------------------------------------------------*/
     /* LOAD UCS BUFFER AND FOLD                                      */
     /*---------------------------------------------------------------*/
-        /* Command reject if not chained to UCS GATE command */
-        if (prevcode != 0xEB)
+        /* For 1403, command reject if not chained to UCS GATE */
+        if (dev->devtype == 0x1403 && prevcode != 0xEB)
         {
             dev->sense[0] = SENSE_CR;
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -308,6 +391,7 @@ BYTE            c;                      /* Print character           */
 
         /* Set fold indicator and return normal status */
         dev->fold = 1;
+        *residual = 0;
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -315,8 +399,8 @@ BYTE            c;                      /* Print character           */
     /*---------------------------------------------------------------*/
     /* LOAD UCS BUFFER (NO FOLD)                                     */
     /*---------------------------------------------------------------*/
-        /* Command reject if not chained to UCS GATE command */
-        if (prevcode != 0xEB)
+        /* For 1403, command reject if not chained to UCS GATE */
+        if (dev->devtype == 0x1403 && prevcode != 0xEB)
         {
             dev->sense[0] = SENSE_CR;
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -325,6 +409,7 @@ BYTE            c;                      /* Print character           */
 
         /* Reset fold indicator and return normal status */
         dev->fold = 0;
+        *residual = 0;
         *unitstat = CSW_CE | CSW_DE;
         break;
 

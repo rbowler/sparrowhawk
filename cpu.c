@@ -575,6 +575,32 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 
+#ifdef FEATURE_EXTENDED_TOD_CLOCK
+        case 0x07:
+        /*-----------------------------------------------------------*/
+        /* 0107: SCKPF - Set Clock Programmable Field            [E] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Program check if register 0 bits 0-15 are not zeroes */
+            if ( regs->gpr[0] & 0xFFFF0000 )
+            {
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Set TOD programmable register from register 0 */
+            regs->todpr = regs->gpr[0] & 0x0000FFFF;
+
+            break;
+#endif /*FEATURE_EXTENDED_TOD_CLOCK*/
+
         default:
         /*-----------------------------------------------------------*/
         /* 01xx: Invalid operation                                   */
@@ -3166,6 +3192,26 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 
+#ifdef FEATURE_S370_CHANNEL
+        case 0x03:
+        /*-----------------------------------------------------------*/
+        /* B203: STIDC - Store Channel ID                        [S] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Store Channel ID and set condition code */
+            regs->psw.cc =
+                store_channel_id (regs, effective_addr & 0xFF00);
+
+            break;
+#endif /*FEATURE_S370_CHANNEL*/
+
         case 0x05:
         /*-----------------------------------------------------------*/
         /* B205: STCK - Store Clock                              [S] */
@@ -3177,11 +3223,14 @@ static BYTE module[8];                  /* Module name               */
             /* Obtain the TOD clock update lock */
             obtain_lock (&sysblk.todlock);
 
-            /* Retrieve the TOD clock value */
-            dreg = sysblk.todclk;
+            /* Retrieve the TOD clock value and shift out the epoch */
+            dreg = sysblk.todclk << 8;
 
-            /* Increment bit position 63 to ensure unique values */
-            sysblk.todclk++;
+            /* Insert the uniqueness value in bits 52-63 */
+            dreg |= (sysblk.toduniq & 0xFFF);
+
+            /* Increment the TOD clock uniqueness value */
+            sysblk.toduniq++;
 
             /* Release the TOD clock update lock */
             release_lock (&sysblk.todlock);
@@ -3219,10 +3268,19 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Fetch clock comparator value from operand location */
-            regs->clkc = vfetch8 ( effective_addr, ar1, regs )
+            dreg = vfetch8 ( effective_addr, ar1, regs )
                         & 0xFFFFFFFFFFFFF000ULL;
-//          /*debug*/logmsg("Set clock comparator=%16.16llX\n",
-//          /*debug*/       regs->clkc);
+
+//          /*debug*/logmsg("Set clock comparator=%16.16llX\n", dreg);
+
+            /* Obtain the TOD clock update lock */
+            obtain_lock (&sysblk.todlock);
+
+            /* Update the clock comparator and set epoch to zero */
+            regs->clkc = dreg >> 8;
+
+            /* Release the TOD clock update lock */
+            release_lock (&sysblk.todlock);
 
             break;
 
@@ -3245,10 +3303,19 @@ static BYTE module[8];                  /* Module name               */
                 goto terminate;
             }
 
-            /* Store clock comparator at operand location */
-            vstore8 ( regs->clkc, effective_addr, ar1, regs );
-//          /*debug*/logmsg("Store clock comparator=%16.16llX\n",
-//          /*debug*/       regs->clkc);
+            /* Obtain the TOD clock update lock */
+            obtain_lock (&sysblk.todlock);
+
+            /* Save clock comparator value and shift out the epoch */
+            dreg = regs->clkc << 8;
+
+            /* Release the TOD clock update lock */
+            release_lock (&sysblk.todlock);
+
+            /* Store clock comparator value at operand location */
+            vstore8 ( dreg, effective_addr, ar1, regs );
+
+//          /*debug*/logmsg("Store clock comparator=%16.16llX\n", dreg);
 
             break;
 
@@ -3272,9 +3339,19 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Fetch the CPU timer value from operand location */
-            regs->ptimer = vfetch8 ( effective_addr, ar1, regs )
+            dreg = vfetch8 ( effective_addr, ar1, regs )
                         & 0xFFFFFFFFFFFFF000ULL;
-//          /*debug*/logmsg("Set CPU timer=%16.16llX\n", regs->ptimer);
+
+            /* Obtain the TOD clock update lock */
+            obtain_lock (&sysblk.todlock);
+
+            /* Update the CPU timer */
+            regs->ptimer = dreg;
+
+            /* Release the TOD clock update lock */
+            release_lock (&sysblk.todlock);
+
+//          /*debug*/logmsg("Set CPU timer=%16.16llX\n", dreg);
 
             break;
 
@@ -3297,9 +3374,19 @@ static BYTE module[8];                  /* Module name               */
                 goto terminate;
             }
 
-            /* Store the CPU timer at operand location */
-            vstore8 ( regs->ptimer, effective_addr, ar1, regs );
-//          /*debug*/logmsg("Store CPU timer=%16.16llX\n", regs->ptimer);
+            /* Obtain the TOD clock update lock */
+            obtain_lock (&sysblk.todlock);
+
+            /* Save the CPU timer value */
+            dreg = regs->ptimer;
+
+            /* Release the TOD clock update lock */
+            release_lock (&sysblk.todlock);
+
+            /* Store CPU timer value at operand location */
+            vstore8 ( dreg, effective_addr, ar1, regs );
+
+//          /*debug*/logmsg("Store CPU timer=%16.16llX\n", dreg);
 
             break;
 
@@ -4769,6 +4856,67 @@ static BYTE module[8];                  /* Module name               */
             regs->psw.cc = search_string (r1, r2, regs);
 
             break;
+
+#ifdef FEATURE_EXTENDED_TOD_CLOCK
+        case 0x78:
+        /*-----------------------------------------------------------*/
+        /* B278: STCKE - Store Clock Extended                    [S] */
+        /*-----------------------------------------------------------*/
+
+            /* Perform serialization before fetching clock */
+            perform_serialization ();
+
+            /* Obtain the TOD clock update lock */
+            obtain_lock (&sysblk.todlock);
+
+            /* Retrieve the TOD epoch, clock bits 0-51, and 4 zeroes */
+            dreg = sysblk.todclk;
+
+            /* Load and increment the TOD clock uniqueness value */
+            n = sysblk.toduniq++;
+
+            /* Release the TOD clock update lock */
+            release_lock (&sysblk.todlock);
+
+            /* Check that all 16 bytes of the operand are accessible */
+            validate_operand (effective_addr, ar1, 15,
+                                ACCTYPE_WRITE, regs);
+
+//          /*debug*/logmsg("Store TOD clock extended: +0=%16.16llX\n",
+//          /*debug*/       dreg);
+
+            /* Insert bits 20-23 of the TOD uniqueness value */
+            dreg |= (U64)((n & 0x00000F00) >> 8);
+
+            /* Store the 8 bit TOD epoch, clock bits 0-51, and bits
+               20-23 of the TOD uniqueness value at operand address */
+            vstore8 ( dreg, effective_addr, ar1, regs );
+
+            /* Build second doubleword of operand using bits 24-31
+               of the TOD clock uniqueness value, followed by a
+               40-bit non-zero value, followed by the 16 bit TOD
+               programmable field from the TOD programmable register */
+            dreg = ((U64)(n & 0xFF) << 56)
+                 | 0x0000000000FF0000ULL
+                 | (U64)(regs->todpr & 0xFFFF);
+
+//          /*debug*/logmsg("Store TOD clock extended: +8=%16.16llX\n",
+//          /*debug*/       dreg);
+
+            /* Store second doubleword value at operand+8 */
+            effective_addr += 8;
+            effective_addr &=
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            vstore8 ( dreg, effective_addr + 8, ar1, regs );
+
+            /* Perform serialization after storing clock */
+            perform_serialization ();
+
+            /* Set condition code zero */
+            regs->psw.cc = 0;
+
+            break;
+#endif /*FEATURE_EXTENDED_TOD_CLOCK*/
 
 #ifdef FEATURE_DUAL_ADDRESS_SPACE
         case 0x79:

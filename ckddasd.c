@@ -215,8 +215,14 @@ U32             sctlfeat;               /* Storage control features  */
     }
 
     /* Set device dependent fields */
-    dev->ckdheads = devhdr.heads;
-    dev->ckdtrksz = devhdr.trksize;
+    dev->ckdheads = ((U32)(devhdr.heads[3]) << 24)
+                    | ((U32)(devhdr.heads[2]) << 16)
+                    | ((U32)(devhdr.heads[1]) << 8)
+                    | (U32)(devhdr.heads[0]);
+    dev->ckdtrksz = ((U32)(devhdr.trksize[3]) << 24)
+                    | ((U32)(devhdr.trksize[2]) << 16)
+                    | ((U32)(devhdr.trksize[1]) << 8)
+                    | (U32)(devhdr.trksize[0]);
     dev->ckdtrks = (statbuf.st_size - CKDDASD_DEVHDR_SIZE)
                         / dev->ckdtrksz;
     dev->ckdcyls = dev->ckdtrks / dev->ckdheads;

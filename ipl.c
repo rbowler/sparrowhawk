@@ -212,6 +212,7 @@ void initial_cpu_reset (REGS *regs)
     memset (regs->ar, 0, sizeof(regs->ar));
     memset (regs->fpr, 0, sizeof(regs->fpr));
     regs->pxr = 0;
+    regs->todpr = 0;
     regs->ptimer = 0;
     regs->clkc = 0;
 
