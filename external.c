@@ -285,7 +285,8 @@ struct  timeval tv;                     /* Structure for gettimeofday
         dreg = dreg * 1000000 + tv.tv_usec;
 
 #ifdef TODCLOCK_DRAG_FACTOR
-        dreg = init + (dreg - init) / TODCLOCK_DRAG_FACTOR;
+        if (sysblk.toddrag > 1)
+            dreg = init + (dreg - init) / sysblk.toddrag;
 #endif /*TODCLOCK_DRAG_FACTOR*/
 
         /* Obtain the TOD clock update lock */

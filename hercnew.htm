@@ -10,14 +10,35 @@ What's new in Hercules</TITLE>
 <h1>What's new in Hercules</h1>
 
 <hr noshade>
+<h2>What's new in release 1.59</h2>
+<p>Release date: 30 Apr 2000
+<ul>
+<li>Missing interrupt after CSCH instruction
+<li>S/370 DAT support (contributed by Jay Maynard)
+<li>Tape device sense byte improvements (by Jan Jaeger)
+<li>Read Buffered Log (CCW X'24') for tape devices (by Jan Jaeger)
+<li>Reject Sense ID CCW for 3420 tape devices (by Jan Jaeger)
+<li>Suppress unprintable character in HMC messages (by Jan Jaeger)
+<li>Suppress attention interrupt if subchannel not enabled
+    (by Roger Bowler)
+<li>New interrupt drag factor to improve performance (by Roger Bowler)
+<li>New toddrag and intdrag config options and drag control panel
+    command allow drag factors to be set (by Roger Bowler)
+<li>Light optimization on CPU critical path (by Valery Pogonchenko)
+</ul>
+<p>Download
+<a href="hercules/hercules-1.59.tar.gz">hercules-1.59.tar.gz</a>
+
 <h2>What's new in release 1.58</h2>
 <p>Release date: 22 Apr 2000
 <ul>
 <li>Support for CKD DASD volumes exceeding 2GB such as 3390-3
     (by Roger Bowler)
-<li>3274-1D SELECT RB/RMP/RBP/WRT commands
+<li>3274-1D SELECT RB/RMP/RBP/WRT commands (by Roger Bowler)
 <li>Support for 3270 14-bit SBA addressing and inbound SFE order
     (by Roger Bowler)
+<li>Command reject if Write Structured Field CCW issued to a
+    3270 without extended attributes (by Roger Bowler)
 <li>Fix missing CSW_IL indication when CCW count exhausted
     (by Roger Bowler)
 <li>Do not set unit exception if CCW count is zero (by Jan Jaeger)
@@ -41,6 +62,7 @@ What's new in Hercules</TITLE>
 <li>Leave GPR, AR and FPR intact during CPU reset for SADUMP
     (by Jan Jaeger)
 <li>Zeroize field for called space identification in PC stack entry
+    (by Jan Jaeger)
 <li>New CCW X'8D' (Write Update Key and Data) required by STOW
     (by Jan Jaeger)
 <li>Fix for 0B7 abend in D M=CHP command (by Jan Jaeger)
@@ -468,7 +490,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 22 Apr 2000
+<p>Last updated 30 Apr 2000
 </BODY>
 </HTML>
 

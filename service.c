@@ -879,7 +879,8 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                 if (!(mto_bk->ltflag[0] & SCCB_MTO_LTFLG0_PROMPT))
                 {
                     for (i = 0; i < event_msglen; i++)
-                        message[i] = ebcdic_to_ascii[event_msg[i]];
+                        message[i] = isprint(ebcdic_to_ascii[event_msg[i]]) ?
+                            ebcdic_to_ascii[event_msg[i]] : 0x20;
                     message[event_msglen] = '\0';
                     logmsg ("%s\n", message);
 // if(!memcmp(message,"*IEE479W",8)) regs->cpustate = CPUSTATE_STOPPING;

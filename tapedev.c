@@ -43,6 +43,7 @@
 /*-------------------------------------------------------------------*/
 /* Additional credits:                                               */
 /*      3480 commands contributed by Jan Jaeger                      */
+/*      Sense byte improvements by Jan Jaeger                        */
 /*-------------------------------------------------------------------*/
 
 /*-------------------------------------------------------------------*/
@@ -2279,31 +2280,51 @@ static void build_sense (DEVBLK *dev)
 {
 U32             stat;                   /* SCSI tape status bits     */
 
-    /* Set load point indicator if tape is at load point */
-    dev->sense[1] &= ~SENSE1_TAPE_LOADPT;
-    switch (dev->tapedevt)
+    /* Indicate intervention required if no file */
+    if (dev->fd < 0)
+        dev->sense[0] |= SENSE_IR;
+    else
     {
-    default:
-    case TAPEDEVT_AWSTAPE:
-        if (dev->nxtblkpos == 0)
-            dev->sense[1] |= SENSE1_TAPE_LOADPT;
-        break;
+        /* Set load point indicator if tape is at load point */
+        dev->sense[1] &= ~SENSE1_TAPE_LOADPT;
+        switch (dev->tapedevt)
+        {
+        default:
+        case TAPEDEVT_AWSTAPE:
+            if (dev->nxtblkpos == 0)
+                dev->sense[1] |= SENSE1_TAPE_LOADPT;
+            break;
 
-    case TAPEDEVT_SCSITAPE:
-        stat = status_scsitape (dev);
-        if (GMT_BOT(stat)) dev->sense[1] |= SENSE1_TAPE_LOADPT;
-        break;
+        case TAPEDEVT_SCSITAPE:
+            stat = status_scsitape (dev);
+            if (GMT_BOT(stat)) dev->sense[1] |= SENSE1_TAPE_LOADPT;
+            break;
 
-    case TAPEDEVT_OMATAPE:
-        if (dev->nxtblkpos == 0 && dev->curfilen == 1)
-            dev->sense[1] |= SENSE1_TAPE_LOADPT;
-        break;
-    } /* end switch(dev->tapedevt) */
+        case TAPEDEVT_OMATAPE:
+            if (dev->nxtblkpos == 0 && dev->curfilen == 1)
+                dev->sense[1] |= SENSE1_TAPE_LOADPT;
+            break;
+        } /* end switch(dev->tapedevt) */
+    } /* !(fd < 0) */
+
+    /* Indicate Drive online to control unit */
+    dev->sense[1] |= SENSE1_TAPE_TUA;
 
     /* Set file protect indicator if read-only file */
-    dev->sense[1] &= ~SENSE1_TAPE_FP;
     if (dev->readonly)
         dev->sense[1] |= SENSE1_TAPE_FP;
+    else
+        dev->sense[1] &= ~SENSE1_TAPE_FP;
+
+    /* Set Error Recovery Action Code */
+    if (dev->sense[0] & SENSE_IR)
+        dev->sense[3] = 0x43;
+    else if (dev->sense[0] & SENSE_CR)
+        dev->sense[3] = 0x27;
+    else if (dev->sense[1] & SENSE1_TAPE_FP)
+        dev->sense[3] = 0x30;
+    else
+        dev->sense[3] = 0x29;
 
 } /* end function build_sense */
 
@@ -2365,8 +2386,8 @@ U32             sctlfeat;               /* Storage control features  */
     if (dev->devtype == 0x3480)
     {
         cutype = 0x3480;
-        cumodel = 0x01;
-        devmodel = 0x01;
+        cumodel = 0x31;
+        devmodel = 0x31;
         devclass = 0x80;
         devtcode = 0x80;
         sctlfeat = 0x00000200;
@@ -2402,8 +2423,8 @@ U32             sctlfeat;               /* Storage control features  */
         dev->devchar[9] = sctlfeat & 0xFF;
         dev->devchar[10] = devclass;
         dev->devchar[11] = devtcode;
-        dev->devchar[40] = devtcode;
-        dev->devchar[41] = devtcode;
+        dev->devchar[40] = 0x41;
+        dev->devchar[41] = 0x80;
         dev->numdevchar = 64;
     }
 
@@ -2909,10 +2930,38 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
+    case 0x24:
+    /*---------------------------------------------------------------*/
+    /* READ BUFFERED LOG                                             */
+    /*---------------------------------------------------------------*/
+        /* Calculate residual byte count */
+        num = (count < 64) ? count : 64;
+        *residual = count - num;
+        if (count < 64) *more = 1;
+
+        /* Clear the device sense bytes */
+        memset (iobuf, 0, num);
+
+        /* Copy device sense bytes to channel I/O buffer */
+        memcpy (iobuf, dev->sense,
+                dev->numsense < num ? dev->numsense : num);
+
+        /* Return unit status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
     case 0xE4:
     /*---------------------------------------------------------------*/
     /* SENSE ID                                                      */
     /*---------------------------------------------------------------*/
+        /* SENSE ID did not exist on the 3803 */
+        if (dev->devtype != 0x3480)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
         /* Calculate residual byte count */
         num = (count < dev->numdevid) ? count : dev->numdevid;
         *residual = count - num;

@@ -18,6 +18,7 @@
 /*      STCPS and SCHM instructions by Jan Jaeger                    */
 /*      Corrections to program check by Jan Jaeger                   */
 /*      Branch tracing by Jan Jaeger                                 */
+/*      Light optimization on critical path by Valery Pogonchenko    */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -454,7 +455,7 @@ static void execute_instruction (BYTE inst[], int execflag, REGS *regs)
 {
 BYTE    opcode;                         /* Instruction byte 0        */
 BYTE    ibyte;                          /* Instruction byte 1        */
-int     r1, r2, r3, b1, b2, x2;         /* Values of R fields        */
+int     r1, r2, b1 = 0, b2 = 0;         /* Values of R fields        */
 U32     newia;                          /* New instruction address   */
 int     ilc;                            /* Instruction length code   */
 int     m;                              /* Condition code mask       */
@@ -470,7 +471,6 @@ int     d, h, i, j;                     /* Integer work areas        */
 int     divide_overflow;                /* 1=divide overflow         */
 int     effective_addr = 0;             /* Effective address         */
 int     effective_addr2 = 0;            /* Effective address         */
-int     ar1, ar2;                       /* Access register numbers   */
 PSA    *psa;                            /* -> prefixed storage area  */
 int     rc;                             /* Return code               */
 DEVBLK *dev;                            /* -> device block for SIO   */
@@ -507,21 +507,17 @@ static BYTE module[8];                  /* Module name               */
     opcode = inst[0];
     ibyte = inst[1];
     r1 = ibyte >> 4;
-    r2 = r3 = x2 = ibyte & 0x0F;
-    b1 = 0;
-    ar1 = ar2 = 0;
-
-    /* For RRE instructions, extract R1/R2 fields from byte 3 */
-    if (opcode == 0xB2) {
-        r1 = inst[3] >> 4;
-        r2 = inst[3] & 0x0F;
-    }
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
 
     /* Determine the instruction length */
     ilc = (opcode < 0x40) ? 2 : (opcode < 0xC0) ? 4 : 6;
 
-    /* Calculate the effective address */
-    if (ilc > 2) {
+    /* For 4 and 6 byte instructions, calculate effective addresses */
+    if (ilc > 2)
+    {
+        /* Calculate the first effective address */
         b1 = inst[2] >> 4;
         effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
         if (b1 != 0)
@@ -529,29 +525,29 @@ static BYTE module[8];                  /* Module name               */
             effective_addr += regs->gpr[b1];
             effective_addr &= ADDRESS_MAXWRAP(regs);
         }
-        ar1 = b1;
-    }
 
-    /* Apply indexing for RX instructions */
-    if ((opcode >= 0x40 && opcode <= 0x7F) || opcode == 0xB1) {
-        if (x2 != 0)
+        /* Apply indexing for RX instructions (note: indexing for
+           the LRA instruction is handled within the case statement,
+           to save one comparison here on the critical path) */
+        if (opcode <= 0x7F && x2 != 0)
         {
             effective_addr += regs->gpr[x2];
             effective_addr &= ADDRESS_MAXWRAP(regs);
         }
-    }
 
-    /* Calculate the 2nd effective address for SS instructions */
-    if (ilc > 4) {
-        b2 = inst[4] >> 4;
-        effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
-        if (b2 != 0)
+        /* Calculate the 2nd effective address for SS instructions */
+        if (ilc > 4)
         {
-            effective_addr2 += regs->gpr[b2];
-            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+            b2 = inst[4] >> 4;
+            effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+            if (b2 != 0)
+            {
+                effective_addr2 += regs->gpr[b2];
+                effective_addr2 &= ADDRESS_MAXWRAP(regs);
+            }
         }
-        ar2 = b2;
-    }
+
+    } /* end if(ilc>2) */
 
     /* If this instruction was not the subject of an execute,
        update the PSW instruction length and address */
@@ -1841,7 +1837,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Store rightmost 2 bytes of R1 register at operand address */
-        vstore2 ( regs->gpr[r1] & 0xFFFF, effective_addr, ar1, regs );
+        vstore2 ( regs->gpr[r1] & 0xFFFF, effective_addr, b1, regs );
 
         break;
 
@@ -1861,7 +1857,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Store rightmost byte of R1 register at operand address */
-        vstoreb ( regs->gpr[r1] & 0xFF, effective_addr, ar1, regs );
+        vstoreb ( regs->gpr[r1] & 0xFF, effective_addr, b1, regs );
 
         break;
 
@@ -1872,7 +1868,7 @@ static BYTE module[8];                  /* Module name               */
 
         /* Load rightmost byte of R1 register from operand address */
         n = regs->gpr[r1] & 0xFFFFFF00;
-        regs->gpr[r1] = n | vfetchb ( effective_addr, ar1, regs );
+        regs->gpr[r1] = n | vfetchb ( effective_addr, b1, regs );
 
         break;
 
@@ -1984,7 +1980,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load rightmost 2 bytes of register from operand address */
-        regs->gpr[r1] = vfetch2 ( effective_addr, ar1, regs );
+        regs->gpr[r1] = vfetch2 ( effective_addr, b1, regs );
 
         /* Propagate sign bit to leftmost 2 bytes of register */
         if ( regs->gpr[r1] > 0x7FFF )
@@ -1998,7 +1994,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load rightmost 2 bytes of comparand from operand address */
-        n = vfetch2 ( effective_addr, ar1, regs );
+        n = vfetch2 ( effective_addr, b1, regs );
 
         /* Propagate sign bit to leftmost 2 bytes of comparand */
         if ( n > 0x7FFF )
@@ -2017,7 +2013,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load 2 bytes from operand address */
-        n = vfetch2 ( effective_addr, ar1, regs );
+        n = vfetch2 ( effective_addr, b1, regs );
 
         /* Propagate sign bit to leftmost 2 bytes of operand */
         if ( n > 0x7FFF )
@@ -2044,7 +2040,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load 2 bytes from operand address */
-        n = vfetch2 ( effective_addr, ar1, regs );
+        n = vfetch2 ( effective_addr, b1, regs );
 
         /* Propagate sign bit to leftmost 2 bytes of operand */
         if ( n > 0x7FFF )
@@ -2071,7 +2067,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load 2 bytes from operand address */
-        n = vfetch2 ( effective_addr, ar1, regs );
+        n = vfetch2 ( effective_addr, b1, regs );
 
         /* Propagate sign bit to leftmost 2 bytes of operand */
         if ( n > 0x7FFF )
@@ -2108,7 +2104,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Convert R1 register to packed decimal */
-        convert_to_decimal (r1, effective_addr, ar1, regs);
+        convert_to_decimal (r1, effective_addr, b1, regs);
 
         break;
 
@@ -2118,7 +2114,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Convert packed decimal storage operand into R1 register */
-        convert_to_binary (r1, effective_addr, ar1, regs);
+        convert_to_binary (r1, effective_addr, b1, regs);
 
         break;
 
@@ -2128,7 +2124,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Store register contents at operand address */
-        vstore4 ( regs->gpr[r1], effective_addr, ar1, regs );
+        vstore4 ( regs->gpr[r1], effective_addr, b1, regs );
 
         break;
 
@@ -2158,7 +2154,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetch4 ( effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, b1, regs );
 
         /* AND second operand with first and set condition code */
         regs->psw.cc = ( regs->gpr[r1] &= n ) ? 1 : 0;
@@ -2171,7 +2167,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetch4 ( effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, b1, regs );
 
         /* Compare unsigned operands and set condition code */
         regs->psw.cc = regs->gpr[r1] < n ? 1 :
@@ -2185,7 +2181,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetch4 ( effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, b1, regs );
 
         /* OR second operand with first and set condition code */
         regs->psw.cc = ( regs->gpr[r1] |= n ) ? 1 : 0;
@@ -2198,7 +2194,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetch4 ( effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, b1, regs );
 
         /* XOR second operand with first and set condition code */
         regs->psw.cc = ( regs->gpr[r1] ^= n ) ? 1 : 0;
@@ -2211,7 +2207,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load R1 register from second operand */
-        regs->gpr[r1] = vfetch4 ( effective_addr, ar1, regs );
+        regs->gpr[r1] = vfetch4 ( effective_addr, b1, regs );
 
         break;
 
@@ -2221,7 +2217,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetch4 ( effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, b1, regs );
 
         /* Compare signed operands and set condition code */
         regs->psw.cc =
@@ -2236,7 +2232,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetch4 ( effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, b1, regs );
 
         /* Add signed operands and set condition code */
         regs->psw.cc =
@@ -2259,7 +2255,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetch4 ( effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, b1, regs );
 
         /* Subtract signed operands and set condition code */
         regs->psw.cc =
@@ -2289,7 +2285,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Load second operand from operand address */
-        n = vfetch4 ( effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, b1, regs );
 
         /* Multiply r1+1 by n and place result in r1 and r1+1 */
         mul_signed (&(regs->gpr[r1]), &(regs->gpr[r1+1]),
@@ -2311,7 +2307,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Load second operand from operand address */
-        n = vfetch4 ( effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, b1, regs );
 
         /* Divide r1::r1+1 by n, remainder in r1, quotient in r1+1 */
         divide_overflow =
@@ -2335,7 +2331,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetch4 ( effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, b1, regs );
 
         /* Add signed operands and set condition code */
         regs->psw.cc =
@@ -2351,7 +2347,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetch4 ( effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, b1, regs );
 
         /* Subtract unsigned operands and set condition code */
         regs->psw.cc =
@@ -2375,7 +2371,7 @@ static BYTE module[8];                  /* Module name               */
 
         /* Store register contents at operand address */
         dreg = ((U64)regs->fpr[r1] << 32) | regs->fpr[r1+1];
-        vstore8 (dreg, effective_addr, ar1, regs);
+        vstore8 (dreg, effective_addr, b1, regs);
 
         break;
 
@@ -2390,7 +2386,7 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        multiply_float_long_to_ext (r1, effective_addr, ar1, regs);
+        multiply_float_long_to_ext (r1, effective_addr, b1, regs);
 
         break;
 
@@ -2406,7 +2402,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Fetch value from operand address */
-        dreg = vfetch8 (effective_addr, ar1, regs );
+        dreg = vfetch8 (effective_addr, b1, regs );
 
         /* Update register contents */
         regs->fpr[r1] = dreg >> 32;
@@ -2425,7 +2421,7 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        compare_float_long (r1, effective_addr, ar1, regs);
+        compare_float_long (r1, effective_addr, b1, regs);
 
         break;
 
@@ -2440,7 +2436,7 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        add_float_long (r1, effective_addr, ar1, regs);
+        add_float_long (r1, effective_addr, b1, regs);
 
         break;
 
@@ -2455,7 +2451,7 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        subtract_float_long (r1, effective_addr, ar1, regs);
+        subtract_float_long (r1, effective_addr, b1, regs);
 
         break;
 
@@ -2470,7 +2466,7 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        multiply_float_long (r1, effective_addr, ar1, regs);
+        multiply_float_long (r1, effective_addr, b1, regs);
 
         break;
 
@@ -2485,7 +2481,7 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        divide_float_long (r1, effective_addr, ar1, regs);
+        divide_float_long (r1, effective_addr, b1, regs);
 
         break;
 
@@ -2500,7 +2496,7 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        add_unnormal_float_long (r1, effective_addr, ar1, regs);
+        add_unnormal_float_long (r1, effective_addr, b1, regs);
 
         break;
 
@@ -2515,7 +2511,7 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        subtract_unnormal_float_long (r1, effective_addr, ar1, regs);
+        subtract_unnormal_float_long (r1, effective_addr, b1, regs);
 
         break;
 
@@ -2531,7 +2527,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Store register contents at operand address */
-        vstore4 (regs->fpr[r1], effective_addr, ar1, regs);
+        vstore4 (regs->fpr[r1], effective_addr, b1, regs);
 
         break;
 #endif /*FEATURE_HEXADECIMAL_FLOATING_POINT*/
@@ -2543,7 +2539,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Load second operand from operand address */
-        n = vfetch4 ( effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, b1, regs );
 
         /* Multiply signed operands ignoring overflow */
         (S32)regs->gpr[r1] *= (S32)n;
@@ -2564,7 +2560,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Update first 32 bits of register from operand address */
-        regs->fpr[r1] = vfetch4 (effective_addr, ar1, regs);
+        regs->fpr[r1] = vfetch4 (effective_addr, b1, regs);
 
         break;
 
@@ -2579,7 +2575,7 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        compare_float_short (r1, effective_addr, ar1, regs);
+        compare_float_short (r1, effective_addr, b1, regs);
 
         break;
 
@@ -2594,7 +2590,7 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        add_float_short (r1, effective_addr, ar1, regs);
+        add_float_short (r1, effective_addr, b1, regs);
 
         break;
 
@@ -2609,7 +2605,7 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        subtract_float_short (r1, effective_addr, ar1, regs);
+        subtract_float_short (r1, effective_addr, b1, regs);
 
         break;
 
@@ -2624,7 +2620,7 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        multiply_float_short_to_long (r1, effective_addr, ar1, regs);
+        multiply_float_short_to_long (r1, effective_addr, b1, regs);
 
         break;
 
@@ -2639,7 +2635,7 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        divide_float_short (r1, effective_addr, ar1, regs);
+        divide_float_short (r1, effective_addr, b1, regs);
 
         break;
 
@@ -2654,7 +2650,7 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        add_unnormal_float_short (r1, effective_addr, ar1, regs);
+        add_unnormal_float_short (r1, effective_addr, b1, regs);
 
         break;
 
@@ -2669,7 +2665,7 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        subtract_unnormal_float_short (r1, effective_addr, ar1, regs);
+        subtract_unnormal_float_short (r1, effective_addr, b1, regs);
 
         break;
 #endif /*FEATURE_HEXADECIMAL_FLOATING_POINT*/
@@ -2694,7 +2690,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Load new system mask value from operand address */
-        regs->psw.sysmask = vfetchb ( effective_addr, ar1, regs );
+        regs->psw.sysmask = vfetchb ( effective_addr, b1, regs );
 
         /* For ECMODE, bits 0 and 2-4 of system mask must be zero */
         if (regs->psw.ecmode && (regs->psw.sysmask & 0xB8) != 0)
@@ -2729,7 +2725,7 @@ static BYTE module[8];                  /* Module name               */
         perform_chkpt_sync ();
 
         /* Fetch new PSW from operand address */
-        vfetchc ( dword, 7, effective_addr, ar1, regs );
+        vfetchc ( dword, 7, effective_addr, b1, regs );
 
         /* Load updated PSW */
         rc = load_psw ( &(regs->psw), dword );
@@ -3095,7 +3091,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Store register contents at operand address */
-        vstorec ( cwork1, d-1, effective_addr, ar1, regs );
+        vstorec ( cwork1, d-1, effective_addr, b1, regs );
 
         break;
 
@@ -3105,7 +3101,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Fetch byte from operand address */
-        obyte = vfetchb ( effective_addr, ar1, regs );
+        obyte = vfetchb ( effective_addr, b1, regs );
 
         /* AND with immediate operand mask */
         obyte &= ibyte;
@@ -3124,7 +3120,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Store immediate operand at operand address */
-        vstoreb ( ibyte, effective_addr, ar1, regs );
+        vstoreb ( ibyte, effective_addr, b1, regs );
 
         break;
 
@@ -3140,10 +3136,10 @@ static BYTE module[8];                  /* Module name               */
         OBTAIN_MAINLOCK();
 
         /* Fetch byte from operand address */
-        obyte = vfetchb ( effective_addr, ar1, regs );
+        obyte = vfetchb ( effective_addr, b1, regs );
 
         /* Set all bits of operand to ones */
-        vstoreb ( 0xFF, effective_addr, ar1, regs );
+        vstoreb ( 0xFF, effective_addr, b1, regs );
 
         /* Release main-storage access lock */
         RELEASE_MAINLOCK();
@@ -3162,13 +3158,13 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Fetch byte from operand address */
-        obyte = vfetchb ( effective_addr, ar1, regs );
+        obyte = vfetchb ( effective_addr, b1, regs );
 
         /* AND with immediate operand */
         obyte &= ibyte;
 
         /* Store result at operand address */
-        vstoreb ( obyte, effective_addr, ar1, regs );
+        vstoreb ( obyte, effective_addr, b1, regs );
 
         /* Set condition code */
         regs->psw.cc = obyte ? 1 : 0;
@@ -3181,7 +3177,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Fetch byte from operand address */
-        obyte = vfetchb ( effective_addr, ar1, regs );
+        obyte = vfetchb ( effective_addr, b1, regs );
 
         /* Compare with immediate operand and set condition code */
         regs->psw.cc = (obyte < ibyte) ? 1 :
@@ -3195,13 +3191,13 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Fetch byte from operand address */
-        obyte = vfetchb ( effective_addr, ar1, regs );
+        obyte = vfetchb ( effective_addr, b1, regs );
 
         /* OR with immediate operand */
         obyte |= ibyte;
 
         /* Store result at operand address */
-        vstoreb ( obyte, effective_addr, ar1, regs );
+        vstoreb ( obyte, effective_addr, b1, regs );
 
         /* Set condition code */
         regs->psw.cc = obyte ? 1 : 0;
@@ -3214,13 +3210,13 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Fetch byte from operand address */
-        obyte = vfetchb ( effective_addr, ar1, regs );
+        obyte = vfetchb ( effective_addr, b1, regs );
 
         /* XOR with immediate operand */
         obyte ^= ibyte;
 
         /* Store result at operand address */
-        vstoreb ( obyte, effective_addr, ar1, regs );
+        vstoreb ( obyte, effective_addr, b1, regs );
 
         /* Set condition code */
         regs->psw.cc = obyte ? 1 : 0;
@@ -3236,7 +3232,7 @@ static BYTE module[8];                  /* Module name               */
         d = (((r3 < r1) ? r3 + 16 - r1 : r3 - r1) + 1) * 4;
 
         /* Fetch new register contents from operand address */
-        vfetchc ( cwork1, d-1, effective_addr, ar1, regs );
+        vfetchc ( cwork1, d-1, effective_addr, b1, regs );
 
         /* Load registers from work area */
         for ( n = r1, d = 0; ; )
@@ -3280,7 +3276,7 @@ static BYTE module[8];                  /* Module name               */
             break;
 
         /* Fetch the trace operand */
-        n2 = vfetch4 ( effective_addr, ar1, regs );
+        n2 = vfetch4 ( effective_addr, b1, regs );
 
         /* Exit if bit zero of the trace operand is one */
         if ( (n2 & 0x80000000) )
@@ -3317,7 +3313,7 @@ static BYTE module[8];                  /* Module name               */
         d = (((r3 < r1) ? r3 + 16 - r1 : r3 - r1) + 1) * 4;
 
         /* Fetch new access register contents from operand address */
-        vfetchc ( cwork1, d-1, effective_addr, ar1, regs );
+        vfetchc ( cwork1, d-1, effective_addr, b1, regs );
 
         /* Load access registers from work area */
         for ( n = r1, d = 0; ; )
@@ -3365,7 +3361,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Store access register contents at operand address */
-        vstorec ( cwork1, d-1, effective_addr, ar1, regs );
+        vstorec ( cwork1, d-1, effective_addr, b1, regs );
 
         break;
 #endif /*FEATURE_ACCESS_REGISTERS*/
@@ -3683,7 +3679,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Store current system mask value into storage operand */
-        vstoreb ( regs->psw.sysmask, effective_addr, ar1, regs );
+        vstoreb ( regs->psw.sysmask, effective_addr, b1, regs );
 
         /* AND system mask with immediate operand */
         regs->psw.sysmask &= ibyte;
@@ -3703,7 +3699,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Store current system mask value into storage operand */
-        vstoreb ( regs->psw.sysmask, effective_addr, ar1, regs );
+        vstoreb ( regs->psw.sysmask, effective_addr, b1, regs );
 
         /* OR system mask with immediate operand */
         regs->psw.sysmask |= ibyte;
@@ -3786,8 +3782,15 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
+        /* Apply indexing to the effective address */
+        if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
         /* Translate the effective address to a real address */
-        cc = translate_addr (effective_addr, ar1, regs, ACCTYPE_LRA,
+        cc = translate_addr (effective_addr, b1, regs, ACCTYPE_LRA,
                 &n, &xcode, &private, &protect, &stid, NULL, NULL);
 
         /* If ALET exception, set exception code in R1 bits 16-31
@@ -3808,6 +3811,10 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
     /* Extended instructions (opcode B2xx)                           */
     /*---------------------------------------------------------------*/
+
+        /* Extract RRE R1/R2 fields from instruction byte 3 */
+        r1 = inst[3] >> 4;
+        r2 = inst[3] & 0x0F;
 
         /* The immediate byte determines the instruction opcode */
         switch ( ibyte ) {
@@ -3832,7 +3839,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Store CPU ID at operand address */
-            vstore8 ( sysblk.cpuid, effective_addr, ar1, regs );
+            vstore8 ( sysblk.cpuid, effective_addr, b1, regs );
 
             break;
 
@@ -3876,7 +3883,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Fetch new TOD clock value from operand address */
-            dreg = vfetch8 ( effective_addr, ar1, regs);
+            dreg = vfetch8 ( effective_addr, b1, regs);
 
             /* Obtain the TOD clock update lock */
             obtain_lock (&sysblk.todlock);
@@ -3926,7 +3933,7 @@ static BYTE module[8];                  /* Module name               */
 //          /*debug*/logmsg("Store TOD clock=%16.16llX\n", dreg);
 
             /* Store TOD clock value at operand address */
-            vstore8 ( dreg, effective_addr, ar1, regs );
+            vstore8 ( dreg, effective_addr, b1, regs );
 
             /* Perform serialization after storing clock */
             perform_serialization ();
@@ -3956,7 +3963,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Fetch clock comparator value from operand location */
-            dreg = vfetch8 ( effective_addr, ar1, regs )
+            dreg = vfetch8 ( effective_addr, b1, regs )
                         & 0xFFFFFFFFFFFFF000ULL;
 
 //          /*debug*/logmsg("Set clock comparator=%16.16llX\n", dreg);
@@ -4001,7 +4008,7 @@ static BYTE module[8];                  /* Module name               */
             release_lock (&sysblk.todlock);
 
             /* Store clock comparator value at operand location */
-            vstore8 ( dreg, effective_addr, ar1, regs );
+            vstore8 ( dreg, effective_addr, b1, regs );
 
 //          /*debug*/logmsg("Store clock comparator=%16.16llX\n", dreg);
 
@@ -4027,7 +4034,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Fetch the CPU timer value from operand location */
-            dreg = vfetch8 ( effective_addr, ar1, regs )
+            dreg = vfetch8 ( effective_addr, b1, regs )
                         & 0xFFFFFFFFFFFFF000ULL;
 
             /* Obtain the TOD clock update lock */
@@ -4072,7 +4079,7 @@ static BYTE module[8];                  /* Module name               */
             release_lock (&sysblk.todlock);
 
             /* Store CPU timer value at operand location */
-            vstore8 ( dreg, effective_addr, ar1, regs );
+            vstore8 ( dreg, effective_addr, b1, regs );
 
 //          /*debug*/logmsg("Store CPU timer=%16.16llX\n", dreg);
 
@@ -4161,7 +4168,7 @@ static BYTE module[8];                  /* Module name               */
             perform_serialization ();
 
             /* Load new prefix value from operand address */
-            n = vfetch4 ( effective_addr, ar1, regs );
+            n = vfetch4 ( effective_addr, b1, regs );
 
             /* Isolate bits 1-19 of new prefix value */
             n &= 0x7FFFF000;
@@ -4205,7 +4212,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Store prefix register at operand address */
-            vstore4 ( regs->pxr, effective_addr, ar1, regs );
+            vstore4 ( regs->pxr, effective_addr, b1, regs );
 
             break;
 
@@ -4229,7 +4236,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Store CPU address at operand address */
-            vstore2 ( regs->cpuad, effective_addr, ar1, regs );
+            vstore2 ( regs->cpuad, effective_addr, b1, regs );
 
             break;
 
@@ -4865,7 +4872,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Fetch the updated path management control word */
             vfetchc ( &pmcw, sizeof(PMCW)-1, effective_addr,
-                        ar1, regs );
+                        b1, regs );
 
             /* Program check if reserved bits are not zero */
             if (pmcw.flag4 & PMCW4_RESV
@@ -4962,7 +4969,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Fetch the operation request block */
             vfetchc ( &orb, sizeof(ORB)-1, effective_addr,
-                        ar1, regs );
+                        b1, regs );
 
             /* Program check if reserved bits are not zero */
             if (orb.flag4 & ORB4_RESV
@@ -5068,7 +5075,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Store the subchannel information block */
             vstorec ( &schib, sizeof(SCHIB)-1, effective_addr,
-                        ar1, regs );
+                        b1, regs );
 
             /* Set condition code 0 */
             regs->psw.cc = 0;
@@ -5121,7 +5128,7 @@ static BYTE module[8];                  /* Module name               */
             regs->psw.cc = test_subchan (regs, dev, &irb);
 
             /* Store the interruption response block */
-            vstorec ( &irb, sizeof(IRB)-1, effective_addr, ar1, regs );
+            vstorec ( &irb, sizeof(IRB)-1, effective_addr, b1, regs );
 
             break;
 
@@ -5176,7 +5183,7 @@ static BYTE module[8];                  /* Module name               */
             {
                 /* Otherwise store at operand location */
                 dreg = ((U64)ioid << 32) | ioparm;
-                vstore8 ( dreg, effective_addr, ar1, regs );
+                vstore8 ( dreg, effective_addr, b1, regs );
             }
 
             break;
@@ -5241,7 +5248,7 @@ static BYTE module[8];                  /* Module name               */
             memset(cwork1,0x00,32);
 
             /* Store channel path status word at operand address */
-            vstorec ( cwork1, 32-1, effective_addr, ar1, regs );
+            vstorec ( cwork1, 32-1, effective_addr, b1, regs );
 
             break;
 
@@ -5683,7 +5690,7 @@ static BYTE module[8];                  /* Module name               */
             release_lock (&sysblk.todlock);
 
             /* Check that all 16 bytes of the operand are accessible */
-            validate_operand (effective_addr, ar1, 15,
+            validate_operand (effective_addr, b1, 15,
                                 ACCTYPE_WRITE, regs);
 
 //          /*debug*/logmsg("Store TOD clock extended: +0=%16.16llX\n",
@@ -5694,7 +5701,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Store the 8 bit TOD epoch, clock bits 0-51, and bits
                20-23 of the TOD uniqueness value at operand address */
-            vstore8 ( dreg, effective_addr, ar1, regs );
+            vstore8 ( dreg, effective_addr, b1, regs );
 
             /* Build second doubleword of operand using bits 24-31
                of the TOD clock uniqueness value, followed by a
@@ -5710,7 +5717,7 @@ static BYTE module[8];                  /* Module name               */
             /* Store second doubleword value at operand+8 */
             effective_addr += 8;
             effective_addr &= ADDRESS_MAXWRAP(regs);
-            vstore8 ( dreg, effective_addr + 8, ar1, regs );
+            vstore8 ( dreg, effective_addr + 8, b1, regs );
 
             /* Perform serialization after storing clock */
             perform_serialization ();
@@ -5796,7 +5803,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Store control register contents at operand address */
-        vstorec ( cwork1, d-1, effective_addr, ar1, regs );
+        vstorec ( cwork1, d-1, effective_addr, b1, regs );
 
         break;
 
@@ -5823,7 +5830,7 @@ static BYTE module[8];                  /* Module name               */
         d = (((r3 < r1) ? r3 + 16 - r1 : r3 - r1) + 1) * 4;
 
         /* Fetch new control register contents from operand address */
-        vfetchc ( cwork1, d-1, effective_addr, ar1, regs );
+        vfetchc ( cwork1, d-1, effective_addr, b1, regs );
 
         /* Load control registers from work area */
         for ( n = r1, d = 0; ; )
@@ -5861,13 +5868,13 @@ static BYTE module[8];                  /* Module name               */
         OBTAIN_MAINLOCK();
 
         /* Load second operand from operand address  */
-        n = vfetch4 ( effective_addr, ar1, regs );
+        n = vfetch4 ( effective_addr, b1, regs );
 
         /* Compare operand with R1 register contents */
         if ( regs->gpr[r1] == n )
         {
             /* If equal, store R3 at operand location and set cc=0 */
-            vstore4 ( regs->gpr[r3], effective_addr, ar1, regs );
+            vstore4 ( regs->gpr[r3], effective_addr, b1, regs );
             regs->psw.cc = 0;
         }
         else
@@ -5911,15 +5918,15 @@ static BYTE module[8];                  /* Module name               */
         OBTAIN_MAINLOCK();
 
         /* Load second operand from operand address  */
-        n1 = vfetch4 ( effective_addr, ar1, regs );
-        n2 = vfetch4 ( effective_addr + 4, ar1, regs );
+        n1 = vfetch4 ( effective_addr, b1, regs );
+        n2 = vfetch4 ( effective_addr + 4, b1, regs );
 
         /* Compare doubleword operand with R1:R1+1 register contents */
         if ( regs->gpr[r1] == n1 && regs->gpr[r1+1] == n2 )
         {
             /* If equal, store R3:R3+1 at operand location and set cc=0 */
-            vstore4 ( regs->gpr[r3], effective_addr, ar1, regs );
-            vstore4 ( regs->gpr[r3+1], effective_addr + 4, ar1, regs );
+            vstore4 ( regs->gpr[r3], effective_addr, b1, regs );
+            vstore4 ( regs->gpr[r3+1], effective_addr + 4, b1, regs );
             regs->psw.cc = 0;
         }
         else
@@ -5957,7 +5964,7 @@ static BYTE module[8];                  /* Module name               */
             {
                 /* Fetch character from register and operand */
                 dbyte = n >> 24;
-                sbyte = vfetchb ( effective_addr++, ar1, regs );
+                sbyte = vfetchb ( effective_addr++, b1, regs );
 
                 /* Compare bytes, set condition code if unequal */
                 if ( dbyte != sbyte )
@@ -6008,13 +6015,13 @@ static BYTE module[8];                  /* Module name               */
         if (j == 0)
         {
 // /*debug*/logmsg ("Model dependent STCM use\n");
-            validate_operand (effective_addr, ar1, 0,
+            validate_operand (effective_addr, b1, 0,
                                 ACCTYPE_WRITE, regs);
             break;
         }
 
         /* Store result at operand location */
-        vstorec ( cwork1, j-1, effective_addr, ar1, regs );
+        vstorec ( cwork1, j-1, effective_addr, b1, regs );
 
         break;
 
@@ -6031,7 +6038,7 @@ static BYTE module[8];                  /* Module name               */
            to recognize an access exception on the first byte */
         if ( r3 == 0 )
         {
-            sbyte = vfetchb ( effective_addr, ar1, regs );
+            sbyte = vfetchb ( effective_addr, b1, regs );
             regs->psw.cc = 0;
             break;
         }
@@ -6046,7 +6053,7 @@ static BYTE module[8];                  /* Module name               */
             if ( r3 & 0x08 )
             {
                 /* Fetch the source byte from the operand */
-                sbyte = vfetchb ( effective_addr, ar1, regs );
+                sbyte = vfetchb ( effective_addr, b1, regs );
 
                 /* If this is the first byte fetched then test the
                    high-order bit to determine the condition code */
@@ -6086,8 +6093,8 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Copy low digits of source bytes to destination bytes */
-        ss_operation (opcode, effective_addr, ar1,
-                effective_addr2, ar2, ibyte, regs);
+        ss_operation (opcode, effective_addr, b1,
+                effective_addr2, b2, ibyte, regs);
         break;
 
     case 0xD2:
@@ -6096,8 +6103,8 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Move characters using current addressing mode and key */
-        move_chars (effective_addr, ar1, regs->psw.pkey,
-                effective_addr2, ar2, regs->psw.pkey, ibyte, regs);
+        move_chars (effective_addr, b1, regs->psw.pkey,
+                effective_addr2, b2, regs->psw.pkey, ibyte, regs);
         break;
 
     case 0xD3:
@@ -6106,8 +6113,8 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Copy high digits of source bytes to destination bytes */
-        ss_operation (opcode, effective_addr, ar1,
-                effective_addr2, ar2, ibyte, regs);
+        ss_operation (opcode, effective_addr, b1,
+                effective_addr2, b2, ibyte, regs);
         break;
 
     case 0xD4:
@@ -6116,8 +6123,8 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Perform AND operation and set condition code */
-        regs->psw.cc = ss_operation (opcode, effective_addr, ar1,
-                                effective_addr2, ar2, ibyte, regs);
+        regs->psw.cc = ss_operation (opcode, effective_addr, b1,
+                                effective_addr2, b2, ibyte, regs);
         break;
 
     case 0xD5:
@@ -6126,8 +6133,8 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Fetch first and second operands into work areas */
-        vfetchc ( cwork1, ibyte, effective_addr, ar1, regs );
-        vfetchc ( cwork2, ibyte, effective_addr2, ar2, regs );
+        vfetchc ( cwork1, ibyte, effective_addr, b1, regs );
+        vfetchc ( cwork2, ibyte, effective_addr2, b2, regs );
 
         /* Compare first operand with second operand */
         rc = memcmp (cwork1, cwork2, ibyte+1);
@@ -6143,8 +6150,8 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Perform OR operation and set condition code */
-        regs->psw.cc = ss_operation (opcode, effective_addr, ar1,
-                                effective_addr2, ar2, ibyte, regs);
+        regs->psw.cc = ss_operation (opcode, effective_addr, b1,
+                                effective_addr2, b2, ibyte, regs);
         break;
 
     case 0xD7:
@@ -6153,8 +6160,8 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Perform XOR operation and set condition code */
-        regs->psw.cc = ss_operation (opcode, effective_addr, ar1,
-                                effective_addr2, ar2, ibyte, regs);
+        regs->psw.cc = ss_operation (opcode, effective_addr, b1,
+                                effective_addr2, b2, ibyte, regs);
         break;
 
     case 0xD9:
@@ -6188,8 +6195,8 @@ static BYTE module[8];                  /* Module name               */
 
         /* Move characters using source key for second operand */
         if (n > 0)
-            move_chars (effective_addr, ar1, regs->psw.pkey,
-                        effective_addr2, ar2, j, n-1, regs);
+            move_chars (effective_addr, b1, regs->psw.pkey,
+                        effective_addr2, b2, j, n-1, regs);
 
         /* Set condition code */
         regs->psw.cc = cc;
@@ -6305,11 +6312,11 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Validate the first operand for write access */
-        validate_operand (effective_addr, ar1, ibyte,
+        validate_operand (effective_addr, b1, ibyte,
                         ACCTYPE_WRITE, regs);
 
         /* Fetch first operand into work area */
-        vfetchc ( cwork1, ibyte, effective_addr, ar1, regs );
+        vfetchc ( cwork1, ibyte, effective_addr, b1, regs );
 
         /* Determine the second operand range by scanning the
            first operand to find the bytes with the highest
@@ -6322,7 +6329,7 @@ static BYTE module[8];                  /* Module name               */
 
         /* Validate the referenced portion of the second operand */
         n = (effective_addr2 + d) & ADDRESS_MAXWRAP(regs);
-        validate_operand (n, ar2, h-d, ACCTYPE_READ, regs);
+        validate_operand (n, b2, h-d, ACCTYPE_READ, regs);
 
         /* Process first operand from left to right, refetching
            second operand and storing the result byte by byte
@@ -6331,10 +6338,10 @@ static BYTE module[8];                  /* Module name               */
         {
             /* Fetch byte from second operand */
             n = (effective_addr2 + cwork1[i]) & ADDRESS_MAXWRAP(regs);
-            sbyte = vfetchb ( n, ar2, regs );
+            sbyte = vfetchb ( n, b2, regs );
 
             /* Store result at first operand address */
-            vstoreb ( sbyte, effective_addr, ar1, regs );
+            vstoreb ( sbyte, effective_addr, b1, regs );
 
             /* Increment first operand address */
             effective_addr++;
@@ -6356,10 +6363,10 @@ static BYTE module[8];                  /* Module name               */
         for ( i = 0; i <= ibyte; i++ )
         {
             /* Fetch argument byte from first operand */
-            dbyte = vfetchb ( effective_addr, ar1, regs );
+            dbyte = vfetchb ( effective_addr, b1, regs );
 
             /* Fetch function byte from second operand */
-            sbyte = vfetchb ( effective_addr2 + dbyte, ar2, regs );
+            sbyte = vfetchb ( effective_addr2 + dbyte, b2, regs );
 
             /* Test for non-zero function byte */
             if (sbyte != 0) {
@@ -6404,8 +6411,8 @@ static BYTE module[8];                  /* Module name               */
 
         /* Edit packed decimal value and set condition code */
         regs->psw.cc =
-            edit_packed (0, effective_addr, ibyte, ar1,
-                        effective_addr2, ar2, regs);
+            edit_packed (0, effective_addr, ibyte, b1,
+                        effective_addr2, b2, regs);
 
         break;
 
@@ -6416,8 +6423,8 @@ static BYTE module[8];                  /* Module name               */
 
         /* Edit and mark packed decimal value and set condition code */
         regs->psw.cc =
-            edit_packed (1, effective_addr, ibyte, ar1,
-                        effective_addr2, ar2, regs);
+            edit_packed (1, effective_addr, ibyte, b1,
+                        effective_addr2, b2, regs);
 
         break;
 
@@ -6458,7 +6465,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Fetch PKM, SASN, AX, and PASN from first operand */
-            dreg = vfetch8 ( effective_addr, ar1, regs );
+            dreg = vfetch8 ( effective_addr, b1, regs );
             pkm = (dreg & 0xFFFF000000000000ULL) >> 48;
             sasn = (dreg & 0xFFFF00000000ULL) >> 32;
             ax = (dreg & 0xFFFF0000) >> 16;
@@ -6489,7 +6496,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Test protection and set condition code */
             regs->psw.cc =
-                test_prot (effective_addr, ar1, regs, dbyte);
+                test_prot (effective_addr, b1, regs, dbyte);
 
             break;
 
@@ -6503,8 +6510,8 @@ static BYTE module[8];                  /* Module name               */
             perform_serialization ();
 
             /* Call MVS assist to obtain lock */
-            obtain_local_lock (effective_addr, ar1,
-                                effective_addr2, ar2, regs);
+            obtain_local_lock (effective_addr, b1,
+                                effective_addr2, b2, regs);
 
             /* Perform serialization after completing operation */
             perform_serialization ();
@@ -6517,8 +6524,8 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
 
             /* Call MVS assist to release lock */
-            release_local_lock (effective_addr, ar1,
-                                effective_addr2, ar2, regs);
+            release_local_lock (effective_addr, b1,
+                                effective_addr2, b2, regs);
 
             break;
 
@@ -6531,8 +6538,8 @@ static BYTE module[8];                  /* Module name               */
             perform_serialization ();
 
             /* Call MVS assist to obtain lock */
-            obtain_cms_lock (effective_addr, ar1,
-                                effective_addr2, ar2, regs);
+            obtain_cms_lock (effective_addr, b1,
+                                effective_addr2, b2, regs);
 
             /* Perform serialization after completing operation */
             perform_serialization ();
@@ -6545,8 +6552,8 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
 
             /* Call MVS assist to release lock */
-            release_cms_lock (effective_addr, ar1,
-                                effective_addr2, ar2, regs);
+            release_cms_lock (effective_addr, b1,
+                                effective_addr2, b2, regs);
 
             break;
 #endif /*FEATURE_MVS_ASSIST*/
@@ -6572,8 +6579,8 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Move characters using source key for second operand */
-            move_chars (effective_addr, ar1, regs->psw.pkey,
-                        effective_addr2, ar2, j, h, regs);
+            move_chars (effective_addr, b1, regs->psw.pkey,
+                        effective_addr2, b2, j, h, regs);
 
             break;
 
@@ -6598,8 +6605,8 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Move characters using destination key for operand 1 */
-            move_chars (effective_addr, ar1, j,
-                        effective_addr2, ar2, regs->psw.pkey,
+            move_chars (effective_addr, b1, j,
+                        effective_addr2, b2, regs->psw.pkey,
                         h, regs);
 
             break;
@@ -6620,20 +6627,20 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Validate the operands for addressing and protection */
-        validate_operand (effective_addr, ar1, ibyte,
+        validate_operand (effective_addr, b1, ibyte,
                         ACCTYPE_WRITE, regs);
         n = (effective_addr2 - ibyte) & ADDRESS_MAXWRAP(regs);
-        validate_operand (n, ar2, ibyte, ACCTYPE_READ, regs);
+        validate_operand (n, b2, ibyte, ACCTYPE_READ, regs);
 
         /* Process the destination operand from left to right,
            and the source operand from right to left */
         for ( i = 0; i <= ibyte; i++ )
         {
             /* Fetch a byte from the source operand */
-            sbyte = vfetchb ( effective_addr2, ar2, regs );
+            sbyte = vfetchb ( effective_addr2, b2, regs );
 
             /* Store the byte in the destination operand */
-            vstoreb ( sbyte, effective_addr, ar1, regs );
+            vstoreb ( sbyte, effective_addr, b1, regs );
 
             /* Increment destination operand address */
             effective_addr++;
@@ -6654,7 +6661,7 @@ static BYTE module[8];                  /* Module name               */
 
         /* Shift packed decimal operand and set condition code */
         regs->psw.cc =
-            shift_and_round_packed (effective_addr, r1, ar1, regs,
+            shift_and_round_packed (effective_addr, r1, b1, regs,
                                 r2, effective_addr2 );
 
         break;
@@ -6665,8 +6672,8 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Move shifted second operand to first operand */
-        move_with_offset (effective_addr, r1, ar1,
-                        effective_addr2, r2, ar2, regs);
+        move_with_offset (effective_addr, r1, b1,
+                        effective_addr2, r2, b2, regs);
 
         break;
 
@@ -6676,8 +6683,8 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Pack second operand into first operand */
-        zoned_to_packed (effective_addr, r1, ar1,
-                        effective_addr2, r2, ar2, regs);
+        zoned_to_packed (effective_addr, r1, b1,
+                        effective_addr2, r2, b2, regs);
 
         break;
 
@@ -6687,8 +6694,8 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Unpack second operand into first operand */
-        packed_to_zoned (effective_addr, r1, ar1,
-                        effective_addr2, r2, ar2, regs);
+        packed_to_zoned (effective_addr, r1, b1,
+                        effective_addr2, r2, b2, regs);
 
         break;
 
@@ -6699,8 +6706,8 @@ static BYTE module[8];                  /* Module name               */
 
         /* Copy packed decimal operand and set condition code */
         regs->psw.cc =
-            zero_and_add_packed (effective_addr, r1, ar1,
-                                effective_addr2, r2, ar2, regs );
+            zero_and_add_packed (effective_addr, r1, b1,
+                                effective_addr2, r2, b2, regs );
 
         break;
 
@@ -6711,8 +6718,8 @@ static BYTE module[8];                  /* Module name               */
 
         /* Compare packed decimal operands and set condition code */
         regs->psw.cc =
-            compare_packed (effective_addr, r1, ar1,
-                                effective_addr2, r2, ar2, regs );
+            compare_packed (effective_addr, r1, b1,
+                                effective_addr2, r2, b2, regs );
 
         break;
 
@@ -6723,8 +6730,8 @@ static BYTE module[8];                  /* Module name               */
 
         /* Add packed decimal operands and set condition code */
         regs->psw.cc =
-            add_packed (effective_addr, r1, ar1,
-                                effective_addr2, r2, ar2, regs );
+            add_packed (effective_addr, r1, b1,
+                                effective_addr2, r2, b2, regs );
 
         break;
 
@@ -6735,8 +6742,8 @@ static BYTE module[8];                  /* Module name               */
 
         /* Subtract packed decimal operands and set condition code */
         regs->psw.cc =
-            subtract_packed (effective_addr, r1, ar1,
-                                effective_addr2, r2, ar2, regs );
+            subtract_packed (effective_addr, r1, b1,
+                                effective_addr2, r2, b2, regs );
 
         break;
 
@@ -6746,8 +6753,8 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Multiply packed decimal operands */
-        multiply_packed (effective_addr, r1, ar1,
-                                effective_addr2, r2, ar2, regs );
+        multiply_packed (effective_addr, r1, b1,
+                                effective_addr2, r2, b2, regs );
 
         break;
 
@@ -6757,8 +6764,8 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Divide packed decimal operands */
-        divide_packed (effective_addr, r1, ar1,
-                                effective_addr2, r2, ar2, regs );
+        divide_packed (effective_addr, r1, b1,
+                                effective_addr2, r2, b2, regs );
 
         break;
 
@@ -6870,6 +6877,7 @@ DWORD   csw;                            /* CSW for S/370 channels    */
 void *cpu_thread (REGS *regs)
 {
 int     rc;                             /* Return code               */
+int     xdefer;                         /* Interrupt defer counter   */
 int     tracethis;                      /* Trace this instruction    */
 int     stepthis;                       /* Stop on this instruction  */
 int     diswait;                        /* 1=Disabled wait state     */
@@ -6919,6 +6927,9 @@ int     icidx;                          /* Instruction counter index */
     /* Clear the disabled wait state flag */
     diswait = 0;
 
+    /* Clear the interrupt defer counter */
+    xdefer = 0;
+
     /* Execute the program */
     while (1) {
 
@@ -6926,91 +6937,105 @@ int     icidx;                          /* Instruction counter index */
         tracethis = 0;
         stepthis = 0;
 
-        /* Obtain the interrupt lock */
-        obtain_lock (&sysblk.intlock);
+        /* Test for interrupts every n instructions */
+        if (xdefer++ >= sysblk.intdrag
+            || regs->psw.wait
+            || regs->cpustate != CPUSTATE_STARTED)
+        {
+            /* Obtain the interrupt lock */
+            obtain_lock (&sysblk.intlock);
 
-        /* If enabled for external interrupts, invite the
-           service processor to present a pending interrupt */
-        if (regs->psw.sysmask & PSW_EXTMASK)
-            perform_external_interrupt (regs);
+            /* If enabled for external interrupts, invite the
+               service processor to present a pending interrupt */
+            if (regs->psw.sysmask & PSW_EXTMASK)
+                perform_external_interrupt (regs);
 
-        /* If an I/O interrupt is pending, and this CPU is
-           enabled for I/O interrupts, invite the channel
-           subsystem to present a pending interrupt */
-        if (sysblk.iopending &&
+            /* If an I/O interrupt is pending, and this CPU is
+               enabled for I/O interrupts, invite the channel
+               subsystem to present a pending interrupt */
+            if (sysblk.iopending &&
+#ifdef FEATURE_BCMODE
+                (regs->psw.sysmask &
+                    (regs->psw.ecmode ? PSW_IOMASK : 0xFE))
+#else /*!FEATURE_BCMODE*/
+                (regs->psw.sysmask & PSW_IOMASK)
+#endif /*!FEATURE_BCMODE*/
+               )
+                perform_io_interrupt (regs);
+
+            /* Perform restart interrupt if pending */
+            if (regs->restart)
+            {
+                regs->restart = 0;
+                rc = psw_restart (regs);
+                if (rc == 0) regs->cpustate = CPUSTATE_STARTED;
+            }
+
+            /* If CPU is stopping, change status to stopped */
+            if (regs->cpustate == CPUSTATE_STOPPING)
+                regs->cpustate = CPUSTATE_STOPPED;
+
+            /* Test for stopped state */
+            if (regs->cpustate == CPUSTATE_STOPPED)
+            {
+                /* Store status at absolute location 0 if requested */
+                if (regs->storstat)
+                {
+                    regs->storstat = 0;
+                    store_status (regs, 0);
+                }
+
+                /* Wait for start command from panel */
+                wait_condition (&sysblk.intcond, &sysblk.intlock);
+                release_lock (&sysblk.intlock);
+                continue;
+            }
+
+            /* Test for disabled wait PSW */
+            if (regs->psw.wait &&
 #ifdef FEATURE_BCMODE
             (regs->psw.sysmask &
-                (regs->psw.ecmode ? PSW_IOMASK : 0xFE))
-#else /*!FEATURE_BCMODE*/
-            (regs->psw.sysmask & PSW_IOMASK)
-#endif /*!FEATURE_BCMODE*/
-           )
-            perform_io_interrupt (regs);
-
-        /* Perform restart interrupt if pending */
-        if (regs->restart)
-        {
-            regs->restart = 0;
-            rc = psw_restart (regs);
-            if (rc == 0) regs->cpustate = CPUSTATE_STARTED;
-        }
-
-        /* If CPU is stopping, change status to stopped */
-        if (regs->cpustate == CPUSTATE_STOPPING)
-            regs->cpustate = CPUSTATE_STOPPED;
-
-        /* Test for stopped state */
-        if (regs->cpustate == CPUSTATE_STOPPED)
-        {
-            /* Store status at absolute location 0 if requested */
-            if (regs->storstat)
-            {
-                regs->storstat = 0;
-                store_status (regs, 0);
-            }
-
-            /* Wait for start command from panel */
-            wait_condition (&sysblk.intcond, &sysblk.intlock);
-            release_lock (&sysblk.intlock);
-            continue;
-        }
-
-        /* Test for disabled wait PSW */
-        if (regs->psw.wait && (regs->psw.sysmask &
                 (regs->psw.ecmode ? (PSW_IOMASK | PSW_EXTMASK) : 0xFF))
                 == 0)
-        {
-            if (diswait == 0)
+#else /*!FEATURE_BCMODE*/
+            (regs->psw.sysmask & (PSW_IOMASK | PSW_EXTMASK)) == 0)
+#endif /*!FEATURE_BCMODE*/
             {
-                logmsg ("Disabled wait state code %8.8X\n",
-                        regs->psw.ia | (regs->psw.amode << 31));
+                if (diswait == 0)
+                {
+                    logmsg ("Disabled wait state code %8.8X\n",
+                            regs->psw.ia | (regs->psw.amode << 31));
 #ifdef INSTRUCTION_COUNTING
-                logmsg ("%llu instructions executed\n",
-                        regs->instcount);
+                    logmsg ("%llu instructions executed\n",
+                            regs->instcount);
 #endif /*INSTRUCTION_COUNTING*/
-                diswait = 1;
+                    diswait = 1;
+                }
+
+                /* Wait for restart command from panel */
+                wait_condition (&sysblk.intcond, &sysblk.intlock);
+                release_lock (&sysblk.intlock);
+                continue;
             }
 
-            /* Wait for restart command from panel */
-            wait_condition (&sysblk.intcond, &sysblk.intlock);
+            /* Reset disabled wait state indicator */
+            diswait = 0;
+
+            /* Test for enabled wait state */
+            if (regs->psw.wait)
+            {
+                /* Wait for I/O or external interrupt */
+                wait_condition (&sysblk.intcond, &sysblk.intlock);
+                release_lock (&sysblk.intlock);
+                continue;
+            }
+
+            /* Release the interrupt lock */
             release_lock (&sysblk.intlock);
-            continue;
-        }
 
-        /* Reset disabled wait state indicator */
-        diswait = 0;
-
-        /* Test for enabled wait state */
-        if (regs->psw.wait)
-        {
-            /* Wait for I/O or external interrupt */
-            wait_condition (&sysblk.intcond, &sysblk.intlock);
-            release_lock (&sysblk.intlock);
-            continue;
-        }
-
-        /* Release the interrupt lock */
-        release_lock (&sysblk.intlock);
+            /* Reset the interrupt defer counter */
+            xdefer = 0;
+        } /* end if(xdefer) */
 
         /* Clear the instruction validity flag in case an access
            error occurs while attempting to fetch next instruction */

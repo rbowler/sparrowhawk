@@ -66,6 +66,7 @@
 #undef	FEATURE_EXPANDED_STORAGE
 #undef	FEATURE_EXTENDED_STORAGE_KEYS
 #undef	FEATURE_EXTENDED_TOD_CLOCK
+#undef	FEATURE_FETCH_PROTECTION_OVERRIDE
 #undef	FEATURE_HEXADECIMAL_FLOATING_POINT
 #undef	FEATURE_IMMEDIATE_AND_RELATIVE
 #undef	FEATURE_INTERVAL_TIMER
@@ -76,6 +77,7 @@
 #undef	FEATURE_PAGE_PROTECTION
 #undef	FEATURE_PRIVATE_SPACE
 #undef	FEATURE_S370_CHANNEL
+#undef	FEATURE_S390_DAT
 #undef	FEATURE_SEGMENT_PROTECTION
 #undef	FEATURE_STORAGE_PROTECTION_OVERRIDE
 #undef	FEATURE_SUBSPACE_GROUP
@@ -105,6 +107,7 @@
  #define FEATURE_EXPANDED_STORAGE
  #define FEATURE_EXTENDED_STORAGE_KEYS
  #define FEATURE_EXTENDED_TOD_CLOCK
+ #define FEATURE_FETCH_PROTECTION_OVERRIDE
  #define FEATURE_HEXADECIMAL_FLOATING_POINT
  #define FEATURE_IMMEDIATE_AND_RELATIVE
  #define FEATURE_LINKAGE_STACK
@@ -113,6 +116,7 @@
  #define FEATURE_MVS_ASSIST
  #define FEATURE_PAGE_PROTECTION
  #define FEATURE_PRIVATE_SPACE
+ #define FEATURE_S390_DAT
  #define FEATURE_STORAGE_PROTECTION_OVERRIDE
  #define FEATURE_SUBSPACE_GROUP
  #define FEATURE_SUPPRESSION_ON_PROTECTION
@@ -324,6 +328,8 @@ typedef struct _SYSBLK {
 	BYTE	mbk;			/* Measurement block key     */
 	int	mbm;			/* Measurement block mode    */
 	int	mbd;			/* Device connect time mode  */
+	int	intdrag;		/* Interrupt drag factor     */
+	int	toddrag;		/* TOD clock drag factor     */
 	struct _DEVBLK *firstdev;	/* -> First device block     */
 	U32	servparm;		/* Service signal parameter  */
 	U32	cp_recv_mask;		/* Syscons CP receive mask   */

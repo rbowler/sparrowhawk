@@ -594,6 +594,14 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             break;
         }
 
+        /* Test for clear subchannel request */
+        if (dev->scsw.flag2 & SCSW2_FC_CLEAR)
+        {
+            /* Clear the clear pending flag and exit */
+            dev->scsw.flag2 &= SCSW2_AC_CLEAR;
+            break;
+        }
+
         /* Display the CCW */
         if (dev->ccwtrace || dev->ccwstep)
             display_ccw (dev, ccw, addr);
@@ -1366,6 +1374,7 @@ int     cc;                             /* Condition code            */
 /*-------------------------------------------------------------------*/
 void clear_subchan (REGS *regs, DEVBLK *dev)
 {
+    logmsg ("%4.4X: Clear subchannel\n", dev->devnum);
 
     /* Obtain the device lock */
     obtain_lock (&dev->lock);
@@ -1381,13 +1390,41 @@ void clear_subchan (REGS *regs, DEVBLK *dev)
     dev->scsw.flag3 &= ~(SCSW3_AC | SCSW3_SC);
     dev->scsw.flag3 = SCSW3_SC_PRI | SCSW3_SC_PEND;
 
-    /* If the device is busy then set a clear pending condition */
-    if (dev->busy)
-        dev->scsw.flag2 |= SCSW2_AC_CLEAR;
-
     /* Clear any pending interrupt */
     dev->pcipending = 0;
     dev->pending = 0;
+
+    /* If the device is busy then signal the device to clear */
+    if (dev->busy)
+    {
+        /* Set clear pending condition */
+        dev->scsw.flag2 |= SCSW2_AC_CLEAR;
+
+        /* Signal the subchannel to resume if it is suspended */
+        if (dev->scsw.flag3 & SCSW3_AC_SUSP)
+        {
+            dev->scsw.flag2 |= SCSW2_AC_RESUM;
+            signal_condition (&dev->resumecond);
+        }
+
+        /* Raise a clear pending interrupt */
+        dev->pending = 1;
+    }
+    else
+    {
+        /* Clear subchannel and make device interrupt pending */
+        dev->scsw.flag0 = 0;
+        dev->scsw.flag1 = 0;
+        dev->scsw.ccwaddr[0] = 0;
+        dev->scsw.ccwaddr[1] = 0;
+        dev->scsw.ccwaddr[2] = 0;
+        dev->scsw.ccwaddr[3] = 0;
+        dev->scsw.chanstat = 0;
+        dev->scsw.unitstat = 0;
+        dev->scsw.count[0] = 0;
+        dev->scsw.count[1] = 0;
+        dev->pending = 1;
+    }
 
     /* For 3270 device, clear any pending input */
     if (dev->devtype == 0x3270)
@@ -1750,12 +1787,23 @@ DEVBLK *dev;                            /* -> Device control block   */
 /* DEVICE ATTENTION                                                  */
 /* Raises an unsolicited interrupt condition for a specified device. */
 /* Return value is 0 if successful, 1 if device is busy or pending   */
+/* or 3 if subchannel is not valid or not enabled                    */
 /*-------------------------------------------------------------------*/
 int
 device_attention (DEVBLK *dev, BYTE unitstat)
 {
     /* Obtain the device lock */
     obtain_lock (&dev->lock);
+
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+    /* If subchannel not valid and enabled, do not present interrupt */
+    if ((dev->pmcw.flag5 & PMCW5_V) == 0
+        || (dev->pmcw.flag5 & PMCW5_E) == 0)
+    {
+        release_lock (&dev->lock);
+        return 3;
+    }
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
     /* If device is already busy or interrupt pending or
        status pending then do not present interrupt */

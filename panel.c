@@ -955,6 +955,7 @@ int     len;                            /* Number of bytes read      */
 BYTE   *loadparm;                       /* -> IPL parameter (ASCIIZ) */
 BYTE    buf[100];                       /* Message buffer            */
 int     n;                              /* Number of bytes in buffer */
+int     toddrag, intdrag;               /* Drag factors              */
 BYTE    newval[32];                     /* Storage alteration value  */
 BYTE   *devascii;                       /* ASCII text device number  */
 #define MAX_ARGS 10                     /* Max num of devinit args   */
@@ -1001,7 +1002,8 @@ BYTE   *devclass;                       /* -> Device class name      */
             "devlist=list devices\n"
             SYSCONS_CMD
             "f-addr=mark frame unusable, f+addr=mark frame usable\n"
-            "quit/exit=terminate, Esc=alternate panel display\n");
+            "drag [tod,int] = display or set drag factors\n"
+            "quit/exit=terminate, Esc=alternate panel display, ?=Help\n");
         return NULL;
     }
 
@@ -1045,6 +1047,19 @@ BYTE   *devclass;                       /* -> Device class name      */
 
         /* Store status in 512 byte block at absolute location 0 */
         store_status (regs, 0);
+        return NULL;
+    }
+
+    /* drag command - display or set drag factors */
+    if (memcmp(cmd,"drag",4)==0)
+    {
+        toddrag = 0;
+        intdrag = 0;
+        sscanf(cmd+4, "%d,%d", &toddrag, &intdrag);
+        if (toddrag > 0 && toddrag <= 10000) sysblk.toddrag = toddrag;
+        if (intdrag > 0 && intdrag <= 10000) sysblk.intdrag = intdrag;
+        logmsg ("TOD clock drag factor = %d\n", sysblk.toddrag);
+        logmsg ("Interrupt drag factor = %d\n", sysblk.intdrag);
         return NULL;
     }
 
@@ -1295,12 +1310,12 @@ BYTE   *devclass;                       /* -> Device class name      */
         /* Raise attention interrupt for the device */
         rc = device_attention (dev, CSW_ATTN);
 
-        /* Issue error message is device was busy or pending */
-        if (rc != 0)
-        {
-            logmsg ("Device %4.4X busy or interrupt pending\n",
-                    devnum);
-        }
+        logmsg ("Device %4.4X %s\n",
+                devnum,
+                rc == 0 ? "attention request raised" :
+                rc == 1 ? "busy or interrupt pending" :
+                rc == 3 ? "subchannel not enabled" :
+                "attention request rejected");
 
         return NULL;
     } /* end if(i) */

@@ -177,6 +177,8 @@ BYTE   *snumcpu;                        /* -> Number of CPUs         */
 BYTE   *sloadparm;                      /* -> IPL load parameter     */
 BYTE   *ssysepoch;                      /* -> System epoch           */
 BYTE   *stzoffset;                      /* -> System timezone offset */
+BYTE   *stoddrag;                       /* -> TOD clock drag factor  */
+BYTE   *sintdrag;                       /* -> Interrupt drag factor  */
 BYTE    loadparm[8];                    /* Load parameter (EBCDIC)   */
 BYTE    version = 0x00;                 /* CPU version code          */
 U32     serial;                         /* CPU serial number         */
@@ -187,6 +189,8 @@ U16     cnslport;                       /* Console port number       */
 U16     numcpu;                         /* Number of CPUs            */
 S32     sysepoch;                       /* System epoch year         */
 S32     tzoffset;                       /* System timezone offset    */
+int     toddrag;                        /* TOD clock drag factor     */
+int     intdrag;                        /* Interrupt drag factor     */
 BYTE   *sdevnum;                        /* -> Device number string   */
 BYTE   *sdevtype;                       /* -> Device type string     */
 U16     devnum;                         /* Device number             */
@@ -219,6 +223,8 @@ int     subchan;                        /* Subchannel number         */
     memset (loadparm, 0x4B, 8);
     sysepoch = 1900;
     tzoffset = 0;
+    toddrag = 1;
+    intdrag = 100;
 
     /* Read records from the configuration file */
     for (scount = 0; ; scount++)
@@ -247,6 +253,8 @@ int     subchan;                        /* Subchannel number         */
         sloadparm = NULL;
         ssysepoch = NULL;
         stzoffset = NULL;
+        stoddrag = NULL;
+        sintdrag = NULL;
 
         /* Check for old-style CPU statement */
         if (scount == 0 && addargc == 5 && strlen(keyword) == 6
@@ -297,6 +305,14 @@ int     subchan;                        /* Subchannel number         */
             else if (strcasecmp (keyword, "tzoffset") == 0)
             {
                 stzoffset = operand;
+            }
+            else if (strcasecmp (keyword, "toddrag") == 0)
+            {
+                stoddrag = operand;
+            }
+            else if (strcasecmp (keyword, "intdrag") == 0)
+            {
+                sintdrag = operand;
             }
             else
             {
@@ -450,6 +466,34 @@ int     subchan;                        /* Subchannel number         */
             }
         }
 
+        /* Parse TOD clock drag factor operand */
+        if (stoddrag != NULL)
+        {
+            if (sscanf(stoddrag, "%u%c", &toddrag, &c) != 1
+                || toddrag < 1 || toddrag > 10000)
+            {
+                fprintf (stderr,
+                        "HHC016I Error in %s line %d: "
+                        "Invalid TOD clock drag factor %s\n",
+                        fname, stmt, stoddrag);
+                exit(1);
+            }
+        }
+
+        /* Parse interrupt drag factor operand */
+        if (sintdrag != NULL)
+        {
+            if (sscanf(sintdrag, "%u%c", &intdrag, &c) != 1
+                || intdrag < 1 || intdrag > 10000)
+            {
+                fprintf (stderr,
+                        "HHC017I Error in %s line %d: "
+                        "Invalid interrupt drag factor %s\n",
+                        fname, stmt, sintdrag);
+                exit(1);
+            }
+        }
+
     } /* end for(scount) */
 
     /* Clear the system configuration block */
@@ -575,6 +619,10 @@ int     subchan;                        /* Subchannel number         */
 
     /* Convert the TOD clock offset to microseconds */
     sysblk.todoffset *= 1000000;
+
+    /* Set the system drag factors */
+    sysblk.toddrag = toddrag;
+    sysblk.intdrag = intdrag;
 
     /* Build the device configuration blocks */
     dvpp = &(sysblk.firstdev);
