@@ -19,6 +19,8 @@
 static BYTE eighthexFF[] =              /* End of track marker       */
         {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
+static int verbose = 1;                        /* Be chatty about reads etc. */
+
 /*-------------------------------------------------------------------*/
 /* ASCII to EBCDIC translate tables                                  */
 /*-------------------------------------------------------------------*/
@@ -223,10 +225,13 @@ CKDDASD_TRKHDR *trkhdr;                 /* -> Track header           */
     rc = rewrite_track (cif);
     if (rc < 0) return -1;
 
-    /* Issue progress message */
-    fprintf (stdout,
-            "Reading cyl %d head %d\n",
-            cyl, head);
+    if (verbose)
+    {
+       /* Issue progress message */
+       fprintf (stdout,
+               "Reading cyl %d head %d\n",
+               cyl, head);
+    }
 
     /* Seek to start of track header */
     seekpos = CKDDASD_DEVHDR_SIZE
@@ -287,10 +292,13 @@ off_t           seekpos;                /* Seek position for lseek   */
     if (cif->trkmodif == 0)
         return 0;
 
-    /* Issue progress message */
-    fprintf (stdout,
-            "Writing cyl %d head %d\n",
-            cif->curcyl, cif->curhead);
+    if (verbose)
+    {
+       /* Issue progress message */
+       fprintf (stdout,
+               "Writing cyl %d head %d\n",
+               cif->curcyl, cif->curhead);
+    }
 
     /* Seek to start of track header */
     seekpos = CKDDASD_DEVHDR_SIZE
@@ -427,9 +435,12 @@ int             dl;                     /* Data length               */
     ecyl = (extent[cext].xtecyl[0] << 8) | extent[cext].xtecyl[1];
     ehead = (extent[cext].xtetrk[0] << 8) | extent[cext].xtetrk[1];
 
-    fprintf (stdout,
-            "Searching extent %d begin (%d,%d) end (%d,%d)\n",
-            cext, ccyl, chead, ecyl, ehead);
+    if (verbose)
+    {
+       fprintf (stdout,
+               "Searching extent %d begin (%d,%d) end (%d,%d)\n",
+               cext, ccyl, chead, ecyl, ehead);
+    }
 
     while (1)
     {
@@ -496,9 +507,12 @@ int             dl;                     /* Data length               */
         ecyl = (extent[cext].xtecyl[0] << 8) | extent[cext].xtecyl[1];
         ehead = (extent[cext].xtetrk[0] << 8) | extent[cext].xtetrk[1];
 
-        fprintf (stdout,
-                "Searching extent %d begin (%d,%d) end (%d,%d)\n",
-                cext, ccyl, chead, ecyl, ehead);
+       if (verbose)
+       {
+           fprintf (stdout,
+                   "Searching extent %d begin (%d,%d) end (%d,%d)\n",
+                   cext, ccyl, chead, ecyl, ehead);
+       }
 
     } /* end while */
 
@@ -633,9 +647,12 @@ CIFBLK         *cif;                    /* CKD image file descriptor */
                 | ((U32)(devhdr.trksize[2]) << 16)
                 | ((U32)(devhdr.trksize[1]) << 8)
                 | (U32)(devhdr.trksize[0]);
-    fprintf (stderr,
-            "%s heads=%d trklen=%d\n",
-            cif->fname, cif->heads, cif->trksz);
+    if (verbose)
+    {
+       fprintf (stderr,
+               "%s heads=%d trklen=%d\n",
+               cif->fname, cif->heads, cif->trksz);
+    }
 
     /* Obtain the track buffer */
     cif->trkbuf = malloc (cif->trksz);
@@ -728,9 +745,12 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
     head = (vol1data[13] << 8) | vol1data[14];
     rec = vol1data[15];
 
-    fprintf (stdout,
-            "VOLSER=%s VTOC=%4.4X%4.4X%2.2X\n",
-             volser, cyl, head, rec);
+    if (verbose)
+    {
+       fprintf (stdout,
+               "VOLSER=%s VTOC=%4.4X%4.4X%2.2X\n",
+                volser, cyl, head, rec);
+    }
 
     /* Read the format 4 DSCB */
     rc = read_block (cif, cyl, head, rec,
@@ -742,13 +762,16 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
         return -1;
     }
 
-    fprintf (stdout,
-            "VTOC start %2.2X%2.2X%2.2X%2.2X "
-            "end %2.2X%2.2X%2.2X%2.2X\n",
-            f4dscb->ds4vtoce.xtbcyl[0], f4dscb->ds4vtoce.xtbcyl[1],
-            f4dscb->ds4vtoce.xtbtrk[0], f4dscb->ds4vtoce.xtbtrk[1],
-            f4dscb->ds4vtoce.xtecyl[0], f4dscb->ds4vtoce.xtecyl[1],
-            f4dscb->ds4vtoce.xtetrk[0], f4dscb->ds4vtoce.xtetrk[1]);
+    if (verbose)
+    {
+       fprintf (stdout,
+               "VTOC start %2.2X%2.2X%2.2X%2.2X "
+               "end %2.2X%2.2X%2.2X%2.2X\n",
+               f4dscb->ds4vtoce.xtbcyl[0], f4dscb->ds4vtoce.xtbcyl[1],
+               f4dscb->ds4vtoce.xtbtrk[0], f4dscb->ds4vtoce.xtbtrk[1],
+               f4dscb->ds4vtoce.xtecyl[0], f4dscb->ds4vtoce.xtecyl[1],
+               f4dscb->ds4vtoce.xtetrk[0], f4dscb->ds4vtoce.xtetrk[1]);
+    }
 
     /* Search for the requested dataset in the VTOC */
     rc = search_key_equal (cif, dsname, sizeof(dsname),
@@ -763,9 +786,12 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
         return -1;
     }
 
-    fprintf (stdout,
-            "DSNAME=%s F1DSCB CCHHR=%4.4X%4.4X%2.2X\n",
-            dsnama, cyl, head, rec);
+    if (verbose)
+    {
+       fprintf (stdout,
+               "DSNAME=%s F1DSCB CCHHR=%4.4X%4.4X%2.2X\n",
+               dsnama, cyl, head, rec);
+    }
 
     /* Read the format 1 DSCB */
     rc = read_block (cif, cyl, head, rec,
@@ -1032,3 +1058,12 @@ int             fl1, fl2, int1, int2;   /* 3380/3390 calculations    */
     return 0;
 } /* end function capacity_calc */
 
+int get_verbose_util(void)
+{
+    return verbose;
+}
+
+void set_verbose_util(int v)
+{
+    verbose = v;
+}

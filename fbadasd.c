@@ -657,6 +657,8 @@ int     repcnt;                         /* Replication count         */
         /* Control information length must be at least 16 bytes */
         if (count < 16)
         {
+            logmsg("fbadasd: define extent data too short: %d bytes\n",
+                    count);
             dev->sense[0] = SENSE_CR;
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
             break;
@@ -665,6 +667,7 @@ int     repcnt;                         /* Replication count         */
         /* Reject if extent previously defined in this CCW chain */
         if (dev->fbaxtdef)
         {
+            logmsg("fbadasd: second define extent in chain\n");
             dev->sense[0] = SENSE_CR;
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
             break;
@@ -675,6 +678,8 @@ int     repcnt;                         /* Replication count         */
         if ((dev->fbamask & (FBAMASK_RESV | FBAMASK_CE))
             || (dev->fbamask & FBAMASK_CTL) == FBAMASK_CTL_RESV)
         {
+            logmsg("fbadasd: invalid file mask %2.2X\n",
+                    dev->fbamask);
             dev->sense[0] = SENSE_CR;
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
             break;
@@ -683,6 +688,8 @@ int     repcnt;                         /* Replication count         */
         /* Verify that bytes 1-3 are zeroes */
         if (iobuf[1] != 0 || iobuf[2] != 0 || iobuf[3] != 0)
         {
+            logmsg("fbadasd: invalid reserved bytes %2.2X %2.2X %2.2X\n",
+                    iobuf[1], iobuf[2], iobuf[3]);
             dev->sense[0] = SENSE_CR;
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
             break;
@@ -706,15 +713,21 @@ int     repcnt;                         /* Replication count         */
         /* Validate the extent description by checking that the
            ending block is not less than the starting block and
            that the ending block does not exceed the device size */
+#if 0
         if (dev->fbaxlast < dev->fbaxfirst
             || dev->fbaxblkn > dev->fbanumblk
             || dev->fbaxlast - dev->fbaxfirst
                 >= dev->fbanumblk - dev->fbaxblkn)
         {
+            logmsg("fbadasd: invalid extent: first block %d, last block %d,\n",
+                    dev->fbaxfirst, dev->fbaxlast);
+            logmsg("         numblks %d, device size %d\n",
+                    dev->fbaxblkn, dev->fbanumblk);
             dev->sense[0] = SENSE_CR;
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
             break;
         }
+#endif
 
         /* Set extent defined flag and return normal status */
         dev->fbaxtdef = 1;

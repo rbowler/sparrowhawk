@@ -11,7 +11,7 @@ Hercules: Installation and Operation</TITLE>
 <h2>Installation Procedure</h2>
 <ol>
 <li>Download the distribution file
-<a href="hercules/hercules-1.61.tar.gz">hercules-1.61.tar.gz</a>
+<a href="hercules-1.63.tar.gz">hercules-1.63.tar.gz</a>
 <p>
 <em>Notes:</em>
 <ol>
@@ -26,9 +26,11 @@ Hercules: Installation and Operation</TITLE>
 <li>Use these commands to unzip the distribution file:
 <pre>mkdir hercules
 cd hercules
-tar xvzf ../hercules-1.61.tar.gz</pre>
+tar xvzf ../hercules-1.63.tar.gz</pre>
 <li>Build the executable files:
 <br><code>make</code>
+<li>Install the programs: as root,
+<br><code>make install</code>
 </ol>
 
 <em>Important:</em>
@@ -83,6 +85,7 @@ Now you can enter an ipl command from the control panel.
 <h4>Panel commands</h4>
 <p>
 <pre>
+cpu <em>n</em>   Set target CPU for subsequent commands
 psw     Display program status word
 gpr     Display general-purpose registers
 fpr     Display floating-point registers
@@ -140,6 +143,9 @@ devinit <em>xxxx</em> [ <em>args</em> ]  Reinitialize device xxxx
 !<em>text</em>   Enter an SCP priority message via the HMC system console
 
 toddrag [<em>n</em>]  Display or set TOD clock drag factor
+
+pgmtrace <em>n</em>   Turn on program interrupt tracing for interrupt code n
+pgmtrace -<em>n</em>  Turn off program interrupt tracing for interrupt code n
 </pre>
 
 <p>
@@ -173,6 +179,6 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 31 May 2000
+<p>Last updated 18 June 2000
 </BODY>
 </HTML>

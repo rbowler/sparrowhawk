@@ -21,6 +21,9 @@
 /*      Light optimization on critical path by Valery Pogonchenko    */
 /*      STCRW and CSP instructions by Jan Jaeger                     */
 /*      OSTAILOR parameter by Jay Maynard                            */
+/*      Conversion to function calls per instruction by Mike Noel    */
+/*      CPU timer and clock comparator interrupt improvements by     */
+/*          Jan Jaeger, after a suggestion by Willem Koynenberg      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -350,22 +353,7 @@ REGS   *realregs;                       /* True regs structure       */
 
     /* Trace the program check */
     if (sysblk.insttrace || sysblk.inststep
-        || (code != PGM_PAGE_TRANSLATION_EXCEPTION
-            && code != PGM_SEGMENT_TRANSLATION_EXCEPTION
-            && (!((sysblk.ostailor == OS_LINUX)
-                && (code == PGM_PROTECTION_EXCEPTION)))
-            && (!((sysblk.ostailor == OS_LINUX)
-                && (!(code == PGM_OPERATION_EXCEPTION
-                && regs->inst[0] == 0xB3))))
-            && (!((sysblk.ostailor == OS_OS390)
-                && ((code == PGM_ASTE_VALIDITY_EXCEPTION)
-                || (code == PGM_STACK_OPERATION_EXCEPTION))))
-            && (!((sysblk.ostailor == OS_VM)
-                && (code == PGM_PRIVILEGED_OPERATION_EXCEPTION)))
-            && code != PGM_SPACE_SWITCH_EVENT
-            && code != PGM_STACK_FULL_EXCEPTION
-            && code != PGM_TRACE_TABLE_EXCEPTION
-            && code != PGM_MONITOR_EVENT))
+        || sysblk.pgminttr & ((U64)1 << ((code - 1) & 0x3F)) )
     {
         logmsg ("CPU%4.4X: Program check CODE=%4.4X ILC=%d ",
                 regs->cpuad, code, regs->psw.ilc);
@@ -476,106 +464,30 @@ PSA    *psa;                            /* -> Prefixed storage area  */
     return 0;
 } /* end function psw_restart */
 
+
 /*-------------------------------------------------------------------*/
-/* Execute an instruction                                            */
+/* define instruction routine table                                  */
 /*-------------------------------------------------------------------*/
-static void execute_instruction (BYTE inst[], int execflag, REGS *regs)
+typedef void (*InstrPtr) ();
+static InstrPtr OpCode_Table[256];
+
+
+void OpCode_0x01 (BYTE inst[], int execflag, REGS *regs)
+    /*---------------------------------------------------------------*/
+    /* Extended instructions (opcode 01xx)                           */
+    /*---------------------------------------------------------------*/
 {
-BYTE    opcode;                         /* Instruction byte 0        */
+int     ilc=2;                          /* Instruction length code   */
 BYTE    ibyte;                          /* Instruction byte 1        */
-int     r1, r2, b1 = 0, b2 = 0;         /* Values of R fields        */
-U32     newia;                          /* New instruction address   */
-int     ilc;                            /* Instruction length code   */
-int     m;                              /* Condition code mask       */
-U32     n, n1, n2;                      /* 32-bit operand values     */
-int     private;                        /* 1=Private address space   */
-int     protect;                        /* 1=ALE or page protection  */
-int     stid;                           /* Segment table indication  */
-int     cc;                             /* Condition code            */
-BYTE    obyte, sbyte, dbyte;            /* Byte work areas           */
-DWORD   dword;                          /* Doubleword work area      */
-U64     dreg;                           /* Double register work area */
-int     d, h, i, j;                     /* Integer work areas        */
-int     divide_overflow;                /* 1=divide overflow         */
-int     effective_addr = 0;             /* Effective address         */
-int     effective_addr2 = 0;            /* Effective address         */
-PSA    *psa;                            /* -> prefixed storage area  */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
 int     rc;                             /* Return code               */
-DEVBLK *dev;                            /* -> device block for SIO   */
-U32     ccwaddr;                        /* CCW address for start I/O */
-U32     ioparm;                         /* I/O interruption parameter*/
-U16     xcode;                          /* Exception code            */
-#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
-U16     h1, h2, h3;                     /* 16-bit operand values     */
-#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
-#ifdef FEATURE_DUAL_ADDRESS_SPACE
-U32     asteo;                          /* Real address of ASTE      */
-U32     aste[16];                       /* ASN second table entry    */
-U16     ax;                             /* Authorization index       */
-U16     pkm;                            /* PSW key mask              */
-U16     pasn;                           /* Primary ASN               */
-U16     sasn;                           /* Secondary ASN             */
-#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
-#ifdef FEATURE_S370_CHANNEL
-BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
-#endif /*FEATURE_S370_CHANNEL*/
-#ifdef FEATURE_CHANNEL_SUBSYSTEM
-U32     ioid;                           /* I/O interruption address  */
-PMCW    pmcw;                           /* Path management ctl word  */
-ORB     orb;                            /* Operation request block   */
-SCHIB   schib;                          /* Subchannel information blk*/
-IRB     irb;                            /* Interruption response blk */
-#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
-BYTE    cwork1[256], cwork2[256];       /* Character work areas      */
-#ifdef MODULE_TRACE
-static BYTE module[8];                  /* Module name               */
-#endif /*MODULE_TRACE*/
 
     /* Extract the opcode and R1/R2/I fields */
-    opcode = inst[0];
+    /* opcode = inst[0]; */
     ibyte = inst[1];
     r1 = ibyte >> 4;
     r2 = ibyte & 0x0F;
-#define r3 r2 /* alternate name for second register number */
-#define x2 r2 /* alternate name for second register number */
-
-    /* Determine the instruction length */
-    ilc = (opcode < 0x40) ? 2 : (opcode < 0xC0) ? 4 : 6;
-
-    /* For 4 and 6 byte instructions, calculate effective addresses */
-    if (ilc > 2)
-    {
-        /* Calculate the first effective address */
-        b1 = inst[2] >> 4;
-        effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
-        if (b1 != 0)
-        {
-            effective_addr += regs->gpr[b1];
-            effective_addr &= ADDRESS_MAXWRAP(regs);
-        }
-
-        /* Apply indexing for RX instructions (note: indexing for
-           the LRA instruction is handled within the case statement,
-           to save one comparison here on the critical path) */
-        if (opcode <= 0x7F && x2 != 0)
-        {
-            effective_addr += regs->gpr[x2];
-            effective_addr &= ADDRESS_MAXWRAP(regs);
-        }
-
-        /* Calculate the 2nd effective address for SS instructions */
-        if (ilc > 4)
-        {
-            b2 = inst[4] >> 4;
-            effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
-            if (b2 != 0)
-            {
-                effective_addr2 += regs->gpr[b2];
-                effective_addr2 &= ADDRESS_MAXWRAP(regs);
-            }
-        }
-
-    } /* end if(ilc>2) */
 
     /* If this instruction was not the subject of an execute,
        update the PSW instruction length and address */
@@ -585,13 +497,6 @@ static BYTE module[8];                  /* Module name               */
         regs->psw.ia += ilc;
         regs->psw.ia &= ADDRESS_MAXWRAP(regs);
     }
-
-    switch (opcode) {
-
-    case 0x01:
-    /*---------------------------------------------------------------*/
-    /* Extended instructions (opcode 01xx)                           */
-    /*---------------------------------------------------------------*/
 
         /* The immediate byte determines the instruction opcode */
         switch ( ibyte ) {
@@ -663,12 +568,34 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
 
         } /* end switch(ibyte) */
-        break;
 
-    case 0x04:
+    terminate:
+}
+
+void OpCode_0x04 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SPM      Set Program Mask                                [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Set condition code from bits 2-3 of R1 register */
         regs->psw.cc = ( regs->gpr[r1] & 0x30000000 ) >> 28;
@@ -678,13 +605,33 @@ static BYTE module[8];                  /* Module name               */
         regs->psw.domask = ( regs->gpr[r1] & 0x04000000 ) >> 26;
         regs->psw.eumask = ( regs->gpr[r1] & 0x02000000 ) >> 25;
         regs->psw.sgmask = ( regs->gpr[r1] & 0x01000000 ) >> 24;
+}
 
-        break;
-
-    case 0x05:
+void OpCode_0x05 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* BALR     Branch and Link Register                        [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+U32     newia;                          /* New instruction address   */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Compute the branch address from the R2 operand */
         newia = regs->gpr[r2];
@@ -713,12 +660,40 @@ static BYTE module[8];                  /* Module name               */
             goto setia;
         } /* end if(r2!=0) */
 
-        break;
+        return;
 
-    case 0x06:
+    setia:
+    /*---------------------------------------------------------------*/
+    /* Set PSW instruction address from newia                        */
+    /*---------------------------------------------------------------*/
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+}
+
+void OpCode_0x06 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* BCTR     Branch on Count Register                        [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+U32     newia;                          /* New instruction address   */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Compute the branch address from the R2 operand */
         newia = regs->gpr[r2];
@@ -728,12 +703,41 @@ static BYTE module[8];                  /* Module name               */
         if ( --(regs->gpr[r1]) && r2 != 0 )
             goto setia;
 
-        break;
+        return;
 
-    case 0x07:
+    setia:
+    /*---------------------------------------------------------------*/
+    /* Set PSW instruction address from newia                        */
+    /*---------------------------------------------------------------*/
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+}
+
+void OpCode_0x07 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* BCR      Branch on Condition Register                    [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+U32     newia;                          /* New instruction address   */
+int     m;                              /* Condition code mask       */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Compute the branch address from the R2 operand */
         newia = regs->gpr[r2];
@@ -755,13 +759,61 @@ static BYTE module[8];                  /* Module name               */
             perform_chkpt_sync (regs);
         }
 
-        break;
+        return;
+
+    setia:
+    /*---------------------------------------------------------------*/
+    /* Set PSW instruction address from newia                        */
+    /*---------------------------------------------------------------*/
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+}
 
 #ifdef FEATURE_BASIC_STORAGE_KEYS
-    case 0x08:
+void OpCode_0x08 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SSK      Set Storage Key                                 [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
+U16     h1;                             /* 16-bit operand values     */
+U16     h2;                             /* 16-bit operand values     */
+U16     h3;                             /* 16-bit operand values     */
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
+U32     asteo;                          /* Real address of ASTE      */
+U32     aste[16];                       /* ASN second table entry    */
+U16     ax;                             /* Authorization index       */
+U16     pkm;                            /* PSW key mask              */
+U16     pasn;                           /* Primary ASN               */
+U16     sasn;                           /* Secondary ASN             */
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+U32     ioid;                           /* I/O interruption address  */
+PMCW    pmcw;                           /* Path management ctl word  */
+ORB     orb;                            /* Operation request block   */
+SCHIB   schib;                          /* Subchannel information blk*/
+IRB     irb;                            /* Interruption response blk */
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if in problem state */
         if ( regs->psw.prob )
@@ -797,12 +849,54 @@ static BYTE module[8];                  /* Module name               */
 //      /*debug*/logmsg("SSK storage block %8.8X key %2.2X\n",
 //      /*debug*/       regs->gpr[r2], regs->gpr[r1] & 0xFE);
 
-        break;
+    terminate:
+}
 
-    case 0x09:
+void OpCode_0x09 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* ISK      Insert Storage Key                              [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
+U16     h1;                             /* 16-bit operand values     */
+U16     h2;                             /* 16-bit operand values     */
+U16     h3;                             /* 16-bit operand values     */
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
+U32     asteo;                          /* Real address of ASTE      */
+U32     aste[16];                       /* ASN second table entry    */
+U16     ax;                             /* Authorization index       */
+U16     pkm;                            /* PSW key mask              */
+U16     pasn;                           /* Primary ASN               */
+U16     sasn;                           /* Secondary ASN             */
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+U32     ioid;                           /* I/O interruption address  */
+PMCW    pmcw;                           /* Path management ctl word  */
+ORB     orb;                            /* Operation request block   */
+SCHIB   schib;                          /* Subchannel information blk*/
+IRB     irb;                            /* Interruption response blk */
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if in problem state */
         if ( regs->psw.prob )
@@ -842,13 +936,36 @@ static BYTE module[8];                  /* Module name               */
 //      /*debug*/logmsg("ISK storage block %8.8X key %2.2X\n",
 //                      regs->gpr[r2], regs->gpr[r1] & 0xFE);
 
-        break;
+    terminate:
+}
 #endif /*FEATURE_BASIC_STORAGE_KEYS*/
 
-    case 0x0A:
+void OpCode_0x0A (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SVC      Supervisor Call                                 [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+PSA    *psa;                            /* -> prefixed storage area  */
+int     rc;                             /* Return code               */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Set the main storage reference and change bits */
         STORAGE_KEY(regs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
@@ -942,13 +1059,38 @@ static BYTE module[8];                  /* Module name               */
         perform_serialization (regs);
         perform_chkpt_sync (regs);
 
-        break;
+    terminate:
+}
 
 #ifdef FEATURE_BIMODAL_ADDRESSING
-    case 0x0B:
+void OpCode_0x0B (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* BSM      Branch and Set Mode                             [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+U32     newia;                          /* New instruction address   */
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Compute the branch address from the R2 operand */
         newia = regs->gpr[r2];
@@ -975,13 +1117,36 @@ static BYTE module[8];                  /* Module name               */
                 regs->psw.ia = newia & 0x00FFFFFF;
             }
         }
+}
 
-        break;
-
-    case 0x0C:
+void OpCode_0x0C (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* BASSM    Branch and Save and Set Mode                    [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+U32     newia;                          /* New instruction address   */
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Compute the branch address from the R2 operand */
         newia = regs->gpr[r2];
@@ -1013,14 +1178,34 @@ static BYTE module[8];                  /* Module name               */
                 regs->psw.ia = newia & 0x00FFFFFF;
             }
         }
-
-        break;
+}
 #endif /*FEATURE_BIMODAL_ADDRESSING*/
 
-    case 0x0D:
+void OpCode_0x0D (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* BASR     Branch and Save Register                        [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+U32     newia;                          /* New instruction address   */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Compute the branch address from the R2 operand */
         newia = regs->gpr[r2];
@@ -1044,32 +1229,97 @@ static BYTE module[8];                  /* Module name               */
             goto setia;
         } /* end if(r2!=0) */
 
-        break;
+        return;
 
-    case 0x0E:
+    setia:
+    /*---------------------------------------------------------------*/
+    /* Set PSW instruction address from newia                        */
+    /*---------------------------------------------------------------*/
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+}
+
+void OpCode_0x0E (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MVCL     Move Long                                       [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Perform move long and set condition code */
         regs->psw.cc = move_long (r1, r2, regs);
+}
 
-        break;
-
-    case 0x0F:
+void OpCode_0x0F (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CLCL     Compare Logical Long                            [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Perform compare long and set condition code */
         regs->psw.cc = compare_long (r1, r2, regs);
+}
 
-        break;
-
-    case 0x10:
+void OpCode_0x10 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LPR      Load Positive Register                          [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Condition code 3 and program check if overflow */
         if ( regs->gpr[r2] == 0x80000000 )
@@ -1081,7 +1331,7 @@ static BYTE module[8];                  /* Module name               */
                 program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
                 goto terminate;
             }
-            break;
+            return;
         }
 
         /* Load positive value of second operand and set cc */
@@ -1091,12 +1341,33 @@ static BYTE module[8];                  /* Module name               */
 
         regs->psw.cc = (S32)regs->gpr[r1] == 0 ? 0 : 2;
 
-        break;
+    terminate:
+}
 
-    case 0x11:
+void OpCode_0x11 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LNR      Load Negative Register                          [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load negative value of second operand and set cc */
         (S32)regs->gpr[r1] = (S32)regs->gpr[r2] > 0 ?
@@ -1104,26 +1375,64 @@ static BYTE module[8];                  /* Module name               */
                                 (S32)regs->gpr[r2];
 
         regs->psw.cc = (S32)regs->gpr[r1] == 0 ? 0 : 1;
+}
 
-        break;
-
-    case 0x12:
+void OpCode_0x12 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LTR      Load and Test Register                          [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Copy second operand and set condition code */
         regs->gpr[r1] = regs->gpr[r2];
 
         regs->psw.cc = (S32)regs->gpr[r1] < 0 ? 1 :
                       (S32)regs->gpr[r1] > 0 ? 2 : 0;
+}
 
-        break;
-
-    case 0x13:
+void OpCode_0x13 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LCR      Load Complement Register                        [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Condition code 3 and program check if overflow */
         if ( regs->gpr[r2] == 0x80000000 )
@@ -1135,7 +1444,7 @@ static BYTE module[8];                  /* Module name               */
                 program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
                 goto terminate;
             }
-            break;
+            return;
         }
 
         /* Load complement of second operand and set condition code */
@@ -1144,75 +1453,210 @@ static BYTE module[8];                  /* Module name               */
         regs->psw.cc = (S32)regs->gpr[r1] < 0 ? 1 :
                       (S32)regs->gpr[r1] > 0 ? 2 : 0;
 
-        break;
+    terminate:
+}
 
-    case 0x14:
+void OpCode_0x14 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* NR       And Register                                    [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* AND second operand with first and set condition code */
         regs->psw.cc = ( regs->gpr[r1] &= regs->gpr[r2] ) ? 1 : 0;
+}
 
-        break;
-
-    case 0x15:
+void OpCode_0x15 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CLR      Compare Logical Register                        [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Compare unsigned operands and set condition code */
         regs->psw.cc = regs->gpr[r1] < regs->gpr[r2] ? 1 :
                       regs->gpr[r1] > regs->gpr[r2] ? 2 : 0;
+}
 
-        break;
-
-    case 0x16:
+void OpCode_0x16 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* OR       Or Register                                     [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* OR second operand with first and set condition code */
         regs->psw.cc = ( regs->gpr[r1] |= regs->gpr[r2] ) ? 1 : 0;
+}
 
-        break;
-
-    case 0x17:
+void OpCode_0x17 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* XR       Exclusive Or Register                           [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* XOR second operand with first and set condition code */
         regs->psw.cc = ( regs->gpr[r1] ^= regs->gpr[r2] ) ? 1 : 0;
+}
 
-        break;
-
-    case 0x18:
+void OpCode_0x18 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LR       Load Register                                   [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
 
-        /* Copy second operand to first operand */
-        regs->gpr[r1] = regs->gpr[r2];
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
 
-        break;
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
-    case 0x19:
+    /* Copy second operand to first operand */
+    regs->gpr[r1] = regs->gpr[r2];
+}
+
+void OpCode_0x19 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CR       Compare Register                                [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
 
-        /* Compare signed operands and set condition code */
-        regs->psw.cc =
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
+
+    /* Compare signed operands and set condition code */
+    regs->psw.cc =
                 (S32)regs->gpr[r1] < (S32)regs->gpr[r2] ? 1 :
                 (S32)regs->gpr[r1] > (S32)regs->gpr[r2] ? 2 : 0;
+}
 
-        break;
-
-    case 0x1A:
+void OpCode_0x1A (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* AR       Add Register                                    [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Add signed operands and set condition code */
         regs->psw.cc =
@@ -1227,12 +1671,33 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        break;
+    terminate:
+}
 
-    case 0x1B:
+void OpCode_0x1B (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SR       Subtract Register                               [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Subtract signed operands and set condition code */
         regs->psw.cc =
@@ -1247,12 +1712,33 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        break;
+    terminate:
+}
 
-    case 0x1C:
+void OpCode_0x1C (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MR       Multiply Register                               [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is odd */
         if ( r1 & 1 )
@@ -1265,13 +1751,34 @@ static BYTE module[8];                  /* Module name               */
         mul_signed (&(regs->gpr[r1]),&(regs->gpr[r1+1]),
                         regs->gpr[r1+1],
                         regs->gpr[r2]);
+    terminate:
+}
 
-        break;
-
-    case 0x1D:
+void OpCode_0x1D (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* DR       Divide Register                                 [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     divide_overflow;                /* 1=divide overflow         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is odd */
         if ( r1 & 1 )
@@ -1293,40 +1800,98 @@ static BYTE module[8];                  /* Module name               */
             program_check (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
             goto terminate;
         }
+    terminate:
+}
 
-        break;
-
-    case 0x1E:
+void OpCode_0x1E (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* ALR      Add Logical Register                            [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Add signed operands and set condition code */
         regs->psw.cc =
                 add_logical (&(regs->gpr[r1]),
                         regs->gpr[r1],
                         regs->gpr[r2]);
+}
 
-        break;
-
-    case 0x1F:
+void OpCode_0x1F (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SLR      Subtract Logical Register                       [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Subtract unsigned operands and set condition code */
         regs->psw.cc =
                 sub_logical (&(regs->gpr[r1]),
                         regs->gpr[r1],
                         regs->gpr[r2]);
-
-        break;
+}
 
 #ifdef FEATURE_HEXADECIMAL_FLOATING_POINT
-    case 0x20:
+void OpCode_0x20 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LPDR     Load Positive Floating Point Long Register      [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1342,12 +1907,33 @@ static BYTE module[8];                  /* Module name               */
         regs->psw.cc =
             ((regs->fpr[r1] & 0x00FFFFFF) || regs->fpr[r1+1]) ? 2 : 0;
 
-        break;
+    terminate:
+}
 
-    case 0x21:
+void OpCode_0x21 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LNDR     Load Negative Floating Point Long Register      [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1363,12 +1949,33 @@ static BYTE module[8];                  /* Module name               */
         regs->psw.cc =
             ((regs->fpr[r1] & 0x00FFFFFF) || regs->fpr[r1+1]) ? 1 : 0;
 
-        break;
+    terminate:
+}
 
-    case 0x22:
+void OpCode_0x22 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LTDR     Load and Test Floating Point Long Register      [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1386,12 +1993,33 @@ static BYTE module[8];                  /* Module name               */
         } else
             regs->psw.cc = 0;
 
-        break;
+    terminate:
+}
 
-    case 0x23:
+void OpCode_0x23 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LCDR     Load Complement Floating Point Long Register    [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1409,12 +2037,33 @@ static BYTE module[8];                  /* Module name               */
         } else
             regs->psw.cc = 0;
 
-        break;
+    terminate:
+}
 
-    case 0x24:
+void OpCode_0x24 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* HDR      Halve Floating Point Long Register              [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1424,12 +2073,33 @@ static BYTE module[8];                  /* Module name               */
 
         halve_float_long_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x25:
+void OpCode_0x25 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LRDR     Load Rounded Floating Point Long Register       [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         /* or if R2 is not 0 or 4 */
@@ -1440,12 +2110,33 @@ static BYTE module[8];                  /* Module name               */
 
         round_float_long_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x26:
+void OpCode_0x26 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MXR      Multiply Floating Point Extended Register       [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0 or 4 */
         if (( r1 & 11) || (r2 & 11)) {
@@ -1455,12 +2146,33 @@ static BYTE module[8];                  /* Module name               */
 
         multiply_float_ext_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x27:
+void OpCode_0x27 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MXDR     Multiply Floating Point Long to Extended Reg.   [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0 or 4 */
         /* or if R2 is not 0, 2, 4, or 6 */
@@ -1471,12 +2183,33 @@ static BYTE module[8];                  /* Module name               */
 
         multiply_float_long_to_ext_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x28:
+void OpCode_0x28 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LDR      Load Floating Point Long Register               [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1488,12 +2221,33 @@ static BYTE module[8];                  /* Module name               */
         regs->fpr[r1] = regs->fpr[r2];
         regs->fpr[r1+1] = regs->fpr[r2+1];
 
-        break;
+    terminate:
+}
 
-    case 0x29:
+void OpCode_0x29 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CDR      Compare Floating Point Long Register            [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1503,12 +2257,33 @@ static BYTE module[8];                  /* Module name               */
 
         compare_float_long_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x2A:
+void OpCode_0x2A (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* ADR      Add Floating Point Long Register                [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1518,12 +2293,33 @@ static BYTE module[8];                  /* Module name               */
 
         add_float_long_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x2B:
+void OpCode_0x2B (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SDR      Subtract Floating Point Long Register           [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1533,12 +2329,33 @@ static BYTE module[8];                  /* Module name               */
 
         subtract_float_long_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x2C:
+void OpCode_0x2C (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MDR      Multiply Floating Point Long Register           [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1548,12 +2365,33 @@ static BYTE module[8];                  /* Module name               */
 
         multiply_float_long_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x2D:
+void OpCode_0x2D (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* DDR      Divide Floating Point Long Register             [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1563,12 +2401,33 @@ static BYTE module[8];                  /* Module name               */
 
         divide_float_long_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x2E:
+void OpCode_0x2E (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* AWR      Add Unnormalized Floating Point Long Register   [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1578,12 +2437,33 @@ static BYTE module[8];                  /* Module name               */
 
         add_unnormal_float_long_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x2F:
+void OpCode_0x2F (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SWR      Subtract Unnormalized Floating Point Long Reg.  [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1593,12 +2473,33 @@ static BYTE module[8];                  /* Module name               */
 
         subtract_unnormal_float_long_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x30:
+void OpCode_0x30 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LPER     Load Positive Floating Point Short Register     [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1612,12 +2513,33 @@ static BYTE module[8];                  /* Module name               */
         /* Set condition code */
         regs->psw.cc = (regs->fpr[r1] & 0x00FFFFFF) ? 2 : 0;
 
-        break;
+    terminate:
+}
 
-    case 0x31:
+void OpCode_0x31 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LNER     Load Negative Floating Point Short Register     [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1631,12 +2553,33 @@ static BYTE module[8];                  /* Module name               */
         /* Set condition code */
         regs->psw.cc = (regs->fpr[r1] & 0x00FFFFFF) ? 1 : 0;
 
-        break;
+    terminate:
+}
 
-    case 0x32:
+void OpCode_0x32 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LTER     Load and Test Floating Point Short Register     [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1653,12 +2596,33 @@ static BYTE module[8];                  /* Module name               */
         } else
             regs->psw.cc = 0;
 
-        break;
+    terminate:
+}
 
-    case 0x33:
+void OpCode_0x33 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LCER     Load Complement Floating Point Short Register   [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1675,12 +2639,33 @@ static BYTE module[8];                  /* Module name               */
         } else
             regs->psw.cc = 0;
 
-        break;
+    terminate:
+}
 
-    case 0x34:
+void OpCode_0x34 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* HER      Halve Floating Point Short Register             [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1690,12 +2675,33 @@ static BYTE module[8];                  /* Module name               */
 
         halve_float_short_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x35:
+void OpCode_0x35 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LRER     Load Rounded Floating Point Short Register      [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1705,12 +2711,33 @@ static BYTE module[8];                  /* Module name               */
 
         round_float_short_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x36:
+void OpCode_0x36 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* AXR      Add Floating Point Extended Register            [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0 or 4 */
         if (( r1 & 11) || (r2 & 11)) {
@@ -1720,12 +2747,33 @@ static BYTE module[8];                  /* Module name               */
 
         add_float_ext_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x37:
+void OpCode_0x37 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SXR      Subtract Floating Point Extended Register       [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0 or 4 */
         if (( r1 & 11) || (r2 & 11)) {
@@ -1735,12 +2783,33 @@ static BYTE module[8];                  /* Module name               */
 
         subtract_float_ext_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x38:
+void OpCode_0x38 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LER      Load Floating Point Short Register              [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1751,12 +2820,33 @@ static BYTE module[8];                  /* Module name               */
         /* Copy register content */
         regs->fpr[r1] = regs->fpr[r2];
 
-        break;
+    terminate:
+}
 
-    case 0x39:
+void OpCode_0x39 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CER      Compare Floating Point Short Register           [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1766,12 +2856,33 @@ static BYTE module[8];                  /* Module name               */
 
         compare_float_short_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x3A:
+void OpCode_0x3A (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* AER      Add Floating Point Short Register               [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1781,12 +2892,33 @@ static BYTE module[8];                  /* Module name               */
 
         add_float_short_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x3B:
+void OpCode_0x3B (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SER      Subtract Floating Point Short Register          [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1796,12 +2928,33 @@ static BYTE module[8];                  /* Module name               */
 
         subtract_float_short_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x3C:
+void OpCode_0x3C (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MER      Multiply Short to Long Floating Point Register  [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1811,12 +2964,33 @@ static BYTE module[8];                  /* Module name               */
 
         multiply_float_short_to_long_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x3D:
+void OpCode_0x3D (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* DER      Divide Floating Point Short Register            [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1826,12 +3000,33 @@ static BYTE module[8];                  /* Module name               */
 
         divide_float_short_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x3E:
+void OpCode_0x3E (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* AUR      Add Unnormalized Floating Point Short Register  [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1841,12 +3036,33 @@ static BYTE module[8];                  /* Module name               */
 
         add_unnormal_float_short_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x3F:
+void OpCode_0x3F (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SUR      Subtract Unnormalized Floating Point Short Reg. [RR] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=2;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
         if (( r1 & 9) || (r2 & 9)) {
@@ -1856,54 +3072,263 @@ static BYTE module[8];                  /* Module name               */
 
         subtract_unnormal_float_short_reg (r1, r2, regs);
 
-        break;
+    terminate:
+}
 #endif /*FEATURE_HEXADECIMAL_FLOATING_POINT*/
 
-    case 0x40:
+void OpCode_0x40 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* STH      Store Halfword                                  [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Store rightmost 2 bytes of R1 register at operand address */
         vstore2 ( regs->gpr[r1] & 0xFFFF, effective_addr, b1, regs );
+}
 
-        break;
-
-    case 0x41:
+void OpCode_0x41 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LA       Load Address                                    [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load operand address into register */
         regs->gpr[r1] = effective_addr;
+}
 
-        break;
-
-    case 0x42:
+void OpCode_0x42 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* STC      Store Character                                 [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Store rightmost byte of R1 register at operand address */
         vstoreb ( regs->gpr[r1] & 0xFF, effective_addr, b1, regs );
+}
 
-        break;
-
-    case 0x43:
+void OpCode_0x43 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* IC       Insert Character                                [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load rightmost byte of R1 register from operand address */
         n = regs->gpr[r1] & 0xFFFFFF00;
         regs->gpr[r1] = n | vfetchb ( effective_addr, b1, regs );
+}
 
-        break;
-
-    case 0x44:
+void OpCode_0x44 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* EX       Execute                                         [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+DWORD   dword;                          /* Doubleword work area      */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if operand is not on a halfword boundary */
         if ( effective_addr & 0x00000001 )
@@ -1927,14 +3352,59 @@ static BYTE module[8];                  /* Module name               */
             dword[1] |= (regs->gpr[r1] & 0xFF);
 
         /* Execute the target instruction */
-        execute_instruction (dword, 1, regs);
+	/* execute_instruction (dword, 1, regs); */
+	OpCode_Table[dword[0]] (dword, 1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x45:
+void OpCode_0x45 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* BAL      Branch and Link                                 [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     newia;                          /* New instruction address   */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Use the second operand address as the branch address */
         newia = effective_addr;
@@ -1950,15 +3420,60 @@ static BYTE module[8];                  /* Module name               */
                 | (regs->psw.sgmask << 24)
                 | regs->psw.ia;
 
-        /* Execute the branch */
-        goto setia;
+    /*---------------------------------------------------------------*/
+    /* Set PSW instruction address from newia                        */
+    /*---------------------------------------------------------------*/
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
 
-        break;
+}
 
-    case 0x46:
+void OpCode_0x46 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* BCT      Branch on Count                                 [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     newia;                          /* New instruction address   */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Use the operand address as the branch address */
         newia = effective_addr;
@@ -1967,21 +3482,86 @@ static BYTE module[8];                  /* Module name               */
         if ( --(regs->gpr[r1]) )
             goto setia;
 
-        break;
+        return;
 
-    case 0x47:
+    setia:
+    /*---------------------------------------------------------------*/
+    /* Set PSW instruction address from newia                        */
+    /*---------------------------------------------------------------*/
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+
+}
+
+void OpCode_0x47 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* BC       Branch on Condition                             [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     newia;                          /* New instruction address   */
+int     m;                              /* Condition code mask       */
+int     effective_addr;                 /* Effective address         */
+#ifdef MODULE_TRACE
+static BYTE module[8];                  /* Module name               */
+#endif /*MODULE_TRACE*/
 
-        /* Use the operand address as the branch address */
-        newia = effective_addr;
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
+
+    /* Generate a bit mask from the condition code value */
+    m = ( regs->psw.cc == 0 ) ? 0x08
+          : ( regs->psw.cc == 1 ) ? 0x04
+          : ( regs->psw.cc == 2 ) ? 0x02 : 0x01;
+
+    /* exit if R1 mask bit is unset */
+    if ( (r1 & m) == 0 ) return;
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Use the operand address as the branch address */
+    newia = effective_addr;
 
 #ifdef MODULE_TRACE
         /* Test for module entry */
         if (inst[1] == 0xF0 && inst[2] == 0xF0
             && inst[3] == ((vfetchb(regs->psw.ia, 0, regs) + 6) & 0xFE))
         {
+	int i;
+
             vfetchc (module, 7, regs->psw.ia + 1, 0, regs);
             for (i=0; i < 8; i++)
                 module[i] = ebcdic_to_ascii[module[i]];
@@ -1991,21 +3571,58 @@ static BYTE module[8];                  /* Module name               */
         }
 #endif /*MODULE_TRACE*/
 
-        /* Generate a bit mask from the condition code value */
-        m = ( regs->psw.cc == 0 ) ? 0x08
-          : ( regs->psw.cc == 1 ) ? 0x04
-          : ( regs->psw.cc == 2 ) ? 0x02 : 0x01;
+    /*---------------------------------------------------------------*/
+    /* Set PSW instruction address from newia                        */
+    /*---------------------------------------------------------------*/
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+}
 
-        /* Branch if R1 mask bit is set */
-        if ( (r1 & m) != 0 )
-            goto setia;
-
-        break;
-
-    case 0x48:
+void OpCode_0x48 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LH       Load Halfword                                   [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load rightmost 2 bytes of register from operand address */
         regs->gpr[r1] = vfetch2 ( effective_addr, b1, regs );
@@ -2013,13 +3630,55 @@ static BYTE module[8];                  /* Module name               */
         /* Propagate sign bit to leftmost 2 bytes of register */
         if ( regs->gpr[r1] > 0x7FFF )
             regs->gpr[r1] |= 0xFFFF0000;
+}
 
-        break;
-
-    case 0x49:
+void OpCode_0x49 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CH       Compare Halfword                                [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load rightmost 2 bytes of comparand from operand address */
         n = vfetch2 ( effective_addr, b1, regs );
@@ -2032,13 +3691,55 @@ static BYTE module[8];                  /* Module name               */
         regs->psw.cc =
                 (S32)regs->gpr[r1] < (S32)n ? 1 :
                 (S32)regs->gpr[r1] > (S32)n ? 2 : 0;
+}
 
-        break;
-
-    case 0x4A:
+void OpCode_0x4A (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* AH       Add Halfword                                    [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load 2 bytes from operand address */
         n = vfetch2 ( effective_addr, b1, regs );
@@ -2060,12 +3761,56 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        break;
+    terminate:
+}
 
-    case 0x4B:
+void OpCode_0x4B (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SH       Subtract Halfword                               [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load 2 bytes from operand address */
         n = vfetch2 ( effective_addr, b1, regs );
@@ -2087,12 +3832,56 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        break;
+    terminate:
+}
 
-    case 0x4C:
+void OpCode_0x4C (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MH       Multiply Halfword                               [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load 2 bytes from operand address */
         n = vfetch2 ( effective_addr, b1, regs );
@@ -2104,13 +3893,55 @@ static BYTE module[8];                  /* Module name               */
         /* Multiply R1 register by n, ignore leftmost 32 bits of
            result, and place rightmost 32 bits in R1 register */
         mul_signed (&n, &(regs->gpr[r1]), regs->gpr[r1], n);
+}
 
-        break;
-
-    case 0x4D:
+void OpCode_0x4D (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* BAS      Branch and Save                                 [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     newia;                          /* New instruction address   */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Use the second operand address as the branch address */
         newia = effective_addr;
@@ -2121,45 +3952,211 @@ static BYTE module[8];                  /* Module name               */
         else
             regs->gpr[r1] = regs->psw.ia & 0x00FFFFFF;
 
-        /* Execute the branch */
-        goto setia;
+    /*---------------------------------------------------------------*/
+    /* Set PSW instruction address from newia                        */
+    /*---------------------------------------------------------------*/
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+}
 
-        break;
-
-    case 0x4E:
+void OpCode_0x4E (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CVD      Convert to Decimal                              [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Convert R1 register to packed decimal */
         convert_to_decimal (r1, effective_addr, b1, regs);
+}
 
-        break;
-
-    case 0x4F:
+void OpCode_0x4F (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CVB      Convert to Binary                               [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Convert packed decimal storage operand into R1 register */
         convert_to_binary (r1, effective_addr, b1, regs);
+}
 
-        break;
-
-    case 0x50:
+void OpCode_0x50 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* ST       Store                                           [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Store register contents at operand address */
         vstore4 ( regs->gpr[r1], effective_addr, b1, regs );
+}
 
-        break;
-
-    case 0x51:
+void OpCode_0x51 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LAE      Load Address Extended                           [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load operand address into register */
         regs->gpr[r1] = effective_addr;
@@ -2173,26 +4170,110 @@ static BYTE module[8];                  /* Module name               */
             regs->ar[r1] = ALET_HOME;
         else /* ACCESS_REGISTER_MODE(&(regs->psw)) */
             regs->ar[r1] = (b1 == 0)? 0 : regs->ar[b1];
+}
 
-        break;
-
-    case 0x54:
+void OpCode_0x54 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* N        And                                             [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load second operand from operand address */
         n = vfetch4 ( effective_addr, b1, regs );
 
         /* AND second operand with first and set condition code */
         regs->psw.cc = ( regs->gpr[r1] &= n ) ? 1 : 0;
+}
 
-        break;
-
-    case 0x55:
+void OpCode_0x55 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CL       Compare Logical                                 [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load second operand from operand address */
         n = vfetch4 ( effective_addr, b1, regs );
@@ -2200,49 +4281,216 @@ static BYTE module[8];                  /* Module name               */
         /* Compare unsigned operands and set condition code */
         regs->psw.cc = regs->gpr[r1] < n ? 1 :
                          regs->gpr[r1] > n ? 2 : 0;
+}
 
-        break;
-
-    case 0x56:
+void OpCode_0x56 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* O        Or                                              [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load second operand from operand address */
         n = vfetch4 ( effective_addr, b1, regs );
 
         /* OR second operand with first and set condition code */
         regs->psw.cc = ( regs->gpr[r1] |= n ) ? 1 : 0;
+}
 
-        break;
-
-    case 0x57:
+void OpCode_0x57 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* X        Exclusive Or                                    [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load second operand from operand address */
         n = vfetch4 ( effective_addr, b1, regs );
 
         /* XOR second operand with first and set condition code */
         regs->psw.cc = ( regs->gpr[r1] ^= n ) ? 1 : 0;
+}
 
-        break;
-
-    case 0x58:
+void OpCode_0x58 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* L        Load                                            [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load R1 register from second operand */
         regs->gpr[r1] = vfetch4 ( effective_addr, b1, regs );
+}
 
-        break;
-
-    case 0x59:
+void OpCode_0x59 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* C        Compare                                         [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load second operand from operand address */
         n = vfetch4 ( effective_addr, b1, regs );
@@ -2251,13 +4499,55 @@ static BYTE module[8];                  /* Module name               */
         regs->psw.cc =
                 (S32)regs->gpr[r1] < (S32)n ? 1 :
                 (S32)regs->gpr[r1] > (S32)n ? 2 : 0;
+}
 
-        break;
-
-    case 0x5A:
+void OpCode_0x5A (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* A        Add                                             [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load second operand from operand address */
         n = vfetch4 ( effective_addr, b1, regs );
@@ -2275,12 +4565,56 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        break;
+    terminate:
+}
 
-    case 0x5B:
+void OpCode_0x5B (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* S        Subtract                                        [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load second operand from operand address */
         n = vfetch4 ( effective_addr, b1, regs );
@@ -2298,12 +4632,56 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        break;
+    terminate:
+}
 
-    case 0x5C:
+void OpCode_0x5C (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* M        Multiply                                        [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is odd */
         if ( r1 & 1 )
@@ -2320,12 +4698,57 @@ static BYTE module[8];                  /* Module name               */
                         regs->gpr[r1+1],
                         n);
 
-        break;
+    terminate:
+}
 
-    case 0x5D:
+void OpCode_0x5D (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* D        Divide                                          [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     divide_overflow;                /* 1=divide overflow         */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is odd */
         if ( r1 & 1 )
@@ -2351,12 +4774,56 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        break;
+    terminate:
+}
 
-    case 0x5E:
+void OpCode_0x5E (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* AL       Add Logical                                     [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load second operand from operand address */
         n = vfetch4 ( effective_addr, b1, regs );
@@ -2366,13 +4833,55 @@ static BYTE module[8];                  /* Module name               */
                 add_logical (&(regs->gpr[r1]),
                         regs->gpr[r1],
                         n);
+}
 
-        break;
-
-    case 0x5F:
+void OpCode_0x5F (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SL       Subtract Logical                                [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load second operand from operand address */
         n = vfetch4 ( effective_addr, b1, regs );
@@ -2382,14 +4891,56 @@ static BYTE module[8];                  /* Module name               */
                 sub_logical (&(regs->gpr[r1]),
                         regs->gpr[r1],
                         n);
-
-        break;
+}
 
 #ifdef FEATURE_HEXADECIMAL_FLOATING_POINT
-    case 0x60:
+void OpCode_0x60 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* STD      Store Floating Point Long                       [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U64     dreg;                           /* Double register work area */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2401,12 +4952,55 @@ static BYTE module[8];                  /* Module name               */
         dreg = ((U64)regs->fpr[r1] << 32) | regs->fpr[r1+1];
         vstore8 (dreg, effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x67:
+void OpCode_0x67 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MXD      Multiply Floating Point Long to Extended        [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0 or 4 */
         if ( r1 & 11) {
@@ -2416,12 +5010,56 @@ static BYTE module[8];                  /* Module name               */
 
         multiply_float_long_to_ext (r1, effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x68:
+void OpCode_0x68 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LD       Load Floating Point Long                        [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U64     dreg;                           /* Double register work area */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2436,12 +5074,55 @@ static BYTE module[8];                  /* Module name               */
         regs->fpr[r1] = dreg >> 32;
         regs->fpr[r1+1] = dreg;
 
-        break;
+    terminate:
+}
 
-    case 0x69:
+void OpCode_0x69 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CD       Compare Floating Point Long                     [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2451,12 +5132,55 @@ static BYTE module[8];                  /* Module name               */
 
         compare_float_long (r1, effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x6A:
+void OpCode_0x6A (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* AD       Add Floating Point Long                         [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2466,12 +5190,55 @@ static BYTE module[8];                  /* Module name               */
 
         add_float_long (r1, effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x6B:
+void OpCode_0x6B (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SD       Subtract Floating Point Long                    [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2481,12 +5248,55 @@ static BYTE module[8];                  /* Module name               */
 
         subtract_float_long (r1, effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x6C:
+void OpCode_0x6C (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MD       Multiply Floating Point Long                    [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2496,12 +5306,55 @@ static BYTE module[8];                  /* Module name               */
 
         multiply_float_long (r1, effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x6D:
+void OpCode_0x6D (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* DD       Divide Floating Point Long                      [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2511,12 +5364,55 @@ static BYTE module[8];                  /* Module name               */
 
         divide_float_long (r1, effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x6E:
+void OpCode_0x6E (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* AW       Add Unnormalized Floating Point Long            [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2526,12 +5422,55 @@ static BYTE module[8];                  /* Module name               */
 
         add_unnormal_float_long (r1, effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x6F:
+void OpCode_0x6F (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SW       Subtract Unnormalized Floating Point Long       [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2541,12 +5480,55 @@ static BYTE module[8];                  /* Module name               */
 
         subtract_unnormal_float_long (r1, effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x70:
+void OpCode_0x70 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* STE      Store Floating Point Short                      [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2557,29 +5539,117 @@ static BYTE module[8];                  /* Module name               */
         /* Store register contents at operand address */
         vstore4 (regs->fpr[r1], effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 #endif /*FEATURE_HEXADECIMAL_FLOATING_POINT*/
 
 #ifdef FEATURE_IMMEDIATE_AND_RELATIVE
-    case 0x71:
+void OpCode_0x71 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MS       Multiply Single                                 [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load second operand from operand address */
         n = vfetch4 ( effective_addr, b1, regs );
 
         /* Multiply signed operands ignoring overflow */
         (S32)regs->gpr[r1] *= (S32)n;
-
-        break;
+}
 #endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
 
 #ifdef FEATURE_HEXADECIMAL_FLOATING_POINT
-    case 0x78:
+void OpCode_0x78 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LE       Load Floating Point Short                       [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2590,12 +5660,55 @@ static BYTE module[8];                  /* Module name               */
         /* Update first 32 bits of register from operand address */
         regs->fpr[r1] = vfetch4 (effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x79:
+void OpCode_0x79 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CE       Compare Floating Point Short                    [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2605,12 +5718,55 @@ static BYTE module[8];                  /* Module name               */
 
         compare_float_short (r1, effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x7A:
+void OpCode_0x7A (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* AE       Add Floating Point Short                        [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2620,12 +5776,55 @@ static BYTE module[8];                  /* Module name               */
 
         add_float_short (r1, effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x7B:
+void OpCode_0x7B (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SE       Subtract Floating Point Short                   [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2635,12 +5834,55 @@ static BYTE module[8];                  /* Module name               */
 
         subtract_float_short (r1, effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x7C:
+void OpCode_0x7C (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* ME       Multiply Floating Point Short to Long           [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2650,12 +5892,55 @@ static BYTE module[8];                  /* Module name               */
 
         multiply_float_short_to_long (r1, effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x7D:
+void OpCode_0x7D (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* DE       Divide Floating Point Short                     [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2665,12 +5950,55 @@ static BYTE module[8];                  /* Module name               */
 
         divide_float_short (r1, effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x7E:
+void OpCode_0x7E (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* AU       Add Unnormalized Floating Point Short           [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Apply indexing for RX instructions (note: indexing for
+       the LRA instruction is handled within the case statement,
+       to save one comparison here on the critical path) */
+    if (x2 != 0)
+        {
+            effective_addr += regs->gpr[x2];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2680,12 +6008,46 @@ static BYTE module[8];                  /* Module name               */
 
         add_unnormal_float_short (r1, effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 
-    case 0x7F:
+void OpCode_0x7F (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SU       Subtract Unnormalized Floating Point Short      [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
         if ( r1 & 9 ) {
@@ -2695,13 +6057,47 @@ static BYTE module[8];                  /* Module name               */
 
         subtract_unnormal_float_short (r1, effective_addr, b1, regs);
 
-        break;
+    terminate:
+}
 #endif /*FEATURE_HEXADECIMAL_FLOATING_POINT*/
 
-    case 0x80:
+void OpCode_0x80 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SSM      Set System Mask                                  [S] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if in problem state */
         if ( regs->psw.prob )
@@ -2727,12 +6123,48 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        break;
+    terminate:
+}
 
-    case 0x82:
+void OpCode_0x82 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LPSW     Load Program Status Word                         [S] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+DWORD   dword;                          /* Doubleword work area      */
+int     effective_addr;                 /* Effective address         */
+int     rc;                             /* Return code               */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if in problem state */
         if ( regs->psw.prob )
@@ -2767,12 +6199,46 @@ static BYTE module[8];                  /* Module name               */
         perform_serialization (regs);
         perform_chkpt_sync (regs);
 
-        break;
+    terminate:
+}
 
-    case 0x83:
+void OpCode_0x83 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* --       Diagnose                                             */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Process diagnose instruction */
         diagnose_call (effective_addr, r1, r2, regs);
@@ -2780,14 +6246,55 @@ static BYTE module[8];                  /* Module name               */
         /* Perform serialization and checkpoint-synchronization */
         perform_serialization (regs);
         perform_chkpt_sync (regs);
-
-        break;
+}
 
 #ifdef FEATURE_IMMEDIATE_AND_RELATIVE
-    case 0x84:
+void OpCode_0x84 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* BRXH     Branch Relative on Index High                  [RSI] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     newia;                          /* New instruction address   */
+int     d;                              /* Integer work areas        */
+int     i;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
+U16     h1;                             /* 16-bit operand values     */
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load immediate operand from instruction bytes 2-3 */
         h1 = (inst[2] << 8) | inst[3];
@@ -2808,12 +6315,62 @@ static BYTE module[8];                  /* Module name               */
         if ( (S32)regs->gpr[r1] > d )
             goto setia;
 
-        break;
+        return;
 
-    case 0x85:
+    setia:
+    /*---------------------------------------------------------------*/
+    /* Set PSW instruction address from newia                        */
+    /*---------------------------------------------------------------*/
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+
+}
+
+void OpCode_0x85 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* BRXLE    Branch Relative on Index Low or Equal          [RSI] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     newia;                          /* New instruction address   */
+int     d;                              /* Integer work areas        */
+int     i;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
+U16     h1;                             /* 16-bit operand values     */
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load immediate operand from instruction bytes 2-3 */
         h1 = (inst[2] << 8) | inst[3];
@@ -2834,13 +6391,57 @@ static BYTE module[8];                  /* Module name               */
         if ( (S32)regs->gpr[r1] <= d )
             goto setia;
 
-        break;
+        return;
+
+    setia:
+    /*---------------------------------------------------------------*/
+    /* Set PSW instruction address from newia                        */
+    /*---------------------------------------------------------------*/
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+
+}
 #endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
 
-    case 0x86:
+void OpCode_0x86 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* BXH      Branch on Index High                            [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     newia;                          /* New instruction address   */
+int     d;                              /* Integer work areas        */
+int     i;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Compute the branch address from the second operand */
         newia = effective_addr;
@@ -2858,12 +6459,56 @@ static BYTE module[8];                  /* Module name               */
         if ( (S32)regs->gpr[r1] > d )
             goto setia;
 
-        break;
+        return;
 
-    case 0x87:
+    setia:
+    /*---------------------------------------------------------------*/
+    /* Set PSW instruction address from newia                        */
+    /*---------------------------------------------------------------*/
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+
+}
+
+void OpCode_0x87 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* BXLE     Branch on Index Low or Equal                    [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     newia;                          /* New instruction address   */
+int     d;                              /* Integer work areas        */
+int     i;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Compute the branch address from the second operand */
         newia = effective_addr;
@@ -2881,38 +6526,146 @@ static BYTE module[8];                  /* Module name               */
         if ( (S32)regs->gpr[r1] <= d )
             goto setia;
 
-        break;
+        return;
 
-    case 0x88:
+    setia:
+    /*---------------------------------------------------------------*/
+    /* Set PSW instruction address from newia                        */
+    /*---------------------------------------------------------------*/
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+
+}
+
+void OpCode_0x88 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SRL      Shift Right Logical                             [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Use rightmost six bits of operand address as shift count */
         n = effective_addr & 0x3F;
 
         /* Shift the R1 register */
         regs->gpr[r1] = n > 31 ? 0 : regs->gpr[r1] >> n;
+}
 
-        break;
-
-    case 0x89:
+void OpCode_0x89 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SLL      Shift Left Logical                              [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Use rightmost six bits of operand address as shift count */
         n = effective_addr & 0x3F;
 
         /* Shift the R1 register */
         regs->gpr[r1] = n > 31 ? 0 : regs->gpr[r1] << n;
+}
 
-        break;
-
-    case 0x8A:
+void OpCode_0x8A (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SRA      Shift Right Arithmetic                          [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Use rightmost six bits of operand address as shift count */
         n = effective_addr & 0x3F;
@@ -2925,13 +6678,50 @@ static BYTE module[8];                  /* Module name               */
         /* Set the condition code */
         regs->psw.cc = (S32)regs->gpr[r1] > 0 ? 2 :
                        (S32)regs->gpr[r1] < 0 ? 1 : 0;
+}
 
-        break;
-
-    case 0x8B:
+void OpCode_0x8B (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SLA      Shift Left Arithmetic                           [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+U32     n1;                             /* 32-bit operand values     */
+U32     n2;                             /* 32-bit operand values     */
+int     i;                              /* Integer work areas        */
+int     j;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Use rightmost six bits of operand address as shift count */
         n = effective_addr & 0x3F;
@@ -2963,19 +6753,55 @@ static BYTE module[8];                  /* Module name               */
                 program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
                 goto terminate;
             }
-            break;
+            return;
         }
 
         /* Set the condition code */
         regs->psw.cc = (S32)regs->gpr[r1] > 0 ? 2 :
                        (S32)regs->gpr[r1] < 0 ? 1 : 0;
 
-        break;
+    terminate:
+}
 
-    case 0x8C:
+void OpCode_0x8C (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SRDL     Shift Right Double Logical                      [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+U64     dreg;                           /* Double register work area */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Specification exception if R1 is odd */
         if ( r1 & 1 )
@@ -2993,12 +6819,48 @@ static BYTE module[8];                  /* Module name               */
         regs->gpr[r1] = dreg >> 32;
         regs->gpr[r1+1] = dreg & 0xFFFFFFFF;
 
-        break;
+    terminate:
+}
 
-    case 0x8D:
+void OpCode_0x8D (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SLDL     Shift Left Double Logical                       [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+U64     dreg;                           /* Double register work area */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Specification exception if R1 is odd */
         if ( r1 & 1 )
@@ -3016,12 +6878,48 @@ static BYTE module[8];                  /* Module name               */
         regs->gpr[r1] = dreg >> 32;
         regs->gpr[r1+1] = dreg & 0xFFFFFFFF;
 
-        break;
+    terminate:
+}
 
-    case 0x8E:
+void OpCode_0x8E (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SRDA     Shift Right Double Arithmetic                   [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+U64     dreg;                           /* Double register work area */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Specification exception if R1 is odd */
         if ( r1 & 1 )
@@ -3042,12 +6940,52 @@ static BYTE module[8];                  /* Module name               */
         /* Set the condition code */
         regs->psw.cc = (S64)dreg > 0 ? 2 : (S64)dreg < 0 ? 1 : 0;
 
-        break;
+    terminate:
+}
 
-    case 0x8F:
+void OpCode_0x8F (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SLDA     Shift Left Double Arithmetic                    [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     m;                              /* Condition code mask       */
+U32     n;                              /* 32-bit operand values     */
+U64     dreg;                           /* Double register work area */
+int     h;                              /* Integer work areas        */
+int     i;                              /* Integer work areas        */
+int     j;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Specification exception if R1 is odd */
         if ( r1 & 1 )
@@ -3089,18 +7027,55 @@ static BYTE module[8];                  /* Module name               */
                 program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
                 goto terminate;
             }
-            break;
+            return;
         }
 
         /* Set the condition code */
         regs->psw.cc = (S64)dreg > 0 ? 2 : (S64)dreg < 0 ? 1 : 0;
 
-        break;
+    terminate:
+}
 
-    case 0x90:
+void OpCode_0x90 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* STM      Store Multiple                                  [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     d;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+BYTE    cwork1[256];                    /* Character work areas      */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Copy register contents into work area */
         for ( n = r1, d = 0; ; )
@@ -3120,13 +7095,46 @@ static BYTE module[8];                  /* Module name               */
 
         /* Store register contents at operand address */
         vstorec ( cwork1, d-1, effective_addr, b1, regs );
+}
 
-        break;
-
-    case 0x91:
+void OpCode_0x91 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* TM       Test under Mask                                 [SI] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+BYTE    obyte;                          /* Byte work areas           */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Fetch byte from operand address */
         obyte = vfetchb ( effective_addr, b1, regs );
@@ -3139,23 +7147,88 @@ static BYTE module[8];                  /* Module name               */
                 ( obyte == 0 ) ? 0 :            /* result all zeroes */
                 ((obyte^ibyte) == 0) ? 3 :      /* result all ones   */
                 1 ;                             /* result mixed      */
+}
 
-        break;
-
-    case 0x92:
+void OpCode_0x92 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MVI      Move Immediate                                  [SI] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Store immediate operand at operand address */
         vstoreb ( ibyte, effective_addr, b1, regs );
+}
 
-        break;
-
-    case 0x93:
+void OpCode_0x93 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* TS       Test and Set                                     [S] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+BYTE    obyte;                          /* Byte work areas           */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Perform serialization before starting operation */
         perform_serialization (regs);
@@ -3177,13 +7250,46 @@ static BYTE module[8];                  /* Module name               */
 
         /* Perform serialization after completing operation */
         perform_serialization (regs);
+}
 
-        break;
-
-    case 0x94:
+void OpCode_0x94 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* NI       And Immediate                                   [SI] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+BYTE    obyte;                          /* Byte work areas           */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Fetch byte from operand address */
         obyte = vfetchb ( effective_addr, b1, regs );
@@ -3196,13 +7302,46 @@ static BYTE module[8];                  /* Module name               */
 
         /* Set condition code */
         regs->psw.cc = obyte ? 1 : 0;
+}
 
-        break;
-
-    case 0x95:
+void OpCode_0x95 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CLI      Compare Logical Immediate                       [SI] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+BYTE    obyte;                          /* Byte work areas           */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Fetch byte from operand address */
         obyte = vfetchb ( effective_addr, b1, regs );
@@ -3210,13 +7349,46 @@ static BYTE module[8];                  /* Module name               */
         /* Compare with immediate operand and set condition code */
         regs->psw.cc = (obyte < ibyte) ? 1 :
                       (obyte > ibyte) ? 2 : 0;
+}
 
-        break;
-
-    case 0x96:
+void OpCode_0x96 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* OI       Or Immediate                                    [SI] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+BYTE    obyte;                          /* Byte work areas           */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Fetch byte from operand address */
         obyte = vfetchb ( effective_addr, b1, regs );
@@ -3229,13 +7401,46 @@ static BYTE module[8];                  /* Module name               */
 
         /* Set condition code */
         regs->psw.cc = obyte ? 1 : 0;
+}
 
-        break;
-
-    case 0x97:
+void OpCode_0x97 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* XI       Exclusive Or Immediate                          [SI] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+BYTE    obyte;                          /* Byte work areas           */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Fetch byte from operand address */
         obyte = vfetchb ( effective_addr, b1, regs );
@@ -3248,13 +7453,48 @@ static BYTE module[8];                  /* Module name               */
 
         /* Set condition code */
         regs->psw.cc = obyte ? 1 : 0;
+}
 
-        break;
-
-    case 0x98:
+void OpCode_0x98 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LM       Load Multiple                                   [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     d;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+BYTE    cwork1[256];                    /* Character work areas      */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Calculate the number of bytes to be loaded */
         d = (((r3 < r1) ? r3 + 16 - r1 : r3 - r1) + 1) * 4;
@@ -3276,14 +7516,50 @@ static BYTE module[8];                  /* Module name               */
             /* Update register number, wrapping from 15 to 0 */
             n++; n &= 15;
         }
-
-        break;
+}
 
 #ifdef FEATURE_TRACING
-    case 0x99:
+void OpCode_0x99 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* TRACE    Trace                                           [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n2;                             /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if in problem state */
         if ( regs->psw.prob )
@@ -3301,14 +7577,14 @@ static BYTE module[8];                  /* Module name               */
 
         /* Exit if explicit tracing (control reg 12 bit 31) is off */
         if ( (regs->cr[12] & CR12_EXTRACE) == 0 )
-            break;
+            return;
 
         /* Fetch the trace operand */
         n2 = vfetch4 ( effective_addr, b1, regs );
 
         /* Exit if bit zero of the trace operand is one */
         if ( (n2 & 0x80000000) )
-            break;
+            return;
 
         /* Perform serialization and checkpoint-synchronization */
         perform_serialization (regs);
@@ -3321,14 +7597,54 @@ static BYTE module[8];                  /* Module name               */
         perform_serialization (regs);
         perform_chkpt_sync (regs);
 
-        break;
+    terminate:
+}
 #endif /*FEATURE_TRACING*/
 
 #ifdef FEATURE_ACCESS_REGISTERS
-    case 0x9A:
+void OpCode_0x9A (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LAM      Load Access Multiple                            [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     d;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
+BYTE    cwork1[256];                    /* Character work areas      */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if operand is not on a fullword boundary */
         if ( effective_addr & 0x00000003 )
@@ -3358,12 +7674,52 @@ static BYTE module[8];                  /* Module name               */
             n++; n &= 15;
         }
 
-        break;
+    terminate:
+}
 
-    case 0x9B:
+void OpCode_0x9B (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* STAM     Store Access Multiple                           [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     d;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
+BYTE    cwork1[256];                    /* Character work areas      */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if operand is not on a fullword boundary */
         if ( effective_addr & 0x00000003 )
@@ -3380,7 +7736,7 @@ static BYTE module[8];                  /* Module name               */
             cwork1[d++] = (regs->ar[n] & 0xFF0000) >> 16;
             cwork1[d++] = (regs->ar[n] & 0xFF00) >> 8;
             cwork1[d++] = regs->ar[n] & 0xFF;
-
+            
             /* Instruction is complete when r3 register is done */
             if ( n == r3 ) break;
 
@@ -3391,15 +7747,76 @@ static BYTE module[8];                  /* Module name               */
         /* Store access register contents at operand address */
         vstorec ( cwork1, d-1, effective_addr, b1, regs );
 
-        break;
+    terminate:
+}
 #endif /*FEATURE_ACCESS_REGISTERS*/
 
 #ifdef FEATURE_S370_CHANNEL
-    case 0x9C:
+void OpCode_0x9C (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* 9C00: SIO        Start I/O                                [S] */
     /* 9C01: SIOF       Start I/O Fast Release                   [S] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+PSA    *psa;                            /* -> prefixed storage area  */
+DEVBLK *dev;                            /* -> device block for SIO   */
+U32     ccwaddr;                        /* CCW address for start I/O */
+U32     ioparm;                         /* I/O interruption parameter*/
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
+U16     h1;                             /* 16-bit operand values     */
+U16     h2;                             /* 16-bit operand values     */
+U16     h3;                             /* 16-bit operand values     */
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
+U32     asteo;                          /* Real address of ASTE      */
+U32     aste[16];                       /* ASN second table entry    */
+U16     ax;                             /* Authorization index       */
+U16     pkm;                            /* PSW key mask              */
+U16     pasn;                           /* Primary ASN               */
+U16     sasn;                           /* Secondary ASN             */
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+U32     ioid;                           /* I/O interruption address  */
+PMCW    pmcw;                           /* Path management ctl word  */
+ORB     orb;                            /* Operation request block   */
+SCHIB   schib;                          /* Subchannel information blk*/
+IRB     irb;                            /* Interruption response blk */
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if in problem state */
         if ( regs->psw.prob )
@@ -3415,7 +7832,7 @@ static BYTE module[8];                  /* Module name               */
         if (dev == NULL)
         {
             regs->psw.cc = 3;
-            break;
+            return;
         }
 
         /* Fetch key and CCW address from the CAW at PSA+X'48' */
@@ -3429,13 +7846,68 @@ static BYTE module[8];                  /* Module name               */
         regs->psw.cc =
             start_io (dev, ioparm, ccwkey, 0, 0, 0, ccwaddr);
 
-        break;
+    terminate:
+}
 
-    case 0x9D:
+void OpCode_0x9D (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* 9D00: TIO        Test I/O                                 [S] */
     /* 9D01: CLRIO      Clear I/O                                [S] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+DEVBLK *dev;                            /* -> device block for SIO   */
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
+U16     h1;                             /* 16-bit operand values     */
+U16     h2;                             /* 16-bit operand values     */
+U16     h3;                             /* 16-bit operand values     */
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
+U32     asteo;                          /* Real address of ASTE      */
+U32     aste[16];                       /* ASN second table entry    */
+U16     ax;                             /* Authorization index       */
+U16     pkm;                            /* PSW key mask              */
+U16     pasn;                           /* Primary ASN               */
+U16     sasn;                           /* Secondary ASN             */
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+U32     ioid;                           /* I/O interruption address  */
+PMCW    pmcw;                           /* Path management ctl word  */
+ORB     orb;                            /* Operation request block   */
+SCHIB   schib;                          /* Subchannel information blk*/
+IRB     irb;                            /* Interruption response blk */
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if in problem state */
         if ( regs->psw.prob )
@@ -3451,18 +7923,73 @@ static BYTE module[8];                  /* Module name               */
         if (dev == NULL)
         {
             regs->psw.cc = 3;
-            break;
+            return;
         }
 
         /* Test the device and set the condition code */
         regs->psw.cc = test_io (regs, dev, ibyte);
 
-        break;
+    terminate:
+}
 
-    case 0x9E:
+void OpCode_0x9E (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* 9E00: HIO        Halt I/O                                 [S] */
     /* 9E01: HDV        Halt Device                              [S] */
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+DEVBLK *dev;                            /* -> device block for SIO   */
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
+U16     h1;                             /* 16-bit operand values     */
+U16     h2;                             /* 16-bit operand values     */
+U16     h3;                             /* 16-bit operand values     */
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
+U32     asteo;                          /* Real address of ASTE      */
+U32     aste[16];                       /* ASN second table entry    */
+U16     ax;                             /* Authorization index       */
+U16     pkm;                            /* PSW key mask              */
+U16     pasn;                           /* Primary ASN               */
+U16     sasn;                           /* Secondary ASN             */
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+U32     ioid;                           /* I/O interruption address  */
+PMCW    pmcw;                           /* Path management ctl word  */
+ORB     orb;                            /* Operation request block   */
+SCHIB   schib;                          /* Subchannel information blk*/
+IRB     irb;                            /* Interruption response blk */
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
     /*---------------------------------------------------------------*/
 
         /* Program check if in problem state */
@@ -3479,18 +8006,72 @@ static BYTE module[8];                  /* Module name               */
         if (dev == NULL)
         {
             regs->psw.cc = 3;
-            break;
+            return;
         }
 
         /* FIXME: for now, just return CC 0 */
         regs->psw.cc = 0;
 
-        break;
+    terminate:
+}
 
-    case 0x9F:
+void OpCode_0x9F (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* TCH      Test Channel                                     [S] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
+U16     h1;                             /* 16-bit operand values     */
+U16     h2;                             /* 16-bit operand values     */
+U16     h3;                             /* 16-bit operand values     */
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
+U32     asteo;                          /* Real address of ASTE      */
+U32     aste[16];                       /* ASN second table entry    */
+U16     ax;                             /* Authorization index       */
+U16     pkm;                            /* PSW key mask              */
+U16     pasn;                           /* Primary ASN               */
+U16     sasn;                           /* Secondary ASN             */
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+U32     ioid;                           /* I/O interruption address  */
+PMCW    pmcw;                           /* Path management ctl word  */
+ORB     orb;                            /* Operation request block   */
+SCHIB   schib;                          /* Subchannel information blk*/
+IRB     irb;                            /* Interruption response blk */
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if in problem state */
         if ( regs->psw.prob )
@@ -3502,28 +8083,237 @@ static BYTE module[8];                  /* Module name               */
         /* Test for pending interrupt and set condition code */
         regs->psw.cc = test_channel (regs, effective_addr & 0xFF00);
 
-        break;
+    terminate:
+}
 #endif /*FEATURE_S370_CHANNEL*/
 
 #ifdef FEATURE_VECTOR_FACILITY
-    case 0xA4:
-    case 0xA5:
-    case 0xA6:
-    case 0xE4:
+void OpCode_0xA4 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* Vector Facility instructions                                  */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         vector_inst(inst, regs);
+}
 
-        break;
+void OpCode_0xA5 (BYTE inst[], int execflag, REGS *regs)
+    /*---------------------------------------------------------------*/
+    /* Vector Facility instructions                                  */
+    /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
+
+        vector_inst(inst, regs);
+}
+
+void OpCode_0xA6 (BYTE inst[], int execflag, REGS *regs)
+    /*---------------------------------------------------------------*/
+    /* Vector Facility instructions                                  */
+    /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
+
+        vector_inst(inst, regs);
+}
+
+void OpCode_0xE4 (BYTE inst[], int execflag, REGS *regs)
+    /*---------------------------------------------------------------*/
+    /* Vector Facility instructions                                  */
+    /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
+
+        vector_inst(inst, regs);
+}
 #endif /*FEATURE_VECTOR_FACILITY*/
             
 #ifdef FEATURE_IMMEDIATE_AND_RELATIVE
-    case 0xA7:
+void OpCode_0xA7 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* Register Immediate instructions (opcode A7xx)                 */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     newia;                          /* New instruction address   */
+int     m;                              /* Condition code mask       */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
+U16     h1;                             /* 16-bit operand values     */
+U16     h2;                             /* 16-bit operand values     */
+U16     h3;                             /* 16-bit operand values     */
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Bits 12-15 of instruction determine the operation code */
         switch (r3) {
@@ -3709,37 +8499,149 @@ static BYTE module[8];                  /* Module name               */
 
         } /* end switch(r3) */
 
-        break;
+        return;
+
+    setia:
+    /*---------------------------------------------------------------*/
+    /* Set PSW instruction address from newia                        */
+    /*---------------------------------------------------------------*/
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+
+    terminate:
+}
 #endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
 
 #ifdef FEATURE_COMPARE_AND_MOVE_EXTENDED
-    case 0xA8:
+void OpCode_0xA8 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MVCLE    Move Long Extended                              [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Perform move long extended and set condition code */
         regs->psw.cc =
             move_long_extended (r1, r3, effective_addr, regs);
+}
 
-        break;
-
-    case 0xA9:
+void OpCode_0xA9 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CLCLE    Compare Logical Long Extended                   [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Perform compare long extended and set condition code */
         regs->psw.cc =
             compare_long_extended (r1, r3, effective_addr, regs);
-
-        break;
+}
 #endif /*FEATURE_COMPARE_AND_MOVE_EXTENDED*/
 
-    case 0xAC:
+void OpCode_0xAC (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* STNSM    Store Then And System Mask                      [SI] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if in problem state */
         if ( regs->psw.prob )
@@ -3754,12 +8656,46 @@ static BYTE module[8];                  /* Module name               */
         /* AND system mask with immediate operand */
         regs->psw.sysmask &= ibyte;
 
-        break;
+    terminate:
+}
 
-    case 0xAD:
+void OpCode_0xAD (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* STOSM    Store Then Or System Mask                       [SI] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if in problem state */
         if ( regs->psw.prob )
@@ -3781,12 +8717,54 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        break;
+    terminate:
+}
 
-    case 0xAE:
+void OpCode_0xAE (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SIGP     Signal Processor                                [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+#ifdef FEATURE_S370_CHANNEL
+#endif /*FEATURE_S370_CHANNEL*/
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if in problem state */
         if ( regs->psw.prob )
@@ -3805,12 +8783,56 @@ static BYTE module[8];                  /* Module name               */
         /* Perform serialization after completing operation */
         perform_serialization (regs);
 
-        break;
+    terminate:
+}
 
-    case 0xAF:
+void OpCode_0xAF (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MC       Monitor Call                                    [SI] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+PSA    *psa;                            /* -> prefixed storage area  */
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+#ifdef FEATURE_S370_CHANNEL
+#endif /*FEATURE_S370_CHANNEL*/
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if monitor class exceeds 15 */
         if ( ibyte > 0x0F )
@@ -3822,7 +8844,7 @@ static BYTE module[8];                  /* Module name               */
         /* Ignore if monitor mask in control register 8 is zero */
         n = (regs->cr[8] & CR8_MCMASK) << ibyte;
         if ((n & 0x00008000) == 0)
-            break;
+            return;
 
         /* Clear PSA+148 and store monitor class at PSA+149 */
         psa = (PSA*)(sysblk.mainstor + regs->pxr);
@@ -3838,12 +8860,52 @@ static BYTE module[8];                  /* Module name               */
         /* Generate a monitor event program interruption */
         program_check (regs, PGM_MONITOR_EVENT);
 
-        break;
+    terminate:
+}
 
-    case 0xB1:
+void OpCode_0xB1 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LRA      Load Real Address                               [RX] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     private;                        /* 1=Private address space   */
+int     protect;                        /* 1=ALE or page protection  */
+int     stid;                           /* Segment table indication  */
+int     cc;                             /* Condition code            */
+int     effective_addr;                 /* Effective address         */
+U16     xcode;                          /* Exception code            */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if in problem state */
         if ( regs->psw.prob )
@@ -3868,19 +8930,84 @@ static BYTE module[8];                  /* Module name               */
         if (cc == 4) {
             regs->gpr[r1] = 0x80000000 | xcode;
             regs->psw.cc = 3;
-            break;
+            return;
         }
 
         /* Set r1 and condition code as returned by translate_addr */
         regs->gpr[r1] = n;
         regs->psw.cc = cc;
 
-        break;
+    terminate:
+}
 
-    case 0xB2:
+void OpCode_0xB2 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* Extended instructions (opcode B2xx)                           */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+U32     n1;                             /* 32-bit operand values     */
+U32     n2;                             /* 32-bit operand values     */
+int     private;                        /* 1=Private address space   */
+int     protect;                        /* 1=ALE or page protection  */
+int     stid;                           /* Segment table indication  */
+U64     dreg;                           /* Double register work area */
+int     effective_addr;                 /* Effective address         */
+U16     xcode;                          /* Exception code            */
+#ifdef FEATURE_LINKAGE_STACK
+U32     newia;                          /* New instruction address   */
+#endif /*FEATURE_LINKAGE_STACK*/
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
+int     rc;                             /* Return code               */
+int     cc;                             /* Condition code            */
+BYTE    obyte;                          /* Byte work areas           */
+U32     asteo;                          /* Real address of ASTE      */
+U32     aste[16];                       /* ASN second table entry    */
+U16     sasn;                           /* Secondary ASN             */
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+U32     ioid;                           /* I/O interruption address  */
+PSA    *psa;                            /* -> prefixed storage area  */
+DEVBLK *dev;                            /* -> device block for SIO   */
+U32     ccwaddr;                        /* CCW address for start I/O */
+U32     ioparm;                         /* I/O interruption parameter*/
+PMCW    pmcw;                           /* Path management ctl word  */
+ORB     orb;                            /* Operation request block   */
+SCHIB   schib;                          /* Subchannel information blk*/
+IRB     irb;                            /* Interruption response blk */
+BYTE    cwork1[256];                    /* Character work areas      */
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Extract RRE R1/R2 fields from instruction byte 3 */
         r1 = inst[3] >> 4;
@@ -4051,6 +9178,13 @@ static BYTE module[8];                  /* Module name               */
             /* Update the clock comparator and set epoch to zero */
             regs->clkc = dreg >> 8;
 
+            /* reset the clock comparator pending flag according to
+               the setting of the tod clock */
+            if( sysblk.todclk > regs->clkc )
+                regs->cpuint = regs->ckpend = 1;
+            else
+                regs->ckpend = 0;
+
             /* Release the TOD clock update lock */
             release_lock (&sysblk.todlock);
 
@@ -4119,6 +9253,12 @@ static BYTE module[8];                  /* Module name               */
 
             /* Update the CPU timer */
             regs->ptimer = dreg;
+
+            /* reset the cpu timer pending flag according to its value */
+            if( (S64)regs->ptimer < 0 )
+                regs->cpuint = regs->ptpend = 1;
+            else
+                regs->ptpend = 0;
 
             /* Release the TOD clock update lock */
             release_lock (&sysblk.todlock);
@@ -5955,15 +11095,27 @@ static BYTE module[8];                  /* Module name               */
             break;
 #endif /*FEATURE_DUAL_ADDRESS_SPACE*/
 
+#ifdef FEATURE_EMULATE_VM
         case 0xF0:
         /*-----------------------------------------------------------*/
         /* B2F0: IUCV - Inter User Communications Vehicle        [S] */
         /*-----------------------------------------------------------*/
 
+            /* Program check if in problem state,
+               the IUCV instruction generates an operation exception
+               rather then a priviliged operation exception when 
+               executed in problem state                             */
+            if ( regs->psw.prob )
+            {
+                program_check (regs, PGM_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
             /* Set condition code to indicate IUCV not available */
             regs->psw.cc = 3;
 
             break;
+#endif
 
         default:
         /*-----------------------------------------------------------*/
@@ -5973,12 +11125,59 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
 
         } /* end switch(ibyte) */
-        break;
+        return;
 
-    case 0xB6:
+#ifdef FEATURE_LINKAGE_STACK
+    setia:
+    /*---------------------------------------------------------------*/
+    /* Set PSW instruction address from newia                        */
+    /*---------------------------------------------------------------*/
+        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+#endif /*FEATURE_LINKAGE_STACK*/
+
+    terminate:
+}
+
+void OpCode_0xB6 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* STCTL    Store Control                                   [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     d;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+BYTE    cwork1[256];                    /* Character work areas      */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if in problem state */
         if ( regs->psw.prob )
@@ -6012,13 +11211,58 @@ static BYTE module[8];                  /* Module name               */
 
         /* Store control register contents at operand address */
         vstorec ( cwork1, d-1, effective_addr, b1, regs );
+    
+    terminate:
+}
 
-        break;
-
-    case 0xB7:
+void OpCode_0xB7 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* LCTL     Load Control                                    [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     d;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+#ifdef FEATURE_S370_CHANNEL
+#endif /*FEATURE_S370_CHANNEL*/
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+BYTE    cwork1[256];                    /* Character work areas      */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if in problem state */
         if ( regs->psw.prob )
@@ -6055,12 +11299,55 @@ static BYTE module[8];                  /* Module name               */
             n++; n &= 15;
         }
 
-        break;
+    terminate:
+}
 
-    case 0xBA:
+void OpCode_0xBA (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CS       Compare and Swap                                [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+#ifdef FEATURE_S370_CHANNEL
+#endif /*FEATURE_S370_CHANNEL*/
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if operand is not on a fullword boundary */
         if ( effective_addr & 0x00000003 )
@@ -6109,12 +11396,56 @@ static BYTE module[8];                  /* Module name               */
             usleep(1L);
 #endif MAX_CPU_ENGINES > 1
 
-        break;
+    terminate:
+}
 
-    case 0xBB:
+void OpCode_0xBB (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CDS      Compare Double and Swap                         [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n1;                             /* 32-bit operand values     */
+U32     n2;                             /* 32-bit operand values     */
+int     effective_addr;                 /* Effective address         */
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+#ifdef FEATURE_S370_CHANNEL
+#endif /*FEATURE_S370_CHANNEL*/
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if either R1 or R3 is odd */
         if ( ( r1 & 1 ) || ( r3 & 1 ) )
@@ -6173,12 +11504,59 @@ static BYTE module[8];                  /* Module name               */
             usleep(1L);
 #endif MAX_CPU_ENGINES > 1
 
-        break;
+    terminate:
+}
 
-    case 0xBD:
+void OpCode_0xBD (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CLM      Compare Logical Characters under Mask           [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     cc;                             /* Condition code            */
+BYTE    sbyte;                          /* Byte work areas           */
+BYTE    dbyte;                          /* Byte work areas           */
+int     i;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+#ifdef FEATURE_S370_CHANNEL
+#endif /*FEATURE_S370_CHANNEL*/
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Clear the condition code */
         cc = 0;
@@ -6212,13 +11590,57 @@ static BYTE module[8];                  /* Module name               */
 
         /* Update the condition code */
         regs->psw.cc = cc;
+}
 
-        break;
-
-    case 0xBE:
+void OpCode_0xBE (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* STCM     Store Characters under Mask                     [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     i;                              /* Integer work areas        */
+int     j;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+#ifdef FEATURE_S370_CHANNEL
+#endif /*FEATURE_S370_CHANNEL*/
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+BYTE    cwork1[256];                    /* Character work areas      */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load value from register */
         n = regs->gpr[r1];
@@ -6247,18 +11669,55 @@ static BYTE module[8];                  /* Module name               */
 // /*debug*/logmsg ("Model dependent STCM use\n");
             validate_operand (effective_addr, b1, 0,
                                 ACCTYPE_WRITE, regs);
-            break;
+            return;
         }
 
         /* Store result at operand location */
         vstorec ( cwork1, j-1, effective_addr, b1, regs );
+}
 
-        break;
-
-    case 0xBF:
+void OpCode_0xBF (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* ICM      Insert Characters under Mask                    [RS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=4;                          /* Instruction length code   */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     cc;                             /* Condition code            */
+BYTE    sbyte;                          /* Byte work areas           */
+U64     dreg;                           /* Double register work area */
+int     h;                              /* Integer work areas        */
+int     i;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    /* opcode = inst[0]; */
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Clear condition code */
         cc = 0;
@@ -6270,7 +11729,7 @@ static BYTE module[8];                  /* Module name               */
         {
             sbyte = vfetchb ( effective_addr, b1, regs );
             regs->psw.cc = 0;
-            break;
+            return;
         }
 
         /* Load existing register value into 64-bit work area */
@@ -6314,53 +11773,280 @@ static BYTE module[8];                  /* Module name               */
 
         /* Set condition code */
         regs->psw.cc = cc;
+}
 
-        break;
-
-    case 0xD1:
+void OpCode_0xD1 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MVN      Move Numerics                                   [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Copy low digits of source bytes to destination bytes */
         ss_operation (opcode, effective_addr, b1,
                 effective_addr2, b2, ibyte, regs);
-        break;
+}
 
-    case 0xD2:
+void OpCode_0xD2 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MVC      Move Characters                                 [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Move characters using current addressing mode and key */
         move_chars (effective_addr, b1, regs->psw.pkey,
                 effective_addr2, b2, regs->psw.pkey, ibyte, regs);
-        break;
+}
 
-    case 0xD3:
+void OpCode_0xD3 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MVZ      Move Zones                                      [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Copy high digits of source bytes to destination bytes */
         ss_operation (opcode, effective_addr, b1,
                 effective_addr2, b2, ibyte, regs);
-        break;
+}
 
-    case 0xD4:
+void OpCode_0xD4 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* NC       And Characters                                  [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Perform AND operation and set condition code */
         regs->psw.cc = ss_operation (opcode, effective_addr, b1,
                                 effective_addr2, b2, ibyte, regs);
-        break;
+}
 
-    case 0xD5:
+void OpCode_0xD5 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CLC      Compare Logical Characters                      [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+int     rc;                             /* Return code               */
+BYTE    cwork1[256];                    /* Character work areas      */
+BYTE    cwork2[256];                    /* Character work areas      */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Fetch first and second operands into work areas */
         vfetchc ( cwork1, ibyte, effective_addr, b1, regs );
@@ -6371,33 +12057,170 @@ static BYTE module[8];                  /* Module name               */
 
         /* Set the condition code */
         regs->psw.cc = (rc == 0) ? 0 : (rc < 0) ? 1 : 2;
+}
 
-        break;
-
-    case 0xD6:
+void OpCode_0xD6 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* OC       Or Characters                                   [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Perform OR operation and set condition code */
         regs->psw.cc = ss_operation (opcode, effective_addr, b1,
                                 effective_addr2, b2, ibyte, regs);
-        break;
+}
 
-    case 0xD7:
+void OpCode_0xD7 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* XC       Exclusive Or Characters                         [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Perform XOR operation and set condition code */
         regs->psw.cc = ss_operation (opcode, effective_addr, b1,
                                 effective_addr2, b2, ibyte, regs);
-        break;
+}
 
-    case 0xD9:
+void OpCode_0xD9 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MVCK     Move with Key                                   [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     cc;                             /* Condition code            */
+int     j;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Load true length from R1 register */
         n = regs->gpr[r1];
@@ -6431,12 +12254,61 @@ static BYTE module[8];                  /* Module name               */
         /* Set condition code */
         regs->psw.cc = cc;
 
-        break;
+    terminate:
+}
 
-    case 0xDA:
+void OpCode_0xDA (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MVCP     Move to Primary                                 [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     cc;                             /* Condition code            */
+int     j;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if secondary space control (CR0 bit 5) is 0,
            or if DAT is off, or if in AR mode or home-space mode */
@@ -6483,12 +12355,61 @@ static BYTE module[8];                  /* Module name               */
         /* Set condition code */
         regs->psw.cc = cc;
 
-        break;
+    terminate:
+}
 
-    case 0xDB:
+void OpCode_0xDB (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MVCS     Move to Secondary                               [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+int     cc;                             /* Condition code            */
+int     j;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Program check if secondary space control (CR0 bit 5) is 0,
            or if DAT is off, or if in AR mode or home-space mode */
@@ -6534,12 +12455,64 @@ static BYTE module[8];                  /* Module name               */
         /* Set condition code */
         regs->psw.cc = cc;
 
-        break;
+    terminate:
+}
 
-    case 0xDC:
+void OpCode_0xDC (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* TR       Translate                                       [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+BYTE    sbyte;                          /* Byte work areas           */
+int     d;                              /* Integer work areas        */
+int     h;                              /* Integer work areas        */
+int     i;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+BYTE    cwork1[256];                    /* Character work areas      */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Validate the first operand for write access */
         validate_operand (effective_addr, b1, ibyte,
@@ -6578,13 +12551,61 @@ static BYTE module[8];                  /* Module name               */
             effective_addr &= ADDRESS_MAXWRAP(regs);
 
         } /* end for(i) */
+}
 
-        break;
-
-    case 0xDD:
+void OpCode_0xDD (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* TRT      Translate and Test                              [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     cc;                             /* Condition code            */
+BYTE    sbyte;                          /* Byte work areas           */
+BYTE    dbyte;                          /* Byte work areas           */
+int     i;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Clear condition code */
         cc = 0;
@@ -6631,37 +12652,181 @@ static BYTE module[8];                  /* Module name               */
 
         /* Update the condition code */
         regs->psw.cc = cc;
+}
 
-        break;
-
-    case 0xDE:
+void OpCode_0xDE (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* EDIT     Edit                                            [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Edit packed decimal value and set condition code */
         regs->psw.cc =
             edit_packed (0, effective_addr, ibyte, b1,
                         effective_addr2, b2, regs);
+}
 
-        break;
-
-    case 0xDF:
+void OpCode_0xDF (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* EDMK     Edit and Mark                                   [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Edit and mark packed decimal value and set condition code */
         regs->psw.cc =
             edit_packed (1, effective_addr, ibyte, b1,
                         effective_addr2, b2, regs);
+}
 
-        break;
-
-    case 0xE5:
+void OpCode_0xE5 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* Extended instructions (opcode E5xx)                           */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+BYTE    dbyte;                          /* Byte work areas           */
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
+U64     dreg;                           /* Double register work area */
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+int     h;                              /* Integer work areas        */
+int     j;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
+U16     ax;                             /* Authorization index       */
+U16     pkm;                            /* PSW key mask              */
+U16     pasn;                           /* Primary ASN               */
+U16     sasn;                           /* Secondary ASN             */
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* The immediate byte determines the instruction opcode */
         switch ( ibyte ) {
@@ -6849,12 +13014,62 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
 
         } /* end switch(ibyte) */
-        break;
 
-    case 0xE8:
+    terminate:
+}
+
+void OpCode_0xE8 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MVCIN    Move Characters Inverse                         [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+U32     n;                              /* 32-bit operand values     */
+BYTE    sbyte;                          /* Byte work areas           */
+int     i;                              /* Integer work areas        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Validate the operands for addressing and protection */
         validate_operand (effective_addr, b1, ibyte,
@@ -6881,141 +13096,816 @@ static BYTE module[8];                  /* Module name               */
             effective_addr2 &= ADDRESS_MAXWRAP(regs);
 
         } /* end for(i) */
+}
 
-        break;
-
-    case 0xF0:
+void OpCode_0xF0 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SRP      Shift and Round Decimal                         [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Shift packed decimal operand and set condition code */
         regs->psw.cc =
             shift_and_round_packed (effective_addr, r1, b1, regs,
                                 r2, effective_addr2 );
+}
 
-        break;
-
-    case 0xF1:
+void OpCode_0xF1 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MVO      Move with Offset                                [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Move shifted second operand to first operand */
         move_with_offset (effective_addr, r1, b1,
                         effective_addr2, r2, b2, regs);
+}
 
-        break;
-
-    case 0xF2:
+void OpCode_0xF2 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* PACK     Pack                                            [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Pack second operand into first operand */
         zoned_to_packed (effective_addr, r1, b1,
                         effective_addr2, r2, b2, regs);
+}
 
-        break;
-
-    case 0xF3:
+void OpCode_0xF3 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* UNPK     Unpack                                          [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Unpack second operand into first operand */
         packed_to_zoned (effective_addr, r1, b1,
                         effective_addr2, r2, b2, regs);
+}
 
-        break;
-
-    case 0xF8:
+void OpCode_0xF8 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* ZAP      Zero and Add Decimal                            [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Copy packed decimal operand and set condition code */
         regs->psw.cc =
             zero_and_add_packed (effective_addr, r1, b1,
                                 effective_addr2, r2, b2, regs );
+}
 
-        break;
-
-    case 0xF9:
+void OpCode_0xF9 (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* CP       Compare Decimal                                 [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Compare packed decimal operands and set condition code */
         regs->psw.cc =
             compare_packed (effective_addr, r1, b1,
                                 effective_addr2, r2, b2, regs );
+}
 
-        break;
-
-    case 0xFA:
+void OpCode_0xFA (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* AP       Add Decimal                                     [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Add packed decimal operands and set condition code */
         regs->psw.cc =
             add_packed (effective_addr, r1, b1,
                                 effective_addr2, r2, b2, regs );
+}
 
-        break;
-
-    case 0xFB:
+void OpCode_0xFB (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* SP       Subtract Decimal                                [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Subtract packed decimal operands and set condition code */
         regs->psw.cc =
             subtract_packed (effective_addr, r1, b1,
                                 effective_addr2, r2, b2, regs );
+}
 
-        break;
-
-    case 0xFC:
+void OpCode_0xFC (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* MP       Multiply Decimal                                [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Multiply packed decimal operands */
         multiply_packed (effective_addr, r1, b1,
                                 effective_addr2, r2, b2, regs );
+}
 
-        break;
-
-    case 0xFD:
+void OpCode_0xFD (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
     /* DP       Divide Decimal                                  [SS] */
     /*---------------------------------------------------------------*/
+{
+int     ilc=6;                          /* Instruction length code   */
+BYTE    opcode;                         /* Instruction byte 0        */
+BYTE    ibyte;                          /* Instruction byte 1        */
+int     r1;                             /* Values of R fields        */
+int     r2;                             /* Values of R fields        */
+int     b1;                             /* Values of R fields        */
+int     b2;                             /* Values of R fields        */
+int     effective_addr;                 /* Effective address         */
+int     effective_addr2;                /* Effective address         */
+
+    /* Extract the opcode and R1/R2/I fields */
+    opcode = inst[0];
+    ibyte = inst[1];
+    r1 = ibyte >> 4;
+    r2 = ibyte & 0x0F;
+#define r3 r2 /* alternate name for second register number */
+#define x2 r2 /* alternate name for second register number */
+
+    /* Calculate the first effective address */
+    b1 = inst[2] >> 4;
+    effective_addr = ((inst[2] & 0x0F) << 8) | inst[3];
+    if (b1 != 0)
+        {
+            effective_addr += regs->gpr[b1];
+            effective_addr &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* Calculate the 2nd effective address for SS instructions */
+    b2 = inst[4] >> 4;
+    effective_addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+    if (b2 != 0)
+        {
+            effective_addr2 += regs->gpr[b2];
+            effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
         /* Divide packed decimal operands */
         divide_packed (effective_addr, r1, b1,
                                 effective_addr2, r2, b2, regs );
+}
 
-        break;
 
-    setia:
+void OpCode_Invalid (BYTE inst[], int execflag, REGS *regs)
     /*---------------------------------------------------------------*/
-    /* Set PSW instruction address from newia                        */
+    /* Here to program check for invalid instuction                  */
     /*---------------------------------------------------------------*/
-        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
-        break;
+{
+BYTE    opcode;                         /* Instruction byte 0        */
+int     ilc;                            /* Instruction length code   */
+
+    opcode = inst[0];
+
+    ilc = (opcode < 0x40) ? 2 : (opcode < 0xC0) ? 4 : 6;
+
+    /* If this instruction was not the subject of an execute,
+       update the PSW instruction length and address */
+    if (execflag == 0)
+    {
+        regs->psw.ilc = ilc;
+        regs->psw.ia += ilc;
+        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+    }
 
     /*---------------------------------------------------------------*/
     /* Invalid instruction operation code                            */
     /*---------------------------------------------------------------*/
-    default:
-        program_check (regs, PGM_OPERATION_EXCEPTION);
-    terminate:
-        break;
-    } /* end switch(opcode) */
+    program_check (regs, PGM_OPERATION_EXCEPTION);
+}
 
-} /* end function execute_instruction */
+/*-------------------------------------------------------------------*/
+/* initialize instruction routine table                              */
+/*-------------------------------------------------------------------*/
+static void OpCode_Init(void)
+{
+int i;
+	for (i=0; i<256; i++) OpCode_Table[i] = &OpCode_Invalid;
+
+	OpCode_Table[0x01] = &OpCode_0x01;
+	OpCode_Table[0x04] = &OpCode_0x04;
+	OpCode_Table[0x05] = &OpCode_0x05;
+	OpCode_Table[0x06] = &OpCode_0x06;
+	OpCode_Table[0x07] = &OpCode_0x07;
+#ifdef FEATURE_BASIC_STORAGE_KEYS
+	OpCode_Table[0x08] = &OpCode_0x08;
+	OpCode_Table[0x09] = &OpCode_0x09;
+#endif /*FEATURE_BASIC_STORAGE_KEYS*/
+	OpCode_Table[0x0a] = &OpCode_0x0A;
+#ifdef FEATURE_BIMODAL_ADDRESSING
+	OpCode_Table[0x0b] = &OpCode_0x0B;
+	OpCode_Table[0x0c] = &OpCode_0x0C;
+#endif /*FEATURE_BIMODAL_ADDRESSING*/
+	OpCode_Table[0x0d] = &OpCode_0x0D;
+	OpCode_Table[0x0e] = &OpCode_0x0E;
+	OpCode_Table[0x0f] = &OpCode_0x0F;
+	OpCode_Table[0x10] = &OpCode_0x10;
+	OpCode_Table[0x11] = &OpCode_0x11;
+	OpCode_Table[0x12] = &OpCode_0x12;
+	OpCode_Table[0x13] = &OpCode_0x13;
+	OpCode_Table[0x14] = &OpCode_0x14;
+	OpCode_Table[0x15] = &OpCode_0x15;
+	OpCode_Table[0x16] = &OpCode_0x16;
+	OpCode_Table[0x17] = &OpCode_0x17;
+	OpCode_Table[0x18] = &OpCode_0x18;
+	OpCode_Table[0x19] = &OpCode_0x19;
+	OpCode_Table[0x1a] = &OpCode_0x1A;
+	OpCode_Table[0x1b] = &OpCode_0x1B;
+	OpCode_Table[0x1c] = &OpCode_0x1C;
+	OpCode_Table[0x1d] = &OpCode_0x1D;
+	OpCode_Table[0x1e] = &OpCode_0x1E;
+	OpCode_Table[0x1f] = &OpCode_0x1F;
+#ifdef FEATURE_HEXADECIMAL_FLOATING_POINT
+	OpCode_Table[0x20] = &OpCode_0x20;
+	OpCode_Table[0x21] = &OpCode_0x21;
+	OpCode_Table[0x22] = &OpCode_0x22;
+	OpCode_Table[0x23] = &OpCode_0x23;
+	OpCode_Table[0x24] = &OpCode_0x24;
+	OpCode_Table[0x25] = &OpCode_0x25;
+	OpCode_Table[0x26] = &OpCode_0x26;
+	OpCode_Table[0x27] = &OpCode_0x27;
+	OpCode_Table[0x28] = &OpCode_0x28;
+	OpCode_Table[0x29] = &OpCode_0x29;
+	OpCode_Table[0x2a] = &OpCode_0x2A;
+	OpCode_Table[0x2b] = &OpCode_0x2B;
+	OpCode_Table[0x2c] = &OpCode_0x2C;
+	OpCode_Table[0x2d] = &OpCode_0x2D;
+	OpCode_Table[0x2e] = &OpCode_0x2E;
+	OpCode_Table[0x2f] = &OpCode_0x2F;
+	OpCode_Table[0x30] = &OpCode_0x30;
+	OpCode_Table[0x31] = &OpCode_0x31;
+	OpCode_Table[0x32] = &OpCode_0x32;
+	OpCode_Table[0x33] = &OpCode_0x33;
+	OpCode_Table[0x34] = &OpCode_0x34;
+	OpCode_Table[0x35] = &OpCode_0x35;
+	OpCode_Table[0x36] = &OpCode_0x36;
+	OpCode_Table[0x37] = &OpCode_0x37;
+	OpCode_Table[0x38] = &OpCode_0x38;
+	OpCode_Table[0x39] = &OpCode_0x39;
+	OpCode_Table[0x3a] = &OpCode_0x3A;
+	OpCode_Table[0x3b] = &OpCode_0x3B;
+	OpCode_Table[0x3c] = &OpCode_0x3C;
+	OpCode_Table[0x3d] = &OpCode_0x3D;
+	OpCode_Table[0x3e] = &OpCode_0x3E;
+	OpCode_Table[0x3f] = &OpCode_0x3F;
+#endif /*FEATURE_HEXADECIMAL_FLOATING_POINT*/
+	OpCode_Table[0x40] = &OpCode_0x40;
+	OpCode_Table[0x41] = &OpCode_0x41;
+	OpCode_Table[0x42] = &OpCode_0x42;
+	OpCode_Table[0x43] = &OpCode_0x43;
+	OpCode_Table[0x44] = &OpCode_0x44;
+	OpCode_Table[0x45] = &OpCode_0x45;
+	OpCode_Table[0x46] = &OpCode_0x46;
+	OpCode_Table[0x47] = &OpCode_0x47;
+	OpCode_Table[0x48] = &OpCode_0x48;
+	OpCode_Table[0x49] = &OpCode_0x49;
+	OpCode_Table[0x4a] = &OpCode_0x4A;
+	OpCode_Table[0x4b] = &OpCode_0x4B;
+	OpCode_Table[0x4c] = &OpCode_0x4C;
+	OpCode_Table[0x4d] = &OpCode_0x4D;
+	OpCode_Table[0x4e] = &OpCode_0x4E;
+	OpCode_Table[0x4f] = &OpCode_0x4F;
+	OpCode_Table[0x50] = &OpCode_0x50;
+	OpCode_Table[0x51] = &OpCode_0x51;
+	OpCode_Table[0x54] = &OpCode_0x54;
+	OpCode_Table[0x55] = &OpCode_0x55;
+	OpCode_Table[0x56] = &OpCode_0x56;
+	OpCode_Table[0x57] = &OpCode_0x57;
+	OpCode_Table[0x58] = &OpCode_0x58;
+	OpCode_Table[0x59] = &OpCode_0x59;
+	OpCode_Table[0x5a] = &OpCode_0x5A;
+	OpCode_Table[0x5b] = &OpCode_0x5B;
+	OpCode_Table[0x5c] = &OpCode_0x5C;
+	OpCode_Table[0x5d] = &OpCode_0x5D;
+	OpCode_Table[0x5e] = &OpCode_0x5E;
+	OpCode_Table[0x5f] = &OpCode_0x5F;
+#ifdef FEATURE_HEXADECIMAL_FLOATING_POINT
+	OpCode_Table[0x60] = &OpCode_0x60;
+	OpCode_Table[0x67] = &OpCode_0x67;
+	OpCode_Table[0x68] = &OpCode_0x68;
+	OpCode_Table[0x69] = &OpCode_0x69;
+	OpCode_Table[0x6a] = &OpCode_0x6A;
+	OpCode_Table[0x6b] = &OpCode_0x6B;
+	OpCode_Table[0x6c] = &OpCode_0x6C;
+	OpCode_Table[0x6d] = &OpCode_0x6D;
+	OpCode_Table[0x6e] = &OpCode_0x6E;
+	OpCode_Table[0x6f] = &OpCode_0x6F;
+	OpCode_Table[0x70] = &OpCode_0x70;
+#endif /*FEATURE_HEXADECIMAL_FLOATING_POINT*/
+#ifdef FEATURE_IMMEDIATE_AND_RELATIVE
+	OpCode_Table[0x71] = &OpCode_0x71;
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_HEXADECIMAL_FLOATING_POINT
+	OpCode_Table[0x78] = &OpCode_0x78;
+	OpCode_Table[0x79] = &OpCode_0x79;
+	OpCode_Table[0x7a] = &OpCode_0x7A;
+	OpCode_Table[0x7b] = &OpCode_0x7B;
+	OpCode_Table[0x7c] = &OpCode_0x7C;
+	OpCode_Table[0x7d] = &OpCode_0x7D;
+	OpCode_Table[0x7e] = &OpCode_0x7E;
+	OpCode_Table[0x7f] = &OpCode_0x7F;
+#endif /*FEATURE_HEXADECIMAL_FLOATING_POINT*/
+	OpCode_Table[0x80] = &OpCode_0x80;
+	OpCode_Table[0x82] = &OpCode_0x82;
+	OpCode_Table[0x83] = &OpCode_0x83;
+#ifdef FEATURE_IMMEDIATE_AND_RELATIVE
+	OpCode_Table[0x84] = &OpCode_0x84;
+	OpCode_Table[0x85] = &OpCode_0x85;
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+	OpCode_Table[0x86] = &OpCode_0x86;
+	OpCode_Table[0x87] = &OpCode_0x87;
+	OpCode_Table[0x88] = &OpCode_0x88;
+	OpCode_Table[0x89] = &OpCode_0x89;
+	OpCode_Table[0x8a] = &OpCode_0x8A;
+	OpCode_Table[0x8b] = &OpCode_0x8B;
+	OpCode_Table[0x8c] = &OpCode_0x8C;
+	OpCode_Table[0x8d] = &OpCode_0x8D;
+	OpCode_Table[0x8e] = &OpCode_0x8E;
+	OpCode_Table[0x8f] = &OpCode_0x8F;
+	OpCode_Table[0x90] = &OpCode_0x90;
+	OpCode_Table[0x91] = &OpCode_0x91;
+	OpCode_Table[0x92] = &OpCode_0x92;
+	OpCode_Table[0x93] = &OpCode_0x93;
+	OpCode_Table[0x94] = &OpCode_0x94;
+	OpCode_Table[0x95] = &OpCode_0x95;
+	OpCode_Table[0x96] = &OpCode_0x96;
+	OpCode_Table[0x97] = &OpCode_0x97;
+	OpCode_Table[0x98] = &OpCode_0x98;
+#ifdef FEATURE_TRACING
+	OpCode_Table[0x99] = &OpCode_0x99;
+#endif /*FEATURE_TRACING*/
+#ifdef FEATURE_ACCESS_REGISTERS
+	OpCode_Table[0x9a] = &OpCode_0x9A;
+	OpCode_Table[0x9b] = &OpCode_0x9B;
+#endif /*FEATURE_ACCESS_REGISTERS*/
+#ifdef FEATURE_S370_CHANNEL
+	OpCode_Table[0x9c] = &OpCode_0x9C;
+	OpCode_Table[0x9d] = &OpCode_0x9D;
+	OpCode_Table[0x9e] = &OpCode_0x9E;
+	OpCode_Table[0x9f] = &OpCode_0x9F;
+#endif /*FEATURE_S370_CHANNEL*/
+#ifdef FEATURE_VECTOR_FACILITY
+	OpCode_Table[0xa4] = &OpCode_0xA4;
+	OpCode_Table[0xa5] = &OpCode_0xA5;
+	OpCode_Table[0xa6] = &OpCode_0xA6;
+#endif /*FEATURE_VECTOR_FACILITY*/
+#ifdef FEATURE_IMMEDIATE_AND_RELATIVE
+	OpCode_Table[0xa7] = &OpCode_0xA7;
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
+#ifdef FEATURE_COMPARE_AND_MOVE_EXTENDED
+	OpCode_Table[0xa8] = &OpCode_0xA8;
+	OpCode_Table[0xa9] = &OpCode_0xA9;
+#endif /*FEATURE_COMPARE_AND_MOVE_EXTENDED*/
+	OpCode_Table[0xac] = &OpCode_0xAC;
+	OpCode_Table[0xad] = &OpCode_0xAD;
+	OpCode_Table[0xae] = &OpCode_0xAE;
+	OpCode_Table[0xaf] = &OpCode_0xAF;
+	OpCode_Table[0xb1] = &OpCode_0xB1;
+	OpCode_Table[0xb2] = &OpCode_0xB2;
+	OpCode_Table[0xb6] = &OpCode_0xB6;
+	OpCode_Table[0xb7] = &OpCode_0xB7;
+	OpCode_Table[0xba] = &OpCode_0xBA;
+	OpCode_Table[0xbb] = &OpCode_0xBB;
+	OpCode_Table[0xbd] = &OpCode_0xBD;
+	OpCode_Table[0xbe] = &OpCode_0xBE;
+	OpCode_Table[0xbf] = &OpCode_0xBF;
+	OpCode_Table[0xd1] = &OpCode_0xD1;
+	OpCode_Table[0xd2] = &OpCode_0xD2;
+	OpCode_Table[0xd3] = &OpCode_0xD3;
+	OpCode_Table[0xd4] = &OpCode_0xD4;
+	OpCode_Table[0xd5] = &OpCode_0xD5;
+	OpCode_Table[0xd6] = &OpCode_0xD6;
+	OpCode_Table[0xd7] = &OpCode_0xD7;
+	OpCode_Table[0xd9] = &OpCode_0xD9;
+	OpCode_Table[0xda] = &OpCode_0xDA;
+	OpCode_Table[0xdb] = &OpCode_0xDB;
+	OpCode_Table[0xdc] = &OpCode_0xDC;
+	OpCode_Table[0xdd] = &OpCode_0xDD;
+	OpCode_Table[0xde] = &OpCode_0xDE;
+	OpCode_Table[0xdf] = &OpCode_0xDF;
+#ifdef FEATURE_VECTOR_FACILITY
+	OpCode_Table[0xe4] = &OpCode_0xE4;
+#endif /*FEATURE_VECTOR_FACILITY*/
+	OpCode_Table[0xe5] = &OpCode_0xE5;
+	OpCode_Table[0xe8] = &OpCode_0xE8;
+	OpCode_Table[0xf0] = &OpCode_0xF0;
+	OpCode_Table[0xf1] = &OpCode_0xF1;
+	OpCode_Table[0xf2] = &OpCode_0xF2;
+	OpCode_Table[0xf3] = &OpCode_0xF3;
+	OpCode_Table[0xf8] = &OpCode_0xF8;
+	OpCode_Table[0xf9] = &OpCode_0xF9;
+	OpCode_Table[0xfa] = &OpCode_0xFA;
+	OpCode_Table[0xfb] = &OpCode_0xFB;
+	OpCode_Table[0xfc] = &OpCode_0xFC;
+	OpCode_Table[0xfd] = &OpCode_0xFD;
+}
 
 /*-------------------------------------------------------------------*/
 /* Perform I/O interrupt if pending                                  */
@@ -7261,6 +14151,9 @@ int     icidx;                          /* Instruction counter index */
         sysblk.brdcstncpu++;
 #endif /*MAX_CPU_ENGINES > 1*/
 
+    /* init the opcode table */
+    OpCode_Init();
+	
     /* Perform initial cpu reset */
     initial_cpu_reset(regs);
 
@@ -7572,7 +14465,8 @@ int     icidx;                          /* Instruction counter index */
         }
 
         /* Execute the instruction */
-        execute_instruction (regs->inst, 0, regs);
+        /* execute_instruction (regs->inst, 0, regs); */
+	OpCode_Table[regs->inst[0]] (regs->inst, 0, regs);
     }
 
     return NULL;

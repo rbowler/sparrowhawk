@@ -194,7 +194,7 @@ U16     numvec;                         /* Number of VFs             */
 S32     sysepoch;                       /* System epoch year         */
 S32     tzoffset;                       /* System timezone offset    */
 int     toddrag;                        /* TOD clock drag factor     */
-int     ostailor;                       /* OS to tailor system to    */
+U64     ostailor;                       /* OS to tailor system to    */
 BYTE   *sdevnum;                        /* -> Device number string   */
 BYTE   *sdevtype;                       /* -> Device type string     */
 U16     devnum;                         /* Device number             */
@@ -644,7 +644,7 @@ BYTE    c;                              /* Work area for sscanf      */
     sysblk.toddrag = toddrag;
 
     /* Set the system OS tailoring value */
-    sysblk.ostailor = ostailor;
+    sysblk.pgminttr = ostailor;
 
     /* Parse the device configuration statements */
     while(1)

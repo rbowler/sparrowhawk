@@ -6,7 +6,11 @@
 #
 #
 
-VERSION  = 1.62
+VERSION  = 1.63
+
+# Change this if you want to install the Hercules executables somewhere
+#   besides /usr/bin.
+DESTDIR  = /usr/bin
 
 CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=390
 #	   -march=pentium -malign-double -mwide-multiply
@@ -15,16 +19,17 @@ CFL_370  = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=370
 LFLAGS	 = -lpthread
 
 EXEFILES = hercules-370 hercules-390 \
-	   dasdinit dasdisup dasdload dasdpdsu tapecopy
+	   dasdinit dasdisup dasdload dasdls dasdpdsu \
+	   tapecopy tapemap tapesplit
 
 TARFILES = makefile *.c *.h hercules.cnf tapeconv.jcl dasdlist \
-	   obj370 obj390 html
+	   obj370 obj390 html zzsa.cnf zzsacard.bin
 
 HRC_370_OBJS = obj370/impl.o obj370/config.o obj370/panel.o \
 	   obj370/ipl.o obj370/cpu.o obj370/assist.o obj370/dat.o \
 	   obj370/block.o obj370/stack.o obj370/xmem.o obj370/sort.o \
 	   obj370/decimal.o obj370/service.o \
-	   obj370/diagnose.o obj370/diagmssf.o obj370/diagsnio.o \
+	   obj370/diagnose.o obj370/diagmssf.o obj370/diagvm.o \
 	   obj370/channel.o obj370/ckddasd.o obj370/fbadasd.o \
 	   obj370/tapedev.o obj370/cardrdr.o obj370/cardpch.o \
 	   obj370/printer.o obj370/console.o obj370/external.o \
@@ -35,7 +40,7 @@ HRC_390_OBJS = obj390/impl.o obj390/config.o obj390/panel.o \
 	   obj390/ipl.o obj390/cpu.o obj390/assist.o obj390/dat.o \
 	   obj390/block.o obj390/stack.o obj390/xmem.o obj390/sort.o \
 	   obj390/decimal.o obj390/service.o \
-	   obj390/diagnose.o obj390/diagmssf.o obj390/diagsnio.o \
+	   obj390/diagnose.o obj390/diagmssf.o obj390/diagvm.o \
 	   obj390/channel.o obj390/ckddasd.o obj390/fbadasd.o \
 	   obj390/tapedev.o obj390/cardrdr.o obj390/cardpch.o \
 	   obj390/printer.o obj390/console.o obj390/external.o \
@@ -48,9 +53,15 @@ DIS_OBJS = dasdisup.o dasdutil.o
 
 DLD_OBJS = dasdload.o dasdutil.o
 
+DLS_OBJS = dasdls.o dasdutil.o
+
 DPU_OBJS = dasdpdsu.o dasdutil.o
 
 TCY_OBJS = tapecopy.o
+
+TMA_OBJS = tapemap.o
+
+TSP_OBJS = tapesplit.o
 
 HEADERS  = hercules.h esa390.h
 
@@ -77,11 +88,20 @@ dasdisup:  $(DIS_OBJS)
 dasdload:  $(DLD_OBJS)
 	$(CC) -o dasdload $(DLD_OBJS)
 
+dasdls:  $(DLS_OBJS)
+	$(CC) -o dasdls $(DLS_OBJS)
+
 dasdpdsu:  $(DPU_OBJS)
 	$(CC) -o dasdpdsu $(DPU_OBJS)
 
 tapecopy:  $(TCY_OBJS)
 	$(CC) -o tapecopy $(TCY_OBJS)
+
+tapemap:  $(TMA_OBJS)
+	$(CC) -o tapemap $(TMA_OBJS)
+
+tapesplit:  $(TSP_OBJS)
+	$(CC) -o tapesplit $(TSP_OBJS)
 
 dasdinit.o: dasdinit.c $(HEADERS) dasdblks.h makefile
 
@@ -89,14 +109,24 @@ dasdisup.o: dasdisup.c $(HEADERS) dasdblks.h makefile
 
 dasdload.o: dasdload.c $(HEADERS) dasdblks.h makefile
 
+dasdls.o: dasdls.c $(HEADERS) dasdblks.h makefile
+
 dasdpdsu.o: dasdpdsu.c $(HEADERS) dasdblks.h makefile
 
 dasdutil.o: dasdutil.c $(HEADERS) dasdblks.h
 
 tapecopy.o: tapecopy.c $(HEADERS) makefile
 
+tapemap.o: tapemap.c $(HEADERS) makefile
+
+tapesplit.o: tapesplit.c $(HEADERS) makefile
+
 clean:
-	rm -f $(EXEFILES) *.o obj370/*.o obj390/*.o
+	rm -rf $(EXEFILES) *.o obj370 obj390; mkdir obj370 obj390
 
 tar:
 	tar cvzf hercules-$(VERSION).tar.gz --exclude \*.o $(TARFILES)
+
+install:  $(EXEFILES)
+	cp $(EXEFILES) $(DESTDIR)
+	cp dasdlist $(DESTDIR)

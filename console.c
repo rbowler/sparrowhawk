@@ -10,6 +10,19 @@
 /* - 1052 and 3215 console printer keyboards via regular telnet      */
 /*-------------------------------------------------------------------*/
 
+/*-------------------------------------------------------------------*/
+/* This module also takes care of the differences between the        */
+/* remote 3270 and local nonsna 3270 devices.  In perticular         */
+/* the support of command chaining, which is not supported on        */
+/* the remote 3270 implementation on which telnet 3270 is based.     */
+/* In the local nonsna environtments a chained read or write will    */
+/* continue at the buffer address where the previous command ended.  */
+/* In order to achieve this, this module will keep track of the      */
+/* buffer location, and ajust the buffer address on chained read and */
+/* write operations.                                                 */
+/*                                           03/06/00 Jan Jaeger.    */
+/*-------------------------------------------------------------------*/
+
 #include "hercules.h"
 
 /*-------------------------------------------------------------------*/
@@ -60,6 +73,24 @@
 /* 3270 definitions                                                  */
 /*-------------------------------------------------------------------*/
 
+/* 3270 local commands (CCWs) */
+#define L3270_EAU       0x0F            /* Erase All Unprotected     */
+#define L3270_EW        0x05            /* Erase/Write               */
+#define L3270_EWA       0x0D            /* Erase/Write Alternate     */
+#define L3270_RB        0x02            /* Read Buffer               */
+#define L3270_RM        0x06            /* Read Modified             */
+#define L3270_WRT       0x01            /* Write                     */
+#define L3270_WSF       0x11            /* Write Structured Field    */
+
+#define L3270_NOP       0x03            /* No Operation              */
+#define L3270_SELRM     0x0B            /* Select RM                 */
+#define L3270_SELRB     0x1B            /* Select RB                 */
+#define L3270_SELRMP    0x2B            /* Select RMP                */
+#define L3270_SELRBP    0x3B            /* Select RBP                */
+#define L3270_SELWRT    0x4B            /* Select WRT                */
+#define L3270_SENSE     0x04            /* Sense                     */
+#define L3270_SENSEID   0xE4            /* Sense ID                  */
+
 /* 3270 remote commands */
 #define R3270_EAU       0x6F            /* Erase All Unprotected     */
 #define R3270_EW        0xF5            /* Erase/Write               */
@@ -82,37 +113,77 @@
 #define O3270_EUA       0x12            /* Erase Unprotected to Addr */
 #define O3270_GE        0x08            /* Graphic Escape            */
 
+/* Inbound structured fields */
+#define SF3270_AID      0x88            /* Aid value of inbound SF   */
+#define SF3270_3270DS   0x80            /* SFID of 3270 datastream SF*/
+
+/* 12 bit 3270 buffer address code conversion table                  */
+static BYTE sba_code[] = { "\x40\xC1\xC2\xC3\xC4\xC5\xC6\xC7"
+                           "\xC8\xC9\x4A\x4B\x4C\x4D\x4E\x4F"
+                           "\x50\xD1\xD2\xD3\xD4\xD5\xD6\xD7"
+                           "\xD8\xD9\x5A\x5B\x5C\x5D\x5E\x5F"
+                           "\x60\x61\xE2\xE3\xE4\xE5\xE6\xE7"
+                           "\xE8\xE9\x6A\x6B\x6C\x6D\x6E\x6F"
+                           "\xF0\xF1\xF2\xF3\xF4\xF5\xF6\xF7"
+                           "\xF8\xF9\x7A\x7B\x7C\x7D\x7E\x7F" };
+
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
 /*-------------------------------------------------------------------*/
-#define TNSDEBUG(lvl,format,a...) \
-        if(debug>=lvl)logmsg("console: " format, ## a)
-#define TNSERROR(format,a...) \
-        logmsg("console: " format, ## a)
-#define BUFLEN_3270     4096
-#define LINE_LENGTH     150
+#define DEBUG_LVL       0               /* 1 = status
+                                           2 = headers
+                                           3 = buffers               */
+#if DEBUG_LVL == 0
+ #define TNSDEBUG1(_format, _args...)
+ #define TNSDEBUG2(_format, _args...)
+ #define TNSDEBUG3(_format, _args...)
+#endif
+#if DEBUG_LVL == 1
+#define TNSDEBUG1(_format, _args...) \
+        logmsg("console: " _format, ## _args)
+#define TNSDEBUG2(_format, _args...)
+#define TNSDEBUG3(_format, _args...)
+#endif
+#if DEBUG_LVL == 2
+#define TNSDEBUG1(_format, _args...) \
+        logmsg("console: " _format, ## _args)
+#define TNSDEBUG2(_format, _args...) \
+        logmsg("console: " _format, ## _args) 
+#define TNSDEBUG3(_format, _args...) 
+#endif
+#if DEBUG_LVL == 3
+#define TNSDEBUG1(_format, _args...) \
+        logmsg("console: " _format, ## _args)
+#define TNSDEBUG2(_format, _args...) \
+        logmsg("console: " _format, ## _args)
+#define TNSDEBUG3(_format, _args...) \
+        logmsg("console: " _format, ## _args)
+#endif
+
+#define TNSERROR(_format,_args...) \
+        logmsg("console: " _format, ## _args)
+
+#define BUFLEN_3270     32768           /* 3270 Send/Receive buffer  */
+#define BUFLEN_1052     150             /* 1052 Send/Receive buffer  */
 #define SPACE           ((BYTE)' ')
 
 
 /*-------------------------------------------------------------------*/
 /* Static data areas                                                 */
 /*-------------------------------------------------------------------*/
-static unsigned int debug = 1;          /* Debug level: 1=status,
-                                           2=headers, 3=buffers      */
 static struct utsname hostinfo;         /* Host info for this system */
 
 
 /*-------------------------------------------------------------------*/
 /* SUBROUTINE TO TRACE THE CONTENTS OF AN ASCII MESSAGE PACKET       */
 /*-------------------------------------------------------------------*/
+#if DEBUG_LVL == 3
 static void
 packet_trace(BYTE *addr, int len)
 {
 unsigned int  i, offset;
 unsigned char c;
 unsigned char print_chars[17];
-
-    if (debug < 3) return;
 
     for (offset=0; offset < len; )
     {
@@ -140,6 +211,9 @@ unsigned char print_chars[17];
     } /* end for(offset) */
 
 } /* end function packet_trace */
+#else
+ #define packet_trace( _addr, _len)
+#endif
 
 
 /*-------------------------------------------------------------------*/
@@ -188,7 +262,7 @@ int     m, n, c;
     } /* end for */
 
     if (n < m) {
-        TNSDEBUG(3, "%d IAC bytes removed, newlen=%d\n", m-n, n);
+        TNSDEBUG3( "%d IAC bytes removed, newlen=%d\n", m-n, n);
         packet_trace (buf, n);
     }
 
@@ -215,7 +289,7 @@ int     m, n, x, newlen;
 
     /* Insert extra IAC bytes backwards from the end of the buffer */
     newlen = len + x;
-    TNSDEBUG(3, "%d IAC bytes added, newlen=%d\n", x, newlen);
+    TNSDEBUG3( "%d IAC bytes added, newlen=%d\n", x, newlen);
     for (n=newlen, m=len; n > m; ) {
         buf[--n] = buf[--m];
         if (buf[n] == IAC) buf[--n] = IAC;
@@ -254,7 +328,7 @@ send_packet (int csock, BYTE *buf, int len, char *caption)
 int     rc;                             /* Return code               */
 
     if (caption != NULL) {
-        TNSDEBUG(2, "Sending %s\n", caption);
+        TNSDEBUG2( "Sending %s\n", caption);
         packet_trace (buf, len);
     }
 
@@ -303,7 +377,7 @@ int     rcvlen=0;                       /* Length of data received   */
         }
 
         if (rc == 0) {
-            TNSDEBUG(1, "Connection closed by client\n");
+            TNSDEBUG1( "Connection closed by client\n");
             return -1;
         }
 
@@ -314,7 +388,7 @@ int     rcvlen=0;                       /* Length of data received   */
             break;
     }
 
-    TNSDEBUG(2, "Packet received length=%d\n", rcvlen);
+    TNSDEBUG2( "Packet received length=%d\n", rcvlen);
     packet_trace (buf, rcvlen);
 
     return rcvlen;
@@ -335,10 +409,10 @@ BYTE    buf[512];                       /* Receive buffer            */
     if (rc < 0) return -1;
 
     if (memcmp(buf, expected, len) != 0) {
-        TNSDEBUG(2, "Expected %s\n", caption);
+        TNSDEBUG2( "Expected %s\n", caption);
         return -1;
     }
-    TNSDEBUG(2, "Received %s\n", caption);
+    TNSDEBUG2( "Received %s\n", caption);
 
     return 0;
 
@@ -419,12 +493,12 @@ static BYTE dont_echo[] = { IAC, DONT, ECHO_OPTION };
     if (rc < sizeof(type_is) + 2
         || memcmp(buf, type_is, sizeof(type_is)) != 0
         || buf[rc-2] != IAC || buf[rc-1] != SE) {
-        TNSDEBUG(2, "Expected IAC SB TERMINAL_TYPE IS\n");
+        TNSDEBUG2( "Expected IAC SB TERMINAL_TYPE IS\n");
         return -1;
     }
     buf[rc-2] = '\0';
     termtype = buf + sizeof(type_is);
-    TNSDEBUG(2, "Received IAC SB TERMINAL_TYPE IS %s IAC SE\n",
+    TNSDEBUG2( "Received IAC SB TERMINAL_TYPE IS %s IAC SE\n",
             termtype);
 
     /* Check terminal type string for device name suffix */
@@ -566,7 +640,7 @@ int     eor = 0;                        /* 1=End of record received  */
 
     /* If zero bytes were received then client has closed connection */
     if (rc == 0) {
-        TNSDEBUG(1, "Device %4.4X connection closed by client %s\n",
+        TNSDEBUG1( "Device %4.4X connection closed by client %s\n",
                 dev->devnum, inet_ntoa(dev->ipaddr));
         dev->sense[0] = SENSE_IR;
         return (CSW_ATTN | CSW_UC);
@@ -596,7 +670,7 @@ int     eor = 0;                        /* 1=End of record received  */
     /* If record is incomplete, test for buffer full */
     if (eor == 0 && dev->rlen3270 >= BUFLEN_3270)
     {
-        TNSDEBUG(1, "3270 buffer overflow\n");
+        TNSDEBUG1( "3270 buffer overflow\n");
         dev->sense[0] = SENSE_DC;
         return (CSW_ATTN | CSW_UC);
     }
@@ -605,7 +679,7 @@ int     eor = 0;                        /* 1=End of record received  */
     if (eor == 0) return 0;
 
     /* Trace the complete 3270 data packet */
-    TNSDEBUG(2, "Packet received length=%d\n", dev->rlen3270);
+    TNSDEBUG2( "Packet received length=%d\n", dev->rlen3270);
     packet_trace (dev->buf, dev->rlen3270);
 
     /* Strip off the telnet EOR marker */
@@ -670,7 +744,7 @@ BYTE            buf[32];                /* tn3270 write buffer       */
     do {
         len = dev->rlen3270;
         rc = recv_3270_data (dev);
-        TNSDEBUG(1, "read buffer: %d bytes received\n",
+        TNSDEBUG2( "read buffer: %d bytes received\n",
                 dev->rlen3270 - len);
     } while(rc == 0);
 
@@ -714,11 +788,11 @@ recv_1052_data (DEVBLK *dev)
 {
 int     num;                            /* Number of bytes received  */
 int     i;                              /* Array subscript           */
-BYTE    buf[LINE_LENGTH];               /* Receive buffer            */
+BYTE    buf[BUFLEN_1052];               /* Receive buffer            */
 BYTE    c;                              /* Character work area       */
 
     /* Receive bytes from client */
-    num = recv (dev->fd, buf, LINE_LENGTH, 0);
+    num = recv (dev->fd, buf, BUFLEN_1052, 0);
 
     /* Return unit check if error on receive */
     if (num < 0) {
@@ -729,14 +803,14 @@ BYTE    c;                              /* Character work area       */
 
     /* If zero bytes were received then client has closed connection */
     if (num == 0) {
-        TNSDEBUG(1, "Device %4.4X connection closed by client %s\n",
+        TNSDEBUG1( "Device %4.4X connection closed by client %s\n",
                 dev->devnum, inet_ntoa(dev->ipaddr));
         dev->sense[0] = SENSE_IR;
         return (CSW_ATTN | CSW_UC);
     }
 
     /* Trace the bytes received */
-    TNSDEBUG(2, "Bytes received length=%d\n", num);
+    TNSDEBUG2( "Bytes received length=%d\n", num);
     packet_trace (buf, num);
 
     /* Copy received bytes to keyboard buffer */
@@ -757,9 +831,9 @@ BYTE    c;                              /* Character work area       */
         }
 
         /* Return unit check if buffer is full */
-        if (dev->keybdrem >= LINE_LENGTH)
+        if (dev->keybdrem >= BUFLEN_1052)
         {
-            TNSDEBUG(1, "Console keyboard buffer overflow\n");
+            TNSDEBUG1( "Console keyboard buffer overflow\n");
             dev->keybdrem = 0;
             dev->sense[0] = SENSE_EC;
             return (CSW_ATTN | CSW_UC);
@@ -816,7 +890,7 @@ BYTE    c;                              /* Character work area       */
             && dev->buf[dev->keybdrem - 1] == '\n'
             && i < num - 1)
         {
-            TNSDEBUG(1, "Console keyboard buffer overrun\n");
+            TNSDEBUG1( "Console keyboard buffer overrun\n");
             dev->keybdrem = 0;
             dev->sense[0] = SENSE_OR;
             return (CSW_ATTN | CSW_UC);
@@ -831,7 +905,7 @@ BYTE    c;                              /* Character work area       */
         return 0;
 
     /* Trace the complete keyboard data packet */
-    TNSDEBUG(2, "Packet received length=%d\n", dev->keybdrem);
+    TNSDEBUG2( "Packet received length=%d\n", dev->keybdrem);
     packet_trace (dev->buf, dev->keybdrem);
 
     /* Strip off the CRLF sequence */
@@ -845,11 +919,10 @@ BYTE    c;                              /* Character work area       */
     } /* end for(i) */
 
     /* Trace the EBCDIC input data */
-    TNSDEBUG(2, "Input data line length=%d\n", dev->keybdrem);
+    TNSDEBUG2( "Input data line length=%d\n", dev->keybdrem);
     packet_trace (dev->buf, dev->keybdrem);
 
-    /* Set the read pending indicator and return attention status */
-    dev->readpending = 1;
+    /* Return attention status */
     return (CSW_ATTN);
 
 } /* end function recv_1052_data */
@@ -898,7 +971,7 @@ BYTE                    rejmsg[80];     /* Rejection message         */
         clientname = "host name unknown";
     }
 
-    TNSDEBUG(1, "Received connection from %s (%s)\n",
+    TNSDEBUG1( "Received connection from %s (%s)\n",
             clientip, clientname);
 
     /* Negotiate telnet parameters */
@@ -986,7 +1059,7 @@ BYTE                    rejmsg[80];     /* Rejection message         */
                     "Connection rejected, device %4.4X unavailable",
                     devnum);
 
-        TNSDEBUG(1, "%s\n", rejmsg);
+        TNSDEBUG1( "%s\n", rejmsg);
 
         /* Send connection rejection message to client */
         if (class == 'D')
@@ -1013,7 +1086,7 @@ BYTE                    rejmsg[80];     /* Rejection message         */
         return NULL;
     }
 
-    TNSDEBUG(1, "Client %s connected to %4.4X device %4.4X\n",
+    TNSDEBUG1( "Client %s connected to %4.4X device %4.4X\n",
             clientip, dev->devtype, dev->devnum);
 
     /* Send connection message to client */
@@ -1215,7 +1288,8 @@ BYTE                    unitstat;       /* Status after receive data */
                 }
 
                 /* Indicate that data is available at the device */
-                dev->readpending = 1;
+                if(dev->rlen3270)
+                    dev->readpending = 1;
 
                 /* Release the device lock */
                 release_lock (&dev->lock);
@@ -1224,7 +1298,7 @@ BYTE                    unitstat;       /* Status after receive data */
                 rc = device_attention (dev, unitstat);
 
                 /* Trace the attention request */
-                TNSDEBUG(2, "%4.4X attention request %s\n",
+                TNSDEBUG2( "%4.4X attention request %s\n",
                         dev->devnum,
                         (rc == 0 ? "raised" : "rejected"));
 
@@ -1272,9 +1346,6 @@ int loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     dev->devid[5] = 0x78;
     dev->devid[6] = 0x02;
     dev->numdevid = 7;
-
-    /* Activate CCW tracing */
-//  dev->ccwtrace = 1;
 
     return 0;
 } /* end function loc3270_init_handler */
@@ -1329,7 +1400,7 @@ int constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     dev->keybdrem = 0;
 
     /* Set length of print buffer */
-    dev->bufsize = LINE_LENGTH;
+    dev->bufsize = BUFLEN_1052;
 
     /* Initialize the device identifier bytes */
     dev->devid[0] = 0xFF;
@@ -1340,9 +1411,6 @@ int constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     dev->devid[5] = dev->devtype & 0xFF;
     dev->devid[6] = 0x00;
     dev->numdevid = 7;
-
-    /* Activate I/O tracing */
-//  dev->ccwtrace = 1;
 
     return 0;
 } /* end function constty_init_handler */
@@ -1383,6 +1451,124 @@ int constty_close_device ( DEVBLK *dev )
 
 
 /*-------------------------------------------------------------------*/
+/* find_buffer_pos() returns the offset of the screen position       */
+/*-------------------------------------------------------------------*/
+int find_buffer_pos (BYTE *buf, int size, int pos)
+{
+int     i, j;
+
+    for(j = i = 0; i < size; i++)
+        if(j >= pos)
+            return i;
+        else
+            switch(buf[i]) {
+                case O3270_SBA: 
+                    i += 2;
+                    break;
+                case O3270_EUA:
+                case O3270_SA:
+                    i += 2;
+                    break;
+                case O3270_RA:
+                    if(buf[i+3] == O3270_GE)
+                        i++;
+                case O3270_SFE:
+                case O3270_MF:
+                    i += 3;
+                    break;
+                case O3270_IC:
+                case O3270_PT:
+                    break;
+                case O3270_SF:
+                case O3270_GE:
+                    i += 1;
+                default:
+                    j++;
+                    break;
+            }
+    /* Return offset zero if the position cannot be determined */
+    return 0;
+}
+
+
+/*-------------------------------------------------------------------*/
+/* get_screen_pos() updates the current screen position              */
+/*-------------------------------------------------------------------*/
+void get_screen_pos (int *pos, BYTE *buf, int size)
+{
+int     i;
+
+    for(i = 0; i < size; i++)
+        switch(buf[i]) {
+            case O3270_RA:
+                /* The Repeat to Address order has 3 argument bytes
+                   and in case of a Graphics Escape 4 bytes
+                   repeat to address sets the buffer address */
+
+                if ((buf[i+1] & 0xC0) == 0x00)
+                    *pos = (buf[i+1] << 8) | buf[i+2];
+                else
+                    *pos = ((buf[i+1] & 0x3F) << 6)
+                                 | (buf[i+2] & 0x3F);
+                if(buf[i+3] == O3270_GE)
+                    i++;
+                /*fallthru*/
+            
+            case O3270_SFE:
+            case O3270_MF:
+                /* Start Field Extended and Modify Field have 
+                   both 3 argument bytes, and do not change 
+                   buffer address */
+
+                i += 3;
+                break;
+
+            case O3270_SBA:
+            case O3270_EUA:
+                /* Set Buffer Address and Erase Unprotected to
+                   Address have 2 argument bytes and set the buffer 
+                   address */ 
+
+                if ((buf[i+1] & 0xC0) == 0x00)
+                    *pos = (buf[i+1] << 8) | buf[i+2];
+                else
+                    *pos = ((buf[i+1] & 0x3F) << 6)
+                                 | (buf[i+2] & 0x3F);
+                /*fallthru*/
+
+            case O3270_SA:
+                /* Set Attribute has 2 argument bytes and does not
+                   change the buffer address */
+
+                i += 2;
+                break;
+
+            case O3270_IC:
+            case O3270_PT:
+                /* Insert Cursor and Program Tab have no argument 
+                   bytes and do not change the buffer address */
+
+                break;
+
+            case O3270_SF:
+            case O3270_GE:
+                /* Start Field and Graphics Escape have one argument
+                   byte, and take 1 screen position, so advance the buffer
+                   address by 1 */
+
+                i += 1;
+                /*fallthru*/
+
+            default:
+                /* Any other character takes one screen position */
+
+                (*pos)++;
+                break;
+        }
+}
+
+
+/*-------------------------------------------------------------------*/
 /* EXECUTE A 3270 CHANNEL COMMAND WORD                               */
 /*-------------------------------------------------------------------*/
 void loc3270_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
@@ -1392,17 +1578,17 @@ void loc3270_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
 int             rc;                     /* Return code               */
 int             num;                    /* Number of bytes to copy   */
 int             len;                    /* Data length               */
-int             off;                    /* Offset in device buffer   */
+int             aid;                    /* First read: AID present   */
 int             pos;                    /* Position in screen        */
 BYTE            cmd;                    /* tn3270 command code       */
-BYTE            buf[32768];             /* tn3270 write buffer       */
+BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
 
     /* Clear the current screen position at start of CCW chain */
-    if (chained == 0)
+    if (!chained)
         dev->pos3270 = 0;
 
     /* Unit check with intervention required if no client connected */
-    if (dev->connected == 0 && !IS_CCW_SENSE(code))
+    if (!dev->connected && !IS_CCW_SENSE(code))
     {
         dev->sense[0] = SENSE_IR;
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -1412,68 +1598,71 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
     /* Process depending on CCW opcode */
     switch (code) {
 
-    case 0x03:
+    case L3270_NOP:
     /*---------------------------------------------------------------*/
     /* CONTROL NO-OPERATION                                          */
     /*---------------------------------------------------------------*/
+
+        /* Reset the buffer address */
+        dev->pos3270 = 0;
+
         *unitstat = CSW_CE | CSW_DE;
         break;
 
-    case 0x0B: /* SELECT (3274-1B) or SELECT RM (3274-1D) */
-    case 0x1B: /* SELECT RB (3274-1D) */
-    case 0x2B: /* SELECT RMP (3274-1D) */
-    case 0x3B: /* SELECT RBP (3274-1D) */
-    case 0x4B: /* SELECT WRT (3274-1D) */
+    case L3270_SELRM:
+    case L3270_SELRB:
+    case L3270_SELRMP:
+    case L3270_SELRBP:
+    case L3270_SELWRT:
     /*---------------------------------------------------------------*/
     /* SELECT                                                        */
     /*---------------------------------------------------------------*/
+
+        /* Reset the buffer address */
+        dev->pos3270 = 0;
+
         *residual = 0;
         *unitstat = CSW_CE | CSW_DE;
         break;
 
-    case 0x0F:
+    case L3270_EAU:
     /*---------------------------------------------------------------*/
     /* ERASE ALL UNPROTECTED                                         */
     /*---------------------------------------------------------------*/
+        dev->pos3270 = 0;
         cmd = R3270_EAU;
         goto write;
 
-    case 0x01:
+    case L3270_WRT:
     /*---------------------------------------------------------------*/
     /* WRITE                                                         */
     /*---------------------------------------------------------------*/
         cmd = R3270_WRT;
         goto write;
 
-    case 0x05:
+    case L3270_EW:
     /*---------------------------------------------------------------*/
     /* ERASE/WRITE                                                   */
     /*---------------------------------------------------------------*/
+        dev->pos3270 = 0;
         cmd = R3270_EW;
         goto write;
 
-    case 0x0D:
+    case L3270_EWA:
     /*---------------------------------------------------------------*/
     /* ERASE/WRITE ALTERNATE                                         */
     /*---------------------------------------------------------------*/
+        dev->pos3270 = 0;
         cmd = R3270_EWA;
         goto write;
 
-    case 0x11:
+    case L3270_WSF:
     /*---------------------------------------------------------------*/
     /* WRITE STRUCTURED FIELD                                        */
     /*---------------------------------------------------------------*/
-        /* Process WSF command if device has extended attributes */
-        if (dev->eab3270)
-        {
-            cmd = R3270_WSF;
-            goto write;
-        }
-
-        /* Command reject, device does not have extended attributes */
-        dev->sense[0] = SENSE_CR;
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
-        break;
+        dev->pos3270 = 0;
+        cmd = R3270_WSF;
+//      goto write;
 
     write:
     /*---------------------------------------------------------------*/
@@ -1482,15 +1671,55 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
         /* Initialize the data length */
         len = 0;
 
-        /* Move the 3270 command code to the first byte of the buffer
-           unless data-chained from previous CCW */
-        if ((chained & CCW_FLAGS_CD) == 0)
-            buf[len++] = cmd;
-
         /* Calculate number of bytes to move and residual byte count */
         num = sizeof(buf) / 2;
         num = (count < num) ? count : num;
         *residual = count - num;
+
+        /* Move the 3270 command code to the first byte of the buffer
+           unless data-chained from previous CCW */
+        if ((chained & CCW_FLAGS_CD) == 0)
+        {
+            buf[len++] = cmd;
+            /* If this is a chained write then we start at the
+               current buffer address rather then the cursor address.
+               If the first action the datastream takes is not a
+               positioning action then insert a SBA to position to
+               the current buffer address */
+            if(chained
+              && cmd == R3270_WRT
+              && dev->pos3270 != 0
+              && iobuf[1] != O3270_SBA
+              && iobuf[1] != O3270_RA
+              && iobuf[1] != O3270_EUA)
+            {
+                /* Copy the write control character and ajust buffer */
+                buf[len++] = *iobuf++; num--;
+                /* Insert the SBA order */
+                buf[len++] = O3270_SBA;
+                if(dev->pos3270 < 4096)
+                {
+                    buf[len++] = sba_code[dev->pos3270 >> 6];
+                    buf[len++] = sba_code[dev->pos3270 & 0x3F];
+                }
+                else
+                {
+                    buf[len++] = dev->pos3270 >> 8;
+                    buf[len++] = dev->pos3270 & 0xFF;
+                }
+            } /* if(iobuf[0] != SBA, RA or EUA) */
+
+            /* Save the screen position at completion of the write.
+               This is necessary in case a Read Buffer command is chained
+               from another write or read, this does not apply for the 
+               write structured field command */
+            if(cmd != R3270_WSF)
+                get_screen_pos(&dev->pos3270, iobuf+1,num-1);
+
+        } /* if(!data_chained) */
+        else /* if(data_chained) */
+            if(cmd != R3270_WSF)
+                get_screen_pos(&dev->pos3270, iobuf,num);
 
         /* Copy data from channel buffer to device buffer */
         memcpy (buf + len, iobuf, num);
@@ -1514,43 +1743,19 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
             break;
         }
 
-        /* == Start of special fix for OS/360 NIP == */
-
-        /* Save the screen position at completion of the write.
-           This is necessary in case a Read Buffer command is chained
-           from the write; the Read Buffer must then return data from
-           the current screen position instead of position zero.
-           Note that we only set this field correctly in the case
-           of a Write consisting only of a SBA order, because the only
-           known case where this matters is in OS/360 NIP where the
-           Read Buffer is preceded by a Write SBA with no data. */
-        if (code == 0x01
-            && (chained & CCW_FLAGS_CD) == 0
-            && (flags & CCW_FLAGS_CD) == 0
-            && (flags & CCW_FLAGS_CC)
-            && count == 4 && iobuf[1] == O3270_SBA)
-        {
-            if ((iobuf[2] & 0xC0) == 0x00)
-                dev->pos3270 = (iobuf[2] << 8) | iobuf[3];
-            else
-                dev->pos3270 = ((iobuf[2] & 0x3F) << 6)
-                                | (iobuf[3] & 0x3F);
-        }
-        else
-            dev->pos3270 = 0;
-
-        /* == End of special fix for OS/360 NIP == */
-
         /* Return normal status */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
-    case 0x02:
+    case L3270_RB:
     /*---------------------------------------------------------------*/
     /* READ BUFFER                                                   */
     /*---------------------------------------------------------------*/
         /* Obtain the device lock */
         obtain_lock (&dev->lock);
+
+        /* AID is only present during the first read */
+        aid = dev->readpending != 2;
 
         /* Receive buffer data from client if not data chained */
         if ((chained & CCW_FLAGS_CD) == 0)
@@ -1564,84 +1769,18 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
                 break;
             }
 
-            /* == Start of special fix for OS/360 NIP == */
+            /* Set AID in buffer flag */
+            aid = 1;
 
-            /* If chained to a Write, Erase/Write, Read Modified, or
-               Read Buffer command, then data transfer begins at the
-               screen position following completion of last command */
-            if (prevcode == 0x01 || prevcode == 0x05
-                || prevcode == 0x0D
-                || prevcode == 0x06 || prevcode == 0x02)
+            /* Save the AID of the current inbound transmission */
+            dev->aid3270 = dev->buf[0];
+            if(dev->pos3270 != 0 && dev->aid3270 != SF3270_AID)
             {
-                /* Screen position 0 is at offset 3 in the device
-                   buffer, following the AID and cursor address bytes */
-                pos = 0;
-                off = 3;
-
-                /* Search the buffer for the current screen position */
-                while (pos < dev->pos3270 && off < dev->rlen3270)
-                {
-                    /* Start Field order is two bytes long and
-                       occupies one position on the screen */
-                    if (dev->buf[off] == O3270_SF)
-                    {
-                        pos++;
-                        off += 2;
-                        continue;
-                    }
-
-                    /* Start Field Extended order is two bytes plus
-                       a variable number of attribute type-value pairs
-                       and occupies one position on the screen */
-                    if (dev->buf[off] == O3270_SFE)
-                    {
-                        pos++;
-                        off += (2 + 2*dev->buf[off+1]);
-                        continue;
-                    }
-
-                    /* Set Attribute order is three bytes long and
-                       occupies no position on the screen */
-                    if (dev->buf[off] == O3270_SA)
-                    {
-                        off += 3;
-                        continue;
-                    }
-
-                    /* Graphic Escape order is two bytes long and
-                       occupies one position on the screen */
-                    if (dev->buf[off] == O3270_GE)
-                    {
-                        pos++;
-                        off += 2;
-                        continue;
-                    }
-
-                    /* Regular characters occupy one screen position */
-                    pos++;
-                    off++;
-                }
-
-                /* == Extra fix for OS/390 consoles with EAB == */
-
-                /* I do not understand why, but the above algorithm
-                   ends up 8 bytes adrift of the entry area when an
-                   MCS console performs a read buffer operation in
-                   extended field mode.  The temporary bypass is to
-                   add 8 to the calculated buffer offset */
-                if (dev->eab3270 && dev->pos3270 == 0x0690
-                    && dev->buf[off+9] == O3270_SFE)
-                    off += 8;
-
-                /* == End of fix for OS/390 consoles with EAB == */
-
-                /* Shift out unwanted characters from buffer */
-                num = (dev->rlen3270 > off ? dev->rlen3270 - off : 0);
-                memmove (dev->buf + 3, dev->buf + off, num);
-                dev->rlen3270 = 3 + num;
+                /* Find current position in buffer */
+                pos = find_buffer_pos(dev->buf+3,dev->rlen3270-3,dev->pos3270);
+                memmove(dev->buf+3, dev->buf+3+pos, dev->rlen3270-(pos+3));
+                dev->rlen3270 -= pos;
             }
-
-            /* == End of special fix for OS/360 NIP == */
 
         } /* end if(!CCW_FLAGS_CD) */
 
@@ -1650,6 +1789,21 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
         num = (count < len) ? count : len;
         *residual = count - num;
         if (count < len) *more = 1;
+
+        /* Save the screen position at completion of the read.
+           This is necessary in case a Read Buffer command is chained
+           from another write or read. */
+        if(dev->aid3270 != SF3270_AID)
+        {
+            if(aid)
+                get_screen_pos(&dev->pos3270, dev->buf+3, num-3);
+            else
+                get_screen_pos(&dev->pos3270, dev->buf, num);
+        }
+
+        /* Indicate that the AID bytes have been skipped */
+        if(dev->readpending == 1)
+            dev->readpending = 2;
 
         /* Copy data from device buffer to channel buffer */
         memcpy (iobuf, dev->buf, num);
@@ -1673,19 +1827,22 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
         release_lock (&dev->lock);
         break;
 
-    case 0x06:
+    case L3270_RM:
     /*---------------------------------------------------------------*/
     /* READ MODIFIED                                                 */
     /*---------------------------------------------------------------*/
         /* Obtain the device lock */
         obtain_lock (&dev->lock);
 
+        /* AID is only present during the first read */
+        aid = dev->readpending != 2;
+
         /* If not data chained from previous Read Modified CCW,
            and if the connection thread has not already accumulated
            a complete Read Modified record in the inbound buffer,
            then solicit a Read Modified operation at the client */
         if ((chained & CCW_FLAGS_CD) == 0
-            && dev->readpending == 0)
+            && !dev->readpending)
         {
             /* Send read modified command to client, await response */
             rc = solicit_3270_data (dev, R3270_RM);
@@ -1696,6 +1853,15 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
                 break;
             }
 
+            dev->aid3270 = dev->buf[0];
+            if(dev->pos3270 != 0 && dev->aid3270 != SF3270_AID)
+            {
+                /* Find current position in buffer */
+                pos = find_buffer_pos(dev->buf+3,dev->rlen3270-3,dev->pos3270);
+                memmove(dev->buf+3, dev->buf+3+pos, dev->rlen3270-(pos+3));
+                dev->rlen3270 -= pos;
+            }
+
         } /* end if(!CCW_FLAGS_CD) */
 
         /* Calculate number of bytes to move and residual byte count */
@@ -1703,6 +1869,21 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
         num = (count < len) ? count : len;
         *residual = count - num;
         if (count < len) *more = 1;
+
+        /* Save the screen position at completion of the read.
+           This is necessary in case a Read Buffer command is chained
+           from another write or read. */
+        if(dev->aid3270 != SF3270_AID)
+        {
+            if(aid)
+                get_screen_pos(&dev->pos3270, dev->buf+3, num-3);
+            else
+                get_screen_pos(&dev->pos3270, dev->buf, num);
+        }
+
+        /* Indicate that the AID bytes have been skipped */
+        if(dev->readpending == 1)
+            dev->readpending = 2;
 
         /* Copy data from device buffer to channel buffer */
         memcpy (iobuf, dev->buf, num);
@@ -1730,7 +1911,7 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
 
         break;
 
-    case 0x04:
+    case L3270_SENSE:
     /*---------------------------------------------------------------*/
     /* SENSE                                                         */
     /*---------------------------------------------------------------*/
@@ -1745,11 +1926,14 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
         /* Clear the device sense bytes */
         memset (dev->sense, 0, sizeof(dev->sense));
 
+        /* Reset the buffer address */
+        dev->pos3270 = 0;
+
         /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
-    case 0xE4:
+    case L3270_SENSEID:
     /*---------------------------------------------------------------*/
     /* SENSE ID                                                      */
     /*---------------------------------------------------------------*/
@@ -1760,6 +1944,9 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
 
         /* Copy device identifier bytes to channel I/O buffer */
         memcpy (iobuf, dev->devid, num);
+
+        /* Reset the buffer address */
+        dev->pos3270 = 0;
 
         /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;
@@ -1813,7 +2000,7 @@ BYTE    stat;                           /* Unit status               */
     /*---------------------------------------------------------------*/
 
         /* Calculate number of bytes to write and set residual count */
-        num = (count < LINE_LENGTH) ? count : LINE_LENGTH;
+        num = (count < BUFLEN_1052) ? count : BUFLEN_1052;
         *residual = count - num;
 
         /* Translate data in channel buffer to ASCII */
@@ -1976,4 +2163,3 @@ BYTE    stat;                           /* Unit status               */
     } /* end switch(code) */
 
 } /* end function constty_execute_ccw */
-

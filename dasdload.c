@@ -9,6 +9,7 @@
 /*-------------------------------------------------------------------*/
 /* Additional credits:                                               */
 /*      Corrections to CVOL initialization logic by Jay Maynard      */
+/*      IEBCOPY native dataset support by Ronen Tzur                 */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -97,6 +98,7 @@ typedef struct _TTRCONV {
 #define METHOD_DIP      2
 #define METHOD_CVOL     3
 #define METHOD_VTOC     4
+#define METHOD_VS       5
 
 /*-------------------------------------------------------------------*/
 /* Static data areas                                                 */
@@ -1720,6 +1722,80 @@ BYTE            seghdr[2];              /* Segment length and flags  */
 } /* end function read_xmit_rec */
 
 /*-------------------------------------------------------------------*/
+/* Subroutine to assemble a logical record from DSORG=VS file        */
+/* Input:                                                            */
+/*      xfd     Input file descriptor                                */
+/*      xfname  Input file name                                      */
+/*      xbuf    Pointer to buffer to receive logical record          */
+/*      recnum  Relative number for the record to be read            */
+/* Output:                                                           */
+/*      The return value is the logical record length,               */
+/*      or -1 if an error occurred.                                  */
+/*-------------------------------------------------------------------*/
+static int
+read_vs_rec (int xfd, BYTE *xfname, BYTE *xbuf, int recnum)
+{
+int             rc;                     /* Return code               */
+int             xreclen;                /* Cumulative record length  */
+DATABLK        *datablk;                /* Data block                */
+
+    if (recnum == 0) {
+       xreclen = read(xfd, xbuf, 56);   /* read COPYR1 plus some extras */
+       if (xreclen < 56)
+        {
+            XMERRF ("%s read error: %s\n",
+                    xfname,
+                    (xreclen < 0 ? strerror(errno) :
+                    "Unexpected end of file"));
+            return -1;
+        }
+     }
+
+    else if (recnum == 1) {
+       xreclen = read(xfd, xbuf, sizeof(COPYR2));  /* read COPYR2 */
+       if (xreclen < sizeof(COPYR2))
+        {
+            XMERRF ("%s read error: %s\n",
+                    xfname,
+                    (xreclen < 0 ? strerror(errno) :
+                    "Unexpected end of file"));
+            return -1;
+        }
+     }
+
+    else {
+       rc = read(xfd, xbuf, 12);        /* read header of DATABLK */
+       if (rc == 0)                     /* read nothing? */
+          return 0;
+       if (rc < 12)
+        {
+            XMERRF ("%s read error: %s\n",
+                    xfname,
+                    (rc < 0 ? strerror(errno) :
+                    "Unexpected end of file"));
+            return -1;
+        }
+       datablk = (DATABLK *)xbuf;
+       xreclen = ((datablk->dlen[0] << 8) | datablk->dlen[1])
+               + datablk->klen;
+       rc = read(xfd, xbuf + 12, xreclen);  /* read kdarea of DATABLK */
+       if (rc < xreclen)
+        {
+            XMERRF ("%s read error: %s\n",
+                    xfname,
+                    (rc < 0 ? strerror(errno) :
+                    "Unexpected end of file"));
+            return -1;
+        }
+       xreclen += 12;                   /* also count the header */
+    }
+
+    /* Return record length */
+    return xreclen;
+
+} /* end function read_vs_rec */
+
+/*-------------------------------------------------------------------*/
 /* Subroutine to process an INMR02 control record                    */
 /* Input:                                                            */
 /*      xbuf    Pointer to buffer containing control record          */
@@ -2540,7 +2616,7 @@ BYTE            memname[9];             /* Member name (ASCIIZ)      */
 } /* end function update_dirblk */
 
 /*-------------------------------------------------------------------*/
-/* Subroutine to read an XMIT file and write to DASD image file      */
+/* Subroutine to read an IEBCOPY file and write to DASD image file   */
 /* Input:                                                            */
 /*      xfname  XMIT input file name                                 */
 /*      ofname  DASD image file name                                 */
@@ -2552,6 +2628,7 @@ BYTE            memname[9];             /* Member name (ASCIIZ)      */
 /*      outcyl  Output starting cylinder number                      */
 /*      outhead Output starting head number                          */
 /*      maxtrks Maximum extent size in tracks                        */
+/*      method  METHOD_XMIT or METHOD_VS                             */
 /* Output:                                                           */
 /*      odsorg  Dataset organization                                 */
 /*      orecfm  Record format                                        */
@@ -2566,9 +2643,10 @@ BYTE            memname[9];             /* Member name (ASCIIZ)      */
 /*      nxthead Starting head number for next dataset                */
 /*-------------------------------------------------------------------*/
 static int
-process_xmit_file (BYTE *xfname, BYTE *ofname, int ofd, BYTE *trkbuf,
+process_iebcopy_file (BYTE *xfname, BYTE *ofname, int ofd, BYTE *trkbuf,
                 U16 devtype, int heads, int trklen,
                 int outcyl, int outhead, int maxtrks,
+                BYTE method,
                 BYTE *odsorg, BYTE *orecfm,
                 int *olrecl, int *oblksz, int *okeyln,
                 int *dirblu, int *lastrec, int *trkbal,
@@ -2616,6 +2694,7 @@ int             outtrk = 0;             /* Output relative track     */
 int             outrec = 0;             /* Output record number      */
 TTRCONV        *ttrtab;                 /* -> TTR conversion table   */
 int             numttr = 0;             /* TTR table array index     */
+COPYR1         *copyr1;                 /* -> header record 1        */
 
     /* Open the input file */
     xfd = open (xfname, O_RDONLY);
@@ -2668,12 +2747,19 @@ int             numttr = 0;             /* TTR table array index     */
     /* Read each logical record */
     while (1)
     {
-        rc = read_xmit_rec (xfd, xfname, xbuf, &xctl);
+        if (method == METHOD_XMIT)
+           rc = read_xmit_rec (xfd, xfname, xbuf, &xctl);
+        else if (method == METHOD_VS) {
+           rc = read_vs_rec (xfd, xfname, xbuf, datarecn);
+           if (rc == 0)                 /* end-of-file */
+              break;
+        } else
+           rc = -1;
         if (rc < 0) return -1;
         xreclen = rc;
 
         /* Process control records */
-        if (xctl)
+        if (method == METHOD_XMIT && xctl)
         {
             /* Extract the control record name */
             make_asciiz (xrecname, sizeof(xrecname), xbuf, 6);
@@ -2718,6 +2804,14 @@ int             numttr = 0;             /* TTR table array index     */
         {
             origheads = process_copyr1 (xbuf, xreclen);
             if (origheads < 0) exit(1);
+            if (method == METHOD_VS) {
+               copyr1 = (COPYR1 *)xbuf;
+               dsorg = copyr1->ds1dsorg[0];
+               recfm = copyr1->ds1recfm;
+               lrecl = (copyr1->ds1lrecl[0] << 8) | copyr1->ds1lrecl[1];
+               blksz = (copyr1->ds1blkl[0] << 8) | copyr1->ds1blkl[1];
+               keyln = copyr1->ds1keyl;
+            }
             continue;
         }
 
@@ -2866,7 +2960,7 @@ int             numttr = 0;             /* TTR table array index     */
     *nxthead = outhead;
     return 0;
 
-} /* end function process_xmit_file */
+} /* end function process_iebcopy_file */
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to initialize a SYSCTLG dataset as an OS CVOL          */
@@ -3596,6 +3690,8 @@ BYTE            c;                      /* Character work area       */
     /* Test for valid initialization method */
     if (strcasecmp(pimeth, "XMIT") == 0)
         *method = METHOD_XMIT;
+    else if (strcasecmp(pimeth, "VS") == 0)
+        *method = METHOD_VS;
     else if (strcasecmp(pimeth, "EMPTY") == 0)
         *method = METHOD_EMPTY;
     else if (strcasecmp(pimeth, "DIP") == 0)
@@ -3611,7 +3707,7 @@ BYTE            c;                      /* Character work area       */
     }
 
     /* Locate the initialization file name */
-    if (*method == METHOD_XMIT)
+    if (*method == METHOD_XMIT || *method == METHOD_VS)
     {
         pifile = strtok (NULL, " \t");
         if (pifile == NULL)
@@ -3885,12 +3981,14 @@ int             fsflag = 0;             /* 1=Free space message sent */
         /* Create dataset according to method specified */
         switch (method) {
 
-        case METHOD_XMIT:
-            /* Create dataset using XMIT file as input */
+        case METHOD_XMIT:               /* IEBCOPY wrapped in XMIT */
+        case METHOD_VS:                 /* "straight" IEBCOPY */
+            /* Create dataset using IEBCOPY file as input */
             maxtrks = 32767;
-            rc = process_xmit_file (ifname, ofname, ofd, trkbuf,
+            rc = process_iebcopy_file (ifname, ofname, ofd, trkbuf,
                                     devtype, heads, trklen,
                                     outcyl, outhead, maxtrks,
+                                    method,
                                     &dsorg, &recfm,
                                     &lrecl, &blksz, &keyln,
                                     &dirblu, &lastrec, &trkbal,

@@ -44,6 +44,7 @@
 /* Additional credits:                                               */
 /*      3480 commands contributed by Jan Jaeger                      */
 /*      Sense byte improvements by Jan Jaeger                        */
+/*      3480 Read Block ID and Locate CCWs by Brandon Hill           */
 /*-------------------------------------------------------------------*/
 
 /*-------------------------------------------------------------------*/
@@ -607,6 +608,8 @@ U16             blklen;                 /* Data length of block      */
     if (blklen == 0)
         dev->curfilen++;
 
+    dev->blockid++;
+
     /* Return block length or zero if tapemark */
     return blklen;
 
@@ -657,6 +660,8 @@ long            blkpos;                 /* Offset of block header    */
     /* Decrement current file number if backspaced over tapemark */
     if (curblkl == 0)
         dev->curfilen--;
+
+    dev->blockid--;
 
     /* Return block length or zero if tapemark */
     return curblkl;
@@ -779,6 +784,7 @@ BYTE            buf[100];               /* Status string (ASCIIZ)    */
         dev->curfilen = 1;
         dev->nxtblkpos = 0;
         dev->prvblkpos = -1;
+	dev->blockid = 0;
     }
 
     /* Return tape status */
@@ -1029,6 +1035,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     if (rc < 0 && fsrerrno == EIO && GMT_EOF(stat))
     {
         dev->curfilen++;
+	dev->blockid++;
         return 0;
     }
 
@@ -1043,6 +1050,8 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
+
+    dev->blockid++;
 
     /* Return +1 to indicate forward space successful */
     return +1;
@@ -1092,6 +1101,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     if (rc < 0 && bsrerrno == EIO)
     {
         dev->curfilen--;
+	dev->blockid--;
         return 0;
     }
 
@@ -1106,6 +1116,8 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
+
+    dev->blockid--;
 
     /* Return +1 to indicate backspace successful */
     return +1;
@@ -2047,6 +2059,8 @@ OMATAPE_DESC   *omadesc;                /* -> OMA descriptor entry   */
         break;
     } /* end switch(omadesc->format) */
 
+    if (rc >= 0) dev->blockid++;
+
     return rc;
 
 } /* end function fsb_omatape */
@@ -2181,6 +2195,8 @@ S32             nxthdro;                /* Offset of next header     */
         rc = bsf_omatape (dev, unitstat);
         if (rc < 0) return -1;
 
+	dev->blockid--;
+
         /* Return zero to indicate tapemark detected */
         return 0;
     }
@@ -2223,6 +2239,8 @@ S32             nxthdro;                /* Offset of next header     */
     /* Update the offsets of the next and previous blocks */
     dev->nxtblkpos = blkpos;
     dev->prvblkpos = prvhdro;
+
+    dev->blockid--;
 
     /* Return +1 to indicate backspace successful */
     return +1;
@@ -2483,6 +2501,7 @@ int tapedev_close_device ( DEVBLK *dev )
     dev->prvblkpos = -1;
     dev->curblkrem = 0;
     dev->curbufoff = 0;
+    dev->blockid = 0;
 
     return 0;
 } /* end function tapedev_close_device */
@@ -2499,6 +2518,7 @@ int             len;                    /* Length of data block      */
 long            num;                    /* Number of bytes to read   */
 OMATAPE_DESC   *omadesc;                /* -> OMA descriptor entry   */
 struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
+long		locblock;		/* Block Id for Locate Block */
 
     /* If this is a data-chained READ, then return any data remaining
        in the buffer which was not used by the previous CCW */
@@ -2546,6 +2566,8 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
             break;
         } /* end switch(dev->tapedevt) */
 
+	dev->blockid = 0;
+
         /* Exit with unit status if open was unsuccessful */
         if (rc < 0) return;
     }
@@ -2583,6 +2605,8 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         /* Exit with unit check status if write error condition */
         if (rc < 0)
             break;
+
+	dev->blockid++;
 
         /* Set normal status */
         *residual = 0;
@@ -2640,6 +2664,8 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         dev->curblkrem = len - num;
         dev->curbufoff = num;
 
+	dev->blockid++;
+
         /* Exit with unit exception status if tapemark was read */
         if (len == 0)
         {
@@ -2655,6 +2681,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     /*---------------------------------------------------------------*/
     /* CONTROL NO-OPERATION                                          */
     /*---------------------------------------------------------------*/
+	*residual = 0;
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -2707,6 +2734,8 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         dev->nxtblkpos = 0;
         dev->prvblkpos = -1;
 
+	dev->blockid = 0;
+
         /* Set unit status */
         *residual = 0;
         *unitstat = CSW_CE | CSW_DE;
@@ -2738,6 +2767,8 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         dev->curfilen = 1;
         dev->nxtblkpos = 0;
         dev->prvblkpos = -1;
+
+	dev->blockid = 0;
 
         /* Set unit status */
         *residual = 0;
@@ -2796,10 +2827,43 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         /* Increment current file number */
         dev->curfilen++;
 
+	dev->blockid++;
+
         /* Set normal status */
         *residual = 0;
         *unitstat = CSW_CE | CSW_DE;
         break;
+
+    case 0x22:
+    /*---------------------------------------------------------------*/
+    /* READ BLOCK ID                                                 */
+    /*---------------------------------------------------------------*/
+        /* Only valid on 3480 devices */
+        if (dev->devtype != 0x3480)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+	/* Calculate number of bytes and residual byte count */
+	len = 2*sizeof(dev->blockid);
+	num = (count < len) ? count : len;
+	*residual = count - num;
+	if (count < len) *more = 1;
+
+	/* Copy Block Id to channel I/O buffer */
+	iobuf[0] = 0x01;
+	iobuf[1] = (dev->blockid >> 16) & 0x3F;
+	iobuf[2] = (dev->blockid >> 8 ) & 0xFF;
+	iobuf[3] = (dev->blockid      ) & 0xFF;
+	iobuf[4] = 0x01;
+	iobuf[5] = (dev->blockid >> 16) & 0x3F;
+	iobuf[6] = (dev->blockid >> 8 ) & 0xFF;
+	iobuf[7] = (dev->blockid      ) & 0xFF;
+
+	*unitstat = CSW_CE | CSW_DE;
+	break;
 
     case 0x27:
     /*---------------------------------------------------------------*/
@@ -2940,6 +3004,132 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         *residual = 0;
         *unitstat = CSW_CE | CSW_DE;
         break;
+
+    case 0x43:
+    /*---------------------------------------------------------------*/
+    /* SYNCHRONIZE                                                   */
+    /*---------------------------------------------------------------*/
+	*unitstat = CSW_CE | CSW_DE;
+	break;
+
+    case 0x4F:
+    /*---------------------------------------------------------------*/
+    /* LOCATE BLOCK                                                  */
+    /*---------------------------------------------------------------*/
+        /* Only valid on 3480 devices */
+        if (dev->devtype != 0x3480)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Not valid for OMA tape */
+        if (dev->tapedevt == TAPEDEVT_OMATAPE)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+	/* Check for minimum count field */
+	if (count < sizeof(dev->blockid))
+	{
+	    dev->sense[0] = SENSE_CR;
+	    *unitstat = CSW_CE | CSW_DE | CSW_UC;
+	    break;
+	}
+
+	/* Block to seek */
+	len = sizeof(locblock);
+	locblock =  ((U32)(iobuf[3]) << 24)
+	          | ((U32)(iobuf[2]) << 16)
+	          | ((U32)(iobuf[1]) <<  8);
+
+	/* Calculate residual byte count */
+	num = (count < len) ? count : len;
+	*residual = count - num;
+
+        /* For SCSI tape, issue rewind command */
+        if (dev->tapedevt == TAPEDEVT_SCSITAPE)
+        {
+            opblk.mt_op = MTREW;
+            opblk.mt_count = 1;
+            rc = ioctl (dev->fd, MTIOCTOP, (char*)&opblk);
+            if (rc < 0)
+            {
+                logmsg ("HHC284I Error rewinding %s: %s\n",
+                        dev->filename, strerror(errno));
+                dev->sense[0] = SENSE_EC;
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                break;
+            } /* end if(rc) */
+        } /* end if(SCSITAPE) */
+
+        /* For AWSTAPE file, seek to start of file */
+        if (dev->tapedevt == TAPEDEVT_AWSTAPE)
+        {
+            rc = lseek (dev->fd, 0, SEEK_SET);
+            if (rc < 0)
+            {
+                /* Handle seek error condition */
+                logmsg ("HHC285I Error seeking to start of %s: %s\n",
+                        dev->filename, strerror(errno));
+
+                /* Set unit check with equipment check */
+                dev->sense[0] = SENSE_EC;
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                break;
+            }
+        } /* end if(AWSTAPE) */
+
+        /* Reset position counters to start of file */
+        dev->curfilen = 1;
+        dev->nxtblkpos = 0;
+        dev->prvblkpos = -1;
+
+	dev->blockid = 0;
+
+	/* Start of block locate code */
+	logmsg("tapedev: Locate block 0x%8.8lX on %4.4X\n",
+	       locblock, dev->devnum);
+	
+        switch (dev->tapedevt)
+        {
+        default:
+        case TAPEDEVT_AWSTAPE:
+	    rc = 0;
+	    while ((dev->blockid < locblock) && (rc >= 0))
+		rc = fsb_awstape(dev, unitstat);
+            break;
+
+        case TAPEDEVT_SCSITAPE:
+	    rc = 0;
+	    while ((dev->blockid < locblock) && (rc >= 0))
+		rc = fsb_scsitape(dev, unitstat);
+            break;
+
+        } /* end switch(dev->tapedevt) */
+
+	if (rc < 0)
+	{
+	    /* Set Unit Check with Equipment Check */
+	    dev->sense[1] = SENSE1_PER;
+	    *unitstat = CSW_CE | CSW_DE | CSW_UC;
+	    break;
+	}
+
+	*unitstat = CSW_CE | CSW_DE;
+	break;
+
+    case 0x77:
+    /*---------------------------------------------------------------*/
+    /* PERFORM SUBSYSTEM FUNCTION                                    */
+    /*---------------------------------------------------------------*/
+	/* Not yet implemented */
+	*residual = 0;
+	*unitstat = CSW_CE | CSW_DE;
+	break;
 
     case 0xCB: /* 9-track 800 bpi */
     case 0xC3: /* 9-track 1600 bpi */

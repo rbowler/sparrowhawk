@@ -1,0 +1,27 @@
+#
+# Configuration file for Hercules ESA/390 emulator
+#
+
+CPUSERIAL 000611
+CPUMODEL  3090
+MAINSIZE  64
+XPNDSIZE  0
+CNSLPORT  3270
+NUMCPU    1
+LOADPARM  ........
+SYSEPOCH  1900
+TZOFFSET  +0000
+
+# .-----------------------------Device number
+# |     .-----------------------Device type
+# |     |       .---------------File name
+# |     |       |
+# V     V       V
+#---    ----    --------------------
+000D    3505    zzsacard.bin
+001F    3270
+0150    3330    sysres.150
+0151    3330    work01.151
+0350    3330    mvtres.350
+0351    3330    dlib01.351
+0352    3330    work02.352

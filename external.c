@@ -12,6 +12,8 @@
 /*      Correction to timer interrupt by Valery Pogonchenko          */
 /*      TOD clock drag factor contributed by Jan Jaeger              */
 /*      Synchronized broadcasting contributed by Jan Jaeger          */
+/*      CPU timer and clock comparator interrupt improvements by     */
+/*          Jan Jaeger, after a suggestion by Willem Koynenberg      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -23,6 +25,16 @@ static void external_interrupt (int code, REGS *regs)
 {
 PSA    *psa;
 int     rc;
+
+    /* reset the cpuint indicator */
+    regs->cpuint = regs->storstat
+#ifdef FEATURE_INTERVAL_TIMER
+                    || regs->itimer_pending
+#endif /*FEATURE_INTERVAL_TIMER*/
+                    || regs->extcall
+                    || regs->emersig
+                    || regs->ckpend
+                    || regs->ptpend;
 
     /* Set the main storage reference and change bits */
     STORAGE_KEY(regs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
@@ -105,9 +117,6 @@ U16     cpuad;                          /* Originating CPU address   */
             if (cpuad >= MAX_CPU_ENGINES)
             {
                 regs->emersig = 0;
-                regs->cpuint = regs->itimer_pending
-                                || regs->extcall
-                                || regs->storstat;
                 return;
             }
         } /* end for(cpuad) */
@@ -126,9 +135,6 @@ U16     cpuad;                          /* Originating CPU address   */
         /* Reset emergency signal pending flag if there are
            no other CPUs which generated emergency signal */
         regs->emersig = 0;
-        regs->cpuint = regs->itimer_pending
-                        || regs->extcall
-                        || regs->storstat;
         while (++cpuad < MAX_CPU_ENGINES)
         {
             if (regs->emercpu[cpuad])
@@ -152,9 +158,6 @@ U16     cpuad;                          /* Originating CPU address   */
 
         /* Reset external call pending */
         regs->extcall = 0;
-        regs->cpuint = regs->itimer_pending
-                        || regs->emersig
-                        || regs->storstat;
 
         /* Store originating CPU address at PSA+X'84' */
         psa = (PSA*)(sysblk.mainstor + regs->pxr);
@@ -176,6 +179,10 @@ U16     cpuad;                          /* Originating CPU address   */
         {
             logmsg ("External interrupt: Clock comparator\n");
         }
+        regs->cpuint = regs->itimer_pending
+                        || regs->emersig
+                        || regs->extcall
+                        || regs->storstat;
         external_interrupt (EXT_CLOCK_COMPARATOR_INTERRUPT, regs);
         return;
     }
@@ -189,6 +196,10 @@ U16     cpuad;                          /* Originating CPU address   */
             logmsg ("External interrupt: CPU timer=%16.16llX\n",
                     regs->ptimer);
         }
+        regs->cpuint = regs->itimer_pending
+                        || regs->emersig
+                        || regs->extcall
+                        || regs->storstat;
         external_interrupt (EXT_CPU_TIMER_INTERRUPT, regs);
         return;
     }
@@ -202,11 +213,8 @@ U16     cpuad;                          /* Originating CPU address   */
         {
             logmsg ("External interrupt: Interval timer\n");
         }
-        external_interrupt (EXT_INTERVAL_TIMER_INTERRUPT, regs);
         regs->itimer_pending = 0;
-        regs->cpuint = regs->extcall
-                        || regs->emersig
-                        || regs->storstat;
+        external_interrupt (EXT_INTERVAL_TIMER_INTERRUPT, regs);
 
         return;
     }
@@ -239,6 +247,16 @@ U16     cpuad;                          /* Originating CPU address   */
         external_interrupt (EXT_SERVICE_SIGNAL_INTERRUPT, regs);
         return;
     }
+
+    /* reset the cpuint indicator */
+    regs->cpuint = regs->storstat
+#ifdef FEATURE_INTERVAL_TIMER
+                    || regs->itimer_pending
+#endif /*FEATURE_INTERVAL_TIMER*/
+                    || regs->extcall
+                    || regs->emersig
+                    || regs->ckpend
+                    || regs->ptpend;
 
 } /* end function perform_external_interrupt */
 
@@ -334,6 +352,9 @@ struct  timeval tv;                     /* Structure for gettimeofday
         /* Shift the epoch out of the difference for the CPU timer */
         diff <<= 8;
 
+        /* Access the diffent register contexts with the intlock held */
+        obtain_lock(&sysblk.intlock);
+
         /* Decrement the CPU timer for each CPU */
 #ifdef FEATURE_CPU_RECONFIG 
         for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
@@ -351,14 +372,15 @@ struct  timeval tv;                     /* Structure for gettimeofday
 
             /* Set interrupt flag if the CPU timer is negative or
                if the TOD clock value exceeds the clock comparator */
-            if ((S64)regs->ptimer < 0
-                || sysblk.todclk > regs->clkc)
-            {
-                intflag = 1;
-                obtain_lock(&sysblk.intlock);
-                regs->cpuint = 1;
-                release_lock(&sysblk.intlock);
-            }
+            if ((S64)regs->ptimer < 0)
+                regs->cpuint = regs->ptpend = intflag = 1;
+            else
+                regs->ptpend = 0;
+
+            if(sysblk.todclk > regs->clkc)
+                regs->cpuint = regs->ckpend = intflag = 1;
+            else
+                regs->ckpend = 0;
 
 #ifdef FEATURE_INTERVAL_TIMER
             /* Point to PSA in main storage */
@@ -379,24 +401,18 @@ struct  timeval tv;                     /* Structure for gettimeofday
             /* Set interrupt flag and interval timer interrupt pending
                if the interval timer went from positive to negative */
             if (itimer < 0 && olditimer >= 0)
-            {
-                intflag = 1;
-                obtain_lock(&sysblk.intlock);
-                regs->cpuint = regs->itimer_pending = 1;
-                release_lock(&sysblk.intlock);
-            }
+                regs->cpuint = regs->itimer_pending = intflag = 1;
 #endif /*FEATURE_INTERVAL_TIMER*/
+
 
         } /* end for(cpu) */
 
         /* If a CPU timer or clock comparator interrupt condition
            was detected for any CPU, then wake up all waiting CPUs */
         if (intflag)
-        {
-            obtain_lock (&sysblk.intlock);
             signal_condition (&sysblk.intcond);
-            release_lock (&sysblk.intlock);
-        }
+
+        release_lock(&sysblk.intlock);
 
 #ifdef MIPS_COUNTING
         /* Calculate MIPS rate */

@@ -86,6 +86,8 @@
 #undef	FEATURE_TRACING
 #undef	FEATURE_VECTOR_FACILITY
 #undef	FEATURE_4K_STORAGE_KEYS
+#undef	FEATURE_HERCULES_DIAGCALLS
+#undef	FEATURE_EMULATE_VM
 
 #if	ARCH == 370
  #define ARCHITECTURE_NAME	"S/370"
@@ -97,6 +99,8 @@
  #define FEATURE_SEGMENT_PROTECTION
  #define FEATURE_SYSTEM_CONSOLE
  #define FEATURE_S370_CHANNEL
+ #define FEATURE_HERCULES_DIAGCALLS
+ #define FEATURE_EMULATE_VM
 #elif	ARCH == 390
  #define ARCHITECTURE_NAME	"ESA/390"
  #define MAX_CPU_ENGINES	6
@@ -130,6 +134,8 @@
  #define FEATURE_TRACING
  #define FEATURE_VECTOR_FACILITY
  #define FEATURE_4K_STORAGE_KEYS
+ #define FEATURE_HERCULES_DIAGCALLS
+ #define FEATURE_EMULATE_VM
 #else
  #error Either ARCH=370 or ARCH=390 must be specified
 #endif
@@ -315,6 +321,8 @@ typedef struct _REGS {			/* Processor registers	     */
 		restart:1,		/* 1=Restart interrpt pending*/
 		extcall:1,		/* 1=Extcall interrpt pending*/
 		emersig:1,		/* 1=Emersig interrpt pending*/
+		ptpend:1,		/* 1=CPU timer int pending   */
+		ckpend:1,               /* 1=Clock comp int pending  */
 		storstat:1,		/* 1=Stop and store status   */
 		sigpreset:1,		/* 1=SIGP cpu reset received */
 		sigpireset:1,		/* 1=SIGP initial cpu reset  */
@@ -413,15 +421,15 @@ typedef struct _SYSBLK {
 	U32	breakaddr;		/* Breakpoint address	     */
 	FILE   *msgpipew;		/* Message pipe write handle */
 	int	msgpiper;		/* Message pipe read handle  */
-	BYTE	ostailor;		/* OS tailoring setting      */
+        U64     pgminttr;               /* Program int trace mask    */
         int     pcpu;                   /* Tgt CPU panel cmd & displ */
     } SYSBLK;
 
-/* Definitions for OS tailoring */
-#define OS_NONE 	0		/* No special OS tailoring   */
-#define OS_OS390	1		/* OS/390		     */
-#define OS_VM		2		/* VM			     */
-#define OS_LINUX	3		/* Linux		     */
+/* Definitions for OS tailoring - msb eq mon event, lsb eq oper exc. */
+#define OS_NONE 	0x7FFFFFFFF7DE7FFFULL	/* No spec OS tail.  */
+#define OS_OS390	0x7FF77BFFF7DE7FFFULL   /* OS/390            */
+#define OS_VM		0x7FFFFFFFF7DE7FFCULL   /* VM	             */
+#define OS_LINUX	0x7FFFFFFFF7DE7FD6ULL   /* Linux	     */
 
 /*-------------------------------------------------------------------*/
 /* Device configuration block					     */
@@ -475,6 +483,7 @@ typedef struct _DEVBLK {
 	struct	in_addr ipaddr; 	/* Client IP address	     */
 	int	rlen3270;		/* Length of data in buffer  */
 	int	pos3270;		/* Current screen position   */
+	BYTE   	aid3270;		/* Current input AID value   */
 	BYTE	mod3270;		/* 3270 model number	     */
 	unsigned int			/* Flags		     */
 		eab3270:1;		/* 1=Extended attributes     */
@@ -493,6 +502,10 @@ typedef struct _DEVBLK {
 	/* Device dependent fields for ctcadpt */
 	unsigned int			/* Flags		     */
 		ctcxmode:1;		/* 0=Basic mode, 1=Extended  */
+	int	ctcpos;			/* next byte offset	     */
+	int	ctcrem;			/* bytes remaining in buffer */
+	int	ctclastpos;		/* last packet read	     */
+	int	ctclastrem;		/* last packet read	     */
 	/* Device dependent fields for printer */
 	unsigned int			/* Flags		     */
 		crlf:1, 		/* 1=CRLF delimiters, 0=LF   */
@@ -517,6 +530,7 @@ typedef struct _DEVBLK {
 					   from current block	     */
 	U16	curbufoff;		/* Offset into buffer of data
 					   for next data chained CCW */
+	long	blockid;		/* Current device block ID   */
 	/* Device dependent fields for fbadasd */
 	unsigned int			/* Flags		     */
 		fbaxtdef:1;		/* 1=Extent defined	     */
@@ -817,10 +831,15 @@ void diag204_call (int r1, int r2, REGS *regs);
 /* Functions in module diagnose.c */
 void diagnose_call (U32 code, int r1, int r2, REGS *regs);
 
-/* Functions in module diagsnio.c */
+/* Functions in module diagvm.c */
 int  diag_devtype (int r1, int r2, REGS *regs);
 int  syncblk_io (int r1, int r2, REGS *regs);
 int  syncgen_io (int r1, int r2, REGS *regs);
+void extid_call (int r1, int r2, REGS *regs);
+int  cpcmd_call (int r1, int r2, REGS *regs);
+void pseudo_timer (U32 code, int r1, int r2, REGS *regs);
+void access_reipl_data (int r1, int r2, REGS *regs);
+int  diag_ppagerel (int r1, int r2, REGS *regs);
 
 /* Functions in module external.c */
 void perform_external_interrupt (REGS *regs);

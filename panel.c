@@ -982,6 +982,7 @@ BYTE   *devascii;                       /* ASCII text device number  */
 int     devargc;                        /* Arg count for devinit     */
 BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
 BYTE   *devclass;                       /* -> Device class name      */
+BYTE   *cmdarg;                         /* -> Command argument       */
 
     /* Copy panel command to work area */
     memset (cmd, 0, sizeof(cmd));
@@ -1025,6 +1026,7 @@ BYTE   *devclass;                       /* -> Device class name      */
             "v addr=value or r addr=value = alter storage\n"
             "b addr = set breakpoint, b- = delete breakpoint\n"
             "i devn=I/O attention interrupt, ext=external interrupt\n"
+            "pgmtrace [-]intcode = trace program interrupts\n"
             "stop=stop CPU, start=start CPU, restart=PSW restart\n"
             STSPALL_CMD
             "store=store status\n"
@@ -1676,6 +1678,33 @@ BYTE   *devclass;                       /* -> Device class name      */
         /* Rename the device */
         define_device(devnum,newdevn);
 
+        return NULL;
+    }
+
+    /* pgmtrace command - trace program interrupts */
+    if (memcmp(cmd,"pgmtrace",8)==0)
+    {
+        cmdarg = strtok(cmd+8," \t");
+        if (cmdarg == NULL
+            || sscanf(cmdarg, "%x%c", &i, &c) != 1)
+        {
+            logmsg ("Program interrupt number %s is invalid\n", cmdarg);
+            return NULL;
+        }
+
+        n = abs(i);
+        if(n < 1 || n > 0x40)
+        {
+            logmsg("Program interrupt number out of range (%4.4X)\n",n);
+            return NULL;
+        }
+
+        /* Add to, or remove interruption code from mask */
+        if(i < 0)
+            sysblk.pgminttr &= ~((U64)1 << (n - 1));
+        else
+            sysblk.pgminttr |= ((U64)1 << (n - 1));
+        
         return NULL;
     }
 

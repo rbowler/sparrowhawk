@@ -1170,7 +1170,7 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
 
 #ifdef FEATURE_CALLED_SPACE_IDENTIFICATION
         /* Set the called space identification */
-        csi = (pasn == 0) ? 0 : pasn << 16 || (aste[5] & 0x0000FFFF);
+        csi = (pasn == 0) ? 0 : pasn << 16 | (aste[5] & 0x0000FFFF);
 #endif /*FEATURE_CALLED_SPACE_IDENTIFICATION*/
 
         /* Perform the stacking process */

@@ -77,20 +77,20 @@ these locations:
 If you are interested in obtaining a copy of the CD itself, contact
 Rick Fochtman at <em>rfochtman </em>&#064;<em> ync.net</em>.
 <p>
-You can use the DASDLOAD and DASDISUP programs
-(see the <a href="hercload.htm">Creating Hercules DASD</a> page)
+You can use the <code>dasdload</code> and <code>dasdisup</code> programs
+(see the <a href="hercload.html">Creating Hercules DASD</a> page)
 to build an OS/360 IPL volume from the unloaded files on the
 archive CD.
 <p>
 Alternatively, you can download my
-<a href="hercules/mftr33.tar.gz">mftr33.tar.gz</a> package
+<a href="mftr33.tar.gz">mftr33.tar.gz</a> package
 which contains a minimal MFT system on a 3330 image, with
 some minimal documentation.
 <p>
 I've produced a document describing how
 to build an OS/360 system on Hercules.  It can be found at
-<a href="http://jmaynard.home.texas.net/hercos360">
-http://jmaynard.home.texas.net/hercos360</a>.
+<a href="http://www.conmicro.cx/hercos360">
+http://www.conmicro.cx/hercos360</a>.
 <p>
 Malcolm Beattie has also produced two useful documents:
 <br>Guide to installing TSO under MVT on Hercules
@@ -308,7 +308,6 @@ The following standard features have been implemented:
 <li>BAKR/PC/PR/PT instructions
 <li>Linkage Stack
 <li>Compare and Form Codeword and Update Tree instructions
-<li>SCLP (Service Call Logical Processor) Facility
 <li>Operational Extensions: Console Integration
 </ul>
 <p>The following optional features have been implemented:
@@ -350,9 +349,9 @@ will be in due course:
 <li>MVS assists
 </ul>
 <p>
-The features are not implemented, and are unlikely to be, either due to lack
-of documentation, limited host system capability, or lack of supporting
-hardware:
+The following features are not implemented, and are unlikely to be, either
+due to lack of documentation, limited host system capability, or lack of
+supporting hardware:
 <ul>
 <li>Asynchronous Data Mover Facility
 <li>Asynchronous Pageout Facility
@@ -371,6 +370,7 @@ hardware:
 <li>Program-Event Recording
 <li>PER extensions
 <li>PR/SM
+<li>SCLP (Service Call Logical Processor) Facility
 <li>SIE I/O Assist
 <li>Sysplex
 <li>Sysplex Timer (ETR)
@@ -384,7 +384,7 @@ to this project, either as coders or as testers or both:
 <sl>
 <li><a href="http://www.snipix.freeserve.co.uk/people.htm">Roger Bowler</a>
     (original author)
-<li><a href="http://jmaynard.home.texas.net/">Jay Maynard</a> (current
+<li><a href="http://www.conmicro.cx/">Jay Maynard</a> (current
     maintainer)
 <li><a href="http://home.worldonline.nl/~jjaeger">Jan Jaeger</a>
 <li><a href="http://www.sysun.com/museum">Dutch Owen</a>

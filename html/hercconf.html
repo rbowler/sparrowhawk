@@ -48,6 +48,8 @@ OSTAILOR  LINUX
 0201    3270
 0202    3270
 0300    3370    sysres.300
+0400    3088    0401 192.168.0.2 vmnet
+0401    3088    0400 192.168.0.2 vmnet
 0580    3420    ickdsf.ipl
 0581    3420    /dev/st0
 0582    3420    /cdrom/tapes/uaa196.tdf
@@ -171,6 +173,10 @@ the device record is:
     <tr><td>3420, 3480</td>
         <td><a href="#tapedev">Tape drives</a></td>
         <td>Disk file, CDROM, or SCSI tape</td>
+    </tr>
+    <tr><td>3088</td>
+        <td><a href="#ctca">Channel-to-channel adapters</a></td>
+        <td>TCP socket</td>
     </tr>
     <tr><td>3310, 3370, 9336<br>0671</td>
         <td><a href="#fbadasd">FBA direct access storage devices</a></td>
@@ -328,6 +334,20 @@ the device record is:
         (for example <b><i>ickdsf.ipl</i></b>)
     </dl>
 <p>
+<a name="ctca">
+<dt><em>Channel-to-channel adapters</em>
+<dd>Three arguments are required:
+    <dl>
+    <p><dt><code><em>Device address</em></code>
+    <dd>CTCA devices must be defined in pairs. This argument specifies the
+        address of the other device of the pair. The device will not be
+        initialized until both devices are defined.
+    <p><dt><code><em>IP address</em></code>
+    <dd>The IP address the emulated CTCA will use to communicate.
+    <p><dt><code><em>command line</em></code>
+    <dd>The command to be started to handle the connection.
+    </dl>
+<p>
 <a name="fbadasd">
 <dt><em>FBA DASD devices</em>
 <dd>The argument specifies the name of a file which contains the FBA
@@ -379,6 +399,6 @@ If you have a question about Hercules, see the
 <a href="hercinst.html"><img src="gifs/back.gif" border=0 alt="back"></a>
 </center>
 <small>
-<p>Last updated 3 June 2000
+<p>Last updated 18 June 2000
 </BODY>
 </HTML>

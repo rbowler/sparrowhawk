@@ -339,4 +339,5 @@ int  capacity_calc (U16 devtype, int used, int keylen, int datalen,
         int *newused, int *trkbaln, int *physlen, int *kbconst,
         int *lbconst, int *nkconst, BYTE*devflag, int *tolfact,
         int *maxdlen, int *numrecs, int *numhead, int *numcyls);
-
+int get_verbose_util(void);
+void set_verbose_util(int v);
