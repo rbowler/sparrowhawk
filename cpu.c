@@ -5689,6 +5689,7 @@ int     rc;                             /* Return code               */
 int     tracethis;                      /* Trace this instruction    */
 int     stepthis;                       /* Stop on this instruction  */
 int     diswait;                        /* 1=Disabled wait state     */
+int     shouldbreak;                    /* 1=Stop at breakpoint      */
 #ifdef INSTRUCTION_COUNTING
 struct {
     int general[256];                   /* General inst counters     */
@@ -5857,12 +5858,16 @@ int     icidx;                          /* Instruction counter index */
         if (inst[0] == 0xFC) sysblk.inststep = 1; /*MP*/
         if (inst[0] == 0xFD) sysblk.inststep = 1; /*DP*/
 
+        /* Test for breakpoint */
+        shouldbreak = sysblk.instbreak
+                        && (regs->psw.ia == sysblk.breakaddr);
+
         /* Display the instruction */
-        if (sysblk.insttrace || sysblk.inststep
+        if (sysblk.insttrace || sysblk.inststep || shouldbreak
             || tracethis || stepthis)
         {
             display_inst (regs, inst);
-            if (sysblk.inststep || stepthis)
+            if (sysblk.inststep || stepthis || shouldbreak)
             {
                 /* Put CPU into stopped state */
                 regs->cpustate = CPUSTATE_STOPPED;

@@ -576,13 +576,15 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
 
     /* File protect error if not within domain of Locate Record
        and file mask inhibits seek and multitrack operations */
-    if (dev->ckdlocat == 0 &&
-        (dev->ckdfmask & CKDMASK_SKCTL) == CKDMASK_SKCTL_INHSMT)
-    {
-        ckd_build_sense (dev, 0, SENSE1_FP, 0, 0, 0);
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
-        return -1;
-    }
+    /* !!This test has been commented out as a temporary fix
+       to avoid 012033 wait state problem loading IEAVNP12!! */
+//  if (dev->ckdlocat == 0 &&
+//      (dev->ckdfmask & CKDMASK_SKCTL) == CKDMASK_SKCTL_INHSMT)
+//  {
+//      ckd_build_sense (dev, 0, SENSE1_FP, 0, 0, 0);
+//      *unitstat = CSW_CE | CSW_DE | CSW_UC;
+//      return -1;
+//  }
 
     /* End of cylinder error if not within domain of Locate Record
        and current track is last track of cylinder */
@@ -3180,6 +3182,80 @@ BYTE            key[256];               /* Key for search operations */
 
         /* Copy device identifier bytes to channel I/O buffer */
         memcpy (iobuf, dev->devid, num);
+
+        /* Return unit status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0x54:
+    /*---------------------------------------------------------------*/
+    /* SENSE SUBSYSTEM STATUS                                        */
+    /*---------------------------------------------------------------*/
+        /* Command reject if within the domain of a Locate Record,
+           or if chained from any command unless the preceding command
+           is Read Device Characteristics, Read Configuration Data, or
+           a Suspend Multipath Reconnection command that was the first
+           command in the chain */
+        if (dev->ckdlocat
+            || (chained && prevcode != 0x64 && prevcode != 0xFA)
+            || (chained && (prevcode != 0x5B || ccwseq > 1)))
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Calculate residual byte count */
+        num = (count < 40) ? count : 40;
+        *residual = count - num;
+        if (count < 40) *more = 1;
+
+        /* Build the subsystem status data in the I/O area */
+        memset (iobuf, 0x00, 40);
+        iobuf[1] = dev->devnum & 0xFF;
+
+        /* Return unit status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0xFA:
+    /*---------------------------------------------------------------*/
+    /* READ CONFIGURATION DATA                                       */
+    /*---------------------------------------------------------------*/
+        /* Command reject if within the domain of a Locate Record */
+        if (dev->ckdlocat)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Calculate residual byte count */
+        num = (count < 256) ? count : 256;
+        *residual = count - num;
+        if (count < 256) *more = 1;
+
+        /* Clear the configuration data area */
+        memset (iobuf, 0x00, 256);
+
+        /* Bytes 0-31 contain node element descriptor 1 (HDA) data */
+        iobuf[0] = 0xC0;
+
+        /* Bytes 32-63 contain node element descriptor 2 (unit) data */
+        iobuf[32] = 0xC0;
+
+        /* Bytes 64-95 contain node element descriptor 3 (CU) data */
+        iobuf[64] = 0xC0;
+
+        /* Bytes 96-127 contain node element desc 4 (subsystem) data */
+        iobuf[96] = 0xC0;
+
+        /* Bytes 128-223 contain zeroes */
+
+        /* Bytes 224-255 contain node element qualifier data */
+        iobuf[96] = 0x80;
 
         /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;

@@ -5,7 +5,10 @@
 /* This module is the control panel for the ESA/390 emulator.        */
 /* It provides functions for displaying the PSW and registers        */
 /* and a command line for requesting control operations such         */
-/* as single stepping and instruction tracing.                       */
+/* as IPL, stop, start, single stepping, instruction tracing,        */
+/* and storage displays. It displays messages issued by other        */
+/* threads via the logmsg macro, and optionally also writes          */
+/* all messages to a log file if stdout is redirected.               */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -83,35 +86,45 @@ static void display_fregs (REGS *regs)
 
 /*-------------------------------------------------------------------*/
 /* Display real storage (up to 16 bytes, or until end of 4K page)    */
-/* Returns number of bytes displayed                                 */
+/* Returns number of characters placed in display buffer             */
 /*-------------------------------------------------------------------*/
-static int display_real (REGS *regs, U32 raddr)
+static int display_real (REGS *regs, U32 raddr, BYTE *buf)
 {
 U32     aaddr;                          /* Absolute storage address  */
 int     blkid;                          /* Main storage 4K block id  */
-int     i;                              /* Loop counter              */
+int     i, j;                           /* Loop counters             */
+int     n;                              /* Number of bytes in buffer */
+BYTE    hbuf[40];                       /* Hexadecimal buffer        */
+BYTE    cbuf[17];                       /* Character buffer          */
+BYTE    c;                              /* Character work area       */
 
-    logmsg ("R:%8.8lX:", raddr);
+    n = sprintf (buf, "R:%8.8lX:", raddr);
     aaddr = APPLY_PREFIXING (raddr, regs->pxr);
     if (aaddr >= sysblk.mainsize)
     {
-        logmsg (" Real address is not valid\n");
-        return 0;
+        n += sprintf (buf+n, " Real address is not valid");
+        return n;
     }
 
     blkid = aaddr >> 12;
-    logmsg ("K:%2.2X=", sysblk.storkeys[blkid]);
+    n += sprintf (buf+n, "K:%2.2X=", sysblk.storkeys[blkid]);
 
-    for (i = 0; i < 16; i++)
+    memset (hbuf, SPACE, sizeof(hbuf));
+    memset (cbuf, SPACE, sizeof(cbuf));
+
+    for (i = 0, j = 0; i < 16; i++)
     {
-        logmsg ("%2.2X", sysblk.mainstor[aaddr++]);
-        if ((aaddr & 0x3) != 0x0) continue;
+        c = sysblk.mainstor[aaddr++];
+        j += sprintf (hbuf+j, "%2.2X", c);
+        if ((aaddr & 0x3) == 0x0) hbuf[j++] = SPACE;
+        c = ebcdic_to_ascii[c];
+        if (!isprint(c)) c = '.';
+        cbuf[i] = c;
         if ((aaddr & 0xFFF) == 0x000) break;
-        logmsg (" ");
     } /* end for(i) */
 
-    logmsg ("\n");
-    return i;
+    n += sprintf (buf+n, "%36.36s %16.16s", hbuf, cbuf);
+    return n;
 
 } /* end function display_real */
 
@@ -163,10 +176,13 @@ int     ilc;                            /* Instruction length        */
 U32     addr1, addr2;                   /* Operand addresses         */
 U32     raddr;                          /* Real address              */
 U16     xcode;                          /* Exception code            */
+BYTE    buf[100];                       /* Message buffer            */
+int     n;                              /* Number of bytes in buffer */
 
     /* Display the PSW */
     store_psw (&regs->psw, dword);
-    logmsg ("PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X ",
+    n = sprintf (buf,
+                "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X ",
                 dword[0], dword[1], dword[2], dword[3],
                 dword[4], dword[5], dword[6], dword[7]);
 
@@ -175,10 +191,10 @@ U16     xcode;                          /* Exception code            */
     ilc = (opcode < 0x40) ? 2 : (opcode < 0xC0) ? 4 : 6;
 
     /* Display the instruction */
-    logmsg ("INST=%2.2X%2.2X", inst[0], inst[1]);
-    if (ilc > 2) logmsg("%2.2X%2.2X", inst[2], inst[3]);
-    if (ilc > 4) logmsg("%2.2X%2.2X", inst[4], inst[5]);
-    logmsg("\n");
+    n += sprintf (buf+n, "INST=%2.2X%2.2X", inst[0], inst[1]);
+    if (ilc > 2) n += sprintf (buf+n, "%2.2X%2.2X", inst[2], inst[3]);
+    if (ilc > 4) n += sprintf (buf+n, "%2.2X%2.2X", inst[4], inst[5]);
+    logmsg ("%s\n", buf);
 
     /* Process the first storage operand */
     if (ilc > 2)
@@ -204,15 +220,17 @@ U16     xcode;                          /* Exception code            */
         }
 
         /* Display storage at first storage operand location */
-        logmsg ("V:%8.8lX:", addr1);
+        n = sprintf (buf, "V:%8.8lX:", addr1);
         xcode = virt_to_real (&raddr, addr1, b1, regs,
                                 (opcode == 0x44 ? ACCTYPE_INSTFETCH :
                                  opcode == 0xB1 ? ACCTYPE_LRA :
                                                   ACCTYPE_READ));
         if (xcode == 0)
-            display_real (regs, raddr);
+            n += display_real (regs, raddr, buf+n);
         else
-            logmsg (" Translation exception %4.4hX\n", xcode);
+            n += sprintf (buf+n," Translation exception %4.4hX",xcode);
+
+        logmsg ("%s\n", buf);
     }
 
     /* Process the second storage operand */
@@ -228,18 +246,61 @@ U16     xcode;                          /* Exception code            */
         }
 
         /* Display storage at second storage operand location */
-        logmsg ("V:%8.8lX:", addr2);
+        n = sprintf (buf, "V:%8.8lX:", addr2);
         xcode = virt_to_real (&raddr, addr2, b2, regs, ACCTYPE_READ);
         if (xcode == 0)
-            display_real (regs, raddr);
+            n += display_real (regs, raddr, buf+n);
         else
-            logmsg (" Translation exception %4.4hX\n", xcode);
+            n += sprintf (buf+n," Translation exception %4.4hX",xcode);
+
+        logmsg ("%s\n", buf);
     }
 
     /* Display the general purpose registers */
     display_regs (regs);
 
 } /* end function display_inst */
+
+/*-------------------------------------------------------------------*/
+/* Parse a storage range operand                                     */
+/* Valid formats for a storage range are:                            */
+/*      startaddr                                                    */
+/*      startaddr-endaddr                                            */
+/*      startaddr.length                                             */
+/* where startaddr, endaddr, and length are hexadecimal values.      */
+/* Return code is 0 if range is valid, or -1 if error message issued */
+/*-------------------------------------------------------------------*/
+static int parse_range (BYTE *operand, U32 *saddr, U32 *eaddr)
+{
+int     rc;                             /* Return code               */
+BYTE    delim;                          /* Operand delimiter         */
+BYTE    c;                              /* Character work area       */
+
+    rc = sscanf(operand, "%lx%c%lx%c", saddr, &delim, eaddr, &c);
+
+    if (rc == 1)
+        *eaddr = *saddr + 0x3F;
+    else
+    {
+        if (rc != 3 || !(delim == '-' || delim == '.'))
+        {
+            logmsg ("Invalid operand: %s\n", operand);
+            return -1;
+        }
+        if (delim == '.') *eaddr += *saddr - 1;
+    }
+
+    *saddr &= 0x7FFFFFFF;
+    *eaddr &= 0x7FFFFFFF;
+
+    if (*eaddr < *saddr)
+    {
+        logmsg ("Invalid range: %s\n", operand);
+        return -1;
+    }
+
+    return 0;
+} /* end function parse_range */
 
 /*-------------------------------------------------------------------*/
 /* Execute a panel command                                           */
@@ -251,6 +312,7 @@ int     cpu;                            /* CPU engine number         */
 REGS   *regs;                           /* -> CPU register context   */
 U32     vaddr;                          /* Virtual storage address   */
 U32     raddr;                          /* Real storage address      */
+U32     eaddr;                          /* Storage ending address    */
 U16     xcode;                          /* Exception code            */
 U16     devnum;                         /* Device number             */
 DEVBLK *dev;                            /* -> Device block           */
@@ -262,6 +324,8 @@ BYTE   *fname;                          /* -> File name (ASCIIZ)     */
 int     fd;                             /* File descriptor           */
 int     len;                            /* Number of bytes read      */
 BYTE   *loadparm;                       /* -> IPL parameter (ASCIIZ) */
+BYTE    buf[100];                       /* Message buffer            */
+int     n;                              /* Number of bytes in buffer */
 
     /* Copy panel command to work area */
     memset (cmd, 0, sizeof(cmd));
@@ -285,6 +349,7 @@ BYTE   *loadparm;                       /* -> IPL parameter (ASCIIZ) */
             "ar=access regs, fpr=floating point regs\n"
             "vxxxxxxxx=display virtual storage location xxxxxxxx\n"
             "rxxxxxxxx=display real storage location xxxxxxxx\n"
+            "bxxxxxxxx=set breakpoint at location xxxxxxxx b-=delete breakpoint\n"
             "idevn=I/O attention interrupt, ext=external interrupt\n"
             "stop=stop CPU, start=start CPU, restart=PSW restart\n"
             "loadcore xxxx=load core image from file xxxx\n"
@@ -418,34 +483,59 @@ BYTE   *loadparm;                       /* -> IPL parameter (ASCIIZ) */
     }
 
     /* r command - display real storage */
-    if (cmd[0] == 'r' && sscanf(cmd+1, "%lx%c", &raddr, &c) == 1)
+    if (cmd[0] == 'r')
     {
-        raddr &= 0x7FFFFFF0;
-        for (i = 0; i < 4; i++)
+        if (parse_range (cmd+1, &raddr, &eaddr) != 0)
+            return NULL;
+
+        for (i = 0; i < 999 && raddr <= eaddr; i++)
         {
-            display_real (regs, raddr);
+            display_real (regs, raddr, buf);
+            logmsg ("%s\n", buf);
             raddr += 16;
         } /* end for(i) */
         return NULL;
     }
 
     /* v command - display virtual storage */
-    if (cmd[0] == 'v' && sscanf(cmd+1, "%lx%c", &vaddr, &c) == 1)
+    if (cmd[0] == 'v')
     {
-        vaddr &= 0x7FFFFFF0;
-        for (i = 0; i < 4; i++)
+        if (parse_range (cmd+1, &vaddr, &eaddr) != 0)
+            return NULL;
+
+        for (i = 0; i < 999 && vaddr <= eaddr; i++)
         {
-            logmsg ("V:%8.8lX:", vaddr);
+            n = sprintf (buf, "V:%8.8lX:", vaddr);
             xcode = virt_to_real (&raddr, vaddr, 0, regs,
                     ACCTYPE_LRA);
             if (xcode == 0)
-                display_real (regs, raddr);
+                n += display_real (regs, raddr, buf+n);
             else
-                logmsg (" Translation exception %4.4hX\n",
+                n += sprintf (buf+n,
+                        " Translation exception %4.4hX",
                         xcode);
+            logmsg ("%s\n", buf);
             vaddr += 16;
         } /* end for(i) */
         return NULL;
+    }
+
+    /* b command - set breakpoint */
+    if (cmd[0] == 'b')
+    {
+        if (cmd[1] == '-')
+        {
+            logmsg ("Deleting breakpoint\n");
+            sysblk.instbreak = 0;
+            return NULL;
+        }
+
+        if (sscanf(cmd+1, "%lx%c", &sysblk.breakaddr, &c) == 1)
+        {
+            sysblk.instbreak = 1;
+            logmsg ("Setting breakpoint at %8.8lX\n", sysblk.breakaddr);
+            return NULL;
+        }
     }
 
     /* i command - generate I/O attention interrupt for device */
@@ -487,7 +577,7 @@ BYTE   *loadparm;                       /* -> IPL parameter (ASCIIZ) */
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
         /* Set SCSW for attention interrupt */
-        dev->scsw.flag0 = SCSW0_CC_1;
+        dev->scsw.flag0 = 0;
         dev->scsw.flag1 = 0;
         dev->scsw.flag2 = 0;
         dev->scsw.flag3 = SCSW3_SC_ALERT | SCSW3_SC_PEND;
@@ -593,16 +683,16 @@ BYTE   *loadparm;                       /* -> IPL parameter (ASCIIZ) */
     }
 
     /* ipl xxxx command - IPL from device xxxx */
-    if (memcmp(cmd,"ipl ",4)==0)
+    if (memcmp(cmd,"ipl",3)==0)
     {
         if (regs->cpustate != CPUSTATE_STOPPED)
         {
             logmsg ("ipl rejected: CPU not stopped\n");
             return NULL;
         }
-        if (sscanf(cmd+4, "%hx%c", &devnum, &c) != 1)
+        if (sscanf(cmd+3, "%hx%c", &devnum, &c) != 1)
         {
-            logmsg ("device number %s invalid\n", cmd+4);
+            logmsg ("device number %s invalid\n", cmd+3);
             return NULL;
         }
         load_ipl (devnum, regs);
@@ -1032,7 +1122,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                         ANSI_POSITION_CURSOR
                         ANSI_WHITE_BLACK,
                         i+1, 1);
-                fwrite (msgbuf + (n * MSG_SIZE), MSG_SIZE, 1, stdout);
+                fwrite (msgbuf + (n * MSG_SIZE), MSG_SIZE, 1, confp);
             }
 
             /* Display the scroll indicators */
@@ -1077,7 +1167,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                     ANSI_WHITE_BLACK);
 
             for (i = 0; i < cmdoff; i++)
-                putc (cmdline[i], stdout);
+                putc (cmdline[i], confp);
 
             fprintf (confp,
                     ANSI_ERASE_EOL);

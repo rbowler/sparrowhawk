@@ -1105,7 +1105,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     }
 
     /* Open the device file if necessary */
-    if (dev->fd < 0 && !IS_CCW_SENSE(code))
+    if (dev->fd < 0 && !IS_CCW_SENSE(code) && code != 0x03)
     {
         /* Open the device file according to device type */
         switch (dev->tapedevt)

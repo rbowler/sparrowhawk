@@ -6,13 +6,13 @@
 #	make ARCH=390
 #
 
-VERSION  = 1.36
+VERSION  = 1.37
 
 CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=$(ARCH)
 #	   -march=pentium -malign-double -mwide-multiply
 LFLAGS	 = -lpthread
 
-EXEFILES = hercules dasdinit dasdload tapecopy
+EXEFILES = hercules dasdinit dasdload dasdpdsu tapecopy
 
 TARFILES = makefile *.c *.h hercules.cnf tapeconv.jcl dasdlist
 
@@ -21,9 +21,11 @@ HRC_OBJS = impl.o config.o panel.o ipl.o cpu.o assist.o \
 	   channel.o service.o ckddasd.o fbadasd.o \
 	   tapedev.o cardrdr.o printer.o console.o
 
-DIN_OBJS = dasdinit.o
+DIN_OBJS = dasdinit.o dasdutil.o
 
-DLD_OBJS = dasdload.o
+DLD_OBJS = dasdload.o dasdutil.o
+
+DPU_OBJS = dasdpdsu.o dasdutil.o
 
 TCY_OBJS = tapecopy.o
 
@@ -37,11 +39,14 @@ hercules:  $(HRC_OBJS)
 dasdinit:  $(DIN_OBJS)
 	cc -o dasdinit $(DIN_OBJS)
 
-tapecopy:  $(TCY_OBJS)
-	cc -o tapecopy $(TCY_OBJS)
-
 dasdload:  $(DLD_OBJS)
 	cc -o dasdload $(DLD_OBJS)
+
+dasdpdsu:  $(DPU_OBJS)
+	cc -o dasdpdsu $(DPU_OBJS)
+
+tapecopy:  $(TCY_OBJS)
+	cc -o tapecopy $(TCY_OBJS)
 
 assist.o:  assist.c $(HEADERS)
 
@@ -81,11 +86,15 @@ ckddasd.o: ckddasd.c $(HEADERS)
 
 fbadasd.o: fbadasd.c $(HEADERS)
 
-dasdinit.o: dasdinit.c $(HEADERS) makefile
+dasdinit.o: dasdinit.c $(HEADERS) dasdblks.h makefile
+
+dasdload.o: dasdload.c $(HEADERS) dasdblks.h makefile
+
+dasdpdsu.o: dasdpdsu.c $(HEADERS) dasdblks.h makefile
+
+dasdutil.o: dasdutil.c $(HEADERS) dasdblks.h
 
 tapecopy.o: tapecopy.c $(HEADERS) makefile
-
-dasdload.o: dasdload.c $(HEADERS) makefile
 
 clean:
 	rm -f $(EXEFILES) *.o

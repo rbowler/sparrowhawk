@@ -1,5 +1,5 @@
 /* DASDLOAD.C   (c) Copyright Roger Bowler, 1999                     */
-/*              Hercules XMIT file unpacker                          */
+/*              Hercules DASD Utilities: DASD image loader           */
 
 /*-------------------------------------------------------------------*/
 /* This program creates a virtual DASD volume from a list of         */
@@ -7,6 +7,7 @@
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
+#include "dasdblks.h"
 
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
@@ -32,280 +33,6 @@
 
 #define EBCDIC_END      "\xC5\xD5\xC4"
 #define EBCDIC_TXT      "\xE3\xE7\xE3"
-
-/*-------------------------------------------------------------------*/
-/* Text unit keys for transmit/receive                               */
-/*-------------------------------------------------------------------*/
-#define INMDDNAM        0x0001          /* DDNAME for the file       */
-#define INMDSNAM        0x0002          /* Name of the file          */
-#define INMMEMBR        0x0003          /* Member name list          */
-#define INMSECND        0x000B          /* Secondary space quantity  */
-#define INMDIR          0x000C          /* Directory space quantity  */
-#define INMEXPDT        0x0022          /* Expiration date           */
-#define INMTERM         0x0028          /* Data transmitted as msg   */
-#define INMBLKSZ        0x0030          /* Block size                */
-#define INMDSORG        0x003C          /* File organization         */
-#define INMLRECL        0x0042          /* Logical record length     */
-#define INMRECFM        0x0049          /* Record format             */
-#define INMTNODE        0x1001          /* Target node name/number   */
-#define INMTUID         0x1002          /* Target user ID            */
-#define INMFNODE        0x1011          /* Origin node name/number   */
-#define INMFUID         0x1012          /* Origin user ID            */
-#define INMLREF         0x1020          /* Date last referenced      */
-#define INMLCHG         0x1021          /* Date last changed         */
-#define INMCREAT        0x1022          /* Creation date             */
-#define INMFVERS        0x1023          /* Origin vers# of data fmt  */
-#define INMFTIME        0x1024          /* Origin timestamp          */
-#define INMTTIME        0x1025          /* Destination timestamp     */
-#define INMFACK         0x1026          /* Originator request notify */
-#define INMERRCD        0x1027          /* RECEIVE command error code*/
-#define INMUTILN        0x1028          /* Name of utility program   */
-#define INMUSERP        0x1029          /* User parameter string     */
-#define INMRECCT        0x102A          /* Transmitted record count  */
-#define INMSIZE         0x102C          /* File size in bytes        */
-#define INMFFM          0x102D          /* Filemode number           */
-#define INMNUMF         0x102F          /* #of files transmitted     */
-#define INMTYPE         0x8012          /* Dataset type              */
-
-/*-------------------------------------------------------------------*/
-/* Definitions of IEBCOPY header records                             */
-/*-------------------------------------------------------------------*/
-typedef struct _COPYR1 {                /* IEBCOPY header record 1   */
-        BYTE    uldfmt;                 /* Unload format             */
-        BYTE    hdrid[3];               /* Header identifier         */
-        HWORD   ds1dsorg;               /* Dataset organization      */
-        HWORD   ds1blkl;                /* Block size                */
-        HWORD   ds1lrecl;               /* Logical record length     */
-        BYTE    ds1recfm;               /* Record format             */
-        BYTE    ds1keyl;                /* Key length                */
-        BYTE    ds1optcd;               /* Option codes              */
-        BYTE    ds1smsfg;               /* SMS indicators            */
-        HWORD   uldblksz;               /* Block size of container   */
-                                        /* Start of DEVTYPE fields   */
-        FWORD   ucbtype;                /* Original device type      */
-        FWORD   maxblksz;               /* Maximum block size        */
-        HWORD   cyls;                   /* Number of cylinders       */
-        HWORD   heads;                  /* Number of tracks/cylinder */
-        HWORD   tracklen;               /* Track length              */
-        HWORD   overhead;               /* Block overhead            */
-        BYTE    keyovhead;              /* Keyed block overhead      */
-        BYTE    devflags;               /* Flags                     */
-        HWORD   tolerance;              /* Tolerance factor          */
-                                        /* End of DEVTYPE fields     */
-        HWORD   hdrcount;               /* Number of header records
-                                           (if zero, then 2 headers) */
-        BYTE    resv1;                  /* Reserved                  */
-        BYTE    ds1refd[3];             /* Last reference date       */
-        BYTE    ds1scext[3];            /* Secondary space extension */
-        BYTE    ds1scalo[4];            /* Secondary allocation      */
-        BYTE    ds1lstar[3];            /* Last track used TTR       */
-        HWORD   ds1trbal;               /* Last track balance        */
-        HWORD   resv2;                  /* Reserved                  */
-    } COPYR1;
-
-/* Bit settings for unload format byte */
-#define COPYR1_ULD_FORMAT       0xC0    /* Bits 0-1=unload format... */
-#define COPYR1_ULD_FORMAT_OLD   0x00    /* ...old format             */
-#define COPYR1_ULD_FORMAT_PDSE  0x40    /* ...PDSE format            */
-#define COPYR1_ULD_FORMAT_ERROR 0x80    /* ...error during unload    */
-#define COPYR1_ULD_FORMAT_XFER  0xC0    /* ...transfer format        */
-#define COPYR1_ULD_PROGRAM      0x10    /* Bit 3=Contains programs   */
-#define COPYR1_ULD_PDSE         0x01    /* Bit 7=Contains PDSE       */
-
-/* Bit settings for header identifier */
-#define COPYR1_HDRID    "\xCA\x6D\x0F"  /* Constant value for hdrid  */
-
-/* Bit settings for dataset organization byte 0 */
-#define DSORG_IS                0x80    /* Indexed sequential        */
-#define DSORG_PS                0x40    /* Physically sequential     */
-#define DSORG_DA                0x20    /* Direct access             */
-#define DSORG_PO                0x02    /* Partitioned organization  */
-#define DSORG_U                 0x01    /* Unmovable                 */
-
-/* Bit settings for dataset organization byte 1 */
-#define DSORG_AM                0x08    /* VSAM dataset              */
-
-/* Bit settings for record format */
-#define RECFM_FORMAT            0xC0    /* Bits 0-1=Record format    */
-#define RECFM_FORMAT_V          0x40    /* ...variable length        */
-#define RECFM_FORMAT_F          0x80    /* ...fixed length           */
-#define RECFM_FORMAT_U          0xC0    /* ...undefined length       */
-#define RECFM_TRKOFLOW          0x20    /* Bit 2=Track overflow      */
-#define RECFM_BLOCKED           0x10    /* Bit 3=Blocked             */
-#define RECFM_SPANNED           0x08    /* Bit 4=Spanned or standard */
-#define RECFM_CTLCHAR           0x06    /* Bits 5-6=Carriage control */
-#define RECFM_CTLCHAR_A         0x02    /* ...ANSI carriage control  */
-#define RECFM_CTLCHAR_M         0x04    /* ...Machine carriage ctl.  */
-
-typedef struct _COPYR2 {                /* IEBCOPY header record 2   */
-        BYTE    debbasic[16];           /* Last 16 bytes of basic
-                                           section of original DEB   */
-        BYTE    debxtent[16][16];       /* First 16 extent descriptors
-                                           from original DEB         */
-        FWORD   resv;                   /* Reserved                  */
-    } COPYR2;
-
-/*-------------------------------------------------------------------*/
-/* Definition of data record block in IEBCOPY unload file            */
-/*-------------------------------------------------------------------*/
-typedef struct _DATABLK {
-        U32     header;                 /* Data block header         */
-        HWORD   cyl;                    /* Cylinder number           */
-        HWORD   head;                   /* Head number               */
-        BYTE    rec;                    /* Record number             */
-        BYTE    klen;                   /* Key length                */
-        HWORD   dlen;                   /* Data length               */
-        BYTE    kdarea[32760];          /* Key and data area         */
-    } DATABLK;
-
-/*-------------------------------------------------------------------*/
-/* Definition of DSCB records in VTOC                                */
-/*-------------------------------------------------------------------*/
-typedef struct _DSXTENT {               /* Dataset extent descriptor */
-        BYTE    xttype;                 /* Extent type               */
-        BYTE    xtseqn;                 /* Extent sequence number    */
-        HWORD   xtbcyl;                 /* Extent begin cylinder     */
-        HWORD   xtbtrk;                 /* Extent begin track        */
-        HWORD   xtecyl;                 /* Extent end cylinder       */
-        HWORD   xtetrk;                 /* Extent end track          */
-    } DSXTENT;
-
-/* Bit definitions for extent type */
-#define XTTYPE_UNUSED           0x00    /* Unused extent descriptor  */
-#define XTTYPE_DATA             0x01    /* Data extent               */
-#define XTTYPE_OVERFLOW         0x02    /* Overflow extent           */
-#define XTTYPE_INDEX            0x04    /* Index extent              */
-#define XTTYPE_USERLBL          0x40    /* User label extent         */
-#define XTTYPE_SHARCYL          0x80    /* Shared cylinders          */
-#define XTTYPE_CYLBOUND         0x81    /* Extent on cyl boundary    */
-
-typedef struct _FORMAT1_DSCB {          /* DSCB1: Dataset descriptor */
-        BYTE    ds1dsnam[44];           /* Key (44 byte dataset name)*/
-        BYTE    ds1fmtid;               /* Format identifier (0xF1)  */
-        BYTE    ds1dssn[6];             /* Volume serial number      */
-        HWORD   ds1volsq;               /* Volume sequence number    */
-        BYTE    ds1credt[3];            /* Dataset creation date...
-                                           ...byte 0: Binary year-1900
-                                           ...bytes 1-2: Binary day  */
-        BYTE    ds1expdt[3];            /* Dataset expiry date       */
-        BYTE    ds1noepv;               /* Number of extents         */
-        BYTE    ds1bodbd;               /* #bytes used in last dirblk*/
-        BYTE    resv1;                  /* Reserved                  */
-        BYTE    ds1syscd[13];           /* System code (IBMOSVS2)    */
-        BYTE    resv2[7];               /* Reserved                  */
-        BYTE    ds1dsorg[2];            /* Dataset organization      */
-        BYTE    ds1recfm;               /* Record format             */
-        BYTE    ds1optcd;               /* Option codes              */
-        HWORD   ds1blkl;                /* Block length              */
-        HWORD   ds1lrecl;               /* Logical record length     */
-        BYTE    ds1keyl;                /* Key length                */
-        HWORD   ds1rkp;                 /* Relative key position     */
-        BYTE    ds1dsind;               /* Dataset indicators        */
-        FWORD   ds1scalo;               /* Secondary allocation...
-                                           ...byte 0: Allocation units
-                                           ...bytes 1-3: Quantity    */
-        BYTE    ds1lstar[3];            /* Last used TTR             */
-        HWORD   ds1trbal;               /* Bytes unused on last trk  */
-        BYTE    resv3[2];               /* Reserved                  */
-        DSXTENT ds1ext1;                /* First extent descriptor   */
-        DSXTENT ds1ext2;                /* Second extent descriptor  */
-        DSXTENT ds1ext3;                /* Third extent descriptor   */
-        BYTE    ds1ptrds[5];            /* CCHHR of F2 or F3 DSCB    */
-    } FORMAT1_DSCB;
-
-/* Bit definitions for ds1dsind */
-#define DS1DSIND_LASTVOL        0x80    /* Last volume of dataset    */
-#define DS1DSIND_RACFIND        0x40    /* RACF indicated            */
-#define DS1DSIND_BLKSIZ8        0x20    /* Blocksize multiple of 8   */
-#define DS1DSIND_PASSWD         0x10    /* Password protected        */
-#define DS1DSIND_WRTPROT        0x04    /* Write protected           */
-#define DS1DSIND_UPDATED        0x02    /* Updated since last backup */
-#define DS1DSIND_SECCKPT        0x01    /* Secure checkpoint dataset */
-
-/* Bit definitions for ds1optcd */
-#define DS1OPTCD_ICFDSET        0x80    /* Dataset in ICF catalog    */
-#define DS1OPTCD_ICFCTLG        0x40    /* ICF catalog               */
-
-/* Bit definitions for ds1scalo byte 0 */
-#define DS1SCALO_UNITS          0xC0    /* Allocation units...       */
-#define DS1SCALO_UNITS_ABSTR    0x00    /* ...absolute tracks        */
-#define DS1SCALO_UNITS_BLK      0x40    /* ...blocks                 */
-#define DS1SCALO_UNITS_TRK      0x80    /* ...tracks                 */
-#define DS1SCALO_UNITS_CYL      0xC0    /* ...cylinders              */
-#define DS1SCALO_CONTIG         0x08    /* Contiguous space          */
-#define DS1SCALO_MXIG           0x04    /* Maximum contiguous extent */
-#define DS1SCALO_ALX            0x02    /* Up to 5 largest extents   */
-#define DS1SCALO_ROUND          0x01    /* Round to cylinders        */
-
-typedef struct _FORMAT4_DSCB {          /* DSCB4: VTOC descriptor    */
-        BYTE    ds4keyid[44];           /* Key (44 bytes of 0x04)    */
-        BYTE    ds4fmtid;               /* Format identifier (0xF4)  */
-        BYTE    ds4hpchr[5];            /* CCHHR of highest F1 DSCB  */
-        HWORD   ds4dsrec;               /* Number of format 0 DSCBs  */
-        BYTE    ds4hcchh[4];            /* CCHH of next avail alt trk*/
-        HWORD   ds4noatk;               /* Number of avail alt tracks*/
-        BYTE    ds4vtoci;               /* VTOC indicators           */
-        BYTE    ds4noext;               /* Number of extents in VTOC */
-        BYTE    resv1[2];               /* Reserved                  */
-        FWORD   ds4devsz;               /* Device size (CCHH)        */
-        HWORD   ds4devtk;               /* Device track length       */
-        BYTE    ds4devi;                /* Non-last keyed blk overhd */
-        BYTE    ds4devl;                /* Last keyed block overhead */
-        BYTE    ds4devk;                /* Non-keyed block difference*/
-        BYTE    ds4devfg;               /* Device flags              */
-        HWORD   ds4devtl;               /* Device tolerance          */
-        BYTE    ds4devdt;               /* Number of DSCBs per track */
-        BYTE    ds4devdb;               /* Number of dirblks/track   */
-        DWORD   ds4amtim;               /* VSAM timestamp            */
-        BYTE    ds4vsind;               /* VSAM indicators           */
-        HWORD   ds4vscra;               /* CRA track location        */
-        DWORD   ds4r2tim;               /* VSAM vol/cat timestamp    */
-        BYTE    resv2[5];               /* Reserved                  */
-        BYTE    ds4f6ptr[5];            /* CCHHR of first F6 DSCB    */
-        DSXTENT ds4vtoce;               /* VTOC extent descriptor    */
-        BYTE    resv3[25];              /* Reserved                  */
-    } FORMAT4_DSCB;
-
-/* Bit definitions for ds4vtoci */
-#define DS4VTOCI_DOS            0x80    /* Format 5 DSCBs not valid  */
-#define DS4VTOCI_DOSSTCK        0x10    /* DOS stacked pack          */
-#define DS4VTOCI_DOSCNVT        0x08    /* DOS converted pack        */
-#define DS4VTOCI_DIRF           0x40    /* VTOC contains errors      */
-#define DS4VTOCI_DIRFCVT        0x20    /* DIRF reclaimed            */
-
-/* Bit definitions for ds4devfg */
-#define DS4DEVFG_TOL            0x01    /* Tolerance factor applies to
-                                           all but last block of trk */
-
-typedef struct _F5AVEXT {               /* Available extent in DSCB5 */
-        HWORD   btrk;                   /* Extent begin track address*/
-        HWORD   ncyl;                   /* Number of full cylinders  */
-        BYTE    ntrk;                   /* Number of odd tracks      */
-    } F5AVEXT;
-
-typedef struct _FORMAT5_DSCB {          /* DSCB5: Free space map     */
-        BYTE    ds5keyid[4];            /* Key (4 bytes of 0x05)     */
-        F5AVEXT ds5avext[8];            /* First 8 available extents */
-        BYTE    ds5fmtid;               /* Format identifier (0xF5)  */
-        F5AVEXT ds5mavet[18];           /* 18 more available extents */
-        BYTE    ds5ptrds[5];            /* CCHHR of next F5 DSCB     */
-    } FORMAT5_DSCB;
-
-/*-------------------------------------------------------------------*/
-/* Definition of PDS directory entry                                 */
-/*-------------------------------------------------------------------*/
-typedef struct _PDSDIR {
-        BYTE    pds2name[8];            /* Member name               */
-        BYTE    pds2ttrp[3];            /* TTR of first block        */
-        BYTE    pds2indc;               /* Indicator byte            */
-        BYTE    pds2usrd[62];           /* User data (0-31 halfwords)*/
-    } PDSDIR;
-
-/* Bit definitions for PDS directory indicator byte */
-#define PDS2INDC_ALIAS          0x80    /* Bit 0: Name is an alias   */
-#define PDS2INDC_NTTR           0x60    /* Bits 1-2: User TTR count  */
-#define PDS2INDC_NTTR_SHIFT     5       /* Shift count for NTTR      */
-#define PDS2INDC_LUSR           0x1F    /* Bits 3-7: User halfwords  */
 
 /*-------------------------------------------------------------------*/
 /* Definition of LOGREC header record                                */
@@ -380,49 +107,6 @@ BYTE noiplccw2[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 int  infolvl = 1;
 
 /*-------------------------------------------------------------------*/
-/* ASCII to EBCDIC translate tables                                  */
-/*-------------------------------------------------------------------*/
-static unsigned char
-ascii_to_ebcdic[] = {
-"\x00\x01\x02\x03\x37\x2D\x2E\x2F\x16\x05\x25\x0B\x0C\x0D\x0E\x0F"
-"\x10\x11\x12\x13\x3C\x3D\x32\x26\x18\x19\x1A\x27\x22\x1D\x35\x1F"
-"\x40\x5A\x7F\x7B\x5B\x6C\x50\x7D\x4D\x5D\x5C\x4E\x6B\x60\x4B\x61"
-"\xF0\xF1\xF2\xF3\xF4\xF5\xF6\xF7\xF8\xF9\x7A\x5E\x4C\x7E\x6E\x6F"
-"\x7C\xC1\xC2\xC3\xC4\xC5\xC6\xC7\xC8\xC9\xD1\xD2\xD3\xD4\xD5\xD6"
-"\xD7\xD8\xD9\xE2\xE3\xE4\xE5\xE6\xE7\xE8\xE9\xAD\xE0\xBD\x5F\x6D"
-"\x79\x81\x82\x83\x84\x85\x86\x87\x88\x89\x91\x92\x93\x94\x95\x96"
-"\x97\x98\x99\xA2\xA3\xA4\xA5\xA6\xA7\xA8\xA9\xC0\x6A\xD0\xA1\x07"
-"\x68\xDC\x51\x42\x43\x44\x47\x48\x52\x53\x54\x57\x56\x58\x63\x67"
-"\x71\x9C\x9E\xCB\xCC\xCD\xDB\xDD\xDF\xEC\xFC\xB0\xB1\xB2\xB3\xB4"
-"\x45\x55\xCE\xDE\x49\x69\x04\x06\xAB\x08\xBA\xB8\xB7\xAA\x8A\x8B"
-"\x09\x0A\x14\xBB\x15\xB5\xB6\x17\x1B\xB9\x1C\x1E\xBC\x20\xBE\xBF"
-"\x21\x23\x24\x28\x29\x2A\x2B\x2C\x30\x31\xCA\x33\x34\x36\x38\xCF"
-"\x39\x3A\x3B\x3E\x41\x46\x4A\x4F\x59\x62\xDA\x64\x65\x66\x70\x72"
-"\x73\xE1\x74\x75\x76\x77\x78\x80\x8C\x8D\x8E\xEB\x8F\xED\xEE\xEF"
-"\x90\x9A\x9B\x9D\x9F\xA0\xAC\xAE\xAF\xFD\xFE\xFB\x3F\xEA\xFA\xFF"
-        };
-
-static unsigned char
-ebcdic_to_ascii[] = {
-"\x00\x01\x02\x03\xA6\x09\xA7\x7F\xA9\xB0\xB1\x0B\x0C\x0D\x0E\x0F"
-"\x10\x11\x12\x13\xB2\xB4\x08\xB7\x18\x19\x1A\xB8\xBA\x1D\xBB\x1F"
-"\xBD\xC0\x1C\xC1\xC2\x0A\x17\x1B\xC3\xC4\xC5\xC6\xC7\x05\x06\x07"
-"\xC8\xC9\x16\xCB\xCC\x1E\xCD\x04\xCE\xD0\xD1\xD2\x14\x15\xD3\xFC"
-"\x20\xD4\x83\x84\x85\xA0\xD5\x86\x87\xA4\xD6\x2E\x3C\x28\x2B\xD7"
-"\x26\x82\x88\x89\x8A\xA1\x8C\x8B\x8D\xD8\x21\x24\x2A\x29\x3B\x5E"
-"\x2D\x2F\xD9\x8E\xDB\xDC\xDD\x8F\x80\xA5\x7C\x2C\x25\x5F\x3E\x3F"
-"\xDE\x90\xDF\xE0\xE2\xE3\xE4\xE5\xE6\x60\x3A\x23\x40\x27\x3D\x22"
-"\xE7\x61\x62\x63\x64\x65\x66\x67\x68\x69\xAE\xAF\xE8\xE9\xEA\xEC"
-"\xF0\x6A\x6B\x6C\x6D\x6E\x6F\x70\x71\x72\xF1\xF2\x91\xF3\x92\xF4"
-"\xF5\x7E\x73\x74\x75\x76\x77\x78\x79\x7A\xAD\xA8\xF6\x5B\xF7\xF8"
-"\x9B\x9C\x9D\x9E\x9F\xB5\xB6\xAC\xAB\xB9\xAA\xB3\xBC\x5D\xBE\xBF"
-"\x7B\x41\x42\x43\x44\x45\x46\x47\x48\x49\xCA\x93\x94\x95\xA2\xCF"
-"\x7D\x4A\x4B\x4C\x4D\x4E\x4F\x50\x51\x52\xDA\x96\x81\x97\xA3\x98"
-"\x5C\xE1\x53\x54\x55\x56\x57\x58\x59\x5A\xFD\xEB\x99\xED\xEE\xEF"
-"\x30\x31\x32\x33\x34\x35\x36\x37\x38\x39\xFE\xFB\x9A\xF9\xFA\xFF"
-        };
-
-/*-------------------------------------------------------------------*/
 /* Subroutine to display command syntax and exit                     */
 /*-------------------------------------------------------------------*/
 static void
@@ -438,56 +122,6 @@ argexit ( int code )
             "\tmsglevel = Value 0-5 controls output verbosity\n");
     exit(code);
 } /* end function argexit */
-
-/*-------------------------------------------------------------------*/
-/* Subroutine to convert a null-terminated string to upper case      */
-/*-------------------------------------------------------------------*/
-static void
-string_to_upper (BYTE *source)
-{
-int     i;                              /* Array subscript           */
-
-    for (i = 0; source[i] != '\0'; i++)
-        source[i] = toupper(source[i]);
-
-} /* end function string_to_upper */
-
-/*-------------------------------------------------------------------*/
-/* Subroutine to convert a string to EBCDIC and pad with blanks      */
-/*-------------------------------------------------------------------*/
-static void
-convert_to_ebcdic (BYTE *dest, int len, BYTE *source)
-{
-int     i;                              /* Array subscript           */
-
-    for (i = 0; i < len && source[i] != '\0'; i++)
-        dest[i] = ascii_to_ebcdic[source[i]];
-
-    while (i < len)
-        dest[i++] = 0x40;
-
-} /* end function convert_to_ebcdic */
-
-/*-------------------------------------------------------------------*/
-/* Subroutine to convert an EBCDIC string to an ASCIIZ string.       */
-/* Removes trailing blanks and adds a terminating null.              */
-/* Returns the length of the ASCII string excluding terminating null */
-/*-------------------------------------------------------------------*/
-static int
-make_asciiz (BYTE *dest, int destlen, BYTE *src, int srclen)
-{
-int             len;                    /* Result length             */
-
-    for (len=0; len < srclen && len < destlen-1; len++)
-    {
-        dest[len] = ebcdic_to_ascii[src[len]];
-        if (dest[len] == SPACE) break;
-    }
-    dest[len] = '\0';
-
-    return len;
-
-} /* end function make_asciiz */
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to load a S/390 integer value from a buffer            */
@@ -507,84 +141,6 @@ int             i;                      /* Array subscript           */
     return result;
 
 } /* end function make_int */
-
-/*-------------------------------------------------------------------*/
-/* Subroutine to print a data block in hex and character format.     */
-/*-------------------------------------------------------------------*/
-static void
-packet_trace ( void *addr, int len )
-{
-unsigned int    maxlen = 2048;
-unsigned int    i, xi, offset, startoff = 0;
-BYTE            c;
-BYTE           *pchar;
-BYTE            print_chars[17];
-BYTE            hex_chars[64];
-BYTE            prev_hex[64] = "";
-int             firstsame = 0;
-int             lastsame = 0;
-
-    pchar = (unsigned char*)addr;
-
-    for (offset=0; ; )
-    {
-        if (offset >= maxlen && offset <= len - maxlen)
-        {
-            offset += 16;
-            pchar += 16;
-            prev_hex[0] = '\0';
-            continue;
-        }
-        if ( offset > 0 )
-        {
-            if ( strcmp ( hex_chars, prev_hex ) == 0 )
-            {
-                if ( firstsame == 0 ) firstsame = startoff;
-                lastsame = startoff;
-            }
-            else
-            {
-                if ( firstsame != 0 )
-                {
-                    if ( lastsame == firstsame )
-                        printf ("Line %4.4X same as above\n",
-                                firstsame );
-                    else
-                        printf ("Lines %4.4X to %4.4X same as above\n",
-                                firstsame, lastsame );
-                    firstsame = lastsame = 0;
-                }
-                printf ("+%4.4X %s %s\n",
-                        startoff, hex_chars, print_chars);
-                strcpy ( prev_hex, hex_chars );
-            }
-        }
-
-        if ( offset >= len ) break;
-
-        memset ( print_chars, 0, sizeof(print_chars) );
-        memset ( hex_chars, SPACE, sizeof(hex_chars) );
-        startoff = offset;
-        for (xi=0, i=0; i < 16; i++)
-        {
-            c = *pchar++;
-            if (offset < len) {
-                sprintf(hex_chars+xi, "%2.2X", c);
-                print_chars[i] = '.';
-                if (isprint(c)) print_chars[i] = c;
-                c = ebcdic_to_ascii[c];
-                if (isprint(c)) print_chars[i] = c;
-            }
-            offset++;
-            xi += 2;
-            hex_chars[xi] = SPACE;
-            if ((offset & 3) == 0) xi++;
-        } /* end for(i) */
-        hex_chars[xi] = '\0';
-
-    } /* end for(offset) */
-
-} /* end function packet_trace */
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to return the name of a dataset organization           */
@@ -1874,7 +1430,7 @@ BYTE            blankblk[152];          /* Data block for blank DSCB */
                 datablk->kdarea[0] == 0x04 ? 4 :
                 datablk->kdarea[0] == 0x05 ? 5 : 1,
                 outcyl, outhead, outrec, outtrk, outrec);
-        if (infolvl >= 5) packet_trace (datablk, 152);
+        if (infolvl >= 5) data_dump (datablk, 152);
 
         datablk = (DATABLK*)(datablk->header);
 
@@ -2567,7 +2123,7 @@ BYTE            c, hex[49], chars[25];  /* Character work areas      */
     /* Return number of bytes used in directory block */
     *dirblu = dirrem;
 
-    /* Point to first directory block */
+    /* Point to first directory entry */
     dirptr += 2;
     dirrem -= 2;
 
@@ -2641,7 +2197,7 @@ BYTE            c, hex[49], chars[25];  /* Character work areas      */
 /* Output:                                                           */
 /*      The TTR is replaced using the TTR conversion table.          */
 /*                                                                   */
-/* Returns value is 0 if successful, or -1 if TTR not in table.      */
+/* Return value is 0 if successful, or -1 if TTR not in table.       */
 /* Directory information is listed if infolvl is 3 or greater.       */
 /*-------------------------------------------------------------------*/
 static int
@@ -2681,7 +2237,7 @@ int             i;                      /* Array subscript           */
 /*      Each original TTR in the directory block is replaced by the  */
 /*      corresponding output TTR from the TTR conversion table.      */
 /*                                                                   */
-/* Returns value is 0 if successful, or -1 if any directory entry    */
+/* Return value is 0 if successful, or -1 if any directory entry     */
 /* contains a TTR which is not found in the TTR conversion table.    */
 /*-------------------------------------------------------------------*/
 static int
@@ -2706,7 +2262,7 @@ BYTE            memname[9];             /* Member name (ASCIIZ)      */
         return -1;
     }
 
-    /* Point to first directory block */
+    /* Point to first directory entry */
     dirptr += 2;
     dirrem -= 2;
 
@@ -2913,7 +2469,7 @@ int             numttr = 0;             /* TTR table array index     */
         /* Process data records */
         datarecn++;
         XMINFF (4, "Data record: length %d\n", xreclen);
-        if (infolvl >= 5) packet_trace (xbuf, xreclen);
+        if (infolvl >= 5) data_dump (xbuf, xreclen);
 
         /* Process IEBCOPY header record 1 */
         if (datarecn == 1)
@@ -3219,7 +2775,7 @@ static BYTE    *sys1name[NUM_SYS1_DATASETS] =
 
     XMINFF (4, "Catalog block at cyl %d head %d rec %d\n",
             outcyl, outhead, outrec);
-    if (infolvl >= 5) packet_trace (datablk.kdarea, keylen + datalen);
+    if (infolvl >= 5) data_dump (datablk.kdarea, keylen + datalen);
 
     /* Count number of blocks written */
     totblks--;
@@ -3324,7 +2880,7 @@ static BYTE    *sys1name[NUM_SYS1_DATASETS] =
 
     XMINFF (4, "Catalog block at cyl %d head %d rec %d\n",
             outcyl, outhead, outrec);
-    if (infolvl >= 5) packet_trace (datablk.kdarea, keylen + datalen);
+    if (infolvl >= 5) data_dump (datablk.kdarea, keylen + datalen);
 
     /* Count number of blocks written */
     totblks--;
@@ -3363,7 +2919,7 @@ static BYTE    *sys1name[NUM_SYS1_DATASETS] =
 
         XMINFF (4, "Catalog block at cyl %d head %d rec %d\n",
                 outcyl, outhead, outrec);
-        if (infolvl >= 5) packet_trace (datablk.kdarea, keylen + datalen);
+        if (infolvl >= 5) data_dump (datablk.kdarea, keylen + datalen);
 
         /* Count number of blocks written */
         totblks--;
@@ -3518,7 +3074,7 @@ DATABLK         datablk;                /* Data block                */
 
     XMINFF (3, "DIP complete at cyl %d head %d rec %d\n",
             outcyl, outhead, outrec);
-    if (infolvl >= 5) packet_trace (diphdr, sizeof(DIPHDR));
+    if (infolvl >= 5) data_dump (diphdr, sizeof(DIPHDR));
 
     /* Return the last record number and track balance */
     *lastrec = outrec;
@@ -4219,8 +3775,8 @@ int             stmtno;                 /* Statement number          */
                 + sizeof(CKDDASD_RECHDR) + R0_DATALEN
                 + sizeof(CKDDASD_RECHDR) + outmaxdl
                 + sizeof(eighthexFF);
-    outtrklv += 0xFF;
-    outtrklv &= 0xFFFFFF00;
+    outtrklv += 0x1FF;
+    outtrklv &= 0xFFFFFE00;
 
     /* Open the control file */
     cfp = fopen (cfname, "r");

@@ -1,5 +1,5 @@
 /* DASDINIT.C   (c) Copyright Roger Bowler, 1999                     */
-/*              Hercules DASD Image Builder                          */
+/*              Hercules DASD Utilities: DASD image builder          */
 
 /*-------------------------------------------------------------------*/
 /* This program creates a disk image file and initializes it as      */
@@ -20,6 +20,7 @@
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
+#include "dasdblks.h"
 
 /*-------------------------------------------------------------------*/
 /* Static data areas                                                 */
@@ -28,29 +29,6 @@ BYTE eighthexFF[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 BYTE iplpsw[8]    = {0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F};
 BYTE iplccw1[8]   = {0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01};
 BYTE iplccw2[8]   = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-
-/*-------------------------------------------------------------------*/
-/* ASCII/EBCDIC translate table                                      */
-/*-------------------------------------------------------------------*/
-unsigned char
-ascii_to_ebcdic[] = {
-"\x00\x01\x02\x03\x37\x2D\x2E\x2F\x16\x05\x25\x0B\x0C\x0D\x0E\x0F"
-"\x10\x11\x12\x13\x3C\x3D\x32\x26\x18\x19\x1A\x27\x22\x1D\x35\x1F"
-"\x40\x5A\x7F\x7B\x5B\x6C\x50\x7D\x4D\x5D\x5C\x4E\x6B\x60\x4B\x61"
-"\xF0\xF1\xF2\xF3\xF4\xF5\xF6\xF7\xF8\xF9\x7A\x5E\x4C\x7E\x6E\x6F"
-"\x7C\xC1\xC2\xC3\xC4\xC5\xC6\xC7\xC8\xC9\xD1\xD2\xD3\xD4\xD5\xD6"
-"\xD7\xD8\xD9\xE2\xE3\xE4\xE5\xE6\xE7\xE8\xE9\xAD\xE0\xBD\x5F\x6D"
-"\x79\x81\x82\x83\x84\x85\x86\x87\x88\x89\x91\x92\x93\x94\x95\x96"
-"\x97\x98\x99\xA2\xA3\xA4\xA5\xA6\xA7\xA8\xA9\xC0\x6A\xD0\xA1\x07"
-"\x68\xDC\x51\x42\x43\x44\x47\x48\x52\x53\x54\x57\x56\x58\x63\x67"
-"\x71\x9C\x9E\xCB\xCC\xCD\xDB\xDD\xDF\xEC\xFC\xB0\xB1\xB2\xB3\xB4"
-"\x45\x55\xCE\xDE\x49\x69\x04\x06\xAB\x08\xBA\xB8\xB7\xAA\x8A\x8B"
-"\x09\x0A\x14\xBB\x15\xB5\xB6\x17\x1B\xB9\x1C\x1E\xBC\x20\xBE\xBF"
-"\x21\x23\x24\x28\x29\x2A\x2B\x2C\x30\x31\xCA\x33\x34\x36\x38\xCF"
-"\x39\x3A\x3B\x3E\x41\x46\x4A\x4F\x59\x62\xDA\x64\x65\x66\x70\x72"
-"\x73\xE1\x74\x75\x76\x77\x78\x80\x8C\x8D\x8E\xEB\x8F\xED\xEE\xEF"
-"\x90\x9A\x9B\x9D\x9F\xA0\xAC\xAE\xAF\xFD\xFE\xFB\x3F\xEA\xFA\xFF"
-        };
 
 
 /*-------------------------------------------------------------------*/
@@ -69,35 +47,6 @@ argexit ( int code )
             "\t           or in 512-byte sectors (FBA devices)\n");
     exit(code);
 } /* end function argexit */
-
-/*-------------------------------------------------------------------*/
-/* Subroutine to convert a null-terminated string to upper case      */
-/*-------------------------------------------------------------------*/
-static void
-string_to_upper (BYTE *source)
-{
-int     i;                              /* Array subscript           */
-
-    for (i = 0; source[i] != '\0'; i++)
-        source[i] = toupper(source[i]);
-
-} /* end function string_to_upper */
-
-/*-------------------------------------------------------------------*/
-/* Subroutine to convert a string to EBCDIC and pad with blanks      */
-/*-------------------------------------------------------------------*/
-static void
-convert_to_ebcdic (BYTE *dest, int len, BYTE *source)
-{
-int     i;                              /* Array subscript           */
-
-    for (i = 0; i < len && source[i] != '\0'; i++)
-        dest[i] = ascii_to_ebcdic[source[i]];
-
-    while (i < len)
-        dest[i++] = 0x40;
-
-} /* end function convert_to_ebcdic */
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to create a CKD DASD image file                        */
@@ -137,8 +86,8 @@ U32             trksize;                /* DASD image track length   */
                 + sizeof(CKDDASD_RECHDR) + rec0len
                 + sizeof(CKDDASD_RECHDR) + maxdlen
                 + sizeof(eighthexFF);
-    trksize += 0xFF;
-    trksize &= 0xFFFFFF00;
+    trksize += 0x1FF;
+    trksize &= 0xFFFFFE00;
 
     /* Compute minimum and maximum number of cylinders */
     cylsize = trksize * heads;
@@ -514,5 +463,4 @@ BYTE    c;                              /* Character work area       */
     return 0;
 
 } /* end function main */
-
 

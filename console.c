@@ -1078,7 +1078,7 @@ BYTE                    unitstat;       /* Status after receive data */
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
                 /* Set SCSW for attention interrupt */
-                dev->scsw.flag0 = SCSW0_CC_1;
+                dev->scsw.flag0 = 0;
                 dev->scsw.flag1 = 0;
                 dev->scsw.flag2 = 0;
                 dev->scsw.flag3 = SCSW3_SC_ALERT | SCSW3_SC_PEND;

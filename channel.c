@@ -688,6 +688,9 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
     } /* end while(chain) */
 
+    /* Obtain the device lock */
+    obtain_lock (&dev->lock);
+
 #ifdef FEATURE_S370_CHANNEL
     /* Build the channel status word */
     dev->csw[0] = ccwkey & 0xF0;
@@ -725,6 +728,9 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
     {
         signal_thread (sysblk.cnsltid, SIGHUP);
     }
+
+    /* Release the device lock */
+    release_lock (&dev->lock);
 
     /* Signal waiting CPUs that an interrupt is pending */
     obtain_lock (&sysblk.intlock);

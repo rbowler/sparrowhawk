@@ -12,6 +12,7 @@
 /* Service Call Logical Processor command word definitions           */
 /*-------------------------------------------------------------------*/
 #define SCLP_READ_SCP_INFO      0x00020001
+#define SCLP_READ_CHP_INFO      0x00030001
 
 /*-------------------------------------------------------------------*/
 /* Service Call Control Block structure definitions                  */
@@ -162,6 +163,19 @@ typedef struct _SCCB_MPF_INFO {
         HWORD   mpfy;                   /* MPF info array entry      */
     } SCCB_MPF_INFO;
 
+/* Channel path information data area */
+typedef struct _SCCB_CHP_INFO {
+        BYTE    installed[32];          /* Channels installed bits   */
+        BYTE    owned[32];              /* Channels owned bits       */
+        BYTE    online[32];             /* Channels online bits      */
+        BYTE    chanset0a[32];          /* 370 channel set 0A        */
+        BYTE    chanset1a[32];          /* 370 channel set 1A        */
+        BYTE    chanset0b[32];          /* 370 channel set 0B        */
+        BYTE    chanset1b[32];          /* 370 channel set 1B        */
+        BYTE    csconfig;               /* Channel set configuration */
+        BYTE    resv[23];               /* Reserved, set to zero     */
+    } SCCB_CHP_INFO;
+
 
 /*-------------------------------------------------------------------*/
 /* Load external interrupt new PSW                                   */
@@ -296,6 +310,7 @@ int             sccblen;                /* Length of SCCB            */
 SCCB_HEADER    *sccb;                   /* -> SCCB header            */
 SCCB_SCP_INFO  *sccbscp;                /* -> SCCB SCP information   */
 SCCB_CPU_INFO  *sccbcpu;                /* -> SCCB CPU information   */
+SCCB_CHP_INFO  *sccbchp;                /* -> SCCB channel path info */
 U16             offset;                 /* Offset from start of SCCB */
 
     /* Program check if SCCB is not on a doubleword boundary */
@@ -386,10 +401,10 @@ U16             offset;                 /* Offset from start of SCCB */
         memcpy (sccbscp->loadparm, sysblk.loadparm, 8);
 
         /* Set installed features bit mask in SCCB */
-//      sccbscp->ifm1 = SCCB_IFM1_CHANNEL_PATH_INFORMATION
+        sccbscp->ifm1 = SCCB_IFM1_CHANNEL_PATH_INFORMATION
 //                    | SCCB_IFM1_CHANNEL_PATH_SUBSYSTEM_COMMAND
 //                    | SCCB_IFM1_CHANNEL_PATH_RECONFIG
-//                    | SCCB_IFM1_CPU_INFORMATION
+                      | SCCB_IFM1_CPU_INFORMATION;
 //                    | SCCB_IFM1_CPU_RECONFIG;
 //      sccbscp->ifm2 = SCCB_IFM2_SIGNAL_ALARM
 //                    | SCCB_IFM2_STORE_STATUS_ON_LOAD
@@ -408,6 +423,62 @@ U16             offset;                 /* Offset from start of SCCB */
             sccbcpu->tod = 0;
             sccbcpu->cpf2 = SCCB_CPF2_PRIVATE_SPACE_BIT_INSTALLED;
         }
+
+        /* Set response code X'0010' in SCCB header */
+        sccb->reas = SCCB_REAS_NONE;
+        sccb->resp = SCCB_RESP_INFO;
+
+        break;
+
+    case SCLP_READ_CHP_INFO:
+
+        /* Set response code X'0300' if SCCB length
+           is insufficient to contain channel path info */
+        if ( sccblen < sizeof(SCCB_HEADER) + sizeof(SCCB_CHP_INFO))
+        {
+            sccb->reas = SCCB_REAS_TOO_SHORT;
+            sccb->resp = SCCB_RESP_BLOCK_ERROR;
+            break;
+        }
+
+        /* Point to SCCB data area following SCCB header */
+        sccbchp = (SCCB_CHP_INFO*)(sccb+1);
+        memset (sccbchp, 0, sizeof(SCCB_CHP_INFO));
+
+        /* Set the bits which indicate channels installed */
+        memset (sccbchp->installed, 0xFF, sizeof(sccbchp->installed));
+
+        /* Set the bits which indicate channels owned */
+        memset (sccbchp->owned, 0xFF, sizeof(sccbchp->owned));
+
+        /* Set the bits which indicate channels online */
+        memset (sccbchp->online, 0xFF, sizeof(sccbchp->online));
+
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+        /* For ESA, clear the channel set identifiers */
+        memset (sccbchp->chanset0a, 0x00, sizeof(sccbchp->chanset0a));
+        memset (sccbchp->chanset1a, 0x00, sizeof(sccbchp->chanset1a));
+        memset (sccbchp->chanset0b, 0x00, sizeof(sccbchp->chanset0b));
+        memset (sccbchp->chanset1b, 0x00, sizeof(sccbchp->chanset1b));
+        sccbchp->csconfig = 0;
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+#ifdef FEATURE_S370_CHANNEL
+        /* For S/370, initialize identifiers for channel set 0A */
+        for (i = 0; i < 16; i++)
+        {
+            sccbchp->chanset0a[2*i] = 0x80;
+            sccbchp->chanset0a[2*i+1] = i;
+        } /* end for(i) */
+
+        /* Clear the remaining channel set identifiers */
+        memset (sccbchp->chanset1a, 0x00, sizeof(sccbchp->chanset1a));
+        memset (sccbchp->chanset0b, 0x00, sizeof(sccbchp->chanset0b));
+        memset (sccbchp->chanset1b, 0x00, sizeof(sccbchp->chanset1b));
+
+        /* Set the channel set configuration byte */
+        sccbchp->csconfig = 0xC0;
+#endif /*FEATURE_S370_CHANNEL*/
 
         /* Set response code X'0010' in SCCB header */
         sccb->reas = SCCB_REAS_NONE;
