@@ -128,6 +128,8 @@ REGS   *regs;                           /* -> CPU register context   */
     /* Clear the interrupt pending and device busy conditions */
     dev->pending = 0;
     dev->busy = 0;
+    dev->scsw.flag2 = 0;
+    dev->scsw.flag3 = 0;
 
 #ifdef FEATURE_S370_CHANNEL
     /* Store the I/O device address at locations 184-187 */

@@ -753,7 +753,7 @@ int     ssevent;                        /* 1=space switch event      */
 U32     retn;                           /* Return address and amode  */
 U32     aste[16];                       /* ASN second table entry    */
 U16     xcode;                          /* Exception code            */
-U16     asn;                            /* Address space number      */
+U16     pasn;                           /* Primary ASN               */
 
     /* Special operation exception if DAT is off, or if
        in secondary space mode or home space mode */
@@ -897,11 +897,11 @@ U16     asn;                            /* Address space number      */
         return 0;
     }
 
-    /* Obtain the new ASN from the entry table */
-    asn = ete[0] & ETE0_ASN;
+    /* Obtain the new primary ASN from the entry table */
+    pasn = ete[0] & ETE0_ASN;
 
-    /* Perform ASN translation if new ASN is non-zero */
-    if (asn != 0)
+    /* Perform ASN translation if ASN is non-zero */
+    if (pasn != 0)
     {
         /* Program check if ASN translation control is zero */
         if ((regs->cr[14] & CR14_ASN_TRAN) == 0)
@@ -911,7 +911,7 @@ U16     asn;                            /* Address space number      */
         }
 
         /* Perform ASN translation to obtain ASTE */
-        xcode = translate_asn (asn, regs, &pasteo, aste);
+        xcode = translate_asn (pasn, regs, &pasteo, aste);
 
         /* Program check if ASN translation exception */
         if (xcode != 0)
@@ -920,7 +920,7 @@ U16     asn;                            /* Address space number      */
             return 0;
         }
 
-    } /* end if(asn!=0) */
+    } /* end if(PC-ss) */
 
     /* Perform basic or stacking program call */
     if ((ete[4] & ETE4_T) == 0)
@@ -983,7 +983,7 @@ U16     asn;                            /* Address space number      */
     } /* end if(stacking PC) */
 
     /* If new ASN is zero, perform program call to current primary */
-    if (asn == 0)
+    if (pasn == 0)
     {
         /* Set SASN equal to PASN */
         regs->cr[3] &= ~CR3_SASN;
@@ -1011,7 +1011,7 @@ U16     asn;                            /* Address space number      */
                         || (regs->psw.sysmask & PSW_PERMODE);
 
         /* Obtain new AX from the ASTE and new PASN from the ET */
-        regs->cr[4] = (aste[1] & ASTE1_AX) | asn;
+        regs->cr[4] = (aste[1] & ASTE1_AX) | pasn;
 
         /* Obtain the new PSTD from the ASTE */
         regs->cr[1] = aste[2];

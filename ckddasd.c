@@ -61,6 +61,21 @@ typedef struct _CKDDASD_RECHDR {        /* Record header             */
 #define CKDMASK_PCI_FETCH       0x01    /* PCI fetch mode            */
 
 /*-------------------------------------------------------------------*/
+/* Bit definitions for Define Extent global attributes byte          */
+/*-------------------------------------------------------------------*/
+#define CKDGATR_ARCH            0xC0    /* Architecture mode...      */
+#define CKDGATR_ARCH_ECKD       0xC0    /* ...extended CKD mode      */
+#define CKDGATR_CKDCONV         0x20    /* CKD conversion mode       */
+#define CKDGATR_SSOP            0x1C    /* Subsystem operation mode..*/
+#define CKDGATR_SSOP_NORMAL     0x00    /* ...normal cache           */
+#define CKDGATR_SSOP_BYPASS     0x04    /* ...bypass cache           */
+#define CKDGATR_SSOP_INHIBIT    0x08    /* ...inhibit cache loading  */
+#define CKDGATR_SSOP_SEQACC     0x0C    /* ...sequential access      */
+#define CKDGATR_SSOP_LOGGING    0x10    /* ...logging mode           */
+#define CKDGATR_USE_CACHE_FW    0x02    /* Use cache fast write      */
+#define CKDGATR_INH_DASD_FW     0x01    /* Inhibit DASD fast write   */
+
+/*-------------------------------------------------------------------*/
 /* Bit definitions for Locate operation byte                         */
 /*-------------------------------------------------------------------*/
 #define CKDOPER_ORIENTATION     0xC0    /* Orientation bits...       */
@@ -147,8 +162,7 @@ BYTE            cucode;                 /* Control unit type code    */
 BYTE            devmodel;               /* Device model number       */
 BYTE            devclass;               /* Device class              */
 BYTE            devtcode;               /* Device type code          */
-BYTE            scfeatures[4];          /* Storage control features  */
-BYTE            rpssects;               /* Number of RPS sectors     */
+U32             sctlfeat;               /* Storage control features  */
 
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
@@ -218,6 +232,11 @@ BYTE            rpssects;               /* Number of RPS sectors     */
                 dev->filename);
     }
 
+    /* Calculate maximum record sizes */
+    har0len = CKDDASD_TRKHDR_SIZE + CKDDASD_RECHDR_SIZE + 8;
+    dev->ckdmaxr0len = dev->ckdtrksz - har0len;
+    dev->ckdmaxr1len = dev->ckdtrksz - 104;
+
     /* Set number of sense bytes */
     dev->numsense = 32;
 
@@ -225,25 +244,26 @@ BYTE            rpssects;               /* Number of RPS sectors     */
     cutype = 0x3990;
     cumodel = 0xC2;
     cucode = 0x10;
-
-    memcpy (scfeatures, "\xD0\x00\x00\x02", 4);
     devclass = 0x20;
 
     switch (dev->devtype) {
     case 0x3390:
         devmodel = 0x06;
         devtcode = 0x27;
-        rpssects = 224;
+        dev->ckdsectors = 224;
+        sctlfeat = 0xD0000002;
         break;
     case 0x3380:
         devmodel = 0x02;
         devtcode = 0x26;
-        rpssects = 222;
+        dev->ckdsectors = 222;
+        sctlfeat = 0x50000003;
         break;
     default:
         devmodel = 0x01;
         devtcode = 0x00;
-        rpssects = 200;
+        dev->ckdsectors = 200;
+        sctlfeat = 0x50000103;
     } /* end switch(dev->devtype) */
 
     /* Initialize the device identifier bytes */
@@ -259,24 +279,28 @@ BYTE            rpssects;               /* Number of RPS sectors     */
     /* Initialize the device characteristics bytes */
     memset (dev->devchar, 0, sizeof(dev->devchar));
     memcpy (dev->devchar, dev->devid+1, 6);
-    memcpy (dev->devchar+6, scfeatures, 4);
+    dev->devchar[6] = (sctlfeat >> 24) & 0xFF;
+    dev->devchar[7] = (sctlfeat >> 16) & 0xFF;
+    dev->devchar[8] = (sctlfeat >> 8) & 0xFF;
+    dev->devchar[9] = sctlfeat & 0xFF;
     dev->devchar[10] = devclass;
     dev->devchar[11] = devtcode;
-    dev->devchar[12] = dev->ckdcyls >> 8;
+    dev->devchar[12] = (dev->ckdcyls >> 8) & 0xFF;
     dev->devchar[13] = dev->ckdcyls & 0xFF;
-    dev->devchar[14] = dev->ckdheads >> 8;
+    dev->devchar[14] = (dev->ckdheads >> 8) & 0xFF;
     dev->devchar[15] = dev->ckdheads & 0xFF;
-    dev->devchar[16] = rpssects;
+    dev->devchar[16] = dev->ckdsectors;
     dev->devchar[17] = (dev->ckdtrksz >> 16) & 0xFF;
     dev->devchar[18] = (dev->ckdtrksz >> 8) & 0xFF;
     dev->devchar[19] = dev->ckdtrksz & 0xFF;
-    har0len = CKDDASD_TRKHDR_SIZE + CKDDASD_RECHDR_SIZE + 8;
     dev->devchar[20] = (har0len >> 8) & 0xFF;
     dev->devchar[21] = har0len & 0xFF;
     dev->devchar[22] = 1;
     dev->devchar[40] = devtcode;
     dev->devchar[41] = devtcode;
     dev->devchar[42] = cucode;
+    dev->devchar[44] = (dev->ckdmaxr0len >> 8) & 0xFF;
+    dev->devchar[45] = dev->ckdmaxr0len & 0xFF;
     dev->numdevchar = 64;
 
     /* Activate I/O tracing */
@@ -307,7 +331,6 @@ static void ckd_build_sense ( DEVBLK *dev, BYTE sense0, BYTE sense1,
 
     /* Sense byte 4 is the physical device address */
     dev->sense[4] = 0;
-
 
     /* Sense byte 5 contains bits 8-15 of the cylinder address
        and sense byte 6 contains bits 4-7 of the cylinder
@@ -434,9 +457,9 @@ off_t           seekpos;                /* Seek position for lseek   */
 
     /* Validate the track header */
     if (trkhdr->bin != 0
-        || trkhdr->cyl[0] != (cyl >> 8)
+        || trkhdr->cyl[0] != ((cyl >> 8) & 0xFF)
         || trkhdr->cyl[1] != (cyl & 0xFF)
-        || trkhdr->head[0] != (head >> 8)
+        || trkhdr->head[0] != ((head >> 8) & 0xFF)
         || trkhdr->head[1] != (head & 0xFF))
     {
         printf("ckddasd: invalid track header\n");
@@ -593,11 +616,12 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
         if (memcmp(rechdr, eighthexFF, 8) != 0)
             break;
 
-        /* No record found error if this is the second end of track
-           in this channel program without an intervening read of
-           the home address or data area, or without an intervening
+        /* End of track found, so terminate with no record found error
+           if this is a LOCATE RECORD; or if this is the second end of
+           track in this channel program without an intervening read
+           of the home address or data area and without an intervening
            write, sense, or control command */
-        if (dev->ckdxmark)
+        if (code == 0x47 || dev->ckdxmark)
         {
             ckd_build_sense (dev, 0, SENSE1_NRF, 0, 0, 0);
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -754,6 +778,17 @@ U16             ckdlen;                 /* Count+key+data length     */
 off_t           curpos;                 /* Current position in file  */
 off_t           nxtpos;                 /* Position of next track    */
 
+    /* Unit check if oriented to count or key areas */
+    if (dev->ckdorient == CKDORIENT_COUNT
+        || dev->ckdorient == CKDORIENT_KEY)
+    {
+        printf("ckddasd: Write CKD orientation error\n");
+        ckd_build_sense (dev, SENSE_CR, 0, 0,
+                        FORMAT_0, MESSAGE_2);
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
     /* Copy the count field from the buffer */
     memset (&rechdr, 0, CKDDASD_RECHDR_SIZE);
     memcpy (&rechdr, buf, (len < CKDDASD_RECHDR_SIZE) ?
@@ -864,6 +899,16 @@ static int ckd_write_kd ( DEVBLK *dev, BYTE *buf, U16 len,
 int             rc;                     /* Return code               */
 U16             kdlen;                  /* Key+data length           */
 
+    /* Unit check if not oriented to count area */
+    if (dev->ckdorient != CKDORIENT_COUNT)
+    {
+        printf("ckddasd: Write KD orientation error\n");
+        ckd_build_sense (dev, SENSE_CR, 0, 0,
+                        FORMAT_0, MESSAGE_2);
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
     /* Calculate total key and data size */
     kdlen = dev->ckdcurkl + dev->ckdcurdl;
 
@@ -903,6 +948,17 @@ static int ckd_write_data ( DEVBLK *dev, BYTE *buf, U16 len,
 {
 int             rc;                     /* Return code               */
 int             skiplen;                /* Number of bytes to skip   */
+
+    /* Unit check if not oriented to count or key areas */
+    if (dev->ckdorient != CKDORIENT_COUNT
+        && dev->ckdorient != CKDORIENT_KEY)
+    {
+        printf("ckddasd: Write data orientation error\n");
+        ckd_build_sense (dev, SENSE_CR, 0, 0,
+                        FORMAT_0, MESSAGE_2);
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
 
     /* If oriented to count field, skip the key field */
     if (dev->ckdorient == CKDORIENT_COUNT)
@@ -956,10 +1012,12 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header (HA)     */
 CKDDASD_RECHDR  rechdr;                 /* CKD record header (count) */
 int             size;                   /* Number of bytes available */
 int             num;                    /* Number of bytes to move   */
+int             skiplen;                /* Number of bytes to skip   */
 U16             bin;                    /* Bin number                */
 U16             cyl;                    /* Cylinder number           */
 U16             head;                   /* Head number               */
-BYTE            fmask;                  /* File mask                 */
+BYTE            cchhr[5];               /* Search argument           */
+BYTE            sector;                 /* Sector number             */
 BYTE            key[256];               /* Key for search operations */
 
     /* Command reject if data chaining */
@@ -978,6 +1036,7 @@ BYTE            key[256];               /* Key for search operations */
         dev->ckdxtdef = 0;
         dev->ckdsetfm = 0;
         dev->ckdlocat = 0;
+        dev->ckdspcnt = 0;
         dev->ckdseek = 0;
         dev->ckdskcyl = 0;
         dev->ckdrecal = 0;
@@ -988,6 +1047,7 @@ BYTE            key[256];               /* Key for search operations */
         dev->ckdideq = 0;
         dev->ckdkyeq = 0;
         dev->ckdwckd = 0;
+        dev->ckdlcount = 0;
     }
 
     /* Reset index marker flag if sense or control command,
@@ -1038,12 +1098,6 @@ BYTE            key[256];               /* Key for search operations */
         dev->ckdloper = CKDOPER_ORIENT_DATA | CKDOPER_RDDATA;
         dev->ckdlaux = 0;
         dev->ckdlcount = 2;
-        dev->ckdlskcyl = 0;
-        dev->ckdlskhead = 0;
-        dev->ckdlsrcyl = 0;
-        dev->ckdlsrhead = 0;
-        dev->ckdlsrrec = 0;
-        dev->ckdlsector = 0;
         dev->ckdltranlf = 0;
 
         /* Seek to start of cylinder zero track zero */
@@ -1581,20 +1635,17 @@ BYTE            key[256];               /* Key for search operations */
             break;
         }
 
-        /* Extract the new file mask from the I/O buffer */
-        fmask = iobuf[0];
+        /* Extract the file mask from the I/O buffer */
+        dev->ckdfmask = iobuf[0];
 
         /* Command reject if file mask is invalid */
-        if ((fmask & CKDMASK_RESV) != 0)
+        if ((dev->ckdfmask & CKDMASK_RESV) != 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_4);
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
             break;
         }
-
-        /* Set the file mask to the new value */
-        dev->ckdfmask = fmask;
 
         /* Set command processed flag */
         dev->ckdsetfm = 1;
@@ -1848,8 +1899,13 @@ BYTE            key[256];               /* Key for search operations */
     /* WRITE DATA                                                    */
     /*---------------------------------------------------------------*/
         /* Command reject if the current track is in the DSF area */
-        /*INCOMPLETE*/
-            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+        if (dev->ckdcurcyl >= dev->ckdcyls)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
 
         /* Command reject if not within the domain of a Locate Record
            and not preceded by either a Search ID Equal or Search Key
@@ -1879,7 +1935,8 @@ BYTE            key[256];               /* Key for search operations */
         if (dev->ckdlocat)
         {
             if (!(((dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRITE
-        /*INCOMPLETE*/ && dev->ckdlcount == 1 /*+ 1 if rdcount suffix */)
+                       && dev->ckdlcount ==
+                            (dev->ckdlaux & CKDLAUX_RDCNTSUF) ? 2 : 1)
                   || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRTTRK))
             {
                 ckd_build_sense (dev, SENSE_CR, 0, 0,
@@ -1887,9 +1944,18 @@ BYTE            key[256];               /* Key for search operations */
                 *unitstat = CSW_CE | CSW_DE | CSW_UC;
                 break;
             }
-            /*INCOMPLETE*/ /*Use transfer length factor and check
-            against CKD conversion mode*/
-        }
+
+            /* If not operating in CKD conversion mode, check that the
+               data length is equal to the transfer length factor */
+            if ((dev->ckdxgattr & CKDGATR_CKDCONV) == 0
+                && dev->ckdcurdl != dev->ckdltranlf)
+            {
+                /* Unit check with invalid track format */
+                ckd_build_sense (dev, 0, SENSE1_ITF, 0, 0, 0);
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                break;
+            }
+        } /* end if(ckdlocat) */
 
         /* If data length is zero, terminate with unit exception */
         if (dev->ckdcurdl == 0)
@@ -1912,8 +1978,13 @@ BYTE            key[256];               /* Key for search operations */
     /* WRITE KEY AND DATA                                            */
     /*---------------------------------------------------------------*/
         /* Command reject if the current track is in the DSF area */
-        /*INCOMPLETE*/
-            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+        if (dev->ckdcurcyl >= dev->ckdcyls)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
 
         /* Command reject if not within the domain of a Locate Record
            and not preceded by a Search ID Equal that compared equal
@@ -1942,7 +2013,8 @@ BYTE            key[256];               /* Key for search operations */
         if (dev->ckdlocat)
         {
             if (!(((dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRITE
-        /*INCOMPLETE*/ && dev->ckdlcount == 1 /*+ 1 if rdcount suffix */)
+                       && dev->ckdlcount ==
+                            (dev->ckdlaux & CKDLAUX_RDCNTSUF) ? 2 : 1)
                   || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRTTRK))
             {
                 ckd_build_sense (dev, SENSE_CR, 0, 0,
@@ -1950,9 +2022,18 @@ BYTE            key[256];               /* Key for search operations */
                 *unitstat = CSW_CE | CSW_DE | CSW_UC;
                 break;
             }
-            /*INCOMPLETE*/ /*Use transfer length factor and check
-            against CKD conversion mode*/
-        }
+
+            /* If not operating in CKD conversion mode, check that the
+               key + data length equals the transfer length factor */
+            if ((dev->ckdxgattr & CKDGATR_CKDCONV) == 0
+                && dev->ckdcurkl + dev->ckdcurdl != dev->ckdltranlf)
+            {
+                /* Unit check with invalid track format */
+                ckd_build_sense (dev, 0, SENSE1_ITF, 0, 0, 0);
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                break;
+            }
+        } /* end if(ckdlocat) */
 
         /* If data length is zero, terminate with unit exception */
         if (dev->ckdcurdl == 0)
@@ -1975,8 +2056,13 @@ BYTE            key[256];               /* Key for search operations */
     /* WRITE RECORD ZERO                                             */
     /*---------------------------------------------------------------*/
         /* Command reject if the current track is in the DSF area */
-        /*INCOMPLETE*/
-            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+        if (dev->ckdcurcyl >= dev->ckdcyls)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
 
         /* Command reject if not within the domain of a Locate Record
            and not preceded by either a Search Home Address that
@@ -2036,13 +2122,16 @@ BYTE            key[256];               /* Key for search operations */
     /* WRITE COUNT KEY AND DATA                                      */
     /*---------------------------------------------------------------*/
         /* Command reject if the current track is in the DSF area */
-        /*INCOMPLETE*/
-            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+        if (dev->ckdcurcyl >= dev->ckdcyls)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
 
         /* Command reject if previous command was a Write R0 that
-           assigned an alternate track */
-        /*INCOMPLETE*/
-            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+           assigned an alternate track - not implemented */
 
         /* Command reject if not within the domain of a Locate Record
            and not preceded by either a Search ID Equal or Search Key
@@ -2093,6 +2182,354 @@ BYTE            key[256];               /* Key for search operations */
         else
             dev->ckdwckd = 0;
 
+        break;
+
+    case 0x47:
+    /*---------------------------------------------------------------*/
+    /* LOCATE RECORD                                                 */
+    /*---------------------------------------------------------------*/
+        /* Calculate residual byte count */
+        num = (count < 16) ? count : 16;
+        *residual = count - num;
+
+        /* Control information length must be at least 16 bytes */
+        if (count < 16)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_3);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Command reject if within the domain of a Locate Record,
+           or not preceded by a Define Extent or Read IPL command */
+        if (dev->ckdlocat
+            || dev->ckdxtdef == 0 || dev->ckdrdipl == 0)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Byte 0 contains the locate record operation byte */
+        dev->ckdloper = iobuf[0];
+
+        /* Validate the locate record operation code (bits 2-7) */
+        if (!((dev->ckdloper & CKDOPER_CODE) == CKDOPER_ORIENT
+              || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRITE
+              || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_FORMAT
+              || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_RDDATA
+              || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRTTRK
+              || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_RDTRKS
+              || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_READ))
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_4);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Check for valid combination of orientation and opcode */
+        if (   ((dev->ckdloper & CKDOPER_ORIENTATION)
+                                        == CKDOPER_ORIENT_HOME
+                && !((dev->ckdloper & CKDOPER_CODE) == CKDOPER_ORIENT
+                  || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_FORMAT
+                  || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_RDDATA
+                  || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_RDTRKS
+                  || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_READ))
+            ||
+               ((dev->ckdloper & CKDOPER_ORIENTATION)
+                                        == CKDOPER_ORIENT_DATA
+                && !((dev->ckdloper & CKDOPER_CODE) == CKDOPER_ORIENT
+                  || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRITE
+                  || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_RDDATA
+                  || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_READ))
+            ||
+               ((dev->ckdloper & CKDOPER_ORIENTATION)
+                                        == CKDOPER_ORIENT_INDEX
+                && !((dev->ckdloper & CKDOPER_CODE) == CKDOPER_FORMAT
+                  || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_READ))
+            )
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_4);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Byte 1 contains the locate record auxiliary byte */
+        dev->ckdlaux = iobuf[1];
+
+        /* Validate the auxiliary byte */
+        if ((dev->ckdlaux & CKDLAUX_RESV) != 0
+            || ((dev->ckdlaux & CKDLAUX_RDCNTSUF)
+                && !((dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRITE
+                  || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_READ))
+            )
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_4);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Byte 2 must contain zeroes */
+        if (iobuf[2] != 0)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_4);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Byte 3 contains the locate record domain count */
+        dev->ckdlcount = iobuf[3];
+
+        /* Validate the locate record domain count */
+        if (   ((dev->ckdloper & CKDOPER_CODE) == CKDOPER_ORIENT
+                && dev->ckdlcount != 0)
+            || ((dev->ckdloper & CKDOPER_CODE) != CKDOPER_ORIENT
+                && dev->ckdlcount == 0)
+            || ((dev->ckdlaux & CKDLAUX_RDCNTSUF)
+                && dev->ckdlcount < 2)
+            )
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_4);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Bytes 4-7 contain the seek address */
+        cyl = (iobuf[4] << 8) | iobuf[5];
+        head = (iobuf[6] << 8) | iobuf[7];
+
+        /* Command reject if seek address is not valid */
+        if (cyl >= dev->ckdcyls || head >= dev->ckdheads)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_4);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* File protect error if seek address is outside extent */
+        if (cyl < dev->ckdxbcyl || cyl > dev->ckdxecyl
+            || (cyl == dev->ckdxbcyl && head < dev->ckdxbhead)
+            || (cyl == dev->ckdxecyl && head > dev->ckdxehead))
+        {
+            ckd_build_sense (dev, 0, SENSE1_FP, 0, 0, 0);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Bytes 8-12 contain the search argument */
+        memcpy (cchhr, iobuf+8, 5);
+
+        /* Byte 13 contains the sector number */
+        sector = iobuf[13];
+
+        /* Command reject if sector number is not valid */
+        if (sector >= dev->ckdsectors)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_4);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Bytes 14-15 contain the transfer length factor */
+        dev->ckdltranlf = (iobuf[14] << 8) | iobuf[15];
+
+        /* Validate the transfer length factor */
+        if (   ((dev->ckdlaux & CKDLAUX_TLFVALID) == 0
+                && dev->ckdltranlf != 0)
+            || ((dev->ckdlaux & CKDLAUX_TLFVALID)
+                && dev->ckdltranlf == 0)
+            || dev->ckdltranlf > dev->ckdxblksz)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_4);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* If transfer length factor is not supplied then use
+           the blocksize from the define extent command */
+        if ((dev->ckdlaux & CKDLAUX_TLFVALID) == 0)
+            dev->ckdltranlf = dev->ckdxblksz;
+
+        /* Seek to the required track */
+        rc = ckd_seek (dev, cyl, head, &trkhdr, unitstat);
+        if (rc < 0) break;
+
+        /* Set normal status */
+        *unitstat = CSW_CE | CSW_DE;
+
+        /* Perform search according to specified orientation */
+        switch ((dev->ckdloper & CKDOPER_ORIENTATION)) {
+
+        case CKDOPER_ORIENT_HOME:
+            /* For home orientation, compare the search CCHH
+               with the CCHH in the track header */
+            if (memcmp (&trkhdr, cchhr, 4) != 0)
+            {
+                ckd_build_sense (dev, 0, SENSE1_NRF, 0, 0, 0);
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            }
+            break;
+
+        case CKDOPER_ORIENT_COUNT:
+        case CKDOPER_ORIENT_DATA:
+            /* For count or data orientation, search the track
+               for a count field matching the specified CCHHR */
+            while (1)
+            {
+                /* Read next count field and exit at end of track
+                   with sense data indicating no record found */
+                rc = ckd_read_count (dev, code, &rechdr, unitstat);
+                if (rc < 0) break;
+
+                /* Compare the count field with the search CCHHR */
+                if (memcmp( &rechdr, cchhr, 5) == 0)
+                    break;
+
+            } /* end while */
+
+        } /* end switch(CKDOPER_ORIENTATION) */
+
+        /* Exit if search ended with error status */
+        if (*unitstat != (CSW_CE | CSW_DE))
+            break;
+
+        /* Reorient past data if data orientation is specified */
+        if ((dev->ckdloper & CKDOPER_ORIENTATION)
+                        == CKDOPER_ORIENT_DATA)
+        {
+            /* Skip past key and data fields */
+            skiplen = dev->ckdcurkl + dev->ckdcurdl;
+            if (skiplen > 0)
+            {
+                rc = ckd_skip (dev, skiplen, unitstat);
+                if (rc < 0) break;
+            }
+
+            /* Set the device orientation fields */
+            dev->ckdrem = 0;
+            dev->ckdorient = CKDORIENT_DATA;
+        }
+
+        /* Set locate record flag and return normal status */
+        dev->ckdlocat = 1;
+        break;
+
+    case 0x63:
+    /*---------------------------------------------------------------*/
+    /* DEFINE EXTENT                                                 */
+    /*---------------------------------------------------------------*/
+        /* Calculate residual byte count */
+        num = (count < 16) ? count : 16;
+        *residual = count - num;
+
+        /* Control information length must be at least 16 bytes */
+        if (count < 16)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_3);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Command reject if within the domain of a Locate Record, or
+           preceded by Define Extent, Space Count, or Set File Mask,
+           or (for 3390 only) preceded by Read IPL */
+        if (dev->ckdlocat
+            || dev->ckdxtdef || dev->ckdspcnt || dev->ckdsetfm
+            || (dev->ckdrdipl && dev->devtype == 0x3390))
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Bytes 0-1 contain the file mask and global attributes */
+        dev->ckdfmask = iobuf[0];
+        dev->ckdxgattr = iobuf[1];
+
+        /* Validate the global attributes byte bits 0-1 */
+        if ((dev->ckdxgattr & CKDGATR_ARCH) != CKDGATR_ARCH_ECKD)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_4);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Validate the file mask */
+        if ((dev->ckdfmask & CKDMASK_RESV) != 0)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_4);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Bytes 2-3 contain the extent block size */
+        dev->ckdxblksz = (iobuf[2] << 8) | iobuf[3];
+
+        /* If extent block size is zero then use the maximum R0
+           record length (as returned in device characteristics
+           bytes 44 and 45) plus 8 */
+        if (dev->ckdxblksz == 0)
+            dev->ckdxblksz = dev->ckdmaxr0len + 8;
+
+        /* Validate the extent block */
+        if (dev->ckdxblksz > dev->ckdmaxr0len + 8)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_4);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Bytes 4-6 must contain zeroes */
+        if (iobuf[4] != 0 || iobuf[5] != 0 || iobuf[6] != 0)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_4);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Bytes 8-11 contain the extent begin cylinder and head */
+        dev->ckdxbcyl = (iobuf[8] << 8) | iobuf[9];
+        dev->ckdxbhead = (iobuf[10] << 8) | iobuf[11];
+
+        /* Bytes 12-15 contain the extent end cylinder and head */
+        dev->ckdxecyl = (iobuf[12] << 8) | iobuf[13];
+        dev->ckdxehead = (iobuf[14] << 8) | iobuf[15];
+
+        /* Validate the extent description by checking that the
+           ending track is not less than the starting track and
+           that the extent does not exceed the device size */
+        if (dev->ckdxecyl < dev->ckdxbcyl
+            || (dev->ckdxecyl == dev->ckdxbcyl
+                && dev->ckdxehead < dev->ckdxbhead)
+            || dev->ckdxecyl >= dev->ckdcyls
+            || dev->ckdxbhead >= dev->ckdheads
+            || dev->ckdxehead >= dev->ckdheads)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_4);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Set extent defined flag and return normal status */
+        dev->ckdxtdef = 1;
+        *unitstat = CSW_CE | CSW_DE;
         break;
 
     case 0x64:
@@ -2154,6 +2591,26 @@ BYTE            key[256];               /* Key for search operations */
     /* Reset write CKD flag if command was not WRITE R0 or WRITE CKD */
     if (code != 0x15 && code != 0x1D)
         dev->ckdwckd = 0;
+
+    /* If within the domain of a locate record then decrement the
+       count of CCWs remaining to be processed within the domain */
+    if (dev->ckdlocat && code != 0x047)
+    {
+        if (dev->ckdlcount > 0)
+            dev->ckdlcount--;
+
+        /* Reset flag if no more CCWs in the domain */
+        if (dev->ckdlcount == 0)
+            dev->ckdlocat = 0;
+
+        /* Command reject with incomplete domain if CCWs remain
+           but command chaining is not specified */
+        if (dev->ckdlcount > 0 && (flags & CCW_FLAGS_CC) == 0)
+        {
+            ckd_build_sense (dev, SENSE_CR | SENSE_OC, 0, 0, 0, 0);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        }
+    } /* end if(ckdlocat) */
 
 } /* end function ckddasd_execute_ccw */
 

@@ -228,6 +228,7 @@ typedef struct _DEVBLK {
                 ckdxtdef:1,             /* 1=Define Extent processed */
                 ckdsetfm:1,             /* 1=Set File Mask processed */
                 ckdlocat:1,             /* 1=Locate Record processed */
+                ckdspcnt:1,             /* 1=Space Count processed   */
                 ckdseek:1,              /* 1=Seek command processed  */
                 ckdskcyl:1,             /* 1=Seek cylinder processed */
                 ckdrecal:1,             /* 1=Recalibrate processed   */
@@ -241,6 +242,9 @@ typedef struct _DEVBLK {
         U16     ckdtrks;                /* Number of tracks          */
         U16     ckdheads;               /* #of heads per cylinder    */
         U16     ckdtrksz;               /* Track size                */
+        U16     ckdmaxr0len;            /* Maximum length of R0 data */
+        U16     ckdmaxr1len;            /* Maximum length of R1 data */
+        BYTE    ckdsectors;             /* Number of sectors         */
         BYTE    ckdfmask;               /* Define extent file mask   */
         BYTE    ckdxgattr;              /* Define extent global attr */
         U16     ckdxblksz;              /* Define extent block size  */
@@ -251,12 +255,6 @@ typedef struct _DEVBLK {
         BYTE    ckdloper;               /* Locate record operation   */
         BYTE    ckdlaux;                /* Locate record aux byte    */
         BYTE    ckdlcount;              /* Locate record count       */
-        U16     ckdlskcyl;              /* Locate record seek cyl    */
-        U16     ckdlskhead;             /* Locate record seek head   */
-        U16     ckdlsrcyl;              /* Locate record search cyl  */
-        U16     ckdlsrhead;             /* Locate record search head */
-        BYTE    ckdlsrrec;              /* Locate record search rec  */
-        BYTE    ckdlsector;             /* Locate record sector      */
         U16     ckdltranlf;             /* Locate record transfer
                                            length factor             */
         U16     ckdcurcyl;              /* Current cylinder          */
