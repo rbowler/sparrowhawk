@@ -3,9 +3,9 @@
  * ieee.c
  * Binary (IEEE) Floating Point Instructions
  * Copyright (c) 2001 Willem Konynenberg <wfk@xos.nl>
+ * TCEB, TCDB and TCXB contributed by Per Jessen, 20 September 2001.
  * Licensed under the Q Public License
- * For details, see
- * http://www.trolltech.com/products/download/freelicense/license.html
+ * For details, see html/herclic.html
  */
 
 /*
@@ -95,6 +95,19 @@ struct sbfp {
 	float	v;
 };
 
+#ifndef HAVE_SQRTL
+#define sqrtl(x) sqrt(x)
+#endif
+#ifndef HAVE_LDEXPL
+#define ldexpl(x,y) ldexp(x,y)
+#endif
+#ifndef HAVE_FABSL
+#define fabsl(x) fabs(x)
+#endif
+#ifndef HAVE_FMODL
+#define fmodl(x,y) fmod(x,y)
+#endif
+
 #endif	/* !defined(_GEN_ARCH) */
 
 /* externally defined architecture-dependent functions */
@@ -135,6 +148,9 @@ struct sbfp {
 #define subtract_ebfp ARCH_DEP(subtract_ebfp)
 #define subtract_lbfp ARCH_DEP(subtract_lbfp)
 #define subtract_sbfp ARCH_DEP(subtract_sbfp)
+#define testdataclass_ebfp ARCH_DEP(testdataclass_ebfp)
+#define testdataclass_lbfp ARCH_DEP(testdataclass_lbfp)
+#define testdataclass_sbfp ARCH_DEP(testdataclass_sbfp)
 
 /*
  * Convert from C IEEE exception to Pop IEEE exception
@@ -241,19 +257,19 @@ int sbfpclassify(struct sbfp *op)
 
 int ebfpissnan(struct ebfp *op)
 {
-	return op->exp == 0x7FFF && (op->fracth || op->fractl)
+	return ebfpclassify(op) == FP_NAN
 		&& (op->fracth & 0x0000800000000000L) == 0;
 }
 
 int lbfpissnan(struct lbfp *op)
 {
-	return op->exp == 0x7FF && op->fract
+	return lbfpclassify(op) == FP_NAN
 		&& (op->fract & 0x0008000000000000L) == 0;
 }
 
 int sbfpissnan(struct sbfp *op)
 {
-	return op->exp == 0xFF && op->fract
+	return sbfpclassify(op) == FP_NAN
 		&& (op->fract & 0x00400000) == 0;
 }
 
@@ -349,6 +365,9 @@ void sbfpinfinity(struct sbfp *op, int sign)
  * Since this concerns only a few boundary conditions, few of the programs
  * that are going to use these instructions will care.
  * If you want to do high-precision number-crunching, you'll find a better way.
+ *
+ * This code should deal with FPC bits 0.0 and 1.0 when handling a NaN,
+ * but it doesn't yet.
  */
 
 /*
@@ -358,35 +377,141 @@ void ebfpston(struct ebfp *op)
 {
 	long double h, l;
 
-	h = ldexpl((long double)(op->fracth | 0x1000000000000L), -48);
-	l = ldexpl((long double)op->fractl, -112);
-	if (op->sign) {
-		h = -h;
-		l = -l;
+	switch (ebfpclassify(op)) {
+	case FP_NAN:
+		logmsg("ebfpston: unexpectedly converting a NaN\n");
+		op->v = sqrt(-1);
+		break;
+	case FP_INFINITE:
+		logmsg("ebfpston: unexpectedly converting an Infinite\n");
+		if (op->sign) {
+			op->v = log(0);
+		} else {
+			op->v = 1/0;
+		}
+		break;
+	case FP_ZERO:
+		if (op->sign) {
+			op->v = 1 / log(0);
+		} else {
+			op->v = 0;
+		}
+		break;
+	case FP_SUBNORMAL:
+		/* WARNING:
+		 * This code is probably not correct yet.
+		 * I only did the quick hack of removing unit bit 1.
+		 * Haven't looked at exponent handling yet.
+		 */
+		h = ldexpl((long double)(op->fracth), -48);
+		l = ldexpl((long double)op->fractl, -112);
+		if (op->sign) {
+			h = -h;
+			l = -l;
+		}
+		op->v = ldexpl(h + l, op->exp - 16383);
+		break;
+	case FP_NORMAL:
+		h = ldexpl((long double)(op->fracth | 0x1000000000000L), -48);
+		l = ldexpl((long double)op->fractl, -112);
+		if (op->sign) {
+			h = -h;
+			l = -l;
+		}
+		op->v = ldexpl(h + l, op->exp - 16383);
+		break;
 	}
-	op->v = ldexpl(h + l, op->exp - 16383);
+	//logmsg("exp=%d fracth=%llx fractl=%llx v=%Lg\n", op->exp, op->fracth, op->fractl, op->v);
 }
 
 void lbfpston(struct lbfp *op)
 {
 	double t;
 
-	t = ldexp((double)(op->fract | 0x10000000000000L), -52);
-	if (op->sign)
-		t = -t;
-	op->v = ldexp(t, op->exp - 1023);
-	//logmsg("lston exp=%d fract=%llx v=%g\n", op->exp, op->fract, op->v);
+	switch (lbfpclassify(op)) {
+	case FP_NAN:
+		logmsg("lbfpston: unexpectedly converting a NaN\n");
+		op->v = sqrt(-1);
+		break;
+	case FP_INFINITE:
+		logmsg("lbfpston: unexpectedly converting an Infinite\n");
+		if (op->sign) {
+			op->v = log(0);
+		} else {
+			op->v = 1/0;
+		}
+		break;
+	case FP_ZERO:
+		if (op->sign) {
+			op->v = 1 / log(0);
+		} else {
+			op->v = 0;
+		}
+		break;
+	case FP_SUBNORMAL:
+		/* WARNING:
+		 * This code is probably not correct yet.
+		 * I only did the quick hack of removing unit bit 1.
+		 * Haven't looked at exponent handling yet.
+		 */
+		t = ldexp((double)(op->fract), -52);
+		if (op->sign)
+			t = -t;
+		op->v = ldexp(t, op->exp - 1023);
+		break;
+	case FP_NORMAL:
+		t = ldexp((double)(op->fract | 0x10000000000000L), -52);
+		if (op->sign)
+			t = -t;
+		op->v = ldexp(t, op->exp - 1023);
+		break;
+	}
+	//logmsg("exp=%d fract=%llx v=%g\n", op->exp, op->fract, op->v);
 }
 
 void sbfpston(struct sbfp *op)
 {
 	float t;
 
-	t = ldexpf((float)(op->fract | 0x800000), -23);
-	if (op->sign)
-		t = -t;
-	op->v = ldexpf(t, op->exp - 127);
-	//logmsg("sston exp=%d fract=%x v=%g\n", op->exp, op->fract, op->v);
+	switch (sbfpclassify(op)) {
+	case FP_NAN:
+		logmsg("sbfpston: unexpectedly converting a NaN\n");
+		op->v = sqrt(-1);
+		break;
+	case FP_INFINITE:
+		logmsg("sbfpston: unexpectedly converting an Infinite\n");
+		if (op->sign) {
+			op->v = log(0);
+		} else {
+			op->v = 1/0;
+		}
+		break;
+	case FP_ZERO:
+		if (op->sign) {
+			op->v = 1 / log(0);
+		} else {
+			op->v = 0;
+		}
+		break;
+	case FP_SUBNORMAL:
+		/* WARNING:
+		 * This code is probably not correct yet.
+		 * I only did the quick hack of removing unit bit 1.
+		 * Haven't looked at exponent handling yet.
+		 */
+		t = ldexpf((float)(op->fract | 0x800000), -23);
+		if (op->sign)
+			t = -t;
+		op->v = ldexpf(t, op->exp - 127);
+		break;
+	case FP_NORMAL:
+		t = ldexpf((float)(op->fract | 0x800000), -23);
+		if (op->sign)
+			t = -t;
+		op->v = ldexpf(t, op->exp - 127);
+		break;
+	}
+	//logmsg("exp=%d fract=%x v=%g\n", op->exp, op->fract, op->v);
 }
 
 /*
@@ -394,32 +519,90 @@ void sbfpston(struct sbfp *op)
  */
 void ebfpntos(struct ebfp *op)
 {
-	long double f = frexpf(op->v, &(op->exp));
+	long double f;
 
-	op->sign = signbit(op->v);
-	op->exp += 16383 - 1;
-	op->fracth = (U64)ldexp(fabsl(f), 49) & 0xFFFFFFFFFFFFL;
-	op->fractl = (U64)fmodl(ldexp(fabsl(f), 113), pow(2, 64));
+	switch (fpclassify(op->v)) {
+	case FP_NAN:
+		ebfpdnan(op);
+		break;
+	case FP_INFINITE:
+		ebfpinfinity(op, signbit(op->v));
+		break;
+	case FP_ZERO:
+		ebfpzero(op, signbit(op->v));
+		break;
+	case FP_SUBNORMAL:
+		/* This may need special handling, but I don't
+		 * exactly how yet.  I suspect I need to do something
+		 * to deal with the different implied unit bit.
+		 */
+	case FP_NORMAL:
+		f = frexpf(op->v, &(op->exp));
+		op->sign = signbit(op->v);
+		op->exp += 16383 - 1;
+		op->fracth = (U64)ldexp(fabsl(f), 49) & 0xFFFFFFFFFFFFL;
+		op->fractl = (U64)fmodl(ldexp(fabsl(f), 113), pow(2, 64));
+		break;
+	}
+	//logmsg("exp=%d fracth=%llx fractl=%llx v=%Lg\n", op->exp, op->fracth, op->fractl, op->v);
 }
 
 void lbfpntos(struct lbfp *op)
 {
-	double f = frexpf(op->v, &(op->exp));
+	double f = 0;
 
-	op->sign = signbit(op->v);
-	op->exp += 1023 - 1;
-	op->fract = (U64)ldexp(fabs(f), 53) & 0xFFFFFFFFFFFFFL;
-	//logmsg("lntos v=%g exp=%d fract=%llx\n", op->v, op->exp, op->fract);
+	switch (fpclassify(op->v)) {
+	case FP_NAN:
+		lbfpdnan(op);
+		break;
+	case FP_INFINITE:
+		lbfpinfinity(op, signbit(op->v));
+		break;
+	case FP_ZERO:
+		lbfpzero(op, signbit(op->v));
+		break;
+	case FP_SUBNORMAL:
+		/* This may need special handling, but I don't
+		 * exactly how yet.  I suspect I need to do something
+		 * to deal with the different implied unit bit.
+		 */
+	case FP_NORMAL:
+		f = frexpf(op->v, &(op->exp));
+		op->sign = signbit(op->v);
+		op->exp += 1023 - 1;
+		op->fract = (U64)ldexp(fabs(f), 53) & 0xFFFFFFFFFFFFFL;
+		break;
+	}
+	//logmsg("exp=%d fract=%llx v=%g\n", op->exp, op->fract, op->v);
 }
 
 void sbfpntos(struct sbfp *op)
 {
 	float f = frexpf(op->v, &(op->exp));
 
-	op->sign = signbit(op->v);
-	op->exp += 127 - 1;
-	op->fract = (U32)ldexp(fabsf(f), 24) & 0x7FFFFF;
-	//logmsg("sntos v=%g exp=%d fract=%x\n", op->v, op->exp, op->fract);
+	switch (fpclassify(op->v)) {
+	case FP_NAN:
+		sbfpdnan(op);
+		break;
+	case FP_INFINITE:
+		sbfpinfinity(op, signbit(op->v));
+		break;
+	case FP_ZERO:
+		sbfpzero(op, signbit(op->v));
+		break;
+	case FP_SUBNORMAL:
+		/* This may need special handling, but I don't
+		 * exactly how yet.  I suspect I need to do something
+		 * to deal with the different implied unit bit.
+		 */
+	case FP_NORMAL:
+		f = frexpf(op->v, &(op->exp));
+		op->sign = signbit(op->v);
+		op->exp += 127 - 1;
+		op->fract = (U32)ldexp(fabsf(f), 24) & 0x7FFFFF;
+		break;
+	}
+	//logmsg("exp=%d fract=%x v=%g\n", op->exp, op->fract, op->v);
 }
 
 /*
@@ -2333,6 +2516,100 @@ DEF_INST(load_negative_bfp_short_reg)
 }
 
 /*
+ * B343 LCXBR - LOAD COMPLEMENT (extended BFP)                 [RRE]
+ */
+DEF_INST(load_complement_bfp_ext_reg)
+{
+	int r1, r2;
+	struct ebfp op;
+
+	RRE(inst, execflag, regs, r1, r2);
+	//logmsg("LCXBR r1=%d r2=%d\n", r1, r2);
+	BFPINST_CHECK(regs);
+	BFPREGPAIR2_CHECK(r1, r2, regs);
+
+	get_ebfp(&op, regs->fpr + FPR2I(r2));
+
+	op.sign = !op.sign;
+
+	switch (ebfpclassify(&op)) {
+	case FP_ZERO:
+		regs->psw.cc = 0;
+		break;
+	case FP_NAN:
+		regs->psw.cc = 3;
+		break;
+	default:
+		regs->psw.cc = 2;
+		break;
+	}
+
+	put_ebfp(&op, regs->fpr + FPR2I(r1));
+}
+
+/*
+ * B313 LCDBR - LOAD COMPLEMENT (long BFP)                     [RRE]
+ */
+DEF_INST(load_complement_bfp_long_reg)
+{
+	int r1, r2;
+	struct lbfp op;
+
+	RRE(inst, execflag, regs, r1, r2);
+	//logmsg("LCDBR r1=%d r2=%d\n", r1, r2);
+	BFPINST_CHECK(regs);
+
+	get_lbfp(&op, regs->fpr + FPR2I(r2));
+
+	op.sign = !op.sign;
+
+	switch (lbfpclassify(&op)) {
+	case FP_ZERO:
+		regs->psw.cc = 0;
+		break;
+	case FP_NAN:
+		regs->psw.cc = 3;
+		break;
+	default:
+		regs->psw.cc = 2;
+		break;
+	}
+
+	put_lbfp(&op, regs->fpr + FPR2I(r1));
+}
+
+/*
+ * B303 LCEBR - LOAD COMPLEMENT (short BFP)                    [RRE]
+ */
+DEF_INST(load_complement_bfp_short_reg)
+{
+	int r1, r2;
+	struct sbfp op;
+
+	RRE(inst, execflag, regs, r1, r2);
+	//logmsg("LCEBR r1=%d r2=%d\n", r1, r2);
+	BFPINST_CHECK(regs);
+
+	get_sbfp(&op, regs->fpr + FPR2I(r2));
+
+	op.sign = !op.sign;
+
+	switch (sbfpclassify(&op)) {
+	case FP_ZERO:
+		regs->psw.cc = 0;
+		break;
+	case FP_NAN:
+		regs->psw.cc = 3;
+		break;
+	default:
+		regs->psw.cc = 2;
+		break;
+	}
+
+	put_sbfp(&op, regs->fpr + FPR2I(r1));
+}
+
+/*
  * B340 LPXBR - LOAD POSITIVE (extended BFP)                   [RRE]
  */
 DEF_INST(load_positive_bfp_ext_reg)
@@ -3199,10 +3476,133 @@ DEF_INST(subtract_bfp_short)
 }
 
 /*
- * ED12 TCXB  - TEST DATA CLASS (extended BFP)                 [RXE]
- * ED11 TCDB  - TEST DATA CLASS (long BFP)                     [RXE]
- * ED10 TCEB  - TEST DATA CLASS (short BFP)                    [RXE]
+ * ED10 TCEB   - TEST DATA CLASS (short BFP)                   [RXE]
+ * Per Jessen, Willem Konynenberg, 20 September 2001
  */
+DEF_INST(testdataclass_bfp_short)
+{
+	int r1, b2;
+	VADR effective_addr2;
+	struct sbfp op1;
+	int bit;
+
+	// parse instruction
+	RXE(inst, execflag, regs, r1, b2, effective_addr2);
+
+	//logmsg("TCEB r1=%d b2=%d\n", r1, b2);
+	BFPINST_CHECK(regs);
+
+	// retrieve first operand.
+	get_sbfp(&op1, regs->fpr + FPR2I(r1));
+
+	switch ( sbfpclassify(&op1) )
+	{ 
+	case FP_ZERO:
+		bit=20+op1.sign; break;
+	case FP_NORMAL:
+		bit=22+op1.sign; break;
+	case FP_SUBNORMAL:
+		bit=24+op1.sign; break;
+	case FP_INFINITE:
+		bit=26+op1.sign; break;
+	case FP_NAN:
+		if ( !sbfpissnan(&op1) ) bit=28+op1.sign; 
+		else                     bit=30+op1.sign; 
+		break;
+	default:
+		bit=0; break;
+	}
+
+	bit=31-bit;
+	regs->psw.cc = (effective_addr2>>bit) & 1;
+}
+
+
+/*
+ * ED11 TCDB   - TEST DATA CLASS (long BFP)                   [RXE]
+ * Per Jessen, Willem Konynenberg, 20 September 2001
+ */
+DEF_INST(testdataclass_bfp_long)
+{
+	int r1, b2;
+	VADR effective_addr2;
+	struct lbfp op1;
+	int bit;
+
+	// parse instruction
+	RXE(inst, execflag, regs, r1, b2, effective_addr2);
+
+	//logmsg("TCDB r1=%d b2=%d\n", r1, b2);
+	BFPINST_CHECK(regs);
+
+	// retrieve first operand.
+	get_lbfp(&op1, regs->fpr + FPR2I(r1));
+
+	switch ( lbfpclassify(&op1) )
+	{ 
+	case FP_ZERO:
+		bit=20+op1.sign; break;
+	case FP_NORMAL:
+		bit=22+op1.sign; break;
+	case FP_SUBNORMAL:
+		bit=24+op1.sign; break;
+	case FP_INFINITE:
+		bit=26+op1.sign; break;
+	case FP_NAN:
+		if ( !lbfpissnan(&op1) ) bit=28+op1.sign; 
+		else                     bit=30+op1.sign; 
+		break;
+	default:
+		bit=0; break;
+	}
+
+	bit=31-bit;
+	regs->psw.cc = (effective_addr2>>bit) & 1;
+}
+
+/*
+ * ED12 TCXB   - TEST DATA CLASS (extended BFP)               [RXE]
+ * Per Jessen, Willem Konynenberg, 20 September 2001
+ */
+DEF_INST(testdataclass_bfp_ext)
+{
+	int r1, b2;
+	VADR effective_addr2;
+	struct ebfp op1;
+	int bit;
+
+	// parse instruction
+	RXE(inst, execflag, regs, r1, b2, effective_addr2);
+
+	//logmsg("TCXB r1=%d b2=%d\n", r1, b2);
+	BFPINST_CHECK(regs);
+	BFPREGPAIR2_CHECK( r1, 0, regs );
+
+	// retrieve first operand.
+	get_ebfp(&op1, regs->fpr + FPR2I(r1));
+
+	switch ( ebfpclassify(&op1) )
+	{ 
+	case FP_ZERO:
+		bit=20+op1.sign; break;
+	case FP_NORMAL:
+		bit=22+op1.sign; break;
+	case FP_SUBNORMAL:
+		bit=24+op1.sign; break;
+	case FP_INFINITE:
+		bit=26+op1.sign; break;
+	case FP_NAN:
+		if ( !ebfpissnan(&op1) ) bit=28+op1.sign; 
+		else                     bit=30+op1.sign; 
+		break;
+	default:
+		bit=0; break;
+	}
+
+	bit=31-bit;
+	regs->psw.cc = (effective_addr2>>bit) & 1;
+}
+
 #endif	/* FEATURE_BINARY_FLOATING_POINT */
 
 #if !defined(_GEN_ARCH)

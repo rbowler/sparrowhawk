@@ -10,24 +10,28 @@
 
 // #define INLINE_STORE_FETCH_ADDR_CHECK
 
+#if defined(FEATURE_DUAL_ADDRESS_SPACE)
 _DAT_C_STATIC U16 ARCH_DEP(translate_asn) (U16 asn, REGS *regs,
 					       U32 *asteo, U32 aste[]);
 _DAT_C_STATIC int ARCH_DEP(authorize_asn) (U16 ax, U32 aste[],
 					      int atemask, REGS *regs);
+#endif
+#if defined(FEATURE_ACCESS_REGISTERS)
 _DAT_C_STATIC U16 ARCH_DEP(translate_alet) (U32 alet, U16 eax,
 	   int acctype, REGS *regs, U32 *asteo, U32 aste[], int *prot);
 _DAT_C_STATIC void ARCH_DEP(purge_alb) (REGS *regs);
+#endif
 _DAT_C_STATIC int ARCH_DEP(translate_addr) (VADR vaddr, int arn,
 	   REGS *regs, int acctype, RADR *raddr, U16 *xcode, int *priv,
 		                                int *prot, int *pstid);
 _DAT_C_STATIC void ARCH_DEP(purge_tlb) (REGS *regs);
 _DAT_C_STATIC void ARCH_DEP(invalidate_pte) (BYTE ibyte, int r1,
 						   int r2, REGS *regs);
-_DAT_C_STATIC RADR ARCH_DEP(logical_to_abs) (VADR addr, int arn,
+_LOGICAL_C_STATIC RADR ARCH_DEP(logical_to_abs) (VADR addr, int arn,
 				   REGS *regs, int acctype, BYTE akey);
 
 #if defined(_FEATURE_SIE)
-_DAT_C_STATIC RADR s390_logical_to_abs (U32 addr, int arn, REGS *regs,
+_LOGICAL_C_STATIC RADR s390_logical_to_abs (U32 addr, int arn, REGS *regs,
 					       int acctype, BYTE akey);
 _DAT_C_STATIC int s390_translate_addr (U32 vaddr, int arn, REGS *regs,
 		       int acctype, RADR *raddr, U16 *xcode, int *priv,
@@ -35,7 +39,7 @@ _DAT_C_STATIC int s390_translate_addr (U32 vaddr, int arn, REGS *regs,
 #endif /*defined(_FEATURE_SIE)*/
 
 #if defined(_FEATURE_ZSIE)
-_DAT_C_STATIC RADR z900_logical_to_abs (U64 addr, int arn, REGS *regs,
+_LOGICAL_C_STATIC RADR z900_logical_to_abs (U64 addr, int arn, REGS *regs,
 					       int acctype, BYTE akey);
 _DAT_C_STATIC int z900_translate_addr (U64 vaddr, int arn, REGS *regs,
 		       int acctype, RADR *raddr, U16 *xcode, int *priv,
@@ -331,7 +335,7 @@ static inline U64 ARCH_DEP(fetch_doubleword_absolute) (RADR addr,
     STORAGE_KEY(addr) |= STORKEY_REF;
 
     /* Fetch the doubleword from absolute storage */
-    return CSWAP64(*((U64*)(sysblk.mainstor + addr)));
+    return fetch_dw(sysblk.mainstor + addr);
 
 } /* end function fetch_doubleword_absolute */
 
@@ -358,7 +362,7 @@ static inline U32 ARCH_DEP(fetch_fullword_absolute) (RADR addr,
     STORAGE_KEY(addr) |= STORKEY_REF;
 
     /* Fetch the fullword from absolute storage */
-    return CSWAP32(*((U32*)(sysblk.mainstor + addr)));
+    return fetch_fw(sysblk.mainstor + addr);
 } /* end function fetch_fullword_absolute */
 
 
@@ -383,10 +387,10 @@ static inline U16 ARCH_DEP(fetch_halfword_absolute) (RADR addr,
     /* Set the main storage reference bit */
     STORAGE_KEY(addr) |= STORKEY_REF;
 
-    /* Fetch the fullword from absolute storage */
-    return CSWAP16(*((U16*)(sysblk.mainstor + addr)));
+    /* Fetch the halfword from absolute storage */
+    return fetch_hw(sysblk.mainstor + addr);
 
-} /* end function fetch_fullword_absolute */
+} /* end function fetch_halfword_absolute */
 
 
 /*-------------------------------------------------------------------*/
@@ -409,7 +413,7 @@ static inline void ARCH_DEP(store_doubleword_absolute) (U64 value,
     STORAGE_KEY(addr) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Store the doubleword into absolute storage */
-    *((U64*)(sysblk.mainstor + addr)) = CSWAP64(value);
+    store_dw(sysblk.mainstor + addr, value);
 
 } /* end function store_doubleword_absolute */
 
@@ -434,7 +438,7 @@ static inline void ARCH_DEP(store_fullword_absolute) (U32 value,
     STORAGE_KEY(addr) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Store the fullword into absolute storage */
-    *((U32*)(sysblk.mainstor + addr)) = CSWAP32(value);
+    store_fw(sysblk.mainstor + addr, value);
 
 } /* end function store_fullword_absolute */
 

@@ -32,6 +32,9 @@
 
 #include "inline.h"
 
+#if defined(OPTION_FISHIO)
+#include "w32chan.h"
+#endif // defined(OPTION_FISHIO)
 
 #if defined(FEATURE_BRANCH_AND_SET_AUTHORITY)
 /*-------------------------------------------------------------------*/
@@ -58,13 +61,6 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
     if(regs->sie_state && (regs->siebk->ic[1] & SIE_IC1_BSA))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 #endif /*defined(_FEATURE_SIE)*/
-
-#ifdef FEATURE_TRACING
-    /* Perform tracing */
-    if ((regs->CR(12) & CR12_BRTRACE) && (r2 != 0))
-        newcr12 = ARCH_DEP(trace_br) (regs->GR_L(r2) & 0x80000000,
-                                regs->GR_L(r2), regs);
-#endif /*FEATURE_TRACING*/
 
     /* Load real address of dispatchable unit control table */
     ducto = regs->CR(2) & CR2_DUCTO;
@@ -106,6 +102,13 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         /* In base authority state R2 cannot specify register zero */
         if (r2 == 0)
             ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+
+      #ifdef FEATURE_TRACING
+        /* Perform tracing */
+        if (regs->CR(12) & CR12_BRTRACE)
+            newcr12 = ARCH_DEP(trace_br) (regs->GR_L(r2) & 0x80000000,
+                                    regs->GR_L(r2), regs);
+      #endif /*FEATURE_TRACING*/
 
         /* Obtain the new PSW key from R1 register bits 24-27 */
         key = regs->GR_L(r1) & 0x000000F0;
@@ -152,7 +155,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
 
         /* Load new PSW key and PSW key mask from R1 register */
         regs->psw.pkey = key;
-        regs->CR_LHH(3) = regs->GR_LHH(r1);
+        regs->CR_LHH(3) &= regs->GR_LHH(r1);
 
         /* Set the problem state bit in the current PSW */
         regs->psw.prob = 1;
@@ -192,6 +195,13 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         if (r2 != 0)
             ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
+      #ifdef FEATURE_TRACING
+        /* Perform tracing */
+        if (regs->CR(12) & CR12_BRTRACE)
+                newcr12 = ARCH_DEP(trace_br) (duct_reta & DUCT_AM31,
+                                        duct_reta &DUCT_IA31, regs);
+      #endif /*FEATURE_TRACING*/
+
         /* If R1 is non-zero, save the current PSW addressing mode
            and instruction address in the R1 register */
         if (r1 != 0)
@@ -224,7 +234,8 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         }
 
         /* Restore the PSW key mask from the DUCT */
-        regs->CR_LHH(3) = duct_pkrp & DUCT_PKM;
+        regs->CR(3) &= 0x0000FFFF;
+        regs->CR(3) |= duct_pkrp & DUCT_PKM;
 
         /* Restore the PSW key from the DUCT */
         regs->psw.pkey = duct_pkrp & DUCT_KEY;
@@ -257,9 +268,12 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
 
     } /* end if(BSA-ra) */
 
+    INVALIDATE_AIA(regs);
+    INVALIDATE_AEA_ALL(regs);
+
 #ifdef FEATURE_TRACING
     /* Update trace table address if branch tracing is on */
-    if ((regs->CR(12) & CR12_BRTRACE) && (r2 != 0))
+    if (regs->CR(12) & CR12_BRTRACE)
         regs->CR(12) = newcr12;
 #endif /*FEATURE_TRACING*/
 
@@ -392,7 +406,10 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
 
         /* ASTE validity exception if ASTE invalid bit is one */
         if (daste[0] & ASTE0_INVALID)
+        {
+            regs->excarid = r2;
             ARCH_DEP(program_interrupt) (regs, PGM_ASTE_VALIDITY_EXCEPTION);
+        }
 
         /* ASTE sequence exception if the subspace ASTE sequence
            number does not match the sequence number in the DUCT */
@@ -427,7 +444,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
     } /* end switch(alet) */
 
     /* Update the primary STD (or ASCE) from the destination ASTE */
-    if (dasteo == (duct0 & DUCT0_BASTEO))
+    if ((dasteo == (duct0 & DUCT0_BASTEO)) && (alet != ALET_SECONDARY))
     {
         /* When the destination ASTE is the base space, replace the
            primary STD (or ASCE) by the STD (or ASCE) in the ASTE */
@@ -487,18 +504,18 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
     regs->CR_LHL(3) = regs->CR_LHL(4);
 
     /* Reset the subspace fields in the DUCT */
-    if (dasteo == (duct0 & DUCT0_BASTEO))
-    {
-        /* When the destination ASTE is the base space,
-           reset the subspace active bit in the DUCT */
-        duct1 &= ~DUCT1_SA;
-        ARCH_DEP(store_fullword_absolute) (duct1, ducto+4, regs);
-    }
-    else if (alet == ALET_SECONDARY)
+    if (alet == ALET_SECONDARY)
     {
         /* When the destination ASTE specifies a subspace by means
            of ALET 1, set the subspace active bit in the DUCT */
         duct1 |= DUCT1_SA;
+        ARCH_DEP(store_fullword_absolute) (duct1, ducto+4, regs);
+    }
+    else if (dasteo == (duct0 & DUCT0_BASTEO))
+    {
+        /* When the destination ASTE is the base space,
+           reset the subspace active bit in the DUCT */
+        duct1 &= ~DUCT1_SA;
         ARCH_DEP(store_fullword_absolute) (duct1, ducto+4, regs);
     }
     else
@@ -657,6 +674,11 @@ U32     n1, n2;                         /* 32 Bit work               */
     /* Obtain 2nd operand address from r2 */
     n2 = regs->GR(r2) & 0xFFFFFFFFFFFFFFFCULL & ADDRESS_MAXWRAP(regs);
 
+#if defined(MODEL_DEPENDENT_CS)
+    /* some models always store, so validate as a store operand, if desired */
+    ARCH_DEP(validate_operand) (n2, r2, 3, ACCTYPE_WRITE, regs);
+#endif /*defined(MODEL_DEPENDENT_CS)*/
+
     /* Load second operand from operand address  */
     n1 = ARCH_DEP(vfetch4) ( n2, r2, regs );
 
@@ -671,26 +693,8 @@ U32     n1, n2;                         /* 32 Bit work               */
         RELEASE_MAINLOCK(regs);
 
         /* Perform requested funtion specified as per request code in r2 */
-        if (regs->GR_L(r2) & 0x00000001)
-        {
-#if defined(_FEATURE_SIE)
-            if(regs->sie_state && !regs->sie_scao)
-                ARCH_DEP(purge_tlb) (regs);
-            else
-#endif /*defined(_FEATURE_SIE)*/
-                BROADCAST_PTLB(regs);
-        }
-
-        if (regs->GR_L(r2) & 0x00000002)
-        {
-#if defined(_FEATURE_SIE)
-            if(regs->sie_state && !regs->sie_scao)
-                ARCH_DEP(purge_alb) (regs);
-            else
-#endif /*defined(_FEATURE_SIE)*/
-                BROADCAST_PALB(regs);
-        }
-
+        if (regs->GR_L(r2) & 3)
+            ARCH_DEP(synchronize_broadcast)(regs, regs->GR_L(r2) & 3, 0);
     }
     else
     {
@@ -701,9 +705,6 @@ U32     n1, n2;                         /* 32 Bit work               */
         /* Release main-storage access lock */
         RELEASE_MAINLOCK(regs);
     }
-
-    /* Wait for all CPU's to perform the requested action */
-    SYNCHRONIZE_BROADCAST(regs);
 
     /* Perform serialization after completing operation */
     PERFORM_SERIALIZATION (regs);
@@ -727,7 +728,7 @@ VADR    effective_addr2;                /* Effective address         */
     if (
 #if defined(_FEATURE_SIE)
         !regs->sie_state &&
-#endif defined(_FEATURE_SIE)
+#endif /* defined(_FEATURE_SIE) */
                       effective_addr2 != 0xF08)
 #endif
 
@@ -826,6 +827,8 @@ VADR    lsea;                           /* Linkage stack entry addr  */
 
     /* Load registers from the stack entry */
     ARCH_DEP(unstack_registers) (0, lsea, r1, r2, regs);
+
+    INVALIDATE_AEA_ALL(regs);
 
 }
 #endif /*defined(FEATURE_LINKAGE_STACK)*/
@@ -1364,6 +1367,9 @@ int     r1, r2;                         /* Values of R fields        */
 
     PRIV_CHECK(regs);
 
+    INVALIDATE_AIA(regs);
+    INVALIDATE_AEA_ALL(regs);
+
 #if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_IPTECSP))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
@@ -1399,17 +1405,8 @@ int     r1, r2;                         /* Values of R fields        */
     }
 #endif /*defined(_FEATURE_SIE)*/
 
-    RELEASE_MAINLOCK(regs);
-
-    /* Inform other CPU's */
-    BROADCAST_PTLB(regs);
-
-    /* Wait for all CPU's to perform the requested action */
-    SYNCHRONIZE_BROADCAST(regs);
-
-    /* Perform serialization after operation */
-    PERFORM_SERIALIZATION (regs);
-
+    /* Mainlock now released by `invalidate_pte' */
+//  RELEASE_MAINLOCK(regs);
 }
 
 
@@ -1841,7 +1838,7 @@ CREG    pte;                            /* Page Table Entry          */
 int     private;                        /* 1=Private address space   */
 int     protect;                        /* 1=ALE or page protection  */
 int     stid;                           /* Segment table indication  */
-U16     xcode;                          /* Exception code            */
+U16     xcode = 0;                      /* Exception code            */
 
     RRE(inst, execflag, regs, r1, r2);
 
@@ -1859,8 +1856,9 @@ U16     xcode;                          /* Exception code            */
     OBTAIN_MAINLOCK(regs);
 
     /* Return condition code 3 if translation exception */
-    if (!ARCH_DEP(translate_addr) (n2, r2, regs, ACCTYPE_PTE,
-                &rpte, &xcode, &private, &protect, &stid))
+    ARCH_DEP(translate_addr) (n2, r2, regs, ACCTYPE_PTE,
+                &rpte, &xcode, &private, &protect, &stid);
+    if (xcode == 0)
     {
         rpte = APPLY_PREFIXING (rpte, regs->PX);
 
@@ -2250,6 +2248,9 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
     /* [5.5.3.1] Load the linkage table designation */
     if (!ASF_ENABLED(regs))
     {
+        /* Special operation exception if in AR mode */
+        if (ACCESS_REGISTER_MODE(&(regs->psw)))
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
         /* Obtain the LTD from control register 5 */
         ltd = regs->CR_L(5);
     }
@@ -2572,7 +2573,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         regs->psw.amode = (ete[1] & ETE1_AMODE) ? 1 : 0;
         regs->psw.AMASK = regs->psw.amode ? AMASK31 : AMASK24;
         regs->psw.IA = ete[1] & ETE1_EIA;
-      #endif /!*defined(FEATURE_ESAME)*/
+      #endif /*!defined(FEATURE_ESAME)*/
         regs->psw.prob = (ete[1] & ETE1_PROB) ? 1 : 0;
 
         /* Replace the PSW key by the entry key if the K bit is set */
@@ -2704,6 +2705,7 @@ U16     pasn;                           /* New primary ASN           */
 U16     sasn;                           /* New secondary ASN         */
 U16     ax;                             /* Authorization index       */
 U16     xcode;                          /* Exception code            */
+int     rc;                             /* return code from load_psw */
 
     E(inst, execflag, regs);
 
@@ -2725,7 +2727,7 @@ U16     xcode;                          /* Exception code            */
     oldpasn = regs->CR_LHL(4);
 
     /* Perform the unstacking process */
-    etype = ARCH_DEP(program_return_unstack) (&newregs, &alsed);
+    etype = ARCH_DEP(program_return_unstack) (&newregs, &alsed, &rc);
 
     /* Perform PR-cp or PR-ss if unstacked entry was a program call */
     if (etype == LSED_UET_PC)
@@ -2851,7 +2853,12 @@ U16     xcode;                          /* Exception code            */
 
     /* Generate space switch event if required */
     if (ssevent)
+    {     
+        regs->psw.ilc = 2;
         ARCH_DEP(program_interrupt) (&newregs, PGM_SPACE_SWITCH_EVENT);
+    }
+    if (rc) /* if new psw has bad format */
+        ARCH_DEP(program_interrupt) (&newregs, rc);
 
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
@@ -3697,21 +3704,12 @@ U64     dreg;                           /* Clock value               */
     /* Update the clock comparator and set epoch to zero */
     regs->clkc = dreg >> 8;
 
-    /* Release the TOD clock update lock */
-    release_lock (&sysblk.todlock);
-
-    /* Obtain the interrupt lock */
-    obtain_lock (&sysblk.intlock);
-
     /* reset the clock comparator pending flag according to
        the setting of the tod clock */
-    if( (sysblk.todclk + regs->todoffset) > regs->clkc )
-        ON_IC_CLKC(regs);
-    else
-        OFF_IC_CLKC(regs);
+    update_TOD_clock();
 
-    /* Release the interrupt lock */
-    release_lock (&sysblk.intlock);
+    /* Release the TOD clock update lock */
+    release_lock (&sysblk.todlock);
 
     RETURN_INTCHECK(regs);
 }
@@ -3767,20 +3765,11 @@ U64     dreg;                           /* Timer value               */
     /* Update the CPU timer */
     regs->ptimer = dreg;
 
+    /* reset the cpu timer pending flag according to its value */
+    update_TOD_clock();
+
     /* Release the TOD clock update lock */
     release_lock (&sysblk.todlock);
-
-    /* Obtain the interrupt lock */
-    obtain_lock (&sysblk.intlock);
-
-    /* reset the cpu timer pending flag according to its value */
-    if( (S64)regs->ptimer < 0 )
-        ON_IC_PTIMER(regs);
-    else
-        OFF_IC_PTIMER(regs);
-
-    /* Release the interrupt lock */
-    release_lock (&sysblk.intlock);
 
 //  /*debug*/logmsg("Set CPU timer=%16.16llX\n", dreg);
 
@@ -4360,10 +4349,21 @@ DEF_INST(set_system_mask)
 {
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
+#if defined(OPTION_REDUCED_INVAL)
+int     realmode;
+int     space;
+int     armode;
+#endif
 
     S(inst, execflag, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
+
+#if defined(OPTION_REDUCED_INVAL)
+    realmode = REAL_MODE(&regs->psw);
+    armode = (regs->psw.armode == 1);
+    space = (regs->psw.space == 1);
+#endif
 
     /* Special operation exception if SSM-suppression is active */
     if ( (regs->CR(0) & CR0_SSM_SUPP)
@@ -4388,7 +4388,15 @@ VADR    effective_addr2;                /* Effective address         */
 
     INVALIDATE_AIA(regs);
 
+#if defined(OPTION_REDUCED_INVAL)
+    if ((realmode  != REAL_MODE(&regs->psw)) ||
+        (armode    != (regs->psw.armode == 1)) ||
+        (space     != (regs->psw.space == 1)))
+        INVALIDATE_AEA_ALL(regs);
+#else
     INVALIDATE_AEA_ALL(regs);
+#endif
+
 
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
     /* DAT must be off in XC mode */
@@ -4458,31 +4466,28 @@ static char *ordername[] = {    "Unassigned",
     /* Perform serialization before starting operation */
     PERFORM_SERIALIZATION (regs);
 
-    /* Load the target CPU address from R3 bits 16-31 */
-    cpad = regs->GR_LHL(r3);
-
     /* Load the order code from operand address bits 24-31 */
     order = effective_addr2 & 0xFF;
+
+    /* Load the target CPU address from R3 bits 16-31 */
+    cpad = (order != SIGP_SETARCH) ? regs->GR_LHL(r3) : regs->cpuad;
 
     /* Load the parameter from R1 (if R1 odd), or R1+1 (if even) */
     parm = (r1 & 1) ? regs->GR_L(r1) : regs->GR_L(r1+1);
 
     /* Return condition code 3 if target CPU does not exist */
 #ifdef _FEATURE_CPU_RECONFIG
-    if (cpad >= MAX_CPU_ENGINES && order != SIGP_SETARCH)
+    if (cpad >= MAX_CPU_ENGINES)
 #else /*!_FEATURE_CPU_RECONFIG*/
-    if (cpad >= sysblk.numcpu && order != SIGP_SETARCH)
+    if (cpad >= sysblk.numcpu)
 #endif /*!_FEATURE_CPU_RECONFIG*/
     {
         regs->psw.cc = 3;
         return;
     }
 
-    /* Point to CPU register context for the target CPU */
-    if(order != SIGP_SETARCH)
-        tregs = sysblk.regs + cpad;
-    else
-        tregs = regs;
+    /* Point to the target CPU */
+    tregs = sysblk.regs + cpad;
 
     /* Trace SIGP unless Sense, External Call, Emergency Signal,
        or the target CPU is configured offline */
@@ -4560,9 +4565,20 @@ static char *ordername[] = {    "Unassigned",
             if (tregs->cpustate != CPUSTATE_STARTED)
                 status |= SIGP_STATUS_STOPPED;
 
+            /* Test for checkstop state */
+            if(tregs->checkstop)
+                status |= SIGP_STATUS_CHECK_STOP;
+
             break;
 
         case SIGP_EXTCALL:
+            /* Test for checkstop state */
+            if(tregs->checkstop)
+            {
+                status |= SIGP_STATUS_CHECK_STOP;
+                break;
+            }
+
             /* Exit with status bit 24 set if a previous external
                call interrupt is still pending in the target CPU */
             if (IS_IC_EXTCALL(tregs))
@@ -4578,6 +4594,13 @@ static char *ordername[] = {    "Unassigned",
             break;
 
         case SIGP_EMERGENCY:
+            /* Test for checkstop state */
+            if(tregs->checkstop)
+            {
+                status |= SIGP_STATUS_CHECK_STOP;
+                break;
+            }
+
             /* Raise an emergency signal interrupt pending condition */
             ON_IC_EMERSIG(tregs);
             tregs->emercpu[regs->cpuad] = 1;
@@ -4585,6 +4608,13 @@ static char *ordername[] = {    "Unassigned",
             break;
 
         case SIGP_START:
+            /* Test for checkstop state */
+            if(tregs->checkstop)
+            {
+                status |= SIGP_STATUS_CHECK_STOP;
+                break;
+            }
+
             /* Restart the target CPU if it is in the stopped state */
             tregs->cpustate = CPUSTATE_STARTED;
             OFF_IC_CPU_NOT_STARTED(tregs);
@@ -4592,6 +4622,13 @@ static char *ordername[] = {    "Unassigned",
             break;
 
         case SIGP_STOP:
+            /* Test for checkstop state */
+            if(tregs->checkstop)
+            {
+                status |= SIGP_STATUS_CHECK_STOP;
+                break;
+            }
+
             /* Put the the target CPU into the stopping state */
             tregs->cpustate = CPUSTATE_STOPPING;
             ON_IC_CPU_NOT_STARTED(tregs);
@@ -4599,6 +4636,13 @@ static char *ordername[] = {    "Unassigned",
             break;
 
         case SIGP_RESTART:
+            /* Test for checkstop state */
+            if(tregs->checkstop)
+            {
+                status |= SIGP_STATUS_CHECK_STOP;
+                break;
+            }
+
             /* Make restart interrupt pending in the target CPU */
             ON_IC_RESTART(tregs);
             /* Set cpustate to stopping. If the restart is successful,
@@ -4609,6 +4653,13 @@ static char *ordername[] = {    "Unassigned",
             break;
 
         case SIGP_STOPSTORE:
+            /* Test for checkstop state */
+            if(tregs->checkstop)
+            {
+                status |= SIGP_STATUS_CHECK_STOP;
+                break;
+            }
+
             /* Indicate store status is required when stopped */
             ON_IC_STORSTAT(tregs);
 
@@ -4640,6 +4691,13 @@ static char *ordername[] = {    "Unassigned",
             break;
 
         case SIGP_SETPREFIX:
+            /* Test for checkstop state */
+            if(tregs->checkstop)
+            {
+                status |= SIGP_STATUS_CHECK_STOP;
+                break;
+            }
+
             /* Exit with operator intervening if the status is
                stopping, such that a retry can be attempted */
             if(tregs->cpustate == CPUSTATE_STOPPING)
@@ -4682,6 +4740,13 @@ static char *ordername[] = {    "Unassigned",
             break;
 
         case SIGP_STORE:
+            /* Test for checkstop state */
+            if(tregs->checkstop)
+            {
+                status |= SIGP_STATUS_CHECK_STOP;
+                break;
+            }
+
             /* Exit with operator intervening if the status is
                stopping, such that a retry can be attempted */
             if(tregs->cpustate == CPUSTATE_STOPPING)
@@ -4718,6 +4783,13 @@ static char *ordername[] = {    "Unassigned",
             break;
 
         case SIGP_STOREX:
+            /* Test for checkstop state */
+            if(tregs->checkstop)
+            {
+                status |= SIGP_STATUS_CHECK_STOP;
+                break;
+            }
+
             /*INCOMPLETE*/
 
             break;
@@ -4773,6 +4845,10 @@ static char *ordername[] = {    "Unassigned",
                         status |= SIGP_STATUS_INVALID_PARAMETER;
                 }
 
+#if defined(OPTION_FISHIO)
+            ios_arch_mode = sysblk.arch_mode;
+#endif // defined(OPTION_FISHIO)
+
             /* Invalidate the ALB and TLB */
             ARCH_DEP(purge_tlb) (regs);
 #if defined(FEATURE_ACCESS_REGISTERS)
@@ -4792,8 +4868,8 @@ static char *ordername[] = {    "Unassigned",
     /* Release the use of the signalling and response facility */
     sysblk.sigpbusy = 0;
 
-    /* Wake up any CPUs waiting for an interrupt or start */
-    signal_condition (&sysblk.intcond);
+    /* Wake up the target CPU */
+    WAKEUP_CPU (tregs->cpuad);
 
     /* Release the interrupt lock */
     release_lock (&sysblk.intlock);
@@ -5122,6 +5198,7 @@ static BYTE mpfact[32] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
     if((regs->GR_L(0) & STSI_GPR0_FC_MASK) == STSI_GPR0_FC_CURRENT)
     {
         regs->GR_L(0) |= STSI_GPR0_FC_BASIC;
+//      regs->GR_L(0) |= STSI_GPR0_FC_LPAR;
         regs->psw.cc = 0;
         return;
     }
@@ -5233,10 +5310,21 @@ DEF_INST(store_then_and_system_mask)
 BYTE    i2;                             /* Immediate byte of opcode  */
 int     b1;                             /* Base of effective addr    */
 VADR    effective_addr1;                /* Effective address         */
+#if defined(OPTION_REDUCED_INVAL)
+int     realmode;
+int     space;
+int     armode;
+#endif
 
     SI(inst, execflag, regs, i2, b1, effective_addr1);
 
     PRIV_CHECK(regs);
+
+#if defined(OPTION_REDUCED_INVAL)
+    realmode = REAL_MODE(&regs->psw);
+    armode = (regs->psw.armode == 1);
+    space = (regs->psw.space == 1);
+#endif
 
 #if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[1] & SIE_IC1_STNSM))
@@ -5247,12 +5335,19 @@ VADR    effective_addr1;                /* Effective address         */
     ARCH_DEP(vstoreb) ( regs->psw.sysmask, effective_addr1, b1, regs );
 
     INVALIDATE_AIA(regs);
-
+#if !defined(OPTION_REDUCED_INVAL)
     INVALIDATE_AEA_ALL(regs);
+#endif
 
     /* AND system mask with immediate operand */
     regs->psw.sysmask &= i2;
 
+#if defined(OPTION_REDUCED_INVAL)
+    if ((realmode  != REAL_MODE(&regs->psw)) ||
+        (armode    != (regs->psw.armode == 1)) ||
+        (space     != (regs->psw.space == 1)))
+        INVALIDATE_AEA_ALL(regs);
+#endif
     SET_IC_EXTERNAL_MASK(regs);
     SET_IC_MCK_MASK(regs);
     SET_IC_IO_MASK(regs);
@@ -5378,7 +5473,7 @@ int     protect;                        /* 1=ALE or page protection  */
                           ? regs->hostregs :
 #endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
                         regs,
-                        &asteo, aste, &protect));
+                        &asteo, aste, &protect))
     {
         regs->psw.cc = 3;
         return;
@@ -5627,11 +5722,11 @@ U64     dreg;                           /* 64-bit work area          */
     /* Calculate the number of registers to be traced, minus 1 */
     i = ( r3 < r1 ) ? r3 + 16 - r1 : r3 - r1;
 
-    /* Update the TOD clock */
-    update_TOD_clock();
-
     /* Obtain the TOD clock update lock */
     obtain_lock (&sysblk.todlock);
+
+    /* Update the TOD clock */
+    update_TOD_clock();
 
     /* Retrieve the TOD clock value and shift out the epoch */
     dreg = sysblk.todclk << 8;

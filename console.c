@@ -1006,7 +1006,7 @@ BYTE                    rejmsg[80];     /* Rejection message         */
 
     if (pHE != NULL && pHE->h_name != NULL
      && pHE->h_name[0] != '\0') {
-        clientname = pHE->h_name;
+        clientname = (char*) pHE->h_name;
     } else {
         clientname = "host name unknown";
     }
@@ -1080,8 +1080,8 @@ BYTE                    rejmsg[80];     /* Rejection message         */
                 hostinfo.nodename, hostinfo.sysname,
                 hostinfo.release);
     len = snprintf (conmsg, sizeof(conmsg),
-                "Hercules version %s build at %s %s",
-                MSTRING(VERSION), __DATE__, __TIME__);
+                "Hercules version %s built at %s %s",
+                VERSION, __DATE__, __TIME__);
 
     if (dev != NULL)
         len += sprintf (conmsg + len, " device %4.4X", dev->devnum);
@@ -1150,7 +1150,7 @@ BYTE                    rejmsg[80];     /* Rejection message         */
     rc = device_attention (dev, CSW_ATTN);
 
     /* Signal connection thread to redrive its select loop */
-    signal_thread (sysblk.cnsltid, SIGHUP);
+    signal_thread (sysblk.cnsltid, SIGUSR2);
 
     return NULL;
 
@@ -1176,7 +1176,7 @@ BYTE                    unitstat;       /* Status after receive data */
 
     /* Display thread started message on control panel */
     logmsg ("HHC600I Console connection thread started: "
-            "tid=%8.8lX, pid=%d\n",
+            "tid="TIDPAT", pid=%d\n",
             thread_id(), getpid());
 
     /* Get information about this system */
@@ -2029,7 +2029,7 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
         release_lock (&dev->lock);
 
         /* Signal connection thread to redrive its select loop */
-        signal_thread (sysblk.cnsltid, SIGHUP);
+        signal_thread (sysblk.cnsltid, SIGUSR2);
 
         break;
 

@@ -9,11 +9,14 @@
 || ----------------------------------------------------------------------------
 */
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
 #include <stdlib.h>
-#include <getopt.h>
 #include "hetlib.h"
 #include "sllib.h"
 #include "hercules.h"
@@ -616,8 +619,7 @@ main( int argc, char *argv[] )
     int i;
 
     /* Display the program identification message */
-    display_version (stderr, "Hercules HET extract files program ",
-                     MSTRING(VERSION), __DATE__, __TIME__);
+    display_version (stderr, "Hercules HET extract files program ");
 
 #ifdef EXTERNALGUI
     if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)

@@ -120,20 +120,25 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     akey = regs->psw.pkey;
 
     /* Translate addresses of leftmost operand bytes */
-    abs1 = LOGICAL_TO_ABS (effective_addr1, b1, regs, ACCTYPE_WRITE, akey);
+    abs1 = LOGICAL_TO_ABS_SKP (effective_addr1, b1, regs, ACCTYPE_WRITE_SKP, akey);
     abs2 = LOGICAL_TO_ABS (effective_addr2, b2, regs, ACCTYPE_READ, akey);
 
     /* Calculate page addresses of rightmost operand bytes */
     npv1 = (effective_addr1 + l) & ADDRESS_MAXWRAP(regs);
-    npv1 &= PAGEFRAME_PAGEMASK;
+    npv1 &= ~0x7FF;
     npv2 = (effective_addr2 + l) & ADDRESS_MAXWRAP(regs);
-    npv2 &= PAGEFRAME_PAGEMASK;
+    npv2 &= ~0x7FF;
 
     /* Translate next page addresses if page boundary crossed */
-    if (npv1 != (effective_addr1 & PAGEFRAME_PAGEMASK))
-        npa1 = LOGICAL_TO_ABS (npv1, b1, regs, ACCTYPE_WRITE, akey);
-    if (npv2 != (effective_addr2 & PAGEFRAME_PAGEMASK))
+    if (npv1 != (effective_addr1 & ~0x7FF))
+        npa1 = LOGICAL_TO_ABS_SKP (npv1, b1, regs, ACCTYPE_WRITE_SKP, akey);
+    if (npv2 != (effective_addr2 & ~0x7FF))
         npa2 = LOGICAL_TO_ABS (npv2, b2, regs, ACCTYPE_READ, akey);
+
+    /* all operands and page crossers valid, now alter ref & chg bits */
+    STORAGE_KEY(abs1) |= (STORKEY_REF | STORKEY_CHANGE);
+    if (npa1)
+        STORAGE_KEY(npa1) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Process operands from left to right */
     for ( i = 0; i <= l; i++ )
@@ -193,9 +198,15 @@ BYTE    dbyte;                          /* Destination operand byte  */
     SS(inst, execflag, regs, l1, l2, b1, effective_addr1,
                                      b2, effective_addr2);
 
-    /* Validate the operands for addressing and protection */
-    ARCH_DEP(validate_operand) (effective_addr1, b1, l1, ACCTYPE_WRITE, regs);
-    ARCH_DEP(validate_operand) (effective_addr2, b2, l2, ACCTYPE_READ, regs);
+    /* If operand 1 crosses a page, make sure both pages are accessable */
+    if((effective_addr1 & PAGEFRAME_PAGEMASK) !=
+        ((effective_addr1 + l1) & PAGEFRAME_PAGEMASK))
+        ARCH_DEP(validate_operand) (effective_addr1, b1, l1, ACCTYPE_WRITE_SKP, regs);
+
+    /* If operand 2 crosses a page, make sure both pages are accessable */
+    if((effective_addr2 & PAGEFRAME_PAGEMASK) !=
+        ((effective_addr2 + l2) & PAGEFRAME_PAGEMASK))
+        ARCH_DEP(validate_operand) (effective_addr2, b2, l2, ACCTYPE_READ, regs);
 
     /* Exchange the digits in the rightmost byte */
     effective_addr1 += l1;
@@ -412,7 +423,7 @@ VADR    effective_addr2,
         /* Release main-storage access lock */
         RELEASE_MAINLOCK(regs);
 
-#if MAX_CPU_ENGINES > 1
+#if MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP)
         /* It this is a failed locked operation
            and there is more then 1 CPU in the configuration
            and there is no broadcast synchronization in progress
@@ -421,7 +432,7 @@ VADR    effective_addr2,
            the physical CPU on a spinlock */
         if(regs->psw.cc && sysblk.numcpu > 1)
             usleep(1L);
-#endif MAX_CPU_ENGINES > 1
+#endif /* MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP) */
 
     }
 }
@@ -452,8 +463,8 @@ BYTE    termchar;                       /* Terminating character     */
     addr1 = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
     addr2 = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
 
-    /* Search up to 4096 bytes until end of operand */
-    for (i = 0; i < 4096; i++)
+    /* Search up to 256 bytes or until end of operand */
+    for (i = 0; i < 0x100; i++)
     {
         /* If operand end address has been reached, return condition
            code 2 and leave the R1 and R2 registers unchanged */
@@ -890,10 +901,10 @@ BYTE    cwork[4];                       /* Character work areas      */
        access exception may be recognized on the first byte */
     if (j == 0)
     {
-#if defined(MODEL_DEPENDENT)
+#if defined(MODEL_DEPENDENT_STCM)
 // /*debug*/logmsg ("Model dependent STCM use\n");
         ARCH_DEP(validate_operand) (effective_addr2, b2, 0, ACCTYPE_WRITE, regs);
-#endif /*defined(MODEL_DEPENDENT)*/
+#endif /*defined(MODEL_DEPENDENT_STCM)*/
         return;
     }
 
@@ -921,12 +932,11 @@ U64     dreg;                           /* Double word work area     */
     /* Perform serialization before fetching clock */
     PERFORM_SERIALIZATION (regs);
 
+    /* Obtain the TOD clock update lock */
+    obtain_lock (&sysblk.todlock);
+
     /* Update the TOD clock value */
     update_TOD_clock();
-
-    /* Obtain the TOD clock update lock just in case the timer thread
-       grabbed it while we weren't looking */
-    obtain_lock (&sysblk.todlock);
 
     /* Retrieve the TOD clock value and shift out the epoch */
     dreg = ((sysblk.todclk + regs->todoffset) << 8) | regs->cpuad;
@@ -968,12 +978,11 @@ U64     dreg;                           /* Double word work area     */
     /* Perform serialization before fetching clock */
     PERFORM_SERIALIZATION (regs);
 
+    /* Obtain the TOD clock update lock */
+    obtain_lock (&sysblk.todlock);
+
     /* Update the TOD clock value */
     update_TOD_clock();
-
-    /* Obtain the TOD clock update lock just in case the timer thread
-       grabbed it while we weren't looking */
-    obtain_lock (&sysblk.todlock);
 
     /* Retrieve the TOD epoch, clock bits 0-51, and 4 zeroes */
     dreg = (sysblk.todclk + regs->todoffset);
@@ -1209,6 +1218,14 @@ int     rc;                             /* Return code               */
     /* Use the I-byte to set the SVC interruption code */
     regs->psw.intcode = i;
 
+/* OS/390 2.10 debugging for negative length GETMAIN */
+#if 0
+    if ( (i == 0x78) || (i == 0x0a) )
+    {
+        ARCH_DEP(display_inst) (regs, regs->ip);
+    }
+#endif
+
     /* Point to PSA in main storage */
     psa = (void*)(sysblk.mainstor + px);
 
@@ -1282,7 +1299,7 @@ BYTE    obyte;                          /* Operand byte              */
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 #endif /*defined(_FEATURE_SIE)*/
 
-#if MAX_CPU_ENGINES > 1
+#if MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP)
         /* It this is a failed locked operation
            and there is more then 1 CPU in the configuration
            and there is no broadcast synchronization in progress
@@ -1291,7 +1308,7 @@ BYTE    obyte;                          /* Operand byte              */
            the physical CPU on a spinlock */
         if(regs->psw.cc && sysblk.numcpu > 1)
             usleep(1L);
-#endif MAX_CPU_ENGINES > 1
+#endif /* MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP) */
 
 }
 
@@ -1402,8 +1419,10 @@ BYTE    cwork[256];                     /* Character work areas      */
     SS_L(inst, execflag, regs, l, b1, effective_addr1,
                                   b2, effective_addr2);
 
-    /* Validate the first operand for write access */
-    ARCH_DEP(validate_operand) (effective_addr1, b1, l, ACCTYPE_WRITE, regs);
+    /* If operand 1 crosses a page, make sure both pages are accessable */
+    if((effective_addr1 & PAGEFRAME_PAGEMASK) !=
+        ((effective_addr1 + l) & PAGEFRAME_PAGEMASK))
+        ARCH_DEP(validate_operand) (effective_addr1, b1, l, ACCTYPE_WRITE_SKP, regs);
 
     /* Fetch first operand into work area */
     ARCH_DEP(vfetchc) ( cwork, l, effective_addr1, b1, regs );
@@ -1417,9 +1436,11 @@ BYTE    cwork[256];                     /* Character work areas      */
         if (cwork[i] > h) h = cwork[i];
     }
 
-    /* Validate the referenced portion of the second operand */
     n = (effective_addr2 + d) & ADDRESS_MAXWRAP(regs);
-    ARCH_DEP(validate_operand) (n, b2, h-d, ACCTYPE_READ, regs);
+    /* If operand 2 crosses a page, make sure both pages are accessable */
+    if((n & PAGEFRAME_PAGEMASK) !=
+        ((n + (h-d)) & PAGEFRAME_PAGEMASK))
+        ARCH_DEP(validate_operand) (n, b2, h-d, ACCTYPE_READ, regs);
 
     /* Process first operand from left to right, refetching
        second operand and storing the result byte by byte
@@ -1599,9 +1620,15 @@ BYTE    lbyte;                          /* Left result byte of pair  */
     SS(inst, execflag, regs, l1, l2, b1, effective_addr1,
                                      b2, effective_addr2);
 
-    /* Validate the operands for addressing and protection */
-    ARCH_DEP(validate_operand) (effective_addr1, b1, l1, ACCTYPE_WRITE, regs);
-    ARCH_DEP(validate_operand) (effective_addr2, b2, l2, ACCTYPE_READ, regs);
+    /* If operand 1 crosses a page, make sure both pages are accessable */
+    if((effective_addr1 & PAGEFRAME_PAGEMASK) !=
+        ((effective_addr1 + l1) & PAGEFRAME_PAGEMASK))
+        ARCH_DEP(validate_operand) (effective_addr1, b1, l1, ACCTYPE_WRITE_SKP, regs);
+
+    /* If operand 2 crosses a page, make sure both pages are accessable */
+    if((effective_addr2 & PAGEFRAME_PAGEMASK) !=
+        ((effective_addr2 + l2) & PAGEFRAME_PAGEMASK))
+        ARCH_DEP(validate_operand) (effective_addr2, b2, l2, ACCTYPE_READ, regs);
 
     /* Exchange the digits in the rightmost byte */
     effective_addr1 += l1;
@@ -1675,7 +1702,7 @@ int     ar1 = 4;                        /* Access register number    */
         }
 
         /* Check bit 0 of GR0 */
-        if ( ((U32) regs->GR_L(0)) < 0 )
+        if ( regs->GR_L(0) & 0x80000000 )
         {
             regs->GR_L(5) = tempword1;
             cc = 3;
@@ -1689,14 +1716,14 @@ int     ar1 = 4;                        /* Access register number    */
         tempword2 = ARCH_DEP(vfetch4) ( tempaddress, ar1, regs );
         tempword3 = ARCH_DEP(vfetch4) ( tempaddress + 4, ar1, regs );
 
-        regs->GR_L(5) = tempword1;
+        
 
         if ( regs->GR_L(0) == tempword2 )
         {
             /* Load GR2 and GR3 from tempword2 and tempword3 */
             regs->GR_L(2) = tempword2;
             regs->GR_L(3) = tempword3;
-
+           regs->GR_L(5) = tempword1;
             cc = 0;
             break;
         }
@@ -1711,6 +1738,7 @@ int     ar1 = 4;                        /* Access register number    */
             regs->GR_L(0) = tempword2;
             regs->GR_L(1) = tempword3;
         }
+    regs->GR_L(5) = tempword1;
     }
 
     regs->psw.cc = cc;

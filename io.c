@@ -237,6 +237,10 @@ BYTE    chpid;
 
     SIE_INTERCEPT(regs);
 
+    /* Program check if reg 1 bits 0-23 not zero */
+    if(regs->GR_L(1) & 0xFFFFFF00)
+        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
+
     chpid = effective_addr2 & 0xFF;
 
     if( !(regs->psw.cc = chp_reset(chpid)) )
@@ -244,7 +248,7 @@ BYTE    chpid;
         obtain_lock(&sysblk.intlock);
         sysblk.chp_reset[chpid/32] |= 0x80000000 >> (chpid % 32);
         ON_IC_CHANRPT;
-        signal_condition (&sysblk.intcond);
+        WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
         release_lock (&sysblk.intlock);
     }
 
@@ -329,13 +333,13 @@ VADR    effective_addr2;                /* Effective address         */
 
     /* Reserved bits in gpr1 must be zero */
     if (regs->GR_L(1) & CHM_GPR1_RESV)
-        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
 
     /* Program check if M bit one and gpr2 address not on
        a 32 byte boundary or highorder bit set in ESA/390 mode */
     if ((regs->GR_L(1) & CHM_GPR1_M)
      && (regs->GR_L(2) & CHM_GPR2_RESV))
-        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
 
     /* Set the measurement block origin address */
     if (regs->GR_L(1) & CHM_GPR1_M)
@@ -666,10 +670,34 @@ DEF_INST(cancel_subchannel)
 {
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
+DEVBLK *dev;                            /* -> device block           */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
-    logmsg("xsch: INCOMPLETE\n");
+    PRIV_CHECK(regs);
+
+    SIE_INTERCEPT(regs);
+
+    /* Program check if reg 1 bits 0-15 not X'0001' */
+    if ( regs->GR_LHH(1) != 0x0001 )
+        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
+
+    /* Locate the device block for this subchannel */
+    dev = find_device_by_subchan (regs->GR_LHL(1));
+
+    /* Condition code 3 if subchannel does not exist,
+       is not valid, or is not enabled */
+    if (dev == NULL
+        || (dev->pmcw.flag5 & PMCW5_V) == 0
+        || (dev->pmcw.flag5 & PMCW5_E) == 0)
+    {
+        regs->psw.cc = 3;
+        return;
+    }
+
+    /* Perform halt subchannel and set condition code */
+    regs->psw.cc = cancel_subchan (regs, dev);
+
 }
 #endif /*defined(FEATURE_CANCEL_IO_FACILITY)*/
 #endif /*defined(FEATURE_CHANNEL_SUBSYSTEM)*/

@@ -30,7 +30,6 @@
 #include "inline.h"
 
 
-#if MAX_CPU_ENGINES > 1
 /*-------------------------------------------------------------------*/
 /* Synchronize broadcast request                                     */
 /* Input:                                                            */
@@ -43,79 +42,89 @@
 /* The CPU issuing the broadcast request will wait until             */
 /* all other CPU's have performed the requested action.         *JJ  */
 /*                                                                   */
-
 /*-------------------------------------------------------------------*/
-void ARCH_DEP(synchronize_broadcast) (REGS *regs)
+void ARCH_DEP(synchronize_broadcast) (REGS *regs, int code, U64 pfra)
 {
 int     i;                              /* Array subscript           */
+REGS   *realregs;                       /* Real REGS if guest        */
 
-    /* Initiate synchronization if this is the initiating CPU */
-    if (sysblk.brdcstncpu == 0)
+    realregs =
+#if defined(_FEATURE_SIE)
+               regs->sie_state ? regs->hostregs :
+#endif /*defined(_FEATURE_SIE)*/
+                                                  regs;
+
+#if MAX_CPU_ENGINES > 1
+    if (code > 0)
     {
-        /* Set number of CPU's to synchronize */
-        sysblk.brdcstncpu = sysblk.numcpu;
+        obtain_lock (&sysblk.intlock);
+        while (IS_IC_BROADCAST_ON)
+            if (IS_IC_BROADCAST(realregs))
+                ARCH_DEP(synchronize_broadcast)(realregs, 0, 0);
+            else
+            {
+                release_lock (&sysblk.intlock);
+#ifdef OPTION_CS_USLEEP
+                usleep (1L);
+#endif
+                obtain_lock (&sysblk.intlock);
+            }
+        ON_IC_BROADCAST;
+        sysblk.broadcast_mask = sysblk.started_mask;
+        sysblk.broadcast_code = code;
+        sysblk.broadcast_pfra = pfra;
+    }
+#else /* MAX_CPU_ENGINES > 1 */
+    sysblk.broadcast_code = code;
+    sysblk.broadcast_pfra = pfra;
+#endif /* MAX_CPU_ENGINES > 1 */
 
-        ON_IC_BRDCSTNCPU;
+    /* Purge TLB */
+    if (sysblk.broadcast_code & BROADCAST_PTLB)
+        ARCH_DEP(purge_tlb) (realregs);
 
-        /* Redrive all stopped CPU's */
-#ifdef _FEATURE_CPU_RECONFIG 
-        for (i = 0; i < MAX_CPU_ENGINES; i++)
-          if(sysblk.regs[i].cpuonline)
-#else /*!_FEATURE_CPU_RECONFIG*/
-        for (i = 0; i < sysblk.numcpu; i++)
-#endif /*!_FEATURE_CPU_RECONFIG*/
-            if (sysblk.regs[i].cpustate == CPUSTATE_STOPPED)
-                sysblk.regs[i].cpustate = CPUSTATE_STOPPING;
-        signal_condition (&sysblk.intcond);
+#if defined(FEATURE_ACCESS_REGISTERS)
+    /* Purge ALB */
+    if (sysblk.broadcast_code & BROADCAST_PALB)
+        ARCH_DEP(purge_alb) (realregs);
+#endif /*defined(FEATURE_ACCESS_REGISTERS)*/
 
+    /* Invalidate TLB entries */
+    if (sysblk.broadcast_code & BROADCAST_ITLB)
+    {
+        for (i = 0; i < (sizeof(regs->tlb)/sizeof(TLBE)); i++)
+            if ((regs->tlb[i].TLB_PTE & PAGETAB_PFRA) == sysblk.broadcast_pfra
+              && regs->tlb[i].valid)
+                    regs->tlb[i].valid = 0;
+        for (i = 0; i < (sizeof(regs->tlb)/sizeof(TLBE)) && realregs != regs; i++)
+            if ((realregs->tlb[i].TLB_PTE & PAGETAB_PFRA) == sysblk.broadcast_pfra
+              && realregs->tlb[i].valid)
+                    realregs->tlb[i].valid = 0;
     }
 
-    /* If this CPU is the last to enter, then signal the
-       requesting CPU's that the synchronization is complete */
-    if (--sysblk.brdcstncpu == 0)
+#if MAX_CPU_ENGINES > 1
+    /* Wait for the other cpus */
+    sysblk.broadcast_mask &= ~realregs->cpumask;
+    if (code > 0)
     {
-        OFF_IC_BRDCSTNCPU;
-        signal_condition (&sysblk.brdcstcond);
+        if (sysblk.broadcast_mask != 0)
+        {
+            WAKEUP_WAITING_CPUS(ALL_CPUS, CPUSTATE_STARTED);
+            wait_condition (&sysblk.broadcast_cond, &sysblk.intlock);
+        }
+        OFF_IC_BROADCAST;
+        release_lock (&sysblk.intlock);
     }
     else
     {
-        /* Wait for all CPU's to synchronize */
-        regs->mainsync = 1;
-        wait_condition (&sysblk.brdcstcond, &sysblk.intlock);
-        regs->mainsync = 0;
+        if (sysblk.broadcast_mask == 0)
+            broadcast_condition (&sysblk.broadcast_cond);
+        else
+            wait_condition (&sysblk.broadcast_cond, &sysblk.intlock);
     }
-
-    
-    /* When running under SIE we must address
-       the host register context for the purpose
-       of synchronisation */
-
-#if defined(FEATURE_ACCESS_REGISTERS)
-    /* Purge ALB if requested */
-    if (sysblk.brdcstpalb != regs->brdcstpalb)
-    {
-        ARCH_DEP(purge_alb) (
-#if defined(_FEATURE_SIE)
-                             regs->sie_state ? regs->hostregs :
-#endif /*defined(_FEATURE_SIE)*/
-                                                                regs);
-        regs->brdcstpalb = sysblk.brdcstpalb;
-    }
-#endif /*defined(FEATURE_ACCESS_REGISTERS)*/
-
-    /* Purge TLB if requested */
-    if (sysblk.brdcstptlb != regs->brdcstptlb)
-    {
-        ARCH_DEP(purge_tlb) (
-#if defined(_FEATURE_SIE)
-                             regs->sie_state ? regs->hostregs :
-#endif /*defined(_FEATURE_SIE)*/
-                                                                regs);
-        regs->brdcstptlb = sysblk.brdcstptlb;
-    }
+#endif /*MAX_CPU_ENGINES > 1*/
 
 } /* end function synchronize_broadcast */
-#endif /*MAX_CPU_ENGINES > 1*/
 
 
 /*-------------------------------------------------------------------*/
@@ -214,6 +223,46 @@ U16     cpuad;                          /* Originating CPU address   */
         /* Generate interrupt key interrupt */
         ARCH_DEP(external_interrupt) (EXT_INTERRUPT_KEY_INTERRUPT, regs);
     }
+
+    /* External interrupt if malfunction alert is pending */
+    if (OPEN_IC_MALFALT(regs))
+    {
+        /* Find first CPU which generated a malfunction alert */
+        for (cpuad = 0; regs->malfcpu[cpuad] == 0; cpuad++)
+        {
+            if (cpuad >= MAX_CPU_ENGINES)
+            {
+                OFF_IC_MALFALT(regs);
+                return;
+            }
+        } /* end for(cpuad) */
+
+// /*debug*/ logmsg ("External interrupt: Malfuction Alert from CPU %d\n",
+// /*debug*/    cpuad);
+
+        /* Reset the indicator for the CPU which was found */
+        regs->malfcpu[cpuad] = 0;
+
+        /* Store originating CPU address at PSA+X'84' */
+        psa = (void*)(sysblk.mainstor + regs->PX);
+        STORE_HW(psa->extcpad,cpuad);
+
+        /* Reset emergency signal pending flag if there are
+           no other CPUs which generated emergency signal */
+        OFF_IC_MALFALT(regs);
+        while (++cpuad < MAX_CPU_ENGINES)
+        {
+            if (regs->malfcpu[cpuad])
+            {
+                ON_IC_MALFALT(regs);
+                break;
+            }
+        } /* end while */
+
+        /* Generate emergency signal interrupt */
+        ARCH_DEP(external_interrupt) (EXT_MALFUNCTION_ALERT_INTERRUPT, regs);
+    }
+
 
     /* External interrupt if emergency signal is pending */
     if (OPEN_IC_EMERSIG(regs))

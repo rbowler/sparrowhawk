@@ -8,64 +8,83 @@
 
 #define _OPCODE_H
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
 
-#define GEN_MAXARCH	3
+#define GEN_MAXARCH	3+2
 
 
 #define GENx___x___x___ \
     { \
 	&s370_operation_exception, \
 	&s390_operation_exception, \
-	&z900_operation_exception \
+	&z900_operation_exception, \
+        (void*)&disasm_none, \
+        (void*)&"?????" \
     }
 
-#define GENx370x___x___(_name) \
+#define GENx370x___x___(_name,_format,_mnemonic) \
     { \
 	&s370_ ## _name, \
 	&s390_operation_exception, \
-	&z900_operation_exception \
+	&z900_operation_exception, \
+        (void*)&disasm_ ## _format, \
+        (void*)& _mnemonic \
     }
 
-#define GENx___x390x___(_name) \
+#define GENx___x390x___(_name,_format,_mnemonic) \
     { \
 	&s370_operation_exception, \
 	&s390_ ## _name, \
-	&z900_operation_exception \
+	&z900_operation_exception, \
+        (void*)&disasm_ ## _format, \
+        (void*)& _mnemonic \
     }
 
-#define GENx370x390x___(_name) \
+#define GENx370x390x___(_name,_format,_mnemonic) \
     { \
 	&s370_ ## _name, \
 	&s390_ ## _name, \
-	&z900_operation_exception \
+	&z900_operation_exception, \
+        (void*)&disasm_ ## _format, \
+        (void*)& _mnemonic \
     }
 
-#define GENx___x___x900(_name) \
+#define GENx___x___x900(_name,_format,_mnemonic) \
     { \
 	&s370_operation_exception, \
 	&s390_operation_exception, \
-	&z900_ ## _name \
+	&z900_ ## _name, \
+        (void*)&disasm_ ## _format, \
+        (void*)& _mnemonic \
     }
 
-#define GENx370x___x900(_name) \
+#define GENx370x___x900(_name,_format,_mnemonic) \
     { \
 	&s370_ ## _name, \
 	&s390_operation_exception, \
-	&z900_ ## _name \
+	&z900_ ## _name, \
+        (void*)&disasm_ ## _format, \
+        (void*)& _mnemonic \
     }
 
-#define GENx___x390x900(_name) \
+#define GENx___x390x900(_name,_format,_mnemonic) \
     { \
 	&s370_operation_exception, \
 	&s390_ ## _name, \
-	&z900_ ## _name \
+	&z900_ ## _name, \
+        (void*)&disasm_ ## _format, \
+        (void*)& _mnemonic \
     }
 
-#define GENx370x390x900(_name) \
+#define GENx370x390x900(_name,_format,_mnemonic) \
     { \
 	&s370_ ## _name, \
 	&s390_ ## _name, \
-	&z900_ ## _name \
+	&z900_ ## _name, \
+        (void*)&disasm_ ## _format, \
+        (void*)& _mnemonic \
     }
 
 
@@ -89,6 +108,14 @@ extern zz_func opcode_e5xx[][GEN_MAXARCH];
 extern zz_func opcode_ebxx[][GEN_MAXARCH];
 extern zz_func opcode_ecxx[][GEN_MAXARCH];
 extern zz_func opcode_edxx[][GEN_MAXARCH];
+
+
+#define DISASM_INSTRUCTION(_inst) \
+    disasm_table((_inst), 0)
+
+typedef void (*func) ();
+
+extern void disasm_table (BYTE inst[], BYTE mnemonic[]);
 
 
 #if defined(OPTION_INSTRUCTION_COUNTING)
@@ -179,43 +206,17 @@ do { \
 #if MAX_CPU_ENGINES == 1
  #define OBTAIN_MAINLOCK(_regs)
  #define RELEASE_MAINLOCK(_regs)
- #define BROADCAST_PTLB(_regs) \
-         ARCH_DEP(purge_tlb)((_regs))
- #define BROADCAST_PALB(_regs) \
-         ARCH_DEP(purge_alb)((_regs))
- #define SYNCHRONIZE_BROADCAST(_regs)
 #else
 #define OBTAIN_MAINLOCK(_register_context) \
 do { \
-    pthread_mutex_lock(&sysblk.mainlock); \
+    obtain_lock(&sysblk.mainlock); \
     (_register_context)->mainlock = 1; \
 } while(0)
 
 #define RELEASE_MAINLOCK(_register_context) \
 do { \
     (_register_context)->mainlock = 0; \
-    pthread_mutex_unlock(&sysblk.mainlock); \
-} while(0)
-
-#define BROADCAST_PTLB(_regs) \
-do { \
-    pthread_mutex_lock(&sysblk.intlock); \
-    sysblk.brdcstptlb++; \
-    pthread_mutex_unlock(&sysblk.intlock); \
-} while(0)
-
-#define BROADCAST_PALB(_regs) \
-do { \
-    pthread_mutex_lock(&sysblk.intlock); \
-    sysblk.brdcstpalb++; \
-    pthread_mutex_unlock(&sysblk.intlock); \
-} while(0)
-
-#define SYNCHRONIZE_BROADCAST(_regs) \
-do { \
-    pthread_mutex_lock(&sysblk.intlock); \
-    ARCH_DEP(synchronize_broadcast)((_regs)); \
-    pthread_mutex_unlock(&sysblk.intlock); \
+    release_lock(&sysblk.mainlock); \
 } while(0)
 #endif
 
@@ -376,36 +377,74 @@ do { \
 #endif /* defined(FEATURE_BINARY_FLOATING_POINT) */
 
 
-#if __BYTE_ORDER == __LITTLE_ENDIAN
- #define CSWAP16(_x) bswap_16(_x)
- #define CSWAP32(_x) bswap_32(_x)
- #define CSWAP64(_x) bswap_64(_x)
-#elif __BYTE_ORDER == __BIG_ENDIAN
+#ifdef WORDS_BIGENDIAN
  #define CSWAP16(_x) (_x)
  #define CSWAP32(_x) (_x)
  #define CSWAP64(_x) (_x)
 #else
- #error Cannot determine byte order
+ #define CSWAP16(_x) bswap_16(_x)
+ #define CSWAP32(_x) bswap_32(_x)
+ #define CSWAP64(_x) bswap_64(_x)
 #endif
 
-#define STORE_HW(_storage, _value) \
+#if i386
+#define store_hw(_storage, _value) \
 	*((U16*)(_storage)) = CSWAP16((_value))
 
-#define FETCH_HW(_value, _storage) \
-	(_value) = CSWAP16(*((U16*)(_storage)))
+#define fetch_hw(_storage) \
+	CSWAP16(*((U16*)(_storage)))
 
-#define STORE_FW(_storage, _value) \
+#define store_fw(_storage, _value) \
 	*((U32*)(_storage)) = CSWAP32((_value))
 
-#define FETCH_FW(_value, _storage) \
-	(_value) = CSWAP32(*((U32*)(_storage)))
+#define fetch_fw(_storage) \
+	CSWAP32(*((U32*)(_storage)))
 
-#define STORE_DW(_storage, _value) \
+#define store_dw(_storage, _value) \
 	*((U64*)(_storage)) = CSWAP64((_value))
 
-#define FETCH_DW(_value, _storage) \
-	(_value) = CSWAP64(*((U64*)(_storage)))
+#define fetch_dw(_storage) \
+	CSWAP64(*((U64*)(_storage)))
 
+#else
+
+static inline U16 fetch_hw(void* storage) {
+  U16 tmp;
+  memcpy(&tmp, storage, 2);
+  return CSWAP16(tmp);
+}
+static inline void store_hw(void* storage, U16 value) {
+  U16 tmp = CSWAP16(value);
+  memcpy(storage, &tmp, 2);
+}
+static inline U32 fetch_fw(void* storage) {
+  U32 tmp;
+  memcpy(&tmp, storage, 4);
+  return CSWAP32(tmp);
+}
+static inline void store_fw(void* storage, U32 value) {
+  U32 tmp = CSWAP32(value);
+  memcpy(storage, &tmp, 4);
+}
+static inline U64 fetch_dw(void* storage) {
+  U64 tmp;
+  memcpy(&tmp, storage, 8);
+  return CSWAP64(tmp);
+}
+static inline void store_dw(void* storage, U64 value) {
+  U64 tmp = CSWAP64(value);
+  memcpy(storage, &tmp, 8);
+}
+
+#endif /* i386 */
+
+#define FETCH_HW(_value, _storage) (_value) = fetch_hw(_storage)
+#define FETCH_FW(_value, _storage) (_value) = fetch_fw(_storage)
+#define FETCH_DW(_value, _storage) (_value) = fetch_dw(_storage)
+
+#define STORE_HW(_storage, _value) store_hw(_storage, _value)
+#define STORE_FW(_storage, _value) store_fw(_storage, _value)
+#define STORE_DW(_storage, _value) store_dw(_storage, _value)
 
 #endif /*!defined(_OPCODE_H)*/
 
@@ -418,7 +457,7 @@ do { \
 #define INSTRUCTION_FETCH(_dest, _addr, _regs) \
 do { \
     if( (_regs)->VI == ((_addr) & PAGEFRAME_PAGEMASK) \
-      && ((_addr) & PAGEFRAME_BYTEMASK) <= PAGEFRAME_PAGESIZE - 6) \
+      && ((_addr) & 0x7FF) <= (0x800 - 6)) \
     { \
         if((_addr) & 0x01) \
             ARCH_DEP(program_interrupt)((_regs), PGM_SPECIFICATION_EXCEPTION); \
@@ -444,6 +483,7 @@ do { \
 
 #if defined(OPTION_AEA_BUFFER)
 
+#if !defined(OPTION_FAST_LOGICAL)
 #define LOGICAL_TO_ABS(_addr, _arn, _regs, _acctype, _akey)	      \
     (((_addr) & PAGEFRAME_PAGEMASK) == (_regs)->VE((_arn))) &&	    \
     ((_arn) >= 0) &&						      \
@@ -456,6 +496,14 @@ do { \
 	((_regs)->AE((_arn)) | ((_addr) & PAGEFRAME_BYTEMASK)) ) :  \
     ARCH_DEP(logical_to_abs) ((_addr), (_arn), (_regs), (_acctype), (_akey))
 
+#define LOGICAL_TO_ABS_SKP(_addr, _arn, _regs, _acctype, _akey)	      \
+    (((_addr) & PAGEFRAME_PAGEMASK) == (_regs)->VE((_arn))) &&	    \
+    ((_arn) >= 0) &&						      \
+    (((_regs)->aekey[(_arn)] == (_akey)) || (_akey) == 0) &&	      \
+    ((_regs)->aeacc[(_arn)] >= (_acctype)) ?			      \
+    ((_regs)->AE((_arn)) | ((_addr) & PAGEFRAME_BYTEMASK))  :  \
+    ARCH_DEP(logical_to_abs) ((_addr), (_arn), (_regs), (_acctype), (_akey))
+
 #define INVALIDATE_AEA(_arn, _regs) \
 	(_regs)->VE((_arn)) = 1
 
@@ -466,9 +514,61 @@ do { \
         (_regs)->VE(i) = 1; \
 } while(0)
 
+#else
+
+#if defined(OPTION_REDUCED_INVAL)
+#define AEIND(_addr) (((_addr) >> PAGEFRAME_PAGESHIFT) & 0xff)
+#define MAXAEA 256
+#else
+#define AEIND(_addr) (((_addr) >> PAGEFRAME_PAGESHIFT) & 0xf)
+#define MAXAEA 16
+#endif
+
+#define LOGICAL_TO_ABS(_addr, _arn, _regs, _acctype, _akey)	      \
+    (((_addr) & PAGEFRAME_PAGEMASK) == (_regs)->VE((AEIND(_addr)))) &&	    \
+    ((_arn) >= 0) &&						      \
+    (((_regs)->aekey[(AEIND(_addr))] == (_akey)) || (_akey) == 0) &&	      \
+    (((_regs)->aenoarn) || ((_regs)->aearn[AEIND(_addr)] == (_arn))) && \
+    ((_regs)->aeacc[(AEIND(_addr))] >= (_acctype)) ?			      \
+    ((_acctype) == ACCTYPE_READ) ?				      \
+    (STORAGE_KEY((_regs)->AE((AEIND(_addr)))) |= STORKEY_REF,		      \
+	((_regs)->AE((AEIND(_addr))) | ((_addr) & PAGEFRAME_BYTEMASK)) ) :  \
+    (STORAGE_KEY((_regs)->AE((AEIND(_addr)))) |= (STORKEY_REF | STORKEY_CHANGE), \
+	((_regs)->AE((AEIND(_addr))) | ((_addr) & PAGEFRAME_BYTEMASK)) ) :  \
+    ARCH_DEP(logical_to_abs) ((_addr), (_arn), (_regs), (_acctype), (_akey))
+
+#define LOGICAL_TO_ABS_SKP(_addr, _arn, _regs, _acctype, _akey)	      \
+    (((_addr) & PAGEFRAME_PAGEMASK) == (_regs)->VE((AEIND(_addr)))) &&	    \
+    ((_arn) >= 0) &&						      \
+    (((_regs)->aekey[(AEIND(_addr))] == (_akey)) || (_akey) == 0) &&	      \
+    (((_regs)->aenoarn) || ((_regs)->aearn[AEIND(_addr)] == (_arn))) && \
+    ((_regs)->aeacc[(AEIND(_addr))] >= (_acctype)) ?			      \
+    ((_regs)->AE((AEIND(_addr))) | ((_addr) & PAGEFRAME_BYTEMASK))  :  \
+    ARCH_DEP(logical_to_abs) ((_addr), (_arn), (_regs), (_acctype), (_akey))
+
+#define INVALIDATE_AEA(_arn, _regs) \
+do { \
+    int i; \
+    (_regs)->aenoarn = 0; \
+    for(i = 0; i < MAXAEA; i++) \
+        (_regs)->VE(i) = 1; \
+} while(0)
+
+#define INVALIDATE_AEA_ALL(_regs) \
+do { \
+    int i; \
+    (_regs)->aenoarn = 0; \
+    for(i = 0; i < MAXAEA; i++) \
+        (_regs)->VE(i) = 1; \
+} while(0)
+#endif
+
 #else /*!defined(OPTION_AEA_BUFFER)*/
 
 #define LOGICAL_TO_ABS(_addr, _arn, _regs, _acctype, _akey) \
+	ARCH_DEP(logical_to_abs) ((_addr), (_arn), (_regs), (_acctype), (_akey))
+
+#define LOGICAL_TO_ABS_SKP(_addr, _arn, _regs, _acctype, _akey) \
 	ARCH_DEP(logical_to_abs) ((_addr), (_arn), (_regs), (_acctype), (_akey))
 
 #define INVALIDATE_AEA(_arn, _regs)
@@ -476,7 +576,6 @@ do { \
 #define INVALIDATE_AEA_ALL(_regs)
 
 #endif /*!defined(OPTION_AEA_BUFFER)*/
-
 
 /* E implied operands and extended op code */
 #undef E
@@ -492,6 +591,21 @@ do { \
 
 /* RR register to register */
 #undef RR
+#if defined(OPTION_FETCHIBYTE)
+#define RR(_inst, _execflag, _regs, _r1, _r2) \
+	{ \
+            register U32 ib; \
+            FETCHIBYTE1(ib, (_inst)) \
+	    (_r1) = ib >> 4; \
+	    (_r2) = ib & 0x0F; \
+	    if( !(_execflag) ) \
+	    { \
+		(_regs)->psw.ilc = 2; \
+		(_regs)->psw.IA += 2; \
+		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	}
+#else
 #define RR(_inst, _execflag, _regs, _r1, _r2) \
 	{ \
 	    (_r1) = (_inst)[1] >> 4; \
@@ -503,9 +617,24 @@ do { \
 		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
 	    } \
 	}
+#endif
 
 /* RR special format for SVC instruction */
 #undef RR_SVC
+#if defined(OPTION_FETCHIBYTE)
+#define RR_SVC(_inst, _execflag, _regs, _svc) \
+	{ \
+            register U32 ib; \
+            FETCHIBYTE1(ib, (_inst)) \
+	    (_svc) = ib; \
+	    if( !(_execflag) ) \
+	    { \
+		(_regs)->psw.ilc = 2; \
+		(_regs)->psw.IA += 2; \
+		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	}
+#else
 #define RR_SVC(_inst, _execflag, _regs, _svc) \
 	{ \
 	    (_svc) = (_inst)[1]; \
@@ -516,9 +645,25 @@ do { \
 		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
 	    } \
 	}
+#endif
 
 /* RRE register to register with extended op code */
 #undef RRE
+#if defined(OPTION_FETCHIBYTE)
+#define RRE(_inst, _execflag, _regs, _r1, _r2) \
+	{ \
+            register U32 ib; \
+            FETCHIBYTE3(ib, (_inst)) \
+	    (_r1) = ib >> 4; \
+	    (_r2) = ib & 0x0F; \
+	    if( !(_execflag) ) \
+	    { \
+		(_regs)->psw.ilc = 4; \
+		(_regs)->psw.IA += 4; \
+		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	}
+#else
 #define RRE(_inst, _execflag, _regs, _r1, _r2) \
 	{ \
 	    (_r1) = (_inst)[3] >> 4; \
@@ -530,6 +675,7 @@ do { \
 		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
 	    } \
 	}
+#endif
 
 /* RRF register to register with additional R3 field */
 #undef RRF_R
@@ -579,6 +725,37 @@ do { \
 
 /* RX register and indexed storage */
 #undef RX
+#if defined(OPTION_FETCHIBYTE)
+#define RX(_inst, _execflag, _regs, _r1, _b2, _effective_addr2) \
+	{ \
+            register U32 ib; \
+            register U32 ib3; \
+            FETCHIBYTE1(ib, (_inst)) \
+	    (_r1) = ib >> 4; \
+	    (_b2) = ib & 0x0F; \
+            FETCHIBYTE2(ib, (_inst)) \
+	    (_effective_addr2) = (ib & 0x0F) << 8; \
+            FETCHIBYTE3(ib3, (_inst)) \
+	    (_effective_addr2) |= ib3; \
+	    if((_b2) != 0) \
+	    { \
+		(_effective_addr2) += (_regs)->GR((_b2)); \
+		(_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	    (_b2) = (_inst)[2] >> 4; \
+	    if((_b2) != 0) \
+	    { \
+		(_effective_addr2) += (_regs)->GR((_b2)); \
+		(_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	    if( !(_execflag) ) \
+	    { \
+		(_regs)->psw.ilc = 4; \
+		(_regs)->psw.IA += 4; \
+		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	}
+#else
 #define RX(_inst, _execflag, _regs, _r1, _b2, _effective_addr2) \
 	{ \
 	    (_r1) = (_inst)[1] >> 4; \
@@ -602,14 +779,22 @@ do { \
 		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
 	    } \
 	}
+#endif
 
 /* RXE register and indexed storage with extended op code */
 #undef RXE
+#if defined(OPTION_FETCHIBYTE)
 #define RXE(_inst, _execflag, _regs, _r1, _b2, _effective_addr2) \
 	{ \
-	    (_r1) = (_inst)[1] >> 4; \
-	    (_b2) = (_inst)[1] & 0x0F; \
-	    (_effective_addr2) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
+            register U32 ib; \
+            register U32 ib3; \
+            FETCHIBYTE1(ib, (_inst)) \
+	    (_r1) = ib >> 4; \
+	    (_b2) = ib & 0x0F; \
+            FETCHIBYTE2(ib, (_inst)) \
+	    (_effective_addr2) = (ib & 0x0F) << 8; \
+            FETCHIBYTE3(ib3, (_inst)) \
+	    (_effective_addr2) |= ib3; \
 	    if((_b2) != 0) \
 	    { \
 		(_effective_addr2) += (_regs)->GR((_b2)); \
@@ -628,6 +813,34 @@ do { \
 		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
 	    } \
 	}
+#else
+#define RXE(_inst, _execflag, _regs, _r1, _b2, _effective_addr2) \
+	{ \
+            U32 iword; \
+            iword = *(U32*)(_inst); \
+            (_r1) = (iword & 0x0000F000) >> 12; \
+            (_b2) = (iword & 0x00000F00) >> 8; \
+            (_effective_addr2) = (iword & 0x000F0000) >> 8 | \
+                                 (iword & 0xFF000000) >> 24; \
+	    if((_b2) != 0) \
+	    { \
+		(_effective_addr2) += (_regs)->GR((_b2)); \
+		(_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+            (_b2) = (iword & 0x00F00000) >> 20; \
+	    if((_b2) != 0) \
+	    { \
+		(_effective_addr2) += (_regs)->GR((_b2)); \
+		(_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	    if( !(_execflag) ) \
+	    { \
+		(_regs)->psw.ilc = 6; \
+		(_regs)->psw.IA += 6; \
+		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	}
+#endif
 
 /* RXF register and indexed storage with ext.opcode and additional R3 */
 #undef RXF
@@ -658,6 +871,32 @@ do { \
 
 /* RS register and storage with additional R3 or M3 field */
 #undef RS
+#if defined(OPTION_FETCHIBYTE)
+#define RS(_inst, _execflag, _regs, _r1, _r3, _b2, _effective_addr2) \
+	{ \
+            register U32 ib; \
+            register U32 ib3; \
+            FETCHIBYTE1(ib, (_inst)) \
+	    (_r1) = ib >> 4; \
+	    (_r3) = ib & 0x0F; \
+            FETCHIBYTE2(ib, (_inst)) \
+	    (_b2) = ib >> 4; \
+	    (_effective_addr2) = (ib & 0x0F) << 8; \
+            FETCHIBYTE3(ib3, (_inst)) \
+	    (_effective_addr2) |= ib3; \
+	    if((_b2) != 0) \
+	    { \
+		(_effective_addr2) += (_regs)->GR((_b2)); \
+		(_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	    if( !(_execflag) ) \
+	    { \
+		(_regs)->psw.ilc = 4; \
+		(_regs)->psw.IA += 4; \
+		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	}
+#else
 #define RS(_inst, _execflag, _regs, _r1, _r3, _b2, _effective_addr2) \
 	{ \
 	    (_r1) = (_inst)[1] >> 4; \
@@ -676,10 +915,37 @@ do { \
 		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
 	    } \
 	}
+#endif
 
 /* RSE register and storage with extended op code and additional
    R3 or M3 field (note, this is NOT the ESA/390 vector RSE format) */
 #undef RSE
+#if defined(OPTION_FETCHIBYTE)
+#define RSE(_inst, _execflag, _regs, _r1, _r3, _b2, _effective_addr2) \
+	{ \
+            register U32 ib; \
+            register U32 ib3; \
+            FETCHIBYTE1(ib, (_inst)) \
+	    (_r1) = ib >> 4; \
+	    (_r3) = ib & 0x0F; \
+            FETCHIBYTE2(ib, (_inst)) \
+	    (_b2) = ib >> 4; \
+	    (_effective_addr2) = (ib & 0x0F) << 8; \
+            FETCHIBYTE3(ib3, (_inst)) \
+	    (_effective_addr2) |= ib3; \
+	    if((_b2) != 0) \
+	    { \
+		(_effective_addr2) += (_regs)->GR((_b2)); \
+		(_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	    if( !(_execflag) ) \
+	    { \
+		(_regs)->psw.ilc = 6; \
+		(_regs)->psw.IA += 6; \
+		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	}
+#else
 #define RSE(_inst, _execflag, _regs, _r1, _r3, _b2, _effective_addr2) \
 	{ \
 	    (_r1) = (_inst)[1] >> 4; \
@@ -698,6 +964,7 @@ do { \
 		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
 	    } \
 	}
+#endif
 
 /* RSL storage operand with extended op code and 4-bit L field */
 #undef RSL
@@ -736,6 +1003,25 @@ do { \
 
 /* RI register and immediate with extended 4-bit op code */
 #undef RI
+#if defined(OPTION_FETCHIBYTE)
+#define RI(_inst, _execflag, _regs, _r1, _op, _i2) \
+	{ \
+            register U32 ib; \
+            register U32 ib3; \
+            FETCHIBYTE1(ib, (_inst)) \
+	    (_r1) = ib >> 4; \
+	    (_op) = ib & 0x0F; \
+            FETCHIBYTE2(ib, (_inst)) \
+            FETCHIBYTE3(ib3, (_inst)) \
+	    (_i2) = (ib << 8) | ib3; \
+	    if( !(_execflag) ) \
+	    { \
+		(_regs)->psw.ilc = 4; \
+		(_regs)->psw.IA += 4; \
+		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	}
+#else
 #define RI(_inst, _execflag, _regs, _r1, _op, _i2) \
 	{ \
 	    (_r1) = (_inst)[1] >> 4; \
@@ -748,9 +1034,29 @@ do { \
 		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
 	    } \
 	}
+#endif
 
 /* RIE register and immediate with ext.opcode and additional R3 */
 #undef RIE
+#if defined(OPTION_FETCHIBYTE)
+#define RIE(_inst, _execflag, _regs, _r1, _r3, _i2) \
+	{ \
+            register U32 ib; \
+            register U32 ib3; \
+            FETCHIBYTE1(ib, (_inst)) \
+	    (_r1) = ib >> 4; \
+	    (_r3) = ib & 0x0F; \
+            FETCHIBYTE2(ib, (_inst)) \
+            FETCHIBYTE3(ib3, (_inst)) \
+	    (_i2) = (ib << 8) | ib3; \
+	    if( !(_execflag) ) \
+	    { \
+		(_regs)->psw.ilc = 6; \
+		(_regs)->psw.IA += 6; \
+		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	}
+#else
 #define RIE(_inst, _execflag, _regs, _r1, _r3, _i2) \
 	{ \
 	    (_r1) = (_inst)[1] >> 4; \
@@ -763,6 +1069,7 @@ do { \
 		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
 	    } \
 	}
+#endif
 
 /* RIL register and longer immediate with extended 4 bit op code */
 #undef RIL
@@ -784,6 +1091,31 @@ do { \
 
 /* SI storage and immediate */
 #undef SI
+#if defined(OPTION_FETCHIBYTE)
+#define SI(_inst, _execflag, _regs, _i2, _b1, _effective_addr1) \
+	{ \
+            register U32 ib; \
+            register U32 ib3; \
+            FETCHIBYTE1(ib, (_inst)) \
+	    (_i2) = ib; \
+            FETCHIBYTE2(ib, (_inst)) \
+	    (_b1) = ib >> 4; \
+	    (_effective_addr1) = (ib & 0x0F) << 8; \
+            FETCHIBYTE3(ib3, (_inst)) \
+	    (_effective_addr1) |= ib3; \
+	    if((_b1) != 0) \
+	    { \
+		(_effective_addr1) += (_regs)->GR((_b1)); \
+		(_effective_addr1) &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	    if( !(_execflag) ) \
+	    { \
+		(_regs)->psw.ilc = 4; \
+		(_regs)->psw.IA += 4; \
+		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	}
+#else
 #define SI(_inst, _execflag, _regs, _i2, _b1, _effective_addr1) \
 	{ \
 	    (_i2) = (_inst)[1]; \
@@ -801,9 +1133,33 @@ do { \
 		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
 	    } \
 	}
+#endif
 
 /* S storage operand only */
 #undef S
+#if defined(OPTION_FETCHIBYTE)
+#define S(_inst, _execflag, _regs, _b2, _effective_addr2) \
+	{ \
+            register U32 ib; \
+            register U32 ib3; \
+            FETCHIBYTE2(ib, (_inst)) \
+	    (_b2) = ib >> 4; \
+	    (_effective_addr2) = (ib & 0x0F) << 8; \
+            FETCHIBYTE3(ib3, (_inst)) \
+	    (_effective_addr2) |= ib3; \
+	    if((_b2) != 0) \
+	    { \
+		(_effective_addr2) += (_regs)->GR((_b2)); \
+		(_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	    if( !(_execflag) ) \
+	    { \
+		(_regs)->psw.ilc = 4; \
+		(_regs)->psw.IA += 4; \
+		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
+	    } \
+	}
+#else
 #define S(_inst, _execflag, _regs, _b2, _effective_addr2) \
 	{ \
 	    (_b2) = (_inst)[2] >> 4; \
@@ -820,6 +1176,7 @@ do { \
 		(_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
 	    } \
 	}
+#endif
 
 /* SS storage to storage with two 4-bit L or R fields */
 #undef SS
@@ -1136,6 +1493,107 @@ do { \
 #define PERFORM_CHKPT_SYNC(_regs)
 
 
+#if !defined(NO_SETUID)
+
+/* SETMODE(INIT) 
+ *   sets the saved uid to the effective uid, and
+ *   sets the effective uid to the real uid, such
+ *   that the program is running with normal user
+ *   attributes, other then that it may switch to
+ *   the saved uid by SETMODE(ROOT). This call is
+ *   usually made upon entry to the setuid program.
+ * 
+ * SETMODE(ROOT)
+ *   sets the saved uid to the real uid, and
+ *   sets the real and effective uid to the saved uid.
+ *   A setuid root program will enter 'root mode' and
+ *   will have all the appropriate access.
+ *
+ * SETMODE(USER)
+ *   sets the real and effective uid to the uid of the 
+ *   caller.  The saved uid will be the effective uid 
+ *   upon entry to the program (as before SETMODE(INIT))
+ *
+ * SETMODE(TERM)
+ *   sets real, effective and saved uid to the real uid
+ *   upon entry to the program.  This call will revoke 
+ *   any setuid access that the thread/process has.  It
+ *   is important to issue this call before an exec to a 
+ *   shell or other program that could introduce integrity
+ *   exposures when running with root access.
+ */
+
+#if defined(HAVE_SETRESUID)
+
+#define _SETMODE_INIT \
+do { \
+    getresuid(&sysblk.ruid,&sysblk.euid,&sysblk.suid); \
+    getresgid(&sysblk.rgid,&sysblk.egid,&sysblk.sgid); \
+    setresuid(sysblk.ruid,sysblk.ruid,sysblk.euid); \
+    setresgid(sysblk.rgid,sysblk.rgid,sysblk.egid); \
+} while(0)
+
+#define _SETMODE_ROOT \
+do { \
+    setresuid(sysblk.suid,sysblk.suid,sysblk.ruid); \
+} while(0)
+
+#define _SETMODE_USER \
+do { \
+    setresuid(sysblk.ruid,sysblk.ruid,sysblk.suid); \
+} while(0)
+
+#define _SETMODE_TERM \
+do { \
+    setresuid(sysblk.ruid,sysblk.ruid,sysblk.ruid); \
+    setresgid(sysblk.rgid,sysblk.rgid,sysblk.rgid); \
+} while(0)
+
+#elif defined(HAVE_SETREUID)
+
+#define _SETMODE_INIT \
+do { \
+    sysblk.ruid = getuid(); \
+    sysblk.euid = geteuid(); \
+    sysblk.rgid = getgid(); \
+    sysblk.egid = getegid(); \
+    setreuid(sysblk.euid, sysblk.ruid); \
+    setregid(sysblk.egid, sysblk.rgid); \
+} while (0)
+
+#define _SETMODE_ROOT \
+do { \
+    setreuid(sysblk.ruid, sysblk.euid); \
+    setregid(sysblk.rgid, sysblk.egid); \
+} while (0)
+
+#define _SETMODE_USER \
+do { \
+    setregid(sysblk.egid, sysblk.rgid); \
+    setreuid(sysblk.euid, sysblk.ruid); \
+} while (0)
+
+#define _SETMODE_TERM \
+do { \
+    setuid(sysblk.ruid); \
+    setgid(sysblk.rgid); \
+} while (0)
+
+#else /* defined(HAVE_SETRESUID) || defined(HAVE_SETEREUID) */
+
+#error Cannot figure out how to swap effective UID/GID, maybe you should define NO_SETUID?
+
+#endif /* defined(HAVE_SETREUID) || defined(HAVE_SETRESUID) */
+
+#define SETMODE(_func) _SETMODE_ ## _func
+
+#else /* !defined(NO_SETUID) */
+
+#define SETMODE(_func)
+
+#endif /* !defined(NO_SETUID) */
+
+
 /* Functions in module channel.c */
 int  ARCH_DEP(startio) (DEVBLK *dev, ORB *orb); 	       /*@IZW*/
 void *s370_execute_ccw_chain (DEVBLK *dev);
@@ -1145,6 +1603,7 @@ int  stchan_id (REGS *regs, U16 chan);
 int  testch (REGS *regs, U16 chan);
 int  testio (REGS *regs, DEVBLK *dev, BYTE ibyte);
 int  test_subchan (REGS *regs, DEVBLK *dev, IRB *irb);
+int  cancel_subchan (REGS *regs, DEVBLK *dev);
 void clear_subchan (REGS *regs, DEVBLK *dev);
 int  halt_subchan (REGS *regs, DEVBLK *dev);
 int  haltio (REGS *regs, DEVBLK *dev, BYTE ibyte);
@@ -1203,7 +1662,7 @@ void ARCH_DEP(diag204_call) (int r1, int r2, REGS *regs);
 
 
 /* Functions in module external.c */
-void ARCH_DEP(synchronize_broadcast) (REGS *regs);
+void ARCH_DEP(synchronize_broadcast) (REGS *regs, int code, U64 pfra);
 void ARCH_DEP(perform_external_interrupt) (REGS *regs);
 void ARCH_DEP(store_status) (REGS *ssreg, RADR aaddr);
 void store_status (REGS *ssreg, U64 aaddr);
@@ -1215,6 +1674,10 @@ int  ARCH_DEP(load_ipl) (U16 devnum, REGS *regs);
 void ARCH_DEP(cpu_reset) (REGS *regs);
 void initial_cpu_reset (REGS *regs);
 void ARCH_DEP(initial_cpu_reset) (REGS *regs);
+int load_main(char *fname, RADR startloc);
+int ARCH_DEP(load_main) (char *fname, RADR startloc);
+int load_hmc(char *fname, REGS *regs);
+int ARCH_DEP(load_hmc) (char *fname, REGS *regs);
 
 
 /* Functions in module machchk.c */
@@ -1222,25 +1685,22 @@ int  ARCH_DEP(present_mck_interrupt) (REGS *regs, U64 *mcic, U32 *xdmg,
 	RADR *fsta);
 U32  channel_report (void);
 void machine_check_crwpend (void);
+void ARCH_DEP(sync_mck_interrupt) (REGS *regs);
+void sigabend_handler (int signo);
 
 
 /* Functions in module panel.c */
 void ARCH_DEP(display_inst) (REGS *regs, BYTE *inst);
+void display_inst (REGS *regs, BYTE *inst);
 
 
 /* Functions in module sie.c */
-#if defined(_FEATURE_SIE)
-int  s370_sie_run (REGS *regs);
-#endif /*!defined(_FEATURE_SIE)*/
-#if defined(_FEATURE_ZSIE)
-int  s390_sie_run (REGS *regs);
-#endif /*!defined(_FEATURE_ZSIE)*/
-int  ARCH_DEP(sie_run) (REGS *regs);
 void ARCH_DEP(sie_exit) (REGS *regs, int code);
 
 
 /* Functions in module stack.c */
 void ARCH_DEP(trap_x) (int trap_is_trap4, int execflag, REGS *regs, U32 trap_operand);
+RADR ARCH_DEP(abs_trap_addr) (VADR vaddr, REGS *regs, int acctype);
 RADR ARCH_DEP(abs_stack_addr) (VADR vaddr, REGS *regs, int acctype);
 void ARCH_DEP(form_stack_entry) (BYTE etype, VADR retna, VADR calla,
 	U32 csi, U32 pcnum, REGS *regs);
@@ -1250,7 +1710,7 @@ void ARCH_DEP(stack_modify) (VADR lsea, U32 m1, U32 m2, REGS *regs);
 void ARCH_DEP(stack_extract) (VADR lsea, int r1, int code, REGS *regs);
 void ARCH_DEP(unstack_registers) (int gtype, VADR lsea, int r1,
 	int r2, REGS *regs);
-int  ARCH_DEP(program_return_unstack) (REGS *regs, RADR *lsedap);
+int  ARCH_DEP(program_return_unstack) (REGS *regs, RADR *lsedap, int *rc);
 
 
 /* Functions in module trace.c */
@@ -1657,6 +2117,7 @@ DEF_INST(set_address_limit);
 DEF_INST(set_channel_monitor);
 DEF_INST(reset_channel_path);
 DEF_INST(start_subchannel);
+DEF_INST(cancel_subchannel);
 DEF_INST(store_channel_path_status);
 DEF_INST(store_channel_report_word);
 DEF_INST(store_subchannel);
@@ -1915,6 +2376,9 @@ DEF_INST(loadlength_bfp_short_to_long);
 DEF_INST(load_negative_bfp_ext_reg);
 DEF_INST(load_negative_bfp_long_reg);
 DEF_INST(load_negative_bfp_short_reg);
+DEF_INST(load_complement_bfp_ext_reg);
+DEF_INST(load_complement_bfp_long_reg);
+DEF_INST(load_complement_bfp_short_reg);
 DEF_INST(load_positive_bfp_ext_reg);
 DEF_INST(load_positive_bfp_long_reg);
 DEF_INST(load_positive_bfp_short_reg);
@@ -1934,5 +2398,8 @@ DEF_INST(subtract_bfp_long_reg);
 DEF_INST(subtract_bfp_long);
 DEF_INST(subtract_bfp_short_reg);
 DEF_INST(subtract_bfp_short);
+DEF_INST(testdataclass_bfp_short);
+DEF_INST(testdataclass_bfp_long);
+DEF_INST(testdataclass_bfp_ext);
 
 /* end of OPCODE.H */

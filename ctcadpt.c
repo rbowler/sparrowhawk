@@ -166,6 +166,10 @@
 
 #include "hercules.h"
 
+#ifdef linux
+#include "if_tun.h"
+#endif
+
 #define HERCIFC_CMD "hercifc"           /* Interface config command  */
 
 /*-------------------------------------------------------------------*/
@@ -190,6 +194,11 @@
 #define CTC_CTCI        7               /* CTC link to TCP/IP stack  */
 #define CTC_VMNET       8               /* CTC link via wfk's vmnet  */
 #define CTC_CFC         9               /* Coupling facility channel */
+
+/*-------------------------------------------------------------------*/
+/* CTCI read timeout value before returning command retry            */
+/*-------------------------------------------------------------------*/
+#define CTC_READ_TIMEOUT_SECS  (5)      /* five seconds              */
 
 /*-------------------------------------------------------------------*/
 /* Definitions for CTC TCP/IP data blocks                            */
@@ -357,8 +366,6 @@ BYTE           *remotep;                /* Destination port number   */
 BYTE           *mtusize;                /* MTU size (characters)     */
 BYTE           *remaddr;                /* Remote IP address         */
 struct in_addr  ipaddr;                 /* Work area for IP address  */
-pid_t           pid;                    /* Process identifier        */
-int             pxc;                    /* Process exit code         */
 BYTE            c;                      /* Character work area       */
 TID             tid;                    /* Thread ID for server      */
 CTCG_PARMBLK    parm;                   /* Parameters for the server */
@@ -651,6 +658,8 @@ BYTE            c;                      /* Character work area       */
             return -1;
         }
         dev->fd = fd;
+
+#ifdef linux
         if ((strncasecmp(utsbuf.sysname, "linux", 5) == 0) &&
             (strncmp(utsbuf.machine, "s390", 4) != 0) &&
             (strncmp(utsbuf.release, "2.4", 3) == 0))
@@ -659,66 +668,27 @@ BYTE            c;                      /* Character work area       */
              * except Linux for S/390 where no tun driver is builtin (yet)
              */
 
-            int sockfd;
-            int tunmax = -1;
-            int i;
             struct ifreq ifr;
     
-            sockfd = socket (AF_INET, SOCK_DGRAM, 0);
-            if (sockfd < 0)
-            {
-                logmsg ("HHC852I %4.4X can not create socket: %s\n",
-                    dev->devnum, strerror(errno));
-                ctcadpt_close_device(dev);
-                return -1;
-            }
-            /*
-             * Loop over all network interfaces, finding
-             * the tun device with the higest number
-             */
-            for (i = 1; ; i++)
-            {
-                memset(&ifr, 0, sizeof(ifr));
-
-                ifr.ifr_ifindex = i;
-                if (ioctl(sockfd, SIOCGIFNAME, &ifr) == 0)
-                {
-                    if (strncmp(ifr.ifr_name, "tun", 3) == 0)
-                        if (isdigit(ifr.ifr_name[3]))
-                        {
-                            char *eptr;
-                            int ifnum;
-                            ifnum = strtol(&ifr.ifr_name[3],
-                                    &eptr, 10);
-                            if (eptr && (*eptr == '\0'))
-                                tunmax = (ifnum > tunmax) ? ifnum : tunmax;
-                        }
-                } else
-                    break;
-            }
-            close(sockfd);
-            sprintf(dev->netdevname, "tun%d", ++tunmax);
-
             memset(&ifr, 0, sizeof(ifr));
-            /* Note:
-             * Intentionally did _NOT_ used constants IFF_... and
-             * TUNSETIFF to avoid #include <linux/if_tun.h> and thus
-             * make it possible to build on systems not having linux-2.4's
-             * kernel headers installed.
-             * Drawback: If these defines change in the kernel headers,
-             *           that has to be changed here too (probably depending
-             *           on the kernel-release check above).
-             */
-            ifr.ifr_flags = 0x1001; /* IFF_TUN | IFF_NO_PI */
-            strncpy(ifr.ifr_name, dev->netdevname, IFNAMSIZ);
-            if (ioctl(fd, (('T' << 8) | 202), &ifr) != 0)
-            {
-                logmsg ("HHC853I %4.4X setting net device param failed: %s\n",
-                    dev->devnum, strerror(errno));
-                ctcadpt_close_device(dev);
-                return -1;
-            }
-        } else {
+            ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
+
+            /* First try the value from the header that we ship (2.4.8) */
+
+            if (ioctl(fd, TUNSETIFF, &ifr) != 0
+                &&
+                /* If it failed with EINVAL, try with the pre-2.4.5 value */
+                (errno != EINVAL || ioctl(fd, ('T' << 8) | 202, &ifr) != 0) )
+                {
+                  logmsg ("HHC853I %4.4X setting net device param failed: %s\n",
+                          dev->devnum, strerror(errno));
+                  ctcadpt_close_device(dev);
+                  return -1;
+                }
+	    strcpy(dev->netdevname, ifr.ifr_name);
+        } else
+#endif
+	  {
             /* Other OS: Simply use basename of the device */
             char *p = strrchr(dev->filename, '/');
             if (p)
@@ -1025,19 +995,19 @@ U32             stackcmd;               /* VSE IP stack command      */
 /* set to indicate the amount of the buffer which was not filled.    */
 /* Two slack bytes follow the packet in the I/O buffer.              */
 /*                                                                   */
-/* On a real CTC device, channel command retry is used to keep the   */
-/* read command active until a packet arrives.  This routine blocks  */
-/* until a packet is available, which achieves the same effect.      */
-/* Note that the operating system missing interrupt handler must     */
-/* be deactivated for the CTC device because the channel program     */
-/* could remain blocked on a read for an indefinite period of time.  */
+/* Command retry is supported (thanks to Jim Pierson) by means of    */
+/* setting a limit on how long we wait for the read to complete      */
+/* (via a call to 'select' with a timeout value specified). If the   */
+/* select times out, we return CE+DE+UC+SM and the "execute_ccw_     */
+/* _chain" function in channel.c should then backup and call us      */
+/* again for the same ccw, allowing us to retry the read (select).   */
 /*                                                                   */
 /* Input:                                                            */
 /*      dev     A pointer to the CTC adapter device block            */
 /*      count   The I/O buffer length from the write CCW             */
 /*      iobuf   The I/O buffer from the write CCW                    */
 /* Output:                                                           */
-/*      unitstat The CSW status (CE+DE or CE+DE+UC)                  */
+/*      unitstat The CSW status (CE+DE or CE+DE+UC or CE+DE+UC+SM)   */
 /*      residual The CSW residual byte count                         */
 /*      more    Set to 1 if packet data exceeds CCW count            */
 /*-------------------------------------------------------------------*/
@@ -1050,6 +1020,50 @@ int             blklen;                 /* Block length from buffer  */
 CTCI_SEGHDR    *seg;                    /* -> Segment in buffer      */
 int             seglen;                 /* Current segment length    */
 U16             num;                    /* Number of bytes returned  */
+fd_set          rfds;                   /* Read FD_SET               */
+int             retval;                 /* Return code from 'select' */
+static struct timeval tv;               /* Timeout time for 'select' */
+
+    /* Limit how long we should wait for data to come in */
+
+    FD_ZERO (&rfds);
+    FD_SET (dev->fd, &rfds); 
+
+    tv.tv_sec = CTC_READ_TIMEOUT_SECS;
+    tv.tv_usec = 0;
+
+    retval = select (dev->fd + 1, &rfds, NULL, NULL, &tv);
+
+    switch (retval) 
+    {
+        case 0:
+        {
+            *unitstat = CSW_CE | CSW_DE | CSW_UC | CSW_SM;
+            dev->sense[0] = 0;
+            return;
+            break;
+        }
+
+        case -1:
+        {
+            if(errno == EINTR)
+            {
+//              logmsg("read interrupted for ctc %4.4X\n",dev->devnum);
+                return;
+            }
+            logmsg ("HHC869I %4.4X Error reading from %s: %s\n",
+                dev->devnum, dev->filename, strerror(errno));
+            dev->sense[0] = SENSE_EC;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            return;
+            break;
+        }
+
+        default:
+        {
+            break;
+        }
+    }
 
     /* Read an IP packet from the TUN device */
     len = read (dev->fd, dev->buf, dev->bufsize);
@@ -1313,6 +1327,8 @@ int n;
                     /* -2 will cause an error status to be set */
                     return -2;
                 }
+                if( n == EINTR )
+                    return -3;
                 logmsg ("%4.4X: Error: read: %s\n",
                         dev->devnum, strerror(errno));
                 sleep(2);
@@ -1366,6 +1382,8 @@ int             lastlen = 2;            /* block length at last pckt */
     while (1) {
         c = bufgetc(dev, lastlen == 2);
         if (c < 0) {
+            if(c == -3)
+                return 0;
             /* End of input buffer.  Return what we have. */
 
             setblkheader (iobuf, lastlen);
@@ -1394,6 +1412,8 @@ int             lastlen = 2;            /* block length at last pckt */
         case SLIP_ESC:
             c = bufgetc(dev, lastlen == 2);
             if (c < 0) {
+                if(c == -3)
+                    return 0;
                 /* End of input buffer.  Return what we have. */
 
                 setblkheader (iobuf, lastlen);

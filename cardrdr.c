@@ -11,8 +11,8 @@
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
 /*-------------------------------------------------------------------*/
-#define CARD_SIZE       80
-#define HEX40           ((BYTE)0x40)
+#define CARD_SIZE        80
+#define HEX40            ((BYTE)0x40)
 
 /*-------------------------------------------------------------------*/
 /* Initialize the device handler                                     */
@@ -20,26 +20,23 @@
 int cardrdr_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 {
 int     i;                              /* Array subscript           */
-int	fc;				/* File counter		     */
+int     fc;                             /* File counter              */
 
-    /* The first argument is the file name */
-    if (argc > 0)
+    int sockdev = 0;
+
+    if (dev->bs)
     {
-        /* Check for valid file name */
-        if (strlen(argv[0]) > sizeof(dev->filename)-1)
+        if (!unbind_device(dev))
         {
-            logmsg ("HHC401I File name too long\n");
+            // (error message already issued)
             return -1;
         }
-
-        /* Save the file name in the device block */
-        strcpy (dev->filename, argv[0]);
     }
-    else
-        dev->filename[0] = '\0';
 
     /* Initialize device dependent fields */
+
     dev->fd = -1;
+    dev->fh = NULL;
     dev->multifile = 0;
     dev->rdreof = 0;
     dev->ebcdic = 0;
@@ -48,20 +45,41 @@ int	fc;				/* File counter		     */
     dev->cardpos = 0;
     dev->cardrem = 0;
     dev->autopad = 0;
+
     fc = 0;
 
-    dev->more_files = malloc(sizeof(char *) * (fc + 1));
+    if (dev->more_files) free (dev->more_files);
+
+    dev->more_files = malloc(sizeof(char*) * (fc + 1));
+
     if (!dev->more_files)
     {
         logmsg ("HHC403I Out of memory\n");
         return -1;
     }
+
     dev->more_files[fc] = NULL;
-    /* Process the driver arguments */
+
+    /* Process the driver arguments starting with the SECOND
+       argument. (The FIRST argument is the filename and is
+       checked later further below.) */
+
     for (i = 1; i < argc; i++)
     {
+        /* sockdev means the device file is actually
+           a connected socket instead of a disk file.
+           The file name is the socket_spec (host:port)
+           to listen for connections on. */
+
+        if (strcasecmp(argv[i], "sockdev") == 0)
+        {
+            sockdev = 1;
+            continue;
+        }
+
         /* multifile means to automatically open the next
            i/p file if multiple i/p files are defined.   */
+
         if (strcasecmp(argv[i], "multifile") == 0)
         {
             dev->multifile = 1;
@@ -70,6 +88,7 @@ int	fc;				/* File counter		     */
 
         /* eof means that unit exception will be returned at
            end of file, instead of intervention required */
+
         if (strcasecmp(argv[i], "eof") == 0)
         {
             dev->rdreof = 1;
@@ -79,6 +98,7 @@ int	fc;				/* File counter		     */
         /* ebcdic means that the card image file consists of
            fixed length 80-byte EBCDIC card images with no
            line-end delimiters */
+
         if (strcasecmp(argv[i], "ebcdic") == 0)
         {
             dev->ebcdic = 1;
@@ -88,6 +108,7 @@ int	fc;				/* File counter		     */
         /* ascii means that the card image file consists of
            variable length ASCII records delimited by either
            line-feed or carriage-return line-feed sequences */
+
         if (strcasecmp(argv[i], "ascii") == 0)
         {
             dev->ascii = 1;
@@ -100,46 +121,129 @@ int	fc;				/* File counter		     */
            is to present a data check if an overlength record
            is encountered.  The trunc option is ignored except
            when processing an ASCII card image file. */
+
         if (strcasecmp(argv[i], "trunc") == 0)
         {
             dev->trunc = 1;
             continue;
         }
 
-	/* autopad means that if reading fixed sized records
-	 * (ebcdic) and end of file is reached in the middle of
-	 * a record, the record is automatically padded to 80 bytes.
-	 */
+        /* autopad means that if reading fixed sized records
+         * (ebcdic) and end of file is reached in the middle of
+         * a record, the record is automatically padded to 80 bytes.
+         */
+
         if (strcasecmp(argv[i], "autopad") == 0)
         {
             dev->autopad = 1;
             continue;
         }
-	// add additional file arguments
-	dev->more_files[fc++] = strdup(argv[i]);
-        dev->more_files = realloc(dev->more_files, sizeof(char *) * (fc + 1));
+
+        // add additional file arguments
+
+        if (strlen(argv[i]) > sizeof(dev->filename)-1)
+        {
+            logmsg ("HHC401I File name too long (max=%d): \"%s\"\n",
+                sizeof(dev->filename)-1,argv[i]);
+            return -1;
+        }
+
+        if (access(argv[i], R_OK | F_OK) != 0)
+        {
+            logmsg ("HHC402I Unable to access file \"%s\": %s\n",
+                argv[i], strerror(errno));
+            return -1;
+        }
+
+        dev->more_files[fc++] = strdup(argv[i]);
+        dev->more_files = realloc(dev->more_files, sizeof(char*) * (fc + 1));
+
         if (!dev->more_files)
         {
             logmsg ("HHC403I Out of memory\n");
             return -1;
         }
+
         dev->more_files[fc] = NULL;
     }
-    dev->current_file = dev->more_files; 
+
+    dev->current_file = dev->more_files;
+
     /* Check for conflicting arguments */
+
     if (dev->ebcdic && dev->ascii)
     {
-        logmsg ("HHC403I Specify ASCII or EBCDIC but not both\n");
+        logmsg ("HHC403I Specify 'ascii' or 'ebcdic' (or neither) but not both\n");
         return -1;
     }
 
-    /* Set length of card image buffer */
+    if (sockdev)
+    {
+        if (fc)
+        {
+            logmsg ("HHC403I Only one filename (sock_spec) allowed for socket devices\n");
+            return -1;
+        }
+
+        // If neither ascii nor ebcdic is specified, default to ascii. This is required
+        // for socket devices because the open logic, if neither is specified, attempts
+        // to determine whether the data is actually ascii or ebcdic by reading the 1st
+        // 160 bytes of data and then rewinding to the beginning of the file afterwards.
+        // Since you can't "rewind" a socket, we must therefore default to one of them.
+
+        if (!dev->ebcdic && !dev->ascii)
+        {
+            logmsg ("HHC403I defaulting to 'ascii' for socket device %4.4X\n",dev->devnum);
+            dev->ascii = 1;
+        }
+    }
+
+    if (dev->multifile && !fc)
+    {
+        logmsg ("HHC403I 'multifile' option ignored\n");
+        dev->multifile = 0;
+    }
+
+    /* The first argument is the file name */
+
+    if (argc > 0)
+    {
+        /* Check for valid file name */
+
+        if (strlen(argv[0]) > sizeof(dev->filename)-1)
+        {
+            logmsg ("HHC401I File name too long (max=%d): \"%s\"\n",
+                sizeof(dev->filename)-1,argv[0]);
+            return -1;
+        }
+
+        if (!sockdev)
+        {
+            if (access(argv[0], R_OK | F_OK) != 0)
+            {
+                logmsg ("HHC402I Unable to access file \"%s\": %s\n",
+                    argv[0], strerror(errno));
+                return -1;
+            }
+        }
+
+        /* Save the file name in the device block */
+
+        strcpy (dev->filename, argv[0]);
+    }
+    else
+        dev->filename[0] = '\0';
+
+    /* Set size of i/o buffer */
+
     dev->bufsize = CARD_SIZE;
 
     /* Set number of sense bytes */
+
     dev->numsense = 1;
 
     /* Initialize the device identifier bytes */
+
     dev->devid[0] = 0xFF;
     dev->devid[1] = 0x28; /* Control unit type is 2821-1 */
     dev->devid[2] = 0x21;
@@ -149,8 +253,14 @@ int	fc;				/* File counter		     */
     dev->devid[6] = 0x01;
     dev->numdevid = 7;
 
-    /* Activate I/O tracing */
-//  dev->ccwtrace = 1;
+    // If socket device, create a listening socket
+    // to accept connections on.
+
+    if (sockdev && !bind_device(dev,dev->filename))
+    {
+        // (error message already issued)
+        return -1;
+    }
 
     return 0;
 } /* end function cardrdr_init_handler */
@@ -161,16 +271,17 @@ int	fc;				/* File counter		     */
 void cardrdr_query_device (DEVBLK *dev, BYTE **class,
                 int buflen, BYTE *buffer)
 {
-
     *class = "RDR";
-    snprintf (buffer, buflen, "%s%s%s%s%s%s%s",
-                dev->filename,
-                (dev->multifile ? " multifile" : ""),
-                (dev->ascii ? " ascii" : ""),
-                (dev->ebcdic ? " ebcdic" : ""),
-                (dev->autopad ? " autopad" : ""),
-                (dev->rdreof ? " eof" : ""),
-                ((dev->ascii && dev->trunc) ? " trunc" : ""));
+
+    snprintf (buffer, buflen, "%s%s%s%s%s%s%s%s",
+        dev->filename,
+        (dev->bs ?                    " sockdev"   : ""),
+        (dev->multifile ?             " multifile" : ""),
+        (dev->ascii ?                 " ascii"     : ""),
+        (dev->ebcdic ?                " ebcdic"    : ""),
+        (dev->autopad ?               " autopad"   : ""),
+        ((dev->ascii && dev->trunc) ? " trunc"     : ""),
+        (dev->rdreof ?                " eof"       : ""));
 
 } /* end function cardrdr_query_device */
 
@@ -180,8 +291,24 @@ void cardrdr_query_device (DEVBLK *dev, BYTE **class,
 int cardrdr_close_device ( DEVBLK *dev )
 {
     /* Close the device file */
-    close (dev->fd);
+
+    if (dev->fh && fclose(dev->fh) != 0)
+    {
+        logmsg ("HHC419E Close error on file \"%s\": %s\n",
+            dev->filename, strerror(errno));
+        dev->fd = -1;
+        dev->fh = NULL;
+        return -1;
+    }
+
+    if (dev->bs)
+    {
+        logmsg ("HHC420I %s (%s) disconnected from device %4.4X (%s)\n",
+            dev->bs->clientip, dev->bs->clientname, dev->devnum, dev->bs->spec);
+    }
+
     dev->fd = -1;
+    dev->fh = NULL;
 
     return 0;
 } /* end function cardrdr_close_device */
@@ -190,10 +317,12 @@ int cardrdr_close_device ( DEVBLK *dev )
 /*-------------------------------------------------------------------*/
 /* Clear the card reader                                             */
 /*-------------------------------------------------------------------*/
-static void clear_cardrdr ( DEVBLK *dev )
+static int clear_cardrdr ( DEVBLK *dev )
 {
     /* Close the card image file */
-    cardrdr_close_device (dev);
+    if (cardrdr_close_device(dev) != 0) return -1;
+
+    if (dev->bs) return 0;
 
     /* Clear the file name */
     dev->filename[0] = '\0';
@@ -202,8 +331,9 @@ static void clear_cardrdr ( DEVBLK *dev )
     if (dev->current_file && *(dev->current_file))
     {
         strcpy(dev->filename, *(dev->current_file++));
-    } else {
-
+    }
+    else
+    {
         /* Reset the device dependent flags */
         dev->multifile = 0;
         dev->ascii = 0;
@@ -212,6 +342,8 @@ static void clear_cardrdr ( DEVBLK *dev )
         dev->trunc = 0;
         dev->autopad = 0;
     }
+
+    return 0;
 } /* end function clear_cardrdr */
 
 
@@ -225,6 +357,68 @@ int     i;                              /* Array subscript           */
 int     len;                            /* Length of data            */
 BYTE    buf[160];                       /* Auto-detection buffer     */
 
+    *unitstat = 0;
+
+    // Socket device?
+
+    if (dev->bs)
+    {
+        // Intervention required if no one has connected yet
+
+        if (dev->fd == -1)
+        {
+            dev->sense[0] = SENSE_IR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            return -1;
+        }
+
+        if (!dev->fh)
+        {
+            /*  GNU 'C' Library documentation for "fdopen":
+
+                  "The opentype argument is interpreted in the same
+                   way as for the fopen function (see section Opening
+                   Streams), except that the 'b' option is not permitted;
+                   this is because GNU makes no distinction between text
+                   and binary files. [...] You must make sure that the
+                   opentype argument matches the actual mode of the open
+                   file descriptor."
+
+                GNU 'C' Library documentation for "fopen":
+
+                  "The character 'b' in opentype has a standard meaning;
+                   it requests a binary stream rather than a text stream.
+                   But this makes no difference in POSIX systems (including
+                   the GNU system). If both `+' and 'b' are specified,
+                   they can appear in either order. See section Text and
+                   Binary Streams."
+
+                GNU 'C' Library documentation for "Text and Binary Streams":
+
+                  "When you open a stream, you can specify either a text
+                   stream or a binary stream. You indicate that you want
+                   a binary stream by specifying the 'b' modifier in the
+                   opentype argument to fopen; see section Opening Streams.
+                   Without this option, fopen opens the file as a text stream."
+
+                Note that even though it clearly states (for fdopen) that the
+                'b' option "is NOT permitted", we are assuming such is not true
+                since it accepts it (but simply ignores it) for fopen. Further-
+                more, since Windows (Cygwin?) DOES make a distinction between
+                binary and text files, we should specify the 'b' option in our
+                call to fdopen. (It has already been verified that this is safe
+                to do on Linux systems, so to play it safe (i.e. to prevent any
+                potential problems on Windows systems), we always specify 'b'.)
+            */
+
+            dev->fh = fdopen(dev->fd, "rb");
+        }
+
+        ASSERT(dev->fd != -1 && dev->fh);
+
+        return 0;
+    }
+
     /* Intervention required if device has no file name */
     if (dev->filename[0] == '\0')
     {
@@ -232,7 +426,7 @@ BYTE    buf[160];                       /* Auto-detection buffer     */
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
         return -1;
     }
-    *unitstat=0;
+
     /* Open the device file */
 #ifdef WIN32
     rc = open (dev->filename, O_RDONLY | O_BINARY);
@@ -253,13 +447,16 @@ BYTE    buf[160];                       /* Auto-detection buffer     */
 
     /* Save the file descriptor in the device block */
     dev->fd = rc;
+    dev->fh = fdopen(dev->fd, "rb");    /* NOTE: see comments in
+                                           function "open_cardrdr"
+                                           regarding fdopen. */
 
     /* If neither EBCDIC nor ASCII was specified, attempt to
        detect the format by inspecting the first 160 bytes */
     if (dev->ebcdic == 0 && dev->ascii == 0)
     {
         /* Read first 160 bytes of file into the buffer */
-        len = read (dev->fd, buf, sizeof(buf));
+        len = fread(buf, 1, sizeof(buf), dev->fh);
         if (len < 0)
         {
             /* Handle read error condition */
@@ -267,8 +464,9 @@ BYTE    buf[160];                       /* Auto-detection buffer     */
                     dev->filename, strerror(errno));
 
             /* Close the file */
-            close (dev->fd);
+            fclose(dev->fh);
             dev->fd = -1;
+            dev->fh = NULL;
 
             /* Set unit check with equipment check */
             dev->sense[0] = SENSE_EC;
@@ -291,7 +489,7 @@ BYTE    buf[160];                       /* Auto-detection buffer     */
         } /* end for(i) */
 
         /* Rewind to start of file */
-        rc = lseek (dev->fd, 0, SEEK_SET);
+        rc = fseek (dev->fh, 0, SEEK_SET);
         if (rc < 0)
         {
             /* Handle seek error condition */
@@ -299,8 +497,9 @@ BYTE    buf[160];                       /* Auto-detection buffer     */
                     dev->filename, strerror(errno));
 
             /* Close the file */
-            close (dev->fd);
+            fclose (dev->fh);
             dev->fd = -1;
+            dev->fh = NULL;
 
             /* Set unit check with equipment check */
             dev->sense[0] = SENSE_EC;
@@ -310,9 +509,10 @@ BYTE    buf[160];                       /* Auto-detection buffer     */
 
     } /* end if(auto-detect) */
 
+    ASSERT(dev->fd != -1 && dev->fh);
+
     return 0;
 } /* end function open_cardrdr */
-
 
 /*-------------------------------------------------------------------*/
 /* Read an 80-byte EBCDIC card image into the device buffer          */
@@ -322,32 +522,38 @@ static int read_ebcdic ( DEVBLK *dev, BYTE *unitstat )
 int     rc;                             /* Return code               */
 
     /* Read 80 bytes of card image data into the device buffer */
-    rc = read (dev->fd, dev->buf, CARD_SIZE);
+    rc = fread(dev->buf, 1, CARD_SIZE, dev->fh);
 
     if ((rc > 0) && (rc < CARD_SIZE) && dev->autopad)
-	{
-        memset(&dev->buf[rc], 0, CARD_SIZE - rc);
-		rc = CARD_SIZE;
-    }
-
-    /* Handle end-of-file condition */
-    if (rc == 0)
     {
-        /* Return unit exception or intervention required */
-        if (dev->rdreof)
+        memset(&dev->buf[rc], 0, CARD_SIZE - rc);
+        rc = CARD_SIZE;
+    }
+    else if (feof(dev->fh)) /* End of file */
+    {
+
+      /* Return unit exception or intervention required */
+      if (dev->rdreof)
         {
-            *unitstat = CSW_CE | CSW_DE | CSW_UX;
+          *unitstat = CSW_CE | CSW_DE | CSW_UX;
         }
-        else
+      else
         {
-            dev->sense[0] = SENSE_IR;
-            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+          dev->sense[0] = SENSE_IR;
+          *unitstat = CSW_CE | CSW_DE | CSW_UC;
         }
 
-        /* Close the file and clear the file name and flags */
-        clear_cardrdr (dev);
+      /* Close the file and clear the file name and flags */
 
-        return -2;
+      if (clear_cardrdr(dev) != 0)
+        {
+          /* Set unit check with equipment check */
+          dev->sense[0] = SENSE_EC;
+          *unitstat = CSW_CE | CSW_DE | CSW_UC;
+          return -1;
+        }
+
+      return -2;
     }
 
     /* Handle read error condition */
@@ -355,7 +561,7 @@ int     rc;                             /* Return code               */
     {
         if (rc < 0)
             logmsg ("HHC407I Error reading file %s: %s\n",
-                    dev->filename, strerror(errno))
+                    dev->filename, strerror(errno));
         else
             logmsg ("HHC408I Unexpected end of file on %s\n",
                     dev->filename);
@@ -386,10 +592,11 @@ BYTE    c;                              /* Input character           */
     for (i = 0; ; )
     {
         /* Read next byte of card image */
-        rc = read (dev->fd, &c, 1);
+        rc = getc(dev->fh);
+        c = (BYTE)rc;
 
         /* Handle end-of-file condition */
-        if (rc == 0 || c == '\x1A')
+        if (rc == EOF || c == '\x1A')
         {
             /* End of record if there is any data in buffer */
             if (i > 0) break;
@@ -406,7 +613,13 @@ BYTE    c;                              /* Input character           */
             }
 
             /* Close the file and clear the file name and flags */
-            clear_cardrdr (dev);
+            if (clear_cardrdr(dev) != 0)
+            {
+                /* Set unit check with equipment check */
+                dev->sense[0] = SENSE_EC;
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                return -1;
+            }
 
             return -2;
         }
@@ -471,7 +684,7 @@ int     rc;                             /* Return code               */
 int     num;                            /* Number of bytes to move   */
 
     /* Open the device file if necessary */
-    if (dev->fd < 0 && !IS_CCW_SENSE(code))
+    if ((dev->fd < 0 || !dev->fh) && !IS_CCW_SENSE(code))
     {
         rc = open_cardrdr (dev, unitstat);
         if (rc) return;
@@ -490,21 +703,21 @@ int     num;                            /* Number of bytes to move   */
         /* Read next card if not data-chained from previous CCW */
         if ((chained & CCW_FLAGS_CD) == 0)
         {
-			for (;;)
-			{
-				/* Read ASCII or EBCDIC card image */
-				if (dev->ascii)
-					rc = read_ascii (dev, unitstat);
-				else
-					rc = read_ebcdic (dev, unitstat);
+            for (;;)
+            {
+                /* Read ASCII or EBCDIC card image */
+                if (dev->ascii)
+                        rc = read_ascii (dev, unitstat);
+                else
+                        rc = read_ebcdic (dev, unitstat);
 
-				if (0
-					|| rc != -2
-					|| !dev->multifile
-					|| open_cardrdr (dev, unitstat) != 0
-					)
-				break;
-			}
+                if (0
+                        || rc != -2
+                        || !dev->multifile
+                        || open_cardrdr (dev, unitstat) != 0
+                        )
+                break;
+            }
 
             /* Return error status if read was unsuccessful */
             if (rc) break;

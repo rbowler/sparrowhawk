@@ -11,12 +11,15 @@
 || ----------------------------------------------------------------------------
 */
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
 #include <stdlib.h>
 #include <limits.h>
-#include <getopt.h>
 
 #include "hetlib.h"
 #include "sllib.h"
@@ -265,8 +268,7 @@ main( int argc, char *argv[] )
     d_hetb = NULL;
 
     /* Display the program identification message */
-    display_version (stderr, "Hercules HET copy/update program ",
-                     MSTRING(VERSION), __DATE__, __TIME__);
+    display_version (stderr, "Hercules HET copy/update program ");
 
 #ifdef EXTERNALGUI
     if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)

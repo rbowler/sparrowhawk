@@ -50,7 +50,7 @@ void ARCH_DEP(store_psw) (REGS *regs, BYTE *addr)
                     | (regs->psw.cc << 4)
                     | (regs->psw.fomask << 3) | (regs->psw.domask << 2)
                     | (regs->psw.eumask << 1) | regs->psw.sgmask;
-        addr[3] = 0;
+        addr[3] = regs->psw.zerobyte;
         STORE_FW(addr + 4,regs->psw.IA); addr[4] |= regs->psw.amode << 7;
 #endif /*!defined(FEATURE_ESAME)*/
 #if defined(FEATURE_BCMODE)
@@ -81,9 +81,20 @@ void ARCH_DEP(store_psw) (REGS *regs, BYTE *addr)
 /*-------------------------------------------------------------------*/
 int ARCH_DEP(load_psw) (REGS *regs, BYTE *addr)
 {
-    INVALIDATE_AIA(regs);
+#if defined(OPTION_REDUCED_INVAL)
+int     realmode;
+int     space;
+int     armode;
+#endif
 
+    INVALIDATE_AIA(regs);
+#if defined(OPTION_REDUCED_INVAL)
+    realmode = REAL_MODE(&regs->psw);
+    armode = (regs->psw.armode == 1);
+    space = (regs->psw.space == 1);
+#else
     INVALIDATE_AEA_ALL(regs);
+#endif
 
     regs->psw.sysmask = addr[0];
     regs->psw.pkey = addr[1] & 0xF0;
@@ -95,6 +106,8 @@ int ARCH_DEP(load_psw) (REGS *regs, BYTE *addr)
     SET_IC_EXTERNAL_MASK(regs);
     SET_IC_MCK_MASK(regs);
     SET_IC_PSW_WAIT(regs);
+
+    regs->psw.zerobyte = addr[3];
 
 #if defined(FEATURE_BCMODE)
     if ( regs->psw.ecmode ) {
@@ -116,6 +129,12 @@ int ARCH_DEP(load_psw) (REGS *regs, BYTE *addr)
         regs->psw.amode = (addr[4] & 0x80) >> 7;
         regs->psw.AMASK = regs->psw.amode ? AMASK31 : AMASK24;
 
+#if defined(OPTION_REDUCED_INVAL)
+        if ((realmode  != REAL_MODE(&regs->psw)) ||
+            (armode    != (regs->psw.armode == 1)) ||
+            (space     != (regs->psw.space == 1)))
+            INVALIDATE_AEA_ALL(regs);
+#endif
 #if defined(FEATURE_ESAME)
         FETCH_DW(regs->psw.IA, addr + 8);
         regs->psw.amode64 = (addr[3] & 0x01);
@@ -207,6 +226,12 @@ int ARCH_DEP(load_psw) (REGS *regs, BYTE *addr)
         regs->psw.sgmask = addr[4] & 0x01;
         regs->psw.amode = 0;
         regs->psw.AMASK = AMASK24;
+#if defined(OPTION_REDUCED_INVAL)
+        if ((realmode  != REAL_MODE(&regs->psw)) ||
+            (armode    != (regs->psw.armode == 1)) ||
+            (space     != (regs->psw.space == 1)))
+            INVALIDATE_AEA_ALL(regs);
+#endif
         FETCH_FW(regs->psw.IA, addr + 4);
         regs->psw.IA &= 0x00FFFFFF;
     }
@@ -352,6 +377,7 @@ static char *pgmintname[] = {
 #endif /*defined(SIE_DEBUG)*/
         realregs->guestregs->TEA = realregs->TEA;
         realregs->guestregs->excarid = realregs->excarid;
+        realregs->guestregs->opndrid = realregs->opndrid;
         (realregs->guestregs->sie_guestpi) (realregs->guestregs, code);
     }
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
@@ -407,8 +433,8 @@ static char *pgmintname[] = {
       || code == PGM_SPECIFICATION_EXCEPTION
       || code == PGM_TRANSLATION_SPECIFICATION_EXCEPTION ))
     {
-            realregs->psw.ilc = (realregs->inst[0] < 0x40) ? 2 :
-                                (realregs->inst[0] < 0xC0) ? 4 : 6;
+            realregs->psw.ilc = (realregs->ip[0] < 0x40) ? 2 :
+                                (realregs->ip[0] < 0xC0) ? 4 : 6;
             realregs->psw.IA += realregs->psw.ilc;
             realregs->psw.IA &= ADDRESS_MAXWRAP(realregs);
     }
@@ -439,7 +465,7 @@ static char *pgmintname[] = {
         logmsg ("CPU%4.4X: %s CODE=%4.4X ILC=%d\n", realregs->cpuad,
                 pgmintname[ (code - 1) & 0x3F], code, realregs->psw.ilc);
         ARCH_DEP(display_inst) (realregs, realregs->instvalid ?
-                                                realregs->inst : NULL);
+                                                realregs->ip : NULL);
     }
 
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
@@ -540,6 +566,7 @@ static char *pgmintname[] = {
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
            )
             psa->excarid = regs->excarid;
+            psa->opndrid = regs->opndrid;
 
 #if defined(FEATURE_ESAME)
         /* Store the translation exception address at PSA+168 */
@@ -841,16 +868,21 @@ static void (* run_cpu[GEN_MAXARCH]) (REGS *regs) =
 
 void *cpu_thread (REGS *regs)
 {
-#define CPU_PRIORITY    15              /* CPU thread priority       */
-
 #ifndef WIN32
-    /* Set CPU thread priority */
-    if (setpriority(PRIO_PROCESS, 0, CPU_PRIORITY))
-        logmsg ("HHC621I CPU thread set priority failed: %s\n",
-                strerror(errno));
 
+    /* Set root mode in order to set priority */
+    SETMODE(ROOT);
+    
+    /* Set CPU thread priority */
+    if (setpriority(PRIO_PROCESS, 0, sysblk.cpuprio))
+        logmsg ("HHC621I CPU thread set priority %d failed: %s\n",
+                sysblk.cpuprio, strerror(errno));
+
+    /* Back to user mode */
+    SETMODE(USER);
+    
     /* Display thread started message on control panel */
-    logmsg ("HHC620I CPU%4.4X thread started: tid=%8.8lX, pid=%d, "
+    logmsg ("HHC620I CPU%4.4X thread started: tid="TIDPAT", pid=%d, "
             "priority=%d\n",
             regs->cpuad, thread_id(), getpid(),
             getpriority(PRIO_PROCESS,0));
@@ -878,10 +910,7 @@ void *cpu_thread (REGS *regs)
         return NULL;
     }
     sysblk.numcpu++;
-#if MAX_CPU_ENGINES > 1
-    if (sysblk.brdcstncpu != 0)
-        sysblk.brdcstncpu++;
-#endif /*MAX_CPU_ENGINES > 1*/
+    initdone = 1;  /* now safe for panel_display function to proceed */
 
     /* Perform initial cpu reset */
     initial_cpu_reset (regs);
@@ -907,7 +936,7 @@ void *cpu_thread (REGS *regs)
     initial_cpu_reset (regs);
 
     /* Display thread ended message on control panel */
-    logmsg ("HHC624I CPU%4.4X thread ended: tid=%8.8lX, pid=%d\n",
+    logmsg ("HHC624I CPU%4.4X thread ended: tid="TIDPAT", pid=%d\n",
             regs->cpuad, thread_id(), getpid());
 
     /* Thread exit */
@@ -937,7 +966,7 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
 		{
 	            logmsg("CPU MASK MISMATCH: %8.8X - %8.8X. Last instruction:\n",
 		       prevmask, regs->ints_mask);
-		       ARCH_DEP(display_inst) (regs, regs->inst);
+		       ARCH_DEP(display_inst) (regs, regs->ip);
 		}
 	    }
 
@@ -946,8 +975,8 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
                synchronize_broadcast() must be called until there are
                no more broadcast pending because synchronize_broadcast()
                releases and reacquires the mainlock. */
-            while (sysblk.brdcstncpu != 0)
-                ARCH_DEP(synchronize_broadcast)(regs);
+            while (IS_IC_BROADCAST(regs))
+                ARCH_DEP(synchronize_broadcast)(regs, 0, 0);
 #endif /*MAX_CPU_ENGINES > 1*/
 
             /* Take interrupts if CPU is not stopped */
@@ -980,6 +1009,10 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
                     PERFORM_CHKPT_SYNC (regs);
                     ARCH_DEP (perform_io_interrupt) (regs);
                 }
+#if MAX_CPU_ENGINES > 1
+                else if (IS_IC_IOPENDING)
+                    WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
+#endif
 
             } /*if(cpustate == CPU_STARTED)*/
 
@@ -988,6 +1021,7 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
             {
                 /* Change CPU status to stopped */
                 regs->cpustate = CPUSTATE_STOPPED;
+                sysblk.started_mask &= ~regs->cpumask;
 
                 if (!regs->cpuonline)
                 {
@@ -1057,6 +1091,7 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
                 PERFORM_SERIALIZATION (regs);
                 PERFORM_CHKPT_SYNC (regs);
                 OFF_IC_RESTART(regs);
+                sysblk.started_mask |= regs->cpumask;
                 ARCH_DEP(restart_interrupt) (regs);
             } /* end if(restart) */
 
@@ -1064,10 +1099,27 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
             if (regs->cpustate == CPUSTATE_STOPPED)
             {
                 /* Wait until there is work to do */
+                sysblk.waitmask |= regs->cpumask;
+                sysblk.started_mask &= ~regs->cpumask;
+#ifdef EXTERNALGUI
+                if (extgui && regs == (sysblk.regs + sysblk.pcpu))
+                    logmsg("MAN=1\n");
+#endif /*EXTERNALGUI*/
                 while (regs->cpustate == CPUSTATE_STOPPED)
                 {
-                    wait_condition (&sysblk.intcond, &sysblk.intlock);
+                    wait_condition (&INTCOND, &sysblk.intlock);
                 }
+#ifdef EXTERNALGUI
+                if (extgui && regs == (sysblk.regs + sysblk.pcpu))
+                    logmsg("MAN=0\n");
+#endif /*EXTERNALGUI*/
+                sysblk.started_mask |= regs->cpumask;
+                sysblk.waitmask &= ~regs->cpumask;
+                /* Purge the lookaside buffers */
+                ARCH_DEP(purge_tlb) (regs);
+#if defined(FEATURE_ACCESS_REGISTERS)
+                ARCH_DEP(purge_alb) (regs);
+#endif /*defined(FEATURE_ACCESS_REGISTERS)*/
                 release_lock (&sysblk.intlock);
                 /* If the architecture mode has changed we must adapt */
                 if(sysblk.arch_mode != regs->arch_mode)
@@ -1078,6 +1130,7 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
             /* Test for wait state */
             if (regs->psw.wait)
             {
+
                 /* Test for disabled wait PSW and issue message */
                 if( IS_IC_DISABLED_WAIT_PSW(regs) )
                 {
@@ -1096,7 +1149,9 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
                 INVALIDATE_AEA_ALL(regs);
 
                 /* Wait for I/O, external or restart interrupt */
-                wait_condition (&sysblk.intcond, &sysblk.intlock);
+                sysblk.waitmask |= regs->cpumask;
+                wait_condition (&INTCOND, &sysblk.intlock);
+                sysblk.waitmask &= ~regs->cpumask;
                 release_lock (&sysblk.intlock);
                 longjmp(regs->progjmp, SIE_NO_INTERCEPT);
             } /* end if(wait) */
@@ -1109,6 +1164,7 @@ void ARCH_DEP(process_trace)(REGS *regs, int tracethis, int stepthis)
 {
 int     shouldbreak;                    /* 1=Stop at breakpoint      */
 
+
             /* Test for breakpoint */
             shouldbreak = sysblk.instbreak
                             && (regs->psw.IA == sysblk.breakaddr);
@@ -1117,7 +1173,7 @@ int     shouldbreak;                    /* 1=Stop at breakpoint      */
             if (sysblk.insttrace || sysblk.inststep || shouldbreak
                 || tracethis || stepthis)
             {
-                ARCH_DEP(display_inst) (regs, regs->inst);
+                ARCH_DEP(display_inst) (regs, regs->ip);
                 if (sysblk.inststep || stepthis || shouldbreak)
                 {
                     /* Put CPU into stopped state */
@@ -1126,17 +1182,195 @@ int     shouldbreak;                    /* 1=Stop at breakpoint      */
     
                     /* Wait for start command from panel */
                     obtain_lock (&sysblk.intlock);
+                    sysblk.waitmask |= regs->cpumask;
+#ifdef EXTERNALGUI
+                    if (extgui && regs == (sysblk.regs + sysblk.pcpu))
+                        logmsg("MAN=1\n");
+#endif /*EXTERNALGUI*/
                     while (regs->cpustate == CPUSTATE_STOPPED)
-                        wait_condition (&sysblk.intcond, &sysblk.intlock);
+                    {
+                        wait_condition (&INTCOND, &sysblk.intlock);
+                    }
+#ifdef EXTERNALGUI
+                    if (extgui && regs == (sysblk.regs + sysblk.pcpu))
+                        logmsg("MAN=0\n");
+#endif /*EXTERNALGUI*/
+                    sysblk.waitmask &= ~regs->cpumask;
                     release_lock (&sysblk.intlock);
                 }
             }
 }
 
+
+#ifdef OPTION_FAST_INSTFETCH
+#define FAST_INSTRUCTION_FETCH(_dest, _addr, _regs, _pe, _if, _se) \
+        { \
+            if ( regs->VI == ((_addr) & PAGEFRAME_PAGEMASK) \
+               && ((_addr) <= (_pe))) \
+            { \
+                if ((_addr) & 0x01) \
+                    goto _se; \
+                (_dest) =  sysblk.mainstor + regs->AI + \
+                         ((_addr) & PAGEFRAME_BYTEMASK); \
+            } \
+            else \
+                goto _if; \
+        } 
+
+#if !defined(OPTION_FOOTPRINT_BUFFER)
+#define FAST_EXECUTE_INSTRUCTION(_inst, _execflag, _regs) \
+        { \
+        COUNT_INST ((_inst), (_regs)); \
+        (_regs)->ip = (_inst); \
+        (opcode_table[_inst[0]][ARCH_MODE]) \
+                               ((_inst), 0, (_regs)); \
+        }
+#else
+#define FAST_EXECUTE_INSTRUCTION(_inst, _execflag, _regs) \
+do { \
+    sysblk.footprregs[(_regs)->cpuad][sysblk.footprptr[(_regs)->cpuad]] = *(_regs); \
+    memcpy(&sysblk.footprregs[(_regs)->cpuad][sysblk.footprptr[(_regs)->cpuad]++].inst,(_inst),6); \
+    sysblk.footprptr[(_regs)->cpuad] &= OPTION_FOOTPRINT_BUFFER - 1; \
+    COUNT_INST((_inst), (_regs)); \
+    (_regs)->ip = (_inst); \
+    opcode_table[((_inst)[0])][ARCH_MODE]((_inst), 0, (_regs)); \
+} while(0)
+
+#endif
+
+#define FAST_IFETCH(_regs, _pe, _ip, _if, _ex) \
+    { \
+_if: \
+    regs->instvalid = 0; \
+    (_ip) = regs->inst; \
+    (_regs)->ip = (_ip); \
+    ARCH_DEP(instfetch) (regs->inst, regs->psw.IA, regs);  \
+    (regs)->instvalid = 1; \
+    (_pe) = (regs->psw.IA & ~0x7FF) + (0x800 - 6); \
+    goto _ex; \
+    }
+
+#define FAST_UNROLLED_EXECUTE(_regs, _pe, _ip, _if, _ex, _se) \
+        { \
+            FAST_INSTRUCTION_FETCH((_ip), (_regs)->psw.IA, (_regs), \
+                                 (_pe), _if, _se); \
+         _ex: \
+            FAST_EXECUTE_INSTRUCTION((_ip), 0, (_regs)); \
+        }
+
 void ARCH_DEP(run_cpu) (REGS *regs)
 {
 int     tracethis;                      /* Trace this instruction    */
 int     stepthis;                       /* Stop on this instruction  */
+VADR    pageend;
+BYTE    *ip;
+
+    /* Set started bit on and wait bit off for this CPU */
+    obtain_lock (&sysblk.intlock);
+    sysblk.started_mask |= regs->cpumask;
+    sysblk.waitmask &= ~regs->cpumask;
+    release_lock (&sysblk.intlock);
+
+    /* Establish longjmp destination for program check */
+    setjmp(regs->progjmp);
+
+    /* Reset instruction trace indicators */
+    tracethis = 0;
+    stepthis = 0;
+    pageend = 0;
+    ip = regs->inst;
+    regs->ip = ip;
+
+    while (1)
+    {
+        /* Test for interrupts if it appears that one may be pending */
+        if( IC_INTERRUPT_CPU(regs) )
+        {
+            ARCH_DEP(process_interrupt)(regs);
+            if (!regs->cpuonline)
+                 return;
+        }
+
+        /* Fetch the next sequential instruction */
+        FAST_INSTRUCTION_FETCH(ip, regs->psw.IA, regs, pageend,
+                            ifetch0, specexception);
+exec0:
+
+
+#ifndef OPTION_CPU_UNROLL
+        /* Count instruction usage */
+        regs->instcount++;
+#endif
+
+        if( IS_IC_TRACE )
+        {
+            regs->ip = ip;
+            ARCH_DEP(process_trace)(regs, tracethis, stepthis);
+
+    
+            /* Reset instruction trace indicators */
+            tracethis = 0;
+            stepthis = 0;
+#ifdef OPTION_CPU_UNROLL
+            regs->instcount++;
+            FAST_EXECUTE_INSTRUCTION (ip, 0, regs);
+            longjmp(regs->progjmp, SIE_NO_INTERCEPT);
+#endif
+        }
+
+        /* Execute the instruction */
+#ifdef OPTION_CPU_UNROLL
+        regs->instcount += 8;
+#else
+        regs->instcount++;
+#endif
+        FAST_EXECUTE_INSTRUCTION (ip, 0, regs);
+
+#ifdef OPTION_CPU_UNROLL
+        FAST_UNROLLED_EXECUTE(regs, pageend, ip, 
+                           ifetch1, exec1, specexception);
+        FAST_UNROLLED_EXECUTE(regs, pageend, ip, 
+                           ifetch2, exec2, specexception);
+        FAST_UNROLLED_EXECUTE(regs, pageend, ip, 
+                           ifetch3, exec3, specexception);
+        FAST_UNROLLED_EXECUTE(regs, pageend, ip, 
+                           ifetch4, exec4, specexception);
+        FAST_UNROLLED_EXECUTE(regs, pageend, ip, 
+                           ifetch5, exec5, specexception);
+        FAST_UNROLLED_EXECUTE(regs, pageend, ip, 
+                           ifetch6, exec6, specexception);
+        FAST_UNROLLED_EXECUTE(regs, pageend, ip, 
+                           ifetch7, exec7, specexception);
+#endif
+
+    }
+
+FAST_IFETCH(regs, pageend, ip, ifetch0, exec0);
+FAST_IFETCH(regs, pageend, ip, ifetch1, exec1);
+FAST_IFETCH(regs, pageend, ip, ifetch2, exec2);
+FAST_IFETCH(regs, pageend, ip, ifetch3, exec3);
+FAST_IFETCH(regs, pageend, ip, ifetch4, exec4);
+FAST_IFETCH(regs, pageend, ip, ifetch5, exec5);
+FAST_IFETCH(regs, pageend, ip, ifetch6, exec6);
+FAST_IFETCH(regs, pageend, ip, ifetch7, exec7);
+
+specexception:
+    regs->ip = ip;
+    regs->instvalid = 0;
+    ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION); 
+
+} /* end function cpu_thread */
+#else
+void ARCH_DEP(run_cpu) (REGS *regs)
+{
+int     tracethis;                      /* Trace this instruction    */
+int     stepthis;                       /* Stop on this instruction  */
+
+    /* Set started bit on and wait bit off for this CPU */
+    obtain_lock (&sysblk.intlock);
+    sysblk.started_mask |= regs->cpumask;
+    sysblk.waitmask &= ~regs->cpumask;
+    release_lock (&sysblk.intlock);
 
     /* Establish longjmp destination for program check */
     setjmp(regs->progjmp);
@@ -1147,18 +1381,6 @@ int     stepthis;                       /* Stop on this instruction  */
 
     while (1)
     {
-#if 0
-        U32 oldmask = regs->ints_mask;
-	    SET_IC_EXTERNAL_MASK(regs);
-	    SET_IC_IO_MASK(regs);
-	    SET_IC_MCK_MASK(regs);
-            if( oldmask != regs->ints_mask)
-            {
-                logmsg("Interrupt mask error oldmask=%8.8x, newmask=%8.8x\n",
-                  oldmask,regs->ints_mask);
-                ARCH_DEP(display_inst) (regs, regs->instvalid ? regs->inst : NULL);
-            }
-#endif
         
         /* Test for interrupts if it appears that one may be pending */
         if( IC_INTERRUPT_CPU(regs) )
@@ -1193,13 +1415,18 @@ int     stepthis;                       /* Stop on this instruction  */
             stepthis = 0;
 #ifdef OPTION_CPU_UNROLL
             regs->instcount++;
-            EXECUTE_INSTRUCTION (regs->inst, 0, regs);
+            EXECUTE_INSTRUCTION (regs->ip, 0, regs);
             longjmp(regs->progjmp, SIE_NO_INTERCEPT);
 #endif
         }
 
         /* Execute the instruction */
-        EXECUTE_INSTRUCTION (regs->inst, 0, regs);
+#ifdef OPTION_CPU_UNROLL
+        regs->instcount += 8;
+#else
+        regs->instcount++;
+#endif
+        EXECUTE_INSTRUCTION (regs->ip, 0, regs);
 
 #ifdef OPTION_CPU_UNROLL
         UNROLLED_EXECUTE(regs);
@@ -1209,12 +1436,11 @@ int     stepthis;                       /* Stop on this instruction  */
         UNROLLED_EXECUTE(regs);
         UNROLLED_EXECUTE(regs);
         UNROLLED_EXECUTE(regs);
-
-        regs->instcount += 8;
 #endif
 
     }
 } /* end function cpu_thread */
+#endif
 
 
 #if !defined(_GEN_ARCH)

@@ -21,8 +21,7 @@
 /*      ESAME ASN authorization and ALET translation - Roger Bowler  */
 /*-------------------------------------------------------------------*/
 
-
-#if !defined(OPTION_NO_INLINE_DAT) || defined(_DAT_C)
+#if !defined(OPTION_NO_INLINE_DAT) || defined(_DAT_C) 
 #if defined(FEATURE_DUAL_ADDRESS_SPACE)
 /*-------------------------------------------------------------------*/
 /* Translate ASN to produce address-space control parameters         */
@@ -952,13 +951,13 @@ TLBE   *tlbp;                           /* -> TLB entry              */
         stl = std & STD_STL;
         sto += (vaddr & 0x7FF00000) >> 18;
 
-        /* Generate addressing exception if outside real storage */
-        if (sto >= regs->mainsize)
-            goto address_excp;
-
         /* Check that virtual address is within the segment table */
         if ((vaddr >> 24) > stl)
             goto seg_tran_length;
+
+        /* Generate addressing exception if outside real storage */
+        if (sto >= regs->mainsize)
+            goto address_excp;
 
         /* Fetch segment table entry from real storage.  All bytes
            must be fetched concurrently as observed by other CPUs */
@@ -987,13 +986,13 @@ TLBE   *tlbp;                           /* -> TLB entry              */
         /* Calculate the real address of the page table entry */
         pto += (vaddr & 0x000FF000) >> 10;
 
-        /* Generate addressing exception if outside real storage */
-        if (pto >= regs->mainsize)
-            goto address_excp;
-
         /* Check that the virtual address is within the page table */
         if (((vaddr & 0x000FF000) >> 16) > ptl)
             goto page_tran_length;
+
+        /* Generate addressing exception if outside real storage */
+        if (pto >= regs->mainsize)
+            goto address_excp;
 
         /* Fetch the page table entry from real storage.  All bytes
            must be fetched concurrently as observed by other CPUs */
@@ -1560,9 +1559,6 @@ _DAT_C_STATIC void ARCH_DEP(purge_tlb) (REGS *regs)
 _DAT_C_STATIC void ARCH_DEP(invalidate_pte) (BYTE ibyte, int r1,
                                                     int r2, REGS *regs)
 {
-#if MAX_CPU_ENGINES == 1 || defined(_FEATURE_SIE)
-int     i;                              /* Array subscript           */
-#endif /*MAX_CPU_ENGINES == 1 || defined(_FEATURE_SIE)*/
 RADR    raddr;                          /* Addr of page table entry  */
 RADR    pte;
 
@@ -1660,29 +1656,16 @@ RADR    pte;
     }
 #endif /*defined(FEATURE_ESAME)*/
 
+    /* Release mainlock before calling synchronize broadcast */
+    RELEASE_MAINLOCK(regs);
 
-/* Invalidation takes place by means of broadcast if maxcpuengines > 1
-   This happens in the IPTE instruction routine, unless this is 
-   a single engine guest under SIE */
-#if MAX_CPU_ENGINES == 1 || defined(_FEATURE_SIE)
-#if MAX_CPU_ENGINES > 1
-    if(regs->sie_state && !regs->sie_scao)
-#endif /*MAX_CPU_ENGINES > 1*/
-        /* Clear the TLB of any entries with matching PFRA */
-        for (i = 0; i < (sizeof(regs->tlb)/sizeof(TLBE)); i++)
-        {
-            if ((regs->tlb[i].TLB_PTE & PAGETAB_PFRA) == (pte & PAGETAB_PFRA)
-                && regs->tlb[i].valid)
-            {
-                regs->tlb[i].valid = 0;
-// /*debug*/logmsg ("dat: TLB entry %d invalidated\n", i); /*debug*/
-            }
-        } /* end for(i) */
-#endif /*MAX_CPU_ENGINES == 1 || defined(_FEATURE_SIE)*/
+    /* Invalidate TLB entries */
+    ARCH_DEP(synchronize_broadcast)(regs, BROADCAST_ITLB, pte & PAGETAB_PFRA);
 
 } /* end function invalidate_pte */
 
-
+#endif /*!defined(OPTION_NO_INLINE_DAT) || defined(_DAT_C) */
+#if !defined(OPTION_NO_INLINE_LOGICAL) || defined(_DAT_C) 
 /*-------------------------------------------------------------------*/
 /* Convert logical address to absolute address and check protection  */
 /*                                                                   */
@@ -1712,7 +1695,8 @@ RADR    pte;
 /*      or translation exception then a program check is generated   */
 /*      and the function does not return.                            */
 /*-------------------------------------------------------------------*/
-_DAT_C_STATIC RADR ARCH_DEP(logical_to_abs) (VADR addr, int arn,
+#if !defined(OPTION_FAST_LOGICAL)
+_LOGICAL_C_STATIC RADR ARCH_DEP(logical_to_abs) (VADR addr, int arn,
                                     REGS *regs, int acctype, BYTE akey)
 {
 RADR    raddr;                          /* Real address              */
@@ -1746,8 +1730,18 @@ U16     xcode;                          /* Exception code            */
             goto vabs_prog_check;
     }
 
+    if (protect && ((acctype == ACCTYPE_WRITE) || (acctype == ACCTYPE_WRITE_SKP)))
+        goto vabs_prot_excp;
+
     /* Convert real address to absolute address */
+#if defined(OPTION_FAST_PREFIX)
+    if (regs->PX)
+        aaddr = APPLY_PREFIXING (raddr, regs->PX);
+    else
+        aaddr = raddr;
+#else
     aaddr = APPLY_PREFIXING (raddr, regs->PX);
+#endif
 
     /* Program check if absolute address is outside main storage */
     if (aaddr >= regs->mainsize)
@@ -1807,6 +1801,15 @@ U16     xcode;                          /* Exception code            */
         /* Set the reference and change bits in the storage key */
         STORAGE_KEY(aaddr) |= (STORKEY_REF | STORKEY_CHANGE);
         break;
+
+    case ACCTYPE_WRITE_SKP:
+        /* Program check if store protected location */
+        if (ARCH_DEP(is_store_protected) (addr, STORAGE_KEY(aaddr), akey,
+                                private, protect, regs))
+            goto vabs_prot_excp;
+
+        break;
+
     } /* end switch */
 
 #if defined(FEATURE_INTERVAL_TIMER)
@@ -1868,7 +1871,7 @@ vabs_addr_excp:
 vabs_prot_excp:
 #ifdef FEATURE_SUPPRESSION_ON_PROTECTION
     regs->TEA = addr & STORAGE_KEY_PAGEMASK;
-    if (protect && acctype == ACCTYPE_WRITE)
+    if (protect && ((acctype == ACCTYPE_WRITE) || (acctype == ACCTYPE_WRITE_SKP)))
     {
         regs->TEA |= TEA_PROT_AP;
   #if defined(FEATURE_ESAME)
@@ -1887,7 +1890,180 @@ vabs_prog_check:
     return -1; /* prevent warning from compiler */
 } /* end function logical_to_abs */
 
+#else /* defined(OPTION_FAST_LOGICAL) */
 
-#endif /*!defined(OPTION_NO_INLINE_DAT) || defined(_DAT_C)*/
+_LOGICAL_C_STATIC RADR ARCH_DEP(logical_to_abs) (VADR addr, int arn,
+                                    REGS *regs, int acctype, BYTE akey)
+{
+RADR    raddr;                          /* Real address              */
+RADR    aaddr;                          /* Absolute address          */
+int     private = 0;                    /* 1=Private address space   */
+int     protect = 0;                    /* 1=Page prot, 2=ALE prot   */
+int     stid = 0;                       /* Address space indication  */
+U16     xcode;                          /* Exception code            */
+#if defined(OPTION_AEA_BUFFER)
+int     aeind;
+#endif
+
+    /* Convert logical address to real address */
+    if ((REAL_MODE(&regs->psw) || arn == USE_REAL_ADDR)
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+      /* Under SIE guest real is always host primary, regardless
+         of the DAT mode */
+      && !(regs->sie_active
+#if !defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+                            && arn == USE_PRIMARY_SPACE
+#endif /*defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+                                                        )
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+      )
+        raddr = addr;
+    else {
+        if (ARCH_DEP(translate_addr) (addr, arn, regs, acctype, &raddr,
+                        &xcode, &private, &protect, &stid))
+            goto vabs_prog_check;
+    }
+
+    if (protect && ((acctype == ACCTYPE_WRITE) || (acctype == ACCTYPE_WRITE_SKP)))
+        goto vabs_prot_excp;
+
+    /* Convert real address to absolute address */
+#if defined(OPTION_FAST_PREFIX)
+    if (regs->PX)
+        aaddr = APPLY_PREFIXING (raddr, regs->PX);
+    else
+        aaddr = raddr;
+#else
+    aaddr = APPLY_PREFIXING (raddr, regs->PX);
+#endif
+
+    /* Program check if absolute address is outside main storage */
+    if (aaddr >= regs->mainsize)
+        goto vabs_addr_excp;
+
+#if defined(_FEATURE_SIE)
+    if(regs->sie_state  && !regs->sie_pref)
+    {
+    U32 sie_stid;
+    U16 sie_xcode;
+    int sie_private;
+
+#if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+        if (SIE_TRANSLATE_ADDR (regs->sie_mso + aaddr,
+              ((regs->siebk->mx & SIE_MX_XC) && regs->psw.armode && arn > 0) ?
+                arn :
+                USE_PRIMARY_SPACE,
+                regs->hostregs, ACCTYPE_SIE, &aaddr, &sie_xcode,
+                &sie_private, &protect, &sie_stid))
+#else /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+        if (SIE_TRANSLATE_ADDR (regs->sie_mso + aaddr,
+                USE_PRIMARY_SPACE,
+                regs->hostregs, ACCTYPE_SIE, &aaddr, &sie_xcode,
+                &sie_private, &protect, &sie_stid))
+#endif /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+            (regs->sie_hostpi) (regs->hostregs, sie_xcode);
+
+        /* Convert host real address to host absolute address */
+        aaddr = APPLY_PREFIXING (aaddr, regs->hostregs->PX);
+    }
+
+    /* Do not apply host key access when SIE fetches/stores data */
+    if(regs->sie_active)
+        akey = 0;
+#endif /*defined(_FEATURE_SIE)*/
+
+    /* Check protection and set reference and change bits */
+    switch (acctype) {
+
+    case ACCTYPE_READ:
+    case ACCTYPE_INSTFETCH:
+        /* Program check if fetch protected location */
+        if (ARCH_DEP(is_fetch_protected) (addr, STORAGE_KEY(aaddr), akey,
+                                private, regs))
+            goto vabs_prot_excp;
+
+        /* Set the reference bit in the storage key */
+        STORAGE_KEY(aaddr) |= STORKEY_REF;
+        break;
+
+    case ACCTYPE_WRITE:
+        /* Program check if store protected location */
+        if (ARCH_DEP(is_store_protected) (addr, STORAGE_KEY(aaddr), akey,
+                                private, protect, regs))
+            goto vabs_prot_excp;
+
+        /* Set the reference and change bits in the storage key */
+        STORAGE_KEY(aaddr) |= (STORKEY_REF | STORKEY_CHANGE);
+        break;
+
+    case ACCTYPE_WRITE_SKP:
+        /* Program check if store protected location */
+        if (ARCH_DEP(is_store_protected) (addr, STORAGE_KEY(aaddr), akey,
+                                private, protect, regs))
+            goto vabs_prot_excp;
+
+        break;
+
+    } /* end switch */
+
+#if defined(OPTION_AEA_BUFFER)
+    if(arn >= 0 && acctype <= ACCTYPE_WRITE)
+    {
+#if defined(FEATURE_ACCESS_REGISTERS)
+        if(ACCESS_REGISTER_MODE(&regs->psw))
+            regs->aenoarn = 0;
+        else
+            regs->aenoarn = 1;
+#else
+        regs->aenoarn = 1;
+#endif
+        aeind = AEIND(addr);
+        regs->AE(aeind) = aaddr & STORAGE_KEY_PAGEMASK;
+        regs->VE(aeind) = addr & STORAGE_KEY_PAGEMASK;
+        regs->aekey[aeind] = akey;
+        regs->aeacc[aeind] = acctype;
+        if (!regs->aenoarn)
+            regs->aearn[aeind] = arn;
+        if((addr < PSA_SIZE) && !private)
+        {
+            if(akey == 0)
+                regs->aeacc[arn] = ACCTYPE_READ;
+            else
+                INVALIDATE_AEA(arn, regs);
+        }
+    }
+#endif
+
+    /* Return the absolute address */
+    return aaddr;
+
+vabs_addr_excp:
+    ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+
+vabs_prot_excp:
+#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
+    regs->TEA = addr & STORAGE_KEY_PAGEMASK;
+    if (protect && ((acctype == ACCTYPE_WRITE) || (acctype == ACCTYPE_WRITE_SKP)))
+    {
+        regs->TEA |= TEA_PROT_AP;
+  #if defined(FEATURE_ESAME)
+        if (protect == 2)
+            regs->TEA |= TEA_PROT_A;
+  #endif /*defined(FEATURE_ESAME)*/
+    }
+    regs->TEA |= stid;
+    regs->excarid = (arn > 0 ? arn : 0);
+#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
+    ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
+
+vabs_prog_check:
+    ARCH_DEP(program_interrupt) (regs, xcode);
+
+    return -1; /* prevent warning from compiler */
+} /* end function logical_to_abs */
+#endif
+
+
+#endif /*!defined(OPTION_NO_INLINE_LOGICAL) | defined(_DAT_C) */
 
 /* end of DAT.H */

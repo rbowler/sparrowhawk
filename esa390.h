@@ -8,37 +8,25 @@
 
 #define _ESA390_H
 
+#include "htypes.h"
+
 /*-------------------------------------------------------------------*/
 /* Header file containing ESA/390 structure definitions 	     */
 /*-------------------------------------------------------------------*/
 
 /* Platform-independent storage operand definitions */
-typedef u_int8_t	BYTE;
-typedef u_int8_t	HWORD[2];
-typedef u_int8_t	FWORD[4];
-typedef u_int8_t	DWORD[8];
-typedef u_int8_t	QWORD[16];
-typedef u_int16_t	U16;
+typedef uint8_t	BYTE;
+typedef uint8_t	HWORD[2];
+typedef uint8_t	FWORD[4];
+typedef uint8_t	DWORD[8];
+typedef uint8_t	QWORD[16];
+typedef uint16_t	U16;
 typedef int16_t 	S16;
-typedef u_int32_t	U32;
+typedef uint32_t	U32;
 typedef int32_t 	S32;
-typedef u_int64_t	U64;
+typedef uint64_t	U64;
 typedef int64_t 	S64;
-#if __BYTE_ORDER == __LITTLE_ENDIAN
- typedef union {
-		 U16 H;
-		 struct { BYTE L; BYTE H; } B;
-	       } HW;
- typedef union {
-		 U32 F;
-		 struct { HW L; HW H; } H;
-		 struct { U32 A:24; BYTE B; } A;
-	       } FW;
- typedef union {
-		 U64 D;
-		 struct { FW L; FW H; } F;
-	       } DW;
-#elif __BYTE_ORDER == __BIG_ENDIAN
+#ifdef WORDS_BIGENDIAN
  typedef union {
 		 U16 H;
 		 struct { BYTE H; BYTE L; } B;
@@ -53,7 +41,19 @@ typedef int64_t 	S64;
 		 struct { FW H; FW L; } F;
 	       } DW;
 #else
- #error Cannot determine byte order
+ typedef union {
+		 U16 H;
+		 struct { BYTE L; BYTE H; } B;
+	       } HW;
+ typedef union {
+		 U32 F;
+		 struct { HW L; HW H; } H;
+		 struct { U32 A:24; BYTE B; } A;
+	       } FW;
+ typedef union {
+		 U64 D;
+		 struct { FW L; FW H; } F;
+	       } DW;
 #endif
 
 typedef union {
@@ -88,9 +88,10 @@ typedef struct _PSW {
 	BYTE	sysmask;		/* System mask		     */
 	BYTE	pkey;			/* Bits 0-3=key, 4-7=zeroes  */
 	BYTE	ilc;			/* Instruction length code   */
-	BYTE	cc;			/* Condition code	     */
+	BYTE	cc;			    /* Condition code	     */
 	U16	intcode;		/* Interruption code	     */
-	DW	ia;			/* Instruction addrress      */
+	DW	ia;			    /* Instruction addrress      */
+        BYTE    zerobyte;       /* bits 24-31                */
 #define IA_G	ia.D
 #define IA_H	ia.F.H.F
 #define IA_L	ia.F.L.F
@@ -548,7 +549,8 @@ typedef struct _PSA_3XX {		/* Prefixed storage area     */
 /*040*/ DWORD csw;			/* Channel status word (S370)*/
 /*048*/ FWORD caw;			/* Channel address word(S370)*/
 /*04C*/ FWORD resv04C;			/* Reserved		     */
-/*050*/ DWORD inttimer; 		/* Interval timer	     */
+/*050*/ FWORD inttimer; 		/* Interval timer	     */
+/*054*/ FWORD resv054;  		/* Reserved                  */
 /*058*/ DWORD extnew;			/* External new PSW	     */
 /*060*/ DWORD svcnew;			/* SVC new PSW		     */
 /*068*/ DWORD pgmnew;			/* Program check new PSW     */
@@ -566,7 +568,7 @@ typedef struct _PSA_3XX {		/* Prefixed storage area     */
 /*09C*/ FWORD moncode;			/* Monitor code 	     */
 /*0A0*/ BYTE  excarid;			/* Exception access id	     */
 /*0A1*/ BYTE  perarid;			/* PER access id	     */
-/*0A2*/ BYTE  resv0A2;			/* Reserved		     */
+/*0A2*/ BYTE  opndrid;			/* Operand access id	     */
 /*0A3*/ BYTE  arch;			/* Architecture mode ID      */
 /*0A4*/ FWORD resv0A4;			/* Reserved		     */
 /*0A8*/ FWORD chanid;			/* Channel id (S370)	     */
@@ -817,13 +819,14 @@ typedef struct _PSA_900 {		/* Prefixed storage area     */
 #define EXT_SERVICE_SIGNAL_INTERRUPT			0x2401
 
 /* Macros for classifying CCW operation codes */
-#define IS_CCW_WRITE(c) 	(((c)&0x03)==0x01)
-#define IS_CCW_READ(c)		(((c)&0x03)==0x02)
-#define IS_CCW_CONTROL(c)	(((c)&0x03)==0x03)
-#define IS_CCW_NOP(c)		((c)==0x03)
-#define IS_CCW_SENSE(c) 	(((c)&0x0F)==0x04)
-#define IS_CCW_TIC(c)		(((c)&0x0F)==0x08)
-#define IS_CCW_RDBACK(c)	(((c)&0x0F)==0x0C)
+#define IS_CCW_WRITE(c) 	    (((c)&0x03)==0x01)
+#define IS_CCW_READ(c)		    (((c)&0x03)==0x02)
+#define IS_CCW_CONTROL(c)	    (((c)&0x03)==0x03)
+#define IS_CCW_NOP(c)		    ((c)==0x03)
+#define IS_CCW_SET_EXTENDED(c)	((c)==0xC3)
+#define IS_CCW_SENSE(c) 	    (((c)&0x0F)==0x04)
+#define IS_CCW_TIC(c)		    (((c)&0x0F)==0x08)
+#define IS_CCW_RDBACK(c)	    (((c)&0x0F)==0x0C)
 
 /* Operation request block structure definition */
 typedef struct _ORB {

@@ -18,6 +18,7 @@
 /*      Dynamic device attach/detach by Jan Jaeger                   */
 /*      OSTAILOR parameter by Jay Maynard                            */
 /*      PANRATE parameter by Reed H. Petty                           */
+/*      CPUPRIO parameter by Jan Jaeger                              */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 /*-------------------------------------------------------------------*/
 
@@ -35,6 +36,10 @@
 #define  _GEN_ARCH 370
 #include "config.c"
 #undef   _GEN_ARCH
+
+#if defined(OPTION_FISHIO)
+#include "w32chan.h"
+#endif // defined(OPTION_FISHIO)
 
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
@@ -264,6 +269,7 @@ BYTE   *stoddrag;                       /* -> TOD clock drag factor  */
 BYTE   *sostailor;                      /* -> OS to tailor system to */
 BYTE   *spanrate;                       /* -> Panel refresh rate     */
 BYTE   *sdevtmax;                       /* -> Max device threads     */
+BYTE   *scpuprio;                       /* -> CPU thread priority    */
 BYTE    loadparm[8];                    /* Load parameter (EBCDIC)   */
 BYTE    version = 0x00;                 /* CPU version code          */
 U32     serial;                         /* CPU serial number         */
@@ -279,6 +285,7 @@ S32     tzoffset;                       /* System timezone offset    */
 int     toddrag;                        /* TOD clock drag factor     */
 U64     ostailor;                       /* OS to tailor system to    */
 int     panrate;                        /* Panel refresh rate        */
+int     cpuprio;                        /* CPU thread priority       */
 BYTE   *sdevnum;                        /* -> Device number string   */
 BYTE   *sdevtype;                       /* -> Device type string     */
 U16     devnum;                         /* Device number             */
@@ -288,6 +295,9 @@ BYTE    c;                              /* Work area for sscanf      */
 
     /* Clear the system configuration block */
     memset (&sysblk, 0, sizeof(SYSBLK));
+
+    /* Initialize SETMODE and set user authority */
+    SETMODE(INIT);
 
     /* Direct logmsg output to stderr during initialization */
     sysblk.msgpipew = stderr;
@@ -316,6 +326,7 @@ BYTE    c;                              /* Work area for sscanf      */
     archmode = ARCH_390;
     ostailor = OS_NONE;
     panrate = PANEL_REFRESH_RATE_SLOW;
+    cpuprio = 15;
     devtmax = MAX_DEVICE_THREADS;
 
     /* Read records from the configuration file */
@@ -349,6 +360,7 @@ BYTE    c;                              /* Work area for sscanf      */
         stoddrag = NULL;
         sostailor = NULL;
         spanrate = NULL;
+        scpuprio = NULL;
         sdevtmax = NULL;
 
         /* Check for old-style CPU statement */
@@ -423,10 +435,15 @@ BYTE    c;                              /* Work area for sscanf      */
             }
             else if (strcasecmp (keyword, "cfccimage") == 0)
             {
+                addargc = 0;
             }
             else if (strcasecmp (keyword, "archmode") == 0)
             {
                 sarchmode = operand;
+            }
+            else if (strcasecmp (keyword, "cpuprio") == 0)
+            {
+                scpuprio = operand;
             }
             else if (strcasecmp (keyword, "devtmax") == 0)
             {
@@ -540,6 +557,26 @@ BYTE    c;                              /* Work area for sscanf      */
                 exit(1);
             }
         }
+
+        /* Parse CPU thread priority operand */
+        if (scpuprio != NULL)
+        {
+            if (sscanf(scpuprio, "%d%c", &cpuprio, &c) != 1)
+            {
+                logmsg( "HHC012I Error in %s line %d: "
+                        "Invalid CPU thread priority %s\n",
+                        fname, stmt, scpuprio);
+                exit(1);
+            }
+
+#if !defined(NO_SETUID)
+        if(sysblk.suid != 0 && cpuprio < 0)
+            logmsg("SETPRIO: Hercules not running as setuid root\n");
+#endif /*!defined(NO_SETUID)*/
+
+        }
+        else
+            sysblk.cpuprio = cpuprio;
 
         /* Parse number of CPUs operand */
         if (snumcpu != NULL)
@@ -683,6 +720,10 @@ BYTE    c;                              /* Work area for sscanf      */
             {
                 ostailor = 0xFFFFFFFFFFFFFFFFULL;
             }
+            else if (strcasecmp (sostailor, "QUIET") == 0)
+            {
+                ostailor = 0;
+            }
             else
             {
                 logmsg( "HHC017I Error in %s line %d: "
@@ -769,17 +810,36 @@ BYTE    c;                              /* Work area for sscanf      */
     initialize_lock (&sysblk.mainlock);
     initialize_lock (&sysblk.intlock);
     initialize_lock (&sysblk.sigplock);
+#if MAX_CPU_ENGINES == 1 || !defined(OPTION_FAST_INTCOND)
     initialize_condition (&sysblk.intcond);
+#endif
 #if MAX_CPU_ENGINES > 1
-    initialize_condition (&sysblk.brdcstcond);
+    initialize_condition (&sysblk.broadcast_cond);
 #ifdef SMP_SERIALIZATION
     for(i = 0; i < MAX_CPU_ENGINES; i++)
         initialize_lock (&sysblk.regs[i].serlock);
 #endif /*SMP_SERIALIZATION*/
 #endif /*MAX_CPU_ENGINES > 1*/
     initialize_detach_attr (&sysblk.detattr);
+#if defined(OPTION_FISHIO)
+    InitIOScheduler                         // initialize i/o scheduler...
+        (
+            sysblk.msgpipew,                // (for issuing msgs to Herc console)
+            sysblk.arch_mode,               // (for calling execute_ccw_chain)
+            DEVICE_THREAD_PRIORITY,         // (for calling fthread_create)
+            MAX_DEVICE_THREAD_IDLE_SECS,    // (maximum device thread wait time)
+            devtmax                         // (maximum #of device threads allowed)
+        );
+#else // !defined(OPTION_FISHIO)
     initialize_lock (&sysblk.ioqlock);
     initialize_condition (&sysblk.ioqcond);
+    /* Set max number device threads */
+    sysblk.devtmax = devtmax;
+    sysblk.devtwait = sysblk.devtnbr =
+    sysblk.devthwm  = sysblk.devtunavail = 0;
+#endif // defined(OPTION_FISHIO)
+    InitializeListHead(&bind_head);
+    initialize_lock(&bind_lock);
 
     /* Set up the system TOD clock offset: compute the number of
        seconds from the designated year to 1970 for TOD clock
@@ -827,11 +887,6 @@ BYTE    c;                              /* Work area for sscanf      */
     /* Set the panel refresh rate */
     sysblk.panrate = panrate;
 
-    /* Set max number device threads */
-    sysblk.devtmax = devtmax;
-    sysblk.devtwait = sysblk.devtnbr =
-    sysblk.devthwm  = sysblk.devtunavail = 0;
-
     /* Initialize the CPU registers */
     for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
     {
@@ -856,6 +911,12 @@ BYTE    c;                              /* Work area for sscanf      */
         sysblk.sie_regs[cpu].hostregs = &sysblk.regs[cpu];
         sysblk.regs[cpu].guestregs = &sysblk.sie_regs[cpu];
 #endif /*defined(_FEATURE_SIE)*/
+
+#if MAX_CPU_ENGINES > 1 && defined(OPTION_FAST_INTCOND)
+        initialize_condition (&sysblk.regs[cpu].intcond);
+#endif
+        sysblk.regs[cpu].cpustate = CPUSTATE_STOPPED;
+        sysblk.regs[cpu].cpumask = 0x80000000 >> cpu;
 
     } /* end for(cpu) */
 
@@ -925,9 +986,12 @@ BYTE    c;                              /* Work area for sscanf      */
     }
     setvbuf (sysblk.msgpipew, NULL, _IOLBF, 0);
 
+#if defined(OPTION_FISHIO)
+    ios_msgpipew = sysblk.msgpipew;
+#endif // defined(OPTION_FISHIO)
+
     /* Display the version identifier on the control panel */
-    display_version (sysblk.msgpipew, "Hercules ",
-                     MSTRING(VERSION), __DATE__, __TIME__);
+    display_version (sysblk.msgpipew, "Hercules ");
 
 #ifdef _FEATURE_VECTOR_FACILITY
     for(i = 0; i < numvec && i < numcpu; i++)
@@ -1011,8 +1075,7 @@ int deconfigure_cpu(REGS *regs)
         ON_IC_CPU_NOT_STARTED(regs);
 
         /* Wake up CPU as it may be waiting */
-        signal_condition (&sysblk.intcond);
-
+        WAKEUP_CPU (regs->cpuad);
         return 0;
     }
     else
@@ -1284,7 +1347,7 @@ DEVBLK *dev;                            /* -> Device block           */
         if (dev->console)
         {
             dev->console = 0;
-            signal_thread (sysblk.cnsltid, SIGHUP);
+            signal_thread (sysblk.cnsltid, SIGUSR2);
         }
     }
 

@@ -1,6 +1,10 @@
 /* FEATURES.H	(c) Copyright Jan Jaeger, 2000-2001		     */
 /*		Architecture-dependent macro definitions	     */
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
 /*-------------------------------------------------------------------*/
 /* S/370, ESA/390 and ESAME features implemented		     */
 /*-------------------------------------------------------------------*/
@@ -86,7 +90,7 @@
 #undef TLB_PTE
 /* The default mode is 900, basic ESAME */
 
-#if !defined(NO_ATTR_REGPARM) & !defined(PROFILE_CPU)
+#if !defined(NO_ATTR_REGPARM) && !defined(PROFILE_CPU)
 #define ATTR_REGPARM(n) __attribute__ ((regparm(n)))
 #else
 #define ATTR_REGPARM(n) /* nothing */

@@ -12,7 +12,7 @@
  |||| |||| |||| |--- |||| |||- |||| ||||   h:mask is always '1'
  |||| |||| |||| |    |||| |||  |||| |||+--> '1' : (regs)->psw.wait == 1
  |||| |||| |||| |    |||| |||  |||| ||+---> '1' : RESTART
- |||| |||| |||| |    |||| |||  |||| |+----> '1' : sysblk.brdcstncpu > 0
+ |||| |||| |||| |    |||| |||  |||| |+----> '1' : sysblk.broadcast
  |||| |||| |||| |    |||| |||  |||| +-----> '1' : STORSTAT
  |||| |||| |||| |    |||| |||  ||||
  |||| |||| |||| |    |||| |||  |||+-------> '1' : ETR timer 
@@ -55,13 +55,17 @@
 #define IC_CPU_NOT_STARTED 0x40000000
 #define IC_IOPENDING       0x20000000
 #define IC_STORSTAT        0x00000008
-#define IC_BRDCSTNCPU      0x00000004
+#if MAX_CPU_ENGINES > 1
+#define IC_BROADCAST       0x00000004
+#else
+#define IC_BROADCAST       0x00000000
+#endif
 #define IC_RESTART         0x00000002
 #define IC_PSW_WAIT        0x00000001
 #define IC_INITIAL_MASK  ( IC_CPU_NOT_STARTED \
                          | IC_PSW_WAIT \
                          | IC_RESTART \
-                         | IC_BRDCSTNCPU \
+                         | IC_BROADCAST \
                          | IC_STORSTAT )
 
 /* External interrupt subclasses */
@@ -163,7 +167,7 @@
 #define ON_IC_CPU_NOT_STARTED(_regs) \
                         ((_regs)->ints_state|=IC_CPU_NOT_STARTED)
 #define ON_IC_RESTART(_regs)    ((_regs)->ints_state|=IC_RESTART)
-#define ON_IC_BRDCSTNCPU        (sysblk.ints_state|=IC_BRDCSTNCPU)
+#define ON_IC_BROADCAST         (sysblk.ints_state|=IC_BROADCAST)
 #define ON_IC_STORSTAT(_regs)   ((_regs)->ints_state|=IC_STORSTAT)
 #define ON_IC_IOPENDING         (sysblk.ints_state|=IC_IOPENDING)
 #define ON_IC_CHANRPT           (sysblk.ints_state|=CR14_CHANRPT)
@@ -173,6 +177,7 @@
 #define ON_IC_PTIMER(_regs)     ((_regs)->ints_state|=CR0_XM_PTIMER)
 #define ON_IC_CLKC(_regs)       ((_regs)->ints_state|=CR0_XM_CLKC)
 #define ON_IC_EXTCALL(_regs)    ((_regs)->ints_state|=CR0_XM_EXTCALL)
+#define ON_IC_MALFALT(_regs)    ((_regs)->ints_state|=CR0_XM_MALFALT)
 #define ON_IC_EMERSIG(_regs)    ((_regs)->ints_state|=CR0_XM_EMERSIG)
 #define ON_IC_TRACE             (sysblk.ints_state|=IC_DEBUG_BIT)
 #define ON_IC_DEBUG(_regs) \
@@ -182,7 +187,7 @@
 #define OFF_IC_CPU_NOT_STARTED(_regs) \
                         ((_regs)->ints_state&=~IC_CPU_NOT_STARTED)
 #define OFF_IC_RESTART(_regs)  ((_regs)->ints_state&=~IC_RESTART)
-#define OFF_IC_BRDCSTNCPU      (sysblk.ints_state&=~IC_BRDCSTNCPU)
+#define OFF_IC_BROADCAST       (sysblk.ints_state&=~IC_BROADCAST)
 #define OFF_IC_STORSTAT(_regs) ((_regs)->ints_state&=~IC_STORSTAT)
 #define OFF_IC_IOPENDING       (sysblk.ints_state&=~IC_IOPENDING)
 #define OFF_IC_CHANRPT         (sysblk.ints_state&=~CR14_CHANRPT)
@@ -192,6 +197,7 @@
 #define OFF_IC_PTIMER(_regs)   ((_regs)->ints_state&=~CR0_XM_PTIMER)
 #define OFF_IC_CLKC(_regs)     ((_regs)->ints_state&=~CR0_XM_CLKC)
 #define OFF_IC_EXTCALL(_regs)  ((_regs)->ints_state&=~CR0_XM_EXTCALL)
+#define OFF_IC_MALFALT(_regs)  ((_regs)->ints_state&=~CR0_XM_MALFALT)
 #define OFF_IC_EMERSIG(_regs)  ((_regs)->ints_state&=~CR0_XM_EMERSIG)
 //#define OFF_IC_TRACE           (sysblk.ints_state&=~IC_DEBUG_BIT)
 #define OFF_IC_DEBUG(_regs) \
@@ -202,7 +208,13 @@
 #define IS_IC_DISABLED_WAIT_PSW(_regs) \
              ( ((_regs)->ints_mask & IC_OPEN_MASK) == 0 )
 #define IS_IC_RESTART(_regs)  ((_regs)->ints_state&IC_RESTART)
-#define IS_IC_BRDCSTNCPU      (sysblk.ints_state&IC_BRDCSTNCPU)
+#if MAX_CPU_ENGINES > 1
+#define IS_IC_BROADCAST_ON    (sysblk.ints_state&IC_BROADCAST)
+#define IS_IC_BROADCAST(_regs) ((sysblk.ints_state&IC_BROADCAST) && \
+                                (sysblk.broadcast_mask&(_regs)->cpumask))
+#else
+#define IS_IC_BROADCAST_ON    0
+#endif
 #define IS_IC_STORSTAT(_regs) ((_regs)->ints_state&IC_STORSTAT)
 #define IS_IC_IOPENDING       (sysblk.ints_state&IC_IOPENDING)
 #define IS_IC_MCKPENDING      (sysblk.ints_state&IC_MCKPENDING)
@@ -215,6 +227,7 @@
 #define IS_IC_PTIMER(_regs)   ((_regs)->ints_state&CR0_XM_PTIMER)
 #define IS_IC_CLKC(_regs)     ((_regs)->ints_state&CR0_XM_CLKC)
 #define IS_IC_EXTCALL(_regs)  ((_regs)->ints_state&CR0_XM_EXTCALL)
+#define IS_IC_MALFALT(_regs)  ((_regs)->ints_state&CR0_XM_MALFALT)
 #define IS_IC_EMERSIG(_regs)  ((_regs)->ints_state&CR0_XM_EMERSIG)
 #define IS_IC_TRACE           (sysblk.ints_state&IC_DEBUG_BIT)
 
@@ -250,6 +263,9 @@
 #define OPEN_IC_EXTCALL(_regs)  (((_regs)->ints_state&CR0_XM_EXTCALL) \
                                             & (_regs)->ints_mask)
 
+#define OPEN_IC_MALFALT(_regs)  (((_regs)->ints_state&CR0_XM_MALFALT) \
+                                            & (_regs)->ints_mask)
+
 #define OPEN_IC_EMERSIG(_regs)  (((_regs)->ints_state&CR0_XM_EMERSIG) \
                                             & (_regs)->ints_mask)
 
@@ -267,7 +283,7 @@
    (((_regs)->ints_state|sysblk.ints_state) & (_regs)->ints_mask)
 
 #define SIE_IC_INTERRUPT_CPU(_regs) \
-   (((_regs)->ints_state|(sysblk.ints_state&IC_BRDCSTNCPU)) & (_regs)->ints_mask)
+   (((_regs)->ints_state|(sysblk.ints_state&IC_BROADCAST)) & (_regs)->ints_mask)
 
 #else /*!INTERRUPTS_FAST_CHECK*/
 

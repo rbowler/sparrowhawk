@@ -166,11 +166,8 @@ int     r1, r2;                         /* Values of R fields        */
     /* Invalidate page table entry */
     ARCH_DEP(invalidate_pte) (inst[1], r1, r2, regs);
 
-    /* Release mainstore interlock */
-    RELEASE_MAINLOCK(regs);
-
-    /* Inform other cpu's */
-    BROADCAST_PTLB(regs);
+    /* Mainlock now released by `invalidate_pte' */
+//  RELEASE_MAINLOCK(regs);
 
     /* Perform serialization after operation */
     PERFORM_SERIALIZATION (regs);
@@ -199,7 +196,7 @@ int     r1, r2;                         /* Values of R fields        */
 DEF_INST(move_page)
 {
 int     r1, r2;                         /* Register values           */
-int     rc;                             /* Return code               */
+int     rc = 0;                         /* Return code               */
 int     cc = 0;				/* Condition code            */
 VADR    vaddr1, vaddr2;                 /* Virtual addresses         */
 RADR    raddr1, raddr2;                 /* Real addresses            */
@@ -266,7 +263,8 @@ BYTE    xpkey1 = 0, xpkey2 = 0;         /* Expanded storage keys     */
 
 	raddr2 = APPLY_PREFIXING (raddr2, regs->PX);
 
-        SIE_TRANSLATE(&raddr2,ACCTYPE_READ,regs);
+        if (raddr2 < regs->mainsize)
+            SIE_TRANSLATE(&raddr2,ACCTYPE_READ,regs);
 
 #if defined(FEATURE_EXPANDED_STORAGE)
         if(rc == 2)
@@ -338,7 +336,8 @@ BYTE    xpkey1 = 0, xpkey2 = 0;         /* Expanded storage keys     */
 
 	raddr1 = APPLY_PREFIXING (raddr1, regs->PX);
 
-        SIE_TRANSLATE(&raddr1,ACCTYPE_READ,regs);
+        if (raddr1 < regs->mainsize)
+            SIE_TRANSLATE(&raddr1,ACCTYPE_READ,regs);
 
 #if defined(FEATURE_EXPANDED_STORAGE)
         if(rc == 2)
@@ -405,8 +404,8 @@ BYTE    xpkey1 = 0, xpkey2 = 0;         /* Expanded storage keys     */
            protection applies to the first operand */
         if (prot)
         {
-            regs->TEA = vaddr1 | stid | 0x00000004;
-            regs->excarid = (stid == TEA_ST_ARMODE) ? r1 : 0;
+            regs->TEA = vaddr1 | stid | TEA_PROT_AP;
+            regs->excarid = (ACCESS_REGISTER_MODE(&regs->psw)) ? r1 : 0;
             ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
         }
 
@@ -451,9 +450,11 @@ BYTE    xpkey1 = 0, xpkey2 = 0;         /* Expanded storage keys     */
 #endif /*defined(FEATURE_EXPANDED_STORAGE)*/
     {
         /* Obtain absolute address of main storage block,
-           check protection, and set reference bit */
-        aaddr2 = LOGICAL_TO_ABS (vaddr2, r2, regs,
+           check protection, and set reference bit. 
+           Use last byte of page to avoid FPO area.  */
+        aaddr2 = LOGICAL_TO_ABS (vaddr2 + 0xFFF, r2, regs,
                                 ACCTYPE_READ, akey2);
+        aaddr2 &= 0xFFFFF000;
     }
 
 #if defined(FEATURE_EXPANDED_STORAGE)
@@ -503,16 +504,23 @@ BYTE    xpkey1 = 0, xpkey2 = 0;         /* Expanded storage keys     */
     return;
 
 mvpg_progck:
-    /* If page translation exception and condition code option
-       in register 0 bit 23 is set, return condition code */
+    /* If page translation exception (PTE invalid) and condition code
+        option in register 0 bit 23 is set, return condition code */
     if ((regs->GR_L(0) & 0x00000100)
-        && xcode == PGM_PAGE_TRANSLATION_EXCEPTION)
+        && xcode == PGM_PAGE_TRANSLATION_EXCEPTION
+        && rc == 2)
     {
         regs->psw.cc = cc;
         return;
     }
 
     /* Otherwise generate program check */
+    /* (Bit 29 of TEA is on for PIC 11 & operand ID also stored) */
+    if (xcode == PGM_PAGE_TRANSLATION_EXCEPTION)
+    {
+        regs->TEA |= TEA_MVPG;
+        regs->opndrid = (r1 << 4) | r2;
+    }
     ARCH_DEP(program_interrupt) (regs, xcode);
 } /* end function move_page */
 

@@ -449,6 +449,11 @@ static void ARCH_DEP(store_decimal) (VADR addr, int len, int arn, REGS *regs,
 int     i, j;                           /* Array subscripts          */
 BYTE    pack[MAX_DECIMAL_LENGTH];       /* Packed decimal work area  */
 
+    /* if operand crosses page, make sure both pages are accessable */
+    if((addr & PAGEFRAME_PAGEMASK) !=
+        ((addr + len) & PAGEFRAME_PAGEMASK))
+        ARCH_DEP(validate_operand) (addr, arn, len, ACCTYPE_WRITE_SKP, regs);
+
     /* Pack digits into packed decimal work area */
     for (i=0, j=0; i < MAX_DECIMAL_DIGITS; i++)
     {
@@ -693,9 +698,14 @@ BYTE    rbyte;                          /* Result byte               */
     SS_L(inst, execflag, regs, l, b1, effective_addr1,
                                   b2, effective_addr2);
 
-    /* Determine if trial run is needed */
-    if((effective_addr1 & STORAGE_KEY_PAGEMASK) !=
-        ((effective_addr1 + l) & STORAGE_KEY_PAGEMASK))
+    /* If addr1 crosses page, make sure both pages are accessable */
+    if((effective_addr1 & PAGEFRAME_PAGEMASK) !=
+        ((effective_addr1 + l) & PAGEFRAME_PAGEMASK))
+        ARCH_DEP(validate_operand) (effective_addr1, b1, l, ACCTYPE_WRITE_SKP, regs);
+
+    /* If addr2 might cross page, do a trial run to catch possible access rupts */
+    if((effective_addr2 & PAGEFRAME_PAGEMASK) !=
+        ((effective_addr2 + l) & PAGEFRAME_PAGEMASK))
         trial_run = 1;
     else
         trial_run = 0;
@@ -773,7 +783,7 @@ BYTE    rbyte;                          /* Result byte               */
                 if(!trial_run)
                     ARCH_DEP(vstoreb) ( rbyte, addr1, b1, regs );
                 else
-                    ARCH_DEP(validate_operand) (addr1, b1, 0, ACCTYPE_WRITE, regs);
+                    ARCH_DEP(validate_operand) (addr1, b1, 0, ACCTYPE_WRITE_SKP, regs);
 
                 /* Set condition code 2 if digit is non-zero */
                 if (h > 0) cc = 2;
@@ -805,7 +815,7 @@ BYTE    rbyte;                          /* Result byte               */
                 if(!trial_run)
                     ARCH_DEP(vstoreb) ( fbyte, addr1, b1, regs );
                 else
-                    ARCH_DEP(validate_operand) (addr1, b1, 0, ACCTYPE_WRITE, regs);
+                    ARCH_DEP(validate_operand) (addr1, b1, 0, ACCTYPE_WRITE_SKP, regs);
                 sig = 0;
                 cc = 0;
             }
@@ -820,7 +830,14 @@ BYTE    rbyte;                          /* Result byte               */
                     if (!trial_run)
                         ARCH_DEP(vstoreb) ( fbyte, addr1, b1, regs );
                     else
-                        ARCH_DEP(validate_operand) (addr1, b1, 0, ACCTYPE_WRITE, regs);
+                        ARCH_DEP(validate_operand) (addr1, b1, 0, ACCTYPE_WRITE_SKP, regs);
+                }
+                else /* store message byte */
+                {
+                    if (!trial_run)
+                        ARCH_DEP(vstoreb) ( pbyte, addr1, b1, regs );
+                    else
+                        ARCH_DEP(validate_operand) (addr1, b1, 0, ACCTYPE_WRITE_SKP, regs);
                 }
             }
 
@@ -863,14 +880,14 @@ int     carry;                          /* Carry indicator           */
     SS(inst, execflag, regs, l1, l2, b1, effective_addr1,
                                      b2, effective_addr2);
 
-    /* Load operands into work areas */
-    ARCH_DEP(load_decimal) (effective_addr1, l1, b1, regs, dec1, &count1, &sign1);
-    ARCH_DEP(load_decimal) (effective_addr2, l2, b2, regs, dec2, &count2, &sign2);
-
     /* Program check if the second operand length exceeds 15 digits
        or is equal to or greater than the first operand length */
     if (l2 > 7 || l2 >= l1)
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /* Load operands into work areas */
+    ARCH_DEP(load_decimal) (effective_addr1, l1, b1, regs, dec1, &count1, &sign1);
+    ARCH_DEP(load_decimal) (effective_addr2, l2, b2, regs, dec2, &count2, &sign2);
 
     /* Program check if the number of bytes in the second operand
        is less than the number of bytes of high-order zeroes in the

@@ -271,12 +271,18 @@ U32     ar;                             /* Copy of new AR            */
 U16     grd_offset;                     /* Offset of disjoint GR_H   */
 BYTE    psw[16];                        /* Copy of new PSW           */
 U64     gr;                             /* Copy of new GR            */
+U64     ia;                             /* ia for trace              */
 #else /*!defined(FEATURE_ESAME)*/
 BYTE    psw[8];                         /* Copy of new PSW           */
 U32     gr;                             /* Copy of new GR            */
+U32     ia;                             /* ia for trace              */
 #endif /*!defined(FEATURE_ESAME)*/
+BYTE    amode;                          /* amode for trace           */
 PSW     save_psw;                       /* Saved copy of current PSW */
 RADR    abs;                            /* Absolute address of parm  */
+#ifdef FEATURE_TRACING
+CREG    newcr12 = 0;                    /* CR12 upon completion      */
+#endif /*FEATURE_TRACING*/
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -326,23 +332,42 @@ RADR    abs;                            /* Absolute address of parm  */
     /* Fetch the PSW from the operand address + psw offset */
 #if defined(FEATURE_ESAME)
     if(flags & 0x0004)
-        ARCH_DEP(vfetchc) (psw, 15, effective_addr2 + psw_offset, b2, regs);
+        ARCH_DEP(vfetchc) (psw, 15, (effective_addr2 + psw_offset)
+                           & ADDRESS_MAXWRAP(regs), b2, regs);
     else
 #endif /*defined(FEATURE_ESAME)*/
-        ARCH_DEP(vfetchc) (psw, 7, effective_addr2 + psw_offset, b2, regs);
+        ARCH_DEP(vfetchc) (psw, 7, (effective_addr2 + psw_offset)
+                           & ADDRESS_MAXWRAP(regs), b2, regs);
 
 
     /* Fetch new AR (B2) from operand address + AR offset */
-    ar = ARCH_DEP(vfetch4) (effective_addr2 + ar_offset, b2, regs);
+    ar = ARCH_DEP(vfetch4) ((effective_addr2 + ar_offset)
+                            & ADDRESS_MAXWRAP(regs), b2, regs);
 
 
     /* Fetch the new gr from operand address + GPR offset */
 #if defined(FEATURE_ESAME)
     if(flags & 0x0002)
-        gr = ARCH_DEP(vfetch8) (effective_addr2 + gr_offset, b2, regs);
+        gr = ARCH_DEP(vfetch8) ((effective_addr2 + gr_offset)
+                                & ADDRESS_MAXWRAP(regs), b2, regs);
     else
 #endif /*defined(FEATURE_ESAME)*/
-        gr = ARCH_DEP(vfetch4) (effective_addr2 + gr_offset, b2, regs);
+        gr = ARCH_DEP(vfetch4) ((effective_addr2 + gr_offset)
+                                & ADDRESS_MAXWRAP(regs), b2, regs);
+
+#if defined(FEATURE_TRACING)
+#if defined(FEATURE_ESAME)
+    FETCH_DW(ia, psw + 8);
+    amode = psw[3] & 0x01;
+#else /*!defined(FEATURE_ESAME)*/
+    FETCH_FW(ia, psw + 4);
+    ia &= 0x7FFFFFFF;
+    amode = psw[4] & 0x80;
+#endif /*!defined(FEATURE_ESAME)*/
+
+    if (regs->CR(12) & CR12_BRTRACE)
+        newcr12 = ARCH_DEP(trace_br) (amode, ia, regs);
+#endif /*defined(FEATURE_TRACING)*/
 
 
     /* Save current PSW */
@@ -351,7 +376,7 @@ RADR    abs;                            /* Absolute address of parm  */
 
     /* Use bits 16-23, 32-63 of psw in operand, other bits from old psw */
     psw[0] = save_psw.sysmask;
-    psw[1] = save_psw.pkey | 0x08 | save_psw.mach | save_psw.wait | save_psw.prob;
+    psw[1] = save_psw.pkey | 0x08 | save_psw.mach<<2 | save_psw.wait<<1 | save_psw.prob;
     psw[3] = 0;
 
 
@@ -395,6 +420,7 @@ RADR    abs;                            /* Absolute address of parm  */
 
     /* Update access register b2 */
     regs->AR(b2) = ar;
+    INVALIDATE_AEA(b2, regs);
 
     /* Update general register b2 */
 #if defined(FEATURE_ESAME)
@@ -403,6 +429,12 @@ RADR    abs;                            /* Absolute address of parm  */
     else
 #endif /*defined(FEATURE_ESAME)*/
         regs->GR_L(b2) = gr;
+
+#ifdef FEATURE_TRACING
+    /* Update trace table address if branch tracing is on */
+    if (regs->CR(12) & CR12_BRTRACE)
+        regs->CR(12) = newcr12;
+#endif /*FEATURE_TRACING*/
 
     /* Space switch event when switching into or
        out of home space mode AND space-switch-event on in CR1 or CR13 */
@@ -429,7 +461,7 @@ RADR    abs;                            /* Absolute address of parm  */
             if (regs->CR(13) & SSEVENT_BIT)
                 regs->TEA |= TEA_SSEVENT;
         }
-
+	regs->psw.ilc = 4;
         ARCH_DEP(program_interrupt) (regs, PGM_SPACE_SWITCH_EVENT);
     }
 
@@ -569,7 +601,6 @@ int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 U64     n;                              /* Absolute value to convert */
 BYTE    result[16];                     /* 31-digit signed result    */
-int     len = 16;                       /* Result length             */
 int     i;                              /* Array subscript           */
 int     d;                              /* Decimal digit or sign     */
 
@@ -600,8 +631,8 @@ int     d;                              /* Decimal digit or sign     */
         }
 
         /* Store sign and decimal digits from right to left */
-        memset (result, 0, len);
-        for (i = len - 1; d != 0 || n != 0; i--)
+        memset (result, 0, 16);
+        for (i = 16 - 1; d != 0 || n != 0; i--)
         {
             result[i] = d;
             d = n % 10;
@@ -613,7 +644,7 @@ int     d;                              /* Decimal digit or sign     */
     }
 
     /* Store 16-byte packed decimal result at operand address */
-    ARCH_DEP(vstorec) ( result, len-1, effective_addr2, b2, regs );
+    ARCH_DEP(vstorec) ( result, 16-1, effective_addr2, b2, regs );
 
 } /* end DEF_INST(convert_to_decimal_long) */
 #endif /*defined(FEATURE_ESAME)*/
@@ -1346,6 +1377,8 @@ VADR    lsea;                           /* Linkage stack entry addr  */
     /* Load registers from the stack entry */
     ARCH_DEP(unstack_registers) (1, lsea, r1, r2, regs);
 
+    INVALIDATE_AEA_ALL(regs);
+
 } /* end DEF_INST(extract_stacked_registers_long) */
 #endif /*defined(FEATURE_ESAME)*/
 
@@ -1880,12 +1913,12 @@ BYTE    cwork[4];                       /* Character work areas      */
 
     if (j == 0)
     {
-#if defined(MODEL_DEPENDENT)
+#if defined(MODEL_DEPENDENT_STCM)
         /* If the mask is all zero, we nevertheless access one byte
            from the storage operand, because POP states that an
            access exception may be recognized on the first byte */
         ARCH_DEP(validate_operand) (effective_addr2, b2, 0, ACCTYPE_WRITE, regs);
-#endif /*defined(MODEL_DEPENDENT)*/
+#endif /*defined(MODEL_DEPENDENT_STCM)*/
         return;
     }
 
@@ -2132,7 +2165,7 @@ U64     n;                              /* 64-bit operand value      */
     /* Perform serialization after completing operation */
     PERFORM_SERIALIZATION (regs);
 
-#if MAX_CPU_ENGINES > 1
+#if MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP)
     /* It this is a failed compare and swap
        and there is more then 1 CPU in the configuration
        and there is no broadcast synchronization in progress
@@ -2141,7 +2174,7 @@ U64     n;                              /* 64-bit operand value      */
        the physical CPU on a spinlock */
     if(regs->psw.cc && sysblk.numcpu > 1)
         usleep(1L);
-#endif MAX_CPU_ENGINES > 1
+#endif /* MAX_CPU_ENGINES > 1 && defined)OPTION_CS_USLEEP) */
 
 #if defined(_FEATURE_ZSIE)
     if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CS1))
@@ -2203,7 +2236,7 @@ U64     n1, n2;                         /* 64-bit operand values     */
     /* Perform serialization after completing operation */
     PERFORM_SERIALIZATION (regs);
 
-#if MAX_CPU_ENGINES > 1
+#if MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP)
     /* It this is a failed compare and swap
        and there is more then 1 CPU in the configuration
        and there is no broadcast synchronization in progress
@@ -2212,7 +2245,7 @@ U64     n1, n2;                         /* 64-bit operand values     */
        the physical CPU on a spinlock */
     if(regs->psw.cc && sysblk.numcpu > 1)
         usleep(1L);
-#endif MAX_CPU_ENGINES > 1
+#endif /* MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP) */
 
 #if defined(_FEATURE_ZSIE)
     if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CDS1))
@@ -4075,7 +4108,7 @@ VADR    effective_addr2;                /* Effective address         */
 
 #if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
-/* E502 STRAG - Store Real Address                             [RXE] */
+/* E502 STRAG - Store Real Address                             [SSE] */
 /*-------------------------------------------------------------------*/
 DEF_INST(store_real_address)
 {

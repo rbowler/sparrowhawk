@@ -16,7 +16,7 @@ instructions on how to build the Win32 version at <a
 href="http://www.bsp-gmbh.com/hercules/nude_w32.html">http://www.bsp-gmbh.com/hercules/nude_w32.html</a>.
 <ol>
 <li>Download the distribution file
-<a href="hercules-2.13.tar.gz">hercules-2.13.tar.gz</a>
+<a href="hercules-2.15.tar.gz">hercules-2.15.tar.gz</a>
 <p>
 <em>Notes:</em>
 <ol>
@@ -29,28 +29,25 @@ href="http://www.bsp-gmbh.com/hercules/nude_w32.html">http://www.bsp-gmbh.com/he
 </ol>
 <p>
 <li>Use these commands to unzip the distribution file:
-<pre>tar xvzf ../hercules-2.13.tar.gz
-cd hercules-2.13</pre>
-<li>Build the executable files:
-<br><code>make </code>[<code>HOST_ARCH=<i>arch</i></code>]<br>
-The <code>HOST_ARCH</code> argument is optional. It specifies the machine
-architecture, for setting options on the C compiler. Possible values are:
-<ul>
-<li><code>i386</code>: Intel 386 and above. No architecture optimizations
-are done.
-<li><code>i586</code>: Pentium and above. If specified, the resulting
-package will not run on 386 or 486 systems.
-<li><code>i686</code>: Pentium Pro and Pentium II. If specified, the
-resulting package will not run on 386, 486, or Pentium systems.
-<li>Anything else will remove the Intel-specific compiler flag.
-</ul>
-The default is i586, since most Hercules users appear to be running
-Pentiums. If building for an Intel-based system, you must not give HOST_ARCH
-an undefined value, as this will cause Hercules to break in weird and
-wonderful ways. If, on the other hand, you are building for a non-Intel
-platform, you must give HOST_ARCH a non-Intel value.
-<li>Install the programs: as root,
-<br><code>make install</code>
+<pre>tar xvzf ../hercules-2.15.tar.gz
+cd hercules-2.15</pre>
+<li>Configure Hercules for your system:
+
+<p><code>./configure</code>
+
+<p>By default, the configure script will attempt to guess appropriate
+	  compiler optimization flags for your system.  If its guesses
+	  turn out to be wrong, you can disable all optimization by
+	  passing the <code>--disable-optimization</code> option to
+	  configure, or specify your own optimization flags with
+	  <code>--enable-optimization=FLAGS</code>
+
+<p>For additional configuration options, run <code>./configure
+	      --help</code>
+
+<li>Build the executables: <p><code>make</code>
+
+<li>Install the programs: as root: <p><code>make install</code>
 </ol>
 
 <em>Important:</em>
@@ -63,12 +60,12 @@ compiler and other software levels.
 <ol>
 <li>Download the RPM file you want:
 <ul>
-<li><a href="hercules-2.13-1.i686.rpm">hercules-2.12-1.i686.rpm</a>: Intel
+<li><a href="hercules-2.15-1.i686.rpm">hercules-2.15-1.i686.rpm</a>: Intel
 Pentium Pro/Pentium II
-<li><a href="hercules-2.13-1.i586.rpm">hercules-2.12-1.i586.rpm</a>: Intel
+<li><a href="hercules-2.15-1.i586.rpm">hercules-2.15-1.i586.rpm</a>: Intel
 Pentium
-<li><a href="hercules-2.13-1.i386.rpm">hercules-2.12-1.i386.rpm</a>: Intel 386
-<li><a href="hercules-2.13-1.alpha.rpm">hercules-2.12-1.alpha.rpm</a>: Alpha
+<li><a href="hercules-2.15-1.i386.rpm">hercules-2.15-1.i386.rpm</a>: Intel 386
+<li><a href="hercules-2.15-1.alpha.rpm">hercules-2.15-1.alpha.rpm</a>: Alpha
 (all flavors)
 </ul>
 <li>Install the RPM:
@@ -78,6 +75,21 @@ This will leave the Hercules executables in /usr/bin, where you can run them
 from anywhere. Sample configuration files will be placed in /etc/hercules,
 and the IPLable card deck for the ZZSA standalone utility will be placed in
 /var/share/hercules.
+
+<h3>Installing Debian packages:</h3>
+
+Debian packages are available for "woody" and later releases.  As of
+this writing, "woody" is not yet released.
+
+<ul>
+<li>Using apt: <code>apt-get install hercules</code>
+<li>Manually with dpkg:
+  <ol>
+    <li>Download a <a href="http://packages.debian.org/hercules">.deb
+		package</a>
+    <li><code>dpkg -i</code> <i>DEB</i>
+  </ol>
+</ul>
 
 <h2>Configuration Procedure</h2>
 <p>
@@ -131,6 +143,7 @@ fpr     Display floating-point registers
 cr      Display control registers
 ar      Display access registers
 pr      Display prefix register
+clocks  Display todclock, clock comparator, cpu timer, and interval timer (370 mode only)
 
 r<em>x</em>      Display 64 bytes starting at real address x
 r<em>x.n</em>    Display n bytes starting at real address x
@@ -164,20 +177,22 @@ k<em>xxxx</em>   Print CCKD internal trace for device number xxxx
 ds<em>xxxx</em>  Display subchannel status for device number xxxx
 
 archmode S/370|ESA/390|ESAME  Set architecture mode
-loadparm [<em>xxxxxxxx</em>]  Display or set the IPL parameter
-loadcore <em>xxxxxxxx</em>    Load core image from file xxxxxxxx
-ipl <em>xxxx</em>             IPL from device number xxxx
+loadparm [<em>xxxxxxxx</em>]           Display or set the IPL parameter
+loadcore <em>xxxxxxxx</em> [<em>address</em>]   Load core image from file xxxxxxxx
+savecore <em>xxxxxxxx</em> [<em>start/*</em>] [<em>end/*</em>] save core to file xxxxxxxx
+loadtext <em>xxxxxxxx</em> [<em>address</em>]   Load object deck xxxxxxxx
+ipl <em>xxxx</em>                      IPL from device number xxxx
 
-ext      Generate an external interrupt
-stop     Stop CPU
-start    Start CPU
-stopall  Stop all CPUs
-startall Start all CPUs
-restart  Generate a restart interrupt and start CPU
-store    Store status
-ipending Display pending interrupts
+ext       Generate an external interrupt
+stop      Stop CPU
+start     Start CPU
+stopall   Stop all CPUs
+startall  Start all CPUs
+restart   Generate a restart interrupt and start CPU
+store     Store status
+ipending  Display pending interrupts
 quit|exit Terminate Hercules
-quiet    Toggles panel quiet mode
+quiet     Toggles panel quiet mode
 
 devlist  Display configured devices
 attach <em>xxxx</em> <em>type</em> [ <em>args</em> ]  Create device xxxx
@@ -196,6 +211,11 @@ pgmtrace -<em>n</em>  Turn off program interrupt tracing for interrupt code n
 panrate slow &#124 fast &#124 <em>n</em>   Set panel refresh rate to n milliseconds
 </pre>
 
+<p> 
+The <em>ipl</em> command may also be used to perform a load from cdrom or
+server.  For example if a standard SuSE S/390 Linux distribution CD is loaded
+and mounted on /cdrom for example, this cdrom may then be ipl-ed by:
+<em>ipl /cdrom/suse.ins</em>
 <p>
 The <em>attach</em> and <em>detach</em> commands are used to dynamically
 add or remove devices from the configuration,
@@ -223,10 +243,10 @@ If you have a question about Hercules, see the
 <a href="hercfaq.html">Hercules Frequently-Asked Questions</a> page.
 
 <p><center><hr width=15% noshade>
-<a href="hercules.html"><img src="gifs/back.gif" border=0 alt="back"></a>
+<a href="index.html"><img src="gifs/back.gif" border=0 alt="back"></a>
 </center>
 
 <small>
-<p>Last updated 5 July 2001
+<p>Last updated 02 December 2001
 </BODY>
 </HTML>

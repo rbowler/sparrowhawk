@@ -30,10 +30,9 @@ static BYTE vollbl[] = "\xE5\xD6\xD3";  /* EBCDIC characters "VOL"   */
 static BYTE hdrlbl[] = "\xC8\xC4\xD9";  /* EBCDIC characters "HDR"   */
 static BYTE eoflbl[] = "\xC5\xD6\xC6";  /* EBCDIC characters "EOF"   */
 static BYTE eovlbl[] = "\xC5\xD6\xE5";  /* EBCDIC characters "EOV"   */
-static BYTE buf[65500];
+static BYTE buf[65536];
 
 #ifdef EXTERNALGUI
-static BYTE padding[36]; /* (above buffer size scares me!) */
 /* Special flag to indicate whether or not we're being
    run under the control of the external GUI facility. */
 int  extgui = 0;
@@ -68,8 +67,7 @@ BYTE            labelrec[81];           /* Standard label (ASCIIZ)   */
 AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
 
     /* Display the program identification message */
-    display_version (stderr, "Hercules tape map program ",
-                     MSTRING(VERSION), __DATE__, __TIME__);
+    display_version (stderr, "Hercules tape map program ");
 
 #ifdef EXTERNALGUI
     if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)

@@ -64,15 +64,13 @@ VADR op4addr;
     {
         /* When in ar mode, ar3 is used to access the
            operand. The alet is fetched from the pl */
-        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
         {
+            if(r3 == 0)
+                ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
             op4alet = ARCH_DEP(vfetch4)(effective_addr4 + 68, b4, regs);
-            if(op4alet)
-            {
-                if(r3 == 0)
-                    ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
-                regs->AR(r3) = op4alet;
-            }
+            regs->AR(r3) = op4alet;
+            INVALIDATE_AEA(r3, regs);
         }
 
         /* Load address of operand 4 */
@@ -85,7 +83,7 @@ VADR op4addr;
         DW_CHECK(op4addr, regs);
 
         /* Load operand 4, using ar3 when in ar mode */
-        op4 = ARCH_DEP(vfetch8)(op4addr, op4alet ? r3 : 0, regs);
+        op4 = ARCH_DEP(vfetch8)(op4addr, r3, regs);
 
         /* replace the 3rd operand with the 4th operand */
         ARCH_DEP(vstore8)(op4, effective_addr4 + 40, b4, regs);
@@ -157,15 +155,13 @@ VADR op4addr;
     {
         /* When in ar mode, ar3 is used to access the
            operand. The alet is fetched from the pl */
-        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
         {
+            if(r3 == 0)
+                ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
             op4alet = ARCH_DEP(vfetch4)(effective_addr4 + 68, b4, regs);
-            if(op4alet)
-            {
-                if(r3 == 0)
-                    ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
-                regs->AR(r3) = op4alet;
-            }
+            regs->AR(r3) = op4alet;
+            INVALIDATE_AEA(r3, regs);
         }
 
         /* Load address of operand 4 */
@@ -174,7 +170,7 @@ VADR op4addr;
         DW_CHECK(op4addr, regs);
 
         /* Load operand 4, using ar3 when in ar mode */
-        ARCH_DEP(vfetchc) ( op4, 16-1, op4addr, op4alet ? r3 : 0, regs );
+        ARCH_DEP(vfetchc) ( op4, 16-1, op4addr, r3, regs );
 
         /* replace the 3rd operand with the 4th operand */
         ARCH_DEP(vstorec) ( op4, 16-1, effective_addr4 + 32, b4, regs );
@@ -363,7 +359,7 @@ U32 op2,
         {
             /* Verify access to 2nd operand */
             ARCH_DEP(validate_operand) (effective_addr2, b2, 4-1,
-                ACCTYPE_WRITE, regs);
+                ACCTYPE_WRITE_SKP, regs);
 
             /* If equal, store replacement and set cc=0 */
             ARCH_DEP(vstore4) ( regs->GR_L(r3+1), effective_addr4, b4, regs );
@@ -411,15 +407,13 @@ VADR op4addr;
 
         /* When in ar mode, ar3 is used to access the
            operand. The alet is fetched from the pl */
-        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
         {
+            if(r3 == 0)
+                ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
             op4alet = ARCH_DEP(vfetch4)(effective_addr4 + 68, b4, regs);
-            if(op4alet)
-            {
-                if(r3 == 0)
-                    ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
-                regs->AR(r3) = op4alet;
-            }
+            regs->AR(r3) = op4alet;
+            INVALIDATE_AEA(r3, regs);
         }
 
         /* Load address of operand 4 */
@@ -432,7 +426,7 @@ VADR op4addr;
         DW_CHECK(op4addr, regs);
 
         /* Load operand 4, using ar3 when in ar mode */
-        op4 = ARCH_DEP(vfetch8)(op4addr, op4alet ? r3 : 0, regs);
+        op4 = ARCH_DEP(vfetch8)(op4addr, r3, regs);
 
         if(op3c != op4)
         {
@@ -448,10 +442,10 @@ VADR op4addr;
 
             /* Verify access to 2nd operand */
             ARCH_DEP(validate_operand) (effective_addr2, b2, 8-1,
-                ACCTYPE_WRITE, regs);
+                ACCTYPE_WRITE_SKP, regs);
 
             /* Store 3rd op replacement at 4th op */
-            ARCH_DEP(vstore8)(op3r, op4addr, op4alet ? r3 : 0, regs);
+            ARCH_DEP(vstore8)(op3r, op4addr, r3, regs);
 
             /* Store 1st op replacement at 2nd op */
             ARCH_DEP(vstore8)(op1r, effective_addr2, b2, regs);
@@ -499,7 +493,7 @@ U64 op2,
         {
             /* Verify access to 2nd operand */
             ARCH_DEP(validate_operand) (effective_addr2, b2, 4-1,
-                ACCTYPE_WRITE, regs);
+                ACCTYPE_WRITE_SKP, regs);
 
             /* If equal, store replacement and set cc=0 */
             ARCH_DEP(vstore8) ( regs->GR_G(r3+1), effective_addr4, b4, regs );
@@ -549,15 +543,13 @@ VADR op4addr;
 
         /* When in ar mode, ar3 is used to access the
            operand. The alet is fetched from the pl */
-        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
         {
+            if(r3 == 0)
+                ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
             op4alet = ARCH_DEP(vfetch4)(effective_addr4 + 68, b4, regs);
-            if(op4alet)
-            {
-                if(r3 == 0)
-                    ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
-                regs->AR(r3) = op4alet;
-            }
+            regs->AR(r3) = op4alet;
+            INVALIDATE_AEA(r3, regs);
         }
 
         /* Load address of operand 4 */
@@ -566,7 +558,7 @@ VADR op4addr;
         DW_CHECK(op4addr, regs);
 
         /* Load operand 4, using ar3 when in ar mode */
-        ARCH_DEP(vfetchc) ( op4, 16-1, op4addr, op4alet ? r3 : 0, regs );
+        ARCH_DEP(vfetchc) ( op4, 16-1, op4addr, r3, regs );
 
         if(memcmp(op3c,op4,16))
         {
@@ -582,10 +574,10 @@ VADR op4addr;
 
             /* Verify access to 2nd operand */
             ARCH_DEP(validate_operand) (effective_addr2, b2, 16-1,
-                ACCTYPE_WRITE, regs);
+                ACCTYPE_WRITE_SKP, regs);
 
             /* Store 3rd op replacement at 4th op */
-            ARCH_DEP(vstorec) ( op3r, 16-1, op4addr, op4alet ? r3 : 0, regs );
+            ARCH_DEP(vstorec) ( op3r, 16-1, op4addr, r3, regs);
 
             /* Store 1st op replacement at 2nd op */
             ARCH_DEP(vstorec) ( op1r, 16-1, effective_addr2, b2, regs);
@@ -615,7 +607,7 @@ U32 op2;
     {
         /* Verify access to 2nd operand */
         ARCH_DEP(validate_operand) (effective_addr2, b2, 4-1,
-            ACCTYPE_WRITE, regs);
+            ACCTYPE_WRITE_SKP, regs);
 
         /* If equal, store replacement and set cc=0 */
         ARCH_DEP(vstore4) ( regs->GR_L(r3), effective_addr4, b4, regs );
@@ -656,19 +648,17 @@ VADR op4addr;
 
         /* Verify access to 2nd operand */
         ARCH_DEP(validate_operand) (effective_addr2, b2, 8-1,
-            ACCTYPE_WRITE, regs);
+            ACCTYPE_WRITE_SKP, regs);
 
         /* When in ar mode, ar3 is used to access the
            operand. The alet is fetched from the pl */
-        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
         {
+            if(r3 == 0)
+                ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
             op4alet = ARCH_DEP(vfetch4)(effective_addr4 + 68, b4, regs);
-            if(op4alet)
-            {
-                if(r3 == 0)
-                    ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
-                regs->AR(r3) = op4alet;
-            }
+            regs->AR(r3) = op4alet;
+            INVALIDATE_AEA(r3, regs);
         }
 
         /* Load address of operand 4 */
@@ -680,7 +670,7 @@ VADR op4addr;
         op4addr &= ADDRESS_MAXWRAP(regs);
         DW_CHECK(op4addr, regs);
 
-        ARCH_DEP(vstore8)(op3, op4addr, op4alet ? r3 : 0, regs);
+        ARCH_DEP(vstore8)(op3, op4addr, r3, regs);
         ARCH_DEP(vstore8)(op1r, effective_addr2, b2, regs);
 
         return 0;
@@ -714,7 +704,7 @@ U64 op2;
     {
         /* Verify access to 2nd operand */
         ARCH_DEP(validate_operand) (effective_addr2, b2, 8-1,
-            ACCTYPE_WRITE, regs);
+            ACCTYPE_WRITE_SKP, regs);
 
         /* If equal, store replacement and set cc=0 */
         ARCH_DEP(vstore8) ( regs->GR_G(r3), effective_addr4, b4, regs );
@@ -757,19 +747,17 @@ VADR op4addr;
 
         /* Verify access to 2nd operand */
         ARCH_DEP(validate_operand) (effective_addr2, b2, 16-1,
-            ACCTYPE_WRITE, regs);
+            ACCTYPE_WRITE_SKP, regs);
 
         /* When in ar mode, ar3 is used to access the
            operand. The alet is fetched from the pl */
-        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
         {
+            if(r3 == 0)
+                ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
             op4alet = ARCH_DEP(vfetch4)(effective_addr4 + 68, b4, regs);
-            if(op4alet)
-            {
-                if(r3 == 0)
-                    ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
-                regs->AR(r3) = op4alet;
-            }
+            regs->AR(r3) = op4alet;
+            INVALIDATE_AEA(r3, regs);
         }
 
         /* Load address of operand 4 */
@@ -777,7 +765,7 @@ VADR op4addr;
         op4addr &= ADDRESS_MAXWRAP(regs);
         DW_CHECK(op4addr, regs);
 
-        ARCH_DEP(vstorec)(op3, 16-1, op4addr, op4alet ? r3 : 0, regs);
+        ARCH_DEP(vstorec)(op3, 16-1, op4addr, r3, regs);
         ARCH_DEP(vstorec)(op1r, 16-1, effective_addr2, b2, regs);
 
         return 0;
@@ -810,28 +798,26 @@ VADR op4addr,
     FW_CHECK(effective_addr4, regs);
 
     op2 = ARCH_DEP(vfetch4)(effective_addr2, b2, regs);
+    op3 = ARCH_DEP(vfetch4)(effective_addr4 + 60, b4, regs);
+    op5 = ARCH_DEP(vfetch4)(effective_addr4 + 92, b4, regs);
 
-    if(regs->GR_L(r1) == op2)
-    {
-        op3 = ARCH_DEP(vfetch4)(effective_addr4 + 60, b4, regs);
-        op5 = ARCH_DEP(vfetch4)(effective_addr4 + 92, b4, regs);
+    if(regs->GR_L(r1) == op2) 
+    { 
 
         /* Verify access to 2nd operand */
         ARCH_DEP(validate_operand) (effective_addr2, b2, 4-1,
-            ACCTYPE_WRITE, regs);
+            ACCTYPE_WRITE_SKP, regs);
 
         /* When in ar mode, ar3 is used to access the
            operand. The alet is fetched from the pl */
-        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
         {
+            if(r3 == 0)
+                ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
             op4alet = ARCH_DEP(vfetch4)(effective_addr4 + 68, b4, regs);
             op6alet = ARCH_DEP(vfetch4)(effective_addr4 + 100, b4, regs);
-            if(op4alet || op6alet)
-            {
-                if(r3 == 0)
-                    ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
-                regs->AR(r3) = op4alet;
-            }
+            regs->AR(r3) = op6alet;
+            INVALIDATE_AEA(r3, regs);
         }
 
         /* Load address of operand 4 */
@@ -852,19 +838,24 @@ VADR op4addr,
         op6addr &= ADDRESS_MAXWRAP(regs);
         FW_CHECK(op6addr, regs);
 
-        /* Verify access to 4th operand */
-        ARCH_DEP(validate_operand) (op4addr, op4alet ? r3 : 0, 4-1,
-            ACCTYPE_WRITE, regs);
-
-        /* Store 5th op at 6th op */
-        if(op6alet)
-            regs->AR(r3) = op6alet;
-        ARCH_DEP(vstore4)(op5, op6addr, op6alet ? r3 : 0, regs);
+        /* Verify access to 6th operand */
+        ARCH_DEP(validate_operand) (op6addr, r3, 4-1,ACCTYPE_WRITE_SKP, regs);
 
         /* Store 3th op at 4th op */
-        if(op4alet)
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
             regs->AR(r3) = op4alet;
-        ARCH_DEP(vstore4)(op3, op4addr, op4alet ? r3 : 0, regs);
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstore4)(op3, op4addr, r3, regs);
+
+        /* Store 5th op at 6th op */
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
+            regs->AR(r3) = op6alet;
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstore4)(op5, op6addr, r3, regs);
 
         /* Store 1st op at 2nd op */
         ARCH_DEP(vstore4)(regs->GR_L(r1+1), effective_addr2, b2, regs);
@@ -907,20 +898,18 @@ VADR op4addr,
 
         /* Verify access to 2nd operand */
         ARCH_DEP(validate_operand) (effective_addr2, b2, 8-1,
-            ACCTYPE_WRITE, regs);
+            ACCTYPE_WRITE_SKP, regs);
 
         /* When in ar mode, ar3 is used to access the
            operand. The alet is fetched from the pl */
-        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
         {
+            if(r3 == 0)
+                ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
             op4alet = ARCH_DEP(vfetch4)(effective_addr4 + 68, b4, regs);
             op6alet = ARCH_DEP(vfetch4)(effective_addr4 + 100, b4, regs);
-            if(op4alet || op6alet)
-            {
-                if(r3 == 0)
-                    ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
-                regs->AR(r3) = op4alet;
-            }
+            regs->AR(r3) = op6alet;
+            INVALIDATE_AEA(r3, regs);
         }
 
         /* Load address of operand 4 */
@@ -941,19 +930,24 @@ VADR op4addr,
         op6addr &= ADDRESS_MAXWRAP(regs);
         DW_CHECK(op6addr, regs);
 
-        /* Verify access to 4th operand */
-        ARCH_DEP(validate_operand) (op4addr, op4alet ? r3 : 0, 8-1,
-            ACCTYPE_WRITE, regs);
-
-        /* Store 5th op at 6th op */
-        if(op6alet)
-            regs->AR(r3) = op6alet;
-        ARCH_DEP(vstore8)(op5, op6addr, op6alet ? r3 : 0, regs);
+        /* Verify access to 6th operand */
+        ARCH_DEP(validate_operand) (op6addr, r3, 8-1, ACCTYPE_WRITE_SKP, regs);
 
         /* Store 3th op at 4th op */
-        if(op4alet)
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
             regs->AR(r3) = op4alet;
-        ARCH_DEP(vstore8)(op3, op4addr, op4alet ? r3 : 0, regs);
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstore8)(op3, op4addr, r3, regs);
+
+        /* Store 5th op at 6th op */
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
+            regs->AR(r3) = op6alet;
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstore8)(op5, op6addr, r3, regs);
 
         /* Store 1st op replacement at 2nd op */
         ARCH_DEP(vstore8)(op1r, effective_addr2, b2, regs);
@@ -994,20 +988,18 @@ VADR op4addr,
 
         /* Verify access to 2nd operand */
         ARCH_DEP(validate_operand) (effective_addr2, b2, 8-1,
-            ACCTYPE_WRITE, regs);
+            ACCTYPE_WRITE_SKP, regs);
 
         /* When in ar mode, ar3 is used to access the
            operand. The alet is fetched from the pl */
-        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
         {
+            if(r3 == 0)
+                ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
             op4alet = ARCH_DEP(vfetch4)(effective_addr4 + 68, b4, regs);
             op6alet = ARCH_DEP(vfetch4)(effective_addr4 + 100, b4, regs);
-            if(op4alet || op6alet)
-            {
-                if(r3 == 0)
-                    ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
-                regs->AR(r3) = op4alet;
-            }
+            regs->AR(r3) = op6alet;
+            INVALIDATE_AEA(r3, regs);
         }
 
         /* Load address of operand 4 */
@@ -1020,19 +1012,24 @@ VADR op4addr,
         op6addr &= ADDRESS_MAXWRAP(regs);
         DW_CHECK(op6addr, regs);
 
-        /* Verify access to 4th operand */
-        ARCH_DEP(validate_operand) (op4addr, op4alet ? r3 : 0, 8-1,
-            ACCTYPE_WRITE, regs);
-
-        /* Store 5th op at 6th op */
-        if(op6alet)
-            regs->AR(r3) = op6alet;
-        ARCH_DEP(vstore8)(op5, op6addr, op6alet ? r3 : 0, regs);
+        /* Verify access to 6th operand */
+        ARCH_DEP(validate_operand) (op6addr, r3, 8-1,ACCTYPE_WRITE_SKP, regs);
 
         /* Store 3th op at 4th op */
-        if(op4alet)
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
             regs->AR(r3) = op4alet;
-        ARCH_DEP(vstore8)(op3, op4addr, op4alet ? r3 : 0, regs);
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstore8)(op3, op4addr, r3, regs);
+
+        /* Store 5th op at 6th op */
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
+            regs->AR(r3) = op6alet;
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstore8)(op5, op6addr, r3, regs);
 
         /* Store 1st op at 2nd op */
         ARCH_DEP(vstore8)(regs->GR_G(r1+1), effective_addr2, b2, regs);
@@ -1077,20 +1074,18 @@ VADR op4addr,
 
         /* Verify access to 2nd operand */
         ARCH_DEP(validate_operand) (effective_addr2, b2, 16-1,
-            ACCTYPE_WRITE, regs);
+            ACCTYPE_WRITE_SKP, regs);
 
         /* When in ar mode, ar3 is used to access the
            operand. The alet is fetched from the pl */
-        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
         {
+            if(r3 == 0)
+                ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
             op4alet = ARCH_DEP(vfetch4)(effective_addr4 + 68, b4, regs);
             op6alet = ARCH_DEP(vfetch4)(effective_addr4 + 100, b4, regs);
-            if(op4alet || op6alet)
-            {
-                if(r3 == 0)
-                    ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
-                regs->AR(r3) = op4alet;
-            }
+            regs->AR(r3) = op6alet;
+            INVALIDATE_AEA(r3, regs);
         }
 
         /* Load address of operand 4 */
@@ -1103,19 +1098,24 @@ VADR op4addr,
         op6addr &= ADDRESS_MAXWRAP(regs);
         DW_CHECK(op6addr, regs);
 
-        /* Verify access to 4th operand */
-        ARCH_DEP(validate_operand) (op4addr, op4alet ? r3 : 0, 16-1,
-            ACCTYPE_WRITE, regs);
-
-        /* Store 5th op at 6th op */
-        if(op6alet)
-            regs->AR(r3) = op6alet;
-        ARCH_DEP(vstorec)(op5, 16-1, op6addr, op6alet ? r3 : 0, regs);
+        /* Verify access to 6th operand */
+        ARCH_DEP(validate_operand) (op6addr, r3, 16-1,ACCTYPE_WRITE_SKP, regs);
 
         /* Store 3th op at 4th op */
-        if(op4alet)
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
             regs->AR(r3) = op4alet;
-        ARCH_DEP(vstorec)(op3, 16-1, op4addr, op4alet ? r3 : 0, regs);
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstorec)(op3, 16-1, op4addr, r3, regs);
+
+        /* Store 5th op at 6th op */
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
+            regs->AR(r3) = op6alet;
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstorec)(op5, 16-1, op6addr, r3, regs);
 
         /* Store 1st op replacement at 2nd op */
         ARCH_DEP(vstorec)(op1r, 16-1, effective_addr2, b2, regs);
@@ -1151,30 +1151,27 @@ VADR op4addr,
     FW_CHECK(effective_addr4, regs);
 
     op2 = ARCH_DEP(vfetch4)(effective_addr2, b2, regs);
+    op3 = ARCH_DEP(vfetch4)(effective_addr4 + 60, b4, regs);
+    op5 = ARCH_DEP(vfetch4)(effective_addr4 + 92, b4, regs);
+    op7 = ARCH_DEP(vfetch4)(effective_addr4 + 124, b4, regs);
 
-    if(regs->GR_L(r1) == op2)
-    {
-        op3 = ARCH_DEP(vfetch4)(effective_addr4 + 60, b4, regs);
-        op5 = ARCH_DEP(vfetch4)(effective_addr4 + 92, b4, regs);
-        op7 = ARCH_DEP(vfetch4)(effective_addr4 + 124, b4, regs);
-
+    if(regs->GR_L(r1) == op2) 
+    { 
         /* Verify access to 2nd operand */
         ARCH_DEP(validate_operand) (effective_addr2, b2, 4-1,
-            ACCTYPE_WRITE, regs);
+            ACCTYPE_WRITE_SKP, regs);
 
         /* When in ar mode, ar3 is used to access the
            operand. The alet is fetched from the pl */
-        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
         {
+            if(r3 == 0)
+                ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
             op4alet = ARCH_DEP(vfetch4)(effective_addr4 + 68, b4, regs);
             op6alet = ARCH_DEP(vfetch4)(effective_addr4 + 100, b4, regs);
             op8alet = ARCH_DEP(vfetch4)(effective_addr4 + 132, b4, regs);
-            if(op4alet || op6alet || op8alet)
-            {
-                if(r3 == 0)
-                    ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
-                regs->AR(r3) = op4alet;
-            }
+            regs->AR(r3) = op8alet;
+            INVALIDATE_AEA(r3, regs);
         }
 
         /* Load address of operand 4 */
@@ -1204,30 +1201,40 @@ VADR op4addr,
         op8addr &= ADDRESS_MAXWRAP(regs);
         FW_CHECK(op8addr, regs);
 
-        /* Verify access to 4th operand */
-        ARCH_DEP(validate_operand) (op4addr, op4alet ? r3 : 0, 4-1,
-            ACCTYPE_WRITE, regs);
+        /* Verify access to 8th operand */
+        ARCH_DEP(validate_operand) (op8addr, r3, 4-1,ACCTYPE_WRITE_SKP, regs);
 
         /* Verify access to 6th operand */
-        if(op6alet)
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
             regs->AR(r3) = op6alet;
-        ARCH_DEP(validate_operand) (op6addr, op6alet ? r3 : 0, 4-1,
-            ACCTYPE_WRITE, regs);
-
-        /* Store 7th op at 8th op */
-        if(op8alet)
-            regs->AR(r3) = op8alet;
-        ARCH_DEP(vstore4)(op7, op8addr, op8alet ? r3 : 0, regs);
-
-        /* Store 5th op at 6th op */
-        if(op6alet)
-            regs->AR(r3) = op6alet;
-        ARCH_DEP(vstore4)(op5, op6addr, op6alet ? r3 : 0, regs);
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(validate_operand) (op6addr, r3, 4-1, ACCTYPE_WRITE_SKP, regs);
 
         /* Store 3rd op at 4th op */
-        if(op4alet)
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
             regs->AR(r3) = op4alet;
-        ARCH_DEP(vstore4)(op3, op4addr, op4alet ? r3 : 0, regs);
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstore4)(op3, op4addr, r3, regs);
+
+        /* Store 5th op at 6th op */
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
+            regs->AR(r3) = op6alet;
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstore4)(op5, op6addr, r3, regs);
+
+        /* Store 7th op at 8th op */
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
+            regs->AR(r3) = op8alet;
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstore4)(op7, op8addr, r3, regs);
 
         /* Store 1st op replacement at 2nd op */
         ARCH_DEP(vstore4)(regs->GR_L(r1+1), effective_addr2, b2, regs);
@@ -1274,21 +1281,19 @@ VADR op4addr,
 
         /* Verify access to 2nd operand */
         ARCH_DEP(validate_operand) (effective_addr2, b2, 8-1,
-            ACCTYPE_WRITE, regs);
+            ACCTYPE_WRITE_SKP, regs);
 
         /* When in ar mode, ar3 is used to access the
            operand. The alet is fetched from the pl */
-        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
         {
+            if(r3 == 0)
+                ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
             op4alet = ARCH_DEP(vfetch4)(effective_addr4 + 68, b4, regs);
             op6alet = ARCH_DEP(vfetch4)(effective_addr4 + 100, b4, regs);
             op8alet = ARCH_DEP(vfetch4)(effective_addr4 + 132, b4, regs);
-            if(op4alet || op6alet || op8alet)
-            {
-                if(r3 == 0)
-                    ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
-                regs->AR(r3) = op4alet;
-            }
+            regs->AR(r3) = op8alet;
+            INVALIDATE_AEA(r3, regs);
         }
 
         /* Load address of operand 4 */
@@ -1318,30 +1323,40 @@ VADR op4addr,
         op8addr &= ADDRESS_MAXWRAP(regs);
         DW_CHECK(op8addr, regs);
 
-        /* Verify access to 4th operand */
-        ARCH_DEP(validate_operand) (op4addr, op4alet ? r3 : 0, 8-1,
-            ACCTYPE_WRITE, regs);
+        /* Verify access to 8th operand */
+        ARCH_DEP(validate_operand) (op8addr, r3, 8-1,ACCTYPE_WRITE_SKP, regs);
 
         /* Verify access to 6th operand */
-        if(op6alet)
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
             regs->AR(r3) = op6alet;
-        ARCH_DEP(validate_operand) (op6addr, op6alet ? r3 : 0, 8-1,
-            ACCTYPE_WRITE, regs);
-
-        /* Store 7th op at 8th op */
-        if(op8alet)
-            regs->AR(r3) = op8alet;
-        ARCH_DEP(vstore8)(op7, op8addr, op8alet ? r3 : 0, regs);
-
-        /* Store 5th op at 6th op */
-        if(op6alet)
-            regs->AR(r3) = op6alet;
-        ARCH_DEP(vstore8)(op5, op6addr, op6alet ? r3 : 0, regs);
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(validate_operand) (op6addr, r3, 8-1,ACCTYPE_WRITE_SKP, regs);
 
         /* Store 3th op at 4th op */
-        if(op4alet)
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
             regs->AR(r3) = op4alet;
-        ARCH_DEP(vstore8)(op3, op4addr, op4alet ? r3 : 0, regs);
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstore8)(op3, op4addr, r3, regs);
+
+        /* Store 5th op at 6th op */
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
+            regs->AR(r3) = op6alet;
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstore8)(op5, op6addr, r3, regs);
+
+        /* Store 7th op at 8th op */
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
+            regs->AR(r3) = op8alet;
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstore8)(op7, op8addr, r3, regs);
 
         /* Store 1st op replacement value at 2nd op */
         ARCH_DEP(vstore8)(op1r, effective_addr2, b2, regs);
@@ -1386,21 +1401,19 @@ VADR op4addr,
 
         /* Verify access to 2nd operand */
         ARCH_DEP(validate_operand) (effective_addr2, b2, 8-1,
-            ACCTYPE_WRITE, regs);
+            ACCTYPE_WRITE_SKP, regs);
 
         /* When in ar mode, ar3 is used to access the
            operand. The alet is fetched from the pl */
-        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
         {
+            if(r3 == 0)
+                ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
             op4alet = ARCH_DEP(vfetch4)(effective_addr4 + 68, b4, regs);
             op6alet = ARCH_DEP(vfetch4)(effective_addr4 + 100, b4, regs);
             op8alet = ARCH_DEP(vfetch4)(effective_addr4 + 132, b4, regs);
-            if(op4alet || op6alet || op8alet)
-            {
-                if(r3 == 0)
-                    ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
-                regs->AR(r3) = op4alet;
-            }
+            regs->AR(r3) = op8alet;
+            INVALIDATE_AEA(r3, regs);
         }
 
         /* Load address of operand 4 */
@@ -1418,30 +1431,40 @@ VADR op4addr,
         op8addr &= ADDRESS_MAXWRAP(regs);
         DW_CHECK(op8addr, regs);
 
-        /* Verify access to 4th operand */
-        ARCH_DEP(validate_operand) (op4addr, op4alet ? r3 : 0, 8-1,
-            ACCTYPE_WRITE, regs);
+        /* Verify access to 8th operand */
+        ARCH_DEP(validate_operand) (op8addr, r3, 8-1,ACCTYPE_WRITE_SKP, regs);
 
         /* Verify access to 6th operand */
-        if(op6alet)
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
             regs->AR(r3) = op6alet;
-        ARCH_DEP(validate_operand) (op6addr, op6alet ? r3 : 0, 8-1,
-            ACCTYPE_WRITE, regs);
-
-        /* Store 7th op at 8th op */
-        if(op8alet)
-            regs->AR(r3) = op8alet;
-        ARCH_DEP(vstore8)(op7, op8addr, op8alet ? r3 : 0, regs);
-
-        /* Store 5th op at 6th op */
-        if(op6alet)
-            regs->AR(r3) = op6alet;
-        ARCH_DEP(vstore8)(op5, op6addr, op6alet ? r3 : 0, regs);
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(validate_operand) (op6addr, r3, 8-1,ACCTYPE_WRITE_SKP, regs);
 
         /* Store 3rd op at 4th op */
-        if(op4alet)
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
             regs->AR(r3) = op4alet;
-        ARCH_DEP(vstore8)(op3, op4addr, op4alet ? r3 : 0, regs);
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstore8)(op3, op4addr, r3, regs);
+
+        /* Store 5th op at 6th op */
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
+            regs->AR(r3) = op6alet;
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstore8)(op5, op6addr, r3, regs);
+
+        /* Store 7th op at 8th op */
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
+            regs->AR(r3) = op8alet;
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstore8)(op7, op8addr, r3, regs);
 
         /* Store 1st op replacement at 2nd op */
         ARCH_DEP(vstore8)(regs->GR_G(r1+1), effective_addr2, b2, regs);
@@ -1490,21 +1513,19 @@ VADR op4addr,
 
         /* Verify access to 2nd operand */
         ARCH_DEP(validate_operand) (effective_addr2, b2, 16-1,
-            ACCTYPE_WRITE, regs);
+            ACCTYPE_WRITE_SKP, regs);
 
         /* When in ar mode, ar3 is used to access the
            operand. The alet is fetched from the pl */
-        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
         {
+            if(r3 == 0)
+                ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
             op4alet = ARCH_DEP(vfetch4)(effective_addr4 + 68, b4, regs);
             op6alet = ARCH_DEP(vfetch4)(effective_addr4 + 100, b4, regs);
             op8alet = ARCH_DEP(vfetch4)(effective_addr4 + 132, b4, regs);
-            if(op4alet || op6alet || op8alet)
-            {
-                if(r3 == 0)
-                                    ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
-                regs->AR(r3) = op4alet;
-            }
+            regs->AR(r3) = op8alet;
+            INVALIDATE_AEA(r3, regs);
         }
 
         /* Load address of operand 4 */
@@ -1522,30 +1543,40 @@ VADR op4addr,
         op8addr &= ADDRESS_MAXWRAP(regs);
         DW_CHECK(op8addr, regs);
 
-        /* Verify access to 4th operand */
-        ARCH_DEP(validate_operand) (op4addr, op4alet ? r3 : 0, 16-1,
-            ACCTYPE_WRITE, regs);
+        /* Verify access to 8th operand */
+        ARCH_DEP(validate_operand) (op8addr, r3, 16-1,ACCTYPE_WRITE_SKP, regs);
 
         /* Verify access to 6th operand */
-        if(op6alet)
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
             regs->AR(r3) = op6alet;
-        ARCH_DEP(validate_operand) (op6addr, op6alet ? r3 : 0, 16-1,
-            ACCTYPE_WRITE, regs);
-
-        /* Store 7th op at 8th op */
-        if(op8alet)
-            regs->AR(r3) = op8alet;
-        ARCH_DEP(vstorec)(op7, 16-1, op8addr, op8alet ? r3 : 0, regs);
-
-        /* Store 5th op at 6th op */
-        if(op6alet)
-            regs->AR(r3) = op6alet;
-        ARCH_DEP(vstorec)(op5, 16-1, op6addr, op6alet ? r3 : 0, regs);
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(validate_operand) (op6addr, r3, 16-1, ACCTYPE_WRITE_SKP, regs);
 
         /* Store 3th op at 4th op */
-        if(op4alet)
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
             regs->AR(r3) = op4alet;
-        ARCH_DEP(vstorec)(op3, 16-1, op4addr, op4alet ? r3 : 0, regs);
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstorec)(op3, 16-1, op4addr, r3, regs);
+
+        /* Store 5th op at 6th op */
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
+            regs->AR(r3) = op6alet;
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstorec)(op5, 16-1, op6addr, r3, regs);
+
+        /* Store 7th op at 8th op */
+        if(!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        {
+            regs->AR(r3) = op8alet;
+            INVALIDATE_AEA(r3, regs);
+        }
+        ARCH_DEP(vstorec)(op7, 16-1, op8addr, r3, regs);
 
         /* Store 1st op replacement value at 2nd op */
         ARCH_DEP(vstorec)(op1r, 16-1, effective_addr2, b2, regs);

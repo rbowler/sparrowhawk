@@ -5,7 +5,7 @@
 /* This module contains device handling functions for emulated       */
 /* 3420 magnetic tape devices for the Hercules ESA/390 emulator.     */
 /*                                                                   */
-/* Three emulated tape formats are supported:                        */
+/* Four emulated tape formats are supported:                         */
 /* 1. AWSTAPE   This is the format used by the P/390.                */
 /*              The entire tape is contained in a single flat file.  */
 /*              Each tape block is preceded by a 6-byte header.      */
@@ -1263,7 +1263,7 @@ long            density;                /* Tape density code         */
 
     if (tapeinfo[i].t_name != NULL)
         logmsg ("HHC218I %s device type: %s\n",
-                dev->filename, tapeinfo[i].t_name)
+                dev->filename, tapeinfo[i].t_name);
     else
         logmsg ("HHC219I %s device type: 0x%lX\n",
                 dev->filename, stblk.mt_type);
@@ -1276,7 +1276,7 @@ long            density;                /* Tape density code         */
 
     if (densinfo[i].t_name != NULL)
         logmsg ("HHC220I %s tape density: %s\n",
-                dev->filename, densinfo[i].t_name)
+                dev->filename, densinfo[i].t_name);
     else
         logmsg ("HHC221I %s tape density code: 0x%lX\n",
                 dev->filename, density);

@@ -263,20 +263,25 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     akey = regs->psw.pkey;
 
     /* Translate addresses of leftmost operand bytes */
-    abs1 = LOGICAL_TO_ABS (effective_addr1, b1, regs, ACCTYPE_WRITE, akey);
+    abs1 = LOGICAL_TO_ABS_SKP (effective_addr1, b1, regs, ACCTYPE_WRITE_SKP, akey);
     abs2 = LOGICAL_TO_ABS (effective_addr2, b2, regs, ACCTYPE_READ, akey);
 
     /* Calculate page addresses of rightmost operand bytes */
     npv1 = (effective_addr1 + l) & ADDRESS_MAXWRAP(regs);
-    npv1 &= PAGEFRAME_PAGEMASK;
+    npv1 &= ~0x7FF;
     npv2 = (effective_addr2 + l) & ADDRESS_MAXWRAP(regs);
-    npv2 &= PAGEFRAME_PAGEMASK;
+    npv2 &= ~0x7FF;
 
     /* Translate next page addresses if page boundary crossed */
-    if (npv1 != (effective_addr1 & PAGEFRAME_PAGEMASK))
-        npa1 = LOGICAL_TO_ABS (npv1, b1, regs, ACCTYPE_WRITE, akey);
-    if (npv2 != (effective_addr2 & PAGEFRAME_PAGEMASK))
+    if (npv1 != (effective_addr1 & ~0x7FF))
+        npa1 = LOGICAL_TO_ABS_SKP (npv1, b1, regs, ACCTYPE_WRITE_SKP, akey);
+    if (npv2 != (effective_addr2 & ~0x7FF))
         npa2 = LOGICAL_TO_ABS (npv2, b2, regs, ACCTYPE_READ, akey);
+
+    /* all operands and page crossers valid, now alter ref & chg bits */
+    STORAGE_KEY(abs1) |= (STORKEY_REF | STORKEY_CHANGE);
+    if (npa1)
+        STORAGE_KEY(npa1) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Process operands from left to right */
     for ( i = 0; i <= l; i++ )
@@ -540,7 +545,8 @@ VADR    newia;                          /* New instruction address   */
     if ( r1 != 0 )
     {
 #if defined(FEATURE_ESAME)
-        regs->GR_LHLCL(r1) &= 0xFE;
+        /* Z/Pops seems to be in error about this */
+//      regs->GR_LHLCL(r1) &= 0xFE;
         if ( regs->psw.amode64 )
             regs->GR_LHLCL(r1) |= 0x01;
         else
@@ -1101,6 +1107,12 @@ U32     n;                              /* 32-bit operand value      */
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
+#if defined(MODEL_DEPENDENT_CS)
+    /* Some models always store, so validate as a store operand, if desired */
+    n = LOGICAL_TO_ABS (effective_addr2, b2, regs, ACCTYPE_WRITE,
+                                                       regs->psw.pkey);
+#endif /*defined(MODEL_DEPENDENT_CS)*/
+
     /* Load second operand from operand address  */
     n = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
 
@@ -1124,7 +1136,7 @@ U32     n;                              /* 32-bit operand value      */
     /* Perform serialization after completing operation */
     PERFORM_SERIALIZATION (regs);
 
-#if MAX_CPU_ENGINES > 1
+#if MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP)
     /* It this is a failed compare and swap
        and there is more then 1 CPU in the configuration
        and there is no broadcast synchronization in progress
@@ -1133,7 +1145,7 @@ U32     n;                              /* 32-bit operand value      */
        the physical CPU on a spinlock */
     if(regs->psw.cc && sysblk.numcpu > 1)
         usleep(1L);
-#endif MAX_CPU_ENGINES > 1
+#endif /* MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP) */
 
 #if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CS1))
@@ -1164,6 +1176,12 @@ U32     n1, n2;                         /* 32-bit operand values     */
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
+#if defined(MODEL_DEPENDENT_CS)
+    /* Some models always store, so validate as a store operand, if desired */
+    n1 = LOGICAL_TO_ABS (effective_addr2, b2, regs, ACCTYPE_WRITE,
+                                                       regs->psw.pkey);
+#endif /*defined(MODEL_DEPENDENT_CS)*/
+
     /* Load second operand from operand address  */
     n1 = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
     n2 = ARCH_DEP(vfetch4) ( effective_addr2 + 4, b2, regs );
@@ -1190,7 +1208,7 @@ U32     n1, n2;                         /* 32-bit operand values     */
     /* Perform serialization after completing operation */
     PERFORM_SERIALIZATION (regs);
 
-#if MAX_CPU_ENGINES > 1
+#if MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP)
     /* It this is a failed compare and swap
        and there is more then 1 CPU in the configuration
        and there is no broadcast synchronization in progress
@@ -1199,7 +1217,7 @@ U32     n1, n2;                         /* 32-bit operand values     */
        the physical CPU on a spinlock */
     if(regs->psw.cc && sysblk.numcpu > 1)
         usleep(1L);
-#endif MAX_CPU_ENGINES > 1
+#endif /* MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP) */
 
 #if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CDS1))
@@ -1356,6 +1374,10 @@ int     i;                              /* Integer work areas        */
     /* Load value from register */
     n = regs->GR_L(r1);
 
+    /* if mask is zero, access rupts recognized for 1 byte */
+    if (r3 == 0)
+            sbyte = ARCH_DEP(vfetchb) ( effective_addr2, b2, regs );
+
     /* Compare characters in register with operand characters */
     for ( i = 0; i < 4; i++ )
     {
@@ -1440,6 +1462,16 @@ BYTE    pad;                            /* Padding byte              */
             addr2++;
             addr2 &= ADDRESS_MAXWRAP(regs);
             len2--;
+        }
+
+        /* Update Regs if cross half page - may get access rupt */
+        if ((addr1 & 0x7ff) == 0 || (addr2 & 0x7ff) == 0)
+        {
+            GR_A(r1, regs) = addr1;
+            GR_A(r2, regs) = addr2;
+
+            regs->GR_LA24(r1+1) = len1;
+            regs->GR_LA24(r2+1) = len2;
         }
 
         /* The instruction can be interrupted when a CPU determined
@@ -1597,7 +1629,7 @@ BYTE    termchar;                       /* Terminating character     */
         /* If first operand byte is the terminating character,
            or if the first operand byte is lower than the
            second operand byte, then return condition code 1 */
-        if (byte1 == termchar || byte1 < byte2)
+        if (byte1 == termchar || ((byte1 < byte2) && (byte2 != termchar)))
         {
             cc = 1;
             break;
@@ -1666,6 +1698,10 @@ S32     remlen1, remlen2;               /* Lengths remaining         */
     addr1 = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
     addr2 = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
 
+    /* update regs so unused bits zeroed */
+    GR_A(r1, regs) = addr1;
+    GR_A(r2, regs) = addr2;
+
     /* Load signed operand lengths from R1+1 and R2+1 */
     len1 =
 #if defined(FEATURE_ESAME)
@@ -1683,6 +1719,7 @@ S32     remlen1, remlen2;               /* Lengths remaining         */
     eqaddr2 = addr2;
     remlen1 = len1;
     remlen2 = len2;
+
     /* If substring length is zero, exit with condition code 0 */
     if (sublen == 0)
     {
@@ -1691,22 +1728,22 @@ S32     remlen1, remlen2;               /* Lengths remaining         */
     }
 
     /* If both operand lengths are zero, exit with condition code 2 */
-    if (len1 == 0 && len2 == 0)
+    if (len1 <= 0 && len2 <= 0)
     {
         regs->psw.cc = 2;
         return;
     }
+ 
+    /* If r1=r2, exit with condition code 0 or 1*/ 
+    if (r1 == r2) 
+    { 
+        regs->psw.cc = (len1 < sublen) ? 1 : 0; 
+        return; 
+    } 
 
     /* Process operands from left to right */
     for (i = 0; len1 > 0 || len2 > 0 ; i++)
     {
-        /* If equal byte count has reached substring length
-           exit with condition code zero */
-        if (equlen == sublen)
-        {
-            cc = 0;
-            break;
-        }
 
         /* If 4096 bytes have been compared, and the last bytes
            compared were unequal, exit with condition code 3 */
@@ -1770,6 +1807,27 @@ S32     remlen1, remlen2;               /* Lengths remaining         */
             len2--;
         }
 
+
+        /* update GPRs if we just crossed half page - could get rupt */
+        if ((addr1 & 0x7FF) == 0 || (addr2 & 0x7FF) == 0)
+            {
+                /* Update R1 and R2 to point to next bytes to compare */
+                GR_A(r1, regs) = addr1;
+                GR_A(r2, regs) = addr2;
+
+                /* Set R1+1 and R2+1 to remaining operand lengths */
+                GR_A(r1+1, regs) = len1;
+                GR_A(r2+1, regs) = len2;
+            }
+
+        /* If equal byte count has reached substring length
+           exit with condition code zero */
+        if (equlen == sublen)
+        {
+            cc = 0;
+            break;
+        }
+
     } /* end for(i) */
 
     /* Update the registers */
@@ -1831,6 +1889,9 @@ BYTE    utf[4];                         /* UTF-8 bytes               */
     /* Load operand lengths from bits 0-31 of R1+1 and R2+1 */
     len1 = GR_A(r1+1, regs);
     len2 = GR_A(r2+1, regs);
+
+    if (len1 == 0 && len2 > 1)
+        cc = 1;
 
     /* Process operands from left to right */
     for (i = 0; len1 > 0 && len2 > 0; i++)
@@ -1908,7 +1969,7 @@ BYTE    utf[4];                         /* UTF-8 bytes               */
         addr1 += n + 1;
         addr1 &= ADDRESS_MAXWRAP(regs);
         len1 -= n + 1;
-
+        
         /* Update operand 2 address and length */
         addr2 = naddr2;
         len2 = nlen2;
@@ -1918,6 +1979,9 @@ BYTE    utf[4];                         /* UTF-8 bytes               */
         GR_A(r1+1, regs) = len1;
         GR_A(r2, regs) = addr2;
         GR_A(r2+1, regs) = len2;
+
+        if (len1 == 0)
+            cc = 1;
 
     } /* end for(i) */
 
@@ -1954,6 +2018,9 @@ BYTE    utf[4];                         /* UTF-8 bytes               */
     /* Load operand lengths from bits 0-31 of R1+1 and R2+1 */
     len1 = GR_A(r1+1, regs);
     len2 = GR_A(r2+1, regs);
+
+    if (len1 == 0 && len2 > 0)
+        cc = 1;
 
     /* Process operands from left to right */
     for (i = 0; len1 > 0 && len2 > 0; i++)
@@ -2015,8 +2082,8 @@ BYTE    utf[4];                         /* UTF-8 bytes               */
             ARCH_DEP(vfetchc) ( utf, n, addr2, r2, regs );
 
             /* Convert F0xxxxxx-F7xxxxxx to Unicode surrogate pair */
-            uvwxy = (((U16)(utf[0] & 0x07) << 2)
-                        | ((U16)(utf[1] & 0x30) >> 4)) - 1;
+            uvwxy = ((((U16)(utf[0] & 0x07) << 2)
+                        | ((U16)(utf[1] & 0x30) >> 4)) - 1) & 0x0F;
             unicode1 = 0xD800 | (uvwxy << 6) | ((U16)(utf[1] & 0x0F) << 2)
                         | ((U16)(utf[2] & 0x30) >> 4);
             unicode2 = 0xDC00 | ((U16)(utf[2] & 0x0F) << 6)
@@ -2073,6 +2140,9 @@ BYTE    utf[4];                         /* UTF-8 bytes               */
         GR_A(r1+1, regs) = len1;
         GR_A(r2, regs) = addr2;
         GR_A(r2+1, regs) = len2;
+
+        if (len1 == 0)
+            cc = 1;
 
     } /* end for(i) */
 
@@ -2147,6 +2217,7 @@ BYTE    sbyte;                          /* Source operand byte       */
 
         /* Increment operand address */
         effective_addr2++;
+        effective_addr2 &= ADDRESS_MAXWRAP(regs);
 
     } /* end for(i) */
 
@@ -2375,20 +2446,25 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     akey = regs->psw.pkey;
 
     /* Translate addresses of leftmost operand bytes */
-    abs1 = LOGICAL_TO_ABS (effective_addr1, b1, regs, ACCTYPE_WRITE, akey);
+    abs1 = LOGICAL_TO_ABS_SKP (effective_addr1, b1, regs, ACCTYPE_WRITE_SKP, akey);
     abs2 = LOGICAL_TO_ABS (effective_addr2, b2, regs, ACCTYPE_READ, akey);
 
     /* Calculate page addresses of rightmost operand bytes */
     npv1 = (effective_addr1 + l) & ADDRESS_MAXWRAP(regs);
-    npv1 &= PAGEFRAME_PAGEMASK;
+    npv1 &= ~0x7FF;
     npv2 = (effective_addr2 + l) & ADDRESS_MAXWRAP(regs);
-    npv2 &= PAGEFRAME_PAGEMASK;
+    npv2 &= ~0x7FF;
 
     /* Translate next page addresses if page boundary crossed */
-    if (npv1 != (effective_addr1 & PAGEFRAME_PAGEMASK))
-        npa1 = LOGICAL_TO_ABS (npv1, b1, regs, ACCTYPE_WRITE, akey);
-    if (npv2 != (effective_addr2 & PAGEFRAME_PAGEMASK))
+    if (npv1 != (effective_addr1 & ~0x7FF))
+        npa1 = LOGICAL_TO_ABS_SKP (npv1, b1, regs, ACCTYPE_WRITE_SKP, akey);
+    if (npv2 != (effective_addr2 & ~0x7FF))
         npa2 = LOGICAL_TO_ABS (npv2, b2, regs, ACCTYPE_READ, akey);
+
+    /* all operands and page crossers valid, now alter ref & chg bits */
+    STORAGE_KEY(abs1) |= (STORKEY_REF | STORKEY_CHANGE);
+    if (npa1)
+        STORAGE_KEY(npa1) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Process operands from left to right */
     for ( i = 0; i <= l; i++ )
@@ -2454,6 +2530,7 @@ VADR    effective_addr2;                /* Effective address         */
 
     /* Fetch target instruction from operand address */
     INSTRUCTION_FETCH(regs->exinst, effective_addr2, regs);
+    INVALIDATE_AIA(regs);
 
     /* Program check if recursive execute */
     if ( regs->exinst[0] == 0x44 )
@@ -2951,10 +3028,16 @@ int     i;                              /* Integer work areas        */
     SS_L(inst, execflag, regs, l, b1, effective_addr1,
                                   b2, effective_addr2);
 
-    /* Validate the operands for addressing and protection */
-    ARCH_DEP(validate_operand) (effective_addr1, b1, l, ACCTYPE_WRITE, regs);
+    /* If operand 1 crosses a page, make sure both pages are accessable */
+    if((effective_addr1 & PAGEFRAME_PAGEMASK) !=
+        ((effective_addr1 + l) & PAGEFRAME_PAGEMASK))
+        ARCH_DEP(validate_operand) (effective_addr1, b1, l, ACCTYPE_WRITE_SKP, regs);
+
+    /* If operand 2 crosses a page, make sure both pages are accessable */
     n = (effective_addr2 - l) & ADDRESS_MAXWRAP(regs);
-    ARCH_DEP(validate_operand) (n, b2, l, ACCTYPE_READ, regs);
+    if((n & PAGEFRAME_PAGEMASK) !=
+        ((n + l) & PAGEFRAME_PAGEMASK))
+        ARCH_DEP(validate_operand) (n, b2, l, ACCTYPE_READ, regs);
 
     /* Process the destination operand from left to right,
        and the source operand from right to left */
@@ -3000,8 +3083,8 @@ GREG    len3;
     ODD2_CHECK(r1, r2, regs);
 
     /* Determine the destination and source addresses */
-    addr1 = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
-    addr2 = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
+    addr1 = regs->GR(r1) = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
+    addr2 = regs->GR(r2) = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
 
     /* Load padding byte from bits 0-7 of R2+1 register */
     pad = regs->GR_LHHCH(r2+1);
@@ -3093,6 +3176,36 @@ GREG    len3;
         return;
     }
 
+    if ((len1 >= 256) && (len2 >= 256) && 
+                  ((addr1 & PAGEFRAME_PAGEMASK) ==
+                   ((addr1 + 255) & PAGEFRAME_PAGEMASK)) && 
+                  ((addr2 & PAGEFRAME_PAGEMASK) ==
+                   ((addr2 + 255) & PAGEFRAME_PAGEMASK)))
+    {
+        abs2 = LOGICAL_TO_ABS (addr2, r2, regs, ACCTYPE_READ, regs->psw.pkey);
+        abs1 = LOGICAL_TO_ABS (addr1, r1, regs, ACCTYPE_WRITE, regs->psw.pkey);
+
+        memcpy(sysblk.mainstor+abs1, sysblk.mainstor+abs2, 256);
+
+        /* Update the registers */
+        GR_A(r1, regs) = addr1 + 256;
+        regs->GR_LA24(r1+1) -= 256;
+        if (r1 != r2)
+        {
+            GR_A(r2, regs) = addr2 + 256;
+            regs->GR_LA24(r2+1) -= 256;
+        }
+        if (regs->GR_LA24(r1+1) ||
+            regs->GR_LA24(r2+1))
+        {
+            regs->psw.IA -= regs->psw.ilc;
+            regs->psw.IA &= ADDRESS_MAXWRAP(regs);
+        }
+        else
+            regs->psw.cc = cc;
+        return;
+    }
+
 #endif
 
     /* Process operands from left to right */
@@ -3155,6 +3268,7 @@ VADR    addr1, addr2;                   /* Operand addresses         */
 GREG    len1, len2;                     /* Operand lengths           */
 BYTE    obyte;                          /* Operand byte              */
 BYTE    pad;                            /* Padding byte              */
+int     cpu_length;                     /* cpu determined length     */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -3171,14 +3285,20 @@ BYTE    pad;                            /* Padding byte              */
     len1 = GR_A(r1+1, regs);
     len2 = GR_A(r3+1, regs);
 
+    /* set cpu_length as shortest distance to new page */
+    if ((addr1 & 0xFFF) > (addr2 & 0xFFF))
+        cpu_length = 0x1000 - (addr1 & 0xFFF);
+    else
+        cpu_length = 0x1000 - (addr2 & 0xFFF);
+
     /* Set the condition code according to the lengths */
     cc = (len1 < len2) ? 1 : (len1 > len2) ? 2 : 0;
 
     /* Process operands from left to right */
     for (i = 0; len1 > 0; i++)
     {
-        /* If 4096 bytes have been moved, exit with cc=3 */
-        if (i >= 4096)
+        /* If cpu determined length has been moved, exit with cc=3 */
+        if (i >= cpu_length)
         {
             cc = 3;
             break;
@@ -3238,20 +3358,25 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     akey = regs->psw.pkey;
 
     /* Translate addresses of leftmost operand bytes */
-    abs1 = LOGICAL_TO_ABS (effective_addr1, b1, regs, ACCTYPE_WRITE, akey);
+    abs1 = LOGICAL_TO_ABS_SKP (effective_addr1, b1, regs, ACCTYPE_WRITE_SKP, akey);
     abs2 = LOGICAL_TO_ABS (effective_addr2, b2, regs, ACCTYPE_READ, akey);
 
     /* Calculate page addresses of rightmost operand bytes */
     npv1 = (effective_addr1 + l) & ADDRESS_MAXWRAP(regs);
-    npv1 &= PAGEFRAME_PAGEMASK;
+    npv1 &= ~0x7FF;
     npv2 = (effective_addr2 + l) & ADDRESS_MAXWRAP(regs);
-    npv2 &= PAGEFRAME_PAGEMASK;
+    npv2 &= ~0x7FF;
 
     /* Translate next page addresses if page boundary crossed */
-    if (npv1 != (effective_addr1 & PAGEFRAME_PAGEMASK))
-        npa1 = LOGICAL_TO_ABS (npv1, b1, regs, ACCTYPE_WRITE, akey);
-    if (npv2 != (effective_addr2 & PAGEFRAME_PAGEMASK))
+    if (npv1 != (effective_addr1 & ~0x7FF))
+        npa1 = LOGICAL_TO_ABS_SKP (npv1, b1, regs, ACCTYPE_WRITE_SKP, akey);
+    if (npv2 != (effective_addr2 & ~0x7FF))
         npa2 = LOGICAL_TO_ABS (npv2, b2, regs, ACCTYPE_READ, akey);
+
+    /* all operands and page crossers valid, now alter ref & chg bits */
+    STORAGE_KEY(abs1) |= (STORKEY_REF | STORKEY_CHANGE);
+    if (npa1)
+        STORAGE_KEY(npa1) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Process operands from left to right */
     for ( i = 0; i <= l; i++ )
@@ -3299,6 +3424,7 @@ int     i;                              /* Loop counter              */
 VADR    addr1, addr2;                   /* Operand addresses         */
 BYTE    sbyte;                          /* String character          */
 BYTE    termchar;                       /* Terminating character     */
+int     cpu_length;                     /* length to next page       */
 
     RRE(inst, execflag, regs, r1, r2);
 
@@ -3313,8 +3439,14 @@ BYTE    termchar;                       /* Terminating character     */
     addr1 = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
     addr2 = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
 
+    /* set cpu_length as shortest distance to new page */
+    if ((addr1 & 0xFFF) > (addr2 & 0xFFF))
+        cpu_length = 0x1000 - (addr1 & 0xFFF);
+    else
+        cpu_length = 0x1000 - (addr2 & 0xFFF);
+
     /* Move up to 4096 bytes until terminating character */
-    for (i = 0; i < 4096; i++)
+    for (i = 0; i < cpu_length; i++)
     {
         /* Fetch a byte from the source operand */
         sbyte = ARCH_DEP(vfetchb) ( addr2, r2, regs );
@@ -3367,8 +3499,14 @@ BYTE    dbyte;                          /* Destination operand byte  */
     SS(inst, execflag, regs, l1, l2, b1, effective_addr1,
                                      b2, effective_addr2);
 
-    /* Validate the operands for addressing and protection */
-    ARCH_DEP(validate_operand) (effective_addr1, b1, l1, ACCTYPE_WRITE, regs);
+    /* If operand 1 crosses a page, make sure both pages are accessable */
+    if((effective_addr1 & PAGEFRAME_PAGEMASK) !=
+        ((effective_addr1 + l1) & PAGEFRAME_PAGEMASK))
+        ARCH_DEP(validate_operand) (effective_addr1, b1, l1, ACCTYPE_WRITE_SKP, regs);
+
+    /* If operand 2 crosses a page, make sure both pages are accessable */
+    if((effective_addr2 & PAGEFRAME_PAGEMASK) !=
+        ((effective_addr2 + l2) & PAGEFRAME_PAGEMASK))
     ARCH_DEP(validate_operand) (effective_addr2, b2, l2, ACCTYPE_READ, regs);
 
     /* Fetch the rightmost byte from the source operand */
@@ -3433,20 +3571,25 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     akey = regs->psw.pkey;
 
     /* Translate addresses of leftmost operand bytes */
-    abs1 = LOGICAL_TO_ABS (effective_addr1, b1, regs, ACCTYPE_WRITE, akey);
+    abs1 = LOGICAL_TO_ABS_SKP (effective_addr1, b1, regs, ACCTYPE_WRITE_SKP, akey);
     abs2 = LOGICAL_TO_ABS (effective_addr2, b2, regs, ACCTYPE_READ, akey);
 
     /* Calculate page addresses of rightmost operand bytes */
     npv1 = (effective_addr1 + l) & ADDRESS_MAXWRAP(regs);
-    npv1 &= PAGEFRAME_PAGEMASK;
+    npv1 &= ~0x7FF;
     npv2 = (effective_addr2 + l) & ADDRESS_MAXWRAP(regs);
-    npv2 &= PAGEFRAME_PAGEMASK;
+    npv2 &= ~0x7FF;
 
     /* Translate next page addresses if page boundary crossed */
-    if (npv1 != (effective_addr1 & PAGEFRAME_PAGEMASK))
-        npa1 = LOGICAL_TO_ABS (npv1, b1, regs, ACCTYPE_WRITE, akey);
-    if (npv2 != (effective_addr2 & PAGEFRAME_PAGEMASK))
+    if (npv1 != (effective_addr1 & ~0x7FF))
+        npa1 = LOGICAL_TO_ABS_SKP (npv1, b1, regs, ACCTYPE_WRITE_SKP, akey);
+    if (npv2 != (effective_addr2 & ~0x7FF))
         npa2 = LOGICAL_TO_ABS (npv2, b2, regs, ACCTYPE_READ, akey);
+
+    /* all operands and page crossers valid, now alter ref & chg bits */
+    STORAGE_KEY(abs1) |= (STORKEY_REF | STORKEY_CHANGE);
+    if (npa1)
+        STORAGE_KEY(npa1) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Process operands from left to right */
     for ( i = 0; i <= l; i++ )

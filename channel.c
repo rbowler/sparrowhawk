@@ -21,6 +21,16 @@
 
 #include "opcode.h"
 
+#if defined(OPTION_FISHIO)
+#include "w32chan.h"
+#endif // defined(OPTION_FISHIO)
+
+#if defined(OPTION_IODELAY) && OPTION_IODELAY > 0
+#define IODELAY() usleep(OPTION_IODELAY)
+#else
+#define IODELAY()
+#endif
+
 #undef CHADDRCHK
 #if defined(FEATURE_ADDRESS_LIMIT_CHECKING)
 #define CHADDRCHK(_addr,_dev)                   \
@@ -255,7 +265,7 @@ if (dev->ccwtrace || dev->ccwstep)
         /* Signal console thread to redrive select */
         if (dev->console)
         {
-            signal_thread (sysblk.cnsltid, SIGHUP);
+            signal_thread (sysblk.cnsltid, SIGUSR2);
         }
     }
     else
@@ -330,11 +340,19 @@ PSA_3XX *psa;                           /* -> Prefixed storage area  */
     /* Signal console thread to redrive select */
     if (dev->console)
     {
-        signal_thread (sysblk.cnsltid, SIGHUP);
+        signal_thread (sysblk.cnsltid, SIGUSR2);
     }
 
     /* Release the device lock */
     release_lock (&dev->lock);
+
+    /* Possible I/O interrupt */
+    obtain_lock (&sysblk.intlock);
+    if (dev->pending || dev->pcipending)
+        QUEUE_IO_INTERRUPT (dev);
+    ON_IC_IOPENDING;
+    WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
+    release_lock (&sysblk.intlock);
 
     /* Return the condition code */
     return cc;
@@ -343,6 +361,41 @@ PSA_3XX *psa;                           /* -> Prefixed storage area  */
 // #endif /*FEATURE_S370_CHANNEL*/
 
 // #ifdef FEATURE_CHANNEL_SUBSYSTEM
+/*-------------------------------------------------------------------*/
+/* CANCEL SUBCHANNEL                                                 */
+/*-------------------------------------------------------------------*/
+/* Input                                                             */
+/*      regs    -> CPU register context                              */
+/*      dev     -> Device control block                              */
+/* Return value                                                      */
+/*      The return value is the condition code for the XSCH          */
+/*      0=start function cancelled (not yet implemented)             */
+/*      1=status pending (no action taken)                           */
+/*      2=function not applicable                                    */
+/*-------------------------------------------------------------------*/
+int cancel_subchan (REGS *regs, DEVBLK *dev)
+{
+int     cc;                             /* Condition code            */
+
+    /* Obtain the device lock */
+    obtain_lock (&dev->lock);
+
+    /* Check pending status */
+    if ((dev->pciscsw.flag3 & SCSW3_SC_PEND)
+      || (dev->scsw.flag3 & SCSW3_SC_PEND))
+        cc = 1;
+     else
+        /* cc = cancel_start_function() */
+        cc = 2;
+    
+    /* Release the device lock */
+    release_lock (&dev->lock);
+
+    /* Return the condition code */
+    return cc;
+
+} /* end function test_subchan */
+
 /*-------------------------------------------------------------------*/
 /* TEST SUBCHANNEL                                                   */
 /*-------------------------------------------------------------------*/
@@ -459,7 +512,7 @@ int     cc;                             /* Condition code            */
         /* Signal console thread to redrive select */
         if (dev->console)
         {
-            signal_thread (sysblk.cnsltid, SIGHUP);
+            signal_thread (sysblk.cnsltid, SIGUSR2);
         }
     }
     else
@@ -506,6 +559,13 @@ void clear_subchan (REGS *regs, DEVBLK *dev)
             dev->scsw.flag2 |= SCSW2_AC_RESUM;
             signal_condition (&dev->resumecond);
         }
+#if !defined(NO_SIGABEND_HANDLER)
+        else
+        {
+            if( dev->ctctype )
+                signal_thread(dev->tid, SIGUSR2);
+        }
+#endif /*!defined(NO_SIGABEND_HANDLER)*/
 
         /* Release the device lock */
         release_lock (&dev->lock);
@@ -545,7 +605,7 @@ void clear_subchan (REGS *regs, DEVBLK *dev)
         /* Signal console thread to redrive select */
         if (dev->console)
         {
-            signal_thread (sysblk.cnsltid, SIGHUP);
+            signal_thread (sysblk.cnsltid, SIGUSR2);
         }
 
         /* Release the device lock */
@@ -553,8 +613,9 @@ void clear_subchan (REGS *regs, DEVBLK *dev)
 
         /* Signal waiting CPUs that an interrupt may be pending */
         obtain_lock (&sysblk.intlock);
+        QUEUE_IO_INTERRUPT (dev);
         ON_IC_IOPENDING;
-        signal_condition (&sysblk.intcond);
+        WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
         release_lock (&sysblk.intlock);
     }
 
@@ -620,6 +681,13 @@ int halt_subchan (REGS *regs, DEVBLK *dev)
             dev->scsw.flag2 |= SCSW2_AC_RESUM;
             signal_condition (&dev->resumecond);
         }
+#if !defined(NO_SIGABEND_HANDLER)
+        else
+        {
+            if( dev->ctctype )
+                signal_thread(dev->tid, SIGUSR2);
+        }
+#endif /*!defined(NO_SIGABEND_HANDLER)*/
 
         /* Release the device lock */
         release_lock (&dev->lock);
@@ -643,7 +711,7 @@ int halt_subchan (REGS *regs, DEVBLK *dev)
         /* Signal console thread to redrive select */
         if (dev->console)
         {
-            signal_thread (sysblk.cnsltid, SIGHUP);
+            signal_thread (sysblk.cnsltid, SIGUSR2);
         }
 
         /* Release the device lock */
@@ -651,8 +719,9 @@ int halt_subchan (REGS *regs, DEVBLK *dev)
 
         /* Signal waiting CPUs that an interrupt may be pending */
         obtain_lock (&sysblk.intlock);
+        QUEUE_IO_INTERRUPT (dev);
         ON_IC_IOPENDING;
-        signal_condition (&sysblk.intcond);
+        WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
         release_lock (&sysblk.intlock);
     }
 
@@ -710,7 +779,7 @@ int resume_subchan (REGS *regs, DEVBLK *dev)
     /* Signal console thread to redrive select */
     if (dev->console)
     {
-        signal_thread (sysblk.cnsltid, SIGHUP);
+        signal_thread (sysblk.cnsltid, SIGUSR2);
     }
 
     /* Set the resume pending flag and signal the subchannel */
@@ -751,6 +820,9 @@ device_reset (DEVBLK *dev)
     dev->pmcw.mbi[0] = 0;
     dev->pmcw.mbi[1] = 0;
     dev->pmcw.flag27 &= ~PMCW27_S;
+    dev->ckdxtdef = 0;
+    dev->ckdsetfm = 0;
+    dev->ckdlcount = 0;
     memset (&dev->scsw, 0, sizeof(SCSW));
     memset (&dev->pciscsw, 0, sizeof(SCSW));
     memset (dev->sense, 0, sizeof(dev->sense));
@@ -783,7 +855,7 @@ int operational = 3;
     }
 
     /* Signal console thread to redrive select */
-    signal_thread (sysblk.cnsltid, SIGHUP);
+    signal_thread (sysblk.cnsltid, SIGUSR2);
 
     return operational;
 
@@ -809,10 +881,12 @@ DEVBLK *dev;                            /* -> Device control block   */
     OFF_IC_CHANRPT;
 
     /* Signal console thread to redrive select */
-    signal_thread (sysblk.cnsltid, SIGHUP);
+    signal_thread (sysblk.cnsltid, SIGUSR2);
 
 } /* end function io_reset */
 
+
+#if !defined(OPTION_FISHIO)
 
 /*-------------------------------------------------------------------*/
 /* Execute a queued I/O                                              */
@@ -837,6 +911,7 @@ void device_thread ()
             sysblk.ioq = dev->nextioq;
             if (sysblk.ioq && sysblk.devtwait)
                 signal_condition(&sysblk.ioqcond);
+            dev->tid = thread_id();
             release_lock (&sysblk.ioqlock);
 
             switch (sysblk.arch_mode)
@@ -848,6 +923,7 @@ void device_thread ()
             }
 
             obtain_lock(&sysblk.ioqlock);
+            dev->tid = 0;
         }
 
         if (sysblk.devtmax < 0
@@ -874,6 +950,7 @@ void device_thread ()
 
 } /* end function device_thread */
 
+#endif // !defined(OPTION_FISHIO)
 
 #endif /*!defined(_CHANNEL_C)*/
 
@@ -1274,8 +1351,9 @@ int ARCH_DEP(device_attention) (DEVBLK *dev, BYTE unitstat)
 
     /* Signal waiting CPUs that an interrupt is pending */
     obtain_lock (&sysblk.intlock);
+    QUEUE_IO_INTERRUPT (dev);
     ON_IC_IOPENDING;
-    signal_condition (&sysblk.intcond);
+    WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
     release_lock (&sysblk.intlock);
 
     return 0;
@@ -1300,9 +1378,10 @@ int ARCH_DEP(device_attention) (DEVBLK *dev, BYTE unitstat)
 /*-------------------------------------------------------------------*/
 int ARCH_DEP(startio) (DEVBLK *dev, ORB *orb)                  /*@IWZ*/
 {
-TID     tid;                            /* Device thread thread id   */
+#if !defined(OPTION_FISHIO)
 DEVBLK *previoq, *ioq;                  /* Device I/O queue pointers */
 int     rc;                             /* Return code               */
+#endif // !defined(OPTION_FISHIO)
 
     /* Obtain the device lock */
     obtain_lock (&dev->lock);
@@ -1330,7 +1409,7 @@ int     rc;                             /* Return code               */
     /* Signal console thread to redrive select */
     if (dev->console)
     {
-        signal_thread (sysblk.cnsltid, SIGHUP);
+        signal_thread (sysblk.cnsltid, SIGUSR2);
     }
 
     /* Store the start I/O parameters in the device block */
@@ -1354,6 +1433,41 @@ int     rc;                             /* Return code               */
     memcpy (dev->pmcw.intparm, orb->intparm,                   /*@IWZ*/
                         sizeof(dev->pmcw.intparm));            /*@IWZ*/
 
+    /* Schedule the I/O.  The various methods are a direct
+     * correlation to the interest in the subject:
+     * [1] Synchronous I/O.  Attempts to complete the channel program
+     *     in the cpu thread to avoid any threads overhead.
+     * [2] FishIO.  Use native win32 APIs to coordinate I/O
+     *     thread scheduling.
+     * [3] Device threads.  Queue the I/O and signal a device thread.
+     *     Eliminates the overhead of thead creation/termination.
+     * [4] Original.  Create a thread to execute this I/O
+     */
+
+#ifdef OPTION_SYNCIO
+    if (dev->syncio)
+    {
+        /* Attempt synchronous I/O */
+        dev->syncio_active = 1;
+        release_lock (&dev->lock);
+        switch (sysblk.arch_mode)
+        {
+            case ARCH_370: s370_execute_ccw_chain (dev); break;
+            case ARCH_900: z900_execute_ccw_chain (dev); break;
+            default:
+            case ARCH_390: s390_execute_ccw_chain (dev); break;
+        }
+        /* Return code 0 if the retry bit is not on */
+        if (!dev->syncio_retry)
+            return 0;
+        obtain_lock (&dev->lock);
+    }
+#endif /*OPTION_SYNCIO*/
+
+#if defined(OPTION_FISHIO)
+    release_lock (&dev->lock);
+    return ScheduleIORequest(dev,dev->devnum);
+#else // !defined(OPTION_FISHIO)
     if (sysblk.devtmax >= 0)
     {
         /* Queue the I/O request */
@@ -1377,7 +1491,7 @@ int     rc;                             /* Return code               */
             signal_condition(&sysblk.ioqcond);
         else if (sysblk.devtmax == 0 || sysblk.devtnbr < sysblk.devtmax)
         {
-            rc = create_thread(&tid,&sysblk.detattr,device_thread,NULL);
+            rc = create_device_thread(&dev->tid,&sysblk.detattr,device_thread,NULL);
             if (rc != 0 && sysblk.devtnbr == 0)
             {
                 logmsg ("HHC760I %4.4X create_thread error: %s",
@@ -1395,7 +1509,7 @@ int     rc;                             /* Return code               */
     else
     {
         /* Execute the CCW chain on a separate thread */
-        if ( create_thread (&dev->tid, &sysblk.detattr,
+        if ( create_device_thread (&dev->tid, &sysblk.detattr,
                             ARCH_DEP(execute_ccw_chain), dev) )
         {
             logmsg ("HHC760I %4.4X create_thread error: %s",
@@ -1410,6 +1524,7 @@ int     rc;                             /* Return code               */
     /* Return with condition code zero */
     return 0;
 
+#endif // defined(OPTION_FISHIO)
 } /* end function startio */
 
 /*-------------------------------------------------------------------*/
@@ -1450,6 +1565,9 @@ DEVXF  *devexec;                        /* -> Execute CCW function   */
 int     ccwseq = 0;                     /* CCW sequence number       */
 int     bufpos = 0;                     /* Position in I/O buffer    */
 BYTE    iobuf[65536];                   /* Channel I/O buffer        */
+#ifdef OPTION_SYNCIO
+int     retry = 0;                      /* 1=I/O asynchronous retry  */
+#endif
 
     /* Extract the I/O parameters from the ORB */              /*@IWZ*/
     FETCH_FW(ccwaddr, dev->orb.ccwaddr);                       /*@IWZ*/
@@ -1476,6 +1594,24 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
     /* Set the subchannel active and device active bits in the SCSW */
     dev->scsw.flag3 |= (SCSW3_AC_SCHAC | SCSW3_AC_DEVAC);
+
+#ifdef OPTION_SYNCIO
+    /* Check for retried synchronous I/O */
+    if (dev->syncio_retry)
+    {
+        dev->syncio_active = 0;
+        dev->syncios--; dev->asyncios++;
+        ccwaddr = dev->syncio_addr;
+        DEVTRACE ("asynchronous I/O ccw addr %8.8x\n", ccwaddr);
+    }
+
+    /* Check for synchronous I/O */
+    if (dev->syncio_active)
+    {
+        dev->syncios++;
+        DEVTRACE ("synchronous  I/O ccw addr %8.8x\n", ccwaddr);
+    }
+#endif
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
     /* Update the measurement block if applicable */
@@ -1504,7 +1640,11 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
     }
 
     /* Generate an initial status I/O interruption if requested */
+#ifdef OPTION_SYNCIO
+    if (dev->scsw.flag1 & SCSW1_I && !dev->syncio_retry)
+#else
     if (dev->scsw.flag1 & SCSW1_I)
+#endif
     {
         /* Obtain the device lock */
         obtain_lock (&dev->lock);
@@ -1528,10 +1668,13 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             logmsg ("channel: Device %4.4X initial status interrupt\n",
                 dev->devnum);
 
+        IODELAY();
+
         /* Signal waiting CPUs that interrupt is pending */
         obtain_lock (&sysblk.intlock);
+        QUEUE_IO_INTERRUPT (dev);
         ON_IC_IOPENDING;
-        signal_condition (&sysblk.intcond);
+        WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
         release_lock (&sysblk.intlock);
     }
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
@@ -1553,10 +1696,13 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             /* Release the device lock */
             release_lock (&dev->lock);
 
+            IODELAY();
+
             /* Signal waiting CPUs that an interrupt may be pending */
             obtain_lock (&sysblk.intlock);
+            QUEUE_IO_INTERRUPT (dev);
             ON_IC_IOPENDING;
-            signal_condition (&sysblk.intcond);
+            WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
             release_lock (&sysblk.intlock);
 
             if (dev->ccwtrace || dev->ccwstep || tracethis)
@@ -1605,7 +1751,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             /* Signal console thread to redrive select */
             if (dev->console)
             {
-                signal_thread (sysblk.cnsltid, SIGHUP);
+                signal_thread (sysblk.cnsltid, SIGUSR2);
             }
 
             /* Reset device busy indicator */
@@ -1614,10 +1760,13 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             /* Release the device lock */
             release_lock (&dev->lock);
 
+            IODELAY();
+
             /* Signal waiting CPUs that an interrupt may be pending */
             obtain_lock (&sysblk.intlock);
+            QUEUE_IO_INTERRUPT (dev);
             ON_IC_IOPENDING;
-            signal_condition (&sysblk.intcond);
+            WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
             release_lock (&sysblk.intlock);
 
             if (dev->ccwtrace || dev->ccwstep || tracethis)
@@ -1650,7 +1799,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             /* Signal console thread to redrive select */
             if (dev->console)
             {
-                signal_thread (sysblk.cnsltid, SIGHUP);
+                signal_thread (sysblk.cnsltid, SIGUSR2);
             }
     
             /* Reset device busy indicator */
@@ -1659,10 +1808,13 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             /* Release the device lock */
             release_lock (&dev->lock);
 
+            IODELAY();
+
             /* Signal waiting CPUs that an interrupt may be pending */
             obtain_lock (&sysblk.intlock);
+            QUEUE_IO_INTERRUPT (dev);
             ON_IC_IOPENDING;
-            signal_condition (&sysblk.intcond);
+            WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
             release_lock (&sysblk.intlock);
 
             if (dev->ccwtrace || dev->ccwstep || tracethis)
@@ -1684,6 +1836,9 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         ccw = sysblk.mainstor + ccwaddr;
 
         /* Increment to next CCW address */
+#ifdef OPTION_SYNCIO
+        dev->syncio_addr = ccwaddr;
+#endif
         ccwaddr += 8;
 
         /* Update the CCW address in the SCSW */
@@ -1779,6 +1934,15 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             /* Suspend the device if not already resume pending */
             if ((dev->scsw.flag2 & SCSW2_AC_RESUM) == 0)
             {
+#ifdef OPTION_SYNCIO
+                /* Retry if synchronous I/O */
+                if (dev->syncio_active)
+                {
+                    dev->syncio_retry = 1;
+                    release_lock (&dev->lock);
+                    return NULL;
+                }
+#endif
                 /* Set the subchannel status word to suspended */
                 dev->scsw.flag3 = SCSW3_AC_SUSP
                                     | SCSW3_SC_INTER
@@ -1797,20 +1961,23 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
                     /* Release the device lock */
                     release_lock (&dev->lock);
 
+                    IODELAY();
+
                     /* Signal waiting CPUs that interrupt is pending */
                     obtain_lock (&sysblk.intlock);
+                    QUEUE_IO_INTERRUPT (dev);
                     ON_IC_IOPENDING;
-                    signal_condition (&sysblk.intcond);
+                    WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
                     release_lock (&sysblk.intlock);
 
-                    /* Obtain the device lock */
+                    /* Re-obtain the device lock */
                     obtain_lock (&dev->lock);
                 }
 
                 /* Signal console thread to redrive select */
                 if (dev->console)
                 {
-                    signal_thread (sysblk.cnsltid, SIGHUP);
+                    signal_thread (sysblk.cnsltid, SIGUSR2);
                 }
 
                 /* Suspend the device until resume instruction */
@@ -1824,7 +1991,6 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
                 /* If the device has been reset then simply return */
                 if(!dev->busy)
                 {
-                    
                     release_lock (&dev->lock);
                     return NULL;
                 }
@@ -1853,6 +2019,9 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             prevcode = 0;
             ccwseq = 0;
             bufpos = 0;
+#ifdef OPTION_SYNCIO
+            dev->syncio_retry = 0;
+#endif
 
             /* Go back and refetch the suspended CCW */
             ccwaddr -= 8;
@@ -1862,7 +2031,11 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
         /* Signal I/O interrupt if PCI flag is set */
+#ifdef OPTION_SYNCIO
+        if (flags & CCW_FLAGS_PCI && !dev->syncio_retry)
+#else
         if (flags & CCW_FLAGS_PCI)
+#endif
         {
             /* Obtain the device lock */
             obtain_lock (&dev->lock);
@@ -1906,10 +2079,13 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             /* Release the device lock */
             release_lock (&dev->lock);
 
+            IODELAY();
+
             /* Signal waiting CPUs that an interrupt is pending */
             obtain_lock (&sysblk.intlock);
+            QUEUE_IO_INTERRUPT (dev);
             ON_IC_IOPENDING;
-            signal_condition (&sysblk.intcond);
+            WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
             release_lock (&sysblk.intlock);
 
         } /* end if(CCW_FLAGS_PCI) */
@@ -1929,11 +2105,56 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             break;
         }
 
+#ifdef OPTION_SYNCIO
+        /* Temporary workaround for -
+           1) Track Overflow processing:
+               Synchronous READ (and probably WRITE) CCWs
+               cannot correctly process splitted records
+               if the continuation has to be scheduled for
+               asynchronous processing;
+           2) DataChained WRITE CCWs:
+               Data merging function used by [C]CKD dev's
+               for data chained write CCW's leads to error
+               when the 1st WRITE CCW which specifies DC is
+               processed SYNChronously and any subsequent
+               WRITE CCW's (including the 1st one) must then
+               be switched to ASYNChronous processing - as a
+               result only last WRITE CCW in the chain is
+               retried although the whole chain starting from
+               the 1st CCW which specified DC must be retried.
+           - this [rough] fix just immediately request 
+             asynchronous processing if one of the above 
+             situations are encountered during synchronous I/O
+             (1:'ckdtrkof' flag is set and CCW specifies READ 
+             or WRITE operation; or 2:WRITE CCW with "DataChain"
+             flag set is processed) 
+        */
+        if( dev->syncio_active &&
+           ( (dev->ckdtrkof
+              && (IS_CCW_READ(code) || IS_CCW_WRITE(code)))
+           || ((flags & CCW_FLAGS_CD)
+              && (IS_CCW_WRITE(code)
+                  || (IS_CCW_CONTROL(code)
+                       && !(IS_CCW_NOP(code)||IS_CCW_SET_EXTENDED(code))))
+              )
+           )
+          )
+        {
+            dev->syncio_retry = 1;
+/*debug   display_ccw(dev, ccw, addr);*/
+            return NULL;
+        }
+#endif
 
         /* For WRITE and CONTROL operations, copy data
            from main storage into channel buffer */
         if (IS_CCW_WRITE(code)
-            || (IS_CCW_CONTROL(code) && !IS_CCW_NOP(code)))
+            ||
+            (
+                IS_CCW_CONTROL(code)
+                &&
+                !(IS_CCW_NOP(code) || IS_CCW_SET_EXTENDED(code))
+            ))
         {
             /* Channel program check if data exceeds buffer size */
             if (bufpos + count > 65536)
@@ -1998,8 +2219,29 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         }
 
         /* Pass the CCW to the device handler for execution */
+#ifdef OPTION_SYNCIO
+        retry = dev->syncio_retry;
+#endif
         (*devexec) (dev, code, flags, chained, count, prevcode,
                     ccwseq, iobuf, &more, &unitstat, &residual);
+#ifdef OPTION_SYNCIO
+        if (retry) dev->syncio_retry = 0;
+
+        /* Check if synchronous I/O needs to be retried */
+        if (dev->syncio_retry)
+        {
+            return NULL;
+        }
+        retry = 0;
+#endif
+
+        /* Check for Command Retry (suggested by Jim Pierson) */
+        if ( unitstat == ( CSW_CE | CSW_DE | CSW_UC | CSW_SM ) )
+        {
+            chain    = 1;
+            ccwaddr -= 8;   /* (retry same ccw again) */
+            continue;
+        }
 
         /* For READ, SENSE, and READ BACKWARD operations, copy data
            from channel buffer to main storage, unless SKIP is set */
@@ -2174,16 +2416,19 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
     /* Signal console thread to redrive select */
     if (dev->console)
     {
-        signal_thread (sysblk.cnsltid, SIGHUP);
+        signal_thread (sysblk.cnsltid, SIGUSR2);
     }
 
     /* Release the device lock */
     release_lock (&dev->lock);
 
+    IODELAY();
+
     /* Signal waiting CPUs that an interrupt is pending */
     obtain_lock (&sysblk.intlock);
+    QUEUE_IO_INTERRUPT (dev);
     ON_IC_IOPENDING;
-    signal_condition (&sysblk.intcond);
+    WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
     release_lock (&sysblk.intlock);
 
     return NULL;
@@ -2260,23 +2505,27 @@ int ARCH_DEP(present_io_interrupt) (REGS *regs, U32 *ioid,
                                   U32 *ioparm, U32 *iointid, BYTE *csw)
 {
 DEVBLK *dev;                            /* -> Device control block   */
-
-    /* Turn off the I/O interrupt pending flag */
-    OFF_IC_IOPENDING;
+int     iopending = 0;                  /* 1 = I/O still pending     */
 
     /* Find a device with pending interrupt */
+#ifdef OPTION_IOINTQ
+    for (dev = sysblk.iointq; dev != NULL; dev = dev->iointq)
+#else /*!OPTION_IOINTQ*/
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+#endif /*!OPTION_IOINTQ*/
     {
         obtain_lock (&dev->lock);
         if ((dev->pending || dev->pcipending)
             && (dev->pmcw.flag5 & PMCW5_V))
         {
-            /* Turn on the I/O interrupt pending flag */
-            ON_IC_IOPENDING;
-
             /* Exit loop if enabled for interrupts from this device */
             if (ARCH_DEP(interrupt_enabled)(regs, dev))
                 break;
+            iopending = 1;
+#if MAX_CPU_ENGINES > 1
+            /* See if another CPU can take this interrupt */
+            WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
+#endif /*MAX_CPU_ENGINES > 1*/
         }
         release_lock (&dev->lock);
     } /* end for(dev) */
@@ -2284,8 +2533,21 @@ DEVBLK *dev;                            /* -> Device control block   */
     /* If no enabled interrupt pending, exit with condition code 0 */
     if (dev == NULL)
     {
+        if (!iopending)
+            OFF_IC_IOPENDING;
         return 0;
     }
+
+    /* Remove the device from the I/O interrupt queue
+       unless both `pcipending' and `pending' are set */
+    if (!(dev->pcipending == 1 && dev->pending == 1))
+        DEQUEUE_IO_INTERRUPT (dev);
+
+#ifdef OPTION_IOINTQ
+    /* Turn off IOPENDING bit if no outstanding I/O interrupts */
+    if (sysblk.iointq == NULL)
+        OFF_IC_IOPENDING;
+#endif
 
 #ifdef FEATURE_S370_CHANNEL
     /* Extract the I/O address and CSW */
@@ -2319,7 +2581,7 @@ DEVBLK *dev;                            /* -> Device control block   */
     /* Signal console thread to redrive select */
     if (dev->console)
     {
-        signal_thread (sysblk.cnsltid, SIGHUP);
+        signal_thread (sysblk.cnsltid, SIGUSR2);
     }
 
     /* Release the device lock */
@@ -2351,5 +2613,17 @@ int device_attention (DEVBLK *dev, BYTE unitstat)
     return 3;
 }
 
+#if defined(OPTION_FISHIO)
+void  call_execute_ccw_chain(int arch_mode, void* pDevBlk)
+{
+    switch (arch_mode)
+    {
+        case ARCH_370: s370_execute_ccw_chain((DEVBLK*)pDevBlk); break;
+        case ARCH_900: z900_execute_ccw_chain((DEVBLK*)pDevBlk); break;
+        default:
+        case ARCH_390: s390_execute_ccw_chain((DEVBLK*)pDevBlk); break;
+    }
+}
+#endif // defined(OPTION_FISHIO)
 
 #endif /*!defined(_GEN_ARCH)*/

@@ -17,6 +17,10 @@
 
 #include "inline.h"
 
+#if defined(OPTION_FISHIO)
+#include "w32chan.h"
+#endif // defined(OPTION_FISHIO)
+
 /*-------------------------------------------------------------------*/
 /* Function to run initial CCW chain from IPL device and load IPLPSW */
 /* Returns 0 if successful, -1 if error                              */
@@ -164,6 +168,12 @@ BYTE    chanstat;                       /* IPL device channel status */
         return -1;
     }
 
+#if defined(OPTION_REDUCED_INVAL)
+    INVALIDATE_AIA(regs);
+
+    INVALIDATE_AEA_ALL(regs);
+#endif
+
     /* Set the CPU into the started state */
     regs->cpustate = CPUSTATE_STARTED;
     OFF_IC_CPU_NOT_STARTED(regs);
@@ -171,9 +181,9 @@ BYTE    chanstat;                       /* IPL device channel status */
     /* reset load state */
     regs->loadstate = 0;
 
-    /* Signal all CPUs to retest stopped indicator */
+    /* Signal the CPU to retest stopped indicator */
     obtain_lock (&sysblk.intlock);
-    signal_condition (&sysblk.intcond);
+    WAKEUP_CPU (regs->cpuad);
     release_lock (&sysblk.intlock);
 
 #ifdef EXTERNALGUI
@@ -182,6 +192,149 @@ BYTE    chanstat;                       /* IPL device channel status */
     return 0;
 } /* end function load_ipl */
 
+
+/* function load_hmc simulates the load from the service processor  */
+/*   the filename pointed to is a descriptor file which has the     */
+/*   following format:                                              */
+/*                                                                  */
+/*   '*' in col 1 is comment                                        */
+/*   core image file followed be address where is should be loaded  */
+/*                                                                  */
+/* For example:                                                     */
+/*                                                                  */
+/* * Linux/390 cdrom boot image                                     */
+/* boot_images/tapeipl.ikr 0x00000000                               */
+/* boot_images/initrd 0x00800000                                    */
+/* boot_images/parmfile 0x00010480                                  */
+/*                                                                  */
+/* The location of the image files is relative to the location of   */
+/* the descriptor file.                         Jan Jaeger 10-11-01 */
+/*                                                                  */
+int ARCH_DEP(load_hmc) (char *fname, REGS *regs)
+{
+int     rc;                             /* Return code               */
+int     rx;                             /* Return code               */
+int     cpu;                            /* CPU number                */
+PSA    *psa;                            /* -> Prefixed storage area  */
+FILE   *fp;
+BYTE    inputline[256];
+BYTE    dirname[256];                   /* dirname of ins file       */
+BYTE   *dirbase;
+BYTE    filename[256];                  /* filename of image file    */
+BYTE    pathname[256];                  /* pathname of image file    */
+U32     fileaddr;
+
+#ifdef EXTERNALGUI
+    if (extgui) logmsg("LOAD=1\n");
+#endif /*EXTERNALGUI*/
+
+    /* Reset external interrupts */
+    OFF_IC_SERVSIG;
+    OFF_IC_INTKEY;
+
+    /* Perform initial reset on the IPL CPU */
+    ARCH_DEP(initial_cpu_reset) (regs);
+
+    /* Perform CPU reset on all other CPUs */
+    for (cpu = 0; cpu < sysblk.numcpu; cpu++)
+        ARCH_DEP(cpu_reset) (sysblk.regs + cpu);
+
+    /* put cpu in load state */
+    regs->loadstate = 1;
+
+    /* Perform I/O reset */
+    io_reset ();
+
+    /* remove filename from pathname */
+    strcpy(dirname,fname);
+    dirbase = strchr(dirname,'/');
+    if(dirbase) *(++dirbase) = '\0';
+    
+    fp = fopen(fname, "r");
+    if(fp == NULL)
+    {
+        logmsg("HHC008I Load from %s failed: %s\n",fname,strerror(errno));
+        return -1;
+    }
+
+    do
+    {
+        rc = fgets(inputline,sizeof(inputline),fp) != NULL;
+        rx = sscanf(inputline,"%s %i",filename,&fileaddr);
+
+        /* If no load address was found load to location zero */
+        if(rc && rx < 2)
+            fileaddr = 0;
+
+        if(rc && rx > 0 && *filename != '*' && *filename != '#')
+        {
+            /* Prepend the directory name if one was found
+               and if no full pathname was specified */
+            if(dirbase && *filename != '/')
+            {
+                strcpy(pathname,dirname);
+                strcat(pathname,filename);
+            }
+            else
+                strcpy(pathname,filename);
+
+            if( ARCH_DEP(load_main) (pathname, fileaddr) < 0 )
+            {
+                fclose(fp);
+#ifdef EXTERNALGUI
+                if (extgui) logmsg("LOAD=0\n");
+#endif /*EXTERNALGUI*/
+                return -1;
+            }
+        }
+    } while(rc);
+    fclose(fp);
+
+
+    /* Zeroize the interrupt code in the PSW */
+    regs->psw.intcode = 0;
+
+    /* Point to PSA in main storage */
+    psa = (PSA*)(sysblk.mainstor + regs->PX);
+
+    /* Load IPL PSW from PSA+X'0' */
+    rc = ARCH_DEP(load_psw) (regs, psa->iplpsw);
+    if ( rc )
+    {
+        logmsg ("HHC109I IPL failed: Invalid IPL PSW: "
+                "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
+                psa->iplpsw[0], psa->iplpsw[1], psa->iplpsw[2],
+                psa->iplpsw[3], psa->iplpsw[4], psa->iplpsw[5],
+                psa->iplpsw[6], psa->iplpsw[7]);
+#ifdef EXTERNALGUI
+        if (extgui) logmsg("LOAD=0\n");
+#endif /*EXTERNALGUI*/
+        return -1;
+    }
+
+#if defined(OPTION_REDUCE_INVAL)
+    INVALIDATE_AIA(regs);
+
+    INVALIDATE_AEA_ALL(regs);
+#endif
+
+    /* Set the CPU into the started state */
+    regs->cpustate = CPUSTATE_STARTED;
+    OFF_IC_CPU_NOT_STARTED(regs);
+
+    /* reset load state */
+    regs->loadstate = 0;
+
+    /* Signal the CPU to retest stopped indicator */
+    obtain_lock (&sysblk.intlock);
+    WAKEUP_CPU (regs->cpuad);
+    release_lock (&sysblk.intlock);
+
+#ifdef EXTERNALGUI
+    if (extgui) logmsg("LOAD=0\n");
+#endif /*EXTERNALGUI*/
+    return 0;
+} /* end function load_hmc */
 /*-------------------------------------------------------------------*/
 /* Function to perform CPU reset                                     */
 /*-------------------------------------------------------------------*/
@@ -189,8 +342,11 @@ void ARCH_DEP(cpu_reset) (REGS *regs)
 {
 int             i;                      /* Array subscript           */
 
+    regs->ip = regs->inst;
+
     /* Clear pending interrupts and indicators */
     regs->loadstate = 0;
+    regs->checkstop = 0;
     regs->sigpreset = 0;
     OFF_IC_ITIMER(regs);
     OFF_IC_RESTART(regs);
@@ -278,6 +434,45 @@ void ARCH_DEP(initial_cpu_reset) (REGS *regs)
 } /* end function initial_cpu_reset */
 
 
+int ARCH_DEP(load_main) (char *fname, RADR startloc)
+{
+int fd;     
+int rl;
+int br = 0;
+RADR pageaddr;
+U32  pagesize;
+
+    fd = open (fname, O_RDONLY|O_BINARY);
+    if(fd < 0)
+    {
+        logmsg("HHC010I load_main: %s: %s\n", fname, strerror(errno));
+        return fd;
+    }
+
+    pagesize = PAGEFRAME_PAGESIZE - (startloc & PAGEFRAME_BYTEMASK);
+    pageaddr = startloc;
+    do {
+        if(pageaddr >= sysblk.mainsize)
+        {
+            logmsg("HHC011I load_main: terminated at end of mainstor\n");
+            close(fd);
+            return br;
+        }
+        rl = read(fd, sysblk.mainstor + pageaddr, pagesize);
+        if(rl > 0)
+        {
+            STORAGE_KEY(pageaddr) |= STORKEY_REF|STORKEY_CHANGE;
+            br += rl;
+        }
+        pageaddr += PAGEFRAME_PAGESIZE;
+	pageaddr &= PAGEFRAME_PAGEMASK;
+        pagesize = PAGEFRAME_PAGESIZE;
+    } while (rl == pagesize);
+
+    close(fd);
+
+    return br;
+}
 #if !defined(_GEN_ARCH)
 
 #define  _GEN_ARCH 390
@@ -292,9 +487,27 @@ int load_ipl (U16 devnum, REGS *regs)
 {
     if(sysblk.arch_mode > ARCH_390)
         sysblk.arch_mode = ARCH_390;
+#if defined(OPTION_FISHIO)
+    ios_arch_mode = sysblk.arch_mode;
+#endif // defined(OPTION_FISHIO)
     switch(sysblk.arch_mode) {
         case ARCH_370: return s370_load_ipl(devnum, regs);
         default:       return s390_load_ipl(devnum, regs);
+    }
+    return -1;
+}
+
+
+int load_hmc (char *fname, REGS *regs)
+{
+    if(sysblk.arch_mode > ARCH_390)
+        sysblk.arch_mode = ARCH_390;
+#if defined(OPTION_FISHIO)
+    ios_arch_mode = sysblk.arch_mode;
+#endif // defined(OPTION_FISHIO)
+    switch(sysblk.arch_mode) {
+        case ARCH_370: return s370_load_hmc(fname, regs);
+        default:       return s390_load_hmc(fname, regs);
     }
     return -1;
 }
@@ -315,5 +528,15 @@ void initial_cpu_reset(REGS *regs)
 }
 
 
-#endif /*!defined(_GEN_ARCH)*/
+int load_main(char *fname, RADR startloc)
+{
+    switch(sysblk.arch_mode) {
+        case ARCH_370: return s370_load_main(fname, startloc);
+        case ARCH_390: return s390_load_main(fname, startloc);
+        case ARCH_900: return z900_load_main(fname, startloc);
+    }
+    return -1;
+}
 
+
+#endif /*!defined(_GEN_ARCH)*/

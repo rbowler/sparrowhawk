@@ -22,6 +22,12 @@
 
 #define _SIE_C
 
+int s370_run_sie (REGS *regs);
+int s390_run_sie (REGS *regs);
+int z900_run_sie (REGS *regs);
+static int (* run_sie[GEN_MAXARCH]) (REGS *regs) =
+                { s370_run_sie, s390_run_sie, z900_run_sie };
+
 #define GUESTREGS (regs->guestregs)
 #define STATEBK   ((SIEBK*)(GUESTREGS->siebk))
 
@@ -119,6 +125,12 @@ int     icode;                          /* Interception code         */
         gpv = s390_load_psw(GUESTREGS, STATEBK->psw);
     }
 
+#if defined(OPTION_REDUCED_INVAL)
+    INVALIDATE_AIA(GUESTREGS);
+
+    INVALIDATE_AEA_ALL(GUESTREGS);
+#endif
+
     /* Set host program interrupt routine */
     GUESTREGS->sie_hostpi = (SIEFN)&ARCH_DEP(program_interrupt);
 
@@ -205,6 +217,10 @@ int     icode;                          /* Interception code         */
     /* Load the guest registers */
     memcpy(GUESTREGS->gr, regs->gr, 14 * sizeof(U64));
     memcpy(GUESTREGS->ar, regs->ar, 16 * sizeof(U32));
+    memcpy(GUESTREGS->fpr, regs->fpr, 32 * sizeof(U32));
+#if defined(FEATURE_BINARY_FLOATING_POINT)
+    GUESTREGS->fpc =  regs->fpc;
+#endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
 
     /* Load GR14 */
     FETCH_W(GUESTREGS->GR(14), STATEBK->gr14);
@@ -217,13 +233,6 @@ int     icode;                          /* Interception code         */
         FETCH_W(GUESTREGS->CR(n), STATEBK->cr[n]);
 
     FETCH_HW(lhcpu, STATEBK->lhcpu);
-
-    /* End operation in case of a validity check */
-    if(gpv)
-    {
-        STATEBK->c = SIE_C_VALIDITY;
-        return;
-    }
 
     /* If this is not the last host cpu that dispatched this state
        descriptor then clear the guest TLB entries */
@@ -240,6 +249,9 @@ int     icode;                          /* Interception code         */
         ARCH_DEP(purge_tlb) (GUESTREGS);
         ARCH_DEP(purge_alb) (GUESTREGS);
     }
+
+    /* Initialise the last fetched instruction pointer */
+    GUESTREGS->ip = GUESTREGS->inst;
 
     /* Set SIE active */
     GUESTREGS->instvalid = 0;
@@ -289,14 +301,12 @@ int     icode;                          /* Interception code         */
     }
 #endif /*!defined(FEATURE_ESAME)*/
 
-    if(GUESTREGS->arch_mode == ARCH_390)
-        icode = s390_sie_run (regs);
-    else
-#if defined(FEATURE_ESAME)
-        icode = z900_sie_run (regs);
-#else /*!defined(FEATURE_ESAME)*/
-        icode = s370_sie_run (regs);
-#endif /*!defined(FEATURE_ESAME)*/
+    /* Early exceptions associated with the guest PSW */
+    if(gpv)
+        ARCH_DEP(program_interrupt) (GUESTREGS, gpv);
+
+    /* Run SIE in guests architecture mode */
+    icode = run_sie[GUESTREGS->arch_mode] (regs);
 
     ARCH_DEP(sie_exit) (regs, icode);
 
@@ -401,6 +411,10 @@ int     n;
     /* Update the approprate host registers */
     memcpy(regs->gr, GUESTREGS->gr, 14 * sizeof(U64));
     memcpy(regs->ar, GUESTREGS->ar, 16 * sizeof(U32));
+    memcpy(regs->fpr, GUESTREGS->fpr, 32 * sizeof(U32));
+#if defined(FEATURE_BINARY_FLOATING_POINT)
+    regs->fpc =  GUESTREGS->fpc;
+#endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
 
     /* Zeroize the interruption parameters */
     memset(STATEBK->ipa, 0, 10);
@@ -433,7 +447,7 @@ int     n;
 
 #if defined(_FEATURE_SIE)
 /* Execute guest instructions */
-int ARCH_DEP(sie_run) (REGS *regs)
+int ARCH_DEP(run_sie) (REGS *regs)
 {
     int icode;
 
@@ -460,8 +474,8 @@ int ARCH_DEP(sie_run) (REGS *regs)
                        no more broadcast pending because synchronize_broadcast()
                        releases and reacquires the mainlock. */
 
-                    while (sysblk.brdcstncpu != 0)
-                        ARCH_DEP(synchronize_broadcast)(regs);
+                    while ((IS_IC_BROADCAST(regs)))
+                        ARCH_DEP(synchronize_broadcast)(regs, 0, 0);
 #endif /*MAX_CPU_ENGINES > 1*/
 
                     if( OPEN_IC_CPUINT(GUESTREGS) )
@@ -481,12 +495,14 @@ int ARCH_DEP(sie_run) (REGS *regs)
                 ARCH_DEP(display_inst) (GUESTREGS, GUESTREGS->inst);
 #endif /*defined(SIE_DEBUG)*/
 
+#if defined(OPTION_CPU_UNROLL)
+                regs->instcount += 8;
+#else
+                regs->instcount++;
+#endif
                 EXECUTE_INSTRUCTION(GUESTREGS->inst, 0, GUESTREGS);
 
-#if !defined(OPTION_CPU_UNROLL)
-                regs->instcount++;
-#else
-
+#if defined(OPTION_CPU_UNROLL)
                 UNROLLED_EXECUTE(GUESTREGS);
                 UNROLLED_EXECUTE(GUESTREGS);
                 UNROLLED_EXECUTE(GUESTREGS);
@@ -494,8 +510,6 @@ int ARCH_DEP(sie_run) (REGS *regs)
                 UNROLLED_EXECUTE(GUESTREGS);
                 UNROLLED_EXECUTE(GUESTREGS);
                 UNROLLED_EXECUTE(GUESTREGS);
-
-                regs->instcount += 8;
 #endif
 
             }
