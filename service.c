@@ -1,6 +1,8 @@
 /* SERVICE.C    (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 Service Processor                            */
 
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+
 /*-------------------------------------------------------------------*/
 /* This module implements service processor functions                */
 /* for the Hercules ESA/390 emulator.                                */
@@ -13,6 +15,7 @@
 /*      Expanded storage support by Jan Jaeger                       */
 /*      Dynamic CPU reconfiguration - Jan Jaeger                     */
 /*      Suppress superflous HHC701I/HHC702I messages - Jan Jaeger    */
+/*      Break syscons output if too long - Jan Jaeger                */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -410,7 +413,7 @@ void zz_service_call (BYTE inst[], int execflag, REGS *regs)
 int             r1, r2;                 /* Values of R fields        */
 U32             sclp_command;           /* SCLP command code         */
 U32             sccb_real_addr;         /* SCCB real address         */
-int             i;                      /* Array subscript           */
+int             i, j;                   /* Array subscripts          */
 int             realmb;                 /* Real storage size in MB   */
 U32             sccb_absolute_addr;     /* Absolute address of SCCB  */
 int             sccblen;                /* Length of SCCB            */
@@ -499,6 +502,8 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
     PRIV_CHECK(regs);
 
+    SIE_INTERCEPT(regs);
+
     /* R1 is SCLP command word */
     sclp_command = regs->gpr[r1];
 
@@ -506,15 +511,15 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     sccb_real_addr = regs->gpr[r2];
 
     /* Obtain the absolute address of the SCCB */
-    sccb_absolute_addr = APPLY_PREFIXING (sccb_real_addr, regs->pxr);
+    sccb_absolute_addr = APPLY_PREFIXING(sccb_real_addr, regs->pxr);
 
     /* Program check if SCCB is not on a doubleword boundary */
     if ( sccb_absolute_addr & 0x00000007 )
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Program check if SCCB is outside main storage */
-    if ( sccb_absolute_addr >= sysblk.mainsize )
-        program_check (regs, PGM_ADDRESSING_EXCEPTION);
+    if ( sccb_absolute_addr >= regs->mainsize )
+        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
 
 //  /*debug*/logmsg("Service call %8.8X SCCB=%8.8X\n",
 //  /*debug*/       sclp_command, sccb_absolute_addr);
@@ -529,8 +534,8 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     STORAGE_KEY(sccb_absolute_addr) |= STORKEY_REF;
 
     /* Program check if end of SCCB falls outside main storage */
-    if ( sysblk.mainsize - sccblen < sccb_absolute_addr )
-        program_check (regs, PGM_ADDRESSING_EXCEPTION);
+    if ( regs->mainsize - sccblen < sccb_absolute_addr )
+        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Obtain lock if immediate response is not requested */
     if (!(sccb->flag & SCCB_FLAG_SYNC)
@@ -586,7 +591,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         memset (sccbscp, 0, sizeof(SCCB_SCP_INFO));
 
         /* Set main storage size in SCCB */
-        realmb = sysblk.mainsize >> 20;
+        realmb = regs->mainsize >> 20;
         sccbscp->realinum[0] = (realmb & 0xFF00) >> 8;
         sccbscp->realinum[1] = realmb & 0xFF;
         sccbscp->realiszm = 1;
@@ -684,7 +689,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 //                      | SCCB_IFM3_READ_RESOURCE_GROUP_INFO
                         ;
         sccbscp->cfg[0] = 0
+#if defined(FEATURE_HYPERVISOR)
                         | SCCB_CFG0_LOGICALLY_PARTITIONED
+#endif /*defined(FEATURE_HYPERVISOR)*/
 #ifdef FEATURE_SUPPRESSION_ON_PROTECTION
                         | SCCB_CFG0_SUPPRESSION_ON_PROTECTION
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
@@ -707,7 +714,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                         ;
         sccbscp->cfg[3] = 0
 //                      | SCCB_CFG3_RESUME_PROGRAM
-//                      | SCCB_CFG3_PERFORM_LOCKED_OPERATION
+#if defined(FEATURE_PLO)
+                        | SCCB_CFG3_PERFORM_LOCKED_OPERATION
+#endif /*defined(FEATURE_PLO)*/
 #ifdef FEATURE_IMMEDIATE_AND_RELATIVE
                         | SCCB_CFG3_IMMEDIATE_AND_RELATIVE
 #endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
@@ -740,13 +749,21 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
             sccbcpu->cpa = sysblk.regs[i].cpuad;
             sccbcpu->tod = 0;
             sccbcpu->cpf[0] = 0
-//                          | SCCB_CPF0_SIE_370_MODE
-//                          | SCCB_CPF0_SIE_XA_MODE
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+                            | SCCB_CPF0_SIE_370_MODE
+                            | SCCB_CPF0_SIE_XA_MODE
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 //                          | SCCB_CPF0_SIE_SET_II_370_MODE
 //                          | SCCB_CPF0_SIE_SET_II_XA_MODE
-//                          | SCCB_CPF0_SIE_NEW_INTERCEPT_FORMAT
-//                          | SCCB_CPF0_STORAGE_KEY_ASSIST
-//                          | SCCB_CPF0_MULTIPLE_CONTROLLED_DATA_SPACE
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+                            | SCCB_CPF0_SIE_NEW_INTERCEPT_FORMAT
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#if defined(FEATURE_STORAGE_KEY_ASSIST)
+                            | SCCB_CPF0_STORAGE_KEY_ASSIST
+#endif /*defined(FEATURE_STORAGE_KEY_ASSIST)*/
+#if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+                            | SCCB_CPF0_MULTIPLE_CONTROLLED_DATA_SPACE
+#endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
                             ;
             sccbcpu->cpf[1] = 0
 //                          | SCCB_CPF1_IO_INTERPRETATION_LEVEL_2
@@ -763,10 +780,10 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
 #ifdef FEATURE_VECTOR_FACILITY
 #ifndef FEATURE_CPU_RECONFIG
-            if(sysblk.regs[i].vf.online)
+            if(sysblk.regs[i].vf->online)
 #endif /*!FEATURE_CPU_RECONFIG*/
               sccbcpu->cpf[2] |= SCCB_CPF2_VECTOR_FEATURE_INSTALLED;
-            if(sysblk.regs[i].vf.online)
+            if(sysblk.regs[i].vf->online)
                 sccbcpu->cpf[2] |= SCCB_CPF2_VECTOR_FEATURE_CONNECTED;
 #ifdef FEATURE_CPU_RECONFIG
             else
@@ -779,10 +796,14 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                             | SCCB_CPF3_PRIVATE_SPACE_FEATURE
                             | SCCB_CPF3_FETCH_ONLY_BIT
 #endif /*FEATURE_PRIVATE_SPACE*/
-//                          | SCCB_CPF3_PER2_INSTALLED
+#if defined(FEATURE_PER2)
+                            | SCCB_CPF3_PER2_INSTALLED
+#endif /*defined(FEATURE_PER2)*/
                             ;
             sccbcpu->cpf[4] = 0
+#if defined(FEATURE_PER2)
                             | SCCB_CPF4_OMISION_GR_ALTERATION_370
+#endif /*defined(FEATURE_PER2)*/
                             ;
             sccbcpu->cpf[5] = 0
 //                          | SCCB_CPF5_GUEST_WAIT_STATE_ASSIST
@@ -952,11 +973,21 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                 /* Print line unless it is a response prompt */
                 if (!(mto_bk->ltflag[0] & SCCB_MTO_LTFLG0_PROMPT))
                 {
-                    for (i = 0; i < event_msglen; i++)
-                        message[i] = isprint(ebcdic_to_ascii[event_msg[i]]) ?
+                    for (i = 0, j = 0; i < event_msglen; i++)
+                    {
+                        message[j++] = isprint(ebcdic_to_ascii[event_msg[i]]) ?
                             ebcdic_to_ascii[event_msg[i]] : 0x20;
-                    message[event_msglen] = '\0';
-                    logmsg ("%s\n", message);
+                            /* Break the line if too long */
+                            if(j > 79)
+                            {
+                                message[j] = '\0';
+                                logmsg ("%s\n", message);
+                                j = 0;
+                            }
+                    }
+                    message[j] = '\0';
+                    if(j > 0)
+                        logmsg ("%s\n", message);
 // if(!memcmp(message,"*IEE479W",8)) regs->cpustate = CPUSTATE_STOPPING;
                 }
             }
@@ -1260,11 +1291,11 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
             break;
         }
 
-        if(sysblk.regs[i].vf.online)
+        if(sysblk.regs[i].vf->online)
             logmsg("CPU%4.4X: Vector Facility configured offline\n",i);
 
         /* Take the VF out of the configuration */
-        sysblk.regs[i].vf.online = 0;
+        sysblk.regs[i].vf->online = 0;
 
         /* Set response code X'0020' in SCCB header */
         sccb->reas = SCCB_REAS_NONE;
@@ -1291,11 +1322,11 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
             break;
         }
 
-        if(!sysblk.regs[i].vf.online)
+        if(!sysblk.regs[i].vf->online)
             logmsg("CPU%4.4X: Vector Facility configured online\n",i);
 
         /* Mark the VF online to the CPU */
-        sysblk.regs[i].vf.online = 1;
+        sysblk.regs[i].vf->online = 1;
 
         /* Set response code X'0020' in SCCB header */
         sccb->reas = SCCB_REAS_NONE;

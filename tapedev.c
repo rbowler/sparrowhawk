@@ -224,13 +224,13 @@ static int open_awstape (DEVBLK *dev, BYTE *unitstat)
 int             rc;                     /* Return code               */
 
     /* Open the AWSTAPE file */
-    rc = open (dev->filename, O_RDWR);
+    rc = open (dev->filename, O_RDWR | O_BINARY);
 
     /* If file is read-only, attempt to open again */
     if (rc < 0 && errno == EROFS)
     {
         dev->readonly = 1;
-        rc = open (dev->filename, O_RDONLY);
+        rc = open (dev->filename, O_RDONLY | O_BINARY);
     }
 
     /* Check for successful open */
@@ -807,13 +807,13 @@ struct mtget    stblk;                  /* Area for MTIOCGET ioctl   */
 long            density;                /* Tape density code         */
 
     /* Open the SCSI tape device */
-    rc = open (dev->filename, O_RDWR);
+    rc = open (dev->filename, O_RDWR | O_BINARY);
 
     /* If file is read-only, attempt to open again */
     if (rc < 0 && errno == EROFS)
     {
         dev->readonly = 1;
-        rc = open (dev->filename, O_RDONLY);
+        rc = open (dev->filename, O_RDONLY | O_BINARY);
     }
 
     /* Check for successful open */
@@ -1239,7 +1239,7 @@ BYTE            c;                      /* Work area for sscanf      */
     pathlen -= 7;
 
     /* Open the tape descriptor file */
-    fd = open (dev->filename, O_RDONLY);
+    fd = open (dev->filename, O_RDONLY | O_BINARY);
     if (fd < 0)
     {
         logmsg ("HHC240I Error opening TDF file %s: %s\n",
@@ -1480,7 +1480,7 @@ OMATAPE_DESC   *omadesc;                /* -> OMA descriptor entry   */
     omadesc += dev->curfilen;
 
     /* Open the OMATAPE file */
-    rc = open (omadesc->filename, O_RDONLY);
+    rc = open (omadesc->filename, O_RDONLY | O_BINARY);
 
     /* Check for successful open */
     if (rc < 0)

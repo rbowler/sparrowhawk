@@ -342,7 +342,7 @@ int             tfd;                    /* Object file descriptor    */
 BYTE            objrec[80];             /* Object card image         */
 
     /* Open the object file */
-    tfd = open (iplfnm, O_RDONLY);
+    tfd = open (iplfnm, O_RDONLY|O_BINARY);
     if (tfd < 0)
     {
         XMERRF ("Cannot open %s: %s\n",
@@ -2701,7 +2701,7 @@ int             numttr = 0;             /* TTR table array index     */
 COPYR1         *copyr1;                 /* -> header record 1        */
 
     /* Open the input file */
-    xfd = open (xfname, O_RDONLY);
+    xfd = open (xfname, O_RDONLY|O_BINARY);
     if (xfd < 0)
     {
         XMERRF ("Cannot open %s: %s\n",
@@ -4303,7 +4303,7 @@ int             stmtno;                 /* Statement number          */
     outtrklv = ROUND_UP(outtrklv,512);
 
     /* Create the output file */
-    ofd = open (ofname, O_RDWR | O_CREAT | O_TRUNC,
+    ofd = open (ofname, O_RDWR | O_CREAT | O_TRUNC | O_BINARY,
                 S_IRUSR | S_IWUSR | S_IRGRP);
     if (ofd < 0)
     {

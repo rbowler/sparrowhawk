@@ -1,7 +1,26 @@
+04 Sep 2000 Win32 portability changes (John Kozak)
+04 Sep 2000 Fix for 64K segment length checking in 370 DAT (Jay Maynard,
+            found by Mario Bezzi)
+04 Sep 2000 Fix for TPI storing interrupt code when no interrupt pending
+            (Jay Maynard, found by Greg Smith)
+03 Sep 2000 Printer support for skip to channel 9 and 12 (Roger Bowler)
+03 Sep 2000 Panel refresh rate command and PANRATE parameter (Reed Petty)
+31 Aug 2000 Fix storage protection override on fetch (Jan Jaeger)
+29 Aug 2000 ESA/390 (VM dataspace) SIE support (Jan Jaeger)
+21 Aug 2000 Bugfix for MXR instruction (by Peter Kuschnerus)
+19 Aug 2000 SIE Vector support (Jan Jaeger)
+12 Aug 2000 Add CONCS, DISCS and RCHP instructions (Jan Jaeger)
+12 Aug 2000 Add S/370 Mode support to SIE (Jan Jaeger)
+08 Aug 2000 Fix flags on intermediate subchannel status (Jan Jaeger)
+08 Aug 2000 Break SYSCONS output lines when too long (Jan Jaeger)
+04 Aug 2000 Floating point instructions SQDR and SQER (by Peter Kuschnerus)
+04 Aug 2000 Add Lock Page instruction (Jan Jaeger)
 03 Aug 2000 Simplify logmsg and DEVTRACE macro definitions (Jay Maynard)
 03 Aug 2000 Prevent incorrect length indication on CONTROL NOP CCW (Jay
             Maynard)
 01 Aug 2000 Complete 370 HIO processing (Jay Maynard)
+29 Jul 2000 Interpretive Execution (SIE) (Jan Jaeger)
+29 Jul 2000 Set Address Limit (SAL) instruction (Jan Jaeger)
 25 Jul 2000 Correct nullification of TPI and TSCH (Jan Jaeger)
 25 Jul 2000 Add device locking to MSCH (Jan Jaeger)
 25 Jul 2000 Correct TPROT instruction (Jan Jaeger)
@@ -10,9 +29,8 @@
             Jaeger)
 22 Jul 2000 Clear remainder of ASTE when loading ASTE with ASF=0 
             in translace_asn (Jan Jaeger)
-22 Jul 2000 Add (incomplete) PLO instruction (Jan Jaeger)
+22 Jul 2000 Add PLO instruction (Jan Jaeger)
 22 Jul 2000 Fix CLCL interruption problem (Jan Jaeger)
-22 Jul 2000 Fix addresswrap in MVO (Jan Jaeger)
 19 Jul 2000 Make ED and EDMK perform a trial run (Jan Jaeger)
 16 Jul 2000 Fix address wraparound in MVO (Jan Jaeger)
 15 Jul 2000 Fix CR15 corruption in form_stack_entry,

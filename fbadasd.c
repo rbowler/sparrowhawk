@@ -65,7 +65,7 @@ BYTE    c;                              /* Character work area       */
     strcpy (dev->filename, argv[0]);
 
     /* Open the device file */
-    dev->fd = open (dev->filename, O_RDWR);
+    dev->fd = open (dev->filename, O_RDWR|O_BINARY);
     if (dev->fd < 0)
     {
         fprintf (stderr,
@@ -685,15 +685,16 @@ int     repcnt;                         /* Replication count         */
             break;
         }
 
-        /* Verify that bytes 1-3 are zeroes */
-        if (iobuf[1] != 0 || iobuf[2] != 0 || iobuf[3] != 0)
-        {
-            logmsg("fbadasd: invalid reserved bytes %2.2X %2.2X %2.2X\n",
-                    iobuf[1], iobuf[2], iobuf[3]);
-            dev->sense[0] = SENSE_CR;
-            *unitstat = CSW_CE | CSW_DE | CSW_UC;
-            break;
-        }
+//      VM/ESA sends 0x00000200 0x00000000 0x00000000 0x0001404F
+//      /* Verify that bytes 1-3 are zeroes */
+//      if (iobuf[1] != 0 || iobuf[2] != 0 || iobuf[3] != 0)
+//      {
+//          logmsg("fbadasd: invalid reserved bytes %2.2X %2.2X %2.2X\n",
+//                  iobuf[1], iobuf[2], iobuf[3]);
+//          dev->sense[0] = SENSE_CR;
+//          *unitstat = CSW_CE | CSW_DE | CSW_UC;
+//          break;
+//      }
 
         /* Bytes 4-7 contain the block number of the first block
            of the extent relative to the start of the device */

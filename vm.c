@@ -1,10 +1,13 @@
 /* VM.C         (c) Copyright Roger Bowler, 2000                     */
 /*              ESA/390 VM Diagnose calls and IUCV instruction       */
 
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+
 /*-------------------------------------------------------------------*/
 /* This module implements miscellaneous diagnose functions           */
 /* described in SC24-5670 VM/ESA CP Programming Services             */
 /* and SC24-5855 VM/ESA CP Diagnosis Reference.                      */
+/*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -85,7 +88,9 @@ U32     effective_addr2;                /* Effective address         */
        rather then a priviliged operation exception when
        executed in problem state                                 *JJ */
     if ( regs->psw.prob )
-        program_check (regs, PGM_OPERATION_EXCEPTION);
+        program_interrupt (regs, PGM_OPERATION_EXCEPTION);
+
+    SIE_INTERCEPT(regs);
 
     /* Set condition code to indicate IUCV not available */
     regs->psw.cc = 3;
@@ -191,7 +196,7 @@ BYTE            skey1, skey2;           /* Storage keys of first and
     /* Program check if parameter list not on fullword boundary */
     if (iopaddr & 0x00000003)
     {
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -234,7 +239,7 @@ BYTE            skey1, skey2;           /* Storage keys of first and
         || !(ioparm.type == HCPSBIOP_WRITE
             || ioparm.type == HCPSBIOP_READ))
     {
-        program_check (regs, PGM_OPERAND_EXCEPTION);
+        program_interrupt (regs, PGM_OPERAND_EXCEPTION);
         return 0;
     }
 
@@ -249,7 +254,7 @@ BYTE            skey1, skey2;           /* Storage keys of first and
     /* Program check if SBILIST is not on a doubleword boundary */
     if (sbiaddr & 0x00000007)
     {
-        program_check (regs, PGM_OPERAND_EXCEPTION);
+        program_interrupt (regs, PGM_OPERAND_EXCEPTION);
         return 0;
     }
 
@@ -260,7 +265,7 @@ BYTE            skey1, skey2;           /* Storage keys of first and
         accum |= ioparm.resv2[i];
     if (accum != 0)
     {
-        program_check (regs, PGM_OPERAND_EXCEPTION);
+        program_interrupt (regs, PGM_OPERAND_EXCEPTION);
         return 0;
     }
 
@@ -308,7 +313,7 @@ BYTE            skey1, skey2;           /* Storage keys of first and
            and is not subject to fetch-protection override
            or storage-protection override mechanisms, and
            an SBILIST entry cannot cross a page boundary */
-        if (sbiaddr >= sysblk.mainsize
+        if (sbiaddr >= regs->mainsize
             || ((STORAGE_KEY(sbiaddr) & STORKEY_FETCH)
                 && (STORAGE_KEY(sbiaddr) & STORKEY_KEY) != ioparm.akey
                 && ioparm.akey != 0))
@@ -318,8 +323,8 @@ BYTE            skey1, skey2;           /* Storage keys of first and
         }
 
         /* Load block number and data address from SBILIST */
-        blknum = fetch_fullword_absolute(sbiaddr);
-        absadr = fetch_fullword_absolute(sbiaddr+4);
+        blknum = fetch_fullword_absolute(sbiaddr, regs);
+        absadr = fetch_fullword_absolute(sbiaddr+4, regs);
 
         if (dev->ccwtrace || dev->ccwstep)
         {
@@ -331,7 +336,7 @@ BYTE            skey1, skey2;           /* Storage keys of first and
         }
 
         /* Return code 12 and cond code 2 if buffer exceeds storage */
-        if (absadr >= sysblk.mainsize - blksize)
+        if (absadr >= regs->mainsize - blksize)
         {
             regs->gpr[15] = 12;
             return 2;
@@ -447,7 +452,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
     /* Program check if parameter list not on fullword boundary */
     if (iopaddr & 0x00000003)
     {
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -479,7 +484,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
        or if the reserved bits in the flag byte are not zero */
     if ((ioparm.akey & 0x0F) || (ioparm.flag & HCPSGIOP_FLAG_RESV))
     {
-        program_check (regs, PGM_OPERAND_EXCEPTION);
+        program_interrupt (regs, PGM_OPERAND_EXCEPTION);
         return 0;
     }
 
@@ -487,7 +492,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
     /* Program check if flag byte specifies format-1 CCW */
     if (ioparm.flag & HCPSGIOP_FORMAT1_CCW)
     {
-        program_check (regs, PGM_OPERAND_EXCEPTION);
+        program_interrupt (regs, PGM_OPERAND_EXCEPTION);
         return 0;
     }
 #endif /*FEATURE_S370_CHANNEL*/
@@ -498,7 +503,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
            ((ioparm.flag & HCPSGIOP_FORMAT1_CCW) ?
                         0x7FFFFFFF : 0x00FFFFFF))
     {
-        program_check (regs, PGM_OPERAND_EXCEPTION);
+        program_interrupt (regs, PGM_OPERAND_EXCEPTION);
         return 0;
     }
 
@@ -513,7 +518,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
         accum |= ioparm.resv4[i];
     if (accum != 0)
     {
-        program_check (regs, PGM_OPERAND_EXCEPTION);
+        program_interrupt (regs, PGM_OPERAND_EXCEPTION);
         return 0;
     }
 
@@ -639,7 +644,7 @@ BYTE            c;                      /* Character work area       */
     /* Program check if operand is not on a doubleword boundary */
     if (idaddr & 0x00000007)
     {
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 
@@ -649,7 +654,7 @@ BYTE            c;                      /* Character work area       */
     /* Program check if operand length is invalid */
     if (idlen < 1)
     {
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 
@@ -762,7 +767,7 @@ BYTE    resp[256];                      /* Response buffer (ASCIIZ)  */
         || ((cmdflags & CMDFLAGS_RESPONSE)
             && (r1 == 15 || r2 == 15 || r1 == r2 + 1 || r2 == r1 + 1)))
     {
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -830,7 +835,7 @@ U32     buflen;                         /* Length of data buffer     */
     /* Program check if buffer length is negative */
     if ((S32)buflen < 0)
     {
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 
@@ -889,7 +894,7 @@ static  BYTE timefmt[]="%m/%d/%y%H:%M:%S%m/%d/%Y%Y-%m-%d";
         || bufadr == 0
         || (bufadr & 0x00000007))
     {
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 
@@ -967,7 +972,7 @@ BYTE    func;                           /* Function code...          */
     /* Program check if R1 is not an even-numbered register */
     if (r1 & 1)
     {
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -980,9 +985,9 @@ BYTE    func;                           /* Function code...          */
 
     /* Validate start/end addresses if function is not CAPR */
     if (func != DIAG214_CAPR
-        && (start > end || end >= sysblk.mainsize))
+        && (start > end || end >= regs->mainsize))
     {
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -1014,7 +1019,7 @@ BYTE    func;                           /* Function code...          */
         break;
 
     default:            /* Invalid function code */
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     } /* end switch(func) */
 

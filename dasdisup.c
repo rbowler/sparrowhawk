@@ -633,7 +633,7 @@ int             nmem = 0;               /* Number of array entries   */
     }
 
     /* Open the CKD image file */
-    cif = open_ckd_image (fname, O_RDWR);
+    cif = open_ckd_image (fname, O_RDWR|O_BINARY);
     if (cif == NULL) return -1;
 
     /* Build the extent array for the SVCLIB dataset */

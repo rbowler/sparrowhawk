@@ -75,7 +75,7 @@ BYTE    pack[MAX_DECIMAL_LENGTH];       /* Packed decimal work area  */
 
         /* Check for valid numeric */
         if (h > 9) {
-            program_check (regs, PGM_DATA_EXCEPTION);
+            program_interrupt (regs, PGM_DATA_EXCEPTION);
             return;
         }
 
@@ -91,7 +91,7 @@ BYTE    pack[MAX_DECIMAL_LENGTH];       /* Packed decimal work area  */
     /* Check for valid sign */
     h = pack[MAX_DECIMAL_LENGTH-1] & 0x0F;
     if ( h < 0x0A ) {
-        program_check (regs, PGM_DATA_EXCEPTION);
+        program_interrupt (regs, PGM_DATA_EXCEPTION);
         return;
     }
 
@@ -521,7 +521,7 @@ int     sign1, sign2, sign3;            /* Sign of operands & result */
 
     /* Program check if overflow and PSW program mask is set */
     if (cc == 3 && regs->psw.domask)
-        program_check (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
+        program_interrupt (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
 
 }
 
@@ -607,7 +607,7 @@ int     signq, signr;                   /* Sign of quotient/remainder*/
     /* Program check if the second operand length exceeds 15 digits
        or is equal to or greater than the first operand length */
     if (l2 > 7 || l2 >= l1)
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Load operands into work areas */
     load_decimal (effective_addr1, l1, b1, regs, dec1, &count1, &sign1);
@@ -615,7 +615,7 @@ int     signq, signr;                   /* Sign of quotient/remainder*/
 
     /* Program check if second operand value is zero */
     if (count2 == 0)
-        program_check (regs, PGM_DECIMAL_DIVIDE_EXCEPTION);
+        program_interrupt (regs, PGM_DECIMAL_DIVIDE_EXCEPTION);
 
     /* Perform trial comparison to determine potential overflow.
        The leftmost digit of the divisor is aligned one digit to
@@ -627,7 +627,7 @@ int     signq, signr;                   /* Sign of quotient/remainder*/
     if (memcmp(dec2 + (MAX_DECIMAL_DIGITS - l2*2 - 2),
                 dec1 + (MAX_DECIMAL_DIGITS - l1*2 - 1),
                 l2*2 + 2) <= 0)
-        program_check (regs, PGM_DECIMAL_DIVIDE_EXCEPTION);
+        program_interrupt (regs, PGM_DECIMAL_DIVIDE_EXCEPTION);
 
     /* Perform decimal division */
     divide_decimal (dec1, count1, dec2, count2, quot, rem);
@@ -652,7 +652,7 @@ int     signq, signr;                   /* Sign of quotient/remainder*/
 
 
 /*-------------------------------------------------------------------*/
-/* DE   EDIT  - Edit                                            [SS] */
+/* DE   ED    - Edit                                            [SS] */
 /* DF   EDMK  - Edit and Mark                                   [SS] */
 /*-------------------------------------------------------------------*/
 void zz_edit_x_edit_and_mark (BYTE inst[], int execflag, REGS *regs)
@@ -722,7 +722,7 @@ BYTE    rbyte;                          /* Result byte               */
     
                     /* Program check if left digit is not numeric */
                     if (h > 9)
-                        program_check (regs, PGM_DATA_EXCEPTION);
+                        program_interrupt (regs, PGM_DATA_EXCEPTION);
     
                 }
                 else
@@ -849,13 +849,13 @@ int     carry;                          /* Carry indicator           */
     /* Program check if the second operand length exceeds 15 digits
        or is equal to or greater than the first operand length */
     if (l2 > 7 || l2 >= l1)
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Program check if the number of bytes in the second operand
        is less than the number of bytes of high-order zeroes in the
        first operand; this ensures that overflow cannot occur */
     if (l2 > l1 - (count1/2 + 1))
-        program_check (regs, PGM_DATA_EXCEPTION);
+        program_interrupt (regs, PGM_DATA_EXCEPTION);
 
     /* Clear the result field */
     memset (dec3, 0, MAX_DECIMAL_DIGITS);
@@ -910,7 +910,7 @@ int     carry;                          /* Carry indicator           */
 
     /* Program check if rounding digit is invalid */
     if (i3 > 9)
-        program_check (regs, PGM_DATA_EXCEPTION);
+        program_interrupt (regs, PGM_DATA_EXCEPTION);
 
     /* Isolate low-order six bits of shift count */
     effective_addr2 &= 0x3F;
@@ -969,7 +969,7 @@ int     carry;                          /* Carry indicator           */
 
     /* Program check if overflow and PSW program mask is set */
     if (cc == 3 && regs->psw.domask)
-        program_check (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
+        program_interrupt (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
 
 }
 
@@ -1044,7 +1044,7 @@ int     sign1, sign2, sign3;            /* Sign of operands & result */
 
     /* Program check if overflow and PSW program mask is set */
     if (cc == 3 && regs->psw.domask)
-        program_check (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
+        program_interrupt (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
 
 }
 
@@ -1088,7 +1088,7 @@ int     sign;                           /* Sign                      */
 
     /* Program check if overflow and PSW program mask is set */
     if (cc == 3 && regs->psw.domask)
-        program_check (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
+        program_interrupt (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
 
 }
 

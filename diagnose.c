@@ -27,18 +27,48 @@ void diagnose_call (U32 code, int r1, int r2, REGS *regs)
 U32             n;                      /* 32-bit operand value      */
 #endif /*FEATURE_HERCULES_DIAGCALLS*/
 
-#ifdef FEATURE_HERCULES_DIAGCALLS
-    /* Program check if in problem state for non hercules diags */
-    if ( regs->psw.prob && (code < 0xF00 || code > 0xF08))
-#else /*!FEATURE_HERCULES_DIAGCALLS*/
-    if ( regs->psw.prob )
-#endif /*!FEATURE_HERCULES_DIAGCALLS*/
-    {
-        program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
-        return;
-    }
-
     switch(code) {
+
+
+#if defined(FEATURE_HYPERVISOR) || defined(FEATURE_EMULATE_VM)
+    case 0x044:
+    /*---------------------------------------------------------------*/
+    /* Diagnose 044: Voluntary Time Slice End                        */
+    /*---------------------------------------------------------------*/
+        scpend_call();
+        break;
+#endif
+
+
+#ifdef FEATURE_MSSF_CALL
+    case 0x080:
+    /*---------------------------------------------------------------*/
+    /* Diagnose 080: MSSF Call                                       */
+    /*---------------------------------------------------------------*/
+        regs->psw.cc = mssf_call (r1, r2, regs);
+        break;
+#endif /*FEATURE_MSSF_CALL*/
+
+
+#if defined(FEATURE_HYPERVISOR)
+    case 0x204:
+    /*---------------------------------------------------------------*/
+    /* Diagnose 204: LPAR RMF Interface                              */
+    /*---------------------------------------------------------------*/
+        diag204_call (r1, r2, regs);
+        regs->psw.cc = 0;
+        break;
+#endif /*defined(FEATURE_HYPERVISOR)*/
+
+#if 0
+    case 0x21C:
+    /*---------------------------------------------------------------*/
+    /* Diagnose 21C: ????                                            */
+    /*---------------------------------------------------------------*/
+        /*INCOMPLETE*/
+        regs->psw.cc = 0;
+        break;
+#endif
 
 #ifdef FEATURE_EMULATE_VM
     case 0x000:
@@ -69,16 +99,7 @@ U32             n;                      /* 32-bit operand value      */
     /*---------------------------------------------------------------*/
         regs->psw.cc = diag_devtype (r1, r2, regs);
         break;
-#endif /*FEATURE_EMULATE_VM*/
 
-    case 0x044:
-    /*---------------------------------------------------------------*/
-    /* Diagnose 044: Voluntary Time Slice End                        */
-    /*---------------------------------------------------------------*/
-        scpend_call();
-        break;
-
-#ifdef FEATURE_EMULATE_VM
     case 0x05C:
     /*---------------------------------------------------------------*/
     /* Diagnose 05C: Error Message Editing                           */
@@ -92,7 +113,7 @@ U32             n;                      /* 32-bit operand value      */
     /* Diagnose 060: Virtual Machine Storage Size                    */
     /*---------------------------------------------------------------*/
         /* Load main storage size in bytes into R1 register */
-        regs->gpr[r1] = sysblk.mainsize;
+        regs->gpr[r1] = regs->mainsize;
         break;
 
     case 0x064:
@@ -103,18 +124,7 @@ U32             n;                      /* 32-bit operand value      */
         regs->gpr[r2] = 44;
         regs->psw.cc = 2;
         break;
-#endif /*FEATURE_EMULATE_VM*/
 
-#ifdef FEATURE_MSSF_CALL
-    case 0x080:
-    /*---------------------------------------------------------------*/
-    /* Diagnose 080: MSSF Call                                       */
-    /*---------------------------------------------------------------*/
-        regs->psw.cc = mssf_call (r1, r2, regs);
-        break;
-#endif /*FEATURE_MSSF_CALL*/
-
-#ifdef FEATURE_EMULATE_VM
     case 0x0A4:
     /*---------------------------------------------------------------*/
     /* Diagnose 0A4: Synchronous I/O (Standard CMS Blocksize)        */
@@ -146,14 +156,6 @@ U32             n;                      /* 32-bit operand value      */
     /*---------------------------------------------------------------*/
         /* This function is implemented as a no-operation */
         regs->gpr[r2] = 0;
-        regs->psw.cc = 0;
-        break;
-
-    case 0x204:
-    /*---------------------------------------------------------------*/
-    /* Diagnose 204: LPAR RMF Interface                              */
-    /*---------------------------------------------------------------*/
-        diag204_call (r1, r2, regs);
         regs->psw.cc = 0;
         break;
 
@@ -229,9 +231,9 @@ U32             n;                      /* 32-bit operand value      */
         n = APPLY_PREFIXING (n, regs->pxr);
 
         /* Addressing exception if block is outside main storage */
-        if ( n >= sysblk.mainsize )
+        if ( n >= regs->mainsize )
         {
-            program_check (regs, PGM_ADDRESSING_EXCEPTION);
+            program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
             break;
         }
 
@@ -253,7 +255,7 @@ U32             n;                      /* 32-bit operand value      */
     /*---------------------------------------------------------------*/
     /* Diagnose xxx: Invalid function code                           */
     /*---------------------------------------------------------------*/
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
 
     } /* end switch(code) */

@@ -1,5 +1,5 @@
 #
-# Makefile for Hercules S/370 and ESA/390 emulator
+# Makefile for Hercules S/370 and ESA/390 emulator, Win32 version
 #
 # This makefile will make executables for both architectures at the same
 # time; the 370 program is hercules-370, and the 390 one is hercules-390.
@@ -14,13 +14,16 @@ VERSION  = 1.67
 #   (the directory is only used when installing).
 DESTDIR  = $(PREFIX)/usr/bin
 
+# Directory where the pthreads-win32 library was installed.
+PTHREADS_W32DIR = //G/pthreads
+
 #CFLAGS	 = -O0 -Wall -DARCH=390
-CFLAGS	 = -O2 -Wall -fPIC -malign-double -DARCH=390
+CFLAGS	 = -O2 -Wall -fPIC -malign-double -DARCH=390 -DWIN32
 #	   -march=pentium -malign-double -mwide-multiply
 #CFL_370  = -O0 -Wall -DARCH=370
-CFL_370  = -O2 -Wall -fPIC -malign-double -DARCH=370
+CFL_370  = -O2 -Wall -fPIC -malign-double -DARCH=370 -DWIN32
 #	   -march=pentium -malign-double -mwide-multiply
-LFLAGS	 = -lpthread
+LFLAGS	 = -L$(PTHREADS_W32DIR)/DLL -lpthreadw32
 
 # Uncomment these lines for NetBSD, with either the unproven-pthreads
 #   or pth packages

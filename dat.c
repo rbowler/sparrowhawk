@@ -1,6 +1,8 @@
 /* DAT.C        (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 Dynamic Address Translation                  */
 
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+
 /*-------------------------------------------------------------------*/
 /* This module implements the DAT, ALET, and ASN translation         */
 /* functions of the ESA/390 architecture, described in the manual    */
@@ -12,11 +14,15 @@
 /* Additional credits:                                               */
 /*      S/370 DAT support by Jay Maynard (as described in            */
 /*      GA22-7000 System/370 Principles of Operation)                */
+/*      Clear remainder of ASTE when ASF=0 - Jan Jaeger              */
+/*      S/370 DAT support when running under SIE - Jan Jaeger        */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
 
 #include "inline.h"
+
+#include "opcode.h"
 
 /*-------------------------------------------------------------------*/
 /* Translate ASN to produce address-space control parameters         */
@@ -59,13 +65,13 @@ int     i;                              /* Array subscript           */
     afte_addr += (asn & ASN_AFX) >> 4;
 
     /* Addressing exception if AFTE is outside main storage */
-    if (afte_addr >= sysblk.mainsize)
+    if (afte_addr >= regs->mainsize)
         goto asn_addr_excp;
 
     /* Load the AFTE from main storage. All four bytes must be
        fetched concurrently as observed by other CPUs */
     afte_addr = APPLY_PREFIXING (afte_addr, regs->pxr);
-    afte = fetch_fullword_absolute (afte_addr);
+    afte = fetch_fullword_absolute (afte_addr, regs);
 
     /* AFX translation exception if AFTE invalid bit is set */
     if (afte & AFTE_INVALID)
@@ -95,7 +101,7 @@ int     i;                              /* Array subscript           */
     aste_addr &= 0x7FFFFFFF;
 
     /* Addressing exception if ASTE is outside main storage */
-    if (aste_addr >= sysblk.mainsize)
+    if (aste_addr >= regs->mainsize)
         goto asn_addr_excp;
 
     /* Return the real address of the ASTE */
@@ -107,7 +113,7 @@ int     i;                              /* Array subscript           */
     aste_addr = APPLY_PREFIXING (aste_addr, regs->pxr);
     for (i = 0; i < numwords; i++)
     {
-        aste[i] = fetch_fullword_absolute (aste_addr);
+        aste[i] = fetch_fullword_absolute (aste_addr, regs);
         aste_addr += 4;
     }
     /* Clear remaining words if fewer than 16 words were loaded */
@@ -139,7 +145,7 @@ asn_asn_tran_spec_excp:
     goto asn_prog_check;
 
 asn_prog_check:
-    program_check (regs, code);
+    program_interrupt (regs, code);
 
 /* Conditions which the caller may or may not program check */
 asn_afx_tran_excp:
@@ -207,12 +213,15 @@ BYTE    ate;                            /* Authority table entry     */
     ato &= 0x7FFFFFFF;
 
     /* Addressing exception if ATE is outside main storage */
-    if (ato >= sysblk.mainsize)
+    if (ato >= regs->mainsize)
         goto auth_addr_excp;
 
     /* Load the byte containing the authority table entry
        and shift the entry into the leftmost 2 bits */
     ato = APPLY_PREFIXING (ato, regs->pxr);
+
+    SIE_TRANSLATE(&ato, ACCTYPE_SIE, regs);
+
     ate = sysblk.mainstor[ato];
     ate <<= ((ax & 0x03)*2);
 
@@ -228,7 +237,7 @@ BYTE    ate;                            /* Authority table entry     */
     return 0;
 
 auth_addr_excp:
-    program_check (regs, PGM_ADDRESSING_EXCEPTION);
+    program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
 
     return -1; /* prevent warning from compiler */
 } /* end function authorize_asn */
@@ -298,7 +307,7 @@ int     code;                           /* Exception code            */
             regs->cr[2] & CR2_DUCTO;
 
     /* Addressing exception if outside main storage */
-    if (cb >= sysblk.mainsize)
+    if (cb >= regs->mainsize)
         goto alet_addr_excp;
 
     /* Load the effective access-list designation (ALD) from
@@ -306,7 +315,7 @@ int     code;                           /* Exception code            */
        fetched concurrently as observed by other CPUs.  Note
        that the DUCT and the PASTE cannot cross a page boundary */
     cb = APPLY_PREFIXING (cb, regs->pxr);
-    ald = fetch_fullword_absolute (cb+16);
+    ald = fetch_fullword_absolute (cb+16, regs);
 
     /* [5.8.4.5] Access-list lookup */
 
@@ -322,7 +331,7 @@ int     code;                           /* Exception code            */
     alo += (alet & ALET_ALEN) << 4;
 
     /* Addressing exception if outside main storage */
-    if (alo >= sysblk.mainsize)
+    if (alo >= regs->mainsize)
         goto alet_addr_excp;
 
     /* Fetch the 16-byte access list entry from absolute storage.
@@ -331,7 +340,7 @@ int     code;                           /* Exception code            */
     alo = APPLY_PREFIXING (alo, regs->pxr);
     for (i = 0; i < 4; i++)
     {
-        ale[i] = fetch_fullword_absolute (alo);
+        ale[i] = fetch_fullword_absolute (alo, regs);
         alo += 4;
     }
 
@@ -350,7 +359,7 @@ int     code;                           /* Exception code            */
 
     /* Addressing exception if ASTE is outside main storage */
     abs = APPLY_PREFIXING (aste_addr, regs->pxr);
-    if (abs >= sysblk.mainsize)
+    if (abs >= regs->mainsize)
         goto alet_addr_excp;
 
     /* Fetch the 64-byte ASN second table entry from real storage.
@@ -358,7 +367,7 @@ int     code;                           /* Exception code            */
        observed by other CPUs.  ASTE cannot cross a page boundary */
     for (i = 0; i < 16; i++)
     {
-        aste[i] = fetch_fullword_absolute (abs);
+        aste[i] = fetch_fullword_absolute (abs, regs);
         abs += 4;
     }
 
@@ -414,7 +423,7 @@ alet_asn_tran_spec_excp:
     goto alet_prog_check;
 
 alet_prog_check:
-    program_check (regs, code);
+    program_interrupt (regs, code);
 
 /* Conditions which the caller may or may not program check */
 alet_spec_excp:
@@ -527,11 +536,6 @@ int     protect = 0;                    /* 1=ALE or page protection  */
 U32     ste = 0;                        /* Segment table entry       */
 U32     pto;                            /* Page table origin         */
 int     ptl;                            /* Page table length         */
-#ifdef FEATURE_S390_DAT
-U32     pte = 0;                        /* Page table entry          */
-#else
-U16     pte = 0;                        /* Page table entry          */
-#endif
 TLBE   *tlbp;                           /* -> TLB entry              */
 U32     alet;                           /* Access list entry token   */
 U32     asteo;                          /* Real address of ASTE      */
@@ -569,25 +573,26 @@ U16     eax;                            /* Authorization index       */
         stid = TEA_ST_SECNDRY;
         std = regs->cr[7];
     }
-    else if (PRIMARY_SPACE_MODE(&regs->psw))
-    {
-        stid = TEA_ST_PRIMARY;
-        std = regs->cr[1];
-    }
-    else if (SECONDARY_SPACE_MODE(&regs->psw))
-    {
-        stid = TEA_ST_SECNDRY;
-        std = regs->cr[7];
-    }
-    else if (HOME_SPACE_MODE(&regs->psw))
-    {
-        stid = TEA_ST_HOME;
-        std = regs->cr[13];
-    }
-    else /* ACCESS_REGISTER_MODE */
+    else if(ACCESS_REGISTER_MODE(&regs->psw)
+#if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+      || (regs->sie_active
+        && (regs->guestregs->siebk->mx & SIE_MX_XC)
+        && regs->guestregs->psw.armode)
+#endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+        )
     {
         /* [5.8.4.1] Select the access-list-entry token */
-        alet = (arn == 0) ? 0 : regs->ar[arn];
+        alet = (arn == 0) ? 0 :
+#if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+        /* Obtain guest ALET if guest is XC guest in AR mode */
+        (regs->sie_active && (regs->guestregs->siebk->mx & SIE_MX_XC) 
+         && regs->guestregs->psw.armode)
+          ? regs->guestregs->ar[arn] :
+        /* else if in SIE mode but not an XC guest in AR mode 
+           then the ALET will be zero */
+        (regs->sie_active) ? 0 :
+#endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+            regs->ar[arn];
 
         /* Use the ALET to determine the segment table origin */
         switch (alet) {
@@ -623,216 +628,284 @@ U16     eax;                            /* Authorization index       */
         } /* end switch(alet) */
 
     } /* end if(ACCESS_REGISTER_MODE) */
-
-    /* Extract the private space bit from segment table descriptor */
-#ifdef FEATURE_S390_DAT
-    private = std & STD_PRIVATE;
-#endif
-
-    /* [3.11.3.2] Check the translation format bits in CR0 */
-#ifdef FEATURE_S390_DAT
-    if ((regs->cr[0] & CR0_TRAN_FMT) != CR0_TRAN_ESA390)
-        goto tran_spec_excp;
-#else
-    if ((((regs->cr[0] & CR0_PAGE_SIZE) != CR0_PAGE_SZ_2K) &&
-       ((regs->cr[0] & CR0_PAGE_SIZE) != CR0_PAGE_SZ_4K)) ||
-       (((regs->cr[0] & CR0_SEG_SIZE) != CR0_SEG_SZ_64K) &&
-       ((regs->cr[0] & CR0_SEG_SIZE) != CR0_SEG_SZ_1M)))
-       goto tran_spec_excp;
-#endif
-
-    /* [3.11.4] Look up the address in the TLB */
-    /* [10.17] Do not use TLB if processing LRA instruction */
-
-    /* Only a single entry in the TLB will be looked up, namely the
-       entry indexed by bits 12-19 of the virtual address */
-    if (acctype == ACCTYPE_LRA)
-        tlbp = NULL;
-    else
-        tlbp = &(regs->tlb[(vaddr >> 12) & 0xFF]);
-
-#ifdef FEATURE_S390_DAT
-    if (tlbp != NULL
-        && (vaddr & 0x7FFFF000) == tlbp->vaddr
-        && tlbp->valid
-        && (tlbp->common || std == tlbp->std)
-        && !(tlbp->common && private))
-#else
-    if (tlbp != NULL
-        && ((((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) &&
-        (vaddr & 0x00FFF000) == tlbp->vaddr) ||
-        (((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_2K) &&
-        (vaddr & 0x00FFF800) == tlbp->vaddr))
-        && tlbp->valid
-        && (tlbp->common || std == tlbp->std)
-        && !(tlbp->common && private))
-#endif
+    else if (PRIMARY_SPACE_MODE(&regs->psw))
     {
-        pte = tlbp->pte;
+        stid = TEA_ST_PRIMARY;
+        std = regs->cr[1];
     }
-    else
+    else if (SECONDARY_SPACE_MODE(&regs->psw))
     {
-        /* [3.11.3.3] Segment table lookup */
+        stid = TEA_ST_SECNDRY;
+        std = regs->cr[7];
+    }
+    else /* HOME_SPACE_MODE */
+    {
+        stid = TEA_ST_HOME;
+        std = regs->cr[13];
+    }
 
-        /* Calculate the real address of the segment table entry */
-#ifdef FEATURE_S390_DAT
-        sto = std & STD_STO;
-        stl = std & STD_STL;
-        sto += (vaddr & 0x7FF00000) >> 18;
-#else
-        sto = std & STD_370_STO;
-        stl = std & STD_370_STL;
-        sto += ((regs->cr[0] & CR0_SEG_SIZE) == CR0_SEG_SZ_1M) ?
-            ((vaddr & 0x00F00000) >> 18) :
-            ((vaddr & 0x00FF0000) >> 14);
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    /* Determine the translation format that is going to be used */
+    if(regs->sie_state && (regs->siebk->m & SIE_M_370))
 #endif
+#if defined(FEATURE_INTERPRETIVE_EXECUTION) || !defined(FEATURE_S390_DAT)
+    {
+    /* S/370 Dynamic Address Translation */
+    U16 pte;
 
-        /* Generate addressing exception if outside real storage */
-        if (sto >= sysblk.mainsize)
-            goto address_excp;
+        /* Extract the private space bit from segment table descriptor */
 
-        /* Check that virtual address is within the segment table */
-        if ((vaddr >> 24) > stl)
-            goto seg_tran_length;
+        /* [3.11.3.2] Check the translation format bits in CR0 */
+        if ((((regs->cr[0] & CR0_PAGE_SIZE) != CR0_PAGE_SZ_2K) &&
+           ((regs->cr[0] & CR0_PAGE_SIZE) != CR0_PAGE_SZ_4K)) ||
+           (((regs->cr[0] & CR0_SEG_SIZE) != CR0_SEG_SZ_64K) &&
+           ((regs->cr[0] & CR0_SEG_SIZE) != CR0_SEG_SZ_1M)))
+           goto tran_spec_excp;
 
-        /* Fetch segment table entry from real storage.  All bytes
-           must be fetched concurrently as observed by other CPUs */
-        sto = APPLY_PREFIXING (sto, regs->pxr);
-        ste = fetch_fullword_absolute (sto);
+        /* [3.11.4] Look up the address in the TLB */
+        /* [10.17] Do not use TLB if processing LRA instruction */
 
-        /* Generate segment translation exception if segment invalid */
-#ifdef FEATURE_S390_DAT
-        if (ste & SEGTAB_INVALID)
-#else
-        if (ste & SEGTAB_370_INVL)
-#endif
-            goto seg_tran_invalid;
+        /* Only a single entry in the TLB will be looked up, namely the
+           entry indexed by bits 12-19 of the virtual address */
+        if (acctype == ACCTYPE_LRA)
+            tlbp = NULL;
+        else
+            tlbp = &(regs->tlb[(vaddr >> 12) & 0xFF]);
 
-        /* Check that all the reserved bits in the STE are zero */
-#ifdef FEATURE_S390_DAT
-        if (ste & SEGTAB_RESV)
-#else
-        if (ste & SEGTAB_370_RSV)
-#endif
-            goto tran_spec_excp;
-
-#ifdef FEATURE_S390_DAT
-        /* If the segment table origin register indicates a private
-           address space then STE must not indicate a common segment */
-        if (private && (ste & (SEGTAB_COMMON)))
-            goto tran_spec_excp;
-#endif
-
-        /* Isolate page table origin and length */
-#ifdef FEATURE_S390_DAT
-        pto = ste & SEGTAB_PTO;
-        ptl = ste & SEGTAB_PTL;
-#else
-        pto = ste & SEGTAB_370_PTO;
-        ptl = ste & SEGTAB_370_PTL;
-#endif
-
-        /* [3.11.3.4] Page table lookup */
-
-        /* Calculate the real address of the page table entry */
-#ifdef FEATURE_S390_DAT
-        pto += (vaddr & 0x000FF000) >> 10;
-#else
-        pto += ((regs->cr[0] & CR0_SEG_SIZE) == CR0_SEG_SZ_1M) ?
-            (((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) ?
-            ((vaddr & 0x000FF000) >> 11) :
-            ((vaddr & 0x000FF800) >> 10)) :
-            (((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) ?
-            ((vaddr & 0x0000F000) >> 11) :
-            ((vaddr & 0x0000F800) >> 10));
-#endif
-
-        /* Generate addressing exception if outside real storage */
-        if (pto >= sysblk.mainsize)
-            goto address_excp;
-
-        /* Check that the virtual address is within the page table */
-#ifdef FEATURE_S390_DAT
-        if (((vaddr & 0x000FF000) >> 16) > ptl)
-            goto page_tran_length;
-#else
-        if ((((regs->cr[0] & CR0_SEG_SIZE) == CR0_SEG_SZ_1M) &&
-            (((vaddr & 0x000F0000) >> 16) > ptl)) ||
-            (((regs->cr[0] & CR0_SEG_SIZE) == CR0_SEG_SZ_64K) &&
-            (((vaddr & 0x0000F000) >> 12) > ptl)))
-            goto page_tran_length;
-#endif
-
-        /* Fetch the page table entry from real storage.  All bytes
-           must be fetched concurrently as observed by other CPUs */
-        pto = APPLY_PREFIXING (pto, regs->pxr);
-#ifdef FEATURE_S390_DAT
-        pte = fetch_fullword_absolute (pto);
-#else
-        pte = fetch_halfword_absolute (pto);
-#endif
-
-        /* Generate page translation exception if page invalid */
-#ifdef FEATURE_S390_DAT
-        if (pte & PAGETAB_INVALID)
-#else
-        if ((((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) &&
-            (pte & PAGETAB_INV_4K)) ||
+        if (tlbp != NULL
+            && ((((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) &&
+            (vaddr & 0x00FFF000) == tlbp->vaddr) ||
             (((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_2K) &&
-            (pte & PAGETAB_INV_2K)))
+            (vaddr & 0x00FFF800) == tlbp->vaddr))
+            && tlbp->valid
+            && (tlbp->common || std == tlbp->std)
+            && !(tlbp->common && private))
+        {
+            pte = tlbp->pte;
+        }
+        else
+        {
+            /* [3.11.3.3] Segment table lookup */
+    
+            /* Calculate the real address of the segment table entry */
+            sto = std & STD_370_STO;
+            stl = std & STD_370_STL;
+            sto += ((regs->cr[0] & CR0_SEG_SIZE) == CR0_SEG_SZ_1M) ?
+                ((vaddr & 0x00F00000) >> 18) :
+                ((vaddr & 0x00FF0000) >> 14);
+    
+            /* Check that virtual address is within the segment table */
+            if (((regs->cr[0] & CR0_SEG_SIZE) == CR0_SEG_SZ_64K) &&
+                (vaddr >> 20) > stl)
+                goto seg_tran_length;
+    
+            /* Generate addressing exception if outside real storage */
+            if (sto >= regs->mainsize)
+                goto address_excp;
+    
+            /* Fetch segment table entry from real storage.  All bytes
+               must be fetched concurrently as observed by other CPUs */
+            sto = APPLY_PREFIXING (sto, regs->pxr);
+            ste = fetch_fullword_absolute (sto, regs);
+    
+            /* Generate segment translation exception if segment invalid */
+            if (ste & SEGTAB_370_INVL)
+                goto seg_tran_invalid;
+    
+            /* Check that all the reserved bits in the STE are zero */
+            if (ste & SEGTAB_370_RSV)
+                goto tran_spec_excp;
+    
+            /* Isolate page table origin and length */
+            pto = ste & SEGTAB_370_PTO;
+            ptl = ste & SEGTAB_370_PTL;
+    
+            /* [3.11.3.4] Page table lookup */
+    
+            /* Calculate the real address of the page table entry */
+            pto += ((regs->cr[0] & CR0_SEG_SIZE) == CR0_SEG_SZ_1M) ?
+                (((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) ?
+                ((vaddr & 0x000FF000) >> 11) :
+                ((vaddr & 0x000FF800) >> 10)) :
+                (((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) ?
+                ((vaddr & 0x0000F000) >> 11) :
+                ((vaddr & 0x0000F800) >> 10));
+    
+            /* Generate addressing exception if outside real storage */
+            if (pto >= regs->mainsize)
+                goto address_excp;
+    
+            /* Check that the virtual address is within the page table */
+            if ((((regs->cr[0] & CR0_SEG_SIZE) == CR0_SEG_SZ_1M) &&
+                (((vaddr & 0x000F0000) >> 16) > ptl)) ||
+                (((regs->cr[0] & CR0_SEG_SIZE) == CR0_SEG_SZ_64K) &&
+                (((vaddr & 0x0000F000) >> 12) > ptl)))
+                goto page_tran_length;
+    
+            /* Fetch the page table entry from real storage.  All bytes
+               must be fetched concurrently as observed by other CPUs */
+            pto = APPLY_PREFIXING (pto, regs->pxr);
+            pte = fetch_halfword_absolute (pto, regs);
+    
+            /* Generate page translation exception if page invalid */
+            if ((((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) &&
+                (pte & PAGETAB_INV_4K)) ||
+                (((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_2K) &&
+                (pte & PAGETAB_INV_2K)))
+                goto page_tran_invalid;
+    
+            /* Check that all the reserved bits in the PTE are zero */
+            if (((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_2K) &&
+                (pte & PAGETAB_RSV_2K))
+                goto tran_spec_excp;
+    
+            /* [3.11.4.2] Place the translated address in the TLB */
+            if (tlbp != NULL)
+            {
+                tlbp->std = std;
+                tlbp->vaddr =
+                    ((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) ?
+                    vaddr & 0x00FFF000 : vaddr & 0x00FFF800;
+                tlbp->pte = pte;
+                tlbp->common = (ste & SEGTAB_370_CMN) ? 1 : 0;
+                tlbp->valid = 1;
+            }
+    
+        } /* end if(!TLB) */
+    
+        /* Set the protection indicator if page protection is active */
+#ifdef FEATURE_SEGMENT_PROTECTION
+        if (ste & SEGTAB_370_PROT)
+            protect = 1;
 #endif
-            goto page_tran_invalid;
+    
+        /* [3.11.3.5] Combine the page frame real address with the byte
+           index of the virtual address to form the real address */
+        *raddr = ((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) ?
+            (((U32)pte & PAGETAB_PFRA_4K) << 8) | (vaddr & 0xFFF) :
+            (((U32)pte & PAGETAB_PFRA_2K) << 8) | (vaddr & 0x7FF);
+    
+    }
+#endif
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    else
+#endif
+#if defined(FEATURE_INTERPRETIVE_EXECUTION) || defined(FEATURE_S390_DAT)
+    {
+    /* S/390 Dynamic Address Translation */
+    U32 pte;
 
-        /* Check that all the reserved bits in the PTE are zero */
-#ifdef FEATURE_S390_DAT
-        if (pte & PAGETAB_RESV)
-#else
-        if (((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_2K) &&
-            (pte & PAGETAB_RSV_2K))
-#endif
+        /* Extract the private space bit from segment table descriptor */
+        private = std & STD_PRIVATE;
+
+        /* [3.11.3.2] Check the translation format bits in CR0 */
+        if ((regs->cr[0] & CR0_TRAN_FMT) != CR0_TRAN_ESA390)
             goto tran_spec_excp;
 
-        /* [3.11.4.2] Place the translated address in the TLB */
-        if (tlbp != NULL)
+        /* [3.11.4] Look up the address in the TLB */
+        /* [10.17] Do not use TLB if processing LRA instruction */
+
+        /* Only a single entry in the TLB will be looked up, namely the
+           entry indexed by bits 12-19 of the virtual address */
+        if (acctype == ACCTYPE_LRA)
+            tlbp = NULL;
+        else
+            tlbp = &(regs->tlb[(vaddr >> 12) & 0xFF]);
+
+        if (tlbp != NULL
+            && (vaddr & 0x7FFFF000) == tlbp->vaddr
+            && tlbp->valid
+            && (tlbp->common || std == tlbp->std)
+            && !(tlbp->common && private))
         {
-            tlbp->std = std;
-#ifdef FEATURE_S390_DAT
-            tlbp->vaddr = vaddr & 0x7FFFF000;
-#else
-            tlbp->vaddr =
-                ((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) ?
-                vaddr & 0x00FFF000 : vaddr & 0x00FFF800;
-#endif
-            tlbp->pte = pte;
-#ifdef FEATURE_S390_DAT
-            tlbp->common = (ste & SEGTAB_COMMON) ? 1 : 0;
-#else
-            tlbp->common = (ste & SEGTAB_370_CMN) ? 1 : 0;
-#endif
-            tlbp->valid = 1;
+            pte = tlbp->pte;
         }
+        else
+        {
+            /* [3.11.3.3] Segment table lookup */
+    
+            /* Calculate the real address of the segment table entry */
+            sto = std & STD_STO;
+            stl = std & STD_STL;
+            sto += (vaddr & 0x7FF00000) >> 18;
+    
+            /* Generate addressing exception if outside real storage */
+            if (sto >= regs->mainsize)
+                goto address_excp;
+    
+            /* Check that virtual address is within the segment table */
+            if ((vaddr >> 24) > stl)
+                goto seg_tran_length;
+    
+            /* Fetch segment table entry from real storage.  All bytes
+               must be fetched concurrently as observed by other CPUs */
+            sto = APPLY_PREFIXING (sto, regs->pxr);
+            ste = fetch_fullword_absolute (sto, regs);
+    
+            /* Generate segment translation exception if segment invalid */
+            if (ste & SEGTAB_INVALID)
+                goto seg_tran_invalid;
+    
+            /* Check that all the reserved bits in the STE are zero */
+            if (ste & SEGTAB_RESV)
+                goto tran_spec_excp;
+    
+            /* If the segment table origin register indicates a private
+               address space then STE must not indicate a common segment */
+            if (private && (ste & (SEGTAB_COMMON)))
+                goto tran_spec_excp;
+    
+            /* Isolate page table origin and length */
+            pto = ste & SEGTAB_PTO;
+            ptl = ste & SEGTAB_PTL;
+    
+            /* [3.11.3.4] Page table lookup */
+    
+            /* Calculate the real address of the page table entry */
+            pto += (vaddr & 0x000FF000) >> 10;
+    
+            /* Generate addressing exception if outside real storage */
+            if (pto >= regs->mainsize)
+                goto address_excp;
+    
+            /* Check that the virtual address is within the page table */
+            if (((vaddr & 0x000FF000) >> 16) > ptl)
+                goto page_tran_length;
+    
+            /* Fetch the page table entry from real storage.  All bytes
+               must be fetched concurrently as observed by other CPUs */
+            pto = APPLY_PREFIXING (pto, regs->pxr);
+            pte = fetch_fullword_absolute (pto, regs);
+    
+            /* Generate page translation exception if page invalid */
+            if (pte & PAGETAB_INVALID)
+                goto page_tran_invalid;
+    
+            /* Check that all the reserved bits in the PTE are zero */
+            if (pte & PAGETAB_RESV)
+                goto tran_spec_excp;
+    
+            /* [3.11.4.2] Place the translated address in the TLB */
+            if (tlbp != NULL)
+            {
+                tlbp->std = std;
+                tlbp->vaddr = vaddr & 0x7FFFF000;
+                tlbp->pte = pte;
+                tlbp->common = (ste & SEGTAB_COMMON) ? 1 : 0;
+                tlbp->valid = 1;
+            }
+    
+        } /* end if(!TLB) */
+    
+        /* Set the protection indicator if page protection is active */
+        if (pte & PAGETAB_PROT)
+            protect = 1;
+    
+        /* [3.11.3.5] Combine the page frame real address with the byte
+           index of the virtual address to form the real address */
+        *raddr = (pte & PAGETAB_PFRA) | (vaddr & 0xFFF);
 
-    } /* end if(!TLB) */
-
-    /* Set the protection indicator if page protection is active */
-#ifdef FEATURE_S390_DAT
-    if (pte & PAGETAB_PROT)
-        protect = 1;
-#else
- #ifdef FEATURE_SEGMENT_PROTECTION
-    if (ste & SEGTAB_370_PROT)
-        protect = 1;
- #endif
-#endif
-
-    /* [3.11.3.5] Combine the page frame real address with the byte
-       index of the virtual address to form the real address */
-#ifdef FEATURE_S390_DAT
-    *raddr = (pte & PAGETAB_PFRA) | (vaddr & 0xFFF);
-#else
-    *raddr = ((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) ?
-        (((U32)pte & PAGETAB_PFRA_4K) << 8) | (vaddr & 0xFFF) :
-        (((U32)pte & PAGETAB_PFRA_2K) << 8) | (vaddr & 0x7FF);
+    }
 #endif
 
     /* Set the private and protection indicators */
@@ -861,7 +934,7 @@ tran_spec_excp:
     goto tran_prog_check;
 
 tran_prog_check:
-    program_check (regs, *xcode);
+    program_interrupt (regs, *xcode);
 
 /* Conditions which the caller may or may not program check */
 seg_tran_invalid:
@@ -932,8 +1005,14 @@ tran_excp_addr:
     }
 
     /* Set the exception access identification */
-    if (ACCESS_REGISTER_MODE(&regs->psw))
-      regs->excarid = (arn < 0 ? 0 : arn);
+    if (ACCESS_REGISTER_MODE(&regs->psw)
+#if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+      || (regs->sie_active 
+        && (regs->guestregs->siebk->mx & SIE_MX_XC)
+        && regs->guestregs->psw.armode)
+#endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+       )
+       regs->excarid = (arn < 0 ? 0 : arn);
 
     /* Return condition code */
     return cc;
@@ -946,6 +1025,11 @@ tran_excp_addr:
 void purge_tlb (REGS *regs)
 {
     memset (regs->tlb, 0, sizeof(regs->tlb));
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    /* Also clear the guest registers in the SIE copy */
+    if(regs->guestregs)
+        memset (regs->guestregs->tlb, 0, sizeof(regs->guestregs->tlb));
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 } /* end function purge_tlb */
 
 /*-------------------------------------------------------------------*/
@@ -966,86 +1050,103 @@ void purge_tlb (REGS *regs)
 /*-------------------------------------------------------------------*/
 void invalidate_pte (BYTE ibyte, int r1, int r2, REGS *regs)
 {
-#if MAX_CPU_ENGINES == 1
+#if MAX_CPU_ENGINES == 1 || defined(FEATURE_INTERPRETIVE_EXECUTION)
 int     i;                              /* Array subscript           */
-#endif /*MAX_CPU_ENGINES == 1*/
+#endif /*MAX_CPU_ENGINES == 1 || defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 U32     raddr;                          /* Addr of page table entry  */
-#ifdef FEATURE_S390_DAT
-U32     pte;                            /* Page table entry          */
-#else
-U16     pte;                            /* Page table entry          */
-#endif
+U32     pte;
 
-    /* Program check if translation format is invalid */
-#ifdef FEATURE_S390_DAT
-    if ((regs->cr[0] & CR0_TRAN_FMT) != CR0_TRAN_ESA390)
-#else
-    if ((((regs->cr[0] & CR0_PAGE_SIZE) != CR0_PAGE_SZ_2K) &&
-       ((regs->cr[0] & CR0_PAGE_SIZE) != CR0_PAGE_SZ_4K)) ||
-       (((regs->cr[0] & CR0_SEG_SIZE) != CR0_SEG_SZ_64K) &&
-       ((regs->cr[0] & CR0_SEG_SIZE) != CR0_SEG_SZ_1M)))
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    /* Determine the machine type for */
+    if(regs->sie_state && (regs->siebk->m & SIE_M_370))
 #endif
-        program_check (regs, PGM_TRANSLATION_SPECIFICATION_EXCEPTION);
+#if defined(FEATURE_INTERPRETIVE_EXECUTION) || !defined(FEATURE_S390_DAT)
+    {
+        /* Program check if translation format is invalid */
+        if ((((regs->cr[0] & CR0_PAGE_SIZE) != CR0_PAGE_SZ_2K) &&
+           ((regs->cr[0] & CR0_PAGE_SIZE) != CR0_PAGE_SZ_4K)) ||
+           (((regs->cr[0] & CR0_SEG_SIZE) != CR0_SEG_SZ_64K) &&
+           ((regs->cr[0] & CR0_SEG_SIZE) != CR0_SEG_SZ_1M)))
+            program_interrupt (regs, PGM_TRANSLATION_SPECIFICATION_EXCEPTION);
 
-    /* Combine the page table origin in the R1 register with
-       the page index in the R2 register, ignoring carry, to
-       form the 31-bit real address of the page table entry */
-#ifdef FEATURE_S390_DAT
-    raddr = (regs->gpr[r1] & SEGTAB_PTO)
-                + ((regs->gpr[r2] & 0x000FF000) >> 10);
-    raddr &= 0x7FFFFFFF;
-#else
-    raddr = (regs->gpr[r1] & SEGTAB_370_PTO)
-                + (((regs->cr[0] & CR0_SEG_SIZE) == CR0_SEG_SZ_1M) ?
-                  (((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) ?
-                  ((regs->gpr[r2] & 0x000FF000) >> 11) :
-                  ((regs->gpr[r2] & 0x000FF800) >> 10)) :
-                  (((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) ?
-                  ((regs->gpr[r2] & 0x0000F000) >> 11) :
-                  ((regs->gpr[r2] & 0x0000F800) >> 10)));
-    raddr &= 0x00FFFFFF;
-#endif
+        /* Combine the page table origin in the R1 register with
+           the page index in the R2 register, ignoring carry, to
+           form the 31-bit real address of the page table entry */
+        raddr = (regs->gpr[r1] & SEGTAB_370_PTO)
+                    + (((regs->cr[0] & CR0_SEG_SIZE) == CR0_SEG_SZ_1M) ?
+                      (((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) ?
+                      ((regs->gpr[r2] & 0x000FF000) >> 11) :
+                      ((regs->gpr[r2] & 0x000FF800) >> 10)) :
+                      (((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) ?
+                      ((regs->gpr[r2] & 0x0000F000) >> 11) :
+                      ((regs->gpr[r2] & 0x0000F800) >> 10)));
+        raddr &= 0x00FFFFFF;
 
-    /* Fetch the page table entry from real storage, subject
-       to normal storage protection mechanisms */
-#ifdef FEATURE_S390_DAT
-    pte = vfetch4 ( raddr, USE_REAL_ADDR, regs );
-#else
-    pte = vfetch2 ( raddr, USE_REAL_ADDR, regs );
-#endif
-
-    /* Set the page invalid bit in the page table entry,
-       again subject to storage protection mechansims */
-#ifdef FEATURE_S390_DAT
-    if(ibyte == 0x59)
-        pte &= ~PAGETAB_ESVALID;
-    else
-        pte |= PAGETAB_INVALID;
-    vstore4 ( pte, raddr, USE_REAL_ADDR, regs );
-#else
-    /* No expanded storage on S/370 */
+        /* Fetch the page table entry from real storage, subject
+           to normal storage protection mechanisms */
+        pte = vfetch2 ( raddr, USE_REAL_ADDR, regs );
+    
+        /* Set the page invalid bit in the page table entry,
+           again subject to storage protection mechansims */
 // /*debug*/ logmsg("dat.c: IPTE issued for entry %4.4X at %8.8X...\n"
 //                  "       page table %8.8X, page index %8.8X, cr0 %8.8X\n",
 //                  pte, raddr, regs->gpr[r1], regs->gpr[r2], regs->cr[0]);
-    if ((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_2K)
-        pte |= PAGETAB_INV_2K;
+        if ((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_2K)
+            pte |= PAGETAB_INV_2K;
+        else
+            pte |= PAGETAB_INV_4K;
+        vstore2 ( pte, raddr, USE_REAL_ADDR, regs );
+    }
+#endif
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
     else
-        pte |= PAGETAB_INV_4K;
-    vstore2 ( pte, raddr, USE_REAL_ADDR, regs );
+#endif
+#if defined(FEATURE_INTERPRETIVE_EXECUTION) || defined(FEATURE_S390_DAT)
+    {
+        /* Program check if translation format is invalid */
+        if ((regs->cr[0] & CR0_TRAN_FMT) != CR0_TRAN_ESA390)
+            program_interrupt (regs, PGM_TRANSLATION_SPECIFICATION_EXCEPTION);
+
+        /* Combine the page table origin in the R1 register with
+           the page index in the R2 register, ignoring carry, to
+           form the 31-bit real address of the page table entry */
+        raddr = (regs->gpr[r1] & SEGTAB_PTO)
+                    + ((regs->gpr[r2] & 0x000FF000) >> 10);
+        raddr &= 0x7FFFFFFF;
+
+        /* Fetch the page table entry from real storage, subject
+           to normal storage protection mechanisms */
+        pte = vfetch4 ( raddr, USE_REAL_ADDR, regs );
+
+        /* Set the page invalid bit in the page table entry,
+           again subject to storage protection mechansims */
+        if(ibyte == 0x59)
+            pte &= ~PAGETAB_ESVALID;
+        else
+            pte |= PAGETAB_INVALID;
+        vstore4 ( pte, raddr, USE_REAL_ADDR, regs );
+    }
 #endif
 
-#if MAX_CPU_ENGINES == 1
-    /* Clear the TLB of any entries with matching PFRA */
-    for (i = 0; i < (sizeof(regs->tlb)/sizeof(TLBE)); i++)
-    {
-        if ((regs->tlb[i].pte & PAGETAB_PFRA) == (pte & PAGETAB_PFRA)
-            && regs->tlb[i].valid)
+#if MAX_CPU_ENGINES == 1 || defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if MAX_CPU_ENGINES > 1
+    if(regs->sie_state && !regs->sie_scao)
+#endif /*MAX_CPU_ENGINES > 1*/
+        /* Clear the TLB of any entries with matching PFRA */
+        for (i = 0; i < (sizeof(regs->tlb)/sizeof(TLBE)); i++)
         {
-            regs->tlb[i].valid = 0;
+            if ((regs->tlb[i].pte & PAGETAB_PFRA) == (pte & PAGETAB_PFRA)
+                && regs->tlb[i].valid)
+            {
+                regs->tlb[i].valid = 0;
 // /*debug*/logmsg ("dat: TLB entry %d invalidated\n", i); /*debug*/
-        }
-    } /* end for(i) */
-#else /*MAX_CPU_ENGINES > 1*/
+            }
+        } /* end for(i) */
+#if MAX_CPU_ENGINES > 1
+    else
+#endif /*MAX_CPU_ENGINES > 1*/
+#endif /*MAX_CPU_ENGINES == 1 || defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#if MAX_CPU_ENGINES > 1
     /* Signal each CPU to perform TLB invalidation.
        IPTE must not complete until all CPUs have indicated
        that they have cleared their TLB and have completed
@@ -1055,7 +1156,12 @@ U16     pte;                            /* Page table entry          */
        to be the only viable alternative at the moment, short of
        building queues and waiting for all other cpu's to clear their
        entries - JJ 09/05/2000 */
-    synchronize_broadcast(regs, &sysblk.brdcstptlb);
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(regs->sie_state)
+        synchronize_broadcast(regs->hostregs, &sysblk.brdcstptlb);
+    else
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+        synchronize_broadcast(regs, &sysblk.brdcstptlb);
 #endif /*MAX_CPU_ENGINES > 1*/
 
 } /* end function invalidate_pte */
@@ -1106,7 +1212,17 @@ S32     olditimer;                      /* Previous interval timer   */
 U16     xcode;                          /* Exception code            */
 
     /* Convert logical address to real address */
-    if (REAL_MODE(&regs->psw) || arn == USE_REAL_ADDR)
+    if ((REAL_MODE(&regs->psw) || arn == USE_REAL_ADDR)
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+      /* Under SIE guest real is always host primary, regardless 
+         of the DAT mode */
+      && !(regs->sie_active
+#if !defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+                            && arn == USE_PRIMARY_SPACE
+#endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+                                                        )
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+      )
         raddr = addr;
     else {
         if (translate_addr (addr, arn, regs, acctype, &raddr, &xcode,
@@ -1118,7 +1234,7 @@ U16     xcode;                          /* Exception code            */
     aaddr = APPLY_PREFIXING (raddr, regs->pxr);
 
     /* Program check if absolute address is outside main storage */
-    if (aaddr >= sysblk.mainsize)
+    if (aaddr >= regs->mainsize)
         goto vabs_addr_excp;
 
 #if defined(FEATURE_INTERVAL_TIMER)
@@ -1161,6 +1277,32 @@ U16     xcode;                          /* Exception code            */
     }
 #endif /*FEATURE_INTERVAL_TIMER*/
 
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(regs->sie_state  && !regs->sie_pref)
+    {
+    U32 sie_stid;
+    U16 sie_xcode;
+    int sie_private;
+
+        if (translate_addr (regs->sie_mso + aaddr,
+#if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+              ((regs->siebk->mx & SIE_MX_XC) && regs->psw.armode && arn > 0) ?
+                arn :
+#endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+                USE_PRIMARY_SPACE,
+                regs->hostregs, ACCTYPE_SIE, &aaddr, &sie_xcode,
+                &sie_private, &protect, &sie_stid, NULL, NULL))
+            program_interrupt (regs->hostregs, sie_xcode);
+
+        /* Convert host real address to host absolute address */
+        aaddr = APPLY_PREFIXING (aaddr, regs->hostregs->pxr);
+    }
+
+    /* Do not apply host key access when SIE fetches/stores data */
+    if(regs->sie_active)
+        akey = 0;
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
     /* Check protection and set reference and change bits */
     switch (acctype) {
 
@@ -1190,7 +1332,7 @@ U16     xcode;                          /* Exception code            */
     return aaddr;
 
 vabs_addr_excp:
-    program_check (regs, PGM_ADDRESSING_EXCEPTION);
+    program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
 
 vabs_prot_excp:
 #ifdef FEATURE_SUPPRESSION_ON_PROTECTION
@@ -1200,10 +1342,10 @@ vabs_prot_excp:
     regs->tea |= stid;
     regs->excarid = (arn > 0 ? arn : 0);
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-    program_check (regs, PGM_PROTECTION_EXCEPTION);
+    program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
 
 vabs_prog_check:
-    program_check (regs, xcode);
+    program_interrupt (regs, xcode);
 
     return -1; /* prevent warning from compiler */
 } /* end function logical_to_abs */
@@ -1697,7 +1839,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
     /* Program check if instruction address is odd */
     if (addr & 0x01)
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Fetch six bytes if instruction cannot cross a page boundary */
     if ((addr & STORAGE_KEY_BYTEMASK) <= STORAGE_KEY_PAGESIZE - 6)

@@ -1,6 +1,8 @@
 /* IPL.C        (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 Initial Program Loader                       */
 
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+
 /*-------------------------------------------------------------------*/
 /* This module implements the Initial Program Load (IPL) function    */
 /* of the S/370 and ESA/390 architectures, described in the manuals  */
@@ -142,7 +144,7 @@ BYTE    chanstat;                       /* IPL device channel status */
     psa = (PSA*)(sysblk.mainstor + regs->pxr);
 
     /* Load IPL PSW from PSA+X'0' */
-    rc = load_psw (&(regs->psw), psa->iplpsw);
+    rc = load_psw (regs, psa->iplpsw);
     if ( rc )
     {
         logmsg ("HHC107I IPL failed: Invalid IPL PSW: "
@@ -196,6 +198,11 @@ int             i;                      /* Array subscript           */
     /* Put the CPU into the stopped state */
     regs->cpustate = CPUSTATE_STOPPED;
 
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+   if(regs->guestregs)
+        cpu_reset(regs->guestregs);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
 } /* end function cpu_reset */
 
 /*-------------------------------------------------------------------*/
@@ -232,6 +239,11 @@ void initial_cpu_reset (REGS *regs)
     /* For S/370 initialize the MCEL address in CR15 */
     regs->cr[15] = 512;
 #endif /*!FEATURE_LINKAGE_STACK*/
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+   if(regs->guestregs)
+        initial_cpu_reset(regs->guestregs);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
 } /* end function initial_cpu_reset */
 

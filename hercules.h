@@ -1,6 +1,8 @@
 /* HERCULES.H	(c) Copyright Roger Bowler, 1999-2000		     */
 /*		ESA/390 Emulator Header File			     */
 
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+
 /*-------------------------------------------------------------------*/
 /* Header file containing Hercules internal data structures	     */
 /* and function prototypes.					     */
@@ -42,9 +44,32 @@
 #define CKD_KEY_TRACING 		/* Trace CKD search keys     */
 #define MIPS_COUNTING			/* Display MIPS on ctl panel */
 #define TODCLOCK_DRAG_FACTOR		/* Enable toddrag feature    */
+#define PANEL_REFRESH_RATE              /* Enable panrate feature    */
+#define PANEL_REFRESH_RATE_FAST 50      /* Fast refresh rate         */
+#define PANEL_REFRESH_RATE_SLOW 500     /* Slow refresh rate         */
 
 #define VECTOR_SECTION_SIZE     128     /* Vector section size       */
 #define VECTOR_PARTIAL_SUM_NUMBER 1     /* Vector partial sum number */
+
+/*-------------------------------------------------------------------*/
+/* Windows 32-specific definitions                                   */
+/*-------------------------------------------------------------------*/
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
+
+#ifdef WIN32
+#define socklen_t int
+/* fake loading of windows.h and winsock.h so we can use             */
+/* pthreads-win32 instead of the native gygwin pthreads support,     */
+/* which doesn't include pthread_cond bits                           */
+#define _WINDOWS_
+#define _WINSOCKAPI_
+#define _WINDOWS_H
+#define _WINSOCK_H
+#define HANDLE int
+#define DWORD int	/* will be undefined later */
+#endif
 
 /*-------------------------------------------------------------------*/
 /* ESA/390 features implemented 				     */
@@ -69,17 +94,24 @@
 #undef	FEATURE_EXTENDED_TOD_CLOCK
 #undef	FEATURE_FETCH_PROTECTION_OVERRIDE
 #undef	FEATURE_HEXADECIMAL_FLOATING_POINT
+#undef	FEATURE_HYPERVISOR
 #undef	FEATURE_IMMEDIATE_AND_RELATIVE
+#undef	FEATURE_INTERPRETIVE_EXECUTION
 #undef	FEATURE_INTERVAL_TIMER
 #undef	FEATURE_LINKAGE_STACK
+#undef	FEATURE_LOCK_PAGE
 #undef	FEATURE_MOVE_PAGE_FACILITY_2
 #undef	FEATURE_MSSF_CALL
+#undef  FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE
 #undef	FEATURE_MVS_ASSIST
 #undef	FEATURE_PAGE_PROTECTION
+#undef	FEATURE_PER2
 #undef	FEATURE_PRIVATE_SPACE
 #undef	FEATURE_S370_CHANNEL
 #undef	FEATURE_S390_DAT
 #undef	FEATURE_SEGMENT_PROTECTION
+#undef	FEATURE_SQUARE_ROOT
+#undef  FEATURE_STORAGE_KEY_ASSIST
 #undef	FEATURE_STORAGE_PROTECTION_OVERRIDE
 #undef	FEATURE_SUBSPACE_GROUP
 #undef	FEATURE_SUPPRESSION_ON_PROTECTION
@@ -89,6 +121,8 @@
 #undef	FEATURE_4K_STORAGE_KEYS
 #undef	FEATURE_HERCULES_DIAGCALLS
 #undef	FEATURE_EMULATE_VM
+#undef  FEATURE_CMPSC
+#undef  FEATURE_PLO  
 
 #if	ARCH == 370
  #define ARCHITECTURE_NAME	"S/370"
@@ -120,14 +154,22 @@
  #define FEATURE_EXTENDED_TOD_CLOCK
  #define FEATURE_FETCH_PROTECTION_OVERRIDE
  #define FEATURE_HEXADECIMAL_FLOATING_POINT
+ #define FEATURE_HYPERVISOR
  #define FEATURE_IMMEDIATE_AND_RELATIVE
+ #define FEATURE_INTERPRETIVE_EXECUTION
+ #define FEATURE_LOCK_PAGE
  #define FEATURE_LINKAGE_STACK
  #undef  FEATURE_MOVE_PAGE_FACILITY_2
  #define FEATURE_MSSF_CALL
+ #define FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE
  #define FEATURE_MVS_ASSIST
  #define FEATURE_PAGE_PROTECTION
+ #define FEATURE_PER2
  #define FEATURE_PRIVATE_SPACE
  #define FEATURE_S390_DAT
+ #define FEATURE_SEGMENT_PROTECTION
+ #define FEATURE_SQUARE_ROOT
+ #define FEATURE_STORAGE_KEY_ASSIST
  #define FEATURE_STORAGE_PROTECTION_OVERRIDE
  #define FEATURE_SUBSPACE_GROUP
  #define FEATURE_SUPPRESSION_ON_PROTECTION
@@ -137,7 +179,8 @@
  #define FEATURE_4K_STORAGE_KEYS
  #define FEATURE_HERCULES_DIAGCALLS
  #define FEATURE_EMULATE_VM
- #undef FEATURE_CMPSC
+ #define FEATURE_CMPSC
+ #define FEATURE_PLO  
 #else
  #error Either ARCH=370 or ARCH=390 must be specified
 #endif
@@ -213,6 +256,9 @@
 /*-------------------------------------------------------------------*/
 #ifndef NOTHREAD
 #include <pthread.h>
+#ifdef WIN32
+#undef DWORD
+#endif
 typedef pthread_t			TID;
 typedef pthread_mutex_t 		LOCK;
 typedef pthread_cond_t			COND;
@@ -269,6 +315,8 @@ typedef int				ATTR;
 #define create_thread(ptid,pat,fn,arg)	(*(ptid)=0,fn(arg),0)
 #define signal_thread(tid,signo)	raise(signo)
 #define thread_id()			0
+#define OBTAIN_MAINLOCK(_register_context)
+#define RELEASE_MAINLOCK(_register_context)
 #endif
 
 /*-------------------------------------------------------------------*/
@@ -304,6 +352,7 @@ typedef struct _REGS {			/* Processor registers	     */
 	U64	ptimer; 		/* CPU timer		     */
 	U64	clkc;			/* 0-7=Clock comparator epoch,
 					   8-63=Comparator bits 0-55 */
+        S64     todoffset;              /* TOD offset for this CPU   */
 	U64	instcount;		/* Instruction counter	     */
 	U64	prevcount;		/* Previous instruction count*/
 	U32	mipsrate;		/* Instructions/millisecond  */
@@ -316,9 +365,35 @@ typedef struct _REGS {			/* Processor registers	     */
 	U32	pxr;			/* Prefix register	     */
 	U32	todpr;			/* TOD programmable register */
 	U32	tea;			/* Translation exception addr*/
+        U32     moncode;                /* Monitor event code        */
+        U16     monclass;               /* Monitor event class       */
 	U16	cpuad;			/* CPU address for STAP      */
 	PSW	psw;			/* Program status word	     */
 	BYTE	excarid;		/* Exception access register */
+        DWORD   exinst;                 /* Target of Execute (EX)    */
+
+        U32     mainsize;               /* Central Storage size or   */
+                                        /* guest storage size (SIE)  */
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+        U32     sie_state;              /* Address of the SIE state
+                                           descriptor block or 0 when
+                                           not running under SIE     */
+        SIEBK  *siebk;                  /* Sie State Desc structure  */
+        struct _REGS *hostregs;         /* Pointer to the hypervisor
+                                           register context          */
+        struct _REGS *guestregs;        /* Pointer to the guest 
+                                           register context          */
+        PSA    *sie_psa;                /* PSA of guest CPU          */
+        U32     sie_mso;                /* Main Storage Origin       */
+        U32     sie_xso;                /* eXpanded Storage Origin   */
+        U32     sie_xsl;                /* eXpanded Storage Limit    */
+        U32     sie_rcpo;               /* Ref and Change Preserv.   */
+        U32     sie_scao;               /* System Contol Area        */
+        S64     sie_epoch;              /* TOD offset in state desc. */
+        unsigned int
+                sie_active:1,           /* Sie active (host only)    */
+                sie_pref:1;             /* Preferred-storage mode    */
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
 	BYTE	cpustate;		/* CPU stopped/started state */
 	unsigned int			/* Flags		     */
@@ -355,7 +430,7 @@ typedef struct _REGS {			/* Processor registers	     */
 #endif /*MAX_CPU_ENGINES > 1*/
 
 #ifdef FEATURE_VECTOR_FACILITY
-        VFREGS  vf;                     /* Vector Facility           */
+        VFREGS *vf;                     /* Vector Facility           */
 #endif /*FEATURE_VECTOR_FACILITY*/
 
 	jmp_buf progjmp;		/* longjmp destination for
@@ -390,6 +465,12 @@ typedef struct _SYSBLK {
 	BYTE	loadparm[8];		/* IPL load parameter	     */
 	U16	numcpu; 		/* Number of CPUs installed  */
 	REGS	regs[MAX_CPU_ENGINES];	/* Registers for each CPU    */
+#ifdef FEATURE_VECTOR_FACILITY
+        VFREGS  vf[MAX_CPU_ENGINES];    /* Vector Facility           */
+#endif /*FEATURE_VECTOR_FACILITY*/
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+        REGS    sie_regs[MAX_CPU_ENGINES];  /* SIE copy of regs      */
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 #if defined(FOOTPRINT_BUFFER)
         REGS    footprregs[MAX_CPU_ENGINES][FOOTPRINT_BUFFER];
         U32     footprptr[MAX_CPU_ENGINES];
@@ -406,8 +487,10 @@ typedef struct _SYSBLK {
 	int	mbm;			/* Measurement block mode    */
 	int	mbd;			/* Device connect time mode  */
 	int	toddrag;		/* TOD clock drag factor     */
+        int     panrate;                /* Panel refresh rate        */
 	struct _DEVBLK *firstdev;	/* -> First device block     */
 	U16	highsubchan;		/* Highest subchannel + 1    */
+        U32     addrlimval;             /* Address limit value (SAL) */
 	U32	servparm;		/* Service signal parameter  */
 	U32	cp_recv_mask;		/* Syscons CP receive mask   */
 	U32	cp_send_mask;		/* Syscons CP send mask      */
@@ -690,9 +773,9 @@ void cpu_reset (REGS *regs);
 void initial_cpu_reset (REGS *regs);
 
 /* Functions in module cpu.c */
-void store_psw (PSW *psw, BYTE *addr);
-int  load_psw (PSW *psw, BYTE *addr);
-void program_check (REGS *regs, int code);
+void store_psw (REGS *regs, BYTE *addr);
+int  load_psw (REGS *regs, BYTE *addr);
+void program_interrupt (REGS *regs, int code);
 void *cpu_thread (REGS *regs);
 
 /* Functions in module dat.c */
@@ -734,11 +817,28 @@ void move_chars (U32 addr1, int arn1, BYTE key1, U32 addr2,
 #define ACCTYPE_IVSK		7	/* Insert Virtual Storage Key*/
 #define ACCTYPE_STACK		8	/* Linkage stack operations  */
 #define ACCTYPE_BSG		9	/* Branch in Subspace Group  */
+#define ACCTYPE_LOCKPAGE       10	/* Lock page                 */
+#define ACCTYPE_SIE            11	/* SIE host translation      */
 
 /* Special value for arn parameter for translate functions in dat.c */
-#define USE_REAL_ADDR		(-1)	/* LURA/STURA instruction    */
-#define USE_PRIMARY_SPACE	(-2)	/* MVCS/MVCP instructions    */
-#define USE_SECONDARY_SPACE	(-3)	/* MVCS/MVCP instructions    */
+#define USE_REAL_ADDR		(-1)	/* Real address              */
+#define USE_PRIMARY_SPACE	(-2)	/* Primary space virtual     */
+#define USE_SECONDARY_SPACE	(-3)	/* Secondary space virtual   */
+
+/* Interception codes used by longjmp/SIE */
+#define SIE_NO_INTERCEPT        (-1)    /* Continue (after pgmint)   */
+#define SIE_HOST_INTERRUPT      (-2)    /* Host interrupt pending    */
+#define SIE_INTERCEPT_INST      (-3)    /* Instruction interception  */
+#define SIE_INTERCEPT_INSTCOMP  (-4)    /* Instr. int TS/CS/CDS      */
+#define SIE_INTERCEPT_EXTREQ    (-5)    /* External interrupt        */
+#define SIE_INTERCEPT_IOREQ     (-6)    /* I/O interrupt             */
+#define SIE_INTERCEPT_WAIT      (-7)    /* Wait state loaded         */
+#define SIE_INTERCEPT_STOPREQ   (-8)    /* STOP reqeust              */
+#define SIE_INTERCEPT_RESTART   (-9)    /* Restart interrupt         */
+#define SIE_INTERCEPT_MCK      (-10)    /* Machine Check interrupt   */
+#define SIE_INTERCEPT_EXT      (-11)    /* External interrupt pending*/
+#define SIE_INTERCEPT_VALIDITY (-12)    /* SIE validity check        */
+#define SIE_INTERCEPT_PER      (-13)    /* SIE guest per event       */
 
 /* Functions in module diagmssf.c */
 void scpend_call (void);
@@ -774,6 +874,9 @@ void machine_check_crwpend (void);
 /* Functions in module service.c */
 void scp_command (BYTE *command, int priomsg);
 
+/* Functions in module sie.c */
+void sie_exit (REGS *regs, int code);
+
 /* Functions in module stack.c */
 void form_stack_entry (BYTE etype, U32 retna, U32 calla, U32 csi, REGS *regs);
 int  program_return_unstack (REGS *regs, U32 *lsedap);
@@ -796,10 +899,10 @@ void *execute_ccw_chain (DEVBLK *dev);
 int  store_channel_id (REGS *regs, U16 chan);
 int  test_channel (REGS *regs, U16 chan);
 int  test_io (REGS *regs, DEVBLK *dev, BYTE ibyte);
-int  halt_io (REGS *regs, DEVBLK *dev, BYTE ibyte);
 int  test_subchan (REGS *regs, DEVBLK *dev, IRB *irb);
 void clear_subchan (REGS *regs, DEVBLK *dev);
 int  halt_subchan (REGS *regs, DEVBLK *dev);
+int  halt_io (REGS *regs, DEVBLK *dev, BYTE ibyte);
 int  resume_subchan (REGS *regs, DEVBLK *dev);
 int  present_io_interrupt (REGS *regs, U32 *ioid, U32 *ioparm,
 	BYTE *csw);

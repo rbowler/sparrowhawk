@@ -1,5 +1,5 @@
 #
-# Configuration file for Hercules ESA/390 emulator
+# Sample configuration file for Hercules ESA/390 emulator
 #
 
 CPUSERIAL 002623        # CPU serial number
@@ -9,6 +9,8 @@ XPNDSIZE  0             # Expanded storage size in megabytes
 CNSLPORT  3270          # TCP port number to which consoles connect
 NUMCPU    1             # Number of CPUs
 LOADPARM  0120....      # IPL parameter
+OSTAILOR  LINUX         # OS tailoring
+PANRATE   FAST          # Panel refresh rate
 
 # .-----------------------Device number
 # |     .-----------------Device type

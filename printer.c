@@ -203,6 +203,20 @@ BYTE            c;                      /* Print character           */
         eor = dev->crlf ? "\r\f" : "\f";
         goto write;
 
+    case 0xC9:
+    /*---------------------------------------------------------------*/
+    /* WRITE AND SKIP TO CHANNEL 9                                   */
+    /*---------------------------------------------------------------*/
+        eor = dev->crlf ? "\r\n" : "\n";
+        goto write;
+
+    case 0xE1:
+    /*---------------------------------------------------------------*/
+    /* WRITE AND SKIP TO CHANNEL 12                                  */
+    /*---------------------------------------------------------------*/
+        eor = dev->crlf ? "\r\n" : "\n";
+        goto write;
+
     write:
         /* Start a new record if not data-chained from previous CCW */
         if ((chained & CCW_FLAGS_CD) == 0)
@@ -277,8 +291,10 @@ BYTE            c;                      /* Print character           */
     /*---------------------------------------------------------------*/
     /* DIAGNOSTIC GATE                                               */
     /*---------------------------------------------------------------*/
-        /* Command reject if 1403 or not first command in chain */
-        if (dev->devtype == 1403 || chained != 0)
+        /* Command reject if 1403, or if chained to another CCW
+           except a no-operation at the start of the CCW chain */
+        if (dev->devtype == 1403 || ccwseq > 1
+            || (chained && prevcode != 0x03))
         {
             dev->sense[0] = SENSE_CR;
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -392,6 +408,28 @@ BYTE            c;                      /* Print character           */
     /* SKIP TO CHANNEL 1 IMMEDIATE                                   */
     /*---------------------------------------------------------------*/
         eor = dev->crlf ? "\r\f" : "\f";
+        write_buffer (dev, eor, strlen(eor), unitstat);
+        if (*unitstat != 0) break;
+
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0xCB:
+    /*---------------------------------------------------------------*/
+    /* SKIP TO CHANNEL 9 IMMEDIATE                                   */
+    /*---------------------------------------------------------------*/
+        eor = dev->crlf ? "\r\n" : "\n";
+        write_buffer (dev, eor, strlen(eor), unitstat);
+        if (*unitstat != 0) break;
+
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0xE3:
+    /*---------------------------------------------------------------*/
+    /* SKIP TO CHANNEL 12 IMMEDIATE                                  */
+    /*---------------------------------------------------------------*/
+        eor = dev->crlf ? "\r\n" : "\n";
         write_buffer (dev, eor, strlen(eor), unitstat);
         if (*unitstat != 0) break;
 

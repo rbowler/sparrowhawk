@@ -85,7 +85,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
     }
 
     /* Open the tape device */
-    infd = open (filename, O_RDONLY);
+    infd = open (filename, O_RDONLY | O_BINARY);
     if (infd < 0)
     {
         printf ("tapemap: Error opening %s: %s\n",

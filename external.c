@@ -1,6 +1,8 @@
 /* EXTERNAL.C   (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 External Interrupt and Timer                 */
 
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+
 /*-------------------------------------------------------------------*/
 /* This module implements external interrupt, timer, and signalling  */
 /* functions for the Hercules ESA/390 emulator.                      */
@@ -15,6 +17,9 @@
 /*      CPU timer and clock comparator interrupt improvements by     */
 /*          Jan Jaeger, after a suggestion by Willem Koynenberg      */
 /*      Prevent TOD clock and CPU timer from going back - Jan Jaeger */
+/*      Use longjmp on all interrupt types - Jan Jaeger              */
+/*      Fix todclock - Jay Maynard                                   */
+/*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -32,22 +37,38 @@ int     rc;
 #ifdef FEATURE_INTERVAL_TIMER
                     || regs->itimer_pending
 #endif /*FEATURE_INTERVAL_TIMER*/
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+                    || (regs->itimer_pending
+                        && regs->sie_state
+                        && (regs->siebk->m & SIE_M_370)
+                        && !(regs->siebk->m & SIE_M_ITMOF))
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
                     || regs->extcall
                     || regs->emersig
                     || regs->ckpend
                     || regs->ptpend;
 
+    release_lock(&sysblk.intlock);
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
     /* Set the main storage reference and change bits */
-    STORAGE_KEY(regs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
+    if(regs->sie_state)
+    {
+        /* Point to SIE copy of PSA in state descriptor */
+        psa = (PSA*)(sysblk.mainstor + regs->sie_state + SIE_IP_PSA_OFFSET);
+        STORAGE_KEY(regs->sie_state) |= (STORKEY_REF | STORKEY_CHANGE);
+    }
+    else
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+    {
+        /* Point to PSA in main storage */
+        psa = (PSA*)(sysblk.mainstor + regs->pxr);
+        STORAGE_KEY(regs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
+    }
 
     /* Store the interrupt code in the PSW */
     regs->psw.intcode = code;
 
-    /* Point to PSA in main storage */
-    psa = (PSA*)(sysblk.mainstor + regs->pxr);
-
-    /* Store current PSW at PSA+X'18' */
-    store_psw (&(regs->psw), psa->extold);
 
     /* For ECMODE, store external interrupt code at PSA+X'86' */
     if ( regs->psw.ecmode )
@@ -56,23 +77,29 @@ int     rc;
         psa->extint[1] = code & 0xFF;
     }
 
-    /* Load new PSW from PSA+X'58' */
-    rc = load_psw (&(regs->psw), psa->extnew);
-
-    release_lock(&sysblk.intlock);
-
-    if ( rc )
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(!regs->sie_state)
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
     {
-        logmsg ("CPU%4.4X: Invalid external new PSW: "
-                "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
-                regs->cpuad,
-                psa->extnew[0], psa->extnew[1], psa->extnew[2],
-                psa->extnew[3], psa->extnew[4], psa->extnew[5],
-                psa->extnew[6], psa->extnew[7]);
-        program_check(regs, rc);
+        /* Store current PSW at PSA+X'18' */
+        store_psw (regs, psa->extold);
+
+        /* Load new PSW from PSA+X'58' */
+        rc = load_psw (regs, psa->extnew);
+
+        if ( rc )
+        {
+            logmsg ("CPU%4.4X: Invalid external new PSW: "
+                    "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
+                    regs->cpuad,
+                    psa->extnew[0], psa->extnew[1], psa->extnew[2],
+                    psa->extnew[3], psa->extnew[4], psa->extnew[5],
+                    psa->extnew[6], psa->extnew[7]);
+            program_interrupt(regs, rc);
+        }
     }
 
-    longjmp (regs->progjmp, 0);
+    longjmp (regs->progjmp, SIE_INTERCEPT_EXT);
 } /* end function external_interrupt */
 
 /*-------------------------------------------------------------------*/
@@ -171,7 +198,7 @@ U16     cpuad;                          /* Originating CPU address   */
     }
 
     /* External interrupt if TOD clock exceeds clock comparator */
-    if (sysblk.todclk > regs->clkc
+    if ((sysblk.todclk + regs->todoffset) > regs->clkc
         && sysblk.insttrace == 0
         && sysblk.inststep == 0
         && (regs->cr[0] & CR0_XM_CLKC))
@@ -196,8 +223,13 @@ U16     cpuad;                          /* Originating CPU address   */
     }
 
     /* External interrupt if interval timer interrupt is pending */
-#ifdef FEATURE_INTERVAL_TIMER
+#if defined(FEATURE_INTERVAL_TIMER) || defined(FEATURE_INTERPRETIVE_EXECUTION)
     if (regs->itimer_pending
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+        && regs->sie_state
+        && (regs->siebk->m & SIE_M_370)
+        && !(regs->siebk->m & SIE_M_ITMOF)
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
         && (regs->cr[0] & CR0_XM_ITIMER))
     {
         if (sysblk.insttrace || sysblk.inststep)
@@ -241,6 +273,12 @@ U16     cpuad;                          /* Originating CPU address   */
 #ifdef FEATURE_INTERVAL_TIMER
                     || regs->itimer_pending
 #endif /*FEATURE_INTERVAL_TIMER*/
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+                    || (regs->itimer_pending
+                        && regs->sie_state
+                        && (regs->siebk->m & SIE_M_370)
+                        && !(regs->siebk->m & SIE_M_ITMOF))
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
                     || regs->extcall
                     || regs->emersig
                     || regs->ckpend
@@ -283,9 +321,6 @@ REGS	       *regs;			/* -> CPU register context   */
     /* Obtain the TOD clock update lock */
     obtain_lock (&sysblk.todlock);
 
-    /* Add number of microseconds from TOD base to 1970 */
-    dreg += sysblk.todoffset;
-
     /* Shift left 4 bits so that bits 0-7=TOD Clock Epoch,
        bits 8-59=TOD Clock bits 0-51, bits 60-63=zero */
     dreg <<= 4;
@@ -314,10 +349,22 @@ REGS	       *regs;			/* -> CPU register context   */
         regs = sysblk.regs + cpu;
 
 	/* Signal clock comparator interrupt if needed */
-        if(sysblk.todclk > regs->clkc)
+        if((sysblk.todclk + regs->todoffset) > regs->clkc)
             regs->cpuint = regs->ckpend = intflag = 1;
         else
             regs->ckpend = 0;
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+        /* If running under SIE also check the SIE copy */
+        if(regs->sie_active)
+        {
+	    /* Signal clock comparator interrupt if needed */
+            if((sysblk.todclk + regs->guestregs->todoffset) > regs->guestregs->clkc)
+                regs->guestregs->cpuint = regs->guestregs->ckpend = 1;
+            else
+                regs->guestregs->ckpend = 0;
+        }
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     } /* end for(cpu) */
 
@@ -343,9 +390,11 @@ void *timer_update_thread (void *argp)
 {
 #ifdef FEATURE_INTERVAL_TIMER
 PSA    *psa;                            /* -> Prefixed storage area  */
+#endif /*FEATURE_INTERVAL_TIMER*/
+#if defined(FEATURE_INTERVAL_TIMER) || defined(FEATURE_INTERPRETIVE_EXECUTION)
 S32     itimer;                         /* Interval timer value      */
 S32     olditimer;                      /* Previous interval timer   */
-#endif /*FEATURE_INTERVAL_TIMER*/
+#endif
 #ifdef MIPS_COUNTING
 int     msecctr = 0;                    /* Millisecond counter       */
 #endif /*MIPS_COUNTING*/
@@ -411,6 +460,58 @@ struct  timeval tv;                     /* Structure for gettimeofday
                 regs->cpuint = regs->ptpend = intflag = 1;
             else
                 regs->ptpend = 0;
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+            /* When running under SIE also update the SIE copy */
+            if(regs->sie_active)
+            {
+                /* Decrement the CPU timer if the CPU is running */
+                if( (S64)diff > 0)
+                    (S64)regs->guestregs->ptimer -= (S64)diff;
+
+                /* Set interrupt flag if the CPU timer is negative */
+                if ((S64)regs->guestregs->ptimer < 0)
+                    regs->guestregs->cpuint = regs->guestregs->ptpend = 1;
+                else
+                    regs->guestregs->ptpend = 0;
+
+                if((regs->guestregs->siebk->m & SIE_M_370)
+                  && !(regs->guestregs->siebk->m & SIE_M_ITMOF))
+                {
+
+                    /* Decrement the location 80 timer */
+                    itimer = (S32)(((U32)(regs->guestregs->sie_psa->inttimer[0]) << 24)
+                                        | ((U32)(regs->guestregs->sie_psa->inttimer[1]) << 16)
+                                        | ((U32)(regs->guestregs->sie_psa->inttimer[2]) << 8)
+                                        | (U32)(regs->guestregs->sie_psa->inttimer[3]));
+                    olditimer = itimer;
+            
+                    /* The interval timer is decremented as though bit 23 is
+                       decremented by one every 1/300 of a second. This comes
+                       out to subtracting 768 (X'300') every 1/100 of a second.
+                       76800/CLK_TCK comes out to 768 on Intel versions of
+                       Linux, where the clock ticks every 1/100 second; it
+                       comes out to 75 on the Alpha, with its 1024/second
+                       tick interval. See 370 POO page 4-29. (ESA doesn't
+                       even have an interval timer.) */
+                    itimer -= 76800 / CLK_TCK;
+                    regs->guestregs->sie_psa->inttimer[0] = ((U32)itimer >> 24) & 0xFF;
+                    regs->guestregs->sie_psa->inttimer[1] = ((U32)itimer >> 16) & 0xFF;
+                    regs->guestregs->sie_psa->inttimer[2] = ((U32)itimer >> 8) & 0xFF;
+                    regs->guestregs->sie_psa->inttimer[3] = (U32)itimer & 0xFF;
+        
+                    /* Set interrupt flag and interval timer interrupt pending
+                       if the interval timer went from positive to negative */
+                    if (itimer < 0 && olditimer >= 0)
+                        regs->guestregs->cpuint = regs->guestregs->itimer_pending = 1;
+
+                    /* The residu field in the state descriptor needs
+                       to be ajusted with the amount of CPU time spend, minus
+                       the number of times the interval timer was deremented
+                       this value should be zero on average *JJ */
+                }
+            }
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
 #ifdef FEATURE_INTERVAL_TIMER
             /* Point to PSA in main storage */
@@ -541,7 +642,7 @@ PSA    *sspsa;                          /* -> Store status area      */
     sspsa->storeclkc[7] = dreg & 0xFF;
 
     /* Store PSW in bytes 256-263 */
-    store_psw (&(ssreg->psw), sspsa->storepsw);
+    store_psw (ssreg, sspsa->storepsw);
 
     /* Store prefix register in bytes 264-267 */
     sspsa->storepfx[0] = (ssreg->pxr >> 24) & 0xFF;

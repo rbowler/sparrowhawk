@@ -1,6 +1,9 @@
 /* XSTORE.C   Expanded storage related instructions - Jan Jaeger     */
 
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+
 /* MVPG moved from cpu.c to xstore.c   05/07/00 Jan Jaeger */
+/* Lock Page added                     29/07/00 Jan Jaeger */
 
 #include "hercules.h"
 
@@ -20,21 +23,47 @@ U32     xaddr;                          /* Expanded storage address  */
 
     PRIV_CHECK(regs);
 
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(regs->sie_state && (regs->siebk->ic[3] & SIE_IC3_PGX))
+        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+#if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+    /* Cannot perform xstore page movement in XC mode */
+    if(regs->sie_state && (regs->siebk->mx & SIE_MX_XC))
+        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+
+    /* expanded storage block number */
+    xaddr = regs->gpr[r2];
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(regs->sie_state)
+    {
+        xaddr += regs->sie_xso;
+        if(xaddr >= regs->sie_xsl)
+        {
+            regs->psw.cc = 3;
+            return;
+        }
+    }
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
     /* If the expanded storage block is not configured then
        terminate with cc3 */
-    if (regs->gpr[r2] >= sysblk.xpndsize)
+    if (xaddr >= sysblk.xpndsize)
     {
         regs->psw.cc = 3;
         return;
     }
 
+    /* Byte offset in expanded storage */
+    xaddr <<= XSTORE_PAGESHIFT;
+
     /* Obtain abs address, verify access and set ref/change bits */
     maddr = logical_to_abs (regs->gpr[r1] & ADDRESS_MAXWRAP(regs),
          USE_REAL_ADDR, regs, ACCTYPE_WRITE, regs->psw.pkey);
     maddr &= XSTORE_PAGEMASK;
-
-    /* Byte offset in expanded storage */
-    xaddr = regs->gpr[r2] << XSTORE_PAGESHIFT;
 
     /* Copy data from expanded to main */
     memcpy (sysblk.mainstor + maddr, sysblk.xpndstor + xaddr,
@@ -59,21 +88,47 @@ U32     xaddr;                          /* Expanded storage address  */
 
     PRIV_CHECK(regs);
 
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(regs->sie_state && (regs->siebk->ic[3] & SIE_IC3_PGX))
+        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+#if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+    /* Cannot perform xstore page movement in XC mode */
+    if(regs->sie_state && (regs->siebk->mx & SIE_MX_XC))
+        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+
+    /* expanded storage block number */
+    xaddr = regs->gpr[r2];
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(regs->sie_state)
+    {
+        xaddr += regs->sie_xso;
+        if(xaddr >= regs->sie_xsl)
+        {
+            regs->psw.cc = 3;
+            return;
+        }
+    }
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
     /* If the expanded storage block is not configured then
        terminate with cc3 */
-    if(regs->gpr[r2] >= sysblk.xpndsize)
+    if (xaddr >= sysblk.xpndsize)
     {
         regs->psw.cc = 3;
         return;
     }
 
+    /* Byte offset in expanded storage */
+    xaddr <<= XSTORE_PAGESHIFT;
+
     /* Obtain abs address, verify access and set ref/change bits */
     maddr = logical_to_abs (regs->gpr[r1] & ADDRESS_MAXWRAP(regs),
          USE_REAL_ADDR, regs, ACCTYPE_READ, regs->psw.pkey);
     maddr &= XSTORE_PAGEMASK;
-
-    /* Byte offset in expanded storage */
-    xaddr = regs->gpr[r2] << XSTORE_PAGESHIFT;
 
     /* Copy data from main to expanded */
     memcpy (sysblk.xpndstor + xaddr, sysblk.mainstor + maddr,
@@ -86,6 +141,46 @@ U32     xaddr;                          /* Expanded storage address  */
 #endif /*defined(FEATURE_EXPANDED_STORAGE)*/
 
 
+/*-------------------------------------------------------------------*/
+/* B262 ????? - Lock Page                                      [RRE] */
+/*-------------------------------------------------------------------*/
+void zz_lock_page (BYTE inst[], int execflag, REGS *regs)
+{
+int     r1, r2;                         /* Values of R fields        */
+U32     n2;                             /* effective addr of r2      */
+U32     raddr;                          /* Real address              */
+int     private;                        /* 1=Private address space   */
+int     protect;                        /* 1=ALE or page protection  */
+int     stid;                           /* Segment table indication  */
+U16     xcode;                          /* Exception code            */
+
+    logmsg("Lock Page: "); display_inst(regs, inst);
+
+    RRE(inst, execflag, regs, r1, r2);
+
+    PRIV_CHECK(regs);
+
+    if(REAL_MODE(&(regs->psw)))
+        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+
+    if(regs->gpr[r1] & 0x0000FF00)
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    n2 = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
+
+    /* Return condition code 3 if translation exception */
+    if (translate_addr (n2, r2, regs, ACCTYPE_LOCKPAGE, &raddr,
+            &xcode, &private, &protect, &stid, NULL, NULL))
+    {
+        regs->psw.cc = 3;
+        return;
+    }
+
+    /*INCOMPLETE*/
+    regs->psw.cc = 1;
+}
+
+
 #if defined(FEATURE_MOVE_PAGE_FACILITY_2)
 
 
@@ -95,6 +190,8 @@ U32     xaddr;                          /* Expanded storage address  */
 void zz_invalidate_expanded_storage_block_entry (BYTE inst[], int execflag, REGS *regs)
 {
 int     r1, r2;                         /* Values of R fields        */
+
+    RRE(inst, execflag, regs, r1, r2);
 
     PRIV_CHECK(regs);
 
@@ -173,7 +270,7 @@ BYTE    xpkey1, xpkey2;                 /* Expanded storage keys     */
     if ((regs->gpr[0] & 0x0000F000) != 0
         || (regs->gpr[0] & 0x00000C00) == 0x00000C00)
     {
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
         return 3;
     }
 
@@ -191,7 +288,7 @@ BYTE    xpkey1, xpkey2;                 /* Expanded storage keys     */
         if ( regs->psw.prob
             && ((regs->cr[3] << (akey >> 4)) & 0x80000000) == 0 )
         {
-            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
             return 3;
         }
 
@@ -250,7 +347,7 @@ BYTE    xpkey1, xpkey2;                 /* Expanded storage keys     */
            protection applies to the first operand */
         if (prot)
         {
-            program_check (regs, PGM_PROTECTION_EXCEPTION);
+            program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
             return 3;
         }
 
@@ -273,7 +370,7 @@ BYTE    xpkey1, xpkey2;                 /* Expanded storage keys     */
         /* Perform protection check on expanded storage block */
         if (akey1 != 0 && akey1 != (xpkey1 & STORKEY_KEY))
         {
-            program_check (regs, PGM_PROTECTION_EXCEPTION);
+            program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
             return 3;
         }
     }
@@ -291,7 +388,7 @@ BYTE    xpkey1, xpkey2;                 /* Expanded storage keys     */
         if (akey1 != 0 && (xpkey1 & STORKEY_FETCH)
             && akey1 != (xpkey1 & STORKEY_KEY))
         {
-            program_check (regs, PGM_PROTECTION_EXCEPTION);
+            program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
             return 3;
         }
     }
@@ -347,7 +444,7 @@ mvpg_progck:
         return (xaddr == vaddr2 ? 2 : 1);
 
     /* Otherwise generate program check */
-    program_check (regs, xcode);
+    program_interrupt (regs, xcode);
     return 3;
 } /* end function move_page */
 

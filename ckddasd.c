@@ -199,7 +199,7 @@ U32             highcyl;                /* Highest cyl# in CKD file  */
     for (fileseq = 1;;)
     {
         /* Open the CKD image file */
-        dev->fd = open (dev->filename, O_RDWR);
+        dev->fd = open (dev->filename, O_RDWR|O_BINARY);
         if (dev->fd < 0)
         {
             logmsg ("HHC352I %s open error: %s\n",

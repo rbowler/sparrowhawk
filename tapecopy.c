@@ -172,7 +172,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
         filename = NULL;
 
     /* Open the tape device */
-    devfd = open (devname, O_RDONLY);
+    devfd = open (devname, O_RDONLY|O_BINARY);
     if (devfd < 0)
     {
         printf ("tapecopy: Error opening %s: %s\n",
@@ -239,7 +239,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
     /* Open the output file */
     if (filename != NULL)
     {
-        outfd = open (filename, O_WRONLY | O_CREAT,
+        outfd = open (filename, O_WRONLY | O_CREAT | O_BINARY,
                         S_IRUSR | S_IWUSR | S_IRGRP);
         if (outfd < 0)
         {

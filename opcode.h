@@ -1,5 +1,7 @@
 /* OPCODE.H     Instruction decoding functions - 02/07/00 Jan Jaeger */
 
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+
 typedef void (*zz_func) (BYTE inst[], int execflag, REGS *regs);
 
 extern zz_func opcode_table[];
@@ -9,18 +11,21 @@ extern zz_func opcode_a5xx[];
 extern zz_func opcode_a6xx[];
 extern zz_func opcode_a7xx[];
 extern zz_func opcode_b2xx[];
-extern zz_func opcode_e5xx[];
+extern zz_func opcode_b3xx[];
 extern zz_func opcode_e4xx[];
+extern zz_func opcode_e5xx[];
 
 void execute_01xx (BYTE inst[], int execflag, REGS *regs);
 void execute_a4xx (BYTE inst[], int execflag, REGS *regs);
 void execute_a5xx (BYTE inst[], int execflag, REGS *regs);
 void execute_a6xx (BYTE inst[], int execflag, REGS *regs);
-void execute_e5xx (BYTE inst[], int execflag, REGS *regs);
 void execute_a7xx (BYTE inst[], int execflag, REGS *regs);
 void execute_b2xx (BYTE inst[], int execflag, REGS *regs);
+void execute_b3xx (BYTE inst[], int execflag, REGS *regs);
 void execute_e4xx (BYTE inst[], int execflag, REGS *regs);
+void execute_e5xx (BYTE inst[], int execflag, REGS *regs);
 void operation_exception (BYTE inst[], int execflag, REGS *regs);
+void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
 
 
 /* The footprint_buffer option saves a copy of the register context
@@ -47,43 +52,43 @@ void operation_exception (BYTE inst[], int execflag, REGS *regs);
 
 #define ODD_CHECK(_r, _regs) \
         if( (_r) & 1 ) \
-            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
+            program_interrupt( (_regs), PGM_SPECIFICATION_EXCEPTION)
 
 #define ODD2_CHECK(_r1, _r2, _regs) \
         if( ((_r1) & 1) || ((_r2) & 1) ) \
-            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
+            program_interrupt( (_regs), PGM_SPECIFICATION_EXCEPTION)
  
 #define FW_CHECK(_value, _regs) \
         if( (_value) & 3 ) \
-            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
+            program_interrupt( (_regs), PGM_SPECIFICATION_EXCEPTION)
  
 #define DW_CHECK(_value, _regs) \
         if( (_value) & 7 ) \
-            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
+            program_interrupt( (_regs), PGM_SPECIFICATION_EXCEPTION)
  
         /* Program check if r1 is not 0, 2, 4, or 6 */
 #define HFPREG_CHECK(_r, _regs) \
         if( (_r) & 9 ) \
-            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
+            program_interrupt( (_regs), PGM_SPECIFICATION_EXCEPTION)
 
         /* Program check if r1 and r2 are not 0, 2, 4, or 6 */
 #define HFPREG2_CHECK(_r1, _r2, _regs) \
         if( ((_r1) & 9) || ((_r2) & 9) ) \
-            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
+            program_interrupt( (_regs), PGM_SPECIFICATION_EXCEPTION)
  
         /* Program check if r1 is not 0 or 4 */
 #define HFPODD_CHECK(_r, _regs) \
         if( (_r) & 11 ) \
-            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
+            program_interrupt( (_regs), PGM_SPECIFICATION_EXCEPTION)
 
         /* Program check if r1 and r2 are not 0 or 4 */
 #define HFPODD2_CHECK(_r1, _r2, _regs) \
         if( ((_r1) & 11) || ((_r2) & 11) ) \
-            program_check( (_regs), PGM_SPECIFICATION_EXCEPTION)
+            program_interrupt( (_regs), PGM_SPECIFICATION_EXCEPTION)
  
 #define PRIV_CHECK(_regs) \
         if( (_regs)->psw.prob ) \
-            program_check( (_regs), PGM_PRIVILEGED_OPERATION_EXCEPTION)
+            program_interrupt( (_regs), PGM_PRIVILEGED_OPERATION_EXCEPTION)
 
 #define E(_inst, _execflag, _regs) \
         { \
@@ -299,41 +304,93 @@ void operation_exception (BYTE inst[], int execflag, REGS *regs);
             } \
         }
 
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+
+#define SIE_INTERCEPT(_regs) \
+        { \
+            if((_regs)->sie_state) \
+                longjmp((_regs)->progjmp, SIE_INTERCEPT_INST); \
+        }
+
+#define SIE_MODE_370(_regs) \
+        { \
+            if(!((_regs)->sie_state && ((_regs)->siebk->m & SIE_M_370))) \
+                program_interrupt((_regs), PGM_OPERATION_EXCEPTION); \
+        }
+
+#define SIE_MODE_XA(_regs) \
+        { \
+            if((_regs)->sie_state && !((_regs)->siebk->m & SIE_M_XA)) \
+                program_interrupt((_regs), PGM_OPERATION_EXCEPTION); \
+        }
+
+#define SIE_TRANSLATE(_addr, _acctype, _regs) \
+        { \
+            if((_regs)->sie_state && !(_regs)->sie_pref) \
+                *(_addr) = logical_to_abs ((_regs)->sie_mso + *(_addr), \
+                  USE_PRIMARY_SPACE, (_regs)->hostregs, (_acctype), 0); \
+        }
+
+#else /*!defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+#define SIE_INTERCEPT(_regs)
+#define SIE_MODE_370(_regs)
+#define SIE_MODE_XA(_regs)
+#define SIE_TRANSLATE(_addr, _acctype, _regs)
+
+#endif /*!defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+
+#if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+
+#define SIE_MODE_XC_OPEX(_regs) \
+        { \
+            if(((_regs)->sie_state && ((_regs)->siebk->mx & SIE_MX_XC))) \
+                program_interrupt((_regs), PGM_OPERATION_EXCEPTION); \
+        }
+        
+#else /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+
+#define SIE_MODE_XC_OPEX(_regs)
+
+#endif /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+
 #if defined(FEATURE_VECTOR_FACILITY)
 
 #define VOP_CHECK(_regs) \
-        if(!((_regs)->cr[0] & CR0_VOP) || !(_regs)->vf.online) \
-            program_check((_regs), PGM_VECTOR_OPERATION_EXCEPTION)
+        if(!((_regs)->cr[0] & CR0_VOP) || !(_regs)->vf->online) \
+            program_interrupt((_regs), PGM_VECTOR_OPERATION_EXCEPTION)
 
 #define VR_INUSE(_vr, _regs) \
-        ((_regs)->vf.vsr & (VSR_VIU0 >> ((_vr) >> 1)))
+        ((_regs)->vf->vsr & (VSR_VIU0 >> ((_vr) >> 1)))
 
 #define VR_CHANGED(_vr, _regs) \
-        ((_regs)->vf.vsr & (VSR_VCH0 >> ((_vr) >> 1)))
+        ((_regs)->vf->vsr & (VSR_VCH0 >> ((_vr) >> 1)))
 
 #define SET_VR_INUSE(_vr, _regs) \
-        (_regs)->vf.vsr |= (VSR_VIU0 >> ((_vr) >> 1))
+        (_regs)->vf->vsr |= (VSR_VIU0 >> ((_vr) >> 1))
 
 #define SET_VR_CHANGED(_vr, _regs) \
-        (_regs)->vf.vsr |= (VSR_VCH0 >> ((_vr) >> 1))
+        (_regs)->vf->vsr |= (VSR_VCH0 >> ((_vr) >> 1))
 
 #define RESET_VR_INUSE(_vr, _regs) \
-        (_regs)->vf.vsr &= ~(VSR_VIU0 >> ((_vr) >> 1))
+        (_regs)->vf->vsr &= ~(VSR_VIU0 >> ((_vr) >> 1))
 
 #define RESET_VR_CHANGED(_vr, _regs) \
-        (_regs)->vf.vsr &= ~(VSR_VCH0 >> ((_vr) >> 1))
+        (_regs)->vf->vsr &= ~(VSR_VCH0 >> ((_vr) >> 1))
 
 #define VMR_SET(_section, _regs) \
-        ((_regs)->vf.vmr[(_section) >> 3] & (0x80 >> ((_section) & 7)))
+        ((_regs)->vf->vmr[(_section) >> 3] & (0x80 >> ((_section) & 7)))
 
 #define MASK_MODE(_regs) \
-        ((_regs)->vf.vsr & VSR_M)
+        ((_regs)->vf->vsr & VSR_M)
 
 #define VECTOR_COUNT(_regs) \
-            (((_regs)->vf.vsr & VSR_VCT) >> 32)
+            (((_regs)->vf->vsr & VSR_VCT) >> 32)
 
 #define VECTOR_IX(_regs) \
-            (((_regs)->vf.vsr & VSR_VIX) >> 16)
+            (((_regs)->vf->vsr & VSR_VIX) >> 16)
 
 /* VST and QST formats are the same */
 #define VST(_inst, _execflag, _regs, _vr3, _rt2, _vr1, _rs2) \
@@ -520,6 +577,10 @@ void zz_zero_and_add (BYTE inst[], int execflag, REGS *regs);
 void zz_inter_user_communication_vehicle (BYTE inst[], int execflag, REGS *regs);
 
 
+/* Instructions in vm.c */
+void zz_start_interpretive_execution (BYTE inst[], int execflag, REGS *regs);
+
+
 /* Instructions in float.c */
 void zz_load_positive_float_long_reg (BYTE inst[], int execflag, REGS *regs);
 void zz_load_negative_float_long_reg (BYTE inst[], int execflag, REGS *regs);
@@ -573,6 +634,8 @@ void zz_divide_float_short (BYTE inst[], int execflag, REGS *regs);
 void zz_add_unnormal_float_short (BYTE inst[], int execflag, REGS *regs);
 void zz_subtract_unnormal_float_short (BYTE inst[], int execflag, REGS *regs);
 void zz_divide_float_ext_reg (BYTE inst[], int execflag, REGS *regs);
+void zz_squareroot_float_long_reg (BYTE inst[], int execflag, REGS *regs);
+void zz_squareroot_float_short_reg (BYTE inst[], int execflag, REGS *regs);
 
 
 /* Instructions in general.c */
@@ -708,7 +771,9 @@ void zz_clear_subchannel (BYTE inst[], int execflag, REGS *regs);
 void zz_halt_subchannel (BYTE inst[], int execflag, REGS *regs);
 void zz_modify_subchannel (BYTE inst[], int execflag, REGS *regs);
 void zz_resume_subchannel (BYTE inst[], int execflag, REGS *regs);
+void zz_set_address_limit (BYTE inst[], int execflag, REGS *regs);
 void zz_set_channel_monitor (BYTE inst[], int execflag, REGS *regs);
+void zz_reset_channel_path (BYTE inst[], int execflag, REGS *regs);
 void zz_start_subchannel (BYTE inst[], int execflag, REGS *regs);
 void zz_store_channel_path_status (BYTE inst[], int execflag, REGS *regs);
 void zz_store_channel_report_word (BYTE inst[], int execflag, REGS *regs);
@@ -720,6 +785,8 @@ void zz_s370_testio (BYTE inst[], int execflag, REGS *regs);
 void zz_s370_haltio (BYTE inst[], int execflag, REGS *regs);
 void zz_s370_test_channel (BYTE inst[], int execflag, REGS *regs);
 void zz_s370_store_channelid (BYTE inst[], int execflag, REGS *regs);
+void zz_s370_connect_channel_set (BYTE inst[], int execflag, REGS *regs);
+void zz_s370_disconnect_channel_set (BYTE inst[], int execflag, REGS *regs);
 
 
 /* Instructions in service.c */
@@ -729,6 +796,7 @@ void zz_service_call (BYTE inst[], int execflag, REGS *regs);
 /* Instructions in xstore.c */
 void zz_page_in (BYTE inst[], int execflag, REGS *regs);
 void zz_page_out (BYTE inst[], int execflag, REGS *regs);
+void zz_lock_page (BYTE inst[], int execflag, REGS *regs);
 void zz_invalidate_expanded_storage_block_entry (BYTE inst[], int execflag, REGS *regs);
 void zz_move_page (BYTE inst[], int execflag, REGS *regs);
 

@@ -11,6 +11,7 @@
 /*      Measurement block support by Jan Jaeger                      */
 /*      Fix program check on NOP due to addressing - Jan Jaeger      */
 /*      Fix program check on TIC as first ccw on RSCH - Jan Jaeger   */
+/*      Fix PCI intermediate status flags             - Jan Jaeger   */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -551,8 +552,8 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         /* Release the device lock */
         release_lock (&dev->lock);
 
-        logmsg ("channel: Device %4.4X initial status interrupt\n",
-                dev->devnum);
+//      logmsg ("channel: Device %4.4X initial status interrupt\n",
+//              dev->devnum);
 
         /* Signal waiting CPUs that interrupt is pending */
         obtain_lock (&sysblk.intlock);
@@ -794,8 +795,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             dev->pciscsw.flag1 = (ccwfmt == 1 ? SCSW1_F : 0);
             dev->pciscsw.flag2 = SCSW2_FC_START;
             dev->pciscsw.flag3 = SCSW3_AC_SCHAC | SCSW3_AC_DEVAC
-                                | SCSW3_SC_INTER | SCSW3_SC_PRI
-                                | SCSW3_SC_PEND;
+                               | SCSW3_SC_INTER | SCSW3_SC_PEND;
             dev->pciscsw.ccwaddr[0] = (ccwaddr & 0xFF000000) >> 24;
             dev->pciscsw.ccwaddr[1] = (ccwaddr & 0xFF0000) >> 16;
             dev->pciscsw.ccwaddr[2] = (ccwaddr & 0xFF00) >> 8;
@@ -1611,7 +1611,7 @@ int halt_subchan (REGS *regs, DEVBLK *dev)
     release_lock (&sysblk.intlock);
 
     /* Return condition code zero */
-    logmsg ("%4.4X: Halt subchannel: cc=0\n", dev->devnum);
+//  logmsg ("%4.4X: Halt subchannel: cc=0\n", dev->devnum);
     return 0;
 
 } /* end function halt_subchan */

@@ -92,7 +92,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
     }
 
     /* Open the tape device */
-    infd = open (infilename, O_RDONLY);
+    infd = open (infilename, O_RDONLY | O_BINARY);
     if (infd < 0)
     {
         printf ("tapesplit: error opening input file %s: %s\n",
@@ -111,7 +111,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
     {
         outfilename = argv[outfilenum];
         printf ("Writing output file %s.\n", outfilename);
-        outfd = open (outfilename, O_WRONLY | O_CREAT,
+        outfd = open (outfilename, O_WRONLY | O_CREAT | O_BINARY,
                         S_IRUSR | S_IWUSR | S_IRGRP);
 
         if (outfd < 0)

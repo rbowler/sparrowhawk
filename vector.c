@@ -8,6 +8,7 @@
 /*                                             28/05/2000 Jan Jaeger */
 /*                                                                   */
 /* Instruction decoding rework                 09/07/2000 Jan Jaeger */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -15,6 +16,12 @@
 #include "opcode.h"
 
 #if defined(FEATURE_VECTOR_FACILITY)
+
+/* The vector save area must be aligned on a boundary 8 times the 
+   section size, however VM stores at 4 times the section size.
+   I do not know if the book or VM is wrong.                     *JJ */
+#define VSA_ALIGN       4
+
 /*-------------------------------------------------------------------*/
 /* A640 VTVM  - Test VMR                                       [RRE] */
 /*-------------------------------------------------------------------*/
@@ -72,12 +79,12 @@ U32     n, n1, n2;
 
     /* Complement VMR */
     for(n2 = 0; n2 <= n1; n2++)
-        regs->vf.vmr[n2] ^= 0xFF;
+        regs->vf->vmr[n2] ^= 0xFF;
     
     /* zeroize remainder */
-    regs->vf.vmr[n1] &= 0x7F00 >> (n & 7);
-    for(n1++; n1 < sizeof(regs->vf.vmr); n1++)
-        regs->vf.vmr[n1] = 0;
+    regs->vf->vmr[n1] &= 0x7F00 >> (n & 7);
+    for(n1++; n1 < sizeof(regs->vf->vmr); n1++)
+        regs->vf->vmr[n1] = 0;
 
 }
 
@@ -200,7 +207,7 @@ int     gr1, unused2;
 
     VOP_CHECK(regs);
 
-    regs->gpr[gr1] = (regs->vf.vsr >> 48);
+    regs->gpr[gr1] = (regs->vf->vsr >> 48);
 
 }
 
@@ -225,15 +232,15 @@ U64     d;
 
     /* n1 contains the starting element number */
     if((n1 = regs->gpr[gr1 + 1] >> 16) >= VECTOR_SECTION_SIZE)
-        program_check(regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Starting address must be eight times the section size aligned */
-    if((n - (8 * n1)) & ((VECTOR_SECTION_SIZE * 8) - 1) )
-        program_check(regs, PGM_SPECIFICATION_EXCEPTION);
+    if((n - (8 * n1)) & ((VECTOR_SECTION_SIZE * VSA_ALIGN) - 1) )
+        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* n2 contains VR pair, which must be an even reg */
     if((n2 = regs->gpr[gr1 + 1] & 0x0000FFFF) & 0x0000FFF1)
-        program_check(regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
 
     if( VR_INUSE(n2, regs) )
     {
@@ -245,8 +252,8 @@ U64     d;
         {
             /* Fetch vr pair from central storage */
             d = vfetch8(n, gr1, regs);    
-            regs->vf.vr[n2][n1] = d >> 32;
-            regs->vf.vr[n2+1][n1] = d;
+            regs->vf->vr[n2][n1] = d >> 32;
+            regs->vf->vr[n2+1][n1] = d;
 
             /* Increment element number */
             n1++;
@@ -304,23 +311,23 @@ U64     d;
 
     /* n1 contains the starting element number */
     if((n1 = regs->gpr[gr1 + 1] >> 16) >= VECTOR_SECTION_SIZE)
-        program_check(regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Starting address must be eight times the section size aligned */
-    if((n - (8 * n1)) & ((VECTOR_SECTION_SIZE * 8) - 1) )
-        program_check(regs, PGM_SPECIFICATION_EXCEPTION);
+    if((n - (8 * n1)) & ((VECTOR_SECTION_SIZE * VSA_ALIGN) - 1) )
+        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* n2 contains VR pair, which must be an even reg */
     if((n2 = regs->gpr[gr1 + 1] & 0x0000FFFF) & 0x0000FFF1)
-        program_check(regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
 
     if( VR_CHANGED(n2, regs) )
     {
         for(; n1 < VECTOR_SECTION_SIZE; n1++)
         {
             /* Store vr pair in savearea */
-            d = ((U64)regs->vf.vr[n2][n1] << 32)
-              | regs->vf.vr[n2+1][n1];
+            d = ((U64)regs->vf->vr[n2][n1] << 32)
+              | regs->vf->vr[n2+1][n1];
             vstore8(d, n, gr1, regs);    
 
             /* Update element number */
@@ -379,23 +386,23 @@ U64     d;
 
     /* n1 contains the starting element number */
     if((n1 = regs->gpr[gr1 + 1] >> 16) >= VECTOR_SECTION_SIZE)
-        program_check(regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Starting address must be eight times the section size aligned */
-    if((n - (8 * n1)) & ((VECTOR_SECTION_SIZE * 8) - 1) )
-        program_check(regs, PGM_SPECIFICATION_EXCEPTION);
+    if((n - (8 * n1)) & ((VECTOR_SECTION_SIZE * VSA_ALIGN) - 1) )
+        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* n2 contains VR pair, which must be an even reg */
     if((n2 = regs->gpr[gr1 + 1] & 0x0000FFFF) & 0x0000FFF1)
-        program_check(regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
 
     if( VR_INUSE(n2, regs) )
     {
         for(; n1 < VECTOR_SECTION_SIZE; n1++)
         {
             /* Store vr pair in savearea */
-            d = ((U64)regs->vf.vr[n2][n1] << 32)
-              | regs->vf.vr[n2+1][n1];
+            d = ((U64)regs->vf->vr[n2][n1] << 32)
+              | regs->vf->vr[n2+1][n1];
             vstore8(d, n, gr1, regs);    
 
             /* Update element number */
@@ -447,13 +454,13 @@ U32     n, n1;
     n = VECTOR_COUNT(regs);
     n1 = n >> 3; 
 
-    vfetchc(regs->vf.vmr, n1,
+    vfetchc(regs->vf->vmr, n1,
         regs->gpr[rs2] & ADDRESS_MAXWRAP(regs), rs2, regs);
 
     /* Set the inactive bits to zero */
-    regs->vf.vmr[n1] &= 0x7F00 >> (n & 7);
-    for(n1++; n1 < sizeof(regs->vf.vmr); n1++)
-        regs->vf.vmr[n1] = 0;
+    regs->vf->vmr[n1] &= 0x7F00 >> (n & 7);
+    for(n1++; n1 < sizeof(regs->vf->vmr); n1++)
+        regs->vf->vmr[n1] = 0;
 
 }
 
@@ -476,17 +483,17 @@ U32     n, n1, n2;
     /* Number of bytes - 1 */
     n1 = n >> 3; 
 
-    vfetchc(regs->vf.vmr, n1,
+    vfetchc(regs->vf->vmr, n1,
         regs->gpr[rs2] & ADDRESS_MAXWRAP(regs), rs2, regs);
 
     /* Complement all bits loaded */
     for(n2 = 0; n2 <= n1; n2++)
-        regs->vf.vmr[n2] ^= 0xFF;
+        regs->vf->vmr[n2] ^= 0xFF;
 
     /* Set the inactive bits to zero */
-    regs->vf.vmr[n1] &= 0x7F00 >> (n & 7);
-    for(n1++; n1 < sizeof(regs->vf.vmr); n1++)
-        regs->vf.vmr[n1] = 0;
+    regs->vf->vmr[n1] &= 0x7F00 >> (n & 7);
+    for(n1++; n1 < sizeof(regs->vf->vmr); n1++)
+        regs->vf->vmr[n1] = 0;
 
 }
 
@@ -506,7 +513,7 @@ U32     n;
     /* Extract vector count (number of active bits in vmr) */
     n = VECTOR_COUNT(regs);
 
-    vstorec(regs->vf.vmr, n >> 3,
+    vstorec(regs->vf->vmr, n >> 3,
             regs->gpr[rs2] & ADDRESS_MAXWRAP(regs), rs2, regs);
     
 }
@@ -536,12 +543,12 @@ BYTE    workvmr[VECTOR_SECTION_SIZE/8];
 
     /* And VMR with workvmr */
     for(n2 = 0; n2 <= n1; n2++)
-        regs->vf.vmr[n2] &= workvmr[n2];
+        regs->vf->vmr[n2] &= workvmr[n2];
     
     /* zeroize remainder */
-    regs->vf.vmr[n1] &= 0x7F00 >> (n & 7);
-    for(n1++; n1 < sizeof(regs->vf.vmr); n1++)
-        regs->vf.vmr[n1] = 0;
+    regs->vf->vmr[n1] &= 0x7F00 >> (n & 7);
+    for(n1++; n1 < sizeof(regs->vf->vmr); n1++)
+        regs->vf->vmr[n1] = 0;
 
 }
 
@@ -570,12 +577,12 @@ BYTE    workvmr[VECTOR_SECTION_SIZE/8];
 
     /* OR VMR with workvmr */
     for(n2 = 0; n2 <= n1; n2++)
-        regs->vf.vmr[n2] |= workvmr[n2];
+        regs->vf->vmr[n2] |= workvmr[n2];
     
     /* zeroize remainder */
-    regs->vf.vmr[n1] &= 0x7F00 >> (n & 7);
-    for(n1++; n1 < sizeof(regs->vf.vmr); n1++)
-        regs->vf.vmr[n1] = 0;
+    regs->vf->vmr[n1] &= 0x7F00 >> (n & 7);
+    for(n1++; n1 < sizeof(regs->vf->vmr); n1++)
+        regs->vf->vmr[n1] = 0;
 
 }
 
@@ -604,12 +611,12 @@ BYTE    workvmr[VECTOR_SECTION_SIZE/8];
 
     /* OR VMR with workvmr */
     for(n2 = 0; n2 <= n1; n2++)
-        regs->vf.vmr[n2] ^= workvmr[n2];
+        regs->vf->vmr[n2] ^= workvmr[n2];
     
     /* zeroize remainder */
-    regs->vf.vmr[n1] &= 0x7F00 >> (n & 7);
-    for(n1++; n1 < sizeof(regs->vf.vmr); n1++)
-        regs->vf.vmr[n1] = 0;
+    regs->vf->vmr[n1] &= 0x7F00 >> (n & 7);
+    for(n1++; n1 < sizeof(regs->vf->vmr); n1++)
+        regs->vf->vmr[n1] = 0;
 
 }
 
@@ -628,7 +635,7 @@ U32     effective_addr2;                /* Effective address         */
 
     DW_CHECK(effective_addr2, regs);
 
-    vstore8(regs->vf.vsr, effective_addr2, b2, regs);
+    vstore8(regs->vf->vsr, effective_addr2, b2, regs);
     
 }
 
@@ -645,7 +652,7 @@ U32     effective_addr2;                /* Effective address         */
 
     VOP_CHECK(regs);
 
-    vstorec(regs->vf.vmr, sizeof(regs->vf.vmr) - 1,
+    vstorec(regs->vf->vmr, sizeof(regs->vf->vmr) - 1,
         effective_addr2, b2, regs);
     
 }
@@ -676,7 +683,7 @@ U64     d;
     if((d & VSR_RESV)
         || ((d & VSR_VCT) >> 32) > VECTOR_SECTION_SIZE 
         || ((d & VSR_VIX) >> 16) >= VECTOR_SECTION_SIZE)
-        program_check(regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
     
     /* In problem state the change bit are set corresponding
        the inuse bits */
@@ -693,13 +700,13 @@ U64     d;
             && !((d & VSR_VIU) & (VSR_VCH0 >> (n1 >> 1))) )
             for(n2 = 0; n2 < VECTOR_SECTION_SIZE; n2++)
             {
-                regs->vf.vr[n1][n2] = 0;
-                regs->vf.vr[n1+1][n2] = 0;
+                regs->vf->vr[n1][n2] = 0;
+                regs->vf->vr[n1+1][n2] = 0;
             }
     }
 
     /* Update the vector status register */
-    regs->vf.vsr = d;
+    regs->vf->vsr = d;
 
 }
 
@@ -716,7 +723,7 @@ U32     effective_addr2;                /* Effective address         */
 
     VOP_CHECK(regs);
 
-    vfetchc(regs->vf.vmr, sizeof(regs->vf.vmr) - 1,
+    vfetchc(regs->vf->vmr, sizeof(regs->vf->vmr) - 1,
         effective_addr2, b2, regs);
     
 }
@@ -743,8 +750,8 @@ U32     n;
         (S32)effective_addr2 > VECTOR_SECTION_SIZE ? 
                  VECTOR_SECTION_SIZE : (S32)effective_addr2;
 
-    regs->vf.vsr &= ~VSR_VCT;
-    regs->vf.vsr |= (U64)n << 32;
+    regs->vf->vsr &= ~VSR_VCT;
+    regs->vf->vsr |= (U64)n << 32;
     
 }
 
@@ -763,7 +770,7 @@ U32     n, n1, n2;
     VOP_CHECK(regs);
 
     /* Set vector interruption index to zero */
-    regs->vf.vsr &= ~VSR_VIX;
+    regs->vf->vsr &= ~VSR_VIX;
 
     /* Clear vr's identified in the bit mask
        n1 contains the vr number   
@@ -774,8 +781,8 @@ U32     n, n1, n2;
         {
             for(n = 0; n < VECTOR_SECTION_SIZE; n++)
             {
-                regs->vf.vr[n1][n] = 0;
-                regs->vf.vr[n1+1][n] = 0;
+                regs->vf->vr[n1][n] = 0;
+                regs->vf->vr[n1+1][n] = 0;
             }
             RESET_VR_INUSE(n1, regs);
         }
@@ -796,9 +803,9 @@ U32     effective_addr2;                /* Effective address         */
     VOP_CHECK(regs);
 
     if(effective_addr2 & 1)
-        regs->vf.vsr |= VSR_M;
+        regs->vf->vsr |= VSR_M;
     else
-        regs->vf.vsr &= ~VSR_M;
+        regs->vf->vsr &= ~VSR_M;
 
 }
 
@@ -824,8 +831,8 @@ U32     n;
         (S32)effective_addr2 > VECTOR_SECTION_SIZE ? 
                  VECTOR_SECTION_SIZE : (S32)effective_addr2;
 
-    regs->vf.vsr &= ~VSR_VIX;
-    regs->vf.vsr |= (U64)n << 16;
+    regs->vf->vsr &= ~VSR_VIX;
+    regs->vf->vsr |= (U64)n << 16;
     
 }
 
@@ -867,7 +874,12 @@ U32     effective_addr2;                /* Effective address         */
 
     DW_CHECK(effective_addr2, regs);
 
-    vstore8(regs->vf.vac, effective_addr2, b2, regs);
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(regs->sie_state && (regs->siebk->ic[3] & SIE_IC3_VACSV))
+        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+    vstore8(regs->vf->vac, effective_addr2, b2, regs);
     
 }
 
@@ -888,7 +900,12 @@ U32     effective_addr2;                /* Effective address         */
 
     DW_CHECK(effective_addr2, regs);
 
-    regs->vf.vac = vfetch8(effective_addr2, b2, regs) & VAC_MASK;
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(regs->sie_state && (regs->siebk->ic[3] & SIE_IC3_VACRS))
+        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+    regs->vf->vac = vfetch8(effective_addr2, b2, regs) & VAC_MASK;
     
 }
 

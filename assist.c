@@ -7,6 +7,7 @@
 /*-------------------------------------------------------------------*/
 
 /*              Instruction decode rework - Jan Jaeger               */
+/*              Correct address wraparound - Jan Jaeger              */
 
 #include "hercules.h"
 
@@ -58,7 +59,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
 
     /* Specification exception if operands are not on word boundary */
     if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     PERFORM_SERIALIZATION(regs);
 
@@ -149,7 +150,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
 
     /* Specification exception if operands are not on word boundary */
     if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
@@ -237,7 +238,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
 
     /* Specification exception if operands are not on word boundary */
     if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     PERFORM_SERIALIZATION(regs);
 
@@ -327,7 +328,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
 
     /* Specification exception if operands are not on word boundary */
     if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* General register 11 contains the lock address */
     lock_addr = regs->gpr[11] & ADDRESS_MAXWRAP(regs);

@@ -3,6 +3,8 @@
 
 /*              (c) Copyright Peter Kuschnerus, 1999 (UPT & CFC)     */
 
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+
 /*-------------------------------------------------------------------*/
 /* This module implements all general instructions of the            */
 /* S/370 and ESA/390 architectures, as described in the manuals      */
@@ -19,6 +21,9 @@
 /*      Fix STCKE instruction - Bernard van der Helm                 */
 /*      Instruction decode rework - Jan Jaeger                       */
 /*      Make STCK update the TOD clock - Jay Maynard                 */
+/*      Fix address wraparound in MVO - Jan Jaeger                   */
+/*      PLO instruction - Jan Jaeger                                 */
+/*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -44,7 +49,7 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
-        program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+        program_interrupt (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
 }
 
         
@@ -71,7 +76,7 @@ U32     n;                              /* 32-bit operand values     */
 
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
-        program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+        program_interrupt (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
 
 }
 
@@ -102,7 +107,7 @@ U32     n;                              /* 32-bit operand values     */
 
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
-        program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+        program_interrupt (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
 
 }
 
@@ -130,7 +135,7 @@ U32     n2;                             /* 16-bit converted to 32    */
 
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
-        program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+        program_interrupt (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
 
 }
 
@@ -440,6 +445,8 @@ U32     newia;                          /* New instruction address   */
 
     RR(inst, execflag, regs, r1, r2);
 
+    SIE_MODE_XA(regs);
+
     /* Compute the branch address from the R2 operand */
     newia = regs->gpr[r2];
 
@@ -482,6 +489,8 @@ int     r1, r2;                         /* Values of R fields        */
 U32     newia;                          /* New instruction address   */
 
     RR(inst, execflag, regs, r1, r2);
+
+    SIE_MODE_XA(regs);
 
     /* Compute the branch address from the R2 operand */
     newia = regs->gpr[r2];
@@ -929,7 +938,7 @@ BYTE    operand_control;                /* Operand control bit       */
 
     /* Check GR1, GR2, GR3 even */
     if ( regs->gpr[1] & 1 || regs->gpr[2] & 1 || regs->gpr[3] & 1 )
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Get index limit and operand-control bit */
     index_limit = effective_addr2 & 0x7FFE;
@@ -1064,6 +1073,11 @@ U32     n;                              /* 32-bit operand value      */
         usleep(1L);
 #endif MAX_CPU_ENGINES > 1
 
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CS1))
+        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
 }
 
 /*-------------------------------------------------------------------*/
@@ -1124,6 +1138,11 @@ U32     n1, n2;                         /* 32-bit operand values     */
     if(regs->psw.cc && sysblk.numcpu > 1 && sysblk.brdcstncpu == 0)
         usleep(1L);
 #endif MAX_CPU_ENGINES > 1
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CDS1))
+        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
 }
 
@@ -1486,7 +1505,7 @@ BYTE    termchar;                       /* Terminating character     */
 
     /* Program check if bits 0-23 of register 0 not zero */
     if ((regs->gpr[0] & 0xFFFFFF00) != 0)
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Load string terminating character from register 0 bits 24-31 */
     termchar = regs->gpr[0] & 0xFF;
@@ -1738,7 +1757,7 @@ BYTE    sbyte;                          /* Source operand byte       */
 
         /* Check for valid high-order digit */
         if (h > 9)
-            program_check (regs, PGM_DATA_EXCEPTION);
+            program_interrupt (regs, PGM_DATA_EXCEPTION);
 
         /* Accumulate high-order digit into result */
         dreg *= 10;
@@ -1749,7 +1768,7 @@ BYTE    sbyte;                          /* Source operand byte       */
         {
             /* Check for valid low-order digit */
             if (d > 9)
-                program_check (regs, PGM_DATA_EXCEPTION);
+                program_interrupt (regs, PGM_DATA_EXCEPTION);
 
             /* Accumulate low-order digit into result */
             dreg *= 10;
@@ -1759,7 +1778,7 @@ BYTE    sbyte;                          /* Source operand byte       */
         {
             /* Check for valid sign */
             if (d < 10)
-                program_check (regs, PGM_DATA_EXCEPTION);
+                program_interrupt (regs, PGM_DATA_EXCEPTION);
         }
 
         /* Increment operand address */
@@ -1778,7 +1797,7 @@ BYTE    sbyte;                          /* Source operand byte       */
 
     /* Program check if overflow */
     if ((S64)dreg < -2147483648LL || (S64)dreg > 2147483647LL)
-        program_check (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
+        program_interrupt (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
 
 }
 
@@ -1869,7 +1888,7 @@ int     divide_overflow;                /* 1=divide overflow         */
 
     /* Program check if overflow */
     if ( divide_overflow )
-        program_check (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
+        program_interrupt (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
 }
 
 
@@ -1900,7 +1919,7 @@ int     divide_overflow;                /* 1=divide overflow         */
 
     /* Program check if overflow */
     if ( divide_overflow )
-            program_check (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
+            program_interrupt (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
 
 }
 
@@ -2054,25 +2073,31 @@ void zz_execute (BYTE inst[], int execflag, REGS *regs)
 int     r1;                             /* Value of R field          */
 int     b2;                             /* Base of effective addr    */
 U32     effective_addr2;                /* Effective address         */
-DWORD   dword;                          /* Doubleword work area      */
 
     RX(inst, execflag, regs, r1, b2, effective_addr2);
 
     ODD_CHECK(effective_addr2, regs);
 
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    /* Ensure that the instruction field is zero, such that
+       zeros are stored in the interception parm field, if
+       the interrupt is intercepted */
+    memset(regs->exinst, 0, 2);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
     /* Fetch target instruction from operand address */
-    instfetch (dword, effective_addr2, regs);
+    instfetch (regs->exinst, effective_addr2, regs);
 
     /* Program check if recursive execute */
-    if ( dword[0] == 0x44 )
-        program_check (regs, PGM_EXECUTE_EXCEPTION);
+    if ( regs->exinst[0] == 0x44 )
+        program_interrupt (regs, PGM_EXECUTE_EXCEPTION);
 
     /* Or 2nd byte of instruction with low-order byte of R1 */
     if ( r1 != 0 )
-        dword[1] |= (regs->gpr[r1] & 0xFF);
+        regs->exinst[1] |= (regs->gpr[r1] & 0xFF);
 
     /* Execute the target instruction */
-    EXECUTE_INSTRUCTION (dword, 1, regs);
+    EXECUTE_INSTRUCTION (regs->exinst, 1, regs);
 
 }
 
@@ -2343,7 +2368,7 @@ int     r1, r2;                         /* Values of R fields        */
         regs->gpr[r1] = regs->gpr[r2];
         regs->psw.cc = 3;
         if ( regs->psw.fomask )
-            program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+            program_interrupt (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
         return;
     }
 
@@ -2461,7 +2486,7 @@ int     r1, r2;                         /* Values of R fields        */
         regs->gpr[r1] = regs->gpr[r2];
         regs->psw.cc = 3;
         if ( regs->psw.fomask )
-            program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+            program_interrupt (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
         return;
     }
 
@@ -2483,32 +2508,23 @@ BYTE    i2;                             /* Monitor class             */
 int     b1;                             /* Base of effective addr    */
 U32     effective_addr1;                /* Effective address         */
 U32     n;                              /* Work                      */
-PSA    *psa;                            /* -> prefixed storage area  */
 
     SI(inst, execflag, regs, i2, b1, effective_addr1);
 
     /* Program check if monitor class exceeds 15 */
     if ( i2 > 0x0F )
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Ignore if monitor mask in control register 8 is zero */
     n = (regs->cr[8] & CR8_MCMASK) << i2;
     if ((n & 0x00008000) == 0)
         return;
 
-    /* Clear PSA+148 and store monitor class at PSA+149 */
-    psa = (PSA*)(sysblk.mainstor + regs->pxr);
-    psa->monclass[0] = 0;
-    psa->monclass[1] = i2;
-
-    /* Store the monitor code at PSA+156 */
-    psa->moncode[0] = effective_addr1 >> 24;
-    psa->moncode[1] = (effective_addr1 & 0xFF0000) >> 16;
-    psa->moncode[2] = (effective_addr1 & 0xFF00) >> 8;
-    psa->moncode[3] = effective_addr1 & 0xFF;
+    regs->monclass = i2;
+    regs->moncode = effective_addr1;
 
     /* Generate a monitor event program interruption */
-    program_check (regs, PGM_MONITOR_EVENT);
+    program_interrupt (regs, PGM_MONITOR_EVENT);
 
 }
 
@@ -2856,7 +2872,7 @@ BYTE    termchar;                       /* Terminating character     */
 
     /* Program check if bits 0-23 of register 0 not zero */
     if ((regs->gpr[0] & 0xFFFFFF00) != 0)
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Load string terminating character from register 0 bits 24-31 */
     termchar = regs->gpr[0] & 0xFF;
@@ -3373,174 +3389,773 @@ U32     effective_addr2,
                                      b4, effective_addr4);
 
     if(regs->gpr[0] & PLO_GPR0_RESV)
-        program_check(regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
 
     if(regs->gpr[0] & PLO_GPR0_T)
         switch(regs->gpr[0] & PLO_GPR0_FC) 
-        {
-            case PLO_CL:
-//INCOMLETE case PLO_CLG:
-            case PLO_CS:
-//INCOMLETE case PLO_CSG:
-            case PLO_DCS:
-//INCOMLETE case PLO_DCSG:
-            case PLO_CSST:
-//INCOMLETE case PLO_CSSTG:
-//INCOMLETE case PLO_CSDST:
-//INCOMLETE case PLO_CSDSTG:
-//INCOMLETE case PLO_CSTST:
-//INCOMLETE case PLO_CSTSTG:
+    {
+        case PLO_CL:
+        case PLO_CLG:
+        case PLO_CS:
+        case PLO_CSG:
+        case PLO_DCS:
+        case PLO_DCSG:
+        case PLO_CSST:
+        case PLO_CSSTG:
+        case PLO_CSDST:
+        case PLO_CSDSTG:
+        case PLO_CSTST:
+        case PLO_CSTSTG:
 
-                /* Indicate function supported */
-                regs->psw.cc = 0;   
-                break;
-            default:
-                /* indicate function not supported */
-                regs->psw.cc = 3;
-                break;
-        }
+            /* Indicate function supported */
+            regs->psw.cc = 0;   
+            break;
+
+        default:
+            /* indicate function not supported */
+            regs->psw.cc = 3;
+            break;
+    }
     else
     {
-        /* Obtain main storage access lock */
+        /* gpr1/ar1 indentify the program lock token, which is used
+           to select a lock from the model dependent number of locks 
+           in the configuration.  We simply use 1 lock which is the 
+           main storage access lock which is also used by CS, CDS 
+           and TS.                                               *JJ */
         OBTAIN_MAINLOCK(regs);
 
         switch(regs->gpr[0] & PLO_GPR0_FC) 
         {
             case PLO_CL:
                 {
-                U32     n2, n4;
+                U32 op2,
+                    op4;
 
                     FW_CHECK(effective_addr2, regs);
                     FW_CHECK(effective_addr4, regs);
 
                     /* Load second operand from operand address  */
-                    n2 = vfetch4 ( effective_addr2, b2, regs );
+                    op2 = vfetch4 ( effective_addr2, b2, regs );
 
-                    if(regs->gpr[r1] == n2)
+                    if(regs->gpr[r1] == op2)
                     {
-                        n4 = vfetch4 ( effective_addr4, b4, regs );
-                        regs->gpr[r3] = n4;
+                        
+                        op4 = vfetch4 ( effective_addr4, b4, regs );
+                        regs->gpr[r3] = op4;
                         regs->psw.cc = 0;
                     }
                     else
                     {
-                        regs->gpr[r1] = n2;
+                        regs->gpr[r1] = op2;
                         regs->psw.cc = 1;
                     }
 
                 }
                 break;
 
-//INCOMLETE case PLO_CLG:
+
+            case PLO_CLG:
+                {
+                U64 op1c,
+                    op2,
+                    op4;
+                U32 op4alet = 0,
+                    op4addr;
+                
+                    DW_CHECK(effective_addr4, regs);
+                    DW_CHECK(effective_addr2, regs);
+
+                    /* load second operand */
+                    op2 = vfetch8(effective_addr2, b2, regs);
+
+                    /* load 1st op. compare value */
+                    op1c = vfetch8(effective_addr4 + 8, b4, regs);
+
+                    if(op1c == op2)
+                    {
+                        /* When in ar mode, ar3 is used to access the 
+                           operand. The alet is fetched from the pl */
+                        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+                        {
+                            op4alet = vfetch4(effective_addr4 + 68, b4, regs);
+                            if(op4alet)
+                            {
+                                if(r3 == 0)
+                                    program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
+                                regs->ar[r3] = op4alet;
+                            }
+                        }
+
+                        /* Load address of operand 4 */
+                        op4addr = vfetch4(effective_addr4 + 76, b4, regs);
+                        op4addr &= ADDRESS_MAXWRAP(regs);
+                        DW_CHECK(op4addr, regs);
+
+                        /* Load operand 4, using ar3 when in ar mode */
+                        op4 = vfetch8(op4addr, op4alet ? r3 : 0, regs);
+
+                        /* replace the 3rd operand with the 4th operand */
+                        vstore8(op4, effective_addr4 + 40, b4, regs);
+
+                        regs->psw.cc = 0;
+                    }
+                    else
+                    {
+                        /* replace the first op compare value with 2nd op */
+                        vstore8(op2, effective_addr4 + 8, b4, regs);
+
+                        regs->psw.cc = 1;
+                    }
+                }
+                break;
+    
 
             case PLO_CS:
                 {
-                U32     n2;
+                U32 op2;
         
                     ODD_CHECK(r1, regs);
                     FW_CHECK(effective_addr2, regs);
 
                     /* Load second operand from operand address  */
-                    n2 = vfetch4 ( effective_addr2, b2, regs );
+                    op2 = vfetch4 ( effective_addr2, b2, regs );
 
                     /* Compare operand with R1 register contents */
-                    if ( regs->gpr[r1] == n2 )
+                    if ( regs->gpr[r1] == op2 )
                     {
                         /* If equal, store R1+1 at operand loc and set cc=0 */
                         vstore4 ( regs->gpr[r1+1], effective_addr2, b2, regs );
+
                         regs->psw.cc = 0;
                     }
                     else
                     {
                         /* If unequal, load R1 from operand and set cc=1 */
-                        regs->gpr[r1] = n2;
+                        regs->gpr[r1] = op2;
+
                         regs->psw.cc = 1;
                     }
 
                 }
                 break;
 
-//INCOMLETE case PLO_CSG:
+
+            case PLO_CSG:
+                {
+                U64 op1c, 
+                    op1r,
+                    op2;
+
+                    DW_CHECK(effective_addr4, regs);
+                    DW_CHECK(effective_addr2, regs);
+
+                    /* Load first op compare value */
+                    op1c = vfetch8(effective_addr4 + 8, b4, regs);
+
+                    /* Load 2nd operand */
+                    op2 = vfetch8(effective_addr2, b2, regs);
+
+                    if(op1c == op2)
+                    {
+                        /* Load 1st op replacement value */
+                        op1r = vfetch8(effective_addr4 + 24, b4, regs);
+
+                        /* Store at 2nd operand location */
+                        vstore8(op1r, effective_addr2, b2, regs);
+
+                        regs->psw.cc = 0;
+                    }
+                    else
+                    {
+                        /* Replace 1st op comp value by 2nd op */
+                        vstore8(op2, effective_addr4 + 8, b4, regs);
+
+                        regs->psw.cc = 1;
+                    }
+                }
+                break;
+
 
             case PLO_DCS:
                 {
-                U32     n2, n4;
+                U32 op2,
+                    op4;
         
                     ODD2_CHECK(r1, r3, regs);
                     FW_CHECK(effective_addr2, regs);
                     FW_CHECK(effective_addr4, regs);
 
                     /* Load second operands from operand addresses  */
-                    n2 = vfetch4 ( effective_addr2, b2, regs );
-                    n4 = vfetch4 ( effective_addr4, b4, regs );
+                    op2 = vfetch4 ( effective_addr2, b2, regs );
 
-                    /* Compare operand with register contents */
-                    if ( regs->gpr[r1] == n2 && regs->gpr[r3] == n4)
+                    if(regs->gpr[r1] != op2)
                     {
-                        /* Verify access to 4th operand */
-                        validate_operand (effective_addr4, b4, 4-1,
-                            ACCTYPE_WRITE, regs);
-                        /* If equal, store replacement and set cc=0 */
-                        vstore4 ( regs->gpr[r1+1], effective_addr2, b2, regs );
-                        vstore4 ( regs->gpr[r3+1], effective_addr4, b4, regs );
-                        regs->psw.cc = 0;
+                        regs->gpr[r1] = op2;
+
+                        regs->psw.cc = 1;
                     }
                     else
                     {
-                        /* If unequal, load R1 & R3 from op and set cc=1 */
-                        regs->gpr[r1] = n2;
-                        regs->gpr[r3] = n4;
-                        regs->psw.cc = 1;
+                        op4 = vfetch4 ( effective_addr4, b4, regs );
+
+                        /* Compare operand with register contents */
+                        if (regs->gpr[r3] != op4)
+                        {
+                            /* If unequal, load r3 from op and set cc=2 */
+                            regs->gpr[r3] = op4;
+                            regs->psw.cc = 2;
+                        }
+                        else
+                        {
+                            /* Verify access to 2nd operand */
+                            validate_operand (effective_addr2, b2, 4-1,
+                                ACCTYPE_WRITE, regs);
+
+                            /* If equal, store replacement and set cc=0 */
+                            vstore4 ( regs->gpr[r3+1], effective_addr4, b4, regs );
+                            vstore4 ( regs->gpr[r1+1], effective_addr2, b2, regs );
+
+                            regs->psw.cc = 0;
+                        }
                     }
 
                 }
                 break;
 
-//INCOMLETE case PLO_DCSG:
+
+            case PLO_DCSG:
+                {
+                U64 op1c,
+                    op1r,
+                    op2,
+                    op3c,
+                    op3r,
+                    op4;
+                U32 op4alet = 0,
+                    op4addr;
+
+                    DW_CHECK(effective_addr2, regs);
+                    DW_CHECK(effective_addr4, regs);
+
+                    /* load 1st op compare value from the pl */
+                    op1c = vfetch8(effective_addr4 + 8, b4, regs);
+
+                    /* load 2nd operand */
+                    op2 = vfetch8(effective_addr2, b2, regs);
+
+                    if(op1c != op2)
+                    {
+                        /* replace the 1st op compare value with 2nd op */
+                        vstore8(op2, effective_addr4 + 8, b4, regs);
+
+                        regs->psw.cc = 1;
+                    }
+                    else
+                    {
+                        /* Load 3rd op compare value */
+                        op3c = vfetch8(effective_addr4 + 40, b4, regs);
+
+                        /* When in ar mode, ar3 is used to access the 
+                           operand. The alet is fetched from the pl */
+                        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+                        {
+                            op4alet = vfetch4(effective_addr4 + 68, b4, regs);
+                            if(op4alet)
+                            {
+                                if(r3 == 0)
+                                    program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
+                                regs->ar[r3] = op4alet;
+                            }
+                        }
+
+                        /* Load address of operand 4 */
+                        op4addr = vfetch4(effective_addr4 + 76, b4, regs);
+                        op4addr &= ADDRESS_MAXWRAP(regs);
+                        DW_CHECK(op4addr, regs);
+
+                        /* Load operand 4, using ar3 when in ar mode */
+                        op4 = vfetch8(op4addr, op4alet ? r3 : 0, regs);
+
+                        if(op3c != op4)
+                        {
+                            vstore8(op4, effective_addr4 + 40, b4, regs);
+                            regs->psw.cc = 2;
+                        }
+                        else
+                        {
+                            /* load replacement values */
+                            op1r = vfetch8(effective_addr4 + 24, b4, regs);
+                            op3r = vfetch8(effective_addr4 + 56, b4, regs);
+
+                            /* Verify access to 2nd operand */
+                            validate_operand (effective_addr2, b2, 8-1,
+                                ACCTYPE_WRITE, regs);
+
+                            /* Store 3rd op replacement at 4th op */
+                            vstore8(op3r, op4addr, op4alet ? r3 : 0, regs);
+
+                            /* Store 1st op replacement at 2nd op */
+                            vstore8(op1r, effective_addr2, b2, regs);
+
+                            regs->psw.cc = 0;
+                        }
+                    }
+
+                }
+                break;
+
 
             case PLO_CSST:
                 {
-                U32     n2;
+                U32 op2;
 
                     ODD_CHECK(r1, regs);
                     FW_CHECK(effective_addr2, regs);
                     FW_CHECK(effective_addr4, regs);
 
                     /* Load second operand from operand address  */
-                    n2 = vfetch4 ( effective_addr2, b2, regs );
+                    op2 = vfetch4 ( effective_addr2, b2, regs );
 
                     /* Compare operand with register contents */
-                    if ( regs->gpr[r1] == n2)
+                    if ( regs->gpr[r1] == op2)
                     {
-                        /* Verify access to 4th operand */
-                        validate_operand (effective_addr4, b4, 4-1,
+                        /* Verify access to 2nd operand */
+                        validate_operand (effective_addr2, b2, 4-1,
                             ACCTYPE_WRITE, regs);
+
                         /* If equal, store replacement and set cc=0 */
-                        vstore4 ( regs->gpr[r1+1], effective_addr2, b2, regs );
                         vstore4 ( regs->gpr[r3], effective_addr4, b4, regs );
+                        vstore4 ( regs->gpr[r1+1], effective_addr2, b2, regs );
+
                         regs->psw.cc = 0;
                     }
                     else
                     {
-                        regs->gpr[r1] = n2;
+                        regs->gpr[r1] = op2;
+
                         regs->psw.cc = 1;
                     }
 
                 }
                 break;
 
-//INCOMLETE case PLO_CSSTG:
 
-//INCOMLETE case PLO_CSDST:
+            case PLO_CSSTG:
+                {
+                U64 op1c,
+                    op1r,
+                    op2,
+                    op3;
+                U32 op4alet = 0,
+                    op4addr;
 
-//INCOMLETE case PLO_CSDSTG:
+                    DW_CHECK(effective_addr2, regs);
+                    DW_CHECK(effective_addr4, regs);
 
-//INCOMLETE case PLO_CSTST:
+                    op1c = vfetch8(effective_addr4 + 8, b4, regs);
+                    op2 = vfetch8(effective_addr2, b2, regs);
+                    
+                    if(op1c == op2)
+                    {
+                        op1r = vfetch8(effective_addr4 + 24, b4, regs);
+                        op3 = vfetch8(effective_addr4 + 56, b4, regs);
+                        
+                        /* Verify access to 2nd operand */
+                        validate_operand (effective_addr2, b2, 8-1,
+                            ACCTYPE_WRITE, regs);
 
-//INCOMLETE case PLO_CSTSTG:
+                        /* When in ar mode, ar3 is used to access the 
+                           operand. The alet is fetched from the pl */
+                        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+                        {
+                            op4alet = vfetch4(effective_addr4 + 68, b4, regs);
+                            if(op4alet)
+                            {
+                                if(r3 == 0)
+                                    program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
+                                regs->ar[r3] = op4alet;
+                            }
+                        }
+
+                        /* Load address of operand 4 */
+                        op4addr = vfetch4(effective_addr4 + 76, b4, regs);
+                        op4addr &= ADDRESS_MAXWRAP(regs);
+                        DW_CHECK(op4addr, regs);
+
+                        vstore8(op3, op4addr, op4alet ? r3 : 0, regs);
+                        vstore8(op1r, effective_addr2, b2, regs);
+
+                        regs->psw.cc = 0;
+                    }
+                    else
+                    {
+                        /* Store 2nd op at 1st op comare value */
+                        vstore8(op2, effective_addr4 + 8, b4, regs);
+                        regs->psw.cc = 1;
+                    }
+
+                }
+                break;
+
+
+            case PLO_CSDST:
+                {
+                U32 op2,
+                    op3,
+                    op4alet = 0,
+                    op4addr,
+                    op5,
+                    op6alet = 0,
+                    op6addr;
+
+                    ODD_CHECK(r1, regs);
+                    FW_CHECK(effective_addr2, regs);
+                    FW_CHECK(effective_addr4, regs);
+
+                    op2 = vfetch4(effective_addr2, b2, regs);
+
+                    if(regs->gpr[r1] == op2)
+                    {
+                        op3 = vfetch4(effective_addr4 + 60, b4, regs);
+                        op5 = vfetch4(effective_addr4 + 92, b4, regs);
+
+                        /* Verify access to 2nd operand */
+                        validate_operand (effective_addr2, b2, 4-1,
+                            ACCTYPE_WRITE, regs);
+
+                        /* When in ar mode, ar3 is used to access the 
+                           operand. The alet is fetched from the pl */
+                        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+                        {
+                            op4alet = vfetch4(effective_addr4 + 68, b4, regs);
+                            op6alet = vfetch4(effective_addr4 + 100, b4, regs);
+                            if(op4alet || op6alet)
+                            {
+                                if(r3 == 0)
+                                    program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
+                                regs->ar[r3] = op4alet;
+                            }
+                        }
+
+                        /* Load address of operand 4 */
+                        op4addr = vfetch4(effective_addr4 + 76, b4, regs);
+                        op4addr &= ADDRESS_MAXWRAP(regs);
+                        FW_CHECK(op4addr, regs);
+
+                        /* Load address of operand 6 */
+                        op6addr = vfetch4(effective_addr4 + 108, b4, regs);
+                        op6addr &= ADDRESS_MAXWRAP(regs);
+                        FW_CHECK(op6addr, regs);
+
+                        /* Verify access to 4th operand */
+                        validate_operand (op4addr, op4alet ? r3 : 0, 4-1,
+                            ACCTYPE_WRITE, regs);
+
+                        /* Store 5th op at 6th op */
+                        if(op6alet)
+                            regs->ar[r3] = op6alet;
+                        vstore4(op5, op6addr, op6alet ? r3 : 0, regs);
+
+                        /* Store 3th op at 4th op */
+                        if(op4alet)
+                            regs->ar[r3] = op4alet;
+                        vstore4(op3, op4addr, op4alet ? r3 : 0, regs);
+
+                        /* Store 1st op at 2nd op */
+                        vstore4(regs->gpr[r1+1], effective_addr2, b2, regs);
+
+                        regs->psw.cc = 0;
+                    }
+                    else
+                    {
+                        regs->gpr[r1] = op2;
+                        regs->psw.cc = 1;
+                    }
+                }
+                break;
+
+
+            case PLO_CSDSTG:
+                {
+                U64 op1c,
+                    op1r,
+                    op2,
+                    op3,
+                    op5;
+                U32 op4alet = 0,
+                    op4addr,
+                    op6alet = 0,
+                    op6addr;
+
+                    DW_CHECK(effective_addr2, regs);
+                    DW_CHECK(effective_addr4, regs);
+
+                    op1c = vfetch8(effective_addr4 + 8, b4, regs);
+                    op2 = vfetch8(effective_addr2, b2, regs);
+
+                    if(op1c == op2)
+                    {
+                        op1r = vfetch8(effective_addr4 + 24, b4, regs);
+                        op3 = vfetch8(effective_addr4 + 56, b4, regs);
+                        op5 = vfetch8(effective_addr4 + 88, b4, regs);
+
+                        /* Verify access to 2nd operand */
+                        validate_operand (effective_addr2, b2, 8-1,
+                            ACCTYPE_WRITE, regs);
+
+                        /* When in ar mode, ar3 is used to access the 
+                           operand. The alet is fetched from the pl */
+                        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+                        {
+                            op4alet = vfetch4(effective_addr4 + 68, b4, regs);
+                            op6alet = vfetch4(effective_addr4 + 100, b4, regs);
+                            if(op4alet || op6alet)
+                            {
+                                if(r3 == 0)
+                                    program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
+                                regs->ar[r3] = op4alet;
+                            }
+                        }
+
+                        /* Load address of operand 4 */
+                        op4addr = vfetch4(effective_addr4 + 76, b4, regs);
+                        op4addr &= ADDRESS_MAXWRAP(regs);
+                        DW_CHECK(op4addr, regs);
+
+                        /* Load address of operand 6 */
+                        op6addr = vfetch4(effective_addr4 + 108, b4, regs);
+                        op6addr &= ADDRESS_MAXWRAP(regs);
+                        DW_CHECK(op6addr, regs);
+
+                        /* Verify access to 4th operand */
+                        validate_operand (op4addr, op4alet ? r3 : 0, 8-1,
+                            ACCTYPE_WRITE, regs);
+
+                        /* Store 5th op at 6th op */
+                        if(op6alet)
+                            regs->ar[r3] = op6alet;
+                        vstore8(op5, op6addr, op6alet ? r3 : 0, regs);
+
+                        /* Store 3th op at 4th op */
+                        if(op4alet)
+                            regs->ar[r3] = op4alet;
+                        vstore8(op3, op4addr, op4alet ? r3 : 0, regs);
+
+                        /* Store 1st op replacement at 2nd op */
+                        vstore8(op1r, effective_addr2, b2, regs);
+
+                        regs->psw.cc = 0;
+                    }
+                    else
+                    {
+                        vstore8(op2, effective_addr4 + 8, b4, regs);
+                        regs->psw.cc = 1;
+                    }
+                }
+                break;
+
+
+            case PLO_CSTST:
+                {
+                U32 op2,
+                    op3,
+                    op4alet = 0,
+                    op4addr,
+                    op5,
+                    op6alet = 0,
+                    op6addr,
+                    op7,
+                    op8alet = 0,
+                    op8addr;
+
+                    ODD_CHECK(r1, regs);
+                    FW_CHECK(effective_addr2, regs);
+                    FW_CHECK(effective_addr4, regs);
+
+                    op2 = vfetch4(effective_addr2, b2, regs);
+
+                    if(regs->gpr[r1] == op2)
+                    {
+                        op3 = vfetch4(effective_addr4 + 60, b4, regs);
+                        op5 = vfetch4(effective_addr4 + 92, b4, regs);
+                        op7 = vfetch4(effective_addr4 + 124, b4, regs);
+
+                        /* Verify access to 2nd operand */
+                        validate_operand (effective_addr2, b2, 4-1,
+                            ACCTYPE_WRITE, regs);
+
+                        /* When in ar mode, ar3 is used to access the 
+                           operand. The alet is fetched from the pl */
+                        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+                        {
+                            op4alet = vfetch4(effective_addr4 + 68, b4, regs);
+                            op6alet = vfetch4(effective_addr4 + 100, b4, regs);
+                            op8alet = vfetch4(effective_addr4 + 132, b4, regs);
+                            if(op4alet || op6alet || op8alet)
+                            {
+                                if(r3 == 0)
+                                    program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
+                                regs->ar[r3] = op4alet;
+                            }
+                        }
+
+                        /* Load address of operand 4 */
+                        op4addr = vfetch4(effective_addr4 + 76, b4, regs);
+                        op4addr &= ADDRESS_MAXWRAP(regs);
+                        FW_CHECK(op4addr, regs);
+
+                        /* Load address of operand 6 */
+                        op6addr = vfetch4(effective_addr4 + 108, b4, regs);
+                        op6addr &= ADDRESS_MAXWRAP(regs);
+                        FW_CHECK(op6addr, regs);
+
+                        /* Load address of operand 8 */
+                        op8addr = vfetch4(effective_addr4 + 140, b4, regs);
+                        op8addr &= ADDRESS_MAXWRAP(regs);
+                        FW_CHECK(op8addr, regs);
+
+                        /* Verify access to 4th operand */
+                        validate_operand (op4addr, op4alet ? r3 : 0, 4-1,
+                            ACCTYPE_WRITE, regs);
+
+                        /* Verify access to 6th operand */
+                        if(op6alet)
+                            regs->ar[r3] = op6alet;
+                        validate_operand (op6addr, op6alet ? r3 : 0, 4-1,
+                            ACCTYPE_WRITE, regs);
+
+                        /* Store 7th op at 8th op */
+                        if(op8alet)
+                            regs->ar[r3] = op8alet;
+                        vstore4(op7, op8addr, op8alet ? r3 : 0, regs);
+
+                        /* Store 5th op at 6th op */
+                        if(op6alet)
+                            regs->ar[r3] = op6alet;
+                        vstore4(op5, op6addr, op6alet ? r3 : 0, regs);
+
+                        /* Store 3rd op at 4th op */
+                        if(op4alet)
+                            regs->ar[r3] = op4alet;
+                        vstore4(op3, op4addr, op4alet ? r3 : 0, regs);
+
+                        /* Store 1st op replacement at 2nd op */
+                        vstore4(regs->gpr[r1+1], effective_addr2, b2, regs);
+
+                        regs->psw.cc = 0;
+                    }
+                    else
+                    {
+                        regs->gpr[r1] = op2;
+                        regs->psw.cc = 1;
+                    }
+                }
+                break;
+
+
+            case PLO_CSTSTG:
+                {
+                U64 op1c,
+                    op1r,
+                    op2,
+                    op3,
+                    op5,
+                    op7;
+                U32 op4alet = 0,
+                    op4addr,
+                    op6alet = 0,
+                    op6addr,
+                    op8alet = 0,
+                    op8addr;
+
+                    DW_CHECK(effective_addr2, regs);
+                    DW_CHECK(effective_addr4, regs);
+
+                    op1c = vfetch8(effective_addr4 + 8, b4, regs);
+                    op2 = vfetch8(effective_addr2, b2, regs);
+
+                    if(op1c == op2)
+                    {
+                        op1r = vfetch8(effective_addr4 + 24, b4, regs);
+                        op3 = vfetch8(effective_addr4 + 56, b4, regs);
+                        op5 = vfetch8(effective_addr4 + 88, b4, regs);
+                        op7 = vfetch8(effective_addr4 + 120, b4, regs);
+
+                        /* Verify access to 2nd operand */
+                        validate_operand (effective_addr2, b2, 8-1,
+                            ACCTYPE_WRITE, regs);
+
+                        /* When in ar mode, ar3 is used to access the 
+                           operand. The alet is fetched from the pl */
+                        if(ACCESS_REGISTER_MODE(&(regs->psw)))
+                        {
+                            op4alet = vfetch4(effective_addr4 + 68, b4, regs);
+                            op6alet = vfetch4(effective_addr4 + 100, b4, regs);
+                            op8alet = vfetch4(effective_addr4 + 132, b4, regs);
+                            if(op4alet || op6alet || op8alet)
+                            {
+                                if(r3 == 0)
+                                    program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
+                                regs->ar[r3] = op4alet;
+                            }
+                        }
+
+                        /* Load address of operand 4 */
+                        op4addr = vfetch4(effective_addr4 + 76, b4, regs);
+                        op4addr &= ADDRESS_MAXWRAP(regs);
+                        DW_CHECK(op4addr, regs);
+
+                        /* Load address of operand 6 */
+                        op6addr = vfetch4(effective_addr4 + 108, b4, regs);
+                        op6addr &= ADDRESS_MAXWRAP(regs);
+                        DW_CHECK(op6addr, regs);
+
+                        /* Load address of operand 8 */
+                        op8addr = vfetch4(effective_addr4 + 140, b4, regs);
+                        op8addr &= ADDRESS_MAXWRAP(regs);
+                        DW_CHECK(op8addr, regs);
+
+                        /* Verify access to 4th operand */
+                        validate_operand (op4addr, op4alet ? r3 : 0, 8-1,
+                            ACCTYPE_WRITE, regs);
+
+                        /* Verify access to 6th operand */
+                        if(op6alet)
+                            regs->ar[r3] = op6alet;
+                        validate_operand (op6addr, op6alet ? r3 : 0, 8-1,
+                            ACCTYPE_WRITE, regs);
+
+                        /* Store 7th op at 8th op */
+                        if(op8alet)
+                            regs->ar[r3] = op8alet;
+                        vstore8(op7, op8addr, op8alet ? r3 : 0, regs);
+
+                        /* Store 5th op at 6th op */
+                        if(op6alet)
+                            regs->ar[r3] = op6alet;
+                        vstore8(op5, op6addr, op6alet ? r3 : 0, regs);
+                
+                        /* Store 3th op at 4th op */
+                        if(op4alet)
+                            regs->ar[r3] = op4alet;
+                        vstore8(op3, op4addr, op4alet ? r3 : 0, regs);
+
+                        /* Store 1st op replacement value at 2nd op */
+                        vstore8(op1r, effective_addr2, b2, regs);
+
+                        regs->psw.cc = 0;
+                    }
+                    else
+                    {
+                        vstore8(op2, effective_addr4 + 8, b4, regs);
+                        regs->psw.cc = 1;
+                    }
+                }
+                break;
 
             default:
-                program_check(regs, PGM_SPECIFICATION_EXCEPTION);
+                program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
                 
         }
 
@@ -3578,7 +4193,7 @@ BYTE    termchar;                       /* Terminating character     */
 
     /* Program check if bits 0-23 of register 0 not zero */
     if ((regs->gpr[0] & 0xFFFFFF00) != 0)
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Load string terminating character from register 0 bits 24-31 */
     termchar = regs->gpr[0] & 0xFF;
@@ -3705,7 +4320,7 @@ int     h, i, j, m;                     /* Integer work areas        */
     {
         regs->psw.cc = 3;
         if ( regs->psw.fomask )
-            program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+            program_interrupt (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
         return;
     }
 
@@ -3781,7 +4396,7 @@ int     i, j;                           /* Integer work areas        */
     {
         regs->psw.cc = 3;
         if ( regs->psw.fomask )
-            program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+            program_interrupt (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
         return;
     }
 
@@ -4043,6 +4658,11 @@ U64     dreg;                           /* Double word work area     */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(regs->sie_state && (regs->siebk->ic[2] & SIE_IC2_STCK))
+        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
     /* Perform serialization before fetching clock */
     PERFORM_SERIALIZATION (regs);
 
@@ -4054,7 +4674,7 @@ U64     dreg;                           /* Double word work area     */
     obtain_lock (&sysblk.todlock);
 
     /* Retrieve the TOD clock value and shift out the epoch */
-    dreg = (sysblk.todclk << 8) | regs->cpuad;
+    dreg = ((sysblk.todclk + regs->todoffset) << 8) | regs->cpuad;
 
     /* Release the TOD clock update lock */
     release_lock (&sysblk.todlock);
@@ -4084,6 +4704,11 @@ U64     dreg;                           /* Double word work area     */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(regs->sie_state && (regs->siebk->ic[2] & SIE_IC2_STCK))
+        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
     /* Perform serialization before fetching clock */
     PERFORM_SERIALIZATION (regs);
 
@@ -4095,7 +4720,7 @@ U64     dreg;                           /* Double word work area     */
     obtain_lock (&sysblk.todlock);
 
     /* Retrieve the TOD epoch, clock bits 0-51, and 4 zeroes */
-    dreg = sysblk.todclk;
+    dreg = (sysblk.todclk + regs->todoffset);
 
     /* Release the TOD clock update lock */
     release_lock (&sysblk.todlock);
@@ -4197,7 +4822,7 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
-        program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+        program_interrupt (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
 }
 
 
@@ -4224,7 +4849,7 @@ U32     n;                              /* 32-bit operand values     */
 
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
-        program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+        program_interrupt (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
 
 }
 
@@ -4256,7 +4881,7 @@ U32     n;                              /* 32-bit operand values     */
 
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
-        program_check (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+        program_interrupt (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
 
 }
 
@@ -4308,18 +4933,34 @@ void zz_supervisor_call (BYTE inst[], int execflag, REGS *regs)
 {
 BYTE    i;                              /* Instruction byte 1        */
 PSA    *psa;                            /* -> prefixed storage area  */
+U32     pxr;                            /* prefix                    */
 int     rc;                             /* Return code               */
 
     RR_SVC(inst, execflag, regs, i);
 
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(regs->sie_state &&
+      ( (regs->siebk->svc_ctl[0] & SIE_SVC0_ALL)
+        || ( (regs->siebk->svc_ctl[0] & SIE_SVC0_1N) && 
+              regs->siebk->svc_ctl[1] == i)
+        || ( (regs->siebk->svc_ctl[0] & SIE_SVC0_2N) && 
+              regs->siebk->svc_ctl[2] == i)
+        || ( (regs->siebk->svc_ctl[0] & SIE_SVC0_3N) && 
+              regs->siebk->svc_ctl[3] == i) ))
+        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+    pxr = regs->pxr;
+    SIE_TRANSLATE(&pxr, ACCTYPE_WRITE, regs);
+
     /* Set the main storage reference and change bits */
-    STORAGE_KEY(regs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(pxr) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Use the I-byte to set the SVC interruption code */
     regs->psw.intcode = i;
 
     /* Point to PSA in main storage */
-    psa = (PSA*)(sysblk.mainstor + regs->pxr);
+    psa = (PSA*)(sysblk.mainstor + pxr);
 
     /* For ECMODE, store SVC interrupt code at PSA+X'88' */
     if ( regs->psw.ecmode )
@@ -4331,12 +4972,12 @@ int     rc;                             /* Return code               */
     }
 
     /* Store current PSW at PSA+X'20' */
-    store_psw ( &(regs->psw), psa->svcold );
+    store_psw ( regs, psa->svcold );
 
     /* Load new PSW from PSA+X'60' */
-    rc = load_psw ( &(regs->psw), psa->svcnew );
+    rc = load_psw ( regs, psa->svcnew );
     if ( rc )
-        program_check (regs, rc);
+        program_interrupt (regs, rc);
 
     /* Perform serialization and checkpoint synchronization */
     PERFORM_SERIALIZATION (regs);
@@ -4376,6 +5017,12 @@ BYTE    obyte;                          /* Operand byte              */
 
     /* Perform serialization after completing operation */
     PERFORM_SERIALIZATION (regs);
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_TS1))
+        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
 }
 
 
@@ -4661,7 +5308,7 @@ int     ar1 = 4;                        /* Access register number    */
 
     /* Check GR4, GR5 doubleword alligned */
     if ( regs->gpr[4] & 0x00000007 || regs->gpr[5] & 0x00000007 )
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Loop until break */
     for (;;)

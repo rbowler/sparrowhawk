@@ -1,6 +1,8 @@
 /* CONFIG.C     (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 Configuration Builder                        */
 
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+
 /*-------------------------------------------------------------------*/
 /* This module builds the configuration tables for the Hercules      */
 /* ESA/390 emulator.  It reads information about the processors      */
@@ -15,6 +17,7 @@
 /*      TOD clock offset contributed by Jay Maynard                  */
 /*      Dynamic device attach/detach by Jan Jaeger                   */
 /*      OSTAILOR parameter by Jay Maynard                            */
+/*      PANRATE parameter by Reed H. Petty                           */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -182,6 +185,7 @@ BYTE   *ssysepoch;                      /* -> System epoch           */
 BYTE   *stzoffset;                      /* -> System timezone offset */
 BYTE   *stoddrag;                       /* -> TOD clock drag factor  */
 BYTE   *sostailor;                      /* -> OS to tailor system to */
+BYTE   *spanrate;                       /* -> Panel refresh rate     */
 BYTE    loadparm[8];                    /* Load parameter (EBCDIC)   */
 BYTE    version = 0x00;                 /* CPU version code          */
 U32     serial;                         /* CPU serial number         */
@@ -195,6 +199,7 @@ S32     sysepoch;                       /* System epoch year         */
 S32     tzoffset;                       /* System timezone offset    */
 int     toddrag;                        /* TOD clock drag factor     */
 U64     ostailor;                       /* OS to tailor system to    */
+int     panrate;                        /* Panel refresh rate        */
 BYTE   *sdevnum;                        /* -> Device number string   */
 BYTE   *sdevtype;                       /* -> Device type string     */
 U16     devnum;                         /* Device number             */
@@ -224,6 +229,7 @@ BYTE    c;                              /* Work area for sscanf      */
     tzoffset = 0;
     toddrag = 1;
     ostailor = OS_NONE;
+    panrate = PANEL_REFRESH_RATE_SLOW;
 
     /* Read records from the configuration file */
     for (scount = 0; ; scount++)
@@ -255,6 +261,7 @@ BYTE    c;                              /* Work area for sscanf      */
         stzoffset = NULL;
         stoddrag = NULL;
         sostailor = NULL;
+        spanrate = NULL;
 
         /* Check for old-style CPU statement */
         if (scount == 0 && addargc == 5 && strlen(keyword) == 6
@@ -316,6 +323,12 @@ BYTE    c;                              /* Work area for sscanf      */
                 stoddrag = operand;
             }
 #endif /*TODCLOCK_DRAG_FACTOR*/
+#ifdef PANEL_REFRESH_RATE
+            else if (strcasecmp (keyword, "panrate") == 0)
+            {
+                spanrate = operand;
+            }
+#endif /*PANEL_REFRESH_RATE*/
             else if (strcasecmp (keyword, "ostailor") == 0)
             {
                 sostailor = operand;
@@ -431,13 +444,15 @@ BYTE    c;                              /* Work area for sscanf      */
             if (sscanf(snumvec, "%hu%c", &numvec, &c) != 1
                 || numvec > MAX_CPU_ENGINES)
             {
-                logmsg( "HHC018I Error in %s line %d: "
+                fprintf (stderr,
+                        "HHC018I Error in %s line %d: "
                         "Invalid number of VFs %s\n",
                         fname, stmt, snumvec);
                 exit(1);
             }
 #else /*!FEATURE_VECTOR_FACILITY*/
-            logmsg("HHC019I Vector Facility Support not configured\n");
+            fprintf (stderr,
+                    "HHC019I Vector Facility Support not configured\n");
             exit(1);
 #endif /*!FEATURE_VECTOR_FACILITY*/
         }
@@ -506,6 +521,33 @@ BYTE    c;                              /* Work area for sscanf      */
         }
 #endif /*TODCLOCK_DRAG_FACTOR*/
 
+#ifdef PANEL_REFRESH_RATE
+        /* Parse panel refresh rate operand */
+        if (spanrate != NULL)
+        {
+            switch (toupper((char)spanrate[0])) 
+            {
+                case 'F': /* fast */
+                    panrate = PANEL_REFRESH_RATE_FAST;
+                    break;
+                case 'S': /* slow */
+                    panrate = PANEL_REFRESH_RATE_SLOW;
+                    break;
+                default:
+                    if (sscanf(spanrate, "%u%c", &panrate, &c) != 1
+                        || panrate < (1000/CLK_TCK) || panrate > 5000)
+                    {
+                        fprintf (stderr,
+                            "HHC045I Error in %s line %d: "
+                            "Invalid panel refresh rate %s\n",
+                            fname, stmt, spanrate);
+                        exit(1);
+                    }
+            }
+        }
+#endif /*PANEL_REFRESH_RATE*/
+
+
         /* Parse OS tailoring operand */
         if (sostailor != NULL)
         {
@@ -539,17 +581,6 @@ BYTE    c;                              /* Work area for sscanf      */
     /* Direct logmsg output to stderr during initialization */
     sysblk.msgpipew = stderr;
 
-    /* Initialize the CPU registers */
-    for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
-    {
-        /* Initialize the processor address register for STAP */
-        sysblk.regs[cpu].cpuad = cpu;
-
-        /* Perform initial CPU reset */
-        initial_cpu_reset (sysblk.regs + cpu);
-
-    } /* end for(cpu) */
-
     /* Obtain main storage */
     sysblk.mainsize = mainsize * 1024 * 1024;
     sysblk.mainstor = malloc(sysblk.mainsize);
@@ -573,8 +604,8 @@ BYTE    c;                              /* Work area for sscanf      */
 
 #if 0   /*DEBUG-JJ-20/03/2000*/
     /* Mark selected frames invalid for debugging purposes */
-    for (i = 64 ; i < (sysblk.mainsize / STORAGE_KEY_PAGESIZE); i += 2)
-        if (i < (sysblk.mainsize / STORAGE_KEY_PAGESIZE) - 64)
+    for (i = 64 ; i < (regs->mainsize / STORAGE_KEY_PAGESIZE); i += 2)
+        if (i < (regs->mainsize / STORAGE_KEY_PAGESIZE) - 64)
             sysblk.storkeys[i] = STORKEY_BADFRM;
         else
             sysblk.storkeys[i++] = STORKEY_BADFRM;
@@ -640,11 +671,44 @@ BYTE    c;                              /* Work area for sscanf      */
     /* Convert the TOD clock offset to microseconds */
     sysblk.todoffset *= 1000000;
 
+    /* Convert for the 'hercules internal' format */
+    sysblk.todoffset <<= 4;
+
     /* Set the TOD clock drag factor */
     sysblk.toddrag = toddrag;
 
     /* Set the system OS tailoring value */
     sysblk.pgminttr = ostailor;
+
+    /* Set the panel refresh rate */
+    sysblk.panrate = panrate;
+
+    /* Initialize the CPU registers */
+    for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
+    {
+        /* Initialize the processor address register for STAP */
+        sysblk.regs[cpu].cpuad = cpu;
+
+        /* Initialize storage size (SIE compat) */
+        sysblk.regs[cpu].mainsize = sysblk.mainsize;
+
+        /* Initialize the TOD offset field for this CPU */
+        sysblk.regs[cpu].todoffset = sysblk.todoffset;
+
+        /* Perform initial CPU reset */
+        initial_cpu_reset (sysblk.regs + cpu);
+
+#if defined(FEATURE_VECTOR_FACILITY)
+        sysblk.regs[cpu].vf = &sysblk.vf[cpu];
+#endif /*defined(FEATURE_VECTOR_FACILITY)*/
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+        sysblk.sie_regs[cpu] = sysblk.regs[cpu];
+        sysblk.sie_regs[cpu].hostregs = &sysblk.regs[cpu];
+        sysblk.regs[cpu].guestregs = &sysblk.sie_regs[cpu];
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+    } /* end for(cpu) */
 
     /* Parse the device configuration statements */
     while(1)
@@ -719,7 +783,7 @@ BYTE    c;                              /* Work area for sscanf      */
 
 #ifdef FEATURE_VECTOR_FACILITY
     for(i = 0; i < numvec && i < numcpu; i++)
-        sysblk.regs[i].vf.online = 1;
+        sysblk.regs[i].vf->online = 1;
 #endif /*FEATURE_VECTOR_FACILITY*/
 
     for(i = 0; i < numcpu; i++)
@@ -738,7 +802,7 @@ int configure_cpu(REGS *regs)
     {
         regs->cpuonline = 0;
 #ifdef FEATURE_VECTOR_FACILITY
-        regs->vf.online = 0;
+        regs->vf->online = 0;
 #endif /*FEATURE_VECTOR_FACILITY*/
         logmsg( "HHC034I Cannot create CPU%4.4X thread: %s\n",
                 regs->cpuad, strerror(errno));

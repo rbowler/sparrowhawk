@@ -97,7 +97,7 @@ int             highcyl;                /* CKD header high cyl number*/
         highcyl = end;
 
     /* Create the DASD image file */
-    fd = open (fname, O_WRONLY | O_CREAT | O_EXCL,
+    fd = open (fname, O_WRONLY | O_CREAT | O_EXCL | O_BINARY,
                 S_IRUSR | S_IWUSR | S_IRGRP);
     if (fd < 0)
     {
@@ -428,7 +428,7 @@ U32             maxsect;                /* Maximum sector count      */
             devtype, volser, sectors, sectsz);
 
     /* Create the DASD image file */
-    fd = open (fname, O_WRONLY | O_CREAT | O_EXCL,
+    fd = open (fname, O_WRONLY | O_CREAT | O_EXCL | O_BINARY,
                 S_IRUSR | S_IWUSR | S_IRGRP);
     if (fd < 0)
     {

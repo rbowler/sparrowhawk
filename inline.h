@@ -1,5 +1,9 @@
 
 
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+
+/* Storage protection override fix               Jan Jaeger 31/08/00 */
+
 /*-------------------------------------------------------------------*/
 /* Add two signed fullwords giving a signed fullword result          */
 /* and return condition code                                         */
@@ -138,6 +142,15 @@ static inline int is_fetch_protected (U32 addr, BYTE skey, BYTE akey,
         return 0;
 #endif /*FEATURE_FETCH_PROTECTION_OVERRIDE*/
 
+#ifdef FEATURE_STORAGE_PROTECTION_OVERRIDE
+    /* [3.4.1.1] Storage protection override allows access to
+       locations with storage key 9, regardless of the access key,
+       provided that CR0 bit 7 is set */
+    if ((skey & STORKEY_KEY) == 0x90
+        && (regs->cr[0] & CR0_STORE_OVRD))
+        return 0;
+#endif /*FEATURE_STORAGE_PROTECTION_OVERRIDE*/
+
     /* [3.4.1] Fetch protection prohibits fetch if storage key fetch
        protect bit is on and access key does not match storage key */
     if ((skey & STORKEY_FETCH)
@@ -171,6 +184,11 @@ static inline int is_store_protected (U32 addr, BYTE skey, BYTE akey,
        regardless of the access key and storage key */
     if (addr < 512
         && (regs->cr[0] & CR0_LOW_PROT)
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+        /* Host low address protection is not applied to guest
+           references to guest storage */
+        && !regs->sie_active
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
         && private == 0)
         return 1;
 
@@ -186,7 +204,7 @@ static inline int is_store_protected (U32 addr, BYTE skey, BYTE akey,
         return 0;
 
 #ifdef FEATURE_STORAGE_PROTECTION_OVERRIDE
-    /* [3.4.1.1] Storage protection override allows stores into
+    /* [3.4.1.1] Storage protection override allows access to
        locations with storage key 9, regardless of the access key,
        provided that CR0 bit 7 is set */
     if ((skey & STORKEY_KEY) == 0x90
@@ -212,16 +230,26 @@ static inline int is_store_protected (U32 addr, BYTE skey, BYTE akey,
 /* other CPUs.  The fullword is first fetched as an integer, then    */
 /* the bytes are reversed into host byte order if necessary.         */
 /*-------------------------------------------------------------------*/
-static inline U32 fetch_fullword_absolute (U32 addr)
+static inline U32 fetch_fullword_absolute (U32 addr, REGS *regs)
 {
 U32     i;
 
-    /* Set the main storage reference bit */
-    STORAGE_KEY(addr) |= STORKEY_REF;
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(!regs->sie_state || regs->sie_pref)
+    {
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+        /* Set the main storage reference bit */
+        STORAGE_KEY(addr) |= STORKEY_REF;
 
-    /* Fetch the fullword from absolute storage */
-    i = *((U32*)(sysblk.mainstor + addr));
-    return ntohl(i);
+        /* Fetch the fullword from absolute storage */
+        i = *((U32*)(sysblk.mainstor + addr));
+        return ntohl(i);
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    }
+    else
+        return vfetch4(regs->sie_mso + addr, USE_PRIMARY_SPACE, regs->hostregs);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
 } /* end function fetch_fullword_absolute */
 
 
@@ -233,16 +261,26 @@ U32     i;
 /* other CPUs.  The halfword is first fetched as an integer, then    */
 /* the bytes are reversed into host byte order if necessary.         */
 /*-------------------------------------------------------------------*/
-static inline U16 fetch_halfword_absolute (U32 addr)
+static inline U16 fetch_halfword_absolute (U32 addr, REGS *regs)
 {
 U16     i;
 
-    /* Set the main storage reference bit */
-    STORAGE_KEY(addr) |= STORKEY_REF;
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(!regs->sie_state || regs->sie_pref)
+    {
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+        /* Set the main storage reference bit */
+        STORAGE_KEY(addr) |= STORKEY_REF;
 
-    /* Fetch the fullword from absolute storage */
-    i = *((U16*)(sysblk.mainstor + addr));
-    return ntohs(i);
+        /* Fetch the fullword from absolute storage */
+        i = *((U16*)(sysblk.mainstor + addr));
+        return ntohs(i);
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    }
+    else
+        return vfetch2(regs->sie_mso + addr, USE_PRIMARY_SPACE, regs->hostregs);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
 } /* end function fetch_fullword_absolute */
 
 
@@ -252,16 +290,26 @@ U16     i;
 /* other CPUs.  The bytes of the word are reversed if necessary      */
 /* and the word is then stored as an integer in absolute storage.    */
 /*-------------------------------------------------------------------*/
-static inline void store_fullword_absolute (U32 value, U32 addr)
+static inline void store_fullword_absolute (U32 value, U32 addr, REGS *regs)
 {
 U32     i;
 
-    /* Set the main storage reference and change bits */
-    STORAGE_KEY(addr) |= (STORKEY_REF | STORKEY_CHANGE);
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(!regs->sie_state || regs->sie_pref)
+    {
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+        /* Set the main storage reference and change bits */
+        STORAGE_KEY(addr) |= (STORKEY_REF | STORKEY_CHANGE);
 
-    /* Store the fullword into absolute storage */
-    i = htonl(value);
-    *((U32*)(sysblk.mainstor + addr)) = i;
+        /* Store the fullword into absolute storage */
+        i = htonl(value);
+        *((U32*)(sysblk.mainstor + addr)) = i;
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    }
+    else
+        vstore4(value, regs->sie_mso + addr, USE_PRIMARY_SPACE, regs->hostregs);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
 } /* end function store_fullword_absolute */
 
 
@@ -324,14 +372,14 @@ U32     ssaste5;                        /* Subspace ASTE word 5      */
     ducto = APPLY_PREFIXING (ducto, regs->pxr);
 
     /* Program check if DUCT origin address is invalid */
-    if (ducto >= sysblk.mainsize)
-        program_check (regs, PGM_ADDRESSING_EXCEPTION);
+    if (ducto >= regs->mainsize)
+        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Fetch DUCT words 0, 1, and 3 from absolute storage
        (note: the DUCT cannot cross a page boundary) */
-    duct0 = fetch_fullword_absolute (ducto);
-    duct1 = fetch_fullword_absolute (ducto+4);
-    duct3 = fetch_fullword_absolute (ducto+12);
+    duct0 = fetch_fullword_absolute (ducto, regs);
+    duct1 = fetch_fullword_absolute (ducto+4, regs);
+    duct3 = fetch_fullword_absolute (ducto+12, regs);
 
     /* Return the original STD unchanged if the dispatchable unit is
        not subspace active or if the ASTE obtained by ASN translation
@@ -345,20 +393,20 @@ U32     ssaste5;                        /* Subspace ASTE word 5      */
     ssasteo = APPLY_PREFIXING (ssasteo, regs->pxr);
 
     /* Program check if ASTE origin address is invalid */
-    if (ssasteo >= sysblk.mainsize)
-        program_check (regs, PGM_ADDRESSING_EXCEPTION);
+    if (ssasteo >= regs->mainsize)
+        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Fetch subspace ASTE words 0, 2, and 5 from absolute storage
        (note: the ASTE cannot cross a page boundary) */
-    ssaste0 = fetch_fullword_absolute (ssasteo);
-    ssaste2 = fetch_fullword_absolute (ssasteo+8);
-    ssaste5 = fetch_fullword_absolute (ssasteo+20);
+    ssaste0 = fetch_fullword_absolute (ssasteo, regs);
+    ssaste2 = fetch_fullword_absolute (ssasteo+8, regs);
+    ssaste5 = fetch_fullword_absolute (ssasteo+20, regs);
 
     /* ASTE validity exception if subspace ASTE invalid bit is one */
     if (ssaste0 & ASTE0_INVALID)
     {
         if (xcode == NULL)
-            program_check (regs, PGM_ASTE_VALIDITY_EXCEPTION);
+            program_interrupt (regs, PGM_ASTE_VALIDITY_EXCEPTION);
         else
             *xcode = PGM_ASTE_VALIDITY_EXCEPTION;
         return 0;
@@ -369,7 +417,7 @@ U32     ssaste5;                        /* Subspace ASTE word 5      */
     if ((ssaste5 & ASTE5_ASTESN) != (duct3 & DUCT3_SSASTESN))
     {
         if (xcode == NULL)
-            program_check (regs, PGM_ASTE_SEQUENCE_EXCEPTION);
+            program_interrupt (regs, PGM_ASTE_SEQUENCE_EXCEPTION);
         else
             *xcode = PGM_ASTE_SEQUENCE_EXCEPTION;
         return 0;

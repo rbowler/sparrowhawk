@@ -1,5 +1,7 @@
 /* OPCODE.C     Instruction decoding functions - 02/07/00 Jan Jaeger */
 
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+
 #include "hercules.h"
 
 #include "opcode.h"
@@ -9,6 +11,7 @@
  #define zz_halt_subchannel                     operation_exception
  #define zz_modify_subchannel                   operation_exception
  #define zz_resume_subchannel                   operation_exception
+ #define zz_set_address_limit                   operation_exception
  #define zz_set_channel_monitor                 operation_exception
  #define zz_start_subchannel                    operation_exception
  #define zz_store_channel_path_status           operation_exception
@@ -19,7 +22,7 @@
 #endif /*!defined(FEATURE_CHANNEL_SUBSYSTEM)*/
 
 
-#if !defined(FEATURE_S370_CHANNEL)
+#if !defined(FEATURE_S370_CHANNEL) && !defined(FEATURE_INTERPRETIVE_EXECUTION)
  #define zz_s370_startio                        operation_exception
  #define zz_s370_testio                         operation_exception
  #define zz_s370_haltio                         operation_exception
@@ -94,7 +97,7 @@
 #endif /*!defined(FEATURE_MOVE_PAGE_FACILITY_2)*/
 
 
-#if !defined(FEATURE_BASIC_STORAGE_KEYS)
+#if !defined(FEATURE_BASIC_STORAGE_KEYS) && !defined(FEATURE_INTERPRETIVE_EXECUTION)
  #define zz_insert_storage_key                  operation_exception
  #define zz_set_storage_key                     operation_exception
  #define zz_reset_reference_bit                 operation_exception
@@ -217,6 +220,25 @@
 #if !defined(FEATURE_CMPSC)
  #define zz_compression_call			operation_exception
 #endif /*!defined(FEATURE_CMPSC)*/
+
+
+#if !defined(FEATURE_LOCK_PAGE)
+ #define zz_lock_page                           operation_exception
+#endif /*!defined(FEATURE_LOCK_PAGE)*/
+
+
+#if !defined(FEATURE_SQUARE_ROOT)
+ #define zz_squareroot_float_long_reg           operation_exception
+ #define zz_squareroot_float_short_reg          operation_exception
+#endif /*!defined(FEATURE_SQUARE_ROOT)*/
+
+
+#if !defined(FEATURE_INTERPRETIVE_EXECUTION)
+ #define zz_start_interpretive_execution        operation_exception
+ #define zz_reset_channel_path                  operation_exception
+ #define zz_s370_connect_channel_set            operation_exception
+ #define zz_s370_disconnect_channel_set         operation_exception
+#endif /*!defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
 
 zz_func opcode_table[256] = {
@@ -757,8 +779,8 @@ zz_func opcode_a7xx[16] = {
 
 
 zz_func opcode_b2xx[256] = {
- /*B200*/       &operation_exception,            
- /*B201*/       &operation_exception,            
+ /*B200*/       &zz_s370_connect_channel_set,           /* CONCS     */
+ /*B201*/       &zz_s370_disconnect_channel_set,        /* DISCS     */
  /*B202*/       &zz_store_cpu_id,                       /* STIDP     */
  /*B203*/       &zz_s370_store_channelid,               /* STIDC     */
  /*B204*/       &zz_set_clock,                          /* SCK       */
@@ -777,7 +799,7 @@ zz_func opcode_b2xx[256] = {
  /*B211*/       &zz_store_prefix,                       /* STPX      */
  /*B212*/       &zz_store_cpu_address,                  /* STAP      */
  /*B213*/       &zz_reset_reference_bit,                /* RRB       */
- /*B214*/       &operation_exception,            
+ /*B214*/       &zz_start_interpretive_execution,       /* SIE       */
  /*B215*/       &operation_exception,            
  /*B216*/       &operation_exception,            
  /*B217*/       &operation_exception,            
@@ -812,11 +834,11 @@ zz_func opcode_b2xx[256] = {
  /*B234*/       &zz_store_subchannel,                   /* STSCH     */
  /*B235*/       &zz_test_subchannel,                    /* TSCH      */
  /*B236*/       &zz_test_pending_interruption,          /* TPI       */
- /*B237*/       &operation_exception,
+ /*B237*/       &zz_set_address_limit,                  /* SAL       */
  /*B238*/       &zz_resume_subchannel,                  /* RSCH      */
  /*B239*/       &zz_store_channel_report_word,          /* STCRW     */
  /*B23A*/       &zz_store_channel_path_status,          /* STCPS     */
- /*B23B*/       &operation_exception,
+ /*B23B*/       &zz_reset_channel_path,                 /* RCHP      */
  /*B23C*/       &zz_set_channel_monitor,                /* SCHM      */
  /*B23D*/       &operation_exception,
  /*B23E*/       &operation_exception,
@@ -825,8 +847,8 @@ zz_func opcode_b2xx[256] = {
  /*B241*/       &zz_checksum,                           /* CKSM      */
  /*B242*/       &operation_exception,            
  /*B243*/       &operation_exception,            
- /*B244*/       &operation_exception,            
- /*B245*/       &operation_exception,            
+ /*B244*/       &zz_squareroot_float_long_reg,          /* SQDR      */
+ /*B245*/       &zz_squareroot_float_short_reg,         /* SQER      */
  /*B246*/       &zz_store_using_real_address,           /* STURA     */
  /*B247*/       &zz_modify_stacked_state,               /* MSTA      */
  /*B248*/       &zz_purge_alb,                          /* PALB      */
@@ -855,7 +877,7 @@ zz_func opcode_b2xx[256] = {
  /*B25F*/       &operation_exception,            
  /*B260*/       &operation_exception,            
  /*B261*/       &operation_exception,            
- /*B262*/       &operation_exception,            
+ /*B262*/       &zz_lock_page,                          /* Lock Page */
  /*B263*/       &zz_compression_call,			/* CMPSC     */
  /*B264*/       &operation_exception,            
  /*B265*/       &operation_exception,            
@@ -2380,14 +2402,21 @@ void operation_exception (BYTE inst[], int execflag, REGS *regs)
         regs->psw.ia += regs->psw.ilc;
         regs->psw.ia &= ADDRESS_MAXWRAP(regs);
     }
-    program_check(regs, PGM_OPERATION_EXCEPTION);
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    /* The B2XX extended opcodes which are not defined are always
+       intercepted by SIE when issued in supervisor state */
+    if(!regs->psw.prob && inst[0] == 0xB2)
+        SIE_INTERCEPT(regs);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/       
+
+    program_interrupt(regs, PGM_OPERATION_EXCEPTION);
 }
 
 
 void dummy_instruction (BYTE inst[], int execflag, REGS *regs)
 {
-    logmsg("Dummy instruction: ");
-    display_inst (regs, regs->inst);
+    logmsg("Dummy instruction: "); display_inst (regs, inst);
 
     if( !execflag )
     {
@@ -2396,4 +2425,5 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs)
         regs->psw.ia += regs->psw.ilc;
         regs->psw.ia &= ADDRESS_MAXWRAP(regs);
     }
+
 }

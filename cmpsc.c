@@ -265,7 +265,7 @@ cmpcompress (int r1, int r2, REGS * regs)
 
 	case CMPMORE_260_CHILDREN:
 	  /* More than 260 children found */
-	  program_check (regs, PGM_DATA_EXCEPTION);
+	  program_interrupt (regs, PGM_DATA_EXCEPTION);
 	  return;
 
 	case CMPEND_SOURCE:
@@ -385,7 +385,7 @@ zz_compression_call (BYTE inst[], int execflag, REGS * regs)
      check if compression-data symbol size is valid */
   if (CMPODD (r1) || CMPODD (r2) || !cdss || cdss > 5)
     {
-      program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+      program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
       return;
     }
 
@@ -652,7 +652,7 @@ display_inst (regs, regs->inst);
      size is valid */
   if (CMPODD (r1) || CMPODD (r2) || !cdss || cdss > 5)
     {
-      program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+      program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
       return;
     }
 

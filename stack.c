@@ -1,6 +1,8 @@
 /* STACK.C      (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 Linkage Stack Operations                     */
 
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+
 /*-------------------------------------------------------------------*/
 /* This module implements the linkage stack functions of ESA/390     */
 /* described in SA22-7201-04 ESA/390 Principles of Operation.        */
@@ -11,9 +13,12 @@
 /* Fix CR15 corruption in form_stack_entry                Jan Jaeger */
 /* Fix nullification in form_stack_entry                  Jan Jaeger */
 /* Fix nullification in unstack_registers                 Jan Jaeger */
+/* Modifications for Interpretive Execution (SIE)         Jan Jaeger */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
+
+#include "opcode.h"
 
 #undef  STACK_DEBUG
 
@@ -50,7 +55,7 @@ U16     xcode;                          /* Exception code            */
     rc = translate_addr (vaddr, 0, regs, ACCTYPE_STACK, &raddr,
                 &xcode, &private, &protect, &stid, NULL, NULL);
     if (rc != 0)
-        program_check (regs, xcode);
+        program_interrupt (regs, xcode);
 
     /* Low-address protection prohibits stores into locations
        0-511 of non-private address spaces if CR0 bit 3 is set */
@@ -63,7 +68,7 @@ U16     xcode;                          /* Exception code            */
         regs->tea = (vaddr & TEA_EFFADDR) | TEA_ST_HOME;
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_check (regs, PGM_PROTECTION_EXCEPTION);
+        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
     }
 
     /* Page protection prohibits all stores into the page */
@@ -73,15 +78,17 @@ U16     xcode;                          /* Exception code            */
         regs->tea = (vaddr & TEA_EFFADDR) | TEA_PROT_AP | TEA_ST_HOME;
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_check (regs, PGM_PROTECTION_EXCEPTION);
+        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
     }
 
     /* Convert real address to absolute address */
     aaddr = APPLY_PREFIXING (raddr, regs->pxr);
 
     /* Program check if absolute address is outside main storage */
-    if (aaddr >= sysblk.mainsize)
-        program_check (regs, PGM_ADDRESSING_EXCEPTION);
+    if (aaddr >= regs->mainsize)
+        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+
+    SIE_TRANSLATE(&aaddr, acctype, regs);
 
     /* Set the reference and change bits in the storage key */
     STORAGE_KEY(aaddr) |= STORKEY_REF;
@@ -128,7 +135,7 @@ int     i;                              /* Array subscript           */
     if ((regs->cr[0] & CR0_ASF) == 0
         || REAL_MODE(&regs->psw)
         || regs->psw.space == 1)
-        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* [5.12.3.1] Locate space for a new linkage stack entry */
 
@@ -153,7 +160,7 @@ int     i;                              /* Array subscript           */
     {
         /* Program check if remaining free space not a multiple of 8 */
         if ((rfs & 0x07) != 0)
-            program_check (regs, PGM_STACK_SPECIFICATION_EXCEPTION);
+            program_interrupt (regs, PGM_STACK_SPECIFICATION_EXCEPTION);
 
         /* Not enough space, so fetch the second word of the
            trailer entry of the current linkage stack section */
@@ -171,7 +178,7 @@ int     i;                              /* Array subscript           */
 
         /* Stack full exception if forward address is not valid */
         if ((fsha & LSTE1_FVALID) == 0)
-            program_check (regs, PGM_STACK_FULL_EXCEPTION);
+            program_interrupt (regs, PGM_STACK_FULL_EXCEPTION);
 
         /* Extract the forward section header address, which points to
            the entry descriptor (words 2-3) of next section's header */
@@ -192,7 +199,7 @@ int     i;                              /* Array subscript           */
            have enough free space to contain the new stack entry */
         rfs = (lsed.rfs[0] << 8) | lsed.rfs[1];
         if (rfs < LSSE_SIZE)
-            program_check (regs, PGM_STACK_SPECIFICATION_EXCEPTION);
+            program_interrupt (regs, PGM_STACK_SPECIFICATION_EXCEPTION);
 
         /* Calculate the virtual address of the new section's header
            entry, which is 8 bytes before the entry descriptor */
@@ -303,7 +310,7 @@ int     i;                              /* Array subscript           */
         abs = abs2;
 
     /* Store the current PSW in bytes 136-143 */
-    store_psw (&regs->psw, sysblk.mainstor+abs);
+    store_psw (regs, sysblk.mainstor+abs);
 
     /* Replace bytes 140-143 by the return address */
     sysblk.mainstor[abs+4] = (retna >> 24) & 0xFF;
@@ -435,11 +442,11 @@ U32     bsea;                           /* Backward stack entry addr */
     if ((regs->cr[0] & CR0_ASF) == 0
         || REAL_MODE(&regs->psw)
         || SECONDARY_SPACE_MODE(&regs->psw))
-        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Special operation exception if home space mode PR instruction */
     if (prinst && HOME_SPACE_MODE(&regs->psw))
-        program_check (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* [5.12.4.1] Locate current entry and process header entry */
 
@@ -463,7 +470,7 @@ U32     bsea;                           /* Backward stack entry addr */
         /* For PR instruction only, generate stack operation exception
            if the unstack suppression bit in the header entry is set */
         if (prinst && (lsedptr->uet & LSED_UET_U))
-            program_check (regs, PGM_STACK_OPERATION_EXCEPTION);
+            program_interrupt (regs, PGM_STACK_OPERATION_EXCEPTION);
 
         /* Calculate the virtual address of the header entry,
            which is 8 bytes before the entry descriptor */
@@ -479,7 +486,7 @@ U32     bsea;                           /* Backward stack entry addr */
 
         /* Stack empty exception if backward address is not valid */
         if ((bsea & LSHE1_BVALID) == 0)
-            program_check (regs, PGM_STACK_EMPTY_EXCEPTION);
+            program_interrupt (regs, PGM_STACK_EMPTY_EXCEPTION);
 
         /* Extract the virtual address of the entry descriptor
            of the last entry in the previous section */
@@ -499,7 +506,7 @@ U32     bsea;                           /* Backward stack entry addr */
 
         /* Stack specification exception if this is also a header */
         if ((lsedptr->uet & LSED_UET_ET) == LSED_UET_HDR)
-            program_check (regs, PGM_STACK_SPECIFICATION_EXCEPTION);
+            program_interrupt (regs, PGM_STACK_SPECIFICATION_EXCEPTION);
 
     } /* end if(LSED_UET_HDR) */
 
@@ -508,12 +515,12 @@ U32     bsea;                           /* Backward stack entry addr */
     /* Stack type exception if this is not a state entry */
     if ((lsedptr->uet & LSED_UET_ET) != LSED_UET_BAKR
         && (lsedptr->uet & LSED_UET_ET) != LSED_UET_PC)
-        program_check (regs, PGM_STACK_TYPE_EXCEPTION);
+        program_interrupt (regs, PGM_STACK_TYPE_EXCEPTION);
 
     /* [5.12.4.3] For PR instruction only, stack operation exception
        if the unstack suppression bit in the state entry is set */
     if (prinst && (lsedptr->uet & LSED_UET_U))
-        program_check (regs, PGM_STACK_OPERATION_EXCEPTION);
+        program_interrupt (regs, PGM_STACK_OPERATION_EXCEPTION);
 
     /* Return the virtual address of the entry descriptor */
     return lsea;
@@ -735,9 +742,9 @@ U16     pasn;                           /* Primary ASN               */
 #endif /*STACK_DEBUG*/
 
     /* Load new PSW from bytes 136-143 of the stack entry */
-    rc = load_psw (&regs->psw, sysblk.mainstor+abs);
+    rc = load_psw (regs, sysblk.mainstor+abs);
     if (rc)
-        program_check (regs, rc);
+        program_interrupt (regs, rc);
 
     /* Restore the PER mode bit from the current PSW */
     if (permode)

@@ -195,14 +195,14 @@ DEVBLK            *dev;                /* Device block pointer       */
     /* Program check if SPCCB is not on a doubleword boundary */
     if ( spccb_absolute_addr & 0x00000007 )
     {
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
         return 3;
     }
 
     /* Program check if SPCCB is outside main storage */
-    if ( spccb_absolute_addr >= sysblk.mainsize )
+    if ( spccb_absolute_addr >= regs->mainsize )
     {
-        program_check (regs, PGM_ADDRESSING_EXCEPTION);
+        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
         return 3;
     }
 
@@ -219,9 +219,9 @@ DEVBLK            *dev;                /* Device block pointer       */
     STORAGE_KEY(spccb_absolute_addr) |= STORKEY_REF;
 
     /* Program check if end of SPCCB falls outside main storage */
-    if ( sysblk.mainsize - spccblen < spccb_absolute_addr )
+    if ( regs->mainsize - spccblen < spccb_absolute_addr )
     {
-        program_check (regs, PGM_ADDRESSING_EXCEPTION);
+        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
         return 3;
     }
 
@@ -257,7 +257,7 @@ DEVBLK            *dev;                /* Device block pointer       */
             memset (spccbconfig, 0, sizeof(SPCCB_CONFIG_INFO));
 
             /* Set main storage size in SPCCB */
-            spccbconfig->totstori = sysblk.mainsize >> 20;
+            spccbconfig->totstori = regs->mainsize >> 20;
             spccbconfig->storisiz = 1;
             spccbconfig->hex04 = 0x04;
             spccbconfig->hex01 = 0x01;
@@ -381,14 +381,14 @@ static U64        diag204tod;          /* last diag204 tod           */
     /* Program check if RMF data is not on a page boundary */
     if ( (abs & STORAGE_KEY_BYTEMASK) != 0x000)
     {
-        program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 
     /* Program check if RMF data area is outside main storage */
-    if ( abs >= sysblk.mainsize )
+    if ( abs >= regs->mainsize )
     {
-        program_check (regs, PGM_ADDRESSING_EXCEPTION);
+        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
         return;
     }
 
@@ -407,7 +407,7 @@ static U64        diag204tod;          /* last diag204 tod           */
         dreg = diag204tod;
 
         /* Retrieve the TOD clock value and shift out the epoch */
-        diag204tod = sysblk.todclk << 8;
+        diag204tod = (sysblk.todclk + regs->todoffset) << 8;
 
         /* Release the TOD clock update lock */
         release_lock (&sysblk.todlock);

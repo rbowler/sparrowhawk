@@ -1,8 +1,13 @@
 /* TRACE.C      Implicit tracing functions - Jan Jaeger              */
 
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+
 #include "hercules.h"
 
 #if defined(FEATURE_TRACING)
+
+#include "opcode.h"
+
 /*-------------------------------------------------------------------*/
 /* Form implicit branch trace entry                                  */
 /*                                                                   */
@@ -18,6 +23,10 @@
 U32 trace_br (int amode, U32 ia, REGS *regs)
 {
 U32     n;                              /* Addr of trace table entry */
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+U32     ag,                             /* Abs Guest addr of TTE     */
+        ah;                             /* Abs Host addr of TTE      */
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Obtain the trace entry address from control register 12 */
     n = regs->cr[12] & CR12_TRACEEA;
@@ -30,19 +39,27 @@ U32     n;                              /* Addr of trace table entry */
         regs->tea = (n & TEA_EFFADDR);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_check (regs, PGM_PROTECTION_EXCEPTION);
+        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
     }
+
+    /* Program check if trace entry is outside main storage */
+    if ( n >= regs->mainsize )
+        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+
+    /* Program check if storing would overflow a 4K page boundary */
+    if ( ((n + 4) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
+        program_interrupt (regs, PGM_TRACE_TABLE_EXCEPTION);
 
     /* Convert trace entry real address to absolute address */
     n = APPLY_PREFIXING (n, regs->pxr);
 
-    /* Program check if trace entry is outside main storage */
-    if ( n >= sysblk.mainsize )
-        program_check (regs, PGM_ADDRESSING_EXCEPTION);
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    ag = n;
 
-    /* Program check if storing would overflow a 4K page boundary */
-    if ( ((n + 4) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
-        program_check (regs, PGM_TRACE_TABLE_EXCEPTION);
+    SIE_TRANSLATE(&n, ACCTYPE_WRITE, regs);
+
+    ah = n;
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
@@ -55,6 +72,14 @@ U32     n;                              /* Addr of trace table entry */
     sysblk.mainstor[n++] = (ia & 0xFF0000) >> 16;
     sysblk.mainstor[n++] = (ia & 0xFF00) >> 8;
     sysblk.mainstor[n++] = ia & 0xFF;
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    /* Recalculate the Guest absolute address */
+    n = ag + (n - ah);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+    /* Convert trace entry absolue address back to real address */
+    n = APPLY_PREFIXING (n, regs->pxr);
 
     /* Return updated value of control register 12 */
     return (regs->cr[12] & ~CR12_TRACEEA) | n;
@@ -77,6 +102,10 @@ U32     n;                              /* Addr of trace table entry */
 U32 trace_bsg (U32 alet, U32 ia, REGS *regs)
 {
 U32     n;                              /* Addr of trace table entry */
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+U32     ag,                             /* Abs Guest addr of TTE     */
+        ah;                             /* Abs Host addr of TTE      */
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Obtain the trace entry address from control register 12 */
     n = regs->cr[12] & CR12_TRACEEA;
@@ -89,19 +118,27 @@ U32     n;                              /* Addr of trace table entry */
         regs->tea = (n & TEA_EFFADDR);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_check (regs, PGM_PROTECTION_EXCEPTION);
+        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
     }
+
+    /* Program check if trace entry is outside main storage */
+    if ( n >= regs->mainsize )
+        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+
+    /* Program check if storing would overflow a 4K page boundary */
+    if ( ((n + 8) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
+        program_interrupt (regs, PGM_TRACE_TABLE_EXCEPTION);
 
     /* Convert trace entry real address to absolute address */
     n = APPLY_PREFIXING (n, regs->pxr);
 
-    /* Program check if trace entry is outside main storage */
-    if ( n >= sysblk.mainsize )
-        program_check (regs, PGM_ADDRESSING_EXCEPTION);
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    ag = n;
 
-    /* Program check if storing would overflow a 4K page boundary */
-    if ( ((n + 8) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
-        program_check (regs, PGM_TRACE_TABLE_EXCEPTION);
+    SIE_TRANSLATE(&n, ACCTYPE_WRITE, regs);
+
+    ah = n;
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
@@ -115,6 +152,14 @@ U32     n;                              /* Addr of trace table entry */
     sysblk.mainstor[n++] = (regs->psw.ia & 0xFF0000) >> 16;
     sysblk.mainstor[n++] = (regs->psw.ia & 0xFF00) >> 8;
     sysblk.mainstor[n++] = regs->psw.ia & 0xFF;
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    /* Recalculate the Guest absolute address */
+    n = ag + (n - ah);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+    /* Convert trace entry absolue address back to real address */
+    n = APPLY_PREFIXING (n, regs->pxr);
 
     /* Return updated value of control register 12 */
     return (regs->cr[12] & ~CR12_TRACEEA) | n;
@@ -136,6 +181,10 @@ U32     n;                              /* Addr of trace table entry */
 U32 trace_ssar (U16 sasn, REGS *regs)
 {
 U32     n;                              /* Addr of trace table entry */
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+U32     ag,                             /* Abs Guest addr of TTE     */
+        ah;                             /* Abs Host addr of TTE      */
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Obtain the trace entry address from control register 12 */
     n = regs->cr[12] & CR12_TRACEEA;
@@ -148,19 +197,27 @@ U32     n;                              /* Addr of trace table entry */
         regs->tea = (n & TEA_EFFADDR);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_check (regs, PGM_PROTECTION_EXCEPTION);
+        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
     }
+
+    /* Program check if trace entry is outside main storage */
+    if ( n >= regs->mainsize )
+        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+
+    /* Program check if storing would overflow a 4K page boundary */
+    if ( ((n + 4) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
+        program_interrupt (regs, PGM_TRACE_TABLE_EXCEPTION);
 
     /* Convert trace entry real address to absolute address */
     n = APPLY_PREFIXING (n, regs->pxr);
 
-    /* Program check if trace entry is outside main storage */
-    if ( n >= sysblk.mainsize )
-        program_check (regs, PGM_ADDRESSING_EXCEPTION);
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    ag = n;
 
-    /* Program check if storing would overflow a 4K page boundary */
-    if ( ((n + 4) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
-        program_check (regs, PGM_TRACE_TABLE_EXCEPTION);
+    SIE_TRANSLATE(&n, ACCTYPE_WRITE, regs);
+
+    ah = n;
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
@@ -170,6 +227,14 @@ U32     n;                              /* Addr of trace table entry */
     sysblk.mainstor[n++] = 0x00;
     sysblk.mainstor[n++] = (sasn & 0xFF00) >> 8;
     sysblk.mainstor[n++] = sasn & 0xFF;
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    /* Recalculate the Guest absolute address */
+    n = ag + (n - ah);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+    /* Convert trace entry absolue address back to real address */
+    n = APPLY_PREFIXING (n, regs->pxr);
 
     /* Return updated value of control register 12 */
     return (regs->cr[12] & ~CR12_TRACEEA) | n;
@@ -191,6 +256,10 @@ U32     n;                              /* Addr of trace table entry */
 U32 trace_pc (U32 pcnum, REGS *regs)
 {
 U32     n;                              /* Addr of trace table entry */
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+U32     ag,                             /* Abs Guest addr of TTE     */
+        ah;                             /* Abs Host addr of TTE      */
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Obtain the trace entry address from control register 12 */
     n = regs->cr[12] & CR12_TRACEEA;
@@ -203,19 +272,27 @@ U32     n;                              /* Addr of trace table entry */
         regs->tea = (n & TEA_EFFADDR);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_check (regs, PGM_PROTECTION_EXCEPTION);
+        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
     }
+
+    /* Program check if trace entry is outside main storage */
+    if ( n >= regs->mainsize )
+        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+
+    /* Program check if storing would overflow a 4K page boundary */
+    if ( ((n + 8) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
+        program_interrupt (regs, PGM_TRACE_TABLE_EXCEPTION);
 
     /* Convert trace entry real address to absolute address */
     n = APPLY_PREFIXING (n, regs->pxr);
 
-    /* Program check if trace entry is outside main storage */
-    if ( n >= sysblk.mainsize )
-        program_check (regs, PGM_ADDRESSING_EXCEPTION);
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    ag = n;
 
-    /* Program check if storing would overflow a 4K page boundary */
-    if ( ((n + 8) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
-        program_check (regs, PGM_TRACE_TABLE_EXCEPTION);
+    SIE_TRANSLATE(&n, ACCTYPE_WRITE, regs);
+
+    ah = n;
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
@@ -230,6 +307,14 @@ U32     n;                              /* Addr of trace table entry */
     sysblk.mainstor[n++] = (regs->psw.ia & 0xFF0000) >> 16;
     sysblk.mainstor[n++] = (regs->psw.ia & 0xFF00) >> 8;
     sysblk.mainstor[n++] = (regs->psw.ia & 0xFE) | regs->psw.prob;
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    /* Recalculate the Guest absolute address */
+    n = ag + (n - ah);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+    /* Convert trace entry absolue address back to real address */
+    n = APPLY_PREFIXING (n, regs->pxr);
 
     /* Return updated value of control register 12 */
     return (regs->cr[12] & ~CR12_TRACEEA) | n;
@@ -252,6 +337,10 @@ U32 trace_pr (REGS *newregs, REGS *regs)
 {
 U32     n;                              /* Addr of trace table entry */
 U16     pasn;                           /* New PASN                  */
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+U32     ag,                             /* Abs Guest addr of TTE     */
+        ah;                             /* Abs Host addr of TTE      */
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Obtain the trace entry address from control register 12 */
     n = regs->cr[12] & CR12_TRACEEA;
@@ -264,24 +353,32 @@ U16     pasn;                           /* New PASN                  */
         regs->tea = (n & TEA_EFFADDR);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_check (regs, PGM_PROTECTION_EXCEPTION);
+        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
     }
+
+    /* Program check if trace entry is outside main storage */
+    if ( n >= regs->mainsize )
+        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+
+    /* Program check if storing would overflow a 4K page boundary */
+    if ( ((n + 12) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
+        program_interrupt (regs, PGM_TRACE_TABLE_EXCEPTION);
 
     /* Convert trace entry real address to absolute address */
     n = APPLY_PREFIXING (n, regs->pxr);
 
-    /* Program check if trace entry is outside main storage */
-    if ( n >= sysblk.mainsize )
-        program_check (regs, PGM_ADDRESSING_EXCEPTION);
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    ag = n;
 
-    /* Program check if storing would overflow a 4K page boundary */
-    if ( ((n + 12) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
-        program_check (regs, PGM_TRACE_TABLE_EXCEPTION);
+    SIE_TRANSLATE(&n, ACCTYPE_WRITE, regs);
 
-    pasn = newregs->cr[4] & CR4_PASN;
+    ah = n;
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
+
+    pasn = newregs->cr[4] & CR4_PASN;
 
     /* Build the program return trace entry */
     sysblk.mainstor[n++] = 0x32;
@@ -298,6 +395,14 @@ U16     pasn;                           /* New PASN                  */
     sysblk.mainstor[n++] = (newregs->psw.ia & 0xFF0000) >> 16;
     sysblk.mainstor[n++] = (newregs->psw.ia & 0xFF00) >> 8;
     sysblk.mainstor[n++] = newregs->psw.ia & 0xFF;
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    /* Recalculate the Guest absolute address */
+    n = ag + (n - ah);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+    /* Convert trace entry absolue address back to real address */
+    n = APPLY_PREFIXING (n, regs->pxr);
 
     /* Return updated value of control register 12 */
     return (regs->cr[12] & ~CR12_TRACEEA) | n;
@@ -320,6 +425,10 @@ U16     pasn;                           /* New PASN                  */
 U32 trace_pt (U16 pasn, U32 gpr2, REGS *regs)
 {
 U32     n;                              /* Addr of trace table entry */
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+U32     ag,                             /* Abs Guest addr of TTE     */
+        ah;                             /* Abs Host addr of TTE      */
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Obtain the trace entry address from control register 12 */
     n = regs->cr[12] & CR12_TRACEEA;
@@ -332,19 +441,27 @@ U32     n;                              /* Addr of trace table entry */
         regs->tea = (n & TEA_EFFADDR);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_check (regs, PGM_PROTECTION_EXCEPTION);
+        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
     }
+
+    /* Program check if trace entry is outside main storage */
+    if ( n >= regs->mainsize )
+        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+
+    /* Program check if storing would overflow a 4K page boundary */
+    if ( ((n + 8) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
+        program_interrupt (regs, PGM_TRACE_TABLE_EXCEPTION);
 
     /* Convert trace entry real address to absolute address */
     n = APPLY_PREFIXING (n, regs->pxr);
 
-    /* Program check if trace entry is outside main storage */
-    if ( n >= sysblk.mainsize )
-        program_check (regs, PGM_ADDRESSING_EXCEPTION);
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    ag = n;
 
-    /* Program check if storing would overflow a 4K page boundary */
-    if ( ((n + 8) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
-        program_check (regs, PGM_TRACE_TABLE_EXCEPTION);
+    SIE_TRANSLATE(&n, ACCTYPE_WRITE, regs);
+
+    ah = n;
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
@@ -358,6 +475,14 @@ U32     n;                              /* Addr of trace table entry */
     sysblk.mainstor[n++] = (gpr2 & 0xFF0000) >> 16;
     sysblk.mainstor[n++] = (gpr2 & 0xFF00) >> 8;
     sysblk.mainstor[n++] = gpr2 & 0xFF;
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    /* Recalculate the Guest absolute address */
+    n = ag + (n - ah);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+    /* Convert trace entry absolue address back to real address */
+    n = APPLY_PREFIXING (n, regs->pxr);
 
     /* Return updated value of control register 12 */
     return (regs->cr[12] & ~CR12_TRACEEA) | n;

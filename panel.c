@@ -20,6 +20,7 @@
 /*      HMC system console commands contributed by Jan Jaeger        */
 /*      Set/reset bad frame indicator command by Jan Jaeger          */
 /*      attach/detach/define commands by Jan Jaeger                  */
+/*      Panel refresh rate triva by Reed H. Petty                    */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -325,7 +326,7 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
     }
     regs = sysblk.regs + sysblk.pcpu;
 
-    store_psw (&regs->psw, curpsw);
+    store_psw (regs, curpsw);
     pswmask = (curpsw[1] & 0x08) ?
                     (curpsw[0] & 0x03) : curpsw[0];
     pswwait = curpsw[1] & 0x02;
@@ -368,7 +369,7 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
                 break;
             case 4:
                 aaddr = APPLY_PREFIXING (NPaddress, regs->pxr);
-                if (aaddr >= sysblk.mainsize)
+                if (aaddr >= regs->mainsize)
                     break;
                 curreg[i] = 0;
                 curreg[i] |= ((sysblk.mainstor[aaddr++] << 24) & 0xFF000000);
@@ -577,7 +578,7 @@ static void display_psw (REGS *regs)
 {
 DWORD   dword;                          /* Doubleword work area      */
 
-    store_psw (&regs->psw, dword);
+    store_psw (regs, dword);
     logmsg ("PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
             dword[0], dword[1], dword[2], dword[3],
             dword[4], dword[5], dword[6], dword[7]);
@@ -651,7 +652,7 @@ BYTE    c;                              /* Character work area       */
 
     n = sprintf (buf, "R:%8.8X:", raddr);
     aaddr = APPLY_PREFIXING (raddr, regs->pxr);
-    if (aaddr >= sysblk.mainsize)
+    if (aaddr >= regs->mainsize)
     {
         n += sprintf (buf+n, " Real address is not valid");
         return n;
@@ -723,16 +724,23 @@ void display_inst (REGS *regs, BYTE *inst)
 {
 DWORD   dword;                          /* Doubleword work area      */
 BYTE    opcode;                         /* Instruction operation code*/
-int     b1=-1, b2=-1, x1;               /* Register numbers          */
 int     ilc;                            /* Instruction length        */
+#if 0  /*ZZBUG*/
+int     b1=-1, b2=-1, x1;               /* Register numbers          */
 U32     addr1 = 0, addr2 = 0;           /* Operand addresses         */
 U32     raddr;                          /* Real address              */
 U16     xcode;                          /* Exception code            */
+#endif
 BYTE    buf[100];                       /* Message buffer            */
 int     n;                              /* Number of bytes in buffer */
 
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(regs->sie_state)
+        logmsg("SIE: ");
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
     /* Display the PSW */
-    store_psw (&regs->psw, dword);
+    store_psw (regs, dword);
     n = sprintf (buf,
                 "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X ",
                 dword[0], dword[1], dword[2], dword[3],
@@ -755,6 +763,19 @@ int     n;                              /* Number of bytes in buffer */
     if (ilc > 2) n += sprintf (buf+n, "%2.2X%2.2X", inst[2], inst[3]);
     if (ilc > 4) n += sprintf (buf+n, "%2.2X%2.2X", inst[4], inst[5]);
     logmsg ("%s\n", buf);
+
+#if 0 /*ZZBUG*/
+
+         /* fetching operands from storage can go terribly wrong 
+            if either a addressing exception or a translation 
+            specification occurs.  This will cause a loop between 
+            display_inst and progam_interrupt.  - Jan Jaeger  */
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    /* Do not try to access host virtual in SIE state */
+    if(!regs->sie_state || regs->sie_pref)
+    {
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Process the first storage operand */
     if (ilc > 2)
@@ -842,6 +863,12 @@ int     n;                              /* Number of bytes in buffer */
 
         logmsg ("%s\n", buf);
     }
+
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    }
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+#endif /*ZZBUG*/
 
     /* Display the general purpose registers */
     display_regs (regs);
@@ -1012,6 +1039,12 @@ BYTE   *cmdarg;                         /* -> Command argument       */
  #define TODDRAG_CMD
 #endif /*TODCLOCK_DRAG_FACTOR*/
 
+#ifdef PANEL_REFRESH_RATE
+ #define PANRATE_CMD "panrate [fast|slow|nnnn] = display or set panel refresh rate\n"
+#else
+ #define PANRATE_CMD
+#endif /*PANEL_REFRESH_RATE*/
+
     /* ? command - display help text */
     if (cmd[0] == '?')
     {
@@ -1039,6 +1072,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
             SYSCONS_CMD
             "f-addr=mark frame unusable, f+addr=mark frame usable\n"
             TODDRAG_CMD
+            PANRATE_CMD
             "quit/exit=terminate, Esc=alternate panel display, ?=Help\n");
         return NULL;
     }
@@ -1128,6 +1162,31 @@ BYTE   *cmdarg;                         /* -> Command argument       */
     }
 #endif /*TODCLOCK_DRAG_FACTOR*/
 
+
+#ifdef PANEL_REFRESH_RATE
+    /* panrate command - display or set rate at which console refreshes */
+    if (memcmp(cmd,"panrate",7)==0)
+    {
+        int trate = 0;
+        switch (cmd[8]) 
+        {
+            case 'f': 
+                sysblk.panrate = PANEL_REFRESH_RATE_FAST;
+                break;
+            case 's': 
+                sysblk.panrate = PANEL_REFRESH_RATE_SLOW;
+                break;
+            default:
+                sscanf(cmd+7,"%d", &trate);
+                if (trate >= (1000 / CLK_TCK) && trate < 5001)
+                    sysblk.panrate = trate;
+        } 
+        logmsg ("Panel refresh rate = %d millisecond(s)\n",sysblk.panrate);
+        return NULL;
+    }
+#endif /*PANEL_REFRESH_RATE */
+	    
+
 #ifdef FEATURE_SYSTEM_CONSOLE
     /* .xxx and !xxx commands - send command or priority message
        to SCP via the HMC system console facility */
@@ -1153,7 +1212,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         if ((cmd[0] == 'f') && sscanf(cmd+2, "%x%c", &aaddr, &c) == 1)
         {
             aaddr &= 0x7FFFF000;
-            if (aaddr >= sysblk.mainsize)
+            if (aaddr >= regs->mainsize)
             {
                 logmsg ("Invalid frame address %8.8X\n", aaddr);
                 return NULL;
@@ -1285,7 +1344,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         /* Alter real storage */
         if (rc > 0)
         {
-            for (i = 0; i < rc && raddr+i < sysblk.mainsize; i++)
+            for (i = 0; i < rc && raddr+i < regs->mainsize; i++)
             {
                 aaddr = raddr + i;
                 aaddr = APPLY_PREFIXING (aaddr, regs->pxr);
@@ -1324,7 +1383,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
             && virt_to_real (&raddr, vaddr, 0, regs, ACCTYPE_LRA) == 0
             && virt_to_real (&raddr, eaddr, 0, regs, ACCTYPE_LRA) == 0)
         {
-            for (i = 0; i < rc && raddr+i < sysblk.mainsize; i++)
+            for (i = 0; i < rc && raddr+i < regs->mainsize; i++)
             {
                 virt_to_real (&raddr, vaddr+i, 0, regs, ACCTYPE_LRA);
                 aaddr = APPLY_PREFIXING (raddr, regs->pxr);
@@ -1423,7 +1482,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         }
 
         /* Open the specified file name */
-        fd = open (fname, O_RDONLY);
+        fd = open (fname, O_RDONLY|O_BINARY);
         if (fd < 0)
         {
             logmsg ("Cannot open %s: %s\n",
@@ -1434,7 +1493,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         /* Read the file into absolute storage */
         logmsg ("Loading %s\n", fname);
 
-        len = read (fd, sysblk.mainstor, sysblk.mainsize);
+        len = read (fd, sysblk.mainstor, regs->mainsize);
         if (len < 0)
         {
             logmsg ("Cannot read %s: %s\n",
@@ -1832,7 +1891,6 @@ int     keybfd;                         /* Keyboard file descriptor  */
 int     maxfd;                          /* Highest file descriptor   */
 fd_set  readset;                        /* Select file descriptors   */
 struct  timeval tv;                     /* Select timeout structure  */
-#define INACTIVITY_INTERVAL     500     /* Interval in milliseconds  */
 
     /* Display thread started message on control panel */
     logmsg ("HHC650I Control panel thread started: "
@@ -1908,8 +1966,8 @@ struct  timeval tv;                     /* Select timeout structure  */
 
         /* Wait for a message to arrive, a key to be pressed,
            or the inactivity interval to expire */
-        tv.tv_sec = INACTIVITY_INTERVAL / 1000;
-        tv.tv_usec = (INACTIVITY_INTERVAL * 1000) % 1000000;
+        tv.tv_sec = sysblk.panrate / 1000;
+        tv.tv_usec = (sysblk.panrate * 1000) % 1000000;
         rc = select (maxfd + 1, &readset, NULL, NULL, &tv);
         if (rc < 0 )
         {
@@ -1981,7 +2039,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                         case 'O':                   /* Store */
                         case 'o':
                             NPaaddr = APPLY_PREFIXING (NPaddress, regs->pxr);
-                            if (NPaaddr >= sysblk.mainsize)
+                            if (NPaaddr >= regs->mainsize)
                                 break;
                             sysblk.mainstor[NPaaddr] = 0;
                             sysblk.mainstor[NPaaddr++] |= ((NPdata >> 24) & 0xFF);
@@ -2369,7 +2427,7 @@ struct  timeval tv;                     /* Select timeout structure  */
         /* =END= */
 
         /* Obtain the PSW for target CPU */
-        store_psw (&regs->psw, curpsw);
+        store_psw (regs, curpsw);
 
         /* Set the display update indicator if the PSW has changed
            or if the instruction counter has changed, or if
