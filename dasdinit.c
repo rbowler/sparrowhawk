@@ -106,13 +106,13 @@ int     i;                              /* Array subscript           */
 /*      fd      DASD image file descriptor                           */
 /*      devtype Device type                                          */
 /*      heads   Number of heads per cylinder                         */
-/*      trksize Length of a track on DASD image file                 */
+/*      maxdlen Maximum R1 record data length                        */
 /*      cyls    Number of cylinders                                  */
 /*      volser  Volume serial number                                 */
 /*-------------------------------------------------------------------*/
 static void
 create_ckd (BYTE *fname, int fd, U16 devtype, U32 heads,
-            U32 trksize, U32 cyls, BYTE *volser)
+            U32 maxdlen, U32 cyls, BYTE *volser)
 {
 int             rc;                     /* Return code               */
 CKDDASD_DEVHDR  devhdr;                 /* Device header             */
@@ -130,6 +130,15 @@ int             ipl1len = 24;           /* Length of IPL1 data       */
 int             ipl2len = 144;          /* Length of IPL2 data       */
 int             vol1len = 80;           /* Length of VOL1 data       */
 int             rec0len = 8;            /* Length of R0 data         */
+U32             trksize;                /* DASD image track length   */
+
+    /* Compute the DASD image track length */
+    trksize = sizeof(CKDDASD_TRKHDR)
+                + sizeof(CKDDASD_RECHDR) + rec0len
+                + sizeof(CKDDASD_RECHDR) + maxdlen
+                + sizeof(eighthexFF);
+    trksize += 0xFF;
+    trksize &= 0xFFFFFF00;
 
     /* Compute minimum and maximum number of cylinders */
     cylsize = trksize * heads;
@@ -166,6 +175,9 @@ int             rec0len = 8;            /* Length of R0 data         */
     memcpy(devhdr.devid, "CKD_P370", 8);
     devhdr.heads = heads;
     devhdr.trksize = trksize;
+    devhdr.devtype = devtype & 0xFF;
+    devhdr.fileseq = 0;
+    devhdr.highcyl = 0;
 
     /* Write the device header */
     rc = write (fd, &devhdr, CKDDASD_DEVHDR_SIZE);
@@ -382,9 +394,8 @@ int main ( int argc, char *argv[] )
 int     fd;                             /* File descriptor           */
 U32     size;                           /* Volume size               */
 U32     heads = 0;                      /* Number of tracks/cylinder */
-U32     trksize = 0;                    /* Track size                */
+U32     maxdlen = 0;                    /* Maximum R1 data length    */
 U32     sectsize = 0;                   /* Sector size               */
-U32     trkovhd;                        /* CKD track overhead        */
 U16     devtype;                        /* Device type               */
 BYTE    type;                           /* C=CKD, F=FBA              */
 BYTE    fname[256];                     /* File name                 */
@@ -426,46 +437,43 @@ BYTE    c;                              /* Character work area       */
         || sscanf(argv[4], "%lu%c", &size, &c) != 1)
         argexit(4);
 
-    /* Calculate the track overhead */
-    trkovhd = 140;
-
     /* Check the device type */
     switch (devtype) {
 
     case 0x2311:
         type = 'C';
         heads = 10;
-        trksize = 3625 + trkovhd;
+        maxdlen = 3625;
         break;
 
     case 0x2314:
         type = 'C';
         heads = 20;
-        trksize = 7294 + trkovhd;
+        maxdlen = 7294;
         break;
 
     case 0x3330:
         type = 'C';
         heads = 19;
-        trksize = 13030 + trkovhd;
+        maxdlen = 13030;
         break;
 
     case 0x3350:
         type = 'C';
         heads = 30;
-        trksize = 19069 + trkovhd;
+        maxdlen = 19069;
         break;
 
     case 0x3380:
         type = 'C';
         heads = 15;
-        trksize = 47476 + trkovhd;
+        maxdlen = 47476;
         break;
 
     case 0x3390:
         type = 'C';
         heads = 15;
-        trksize = 56664 + trkovhd;
+        maxdlen = 56664;
         break;
 
     case 0x3310:
@@ -497,7 +505,7 @@ BYTE    c;                              /* Character work area       */
 
     /* Create the device */
     if (type == 'C')
-        create_ckd (fname, fd, devtype, heads, trksize, size, volser);
+        create_ckd (fname, fd, devtype, heads, maxdlen, size, volser);
     else
         create_fba (fname, fd, devtype, sectsize, size, volser);
 

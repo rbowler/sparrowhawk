@@ -13,6 +13,11 @@
 #include "hercules.h"
 
 /*-------------------------------------------------------------------*/
+/* Internal macro definitions                                        */
+/*-------------------------------------------------------------------*/
+#define SPACE           ((BYTE)' ')
+
+/*-------------------------------------------------------------------*/
 /* Global data areas                                                 */
 /*-------------------------------------------------------------------*/
 SYSBLK  sysblk;
@@ -72,6 +77,8 @@ ascii_to_ebcdic[] = {
 /*-------------------------------------------------------------------*/
 static int read_config (BYTE *fname, FILE *fp)
 {
+int     stmtlen;                        /* Statement length          */
+
     while (1)
     {
         /* Increment statement counter */
@@ -88,8 +95,12 @@ static int read_config (BYTE *fname, FILE *fp)
             exit(1);
         }
 
+        /* Check for DOS end of file character */
+        if (buf[0] == '\x1A') return -1;
+
         /* Check that statement ends with a newline */
-        if (buf[strlen(buf)-1] != '\n')
+        stmtlen = strlen(buf);
+        if (stmtlen == 0 || buf[stmtlen-1] != '\n')
         {
             fprintf (stderr,
                     "HHC002I File %s line %d is too long\n",
@@ -97,8 +108,17 @@ static int read_config (BYTE *fname, FILE *fp)
             exit(1);
         }
 
+        /* Remove trailing carriage return and line feed */
+        stmtlen--;
+        if (stmtlen > 0 && buf[stmtlen-1] == '\r') stmtlen--;
+
+        /* Remove trailing blanks and tabs */
+        while (stmtlen > 0 && (buf[stmtlen-1] == SPACE
+                || buf[stmtlen-1] == '\t')) stmtlen--;
+        buf[stmtlen] = '\0';
+
         /* Ignore comments and null statements */
-        if (buf[0] == '\n' || buf[0] == '#')
+        if (stmtlen == 0 || buf[0] == '*' || buf[0] == '#')
            continue;
 
         break;
@@ -196,12 +216,12 @@ int     subchan;                        /* Subchannel number         */
     }
 
     /* Parse the CPU statement */
-    sserial = strtok (buf, " \t\n");
-    smainsize = strtok (NULL, " \t\n");
-    sxpndsize = strtok (NULL, " \t\n");
-    scnslport = strtok (NULL, " \t\n");
-    snumcpu = strtok (NULL, " \t\n");
-    sloadparm = strtok (NULL, " \t\n");
+    sserial = strtok (buf, " \t");
+    smainsize = strtok (NULL, " \t");
+    sxpndsize = strtok (NULL, " \t");
+    scnslport = strtok (NULL, " \t");
+    snumcpu = strtok (NULL, " \t");
+    sloadparm = strtok (NULL, " \t");
 
     if (sserial == NULL || smainsize == NULL || sxpndsize == NULL
         || scnslport == NULL || snumcpu == NULL || sloadparm == NULL)
@@ -365,8 +385,8 @@ int     subchan;                        /* Subchannel number         */
             break;
 
         /* Parse the device statement */
-        sdevnum = strtok (buf, " \t\n");
-        sdevtype = strtok (NULL, " \t\n");
+        sdevnum = strtok (buf, " \t");
+        sdevtype = strtok (NULL, " \t");
 
         if (sdevnum == NULL || sdevtype == NULL)
         {
@@ -399,7 +419,7 @@ int     subchan;                        /* Subchannel number         */
         /* Use remaining fields in the device statement to create an
            argument array for device handler initialization function */
         for (devargc = 0; devargc < MAX_ARGS &&
-            (devargv[devargc] = strtok (NULL, " \t\n")) != NULL;
+            (devargv[devargc] = strtok (NULL, " \t")) != NULL;
             devargc++);
 
         /* Determine which device handler to use for this device */

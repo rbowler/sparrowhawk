@@ -1155,7 +1155,7 @@ BYTE            key[256];               /* Key for search operations */
 
     /* Reset index marker flag if sense or control command,
        or any write command (other search ID or search key),
-       or any read command except read count or read sector */
+       or any read command except read sector */
     if (IS_CCW_SENSE(code) || IS_CCW_CONTROL(code)
         || (IS_CCW_WRITE(code)
             && (code & 0x7F) != 0x31
@@ -1165,7 +1165,6 @@ BYTE            key[256];               /* Key for search operations */
             && (code & 0x7F) != 0x49
             && (code & 0x7F) != 0x69)
         || (IS_CCW_READ(code)
-            && (code & 0x7F) != 0x12
             && (code & 0x7F) != 0x22))
         dev->ckdxmark = 0;
 

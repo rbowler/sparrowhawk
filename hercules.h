@@ -339,7 +339,14 @@ typedef struct _CKDDASD_DEVHDR {	/* Device header	     */
 	BYTE	devid[8];		/* Device identifier	     */
 	U32	heads;			/* #of heads per cylinder    */
 	U32	trksize;		/* Track size		     */
-	U32	flags;			/* Flags		     */
+	BYTE	devtype;		/* Last 2 digits of device type
+					   (0x80=3380, 0x90=3390)    */
+	BYTE	fileseq;		/* CKD image file sequence no.
+					   (0x00=only file, 0x01=first
+					   file of multiple files)   */
+	U16	highcyl;		/* Highest cylinder number on
+					   this file, or zero if this
+					   is the last or only file  */
 	BYTE	resv[492];		/* Reserved		     */
     } CKDDASD_DEVHDR;
 
