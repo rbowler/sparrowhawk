@@ -1,3 +1,5 @@
+06 Jul 2002 Fix chkdsk compatility problem - Greg Smith
+05 Jul 2002 Allow tape file to be opened for input if on CD-ROM - Volker Bandke
 03 Jul 2002 Fix tape to include read backwards support - Volker Bandke
 02 Jul 2002 CTC fix for TurboLinux bug - Jim Pierson
 02 Jul 2002 3287 printer support via TN3270 - Tomas Masek

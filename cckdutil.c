@@ -1249,7 +1249,7 @@ space_check:
             }
 #if 1
             /* Turn off new bits in the track header - toleration */
-            if (buf[0] & ~CCKD_COMPRESS_MASK)
+            if (level >= 1 && (buf[0] & ~CCKD_COMPRESS_MASK))
             {
                 buf[0] &= CCKD_COMPRESS_MASK;
                 if (fdflags & O_RDWR)
