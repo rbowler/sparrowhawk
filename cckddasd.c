@@ -1964,6 +1964,7 @@ CCKD_L2ENT      l2;                     /* Level 2 entry             */
               "%2.2x%2.2x%2.2x%2.2x%2.2x\n",
               trk, sfx, l2.pos, rc,
               buf[0], buf[1], buf[2], buf[3], buf[4]);
+    buf[0] &= CCKD_COMPRESS_MASK;
 
     if (cckd_cchh (dev, buf, trk) < 0)
         rc = cckd_null_trk (dev, buf, trk, 0);
@@ -1987,6 +1988,7 @@ int             sfx,l1x,l2x;            /* Lookup table indices      */
     sfx = cckd->sfn;
     l1x = trk >> 8;
     l2x = trk & 0xff;
+    buf[0] &= CCKD_COMPRESS_MASK;
 
     /* take care of the special instance where we are writing
        to a regular ckd file (ie not a compressed one) */
@@ -2664,6 +2666,7 @@ int             add = 0;                /* Add the shadow file back  */
                           "%2.2x%2.2x%2.2x%2.2x%2.2x\n",
                           i * 256 + j, sfx, l2[j].pos, l2[j].len,
                           buf[0], buf[1], buf[2], buf[3], buf[4]);
+                buf[0] &= CCKD_COMPRESS_MASK;
                 rc = cckd_write_trkimg (dev, buf, l2[j].len, i * 256 + j);
 
             } /* for each level 2 entry */
@@ -2732,6 +2735,7 @@ int             add = 0;                /* Add the shadow file back  */
                 {   rc = lseek (cckd->fd[sfx], cckd->l2[j].pos, SEEK_SET);
                     rc = read (cckd->fd[sfx], buf, cckd->l2[j].len);
                 }
+                buf[0] &= CCKD_COMPRESS_MASK;
 
                 /* uncompress the track image */
                 switch (buf[0]) {
@@ -3382,6 +3386,7 @@ int             trk;                    /* Track number              */
         {   /* space is a track image */
             DEVTRACE("cckddasd: gclen off 0x%lx is trk %d len %d\n",
                      pos + off, trk, cckd->l2[cckd->gcl2x].len);
+            buf[off] &= CCKD_COMPRESS_MASK;
             return cckd->l2[cckd->gcl2x].len;
         }
     }

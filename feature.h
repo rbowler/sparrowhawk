@@ -45,6 +45,7 @@
 #undef APPLY_PREFIXING
 #undef AMASK
 #undef ADDRESS_MAXWRAP
+#undef ADDRESS_MAXWRAP_E
 #undef REAL_MODE
 #undef PER_MODE
 #undef ASF_ENABLED
@@ -125,6 +126,9 @@ s370_ ## _name
 
 #define ADDRESS_MAXWRAP(_register_context) \
 	(AMASK24)
+
+#define ADDRESS_MAXWRAP_E(_register_context) \
+	(AMASK31)
 
 #define REAL_MODE(p) \
 	((p)->ecmode==0 || ((p)->sysmask & PSW_DATMODE)==0)
@@ -211,6 +215,9 @@ s390_ ## _name
 #define AMASK   AMASK_L
 
 #define ADDRESS_MAXWRAP(_register_context) \
+	((_register_context)->psw.AMASK)
+
+#define ADDRESS_MAXWRAP_E(_register_context) \
 	((_register_context)->psw.AMASK)
 
 #define REAL_MODE(p) \
@@ -301,6 +308,9 @@ s390_ ## _name
 #define AMASK   AMASK_G
 
 #define ADDRESS_MAXWRAP(_register_context) \
+	((_register_context)->psw.AMASK)
+
+#define ADDRESS_MAXWRAP_E(_register_context) \
 	((_register_context)->psw.AMASK)
 
 #define REAL_MODE(p) \
@@ -409,7 +419,11 @@ z900_ ## _name
  #define PAGEFRAME_PAGESHIFT	11
  #define PAGEFRAME_BYTEMASK	0x000007FF
  #define PAGEFRAME_PAGEMASK	0x7FFFF800
+ #if defined(FEATURE_370E_EXTENDED_ADDRESSING)
+  #define MAXADDRESS             0x03FFFFFF
+ #else
  #define MAXADDRESS             0x00FFFFFF
+ #endif
 #endif
 
 

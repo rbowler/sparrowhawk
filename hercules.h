@@ -1281,6 +1281,11 @@ typedef struct _CCKDDASD_DEVHDR {       /* Compress device header    */
 #define CCKD_COMPRESS_BZIP2    2
 #define CCKD_COMPRESS_MAX      CCKD_COMPRESS_BZIP2
 #endif
+#define CCKD_COMPRESS_MASK     0x03
+#define CCKD_NEWFMT            0x80
+
+#define CCKD_LEN_MASK          0
+#define CCKD_GET_BUFLEN(c)     0
 
 typedef struct _CCKD_DFWQE {            /* Defferred write queue elem*/
         struct _CCKD_DFWQE *next;       /* -> next queue element     */

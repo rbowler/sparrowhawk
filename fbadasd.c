@@ -314,6 +314,7 @@ int     repcnt;                         /* Replication count         */
 
             /* Calculate number of bytes to write */
             num = (count < dev->fbablksiz) ? count : dev->fbablksiz;
+            if (num < dev->fbablksiz) *more = 1;
 
             /* Write physical block from channel buffer */
             if (num > 0)
@@ -359,6 +360,7 @@ int     repcnt;                         /* Replication count         */
 
         /* Set residual byte count */
         *residual = count;
+        if (dev->fbalcnum > 0) *more = 1;
 
         /* Set ending status */
         *unitstat |= CSW_CE | CSW_DE;

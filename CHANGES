@@ -1,3 +1,13 @@
+02 Jul 2002 CTC fix for TurboLinux bug - Jim Pierson
+02 Jul 2002 3287 printer support via TN3270 - Tomas Masek
+02 Jul 2002 S/370 extended memory fixes - Tomas Masek
+02 Jul 2002 ctcadpt.c compilation fix for FreeBSD - Mark Szlaga
+02 Jul 2002 Fixed 3270 ERASE ALL UNPROTECTED command to not count data
+            read - Tomas Fott
+02 Jul 2002 Fixes to ckdtab in dasdtab.c - Greg Smith
+23 Jun 2002 Retrofitted cckd chkdsk fixes/enhancements - Greg Smith
+23 Jun 2002 FBA fixes contributed by Tomas Masek - Greg Smith
+20 Jun 2002 Compatibility fixes for cckd and 2.17 - Greg Smith
 20 May 2002 Fix attach command broken in 2.16.1 - Jay Maynard
 14 May 2002 Fix S/370 timer problem - Valery Pogonchenko
 13 May 2002 Possible fix for `timed_wait_condition' loop - Greg Smith

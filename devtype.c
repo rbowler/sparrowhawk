@@ -49,6 +49,7 @@ DEVENT device_handler_table[] = {
 
     /* Local Non-SNA 3270 devices */
     { 0x3270, &loc3270_device_hndinfo },
+    { 0x3287, &loc3270_device_hndinfo },
 
     /* Communications devices */
     { 0x3088, &ctcadpt_device_hndinfo },

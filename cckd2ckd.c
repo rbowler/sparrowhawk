@@ -397,6 +397,7 @@ int             limited=0;              /* 1=Limit cyls copied       */
                              ifile, strerror(errno));
                     exit (16);
                 }
+                buf[0] &= CCKD_COMPRESS_MASK;
 
                 /* uncompress the track image */
                 compress = buf[0];
