@@ -123,6 +123,22 @@ int     i;                              /* Array subscript           */
     return 0;
 } /* end function cardrdr_init_handler */
 
+/*-------------------------------------------------------------------*/
+/* Query the device definition                                       */
+/*-------------------------------------------------------------------*/
+void cardrdr_query_device (DEVBLK *dev, BYTE **class,
+                int buflen, BYTE *buffer)
+{
+
+    *class = "RDR";
+    snprintf (buffer, buflen, "%s%s%s%s%s",
+                dev->filename,
+                (dev->ascii ? " ascii" : ""),
+                (dev->ebcdic ? " ebcdic" : ""),
+                (dev->rdreof ? " eof" : ""),
+                ((dev->ascii && dev->trunc) ? " trunc" : ""));
+
+} /* end function cardrdr_query_device */
 
 /*-------------------------------------------------------------------*/
 /* Close the card image file                                         */

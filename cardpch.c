@@ -73,6 +73,12 @@ int     i;                              /* Array subscript           */
             continue;
         }
 
+        if (strcasecmp(argv[i], "ebcdic") == 0)
+        {
+            dev->ascii = 0;
+            continue;
+        }
+
         if (strcasecmp(argv[i], "crlf") == 0)
         {
             dev->crlf = 1;
@@ -105,6 +111,21 @@ int     i;                              /* Array subscript           */
 
     return 0;
 } /* end function cardpch_init_handler */
+
+/*-------------------------------------------------------------------*/
+/* Query the device definition                                       */
+/*-------------------------------------------------------------------*/
+void cardpch_query_device (DEVBLK *dev, BYTE **class,
+                int buflen, BYTE *buffer)
+{
+
+    *class = "PCH";
+    snprintf (buffer, buflen, "%s%s%s",
+                dev->filename,
+                (dev->ascii ? " ascii" : " ebcdic"),
+                ((dev->ascii && dev->crlf) ? " crlf" : ""));
+
+} /* end function cardpch_query_device */
 
 /*-------------------------------------------------------------------*/
 /* Execute a Channel Command Word                                    */

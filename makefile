@@ -6,7 +6,7 @@
 #
 #
 
-VERSION  = 1.51
+VERSION  = 1.52
 
 CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=390
 #	   -march=pentium -malign-double -mwide-multiply

@@ -45,7 +45,7 @@ typedef struct _SCCB_HEADER {
 
 /* Bit definitions for SCCB header reason code */
 #define SCCB_REAS_NONE          0x00    /* No reason                 */
-#define SCCB_REAS_NOT_4KBNDRY   0x01    /* SCCB crosses 4K boundary  */
+#define SCCB_REAS_NOT_PGBNDRY   0x01    /* SCCB crosses page boundary*/
 #define SCCB_REAS_ODD_LENGTH    0x02    /* Length not multiple of 8  */
 #define SCCB_REAS_TOO_SHORT     0x03    /* Length is inadequate      */
 #define SCCB_REAS_INVALID_CMD   0x01    /* Invalid SCLP command code */
@@ -459,7 +459,7 @@ int             masklen;                /* Length of event mask      */
     sccblen = (sccb->length[0] << 8) | sccb->length[1];
 
     /* Set the main storage reference bit */
-    sysblk.storkeys[sccb_absolute_addr >> 12] |= STORKEY_REF;
+    STORAGE_KEY(sccb_absolute_addr) |= STORKEY_REF;
 
     /* Program check if end of SCCB falls outside main storage */
     if ( sysblk.mainsize - sccblen < sccb_absolute_addr )
@@ -489,13 +489,13 @@ int             masklen;                /* Length of event mask      */
     case SCLP_READ_SCP_INFO:
 
         /* Set the main storage change bit */
-        sysblk.storkeys[sccb_absolute_addr >> 12] |= STORKEY_CHANGE;
+        STORAGE_KEY(sccb_absolute_addr) |= STORKEY_CHANGE;
 
         /* Set response code X'0100' if SCCB crosses a page boundary */
-        if ((sccb_absolute_addr & 0x7FFFF000) !=
-            ((sccb_absolute_addr + sccblen - 1) & 0x7FFFF000))
+        if ((sccb_absolute_addr & STORAGE_KEY_PAGEMASK) !=
+            ((sccb_absolute_addr + sccblen - 1) & STORAGE_KEY_PAGEMASK))
         {
-            sccb->reas = SCCB_REAS_NOT_4KBNDRY;
+            sccb->reas = SCCB_REAS_NOT_PGBNDRY;
             sccb->resp = SCCB_RESP_BLOCK_ERROR;
             break;
         }
@@ -683,13 +683,13 @@ int             masklen;                /* Length of event mask      */
     case SCLP_READ_CHP_INFO:
 
         /* Set the main storage change bit */
-        sysblk.storkeys[sccb_absolute_addr >> 12] |= STORKEY_CHANGE;
+        STORAGE_KEY(sccb_absolute_addr) |= STORKEY_CHANGE;
 
         /* Set response code X'0100' if SCCB crosses a page boundary */
-        if ((sccb_absolute_addr & 0x7FFFF000) !=
-            ((sccb_absolute_addr + sccblen - 1) & 0x7FFFF000))
+        if ((sccb_absolute_addr & STORAGE_KEY_PAGEMASK) !=
+            ((sccb_absolute_addr + sccblen - 1) & STORAGE_KEY_PAGEMASK))
         {
-            sccb->reas = SCCB_REAS_NOT_4KBNDRY;
+            sccb->reas = SCCB_REAS_NOT_PGBNDRY;
             sccb->resp = SCCB_RESP_BLOCK_ERROR;
             break;
         }
@@ -739,13 +739,13 @@ int             masklen;                /* Length of event mask      */
     case SCLP_READ_CSI_INFO:
 
         /* Set the main storage change bit */
-        sysblk.storkeys[sccb_absolute_addr >> 12] |= STORKEY_CHANGE;
+        STORAGE_KEY(sccb_absolute_addr) |= STORKEY_CHANGE;
 
         /* Set response code X'0100' if SCCB crosses a page boundary */
-        if ((sccb_absolute_addr & 0x7FFFF000) !=
-            ((sccb_absolute_addr + sccblen - 1) & 0x7FFFF000))
+        if ((sccb_absolute_addr & STORAGE_KEY_PAGEMASK) !=
+            ((sccb_absolute_addr + sccblen - 1) & STORAGE_KEY_PAGEMASK))
         {
-            sccb->reas = SCCB_REAS_NOT_4KBNDRY;
+            sccb->reas = SCCB_REAS_NOT_PGBNDRY;
             sccb->resp = SCCB_RESP_BLOCK_ERROR;
             break;
         }
@@ -778,13 +778,13 @@ int             masklen;                /* Length of event mask      */
     case SCLP_WRITE_EVENT_DATA:
 
         /* Set the main storage change bit */
-        sysblk.storkeys[sccb_absolute_addr >> 12] |= STORKEY_CHANGE;
+        STORAGE_KEY(sccb_absolute_addr) |= STORKEY_CHANGE;
 
         /* Set response code X'0100' if SCCB crosses a page boundary */
-        if ((sccb_absolute_addr & 0x7FFFF000) !=
-            ((sccb_absolute_addr + sccblen - 1) & 0x7FFFF000))
+        if ((sccb_absolute_addr & STORAGE_KEY_PAGEMASK) !=
+            ((sccb_absolute_addr + sccblen - 1) & STORAGE_KEY_PAGEMASK))
         {
-            sccb->reas = SCCB_REAS_NOT_4KBNDRY;
+            sccb->reas = SCCB_REAS_NOT_PGBNDRY;
             sccb->resp = SCCB_RESP_BLOCK_ERROR;
             break;
         }
@@ -845,13 +845,13 @@ int             masklen;                /* Length of event mask      */
     case SCLP_READ_EVENT_DATA:
 
         /* Set the main storage change bit */
-        sysblk.storkeys[sccb_absolute_addr >> 12] |= STORKEY_CHANGE;
+        STORAGE_KEY(sccb_absolute_addr) |= STORKEY_CHANGE;
 
         /* Set response code X'0100' if SCCB crosses a page boundary */
-        if ((sccb_absolute_addr & 0x7FFFF000) !=
-            ((sccb_absolute_addr + sccblen - 1) & 0x7FFFF000))
+        if ((sccb_absolute_addr & STORAGE_KEY_PAGEMASK) !=
+            ((sccb_absolute_addr + sccblen - 1) & STORAGE_KEY_PAGEMASK))
         {
-            sccb->reas = SCCB_REAS_NOT_4KBNDRY;
+            sccb->reas = SCCB_REAS_NOT_PGBNDRY;
             sccb->resp = SCCB_RESP_BLOCK_ERROR;
             break;
         }
@@ -953,13 +953,13 @@ int             masklen;                /* Length of event mask      */
     case SCLP_WRITE_EVENT_MASK:
 
         /* Set the main storage change bit */
-        sysblk.storkeys[sccb_absolute_addr >> 12] |= STORKEY_CHANGE;
+        STORAGE_KEY(sccb_absolute_addr) |= STORKEY_CHANGE;
 
         /* Set response code X'0100' if SCCB crosses a page boundary */
-        if ((sccb_absolute_addr & 0x7FFFF000) !=
-            ((sccb_absolute_addr + sccblen - 1) & 0x7FFFF000))
+        if ((sccb_absolute_addr & STORAGE_KEY_PAGEMASK) !=
+            ((sccb_absolute_addr + sccblen - 1) & STORAGE_KEY_PAGEMASK))
         {
-            sccb->reas = SCCB_REAS_NOT_4KBNDRY;
+            sccb->reas = SCCB_REAS_NOT_PGBNDRY;
             sccb->resp = SCCB_RESP_BLOCK_ERROR;
             break;
         }
@@ -1024,7 +1024,7 @@ int             masklen;                /* Length of event mask      */
         return 1;
 
     /* Set service signal external interrupt pending */
-    sysblk.servparm = sccb_real_addr;
+    sysblk.servparm = sccb_absolute_addr;
     sysblk.servsig = 1;
 
     /* Release the interrupt lock */

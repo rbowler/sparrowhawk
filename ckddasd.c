@@ -409,6 +409,20 @@ U32             sctlfeat;               /* Storage control features  */
 
 
 /*-------------------------------------------------------------------*/
+/* Query the device definition                                       */
+/*-------------------------------------------------------------------*/
+void ckddasd_query_device (DEVBLK *dev, BYTE **class,
+                int buflen, BYTE *buffer)
+{
+
+    *class = "DASD";
+    snprintf (buffer, buflen, "%s [%d cyls]",
+            dev->filename,
+            dev->ckdcyls);
+
+} /* end function ckddasd_query_device */
+
+/*-------------------------------------------------------------------*/
 /* Build sense data                                                  */
 /*-------------------------------------------------------------------*/
 static void ckd_build_sense ( DEVBLK *dev, BYTE sense0, BYTE sense1,

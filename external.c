@@ -1,4 +1,4 @@
-/* EXTERNAL.C   (c) Copyright Roger Bowler, 1999                     */
+/* EXTERNAL.C   (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 External Interrupt and Timer                 */
 
 /*-------------------------------------------------------------------*/
@@ -6,7 +6,14 @@
 /* functions for the Hercules ESA/390 emulator.                      */
 /*-------------------------------------------------------------------*/
 
+/*-------------------------------------------------------------------*/
+/* Additional credits:                                               */
+/*      TOD clock offset contributed by Jay Maynard                  */
+/*-------------------------------------------------------------------*/
+
 #include "hercules.h"
+
+#undef  MIPS_COUNTING
 
 /*-------------------------------------------------------------------*/
 /* Load external interrupt new PSW                                   */
@@ -17,7 +24,7 @@ PSA    *psa;
 int     rc;
 
     /* Set the main storage reference and change bits */
-    sysblk.storkeys[regs->pxr >> 12] |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(regs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Store the interrupt code in the PSW */
     regs->psw.intcode = code;
@@ -192,6 +199,11 @@ U16     cpuad;                          /* Originating CPU address   */
     if (sysblk.servsig
         && (regs->cr[0] & CR0_XM_SERVSIG))
     {
+        /* Apply prefixing if the parameter is a storage address */
+        if ((sysblk.servparm & 0x00000007) == 0)
+            sysblk.servparm =
+                APPLY_PREFIXING (sysblk.servparm, regs->pxr);
+
 //      logmsg ("External interrupt: Service signal %8.8X\n",
 //              sysblk.servparm);
 
@@ -228,6 +240,9 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 S32     itimer;                         /* Interval timer value      */
 S32     olditimer;                      /* Previous interval timer   */
 #endif /*FEATURE_INTERVAL_TIMER*/
+#ifdef MIPS_COUNTING
+int     msecctr = 0;                    /* Millisecond counter       */
+#endif /*MIPS_COUNTING*/
 int     cpu;                            /* CPU engine number         */
 REGS   *regs;                           /* -> CPU register context   */
 int     intflag = 0;                    /* 1=Interrupt possible      */
@@ -252,18 +267,18 @@ struct  timeval tv;                     /* Structure for gettimeofday
         /* Load number of seconds since 00:00:00 01 Jan 1970 */
         dreg = (U64)tv.tv_sec;
 
-        /* Add number of seconds from 1900 to 1970 */
-        dreg += 86400ULL * (70*365 + 17);
-
         /* Convert to microseconds */
         dreg = dreg * 1000000 + tv.tv_usec;
+
+        /* Obtain the TOD clock update lock */
+        obtain_lock (&sysblk.todlock);
+
+        /* Add number of microseconds from TOD base to 1970 */
+        dreg += sysblk.todoffset;
 
         /* Shift left 4 bits so that bits 0-7=TOD Clock Epoch,
            bits 8-59=TOD Clock bits 0-51, bits 60-63=zero */
         dreg <<= 4;
-
-        /* Obtain the TOD clock update lock */
-        obtain_lock (&sysblk.todlock);
 
         /* Calculate the difference between the new TOD clock
            value and the previous value, if the clock is set */
@@ -332,6 +347,31 @@ struct  timeval tv;                     /* Structure for gettimeofday
             signal_condition (&sysblk.intcond);
             release_lock (&sysblk.intlock);
         }
+
+#ifdef MIPS_COUNTING
+        /* Calculate MIPS rate */
+        msecctr += CLOCK_RESOLUTION;
+        if (msecctr > 999)
+        {
+            for (cpu = 0; cpu < sysblk.numcpu; cpu++)
+            {
+                /* Point to the CPU register context */
+                regs = sysblk.regs + cpu;
+
+                /* Calculate instructions/millisecond for this CPU */
+                regs->mipsrate =
+                    (regs->instcount - regs->prevcount) / msecctr;
+
+                /* Save the instruction counter */
+                regs->prevcount = regs->instcount;
+
+            } /* end for(cpu) */
+
+            /* Reset the millisecond counter */
+            msecctr = 0;
+
+        } /* end if(msecctr) */
+#endif /*MIPS_COUNTING*/
 
         /* Sleep for CLOCK_RESOLUTION milliseconds */
         tv.tv_sec = CLOCK_RESOLUTION / 1000;

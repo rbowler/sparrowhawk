@@ -19,25 +19,22 @@ processor and device layout.  It is roughly equivalent to the IOCDS on
 a real System/390.  The configuration file is an ASCII text file.
 
 <h3>Example configuration file</h3>
-<pre><code>
-# .--------------------------------------------------CPU serial number
-# |     .---------------------------------------------CPU model number
-# |     |       .------------------------------------Main storage (MB)
-# |     |       |       .------------------------Expanded storage (MB)
-# |     |       |       |       .-------------------tn3270 port number
-# |     |       |       |       |       .---------------Number of CPUs
-# |     |       |       |       |       |       .-------Load parameter
-# |     |       |       |       |       |       |
-# V     V       V       V       V       V       V
-#-----  ----    ----    ----    ----    -       --------
-000611  3090    64      0       3270    1       0120....
+<pre><code>#
+# System parameters
+#
 
-# .-----------------------------Device number
-# |     .-----------------------Device type
-# |     |       .---------------File name
-# |     |       |
-# V     V       V
-#---    ----    --------------------
+CPUSERIAL 000611
+CPUMODEL  3090
+MAINSIZE  64
+XPNDSIZE  0
+CNSLPORT  3270
+NUMCPU    1
+LOADPARM  0120....
+
+#
+# Device definitions
+#
+
 000A    1442    adrdmprs.rdr
 000C    3505    jcl.txt ascii trunc
 000D    3525    pch00d.txt ascii
@@ -62,33 +59,35 @@ a real System/390.  The configuration file is an ASCII text file.
 Blank lines, and lines beginning with a hash sign or an asterisk,
 are treated as comments.
 
-<h3>CPU record</h3>
+<h3>System parameters</h3>
 <p>
-The first statement of the configuration file is the CPU record.
-The format of the CPU record is:
-<p><code><em>cpuid cpumodel mainstor expnstor port numcpu loadparm</em></code>
-<p>where:
+System parameters may appear in any order but they must precede all
+device records.  Each system parameter must be on a separate line.
+The following system parameters may be specified:
 <dl>
-<dt><code><em>cpuid</em></code>
-<dd>is a 6 hexadecimal digit number which is the CPU serial number
+<dt><code>CPUID <em>xxxxxx</em></code>
+<dd>specifies the 6 hexadecimal digit CPU serial
+    number stored by the STIDP instruction
+<dt><code>CPUMODEL <em>xxxx</em></code>
+<dd>specifies the 4 hexadecimal digit CPU model number
     stored by the STIDP instruction
-<dt><code><em>cpumodel</em></code>
-<dd>is a 4 hexadecimal digit number which is the CPU model number
-    stored by the STIDP instruction
-<dt><code><em>mainstor</em></code>
-<dd>is a decimal number giving the main storage size in megabytes
-    (valid range is 2 to 2048 megabytes)
-<dt><code><em>expnstor</em></code>
-<dd>is a decimal number giving the expanded storage size in megabytes
-    (valid range is 0 to 2048 megabytes)
-<dt><code><em>port</em></code>
-<dd>is the port number (in decimal) for tn3270 and telnet clients
-<dt><code><em>numcpu</em></code>
-<dd>is the number of emulated CPU's (currently ignored, as Hercules
-    only supports uniprocessor configurations at present)
-<dt><code><em>loadparm</em></code>
-<dd>is the eight-character LOADPARM parameter which is used by some
-    operating systems to select system parameters
+<dt><code>MAINSTOR <em>nnnn</em></code>
+<dd>specifies the main storage size in megabytes, where
+    <code><em>nnnn</em></code> is a decimal number
+    in the range is 2 to 2048
+<dt><code>XPNDSTOR <em>nnnn</em></code>
+<dd>specifies the expanded storage size in megabytes, where
+    <code><em>nnnn</em></code> is a decimal number
+    in the range is 0 to 2048
+<dt><code>CNSLPORT <em>nnnn</em></code>
+<dd>specifies the port number (in decimal) to which tn3270 and
+    telnet clients will connect
+<dt><code>NUMCPU <em>nn</em></code>
+<dd>specifies the number of emulated CPU's (currently ignored, as
+    Hercules only supports uniprocessor configurations at present)
+<dt><code>LOADPARM <em>xxxxxxxx</em></code>
+<dd>specifies the eight-character IPL parameter which is used
+    by some operating systems to select system parameters
 </dl>
 
 <h3>Device records</h3>
@@ -317,7 +316,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 15 Feb 2000
+<p>Last updated 19 Feb 2000
 </BODY>
 </HTML>
 

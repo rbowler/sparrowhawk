@@ -181,6 +181,20 @@ BYTE    unittyp;                        /* Unit type                 */
 
 
 /*-------------------------------------------------------------------*/
+/* Query the device definition                                       */
+/*-------------------------------------------------------------------*/
+void fbadasd_query_device (DEVBLK *dev, BYTE **class,
+                int buflen, BYTE *buffer)
+{
+
+    *class = "DASD";
+    snprintf (buffer, buflen, "%s [%d blks]",
+            dev->filename,
+            dev->fbanumblk);
+
+} /* end function fbadasd_query_device */
+
+/*-------------------------------------------------------------------*/
 /* Execute a Channel Command Word                                    */
 /*-------------------------------------------------------------------*/
 void fbadasd_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,

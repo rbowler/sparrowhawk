@@ -1,4 +1,4 @@
-/* DIAGNOSE.C   (c) Copyright Jan Jaeger, 1999                       */
+/* DIAGNOSE.C   (c) Copyright Jan Jaeger, 1999-2000                  */
 /*              ESA/390 Diagnose Functions                           */
 
 /*-------------------------------------------------------------------*/
@@ -49,7 +49,7 @@ typedef struct _SPCCB_CONFIG_INFO {
         BYTE    hex04;                  /* This field contains the
                                            value of 04 hex.          */
         BYTE    hex01;                  /* This field contains the
-                                           value of either 0 hex or
+                                           value of either 01 hex or
                                            02 hex.                   */
         FWORD   reserved;               /* Reserved.                 */
         HWORD   toticpu;                /* Total number of installed
@@ -208,7 +208,7 @@ DEVBLK            *dev;                /* Device block pointer       */
     spccblen = (spccb->length[0] << 8) | spccb->length[1];
 
     /* Mark page referenced */
-    sysblk.storkeys[spccb_absolute_addr >> 12] |= STORKEY_REF;
+    STORAGE_KEY(spccb_absolute_addr) |= STORKEY_REF;
 
     /* Program check if end of SPCCB falls outside main storage */
     if ( sysblk.mainsize - spccblen < spccb_absolute_addr )
@@ -324,7 +324,7 @@ DEVBLK            *dev;                /* Device block pointer       */
         } /* end switch(mssf_command) */
 
     /* Mark page changed */
-    sysblk.storkeys[spccb_absolute_addr >> 12] |= STORKEY_CHANGE;
+    STORAGE_KEY(spccb_absolute_addr) |= STORKEY_CHANGE;
 
     /* Set service signal external interrupt pending */
     sysblk.servparm = spccb_absolute_addr;
@@ -358,7 +358,7 @@ static U64        diag204tod;          /* last diag204 tod           */
     abs = APPLY_PREFIXING (regs->gpr[r1], regs->pxr);
 
     /* Program check if RMF data is not on a page boundary */
-    if ( abs & 0x00000FFF )
+    if ( (abs & STORAGE_KEY_BYTEMASK) != 0x000)
     {
         program_check (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
@@ -382,11 +382,14 @@ static U64        diag204tod;          /* last diag204 tod           */
         /* save last diag204 tod */
         dreg = diag204tod;
 
-        /* Retrieve the TOD clock value and update diag204tod */
-        diag204tod = sysblk.todclk;
+        /* Retrieve the TOD clock value and shift out the epoch */
+        diag204tod = sysblk.todclk << 8;
 
-        /* Increment bit position 63 to ensure unique values */
-        sysblk.todclk++;
+        /* Insert the uniqueness value in bits 52-63 */
+        diag204tod |= (sysblk.toduniq & 0xFFF);
+
+        /* Increment the TOD clock uniqueness value */
+        sysblk.toduniq++;
 
         /* Release the TOD clock update lock */
         release_lock (&sysblk.todlock);
@@ -395,7 +398,7 @@ static U64        diag204tod;          /* last diag204 tod           */
         hdrinfo = (DIAG204_HDR*)(sysblk.mainstor + abs);
 
         /* Mark page referenced */
-        sysblk.storkeys[abs >> 12] |= STORKEY_REF | STORKEY_CHANGE;
+        STORAGE_KEY(abs) |= STORKEY_REF | STORKEY_CHANGE;
 
         memset(hdrinfo, 0, sizeof(DIAG204_HDR));
         hdrinfo->numpart = 1;
@@ -422,6 +425,7 @@ static U64        diag204tod;          /* last diag204 tod           */
             partinfo->partname[i] = ascii_to_ebcdic[(int)lparname[i]];
 
         /* hercules cpu's */
+        getrusage(RUSAGE_SELF,&usage);
         cpuinfo = (DIAG204_PART_CPU*)(partinfo + 1);
         for(i = 0; i < sysblk.numcpu;i++) {
             memset(cpuinfo, 0, sizeof(DIAG204_PART_CPU));
@@ -429,7 +433,6 @@ static U64        diag204tod;          /* last diag204 tod           */
             cpuinfo->cpaddr[1] = sysblk.regs[i].cpuad & 0xFF;
             cpuinfo->relshare[0] = (100 & 0xFF00) >> 8;
             cpuinfo->relshare[1] = 100 & 0xFF;
-            getrusage(RUSAGE_SELF,&usage);
             dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) / sysblk.numcpu;
             dreg = dreg * 1000000 + (i ? 0 : usage.ru_utime.tv_usec + usage.ru_stime.tv_usec);
             dreg <<= 12;
@@ -456,6 +459,7 @@ static U64        diag204tod;          /* last diag204 tod           */
         }
 
         /* lpar management */
+        getrusage(RUSAGE_CHILDREN,&usage);
         partinfo = (DIAG204_PART*)cpuinfo;
         memset(partinfo, 0, sizeof(DIAG204_PART));
         partinfo->partnum = 0;
@@ -466,7 +470,6 @@ static U64        diag204tod;          /* last diag204 tod           */
         memset(cpuinfo, 0, sizeof(DIAG204_PART_CPU));
 //      cpuinfo->cpaddr[0] = 0;
 //      cpuinfo->cpaddr[1] = 0;
-        getrusage(RUSAGE_CHILDREN,&usage);
         dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) / sysblk.numcpu;
         dreg = dreg * 1000000 + (i ? 0 : usage.ru_utime.tv_usec + usage.ru_stime.tv_usec);
         dreg <<= 12;

@@ -35,7 +35,6 @@ static U32 abs_stack_addr (U32 vaddr, REGS *regs, int acctype)
 int     rc;                             /* Return code               */
 U32     raddr;                          /* Real address              */
 U32     aaddr;                          /* Absolute address          */
-U32     block;                          /* 4K block number           */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=ALE or page protection  */
 int     stid;                           /* Segment table indication  */
@@ -87,10 +86,9 @@ U16     xcode;                          /* Exception code            */
     }
 
     /* Set the reference and change bits in the storage key */
-    block = aaddr >> 12;
-    sysblk.storkeys[block] |= STORKEY_REF;
+    STORAGE_KEY(aaddr) |= STORKEY_REF;
     if (acctype == ACCTYPE_WRITE)
-        sysblk.storkeys[block] |= STORKEY_CHANGE;
+        STORAGE_KEY(aaddr) |= STORKEY_CHANGE;
 
     /* Return absolute address */
     return aaddr;
@@ -263,7 +261,7 @@ int     i;                              /* Array subscript           */
         abs += 4;
 
         /* Recalculate absolute address if page boundary crossed */
-        if ((lsea & 0xFFF) == 0x000)
+        if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
             abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
 
     } /* end for(i) */
@@ -288,7 +286,7 @@ int     i;                              /* Array subscript           */
         abs += 4;
 
         /* Recalculate absolute address if page boundary crossed */
-        if ((lsea & 0xFFF) == 0x000)
+        if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
             abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
 
     } /* end for(i) */
@@ -309,7 +307,7 @@ int     i;                              /* Array subscript           */
     abs += 8;
 
     /* Recalculate absolute address if page boundary crossed */
-    if ((lsea & 0xFFF) == 0x000)
+    if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
         abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
 
     /* Store the current PSW in bytes 136-143 */
@@ -337,7 +335,7 @@ int     i;                              /* Array subscript           */
     abs += 8;
 
     /* Recalculate absolute address if page boundary crossed */
-    if ((lsea & 0xFFF) == 0x000)
+    if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
         abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
 
     /* Store the called address or PC number in bytes 148-151 */
@@ -352,7 +350,7 @@ int     i;                              /* Array subscript           */
     abs += 8;
 
     /* Recalculate absolute address if page boundary crossed */
-    if ((lsea & 0xFFF) == 0x000)
+    if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
         abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
 
     /* Store zeroes in bytes 152-159 */
@@ -364,7 +362,7 @@ int     i;                              /* Array subscript           */
     abs += 8;
 
     /* Recalculate absolute address if page boundary crossed */
-    if ((lsea & 0xFFF) == 0x000)
+    if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
         abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
 
     /* Build the new linkage stack entry descriptor */
@@ -598,7 +596,7 @@ int     tranreqd;                       /* 1=Translation required    */
     for (i = 0; i < 16; i++)
     {
         /* Recalculate absolute address if page boundary crossed */
-        if ((lsea & 0xFFF) == 0x000)
+        if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
             tranreqd = 1;
 
         /* Calculate absolute address if required */
@@ -635,7 +633,7 @@ int     tranreqd;                       /* 1=Translation required    */
     for (i = 0; i < 16; i++)
     {
         /* Recalculate absolute address if page boundary crossed */
-        if ((lsea & 0xFFF) == 0x000)
+        if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
             tranreqd = 1;
 
         /* Calculate absolute address if required */
@@ -761,7 +759,7 @@ U16     pasn;                           /* Primary ASN               */
     abs += 8;
 
     /* Recalculate absolute address if page boundary crossed */
-    if ((lsea & 0xFFF) == 0x000)
+    if ((lsea & STORAGE_KEY_BYTEMASK) == 0x000)
         abs = abs_stack_addr (lsea, regs, ACCTYPE_READ);
 
     /* Save the PER mode bit from the current PSW */

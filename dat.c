@@ -117,7 +117,7 @@ static inline U32 fetch_fullword_absolute (U32 addr)
 U32     i;
 
     /* Set the main storage reference bit */
-    sysblk.storkeys[addr >> 12] |= STORKEY_REF;
+    STORAGE_KEY(addr) |= STORKEY_REF;
 
     /* Fetch the fullword from absolute storage */
     i = *((U32*)(sysblk.mainstor + addr));
@@ -321,7 +321,7 @@ BYTE    ate;                            /* Authority table entry     */
     ate <<= ((ax & 0x03)*2);
 
     /* Set the main storage reference bit */
-    sysblk.storkeys[ato >> 12] |= STORKEY_REF;
+    STORAGE_KEY(ato) |= STORKEY_REF;
 
     /* Authorization fails if the specified bit (either X'80' or
        X'40' of the 2 bit authority table entry) is zero */
@@ -978,7 +978,7 @@ U16     xcode;                          /* Exception code            */
         goto tprot_addr_excp;
 
     /* Load the storage key for the absolute address */
-    skey = sysblk.storkeys[aaddr >> 12];
+    skey = STORAGE_KEY(aaddr);
 
     /* Return condition code 2 if location is fetch protected */
     if (is_fetch_protected (addr, skey, akey, private, regs))
@@ -1031,7 +1031,6 @@ static U32 logical_to_abs (U32 addr, int arn, REGS *regs,
 {
 U32     raddr;                          /* Real address              */
 U32     aaddr;                          /* Absolute address          */
-U32     block;                          /* 4K block number           */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=ALE or page protection  */
 int     stid;                           /* Segment table indication  */
@@ -1070,28 +1069,27 @@ U16     xcode;                          /* Exception code            */
 #endif /*FEATURE_INTERVAL_TIMER*/
 
     /* Check protection and set reference and change bits */
-    block = aaddr >> 12;
     switch (acctype) {
 
     case ACCTYPE_READ:
     case ACCTYPE_INSTFETCH:
         /* Program check if fetch protected location */
-        if (is_fetch_protected (addr, sysblk.storkeys[block], akey,
+        if (is_fetch_protected (addr, STORAGE_KEY(aaddr), akey,
                                 private, regs))
             goto vabs_prot_excp;
 
         /* Set the reference bit in the storage key */
-        sysblk.storkeys[block] |= STORKEY_REF;
+        STORAGE_KEY(aaddr) |= STORKEY_REF;
         break;
 
     case ACCTYPE_WRITE:
         /* Program check if store protected location */
-        if (is_store_protected (addr, sysblk.storkeys[block], akey,
+        if (is_store_protected (addr, STORAGE_KEY(aaddr), akey,
                                 private, protect, regs))
             goto vabs_prot_excp;
 
         /* Set the reference and change bits in the storage key */
-        sysblk.storkeys[block] |= (STORKEY_REF | STORKEY_CHANGE);
+        STORAGE_KEY(aaddr) |= (STORKEY_REF | STORKEY_CHANGE);
         break;
     } /* end switch */
 
@@ -1146,11 +1144,11 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
     /* Calculate page address of last byte of operand */
     addr2 = (addr + len) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    addr2 &= 0xFFFFF000;
+    addr2 &= STORAGE_KEY_PAGEMASK;
 
     /* Copy data to real storage in either one or two parts
        depending on whether operand crosses a page boundary */
-    if (addr2 == (addr & 0xFFFFF000)) {
+    if (addr2 == (addr & STORAGE_KEY_PAGEMASK)) {
         addr = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE, akey);
         memcpy (sysblk.mainstor+addr, src, len+1);
     } else {
@@ -1212,7 +1210,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     abs1 = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE, akey);
 
     /* Repeat address translation if operand crosses a page boundary */
-    if ((addr2 & 0xFFF) == 0x000)
+    if ((addr2 & STORAGE_KEY_BYTEMASK) == 0x000)
         abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE, akey);
     else
         abs2 = abs1 + 1;
@@ -1263,7 +1261,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
     /* Calculate page address of last byte of operand */
     addr2 = (addr + 3) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    addr2 &= 0xFFFFF000;
+    addr2 &= STORAGE_KEY_PAGEMASK;
     abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE, akey);
 
     /* Store integer value byte by byte at operand location */
@@ -1329,7 +1327,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
     /* Calculate page address of last byte of operand */
     addr2 = (addr + 7) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    addr2 &= 0xFFFFF000;
+    addr2 &= STORAGE_KEY_PAGEMASK;
     abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE, akey);
 
     /* Store integer value byte by byte at operand location */
@@ -1378,11 +1376,11 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
     /* Calculate page address of last byte of operand */
     addr2 = (addr + len) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    addr2 &= 0xFFFFF000;
+    addr2 &= STORAGE_KEY_PAGEMASK;
 
     /* Copy data from real storage in either one or two parts
        depending on whether operand crosses a page boundary */
-    if (addr2 == (addr & 0xFFFFF000)) {
+    if (addr2 == (addr & STORAGE_KEY_PAGEMASK)) {
         addr = logical_to_abs (addr, arn, regs, ACCTYPE_READ, akey);
         memcpy (dest, sysblk.mainstor+addr, len+1);
     } else {
@@ -1446,7 +1444,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     abs1 = logical_to_abs (addr, arn, regs, ACCTYPE_READ, akey);
 
     /* Repeat address translation if operand crosses a page boundary */
-    if ((addr2 & 0xFFF) == 0x000)
+    if ((addr2 & STORAGE_KEY_BYTEMASK) == 0x000)
         abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_READ, akey);
     else
         abs2 = abs1 + 1;
@@ -1495,7 +1493,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
     /* Calculate page address of last byte of operand */
     addr2 = (addr + 3) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    addr2 &= 0xFFFFF000;
+    addr2 &= STORAGE_KEY_PAGEMASK;
     abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_READ, akey);
 
     /* Fetch integer value byte by byte from operand location */
@@ -1563,7 +1561,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
     /* Calculate page address of last byte of operand */
     addr2 = (addr + 7) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    addr2 &= 0xFFFFF000;
+    addr2 &= STORAGE_KEY_PAGEMASK;
     abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_READ, akey);
 
     /* Fetch integer value byte by byte from operand location */
@@ -1618,6 +1616,14 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         return;
     }
 
+    /* Fetch six bytes if instruction cannot cross a page boundary */
+    if ((addr & STORAGE_KEY_BYTEMASK) <= STORAGE_KEY_PAGESIZE - 6)
+    {
+        abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
+        memcpy (dest, sysblk.mainstor+abs, 6);
+        return;
+    }
+
     /* Fetch first two bytes of instruction */
     abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
     memcpy (dest, sysblk.mainstor+abs, 2);
@@ -1629,7 +1635,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     abs += 2;
     addr += 2;
     addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    if ((addr & 0xFFF) == 0x000) {
+    if ((addr & STORAGE_KEY_BYTEMASK) == 0x000) {
         abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
     }
     memcpy (dest+2, sysblk.mainstor+abs, 2);
@@ -1641,7 +1647,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     abs += 2;
     addr += 2;
     addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    if ((addr & 0xFFF) == 0x000) {
+    if ((addr & STORAGE_KEY_BYTEMASK) == 0x000) {
         abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
     }
     memcpy (dest+4, sysblk.mainstor+abs, 2);
@@ -1700,15 +1706,15 @@ BYTE    obyte;                          /* Operand byte              */
     /* Calculate page addresses of rightmost operand bytes */
     npv1 = (addr1 + len)
                 & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    npv1 &= 0xFFFFF000;
+    npv1 &= STORAGE_KEY_PAGEMASK;
     npv2 = (addr2 + len)
                 & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    npv2 &= 0xFFFFF000;
+    npv2 &= STORAGE_KEY_PAGEMASK;
 
     /* Translate next page addresses if page boundary crossed */
-    if (npv1 != (addr1 & 0xFFFFF000))
+    if (npv1 != (addr1 & STORAGE_KEY_PAGEMASK))
         npa1 = logical_to_abs (npv1, arn1, regs, ACCTYPE_WRITE, key1);
-    if (npv2 != (addr2 & 0xFFFFF000))
+    if (npv2 != (addr2 & STORAGE_KEY_PAGEMASK))
         npa2 = logical_to_abs (npv2, arn2, regs, ACCTYPE_READ, key2);
 
     /* Process operands from left to right */
@@ -1726,7 +1732,7 @@ BYTE    obyte;                          /* Operand byte              */
         abs1++;
 
         /* Adjust absolute address if page boundary crossed */
-        if ((addr1 & 0xFFF) == 0x000)
+        if ((addr1 & STORAGE_KEY_BYTEMASK) == 0x000)
             abs1 = npa1;
 
         /* Increment second operand address */
@@ -1735,7 +1741,7 @@ BYTE    obyte;                          /* Operand byte              */
         abs2++;
 
         /* Adjust absolute address if page boundary crossed */
-        if ((addr2 & 0xFFF) == 0x000)
+        if ((addr2 & STORAGE_KEY_BYTEMASK) == 0x000)
             abs2 = npa2;
 
     } /* end for(i) */
@@ -1788,15 +1794,15 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     /* Calculate page addresses of rightmost operand bytes */
     npv1 = (addr1 + len)
                 & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    npv1 &= 0xFFFFF000;
+    npv1 &= STORAGE_KEY_PAGEMASK;
     npv2 = (addr2 + len)
                 & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    npv2 &= 0xFFFFF000;
+    npv2 &= STORAGE_KEY_PAGEMASK;
 
     /* Translate next page addresses if page boundary crossed */
-    if (npv1 != (addr1 & 0xFFFFF000))
+    if (npv1 != (addr1 & STORAGE_KEY_PAGEMASK))
         npa1 = logical_to_abs (npv1, arn1, regs, ACCTYPE_WRITE, akey);
-    if (npv2 != (addr2 & 0xFFFFF000))
+    if (npv2 != (addr2 & STORAGE_KEY_PAGEMASK))
         npa2 = logical_to_abs (npv2, arn2, regs, ACCTYPE_READ, akey);
 
     /* Process operands from left to right */
@@ -1848,7 +1854,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         abs1++;
 
         /* Adjust absolute address if page boundary crossed */
-        if ((addr1 & 0xFFF) == 0x000)
+        if ((addr1 & STORAGE_KEY_BYTEMASK) == 0x000)
             abs1 = npa1;
 
         /* Increment second operand address */
@@ -1857,7 +1863,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         abs2++;
 
         /* Adjust absolute address if page boundary crossed */
-        if ((addr2 & 0xFFF) == 0x000)
+        if ((addr2 & STORAGE_KEY_BYTEMASK) == 0x000)
             abs2 = npa2;
 
     } /* end for(i) */
@@ -1901,10 +1907,10 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     /* Calculate page address of rightmost operand byte */
     npv = (addr + len)
                 & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-    npv &= 0xFFFFF000;
+    npv &= STORAGE_KEY_PAGEMASK;
 
     /* Translate next page address if page boundary crossed */
-    if (npv != (addr & 0xFFFFF000))
+    if (npv != (addr & STORAGE_KEY_PAGEMASK))
         logical_to_abs (npv, arn, regs, acctype, akey);
 
 } /* end function validate_operand */

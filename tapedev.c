@@ -1406,6 +1406,19 @@ U32             sctlfeat;               /* Storage control features  */
 
 
 /*-------------------------------------------------------------------*/
+/* Query the device definition                                       */
+/*-------------------------------------------------------------------*/
+void tapedev_query_device (DEVBLK *dev, BYTE **class,
+                int buflen, BYTE *buffer)
+{
+
+    *class = "TAPE";
+    snprintf (buffer, buflen, "%s", dev->filename);
+
+} /* end function tapedev_query_device */
+
+
+/*-------------------------------------------------------------------*/
 /* Execute a Channel Command Word                                    */
 /*-------------------------------------------------------------------*/
 void tapedev_execute_ccw (DEVBLK *dev, BYTE code, BYTE flags,

@@ -101,6 +101,20 @@ int     i;                              /* Array subscript           */
 } /* end function printer_init_handler */
 
 /*-------------------------------------------------------------------*/
+/* Query the device definition                                       */
+/*-------------------------------------------------------------------*/
+void printer_query_device (DEVBLK *dev, BYTE **class,
+                int buflen, BYTE *buffer)
+{
+
+    *class = "PRT";
+    snprintf (buffer, buflen, "%s%s",
+                dev->filename,
+                (dev->crlf ? " crlf" : ""));
+
+} /* end function printer_query_device */
+
+/*-------------------------------------------------------------------*/
 /* Execute a Channel Command Word                                    */
 /*-------------------------------------------------------------------*/
 void printer_execute_ccw (DEVBLK *dev, BYTE code, BYTE flags,

@@ -281,7 +281,7 @@ U32     tea;                            /* Translation exception addr*/
 BYTE    excarid;                        /* Exception access reg id   */
 
     /* Set the main storage reference and change bits */
-    sysblk.storkeys[regs->pxr >> 12] |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(regs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Save the translation exception address and AR identifier */
     tea = regs->tea;
@@ -406,7 +406,7 @@ int     rc;                             /* Return code               */
 PSA    *psa;                            /* -> Prefixed storage area  */
 
     /* Set the main storage reference and change bits */
-    sysblk.storkeys[regs->pxr >> 12] |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(regs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Zeroize the interrupt code in the PSW */
     regs->psw.intcode = 0;
@@ -748,8 +748,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Update the storage key from R1 register bits 24-30 */
-        n >>= 12;
-        sysblk.storkeys[n] = regs->gpr[r1] & 0xFE;
+        STORAGE_KEY(n) = regs->gpr[r1] & 0xFE;
 
 //      /*debug*/logmsg("SSK storage block %8.8X key %2.2X\n",
 //                      regs->gpr[r2], regs->gpr[r1] & 0xFE);
@@ -789,9 +788,8 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Insert the storage key into R1 register bits 24-31 */
-        n >>= 12;
         regs->gpr[r1] &= 0xFFFFFF00;
-        regs->gpr[r1] |= sysblk.storkeys[n];
+        regs->gpr[r1] |= STORAGE_KEY(n);
 
         /* In BC mode, clear bits 29-31 of R1 register */
         if ( regs->psw.ecmode == 0 )
@@ -809,8 +807,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Set the main storage reference and change bits */
-        sysblk.storkeys[regs->pxr >> 12] |=
-                                (STORKEY_REF | STORKEY_CHANGE);
+        STORAGE_KEY(regs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
 
         /* Use the I-byte to set the SVC interruption code */
         regs->psw.intcode = ibyte;
@@ -3334,14 +3331,20 @@ static BYTE module[8];                  /* Module name               */
         /* Obtain the TOD clock update lock */
         obtain_lock (&sysblk.todlock);
 
-        /* Retrieve the TOD clock value */
-        dreg = sysblk.todclk;
+        /* Retrieve the TOD clock value and shift out the epoch */
+        dreg = sysblk.todclk << 8;
+
+        /* Insert the uniqueness value in bits 52-63 */
+        dreg |= (sysblk.toduniq & 0xFFF);
+
+        /* Increment the TOD clock uniqueness value */
+        sysblk.toduniq++;
 
         /* Release the TOD clock update lock */
         release_lock (&sysblk.todlock);
 
         /* Set the main storage change and reference bits */
-        sysblk.storkeys[n >> 12] |= (STORKEY_REF | STORKEY_CHANGE);
+        STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
 
         /* Build the explicit trace entry */
         sysblk.mainstor[n++] = (0x70 | i);
@@ -3949,6 +3952,33 @@ static BYTE module[8];                  /* Module name               */
                 goto terminate;
             }
 
+            /* Program check if operand not on doubleword boundary */
+            if ( effective_addr & 0x00000007 )
+            {
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Fetch new TOD clock value from operand address */
+            dreg = vfetch8 ( effective_addr, ar1, regs);
+
+            /* Obtain the TOD clock update lock */
+            obtain_lock (&sysblk.todlock);
+
+            /* Compute the new TOD clock offset in microseconds */
+            sysblk.todoffset += (dreg >> 12) - (sysblk.todclk >> 4);
+
+            /* Set the new TOD clock value */
+            sysblk.todclk = (dreg & 0xFFFFFFFFFFFFF000ULL) >> 8;
+
+            /* Reset the TOD clock uniqueness value */
+            sysblk.toduniq = 0;
+
+            /* Release the TOD clock update lock */
+            release_lock (&sysblk.todlock);
+
+            /*debug*/logmsg("Set TOD clock=%16.16llX\n", dreg);
+
             /* Return condition code zero */
             regs->psw.cc = 0;
 
@@ -4315,13 +4345,12 @@ static BYTE module[8];                  /* Module name               */
 
             /* Set the condition code according to the original state
                of the reference and change bits in the storage key */
-            n >>= 12;
             regs->psw.cc =
-               ((sysblk.storkeys[n] & STORKEY_REF) ? 2 : 0)
-               | ((sysblk.storkeys[n] & STORKEY_CHANGE) ? 1 : 0);
+               ((STORAGE_KEY(n) & STORKEY_REF) ? 2 : 0)
+               | ((STORAGE_KEY(n) & STORKEY_CHANGE) ? 1 : 0);
 
             /* Reset the reference bit in the storage key */
-            sysblk.storkeys[n] &= ~(STORKEY_REF);
+            STORAGE_KEY(n) &= ~(STORKEY_REF);
 
             break;
 #endif /*FEATURE_BASIC_STORAGE_KEYS*/
@@ -4524,9 +4553,8 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Insert the storage key into R1 register bits 24-31 */
-            n >>= 12;
             regs->gpr[r1] &= 0xFFFFFF00;
-            regs->gpr[r1] |= sysblk.storkeys[n];
+            regs->gpr[r1] |= STORAGE_KEY(n);
 
             /* Clear bits 29-31 of R1 register */
             regs->gpr[r1] &= 0xFFFFFFF8;
@@ -4695,9 +4723,8 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Insert the storage key into R1 register bits 24-31 */
-            n >>= 12;
             regs->gpr[r1] &= 0xFFFFFF00;
-            regs->gpr[r1] |= sysblk.storkeys[n];
+            regs->gpr[r1] |= STORAGE_KEY(n);
 
             break;
 
@@ -4729,13 +4756,12 @@ static BYTE module[8];                  /* Module name               */
 
             /* Set the condition code according to the original state
                of the reference and change bits in the storage key */
-            n >>= 12;
             regs->psw.cc =
-               ((sysblk.storkeys[n] & STORKEY_REF) ? 2 : 0)
-               | ((sysblk.storkeys[n] & STORKEY_CHANGE) ? 1 : 0);
+               ((STORAGE_KEY(n) & STORKEY_REF) ? 2 : 0)
+               | ((STORAGE_KEY(n) & STORKEY_CHANGE) ? 1 : 0);
 
             /* Reset the reference bit in the storage key */
-            sysblk.storkeys[n] &= ~(STORKEY_REF);
+            STORAGE_KEY(n) &= ~(STORKEY_REF);
 
             break;
 
@@ -4770,8 +4796,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Update the storage key from R1 register bits 24-30 */
-            n >>= 12;
-            sysblk.storkeys[n] = regs->gpr[r1] & 0xFE;
+            STORAGE_KEY(n) = regs->gpr[r1] & 0xFE;
 
             /* Perform serialization and checkpoint-synchronization */
             perform_serialization ();
@@ -6743,7 +6768,7 @@ DWORD   csw;                            /* CSW for S/370 channels    */
     if (rc == 0) return;
 
     /* Set the main storage reference and change bits */
-    sysblk.storkeys[regs->pxr >> 12] |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(regs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Point to the PSA in main storage */
     psa = (PSA*)(sysblk.mainstor + regs->pxr);

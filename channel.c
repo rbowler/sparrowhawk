@@ -115,7 +115,7 @@ BYTE   *ccw;                            /* CCW pointer               */
     }
 
     /* Channel protection check if CCW is fetch protected */
-    storkey = sysblk.storkeys[ccwaddr >> 12];
+    storkey = STORAGE_KEY(ccwaddr);
     if (ccwkey != 0 && (storkey & STORKEY_FETCH)
         && (storkey & STORKEY_KEY) != ccwkey)
     {
@@ -124,7 +124,7 @@ BYTE   *ccw;                            /* CCW pointer               */
     }
 
     /* Set the main storage reference bit for the CCW location */
-    sysblk.storkeys[ccwaddr >> 12] |= STORKEY_REF;
+    STORAGE_KEY(ccwaddr) |= STORKEY_REF;
 
     /* Point to the CCW in main storage */
     ccw = sysblk.mainstor + ccwaddr;
@@ -175,7 +175,7 @@ BYTE    storkey;                        /* Storage key               */
     }
 
     /* Channel protection check if IDAW is fetch protected */
-    storkey = sysblk.storkeys[idawaddr >> 12];
+    storkey = STORAGE_KEY(idawaddr);
     if (ccwkey != 0 && (storkey & STORKEY_FETCH)
         && (storkey & STORKEY_KEY) != ccwkey)
     {
@@ -184,7 +184,7 @@ BYTE    storkey;                        /* Storage key               */
     }
 
     /* Set the main storage reference bit for the IDAW location */
-    sysblk.storkeys[idawaddr >> 12] |= STORKEY_REF;
+    STORAGE_KEY(idawaddr) |= STORKEY_REF;
 
     /* Fetch IDAW from main storage */
     idaw = sysblk.mainstor[idawaddr] << 24
@@ -267,7 +267,7 @@ BYTE    area[64];                       /* Data display area         */
             /* Channel protection check if IDAW data location is
                fetch protected, or if location is store protected
                and command is READ, READ BACKWARD, or SENSE */
-            storkey = sysblk.storkeys[idadata >> 12];
+            storkey = STORAGE_KEY(idadata);
             if (ccwkey != 0 && (storkey & STORKEY_KEY) != ccwkey
                 && ((storkey & STORKEY_FETCH) || readcmd))
             {
@@ -279,7 +279,7 @@ BYTE    area[64];                       /* Data display area         */
             if (idalen > idacount) idalen = idacount;
 
             /* Set the main storage reference and change bits */
-            sysblk.storkeys[idadata >> 12] |=
+            STORAGE_KEY(idadata) |=
                 (readcmd ? (STORKEY_REF|STORKEY_CHANGE) : STORKEY_REF);
 
             /* Copy data between main storage and channel buffer */
@@ -317,8 +317,8 @@ BYTE    area[64];                       /* Data display area         */
         /* Channel protection check if any data is fetch protected,
            or if location is store protected and command is READ,
            READ BACKWARD, or SENSE */
-        firstpage = addr >> 12;
-        lastpage = (addr + count - 1) >> 12;
+        firstpage = addr >> STORAGE_KEY_PAGESHIFT;
+        lastpage = (addr + count - 1) >> STORAGE_KEY_PAGESHIFT;
         for (i = firstpage; i <= lastpage; i++)
         {
             storkey = sysblk.storkeys[i];

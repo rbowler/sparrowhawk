@@ -22,6 +22,8 @@
 
 #include "hercules.h"
 
+#undef  MIPS_COUNTING
+
 /*=NP================================================================*/
 /* Global data for new panel display                                 */
 /*   (Note: all NPD mods are identified by the string =NP=           */
@@ -148,6 +150,7 @@ static void NP_screen(FILE *confp)
 {
 
     DEVBLK *dev;
+    BYTE *devclass;
     int p, a;
     char c[2];
     char devnam[128];
@@ -179,7 +182,11 @@ static void NP_screen(FILE *confp)
     fprintf(confp, ANSI_CURSOR, 16, 22);
     fprintf(confp, "DATA:");
     fprintf(confp, ANSI_CURSOR, 20, 2);
+#ifdef MIPS_COUNTING
+    fprintf(confp, "MIPS");
+#else
     fprintf(confp, "instructions");
+#endif
 
 
     p = 3;
@@ -188,58 +195,9 @@ static void NP_screen(FILE *confp)
          fprintf(confp, ANSI_CURSOR, p, 40);
          c[0] = a | 0x40;
          c[1] = '\0';
-         fprintf(confp, "%s %4.4X %4.4X ", c, dev->devnum, dev->devtype);
-         switch (dev->devtype) {
-             case 0x1052:
-             case 0x3215:
-                 fprintf(confp, "CON  ");
-                 break;
-             case 0x1442:
-             case 0x2501:
-             case 0x3505:
-                 fprintf(confp, "RDR  ");
-                 break;
-             case 0x3525:
-                 fprintf(confp, "PCH  ");
-                 break;
-             case 0x1403:
-             case 0x3211:
-                 fprintf(confp, "PRT  ");
-                 break;
-             case 0x3420:
-             case 0x3480:
-                 fprintf(confp, "TAPE ");
-                 break;
-             case 0x2311:
-             case 0x2314:
-             case 0x3330:
-             case 0x3350:
-             case 0x3380:
-             case 0x3390:
-             case 0x3310:
-             case 0x3370:
-             case 0x9336:
-                 fprintf(confp, "DASD ");
-                 break;
-             case 0x3270:
-                 fprintf(confp, "DSP  ");
-                 break;
-             default:
-                 break;
-         }
-         strcpy(devnam, ((dev->console && dev->connected) ?
-                  (BYTE*)inet_ntoa(dev->ipaddr) : dev->filename));
-         if (dev->ebcdic)
-             strcat(devnam, " ebcdic");
-         if (dev->ascii)
-             strcat(devnam, " ascii");
-         if (dev->crlf)
-             strcat(devnam, " crlf");
-         if (dev->trunc)
-             strcat(devnam, " trunc");
-         if (dev->rdreof)
-             strcat(devnam, " eof");
-         fprintf(confp, "%.24s", devnam);
+         (dev->devqdef)(dev, &devclass, sizeof(devnam), devnam);
+         fprintf(confp, "%s %4.4X %4.4X %-4.4s %.24s",
+                 c, dev->devnum, dev->devtype, devclass, devnam);
          strcpy(NPdevname[a - 1], devnam);
          NPbusy[a - 1] = 0;
          NPbusy[a - 1] = 0;
@@ -315,6 +273,7 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
     BYTE pswmask;                        /* PSW interruption mask     */
     BYTE pswwait;                        /* PSW wait state bit        */
     DEVBLK *dev;
+    BYTE *devclass;
     int p, a;
     char ch[2];
     U32 aaddr;
@@ -434,7 +393,12 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
     }
     fprintf(confp, ANSI_CURSOR, 19, 2);
     fprintf(confp, ANSI_YLW_BLK);
+#ifdef MIPS_COUNTING
+    fprintf(confp, "%1.1d.%2.2d",
+            regs->mipsrate / 1000, (regs->mipsrate % 1000) / 10);
+#else
     fprintf(confp, "%12.12u", (unsigned)regs->instcount);
+#endif
     if (NPaddress != NPcuraddr) {
         fprintf(confp, ANSI_YLW_BLK);
         fprintf(confp, ANSI_CURSOR, 16, 11);
@@ -527,18 +491,7 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
               fprintf(confp, "%4.4X", dev->devtype);
               NPopen[a - 1] = open;
          }
-         strcpy(devnam, ((dev->console && dev->connected) ?
-                  (BYTE*)inet_ntoa(dev->ipaddr) : dev->filename));
-         if (dev->ebcdic)
-             strcat(devnam, " ebcdic");
-         if (dev->ascii)
-             strcat(devnam, " ascii");
-         if (dev->crlf)
-             strcat(devnam, " crlf");
-         if (dev->trunc)
-             strcat(devnam, " trunc");
-         if (dev->rdreof)
-             strcat(devnam, " eof");
+         (dev->devqdef)(dev, &devclass, sizeof(devnam), devnam);
          if (strcmp(NPdevname[a - 1], devnam) != 0) {
              fprintf(confp, ANSI_GRY_BLK);
              fprintf(confp, ANSI_CURSOR, p, 57);
@@ -675,7 +628,6 @@ static void display_fregs (REGS *regs)
 static int display_real (REGS *regs, U32 raddr, BYTE *buf)
 {
 U32     aaddr;                          /* Absolute storage address  */
-int     blkid;                          /* Main storage 4K block id  */
 int     i, j;                           /* Loop counters             */
 int     n;                              /* Number of bytes in buffer */
 BYTE    hbuf[40];                       /* Hexadecimal buffer        */
@@ -690,8 +642,7 @@ BYTE    c;                              /* Character work area       */
         return n;
     }
 
-    blkid = aaddr >> 12;
-    n += sprintf (buf+n, "K:%2.2X=", sysblk.storkeys[blkid]);
+    n += sprintf (buf+n, "K:%2.2X=", STORAGE_KEY(aaddr));
 
     memset (hbuf, SPACE, sizeof(hbuf));
     memset (cbuf, SPACE, sizeof(cbuf));
@@ -1014,6 +965,7 @@ BYTE   *devascii;                       /* ASCII text device number  */
 #define MAX_ARGS 10                     /* Max num of devinit args   */
 int     devargc;                        /* Arg count for devinit     */
 BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
+BYTE   *devclass;                       /* -> Device class name      */
 
     /* Copy panel command to work area */
     memset (cmd, 0, sizeof(cmd));
@@ -1236,8 +1188,7 @@ BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
                 aaddr = raddr + i;
                 aaddr = APPLY_PREFIXING (aaddr, regs->pxr);
                 sysblk.mainstor[aaddr] = newval[i];
-                sysblk.storkeys[aaddr >> 12] |=
-                                (STORKEY_REF | STORKEY_CHANGE);
+                STORAGE_KEY(aaddr) |= (STORKEY_REF | STORKEY_CHANGE);
             } /* end for(i) */
         }
 
@@ -1276,8 +1227,7 @@ BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
                 virt_to_real (&raddr, vaddr+i, 0, regs, ACCTYPE_LRA);
                 aaddr = APPLY_PREFIXING (raddr, regs->pxr);
                 sysblk.mainstor[aaddr] = newval[i];
-                sysblk.storkeys[aaddr >> 12] |=
-                                (STORKEY_REF | STORKEY_CHANGE);
+                STORAGE_KEY(aaddr) |= (STORKEY_REF | STORKEY_CHANGE);
             } /* end for(i) */
         }
 
@@ -1453,10 +1403,12 @@ BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
     {
         for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
         {
+            /* Call the device handler's query definition function */
+            (dev->devqdef)(dev, &devclass, sizeof(buf), buf);
+
+            /* Display the device definition and status */
             logmsg ("%4.4X %4.4X %s %s%s%s\n",
-                    dev->devnum, dev->devtype,
-                    ((dev->console && dev->connected) ?
-                        (BYTE*)inet_ntoa(dev->ipaddr) : dev->filename),
+                    dev->devnum, dev->devtype, buf,
                     (dev->fd > 2 ? "open " : ""),
                     (dev->busy ? "busy " : ""),
                     ((dev->pending || dev->pcipending) ?

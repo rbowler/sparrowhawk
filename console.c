@@ -1016,6 +1016,7 @@ struct sockaddr_in      server;         /* Server address structure  */
 int                     term_flag=0;    /* Termination flag          */
 fd_set                  readset;        /* Read bit map for select   */
 int                     maxfd;          /* Highest fd for select     */
+int                     optval;         /* Argument for setsockopt   */
 TID                     tidneg;         /* Negotiation thread id     */
 DEVBLK                 *dev;            /* -> Device block           */
 BYTE                    unitstat;       /* Status after receive data */
@@ -1036,6 +1037,11 @@ BYTE                    unitstat;       /* Status after receive data */
         TNSERROR("socket: %s\n", strerror(errno));
         return NULL;
     }
+
+    /* Allow previous instance of socket to be reused */
+    optval = 1;
+    setsockopt (lsock, SOL_SOCKET, SO_REUSEADDR,
+                &optval, sizeof(optval));
 
     /* Prepare the sockaddr structure for the bind */
     memset (&server, 0, sizeof(server));
@@ -1230,6 +1236,24 @@ int loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 
 
 /*-------------------------------------------------------------------*/
+/* QUERY THE 3270 DEVICE DEFINITION                                  */
+/*-------------------------------------------------------------------*/
+void loc3270_query_device (DEVBLK *dev, BYTE **class,
+                int buflen, BYTE *buffer)
+{
+
+    *class = "DSP";
+
+    if (dev->connected)
+        snprintf (buffer, buflen, "%s",
+                (BYTE*)inet_ntoa(dev->ipaddr));
+    else
+        buffer[0] = '\0';
+
+} /* end function loc3270_query_device */
+
+
+/*-------------------------------------------------------------------*/
 /* INITIALIZE THE 1052/3215 DEVICE HANDLER                           */
 /*-------------------------------------------------------------------*/
 int constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
@@ -1261,6 +1285,24 @@ int constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 
     return 0;
 } /* end function constty_init_handler */
+
+
+/*-------------------------------------------------------------------*/
+/* QUERY THE 1052/3215 DEVICE DEFINITION                             */
+/*-------------------------------------------------------------------*/
+void constty_query_device (DEVBLK *dev, BYTE **class,
+                int buflen, BYTE *buffer)
+{
+
+    *class = "CON";
+
+    if (dev->connected)
+        snprintf (buffer, buflen, "%s",
+                (BYTE*)inet_ntoa(dev->ipaddr));
+    else
+        buffer[0] = '\0';
+
+} /* end function constty_query_device */
 
 
 /*-------------------------------------------------------------------*/
@@ -1304,6 +1346,7 @@ BYTE            buf[32768];             /* tn3270 write buffer       */
     /*---------------------------------------------------------------*/
     /* SELECT                                                        */
     /*---------------------------------------------------------------*/
+        *residual = 0;
         *unitstat = CSW_CE | CSW_DE;
         break;
 

@@ -42,7 +42,7 @@ static inline U32 fetch_fullword_absolute (U32 addr)
 U32     i;
 
     /* Set the main storage reference bit */
-    sysblk.storkeys[addr >> 12] |= STORKEY_REF;
+    STORAGE_KEY(addr) |= STORKEY_REF;
 
     /* Fetch the fullword from absolute storage */
     i = *((U32*)(sysblk.mainstor + addr));
@@ -60,7 +60,7 @@ static inline void store_fullword_absolute (U32 value, U32 addr)
 U32     i;
 
     /* Set the main storage reference and change bits */
-    sysblk.storkeys[addr >> 12] |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(addr) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Store the fullword into absolute storage */
     i = htonl(value);
