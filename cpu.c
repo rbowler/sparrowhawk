@@ -265,9 +265,9 @@ REGS   *regs = &(sysblk.regs[0]);
             code, regs->psw.ilc);
     instfetch (dword, regs->psw.ia - regs->psw.ilc, regs);
     display_inst (regs, dword);
-    if (code != PGM_PAGE_TRANSLATION_EXCEPTION
-        && code != PGM_SEGMENT_TRANSLATION_EXCEPTION)
-        panel_command (regs);
+//  if (code != PGM_PAGE_TRANSLATION_EXCEPTION
+//      && code != PGM_SEGMENT_TRANSLATION_EXCEPTION)
+//      panel_command (regs);
 
     /* Point to PSA in main storage */
     psa = (PSA*)(sysblk.mainstor + regs->pxr);
@@ -429,10 +429,10 @@ static BYTE module[8];                  /* Module name               */
     /* SPM      Set Program Mask                                [RR] */
     /*---------------------------------------------------------------*/
 
-        /* Set condition code from bits 2-3 of register */
+        /* Set condition code from bits 2-3 of R1 register */
         regs->psw.cc = ( regs->gpr[r1] & 0x30000000 ) >> 28;
 
-        /* Set program mask from bits 4-7 of register */
+        /* Set program mask from bits 4-7 of R1 register */
         regs->psw.fomask = ( regs->gpr[r1] & 0x08000000 ) >> 27;
         regs->psw.domask = ( regs->gpr[r1] & 0x04000000 ) >> 26;
         regs->psw.eumask = ( regs->gpr[r1] & 0x02000000 ) >> 25;
@@ -637,7 +637,7 @@ static BYTE module[8];                  /* Module name               */
     /* MVCL     Move Long                                       [RR] */
     /*---------------------------------------------------------------*/
 
-        /* Program check if either register r1 or r2 is odd */
+        /* Program check if either R1 or R2 register is odd */
         if ( (r1 & 1) || (r2 & 1) )
         {
             program_check (PGM_SPECIFICATION_EXCEPTION);
@@ -652,10 +652,10 @@ static BYTE module[8];                  /* Module name               */
         ar1 = r1;
         ar2 = r2;
 
-        /* Load padding byte from bits 0-7 of register r2+1 */
+        /* Load padding byte from bits 0-7 of R2+1 register */
         obyte = regs->gpr[r2+1] >> 24;
 
-        /* Load operand lengths from bits 8-31 of r1+1 and r2+1 */
+        /* Load operand lengths from bits 8-31 of R1+1 and R2+1 */
         n1 = regs->gpr[r1+1] & 0x00FFFFFF;
         n2 = regs->gpr[r2+1] & 0x00FFFFFF;
 
@@ -723,7 +723,7 @@ static BYTE module[8];                  /* Module name               */
     /* CLCL     Compare Logical Long                            [RR] */
     /*---------------------------------------------------------------*/
 
-        /* Program check if either register r1 or r2 is odd */
+        /* Program check if either R1 or R2 register is odd */
         if ( (r1 & 1) || (r2 & 1) )
         {
             program_check (PGM_SPECIFICATION_EXCEPTION);
@@ -738,10 +738,10 @@ static BYTE module[8];                  /* Module name               */
         ar1 = r1;
         ar2 = r2;
 
-        /* Load padding byte from bits 0-7 of register r2+1 */
+        /* Load padding byte from bits 0-7 of R2+1 register */
         obyte = regs->gpr[r2+1] >> 24;
 
-        /* Load operand lengths from bits 8-31 of r1+1 and r2+1 */
+        /* Load operand lengths from bits 8-31 of R1+1 and R2+1 */
         n1 = regs->gpr[r1+1] & 0x00FFFFFF;
         n2 = regs->gpr[r2+1] & 0x00FFFFFF;
 
@@ -1068,6 +1068,24 @@ static BYTE module[8];                  /* Module name               */
 
         break;
 
+    case 0x35:
+    /*---------------------------------------------------------------*/
+    /* LRER     Load Rounded Floating Point Short Register      [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if ( r1 & 1 || r1 > 6 || r2 & 1 || r2 > 6)
+        {
+            program_check (PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Copy and round register contents */
+        regs->fpr[r1] = regs->fpr[r2];
+        /*INCOMPLETE*/
+
+        break;
+
     case 0x38:
     /*---------------------------------------------------------------*/
     /* LER      Load Floating Point Short Register              [RR] */
@@ -1090,7 +1108,7 @@ static BYTE module[8];                  /* Module name               */
     /* STH      Store Halfword                                  [RX] */
     /*---------------------------------------------------------------*/
 
-        /* Store rightmost 2 bytes of register at operand address */
+        /* Store rightmost 2 bytes of R1 register at operand address */
         vstore2 ( regs->gpr[r1] & 0xFFFF, effective_addr, ar1, regs );
 
         break;
@@ -1110,7 +1128,7 @@ static BYTE module[8];                  /* Module name               */
     /* STC      Store Character                                 [RX] */
     /*---------------------------------------------------------------*/
 
-        /* Store rightmost byte of register at operand address */
+        /* Store rightmost byte of R1 register at operand address */
         vstoreb ( regs->gpr[r1] & 0xFF, effective_addr, ar1, regs );
 
         break;
@@ -1120,7 +1138,7 @@ static BYTE module[8];                  /* Module name               */
     /* IC       Insert Character                                [RX] */
     /*---------------------------------------------------------------*/
 
-        /* Load rightmost byte of register from operand address */
+        /* Load rightmost byte of R1 register from operand address */
         regs->gpr[r1] &= 0xFFFFFF00;
         regs->gpr[r1] |= vfetchb ( effective_addr, ar1, regs );
 
@@ -1327,8 +1345,8 @@ static BYTE module[8];                  /* Module name               */
         if ( n > 0x7FFF )
             n |= 0xFFFF0000;
 
-        /* Multiply r1 by n, ignore leftmost 32 bits of result,
-           and place rightmost 32 bits in r1 */
+        /* Multiply R1 register by n, ignore leftmost 32 bits of
+           result, and place rightmost 32 bits in R1 register */
         mul_signed (&n, &(regs->gpr[r1]), regs->gpr[r1], n);
 
         break;
@@ -1341,7 +1359,7 @@ static BYTE module[8];                  /* Module name               */
         /* Use the operand address as the branch address */
         newia = effective_addr;
 
-        /* Store the link information in R1 */
+        /* Store the link information in R1 register */
         if ( regs->psw.amode )
             regs->gpr[r1] = 0x80000000 | regs->psw.ia;
         else
@@ -2700,7 +2718,7 @@ static BYTE module[8];                  /* Module name               */
     /* MVCLE    Move Long Extended                              [RS] */
     /*---------------------------------------------------------------*/
 
-        /* Program check if either register r1 or r3 is odd */
+        /* Program check if either R1 or R3 register is odd */
         if ( (r1 & 1) || (r3 & 1) )
         {
             program_check (PGM_SPECIFICATION_EXCEPTION);
@@ -2718,7 +2736,7 @@ static BYTE module[8];                  /* Module name               */
         ar1 = r1;
         ar2 = r3;
 
-        /* Load operand lengths from bits 0-31 of r1+1 and r3+1 */
+        /* Load operand lengths from bits 0-31 of R1+1 and R3+1 */
         n1 = regs->gpr[r1+1];
         n2 = regs->gpr[r3+1];
 
@@ -2769,7 +2787,7 @@ static BYTE module[8];                  /* Module name               */
     /* CLCLE    Compare Logical Long Extended                   [RS] */
     /*---------------------------------------------------------------*/
 
-        /* Program check if either register r1 or r3 is odd */
+        /* Program check if either R1 or R3 register is odd */
         if ( (r1 & 1) || (r3 & 1) )
         {
             program_check (PGM_SPECIFICATION_EXCEPTION);
@@ -2787,7 +2805,7 @@ static BYTE module[8];                  /* Module name               */
         ar1 = r1;
         ar2 = r3;
 
-        /* Load operand lengths from bits 0-31 of r1+1 and r3+1 */
+        /* Load operand lengths from bits 0-31 of R1+1 and R3+1 */
         n1 = regs->gpr[r1+1];
         n2 = regs->gpr[r3+1];
 
@@ -2983,8 +3001,8 @@ static BYTE module[8];                  /* Module name               */
         cc = translate_addr (effective_addr, ar1, regs, ACCTYPE_LRA,
                 &n, &xcode, &private, &protect);
 
-        /* If ALET exception, set exception code in r1 bits 16-31
-           set high order bit of r1, and set condition code 3 */
+        /* If ALET exception, set exception code in R1 bits 16-31
+           set high order bit of R1, and set condition code 3 */
         if (cc == 4) {
             regs->gpr[r1] = 0x80000000 | xcode;
             regs->psw.cc = 3;
@@ -3414,7 +3432,7 @@ static BYTE module[8];                  /* Module name               */
 
         case 0x20:
         /*-----------------------------------------------------------*/
-        /* B220: Service Call                                  [RRE] */
+        /* B220: SERVC - Service Call                          [RRE] */
         /*-----------------------------------------------------------*/
 
             /* Program check if in problem state */
@@ -3436,6 +3454,59 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 
+        case 0x21:
+        /*-----------------------------------------------------------*/
+        /* B221: IPTE - Invalidate Page Table Entry            [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Perform serialization before operation */
+            perform_serialization ();
+
+            /* Program check if translation format is invalid */
+            if ((regs->cr[0] & CR0_TRAN_FMT) != CR0_TRAN_ESA390)
+            {
+                program_check (PGM_TRANSLATION_SPECIFICATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Combine the page table origin in the R1 register with
+               the page index in the R2 register, ignoring carry, to
+               form the 31-bit real address of the page table entry */
+            n = (regs->gpr[r1] & SEGTAB_PTO)
+                + ((regs->gpr[r2] & 0x000FF000) >> 10);
+            n &= 0x7FFFFFFF;
+
+            /* Fetch the page table entry from real storage, subject
+               to normal storage protection mechanisms */
+            n1 = vfetch4 ( n, USE_REAL_ADDR, regs );
+
+            /* Set the page invalid bit in the page table entry,
+               again subject to storage protection mechansims */
+            n1 |= PAGETAB_INVALID;
+            vstore4 ( n1, n, USE_REAL_ADDR, regs );
+
+            /* Clear the TLB of any entries with matching PFRA */
+            invalidate_tlb_entry (n1, regs);
+
+            /* Signal each CPU to perform the same invalidation.
+               IPTE must not complete until all CPUs have indicated
+               that they have cleared their TLB and have completed
+               any storage accesses using the invalidated entries */
+            /*INCOMPLETE*/ /* Not yet designed a way of doing this
+            without adversely impacting TLB performance */
+
+            /* Perform serialization after operation */
+            perform_serialization ();
+
+            break;
+
         case 0x22:
         /*-----------------------------------------------------------*/
         /* B222: IPM - Insert Program Mask                     [RRE] */
@@ -3450,6 +3521,59 @@ static BYTE module[8];                  /* Module name               */
                     | (regs->psw.domask << 26)
                     | (regs->psw.eumask << 25)
                     | (regs->psw.sgmask << 24);
+
+            break;
+
+        case 0x23:
+        /*-----------------------------------------------------------*/
+        /* B223: IVSK - Insert Virtual Storage Key             [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Special operation exception if DAT is off */
+            if ( (regs->psw.sysmask & PSW_DATMODE) == 0 )
+            {
+                program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Privileged operation exception if in problem state
+               and the extraction-authority control bit is zero */
+            if ( regs->psw.prob
+                 && (regs->cr[0] & CR0_EXT_AUTH) == 0 )
+            {
+                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Load virtual storage address from R2 register */
+            effective_addr = regs->gpr[r2] &
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+
+            /* Translate virtual address to real address */
+            if (translate_addr (effective_addr, r2, regs, ACCTYPE_IVSK,
+                &n, &xcode, &private, &protect))
+            {
+                program_check (xcode);
+                goto terminate;
+            }
+
+            /* Convert real address to absolute address */
+            n = APPLY_PREFIXING (n, regs->pxr);
+
+            /* Addressing exception if block is outside main storage */
+            if ( n >= sysblk.mainsize )
+            {
+                program_check (PGM_ADDRESSING_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Insert the storage key into R1 register bits 24-31 */
+            n >>= 12;
+            regs->gpr[r1] &= 0xFFFFFF00;
+            regs->gpr[r1] |= sysblk.storkeys[n];
+
+            /* Clear bits 29-31 of R1 register */
+            regs->gpr[r1] &= 0xFFFFFFF8;
 
             break;
 
@@ -3506,7 +3630,7 @@ static BYTE module[8];                  /* Module name               */
             perform_serialization ();
             perform_chkpt_sync ();
 
-            /* Load the new ASN from register r1 bits 16-31 */
+            /* Load the new ASN from R1 register bits 16-31 */
             sasn = regs->gpr[r1] & CR3_SASN;
 
             /* Test for SSAR to current primary */
@@ -3692,7 +3816,7 @@ details are in "Subspace-Replacement Operations" in topic 5.9.2.
                 goto terminate;
             }
 
-            /* Extract the ASN from general register r1 bits 16-31 */
+            /* Extract the ASN from R1 register bits 16-31 */
             pasn = regs->gpr[r1] & 0xFFFF;
 
             /* Space switch if ASN not equal to current PASN */
@@ -3770,13 +3894,13 @@ topic 5.9.2.
             }
 
             /* Replace PSW addressing mode, instruction address,
-               and problem state bit from general register r2 */
+               and problem state bit from R2 register */
             regs->psw.amode = (regs->gpr[r2] & 0x80000000) ? 1 : 0;
             regs->psw.ia = regs->gpr[r2] & 0x7FFFFFFE;
             regs->psw.prob = (regs->gpr[r2] & 0x00000001) ? 1 : 0;
 
-            /* AND the current PKM with register r1 bits 0-15 and
-               replace the current SASN with r1 bits 16-31 */
+            /* AND the current PKM with R1 register bits 0-15 and
+               replace the current SASN with R1 bits 16-31 */
             regs->cr[3] &= ~CR3_SASN;
             regs->cr[3] |= regs->gpr[r1];
 
@@ -3806,7 +3930,7 @@ topic 5.9.2.
                 goto terminate;
             }
 
-            /* Load 4K block address from register r2 */
+            /* Load 4K block address from R2 register */
             n = regs->gpr[r2] &
                         (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
 
@@ -3820,7 +3944,7 @@ topic 5.9.2.
                 goto terminate;
             }
 
-            /* Load the storage key into r1 bits 24-31 */
+            /* Insert the storage key into R1 register bits 24-31 */
             n >>= 12;
             regs->gpr[r1] &= 0xFFFFFF00;
             regs->gpr[r1] |= sysblk.storkeys[n];
@@ -3839,7 +3963,7 @@ topic 5.9.2.
                 goto terminate;
             }
 
-            /* Load 4K block number from register r2 */
+            /* Load 4K block address from R2 register */
             n = regs->gpr[r2] &
                         (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
 
@@ -3877,7 +4001,7 @@ topic 5.9.2.
                 goto terminate;
             }
 
-            /* Load 4K block number from register r2 */
+            /* Load 4K block address from R2 register */
             n = regs->gpr[r2] &
                         (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
 
@@ -3895,7 +4019,7 @@ topic 5.9.2.
                 goto terminate;
             }
 
-            /* Update the storage key from register r1 bits 24-30 */
+            /* Update the storage key from R1 register bits 24-30 */
             n >>= 12;
 // /*debug*/printf ("SSKE setting storage key %2.2X for block %8.8lX\n",
 // /*debug*/            (BYTE)(regs->gpr[r1] & 0xFE), n);
@@ -3919,7 +4043,7 @@ topic 5.9.2.
                 goto terminate;
             }
 
-            /* Load 4K block address from register r2 */
+            /* Load 4K block address from R2 register */
             n = regs->gpr[r2] &
                         (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
             n &= 0xFFFFF000;
@@ -4289,6 +4413,34 @@ topic 5.9.2.
             break;
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
+        case 0x46:
+        /*-----------------------------------------------------------*/
+        /* B246: STURA - Store Using Real Address              [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* R2 register contains operand real storage address */
+            n = regs->gpr[r2] &
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+
+            /* Program check if operand not on fullword boundary */
+            if ( n & 0x00000003 )
+            {
+                program_check (PGM_SPECIFICATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Store R1 register at second operand location */
+            vstore4 (regs->gpr[r1], n, USE_REAL_ADDR, regs );
+
+            break;
+
         case 0x48:
         /*-----------------------------------------------------------*/
         /* B248: PALB - Purge ALB                              [RRE] */
@@ -4303,6 +4455,34 @@ topic 5.9.2.
 
             /* Purge the ART lookaside buffer for this CPU */
             purge_alb (regs);
+
+            break;
+
+        case 0x4B:
+        /*-----------------------------------------------------------*/
+        /* B24B: LURA - Load Using Real Address                [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* R2 register contains operand real storage address */
+            n = regs->gpr[r2] &
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+
+            /* Program check if operand not on fullword boundary */
+            if ( n & 0x00000003 )
+            {
+                program_check (PGM_SPECIFICATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Load R1 register from second operand */
+            regs->gpr[r1] = vfetch4 ( n, USE_REAL_ADDR, regs );
 
             break;
 
@@ -4333,7 +4513,7 @@ topic 5.9.2.
             }
 
             /* Perform ALET translation using EAX value from register
-               r2 bits 0-15, and set condition code 3 if exception */
+               R2 bits 0-15, and set condition code 3 if exception */
             if (translate_alet (r1, (regs->gpr[r2] >> 16),
                                 regs, ACCTYPE_TAR, &n, &protect));
             {
@@ -4352,7 +4532,7 @@ topic 5.9.2.
         /* B24D: CPYA - Copy Access Register                   [RRE] */
         /*-----------------------------------------------------------*/
 
-            /* Copy access register R2 to access register R1 */
+            /* Copy R2 access register to R1 access register */
             regs->ar[r1] = regs->ar[r2];
 
             break;
@@ -4362,7 +4542,7 @@ topic 5.9.2.
         /* B24E: SAR - Set Access Register                     [RRE] */
         /*-----------------------------------------------------------*/
 
-            /* Copy general register R2 to access register R1 */
+            /* Copy R2 general register to R1 access register */
             regs->ar[r1] = regs->gpr[r2];
 
             break;
@@ -4372,7 +4552,7 @@ topic 5.9.2.
         /* B24F: EAR - Extract Access Register                 [RRE] */
         /*-----------------------------------------------------------*/
 
-            /* Copy access register R2 to general register R1 */
+            /* Copy R2 access register to R1 general register */
             regs->gpr[r1] = regs->ar[r2];
 
             break;
@@ -5372,6 +5552,27 @@ is set, and the control registers remain unchanged.
 
             break;
 
+        case 0x01:
+        /*-----------------------------------------------------------*/
+        /* E501: TPROT - Test Protection                       [SSE] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* Load access key from operand 2 address bits 24-27 */
+            dbyte = effective_addr2 & 0xF0;
+
+            /* Test protection and set condition code */
+            regs->psw.cc =
+                test_prot (effective_addr, ar1, regs, dbyte);
+
+            break;
+
         default:
         /*-----------------------------------------------------------*/
         /* E5xx: Invalid operation                                   */
@@ -5778,6 +5979,9 @@ int     icidx;                          /* Instruction counter index */
                 (regs->psw.ecmode ? (PSW_IOMASK | PSW_EXTMASK) : 0xFF))
                 == 0) {
             printf ("Disabled wait state code %8.8lX\n", regs->psw.ia);
+#ifdef INSTRUCTION_COUNTING
+            printf ("%d instructions executed\n", instcount.overall);
+#endif /*INSTRUCTION_COUNTING*/
             panel_command (regs);
             continue;
         }

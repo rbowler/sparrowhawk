@@ -396,7 +396,7 @@ BYTE   *onoroff;                        /* "on" or "off"             */
             {
                 printf ("V:%8.8lX:", vaddr);
                 xcode = virt_to_real (&raddr, vaddr, 0, regs,
-                        ACCTYPE_READ);
+                        ACCTYPE_LRA);
                 if (xcode == 0)
                     display_real (regs, raddr);
                 else

@@ -2,7 +2,7 @@
 # Makefile for Hercules ESA/390 emulator
 #
 
-VERSION  = 1.21
+VERSION  = 1.22
 
 CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION)
 #	   -march=pentium -malign-double -mwide-multiply

@@ -109,6 +109,7 @@ int ckddasd_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 int             rc;                     /* Return code               */
 struct stat     statbuf;                /* File information          */
 CKDDASD_DEVHDR  devhdr;                 /* Device header             */
+int             har0len;                /* Length of HA + R0         */
 
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
@@ -188,8 +189,27 @@ CKDDASD_DEVHDR  devhdr;                 /* Device header             */
     dev->devid[3] = 0xC2;
     dev->devid[4] = dev->devtype >> 8;
     dev->devid[5] = dev->devtype & 0xFF;
-    dev->devid[6] = 0x16;
+    dev->devid[6] = 0x02;
     dev->numdevid = 7;
+
+    /* Initialize the device characteristics bytes */
+    memset (dev->devchar, 0, sizeof(dev->devchar));
+    memcpy (dev->devchar, dev->devid+1, 6);
+    memcpy (dev->devchar+6, "\xD0\x00\x00\x02", 4);
+    dev->devchar[10] = 0x20;            /* Device class */
+    dev->devchar[11] = 0x26;            /* Unit type */
+    dev->devchar[12] = dev->ckdcyls >> 8;
+    dev->devchar[13] = dev->ckdcyls & 0xFF;
+    dev->devchar[14] = dev->ckdheads >> 8;
+    dev->devchar[15] = dev->ckdheads & 0xFF;
+    dev->devchar[16] = 240;             /* Number of sectors */
+    dev->devchar[17] = (dev->ckdtrksz >> 16) & 0xFF;
+    dev->devchar[18] = (dev->ckdtrksz >> 8) & 0xFF;
+    dev->devchar[19] = dev->ckdtrksz & 0xFF;
+    har0len = CKDDASD_TRKHDR_SIZE + CKDDASD_RECHDR_SIZE + 8;
+    dev->devchar[20] = (har0len >> 8) & 0xFF;
+    dev->devchar[21] = har0len & 0xFF;
+    dev->numdevchar = 64;
 
     /* Activate I/O tracing */
     dev->ccwtrace = 1;
@@ -1791,6 +1811,30 @@ BYTE            key[256];               /* Key for search operations */
         else
             dev->ckdwckd = 0;
 
+        break;
+
+    case 0x64:
+    /*---------------------------------------------------------------*/
+    /* READ DEVICE CHARACTERISTICS                                   */
+    /*---------------------------------------------------------------*/
+        /* Command reject if within the domain of a Locate Record */
+        if (dev->ckdlocat == 0)
+        {
+            dev->sense[0] = SENSE_CR;
+            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Calculate residual byte count */
+        num = (count < dev->numdevchar) ? count : dev->numdevchar;
+        *residual = count - num;
+        if (count < dev->numdevchar) *more = 1;
+
+        /* Copy device characteristics bytes to channel buffer */
+        memcpy (iobuf, dev->devchar, num);
+
+        *unitstat = CSW_CE | CSW_DE;
         break;
 
     default:

@@ -11,6 +11,100 @@
 #include "hercules.h"
 
 /*-------------------------------------------------------------------*/
+/* Test for fetch protected storage location.                        */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr    31-bit logical address of storage location           */
+/*      skey    Storage key with fetch, reference, and change bits   */
+/*              and one low-order zero appended                      */
+/*      akey    Access key with 4 low-order zeroes appended          */
+/*      private 1=Location is in a private address space             */
+/*      regs    Pointer to the CPU register context                  */
+/* Return value:                                                     */
+/*      1=Fetch protected, 0=Not fetch protected                     */
+/*-------------------------------------------------------------------*/
+static inline int is_fetch_protected (U32 addr, BYTE skey, BYTE akey,
+                        int private, REGS *regs)
+{
+    /* [3.4.1] Fetch is allowed if access key is zero, regardless
+       of the storage key and fetch protection bit */
+    if (akey == 0)
+        return 0;
+
+    /* [3.4.1.2] Fetch protection override allows fetch from first
+       2K of non-private address spaces if CR0 bit 6 is set */
+    if (addr < 2048
+        && (regs->cr[0] & CR0_FETCH_OVRD)
+        && private == 0)
+        return 0;
+
+    /* [3.4.1] Fetch protection prohibits fetch if storage key fetch
+       protect bit is on and access key does not match storage key */
+    if ((skey & STORKEY_FETCH)
+        && akey != (skey & STORKEY_KEY))
+        return 1;
+
+    /* Return zero if location is not fetch protected */
+    return 0;
+
+} /* end function is_fetch_protected */
+
+/*-------------------------------------------------------------------*/
+/* Test for store protected storage location.                        */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr    31-bit logical address of storage location           */
+/*      skey    Storage key with fetch, reference, and change bits   */
+/*              and one low-order zero appended                      */
+/*      akey    Access key with 4 low-order zeroes appended          */
+/*      private 1=Location is in a private address space             */
+/*      protect 1=Access list protection or page protection applies  */
+/*      regs    Pointer to the CPU register context                  */
+/* Return value:                                                     */
+/*      1=Store protected, 0=Not store protected                     */
+/*-------------------------------------------------------------------*/
+static inline int is_store_protected (U32 addr, BYTE skey, BYTE akey,
+                        int private, int protect, REGS *regs)
+{
+    /* [3.4.4] Low-address protection prohibits stores into locations
+       0-511 of non-private address spaces if CR0 bit 3 is set,
+       regardless of the access key and storage key */
+    if (addr < 512
+        && (regs->cr[0] & CR0_LOW_PROT)
+        && private == 0)
+        return 1;
+
+    /* Access-list controlled protection prohibits all stores into
+       the address space, and page protection prohibits all stores
+       into the page, regardless of the access key and storage key */
+    if (protect)
+        return 1;
+
+    /* [3.4.1] Store is allowed if access key is zero, regardless
+       of the storage key */
+    if (akey == 0)
+        return 0;
+
+#ifdef FEATURE_STORAGE_PROTECTION_OVERRIDE
+    /* [3.4.1.1] Storage protection override allows stores into
+       locations with storage key 9, regardless of the access key,
+       provided that CR0 bit 7 is set */
+    if ((skey & STORKEY_KEY) == 0x90
+        && (regs->cr[0] & CR0_STORE_OVRD))
+        return 0;
+#endif /*FEATURE_STORAGE_PROTECTION_OVERRIDE*/
+
+    /* [3.4.1] Store protection prohibits stores if the access
+       key does not match the storage key */
+    if (akey != (skey & STORKEY_KEY))
+        return 1;
+
+    /* Return zero if location is not store protected */
+    return 0;
+
+} /* end function is_store_protected */
+
+/*-------------------------------------------------------------------*/
 /* Fetch a fullword from absolute storage.                           */
 /* All bytes of the word are fetched concurrently as observed by     */
 /* other CPUs.  The fullword is first fetched as an integer, then    */
@@ -555,7 +649,7 @@ TLBE   *tlbp;                           /* -> TLB entry              */
     tlbp = &(regs->tlb[arn]);
     if ((vaddr & 0x7FFFF000) == tlbp->vaddr
         && tlbp->valid
-        && (tlbp->common нн std == tlbp->std)
+        && (tlbp->common || std == tlbp->std)
         && !(tlbp->common && private)
         && acctype != ACCTYPE_LRA)
     {
@@ -702,44 +796,139 @@ void purge_tlb (REGS *regs)
 } /* end function purge_tlb */
 
 /*-------------------------------------------------------------------*/
-/* Convert virtual to absolute and enforce addressing and protection */
+/* Invalidate page table entry                                       */
+/*                                                                   */
+/* Input:                                                            */
+/*      pte     Page table entry to be invalidated                   */
+/*      regs    CPU register context                                 */
+/*                                                                   */
+/*      This subroutine clears the TLB of all entries whose PFRA     */
+/*      matches the PFRA of the supplied page table entry.           */
 /*-------------------------------------------------------------------*/
-static U32 virt_to_abs (U32 vaddr, int arn, REGS *regs, int acctype)
+void invalidate_tlb_entry (U32 pte, REGS *regs)
 {
-int     rc;                             /* Return code               */
+int     i;                              /* Array subscript           */
+
+    for (i = 0; i < (sizeof(regs->tlb)/sizeof(TLBE)); i++)
+    {
+        if ((regs->tlb[i].pte & PAGETAB_PFRA) == (pte & PAGETAB_PFRA))
+        {
+            regs->tlb[i].valid = 0;
+            printf ("dat: TLB entry %d invalidated\n", i); /*debug*/
+        }
+    } /* end for(i) */
+
+} /* end function invalidate_tlb_entry */
+
+/*-------------------------------------------------------------------*/
+/* Test protection and return condition code                         */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr    Logical address to be tested                         */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/*      akey    Access key with 4 low-order zeroes appended          */
+/* Returns:                                                          */
+/*      Condition code for TPROT instruction:                        */
+/*      0=Fetch and store allowed, 1=Fetch allowed but not store,    */
+/*      2=No access allowed, 3=Translation not available.            */
+/*                                                                   */
+/*      If the logical address causes an addressing or translation   */
+/*      specification exception then a program check is generated    */
+/*      and the function does not return.                            */
+/*-------------------------------------------------------------------*/
+int test_prot (U32 addr, int arn, REGS *regs, BYTE akey)
+{
 U32     raddr;                          /* Real address              */
 U32     aaddr;                          /* Absolute address          */
-int     key;                            /* Protection key            */
+BYTE    skey;                           /* Storage key               */
+int     private = 0;                    /* 1=Private address space   */
+int     protect = 0;                    /* 1=ALE or page protection  */
+U16     code;                           /* Exception code            */
+
+    /* Convert logical address to real address */
+    if (REAL_MODE(&regs->psw))
+        raddr = addr;
+    else {
+        /* Return condition code 3 if translation exception */
+        if (translate_addr (addr, arn, regs, ACCTYPE_TPROT, &raddr,
+                            &code, &private, &protect))
+            return 3;
+    }
+
+    /* Convert real address to absolute address */
+    aaddr = APPLY_PREFIXING (raddr, regs->pxr);
+
+    /* Program check if absolute address is outside main storage */
+    if (aaddr >= sysblk.mainsize)
+        goto tprot_addr_excp;
+
+    /* Load the storage key for the absolute address */
+    skey = sysblk.storkeys[aaddr >> 12];
+
+    /* Return condition code 2 if location is fetch protected */
+    if (is_fetch_protected (addr, skey, akey, private, regs))
+        return 2;
+
+    /* Return condition code 1 if location is store protected */
+    if (is_store_protected (addr, skey, akey, private, protect, regs))
+        return 1;
+
+    /* Return condition code 0 if location is not protected */
+    return 0;
+
+tprot_addr_excp:
+    program_check (PGM_ADDRESSING_EXCEPTION);
+    return 3;
+
+} /* end function test_prot */
+
+/*-------------------------------------------------------------------*/
+/* Convert logical address to absolute address and check protection  */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr    Logical address to be translated                     */
+/*      arn     Access register number (or USE_REAL_ADDR)            */
+/*      regs    CPU register context                                 */
+/*      acctype Type of access requested: READ, WRITE, or INSTFETCH  */
+/* Returns:                                                          */
+/*      Absolute storage address.                                    */
+/*                                                                   */
+/*      If the PSW indicates DAT-off, or if the access register      */
+/*      number parameter is the special value USE_REAL_ADDR,         */
+/*      then the addr parameter is treated as a real address.        */
+/*      Otherwise addr is a virtual address, so dynamic address      */
+/*      translation is called to convert it to a real address.       */
+/*      Prefixing is then applied to convert the real address to     */
+/*      an absolute address, and then low-address protection,        */
+/*      access-list controlled protection, page protection, and      */
+/*      key controlled protection checks are applied to the address. */
+/*      If successful, the reference and change bits of the storage  */
+/*      key are updated, and the absolute address is returned.       */
+/*                                                                   */
+/*      If the logical address causes an addressing, protection,     */
+/*      or translation exception then a program check is generated   */
+/*      and the function does not return.                            */
+/*-------------------------------------------------------------------*/
+static U32 logical_to_abs (U32 addr, int arn, REGS *regs, int acctype)
+{
+U32     raddr;                          /* Real address              */
+U32     aaddr;                          /* Absolute address          */
+BYTE    akey;                           /* Access key from PSW       */
 U32     block;                          /* 4K block number           */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=ALE or page protection  */
-int     fetch_override;                 /* 1=Fetch protect override  */
 PSA    *psa;                            /* -> Prefixed storage area  */
 U16     code;                           /* Exception code            */
 
-    /* Point to the PSA in main storage */
-    psa = (PSA*)(sysblk.mainstor + regs->pxr);
-
-    /* Convert virtual address to real address */
-    if (REAL_MODE(&regs->psw)) raddr = vaddr;
+    /* Convert logical address to real address */
+    if (REAL_MODE(&regs->psw) || arn == USE_REAL_ADDR)
+        raddr = addr;
     else {
-        rc = translate_addr (vaddr, arn, regs, acctype, &raddr, &code,
-                            &private, &protect);
-        if (rc != 0)
+        if (translate_addr (addr, arn, regs, acctype, &raddr, &code,
+                            &private, &protect))
             goto vabs_prog_check;
     }
-
-    /* [3.4.4] Enforce low-address protection for stores into
-       locations 0-511 of non-private address spaces if bit 3 of
-       control register 0 is set */
-    if (acctype == ACCTYPE_WRITE && vaddr < 512
-        && (regs->cr[0] & CR0_LOW_PROT)
-        && private == 0)
-        goto vabs_prot_excp;
-
-    /* Enforce access-list controlled protection and page protection */
-    if (acctype == ACCTYPE_WRITE && protect)
-        goto vabs_prot_excp;
 
     /* Convert real address to absolute address */
     aaddr = APPLY_PREFIXING (raddr, regs->pxr);
@@ -748,22 +937,16 @@ U16     code;                           /* Exception code            */
     if (aaddr >= sysblk.mainsize)
         goto vabs_addr_excp;
 
-    /* Check key and set reference and change bits */
-    key = regs->psw.key << 4;
+    /* Check protection and set reference and change bits */
+    akey = regs->psw.key << 4;
     block = aaddr >> 12;
     switch (acctype) {
 
     case ACCTYPE_READ:
     case ACCTYPE_INSTFETCH:
-        /* [3.4.1.2] Check for fetch protection override */
-        fetch_override = (vaddr < 2048
-                        && (regs->cr[0] & CR0_FETCH_OVRD)
-                        && private == 0);
-
-        /* [3.4.1] Check for fetch protection */
-        if (key != 0 && fetch_override == 0
-            && (sysblk.storkeys[block] & STORKEY_FETCH)
-            && (sysblk.storkeys[block] & STORKEY_KEY) != key)
+        /* Program check if fetch protected location */
+        if (is_fetch_protected (addr, sysblk.storkeys[block], akey,
+                                private, regs))
             goto vabs_prot_excp;
 
         /* Set the reference bit in the storage key */
@@ -771,15 +954,11 @@ U16     code;                           /* Exception code            */
         break;
 
     case ACCTYPE_WRITE:
-        /* [3.4.1] Check for store protection */
-        if (key != 0
-#ifdef FEATURE_STORAGE_PROTECTION_OVERRIDE
-            /* [3.4.1.1] Ignore protection if storage key is 9 */
-            && ((regs->cr[0] & CR0_STORE_OVRD) == 0
-                || (sysblk.storkeys[block] & STORKEY_KEY) != 0x90)
-#endif /*FEATURE_STORAGE_PROTECTION_OVERRIDE*/
-            && (sysblk.storkeys[block] & STORKEY_KEY) != key)
+        /* Program check if store protected location */
+        if (is_store_protected (addr, sysblk.storkeys[block], akey,
+                                private, protect, regs))
             goto vabs_prot_excp;
+
         /* Set the reference and change bits in the storage key */
         sysblk.storkeys[block] |= (STORKEY_REF | STORKEY_CHANGE);
         break;
@@ -797,6 +976,9 @@ vabs_prot_excp:
     return 0;
 
 vabs_prog_check:
+    /* Point to the PSA in main storage */
+    psa = (PSA*)(sysblk.mainstor + regs->pxr);
+
     if (code == PGM_ALEN_TRANSLATION_EXCEPTION
         || code == PGM_ALE_SEQUENCE_EXCEPTION
         || code == PGM_ASTE_VALIDITY_EXCEPTION
@@ -812,9 +994,9 @@ vabs_prog_check:
         psa->excarid = (acctype == ACCTYPE_INSTFETCH) ? 0 : arn;
 
         /* Store the translation exception address at PSA+144 */
-        psa->tea[0] = (vaddr & 0x7F000000) >> 24;
-        psa->tea[1] = (vaddr & 0xFF0000) >> 16;
-        psa->tea[2] = (vaddr & 0xF000) >> 8;
+        psa->tea[0] = (addr & 0x7F000000) >> 24;
+        psa->tea[1] = (addr & 0xFF0000) >> 16;
+        psa->tea[2] = (addr & 0xF000) >> 8;
         psa->tea[3] = (regs->psw.space << 1) | regs->psw.armode;
         if (SECONDARY_SPACE_MODE(&regs->psw)
             && acctype != ACCTYPE_INSTFETCH)
@@ -823,7 +1005,7 @@ vabs_prog_check:
     program_check (code);
     return 0;
 
-} /* end function virt_to_abs */
+} /* end function logical_to_abs */
 
 /*-------------------------------------------------------------------*/
 /* Store 1 to 256 characters into virtual storage operand            */
@@ -853,13 +1035,13 @@ BYTE    len2;                           /* Length after next page    */
     /* Copy data to real storage in either one or two parts
        depending on whether operand crosses a page boundary */
     if (addr2 == (addr & 0xFFFFF000)) {
-        addr = virt_to_abs (addr, arn, regs, ACCTYPE_WRITE);
+        addr = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE);
         memcpy (sysblk.mainstor+addr, src, len+1);
     } else {
         len1 = addr2 - addr;
         len2 = len - len1 + 1;
-        addr = virt_to_abs (addr, arn, regs, ACCTYPE_WRITE);
-        addr2 = virt_to_abs (addr2, arn, regs, ACCTYPE_WRITE);
+        addr = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE);
+        addr2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE);
         memcpy (sysblk.mainstor+addr, src, len1);
         memcpy (sysblk.mainstor+addr, src+len1, len2);
     }
@@ -880,7 +1062,7 @@ BYTE    len2;                           /* Length after next page    */
 /*-------------------------------------------------------------------*/
 void vstoreb (BYTE value, U32 addr, int arn, REGS *regs)
 {
-    addr = virt_to_abs (addr, arn, regs, ACCTYPE_WRITE);
+    addr = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE);
     sysblk.mainstor[addr] = value;
 } /* end function vstoreb */
 
@@ -906,11 +1088,11 @@ U32     abs1, abs2;                     /* Absolute addresses        */
     addr2 = (addr + 1) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
 
     /* Get absolute address of first byte of operand */
-    abs1 = virt_to_abs (addr, arn, regs, ACCTYPE_WRITE);
+    abs1 = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE);
 
     /* Repeat address translation if operand crosses a page boundary */
     if ((addr2 & 0xFFF) == 0x000)
-        abs2 = virt_to_abs (addr2, arn, regs, ACCTYPE_WRITE);
+        abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE);
     else
         abs2 = abs1 + 1;
 
@@ -941,7 +1123,7 @@ U32     addr2;                          /* Page address of last byte */
 U32     abs, abs2;                      /* Absolute addresses        */
 
     /* Get absolute address of first byte of operand */
-    abs = virt_to_abs (addr, arn, regs, ACCTYPE_WRITE);
+    abs = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE);
 
     /* Store 4 bytes when operand is fullword aligned */
     if ((addr & 0x03) == 0) {
@@ -957,7 +1139,7 @@ U32     abs, abs2;                      /* Absolute addresses        */
     /* Calculate page address of last byte of operand */
     addr2 = (addr + 3) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
     addr2 &= 0xFFFFF000;
-    abs2 = virt_to_abs (addr2, arn, regs, ACCTYPE_WRITE);
+    abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE);
 
     /* Store integer value byte by byte at operand location */
     for (i=0, k=24; i < 4; i++, k -= 8) {
@@ -999,7 +1181,7 @@ U32     addr2;                          /* Page address of last byte */
 U32     abs, abs2;                      /* Absolute addresses        */
 
     /* Get absolute address of first byte of operand */
-    abs = virt_to_abs (addr, arn, regs, ACCTYPE_WRITE);
+    abs = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE);
 
     /* Store 8 bytes when operand is doubleword aligned */
     if ((addr & 0x07) == 0) {
@@ -1019,7 +1201,7 @@ U32     abs, abs2;                      /* Absolute addresses        */
     /* Calculate page address of last byte of operand */
     addr2 = (addr + 7) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
     addr2 &= 0xFFFFF000;
-    abs2 = virt_to_abs (addr2, arn, regs, ACCTYPE_WRITE);
+    abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE);
 
     /* Store integer value byte by byte at operand location */
     for (i=0, k=56; i < 8; i++, k -= 8) {
@@ -1068,13 +1250,13 @@ BYTE    len2;                           /* Length after next page    */
     /* Copy data from real storage in either one or two parts
        depending on whether operand crosses a page boundary */
     if (addr2 == (addr & 0xFFFFF000)) {
-        addr = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
+        addr = logical_to_abs (addr, arn, regs, ACCTYPE_READ);
         memcpy (dest, sysblk.mainstor+addr, len+1);
     } else {
         len1 = addr2 - addr;
         len2 = len - len1 + 1;
-        addr = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
-        addr2 = virt_to_abs (addr2, arn, regs, ACCTYPE_READ);
+        addr = logical_to_abs (addr, arn, regs, ACCTYPE_READ);
+        addr2 = logical_to_abs (addr2, arn, regs, ACCTYPE_READ);
         memcpy (dest, sysblk.mainstor+addr, len1);
         memcpy (dest+len1, sysblk.mainstor+addr, len2);
     }
@@ -1096,7 +1278,7 @@ BYTE    len2;                           /* Length after next page    */
 /*-------------------------------------------------------------------*/
 BYTE vfetchb (U32 addr, int arn, REGS *regs)
 {
-    addr = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
+    addr = logical_to_abs (addr, arn, regs, ACCTYPE_READ);
     return sysblk.mainstor[addr];
 } /* end function vfetchb */
 
@@ -1123,11 +1305,11 @@ U32     abs1, abs2;                     /* Absolute addresses        */
     addr2 = (addr + 1) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
 
     /* Get absolute address of first byte of operand */
-    abs1 = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
+    abs1 = logical_to_abs (addr, arn, regs, ACCTYPE_READ);
 
     /* Repeat address translation if operand crosses a page boundary */
     if ((addr2 & 0xFFF) == 0x000)
-        abs2 = virt_to_abs (addr2, arn, regs, ACCTYPE_READ);
+        abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_READ);
     else
         abs2 = abs1 + 1;
 
@@ -1156,7 +1338,7 @@ U32     value;                          /* Accumulated value         */
 U32     abs;                            /* Absolute storage location */
 
     /* Get absolute address of first byte of operand */
-    abs = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
+    abs = logical_to_abs (addr, arn, regs, ACCTYPE_READ);
 
     /* Fetch 4 bytes when operand is fullword aligned */
     if ((addr & 0x03) == 0) {
@@ -1181,7 +1363,7 @@ U32     abs;                            /* Absolute storage location */
 
         /* Translation required again if page boundary crossed */
         if ((addr & 0xFFF) == 0x000)
-            abs = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
+            abs = logical_to_abs (addr, arn, regs, ACCTYPE_READ);
 
     } /* end for */
     return value;
@@ -1209,7 +1391,7 @@ U64     value;                          /* Accumulated value         */
 U32     abs;                            /* Absolute storage location */
 
     /* Get absolute address of first byte of operand */
-    abs = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
+    abs = logical_to_abs (addr, arn, regs, ACCTYPE_READ);
 
     /* Fetch 8 bytes when operand is doubleword aligned */
     if ((addr & 0x07) == 0) {
@@ -1217,10 +1399,10 @@ U32     abs;                            /* Absolute storage location */
                 | ((U64)sysblk.mainstor[abs+1] << 48)
                 | ((U64)sysblk.mainstor[abs+2] << 40)
                 | ((U64)sysblk.mainstor[abs+3] << 32)
-                | (sysblk.mainstor[abs+4] << 24)
-                | (sysblk.mainstor[abs+5] << 16)
-                | (sysblk.mainstor[abs+6] << 8)
-                | sysblk.mainstor[abs+7];
+                | ((U64)sysblk.mainstor[abs+4] << 24)
+                | ((U64)sysblk.mainstor[abs+5] << 16)
+                | ((U64)sysblk.mainstor[abs+6] << 8)
+                | (U64)sysblk.mainstor[abs+7];
     }
 
     /* Fetch 8 bytes when operand is not doubleword aligned
@@ -1238,7 +1420,7 @@ U32     abs;                            /* Absolute storage location */
 
         /* Translation required again if page boundary crossed */
         if ((addr & 0xFFF) == 0x000)
-            abs = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
+            abs = logical_to_abs (addr, arn, regs, ACCTYPE_READ);
 
     } /* end for */
     return value;
@@ -1273,7 +1455,7 @@ U32 abs;                                /* Absolute storage address  */
     }
 
     /* Fetch first two bytes of instruction */
-    abs = virt_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH);
+    abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH);
     memcpy (dest, sysblk.mainstor+abs, 2);
 
     /* Return if two-byte instruction */
@@ -1284,7 +1466,7 @@ U32 abs;                                /* Absolute storage address  */
     addr += 2;
     addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
     if ((addr & 0xFFF) == 0x000) {
-        abs = virt_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH);
+        abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH);
     }
     memcpy (dest+2, sysblk.mainstor+abs, 2);
 
@@ -1296,7 +1478,7 @@ U32 abs;                                /* Absolute storage address  */
     addr += 2;
     addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
     if ((addr & 0xFFF) == 0x000) {
-        abs = virt_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH);
+        abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH);
     }
     memcpy (dest+4, sysblk.mainstor+abs, 2);
 

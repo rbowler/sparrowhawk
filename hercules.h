@@ -156,7 +156,7 @@ typedef struct _DEVBLK {
         int     numdevid;               /* Number of device id bytes */
         BYTE    devid[32];              /* Device identifier bytes   */
         int     numdevchar;             /* Number of devchar bytes   */
-        BYTE    devchar[32];            /* Device characteristics    */
+        BYTE    devchar[64];            /* Device characteristics    */
         TID     tid;                    /* Thread-id executing CCW   */
         U32     ccwaddr;                /* Address of first CCW      */
         int     ccwfmt;                 /* CCW format (0 or 1)       */
@@ -293,6 +293,8 @@ int  translate_addr (U32 vaddr, int arn, REGS *regs, int acctype,
         U32 *raddr, U16 *xcode, int *priv, int *prot);
 void purge_alb (REGS *regs);
 void purge_tlb (REGS *regs);
+void invalidate_tlb_entry (U32 pte, REGS *regs);
+int  test_prot (U32 addr, int arn, REGS *regs, BYTE akey);
 void vstorec (void *src, BYTE len, U32 addr, int arn, REGS *regs);
 void vstoreb (BYTE value, U32 addr, int arn, REGS *regs);
 void vstore2 (U16 value, U32 addr, int arn, REGS *regs);
@@ -312,6 +314,10 @@ void instfetch (BYTE *dest, U32 addr, REGS *regs);
 #define ACCTYPE_TAR             4       /* Test Access               */
 #define ACCTYPE_LRA             5       /* Load Real Address         */
 #define ACCTYPE_TPROT           6       /* Test Protection           */
+#define ACCTYPE_IVSK            7       /* Insert Virtual Storage Key*/
+
+/* Special value for arn parameter for translate functions in dat.c */
+#define USE_REAL_ADDR           (-1)    /* LURA/STURA instruction    */
 
 /* Functions in module decimal.c */
 int  shift_and_round_packed (U32 addr, int len, int arn, REGS *regs,
