@@ -6,5 +6,11 @@
 /*-------------------------------------------------------------------*/
 
 #if !defined(VERSION)
-#define	VERSION	2.11a                   /* Hercules version number   */
+#warning No version specified
+#define	VERSION	Unknown                 /* Unkown version number     */
 #endif
+
+void display_version();
+
+#define HERCULES_COPYRIGHT \
+       "(c)Copyright 1999-2001 by Roger Bowler, Jan Jaeger, and others"

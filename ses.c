@@ -1,7 +1,7 @@
-/* SES.C        (c) Copyright Jan Jaeger, 1999-2000                  */
+/* SES.C        (c) Copyright Jan Jaeger, 1999-2001                  */
 /*              Sysplex Instructions                                 */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 #include "hercules.h"
 
@@ -204,7 +204,7 @@ int r1, r2;                                     /* register values   */
 DEF_INST(ses_opcode_B272)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -223,7 +223,7 @@ U32     effective_addr2;                /* Effective address         */
 DEF_INST(ses_opcode_B27A)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -242,7 +242,7 @@ U32     effective_addr2;                /* Effective address         */
 DEF_INST(ses_opcode_B27B)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -261,7 +261,7 @@ U32     effective_addr2;                /* Effective address         */
 DEF_INST(ses_opcode_B27C)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -280,7 +280,7 @@ U32     effective_addr2;                /* Effective address         */
 DEF_INST(ses_opcode_B27E)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -299,7 +299,7 @@ U32     effective_addr2;                /* Effective address         */
 DEF_INST(ses_opcode_B27F)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -318,7 +318,7 @@ U32     effective_addr2;                /* Effective address         */
 DEF_INST(ses_opcode_B2A4)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -337,7 +337,7 @@ U32     effective_addr2;                /* Effective address         */
 DEF_INST(ses_opcode_B2A8)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -356,7 +356,7 @@ U32     effective_addr2;                /* Effective address         */
 DEF_INST(ses_opcode_B2F1)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -375,7 +375,7 @@ U32     effective_addr2;                /* Effective address         */
 DEF_INST(ses_opcode_B2F6)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -391,10 +391,6 @@ U32     effective_addr2;                /* Effective address         */
 
 #if !defined(_GEN_ARCH)
 
-// #define  _GEN_ARCH 964
-// #include "ses.c"
-
-// #undef   _GEN_ARCH
 #define  _GEN_ARCH 390
 #include "ses.c"
 

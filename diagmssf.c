@@ -1,4 +1,4 @@
-/* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2000                  */
+/* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2001                  */
 /*              ESA/390 Diagnose Functions                           */
 
 /*-------------------------------------------------------------------*/
@@ -8,7 +8,7 @@
 /* LPAR RMF interface call                                           */
 /*                                                                   */
 /*                                             04/12/1999 Jan Jaeger */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -204,20 +204,14 @@ DEVBLK            *dev;                /* Device block pointer       */
 
     /* Program check if SPCCB is not on a doubleword boundary */
     if ( spccb_absolute_addr & 0x00000007 )
-    {
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
-        return 3;
-    }
 
     /* Program check if SPCCB is outside main storage */
     if ( spccb_absolute_addr >= regs->mainsize )
-    {
         ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
-        return 3;
-    }
 
-    /*debug*/logmsg("MSSF call %8.8X SPCCB=%8.8X\n",
-    /*debug*/       mssf_command, spccb_absolute_addr);
+//  /*debug*/logmsg("MSSF call %8.8X SPCCB=%8.8X\n",
+//  /*debug*/       mssf_command, spccb_absolute_addr);
 
     /* Point to Service Processor Command Control Block */
     spccb = (SPCCB_HEADER*)(sysblk.mainstor + spccb_absolute_addr);
@@ -230,16 +224,13 @@ DEVBLK            *dev;                /* Device block pointer       */
 
     /* Program check if end of SPCCB falls outside main storage */
     if ( regs->mainsize - spccblen < spccb_absolute_addr )
-    {
         ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
-        return 3;
-    }
 
     /* Obtain the interrupt lock */
     obtain_lock (&sysblk.intlock);
 
     /* If a service signal is pending then we cannot process the request */
-    if( sysblk.servsig == 1 ) {
+    if( IS_IC_SERVSIG ) {
         release_lock (&sysblk.intlock);
         return 2;   /* Service Processor Busy */
     }
@@ -354,7 +345,7 @@ DEVBLK            *dev;                /* Device block pointer       */
 
     /* Set service signal external interrupt pending */
     sysblk.servparm = spccb_absolute_addr;
-    sysblk.extpending = sysblk.servsig = 1; 
+    ON_IC_SERVSIG; 
 
     /* Release the interrupt lock */
     release_lock (&sysblk.intlock);
@@ -373,7 +364,7 @@ void ARCH_DEP(diag204_call) (int r1, int r2, REGS *regs)
 DIAG204_HDR       *hdrinfo;            /* Header                     */
 DIAG204_PART      *partinfo;           /* Partition info             */
 DIAG204_PART_CPU  *cpuinfo;            /* CPU info                   */
-U32               abs;                 /* abs addr of data area      */
+RADR              abs;                 /* abs addr of data area      */
 U64               dreg;                /* work doubleword            */
 int               i;                   /* loop counter               */
 struct rusage     usage;               /* RMF type data              */
@@ -381,21 +372,15 @@ static char       lparname[] = "HERCULES";
 static char       physical[] = "PHYSICAL";
 static U64        diag204tod;          /* last diag204 tod           */
 
-    abs = APPLY_PREFIXING (regs->GR_L(r1), regs->PX);
+    abs = APPLY_PREFIXING (regs->GR(r1), regs->PX);
 
     /* Program check if RMF data is not on a page boundary */
-    if ( (abs & STORAGE_KEY_BYTEMASK) != 0x000)
-    {
+    if ( (abs & PAGEFRAME_BYTEMASK) != 0x000)
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
-        return;
-    }
 
     /* Program check if RMF data area is outside main storage */
     if ( abs >= regs->mainsize )
-    {
         ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
-        return;
-    }
 
     /* Test DIAG204 command word */
     switch (regs->GR_L(r2)) {
@@ -493,10 +478,6 @@ static U64        diag204tod;          /* last diag204 tod           */
 
 #if !defined(_GEN_ARCH)
 
-// #define  _GEN_ARCH 964
-// #include "diagmssf.c"
-
-// #undef   _GEN_ARCH
 #define  _GEN_ARCH 390
 #include "diagmssf.c"
 

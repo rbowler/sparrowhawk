@@ -15,7 +15,7 @@
 /*                                               Jan Jaeger 01/07/00 */
 /* Add trialrun to ED and EDMK                   Jan Jaeger 19/07/00 */
 /* Fix random MP bug - Mario Bezzi                                   */
-/* Clear TEA on data exception - Peter Kuschnerus                V209*/
+/* Clear DXC on data exception - Peter Kuschnerus                V209*/
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 /* TP instruction - Roger Bowler                            08/02/01 */
 /*-------------------------------------------------------------------*/
@@ -395,7 +395,7 @@ BYTE    pack[MAX_DECIMAL_LENGTH];       /* Packed decimal work area  */
         /* Check for valid numeric */
         if (h > 9)
         {
-            regs->TEA = 0;
+            regs->dxc = DXC_DECIMAL;
             ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
             return;
         }
@@ -413,7 +413,7 @@ BYTE    pack[MAX_DECIMAL_LENGTH];       /* Packed decimal work area  */
     h = pack[MAX_DECIMAL_LENGTH-1] & 0x0F;
     if (h < 0x0A)
     {
-        regs->TEA = 0;
+        regs->dxc = DXC_DECIMAL;
         ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
         return;
     }
@@ -739,7 +739,7 @@ BYTE    rbyte;                          /* Result byte               */
                     /* Program check if left digit is not numeric */
                     if (h > 9)
                     {
-                        regs->TEA = 0;
+                        regs->dxc = DXC_DECIMAL;
                         ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
                     }
 
@@ -877,7 +877,7 @@ int     carry;                          /* Carry indicator           */
        first operand; this ensures that overflow cannot occur */
     if (l2 > l1 - (count1/2 + 1))
     {
-        regs->TEA = 0;
+        regs->dxc = DXC_DECIMAL;
         ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
     }
 
@@ -935,7 +935,7 @@ int     carry;                          /* Carry indicator           */
     /* Program check if rounding digit is invalid */
     if (i3 > 9)
     {
-        regs->TEA = 0;
+        regs->dxc = DXC_DECIMAL;
         ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
     }
 
@@ -1166,10 +1166,6 @@ BYTE    pack[MAX_DECIMAL_LENGTH];       /* Packed decimal work area  */
 
 #if !defined(_GEN_ARCH)
 
-// #define  _GEN_ARCH 964
-// #include "decimal.c"
-
-// #undef   _GEN_ARCH
 #define  _GEN_ARCH 390
 #include "decimal.c"
 

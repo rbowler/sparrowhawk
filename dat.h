@@ -80,7 +80,7 @@ int     i;                              /* Array subscript           */
 
   #if !defined(FEATURE_ESAME)
     /* ASN translation specification exception if reserved bits set */
-    if (ASF_ENABLED(regs) == 0) {
+    if (!ASF_ENABLED(regs)) {
         if (afte & AFTE_RESV_0)
               goto asn_asn_tran_spec_excp;
     } else {
@@ -90,7 +90,7 @@ int     i;                              /* Array subscript           */
   #endif /*!defined(FEATURE_ESAME)*/
 
     /* [3.9.3.2] Use AFTE and ASX to obtain real address of ASTE */
-    if (ASF_ENABLED(regs) == 0) {
+    if (!ASF_ENABLED(regs)) {
         aste_addr = afte & AFTE_ASTO_0;
         aste_addr += (asn & ASN_ASX) << 4;
         numwords = 4;
@@ -132,7 +132,7 @@ int     i;                              /* Array subscript           */
     if ((aste[0] & ASTE0_RESV) || (aste[1] & ASTE1_RESV)
         || ((aste[0] & ASTE0_BASE)
           #ifdef FEATURE_SUBSPACE_GROUP
-            && ASF_ENABLED(regs) == 0
+            && !ASF_ENABLED(regs)
           #endif /*FEATURE_SUBSPACE_GROUP*/
             ))
         goto asn_asn_tran_spec_excp;
@@ -167,6 +167,7 @@ asn_asx_tran_excp:
 
 } /* end function translate_asn */
 #endif /*defined(FEATURE_DUAL_ADDRESS_SPACE)*/
+
 
 #if defined(FEATURE_DUAL_ADDRESS_SPACE)
 /*-------------------------------------------------------------------*/
@@ -261,6 +262,7 @@ auth_addr_excp:
     return 1;
 } /* end function authorize_asn */
 #endif /*defined(FEATURE_DUAL_ADDRESS_SPACE)*/
+
 
 #if defined(FEATURE_ACCESS_REGISTERS)
 /*-------------------------------------------------------------------*/
@@ -419,7 +421,7 @@ int     code;                           /* Exception code            */
             if ((aste[0] & ASTE0_RESV) || (aste[1] & ASTE1_RESV)
                 || ((aste[0] & ASTE0_BASE)
                       #ifdef FEATURE_SUBSPACE_GROUP
-                        && ASF_ENABLED(regs) == 0
+                        && !ASF_ENABLED(regs)
                       #endif /*FEATURE_SUBSPACE_GROUP*/
                    ))
                 goto alet_asn_tran_spec_excp;
@@ -487,6 +489,7 @@ ext_auth_excp:
 } /* end function translate_alet */
 #endif /*defined(FEATURE_ACCESS_REGISTERS)*/
 
+
 #if defined(FEATURE_ACCESS_REGISTERS)
 /*-------------------------------------------------------------------*/
 /* Purge the ART lookaside buffer                                    */
@@ -501,6 +504,7 @@ _DAT_C_STATIC void ARCH_DEP(purge_alb) (REGS *regs)
   #endif /*defined(_FEATURE_SIE)*/
 } /* end function purge_alb */
 #endif /*defined(FEATURE_ACCESS_REGISTERS)*/
+
 
 /*-------------------------------------------------------------------*/
 /* Determine effective ASCE or STD                                   */
@@ -579,16 +583,16 @@ U16     xcode;                          /* ALET tran.exception code  */
     }
   #if defined(FEATURE_ACCESS_REGISTERS)
     else if(ACCESS_REGISTER_MODE(&regs->psw)
-    #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+    #if defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
       || (regs->sie_active
         && (regs->guestregs->siebk->mx & SIE_MX_XC)
         && regs->guestregs->psw.armode)
-    #endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+    #endif /*defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
         )
     {
         /* [5.8.4.1] Select the access-list-entry token */
         alet = (arn == 0) ? 0 :
-    #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+    #if defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
         /* Obtain guest ALET if guest is XC guest in AR mode */
         (regs->sie_active && (regs->guestregs->siebk->mx & SIE_MX_XC)
          && regs->guestregs->psw.armode)
@@ -596,7 +600,7 @@ U16     xcode;                          /* ALET tran.exception code  */
         /* else if in SIE mode but not an XC guest in AR mode
            then the ALET will be zero */
         (regs->sie_active) ? 0 :
-    #endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+    #endif /*defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
             regs->AR(arn);
 
         /* Use the ALET to determine the segment table origin */
@@ -657,6 +661,7 @@ U16     xcode;                          /* ALET tran.exception code  */
 
     return 0;
 } /* end function load_address_space_designator */
+
 
 /*-------------------------------------------------------------------*/
 /* Translate a 31-bit virtual address to a real address              */
@@ -739,7 +744,7 @@ _DAT_C_STATIC int ARCH_DEP(translate_addr) (VADR vaddr, int arn,
                         int *prot, int *pstid, U32 *xpblk, BYTE *xpkey)
 {
 RADR    sto = 0;                        /* Segment table origin      */
-RADR    pto;                            /* Page table origin         */
+RADR    pto = 0;                        /* Page table origin         */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=Page prot, 2=ALE prot   */
 int     stid;                           /* Address space indication  */
@@ -935,7 +940,6 @@ TLBE   *tlbp;                           /* -> TLB entry              */
     if (acctype == ACCTYPE_LRA
     #if defined(FEATURE_LOCK_PAGE)
        || acctype == ACCTYPE_LOCKPAGE
-       || acctype == ACCTYPE_UNLKPAGE
     #endif /*defined(FEATURE_LOCK_PAGE)*/
        )
         tlbp = NULL;
@@ -1025,41 +1029,24 @@ TLBE   *tlbp;                           /* -> TLB entry              */
             tlbp->valid = 1;
         }
 
-#if defined(FEATURE_LOCK_PAGE)
-        switch(acctype) {
-        case ACCTYPE_LOCKPAGE:
-            if(pte & PAGETAB_PGLOCK)
-                regs->psw.cc = 1;
-            else
-            {
-                ARCH_DEP(store_fullword_absolute)(pte |
-                                PAGETAB_PGLOCK, pto, regs);
-                regs->psw.cc = 0;
-            }
-            break;
-
-        case ACCTYPE_UNLKPAGE:
-            if(pte & PAGETAB_PGLOCK)
-            {
-                ARCH_DEP(store_fullword_absolute)(pte &
-                               ~PAGETAB_PGLOCK, pto, regs);
-                regs->psw.cc = 0;
-            }
-            else
-                regs->psw.cc = 1;
-            break;
-        } /* end switch(acctype) */
-#endif /*defined(FEATURE_LOCK_PAGE)*/
-
     } /* end if(!TLB) */
 
     /* Set the protection indicator if page protection is active */
     if (pte & PAGETAB_PROT)
         protect = 1;
 
+#if defined(FEATURE_LOCK_PAGE)
+    if(acctype != ACCTYPE_LOCKPAGE)
+#endif /*defined(FEATURE_LOCK_PAGE)*/
     /* [3.11.3.5] Combine the page frame real address with the byte
        index of the virtual address to form the real address */
-    *raddr = (pte & PAGETAB_PFRA) | (vaddr & 0xFFF);
+        *raddr = (pte & PAGETAB_PFRA) | (vaddr & 0xFFF);
+#if defined(FEATURE_LOCK_PAGE)
+    else
+    /* In the case of lock page, return the address of the 
+       pagetable entry */
+        *raddr = pto;
+#endif /*defined(FEATURE_LOCK_PAGE)*/
 
 #endif /*defined(FEATURE_S390_DAT)*/
 
@@ -1087,6 +1074,9 @@ U16     sx, px;                         /* Segment and page index,
     if (*xcode != 0)
         goto tran_alet_excp;
 
+    /* Extract the private space bit from the ASCE */
+    private = asce & ASCE_P;
+
 //  logmsg("asce=%16.16llX\n",asce);
 
     /* If ASCE indicates a real-space then real addr = virtual addr */
@@ -1102,9 +1092,6 @@ U16     sx, px;                         /* Segment and page index,
     }
     else
     {
-        /* Extract the private space bit from the ASCE */
-        private = asce & ASCE_P;
-
         /* Extract the table origin, type, and length from the ASCE,
            and set the table offset to zero */
         rto = asce & ASCE_TO;
@@ -1279,6 +1266,11 @@ U16     sx, px;                         /* Segment and page index,
 
         /* Perform ESAME segment translation */
 
+        /* Add the segment index (with three low-order zeroes)
+           to the segment table origin, giving the address of
+           the segment table entry */
+        sto += sx;
+
         /* Segment translation exception if table offset is
            greater than high-order 2 bits of segment index */
         if (tf > (sx >> 12))
@@ -1288,11 +1280,6 @@ U16     sx, px;                         /* Segment and page index,
            less than high-order 2 bits of segment index */
         if (tl < (sx >> 12))
             goto seg_tran_length;
-
-        /* Add the segment index (with three low-order zeroes)
-           to the segment table origin, giving the address of
-           the segment table entry */
-        sto += sx;
 
         /* Addressing exception if outside real storage */
         if (sto >= regs->mainsize)
@@ -1349,34 +1336,15 @@ U16     sx, px;                         /* Segment and page index,
         if ((ste & ZSEGTAB_P) || (pte & ZPGETAB_P))
             protect = 1;
 
-        /* Combine the page frame real address with the byte index
-           of the virtual address to form the real address */
-        *raddr = (pte & ZPGETAB_PFRA) | (vaddr & 0xFFF);
-
 #if defined(FEATURE_LOCK_PAGE)
-        switch(acctype) {
-        case ACCTYPE_LOCKPAGE:
-            if(pte & PAGETAB_PGLOCK)
-                regs->psw.cc = 1;
-            else
-            {
-                ARCH_DEP(store_doubleword_absolute)(pte |
-                                PAGETAB_PGLOCK, pto, regs);
-                regs->psw.cc = 0;
-            }
-            break;
-
-        case ACCTYPE_UNLKPAGE:
-            if(pte & PAGETAB_PGLOCK)
-            {
-                ARCH_DEP(store_doubleword_absolute)(pte &
-                               ~PAGETAB_PGLOCK, pto, regs);
-                regs->psw.cc = 0;
-            }
-            else
-                regs->psw.cc = 1;
-            break;
-        } /* end switch(acctype) */
+        if(acctype != ACCTYPE_LOCKPAGE)
+#endif /*defined(FEATURE_LOCK_PAGE)*/
+            /* Combine the page frame real address with the byte index
+               of the virtual address to form the real address */
+            *raddr = (pte & ZPGETAB_PFRA) | (vaddr & 0xFFF);
+#if defined(FEATURE_LOCK_PAGE)
+        else
+            *raddr = pto;
 #endif /*defined(FEATURE_LOCK_PAGE)*/
 
     } /* end if(ASCE_R) */
@@ -1460,6 +1428,8 @@ page_tran_length:
 #endif /*!defined(FEATURE_ESAME)*/
 
 seg_tran_length:
+//  logmsg("dat.c: segment translation exception due to segment length\n");
+//  logmsg("       cr0=" F_RADR " sto=" F_RADR "\n",regs->CR(0),sto);
     *xcode = PGM_SEGMENT_TRANSLATION_EXCEPTION;
     *raddr = sto;
     cc = 3;
@@ -1532,11 +1502,11 @@ tran_excp_addr:
 
     /* Set the exception access identification */
     if (ACCESS_REGISTER_MODE(&regs->psw)
-#if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+#if defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
       || (regs->sie_active
         && (regs->guestregs->siebk->mx & SIE_MX_XC)
         && regs->guestregs->psw.armode)
-#endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+#endif /*defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
        )
        regs->excarid = (arn < 0 ? 0 : arn);
 
@@ -1544,6 +1514,7 @@ tran_excp_addr:
     return cc;
 
 } /* end function translate_addr */
+
 
 /*-------------------------------------------------------------------*/
 /* Purge the translation lookaside buffer                            */
@@ -1562,6 +1533,7 @@ _DAT_C_STATIC void ARCH_DEP(purge_tlb) (REGS *regs)
     }
 #endif /*defined(_FEATURE_SIE)*/
 } /* end function purge_tlb */
+
 
 /*-------------------------------------------------------------------*/
 /* Invalidate page table entry                                       */
@@ -1658,9 +1630,13 @@ RADR    pte;
     {
         /* Combine the page table origin in the R1 register with
            the page index in the R2 register, ignoring carry, to
-           form the 31-bit real address of the page table entry */
+           form the 64-bit real address of the page table entry */
         raddr = (regs->GR_G(r1) & ZSEGTAB_PTO)
-                    + ((regs->GR_G(r2) & 0x000FF000) >> 10);
+                    + ((regs->GR_G(r2) & 0x000FF000) >> 9);
+
+#if defined(MODEL_DEPENDENT)
+        raddr = APPLY_PREFIXING (raddr, regs->PX);
+#endif /*defined(MODEL_DEPENDENT)*/
 
         /* Fetch the page table entry from real storage, subject
            to normal storage protection mechanisms */
@@ -1767,9 +1743,9 @@ U16     xcode;                          /* Exception code            */
       /* Under SIE guest real is always host primary, regardless
          of the DAT mode */
       && !(regs->sie_active
-#if !defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+#if !defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
                             && arn == USE_PRIMARY_SPACE
-#endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+#endif /*defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
                                                         )
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
       )
@@ -1860,7 +1836,7 @@ U16     xcode;                          /* Exception code            */
         /* Set interrupt flag and interval timer interrupt pending
            if the interval timer went from positive to negative */
         if (itimer < 0 && olditimer >= 0)
-            regs->cpuint = regs->itimer_pending = 1;
+            ON_IC_ITIMER(regs);
 
         /* Release the TOD clock update lock */
         release_lock (&sysblk.todlock);
@@ -1883,7 +1859,7 @@ U16     xcode;                          /* Exception code            */
         regs->VE(arn) = addr & STORAGE_KEY_PAGEMASK;
         regs->aekey[arn] = akey;
         regs->aeacc[arn] = acctype;
-        if((addr < 4096) && !private)
+        if((addr < PSA_SIZE) && !private)
         {
             if(akey == 0)
                 regs->aeacc[arn] = ACCTYPE_READ;

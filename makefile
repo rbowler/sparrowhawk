@@ -2,7 +2,7 @@
 # Makefile for Hercules S/370, ESA/390 and z/Architecture emulator
 #
 
-VERSION  = 2.11
+VERSION  = 2.12
 
 # Change this if you want to install the Hercules executables somewhere
 #   besides /usr/bin. The $PREFIX (which defaults to nothing) can be
@@ -10,62 +10,64 @@ VERSION  = 2.11
 #   (the directory is only used when installing).
 DESTDIR  = $(PREFIX)/usr/bin
 
-# Standard flags for all architectures
-CFLAGS	 = -Wall -fomit-frame-pointer -DVERSION=$(VERSION) -DNO_BYTESWAP_H
-LFLAGS	 = -lpthread
-
-# Add default flags for Pentium compilations
+# Architecture processing:
 ifndef HOST_ARCH
 HOST_ARCH = i586
 endif
 
-# Handle host architecture if specified
 ifeq ($(HOST_ARCH),i386)
-CFLAGS	 += -O3 -malign-double -DNO_ASM_BYTESWAP
+ARCH_FLAGS = -O3
 endif
 ifeq ($(HOST_ARCH),i586)
-CFLAGS	 += -O3 -malign-double -march=pentium
+ARCH_FLAGS = -O3 -march=pentium
 endif
 ifeq ($(HOST_ARCH),i686)
-CFLAGS	 += -O3 -malign-double -march=pentiumpro
+ARCH_FLAGS = -O3 -march=pentiumpro
 endif
 ifeq ($(HOST_ARCH),alpha)
-CFLAGS	 += -O2 -DNO_ASM_BYTESWAP
-endif
-ifeq ($(HOST_ARCH),other)
-CFLAGS	 += -O3 -DNO_ASM_BYTESWAP
+ARCH_FLAGS = -O2
 endif
 
-# Uncomment these lines for NetBSD, with either the unproven-pthreads
-#   or pth packages
-#CFLAGS  += -I/usr/pkg/pthreads/include -I/usr/pkg/include
-#LFLAGS	 += -L/usr/pkg/pthreads/lib -R/usr/pkg/pthreads
-#LFLAGS	 += -L/usr/pkg/lib -R/usr/pkg/pthreads/lib
+ifndef ARCH_FLAGS
+ARCH_FLAGS = -O3
+endif
 
-# Reverse the comments below to disable Compressed CKD Dasd support
-#CFLAGS  += -DNO_CCKD
-LFLAGS	 += -lz
+# For Linux use:
+#CFLAGS  = -O3 -Wall -march=pentium -fomit-frame-pointer \
+#	   -DVERSION=$(VERSION)
+# For older Linux versions use:
+CFLAGS  = $(ARCH_FLAGS) -fomit-frame-pointer \
+	  -DVERSION=$(VERSION) -DNO_BYTESWAP_H -DNO_ASM_BYTESWAP \
+	  -DNO_ATTR_REGPARM
+# For Linux/390 use:
+#CFLAGS  = -O3 -DVERSION=$(VERSION) -DNO_BYTESWAP_H -DNO_ASM_BYTESWAP\
+#	  -DNO_ATTR_REGPARM
 
-# Uncomment these lines to enable Compressed CKD bzip2 compression
-#CFLAGS  += -DCCKD_BZIP2
+LFLAGS	 = -lpthread -lm -lz
 
-# Uncomment these lines to enable HET bzip2 compression
+# Uncomment the lines below to enable Compressed CKD bzip2 compression
+#CFLAGS	+= -DCCKD_BZIP2
+#LFLAGS	+= -lbz2
+
+# Uncomment the lines below to enable HET bzip2 compression
 #CFLAGS	+= -DHET_BZIP2
 #LFLAGS	+= -lbz2
 
 EXEFILES = hercules hercifc \
 	   dasdinit dasdisup dasdload dasdls dasdpdsu \
-	   tapecopy tapelist tapemap tapesplit \
+	   tapecopy tapemap tapesplt \
 	   cckd2ckd cckdcdsk ckd2cckd cckdcomp \
-	   hetget hetinit hetmap hetupd
+	   hetget hetinit hetmap hetupd \
+	   dmap2hrc
 
 TARFILES = makefile *.c *.h hercules.cnf tapeconv.jcl dasdlist \
 	   html zzsa.cnf zzsacard.bin
 
-HRC_OBJS = impl.o config.o panel.o \
+HRC_OBJS = impl.o config.o panel.o version.o \
 	   ipl.o assist.o dat.o \
 	   stack.o cpu.o vstore.o \
-	   general.o control.o io.o \
+	   general1.o general2.o plo.o \
+           control.o io.o \
 	   decimal.o service.o opcode.o \
 	   diagnose.o diagmssf.o vm.o \
 	   channel.o ckddasd.o fbadasd.o \
@@ -75,46 +77,47 @@ HRC_OBJS = impl.o config.o panel.o \
 	   machchk.o vector.o xstore.o \
 	   cmpsc.o sie.o ses.o timer.o \
 	   esame.o cckddasd.o cckdcdsx.o \
-	   parser.o hetlib.o
+	   parser.o hetlib.o ieee.o
 
-HIFC_OBJ = hercifc.o
+HIFC_OBJ = hercifc.o version.o
 
-DIN_OBJS = dasdinit.o dasdutil.o
+DIN_OBJS = dasdinit.o dasdutil.o version.o
 
-DIS_OBJS = dasdisup.o dasdutil.o
+DIS_OBJS = dasdisup.o dasdutil.o version.o
 
-DLD_OBJS = dasdload.o dasdutil.o
+DLD_OBJS = dasdload.o dasdutil.o version.o
 
-DLS_OBJS = dasdls.o dasdutil.o
+DLS_OBJS = dasdls.o dasdutil.o version.o
 
-DPU_OBJS = dasdpdsu.o dasdutil.o
+DPU_OBJS = dasdpdsu.o dasdutil.o version.o
 
-TCY_OBJS = tapecopy.o
+TCY_OBJS = tapecopy.o version.o
 
-TLS_OBJS = tapelist.o
+TMA_OBJS = tapemap.o version.o
 
-TMA_OBJS = tapemap.o
+TSP_OBJS = tapesplt.o version.o
 
-TSP_OBJS = tapesplit.o
+CCHK_OBJ = cckdcdsk.o version.o
 
-CCHK_OBJ = cckdcdsk.o
+COMP_OBJ = cckdcomp.o cckdcdsx.o version.o
 
-COMP_OBJ = cckdcomp.o cckdcdsx.o
+C2CC_OBJ = ckd2cckd.o version.o
 
-C2CC_OBJ = ckd2cckd.o
+CC2C_OBJ = cckd2ckd.o version.o
 
-CC2C_OBJ = cckd2ckd.o
+HGT_OBJS = hetget.o hetlib.o sllib.o version.o
 
-HGT_OBJS = hetget.o hetlib.o sllib.o
+HIN_OBJS = hetinit.o hetlib.o sllib.o version.o
 
-HIN_OBJS = hetinit.o hetlib.o sllib.o
+HMA_OBJS = hetmap.o hetlib.o sllib.o version.o
 
-HMA_OBJS = hetmap.o hetlib.o sllib.o
+HUP_OBJS = hetupd.o hetlib.o sllib.o version.o
 
-HUP_OBJS = hetupd.o hetlib.o sllib.o
+D2H_OBJS = dmap2hrc.o version.o
 
 HEADERS  = feat370.h feat390.h feat900.h featall.h featchk.h features.h \
 	   esa390.h opcode.h hercules.h inline.h dat.h vstore.h \
+	   codeconv.h \
 	   byteswap.h \
 	   dasdblks.h \
 	   hetlib.h \
@@ -151,14 +154,23 @@ dasdpdsu:  $(DPU_OBJS)
 tapecopy:  $(TCY_OBJS)
 	$(CC) -o tapecopy $(TCY_OBJS)
 
-tapelist:  $(TLS_OBJS)
-	$(CC) -o tapelist $(TLS_OBJS)
-
 tapemap:  $(TMA_OBJS)
 	$(CC) -o tapemap $(TMA_OBJS)
 
-tapesplit:  $(TSP_OBJS)
-	$(CC) -o tapesplit $(TSP_OBJS)
+tapesplt: $(TSP_OBJS)
+	$(CC) -o tapesplt $(TSP_OBJS)
+
+cckdcdsk: $(CCHK_OBJ)
+	$(CC) -o cckdcdsk $(CCHK_OBJ) $(LFLAGS)
+
+cckdcomp: $(COMP_OBJ)
+	$(CC) -o cckdcomp $(COMP_OBJ) $(LFLAGS)
+
+cckd2ckd: $(CC2C_OBJ)
+	$(CC) -o cckd2ckd $(CC2C_OBJ) $(LFLAGS)
+
+ckd2cckd: $(C2CC_OBJ)
+	$(CC) -o ckd2cckd $(C2CC_OBJ) $(LFLAGS)
 
 hetget:  $(HGT_OBJS)
 	$(CC) -o hetget $(HGT_OBJS) $(LFLAGS)
@@ -171,6 +183,9 @@ hetmap:  $(HMA_OBJS)
 
 hetupd:  $(HUP_OBJS)
 	$(CC) -o hetupd $(HUP_OBJS) $(LFLAGS)
+
+dmap2hrc:  $(D2H_OBJS)
+	$(CC) -o dmap2hrc $(D2H_OBJS) $(LFLAGS)
 
 dasdinit.o: dasdinit.c $(HEADERS) dasdblks.h
 
@@ -186,11 +201,9 @@ dasdutil.o: dasdutil.c $(HEADERS) dasdblks.h
 
 tapecopy.o: tapecopy.c $(HEADERS)
 
-tapelist.o: tapelist.c $(HEADERS)
-
 tapemap.o: tapemap.c $(HEADERS)
 
-tapesplit.o: tapesplit.c $(HEADERS)
+tapesplt.o: tapesplt.c $(HEADERS)
 
 hetget.o: hetget.c hetlib.h sllib.h
 
@@ -200,33 +213,22 @@ hetmap.o: hetmap.c hetlib.h sllib.h
 
 hetupd.o: hetupd.c hetlib.h sllib.h
 
+dmap2hrc.o: dmap2hrc.c $(HEADERS)
+
 cckd:	   cckd2ckd cckdcdsk ckd2cckd cckdcomp
 
-cckd2ckd:  $(CC2C_OBJ)
-	$(CC) -o cckd2ckd $(CC2C_OBJ) $(LFLAGS)
-
-cckdcdsk:  $(CCHK_OBJ)
-	$(CC) -o cckdcdsk $(CCHK_OBJ) $(LFLAGS)
-
-ckd2cckd:  $(C2CC_OBJ)
-	$(CC) -o ckd2cckd $(C2CC_OBJ) $(LFLAGS)
-
-cckdcomp:  $(COMP_OBJ)
-	$(CC) -o cckdcomp $(COMP_OBJ) $(LFLAGS)
-
-$(CCHK_OBJ): %.o: %.c $(HEADERS)
-	$(CC) $(CFLAGS) -o $@ -c $<
-
 clean:
-	rm -rf $(EXEFILES) *.o
+	rm -rf $(EXEFILES) *.o core
 
 tar:	clean
-	(cd ..; tar cvzf hercules-$(VERSION).tar.gz hercules-$(VERSION))
+	(cd ..; tar cvzf hercules-$(VERSION).tar.gz --exclude \*CVS hercules-$(VERSION))
 
 install:  $(EXEFILES)
 	cp $(EXEFILES) $(DESTDIR)
-	cp dasdlist $(DESTDIR)
+	cp util/dasdlist $(DESTDIR)
+ifndef RPM_OPT_FLAGS
 	chown root $(DESTDIR)/hercifc
 	chmod 0751 $(DESTDIR)/hercifc
 	chmod +s $(DESTDIR)/hercifc
 	rm hercifc
+endif

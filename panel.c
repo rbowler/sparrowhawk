@@ -22,6 +22,8 @@
 /*      attach/detach/define commands by Jan Jaeger                  */
 /*      Panel refresh rate triva by Reed H. Petty                    */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+/*      64-bit address support by Roger Bowler                       */
+/*      Display subchannel command by Nobumichi Kozawa               */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -35,9 +37,13 @@
 /*-------------------------------------------------------------------*/
 /* Internal function prototypes                                      */
 /*-------------------------------------------------------------------*/
-static U16 virt_to_real (U32 *raptr, U32 vaddr, int arn, REGS *regs,
-                        int acctype);
+static void alter_display_real (BYTE *opnd, REGS *regs);
+static void alter_display_virt (BYTE *opnd, REGS *regs);
 
+/*-------------------------------------------------------------------*/
+/* Internal macro definitions                                        */
+/*-------------------------------------------------------------------*/
+#define SPACE           ((BYTE)' ')
 
 /*=NP================================================================*/
 /* Global data for new panel display                                 */
@@ -130,6 +136,27 @@ int NPdatalen;          /* Length of data */
 char NPcurprompt1[40];
 char NPcurprompt2[40];
 U32 NPaaddr;
+
+#ifdef EXTERNALGUI
+/*-------------------------------------------------------------------*/
+/* External GUI control                                              */
+/*-------------------------------------------------------------------*/
+#ifdef OPTION_MIPS_COUNTING
+U32     mipsrate = 0;
+U32     siosrate = 0;
+U32     prevmipsrate = 0;
+U32     prevsiosrate = 0;
+#endif /*OPTION_MIPS_COUNTING*/
+int     gui_gregs = 1;                  /* 1=gregs status active     */
+int     gui_cregs = 1;                  /* 1=cregs status active     */
+int     gui_aregs = 1;                  /* 1=aregs status active     */
+int     gui_fregs = 1;                  /* 1=fregs status active     */
+int     gui_devlist = 1;                /* 1=devlist status active   */
+DEVBLK* dev;
+BYTE*   devclass;
+char    devnam[256];
+int     stat_online, stat_busy, stat_pend, stat_open;
+#endif /*EXTERNALGUI*/
 
 /*=NP================================================================*/
 /*  Initialize the NP data                                           */
@@ -604,12 +631,6 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
 
 
 /*-------------------------------------------------------------------*/
-/* Internal macro definitions                                        */
-/*-------------------------------------------------------------------*/
-#define SPACE           ((BYTE)' ')
-
-
-/*-------------------------------------------------------------------*/
 /* Display general purpose registers                                 */
 /*-------------------------------------------------------------------*/
 static void display_regs (REGS *regs)
@@ -672,229 +693,6 @@ static void display_fregs (REGS *regs)
 } /* end function display_fregs */
 
 /*-------------------------------------------------------------------*/
-/* Display real storage (up to 16 bytes, or until end of 4K page)    */
-/* Returns number of characters placed in display buffer             */
-/*-------------------------------------------------------------------*/
-static int display_real (REGS *regs, U32 raddr, BYTE *buf)
-{
-U32     aaddr;                          /* Absolute storage address  */
-int     i, j;                           /* Loop counters             */
-int     n;                              /* Number of bytes in buffer */
-BYTE    hbuf[40];                       /* Hexadecimal buffer        */
-BYTE    cbuf[17];                       /* Character buffer          */
-BYTE    c;                              /* Character work area       */
-
-    n = sprintf (buf, "R:%8.8X:", raddr);
-    aaddr = APPLY_PREFIXING (raddr, regs->PX);
-    if (aaddr >= regs->mainsize)
-    {
-        n += sprintf (buf+n, " Real address is not valid");
-        return n;
-    }
-
-    n += sprintf (buf+n, "K:%2.2X=", STORAGE_KEY(aaddr));
-
-    memset (hbuf, SPACE, sizeof(hbuf));
-    memset (cbuf, SPACE, sizeof(cbuf));
-
-    for (i = 0, j = 0; i < 16; i++)
-    {
-        c = sysblk.mainstor[aaddr++];
-        j += sprintf (hbuf+j, "%2.2X", c);
-        if ((aaddr & 0x3) == 0x0) hbuf[j++] = SPACE;
-        c = ebcdic_to_ascii[c];
-        if (!isprint(c)) c = '.';
-        cbuf[i] = c;
-        if ((aaddr & 0xFFF) == 0x000) break;
-    } /* end for(i) */
-
-    n += sprintf (buf+n, "%36.36s %16.16s", hbuf, cbuf);
-    return n;
-
-} /* end function display_real */
-
-/*-------------------------------------------------------------------*/
-/* Display instruction                                               */
-/*-------------------------------------------------------------------*/
-void display_inst (REGS *regs, BYTE *inst)
-{
-QWORD   qword;                          /* Doubleword work area      */
-BYTE    opcode;                         /* Instruction operation code*/
-int     ilc;                            /* Instruction length        */
-#ifdef DISPLAY_INSTRUCTION_OPERANDS
-int     b1=-1, b2=-1, x1;               /* Register numbers          */
-U32     addr1 = 0, addr2 = 0;           /* Operand addresses         */
-U32     raddr;                          /* Real address              */
-U16     xcode;                          /* Exception code            */
-#endif /*DISPLAY_INSTRUCTION_OPERANDS*/
-BYTE    buf[100];                       /* Message buffer            */
-int     n;                              /* Number of bytes in buffer */
-
-#if defined(_FEATURE_SIE)
-    if(regs->sie_state)
-        logmsg("SIE: ");
-#endif /*defined(_FEATURE_SIE)*/
-
-    /* Display the PSW */
-    memset (qword, 0x00, sizeof(qword));
-    store_psw (regs, qword);
-    n = sprintf (buf,
-                "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X ",
-                qword[0], qword[1], qword[2], qword[3],
-                qword[4], qword[5], qword[6], qword[7]);
-    if(regs->arch_mode >= ARCH_900)
-        n += sprintf (buf + n,
-                "%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X ",
-                qword[8], qword[9], qword[10], qword[11],
-                qword[12], qword[13], qword[14], qword[15]);
-
-    /* Exit if instruction is not valid */
-    if (inst == NULL)
-    {
-        logmsg ("%sInstruction fetch error\n", buf);
-        display_regs (regs);
-        return;
-    }
-
-    /* Extract the opcode and determine the instruction length */
-    opcode = inst[0];
-    ilc = (opcode < 0x40) ? 2 : (opcode < 0xC0) ? 4 : 6;
-
-    /* Display the instruction */
-    n += sprintf (buf+n, "INST=%2.2X%2.2X", inst[0], inst[1]);
-    if (ilc > 2) n += sprintf (buf+n, "%2.2X%2.2X", inst[2], inst[3]);
-    if (ilc > 4) n += sprintf (buf+n, "%2.2X%2.2X", inst[4], inst[5]);
-    logmsg ("%s\n", buf);
-
-#ifdef DISPLAY_INSTRUCTION_OPERANDS
-
-         /* fetching operands from storage can go terribly wrong
-            if either a addressing exception or a translation
-            specification occurs.  This will cause a loop between
-            display_inst and progam_interrupt.  - Jan Jaeger  */
-
-#if defined(_FEATURE_SIE)
-    /* Do not try to access host virtual in SIE state */
-    if(!regs->sie_state || regs->sie_pref)
-    {
-#endif /*defined(_FEATURE_SIE)*/
-
-    /* Process the first storage operand */
-    if (ilc > 2
-        && opcode != 0x84 && opcode != 0x85
-        && opcode != 0xA5 && opcode != 0xA7
-        && opcode != 0xC0 && opcode != 0xEC)
-    {
-        /* Calculate the effective address of the first operand */
-        b1 = inst[2] >> 4;
-        addr1 = ((inst[2] & 0x0F) << 8) | inst[3];
-        if (b1 != 0)
-        {
-            addr1 += regs->GR_L(b1);
-            addr1 &= ADDRESS_MAXWRAP(regs);
-        }
-
-        /* Apply indexing for RX/RXE/RXF instructions */
-        if ((opcode >= 0x40 && opcode <= 0x7F) || opcode == 0xB1
-            || opcode == 0xE3 || opcode == 0xED)
-        {
-            x1 = inst[1] & 0x0F;
-            if (x1 != 0)
-            {
-                addr1 += regs->GR_L(x1);
-                addr1 &= ADDRESS_MAXWRAP(regs);
-            }
-        }
-    }
-
-    /* Process the second storage operand */
-    if (ilc > 4
-        && opcode != 0xC0 && opcode != 0xE3 && opcode != 0xEB
-        && opcode != 0xEC && opcode != 0xED)
-    {
-        /* Calculate the effective address of the second operand */
-        b2 = inst[4] >> 4;
-        addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
-        if (b2 != 0)
-        {
-            addr2 += regs->GR_L(b2);
-            addr2 &= ADDRESS_MAXWRAP(regs);
-        }
-    }
-
-    /* Calculate the operand addresses for MVCL(E) and CLCL(E) */
-    if (opcode == 0x0E || opcode == 0x0F
-        || opcode == 0xA8 || opcode == 0xA9)
-    {
-        b1 = inst[1] >> 4;
-        addr1 = regs->GR_L(b1) & ADDRESS_MAXWRAP(regs);
-        b2 = inst[1] & 0x0F;
-        addr2 = regs->GR_L(b2) & ADDRESS_MAXWRAP(regs);
-    }
-
-    /* Calculate the operand addresses for RRE instructions */
-    if ((opcode == 0xB2 &&
-            ((inst[1] >= 0x20 && inst[1] <= 0x2F)
-            || (inst[1] >= 0x40 && inst[1] <= 0x6F)
-            || (inst[1] >= 0xA0 && inst[1] <= 0xAF)))
-        || opcode == 0xB3
-        || opcode == 0xB9)
-    {
-        b1 = inst[3] >> 4;
-        addr1 = regs->GR_L(b1) & ADDRESS_MAXWRAP(regs);
-        b2 = inst[3] & 0x0F;
-        addr2 = regs->GR_L(b2) & ADDRESS_MAXWRAP(regs);
-    }
-
-    /* Display storage at first storage operand location */
-    if (b1 >= 0)
-    {
-        n = sprintf (buf, "V:%8.8X:", addr1);
-        xcode = virt_to_real (&raddr, addr1, b1, regs,
-                                (opcode == 0x44 ? ACCTYPE_INSTFETCH :
-                                 opcode == 0xB1 ? ACCTYPE_LRA :
-                                                  ACCTYPE_READ));
-        if (xcode == 0)
-            n += display_real (regs, raddr, buf+n);
-        else
-            n += sprintf (buf+n," Translation exception %4.4hX",xcode);
-
-        logmsg ("%s\n", buf);
-    }
-
-    /* Display storage at second storage operand location */
-    if (b2 >= 0)
-    {
-        n = sprintf (buf, "V:%8.8X:", addr2);
-        xcode = virt_to_real (&raddr, addr2, b2, regs, ACCTYPE_READ);
-        if (xcode == 0)
-            n += display_real (regs, raddr, buf+n);
-        else
-            n += sprintf (buf+n," Translation exception %4.4hX",xcode);
-
-        logmsg ("%s\n", buf);
-    }
-
-#if defined(_FEATURE_SIE)
-    }
-#endif /*defined(_FEATURE_SIE)*/
-
-#endif /*DISPLAY_INSTRUCTION_OPERANDS*/
-
-    /* Display the general purpose registers */
-    display_regs (regs);
-
-    /* Display control registers if appropriate */
-    if (!REAL_MODE(&regs->psw) || regs->inst[0] == 0xB2)
-        display_cregs (regs);
-
-    /* Display access registers if appropriate */
-    if (!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
-        display_aregs (regs);
-
-} /* end function display_inst */
-
-/*-------------------------------------------------------------------*/
 /* Parse a storage range or storage alteration operand               */
 /*                                                                   */
 /* Valid formats for a storage range operand are:                    */
@@ -914,9 +712,11 @@ int     n;                              /* Number of bytes in buffer */
 /*           start/end/value are returned in saddr, eaddr, newval    */
 /*      -1 = error message issued                                    */
 /*-------------------------------------------------------------------*/
-static int parse_range (BYTE *operand, U32 *saddr, U32 *eaddr,
-                        BYTE *newval)
+static int parse_range (BYTE *operand, U64 maxadr, U64 *sadrp,
+                        U64 *eadrp, BYTE *newval)
 {
+U64     opnd1, opnd2;                   /* Address/length operands   */
+U64     saddr, eaddr;                   /* Range start/end addresses */
 int     rc;                             /* Return code               */
 int     n;                              /* Number of bytes altered   */
 int     h1, h2;                         /* Hexadecimal digits        */
@@ -924,7 +724,7 @@ BYTE   *s;                              /* Alteration value pointer  */
 BYTE    delim;                          /* Operand delimiter         */
 BYTE    c;                              /* Character work area       */
 
-    rc = sscanf(operand, "%x%c%x%c", saddr, &delim, eaddr, &c);
+    rc = sscanf(operand, "%llx%c%llx%c", &opnd1, &delim, &opnd2, &c);
 
     /* Process storage alteration operand */
     if (rc > 2 && delim == '=')
@@ -949,44 +749,141 @@ BYTE    c;                              /* Character work area       */
             }
             newval[n++] = (h1 << 4) | h2;
         } /* end for(n) */
-        *saddr &= 0x7FFFFFFF;
-        *eaddr = *saddr + n - 1;
-        if (*eaddr > 0x7FFFFFFF)
-        {
-            logmsg ("Invalid wrap: %s\n", operand);
-            return -1;
-        }
-        return n;
+        saddr = opnd1;
+        eaddr = saddr + n - 1;
     }
-
-    /* Process storage range operand */
-    if (rc == 1)
-        *eaddr = *saddr + 0x3F;
     else
     {
-        if (rc != 3 || !(delim == '-' || delim == '.'))
+        /* Process storage range operand */
+        saddr = opnd1;
+        if (rc == 1)
         {
-            logmsg ("Invalid operand: %s\n", operand);
-            return -1;
+            /* If only starting address is specified, default to
+               64 byte display, or less if near end of storage */
+            eaddr = saddr + 0x3F;
+            if (eaddr > maxadr) eaddr = maxadr;
         }
-        if (delim == '.') *eaddr += *saddr - 1;
+        else
+        {
+            /* Ending address or length is specified */
+            if (rc != 3 || !(delim == '-' || delim == '.'))
+            {
+                logmsg ("Invalid operand: %s\n", operand);
+                return -1;
+            }
+            eaddr = (delim == '.') ? saddr + opnd2 - 1 : opnd2;
+        }
+        /* Set n=0 to indicate storage display only */
+        n = 0;
     }
 
     /* Check for valid range */
-    if (*saddr > 0x7FFFFFFF || *eaddr > 0x7FFFFFFF || *eaddr < *saddr)
+    if (saddr > maxadr || eaddr > maxadr || eaddr < saddr)
     {
         logmsg ("Invalid range: %s\n", operand);
         return -1;
     }
 
-    return 0;
+    /* Return start/end addresses and number of bytes altered */
+    *sadrp = saddr;
+    *eadrp = eaddr;
+    return n;
+
 } /* end function parse_range */
+
+/*-------------------------------------------------------------------*/
+/* Display subchannel                                                */
+/*-------------------------------------------------------------------*/
+static void display_subchannel (DEVBLK *dev)
+{
+    logmsg ("%4.4X:D/T=%4.4X",
+            dev->devnum, dev->devtype);
+    if (ARCH_370 == sysblk.arch_mode)
+    {
+        logmsg (" CSW=Flags:%2.2X CCW:%2.2X%2.2X%2.2X "
+                "Stat:%2.2X%2.2X Count:%2.2X%2.2X\n",
+                dev->csw[0], dev->csw[1], dev->csw[2], dev->csw[3],
+                dev->csw[4], dev->csw[5], dev->csw[6], dev->csw[7]);
+    } else {
+        logmsg (" Subchannel_Number=%4.4X\n", dev->subchan);
+        logmsg ("     PMCW=IntParm:%2.2X%2.2X%2.2X%2.2X Flags:%2.2X%2.2X"
+                " Dev:%2.2X%2.2X"
+                " LPM:%2.2X PNOM:%2.2X LPUM:%2.2X PIM:%2.2X\n"
+                "          MBI:%2.2X%2.2X POM:%2.2X PAM:%2.2X"
+                " CHPIDs:%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X"
+                " Misc:%2.2X%2.2X%2.2X%2.2X\n",
+                dev->pmcw.intparm[0], dev->pmcw.intparm[1],
+                dev->pmcw.intparm[2], dev->pmcw.intparm[3],
+                dev->pmcw.flag4, dev->pmcw.flag5,
+                dev->pmcw.devnum[0], dev->pmcw.devnum[1],
+                dev->pmcw.lpm, dev->pmcw.pnom, dev->pmcw.lpum, dev->pmcw.pim,
+                dev->pmcw.mbi[0], dev->pmcw.mbi[1],
+                dev->pmcw.pom, dev->pmcw.pam,
+                dev->pmcw.chpid[0], dev->pmcw.chpid[1],
+                dev->pmcw.chpid[2], dev->pmcw.chpid[3],
+                dev->pmcw.chpid[4], dev->pmcw.chpid[5],
+                dev->pmcw.chpid[6], dev->pmcw.chpid[7],
+                dev->pmcw.flag24, dev->pmcw.flag25,
+                dev->pmcw.flag26, dev->pmcw.flag27);
+
+        logmsg ("     SCSW=Flags:%2.2X%2.2X SCHC:%2.2X%2.2X "
+                "Stat:%2.2X%2.2X Count:%2.2X%2.2X "
+                "CCW:%2.2X%2.2X%2.2X%2.2X\n",
+                dev->scsw.flag0, dev->scsw.flag1,
+                dev->scsw.flag2, dev->scsw.flag3,
+                dev->scsw.unitstat, dev->scsw.chanstat,
+                dev->scsw.count[0], dev->scsw.count[1],
+                dev->scsw.ccwaddr[0], dev->scsw.ccwaddr[1],
+                dev->scsw.ccwaddr[2], dev->scsw.ccwaddr[3]);
+    }
+
+} /* end function display_subchannel */
 
 void    cckd_sf_add (DEVBLK *);
 void    cckd_sf_remove (DEVBLK *, int);
 void    cckd_sf_newname (DEVBLK *, BYTE *);
 void    cckd_sf_stats (DEVBLK *);
 void    cckd_print_itrace (DEVBLK *);
+
+void    device_thread();
+
+int herc_system (char *command)
+{
+extern char **environ;
+int pid, status;
+
+    if (command == 0)
+        return 1;
+
+    pid = fork();
+
+    if (pid == -1)
+        return -1;
+
+    if (pid == 0) {
+        char *argv[4];
+
+        dup2(sysblk.msgpiper, STDIN_FILENO);
+        dup2(fileno(sysblk.msgpipew), STDOUT_FILENO);
+        dup2(fileno(sysblk.msgpipew), STDERR_FILENO);
+
+        argv[0] = "sh";
+        argv[1] = "-c";
+        argv[2] = command;
+        argv[3] = 0;
+        execve("/bin/sh", argv, environ);
+
+        exit(127);
+    }
+    do {
+        if (waitpid(pid, &status, 0) == -1) {
+            if (errno != EINTR)
+                return -1;
+        } else
+            return status;
+    } while(1);
+}
+
 
 /*-------------------------------------------------------------------*/
 /* Execute a panel command                                           */
@@ -997,10 +894,6 @@ BYTE    cmd[80];                        /* Copy of panel command     */
 int     cpu;                            /* CPU engine number         */
 REGS   *regs;                           /* -> CPU register context   */
 U32     aaddr;                          /* Absolute storage address  */
-U32     vaddr;                          /* Virtual storage address   */
-U32     raddr;                          /* Real storage address      */
-U32     eaddr;                          /* Storage ending address    */
-U16     xcode;                          /* Exception code            */
 U16     devnum;                         /* Device number             */
 U16     newdevn;                        /* Device number             */
 U16     devtype;                        /* Device type               */
@@ -1015,12 +908,14 @@ int     fd;                             /* File descriptor           */
 int     len;                            /* Number of bytes read      */
 BYTE   *loadparm;                       /* -> IPL parameter (ASCIIZ) */
 BYTE   *archmode;                       /* -> architecture mode      */
+#if defined(OPTION_INSTRUCTION_COUNTING)
+BYTE   *iclear;                         /* -> icount option          */
+#endif /*defined(OPTION_INSTRUCTION_COUNTING)*/
 BYTE    buf[100];                       /* Message buffer            */
 int     n;                              /* Number of bytes in buffer */
 #ifdef OPTION_TODCLOCK_DRAG_FACTOR
 int     toddrag;                        /* TOD clock drag factor     */
 #endif /*OPTION_TODCLOCK_DRAG_FACTOR*/
-BYTE    newval[32];                     /* Storage alteration value  */
 BYTE   *devascii;                       /* ASCII text device number  */
 #define MAX_ARGS 10                     /* Max num of devinit args   */
 int     devargc;                        /* Arg count for devinit     */
@@ -1065,7 +960,7 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
 #endif /*PANEL_REFRESH_RATE*/
 
 #if defined(OPTION_INSTRUCTION_COUNTING)
- #define ICOUNT_CMD "icount = display instruction counters\n"
+ #define ICOUNT_CMD "icount [clear] = display instruction counters\n"
 #else
  #define ICOUNT_CMD
 #endif
@@ -1083,7 +978,8 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
             "v addr=value or r addr=value = alter storage\n"
             "b addr = set breakpoint, b- = delete breakpoint\n"
             "i devn=I/O attention interrupt, ext=external interrupt\n"
-            "ipending = display pending interrupts\n"
+            "ds devn=display subchannel\n"
+            "ipending [{+|-}debug] = display pending interrupts\n"
             "pgmtrace [-]intcode = trace program interrupts\n"
             "stop=stop CPU, start=start CPU, restart=PSW restart\n"
             STSPALL_CMD
@@ -1096,7 +992,10 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
             "attach devn type [arg...] = initialize device\n"
             "detach devn = remove device\n"
             "define olddevn newdevn = rename device\n"
+            "devtmax[=n] = report or set maximum device threads\n"
+            "              (-1=per i/o, 0=unlimited, 1-n=limit)\n"
             SYSCONS_CMD
+            "sh xxx = shell command\n"
             "f-addr=mark frame unusable, f+addr=mark frame usable\n"
             TODDRAG_CMD
             PANRATE_CMD
@@ -1109,6 +1008,7 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
     if (strcmp(cmd,"g") == 0)
     {
         sysblk.inststep = 0;
+        SET_IC_TRACE;
         strcpy (cmd, "start");
     }
 
@@ -1121,6 +1021,7 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
 
         /* Restart the CPU if it is in the stopped state */
         regs->cpustate = CPUSTATE_STARTED;
+        OFF_IC_CPU_NOT_STARTED(regs);
 
         /* Signal stopped CPUs to retest stopped indicator */
         signal_condition (&sysblk.intcond);
@@ -1128,6 +1029,9 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
         /* Release the interrupt lock */
         release_lock (&sysblk.intlock);
 
+#ifdef EXTERNALGUI
+        if (extgui) logmsg("MAN=0\n");
+#endif /*EXTERNALGUI*/
         return NULL;
     }
 
@@ -1135,6 +1039,10 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
     if (strcmp(cmd,"stop") == 0)
     {
         regs->cpustate = CPUSTATE_STOPPING;
+        ON_IC_CPU_NOT_STARTED(regs);
+#ifdef EXTERNALGUI
+        if (extgui) logmsg("MAN=1\n");
+#endif /*EXTERNALGUI*/
         return NULL;
     }
 
@@ -1179,105 +1087,111 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
     /* icount command - display instruction counts */
     if (memcmp(cmd,"icount",6)==0)
     {
-        int i1, i2;
-        for(i1 = 0; i1 < 256; i1++)
+        iclear = strtok (cmd + 6, " \t");
+        if(iclear != NULL && !strcasecmp(iclear, "clear"))
+            memset(IMAP_FIRST,0,IMAP_SIZE);
+        else
         {
-            switch(i1) {
-                case 0x01:
-                    for(i2 = 0; i2 < 256; i2++)
-                        if(sysblk.imap01[i2])
-                            logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
-                                i1, i2, sysblk.imap01[i2]);
-                    break;
-                case 0xA4:
-                    for(i2 = 0; i2 < 256; i2++)
-                        if(sysblk.imapa4[i2])
-                            logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
-                                i1, i2, sysblk.imapa4[i2]);
-                    break;
-                case 0xA5:
-                    for(i2 = 0; i2 < 16; i2++)
-                        if(sysblk.imapa5[i2])
-                            logmsg("INST=%2.2Xx%1.1X\tCOUNT=%llu\n",
-                                i1, i2, sysblk.imapa5[i2]);
-                    break;
-                case 0xA6:
-                    for(i2 = 0; i2 < 256; i2++)
-                        if(sysblk.imapa6[i2])
-                            logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
-                                i1, i2, sysblk.imapa6[i2]);
-                    break;
-                case 0xA7:
-                    for(i2 = 0; i2 < 16; i2++)
-                        if(sysblk.imapa7[i2])
-                            logmsg("INST=%2.2Xx%1.1X\tCOUNT=%llu\n",
-                                i1, i2, sysblk.imapa7[i2]);
-                    break;
-                case 0xB2:
-                    for(i2 = 0; i2 < 256; i2++)
-                        if(sysblk.imapb2[i2])
-                            logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
-                                i1, i2, sysblk.imapb2[i2]);
-                    break;
-                case 0xB3:
-                    for(i2 = 0; i2 < 256; i2++)
-                        if(sysblk.imapb3[i2])
-                            logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
-                                i1, i2, sysblk.imapb3[i2]);
-                    break;
-                case 0xB9:
-                    for(i2 = 0; i2 < 256; i2++)
-                        if(sysblk.imapb9[i2])
-                            logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
-                                i1, i2, sysblk.imapb9[i2]);
-                    break;
-                case 0xC0:
-                    for(i2 = 0; i2 < 16; i2++)
-                        if(sysblk.imapc0[i2])
-                            logmsg("INST=%2.2Xx%1.1X\tCOUNT=%llu\n",
-                                i1, i2, sysblk.imapc0[i2]);
-                    break;
-                case 0xE3:
-                    for(i2 = 0; i2 < 256; i2++)
-                        if(sysblk.imape3[i2])
-                            logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
-                                i1, i2, sysblk.imape3[i2]);
-                    break;
-                case 0xE4:
-                    for(i2 = 0; i2 < 256; i2++)
-                        if(sysblk.imape4[i2])
-                            logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
-                                i1, i2, sysblk.imape4[i2]);
-                    break;
-                case 0xE5:
-                    for(i2 = 0; i2 < 256; i2++)
-                        if(sysblk.imape5[i2])
-                            logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
-                                i1, i2, sysblk.imape5[i2]);
-                    break;
-                case 0xEB:
-                    for(i2 = 0; i2 < 256; i2++)
-                        if(sysblk.imapeb[i2])
-                            logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
-                                i1, i2, sysblk.imapeb[i2]);
-                    break;
-                case 0xEC:
-                    for(i2 = 0; i2 < 256; i2++)
-                        if(sysblk.imapec[i2])
-                            logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
-                                i1, i2, sysblk.imapec[i2]);
-                    break;
-                case 0xED:
-                    for(i2 = 0; i2 < 256; i2++)
-                        if(sysblk.imaped[i2])
-                            logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
-                                i1, i2, sysblk.imaped[i2]);
-                    break;
-                default:
-                    if(sysblk.imapxx[i1])
-                        logmsg("INST=%2.2X  \tCOUNT=%llu\n",
-                            i1, sysblk.imapxx[i1]);
-                    break;
+            int i1, i2;
+            for(i1 = 0; i1 < 256; i1++)
+            {
+                switch(i1) {
+                    case 0x01:
+                        for(i2 = 0; i2 < 256; i2++)
+                            if(sysblk.imap01[i2])
+                                logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
+                                    i1, i2, sysblk.imap01[i2]);
+                        break;
+                    case 0xA4:
+                        for(i2 = 0; i2 < 256; i2++)
+                            if(sysblk.imapa4[i2])
+                                logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
+                                    i1, i2, sysblk.imapa4[i2]);
+                        break;
+                    case 0xA5:
+                        for(i2 = 0; i2 < 16; i2++)
+                            if(sysblk.imapa5[i2])
+                                logmsg("INST=%2.2Xx%1.1X\tCOUNT=%llu\n",
+                                    i1, i2, sysblk.imapa5[i2]);
+                        break;
+                    case 0xA6:
+                        for(i2 = 0; i2 < 256; i2++)
+                            if(sysblk.imapa6[i2])
+                                logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
+                                    i1, i2, sysblk.imapa6[i2]);
+                        break;
+                    case 0xA7:
+                        for(i2 = 0; i2 < 16; i2++)
+                            if(sysblk.imapa7[i2])
+                                logmsg("INST=%2.2Xx%1.1X\tCOUNT=%llu\n",
+                                    i1, i2, sysblk.imapa7[i2]);
+                        break;
+                    case 0xB2:
+                        for(i2 = 0; i2 < 256; i2++)
+                            if(sysblk.imapb2[i2])
+                                logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
+                                    i1, i2, sysblk.imapb2[i2]);
+                        break;
+                    case 0xB3:
+                        for(i2 = 0; i2 < 256; i2++)
+                            if(sysblk.imapb3[i2])
+                                logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
+                                    i1, i2, sysblk.imapb3[i2]);
+                        break;
+                    case 0xB9:
+                        for(i2 = 0; i2 < 256; i2++)
+                            if(sysblk.imapb9[i2])
+                                logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
+                                    i1, i2, sysblk.imapb9[i2]);
+                        break;
+                    case 0xC0:
+                        for(i2 = 0; i2 < 16; i2++)
+                            if(sysblk.imapc0[i2])
+                                logmsg("INST=%2.2Xx%1.1X\tCOUNT=%llu\n",
+                                    i1, i2, sysblk.imapc0[i2]);
+                        break;
+                    case 0xE3:
+                        for(i2 = 0; i2 < 256; i2++)
+                            if(sysblk.imape3[i2])
+                                logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
+                                    i1, i2, sysblk.imape3[i2]);
+                        break;
+                    case 0xE4:
+                        for(i2 = 0; i2 < 256; i2++)
+                            if(sysblk.imape4[i2])
+                                logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
+                                    i1, i2, sysblk.imape4[i2]);
+                        break;
+                    case 0xE5:
+                        for(i2 = 0; i2 < 256; i2++)
+                            if(sysblk.imape5[i2])
+                                logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
+                                    i1, i2, sysblk.imape5[i2]);
+                        break;
+                    case 0xEB:
+                        for(i2 = 0; i2 < 256; i2++)
+                            if(sysblk.imapeb[i2])
+                                logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
+                                    i1, i2, sysblk.imapeb[i2]);
+                        break;
+                    case 0xEC:
+                        for(i2 = 0; i2 < 256; i2++)
+                            if(sysblk.imapec[i2])
+                                logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
+                                    i1, i2, sysblk.imapec[i2]);
+                        break;
+                    case 0xED:
+                        for(i2 = 0; i2 < 256; i2++)
+                            if(sysblk.imaped[i2])
+                                logmsg("INST=%2.2X%2.2X\tCOUNT=%llu\n",
+                                    i1, i2, sysblk.imaped[i2]);
+                        break;
+                    default:
+                        if(sysblk.imapxx[i1])
+                            logmsg("INST=%2.2X  \tCOUNT=%llu\n",
+                                i1, sysblk.imapxx[i1]);
+                        break;
+                }
             }
         }
         return NULL;
@@ -1287,6 +1201,15 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
     /* ipending command - display pending interrupts */
     if (memcmp(cmd,"ipending",8)==0)
     {
+        cmdarg = strtok(cmd+8," \t");
+        if (cmdarg != NULL && (memcmp(cmdarg+1,"debug",5) != 0 
+	    		    || (*cmdarg!='+' && *cmdarg!='-')))
+	{
+            logmsg ("ipending expects {+|-}debug as operand."
+		        " %s is invalid\n", cmdarg);
+	    cmdarg=NULL;
+        }
+
 #ifdef _FEATURE_CPU_RECONFIG
         for(i = 0; i < MAX_CPU_ENGINES; i++)
           if(sysblk.regs[i].cpuonline)
@@ -1294,25 +1217,46 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
         for(i = 0; i < sysblk.numcpu; i++)
 #endif /*!_FEATURE_CPU_RECONFIG*/
         {
+            if(cmdarg != NULL)
+	    {
+	        logmsg("Interrupt checking debug mode set to ");
+	        if(*cmdarg=='+')
+		{
+		    ON_IC_DEBUG(sysblk.regs+i);
+		    logmsg("ON\n");
+		}
+		else
+		{
+		    OFF_IC_DEBUG(sysblk.regs+i);
+		    logmsg("OFF\n");
+		}
+	    }
 // /*DEBUG*/logmsg("CPU%4.4X: Any cpu interrupt %spending\n",
 // /*DEBUG*/    sysblk.regs[i].cpuad, sysblk.regs[i].cpuint ? "" : "not ");
+            logmsg("CPU%4.4X: CPUint=%8.8X (r:%8.8X|s:%8.8X)&(Mask:%8.8X)\n",
+                sysblk.regs[i].cpuad, IC_INTERRUPT_CPU(sysblk.regs+i),
+		         sysblk.regs[i].ints_state,
+		         sysblk.ints_state, regs[i].ints_mask);
             logmsg("CPU%4.4X: Clock comparator %spending\n",
-                sysblk.regs[i].cpuad, sysblk.regs[i].ckpend ? "" : "not ");
+                sysblk.regs[i].cpuad,
+		         IS_IC_CLKC(sysblk.regs+i) ? "" : "not ");
             logmsg("CPU%4.4X: CPU timer %spending\n",
-                sysblk.regs[i].cpuad, sysblk.regs[i].ptpend ? "" : "not ");
+                sysblk.regs[i].cpuad,
+		         IS_IC_PTIMER(sysblk.regs+i) ? "" : "not ");
             logmsg("CPU%4.4X: Interval timer %spending\n",
-                sysblk.regs[i].cpuad, sysblk.regs[i].itimer_pending ? "" : "not ");
+                sysblk.regs[i].cpuad,
+		         IS_IC_ITIMER(sysblk.regs+i) ? "" : "not ");
             logmsg("CPU%4.4X: External call %spending\n",
-                sysblk.regs[i].cpuad, sysblk.regs[i].extcall ? "" : "not ");
+                sysblk.regs[i].cpuad,
+		         IS_IC_EXTCALL(sysblk.regs+i) ? "" : "not ");
             logmsg("CPU%4.4X: Emergency signal %spending\n",
-                sysblk.regs[i].cpuad, sysblk.regs[i].emersig ? "" : "not ");
+                sysblk.regs[i].cpuad,
+		         IS_IC_EMERSIG(sysblk.regs+i) ? "" : "not ");
         }
-        logmsg("External interrupt %spending\n",
-                                sysblk.extpending ? "" : "not ");
         logmsg("Machine check interrupt %spending\n",
-                                sysblk.mckpending ? "" : "not ");
+                                IS_IC_MCKPENDING ? "" : "not ");
         logmsg("I/O interrupt %spending\n",
-                                sysblk.iopending ? "" : "not ");
+                                IS_IC_IOPENDING ? "" : "not ");
         for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
         {
             if (dev->pending && (dev->pmcw.flag5 & PMCW5_V))
@@ -1336,6 +1280,9 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
                 sysblk.regs[i].cpustate = CPUSTATE_STARTED;
         signal_condition (&sysblk.intcond);
         release_lock (&sysblk.intlock);
+#ifdef EXTERNALGUI
+        if (extgui) logmsg("MAN=0\n");
+#endif /*EXTERNALGUI*/
         return NULL;
     }
 
@@ -1345,8 +1292,14 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
         obtain_lock (&sysblk.intlock);
         for (i = 0; i < MAX_CPU_ENGINES; i++)
             if(sysblk.regs[i].cpuonline)
-                sysblk.regs[i].cpustate = CPUSTATE_STOPPING;
+        {
+            sysblk.regs[i].cpustate = CPUSTATE_STOPPING;
+            ON_IC_CPU_NOT_STARTED(sysblk.regs + i);
+        }
         release_lock (&sysblk.intlock);
+#ifdef EXTERNALGUI
+        if (extgui) logmsg("MAN=1\n");
+#endif /*EXTERNALGUI*/
         return NULL;
     }
 #endif /*MAX_CPU_ENGINES > 1*/
@@ -1413,6 +1366,12 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
     }
 #endif /*FEATURE_SYSTEM_CONSOLE*/
 
+    if (!strncmp(cmd,"sh",2))
+    {
+        herc_system(cmd + 2);
+        return NULL;
+    }
+
     /* x+ and x- commands - turn switches on or off */
     if (cmd[1] == '+' || cmd[1] == '-')
     {
@@ -1444,6 +1403,7 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
         if (cmd[0]=='t' && cmd[2]=='\0')
         {
             sysblk.insttrace = oneorzero;
+	    SET_IC_TRACE;
             logmsg ("Instruction tracing is now %s\n", onoroff);
             return NULL;
         }
@@ -1452,6 +1412,7 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
         if (cmd[0]=='s' && cmd[2]=='\0')
         {
             sysblk.inststep = oneorzero;
+	    SET_IC_TRACE;
             logmsg ("Instruction stepping is now %s\n", onoroff);
             return NULL;
         }
@@ -1537,7 +1498,7 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
         obtain_lock (&sysblk.intlock);
 
         /* Indicate that a restart interrupt is pending */
-        regs->restart = 1;
+        ON_IC_RESTART(regs);
 
         /* Ensure that a stopped CPU will recognize the restart */
         if (regs->cpustate == CPUSTATE_STOPPED)
@@ -1555,77 +1516,14 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
     /* r command - display or alter real storage */
     if (cmd[0] == 'r')
     {
-        /* Parse the range or alteration operand */
-        rc = parse_range (cmd+1, &raddr, &eaddr, newval);
-        if (rc < 0) return NULL;
-
-        /* Alter real storage */
-        if (rc > 0)
-        {
-            for (i = 0; i < rc && raddr+i < regs->mainsize; i++)
-            {
-                aaddr = raddr + i;
-                aaddr = APPLY_PREFIXING (aaddr, regs->PX);
-                sysblk.mainstor[aaddr] = newval[i];
-                STORAGE_KEY(aaddr) |= (STORKEY_REF | STORKEY_CHANGE);
-            } /* end for(i) */
-        }
-
-        /* Display real storage */
-        for (i = 0; i < 999 && raddr <= eaddr; i++)
-        {
-            display_real (regs, raddr, buf);
-            logmsg ("%s\n", buf);
-            raddr += 16;
-        } /* end for(i) */
-
+        alter_display_real (cmd+1, regs);
         return NULL;
     }
 
     /* v command - display or alter virtual storage */
     if (cmd[0] == 'v')
     {
-        /* Reject the command if no segment table */
-        if (regs->CR_L(1) == 0)
-        {
-            logmsg ("Virtual storage not available\n");
-            return NULL;
-        }
-
-        /* Parse the range or alteration operand */
-        rc = parse_range (cmd+1, &vaddr, &eaddr, newval);
-        if (rc < 0) return NULL;
-
-        /* Alter virtual storage */
-        if (rc > 0
-            && virt_to_real (&raddr, vaddr, 0, regs, ACCTYPE_LRA) == 0
-            && virt_to_real (&raddr, eaddr, 0, regs, ACCTYPE_LRA) == 0)
-        {
-            for (i = 0; i < rc && raddr+i < regs->mainsize; i++)
-            {
-                virt_to_real (&raddr, vaddr+i, 0, regs, ACCTYPE_LRA);
-                aaddr = APPLY_PREFIXING (raddr, regs->PX);
-                sysblk.mainstor[aaddr] = newval[i];
-                STORAGE_KEY(aaddr) |= (STORKEY_REF | STORKEY_CHANGE);
-            } /* end for(i) */
-        }
-
-        /* Display virtual storage */
-        for (i = 0; i < 999 && vaddr <= eaddr; i++)
-        {
-            n = sprintf (buf, "V:%8.8X:", vaddr);
-            xcode = virt_to_real (&raddr, vaddr, 0, regs,
-                    ACCTYPE_LRA);
-            if (xcode == 0)
-                n += display_real (regs, raddr, buf+n);
-            else
-                n += sprintf (buf+n,
-                        " Translation exception %4.4hX",
-                        xcode);
-            logmsg ("%s\n", buf);
-            vaddr += 16;
-        } /* end for(i) */
-
+        alter_display_virt (cmd+1, regs);
         return NULL;
     }
 
@@ -1636,12 +1534,14 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
         {
             logmsg ("Deleting breakpoint\n");
             sysblk.instbreak = 0;
+            SET_IC_TRACE;
             return NULL;
         }
 
         if (sscanf(cmd+1, "%llx%c", &sysblk.breakaddr, &c) == 1)
         {
             sysblk.instbreak = 1;
+            ON_IC_TRACE;
             logmsg ("Setting breakpoint at %16.16llX\n", sysblk.breakaddr);
             return NULL;
         }
@@ -1675,7 +1575,7 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
     if (strcmp(cmd,"ext") == 0)
     {
         obtain_lock(&sysblk.intlock);
-        sysblk.extpending = sysblk.intkey = 1;
+        ON_IC_INTKEY;
         release_lock(&sysblk.intlock);
         logmsg ("Interrupt key depressed\n");
         return NULL;
@@ -1799,7 +1699,7 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
     if (strcmp(cmd,"quit") == 0 || strcmp(cmd,"exit") == 0)
     {
         sysblk.msgpipew = stderr;
-        devascii = strtok(cmd+4," \t");
+        devascii = strtok(cmd+5," \t");
         if (devascii == NULL || strcmp("now",devascii))
             release_config();
         exit(0);
@@ -1845,9 +1745,13 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
         }
 
         /* Set up remaining arguments for initialization handler */
+#ifndef EXTERNALGUI
         for (devargc = 0; devargc < MAX_ARGS &&
             (devargv[devargc] = strtok(NULL," \t")) != NULL;
             devargc++);
+#else /*EXTERNALGUI*/
+        parse_args (devascii+strlen(devascii)+1, MAX_ARGS, devargv, &devargc);
+#endif /*!EXTERNALGUI*/
 
         /* Obtain the device lock */
         obtain_lock (&dev->lock);
@@ -1911,9 +1815,13 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
         }
 
         /* Set up remaining arguments for initialization handler */
+#ifndef EXTERNALGUI
         for (devargc = 0; devargc < MAX_ARGS &&
             (devargv[devargc] = strtok(NULL," \t")) != NULL;
             devargc++);
+#else /*EXTERNALGUI*/
+        parse_args (devascii+strlen(devascii)+1, MAX_ARGS, devargv, &devargc);
+#endif /*!EXTERNALGUI*/
 
         /* Attach the device */
         attach_device(devnum, devtype, devargc, devargv);
@@ -2062,6 +1970,71 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
         return NULL;
     }
 
+    /* ds - display subchannel */
+    if (memcmp(cmd,"ds",2)==0)
+    {
+        devascii = strtok(cmd+2," \t");
+        if (devascii == NULL
+            || sscanf(devascii, "%hx%c", &devnum, &c) != 1)
+        {
+            logmsg("Device number %s is invalid\n",devascii);
+            return NULL;
+        }
+        dev = find_device_by_devnum (devnum);
+        if (dev == NULL)
+        {
+            logmsg("Device number %4.4X not found\n", devnum);
+            return NULL;
+        }
+        display_subchannel(dev);
+        return NULL;
+    }
+
+    /* devtmax command - display or set max device threads */
+
+    if (memcmp(cmd,"devtmax",7)==0)
+    {
+        TID tid;
+        int devtmax = -2;
+
+        if (cmd[7] == '=')
+            sscanf(cmd+8, "%d", &devtmax);
+        else
+            devtmax = sysblk.devtmax;
+
+        if (devtmax >= -1)
+            sysblk.devtmax = devtmax;
+        else
+        {
+            logmsg("Invalid max device threads value (must be -1 to n)\n");
+            return NULL;
+        }
+
+        /* Create a new device thread if the I/O queue is not NULL
+           and more threads can be created */
+
+        if ((sysblk.devtnbr < sysblk.devtmax || sysblk.devtmax == 0)
+          && sysblk.ioq != NULL)
+            create_thread(&tid, &sysblk.detattr, device_thread, NULL);
+
+        /* Terminate threads while the number of threads exceeds
+           the maximum and threads are waiting */
+
+        while (sysblk.devtnbr > sysblk.devtmax && sysblk.devtmax != 0
+            && sysblk.devtwait)
+        {
+            signal_condition(&sysblk.ioqcond);
+            sleep (1);
+        }
+
+        logmsg ("Max device threads %d current %d most %d "
+                "waiting %d total I/Os queued %d\n",
+                sysblk.devtmax, sysblk.devtnbr, sysblk.devthwm,
+                sysblk.devtwait, sysblk.devtunavail);
+
+        return NULL;
+    }
+
     /* Ignore just enter */
     if (cmd[0] == '\0')
         return NULL;
@@ -2121,6 +2094,9 @@ struct termios kbattr;                  /* Terminal I/O structure    */
     kbattr.c_lflag |= (ECHO | ICANON);
     tcsetattr (STDIN_FILENO, TCSANOW, &kbattr);
 
+#ifdef EXTERNALGUI
+    if (!extgui)
+#endif /*EXTERNALGUI*/
     /* Reset the cursor position */
     fprintf (stderr,
             ANSI_ROW24_COL79
@@ -2159,16 +2135,26 @@ int     firstmsgn = 0;                  /* Number of first message to
 #define MSG_SIZE                80      /* Size of one message       */
 #define BUF_SIZE    (MAX_MSGS*MSG_SIZE) /* Total size of buffer      */
 #define NUM_LINES               22      /* Number of scrolling lines */
+#ifdef EXTERNALGUI
+#define CMD_SIZE              1024      /* Length of command line    */
+#else /*!EXTERNALGUI*/
 #define CMD_SIZE                60      /* Length of command line    */
+#endif /*EXTERNALGUI*/
 REGS   *regs;                           /* -> CPU register context   */
 QWORD   curpsw;                         /* Current PSW               */
 QWORD   prvpsw;                         /* Previous PSW              */
 BYTE    prvstate = 0xFF;                /* Previous stopped state    */
 U64     prvicount = 0;                  /* Previous instruction count*/
 BYTE    pswwait;                        /* PSW wait state bit        */
+#ifdef EXTERNALGUI
+BYTE    redraw_msgs = 0;                /* 1=Redraw message area     */
+BYTE    redraw_cmd = 0;                 /* 1=Redraw command line     */
+BYTE    redraw_status = 0;              /* 1=Redraw status line      */
+#else /*!EXTERNALGUI*/
 BYTE    redraw_msgs;                    /* 1=Redraw message area     */
 BYTE    redraw_cmd;                     /* 1=Redraw command line     */
 BYTE    redraw_status;                  /* 1=Redraw status line      */
+#endif /*EXTERNALGUI*/
 BYTE    readbuf[MSG_SIZE];              /* Message read buffer       */
 int     readoff = 0;                    /* Number of bytes in readbuf*/
 BYTE    cmdline[CMD_SIZE+1];            /* Command line buffer       */
@@ -2178,8 +2164,13 @@ BYTE    c;                              /* Character work area       */
 FILE   *confp;                          /* Console file pointer      */
 FILE   *logfp;                          /* Log file pointer          */
 FILE   *rcfp;                           /* RC file pointer           */
+BYTE   *rcname;                         /* hercules.rc name pointer  */
 struct termios kbattr;                  /* Terminal I/O structure    */
+#ifdef EXTERNALGUI
+BYTE    kbbuf[CMD_SIZE];                /* Keyboard input buffer     */
+#else /*!EXTERNALGUI*/
 BYTE    kbbuf[6];                       /* Keyboard input buffer     */
+#endif /*EXTERNALGUI*/
 int     kblen;                          /* Number of chars in kbbuf  */
 int     pipefd;                         /* Pipe file descriptor      */
 int     keybfd;                         /* Keyboard file descriptor  */
@@ -2215,6 +2206,8 @@ struct  timeval tv;                     /* Select timeout structure  */
     {
         confp = stderr;
         logfp = stdout;
+	/* Logfile should be unbuffered to be always in sync */
+	setvbuf(logfp, NULL, _IONBF, 0);
     }
 
     /* Set screen output stream to fully buffered */
@@ -2223,7 +2216,12 @@ struct  timeval tv;                     /* Select timeout structure  */
     /* Set up the input file descriptors */
     pipefd = sysblk.msgpiper;
     keybfd = STDIN_FILENO;
-    rcfp = fopen("hercules.rc", "r");
+
+    /* Obtain the name of the hercules.rc file or default */
+    if(!(rcname = getenv("HERCULES_RC")))
+        rcname = "hercules.rc";
+
+    rcfp = fopen(rcname, "r");
 
     /* Register the system cleanup exit routine */
     atexit (system_cleanup);
@@ -2235,12 +2233,23 @@ struct  timeval tv;                     /* Select timeout structure  */
     kbattr.c_cc[VTIME] = 0;
     tcsetattr (keybfd, TCSANOW, &kbattr);
 
+#ifdef EXTERNALGUI
+    if (!extgui)
+#endif /*EXTERNALGUI*/
     /* Clear the screen */
     fprintf (confp,
             ANSI_WHT_BLK
             ANSI_ERASE_SCREEN);
+
+#ifdef EXTERNALGUI
+    if (!extgui)
+    {
+#endif /*EXTERNALGUI*/
     redraw_msgs = 1;
     redraw_cmd = 1;
+#ifdef EXTERNALGUI
+    }
+#endif /*EXTERNALGUI*/
     redraw_status = 1;
 
     /* Process messages and commands */
@@ -2600,6 +2609,44 @@ struct  timeval tv;                     /* Select timeout structure  */
                     cmdline[cmdoff] = '\0';
                     /* =NP= create_thread replaced with: */
                     if (NPDup == 0) {
+#ifdef EXTERNALGUI
+                        if (extgui && (cmdline[0] == ']'))
+                        {
+                            redraw_status = 1;
+
+                            if (strncmp(cmdline,"]GREGS=",7) == 0)
+                            {
+                                gui_gregs = atoi(cmdline+7);
+                            }
+                            else
+                            if (strncmp(cmdline,"]CREGS=",7) == 0)
+                            {
+                                gui_cregs = atoi(cmdline+7);
+                            }
+                            else
+                            if (strncmp(cmdline,"]AREGS=",7) == 0)
+                            {
+                                gui_aregs = atoi(cmdline+7);
+                            }
+                            else
+                            if (strncmp(cmdline,"]FREGS=",7) == 0)
+                            {
+                                gui_fregs = atoi(cmdline+7);
+                            }
+                            else
+                            if (strncmp(cmdline,"]DEVLIST=",9) == 0)
+                            {
+                                gui_devlist = atoi(cmdline+9);
+                            }
+                            else
+                            if (strncmp(cmdline,"]MAINSTOR=",10) == 0)
+                            {
+                                fprintf(stderr,"MAINSTOR=%d\n",(U32)sysblk.mainstor);
+                                fprintf(stderr,"MAINSIZE=%d\n",(U32)sysblk.mainsize);
+                            }
+                        }
+                        else
+#endif /*EXTERNALGUI*/
                         create_thread (&cmdtid, &sysblk.detattr,
                                 panel_command, cmdline);
                     } else {
@@ -2639,6 +2686,10 @@ struct  timeval tv;                     /* Select timeout structure  */
                     }
                     /* =END= */
                     cmdoff = 0;
+#ifdef EXTERNALGUI
+                    /* Process *ALL* of the 'keyboard' (stdin) buffer data! */
+                    if (extgui) {i++; continue;}
+#endif /*EXTERNALGUI*/
                     redraw_cmd = 1;
                     break;
                 }
@@ -2713,9 +2764,16 @@ struct  timeval tv;                     /* Select timeout structure  */
             }
 
             /* Copy message to circular buffer and empty read buffer */
+#ifdef EXTERNALGUI
+            if (!extgui)
+#endif /*EXTERNALGUI*/
             memcpy (msgbuf + (msgslot * MSG_SIZE), readbuf, MSG_SIZE);
             readoff = 0;
 
+#ifdef EXTERNALGUI
+            if (!extgui)
+            {
+#endif /*EXTERNALGUI*/
             /* Update message count and next available slot number */
             if (nummsgs < MAX_MSGS)
                 msgslot = ++nummsgs;
@@ -2729,11 +2787,15 @@ struct  timeval tv;                     /* Select timeout structure  */
 
             /* Set the display update indicator */
             redraw_msgs = 1;
-
+#ifdef EXTERNALGUI
+            }
+#endif /*EXTERNALGUI*/
         }
 
+#ifdef EXTERNALGUI
+        if (!extgui)
+#endif /*EXTERNALGUI*/
         /* =NP= : Reinit traditional panel if NP is down */
-
         if (NPDup == 0 && NPDinit == 1) {
             NPDinit = 0;
             redraw_msgs = 1;
@@ -2742,12 +2804,14 @@ struct  timeval tv;                     /* Select timeout structure  */
             fprintf(confp, ANSI_WHT_BLK);
             fprintf(confp, ANSI_ERASE_SCREEN);
         }
-
         /* =END= */
 
         /* Obtain the PSW for target CPU */
         memset (curpsw, 0x00, sizeof(curpsw));
         store_psw (regs, curpsw);
+
+        /* Isolate the PSW interruption wait bit */
+        pswwait = curpsw[1] & 0x02;
 
         /* Set the display update indicator if the PSW has changed
            or if the instruction counter has changed, or if
@@ -2776,6 +2840,9 @@ struct  timeval tv;                     /* Select timeout structure  */
         /*        the NP display as an else after those ifs */
 
         if (NPDup == 0) {
+#ifdef EXTERNALGUI
+            if (!extgui)
+#endif /*EXTERNALGUI*/
             /* Rewrite the screen if display update indicators are set */
             if (redraw_msgs)
             {
@@ -2801,20 +2868,20 @@ struct  timeval tv;                     /* Select timeout structure  */
 
             if (redraw_status)
             {
-                /* Isolate the PSW interruption wait bit */
-                pswwait = curpsw[1] & 0x02;
-
                 /* Display the PSW and instruction counter for CPU 0 */
                 fprintf (confp,
-                    ANSI_ROW24_COL1
-                    ANSI_YELLOW_RED
+                    "%s"
 #if MAX_CPU_ENGINES > 1
                     "CPU%4.4X "
 #endif
                     "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X"
                        " %2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X"
                     " %c%c%c%c%c%c%c instcount=%llu"
-                    ANSI_ERASE_EOL,
+                    "%s",
+#ifdef EXTERNALGUI
+                    extgui ? ("STATUS=") :
+#endif /*EXTERNALGUI*/
+                    (ANSI_ROW24_COL1 ANSI_YELLOW_RED),
 #if MAX_CPU_ENGINES > 1
                     regs->cpuad,
 #endif
@@ -2836,9 +2903,182 @@ struct  timeval tv;                     /* Select timeout structure  */
 #if defined(_FEATURE_SIE)
                     regs->sie_state ?  regs->hostregs->instcount :
 #endif /*defined(_FEATURE_SIE)*/
-                        regs->instcount);
-            } /* end if(redraw_status) */
+                    regs->instcount,
+#ifdef EXTERNALGUI
+                    extgui ? "\n" :
+#endif /*EXTERNALGUI*/
+                    ANSI_ERASE_EOL);
 
+#ifdef EXTERNALGUI
+                if (extgui)
+                {
+                    /* (for system activity meter) */
+                    if (!(regs->cpustate == CPUSTATE_STOPPING ||
+                        regs->cpustate == CPUSTATE_STOPPED))
+                    {
+                        fprintf(confp,"SYS=%c\n",pswwait?'0':'1');
+                    }
+#ifdef OPTION_MIPS_COUNTING
+                    /* Calculate MIPS rate */
+#ifdef FEATURE_CPU_RECONFIG
+                    for (mipsrate = siosrate = i = 0; i < MAX_CPU_ENGINES; i++)
+                        if(sysblk.regs[i].cpuonline)
+#else /*!FEATURE_CPU_RECONFIG*/
+                        for(mipsrate = siosrate = i = 0; i < sysblk.numcpu; i++)
+#endif /*!FEATURE_CPU_RECONFIG*/
+                        {
+                            mipsrate += sysblk.regs[i].mipsrate;
+                            siosrate += sysblk.regs[i].siosrate;
+                        }
+
+                    if (mipsrate > 100000) mipsrate = 0;	/* ignore wildly high rate */
+
+                    /* MIPS rate */
+                    if (prevmipsrate != mipsrate)
+                    {
+                        prevmipsrate = mipsrate;
+                        fprintf(confp, "MIPS=%2.1d.%2.2d\n",
+                            prevmipsrate / 1000, (prevmipsrate % 1000) / 10);
+                    }
+
+                    /* SIO rate */
+                    if (prevsiosrate != siosrate)
+                    {
+                        prevsiosrate = siosrate;
+                        fprintf(confp, "SIOS=%5d\n",prevsiosrate);
+                    }
+
+#endif /*OPTION_MIPS_COUNTING*/
+                    if (gui_gregs)  /* GP regs */
+                    {
+                        fprintf(confp,"GR0-3=%8.8X %8.8X %8.8X %8.8X\n",
+                            regs->GR_L(0),regs->GR_L(1),regs->GR_L(2),regs->GR_L(3));
+                        fprintf(confp,"GR4-7=%8.8X %8.8X %8.8X %8.8X\n",
+                            regs->GR_L(4),regs->GR_L(5),regs->GR_L(6),regs->GR_L(7));
+                        fprintf(confp,"GR8-B=%8.8X %8.8X %8.8X %8.8X\n",
+                            regs->GR_L(8),regs->GR_L(9),regs->GR_L(10),regs->GR_L(11));
+                        fprintf(confp,"GRC-F=%8.8X %8.8X %8.8X %8.8X\n",
+                            regs->GR_L(12),regs->GR_L(13),regs->GR_L(14),regs->GR_L(15));
+                    }
+
+                    if (gui_cregs)  /* CR regs */
+                    {
+                        fprintf(confp,"CR0-3=%8.8X %8.8X %8.8X %8.8X\n",
+                            regs->CR_L(0),regs->CR_L(1),regs->CR_L(2),regs->CR_L(3));
+                        fprintf(confp,"CR4-7=%8.8X %8.8X %8.8X %8.8X\n",
+                            regs->CR_L(4),regs->CR_L(5),regs->CR_L(6),regs->CR_L(7));
+                        fprintf(confp,"CR8-B=%8.8X %8.8X %8.8X %8.8X\n",
+                            regs->CR_L(8),regs->CR_L(9),regs->CR_L(10),regs->CR_L(11));
+                        fprintf(confp,"CRC-F=%8.8X %8.8X %8.8X %8.8X\n",
+                            regs->CR_L(12),regs->CR_L(13),regs->CR_L(14),regs->CR_L(15));
+                    }
+
+                    if (gui_aregs)  /* AR regs */
+                    {
+                        fprintf(confp,"AR0-3=%8.8X %8.8X %8.8X %8.8X\n",
+                            regs->AR(0),regs->AR(1),regs->AR(2),regs->AR(3));
+                        fprintf(confp,"AR4-7=%8.8X %8.8X %8.8X %8.8X\n",
+                            regs->AR(4),regs->AR(5),regs->AR(6),regs->AR(7));
+                        fprintf(confp,"AR8-B=%8.8X %8.8X %8.8X %8.8X\n",
+                            regs->AR(8),regs->AR(9),regs->AR(10),regs->AR(11));
+                        fprintf(confp,"ARC-F=%8.8X %8.8X %8.8X %8.8X\n",
+                            regs->AR(12),regs->AR(13),regs->AR(14),regs->AR(15));
+                    }
+
+                    if (gui_fregs)  /* FP regs */
+                    {
+                        fprintf(confp,"FR0-2=%8.8X %8.8X %8.8X %8.8X\n",
+                            regs->fpr[0],regs->fpr[1],regs->fpr[2],regs->fpr[3]);
+                        fprintf(confp,"FR4-6=%8.8X %8.8X %8.8X %8.8X\n",
+                            regs->fpr[4],regs->fpr[5],regs->fpr[6],regs->fpr[7]);
+                    }
+
+                    if (gui_devlist)  /* device status */
+                    {
+                        for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+                        {
+                            if (!(dev->pmcw.flag5 & PMCW5_V)) continue;
+
+                            stat_online = stat_busy = stat_pend = stat_open = 0;
+
+                            (dev->devqdef)(dev, &devclass, sizeof(devnam), devnam);
+
+                            devnam[255] = 0;   // (ensure string is null terminated)
+
+                            if ((dev->console && dev->connected) ||
+                                (strlen(dev->filename) > 0))
+                                stat_online = 1;
+                            if (dev->busy) stat_busy = 1;
+                            if (dev->pending) stat_pend = 1;
+                            if (dev->fd > 2) stat_open = 1;
+
+                            fprintf(confp, "DEV=%4.4X %4.4X %-4.4s %d%d%d%d %s\n",
+                                dev->devnum,
+                                dev->devtype,
+                                devclass,
+                                stat_online,
+                                stat_busy,
+                                stat_pend,
+                                stat_open,
+                                devnam);
+                        }
+
+                        fprintf(confp, "DEV=X\n");    /* (indicate end of list) */
+                    }
+                }
+#endif /*EXTERNALGUI*/
+            } /* end if(redraw_status) */
+#ifdef EXTERNALGUI
+			else /* !redraw_status */
+			{
+	            /* If we're under the control of an external GUI,
+	               some status info we need to send ALL the time. */
+	            if (extgui)
+				{
+                    /* (for system activity meter) */
+                    if (!(regs->cpustate == CPUSTATE_STOPPING ||
+                        regs->cpustate == CPUSTATE_STOPPED))
+                    {
+                        fprintf(confp,"SYS=%c\n",pswwait?'0':'1');
+                    }
+
+                    if (gui_devlist)  /* device status */
+                    {
+                        for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+                        {
+                            if (!(dev->pmcw.flag5 & PMCW5_V)) continue;
+
+                            stat_online = stat_busy = stat_pend = stat_open = 0;
+
+                            (dev->devqdef)(dev, &devclass, sizeof(devnam), devnam);
+
+                            devnam[255] = 0;   // (ensure string is null terminated)
+
+                            if ((dev->console && dev->connected) ||
+                                (strlen(dev->filename) > 0))
+                                stat_online = 1;
+                            if (dev->busy) stat_busy = 1;
+                            if (dev->pending) stat_pend = 1;
+                            if (dev->fd > 2) stat_open = 1;
+
+                            fprintf(confp, "DEV=%4.4X %4.4X %-4.4s %d%d%d%d %s\n",
+                                dev->devnum,
+                                dev->devtype,
+                                devclass,
+                                stat_online,
+                                stat_busy,
+                                stat_pend,
+                                stat_open,
+                                devnam);
+                        }
+
+                        fprintf(confp, "DEV=X\n");    /* (indicate end of list) */
+                    }
+				}
+			}
+
+            if (!extgui)
+#endif /*EXTERNALGUI*/
             if (redraw_cmd)
             {
                 /* Display the command line */
@@ -2860,6 +3100,9 @@ struct  timeval tv;                     /* Select timeout structure  */
             /* Flush screen buffer and reset display update indicators */
             if (redraw_msgs || redraw_cmd || redraw_status)
             {
+#ifdef EXTERNALGUI
+                if (!extgui)
+#endif /*EXTERNALGUI*/
                 fprintf (confp,
                     ANSI_POSITION_CURSOR,
                     23, 13+cmdoff);
@@ -2875,8 +3118,14 @@ struct  timeval tv;                     /* Select timeout structure  */
                    || (redraw_cmd && NPdataentry == 1)) {
                 if (NPDinit == 0) {
                     NPDinit = 1;
+#ifdef EXTERNALGUI
+                    if (!extgui)
+#endif /*EXTERNALGUI*/
                     NP_screen(confp);
                 }
+#ifdef EXTERNALGUI
+                if (!extgui)
+#endif /*EXTERNALGUI*/
                 NP_update(confp, cmdline, cmdoff);
                 fflush (confp);
                 redraw_msgs = 0;
@@ -2895,7 +3144,6 @@ struct  timeval tv;                     /* Select timeout structure  */
 
 #endif /*!defined(_PANEL_C)*/
 
-
 /*-------------------------------------------------------------------*/
 /* Convert virtual address to real address                           */
 /*                                                                   */
@@ -2907,6 +3155,8 @@ struct  timeval tv;                     /* Select timeout structure  */
 /*              or ACCTYPE_LRA)                                      */
 /* Output:                                                           */
 /*      raptr   Points to word in which real address is returned     */
+/*      siptr   Points to word to receive indication of which        */
+/*              STD or ASCE was used to perform the translation      */
 /* Return value:                                                     */
 /*      0=translation successful, non-zero=exception code            */
 /* Note:                                                             */
@@ -2923,15 +3173,14 @@ struct  timeval tv;                     /* Select timeout structure  */
 /*      program_interrupt function attempts to display the           */
 /*      instruction which caused the program check.                  */
 /*-------------------------------------------------------------------*/
-static U16 ARCH_DEP(virt_to_real) (U32 *raptr, U32 vaddr, int arn,
-                                        REGS *regs, int acctype)
+static U16 ARCH_DEP(virt_to_real) (RADR *raptr, int *siptr,
+                        VADR vaddr, int arn, REGS *regs, int acctype)
 {
 int     rc;                             /* Return code               */
 RADR    raddr;                          /* Real address              */
 U16     xcode;                          /* Exception code            */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=ALE or page protection  */
-int     stid;                           /* Segment table indication  */
 REGS    wrkregs = *regs;                /* Working copy of CPU regs  */
 
     if (REAL_MODE(&wrkregs.psw) && acctype != ACCTYPE_LRA) {
@@ -2942,20 +3191,414 @@ REGS    wrkregs = *regs;                /* Working copy of CPU regs  */
     wrkregs.panelregs = 1;
 
     rc = ARCH_DEP(translate_addr) (vaddr, arn, &wrkregs, acctype,
-                &raddr, &xcode, &private, &protect, &stid, NULL, NULL);
+                &raddr, &xcode, &private, &protect, siptr, NULL, NULL);
     if (rc) return xcode;
 
     *raptr = raddr;
     return 0;
 } /* end function virt_to_real */
 
+/*-------------------------------------------------------------------*/
+/* Display real storage (up to 16 bytes, or until end of page)       */
+/* Prefixes display by Rxxxxx: if draflag is 1                       */
+/* Returns number of characters placed in display buffer             */
+/*-------------------------------------------------------------------*/
+static int ARCH_DEP(display_real) (REGS *regs, RADR raddr, BYTE *buf,
+                                    int draflag)
+{
+RADR    aaddr;                          /* Absolute storage address  */
+int     i, j;                           /* Loop counters             */
+int     n = 0;                          /* Number of bytes in buffer */
+BYTE    hbuf[40];                       /* Hexadecimal buffer        */
+BYTE    cbuf[17];                       /* Character buffer          */
+BYTE    c;                              /* Character work area       */
+
+    if (draflag)
+    {
+      #if defined(FEATURE_ESAME)
+        n = sprintf (buf, "R:%16.16llX:", raddr);
+      #else /*!defined(FEATURE_ESAME)*/
+        n = sprintf (buf, "R:%8.8X:", (U32)raddr);
+      #endif /*!defined(FEATURE_ESAME)*/
+    }
+
+    aaddr = APPLY_PREFIXING (raddr, regs->PX);
+    if (aaddr >= regs->mainsize)
+    {
+        n += sprintf (buf+n, " Real address is not valid");
+        return n;
+    }
+
+    n += sprintf (buf+n, "K:%2.2X=", STORAGE_KEY(aaddr));
+
+    memset (hbuf, SPACE, sizeof(hbuf));
+    memset (cbuf, SPACE, sizeof(cbuf));
+
+    for (i = 0, j = 0; i < 16; i++)
+    {
+        c = sysblk.mainstor[aaddr++];
+        j += sprintf (hbuf+j, "%2.2X", c);
+        if ((aaddr & 0x3) == 0x0) hbuf[j++] = SPACE;
+        c = ebcdic_to_ascii[c];
+        if (!isprint(c)) c = '.';
+        cbuf[i] = c;
+        if ((aaddr & PAGEFRAME_BYTEMASK) == 0x000) break;
+    } /* end for(i) */
+
+    n += sprintf (buf+n, "%36.36s %16.16s", hbuf, cbuf);
+    return n;
+
+} /* end function display_real */
+
+/*-------------------------------------------------------------------*/
+/* Display virtual storage (up to 16 bytes, or until end of page)    */
+/* Returns number of characters placed in display buffer             */
+/*-------------------------------------------------------------------*/
+static int ARCH_DEP(display_virt) (REGS *regs, VADR vaddr, BYTE *buf,
+                                    int ar, int acctype)
+{
+RADR    raddr;                          /* Real address              */
+int     n;                              /* Number of bytes in buffer */
+int     stid;                           /* Segment table indication  */
+U16     xcode;                          /* Exception code            */
+
+  #if defined(FEATURE_ESAME)
+    n = sprintf (buf, "V:%16.16llX:", vaddr);
+  #else /*!defined(FEATURE_ESAME)*/
+    n = sprintf (buf, "V:%8.8X:", vaddr);
+  #endif /*!defined(FEATURE_ESAME)*/
+    xcode = ARCH_DEP(virt_to_real) (&raddr, &stid,
+                                    vaddr, ar, regs, acctype);
+    if (xcode == 0)
+    {
+        n += ARCH_DEP(display_real) (regs, raddr, buf+n, 0);
+    }
+    else
+        n += sprintf (buf+n," Translation exception %4.4hX",xcode);
+
+    return n;
+
+} /* end function display_virt */
+
+/*-------------------------------------------------------------------*/
+/* Process real storage alter/display command                        */
+/*-------------------------------------------------------------------*/
+static void ARCH_DEP(alter_display_real) (BYTE *opnd, REGS *regs)
+{
+U64     saddr, eaddr;                   /* Range start/end addresses */
+U64     maxadr;                         /* Highest real storage addr */
+RADR    raddr;                          /* Real storage address      */
+RADR    aaddr;                          /* Absolute storage address  */
+int     len;                            /* Number of bytes to alter  */
+int     i;                              /* Loop counter              */
+BYTE    newval[32];                     /* Storage alteration value  */
+BYTE    buf[100];                       /* Message buffer            */
+
+    /* Set limit for address range */
+  #if defined(FEATURE_ESAME)
+    maxadr = 0xFFFFFFFFFFFFFFFFULL;
+  #else /*!defined(FEATURE_ESAME)*/
+    maxadr = 0x7FFFFFFF;
+  #endif /*!defined(FEATURE_ESAME)*/
+
+    /* Parse the range or alteration operand */
+    len = parse_range (opnd, maxadr, &saddr, &eaddr, newval);
+    if (len < 0) return;
+    raddr = saddr;
+
+    /* Alter real storage */
+    if (len > 0)
+    {
+        for (i = 0; i < len && raddr+i < regs->mainsize; i++)
+        {
+            aaddr = raddr + i;
+            aaddr = APPLY_PREFIXING (aaddr, regs->PX);
+            sysblk.mainstor[aaddr] = newval[i];
+            STORAGE_KEY(aaddr) |= (STORKEY_REF | STORKEY_CHANGE);
+        } /* end for(i) */
+    }
+
+    /* Display real storage */
+    for (i = 0; i < 999 && raddr <= eaddr; i++)
+    {
+        ARCH_DEP(display_real) (regs, raddr, buf, 1);
+        logmsg ("%s\n", buf);
+        raddr += 16;
+    } /* end for(i) */
+
+} /* end function alter_display_real */
+
+/*-------------------------------------------------------------------*/
+/* Process virtual storage alter/display command                     */
+/*-------------------------------------------------------------------*/
+static void ARCH_DEP(alter_display_virt) (BYTE *opnd, REGS *regs)
+{
+U64     saddr, eaddr;                   /* Range start/end addresses */
+U64     maxadr;                         /* Highest virt storage addr */
+VADR    vaddr;                          /* Virtual storage address   */
+RADR    raddr;                          /* Real storage address      */
+RADR    aaddr;                          /* Absolute storage address  */
+int     stid;                           /* Segment table indication  */
+int     len;                            /* Number of bytes to alter  */
+int     i;                              /* Loop counter              */
+int     n;                              /* Number of bytes in buffer */
+int     arn = 0;                        /* Access register number    */
+U16     xcode;                          /* Exception code            */
+BYTE    newval[32];                     /* Storage alteration value  */
+BYTE    buf[100];                       /* Message buffer            */
+
+    /* Set limit for address range */
+  #if defined(FEATURE_ESAME)
+    maxadr = 0xFFFFFFFFFFFFFFFFULL;
+  #else /*!defined(FEATURE_ESAME)*/
+    maxadr = 0x7FFFFFFF;
+  #endif /*!defined(FEATURE_ESAME)*/
+
+    /* Parse the range or alteration operand */
+    len = parse_range (opnd, maxadr, &saddr, &eaddr, newval);
+    if (len < 0) return;
+    vaddr = saddr;
+
+    /* Alter virtual storage */
+    if (len > 0
+        && ARCH_DEP(virt_to_real) (&raddr, &stid, vaddr, arn,
+                                   regs, ACCTYPE_LRA) == 0
+        && ARCH_DEP(virt_to_real) (&raddr, &stid, eaddr, arn,
+                                   regs, ACCTYPE_LRA) == 0)
+    {
+        for (i = 0; i < len && raddr+i < regs->mainsize; i++)
+        {
+            ARCH_DEP(virt_to_real) (&raddr, &stid, vaddr+i, arn,
+                                    regs, ACCTYPE_LRA);
+            aaddr = APPLY_PREFIXING (raddr, regs->PX);
+            sysblk.mainstor[aaddr] = newval[i];
+            STORAGE_KEY(aaddr) |= (STORKEY_REF | STORKEY_CHANGE);
+        } /* end for(i) */
+    }
+
+    /* Display virtual storage */
+    for (i = 0; i < 999 && vaddr <= eaddr; i++)
+    {
+        if (i == 0 || (vaddr & PAGEFRAME_BYTEMASK) < 16)
+        {
+            xcode = ARCH_DEP(virt_to_real) (&raddr, &stid, vaddr, arn,
+                                            regs, ACCTYPE_LRA);
+          #if defined(FEATURE_ESAME)
+            n = sprintf (buf, "V:%16.16llX ", vaddr);
+          #else /*!defined(FEATURE_ESAME)*/
+            n = sprintf (buf, "V:%8.8X ", vaddr);
+          #endif /*!defined(FEATURE_ESAME)*/
+            if (stid == TEA_ST_PRIMARY)
+                n += sprintf (buf+n, "(primary)");
+            else if (stid == TEA_ST_SECNDRY)
+                n += sprintf (buf+n, "(secondary)");
+            else if (stid == TEA_ST_HOME)
+                n += sprintf (buf+n, "(home)");
+            else
+                n += sprintf (buf+n, "(AR%2.2d)", arn);
+            if (xcode == 0)
+          #if defined(FEATURE_ESAME)
+                n += sprintf (buf+n, " R:%16.16llX", raddr);
+          #else /*!defined(FEATURE_ESAME)*/
+                n += sprintf (buf+n, " R:%8.8X", (U32)raddr);
+          #endif /*!defined(FEATURE_ESAME)*/
+            logmsg ("%s\n", buf);
+        }
+        ARCH_DEP(display_virt) (regs, vaddr, buf, arn, ACCTYPE_LRA);
+        logmsg ("%s\n", buf);
+        vaddr += 16;
+    } /* end for(i) */
+
+} /* end function alter_display_virt */
+
+/*-------------------------------------------------------------------*/
+/* Display instruction                                               */
+/*-------------------------------------------------------------------*/
+void ARCH_DEP(display_inst) (REGS *regs, BYTE *inst)
+{
+QWORD   qword;                          /* Doubleword work area      */
+BYTE    opcode;                         /* Instruction operation code*/
+int     ilc;                            /* Instruction length        */
+#ifdef DISPLAY_INSTRUCTION_OPERANDS
+int     b1=-1, b2=-1, x1;               /* Register numbers          */
+VADR    addr1 = 0, addr2 = 0;           /* Operand addresses         */
+#endif /*DISPLAY_INSTRUCTION_OPERANDS*/
+BYTE    buf[100];                       /* Message buffer            */
+int     n;                              /* Number of bytes in buffer */
+
+  #if defined(_FEATURE_SIE)
+    if(regs->sie_state)
+        logmsg("SIE: ");
+  #endif /*defined(_FEATURE_SIE)*/
+
+#if 0
+#if _GEN_ARCH == 370
+    logmsg("S/370 ");
+#elif _GEN_ARCH == 390
+    logmsg("ESA/390 ");
+#else
+    logmsg("Z/Arch ");
+#endif
+#endif
+
+    /* Display the PSW */
+    memset (qword, 0x00, sizeof(qword));
+    ARCH_DEP(store_psw) (regs, qword);
+    n = sprintf (buf,
+                "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X ",
+                qword[0], qword[1], qword[2], qword[3],
+                qword[4], qword[5], qword[6], qword[7]);
+  #if defined(FEATURE_ESAME)
+        n += sprintf (buf + n,
+                "%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X ",
+                qword[8], qword[9], qword[10], qword[11],
+                qword[12], qword[13], qword[14], qword[15]);
+  #endif /*defined(FEATURE_ESAME)*/
+
+    /* Exit if instruction is not valid */
+    if (inst == NULL)
+    {
+        logmsg ("%sInstruction fetch error\n", buf);
+        display_regs (regs);
+        return;
+    }
+
+    /* Extract the opcode and determine the instruction length */
+    opcode = inst[0];
+    ilc = (opcode < 0x40) ? 2 : (opcode < 0xC0) ? 4 : 6;
+
+    /* Display the instruction */
+    n += sprintf (buf+n, "INST=%2.2X%2.2X", inst[0], inst[1]);
+    if (ilc > 2) n += sprintf (buf+n, "%2.2X%2.2X", inst[2], inst[3]);
+    if (ilc > 4) n += sprintf (buf+n, "%2.2X%2.2X", inst[4], inst[5]);
+    logmsg ("%s\n", buf);
+
+#ifdef DISPLAY_INSTRUCTION_OPERANDS
+
+  #if defined(_FEATURE_SIE)
+    /* Do not try to access host virtual in SIE state */
+    if(!regs->sie_state || regs->sie_pref)
+    {
+  #endif /*defined(_FEATURE_SIE)*/
+
+    /* Process the first storage operand */
+    if (ilc > 2
+        && opcode != 0x84 && opcode != 0x85
+        && opcode != 0xA5 && opcode != 0xA7
+        && opcode != 0xC0 && opcode != 0xEC)
+    {
+        /* Calculate the effective address of the first operand */
+        b1 = inst[2] >> 4;
+        addr1 = ((inst[2] & 0x0F) << 8) | inst[3];
+        if (b1 != 0)
+        {
+            addr1 += regs->GR(b1);
+            addr1 &= ADDRESS_MAXWRAP(regs);
+        }
+
+        /* Apply indexing for RX/RXE/RXF instructions */
+        if ((opcode >= 0x40 && opcode <= 0x7F) || opcode == 0xB1
+            || opcode == 0xE3 || opcode == 0xED)
+        {
+            x1 = inst[1] & 0x0F;
+            if (x1 != 0)
+            {
+                addr1 += regs->GR(x1);
+                addr1 &= ADDRESS_MAXWRAP(regs);
+            }
+        }
+    }
+
+    /* Process the second storage operand */
+    if (ilc > 4
+        && opcode != 0xC0 && opcode != 0xE3 && opcode != 0xEB
+        && opcode != 0xEC && opcode != 0xED)
+    {
+        /* Calculate the effective address of the second operand */
+        b2 = inst[4] >> 4;
+        addr2 = ((inst[4] & 0x0F) << 8) | inst[5];
+        if (b2 != 0)
+        {
+            addr2 += regs->GR(b2);
+            addr2 &= ADDRESS_MAXWRAP(regs);
+        }
+    }
+
+    /* Calculate the operand addresses for MVCL(E) and CLCL(E) */
+    if (opcode == 0x0E || opcode == 0x0F
+        || opcode == 0xA8 || opcode == 0xA9)
+    {
+        b1 = inst[1] >> 4;
+        addr1 = regs->GR(b1) & ADDRESS_MAXWRAP(regs);
+        b2 = inst[1] & 0x0F;
+        addr2 = regs->GR(b2) & ADDRESS_MAXWRAP(regs);
+    }
+
+    /* Calculate the operand addresses for RRE instructions */
+    if ((opcode == 0xB2 &&
+            ((inst[1] >= 0x20 && inst[1] <= 0x2F)
+            || (inst[1] >= 0x40 && inst[1] <= 0x6F)
+            || (inst[1] >= 0xA0 && inst[1] <= 0xAF)))
+        || opcode == 0xB3
+        || opcode == 0xB9)
+    {
+        b1 = inst[3] >> 4;
+        addr1 = regs->GR(b1) & ADDRESS_MAXWRAP(regs);
+        b2 = inst[3] & 0x0F;
+        addr2 = regs->GR(b2) & ADDRESS_MAXWRAP(regs);
+    }
+
+    /* Display storage at first storage operand location */
+    if (b1 >= 0)
+    {
+        if (REAL_MODE(&regs->psw))
+            n = ARCH_DEP(display_real) (regs, addr1, buf, 1);
+        else
+            n = ARCH_DEP(display_virt) (regs, addr1, buf, b1,
+                                (opcode == 0x44 ? ACCTYPE_INSTFETCH :
+                                 opcode == 0xB1 ? ACCTYPE_LRA :
+                                                  ACCTYPE_READ));
+        logmsg ("%s\n", buf);
+    }
+
+    /* Display storage at second storage operand location */
+    if (b2 >= 0)
+    {
+        if (REAL_MODE(&regs->psw)
+            || (opcode == 0xB2 && inst[1] == 0x4B) /*LURA*/
+            || (opcode == 0xB2 && inst[1] == 0x46) /*STURA*/
+            || (opcode == 0xB9 && inst[1] == 0x05) /*LURAG*/
+            || (opcode == 0xB9 && inst[1] == 0x25)) /*STURG*/
+            n = ARCH_DEP(display_real) (regs, addr2, buf, 1);
+        else
+            n = ARCH_DEP(display_virt) (regs, addr2, buf, b2,
+                                        ACCTYPE_READ);
+
+        logmsg ("%s\n", buf);
+    }
+
+  #if defined(_FEATURE_SIE)
+    }
+  #endif /*defined(_FEATURE_SIE)*/
+
+#endif /*DISPLAY_INSTRUCTION_OPERANDS*/
+
+    /* Display the general purpose registers */
+    display_regs (regs);
+
+    /* Display control registers if appropriate */
+    if (!REAL_MODE(&regs->psw) || regs->inst[0] == 0xB2)
+        display_cregs (regs);
+
+    /* Display access registers if appropriate */
+    if (!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+        display_aregs (regs);
+
+} /* end function display_inst */
+
 
 #if !defined(_GEN_ARCH)
 
-// #define  _GEN_ARCH 964
-// #include "panel.c"
-
-// #undef   _GEN_ARCH
 #define  _GEN_ARCH 390
 #include "panel.c"
 
@@ -2966,18 +3609,30 @@ REGS    wrkregs = *regs;                /* Working copy of CPU regs  */
 /*-------------------------------------------------------------------*/
 /* Wrappers for architecture-dependent functions                     */
 /*-------------------------------------------------------------------*/
-static U16 virt_to_real (U32 *raptr, U32 vaddr, int arn, REGS *regs,
-                        int acctype)
+static void alter_display_real (BYTE *opnd, REGS *regs)
 {
     switch(sysblk.arch_mode) {
         case ARCH_370:
-            return s370_virt_to_real(raptr,vaddr,arn,regs,acctype);
+            s370_alter_display_real (opnd, regs); break;
         case ARCH_390:
-            return s390_virt_to_real(raptr,vaddr,arn,regs,acctype);
+            s390_alter_display_real (opnd, regs); break;
         case ARCH_900:
-            return z900_virt_to_real(raptr,vaddr,arn,regs,acctype);
+            z900_alter_display_real (opnd, regs); break;
     }
-    return 0xFFFF;
-}
+    return;
+} /* end function alter_display_real */
+
+static void alter_display_virt (BYTE *opnd, REGS *regs)
+{
+    switch(sysblk.arch_mode) {
+        case ARCH_370:
+            s370_alter_display_virt (opnd, regs); break;
+        case ARCH_390:
+            s390_alter_display_virt (opnd, regs); break;
+        case ARCH_900:
+            z900_alter_display_virt (opnd, regs); break;
+    }
+    return;
+} /* end function alter_display_virt */
 
 #endif /*!defined(_GEN_ARCH)*/

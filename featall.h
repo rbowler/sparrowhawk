@@ -5,8 +5,8 @@
 /* Default features						     */
 /*   All existing features MUST be #undef-ed here.		     */
 /*-------------------------------------------------------------------*/
-#define MAX_CPU_ENGINES 	      6 /* Maximum number of engines */
-#define SMP_SERIALIZATION		/* Serialize storage for SMP */
+#define MAX_CPU_ENGINES 	      1 /* Maximum number of engines */
+#undef  SMP_SERIALIZATION		/* Serialize storage for SMP */
 #define VECTOR_SECTION_SIZE	    128 /* Vector section size	     */
 #define VECTOR_PARTIAL_SUM_NUMBER     1 /* Vector partial sum number */
 #define CKD_MAXFILES		      4 /* Max files per CKD volume  */
@@ -15,16 +15,25 @@
 #define PANEL_REFRESH_RATE		/* Enable panrate feature    */
 #define PANEL_REFRESH_RATE_FAST      50 /* Fast refresh rate	     */
 #define PANEL_REFRESH_RATE_SLOW     500 /* Slow refresh rate	     */
+#define MAX_DEVICE_THREAD_IDLE_SECS 300 /* 5 Minute thread timeout   */
 #define OPTION_AIA_BUFFER		/* Instruction addr cache    */
 #define OPTION_AEA_BUFFER		/* Effective addr cache      */
 #define OPTION_NO_INLINE_DAT		/* Performance option	     */
-#undef	OPTION_NO_INLINE_VSTORE 	/* Performance option	     */
-#undef	OPTION_NO_LINUX_INTERRUPT_PATCH /* Linux performance	     */
-#undef  OPTION_FOOTPRINT_BUFFER     256 /* Size must be a power of 2 */
+#undef  OPTION_NO_INLINE_VSTORE 	/* Performance option	     */
+#undef  OPTION_FOOTPRINT_BUFFER  /* 256 ** Size must be a power of 2 */
 #undef  OPTION_INSTRUCTION_COUNTING	/* First use trace and count */
 #define OPTION_CKD_KEY_TRACING		/* Trace CKD search keys     */
-#define OPTION_NO_DEVICE_THREAD 	/* Separate threads for I/O  */
-#undef	OPTION_CMPSC_DEBUGLVL	      3 /* 1=Exp 2=Comp 3=Both debug */
+#undef	OPTION_CMPSC_DEBUGLVL	   /* 3 ** 1=Exp 2=Comp 3=Both debug */
+
+
+/* <fenv.h> has not been ported by CygWin yet; thus it does not apply for WIN32 builds */
+
+#if defined(WIN32)
+#define OPTION_NO_IEEE_SUPPORT          /* No/downlevel IEEE support */
+#else
+#undef  OPTION_NO_IEEE_SUPPORT          /* No/downlevel IEEE support */
+#endif
+
 
 #define FEATURE_ALD_FORMAT            0
 
@@ -38,6 +47,7 @@
 #undef FEATURE_BRANCH_AND_SET_AUTHORITY
 #undef FEATURE_BROADCASTED_PURGING
 #undef FEATURE_CALLED_SPACE_IDENTIFICATION
+#undef FEATURE_CANCEL_IO_FACILITY
 #undef FEATURE_CHANNEL_SUBSYSTEM
 #undef FEATURE_CHECKSUM_INSTRUCTION
 #undef FEATURE_COMPARE_AND_MOVE_EXTENDED
@@ -46,6 +56,8 @@
 #undef FEATURE_DUAL_ADDRESS_SPACE
 #undef FEATURE_EMULATE_VM
 #undef FEATURE_ESAME
+#undef FEATURE_ESAME_INSTALLED
+#undef FEATURE_ESAME_N3_ESA390
 #undef FEATURE_EXPANDED_STORAGE
 #undef FEATURE_EXTENDED_STORAGE_KEYS
 #undef FEATURE_EXTENDED_TOD_CLOCK
@@ -59,6 +71,7 @@
 #undef FEATURE_HFP_EXTENSIONS
 #undef FEATURE_HYPERVISOR
 #undef FEATURE_IMMEDIATE_AND_RELATIVE
+#undef FEATURE_INCORRECT_LENGTH_INDICATION_SUPPRESSION
 #undef FEATURE_INTERPRETIVE_EXECUTION
 #undef FEATURE_INTERVAL_TIMER
 #undef FEATURE_LINKAGE_STACK

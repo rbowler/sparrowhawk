@@ -1,8 +1,8 @@
-/* IPL.C        (c) Copyright Roger Bowler, 1999-2000                */
+/* IPL.C        (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 Initial Program Loader                       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the Initial Program Load (IPL) function    */
@@ -31,8 +31,13 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 BYTE    unitstat;                       /* IPL device unit status    */
 BYTE    chanstat;                       /* IPL device channel status */
 
+#ifdef EXTERNALGUI
+    if (extgui) logmsg("LOAD=1\n");
+#endif /*EXTERNALGUI*/
+
     /* Reset external interrupts */
-    sysblk.extpending = sysblk.servsig = sysblk.intkey = 0;
+    OFF_IC_SERVSIG;
+    OFF_IC_INTKEY;
 
     /* Perform initial reset on the IPL CPU */
     ARCH_DEP(initial_cpu_reset) (regs);
@@ -53,6 +58,9 @@ BYTE    chanstat;                       /* IPL device channel status */
     {
         logmsg ("HHC103I Device %4.4X not in configuration\n",
                 devnum);
+#ifdef EXTERNALGUI
+        if (extgui) logmsg("LOAD=0\n");
+#endif /*EXTERNALGUI*/
         return -1;
     }
 
@@ -70,9 +78,6 @@ BYTE    chanstat;                       /* IPL device channel status */
     psa->iplpsw[6] = 0;                 /* Byte count = 24 */
     psa->iplpsw[7] = 24;
 
-    /* Set CCW tracing for the IPL device */
-    dev->ccwtrace = 1;
-
     /* Enable the subchannel for the IPL device */
     dev->pmcw.flag5 |= PMCW5_E;
 
@@ -81,9 +86,6 @@ BYTE    chanstat;                       /* IPL device channel status */
 
     /* Execute the IPL channel program */
     ARCH_DEP(execute_ccw_chain) (dev);
-
-    /* Reset CCW tracing for the IPL device */
-    dev->ccwtrace = 0;
 
     /* Clear the interrupt pending and device busy conditions */
     dev->pending = 0;
@@ -112,6 +114,9 @@ BYTE    chanstat;                       /* IPL device channel status */
             if ((i & 3) == 3) logmsg(" ");
         }
         logmsg ("\n");
+#ifdef EXTERNALGUI
+        if (extgui) logmsg("LOAD=0\n");
+#endif /*EXTERNALGUI*/
         return -1;
     }
 
@@ -127,6 +132,8 @@ BYTE    chanstat;                       /* IPL device channel status */
 #endif /*FEATURE_S370_CHANNEL*/
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
+    /* Set LPUM */
+    dev->pmcw.lpum = 0x80;
     /* Store X'0001' + subchannel number at locations 184-187 */
     psa->ioid[0] = 0;
     psa->ioid[1] = 1;
@@ -151,11 +158,15 @@ BYTE    chanstat;                       /* IPL device channel status */
                 psa->iplpsw[0], psa->iplpsw[1], psa->iplpsw[2],
                 psa->iplpsw[3], psa->iplpsw[4], psa->iplpsw[5],
                 psa->iplpsw[6], psa->iplpsw[7]);
+#ifdef EXTERNALGUI
+        if (extgui) logmsg("LOAD=0\n");
+#endif /*EXTERNALGUI*/
         return -1;
     }
 
     /* Set the CPU into the started state */
     regs->cpustate = CPUSTATE_STARTED;
+    OFF_IC_CPU_NOT_STARTED(regs);
 
     /* reset load state */
     regs->loadstate = 0;
@@ -165,6 +176,9 @@ BYTE    chanstat;                       /* IPL device channel status */
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 
+#ifdef EXTERNALGUI
+    if (extgui) logmsg("LOAD=0\n");
+#endif /*EXTERNALGUI*/
     return 0;
 } /* end function load_ipl */
 
@@ -178,17 +192,19 @@ int             i;                      /* Array subscript           */
     /* Clear pending interrupts and indicators */
     regs->loadstate = 0;
     regs->sigpreset = 0;
-    regs->itimer_pending = 0;
-    regs->restart = 0;
-    regs->extcall = 0;
+    OFF_IC_ITIMER(regs);
+    OFF_IC_RESTART(regs);
+    OFF_IC_EXTCALL(regs);
     regs->extccpu = 0;
-    regs->emersig = 0;
+    OFF_IC_EMERSIG(regs);
     for (i = 0; i < MAX_CPU_ENGINES; i++)
         regs->emercpu[i] = 0;
-    regs->storstat = 0;
-    regs->cpuint = 0;
+    OFF_IC_STORSTAT(regs);
+    OFF_IC_CPUINT(regs);
     regs->instvalid = 0;
     regs->instcount = 0;
+
+    SET_IC_INITIAL_MASK(regs);
 
     /* Clear the translation exception identification */
     regs->EA_G = 0;
@@ -205,6 +221,7 @@ int             i;                      /* Array subscript           */
 
     /* Put the CPU into the stopped state */
     regs->cpustate = CPUSTATE_STOPPED;
+    ON_IC_CPU_NOT_STARTED(regs);
 
 #if defined(_FEATURE_SIE)
    if(regs->guestregs)
@@ -212,6 +229,7 @@ int             i;                      /* Array subscript           */
         ARCH_DEP(cpu_reset)(regs->guestregs);
         /* CPU state of SIE copy cannot be controlled */
         regs->guestregs->cpustate = CPUSTATE_STARTED;
+        OFF_IC_CPU_NOT_STARTED(regs->guestregs);
    }
 #endif /*defined(_FEATURE_SIE)*/
 
@@ -262,10 +280,6 @@ void ARCH_DEP(initial_cpu_reset) (REGS *regs)
 
 #if !defined(_GEN_ARCH)
 
-// #define  _GEN_ARCH 964
-// #include "ipl.c"
-
-// #undef   _GEN_ARCH
 #define  _GEN_ARCH 390
 #include "ipl.c"
 
@@ -288,10 +302,6 @@ int load_ipl (U16 devnum, REGS *regs)
 
 void initial_cpu_reset(REGS *regs)
 {
-    /* Reset to basic mode if in ESAME */
-    if(sysblk.arch_mode > ARCH_390)
-        sysblk.arch_mode = ARCH_390;
-
     /* Perform initial CPU reset */
     switch(sysblk.arch_mode) {
         case ARCH_370:
@@ -301,6 +311,7 @@ void initial_cpu_reset(REGS *regs)
             s390_initial_cpu_reset (regs);
             break;
     }
+    regs->arch_mode = sysblk.arch_mode;
 }
 
 

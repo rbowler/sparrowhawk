@@ -1,8 +1,8 @@
 /* TRACE.C      (c) Copyright Jan Jaeger, 2000-2001                  */
 /*              Implicit tracing functions                           */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 #include "hercules.h"
 
@@ -477,10 +477,6 @@ RADR    ag,                             /* Abs Guest addr of TTE     */
 
 #if !defined(_GEN_ARCH)
 
-// #define  _GEN_ARCH 964
-// #include "trace.c"
-
-// #undef   _GEN_ARCH
 #define  _GEN_ARCH 390
 #include "trace.c"
 

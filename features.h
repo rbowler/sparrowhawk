@@ -20,7 +20,7 @@
  #include "feat370.h"
 #elif	  _GEN_ARCH == 390
  #include "feat390.h"
-#else  /* _GEN_ARCH >= 900 */
+#else  /* _GEN_ARCH = 900 */
  #include "feat900.h"
 #endif
 #include  "featchk.h"
@@ -28,6 +28,7 @@
 
 #undef ARCH_MODE
 #undef APPLY_PREFIXING
+#undef AMASK
 #undef ADDRESS_MAXWRAP
 #undef REAL_MODE
 #undef ASF_ENABLED
@@ -36,22 +37,39 @@
 #undef SAEVENT_BIT
 #undef SSEVENT_BIT
 #undef SSGROUP_BIT
+#undef LSED_UET_HDR
+#undef LSED_UET_TLR
+#undef LSED_UET_BAKR
+#undef LSED_UET_PC
+#undef CHM_GPR2_RESV
 #undef DEF_INST
 #undef ARCH_DEP
 #undef PSA
+#undef PSA_SIZE
 #undef IA
 #undef PX
 #undef CR
 #undef GR
+#undef GR_A
 #undef MONCODE
 #undef TEA
+#undef DXC
 #undef ET 
+#undef PX_MASK
+#undef RSTOLD
+#undef RSTNEW
 #undef RADR
-#undef GR_A
+#undef F_RADR
 #undef VADR
+#undef F_VADR
 #undef GREG
+#undef F_GREG
 #undef CREG
+#undef F_CREG
 #undef AREG
+#undef F_AREG
+#undef STORE_W
+#undef FETCH_W
 #if defined(OPTION_AIA_BUFFER)
 #undef VI
 #undef AI
@@ -60,7 +78,14 @@
 #undef AE
 #undef VE
 #endif /*defined(OPTION_AEA_BUFFER)*/
+#undef SIEBK
 /* The default mode is 900, basic ESAME */
+
+#if !defined(NO_ATTR_REGPARM)
+#define ATTR_REGPARM(n) __attribute__ ((regparm(n)))
+#else
+#define ATTR_REGPARM(n) /* nothing */
+#endif
 
 #if !defined(_GEN_ARCH)
 #define _GEN_ARCH 900
@@ -71,7 +96,7 @@
 #define ARCH_MODE	ARCH_370
 
 #define DEF_INST(_name) \
-__attribute__ ((regparm(3))) void s370_ ## _name (BYTE inst[], int execflag, REGS *regs)
+ATTR_REGPARM(3) void s370_ ## _name (BYTE inst[], int execflag, REGS *regs)
 
 #define ARCH_DEP(_name) \
 s370_ ## _name
@@ -80,8 +105,10 @@ s370_ ## _name
 	((((addr)&0x7FFFF000)==0)?((addr)&0xFFF)|pfx:\
 	(((addr)&0x7FFFF000)==pfx)?(addr)&0xFFF:(addr))
 
+#define AMASK   AMASK_L
+
 #define ADDRESS_MAXWRAP(_register_context) \
-	(0x00FFFFFF)
+	(AMASK24)
 
 #define REAL_MODE(p) \
 	((p)->ecmode==0 || ((p)->sysmask & PSW_DATMODE)==0)
@@ -99,6 +126,7 @@ s370_ ## _name
 #define SSGROUP_BIT	STD_GROUP
 
 #define PSA	PSA_3XX
+#define PSA_SIZE 4096
 #define IA	IA_L
 #define PX	PX_L
 #define CR(_r)	CR_L(_r)
@@ -106,16 +134,28 @@ s370_ ## _name
 #define GR_A(_r, _regs) ((_regs)->GR_L((_r)))
 #define MONCODE MC_L
 #define TEA	EA_L
+#define DXC     tea
 #define ET 	ET_L
+#define PX_MASK 0x7FFFF000
+#define RSTOLD  iplccw1
+#define RSTNEW  iplpsw
 #if !defined(_FEATURE_ZSIE)
 #define RADR	U32
+#define F_RADR  "%8.8X"
 #else
 #define RADR	U64
+#define F_RADR  "%16.16llX"
 #endif
 #define VADR	U32
+#define F_VADR  "%8.8X"
 #define GREG	U32
+#define F_GREG  "%8.8X"
 #define CREG	U32
+#define F_CREG  "%8.8X"
 #define AREG	U32
+#define F_AREG  "%8.8X"
+#define STORE_W STORE_FW
+#define FETCH_W FETCH_FW
 #if defined(OPTION_AIA_BUFFER)
 #define VI	VI_L
 #define AI	AI_L
@@ -124,13 +164,14 @@ s370_ ## _name
 #define AE(_r)	AE_L(_r)
 #define VE(_r)	VE_L(_r)
 #endif /*defined(OPTION_AEA_BUFFER)*/
+#define SIEBK                   SIE1BK
 
 #elif _GEN_ARCH == 390
 
 #define ARCH_MODE	ARCH_390
 
 #define DEF_INST(_name) \
-__attribute__ ((regparm(3))) void s390_ ## _name (BYTE inst[], int execflag, REGS *regs)
+ATTR_REGPARM(3) void s390_ ## _name (BYTE inst[], int execflag, REGS *regs)
 
 #define ARCH_DEP(_name) \
 s390_ ## _name
@@ -139,8 +180,10 @@ s390_ ## _name
 	((((addr)&0x7FFFF000)==0)?((addr)&0xFFF)|pfx:\
 	(((addr)&0x7FFFF000)==pfx)?(addr)&0xFFF:(addr))
 
+#define AMASK   AMASK_L
+
 #define ADDRESS_MAXWRAP(_register_context) \
-	((_register_context)->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF)
+	((_register_context)->psw.AMASK)
 
 #define REAL_MODE(p) \
 	(((p)->sysmask & PSW_DATMODE)==0)
@@ -157,7 +200,15 @@ s390_ ## _name
 #define SSEVENT_BIT	STD_SSEVENT
 #define SSGROUP_BIT	STD_GROUP
 
+#define LSED_UET_HDR	S_LSED_UET_HDR
+#define LSED_UET_TLR	S_LSED_UET_TLR
+#define LSED_UET_BAKR	S_LSED_UET_BAKR
+#define LSED_UET_PC	S_LSED_UET_PC
+
+#define CHM_GPR2_RESV   S_CHM_GPR2_RESV
+
 #define PSA	PSA_3XX
+#define PSA_SIZE 4096
 #define IA	IA_L
 #define PX	PX_L
 #define CR(_r)	CR_L(_r)
@@ -165,16 +216,28 @@ s390_ ## _name
 #define GR_A(_r, _regs) ((_regs)->GR_L((_r)))
 #define MONCODE MC_L
 #define TEA	EA_L
+#define DXC     tea
 #define ET 	ET_L
+#define PX_MASK 0x7FFFF000
+#define RSTNEW  iplpsw
+#define RSTOLD  iplccw1
 #if !defined(_FEATURE_ZSIE)
 #define RADR	U32
+#define F_RADR  "%8.8X"
 #else
 #define RADR	U64
+#define F_RADR  "%16.16llX"
 #endif
 #define VADR	U32
+#define F_VADR  "%8.8X"
 #define GREG	U32
+#define F_GREG  "%8.8X"
 #define CREG	U32
+#define F_CREG  "%8.8X"
 #define AREG	U32
+#define F_AREG  "%8.8X"
+#define STORE_W STORE_FW
+#define FETCH_W FETCH_FW
 #if defined(OPTION_AIA_BUFFER)
 #define VI	VI_L
 #define AI	AI_L
@@ -183,6 +246,7 @@ s390_ ## _name
 #define AE(_r)	AE_L(_r)
 #define VE(_r)	VE_L(_r)
 #endif /*defined(OPTION_AEA_BUFFER)*/
+#define SIEBK                   SIE1BK
 
 #elif _GEN_ARCH == 900
 
@@ -192,9 +256,10 @@ s390_ ## _name
 	((((addr)&0xFFFFFFFFFFFFE000ULL)==0)?((addr)&0x1FFF)|pfx:\
 	(((addr)&0xFFFFFFFFFFFFE000ULL)==pfx)?(addr)&0x1FFF:(addr))
 
+#define AMASK   AMASK_G
+
 #define ADDRESS_MAXWRAP(_register_context) \
-	((_register_context)->psw.amode64 ? 0xFFFFFFFFFFFFFFFFULL : \
-	   (_register_context)->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF)
+	((_register_context)->psw.AMASK)
 
 #define REAL_MODE(p) \
 	(((p)->sysmask & PSW_DATMODE)==0)
@@ -211,13 +276,21 @@ s390_ ## _name
 #define SSEVENT_BIT	ASCE_X
 #define SSGROUP_BIT	ASCE_G
 
+#define LSED_UET_HDR	Z_LSED_UET_HDR
+#define LSED_UET_TLR	Z_LSED_UET_TLR
+#define LSED_UET_BAKR	Z_LSED_UET_BAKR
+#define LSED_UET_PC	Z_LSED_UET_PC
+
+#define CHM_GPR2_RESV   Z_CHM_GPR2_RESV
+
 #define DEF_INST(_name) \
-__attribute__ ((regparm(3))) void z900_ ## _name (BYTE inst[], int execflag, REGS *regs)
+ATTR_REGPARM(3) void z900_ ## _name (BYTE inst[], int execflag, REGS *regs)
 
 #define ARCH_DEP(_name) \
 z900_ ## _name
 
 #define PSA	PSA_900
+#define PSA_SIZE 8192
 #define IA	IA_G
 #define PX	PX_G
 #define CR(_r)	CR_G(_r)
@@ -225,12 +298,23 @@ z900_ ## _name
 #define GR_A(_r, _regs) ((_regs)->psw.amode64 ? (_regs)->GR_G((_r)) : (_regs)->GR_L((_r)))
 #define MONCODE MC_G
 #define TEA	EA_G
+#define DXC     dataexc
 #define ET 	ET_G
+#define PX_MASK 0x7FFFE000
+#define RSTOLD  rstold
+#define RSTNEW  rstnew
 #define RADR	U64
+#define F_RADR  "%16.16llX"
 #define VADR	U64
+#define F_VADR  "%16.16llX"
 #define GREG	U64
+#define F_GREG  "%16.16llX"
 #define CREG	U64
+#define F_CREG  "%16.16llX"
 #define AREG	U32
+#define F_AREG  "%8.8X"
+#define STORE_W STORE_DW
+#define FETCH_W FETCH_DW
 #if defined(OPTION_AIA_BUFFER)
 #define VI	VI_G
 #define AI	AI_G
@@ -239,66 +323,11 @@ z900_ ## _name
 #define AE(_r)	AE_G(_r)
 #define VE(_r)	VE_G(_r)
 #endif /*defined(OPTION_AEA_BUFFER)*/
-
-#elif _GEN_ARCH == 964
-
-#define ARCH_MODE	ARCH_964
-
-#define APPLY_PREFIXING(addr,pfx) \
-	((((addr)&0xFFFFFFFFFFFFE000ULL)==0)?((addr)&0x1FFF)|pfx:\
-	(((addr)&0xFFFFFFFFFFFFE000ULL)==pfx)?(addr)&0x1FFF:(addr))
-
-#define ADDRESS_MAXWRAP(_register_context) \
-	((_register_context)->psw.amode64 ? 0xFFFFFFFFFFFFFFFFULL : \
-	   (_register_context)->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF)
-
-#define REAL_MODE(p) \
-	(((p)->sysmask & PSW_DATMODE)==0)
-
-#define ASF_ENABLED(_regs)	1 /* ASF is always enabled for ESAME */
-
-#define ASTE_AS_DESIGNATOR(_aste) \
-	(((U64)((_aste)[2])<<32)|(U64)((_aste)[3]))
-
-#define ASTE_LT_DESIGNATOR(_aste) \
-	((_aste)[6])
-
-#define SAEVENT_BIT	ASCE_S
-#define SSEVENT_BIT	ASCE_X
-#define SSGROUP_BIT	ASCE_G
-
-#define DEF_INST(_name) \
-__attribute__ ((regparm(3))) void z964_ ## _name (BYTE inst[], int execflag, REGS *regs)
-
-#define ARCH_DEP(_name) \
-z964_ ## _name
-
-#define PSA	PSA_900
-#define IA	IA_G
-#define PX	PX_G
-#define CR(_r)	CR_G(_r)
-#define GR(_r)	GR_G(_r)
-#define GR_A(_r, _regs) ((_regs)->psw.amode64 ? (_regs)->GR_G((_r)) : (_regs)->GR_L((_r)))
-#define MONCODE MC_G
-#define TEA	EA_G
-#define ET 	ET_G
-#define RADR	U64
-#define VADR	U64
-#define GREG	U64
-#define CREG	U64
-#define AREG	U32
-#if defined(OPTION_AIA_BUFFER)
-#define VI	VI_G
-#define AI	AI_G
-#endif /*defined(OPTION_AIA_BUFFER)*/
-#if defined(OPTION_AEA_BUFFER)
-#define AE(_r)	AE_G(_r)
-#define VE(_r)	VE_G(_r)
-#endif /*defined(OPTION_AEA_BUFFER)*/
+#define SIEBK                   SIE2BK
 
 #else
 
-#warning _GEN_ARCH must be 370, 390, 900, 964 or undefined
+#warning _GEN_ARCH must be 370, 390, 900 or undefined
 
 #endif
 

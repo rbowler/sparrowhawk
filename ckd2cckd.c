@@ -32,6 +32,12 @@ int chk_endian ();
 BYTE eighthexFF[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 int          errs = 0;
 
+#ifdef EXTERNALGUI
+/* Special flag to indicate whether or not we're being
+   run under the control of the external GUI facility. */
+int  extgui = 0;
+#endif /*EXTERNALGUI*/
+
 /*-------------------------------------------------------------------*/
 /* Build a compressed ckd file from a regular ckd file               */
 /*-------------------------------------------------------------------*/
@@ -77,7 +83,18 @@ int             nofudge=1;              /* Disable fudge factor      */
 unsigned int    c=CCKD_COMPRESS_ZLIB;   /* Compression algorithm     */
 int             z=-1;                   /* Compression value         */
 
+    /* Display the program identification message */
+    display_version (stderr, "Hercules ckd to cckd copy program ",
+                     MSTRING(VERSION), __DATE__, __TIME__);
+
     /* parse the arguments */
+#ifdef EXTERNALGUI
+    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
+    {
+        extgui = 1;
+        argc--;
+    }
+#endif /*EXTERNALGUI*/
     for (argc--, argv++ ; argc > 0 ; argc--, argv++)
     {
         if(**argv != '-') break;
@@ -162,7 +179,7 @@ int             z=-1;                   /* Compression value         */
     for (fileseq = 1;;)
     {
         /* Open the CKD image file */
-        ifd = open (ifile, O_RDONLY);
+        ifd = open (ifile, O_RDONLY|O_BINARY);
         if (ifd < 0)
         {
             fprintf (stderr, "ckd2cckd: %s open error: %s\n",
@@ -319,12 +336,12 @@ int             z=-1;                   /* Compression value         */
     trks = cyls * heads;
 
     /* Open the output file */
-    ofd = open (ofile, O_WRONLY | O_CREAT | O_EXCL,
+    ofd = open (ofile, O_WRONLY | O_CREAT | O_EXCL | O_BINARY,
                 S_IRUSR | S_IWUSR | S_IRGRP);
     if (ofd < 0)
     {
-        printf ("ckd2cckd: %s open error: %s\n",
-                ofile, strerror(errno));
+        fprintf (stderr, "ckd2cckd: %s open error: %s\n",
+                 ofile, strerror(errno));
         exit (10);
     }
 
@@ -341,6 +358,12 @@ int             z=-1;                   /* Compression value         */
     devhdr.trksize[0] = trksz & 0xFF;
     devhdr.devtype = devtype;
     rc = write (ofd, &devhdr, CKDDASD_DEVHDR_SIZE);
+    if (rc != CKDDASD_DEVHDR_SIZE)
+    {
+        fprintf (stderr, "ckd2cckd: %s write error: %s\n",
+                 ofile, strerror(errno));
+        exit (11);
+    }
 
     /* Build and write the Compressed CKD device header */
     memset (&cdevhdr, 0, CCKDDASD_DEVHDR_SIZE);
@@ -348,8 +371,10 @@ int             z=-1;                   /* Compression value         */
     cdevhdr.vrm[1] = CCKD_RELEASE;
     cdevhdr.vrm[2] = CCKD_MODLVL;
     if (chk_endian())  cdevhdr.options |= CCKD_BIGENDIAN;
-    if (nofudge)       cdevhdr.options |= CCKD_NOFUDGE;
-    cdevhdr.numl1tab = (trks + 255) / 256;
+    if (nofudge || 1)  cdevhdr.options |= CCKD_NOFUDGE;
+    if (trks < ckdtrks)
+        cdevhdr.numl1tab = (ckdtrks + 255) / 256;
+    else cdevhdr.numl1tab = (trks + 255) / 256;
     cdevhdr.numl2tab = 256;
     cdevhdr.cyls[3] = (cyls >> 24) & 0xFF;
     cdevhdr.cyls[2] = (cyls >> 16) & 0xFF;
@@ -358,14 +383,32 @@ int             z=-1;                   /* Compression value         */
     cdevhdr.compress = c;
     cdevhdr.compress_parm = z;
     rc = write (ofd, &cdevhdr, CCKDDASD_DEVHDR_SIZE);
+    if (rc != CCKDDASD_DEVHDR_SIZE)
+    {
+        fprintf (stderr, "ckd2cckd: %s write error: %s\n",
+                 ofile, strerror(errno));
+        exit (12);
+    }
 
     /* Build and write the primary lookup table */
     l1 = calloc (cdevhdr.numl1tab, CCKD_L1ENT_SIZE);
     rc = write (ofd, l1, cdevhdr.numl1tab * CCKD_L1ENT_SIZE);
+    if (rc != cdevhdr.numl1tab * CCKD_L1ENT_SIZE)
+    {
+        fprintf (stderr, "ckd2cckd: %s write error: %s\n",
+                 ofile, strerror(errno));
+        exit (13);
+    }
 
     /* get buffers */
     buf = malloc (trksz);
     buf2 = malloc (trksz);
+    if (buf == NULL || buf2 == NULL)
+    {
+        fprintf (stderr, "ckd2cckd: buffer malloc error: %s\n",
+                 strerror(errno));
+        exit (14);
+    }
 
     /* Start reading/writing tracks */
     fileseq = 0;
@@ -373,6 +416,12 @@ int             z=-1;                   /* Compression value         */
     pos = CCKD_L1TAB_POS + cdevhdr.numl1tab * CCKD_L1ENT_SIZE;
     l1x = 0;
     l2pos = 0;
+
+#ifdef EXTERNALGUI
+    /* Tell the GUI how many tracks we'll be processing. */
+    if (extgui) fprintf (stderr, "CKDTRKS=%d\n", ckdtrks);
+#endif /*EXTERNALGUI*/
+
     for (i = 0; i < ckdtrks; i++)
     {
         /* see if we need to changed input file descriptor */
@@ -393,19 +442,53 @@ int             z=-1;                   /* Compression value         */
                 {
                     l1[l1x] = l2pos;
                     rc = lseek (ofd, l2pos, SEEK_SET);
+                    if (rc == -1)
+                    {
+                        fprintf (stderr, "ckd2cckd: %s lseek error: %s\n",
+                                 ofile, strerror(errno));
+                        exit (15);
+                    }
                     rc = write (ofd, &l2, CCKD_L2TAB_SIZE);
+                    if (rc != CCKD_L2TAB_SIZE)
+                    {
+                        fprintf (stderr, "ckd2cckd: %s write error: %s\n",
+                                ofile, strerror(errno));
+                        exit (16);
+                    }
                 }
                 l1x++;
             }
             l2pos = pos;
             memset (&l2, 0, CCKD_L2TAB_SIZE);
+
             rc = lseek (ofd, l2pos, SEEK_SET);
+            if (rc == -1)
+            {
+                fprintf (stderr, "ckd2cckd: %s lseek error: %s\n",
+                         ofile, strerror(errno));
+                exit (17);
+            }
+
             rc = write (ofd, &l2, CCKD_L2TAB_SIZE);
+            if (rc != CCKD_L2TAB_SIZE)
+            {
+                fprintf (stderr, "ckd2cckd: %s write error: %s\n",
+                         ofile, strerror(errno));
+                exit (18);
+            }
+
             pos += CCKD_L2TAB_SIZE;
         }
 
         /* read the track image */
         rc = read (ifd, buf, trksz);
+        if (rc != trksz)
+        {
+            *sfxptr = '0' + fileseq;
+            fprintf (stderr, "ckd2cckd: %s read error: %s\n",
+                     ifile, strerror(errno));
+            exit (19);
+        }
 
         /* get track image length */
         buflen = trk_len (buf, i, heads, trksz);
@@ -480,6 +563,12 @@ int             z=-1;                   /* Compression value         */
             l2[l2x].len = obuflen;
             l2[l2x].size = obuflen;
             rc = write (ofd, obuf, obuflen);
+            if (rc != obuflen)
+            {
+                fprintf (stderr, "ckd2cckd: %s write error: %s\n",
+                         ofile, strerror(errno));
+                exit (20);
+            }
             pos += obuflen;
         }
 
@@ -491,7 +580,7 @@ int             z=-1;                   /* Compression value         */
         {
             fprintf (stderr,
                      "ckd2cckd: Terminated due to errors\n");
-            exit (11);
+            exit (21);
         }
     }
 
@@ -504,19 +593,58 @@ int             z=-1;                   /* Compression value         */
         {
             l1[l1x] = l2pos;
             rc = lseek (ofd, l2pos, SEEK_SET);
+            if (rc == -1)
+            {
+                fprintf (stderr, "ckd2cckd: %s lseek error: %s\n",
+                         ofile, strerror(errno));
+                exit (22);
+            }
             rc = write (ofd, &l2, CCKD_L2TAB_SIZE);
+            if (rc != CCKD_L2TAB_SIZE)
+            {
+                fprintf (stderr, "ckd2cckd: %s write error: %s\n",
+                        ofile, strerror(errno));
+                exit (23);
+            }
         }
     }
 
     /* update the primary lookup table */
     rc = lseek (ofd, CCKD_L1TAB_POS, SEEK_SET);
+    if (rc == -1)
+    {
+        fprintf (stderr, "ckd2cckd: %s lseek error: %s\n",
+                 ofile, strerror(errno));
+        exit (24);
+    }
     rc = write (ofd, l1, cdevhdr.numl1tab * CCKD_L1ENT_SIZE);
+    if (rc != cdevhdr.numl1tab * CCKD_L1ENT_SIZE)
+    {
+        fprintf (stderr, "ckd2cckd: %s write error: %s\n",
+                 ofile, strerror(errno));
+        exit (25);
+    }
 
     /* update the compressed device header */
     cdevhdr.size = pos;
     cdevhdr.used = pos;
+
     rc = lseek (ofd, CKDDASD_DEVHDR_SIZE, SEEK_SET);
+    if (rc == -1)
+    {
+        fprintf (stderr, "ckd2cckd: %s lseek error: %s\n",
+                 ofile, strerror(errno));
+        exit (26);
+    }
+
     rc = write (ofd, &cdevhdr, CCKDDASD_DEVHDR_SIZE);
+    if (rc != CCKDDASD_DEVHDR_SIZE)
+    {
+        fprintf (stderr, "ckd2cckd: %s write error: %s\n",
+                 ofile, strerror(errno));
+        exit (27);
+    }
+
     rc = ftruncate (ofd, pos);
 
     /* free all our malloc()ed storage */
@@ -531,7 +659,7 @@ int             z=-1;                   /* Compression value         */
         fprintf (stderr,
                 "ckd2cckd: %s close error: %s\n",
                 ofile, strerror(errno));
-        exit (12);
+        exit (28);
     }
 
     /* close the input file[s] */
@@ -540,22 +668,26 @@ int             z=-1;                   /* Compression value         */
         rc = close (ckdfd[i]);
         if (rc < 0)
         {
+            *sfxptr = '0' + i;
             fprintf (stderr,
                     "ckd2cckd: %s close error: %s\n",
                     ifile, strerror(errno));
-            exit (13);
+            exit (29);
         }
     }
 
     if (quiet == 0 || errs > 0)
-        printf ("ckd2cckd: copy %s\n",
-                errs ? "completed with errors"
-                     : "successful!!         ");
+        printf ("\rckd2cckd: copy %s\n",
+                errs ? "completed with errors            "
+                     : "successful!!                     ");
 
     return 0;
 
 }
 
+/*-------------------------------------------------------------------*/
+/* Display command syntax                                            */
+/*-------------------------------------------------------------------*/
 void syntax ()
 {
     printf ("usage:  ckd2cckd [-options] input-file output-file\n"
@@ -589,20 +721,34 @@ void syntax ()
             "                       1=fastest ... 9=best\n"
 #endif
            );
-    exit (14);
+    exit (30);
 } /* end function syntax */
 
+/*-------------------------------------------------------------------*/
+/* Test for an abbreviation                                          */
+/*-------------------------------------------------------------------*/
 int abbrev (char *tst, char *cmp)
 {
     size_t len = strlen(tst);
     return ((len >= 1) && (!strncmp(tst, cmp, len)));
 } /* end function abbrev */
 
+/*-------------------------------------------------------------------*/
+/* Display progress status                                           */
+/*-------------------------------------------------------------------*/
 void status (int i, int n)
 {
 static char indic[] = "|/-\\";
 
-    printf ("\r%c %3d%% track %6d of %6d\r",
+#ifdef EXTERNALGUI
+    if (extgui)
+    {
+        if (i % 100) return;
+        fprintf (stderr, "TRK=%d\n", i);
+        return; 
+    } 
+#endif /*EXTERNALGUI*/
+    printf ("\r%c %3d%% track %6d of %6d",
             indic[i%4], (i*100)/n, i, n);
 } /* end function status */
 

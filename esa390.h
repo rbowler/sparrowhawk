@@ -56,6 +56,18 @@ typedef int64_t 	S64;
  #error Cannot determine byte order
 #endif
 
+typedef union {
+                 HWORD H;
+                 struct { BYTE H; BYTE L; } B;
+	       } HWORD_U;
+typedef union {
+		 FWORD F;
+		 struct { HWORD_U H; HWORD_U L; } H;
+	       } FWORD_U;
+typedef union {
+		 DWORD D;
+		 struct { FWORD_U H; FWORD_U L; } F;
+	       } DWORD_U;
 
 /* Internal-format PSW structure definition */
 typedef struct _PSW {
@@ -83,6 +95,12 @@ typedef struct _PSW {
 #define IA_H	ia.F.H.F
 #define IA_L	ia.F.L.F
 #define IA_LA24 ia.F.L.A.A
+        DW      amask;                  /* Address wraparound mask   */
+#define AMASK_G	amask.D
+#define AMASK_L	amask.F.L.F
+#define AMASK24 0x00FFFFFF
+#define AMASK31 0x7FFFFFFF
+#define AMASK64 0xFFFFFFFFFFFFFFFFULL
     } PSW;
 
 /* Bit definitions for ECMODE PSW system mask */
@@ -100,12 +118,6 @@ typedef struct _PSW {
 	((p)->space==0 && (p)->armode==1)
 #define HOME_SPACE_MODE(p) \
 	((p)->space==1 && (p)->armode==1)
-#define ESAMEARCH(_regs) \
-	((_regs)->arch_mode >= ESA_900)
-#define ESAMEMODE(_psw) \
-	((_psw)->notesame == 0)
-#define AMODE64(_psw) \
-	((_psw)->notesame == 0 && (_psw)->amode64)
 
 /* Structure definition for translation-lookaside buffer entry */
 typedef struct _TLBE {
@@ -265,7 +277,8 @@ typedef struct _TLBE {
 #define ZPGETAB_PFRA	0xFFFFFFFFFFFFF000ULL /* Page frame real addr*/
 #define ZPGETAB_I	0x400		/* Invalid page 	     */
 #define ZPGETAB_P	0x200		/* Protected page	     */
-#define ZPGETAB_RESV	0x900		/* Reserved bits - must be 0 */
+#define ZPGETAB_ESVALID 0x100	        /* Valid in expanded storage */
+#define ZPGETAB_RESV	0x800		/* Reserved bits - must be 0 */
 
 /* Segment table designation bit definitions (ESA/390 mode) */
 #define STD_SSEVENT	0x80000000	/* Space switch event	     */
@@ -324,7 +337,7 @@ typedef struct _TLBE {
 #define ALET_ALEN	0x0000FFFF	/* Access-list entry number  */
 
 /* Access-list designation bit definitions */
-#if FEATURE_ALD_FORMAT == 0
+#if FEATURE_ALD_FORMAT == 0 || defined(FEATURE_ESAME)
 #define ALD_ALO 	0x7FFFFF80	/* Access-list origin (fmt0) */
 #define ALD_ALL 	0x0000007F	/* Access-list length (fmt0) */
 #define ALD_ALL_SHIFT	3		/* Length units are 2**3     */
@@ -421,14 +434,19 @@ typedef struct _LSED {
 	HWORD	resv;			/* Reserved bits - must be 0 */
     } LSED;
 
-/* Linkage stack entry descriptor bit definitions */
+/* Stack type definitions                                            */
 #define LSED_UET_U	0x80		/* Unstack suppression bit   */
 #define LSED_UET_ET	0x7F		/* Entry type...	     */
-#define LSED_UET_HDR	0x01		/* ...header entry	     */
-#define LSED_UET_TLR	0x02		/* ...trailer entry	     */
-#define LSED_UET_BAKR	0x04		/* ...branch state entry     */
-#define LSED_UET_PC	0x05		/* ...call state entry	     */
 
+#define S_LSED_UET_HDR	0x01		/* ...header entry	     */
+#define S_LSED_UET_TLR	0x02		/* ...trailer entry	     */
+#define S_LSED_UET_BAKR	0x04		/* ...branch state entry     */
+#define S_LSED_UET_PC	0x05		/* ...call state entry	     */
+
+#define Z_LSED_UET_HDR	0x09		/* ...header entry	     */
+#define Z_LSED_UET_TLR	0x0A		/* ...trailer entry	     */
+#define Z_LSED_UET_BAKR	0x0C		/* ...branch state entry     */
+#define Z_LSED_UET_PC	0x0D		/* ...call state entry	     */
 
 /* Program call number bit definitions */
 #define PC_LX		0x000FFF00	/* Linkage index	     */
@@ -566,53 +584,70 @@ typedef struct _PSA_3XX {		/* Prefixed storage area     */
 
 /* ESAME Prefixed storage area structure definition */
 typedef struct _PSA_900 {		/* Prefixed storage area     */
-/*000*/ DWORD iplpsw;			/* IPL PSW, Restart new PSW  */
-/*008*/ DWORD iplccw1;			/* IPL CCW1, Restart old PSW */
-/*010*/ DWORD iplccw2;			/* IPL CCW2		     */
-/*018*/ BYTE  resv018[104];
-/*080*/ FWORD extparm;			/* External interrupt param  */
-/*084*/ HWORD extcpad;			/* External interrupt CPU#   */
-/*086*/ HWORD extint;			/* External interrupt code   */
-/*088*/ FWORD svcint;			/* SVC interrupt code	     */
-/*08C*/ FWORD pgmint;			/* Program interrupt code    */
-/*090*/ FWORD dataexc;			/* Data exception code	     */
-/*094*/ HWORD monclass; 		/* Monitor class	     */
-/*096*/ HWORD perint;			/* PER interrupt code	     */
-/*098*/ DWORD peradr;			/* PER address		     */
-/*0A0*/ BYTE  excarid;			/* Exception access id	     */
-/*0A1*/ BYTE  perarid;			/* PER access id	     */
-/*0A2*/ BYTE  opndrid;			/* Operand access id	     */
-/*0A3*/ BYTE  arch;			/* Architecture mode ID      */
-/*0A4*/ FWORD mpladdr;			/* MPL addr		     */
-/*0A8*/ DWORD tea;			/* Translation exception addr*/
-/*0B0*/ DWORD moncode;			/* Monitor code 	     */
-/*0B8*/ FWORD ioid;			/* I/O interrupt subsys id   */
-/*0BC*/ FWORD ioparm;			/* I/O interrupt parameter   */
-/*0C0*/ FWORD iointid;			/* I/O interrupt ID	     */
-/*0C4*/ FWORD resv0C0;			/* Reserved		     */
-/*0C8*/ FWORD stfl;			/* Facilities list (STFL)    */
-/*0CC*/ FWORD resv0CC;			/* Reserved		     */
-/*0D0*/ DWORD resv0D0;			/* Reserved		     */
-/*0D8*/ DWORD resv0D8;			/* Reserved		     */
-/*0E0*/ DWORD resv0E0;			/* Reserved		     */
-/*0E8*/ DWORD mckint;			/* Machine check int code    */
-/*0F0*/ FWORD mckext;			/* Machine check int code ext*/
-/*0F4*/ FWORD xdmgcode; 		/* External damage code      */
-/*0F8*/ DWORD mcstorad; 		/* Failing storage address   */
-/*100*/ BYTE  resv100[32];		/* Reserved		     */
-/*120*/ QWORD rstold;			/* Restart old PSW	     */
-/*130*/ QWORD extold;			/* External old PSW	     */
-/*140*/ QWORD svcold;			/* SVC old PSW		     */
-/*150*/ QWORD pgmold;			/* Program check old PSW     */
-/*160*/ QWORD mckold;			/* Machine check old PSW     */
-/*170*/ QWORD iopold;			/* I/O old PSW		     */
-/*180*/ BYTE  resv180[32];		/* Reserved		     */
-/*1A0*/ QWORD rstnew;			/* Restart new PSW	     */
-/*1B0*/ QWORD extnew;			/* External new PSW	     */
-/*1C0*/ QWORD svcnew;			/* SVC new PSW		     */
-/*1D0*/ QWORD pgmnew;			/* Program check new PSW     */
-/*1E0*/ QWORD mcknew;			/* Machine check new PSW     */
-/*1F0*/ QWORD iopnew;			/* I/O new PSW		     */
+/*0000*/ DWORD iplpsw;			/* IPL PSW                   */
+/*0008*/ DWORD iplccw1;			/* IPL CCW1                  */
+/*0010*/ DWORD iplccw2;			/* IPL CCW2		     */
+/*0018*/ BYTE  resv0018[104];           /* Reserved                  */
+/*0080*/ FWORD extparm;			/* External interrupt param  */
+/*0084*/ HWORD extcpad;			/* External interrupt CPU#   */
+/*0086*/ HWORD extint;			/* External interrupt code   */
+/*0088*/ FWORD svcint;			/* SVC interrupt code	     */
+/*008C*/ FWORD pgmint;			/* Program interrupt code    */
+/*0090*/ FWORD dataexc;			/* Data exception code	     */
+/*0094*/ HWORD monclass; 		/* Monitor class	     */
+/*0096*/ HWORD perint;			/* PER interrupt code	     */
+/*0098*/ DWORD peradr;			/* PER address		     */
+/*00A0*/ BYTE  excarid;			/* Exception access id	     */
+/*00A1*/ BYTE  perarid;			/* PER access id	     */
+/*00A2*/ BYTE  opndrid;			/* Operand access id	     */
+/*00A3*/ BYTE  arch;			/* Architecture mode ID      */
+/*00A4*/ FWORD mpladdr;			/* MPL addr		     */
+/*00A8*/ DWORD_U tea;			/* Translation exception addr*/
+#define TEA_G tea.D
+#define TEA_L tea.F.L.F
+#define TEA_H tea.F.H.F
+/*00B0*/ DWORD moncode;			/* Monitor code 	     */
+/*00B8*/ FWORD ioid;			/* I/O interrupt subsys id   */
+/*00BC*/ FWORD ioparm;			/* I/O interrupt parameter   */
+/*00C0*/ FWORD iointid;			/* I/O interrupt ID	     */
+/*00C4*/ FWORD resv00C0;		/* Reserved		     */
+/*00C8*/ FWORD stfl;			/* Facilities list (STFL)    */
+/*00CC*/ FWORD resv00CC;		/* Reserved		     */
+/*00D0*/ DWORD resv00D0;		/* Reserved		     */
+/*00D8*/ DWORD resv00D8;		/* Reserved		     */
+/*00E0*/ DWORD resv00E0;		/* Reserved		     */
+/*00E8*/ DWORD mckint;			/* Machine check int code    */
+/*00F0*/ FWORD mckext;			/* Machine check int code ext*/
+/*00F4*/ FWORD xdmgcode; 		/* External damage code      */
+/*00F8*/ DWORD mcstorad; 		/* Failing storage address   */
+/*0100*/ BYTE  resv0100[32];		/* Reserved		     */
+/*0120*/ QWORD rstold;			/* Restart old PSW	     */
+/*0130*/ QWORD extold;			/* External old PSW	     */
+/*0140*/ QWORD svcold;			/* SVC old PSW		     */
+/*0150*/ QWORD pgmold;			/* Program check old PSW     */
+/*0160*/ QWORD mckold;			/* Machine check old PSW     */
+/*0170*/ QWORD iopold;			/* I/O old PSW		     */
+/*0180*/ BYTE  resv0180[32];		/* Reserved		     */
+/*01A0*/ QWORD rstnew;			/* Restart new PSW	     */
+/*01B0*/ QWORD extnew;			/* External new PSW	     */
+/*01C0*/ QWORD svcnew;			/* SVC new PSW		     */
+/*01D0*/ QWORD pgmnew;			/* Program check new PSW     */
+/*01E0*/ QWORD mcknew;			/* Machine check new PSW     */
+/*01F0*/ QWORD iopnew;			/* I/O new PSW		     */
+/*0200*/ BYTE  resv0200[4096];          /* Reserved                  */
+/*1200*/ FWORD storefpr[32];		/* FP register save area     */
+/*1280*/ DWORD storegpr[16];		/* General register save area*/
+/*1300*/ QWORD storepsw;                /* Store status PSW save area*/
+/*1310*/ DWORD resv1310;                /* Reserved                  */
+/*1318*/ FWORD storepfx;                /* Prefix register save area */
+/*131C*/ FWORD storefpc;                /* FP control save area      */
+/*1320*/ FWORD resv1320;                /* Reserved                  */
+/*1324*/ FWORD storetpr;                /* TOD prog reg save area    */
+/*1328*/ DWORD storeptmr;               /* CPU timer save area       */
+/*1330*/ DWORD storeclkc;               /* Clock comparator save area*/
+/*1338*/ DWORD resv1338;                /* Reserved                  */
+/*1340*/ FWORD storear[16];		/* Access register save area */
+/*1380*/ DWORD storecr[16];		/* Control register save area*/
 } PSA_900;
 
 /* Bit settings for translation exception address */
@@ -665,6 +700,7 @@ typedef struct _PSA_900 {		/* Prefixed storage area     */
 #define MCIC_AR  0x0000000040000000ULL	/* Access register validity  */
 #define MCIC_DA  0x0000000020000000ULL	/* Delayed access exeption   */
 
+#define MCIC_PR  0x0000000000200000ULL	/* TOD prog. reg. validity   */
 #define MCIC_XF  0x0000000000100000ULL	/* Extended float reg val.   */
 #define MCIC_AP  0x0000000000080000ULL	/* Ancillary report	     */
 #define MCIC_CT  0x0000000000020000ULL	/* CPU timer validity	     */
@@ -1046,8 +1082,9 @@ typedef struct _MBK {
 #define CHM_GPR1_D	0x00000001	/* Block update Mode	     */
 #define CHM_GPR1_RESV	0x0FFFFFFC	/* Reserved, must be zero    */
 
-#define CHM_GPR2_MBO	0x7FFFFFE0	/* Measurement Block Origin  */
-#define CHM_GPR2_RESV	0x8000001F	/* Reserved, must be zero    */
+/* Measurement Block Origin  */
+#define S_CHM_GPR2_RESV	0x8000001F	/* Reserved, must be zero    */
+#define Z_CHM_GPR2_RESV	0x0000001F	/* Reserved, must be zero    */
 
 /* Definitions for PLO instruction */
 #define PLO_GPR0_FC	0x000000FF	/* Function code mask	     */
@@ -1055,16 +1092,28 @@ typedef struct _MBK {
 #define PLO_GPR0_RESV	0xFFFFFE00	/* Reserved bits	     */
 #define PLO_CL			 0	/* Compare and load	     */
 #define PLO_CLG 		 1	/* Compare and load	     */
+#define PLO_CLGR                 2      /* Compare and load    ESAME */
+#define PLO_CLX                  3      /* Compare and load    ESAME */
 #define PLO_CS			 4	/* Compare and swap	     */
 #define PLO_CSG 		 5	/* Compare and swap	     */
+#define PLO_CSGR                 6      /* Compare and swap    ESAME */
+#define PLO_CSX                  7      /* Compare and swap    ESAME */
 #define PLO_DCS 		 8	/* Double compare and swap   */
 #define PLO_DCSG		 9	/* Double compare and swap   */
+#define PLO_DCSGR		10	/* Double c and s      ESAME */
+#define PLO_DCSX 		11	/* Double c and s      ESAME */
 #define PLO_CSST		12	/* Compare and swap and store*/
 #define PLO_CSSTG		13	/* Compare and swap and store*/
+#define PLO_CSSTGR		14	/* C/S/S               ESAME */
+#define PLO_CSSTX 		15	/* C/S/S               ESAME */
 #define PLO_CSDST		16	/* C/S and double store      */
 #define PLO_CSDSTG		17	/* C/S and double store      */
+#define PLO_CSDSTGR     	18	/* C/S/DS              ESAME */
+#define PLO_CSDSTX		19	/* C/S/DS              ESAME */
 #define PLO_CSTST		20	/* C/S and triple store      */
 #define PLO_CSTSTG		21	/* C/S and triple store      */
+#define PLO_CSTSTGR		22	/* C/S/TS              ESAME */
+#define PLO_CSTSTX 		23	/* C/S/TS              ESAME */
 
 /* Bit definitions for the Vector Facility */
 #define VSR_M	 0x0001000000000000ULL	/* Vector mask mode bit      */
@@ -1078,46 +1127,46 @@ typedef struct _MBK {
 
 #define VAC_MASK 0x00FFFFFFFFFFFFFFULL	/* Vector Activity Count mask*/
 
-/* SIE State Descriptor Block */
-typedef struct _SIEBK { 		/* SIE State Descriptor      */
-/*00*/	BYTE  v;			/* Intervention requests     */
+/* SIE Format 1 State Descriptor Block */
+typedef struct _SIE1BK { 		/* SIE State Descriptor      */
+/*000*/	BYTE  v;			/* Intervention requests     */
 #define SIE_V_WAIT	0x10		/* Wait/Run bit 	     */
 #define SIE_V_EXTCALL	0x08		/* External call pending     */
 #define SIE_V_STOP	0x04		/* SIE Stop control	     */
 #define SIE_V_IO	0x02		/* I/O Interrupt pending     */
 #define SIE_V_EXT	0x01		/* EXT Interrupt pending     */
-/*01*/	BYTE  s;			/* State controls	     */
+/*001*/	BYTE  s;			/* State controls	     */
 #define SIE_S_T 	0x80		/* Interval timer irpt pend  */
 #define SIE_S_RETENTION 0x40		/* SIE State retained	     */
 #define SIE_S_EXP_TIMER 0x02		/* Expedite timer enabled    */
 #define SIE_S_EXP_RUN	0x01		/* Expedite run enabled      */
-/*02*/	BYTE  mx;			/* Machine mode control      */
+/*002*/	BYTE  mx;			/* Machine mode control      */
 #define SIE_MX_XC	0x01		/* XC mode guest	     */
-/*03*/	BYTE  m;			/* Mode controls	     */
+/*003*/	BYTE  m;			/* Mode controls	     */
 #define SIE_M_VCC	0x40		/* Vector change control     */
 #define SIE_M_XA	0x20		/* XA mode guest	     */
 #define SIE_M_370	0x10		/* 370 mode guest	     */
 #define SIE_M_VR	0x08		/* V=R mode guest	     */
 #define SIE_M_ITMOF	0x04		/* Guest ival timer disabled */
 #define SIE_M_GPE	0x02		/* Guest per enhancement     */
-/*04*/	FWORD prefix;			/* Guest prefix register     */
-/*08*/	HWORD mso;			/* Main Storage Origin	     */
-/*0A*/	HWORD mse;			/* Main Storage Extent	     */
-/*0C*/	FWORD resv0cf;
-/*10*/	FWORD gr14;			/* Guest gr 14		     */
-/*14*/	FWORD gr15;			/* Guest gr 15		     */
-/*18*/	DWORD psw;			/* Guest PSW		     */
-/*20*/	FWORD resv20f;
-/*24*/	FWORD residue;			/* Residue counter	     */
-/*28*/	DWORD cputimer; 		/* CPU timer		     */
-/*30*/	DWORD clockcomp;		/* Clock comparator	     */
-/*38*/	DWORD epoch;			/* Guest/Host epoch diff.    */
-/*40*/	FWORD svc_ctl;			/* SVC Controls 	     */
+/*004*/	FWORD prefix;			/* Guest prefix register     */
+/*008*/	HWORD mso;			/* Main Storage Origin	     */
+/*00A*/	HWORD mse;			/* Main Storage Extent	     */
+/*00C*/	FWORD resv0cf;
+/*010*/	FWORD gr14;			/* Guest gr 14		     */
+/*014*/	FWORD gr15;			/* Guest gr 15		     */
+/*018*/	DWORD psw;			/* Guest PSW		     */
+/*020*/	FWORD resv20f;
+/*024*/	FWORD residue;			/* Residue counter	     */
+/*028*/	DWORD cputimer; 		/* CPU timer		     */
+/*030*/	DWORD clockcomp;		/* Clock comparator	     */
+/*038*/	DWORD epoch;			/* Guest/Host epoch diff.    */
+/*040*/	FWORD svc_ctl;			/* SVC Controls 	     */
 #define SIE_SVC0_ALL	0x80		/* Intercept all SVCs	     */
 #define SIE_SVC0_1N	0x40		/* Intercept SVC 1n	     */
 #define SIE_SVC0_2N	0x20		/* Intercept SVC 2n	     */
 #define SIE_SVC0_3N	0x10		/* Intercept SVC 3n	     */
-/*44*/	HWORD lctl_ctl; 		/* LCTL Control 	     */
+/*044*/	HWORD lctl_ctl; 		/* LCTL Control 	     */
 #define SIE_LCTL0_CR0	0x80		/* Intercept LCTL 0	     */
 #define SIE_LCTL0_CR1	0x40		/* Intercept LCTL 1	     */
 #define SIE_LCTL0_CR2	0x20		/* Intercept LCTL 2	     */
@@ -1134,8 +1183,8 @@ typedef struct _SIEBK { 		/* SIE State Descriptor      */
 #define SIE_LCTL1_CR13	0x04		/* Intercept LCTL 13	     */
 #define SIE_LCTL1_CR14	0x02		/* Intercept LCTL 14	     */
 #define SIE_LCTL1_CR15	0x01		/* Intercept LCTL 15	     */
-/*46*/	HWORD cpuad;			/* Virtual CPU address	     */
-/*48*/	DWORD ic;			/* Interception Controls     */
+/*046*/	HWORD cpuad;			/* Virtual CPU address	     */
+/*048*/	DWORD ic;			/* Interception Controls     */
 #define SIE_IC0_OPEREX	0x80		/* Intercept operation exc.  */
 #define SIE_IC0_PRIVOP	0x40		/* Intercept priv. op. exc.  */
 #define SIE_IC0_PGMALL	0x20		/* Intercept program ints    */
@@ -1165,7 +1214,7 @@ typedef struct _SIEBK { 		/* SIE State Descriptor      */
 #define SIE_IC3_PR	0x08		/* Intercept PR 	     */
 #define SIE_IC3_BAKR	0x04		/* Intercept BAKR	     */
 #define SIE_IC3_PGX	0x02		/* Intercept PGIN/PGOUT      */
-/*50*/	BYTE  c;			/* Interception Code	     */
+/*050*/	BYTE  c;			/* Interception Code	     */
 #define SIE_C_INST	   4		/* Instruction interception  */
 #define SIE_C_PGMINT	   8		/* Program interruption      */
 #define SIE_C_PGMINST	  12		/* Program/instruction int   */
@@ -1176,35 +1225,179 @@ typedef struct _SIEBK { 		/* SIE State Descriptor      */
 #define SIE_C_VALIDITY	  32		/* Validity		     */
 #define SIE_C_STOPREQ	  40		/* Stop request 	     */
 #define SIE_C_OPEREXC	  44		/* Operation Exception	     */
-/*51*/	BYTE  f;			/* Interception Status	     */
+/*051*/	BYTE  f;			/* Interception Status	     */
 #define SIE_F_IN	0x80		/* Intercept format 2	     */
 #define SIE_F_IF	0x02		/* Instruction fetch PER     */
 #define SIE_F_EX	0x01		/* Icept for target of EX    */
-/*52*/	HWORD lhcpu;			/* Last Host CPU addr	     */
-/*54*/	HWORD todpf;			/* TOD programmable field    */
-/*56*/	HWORD ipa;			/* Instruction parameter A   */
-/*58*/	FWORD ipb;			/* Instruction parameter B   */
-/*5C*/	FWORD ipc;			/* Instruction parameter C   */
-/*60*/	FWORD rcpo;			/* RCP area origin	     */
+/*052*/	HWORD lhcpu;			/* Last Host CPU addr	     */
+/*054*/	HWORD todpf;			/* TOD programmable field    */
+/*056*/	HWORD ipa;			/* Instruction parameter A   */
+/*058*/	FWORD ipb;			/* Instruction parameter B   */
+/*05C*/	FWORD ipc;			/* Instruction parameter C   */
+/*060*/	FWORD rcpo;			/* RCP area origin	     */
 #define SIE_RCPO0_SKA	0x80		/* Storage Key Assist	     */
-/*64*/	FWORD scao;			/* SCA area origin	     */
-/*68*/	FWORD subchtabo;		/* Subchannel table origin   */
-/*6C*/	FWORD resv6Cf;
-/*70*/	HWORD tch_ctl;			/* Test Channel control      */
-/*72*/	HWORD resv72h;
-/*74*/	FWORD iopassthru;		/* I/O passthru control      */
-/*78*/	BYTE  xslim[3]; 		/* Extended stor upper lim   */
-/*7B*/	BYTE  resv7Bb;
-/*7C*/	FWORD resv7Cf;
-/*80*/	FWORD cr[16];			/* Guest Control registers   */
-/*C0*/	BYTE  ip[34];			/* Interruption parameters   */
+#define SIE_RCPO0_SKAIP 0x40		/* SKA in progress           */
+#define SIE_RCPO2_RCPBY 0x10		/* RCP Bypass                */
+/*064*/	FWORD scao;			/* SCA area origin	     */
+/*068*/	FWORD subchtabo;		/* Subchannel table origin   */
+/*06C*/	FWORD resv6Cf;
+/*070*/	HWORD tch_ctl;			/* Test Channel control      */
+/*072*/	HWORD resv72h;
+/*074*/	FWORD iopassthru;		/* I/O passthru control      */
+/*078*/	BYTE  xslim[3]; 		/* Extended stor upper lim   */
+/*07B*/	BYTE  resv7Bb;
+/*07C*/	FWORD resv7Cf;
+/*080*/	FWORD cr[16];			/* Guest Control registers   */
+/*0C0*/	BYTE  ip[34];			/* Interruption parameters   */
 #define SIE_IP_PSA_OFFSET	0x40	/* Offset of the IP field
 					   relative to the ipfields
 					   in the PSA		     */
-/*E2*/	BYTE  xso[3];			/* Expanded storage origin   */
-/*E5*/	BYTE  xsl[3];			/* Expanded storage limit    */
-/*E8*/	BYTE  resvE8b[24];
-} SIEBK;
+/*0E2*/	BYTE  xso[3];			/* Expanded storage origin   */
+/*0E5*/	BYTE  xsl[3];			/* Expanded storage limit    */
+/*0E8*/	BYTE  resvE8b[24];
+} SIE1BK;
+
+
+/* SIE Format 2 State Descriptor Block */
+typedef struct _SIE2BK { 		/* SIE State Descriptor      */
+/*000*/	BYTE  v;			/* Intervention requests     */
+#define SIE_V_WAIT	0x10		/* Wait/Run bit 	     */
+#define SIE_V_EXTCALL	0x08		/* External call pending     */
+#define SIE_V_STOP	0x04		/* SIE Stop control	     */
+#define SIE_V_IO	0x02		/* I/O Interrupt pending     */
+#define SIE_V_EXT	0x01		/* EXT Interrupt pending     */
+/*001*/	BYTE  s;			/* State controls	     */
+#define SIE_S_T 	0x80		/* Interval timer irpt pend  */
+#define SIE_S_RETENTION 0x40		/* SIE State retained	     */
+#define SIE_S_EXP_TIMER 0x02		/* Expedite timer enabled    */
+#define SIE_S_EXP_RUN	0x01		/* Expedite run enabled      */
+/*002*/	BYTE  mx;			/* Machine mode control      */
+#define SIE_MX_XC	0x01		/* XC mode guest	     */
+#define SIE_MX_ESAME    0x08            /* ESAME mode guest          */
+/*003*/	BYTE  m;			/* Mode controls	     */
+#define SIE_M_VCC	0x40		/* Vector change control     */
+#define SIE_M_XA	0x20		/* XA mode guest	     */
+#define SIE_M_370	0x10		/* 370 mode guest	     */
+#define SIE_M_VR	0x08		/* V=R mode guest	     */
+#define SIE_M_ITMOF	0x04		/* Guest ival timer disabled */
+#define SIE_M_GPE	0x02		/* Guest per enhancement     */
+/*004*/	FWORD prefix;			/* Guest prefix register     */
+/*008*/ FWORD resv008f;
+/*00C*/	FWORD resv00cf;
+/*010*/	DWORD resv010d;
+/*018*/	DWORD resv018d;
+/*020*/	DWORD resv020d;
+/*028*/	DWORD cputimer; 		/* CPU timer		     */
+/*030*/	DWORD clockcomp;		/* Clock comparator	     */
+/*038*/	DWORD epoch;			/* Guest/Host epoch diff.    */
+/*040*/	FWORD svc_ctl;			/* SVC Controls 	     */
+#define SIE_SVC0_ALL	0x80		/* Intercept all SVCs	     */
+#define SIE_SVC0_1N	0x40		/* Intercept SVC 1n	     */
+#define SIE_SVC0_2N	0x20		/* Intercept SVC 2n	     */
+#define SIE_SVC0_3N	0x10		/* Intercept SVC 3n	     */
+/*044*/	HWORD lctl_ctl; 		/* LCTL Control 	     */
+#define SIE_LCTL0_CR0	0x80		/* Intercept LCTL 0	     */
+#define SIE_LCTL0_CR1	0x40		/* Intercept LCTL 1	     */
+#define SIE_LCTL0_CR2	0x20		/* Intercept LCTL 2	     */
+#define SIE_LCTL0_CR3	0x10		/* Intercept LCTL 3	     */
+#define SIE_LCTL0_CR4	0x08		/* Intercept LCTL 4	     */
+#define SIE_LCTL0_CR5	0x04		/* Intercept LCTL 5	     */
+#define SIE_LCTL0_CR6	0x02		/* Intercept LCTL 6	     */
+#define SIE_LCTL0_CR7	0x01		/* Intercept LCTL 7	     */
+#define SIE_LCTL1_CR8	0x80		/* Intercept LCTL 8	     */
+#define SIE_LCTL1_CR9	0x40		/* Intercept LCTL 9	     */
+#define SIE_LCTL1_CR10	0x20		/* Intercept LCTL 10	     */
+#define SIE_LCTL1_CR11	0x10		/* Intercept LCTL 11	     */
+#define SIE_LCTL1_CR12	0x08		/* Intercept LCTL 12	     */
+#define SIE_LCTL1_CR13	0x04		/* Intercept LCTL 13	     */
+#define SIE_LCTL1_CR14	0x02		/* Intercept LCTL 14	     */
+#define SIE_LCTL1_CR15	0x01		/* Intercept LCTL 15	     */
+/*046*/	HWORD cpuad;			/* Virtual CPU address	     */
+/*048*/	DWORD ic;			/* Interception Controls     */
+#define SIE_IC0_OPEREX	0x80		/* Intercept operation exc.  */
+#define SIE_IC0_PRIVOP	0x40		/* Intercept priv. op. exc.  */
+#define SIE_IC0_PGMALL	0x20		/* Intercept program ints    */
+#define SIE_IC0_TS1	0x08		/* Intercept TS cc1	     */
+#define SIE_IC0_CS1	0x04		/* Intercept CS cc1	     */
+#define SIE_IC0_CDS1	0x02		/* Intercept CDS cc1	     */
+#define SIE_IC0_IPTECSP 0x01		/* Intercept IPTE or CSP     */
+#define SIE_IC1_LPSW	0x40		/* Intercept LPSW/LPSWE	     */
+#define SIE_IC1_PXLB	0x20		/* Intercept PTLB or PALB    */
+#define SIE_IC1_SSM	0x10		/* Intercept SSM	     */
+#define SIE_IC1_BSA	0x08		/* Intercept BSA	     */
+#define SIE_IC1_STCTL	0x04		/* Intercept STCTL	     */
+#define SIE_IC1_STOSM	0x02		/* Intercept STOSM	     */
+#define SIE_IC1_STNSM	0x01		/* Intercept STNSM	     */
+#define SIE_IC2_STCK	0x80		/* Intercept STCK	     */
+#define SIE_IC2_ISKE	0x40		/* Intercept ISK/ISKE	     */
+#define SIE_IC2_SSKE	0x20		/* Intercept SSK/SSKE	     */
+#define SIE_IC2_RRBE	0x10		/* Intercept RRB/RRBE	     */
+#define SIE_IC2_PC	0x08		/* Intercept PC 	     */
+#define SIE_IC2_PT	0x04		/* Intercept PT 	     */
+#define SIE_IC2_TPROT	0x02		/* Intercept TPROT	     */
+#define SIE_IC2_LASP	0x01		/* Intercept LASP	     */
+#define SIE_IC3_VACSV	0x80		/* Intercept VACSV	     */
+#define SIE_IC3_SPT	0x40		/* Intercept SPT and STPT    */
+#define SIE_IC3_SCKC	0x20		/* Intercept SCKC and STCKC  */
+#define SIE_IC3_VACRS	0x10		/* Intercept VACRS	     */
+#define SIE_IC3_PR	0x08		/* Intercept PR 	     */
+#define SIE_IC3_BAKR	0x04		/* Intercept BAKR	     */
+#define SIE_IC3_PGX	0x02		/* Intercept PGIN/PGOUT      */
+/*050*/	BYTE  c;			/* Interception Code	     */
+#define SIE_C_INST	   4		/* Instruction interception  */
+#define SIE_C_PGMINT	   8		/* Program interruption      */
+#define SIE_C_PGMINST	  12		/* Program/instruction int   */
+#define SIE_C_EXTREQ	  16		/* External request	     */
+#define SIE_C_EXTINT	  20		/* External interruption     */
+#define SIE_C_IOREQ	  24		/* I/O request		     */
+#define SIE_C_WAIT	  28		/* Wait state		     */
+#define SIE_C_VALIDITY	  32		/* Validity		     */
+#define SIE_C_STOPREQ	  40		/* Stop request 	     */
+#define SIE_C_OPEREXC	  44		/* Operation Exception	     */
+/*051*/	BYTE  f;			/* Interception Status	     */
+#define SIE_F_IN	0x80		/* Intercept format 2	     */
+#define SIE_F_IF	0x02		/* Instruction fetch PER     */
+#define SIE_F_EX	0x01		/* Icept for target of EX    */
+/*052*/	HWORD lhcpu;			/* Last Host CPU addr	     */
+/*054*/	HWORD resv054h;
+/*056*/	HWORD ipa;			/* Instruction parameter A   */
+/*058*/	FWORD ipb;			/* Instruction parameter B   */
+/*05C*/	FWORD ipc;			/* Instruction parameter C   */
+/*060*/	FWORD rcpo;			/* RCP area origin	     */
+#define SIE_RCPO0_SKA	0x80		/* Storage Key Assist	     */
+#define SIE_RCPO0_SKAIP 0x40		/* SKA in progress           */
+#define SIE_RCPO2_RCPBY 0x10		/* RCP Bypass                */
+/*064*/	FWORD scao;			/* SCA area origin	     */
+/*068*/	FWORD resv068f;
+/*06C*/	HWORD todpfh;                   /* TOD pf high half          */
+/*06E*/	HWORD todpf;			/* TOD programmable field    */
+/*070*/	FWORD resv070f;
+/*074*/	FWORD iopct;       		/* I/O interpretation cntl 2 */
+/*078*/	FWORD resv078f;
+/*07C*/	FWORD resv07cf;
+/*080*/ DWORD mso;                      /* Main Storage Origin       */
+/*088*/ DWORD mse;                      /* Main Storage Extend
+                                           The actual guest machine
+                                           size is (mse+1)-mso       */
+#define SIE2_MS_MASK    0xFFFFFFFFFFF00000ULL
+/*090*/ QWORD psw;                      /* Guest PSW		     */
+/*0A0*/	DWORD gr14;			/* Guest gr 14		     */
+/*0A8*/	DWORD gr15;			/* Guest gr 15		     */
+/*0B0*/ DWORD recv0b0d;
+/*0B8*/ HWORD recv0b8d;
+/*0BA*/	BYTE  xso[3];			/* Expanded storage origin   */
+/*0BD*/	BYTE  xsl[3];			/* Expanded storage limit    */
+/*0C0*/	BYTE  ip[52];			/* Interruption parameters   */
+#define SIE_IP_PSA_OFFSET       0x40    /* Offset of the IP field 
+                                           relative to the ipfields
+                                           in the PSA for ESAME guest*/
+/*0F4*/ BYTE  resv0f4b[6];
+/*0FA*/ HWORD ief;                      /* Migration Emulation cnlt  */
+/*0FC*/ FWORD resv0fcf;
+/*100*/ DWORD cr[16];                   /* Control registers         */
+/*180*/ BYTE  resv180b[128];
+} SIE2BK;
+
 
 #define LKPG_GPR0_LOCKBIT	0x00000200
 #define LKPG_GPR0_RESV		0x0000FD00
@@ -1292,16 +1485,20 @@ typedef struct _SYSIBVMDB {	/* Virtual Machine Desc Block	*/
 	BYTE	cpid[4*4];	/* Control Program ID		*/
 	}	SYSIBVMDB;
 
+/* Bit definitions for floating-point-control register */
+#define FPC_MASK        0xF8000000
 #define FPC_MASK_IMI    0x80000000
 #define FPC_MASK_IMZ    0x40000000
 #define FPC_MASK_IMO    0x20000000
 #define FPC_MASK_IMU    0x10000000
 #define FPC_MASK_IMX    0x08000000
+#define FPC_FLAG        0x00F80000
 #define FPC_FLAG_SFI    0x00800000
 #define FPC_FLAG_SFZ    0x00400000
 #define FPC_FLAG_SFO    0x00200000
 #define FPC_FLAG_SFU    0x00100000
 #define FPC_FLAG_SFX    0x00080000
+#define FPC_DXC         0x0000FF00
 #define FPC_DXC_I       0x00008000
 #define FPC_DXC_Z       0x00004000
 #define FPC_DXC_O       0x00002000
@@ -1310,5 +1507,20 @@ typedef struct _SYSIBVMDB {	/* Virtual Machine Desc Block	*/
 #define FPC_DXC_Y       0x00000400
 #define FPC_RM          0x00000003
 #define FPC_RESERVED    0x070700FC
+
+/* Data exception codes */
+#define DXC_DECIMAL             0x00    /* Decimal operand exception */
+#define DXC_AFP_REGISTER        0x01    /* AFP register exception    */
+#define DXC_BFP_INSTRUCTION     0x02    /* BFP instruction exception */
+#define DXC_IEEE_INEXACT_TRUNC  0x08    /* IEEE inexact, truncated   */
+#define DXC_IEEE_INEXACT_INCR   0x0C    /* IEEE inexact, incremented */
+#define DXC_IEEE_UF_EXACT       0x10    /* IEEE underflow. exact     */
+#define DXC_IEEE_UF_INEX_TRUNC  0x18    /* IEEE u/flow,inexact,trunc */
+#define DXC_IEEE_UF_INEX_INCR   0x1C    /* IEEE u/flow,inexact,incr  */
+#define DXC_IEEE_OF_EXACT       0x20    /* IEEE overflow. exact      */
+#define DXC_IEEE_OF_INEX_TRUNC  0x28    /* IEEE o/flow,inexact,trunc */
+#define DXC_IEEE_OF_INEX_INCR   0x2C    /* IEEE o/flow,inexact,incr  */
+#define DXC_IEEE_DIV_ZERO       0x40    /* IEEE division by zero     */
+#define DXC_IEEE_INVALID_OP     0x80    /* IEEE invalid operation    */
 
 #endif /*!defined(_ESA390_H)*/

@@ -29,11 +29,11 @@
 
 #if !defined(_GEN_ARCH)
 
-#define  _GEN_ARCH 370
+#define  _GEN_ARCH 390
 #include "config.c"
 #undef   _GEN_ARCH
 
-#define  _GEN_ARCH 390
+#define  _GEN_ARCH 370
 #include "config.c"
 #undef   _GEN_ARCH
 
@@ -48,58 +48,86 @@
 SYSBLK  sysblk;
 
 /*-------------------------------------------------------------------*/
+/* External GUI control                                              */
+/*-------------------------------------------------------------------*/
+#ifdef EXTERNALGUI
+int extgui = 0;             /* 1=external gui active                */
+#endif /*EXTERNALGUI*/
+
+/*-------------------------------------------------------------------*/
 /* Static data areas                                                 */
 /*-------------------------------------------------------------------*/
 static int  stmt = 0;                   /* Config statement number   */
+#ifdef EXTERNALGUI
+static BYTE buf[1024];                  /* Config statement buffer   */
+#else /*!EXTERNALGUI*/
 static BYTE buf[256];                   /* Config statement buffer   */
+#endif /*EXTERNALGUI*/
 static BYTE *keyword;                   /* -> Statement keyword      */
 static BYTE *operand;                   /* -> First argument         */
-#define MAX_ARGS 10                     /* Max #of additional args   */
+#define MAX_ARGS 12                     /* Max #of additional args   */
 static int  addargc;                    /* Number of additional args */
 static BYTE *addargv[MAX_ARGS];         /* Additional argument array */
 
 /*-------------------------------------------------------------------*/
 /* ASCII/EBCDIC TRANSLATE TABLES                                     */
 /*-------------------------------------------------------------------*/
-unsigned char
-ebcdic_to_ascii[] = {
-"\x00\x01\x02\x03\xA6\x09\xA7\x7F\xA9\xB0\xB1\x0B\x0C\x0D\x0E\x0F"
-"\x10\x11\x12\x13\xB2\xB4\x08\xB7\x18\x19\x1A\xB8\xBA\x1D\xBB\x1F"
-"\xBD\xC0\x1C\xC1\xC2\x0A\x17\x1B\xC3\xC4\xC5\xC6\xC7\x05\x06\x07"
-"\xC8\xC9\x16\xCB\xCC\x1E\xCD\x04\xCE\xD0\xD1\xD2\x14\x15\xD3\xFC"
-"\x20\xD4\x83\x84\x85\xA0\xD5\x86\x87\xA4\xD6\x2E\x3C\x28\x2B\xD7"
-"\x26\x82\x88\x89\x8A\xA1\x8C\x8B\x8D\xD8\x21\x24\x2A\x29\x3B\x5E"
-"\x2D\x2F\xD9\x8E\xDB\xDC\xDD\x8F\x80\xA5\x7C\x2C\x25\x5F\x3E\x3F"
-"\xDE\x90\xDF\xE0\xE2\xE3\xE4\xE5\xE6\x60\x3A\x23\x40\x27\x3D\x22"
-"\xE7\x61\x62\x63\x64\x65\x66\x67\x68\x69\xAE\xAF\xE8\xE9\xEA\xEC"
-"\xF0\x6A\x6B\x6C\x6D\x6E\x6F\x70\x71\x72\xF1\xF2\x91\xF3\x92\xF4"
-"\xF5\x7E\x73\x74\x75\x76\x77\x78\x79\x7A\xAD\xA8\xF6\x5B\xF7\xF8"
-"\x9B\x9C\x9D\x9E\x9F\xB5\xB6\xAC\xAB\xB9\xAA\xB3\xBC\x5D\xBE\xBF"
-"\x7B\x41\x42\x43\x44\x45\x46\x47\x48\x49\xCA\x93\x94\x95\xA2\xCF"
-"\x7D\x4A\x4B\x4C\x4D\x4E\x4F\x50\x51\x52\xDA\x96\x81\x97\xA3\x98"
-"\x5C\xE1\x53\x54\x55\x56\x57\x58\x59\x5A\xFD\xEB\x99\xED\xEE\xEF"
-"\x30\x31\x32\x33\x34\x35\x36\x37\x38\x39\xFE\xFB\x9A\xF9\xFA\xFF"
-        };
+#include "codeconv.h"
 
-unsigned char
-ascii_to_ebcdic[] = {
-"\x00\x01\x02\x03\x37\x2D\x2E\x2F\x16\x05\x25\x0B\x0C\x0D\x0E\x0F"
-"\x10\x11\x12\x13\x3C\x3D\x32\x26\x18\x19\x1A\x27\x22\x1D\x35\x1F"
-"\x40\x5A\x7F\x7B\x5B\x6C\x50\x7D\x4D\x5D\x5C\x4E\x6B\x60\x4B\x61"
-"\xF0\xF1\xF2\xF3\xF4\xF5\xF6\xF7\xF8\xF9\x7A\x5E\x4C\x7E\x6E\x6F"
-"\x7C\xC1\xC2\xC3\xC4\xC5\xC6\xC7\xC8\xC9\xD1\xD2\xD3\xD4\xD5\xD6"
-"\xD7\xD8\xD9\xE2\xE3\xE4\xE5\xE6\xE7\xE8\xE9\xAD\xE0\xBD\x5F\x6D"
-"\x79\x81\x82\x83\x84\x85\x86\x87\x88\x89\x91\x92\x93\x94\x95\x96"
-"\x97\x98\x99\xA2\xA3\xA4\xA5\xA6\xA7\xA8\xA9\xC0\x6A\xD0\xA1\x07"
-"\x68\xDC\x51\x42\x43\x44\x47\x48\x52\x53\x54\x57\x56\x58\x63\x67"
-"\x71\x9C\x9E\xCB\xCC\xCD\xDB\xDD\xDF\xEC\xFC\xB0\xB1\xB2\xB3\xB4"
-"\x45\x55\xCE\xDE\x49\x69\x04\x06\xAB\x08\xBA\xB8\xB7\xAA\x8A\x8B"
-"\x09\x0A\x14\xBB\x15\xB5\xB6\x17\x1B\xB9\x1C\x1E\xBC\x20\xBE\xBF"
-"\x21\x23\x24\x28\x29\x2A\x2B\x2C\x30\x31\xCA\x33\x34\x36\x38\xCF"
-"\x39\x3A\x3B\x3E\x41\x46\x4A\x4F\x59\x62\xDA\x64\x65\x66\x70\x72"
-"\x73\xE1\x74\x75\x76\x77\x78\x80\x8C\x8D\x8E\xEB\x8F\xED\xEE\xEF"
-"\x90\x9A\x9B\x9D\x9F\xA0\xAC\xAE\xAF\xFD\xFE\xFB\x3F\xEA\xFA\xFF"
-        };
+#ifdef EXTERNALGUI
+/*-------------------------------------------------------------------*/
+/* Subroutine to parse an argument string. The string that is passed */
+/* is modified in-place by inserting null characters at the end of   */
+/* each argument found. The returned array of argument pointers      */
+/* then points to each argument found in the original string. Any    */
+/* argument that begins with '#' comment indicator causes early      */
+/* termination of the parsing and is not included in the count. Any  */
+/* argument found that starts with a double-quote character causes   */
+/* all characters following the double-quote up to the next double-  */
+/* quote to be included as part of that argument. The quotes them-   */
+/* selves are not considered part of any argument and are ignored.   */
+/* p            Points to string to be parsed.                       */
+/* maxargc      Maximum allowable number of arguments. (Prevents     */
+/*              overflowing the pargv array)                         */
+/* pargv        Pointer to buffer for argument pointer array.        */
+/* pargc        Pointer to number of arguments integer result.       */
+/* Returns number of arguments found. (same value as at *pargc)      */
+/*-------------------------------------------------------------------*/
+int parse_args (BYTE* p, int maxargc, BYTE** pargv, int* pargc)
+{
+    for (*pargc = 0; *pargc < MAX_ARGS; ++*pargc) addargv[*pargc] = NULL;
+
+    *pargc = 0; p--;
+
+    while (*pargc < maxargc)
+    {
+        if (!*(p+1)) break;             // exit at end-of-string
+        while (isspace(*++p));          // advance to next arg
+        if (!*p) break;                 // exit at end-of-string
+        if (*p == '\"')                 // begin of quoted string?
+        {
+            *pargv++ = ++p;             // save ptr to next arg
+            while (*p && *++p != '\"'); // advance to ending quote
+            if (!*p)                    // end quote not found?
+            {
+                --pargv;                // backup to quote arg
+                while (*--(*pargv) != '\"'); // backup to quote
+                ++*pargc;               // count last arg
+                break;                  // end quote not found
+            }
+            *p = 0;                     // mark end of arg
+        }
+        else *pargv++ = p;              // save ptr to next arg
+        if ('#' == *p) break;           // exit at beg-of-comments
+        ++*pargc;                       // count args
+        while (!isspace(*++p) && *p);   // skip to end of arg
+        if (!*p) break;                 // exit at end-of-string
+        *p = 0;                         // mark end of arg
+    }
+
+    return *pargc;                      // return #of arguments
+}
+#endif /*EXTERNALGUI*/
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to read a statement from the configuration file        */
@@ -131,10 +159,10 @@ int     stmtlen;                        /* Statement length          */
             /* Check for I/O error */
             if (ferror(fp))
             {
-            logmsg( "HHC001I Error reading file %s line %d: %s\n",
+                logmsg( "HHC001I Error reading file %s line %d: %s\n",
                     fname, stmt, strerror(errno));
-            exit(1);
-        }
+                exit(1);
+            }
 
             /* Check for end of file */
             if (stmtlen == 0 && (c == EOF || c == '\x1A'))
@@ -149,11 +177,11 @@ int     stmtlen;                        /* Statement length          */
 
             /* Check that statement does not overflow buffer */
             if (stmtlen >= sizeof(buf) - 1)
-        {
-            logmsg( "HHC002I File %s line %d is too long\n",
+            {
+                logmsg( "HHC002I File %s line %d is too long\n",
                     fname, stmt);
-            exit(1);
-        }
+                exit(1);
+            }
 
             /* Append character to buffer */
             buf[stmtlen++] = c;
@@ -169,6 +197,27 @@ int     stmtlen;                        /* Statement length          */
         if (stmtlen == 0 || buf[0] == '*' || buf[0] == '#')
            continue;
 
+#ifdef EXTERNALGUI
+
+        /* Parse the statement just read */
+
+        parse_args (buf, MAX_ARGS, addargv, &addargc);
+
+        /* Move the first two arguments to separate variables */
+
+        keyword = addargv[0];
+        operand = addargv[1];
+
+        addargc = (addargc > 2) ? (addargc-2) : (0);
+
+        for (i = 0; i < MAX_ARGS; i++)
+        {
+            if (i < (MAX_ARGS-2)) addargv[i] = addargv[i+2];
+            else addargv[i] = NULL;
+        }
+
+#else /*EXTERNALGUI*/
+
         /* Split the statement into keyword and first operand */
         keyword = strtok (buf, " \t");
         operand = strtok (NULL, " \t");
@@ -181,6 +230,8 @@ int     stmtlen;                        /* Statement length          */
 
         /* Clear any unused additional operand pointers */
         for (i = addargc; i < MAX_ARGS; i++) addargv[i] = NULL;
+
+#endif /*!EXTERNALGUI*/
 
         break;
     } /* end while */
@@ -213,6 +264,7 @@ BYTE   *stzoffset;                      /* -> System timezone offset */
 BYTE   *stoddrag;                       /* -> TOD clock drag factor  */
 BYTE   *sostailor;                      /* -> OS to tailor system to */
 BYTE   *spanrate;                       /* -> Panel refresh rate     */
+BYTE   *sdevtmax;                       /* -> Max device threads     */
 BYTE    loadparm[8];                    /* Load parameter (EBCDIC)   */
 BYTE    version = 0x00;                 /* CPU version code          */
 U32     serial;                         /* CPU serial number         */
@@ -232,6 +284,7 @@ BYTE   *sdevnum;                        /* -> Device number string   */
 BYTE   *sdevtype;                       /* -> Device type string     */
 U16     devnum;                         /* Device number             */
 U16     devtype;                        /* Device type               */
+int     devtmax;                        /* Max number device threads */
 BYTE    c;                              /* Work area for sscanf      */
 
     /* Clear the system configuration block */
@@ -264,6 +317,7 @@ BYTE    c;                              /* Work area for sscanf      */
     archmode = ARCH_390;
     ostailor = OS_NONE;
     panrate = PANEL_REFRESH_RATE_SLOW;
+    devtmax = MAX_DEVICE_THREADS;
 
     /* Read records from the configuration file */
     for (scount = 0; ; scount++)
@@ -296,6 +350,7 @@ BYTE    c;                              /* Work area for sscanf      */
         stoddrag = NULL;
         sostailor = NULL;
         spanrate = NULL;
+        sdevtmax = NULL;
 
         /* Check for old-style CPU statement */
         if (scount == 0 && addargc == 5 && strlen(keyword) == 6
@@ -367,16 +422,22 @@ BYTE    c;                              /* Work area for sscanf      */
             {
                 sostailor = operand;
             }
-// #if defined(FEATURE_HARDWARE_LOADER)
             else if (strcasecmp (keyword, "cfccimage") == 0)
             {
+#if defined(_FEATURE_HARDWARE_LOADER)
                 /* Set the CFCC image file name in the system block */
                 strncpy(sysblk.hwl_fname,operand,sizeof(sysblk.hwl_fname));
+#else /*!defined(_FEATURE_HARDWARE_LOADER)*/
+                logmsg( "HHC019I Hardware Loader Support not configured\n");
+#endif /*!defined(_FEATURE_HARDWARE_LOADER)*/
             }
-// #endif /*defined(FEATURE_HARDWARE_LOADER)*/
             else if (strcasecmp (keyword, "archmode") == 0)
             {
                 sarchmode = operand;
+            }
+            else if (strcasecmp (keyword, "devtmax") == 0)
+            {
+                sdevtmax = operand;
             }
             else
             {
@@ -452,7 +513,7 @@ BYTE    c;                              /* Work area for sscanf      */
         if (smainsize != NULL)
         {
             if (sscanf(smainsize, "%hu%c", &mainsize, &c) != 1
-                || mainsize < 2 || mainsize > 256)
+                || mainsize < 2 || mainsize > 1024)
             {
                 logmsg( "HHC009I Error in %s line %d: "
                         "Invalid main storage size %s\n",
@@ -512,10 +573,9 @@ BYTE    c;                              /* Work area for sscanf      */
                         fname, stmt, snumvec);
                 exit(1);
             }
-#else /*!FEATURE_VECTOR_FACILITY*/
+#else /*!_FEATURE_VECTOR_FACILITY*/
             logmsg( "HHC019I Vector Facility Support not configured\n");
-            exit(1);
-#endif /*!FEATURE_VECTOR_FACILITY*/
+#endif /*!_FEATURE_VECTOR_FACILITY*/
         }
 
         /* Parse load parameter operand */
@@ -582,7 +642,7 @@ BYTE    c;                              /* Work area for sscanf      */
         /* Parse panel refresh rate operand */
         if (spanrate != NULL)
         {
-            switch (toupper((char)spanrate[0])) 
+            switch (toupper((char)spanrate[0]))
             {
                 case 'F': /* fast */
                     panrate = PANEL_REFRESH_RATE_FAST;
@@ -636,6 +696,19 @@ BYTE    c;                              /* Work area for sscanf      */
             }
         }
 
+        /* Parse Maximum number of device threads */
+        if (sdevtmax != NULL)
+        {
+            if (sscanf(sdevtmax, "%d%c", &devtmax, &c) != 1
+                || devtmax < -1)
+            {
+                logmsg( "HHC016I Error in %s line %d: "
+                        "Invalid Max device threads %s\n",
+                        fname, stmt, sdevtmax);
+                exit(1);
+            }
+        }
+
     } /* end for(scount) */
 
     /* Obtain main storage */
@@ -668,7 +741,7 @@ BYTE    c;                              /* Work area for sscanf      */
 
     if (xpndsize != 0)
     {
-#ifdef FEATURE_EXPANDED_STORAGE
+#ifdef _FEATURE_EXPANDED_STORAGE
         /* Obtain expanded storage */
         sysblk.xpndsize = xpndsize * (1024*1024 / XSTORE_PAGESIZE);
         sysblk.xpndstor = malloc(sysblk.xpndsize * XSTORE_PAGESIZE);
@@ -679,10 +752,9 @@ BYTE    c;                              /* Work area for sscanf      */
                     xpndsize, strerror(errno));
             exit(1);
         }
-#else /*!FEATURE_EXPANDED_STORAGE*/
+#else /*!_FEATURE_EXPANDED_STORAGE*/
         logmsg( "HHC024I Expanded storage support not installed\n");
-        exit(1);
-#endif /*!FEATURE_EXPANDED_STORAGE*/
+#endif /*!_FEATURE_EXPANDED_STORAGE*/
     } /* end if(sysblk.xpndsize) */
 
     /* Save the console port number */
@@ -710,6 +782,8 @@ BYTE    c;                              /* Work area for sscanf      */
 #endif /*SMP_SERIALIZATION*/
 #endif /*MAX_CPU_ENGINES > 1*/
     initialize_detach_attr (&sysblk.detattr);
+    initialize_lock (&sysblk.ioqlock);
+    initialize_condition (&sysblk.ioqcond);
 
     /* Set up the system TOD clock offset: compute the number of
        seconds from the designated year to 1970 for TOD clock
@@ -735,6 +809,11 @@ BYTE    c;                              /* Work area for sscanf      */
 
     /* Set the panel refresh rate */
     sysblk.panrate = panrate;
+
+    /* Set max number device threads */
+    sysblk.devtmax = devtmax;
+    sysblk.devtwait = sysblk.devtnbr =
+    sysblk.devthwm  = sysblk.devtunavail = 0;
 
     /* Initialize the CPU registers */
     for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
@@ -830,10 +909,8 @@ BYTE    c;                              /* Work area for sscanf      */
     setvbuf (sysblk.msgpipew, NULL, _IOLBF, 0);
 
     /* Display the version identifier on the control panel */
-    logmsg ("Hercules version %s built at %s %s\n"
-            "(c)Copyright 1999-2001 by "
-            "Roger Bowler, Jan Jaeger, and others\n",
-            MSTRING(VERSION), __DATE__, __TIME__);
+    display_version (sysblk.msgpipew, "Hercules ",
+                     MSTRING(VERSION), __DATE__, __TIME__);
 
 #ifdef _FEATURE_VECTOR_FACILITY
     for(i = 0; i < numvec && i < numcpu; i++)
@@ -853,6 +930,16 @@ void release_config()
 {
 DEVBLK *dev;
 int     cpu;
+
+    /* Stop all CPU's */
+    obtain_lock (&sysblk.intlock);
+    for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
+        if(sysblk.regs[cpu].cpuonline)
+        {
+            sysblk.regs[cpu].cpustate = CPUSTATE_STOPPING;
+            ON_IC_CPU_NOT_STARTED(sysblk.regs + cpu);
+        }
+    release_lock (&sysblk.intlock);
 
     /* Detach all devices */
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
@@ -876,6 +963,7 @@ int configure_cpu(REGS *regs)
         return -1;
     regs->cpuonline = 1;
     regs->cpustate = CPUSTATE_STARTING;
+    ON_IC_CPU_NOT_STARTED(regs);
     regs->arch_mode = sysblk.arch_mode;
     if ( create_thread (&(regs->cputid), &sysblk.detattr, cpu_thread, regs) )
     {
@@ -890,6 +978,7 @@ int configure_cpu(REGS *regs)
     return 0;
 } /* end function configure_cpu */
 
+
 /*-------------------------------------------------------------------*/
 /* Function to remove a CPU from the configuration                   */
 /* This routine MUST be called with the intlock held                 */
@@ -900,6 +989,7 @@ int deconfigure_cpu(REGS *regs)
     {
         regs->cpuonline = 0;
         regs->cpustate = CPUSTATE_STOPPING;
+        ON_IC_CPU_NOT_STARTED(regs);
 
         /* Wake up CPU as it may be waiting */
         signal_condition (&sysblk.intcond);
@@ -908,36 +998,9 @@ int deconfigure_cpu(REGS *regs)
     }
     else
         return -1;
-    
+
 } /* end function deconfigure_cpu */
 
-#if !defined(OPTION_NO_DEVICE_THREAD)
-/*-------------------------------------------------------------------*/
-/* Run as a separate thread for each device to run execute_ccw_chain */
-/* LOOPER_DIE isn't actually used yet but is there if anyone wants it*/
-/*                                                                   */
-/* code courtesy of Malcome Beattie                                  */
-/*-------------------------------------------------------------------*/
-void device_loop (DEVBLK *dev)
-{
-    while (1) {
-	obtain_lock(&dev->lock);
-	while (dev->loopercmd == LOOPER_WAIT)
-	    wait_condition(&dev->loopercond, &dev->lock);
-	if (dev->loopercmd == LOOPER_DIE)
-	    break;
-	/* It's LOOPER_EXEC */
-	dev->loopercmd = LOOPER_WAIT;
-	release_lock(&dev->lock);
-	ARCH_DEP(execute_ccw_chain)(dev);
-    }
-    release_lock(&dev->lock);
-
-    /* It's our responsibility to free the device structure */
-    /* otherwise it's a headache to synchronise with the config thread */
-    free(dev);
-} /* end function device_loop */
-#endif /*!defined(OPTION_NO_DEVICE_THREAD)*/
 
 /*-------------------------------------------------------------------*/
 /* Function to build a device configuration block                    */
@@ -1071,26 +1134,10 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
         /* Initialize the device lock and conditions */
         initialize_lock (&dev->lock);
         initialize_condition (&dev->resumecond);
-#if !defined(OPTION_NO_DEVICE_THREAD)
-        initialize_condition (&dev->loopercond);
-#endif /*!defined(OPTION_NO_DEVICE_THREAD)*/
 
         /* Assign new subchannel number */
         dev->subchan = sysblk.highsubchan++;
 
-#if !defined(OPTION_NO_DEVICE_THREAD)
-	/* Ensure command for new thread is LOOPER_WAIT */
-	/* (Yeah, it's zero anyway but let's be pedantic) */
-	dev->loopercmd = LOOPER_WAIT;
-
-	/* Start a thread for this device */
-	if ( create_thread (&dev->tid, &sysblk.detattr, device_loop, dev) )
-	{
-            logmsg ("HHC045I Cannot create thread for device %4.4X: %s\n",
-                    devnum, strerror(errno));
-            return 1;
-	}
-#endif /*!defined(OPTION_NO_DEVICE_THREAD)*/
     }
 
     /* Obtain the device lock */
@@ -1163,21 +1210,22 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
     /* Mark device valid */
     dev->pmcw.flag5 |= PMCW5_V;
 
-#ifdef FEATURE_CHANNEL_SUBSYSTEM
+#ifdef _FEATURE_CHANNEL_SUBSYSTEM
     /* Indicate a CRW is pending for this device */
     dev->crwpending = 1;
-#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+#endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
 
     /* Release device lock */
     release_lock(&dev->lock);
 
-#ifdef FEATURE_CHANNEL_SUBSYSTEM
+#ifdef _FEATURE_CHANNEL_SUBSYSTEM
     /* Signal machine check */
     machine_check_crwpend();
-#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+#endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
 
     return 0;
 } /* end function attach_device */
+
 
 /*-------------------------------------------------------------------*/
 /* Function to delete a device configuration block                   */
@@ -1201,10 +1249,10 @@ DEVBLK *dev;                            /* -> Device block           */
     /* Mark device invalid */
     dev->pmcw.flag5 &= ~(PMCW5_E | PMCW5_V);
 
-#ifdef FEATURE_CHANNEL_SUBSYSTEM
+#ifdef _FEATURE_CHANNEL_SUBSYSTEM
     /* Indicate a CRW is pending for this device */
     dev->crwpending = 1;
-#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+#endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
 
     /* Close file or socket */
     if (dev->fd > 2)
@@ -1223,10 +1271,10 @@ DEVBLK *dev;                            /* -> Device block           */
     /* Release device lock */
     release_lock(&dev->lock);
 
-#ifdef FEATURE_CHANNEL_SUBSYSTEM
+#ifdef _FEATURE_CHANNEL_SUBSYSTEM
     /* Signal machine check */
     machine_check_crwpend();
-#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+#endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
 
     logmsg ("HHC041I device %4.4X detached\n", devnum);
 
@@ -1270,24 +1318,25 @@ DEVBLK *dev;                            /* -> Device block           */
     /* Disable the device */
     dev->pmcw.flag5 &= ~PMCW5_E;
 
-#ifdef FEATURE_CHANNEL_SUBSYSTEM
+#ifdef _FEATURE_CHANNEL_SUBSYSTEM
     /* Indicate a CRW is pending for this device */
     dev->crwpending = 1;
-#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+#endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
 
     /* Release device lock */
     release_lock(&dev->lock);
 
-#ifdef FEATURE_CHANNEL_SUBSYSTEM
+#ifdef _FEATURE_CHANNEL_SUBSYSTEM
     /* Signal machine check */
     machine_check_crwpend();
-#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+#endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
 
     logmsg ("HHC044I device %4.4X defined as %4.4X\n",
             olddevn, newdevn);
 
     return 0;
 } /* end function define_device */
+
 
 /*-------------------------------------------------------------------*/
 /* Function to find an unused device block entry                     */
@@ -1303,6 +1352,7 @@ DEVBLK *dev;
 
 } /* end function find_unused_device */
 
+
 /*-------------------------------------------------------------------*/
 /* Function to find a device block given the device number           */
 /*-------------------------------------------------------------------*/
@@ -1316,6 +1366,7 @@ DEVBLK *dev;
     return dev;
 
 } /* end function find_device_by_devnum */
+
 
 /*-------------------------------------------------------------------*/
 /* Function to find a device block given the subchannel number       */

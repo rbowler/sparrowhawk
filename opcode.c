@@ -15,1496 +15,516 @@
 #include "opcode.c"
 #undef   _GEN_ARCH
 
-// #define  _GEN_ARCH 964
-// #include "opcode.c"
-// #undef   _GEN_ARCH
-
 #endif /*!defined(_GEN_ARCH)*/
 
 #include "hercules.h"
 
 #include "opcode.h"
 
+#define UNDEF_INST(_x) \
+        DEF_INST(_x) { ARCH_DEP(operation_exception) \
+        (inst,execflag,regs); }
 
-#if _GEN_ARCH == 370
 
 #if !defined(FEATURE_CHANNEL_SUBSYSTEM)
- #define s370_clear_subchannel                    s370_operation_exception
- #define s370_halt_subchannel                     s370_operation_exception
- #define s370_modify_subchannel                   s370_operation_exception
- #define s370_resume_subchannel                   s370_operation_exception
- #define s370_set_address_limit                   s370_operation_exception
- #define s370_set_channel_monitor                 s370_operation_exception
- #define s370_start_subchannel                    s370_operation_exception
- #define s370_store_channel_path_status           s370_operation_exception
- #define s370_store_channel_report_word           s370_operation_exception
- #define s370_store_subchannel                    s370_operation_exception
- #define s370_test_pending_interruption           s370_operation_exception
- #define s370_test_subchannel                     s370_operation_exception
+ UNDEF_INST(clear_subchannel)
+ UNDEF_INST(halt_subchannel)
+ UNDEF_INST(modify_subchannel)
+ UNDEF_INST(resume_subchannel)
+ UNDEF_INST(set_address_limit)
+ UNDEF_INST(set_channel_monitor)
+ UNDEF_INST(start_subchannel)
+ UNDEF_INST(store_channel_path_status)
+ UNDEF_INST(store_channel_report_word)
+ UNDEF_INST(store_subchannel)
+ UNDEF_INST(test_pending_interruption)
+ UNDEF_INST(test_subchannel)
 #endif /*!defined(FEATURE_CHANNEL_SUBSYSTEM)*/
 
 
 #if !defined(FEATURE_S370_CHANNEL)
- #define s370_start_io                            s370_operation_exception
- #define s370_test_io                             s370_operation_exception
- #define s370_halt_io                             s370_operation_exception
- #define s370_test_channel                        s370_operation_exception
- #define s370_store_channel_id                    s370_operation_exception
+ UNDEF_INST(start_io)
+ UNDEF_INST(test_io)
+ UNDEF_INST(halt_io)
+ UNDEF_INST(test_channel)
+ UNDEF_INST(store_channel_id)
 #endif /*!defined(FEATURE_S370_CHANNEL)*/
 
 
 #if !defined(FEATURE_IMMEDIATE_AND_RELATIVE)
- #define s370_test_under_mask_high                s370_operation_exception
- #define s370_test_under_mask_low                 s370_operation_exception
- #define s370_branch_relative_on_condition        s370_operation_exception
- #define s370_branch_relative_and_save            s370_operation_exception
- #define s370_branch_relative_on_count            s370_operation_exception
- #define s370_load_halfword_immediate             s370_operation_exception
- #define s370_add_halfword_immediate              s370_operation_exception
- #define s370_multiply_halfword_immediate         s370_operation_exception
- #define s370_compare_halfword_immediate          s370_operation_exception
- #define s370_multiply_single_register            s370_operation_exception
- #define s370_multiply_single                     s370_operation_exception
- #define s370_branch_relative_on_index_high       s370_operation_exception
- #define s370_branch_relative_on_index_low_or_equal s370_operation_exception
+ UNDEF_INST(test_under_mask_high)
+ UNDEF_INST(test_under_mask_low)
+ UNDEF_INST(branch_relative_on_condition)
+ UNDEF_INST(branch_relative_and_save)
+ UNDEF_INST(branch_relative_on_count)
+ UNDEF_INST(load_halfword_immediate)
+ UNDEF_INST(add_halfword_immediate)
+ UNDEF_INST(multiply_halfword_immediate)
+ UNDEF_INST(compare_halfword_immediate)
+ UNDEF_INST(multiply_single_register)
+ UNDEF_INST(multiply_single)
+ UNDEF_INST(branch_relative_on_index_high)
+ UNDEF_INST(branch_relative_on_index_low_or_equal)
 #endif /*!defined(FEATURE_IMMEDIATE_AND_RELATIVE)*/
 
 
 #if !defined(FEATURE_COMPARE_AND_MOVE_EXTENDED)
- #define s370_compare_logical_long_extended       s370_operation_exception
- #define s370_move_long_extended                  s370_operation_exception
+ UNDEF_INST(compare_logical_long_extended)
+ UNDEF_INST(move_long_extended)
 #endif /*!defined(FEATURE_COMPARE_AND_MOVE_EXTENDED)*/
 
 
 #if !defined(FEATURE_CHECKSUM_INSTRUCTION)
- #define s370_checksum                            s370_operation_exception
+ UNDEF_INST(checksum)
 #endif /*!defined(FEATURE_CHECKSUM_INSTRUCTION)*/
 
 
 #if !defined(FEATURE_PERFORM_LOCKED_OPERATION)
- #define s370_perform_locked_operation            s370_operation_exception
+ UNDEF_INST(perform_locked_operation)
 #endif /*!defined(FEATURE_PERFORM_LOCKED_OPERATION)*/
 
 
 #if !defined(FEATURE_SUBSPACE_GROUP)
- #define s370_branch_in_subspace_group            s370_operation_exception
+ UNDEF_INST(branch_in_subspace_group)
 #endif /*!defined(FEATURE_SUBSPACE_GROUP)*/
 
 
 #if !defined(FEATURE_BRANCH_AND_SET_AUTHORITY)
- #define s370_branch_and_set_authority            s370_operation_exception
+ UNDEF_INST(branch_and_set_authority)
 #endif /*!defined(FEATURE_BRANCH_AND_SET_AUTHORITY)*/
 
 
 #if !defined(FEATURE_EXPANDED_STORAGE)
- #define s370_page_in                             s370_operation_exception
- #define s370_page_out                            s370_operation_exception
+ UNDEF_INST(page_in)
+ UNDEF_INST(page_out)
 #endif /*!defined(FEATURE_EXPANDED_STORAGE)*/
 
 
 #if !defined(FEATURE_BROADCASTED_PURGING)
- #define s370_compare_and_swap_and_purge          s370_operation_exception
+ UNDEF_INST(compare_and_swap_and_purge)
 #endif /*!defined(FEATURE_BROADCASTED_PURGING)*/
 
 
 #if !defined(FEATURE_BIMODAL_ADDRESSING)
- #define s370_branch_and_set_mode                 s370_operation_exception
- #define s370_branch_and_save_and_set_mode        s370_operation_exception
+ UNDEF_INST(branch_and_set_mode)
+ UNDEF_INST(branch_and_save_and_set_mode)
 #endif /*!defined(FEATURE_BIMODAL_ADDRESSING)*/
 
 
 #if !defined(FEATURE_MOVE_PAGE_FACILITY_2)
- #define s370_move_page                           s370_operation_exception
- #define s370_invalidate_expanded_storage_block_entry s370_operation_exception
+ UNDEF_INST(move_page)
+ UNDEF_INST(invalidate_expanded_storage_block_entry)
  #endif /*!defined(FEATURE_MOVE_PAGE_FACILITY_2)*/
 
 
 #if !defined(FEATURE_BASIC_STORAGE_KEYS)
- #define s370_insert_storage_key                  s370_operation_exception
- #define s370_set_storage_key                     s370_operation_exception
- #define s370_reset_reference_bit                 s370_operation_exception
+ UNDEF_INST(insert_storage_key)
+ UNDEF_INST(set_storage_key)
+ UNDEF_INST(reset_reference_bit)
 #endif /*!defined(FEATURE_BASIC_STORAGE_KEYS)*/
 
 
 #if !defined(FEATURE_LINKAGE_STACK)
- #define s370_branch_and_stack                    s370_operation_exception
- #define s370_modify_stacked_state                s370_operation_exception
- #define s370_extract_stacked_registers           s370_operation_exception
- #define s370_extract_stacked_state               s370_operation_exception
+ UNDEF_INST(branch_and_stack)
+ UNDEF_INST(modify_stacked_state)
+ UNDEF_INST(extract_stacked_registers)
+ UNDEF_INST(extract_stacked_state)
 #endif /*!defined(FEATURE_LINKAGE_STACK)*/
 
 
 #if !defined(FEATURE_DUAL_ADDRESS_SPACE)
- #define s370_insert_address_space_control        s370_operation_exception
- #define s370_set_secondary_asn                   s370_operation_exception
- #define s370_extract_primary_asn                 s370_operation_exception
- #define s370_extract_secondary_asn               s370_operation_exception
- #define s370_program_call                        s370_operation_exception
- #define s370_program_transfer                    s370_operation_exception
- #define s370_set_address_space_control_x         s370_operation_exception
- #define s370_load_address_space_parameters       s370_operation_exception
+ UNDEF_INST(insert_address_space_control)
+ UNDEF_INST(set_secondary_asn)
+ UNDEF_INST(extract_primary_asn)
+ UNDEF_INST(extract_secondary_asn)
+ UNDEF_INST(program_call)
+ UNDEF_INST(program_transfer)
+ UNDEF_INST(set_address_space_control_x)
+ UNDEF_INST(load_address_space_parameters)
 #endif /*!defined(FEATURE_DUAL_ADDRESS_SPACE)*/
 
 
 #if !defined(FEATURE_ACCESS_REGISTERS)
- #define s370_load_access_multiple                s370_operation_exception
- #define s370_store_access_multiple               s370_operation_exception
- #define s370_purge_accesslist_lookaside_buffer   s370_operation_exception
- #define s370_test_access                         s370_operation_exception
- #define s370_copy_access                         s370_operation_exception
- #define s370_set_access_register                 s370_operation_exception
- #define s370_extract_access_register             s370_operation_exception
+ UNDEF_INST(load_access_multiple)
+ UNDEF_INST(store_access_multiple)
+ UNDEF_INST(purge_accesslist_lookaside_buffer)
+ UNDEF_INST(test_access)
+ UNDEF_INST(copy_access)
+ UNDEF_INST(set_access_register)
+ UNDEF_INST(extract_access_register)
 #endif /*!defined(FEATURE_ACCESS_REGISTERS)*/
 
 
 #if !defined(FEATURE_EXTENDED_STORAGE_KEYS)
- #define s370_insert_storage_key_extended         s370_operation_exception
- #define s370_reset_reference_bit_extended        s370_operation_exception
- #define s370_set_storage_key_extended            s370_operation_exception
+ UNDEF_INST(insert_storage_key_extended)
+ UNDEF_INST(reset_reference_bit_extended)
+ UNDEF_INST(set_storage_key_extended)
 #endif /*!defined(FEATURE_EXTENDED_STORAGE_KEYS)*/
 
 
 #if !defined(FEATURE_EXTENDED_TOD_CLOCK)
- #define s370_set_clock_programmable_field        s370_operation_exception
- #define s370_store_clock_extended                s370_operation_exception
+ UNDEF_INST(set_clock_programmable_field)
+ UNDEF_INST(store_clock_extended)
 #endif /*!defined(FEATURE_EXTENDED_TOD_CLOCK)*/
 
 
 #if !defined(FEATURE_VECTOR_FACILITY)
- #define s370_execute_a4xx                       s370_operation_exception
- #if !defined(FEATURE_ESAME)
-  #define s370_execute_a5xx                      s370_operation_exception
+ UNDEF_INST(execute_a4xx)
+ #if !defined(FEATURE_ESAME) && !defined(FEATURE_ESAME_N3_ESA390)
+  UNDEF_INST(execute_a5xx)
  #endif /*!defined(FEATURE_ESAME)*/
 
- #define s370_execute_a6xx                       s370_operation_exception
- #define s370_execute_e4xx                       s370_operation_exception
+ UNDEF_INST(execute_a6xx)
+ UNDEF_INST(execute_e4xx)
+
+ UNDEF_INST(v_test_vmr)
+ UNDEF_INST(v_complement_vmr)
+ UNDEF_INST(v_count_left_zeros_in_vmr)
+ UNDEF_INST(v_count_ones_in_vmr)
+ UNDEF_INST(v_extract_vct)
+ UNDEF_INST(v_extract_vector_modes)
+ UNDEF_INST(v_restore_vr)
+ UNDEF_INST(v_save_changed_vr)
+ UNDEF_INST(v_save_vr)
+ UNDEF_INST(v_load_vmr)
+ UNDEF_INST(v_load_vmr_complement)
+ UNDEF_INST(v_store_vmr)
+ UNDEF_INST(v_and_to_vmr)
+ UNDEF_INST(v_or_to_vmr)
+ UNDEF_INST(v_exclusive_or_to_vmr)
+ UNDEF_INST(v_save_vsr)
+ UNDEF_INST(v_save_vmr)
+ UNDEF_INST(v_restore_vsr)
+ UNDEF_INST(v_restore_vmr)
+ UNDEF_INST(v_load_vct_from_address)
+ UNDEF_INST(v_clear_vr)
+ UNDEF_INST(v_set_vector_mask_mode)
+ UNDEF_INST(v_load_vix_from_address)
+ UNDEF_INST(v_store_vector_parameters)
+ UNDEF_INST(v_save_vac)
+ UNDEF_INST(v_restore_vac)
 #endif /*!defined(FEATURE_VECTOR_FACILITY)*/
 
 
-#if !defined(FEATURE_ESAME)
- #define s370_execute_b9xx                        s370_operation_exception
- #define s370_execute_e3xx                        s370_operation_exception
- #define s370_execute_ebxx                        s370_operation_exception
- #define s370_execute_ecxx                        s370_operation_exception
- #define s370_execute_c0xx                        s370_operation_exception
- #define s370_set_address_mode_24                 s370_operation_exception
- #define s370_set_address_mode_31                 s370_operation_exception
- #define s370_set_address_mode_64                 s370_operation_exception
- #define s370_test_under_mask_highword_high       s370_operation_exception
- #define s370_test_under_mask_highword_low        s370_operation_exception
- #define s370_branch_relative_on_count_long       s370_operation_exception
- #define s370_load_long_halfword_immediate        s370_operation_exception
- #define s370_add_long_halfword_immediate         s370_operation_exception
- #define s370_multiply_long_halfword_immediate    s370_operation_exception
- #define s370_compare_long_halfword_immedate      s370_operation_exception
- #define s370_load_psw_extended                   s370_operation_exception
+#if !defined(FEATURE_ESAME) && !defined(FEATURE_ESAME_N3_ESA390)
+ UNDEF_INST(execute_b9xx)
+ UNDEF_INST(execute_e3xx)
+ UNDEF_INST(execute_ebxx)
+ UNDEF_INST(execute_ecxx)
+ UNDEF_INST(execute_c0xx)
+ UNDEF_INST(set_address_mode_24)
+ UNDEF_INST(set_address_mode_31)
+ UNDEF_INST(set_address_mode_64)
+ UNDEF_INST(test_under_mask_highword_high)
+ UNDEF_INST(test_under_mask_highword_low)
+ UNDEF_INST(branch_relative_on_count_long)
+ UNDEF_INST(load_long_halfword_immediate)
+ UNDEF_INST(add_long_halfword_immediate)
+ UNDEF_INST(multiply_long_halfword_immediate)
+ UNDEF_INST(compare_long_halfword_immedate)
+ UNDEF_INST(load_psw_extended)
 #endif /*!defined(FEATURE_ESAME)*/
 
 
 #if !defined(FEATURE_BASIC_FP_EXTENSIONS)
- #define s370_execute_b3xx                        s370_operation_exception
- #define s370_execute_edxx                        s370_operation_exception
+ UNDEF_INST(execute_b3xx)
+ UNDEF_INST(execute_edxx)
 #endif /*!defined(FEATURE_BASIC_FP_EXTENSIONS)*/
 
 
 #if !defined(FEATURE_HEXADECIMAL_FLOATING_POINT)
- #define s370_load_positive_float_long_reg        s370_operation_exception
- #define s370_load_negative_float_long_reg        s370_operation_exception
- #define s370_load_and_test_float_long_reg        s370_operation_exception
- #define s370_load_complement_float_long_reg      s370_operation_exception
- #define s370_halve_float_long_reg                s370_operation_exception
- #define s370_round_float_long_reg                s370_operation_exception
- #define s370_multiply_float_ext_reg              s370_operation_exception
- #define s370_multiply_float_long_to_ext_reg      s370_operation_exception
- #define s370_load_float_long_reg                 s370_operation_exception
- #define s370_compare_float_long_reg              s370_operation_exception
- #define s370_add_float_long_reg                  s370_operation_exception
- #define s370_subtract_float_long_reg             s370_operation_exception
- #define s370_multiply_float_long_reg             s370_operation_exception
- #define s370_divide_float_long_reg               s370_operation_exception
- #define s370_add_unnormal_float_long_reg         s370_operation_exception
- #define s370_subtract_unnormal_float_long_reg    s370_operation_exception
- #define s370_load_positive_float_short_reg       s370_operation_exception
- #define s370_load_negative_float_short_reg       s370_operation_exception
- #define s370_load_and_test_float_short_reg       s370_operation_exception
- #define s370_load_complement_float_short_reg     s370_operation_exception
- #define s370_halve_float_short_reg               s370_operation_exception
- #define s370_round_float_short_reg               s370_operation_exception
- #define s370_add_float_ext_reg                   s370_operation_exception
- #define s370_subtract_float_ext_reg              s370_operation_exception
- #define s370_load_float_short_reg                s370_operation_exception
- #define s370_compare_float_short_reg             s370_operation_exception
- #define s370_add_float_short_reg                 s370_operation_exception
- #define s370_subtract_float_short_reg            s370_operation_exception
- #define s370_multiply_float_short_to_long_reg    s370_operation_exception
- #define s370_divide_float_short_reg              s370_operation_exception
- #define s370_add_unnormal_float_short_reg        s370_operation_exception
- #define s370_subtract_unnormal_float_short_reg   s370_operation_exception
- #define s370_store_float_long                    s370_operation_exception
- #define s370_multiply_float_long_to_ext          s370_operation_exception
- #define s370_load_float_long                     s370_operation_exception
- #define s370_compare_float_long                  s370_operation_exception
- #define s370_add_float_long                      s370_operation_exception
- #define s370_subtract_float_long                 s370_operation_exception
- #define s370_multiply_float_long                 s370_operation_exception
- #define s370_divide_float_long                   s370_operation_exception
- #define s370_add_unnormal_float_long             s370_operation_exception
- #define s370_subtract_unnormal_float_long        s370_operation_exception
- #define s370_store_float_short                   s370_operation_exception
- #define s370_load_float_short                    s370_operation_exception
- #define s370_compare_float_short                 s370_operation_exception
- #define s370_add_float_short                     s370_operation_exception
- #define s370_subtract_float_short                s370_operation_exception
- #define s370_multiply_float_short_to_long        s370_operation_exception
- #define s370_divide_float_short                  s370_operation_exception
- #define s370_add_unnormal_float_short            s370_operation_exception
- #define s370_subtract_unnormal_float_short       s370_operation_exception
- #define s370_divide_float_ext_reg                s370_operation_exception
+ UNDEF_INST(load_positive_float_long_reg)
+ UNDEF_INST(load_negative_float_long_reg)
+ UNDEF_INST(load_and_test_float_long_reg)
+ UNDEF_INST(load_complement_float_long_reg)
+ UNDEF_INST(halve_float_long_reg)
+ UNDEF_INST(round_float_long_reg)
+ UNDEF_INST(multiply_float_ext_reg)
+ UNDEF_INST(multiply_float_long_to_ext_reg)
+ UNDEF_INST(load_float_long_reg)
+ UNDEF_INST(compare_float_long_reg)
+ UNDEF_INST(add_float_long_reg)
+ UNDEF_INST(subtract_float_long_reg)
+ UNDEF_INST(multiply_float_long_reg)
+ UNDEF_INST(divide_float_long_reg)
+ UNDEF_INST(add_unnormal_float_long_reg)
+ UNDEF_INST(subtract_unnormal_float_long_reg)
+ UNDEF_INST(load_positive_float_short_reg)
+ UNDEF_INST(load_negative_float_short_reg)
+ UNDEF_INST(load_and_test_float_short_reg)
+ UNDEF_INST(load_complement_float_short_reg)
+ UNDEF_INST(halve_float_short_reg)
+ UNDEF_INST(round_float_short_reg)
+ UNDEF_INST(add_float_ext_reg)
+ UNDEF_INST(subtract_float_ext_reg)
+ UNDEF_INST(load_float_short_reg)
+ UNDEF_INST(compare_float_short_reg)
+ UNDEF_INST(add_float_short_reg)
+ UNDEF_INST(subtract_float_short_reg)
+ UNDEF_INST(multiply_float_short_to_long_reg)
+ UNDEF_INST(divide_float_short_reg)
+ UNDEF_INST(add_unnormal_float_short_reg)
+ UNDEF_INST(subtract_unnormal_float_short_reg)
+ UNDEF_INST(store_float_long)
+ UNDEF_INST(multiply_float_long_to_ext)
+ UNDEF_INST(load_float_long)
+ UNDEF_INST(compare_float_long)
+ UNDEF_INST(add_float_long)
+ UNDEF_INST(subtract_float_long)
+ UNDEF_INST(multiply_float_long)
+ UNDEF_INST(divide_float_long)
+ UNDEF_INST(add_unnormal_float_long)
+ UNDEF_INST(subtract_unnormal_float_long)
+ UNDEF_INST(store_float_short)
+ UNDEF_INST(load_float_short)
+ UNDEF_INST(compare_float_short)
+ UNDEF_INST(add_float_short)
+ UNDEF_INST(subtract_float_short)
+ UNDEF_INST(multiply_float_short_to_long)
+ UNDEF_INST(divide_float_short)
+ UNDEF_INST(add_unnormal_float_short)
+ UNDEF_INST(subtract_unnormal_float_short)
+ UNDEF_INST(divide_float_ext_reg)
 #endif /*!defined(FEATURE_HEXADECIMAL_FLOATING_POINT)*/
 
 
 #if !defined(FEATURE_HFP_EXTENSIONS)
- #define s370_loadlength_float_short_to_long_reg  s370_operation_exception
- #define s370_loadlength_float_long_to_ext_reg    s370_operation_exception
- #define s370_loadlength_float_short_to_ext_reg   s370_operation_exception
- #define s370_squareroot_float_ext_reg            s370_operation_exception
- #define s370_multiply_float_short_reg            s370_operation_exception
- #define s370_load_positive_float_ext_reg         s370_operation_exception
- #define s370_load_negative_float_ext_reg         s370_operation_exception
- #define s370_load_and_test_float_ext_reg         s370_operation_exception
- #define s370_load_complement_float_ext_reg       s370_operation_exception
- #define s370_round_float_ext_to_short_reg        s370_operation_exception
- #define s370_load_fp_int_float_ext_reg           s370_operation_exception
- #define s370_compare_float_ext_reg               s370_operation_exception
- #define s370_load_fp_int_float_short_reg         s370_operation_exception
- #define s370_load_fp_int_float_long_reg          s370_operation_exception
- #define s370_convert_fixed_to_float_short_reg    s370_operation_exception
- #define s370_convert_fixed_to_float_long_reg     s370_operation_exception
- #define s370_convert_fixed_to_float_ext_reg      s370_operation_exception
- #define s370_convert_float_short_to_fixed_reg    s370_operation_exception
- #define s370_convert_float_long_to_fixed_reg     s370_operation_exception
- #define s370_convert_float_ext_to_fixed_reg      s370_operation_exception
- #define s370_loadlength_float_short_to_long      s370_operation_exception
- #define s370_loadlength_float_long_to_ext        s370_operation_exception
- #define s370_loadlength_float_short_to_ext       s370_operation_exception
- #define s370_squareroot_float_short              s370_operation_exception
- #define s370_squareroot_float_long               s370_operation_exception
- #define s370_multiply_float_short                s370_operation_exception
+ UNDEF_INST(loadlength_float_short_to_long_reg)
+ UNDEF_INST(loadlength_float_long_to_ext_reg)
+ UNDEF_INST(loadlength_float_short_to_ext_reg)
+ UNDEF_INST(squareroot_float_ext_reg)
+ UNDEF_INST(multiply_float_short_reg)
+ UNDEF_INST(load_positive_float_ext_reg)
+ UNDEF_INST(load_negative_float_ext_reg)
+ UNDEF_INST(load_and_test_float_ext_reg)
+ UNDEF_INST(load_complement_float_ext_reg)
+ UNDEF_INST(round_float_ext_to_short_reg)
+ UNDEF_INST(load_fp_int_float_ext_reg)
+ UNDEF_INST(compare_float_ext_reg)
+ UNDEF_INST(load_fp_int_float_short_reg)
+ UNDEF_INST(load_fp_int_float_long_reg)
+ UNDEF_INST(convert_fixed_to_float_short_reg)
+ UNDEF_INST(convert_fixed_to_float_long_reg)
+ UNDEF_INST(convert_fixed_to_float_ext_reg)
+ UNDEF_INST(convert_float_short_to_fixed_reg)
+ UNDEF_INST(convert_float_long_to_fixed_reg)
+ UNDEF_INST(convert_float_ext_to_fixed_reg)
+ UNDEF_INST(loadlength_float_short_to_long)
+ UNDEF_INST(loadlength_float_long_to_ext)
+ UNDEF_INST(loadlength_float_short_to_ext)
+ UNDEF_INST(squareroot_float_short)
+ UNDEF_INST(squareroot_float_long)
+ UNDEF_INST(multiply_float_short)
 #endif /*!defined(FEATURE_HFP_EXTENSIONS)*/
 
 
+#if !defined(FEATURE_FPS_EXTENSIONS)
+ UNDEF_INST(convert_bfp_long_to_float_long_reg)
+ UNDEF_INST(convert_bfp_short_to_float_long_reg)
+ UNDEF_INST(convert_float_long_to_bfp_long_reg)
+ UNDEF_INST(convert_float_long_to_bfp_short_reg)
+ UNDEF_INST(load_float_ext_reg)
+ UNDEF_INST(load_zero_float_ext_reg)
+ UNDEF_INST(load_zero_float_long_reg)
+ UNDEF_INST(load_zero_float_short_reg)
+#endif /*!defined(FEATURE_FPS_EXTENSIONS)*/
+
+
+#if !defined(FEATURE_BINARY_FLOATING_POINT)
+ UNDEF_INST(store_fpc)
+ UNDEF_INST(load_fpc)
+ UNDEF_INST(set_fpc)
+ UNDEF_INST(extract_fpc)
+ UNDEF_INST(set_rounding_mode)
+#endif /*!defined(FEATURE_BINARY_FLOATING_POINT)*/
+
+
+#if !defined(FEATURE_BINARY_FLOATING_POINT) || defined(OPTION_NO_IEEE_SUPPORT)
+ UNDEF_INST(add_bfp_ext_reg)
+ UNDEF_INST(add_bfp_long)
+ UNDEF_INST(add_bfp_long_reg)
+ UNDEF_INST(add_bfp_short)
+ UNDEF_INST(add_bfp_short_reg)
+ UNDEF_INST(compare_and_signal_bfp_ext_reg)
+ UNDEF_INST(compare_and_signal_bfp_long)
+ UNDEF_INST(compare_and_signal_bfp_long_reg)
+ UNDEF_INST(compare_and_signal_bfp_short)
+ UNDEF_INST(compare_and_signal_bfp_short_reg)
+ UNDEF_INST(compare_bfp_ext_reg)
+ UNDEF_INST(compare_bfp_long)
+ UNDEF_INST(compare_bfp_long_reg)
+ UNDEF_INST(compare_bfp_short)
+ UNDEF_INST(compare_bfp_short_reg)
+ UNDEF_INST(convert_bfp_long_to_fix32_reg)
+ UNDEF_INST(convert_bfp_short_to_fix32_reg)
+ UNDEF_INST(convert_fix32_to_bfp_long_reg)
+ UNDEF_INST(convert_fix32_to_bfp_short_reg)
+ UNDEF_INST(divide_bfp_ext_reg)
+ UNDEF_INST(divide_bfp_long)
+ UNDEF_INST(divide_bfp_long_reg)
+ UNDEF_INST(divide_bfp_short)
+ UNDEF_INST(divide_bfp_short_reg)
+ UNDEF_INST(load_and_test_bfp_ext_reg)
+ UNDEF_INST(load_and_test_bfp_long_reg)
+ UNDEF_INST(load_and_test_bfp_short_reg)
+ UNDEF_INST(load_negative_bfp_ext_reg)
+ UNDEF_INST(load_negative_bfp_long_reg)
+ UNDEF_INST(load_negative_bfp_short_reg)
+ UNDEF_INST(load_positive_bfp_ext_reg)
+ UNDEF_INST(load_positive_bfp_long_reg)
+ UNDEF_INST(load_positive_bfp_short_reg)
+ UNDEF_INST(loadlength_bfp_short_to_long)
+ UNDEF_INST(loadlength_bfp_short_to_long_reg)
+ UNDEF_INST(multiply_bfp_ext_reg)
+ UNDEF_INST(multiply_bfp_long)
+ UNDEF_INST(multiply_bfp_long_reg)
+ UNDEF_INST(multiply_bfp_short)
+ UNDEF_INST(multiply_bfp_short_reg)
+ UNDEF_INST(round_bfp_long_to_short_reg)
+ UNDEF_INST(squareroot_bfp_ext_reg)
+ UNDEF_INST(squareroot_bfp_long)
+ UNDEF_INST(squareroot_bfp_long_reg)
+ UNDEF_INST(squareroot_bfp_short)
+ UNDEF_INST(squareroot_bfp_short_reg)
+ UNDEF_INST(subtract_bfp_ext_reg)
+ UNDEF_INST(subtract_bfp_long)
+ UNDEF_INST(subtract_bfp_long_reg)
+ UNDEF_INST(subtract_bfp_short)
+ UNDEF_INST(subtract_bfp_short_reg)
+#endif /*!defined(FEATURE_BINARY_FLOATING_POINT)*/
+
+
 #if !defined(FEATURE_EMULATE_VM)
- #define s370_inter_user_communication_vehicle    s370_operation_exception
+ UNDEF_INST(inter_user_communication_vehicle)
 #endif /*!defined(FEATURE_EMULATE_VM)*/
 
 
 #if !defined(FEATURE_RESUME_PROGRAM)
- #define s370_resume_program                      s370_operation_exception
+ UNDEF_INST(resume_program)
 #endif /*!defined(FEATURE_RESUME_PROGRAM)*/
 
 
 #if !defined(FEATURE_COMPRESSION)
- #define s370_compression_call                    s370_operation_exception
+ UNDEF_INST(compression_call)
 #endif /*!defined(FEATURE_COMPRESSION)*/
 
 
 #if !defined(FEATURE_LOCK_PAGE)
- #define s370_lock_page                           s370_operation_exception
+ UNDEF_INST(lock_page)
 #endif /*!defined(FEATURE_LOCK_PAGE)*/
 
 
 #if !defined(FEATURE_SQUARE_ROOT)
- #define s370_squareroot_float_long_reg           s370_operation_exception
- #define s370_squareroot_float_short_reg          s370_operation_exception
+ UNDEF_INST(squareroot_float_long_reg)
+ UNDEF_INST(squareroot_float_short_reg)
 #endif /*!defined(FEATURE_SQUARE_ROOT)*/
 
 
 #if !defined(FEATURE_INTERPRETIVE_EXECUTION)
- #define s370_start_interpretive_execution        s370_operation_exception
+ UNDEF_INST(start_interpretive_execution)
 #endif /*!defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
 
 #if !defined(_FEATURE_SIE)
- #define s370_reset_channel_path                  s370_operation_exception
- #define s370_connect_channel_set                 s370_operation_exception
- #define s370_disconnect_channel_set              s370_operation_exception
+ UNDEF_INST(reset_channel_path)
+ UNDEF_INST(connect_channel_set)
+ UNDEF_INST(disconnect_channel_set)
 #endif /*!defined(_FEATURE_SIE)*/
 
 
 #if !defined(FEATURE_STRUCTURED_EXTERNAL_STORAGE)
- #define s370_ses_opcode_0105                     s370_operation_exception
- #define s370_ses_opcode_0106                     s370_operation_exception
- #define s370_ses_opcode_0108                     s370_operation_exception
- #define s370_ses_opcode_0109                     s370_operation_exception
- #define s370_ses_opcode_B260                     s370_operation_exception
- #define s370_ses_opcode_B261                     s370_operation_exception
- #define s370_ses_opcode_B264                     s370_operation_exception
- #define s370_ses_opcode_B265                     s370_operation_exception
- #define s370_ses_opcode_B266                     s370_operation_exception
- #define s370_ses_opcode_B267                     s370_operation_exception
- #define s370_ses_opcode_B268                     s370_operation_exception
- #define s370_ses_opcode_B272                     s370_operation_exception
- #define s370_ses_opcode_B27A                     s370_operation_exception
- #define s370_ses_opcode_B27B                     s370_operation_exception
- #define s370_ses_opcode_B27C                     s370_operation_exception
- #define s370_ses_opcode_B27E                     s370_operation_exception
- #define s370_ses_opcode_B27F                     s370_operation_exception
- #define s370_ses_opcode_B2A4                     s370_operation_exception
- #define s370_ses_opcode_B2A8                     s370_operation_exception
- #define s370_ses_opcode_B2F1                     s370_operation_exception
- #define s370_ses_opcode_B2F6                     s370_operation_exception
+ UNDEF_INST(ses_opcode_0105)
+ UNDEF_INST(ses_opcode_0106)
+ UNDEF_INST(ses_opcode_0108)
+ UNDEF_INST(ses_opcode_0109)
+ UNDEF_INST(ses_opcode_B260)
+ UNDEF_INST(ses_opcode_B261)
+ UNDEF_INST(ses_opcode_B264)
+ UNDEF_INST(ses_opcode_B265)
+ UNDEF_INST(ses_opcode_B266)
+ UNDEF_INST(ses_opcode_B267)
+ UNDEF_INST(ses_opcode_B268)
+ UNDEF_INST(ses_opcode_B272)
+ UNDEF_INST(ses_opcode_B27A)
+ UNDEF_INST(ses_opcode_B27B)
+ UNDEF_INST(ses_opcode_B27C)
+ UNDEF_INST(ses_opcode_B27E)
+ UNDEF_INST(ses_opcode_B27F)
+ UNDEF_INST(ses_opcode_B2A4)
+ UNDEF_INST(ses_opcode_B2A8)
+ UNDEF_INST(ses_opcode_B2F1)
+ UNDEF_INST(ses_opcode_B2F6)
 #endif /*!defined(FEATURE_STRUCTURED_EXTERNAL_STORAGE)*/
 
 
 #if !defined(FEATURE_EXTENDED_TRANSLATION)
- #define s370_translate_extended                  s370_operation_exception
- #define s370_convert_unicode_to_utf8             s370_operation_exception
- #define s370_convert_utf8_to_unicode             s370_operation_exception
+ UNDEF_INST(translate_extended)
+ UNDEF_INST(convert_unicode_to_utf8)
+ UNDEF_INST(convert_utf8_to_unicode)
 #endif /*!defined(FEATURE_EXTENDED_TRANSLATION)*/
 
 
 #if !defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
- #define s370_compare_logical_long_unicode        s370_operation_exception
- #define s370_move_long_unicode                   s370_operation_exception
- #define s370_pack_ascii                          s370_operation_exception
- #define s370_pack_unicode                        s370_operation_exception
- #define s370_test_decimal                        s370_operation_exception
- #define s370_translate_one_to_one                s370_operation_exception
- #define s370_translate_one_to_two                s370_operation_exception
- #define s370_translate_two_to_one                s370_operation_exception
- #define s370_translate_two_to_two                s370_operation_exception
- #define s370_unpack_ascii                        s370_operation_exception
- #define s370_unpack_unicode                      s370_operation_exception
+ UNDEF_INST(compare_logical_long_unicode)
+ UNDEF_INST(move_long_unicode)
+ UNDEF_INST(pack_ascii)
+ UNDEF_INST(pack_unicode)
+ UNDEF_INST(test_decimal)
+ UNDEF_INST(translate_one_to_one)
+ UNDEF_INST(translate_one_to_two)
+ UNDEF_INST(translate_two_to_one)
+ UNDEF_INST(translate_two_to_two)
+ UNDEF_INST(unpack_ascii)
+ UNDEF_INST(unpack_unicode)
 #endif /*!defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
 
 
-#if !defined(FEATURE_LOAD_REVERSED)
- #define s370_load_reversed_long_register         s370_operation_exception
- #define s370_load_reversed_register              s370_operation_exception
- #define s370_load_reversed_long                  s370_operation_exception
- #define s370_load_reversed                       s370_operation_exception
- #define s370_load_reversed_high                  s370_operation_exception
- #define s370_store_reversed_long                 s370_operation_exception
- #define s370_store_reversed                      s370_operation_exception
- #define s370_store_reversed_high                 s370_operation_exception
-#endif /*!defined(FEATURE_LOAD_REVERSED)*/
-
-
-#if !defined(FEATURE_SERVICE_PROCESSOR)
- #define s370_service_call                        s370_operation_exception
-#endif /*!defined(FEATURE_SERVICE_PROCESSOR)*/
-
-
-#elif _GEN_ARCH == 390
-
-#if !defined(FEATURE_CHANNEL_SUBSYSTEM)
- #define s390_clear_subchannel                    s390_operation_exception
- #define s390_halt_subchannel                     s390_operation_exception
- #define s390_modify_subchannel                   s390_operation_exception
- #define s390_resume_subchannel                   s390_operation_exception
- #define s390_set_address_limit                   s390_operation_exception
- #define s390_set_channel_monitor                 s390_operation_exception
- #define s390_start_subchannel                    s390_operation_exception
- #define s390_store_channel_path_status           s390_operation_exception
- #define s390_store_channel_report_word           s390_operation_exception
- #define s390_store_subchannel                    s390_operation_exception
- #define s390_test_pending_interruption           s390_operation_exception
- #define s390_test_subchannel                     s390_operation_exception
-#endif /*!defined(FEATURE_CHANNEL_SUBSYSTEM)*/
-
-
-#if !defined(FEATURE_S370_CHANNEL)
- #define s390_start_io                            s390_operation_exception
- #define s390_test_io                             s390_operation_exception
- #define s390_halt_io                             s390_operation_exception
- #define s390_test_channel                        s390_operation_exception
- #define s390_store_channel_id                    s390_operation_exception
-#endif /*!defined(FEATURE_S370_CHANNEL)*/
-
-
-#if !defined(FEATURE_IMMEDIATE_AND_RELATIVE)
- #define s390_test_under_mask_high                s390_operation_exception
- #define s390_test_under_mask_low                 s390_operation_exception
- #define s390_branch_relative_on_condition        s390_operation_exception
- #define s390_branch_relative_and_save            s390_operation_exception
- #define s390_branch_relative_on_count            s390_operation_exception
- #define s390_load_halfword_immediate             s390_operation_exception
- #define s390_add_halfword_immediate              s390_operation_exception
- #define s390_multiply_halfword_immediate         s390_operation_exception
- #define s390_compare_halfword_immediate          s390_operation_exception
- #define s390_multiply_single_register            s390_operation_exception
- #define s390_multiply_single                     s390_operation_exception
- #define s390_branch_relative_on_index_high       s390_operation_exception
- #define s390_branch_relative_on_index_low_or_equal s390_operation_exception
-#endif /*!defined(FEATURE_IMMEDIATE_AND_RELATIVE)*/
-
-
-#if !defined(FEATURE_COMPARE_AND_MOVE_EXTENDED)
- #define s390_compare_logical_long_extended       s390_operation_exception
- #define s390_move_long_extended                  s390_operation_exception
-#endif /*!defined(FEATURE_COMPARE_AND_MOVE_EXTENDED)*/
-
-
-#if !defined(FEATURE_CHECKSUM_INSTRUCTION)
- #define s390_checksum                            s390_operation_exception
-#endif /*!defined(FEATURE_CHECKSUM_INSTRUCTION)*/
-
-
-#if !defined(FEATURE_PERFORM_LOCKED_OPERATION)
- #define s390_perform_locked_operation            s390_operation_exception
-#endif /*!defined(FEATURE_PERFORM_LOCKED_OPERATION)*/
-
-
-#if !defined(FEATURE_SUBSPACE_GROUP)
- #define s390_branch_in_subspace_group            s390_operation_exception
-#endif /*!defined(FEATURE_SUBSPACE_GROUP)*/
-
-
-#if !defined(FEATURE_BRANCH_AND_SET_AUTHORITY)
- #define s390_branch_and_set_authority            s390_operation_exception
-#endif /*!defined(FEATURE_BRANCH_AND_SET_AUTHORITY)*/
-
-
-#if !defined(FEATURE_EXPANDED_STORAGE)
- #define s390_page_in                             s390_operation_exception
- #define s390_page_out                            s390_operation_exception
-#endif /*!defined(FEATURE_EXPANDED_STORAGE)*/
-
-
-#if !defined(FEATURE_BROADCASTED_PURGING)
- #define s390_compare_and_swap_and_purge          s390_operation_exception
-#endif /*!defined(FEATURE_BROADCASTED_PURGING)*/
-
-
-#if !defined(FEATURE_BIMODAL_ADDRESSING)
- #define s390_branch_and_set_mode                 s390_operation_exception
- #define s390_branch_and_save_and_set_mode        s390_operation_exception
-#endif /*!defined(FEATURE_BIMODAL_ADDRESSING)*/
-
-
-#if !defined(FEATURE_MOVE_PAGE_FACILITY_2)
- #define s390_move_page                           s390_operation_exception
- #define s390_invalidate_expanded_storage_block_entry s390_operation_exception
- #endif /*!defined(FEATURE_MOVE_PAGE_FACILITY_2)*/
-
-
-#if !defined(FEATURE_BASIC_STORAGE_KEYS)
- #define s390_insert_storage_key                  s390_operation_exception
- #define s390_set_storage_key                     s390_operation_exception
- #define s390_reset_reference_bit                 s390_operation_exception
-#endif /*!defined(FEATURE_BASIC_STORAGE_KEYS)*/
-
-
-#if !defined(FEATURE_LINKAGE_STACK)
- #define s390_branch_and_stack                    s390_operation_exception
- #define s390_modify_stacked_state                s390_operation_exception
- #define s390_extract_stacked_registers           s390_operation_exception
- #define s390_extract_stacked_state               s390_operation_exception
-#endif /*!defined(FEATURE_LINKAGE_STACK)*/
-
-
-#if !defined(FEATURE_DUAL_ADDRESS_SPACE)
- #define s390_insert_address_space_control        s390_operation_exception
- #define s390_set_secondary_asn                   s390_operation_exception
- #define s390_extract_primary_asn                 s390_operation_exception
- #define s390_extract_secondary_asn               s390_operation_exception
- #define s390_program_call                        s390_operation_exception
- #define s390_program_transfer                    s390_operation_exception
- #define s390_set_address_space_control_x         s390_operation_exception
- #define s390_load_address_space_parameters       s390_operation_exception
-#endif /*!defined(FEATURE_DUAL_ADDRESS_SPACE)*/
-
-
-#if !defined(FEATURE_ACCESS_REGISTERS)
- #define s390_load_access_multiple                s390_operation_exception
- #define s390_store_access_multiple               s390_operation_exception
- #define s390_purge_accesslist_lookaside_buffer   s390_operation_exception
- #define s390_test_access                         s390_operation_exception
- #define s390_copy_access                         s390_operation_exception
- #define s390_set_access_register                 s390_operation_exception
- #define s390_extract_access_register             s390_operation_exception
-#endif /*!defined(FEATURE_ACCESS_REGISTERS)*/
-
-
-#if !defined(FEATURE_EXTENDED_STORAGE_KEYS)
- #define s390_insert_storage_key_extended         s390_operation_exception
- #define s390_reset_reference_bit_extended        s390_operation_exception
- #define s390_set_storage_key_extended            s390_operation_exception
-#endif /*!defined(FEATURE_EXTENDED_STORAGE_KEYS)*/
-
-
-#if !defined(FEATURE_EXTENDED_TOD_CLOCK)
- #define s390_set_clock_programmable_field        s390_operation_exception
- #define s390_store_clock_extended                s390_operation_exception
-#endif /*!defined(FEATURE_EXTENDED_TOD_CLOCK)*/
-
-
-#if !defined(FEATURE_VECTOR_FACILITY)
- #define s390_execute_a4xx                       s390_operation_exception
+#if !defined(FEATURE_LOAD_REVERSED) && !defined(FEATURE_ESAME_N3_ESA390)
+ UNDEF_INST(load_reversed_register)
+ UNDEF_INST(load_reversed)
+ UNDEF_INST(load_reversed_half)
+ UNDEF_INST(store_reversed)
+ UNDEF_INST(store_reversed_half)
  #if !defined(FEATURE_ESAME)
-  #define s390_execute_a5xx                      s390_operation_exception
+ UNDEF_INST(load_reversed_long_register)
+ UNDEF_INST(store_reversed_long)
  #endif /*!defined(FEATURE_ESAME)*/
-
- #define s390_execute_a6xx                       s390_operation_exception
- #define s390_execute_e4xx                       s390_operation_exception
-#endif /*!defined(FEATURE_VECTOR_FACILITY)*/
-
-
-#if !defined(FEATURE_ESAME)
- #define s390_execute_b9xx                        s390_operation_exception
- #define s390_execute_e3xx                        s390_operation_exception
- #define s390_execute_ebxx                        s390_operation_exception
- #define s390_execute_ecxx                        s390_operation_exception
- #define s390_execute_c0xx                        s390_operation_exception
- #define s390_set_address_mode_24                 s390_operation_exception
- #define s390_set_address_mode_31                 s390_operation_exception
- #define s390_set_address_mode_64                 s390_operation_exception
- #define s390_test_under_mask_highword_high       s390_operation_exception
- #define s390_test_under_mask_highword_low        s390_operation_exception
- #define s390_branch_relative_on_count_long       s390_operation_exception
- #define s390_load_long_halfword_immediate        s390_operation_exception
- #define s390_add_long_halfword_immediate         s390_operation_exception
- #define s390_multiply_long_halfword_immediate    s390_operation_exception
- #define s390_compare_long_halfword_immedate      s390_operation_exception
- #define s390_load_psw_extended                   s390_operation_exception
-#endif /*!defined(FEATURE_ESAME)*/
-
-
-#if !defined(FEATURE_BASIC_FP_EXTENSIONS)
- #define s390_execute_b3xx                        s390_operation_exception
- #define s390_execute_edxx                        s390_operation_exception
-#endif /*!defined(FEATURE_BASIC_FP_EXTENSIONS)*/
-
-
-#if !defined(FEATURE_HEXADECIMAL_FLOATING_POINT)
- #define s390_load_positive_float_long_reg        s390_operation_exception
- #define s390_load_negative_float_long_reg        s390_operation_exception
- #define s390_load_and_test_float_long_reg        s390_operation_exception
- #define s390_load_complement_float_long_reg      s390_operation_exception
- #define s390_halve_float_long_reg                s390_operation_exception
- #define s390_round_float_long_reg                s390_operation_exception
- #define s390_multiply_float_ext_reg              s390_operation_exception
- #define s390_multiply_float_long_to_ext_reg      s390_operation_exception
- #define s390_load_float_long_reg                 s390_operation_exception
- #define s390_compare_float_long_reg              s390_operation_exception
- #define s390_add_float_long_reg                  s390_operation_exception
- #define s390_subtract_float_long_reg             s390_operation_exception
- #define s390_multiply_float_long_reg             s390_operation_exception
- #define s390_divide_float_long_reg               s390_operation_exception
- #define s390_add_unnormal_float_long_reg         s390_operation_exception
- #define s390_subtract_unnormal_float_long_reg    s390_operation_exception
- #define s390_load_positive_float_short_reg       s390_operation_exception
- #define s390_load_negative_float_short_reg       s390_operation_exception
- #define s390_load_and_test_float_short_reg       s390_operation_exception
- #define s390_load_complement_float_short_reg     s390_operation_exception
- #define s390_halve_float_short_reg               s390_operation_exception
- #define s390_round_float_short_reg               s390_operation_exception
- #define s390_add_float_ext_reg                   s390_operation_exception
- #define s390_subtract_float_ext_reg              s390_operation_exception
- #define s390_load_float_short_reg                s390_operation_exception
- #define s390_compare_float_short_reg             s390_operation_exception
- #define s390_add_float_short_reg                 s390_operation_exception
- #define s390_subtract_float_short_reg            s390_operation_exception
- #define s390_multiply_float_short_to_long_reg    s390_operation_exception
- #define s390_divide_float_short_reg              s390_operation_exception
- #define s390_add_unnormal_float_short_reg        s390_operation_exception
- #define s390_subtract_unnormal_float_short_reg   s390_operation_exception
- #define s390_store_float_long                    s390_operation_exception
- #define s390_multiply_float_long_to_ext          s390_operation_exception
- #define s390_load_float_long                     s390_operation_exception
- #define s390_compare_float_long                  s390_operation_exception
- #define s390_add_float_long                      s390_operation_exception
- #define s390_subtract_float_long                 s390_operation_exception
- #define s390_multiply_float_long                 s390_operation_exception
- #define s390_divide_float_long                   s390_operation_exception
- #define s390_add_unnormal_float_long             s390_operation_exception
- #define s390_subtract_unnormal_float_long        s390_operation_exception
- #define s390_store_float_short                   s390_operation_exception
- #define s390_load_float_short                    s390_operation_exception
- #define s390_compare_float_short                 s390_operation_exception
- #define s390_add_float_short                     s390_operation_exception
- #define s390_subtract_float_short                s390_operation_exception
- #define s390_multiply_float_short_to_long        s390_operation_exception
- #define s390_divide_float_short                  s390_operation_exception
- #define s390_add_unnormal_float_short            s390_operation_exception
- #define s390_subtract_unnormal_float_short       s390_operation_exception
- #define s390_divide_float_ext_reg                s390_operation_exception
-#endif /*!defined(FEATURE_HEXADECIMAL_FLOATING_POINT)*/
-
-
-#if !defined(FEATURE_HFP_EXTENSIONS)
- #define s390_loadlength_float_short_to_long_reg  s390_operation_exception
- #define s390_loadlength_float_long_to_ext_reg    s390_operation_exception
- #define s390_loadlength_float_short_to_ext_reg   s390_operation_exception
- #define s390_squareroot_float_ext_reg            s390_operation_exception
- #define s390_multiply_float_short_reg            s390_operation_exception
- #define s390_load_positive_float_ext_reg         s390_operation_exception
- #define s390_load_negative_float_ext_reg         s390_operation_exception
- #define s390_load_and_test_float_ext_reg         s390_operation_exception
- #define s390_load_complement_float_ext_reg       s390_operation_exception
- #define s390_round_float_ext_to_short_reg        s390_operation_exception
- #define s390_load_fp_int_float_ext_reg           s390_operation_exception
- #define s390_compare_float_ext_reg               s390_operation_exception
- #define s390_load_fp_int_float_short_reg         s390_operation_exception
- #define s390_load_fp_int_float_long_reg          s390_operation_exception
- #define s390_convert_fixed_to_float_short_reg    s390_operation_exception
- #define s390_convert_fixed_to_float_long_reg     s390_operation_exception
- #define s390_convert_fixed_to_float_ext_reg      s390_operation_exception
- #define s390_convert_float_short_to_fixed_reg    s390_operation_exception
- #define s390_convert_float_long_to_fixed_reg     s390_operation_exception
- #define s390_convert_float_ext_to_fixed_reg      s390_operation_exception
- #define s390_loadlength_float_short_to_long      s390_operation_exception
- #define s390_loadlength_float_long_to_ext        s390_operation_exception
- #define s390_loadlength_float_short_to_ext       s390_operation_exception
- #define s390_squareroot_float_short              s390_operation_exception
- #define s390_squareroot_float_long               s390_operation_exception
- #define s390_multiply_float_short                s390_operation_exception
-#endif /*!defined(FEATURE_HFP_EXTENSIONS)*/
-
-
-#if !defined(FEATURE_EMULATE_VM)
- #define s390_inter_user_communication_vehicle    s390_operation_exception
-#endif /*!defined(FEATURE_EMULATE_VM)*/
-
-
-#if !defined(FEATURE_RESUME_PROGRAM)
- #define s390_resume_program                      s390_operation_exception
-#endif /*!defined(FEATURE_RESUME_PROGRAM)*/
-
-
-#if !defined(FEATURE_COMPRESSION)
- #define s390_compression_call                    s390_operation_exception
-#endif /*!defined(FEATURE_COMPRESSION)*/
-
-
-#if !defined(FEATURE_LOCK_PAGE)
- #define s390_lock_page                           s390_operation_exception
-#endif /*!defined(FEATURE_LOCK_PAGE)*/
-
-
-#if !defined(FEATURE_SQUARE_ROOT)
- #define s390_squareroot_float_long_reg           s390_operation_exception
- #define s390_squareroot_float_short_reg          s390_operation_exception
-#endif /*!defined(FEATURE_SQUARE_ROOT)*/
-
-
-#if !defined(FEATURE_INTERPRETIVE_EXECUTION)
- #define s390_start_interpretive_execution        s390_operation_exception
-#endif /*!defined(FEATURE_INTERPRETIVE_EXECUTION)*/
-
-
-#if !defined(_FEATURE_SIE)
- #define s390_reset_channel_path                  s390_operation_exception
- #define s390_connect_channel_set                 s390_operation_exception
- #define s390_disconnect_channel_set              s390_operation_exception
-#endif /*!defined(_FEATURE_SIE)*/
-
-
-#if !defined(FEATURE_STRUCTURED_EXTERNAL_STORAGE)
- #define s390_ses_opcode_0105                     s390_operation_exception
- #define s390_ses_opcode_0106                     s390_operation_exception
- #define s390_ses_opcode_0108                     s390_operation_exception
- #define s390_ses_opcode_0109                     s390_operation_exception
- #define s390_ses_opcode_B260                     s390_operation_exception
- #define s390_ses_opcode_B261                     s390_operation_exception
- #define s390_ses_opcode_B264                     s390_operation_exception
- #define s390_ses_opcode_B265                     s390_operation_exception
- #define s390_ses_opcode_B266                     s390_operation_exception
- #define s390_ses_opcode_B267                     s390_operation_exception
- #define s390_ses_opcode_B268                     s390_operation_exception
- #define s390_ses_opcode_B272                     s390_operation_exception
- #define s390_ses_opcode_B27A                     s390_operation_exception
- #define s390_ses_opcode_B27B                     s390_operation_exception
- #define s390_ses_opcode_B27C                     s390_operation_exception
- #define s390_ses_opcode_B27E                     s390_operation_exception
- #define s390_ses_opcode_B27F                     s390_operation_exception
- #define s390_ses_opcode_B2A4                     s390_operation_exception
- #define s390_ses_opcode_B2A8                     s390_operation_exception
- #define s390_ses_opcode_B2F1                     s390_operation_exception
- #define s390_ses_opcode_B2F6                     s390_operation_exception
-#endif /*!defined(FEATURE_STRUCTURED_EXTERNAL_STORAGE)*/
-
-
-#if !defined(FEATURE_EXTENDED_TRANSLATION)
- #define s390_translate_extended                  s390_operation_exception
- #define s390_convert_unicode_to_utf8             s390_operation_exception
- #define s390_convert_utf8_to_unicode             s390_operation_exception
-#endif /*!defined(FEATURE_EXTENDED_TRANSLATION)*/
-
-
-#if !defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
- #define s390_compare_logical_long_unicode        s390_operation_exception
- #define s390_move_long_unicode                   s390_operation_exception
- #define s390_pack_ascii                          s390_operation_exception
- #define s390_pack_unicode                        s390_operation_exception
- #define s390_test_decimal                        s390_operation_exception
- #define s390_translate_one_to_one                s390_operation_exception
- #define s390_translate_one_to_two                s390_operation_exception
- #define s390_translate_two_to_one                s390_operation_exception
- #define s390_translate_two_to_two                s390_operation_exception
- #define s390_unpack_ascii                        s390_operation_exception
- #define s390_unpack_unicode                      s390_operation_exception
-#endif /*!defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
-
-
-#if !defined(FEATURE_LOAD_REVERSED)
- #define s390_load_reversed_long_register         s390_operation_exception
- #define s390_load_reversed_register              s390_operation_exception
- #define s390_load_reversed_long                  s390_operation_exception
- #define s390_load_reversed                       s390_operation_exception
- #define s390_load_reversed_high                  s390_operation_exception
- #define s390_store_reversed_long                 s390_operation_exception
- #define s390_store_reversed                      s390_operation_exception
- #define s390_store_reversed_high                 s390_operation_exception
-#endif /*!defined(FEATURE_LOAD_REVERSED)*/
+#endif /*!defined(FEATURE_LOAD_REVERSED) && !defined(FEATURE_ESAME_N3_ESA390)*/
 
 
 #if !defined(FEATURE_SERVICE_PROCESSOR)
- #define s390_service_call                        s390_operation_exception
+ UNDEF_INST(service_call)
 #endif /*!defined(FEATURE_SERVICE_PROCESSOR)*/
 
 
-#elif _GEN_ARCH == 964
-
-#if !defined(FEATURE_CHANNEL_SUBSYSTEM)
- #define z964_clear_subchannel                    z964_operation_exception
- #define z964_halt_subchannel                     z964_operation_exception
- #define z964_modify_subchannel                   z964_operation_exception
- #define z964_resume_subchannel                   z964_operation_exception
- #define z964_set_address_limit                   z964_operation_exception
- #define z964_set_channel_monitor                 z964_operation_exception
- #define z964_start_subchannel                    z964_operation_exception
- #define z964_store_channel_path_status           z964_operation_exception
- #define z964_store_channel_report_word           z964_operation_exception
- #define z964_store_subchannel                    z964_operation_exception
- #define z964_test_pending_interruption           z964_operation_exception
- #define z964_test_subchannel                     z964_operation_exception
-#endif /*!defined(FEATURE_CHANNEL_SUBSYSTEM)*/
-
-
-#if !defined(FEATURE_S370_CHANNEL)
- #define z964_start_io                            z964_operation_exception
- #define z964_test_io                             z964_operation_exception
- #define z964_halt_io                             z964_operation_exception
- #define z964_test_channel                        z964_operation_exception
- #define z964_store_channel_id                    z964_operation_exception
-#endif /*!defined(FEATURE_S370_CHANNEL)*/
-
-
-#if !defined(FEATURE_IMMEDIATE_AND_RELATIVE)
- #define z964_test_under_mask_high                z964_operation_exception
- #define z964_test_under_mask_low                 z964_operation_exception
- #define z964_branch_relative_on_condition        z964_operation_exception
- #define z964_branch_relative_and_save            z964_operation_exception
- #define z964_branch_relative_on_count            z964_operation_exception
- #define z964_load_halfword_immediate             z964_operation_exception
- #define z964_add_halfword_immediate              z964_operation_exception
- #define z964_multiply_halfword_immediate         z964_operation_exception
- #define z964_compare_halfword_immediate          z964_operation_exception
- #define z964_multiply_single_register            z964_operation_exception
- #define z964_multiply_single                     z964_operation_exception
- #define z964_branch_relative_on_index_high       z964_operation_exception
- #define z964_branch_relative_on_index_low_or_equal z964_operation_exception
-#endif /*!defined(FEATURE_IMMEDIATE_AND_RELATIVE)*/
-
-
-#if !defined(FEATURE_COMPARE_AND_MOVE_EXTENDED)
- #define z964_compare_logical_long_extended       z964_operation_exception
- #define z964_move_long_extended                  z964_operation_exception
-#endif /*!defined(FEATURE_COMPARE_AND_MOVE_EXTENDED)*/
-
-
-#if !defined(FEATURE_CHECKSUM_INSTRUCTION)
- #define z964_checksum                            z964_operation_exception
-#endif /*!defined(FEATURE_CHECKSUM_INSTRUCTION)*/
-
-
-#if !defined(FEATURE_PERFORM_LOCKED_OPERATION)
- #define z964_perform_locked_operation            z964_operation_exception
-#endif /*!defined(FEATURE_PERFORM_LOCKED_OPERATION)*/
-
-
-#if !defined(FEATURE_SUBSPACE_GROUP)
- #define z964_branch_in_subspace_group            z964_operation_exception
-#endif /*!defined(FEATURE_SUBSPACE_GROUP)*/
-
-
-#if !defined(FEATURE_BRANCH_AND_SET_AUTHORITY)
- #define z964_branch_and_set_authority            z964_operation_exception
-#endif /*!defined(FEATURE_BRANCH_AND_SET_AUTHORITY)*/
-
-
-#if !defined(FEATURE_EXPANDED_STORAGE)
- #define z964_page_in                             z964_operation_exception
- #define z964_page_out                            z964_operation_exception
-#endif /*!defined(FEATURE_EXPANDED_STORAGE)*/
-
-
-#if !defined(FEATURE_BROADCASTED_PURGING)
- #define z964_compare_and_swap_and_purge          z964_operation_exception
-#endif /*!defined(FEATURE_BROADCASTED_PURGING)*/
-
-
-#if !defined(FEATURE_BIMODAL_ADDRESSING)
- #define z964_branch_and_set_mode                 z964_operation_exception
- #define z964_branch_and_save_and_set_mode        z964_operation_exception
-#endif /*!defined(FEATURE_BIMODAL_ADDRESSING)*/
-
-
-#if !defined(FEATURE_MOVE_PAGE_FACILITY_2)
- #define z964_move_page                           z964_operation_exception
- #define z964_invalidate_expanded_storage_block_entry z964_operation_exception
- #endif /*!defined(FEATURE_MOVE_PAGE_FACILITY_2)*/
-
-
-#if !defined(FEATURE_BASIC_STORAGE_KEYS)
- #define z964_insert_storage_key                  z964_operation_exception
- #define z964_set_storage_key                     z964_operation_exception
- #define z964_reset_reference_bit                 z964_operation_exception
-#endif /*!defined(FEATURE_BASIC_STORAGE_KEYS)*/
-
-
-#if !defined(FEATURE_LINKAGE_STACK)
- #define z964_branch_and_stack                    z964_operation_exception
- #define z964_modify_stacked_state                z964_operation_exception
- #define z964_extract_stacked_registers           z964_operation_exception
- #define z964_extract_stacked_registers_long      z964_operation_exception
- #define z964_extract_stacked_state               z964_operation_exception
-#endif /*!defined(FEATURE_LINKAGE_STACK)*/
-
-
-#if !defined(FEATURE_DUAL_ADDRESS_SPACE)
- #define z964_insert_address_space_control        z964_operation_exception
- #define z964_set_secondary_asn                   z964_operation_exception
- #define z964_extract_primary_asn                 z964_operation_exception
- #define z964_extract_secondary_asn               z964_operation_exception
- #define z964_program_call                        z964_operation_exception
- #define z964_program_transfer                    z964_operation_exception
- #define z964_set_address_space_control_x         z964_operation_exception
- #define z964_load_address_space_parameters       z964_operation_exception
-#endif /*!defined(FEATURE_DUAL_ADDRESS_SPACE)*/
-
-
-#if !defined(FEATURE_ACCESS_REGISTERS)
- #define z964_load_access_multiple                z964_operation_exception
- #define z964_store_access_multiple               z964_operation_exception
- #define z964_purge_accesslist_lookaside_buffer   z964_operation_exception
- #define z964_test_access                         z964_operation_exception
- #define z964_copy_access                         z964_operation_exception
- #define z964_set_access_register                 z964_operation_exception
- #define z964_extract_access_register             z964_operation_exception
-#endif /*!defined(FEATURE_ACCESS_REGISTERS)*/
-
-
-#if !defined(FEATURE_EXTENDED_STORAGE_KEYS)
- #define z964_insert_storage_key_extended         z964_operation_exception
- #define z964_reset_reference_bit_extended        z964_operation_exception
- #define z964_set_storage_key_extended            z964_operation_exception
-#endif /*!defined(FEATURE_EXTENDED_STORAGE_KEYS)*/
-
-
-#if !defined(FEATURE_EXTENDED_TOD_CLOCK)
- #define z964_set_clock_programmable_field        z964_operation_exception
- #define z964_store_clock_extended                z964_operation_exception
-#endif /*!defined(FEATURE_EXTENDED_TOD_CLOCK)*/
-
-
-#if !defined(FEATURE_VECTOR_FACILITY)
- #define z964_execute_a4xx                       z964_operation_exception
- #if !defined(FEATURE_ESAME)
-  #define z964_execute_a5xx                      z964_operation_exception
- #endif /*!defined(FEATURE_ESAME)*/
-
- #define z964_execute_a6xx                       z964_operation_exception
- #define z964_execute_e4xx                       z964_operation_exception
-#endif /*!defined(FEATURE_VECTOR_FACILITY)*/
-
-
-#if !defined(FEATURE_ESAME)
- #define z964_execute_b9xx                        z964_operation_exception
- #define z964_execute_e3xx                        z964_operation_exception
- #define z964_execute_ebxx                        z964_operation_exception
- #define z964_execute_ecxx                        z964_operation_exception
- #define z964_execute_c0xx                        z964_operation_exception
- #define z964_set_address_mode_24                 z964_operation_exception
- #define z964_set_address_mode_31                 z964_operation_exception
- #define z964_set_address_mode_64                 z964_operation_exception
- #define z964_test_under_mask_highword_high       z964_operation_exception
- #define z964_test_under_mask_highword_low        z964_operation_exception
- #define z964_branch_relative_on_count_long       z964_operation_exception
- #define z964_load_long_halfword_immediate        z964_operation_exception
- #define z964_add_long_halfword_immediate         z964_operation_exception
- #define z964_multiply_long_halfword_immediate    z964_operation_exception
- #define z964_compare_long_halfword_immedate      z964_operation_exception
- #define z964_load_psw_extended                   z964_operation_exception
-#endif /*!defined(FEATURE_ESAME)*/
-
-
-#if !defined(FEATURE_BASIC_FP_EXTENSIONS)
- #define z964_execute_b3xx                        z964_operation_exception
- #define z964_execute_edxx                        z964_operation_exception
-#endif /*!defined(FEATURE_BASIC_FP_EXTENSIONS)*/
-
-
-#if !defined(FEATURE_HEXADECIMAL_FLOATING_POINT)
- #define z964_load_positive_float_long_reg        z964_operation_exception
- #define z964_load_negative_float_long_reg        z964_operation_exception
- #define z964_load_and_test_float_long_reg        z964_operation_exception
- #define z964_load_complement_float_long_reg      z964_operation_exception
- #define z964_halve_float_long_reg                z964_operation_exception
- #define z964_round_float_long_reg                z964_operation_exception
- #define z964_multiply_float_ext_reg              z964_operation_exception
- #define z964_multiply_float_long_to_ext_reg      z964_operation_exception
- #define z964_load_float_long_reg                 z964_operation_exception
- #define z964_compare_float_long_reg              z964_operation_exception
- #define z964_add_float_long_reg                  z964_operation_exception
- #define z964_subtract_float_long_reg             z964_operation_exception
- #define z964_multiply_float_long_reg             z964_operation_exception
- #define z964_divide_float_long_reg               z964_operation_exception
- #define z964_add_unnormal_float_long_reg         z964_operation_exception
- #define z964_subtract_unnormal_float_long_reg    z964_operation_exception
- #define z964_load_positive_float_short_reg       z964_operation_exception
- #define z964_load_negative_float_short_reg       z964_operation_exception
- #define z964_load_and_test_float_short_reg       z964_operation_exception
- #define z964_load_complement_float_short_reg     z964_operation_exception
- #define z964_halve_float_short_reg               z964_operation_exception
- #define z964_round_float_short_reg               z964_operation_exception
- #define z964_add_float_ext_reg                   z964_operation_exception
- #define z964_subtract_float_ext_reg              z964_operation_exception
- #define z964_load_float_short_reg                z964_operation_exception
- #define z964_compare_float_short_reg             z964_operation_exception
- #define z964_add_float_short_reg                 z964_operation_exception
- #define z964_subtract_float_short_reg            z964_operation_exception
- #define z964_multiply_float_short_to_long_reg    z964_operation_exception
- #define z964_divide_float_short_reg              z964_operation_exception
- #define z964_add_unnormal_float_short_reg        z964_operation_exception
- #define z964_subtract_unnormal_float_short_reg   z964_operation_exception
- #define z964_store_float_long                    z964_operation_exception
- #define z964_multiply_float_long_to_ext          z964_operation_exception
- #define z964_load_float_long                     z964_operation_exception
- #define z964_compare_float_long                  z964_operation_exception
- #define z964_add_float_long                      z964_operation_exception
- #define z964_subtract_float_long                 z964_operation_exception
- #define z964_multiply_float_long                 z964_operation_exception
- #define z964_divide_float_long                   z964_operation_exception
- #define z964_add_unnormal_float_long             z964_operation_exception
- #define z964_subtract_unnormal_float_long        z964_operation_exception
- #define z964_store_float_short                   z964_operation_exception
- #define z964_load_float_short                    z964_operation_exception
- #define z964_compare_float_short                 z964_operation_exception
- #define z964_add_float_short                     z964_operation_exception
- #define z964_subtract_float_short                z964_operation_exception
- #define z964_multiply_float_short_to_long        z964_operation_exception
- #define z964_divide_float_short                  z964_operation_exception
- #define z964_add_unnormal_float_short            z964_operation_exception
- #define z964_subtract_unnormal_float_short       z964_operation_exception
- #define z964_divide_float_ext_reg                z964_operation_exception
-#endif /*!defined(FEATURE_HEXADECIMAL_FLOATING_POINT)*/
-
-
-#if !defined(FEATURE_HFP_EXTENSIONS)
- #define z964_loadlength_float_short_to_long_reg  z964_operation_exception
- #define z964_loadlength_float_long_to_ext_reg    z964_operation_exception
- #define z964_loadlength_float_short_to_ext_reg   z964_operation_exception
- #define z964_squareroot_float_ext_reg            z964_operation_exception
- #define z964_multiply_float_short_reg            z964_operation_exception
- #define z964_load_positive_float_ext_reg         z964_operation_exception
- #define z964_load_negative_float_ext_reg         z964_operation_exception
- #define z964_load_and_test_float_ext_reg         z964_operation_exception
- #define z964_load_complement_float_ext_reg       z964_operation_exception
- #define z964_round_float_ext_to_short_reg        z964_operation_exception
- #define z964_load_fp_int_float_ext_reg           z964_operation_exception
- #define z964_compare_float_ext_reg               z964_operation_exception
- #define z964_load_fp_int_float_short_reg         z964_operation_exception
- #define z964_load_fp_int_float_long_reg          z964_operation_exception
- #define z964_convert_fixed_to_float_short_reg    z964_operation_exception
- #define z964_convert_fixed_to_float_long_reg     z964_operation_exception
- #define z964_convert_fixed_to_float_ext_reg      z964_operation_exception
- #define z964_convert_float_short_to_fixed_reg    z964_operation_exception
- #define z964_convert_float_long_to_fixed_reg     z964_operation_exception
- #define z964_convert_float_ext_to_fixed_reg      z964_operation_exception
- #define z964_loadlength_float_short_to_long      z964_operation_exception
- #define z964_loadlength_float_long_to_ext        z964_operation_exception
- #define z964_loadlength_float_short_to_ext       z964_operation_exception
- #define z964_squareroot_float_short              z964_operation_exception
- #define z964_squareroot_float_long               z964_operation_exception
- #define z964_multiply_float_short                z964_operation_exception
-#endif /*!defined(FEATURE_HFP_EXTENSIONS)*/
-
-
-#if !defined(FEATURE_EMULATE_VM)
- #define z964_inter_user_communication_vehicle    z964_operation_exception
-#endif /*!defined(FEATURE_EMULATE_VM)*/
-
-
-#if !defined(FEATURE_RESUME_PROGRAM)
- #define z964_resume_program                      z964_operation_exception
-#endif /*!defined(FEATURE_RESUME_PROGRAM)*/
-
-
-#if !defined(FEATURE_COMPRESSION)
- #define z964_compression_call                    z964_operation_exception
-#endif /*!defined(FEATURE_COMPRESSION)*/
-
-
-#if !defined(FEATURE_LOCK_PAGE)
- #define z964_lock_page                           z964_operation_exception
-#endif /*!defined(FEATURE_LOCK_PAGE)*/
-
-
-#if !defined(FEATURE_SQUARE_ROOT)
- #define z964_squareroot_float_long_reg           z964_operation_exception
- #define z964_squareroot_float_short_reg          z964_operation_exception
-#endif /*!defined(FEATURE_SQUARE_ROOT)*/
-
-
-#if !defined(FEATURE_INTERPRETIVE_EXECUTION)
- #define z964_start_interpretive_execution        z964_operation_exception
-#endif /*!defined(FEATURE_INTERPRETIVE_EXECUTION)*/
-
-
-#if !defined(_FEATURE_SIE)
- #define z964_reset_channel_path                  z964_operation_exception
- #define z964_connect_channel_set                 z964_operation_exception
- #define z964_disconnect_channel_set              z964_operation_exception
-#endif /*!defined(_FEATURE_SIE)*/
-
-
-#if !defined(FEATURE_STRUCTURED_EXTERNAL_STORAGE)
- #define z964_ses_opcode_0105                     z964_operation_exception
- #define z964_ses_opcode_0106                     z964_operation_exception
- #define z964_ses_opcode_0108                     z964_operation_exception
- #define z964_ses_opcode_0109                     z964_operation_exception
- #define z964_ses_opcode_B260                     z964_operation_exception
- #define z964_ses_opcode_B261                     z964_operation_exception
- #define z964_ses_opcode_B264                     z964_operation_exception
- #define z964_ses_opcode_B265                     z964_operation_exception
- #define z964_ses_opcode_B266                     z964_operation_exception
- #define z964_ses_opcode_B267                     z964_operation_exception
- #define z964_ses_opcode_B268                     z964_operation_exception
- #define z964_ses_opcode_B272                     z964_operation_exception
- #define z964_ses_opcode_B27A                     z964_operation_exception
- #define z964_ses_opcode_B27B                     z964_operation_exception
- #define z964_ses_opcode_B27C                     z964_operation_exception
- #define z964_ses_opcode_B27E                     z964_operation_exception
- #define z964_ses_opcode_B27F                     z964_operation_exception
- #define z964_ses_opcode_B2A4                     z964_operation_exception
- #define z964_ses_opcode_B2A8                     z964_operation_exception
- #define z964_ses_opcode_B2F1                     z964_operation_exception
- #define z964_ses_opcode_B2F6                     z964_operation_exception
-#endif /*!defined(FEATURE_STRUCTURED_EXTERNAL_STORAGE)*/
-
-
-#if !defined(FEATURE_EXTENDED_TRANSLATION)
- #define z964_translate_extended                  z964_operation_exception
- #define z964_convert_unicode_to_utf8             z964_operation_exception
- #define z964_convert_utf8_to_unicode             z964_operation_exception
-#endif /*!defined(FEATURE_EXTENDED_TRANSLATION)*/
-
-
-#if !defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
- #define z964_compare_logical_long_unicode        z964_operation_exception
- #define z964_move_long_unicode                   z964_operation_exception
- #define z964_pack_ascii                          z964_operation_exception
- #define z964_pack_unicode                        z964_operation_exception
- #define z964_test_decimal                        z964_operation_exception
- #define z964_translate_one_to_one                z964_operation_exception
- #define z964_translate_one_to_two                z964_operation_exception
- #define z964_translate_two_to_one                z964_operation_exception
- #define z964_translate_two_to_two                z964_operation_exception
- #define z964_unpack_ascii                        z964_operation_exception
- #define z964_unpack_unicode                      z964_operation_exception
-#endif /*!defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
-
-
-#if !defined(FEATURE_LOAD_REVERSED)
- #define z964_load_reversed_long_register         z964_operation_exception
- #define z964_load_reversed_register              z964_operation_exception
- #define z964_load_reversed_long                  z964_operation_exception
- #define z964_load_reversed                       z964_operation_exception
- #define z964_load_reversed_high                  z964_operation_exception
- #define z964_store_reversed_long                 z964_operation_exception
- #define z964_store_reversed                      z964_operation_exception
- #define z964_store_reversed_high                 z964_operation_exception
-#endif /*!defined(FEATURE_LOAD_REVERSED)*/
-
-
-#if !defined(FEATURE_SERVICE_PROCESSOR)
- #define z964_service_call                        z964_operation_exception
-#endif /*!defined(FEATURE_SERVICE_PROCESSOR)*/
-
-
-#else /* _GEN_ARCH == 900 */
-
-#if !defined(FEATURE_CHANNEL_SUBSYSTEM)
- #define z900_clear_subchannel                    z900_operation_exception
- #define z900_halt_subchannel                     z900_operation_exception
- #define z900_modify_subchannel                   z900_operation_exception
- #define z900_resume_subchannel                   z900_operation_exception
- #define z900_set_address_limit                   z900_operation_exception
- #define z900_set_channel_monitor                 z900_operation_exception
- #define z900_start_subchannel                    z900_operation_exception
- #define z900_store_channel_path_status           z900_operation_exception
- #define z900_store_channel_report_word           z900_operation_exception
- #define z900_store_subchannel                    z900_operation_exception
- #define z900_test_pending_interruption           z900_operation_exception
- #define z900_test_subchannel                     z900_operation_exception
-#endif /*!defined(FEATURE_CHANNEL_SUBSYSTEM)*/
-
-
-#if !defined(FEATURE_S370_CHANNEL)
- #define z900_start_io                            z900_operation_exception
- #define z900_test_io                             z900_operation_exception
- #define z900_halt_io                             z900_operation_exception
- #define z900_test_channel                        z900_operation_exception
- #define z900_store_channel_id                    z900_operation_exception
-#endif /*!defined(FEATURE_S370_CHANNEL)*/
-
-
-#if !defined(FEATURE_IMMEDIATE_AND_RELATIVE)
- #define z900_test_under_mask_high                z900_operation_exception
- #define z900_test_under_mask_low                 z900_operation_exception
- #define z900_branch_relative_on_condition        z900_operation_exception
- #define z900_branch_relative_and_save            z900_operation_exception
- #define z900_branch_relative_on_count            z900_operation_exception
- #define z900_load_halfword_immediate             z900_operation_exception
- #define z900_add_halfword_immediate              z900_operation_exception
- #define z900_multiply_halfword_immediate         z900_operation_exception
- #define z900_compare_halfword_immediate          z900_operation_exception
- #define z900_multiply_single_register            z900_operation_exception
- #define z900_multiply_single                     z900_operation_exception
- #define z900_branch_relative_on_index_high       z900_operation_exception
- #define z900_branch_relative_on_index_low_or_equal z900_operation_exception
-#endif /*!defined(FEATURE_IMMEDIATE_AND_RELATIVE)*/
-
-
-#if !defined(FEATURE_COMPARE_AND_MOVE_EXTENDED)
- #define z900_compare_logical_long_extended       z900_operation_exception
- #define z900_move_long_extended                  z900_operation_exception
-#endif /*!defined(FEATURE_COMPARE_AND_MOVE_EXTENDED)*/
-
-
-#if !defined(FEATURE_CHECKSUM_INSTRUCTION)
- #define z900_checksum                            z900_operation_exception
-#endif /*!defined(FEATURE_CHECKSUM_INSTRUCTION)*/
-
-
-#if !defined(FEATURE_PERFORM_LOCKED_OPERATION)
- #define z900_perform_locked_operation            z900_operation_exception
-#endif /*!defined(FEATURE_PERFORM_LOCKED_OPERATION)*/
-
-
-#if !defined(FEATURE_SUBSPACE_GROUP)
- #define z900_branch_in_subspace_group            z900_operation_exception
-#endif /*!defined(FEATURE_SUBSPACE_GROUP)*/
-
-
-#if !defined(FEATURE_BRANCH_AND_SET_AUTHORITY)
- #define z900_branch_and_set_authority            z900_operation_exception
-#endif /*!defined(FEATURE_BRANCH_AND_SET_AUTHORITY)*/
-
-
-#if !defined(FEATURE_EXPANDED_STORAGE)
- #define z900_page_in                             z900_operation_exception
- #define z900_page_out                            z900_operation_exception
-#endif /*!defined(FEATURE_EXPANDED_STORAGE)*/
-
-
-#if !defined(FEATURE_BROADCASTED_PURGING)
- #define z900_compare_and_swap_and_purge          z900_operation_exception
-#endif /*!defined(FEATURE_BROADCASTED_PURGING)*/
-
-
-#if !defined(FEATURE_BIMODAL_ADDRESSING)
- #define z900_branch_and_set_mode                 z900_operation_exception
- #define z900_branch_and_save_and_set_mode        z900_operation_exception
-#endif /*!defined(FEATURE_BIMODAL_ADDRESSING)*/
-
-
-#if !defined(FEATURE_MOVE_PAGE_FACILITY_2)
- #define z900_move_page                           z900_operation_exception
- #define z900_invalidate_expanded_storage_block_entry z900_operation_exception
- #endif /*!defined(FEATURE_MOVE_PAGE_FACILITY_2)*/
-
-
-#if !defined(FEATURE_BASIC_STORAGE_KEYS)
- #define z900_insert_storage_key                  z900_operation_exception
- #define z900_set_storage_key                     z900_operation_exception
- #define z900_reset_reference_bit                 z900_operation_exception
-#endif /*!defined(FEATURE_BASIC_STORAGE_KEYS)*/
-
-
-#if !defined(FEATURE_LINKAGE_STACK)
- #define z900_branch_and_stack                    z900_operation_exception
- #define z900_modify_stacked_state                z900_operation_exception
- #define z900_extract_stacked_registers           z900_operation_exception
- #define z900_extract_stacked_registers_long      z900_operation_exception
- #define z900_extract_stacked_state               z900_operation_exception
-#endif /*!defined(FEATURE_LINKAGE_STACK)*/
-
-
-#if !defined(FEATURE_DUAL_ADDRESS_SPACE)
- #define z900_insert_address_space_control        z900_operation_exception
- #define z900_set_secondary_asn                   z900_operation_exception
- #define z900_extract_primary_asn                 z900_operation_exception
- #define z900_extract_secondary_asn               z900_operation_exception
- #define z900_program_call                        z900_operation_exception
- #define z900_program_transfer                    z900_operation_exception
- #define z900_set_address_space_control_x         z900_operation_exception
- #define z900_load_address_space_parameters       z900_operation_exception
-#endif /*!defined(FEATURE_DUAL_ADDRESS_SPACE)*/
-
-
-#if !defined(FEATURE_ACCESS_REGISTERS)
- #define z900_load_access_multiple                z900_operation_exception
- #define z900_store_access_multiple               z900_operation_exception
- #define z900_purge_accesslist_lookaside_buffer   z900_operation_exception
- #define z900_test_access                         z900_operation_exception
- #define z900_copy_access                         z900_operation_exception
- #define z900_set_access_register                 z900_operation_exception
- #define z900_extract_access_register             z900_operation_exception
-#endif /*!defined(FEATURE_ACCESS_REGISTERS)*/
-
-
-#if !defined(FEATURE_EXTENDED_STORAGE_KEYS)
- #define z900_insert_storage_key_extended         z900_operation_exception
- #define z900_reset_reference_bit_extended        z900_operation_exception
- #define z900_set_storage_key_extended            z900_operation_exception
-#endif /*!defined(FEATURE_EXTENDED_STORAGE_KEYS)*/
-
-
-#if !defined(FEATURE_EXTENDED_TOD_CLOCK)
- #define z900_set_clock_programmable_field        z900_operation_exception
- #define z900_store_clock_extended                z900_operation_exception
-#endif /*!defined(FEATURE_EXTENDED_TOD_CLOCK)*/
-
-
-#if !defined(FEATURE_VECTOR_FACILITY)
- #define z900_execute_a4xx                       z900_operation_exception
- #if !defined(FEATURE_ESAME)
-  #define z900_execute_a5xx                      z900_operation_exception
- #endif /*!defined(FEATURE_ESAME)*/
-
- #define z900_execute_a6xx                       z900_operation_exception
- #define z900_execute_e4xx                       z900_operation_exception
-#endif /*!defined(FEATURE_VECTOR_FACILITY)*/
-
-
-#if !defined(FEATURE_ESAME)
- #define z900_execute_b9xx                        z900_operation_exception
- #define z900_execute_e3xx                        z900_operation_exception
- #define z900_execute_ebxx                        z900_operation_exception
- #define z900_execute_ecxx                        z900_operation_exception
- #define z900_execute_c0xx                        z900_operation_exception
- #define z900_set_address_mode_24                 z900_operation_exception
- #define z900_set_address_mode_31                 z900_operation_exception
- #define z900_set_address_mode_64                 z900_operation_exception
- #define z900_test_under_mask_highword_high       z900_operation_exception
- #define z900_test_under_mask_highword_low        z900_operation_exception
- #define z900_branch_relative_on_count_long       z900_operation_exception
- #define z900_load_long_halfword_immediate        z900_operation_exception
- #define z900_add_long_halfword_immediate         z900_operation_exception
- #define z900_multiply_long_halfword_immediate    z900_operation_exception
- #define z900_compare_long_halfword_immedate      z900_operation_exception
- #define z900_load_psw_extended                   z900_operation_exception
-#endif /*!defined(FEATURE_ESAME)*/
-
-
-#if !defined(FEATURE_BASIC_FP_EXTENSIONS)
- #define z900_execute_b3xx                        z900_operation_exception
- #define z900_execute_edxx                        z900_operation_exception
-#endif /*!defined(FEATURE_BASIC_FP_EXTENSIONS)*/
-
-
-#if !defined(FEATURE_HEXADECIMAL_FLOATING_POINT)
- #define z900_load_positive_float_long_reg        z900_operation_exception
- #define z900_load_negative_float_long_reg        z900_operation_exception
- #define z900_load_and_test_float_long_reg        z900_operation_exception
- #define z900_load_complement_float_long_reg      z900_operation_exception
- #define z900_halve_float_long_reg                z900_operation_exception
- #define z900_round_float_long_reg                z900_operation_exception
- #define z900_multiply_float_ext_reg              z900_operation_exception
- #define z900_multiply_float_long_to_ext_reg      z900_operation_exception
- #define z900_load_float_long_reg                 z900_operation_exception
- #define z900_compare_float_long_reg              z900_operation_exception
- #define z900_add_float_long_reg                  z900_operation_exception
- #define z900_subtract_float_long_reg             z900_operation_exception
- #define z900_multiply_float_long_reg             z900_operation_exception
- #define z900_divide_float_long_reg               z900_operation_exception
- #define z900_add_unnormal_float_long_reg         z900_operation_exception
- #define z900_subtract_unnormal_float_long_reg    z900_operation_exception
- #define z900_load_positive_float_short_reg       z900_operation_exception
- #define z900_load_negative_float_short_reg       z900_operation_exception
- #define z900_load_and_test_float_short_reg       z900_operation_exception
- #define z900_load_complement_float_short_reg     z900_operation_exception
- #define z900_halve_float_short_reg               z900_operation_exception
- #define z900_round_float_short_reg               z900_operation_exception
- #define z900_add_float_ext_reg                   z900_operation_exception
- #define z900_subtract_float_ext_reg              z900_operation_exception
- #define z900_load_float_short_reg                z900_operation_exception
- #define z900_compare_float_short_reg             z900_operation_exception
- #define z900_add_float_short_reg                 z900_operation_exception
- #define z900_subtract_float_short_reg            z900_operation_exception
- #define z900_multiply_float_short_to_long_reg    z900_operation_exception
- #define z900_divide_float_short_reg              z900_operation_exception
- #define z900_add_unnormal_float_short_reg        z900_operation_exception
- #define z900_subtract_unnormal_float_short_reg   z900_operation_exception
- #define z900_store_float_long                    z900_operation_exception
- #define z900_multiply_float_long_to_ext          z900_operation_exception
- #define z900_load_float_long                     z900_operation_exception
- #define z900_compare_float_long                  z900_operation_exception
- #define z900_add_float_long                      z900_operation_exception
- #define z900_subtract_float_long                 z900_operation_exception
- #define z900_multiply_float_long                 z900_operation_exception
- #define z900_divide_float_long                   z900_operation_exception
- #define z900_add_unnormal_float_long             z900_operation_exception
- #define z900_subtract_unnormal_float_long        z900_operation_exception
- #define z900_store_float_short                   z900_operation_exception
- #define z900_load_float_short                    z900_operation_exception
- #define z900_compare_float_short                 z900_operation_exception
- #define z900_add_float_short                     z900_operation_exception
- #define z900_subtract_float_short                z900_operation_exception
- #define z900_multiply_float_short_to_long        z900_operation_exception
- #define z900_divide_float_short                  z900_operation_exception
- #define z900_add_unnormal_float_short            z900_operation_exception
- #define z900_subtract_unnormal_float_short       z900_operation_exception
- #define z900_divide_float_ext_reg                z900_operation_exception
-#endif /*!defined(FEATURE_HEXADECIMAL_FLOATING_POINT)*/
-
-
-#if !defined(FEATURE_HFP_EXTENSIONS)
- #define z900_loadlength_float_short_to_long_reg  z900_operation_exception
- #define z900_loadlength_float_long_to_ext_reg    z900_operation_exception
- #define z900_loadlength_float_short_to_ext_reg   z900_operation_exception
- #define z900_squareroot_float_ext_reg            z900_operation_exception
- #define z900_multiply_float_short_reg            z900_operation_exception
- #define z900_load_positive_float_ext_reg         z900_operation_exception
- #define z900_load_negative_float_ext_reg         z900_operation_exception
- #define z900_load_and_test_float_ext_reg         z900_operation_exception
- #define z900_load_complement_float_ext_reg       z900_operation_exception
- #define z900_round_float_ext_to_short_reg        z900_operation_exception
- #define z900_load_fp_int_float_ext_reg           z900_operation_exception
- #define z900_compare_float_ext_reg               z900_operation_exception
- #define z900_load_fp_int_float_short_reg         z900_operation_exception
- #define z900_load_fp_int_float_long_reg          z900_operation_exception
- #define z900_convert_fixed_to_float_short_reg    z900_operation_exception
- #define z900_convert_fixed_to_float_long_reg     z900_operation_exception
- #define z900_convert_fixed_to_float_ext_reg      z900_operation_exception
- #define z900_convert_float_short_to_fixed_reg    z900_operation_exception
- #define z900_convert_float_long_to_fixed_reg     z900_operation_exception
- #define z900_convert_float_ext_to_fixed_reg      z900_operation_exception
- #define z900_loadlength_float_short_to_long      z900_operation_exception
- #define z900_loadlength_float_long_to_ext        z900_operation_exception
- #define z900_loadlength_float_short_to_ext       z900_operation_exception
- #define z900_squareroot_float_short              z900_operation_exception
- #define z900_squareroot_float_long               z900_operation_exception
- #define z900_multiply_float_short                z900_operation_exception
-#endif /*!defined(FEATURE_HFP_EXTENSIONS)*/
-
-
-#if !defined(FEATURE_EMULATE_VM)
- #define z900_inter_user_communication_vehicle    z900_operation_exception
-#endif /*!defined(FEATURE_EMULATE_VM)*/
-
-
-#if !defined(FEATURE_RESUME_PROGRAM)
- #define z900_resume_program                      z900_operation_exception
-#endif /*!defined(FEATURE_RESUME_PROGRAM)*/
-
-
-#if !defined(FEATURE_COMPRESSION)
- #define z900_compression_call                    z900_operation_exception
-#endif /*!defined(FEATURE_COMPRESSION)*/
-
-
-#if !defined(FEATURE_LOCK_PAGE)
- #define z900_lock_page                           z900_operation_exception
-#endif /*!defined(FEATURE_LOCK_PAGE)*/
-
-
-#if !defined(FEATURE_SQUARE_ROOT)
- #define z900_squareroot_float_long_reg           z900_operation_exception
- #define z900_squareroot_float_short_reg          z900_operation_exception
-#endif /*!defined(FEATURE_SQUARE_ROOT)*/
-
-
-#if !defined(FEATURE_INTERPRETIVE_EXECUTION)
- #define z900_start_interpretive_execution        z900_operation_exception
-#endif /*!defined(FEATURE_INTERPRETIVE_EXECUTION)*/
-
-
-#if !defined(_FEATURE_SIE)
- #define z900_reset_channel_path                  z900_operation_exception
- #define z900_connect_channel_set                 z900_operation_exception
- #define z900_disconnect_channel_set              z900_operation_exception
-#endif /*!defined(_FEATURE_SIE)*/
-
-
-#if !defined(FEATURE_STRUCTURED_EXTERNAL_STORAGE)
- #define z900_ses_opcode_0105                     z900_operation_exception
- #define z900_ses_opcode_0106                     z900_operation_exception
- #define z900_ses_opcode_0108                     z900_operation_exception
- #define z900_ses_opcode_0109                     z900_operation_exception
- #define z900_ses_opcode_B260                     z900_operation_exception
- #define z900_ses_opcode_B261                     z900_operation_exception
- #define z900_ses_opcode_B264                     z900_operation_exception
- #define z900_ses_opcode_B265                     z900_operation_exception
- #define z900_ses_opcode_B266                     z900_operation_exception
- #define z900_ses_opcode_B267                     z900_operation_exception
- #define z900_ses_opcode_B268                     z900_operation_exception
- #define z900_ses_opcode_B272                     z900_operation_exception
- #define z900_ses_opcode_B27A                     z900_operation_exception
- #define z900_ses_opcode_B27B                     z900_operation_exception
- #define z900_ses_opcode_B27C                     z900_operation_exception
- #define z900_ses_opcode_B27E                     z900_operation_exception
- #define z900_ses_opcode_B27F                     z900_operation_exception
- #define z900_ses_opcode_B2A4                     z900_operation_exception
- #define z900_ses_opcode_B2A8                     z900_operation_exception
- #define z900_ses_opcode_B2F1                     z900_operation_exception
- #define z900_ses_opcode_B2F6                     z900_operation_exception
-#endif /*!defined(FEATURE_STRUCTURED_EXTERNAL_STORAGE)*/
-
-
-#if !defined(FEATURE_EXTENDED_TRANSLATION)
- #define z900_translate_extended                  z900_operation_exception
- #define z900_convert_unicode_to_utf8             z900_operation_exception
- #define z900_convert_utf8_to_unicode             z900_operation_exception
-#endif /*!defined(FEATURE_EXTENDED_TRANSLATION)*/
-
-
-#if !defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
- #define z900_compare_logical_long_unicode        z900_operation_exception
- #define z900_move_long_unicode                   z900_operation_exception
- #define z900_pack_ascii                          z900_operation_exception
- #define z900_pack_unicode                        z900_operation_exception
- #define z900_test_decimal                        z900_operation_exception
- #define z900_translate_one_to_one                z900_operation_exception
- #define z900_translate_one_to_two                z900_operation_exception
- #define z900_translate_two_to_one                z900_operation_exception
- #define z900_translate_two_to_two                z900_operation_exception
- #define z900_unpack_ascii                        z900_operation_exception
- #define z900_unpack_unicode                      z900_operation_exception
-#endif /*!defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
-
-
-#if !defined(FEATURE_LOAD_REVERSED)
- #define z900_load_reversed_long_register         z900_operation_exception
- #define z900_load_reversed_register              z900_operation_exception
- #define z900_load_reversed_long                  z900_operation_exception
- #define z900_load_reversed                       z900_operation_exception
- #define z900_load_reversed_high                  z900_operation_exception
- #define z900_store_reversed_long                 z900_operation_exception
- #define z900_store_reversed                      z900_operation_exception
- #define z900_store_reversed_high                 z900_operation_exception
-#endif /*!defined(FEATURE_LOAD_REVERSED)*/
-
-
-#if !defined(FEATURE_SERVICE_PROCESSOR)
- #define z900_service_call                        z900_operation_exception
-#endif /*!defined(FEATURE_SERVICE_PROCESSOR)*/
-
-
-#endif /* _GEN_ARCH */
+#if !defined(FEATURE_ESAME_N3_ESA390) && !defined(FEATURE_ESAME)
+ UNDEF_INST(add_logical_carry);
+ UNDEF_INST(add_logical_carry_register);
+ UNDEF_INST(branch_relative_and_save_long);
+ UNDEF_INST(branch_relative_on_condition_long);
+ UNDEF_INST(divide_logical);
+ UNDEF_INST(divide_logical_register);
+ UNDEF_INST(extract_psw);
+ UNDEF_INST(load_address_relative_long);
+ UNDEF_INST(multiply_logical);
+ UNDEF_INST(multiply_logical_register);
+ UNDEF_INST(rotate_left_single_logical);
+ UNDEF_INST(set_addressing_mode_24);
+ UNDEF_INST(set_addressing_mode_31);
+ UNDEF_INST(subtract_logical_borrow);
+ UNDEF_INST(subtract_logical_borrow_register);
+ UNDEF_INST(test_addressing_mode);
+#endif /*!defined(FEATURE_ESAME_N3_ESA390) && !defined(FEATURE_ESAME)*/
+
+
+#if !defined(FEATURE_ESAME_N3_ESA390) && !defined(FEATURE_ESAME_INSTALLED) && !defined(FEATURE_ESAME)
+ UNDEF_INST(store_facilities_list);
+#endif /*!defined(FEATURE_ESAME_N3_ESA390) && !defined(FEATURE_ESAME_INSTALLED)*/
+
+
+#if !defined(FEATURE_CANCEL_IO_FACILITY)
+ UNDEF_INST(cancel_subchannel)
+#endif /*!defined(FEATURE_CANCEL_IO_FACILITY)*/
 
 
 /* The following execute_xxxx routines can be optimized by the
@@ -1538,7 +558,7 @@ DEF_INST(execute_b3xx)
 
 DEF_INST(execute_edxx)
 {
-    opcode_edxx[inst[1]][ARCH_MODE](inst, execflag, regs);
+    opcode_edxx[inst[5]][ARCH_MODE](inst, execflag, regs);
 }
 #endif /*defined(FEATURE_BASIC_FP_EXTENSIONS)*/
 
@@ -1549,7 +569,7 @@ DEF_INST(execute_e5xx)
 }
 
 
-#if defined(FEATURE_ESAME)
+#if defined(FEATURE_ESAME) && !defined(FEATURE_ESAME_N3_ESA390)
 DEF_INST(execute_a5xx)
 {
     opcode_a5xx[inst[1] & 0x0F][ARCH_MODE](inst, execflag, regs);
@@ -1638,7 +658,7 @@ DEF_INST(operation_exception)
 
 DEF_INST(dummy_instruction)
 {
-    logmsg("Dummy instruction: "); display_inst (regs, inst);
+    logmsg("Dummy instruction: "); ARCH_DEP(display_inst) (regs, inst);
 
     if( !execflag )
     {
@@ -1924,9 +944,9 @@ zz_func opcode_01xx[256][GEN_MAXARCH] = {
  /*0108*/ GENx___x390x900 (ses_opcode_0108),                    /* TMPS      */
  /*0109*/ GENx___x390x900 (ses_opcode_0109),                    /* CMPS      */
  /*010A*/ GENx___x___x___ ,
- /*010B*/ GENx___x___x900 (test_addressing_mode),               /*!TAM       */
- /*010C*/ GENx___x___x900 (set_addressing_mode_24),             /*!SAM24     */
- /*010D*/ GENx___x___x900 (set_addressing_mode_31),             /*!SAM31     */
+ /*010B*/ GENx___x390x900 (test_addressing_mode),               /*!TAM       */
+ /*010C*/ GENx___x390x900 (set_addressing_mode_24),             /*!SAM24     */
+ /*010D*/ GENx___x390x900 (set_addressing_mode_31),             /*!SAM31     */
  /*010E*/ GENx___x___x900 (set_addressing_mode_64),             /*!SAM64     */
  /*010F*/ GENx___x___x___ ,
  /*0110*/ GENx___x___x___ ,
@@ -2516,13 +1536,13 @@ zz_func opcode_b2xx[256][GEN_MAXARCH] = {
  /*B226*/ GENx370x390x900 (extract_primary_asn),                /* EPAR      */
  /*B227*/ GENx370x390x900 (extract_secondary_asn),              /* ESAR      */
  /*B228*/ GENx370x390x900 (program_transfer),                   /* PT        */
- /*B229*/ GENx___x390x900 (insert_storage_key_extended),        /* ISKE      */
- /*B22A*/ GENx___x390x900 (reset_reference_bit_extended),       /* RRBE      */
- /*B22B*/ GENx___x390x900 (set_storage_key_extended),           /* SSKE      */
+ /*B229*/ GENx370x390x900 (insert_storage_key_extended),        /* ISKE      */
+ /*B22A*/ GENx370x390x900 (reset_reference_bit_extended),       /* RRBE      */
+ /*B22B*/ GENx370x390x900 (set_storage_key_extended),           /* SSKE      */
  /*B22C*/ GENx370x390x900 (test_block),                         /* TB        */
  /*B22D*/ GENx370x390x900 (divide_float_ext_reg),               /* DXR       */
- /*B22E*/ GENx___x390x___ (page_in),                            /* PGIN      */
- /*B22F*/ GENx___x390x___ (page_out),                           /* PGOUT     */
+ /*B22E*/ GENx___x390x900 (page_in),                            /* PGIN      */
+ /*B22F*/ GENx___x390x900 (page_out),                           /* PGOUT     */
  /*B230*/ GENx___x390x900 (clear_subchannel),                   /* CSCH      */
  /*B231*/ GENx___x390x900 (halt_subchannel),                    /* HSCH      */
  /*B232*/ GENx___x390x900 (modify_subchannel),                  /* MSCH      */
@@ -2564,7 +1584,7 @@ zz_func opcode_b2xx[256][GEN_MAXARCH] = {
  /*B256*/ GENx___x___x___ ,
  /*B257*/ GENx___x390x900 (compare_until_substring_equal),      /* CUSE      */
  /*B258*/ GENx___x390x900 (branch_in_subspace_group),           /* BSG       */
- /*B259*/ GENx___x390x___ (invalidate_expanded_storage_block_entry), /* IESBE*/
+ /*B259*/ GENx___x390x900 (invalidate_expanded_storage_block_entry), /* IESBE*/
  /*B25A*/ GENx___x390x900 (branch_and_set_authority),           /* BSA       */
  /*B25B*/ GENx___x___x___ ,                                     /*%PGXIN     */
  /*B25C*/ GENx___x___x___ ,                                     /*%PGXOUT    */
@@ -2593,7 +1613,7 @@ zz_func opcode_b2xx[256][GEN_MAXARCH] = {
  /*B273*/ GENx___x___x___ ,                                     /*%SIGA      */
  /*B274*/ GENx___x___x___ ,
  /*B275*/ GENx___x___x___ ,
- /*B276*/ GENx___x___x900 (dummy_instruction),                  /*!XSCH      */
+ /*B276*/ GENx___x390x900 (cancel_subchannel),                  /*!XSCH      */
  /*B277*/ GENx___x390x900 (resume_program),                     /* RP        */
  /*B278*/ GENx___x390x900 (store_clock_extended),               /* STCKE     */
  /*B279*/ GENx___x390x900 (set_address_space_control_x),        /* SACF      */
@@ -2628,11 +1648,11 @@ zz_func opcode_b2xx[256][GEN_MAXARCH] = {
  /*B296*/ GENx___x___x___ ,
  /*B297*/ GENx___x___x___ ,
  /*B298*/ GENx___x___x___ ,
- /*B299*/ GENx___x___x___ ,
+ /*B299*/ GENx___x390x900 (set_rounding_mode),                  /* SRNM      */
  /*B29A*/ GENx___x___x___ ,
  /*B29B*/ GENx___x___x___ ,
- /*B29C*/ GENx___x___x900 (store_floating_point_control_register), /* STFPC  */
- /*B29D*/ GENx___x___x900 (load_floating_point_control_register),  /* LFPC   */
+ /*B29C*/ GENx___x390x900 (store_fpc),                          /* STFPC     */
+ /*B29D*/ GENx___x390x900 (load_fpc),                           /* LFPC      */
  /*B29E*/ GENx___x___x___ ,
  /*B29F*/ GENx___x___x___ ,
  /*B2A0*/ GENx___x___x___ ,
@@ -2736,36 +1756,36 @@ zz_func opcode_b2xx[256][GEN_MAXARCH] = {
 // #if defined(FEATURE_BASIC_FP_EXTENSIONS)
 
 zz_func opcode_b3xx[256][GEN_MAXARCH] = {
- /*B300*/ GENx___x___x___ ,
- /*B301*/ GENx___x___x___ ,
- /*B302*/ GENx___x___x___ ,
+ /*B300*/ GENx___x390x900 (load_positive_bfp_short_reg),        /* LPEBR     */
+ /*B301*/ GENx___x390x900 (load_negative_bfp_short_reg),        /* LNEBR     */
+ /*B302*/ GENx___x390x900 (load_and_test_bfp_short_reg),        /* LTEBR     */
  /*B303*/ GENx___x___x___ ,
- /*B304*/ GENx___x___x___ ,
+ /*B304*/ GENx___x390x900 (loadlength_bfp_short_to_long_reg),   /* LDEBR     */
  /*B305*/ GENx___x___x___ ,
  /*B306*/ GENx___x___x___ ,
  /*B307*/ GENx___x___x___ ,
- /*B308*/ GENx___x___x___ ,
- /*B309*/ GENx___x___x___ ,
- /*B30A*/ GENx___x___x___ ,
- /*B30B*/ GENx___x___x___ ,
+ /*B308*/ GENx___x390x900 (compare_and_signal_bfp_short_reg),   /* KEBR      */
+ /*B309*/ GENx___x390x900 (compare_bfp_short_reg),              /* CEBR      */
+ /*B30A*/ GENx___x390x900 (add_bfp_short_reg),                  /* AEBR      */
+ /*B30B*/ GENx___x390x900 (subtract_bfp_short_reg),             /* SEBR      */
  /*B30C*/ GENx___x___x___ ,
- /*B30D*/ GENx___x___x___ ,
+ /*B30D*/ GENx___x390x900 (divide_bfp_short_reg),               /* DEBR      */
  /*B30E*/ GENx___x___x___ ,
  /*B30F*/ GENx___x___x___ ,
- /*B310*/ GENx___x___x___ ,
- /*B311*/ GENx___x___x___ ,
- /*B312*/ GENx___x___x___ ,
+ /*B310*/ GENx___x390x900 (load_positive_bfp_long_reg),         /* LPDBR     */
+ /*B311*/ GENx___x390x900 (load_negative_bfp_long_reg),         /* LNDBR     */
+ /*B312*/ GENx___x390x900 (load_and_test_bfp_long_reg),         /* LTDBR     */
  /*B313*/ GENx___x___x___ ,
- /*B314*/ GENx___x___x___ ,
- /*B315*/ GENx___x___x___ ,
- /*B316*/ GENx___x___x___ ,
- /*B317*/ GENx___x___x___ ,
- /*B318*/ GENx___x___x___ ,
- /*B319*/ GENx___x___x___ ,
- /*B31A*/ GENx___x___x___ ,
- /*B31B*/ GENx___x___x___ ,
- /*B31C*/ GENx___x___x___ ,
- /*B31D*/ GENx___x___x___ ,
+ /*B314*/ GENx___x390x900 (squareroot_bfp_short_reg),           /* SQEBR     */
+ /*B315*/ GENx___x390x900 (squareroot_bfp_long_reg),            /* SQDBR     */
+ /*B316*/ GENx___x390x900 (squareroot_bfp_ext_reg),             /* SQXBR     */
+ /*B317*/ GENx___x390x900 (multiply_bfp_short_reg),             /* MEEBR     */
+ /*B318*/ GENx___x390x900 (compare_and_signal_bfp_long_reg),    /* KDBR      */
+ /*B319*/ GENx___x390x900 (compare_bfp_long_reg),               /* CDBR      */
+ /*B31A*/ GENx___x390x900 (add_bfp_long_reg),                   /* ADBR      */
+ /*B31B*/ GENx___x390x900 (subtract_bfp_long_reg),              /* SDBR      */
+ /*B31C*/ GENx___x390x900 (multiply_bfp_long_reg),              /* MDBR      */
+ /*B31D*/ GENx___x390x900 (divide_bfp_long_reg),                /* DDBR      */
  /*B31E*/ GENx___x___x___ ,
  /*B31F*/ GENx___x___x___ ,
  /*B320*/ GENx___x___x___ ,
@@ -2800,32 +1820,32 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B33D*/ GENx___x___x___ ,
  /*B33E*/ GENx___x___x___ ,
  /*B33F*/ GENx___x___x___ ,
- /*B340*/ GENx___x___x___ ,
- /*B341*/ GENx___x___x___ ,
- /*B342*/ GENx___x___x___ ,
+ /*B340*/ GENx___x390x900 (load_positive_bfp_ext_reg),          /* LPXBR     */
+ /*B341*/ GENx___x390x900 (load_negative_bfp_ext_reg),          /* LNXBR     */
+ /*B342*/ GENx___x390x900 (load_and_test_bfp_ext_reg),          /* LTXBR     */
  /*B343*/ GENx___x___x___ ,
- /*B344*/ GENx___x___x___ ,
+ /*B344*/ GENx___x390x900 (round_bfp_long_to_short_reg),        /* LEDBR     */
  /*B345*/ GENx___x___x___ ,
  /*B346*/ GENx___x___x___ ,
  /*B347*/ GENx___x___x___ ,
- /*B348*/ GENx___x___x___ ,
- /*B349*/ GENx___x___x___ ,
- /*B34A*/ GENx___x___x___ ,
- /*B34B*/ GENx___x___x___ ,
- /*B34C*/ GENx___x___x___ ,
- /*B34D*/ GENx___x___x___ ,
+ /*B348*/ GENx___x390x900 (compare_and_signal_bfp_ext_reg),     /* KXBR      */
+ /*B349*/ GENx___x390x900 (compare_bfp_ext_reg),                /* CXBR      */
+ /*B34A*/ GENx___x390x900 (add_bfp_ext_reg),                    /* AXBR      */
+ /*B34B*/ GENx___x390x900 (subtract_bfp_ext_reg),               /* SXBR      */
+ /*B34C*/ GENx___x390x900 (multiply_bfp_ext_reg),               /* MXBR      */
+ /*B34D*/ GENx___x390x900 (divide_bfp_ext_reg),                 /* DXBR      */
  /*B34E*/ GENx___x___x___ ,
  /*B34F*/ GENx___x___x___ ,
- /*B350*/ GENx___x___x___ ,
- /*B351*/ GENx___x___x___ ,
+ /*B350*/ GENx___x390x900 (convert_float_long_to_bfp_short_reg),/* TBEDR     */
+ /*B351*/ GENx___x390x900 (convert_float_long_to_bfp_long_reg), /* TBDR      */
  /*B352*/ GENx___x___x___ ,
  /*B353*/ GENx___x___x___ ,
  /*B354*/ GENx___x___x___ ,
  /*B355*/ GENx___x___x___ ,
  /*B356*/ GENx___x___x___ ,
  /*B357*/ GENx___x___x___ ,
- /*B358*/ GENx___x___x___ ,
- /*B359*/ GENx___x___x___ ,
+ /*B358*/ GENx___x390x900 (convert_bfp_short_to_float_long_reg),/* THDER     */
+ /*B359*/ GENx___x390x900 (convert_bfp_long_to_float_long_reg), /* THDR      */
  /*B35A*/ GENx___x___x___ ,
  /*B35B*/ GENx___x___x___ ,
  /*B35C*/ GENx___x___x___ ,
@@ -2837,7 +1857,7 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B362*/ GENx___x390x900 (load_and_test_float_ext_reg),        /* LTXR      */
  /*B363*/ GENx___x390x900 (load_complement_float_ext_reg),      /* LCXR      */
  /*B364*/ GENx___x___x___ ,
- /*B365*/ GENx___x___x___ ,
+ /*B365*/ GENx___x390x900 (load_float_ext_reg),                 /* LXR       */
  /*B366*/ GENx___x390x900 (round_float_ext_to_short_reg),       /* LEXR      */
  /*B367*/ GENx___x390x900 (load_fp_int_float_ext_reg),          /* FIXR      */
  /*B368*/ GENx___x___x___ ,
@@ -2852,9 +1872,9 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B371*/ GENx___x___x___ ,
  /*B372*/ GENx___x___x___ ,
  /*B373*/ GENx___x___x___ ,
- /*B374*/ GENx___x___x___ ,
- /*B375*/ GENx___x___x___ ,
- /*B376*/ GENx___x___x___ ,
+ /*B374*/ GENx___x390x900 (load_zero_float_short_reg),          /* LZER      */
+ /*B375*/ GENx___x390x900 (load_zero_float_long_reg),           /* LZDR      */
+ /*B376*/ GENx___x390x900 (load_zero_float_ext_reg),            /* LZXR      */
  /*B377*/ GENx___x390x900 (load_fp_int_float_short_reg),        /* FIER      */
  /*B378*/ GENx___x___x___ ,
  /*B379*/ GENx___x___x___ ,
@@ -2868,7 +1888,7 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B381*/ GENx___x___x___ ,
  /*B382*/ GENx___x___x___ ,
  /*B383*/ GENx___x___x___ ,
- /*B384*/ GENx___x___x900 (set_floating_point_control_register), /* SFPC     */
+ /*B384*/ GENx___x390x900 (set_fpc),                            /* SFPC      */
  /*B385*/ GENx___x___x___ ,
  /*B386*/ GENx___x___x___ ,
  /*B387*/ GENx___x___x___ ,
@@ -2876,7 +1896,7 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B389*/ GENx___x___x___ ,
  /*B38A*/ GENx___x___x___ ,
  /*B38B*/ GENx___x___x___ ,
- /*B38C*/ GENx___x___x___ ,
+ /*B38C*/ GENx___x390x900 (extract_fpc),                        /* EFPC      */
  /*B38D*/ GENx___x___x___ ,
  /*B38E*/ GENx___x___x___ ,
  /*B38F*/ GENx___x___x___ ,
@@ -2884,12 +1904,12 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B391*/ GENx___x___x___ ,
  /*B392*/ GENx___x___x___ ,
  /*B393*/ GENx___x___x___ ,
- /*B394*/ GENx___x___x___ ,
- /*B395*/ GENx___x___x___ ,
+ /*B394*/ GENx___x390x900 (convert_fix32_to_bfp_short_reg),     /* CEFBR     */
+ /*B395*/ GENx___x390x900 (convert_fix32_to_bfp_long_reg),      /* CDFBR     */
  /*B396*/ GENx___x___x___ ,
  /*B397*/ GENx___x___x___ ,
- /*B398*/ GENx___x___x___ ,
- /*B399*/ GENx___x___x___ ,
+ /*B398*/ GENx___x390x900 (convert_bfp_short_to_fix32_reg),     /* CFEBR     */
+ /*B399*/ GENx___x390x900 (convert_bfp_long_to_fix32_reg),      /* CFDBR     */
  /*B39A*/ GENx___x___x___ ,
  /*B39B*/ GENx___x___x___ ,
  /*B39C*/ GENx___x___x___ ,
@@ -3132,14 +2152,14 @@ zz_func opcode_b9xx[256][GEN_MAXARCH] = {
  /*B983*/ GENx___x___x___ ,
  /*B984*/ GENx___x___x___ ,
  /*B985*/ GENx___x___x___ ,
- /*B986*/ GENx___x___x900 (dummy_instruction),                  /*!MLGR      */
+ /*B986*/ GENx___x___x900 (multiply_logical_long_register),     /*!MLGR      */
  /*B987*/ GENx___x___x900 (divide_logical_long_register),       /*!DLGR      */
  /*B988*/ GENx___x___x900 (add_logical_carry_long_register),    /*!ALCGR     */
  /*B989*/ GENx___x___x900 (subtract_logical_borrow_long_register), /*!SLBGR  */
  /*B98A*/ GENx___x___x___ ,
  /*B98B*/ GENx___x___x___ ,
  /*B98C*/ GENx___x___x___ ,
- /*B98D*/ GENx___x___x900 (extract_psw),                        /*!EPSW      */
+ /*B98D*/ GENx___x390x900 (extract_psw),                        /*!EPSW      */
  /*B98E*/ GENx___x___x___ ,
  /*B98F*/ GENx___x___x___ ,
  /*B990*/ GENx___x___x900 (dummy_instruction),                  /*!TRTT      */
@@ -3148,10 +2168,10 @@ zz_func opcode_b9xx[256][GEN_MAXARCH] = {
  /*B993*/ GENx___x___x900 (dummy_instruction),                  /*!TROO      */
  /*B994*/ GENx___x___x___ ,
  /*B995*/ GENx___x___x___ ,
- /*B996*/ GENx___x___x900 (dummy_instruction),                  /*!MLR       */
- /*B997*/ GENx___x___x900 (divide_logical_register),            /*!DLR       */
- /*B998*/ GENx___x___x900 (add_logical_carry_register),         /*!ALCR      */
- /*B999*/ GENx___x___x900 (subtract_logical_borrow_register),   /*!SLBR      */
+ /*B996*/ GENx___x390x900 (multiply_logical_register),          /*!MLR       */
+ /*B997*/ GENx___x390x900 (divide_logical_register),            /*!DLR       */
+ /*B998*/ GENx___x390x900 (add_logical_carry_register),         /*!ALCR      */
+ /*B999*/ GENx___x390x900 (subtract_logical_borrow_register),   /*!SLBR      */
  /*B99A*/ GENx___x___x___ ,
  /*B99B*/ GENx___x___x___ ,
  /*B99C*/ GENx___x___x___ ,
@@ -3260,12 +2280,12 @@ zz_func opcode_b9xx[256][GEN_MAXARCH] = {
 // #if defined(FEATURE_ESAME)
 
 zz_func opcode_c0xx[16][GEN_MAXARCH] = {
- /*C0x0*/ GENx___x___x900 (load_address_relative_long),         /*!LARL      */
+ /*C0x0*/ GENx___x390x900 (load_address_relative_long),         /*!LARL      */
  /*C0x1*/ GENx___x___x___ ,
  /*C0x2*/ GENx___x___x___ ,
  /*C0x3*/ GENx___x___x___ ,
- /*C0x4*/ GENx___x___x900 (branch_relative_on_condition_long),  /*!BRCL      */
- /*C0x5*/ GENx___x___x900 (branch_relative_and_save_long),      /*!BRASL     */
+ /*C0x4*/ GENx___x390x900 (branch_relative_on_condition_long),  /*!BRCL      */
+ /*C0x5*/ GENx___x390x900 (branch_relative_and_save_long),      /*!BRASL     */
  /*C0x6*/ GENx___x___x___ ,
  /*C0x7*/ GENx___x___x___ ,
  /*C0x8*/ GENx___x___x___ ,
@@ -3296,14 +2316,14 @@ zz_func opcode_e3xx[256][GEN_MAXARCH] = {
  /*E30B*/ GENx___x___x900 (subtract_logical_long),              /*!SLG       */
  /*E30C*/ GENx___x___x900 (multiply_single_long),               /*!MSG       */
  /*E30D*/ GENx___x___x900 (divide_single_long),                 /*!DSG       */
- /*E30E*/ GENx___x___x900 (dummy_instruction),                  /*!CVBG      */
+ /*E30E*/ GENx___x___x900 (convert_to_binary_long),             /*!CVBG      */
  /*E30F*/ GENx___x___x900 (load_reversed_long),                 /*!LRVG      */
  /*E310*/ GENx___x___x___ ,
  /*E311*/ GENx___x___x___ ,
  /*E312*/ GENx___x___x___ ,
  /*E313*/ GENx___x___x___ ,
  /*E314*/ GENx___x___x900 (load_long_fullword),                 /*!LGF       */
- /*E315*/ GENx___x___x___ ,
+ /*E315*/ GENx___x___x900 (load_long_halfword),                 /*!LGH       */
  /*E316*/ GENx___x___x900 (load_logical_long_fullword),         /*!LLGF      */
  /*E317*/ GENx___x___x900 (load_logical_long_thirtyone),        /*!LLGT/LCLAG*/
  /*E318*/ GENx___x___x900 (add_long_fullword),                  /*!AGF       */
@@ -3313,7 +2333,7 @@ zz_func opcode_e3xx[256][GEN_MAXARCH] = {
  /*E31C*/ GENx___x___x900 (multiply_single_long_fullword),      /*!MSGF      */
  /*E31D*/ GENx___x___x900 (divide_single_long_fullword),        /*!DSGF      */
  /*E31E*/ GENx___x390x900 (load_reversed),                      /*!LRV       */
- /*E31F*/ GENx___x___x900 (load_reversed_half),                 /*!LRVH      */
+ /*E31F*/ GENx___x390x900 (load_reversed_half),                 /*!LRVH      */
  /*E320*/ GENx___x___x900 (compare_long),                       /*!CG        */
  /*E321*/ GENx___x___x900 (compare_logical_long),               /*!CLG       */
  /*E322*/ GENx___x___x___ ,
@@ -3328,7 +2348,7 @@ zz_func opcode_e3xx[256][GEN_MAXARCH] = {
  /*E32B*/ GENx___x___x___ ,
  /*E32C*/ GENx___x___x___ ,
  /*E32D*/ GENx___x___x___ ,
- /*E32E*/ GENx___x___x900 (dummy_instruction),                  /*!CVDG      */
+ /*E32E*/ GENx___x___x900 (convert_to_decimal_long),            /*!CVDG      */
  /*E32F*/ GENx___x___x900 (store_reversed_long),                /*!STRVG     */
  /*E330*/ GENx___x___x900 (compare_long_fullword),              /*!CGF       */
  /*E331*/ GENx___x___x900 (compare_logical_long_fullword),      /*!CLGF      */
@@ -3345,7 +2365,7 @@ zz_func opcode_e3xx[256][GEN_MAXARCH] = {
  /*E33C*/ GENx___x___x___ ,
  /*E33D*/ GENx___x___x___ ,
  /*E33E*/ GENx___x390x900 (store_reversed),                     /*!STRV      */
- /*E33F*/ GENx___x___x900 (store_reversed_half),                /*!STRVH     */
+ /*E33F*/ GENx___x390x900 (store_reversed_half),                /*!STRVH     */
  /*E340*/ GENx___x___x___ ,
  /*E341*/ GENx___x___x___ ,
  /*E342*/ GENx___x___x___ ,
@@ -3416,7 +2436,7 @@ zz_func opcode_e3xx[256][GEN_MAXARCH] = {
  /*E383*/ GENx___x___x___ ,
  /*E384*/ GENx___x___x___ ,
  /*E385*/ GENx___x___x___ ,
- /*E386*/ GENx___x___x900 (dummy_instruction),                  /*!MLG       */
+ /*E386*/ GENx___x___x900 (multiply_logical_long),              /*!MLG       */
  /*E387*/ GENx___x___x900 (divide_logical_long),                /*!DLG       */
  /*E388*/ GENx___x___x900 (add_logical_carry_long),             /*!ALCG      */
  /*E389*/ GENx___x___x900 (subtract_logical_borrow_long),       /*!SLBG      */
@@ -3432,10 +2452,10 @@ zz_func opcode_e3xx[256][GEN_MAXARCH] = {
  /*E393*/ GENx___x___x___ ,
  /*E394*/ GENx___x___x___ ,
  /*E395*/ GENx___x___x___ ,
- /*E396*/ GENx___x___x900 (dummy_instruction),                  /*!ML        */
- /*E397*/ GENx___x___x900 (divide_logical),                     /*!DL        */
- /*E398*/ GENx___x___x900 (add_logical_carry),                  /*!ALC       */
- /*E399*/ GENx___x___x900 (subtract_logical_borrow),            /*!SLB       */
+ /*E396*/ GENx___x390x900 (multiply_logical),                   /*!ML        */
+ /*E397*/ GENx___x390x900 (divide_logical),                     /*!DL        */
+ /*E398*/ GENx___x390x900 (add_logical_carry),                  /*!ALC       */
+ /*E399*/ GENx___x390x900 (subtract_logical_borrow),            /*!SLB       */
  /*E39A*/ GENx___x___x___ ,
  /*E39B*/ GENx___x___x___ ,
  /*E39C*/ GENx___x___x___ ,
@@ -3819,7 +2839,7 @@ zz_func opcode_ebxx[256][GEN_MAXARCH] = {
  /*EB0C*/ GENx___x___x900 (shift_right_single_logical_long),    /*!SRLG      */
  /*EB0D*/ GENx___x___x900 (shift_left_single_logical_long),     /*!SLLG      */
  /*EB0E*/ GENx___x___x___ ,
- /*EB0F*/ GENx___x___x900 (dummy_instruction),                  /*!TRACG     */
+ /*EB0F*/ GENx___x___x900 (trace_long),                         /*!TRACG     */
  /*EB10*/ GENx___x___x___ ,
  /*EB11*/ GENx___x___x___ ,
  /*EB12*/ GENx___x___x___ ,
@@ -3833,7 +2853,7 @@ zz_func opcode_ebxx[256][GEN_MAXARCH] = {
  /*EB1A*/ GENx___x___x___ ,
  /*EB1B*/ GENx___x___x___ ,
  /*EB1C*/ GENx___x___x900 (rotate_left_single_logical_long),    /*!RLLG      */
- /*EB1D*/ GENx___x___x900 (rotate_left_single_logical),         /*!RLL       */
+ /*EB1D*/ GENx___x390x900 (rotate_left_single_logical),         /*!RLL       */
  /*EB1E*/ GENx___x___x___ ,
  /*EB1F*/ GENx___x___x___ ,
  /*EB20*/ GENx___x___x900 (compare_logical_characters_under_mask_high), /*!CLMH */
@@ -4332,32 +3352,32 @@ zz_func opcode_edxx[256][GEN_MAXARCH] = {
  /*ED01*/ GENx___x___x___ ,
  /*ED02*/ GENx___x___x___ ,
  /*ED03*/ GENx___x___x___ ,
- /*ED04*/ GENx___x___x___ ,
+ /*ED04*/ GENx___x390x900 (loadlength_bfp_short_to_long),       /* LDEB      */
  /*ED05*/ GENx___x___x___ ,
  /*ED06*/ GENx___x___x___ ,
  /*ED07*/ GENx___x___x___ ,
- /*ED08*/ GENx___x___x___ ,
- /*ED09*/ GENx___x___x___ ,
- /*ED0A*/ GENx___x___x___ ,
- /*ED0B*/ GENx___x___x___ ,
+ /*ED08*/ GENx___x390x900 (compare_and_signal_bfp_short),       /* KEB       */
+ /*ED09*/ GENx___x390x900 (compare_bfp_short),                  /* CEB       */
+ /*ED0A*/ GENx___x390x900 (add_bfp_short),                      /* AEB       */
+ /*ED0B*/ GENx___x390x900 (subtract_bfp_short),                 /* SEB       */
  /*ED0C*/ GENx___x___x___ ,
- /*ED0D*/ GENx___x___x___ ,
+ /*ED0D*/ GENx___x390x900 (divide_bfp_short),                   /* DEB       */
  /*ED0E*/ GENx___x___x___ ,
  /*ED0F*/ GENx___x___x___ ,
  /*ED10*/ GENx___x___x___ ,
  /*ED11*/ GENx___x___x___ ,
  /*ED12*/ GENx___x___x___ ,
  /*ED13*/ GENx___x___x___ ,
- /*ED14*/ GENx___x___x___ ,
- /*ED15*/ GENx___x___x___ ,
+ /*ED14*/ GENx___x390x900 (squareroot_bfp_short),               /* SQEB      */
+ /*ED15*/ GENx___x390x900 (squareroot_bfp_long),                /* SQDB      */
  /*ED16*/ GENx___x___x___ ,
- /*ED17*/ GENx___x___x___ ,
- /*ED18*/ GENx___x___x___ ,
- /*ED19*/ GENx___x___x___ ,
- /*ED1A*/ GENx___x___x___ ,
- /*ED1B*/ GENx___x___x___ ,
- /*ED1C*/ GENx___x___x___ ,
- /*ED1D*/ GENx___x___x___ ,
+ /*ED17*/ GENx___x390x900 (multiply_bfp_short),                 /* MEEB      */
+ /*ED18*/ GENx___x390x900 (compare_and_signal_bfp_long),        /* KDB       */
+ /*ED19*/ GENx___x390x900 (compare_bfp_long),                   /* CDB       */
+ /*ED1A*/ GENx___x390x900 (add_bfp_long),                       /* ADB       */
+ /*ED1B*/ GENx___x390x900 (subtract_bfp_long),                  /* SDB       */
+ /*ED1C*/ GENx___x390x900 (multiply_bfp_long),                  /* MDB       */
+ /*ED1D*/ GENx___x390x900 (divide_bfp_long),                    /* DDB       */
  /*ED1E*/ GENx___x___x___ ,
  /*ED1F*/ GENx___x___x___ ,
  /*ED20*/ GENx___x___x___ ,

@@ -69,6 +69,7 @@ int     i;                              /* Array subscript           */
     {
         /* Set number of CPU's to synchronize */
         sysblk.brdcstncpu = sysblk.numcpu;
+        ON_IC_BRDCSTNCPU;
 
         /* Redrive all stopped CPU's */
 #ifdef _FEATURE_CPU_RECONFIG 
@@ -86,7 +87,10 @@ int     i;                              /* Array subscript           */
        waiting CPU's that the synchronization is complete
        else wait for the synchronization to compete */
     if (--sysblk.brdcstncpu == 0)
+    {
+        OFF_IC_BRDCSTNCPU;
         signal_condition (&sysblk.brdcstcond);
+    }
     else
         wait_condition (&sysblk.brdcstcond, &sysblk.intlock);
 
@@ -123,22 +127,7 @@ PSA     *psa;
 int     rc;
 
     /* reset the cpuint indicator */
-    regs->cpuint = regs->storstat
-#ifdef FEATURE_INTERVAL_TIMER
-                    || (regs->itimer_pending
-#if defined(_FEATURE_SIE)
-                        && !(regs->sie_state
-                          && (regs->siebk->m & SIE_M_ITMOF))
-#endif /*defined(_FEATURE_SIE)*/
-                          )
-#endif /*FEATURE_INTERVAL_TIMER*/
-                    || regs->extcall
-                    || regs->emersig
-#if defined(OPTION_NO_LINUX_INTERRUPT_PATCH)
-                    || regs->ptpend
-                    || regs->ckpend
-#endif
-                                   ;
+    RESET_IC_CPUINT(regs);
 
     release_lock(&sysblk.intlock);
 
@@ -162,10 +151,10 @@ int     rc;
     regs->psw.intcode = code;
 
 
-#if !defined(FEATURE_ESAME)
+#if defined(FEATURE_BCMODE)
     /* For ECMODE, store external interrupt code at PSA+X'86' */
     if ( regs->psw.ecmode )
-#endif /*!defined(FEATURE_ESAME)*/
+#endif /*defined(FEATURE_BCMODE)*/
         STORE_HW(psa->extint,code);
 
 #if defined(_FEATURE_SIE)
@@ -179,11 +168,7 @@ int     rc;
         rc = ARCH_DEP(load_psw) (regs, psa->extnew);
 
         if ( rc )
-        {
-            logmsg ("CPU%4.4X: Invalid external new PSW: ",regs->cpuad);
-            display_psw (regs);
             ARCH_DEP(program_interrupt)(regs, rc);
-        }
     }
 
     longjmp (regs->progjmp, SIE_INTERCEPT_EXT);
@@ -211,32 +196,30 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 U16     cpuad;                          /* Originating CPU address   */
 
     /* External interrupt if console interrupt key was depressed */
-    if (sysblk.intkey
+    if (OPEN_IC_INTKEY(regs)
 #if defined(_FEATURE_SIE)
         && !regs->sie_state
 #endif /*!defined(_FEATURE_SIE)*/
-        && (regs->CR(0) & CR0_XM_INTKEY))
+        )
     {
         logmsg ("External interrupt: Interrupt key\n");
 
         /* Reset interrupt key pending */
-        sysblk.intkey = 0;
-        sysblk.extpending = sysblk.servsig;
+        OFF_IC_INTKEY;
 
         /* Generate interrupt key interrupt */
         ARCH_DEP(external_interrupt) (EXT_INTERRUPT_KEY_INTERRUPT, regs);
     }
 
     /* External interrupt if emergency signal is pending */
-    if (regs->emersig
-        && (regs->CR(0) & CR0_XM_EMERSIG))
+    if (OPEN_IC_EMERSIG(regs))
     {
         /* Find first CPU which generated an emergency signal */
         for (cpuad = 0; regs->emercpu[cpuad] == 0; cpuad++)
         {
             if (cpuad >= MAX_CPU_ENGINES)
             {
-                regs->emersig = 0;
+                OFF_IC_EMERSIG(regs);
                 return;
             }
         } /* end for(cpuad) */
@@ -253,12 +236,12 @@ U16     cpuad;                          /* Originating CPU address   */
 
         /* Reset emergency signal pending flag if there are
            no other CPUs which generated emergency signal */
-        regs->emersig = 0;
+        OFF_IC_EMERSIG(regs);
         while (++cpuad < MAX_CPU_ENGINES)
         {
             if (regs->emercpu[cpuad])
             {
-                regs->cpuint = regs->emersig = 1;
+                ON_IC_EMERSIG(regs);
                 break;
             }
         } /* end while */
@@ -268,14 +251,13 @@ U16     cpuad;                          /* Originating CPU address   */
     }
 
     /* External interrupt if external call is pending */
-    if (regs->extcall
-        && (regs->CR(0) & CR0_XM_EXTCALL))
+    if (OPEN_IC_EXTCALL(regs))
     {
 //  /*debug*/logmsg ("External interrupt: External Call from CPU %d\n",
 //  /*debug*/       regs->extccpu);
 
         /* Reset external call pending */
-        regs->extcall = 0;
+        OFF_IC_EXTCALL(regs);
 
         /* Store originating CPU address at PSA+X'84' */
         psa = (void*)(sysblk.mainstor + regs->PX);
@@ -289,7 +271,7 @@ U16     cpuad;                          /* Originating CPU address   */
     if ((sysblk.todclk + regs->todoffset) > regs->clkc
         && sysblk.insttrace == 0
         && sysblk.inststep == 0
-        && (regs->CR(0) & CR0_XM_CLKC))
+        && OPEN_IC_CLKC(regs) )
     {
         if (sysblk.insttrace || sysblk.inststep)
         {
@@ -300,7 +282,7 @@ U16     cpuad;                          /* Originating CPU address   */
 
     /* External interrupt if CPU timer is negative */
     if ((S64)regs->ptimer < 0
-        && (regs->CR(0) & CR0_XM_PTIMER))
+        && OPEN_IC_PTIMER(regs) )
     {
         if (sysblk.insttrace || sysblk.inststep)
         {
@@ -312,28 +294,28 @@ U16     cpuad;                          /* Originating CPU address   */
 
     /* External interrupt if interval timer interrupt is pending */
 #if defined(FEATURE_INTERVAL_TIMER)
-    if (regs->itimer_pending
+    if (OPEN_IC_ITIMER(regs)
 #if defined(_FEATURE_SIE)
         && !(regs->sie_state
           && (regs->siebk->m & SIE_M_ITMOF))
 #endif /*defined(_FEATURE_SIE)*/
-        && (regs->CR(0) & CR0_XM_ITIMER))
+        )
     {
         if (sysblk.insttrace || sysblk.inststep)
         {
             logmsg ("External interrupt: Interval timer\n");
         }
-        regs->itimer_pending = 0;
+        OFF_IC_ITIMER(regs);
         ARCH_DEP(external_interrupt) (EXT_INTERVAL_TIMER_INTERRUPT, regs);
     }
 #endif /*FEATURE_INTERVAL_TIMER*/
 
     /* External interrupt if service signal is pending */
-    if (sysblk.servsig
+    if (OPEN_IC_SERVSIG(regs)
 #if defined(_FEATURE_SIE)
         && !regs->sie_state
 #endif /*!defined(_FEATURE_SIE)*/
-        && (regs->CR(0) & CR0_XM_SERVSIG))
+        )
     {
         /* Apply prefixing if the parameter is a storage address */
         if ((sysblk.servparm & 0x00000007) == 0)
@@ -348,30 +330,14 @@ U16     cpuad;                          /* Originating CPU address   */
         STORE_FW(psa->extparm,sysblk.servparm);
 
         /* Reset service signal pending */
-        sysblk.servsig = 0;
-        sysblk.extpending = sysblk.intkey;
+        OFF_IC_SERVSIG;
 
         /* Generate service signal interrupt */
         ARCH_DEP(external_interrupt) (EXT_SERVICE_SIGNAL_INTERRUPT, regs);
     }
 
     /* reset the cpuint indicator */
-    regs->cpuint = regs->storstat
-#ifdef FEATURE_INTERVAL_TIMER
-                    || (regs->itimer_pending
-#if defined(_FEATURE_SIE)
-                        && regs->sie_state
-                        && !(regs->siebk->m & SIE_M_ITMOF)
-#endif /*defined(_FEATURE_SIE)*/
-                          )
-#endif /*FEATURE_INTERVAL_TIMER*/
-                    || regs->extcall
-                    || regs->emersig
-#if defined(OPTION_NO_LINUX_INTERRUPT_PATCH)
-                    || regs->ptpend
-                    || regs->ckpend
-#endif
-                                   ;
+    RESET_IC_CPUINT(regs);
 
 } /* end function perform_external_interrupt */
 
@@ -383,14 +349,14 @@ U16     cpuad;                          /* Originating CPU address   */
 /*      aaddr   A valid absolute address of a 512-byte block into    */
 /*              which status is to be stored                         */
 /*-------------------------------------------------------------------*/
-void ARCH_DEP(store_status) (REGS *ssreg, U32 aaddr)
+void ARCH_DEP(store_status) (REGS *ssreg, RADR aaddr)
 {
 U64     dreg;                           /* Double register work area */
 int     i;                              /* Array subscript           */
-PSA_3XX *sspsa;  /*INCOMPLETE*/         /* -> Store status area      */
+PSA     *sspsa;                         /* -> Store status area      */
 
     /* Point to the PSA into which status is to be stored */
-    sspsa = (PSA_3XX*)(sysblk.mainstor + aaddr);
+    sspsa = (void*)(sysblk.mainstor + aaddr);
 
     /* Store CPU timer in bytes 216-223 */
     dreg = ssreg->ptimer;
@@ -405,24 +371,44 @@ PSA_3XX *sspsa;  /*INCOMPLETE*/         /* -> Store status area      */
     /* Store prefix register in bytes 264-267 */
     STORE_FW(sspsa->storepfx,ssreg->PX);
 
+#if defined(FEATURE_ESAME)
+    /* Store Floating Point Control Register */
+    STORE_FW(sspsa->storefpc,ssreg->fpc);
+
+    /* Store TOD Programable register */
+    STORE_FW(sspsa->storetpr,ssreg->todpr);
+#endif /*defined(FEATURE_ESAME)*/
+
+#if defined(FEATURE_ESAME)
+    sspsa->arch = 1;
+#endif /*defined(FEATURE_ESAME)*/
+
+#if defined(FEATURE_ESAME_INSTALLED)
+    sspsa->arch = 0;
+#endif /*defined(FEATURE_ESAME_INSTALLED)*/
+
     /* Store access registers in bytes 288-351 */
     for (i = 0; i < 16; i++)
         STORE_FW(sspsa->storear[i],ssreg->AR(i));
 
     /* Store floating-point registers in bytes 352-383 */
+#if defined(FEATURE_ESAME)
+    for (i = 0; i < 32; i++)
+#else /*!defined(FEATURE_ESAME)*/
     for (i = 0; i < 8; i++)
+#endif /*!defined(FEATURE_ESAME)*/
         STORE_FW(sspsa->storefpr[i],ssreg->fpr[i]);
 
     /* Store general-purpose registers in bytes 384-447 */
     for (i = 0; i < 16; i++)
-        STORE_FW(sspsa->storegpr[i],ssreg->GR_L(i));
+        STORE_W(sspsa->storegpr[i],ssreg->GR(i));
 
     /* Store control registers in bytes 448-511 */
     for (i = 0; i < 16; i++)
-        STORE_FW(sspsa->storecr[i],ssreg->CR(i));
+        STORE_W(sspsa->storecr[i],ssreg->CR(i));
 
-    logmsg ("HHC611I CPU %d status stored "
-            "at absolute location %8.8X\n",
+    logmsg ("HHC611I CPU%4.4X status stored "
+            "at absolute location " F_RADR "\n",
             ssreg->cpuad, aaddr);
 
 } /* end function store_status */
@@ -430,10 +416,6 @@ PSA_3XX *sspsa;  /*INCOMPLETE*/         /* -> Store status area      */
 
 #if !defined(_GEN_ARCH)
 
-// #define  _GEN_ARCH 964
-// #include "external.c"
-
-// #undef   _GEN_ARCH
 #define  _GEN_ARCH 390
 #include "external.c"
 
@@ -442,12 +424,20 @@ PSA_3XX *sspsa;  /*INCOMPLETE*/         /* -> Store status area      */
 #include "external.c"
 
 
-void store_status (REGS *ssreg, U32 aaddr)
+void store_status (REGS *ssreg, U64 aaddr)
 {
     switch(ssreg->arch_mode) {
-        case ARCH_370: s370_store_status (ssreg, aaddr);
-        case ARCH_390: s390_store_status (ssreg, aaddr);
-        case ARCH_900: z900_store_status (ssreg, aaddr);
+        case ARCH_370:
+            aaddr &= 0x7FFFFFFF;
+            s370_store_status (ssreg, aaddr);
+            break;
+        case ARCH_390:
+            aaddr &= 0x7FFFFFFF;
+            s390_store_status (ssreg, aaddr);
+            break;
+        case ARCH_900:
+            z900_store_status (ssreg, aaddr);
+            break;
     }
 }
 #endif /*!defined(_GEN_ARCH)*/

@@ -7,6 +7,13 @@
 /* SA22-7832-00 z/Architecture Principles of Operation               */
 /*-------------------------------------------------------------------*/
 
+/*-------------------------------------------------------------------*/
+/* Additional credits:                                               */
+/*      EPSW/EREGG/LMD instructions - Roger Bowler                   */
+/*      PKA/PKU/UNPKA/UNPKU instructions - Roger Bowler              */
+/*      Divide logical instructions - Vic Cross                      */
+/*-------------------------------------------------------------------*/
+
 #include "hercules.h"
 
 #include "opcode.h"
@@ -21,7 +28,7 @@ static inline int add_logical_long(U64 *result, U64 op1, U64 op2)
     *result = op1 + op2;
 
     return (*result == 0 ? 0 : 1) | (op1 > *result ? 2 : 0);
-}
+} /* end add_logical_long() */
         
 
 static inline int sub_logical_long(U64 *result, U64 op1, U64 op2)
@@ -29,7 +36,7 @@ static inline int sub_logical_long(U64 *result, U64 op1, U64 op2)
     *result = op1 - op2;
 
     return (*result == 0 ? 0 : 1) | (op1 < *result ? 0 : 2);
-}
+} /* end sub_logical_long() */
         
 
 static inline int add_signed_long(U64 *result, U64 op1, U64 op2)
@@ -40,7 +47,7 @@ static inline int add_signed_long(U64 *result, U64 op1, U64 op2)
       || ((S64)op1 >= 0 && (S64)op2 >= 0 && (S64)*result < 0)) ? 3 :
                                               (S64)*result < 0 ? 1 :
                                               (S64)*result > 0 ? 2 : 0;
-}
+} /* end add_signed_long() */
         
 
 static inline int sub_signed_long(U64 *result, U64 op1, U64 op2)
@@ -51,7 +58,8 @@ static inline int sub_signed_long(U64 *result, U64 op1, U64 op2)
       || ((S64)op1 >= 0 && (S64)op2 < 0 && (S64)*result < 0)) ? 3 :
                                              (S64)*result < 0 ? 1 :
                                              (S64)*result > 0 ? 2 : 0;
-}
+} /* end sub_signed_long() */
+
 
 static inline int div_logical_long
                   (U64 *rem, U64 *quot, U64 high, U64 lo, U64 d)
@@ -59,45 +67,68 @@ static inline int div_logical_long
     int i;
 
     *quot = 0;
-    if (high >= d) return(1);
+    if (high >= d) return 1;
     for (i = 0; i < 64; i++)
     {
-      high = (high << 1) | (lo >> 63);
-      lo = (lo << 1);
-      *quot <<= 1;
-      if (high >= d)
-      {
-        *quot += 1;
-        high -= d;
-      }
+        high = (high << 1) | (lo >> 63);
+        lo = (lo << 1);
+        *quot <<= 1;
+        if (high >= d)
+        {
+            *quot += 1;
+            high -= d;
+        }
     }
     *rem = high;
     return 0;
-}
+} /* end div_logical_long() */
+
+
+static inline int mult_logical_long
+                  (U64 *high, U64 *lo, U64 md, U64 mr)
+{
+    int i;
+
+    *high = ((md & 1) ? mr : 0);
+    for (i = 0; i < 64; i++)
+    {
+        *lo = (*lo >> 1) | (*high << 63);
+        *high >>= 1;
+        md >>= 1;
+        if (md & 1)
+            *high += mr;
+    }
+    return 0;
+} /* end mult_logical_long() */
 
 #endif /*!defined(_LONG_MATH)*/
 
 
-// #if defined(FEATURE_BINARY_FLOATING_POINT)
+#if defined(FEATURE_BINARY_FLOATING_POINT)
 /*-------------------------------------------------------------------*/
-/* B29C STFPC - Store Floating Point Control register            [S] */
+/* B29C STFPC - Store FPC                                        [S] */
 /*-------------------------------------------------------------------*/
-DEF_INST(store_floating_point_control_register)
+DEF_INST(store_fpc)
 {
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
+    BFPINST_CHECK(regs);
+
     /* Store register contents at operand address */
     ARCH_DEP(vstore4) ( regs->fpc, effective_addr2, b2, regs );
-}
+
+} /* end DEF_INST(store_fpc) */
+#endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
 
 
+#if defined(FEATURE_BINARY_FLOATING_POINT)
 /*-------------------------------------------------------------------*/
-/* B29D LFPC  - Load Floating Point Control register             [S] */
+/* B29D LFPC  - Load FPC                                         [S] */
 /*-------------------------------------------------------------------*/
-DEF_INST(load_floating_point_control_register)
+DEF_INST(load_fpc)
 {
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
@@ -105,7 +136,9 @@ U32     tmp_fpc;
 
     S(inst, execflag, regs, b2, effective_addr2);
 
-    /* Load second operand from operand address */
+    BFPINST_CHECK(regs);
+
+    /* Load FPC register from operand address */
     tmp_fpc = ARCH_DEP(vfetch4) (effective_addr2, b2, regs);
 
     if(tmp_fpc & FPC_RESERVED)
@@ -113,25 +146,70 @@ U32     tmp_fpc;
     else
         regs->fpc = tmp_fpc;
 
-}
+} /* end DEF_INST(load_fpc) */
+#endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
 
 
+#if defined(FEATURE_BINARY_FLOATING_POINT)
 /*-------------------------------------------------------------------*/
-/* B384 SFPC  - Set Floating Point Control register            [RRE] */
+/* B384 SFPC  - Set FPC                                        [RRE] */
 /*-------------------------------------------------------------------*/
-DEF_INST(set_floating_point_control_register)
+DEF_INST(set_fpc)
 {
 int     r1, unused;                     /* Values of R fields        */
 
     RRE(inst, execflag, regs, r1, unused);
 
+    BFPINST_CHECK(regs);
+
+    /* Load FPC register from R1 register bits 32-63 */
     if(regs->GR_L(r1) & FPC_RESERVED)
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
     else
         regs->fpc = regs->GR_L(r1);
 
-}
-// #endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
+} /* end DEF_INST(set_fpc) */
+#endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
+
+
+#if defined(FEATURE_BINARY_FLOATING_POINT)
+/*-------------------------------------------------------------------*/
+/* B38C EFPC  - Extract FPC                                    [RRE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(extract_fpc)
+{
+int     r1, unused;                     /* Values of R fields        */
+
+    RRE(inst, execflag, regs, r1, unused);
+
+    BFPINST_CHECK(regs);
+
+    /* Load R1 register bits 32-63 from FPC register */
+    regs->GR_L(r1) = regs->fpc;
+
+} /* end DEF_INST(extract_fpc) */
+#endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
+
+
+#if defined(FEATURE_BINARY_FLOATING_POINT)
+/*-------------------------------------------------------------------*/
+/* B299 SRNM  - Set Rounding Mode                                [S] */
+/*-------------------------------------------------------------------*/
+DEF_INST(set_rounding_mode)
+{
+int     b2;                             /* Base of effective addr    */
+VADR    effective_addr2;                /* Effective address         */
+
+    S(inst, execflag, regs, b2, effective_addr2);
+
+    BFPINST_CHECK(regs);
+
+    /* Set FPC register rounding mode bits from operand address */
+    regs->fpc &= ~(FPC_RM);
+    regs->fpc |= (effective_addr2 & FPC_RM);
+
+} /* end DEF_INST(set_rounding_mode) */
+#endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
 
 
 #if defined(FEATURE_LINKAGE_STACK)
@@ -142,10 +220,15 @@ DEF_INST(trap2)
 {
     E(inst, execflag, regs);
 
+    SIE_MODE_XC_SOPEX(regs);
+
     ARCH_DEP(trap_x) (0, execflag, regs, 0);
-}
+
+} /* end DEF_INST(trap2) */
+#endif /*defined(FEATURE_LINKAGE_STACK)*/
 
 
+#if defined(FEATURE_LINKAGE_STACK)
 /*-------------------------------------------------------------------*/
 /* B2FF TRAP4 - Trap                                             [S] */
 /*-------------------------------------------------------------------*/
@@ -156,8 +239,11 @@ VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
+    SIE_MODE_XC_SOPEX(regs);
+
     ARCH_DEP(trap_x) (1, execflag, regs, effective_addr2);
-}
+
+} /* end DEF_INST(trap4) */
 #endif /*defined(FEATURE_LINKAGE_STACK)*/
 
 
@@ -190,7 +276,7 @@ int     i;
     S(inst, execflag, regs, b2, effective_addr2);
 
     /* Determine the address of the parameter list */
-    pl_addr = !execflag ? regs->psw.IA : regs->ET + 4;
+    pl_addr = !execflag ? regs->psw.IA : (regs->ET + 4);
     
     /* Fetch flags from the instruction address space */
     abs = LOGICAL_TO_ABS (pl_addr, 0, regs,
@@ -287,13 +373,30 @@ int     i;
         }
     }
 
+#if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+    if(regs->sie_state
+      && (regs->siebk->mx & SIE_MX_XC)
+      && (psw[2] & 0x80))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+#endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+
     /* Save current PSW */
     save_psw = regs->psw;
 
     /* Specification exception when setting home 
        space mode in problem state */
-    if(regs->psw.prob && (psw[2] & 0xC0))
+    if(!REAL_MODE(&regs->psw)
+      && regs->psw.prob
+      && ((psw[2] & 0xC0) == 0xC0) )
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /* Make bits 12 and 31 valid, as these are ignored by RP */
+#if defined(FEATURE_ESAME)
+    psw[1] &= ~(0x08);
+#else /*!defined(FEATURE_ESAME)*/
+    psw[1] |= 0x08;
+    psw[3] &= ~(0x01);
+#endif /*!defined(FEATURE_ESAME)*/
 
     if( ARCH_DEP(load_psw) (regs, psw) )
     {
@@ -308,6 +411,11 @@ int     i;
     regs->psw.mach = save_psw.mach;
     regs->psw.sysmask = save_psw.sysmask;
     regs->psw.pkey = save_psw.pkey;
+
+    SET_IC_EXTERNAL_MASK(regs);
+    SET_IC_MCK_MASK(regs);
+    SET_IC_ECIO_MASK(regs);
+    SET_IC_PSW_WAIT(regs);
 
     /* Update access register b2 */
     FETCH_FW(regs->AR(b2), ar);
@@ -324,11 +432,299 @@ int     i;
        out of home space mode */
     if(HOME_SPACE_MODE(&(regs->psw)) ^ HOME_SPACE_MODE(&save_psw))
         ARCH_DEP(program_interrupt) (regs, PGM_SPACE_SWITCH_EVENT);
-}
+
+} /* end DEF_INST(resume_program) */
 #endif /*defined(FEATURE_RESUME_PROGRAM)*/
 
 
+#if defined(FEATURE_ESAME) && defined(FEATURE_TRACING)
+/*-------------------------------------------------------------------*/
+/* EB0F TRACG - Trace Long                                     [RSE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(trace_long)
+{
+int     r1, r3;                         /* Register numbers          */
+int     b2;                             /* effective address base    */
+VADR    effective_addr2;                /* effective address         */
+
+    RSE(inst, execflag, regs, r1, r3, b2, effective_addr2);
+
+    PRIV_CHECK(regs);
+
+    FW_CHECK(effective_addr2, regs);
+
+    /*INCOMPLETE*/
+
+} /* end DEF_INST(trace_long) */
+#endif /*defined(FEATURE_ESAME) && defined(FEATURE_TRACING)*/
+
+
 #if defined(FEATURE_ESAME)
+/*-------------------------------------------------------------------*/
+/* E30E CVBG  - Convert to Binary Long                         [RXE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(convert_to_binary_long)
+{
+int     r1;                             /* Values of R fields        */
+int     b2;                             /* Base of effective addr    */
+VADR    effective_addr2;                /* Effective address         */
+U64     dreg;                           /* 64-bit result accumulator */
+int     i;                              /* Loop counter              */
+int     h, d;                           /* Decimal digits            */
+BYTE    sbyte;                          /* Source operand byte       */
+int     ovf = 0;                        /* Overflow indicator        */
+U64     oreg = 0;                       /* 64 bit overflow work reg  */
+
+    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+
+    /* Initialize binary result */
+    dreg = 0;
+
+    /* Convert digits to binary */
+    for (i = 0; i < 16; i++)
+    {
+        /* Load next byte of operand */
+        sbyte = ARCH_DEP(vfetchb) ( effective_addr2, b2, regs );
+
+        /* Isolate high-order and low-order digits */
+        h = (sbyte & 0xF0) >> 4;
+        d = sbyte & 0x0F;
+
+        /* Check for valid high-order digit */
+        if (h > 9)
+        {
+            regs->dxc = DXC_DECIMAL;
+            ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
+        }
+
+        /* Accumulate high-order digit into result */
+        dreg *= 10;
+        dreg += h;
+
+        /* Set overflow indicator if an overflow has occurred */
+        if(dreg < oreg)
+            ovf = 1;
+
+        /* Save current value */
+        oreg = dreg;
+
+        /* Check for valid low-order digit or sign */
+        if (i < 7)
+        {
+            /* Check for valid low-order digit */
+            if (d > 9)
+            {
+                regs->dxc = DXC_DECIMAL;
+                ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
+            }
+
+            /* Accumulate low-order digit into result */
+            dreg *= 10;
+            dreg += d;
+        }
+        else
+        {
+            /* Check for valid sign */
+            if (d < 10)
+            {
+                regs->dxc = DXC_DECIMAL;
+                ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
+            }
+        }
+
+        /* Increment operand address */
+        effective_addr2++;
+
+    } /* end for(i) */
+
+    /* Result is negative if sign is X'B' or X'D' */
+    if (d == 0x0B || d == 0x0D)
+    {
+        if( (S64)dreg == -1LL )
+            ovf = 1;
+        (S64)dreg = -((S64)dreg);
+    }
+
+    /* Store result into R1 register */
+    regs->GR_G(r1) = dreg;
+
+    /* Program check if overflow */
+    if ( ovf )
+        ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
+
+} /* end DEF_INST(convert_to_binary_long) */
+#endif /*defined(FEATURE_ESAME)*/
+
+
+#if defined(FEATURE_ESAME)
+/*-------------------------------------------------------------------*/
+/* E32E CVDG  - Convert to Decimal Long                        [RXE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(convert_to_decimal_long)
+{
+int     r1;                             /* Values of R fields        */
+int     b2;                             /* Base of effective addr    */
+VADR    effective_addr2;                /* Effective address         */
+U64     n;                              /* Absolute value to convert */
+BYTE    result[16];                     /* 31-digit signed result    */
+int     len = 16;                       /* Result length             */
+int     i;                              /* Array subscript           */
+int     d;                              /* Decimal digit or sign     */
+
+    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+
+    /* Special case when R1 is maximum negative value */
+    if (regs->GR_G(r1) == 0x8000000000000000ULL)
+    {
+        memcpy (result,
+                "\x00\x00\x00\x00\x00\x00\x92\x23"
+                "\x37\x20\x36\x85\x47\x75\x80\x8D",
+                sizeof(result));
+    }
+    else
+    {
+        /* Load absolute value and generate sign */
+        if (regs->GR_G(r1) < 0x8000000000000000ULL)
+        {
+            /* Value is positive */
+            n = regs->GR_G(r1);
+            d = 0x0C;
+        }
+        else
+        {
+            /* Value is negative */
+            n = -((S64)(regs->GR_G(r1)));
+            d = 0x0D;
+        }
+
+        /* Store sign and decimal digits from right to left */
+        memset (result, 0, len);
+        for (i = len - 1; d != 0 || n != 0; i--)
+        {
+            result[i] = d;
+            d = n % 10;
+            n /= 10;
+            result[i] |= (d << 4);
+            d = n % 10;
+            n /= 10;
+        }
+    }
+
+    /* Store 16-byte packed decimal result at operand address */
+    ARCH_DEP(vstorec) ( result, len-1, effective_addr2, b2, regs );
+
+} /* end DEF_INST(convert_to_decimal_long) */
+#endif /*defined(FEATURE_ESAME)*/
+
+
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
+/*-------------------------------------------------------------------*/
+/* E396 ML    - Multiply Logical                               [RXE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(multiply_logical)
+{
+int     r1;                             /* Values of R fields        */
+int     b2;                             /* Base of effective addr    */
+VADR    effective_addr2;                /* Effective Address         */
+U32     m;
+U64     p;
+
+    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+
+    ODD_CHECK(r1, regs);
+
+    /* Load second operand from operand address */
+    m = ARCH_DEP(vfetch4) (effective_addr2, b2, regs);
+
+    /* Multiply unsigned values */
+    p = (U64)regs->GR_L(r1 + 1) * m;
+
+    /* Store the result */
+    regs->GR_L(r1) = (p >> 32);
+    regs->GR_L(r1 + 1) = (p & 0xFFFFFFFF);
+
+} /* end DEF_INST(multiply_logical) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
+
+
+#if defined(FEATURE_ESAME)
+/*-------------------------------------------------------------------*/
+/* E386 MLG   - Multiply Logical Long                          [RXE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(multiply_logical_long)
+{
+int     r1;                             /* Values of R fields        */
+int     b2;                             /* Base of effective addr    */
+VADR    effective_addr2;                /* Effective Address         */
+U64     m, ph, pl;
+
+    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+
+    ODD_CHECK(r1, regs);
+
+    /* Load second operand from operand address */
+    m = ARCH_DEP(vfetch8) (effective_addr2, b2, regs);
+
+    /* Multiply unsigned values */
+    mult_logical_long(&ph, &pl, regs->GR_G(r1 + 1), m);
+
+    /* Store the result */
+    regs->GR_G(r1) = ph;
+    regs->GR_G(r1 + 1) = pl;
+
+} /* end DEF_INST(multiply_logical_long) */
+#endif /*defined(FEATURE_ESAME)*/
+
+
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
+/*-------------------------------------------------------------------*/
+/* B996 MLR   - Multiply Logical Register                      [RRE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(multiply_logical_register)
+{
+int     r1, r2;                         /* Values of R fields        */
+U64     p;
+
+    RRE(inst, execflag, regs, r1, r2);
+
+    ODD_CHECK(r1, regs);
+
+    /* Multiply unsigned values */
+    p = (U64)regs->GR_L(r1 + 1) * (U64)regs->GR_L(r2);
+
+    /* Store the result */
+    regs->GR_L(r1) = (p >> 32);
+    regs->GR_L(r1 + 1) = (p & 0xFFFFFFFF);
+
+} /* end DEF_INST(multiply_logical_register) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
+
+
+#if defined(FEATURE_ESAME)
+/*-------------------------------------------------------------------*/
+/* B986 MLGR  - Multiply Logical Long Register                 [RRE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(multiply_logical_long_register)
+{
+int     r1, r2;                         /* Values of R fields        */
+U64     ph, pl;
+
+    RRE(inst, execflag, regs, r1, r2);
+
+    ODD_CHECK(r1, regs);
+
+    /* Multiply unsigned values */
+    mult_logical_long(&ph, &pl, regs->GR_G(r1 + 1), regs->GR_G(r2));
+
+    /* Store the result */
+    regs->GR_G(r1) = ph;
+    regs->GR_G(r1 + 1) = pl;
+
+} /* end DEF_INST(multiply_logical_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
+
+
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E397 DL    - Divide Logical                                 [RXE] */
 /*-------------------------------------------------------------------*/
@@ -344,24 +740,24 @@ U64     n;
 
     ODD_CHECK(r1, regs);
 
+    n = ((U64)regs->GR_L(r1) << 32) | (U32)regs->GR_L(r1 + 1); 
+
     /* Load second operand from operand address */
     d = ARCH_DEP(vfetch4) (effective_addr2, b2, regs);
 
-    n = regs->GR_L(r1); 
-    n = (n << 32) | (U32)regs->GR_L(r1 + 1); 
-
     if (d == 0
-      || (d == 1LL &&
-         n == 0x8000000000000000ULL))
+      || (n / d) > 0xFFFFFFFF)
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
 
     /* Divide unsigned registers */
     regs->GR_L(r1) = n % d;
     regs->GR_L(r1 + 1) = n / d;
 
-}
+} /* end DEF_INST(divide_logical) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E387 DLG   - Divide Logical Long                            [RXE] */
 /*-------------------------------------------------------------------*/
@@ -399,9 +795,11 @@ U64     d, r, q;
       }
 
     }
-}
+} /* end DEF_INST(divide_logical_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B997 DLR   - Divide Logical Register                        [RRE] */
 /*-------------------------------------------------------------------*/
@@ -409,51 +807,55 @@ DEF_INST(divide_logical_register)
 {
 int     r1, r2;                         /* Values of R fields        */
 U64     n;
+U32     d;
 
     RRE(inst, execflag, regs, r1, r2);
 
     ODD_CHECK(r1, regs);
 
-    n = regs->GR_L(r1);
-    n = (n << 32) | (U32)regs->GR_L(r1 + 1);
+    n = ((U64)regs->GR_L(r1) << 32) | regs->GR_L(r1 + 1);
 
-    if(regs->GR_G(r2) == 0
-      || (regs->GR_L(r2) == 1L &&
-          n == 0x8000000000000000UL))
+    d = regs->GR_L(r2);
+
+    if(d == 0
+      || (n / d) > 0xFFFFFFFF)
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
 
     /* Divide signed registers */
-    regs->GR_L(r1) = n % regs->GR_L(r2);
-    regs->GR_L(r1 + 1) = n / regs->GR_L(r2);
+    regs->GR_L(r1) = n % d;
+    regs->GR_L(r1 + 1) = n / d;
 
-}
+} /* end DEF_INST(divide_logical_register) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B987 DLGR  - Divide Logical Long Register                   [RRE] */
 /*-------------------------------------------------------------------*/
 DEF_INST(divide_logical_long_register)
 {
 int     r1, r2;                         /* Values of R fields        */
-U64     r, q;
+U64     r, q, d;
 
     RRE(inst, execflag, regs, r1, r2);
 
     ODD_CHECK(r1, regs);
 
+    d = regs->GR_G(r2);
+
     if (regs->GR_G(r1) == 0)            /* check for the simple case */
     {
-      if(regs->GR_G(r2) == 0)
+      if(d == 0)
           ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
 
       /* Divide signed registers */
-      regs->GR_G(r1) = regs->GR_G(r1 + 1) % regs->GR_G(r2);
-      regs->GR_G(r1 + 1) = regs->GR_G(r1 + 1) / regs->GR_G(r2);
+      regs->GR_G(r1) = regs->GR_G(r1 + 1) % d;
+      regs->GR_G(r1 + 1) = regs->GR_G(r1 + 1) / d;
     }
     else
     {
-      if (div_logical_long(&r, &q, regs->GR_G(r1), regs->GR_G(r1 + 1),
-                           regs->GR_G(r2) ) )
+      if (div_logical_long(&r, &q, regs->GR_G(r1), regs->GR_G(r1 + 1), d) )
           ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
       else 
       {
@@ -461,9 +863,11 @@ U64     r, q;
         regs->GR_G(r1 + 1) = q;
       }
     }
-}
+} /* end DEF_INST(divide_logical_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B988 ALCGR - Add Logical with Carry Long Register           [RRE] */
 /*-------------------------------------------------------------------*/
@@ -471,8 +875,11 @@ DEF_INST(add_logical_carry_long_register)
 {
 int     r1, r2;                         /* Values of R fields        */
 int     carry = 0;
+U64     n;
 
     RRE(inst, execflag, regs, r1, r2);
+
+    n = regs->GR_G(r2);
 
     /* Add the carry to operand */
     if(regs->psw.cc & 2)
@@ -483,10 +890,12 @@ int     carry = 0;
     /* Add unsigned operands and set condition code */
     regs->psw.cc = add_logical_long(&(regs->GR_G(r1)),
                                       regs->GR_G(r1),
-                                      regs->GR_G(r2)) | carry;
-}
+                                      n) | carry;
+} /* end DEF_INST(add_logical_carry_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B989 SLBGR - Subtract Logical with Borrow Long Register     [RRE] */
 /*-------------------------------------------------------------------*/
@@ -494,8 +903,11 @@ DEF_INST(subtract_logical_borrow_long_register)
 {
 int     r1, r2;                         /* Values of R fields        */
 int     borrow = 0;
+U64     n;
 
     RRE(inst, execflag, regs, r1, r2);
+
+    n = regs->GR_G(r2);
 
     /* Subtract the borrow from operand */
     if(!(regs->psw.cc & 2))
@@ -506,11 +918,13 @@ int     borrow = 0;
     /* Subtract unsigned operands and set condition code */
     regs->psw.cc = sub_logical_long(&(regs->GR_G(r1)),
                                       regs->GR_G(r1),
-                                      regs->GR_G(r2)) & ~borrow;
+                                      n) & ~borrow;
 
-}
+} /* end DEF_INST(subtract_logical_borrow_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E388 ALCG  - Add Logical with Carry Long                    [RXE] */
 /*-------------------------------------------------------------------*/
@@ -537,9 +951,11 @@ int     carry = 0;
     regs->psw.cc = add_logical_long(&(regs->GR_G(r1)),
                                       regs->GR_G(r1),
                                       n) | carry;
-}
+} /* end DEF_INST(add_logical_carry_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E389 SLBG  - Subtract Logical with Borrow Long              [RXE] */
 /*-------------------------------------------------------------------*/
@@ -567,9 +983,11 @@ int     borrow = 0;
                                       regs->GR_G(r1),
                                       n) & ~borrow;
 
-}
+} /* end DEF_INST(subtract_logical_borrow_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B998 ALCR  - Add Logical with Carry Register                [RRE] */
 /*-------------------------------------------------------------------*/
@@ -577,8 +995,11 @@ DEF_INST(add_logical_carry_register)
 {
 int     r1, r2;                         /* Values of R fields        */
 int     carry = 0;
+U32     n;
 
     RRE(inst, execflag, regs, r1, r2);
+
+    n = regs->GR_L(r2);
 
     /* Add the carry to operand */
     if(regs->psw.cc & 2)
@@ -589,10 +1010,12 @@ int     carry = 0;
     /* Add unsigned operands and set condition code */
     regs->psw.cc = add_logical(&(regs->GR_L(r1)),
                                  regs->GR_L(r1),
-                                 regs->GR_L(r2)) | carry;
-}
+                                 n) | carry;
+} /* end DEF_INST(add_logical_carry_register) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B999 SLBR  - Subtract Logical with Borrow Register          [RRE] */
 /*-------------------------------------------------------------------*/
@@ -600,8 +1023,11 @@ DEF_INST(subtract_logical_borrow_register)
 {
 int     r1, r2;                         /* Values of R fields        */
 int     borrow = 0;
+U32     n;
 
     RRE(inst, execflag, regs, r1, r2);
+
+    n = regs->GR_L(r2);
 
     /* Subtract the borrow from operand */
     if(!(regs->psw.cc & 2))
@@ -612,11 +1038,13 @@ int     borrow = 0;
     /* Subtract unsigned operands and set condition code */
     regs->psw.cc = sub_logical(&(regs->GR_L(r1)),
                                  regs->GR_L(r1),
-                                 regs->GR_L(r2)) & ~borrow;
+                                 n) & ~borrow;
 
-}
+} /* end DEF_INST(subtract_logical_borrow_register) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E398 ALC   - Add Logical with Carry                         [RXE] */
 /*-------------------------------------------------------------------*/
@@ -643,9 +1071,11 @@ int     carry = 0;
     regs->psw.cc = add_logical(&(regs->GR_L(r1)),
                                  regs->GR_L(r1),
                                  n) | carry;
-}
+} /* end DEF_INST(add_logical_carry) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E399 SLB   - Subtract Logical with Borrow                   [RXE] */
 /*-------------------------------------------------------------------*/
@@ -673,9 +1103,11 @@ int     borrow = 0;
                                  regs->GR_L(r1),
                                  n) & ~borrow;
 
-}
+} /* end DEF_INST(subtract_logical_borrow) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E30D DSG   - Divide Single Long                             [RXE] */
 /*-------------------------------------------------------------------*/
@@ -684,7 +1116,7 @@ DEF_INST(divide_single_long)
 int     r1;                             /* Values of R fields        */
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
-S64     n;                              /* 64-bit operand values     */
+U64     n;                              /* 64-bit operand values     */
 
     RXE(inst, execflag, regs, r1, b2, effective_addr2);
 
@@ -694,16 +1126,18 @@ S64     n;                              /* 64-bit operand values     */
     n = ARCH_DEP(vfetch8) ( effective_addr2, b2, regs );
 
     if(n == 0
-      || (n == -1LL &&
+      || ((S64)n == -1LL &&
           regs->GR_G(r1) == 0x8000000000000000ULL))
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
 
     regs->GR_G(r1) = (S64)regs->GR_G(r1 + 1) % (S64)n;
     regs->GR_G(r1 + 1) = (S64)regs->GR_G(r1 + 1) / (S64)n;
 
-}
+} /* end DEF_INST(divide_single_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E31D DSGF  - Divide Single Long Fullword                    [RXE] */
 /*-------------------------------------------------------------------*/
@@ -712,7 +1146,7 @@ DEF_INST(divide_single_long_fullword)
 int     r1;                             /* Values of R fields        */
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
-S32     n;                              /* 64-bit operand values     */
+U32     n;                              /* 64-bit operand values     */
 
     RXE(inst, execflag, regs, r1, b2, effective_addr2);
 
@@ -722,23 +1156,25 @@ S32     n;                              /* 64-bit operand values     */
     n = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
 
     if(n == 0
-      || (n == -1 &&
+      || ((S32)n == -1 &&
           regs->GR_G(r1) == 0x8000000000000000ULL))
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
 
     regs->GR_G(r1) = (S64)regs->GR_G(r1 + 1) % (S32)n;
     regs->GR_G(r1 + 1) = (S64)regs->GR_G(r1 + 1) / (S32)n;
 
-}
+} /* end DEF_INST(divide_single_long_fullword) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B90D DSGR  - Divide Single Long Register                    [RRE] */
 /*-------------------------------------------------------------------*/
 DEF_INST(divide_single_long_register)
 {
 int     r1, r2;                         /* Values of R fields        */
-S64     n;
+U64     n;
 
     RRE(inst, execflag, regs, r1, r2);
 
@@ -749,22 +1185,24 @@ S64     n;
           regs->GR_G(r1) == 0x8000000000000000ULL))
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
 
-    n = (S64)regs->GR_G(r2);
+    n = regs->GR_G(r2);
 
     /* Divide signed registers */
     regs->GR_G(r1) = (S64)regs->GR_G(r1 + 1) % (S64)n;
     regs->GR_G(r1 + 1) = (S64)regs->GR_G(r1 + 1) / (S64)n;
 
-}
+} /* end DEF_INST(divide_single_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B91D DSGFR - Divide Single Long Fullword Register           [RRE] */
 /*-------------------------------------------------------------------*/
 DEF_INST(divide_single_long_fullword_register)
 {
 int     r1, r2;                         /* Values of R fields        */
-S32     n;
+U32     n;
 
     RRE(inst, execflag, regs, r1, r2);
 
@@ -775,15 +1213,17 @@ S32     n;
           regs->GR_G(r1) == 0x8000000000000000ULL))
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_DIVIDE_EXCEPTION);
 
-    n = (S32)regs->GR_L(r2);
+    n = regs->GR_L(r2);
 
     /* Divide signed registers */
     regs->GR_G(r1) = (S64)regs->GR_G(r1 + 1) % (S32)n;
     regs->GR_G(r1 + 1) = (S64)regs->GR_G(r1 + 1) / (S32)n;
 
-}
+} /* end DEF_INST(divide_single_long_fullword_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E390 LLGC  - Load Logical Character                         [RXE] */
 /*-------------------------------------------------------------------*/
@@ -796,9 +1236,12 @@ VADR    effective_addr2;                /* Effective address         */
     RXE(inst, execflag, regs, r1, b2, effective_addr2);
 
     regs->GR_G(r1) = ARCH_DEP(vfetchb) ( effective_addr2, b2, regs );
-}
+
+} /* end DEF_INST(load_logical_character) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E391 LLGH  - Load Logical Halfword                          [RXE] */
 /*-------------------------------------------------------------------*/
@@ -811,9 +1254,12 @@ VADR    effective_addr2;                /* Effective address         */
     RXE(inst, execflag, regs, r1, b2, effective_addr2);
 
     regs->GR_G(r1) = ARCH_DEP(vfetch2) ( effective_addr2, b2, regs );
-}
+
+} /* end DEF_INST(load_logical_halfword) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E38E STPQ  - Store Pair to Quadword                         [RXE] */
 /*-------------------------------------------------------------------*/
@@ -828,6 +1274,8 @@ QWORD   qwork;                          /* Quadword work area        */
 
     ODD_CHECK(r1, regs);
 
+    QW_CHECK(effective_addr2, regs);
+
     /* Store regs in workarea */
     STORE_DW(qwork, regs->GR_G(r1));
     STORE_DW(qwork+8, regs->GR_G(r1+1));
@@ -838,9 +1286,12 @@ QWORD   qwork;                          /* Quadword work area        */
     OBTAIN_MAINLOCK(regs);
     ARCH_DEP(vstorec) ( qwork, 16-1, effective_addr2, b2, regs );
     RELEASE_MAINLOCK(regs);
-}
+
+} /* end DEF_INST(store_pair_to_quadword) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E38F LPQ   - Load Pair from Quadword                        [RXE] */
 /*-------------------------------------------------------------------*/
@@ -855,6 +1306,8 @@ QWORD   qwork;                          /* Quadword work area        */
 
     ODD_CHECK(r1, regs);
 
+    QW_CHECK(effective_addr2, regs);
+
     /* Load R1 and R1+1 registers contents from second operand
        Provide storage consistancy by means of obtaining 
        the main storage access lock */
@@ -865,9 +1318,12 @@ QWORD   qwork;                          /* Quadword work area        */
     /* Load regs from workarea */
     FETCH_DW(regs->GR_G(r1), qwork);
     FETCH_DW(regs->GR_G(r1+1), qwork+8);
-}
+
+} /* end DEF_INST(load_pair_from_quadword) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B90E EREGG - Extract Stacked Registers Long                 [RRE] */
 /*-------------------------------------------------------------------*/
@@ -888,9 +1344,11 @@ VADR    lsea;                           /* Linkage stack entry addr  */
     /* Load registers from the stack entry */
     ARCH_DEP(unstack_registers) (1, lsea, r1, r2, regs);
 
-}
+} /* end DEF_INST(extract_stacked_registers_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B98D EPSW  - Extract PSW                                    [RRE] */
 /*-------------------------------------------------------------------*/
@@ -900,6 +1358,11 @@ int     r1, r2;                         /* Values of R fields        */
 QWORD   currpsw;                        /* Work area for PSW         */
 
     RRE(inst, execflag, regs, r1, r2);
+
+#if defined(_FEATURE_ZSIE)
+    if(regs->sie_state && (regs->siebk->ic[1] & SIE_IC1_LPSW))
+        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#endif /*defined(_FEATURE_ZSIE)*/
 
     /* Store the current PSW in work area */
     ARCH_DEP(store_psw) (regs, currpsw);
@@ -912,9 +1375,11 @@ QWORD   currpsw;                        /* Work area for PSW         */
     if(r2 != 0)
         FETCH_FW(regs->GR_L(r2), currpsw+4);
 
-}
+} /* end DEF_INST(extract_psw) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B99D ESEA  - Extract and Set Extended Authority             [RRE] */
 /*-------------------------------------------------------------------*/
@@ -926,14 +1391,24 @@ int     r1, unused;                     /* Value of R field          */
 
     PRIV_CHECK(regs);
 
+#if 0
+#if defined(_FEATURE_ZSIE)
+    if(regs->sie_state && (regs->siebk->lctl_ctl[1] & SIE_LCTL1_CR8))
+        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#endif /*defined(_FEATURE_ZSIE)*/
+#endif
+
     regs->GR_LHH(r1) = regs->CR_LHH(8);
     regs->CR_LHH(8) = regs->GR_LHL(r1);
 
     INVALIDATE_AIA(regs);
     INVALIDATE_AEA_ALL(regs);
-}
+
+} /* end DEF_INST(extract_and_set_extended_authority) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* C0x0 LARL  - Load Address Relative Long                     [RIL] */
 /*-------------------------------------------------------------------*/
@@ -946,10 +1421,13 @@ U32     i2;                             /* 32-bit operand values     */
     RIL(inst, execflag, regs, r1, opcd, i2);
 
     GR_A(r1, regs) = ((!execflag ? (regs->psw.IA - 6) : regs->ET)
-                                 + 2*(S32)i2) & ADDRESS_MAXWRAP(regs);
-}
+                               + 2LL*(S32)i2) & ADDRESS_MAXWRAP(regs);
+
+} /* end DEF_INST(load_address_relative_long) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A5x0 IIHH  - Insert Immediate High High                      [RI] */
 /*-------------------------------------------------------------------*/
@@ -962,9 +1440,12 @@ U16     i2;                             /* 16-bit operand values     */
     RI(inst, execflag, regs, r1, opcd, i2);
 
     regs->GR_HHH(r1) = i2;
-}
+
+} /* end DEF_INST(insert_immediate_high_high) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A5x1 IIHL  - Insert Immediate High Low                       [RI] */
 /*-------------------------------------------------------------------*/
@@ -977,9 +1458,12 @@ U16     i2;                             /* 16-bit operand values     */
     RI(inst, execflag, regs, r1, opcd, i2);
 
     regs->GR_HHL(r1) = i2;
-}
+
+} /* end DEF_INST(insert_immediate_high_low) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A5x2 IILH  - Insert Immediate Low High                       [RI] */
 /*-------------------------------------------------------------------*/
@@ -992,9 +1476,12 @@ U16     i2;                             /* 16-bit operand values     */
     RI(inst, execflag, regs, r1, opcd, i2);
 
     regs->GR_LHH(r1) = i2;
-}
+
+} /* end DEF_INST(insert_immediate_low_high) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A5x3 IILL  - Insert Immediate Low Low                        [RI] */
 /*-------------------------------------------------------------------*/
@@ -1007,9 +1494,12 @@ U16     i2;                             /* 16-bit operand values     */
     RI(inst, execflag, regs, r1, opcd, i2);
 
     regs->GR_LHL(r1) = i2;
-}
+
+} /* end DEF_INST(insert_immediate_low_low) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A5x4 NIHH  - And Immediate High High                         [RI] */
 /*-------------------------------------------------------------------*/
@@ -1025,9 +1515,12 @@ U16     i2;                             /* 16-bit operand values     */
 
     /* Set condition code according to result */
     regs->psw.cc = regs->GR_HHH(r1) ? 1 : 0;
-}
+
+} /* end DEF_INST(and_immediate_high_high) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A5x5 NIHL  - And Immediate High Low                          [RI] */
 /*-------------------------------------------------------------------*/
@@ -1043,9 +1536,12 @@ U16     i2;                             /* 16-bit operand values     */
 
     /* Set condition code according to result */
     regs->psw.cc = regs->GR_HHL(r1) ? 1 : 0;
-}
+
+} /* end DEF_INST(and_immediate_high_low) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A5x6 NILH  - And Immediate Low High                          [RI] */
 /*-------------------------------------------------------------------*/
@@ -1061,9 +1557,12 @@ U16     i2;                             /* 16-bit operand values     */
 
     /* Set condition code according to result */
     regs->psw.cc = regs->GR_LHH(r1) ? 1 : 0;
-}
+
+} /* end DEF_INST(and_immediate_low_high) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A5x7 NILL  - And Immediate Low Low                           [RI] */
 /*-------------------------------------------------------------------*/
@@ -1079,9 +1578,12 @@ U16     i2;                             /* 16-bit operand values     */
 
     /* Set condition code according to result */
     regs->psw.cc = regs->GR_LHL(r1) ? 1 : 0;
-}
+
+} /* end DEF_INST(and_immediate_low_low) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A5x8 OIHH  - Or Immediate High High                          [RI] */
 /*-------------------------------------------------------------------*/
@@ -1097,9 +1599,12 @@ U16     i2;                             /* 16-bit operand values     */
 
     /* Set condition code according to result */
     regs->psw.cc = regs->GR_HHH(r1) ? 1 : 0;
-}
+
+} /* end DEF_INST(or_immediate_high_high) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A5x9 OIHL  - Or Immediate High Low                           [RI] */
 /*-------------------------------------------------------------------*/
@@ -1115,9 +1620,12 @@ U16     i2;                             /* 16-bit operand values     */
 
     /* Set condition code according to result */
     regs->psw.cc = regs->GR_HHL(r1) ? 1 : 0;
-}
+
+} /* end DEF_INST(or_immediate_high_low) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A5xA OILH  - Or Immediate Low High                           [RI] */
 /*-------------------------------------------------------------------*/
@@ -1133,9 +1641,12 @@ U16     i2;                             /* 16-bit operand values     */
 
     /* Set condition code according to result */
     regs->psw.cc = regs->GR_LHH(r1) ? 1 : 0;
-}
+
+} /* end DEF_INST(or_immediate_low_high) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A5xB OILL  - Or Immediate Low Low                            [RI] */
 /*-------------------------------------------------------------------*/
@@ -1151,9 +1662,12 @@ U16     i2;                             /* 16-bit operand values     */
 
     /* Set condition code according to result */
     regs->psw.cc = regs->GR_LHL(r1) ? 1 : 0;
-}
+
+} /* end DEF_INST(or_immediate_low_low) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A5xC LLIHH - Load Logical Immediate High High                [RI] */
 /*-------------------------------------------------------------------*/
@@ -1166,9 +1680,12 @@ U16     i2;                             /* 16-bit operand values     */
     RI(inst, execflag, regs, r1, opcd, i2);
 
     regs->GR_G(r1) = (U64)i2 << 48;
-}
+
+} /* end DEF_INST(load_logical_immediate_high_high) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A5xD LLIHL - Load Logical Immediate High Low                 [RI] */
 /*-------------------------------------------------------------------*/
@@ -1181,9 +1698,12 @@ U16     i2;                             /* 16-bit operand values     */
     RI(inst, execflag, regs, r1, opcd, i2);
 
     regs->GR_G(r1) = (U64)i2 << 32;
-}
+
+} /* end DEF_INST(load_logical_immediate_high_low) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A5xE LLILH - Load Logical Immediate Low High                 [RI] */
 /*-------------------------------------------------------------------*/
@@ -1196,9 +1716,12 @@ U16     i2;                             /* 16-bit operand values     */
     RI(inst, execflag, regs, r1, opcd, i2);
 
     regs->GR_G(r1) = (U64)i2 << 16;
-}
+
+} /* end DEF_INST(load_logical_immediate_low_high) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A5xF LLILL - Load Logical Immediate Low Low                  [RI] */
 /*-------------------------------------------------------------------*/
@@ -1211,11 +1734,14 @@ U16     i2;                             /* 16-bit operand values     */
     RI(inst, execflag, regs, r1, opcd, i2);
 
     regs->GR_G(r1) = (U64)i2;
-}
+
+} /* end DEF_INST(load_logical_immediate_low_low) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
-/* C0x4 BRCL  - Branch Relative on Condition                   [RIL] */
+/* C0x4 BRCL  - Branch Relative on Condition Long              [RIL] */
 /*-------------------------------------------------------------------*/
 DEF_INST(branch_relative_on_condition_long)
 {
@@ -1229,10 +1755,13 @@ U32     i2;                             /* 32-bit operand values     */
     if ((0x08 >> regs->psw.cc) & r1)
         /* Calculate the relative branch address */
         regs->psw.IA = ((!execflag ? (regs->psw.IA - 6) : regs->ET)
-                                  + 2*(S32)i2) & ADDRESS_MAXWRAP(regs);
-}
+                                + 2LL*(S32)i2) & ADDRESS_MAXWRAP(regs);
+
+} /* end DEF_INST(branch_relative_on_condition_long) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* C0x5 BRASL - Branch Relative And Save Long                  [RIL] */
 /*-------------------------------------------------------------------*/
@@ -1244,9 +1773,11 @@ U32     i2;                             /* 32-bit operand values     */
 
     RIL(inst, execflag, regs, r1, opcd, i2);
 
+#if defined(FEATURE_ESAME)
     if(regs->psw.amode64)
         regs->GR_G(r1) = regs->psw.IA;
     else
+#endif /*defined(FEATURE_ESAME)*/
     if ( regs->psw.amode )
         regs->GR_L(r1) = 0x80000000 | regs->psw.IA;
     else
@@ -1254,10 +1785,13 @@ U32     i2;                             /* 32-bit operand values     */
 
     /* Set instruction address to the relative branch address */
     regs->psw.IA = ((!execflag ? (regs->psw.IA - 6) : regs->ET)
-                                  + 2*(S32)i2) & ADDRESS_MAXWRAP(regs);
-}
+                                + 2LL*(S32)i2) & ADDRESS_MAXWRAP(regs);
+
+} /* end DEF_INST(branch_relative_and_save_long) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB20 CLMH  - Compare Logical Characters under Mask High     [RSE] */
 /*-------------------------------------------------------------------*/
@@ -1303,9 +1837,12 @@ int     i;                              /* Integer work areas        */
 
     /* Update the condition code */
     regs->psw.cc = cc;
-}
+
+} /* end DEF_INST(compare_logical_characters_under_mask_high) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB2C STCMH - Store Characters under Mask High               [RSE] */
 /*-------------------------------------------------------------------*/
@@ -1344,15 +1881,20 @@ BYTE    cwork[4];                       /* Character work areas      */
        access exception may be recognized on the first byte */
     if (j == 0)
     {
+#if defined(MODEL_DEPENDENT)
         ARCH_DEP(validate_operand) (effective_addr2, b2, 0, ACCTYPE_WRITE, regs);
+#endif /*defined(MODEL_DEPENDENT)*/
         return;
     }
 
     /* Store result at operand location */
     ARCH_DEP(vstorec) ( cwork, j-1, effective_addr2, b2, regs );
-}
+
+} /* end DEF_INST(store_characters_under_mask_high) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB80 ICMH  - Insert Characters under Mask High              [RSE] */
 /*-------------------------------------------------------------------*/
@@ -1419,9 +1961,12 @@ U64     dreg;                           /* Double register work area */
 
     /* Set condition code */
     regs->psw.cc = cc;
-}
+
+} /* end DEF_INST(insert_characters_under_mask_high) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EC44 BRXHG - Branch Relative on Index High Long             [RIE] */
 /*-------------------------------------------------------------------*/
@@ -1429,7 +1974,7 @@ DEF_INST(branch_relative_on_index_high_long)
 {
 int     r1, r3;                         /* Register numbers          */
 U32     i2;                             /* 32-bit operand            */
-int     i,j;                            /* Integer workareas         */
+S64     i,j;                            /* Integer workareas         */
 
     RIE(inst, execflag, regs, r1, r3, i2);
 
@@ -1445,11 +1990,13 @@ int     i,j;                            /* Integer workareas         */
     /* Branch if result compares high */
     if ( (S64)regs->GR_G(r1) > j )
         regs->psw.IA = ((!execflag ? (regs->psw.IA - 6) : regs->ET)
-                                  + 2*(S32)i2) & ADDRESS_MAXWRAP(regs);
+                                + 2LL*(S32)i2) & ADDRESS_MAXWRAP(regs);
 
-}
+} /* end DEF_INST(branch_relative_on_index_high_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EC45 BRXLG - Branch Relative on Index Low or Equal Long     [RIE] */
 /*-------------------------------------------------------------------*/
@@ -1457,7 +2004,7 @@ DEF_INST(branch_relative_on_index_low_or_equal_long)
 {
 int     r1, r3;                         /* Register numbers          */
 U32     i2;                             /* 32-bit operand            */
-int     i,j;                            /* Integer workareas         */
+S64     i,j;                            /* Integer workareas         */
 
     RIE(inst, execflag, regs, r1, r3, i2);
 
@@ -1473,11 +2020,13 @@ int     i,j;                            /* Integer workareas         */
     /* Branch if result compares low or equal */
     if ( (S64)regs->GR_G(r1) <= j )
         regs->psw.IA = ((!execflag ? (regs->psw.IA - 6) : regs->ET)
-                                  + 2*(S32)i2) & ADDRESS_MAXWRAP(regs);
+                                + 2LL*(S32)i2) & ADDRESS_MAXWRAP(regs);
 
-}
+} /* end DEF_INST(branch_relative_on_index_low_or_equal_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB44 BXHG  - Branch on Index High Long                      [RSE] */
 /*-------------------------------------------------------------------*/
@@ -1503,9 +2052,11 @@ S64     i, j;                           /* Integer work areas        */
     if ( (S64)regs->GR_G(r1) > j )
         regs->psw.IA = effective_addr2;
 
-}
+} /* end DEF_INST(branch_on_index_high_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB45 BXLEG - Branch on Index Low or Equal Long              [RSE] */
 /*-------------------------------------------------------------------*/
@@ -1531,9 +2082,11 @@ S64     i, j;                           /* Integer work areas        */
     if ( (S64)regs->GR_G(r1) <= j )
         regs->psw.IA = effective_addr2;
 
-}
+} /* end DEF_INST(branch_on_index_low_or_equal_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB30 CSG   - Compare and Swap Long                          [RSE] */
 /*-------------------------------------------------------------------*/
@@ -1546,7 +2099,7 @@ U64     n;                              /* 64-bit operand value      */
 
     RSE(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
-    FW_CHECK(effective_addr2, regs);
+    DW_CHECK(effective_addr2, regs);
 
     /* Perform serialization before starting operation */
     PERFORM_SERIALIZATION (regs);
@@ -1593,8 +2146,11 @@ U64     n;                              /* 64-bit operand value      */
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 #endif /*defined(_FEATURE_ZSIE)*/
 
-}
+} /* end DEF_INST(compare_and_swap_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
+
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB3E CDSG  - Compare Double and Swap Long                   [RSE] */
 /*-------------------------------------------------------------------*/
@@ -1609,7 +2165,7 @@ U64     n1, n2;                         /* 64-bit operand values     */
 
     ODD2_CHECK(r1, r3, regs);
 
-    DW_CHECK(effective_addr2, regs);
+    QW_CHECK(effective_addr2, regs);
 
     /* Perform serialization before starting operation */
     PERFORM_SERIALIZATION (regs);
@@ -1625,6 +2181,8 @@ U64     n1, n2;                         /* 64-bit operand values     */
     if ( regs->GR_G(r1) == n1 && regs->GR_G(r1+1) == n2 )
     {
         /* If equal, store R3:R3+1 at operand location and set cc=0 */
+        ARCH_DEP(validate_operand) (effective_addr2 + 8, b2, 8-1,
+                                                         ACCTYPE_WRITE, regs);
         ARCH_DEP(vstore8) ( regs->GR_G(r3), effective_addr2, b2, regs );
         ARCH_DEP(vstore8) ( regs->GR_G(r3+1), effective_addr2 + 8, b2, regs );
         regs->psw.cc = 0;
@@ -1659,9 +2217,11 @@ U64     n1, n2;                         /* 64-bit operand values     */
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 #endif /*defined(_FEATURE_ZSIE)*/
 
-}
+} /* end DEF_INST(compare_double_and_swap_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E346 BCTG  - Branch on Count Long                           [RXE] */
 /*-------------------------------------------------------------------*/
@@ -1677,9 +2237,11 @@ VADR    effective_addr2;                /* Effective address         */
     if ( --(regs->GR_G(r1)) )
         regs->psw.IA = effective_addr2;
 
-}
+} /* end DEF_INST(branch_on_count_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B946 BCTGR - Branch on Count Long Register                  [RRE] */
 /*-------------------------------------------------------------------*/
@@ -1698,9 +2260,11 @@ VADR    newia;                          /* New instruction address   */
     if ( --(regs->GR_G(r1)) && r2 != 0 )
         regs->psw.IA = newia;
 
-}
+} /* end DEF_INST(branch_on_count_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B920 CGR   - Compare Long Register                          [RRE] */
 /*-------------------------------------------------------------------*/
@@ -1714,9 +2278,12 @@ int     r1, r2;                         /* Values of R fields        */
     regs->psw.cc =
                 (S64)regs->GR_G(r1) < (S64)regs->GR_G(r2) ? 1 :
                 (S64)regs->GR_G(r1) > (S64)regs->GR_G(r2) ? 2 : 0;
-}
+
+} /* end DEF_INST(compare_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B930 CGFR  - Compare Long Fullword Register                 [RRE] */
 /*-------------------------------------------------------------------*/
@@ -1730,9 +2297,12 @@ int     r1, r2;                         /* Values of R fields        */
     regs->psw.cc =
                 (S64)regs->GR_G(r1) < (S32)regs->GR_L(r2) ? 1 :
                 (S64)regs->GR_G(r1) > (S32)regs->GR_L(r2) ? 2 : 0;
-}
+
+} /* end DEF_INST(compare_long_fullword_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E320 CG    - Compare Long                                   [RXE] */
 /*-------------------------------------------------------------------*/
@@ -1752,9 +2322,12 @@ U64     n;                              /* 64-bit operand values     */
     regs->psw.cc =
             (S64)regs->GR_G(r1) < (S64)n ? 1 :
             (S64)regs->GR_G(r1) > (S64)n ? 2 : 0;
-}
+
+} /* end DEF_INST(compare_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E330 CGF   - Compare Long Fullword                          [RXE] */
 /*-------------------------------------------------------------------*/
@@ -1763,20 +2336,23 @@ DEF_INST(compare_long_fullword)
 int     r1;                             /* Values of R fields        */
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
-S32     n;                              /* 64-bit operand values     */
+U32     n;                              /* 32-bit operand values     */
 
     RXE(inst, execflag, regs, r1, b2, effective_addr2);
 
     /* Load second operand from operand address */
-    n = (S32)ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
+    n = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
 
     /* Compare signed operands and set condition code */
     regs->psw.cc =
             (S64)regs->GR_G(r1) < (S32)n ? 1 :
             (S64)regs->GR_G(r1) > (S32)n ? 2 : 0;
-}
+
+} /* end DEF_INST(compare_long_fullword) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E30A ALG   - Add Logical Long                               [RXE] */
 /*-------------------------------------------------------------------*/
@@ -1796,9 +2372,12 @@ U64     n;                              /* 64-bit operand values     */
     regs->psw.cc = add_logical_long(&(regs->GR_G(r1)),
                                       regs->GR_G(r1),
                                       n);
-}
+
+} /* end DEF_INST(add_logical_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E31A ALGF  - Add Logical Long Fullword                      [RXE] */
 /*-------------------------------------------------------------------*/
@@ -1818,9 +2397,12 @@ U32     n;                              /* 32-bit operand values     */
     regs->psw.cc = add_logical_long(&(regs->GR_G(r1)),
                                       regs->GR_G(r1),
                                       n);
-}
+
+} /* end DEF_INST(add_logical_long_fullword) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E318 AGF   - Add Long Fullword                              [RXE] */
 /*-------------------------------------------------------------------*/
@@ -1844,9 +2426,12 @@ U32     n;                              /* 32-bit operand values     */
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
-}
+
+} /* end DEF_INST(add_long_fullword) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E308 AG    - Add Long                                       [RXE] */
 /*-------------------------------------------------------------------*/
@@ -1870,9 +2455,12 @@ U64     n;                              /* 64-bit operand values     */
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
-}
+
+} /* end DEF_INST(add_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E30B SLG   - Subtract Logical Long                          [RXE] */
 /*-------------------------------------------------------------------*/
@@ -1893,9 +2481,11 @@ U64     n;                              /* 64-bit operand values     */
                                       regs->GR_G(r1),
                                       n);
 
-}
+} /* end DEF_INST(subtract_logical_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E31B SLGF  - Subtract Logical Long Fullword                 [RXE] */
 /*-------------------------------------------------------------------*/
@@ -1916,9 +2506,11 @@ U32     n;                              /* 32-bit operand values     */
                                       regs->GR_G(r1),
                                       n);
 
-}
+} /* end DEF_INST(subtract_logical_long_fullword) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E319 SGF   - Subtract Long Fullword                         [RXE] */
 /*-------------------------------------------------------------------*/
@@ -1942,9 +2534,12 @@ U32     n;                              /* 32-bit operand values     */
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
-}
+
+} /* end DEF_INST(subtract_long_fullword) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E309 SG    - Subtract Long                                  [RXE] */
 /*-------------------------------------------------------------------*/
@@ -1968,9 +2563,12 @@ U64     n;                              /* 64-bit operand values     */
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
-}
+
+} /* end DEF_INST(subtract_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B909 SGR   - Subtract Long Register                         [RRE] */
 /*-------------------------------------------------------------------*/
@@ -1988,9 +2586,12 @@ int     r1, r2;                         /* Values of R fields        */
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
-}
+
+} /* end DEF_INST(subtract_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B919 SGFR  - Subtract Long Fullword Register                [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2008,9 +2609,12 @@ int     r1, r2;                         /* Values of R fields        */
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
-}
+
+} /* end DEF_INST(subtract_long_fullword_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B908 AGR   - Add Long Register                              [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2028,9 +2632,12 @@ int     r1, r2;                         /* Values of R fields        */
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
-}
+
+} /* end DEF_INST(add_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B918 AGFR  - Add Long Fullword Register                     [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2048,9 +2655,12 @@ int     r1, r2;                         /* Values of R fields        */
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
-}
+
+} /* end DEF_INST(add_long_fullword_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B900 LPGR  - Load Positive Long Register                    [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2076,9 +2686,12 @@ int     r1, r2;                         /* Values of R fields        */
                             (S64)regs->GR_G(r2);
 
     regs->psw.cc = (S64)regs->GR_G(r1) == 0 ? 0 : 2;
-}
+
+} /* end DEF_INST(load_positive_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B910 LPGFR - Load Positive Long Fullword Register           [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2094,9 +2707,12 @@ int     r1, r2;                         /* Values of R fields        */
                             (S32)regs->GR_L(r2);
 
     regs->psw.cc = (S64)regs->GR_G(r1) == 0 ? 0 : 2;
-}
+
+} /* end DEF_INST(load_positive_long_fullword_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B901 LNGR  - Load Negative Long Register                    [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2112,9 +2728,12 @@ int     r1, r2;                         /* Values of R fields        */
                             (S64)regs->GR_G(r2);
 
     regs->psw.cc = (S64)regs->GR_G(r1) == 0 ? 0 : 1;
-}
+
+} /* end DEF_INST(load_negative_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B911 LNGFR - Load Negative Long Fullword Register           [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2130,9 +2749,12 @@ int     r1, r2;                         /* Values of R fields        */
                             (S32)regs->GR_L(r2);
 
     regs->psw.cc = (S64)regs->GR_G(r1) == 0 ? 0 : 1;
-}
+
+} /* end DEF_INST(load_negative_long_fullword_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B902 LTGR  - Load and Test Long Register                    [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2147,9 +2769,12 @@ int     r1, r2;                         /* Values of R fields        */
 
     regs->psw.cc = (S64)regs->GR_G(r1) < 0 ? 1 :
                    (S64)regs->GR_G(r1) > 0 ? 2 : 0;
-}
+
+} /* end DEF_INST(load_and_test_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B912 LTGFR - Load and Test Long Fullword Register           [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2164,9 +2789,12 @@ int     r1, r2;                         /* Values of R fields        */
 
     regs->psw.cc = (S64)regs->GR_G(r1) < 0 ? 1 :
                    (S64)regs->GR_G(r1) > 0 ? 2 : 0;
-}
+
+} /* end DEF_INST(load_and_test_long_fullword_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B903 LCGR  - Load Complement Long Register                  [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2191,9 +2819,12 @@ int     r1, r2;                         /* Values of R fields        */
 
     regs->psw.cc = (S64)regs->GR_G(r1) < 0 ? 1 :
                    (S64)regs->GR_G(r1) > 0 ? 2 : 0;
-}
+
+} /* end DEF_INST(load_complement_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B913 LCGFR - Load Complement Long Fullword Register         [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2208,9 +2839,12 @@ int     r1, r2;                         /* Values of R fields        */
 
     regs->psw.cc = (S64)regs->GR_G(r1) < 0 ? 1 :
                    (S64)regs->GR_G(r1) > 0 ? 2 : 0;
-}
+
+} /* end DEF_INST(load_complement_long_fullword_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A7x2 TMHH  - Test under Mask High High                       [RI] */
 /*-------------------------------------------------------------------*/
@@ -2236,9 +2870,12 @@ U16     h2;                             /* 16-bit operand values     */
             ((h1 ^ i2) == 0) ? 3 :      /* result all ones   */
             ((h1 & h2) == 0) ? 1 :      /* leftmost bit zero */
             2;                          /* leftmost bit one  */
-}
+
+} /* end DEF_INST(test_under_mask_high_high) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A7x3 TMHL  - Test under Mask High Low                        [RI] */
 /*-------------------------------------------------------------------*/
@@ -2265,11 +2902,13 @@ U16     h2;                             /* 16-bit operand values     */
             ((h1 & h2) == 0) ? 1 :      /* leftmost bit zero */
             2;                          /* leftmost bit one  */
 
-}
+} /* end DEF_INST(test_under_mask_high_low) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
-/* A7x7 BRCT  - Branch Relative on Count Long                   [RI] */
+/* A7x7 BRCTG - Branch Relative on Count Long                   [RI] */
 /*-------------------------------------------------------------------*/
 DEF_INST(branch_relative_on_count_long)
 {
@@ -2283,9 +2922,12 @@ U16     i2;                             /* 16-bit operand values     */
     if ( --(regs->GR_G(r1)) )
         regs->psw.IA = ((!execflag ? (regs->psw.IA - 4) : regs->ET)
                                   + 2*(S16)i2) & ADDRESS_MAXWRAP(regs);
-}
+
+} /* end DEF_INST(branch_relative_on_count_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E321 CLG   - Compare Logical long                           [RXE] */
 /*-------------------------------------------------------------------*/
@@ -2304,8 +2946,12 @@ U64     n;                              /* 64-bit operand values     */
     /* Compare unsigned operands and set condition code */
     regs->psw.cc = regs->GR_G(r1) < n ? 1 :
                    regs->GR_G(r1) > n ? 2 : 0;
-}
 
+} /* end DEF_INST(compare_logical_long) */
+#endif /*defined(FEATURE_ESAME)*/
+
+
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E331 CLGF  - Compare Logical long fullword                  [RXE] */
 /*-------------------------------------------------------------------*/
@@ -2324,9 +2970,12 @@ U32     n;                              /* 32-bit operand values     */
     /* Compare unsigned operands and set condition code */
     regs->psw.cc = regs->GR_G(r1) < n ? 1 :
                    regs->GR_G(r1) > n ? 2 : 0;
-}
+
+} /* end DEF_INST(compare_logical_long_fullword) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B931 CLGFR - Compare Logical Long Fullword Register         [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2339,11 +2988,14 @@ int     r1, r2;                         /* Values of R fields        */
     /* Compare unsigned operands and set condition code */
     regs->psw.cc = regs->GR_G(r1) < regs->GR_L(r2) ? 1 :
                    regs->GR_G(r1) > regs->GR_L(r2) ? 2 : 0;
-}
+
+} /* end DEF_INST(compare_logical_long_fullword_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
-/* B917 LLGTR - Load Logical Long Thirtyone Regsiter           [RRE] */
+/* B917 LLGTR - Load Logical Long Thirtyone Register           [RRE] */
 /*-------------------------------------------------------------------*/
 DEF_INST(load_logical_long_thirtyone_register)
 {
@@ -2352,9 +3004,12 @@ int     r1, r2;                         /* Values of R fields        */
     RRE(inst, execflag, regs, r1, r2);
 
     regs->GR_G(r1) = regs->GR_L(r2) & 0x7FFFFFFF;
-}
+
+} /* end DEF_INST(load_logical_long_thirtyone_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B921 CLGR  - Compare Logical Long Register                  [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2367,13 +3022,16 @@ int     r1, r2;                         /* Values of R fields        */
     /* Compare unsigned operands and set condition code */
     regs->psw.cc = regs->GR_G(r1) < regs->GR_G(r2) ? 1 :
                    regs->GR_G(r1) > regs->GR_G(r2) ? 2 : 0;
-}
+
+} /* end DEF_INST(compare_logical_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB1C RLLG  - Rotate Left Single Logical Long                [RSE] */
 /*-------------------------------------------------------------------*/
-DEF_INST(rotate_left_single_logical_long)     
+DEF_INST(rotate_left_single_logical_long)
 {
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
@@ -2386,12 +3044,14 @@ U64     n;                              /* Integer work areas        */
     n = effective_addr2 & 0x3F;
 
     /* Rotate and copy contents of r3 to r1 */
-    regs->GR_G(r1) = regs->GR_G(r3) << n
-                   | regs->GR_G(r3) >> (64 - n);
+    regs->GR_G(r1) = (regs->GR_G(r3) << n)
+                   | ((n == 0) ? 0 : (regs->GR_G(r3) >> (64 - n)));
 
-}
+} /* end DEF_INST(rotate_left_single_logical_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB1D RLL   - Rotate Left Single Logical                     [RSE] */
 /*-------------------------------------------------------------------*/
@@ -2408,12 +3068,14 @@ U64     n;                              /* Integer work areas        */
     n = effective_addr2 & 0x1F;
 
     /* Rotate and copy contents of r3 to r1 */
-    regs->GR_L(r1) = regs->GR_L(r3) << n
-                   | regs->GR_L(r3) >> (32 - n);
+    regs->GR_L(r1) = (regs->GR_L(r3) << n)
+                   | ((n == 0) ? 0 : (regs->GR_L(r3) >> (32 - n)));
 
-}
+} /* end DEF_INST(rotate_left_single_logical) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB0D SLLG  - Shift Left Single Logical Long                 [RSE] */
 /*-------------------------------------------------------------------*/
@@ -2429,11 +3091,14 @@ U64     n;                              /* Integer work areas        */
     /* Use rightmost six bits of operand address as shift count */
     n = effective_addr2 & 0x3F;
 
-    /* Copy contents of r3 to r1 */
+    /* Copy contents of r3 to r1 and perform shift */
     regs->GR_G(r1) = regs->GR_G(r3) << n;
-}
+
+} /* end DEF_INST(shift_left_single_logical_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB0C SRLG  - Shift Right Single Logical Long                [RSE] */
 /*-------------------------------------------------------------------*/
@@ -2449,11 +3114,14 @@ U64     n;                              /* Integer work areas        */
     /* Use rightmost six bits of operand address as shift count */
     n = effective_addr2 & 0x3F;
 
-    /* Copy contents of r3 to r1 */
+    /* Copy contents of r3 to r1 and perform shift */
     regs->GR_G(r1) = regs->GR_G(r3) >> n;
-}
+
+} /* end DEF_INST(shift_right_single_logical_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB0B SLAG  - Shift Left Single Long                         [RSE] */
 /*-------------------------------------------------------------------*/
@@ -2470,17 +3138,14 @@ int     i, j;                           /* Integer work areas        */
     /* Use rightmost six bits of operand address as shift count */
     n = effective_addr2 & 0x3F;
 
-    /* Copy contents of r3 to r1 */
-    regs->GR_G(r1) = regs->GR_G(r3);
-
-    /* Load the numeric and sign portions from the R1 register */
-    n1 = regs->GR_G(r1) & 0x7FFFFFFFFFFFFFFFULL;
-    n2 = regs->GR_G(r1) & 0x8000000000000000ULL;
+    /* Load the numeric and sign portions from the R3 register */
+    n1 = regs->GR_G(r3) & 0x7FFFFFFFFFFFFFFFULL;
+    n2 = regs->GR_G(r3) & 0x8000000000000000ULL;
 
     /* Shift the numeric portion left n positions */
     for (i = 0, j = 0; i < n; i++)
     {
-        /* Shift bits 1-31 left one bit position */
+        /* Shift bits 1-63 left one bit position */
         n1 <<= 1;
 
         /* Overflow if bit shifted out is unlike the sign bit */
@@ -2504,9 +3169,11 @@ int     i, j;                           /* Integer work areas        */
     regs->psw.cc = (S64)regs->GR_G(r1) > 0 ? 2 :
                    (S64)regs->GR_G(r1) < 0 ? 1 : 0;
 
-}
+} /* end DEF_INST(shift_left_single_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB0A SRAG  - Shift Right single Long                        [RSE] */
 /*-------------------------------------------------------------------*/
@@ -2522,20 +3189,20 @@ U64     n;                              /* Integer work areas        */
     /* Use rightmost six bits of operand address as shift count */
     n = effective_addr2 & 0x3F;
 
-    /* Copy contents of r3 to r1 */
-    regs->GR_G(r1) = regs->GR_G(r3);
-
-    /* Shift the signed value of the R1 register */
-    (S64)regs->GR_G(r1) = n > 62 ?
-                    ((S64)regs->GR_G(r1) < 0 ? -1 : 0) :
-                    (S64)regs->GR_G(r1) >> n;
+    /* Copy and shift the signed value of the R3 register */
+    (S64)regs->GR_G(r1) = (n > 62) ?
+                    ((S64)regs->GR_G(r3) < 0 ? -1LL : 0) :
+                    (S64)regs->GR_G(r3) >> n;
 
     /* Set the condition code */
     regs->psw.cc = (S64)regs->GR_G(r1) > 0 ? 2 :
                    (S64)regs->GR_G(r1) < 0 ? 1 : 0;
-}
+
+} /* end DEF_INST(shift_right_single_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E31C MSGF  - Multiply Single Long Fullword                  [RXE] */
 /*-------------------------------------------------------------------*/
@@ -2554,9 +3221,11 @@ U32     n;                              /* 32-bit operand values     */
     /* Multiply signed operands ignoring overflow */
     (S64)regs->GR_G(r1) *= (S32)n;
 
-}
+} /* end DEF_INST(multiply_single_long_fullword) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E30C MSG   - Multiply Single Long                           [RXE] */
 /*-------------------------------------------------------------------*/
@@ -2575,9 +3244,11 @@ U64     n;                              /* 64-bit operand values     */
     /* Multiply signed operands ignoring overflow */
     (S64)regs->GR_G(r1) *= (S64)n;
 
-}
+} /* end DEF_INST(multiply_single_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B91C MSGFR - Multiply Single Long Fullword Register         [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2590,9 +3261,11 @@ int     r1, r2;                         /* Values of R fields        */
     /* Multiply signed registers ignoring overflow */
     (S64)regs->GR_G(r1) *= (S32)regs->GR_L(r2);
 
-}
+} /* end DEF_INST(multiply_single_long_fullword_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B90C MSGR  - Multiply Single Long Register                  [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2605,9 +3278,11 @@ int     r1, r2;                         /* Values of R fields        */
     /* Multiply signed registers ignoring overflow */
     (S64)regs->GR_G(r1) *= (S64)regs->GR_G(r2);
 
-}
+} /* end DEF_INST(multiply_single_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A7x9 LGHI  - Load Long Halfword Immediate                    [RI] */
 /*-------------------------------------------------------------------*/
@@ -2622,9 +3297,11 @@ U16     i2;                             /* 16-bit operand values     */
     /* Load operand into register */
     (S64)regs->GR_G(r1) = (S16)i2;
 
-}
+} /* end DEF_INST(load_long_halfword_immediate) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A7xB AGHI  - Add Long Halfword Immediate                     [RI] */
 /*-------------------------------------------------------------------*/
@@ -2633,23 +3310,23 @@ DEF_INST(add_long_halfword_immediate)
 int     r1;                             /* Register number           */
 int     opcd;                           /* Opcode                    */
 U16     i2;                             /* 16-bit immediate op       */
-S64     n;                              /* 16-bit converted to long  */
 
     RI(inst, execflag, regs, r1, opcd, i2);
-
-    /* Propagate sign bit to form 32-bit signed operand */
-    n = (S16)i2;
 
     /* Add signed operands and set condition code */
     regs->psw.cc = add_signed_long(&(regs->GR_G(r1)),
                                      regs->GR_G(r1),
-                                     n);
+                                (S16)i2);
 
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && regs->psw.fomask )
         ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
-}
 
+} /* end DEF_INST(add_long_halfword_immediate) */
+#endif /*defined(FEATURE_ESAME)*/
+
+
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A7xD MGHI  - Multiply Long Halfword Immediate                [RI] */
 /*-------------------------------------------------------------------*/
@@ -2664,9 +3341,11 @@ U16     i2;                             /* 16-bit operand            */
     /* Multiply register by operand ignoring overflow  */
     (S64)regs->GR_G(r1) *= (S16)i2;
 
-}
+} /* end DEF_INST(multiply_long_halfword_immediate) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* A7xF CGHI  - Compare Long Halfword Immediate                 [RI] */
 /*-------------------------------------------------------------------*/
@@ -2683,9 +3362,11 @@ U16     i2;                             /* 16-bit operand            */
             (S64)regs->GR_G(r1) < (S16)i2 ? 1 :
             (S64)regs->GR_G(r1) > (S16)i2 ? 2 : 0;
 
-}
+} /* end DEF_INST(compare_long_halfword_immediate) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B980 NGR   - And Register Long                              [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2697,9 +3378,12 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* AND second operand with first and set condition code */
     regs->psw.cc = ( regs->GR_G(r1) &= regs->GR_G(r2) ) ? 1 : 0;
-}
+
+} /* end DEF_INST(and_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B981 OGR   - Or Register Long                               [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2711,9 +3395,12 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* OR second operand with first and set condition code */
     regs->psw.cc = ( regs->GR_G(r1) |= regs->GR_G(r2) ) ? 1 : 0;
-}
+
+} /* end DEF_INST(or_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B982 XGR   - Exclusive Or Register Long                     [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2725,9 +3412,12 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* XOR second operand with first and set condition code */
     regs->psw.cc = ( regs->GR_G(r1) ^= regs->GR_G(r2) ) ? 1 : 0;
-}
+
+} /* end DEF_INST(exclusive_or_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E380 NG    - And Long                                       [RXE] */
 /*-------------------------------------------------------------------*/
@@ -2745,9 +3435,12 @@ U64     n;                              /* 64-bit operand values     */
 
     /* AND second operand with first and set condition code */
     regs->psw.cc = ( regs->GR_G(r1) &= n ) ? 1 : 0;
-}
+
+} /* end DEF_INST(and_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E381 OG    - Or Long                                        [RXE] */
 /*-------------------------------------------------------------------*/
@@ -2765,9 +3458,12 @@ U64     n;                              /* 64-bit operand values     */
 
     /* OR second operand with first and set condition code */
     regs->psw.cc = ( regs->GR_G(r1) |= n ) ? 1 : 0;
-}
+
+} /* end DEF_INST(or_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E382 XG    - Exclusive Or Long                              [RXE] */
 /*-------------------------------------------------------------------*/
@@ -2785,9 +3481,12 @@ U64     n;                              /* 64-bit operand values     */
 
     /* XOR second operand with first and set condition code */
     regs->psw.cc = ( regs->GR_G(r1) ^= n ) ? 1 : 0;
-}
+
+} /* end DEF_INST(exclusive_or_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B904 LGR   - Load Long Register                             [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2799,9 +3498,12 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* Copy second operand to first operand */
     regs->GR_G(r1) = regs->GR_G(r2);
-}
+
+} /* end DEF_INST(load_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B916 LLGFR - Load Logical Long Fullword Register            [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2813,9 +3515,12 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* Copy second operand to first operand */
     regs->GR_G(r1) = regs->GR_L(r2);
-}
+
+} /* end DEF_INST(load_logical_long_fullword_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B914 LGFR  - Load Long Fullword Register                    [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2827,9 +3532,12 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* Copy second operand to first operand */
     (S64)regs->GR_G(r1) = (S32)regs->GR_L(r2);
-}
+
+} /* end DEF_INST(load_long_fullword_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B90A ALGR  - Add Logical Register Long                      [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2843,9 +3551,12 @@ int     r1, r2;                         /* Values of R fields        */
     regs->psw.cc = add_logical_long(&(regs->GR_G(r1)),
                                       regs->GR_G(r1),
                                       regs->GR_G(r2));
-}
+
+} /* end DEF_INST(add_logical_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B91A ALGFR - Add Logical Long Fullword Register             [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2855,13 +3566,16 @@ int     r1, r2;                         /* Values of R fields        */
 
     RRE(inst, execflag, regs, r1, r2);
 
-    /* Add signed operands and set condition code */
+    /* Add unsigned operands and set condition code */
     regs->psw.cc = add_logical_long(&(regs->GR_G(r1)),
                                       regs->GR_G(r1),
                                       regs->GR_L(r2));
-}
+
+} /* end DEF_INST(add_logical_long_fullword_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B91B SLGFR - Subtract Logical Long Fullword Register        [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2875,9 +3589,12 @@ int     r1, r2;                         /* Values of R fields        */
     regs->psw.cc = sub_logical_long(&(regs->GR_G(r1)),
                                       regs->GR_G(r1),
                                       regs->GR_L(r2));
-}
+
+} /* end DEF_INST(subtract_logical_long_fullword_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B90B SLGR  - Subtract Logical Register Long                 [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2891,9 +3608,12 @@ int     r1, r2;                         /* Values of R fields        */
     regs->psw.cc = sub_logical_long(&(regs->GR_G(r1)),
                                       regs->GR_G(r1),
                                       regs->GR_G(r2));
-}
+
+} /* end DEF_INST(subtract_logical_long_register) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EF   LMD   - Load Multiple Disjoint                          [SS] */
 /*-------------------------------------------------------------------*/
@@ -2933,9 +3653,12 @@ BYTE    rworkh[64], rworkl[64];         /* High and low halves of new
         /* Update register number, wrapping from 15 to 0 */
         i++; i &= 15;
     }
-}
+
+} /* end DEF_INST(load_multiple_disjoint) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB96 LMH   - Load Multiple High                             [RSE] */
 /*-------------------------------------------------------------------*/
@@ -2967,9 +3690,12 @@ BYTE    rwork[64];                      /* Character work areas      */
         /* Update register number, wrapping from 15 to 0 */
         i++; i &= 15;
     }
-}
+
+} /* end DEF_INST(load_multiple_high) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB04 LMG   - Load Multiple Long                             [RSE] */
 /*-------------------------------------------------------------------*/
@@ -3001,9 +3727,12 @@ BYTE    rwork[128];                     /* Register work areas       */
         /* Update register number, wrapping from 15 to 0 */
         i++; i &= 15;
     }
-}
+
+} /* end DEF_INST(load_multiple_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB25 STCTG - Store Control Long                             [RSE] */
 /*-------------------------------------------------------------------*/
@@ -3042,9 +3771,11 @@ BYTE    rwork[128];                      /* Register work areas       */
     /* Store control register contents at operand address */
     ARCH_DEP(vstorec) ( rwork, d-1, effective_addr2, b2, regs );
 
-}
+} /* end DEF_INST(store_control_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB2F LCTLG - Load Control Long                              [RSE] */
 /*-------------------------------------------------------------------*/
@@ -3099,9 +3830,15 @@ BYTE    rwork[128];                     /* Register work areas       */
         /* Update register number, wrapping from 15 to 0 */
         i++; i &= 15;
     }
-}
+
+    SET_IC_EXTERNAL_MASK(regs);
+    SET_IC_MCK_MASK(regs);
+
+} /* end DEF_INST(load_control_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB24 STMG  - Store Multiple Long                            [RSE] */
 /*-------------------------------------------------------------------*/
@@ -3131,9 +3868,11 @@ BYTE    rwork[128];                      /* Register work areas       */
     /* Store control register contents at operand address */
     ARCH_DEP(vstorec) ( rwork, d-1, effective_addr2, b2, regs );
 
-}
+} /* end DEF_INST(store_multiple_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* EB26 STMH  - Store Multiple High                            [RSE] */
 /*-------------------------------------------------------------------*/
@@ -3162,9 +3901,12 @@ BYTE    rwork[64];                      /* Register work area        */
 
     /* Store register contents at operand address */
     ARCH_DEP(vstorec) ( rwork, d-1, effective_addr2, b2, regs );
-}
+
+} /* end DEF_INST(store_multiple_high) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B905 LURAG - Load Using Real Address Long                   [RRE] */
 /*-------------------------------------------------------------------*/
@@ -3180,15 +3922,17 @@ RADR    n;                              /* Unsigned work             */
     /* R2 register contains operand real storage address */
     n = regs->GR_G(r2) & ADDRESS_MAXWRAP(regs);
 
-    /* Program check if operand not on fullword boundary */
-    FW_CHECK(n, regs);
+    /* Program check if operand not on doubleword boundary */
+    DW_CHECK(n, regs);
 
     /* Load R1 register from second operand */
     regs->GR_G(r1) = ARCH_DEP(vfetch8) ( n, USE_REAL_ADDR, regs );
 
-}
+} /* end DEF_INST(load_using_real_address_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B925 STURG - Store Using Real Address Long                  [RRE] */
 /*-------------------------------------------------------------------*/
@@ -3204,15 +3948,17 @@ RADR    n;                              /* Unsigned work             */
     /* R2 register contains operand real storage address */
     n = regs->GR_G(r2) & ADDRESS_MAXWRAP(regs);
 
-    /* Program check if operand not on fullword boundary */
-    FW_CHECK(n, regs);
+    /* Program check if operand not on doubleword boundary */
+    DW_CHECK(n, regs);
 
     /* Store R1 register at second operand location */
     ARCH_DEP(vstore8) (regs->GR_G(r1), n, USE_REAL_ADDR, regs );
 
-}
+} /* end DEF_INST(store_using_real_address_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* 010B TAM   - Test Addressing Mode                             [E] */
 /*-------------------------------------------------------------------*/
@@ -3220,10 +3966,17 @@ DEF_INST(test_addressing_mode)
 {
     E(inst, execflag, regs);
 
-    regs->psw.cc = (regs->psw.amode64 << 1) | regs->psw.amode;
-}
+    regs->psw.cc =
+#if defined(FEATURE_ESAME)
+                   (regs->psw.amode64 << 1) |
+#endif /*defined(FEATURE_ESAME)*/
+                                              regs->psw.amode;
+
+} /* end DEF_INST(test_addressing_mode) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* 010C SAM24 - Set Addressing Mode 24                           [E] */
 /*-------------------------------------------------------------------*/
@@ -3240,10 +3993,17 @@ VADR    ia;                             /* Unupdated instruction addr*/
     if (ia > 0xFFFFFFULL)
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
-    regs->psw.amode = regs->psw.amode64 = 0;
-}
+#if defined(FEATURE_ESAME)
+    regs->psw.amode64 =
+#endif /*defined(FEATURE_ESAME)*/
+                        regs->psw.amode = 0;
+    regs->psw.AMASK = AMASK24;
+
+} /* end DEF_INST(set_addressing_mode_24) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* 010D SAM31 - Set Addressing Mode 31                           [E] */
 /*-------------------------------------------------------------------*/
@@ -3260,10 +4020,17 @@ VADR    ia;                             /* Unupdated instruction addr*/
     if (ia > 0x7FFFFFFFULL)
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
-    regs->psw.amode = 1; regs->psw.amode64 = 0;
-}
+#if defined(FEATURE_ESAME)
+    regs->psw.amode64 = 0;
+#endif /*defined(FEATURE_ESAME)*/
+    regs->psw.amode = 1;
+    regs->psw.AMASK = AMASK31;
+
+} /* end DEF_INST(set_addressing_mode_31) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* 010E SAM64 - Set Addressing Mode 64                           [E] */
 /*-------------------------------------------------------------------*/
@@ -3272,9 +4039,13 @@ DEF_INST(set_addressing_mode_64)
     E(inst, execflag, regs);
 
     regs->psw.amode = regs->psw.amode64 = 1;
-}
+    regs->psw.AMASK = AMASK64;
+
+} /* end DEF_INST(set_addressing_mode_64) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E324 STG   - Store Long                                     [RXE] */
 /*-------------------------------------------------------------------*/
@@ -3288,9 +4059,12 @@ VADR    effective_addr2;                /* Effective address         */
 
     /* Store register contents at operand address */
     ARCH_DEP(vstore8) ( regs->GR_G(r1), effective_addr2, b2, regs );
-}
+
+} /* end DEF_INST(store_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E502 STRAG - Store Real Address                             [RXE] */
 /*-------------------------------------------------------------------*/
@@ -3318,9 +4092,12 @@ RADR    n;                              /* 64-bit operand values     */
 
     /* Store register contents at operand address */
     ARCH_DEP(vstore8) ( n, effective_addr1, b1, regs );
-}
+
+} /* end DEF_INST(store_real_address) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E304 LG    - Load Long                                      [RXE] */
 /*-------------------------------------------------------------------*/
@@ -3334,9 +4111,12 @@ VADR    effective_addr2;                /* Effective address         */
 
     /* Load R1 register from second operand */
     regs->GR_G(r1) = ARCH_DEP(vfetch8) ( effective_addr2, b2, regs );
-}
+
+} /* end DEF_INST(load_long) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E314 LGF   - Load Long Fullword                             [RXE] */
 /*-------------------------------------------------------------------*/
@@ -3350,9 +4130,31 @@ VADR    effective_addr2;                /* Effective address         */
 
     /* Load R1 register from second operand */
     (S64)regs->GR_G(r1) = (S32)ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
-}
+
+} /* end DEF_INST(load_long_fullword) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
+/*-------------------------------------------------------------------*/
+/* E315 LGH   - Load Long Halfword                             [RXE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(load_long_halfword)
+{
+int     r1;                             /* Value of R field          */
+int     b2;                             /* Base of effective addr    */
+VADR    effective_addr2;                /* Effective address         */
+
+    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+
+    /* Load R1 register from second operand */
+    (S64)regs->GR_G(r1) = (S16)ARCH_DEP(vfetch2) ( effective_addr2, b2, regs );
+
+} /* end DEF_INST(load_long_halfword) */
+#endif /*defined(FEATURE_ESAME)*/
+
+
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E316 LLGF  - Load Logical Long Fullword                     [RXE] */
 /*-------------------------------------------------------------------*/
@@ -3366,9 +4168,12 @@ VADR    effective_addr2;                /* Effective address         */
 
     /* Load R1 register from second operand */
     regs->GR_G(r1) = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
-}
+
+} /* end DEF_INST(load_logical_long_fullword) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E317 LLGT  - Load Logical Long Thirtyone                    [RXE] */
 /*-------------------------------------------------------------------*/
@@ -3383,9 +4188,12 @@ VADR    effective_addr2;                /* Effective address         */
     /* Load R1 register from second operand */
     regs->GR_G(r1) = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs )
                                                         & 0x7FFFFFFF;
-}
+
+} /* end DEF_INST(load_logical_long_thirtyone) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B2B2 LPSWE - Load PSW Extended                                [S] */
 /*-------------------------------------------------------------------*/
@@ -3423,9 +4231,11 @@ int     rc;
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
-}
+} /* end DEF_INST(load_program_status_word_extended) */
+#endif /*defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E303 LRAG  - Load Real Address Long                         [RXE] */
 /*-------------------------------------------------------------------*/
@@ -3448,29 +4258,41 @@ RADR    n;                              /* 64-bit operand values     */
     PRIV_CHECK(regs);
 
     /* Translate the effective address to a real address */
-    cc = ARCH_DEP(translate_addr) (effective_addr2, b2, regs, ACCTYPE_LRA,
-            &n, &xcode, &private, &protect, &stid, NULL, NULL);
+    cc = ARCH_DEP(translate_addr) (effective_addr2, b2, regs,
+            ACCTYPE_LRA, &n, &xcode, &private, &protect, &stid,
+            NULL, NULL);
 
-    /* If ALET exception, set exception code in R1 bits 16-31
-       set high order bit of R1, and set condition code 3 */
-    if (cc == 4) {
-        regs->GR_G(r1) = 0x8000000000000000ULL | xcode;
-        regs->psw.cc = 3;
+    /* If ALET exception or ASCE-type or region translation
+       exception, or if the segment table entry is outside the
+       table and the entry address exceeds 2GB, set exception
+       code in R1 bits 48-63, set bit 32 of R1, and set cc 3 */
+    if (cc > 3
+        || (cc == 3 && n > 0x7FFFFFFF))
+    {
+        regs->GR_L(r1) = 0x80000000 | xcode;
+        cc = 3;
+    }
+    else if (cc == 3) /* && n <= 0x7FFFFFFF */
+    {
+        /* If segment table entry is outside table and entry
+           address does not exceed 2GB, return bits 32-63 of
+           the entry address and leave bits 0-31 unchanged */
+        regs->GR_L(r1) = n;
     }
     else
     {
-        /* Set r1 and condition code as returned by translate_addr */
+        /* Set R1 and condition code as returned by translate_addr */
         regs->GR_G(r1) = n;
-        regs->psw.cc = cc;
     }
 
-}
+    /* Set condition code */
+    regs->psw.cc = cc;
 
-
+} /* end DEF_INST(load_real_address_long) */
 #endif /*defined(FEATURE_ESAME)*/
 
 
-#if defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)
+#if defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390)
 /*-------------------------------------------------------------------*/
 /* B2B1 STFL  - Store Facilities List                            [S] */
 /*-------------------------------------------------------------------*/
@@ -3484,6 +4306,8 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 
     PRIV_CHECK(regs);
 
+    SIE_INTERCEPT(regs);
+
     /* Set the main storage reference and change bits */
     STORAGE_KEY(regs->PX) |= (STORKEY_REF | STORKEY_CHANGE);
 
@@ -3495,7 +4319,12 @@ PSA    *psa;                            /* -> Prefixed storage area  */
                  | 0x80
 #endif /*defined(FEATURE_ESAME_N3_ESA390)*/
 #if defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)
-                 | (sysblk.arch_z900 ? 0x40 : 0)
+                 | (
+#if defined(_FEATURE_ZSIE)
+                   (regs->sie_state 
+                     && (regs->hostregs->arch_mode != ARCH_900) ) ? 0 :
+#endif /*defined(_FEATURE_ZSIE)*/
+                   (sysblk.arch_z900 ? 0x40 : 0) )
 #endif /*defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)*/
 #if defined(FEATURE_ESAME)
                  | 0x20
@@ -3505,12 +4334,11 @@ PSA    *psa;                            /* -> Prefixed storage area  */
     psa->stfl[2] = 0;
     psa->stfl[3] = 0;
 
-}
+} /* end DEF_INST(store_facilities_list) */
 #endif /*defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)*/
 
 
-#if defined(FEATURE_LOAD_REVERSED)
-#if defined(FEATURE_ESAME)
+#if defined(FEATURE_LOAD_REVERSED) && defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* B90F LRVGR - Load Reversed Long Register                    [RRE] */
 /*-------------------------------------------------------------------*/
@@ -3522,10 +4350,12 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* Copy second operand to first operand */
     regs->GR_G(r1) = bswap_64(regs->GR_G(r2));
-}
-#endif /*defined(FEATURE_ESAME)*/
+
+} /* end DEF_INST(load_reversed_long_register) */
+#endif /*defined(FEATURE_LOAD_REVERSED) && defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_LOAD_REVERSED)
 /*-------------------------------------------------------------------*/
 /* B91F LRVR  - Load Reversed Register                         [RRE] */
 /*-------------------------------------------------------------------*/
@@ -3537,10 +4367,12 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* Copy second operand to first operand */
     regs->GR_L(r1) = bswap_32(regs->GR_L(r2));
-}
+
+} /* end DEF_INST(load_reversed_register) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_LOAD_REVERSED)*/
 
 
-#if defined(FEATURE_ESAME)
+#if defined(FEATURE_LOAD_REVERSED) && defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E30F LRVG  - Load Reversed Long                             [RXE] */
 /*-------------------------------------------------------------------*/
@@ -3554,10 +4386,12 @@ VADR    effective_addr2;                /* Effective address         */
 
     /* Load R1 register from second operand */
     regs->GR_G(r1) = bswap_64(ARCH_DEP(vfetch8) ( effective_addr2, b2, regs ));
-}
-#endif /*defined(FEATURE_ESAME)*/
+
+} /* end DEF_INST(load_reversed_long) */
+#endif /*defined(FEATURE_LOAD_REVERSED) && defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_LOAD_REVERSED)
 /*-------------------------------------------------------------------*/
 /* E31E LRV   - Load Reversed                                  [RXE] */
 /*-------------------------------------------------------------------*/
@@ -3571,10 +4405,12 @@ VADR    effective_addr2;                /* Effective address         */
 
     /* Load R1 register from second operand */
     regs->GR_L(r1) = bswap_32(ARCH_DEP(vfetch4) ( effective_addr2, b2, regs ));
-}
+
+} /* end DEF_INST(load_reversed) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_LOAD_REVERSED)*/
 
 
-#if defined(FEATURE_ESAME)
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_LOAD_REVERSED)
 /*-------------------------------------------------------------------*/
 /* E31F LRVH  - Load Reversed Half                             [RXE] */
 /*-------------------------------------------------------------------*/
@@ -3588,11 +4424,11 @@ VADR    effective_addr2;                /* Effective address         */
 
     /* Load R1 register from second operand */
     regs->GR_LHL(r1) = bswap_16(ARCH_DEP(vfetch2) ( effective_addr2, b2, regs ));
-}
-#endif /*defined(FEATURE_ESAME)*/
+} /* end DEF_INST(load_reversed_half) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_LOAD_REVERSED)*/
 
 
-#if defined(FEATURE_ESAME)
+#if defined(FEATURE_LOAD_REVERSED) && defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
 /* E32F STRVG - Store Reversed Long                            [RXE] */
 /*-------------------------------------------------------------------*/
@@ -3606,10 +4442,12 @@ VADR    effective_addr2;                /* Effective address         */
 
     /* Store register contents at operand address */
     ARCH_DEP(vstore8) ( bswap_64(regs->GR_G(r1)), effective_addr2, b2, regs );
-}
-#endif /*defined(FEATURE_ESAME)*/
+
+} /* end DEF_INST(store_reversed_long) */
+#endif /*defined(FEATURE_LOAD_REVERSED) && defined(FEATURE_ESAME)*/
 
 
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_LOAD_REVERSED)
 /*-------------------------------------------------------------------*/
 /* E33E STRV  - Store Reversed                                 [RXE] */
 /*-------------------------------------------------------------------*/
@@ -3623,10 +4461,12 @@ VADR    effective_addr2;                /* Effective address         */
 
     /* Store register contents at operand address */
     ARCH_DEP(vstore4) ( bswap_32(regs->GR_L(r1)), effective_addr2, b2, regs );
-}
+
+} /* end DEF_INST(store_reversed) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_LOAD_REVERSED)*/
 
 
-#if defined(FEATURE_ESAME)
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_LOAD_REVERSED)
 /*-------------------------------------------------------------------*/
 /* E33F STRVH - Store Reversed Half                            [RXE] */
 /*-------------------------------------------------------------------*/
@@ -3640,9 +4480,9 @@ VADR    effective_addr2;                /* Effective address         */
 
     /* Store register contents at operand address */
     ARCH_DEP(vstore2) ( bswap_16(regs->GR_LHL(r1)), effective_addr2, b2, regs );
-}
-#endif /*defined(FEATURE_ESAME)*/
-#endif /*defined(FEATURE_LOAD_REVERSED)*/
+
+} /* end DEF_INST(store_reversed_half) */
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_LOAD_REVERSED)*/
 
 
 #if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
@@ -3678,7 +4518,7 @@ int     i, j;                           /* Array subscripts          */
     }
 
     /* Store 16-byte packed decimal result at operand address */
-    ARCH_DEP(vstorec) ( result, 15, addr1, b1, regs );
+    ARCH_DEP(vstorec) ( result, 16-1, addr1, b1, regs );
 
 } /* end DEF_INST(pack_ascii) */
 #endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
@@ -3718,7 +4558,7 @@ int     i, j;                           /* Array subscripts          */
     }
 
     /* Store 16-byte packed decimal result at operand address */
-    ARCH_DEP(vstorec) ( result, 15, addr1, b1, regs );
+    ARCH_DEP(vstorec) ( result, 16-1, addr1, b1, regs );
 
 } /* end DEF_INST(pack_unicode) */
 #endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
@@ -3833,10 +4673,6 @@ int     cc;                             /* Condition code            */
 
 #if !defined(_GEN_ARCH)
 
-// #define  _GEN_ARCH 964
-// #include "esame.c"
-
-// #undef   _GEN_ARCH
 #define  _GEN_ARCH 390
 #include "esame.c"
 

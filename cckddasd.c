@@ -550,12 +550,6 @@ BYTE           *buf,*buf2;              /* Buffers                   */
         {
             buf = dfw->buf;
 
-            /* wakeup dfw if old track was updated */
-            if (cckd->dfwaiting)
-                signal_condition (&cckd->dfwcond);
-
-            release_lock (&cckd->dfwlock);
-
             /* check for readahead miss */
             if (cckd->cache[lru].buf && !cckd->cache[lru].used)
                 cckd->misses++;
@@ -578,6 +572,12 @@ BYTE           *buf,*buf2;              /* Buffers                   */
             {   cckd->cachehits++;
                 if (trk == cckd->curtrk + 1) cckd_readahead (dev, trk);
             }
+
+            /* wakeup dfw if old track was updated */
+            if (cckd->dfwaiting)
+                signal_condition (&cckd->dfwcond);
+
+            release_lock (&cckd->dfwlock);
             release_lock (&cckd->cachelock);
 
             DEVTRACE ("cckddasd: %d rdtrk[%2.2d] %d in dfwq %p buf %p\n",
@@ -1344,7 +1344,7 @@ int             sfx;                    /* Shadow file index         */
     }
     cckd->free[i].next = cckd->freeavail;
     cckd->freeavail = i;
-    rc = ftruncate (dev->fd, cckd->cdevhdr[sfx].size);
+    rc = ftruncate (cckd->fd[sfx], cckd->cdevhdr[sfx].size);
     if (cckd->free[i].len >= cckd->cdevhdr[sfx].free_largest)
     {   /* find the next largest free space */
         cckd->cdevhdr[sfx].free_largest = 0;
@@ -1534,9 +1534,30 @@ int             i;                      /* Index                     */
     DEVTRACE ("cckddasd: reading free space, number %d\n",
               cckd->cdevhdr[sfx].free_number);
 
+    /* get storage for the internal free space chain;
+       get a multiple of 1024 entries. */
+    cckd->freenbr = ((cckd->cdevhdr[sfx].free_number << 10) + 1) >> 10;
+    cckd->free = calloc (cckd->freenbr, CCKD_FREEBLK_ISIZE);
+
+    /* if the only free space is at the end of the file,
+       then remove it.  this should only happen for a file
+       built by the cckddump os/390 utility */
+    if (cckd->cdevhdr[sfx].free_number == 1)
+    {
+        fpos = cckd->cdevhdr[sfx].free;
+        rc = lseek (cckd->fd[sfx], fpos, SEEK_SET);
+        rc = read (cckd->fd[sfx], &cckd->free[0], CCKD_FREEBLK_SIZE);
+        if (fpos + cckd->free[0].len == cckd->cdevhdr[sfx].size)
+        {
+            cckd->cdevhdr[sfx].free_number = 
+            cckd->cdevhdr[sfx].free_total = 
+            cckd->cdevhdr[sfx].free_largest = 0;
+            cckd->cdevhdr[sfx].size -= cckd->free[0].len;
+            rc = ftruncate (cckd->fd[sfx], cckd->cdevhdr[sfx].size);
+        }
+    }
+
     /* build the doubly linked internal free space chain */
-    cckd->freenbr = ((cckd->cdevhdr[sfx].free_number >> 10) + 1) << 10;
-    cckd->free = malloc (cckd->freenbr * CCKD_FREEBLK_ISIZE);
     if (cckd->cdevhdr[sfx].free_number)
     {
         cckd->free1st = 0;
@@ -2507,14 +2528,43 @@ long            len;                    /* Uncompressed trk length   */
     /* make the previous file active */
     cckd->sfn--;
 
+    /* Verify the integrity of the new active file by calling the
+       chkdsk function.  This is especially important if the
+       preceding file was created by cckddump program and made
+       writable for the merge */
+    rc = cckd_chkdsk (cckd->fd[sfx-1], sysblk.msgpipew, 1);
+    if (rc < 0)
+    {
+        logmsg ("cckddasd: cannot remove shadow file [%d], "
+                "file [%d] failed chkdsk\n",
+                sfx, sfx-1);
+        cckd->sfn++;
+        release_lock (&cckd->filelock);
+        return;         
+    }
+
+    /* Re-read the compressed device header, in case chkdsk
+       rebuilt the free space */
+    rc = cckd_read_chdr (dev);
+    if (rc < 0)
+    {
+        logmsg ("cckddasd: cannot remove shadow file [%d], "
+                "file [%d] read cckd devhdr failed\n",
+                sfx, sfx-1);
+        cckd->sfn++;
+        release_lock (&cckd->filelock);
+        return;         
+    }
+
     /* perform backwards merge to a compressed file */
     if (merge && cckd->cdevhdr[sfx-1].size)
     {
+        DEVTRACE ("cckddasd: sfrem merging to compressed file [%d] %s\n",
+                  sfx-1, sfn);
+        cckd->cdevhdr[cckd->sfn].options |= CCKD_OPENED;
         buf = malloc (dev->ckdtrksz);
         for (i = 0; i < cckd->cdevhdr[sfx].numl1tab; i++)
         {
-            DEVTRACE ("cckddasd: sfrem merging to compressed file [%d] %s\n", sfx-1, sfn);
-
             /* get the level 2 tables */
             rc = cckd_read_l2 (dev, sfx, i);
             memcpy (&l2, cckd->l2, CCKD_L2TAB_SIZE);

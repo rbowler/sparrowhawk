@@ -1,114 +1,260 @@
 #
 # Makefile for Hercules S/370, ESA/390 and z/Architecture emulator
 # modified to build hercules under windows (VB)
+# modified to build external GUI compatible version under Windows (Fish)
+# modified to be useful (hopefully) for Linux AND windows (VB)
 #
 
-VERSION  = 2.11a
+WIN=NO
+THEOS=$(OSTYPE)
+ifeq ($(THEOS),cygwin)
+WIN=yes
+endif
 
-# Change this if you want to install the Hercules executables somewhere
+ifndef HOST_ARCH
+HOST_ARCH=pentium
+endif
+
+VERSION  = 2.12_$(HOST_ARCH)
+
+#   Set the default directory where you want to install the Hercules executables somewhere
 #   besides /usr/bin. The $PREFIX (which defaults to nothing) can be
 #   overridden in the make command line, as in "PREFIX=/foo make install"
 #   (the directory is only used when installing).
+ifeq ($(WIN),yes)
 DESTDIR  = $(PREFIX)/hercules2
+else
+DESTDIR  = $(prefix)/usr/bin
+endif
+
+#    The default installation directory can be overridden by the DEST= keyword
+#    when executing the make utility
+ifndef DEST
+DEST = $(DESTDIR)
+endif
+
+# Standard compiler flags used for all architectures
+CFLAGS = -Wall -fomit-frame-pointer -DVERSION=$(VERSION) -DNO_ATTR_REGPARM
 
 # Directory where the pthreads-win32 library was installed.
+ifeq ($(WIN),yes)
 PTHREADS_W32DIR = /usr
 CC = gcc -I$(PTHREADS_W32DIR)/Pthreads
+endif
+
+ifeq ($(WIN),yes)
+CFLAGS += -DWIN32
+CFLAGS += -D__LITTLE_ENDIAN=1234
+CFLAGS += -D__BYTE_ORDER=1234
+CFLAGS += -DNO_BYTESWAP_H
+endif
 
 
-# For Linux use:
-#CFLAGS  = -O3 -Wall -malign-double -march=pentium -fomit-frame-pointer \
-	   -DVERSION=$(VERSION)
-# For older Linux versions use:
-CFLAGS	 = -O3 -Wall -malign-double -march=pentium -fomit-frame-pointer \
-           -DVERSION=$(VERSION) -DWIN32 -DCCKD -DNO_BYTESWAP_H \
-           -D__BYTE_ORDER="__LITTLE_ENDIAN"
+#set compiler flags depending on HOST_ARCH
+ifeq ($(HOST_ARCH),i386)
+CFLAGS += -O3 -malign-double
+CFLAGS += -DNO_ASM_BYTESWAP
+endif
+
+ifeq ($(HOST_ARCH),i586)
+CFLAGS += -O3 -malign-double -march=pentium
+endif
+
+ifeq ($(HOST_ARCH),pentium)
+CFLAGS += -O3 -malign-double -march=pentium
+endif
+
+ifeq ($(HOST_ARCH),i686)
+CFLAGS += -O3 -malign-double -march=pentiumpro
+endif
+
+ifeq ($(HOST_ARCH),pentiumpro)
+CFLAGS += -O3 -malign-double -march=pentiumpro
+endif
+
+ifeq ($(HOST_ARCH),alpha)
+CFLAGS += -O2
+CFLAGS += -DNO_ASM_BYTESWAP
+endif
+
+ifeq ($(HOST_ARCH),other)
+CFLAGS += -O3
+CFLAGS += -DNO_ASM_BYTESWAP
+endif
 
 # For Linux/390 use:
-#CFLAGS  = -O3 -DVERSION=$(VERSION) -DNO_BYTESWAP_H -DNO_ASM_BYTESWAP
+#CFLAGS += -DNO_ASM_BYTESWAP
+#
 
-LFLAGS   = -L$(PTHREADS_W32DIR)/DLL -lpthreadw32
 
-# Reverse the comments below to disable Compressed CKD Dasd support
-#CFLAGS  += -DNO_CCKD
-#CFL_370 += -DNO_CCKD
-LFLAGS	 += -lz
+ifeq ($(WIN),yes)
+LFLAGS = -L$(PTHREADS_W32DIR)/DLL -lpthreadw32
+else
+LFLAGS = -lpthread
+endif
 
-# Uncomment these lines to enable Compressed CKD bzip2 compression
-#CFLAGS  += -DCCKD_BZIP2
-#CFL_370 += -DCCKD_BZIP2
+# Comment out the line below to build a console-mode only
+# (i.e. NON-external GUI compatible) version of Hercules
+#
+# Note: the external GUI compatible version of Hercules
+# (which is the default) can be run in both console mode
+# or external GUI mode, whereas a NON-external GUI compatible
+# version can ONLY be run in console (non-GUI) mode.
 
-# Uncomment these lines to enable HET bzip2 compression
-#CFLAGS	+= -DHET_BZIP2
-#CFL_370	+= -DHET_BZIP2
-#LFLAGS	+= -lbz2
+CFLAGS += -DEXTERNALGUI
+
+# Change the value below to YES to enable compresion
+#			 to NO	to disable compression
+CCKD=YES
+
+# Change the value below to YES to use bzip2 compression
+#			 to NO	to use standard compression
+BZIP2=YES
+
+ifeq ($(CCKD),YES)
+LFLAGS += -lz
+else
+CFLAGS += -DNO_CCKD
+endif
+
+ifeq ($(BZIP2),YES)
+CFLAGS += -DCCKD_BZIP2
+CFLAGS += -DHET_BZIP2
+LFLAGS += -lbz2
+endif
 
 EXEFILES = hercules \
-	   dasdinit dasdisup dasdload dasdls dasdpdsu \
-	   tapecopy tapemap tapesplit \
-	   cckd2ckd cckdcdsk ckd2cckd cckdcomp \
-	   hetget hetinit hetmap hetupd
+	   dasdinit \
+	   dasdisup \
+	   dasdload \
+	   dasdls   \
+	   dasdpdsu \
+	   tapecopy \
+	   tapemap  \
+	   tapesplt \
+	   cckd2ckd \
+	   cckdcdsk \
+	   ckd2cckd \
+	   cckdcomp \
+	   hetget   \
+	   hetinit  \
+	   hetmap   \
+	   hetupd   \
+	   dmap2hrc
 
-EXFILES = hercules.exe \
-           dasdinit.exe dasdisup.exe dasdload.exe dasdls.exe dasdpdsu.exe \
-           tapecopy.exe tapemap.exe tapesplit.exe \
-           cckd2ckd.exe cckdcdsk.exe ckd2cckd.exe cckdcomp.exe \
-           hetget.exe hetinit.exe hetmap.exe hetupd.exe
+ifeq ($(WIN),yes)
+else
+EXEFILES += hercifc
+endif
 
-TARFILES = makefile *.c *.h hercules.cnf tapeconv.jcl dasdlist \
-	   html zzsa.cnf zzsacard.bin
+TARFILES = makefile \
+	   *.c \
+	   *.h \
+	   hercules.cnf \
+	   tapeconv.jcl \
+	   util/dasdlist \
+	   html \
+	   zzsa.cnf \
+	   zzsacard.bin
 
-HRC_OBJS = impl.o config.o panel.o \
-	   ipl.o assist.o dat.o \
-	   stack.o cpu.o vstore.o \
-	   general.o control.o io.o \
-	   decimal.o service.o opcode.o \
-	   diagnose.o diagmssf.o vm.o \
-	   channel.o ckddasd.o fbadasd.o \
-	   tapedev.o cardrdr.o cardpch.o \
-	   printer.o console.o external.o \
-	   float.o ctcadpt.o trace.o \
-	   machchk.o vector.o xstore.o \
-	   cmpsc.o sie.o ses.o timer.o \
-	   esame.o cckddasd.o cckdcdsx.o \
-	   parser.o hetlib.o
+HRC_OBJS = impl.o \
+	   config.o \
+	   panel.o \
+	   version.o \
+	   ipl.o \
+	   assist.o \
+	   dat.o \
+	   stack.o \
+	   cpu.o \
+	   vstore.o \
+	   general1.o \
+	   general2.o \
+	   plo.o \
+	   control.o \
+	   io.o \
+	   decimal.o \
+	   service.o \
+	   opcode.o \
+	   diagnose.o \
+	   diagmssf.o \
+	   vm.o \
+	   channel.o \
+	   ckddasd.o \
+	   fbadasd.o \
+	   tapedev.o \
+	   cardrdr.o \
+	   cardpch.o \
+	   printer.o \
+	   console.o \
+	   external.o \
+	   float.o \
+	   ctcadpt.o \
+	   trace.o \
+	   machchk.o \
+	   vector.o \
+	   xstore.o \
+	   cmpsc.o \
+	   sie.o \
+	   ses.o \
+	   timer.o \
+	   esame.o \
+	   cckddasd.o \
+	   cckdcdsx.o \
+	   parser.o \
+	   hetlib.o \
+	   ieee.o
 
-#HIFC_OBJ = hercifc.o
+ifeq ($(WIN),yes)
+else
+HIFC_OBJ = hercifc.o version.o
+endif
 
-DIN_OBJS = dasdinit.o dasdutil.o
+DIN_OBJS = dasdinit.o dasdutil.o version.o
 
-DIS_OBJS = dasdisup.o dasdutil.o
+DIS_OBJS = dasdisup.o dasdutil.o version.o
 
-DLD_OBJS = dasdload.o dasdutil.o
+DLD_OBJS = dasdload.o dasdutil.o version.o
 
-DLS_OBJS = dasdls.o dasdutil.o
+DLS_OBJS = dasdls.o dasdutil.o version.o
 
-DPU_OBJS = dasdpdsu.o dasdutil.o
+DPU_OBJS = dasdpdsu.o dasdutil.o version.o
 
-TCY_OBJS = tapecopy.o
+TCY_OBJS = tapecopy.o version.o
 
-TMA_OBJS = tapemap.o
+TMA_OBJS = tapemap.o version.o
 
-TSP_OBJS = tapesplit.o
+TSP_OBJS = tapesplt.o version.o
 
-CCHK_OBJ = cckdcdsk.o
+CCHK_OBJ = cckdcdsk.o version.o
 
-COMP_OBJ = cckdcomp.o cckdcdsx.o
+COMP_OBJ = cckdcomp.o cckdcdsx.o version.o
 
-C2CC_OBJ = ckd2cckd.o
+C2CC_OBJ = ckd2cckd.o version.o
 
-CC2C_OBJ = cckd2ckd.o
+CC2C_OBJ = cckd2ckd.o version.o
 
-HGT_OBJS = hetget.o hetlib.o sllib.o
+HGT_OBJS = hetget.o hetlib.o sllib.o version.o
 
-HIN_OBJS = hetinit.o hetlib.o sllib.o
+HIN_OBJS = hetinit.o hetlib.o sllib.o version.o
 
-HMA_OBJS = hetmap.o hetlib.o sllib.o
+HMA_OBJS = hetmap.o hetlib.o sllib.o version.o
 
-HUP_OBJS = hetupd.o hetlib.o sllib.o
+HUP_OBJS = hetupd.o hetlib.o sllib.o version.o
 
-HEADERS  = feat370.h feat390.h feat900.h featall.h featchk.h features.h \
-	   esa390.h opcode.h hercules.h inline.h dat.h vstore.h \
+D2H_OBJS = dmap2hrc.o version.o
+
+HEADERS  = feat370.h \
+	   feat390.h \
+	   feat900.h \
+	   featall.h \
+	   featchk.h \
+	   features.h \
+	   esa390.h \
+	   opcode.h \
+	   hercules.h \
+	   inline.h \
+	   dat.h \
+	   vstore.h \
 	   byteswap.h \
 	   dasdblks.h \
 	   hetlib.h \
@@ -116,7 +262,7 @@ HEADERS  = feat370.h feat390.h feat900.h featall.h featchk.h features.h \
 
 #HEADERS  = esa390.h version.h inline.h
 
-all:	   $(EXEFILES)
+all:  $(EXEFILES)
 
 hercules:  $(HRC_OBJS)
 	$(CC) -o hercules $(HRC_OBJS) $(LFLAGS)
@@ -124,8 +270,11 @@ hercules:  $(HRC_OBJS)
 $(HRC_OBJS): %.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -o $@ -c $<
 
-#hercifc:  $(HIFC_OBJ)
-#        $(CC) -o hercifc $(HIFC_OBJ)
+ifeq ($(WIN),yes)
+else
+hercifc:  $(HIFC_OBJ)
+	$(CC) -o hercifc $(HIFC_OBJ)
+endif
 
 dasdinit:  $(DIN_OBJS)
 	$(CC) -o dasdinit $(DIN_OBJS)
@@ -148,8 +297,8 @@ tapecopy:  $(TCY_OBJS)
 tapemap:  $(TMA_OBJS)
 	$(CC) -o tapemap $(TMA_OBJS)
 
-tapesplit:  $(TSP_OBJS)
-	$(CC) -o tapesplit $(TSP_OBJS)
+tapesplt:  $(TSP_OBJS)
+	$(CC) -o tapesplt $(TSP_OBJS)
 
 hetget:  $(HGT_OBJS)
 	$(CC) -o hetget $(HGT_OBJS) $(LFLAGS)
@@ -162,6 +311,9 @@ hetmap:  $(HMA_OBJS)
 
 hetupd:  $(HUP_OBJS)
 	$(CC) -o hetupd $(HUP_OBJS) $(LFLAGS)
+
+dmap2hrc:  $(D2H_OBJS)
+	$(CC) -o dmap2hrc $(D2H_OBJS) $(LFLAGS)
 
 dasdinit.o: dasdinit.c $(HEADERS) dasdblks.h
 
@@ -179,7 +331,19 @@ tapecopy.o: tapecopy.c $(HEADERS)
 
 tapemap.o: tapemap.c $(HEADERS)
 
-tapesplit.o: tapesplit.c $(HEADERS)
+tapesplt.o: tapesplt.c $(HEADERS)
+
+cckdcdsk: $(CCHK_OBJ)
+	$(CC) -o cckdcdsk $(CCHK_OBJ) $(LFLAGS)
+
+cckdcomp: $(COMP_OBJ)
+	$(CC) -o cckdcomp $(COMP_OBJ) $(LFLAGS)
+
+cckd2ckd: $(CC2C_OBJ)
+	$(CC) -o cckd2ckd $(CC2C_OBJ) $(LFLAGS)
+
+ckd2cckd: $(C2CC_OBJ)
+	$(CC) -o ckd2cckd $(C2CC_OBJ) $(LFLAGS)
 
 hetget.o: hetget.c hetlib.h sllib.h
 
@@ -189,22 +353,9 @@ hetmap.o: hetmap.c hetlib.h sllib.h
 
 hetupd.o: hetupd.c hetlib.h sllib.h
 
-cckd:	   cckd2ckd cckdcdsk ckd2cckd cckdcomp
+dmap2hrc.o: dmap2hrc.c $(HEADERS)
 
-cckd2ckd:  $(CC2C_OBJ)
-	$(CC) -o cckd2ckd $(CC2C_OBJ) $(LFLAGS)
-
-cckdcdsk:  $(CCHK_OBJ)
-	$(CC) -o cckdcdsk $(CCHK_OBJ) $(LFLAGS)
-
-ckd2cckd:  $(C2CC_OBJ)
-	$(CC) -o ckd2cckd $(C2CC_OBJ) $(LFLAGS)
-
-cckdcomp:  $(COMP_OBJ)
-	$(CC) -o cckdcomp $(COMP_OBJ) $(LFLAGS)
-
-$(CCHK_OBJ): %.o: %.c $(HEADERS)
-	$(CC) $(CFLAGS) -o $@ -c $<
+cckd: cckd2ckd cckdcdsk ckd2cckd cckdcomp
 
 clean:
 	rm -rf $(EXEFILES) *.o
@@ -213,4 +364,15 @@ tar:	clean
 	(cd ..; tar cvzf hercules-$(VERSION).tar.gz hercules-$(VERSION))
 
 install:  $(EXEFILES)
-	cp $(EXEFILES) $(DESTDIR)
+	mkdir -p $(DEST)
+ifeq ($(WIN),yes)
+	cp *.exe $(DEST)
+	cp util/dasdlist* $(DEST)
+else
+	cp $(EXEFILES) $(DEST)
+	cp util/dasdlist $(DEST)
+	chown root $(DEST)/hercifc
+	chmod 0751 $(DEST)/hercifc
+	chmod +s $(DEST)/hercifc
+	rm hercifc
+endif

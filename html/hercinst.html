@@ -16,7 +16,7 @@ instructions on how to build the Win32 version at <a
 href="http://www.bsp-gmbh.com/hercules/nude_w32.html">http://www.bsp-gmbh.com/hercules/nude_w32.html</a>.
 <ol>
 <li>Download the distribution file
-<a href="hercules-2.10.tar.gz">hercules-2.10.tar.gz</a>
+<a href="hercules-2.12.tar.gz">hercules-2.12.tar.gz</a>
 <p>
 <em>Notes:</em>
 <ol>
@@ -29,8 +29,8 @@ href="http://www.bsp-gmbh.com/hercules/nude_w32.html">http://www.bsp-gmbh.com/he
 </ol>
 <p>
 <li>Use these commands to unzip the distribution file:
-<pre>tar xvzf ../hercules-2.10.tar.gz
-cd hercules-2.10</pre>
+<pre>tar xvzf ../hercules-2.12.tar.gz
+cd hercules-2.12</pre>
 <li>Build the executable files:
 <br><code>make </code>[<code>HOST_ARCH=<i>arch</i></code>]<br>
 The <code>HOST_ARCH</code> argument is optional. It specifies the machine
@@ -63,12 +63,12 @@ compiler and other software levels.
 <ol>
 <li>Download the RPM file you want:
 <ul>
-<li><a href="hercules-2.10-1.i686.rpm">hercules-2.10-1.i686.rpm</a>: Intel
+<li><a href="hercules-2.12-1.i686.rpm">hercules-2.12-1.i686.rpm</a>: Intel
 Pentium Pro/Pentium II
-<li><a href="hercules-2.10-1.i586.rpm">hercules-2.10-1.i586.rpm</a>: Intel
+<li><a href="hercules-2.12-1.i586.rpm">hercules-2.12-1.i586.rpm</a>: Intel
 Pentium
-<li><a href="hercules-2.10-1.i386.rpm">hercules-2.10-1.i386.rpm</a>: Intel 386
-<li><a href="hercules-2.10-1.alpha.rpm">hercules-2.10-1.alpha.rpm</a>: Alpha
+<li><a href="hercules-2.12-1.i386.rpm">hercules-2.12-1.i386.rpm</a>: Intel 386
+<li><a href="hercules-2.12-1.alpha.rpm">hercules-2.12-1.alpha.rpm</a>: Alpha
 (all flavors)
 </ul>
 <li>Install the RPM:
@@ -159,6 +159,7 @@ s+<em>xxxx</em>  Turn on CCW single-step mode for device number xxxx
 s-<em>xxxx</em>  Turn off CCW single-step mode for device number xxxx
 i<em>xxxx</em>   Generate an I/O attention interrupt for device number xxxx
 k<em>xxxx</em>   Print CCKD internal trace for device number xxxx
+ds<em>xxxx</em>  Display subchannel status for device number xxxx
 
 archmode S/370|ESA/390|ESAME  Set architecture mode
 loadparm [<em>xxxxxxxx</em>]  Display or set the IPL parameter
@@ -223,6 +224,6 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 01 February 2001
+<p>Last updated 13 February 2001
 </BODY>
 </HTML>

@@ -1,4 +1,4 @@
-/* DIAGNOSE.C   (c) Copyright Roger Bowler, 2000                     */
+/* DIAGNOSE.C   (c) Copyright Roger Bowler, 2000-2001                */
 /*              ESA/390 Diagnose Functions                           */
 
 /*-------------------------------------------------------------------*/
@@ -9,7 +9,7 @@
 /* Additional credits:                                               */
 /*      Hercules-specific diagnose calls by Jay Maynard.             */
 /*      Set/reset bad frame indicator call by Jan Jaeger.            */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -37,6 +37,30 @@ U32             n;                      /* 32-bit operand value      */
 #endif /*FEATURE_HERCULES_DIAGCALLS*/
 
     switch(code) {
+
+
+    case 0x01F:
+    /*---------------------------------------------------------------*/
+    /* Diagnose 01F: Power Off                                       */
+    /*---------------------------------------------------------------*/
+
+        /* The poweroff diagnose is only valid on the 9221 */
+        if((sysblk.cpuid >> 16 & 0xFFFF) != 0x9221
+          /* and r1/r2 must contain C'POWEROFF' in EBCDIC */
+          || regs->GR_L(r1) != 0xD7D6E6C5
+          || regs->GR_L(r2) != 0xD9D6C6C6)
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+        regs->cpustate = CPUSTATE_STOPPING;
+        ON_IC_CPU_NOT_STARTED(regs);
+
+        /* Release the configuration */
+        release_config();
+
+        /* Power Off: exit hercules */
+        exit(0);
+
+        break;
 
 
 #if defined(FEATURE_HYPERVISOR) || defined(FEATURE_EMULATE_VM)
@@ -84,7 +108,7 @@ U32             n;                      /* 32-bit operand value      */
     /*---------------------------------------------------------------*/
     /* Diagnose 000: Store Extended Identification Code              */
     /*---------------------------------------------------------------*/
-        extid_call (r1, r2, regs);
+        ARCH_DEP(extid_call) (r1, r2, regs);
         break;
 
     case 0x008:
@@ -92,21 +116,21 @@ U32             n;                      /* 32-bit operand value      */
     /* Diagnose 008: Virtual Console Function                        */
     /*---------------------------------------------------------------*/
         /* Process CP command and set condition code */
-        regs->psw.cc = cpcmd_call (r1, r2, regs);
+        regs->psw.cc = ARCH_DEP(cpcmd_call) (r1, r2, regs);
         break;
 
     case 0x00C:
     /*---------------------------------------------------------------*/
     /* Diagnose 00C: Pseudo Timer                                    */
     /*---------------------------------------------------------------*/
-        pseudo_timer (code, r1, r2, regs);
+        ARCH_DEP(pseudo_timer) (code, r1, r2, regs);
         break;
 
     case 0x024:
     /*---------------------------------------------------------------*/
     /* Diagnose 024: Device Type and Features                        */
     /*---------------------------------------------------------------*/
-        regs->psw.cc = diag_devtype (r1, r2, regs);
+        regs->psw.cc = ARCH_DEP(diag_devtype) (r1, r2, regs);
         break;
 
     case 0x05C:
@@ -138,7 +162,7 @@ U32             n;                      /* 32-bit operand value      */
     /*---------------------------------------------------------------*/
     /* Diagnose 0A4: Synchronous I/O (Standard CMS Blocksize)        */
     /*---------------------------------------------------------------*/
-        regs->psw.cc = syncblk_io (r1, r2, regs);
+        regs->psw.cc = ARCH_DEP(syncblk_io) (r1, r2, regs);
 //      logmsg ("Diagnose X\'0A4\': CC=%d, R15=%8.8X\n",      /*debug*/
 //              regs->psw.cc, regs->GR_L(15));                 /*debug*/
         break;
@@ -147,7 +171,7 @@ U32             n;                      /* 32-bit operand value      */
     /*---------------------------------------------------------------*/
     /* Diagnose 0A8: Synchronous General I/O                         */
     /*---------------------------------------------------------------*/
-        regs->psw.cc = syncgen_io (r1, r2, regs);
+        regs->psw.cc = ARCH_DEP(syncgen_io) (r1, r2, regs);
 //      logmsg ("Diagnose X\'0A8\': CC=%d, R15=%8.8X\n",      /*debug*/
 //              regs->psw.cc, regs->GR_L(15));                 /*debug*/
         break;
@@ -156,7 +180,7 @@ U32             n;                      /* 32-bit operand value      */
     /*---------------------------------------------------------------*/
     /* Diagnose 0B0: Access Re-IPL Data                              */
     /*---------------------------------------------------------------*/
-        access_reipl_data (r1, r2, regs);
+        ARCH_DEP(access_reipl_data) (r1, r2, regs);
         break;
 
     case 0x0DC:
@@ -172,7 +196,7 @@ U32             n;                      /* 32-bit operand value      */
     /*---------------------------------------------------------------*/
     /* Diagnose 214: Pending Page Release                            */
     /*---------------------------------------------------------------*/
-        regs->psw.cc = diag_ppagerel (r1, r2, regs);
+        regs->psw.cc = ARCH_DEP(diag_ppagerel) (r1, r2, regs);
         break;
 
     case 0x23C:
@@ -195,7 +219,7 @@ U32             n;                      /* 32-bit operand value      */
     /*---------------------------------------------------------------*/
     /* Diagnose 270: Pseudo Timer Extended                           */
     /*---------------------------------------------------------------*/
-        pseudo_timer (code, r1, r2, regs);
+        ARCH_DEP(pseudo_timer) (code, r1, r2, regs);
         break;
 
     case 0x274:
@@ -213,6 +237,7 @@ U32             n;                      /* 32-bit operand value      */
     /* Diagnose F00: Hercules normal mode                            */
     /*---------------------------------------------------------------*/
         sysblk.inststep = 0;
+        SET_IC_TRACE;
         break;
 
     case 0xF04:
@@ -220,6 +245,7 @@ U32             n;                      /* 32-bit operand value      */
     /* Diagnose F04: Hercules single step mode                       */
     /*---------------------------------------------------------------*/
         sysblk.inststep = 1;
+        ON_IC_TRACE;
         break;
 
     case 0xF08:
@@ -257,6 +283,7 @@ U32             n;                      /* 32-bit operand value      */
     /* Diagnose F10: Hercules CPU stop                               */
     /*---------------------------------------------------------------*/
         regs->cpustate = CPUSTATE_STOPPING;
+        ON_IC_CPU_NOT_STARTED(regs);
         break;
 #endif /*FEATURE_HERCULES_DIAGCALLS*/
 
@@ -276,10 +303,6 @@ U32             n;                      /* 32-bit operand value      */
 
 #if !defined(_GEN_ARCH)
 
-// #define  _GEN_ARCH 964
-// #include "diagnose.c"
-
-// #undef   _GEN_ARCH
 #define  _GEN_ARCH 390
 #include "diagnose.c"
 

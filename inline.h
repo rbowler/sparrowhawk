@@ -1,12 +1,14 @@
 /* INLINE.H	(c) Copyright Jan Jaeger, 2000-2001		     */
 /*		Inline function definitions			     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /* Storage protection override fix		 Jan Jaeger 31/08/00 */
 /* ESAME low-address protection 	 v208d Roger Bowler 20/01/01 */
 /* ESAME subspace replacement		 v208e Roger Bowler 27/01/01 */
+
+// #define INLINE_STORE_FETCH_ADDR_CHECK
 
 _DAT_C_STATIC U16 ARCH_DEP(translate_asn) (U16 asn, REGS *regs,
 					       U32 *asteo, U32 aste[]);
@@ -79,78 +81,44 @@ _VSTORE_C_STATIC void s390_instfetch (BYTE *dest, U32 addr, REGS *regs);
 
 #define _INLINE_H
 
-/*-------------------------------------------------------------------*/
-/* Add two signed fullwords giving a signed fullword result	     */
-/* and return condition code					     */
-/*-------------------------------------------------------------------*/
-static inline int add_signed ( U32 *result, U32 op1, U32 op2 )
+
+static inline int add_logical(U32 *result, U32 op1, U32 op2)
 {
-U64	r;
-U32	x;
-int	carry_in, carry_out;
-int	cc;
+    *result = op1 + op2;
 
-    r = (U64)op1 + op2;
-    x = (U32)r;
-    carry_in = ((op1 & 0x7FFFFFFF) + (op2 & 0x7FFFFFFF)) >> 31;
-    carry_out = r >> 32;
-    *result = x;
-    cc = (carry_out != carry_in)? 3 :
-	(x == 0)? 0 : ((S32)x < 0)? 1 : 2;
-    return cc;
-} /* end function add_signed */
+    return (*result == 0 ? 0 : 1) | (op1 > *result ? 2 : 0);
+}
+        
 
-/*-------------------------------------------------------------------*/
-/* Subtract two signed fullwords giving a signed fullword result     */
-/* and return condition code					     */
-/*-------------------------------------------------------------------*/
-static inline int sub_signed ( U32 *result, U32 op1, U32 op2 )
+static inline int sub_logical(U32 *result, U32 op1, U32 op2)
 {
-U64	r;
-U32	x;
-int	carry_in, carry_out;
-int	cc;
+    *result = op1 - op2;
 
-    r = (U64)op1 + ~op2 + 1;
-    x = (U32)r;
-    carry_in = ((op1 & 0x7FFFFFFF) + (~op2 & 0x7FFFFFFF) + 1) >> 31;
-    carry_out = r >> 32;
-    *result = x;
-    cc = (carry_out != carry_in)? 3 :
-	(x == 0)? 0 : ((S32)x < 0)? 1 : 2;
-    return cc;
-} /* end function sub_signed */
+    return (*result == 0 ? 0 : 1) | (op1 < *result ? 0 : 2);
+}
+        
 
-/*-------------------------------------------------------------------*/
-/* Add two unsigned fullwords giving an unsigned fullword result     */
-/* and return condition code					     */
-/*-------------------------------------------------------------------*/
-static inline int add_logical ( U32 *result, U32 op1, U32 op2 )
+static inline int add_signed(U32 *result, U32 op1, U32 op2)
 {
-U64	r;
-int	cc;
+    *result = (S32)op1 + (S32)op2;
 
-    r = (U64)op1 + (U64)op2;
-    *result = (U32)r;
-    if ((r >> 32) == 0) cc = ((U32)r == 0)? 0 : 1;
-    else cc = ((U32)r == 0)? 2 : 3;
-    return cc;
-} /* end function add_logical */
+    return (((S32)op1 < 0 && (S32)op2 < 0 && (S32)*result >= 0)
+      || ((S32)op1 >= 0 && (S32)op2 >= 0 && (S32)*result < 0)) ? 3 :
+                                              (S32)*result < 0 ? 1 :
+                                              (S32)*result > 0 ? 2 : 0;
+}
+        
 
-/*-------------------------------------------------------------------*/
-/* Subtract two unsigned fullwords giving an unsigned fullword	     */
-/* and return condition code					     */
-/*-------------------------------------------------------------------*/
-static inline int sub_logical ( U32 *result, U32 op1, U32 op2 )
+static inline int sub_signed(U32 *result, U32 op1, U32 op2)
 {
-U64	r;
-int	cc;
+    *result = (S32)op1 - (S32)op2;
 
-    r = (U64)op1 + ~((U32)op2) + 1;
-    *result = (U32)r;
-    cc = ((U32)r == 0) ? 2 : ((r >> 32) == 0) ? 1 : 3;
-    return cc;
-} /* end function sub_logical */
+    return (((S32)op1 < 0 && (S32)op2 >= 0 && (S32)*result >= 0)
+      || ((S32)op1 >= 0 && (S32)op2 < 0 && (S32)*result < 0)) ? 3 :
+                                             (S32)*result < 0 ? 1 :
+                                             (S32)*result > 0 ? 2 : 0;
+}
+
 
 /*-------------------------------------------------------------------*/
 /* Multiply two signed fullwords giving a signed doubleword result   */
@@ -352,6 +320,11 @@ static inline int ARCH_DEP(is_store_protected) (VADR addr, BYTE skey,
 static inline U64 ARCH_DEP(fetch_doubleword_absolute) (RADR addr,
 							    REGS *regs)
 {
+#if defined(INLINE_STORE_FETCH_ADDR_CHECK)
+    if(addr > regs->mainsize - 8)
+	ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+#endif /*defined(INLINE_STORE_FETCH_ADDR_CHECK)*/
+
     SIE_TRANSLATE(&addr, ACCTYPE_READ, regs);
 
     /* Set the main storage reference bit */
@@ -374,6 +347,11 @@ static inline U64 ARCH_DEP(fetch_doubleword_absolute) (RADR addr,
 static inline U32 ARCH_DEP(fetch_fullword_absolute) (RADR addr,
 							    REGS *regs)
 {
+#if defined(INLINE_STORE_FETCH_ADDR_CHECK)
+    if(addr > regs->mainsize - 4)
+	ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+#endif /*defined(INLINE_STORE_FETCH_ADDR_CHECK)*/
+
     SIE_TRANSLATE(&addr, ACCTYPE_READ, regs);
 
     /* Set the main storage reference bit */
@@ -395,6 +373,11 @@ static inline U32 ARCH_DEP(fetch_fullword_absolute) (RADR addr,
 static inline U16 ARCH_DEP(fetch_halfword_absolute) (RADR addr,
 							    REGS *regs)
 {
+#if defined(INLINE_STORE_FETCH_ADDR_CHECK)
+    if(addr > regs->mainsize - 2)
+	ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+#endif /*defined(INLINE_STORE_FETCH_ADDR_CHECK)*/
+
     SIE_TRANSLATE(&addr, ACCTYPE_READ, regs);
 
     /* Set the main storage reference bit */
@@ -415,6 +398,11 @@ static inline U16 ARCH_DEP(fetch_halfword_absolute) (RADR addr,
 static inline void ARCH_DEP(store_doubleword_absolute) (U64 value,
 						  RADR addr, REGS *regs)
 {
+#if defined(INLINE_STORE_FETCH_ADDR_CHECK)
+    if(addr > regs->mainsize - 8)
+	ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+#endif /*defined(INLINE_STORE_FETCH_ADDR_CHECK)*/
+
     SIE_TRANSLATE(&addr, ACCTYPE_WRITE, regs);
 
     /* Set the main storage reference and change bits */
@@ -435,6 +423,11 @@ static inline void ARCH_DEP(store_doubleword_absolute) (U64 value,
 static inline void ARCH_DEP(store_fullword_absolute) (U32 value,
 						  RADR addr, REGS *regs)
 {
+#if defined(INLINE_STORE_FETCH_ADDR_CHECK)
+    if(addr > regs->mainsize - 4)
+	ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+#endif /*defined(INLINE_STORE_FETCH_ADDR_CHECK)*/
+
     SIE_TRANSLATE(&addr, ACCTYPE_WRITE, regs);
 
     /* Set the main storage reference and change bits */
@@ -479,7 +472,7 @@ static inline void ARCH_DEP(store_fullword_absolute) (U32 value,
 /*	For all other error conditions a program check is generated  */
 /*	and the function does not return.			     */
 /*-------------------------------------------------------------------*/
-static inline U32 ARCH_DEP(subspace_replace) (RADR std, U32 asteo,
+static inline RADR ARCH_DEP(subspace_replace) (RADR std, U32 asteo,
 						U16 *xcode, REGS *regs)
 {
 U32	ducto;				/* DUCT origin		     */
@@ -495,7 +488,7 @@ U32	ssaste[16];			/* Subspace ASTE	     */
     /* Return the original STD unchanged if the address-space function
        control (CR0 bit 15) is zero, or if the subspace-group control
        (bit 22 of the STD) is zero */
-    if (ASF_ENABLED(regs) == 0
+    if (!ASF_ENABLED(regs)
 	|| (std & SSGROUP_BIT) == 0)
 	return std;
 
@@ -532,12 +525,15 @@ U32	ssaste[16];			/* Subspace ASTE	     */
        storage (note: the ASTE cannot cross a page boundary) */
     ssaste[0] = ARCH_DEP(fetch_fullword_absolute) (ssasteo, regs);
     ssaste[2] = ARCH_DEP(fetch_fullword_absolute) (ssasteo+8, regs);
+#if defined(FEATURE_ESAME)
     ssaste[3] = ARCH_DEP(fetch_fullword_absolute) (ssasteo+12, regs);
+#endif /*defined(FEATURE_ESAME)*/
     ssaste[5] = ARCH_DEP(fetch_fullword_absolute) (ssasteo+20, regs);
 
     /* ASTE validity exception if subspace ASTE invalid bit is one */
     if (ssaste[0] & ASTE0_INVALID)
     {
+        regs->excarid = 0;
 	if (xcode == NULL)
 	    ARCH_DEP(program_interrupt) (regs, PGM_ASTE_VALIDITY_EXCEPTION);
 	else
@@ -549,6 +545,7 @@ U32	ssaste[16];			/* Subspace ASTE	     */
        number does not match the sequence number in the DUCT */
     if ((ssaste[5] & ASTE5_ASTESN) != (duct3 & DUCT3_SSASTESN))
     {
+        regs->excarid = 0;
 	if (xcode == NULL)
 	    ARCH_DEP(program_interrupt) (regs, PGM_ASTE_SEQUENCE_EXCEPTION);
 	else

@@ -18,6 +18,7 @@ static void sighup_handler (int signo)
 {
 //  logmsg ("config: sighup handler entered for thread %lu\n",/*debug*/
 //          thread_id());                                     /*debug*/
+    signal(SIGHUP, sighup_handler);
     return;
 } /* end function sighup_handler */
 
@@ -29,19 +30,25 @@ static void sigint_handler (int signo)
 //  logmsg ("config: sigint handler entered for thread %lu\n",/*debug*/
 //          thread_id());                                     /*debug*/
 
+    signal(SIGINT, sigint_handler);
     /* Ignore signal unless presented on console thread */
     if (thread_id() != sysblk.cnsltid)
         return;
 
     /* Exit if previous SIGINT request was not actioned */
     if (sysblk.sigintreq)
+    {
+        /* Release the configuration */
+        release_config();
         exit(1);
+    }
 
     /* Set SIGINT request pending flag */
     sysblk.sigintreq = 1;
 
     /* Activate instruction stepping */
     sysblk.inststep = 1;
+    ON_IC_TRACE;
     return;
 } /* end function sigint_handler */
 
@@ -50,15 +57,25 @@ static void sigint_handler (int signo)
 /*-------------------------------------------------------------------*/
 int main (int argc, char *argv[])
 {
-BYTE   *cfgfile = "hercules.cnf";       /* -> Configuration filename */
+BYTE   *cfgfile;                        /* -> Configuration filename */
 int     c;                              /* Work area for getopt      */
 
+    /* Get name of configuration file or default to hercules.cnf */
+    if(!(cfgfile = getenv("HERCULES_CNF")))
+        cfgfile = "hercules.cnf";
+
     /* Display the version identifier */
-    fprintf (stderr,
-            "Hercules version %s built at %s %s\n",
-            MSTRING(VERSION), __DATE__, __TIME__);
+    display_version (stderr, "Hercules ", MSTRING(VERSION),
+                             __DATE__, __TIME__);
 
     /* Process the command line options */
+#ifdef EXTERNALGUI
+    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
+    {
+        extgui = 1;
+        argc--;
+    }
+#endif /*EXTERNALGUI*/
     while ((c = getopt(argc, argv, "f:")) != EOF)
     {
         switch (c) {

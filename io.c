@@ -1,8 +1,8 @@
-/* IO.C         (c) Copyright Roger Bowler, 1994-2000                */
+/* IO.C         (c) Copyright Roger Bowler, 1994-2001                */
 /*              ESA/390 CPU Emulator                                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all I/O instructions of the                */
@@ -54,11 +54,11 @@ DEVBLK *dev;                            /* -> device block           */
     SIE_INTERCEPT(regs);
 
     /* Program check if reg 1 bits 0-15 not X'0001' */
-    if ( (regs->GR_L(1) >> 16) != 0x0001 )
+    if ( regs->GR_LHH(1) != 0x0001 )
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_L(1) & 0xFFFF);
+    dev = find_device_by_subchan (regs->GR_LHL(1));
 
     /* Condition code 3 if subchannel does not exist,
        is not valid, or is not enabled */
@@ -94,11 +94,11 @@ DEVBLK *dev;                            /* -> device block           */
     SIE_INTERCEPT(regs);
 
     /* Program check if reg 1 bits 0-15 not X'0001' */
-    if ( (regs->GR_L(1) >> 16) != 0x0001 )
+    if ( regs->GR_LHH(1) != 0x0001 )
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_L(1) & 0xFFFF);
+    dev = find_device_by_subchan (regs->GR_LHL(1));
 
     /* Condition code 3 if subchannel does not exist,
        is not valid, or is not enabled */
@@ -145,11 +145,11 @@ PMCW    pmcw;                           /* Path management ctl word  */
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
 
     /* Program check if reg 1 bits 0-15 not X'0001' */
-    if ( (regs->GR_L(1) >> 16) != 0x0001 )
+    if ( regs->GR_LHH(1) != 0x0001 )
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_L(1) & 0xFFFF);
+    dev = find_device_by_subchan (regs->GR_LHL(1));
 
     /* Condition code 3 if subchannel does not exist */
     if (dev == NULL)
@@ -259,11 +259,11 @@ DEVBLK *dev;                            /* -> device block           */
     SIE_INTERCEPT(regs);
 
     /* Program check if reg 1 bits 0-15 not X'0001' */
-    if ( (regs->GR_L(1) >> 16) != 0x0001 )
+    if ( regs->GR_LHH(1) != 0x0001 )
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_L(1) & 0xFFFF);
+    dev = find_device_by_subchan (regs->GR_LHL(1));
 
     /* Condition code 3 if subchannel does not exist,
        is not valid, or is not enabled */
@@ -322,7 +322,7 @@ VADR    effective_addr2;                /* Effective address         */
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Program check if M bit one and gpr2 address not on
-       a 32 byte boundary or highorder bit set */
+       a 32 byte boundary or highorder bit set in ESA/390 mode */
     if ((regs->GR_L(1) & CHM_GPR1_M)
      && (regs->GR_L(2) & CHM_GPR2_RESV))
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
@@ -330,7 +330,7 @@ VADR    effective_addr2;                /* Effective address         */
     /* Set the measurement block origin address */
     if (regs->GR_L(1) & CHM_GPR1_M)
     {
-        sysblk.mbo = regs->GR_L(2) & CHM_GPR2_MBO;
+        sysblk.mbo = regs->GR(2);
         sysblk.mbk = (regs->GR_L(1) & CHM_GPR1_MBK) >> 24;
         sysblk.mbm = 1;
     }
@@ -369,22 +369,25 @@ ORB     orb;                            /* Operation request block   */
         || orb.ccwaddr[0] & 0x80)
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
 
+#if !defined(FEATURE_INCORRECT_LENGTH_INDICATION_SUPPRESSION)
     /* Program check if incorrect length suppression */
     if (orb.flag7 & ORB7_L)
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
+#endif /*!defined(FEATURE_INCORRECT_LENGTH_INDICATION_SUPPRESSION)*/
 
     /* Program check if reg 1 bits 0-15 not X'0001' */
-    if ( (regs->GR_L(1) >> 16) != 0x0001 )
+    if ( regs->GR_LHH(1) != 0x0001 )
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_L(1) & 0xFFFF);
+    dev = find_device_by_subchan (regs->GR_LHL(1));
 
     /* Condition code 3 if subchannel does not exist,
-       is not valid, or is not enabled */
+       is not valid, is not enabled, or no path available */
     if (dev == NULL
         || (dev->pmcw.flag5 & PMCW5_V) == 0
-        || (dev->pmcw.flag5 & PMCW5_E) == 0)
+        || (dev->pmcw.flag5 & PMCW5_E) == 0
+        || (orb.lpm & dev->pmcw.pam) == 0)
     {
         regs->psw.cc = 3;
         return;
@@ -397,10 +400,16 @@ ORB     orb;                            /* Operation request block   */
     /* Clear the path not operational mask */
     dev->pmcw.pnom = 0;
 
+    /* Copy the logical path mask */
+    dev->pmcw.lpm = orb.lpm;
+
     /* Start the channel program and set the condition code */
     regs->psw.cc = ARCH_DEP(startio) (dev, &orb);              /*@IWZ*/
 
     regs->siocount++;
+
+    /* Set the last path used mask */
+    if (0 == regs->psw.cc) dev->pmcw.lpum = 0x80;
 }
 
 
@@ -482,11 +491,11 @@ SCHIB   schib;                          /* Subchannel information blk*/
     SIE_INTERCEPT(regs);
 
     /* Program check if reg 1 bits 0-15 not X'0001' */
-    if ( (regs->GR_L(1) >> 16) != 0x0001 )
+    if ( regs->GR_LHH(1) != 0x0001 )
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_L(1) & 0xFFFF);
+    dev = find_device_by_subchan (regs->GR_LHL(1));
 
     /* Set condition code 3 if subchannel does not exist */
     if (dev == NULL)
@@ -527,6 +536,7 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 U64     dreg;                           /* Double register work area */
 U32     ioid;                           /* I/O interruption address  */
 U32     ioparm;                         /* I/O interruption parameter*/
+U32     iointid;                        /* I/O interruption ident    */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -538,40 +548,50 @@ U32     ioparm;                         /* I/O interruption parameter*/
 
     /* validate operand before taking any action */
     if ( effective_addr2 != 0 )
-        ARCH_DEP(validate_operand) (effective_addr2, b2, 8-1, ACCTYPE_WRITE, regs);
+        ARCH_DEP(validate_operand) (effective_addr2, b2, 8-1,
+                                                  ACCTYPE_WRITE, regs);
 
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
-    /* Obtain the interrupt lock */
-    obtain_lock (&sysblk.intlock);
-
-    /* Test and clear pending interrupt, set condition code */
-    regs->psw.cc =
-        ARCH_DEP(present_io_interrupt) (regs, &ioid, &ioparm, NULL);
-
-    /* Release the interrupt lock */
-    release_lock (&sysblk.intlock);
-
-    /* Store the SSID word and I/O parameter if an interrupt was pending */
-    if (regs->psw.cc)
+    if( IS_IC_IOPENDING )
     {
-        if ( effective_addr2 == 0 )
+        /* Obtain the interrupt lock */
+        obtain_lock (&sysblk.intlock);
+
+        /* Test and clear pending interrupt, set condition code */
+        regs->psw.cc =
+            ARCH_DEP(present_io_interrupt) (regs, &ioid, &ioparm,
+                                                       &iointid, NULL);
+
+        /* Release the interrupt lock */
+        release_lock (&sysblk.intlock);
+
+        /* Store the SSID word and I/O parameter if an interrupt was pending */
+        if (regs->psw.cc)
         {
-            /* If operand address is zero, store in PSA */
-            psa = (void*)(sysblk.mainstor + regs->PX);
-            STORE_FW(psa->ioid,ioid);
-            STORE_FW(psa->ioparm,ioparm);
-        }
-        else
-        {
-            /* Otherwise store at operand location */
-            dreg = ((U64)ioid << 32) | ioparm;
-            ARCH_DEP(vstore8) ( dreg, effective_addr2, b2, regs );
+            if ( effective_addr2 == 0 )
+            {
+                /* If operand address is zero, store in PSA */
+                psa = (void*)(sysblk.mainstor + regs->PX);
+                STORE_FW(psa->ioid,ioid);
+                STORE_FW(psa->ioparm,ioparm);
+#if defined(FEATURE_ESAME)
+                STORE_FW(psa->iointid,iointid);
+#endif /*defined(FEATURE_ESAME)*/
+            }
+            else
+            {
+                /* Otherwise store at operand location */
+                dreg = ((U64)ioid << 32) | ioparm;
+                ARCH_DEP(vstore8) ( dreg, effective_addr2, b2, regs );
+            }
         }
     }
-
+    else
+        regs->psw.cc = 0;
+    
 }
 
 
@@ -581,7 +601,7 @@ U32     ioparm;                         /* I/O interruption parameter*/
 DEF_INST(test_subchannel)
 {
 int     b2;                             /* Effective addr base       */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 DEVBLK *dev;                            /* -> device block           */
 IRB     irb;                            /* Interruption response blk */
 
@@ -594,11 +614,11 @@ IRB     irb;                            /* Interruption response blk */
     FW_CHECK(effective_addr2, regs);
 
     /* Program check if reg 1 bits 0-15 not X'0001' */
-    if ( (regs->GR_L(1) >> 16) != 0x0001 )
+    if ( regs->GR_LHH(1) != 0x0001 )
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_L(1) & 0xFFFF);
+    dev = find_device_by_subchan (regs->GR_LHL(1));
 
     /* Condition code 3 if subchannel does not exist,
        is not valid, or is not enabled */
@@ -626,6 +646,21 @@ IRB     irb;                            /* Interruption response blk */
 
 }
 
+
+#if defined(FEATURE_CANCEL_IO_FACILITY)
+/*-------------------------------------------------------------------*/
+/* B276 XSCH  - Cancel Subchannel                                [S] */
+/*-------------------------------------------------------------------*/
+DEF_INST(cancel_subchannel)
+{
+int     b2;                             /* Base of effective addr    */
+VADR    effective_addr2;                /* Effective address         */
+
+    S(inst, execflag, regs, b2, effective_addr2);
+
+    logmsg("xsch: INCOMPLETE\n");
+}
+#endif /*defined(FEATURE_CANCEL_IO_FACILITY)*/
 #endif /*defined(FEATURE_CHANNEL_SUBSYSTEM)*/
 
 
@@ -639,11 +674,11 @@ IRB     irb;                            /* Interruption response blk */
 DEF_INST(start_io)
 {
 int     b2;                             /* Effective addr base       */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 PSA    *psa;                            /* -> prefixed storage area  */
 DEVBLK *dev;                            /* -> device block for SIO   */
 ORB     orb;                            /* Operation request blk @IZW*/
-U32     ccwaddr;                        /* CCW address for start I/O */
+VADR    ccwaddr;                        /* CCW address for start I/O */
 BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
 
     S(inst, execflag, regs, b2, effective_addr2);
@@ -688,7 +723,7 @@ BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
 DEF_INST(test_io)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 DEVBLK *dev;                            /* -> device block for SIO   */
 
     S(inst, execflag, regs, b2, effective_addr2);
@@ -720,7 +755,7 @@ DEVBLK *dev;                            /* -> device block for SIO   */
 DEF_INST(halt_io)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 DEVBLK *dev;                            /* -> device block for SIO   */
 
     S(inst, execflag, regs, b2, effective_addr2);
@@ -751,7 +786,7 @@ DEVBLK *dev;                            /* -> device block for SIO   */
 DEF_INST(test_channel)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 #if defined(_FEATURE_SIE)
 BYTE    channelid;
 U16     tch_ctl;
@@ -772,7 +807,7 @@ U16     tch_ctl;
     else
     {
         channelid = (effective_addr2 >> 8) & 0xFF;
-        FETCH_HW(tch_ctl,regs->siebk->tch_ctl);
+        FETCH_HW(tch_ctl,((SIEBK*)(regs->siebk))->tch_ctl);
         if((channelid > 15)
          || ((0x8000 >> channelid) & tch_ctl))
             longjmp(regs->progjmp, SIE_INTERCEPT_INST);
@@ -790,7 +825,7 @@ U16     tch_ctl;
 DEF_INST(store_channel_id)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -805,13 +840,14 @@ U32     effective_addr2;                /* Effective address         */
 }
 
 
+#if defined(_FEATURE_SIE)
 /*-------------------------------------------------------------------*/
 /* B200 CONCS - Connect Channel Set                              [S] */
 /*-------------------------------------------------------------------*/
 DEF_INST(connect_channel_set)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -830,7 +866,7 @@ U32     effective_addr2;                /* Effective address         */
 DEF_INST(disconnect_channel_set)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -841,15 +877,12 @@ U32     effective_addr2;                /* Effective address         */
     SIE_INTERCEPT(regs);
 
 }
+#endif /*defined(_FEATURE_SIE)*/
 #endif /*defined(FEATURE_S370_CHANNEL)*/
 
 
 #if !defined(_GEN_ARCH)
 
-// #define  _GEN_ARCH 964
-// #include "io.c"
-
-// #undef   _GEN_ARCH
 #define  _GEN_ARCH 390
 #include "io.c"
 

@@ -1,4 +1,4 @@
-/* DASDLOAD.C   (c) Copyright Roger Bowler, 1999-2000                */
+/* DASDLOAD.C   (c) Copyright Roger Bowler, 1999-2001                */
 /*              Hercules DASD Utilities: DASD image loader           */
 
 /*-------------------------------------------------------------------*/
@@ -18,11 +18,11 @@
 /*-------------------------------------------------------------------*/
 /* Internal table sizes                                              */
 /*-------------------------------------------------------------------*/
-#define MAXDBLK 3000                    /* Maximum number of directory
+#define MAXDBLK 10000                   /* Maximum number of directory
                                            blocks per dataset        */
-#define MAXTTR  10000                   /* Maximum number of TTRs
+#define MAXTTR  30000                   /* Maximum number of TTRs
                                            per dataset               */
-#define MAXDSCB 500                     /* Maximum number of DSCBs   */
+#define MAXDSCB 1000                    /* Maximum number of DSCBs   */
 
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
@@ -122,6 +122,12 @@ BYTE noiplccw2[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 /* Information message level: 0=None, 1=File name, 2=File information,
    3=Member information, 4=Text units, record headers, 5=Dump data */
 int  infolvl = 1;
+
+#ifdef EXTERNALGUI
+/* Special flag to indicate whether or not we're being
+   run under the control of the external GUI facility. */
+int  extgui = 0;
+#endif /*EXTERNALGUI*/
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to display command syntax and exit                     */
@@ -3556,6 +3562,11 @@ static int      stmtno = 0;             /* Statement number          */
             return -1;
         }
 
+#ifdef EXTERNALGUI
+        /* Indicate input file progess */
+        if (extgui) fprintf (stderr, "IPOS=%ld\n", ftell(cfp));
+#endif /*EXTERNALGUI*/
+
         /* Check for DOS end of file character */
         if (stmt[0] == '\x1A')
             return +1;
@@ -4100,10 +4111,21 @@ int             fsflag = 0;             /* 1=Free space message sent */
         /* Issue free space information message */
         if (fsflag == 0)
         {
+#ifdef EXTERNALGUI
+            if (extgui) fprintf (stderr, "REQCYLS=%d\n", reqcyls);
+            else
+#endif /*EXTERNALGUI*/
             XMINFF (1, "Free space starts at cyl %d head %d\n",
                     outcyl, outhead);
             fsflag = 1;
         }
+
+#ifdef EXTERNALGUI
+        /* Indicate output file progess */
+        if (extgui)
+            if ((outcyl % 10) == 0)
+                fprintf (stderr, "OUTCYL=%d\n", outcyl);
+#endif /*EXTERNALGUI*/
 
         /* Initialize track buffer with empty track */
         init_track (trklen, trkbuf, outcyl, outhead, &outusedv);
@@ -4196,12 +4218,18 @@ BYTE            stmt[256];              /* Control file statement    */
 int             stmtno;                 /* Statement number          */
 
     /* Display the program identification message */
-    fprintf (stdout,
-            "Hercules DASD loader program %s "
-            "(c)Copyright Roger Bowler, 1999-2000\n",
-            MSTRING(VERSION));
+    display_version (stderr,
+                     "Hercules DASD loader program ",
+                     MSTRING(VERSION), __DATE__, __TIME__);
 
     /* Check the number of arguments */
+#ifdef EXTERNALGUI
+    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
+    {
+        extgui = 1;
+        argc--;
+    }
+#endif /*EXTERNALGUI*/
     if (argc < 3 || argc > 4)
         argexit(4);
 

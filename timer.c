@@ -73,12 +73,12 @@ REGS	       *regs;			/* -> CPU register context   */
 
 	/* Signal clock comparator interrupt if needed */
         if((sysblk.todclk + regs->todoffset) > regs->clkc)
-#if defined(OPTION_NO_LINUX_INTERRUPT_PATCH)
-            regs->cpuint =
-#endif
-                           regs->ckpend = intflag = 1;
+        {
+            ON_IC_CLKC(regs);
+            intflag = 1;
+        }
         else
-            regs->ckpend = 0;
+            OFF_IC_CLKC(regs);
 
 #if defined(_FEATURE_SIE)
         /* If running under SIE also check the SIE copy */
@@ -86,12 +86,9 @@ REGS	       *regs;			/* -> CPU register context   */
         {
 	    /* Signal clock comparator interrupt if needed */
             if((sysblk.todclk + regs->guestregs->todoffset) > regs->guestregs->clkc)
-#if defined(OPTION_NO_LINUX_INTERRUPT_PATCH)
-                regs->guestregs->cpuint =
-#endif
-                                          regs->guestregs->ckpend = 1;
+                ON_IC_CLKC(regs->guestregs);
             else
-                regs->guestregs->ckpend = 0;
+                OFF_IC_CLKC(regs->guestregs);
         }
 #endif /*defined(_FEATURE_SIE)*/
 
@@ -126,8 +123,10 @@ S32     olditimer;                      /* Previous interval timer   */
 #endif
 #ifdef OPTION_MIPS_COUNTING
 int     msecctr = 0;                    /* Millisecond counter       */
-int     msecdiff;
 #endif /*OPTION_MIPS_COUNTING*/
+#if defined(_FEATURE_SIE)
+int     itimer_diff;                    /* TOD difference in TU      */
+#endif /*defined(_FEATURE_SIE)*/
 int     cpu;                            /* CPU engine number         */
 REGS   *regs;                           /* -> CPU register context   */
 int     intflag = 0;                    /* 1=Interrupt possible      */
@@ -168,14 +167,17 @@ struct  timeval tv;                     /* Structure for gettimeofday
         /* Shift the epoch out of the difference for the CPU timer */
         diff <<= 8;
 
-#ifdef OPTION_MIPS_COUNTING
-        /* Calculate how many milliseconds we did sleep */
-        msecdiff = (int)((diff>>12)/1000);                             
+#if defined(OPTION_MIPS_COUNTING) && defined(_FEATURE_SIE)
+        /* Calculate diff in interval timer units */
+        itimer_diff = (int)((3*diff)/160000);                             
 #endif
 
         /* Obtain the TOD clock update lock when manipulating the 
            cpu timers */
         obtain_lock (&sysblk.todlock);
+
+        /* Access the diffent register contexts with the intlock held */
+        obtain_lock(&sysblk.intlock);
 
         /* Decrement the CPU timer for each CPU */
 #ifdef _FEATURE_CPU_RECONFIG 
@@ -194,12 +196,9 @@ struct  timeval tv;                     /* Structure for gettimeofday
 
             /* Set interrupt flag if the CPU timer is negative */
             if ((S64)regs->ptimer < 0)
-#if defined(OPTION_NO_LINUX_INTERRUPT_PATCH)
-                regs->cpuint = 
-#endif
-                               regs->ptpend = intflag = 1;
+                ON_IC_PTIMER(regs);
             else
-                regs->ptpend = 0;
+                OFF_IC_PTIMER(regs);
 
 #if defined(_FEATURE_SIE)
             /* When running under SIE also update the SIE copy */
@@ -211,12 +210,9 @@ struct  timeval tv;                     /* Structure for gettimeofday
 
                 /* Set interrupt flag if the CPU timer is negative */
                 if ((S64)regs->guestregs->ptimer < 0)
-#if defined(OPTION_NO_LINUX_INTERRUPT_PATCH)
-                    regs->guestregs->cpuint =
-#endif
-                                              regs->guestregs->ptpend = 1;
+                    ON_IC_PTIMER(regs->guestregs);
                 else
-                    regs->guestregs->ptpend = 0;
+                    OFF_IC_PTIMER(regs->guestregs);
 
                 if((regs->guestregs->siebk->m & SIE_M_370)
                   && !(regs->guestregs->siebk->m & SIE_M_ITMOF))
@@ -234,8 +230,8 @@ struct  timeval tv;                     /* Structure for gettimeofday
                        comes out to 75 on the Alpha, with its 1024/second
                        tick interval. See 370 POO page 4-29. (ESA doesn't
                        even have an interval timer.) */
-#ifdef OPTION_MIPS_COUNTING
-                    itimer -= 77 * msecdiff;
+#if defined(OPTION_MIPS_COUNTING) && defined(_FEATURE_SIE)
+                    itimer -= itimer_diff;
 #else
                     itimer -= 76800 / CLK_TCK;
 #endif
@@ -244,7 +240,7 @@ struct  timeval tv;                     /* Structure for gettimeofday
                     /* Set interrupt flag and interval timer interrupt pending
                        if the interval timer went from positive to negative */
                     if (itimer < 0 && olditimer >= 0)
-                        regs->guestregs->cpuint = regs->guestregs->itimer_pending = 1;
+                        ON_IC_ITIMER(regs->guestregs);
 
                     /* The residu field in the state descriptor needs
                        to be ajusted with the amount of CPU time spend, minus
@@ -255,7 +251,7 @@ struct  timeval tv;                     /* Structure for gettimeofday
 #endif /*defined(_FEATURE_SIE)*/
 
 #ifdef _FEATURE_INTERVAL_TIMER
-        if(sysblk.arch_mode == ARCH_370) {
+        if(regs->arch_mode == ARCH_370) {
             /* Point to PSA in main storage */
             psa = (PSA_3XX*)(sysblk.mainstor + regs->PX);
 
@@ -271,8 +267,8 @@ struct  timeval tv;                     /* Structure for gettimeofday
                comes out to 75 on the Alpha, with its 1024/second
                tick interval. See 370 POO page 4-29. (ESA doesn't
                even have an interval timer.) */
-#ifdef OPTION_MIPS_COUNTING
-            itimer -= 77 * msecdiff;
+#if defined(OPTION_MIPS_COUNTING) && defined(_FEATURE_SIE)
+            itimer -= itimer_diff;
 #else
             itimer -= 76800 / CLK_TCK;
 #endif
@@ -281,17 +277,17 @@ struct  timeval tv;                     /* Structure for gettimeofday
             /* Set interrupt flag and interval timer interrupt pending
                if the interval timer went from positive to negative */
             if (itimer < 0 && olditimer >= 0)
-                regs->cpuint = regs->itimer_pending = intflag = 1;
-        } /*if(sysblk.arch_mode == ARCH_370)*/
+            {
+                ON_IC_ITIMER(regs);
+                intflag = 1;
+            }
+        } /*if(regs->arch_mode == ARCH_370)*/
 #endif /*_FEATURE_INTERVAL_TIMER*/
 
         } /* end for(cpu) */
 
         /* Release the TOD clock update lock */
         release_lock (&sysblk.todlock);
-
-        /* ZZ Access the diffent register contexts with the intlock held */
-        obtain_lock(&sysblk.intlock);
 
         /* If a CPU timer or clock comparator interrupt condition
            was detected for any CPU, then wake up all waiting CPUs */
@@ -303,7 +299,7 @@ struct  timeval tv;                     /* Structure for gettimeofday
 #ifdef OPTION_MIPS_COUNTING
         /* Calculate MIPS rate...allow for the Alpha's 1024 ticks/second
            internal clock, as well as everyone else's 100/second */
-        msecctr += msecdiff;
+        msecctr += (int)(diff/4096000);
         if (msecctr > 999)
         {
 #ifdef _FEATURE_CPU_RECONFIG 

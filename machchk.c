@@ -1,7 +1,7 @@
-/* MACHCHK.C    (c) Copyright Jan Jaeger, 2000                       */
+/* MACHCHK.C    (c) Copyright Jan Jaeger, 2000-2001                  */
 /*              ESA/390 Machine Check Functions                      */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /*-------------------------------------------------------------------*/
 /* The machine check function supports dynamic I/O configuration.    */
@@ -24,7 +24,7 @@
 /* Return pending channel report                                     */
 /*                                                                   */
 /* Returns zero if no device has CRW pending.  Otherwise returns     */
-/* the channel report word for the first device which has CRW        */
+/* the channel report word for the first device which has a CRW      */
 /* pending, and resets the CRW for that device.                      */
 /*-------------------------------------------------------------------*/
 U32 channel_report()
@@ -55,7 +55,7 @@ void machine_check_crwpend()
 {
     /* Signal waiting CPUs that an interrupt may be pending */
     obtain_lock (&sysblk.intlock);
-    sysblk.mckpending = sysblk.crwpending = 1;
+    ON_IC_CHANRPT;
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 
@@ -88,7 +88,7 @@ int rc = 0;
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
     /* If there is a crw pending and we are enabled for the channel
        report interrupt subclass then process the interrupt */
-    if(sysblk.crwpending && (regs->CR(14) & CR14_CHANRPT))
+    if( OPEN_IC_CHANRPT(regs) )
     {
         *mcic =  MCIC_CP |
                MCIC_WP |
@@ -104,18 +104,24 @@ int rc = 0;
 #ifdef FEATURE_ACCESS_REGISTERS
                MCIC_AR |
 #endif /*FEATURE_ACCESS_REGISTERS*/
+#if defined(FEATURE_ESAME) && defined(FEATURE_EXTENDED_TOD_CLOCK)
+               MCIC_PR |
+#endif /*defined(FEATURE_ESAME) && defined(FEATURE_EXTENDED_TOD_CLOCK)*/
+#if defined(FEATURE_BINARY_FLOATING_POINT)
+               MCIC_XF |
+#endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
                MCIC_AP |
                MCIC_CT |
                MCIC_CC ;
         *xdmg = 0;
         *fsta = 0;
-        sysblk.crwpending = 0;
+        OFF_IC_CHANRPT;
         rc = 1;
     }
 
-    if(!sysblk.crwpending)
+    if(!IS_IC_CHANRPT)
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
-        sysblk.mckpending = 0;
+        OFF_IC_CHANRPT;
 
     return rc;
 } /* end function present_mck_interrupt */
@@ -123,10 +129,6 @@ int rc = 0;
 
 #if !defined(_GEN_ARCH)
 
-// #define  _GEN_ARCH 964
-// #include "machchk.c"
-
-// #undef   _GEN_ARCH
 #define  _GEN_ARCH 390
 #include "machchk.c"
 

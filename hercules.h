@@ -12,6 +12,7 @@
 #include "features.h"
 
 #if !defined(_HERCULES_H)
+#include "cpuint.h"
 
 #include <unistd.h>
 #include <stdio.h>
@@ -144,6 +145,8 @@ typedef pthread_attr_t			ATTR;
 	pthread_cond_broadcast((pcond))
 #define wait_condition(pcond,plk) \
 	pthread_cond_wait((pcond),(plk))
+#define timed_wait_condition(pcond,plk,timeout) \
+	pthread_cond_timedwait((pcond),(plk),(timeout))
 #define initialize_detach_attr(pat) \
 	pthread_attr_init((pat)); \
 	pthread_attr_setdetachstate((pat),PTHREAD_CREATE_DETACHED)
@@ -167,6 +170,7 @@ typedef int				ATTR;
 #define initialize_condition(pcond)	*(pcond)=0
 #define signal_condition(pcond) 	*(pcond)=1
 #define wait_condition(pcond,plk)	*(pcond)=1
+#define timed_wait_condition(pcond,plk,timeout)	*(pcond)=1
 #define initialize_detach_attr(pat)	*(pat)=1
 #define create_thread(ptid,pat,fn,arg)	(*(ptid)=0,fn(arg),0)
 #define signal_thread(tid,signo)	raise(signo)
@@ -247,6 +251,7 @@ typedef struct _REGS {			/* Processor registers	     */
 #define GR_LA24(_r) gr[(_r)].F.L.A.A	 /* 24 bit addr, bits 40-63  */
 #define GR_LA8(_r) gr[(_r)].F.L.A.B	 /* 24 bit addr, unused bits */
 #define GR_LHLCL(_r) gr[(_r)].F.L.H.L.B.L   /* Character, bits 56-63 */
+#define GR_LHLCH(_r) gr[(_r)].F.L.H.L.B.H   /* Character, bits 48-55 */
 #define CR_G(_r)   cr[(_r)].D		 /* Bits 0-63		     */
 #define CR_H(_r)   cr[(_r)].F.H.F	 /* Fullword bits 0-31	     */
 #define CR_HHH(_r) cr[(_r)].F.H.H.H.H	 /* Halfword bits 0-15	     */
@@ -280,6 +285,7 @@ typedef struct _REGS {			/* Processor registers	     */
 // #if defined(FEATURE_BINARY_FLOATING_POINT)
         U32     fpc;                    /* IEEE Floating Point 
                                                     Control Register */
+	U32	dxc;                    /* Data exception code       */
 // #endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
 	U32	todpr;			/* TOD programmable register */
 	U16	monclass;		/* Monitor event class	     */
@@ -317,6 +323,7 @@ typedef struct _REGS {			/* Processor registers	     */
 	unsigned int			/* Flags		     */
 		cpuonline:1,		/* 1=CPU is online	     */
 		loadstate:1,		/* 1=CPU is in load state    */
+#ifndef INTERRUPTS_FAST_CHECK
 		cpuint:1,		/* 1=There is an interrupt
 					     pending for this CPU    */
 		itimer_pending:1,	/* 1=Interrupt is pending for
@@ -327,10 +334,15 @@ typedef struct _REGS {			/* Processor registers	     */
 		ptpend:1,		/* 1=CPU timer int pending   */
 		ckpend:1,		/* 1=Clock comp int pending  */
 		storstat:1,		/* 1=Stop and store status   */
+#endif /*INTERRUPTS_FAST_CHECK*/
 		sigpreset:1,		/* 1=SIGP cpu reset received */
 		sigpireset:1,		/* 1=SIGP initial cpu reset  */
 		panelregs:1,		/* 1=Disallow program checks */
 		instvalid:1;		/* 1=Inst field is valid     */
+#ifdef INTERRUPTS_FAST_CHECK
+	U32	ints_state;		/* CPU Interrupts Status     */
+	U32	ints_mask;		/* Respective Interrupts Mask*/
+#endif /*INTERRUPTS_FAST_CHECK*/
 	BYTE	emercpu 		/* Emergency signal flags    */
 		    [MAX_CPU_ENGINES];	/* for each CPU (1=pending)  */
 	U16	extccpu;		/* CPU causing external call */
@@ -418,6 +430,14 @@ typedef struct _SYSBLK {
 	int	panrate;		/* Panel refresh rate	     */
 	struct _DEVBLK *firstdev;	/* -> First device block     */
 	U16	highsubchan;		/* Highest subchannel + 1    */
+        struct _DEVBLK *ioq;            /* I/O queue                 */
+        LOCK    ioqlock;                /* I/O queue lock            */
+        COND    ioqcond;                /* I/O queue condition       */
+        int     devtwait;               /* Device threads waiting    */
+        int     devtnbr;                /* Number of device threads  */
+        int     devtmax;                /* Max device threads        */
+        int     devthwm;                /* High water mark           */
+        int     devtunavail;            /* Count thread unavailable  */
 	RADR	addrlimval;		/* Address limit value (SAL) */
 	U32	servparm;		/* Service signal parameter  */
 	U32	cp_recv_mask;		/* Syscons CP receive mask   */
@@ -427,17 +447,22 @@ typedef struct _SYSBLK {
 	BYTE	scpcmdstr[123+1];	/* Operator command string   */
 	int	scpcmdtype;		/* Operator command type     */
 	unsigned int			/* Flags		     */
+#ifndef INTERRUPTS_FAST_CHECK
 		iopending:1,		/* 1=I/O interrupt pending   */
 		mckpending:1,		/* 1=MCK interrupt pending   */
 		extpending:1,		/* 1=EXT interrupt pending   */
-		crwpending:1,		/* 1=Channel report pending  */
-		sigpbusy:1,		/* 1=Signal facility in use  */
-		servsig:1,		/* 1=Service signal pending  */
 		intkey:1,		/* 1=Interrupt key pending   */
+		servsig:1,		/* 1=Service signal pending  */
+		crwpending:1,		/* 1=Channel report pending  */
+#endif /*INTERRUPTS_FAST_CHECK*/
+		sigpbusy:1,		/* 1=Signal facility in use  */
 		sigintreq:1,		/* 1=SIGINT request pending  */
 		insttrace:1,		/* 1=Instruction trace	     */
 		inststep:1,		/* 1=Instruction step	     */
 		instbreak:1;		/* 1=Have breakpoint	     */
+#ifdef INTERRUPTS_FAST_CHECK
+	U32	ints_state;		/* Common Interrupts Status  */
+#endif /*INTERRUPTS_FAST_CHECK*/
 // #if MAX_CPU_ENGINES > 1
 	U32	brdcstpalb;		/* purge_alb() pending	     */
 	U32	brdcstptlb;		/* purge_tlb() pending	     */
@@ -456,6 +481,7 @@ typedef struct _SYSBLK {
 // #endif /*defined(FEATURE_HARDWARE_LOADER)*/
 
 #if defined(OPTION_INSTRUCTION_COUNTING)
+#define IMAP_FIRST sysblk.imap01
 	U64 imap01[256];
 	U64 imapa4[256];
 	U64 imapa5[16];
@@ -472,6 +498,23 @@ typedef struct _SYSBLK {
 	U64 imapec[256];
 	U64 imaped[256];
 	U64 imapxx[256];
+#define IMAP_SIZE \
+	    ( sizeof(sysblk.imap01) \
+	    + sizeof(sysblk.imapa4) \
+	    + sizeof(sysblk.imapa5) \
+	    + sizeof(sysblk.imapa6) \
+	    + sizeof(sysblk.imapa7) \
+	    + sizeof(sysblk.imapb2) \
+	    + sizeof(sysblk.imapb3) \
+	    + sizeof(sysblk.imapb9) \
+	    + sizeof(sysblk.imapc0) \
+	    + sizeof(sysblk.imape3) \
+	    + sizeof(sysblk.imape4) \
+	    + sizeof(sysblk.imape5) \
+	    + sizeof(sysblk.imapeb) \
+	    + sizeof(sysblk.imapec) \
+	    + sizeof(sysblk.imaped) \
+	    + sizeof(sysblk.imapxx) )
 #endif
 
     } SYSBLK;
@@ -481,7 +524,13 @@ typedef struct _SYSBLK {
 #define OS_OS390	0x7FF673FFF7DE7FFFULL	/* OS/390	     */
 #define OS_VSE		0x7FF673FFF7DE7FFFULL	/* VSE		     */
 #define OS_VM		0x7FFFFFFFF7DE7FFCULL	/* VM		     */
-#define OS_LINUX	0x7CFFFFFFF7DE7FD6ULL	/* Linux	     */
+#define OS_LINUX	0x78FFFFFFF7DE7FD6ULL	/* Linux	     */
+
+#ifndef WIN32
+#define MAX_DEVICE_THREADS 0
+#else
+#define MAX_DEVICE_THREADS 8
+#endif
 
 /*-------------------------------------------------------------------*/
 /* Device configuration block					     */
@@ -496,11 +545,9 @@ typedef struct _DEVBLK {
 	DEVCF  *devclos;		/* -> Close device function  */
 	LOCK	lock;			/* Device block lock	     */
 	COND	resumecond;		/* Resume condition	     */
-#if !defined(OPTION_NO_DEVICE_THREAD)
-	COND	loopercond;		/* Loop or die condition     */
-	int	loopercmd;		/* Loop or die command	     */
-#endif /*!defined(OPTION_NO_DEVICE_THREAD)*/
 	struct _DEVBLK *nextdev;	/* -> next device block      */
+        struct _DEVBLK *nextioq;        /* -> next device in I/O q   */
+        int     priority;               /* Device priority           */
 	unsigned int			/* Flags		     */
 		pending:1,		/* 1=Interrupt pending	     */
 		busy:1, 		/* 1=Device busy	     */
@@ -531,7 +578,11 @@ typedef struct _DEVBLK {
 	TID	tid;			/* Thread-id executing CCW   */
 	BYTE   *buf;			/* -> Device data buffer     */
 	int	bufsize;		/* Device data buffer size   */
+#ifdef EXTERNALGUI
+	BYTE	filename[1024];		/* Unix file name	     */
+#else /*!EXTERNALGUI*/
 	BYTE	filename[256];		/* Unix file name	     */
+#endif /*EXTERNALGUI*/
 	int	fd;			/* File desc / socket number */
 	/* Device dependent fields for console */
 	struct	in_addr ipaddr; 	/* Client IP address	     */
@@ -548,11 +599,17 @@ typedef struct _DEVBLK {
 		rdreof:1,		/* 1=Unit exception at EOF   */
 		ebcdic:1,		/* 1=Card deck is EBCDIC     */
 		ascii:1,		/* 1=Convert ASCII to EBCDIC */
-		trunc:1;		/* Truncate overlength record*/
+		trunc:1,		/* Truncate overlength record*/
+		autopad:1;		/* 1=Pad incomplete last rec
+                                           to 80 bytes if EBCDIC     */
 	int	cardpos;		/* Offset of next byte to be
 					   read from data buffer     */
 	int	cardrem;		/* Number of bytes remaining
 					   in data buffer	     */
+        char	**more_files;		/* for more that one file in
+					   reader */
+	char	**current_file;		/* counts how many additional
+					   reader files are avail    */
 	/* Device dependent fields for ctcadpt */
 	unsigned int			/* Flags		     */
 		ctcxmode:1;		/* 0=Basic mode, 1=Extended  */
@@ -562,6 +619,7 @@ typedef struct _DEVBLK {
 	int	ctcrem; 		/* bytes remaining in buffer */
 	int	ctclastpos;		/* last packet read	     */
 	int	ctclastrem;		/* last packet read	     */
+        BYTE    netdevname[IFNAMSIZ];   /* network device name       */
 	/* Device dependent fields for printer */
 	unsigned int			/* Flags		     */
 		crlf:1, 		/* 1=CRLF delimiters, 0=LF   */
@@ -848,7 +906,12 @@ typedef struct _CCKD_CACHE {		/* Cache structure           */
                                            threads: 1 - 9            */
 #define CCKD_MAX_DFW           9        /* Number of deferred write
                                            threads: 1 - 9            */
-#define CCKD_MAX_DFWQ_DEPTH    64       /* Track reads will be locked
+#ifdef WIN42
+#define CCKD_MAX_DFWQ_DEPTH    8
+#else
+#define CCKD_MAX_DFWQ_DEPTH    32
+#endif
+                                        /* Track reads will be locked
                                            when the deferred-write-
                                            queue gets this large     */
 
@@ -941,6 +1004,9 @@ typedef struct _CCKDDASD_EXT {          /* Ext for compressed ckd    */
 extern SYSBLK	sysblk; 		/* System control block      */
 extern BYTE	ascii_to_ebcdic[];	/* Translate table	     */
 extern BYTE	ebcdic_to_ascii[];	/* Translate table	     */
+#ifdef EXTERNALGUI
+extern int extgui;              /* external gui present */
+#endif /*EXTERNALGUI*/
 
 /*-------------------------------------------------------------------*/
 /* Function prototypes						     */
@@ -958,9 +1024,11 @@ int  detach_device (U16 devnum);
 int  define_device (U16 olddev, U16 newdev);
 int  configure_cpu (REGS *regs);
 int  deconfigure_cpu (REGS *regs);
+#ifdef EXTERNALGUI
+int parse_args (BYTE* p, int maxargc, BYTE** pargv, int* pargc);
+#endif /*EXTERNALGUI*/
 
 /* Functions in module panel.c */
-void display_inst (REGS *regs, BYTE *inst);
 void panel_display (void);
 
 /* Access type parameter passed to translate functions in dat.c */
@@ -974,9 +1042,8 @@ void panel_display (void);
 #define ACCTYPE_STACK		8	/* Linkage stack operations  */
 #define ACCTYPE_BSG		9	/* Branch in Subspace Group  */
 #define ACCTYPE_LOCKPAGE       10	/* Lock page		     */
-#define ACCTYPE_UNLKPAGE       11	/* Unlock page		     */
-#define ACCTYPE_SIE	       12	/* SIE host translation      */
-#define ACCTYPE_STRAG	       13	/* Store real address	     */
+#define ACCTYPE_SIE	       11	/* SIE host translation      */
+#define ACCTYPE_STRAG	       12	/* Store real address	     */
 
 /* Special value for arn parameter for translate functions in dat.c */
 #define USE_REAL_ADDR		(-1)	/* Real address 	     */
@@ -1003,18 +1070,7 @@ void panel_display (void);
 #define ARCH_370	0		/* S/370 mode		     */
 #define ARCH_390	1		/* ESA/390 mode 	     */
 #define ARCH_900	2		/* ESAME mode		     */
-#define ARCH_964	3		/* ESAME AMODE 64	     */
 
-
-/* Functions in module vm.c */
-int  diag_devtype (int r1, int r2, REGS *regs);
-int  syncblk_io (int r1, int r2, REGS *regs);
-int  syncgen_io (int r1, int r2, REGS *regs);
-void extid_call (int r1, int r2, REGS *regs);
-int  cpcmd_call (int r1, int r2, REGS *regs);
-void pseudo_timer (U32 code, int r1, int r2, REGS *regs);
-void access_reipl_data (int r1, int r2, REGS *regs);
-int  diag_ppagerel (int r1, int r2, REGS *regs);
 
 /* Functions in module timer.c */
 void update_TOD_clock (void);

@@ -1,4 +1,4 @@
-/* CKDDASD.C    (c) Copyright Roger Bowler, 1999-2000                */
+/* CKDDASD.C    (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 CKD Direct Access Storage Device Handler     */
 
 /*-------------------------------------------------------------------*/
@@ -88,6 +88,31 @@
 #define CKDORIENT_COUNT         2       /* Oriented after count field*/
 #define CKDORIENT_KEY           3       /* Oriented after key field  */
 #define CKDORIENT_DATA          4       /* Oriented after data field */
+
+/* Path state byte for Sense Path Group ID command */
+#define SPG_PATHSTAT            0xC0    /* Pathing status bits...    */
+#define SPG_PATHSTAT_RESET      0x00    /* ...reset                  */
+#define SPG_PATHSTAT_RESV       0x40    /* ...reserved bit setting   */
+#define SPG_PATHSTAT_UNGROUPED  0x80    /* ...ungrouped              */
+#define SPG_PATHSTAT_GROUPED    0xC0    /* ...grouped                */
+#define SPG_PARTSTAT            0x30    /* Partitioning status bits..*/
+#define SPG_PARTSTAT_IENABLED   0x00    /* ...implicitly enabled     */
+#define SPG_PARTSTAT_RESV       0x10    /* ...reserved bit setting   */
+#define SPG_PARTSTAT_DISABLED   0x20    /* ...disabled               */
+#define SPG_PARTSTAT_XENABLED   0x30    /* ...explicitly enabled     */
+#define SPG_PATHMODE            0x08    /* Path mode bit...          */
+#define SPG_PATHMODE_SINGLE     0x00    /* ...single path mode       */
+#define SPG_PATHMODE_RESV       0x08    /* ...reserved bit setting   */
+#define SPG_RESERVED            0x07    /* Reserved bits, must be 0  */
+
+/* Function control byte for Set Path Group ID command */
+#define SPG_SET_MULTIPATH       0x80    /* Set multipath mode        */
+#define SPG_SET_COMMAND         0x60    /* Set path command bits...  */
+#define SPG_SET_ESTABLISH       0x00    /* ...establish group        */
+#define SPG_SET_DISBAND         0x20    /* ...disband group          */
+#define SPG_SET_RESIGN          0x40    /* ...resign from group      */
+#define SPG_SET_COMMAND_RESV    0x60    /* ...reserved bit setting   */
+#define SPG_SET_RESV            0x1F    /* Reserved bits, must be 0  */
 
 /*-------------------------------------------------------------------*/
 /* Bit definitions for Diagnostic Control subcommand byte            */
@@ -302,6 +327,12 @@ int             cckd=0;                 /* 1 if compressed CKD       */
                 return -1;
             }
         }
+
+        /* If `readonly' and shadow files (`sf=') were specified,
+           then turn off the readonly bit.  Might as well make
+           sure the `fakewrite' bit is off, too.               */
+        if (dev->ckdsfn[0] != '\0')
+            dev->ckdrdonly = dev->ckdfakewrt = 0;
 
         /* If shadow file, only one base file is allowed */
         if (fileseq > 1 && dev->ckdsfn[0] != '\0')
@@ -669,6 +700,9 @@ int             cckd=0;                 /* 1 if compressed CKD       */
     dev->devchar[56] = 0xFF;	// real CU type code
     dev->devchar[57] = 0xFF;	// real device type code
     dev->numdevchar = 64;
+
+    /* Clear the DPA */
+    memset(dev->pgid, 0, sizeof(dev->pgid));
 
     /* Activate I/O tracing */
 //  dev->ccwtrace = 1;
@@ -1429,8 +1463,15 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
            command; or if this is the second end of track in this
            channel program without an intervening read of the home
            address or data area and without an intervening write,
-           sense, or control command */
-        if (code == 0x47 || code == 0x9D || dev->ckdxmark)
+
+           sense, or control command --
+           -- except when multitrack READ or SEARCH [KEY?] command
+           operates outside the domain of a locate record */
+        if (code == 0x47 || code == 0x9D
+            || (dev->ckdxmark
+                && !((dev->ckdlcount == 0)
+                     && ( (IS_CCW_READ(code) && (code&0x80))
+                         || code==0xA9 || code==0xC9 || code==0xE9) )))
         {
             ckd_build_sense (dev, 0, SENSE1_NRF, 0, 0, 0);
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -1639,7 +1680,7 @@ int             skiplen;                /* Number of bytes to skip   */
 
     /* Check that there is enough space on the current track to
        contain the complete erase plus an end of track marker */
-    if (curpos + ckdlen + 8 >= nxtpos)
+    if (curpos + ckdlen + 8 >= (unsigned long)nxtpos)
     {
         /* Unit check with invalid track format */
         ckd_build_sense (dev, 0, SENSE1_ITF, 0, 0, 0);
@@ -1753,7 +1794,7 @@ int             skiplen;                /* Number of bytes to skip   */
 
     /* Check that there is enough space on the current track to
        contain the complete record plus an end of track marker */
-    if (curpos + ckdlen + 8 >= nxtpos)
+    if (curpos + ckdlen + 8 >= (unsigned long)nxtpos)
     {
         /* Unit check with invalid track format */
         ckd_build_sense (dev, 0, SENSE1_ITF, 0, 0, 0);
@@ -2026,7 +2067,8 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
 
     /* Reset index marker flag if sense or control command,
        or any write command (other search ID or search key),
-       or any read command except read sector */
+       or any read command except read sector --
+       -- and except single track Read Count */
     if (IS_CCW_SENSE(code) || IS_CCW_CONTROL(code)
         || (IS_CCW_WRITE(code)
             && (code & 0x7F) != 0x31
@@ -2036,6 +2078,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             && (code & 0x7F) != 0x49
             && (code & 0x7F) != 0x69)
         || (IS_CCW_READ(code)
+            &&  code         != 0x12
             && (code & 0x7F) != 0x22))
         dev->ckdxmark = 0;
 
@@ -2103,7 +2146,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         dev->ckdpos = num;
 
         /* Return unit exception if data length is zero */
-        if (dev->ckdcurdl == 0 && count != 0)
+        if (dev->ckdcurdl == 0)
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
         else
             *unitstat = CSW_CE | CSW_DE;
@@ -2236,7 +2279,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         dev->ckdpos = num;
 
         /* Return unit exception if data length is zero */
-        if (dev->ckdcurdl == 0 && count != 0)
+        if (dev->ckdcurdl == 0)
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
         else
             *unitstat = CSW_CE | CSW_DE;
@@ -2338,7 +2381,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         dev->ckdpos = num;
 
         /* Return unit exception if data length is zero */
-        if (dev->ckdcurdl == 0 && count != 0)
+        if (dev->ckdcurdl == 0)
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
         else
             *unitstat = CSW_CE | CSW_DE;
@@ -2485,7 +2528,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         dev->ckdpos = num;
 
         /* Return unit exception if data length is zero */
-        if (dev->ckdcurdl == 0 && count != 0)
+        if (dev->ckdcurdl == 0)
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
         else
             *unitstat = CSW_CE | CSW_DE;
@@ -2716,7 +2759,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         dev->ckdpos = num;
 
         /* Return unit exception if data length is zero */
-        if (dev->ckdcurdl == 0 && count != 0)
+        if (dev->ckdcurdl == 0)
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
         else
             *unitstat = CSW_CE | CSW_DE;
@@ -3418,7 +3461,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         } /* end if(ckdlcount) */
 
         /* If data length is zero, terminate with unit exception */
-        if (dev->ckdcurdl == 0 && count != 0)
+        if (dev->ckdcurdl == 0)
         {
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
             break;
@@ -3504,7 +3547,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         }
 
         /* If data length is zero, terminate with unit exception */
-        if (dev->ckdcurdl == 0 && count != 0)
+        if (dev->ckdcurdl == 0)
         {
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
             break;
@@ -3615,7 +3658,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         } /* end if(ckdlcount) */
 
         /* If data length is zero, terminate with unit exception */
-        if (dev->ckdcurdl == 0 && count != 0)
+        if (dev->ckdcurdl == 0)
         {
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
             break;
@@ -3701,7 +3744,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         }
 
         /* If data length is zero, terminate with unit exception */
-        if (dev->ckdcurdl == 0 && count != 0)
+        if (dev->ckdcurdl == 0)
         {
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
             break;
@@ -4580,6 +4623,56 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
 
         /* Copy device identifier bytes to channel I/O buffer */
         memcpy (iobuf, dev->devid, num);
+
+        /* Return unit status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0x34:
+    /*---------------------------------------------------------------*/
+    /* SENSE PATH GROUP ID                                           */
+    /*---------------------------------------------------------------*/
+
+        /* Calculate residual byte count */
+        num = (count < 12) ? count : 12;
+        *residual = count - num;
+        if (count < 12) *more = 1;
+
+        /* Byte 0 is the path group state byte */
+        iobuf[0] = SPG_PATHSTAT_RESET
+                | SPG_PARTSTAT_IENABLED
+                | SPG_PATHMODE_SINGLE;
+
+        /* Bytes 1-11 contain the path group identifier */
+        memcpy (iobuf+1, dev->pgid, 11);
+
+        /* Return unit status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0xAF:
+    /*---------------------------------------------------------------*/
+    /* SET PATH GROUP ID                                             */
+    /*---------------------------------------------------------------*/
+
+        /* Calculate residual byte count */
+        num = (count < 12) ? count : 12;
+        *residual = count - num;
+
+        /* Control information length must be at least 12 bytes */
+        if (count < 12)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Byte 0 is the path group state byte */
+        if ((iobuf[0] & SPG_SET_COMMAND) == SPG_SET_ESTABLISH)
+        {
+            /* Bytes 1-11 contain the path group identifier */
+            memcpy (dev->pgid, iobuf+1, 11);
+        }
 
         /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;

@@ -69,7 +69,7 @@
     }
 
 
-typedef __attribute__ ((regparm(3))) void (*zz_func) (BYTE inst[], int execflag, REGS *regs);
+typedef ATTR_REGPARM(3) void (*zz_func) (BYTE inst[], int execflag, REGS *regs);
 
 extern zz_func opcode_table[][GEN_MAXARCH];
 extern zz_func opcode_01xx[][GEN_MAXARCH];
@@ -148,7 +148,7 @@ int used; \
     if(!used) \
     { \
 	logmsg("First use: "); \
-	display_inst ((_regs), (_inst)); \
+	ARCH_DEP(display_inst) ((_regs), (_inst)); \
     } \
 }
 
@@ -201,13 +201,17 @@ int used; \
 	if( (_value) & 7 ) \
 	    ARCH_DEP(program_interrupt)( (_regs), PGM_SPECIFICATION_EXCEPTION)
 
+#define QW_CHECK(_value, _regs) \
+	if( (_value) & 15 ) \
+	    ARCH_DEP(program_interrupt)( (_regs), PGM_SPECIFICATION_EXCEPTION)
+
 #if defined(FEATURE_BASIC_FP_EXTENSIONS)
 
 	/* Program check if r1 is not 0, 2, 4, or 6 */
 #define HFPREG_CHECK(_r, _regs) \
 	if( !((_regs)->CR(0) & CR0_AFP) ) { \
 	    if( (_r) & 9 ) { \
-		_regs->TEA = 1; \
+                (_regs)->dxc = DXC_AFP_REGISTER; \
 		ARCH_DEP(program_interrupt)( (_regs), PGM_DATA_EXCEPTION); \
 	    } \
 	}
@@ -216,7 +220,7 @@ int used; \
 #define HFPREG2_CHECK(_r1, _r2, _regs) \
 	if( !((_regs)->CR(0) & CR0_AFP) ) { \
 	    if( ((_r1) & 9) || ((_r2) & 9) ) { \
-		_regs->TEA = 1; \
+                (_regs)->dxc = DXC_AFP_REGISTER; \
 		ARCH_DEP(program_interrupt)( (_regs), PGM_DATA_EXCEPTION); \
 	    } \
 	}
@@ -227,7 +231,7 @@ int used; \
 	    ARCH_DEP(program_interrupt)( (_regs), PGM_SPECIFICATION_EXCEPTION); \
 	else if( !((_regs)->CR(0) & CR0_AFP) ) { \
 	    if( (_r) & 9 ) { \
-		_regs->TEA = 1; \
+                (_regs)->dxc = DXC_AFP_REGISTER; \
 		ARCH_DEP(program_interrupt)( (_regs), PGM_DATA_EXCEPTION); \
 	    } \
 	}
@@ -238,7 +242,7 @@ int used; \
 	    ARCH_DEP(program_interrupt)( (_regs), PGM_SPECIFICATION_EXCEPTION); \
 	else if( !((_regs)->CR(0) & CR0_AFP) ) { \
 	    if( ((_r1) & 9) || ((_r2) & 9) ) { \
-		_regs->TEA = 1; \
+                (_regs)->dxc = DXC_AFP_REGISTER; \
 		ARCH_DEP(program_interrupt)( (_regs), PGM_DATA_EXCEPTION); \
 	    } \
 	}
@@ -286,9 +290,21 @@ int used; \
 	if (((_m) == 2) || ((_m) == 3) || ((_m) & 8)) \
 	    ARCH_DEP(program_interrupt)( (_regs), PGM_SPECIFICATION_EXCEPTION)
 
+#define BFPINST_CHECK(_regs) \
+        if( !((_regs)->CR(0) & CR0_AFP) ) { \
+            (_regs)->dxc = DXC_BFP_INSTRUCTION; \
+            ARCH_DEP(program_interrupt)( (_regs), PGM_DATA_EXCEPTION); \
+        }
+
 #define PRIV_CHECK(_regs) \
 	if( (_regs)->psw.prob ) \
 	    ARCH_DEP(program_interrupt)( (_regs), PGM_PRIVILEGED_OPERATION_EXCEPTION)
+
+#if defined(FEATURE_BINARY_FLOATING_POINT)
+#define BFPREGPAIR2_CHECK(_r1, _r2, _regs) \
+	if( ((_r1) & 2) || ((_r2) & 2) ) \
+	    ARCH_DEP(program_interrupt)( (_regs), PGM_SPECIFICATION_EXCEPTION)
+#endif /* defined(FEATURE_BINARY_FLOATING_POINT) */
 
 
 #if __BYTE_ORDER == __LITTLE_ENDIAN
@@ -339,7 +355,6 @@ int used; \
 		ARCH_DEP(program_interrupt) ((_regs), PGM_SPECIFICATION_EXCEPTION); \
 	    memcpy ((_dest), sysblk.mainstor + (_regs)->AI + \
 				    ((_addr) & PAGEFRAME_BYTEMASK) , 6); \
-	    STORAGE_KEY((_regs)->AI) |= STORKEY_REF; \
 	} \
 	else \
 	    ARCH_DEP(instfetch) ((_dest), (_addr), (_regs)); \
@@ -883,16 +898,21 @@ int used; \
 
 
 #undef SIE_MODE_XC_OPEX
+#undef SIE_MODE_XC_SOPEX
 
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
 
 #define SIE_MODE_XC_OPEX(_regs) \
 	if(((_regs)->sie_state && ((_regs)->siebk->mx & SIE_MX_XC))) \
 	    ARCH_DEP(program_interrupt)((_regs), PGM_OPERATION_EXCEPTION)
+#define SIE_MODE_XC_SOPEX(_regs) \
+	if(((_regs)->sie_state && ((_regs)->siebk->mx & SIE_MX_XC))) \
+	    ARCH_DEP(program_interrupt)((_regs), PGM_SPECIAL_OPERATION_EXCEPTION)
 
 #else /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
 
 #define SIE_MODE_XC_OPEX(_regs)
+#define SIE_MODE_XC_SOPEX(_regs)
 
 #endif /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
 
@@ -1048,7 +1068,9 @@ int used; \
 
 /* Functions in module channel.c */
 int  ARCH_DEP(startio) (DEVBLK *dev, ORB *orb); 	       /*@IZW*/
-void *ARCH_DEP(execute_ccw_chain) (DEVBLK *dev);
+void *s370_execute_ccw_chain (DEVBLK *dev);
+void *s390_execute_ccw_chain (DEVBLK *dev);
+void *z900_execute_ccw_chain (DEVBLK *dev);
 int  stchan_id (REGS *regs, U16 chan);
 int  testch (REGS *regs, U16 chan);
 int  testio (REGS *regs, DEVBLK *dev, BYTE ibyte);
@@ -1057,23 +1079,24 @@ void clear_subchan (REGS *regs, DEVBLK *dev);
 int  halt_subchan (REGS *regs, DEVBLK *dev);
 int  haltio (REGS *regs, DEVBLK *dev, BYTE ibyte);
 int  resume_subchan (REGS *regs, DEVBLK *dev);
-int  ARCH_DEP(present_io_interrupt) (REGS *regs, U32 *ioid, U32 *ioparm,
-	BYTE *csw);
+int  ARCH_DEP(present_io_interrupt) (REGS *regs, U32 *ioid,
+        U32 *ioparm, U32 *iointid, BYTE *csw);
 void io_reset (void);
 int  device_attention (DEVBLK *dev, BYTE unitstat);
 int  ARCH_DEP(device_attention) (DEVBLK *dev, BYTE unitstat);
 
 
 /* Functions in module cpu.c */
-void ARCH_DEP(store_psw) (REGS *regs, BYTE *addr);
 #if defined(_FEATURE_SIE)
+void s370_store_psw (REGS *regs, BYTE *addr);
 int  s370_load_psw (REGS *regs, BYTE *addr);
-#endif /*!defined(_FEATURE_SIE)*/
+#endif /*defined(_FEATURE_SIE)*/
 #if defined(_FEATURE_ZSIE)
 int  s390_load_psw (REGS *regs, BYTE *addr);
-#endif /*!defined(_FEATURE_ZSIE)*/
+void s390_store_psw (REGS *regs, BYTE *addr);
+#endif /*defined(_FEATURE_ZSIE)*/
+void ARCH_DEP(store_psw) (REGS *regs, BYTE *addr);
 int  ARCH_DEP(load_psw) (REGS *regs, BYTE *addr);
-
 #if defined(_FEATURE_SIE)
 void s370_program_interrupt (REGS *regs, int code);
 #endif /*!defined(_FEATURE_SIE)*/
@@ -1084,6 +1107,17 @@ void ARCH_DEP(program_interrupt) (REGS *regs, int code);
 void *cpu_thread (REGS *regs);
 void store_psw (REGS *regs, BYTE *addr);
 void display_psw (REGS *regs);
+
+
+/* Functions in module vm.c */
+int  ARCH_DEP(diag_devtype) (int r1, int r2, REGS *regs);
+int  ARCH_DEP(syncblk_io) (int r1, int r2, REGS *regs);
+int  ARCH_DEP(syncgen_io) (int r1, int r2, REGS *regs);
+void ARCH_DEP(extid_call) (int r1, int r2, REGS *regs);
+int  ARCH_DEP(cpcmd_call) (int r1, int r2, REGS *regs);
+void ARCH_DEP(pseudo_timer) (U32 code, int r1, int r2, REGS *regs);
+void ARCH_DEP(access_reipl_data) (int r1, int r2, REGS *regs);
+int  ARCH_DEP(diag_ppagerel) (int r1, int r2, REGS *regs);
 
 
 /* Functions in module diagnose.c */
@@ -1099,9 +1133,9 @@ void ARCH_DEP(diag204_call) (int r1, int r2, REGS *regs);
 
 /* Functions in module external.c */
 void ARCH_DEP(perform_external_interrupt) (REGS *regs);
-void ARCH_DEP(store_status) (REGS *ssreg, U32 aaddr);
+void ARCH_DEP(store_status) (REGS *ssreg, RADR aaddr);
 void synchronize_broadcast (REGS *regs, U32 *type);
-void store_status (REGS *ssreg, U32 aaddr);
+void store_status (REGS *ssreg, U64 aaddr);
 
 
 /* Functions in module ipl.c */
@@ -1117,6 +1151,10 @@ int  ARCH_DEP(present_mck_interrupt) (REGS *regs, U64 *mcic, U32 *xdmg,
 	RADR *fsta);
 U32  channel_report (void);
 void machine_check_crwpend (void);
+
+
+/* Functions in module panel.c */
+void ARCH_DEP(display_inst) (REGS *regs, BYTE *inst);
 
 
 /* Functions in module sie.c */
@@ -1141,7 +1179,7 @@ void ARCH_DEP(stack_modify) (VADR lsea, U32 m1, U32 m2, REGS *regs);
 void ARCH_DEP(stack_extract) (VADR lsea, int r1, int code, REGS *regs);
 void ARCH_DEP(unstack_registers) (int gtype, VADR lsea, int r1,
 	int r2, REGS *regs);
-int  ARCH_DEP(program_return_unstack) (REGS *regs, U32 *lsedap);
+int  ARCH_DEP(program_return_unstack) (REGS *regs, RADR *lsedap);
 
 
 /* Functions in module trace.c */
@@ -1151,6 +1189,57 @@ CREG  ARCH_DEP(trace_ssar) (U16 sasn, REGS *regs);
 CREG  ARCH_DEP(trace_pc) (U32 pcnum, REGS *regs);
 CREG  ARCH_DEP(trace_pr) (REGS *newregs, REGS *regs);
 CREG  ARCH_DEP(trace_pt) (U16 pasn, GREG gpr2, REGS *regs);
+
+
+/* Functions in module plo.c */
+int ARCH_DEP(plo_cl) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_clg) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_clgr) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_clx) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_cs) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_csg) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_csgr) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_csx) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_dcs) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_dcsg) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_dcsgr) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_dcsx) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_csst) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_csstg) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_csstgr) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_csstx) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_csdst) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_csdstg) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_csdstgr) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_csdstx) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_cstst) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_cststg) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_cststgr) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
+int ARCH_DEP(plo_cststx) (int r1, int r3, VADR effective_addr2, int b2,
+                            VADR effective_addr4, int b4,  REGS *regs);
 
 
 /* Instruction functions in opcode.c */
@@ -1576,12 +1665,21 @@ DEF_INST(ses_opcode_B2F6);
 
 
 /* Instructions in esame.c */
-DEF_INST(store_floating_point_control_register);
-DEF_INST(load_floating_point_control_register);
-DEF_INST(set_floating_point_control_register);
+DEF_INST(store_fpc);
+DEF_INST(load_fpc);
+DEF_INST(set_fpc);
+DEF_INST(extract_fpc);
+DEF_INST(set_rounding_mode);
 DEF_INST(trap2);
 DEF_INST(trap4);
 DEF_INST(resume_program);
+DEF_INST(trace_long);
+DEF_INST(convert_to_binary_long);
+DEF_INST(convert_to_decimal_long);
+DEF_INST(multiply_logical);
+DEF_INST(multiply_logical_long);
+DEF_INST(multiply_logical_register);
+DEF_INST(multiply_logical_long_register);
 DEF_INST(divide_logical);
 DEF_INST(divide_logical_long);
 DEF_INST(divide_logical_register);
@@ -1696,6 +1794,7 @@ DEF_INST(load_negative_long_fullword_register);
 DEF_INST(load_and_test_long_fullword_register);
 DEF_INST(load_complement_long_fullword_register);
 DEF_INST(load_long_fullword);
+DEF_INST(load_long_halfword);
 DEF_INST(compare_long_fullword);
 DEF_INST(load_logical_long_fullword_register);
 DEF_INST(load_logical_long_fullword);
@@ -1728,5 +1827,61 @@ DEF_INST(pack_ascii);
 DEF_INST(pack_unicode);
 DEF_INST(unpack_ascii);
 DEF_INST(unpack_unicode);
+
+
+/* Instructions in ieee.c */
+DEF_INST(add_bfp_ext_reg);
+DEF_INST(add_bfp_long_reg);
+DEF_INST(add_bfp_long);
+DEF_INST(add_bfp_short_reg);
+DEF_INST(add_bfp_short);
+DEF_INST(compare_bfp_ext_reg);
+DEF_INST(compare_bfp_long_reg);
+DEF_INST(compare_bfp_long);
+DEF_INST(compare_bfp_short_reg);
+DEF_INST(compare_bfp_short);
+DEF_INST(compare_and_signal_bfp_ext_reg);
+DEF_INST(compare_and_signal_bfp_long_reg);
+DEF_INST(compare_and_signal_bfp_long);
+DEF_INST(compare_and_signal_bfp_short_reg);
+DEF_INST(compare_and_signal_bfp_short);
+DEF_INST(convert_fix32_to_bfp_long_reg);
+DEF_INST(convert_fix32_to_bfp_short_reg);
+DEF_INST(convert_bfp_long_to_fix32_reg);
+DEF_INST(convert_bfp_short_to_fix32_reg);
+DEF_INST(divide_bfp_ext_reg);
+DEF_INST(divide_bfp_long_reg);
+DEF_INST(divide_bfp_long);
+DEF_INST(divide_bfp_short_reg);
+DEF_INST(divide_bfp_short);
+DEF_INST(extract_floating_point_control_register);
+DEF_INST(load_and_test_bfp_ext_reg);
+DEF_INST(load_and_test_bfp_long_reg);
+DEF_INST(load_and_test_bfp_short_reg);
+DEF_INST(loadlength_bfp_short_to_long_reg);
+DEF_INST(loadlength_bfp_short_to_long);
+DEF_INST(load_negative_bfp_ext_reg);
+DEF_INST(load_negative_bfp_long_reg);
+DEF_INST(load_negative_bfp_short_reg);
+DEF_INST(load_positive_bfp_ext_reg);
+DEF_INST(load_positive_bfp_long_reg);
+DEF_INST(load_positive_bfp_short_reg);
+DEF_INST(round_bfp_long_to_short_reg);
+DEF_INST(multiply_bfp_ext_reg);
+DEF_INST(multiply_bfp_long_reg);
+DEF_INST(multiply_bfp_long);
+DEF_INST(multiply_bfp_short_reg);
+DEF_INST(multiply_bfp_short);
+DEF_INST(squareroot_bfp_ext_reg);
+DEF_INST(squareroot_bfp_long_reg);
+DEF_INST(squareroot_bfp_long);
+DEF_INST(squareroot_bfp_short_reg);
+DEF_INST(squareroot_bfp_short);
+DEF_INST(subtract_bfp_ext_reg);
+DEF_INST(subtract_bfp_long_reg);
+DEF_INST(subtract_bfp_long);
+DEF_INST(subtract_bfp_short_reg);
+DEF_INST(subtract_bfp_short);
+
 
 /* end of OPCODE.H */

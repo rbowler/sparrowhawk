@@ -1,6 +1,6 @@
 /* VSTORE.C */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 #include "hercules.h"
 
@@ -14,10 +14,6 @@
 
 #if !defined(_GEN_ARCH)
 
-// #define  _GEN_ARCH 964
-// #include "vstore.c"
-
-// #undef   _GEN_ARCH
 #define  _GEN_ARCH 390
 #include "vstore.c"
 

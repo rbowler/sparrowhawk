@@ -1,7 +1,7 @@
 /* XSTORE.C   Expanded storage related instructions - Jan Jaeger     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 
 /* MVPG moved from cpu.c to xstore.c   05/07/00 Jan Jaeger */
 
@@ -63,8 +63,8 @@ U32     xaddr;                          /* Expanded storage address  */
     xaddr <<= XSTORE_PAGESHIFT;
 
     /* Obtain abs address, verify access and set ref/change bits */
-    maddr = ARCH_DEP(logical_to_abs) (regs->GR_L(r1) & ADDRESS_MAXWRAP(regs),
-         USE_REAL_ADDR, regs, ACCTYPE_WRITE, regs->psw.pkey);
+    maddr = ARCH_DEP(logical_to_abs) (regs->GR(r1) & ADDRESS_MAXWRAP(regs),
+         USE_REAL_ADDR, regs, ACCTYPE_WRITE, 0);
     maddr &= XSTORE_PAGEMASK;
 
     /* Copy data from expanded to main */
@@ -128,7 +128,7 @@ U32     xaddr;                          /* Expanded storage address  */
     xaddr <<= XSTORE_PAGESHIFT;
 
     /* Obtain abs address, verify access and set ref/change bits */
-    maddr = ARCH_DEP(logical_to_abs) (regs->GR_L(r1) & ADDRESS_MAXWRAP(regs),
+    maddr = ARCH_DEP(logical_to_abs) (regs->GR(r1) & ADDRESS_MAXWRAP(regs),
          USE_REAL_ADDR, regs, ACCTYPE_READ, regs->psw.pkey);
     maddr &= XSTORE_PAGEMASK;
 
@@ -224,6 +224,8 @@ BYTE    akey1, akey2;                   /* Access keys for operands  */
 BYTE    xpkey1, xpkey2;                 /* Expanded storage keys     */
 
     RRE(inst, execflag, regs, r1, r2);
+
+    SIE_INTERCEPT(regs);
 
     /* Specification exception if register 0 bits 16-19 are
        not all zero, or if bits 20 and 21 are both ones */
@@ -413,10 +415,6 @@ mvpg_progck:
 
 #if !defined(_GEN_ARCH)
 
-// #define  _GEN_ARCH 964
-// #include "xstore.c"
-
-// #undef   _GEN_ARCH
 #define  _GEN_ARCH 390
 #include "xstore.c"
 

@@ -22,6 +22,14 @@
  #endif
 #endif
 
+/* _FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE is used for host 
+   related processing issues, FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE
+   is defined only in ESA/390 mode. MCDS is an ESA/390
+   feature that is supported under z/Architecture SIE */
+#if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+ #define _FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE
+#endif
+
 #if defined(FEATURE_2K_STORAGE_KEYS) \
  && defined(FEATURE_4K_STORAGE_KEYS)
  #define _FEATURE_2K_STORAGE_KEYS
@@ -35,6 +43,24 @@
  #define _FEATURE_VECTOR_FACILITY
 #endif
 
+#if defined(FEATURE_HARDWARE_LOADER)
+ #define _FEATURE_HARDWARE_LOADER
+#endif
+
+#if defined(FEATURE_CHANNEL_SUBSYSTEM)
+ #define _FEATURE_CHANNEL_SUBSYSTEM
+#endif
+
+#if defined(FEATURE_EXPANDED_STORAGE)
+ #define _FEATURE_EXPANDED_STORAGE
+#endif
+
+/* When ESAME is installed then all instructions
+   marked N3 in the reference are also available
+   in ESA/390 mode */
+#if defined(FEATURE_ESAME_INSTALLED)
+ #define FEATURE_ESAME_N3_ESA390
+#endif /*defined(FEATURE_ESAME_INSTALLED)*/
 
 #if defined(_FEATURE_SIE) && defined(FEATURE_STORAGE_KEY_ASSIST)
  #define _FEATURE_STORAGE_KEY_ASSIST
@@ -70,6 +96,11 @@
  #error Expanded storage cannot be defined with 2K storage keys
 #endif
 
+#if ( defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME) ) \
+ && defined(FEATURE_VECTOR_FACILITY)
+ #error Vector Facility not supported on ESAME capable processors
+#endif
+ 
 #if defined(FEATURE_MOVE_PAGE_FACILITY_2) \
  && !defined(FEATURE_4K_STORAGE_KEYS)
  #error Move page facility cannot be defined with 2K storage keys
@@ -85,6 +116,11 @@
  #error MCDS requires storage key assist
 #endif
 
+#if defined(FEATURE_SIE) && defined(FEATURE_ESAME) \
+ && !defined(FEATURE_STORAGE_KEY_ASSIST)
+ #error ESAME SIE requires storage key assist
+#endif
+
 #if defined(FEATURE_STORAGE_KEY_ASSIST) \
  && !defined(FEATURE_INTERPRETIVE_EXECUTION)
  #error Storage Key assist only supported with SIE
@@ -96,8 +132,13 @@
 #endif
 
 #if defined(FEATURE_BINARY_FLOATING_POINT) \
- && !defined(FEATURE_BASIC_FP_EXTENSIONS)
- #error Binary floating point requires basic FP extensions
+ && defined(OPTION_NO_IEEE_SUPPORT)
+ #undef FEATURE_BINARY_FLOATING_POINT
+#endif
+
+#if defined(FEATURE_BASIC_FP_EXTENSIONS) \
+ && !defined(FEATURE_HEXADECIMAL_FLOATING_POINT)
+ #error Basic FP extensions requires hexadecimal floating point
 #endif
 
 #if !defined(FEATURE_BASIC_FP_EXTENSIONS)

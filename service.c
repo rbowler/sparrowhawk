@@ -150,7 +150,19 @@ typedef struct _SCCB_SCP_INFO {
         BYTE    numcrl;                 /* Max #of copy and reassign
                                            list elements allowed     */
         FWORD   etrtol;                 /* ETR sync check tolerance  */
-        BYTE    resv8[32];              /* Reserved                  */
+        BYTE    resv60[3];
+        BYTE    maxvm;                  /* Max guest storage size   
+                                           >= 31 and <= 64 (2**pow)-1
+                                           is the max supported 
+                                           guest real size. 0 means
+                                           not constrained.          */
+        FWORD   grzm;                   /* Addess increment size in
+                                           units of 1M, valid only 
+                                           if realiszm is zero       */
+        DWORD   grnmx;                  /* Maximum increment number
+                                           when it is larger then 
+                                           64K or when ESAME is on   */
+        BYTE    resv8[16];              /* Reserved                  */
     } SCCB_SCP_INFO;
 
 /* Bit definitions for installed facilities */
@@ -176,7 +188,9 @@ typedef struct _SCCB_SCP_INFO {
 #define SCCB_IFM2_COPY_AND_REASSIGN_STORAGE_LIST        0x01
 #define SCCB_IFM3_VECTOR_FEATURE_RECONFIG               0x80
 #define SCCB_IFM3_READ_WRITE_EVENT_FEATURE              0x40
+#define SCCB_IFM3_EXTENDED_STORAGE_USABILITY_MAP_EXT    0x20
 #define SCCB_IFM3_READ_RESOURCE_GROUP_INFO              0x08
+#define SCCB_IFM4_READ_STORAGE_STATUS                   0x80
 
 /* Bit definitions for configuration characteristics */
 #define SCCB_CFG0_LOGICALLY_PARTITIONED                 0x80
@@ -479,7 +493,7 @@ void scp_command (BYTE *command, int priomsg)
 
     /* If a service signal is pending then reject the command
        with message indicating that service processor is busy */
-    if (sysblk.servsig)
+    if (IS_IC_SERVSIG)
     {
         logmsg ("HHC706I Service Processor busy\n");
 
@@ -497,7 +511,7 @@ void scp_command (BYTE *command, int priomsg)
 
     /* Set service signal interrupt pending for read event data */
     sysblk.servparm = 1;
-    sysblk.extpending = sysblk.servsig = 1;
+    ON_IC_SERVSIG;
     signal_condition (&sysblk.intcond);
 
     /* Release the interrupt lock */
@@ -609,10 +623,11 @@ int servpendok = 0;
     do {
         sleep(1);
         obtain_lock(&sysblk.intlock);
-        if(!sysblk.servsig)
+        if(!IS_IC_SERVSIG)
         {
             sysblk.servparm = 1;
-            sysblk.extpending = sysblk.servsig = servpendok = 1;
+            ON_IC_SERVSIG;
+            servpendok = 1;
             sysblk.hwl_tid = 0;
             signal_condition (&sysblk.intcond);
         }
@@ -852,7 +867,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
         /* If a service signal is pending then return condition
            code 2 to indicate that service processor is busy */
-        if (sysblk.servsig)
+        if (IS_IC_SERVSIG)
         {
             release_lock (&sysblk.intlock);
             regs->psw.cc = 2;
@@ -902,6 +917,15 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccbscp->realiszm = 1;
         sccbscp->realbszk = 4;
         STORE_HW(sccbscp->realiint, 1);
+
+#if defined(FEATURE_ESAME)
+        /* SIE supports the full address range */
+        sccbscp->maxvm = 0;  
+        /* realiszm is valid */
+        STORE_FW(sccbscp->grzm, 0);
+        /* Number of storage increments installed in esame mode */
+        STORE_DW(sccbscp->grnmx, realmb);
+#endif /*defined(FEATURE_ESAME)*/
 
 #ifdef FEATURE_EXPANDED_STORAGE
         /* Set expanded storage size in SCCB */
@@ -1059,7 +1083,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
             sccbcpu->tod = 0;
             sccbcpu->cpf[0] = 0
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if !defined(FEATURE_ESAME)
                             | SCCB_CPF0_SIE_370_MODE
+#endif /*!defined(FEATURE_ESAME)*/
                             | SCCB_CPF0_SIE_XA_MODE
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 //                          | SCCB_CPF0_SIE_SET_II_370_MODE
@@ -1070,9 +1096,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 #if defined(FEATURE_STORAGE_KEY_ASSIST)
                             | SCCB_CPF0_STORAGE_KEY_ASSIST
 #endif /*defined(FEATURE_STORAGE_KEY_ASSIST)*/
-#if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+#if defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
                             | SCCB_CPF0_MULTIPLE_CONTROLLED_DATA_SPACE
-#endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+#endif /*defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
                             ;
             sccbcpu->cpf[1] = 0
 //                          | SCCB_CPF1_IO_INTERPRETATION_LEVEL_2
@@ -1216,7 +1242,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         memset (sccbcsi, 0, sizeof(SCCB_CSI_INFO));
 
         sccbcsi->csif[0] = 0
-//                      | SCCB_CSI0_CANCEL_IO_REQUEST_FACILITY
+#if defined(FEATURE_CANCEL_IO_FACILITY)
+                        | SCCB_CSI0_CANCEL_IO_REQUEST_FACILITY
+#endif /*defined(FEATURE_CANCEL_IO_FACILITY)*/
                         | SCCB_CSI0_CONCURRENT_SENSE_FACILITY
                         ;
 
@@ -1296,7 +1324,10 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                         message[j] = '\0';
                         if(j > 0)
                             logmsg ("%s\n", message);
-// if(!memcmp(message,"*IEE479W",8)) regs->cpustate = CPUSTATE_STOPPING;
+#if 0
+   if(!memcmp(message," IEA190I",8)) { regs->cpustate = CPUSTATE_STOPPING;
+                                       ON_IC_CPU_NOT_STARTED(regs); }
+#endif
                     }
                 }
                 mcd_len -= obj_len;
@@ -1762,7 +1793,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
     /* Set service signal external interrupt pending */
     sysblk.servparm = sccb_absolute_addr;
-    sysblk.extpending = sysblk.servsig = 1;
+    ON_IC_SERVSIG;
 
     /* Release the interrupt lock */
     release_lock (&sysblk.intlock);
@@ -1776,11 +1807,11 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
 #if !defined(_GEN_ARCH)
 
-// #define  _GEN_ARCH 964
-// #include "service.c"
-
-// #undef   _GEN_ARCH
 #define  _GEN_ARCH 390
+#include "service.c"
+
+#undef   _GEN_ARCH
+#define  _GEN_ARCH 370
 #include "service.c"
 
 #endif /*!defined(_GEN_ARCH)*/

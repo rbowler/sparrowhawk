@@ -1,5 +1,162 @@
+04 May 2001 Correct fbadasd.c syntax error - Greg Smith
+04 May 2001 Correct RRB/RRBE rcpkey - Paul Leisy
+03 May 2001 Try to open FBA emulated device readonly if open for
+            readwrite failed.  Allows Linux/390 to be installed
+            from cdrom - Greg Smith
+03 May 2001 Allow `readonly' to be specified for shadowed ckd or cckd
+            devices.  Base file will be opened O_RDONLY. - Greg Smith
+03 May 2001 Enablement of ISKE/RRBE/SSKE in S/370 mode - Valery Pogonchenko
+03 May 2001 Correction to oldpsw during ifetch - Jan Jaeger
+30 Apr 2001 Correct SIE guest interrupt subclass enablement - Jan Jaeger
+28 Apr 2001 Temporarily intercept move page (SIE) - Jan Jaeger
+28 Apr 2001 Add move page to z/Arch - Jan Jaeger
+28 Apr 2001 Fix RRBE RCP index error - Paul Leisy
+27 Apr 2001 Fix STCM(G) with zero mask - Paul Leisy
+26 Apr 2001 Change unsupported config statements erros to warnings - Jan Jaeger
+26 Apr 2001 Correct old psw during ifetch exception - Paul Leisy
+26 Apr 2001 Correct setting of fetch bit in SSKE under SIE - Paul Leisy
+24 Apr 2001 Fixed ckd2cckd bug for multi-file ckd disks - Greg Smith
+24 Apr 2001 Added error detection code to ckd2cckd and cckd2ckd - Greg Smith
+24 Apr 2001 Fixed potential errors in cckd backwards merge (sf-) - Greg Smith
+24 Apr 2001 Reduced CCKD_MAX_DFWQ_DEPTH to 8 for WIN32 otherwise 32 - Greg Smith
+22 Apr 2001 cckd2ckd not stopping if -cyl specified - Greg Smith
+22 Apr 2001 add ISKE, RRBE and SSKE to 370 mode  - Valery Pogonchenko
+22 Apr 2001 ckd fix Read Count setting index marker - Valery Pogonchenko
+22 Apr 2001 ckd fix processing multitrack read ops - Valery Pogonchenko
+22 Apr 2001 cmpsc fixes for expansion - Greg Smith
+22 Apr 2001 Correct prefix alignment for ESA/390 
+            guest in 64 bit mode SIE - Jan Jaeger
+21 Apr 2001 Added support for muliple files in card reader
+21 Apr 2001 Added support auto-padding of ebcdic files in card reader
+21 Apr 2001 Added support for builtin tun driver of linux kernel 2.4.x
+17 Apr 2001 Fix SSKE rcp guest ref and change bits - Paul Leisy
+18 Apr 2001 Fix CPU TIMER interrupt processing - Jan Jaeger
+17 Apr 2001 Device I/O thread throttling - Greg Smith & Fish
+17 Apr 2001 Fix ISKE rcp index - Paul Leisy
+16 Apr 2001 `-malign-double' removed from makefile - Greg Smith
+16 Apr 2001 Read-track fix reintroduced after being deprecated - Greg Smith
+16 Apr 2001 iobuf in channel.c is now malloc'ed to reduce out of
+            memory errors under Cygwin - Greg Smith
+16 Apr 2001 Reintroduced OPTION_NO_DEVICE_THREAD - Jan Jaeger
+15 Apr 2001 featall.h: #define OPTION_NO_IEEE_SUPPORT for WIN32 builds
+            (<fenv.h> has not been ported by CygWin yet)
+13 Apr 2001 Correction to CVDG - Jan Jaeger
+09 Apr 2001 Fix intlock access in clock and timer routines - Jan Jaeger
+08 Apr 2001 Small optimization of vstore/vfetch - Jan Jaeger
+08 Apr 2001 Correction to SIGP Set Architecture Mode - Jan Jaeger
+08 Apr 2001 Small optimization of TPI - Jan Jaeger
+08 Apr 2001 Correction to SCHM in 64 bit mode - Jan Jaeger
+08 Apr 2001 Correction to TB in amode 64 - Jan Jaeger
+06 Apr 2001 Read-track released dfwlock too soon when track found
+            in dfw queue
+04 Apr 2001 Sense/Set Path Group ID for DASD - Jan Jaeger
+02 Apr 2001 Correction to register unstacking logic - Jan Jaeger
+04 Apr 2001 #define MAX_DEVICE_THREAD_IDLE_SECS 300
+02 Apr 2001 Fixed device_thread race condition in channel.c
+02 Apr 2001 Added support for [Windows] External GUI
+01 Apr 2001 Correction to Lock Page - Jan Jaeger
+28 Mar 2001 Fix nullification problem in form_stack_entry - Jan Jaeger
+27 Mar 2001 Fix exception access id in BSG - Jan Jaeger
+27 Mar 2001 Fix exception access id during subspace replacement - Jan Jaeger
+27 Mar 2001 Fix translation exception address in ESAME mode - Jan Jaeger
+27 Mar 2001 Correction to ckd2cckd for small ckd files - Greg Smith
+25 Mar 2001 Correction to LPQ/STPQ - Jan Jaeger
+25 Mar 2001 Correction to MVCK/MVCP/MVCS - Jan Jaeger
+25 Mar 2001 Dynamic device threads - Jan Jaeger
+23 Mar 2001 Set `unit check' status when EOF CKD record read
+            even if count field is zero - Greg Smith 
+23 Mar 2001 Bypass number of cylinder check in cckdcdsk.c - Greg Smith
+22 Mar 2001 Implement XSTORE in ESAME mode - Jan Jaeger
+22 Mar 2001 Implement fast interrupt processing for MCK and PER - Jan Jaeger
+22 Mar 2001 Correct interruption identification word - Jan Jaeger
+22 Mar 2001 Correct interrupt mask setting in LCTL/LTCLG - Jan Jaeger
+22 Mar 2001 Correct SSM/STOSM spec exc in ESAME mode - Jan Jaeger
+21 Mar 2001 Correct cache invalidation in PR - Greg Smith
+20 Mar 2001 Correction to 64 bit SIGP initial_cpu_reset - Jan Jaeger
+18 Mar 2001 Correction to stack types in ESAME mode - Jan Jaeger
+18 Mar 2001 Correct LRA/LRAG segment table entry address on cc 3 - Jan Jaeger
+18 Mar 2001 Correct address types in move char instructions - Jan Jaeger
+18 Mar 2001 Correct subspace_replace address type - Jan Jaeger
+16 Mar 2001 Fix to allow HET files to reside on read-only media - Leland Lucius
+16 Mar 2001 Fix LPSW in ESAME mode - Jan Jaeger
+15 Mar 2001 Compressed CKD utilities now tolerate VM weirdness - Greg Smith
+15 Mar 2001 Alternate tracks for compressed CKD volumes - Greg Smith
+15 Mar 2001 Utilities display versioning and copyright info - Greg Smith
+15 Mar 2001 Invalidate AEA and AIA cache on SIE entry/exit - Jan Jaeger
+15 Mar 2001 Present device end on terminating console session - Jan Jaeger
+13 Mar 2001 Fix address types in assist/float/ieee instructions - Jan Jaeger
+10 Mar 2001 Stop all CPU's in release_config - Jan Jaeger
+10 Mar 2001 Fix CPU entering manual state on disabled wait - Jan Jaeger
+10 Mar 2001 Various fixes to configurable features logic - Jan Jaeger
+08 Mar 2001 Fix ESAME Add/Subtract/Multiply/Divide
+            when both operands address same register - Jan Jaeger
+07 Mar 2001 Correction to MLG/MLGR - Jan Jaeger
+07 Mar 2001 Add sh panel command - Bernard van der Helm
+07 Mar 2001 Add 9221 power-off diagnose - Jan Jaeger
+05 Mar 2001 Correction to RP - Peter Stammbach
+05 Mar 2001 Correction to DIAG204 - Jan Jaeger
+05 Mar 2001 64 Bit fix to program_return_unstack - Jan Jaeger
+05 Mar 2001 SIE corrections to EPSW and STFL - Jan Jaeger
+05 Mar 2001 ESAME SIE SKA fix for SSKE/RRBE/ISKE - Jan Jaeger
+04 Mar 2001 Multi architecture debug format enhancements - Peter Stammbach
+03 Mar 2001 Correct store_psw during SIE interception - Jan Jaeger
+03 Mar 2001 Correct trap control block - Roger Bowler
+02 Mar 2001 Correction storage key updates by subchannels - Jan Jaeger
+01 Mar 2001 Correction to TRAP2/TRAP4 - Paul Leisy
+01 Mar 2001 Fix restart in ESAME mode - Jan Jaeger
+01 Mar 2001 Correction to SIGP set architecture mode - Jan Jaeger
+01 Mar 2001 SIE guest/host storage mapping corrections - Jan Jaeger
+01 Mar 2001 Multi architecture fix for device threads - Juergen Dobrinski
+28 Feb 2001 Correction to SIE interception parameters - Jan Jaeger
+28 Feb 2001 Move Lock Page logic from dat.h to control.c - Jan Jaeger
+27 Feb 2001 Add instructions marked N3 to ESA/390 - Jan Jaeger
+27 Feb 2001 CVDG/CVBG instructions - Roger Bowler/Jan Jaeger
+26 Feb 2001 Fix CDSG nullification on pagefault - Jan Jaeger
+26 Feb 2001 Modification to 64 bit SIE - Jan Jaeger
+25 Feb 2001 Fix PC/PT ltd origin in 64 bit mode - Jan Jaeger
+25 Feb 2001 Improved interrupt processing - Valery Pogonchenko
+25 Feb 2001 Fix private space bit to apply to real spaces - Jan Jaeger
+25 Feb 2001 Add (incomplete) TRACG instruction - Jan Jaeger
+25 Feb 2001 Correction to access register unstacking - Peter Stammbach
+24 Feb 2001 Correction to 64bit IDAW's - Peter Stammbach
+24 Feb 2001 cckd patches  - Greg Smith
+24 Feb 2001 Incorrect-Length-Indication-Suppression facility - Jan Jaeger
+24 Feb 2001 Correction to interval timer Fix 
+22 Feb 2001 S/370 interval timer fixes - Mark Gaubatz
+22 Feb 2001 64 bit Interpretive Execution (SIE) - Jan Jaeger
+22 Feb 2001 Corrections to load_psw and store_psw - Jan Jaeger
+22 Feb 2001 Improved address wrapping - Leland Lucius
+20 Feb 2001 64 bit opcodes for PLO - Jan Jaeger
+19 Feb 2001 Correction IPTE - Jan Jaeger
+17 Feb 2001 Corrections to ISKE/IVSK/LCTL/RRBE/STCTL - Roger Bowler
+16 Feb 2001 Fix ITF problem on 3390 compressed DASD - Greg Smith
+16 Feb 2001 Fix to interception for paging exceptions in SIE - Paul Leisly
+16 Feb 2001 IEEE float - Willem Konynenberg
+16 Feb 2001 Further 64 bit panel updates - Roger Bowler
+16 Feb 2001 Fix to LRA/LRAG - Roger Bowler
+15 Feb 2001 64 bit fixes for CKSM, CLCLE, CUSE, CUUTF, CUTFU, TRE - Jan Jaeger
+15 Feb 2001 Call s390_load_psw in LPSW in ESAME mode - Jan Jaeger
+15 Feb 2001 Additional checking in load_psw in ESAME mode - Roger Bowler
+14 Feb 2001 LPM fixes and display subchannel command - Nobumichi Kozawa
+14 Feb 2001 64 bit support for panel.c - Roger Bowler
+14 Feb 2001 Fix amode64 in load_psw - Ulrich Weigand
+14 Feb 2001 64 bit correction to SRST - Jan Jaeger
+14 Feb 2001 Correction to DL - Jan Jaeger
+13 Feb 2001 Fix RLL/RLLG - Jan Jaeger
+13 Feb 2001 Multiply logical (ML/MLR/MLG/MLGR) instructions - Vic Cross
+13 Feb 2001 Correction to DL - Vic Cross
+13 Feb 2001 Corrections to BRXHG and BRXLG - Jan Jaeger
+13 Feb 2001 Add LGH instruction - Jan Jaeger
+13 Feb 2001 Patch machine check for z/Arch compliance - Jan Jaeger
+12 Feb 2001 Patch store status for z/Arch compliance - Jan Jaeger
+11 Feb 2001 Correction to LRAG - Jan Jaeger
+11 Feb 2001 Allow use of environment variables to override filenames
+            of hercules.rc hercules.cnf and hercifc - Jan Jaeger
+11 Feb 2001 Various floating additions inclusing EFPC/SRNM 
+            instructions, and data exception code specs - Roger Bowler
+11 Feb 2001 Correction to pgmint instruction nullification - Jan Jaeger
+10 Feb 2001 NLS support - Roger Bowler
 09 Feb 2001 LFPC/SFPC/STFPC IEEE floating point instructions - Jan Jaeger
-09 Feb 2001 Fixes to CMPSC - Bernard van der Helm
 09 Feb 2001 Extended translation fac. 2 (PKA/PKU/UNPKA/UNPKU) - Roger Bowler
 09 Feb 2001 Divide logical (DL/DLR/DLG/DLGR) instructions - Vic Cross
 09 Feb 2001 Display instruction operands - Roger Bowler
@@ -221,7 +378,7 @@
             (by Ronen Tzur)
 18 Jun 2000 New dasdls command lists the VTOC of a CKD DASD volume
             (by Malcolm Beattie)
-18 Jun 2000 New AWSTAPE handling commands: tapesplit, tapemap (by Jay Maynard)
+18 Jun 2000 New AWSTAPE handling commands: tapesplt, tapemap (by Jay Maynard)
 18 Jun 2000 make install target to install in /usr/bin (by Jay Maynard)
 03 Jun 2000 Still more multiprocessor improvements (by Jan Jaeger)
 03 Jun 2000 Dynamic CPU reconfiguration (by Jan Jaeger)

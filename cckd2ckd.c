@@ -34,6 +34,12 @@ void swapend2 (unsigned char *);
 BYTE eighthexFF[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 int          errs = 0;
 
+#ifdef EXTERNALGUI
+/* Special flag to indicate whether or not we're being
+   run under the control of the external GUI facility. */
+int  extgui = 0;
+#endif /*EXTERNALGUI*/
+
 /*-------------------------------------------------------------------*/
 /* Build a ckd file from a compressed ckd file                       */
 /*-------------------------------------------------------------------*/
@@ -72,8 +78,20 @@ int             quiet=0;                /* Don't display status      */
 int             valid=1;                /* Validate track images     */
 int             swapend=0;              /* Need to swap byte order   */
 int             maxerrs=5;              /* Max errors allowed        */
+int             limited=0;              /* 1=Limit cyls copied       */
+
+    /* Display the program identification message */
+    display_version (stderr, "Hercules cckd to ckd copy program ",
+                     MSTRING(VERSION), __DATE__, __TIME__);
 
     /* parse the arguments */
+#ifdef EXTERNALGUI
+    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
+    {
+        extgui = 1;
+        argc--;
+    }
+#endif /*EXTERNALGUI*/
     for (argc--, argv++ ; argc > 0 ; argc--, argv++)
     {
         if(**argv != '-') break;
@@ -87,6 +105,7 @@ int             maxerrs=5;              /* Max errors allowed        */
                            if (argc < 2) syntax ();
                            argc--; argv++;
                            cyls = atoi (argv[0]);
+                           if (cyls >= 0) limited = 1;
                            break;
                        }
                        syntax ();
@@ -128,7 +147,7 @@ int             maxerrs=5;              /* Max errors allowed        */
     ifile = argv[0]; ofile = argv[1];
 
     /* open the input file */
-    ifd = open (ifile, O_RDONLY);
+    ifd = open (ifile, O_RDONLY|O_BINARY);
     if (ifd < 0)
     {
         fprintf (stderr,
@@ -139,12 +158,18 @@ int             maxerrs=5;              /* Max errors allowed        */
 
     /* read the CKD device header */
     rc = read (ifd, &devhdr, CKDDASD_DEVHDR_SIZE);
+    if (rc != CKDDASD_DEVHDR_SIZE)
+    {
+        fprintf (stderr, "cckd2ckd: %s read error: %s\n",
+                 ifile, strerror(errno));
+        exit (2);
+    }
     if (memcmp(devhdr.devid, "CKD_C370", 8) != 0)
     {
         fprintf (stderr,
          "cckd2ckd: input file %s is not a compressed ckd file\n",
          ifile);
-        exit (2);
+        exit (3);
     }
     memcpy (devhdr.devid, "CKD_P370", 8);
 
@@ -160,6 +185,12 @@ int             maxerrs=5;              /* Max errors allowed        */
 
     /* read the compressed CKD device header */
     rc = read (ifd, &cdevhdr, CCKDDASD_DEVHDR_SIZE);
+    if (rc != CCKDDASD_DEVHDR_SIZE)
+    {
+        fprintf (stderr, "cckd2ckd: %s read error: %s\n",
+                 ifile, strerror(errno));
+        exit (4);
+    }
 
     /* check the byte order of the file vs the machine */
     if (((cdevhdr.options & CCKD_BIGENDIAN) != 0 && chk_endian() == 0) ||
@@ -169,7 +200,19 @@ int             maxerrs=5;              /* Max errors allowed        */
     /* get area for primary lookup table and read it in */
     if (swapend) swapend4 ((unsigned char *)&cdevhdr.numl1tab);
     l1 = malloc (cdevhdr.numl1tab * CCKD_L1ENT_SIZE);
+    if (l1 == NULL)
+    {
+        fprintf (stderr, "lookup table malloc error: %s\n",
+                 strerror(errno));
+        exit (5);
+    } 
     rc = read (ifd, l1, cdevhdr.numl1tab * CCKD_L1ENT_SIZE);
+    if (rc != cdevhdr.numl1tab * CCKD_L1ENT_SIZE)
+    {
+        fprintf (stderr, "cckd2ckd: %s read error: %s\n",
+                 ifile, strerror(errno));
+        exit (6);
+    }
     if (swapend)
         for (i = 0; i < cdevhdr.numl1tab; i++)
             swapend4 ((unsigned char *)&l1[i]);
@@ -195,7 +238,19 @@ int             maxerrs=5;              /* Max errors allowed        */
         else
         {
             rc = lseek (ifd, l1[i], SEEK_SET);
+            if (rc == -1)
+            {
+                fprintf (stderr, "cckd2ckd: %s lseek error: %s\n",
+                         ifile, strerror(errno));
+                exit (7);
+            }
             rc = read (ifd, &l2, CCKD_L2TAB_SIZE);
+            if (rc != CCKD_L2TAB_SIZE)
+            {
+                fprintf (stderr, "cckd2ckd: %s read error: %s\n",
+                         ifile, strerror(errno));
+                exit (8);
+            }
         }
         /* find the last used entry in the level 2 table */
         for (j = 255; j > 0; j--)
@@ -216,7 +271,15 @@ int             maxerrs=5;              /* Max errors allowed        */
     files = (trks + trks_per_file - 1) / trks_per_file;
     highcyl = cyls_per_file - 1;
 
+#ifdef EXTERNALGUI
+    /* Tell the GUI how many tracks we'll be processing. */
+    if (extgui) fprintf (stderr, "TRKS=%ld\n", trks);
+#endif /*EXTERNALGUI*/
+
     /* don't print status if stdout is not a tty */
+#ifdef EXTERNALGUI
+    if (!extgui)
+#endif /*EXTERNALGUI*/
     if (!isatty (fileno(stdout))) quiet = 1;
 
     /* Locate the last character of the file name */
@@ -229,17 +292,36 @@ int             maxerrs=5;              /* Max errors allowed        */
     /* get buffers */
     buf = malloc (trksz);
     buf2 = malloc (trksz);
+    if (buf == NULL || buf2 == NULL)
+    {
+        fprintf (stderr, "cckd2ckd: buffer malloc error: %s\n",
+                 strerror(errno));
+        exit (9);
+    }
 
     /* process each entry in the primary lookup table */
-    for (i = 0; i * 256 < trks; i++)
+    for (i = 0; i * 256 < trks || l1[i] != 0; i++)
     {
+        if (limited && i * 256 >= trks) break;
         /* get the secondary lookup table */
         if (i >= cdevhdr.numl1tab || l1[i] == 0)
             memset (&l2, 0, CCKD_L2TAB_SIZE);
         else
         {
             rc = lseek (ifd, l1[i], SEEK_SET);
+            if (rc == -1)
+            {
+                fprintf (stderr, "cckd2ckd: %s lseek error: %s\n",
+                         ifile, strerror(errno));
+                exit (10);
+            }
             rc = read (ifd, &l2, CCKD_L2TAB_SIZE);
+            if (rc != CCKD_L2TAB_SIZE)
+            {
+                fprintf (stderr, "cckd2ckd: %s read error: %s\n",
+                         ifile, strerror(errno));
+                exit (11);
+            }
             if (swapend) /* fix byte order if necessary */
                 for (j = 0; j< 256; j++)
                 {
@@ -250,9 +332,13 @@ int             maxerrs=5;              /* Max errors allowed        */
         }
 
         /* process each entry in the secondary lookup table */
-        for (j = 0; j < 256 && i * 256 + j < trks; j++)
+        for (j = 0;
+             j < 256 && (i * 256 + j < trks || (l1[i] != 0 && l2[j].pos != 0));
+             j++)
+
         {
             trk = i * 256 + j;
+            if (limited && trk >= trks) break;
 
             /* check for new output file */
             if (trk % trks_per_file == 0)
@@ -266,7 +352,7 @@ int             maxerrs=5;              /* Max errors allowed        */
                         fprintf (stderr,
                                  "cckd2ckd: %s close error: %s\n",
                                  ofile, strerror(errno));
-                        exit(3);
+                        exit(12);
                     }
                     *sfxptr = '0' + fileseq;
                 }
@@ -284,15 +370,17 @@ int             maxerrs=5;              /* Max errors allowed        */
                     devhdr.highcyl[0] = 0;
                 }
                 /* open the output file */
-                ofd = open (ofile, O_WRONLY | O_CREAT | O_EXCL,
+                ofd = open (ofile,
+                            O_WRONLY | O_CREAT | O_EXCL | O_BINARY,
                             S_IRUSR | S_IWUSR | S_IRGRP);
                 if (ofd < 0)
                 {
                     fprintf (stderr,
                              "cckd2ckd: %s open error: %s\n",
                              ofile, strerror(errno));
-                    exit (4);
+                    exit (13);
                 }
+
                 /* write the devhdr */
                 rc = write (ofd, &devhdr, CKDDASD_DEVHDR_SIZE);
                 if (rc != CKDDASD_DEVHDR_SIZE)
@@ -300,7 +388,7 @@ int             maxerrs=5;              /* Max errors allowed        */
                     fprintf (stderr,
                              "cckd2ckd: %s write error: %s\n",
                              ofile, strerror(errno));
-                    exit (5);
+                    exit (14);
                 }
             }
 
@@ -313,7 +401,21 @@ int             maxerrs=5;              /* Max errors allowed        */
             else
             {
                 rc = lseek (ifd, l2[j].pos, SEEK_SET);
+                if (rc == -1)
+                {
+                    fprintf (stderr, "cckd2ckd: %s lseek error: %s\n",
+                             ifile, strerror(errno));
+                    exit (15);
+                }
+
                 rc = read (ifd, buf, l2[j].len);
+                if (rc != l2[j].len)
+                {
+                    fprintf (stderr, "cckd2ckd: %s read error: %s\n",
+                             ifile, strerror(errno));
+                    exit (16);
+                }
+
                 /* uncompress the track image */
                 compress = buf[0];
                 buf[0] = 0;
@@ -409,7 +511,7 @@ int             maxerrs=5;              /* Max errors allowed        */
                 fprintf (stderr,
                          "cckd2ckd: %s write error: %s\n",
                          ofile, strerror(errno));
-                exit (6);
+                exit (17);
             }
 
             /* update status information */
@@ -420,7 +522,7 @@ int             maxerrs=5;              /* Max errors allowed        */
             {
                 fprintf (stderr,
                          "cckd2ckd: Terminated due to errors\n");
-                exit (7);
+                exit (18);
             }
         }
     }
@@ -437,7 +539,7 @@ int             maxerrs=5;              /* Max errors allowed        */
         fprintf (stderr,
                  "cckd2ckd: %s close error: %s\n",
                  ofile, strerror(errno));
-        exit(8);
+        exit(19);
     }
     rc = close (ifd);
     if (rc < 0)
@@ -445,7 +547,7 @@ int             maxerrs=5;              /* Max errors allowed        */
         fprintf (stderr,
                  "cckd2ckd: %s close error: %s\n",
                  ifile, strerror(errno));
-        exit(9);
+        exit(20);
     }
 
     if (quiet == 0 || errs > 0)
@@ -474,7 +576,7 @@ void syntax ()
             "     -quiet            quiet mode, don't display status\n"
             "     -validate         validate track images [default]\n"
             "     -novalidate       don't validate track images\n");
-    exit (9);
+    exit (21);
 } /* end function syntax */
 
 int abbrev (char *tst, char *cmp)
@@ -487,6 +589,10 @@ void status (int i, int n)
 {
 static char indic[] = "|/-\\";
 
+#ifdef EXTERNALGUI
+    if (extgui) fprintf (stderr, "TRK=%d\n", i);
+    else
+#endif /*EXTERNALGUI*/
     printf ("\r%c %3d%% track %6d of %6d\r",
             indic[i%4], (i*100)/n, i, n);
 } /* end function status */
@@ -559,7 +665,8 @@ int             kl,dl;                  /* Key/Data lengths          */
     if (memcmp (cchh, cchh2, 4) != 0   ||  buf[9] != 0 ||
         buf[10] != 0   || buf[11] != 0 || buf[12] != 8)
     {
-        fprintf (stderr, "*** track %d R0 validation error !! "
+        fprintf (stderr, "\r*** track %d R0 validation error !! "
+
                  "%2.2x%2.2x%2.2x%2.2x%2.2x%2.2x%2.2x%2.2x\n",
                  trk, buf[5], buf[6], buf[7], buf[8], buf[9],
                  buf[10], buf[11], buf[12]);
@@ -575,25 +682,34 @@ int             kl,dl;                  /* Key/Data lengths          */
     {
         kl = buf[sz+5];
         dl = buf[sz+6] * 256 + buf[sz+7];
+
         /* fix for track overflow bit */
         memcpy (cchh2, &buf[sz], 4); cchh2[0] &= 0x7f;
-        if (memcmp (cchh, cchh2, 4) != 0 || buf[sz+4] != r ||
+
+        /* fix for funny formatted vm disks */
+        if (r == 1) memcpy (cchh, cchh2, 4);
+
+        if (memcmp (cchh, cchh2, 4) != 0 || buf[sz+4] == 0 ||
+
             sz + 8 + kl + dl >= len)
         {
-            fprintf (stderr, "*** track %d R%d validation error !! "
+            fprintf (stderr, "\r*** track %d R%d validation error !! "
+
                      "%2.2x%2.2x%2.2x%2.2x%2.2x%2.2x%2.2x%2.2x\n",
                      trk, r, buf[sz], buf[sz+1], buf[sz+2], buf[sz+3],
                      buf[sz+4], buf[sz+5], buf[sz+6], buf[sz+7]);
             errs++;
             if (r > 1)
             {
-                printf ("    track truncated\n");
+                printf ("    track truncated              \n");
+
                 memcpy (&buf[sz], eighthexFF, 8);
                 return sz + 8;
             }
             else
             {
-                printf ("    null track substituted\n");
+                printf ("    null track substituted       \n");
+
                 return null_trk (trk, buf, heads);
             }
         }
@@ -602,7 +718,8 @@ int             kl,dl;                  /* Key/Data lengths          */
 
     if (sz != len)
     {
-        fprintf (stderr, "*** track %d size mismatch !! "
+        fprintf (stderr, "\r*** track %d size mismatch !! "
+
                  "size found %d, expected %d\n",
                  trk, sz, len);
         errs++;

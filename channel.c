@@ -1,4 +1,4 @@
-/* CHANNEL.C    (c) Copyright Roger Bowler, 1999-2000                */
+/* CHANNEL.C    (c) Copyright Roger Bowler, 1999-2001                */
 /*              ESA/390 Channel Emulator                             */
 
 /*-------------------------------------------------------------------*/
@@ -12,8 +12,9 @@
 /*      Fix program check on NOP due to addressing - Jan Jaeger      */
 /*      Fix program check on TIC as first ccw on RSCH - Jan Jaeger   */
 /*      Fix PCI intermediate status flags             - Jan Jaeger   */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
 /*      64-bit IDAW support - Roger Bowler v209                  @IWZ*/
+/*      Incorrect-length-indication-suppression - Jan Jaeger         */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -540,7 +541,7 @@ void clear_subchan (REGS *regs, DEVBLK *dev)
 
     /* Signal waiting CPUs that an interrupt may be pending */
     obtain_lock (&sysblk.intlock);
-    sysblk.iopending = 1;
+    ON_IC_IOPENDING;
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 
@@ -632,7 +633,7 @@ int halt_subchan (REGS *regs, DEVBLK *dev)
 
     /* Signal waiting CPUs that an interrupt may be pending */
     obtain_lock (&sysblk.intlock);
-    sysblk.iopending = 1;
+    ON_IC_IOPENDING;
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 
@@ -738,12 +739,73 @@ DEVBLK *dev;                            /* -> Device control block   */
     } /* end for(dev) */
 
     /* No crws pending anymore */
-    sysblk.crwpending = 0;
+    OFF_IC_CHANRPT;
 
     /* Signal console thread to redrive select */
     signal_thread (sysblk.cnsltid, SIGHUP);
 
 } /* end function io_reset */
+
+
+/*-------------------------------------------------------------------*/
+/* Execute a queued I/O                                              */
+/*-------------------------------------------------------------------*/
+void device_thread ()
+{
+    DEVBLK         *dev;
+    struct timespec waittime;
+    struct timeval  now;
+    int             timedout;
+
+    obtain_lock(&sysblk.ioqlock);
+
+    sysblk.devtnbr++;
+    if (sysblk.devtnbr > sysblk.devthwm)
+        sysblk.devthwm = sysblk.devtnbr;
+
+    while (1)
+    {
+        while ((dev=sysblk.ioq) != NULL)
+        {
+            sysblk.ioq = dev->nextioq;
+            if (sysblk.ioq && sysblk.devtwait)
+                signal_condition(&sysblk.ioqcond);
+            release_lock (&sysblk.ioqlock);
+
+            switch (sysblk.arch_mode)
+            {
+                case ARCH_370: s370_execute_ccw_chain (dev); break;
+                case ARCH_900: z900_execute_ccw_chain (dev); break;
+                default:
+                case ARCH_390: s390_execute_ccw_chain (dev); break;
+            }
+
+            obtain_lock(&sysblk.ioqlock);
+        }
+
+        if (sysblk.devtmax < 0
+         || (sysblk.devtmax > 0 && sysblk.devtnbr > sysblk.devtmax))
+            break;
+
+        gettimeofday(&now, NULL);
+        waittime.tv_sec = now.tv_sec + MAX_DEVICE_THREAD_IDLE_SECS;
+        waittime.tv_nsec = now.tv_usec * 1000;
+
+        /* Wait for work to arrive or timer to expire... */
+
+        sysblk.devtwait++;
+        timedout = timed_wait_condition
+                         (&sysblk.ioqcond, &sysblk.ioqlock, &waittime);
+        sysblk.devtwait--;
+
+        /*  If we timed out AND ioq is NULL then we should exit */
+        if (timedout && sysblk.ioq == NULL) break;
+    }
+
+    sysblk.devtnbr--;
+    release_lock (&sysblk.ioqlock);
+
+} /* end function device_thread */
 
 
 #endif /*!defined(_CHANNEL_C)*/
@@ -830,7 +892,7 @@ BYTE    storkey;                        /* Storage key               */
 
     /* Channel program check if IDAW is not on correct           @IWZ
        boundary or is outside limit of main storage */
-    if ((idawaddr & ((idawfmt == 2)? 0x07 : 0x03))             /*@IWZ*/
+    if ((idawaddr & ((idawfmt == 2) ? 0x07 : 0x03))            /*@IWZ*/
         || idawaddr >= sysblk.mainsize)
     {
         *chanstat = CSW_PROGC;
@@ -932,7 +994,7 @@ int     idaseq;                         /* IDA sequence number       */
 RADR    idadata;                        /* IDA data address      @IWZ*/
 U16     idalen;                         /* IDA data length           */
 BYTE    storkey;                        /* Storage key               */
-int     i, firstpage, lastpage;         /* 4K page numbers           */
+RADR    page,startpage,endpage;         /* Storage key pages         */
 BYTE    readcmd;                        /* 1=READ, SENSE, or RDBACK  */
 BYTE    area[64];                       /* Data display area         */
 
@@ -1009,7 +1071,7 @@ BYTE    area[64];                       /* Data display area         */
             iobuf += idalen;
 
             /* Increment to next IDAW address */
-            idawaddr += 4;
+            idawaddr += (idawfmt == 1) ? 4 : 8;
 
         } /* end for(idaseq) */
 
@@ -1025,28 +1087,29 @@ BYTE    area[64];                       /* Data display area         */
         /* Channel protection check if any data is fetch protected,
            or if location is store protected and command is READ,
            READ BACKWARD, or SENSE */
-        firstpage = (addr & STORAGE_KEY_PAGEMASK)
-                                >> STORAGE_KEY_PAGESHIFT;
-        lastpage = ((addr + count - 1) & STORAGE_KEY_PAGEMASK)
-                                >> STORAGE_KEY_PAGESHIFT;
-        for (i = firstpage; i <= lastpage;
-                                i += STORAGE_KEY_PAGESIZE >> 10)
+        startpage = addr;
+        endpage = addr + (count - 1);
+        for (page = startpage & STORAGE_KEY_PAGEMASK;
+             page <= (endpage | STORAGE_KEY_BYTEMASK);
+             page += STORAGE_KEY_PAGESIZE)
         {
-            storkey = sysblk.storkeys[i];
+            storkey = STORAGE_KEY(page);
             if (ccwkey != 0 && (storkey & STORKEY_KEY) != ccwkey
                 && ((storkey & STORKEY_FETCH) || readcmd))
             {
                 *chanstat = CSW_PROTC;
                 return;
             }
-        } /* end for(i) */
+        } /* end for(page) */
 
         /* Set the main storage reference and change bits */
-        for (i = firstpage; i <= lastpage; i++)
+        for (page = startpage & STORAGE_KEY_PAGEMASK;
+             page <= (endpage | STORAGE_KEY_BYTEMASK);
+             page += STORAGE_KEY_PAGESIZE)
         {
-            sysblk.storkeys[i] |=
+            STORAGE_KEY(page) |=
                 (readcmd ? (STORKEY_REF|STORKEY_CHANGE) : STORKEY_REF);
-        } /* end for(i) */
+        } /* end for(page) */
 
         /* Copy data between main storage and channel buffer */
         if (readcmd)
@@ -1125,7 +1188,7 @@ int ARCH_DEP(device_attention) (DEVBLK *dev, BYTE unitstat)
 
     /* Signal waiting CPUs that an interrupt is pending */
     obtain_lock (&sysblk.intlock);
-    sysblk.iopending = 1;
+    ON_IC_IOPENDING;
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 
@@ -1151,6 +1214,9 @@ int ARCH_DEP(device_attention) (DEVBLK *dev, BYTE unitstat)
 /*-------------------------------------------------------------------*/
 int ARCH_DEP(startio) (DEVBLK *dev, ORB *orb)                  /*@IWZ*/
 {
+TID     tid;                            /* Device thread thread id   */
+DEVBLK *previoq, *ioq;                  /* Device I/O queue pointers */
+int     rc;                             /* Return code               */
 
     /* Obtain the device lock */
     obtain_lock (&dev->lock);
@@ -1202,24 +1268,58 @@ int ARCH_DEP(startio) (DEVBLK *dev, ORB *orb)                  /*@IWZ*/
     memcpy (dev->pmcw.intparm, orb->intparm,                   /*@IWZ*/
                         sizeof(dev->pmcw.intparm));            /*@IWZ*/
 
-    /* Release the device lock */
-    release_lock (&dev->lock);
-
-#if !defined(OPTION_NO_DEVICE_THREAD)
-     /* Execute the CCW chain in the device's own thread by
-        prodding it (code courtesy of Malcolm Beattie) */
-     dev->loopercmd = LOOPER_EXEC;
-     signal_condition(&dev->loopercond);
-#else
-    /* Execute the CCW chain on a separate thread */
-    if ( create_thread (&dev->tid, &sysblk.detattr,
-                        ARCH_DEP(execute_ccw_chain), dev) )
+    if (sysblk.devtmax >= 0)
     {
-        logmsg ("HHC760I %4.4X create_thread error: %s",
-                dev->devnum, strerror(errno));
-        return 2;
+        /* Queue the I/O request */
+        obtain_lock (&sysblk.ioqlock);
+
+        /* Insert the device into the I/O queue */
+        for (previoq = NULL, ioq = sysblk.ioq; ioq; ioq = ioq->nextioq)
+        {
+            if (dev->priority > ioq->priority) break;
+            previoq = ioq;
+        }
+        dev->nextioq = ioq;
+        if (previoq) previoq->nextioq = dev;
+        else sysblk.ioq = dev;
+//      dev->nextioq = sysblk.ioq;
+//      sysblk.ioq = dev;
+
+        /* Signal a device thread if one is waiting, otherwise create
+           a device thread if the maximum number hasn't been created */
+        if (sysblk.devtwait)
+            signal_condition(&sysblk.ioqcond);
+        else if (sysblk.devtmax == 0 || sysblk.devtnbr < sysblk.devtmax)
+        {
+            rc = create_thread(&tid,&sysblk.detattr,device_thread,NULL);
+            if (rc != 0 && sysblk.devtnbr == 0)
+            {
+                logmsg ("HHC760I %4.4X create_thread error: %s",
+                        dev->devnum, strerror(errno));
+                release_lock (&sysblk.ioqlock);
+                release_lock (&dev->lock);
+                return 2;
+            }
+        }
+        else
+            sysblk.devtunavail++;
+
+        release_lock (&sysblk.ioqlock);
     }
-#endif
+    else
+    {
+        /* Execute the CCW chain on a separate thread */
+        if ( create_thread (&dev->tid, &sysblk.detattr,
+                            ARCH_DEP(execute_ccw_chain), dev) )
+        {
+            logmsg ("HHC760I %4.4X create_thread error: %s",
+                    dev->devnum, strerror(errno));
+            release_lock (&dev->lock);
+            return 2;
+        }
+    }
+
+    release_lock (&dev->lock);
 
     /* Return with condition code zero */
     return 0;
@@ -1343,7 +1443,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
         /* Signal waiting CPUs that interrupt is pending */
         obtain_lock (&sysblk.intlock);
-        sysblk.iopending = 1;
+        ON_IC_IOPENDING;
         signal_condition (&sysblk.intcond);
         release_lock (&sysblk.intlock);
     }
@@ -1495,7 +1595,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
                     /* Signal waiting CPUs that interrupt is pending */
                     obtain_lock (&sysblk.intlock);
-                    sysblk.iopending = 1;
+                    ON_IC_IOPENDING;
                     signal_condition (&sysblk.intcond);
                     release_lock (&sysblk.intlock);
 
@@ -1590,7 +1690,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
             /* Signal waiting CPUs that an interrupt is pending */
             obtain_lock (&sysblk.intlock);
-            sysblk.iopending = 1;
+            ON_IC_IOPENDING;
             signal_condition (&sysblk.intcond);
             release_lock (&sysblk.intlock);
 
@@ -1604,13 +1704,21 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             break;
         }
 
+        /* Check that I/O buffer exists */
+        if (iobuf == NULL)
+        {
+            chanstat = CSW_PROGC;
+            break;
+        }
+
+
         /* For WRITE and CONTROL operations, copy data
            from main storage into channel buffer */
         if (IS_CCW_WRITE(code)
             || (IS_CCW_CONTROL(code) && !IS_CCW_NOP(code)))
         {
             /* Channel program check if data exceeds buffer size */
-            if (bufpos + count > sizeof(iobuf))
+            if (bufpos + count > 65536)
             {
                 chanstat = CSW_PROGC;
                 break;
@@ -1697,7 +1805,15 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
                for non-NOP CCWs */
             if (((flags & CCW_FLAGS_CD)
                 || (flags & CCW_FLAGS_SLI) == 0)
-                && (code != 0x03))
+                && (code != 0x03)
+#if defined(FEATURE_INCORRECT_LENGTH_INDICATION_SUPPRESSION)
+                /* Suppress incorrect length indication if 
+                   CCW format is one and SLI mode is indicated
+                   in the ORB */
+                && !((dev->orb.flag5 & ORB5_F)
+                  && (dev->orb.flag5 & ORB5_U))
+#endif /*defined(FEATURE_INCORRECT_LENGTH_INDICATION_SUPPRESSION)*/
+                        )
                 chanstat |= CSW_IL;
         }
 
@@ -1848,7 +1964,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
     /* Signal waiting CPUs that an interrupt is pending */
     obtain_lock (&sysblk.intlock);
-    sysblk.iopending = 1;
+    ON_IC_IOPENDING;
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 
@@ -1902,7 +2018,7 @@ int     i;                              /* Interruption subclass     */
     i = (dev->pmcw.flag4 & PMCW4_ISC) >> 3;
 
     /* Test interruption subclass mask bit in CR6 */
-    if ((regs->CR(6) & (0x80000000 >> i)) == 0)
+    if ((regs->CR_L(6) & (0x80000000 >> i)) == 0)
         return 0;
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
@@ -1923,12 +2039,12 @@ int     i;                              /* Interruption subclass     */
 /* Note: The caller MUST hold the interrupt lock (sysblk.intlock).   */
 /*-------------------------------------------------------------------*/
 int ARCH_DEP(present_io_interrupt) (REGS *regs, U32 *ioid,
-                                    U32 *ioparm, BYTE *csw)
+                                  U32 *ioparm, U32 *iointid, BYTE *csw)
 {
 DEVBLK *dev;                            /* -> Device control block   */
 
     /* Turn off the I/O interrupt pending flag */
-    sysblk.iopending = 0;
+    OFF_IC_IOPENDING;
 
     /* Find a device with pending interrupt */
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
@@ -1938,7 +2054,7 @@ DEVBLK *dev;                            /* -> Device control block   */
             && (dev->pmcw.flag5 & PMCW5_V))
         {
             /* Turn on the I/O interrupt pending flag */
-            sysblk.iopending = 1;
+            ON_IC_IOPENDING;
 
             /* Exit loop if enabled for interrupts from this device */
             if (ARCH_DEP(interrupt_enabled)(regs, dev))
@@ -1967,6 +2083,9 @@ DEVBLK *dev;                            /* -> Device control block   */
     /* Extract the I/O address and interrupt parameter */
     *ioid = 0x00010000 | dev->subchan;
     FETCH_FW(*ioparm,dev->pmcw.intparm);
+#if defined(FEATURE_ESAME)
+    *iointid = (dev->pmcw.flag4 & PMCW4_ISC) << 24;
+#endif /*defined(FEATURE_ESAME)*/
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
     /* Reset the interrupt pending flag for the device */
@@ -1996,10 +2115,6 @@ DEVBLK *dev;                            /* -> Device control block   */
 
 #if !defined(_GEN_ARCH)
 
-// #define  _GEN_ARCH 964
-// #include "channel.c"
-
-// #undef   _GEN_ARCH
 #define  _GEN_ARCH 390
 #include "channel.c"
 

@@ -6,9 +6,11 @@
 /*      Interpretive Execution, SA22-7095-01                         */
 /*      and                                                          */
 /*      Enterprise Systems Architecture / Extended Configuration     */
-/*      Principles of Operation, SC24-5594-02                        */
+/*      Principles of Operation, SC24-5594-02 and SC24-5965-00       */
 
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2001      */
+
+// #define SIE_DEBUG
 
 #include "hercules.h"
 
@@ -21,7 +23,7 @@
 #define _SIE_C
 
 #define GUESTREGS (regs->guestregs)
-#define STATEBK   (GUESTREGS->siebk)
+#define STATEBK   ((SIEBK*)(GUESTREGS->siebk))
 
 #define SIE_I_WAIT(_guestregs) \
         ((_guestregs)->psw.wait)
@@ -29,39 +31,25 @@
 #define SIE_I_STOP(_guestregs) \
         ((_guestregs)->siebk->v & SIE_V_STOP)
 
-#define SIE_I_IO(_guestregs) \
-        (((_guestregs)->siebk->v & SIE_V_IO) \
-           && ((_guestregs)->psw.sysmask \
-                 & ((_guestregs)->psw.ecmode ? PSW_IOMASK : 0xFE) ))
-
 #define SIE_I_EXT(_guestregs) \
         (((_guestregs)->siebk->v & SIE_V_EXT) \
           && ((_guestregs)->psw.sysmask & PSW_EXTMASK))
 
-#if defined(OPTION_NO_LINUX_INTERRUPT_PATCH)
-#define SIE_I_HOST(_hostregs) \
-        ((sysblk.mckpending && (_hostregs)->psw.mach) \
-          || ((sysblk.extpending || (_hostregs)->cpuint) \
-              && ((_hostregs)->psw.sysmask & PSW_EXTMASK)) \
-          || (_hostregs)->restart \
-          || (sysblk.iopending && ((_hostregs)->psw.sysmask & PSW_IOMASK)) \
-          || (_hostregs)->psw.wait \
-          || (_hostregs)->cpustate != CPUSTATE_STARTED)
-#else
-#define SIE_I_HOST(_hostregs) \
-        ((sysblk.mckpending && (_hostregs)->psw.mach) \
-          || ((sysblk.extpending \
-              || (_hostregs)->cpuint \
-              || ((_hostregs)->ptpend && ((_hostregs)->CR(0) & CR0_XM_PTIMER)) \
-              || ((_hostregs)->ckpend && ((_hostregs)->CR(0) & CR0_XM_CLKC))) \
-              && ((_hostregs)->psw.sysmask & PSW_EXTMASK)) \
-          || (_hostregs)->restart \
-          || (sysblk.iopending && ((_hostregs)->psw.sysmask & PSW_IOMASK)) \
-          || (_hostregs)->psw.wait \
-          || (_hostregs)->cpustate != CPUSTATE_STARTED)
-#endif
+#define SIE_I_HOST(_hostregs) SIE_IC_INTERRUPT_CPU(_hostregs)
 
 #endif /*!defined(_SIE_C)*/
+
+#undef SIE_I_IO
+#if !defined(FEATURE_ESAME)
+#define SIE_I_IO(_guestregs) \
+        (((_guestregs)->siebk->v & SIE_V_IO) \
+           && ((_guestregs)->psw.sysmask \
+                 & ((_guestregs)->psw.ecmode ? PSW_IOMASK : 0xFE) ))
+#else /*defined(FEATURE_ESAME)*/
+#define SIE_I_IO(_guestregs) \
+        (((_guestregs)->siebk->v & SIE_V_IO) \
+           && ((_guestregs)->psw.sysmask & PSW_IOMASK ))
+#endif /*defined(FEATURE_ESAME)*/
 
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
 
@@ -88,9 +76,14 @@ int     icode;                          /* Interception code         */
     if(!regs->psw.amode || !PRIMARY_SPACE_MODE(&(regs->psw)))
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
-    if((effective_addr2 & 0xFF) != 0
+    if((effective_addr2 & (sizeof(SIEBK)-1)) != 0
+#if defined(FEATURE_ESAME)
+      || (effective_addr2 & 0xFFFFFFFFFFFFF000ULL) == 0
+      || (effective_addr2 & 0xFFFFFFFFFFFFF000ULL) == regs->PX)
+#else /*!defined(FEATURE_ESAME)*/
       || (effective_addr2 & 0x7FFFF000) == 0
       || (effective_addr2 & 0x7FFFF000) == regs->PX)
+#endif /*!defined(FEATURE_ESAME)*/
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Perform serialization and checkpoint synchronization */
@@ -100,22 +93,29 @@ int     icode;                          /* Interception code         */
     /* Absolute address of state descriptor block */
     GUESTREGS->sie_state = effective_addr2;
 
-//  logmsg("SIE: state descriptor %8.8llX\n",GUESTREGS->sie_state);
+#if defined(SIE_DEBUG)
+    logmsg("SIE: state descriptor " F_RADR "\n",GUESTREGS->sie_state);
+#endif /*defined(SIE_DEBUG)*/
 
     /* Direct pointer to state descriptor block */
-    STATEBK = (SIEBK*)(sysblk.mainstor + effective_addr2);
+    STATEBK = (void*)(sysblk.mainstor + effective_addr2);
 
+#if defined(FEATURE_ESAME)
+    if(STATEBK->mx & SIE_MX_ESAME)
+    {
+        GUESTREGS->arch_mode = ARCH_900;
+        GUESTREGS->sie_guestpi = (SIEFN)&z900_program_interrupt;
+        gpv = z900_load_psw(GUESTREGS, STATEBK->psw);
+    }
+#else /*!defined(FEATURE_ESAME)*/
     if(STATEBK->m & SIE_M_370)
     {
         GUESTREGS->arch_mode = ARCH_370;
         GUESTREGS->sie_guestpi = (SIEFN)&s370_program_interrupt;
         gpv = s370_load_psw(GUESTREGS, STATEBK->psw);
     }
-#if 0
-    if(STATEBK->m & SIE_M_XA)
-#else
+#endif /*!defined(FEATURE_ESAME)*/
     else
-#endif
     {
         GUESTREGS->arch_mode = ARCH_390;
         GUESTREGS->sie_guestpi = (SIEFN)&s390_program_interrupt;
@@ -136,7 +136,27 @@ int     icode;                          /* Interception code         */
 
     /* Load prefix from state descriptor */
     FETCH_FW(GUESTREGS->PX, STATEBK->prefix);
+    GUESTREGS->PX &=
+#if !defined(FEATURE_ESAME)
+                     PX_MASK;
+#else /*defined(FEATURE_ESAME)*/
+                     (GUESTREGS->arch_mode == ARCH_900) ? PX_MASK : 0x7FFFF000;
+#endif /*defined(FEATURE_ESAME)*/
 
+
+#if defined(FEATURE_ESAME)
+    /* Load main storage origin */
+    FETCH_DW(GUESTREGS->sie_mso,STATEBK->mso);
+    GUESTREGS->sie_mso &= SIE2_MS_MASK;
+
+    /* Load main storage extend */
+    FETCH_DW(GUESTREGS->mainsize,STATEBK->mse);
+    GUESTREGS->mainsize += 0x100000;
+    GUESTREGS->mainsize &= SIE2_MS_MASK;
+
+    /* Calculate main storage size */
+    GUESTREGS->mainsize -= GUESTREGS->sie_mso;
+#else /*!defined(FEATURE_ESAME)*/
     /* Load main storage origin */
     FETCH_HW(GUESTREGS->sie_mso,STATEBK->mso);
     GUESTREGS->sie_mso <<= 16;
@@ -144,6 +164,7 @@ int     icode;                          /* Interception code         */
     /* Load main storage extend */
     FETCH_HW(GUESTREGS->mainsize,STATEBK->mse);
     GUESTREGS->mainsize = (GUESTREGS->mainsize + 1) << 16;
+#endif /*!defined(FEATURE_ESAME)*/
 
     /* Load expanded storage origin */
     GUESTREGS->sie_xso = STATEBK->xso[0] << 16
@@ -162,12 +183,9 @@ int     icode;                          /* Interception code         */
 
     /* Reset the CPU timer pending flag according to its value */
     if( (S64)GUESTREGS->ptimer < 0 )
-#if defined(OPTION_NO_LINUX_INTERRUPT_PATCH)
-        GUESTREGS->cpuint =
-#endif
-                            GUESTREGS->ptpend = 1;
+        ON_IC_PTIMER(GUESTREGS);
     else
-        GUESTREGS->ptpend = 0;
+        OFF_IC_PTIMER(GUESTREGS);
 
     /* Load the TOD clock offset for this guest */
     FETCH_DW(GUESTREGS->sie_epoch, STATEBK->epoch);
@@ -180,12 +198,9 @@ int     icode;                          /* Interception code         */
     /* Reset the clock comparator pending flag according to
        the setting of the TOD clock */
     if( (sysblk.todclk + GUESTREGS->todoffset) > GUESTREGS->clkc )
-#if defined(OPTION_NO_LINUX_INTERRUPT_PATCH)
-        GUESTREGS->cpuint =
-#endif
-                            GUESTREGS->ckpend = 1;
+        ON_IC_CLKC(GUESTREGS);
     else
-        GUESTREGS->ckpend = 0;
+        OFF_IC_CLKC(GUESTREGS);
 
     /* Load TOD Programmable Field */
     FETCH_HW(GUESTREGS->todpr, STATEBK->todpf);
@@ -195,14 +210,14 @@ int     icode;                          /* Interception code         */
     memcpy(GUESTREGS->ar, regs->ar, 16 * sizeof(U32));
 
     /* Load GR14 */
-    FETCH_FW(GUESTREGS->GR_L(14), STATEBK->gr14);
+    FETCH_W(GUESTREGS->GR(14), STATEBK->gr14);
 
     /* Load GR15 */
-    FETCH_FW(GUESTREGS->GR_L(15), STATEBK->gr15);
+    FETCH_W(GUESTREGS->GR(15), STATEBK->gr15);
 
     /* Load control registers */
     for(n = 0;n < 16; n++)
-        FETCH_FW(GUESTREGS->CR(n), STATEBK->cr[n]);
+        FETCH_W(GUESTREGS->CR(n), STATEBK->cr[n]);
 
     FETCH_HW(lhcpu, STATEBK->lhcpu);
 
@@ -234,6 +249,7 @@ int     icode;                          /* Interception code         */
                            + GUESTREGS->PX, USE_PRIMARY_SPACE, regs,
                              ACCTYPE_SIE, 0) );
 
+#if !defined(FEATURE_ESAME)
     /* If this is a S/370 guest, and the interval timer is enabled
        then initialize the timer */
     if( (STATEBK->m & SIE_M_370)
@@ -264,18 +280,18 @@ int     icode;                          /* Interception code         */
         /* Set interrupt flag and interval timer interrupt pending
            if the interval timer went from positive to negative */
         if (itimer < 0 && olditimer >= 0)
-            GUESTREGS->cpuint = GUESTREGS->itimer_pending = 1;
-
+            ON_IC_ITIMER(GUESTREGS);
     }
+#endif /*!defined(FEATURE_ESAME)*/
 
-    switch(GUESTREGS->arch_mode) {
-        case ARCH_370:
-            icode = s370_sie_run (regs);
-            break;
-        case ARCH_390:
-        default:  /* Prevent unused icode warning from compiler */
-            icode = s390_sie_run (regs);
-    }
+    if(GUESTREGS->arch_mode == ARCH_390)
+        icode = s390_sie_run (regs);
+    else
+#if defined(FEATURE_ESAME)
+        icode = z900_sie_run (regs);
+#else /*!defined(FEATURE_ESAME)*/
+        icode = s370_sie_run (regs);
+#endif /*!defined(FEATURE_ESAME)*/
 
     ARCH_DEP(sie_exit) (regs, icode);
 
@@ -291,8 +307,11 @@ void ARCH_DEP(sie_exit) (REGS *regs, int code)
 {
 int     n;
 
-//  logmsg("SIE: interception code %d\n",code);
-//  display_inst (GUESTREGS, GUESTREGS->instvalid ? GUESTREGS->inst : NULL);
+#if defined(SIE_DEBUG)
+    logmsg("SIE: interception code %d\n",code);
+    ARCH_DEP(display_inst) (GUESTREGS, GUESTREGS->instvalid ?
+                                        GUESTREGS->inst : NULL);
+#endif /*defined(SIE_DEBUG)*/
 
     /* Indicate we have left SIE mode */
     regs->sie_active = 0;
@@ -359,17 +378,24 @@ int     n;
     STORE_HW(STATEBK->todpf, GUESTREGS->todpr);
 
     /* Save GR14 */
-    STORE_FW(STATEBK->gr14, GUESTREGS->GR_L(14));
+    STORE_W(STATEBK->gr14, GUESTREGS->GR(14));
 
     /* Save GR15 */
-    STORE_FW(STATEBK->gr15, GUESTREGS->GR_L(15));
+    STORE_W(STATEBK->gr15, GUESTREGS->GR(15));
 
     /* Store the PSW */
-    ARCH_DEP(store_psw)(GUESTREGS, STATEBK->psw);
+    if(GUESTREGS->arch_mode == ARCH_390)
+        s390_store_psw (GUESTREGS, STATEBK->psw);
+    else
+#if defined(FEATURE_ESAME)
+        z900_store_psw (GUESTREGS, STATEBK->psw);
+#else /*!defined(FEATURE_ESAME)*/
+        s370_store_psw (GUESTREGS, STATEBK->psw);
+#endif /*!defined(FEATURE_ESAME)*/
 
     /* save control registers */
     for(n = 0;n < 16; n++)
-        STORE_FW(STATEBK->cr[n], GUESTREGS->CR(n));
+        STORE_W(STATEBK->cr[n], GUESTREGS->CR(n));
 
     /* Update the approprate host registers */
     memcpy(regs->gr, GUESTREGS->gr, 14 * sizeof(U64));
@@ -410,6 +436,10 @@ int ARCH_DEP(sie_run) (REGS *regs)
 {
     int icode;
 
+    SET_IC_EXTERNAL_MASK(GUESTREGS);
+    SET_IC_MCK_MASK(GUESTREGS);
+    SET_IC_IO_MASK(GUESTREGS);
+
     do {
         if(!(icode = setjmp(GUESTREGS->progjmp)))
             while(! SIE_I_WAIT(GUESTREGS)
@@ -420,13 +450,7 @@ int ARCH_DEP(sie_run) (REGS *regs)
                && ! SIE_I_HOST(regs) )
             {
 
-                if((GUESTREGS->psw.sysmask & PSW_EXTMASK)
-                  && (GUESTREGS->cpuint
-#if !defined(OPTION_NO_LINUX_INTERRUPT_PATCH)
-                  || (GUESTREGS->ptpend && (GUESTREGS->CR(0) & CR0_XM_PTIMER))
-                  || (GUESTREGS->ckpend && (GUESTREGS->CR(0) & CR0_XM_CLKC))
-#endif
-                  ))
+                if(OPEN_IC_CPUINT(GUESTREGS))
                 {
                     obtain_lock(&sysblk.intlock);
                     ARCH_DEP(perform_external_interrupt) (GUESTREGS);
@@ -441,8 +465,10 @@ int ARCH_DEP(sie_run) (REGS *regs)
 
                 regs->instcount++;
 
+#if defined(SIE_DEBUG)
                 /* Display the instruction */
-// /*ZZDEBUG*/  display_inst (GUESTREGS, GUESTREGS->inst);
+                ARCH_DEP(display_inst) (GUESTREGS, GUESTREGS->inst);
+#endif /*defined(SIE_DEBUG)*/
 
                 EXECUTE_INSTRUCTION(GUESTREGS->inst, 0, GUESTREGS);
 
@@ -489,10 +515,6 @@ int ARCH_DEP(sie_run) (REGS *regs)
 
 #if !defined(_GEN_ARCH)
 
-// #define  _GEN_ARCH 964
-// #include "sie.c"
-
-// #undef   _GEN_ARCH
 #define  _GEN_ARCH 390
 #include "sie.c"
 
