@@ -411,6 +411,7 @@ int     subchan;                        /* Subchannel number         */
             devexec = &constty_execute_ccw;
             break;
 
+        case 0x1442:
         case 0x2501:
         case 0x3505:
             devinit = &cardrdr_init_handler;
@@ -429,6 +430,7 @@ int     subchan;                        /* Subchannel number         */
             devexec = &tapedev_execute_ccw;
             break;
 
+        case 0x2311:
         case 0x2314:
         case 0x3330:
         case 0x3350:

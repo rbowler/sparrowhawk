@@ -256,16 +256,17 @@ typedef struct _DEVBLK {
 	/* Device dependent fields for tapedev */
 	BYTE	tapedevt;		/* Tape device type	     */
 	void   *omadesc;		/* -> OMA descriptor array   */
-	U32	curfilen;		/* Current file number	     */
+	U16	curfilen;		/* Current file number	     */
+	U16	curblklen;		/* Length of current block   */
 	long	curblkpos;		/* Offset from start of file
 					   to current block	     */
 	long	nxtblkpos;		/* Offset from start of file
 					   to next block	     */
 	long	prvblkpos;		/* Offset from start of file
 					   to previous block	     */
-	U32	curblkrem;		/* Number of bytes unread
+	U16	curblkrem;		/* Number of bytes unread
 					   from current block	     */
-	U32	curbufoff;		/* Offset into buffer of data
+	U16	curbufoff;		/* Offset into buffer of data
 					   for next data chained CCW */
 	/* Device dependent fields for fbadasd */
 	unsigned int			/* Flags		     */
@@ -285,6 +286,7 @@ typedef struct _DEVBLK {
 	U16	fbalcnum;		/* Block count for locate    */
 	/* Device dependent fields for ckddasd */
 	unsigned int			/* Flags		     */
+		ckd3990:1,		/* 1=Control unit is 3990    */
 		ckdxtdef:1,		/* 1=Define Extent processed */
 		ckdsetfm:1,		/* 1=Set File Mask processed */
 		ckdlocat:1,		/* 1=Locate Record processed */

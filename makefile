@@ -6,15 +6,15 @@
 #	make ARCH=390
 #
 
-VERSION  = 1.32
+VERSION  = 1.33
 
 CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=$(ARCH)
 #	   -march=pentium -malign-double -mwide-multiply
 LFLAGS	 = -lpthread
 
-all:	   cpu ipl dasdinit tapecopy
+EXEFILES = cpu ipl dasdinit tapecopy xmitconv
 
-TARFILES = makefile *.c *.h hercules.cnf tapeconv.jcl
+TARFILES = makefile *.c *.h hercules.cnf tapeconv.jcl dasdlist
 
 ALL_OBJS = config.o panel.o cpu.o assist.o dat.o decimal.o \
 	   block.o stack.o xmem.o \
@@ -29,7 +29,11 @@ DIN_OBJS = dasdinit.o
 
 TCY_OBJS = tapecopy.o
 
+XMT_OBJS = xmitconv.o
+
 HEADERS  = hercules.h esa390.h
+
+all:	   $(EXEFILES)
 
 cpu:	   $(CPU_OBJS)
 	cc $(LFLAGS) -o cpu $(CPU_OBJS)
@@ -42,6 +46,9 @@ dasdinit:  $(DIN_OBJS)
 
 tapecopy:  $(TCY_OBJS)
 	cc -o tapecopy $(TCY_OBJS)
+
+xmitconv:  $(XMT_OBJS)
+	cc -o xmitconv $(XMT_OBJS)
 
 assist.o:  assist.c $(HEADERS)
 
@@ -85,8 +92,10 @@ dasdinit.o: dasdinit.c $(HEADERS) makefile
 
 tapecopy.o: tapecopy.c $(HEADERS) makefile
 
+xmitconv.o: xmitconv.c $(HEADERS) makefile
+
 clean:
-	rm -f cpu ipl dasdinit tapecopy *.o
+	rm -f $(EXEFILES) *.o
 
 tar:
 	tar cvzf hercules-$(VERSION).tar.gz $(TARFILES)

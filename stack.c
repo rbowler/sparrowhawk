@@ -9,6 +9,8 @@
 
 #include "hercules.h"
 
+#undef  STACK_DEBUG
+
 /*-------------------------------------------------------------------*/
 /* Convert linkage stack virtual address to absolute address         */
 /*                                                                   */
@@ -136,6 +138,13 @@ int     i;                              /* Array subscript           */
     absold = abs_stack_addr (lsea, regs, ACCTYPE_READ);
     memcpy (&lsed, sysblk.mainstor+absold, sizeof(LSED));
 
+#ifdef STACK_DEBUG
+    printf ("stack: Current stack entry at %8.8lX\n", lsea);
+    printf ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X nes=%2.2X%2.2X\n",
+            lsed.uet, lsed.si, lsed.rfs[0],
+            lsed.rfs[1], lsed.nes[0], lsed.nes[1]);
+#endif /*STACK_DEBUG*/
+
     /* Check whether the current linkage stack section has enough
        remaining free space to contain the new stack entry */
     rfs = (lsed.rfs[0] << 8) | lsed.rfs[1];
@@ -158,6 +167,10 @@ int     i;                              /* Array subscript           */
                 | (sysblk.mainstor[abs+6] << 8)
                 | sysblk.mainstor[abs+7];
 
+#ifdef STACK_DEBUG
+        printf ("stack: Forward section header addr %8.8lX\n", fsha);
+#endif /*STACK_DEBUG*/
+
         /* Stack full exception if forward address is not valid */
         if ((fsha & LSTE1_FVALID) == 0)
         {
@@ -172,6 +185,13 @@ int     i;                              /* Array subscript           */
         /* Fetch the entry descriptor of the next section's header */
         abs = abs_stack_addr (fsha, regs, ACCTYPE_READ);
         memcpy (&lsed, sysblk.mainstor+abs, sizeof(LSED));
+
+#ifdef STACK_DEBUG
+        printf ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X "
+                "nes=%2.2X%2.2X\n",
+                lsed.uet, lsed.si, lsed.rfs[0],
+                lsed.rfs[1], lsed.nes[0], lsed.nes[1]);
+#endif /*STACK_DEBUG*/
 
         /* Program check if the next linkage stack section does not
            have enough free space to contain the new stack entry */
@@ -209,6 +229,10 @@ int     i;                              /* Array subscript           */
     lsea += sizeof(LSED);
     lsea &= 0x7FFFFFFF;
 
+#ifdef STACK_DEBUG
+    printf ("stack: New stack entry at %8.8lX\n", lsea);
+#endif /*STACK_DEBUG*/
+
     /* Store general registers 0-15 in bytes 0-63 of the new entry */
     abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
     for (i = 0; i < 16; i++)
@@ -218,6 +242,11 @@ int     i;                              /* Array subscript           */
         sysblk.mainstor[abs+1] = (regs->gpr[i] >> 16) & 0xFF;
         sysblk.mainstor[abs+2] = (regs->gpr[i] >> 8) & 0xFF;
         sysblk.mainstor[abs+3] = regs->gpr[i] & 0xFF;
+
+#ifdef STACK_DEBUG
+        printf ("stack: GPR%d=%8.8lX stored at V:%8.8lX A:%8.8lX\n",
+                i, regs->gpr[i], lsea, abs);
+#endif /*STACK_DEBUG*/
 
         /* Update the virtual and absolute addresses */
         lsea += 4;
@@ -238,6 +267,11 @@ int     i;                              /* Array subscript           */
         sysblk.mainstor[abs+1] = (regs->ar[i] >> 16) & 0xFF;
         sysblk.mainstor[abs+2] = (regs->ar[i] >> 8) & 0xFF;
         sysblk.mainstor[abs+3] = regs->ar[i] & 0xFF;
+
+#ifdef STACK_DEBUG
+        printf ("stack: AR%d=%8.8lX stored at V:%8.8lX A:%8.8lX\n",
+                i, regs->ar[i], lsea, abs);
+#endif /*STACK_DEBUG*/
 
         /* Update the virtual and absolute addresses */
         lsea += 4;
@@ -277,6 +311,16 @@ int     i;                              /* Array subscript           */
     sysblk.mainstor[abs+5] = (retna >> 16) & 0xFF;
     sysblk.mainstor[abs+6] = (retna >> 8) & 0xFF;
     sysblk.mainstor[abs+7] = retna & 0xFF;
+
+#ifdef STACK_DEBUG
+    printf ("stack: PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X "
+            "stored at V:%8.8lX A:%8.8lX\n",
+            sysblk.mainstor[abs], sysblk.mainstor[abs+1],
+            sysblk.mainstor[abs+2], sysblk.mainstor[abs+3],
+            sysblk.mainstor[abs+4], sysblk.mainstor[abs+5],
+            sysblk.mainstor[abs+6], sysblk.mainstor[abs+7],
+            lsea, abs);
+#endif /*STACK_DEBUG*/
 
     /* Update virtual and absolute addresses to point to byte 144 */
     lsea += 8;
@@ -325,13 +369,32 @@ int     i;                              /* Array subscript           */
     /* Store the linkage stack entry descriptor in bytes 160-167 */
     memcpy (sysblk.mainstor+abs, &lsed2, sizeof(LSED));
 
+#ifdef STACK_DEBUG
+    printf ("stack: New stack entry at %8.8lX\n", lsea);
+    printf ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X nes=%2.2X%2.2X\n",
+            lsed2.uet, lsed2.si, lsed2.rfs[0],
+            lsed2.rfs[1], lsed2.nes[0], lsed2.nes[1]);
+#endif /*STACK_DEBUG*/
+
     /* [5.12.3.3] Update the current entry */
     lsed.nes[0] = (size >> 8) & 0xFF;
     lsed.nes[1] = size & 0xFF;
     memcpy (sysblk.mainstor+absold, &lsed, sizeof(LSED));
 
+#ifdef STACK_DEBUG
+    printf ("stack: Previous stack entry updated at A:%8.8lX\n",
+            absold);
+    printf ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X nes=%2.2X%2.2X\n",
+            lsed.uet, lsed.si, lsed.rfs[0],
+            lsed.rfs[1], lsed.nes[0], lsed.nes[1]);
+#endif /*STACK_DEBUG*/
+
     /* [5.12.3.4] Update control register 15 */
     regs->cr[15] = lsea & CR15_LSEA;
+
+#ifdef STACK_DEBUG
+    printf ("stack: CR15=%8.8lX\n", regs->cr[15]);
+#endif /*STACK_DEBUG*/
 
 } /* end function form_stack_entry */
 
@@ -388,6 +451,13 @@ U32     bsea;                           /* Backward stack entry addr */
     abs = abs_stack_addr (lsea, regs, ACCTYPE_READ);
     memcpy (lsedptr, sysblk.mainstor+abs, sizeof(LSED));
 
+#ifdef STACK_DEBUG
+    printf ("stack: Stack entry located at %8.8lX\n", lsea);
+    printf ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X nes=%2.2X%2.2X\n",
+            lsedptr->uet, lsedptr->si, lsedptr->rfs[0],
+            lsedptr->rfs[1], lsedptr->nes[0], lsedptr->nes[1]);
+#endif /*STACK_DEBUG*/
+
     /* Check for a header entry */
     if ((lsedptr->uet & LSED_UET_ET) == LSED_UET_HDR)
     {
@@ -425,6 +495,14 @@ U32     bsea;                           /* Backward stack entry addr */
         /* Fetch the entry descriptor of the designated entry */
         abs = abs_stack_addr (lsea, regs, ACCTYPE_READ);
         memcpy (lsedptr, sysblk.mainstor+abs, sizeof(LSED));
+
+#ifdef STACK_DEBUG
+        printf ("stack: Stack entry located at %8.8lX\n", lsea);
+        printf ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X "
+                "nes=%2.2X%2.2X\n",
+                lsedptr->uet, lsedptr->si, lsedptr->rfs[0],
+                lsedptr->rfs[1], lsedptr->nes[0], lsedptr->nes[1]);
+#endif /*STACK_DEBUG*/
 
         /* Stack specification exception if this is also a header */
         if ((lsedptr->uet & LSED_UET_ET) == LSED_UET_HDR)
@@ -502,22 +580,17 @@ int     tranreqd;                       /* 1=Translation required    */
     /* Set indicator to force calculation of absolute address */
     tranreqd = 1;
 
+#ifdef STACK_DEBUG
+    printf ("stack: Unstacking registers %d-%d from %8.8lX\n",
+            r1, r2, lsea);
+#endif /*STACK_DEBUG*/
+
     /* Load general registers from bytes 0-63 of the state entry */
     for (i = 0; i < 16; i++)
     {
         /* Recalculate absolute address if page boundary crossed */
         if ((lsea & 0xFFF) == 0x000)
             tranreqd = 1;
-
-        /* Loop if the register is outside the range to be loaded */
-        if (r1 <= r2)
-        {
-            if (i < r1 || i > r2) continue;
-        }
-        else
-        {
-            if (i < r1 && i > r2) continue;
-        }
 
         /* Calculate absolute address if required */
         if (tranreqd)
@@ -527,10 +600,20 @@ int     tranreqd;                       /* 1=Translation required    */
         }
 
         /* Load the general register from the stack entry */
-        regs->gpr[i] = (sysblk.mainstor[abs] << 24)
-                        | (sysblk.mainstor[abs+1] << 16)
-                        | (sysblk.mainstor[abs+2] << 8)
-                        | sysblk.mainstor[abs+3];
+        if ((r1 <= r2 && i >= r1 && i <= r2)
+            || (r1 > r2 && (i >= r1 || i <= r2)))
+        {
+            regs->gpr[i] = (sysblk.mainstor[abs] << 24)
+                            | (sysblk.mainstor[abs+1] << 16)
+                            | (sysblk.mainstor[abs+2] << 8)
+                            | sysblk.mainstor[abs+3];
+
+#ifdef STACK_DEBUG
+            printf ("stack: GPR%d=%8.8lX "
+                    "loaded from V:%8.8lX A:%8.8lX\n",
+                    i, regs->gpr[i], lsea, abs);
+#endif /*STACK_DEBUG*/
+        }
 
         /* Update the virtual and absolute addresses */
         lsea += 4;
@@ -546,16 +629,6 @@ int     tranreqd;                       /* 1=Translation required    */
         if ((lsea & 0xFFF) == 0x000)
             tranreqd = 1;
 
-        /* Loop if the register is outside the range to be loaded */
-        if (r1 <= r2)
-        {
-            if (i < r1 || i > r2) continue;
-        }
-        else
-        {
-            if (i < r1 && i > r2) continue;
-        }
-
         /* Calculate absolute address if required */
         if (tranreqd)
         {
@@ -564,10 +637,20 @@ int     tranreqd;                       /* 1=Translation required    */
         }
 
         /* Load the access register from the stack entry */
-        regs->ar[i] = (sysblk.mainstor[abs] << 24)
-                        | (sysblk.mainstor[abs+1] << 16)
-                        | (sysblk.mainstor[abs+2] << 8)
-                        | sysblk.mainstor[abs+3];
+        if ((r1 <= r2 && i >= r1 && i <= r2)
+            || (r1 > r2 && (i >= r1 || i <= r2)))
+        {
+            regs->ar[i] = (sysblk.mainstor[abs] << 24)
+                            | (sysblk.mainstor[abs+1] << 16)
+                            | (sysblk.mainstor[abs+2] << 8)
+                            | sysblk.mainstor[abs+3];
+
+#ifdef STACK_DEBUG
+            printf ("stack: AR%d=%8.8lX "
+                    "loaded from V:%8.8lX A:%8.8lX\n",
+                    i, regs->ar[i], lsea, abs);
+#endif /*STACK_DEBUG*/
+        }
 
         /* Update the virtual and absolute addresses */
         lsea += 4;
@@ -624,7 +707,8 @@ U16     pasn;                           /* Primary ASN               */
     unstack_registers (lsea, 2, 14, regs);
 
     /* Point back to byte 128 of the state entry */
-    lsea -= LSSE_SIZE - sizeof(LSED) + 128;
+    lsea -= LSSE_SIZE - sizeof(LSED);
+    lsea += 128;
     lsea &= 0x7FFFFFFF;
 
     /* Translate virtual address to absolute address */
@@ -674,6 +758,16 @@ U16     pasn;                           /* Primary ASN               */
     /* Save the PER mode bit from the current PSW */
     permode = (regs->psw.sysmask & PSW_PERMODE) ? 1 : 0;
 
+#ifdef STACK_DEBUG
+    printf ("stack: PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X "
+            "loaded from V:%8.8lX A:%8.8lX\n",
+            sysblk.mainstor[abs], sysblk.mainstor[abs+1],
+            sysblk.mainstor[abs+2], sysblk.mainstor[abs+3],
+            sysblk.mainstor[abs+4], sysblk.mainstor[abs+5],
+            sysblk.mainstor[abs+6], sysblk.mainstor[abs+7],
+            lsea, abs);
+#endif /*STACK_DEBUG*/
+
     /* Load new PSW from bytes 136-143 of the stack entry */
     rc = load_psw (&regs->psw, sysblk.mainstor+abs);
     if (rc) {
@@ -691,12 +785,16 @@ U16     pasn;                           /* Primary ASN               */
        descriptor of the preceding linkage stack entry.  The
        next entry size field of this entry will be cleared on
        successful completion of the PR instruction */
-    lsea -= 136;
+    lsea -= 136 + sizeof(LSED);
     lsea &= 0x7FFFFFFF;
     *lsedap = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
 
     /* [5.12.4.5] Update CR15 to point to the previous entry */
     regs->cr[15] = lsea & CR15_LSEA;
+
+#ifdef STACK_DEBUG
+    printf ("stack: CR15=%8.8lX\n", regs->cr[15]);
+#endif /*STACK_DEBUG*/
 
     /* Return the entry type of the unstacked state entry */
     return (lsed.uet & LSED_UET_ET);
@@ -769,7 +867,8 @@ U32     abs;                            /* Absolute address          */
     lsea = locate_stack_entry (0, &lsed, regs);
 
     /* Point back to byte 128 of the state entry */
-    lsea -= LSSE_SIZE - sizeof(LSED) + 128;
+    lsea -= LSSE_SIZE - sizeof(LSED);
+    lsea += 128;
 
     /* Point to byte 128, 136, 144, or 152 depending on the code */
     lsea += code * 8;
@@ -823,7 +922,8 @@ U32     abs;                            /* Absolute address          */
     lsea = locate_stack_entry (0, &lsed, regs);
 
     /* Point back to byte 152 of the state entry */
-    lsea -= LSSE_SIZE - sizeof(LSED) + 152;
+    lsea -= LSSE_SIZE - sizeof(LSED);
+    lsea += 152;
     lsea &= 0x7FFFFFFF;
 
     /* Store the general register pair into the state entry */

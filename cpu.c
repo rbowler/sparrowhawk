@@ -60,8 +60,8 @@ int     cc;
 
     r = (U64)op1 + (U64)op2;
     *result = (U32)r;
-    if ((r >> 32) == 0) cc = (r == 0)? 0 : 1;
-    else cc = (r == 0)? 2 : 3;
+    if ((r >> 32) == 0) cc = ((U32)r == 0)? 0 : 1;
+    else cc = ((U32)r == 0)? 2 : 3;
     return cc;
 }
 
@@ -75,10 +75,9 @@ sub_logical ( U32 *result, U32 op1, U32 op2 )
 U64     r;
 int     cc;
 
-    r = (U64)op1 - (U64)op2;
+    r = (U64)op1 + ~((U32)op2) + 1;
     *result = (U32)r;
-    if ((r >> 32) == 0) cc = (r == 0)? 0 : 1;
-    else cc = (r == 0)? 2 : 3;
+    cc = ((U32)r == 0) ? 2 : ((r >> 32) == 0) ? 1 : 3;
     return cc;
 }
 
@@ -2937,6 +2936,9 @@ static BYTE module[8];                  /* Module name               */
             /* Retrieve the TOD clock value */
             dreg = sysblk.todclk;
 
+            /* Increment bit position 63 to ensure unique values */
+            sysblk.todclk++;
+
             /* Release the TOD clock update lock */
             release_lock (&sysblk.todlock);
 
@@ -5725,7 +5727,7 @@ int     icidx;                          /* Instruction counter index */
 #endif /*INSTRUCTION_COUNTING*/
 
         /* Turn on trace for specific instructions */
-//      if (dword[0] == 0xB2 && dword[1] == 0x20) sysblk.inststep = 1;
+//      if (dword[0] == 0xB2 && dword[1] == 0x20) sysblk.inststep = 1; /*SERVC*/
 //      if (dword[0] == 0xB2 && dword[1] == 0x25) sysblk.inststep = 1; /*SSAR*/
 //      if (dword[0] == 0xB2 && dword[1] == 0x40) sysblk.inststep = 1; /*BAKR*/
 //      if (dword[0] == 0xB2 && dword[1] == 0x18) sysblk.inststep = 1; /*PC*/

@@ -25,6 +25,9 @@
 /* Static data areas                                                 */
 /*-------------------------------------------------------------------*/
 BYTE eighthexFF[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+BYTE iplpsw[8]    = {0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F};
+BYTE iplccw1[8]   = {0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01};
+BYTE iplccw2[8]   = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
 /*-------------------------------------------------------------------*/
 /* ASCII/EBCDIC translate table                                      */
@@ -124,12 +127,9 @@ U32             mincyls;                /* Minimum cylinder count    */
 U32             maxcyls;                /* Maximum cylinder count    */
 int             keylen = 4;             /* Length of keys            */
 int             ipl1len = 24;           /* Length of IPL1 data       */
-int             ipl2len = 4096;         /* Length of IPL2 data       */
+int             ipl2len = 144;          /* Length of IPL2 data       */
 int             vol1len = 80;           /* Length of VOL1 data       */
 int             rec0len = 8;            /* Length of R0 data         */
-U16             vtoccyl = 0;            /* VTOC cylinder number      */
-U16             vtochead = 1;           /* VTOC head number          */
-BYTE            vtocrec = 1;            /* VTOC record number        */
 
     /* Compute minimum and maximum number of cylinders */
     cylsize = trksize * heads;
@@ -226,6 +226,9 @@ BYTE            vtocrec = 1;            /* VTOC record number        */
                 rechdr->dlen[1] = ipl1len & 0xFF;
                 convert_to_ebcdic (pos, keylen, "IPL1");
                 pos += keylen;
+                memcpy (pos, iplpsw, 8);
+                memcpy (pos+8, iplccw1, 8);
+                memcpy (pos+16, iplccw2, 8);
                 pos += ipl1len;
 
                 /* Build the IPL2 record */
@@ -258,12 +261,6 @@ BYTE            vtocrec = 1;            /* VTOC record number        */
                 pos += keylen;
                 convert_to_ebcdic (pos, 4, "VOL1");
                 convert_to_ebcdic (pos+4, 6, volser);
-                pos[10] = 0x40;
-                pos[11] = (vtoccyl >> 8) & 0xFF;
-                pos[12] = vtoccyl & 0xFF;
-                pos[13] = (vtochead >> 8) & 0xFF;
-                pos[14] = vtochead & 0xFF;
-                pos[15] = vtocrec;
                 convert_to_ebcdic (pos+37, 14, "HERCULES");
                 pos += vol1len;
 
@@ -488,7 +485,7 @@ BYTE    c;                              /* Character work area       */
 
     } /* end switch(devtype) */
 
-    /* Create a new file, with error if file already exists */
+    /* Create the DASD image file */
     fd = open (fname, O_WRONLY | O_CREAT | O_EXCL,
                 S_IRUSR | S_IWUSR | S_IRGRP);
     if (fd < 0)

@@ -248,6 +248,7 @@ U32             sctlfeat;               /* Storage control features  */
         formula = 2;
         f1 = 34; f2 = 19; f3 = 9; f4 = 6; f5 = 116; f6 = 6;
         rpscalc = 0x7708;
+        dev->ckd3990 = 1;
         break;
     case 0x3380:
         cutype = 0x3880; cumodel = 0x03; cucode = 0x10;
@@ -268,7 +269,7 @@ U32             sctlfeat;               /* Storage control features  */
         rpscalc = 0x5007;
         break;
     case 0x3350:
-        cutype = 0x3880; cumodel = 0x01; cucode = 0x00;
+        cutype = 0x3830; cumodel = 0x02; cucode = 0x00;
         devmodel = 0x00; devtcode = 0x00;
         dev->ckdsectors = 128;
         dev->ckdmaxr0len = 19254;
@@ -281,7 +282,7 @@ U32             sctlfeat;               /* Storage control features  */
         rpscalc = 0x0000;
         break;
     case 0x3330:
-        cutype = 0x3880; cumodel = 0x01; cucode = 0x00;
+        cutype = 0x3830; cumodel = 0x02; cucode = 0x00;
         if (dev->ckdcyls > 404)
             devmodel = 0x11; /*3330-11*/
         else
@@ -298,7 +299,7 @@ U32             sctlfeat;               /* Storage control features  */
         rpscalc = 0x0000;
         break;
     default:
-        cutype = 0x3880; cumodel = 0x01; cucode = 0x10;
+        cutype = 0x2841; cumodel = 0x00; cucode = 0x00;
         devmodel = 0x00; devtcode = 0x00;
         dev->ckdsectors = 0;
         dev->ckdmaxr0len = 0;
@@ -523,6 +524,21 @@ off_t           seekpos;                /* Seek position for lseek   */
         return -1;
     }
 
+    /* Validate the track header */
+    if (trkhdr->bin != 0
+        || trkhdr->cyl[0] != (cyl >> 8)
+        || trkhdr->cyl[1] != (cyl & 0xFF)
+        || trkhdr->head[0] != (head >> 8)
+        || trkhdr->head[1] != (head & 0xFF))
+    {
+        printf("ckddasd: invalid track header\n");
+
+        /* Unit check with invalid track format */
+        ckd_build_sense (dev, 0, SENSE1_ITF, 0, 0, 0);
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
     /* Set device orientation fields */
     dev->ckdcurcyl = cyl;
     dev->ckdcurhead = head;
@@ -673,9 +689,9 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
         if (memcmp(rechdr, eighthexFF, 8) != 0)
             break;
 
-        /* If this is a READ TRACK command, return with the
+        /* For READ TRACK or READ MULTIPLE CKD, return with the
            end of track marker in the record header field */
-        if (code == 0xDE)
+        if (code == 0xDE || code == 0x5E)
             break;
 
         /* End of track found, so terminate with no record found
@@ -982,8 +998,9 @@ U16             kdlen;                  /* Key+data length           */
     /* Pad the I/O buffer with zeroes if necessary */
     while (len < kdlen) buf[len++] = '\0';
 
-    DEVTRACE("ckddasd: updating record %d kl %d dl %d\n",
-            dev->ckdcurrec, dev->ckdcurkl, dev->ckdcurdl);
+    DEVTRACE("ckddasd: updating cyl %d head %d record %d kl %d dl %d\n",
+            dev->ckdcurcyl, dev->ckdcurhead, dev->ckdcurrec,
+            dev->ckdcurkl, dev->ckdcurdl);
 
     /* Write key and data */
     rc = write (dev->fd, buf, kdlen);
@@ -1042,8 +1059,9 @@ int             skiplen;                /* Number of bytes to skip   */
     /* Pad the I/O buffer with zeroes if necessary */
     while (len < dev->ckdcurdl) buf[len++] = '\0';
 
-    DEVTRACE("ckddasd: updating record %d dl %d\n",
-            dev->ckdcurrec, dev->ckdcurdl);
+    DEVTRACE("ckddasd: updating cyl %d head %d record %d dl %d\n",
+            dev->ckdcurcyl, dev->ckdcurhead, dev->ckdcurrec,
+            dev->ckdcurdl);
 
     /* Write data */
     rc = write (dev->fd, buf, dev->ckdcurdl);
@@ -1102,7 +1120,7 @@ BYTE            key[256];               /* Key for search operations */
     }
 
     /* Command reject if data chaining and command is not READ */
-    if ((flags & CCW_FLAGS_CD) && code != 0x02
+    if ((flags & CCW_FLAGS_CD) && code != 0x02 && code != 0x5E
         && (code & 0x7F) != 0x1E && (code & 0x7F) != 0x1A
         && (code & 0x7F) != 0x16 && (code & 0x7F) != 0x12
         && (code & 0x7F) != 0x0E && (code & 0x7F) != 0x06)
@@ -1235,14 +1253,23 @@ BYTE            key[256];               /* Key for search operations */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
+    case 0x17:
+    /*---------------------------------------------------------------*/
+    /* RESTORE                                                       */
+    /*---------------------------------------------------------------*/
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
     case 0x06:
     case 0x86:
     /*---------------------------------------------------------------*/
     /* READ DATA                                                     */
     /*---------------------------------------------------------------*/
-        /* Command reject if not preceded by a Seek, Seek Cylinder,
+        /* For 3990, command reject if not preceded by Seek, Seek Cyl,
            Locate Record, Read IPL, or Recalibrate command */
-        if (dev->ckdseek == 0 && dev->ckdskcyl == 0
+        if (dev->ckd3990
+            && dev->ckdseek == 0 && dev->ckdskcyl == 0
             && dev->ckdlocat == 0 && dev->ckdrdipl == 0
             && dev->ckdrecal == 0)
         {
@@ -1301,9 +1328,10 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
     /* READ KEY AND DATA                                             */
     /*---------------------------------------------------------------*/
-        /* Command reject if not preceded by a Seek, Seek Cylinder,
+        /* For 3990, command reject if not preceded by Seek, Seek Cyl,
            Locate Record, Read IPL, or Recalibrate command */
-        if (dev->ckdseek == 0 && dev->ckdskcyl == 0
+        if (dev->ckd3990
+            && dev->ckdseek == 0 && dev->ckdskcyl == 0
             && dev->ckdlocat == 0 && dev->ckdrdipl == 0
             && dev->ckdrecal == 0)
         {
@@ -1365,9 +1393,10 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
     /* READ COUNT                                                    */
     /*---------------------------------------------------------------*/
-        /* Command reject if not preceded by a Seek, Seek Cylinder,
+        /* For 3990, command reject if not preceded by Seek, Seek Cyl,
            Locate Record, Read IPL, or Recalibrate command */
-        if (dev->ckdseek == 0 && dev->ckdskcyl == 0
+        if (dev->ckd3990
+            && dev->ckdseek == 0 && dev->ckdskcyl == 0
             && dev->ckdlocat == 0 && dev->ckdrdipl == 0
             && dev->ckdrecal == 0)
         {
@@ -1419,9 +1448,10 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
     /* READ RECORD ZERO                                              */
     /*---------------------------------------------------------------*/
-        /* Command reject if not preceded by a Seek, Seek Cylinder,
+        /* For 3990, command reject if not preceded by Seek, Seek Cyl,
            Locate Record, Read IPL, or Recalibrate command */
-        if (dev->ckdseek == 0 && dev->ckdskcyl == 0
+        if (dev->ckd3990
+            && dev->ckdseek == 0 && dev->ckdskcyl == 0
             && dev->ckdlocat == 0 && dev->ckdrdipl == 0
             && dev->ckdrecal == 0)
         {
@@ -1503,9 +1533,10 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
     /* READ HOME ADDRESS                                             */
     /*---------------------------------------------------------------*/
-        /* Command reject if not preceded by a Seek, Seek Cylinder,
+        /* For 3990, command reject if not preceded by Seek, Seek Cyl,
            Locate Record, Read IPL, or Recalibrate command */
-        if (dev->ckdseek == 0 && dev->ckdskcyl == 0
+        if (dev->ckd3990
+            && dev->ckdseek == 0 && dev->ckdskcyl == 0
             && dev->ckdlocat == 0 && dev->ckdrdipl == 0
             && dev->ckdrecal == 0)
         {
@@ -1567,9 +1598,10 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
     /* READ COUNT KEY AND DATA                                       */
     /*---------------------------------------------------------------*/
-        /* Command reject if not preceded by a Seek, Seek Cylinder,
+        /* For 3990, command reject if not preceded by Seek, Seek Cyl,
            Locate Record, Read IPL, or Recalibrate command */
-        if (dev->ckdseek == 0 && dev->ckdskcyl == 0
+        if (dev->ckd3990
+            && dev->ckdseek == 0 && dev->ckdskcyl == 0
             && dev->ckdlocat == 0 && dev->ckdrdipl == 0
             && dev->ckdrecal == 0)
         {
@@ -1626,6 +1658,73 @@ BYTE            key[256];               /* Key for search operations */
             *unitstat = CSW_CE | CSW_DE | CSW_UX;
         else
             *unitstat = CSW_CE | CSW_DE;
+
+        break;
+
+    case 0x5E:
+    /*---------------------------------------------------------------*/
+    /* READ MULTIPLE COUNT KEY AND DATA                              */
+    /*---------------------------------------------------------------*/
+        /* Command reject if within the domain of a Locate Record */
+        if (dev->ckdlocat)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* For 3990, command reject if not preceded by Seek, Seek Cyl,
+           Locate Record, Read IPL, or Recalibrate */
+        if (dev->ckd3990
+            && dev->ckdseek == 0 && dev->ckdskcyl == 0
+            && dev->ckdlocat == 0 && dev->ckdrdipl == 0
+            && dev->ckdrecal == 0)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Read records into the I/O buffer until end of track */
+        for (size = 0; ; )
+        {
+            /* Read next count field */
+            rc = ckd_read_count (dev, code, &rechdr, unitstat);
+            if (rc < 0) break;
+
+            /* Exit if end of track marker was read */
+            if (memcmp (&rechdr, eighthexFF, 8) == 0)
+                break;
+
+            /* Copy count field to I/O buffer */
+            memcpy (iobuf + size, &rechdr, CKDDASD_RECHDR_SIZE);
+            size += CKDDASD_RECHDR_SIZE;
+
+            /* Read key field */
+            rc = ckd_read_key (dev, code, iobuf + size, unitstat);
+            if (rc < 0) break;
+            size += dev->ckdcurkl;
+
+            /* Read data field */
+            rc = ckd_read_data (dev, code, iobuf + size, unitstat);
+            if (rc < 0) break;
+            size += dev->ckdcurdl;
+
+        } /* end for(size) */
+
+        /* Set the residual count */
+        num = (count < size) ? count : size;
+        *residual = count - num;
+        if (count < size) *more = 1;
+
+        /* Save size and offset of data not used by this CCW */
+        dev->ckdrem = size - num;
+        dev->ckdpos = num;
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
 
         break;
 
@@ -1718,9 +1817,10 @@ BYTE            key[256];               /* Key for search operations */
             break;
         }
 
-        /* Command reject if Seek Head not preceded by a Seek,
+        /* For 3990, command reject if Seek Head not preceded by Seek,
            Seek Cylinder, Locate Record, Read IPL, or Recalibrate */
-        if (code == 0x1B && dev->ckdseek == 0 && dev->ckdskcyl == 0
+        if (code == 0x1B && dev->ckd3990
+            && dev->ckdseek == 0 && dev->ckdskcyl == 0
             && dev->ckdlocat == 0 && dev->ckdrdipl == 0
             && dev->ckdrecal == 0)
         {
@@ -1933,9 +2033,10 @@ BYTE            key[256];               /* Key for search operations */
             break;
         }
 
-        /* Command reject if not preceded by a Seek, Seek Cylinder,
+        /* For 3990, command reject if not preceded by Seek, Seek Cyl,
            Locate Record, Read IPL, or Recalibrate command */
-        if (dev->ckdseek == 0 && dev->ckdskcyl == 0
+        if (dev->ckd3990
+            && dev->ckdseek == 0 && dev->ckdskcyl == 0
             && dev->ckdlocat == 0 && dev->ckdrdipl == 0
             && dev->ckdrecal == 0)
         {
@@ -1968,9 +2069,10 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
     /* SEARCH KEY                                                    */
     /*---------------------------------------------------------------*/
-        /* Command reject if not preceded by a Seek, Seek Cylinder,
+        /* For 3990, command reject if not preceded by Seek, Seek Cyl,
            Locate Record, Read IPL, or Recalibrate command */
-        if (dev->ckdseek == 0 && dev->ckdskcyl == 0
+        if (dev->ckd3990
+            && dev->ckdseek == 0 && dev->ckdskcyl == 0
             && dev->ckdlocat == 0 && dev->ckdrdipl == 0
             && dev->ckdrecal == 0)
         {
@@ -2042,9 +2144,10 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
     /* SEARCH ID                                                     */
     /*---------------------------------------------------------------*/
-        /* Command reject if not preceded by a Seek, Seek Cylinder,
+        /* For 3990, command reject if not preceded by Seek, Seek Cyl,
            Locate Record, Read IPL, or Recalibrate command */
-        if (dev->ckdseek == 0 && dev->ckdskcyl == 0
+        if (dev->ckd3990
+            && dev->ckdseek == 0 && dev->ckdskcyl == 0
             && dev->ckdlocat == 0 && dev->ckdrdipl == 0
             && dev->ckdrecal == 0)
         {
@@ -2094,9 +2197,10 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
     /* SEARCH HOME ADDRESS EQUAL                                     */
     /*---------------------------------------------------------------*/
-        /* Command reject if not preceded by a Seek, Seek Cylinder,
+        /* For 3990, command reject if not preceded by Seek, Seek Cyl,
            Locate Record, Read IPL, or Recalibrate command */
-        if (dev->ckdseek == 0 && dev->ckdskcyl == 0
+        if (dev->ckd3990
+            && dev->ckdseek == 0 && dev->ckdskcyl == 0
             && dev->ckdlocat == 0 && dev->ckdrdipl == 0
             && dev->ckdrecal == 0)
         {

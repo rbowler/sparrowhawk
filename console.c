@@ -1136,6 +1136,16 @@ int loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     /* Set the size of the device buffer */
     dev->bufsize = BUFLEN_3270;
 
+    /* Initialize the device identifier bytes */
+    dev->devid[0] = 0xFF;
+    dev->devid[1] = 0x32; /* Control unit type is 3272-1 */
+    dev->devid[2] = 0x72;
+    dev->devid[3] = 0x01;
+    dev->devid[4] = dev->devtype >> 8;
+    dev->devid[5] = dev->devtype & 0xFF;
+    dev->devid[6] = 0x02;
+    dev->numdevid = 7;
+
     /* Activate CCW tracing */
 //  dev->ccwtrace = 1;
 
@@ -1159,6 +1169,16 @@ int constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 
     /* Set length of print buffer */
     dev->bufsize = LINE_LENGTH;
+
+    /* Initialize the device identifier bytes */
+    dev->devid[0] = 0xFF;
+    dev->devid[1] = dev->devtype >> 8;
+    dev->devid[2] = dev->devtype & 0xFF;
+    dev->devid[3] = 0x00;
+    dev->devid[4] = dev->devtype >> 8;
+    dev->devid[5] = dev->devtype & 0xFF;
+    dev->devid[6] = 0x00;
+    dev->numdevid = 7;
 
     /* Activate I/O tracing */
 //  dev->ccwtrace = 1;
@@ -1351,6 +1371,22 @@ BYTE            buf[4096];              /* tn3270 write buffer       */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
+    case 0xE4:
+    /*---------------------------------------------------------------*/
+    /* SENSE ID                                                      */
+    /*---------------------------------------------------------------*/
+        /* Calculate residual byte count */
+        num = (count < dev->numdevid) ? count : dev->numdevid;
+        *residual = count - num;
+        if (count < dev->numdevid) *more = 1;
+
+        /* Copy device identifier bytes to channel I/O buffer */
+        memcpy (iobuf, dev->devid, num);
+
+        /* Return unit status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
     default:
     /*---------------------------------------------------------------*/
     /* INVALID OPERATION                                             */
@@ -1530,6 +1566,22 @@ BYTE    stat;                           /* Unit status               */
 
         /* Clear the device sense bytes */
         memset (dev->sense, 0, sizeof(dev->sense));
+
+        /* Return unit status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0xE4:
+    /*---------------------------------------------------------------*/
+    /* SENSE ID                                                      */
+    /*---------------------------------------------------------------*/
+        /* Calculate residual byte count */
+        num = (count < dev->numdevid) ? count : dev->numdevid;
+        *residual = count - num;
+        if (count < dev->numdevid) *more = 1;
+
+        /* Copy device identifier bytes to channel I/O buffer */
+        memcpy (iobuf, dev->devid, num);
 
         /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;

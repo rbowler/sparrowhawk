@@ -42,6 +42,16 @@ int printer_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     /* Set number of sense bytes */
     dev->numsense = 1;
 
+    /* Initialize the device identifier bytes */
+    dev->devid[0] = 0xFF;
+    dev->devid[1] = 0x28; /* Control unit type is 2821-1 */
+    dev->devid[2] = 0x21;
+    dev->devid[3] = 0x01;
+    dev->devid[4] = dev->devtype >> 8;
+    dev->devid[5] = dev->devtype & 0xFF;
+    dev->devid[6] = 0x01;
+    dev->numdevid = 7;
+
     /* Activate I/O tracing */
     dev->ccwtrace = 1;
 
@@ -62,7 +72,7 @@ char   *eor;                            /* -> end of record string   */
 BYTE    c;                              /* Print character           */
 
     /* Open the device file if necessary */
-    if (dev->fp == NULL)
+    if (dev->fp == NULL && !IS_CCW_SENSE(code))
     {
         dev->fp = fopen (dev->filename, "w");
         if (dev->fp == NULL)
@@ -303,6 +313,22 @@ BYTE    c;                              /* Print character           */
 
         /* Clear the device sense bytes */
         memset (dev->sense, 0, sizeof(dev->sense));
+
+        /* Return unit status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0xE4:
+    /*---------------------------------------------------------------*/
+    /* SENSE ID                                                      */
+    /*---------------------------------------------------------------*/
+        /* Calculate residual byte count */
+        num = (count < dev->numdevid) ? count : dev->numdevid;
+        *residual = count - num;
+        if (count < dev->numdevid) *more = 1;
+
+        /* Copy device identifier bytes to channel I/O buffer */
+        memcpy (iobuf, dev->devid, num);
 
         /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;

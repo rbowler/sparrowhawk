@@ -445,12 +445,13 @@ void *timer_update_thread (void *argp)
 int     cpu;                            /* CPU engine number         */
 REGS   *regs;                           /* -> CPU register context   */
 int     intflag = 0;                    /* 1=Interrupt possible      */
+U64     prev;                           /* Previous TOD clock value  */
 U64     diff;                           /* Difference between new and
                                            previous TOD clock values */
 U64     dreg;                           /* Double register work area */
 struct  timeval tv;                     /* Structure for gettimeofday
                                            and select function calls */
-#define CLOCK_RESOLUTION        100     /* TOD clock resolution in
+#define CLOCK_RESOLUTION        1       /* TOD clock resolution in
                                            milliseconds              */
 
     while (1)
@@ -470,12 +471,13 @@ struct  timeval tv;                     /* Structure for gettimeofday
         /* Convert to TOD clock format */
         dreg <<= 12;
 
-        /* Calculate the difference between the new TOD clock
-           value and the previous value, if the clock is set */
-        diff = (sysblk.todclk == 0 ? 0 : dreg - sysblk.todclk);
-
         /* Obtain the TOD clock update lock */
         obtain_lock (&sysblk.todlock);
+
+        /* Calculate the difference between the new TOD clock
+           value and the previous value, if the clock is set */
+        prev = sysblk.todclk & 0xFFFFFFFFFFFFF000ULL;
+        diff = (prev == 0 ? 0 : dreg - prev);
 
         /* Update the TOD clock */
         sysblk.todclk = dreg;

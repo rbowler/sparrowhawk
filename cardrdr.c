@@ -115,9 +115,11 @@ int     rc;                             /* Return code               */
     if (rc < CARD_SIZE)
     {
         if (rc < 0)
-            perror("cardrdr: read error");
+            printf ("HHC403I Error reading file %s: %s\n",
+                    dev->filename, strerror(errno));
         else
-            printf("cardrdr: unexpected end of file\n");
+            printf ("HHC404I Unexpected end of file on %s\n",
+                    dev->filename);
 
         /* Set unit check with equipment check */
         dev->sense[0] = SENSE_EC;
@@ -162,7 +164,8 @@ BYTE    c;                              /* Input character           */
         /* Handle read error condition */
         if (rc < 0)
         {
-            perror("cardrdr: read error");
+            printf ("HHC405I Error reading file %s: %s\n",
+                    dev->filename, strerror(errno));
 
             /* Set unit check with equipment check */
             dev->sense[0] = SENSE_EC;
@@ -208,13 +211,14 @@ int     rc;                             /* Return code               */
 int     num;                            /* Number of bytes to move   */
 
     /* Open the device file if necessary */
-    if (dev->fd < 0)
+    if (dev->fd < 0 && !IS_CCW_SENSE(code))
     {
         rc = open (dev->filename, O_RDONLY);
         if (rc < 0)
         {
             /* Handle open failure */
-            perror("cardrdr: open error");
+            printf ("HHC406I Error opening file %s: %s\n",
+                    dev->filename, strerror(errno));
 
             /* Set unit check with intervention required */
             dev->sense[0] = SENSE_IR;
@@ -287,6 +291,22 @@ int     num;                            /* Number of bytes to move   */
 
         /* Clear the device sense bytes */
         memset (dev->sense, 0, sizeof(dev->sense));
+
+        /* Return unit status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0xE4:
+    /*---------------------------------------------------------------*/
+    /* SENSE ID                                                      */
+    /*---------------------------------------------------------------*/
+        /* Calculate residual byte count */
+        num = (count < dev->numdevid) ? count : dev->numdevid;
+        *residual = count - num;
+        if (count < dev->numdevid) *more = 1;
+
+        /* Copy device identifier bytes to channel I/O buffer */
+        memcpy (iobuf, dev->devid, num);
 
         /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;

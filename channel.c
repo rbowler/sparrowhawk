@@ -611,6 +611,28 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
                         dev->sense[17], dev->sense[18], dev->sense[19],
                         dev->sense[20], dev->sense[21], dev->sense[22],
                         dev->sense[23]);
+                if (dev->sense[0] != 0 || dev->sense[1] != 0)
+                {
+                    printf ("%4.4X:Sense=%s%s%s%s%s%s%s%s"
+                            "%s%s%s%s%s%s%s%s\n",
+                            dev->devnum,
+                            (dev->sense[0] & SENSE_CR) ? "CMDREJ " : "",
+                            (dev->sense[0] & SENSE_IR) ? "INTREQ " : "",
+                            (dev->sense[0] & SENSE_BOC) ? "BOC " : "",
+                            (dev->sense[0] & SENSE_EC) ? "EQC " : "",
+                            (dev->sense[0] & SENSE_DC) ? "DCK " : "",
+                            (dev->sense[0] & SENSE_OR) ? "OVR " : "",
+                            (dev->sense[0] & SENSE_CC) ? "CCK " : "",
+                            (dev->sense[0] & SENSE_OC) ? "OCK " : "",
+                            (dev->sense[1] & SENSE1_PER) ? "PER " : "",
+                            (dev->sense[1] & SENSE1_ITF) ? "ITF " : "",
+                            (dev->sense[1] & SENSE1_EOC) ? "EOC " : "",
+                            (dev->sense[1] & SENSE1_MTO) ? "MSG " : "",
+                            (dev->sense[1] & SENSE1_NRF) ? "NRF " : "",
+                            (dev->sense[1] & SENSE1_FP) ? "FP " : "",
+                            (dev->sense[1] & SENSE1_WRI) ? "WRI " : "",
+                            (dev->sense[1] & SENSE1_IE) ? "IE " : "");
+                }
             }
         }
 
@@ -969,10 +991,6 @@ DEVBLK *dev;                            /* -> Device control block   */
     /* Extract the I/O address and interrupt parameter */
     *ioid = 0x00010000 | dev->subchan;
     *ioparm = dev->ioparm;
-
-    /* Display the subchannel status word */
-    if (dev->ccwtrace || dev->ccwstep)
-        display_scsw (dev);
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
     /* Reset the interrupt pending and busy flags for the device */
