@@ -42,9 +42,9 @@ typedef struct _CKDDASD_RECHDR {        /* Record header             */
 /* Bit definitions for File Mask                                     */
 /*-------------------------------------------------------------------*/
 #define CKDMASK_WRCTL           0xC0    /* Write control bits...     */
-#define CKDMASK_WRCTL_INHFMT    0x00    /* ...inhibit write HA/R0    */
+#define CKDMASK_WRCTL_INHWR0    0x00    /* ...inhibit write HA/R0    */
 #define CKDMASK_WRCTL_INHWRT    0x40    /* ...inhibit all writes     */
-#define CKDMASK_WRCTL_WRTUPD    0x80    /* ...write update only      */
+#define CKDMASK_WRCTL_ALLWRU    0x80    /* ...write update only      */
 #define CKDMASK_WRCTL_ALLWRT    0xC0    /* ...allow all writes       */
 #define CKDMASK_RESV            0x20    /* Reserved bits - must be 0 */
 #define CKDMASK_SKCTL           0x18    /* Seek control bits...      */
@@ -374,21 +374,18 @@ U16             cyl;                    /* Cylinder number for seek  */
 U16             head;                   /* Head number for seek      */
 CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
 
-    /* For Read Count and Read Count Key and Data, skip record zero */
-    if ((code & 0x7F) == 0x12 || (code & 0x7F) == 0x1E)
+    /* Skip record 0 for all operations except READ TRACK, READ R0,
+       SEARCH ID EQUAL, SEARCH ID HIGH, and SEARCH ID EQUAL OR HIGH */
+    if (code != 0xDE
+        && (code & 0x7F) != 0x16
+        && (code & 0x7F) != 0x31
+        && (code & 0x7F) != 0x51
+        && (code & 0x7F) != 0x71)
         skipr0 = 1;
 
     /* Search for next count field */
     for ( ; ; )
     {
-        /* Skip record 0 on if end of track already passed for all
-           operations except Search Id Equal/High/Equal or High */
-        if (dev->ckdxmark
-            && (code & 0x7F) != 0x31
-            && (code & 0x7F) != 0x51
-            && (code & 0x7F) != 0x71)
-            skipr0 = 1;
-
         /* If oriented to count or key field, skip key and data */
         if (dev->ckdorient == CKDORIENT_COUNT)
             skiplen = dev->ckdcurkl + dev->ckdcurdl;
@@ -570,6 +567,119 @@ int             skiplen;                /* Number of bytes to skip   */
 
 
 /*-------------------------------------------------------------------*/
+/* Write count key and data fields                                   */
+/*-------------------------------------------------------------------*/
+static int ckd_write_ckd ( DEVBLK *dev, BYTE *buf, U16 len,
+                BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+CKDDASD_RECHDR  rechdr;                 /* CKD record header         */
+BYTE            recnum;                 /* Record number             */
+BYTE            keylen;                 /* Key length                */
+U16             datalen;                /* Data length               */
+U16             ckdlen;                 /* Count+key+data length     */
+off_t           curpos;                 /* Current position in file  */
+off_t           nxtpos;                 /* Position of next track    */
+
+    /* Copy the count field from the buffer */
+    memset (&rechdr, 0, CKDDASD_RECHDR_SIZE);
+    memcpy (&rechdr, buf, (len < CKDDASD_RECHDR_SIZE) ?
+                                len : CKDDASD_RECHDR_SIZE);
+
+    /* Extract the record number, key length and data length */
+    recnum = rechdr.rec;
+    keylen = rechdr.klen;
+    datalen = (rechdr.dlen[0] << 8) + rechdr.dlen[1];
+
+    /* Calculate total count key and data size */
+    ckdlen = CKDDASD_RECHDR_SIZE + keylen + datalen;
+
+    /* Determine the current position in the file */
+    curpos = lseek (dev->fd, 0, SEEK_CUR);
+    if (curpos < 0)
+    {
+        /* Handle seek error condition */
+        perror("ckddasd: lseek error");
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Calculate the position of the next track in the file */
+    nxtpos = CKDDASD_DEVHDR_SIZE
+            + (((dev->ckdcurcyl * dev->ckdheads) + dev->ckdcurhead)
+                * dev->ckdtrksz) + dev->ckdtrksz;
+
+    /* Check that there is enough space on the current track to
+       contain the complete record plus an end of track marker */
+    if (curpos + ckdlen + 8 >= nxtpos)
+    {
+        /* Unit check with equipment check and invalid track format */
+        dev->sense[0] = SENSE_EC;
+        dev->sense[1] = SENSE1_ITF;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Pad the I/O buffer with zeroes if necessary */
+    while (len < ckdlen) buf[len++] = '\0';
+
+    printf("ckddasd: writing record %d kl %d dl %d\n",
+            recnum, keylen, datalen);
+
+    /* Write count key and data */
+    rc = write (dev->fd, buf, ckdlen);
+    if (rc < ckdlen)
+    {
+        /* Handle write error condition */
+        perror("ckddasd: write error");
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Logically erase rest of track by writing end of track marker */
+    rc = write (dev->fd, eighthexFF, 8);
+    if (rc < CKDDASD_RECHDR_SIZE)
+    {
+        /* Handle write error condition */
+        perror("ckddasd: write error");
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Backspace over end of track marker */
+    rc = lseek (dev->fd, -(CKDDASD_RECHDR_SIZE), SEEK_CUR);
+    if (rc < 0)
+    {
+        /* Handle seek error condition */
+        perror("ckddasd: lseek error");
+
+        /* Set unit check with equipment check */
+        dev->sense[0] = SENSE_EC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Set the device orientation fields */
+    dev->ckdcurrec = recnum;
+    dev->ckdcurkl = keylen;
+    dev->ckdcurdl = datalen;
+    dev->ckdrem = 0;
+    dev->ckdorient = CKDORIENT_DATA;
+
+    return 0;
+} /* end function ckd_write_ckd */
+
+
+/*-------------------------------------------------------------------*/
 /* Execute a Channel Command Word                                    */
 /*-------------------------------------------------------------------*/
 void ckddasd_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
@@ -587,6 +697,15 @@ U16             head;                   /* Head number               */
 BYTE            fmask;                  /* File mask                 */
 BYTE            key[256];               /* Key for search operations */
 
+    /* Command reject if data chaining */
+    if (flags & CCW_FLAGS_CD)
+    {
+        printf ("ckddasd: CKD data chaining not supported\n");
+        dev->sense[0] = SENSE_CR;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return;
+    }
+
     /* Reset flags at start of CCW chain */
     if (chained == 0)
     {
@@ -599,6 +718,10 @@ BYTE            key[256];               /* Key for search operations */
         dev->ckdrdipl = 0;
         dev->ckdfmask = 0;
         dev->ckdxmark = 0;
+        dev->ckdhaeq = 0;
+        dev->ckdideq = 0;
+        dev->ckdkyeq = 0;
+        dev->ckdwckd = 0;
     }
 
     /* Reset index marker flag if write, sense, or control command,
@@ -653,11 +776,7 @@ BYTE            key[256];               /* Key for search operations */
         rc = ckd_seek (dev, 0, 0, &trkhdr, unitstat);
         if (rc < 0) break;
 
-        /* Read count field for record zero */
-        rc = ckd_read_count (dev, code, &rechdr, unitstat);
-        if (rc < 0) break;
-
-        /* Read count field for next record */
+        /* Read count field for first record following R0 */
         rc = ckd_read_count (dev, code, &rechdr, unitstat);
         if (rc < 0) break;
 
@@ -1304,6 +1423,12 @@ BYTE            key[256];               /* Key for search operations */
         else
             *unitstat = CSW_CE | CSW_DE;
 
+        /* Set flag if entire key was equal for SEARCH KEY EQUAL */
+        if (rc == 0 && num == dev->ckdcurkl && (code & 0x7F) == 0x29)
+            dev->ckdkyeq = 1;
+        else
+            dev->ckdkyeq = 0;
+
         break;
 
     case 0x31: case 0xB1: /* SEARCH ID EQUAL */
@@ -1349,6 +1474,323 @@ BYTE            key[256];               /* Key for search operations */
         else
             *unitstat = CSW_CE | CSW_DE;
 
+        /* Set flag if entire id compared equal for SEARCH ID EQUAL */
+        if (rc == 0 && num == 5 && (code & 0x7F) == 0x31)
+            dev->ckdideq = 1;
+        else
+            dev->ckdideq = 0;
+
+        break;
+
+    case 0x39:
+    case 0xB9:
+    /*---------------------------------------------------------------*/
+    /* SEARCH HOME ADDRESS EQUAL                                     */
+    /*---------------------------------------------------------------*/
+        /* Command reject if not preceded by a Seek, Seek Cylinder,
+           Locate Record, Read IPL, or Recalibrate command */
+        if (dev->ckdseek == 0 && dev->ckdskcyl == 0
+            && dev->ckdlocat == 0 && dev->ckdrdipl == 0
+            && dev->ckdrecal == 0)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Command reject if within the domain of a Locate Record */
+        if (dev->ckdlocat)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* For multitrack operation, advance to next track */
+        if (code & 0x80)
+        {
+            rc = mt_advance (dev, unitstat);
+            if (rc < 0) break;
+        }
+
+        /* Seek to beginning of track */
+        rc = ckd_seek (dev, dev->ckdcurcyl, dev->ckdcurhead,
+                        &trkhdr, unitstat);
+        if (rc < 0) break;
+
+        /* Calculate number of compare bytes and set residual count */
+        num = (count < 4) ? count : 4;
+        *residual = count - num;
+
+        /* Compare CCHH portion of track header with search argument */
+        rc = memcmp(&trkhdr+1, iobuf, num);
+
+        /* Return status modifier if compare result matches */
+        if (rc == 0)
+            *unitstat = CSW_SM | CSW_CE | CSW_DE;
+        else
+            *unitstat = CSW_CE | CSW_DE;
+
+        /* Set flag if entire home address compared equal */
+        if (rc == 0 && num == 4)
+            dev->ckdhaeq = 1;
+        else
+            dev->ckdhaeq = 0;
+
+        break;
+
+#if 0 /* Write commands still under development */
+    case 0x05:
+    /*---------------------------------------------------------------*/
+    /* WRITE DATA                                                    */
+    /*---------------------------------------------------------------*/
+        /* Command reject if the current track is in the DSF area */
+        /*INCOMPLETE*/
+            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+
+        /* Command reject if not within the domain of a Locate Record
+           and not preceded by either a Search ID Equal or Search Key
+           Equal that compared equal on all bytes */
+           /*INCOMPLETE*/ /*Write CKD allows intervening Read/Write
+             key and data commands, Write Data does not!!! Rethink
+             the handling of these flags*/
+        if (dev->ckdlocat == 0 && dev->ckdideq == 0
+            && dev->ckdkyeq == 0)
+        {
+            dev->sense[0] = SENSE_CR;
+            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Command reject if file mask inhibits all write commands */
+        if ((dev->ckdfmask & CKDMASK_WRCTL) == CKDMASK_WRCTL_INHWRT)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+            break;
+        }
+
+        /* Check operation code if within domain of a Locate Record */
+        if (dev->ckdlocat)
+        {
+            if (!(((dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRITE
+        /*INCOMPLETE*/ && dev->ckdlcount == 1 /*+ 1 if rdcount suffix */)
+                  || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRTTRK))
+            {
+                dev->sense[0] = SENSE_CR;
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+                break;
+            }
+            /*INCOMPLETE*/ /*Use transfer length factor and check
+            against CKD conversion mode*/
+        }
+
+        /* If data length is zero, terminate with unit exception */
+        if (dev->ckdcurdl == 0)
+        {
+            *unitstat = CSW_CE | CSW_DE | CSW_UX;
+            break;
+        }
+
+        /* Write data */
+        rc = ckd_write_data (dev, iobuf, count, unitstat);
+        if (rc < 0) break;
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+
+        break;
+
+    case 0x0D:
+    /*---------------------------------------------------------------*/
+    /* WRITE KEY AND DATA                                            */
+    /*---------------------------------------------------------------*/
+        /* Command reject if the current track is in the DSF area */
+        /*INCOMPLETE*/
+            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+
+        /* Command reject if not within the domain of a Locate Record
+           and not preceded by a Search ID Equal that compared equal
+           on all bytes */
+           /*INCOMPLETE*/ /*Write CKD allows intervening Read/Write
+             key and data commands, Write Key Data does not!!! Rethink
+             the handling of these flags*/
+        if (dev->ckdlocat == 0 && dev->ckdideq == 0)
+        {
+            dev->sense[0] = SENSE_CR;
+            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Command reject if file mask inhibits all write commands */
+        if ((dev->ckdfmask & CKDMASK_WRCTL) == CKDMASK_WRCTL_INHWRT)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+            break;
+        }
+
+        /* Check operation code if within domain of a Locate Record */
+        if (dev->ckdlocat)
+        {
+            if (!(((dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRITE
+        /*INCOMPLETE*/ && dev->ckdlcount == 1 /*+ 1 if rdcount suffix */)
+                  || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRTTRK))
+            {
+                dev->sense[0] = SENSE_CR;
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+                break;
+            }
+            /*INCOMPLETE*/ /*Use transfer length factor and check
+            against CKD conversion mode*/
+        }
+
+        /* If data length is zero, terminate with unit exception */
+        if (dev->ckdcurdl == 0)
+        {
+            *unitstat = CSW_CE | CSW_DE | CSW_UX;
+            break;
+        }
+
+        /* Write key and data */
+        rc = ckd_write_kd (dev, iobuf, count, unitstat);
+        if (rc < 0) break;
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+
+        break;
+
+    case 0x15:
+    /*---------------------------------------------------------------*/
+    /* WRITE RECORD ZERO                                             */
+    /*---------------------------------------------------------------*/
+        /* Command reject if the current track is in the DSF area */
+        /*INCOMPLETE*/
+            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+
+        /* Command reject if not within the domain of a Locate Record
+           and not preceded by either a Search Home Address that
+           compared equal on all 4 bytes, or a Write Home Address not
+           within the domain of a Locate Record */
+        if (dev->ckdlocat == 0 && dev->ckdhaeq == 0)
+        {
+            dev->sense[0] = SENSE_CR;
+            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Command reject if file mask does not permit Write R0 */
+        if ((dev->ckdfmask & CKDMASK_WRCTL) != CKDMASK_WRCTL_ALLWRT)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+            break;
+        }
+
+        /* Check operation code if within domain of a Locate Record */
+        if (dev->ckdlocat)
+        {
+            if (!((dev->ckdloper & CKDOPER_CODE) == CKDOPER_FORMAT
+                    && ((dev->ckdloper & CKDOPER_ORIENTATION)
+                                == CKDOPER_ORIENT_HOME
+                          || (dev->ckdloper & CKDOPER_ORIENTATION)
+                                == CKDOPER_ORIENT_INDEX
+                       )))
+            {
+                dev->sense[0] = SENSE_CR;
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+                break;
+            }
+        }
+
+        /* Write R0 count key and data */
+        rc = ckd_write_ckd (dev, iobuf, count, unitstat);
+        if (rc < 0) break;
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+
+        /* Set flag if Write R0 outside domain of a locate record */
+        if (dev->ckdlocat == 0)
+            dev->ckdwckd = 1;
+        else
+            dev->ckdwckd = 0;
+
+        break;
+
+#endif
+    case 0x1D:
+    /*---------------------------------------------------------------*/
+    /* WRITE COUNT KEY AND DATA                                      */
+    /*---------------------------------------------------------------*/
+        /* Command reject if the current track is in the DSF area */
+        /*INCOMPLETE*/
+            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+
+        /* Command reject if previous command was a Write R0 that
+           assigned an alternate track */
+        /*INCOMPLETE*/
+            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+
+        /* Command reject if not within the domain of a Locate Record
+           and not preceded by either a Search ID Equal or Search Key
+           Equal that compared equal on all bytes, or a Write R0 or
+           Write CKD not within the domain of a Locate Record */
+        if (dev->ckdlocat == 0 && dev->ckdideq == 0
+            && dev->ckdkyeq == 0 && dev->ckdwckd == 0)
+        {
+            dev->sense[0] = SENSE_CR;
+            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Command reject if file mask does not permit Write CKD */
+        if ((dev->ckdfmask & CKDMASK_WRCTL) != CKDMASK_WRCTL_ALLWRT
+            && (dev->ckdfmask & CKDMASK_WRCTL) != CKDMASK_WRCTL_INHWR0)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+            break;
+        }
+
+        /* Check operation code if within domain of a Locate Record */
+        if (dev->ckdlocat)
+        {
+            if (!((dev->ckdloper & CKDOPER_CODE) == CKDOPER_FORMAT
+                  || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRTTRK))
+            {
+                dev->sense[0] = SENSE_CR;
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                /*INCOMPLETE*/ /*Sense Format 0 message 2*/
+                break;
+            }
+        }
+
+        /* Write count key and data */
+        rc = ckd_write_ckd (dev, iobuf, count, unitstat);
+        if (rc < 0) break;
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+
+        /* Set flag if Write CKD outside domain of a locate record */
+        if (dev->ckdlocat == 0)
+            dev->ckdwckd = 1;
+        else
+            dev->ckdwckd = 0;
+
         break;
 
     default:
@@ -1360,6 +1802,31 @@ BYTE            key[256];               /* Key for search operations */
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
 
     } /* end switch(code) */
+
+    /* Reset the flags which ensure correct positioning for write
+       commands */
+
+    /* Reset search HA flag if command was not SEARCH HA EQUAL
+       or WRITE HA */
+    if ((code & 0x7F) != 0x39 && (code & 0x7F) != 0x19)
+        dev->ckdhaeq = 0;
+
+    /* Reset search id flag if command was not SEARCH ID EQUAL,
+       READ/WRITE KEY AND DATA, or READ/WRITE DATA */
+    if ((code & 0x7F) != 0x31
+        && (code & 0x7F) != 0x0E && (code & 0x7F) != 0x0D
+        && (code & 0x7F) != 0x06 && (code & 0x7F) != 0x05)
+        dev->ckdideq = 0;
+
+    /* Reset search key flag if command was not SEARCH KEY EQUAL
+       or READ/WRITE DATA */
+    if ((code & 0x7F) != 0x29
+        && (code & 0x7F) != 0x06 && (code & 0x7F) != 0x05)
+        dev->ckdkyeq = 0;
+
+    /* Reset write CKD flag if command was not WRITE R0 or WRITE CKD */
+    if (code != 0x15 && code != 0x1D)
+        dev->ckdwckd = 0;
 
 } /* end function ckddasd_execute_ccw */
 

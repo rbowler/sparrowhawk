@@ -358,7 +358,7 @@ U16             offset;                 /* Offset from start of SCCB */
     obtain_lock (&sysblk.intlock);
 
     /* Set service signal external interrupt pending */
-    sysblk.servparm = sclp_command;
+    sysblk.servparm = sccb_absolute_addr;
     sysblk.servsig = 1;
 
     /* Release the interrupt lock */

@@ -457,7 +457,7 @@ ext_auth_excp:
 /*-------------------------------------------------------------------*/
 /* Purge the ART lookaside buffer                                    */
 /*-------------------------------------------------------------------*/
-void purge_alb (void)
+void purge_alb (REGS *regs)
 {
 } /* end function purge_alb */
 
@@ -520,6 +520,7 @@ U32     ste;                            /* Segment table entry       */
 U32     pto;                            /* Page table origin         */
 int     ptl;                            /* Page table length         */
 U32     pte;                            /* Page table entry          */
+TLBE   *tlbp;                           /* -> TLB entry              */
 
     /* [3.11.3.1] Load the effective segment table descriptor */
     if (acctype == ACCTYPE_INSTFETCH)
@@ -539,9 +540,7 @@ U32     pte;                            /* Page table entry          */
             goto tran_alet_excp;
     }
 
-    /* Extract fields from segment table descriptor */
-    sto = std & STD_STO;
-    stl = std & STD_STL;
+    /* Extract the private space bit from segment table descriptor */
     private = std & STD_PRIVATE;
 
     /* [3.11.3.2] Check the translation format bits in CR0 */
@@ -549,70 +548,95 @@ U32     pte;                            /* Page table entry          */
         goto tran_spec_excp;
 
     /* [3.11.4] Look up the address in the TLB */
-    /*INCOMPLETE*/
     /* [10.17] Do not use TLB if processing LRA instruction */
-    /*INCOMPLETE*/
 
-    /* [3.11.3.3] Segment table lookup */
+    /* Only a single entry in the TLB will be looked up, namely the
+       entry associated with the base/access register being used */
+    tlbp = &(regs->tlb[arn]);
+    if ((vaddr & 0x7FFFF000) == tlbp->vaddr
+        && tlbp->valid
+        && (tlbp->common нн std == tlbp->std)
+        && !(tlbp->common && private)
+        && acctype != ACCTYPE_LRA)
+    {
+        pte = tlbp->pte;
+    }
+    else
+    {
+        /* [3.11.3.3] Segment table lookup */
 
-    /* Calculate the real address of the segment table entry */
-    sto += (vaddr & 0x7FF00000) >> 18;
+        /* Calculate the real address of the segment table entry */
+        sto = std & STD_STO;
+        stl = std & STD_STL;
+        sto += (vaddr & 0x7FF00000) >> 18;
 
-    /* Generate addressing exception if outside real storage */
-    if (sto >= sysblk.mainsize)
-        goto address_excp;
+        /* Generate addressing exception if outside real storage */
+        if (sto >= sysblk.mainsize)
+            goto address_excp;
 
-    /* Check that the virtual address is within the segment table */
-    if ((vaddr >> 24) > stl)
-        goto seg_tran_length;
+        /* Check that virtual address is within the segment table */
+        if ((vaddr >> 24) > stl)
+            goto seg_tran_length;
 
-    /* Fetch the segment table entry from real storage.  All four
-       bytes must be fetched concurrently as observed by other CPUs */
-    sto = APPLY_PREFIXING (sto, regs->pxr);
-    ste = fetch_fullword_absolute (sto);
+        /* Fetch segment table entry from real storage.  All bytes
+           must be fetched concurrently as observed by other CPUs */
+        sto = APPLY_PREFIXING (sto, regs->pxr);
+        ste = fetch_fullword_absolute (sto);
 
-    /* Generate segment translation exception if segment invalid */
-    if (ste & SEGTAB_INVALID)
-        goto seg_tran_invalid;
+        /* Generate segment translation exception if segment invalid */
+        if (ste & SEGTAB_INVALID)
+            goto seg_tran_invalid;
 
-    /* Check that all the reserved bits in the STE are zero */
-    if (ste & SEGTAB_RESV)
-        goto tran_spec_excp;
+        /* Check that all the reserved bits in the STE are zero */
+        if (ste & SEGTAB_RESV)
+            goto tran_spec_excp;
 
-    /* If the segment table origin register indicates a private
-       address space then the STE must not indicate a common segment */
-    if (private && (ste & (SEGTAB_COMMON)))
-        goto tran_spec_excp;
+        /* If the segment table origin register indicates a private
+           address space then STE must not indicate a common segment */
+        if (private && (ste & (SEGTAB_COMMON)))
+            goto tran_spec_excp;
 
-    /* Isolate page table origin and length */
-    pto = ste & SEGTAB_PTO;
-    ptl = ste & SEGTAB_PTL;
+        /* Isolate page table origin and length */
+        pto = ste & SEGTAB_PTO;
+        ptl = ste & SEGTAB_PTL;
 
-    /* [3.11.3.4] Page table lookup */
+        /* [3.11.3.4] Page table lookup */
 
-    /* Calculate the real address of the page table entry */
-    pto += (vaddr & 0x000FF000) >> 10;
+        /* Calculate the real address of the page table entry */
+        pto += (vaddr & 0x000FF000) >> 10;
 
-    /* Generate addressing exception if outside real storage */
-    if (pto >= sysblk.mainsize)
-        goto address_excp;
+        /* Generate addressing exception if outside real storage */
+        if (pto >= sysblk.mainsize)
+            goto address_excp;
 
-    /* Check that the virtual address is within the page table */
-    if (((vaddr & 0x000FF000) >> 16) > ptl)
-        goto page_tran_length;
+        /* Check that the virtual address is within the page table */
+        if (((vaddr & 0x000FF000) >> 16) > ptl)
+            goto page_tran_length;
 
-    /* Fetch the page table entry from real storage.  All four
-       bytes must be fetched concurrently as observed by other CPUs */
-    pto = APPLY_PREFIXING (pto, regs->pxr);
-    pte = fetch_fullword_absolute (pto);
+        /* Fetch the page table entry from real storage.  All bytes
+           must be fetched concurrently as observed by other CPUs */
+        pto = APPLY_PREFIXING (pto, regs->pxr);
+        pte = fetch_fullword_absolute (pto);
 
-    /* Generate page translation exception if page invalid */
-    if (pte & PAGETAB_INVALID)
-        goto page_tran_invalid;
+        /* Generate page translation exception if page invalid */
+        if (pte & PAGETAB_INVALID)
+            goto page_tran_invalid;
 
-    /* Check that all the reserved bits in the PTE are zero */
-    if (pte & PAGETAB_RESV)
-        goto tran_spec_excp;
+        /* Check that all the reserved bits in the PTE are zero */
+        if (pte & PAGETAB_RESV)
+            goto tran_spec_excp;
+
+        /* [3.11.4.2] Place the translated address in the TLB */
+        if (acctype != ACCTYPE_LRA)
+        {
+            tlbp->std = std;
+            tlbp->vaddr = vaddr & 0x7FFFF000;
+            tlbp->pte = pte;
+            tlbp->common = (ste & SEGTAB_COMMON) ? 1 : 0;
+            tlbp->valid = 1;
+        }
+
+    } /* end if(!TLB) */
 
     /* Set the protection indicator if page protection is active */
     if (pte & PAGETAB_PROT)
@@ -672,8 +696,9 @@ tran_alet_excp:
 /*-------------------------------------------------------------------*/
 /* Purge the translation lookaside buffer                            */
 /*-------------------------------------------------------------------*/
-void purge_tlb (void)
+void purge_tlb (REGS *regs)
 {
+    memset (regs->tlb, 0, sizeof(regs->tlb));
 } /* end function purge_tlb */
 
 /*-------------------------------------------------------------------*/
@@ -801,44 +826,6 @@ vabs_prog_check:
 } /* end function virt_to_abs */
 
 /*-------------------------------------------------------------------*/
-/* Store an integer value in virtual storage.  The value is stored   */
-/* byte by byte because otherwise the Intel processor would store    */
-/* the bytes in reverse order.                                       */
-/*-------------------------------------------------------------------*/
-void vstorei (U64 value, int len, U32 addr, int arn, REGS *regs)
-{
-U32 abs = 0;                            /* Absolute storage location */
-int tran = 1;                           /* 1=Translation required    */
-
-    /* Start from last byte of operand */
-    addr += len - 1;
-    addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-    /* Store bytes in absolute storage from right to left */
-    while (len-- > 0) {
-
-        /* Translate virtual address to absolute address */
-        if (tran) {
-            abs = virt_to_abs (addr, arn, regs, ACCTYPE_WRITE);
-        }
-
-        /* Store byte in absolute storage */
-        sysblk.mainstor[abs] = value & 0xFF;
-        value >>= 8;
-
-        /* Decrement absolute address and virtual address */
-        abs--;
-        addr--;
-        addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-        /* Translation required again if page boundary crossed */
-        tran = ((addr & 0xFFF) == 0xFFF);
-
-    } /* end while */
-
-} /* end function vstorei */
-
-/*-------------------------------------------------------------------*/
 /* Store 1 to 256 characters into virtual storage operand            */
 /*                                                                   */
 /* Input:                                                            */
@@ -866,7 +853,7 @@ BYTE    len2;                           /* Length after next page    */
     /* Copy data to real storage in either one or two parts
        depending on whether operand crosses a page boundary */
     if (addr2 == (addr & 0xFFFFF000)) {
-        addr = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
+        addr = virt_to_abs (addr, arn, regs, ACCTYPE_WRITE);
         memcpy (sysblk.mainstor+addr, src, len+1);
     } else {
         len1 = addr2 - addr;
@@ -896,6 +883,162 @@ void vstoreb (BYTE value, U32 addr, int arn, REGS *regs)
     addr = virt_to_abs (addr, arn, regs, ACCTYPE_WRITE);
     sysblk.mainstor[addr] = value;
 } /* end function vstoreb */
+
+/*-------------------------------------------------------------------*/
+/* Store a two-byte integer into virtual storage operand             */
+/*                                                                   */
+/* Input:                                                            */
+/*      value   16-bit integer value to be stored                    */
+/*      addr    Logical address of leftmost operand byte             */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or protection             */
+/*      exception, and in this case the function does not return.    */
+/*-------------------------------------------------------------------*/
+void vstore2 (U16 value, U32 addr, int arn, REGS *regs)
+{
+U32     addr2;                          /* Address of second byte    */
+U32     abs1, abs2;                     /* Absolute addresses        */
+
+    /* Calculate address of second byte of operand */
+    addr2 = (addr + 1) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+
+    /* Get absolute address of first byte of operand */
+    abs1 = virt_to_abs (addr, arn, regs, ACCTYPE_WRITE);
+
+    /* Repeat address translation if operand crosses a page boundary */
+    if ((addr2 & 0xFFF) == 0x000)
+        abs2 = virt_to_abs (addr2, arn, regs, ACCTYPE_WRITE);
+    else
+        abs2 = abs1 + 1;
+
+    /* Store integer value at operand location */
+    sysblk.mainstor[abs1] = value >> 8;
+    sysblk.mainstor[abs2] = value & 0xFF;
+
+} /* end function vstore2 */
+
+/*-------------------------------------------------------------------*/
+/* Store a four-byte integer into virtual storage operand            */
+/*                                                                   */
+/* Input:                                                            */
+/*      value   32-bit integer value to be stored                    */
+/*      addr    Logical address of leftmost operand byte             */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or protection             */
+/*      exception, and in this case the function does not return.    */
+/*-------------------------------------------------------------------*/
+void vstore4 (U32 value, U32 addr, int arn, REGS *regs)
+{
+int     i;                              /* Loop counter              */
+int     k;                              /* Shift counter             */
+U32     addr2;                          /* Page address of last byte */
+U32     abs, abs2;                      /* Absolute addresses        */
+
+    /* Get absolute address of first byte of operand */
+    abs = virt_to_abs (addr, arn, regs, ACCTYPE_WRITE);
+
+    /* Store 4 bytes when operand is fullword aligned */
+    if ((addr & 0x03) == 0) {
+        sysblk.mainstor[abs] = (value >> 24) & 0xFF;
+        sysblk.mainstor[abs+1] = (value >> 16) & 0xFF;
+        sysblk.mainstor[abs+2] = (value >> 8) & 0xFF;
+        sysblk.mainstor[abs+3] = value & 0xFF;
+        return;
+    }
+
+    /* Operand is not fullword aligned and may cross a page boundary */
+
+    /* Calculate page address of last byte of operand */
+    addr2 = (addr + 3) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr2 &= 0xFFFFF000;
+    abs2 = virt_to_abs (addr2, arn, regs, ACCTYPE_WRITE);
+
+    /* Store integer value byte by byte at operand location */
+    for (i=0, k=24; i < 4; i++, k -= 8) {
+
+        /* Store byte in absolute storage */
+        sysblk.mainstor[abs] = (value >> k) & 0xFF;
+
+        /* Increment absolute address and virtual address */
+        abs++;
+        addr++;
+        addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+
+        /* Adjust absolute address if page boundary crossed */
+        if (addr == addr2)
+            abs = abs2;
+
+    } /* end for */
+
+} /* end function vstore4 */
+
+/*-------------------------------------------------------------------*/
+/* Store an eight-byte integer into virtual storage operand          */
+/*                                                                   */
+/* Input:                                                            */
+/*      value   64-bit integer value to be stored                    */
+/*      addr    Logical address of leftmost operand byte             */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or protection             */
+/*      exception, and in this case the function does not return.    */
+/*-------------------------------------------------------------------*/
+void vstore8 (U64 value, U32 addr, int arn, REGS *regs)
+{
+int     i;                              /* Loop counter              */
+int     k;                              /* Shift counter             */
+U32     addr2;                          /* Page address of last byte */
+U32     abs, abs2;                      /* Absolute addresses        */
+
+    /* Get absolute address of first byte of operand */
+    abs = virt_to_abs (addr, arn, regs, ACCTYPE_WRITE);
+
+    /* Store 8 bytes when operand is doubleword aligned */
+    if ((addr & 0x07) == 0) {
+        sysblk.mainstor[abs] = (value >> 56) & 0xFF;
+        sysblk.mainstor[abs+1] = (value >> 48) & 0xFF;
+        sysblk.mainstor[abs+2] = (value >> 40) & 0xFF;
+        sysblk.mainstor[abs+3] = (value >> 32) & 0xFF;
+        sysblk.mainstor[abs+4] = (value >> 24) & 0xFF;
+        sysblk.mainstor[abs+5] = (value >> 16) & 0xFF;
+        sysblk.mainstor[abs+6] = (value >> 8) & 0xFF;
+        sysblk.mainstor[abs+7] = value & 0xFF;
+        return;
+    }
+
+    /* Non-doubleword aligned operand may cross a page boundary */
+
+    /* Calculate page address of last byte of operand */
+    addr2 = (addr + 7) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    addr2 &= 0xFFFFF000;
+    abs2 = virt_to_abs (addr2, arn, regs, ACCTYPE_WRITE);
+
+    /* Store integer value byte by byte at operand location */
+    for (i=0, k=56; i < 8; i++, k -= 8) {
+
+        /* Store byte in absolute storage */
+        sysblk.mainstor[abs] = (value >> k) & 0xFF;
+
+        /* Increment absolute address and virtual address */
+        abs++;
+        addr++;
+        addr &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+
+        /* Adjust absolute address if page boundary crossed */
+        if (addr == addr2)
+            abs = abs2;
+
+    } /* end for */
+
+} /* end function vstore8 */
 
 /*-------------------------------------------------------------------*/
 /* Fetch a 1 to 256 character operand from virtual storage           */
@@ -979,7 +1122,7 @@ U32     abs1, abs2;                     /* Absolute addresses        */
     /* Calculate address of second byte of operand */
     addr2 = (addr + 1) & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
 
-    /* Get absolute addresses of first byte of operand */
+    /* Get absolute address of first byte of operand */
     abs1 = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
 
     /* Repeat address translation if operand crosses a page boundary */
@@ -1012,7 +1155,7 @@ int     i;                              /* Loop counter              */
 U32     value;                          /* Accumulated value         */
 U32     abs;                            /* Absolute storage location */
 
-    /* Get absolute addresses of first byte of operand */
+    /* Get absolute address of first byte of operand */
     abs = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
 
     /* Fetch 4 bytes when operand is fullword aligned */
@@ -1065,7 +1208,7 @@ int     i;                              /* Loop counter              */
 U64     value;                          /* Accumulated value         */
 U32     abs;                            /* Absolute storage location */
 
-    /* Get absolute addresses of first byte of operand */
+    /* Get absolute address of first byte of operand */
     abs = virt_to_abs (addr, arn, regs, ACCTYPE_READ);
 
     /* Fetch 8 bytes when operand is doubleword aligned */

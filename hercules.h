@@ -220,7 +220,11 @@ typedef struct _DEVBLK {
                 ckdskcyl:1,             /* 1=Seek cylinder processed */
                 ckdrecal:1,             /* 1=Recalibrate processed   */
                 ckdrdipl:1,             /* 1=Read IPL processed      */
-                ckdxmark:1;             /* 1=End of track mark found */
+                ckdxmark:1,             /* 1=End of track mark found */
+                ckdhaeq:1,              /* 1=Search Home Addr Equal  */
+                ckdideq:1,              /* 1=Search ID Equal         */
+                ckdkyeq:1,              /* 1=Search Key Equal        */
+                ckdwckd:1;              /* 1=Write R0 or Write CKD   */
         U16     ckdcyls;                /* Number of cylinders       */
         U16     ckdtrks;                /* Number of tracks          */
         U16     ckdheads;               /* #of heads per cylinder    */
@@ -287,11 +291,13 @@ U16  translate_alet (int arn, U16 eax, REGS *regs, int acctype,
         U32 *stdptr, int *prot);
 int  translate_addr (U32 vaddr, int arn, REGS *regs, int acctype,
         U32 *raddr, U16 *xcode, int *priv, int *prot);
-void purge_alb (void);
-void purge_tlb (void);
-void vstorei (U64 value, int len, U32 addr, int arn, REGS *regs);
+void purge_alb (REGS *regs);
+void purge_tlb (REGS *regs);
 void vstorec (void *src, BYTE len, U32 addr, int arn, REGS *regs);
 void vstoreb (BYTE value, U32 addr, int arn, REGS *regs);
+void vstore2 (U16 value, U32 addr, int arn, REGS *regs);
+void vstore4 (U32 value, U32 addr, int arn, REGS *regs);
+void vstore8 (U64 value, U32 addr, int arn, REGS *regs);
 void vfetchc (void *dest, BYTE len, U32 addr, int arn, REGS *regs);
 BYTE vfetchb (U32 addr, int arn, REGS *regs);
 U16  vfetch2 (U32 addr, int arn, REGS *regs);
@@ -308,13 +314,19 @@ void instfetch (BYTE *dest, U32 addr, REGS *regs);
 #define ACCTYPE_TPROT           6       /* Test Protection           */
 
 /* Functions in module decimal.c */
+int  shift_and_round_packed (U32 addr, int len, int arn, REGS *regs,
+        BYTE round, BYTE shift);
+int  zero_and_add_packed (U32 addr1, int len1, int arn1,
+        U32 addr2, int len2, int arn2, REGS *regs);
 int  compare_packed (U32 addr1, int len1, int arn1,
         U32 addr2, int len2, int arn2, REGS *regs);
 int  add_packed (U32 addr1, int len1, int arn1,
         U32 addr2, int len2, int arn2, REGS *regs);
 int  subtract_packed (U32 addr1, int len1, int arn1,
         U32 addr2, int len2, int arn2, REGS *regs);
-int  zero_and_add_packed (U32 addr1, int len1, int arn1,
+void multiply_packed (U32 addr1, int len1, int arn1,
+        U32 addr2, int len2, int arn2, REGS *regs);
+void divide_packed (U32 addr1, int len1, int arn1,
         U32 addr2, int len2, int arn2, REGS *regs);
 
 /* Functions in module service.c */

@@ -83,6 +83,9 @@ REGS   *regs;
     /* Point to the register context for CPU 0 */
     regs = &(sysblk.regs[0]);
 
+    /* Initialize register 15 to program starting address */
+    regs->gpr[15] = START_ADDR;
+
     /* Store the initial PSW in main storage and start the CPU */
     store_psw (&psw, sysblk.mainstor + PSW_LOCATION);
 

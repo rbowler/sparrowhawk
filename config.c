@@ -398,6 +398,8 @@ int     subchan;                        /* Subchannel number         */
                     "HHC018I Error in %s line %d: "
                     "Device type %4.4X not recognized\n",
                     fname, stmt, devtype);
+            devinit = NULL;
+            devexec = NULL;
             exit(1);
         } /* end switch(devtype) */
 

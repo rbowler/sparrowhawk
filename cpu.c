@@ -1091,7 +1091,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Store rightmost 2 bytes of register at operand address */
-        vstorei ( regs->gpr[r1], 2, effective_addr, ar1, regs );
+        vstore2 ( regs->gpr[r1] & 0xFFFF, effective_addr, ar1, regs );
 
         break;
 
@@ -1386,7 +1386,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Store packed decimal result at operand address */
-        vstorei ( dreg, 8, effective_addr, ar1, regs );
+        vstore8 ( dreg, effective_addr, ar1, regs );
 
         break;
 
@@ -1472,7 +1472,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Store register contents at operand address */
-        vstorei ( regs->gpr[r1], 4, effective_addr, ar1, regs );
+        vstore4 ( regs->gpr[r1], effective_addr, ar1, regs );
 
         break;
 
@@ -1719,7 +1719,7 @@ static BYTE module[8];                  /* Module name               */
 
         /* Store register contents at operand address */
         dreg = ((U64)regs->fpr[r1] << 32) | regs->fpr[r1+1];
-        vstorei ( dreg, 8, effective_addr, ar1, regs );
+        vstore8 ( dreg, effective_addr, ar1, regs );
 
         break;
 
@@ -1757,7 +1757,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Store register contents at operand address */
-        vstorei ( regs->fpr[r1], 4, effective_addr, ar1, regs );
+        vstore4 ( regs->fpr[r1], effective_addr, ar1, regs );
 
         break;
 
@@ -2119,7 +2119,7 @@ static BYTE module[8];                  /* Module name               */
         for ( n = r1; ; )
         {
             /* Store register contents at operand address */
-            vstorei ( regs->gpr[n], 4, effective_addr, ar1, regs );
+            vstore4 ( regs->gpr[n], effective_addr, ar1, regs );
 
             /* Instruction is complete when r3 register is done */
             if ( n == r3 ) break;
@@ -2424,7 +2424,7 @@ static BYTE module[8];                  /* Module name               */
         for ( n = r1; ; )
         {
             /* Store access register contents at operand address */
-            vstorei ( regs->ar[n], 4, effective_addr, ar1, regs );
+            vstore4 ( regs->ar[n], effective_addr, ar1, regs );
 
             /* Instruction is complete when r3 register is done */
             if ( n == r3 ) break;
@@ -3025,7 +3025,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Store CPU ID at operand address */
-            vstorei ( sysblk.cpuid, 8, effective_addr, ar1, regs );
+            vstore8 ( sysblk.cpuid, effective_addr, ar1, regs );
 
             break;
 
@@ -3058,7 +3058,7 @@ static BYTE module[8];                  /* Module name               */
             sysblk.todclk = dreg;
 
             /* Store clock value at operand address */
-            vstorei ( dreg, 8, effective_addr, ar1, regs );
+            vstore8 ( dreg, effective_addr, ar1, regs );
 
             /* Perform serialization after storing clock */
             perform_serialization ();
@@ -3116,7 +3116,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Store clock comparator at operand location */
             /*INCOMPLETE*/
-            vstorei ( regs->clkc, 8, effective_addr, ar1, regs );
+            vstore8 ( regs->clkc, effective_addr, ar1, regs );
             /*debug*/printf("Store clock comparator=%16.16llX\n",
             /*debug*/       regs->clkc);
 
@@ -3169,7 +3169,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Store the CPU timer at operand location */
             /*INCOMPLETE*/
-            vstorei ( regs->timer, 8, effective_addr, ar1, regs );
+            vstore8 ( regs->timer, effective_addr, ar1, regs );
             /*debug*/printf("Store CPU timer=%16.16llX\n", regs->timer);
 
             break;
@@ -3230,7 +3230,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Purge the translation lookaside buffer for this CPU */
-            purge_tlb ();
+            purge_tlb (regs);
 
             break;
 
@@ -3273,8 +3273,8 @@ static BYTE module[8];                  /* Module name               */
             regs->pxr = n;
 
             /* Invalidate the ALB and TLB */
-            purge_alb ();
-            purge_tlb ();
+            purge_alb (regs);
+            purge_tlb (regs);
 
             /* Perform serialization after completing the operation */
             perform_serialization ();
@@ -3301,7 +3301,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Store prefix register at operand address */
-            vstorei ( regs->pxr, 4, effective_addr, ar1, regs );
+            vstore4 ( regs->pxr, effective_addr, ar1, regs );
 
             break;
 
@@ -3325,7 +3325,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Store CPU address at operand address */
-            vstorei ( regs->cpuad, 2, effective_addr, ar1, regs );
+            vstore2 ( regs->cpuad, effective_addr, ar1, regs );
 
             break;
 
@@ -4283,7 +4283,7 @@ topic 5.9.2.
             {
                 /* Otherwise store at operand location */
                 dreg = ((U64)ioid << 32) | ioparm;
-                vstorei ( dreg, 8, effective_addr, ar1, regs );
+                vstore8 ( dreg, effective_addr, ar1, regs );
             }
 
             break;
@@ -4302,7 +4302,7 @@ topic 5.9.2.
             }
 
             /* Purge the ART lookaside buffer for this CPU */
-            purge_alb ();
+            purge_alb (regs);
 
             break;
 
@@ -4487,7 +4487,7 @@ topic 5.9.2.
         for ( n = r1; ; )
         {
             /* Store control register contents at operand address */
-            vstorei ( regs->cr[n], 4, effective_addr, ar1, regs );
+            vstore4 ( regs->cr[n], effective_addr, ar1, regs );
 
             /* Instruction is complete when r3 register is done */
             if ( n == r3 ) break;
@@ -4562,7 +4562,7 @@ topic 5.9.2.
         if ( regs->gpr[r1] == n )
         {
             /* If equal, store R3 at operand location and set cc=0 */
-            vstorei ( regs->gpr[r3], 4, effective_addr, ar1, regs );
+            vstore4 ( regs->gpr[r3], effective_addr, ar1, regs );
             regs->psw.cc = 0;
         }
         else
@@ -4613,8 +4613,8 @@ topic 5.9.2.
         if ( regs->gpr[r1] == n && regs->gpr[r1+1] == d )
         {
             /* If equal, store R3:R3+1 at operand location and set cc=0 */
-            vstorei ( regs->gpr[r3], 4, effective_addr, ar1, regs );
-            vstorei ( regs->gpr[r3+1], 4, effective_addr + 4, ar1, regs );
+            vstore4 ( regs->gpr[r3], effective_addr, ar1, regs );
+            vstore4 ( regs->gpr[r3+1], effective_addr + 4, ar1, regs );
             regs->psw.cc = 0;
         }
         else
@@ -4772,7 +4772,7 @@ topic 5.9.2.
             dbyte = (dbyte & 0xF0) | ( sbyte & 0x0F);
 
             /* Store result at destination operand address */
-            vstorei ( dbyte, 1, effective_addr, ar1, regs );
+            vstoreb ( dbyte, effective_addr, ar1, regs );
 
             /* Increment operand addresses */
             effective_addr++;
@@ -4798,7 +4798,7 @@ topic 5.9.2.
             sbyte = vfetchb ( effective_addr2, ar2, regs );
 
             /* Store the byte in the destination operand */
-            vstorei ( sbyte, 1, effective_addr, ar1, regs );
+            vstoreb ( sbyte, effective_addr, ar1, regs );
 
             /* Increment operand addresses */
             effective_addr++;
@@ -4828,7 +4828,7 @@ topic 5.9.2.
             dbyte = (dbyte & 0x0F) | ( sbyte & 0xF0);
 
             /* Store result at destination operand address */
-            vstorei ( dbyte, 1, effective_addr, ar1, regs );
+            vstoreb ( dbyte, effective_addr, ar1, regs );
 
             /* Increment operand addresses */
             effective_addr++;
@@ -4861,7 +4861,7 @@ topic 5.9.2.
             if ( dbyte &= sbyte ) regs->psw.cc = 1;
 
             /* Store result at destination operand address */
-            vstorei ( dbyte, 1, effective_addr, ar1, regs );
+            vstoreb ( dbyte, effective_addr, ar1, regs );
 
             /* Increment operand addresses */
             effective_addr++;
@@ -4928,7 +4928,7 @@ topic 5.9.2.
             if ( dbyte |= sbyte ) regs->psw.cc = 1;
 
             /* Store result at destination operand address */
-            vstorei ( dbyte, 1, effective_addr, ar1, regs );
+            vstoreb ( dbyte, effective_addr, ar1, regs );
 
             /* Increment operand addresses */
             effective_addr++;
@@ -4961,7 +4961,7 @@ topic 5.9.2.
             if ( dbyte ^= sbyte ) regs->psw.cc = 1;
 
             /* Store result at destination operand address */
-            vstorei ( dbyte, 1, effective_addr, ar1, regs );
+            vstoreb ( dbyte, effective_addr, ar1, regs );
 
             /* Increment operand addresses */
             effective_addr++;
@@ -4990,7 +4990,7 @@ topic 5.9.2.
             sbyte = vfetchb ( effective_addr2 + dbyte, ar2, regs );
 
             /* Store result at first operand address */
-            vstorei ( sbyte, 1, effective_addr, ar1, regs );
+            vstoreb ( sbyte, effective_addr, ar1, regs );
 
             /* Increment first operand address */
             effective_addr++;
@@ -5130,7 +5130,7 @@ topic 5.9.2.
                 /* Replace the pattern byte by the fill character
                    or by a zoned decimal digit */
                 obyte = (sig == 0 && h == 0) ? fbyte : (0xF0 | h);
-                vstorei ( obyte, 1, effective_addr, ar1, regs );
+                vstoreb ( obyte, effective_addr, ar1, regs );
 
                 /* Set condition code 2 if digit is non-zero */
                 if (h > 0) regs->psw.cc = 2;
@@ -5159,7 +5159,7 @@ topic 5.9.2.
                significance indicator, and zeroize conditon code  */
             else if (dbyte == 0x22)
             {
-                vstorei ( fbyte, 1, effective_addr, ar1, regs );
+                vstoreb ( fbyte, effective_addr, ar1, regs );
                 sig = 0;
                 regs->psw.cc = 0;
             }
@@ -5170,7 +5170,7 @@ topic 5.9.2.
             else
             {
                 if (sig == 0)
-                    vstorei ( fbyte, 1, effective_addr, ar1, regs );
+                    vstoreb ( fbyte, effective_addr, ar1, regs );
             }
 
             /* Increment first operand address */
@@ -5397,7 +5397,7 @@ is set, and the control registers remain unchanged.
             sbyte = vfetchb ( effective_addr2, ar2, regs );
 
             /* Store the byte in the destination operand */
-            vstorei ( sbyte, 1, effective_addr, ar1, regs );
+            vstoreb ( sbyte, effective_addr, ar1, regs );
 
             /* Increment destination operand address */
             effective_addr++;
@@ -5410,6 +5410,18 @@ is set, and the control registers remain unchanged.
                     (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
 
         } /* end for(i) */
+
+        break;
+
+    case 0xF0:
+    /*---------------------------------------------------------------*/
+    /* SRP      Shift and Round Decimal                         [SS] */
+    /*---------------------------------------------------------------*/
+
+        /* Shift packed decimal operand and set condition code */
+        regs->psw.cc =
+            shift_and_round_packed (effective_addr, r1, ar1, regs,
+                                r2, effective_addr2 );
 
         break;
 
@@ -5429,7 +5441,7 @@ is set, and the control registers remain unchanged.
         /* Move low digit of source byte to high digit of destination */
         dbyte &= 0x0F;
         dbyte |= sbyte << 4;
-        vstorei ( dbyte, 1, effective_addr, ar1, regs );
+        vstoreb ( dbyte, effective_addr, ar1, regs );
 
         /* Process remaining bytes from right to left */
         for ( i = r1, j = r2; i > 0; )
@@ -5445,7 +5457,7 @@ is set, and the control registers remain unchanged.
 
             /* Move low digit to destination high digit */
             dbyte |= sbyte << 4;
-            vstorei ( dbyte, 1, --effective_addr, ar1, regs );
+            vstoreb ( dbyte, --effective_addr, ar1, regs );
 
             /* Wraparound according to addressing mode */
             effective_addr &=
@@ -5467,7 +5479,7 @@ is set, and the control registers remain unchanged.
         effective_addr2 += r2;
         sbyte = vfetchb ( effective_addr2, ar2, regs );
         dbyte = (sbyte << 4) | (sbyte >> 4);
-        vstorei ( dbyte, 1, effective_addr, ar1, regs );
+        vstoreb ( dbyte, effective_addr, ar1, regs );
 
         /* Process remaining bytes from right to left */
         for ( i = r1, j = r2; i > 0; i-- )
@@ -5492,7 +5504,7 @@ is set, and the control registers remain unchanged.
             }
 
             /* Store packed digits at first operand address */
-            vstorei ( dbyte, 1, --effective_addr, ar1, regs );
+            vstoreb ( dbyte, --effective_addr, ar1, regs );
 
             /* Wraparound according to addressing mode */
             effective_addr &=
@@ -5514,7 +5526,7 @@ is set, and the control registers remain unchanged.
         effective_addr2 += r2;
         sbyte = vfetchb ( effective_addr2, ar2, regs );
         dbyte = (sbyte << 4) | (sbyte >> 4);
-        vstorei ( dbyte, 1, effective_addr, ar1, regs );
+        vstoreb ( dbyte, effective_addr, ar1, regs );
 
         /* Process remaining bytes from right to left */
         for ( i = r1, j = r2; i > 0; i-- )
@@ -5533,12 +5545,12 @@ is set, and the control registers remain unchanged.
             }
 
             /* Store unpacked bytes at first operand address */
-            vstorei ( dbyte, 1, --effective_addr, ar1, regs );
+            vstoreb ( dbyte, --effective_addr, ar1, regs );
             if ( --i > 0 )
             {
                 effective_addr &=
                     (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-                vstorei ( obyte, 1, --effective_addr, ar1, regs );
+                vstoreb ( obyte, --effective_addr, ar1, regs );
             }
 
             /* Wraparound according to addressing mode */
@@ -5595,6 +5607,28 @@ is set, and the control registers remain unchanged.
         /* Subtract packed decimal operands and set condition code */
         regs->psw.cc =
             subtract_packed (effective_addr, r1, ar1,
+                                effective_addr2, r2, ar2, regs );
+
+        break;
+
+    case 0xFC:
+    /*---------------------------------------------------------------*/
+    /* MP       Multiply Decimal                                [SS] */
+    /*---------------------------------------------------------------*/
+
+        /* Multiply packed decimal operands */
+        multiply_packed (effective_addr, r1, ar1,
+                                effective_addr2, r2, ar2, regs );
+
+        break;
+
+    case 0xFD:
+    /*---------------------------------------------------------------*/
+    /* DP       Divide Decimal                                  [SS] */
+    /*---------------------------------------------------------------*/
+
+        /* Divide packed decimal operands */
+        divide_packed (effective_addr, r1, ar1,
                                 effective_addr2, r2, ar2, regs );
 
         break;

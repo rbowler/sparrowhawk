@@ -2,9 +2,10 @@
 # Makefile for Hercules ESA/390 emulator
 #
 
-VERSION  = 1.20
+VERSION  = 1.21
 
 CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION)
+#	   -march=pentium -malign-double -mwide-multiply
 LFLAGS	 = -lpthread
 
 all:	   cpu ipl
@@ -37,13 +38,13 @@ printer.o: printer.c $(HEADERS)
 
 cpu.o:	   cpu.c $(HEADERS)
 
-cputest.o: cputest.c $(HEADERS)
+cputest.o: cputest.c $(HEADERS) makefile
 
 decimal.o: decimal.c $(HEADERS)
 
 dat.o:	   dat.c $(HEADERS)
 
-ipl.o:	   ipl.c $(HEADERS)
+ipl.o:	   ipl.c $(HEADERS) makefile
 
 channel.o: channel.c $(HEADERS)
 
@@ -51,7 +52,7 @@ service.o: service.c $(HEADERS)
 
 simtape.o: simtape.c $(HEADERS)
 
-loc3270.o: loc3270.c $(HEADERS)
+loc3270.o: loc3270.c $(HEADERS) makefile
 
 ckddasd.o: ckddasd.c $(HEADERS)
 

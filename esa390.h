@@ -17,25 +17,25 @@ typedef unsigned long long      U64;
 typedef long long               S64;
 
 typedef struct _PSW {
-    BYTE  sysmask;                      /* System mask               */
-    unsigned int
-        prob:1,                         /* 1=Problem state           */
-        wait:1,                         /* 1=Wait state              */
-        mach:1,                         /* 1=Machine check enabled   */
-        ecmode:1,                       /* 1=ECMODE, 0=BCMODE        */
-        key:4,                          /* Protection key            */
-        sgmask:1,                       /* Significance mask         */
-        eumask:1,                       /* Exponent underflow mask   */
-        domask:1,                       /* Decimal overflow mask     */
-        fomask:1,                       /* Fixed-point overflow mask */
-        armode:1,                       /* Access-register mode      */
-        space:1,                        /* Secondary-space mode      */
-        amode:1;                        /* Addressing mode           */
-    BYTE  ilc;                          /* Instruction length code   */
-    BYTE  cc;                           /* Condition code            */
-    U16   intcode;                      /* Interruption code         */
-    U32   ia;                           /* Instruction address       */
-} PSW;
+        BYTE    sysmask;                /* System mask               */
+        unsigned int
+                prob:1,                 /* 1=Problem state           */
+                wait:1,                 /* 1=Wait state              */
+                mach:1,                 /* 1=Machine check enabled   */
+                ecmode:1,               /* 1=ECMODE, 0=BCMODE        */
+                key:4,                  /* Protection key            */
+                sgmask:1,               /* Significance mask         */
+                eumask:1,               /* Exponent underflow mask   */
+                domask:1,               /* Decimal overflow mask     */
+                fomask:1,               /* Fixed-point overflow mask */
+                armode:1,               /* Access-register mode      */
+                space:1,                /* Secondary-space mode      */
+                amode:1;                /* Addressing mode           */
+        BYTE    ilc;                    /* Instruction length code   */
+        BYTE    cc;                     /* Condition code            */
+        U16     intcode;                /* Interruption code         */
+        U32     ia;                     /* Instruction address       */
+    } PSW;
 
 /* Bit definitions for ECMODE PSW system mask */
 #define PSW_PERMODE     0x40            /* Program event recording   */
@@ -60,20 +60,31 @@ typedef struct _PSW {
         ((((addr)&0x7FFFF000)==0)?((addr)&0xFFF)|pfx:\
         (((addr)&0x7FFFF000)==pfx)?(addr)&0xFFF:(addr))
 
+/* Structure definition for translation-lookaside buffer entry */
+typedef struct _TLBE {
+        U32     std;                    /* Segment table designation */
+        U32     vaddr;                  /* Virtual page address      */
+        U32     pte;                    /* Copy of page table entry  */
+        BYTE    valid;                  /* 1=TLB entry is valid      */
+        BYTE    common;                 /* 1=Page in common segment  */
+        BYTE    resv[2];                /* Padding for alignment     */
+    } TLBE;
+
 /* Structure definition for CPU register context */
 typedef struct _REGS {                  /* Processor registers       */
-    PSW   psw;                          /* Program status word       */
-    U32   gpr[16];                      /* General purpose registers */
-    U32   cr[16];                       /* Control registers         */
-    U32   ar[16];                       /* Access registers          */
-    U32   fpr[8];                       /* Floating point registers  */
-    U32   pxr;                          /* Prefix register           */
-    U16   cpuad;                        /* CPU address for STAP      */
-    U64   timer;                        /* CPU timer                 */
-    U64   clkc;                         /* Clock comparator          */
-  jmp_buf progjmp;                      /* longjmp destination for
+        PSW     psw;                    /* Program status word       */
+        U32     gpr[16];                /* General purpose registers */
+        U32     cr[16];                 /* Control registers         */
+        U32     ar[16];                 /* Access registers          */
+        U32     fpr[8];                 /* Floating point registers  */
+        U32     pxr;                    /* Prefix register           */
+        U16     cpuad;                  /* CPU address for STAP      */
+        U64     timer;                  /* CPU timer                 */
+        U64     clkc;                   /* Clock comparator          */
+        jmp_buf progjmp;                /* longjmp destination for
                                            program check return      */
-} REGS;
+        TLBE    tlb[16];                /* Translation lookaside buf */
+    } REGS;
 
 /* Bit definitions for control register 0 */
 #define CR0_SSM_SUPP    0x40000000      /* SSM suppression control   */
