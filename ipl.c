@@ -1,4 +1,4 @@
-/* IPL.C        (c) Copyright Roger Bowler, 1999                     */
+/* IPL.C        (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 Initial Program Loader                       */
 
 /*-------------------------------------------------------------------*/
@@ -172,7 +172,8 @@ void cpu_reset (REGS *regs)
 int             i;                      /* Array subscript           */
 
     /* Clear pending interrupts and indicators */
-    regs->itimer_pending = 0; 
+    regs->sigpreset = 0;
+    regs->itimer_pending = 0;
     regs->restart = 0;
     regs->extcall = 0;
     regs->extccpu = 0;
@@ -202,6 +203,9 @@ int             i;                      /* Array subscript           */
 /*-------------------------------------------------------------------*/
 void initial_cpu_reset (REGS *regs)
 {
+    /* Clear reset pending indicators */
+    regs->sigpireset = regs->sigpreset = 0;
+
     /* Perform a CPU reset */
     cpu_reset (regs);
 

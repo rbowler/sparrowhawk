@@ -115,6 +115,18 @@ void printer_query_device (DEVBLK *dev, BYTE **class,
 } /* end function printer_query_device */
 
 /*-------------------------------------------------------------------*/
+/* Close the device                                                  */
+/*-------------------------------------------------------------------*/
+int printer_close_device ( DEVBLK *dev )
+{
+    /* Close the device file */
+    close (dev->fd);
+    dev->fd = -1;
+
+    return 0;
+} /* end function printer_close_device */
+
+/*-------------------------------------------------------------------*/
 /* Execute a Channel Command Word                                    */
 /*-------------------------------------------------------------------*/
 void printer_execute_ccw (DEVBLK *dev, BYTE code, BYTE flags,

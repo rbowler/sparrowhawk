@@ -127,6 +127,18 @@ void cardpch_query_device (DEVBLK *dev, BYTE **class,
 } /* end function cardpch_query_device */
 
 /*-------------------------------------------------------------------*/
+/* Close the device                                                  */
+/*-------------------------------------------------------------------*/
+int cardpch_close_device ( DEVBLK *dev )
+{
+    /* Close the device file */
+    close (dev->fd);
+    dev->fd = -1;
+
+    return 0;
+} /* end function cardpch_close_device */
+
+/*-------------------------------------------------------------------*/
 /* Execute a Channel Command Word                                    */
 /*-------------------------------------------------------------------*/
 void cardpch_execute_ccw (DEVBLK *dev, BYTE code, BYTE flags,

@@ -36,15 +36,11 @@
 /*-------------------------------------------------------------------*/
 /* Macro definitions for implementation options 		     */
 /*-------------------------------------------------------------------*/
-#define MAX_CPU_ENGINES 	1	/* Max number of S/390 CPUs  */
+#define SMP_SERIALIZATION		/* Serialize storage for SMP */
 #define CKD_MAXFILES		4	/* Max files per CKD volume  */
 #define CKD_KEY_TRACING 		/* Trace CKD search keys     */
 #define MIPS_COUNTING			/* Display MIPS on ctl panel */
 #define TODCLOCK_DRAG_FACTOR		/* Enable toddrag feature    */
-
-/* Uncomment the following to reduce messages from Linux/390 */
-//#define NO_PROTECTION_EXCEPTION_TRACE /* Suppress 0C4 trace message*/
-//#define NO_BINARY_FP_OPERATION_EXCEPTION_TRACE /* Suppress B3xx msg*/
 
 /*-------------------------------------------------------------------*/
 /* ESA/390 features implemented 				     */
@@ -87,6 +83,7 @@
 
 #if	ARCH == 370
  #define ARCHITECTURE_NAME	"S/370"
+ #define MAX_CPU_ENGINES	1
  #define FEATURE_BASIC_STORAGE_KEYS
  #define FEATURE_BCMODE
  #define FEATURE_HEXADECIMAL_FLOATING_POINT
@@ -96,6 +93,7 @@
  #define FEATURE_S370_CHANNEL
 #elif	ARCH == 390
  #define ARCHITECTURE_NAME	"ESA/390"
+ #define MAX_CPU_ENGINES	16
  #define FEATURE_ACCESS_REGISTERS
  #define FEATURE_BIMODAL_ADDRESSING
  #define FEATURE_BRANCH_AND_SET_AUTHORITY
@@ -259,6 +257,7 @@ typedef void DEVQF (struct _DEVBLK *dev, BYTE **class, int buflen,
 typedef void DEVXF (struct _DEVBLK *dev, BYTE code, BYTE flags,
 	BYTE chained, U16 count, BYTE prevcode, int ccwseq,
 	BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual);
+typedef int DEVCF (struct _DEVBLK *dev);
 
 /*-------------------------------------------------------------------*/
 /* Structure definition for CPU register context		     */
@@ -293,16 +292,25 @@ typedef struct _REGS {			/* Processor registers	     */
 		extcall:1,		/* 1=Extcall interrpt pending*/
 		emersig:1,		/* 1=Emersig interrpt pending*/
 		storstat:1,		/* 1=Stop and store status   */
+		sigpreset:1,		/* 1=SIGP cpu reset received */
+		sigpireset:1,		/* 1=SIGP initial cpu reset  */
 		instvalid:1;		/* 1=Inst field is valid     */
 	BYTE	emercpu 		/* Emergency signal flags    */
 		    [MAX_CPU_ENGINES];	/* for each CPU (1=pending)  */
 	U16	extccpu;		/* CPU causing external call */
 	BYTE	inst[6];		/* Last-fetched instruction  */
 #if MAX_CPU_ENGINES > 1
-	U64	broadcast;		/* Broadcast request pending */
-	U64	brdcstpalb;		/* purge_alb() pending	     */
-	U64	brdcstptlb;		/* purge_tlb() pending	     */
-	unsigned int mainlock:1;	/* MAINLOCK held indicator   */
+	U32	brdcstpalb;		/* purge_alb() pending	     */
+	U32	brdcstptlb;		/* purge_tlb() pending	     */
+	unsigned int			/* Flags		     */
+		mainlock:1;		/* MAINLOCK held indicator   */
+#ifdef SMP_SERIALIZATION
+		/* Locking and unlocking the serialisation lock causes
+		   the processor cache to be flushed this is used to
+		   mimic the S/390 serialisation operation.  To avoid
+		   contention, each S/390 CPU has its own lock	     */
+	LOCK	serlock;		/* Serialization lock	     */
+#endif /*SMP_SERIALIZATION*/
 #endif /*MAX_CPU_ENGINES > 1*/
 	jmp_buf progjmp;		/* longjmp destination for
 					   program check return      */
@@ -367,14 +375,22 @@ typedef struct _SYSBLK {
 		inststep:1,		/* 1=Instruction step	     */
 		instbreak:1;		/* 1=Have breakpoint	     */
 #if MAX_CPU_ENGINES > 1
-	U64	broadcast;		/* Broadcast request pending */
-	U64	brdcstpalb;		/* purge_alb() pending	     */
-	U64	brdcstptlb;		/* purge_tlb() pending	     */
+	U32	brdcstpalb;		/* purge_alb() pending	     */
+	U32	brdcstptlb;		/* purge_tlb() pending	     */
+	int	brdcstncpu;		/* number of CPUs waiting    */
+	COND	brdcstcond;		/* Broadcast condition	     */
 #endif /*MAX_CPU_ENGINES > 1*/
 	U32	breakaddr;		/* Breakpoint address	     */
 	FILE   *msgpipew;		/* Message pipe write handle */
 	int	msgpiper;		/* Message pipe read handle  */
+	BYTE	ostailor;		/* OS tailoring setting      */
     } SYSBLK;
+
+/* Definitions for OS tailoring */
+#define OS_NONE 	0		/* No special OS tailoring   */
+#define OS_OS390	1		/* OS/390		     */
+#define OS_VM		2		/* VM			     */
+#define OS_LINUX	3		/* Linux		     */
 
 /*-------------------------------------------------------------------*/
 /* Device configuration block					     */
@@ -386,6 +402,7 @@ typedef struct _DEVBLK {
 	DEVIF  *devinit;		/* -> Init device function   */
 	DEVQF  *devqdef;		/* -> Query device function  */
 	DEVXF  *devexec;		/* -> Execute CCW function   */
+	DEVCF  *devclos;		/* -> Close device function  */
 	LOCK	lock;			/* Device block lock	     */
 	COND	resumecond;		/* Resume condition	     */
 	struct _DEVBLK *nextdev;	/* -> next device block      */
@@ -774,8 +791,7 @@ void perform_external_interrupt (REGS *regs);
 void *timer_update_thread (void *argp);
 void store_status (REGS *ssreg, U32 aaddr);
 int  signal_processor (int r1, int r3, U32 eaddr, REGS *regs);
-void issue_broadcast_request (U64 *type);
-void perform_broadcast_request (REGS *regs);
+void synchronize_broadcast (REGS *regs, U32 *type);
 
 /* Functions in module machchk.c */
 int  present_mck_interrupt (REGS *regs, U64 *mcic, U32 *xdmg,
@@ -839,45 +855,54 @@ int  device_attention (DEVBLK *dev, BYTE unitstat);
 DEVIF cardrdr_init_handler;
 DEVQF cardrdr_query_device;
 DEVXF cardrdr_execute_ccw;
+DEVCF cardrdr_close_device;
 
 /* Functions in module cardpch.c */
 DEVIF cardpch_init_handler;
 DEVQF cardpch_query_device;
 DEVXF cardpch_execute_ccw;
+DEVCF cardpch_close_device;
 
 /* Functions in module console.c */
 void *console_connection_handler (void *arg);
 DEVIF loc3270_init_handler;
 DEVQF loc3270_query_device;
 DEVXF loc3270_execute_ccw;
+DEVCF loc3270_close_device;
 DEVIF constty_init_handler;
 DEVQF constty_query_device;
 DEVXF constty_execute_ccw;
+DEVCF constty_close_device;
 
 /* Functions in module ctcadpt.c */
 DEVIF ctcadpt_init_handler;
 DEVQF ctcadpt_query_device;
 DEVXF ctcadpt_execute_ccw;
+DEVCF ctcadpt_close_device;
 
 /* Functions in module printer.c */
 DEVIF printer_init_handler;
 DEVQF printer_query_device;
 DEVXF printer_execute_ccw;
+DEVCF printer_close_device;
 
 /* Functions in module tapedev.c */
 DEVIF tapedev_init_handler;
 DEVQF tapedev_query_device;
 DEVXF tapedev_execute_ccw;
+DEVCF tapedev_close_device;
 
 /* Functions in module ckddasd.c */
 DEVIF ckddasd_init_handler;
 DEVQF ckddasd_query_device;
 DEVXF ckddasd_execute_ccw;
+DEVCF ckddasd_close_device;
 
 /* Functions in module fbadasd.c */
 DEVIF fbadasd_init_handler;
 DEVQF fbadasd_query_device;
 DEVXF fbadasd_execute_ccw;
+DEVCF fbadasd_close_device;
 void fbadasd_syncblk_io (DEVBLK *dev, BYTE type, U32 blknum,
 	U32 blksize, BYTE *iobuf, BYTE *unitstat, U16 *residual);
 

@@ -10,6 +10,23 @@ What's new in Hercules</TITLE>
 <h1>What's new in Hercules</h1>
 
 <hr noshade>
+<h2>What's new in release 1.61</h2>
+<p>Release date: 21 May 2000
+<ul>
+<li>More multiprocessor improvements (by Jan Jaeger)
+<li>New startall/stopall panel commands (by Jan Jaeger)
+<li>STIDP stores processor address in first digit of CPU id
+    (by Roger Bowler)
+<li>Correction to IPTE instruction for S/370 (by Jay Maynard)
+<li>Dummy HIO instruction for S/370 (by Jay Maynard)
+<li>Support for emulated 0671 FBA DASD (by Jay Maynard)
+<li>FBA device reserve/release CCW support (by Jay Maynard)
+<li>New OSTAILOR configuration option allows selective suppression
+    of program check messages (by Jay Maynard)
+</ul>
+<p>Download
+<a href="hercules/hercules-1.61.tar.gz">hercules-1.61.tar.gz</a>
+
 <h2>What's new in release 1.60</h2>
 <p>Release date: 14 May 2000
 <ul>
@@ -21,15 +38,14 @@ What's new in Hercules</TITLE>
 <li>Compare and Swap and Purge (CSP) instruction (by Jan Jaeger)
 <li>Broadcasted purging (by Jan Jaeger)
 <li>Fix LASP instruction SASN authorization using wrong AX if bits 29-31
-    are 010 and SASN \= PASN (by Izzeb Oiram)
+    are 010 and SASN \= PASN (by Mario Bezzi)
 <li>Fix SAC instruction special operation exception setting secondary
-    space mode when ASF=0 (by Izzeb Oiram)
+    space mode when ASF=0 (by Mario Bezzi)
 <li>Remove intdrag option and replace drag command by toddrag command
 <li>New extpending flag to improve performance (originally contributed
     by Valery Pogonchenko and enhanced by Jan Jaeger)
 <li>Allow longer host name in console connected message (by Jay Maynard)
-<li>Floating point version 5
-    including fixes for bugs reported by Izzeb Oiram
+<li>Floating point version 5 including fixes by Mario Bezzi
     (contributed by Peter Kuschnerus)
 </ul>
 <p>Download
@@ -517,7 +533,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 14 May 2000
+<p>Last updated 21 May 2000
 </BODY>
 </HTML>
 

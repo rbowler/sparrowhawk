@@ -6,7 +6,7 @@
 #
 #
 
-VERSION  = 1.60
+VERSION  = 1.61
 
 CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=390
 #	   -march=pentium -malign-double -mwide-multiply
@@ -29,7 +29,7 @@ HRC_370_OBJS = obj370/impl.o obj370/config.o obj370/panel.o \
 	   obj370/tapedev.o obj370/cardrdr.o obj370/cardpch.o \
 	   obj370/printer.o obj370/console.o obj370/external.o \
 	   obj370/float.o obj370/ctcadpt.o obj370/trace.o \
-           obj370/machchk.o
+	   obj370/machchk.o
 
 HRC_390_OBJS = obj390/impl.o obj390/config.o obj390/panel.o \
 	   obj390/ipl.o obj390/cpu.o obj390/assist.o obj390/dat.o \
@@ -40,7 +40,7 @@ HRC_390_OBJS = obj390/impl.o obj390/config.o obj390/panel.o \
 	   obj390/tapedev.o obj390/cardrdr.o obj390/cardpch.o \
 	   obj390/printer.o obj390/console.o obj390/external.o \
 	   obj390/float.o obj390/ctcadpt.o obj390/trace.o \
-           obj390/machchk.o
+	   obj390/machchk.o
 
 DIN_OBJS = dasdinit.o dasdutil.o
 

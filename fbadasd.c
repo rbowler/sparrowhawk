@@ -1,9 +1,14 @@
-/* FBADASD.C    (c) Copyright Roger Bowler, 1999                     */
+/* FBADASD.C    (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 FBA Direct Access Storage Device Handler     */
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
 /* fixed block architecture direct access storage devices.           */
+/*-------------------------------------------------------------------*/
+
+/*-------------------------------------------------------------------*/
+/* Additional credits:                                               */
+/*      0671 device support by Jay Maynard                           */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -45,6 +50,7 @@ U32     blksufh;                        /* Blocks under fixed heads  */
 U32     startblk;                       /* Device origin block number*/
 U32     numblks;                        /* Device block count        */
 BYTE    unittyp;                        /* Unit type                 */
+BYTE    unitmdl;                        /* Unit model                */
 BYTE    c;                              /* Character work area       */
 
     /* The first argument is the file name */
@@ -128,20 +134,30 @@ BYTE    c;                              /* Character work area       */
     switch (dev->devtype) {
     case 0x3310:
         unittyp = 0x01;
+        unitmdl = 0x01;
         blkspcg = 32;
         blkspap = 352;
         blksufh = 0;
         break;
     case 0x3370:
         unittyp = 0x02;
+        unitmdl = 0x04;
         blkspcg = 62;
         blkspap = 744;
         blksufh = 0;
         break;
     case 0x9336:
         unittyp = 0x02;
+        unitmdl = 0x01;
         blkspcg = 64;
         blkspap = 960;
+        blksufh = 0;
+        break;
+    case 0x0671:
+        unittyp = 0x02;
+        unitmdl = 0x01;
+        blkspcg = 63;
+        blkspap = 630;
         blksufh = 0;
         break;
     default:
@@ -158,7 +174,7 @@ BYTE    c;                              /* Character work area       */
     dev->devid[3] = 0x01;
     dev->devid[4] = dev->devtype >> 8;
     dev->devid[5] = dev->devtype & 0xFF;
-    dev->devid[6] = 0x01;
+    dev->devid[6] = unitmdl;
     dev->numdevid = 7;
 
     /* Initialize the device characteristics bytes */
@@ -218,7 +234,6 @@ BYTE    c;                              /* Character work area       */
     return 0;
 } /* end function fbadasd_init_handler */
 
-
 /*-------------------------------------------------------------------*/
 /* Query the device definition                                       */
 /*-------------------------------------------------------------------*/
@@ -232,6 +247,18 @@ void fbadasd_query_device (DEVBLK *dev, BYTE **class,
             dev->fbaorigin, dev->fbanumblk);
 
 } /* end function fbadasd_query_device */
+
+/*-------------------------------------------------------------------*/
+/* Close the device                                                  */
+/*-------------------------------------------------------------------*/
+int fbadasd_close_device ( DEVBLK *dev )
+{
+    /* Close the device file */
+    close (dev->fd);
+    dev->fd = -1;
+
+    return 0;
+} /* end function fbadasd_close_device */
 
 /*-------------------------------------------------------------------*/
 /* Execute a Channel Command Word                                    */
@@ -709,10 +736,56 @@ int     repcnt;                         /* Replication count         */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
+    case 0x94:
+    /*---------------------------------------------------------------*/
+    /* DEVICE RELEASE                                                */
+    /*---------------------------------------------------------------*/
+        /* Reject if extent previously defined in this CCW chain */
+        if (dev->fbaxtdef)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Return sense information */
+        goto sense;
+
+    case 0xB4:
+    /*---------------------------------------------------------------*/
+    /* DEVICE RESERVE                                                */
+    /*---------------------------------------------------------------*/
+        /* Reject if extent previously defined in this CCW chain */
+        if (dev->fbaxtdef)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Return sense information */
+        goto sense;
+
+    case 0x14:
+    /*---------------------------------------------------------------*/
+    /* UNCONDITIONAL RESERVE                                         */
+    /*---------------------------------------------------------------*/
+        /* Reject if this is not the first CCW in the chain */
+        if (ccwseq > 0)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Return sense information */
+        goto sense;
+
     case 0x04:
     /*---------------------------------------------------------------*/
     /* SENSE                                                         */
     /*---------------------------------------------------------------*/
+    sense:
         /* Calculate residual byte count */
         num = (count < dev->numsense) ? count : dev->numsense;
         *residual = count - num;

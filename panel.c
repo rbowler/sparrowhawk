@@ -991,6 +991,12 @@ BYTE   *devclass;                       /* -> Device class name      */
     cpu = 0;
     regs = sysblk.regs + cpu;
 
+#if MAX_CPU_ENGINES > 1
+ #define STSPALL_CMD "startall/stopall=start/stop all CPUs\n"
+#else
+ #define STSPALL_CMD
+#endif /*MAX_CPU_ENGINES>1*/
+
 #ifdef FEATURE_SYSTEM_CONSOLE
  #define SYSCONS_CMD ".xxx=scp command, !xxx=scp priority messsage\n"
 #else
@@ -1017,6 +1023,7 @@ BYTE   *devclass;                       /* -> Device class name      */
             "b addr = set breakpoint, b- = delete breakpoint\n"
             "i devn=I/O attention interrupt, ext=external interrupt\n"
             "stop=stop CPU, start=start CPU, restart=PSW restart\n"
+            STSPALL_CMD
             "store=store status\n"
             "loadcore filename=load core image from file\n"
             "loadparm xxxxxxxx=set IPL parameter, ipl devn=IPL\n"
@@ -1040,7 +1047,8 @@ BYTE   *devclass;                       /* -> Device class name      */
     }
 
     /* start command (or just Enter) - start CPU */
-    if (cmd[0] == '\0' || strcmp(cmd,"start") == 0)
+    if ((cmd[0] == '\0' && sysblk.inststep)
+        || strcmp(cmd,"start") == 0)
     {
         /* Obtain the interrupt lock */
         obtain_lock (&sysblk.intlock);
@@ -1063,6 +1071,29 @@ BYTE   *devclass;                       /* -> Device class name      */
         regs->cpustate = CPUSTATE_STOPPING;
         return NULL;
     }
+
+#if MAX_CPU_ENGINES > 1
+    /* startall command - start all CPU's */
+    if (strcmp(cmd,"startall") == 0)
+    {
+        obtain_lock (&sysblk.intlock);
+        for (i = 0; i < sysblk.numcpu; i++)
+            sysblk.regs[i].cpustate = CPUSTATE_STARTED;
+        signal_condition (&sysblk.intcond);
+        release_lock (&sysblk.intlock);
+        return NULL;
+    }
+
+    /* stopall command - stop all CPU's */
+    if (strcmp(cmd,"stopall") == 0)
+    {
+        obtain_lock (&sysblk.intlock);
+        for (i = 0; i < sysblk.numcpu; i++)
+            sysblk.regs[i].cpustate = CPUSTATE_STOPPING;
+        release_lock (&sysblk.intlock);
+        return NULL;
+    }
+#endif /*MAX_CPU_ENGINES > 1*/
 
     /* store command - store CPU status at absolute zero */
     if (strcmp(cmd,"store") == 0)
@@ -1224,6 +1255,10 @@ BYTE   *devclass;                       /* -> Device class name      */
 
         /* Indicate that a restart interrupt is pending */
         regs->restart = 1;
+
+        /* Ensure that a stopped CPU will recognize the restart */
+        if (regs->cpustate == CPUSTATE_STOPPED)
+            regs->cpustate = CPUSTATE_STOPPING;
 
         /* Signal waiting CPUs that an interrupt is pending */
         signal_condition (&sysblk.intcond);
@@ -1521,13 +1556,7 @@ BYTE   *devclass;                       /* -> Device class name      */
         /* Close the existing file, if any */
         if (dev->fd > 2)
         {
-            if (close(dev->fd) < 0)
-            {
-                /* Close failed; log the event */
-                logmsg ("Error closing file %s: %s\n",
-                        dev->filename,strerror(errno));
-            }
-            dev->fd = -1;
+            (*(dev->devclos))(dev);
         }
 
         /* Call the device init routine to do the hard work */
@@ -1624,6 +1653,10 @@ BYTE   *devclass;                       /* -> Device class name      */
 
         return NULL;
     }
+
+    /* Ignore just enter */
+    if (cmd[0] == '\0')
+        return NULL;
 
     /* Invalid command - display error message */
     logmsg ("%s command invalid. Enter ? for help\n", cmd);

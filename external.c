@@ -11,6 +11,7 @@
 /*      TOD clock offset contributed by Jay Maynard                  */
 /*      Correction to timer interrupt by Valery Pogonchenko          */
 /*      TOD clock drag factor contributed by Jan Jaeger              */
+/*      Synchronized broadcasting contributed by Jan Jaeger          */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -46,12 +47,14 @@ int     rc;
     rc = load_psw (&(regs->psw), psa->extnew);
     if ( rc )
     {
-        logmsg ("Invalid external interrupt new PSW: "
+        release_lock(&sysblk.intlock);
+        logmsg ("CPU%4.4X: Invalid external new PSW: "
                 "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
+                regs->cpuad,
                 psa->extnew[0], psa->extnew[1], psa->extnew[2],
                 psa->extnew[3], psa->extnew[4], psa->extnew[5],
                 psa->extnew[6], psa->extnew[7]);
-        regs->cpustate = CPUSTATE_STOPPED;
+        program_check(regs, rc);
     }
 
 } /* end function external_interrupt */
@@ -109,8 +112,8 @@ U16     cpuad;                          /* Originating CPU address   */
             }
         } /* end for(cpuad) */
 
-        logmsg ("External interrupt: Emergency Signal from CPU %d\n",
-                cpuad);
+// /*debug*/ logmsg ("External interrupt: Emergency Signal from CPU %d\n",
+// /*debug*/    cpuad);
 
         /* Reset the indicator for the CPU which was found */
         regs->emercpu[cpuad] = 0;
@@ -537,6 +540,24 @@ U32     status = 0;                     /* Signal status             */
 U32     abs;                            /* Absolute address          */
 U16     cpad;                           /* Target CPU address        */
 BYTE    order;                          /* SIGP order code           */
+static char *ordername[] = {    "Unassigned",
+        /* SIGP_SENSE     */    "Sense",
+        /* SIGP_EXTCALL   */    "External call",
+        /* SIGP_EMERGENCY */    "Emergency signal",
+        /* SIGP_START     */    "Start",
+        /* SIGP_STOP      */    "Stop",
+        /* SIGP_RESTART   */    "Restart",
+        /* SIGP_IPR       */    "Initial program reset",
+        /* SIGP_PR        */    "Program reset",
+        /* SIGP_STOPSTORE */    "Stop and store status",
+        /* SIGP_IMPL      */    "Initial microprogram load",
+        /* SIGP_INITRESET */    "Initial CPU reset",
+        /* SIGP_RESET     */    "CPU reset",
+        /* SIGP_SETPREFIX */    "Set prefix",
+        /* SIGP_STORE     */    "Store status",
+        /* 0x0F           */    "Unassigned",
+        /* 0x10           */    "Unassigned",
+        /* SIGP_STOREX    */    "Store extended status at address" };
 
     /* Load the target CPU address from R3 bits 16-31 */
     cpad = regs->gpr[r3] & 0xFFFF;
@@ -551,14 +572,18 @@ BYTE    order;                          /* SIGP order code           */
     if (cpad >= sysblk.numcpu)
         return 3;
 
-//  /*debug*/logmsg("SIGP CPU %4.4X ORDER %2.2X PARM %8.8X\n",
-//  /*debug*/       cpad, order, parm);
+    /* Trace SIGP unless Sense, External Call, or Emergency Signal */
+    if (order > SIGP_EMERGENCY)
+        logmsg ("CPU%4.4X: SIGP CPU%4.4X %s PARM %8.8X\n",
+                regs->cpuad, cpad,
+                order > SIGP_STOREX ? ordername[0] : ordername[order],
+                parm);
 
     /* [4.9.2.1] Claim the use of the CPU signaling and response
        facility, and return condition code 2 if the facility is
        busy.  The sigpbusy bit is set while the facility is in
        use by any CPU.  The sigplock must be held while testing
-       or changing the value of the sigpbusy bit. */
+       and setting the value of the sigpbusy bit to one. */
     obtain_lock (&sysblk.sigplock);
     if (sysblk.sigpbusy)
     {
@@ -594,7 +619,7 @@ BYTE    order;                          /* SIGP order code           */
             status |= SIGP_STATUS_EXTERNAL_CALL_PENDING;
 
         /* Set status bit 25 if target CPU is stopped */
-        if (tregs->cpustate == CPUSTATE_STOPPED)
+        if (tregs->cpustate != CPUSTATE_STARTED)
             status |= SIGP_STATUS_STOPPED;
 
         break;
@@ -636,6 +661,10 @@ BYTE    order;                          /* SIGP order code           */
     case SIGP_RESTART:
         /* Make restart interrupt pending in the target CPU */
         tregs->restart = 1;
+        /* Set cpustate to stopping. If the restart is successful,
+           then the cpustate will be set to started in cpu.c */
+        if(tregs->cpustate == CPUSTATE_STOPPED)
+            tregs->cpustate = CPUSTATE_STOPPING;
 
         break;
 
@@ -649,14 +678,16 @@ BYTE    order;                          /* SIGP order code           */
         break;
 
     case SIGP_INITRESET:
-        /* Perform initial CPU reset function */
-        initial_cpu_reset (tregs);
+        /* Signal initial CPU reset function */
+        tregs->sigpireset = 1;
+        tregs->cpustate = CPUSTATE_STOPPING;
 
         break;
 
     case SIGP_RESET:
-        /* Perform CPU reset function */
-        cpu_reset (tregs);
+        /* Signal CPU reset function */
+        tregs->sigpreset = 1;
+        tregs->cpustate = CPUSTATE_STOPPING;
 
         break;
 
@@ -718,6 +749,8 @@ BYTE    order;                          /* SIGP order code           */
 
         break;
 
+    case SIGP_STOREX:
+
     default:
         status = SIGP_STATUS_INVALID_ORDER;
     } /* end switch(order) */
@@ -746,43 +779,72 @@ BYTE    order;                          /* SIGP order code           */
 
 #if MAX_CPU_ENGINES > 1
 /*-------------------------------------------------------------------*/
-/* Issue Broadcast Request                                           */
+/* Synchronize broadcast request                                     */
 /* Input:                                                            */
+/*      regs    A pointer to the CPU register context                */
 /*      type    A pointer to the request counter in the sysblk for   */
-/*              the requested function (brdcstptlb or brdcstpalb).   */
+/*              the requested function (brdcstptlb or brdcstpalb),   */
+/*              or zero in case of being a target being synchronized */
+/*                                                                   */
+/* If the type is zero then the intlock MUST be held, else           */
+/* the intlock MUST NOT be held.                                     */
 /*                                                                   */
 /* Signals all other CPU's to perform a requested function           */
-/* synchronously, such as purging the ALB and TLB buffers.  In       */
-/* theory the CPU issuing the broadcast request should wait until    */
-/* all other CPU's have performed the requested action.  In this     */
-/* implementation, the issuing CPU will continue, and all other      */
-/* CPU's will finish the currently executing instruction before      */
-/* performing the requsted action.  This mode of operation is        */
-/* probably within tolerance limits. *JJ*                            */
+/* synchronously, such as purging the ALB and TLB buffers.           */
+/* The CPU issuing the broadcast request will wait until             */
+/* all other CPU's have performed the requested action.         *JJ  */
 /*-------------------------------------------------------------------*/
-void issue_broadcast_request (U64 *type)
+void synchronize_broadcast (REGS *regs, U32 *type)
 {
-    /* Obtain the interrupt lock */
-    obtain_lock(&sysblk.intlock);
+int     i;                              /* Array subscript           */
 
-    /* Increment the broadcast request counter */
-    sysblk.broadcast++;
+    /* If type is specified then obtain lock and increment counter */
+    if (type != NULL)
+    {
+        /* Obtain the intlock for CSP or IPTE */
+        obtain_lock (&sysblk.intlock);
 
-    /* Increment the counter for the specified function */
-    (*type)++;
+        /* Increment the counter for the specified function */
+        (*type)++;
+    }
 
-    /* Release the interrupt lock */
-    release_lock(&sysblk.intlock);
+#if 0
+    logmsg ("CPU%4.4X: synchronize_broadcast() type %c= NULL, ncpu = %d\n",
+            regs->cpuad, type == NULL ? '=' : '!', sysblk.brdcstncpu);
+#endif
 
-} /* end function issue_broadcast request */
+    /* Initiate synchronization if this is the initiating CPU */
+    if (sysblk.brdcstncpu == 0)
+    {
+#if 0
+        if (type == NULL)
+            logmsg ("CPU%4.4X: synchronize_broadcast() logic error\n",
+                    regs->cpuad);
+#endif
 
-/*-------------------------------------------------------------------*/
-/* Perform Broadcast Request                                         */
-/*                                                                   */
-/* Note: The caller MUST hold the interrupt lock (sysblk.intlock)    */
-/*-------------------------------------------------------------------*/
-void perform_broadcast_request (REGS *regs)
-{
+        /* Set number of CPU's to synchronize */
+        sysblk.brdcstncpu = sysblk.numcpu;
+
+        /* Redrive all stopped CPU's */
+        for (i = 0; i < sysblk.numcpu; i++)
+            if (sysblk.regs[i].cpustate == CPUSTATE_STOPPED)
+                sysblk.regs[i].cpustate = CPUSTATE_STOPPING;
+        signal_condition (&sysblk.intcond);
+    }
+
+    /* If this CPU is the last to enter, then signal all
+       waiting CPU's that the synchronization is complete
+       else wait for the synchronization to compete */
+    if (--sysblk.brdcstncpu == 0)
+        signal_condition (&sysblk.brdcstcond);
+    else
+        wait_condition (&sysblk.brdcstcond, &sysblk.intlock);
+
+#if 0
+    logmsg ("CPU%4.4X: synchronize_broadcast() brdcstwait ended, ncpu = %d\n",
+            regs->cpuad, sysblk.brdcstncpu);
+#endif
+
     /* Purge ALB if requested */
     if (sysblk.brdcstpalb != regs->brdcstpalb)
     {
@@ -797,8 +859,9 @@ void perform_broadcast_request (REGS *regs)
         regs->brdcstptlb = sysblk.brdcstptlb;
     }
 
-    /* Reset broadcast counter for this CPU */
-    regs->broadcast = sysblk.broadcast;
+    /* release intlock */
+    if(type != NULL)
+        release_lock(&sysblk.intlock);
 
-} /* end function perform_broadcast request */
+} /* end function synchronize_broadcast */
 #endif /*MAX_CPU_ENGINES > 1*/

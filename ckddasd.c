@@ -170,15 +170,6 @@ U32             trks;                   /* #of tracks in CKD file    */
 U32             cyls;                   /* #of cylinders in CKD file */
 U32             highcyl;                /* Highest cyl# in CKD file  */
 
-    /* If this is a device reinitialization, close all of the CKD
-       image files still open from the previous initialization */
-    for (fileseq = 1; fileseq <= dev->ckdnumfd; fileseq++)
-    {
-        if (dev->ckdfd[fileseq-1] > 2)
-            close (dev->ckdfd[fileseq-1]);
-    }
-    dev->ckdnumfd = 0;
-
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
     {
@@ -524,6 +515,31 @@ void ckddasd_query_device (DEVBLK *dev, BYTE **class,
             dev->ckdcyls);
 
 } /* end function ckddasd_query_device */
+
+/*-------------------------------------------------------------------*/
+/* Close the device                                                  */
+/*-------------------------------------------------------------------*/
+int ckddasd_close_device ( DEVBLK *dev )
+{
+int     fileseq;                        /* File sequence number      */
+
+    /* Close the device file */
+    close (dev->fd);
+    dev->fd = -1;
+
+    /* Close all of the CKD image files */
+    for (fileseq = 0; fileseq < dev->ckdnumfd; fileseq++)
+    {
+        if (dev->ckdfd[fileseq] > 2)
+        {
+            close (dev->ckdfd[fileseq]);
+            dev->ckdfd[fileseq] = 0;
+        }
+    }
+    dev->ckdnumfd = 0;
+
+    return 0;
+} /* end function ckddasd_close_device */
 
 /*-------------------------------------------------------------------*/
 /* Build sense data                                                  */

@@ -20,6 +20,7 @@
 /*      Branch tracing by Jan Jaeger                                 */
 /*      Light optimization on critical path by Valery Pogonchenko    */
 /*      STCRW and CSP instructions by Jan Jaeger                     */
+/*      OSTAILOR parameter by Jay Maynard                            */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -143,14 +144,18 @@ S64     quot, rem;
 /*-------------------------------------------------------------------*/
 /* Perform serialization                                             */
 /*-------------------------------------------------------------------*/
-static inline void perform_serialization (void)
+static inline void perform_serialization (REGS *regs)
 {
+#if MAX_CPU_ENGINES > 1 && defined(SMP_SERIALIZATION)
+    obtain_lock(&regs->serlock);
+    release_lock(&regs->serlock);
+#endif /*SERIALIZATION*/
 } /* end function perform_serialization */
 
 /*-------------------------------------------------------------------*/
 /* Perform checkpoint synchronization                                */
 /*-------------------------------------------------------------------*/
-static inline void perform_chkpt_sync (void)
+static inline void perform_chkpt_sync (REGS *regs)
 {
 } /* end function perform_chkpt_sync */
 
@@ -336,20 +341,23 @@ REGS   *realregs;                       /* True regs structure       */
     if (sysblk.insttrace || sysblk.inststep
         || (code != PGM_PAGE_TRANSLATION_EXCEPTION
             && code != PGM_SEGMENT_TRANSLATION_EXCEPTION
-#ifdef NO_PROTECTION_EXCEPTION_TRACE
-            && code != PGM_PROTECTION_EXCEPTION
-#endif /*NO_PROTECTION_EXCEPTION_TRACE*/
-#ifdef NO_BINARY_FP_OPERATION_EXCEPTION_TRACE
-            && (!(code == PGM_OPERATION_EXCEPTION
-                && regs->inst[0] == 0xB3))
-#endif /*NO_BINARY_FP_OPERATION_EXCEPTION_TRACE*/
+            && (!((sysblk.ostailor == OS_LINUX)
+                && (code == PGM_PROTECTION_EXCEPTION)))
+            && (!((sysblk.ostailor == OS_LINUX)
+                && (!(code == PGM_OPERATION_EXCEPTION
+                && regs->inst[0] == 0xB3))))
+            && (!((sysblk.ostailor == OS_OS390)
+                && ((code == PGM_ASTE_VALIDITY_EXCEPTION)
+                || (code == PGM_STACK_OPERATION_EXCEPTION))))
+            && (!((sysblk.ostailor == OS_VM)
+                && (code == PGM_PRIVILEGED_OPERATION_EXCEPTION)))
             && code != PGM_SPACE_SWITCH_EVENT
             && code != PGM_STACK_FULL_EXCEPTION
             && code != PGM_TRACE_TABLE_EXCEPTION
             && code != PGM_MONITOR_EVENT))
     {
-        logmsg ("Program check CODE=%4.4X ILC=%d ",
-                code, regs->psw.ilc);
+        logmsg ("CPU%4.4X: Program check CODE=%4.4X ILC=%d ",
+                regs->cpuad, code, regs->psw.ilc);
         display_inst (regs, regs->instvalid ? regs->inst : NULL);
     }
 
@@ -407,8 +415,9 @@ REGS   *realregs;                       /* True regs structure       */
     /* Load new PSW from PSA+X'68' */
     if ( load_psw (&(realregs->psw), psa->pgmnew) )
     {
-        logmsg ("Invalid program-check new PSW: "
+        logmsg ("CPU%4.4X: Invalid program-check new PSW: "
                 "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
+                regs->cpuad,
                 psa->pgmnew[0], psa->pgmnew[1], psa->pgmnew[2],
                 psa->pgmnew[3], psa->pgmnew[4], psa->pgmnew[5],
                 psa->pgmnew[6], psa->pgmnew[7]);
@@ -444,8 +453,9 @@ PSA    *psa;                            /* -> Prefixed storage area  */
     rc = load_psw (&(regs->psw), psa->iplpsw);
     if ( rc )
     {
-        logmsg ("Invalid restart new PSW: "
+        logmsg ("CPU%4.4X: Invalid restart new PSW: "
                 "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
+                regs->cpuad,
                 psa->iplpsw[0], psa->iplpsw[1], psa->iplpsw[2],
                 psa->iplpsw[3], psa->iplpsw[4], psa->iplpsw[5],
                 psa->iplpsw[6], psa->iplpsw[7]);
@@ -581,15 +591,15 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             /* Perform unstacking process */
             rc = program_return (regs);
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             /* Generate space switch event if required */
             if (rc) {
@@ -730,8 +740,8 @@ static BYTE module[8];                  /* Module name               */
            the mask is all ones and the register is all zeroes */
         if ( r1 == 0x0F && r2 == 0 )
         {
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
         }
 
         break;
@@ -918,8 +928,8 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Perform serialization and checkpoint synchronization */
-        perform_serialization ();
-        perform_chkpt_sync ();
+        perform_serialization (regs);
+        perform_chkpt_sync (regs);
 
         break;
 
@@ -2728,8 +2738,8 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Perform serialization and checkpoint synchronization */
-        perform_serialization ();
-        perform_chkpt_sync ();
+        perform_serialization (regs);
+        perform_chkpt_sync (regs);
 
         /* Fetch new PSW from operand address */
         vfetchc ( dword, 7, effective_addr, b1, regs );
@@ -2743,8 +2753,8 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Perform serialization and checkpoint synchronization */
-        perform_serialization ();
-        perform_chkpt_sync ();
+        perform_serialization (regs);
+        perform_chkpt_sync (regs);
 
         break;
 
@@ -2757,8 +2767,8 @@ static BYTE module[8];                  /* Module name               */
         diagnose_call (effective_addr, r1, r2, regs);
 
         /* Perform serialization and checkpoint-synchronization */
-        perform_serialization ();
-        perform_chkpt_sync ();
+        perform_serialization (regs);
+        perform_chkpt_sync (regs);
 
         break;
 
@@ -3137,7 +3147,7 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Perform serialization before starting operation */
-        perform_serialization ();
+        perform_serialization (regs);
 
         /* Obtain main-storage access lock */
         OBTAIN_MAINLOCK(regs);
@@ -3155,7 +3165,7 @@ static BYTE module[8];                  /* Module name               */
         regs->psw.cc = obyte >> 7;
 
         /* Perform serialization after completing operation */
-        perform_serialization ();
+        perform_serialization (regs);
 
         break;
 
@@ -3290,15 +3300,15 @@ static BYTE module[8];                  /* Module name               */
             break;
 
         /* Perform serialization and checkpoint-synchronization */
-        perform_serialization ();
-        perform_chkpt_sync ();
+        perform_serialization (regs);
+        perform_chkpt_sync (regs);
 
         /* Add a new trace table entry and update CR12 */
         trace_tr (n2, r1, r3, regs);
 
         /* Perform serialization and checkpoint-synchronization */
-        perform_serialization ();
-        perform_chkpt_sync ();
+        perform_serialization (regs);
+        perform_chkpt_sync (regs);
 
         break;
 #endif /*FEATURE_TRACING*/
@@ -3435,6 +3445,34 @@ static BYTE module[8];                  /* Module name               */
 
         /* Test the device and set the condition code */
         regs->psw.cc = test_io (regs, dev, ibyte);
+
+        break;
+
+    case 0x9E:
+    /*---------------------------------------------------------------*/
+    /* 9E00: HIO        Halt I/O                                 [S] */
+    /* 9E01: HDV        Halt Device                              [S] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if in problem state */
+        if ( regs->psw.prob )
+        {
+            program_check (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Locate the device block */
+        dev = find_device_by_devnum (effective_addr);
+
+        /* Set condition code 3 if device does not exist */
+        if (dev == NULL)
+        {
+            regs->psw.cc = 3;
+            break;
+        }
+
+        /* FIXME: for now, just return CC 0 */
+        regs->psw.cc = 0;
 
         break;
 
@@ -3733,14 +3771,14 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Perform serialization before starting operation */
-        perform_serialization ();
+        perform_serialization (regs);
 
         /* Signal processor and set condition code */
         regs->psw.cc =
             signal_processor (r1, r3, effective_addr, regs);
 
         /* Perform serialization after completing operation */
-        perform_serialization ();
+        perform_serialization (regs);
 
         break;
 
@@ -3845,8 +3883,15 @@ static BYTE module[8];                  /* Module name               */
                 goto terminate;
             }
 
+            /* Load the CPU ID */
+            dreg = sysblk.cpuid;
+
+            /* If first digit of serial is zero, insert processor id */
+            if ((dreg & 0x00F0000000000000ULL) == 0)
+                dreg |= (U64)(regs->cpuad & 0x0F) << 52;
+
             /* Store CPU ID at operand address */
-            vstore8 ( sysblk.cpuid, effective_addr, b1, regs );
+            vstore8 ( dreg, effective_addr, b1, regs );
 
             break;
 
@@ -3920,7 +3965,7 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
 
             /* Perform serialization before fetching clock */
-            perform_serialization ();
+            perform_serialization (regs);
 
             /* Obtain the TOD clock update lock */
             obtain_lock (&sysblk.todlock);
@@ -3943,7 +3988,7 @@ static BYTE module[8];                  /* Module name               */
             vstore8 ( dreg, effective_addr, b1, regs );
 
             /* Perform serialization after storing clock */
-            perform_serialization ();
+            perform_serialization (regs);
 
             /* Set condition code zero */
             regs->psw.cc = 0;
@@ -4172,7 +4217,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Perform serialization before fetching the operand */
-            perform_serialization ();
+            perform_serialization (regs);
 
             /* Load new prefix value from operand address */
             n = vfetch4 ( effective_addr, b1, regs );
@@ -4195,7 +4240,7 @@ static BYTE module[8];                  /* Module name               */
             purge_tlb (regs);
 
             /* Perform serialization after completing the operation */
-            perform_serialization ();
+            perform_serialization (regs);
 
             break;
 
@@ -4292,15 +4337,15 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             /* Perform PC using operand address as PC number */
             rc = program_call (effective_addr, regs);
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             /* Generate space switch event if required */
             if (rc) {
@@ -4318,15 +4363,15 @@ static BYTE module[8];                  /* Module name               */
             obyte = (effective_addr & 0x00000F00) >> 8;
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             /* Set the address-space control bits in the PSW */
             rc = set_address_space_control (obyte, regs);
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             /* Generate a space-switch-event if indicated */
             if (rc)
@@ -4382,13 +4427,13 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Perform serialization before operation */
-            perform_serialization ();
+            perform_serialization (regs);
 
             /* Invalidate page table entry */
             invalidate_pte (ibyte, r1, r2, regs);
 
             /* Perform serialization after operation */
-            perform_serialization ();
+            perform_serialization (regs);
 
             break;
 
@@ -4486,8 +4531,8 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             /* Load the new ASN from R1 register bits 16-31 */
             sasn = regs->gpr[r1] & CR3_SASN;
@@ -4496,8 +4541,8 @@ static BYTE module[8];                  /* Module name               */
             set_secondary_asn (sasn, regs);
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             break;
 
@@ -4559,16 +4604,16 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             /* Set new PKM, PASN, SASN, PSTD, SSTD, amode,
                instruction address, and problem state bit */
             rc = program_transfer (r1, r2, regs);
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             /* Generate space switch event if required */
             if (rc) {
@@ -4662,8 +4707,8 @@ static BYTE module[8];                  /* Module name               */
             n = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             /* Convert real address to absolute address */
             n = APPLY_PREFIXING (n, regs->pxr);
@@ -4680,8 +4725,8 @@ static BYTE module[8];                  /* Module name               */
             STORAGE_KEY(n) |= regs->gpr[r1] & ~(STORKEY_BADFRM);
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             break;
 #endif /*FEATURE_EXTENDED_STORAGE_KEYS*/
@@ -4703,7 +4748,7 @@ static BYTE module[8];                  /* Module name               */
             n &= 0xFFFFF000;
 
             /* Perform serialization */
-            perform_serialization ();
+            perform_serialization (regs);
 
             /* Addressing exception if block is outside main storage */
             if ( n >= sysblk.mainsize )
@@ -4736,7 +4781,7 @@ static BYTE module[8];                  /* Module name               */
                 regs->psw.cc = 0;
 
             /* Perform serialization */
-            perform_serialization ();
+            perform_serialization (regs);
 
             /* Clear general register 0 */
             regs->gpr[0] = 0;
@@ -4916,8 +4961,8 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             /* Condition code 1 if subchannel is status pending */
             if (dev->scsw.flag3 & SCSW3_SC_PEND)
@@ -5023,8 +5068,8 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             /* Clear the path not operational mask */
             dev->pmcw.pnom = 0;
@@ -5079,8 +5124,8 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             /* Build the subchannel information block */
             schib.pmcw = dev->pmcw;
@@ -5135,8 +5180,8 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             /* Test and clear pending status, set condition code */
             regs->psw.cc = test_subchan (regs, dev, &irb);
@@ -5166,8 +5211,8 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Perform serialization and checkpoint-synchronization */
-            perform_serialization ();
-            perform_chkpt_sync ();
+            perform_serialization (regs);
+            perform_chkpt_sync (regs);
 
             /* Obtain the interrupt lock */
             obtain_lock (&sysblk.intlock);
@@ -5615,7 +5660,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Perform serialization before starting operation */
-            perform_serialization ();
+            perform_serialization (regs);
 
             /* Obtain main-storage access lock */
             OBTAIN_MAINLOCK(regs);
@@ -5633,13 +5678,19 @@ static BYTE module[8];                  /* Module name               */
                 vstore4 ( regs->gpr[r1+1], n2, r2, regs );
                 regs->psw.cc = 0;
 
+                /* Release main-storage access lock
+                   synchronize_broadcast() must not be called
+                   with the mainlock held as this can cause
+                   a deadly embrace with other CPU's */
+                RELEASE_MAINLOCK(regs);
+
                 /* Purge the TLB if bit 31 of r2 register is set */
                 if (regs->gpr[r2] & 0x00000001)
                 {
 #if MAX_CPU_ENGINES == 1
                     purge_tlb(regs);
 #else /*!MAX_CPU_ENGINES == 1*/
-                    issue_broadcast_request(&sysblk.brdcstptlb);
+                    synchronize_broadcast(regs, &sysblk.brdcstptlb);
 #endif /*!MAX_CPU_ENGINES == 1*/
                 }
 
@@ -5649,7 +5700,7 @@ static BYTE module[8];                  /* Module name               */
 #if MAX_CPU_ENGINES == 1
                     purge_alb(regs);
 #else /*!MAX_CPU_ENGINES == 1*/
-                    issue_broadcast_request(&sysblk.brdcstpalb);
+                    synchronize_broadcast(regs, &sysblk.brdcstpalb);
 #endif /*!MAX_CPU_ENGINES == 1*/
                 }
 
@@ -5659,13 +5710,13 @@ static BYTE module[8];                  /* Module name               */
                 /* If unequal, load R1 from operand and set cc=1 */
                 regs->gpr[r1] = n;
                 regs->psw.cc = 1;
+
+                /* Release main-storage access lock */
+                RELEASE_MAINLOCK(regs);
             }
 
-            /* Release main-storage access lock */
-            RELEASE_MAINLOCK(regs);
-
             /* Perform serialization after completing operation */
-            perform_serialization ();
+            perform_serialization (regs);
 
             break;
 #endif /*FEATURE_BROADCASTED_PURGING*/
@@ -5739,7 +5790,7 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Perform serialization before operation */
-            perform_serialization ();
+            perform_serialization (regs);
 
             /* Update page table entry interlocked */
             OBTAIN_MAINLOCK(regs);
@@ -5751,7 +5802,7 @@ static BYTE module[8];                  /* Module name               */
             RELEASE_MAINLOCK(regs);
 
             /* Perform serialization after operation */
-            perform_serialization ();
+            perform_serialization (regs);
 
             break;
 #endif /*FEATURE_MOVE_PAGE_FACILITY_2*/
@@ -5807,7 +5858,7 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
 
             /* Perform serialization before fetching clock */
-            perform_serialization ();
+            perform_serialization (regs);
 
             /* Obtain the TOD clock update lock */
             obtain_lock (&sysblk.todlock);
@@ -5852,7 +5903,7 @@ static BYTE module[8];                  /* Module name               */
             vstore8 ( dreg, effective_addr + 8, b1, regs );
 
             /* Perform serialization after storing clock */
-            perform_serialization ();
+            perform_serialization (regs);
 
             /* Set condition code zero */
             regs->psw.cc = 0;
@@ -5994,7 +6045,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Perform serialization before starting operation */
-        perform_serialization ();
+        perform_serialization (regs);
 
         /* Obtain main-storage access lock */
         OBTAIN_MAINLOCK(regs);
@@ -6020,7 +6071,7 @@ static BYTE module[8];                  /* Module name               */
         RELEASE_MAINLOCK(regs);
 
         /* Perform serialization after completing operation */
-        perform_serialization ();
+        perform_serialization (regs);
 
         break;
 
@@ -6044,7 +6095,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Perform serialization before starting operation */
-        perform_serialization ();
+        perform_serialization (regs);
 
         /* Obtain main-storage access lock */
         OBTAIN_MAINLOCK(regs);
@@ -6073,7 +6124,7 @@ static BYTE module[8];                  /* Module name               */
         RELEASE_MAINLOCK(regs);
 
         /* Perform serialization after completing operation */
-        perform_serialization ();
+        perform_serialization (regs);
 
         break;
 
@@ -6639,14 +6690,14 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
 
             /* Perform serialization before starting operation */
-            perform_serialization ();
+            perform_serialization (regs);
 
             /* Call MVS assist to obtain lock */
             obtain_local_lock (effective_addr, b1,
                                 effective_addr2, b2, regs);
 
             /* Perform serialization after completing operation */
-            perform_serialization ();
+            perform_serialization (regs);
 
             break;
 
@@ -6667,14 +6718,14 @@ static BYTE module[8];                  /* Module name               */
         /*-----------------------------------------------------------*/
 
             /* Perform serialization before starting operation */
-            perform_serialization ();
+            perform_serialization (regs);
 
             /* Call MVS assist to obtain lock */
             obtain_cms_lock (effective_addr, b1,
                                 effective_addr2, b2, regs);
 
             /* Perform serialization after completing operation */
-            perform_serialization ();
+            perform_serialization (regs);
 
             break;
 
@@ -6998,6 +7049,13 @@ DWORD   csw;                            /* CSW for S/370 channels    */
     rc = load_psw ( &(regs->psw), psa->iopnew );
     if ( rc )
     {
+        release_lock(&sysblk.intlock);
+        logmsg ("CPU%4.4X: Invalid I/O new PSW: "
+                "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
+                regs->cpuad,
+                psa->iopnew[0], psa->iopnew[1], psa->iopnew[2],
+                psa->iopnew[3], psa->iopnew[4], psa->iopnew[5],
+                psa->iopnew[6], psa->iopnew[7]);
         program_check (regs, rc);
     }
 
@@ -7071,6 +7129,13 @@ U32     fsta;                           /* Failing storage address   */
     rc = load_psw ( &(regs->psw), psa->mcknew );
     if ( rc )
     {
+        release_lock(&sysblk.intlock);
+        logmsg ("CPU%4.4X: Invalid machine check new PSW: "
+                "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
+                regs->cpuad,
+                psa->mcknew[0], psa->mcknew[1], psa->mcknew[2],
+                psa->mcknew[3], psa->mcknew[4], psa->mcknew[5],
+                psa->mcknew[6], psa->mcknew[7]);
         program_check (regs, rc);
     }
 
@@ -7107,7 +7172,7 @@ int     icidx;                          /* Instruction counter index */
 #define CPU_PRIORITY    15              /* CPU thread priority       */
 
     /* Display thread started message on control panel */
-    logmsg ("HHC620I CPU%d thread started: tid=%8.8lX, pid=%d, "
+    logmsg ("HHC620I CPU%4.4X thread started: tid=%8.8lX, pid=%d, "
             "priority=%d\n",
             regs->cpuad, thread_id(), getpid(),
             getpriority(PRIO_PROCESS,0));
@@ -7117,7 +7182,7 @@ int     icidx;                          /* Instruction counter index */
         logmsg ("HHC621I CPU thread set priority failed: %s\n",
                 strerror(errno));
 
-    logmsg ("HHC622I CPU%d priority adjusted to %d\n",
+    logmsg ("HHC622I CPU%4.4X priority adjusted to %d\n",
             regs->cpuad, getpriority(PRIO_PROCESS,0));
 
 #ifdef INSTRUCTION_COUNTING
@@ -7132,8 +7197,8 @@ int     icidx;                          /* Instruction counter index */
     diswait = 0;
 
     /* Execute the program */
-    while (1) {
-
+    while (1)
+    {
         /* Reset instruction trace indicators */
         tracethis = 0;
         stepthis = 0;
@@ -7149,43 +7214,51 @@ int     icidx;                          /* Instruction counter index */
             ||  (sysblk.iopending &&
               (regs->psw.sysmask & (regs->psw.ecmode ? PSW_IOMASK : 0xFE)))
 #endif /*FEATURE_BCMODE*/
-#if MAX_CPU_ENGINES > 1
-            || (sysblk.broadcast != regs->broadcast)
-#endif /*MAX_CPU_ENGINES > 1*/
             || regs->psw.wait
+#if MAX_CPU_ENGINES > 1
+            || sysblk.brdcstncpu != 0
+#endif /*MAX_CPU_ENGINES > 1*/
             || regs->cpustate != CPUSTATE_STARTED)
         {
             /* Obtain the interrupt lock */
             obtain_lock (&sysblk.intlock);
 
 #if MAX_CPU_ENGINES > 1
-            /* Perform broadcasted purge of ALB and TLB if requested */
-            if (sysblk.broadcast != regs->broadcast)
-                perform_broadcast_request(regs);
+            /* Perform broadcasted purge of ALB and TLB if requested
+               synchronize_broadcast() must be called until there are
+               no more broadcast pending because synchronize_broadcast()
+               releases and reacquires the mainlock. */
+            while (sysblk.brdcstncpu != 0)
+                synchronize_broadcast(regs, NULL);
 #endif /*MAX_CPU_ENGINES > 1*/
 
-            /* If a machine check is pending and we are enabled for
-               machine checks then take the interrupt */
-            if (sysblk.mckpending && regs->psw.mach)
-                perform_mck_interrupt (regs);
+            /* Take interrupts if CPU is not stopped */
+            if (regs->cpustate == CPUSTATE_STARTED)
+            {
+                /* If a machine check is pending and we are enabled for
+                   machine checks then take the interrupt */
+                if (sysblk.mckpending && regs->psw.mach)
+                    perform_mck_interrupt (regs);
 
-            /* If enabled for external interrupts, invite the
-               service processor to present a pending interrupt */
-            if (regs->psw.sysmask & PSW_EXTMASK)
-                perform_external_interrupt (regs);
+                /* If enabled for external interrupts, invite the
+                   service processor to present a pending interrupt */
+                if (regs->psw.sysmask & PSW_EXTMASK)
+                    perform_external_interrupt (regs);
 
-            /* If an I/O interrupt is pending, and this CPU is
-               enabled for I/O interrupts, invite the channel
-               subsystem to present a pending interrupt */
-            if (sysblk.iopending &&
+                /* If an I/O interrupt is pending, and this CPU is
+                   enabled for I/O interrupts, invite the channel
+                   subsystem to present a pending interrupt */
+                if (sysblk.iopending &&
 #ifdef FEATURE_BCMODE
-                (regs->psw.sysmask &
-                    (regs->psw.ecmode ? PSW_IOMASK : 0xFE))
+                    (regs->psw.sysmask &
+                        (regs->psw.ecmode ? PSW_IOMASK : 0xFE))
 #else /*!FEATURE_BCMODE*/
-                (regs->psw.sysmask & PSW_IOMASK)
+                    (regs->psw.sysmask & PSW_IOMASK)
 #endif /*!FEATURE_BCMODE*/
-               )
-                perform_io_interrupt (regs);
+                   )
+                    perform_io_interrupt (regs);
+
+            } /*if(cpustate == CPU_STARTED)*/
 
             /* Perform restart interrupt if pending */
             if (regs->restart)
@@ -7197,37 +7270,51 @@ int     icidx;                          /* Instruction counter index */
 
             /* If CPU is stopping, change status to stopped */
             if (regs->cpustate == CPUSTATE_STOPPING)
+            {
+                /* Change CPU status to stopped */
                 regs->cpustate = CPUSTATE_STOPPED;
 
-            /* Test for stopped state */
-            if (regs->cpustate == CPUSTATE_STOPPED)
-            {
+                /* If initial CPU reset pending then perform reset */
+                if (regs->sigpireset)
+                    initial_cpu_reset(regs);
+
+                /* If a CPU reset is pending then perform the reset */
+                if (regs->sigpreset)
+                    cpu_reset(regs);
+
                 /* Store status at absolute location 0 if requested */
                 if (regs->storstat)
                 {
                     regs->storstat = 0;
                     store_status (regs, 0);
                 }
+            }
 
-                /* Wait for start command from panel */
-                wait_condition (&sysblk.intcond, &sysblk.intlock);
+            /* This is where a stopped CPU will wait */
+            if (regs->cpustate == CPUSTATE_STOPPED)
+            {
+                /* Wait until there is work to do */
+                while (regs->cpustate == CPUSTATE_STOPPED)
+                    wait_condition (&sysblk.intcond, &sysblk.intlock);
                 release_lock (&sysblk.intlock);
                 continue;
             }
 
-            /* Test for disabled wait PSW */
-            if (regs->psw.wait &&
-#ifdef FEATURE_BCMODE
-            (regs->psw.sysmask &
-                (regs->psw.ecmode ? (PSW_IOMASK | PSW_EXTMASK) : 0xFF))
-                == 0)
-#else /*!FEATURE_BCMODE*/
-            (regs->psw.sysmask & (PSW_IOMASK | PSW_EXTMASK)) == 0)
-#endif /*!FEATURE_BCMODE*/
+            /* Test for wait state */
+            if (regs->psw.wait)
             {
-                if (diswait == 0)
+                /* Test for disabled wait PSW and issue message */
+                if ( diswait == 0 &&
+#ifdef FEATURE_BCMODE
+                (regs->psw.sysmask &
+                    (regs->psw.ecmode ?
+                        (PSW_IOMASK | PSW_EXTMASK) : 0xFF)) == 0)
+#else /*!FEATURE_BCMODE*/
+                (regs->psw.sysmask & (PSW_IOMASK | PSW_EXTMASK)) == 0)
+#endif /*!FEATURE_BCMODE*/
                 {
-                    logmsg ("Disabled wait state code %8.8X\n",
+                    logmsg ("CPU%4.4X: Disabled wait state code %8.8X\n",
+                            regs->cpuad,
                             regs->psw.ia | (regs->psw.amode << 31));
 #ifdef INSTRUCTION_COUNTING
                     logmsg ("%llu instructions executed\n",
@@ -7236,7 +7323,7 @@ int     icidx;                          /* Instruction counter index */
                     diswait = 1;
                 }
 
-                /* Wait for restart command from panel */
+                /* Wait for I/O, external or restart interrupt */
                 wait_condition (&sysblk.intcond, &sysblk.intlock);
                 release_lock (&sysblk.intlock);
                 continue;
@@ -7244,15 +7331,6 @@ int     icidx;                          /* Instruction counter index */
 
             /* Reset disabled wait state indicator */
             diswait = 0;
-
-            /* Test for enabled wait state */
-            if (regs->psw.wait)
-            {
-                /* Wait for I/O or external interrupt */
-                wait_condition (&sysblk.intcond, &sysblk.intlock);
-                release_lock (&sysblk.intlock);
-                continue;
-            }
 
             /* Release the interrupt lock */
             release_lock (&sysblk.intlock);

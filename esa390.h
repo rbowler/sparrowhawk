@@ -375,6 +375,7 @@ typedef struct _LSED {
 #define SIGP_RESET	0x0C		/* CPU reset		     */
 #define SIGP_SETPREFIX	0x0D		/* Set prefix		     */
 #define SIGP_STORE	0x0E		/* Store status at address   */
+#define SIGP_STOREX	0x11		/* Store ext status at addr  */
 
 /* SIGP status codes */
 #define SIGP_STATUS_EQUIPMENT_CHECK		0x80000000

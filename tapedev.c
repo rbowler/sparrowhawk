@@ -2461,6 +2461,33 @@ void tapedev_query_device (DEVBLK *dev, BYTE **class,
 } /* end function tapedev_query_device */
 
 /*-------------------------------------------------------------------*/
+/* Close the device                                                  */
+/*-------------------------------------------------------------------*/
+int tapedev_close_device ( DEVBLK *dev )
+{
+    /* Close the device file */
+    close (dev->fd);
+    dev->fd = -1;
+
+    /* Release the OMA descriptor array if allocated */
+    if (dev->omadesc != NULL)
+    {
+        free (dev->omadesc);
+        dev->omadesc = NULL;
+    }
+
+    /* Reset the device dependent fields */
+    dev->omafiles = 0;
+    dev->curfilen = 1;
+    dev->nxtblkpos = 0;
+    dev->prvblkpos = -1;
+    dev->curblkrem = 0;
+    dev->curbufoff = 0;
+
+    return 0;
+} /* end function tapedev_close_device */
+
+/*-------------------------------------------------------------------*/
 /* Execute a Channel Command Word                                    */
 /*-------------------------------------------------------------------*/
 void tapedev_execute_ccw (DEVBLK *dev, BYTE code, BYTE flags,

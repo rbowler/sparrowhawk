@@ -14,6 +14,7 @@
 /* Additional credits:                                               */
 /*      TOD clock offset contributed by Jay Maynard                  */
 /*      Dynamic device attach/detach by Jan Jaeger                   */
+/*      OSTAILOR parameter by Jay Maynard                            */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -179,6 +180,7 @@ BYTE   *sloadparm;                      /* -> IPL load parameter     */
 BYTE   *ssysepoch;                      /* -> System epoch           */
 BYTE   *stzoffset;                      /* -> System timezone offset */
 BYTE   *stoddrag;                       /* -> TOD clock drag factor  */
+BYTE   *sostailor;                      /* -> OS to tailor system to */
 BYTE    loadparm[8];                    /* Load parameter (EBCDIC)   */
 BYTE    version = 0x00;                 /* CPU version code          */
 U32     serial;                         /* CPU serial number         */
@@ -190,6 +192,7 @@ U16     numcpu;                         /* Number of CPUs            */
 S32     sysepoch;                       /* System epoch year         */
 S32     tzoffset;                       /* System timezone offset    */
 int     toddrag;                        /* TOD clock drag factor     */
+int     ostailor;                       /* OS to tailor system to    */
 BYTE   *sdevnum;                        /* -> Device number string   */
 BYTE   *sdevtype;                       /* -> Device type string     */
 U16     devnum;                         /* Device number             */
@@ -217,6 +220,7 @@ BYTE    c;                              /* Work area for sscanf      */
     sysepoch = 1900;
     tzoffset = 0;
     toddrag = 1;
+    ostailor = OS_NONE;
 
     /* Read records from the configuration file */
     for (scount = 0; ; scount++)
@@ -246,6 +250,7 @@ BYTE    c;                              /* Work area for sscanf      */
         ssysepoch = NULL;
         stzoffset = NULL;
         stoddrag = NULL;
+        sostailor = NULL;
 
         /* Check for old-style CPU statement */
         if (scount == 0 && addargc == 5 && strlen(keyword) == 6
@@ -303,6 +308,10 @@ BYTE    c;                              /* Work area for sscanf      */
                 stoddrag = operand;
             }
 #endif /*TODCLOCK_DRAG_FACTOR*/
+            else if (strcasecmp (keyword, "ostailor") == 0)
+            {
+                sostailor = operand;
+            }
             else
             {
                 fprintf (stderr,
@@ -471,6 +480,31 @@ BYTE    c;                              /* Work area for sscanf      */
         }
 #endif /*TODCLOCK_DRAG_FACTOR*/
 
+        /* Parse OS tailoring operand */
+        if (sostailor != NULL)
+        {
+            if (strcasecmp (sostailor, "OS/390") == 0)
+            {
+                ostailor = OS_OS390;
+            }
+            else if (strcasecmp (sostailor, "VM") == 0)
+            {
+                ostailor = OS_VM;
+            }
+            else if (strcasecmp (sostailor, "LINUX") == 0)
+            {
+                ostailor = OS_LINUX;
+            }
+            else
+            {
+                fprintf (stderr,
+                        "HHC017I Error in %s line %d: "
+                        "Unknown OS tailor specification %s\n",
+                        fname, stmt, sostailor);
+                exit(1);
+            }
+        }
+
     } /* end for(scount) */
 
     /* Clear the system configuration block */
@@ -559,6 +593,13 @@ BYTE    c;                              /* Work area for sscanf      */
     initialize_lock (&sysblk.intlock);
     initialize_lock (&sysblk.sigplock);
     initialize_condition (&sysblk.intcond);
+#if MAX_CPU_ENGINES > 1
+    initialize_condition (&sysblk.brdcstcond);
+#ifdef SMP_SERIALIZATION
+    for(i = 0; i < MAX_CPU_ENGINES; i++)
+        initialize_lock (&sysblk.regs[i].serlock);
+#endif /*SMP_SERIALIZATION*/
+#endif /*MAX_CPU_ENGINES > 1*/
     initialize_detach_attr (&sysblk.detattr);
 
     /* Set up the system TOD clock offset: compute the number of
@@ -576,6 +617,9 @@ BYTE    c;                              /* Work area for sscanf      */
 
     /* Set the TOD clock drag factor */
     sysblk.toddrag = toddrag;
+
+    /* Set the system OS tailoring value */
+    sysblk.ostailor = ostailor;
 
     /* Parse the device configuration statements */
     while(1)
@@ -661,6 +705,7 @@ DEVBLK**dvpp;                           /* -> Device block address   */
 DEVIF  *devinit;                        /* -> Device init function   */
 DEVQF  *devqdef;                        /* -> Device query function  */
 DEVXF  *devexec;                        /* -> Device exec function   */
+DEVCF  *devclos;                        /* -> Device close function  */
 int     rc;                             /* Return code               */
 int     newdevblk = 0;                  /* 1=Newly created devblk    */
 
@@ -679,6 +724,7 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
         devinit = &constty_init_handler;
         devqdef = &constty_query_device;
         devexec = &constty_execute_ccw;
+        devclos = &constty_close_device;
         break;
 
     case 0x1442:
@@ -687,12 +733,14 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
         devinit = &cardrdr_init_handler;
         devqdef = &cardrdr_query_device;
         devexec = &cardrdr_execute_ccw;
+        devclos = &cardrdr_close_device;
         break;
 
     case 0x3525:
         devinit = &cardpch_init_handler;
         devqdef = &cardpch_query_device;
         devexec = &cardpch_execute_ccw;
+        devclos = &cardpch_close_device;
         break;
 
     case 0x1403:
@@ -700,6 +748,7 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
         devinit = &printer_init_handler;
         devqdef = &printer_query_device;
         devexec = &printer_execute_ccw;
+        devclos = &printer_close_device;
         break;
 
     case 0x3420:
@@ -707,6 +756,7 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
         devinit = &tapedev_init_handler;
         devqdef = &tapedev_query_device;
         devexec = &tapedev_execute_ccw;
+        devclos = &tapedev_close_device;
         break;
 
     case 0x2311:
@@ -718,26 +768,31 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
         devinit = &ckddasd_init_handler;
         devqdef = &ckddasd_query_device;
         devexec = &ckddasd_execute_ccw;
+        devclos = &ckddasd_close_device;
         break;
 
+    case 0x0671:
     case 0x3310:
     case 0x3370:
     case 0x9336:
         devinit = &fbadasd_init_handler;
         devqdef = &fbadasd_query_device;
         devexec = &fbadasd_execute_ccw;
+        devclos = &fbadasd_close_device;
         break;
 
     case 0x3270:
         devinit = &loc3270_init_handler;
         devqdef = &loc3270_query_device;
         devexec = &loc3270_execute_ccw;
+        devclos = &loc3270_close_device;
         break;
 
     case 0x3088:
         devinit = &ctcadpt_init_handler;
         devqdef = &ctcadpt_query_device;
         devexec = &ctcadpt_execute_ccw;
+        devclos = &ctcadpt_close_device;
         break;
 
     default:
@@ -783,6 +838,7 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
     dev->devinit = devinit;
     dev->devqdef = devqdef;
     dev->devexec = devexec;
+    dev->devclos = devclos;
     dev->fd = -1;
 
     /* Initialize the path management control word */
@@ -865,7 +921,6 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
 int detach_device (U16 devnum)
 {
 DEVBLK *dev;                            /* -> Device block           */
-int     fileseq;                        /* File seq num for ckddasd  */
 
     /* Find the device block */
     dev = find_device_by_devnum (devnum);
@@ -890,8 +945,8 @@ int     fileseq;                        /* File seq num for ckddasd  */
     /* Close file or socket */
     if (dev->fd > 2)
     {
-        close (dev->fd);
-        dev->fd = -1;
+        /* Call the device close handler */
+        (*(dev->devclos))(dev);
 
         /* Signal console thread to redrive select */
         if (dev->console)
@@ -900,14 +955,6 @@ int     fileseq;                        /* File seq num for ckddasd  */
             signal_thread (sysblk.cnsltid, SIGHUP);
         }
     }
-
-    /* For CKD devices, close additional files */
-    for (fileseq = 1; fileseq <= dev->ckdnumfd; fileseq++)
-    {
-        if (dev->ckdfd[fileseq-1] > 2)
-            close (dev->ckdfd[fileseq-1]);
-    }
-    dev->ckdnumfd = 0;
 
     /* Release device lock */
     release_lock(&dev->lock);

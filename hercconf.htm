@@ -85,17 +85,19 @@ The following system parameters may be specified:
 <dd>specifies the port number (in decimal) to which tn3270 and
     telnet clients will connect
 <dt><code>NUMCPU <em>nn</em></code>
-<dd>specifies the number of emulated CPU's.
+<dd>specifies the number of emulated CPUs.
     <em>Note:</em>
-    If you wish to specify more than one CPU you must enable
-    multiprocessor support by increasing the value of
-    <code>MAX_CPU_ENGINES</code>
-    in the file <em><b>hercules.h</b></em> and recompiling.
-    Multiprocessor support is turned off by default to avoid
-    degrading performance on uniprocessor systems.
-    You can emulate multiple CPU's even on a uniprocessor system
-    and you may achieve a small performance benefit if your
-    operating system is able to support multiple CPU's.
+    Multiprocessor emulation is only available when the definition of
+    the compile-time variable <code>MAX_CPU_ENGINES</code>
+    in the file <em><b>hercules.h</b></em> has a value of more than 1.
+    Multiprocessor emulation works best
+    if your system has more than physical CPU, but you can
+    emulate multiple CPUs even on a uniprocessor system
+    and you may still achieve a small performance benefit.
+    There is no point in specifying NUMCPU greater than 1 unless
+    your operating system is able to support multiple CPUs, and
+    if you do not need multiprocessor emulation then setting
+    MAX_CPU_ENGINES to 1 at compile time may improve performance.
 <dt><code>LOADPARM <em>xxxxxxxx</em></code>
 <dd>specifies the eight-character IPL parameter which is used
     by some operating systems to select system parameters
@@ -120,6 +122,11 @@ The following system parameters may be specified:
     to slow down the TOD clock by a factor of <em>nn</em>, which can
     improve the performance of some operating systems which consume
     significant amounts of CPU time processing timer interrupts.
+<dt><code>OSTAILOR OS/390 &#124; VM &#124; LINUX
+<dd>specifies the intended operating system.  The effect of this
+    parameter is to reduce control panel message traffic by
+    selectively suppressing trace messages for program checks
+    which are considered normal in the specified environment.
 </dl>
 <p>
 A comment preceded by a hash sign may be appended to any system
@@ -168,7 +175,7 @@ the device record is:
         <td><a href="#tapedev">Tape drives</a></td>
         <td>Disk file, CDROM, or SCSI tape</td>
     </tr>
-    <tr><td>3310, 3370, 9336</td>
+    <tr><td>3310, 3370, 9336<br>0671</td>
         <td><a href="#fbadasd">FBA direct access storage devices</a></td>
         <td>Disk file</td>
     </tr>
@@ -380,7 +387,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 14 May 2000
+<p>Last updated 21 May 2000
 </BODY>
 </HTML>
 

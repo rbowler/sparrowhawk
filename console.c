@@ -678,7 +678,7 @@ BYTE            buf[32];                /* tn3270 write buffer       */
     if (rc & CSW_UC)
     {
         close (dev->fd);
-        dev->fd = 0;
+        dev->fd = -1;
         dev->connected = 0;
         dev->sense[0] = SENSE_DC;
         return (CSW_UC);
@@ -1210,7 +1210,7 @@ BYTE                    unitstat;       /* Status after receive data */
                 if (unitstat & CSW_UC)
                 {
                     close (dev->fd);
-                    dev->fd = 0;
+                    dev->fd = -1;
                     dev->connected = 0;
                 }
 
@@ -1254,7 +1254,7 @@ int loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     /* Indicate that this is a console device */
     dev->console = 1;
 
-    /* Set device 'free' */
+    /* Reset device dependent flags */
     dev->connected = 0;
 
     /* Set number of sense bytes */
@@ -1296,6 +1296,22 @@ void loc3270_query_device (DEVBLK *dev, BYTE **class,
         buffer[0] = '\0';
 
 } /* end function loc3270_query_device */
+
+
+/*-------------------------------------------------------------------*/
+/* CLOSE THE 3270 DEVICE HANDLER                                     */
+/*-------------------------------------------------------------------*/
+int loc3270_close_device ( DEVBLK *dev )
+{
+    /* Close the device file */
+    close (dev->fd);
+    dev->fd = -1;
+
+    /* Reset device dependent flags */
+    dev->connected = 0;
+
+    return 0;
+} /* end function loc3270_close_device */
 
 
 /*-------------------------------------------------------------------*/
@@ -1348,6 +1364,22 @@ void constty_query_device (DEVBLK *dev, BYTE **class,
         buffer[0] = '\0';
 
 } /* end function constty_query_device */
+
+
+/*-------------------------------------------------------------------*/
+/* CLOSE THE 1052/3215 DEVICE HANDLER                                */
+/*-------------------------------------------------------------------*/
+int constty_close_device ( DEVBLK *dev )
+{
+    /* Close the device file */
+    close (dev->fd);
+    dev->fd = -1;
+
+    /* Reset device dependent flags */
+    dev->connected = 0;
+
+    return 0;
+} /* end function constty_close_device */
 
 
 /*-------------------------------------------------------------------*/

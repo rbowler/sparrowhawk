@@ -1131,8 +1131,14 @@ U16     pte;                            /* Page table entry          */
                 + ((regs->gpr[r2] & 0x000FF000) >> 10);
     raddr &= 0x7FFFFFFF;
 #else
-    raddr = (regs->gpr[r1] & SEGTAB_PTO)
-                + ((regs->gpr[r2] & 0x000FF000) >> 10);
+    raddr = (regs->gpr[r1] & SEGTAB_370_PTO)
+                + (((regs->cr[0] & CR0_SEG_SIZE) == CR0_SEG_SZ_1M) ?
+                  (((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) ?
+                  ((regs->gpr[r2] & 0x000FF000) >> 11) :
+                  ((regs->gpr[r2] & 0x000FF800) >> 10)) :
+                  (((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) ?
+                  ((regs->gpr[r2] & 0x0000F000) >> 11) :
+                  ((regs->gpr[r2] & 0x0000F800) >> 10)));
     raddr &= 0x00FFFFFF;
 #endif
 
@@ -1154,6 +1160,9 @@ U16     pte;                            /* Page table entry          */
     vstore4 ( pte, raddr, USE_REAL_ADDR, regs );
 #else
     /* No expanded storage on S/370 */
+// /*debug*/ logmsg("dat.c: IPTE issued for entry %4.4X at %8.8X...\n"
+//                  "       page table %8.8X, page index %8.8X, cr0 %8.8X\n",
+//                  pte, raddr, regs->gpr[r1], regs->gpr[r2], regs->cr[0]);
     if ((regs->cr[0] & CR0_PAGE_SIZE) == CR0_PAGE_SZ_2K)
         pte |= PAGETAB_INV_2K;
     else
@@ -1182,7 +1191,7 @@ U16     pte;                            /* Page table entry          */
        to be the only viable alternative at the moment, short of
        building queues and waiting for all other cpu's to clear their
        entries - JJ 09/05/2000 */
-    issue_broadcast_request(&sysblk.brdcstptlb);
+    synchronize_broadcast(regs, &sysblk.brdcstptlb);
 #endif /*MAX_CPU_ENGINES > 1*/
 
 } /* end function invalidate_pte */
@@ -1503,11 +1512,9 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     abs = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE, akey);
 
     /* Store 4 bytes when operand is fullword aligned */
-    if ((addr & 0x03) == 0) {
-        sysblk.mainstor[abs] = (value >> 24) & 0xFF;
-        sysblk.mainstor[abs+1] = (value >> 16) & 0xFF;
-        sysblk.mainstor[abs+2] = (value >> 8) & 0xFF;
-        sysblk.mainstor[abs+3] = value & 0xFF;
+    if ((addr & 0x03) == 0)
+    {
+        *((U32*)(sysblk.mainstor + abs)) = htonl(value);
         return;
     }
 
@@ -1736,12 +1743,8 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     abs = logical_to_abs (addr, arn, regs, ACCTYPE_READ, akey);
 
     /* Fetch 4 bytes when operand is fullword aligned */
-    if ((addr & 0x03) == 0) {
-        return (sysblk.mainstor[abs] << 24)
-                | (sysblk.mainstor[abs+1] << 16)
-                | (sysblk.mainstor[abs+2] << 8)
-                | sysblk.mainstor[abs+3];
-    }
+    if ((addr & 0x03) == 0)
+        return ntohl(*((U32*)(sysblk.mainstor + abs)));
 
     /* Operand is not fullword aligned and may cross a page boundary */
 

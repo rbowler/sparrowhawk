@@ -102,6 +102,18 @@ void ctcadpt_query_device (DEVBLK *dev, BYTE **class,
 } /* end function ctcadpt_query_device */
 
 /*-------------------------------------------------------------------*/
+/* Close the device                                                  */
+/*-------------------------------------------------------------------*/
+int ctcadpt_close_device ( DEVBLK *dev )
+{
+    /* Close the device file */
+    close (dev->fd);
+    dev->fd = -1;
+
+    return 0;
+} /* end function ctcadpt_close_device */
+
+/*-------------------------------------------------------------------*/
 /* Execute a Channel Command Word                                    */
 /*-------------------------------------------------------------------*/
 void ctcadpt_execute_ccw (DEVBLK *dev, BYTE code, BYTE flags,

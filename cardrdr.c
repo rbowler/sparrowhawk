@@ -139,13 +139,25 @@ void cardrdr_query_device (DEVBLK *dev, BYTE **class,
 } /* end function cardrdr_query_device */
 
 /*-------------------------------------------------------------------*/
-/* Close the card image file                                         */
+/* Close the device                                                  */
 /*-------------------------------------------------------------------*/
-static void close_cardrdr ( DEVBLK *dev )
+int cardrdr_close_device ( DEVBLK *dev )
 {
-    /* Close the card image file */
+    /* Close the device file */
     close (dev->fd);
     dev->fd = -1;
+
+    return 0;
+} /* end function cardrdr_close_device */
+
+
+/*-------------------------------------------------------------------*/
+/* Clear the card reader                                             */
+/*-------------------------------------------------------------------*/
+static void clear_cardrdr ( DEVBLK *dev )
+{
+    /* Close the card image file */
+    cardrdr_close_device (dev);
 
     /* Clear the file name */
     dev->filename[0] = '\0';
@@ -156,7 +168,7 @@ static void close_cardrdr ( DEVBLK *dev )
     dev->rdreof = 0;
     dev->trunc = 0;
 
-} /* end function close_cardrdr */
+} /* end function clear_cardrdr */
 
 
 /*-------------------------------------------------------------------*/
@@ -279,7 +291,7 @@ int     rc;                             /* Return code               */
         }
 
         /* Close the file and clear the file name and flags */
-        close_cardrdr (dev);
+        clear_cardrdr (dev);
 
         return -1;
     }
@@ -340,7 +352,7 @@ BYTE    c;                              /* Input character           */
             }
 
             /* Close the file and clear the file name and flags */
-            close_cardrdr (dev);
+            clear_cardrdr (dev);
 
             return -1;
         }

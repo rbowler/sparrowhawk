@@ -12,7 +12,7 @@ Installing and Operating Hercules</TITLE>
 <h2>Installation Procedure</h2>
 <ol>
 <li>Download the distribution file
-<a href="hercules/hercules-1.60.tar.gz">hercules-1.60.tar.gz</a>
+<a href="hercules/hercules-1.61.tar.gz">hercules-1.61.tar.gz</a>
 <p>
 <em>Notes:</em>
 <ol>
@@ -27,7 +27,7 @@ Installing and Operating Hercules</TITLE>
 <li>Use these commands to unzip the distribution file:
 <pre>mkdir hercules
 cd hercules
-tar xvzf ../hercules-1.60.tar.gz</pre>
+tar xvzf ../hercules-1.61.tar.gz</pre>
 <li>Build the executable files:
 <br><code>make</code>
 </ol>
@@ -122,14 +122,16 @@ loadparm [<em>xxxxxxxx</em>]  Display or set the IPL parameter
 loadcore <em>xxxxxxxx</em>    Load core image from file xxxxxxxx
 ipl <em>xxxx</em>             IPL from device number xxxx
 
-ext     Generate an external interrupt
-stop    Stop CPU
-start   Start CPU
-restart Generate a restart interrupt and start CPU
-store   Store status
-quit    Terminate Hercules
+ext      Generate an external interrupt
+stop     Stop CPU
+start    Start CPU
+stopall  Stop all CPUs
+startall Start all CPUs
+restart  Generate a restart interrupt and start CPU
+store    Store status
+quit     Terminate Hercules
 
-devlist Display configured devices
+devlist  Display configured devices
 attach <em>xxxx</em> <em>type</em> [ <em>args</em> ]  Create device xxxx
 detach <em>xxxx</em>  Delete device xxxx
 define <em>xxxx</em> <em>yyyy</em>  Rename device number xxxx to yyyy
@@ -172,7 +174,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 14 May 2000
+<p>Last updated 21 May 2000
 </BODY>
 </HTML>
 
