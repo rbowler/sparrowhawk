@@ -477,6 +477,7 @@ int     subchan;                        /* Subchannel number         */
 
         case 0x3310:
         case 0x3370:
+        case 0x9336:
             devinit = &fbadasd_init_handler;
             devexec = &fbadasd_execute_ccw;
             break;

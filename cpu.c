@@ -262,14 +262,13 @@ int load_psw (PSW *psw, BYTE *addr)
 /*-------------------------------------------------------------------*/
 void program_check (int code)
 {
+REGS   *regs = &(sysblk.regs[0]);       /* -> CPU register context   */
 PSA    *psa;                            /* -> Prefixed storage area  */
 int     rc;                             /* Return code               */
-U32     ia;                             /* Instruction address       */
-DWORD   dword;                          /* Doubleword work area      */
-REGS   *regs = &(sysblk.regs[0]);
 
-    /* Back up the PSW for exceptions which cause nullification */
-    if (code == PGM_PAGE_TRANSLATION_EXCEPTION
+    /* Back up the PSW for exceptions which cause nullification,
+       unless the exception occurred during instruction fetch */
+    if ((code == PGM_PAGE_TRANSLATION_EXCEPTION
         || code == PGM_SEGMENT_TRANSLATION_EXCEPTION
         || code == PGM_TRACE_TABLE_EXCEPTION
         || code == PGM_AFX_TRANSLATION_EXCEPTION
@@ -288,15 +287,10 @@ REGS   *regs = &(sysblk.regs[0]);
         || code == PGM_STACK_SPECIFICATION_EXCEPTION
         || code == PGM_STACK_TYPE_EXCEPTION
         || code == PGM_STACK_OPERATION_EXCEPTION)
+        && regs->instvalid)
     {
         regs->psw.ia -= regs->psw.ilc;
         regs->psw.ia &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        ia = regs->psw.ia;
-    }
-    else
-    {
-        ia = regs->psw.ia - regs->psw.ilc;
-        ia &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
     }
 
     /* Store the interrupt code in the PSW */
@@ -307,11 +301,7 @@ REGS   *regs = &(sysblk.regs[0]);
     {
         logmsg ("Program check CODE=%4.4X ILC=%d ",
                 code, regs->psw.ilc);
-        instfetch (dword, ia, regs);
-        display_inst (regs, dword);
-//      if (code != PGM_PAGE_TRANSLATION_EXCEPTION
-//          && code != PGM_SEGMENT_TRANSLATION_EXCEPTION)
-//          regs->cpustate = CPUSTATE_STOPPING;
+        display_inst (regs, regs->instvalid ? regs->inst : NULL);
     }
 
     /* Point to PSA in main storage */
@@ -4875,11 +4865,11 @@ static BYTE module[8];                  /* Module name               */
         obtain_lock (&sysblk.mainlock);
 
         /* Load second operand from operand address  */
-        n = vfetch4 ( effective_addr, ar1, regs );
-        d = vfetch4 ( effective_addr + 4, ar1, regs );
+        n1 = vfetch4 ( effective_addr, ar1, regs );
+        n2 = vfetch4 ( effective_addr + 4, ar1, regs );
 
         /* Compare doubleword operand with R1:R1+1 register contents */
-        if ( regs->gpr[r1] == n && regs->gpr[r1+1] == d )
+        if ( regs->gpr[r1] == n1 && regs->gpr[r1+1] == n2 )
         {
             /* If equal, store R3:R3+1 at operand location and set cc=0 */
             vstore4 ( regs->gpr[r3], effective_addr, ar1, regs );
@@ -4889,8 +4879,8 @@ static BYTE module[8];                  /* Module name               */
         else
         {
             /* If unequal, load R1:R1+1 from operand and set cc=1 */
-            regs->gpr[r1] = n;
-            regs->gpr[r1+1] = d;
+            regs->gpr[r1] = n1;
+            regs->gpr[r1+1] = n2;
             regs->psw.cc = 1;
         }
 
@@ -5898,7 +5888,6 @@ DWORD   csw;                            /* CSW for S/370 channels    */
 /*-------------------------------------------------------------------*/
 void *cpu_thread (REGS *regs)
 {
-DWORD   inst;                           /* Instruction area          */
 int     rc;                             /* Return code               */
 int     tracethis;                      /* Trace this instruction    */
 int     stepthis;                       /* Stop on this instruction  */
@@ -6017,42 +6006,45 @@ int     icidx;                          /* Instruction counter index */
         /* Release the interrupt lock */
         release_lock (&sysblk.intlock);
 
-        /* Clear the instruction length code in case access error
-           occurs while attempting to fetch next instruction */
-        regs->psw.ilc = 0;
+        /* Clear the instruction validity flag in case an access
+           error occurs while attempting to fetch next instruction */
+        regs->instvalid = 0;
 
         /* Fetch the next sequential instruction */
-        instfetch (inst, regs->psw.ia, regs);
+        instfetch (regs->inst, regs->psw.ia, regs);
+
+        /* Set the instruction validity flag */
+        regs->instvalid = 1;
 
         /* Count instruction usage */
         regs->instcount++;
 
 #ifdef INSTRUCTION_COUNTING
         /* Find instruction counter for this opcode */
-        switch (inst[0]) {
-        case 0x01: picta = instcount.op01; icidx = inst[1]; break;
-        case 0xA4: picta = instcount.opA4; icidx = inst[1]; break;
-        case 0xA5: picta = instcount.opA5; icidx = inst[1]; break;
-        case 0xA6: picta = instcount.opA6; icidx = inst[1]; break;
-        case 0xA7: picta = instcount.opA7; icidx = inst[1] & 0x0F;
+        switch (regs->inst[0]) {
+        case 0x01: picta = instcount.op01; icidx = regs->inst[1]; break;
+        case 0xA4: picta = instcount.opA4; icidx = regs->inst[1]; break;
+        case 0xA5: picta = instcount.opA5; icidx = regs->inst[1]; break;
+        case 0xA6: picta = instcount.opA6; icidx = regs->inst[1]; break;
+        case 0xA7: picta = instcount.opA7; icidx = regs->inst[1] & 0x0F;
                    break;
-        case 0xB2: picta = instcount.opB2; icidx = inst[1]; break;
-        case 0xB3: picta = instcount.opB3; icidx = inst[1]; break;
-        case 0xE4: picta = instcount.opE4; icidx = inst[1]; break;
-        case 0xE5: picta = instcount.opE5; icidx = inst[1]; break;
-        case 0xE6: picta = instcount.opE6; icidx = inst[1]; break;
-        case 0xED: picta = instcount.opED; icidx = inst[1]; break;
-        default: picta = instcount.general; icidx = inst[0];
+        case 0xB2: picta = instcount.opB2; icidx = regs->inst[1]; break;
+        case 0xB3: picta = instcount.opB3; icidx = regs->inst[1]; break;
+        case 0xE4: picta = instcount.opE4; icidx = regs->inst[1]; break;
+        case 0xE5: picta = instcount.opE5; icidx = regs->inst[1]; break;
+        case 0xE6: picta = instcount.opE6; icidx = regs->inst[1]; break;
+        case 0xED: picta = instcount.opED; icidx = regs->inst[1]; break;
+        default: picta = instcount.general; icidx = regs->inst[0];
         } /* end switch */
 
         /* Test for first usage of this opcode */
         if (picta[icidx] == 0 && regs->instcount >= 256) {
             if (picta == instcount.general)
                 logmsg ("First use of instruction %2.2X\n",
-                        inst[0]);
+                        regs->inst[0]);
             else
                 logmsg ("First use of instruction %2.2X%2.2X\n",
-                        inst[0], icidx);
+                        regs->inst[0], icidx);
             tracethis = 1;
         }
 
@@ -6063,18 +6055,18 @@ int     icidx;                          /* Instruction counter index */
 #endif /*INSTRUCTION_COUNTING*/
 
         /* Turn on trace for specific instructions */
-//      if (inst[0] == 0xB2 && inst[1] == 0x20) sysblk.inststep = 1; /*SERVC*/
-//      if (inst[0] == 0xB2 && inst[1] == 0x25) sysblk.inststep = 1; /*SSAR*/
-//      if (inst[0] == 0xB2 && inst[1] == 0x40) sysblk.inststep = 1; /*BAKR*/
-//      if (inst[0] == 0xB2 && inst[1] == 0x18) sysblk.inststep = 1; /*PC*/
-//      if (inst[0] == 0xB2 && inst[1] == 0x28) sysblk.inststep = 1; /*PT*/
-//      if (inst[0] == 0xB2 && inst[1] == 0x47) sysblk.inststep = 1; /*MSTA*/
-//      if (inst[0] == 0xB2 && inst[1] == 0x49) sysblk.inststep = 1; /*EREG*/
-//      if (inst[0] == 0xB2 && inst[1] == 0x4A) sysblk.inststep = 1; /*ESTA*/
-//      if (inst[0] == 0x01 && inst[1] == 0x01) sysblk.inststep = 1; /*PR*/
-//      if (inst[0] == 0xE5) sysblk.inststep = 1; /*LASP & MVS assists*/
-        if (inst[0] == 0xFC) sysblk.inststep = 1; /*MP*/
-        if (inst[0] == 0xFD) sysblk.inststep = 1; /*DP*/
+//      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x20) sysblk.inststep = 1; /*SERVC*/
+//      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x25) sysblk.inststep = 1; /*SSAR*/
+//      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x40) sysblk.inststep = 1; /*BAKR*/
+//      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x18) sysblk.inststep = 1; /*PC*/
+//      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x28) sysblk.inststep = 1; /*PT*/
+//      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x47) sysblk.inststep = 1; /*MSTA*/
+//      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x49) sysblk.inststep = 1; /*EREG*/
+//      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x4A) sysblk.inststep = 1; /*ESTA*/
+//      if (regs->inst[0] == 0x01 && regs->inst[1] == 0x01) sysblk.inststep = 1; /*PR*/
+//      if (regs->inst[0] == 0xE5) sysblk.inststep = 1; /*LASP & MVS assists*/
+        if (regs->inst[0] == 0xFC) sysblk.inststep = 1; /*MP*/
+        if (regs->inst[0] == 0xFD) sysblk.inststep = 1; /*DP*/
 
         /* Test for breakpoint */
         shouldbreak = sysblk.instbreak
@@ -6084,7 +6076,7 @@ int     icidx;                          /* Instruction counter index */
         if (sysblk.insttrace || sysblk.inststep || shouldbreak
             || tracethis || stepthis)
         {
-            display_inst (regs, inst);
+            display_inst (regs, regs->inst);
             if (sysblk.inststep || stepthis || shouldbreak)
             {
                 /* Put CPU into stopped state */
@@ -6099,7 +6091,7 @@ int     icidx;                          /* Instruction counter index */
         }
 
         /* Execute the instruction */
-        execute_instruction (inst, 0, regs);
+        execute_instruction (regs->inst, 0, regs);
     }
 
     return NULL;

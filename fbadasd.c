@@ -39,6 +39,10 @@ int fbadasd_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 {
 int     rc;                             /* Return code               */
 struct  stat statbuf;                   /* File information          */
+U32     blkspcg;                        /* Blocks per cyclical group */
+U32     blkspap;                        /* Blocks per access position*/
+U32     blksufh;                        /* Blocks under fixed heads  */
+BYTE    unittyp;                        /* Unit type                 */
 
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
@@ -75,8 +79,38 @@ struct  stat statbuf;                   /* File information          */
     dev->fbablksiz = 512;
     dev->fbanumblk = statbuf.st_size / dev->fbablksiz;
 
+    logmsg ("fbadasd: %s blks=%d\n",
+            dev->filename, dev->fbanumblk);
+
     /* Set number of sense bytes */
     dev->numsense = 24;
+
+    /* Set the device dependent characteristics fields */
+    switch (dev->devtype) {
+    case 0x3310:
+        unittyp = 0x01;
+        blkspcg = 32;
+        blkspap = 352;
+        blksufh = 0;
+        break;
+    case 0x3370:
+        unittyp = 0x02;
+        blkspcg = 62;
+        blkspap = 744;
+        blksufh = 0;
+        break;
+    case 0x9336:
+        unittyp = 0x02;
+        blkspcg = 64;
+        blkspap = 960;
+        blksufh = 0;
+        break;
+    default:
+        fprintf (stderr,
+                "HHC304I Unsupported device type: %4.4X\n",
+                dev->devtype);
+        return -1;
+    } /* end switch(dev->devtype) */
 
     /* Initialize the device identifier bytes */
     dev->devid[0] = 0xFF;
@@ -90,28 +124,53 @@ struct  stat statbuf;                   /* File information          */
 
     /* Initialize the device characteristics bytes */
     memset (dev->devchar, 0, sizeof(dev->devchar));
-    dev->devchar[0] = 0x30;             /* Operation modes */
-    dev->devchar[1] = 0x08;             /* Features */
-    dev->devchar[2] = 0x21;             /* Device class */
-    dev->devchar[3] = 0x02;             /* Unit type 3370 A1 on 4361 */
-                                        /* Physical block size */
-    dev->devchar[4] = dev->fbablksiz >> 8;
+    /* Operation modes */
+    dev->devchar[0] = 0x30;
+    /* Features */
+    dev->devchar[1] = 0x08;
+    /* Device class */
+    dev->devchar[2] = 0x21;
+    /* Unit type */
+    dev->devchar[3] = unittyp;
+    /* Physical record size */
+    dev->devchar[4] = (dev->fbablksiz & 0xFF00) >> 8;
     dev->devchar[5] = dev->fbablksiz & 0xFF;
-    dev->devchar[6] = 0x00;             /* Blocks/cyclical group 62 */
-    dev->devchar[7] = 0x00;
-    dev->devchar[8] = 0x00;
-    dev->devchar[9] = 0x3E;
-    dev->devchar[10] = 0x00;            /* Blocks/access position */
-    dev->devchar[11] = 0x00;
-    dev->devchar[12] = 0x02;
-    dev->devchar[13] = 0xE8;
-                                        /* Blocks under movable heads*/
-    dev->devchar[14] = dev->fbanumblk >> 24;
+    /* Blocks per cyclical group */
+    dev->devchar[6] = (blkspcg & 0xFF000000) >> 24;
+    dev->devchar[7] = (blkspcg & 0xFF0000) >> 16;
+    dev->devchar[8] = (blkspcg & 0xFF00) >> 8;
+    dev->devchar[9] = blkspcg & 0xFF;
+    /* Blocks per access position */
+    dev->devchar[10] = (blkspap & 0xFF000000) >> 24;
+    dev->devchar[11] = (blkspap & 0xFF0000) >> 16;
+    dev->devchar[12] = (blkspap & 0xFF00) >> 8;
+    dev->devchar[13] = blkspap & 0xFF;
+    /* Blocks under movable heads*/
+    dev->devchar[14] = (dev->fbanumblk & 0xFF000000) >> 24;
     dev->devchar[15] = (dev->fbanumblk & 0xFF0000) >> 16;
     dev->devchar[16] = (dev->fbanumblk & 0xFF00) >> 8;
     dev->devchar[17] = dev->fbanumblk & 0xFF;
-//  dev->devchar[24] = 0x05;            /* Blocks in CE+SA areas */
-//  dev->devchar[25] = 0xD0;
+    /* Blocks under fixed heads*/
+    dev->devchar[18] = (blksufh & 0xFF000000) >> 24;
+    dev->devchar[19] = (blksufh & 0xFF0000) >> 16;
+    dev->devchar[20] = (blksufh & 0xFF00) >> 8;
+    dev->devchar[21] = blksufh & 0xFF;
+    /* Blocks in alternate area */
+    dev->devchar[22] = 0;
+    dev->devchar[23] = 0;
+    /* Blocks in CE+SA areas */
+    dev->devchar[24] = 0;
+    dev->devchar[25] = 0;
+    /* Cyclic period of media in milliseconds */
+    dev->devchar[26] = 0;
+    dev->devchar[27] = 0;
+    /* Minimum time to change access position in milliseconds */
+    dev->devchar[28] = 0;
+    dev->devchar[29] = 0;
+    /* Maximum time to change access position in milliseconds */
+    dev->devchar[30] = 0;
+    dev->devchar[31] = 0;
+    /* Number of device characteristics bytes */
     dev->numdevchar = 32;
 
     /* Activate I/O tracing */
@@ -133,6 +192,7 @@ int     num;                            /* Number of bytes to move   */
 long    rba;                            /* Offset for seek           */
 BYTE    hexzeroes[512];                 /* Bytes for zero fill       */
 int     rem;                            /* Byte count for zero fill  */
+int     repcnt;                         /* Replication count         */
 
     /* Reset extent flag at start of CCW chain */
     if (chained == 0)
@@ -318,7 +378,8 @@ int     rem;                            /* Byte count for zero fill  */
 
         /* Reject if locate command did not specify read operation */
         if (prevcode != 0x02
-            && (dev->fbaoper & FBAOPER_CODE) != FBAOPER_READ)
+            && (dev->fbaoper & FBAOPER_CODE) != FBAOPER_READ
+            && (dev->fbaoper & FBAOPER_CODE) != FBAOPER_READREP)
         {
             dev->sense[0] = SENSE_CR;
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -419,7 +480,7 @@ int     rem;                            /* Byte count for zero fill  */
             }
         }
         else if ((dev->fbaoper & FBAOPER_CODE) == FBAOPER_READ
-            || (dev->fbaoper & FBAOPER_CODE) == FBAOPER_READREP)
+                || (dev->fbaoper & FBAOPER_CODE) == FBAOPER_READREP)
         {
         }
         else if ((dev->fbaoper & FBAOPER_CODE) == FBAOPER_FMTDEFC)
@@ -439,6 +500,9 @@ int     rem;                            /* Byte count for zero fill  */
             break;
         }
 
+        /* Byte 1 contains the replication count */
+        repcnt = iobuf[1];
+
         /* Bytes 2-3 contain the block count */
         dev->fbalcnum = (iobuf[2] << 8) | iobuf[3];
 
@@ -457,6 +521,18 @@ int     rem;                            /* Byte count for zero fill  */
             dev->sense[0] = SENSE_CR;
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
             break;
+        }
+
+        /* For replicated data, verify that the replication count
+           is non-zero and is a multiple of the block count */
+        if ((dev->fbaoper & FBAOPER_CODE) == FBAOPER_READREP)
+        {
+            if (repcnt == 0 || repcnt % dev->fbalcnum != 0)
+            {
+                dev->sense[0] = SENSE_CR;
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                break;
+            }
         }
 
         /* Position device to start of block */

@@ -186,6 +186,8 @@ typedef struct _REGS {			/* Processor registers	     */
 					     the interval timer      */
 	BYTE	cpustate;		/* CPU stopped/started state */
 	BYTE	restart;		/* 1=Restart interrpt pending*/
+	BYTE	instvalid;		/* 1=Inst field is valid     */
+	BYTE	inst[6];		/* Last-fetched instruction  */
 	jmp_buf progjmp;		/* longjmp destination for
 					   program check return      */
     } REGS;

@@ -177,9 +177,9 @@ void display_inst (REGS *regs, BYTE *inst)
 {
 DWORD   dword;                          /* Doubleword work area      */
 BYTE    opcode;                         /* Instruction operation code*/
-int     b1, b2, x1;                     /* Register numbers          */
+int     b1=-1, b2=-1, x1;               /* Register numbers          */
 int     ilc;                            /* Instruction length        */
-U32     addr1, addr2;                   /* Operand addresses         */
+U32     addr1 = 0, addr2 = 0;           /* Operand addresses         */
 U32     raddr;                          /* Real address              */
 U16     xcode;                          /* Exception code            */
 BYTE    buf[100];                       /* Message buffer            */
@@ -191,6 +191,14 @@ int     n;                              /* Number of bytes in buffer */
                 "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X ",
                 dword[0], dword[1], dword[2], dword[3],
                 dword[4], dword[5], dword[6], dword[7]);
+
+    /* Exit if instruction is not valid */
+    if (inst == NULL)
+    {
+        logmsg ("%sInstruction fetch error\n", buf);
+        display_regs (regs);
+        return;
+    }
 
     /* Extract the opcode and determine the instruction length */
     opcode = inst[0];
@@ -224,19 +232,6 @@ int     n;                              /* Number of bytes in buffer */
                 addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
             }
         }
-
-        /* Display storage at first storage operand location */
-        n = sprintf (buf, "V:%8.8X:", addr1);
-        xcode = virt_to_real (&raddr, addr1, b1, regs,
-                                (opcode == 0x44 ? ACCTYPE_INSTFETCH :
-                                 opcode == 0xB1 ? ACCTYPE_LRA :
-                                                  ACCTYPE_READ));
-        if (xcode == 0)
-            n += display_real (regs, raddr, buf+n);
-        else
-            n += sprintf (buf+n," Translation exception %4.4hX",xcode);
-
-        logmsg ("%s\n", buf);
     }
 
     /* Process the second storage operand */
@@ -250,8 +245,52 @@ int     n;                              /* Number of bytes in buffer */
             addr2 += regs->gpr[b2];
             addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
         }
+    }
 
-        /* Display storage at second storage operand location */
+    /* Calculate the operand addresses for MVCL(E) and CLCL(E) */
+    if (opcode == 0x0E || opcode == 0x0F
+        || opcode == 0xA8 || opcode == 0xA9)
+    {
+        b1 = inst[1] >> 4;
+        addr1 = regs->gpr[b1] &
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        b2 = inst[1] & 0x0F;
+        addr2 = regs->gpr[b2] &
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    }
+
+    /* Calculate the operand addresses for RRE instructions */
+    if (opcode == 0xB2
+        && ((inst[1] >= 0x20 && inst[1] <= 0x2F)
+            || (inst[1] >= 0x40 && inst[1] <= 0x5F)))
+    {
+        b1 = inst[3] >> 4;
+        addr1 = regs->gpr[b1] &
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        b2 = inst[3] & 0x0F;
+        addr2 = regs->gpr[b2] &
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    }
+
+    /* Display storage at first storage operand location */
+    if (b1 >= 0)
+    {
+        n = sprintf (buf, "V:%8.8X:", addr1);
+        xcode = virt_to_real (&raddr, addr1, b1, regs,
+                                (opcode == 0x44 ? ACCTYPE_INSTFETCH :
+                                 opcode == 0xB1 ? ACCTYPE_LRA :
+                                                  ACCTYPE_READ));
+        if (xcode == 0)
+            n += display_real (regs, raddr, buf+n);
+        else
+            n += sprintf (buf+n," Translation exception %4.4hX",xcode);
+
+        logmsg ("%s\n", buf);
+    }
+
+    /* Display storage at second storage operand location */
+    if (b2 >= 0)
+    {
         n = sprintf (buf, "V:%8.8X:", addr2);
         xcode = virt_to_real (&raddr, addr2, b2, regs, ACCTYPE_READ);
         if (xcode == 0)
