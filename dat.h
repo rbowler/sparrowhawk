@@ -1,8 +1,8 @@
-/* DAT.H        (c) Copyright Roger Bowler, 1999-2002                */
+/* DAT.H        (c) Copyright Roger Bowler, 1999-2003                */
 /*              ESA/390 Dynamic Address Translation                  */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the DAT, ALET, and ASN translation         */
@@ -65,7 +65,7 @@ int     i;                              /* Array subscript           */
     afte_addr += (asn & ASN_AFX) >> 4;
 
     /* Addressing exception if AFTE is outside main storage */
-    if (afte_addr >= regs->mainsize)
+    if (afte_addr > regs->mainlim)
         goto asn_addr_excp;
 
     /* Load the AFTE from main storage. All four bytes must be
@@ -103,7 +103,7 @@ int     i;                              /* Array subscript           */
     aste_addr &= 0x7FFFFFFF;
 
     /* Addressing exception if ASTE is outside main storage */
-    if (aste_addr >= regs->mainsize)
+    if (aste_addr > regs->mainlim)
         goto asn_addr_excp;
 
     /* Return the real address of the ASTE */
@@ -196,12 +196,7 @@ asn_asx_tran_excp:
 /*                                                                   */
 /*      A program check may be generated for addressing exception    */
 /*      if the authority table entry address is invalid, and in      */
-/*      this case the function does not return.  However, if the     */
-/*      regs->panelregs flag is set, indicating that translation     */
-/*      is being performed by the control panel for the purpose      */
-/*      of instruction display, then an addressing exception will    */
-/*      cause the function to return as if authorization had been    */
-/*      unsuccessful, and no program check will occur.               */
+/*      this case the function does not return.                      */
 /*-------------------------------------------------------------------*/
 _DAT_C_STATIC int ARCH_DEP(authorize_asn) (U16 ax, U32 aste[],
                                                int atemask, REGS *regs)
@@ -228,7 +223,7 @@ BYTE    ate;                            /* Authority table entry     */
     ato &= 0x7FFFFFFF;
 
     /* Addressing exception if ATE is outside main storage */
-    if (ato >= regs->mainsize)
+    if (ato > regs->mainlim)
         goto auth_addr_excp;
 
     /* Load the byte containing the authority table entry
@@ -237,11 +232,11 @@ BYTE    ate;                            /* Authority table entry     */
 
     SIE_TRANSLATE(&ato, ACCTYPE_SIE, regs);
 
-    ate = sysblk.mainstor[ato];
+    ate = regs->mainstor[ato];
     ate <<= ((ax & 0x03)*2);
 
     /* Set the main storage reference bit */
-    STORAGE_KEY(ato) |= STORKEY_REF;
+    STORAGE_KEY(ato, regs) |= STORKEY_REF;
 
     /* Authorization fails if the specified bit (either X'80' or
        X'40' of the 2 bit authority table entry) is zero */
@@ -251,14 +246,11 @@ BYTE    ate;                            /* Authority table entry     */
     /* Exit with successful return code */
     return 0;
 
-/* Conditions which always cause program check, except
-   when performing translation for the control panel */
+/* Conditions which always cause program check */
 auth_addr_excp:
-    if (regs->panelregs == 0)
-        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
-
-    /* Exit with unsuccessful return code if called by control panel */
+    ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
     return 1;
+
 } /* end function authorize_asn */
 #endif /*defined(FEATURE_DUAL_ADDRESS_SPACE)*/
 
@@ -300,11 +292,7 @@ auth_addr_excp:
 /*                                                                   */
 /*      A program check may be generated for addressing and ASN      */
 /*      translation specification exceptions, in which case the      */
-/*      function does not return.  However, if the special flag      */
-/*      regs->panelregs is set, which indicates that translation     */
-/*      is being performed by the control panel for the purpose      */
-/*      of instruction display, then ALL exceptions are returned     */
-/*      with an exception code, and no program checks occur.         */
+/*      function does not return.                                    */
 /*-------------------------------------------------------------------*/
 _DAT_C_STATIC U16 ARCH_DEP(translate_alet) (U32 alet, U16 eax,
             int acctype, REGS *regs, U32 *asteo, U32 aste[], int *prot)
@@ -312,7 +300,7 @@ _DAT_C_STATIC U16 ARCH_DEP(translate_alet) (U32 alet, U16 eax,
 U32     cb;                             /* DUCT or PASTE address     */
 U32     ald;                            /* Access-list designation   */
 U32     alo;                            /* Access-list origin        */
-int     all;                            /* Access-list length        */
+U32     all;                            /* Access-list length        */
 U32     ale[4];                         /* Access-list entry         */
 U32     aste_addr;                      /* Real address of ASTE      */
 U32     abs;                            /* Absolute address          */
@@ -333,7 +321,7 @@ int     code;                           /* Exception code            */
             regs->CR(2) & CR2_DUCTO;
 
     /* Addressing exception if outside main storage */
-    if (cb >= regs->mainsize)
+    if (cb > regs->mainlim)
         goto alet_addr_excp;
 
     /* Load the effective access-list designation (ALD) from
@@ -357,7 +345,7 @@ int     code;                           /* Exception code            */
     alo += (alet & ALET_ALEN) << 4;
 
     /* Addressing exception if outside main storage */
-    if (alo >= regs->mainsize)
+    if (alo > regs->mainlim)
         goto alet_addr_excp;
 
     /* Fetch the 16-byte access list entry from absolute storage.
@@ -385,7 +373,7 @@ int     code;                           /* Exception code            */
 
     /* Addressing exception if ASTE is outside main storage */
     abs = APPLY_PREFIXING (aste_addr, regs->PX);
-    if (abs >= regs->mainsize)
+    if (abs > regs->mainlim)
         goto alet_addr_excp;
 
     /* Fetch the 64-byte ASN second table entry from real storage.
@@ -454,11 +442,7 @@ alet_asn_tran_spec_excp:
 #endif /*!defined(FEATURE_ESAME)*/
 
 alet_prog_check:
-    if (regs->panelregs == 0)
-        ARCH_DEP(program_interrupt) (regs, code);
-
-    /* Return exception code to control panel */
-    return code;
+    ARCH_DEP(program_interrupt) (regs, code);
 
 /* Conditions which the caller may or may not program check */
 alet_spec_excp:
@@ -546,6 +530,10 @@ U32     aste[16];                       /* ASN second table entry    */
 U16     eax;                            /* Authorization index       */
 U16     xcode;                          /* ALET tran.exception code  */
 #endif /*defined(FEATURE_ACCESS_REGISTERS)*/
+
+    UNREFERENCED_370(arn);
+    UNREFERENCED_370(acctype);
+    UNREFERENCED_370(pprot);
 
 #if defined(FEATURE_DUAL_ADDRESS_SPACE)
     if (acctype == ACCTYPE_INSTFETCH)
@@ -721,13 +709,7 @@ U16     xcode;                          /* ALET tran.exception code  */
 /*                                                                   */
 /*      A program check may be generated for addressing and          */
 /*      translation specification exceptions, in which case the      */
-/*      function does not return.  However, if the special flag      */
-/*      regs->panelregs is set, which indicates that translation     */
-/*      is being performed by the control panel for the purpose      */
-/*      of instruction display, then no program checks occur, and    */
-/*      addressing and translation specification exceptions are      */
-/*      indicated by return code 4 and the exception code may be     */
-/*      set to X'0005', X'0012', or X'0017'.                         */
+/*      function does not return.                                    */
 /*-------------------------------------------------------------------*/
 _DAT_C_STATIC int ARCH_DEP(translate_addr) (VADR vaddr, int arn,
            REGS *regs, int acctype, RADR *raddr, U16 *xcode, int *priv,
@@ -745,10 +727,10 @@ int     cc;                             /* Condition code            */
 /* S/370 Dynamic Address Translation */
 /*-----------------------------------*/
 RADR    std;                            /* Segment table descriptor  */
-int     stl;                            /* Segment table length      */
+U32     stl;                            /* Segment table length      */
 RADR    ste;                            /* Segment table entry       */
 U16     pte;                            /* Page table entry          */
-int     ptl;                            /* Page table length         */
+U32     ptl;                            /* Page table length         */
 TLBE   *tlbp;                           /* -> TLB entry              */
 
     /* Load the effective segment table descriptor */
@@ -809,7 +791,7 @@ TLBE   *tlbp;                           /* -> TLB entry              */
             goto seg_tran_length;
 
         /* Generate addressing exception if outside real storage */
-        if (sto >= regs->mainsize)
+        if (sto > regs->mainlim)
             goto address_excp;
 
         /* Fetch segment table entry from real storage.  All bytes
@@ -841,7 +823,7 @@ TLBE   *tlbp;                           /* -> TLB entry              */
             ((vaddr & 0x0000F800) >> 10));
 
         /* Generate addressing exception if outside real storage */
-        if (pto >= regs->mainsize)
+        if (pto > regs->mainlim)
             goto address_excp;
 
         /* Check that the virtual address is within the page table */
@@ -905,10 +887,10 @@ TLBE   *tlbp;                           /* -> TLB entry              */
 /* S/390 Dynamic Address Translation */
 /*-----------------------------------*/
 RADR    std;                            /* Segment table descriptor  */
-int     stl;                            /* Segment table length      */
+U32     stl;                            /* Segment table length      */
 RADR    ste;                            /* Segment table entry       */
 RADR    pte;                            /* Page table entry          */
-int     ptl;                            /* Page table length         */
+U32     ptl;                            /* Page table length         */
 TLBE   *tlbp;                           /* -> TLB entry              */
 
     /* [3.11.3.1] Load the effective segment table descriptor */
@@ -958,7 +940,7 @@ TLBE   *tlbp;                           /* -> TLB entry              */
             goto seg_tran_length;
 
         /* Generate addressing exception if outside real storage */
-        if (sto >= regs->mainsize)
+        if (sto > regs->mainlim)
             goto address_excp;
 
         /* Fetch segment table entry from real storage.  All bytes
@@ -993,7 +975,7 @@ TLBE   *tlbp;                           /* -> TLB entry              */
             goto page_tran_length;
 
         /* Generate addressing exception if outside real storage */
-        if (pto >= regs->mainsize)
+        if (pto > regs->mainlim)
             goto address_excp;
 
         /* Fetch the page table entry from real storage.  All bytes
@@ -1149,7 +1131,7 @@ TLBE   *tlbp;                           /* -> TLB entry              */
                 rto += rfx;
     
                 /* Addressing exception if outside main storage */
-                if (rto >= regs->mainsize)
+                if (rto > regs->mainlim)
                     goto address_excp;
     
                 /* Fetch region-first table entry from absolute storage.
@@ -1196,7 +1178,7 @@ TLBE   *tlbp;                           /* -> TLB entry              */
                 rto += rsx;
     
                 /* Addressing exception if outside main storage */
-                if (rto >= regs->mainsize)
+                if (rto > regs->mainlim)
                     goto address_excp;
     
                 /* Fetch region-second table entry from absolute storage.
@@ -1243,7 +1225,7 @@ TLBE   *tlbp;                           /* -> TLB entry              */
                 rto += rtx;
     
                 /* Addressing exception if outside main storage */
-                if (rto >= regs->mainsize)
+                if (rto > regs->mainlim)
                     goto address_excp;
     
                 /* Fetch region-third table entry from absolute storage.
@@ -1290,7 +1272,7 @@ TLBE   *tlbp;                           /* -> TLB entry              */
                 goto seg_tran_length;
     
             /* Addressing exception if outside real storage */
-            if (sto >= regs->mainsize)
+            if (sto > regs->mainlim)
                 goto address_excp;
     
             /* Fetch segment table entry from absolute storage.  All bytes
@@ -1323,7 +1305,7 @@ TLBE   *tlbp;                           /* -> TLB entry              */
             pto += px;
     
             /* Addressing exception if outside real storage */
-            if (pto >= regs->mainsize)
+            if (pto > regs->mainlim)
                 goto address_excp;
     
             /* Fetch the page table entry from absolute storage.  All bytes
@@ -1401,11 +1383,7 @@ tran_spec_excp:
     goto tran_prog_check;
 
 tran_prog_check:
-    if (regs->panelregs == 0)
-        ARCH_DEP(program_interrupt) (regs, *xcode);
-
-    /* Return to control panel with exception code already set */
-    return 4;
+    ARCH_DEP(program_interrupt) (regs, *xcode);
 
 /* Conditions which the caller may or may not program check */
 seg_tran_invalid:
@@ -1565,6 +1543,8 @@ _DAT_C_STATIC void ARCH_DEP(invalidate_pte) (BYTE ibyte, int r1,
 RADR    raddr;                          /* Addr of page table entry  */
 RADR    pte;
 
+    UNREFERENCED_370(ibyte);
+
 #if !defined(FEATURE_S390_DAT) && !defined(FEATURE_ESAME)
     {
         /* Program check if translation format is invalid */
@@ -1678,6 +1658,8 @@ RADR std;
 int stid = 0;
 int protect = 0;
 
+    UNREFERENCED(addr);
+
     if(ARCH_DEP(load_address_space_designator) (arn, regs, acctype,
       &std, &stid, &protect))
         return 0;
@@ -1731,6 +1713,9 @@ RADR    raddr;                          /* Real address              */
 RADR    aaddr;                          /* Absolute address          */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=Page prot, 2=ALE prot   */
+#if defined(_FEATURE_SIE)
+int     host_protect = 0;               /* 1=Page prot, 2=ALE prot   */
+#endif /*defined(_FEATURE_SIE)*/
 int     stid = 0;                       /* Address space indication  */
 #ifdef FEATURE_INTERVAL_TIMER
 PSA    *psa;                            /* -> Prefixed storage area  */
@@ -1772,7 +1757,7 @@ U16     xcode;                          /* Exception code            */
 #endif
 
     /* Program check if absolute address is outside main storage */
-    if (aaddr >= regs->mainsize)
+    if (aaddr > regs->mainlim)
         goto vabs_addr_excp;
 
 #if defined(_FEATURE_SIE)
@@ -1788,12 +1773,12 @@ U16     xcode;                          /* Exception code            */
                 arn :
                 USE_PRIMARY_SPACE,
                 regs->hostregs, ACCTYPE_SIE, &aaddr, &sie_xcode,
-                &sie_private, &protect, &sie_stid))
+                &sie_private, &host_protect, &sie_stid))
 #else /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
         if (SIE_TRANSLATE_ADDR (regs->sie_mso + aaddr,
                 USE_PRIMARY_SPACE,
                 regs->hostregs, ACCTYPE_SIE, &aaddr, &sie_xcode,
-                &sie_private, &protect, &sie_stid))
+                &sie_private, &host_protect, &sie_stid))
 #endif /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
             (regs->sie_hostpi) (regs->hostregs, sie_xcode);
 
@@ -1812,22 +1797,30 @@ U16     xcode;                          /* Exception code            */
     case ACCTYPE_READ:
     case ACCTYPE_INSTFETCH:
         /* Program check if fetch protected location */
-        if (ARCH_DEP(is_fetch_protected) (addr, STORAGE_KEY(aaddr), akey,
+        if (ARCH_DEP(is_fetch_protected) (addr, STORAGE_KEY(aaddr, regs), akey,
                                 private, regs))
+        {
+            host_protect = 0;
             goto vabs_prot_excp;
+        }
 
         /* Set the reference bit in the storage key */
-        STORAGE_KEY(aaddr) |= STORKEY_REF;
+        STORAGE_KEY(aaddr, regs) |= STORKEY_REF;
         break;
 
     case ACCTYPE_WRITE:
         /* Program check if store protected location */
-        if (ARCH_DEP(is_store_protected) (addr, STORAGE_KEY(aaddr), akey,
+        if (ARCH_DEP(is_store_protected) (addr, STORAGE_KEY(aaddr, regs), akey,
                                 private, protect, regs))
+        {
+            host_protect = 0;
+            goto vabs_prot_excp;
+        }
+        if(host_protect)
             goto vabs_prot_excp;
 
         /* Set the reference and change bits in the storage key */
-        STORAGE_KEY(aaddr) |= (STORKEY_REF | STORKEY_CHANGE);
+        STORAGE_KEY(aaddr, regs) |= (STORKEY_REF | STORKEY_CHANGE);
 
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SA(regs) && (arn != USE_REAL_ADDR)
@@ -1843,8 +1836,13 @@ U16     xcode;                          /* Exception code            */
 
     case ACCTYPE_WRITE_SKP:
         /* Program check if store protected location */
-        if (ARCH_DEP(is_store_protected) (addr, STORAGE_KEY(aaddr), akey,
+        if (ARCH_DEP(is_store_protected) (addr, STORAGE_KEY(aaddr, regs), akey,
                                 private, protect, regs))
+        {
+            host_protect = 0;
+            goto vabs_prot_excp;
+        }
+        if(host_protect)
             goto vabs_prot_excp;
 
 #if defined(FEATURE_PER)
@@ -1859,13 +1857,20 @@ U16     xcode;                          /* Exception code            */
 
         break;
 
+    case ACCTYPE_SIE_WRITE:
+        /* Check for host page protection */
+        if(protect || host_protect)
+            goto vabs_prot_excp;
+
+        break;
+
     } /* end switch */
 
 #if defined(FEATURE_INTERVAL_TIMER)
     if(raddr < 88 && raddr >= 76)
     {
         /* Point to PSA in main storage */
-        psa = (PSA*)(sysblk.mainstor + (aaddr & 0x7FFFF000));
+        psa = (PSA*)(regs->mainstor + (aaddr & 0x7FFFF000));
 
         /* Obtain the TOD clock update lock */
         obtain_lock (&sysblk.todlock);
@@ -1886,8 +1891,8 @@ U16     xcode;                          /* Exception code            */
         /* Check for access to interval timer at location 80 */
         if (sysblk.insttrace || sysblk.inststep)
         {
-            logmsg ("dat.c: Interval timer accessed: "
-                    "%2.2X%2.2X%2.2X%2.2X\n",
+            logmsg (_("dat.c: Interval timer accessed: "
+                    "%2.2X%2.2X%2.2X%2.2X\n"),
                     psa->inttimer[0], psa->inttimer[1],
                     psa->inttimer[2], psa->inttimer[3]);
         }
@@ -1931,7 +1936,19 @@ vabs_prot_excp:
     regs->TEA |= stid;
     regs->excarid = (arn > 0 ? arn : 0);
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-    ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
+
+#if defined(_FEATURE_PROTECTION_INTERCEPTION_CONTROL)
+    if(host_protect)
+    {
+#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
+        regs->hostregs->TEA = regs->TEA;
+        regs->hostregs->excarid = regs->excarid;
+#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
+        (regs->sie_hostpi) (regs->hostregs, PGM_PROTECTION_EXCEPTION);
+    }
+    else
+#endif /*defined(_FEATURE_PROTECTION_INTERCEPTION_CONTROL)*/
+        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
 
 vabs_prog_check:
     ARCH_DEP(program_interrupt) (regs, xcode);
@@ -1948,6 +1965,9 @@ RADR    raddr;                          /* Real address              */
 RADR    aaddr;                          /* Absolute address          */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=Page prot, 2=ALE prot   */
+#if defined(_FEATURE_SIE)
+int     host_protect = 0;               /* 1=Page prot, 2=ALE prot   */
+#endif /*defined(_FEATURE_SIE)*/
 int     stid = 0;                       /* Address space indication  */
 U16     xcode;                          /* Exception code            */
 #if defined(OPTION_AEA_BUFFER)
@@ -1987,7 +2007,7 @@ int     aeind;
 #endif
 
     /* Program check if absolute address is outside main storage */
-    if (aaddr >= regs->mainsize)
+    if (aaddr > regs->mainlim)
         goto vabs_addr_excp;
 
 #if defined(_FEATURE_SIE)
@@ -2003,12 +2023,12 @@ int     aeind;
                 arn :
                 USE_PRIMARY_SPACE,
                 regs->hostregs, ACCTYPE_SIE, &aaddr, &sie_xcode,
-                &sie_private, &protect, &sie_stid))
+                &sie_private, &host_protect, &sie_stid))
 #else /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
         if (SIE_TRANSLATE_ADDR (regs->sie_mso + aaddr,
                 USE_PRIMARY_SPACE,
                 regs->hostregs, ACCTYPE_SIE, &aaddr, &sie_xcode,
-                &sie_private, &protect, &sie_stid))
+                &sie_private, &host_protect, &sie_stid))
 #endif /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
             (regs->sie_hostpi) (regs->hostregs, sie_xcode);
 
@@ -2027,22 +2047,30 @@ int     aeind;
     case ACCTYPE_READ:
     case ACCTYPE_INSTFETCH:
         /* Program check if fetch protected location */
-        if (ARCH_DEP(is_fetch_protected) (addr, STORAGE_KEY(aaddr), akey,
+        if (ARCH_DEP(is_fetch_protected) (addr, STORAGE_KEY(aaddr, regs), akey,
                                 private, regs))
+        {
+            host_protect = 0;
             goto vabs_prot_excp;
+        }
 
         /* Set the reference bit in the storage key */
-        STORAGE_KEY(aaddr) |= STORKEY_REF;
+        STORAGE_KEY(aaddr, regs) |= STORKEY_REF;
         break;
 
     case ACCTYPE_WRITE:
         /* Program check if store protected location */
-        if (ARCH_DEP(is_store_protected) (addr, STORAGE_KEY(aaddr), akey,
+        if (ARCH_DEP(is_store_protected) (addr, STORAGE_KEY(aaddr, regs), akey,
                                 private, protect, regs))
+        {
+            host_protect = 0;
+            goto vabs_prot_excp;
+        }
+        if(host_protect)
             goto vabs_prot_excp;
 
         /* Set the reference and change bits in the storage key */
-        STORAGE_KEY(aaddr) |= (STORKEY_REF | STORKEY_CHANGE);
+        STORAGE_KEY(aaddr, regs) |= (STORKEY_REF | STORKEY_CHANGE);
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SA(regs) && (arn != USE_REAL_ADDR)
 #if defined(FEATURE_PER2)
@@ -2056,9 +2084,15 @@ int     aeind;
 
     case ACCTYPE_WRITE_SKP:
         /* Program check if store protected location */
-        if (ARCH_DEP(is_store_protected) (addr, STORAGE_KEY(aaddr), akey,
+        if (ARCH_DEP(is_store_protected) (addr, STORAGE_KEY(aaddr, regs), akey,
                                 private, protect, regs))
+        {
+            host_protect = 0;
             goto vabs_prot_excp;
+        }
+        if(host_protect)
+            goto vabs_prot_excp;
+
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SA(regs) && (arn != USE_REAL_ADDR)
 #if defined(FEATURE_PER2)
@@ -2068,6 +2102,13 @@ int     aeind;
           && PER_RANGE_CHECK(addr,regs->CR(10),regs->CR(11)) )
             ON_IC_PER_SA(regs);
 #endif /*defined(FEATURE_PER)*/
+
+        break;
+
+    case ACCTYPE_SIE_WRITE:
+        /* Check for host page protection */
+        if(protect || host_protect)
+            goto vabs_prot_excp;
 
         break;
 
@@ -2121,7 +2162,19 @@ vabs_prot_excp:
     regs->TEA |= stid;
     regs->excarid = (arn > 0 ? arn : 0);
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-    ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
+
+#if defined(_FEATURE_PROTECTION_INTERCEPTION_CONTROL)
+    if(host_protect)
+    {
+#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
+        regs->hostregs->TEA = regs->TEA;
+        regs->hostregs->excarid = regs->excarid;
+#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
+        (regs->sie_hostpi) (regs->hostregs, PGM_PROTECTION_EXCEPTION);
+    }
+    else
+#endif /*defined(_FEATURE_PROTECTION_INTERCEPTION_CONTROL)*/
+        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
 
 vabs_prog_check:
     ARCH_DEP(program_interrupt) (regs, xcode);

@@ -1,8 +1,8 @@
-/* IPL.C        (c) Copyright Roger Bowler, 1999-2002                */
+/* IPL.C        (c) Copyright Roger Bowler, 1999-2003                */
 /*              ESA/390 Initial Program Loader                       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the Initial Program Load (IPL) function    */
@@ -60,7 +60,7 @@ BYTE    chanstat;                       /* IPL device channel status */
     dev = find_device_by_devnum (devnum);
     if (dev == NULL)
     {
-        logmsg ("HHC103I Device %4.4X not in configuration\n",
+        logmsg (_("HHCCP027E Device %4.4X not in configuration\n"),
                 devnum);
 #ifdef EXTERNALGUI
         if (extgui) logmsg("LOAD=0\n");
@@ -71,14 +71,17 @@ BYTE    chanstat;                       /* IPL device channel status */
     if(sysblk.arch_mode == ARCH_370
       && dev->chanset != regs->chanset)
     {
-        logmsg("HHC023I Device not connected to channelset\n");
+        logmsg(_("HHCCP028E Device not connected to channelset\n"));
 #ifdef EXTERNALGUI
         if (extgui) logmsg("LOAD=0\n");
 #endif /*EXTERNALGUI*/
         return -1;
     }
     /* Point to the PSA in main storage */
-    psa = (PSA*)(sysblk.mainstor + regs->PX);
+    psa = (PSA*)(regs->mainstor + regs->PX);
+
+    /* Set Main Storage Reference and Update bits */
+    STORAGE_KEY(regs->PX, regs) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Build the IPL CCW at location 0 */
     psa->iplpsw[0] = 0x02;              /* CCW command = Read */
@@ -118,10 +121,10 @@ BYTE    chanstat;                       /* IPL device channel status */
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
     if (unitstat != (CSW_CE | CSW_DE) || chanstat != 0) {
-        logmsg ("HHC105I %s mode IPL failed: CSW status=%2.2X%2.2X\n",
+        logmsg (_("HHCCP029E %s mode IPL failed: CSW status=%2.2X%2.2X\n"),
                 get_arch_mode_string(regs), unitstat, chanstat);
-        logmsg ("HHC106I Sense=");
-        for (i=0; i < dev->numsense; i++)
+        logmsg (_("           Sense="));
+        for (i=0; i < (int)dev->numsense; i++)
         {
             logmsg ("%2.2X", dev->sense[i]);
             if ((i & 3) == 3) logmsg(" ");
@@ -160,14 +163,17 @@ BYTE    chanstat;                       /* IPL device channel status */
     regs->psw.intcode = 0;
 
     /* Point to PSA in main storage */
-    psa = (PSA*)(sysblk.mainstor + regs->PX);
+    psa = (PSA*)(regs->mainstor + regs->PX);
 
     /* Load IPL PSW from PSA+X'0' */
+    obtain_lock(&sysblk.intlock);
     rc = ARCH_DEP(load_psw) (regs, psa->iplpsw);
+    release_lock(&sysblk.intlock);
     if ( rc )
     {
-        logmsg ("HHC107I IPL failed: Invalid IPL PSW: "
-                "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
+        logmsg (_("HHCCP030E %s mode IPL failed: Invalid IPL PSW: "
+                "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n"),
+                get_arch_mode_string(regs),
                 psa->iplpsw[0], psa->iplpsw[1], psa->iplpsw[2],
                 psa->iplpsw[3], psa->iplpsw[4], psa->iplpsw[5],
                 psa->iplpsw[6], psa->iplpsw[7]);
@@ -189,6 +195,10 @@ BYTE    chanstat;                       /* IPL device channel status */
 
     /* reset load state */
     regs->loadstate = 0;
+
+    /* Save IPL device number and cpu number */
+    sysblk.ipldev = devnum;
+    sysblk.iplcpu = regs->cpuad;
 
     /* Signal the CPU to retest stopped indicator */
     obtain_lock (&sysblk.intlock);
@@ -265,7 +275,7 @@ U32     fileaddr;
     fp = fopen(fname, "r");
     if(fp == NULL)
     {
-        logmsg("HHC008I Load from %s failed: %s\n",fname,strerror(errno));
+        logmsg(_("HHCCP031E Load from %s failed: %s\n"),fname,strerror(errno));
         return -1;
     }
 
@@ -307,14 +317,17 @@ U32     fileaddr;
     regs->psw.intcode = 0;
 
     /* Point to PSA in main storage */
-    psa = (PSA*)(sysblk.mainstor + regs->PX);
+    psa = (PSA*)(regs->mainstor + regs->PX);
 
     /* Load IPL PSW from PSA+X'0' */
+    obtain_lock(&sysblk.intlock);
     rc = ARCH_DEP(load_psw) (regs, psa->iplpsw);
+    release_lock(&sysblk.intlock);
     if ( rc )
     {
-        logmsg ("HHC109I IPL failed: Invalid IPL PSW: "
-                "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
+        logmsg (_("HHCCP032E %s mode IPL failed: Invalid IPL PSW: "
+                "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n"),
+                get_arch_mode_string(regs),
                 psa->iplpsw[0], psa->iplpsw[1], psa->iplpsw[2],
                 psa->iplpsw[3], psa->iplpsw[4], psa->iplpsw[5],
                 psa->iplpsw[6], psa->iplpsw[7]);
@@ -387,9 +400,14 @@ int             i;                      /* Array subscript           */
     ARCH_DEP(purge_alb) (regs);
 #endif /*defined(FEATURE_ACCESS_REGISTERS)*/
 
-    /* Put the CPU into the stopped state */
-    regs->cpustate = CPUSTATE_STOPPED;
-    ON_IC_CPU_NOT_STARTED(regs);
+#if defined(_FEATURE_SIE)
+    if(!regs->hostregs)
+#endif /*defined(_FEATURE_SIE)*/
+    {
+        /* Put the CPU into the stopped state */
+        regs->cpustate = CPUSTATE_STOPPED;
+        ON_IC_CPU_NOT_STARTED(regs);
+    }
 
 #if defined(_FEATURE_SIE)
    if(regs->guestregs)
@@ -457,7 +475,7 @@ U32  pagesize;
     fd = open (fname, O_RDONLY|O_BINARY);
     if(fd < 0)
     {
-        logmsg("HHC010I load_main: %s: %s\n", fname, strerror(errno));
+        logmsg(_("HHCCP033E load_main: %s: %s\n"), fname, strerror(errno));
         return fd;
     }
 
@@ -466,20 +484,20 @@ U32  pagesize;
     do {
         if(pageaddr >= sysblk.mainsize)
         {
-            logmsg("HHC011I load_main: terminated at end of mainstor\n");
+            logmsg(_("HHCCP034W load_main: terminated at end of mainstor\n"));
             close(fd);
             return br;
         }
         rl = read(fd, sysblk.mainstor + pageaddr, pagesize);
         if(rl > 0)
         {
-            STORAGE_KEY(pageaddr) |= STORKEY_REF|STORKEY_CHANGE;
+            STORAGE_KEY(pageaddr, &sysblk) |= STORKEY_REF|STORKEY_CHANGE;
             br += rl;
         }
         pageaddr += PAGEFRAME_PAGESIZE;
-	pageaddr &= PAGEFRAME_PAGEMASK;
+    pageaddr &= PAGEFRAME_PAGEMASK;
         pagesize = PAGEFRAME_PAGESIZE;
-    } while (rl == pagesize);
+    } while (rl == (int)pagesize);
 
     close(fd);
 

@@ -1,4 +1,4 @@
-/* HOSTINFO.H   (c) Copyright "Fish" (David B. Trout), 2002.         */
+/* HOSTINFO.H   (c) Copyright "Fish" (David B. Trout), 2002-2003     */
 
 /*   Released under the Q Public License                             */
 /*      (http://www.conmicro.cx/hercules/herclic.html)               */
@@ -32,5 +32,11 @@ HOST_INFO;
 extern  HOST_INFO  hostinfo;
 extern  void  init_hostinfo ();
 extern  void  display_hostinfo (FILE *f);
+
+#if defined(WIN32)
+extern  int   get_process_directory(char* dirbuf, size_t bufsiz);
+extern  int is_win32_directory(char* dir);
+extern void convert_win32_directory_to_posix_directory(const char *win32_dir, char *posix_dir);
+#endif /*defined(WIN32)*/
 
 #endif /*!defined(_HOSTINFO_H_)*/

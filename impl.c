@@ -1,21 +1,20 @@
-/* IMPL.C       (c) Copyright Roger Bowler, 1999-2002                */
+/* IMPL.C       (c) Copyright Roger Bowler, 1999-2003                */
 /*              Hercules Initialization Module                       */
 
 /*-------------------------------------------------------------------*/
 /* This module initializes the Hercules S/370 or ESA/390 emulator.   */
 /* It builds the system configuration blocks, creates threads for    */
-/* the console server, the timer handler, and central processors,    */
+/* central processors, HTTP server                                   */
 /* and activates the control panel which runs under the main thread. */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
 #include "opcode.h"
-#include <unistd.h>
 #include "httpmisc.h"
 #include "hostinfo.h"
 
 #if defined(FISH_HANG)
-extern  int   bFishHangAtExit;	// (set to true when shutting down)
+extern  int   bFishHangAtExit;  // (set to true when shutting down)
 extern  void  FishHangInit(char* pszFileCreated, int nLineCreated);
 extern  void  FishHangReport();
 extern  void  FishHangAtExit();
@@ -28,6 +27,8 @@ static void sigint_handler (int signo)
 {
 //  logmsg ("config: sigint handler entered for thread %lu\n",/*debug*/
 //          thread_id());                                     /*debug*/
+
+    UNREFERENCED(signo);
 
     signal(SIGINT, sigint_handler);
     /* Ignore signal unless presented on console thread */
@@ -75,7 +76,11 @@ int i;
 #endif /*!FEATURE_CPU_RECONFIG*/
         {
             if(sysblk.regs[i].cpustate == CPUSTATE_STARTED
-              && !sysblk.regs[i].psw.wait)
+              && (!sysblk.regs[i].psw.wait
+#if defined(_FEATURE_WAITSTATE_ASSIST)
+              && !(sysblk.regs[i].sie_state && sysblk.regs[i].guestregs->psw.wait)
+#endif
+                                           ))
             {
                 /* If the cpu is running but not executing
                    instructions then it must be malfunctioning */
@@ -114,6 +119,12 @@ int     c;                              /* Work area for getopt      */
 int     arg_error = 0;                  /* 1=Invalid arguments       */
 #ifdef PROFILE_CPU
 TID paneltid;
+#endif
+
+#if defined(ENABLE_NLS)
+    setlocale(LC_ALL, "");
+    bindtextdomain(PACKAGE, LOCALEDIR);
+    textdomain(PACKAGE);
 #endif
 
 #ifdef EXTERNALGUI
@@ -173,7 +184,7 @@ TID paneltid;
     if ( signal (SIGINT, sigint_handler) == SIG_ERR )
     {
         fprintf (stderr,
-                "HHC131I Cannot register SIGINT handler: %s\n",
+                "HHCIN001S Cannot register SIGINT handler: %s\n",
                 strerror(errno));
         exit(1);
     }
@@ -183,7 +194,7 @@ TID paneltid;
     if ( signal (SIGPIPE, SIG_IGN) == SIG_ERR )
     {
         fprintf (stderr,
-                "HHC132I Cannot suppress SIGPIPE signal: %s\n",
+                "HHCIN002E Cannot suppress SIGPIPE signal: %s\n",
                 strerror(errno));
     }
 
@@ -191,7 +202,11 @@ TID paneltid;
     {
     struct sigaction sa;
         sa.sa_sigaction = (void*)&sigabend_handler;
+#ifdef SA_NODEFER
         sa.sa_flags = SA_NODEFER;
+#else
+    sa.sa_flags = 0;
+#endif
 
         if( sigaction(SIGILL, &sa, NULL)
          || sigaction(SIGFPE, &sa, NULL)
@@ -201,7 +216,8 @@ TID paneltid;
          || sigaction(SIGUSR2, &sa, NULL) )
         {
             fprintf (stderr,
-                    "HHC133I Cannot register SIGILL/FPE/SEGV/BUS/USR handler: %s\n",
+                    "HHCIN003S Cannot register SIGILL/FPE/SEGV/BUS/USR "
+                    "handler: %s\n",
                     strerror(errno));
             exit(1);
         }
@@ -212,7 +228,7 @@ TID paneltid;
                         watchdog_thread, NULL) )
     {
         fprintf (stderr,
-                "HHC134I Cannot create watchdog thread: %s\n",
+                "HHCIN004S Cannot create watchdog thread: %s\n",
                 strerror(errno));
         exit(1);
     }
@@ -221,36 +237,35 @@ TID paneltid;
 #if defined(OPTION_HTTP_SERVER)
     if(sysblk.httpport) {
         /* Start the http server connection thread */
+        if (!sysblk.httproot)
+        {
+#if defined(WIN32)
+            char process_dir[1024];
+            if (get_process_directory(process_dir,1024) > 0)
+                sysblk.httproot = strdup(process_dir);
+            else
+#endif /*defined(WIN32)*/
+            sysblk.httproot = HTTP_ROOT;
+        }
+#if defined(WIN32)
+        if (is_win32_directory(sysblk.httproot))
+        {
+            char posix_dir[1024];
+            convert_win32_directory_to_posix_directory(sysblk.httproot,posix_dir);
+            sysblk.httproot = strdup(posix_dir);
+        }
+#endif /*defined(WIN32)*/
+        TRACE("HTTPROOT = %s\n",sysblk.httproot);
         if ( create_thread (&sysblk.httptid, &sysblk.detattr,
                             http_server, NULL) )
         {
             fprintf (stderr,
-                    "HHS001E Cannot create http_server thread: %s\n",
+                    "HHCIN005S Cannot create http_server thread: %s\n",
                     strerror(errno));
             exit(1);
         }
     }
 #endif /*defined(OPTION_HTTP_SERVER)*/
-
-    /* Start the console connection thread */
-    if ( create_thread (&sysblk.cnsltid, &sysblk.detattr,
-                        console_connection_handler, NULL) )
-    {
-        fprintf (stderr,
-                "HHC135I Cannot create console thread: %s\n",
-                strerror(errno));
-        exit(1);
-    }
-
-    /* Start the TOD clock and CPU timer thread */
-    if ( create_thread (&sysblk.todtid, &sysblk.detattr,
-                        timer_update_thread, NULL) )
-    {
-        fprintf (stderr,
-                "HHC136I Cannot create timer thread: %s\n",
-                strerror(errno));
-        exit(1);
-    }
 
 #ifndef PROFILE_CPU
     /* Activate the control panel */
@@ -266,7 +281,7 @@ TID paneltid;
                         panel_display, NULL) )
     {
         fprintf (stderr,
-                "HHC137I Cannot create panel thread: %s\n",
+                "HHCIN006S Cannot create panel thread: %s\n",
                 strerror(errno));
         exit(1);
     }

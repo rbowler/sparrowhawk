@@ -1,4 +1,4 @@
-/* CARDPCH.C    (c) Copyright Roger Bowler, 1999-2002                */
+/* CARDPCH.C    (c) Copyright Roger Bowler, 1999-2003                */
 /*              ESA/390 Card Punch Device Handler                    */
 
 /*-------------------------------------------------------------------*/
@@ -31,7 +31,7 @@ int             rc;                     /* Return code               */
     /* Equipment check if error writing to output file */
     if (rc < len)
     {
-        logmsg ("HHC423I Error writing to %s: %s\n",
+        logmsg (_("HHCPU004E Error writing to %s: %s\n"),
                 dev->filename,
                 (errno == 0 ? "incomplete": strerror(errno)));
         dev->sense[0] = SENSE_EC;
@@ -44,14 +44,14 @@ int             rc;                     /* Return code               */
 /*-------------------------------------------------------------------*/
 /* Initialize the device handler                                     */
 /*-------------------------------------------------------------------*/
-int cardpch_init_handler (DEVBLK *dev, int argc, BYTE *argv[])
+static int cardpch_init_handler (DEVBLK *dev, int argc, BYTE *argv[])
 {
 int     i;                              /* Array subscript           */
 
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
     {
-        logmsg ("HHC421I File name missing or invalid\n");
+        logmsg (_("HHCPU001E File name missing or invalid\n"));
         return -1;
     }
 
@@ -86,7 +86,7 @@ int     i;                              /* Array subscript           */
             continue;
         }
 
-        logmsg ("HHC422I Invalid argument: %s\n",
+        logmsg (_("HHCPU002E Invalid argument: %s\n"),
                 argv[i]);
         return -1;
     }
@@ -116,7 +116,7 @@ int     i;                              /* Array subscript           */
 /*-------------------------------------------------------------------*/
 /* Query the device definition                                       */
 /*-------------------------------------------------------------------*/
-void cardpch_query_device (DEVBLK *dev, BYTE **class,
+static void cardpch_query_device (DEVBLK *dev, BYTE **class,
                 int buflen, BYTE *buffer)
 {
 
@@ -131,7 +131,7 @@ void cardpch_query_device (DEVBLK *dev, BYTE **class,
 /*-------------------------------------------------------------------*/
 /* Close the device                                                  */
 /*-------------------------------------------------------------------*/
-int cardpch_close_device ( DEVBLK *dev )
+static int cardpch_close_device ( DEVBLK *dev )
 {
     /* Close the device file */
     close (dev->fd);
@@ -143,7 +143,7 @@ int cardpch_close_device ( DEVBLK *dev )
 /*-------------------------------------------------------------------*/
 /* Execute a Channel Command Word                                    */
 /*-------------------------------------------------------------------*/
-void cardpch_execute_ccw (DEVBLK *dev, BYTE code, BYTE flags,
+static void cardpch_execute_ccw (DEVBLK *dev, BYTE code, BYTE flags,
         BYTE chained, U16 count, BYTE prevcode, int ccwseq,
         BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual)
 {
@@ -151,6 +151,9 @@ int             rc;                     /* Return code               */
 int             i;                      /* Loop counter              */
 int             num;                    /* Number of bytes to move   */
 BYTE            c;                      /* Output character          */
+
+    UNREFERENCED(prevcode);
+    UNREFERENCED(ccwseq);
 
     /* Open the device file if necessary */
     if (dev->fd < 0 && !IS_CCW_SENSE(code))
@@ -161,7 +164,7 @@ BYTE            c;                      /* Output character          */
         if (rc < 0)
         {
             /* Handle open failure */
-            logmsg ("HHC423I Error opening file %s: %s\n",
+            logmsg (_("HHCPU003E Error opening file %s: %s\n"),
                     dev->filename, strerror(errno));
 
             /* Set unit check with intervention required */
@@ -200,7 +203,7 @@ BYTE            c;                      /* Output character          */
 
             if (dev->ascii)
             {
-                c = ebcdic_to_ascii[c];
+                c = guest_to_host(c);
                 if (!isprint(c)) c = SPACE;
             }
 
@@ -298,5 +301,6 @@ DEVHND cardpch_device_hndinfo = {
         &cardpch_init_handler,
         &cardpch_execute_ccw,
         &cardpch_close_device,
-        &cardpch_query_device
+        &cardpch_query_device,
+        NULL, NULL, NULL, NULL
 };

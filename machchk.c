@@ -1,7 +1,7 @@
-/* MACHCHK.C    (c) Copyright Jan Jaeger, 2000-2002                  */
+/* MACHCHK.C    (c) Copyright Jan Jaeger, 2000-2003                  */
 /*              ESA/390 Machine Check Functions                      */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
 
 /*-------------------------------------------------------------------*/
 /* The machine check function supports dynamic I/O configuration.    */
@@ -111,6 +111,11 @@ int ARCH_DEP(present_mck_interrupt)(REGS *regs, U64 *mcic, U32 *xdmg, RADR *fsta
 {
 int rc = 0;
 
+    UNREFERENCED_370(regs);
+    UNREFERENCED_370(mcic);
+    UNREFERENCED_370(xdmg);
+    UNREFERENCED_370(fsta);
+
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
     /* If there is a crw pending and we are enabled for the channel
        report interrupt subclass then process the interrupt */
@@ -202,10 +207,10 @@ RADR    fsta = 0;
 
 
     /* Set the main storage reference and change bits */
-    STORAGE_KEY(regs->PX) |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(regs->PX, regs) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Point to the PSA in main storage */
-    psa = (void*)(sysblk.mainstor + regs->PX);
+    psa = (void*)(regs->mainstor + regs->PX);
 
     /* Store registers in machine check save area */
     ARCH_DEP(store_status) (regs, regs->PX);
@@ -221,7 +226,8 @@ RADR    fsta = 0;
 
     /* Trace the machine check interrupt */
     if (sysblk.insttrace || sysblk.inststep)
-        logmsg ("Machine Check code=%16.16llu\n", (long long)mcic);
+        logmsg (_("HHCCP019I Machine Check code=%16.16llu\n"),
+                  (long long)mcic);
 
     /* Store the external damage code at PSA+244 */
     STORE_FW(psa->xdmgcode, xdmg);
@@ -254,6 +260,11 @@ RADR    fsta = 0;
 
 #if defined(_ARCHMODE3)
  #undef   _GEN_ARCH
+ #if !defined(HAVE_STRSIGNAL)
+    char * strsignal( int sig ) {
+        return sys_siglist[sig];
+    }
+ #endif
  #define  _GEN_ARCH _ARCHMODE3
  #include "machchk.c"
 #endif
@@ -277,10 +288,12 @@ int i;
         for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
             if (dev->tid == tid) break;
         if( dev == NULL)
-            logmsg("signal USR2 received for undetermined device\n");
+            logmsg(_("HHCCP020E signal USR2 received for undetermined "
+                     "device\n"));
         else
             if(dev->ccwtrace)
-                logmsg("signal USR2 received for device %4.4X\n",dev->devnum);
+                logmsg(_("HHCCP021E signal USR2 received for device "
+                         "%4.4X\n"),dev->devnum);
         return;
     }
 
@@ -307,11 +320,11 @@ int i;
     if(regs->psw.mach)
     {
 #if defined(_FEATURE_SIE)
-        logmsg("CPU%4.4X: Machine check due to host error: %s\n",
+        logmsg(_("HHCCP017I CPU%4.4X: Machine check due to host error: %s\n"),
           regs->sie_active ? regs->guestregs->cpuad : regs->cpuad,
           strsignal(signo));
 #else /*!defined(_FEATURE_SIE)*/
-        logmsg("CPU%4.4X: Machine check due to host error: %s\n",
+        logmsg(_("HHCCP017I CPU%4.4X: Machine check due to host error: %s\n"),
           regs->cpuad, strsignal(signo));
 #endif /*!defined(_FEATURE_SIE)*/
 
@@ -346,11 +359,11 @@ int i;
     else
     {
 #if defined(_FEATURE_SIE)
-        logmsg("CPU%4.4X: Check-Stop due to host error: %s\n",
+        logmsg(_("HHCCP018I CPU%4.4X: Check-Stop due to host error: %s\n"),
           regs->sie_active ? regs->guestregs->cpuad : regs->cpuad,
           strsignal(signo));
 #else /*!defined(_FEAURE_SIE)*/
-        logmsg("CPU%4.4X: Check-Stop due to host error: %s\n",
+        logmsg(_("HHCCP018I CPU%4.4X: Check-Stop due to host error: %s\n"),
           regs->cpuad, strsignal(signo));
 #endif /*!defined(_FEAURE_SIE)*/
         display_inst(

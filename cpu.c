@@ -1,8 +1,8 @@
-/* CPU.C        (c) Copyright Roger Bowler, 1994-2002                */
+/* CPU.C        (c) Copyright Roger Bowler, 1994-2003                */
 /*              ESA/390 CPU Emulator                                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the CPU instruction execution function of  */
@@ -252,7 +252,7 @@ int     armode;
     /* Check for wait state PSW */
     if (regs->psw.wait && (sysblk.insttrace || sysblk.inststep))
     {
-        logmsg ("Wait state PSW loaded: ");
+        logmsg (_("HHCCP043I Wait state PSW loaded: "));
         display_psw (regs);
     }
 
@@ -341,6 +341,12 @@ static char *pgmintname[] = {
         /* 3F */        "Unassigned exception",
         /* 40 */        "Monitor event" };
 
+    /* If called with ghost registers (ie from hercules command
+       then ignore all interrupt handling and report the error
+       to the caller */
+    if(regs->ghostregs)
+        longjmp(regs->progjmp, pcode);
+   
     /* program_interrupt() may be called with a shadow copy of the
        regs structure, realregs is the pointer to the real structure
        which must be used when loading/storing the psw, or backing up
@@ -390,11 +396,14 @@ static char *pgmintname[] = {
         ) )
     {
 #if defined(SIE_DEBUG)
-        logmsg("program_int() passing to guest code=%4.4X\n",pcode);
+        logmsg(_("program_int() passing to guest code=%4.4X\n"),pcode);
 #endif /*defined(SIE_DEBUG)*/
         realregs->guestregs->TEA = realregs->TEA;
         realregs->guestregs->excarid = realregs->excarid;
         realregs->guestregs->opndrid = realregs->opndrid;
+#if defined(_FEATURE_PROTECTION_INTERCEPTION_CONTROL)
+        realregs->guestregs->hostint = 1;
+#endif /*defined(_FEATURE_PROTECTION_INTERCEPTION_CONTROL)*/
         (realregs->guestregs->sie_guestpi) (realregs->guestregs, pcode);
     }
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
@@ -450,10 +459,10 @@ static char *pgmintname[] = {
       || code == PGM_SPECIFICATION_EXCEPTION
       || code == PGM_TRANSLATION_SPECIFICATION_EXCEPTION ))
     {
-            realregs->psw.ilc = (realregs->ip[0] < 0x40) ? 2 :
-                                (realregs->ip[0] < 0xC0) ? 4 : 6;
-            realregs->psw.IA += realregs->psw.ilc;
-            realregs->psw.IA &= ADDRESS_MAXWRAP(realregs);
+        realregs->psw.ilc = (realregs->ip[0] < 0x40) ? 2 :
+                            (realregs->ip[0] < 0xC0) ? 4 : 6;
+        realregs->psw.IA += realregs->psw.ilc;
+        realregs->psw.IA &= ADDRESS_MAXWRAP(realregs);
     }
         
     /* Store the interrupt code in the PSW */
@@ -472,14 +481,15 @@ static char *pgmintname[] = {
                         (&sysblk.footprregs[realregs->cpuad][n],
                         sysblk.footprregs[realregs->cpuad][n].inst);
 #endif /*defined(OPTION_FOOTPRINT_BUFFER)*/
+        logmsg(_("HHCCP014I "));
 #if defined(_FEATURE_SIE)
         if(realregs->sie_state)
-            logmsg("SIE: ");
+            logmsg(_("SIE: "));
 #endif /*defined(_FEATURE_SIE)*/
 #if defined(SIE_DEBUG)
         logmsg (MSTRING(_GEN_ARCH) " ");
 #endif /*defined(SIE_DEBUG)*/
-        logmsg ("CPU%4.4X: %s CODE=%4.4X ILC=%d\n", realregs->cpuad,
+        logmsg (_("CPU%4.4X: %s CODE=%4.4X ILC=%d\n"), realregs->cpuad,
                 pgmintname[ (code - 1) & 0x3F], pcode, realregs->psw.ilc);
         ARCH_DEP(display_inst) (realregs, realregs->instvalid ?
                                                 realregs->ip : NULL);
@@ -500,7 +510,14 @@ static char *pgmintname[] = {
 #if defined(_FEATURE_SIE)
     if(!regs->sie_state ||
       /* Interception is mandatory for the following exceptions */
-      (  code != PGM_PROTECTION_EXCEPTION
+      (
+#if defined(_FEATURE_PROTECTION_INTERCEPTION_CONTROL)
+         !(code == PGM_PROTECTION_EXCEPTION
+           && (!(regs->siebk->ec[2] & SIE_EC2_PROTEX)
+             || realregs->hostint))
+#else /*!defined(_FEATURE_PROTECTION_INTERCEPTION_CONTROL)*/
+         code != PGM_PROTECTION_EXCEPTION
+#endif /*!defined(_FEATURE_PROTECTION_INTERCEPTION_CONTROL)*/
       && code != PGM_ADDRESSING_EXCEPTION
       && code != PGM_SPECIFICATION_EXCEPTION
       && code != PGM_SPECIAL_OPERATION_EXCEPTION
@@ -528,10 +545,10 @@ static char *pgmintname[] = {
     {
 #endif /*defined(_FEATURE_SIE)*/
         /* Set the main storage reference and change bits */
-        STORAGE_KEY(px) |= (STORKEY_REF | STORKEY_CHANGE);
+        STORAGE_KEY(px, regs) |= (STORKEY_REF | STORKEY_CHANGE);
 
         /* Point to PSA in main storage */
-        psa = (void*)(sysblk.mainstor + px);
+        psa = (void*)(regs->mainstor + px);
 #if defined(_FEATURE_SIE)
         nointercept = 1;
     }
@@ -542,17 +559,17 @@ static char *pgmintname[] = {
            rather then the PSA, except for the operation exception */
         if(code != PGM_OPERATION_EXCEPTION)
         {
-            psa = (void*)(sysblk.mainstor + regs->sie_state + SIE_IP_PSA_OFFSET);
+            psa = (void*)(regs->hostregs->mainstor + regs->sie_state + SIE_IP_PSA_OFFSET);
             /* Set the main storage reference and change bits */
-            STORAGE_KEY(regs->sie_state) |= (STORKEY_REF | STORKEY_CHANGE);
+            STORAGE_KEY(regs->sie_state, regs->hostregs) |= (STORKEY_REF | STORKEY_CHANGE);
         }
         else
         {
             /* Point to PSA in main storage */
-            psa = (void*)(sysblk.mainstor + px);
+            psa = (void*)(regs->mainstor + px);
 
             /* Set the main storage reference and change bits */
-            STORAGE_KEY(px) |= (STORKEY_REF | STORKEY_CHANGE);
+            STORAGE_KEY(px, regs) |= (STORKEY_REF | STORKEY_CHANGE);
         }
 
         nointercept = 0;
@@ -574,7 +591,8 @@ static char *pgmintname[] = {
     if( OPEN_IC_PERINT(realregs) )
     {
         if( IS_IC_TRACE )
-            logmsg("CPU%4.4X PER event: code=%4.4X perc=%2.2X addr=" F_VADR "\n",
+            logmsg(_("HHCCP015I CPU%4.4X PER event: code=%4.4X perc=%2.2X "
+                     "addr=" F_VADR "\n"),
               regs->cpuad, pcode, IS_IC_PER(realregs) >> 16,
               (realregs->psw.IA - realregs->psw.ilc) & ADDRESS_MAXWRAP(realregs) );
 
@@ -631,9 +649,12 @@ static char *pgmintname[] = {
           || code == PGM_PROTECTION_EXCEPTION
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
            )
+        {
             psa->excarid = regs->excarid;
-            psa->opndrid = regs->opndrid;
-            regs->opndrid = 0;
+            if(regs->TEA | TEA_MVPG)    
+                psa->opndrid = regs->opndrid;
+            realregs->opndrid = 0;
+        }
 
 #if defined(FEATURE_ESAME)
         /* Store the translation exception address at PSA+168 */
@@ -681,6 +702,7 @@ static char *pgmintname[] = {
             STORE_FW(psa->tea, regs->TEA);
         }
 #endif /*!defined(FEATURE_ESAME)*/
+        realregs->TEA = 0;
 
         /* Store Data exception code in PSA */
         if (code == PGM_DATA_EXCEPTION)
@@ -706,10 +728,16 @@ static char *pgmintname[] = {
         }
     }
 
+#if defined(_FEATURE_PROTECTION_INTERCEPTION_CONTROL)
+    realregs->hostint = 0;
+#endif /*defined(_FEATURE_PROTECTION_INTERCEPTION_CONTROL)*/
+
 #if defined(_FEATURE_SIE)
     if(nointercept)
     {
 #endif /*defined(_FEATURE_SIE)*/
+
+        obtain_lock(&sysblk.intlock);
 
         /* Store current PSW at PSA+X'28' or PSA+X'150' for ESAME */
         ARCH_DEP(store_psw) (realregs, psa->pgmold);
@@ -719,16 +747,22 @@ static char *pgmintname[] = {
         {
 #if defined(_FEATURE_SIE)
             if(realregs->sie_state)
+            {
+                release_lock(&sysblk.intlock); 
                 longjmp(realregs->progjmp, pcode);
+            }
             else
 #endif /*defined(_FEATURE_SIE)*/
             {
-                logmsg ("CPU%4.4X: Program interrupt loop: ",realregs->cpuad);
+                logmsg (_("HHCCP016I CPU%4.4X: Program interrupt loop: "),
+                          realregs->cpuad);
                 display_psw (realregs);
                 realregs->cpustate = CPUSTATE_STOPPING;
                 ON_IC_CPU_NOT_STARTED(realregs);
             }
         }
+
+        release_lock(&sysblk.intlock);
 
         longjmp(realregs->progjmp, SIE_NO_INTERCEPT);
 
@@ -749,13 +783,13 @@ int     rc;                             /* Return code               */
 PSA    *psa;                            /* -> Prefixed storage area  */
 
     /* Set the main storage reference and change bits */
-    STORAGE_KEY(regs->PX) |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(regs->PX, regs) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Zeroize the interrupt code in the PSW */
     regs->psw.intcode = 0;
 
     /* Point to PSA in main storage */
-    psa = (PSA*)(sysblk.mainstor + regs->PX);
+    psa = (PSA*)(regs->mainstor + regs->PX);
 
     /* Store current PSW at PSA+X'8' or PSA+X'120' for ESAME  */
     ARCH_DEP(store_psw) (regs, psa->RSTOLD);
@@ -781,26 +815,39 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 /* Perform I/O interrupt if pending                                  */
 /* Note: The caller MUST hold the interrupt lock (sysblk.intlock)    */
 /*-------------------------------------------------------------------*/
-static void ARCH_DEP(perform_io_interrupt) (REGS *regs)
+void ARCH_DEP(perform_io_interrupt) (REGS *regs)
 {
 int     rc;                             /* Return code               */
+int     icode;                          /* Intercept code            */
 PSA    *psa;                            /* -> Prefixed storage area  */
 U32     ioparm;                         /* I/O interruption parameter*/
 U32     ioid;                           /* I/O interruption address  */
 U32     iointid;                        /* I/O interruption ident    */
+RADR    pfx;                            /* Prefix                    */
 DWORD   csw;                            /* CSW for S/370 channels    */
 
     /* Test and clear pending I/O interrupt */
-    rc = ARCH_DEP(present_io_interrupt) (regs, &ioid, &ioparm, &iointid, csw);
+    icode = ARCH_DEP(present_io_interrupt) (regs, &ioid, &ioparm, &iointid, csw);
 
     /* Exit if no interrupt was presented */
-    if (rc == 0) return;
+    if (icode == 0) return;
 
-    /* Set the main storage reference and change bits */
-    STORAGE_KEY(regs->PX) |= (STORKEY_REF | STORKEY_CHANGE);
-
-    /* Point to the PSA in main storage */
-    psa = (void*)(sysblk.mainstor + regs->PX);
+#if defined(_FEATURE_IO_ASSIST)
+    if(regs->sie_state && icode != SIE_NO_INTERCEPT)
+    {
+        /* Point to SIE copy of PSA in state descriptor */
+        psa = (void*)(regs->hostregs->mainstor + regs->sie_state + SIE_II_PSA_OFFSET);
+        STORAGE_KEY(regs->sie_state, regs->hostregs) |= (STORKEY_REF | STORKEY_CHANGE);
+    }
+    else
+#endif
+    {
+        /* Point to PSA in main storage */
+        pfx = regs->PX;
+        SIE_TRANSLATE(&pfx, ACCTYPE_SIE, regs);
+        psa = (void*)(regs->mainstor + pfx);
+        STORAGE_KEY(pfx, regs) |= (STORKEY_REF | STORKEY_CHANGE);
+    }
 
 #ifdef FEATURE_S370_CHANNEL
     /* Store the channel status word at PSA+X'40' */
@@ -815,8 +862,8 @@ DWORD   csw;                            /* CSW for S/370 channels    */
 
     /* Trace the I/O interrupt */
     if (sysblk.insttrace || sysblk.inststep)
-        logmsg ("I/O interrupt code=%4.4X "
-                "CSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
+        logmsg (_("HHCCP044I I/O interrupt code=%4.4X "
+                "CSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n"),
                 regs->psw.intcode,
                 csw[0], csw[1], csw[2], csw[3],
                 csw[4], csw[5], csw[6], csw[7]);
@@ -829,33 +876,43 @@ DWORD   csw;                            /* CSW for S/370 channels    */
     /* Store the I/O interruption parameter at PSA+X'BC' */
     STORE_FW(psa->ioparm, ioparm);
 
-#if defined(FEATURE_ESAME)
+#if defined(FEATURE_ESAME) || defined(_FEATURE_IO_ASSIST)
     /* Store the I/O interruption identification word at PSA+X'C0' */
     STORE_FW(psa->iointid, iointid);
 #endif /*defined(FEATURE_ESAME)*/
 
     /* Trace the I/O interrupt */
     if (sysblk.insttrace || sysblk.inststep)
-#if !defined(FEATURE_ESAME)
-        logmsg ("I/O interrupt code=%8.8X parm=%8.8X\n", ioid, ioparm);
+#if !defined(FEATURE_ESAME) && !defined(_FEATURE_IO_ASSIST)
+        logmsg (_("HHCCP045I I/O interrupt code=%8.8X parm=%8.8X\n"),
+                  ioid, ioparm);
 #else /*defined(FEATURE_ESAME)*/
-        logmsg ("I/O interrupt code=%8.8X parm=%8.8X id=%8.8X\n",
+        logmsg (_("HHCCP046I I/O interrupt code=%8.8X parm=%8.8X id=%8.8X\n"),
           ioid, ioparm, iointid);
 #endif /*defined(FEATURE_ESAME)*/
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
-    /* Store current PSW at PSA+X'38' or PSA+X'170' for ESAME */
-    ARCH_DEP(store_psw) ( regs, psa->iopold );
+#if defined(_FEATURE_IO_ASSIST)
+    if(icode == SIE_NO_INTERCEPT)
+#endif
+    {
+        /* Store current PSW at PSA+X'38' or PSA+X'170' for ESAME */
+        ARCH_DEP(store_psw) ( regs, psa->iopold );
 
-    /* Load new PSW from PSA+X'78' or PSA+X'1F0' for ESAME */
-    rc = ARCH_DEP(load_psw) ( regs, psa->iopnew );
+        /* Load new PSW from PSA+X'78' or PSA+X'1F0' for ESAME */
+        rc = ARCH_DEP(load_psw) ( regs, psa->iopnew );
 
+        if ( rc )
+        {
+            release_lock(&sysblk.intlock);
+            ARCH_DEP(program_interrupt) (regs, rc);
+        }
+    }
+    
     release_lock(&sysblk.intlock);
 
-    if ( rc )
-        ARCH_DEP(program_interrupt) (regs, rc);
+    longjmp(regs->progjmp, icode);
 
-    longjmp (regs->progjmp, SIE_INTERCEPT_IOREQ);
 } /* end function perform_io_interrupt */
 
 /*-------------------------------------------------------------------*/
@@ -877,10 +934,10 @@ RADR    fsta;                           /* Failing storage address   */
     if (rc == 0) return;
 
     /* Set the main storage reference and change bits */
-    STORAGE_KEY(regs->PX) |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(regs->PX, regs) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Point to the PSA in main storage */
-    psa = (void*)(sysblk.mainstor + regs->PX);
+    psa = (void*)(regs->mainstor + regs->PX);
 
     /* Store registers in machine check save area */
     ARCH_DEP(store_status) (regs, regs->PX);
@@ -896,7 +953,8 @@ RADR    fsta;                           /* Failing storage address   */
 
     /* Trace the machine check interrupt */
     if (sysblk.insttrace || sysblk.inststep)
-        logmsg ("Machine Check code=%16.16llu\n", (long long)mcic);
+        logmsg (_("HHCCP022I Machine Check code=%16.16llu\n"),
+                  (long long)mcic);
 
     /* Store the external damage code at PSA+244 */
     STORE_FW(psa->xdmgcode, xdmg);
@@ -952,25 +1010,25 @@ void *cpu_thread (REGS *regs)
     
     /* Set CPU thread priority */
     if (setpriority(PRIO_PROCESS, 0, sysblk.cpuprio))
-        logmsg ("HHC621I CPU thread set priority %d failed: %s\n",
+        logmsg (_("HHCCP001W CPU thread set priority %d failed: %s\n"),
                 sysblk.cpuprio, strerror(errno));
 
     /* Back to user mode */
     SETMODE(USER);
     
     /* Display thread started message on control panel */
-    logmsg ("HHC620I CPU%4.4X thread started: tid="TIDPAT", pid=%d, "
-            "priority=%d\n",
+    logmsg (_("HHCCP002I CPU%4.4X thread started: tid="TIDPAT", pid=%d, "
+            "priority=%d\n"),
             regs->cpuad, thread_id(), getpid(),
             getpriority(PRIO_PROCESS,0));
 #endif
 
-    logmsg ("HHC630I CPU%4.4X Architecture Mode %s\n",
-		regs->cpuad,get_arch_mode_string(regs));
+    logmsg (_("HHCCP003I CPU%4.4X architecture mode %s\n"),
+        regs->cpuad,get_arch_mode_string(regs));
 
 #ifdef FEATURE_VECTOR_FACILITY
     if (regs->vf->online)
-        logmsg ("HHC625I CPU%4.4X Vector Facility online\n",
+        logmsg (_("HHCCP004I CPU%4.4X Vector Facility online\n"),
                 regs->cpuad);
 #endif /*FEATURE_VECTOR_FACILITY*/
 
@@ -981,13 +1039,27 @@ void *cpu_thread (REGS *regs)
     obtain_lock(&sysblk.intlock);
     if(regs->cpustate != CPUSTATE_STARTING)
     {
-        logmsg("HHC623I CPU%4.4X thread already started\n",
+        logmsg(_("HHCCP005E CPU%4.4X thread already started\n"),
             regs->cpuad);
         release_lock(&sysblk.intlock);
         return NULL;
     }
-    sysblk.numcpu++;
-    initdone = 1;  /* now safe for panel_display function to proceed */
+
+    if(!sysblk.numcpu)
+    {
+        sysblk.numcpu++;
+        /* Start the TOD clock and CPU timer thread */
+        if ( create_thread (&sysblk.todtid, &sysblk.detattr,
+                            timer_update_thread, NULL) )
+        {
+            logmsg (_("HHCCP006E Cannot create timer thread: %s\n"),
+                    strerror(errno));
+            release_lock(&sysblk.intlock);
+            return NULL;
+        }
+    }
+    else
+        sysblk.numcpu++;
 
     /* Perform initial cpu reset */
     initial_cpu_reset (regs);
@@ -1002,9 +1074,11 @@ void *cpu_thread (REGS *regs)
     if(sysblk.arch_mode != regs->arch_mode)
     {
         regs->arch_mode = sysblk.arch_mode;
-        logmsg ("HHC631I CPU%4.4X Architecture Mode set to %s\n",
-			regs->cpuad,get_arch_mode_string(regs));
+        logmsg (_("HHCCP007I CPU%4.4X architecture mode set to %s\n"),
+            regs->cpuad,get_arch_mode_string(regs));
     }
+
+    initdone = 1;  /* now safe for panel_display function to proceed */
 
     /* Execute the program in specified mode */
     run_cpu[regs->arch_mode] (regs);
@@ -1013,7 +1087,7 @@ void *cpu_thread (REGS *regs)
     initial_cpu_reset (regs);
 
     /* Display thread ended message on control panel */
-    logmsg ("HHC624I CPU%4.4X thread ended: tid="TIDPAT", pid=%d\n",
+    logmsg (_("HHCCP008I CPU%4.4X thread ended: tid="TIDPAT", pid=%d\n"),
             regs->cpuad, thread_id(), getpid());
 
     /* Thread exit */
@@ -1039,7 +1113,8 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
 	        SET_IC_PER_MASK(regs);
 	        if(prevmask != regs->ints_mask)
 		{
-	            logmsg("CPU MASK MISMATCH: %8.8X - %8.8X. Last instruction:\n",
+	            logmsg(_("HHCCP009E CPU MASK MISMATCH: %8.8X - %8.8X. "
+                            "Last instruction:\n"),
 		       prevmask, regs->ints_mask);
 		       ARCH_DEP(display_inst) (regs, regs->ip);
 		}
@@ -1158,7 +1233,7 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
                 {
                     OFF_IC_STORSTAT(regs);
                     ARCH_DEP(store_status) (regs, 0);
-                    logmsg ("HHC611I CPU%4.4X store status completed.\n",
+                    logmsg (_("HHCCP010I CPU%4.4X store status completed.\n"),
                         regs->cpuad);
 
 #ifdef OPTION_CPU_UNROLL
@@ -1181,6 +1256,14 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
             /* This is where a stopped CPU will wait */
             if (regs->cpustate == CPUSTATE_STOPPED)
             {
+#ifdef OPTION_MIPS_COUNTING
+        struct timeval tv;
+
+        gettimeofday (&tv, NULL);
+        ADJUST_TOD (tv, regs->lasttod);
+        regs->waittod = (U64)tv.tv_sec;
+        regs->waittod = regs->waittod * 1000000 + tv.tv_usec;
+#endif
                 /* Wait until there is work to do */
                 sysblk.waitmask |= regs->cpumask;
                 sysblk.started_mask &= ~regs->cpumask;
@@ -1217,7 +1300,9 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
                 /* Test for disabled wait PSW and issue message */
                 if( IS_IC_DISABLED_WAIT_PSW(regs) )
                 {
-                    logmsg ("CPU%4.4X: Disabled wait state\n",regs->cpuad);
+                    logmsg (_("HHCCP011I CPU%4.4X: Disabled wait state\n"
+                              "          "),
+                           regs->cpuad);
                     display_psw (regs);
                     regs->cpustate = CPUSTATE_STOPPING;
                     ON_IC_CPU_NOT_STARTED(regs);
@@ -1288,11 +1373,11 @@ int     shouldbreak;                    /* 1=Stop at breakpoint      */
 #ifdef OPTION_FAST_INSTFETCH
 #define FAST_INSTRUCTION_FETCH(_dest, _addr, _regs, _pe, _if) \
         { \
-            if ( regs->VI == ((_addr) & (PAGEFRAME_PAGEMASK | 0x01)) \
+            if ( (_regs)->VI == ((_addr) & (PAGEFRAME_PAGEMASK | 0x01)) \
                && ((_addr) <= (_pe))) \
                 (_dest) =  pagestart + ((_addr) & PAGEFRAME_BYTEMASK); \
             else goto _if; \
-        } 
+}
 
 #if !defined(OPTION_FOOTPRINT_BUFFER)
 #define FAST_EXECUTE_INSTRUCTION(_inst, _execflag, _regs) \
@@ -1300,7 +1385,7 @@ int     shouldbreak;                    /* 1=Stop at breakpoint      */
         COUNT_INST ((_inst), (_regs)); \
         (_regs)->ip = (_inst); \
         (ARCH_DEP(opcode_table)[_inst[0]]) ((_inst), 0, (_regs)); \
-        }
+}
 #else
 #define FAST_EXECUTE_INSTRUCTION(_inst, _execflag, _regs) \
 do { \
@@ -1317,15 +1402,15 @@ do { \
 #define FAST_IFETCH(_regs, _pe, _ip, _if, _ex) \
     { \
 _if: \
-    regs->instvalid = 0; \
-    (_ip) = regs->inst; \
+    (_regs)->instvalid = 0; \
+    (_ip) = (_regs)->inst; \
     (_regs)->ip = (_ip); \
-    ARCH_DEP(instfetch) (regs->inst, regs->psw.IA, regs);  \
+    ARCH_DEP(instfetch) ((_regs)->inst, (_regs)->psw.IA, (_regs));  \
     (regs)->instvalid = 1; \
-    (_pe) = (regs->psw.IA & ~0x7FF) + (0x800 - 6); \
-    pagestart = sysblk.mainstor + regs->AI; \
+    (_pe) = ((_regs)->psw.IA & ~0x7FF) + (0x800 - 6); \
+    pagestart = (_regs)->mainstor + (_regs)->AI; \
     goto _ex; \
-    }
+}                                                                                          
 
 #define FAST_UNROLLED_EXECUTE(_regs, _pe, _ip, _if, _ex) \
         { \
@@ -1333,7 +1418,7 @@ _if: \
                                  (_pe), _if); \
          _ex: \
             FAST_EXECUTE_INSTRUCTION((_ip), 0, (_regs)); \
-        }
+}                                                                                          
 
 void ARCH_DEP(run_cpu) (REGS *regs)
 {
@@ -1358,7 +1443,7 @@ BYTE    *ip, *pagestart = NULL;
     ip = regs->inst;
     regs->ip = ip;
 
-    pagestart = sysblk.mainstor + regs->AI; 
+    pagestart = regs->mainstor + regs->AI; 
 
 #ifdef FEATURE_PER
     if (PER_MODE(regs))
@@ -1421,7 +1506,7 @@ exec0:
                            ifetch7, exec7);
 #endif
 
-    }
+}
 
 FAST_IFETCH(regs, pageend, ip, ifetch0, exec0);
 FAST_IFETCH(regs, pageend, ip, ifetch1, exec1);
@@ -1459,7 +1544,7 @@ slowloop:
             regs->ip = ip;
             ARCH_DEP(process_trace)(regs, tracethis, stepthis);
 
-    
+
             /* Reset instruction trace indicators */
             tracethis = 0;
             stepthis = 0;
@@ -1468,7 +1553,7 @@ slowloop:
         /* Execute the instruction */
         regs->instcount++;
         EXECUTE_INSTRUCTION (regs->ip, 0, regs);
-    }
+}
 #endif
 
 } /* end function cpu_thread */
@@ -1506,7 +1591,7 @@ int     stepthis;                       /* Stop on this instruction  */
             if (!regs->cpuonline)
                 return;
         } /* end if(interrupt) */
-
+    
         /* Clear the instruction validity flag in case an access
            error occurs while attempting to fetch next instruction */
         regs->instvalid = 0;
@@ -1555,10 +1640,10 @@ int     stepthis;                       /* Stop on this instruction  */
 #ifdef FEATURE_PER
 slowloop:
     while (1)
-    {
+{
         /* Test for interrupts if it appears that one may be pending */
         if( IC_INTERRUPT_CPU(regs) )
-        {
+{
             ARCH_DEP(process_interrupt)(regs);
             if (!regs->cpuonline)
                  return;
@@ -1607,7 +1692,6 @@ slowloop:
  #include "cpu.c"
 #endif
 
-
 /*-------------------------------------------------------------------*/
 /* Store program status word                                         */
 /*-------------------------------------------------------------------*/
@@ -1632,7 +1716,6 @@ void store_psw (REGS *regs, BYTE *addr)
     }
 } /* end function store_psw */
 
-
 /*-------------------------------------------------------------------*/
 /* Display program status word                                       */
 /*-------------------------------------------------------------------*/
@@ -1645,21 +1728,20 @@ QWORD   qword;                            /* quadword work area      */
     if( regs->arch_mode != ARCH_900 )
     {
         store_psw (regs, qword);
-        logmsg ("PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
+        logmsg (_("PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n"),
                 qword[0], qword[1], qword[2], qword[3],
                 qword[4], qword[5], qword[6], qword[7]);
     }
     else
     {
         store_psw (regs, qword);
-        logmsg ("PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X "
-                "%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X\n",
+        logmsg (_("PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X "
+                "%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X\n"),
                 qword[0], qword[1], qword[2], qword[3],
                 qword[4], qword[5], qword[6], qword[7],
                 qword[8], qword[9], qword[10], qword[11],
                 qword[12], qword[13], qword[14], qword[15]);
     }
-
 
 } /* end function display_psw */
 
@@ -1678,8 +1760,57 @@ const char* arch_name[GEN_MAXARCH] =
 
 const char* get_arch_mode_string(REGS* regs)
 {
-	if (!regs) return arch_name[sysblk.arch_mode];
-	else return arch_name[regs->arch_mode];
+    if (!regs) return arch_name[sysblk.arch_mode];
+    else return arch_name[regs->arch_mode];
+        }
+
+#if defined(OPTION_CPU_UTILIZATION)
+
+int timeval_subtract (struct timeval *beg_timeval, struct timeval *end_timeval, struct timeval *dif_timeval)
+{
+    struct timeval begtime;
+    struct timeval endtime;
+    ASSERT ( beg_timeval -> tv_sec >= 0  &&  beg_timeval -> tv_usec >= 0 );
+    ASSERT ( end_timeval -> tv_sec >= 0  &&  end_timeval -> tv_usec >= 0 );
+
+    memcpy(&begtime,beg_timeval,sizeof(struct timeval));
+    memcpy(&endtime,end_timeval,sizeof(struct timeval));
+
+    dif_timeval->tv_sec = endtime.tv_sec - begtime.tv_sec;
+
+    if (endtime.tv_usec >= begtime.tv_usec)
+    {
+        dif_timeval->tv_usec = endtime.tv_usec - begtime.tv_usec;
+    }
+    else
+    {
+        dif_timeval->tv_sec--;
+        dif_timeval->tv_usec = (endtime.tv_usec + 1000000) - begtime.tv_usec;
+    }
+
+    return ((dif_timeval->tv_sec < 0 || dif_timeval->tv_usec < 0) ? -1 : 0);
 }
 
+int timeval_add (struct timeval *dif_timeval, struct timeval *accum_timeval)
+        {
+    ASSERT ( dif_timeval   -> tv_sec >= 0  &&  dif_timeval   -> tv_usec >= 0 );
+    ASSERT ( accum_timeval -> tv_sec >= 0  &&  accum_timeval -> tv_usec >= 0 );
+
+    accum_timeval->tv_sec  += dif_timeval->tv_sec;
+    accum_timeval->tv_usec += dif_timeval->tv_usec;
+
+    if (accum_timeval->tv_usec > 1000000)
+    {
+        int nsec = accum_timeval->tv_usec / 1000000;
+        accum_timeval->tv_sec  += nsec;
+        accum_timeval->tv_usec -= nsec * 1000000;
+    }
+
+    return ((accum_timeval->tv_sec < 0 || accum_timeval->tv_usec < 0) ? -1 : 0);
+}
+
+#endif /*defined(OPTION_CPU_UTILIZATION)*/
+
 #endif /*!defined(_GEN_ARCH)*/
+
+

@@ -1,21 +1,163 @@
-06 Jul 2002 Fix chkdsk compatility problem - Greg Smith
-05 Jul 2002 Allow tape file to be opened for input if on CD-ROM - Volker Bandke
-03 Jul 2002 Fix tape to include read backwards support - Volker Bandke
+01 Feb 2003 Add changes for Mac OS X support - Paul Scott
+01 Feb 2003 Fix dasdinit wrong trk 0 size - Greg Smith + sidmuc
+31 Jan 2003 Command reject if path assignment is not supported (non-3480
+            ASSIGN/UNASSIGN CCW opcodes 0xB7 & 0xC7 only in tapedev.c)
+            imhotepio <freige@fibertel.com.ar> [freige@fibertel.com.ar]
+            by Fish
+28 Jan 2003 Obtain intlock during all psw loads - Greg Smith
+27 Jan 2003 TS might not set byte to 0xff - Greg Smith
+24 Jan 2003 Disable syncio for fba due to problems - Greg Smith + Ivan
+22 Jan 2003 Flush updated active cache entry if no active i/o - Greg Smith + Ivan
+22 Jan 2003 SMP updates - Greg Smith
+22 Jan 2003 Fix for regparm attribute problem - Greg Smith
+14 Jan 2003 relax stress write and readahead criteria - Greg Smith
+12 Jan 2003 select() kludge for win32 for high cpu - Greg Smith
+10 Jan 2003 Display a reasonable error message if a track image
+            is probably compressed using a locally unsupported
+            compression algorithm (such as bzip2) - Greg Smith
+09 Jan 2003 Require `-f' option for cckdcdsk & cckdcomp if
+            file has OPENED bit on - Greg Smith
+09 Jan 2003 Correct & enable DAS for S/370 - Jan Jaeger
+08 Jan 2003 Add dummy fix page S/370 MVS assist - Jan Jaeger
+07 Jan 2003 Updated cckd utilities (cckddump & cckdload) - Greg Smith
+07 Jan 2003 Fix/recover possible cckd corruption - Greg Smith
+07 Jan 2003 Add Region Relocate, I/O- External- and Wait-assists - Jan Jaeger
+06 Jan 2003 delay exit in config.c to give time to display message - Fish
+06 Jan 2003 minor changes to tapedev.c read_omadesc function - JCS
+06 Jan 2003 Pre-init residual to zero in tapedev execute_ccw -
+            freige@fibertel.com.ar by Fish
+06 Jan 2003 Fix to 'unbind_device' to remove listening socket from panel
+            thread's select list before closing it. - Fish
+04 Jan 2003 CTCI_Init (ctc_ctci.c): malloc working CTCBLK to work around
+            gcc 3.x bug caused by large vars allocated on stack - Fish
+03 Jan 2003 Fix fthreads to behave as pthreads does regarding return codes
+            (conform to SUS (Single UNIX Specification) rather than DCE
+            (Distributed Computing Environment) semantics; affected CTCI
+            logic's 'timed_wait_condition' return code tests) - Fish
+03 Jan 2003 Added ARCHMODE to other "IPL failure" messages too - Fish
+27 Dec 2002 Added comprehensive details to README.CVS document - Fish
+27 Dec 2002 Fix bug ctc logic to accept MAC addr in lieu of IP addr - Fish
+27 Dec 2002 Fix warning about IFC_IOCtl in tuntap.c - Fish
+27 Dec 2002 obtain_lock not needed to signal_condition in ctc logic - Fish 
+27 Dec 2002 Use sched_yield (not usleep) if can't enqueue ctc frame - Fish
+27 Dec 2002 Rewrote ParseMAC function to fix subtle bug - Fish
+27 Dec 2002 Fixed tt32stats command to work with new LCS CTC logic - Fish
+27 Dec 2002 Un-tabbed ctc source modules - Fish
+15 Dec 2002 Renumbered messages in printer.c and console.c - Jay Maynard
+15 Dec 2002 Streamlining Windows build processing, add P4 support - Volker Bandke
+12 Dec 2002 Main storage addressing cleanup - Jan Jaeger
+09 Dec 2002 Fix windows comiple errors in hsccmd.c - Jim Pierson
+05 Dec 2002 Various fixes and roll back of 30/6 performance mods - Jan Jaeger
+26 Nov 2002 Missing devtype.c FBA entries - Greg Smith and Ivan
+23 Nov 2002 Remove cckd/het zlib dependency - Greg Smith
+16 Nov 2002 Add MVCLU and CLCLU instructions - Jan Jaeger
+16 Nov 2002 Add TROO, TROT, TRTO and TRTT instructions - Jan Jaeger
+15 Nov 2002 Add extended translation facility 2 to ESA/390 mode - Jan Jaeger
+14 Nov 2002 Corrections to opcode table and disassembler - Jan Jaeger
+14 Nov 2002 New CTC and LCS emulation - Jim Pierson
+14 Nov 2002 Add SVCA to z/Architecture mode - Jan Jaeger
+07 Nov 2002 Correct execution controls - Jan Jaeger
+29 Oct 2002 Make card reader eof/intrq parameter persistent - Jay Maynard
+29 Oct 2002 Correct devinit command to work when only one argument is given -
+            Jay Maynard
+29 Oct 2002 Ignore 7-track mode set commands for tape drives - Andy Norrie
+27 Oct 2002 Fix dasdisup to accept one argument - Jay Maynard
+13 Oct 2002 64bit cmpsc fixes - Bernard van der Helm
+12 Oct 2002 CKD fix when offset >= 2G - Greg Smith
+03 Okt 2002 PER fixes - Jan Jaeger
+01 Okt 2002 Fix for SSK/ISK/RRB - Juergen Dobrinski
+19 Sep 2002 Fix cckd thrash for large fragmentations - Greg Smith
+19 Sep 2002 Fix console.c to wait for initdone to listen - Greg Smith
+30 Aug 2002 Fix MVCL to update regs prior to possible program check - Greg
+            Smith
+26 Aug 2002 Added "noprompt" option to turn off input prompting for 1052/3215
+            consoles - Jay Maynard
+25 Aug 2002 Fix cckd free space chain corruption when freeing space
+            for a `type 1' null track - Greg Smith & Volker Bandke
+08 Aug 2002 Increased cckd shutdown serialization - Greg Smith
+08 Aug 2002 Add 'Send" button in syslog cgi - Adam Thornton by Jan Jaeger
+08 Aug 2002 AEA invalidation performance enhancement - Gabor Hofi by Greg Smith
+03 Aug 2002 Fix dasdload to ignore comments in CBT XMIT files - Roger Bowler
+03 Aug 2002 Change automagic to make NLS support work - Volker Bandke
+30 Jul 2002 Compressed dasd tweaks - Greg Smith
+26 Jul 2002 Compressed dasd enhanced free pending processing - Greg Smith
+22 Jul 2002 Performance tweaks - Gabor Hofi & Greg Smith
+22 Jul 2002 cckd options `nofsync' and `fsyncwa' - Greg Smith
+21 Jul 2002 Update ieee-w32.h to compile under current Cygwin - Greg Smith
+19 Jul 2002 Fix to cpu utilization percentage - Greg Smith
+17 Jul 2002 New utility dasdcopy.c; replaces ckd2cckd and cckd2ckd and
+            adds fba2cfba and cfba2fba function - Greg Smith
+16 Jul 2002 New 'hmccmds.c' source module #included by 'panel.c'. - Fish
+14 Jul 2002 UNTABBED all .c/.h source files (NO EMBEDDED TABS, please!) - Fish
+14 Jul 2002 ** MAJOR CLEANUP ** Added -W compile option to see ALL warnings and
+            corrected most signed/unisgned and unreferenced warnings; only
+            'ckddasd', 'cckddasd' and 'cckdutil' remain to be cleaned up - Fish
+13 Jul 2002 Fix dasdutil.c to correctly detecte write error in
+            created_ckd_file - Volker Bandke
+11 Jul 2002 File integrity fixes for compressed dasd - Greg Smith
+11 Jul 2002 New optional HTTPROOT control file statement - Fish
+09 Jul 2002 Minor fix to OPTION_CPU_UTILIZATION to fix FISH_HANG issue - Fish
 02 Jul 2002 CTC fix for TurboLinux bug - Jim Pierson
 02 Jul 2002 3287 printer support via TN3270 - Tomas Masek
 02 Jul 2002 S/370 extended memory fixes - Tomas Masek
-02 Jul 2002 ctcadpt.c compilation fix for FreeBSD - Mark Szlaga
-02 Jul 2002 Fixed 3270 ERASE ALL UNPROTECTED command to not count data
-            read - Tomas Fott
 02 Jul 2002 Fixes to ckdtab in dasdtab.c - Greg Smith
-23 Jun 2002 Retrofitted cckd chkdsk fixes/enhancements - Greg Smith
-23 Jun 2002 FBA fixes contributed by Tomas Masek - Greg Smith
-20 Jun 2002 Compatibility fixes for cckd and 2.17 - Greg Smith
-20 May 2002 Fix attach command broken in 2.16.1 - Jay Maynard
+02 Jul 2002 Correct Erase All Unprotected 3270 order - Tomas Fott
+01 Jul 2002 Complete IPL function in web interface - Jan Jaeger
+30 Jun 2002 Fix minor "inet_ntoa" bug in 'connect_client' function
+            reported by Mark Gaubatz [Mark.Gaubatz@verizon.net] - Fish
+30 Jun 2002 Fix some minor issues relating to tape device handling contributed
+            by hackules (http://www.geocities.com/hackules390/): - Fish
+            h31: Fixes a problem with HET tapes on CD.
+            h23: A minor fix to tapedev that corrects the setting of the chunk
+                 size for HET files.
+            h09: Fixes a small bug in tapedev.c where a backspace file operation
+                 could muck up position info if already positioned at the start
+                 of the file.
+30 Jun 2002 Calculate percent CPU utilization - Fish
+29 Jun 2002 Gabor Hoffer performance patch: part 3 - Fish
+27 Jun 2002 Fix validation intercept when no S/370 mode installed - Jan Jaeger
+27 Jun 2002 Fix scpinfo CHSC bit - Jan Jaeger
+27 Jun 2002 Remove MVCL overlap logging - Jan Jaeger
+27 Jun 2002 Fix operand access id - Jan Jaeger
+27 Jun 2002 Fix keyaccess on PGOUT - Jan Jaeger
+23 Jun 2002 Fix for `no shadow file name' messages - Greg Smith
+23 Jun 2002 Gabor Hoffer's performance patch: parts 1 & 2 -- Fish
+23 Jun 2002 Fixes/enhancements for cckd chkdsk - Greg Smith
+20 Jun 2002 Fix arch mode id in store status function - Jan Jaeger
+19 Jun 2002 Set manufacterer to HRC for STSI - Jan Jaeger
+18 Jun 2002 FBA dasdtab updates - Tomas Masek by Greg Smith
+18 Jun 2002 Fix NRF condition for CKD dasd - Greg Smith
+17 Jun 2002 Fix segmentation fault during cckd compress - Greg Smith
+15 Jun 2002 configure.ac: Cygwin stack bug workaround - Matt and Fish
+15 Jun 2002 cfba chkdsk fix - Greg Smith
+15 Jun 2002 ckd internal trace support - Greg Smith
+14 Jun 2002 Remove cfba debugs - Greg Smith
+14 Jun 2002 Set `more' if residual data after fba write - Tomas Masek by Greg Smith
+13 Jun 2002 Another cfba fix (segmentation fault after detach while trace active) - Greg Smith
+13 Jun 2002 READ BACKWARD support for tapes added - Volker Bandke (Original patch: Hax 28 by Hackules)
+12 Jun 2002 cfba/cckd/ckd fixes - Greg Smith
+05 Jun 2002 Increase 3270 buffer to 64K as adding IAC bytes may cause overflow - Jan Jaeger
+02 Jun 2002 Created "hercnls.h" module and fixed some typos/warnings - Fish
+30 May 2002 Preliminary cfba (compressed fba) support - Greg Smith
+30 May 2002 Various dasd fixes - Greg Smith
+24 May 2002 Fixes for the cckd updates - Greg Smith
+18 May 2002 More updates for cckd - Greg Smith
+15 May 2002 Fix for MVPG problem as reported by Guy Przytula - Jan Jaeger
+14 May 2002 Updates for cckd - Greg Smith
 14 May 2002 Fix S/370 timer problem - Valery Pogonchenko
-13 May 2002 Possible fix for `timed_wait_condition' loop - Greg Smith
-09 May 2002 Fix 3350 dasdtab entry - Greg Smith
+13 May 2002 NLS support for cckd utilities - Jan Jaeger
+11 May 2002 NLS support - Jan Jaeger
+08 May 2002 Fixes for 3350 dasdload - Greg Smith
+08 May 2002 CodePage converion table 850/273 - Gerd Petermann
+05 May 2002 Add some NLS definitions - Jan Jaeger
+05 May 2002 Merge Debian patch to ckd2cckd.c to permit compilation with
+            gcc 3.0, where printf may be a macro - Matt Zimmerman
+04 May 2002 Fix panel.c attach command bug identified by Kris Van Hees
+            since no on else has yet - Fish
+01 May 2002 3390-9 and large file support - Greg Smith
+01 May 2002 CodePage support - Jan Jaeger
 29 Apr 2002 Fix fthreads "trylock" for REAL this time - Fish
+29 Apr 2002 Create console thread dynamically - Jan Jaeger
 25 Apr 2002 Hot fix for fthreads "trylock" oversight - Fish
 21 Apr 2002 Fix various backwards merge problems with cckd - Greg Smith
 19 Apr 2002 Fix cckdcdsk return code bug - Fish

@@ -1,8 +1,8 @@
-/* EXTERNAL.C   (c) Copyright Roger Bowler, 1999-2002                */
+/* EXTERNAL.C   (c) Copyright Roger Bowler, 1999-2003                */
 /*              ESA/390 External Interrupt and Timer                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements external interrupt, timer, and signalling  */
@@ -45,7 +45,7 @@
 /*-------------------------------------------------------------------*/
 void ARCH_DEP(synchronize_broadcast) (REGS *regs, int code, U64 pfra)
 {
-int     i;                              /* Array subscript           */
+U32     i;                              /* Array subscript           */
 REGS   *realregs;                       /* Real REGS if guest        */
 
     realregs =
@@ -64,9 +64,7 @@ REGS   *realregs;                       /* Real REGS if guest        */
             else
             {
                 release_lock (&sysblk.intlock);
-#ifdef OPTION_CS_USLEEP
-                usleep (1L);
-#endif
+                sched_yield();
                 obtain_lock (&sysblk.intlock);
             }
         ON_IC_BROADCAST;
@@ -132,28 +130,38 @@ REGS   *realregs;                       /* Real REGS if guest        */
 /*-------------------------------------------------------------------*/
 static void ARCH_DEP(external_interrupt) (int code, REGS *regs)
 {
+RADR    pfx;
 PSA     *psa;
 int     rc;
 
     /* reset the cpuint indicator */
     RESET_IC_CPUINT(regs);
 
-    release_lock(&sysblk.intlock);
-
 #if defined(_FEATURE_SIE)
     /* Set the main storage reference and change bits */
-    if(regs->sie_state)
+    if(regs->sie_state
+#if defined(FEATURE_EXPEDITED_SIE_SUBSET)
+                       && !(regs->siebk->s & SIE_S_EXP_TIMER)
+#endif /*defined(FEATURE_EXPEDITED_SIE_SUBSET)*/
+#if defined(_FEATURE_EXTERNAL_INTERRUPT_ASSIST)
+                       && !(regs->siebk->ec[0] & SIE_EC0_EXTA)
+#endif
+                                                            )
     {
         /* Point to SIE copy of PSA in state descriptor */
-        psa = (void*)(sysblk.mainstor + regs->sie_state + SIE_IP_PSA_OFFSET);
-        STORAGE_KEY(regs->sie_state) |= (STORKEY_REF | STORKEY_CHANGE);
+        psa = (void*)(regs->hostregs->mainstor + regs->sie_state + SIE_IP_PSA_OFFSET);
+        STORAGE_KEY(regs->sie_state, regs->hostregs) |= (STORKEY_REF | STORKEY_CHANGE);
     }
     else
 #endif /*defined(_FEATURE_SIE)*/
     {
         /* Point to PSA in main storage */
-        psa = (void*)(sysblk.mainstor + regs->PX);
-        STORAGE_KEY(regs->PX) |= (STORKEY_REF | STORKEY_CHANGE);
+        pfx = regs->PX;
+#if defined(FEATURE_EXPEDITED_SIE_SUBSET)
+        SIE_TRANSLATE(&pfx, ACCTYPE_SIE, regs);
+#endif /*defined(FEATURE_EXPEDITED_SIE_SUBSET)*/
+        psa = (void*)(regs->mainstor + pfx);
+        STORAGE_KEY(pfx, regs) |= (STORKEY_REF | STORKEY_CHANGE);
     }
 
     /* Store the interrupt code in the PSW */
@@ -171,7 +179,14 @@ int     rc;
         STORE_HW(psa->extint,code);
 
 #if defined(_FEATURE_SIE)
-    if(!regs->sie_state)
+    if(!regs->sie_state
+#if defined(FEATURE_EXPEDITED_SIE_SUBSET)
+                       || (regs->siebk->s & SIE_S_EXP_TIMER)
+#endif /*defined(FEATURE_EXPEDITED_SIE_SUBSET)*/
+#if defined(_FEATURE_EXTERNAL_INTERRUPT_ASSIST)
+                       || (regs->siebk->ec[0] & SIE_EC0_EXTA)
+#endif
+                                                            )
 #endif /*defined(_FEATURE_SIE)*/
     {
         /* Store current PSW at PSA+X'18' */
@@ -181,10 +196,28 @@ int     rc;
         rc = ARCH_DEP(load_psw) (regs, psa->extnew);
 
         if ( rc )
+        {
+            release_lock(&sysblk.intlock);
             ARCH_DEP(program_interrupt)(regs, rc);
+        }
     }
 
-    longjmp (regs->progjmp, SIE_INTERCEPT_EXT);
+    release_lock(&sysblk.intlock);
+
+#if defined(_FEATURE_SIE)
+    if(regs->sie_state
+#if defined(FEATURE_EXPEDITED_SIE_SUBSET)
+                       && !(regs->siebk->s & SIE_S_EXP_TIMER)
+#endif /*defined(FEATURE_EXPEDITED_SIE_SUBSET)*/
+#if defined(_FEATURE_EXTERNAL_INTERRUPT_ASSIST)
+                       && !(regs->siebk->ec[0] & SIE_EC0_EXTA)
+#endif
+                                                            )
+        longjmp (regs->progjmp, SIE_INTERCEPT_EXT);
+    else
+#endif /*defined(_FEATURE_SIE)*/
+        longjmp (regs->progjmp, SIE_NO_INTERCEPT);
+
 } /* end function external_interrupt */
 
 /*-------------------------------------------------------------------*/
@@ -215,7 +248,7 @@ U16     cpuad;                          /* Originating CPU address   */
 #endif /*!defined(_FEATURE_SIE)*/
         )
     {
-        logmsg ("External interrupt: Interrupt key\n");
+        logmsg (_("HHCCP023I External interrupt: Interrupt key\n"));
 
         /* Reset interrupt key pending */
         OFF_IC_INTKEY;
@@ -237,14 +270,14 @@ U16     cpuad;                          /* Originating CPU address   */
             }
         } /* end for(cpuad) */
 
-// /*debug*/ logmsg ("External interrupt: Malfuction Alert from CPU %d\n",
+// /*debug*/ logmsg (_("External interrupt: Malfuction Alert from CPU %d\n"),
 // /*debug*/    cpuad);
 
         /* Reset the indicator for the CPU which was found */
         regs->malfcpu[cpuad] = 0;
 
         /* Store originating CPU address at PSA+X'84' */
-        psa = (void*)(sysblk.mainstor + regs->PX);
+        psa = (void*)(regs->mainstor + regs->PX);
         STORE_HW(psa->extcpad,cpuad);
 
         /* Reset emergency signal pending flag if there are
@@ -277,14 +310,14 @@ U16     cpuad;                          /* Originating CPU address   */
             }
         } /* end for(cpuad) */
 
-// /*debug*/ logmsg ("External interrupt: Emergency Signal from CPU %d\n",
+// /*debug*/ logmsg (_("External interrupt: Emergency Signal from CPU %d\n"),
 // /*debug*/    cpuad);
 
         /* Reset the indicator for the CPU which was found */
         regs->emercpu[cpuad] = 0;
 
         /* Store originating CPU address at PSA+X'84' */
-        psa = (void*)(sysblk.mainstor + regs->PX);
+        psa = (void*)(regs->mainstor + regs->PX);
         STORE_HW(psa->extcpad,cpuad);
 
         /* Reset emergency signal pending flag if there are
@@ -306,14 +339,14 @@ U16     cpuad;                          /* Originating CPU address   */
     /* External interrupt if external call is pending */
     if (OPEN_IC_EXTCALL(regs))
     {
-//  /*debug*/logmsg ("External interrupt: External Call from CPU %d\n",
+//  /*debug*/logmsg (_("External interrupt: External Call from CPU %d\n"),
 //  /*debug*/       regs->extccpu);
 
         /* Reset external call pending */
         OFF_IC_EXTCALL(regs);
 
         /* Store originating CPU address at PSA+X'84' */
-        psa = (void*)(sysblk.mainstor + regs->PX);
+        psa = (void*)(regs->mainstor + regs->PX);
         STORE_HW(psa->extcpad,regs->extccpu);
 
         /* Generate external call interrupt */
@@ -328,7 +361,7 @@ U16     cpuad;                          /* Originating CPU address   */
     {
         if (sysblk.insttrace || sysblk.inststep)
         {
-            logmsg ("External interrupt: Clock comparator\n");
+            logmsg (_("HHCCP024I External interrupt: Clock comparator\n"));
         }
         ARCH_DEP(external_interrupt) (EXT_CLOCK_COMPARATOR_INTERRUPT, regs);
     }
@@ -339,7 +372,7 @@ U16     cpuad;                          /* Originating CPU address   */
     {
         if (sysblk.insttrace || sysblk.inststep)
         {
-            logmsg ("External interrupt: CPU timer=%16.16llX\n",
+            logmsg (_("HHCCP025I External interrupt: CPU timer=%16.16llX\n"),
                     (long long)regs->ptimer);
         }
         ARCH_DEP(external_interrupt) (EXT_CPU_TIMER_INTERRUPT, regs);
@@ -356,7 +389,7 @@ U16     cpuad;                          /* Originating CPU address   */
     {
         if (sysblk.insttrace || sysblk.inststep)
         {
-            logmsg ("External interrupt: Interval timer\n");
+            logmsg (_("HHCCP026I External interrupt: Interval timer\n"));
         }
         OFF_IC_ITIMER(regs);
         ARCH_DEP(external_interrupt) (EXT_INTERVAL_TIMER_INTERRUPT, regs);
@@ -375,11 +408,11 @@ U16     cpuad;                          /* Originating CPU address   */
             sysblk.servparm =
                 APPLY_PREFIXING (sysblk.servparm, regs->PX);
 
-//      logmsg ("External interrupt: Service signal %8.8X\n",
+//      logmsg (_("External interrupt: Service signal %8.8X\n"),
 //              sysblk.servparm);
 
         /* Store service signal parameter at PSA+X'80' */
-        psa = (void*)(sysblk.mainstor + regs->PX);
+        psa = (void*)(regs->mainstor + regs->PX);
         STORE_FW(psa->extparm,sysblk.servparm);
 
         /* Reset service parameter */
@@ -412,7 +445,7 @@ int     i;                              /* Array subscript           */
 PSA     *sspsa;                         /* -> Store status area      */
 
     /* Point to the PSA into which status is to be stored */
-    sspsa = (void*)(sysblk.mainstor + aaddr);
+    sspsa = (void*)(ssreg->mainstor + aaddr);
 
     /* Store CPU timer in bytes 216-223 */
     dreg = ssreg->ptimer;
@@ -435,12 +468,12 @@ PSA     *sspsa;                         /* -> Store status area      */
     STORE_FW(sspsa->storetpr,ssreg->todpr);
 #endif /*defined(FEATURE_ESAME)*/
 
+#if defined(_900)
 #if defined(FEATURE_ESAME)
     sspsa->arch = 1;
-#endif /*defined(FEATURE_ESAME)*/
-
-#if defined(_900)
+#else /*defined(FEATURE_ESAME)*/
     sspsa->arch = 0;
+#endif /*defined(FEATURE_ESAME)*/
 #endif /*defined(_900)*/
 
     /* Store access registers in bytes 288-351 */

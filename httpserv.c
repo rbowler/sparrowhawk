@@ -1,4 +1,4 @@
-/* HTTPSERV.C   (c)Copyright Jan Jaeger, 2002                        */
+/* HTTPSERV.C   (c)Copyright Jan Jaeger, 2002-2003                   */
 /*              HTTP Server                                          */
 
 /* This file contains all code required for the HTTP server,         */
@@ -17,12 +17,12 @@
 /*                                                                   */
 /* If the request is for a /cgi-bin/ path, then the cgibin           */
 /* directory in cgibin.c will be searched, for any other request     */
-/* the HTTP_ROOT (/usr/local/hercules) will be used as the root      */
-/* to find the specified file.                                       */
+/* the sysblk.httproot (/usr/local/hercules) will be used as the     */
+/* root to find the specified file.                                  */
 /*                                                                   */
 /* As realpath() is used to verify that the files are from within    */
-/* the HTTP_ROOT tree symbolic links that refer to files outside     */
-/* the HTTP_ROOT tree are not supported.                             */
+/* the sysblk.httproot tree symbolic links that refer to files       */
+/* outside the sysblk.httproot tree are not supported.               */
 /*                                                                   */
 /*                                                                   */
 /*                                           Jan Jaeger - 28/03/2002 */
@@ -52,17 +52,18 @@ static CONTYP mime_types[] = {
 int html_include(WEBBLK *webblk, char *filename)
 {
     FILE *inclfile;
-    char fullname[1024] = HTTP_ROOT;
+    char fullname[1024];
     char buffer[1024];
     int ret;
 
-    inclfile = fopen(strcat(fullname,filename),"r");
+    strncpy(fullname,sysblk.httproot,1024);
+    inclfile = fopen(strncat(fullname,filename,1024),"r");
 
     if (!inclfile)
     {
-        logmsg("HHS021E html_include: Cannot open %s: %s\n",
+        logmsg(_("HHCHT011E html_include: Cannot open %s: %s\n"),
           fullname,strerror(errno));
-        fprintf(webblk->hsock,"ERROR: Cannot open %s: %s\n",
+        fprintf(webblk->hsock,_("ERROR: Cannot open %s: %s\n"),
           filename,strerror(errno));
         return FALSE;
     }
@@ -230,8 +231,9 @@ char *value;
 char *strtok_str;
 CGIVAR **cgivar;
 
-    for(cgivar = &(webblk->cgivar); *cgivar != NULL;
-        cgivar = &((*cgivar)->next));
+    for (cgivar = &(webblk->cgivar);
+        *cgivar;
+         cgivar = &((*cgivar)->next));
 
     for (name = strtok_r(qstring,"&; ",&strtok_str);
          name; 
@@ -256,8 +258,8 @@ CGIVAR **cgivar;
 static void http_dump_cgi_variables(WEBBLK *webblk)
 {
     CGIVAR *cv;
-    for(cv = webblk->cgivar; cv != NULL; cv = cv->next)
-        logmsg("HHS020D cgi_var_dump: pointer(%p) name(%s) value(%s) type(%d)\n",
+    for(cv = webblk->cgivar; cv; cv = cv->next)
+        logmsg(_("HHCHT012I cgi_var_dump: pointer(%p) name(%s) value(%s) type(%d)\n"),
           cv, cv->name, cv->value, cv->type);
 }
 #endif
@@ -266,7 +268,7 @@ static void http_dump_cgi_variables(WEBBLK *webblk)
 char *http_variable(WEBBLK *webblk, char *name, int type)
 {
     CGIVAR *cv;
-    for(cv = webblk->cgivar; cv != NULL; cv = cv->next)
+    for(cv = webblk->cgivar; cv; cv = cv->next)
         if((cv->type & type) && !strcmp(name,cv->name))
             return cv->value;
     return NULL;
@@ -279,7 +281,7 @@ static void http_verify_path(WEBBLK *webblk, char *path)
     char resolved_path[1024];
     int i;
 
-    realpath(HTTP_ROOT,resolved_base); strcat(resolved_base,"/");
+    realpath(sysblk.httproot,resolved_base); strncat(resolved_base,"/",1024);
     realpath(path,resolved_path);
 
     for (i = 0; path[i]; i++)
@@ -357,11 +359,12 @@ static void http_download(WEBBLK *webblk, char *filename)
     char tbuf[80];
     int fd, length;
     char *filetype;
-    char fullname[1024] = HTTP_ROOT;
+    char fullname[1024];
     struct stat st;
     CONTYP *mime_type = mime_types;
 
-    strcat(fullname,filename);
+    strncpy(fullname,sysblk.httproot,1024);
+    strncat(fullname,filename,1024);
 
     http_verify_path(webblk,fullname);
 
@@ -497,8 +500,8 @@ static void *http_request(FILE *hsock)
 
     /* anything following a ? in the URL is part of the get arguments */
     if ((pointer=strchr(url,'?'))) {
-        *pointer = 0;
-        http_interpret_variable_string(webblk, pointer + 1, VARTYPE_GET);
+        *pointer++ = 0;
+        http_interpret_variable_string(webblk, pointer, VARTYPE_GET);
     }
 
     while(url[0] == '/' && url[1] == '/')
@@ -521,7 +524,7 @@ static void *http_request(FILE *hsock)
     http_dump_cgi_variables(webblk);
 #endif
 
-    for(cgient = cgidir; cgient->path != NULL; cgient++)
+    for(cgient = cgidir; cgient->path; cgient++)
     {
         if(!strcmp(cgient->path, url))
         {
@@ -552,9 +555,11 @@ fd_set                  selset;         /* Read bit map for select   */
 int                     optval;         /* Argument for setsockopt   */
 TID                     httptid;        /* Negotiation thread id     */
 
+    UNREFERENCED(arg);
+
     /* Display thread started message on control panel */
-    logmsg ("HHS019I HTTP listener thread started: "
-            "tid="TIDPAT", pid=%d\n",
+    logmsg (_("HHCHT001I HTTP listener thread started: "
+            "tid="TIDPAT", pid=%d\n"),
             thread_id(), getpid());
 
     /* Obtain a socket */
@@ -562,7 +567,7 @@ TID                     httptid;        /* Negotiation thread id     */
 
     if (lsock < 0)
     {
-        logmsg("HHS018E socket: %s\n", strerror(errno));
+        logmsg(_("HHCHT002E socket: %s\n"), strerror(errno));
         return NULL;
     }
 
@@ -585,14 +590,14 @@ TID                     httptid;        /* Negotiation thread id     */
 
         if (rc == 0 || errno != EADDRINUSE) break;
 
-        logmsg ("HHS017I Waiting for port %u to become free\n",
+        logmsg (_("HHCHT003W Waiting for port %u to become free\n"),
                 sysblk.httpport);
         sleep(10);
     } /* end while */
 
     if (rc != 0)
     {
-        logmsg("HHS016E bind: %s\n", strerror(errno));
+        logmsg(_("HHCHT004E bind: %s\n"), strerror(errno));
         return NULL;
     }
 
@@ -601,11 +606,11 @@ TID                     httptid;        /* Negotiation thread id     */
 
     if (rc < 0)
     {
-        logmsg("HHS015E listen: %s\n", strerror(errno));
+        logmsg(_("HHCHT005E listen: %s\n"), strerror(errno));
         return NULL;
     }
 
-    logmsg("HHS014I Waiting for HTTP requests on port %u\n",
+    logmsg(_("HHCHT006I Waiting for HTTP requests on port %u\n"),
             sysblk.httpport);
 
     /* Handle connection requests and attention interrupts */
@@ -617,10 +622,10 @@ TID                     httptid;        /* Negotiation thread id     */
 
         /* Wait for a file descriptor to become ready */
 #if defined(WIN32)
-	{
-	    struct timeval tv={0,500000};	/* half a second */
-	    rc = select ( lsock+1, &selset, NULL, NULL, &tv );
-	}
+    {
+        struct timeval tv={0,500000};   /* half a second */
+        rc = select ( lsock+1, &selset, NULL, NULL, &tv );
+    }
 #else /*!defined(WIN32)*/
         rc = select ( lsock+1, &selset, NULL, NULL, NULL );
 #endif /*!defined(WIN32)*/
@@ -630,7 +635,7 @@ TID                     httptid;        /* Negotiation thread id     */
         if (rc < 0 )
         {
             if (errno == EINTR) continue;
-            logmsg("HHS013E select: %s\n", strerror(errno));
+            logmsg(_("HHCHT007E select: %s\n"), strerror(errno));
             break;
         }
 
@@ -642,13 +647,13 @@ TID                     httptid;        /* Negotiation thread id     */
 
             if (csock < 0)
             {
-                logmsg("HHS012E accept: %s\n", strerror(errno));
+                logmsg(_("HHCHT008E accept: %s\n"), strerror(errno));
                 continue;
             }
 
             if(!(hsock = fdopen(csock,"r+")))
             {
-                logmsg("HHS011E fdopen: %s\n",strerror(errno));
+                logmsg(_("HHCHT009E fdopen: %s\n"),strerror(errno));
                 close(csock);
                 continue;
             }
@@ -657,7 +662,7 @@ TID                     httptid;        /* Negotiation thread id     */
             if ( create_thread (&httptid, &sysblk.detattr,
                                 http_request, hsock) )
             {
-                logmsg("HHS010E http_request create_thread: %s\n",
+                logmsg(_("HHCHT010E http_request create_thread: %s\n"),
                         strerror(errno));
                 fclose (hsock);
                 close (csock);

@@ -1,8 +1,8 @@
-/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2002                */
+/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2003                */
 /*              ESA/390 Service Processor                            */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements service processor functions                */
@@ -493,21 +493,21 @@ void scp_command (BYTE *command, int priomsg)
     /* Error if disabled for priority messages */
     if (priomsg && !(sysblk.cp_recv_mask & 0x00800000))
     {
-        logmsg ("HHC703I SCP not receiving priority messages\n");
+        logmsg (_("HHCCP036E SCP not receiving priority messages\n"));
         return;
     }
 
     /* Error if disabled for commands */
     if (!priomsg && !(sysblk.cp_recv_mask & 0x80000000))
     {
-        logmsg ("HHC704I SCP not receiving commands\n");
+        logmsg (_("HHCCP037E SCP not receiving commands\n"));
         return;
     }
 
     /* Error if command string is missing */
     if (strlen(command) < 1)
     {
-        logmsg ("HHC705I No SCP command\n");
+        logmsg (_("HHCCP038E No SCP command\n"));
         return;
     }
 
@@ -518,7 +518,7 @@ void scp_command (BYTE *command, int priomsg)
        command with message indicating that service processor is busy */
     if (IS_IC_SERVSIG && (sysblk.servparm & SERVSIG_PEND))
     {
-        logmsg ("HHC706I Service Processor busy\n");
+        logmsg (_("HHCCP039E Service Processor busy\n"));
 
         /* Release the interrupt lock */
         release_lock (&sysblk.intlock);
@@ -558,13 +558,13 @@ void scp_command (BYTE *command, int priomsg)
 /*-------------------------------------------------------------------*/
 DEF_INST(service_call)
 {
-int             r1, r2;                 /* Values of R fields        */
+U32             r1, r2;                 /* Values of R fields        */
 U32             sclp_command;           /* SCLP command code         */
 U32             sccb_real_addr;         /* SCCB real address         */
-int             i, j;                   /* Array subscripts          */
-int             realmb;                 /* Real storage size in MB   */
+U32             i, j;                   /* Array subscripts          */
+U32             realmb;                 /* Real storage size in MB   */
 U32             sccb_absolute_addr;     /* Absolute address of SCCB  */
-int             sccblen;                /* Length of SCCB            */
+U32             sccblen;                /* Length of SCCB            */
 SCCB_HEADER    *sccb;                   /* -> SCCB header            */
 SCCB_SCP_INFO  *sccbscp;                /* -> SCCB SCP information   */
 SCCB_CPU_INFO  *sccbcpu;                /* -> SCCB CPU information   */
@@ -577,30 +577,25 @@ SCCB_CSI_INFO  *sccbcsi;                /* -> SCCB channel subsys inf*/
 U16             offset;                 /* Offset from start of SCCB */
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
 DEVBLK         *dev;                    /* Used to find CHPIDs       */
-int             chpbyte;                /* Offset to byte for CHPID  */
-int             chpbit;                 /* Bit number for CHPID      */
+U32             chpbyte;                /* Offset to byte for CHPID  */
+U32             chpbit;                 /* Bit number for CHPID      */
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 #ifdef FEATURE_SYSTEM_CONSOLE
 SCCB_EVENT_MASK*evd_mask;               /* Event mask                */
 SCCB_EVD_HDR   *evd_hdr;                /* Event header              */
-int             evd_len;                /* Length of event data      */
+U32             evd_len;                /* Length of event data      */
 SCCB_EVD_BK    *evd_bk;                 /* Event data                */
 SCCB_MCD_BK    *mcd_bk;                 /* Message Control Data      */
-int             mcd_len;                /* Length of MCD             */
+U32             mcd_len;                /* Length of MCD             */
 SCCB_OBJ_HDR   *obj_hdr;                /* Object Header             */
-int             obj_len;                /* Length of Object          */
-int             obj_type;               /* Object type               */
+U32             obj_len;                /* Length of Object          */
+U32             obj_type;               /* Object type               */
 SCCB_MTO_BK    *mto_bk;                 /* Message Text Object       */
 BYTE           *event_msg;              /* Message Text pointer      */
-int             event_msglen;           /* Message Text length       */
+U32             event_msglen;           /* Message Text length       */
 SCCB_CPI_BK    *cpi_bk;                 /* Control Program Info      */
-#ifndef NO_CYGWIN_STACK_BUG
-BYTE           *message = NULL;         /* Maximum event data buffer
-                                           length plus one for \0    */
-#else
 BYTE            message[4089];          /* Maximum event data buffer
                                            length plus one for \0    */
-#endif
 static BYTE     const1_template[] = {
         0x13,0x10,                      /* MDS message unit          */
         0x00,0x25,0x13,0x11,            /* MDS routine info          */
@@ -641,7 +636,7 @@ static BYTE    const5_template = {
         0x30                            /* Text data                 */
         };
 
-int             masklen;                /* Length of event mask      */
+U32             masklen;                /* Length of event mask      */
 U32             old_cp_recv_mask;       /* Masks before write event  */
 U32             old_cp_send_mask;       /*              mask command */
 #endif /*FEATURE_SYSTEM_CONSOLE*/
@@ -649,9 +644,9 @@ U32             old_cp_send_mask;       /*              mask command */
 
 #ifdef FEATURE_EXPANDED_STORAGE
 SCCB_XST_MAP    *sccbxmap;              /* Xstore usability map      */
-int             xstincnum;              /* Number of expanded storage
+U32             xstincnum;              /* Number of expanded storage
                                                          increments  */
-int             xstblkinc;              /* Number of expanded storage
+U32             xstblkinc;              /* Number of expanded storage
                                                blocks per increment  */
 BYTE            *xstmap;                /* Xstore bitmap, zero means
                                                            available */
@@ -677,23 +672,23 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Program check if SCCB is outside main storage */
-    if ( sccb_absolute_addr >= regs->mainsize )
+    if ( sccb_absolute_addr > regs->mainlim )
         ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
 //  /*debug*/logmsg("Service call %8.8X SCCB=%8.8X\n",
 //  /*debug*/       sclp_command, sccb_absolute_addr);
 
     /* Point to service call control block */
-    sccb = (SCCB_HEADER*)(sysblk.mainstor + sccb_absolute_addr);
+    sccb = (SCCB_HEADER*)(regs->mainstor + sccb_absolute_addr);
 
     /* Load SCCB length from header */
     FETCH_HW(sccblen, sccb->length);
 
     /* Set the main storage reference bit */
-    STORAGE_KEY(sccb_absolute_addr) |= STORKEY_REF;
+    STORAGE_KEY(sccb_absolute_addr, regs) |= STORKEY_REF;
 
     /* Program check if end of SCCB falls outside main storage */
-    if ( regs->mainsize - sccblen < sccb_absolute_addr )
+    if ( sysblk.mainsize - sccblen < sccb_absolute_addr )
         ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Obtain lock if immediate response is not requested */
@@ -719,7 +714,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     case SCLP_READ_SCP_INFO:
 
         /* Set the main storage change bit */
-        STORAGE_KEY(sccb_absolute_addr) |= STORKEY_CHANGE;
+        STORAGE_KEY(sccb_absolute_addr, regs) |= STORKEY_CHANGE;
 
         /* Set response code X'0100' if SCCB crosses a page boundary */
         if ((sccb_absolute_addr & STORAGE_KEY_PAGEMASK) !=
@@ -750,7 +745,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         memset (sccbscp, 0, sizeof(SCCB_SCP_INFO));
 
         /* Set main storage size in SCCB */
-        realmb = regs->mainsize >> 20;
+        realmb = sysblk.mainsize >> 20;
         STORE_HW(sccbscp->realinum, realmb);
         sccbscp->realiszm = 1;
         sccbscp->realbszk = 4;
@@ -849,7 +844,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                         | SCCB_CFG0_SUPPRESSION_ON_PROTECTION
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
 //                      | SCCB_CFG0_INITIATE_RESET
-//                      | SCCB_CFG0_STORE_CHANNEL_SUBSYS_CHARACTERISTICS
+#if defined(FEATURE_CHSC)
+                        | SCCB_CFG0_STORE_CHANNEL_SUBSYS_CHARACTERISTICS
+#endif /*defined(FEATURE_CHSC)*/
 #if defined(FEATURE_MOVE_PAGE_FACILITY_2)
                         | SCCB_CFG0_MVPG_FOR_ALL_GUESTS
 #endif /*defined(FEATURE_MOVE_PAGE_FACILITY_2)*/
@@ -931,7 +928,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                             | SCCB_CPF0_SIE_XA_MODE
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 //                          | SCCB_CPF0_SIE_SET_II_370_MODE
-//                          | SCCB_CPF0_SIE_SET_II_XA_MODE
+#if defined(FEATURE_IO_ASSIST)
+                            | SCCB_CPF0_SIE_SET_II_XA_MODE
+#endif /*defined(FEATURE_IO_ASSIST)*/
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
                             | SCCB_CPF0_SIE_NEW_INTERCEPT_FORMAT
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
@@ -943,7 +942,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 #endif /*defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
                             ;
             sccbcpu->cpf[1] = 0
-//                          | SCCB_CPF1_IO_INTERPRETATION_LEVEL_2
+#if defined(FEATURE_IO_ASSIST)
+                            | SCCB_CPF1_IO_INTERPRETATION_LEVEL_2
+#endif /*defined(FEATURE_IO_ASSIST)*/
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
                             | SCCB_CPF1_GUEST_PER_ENHANCED
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
@@ -951,14 +952,20 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 #if defined(FEATURE_STORAGE_KEY_ASSIST)
                             | SCCB_CPF1_RCP_BYPASS_FACILITY
 #endif /*defined(FEATURE_STORAGE_KEY_ASSIST)*/
-//                          | SCCB_CPF1_REGION_RELOCATE_FACILITY
-//                          | SCCB_CPF1_EXPEDITE_TIMER_PROCESSING
+#if defined(FEATURE_REGION_RELOCATE)
+                            | SCCB_CPF1_REGION_RELOCATE_FACILITY
+#endif /*defined(FEATURE_REGION_RELOCATE)*/
+#if defined(FEATURE_EXPEDITED_SIE_SUBSET)
+                            | SCCB_CPF1_EXPEDITE_TIMER_PROCESSING
+#endif /*defined(FEATURE_EXPEDITED_SIE_SUBSET)*/
                             ;
             sccbcpu->cpf[2] = 0
 #if defined(FEATURE_CRYPTO)
                             | SCCB_CPF2_CRYPTO_FEATURE_ACCESSED
 #endif /*defined(FEATURE_CRYPTO)*/
-//                          | SCCB_CPF2_EXPEDITE_RUN_PROCESSING
+#if defined(FEATURE_EXPEDITED_SIE_SUBSET)
+                            | SCCB_CPF2_EXPEDITE_RUN_PROCESSING
+#endif /*defined(FEATURE_EXPEDITED_SIE_SUBSET)*/
                             ;
 
 #ifdef FEATURE_VECTOR_FACILITY
@@ -989,7 +996,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 #endif /*defined(FEATURE_PER2)*/
                             ;
             sccbcpu->cpf[5] = 0
-//                          | SCCB_CPF5_GUEST_WAIT_STATE_ASSIST
+#if defined(FEATURE_WAITSTATE_ASSIST)
+                            | SCCB_CPF5_GUEST_WAIT_STATE_ASSIST
+#endif /*defined(FEATURE_WAITSTATE_ASSIST)*/
                             ;
             sccbcpu->cpf[13] = 0
 #if defined(FEATURE_CRYPTO)
@@ -1010,7 +1019,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     case SCLP_READ_CHP_INFO:
 
         /* Set the main storage change bit */
-        STORAGE_KEY(sccb_absolute_addr) |= STORKEY_CHANGE;
+        STORAGE_KEY(sccb_absolute_addr, regs) |= STORKEY_CHANGE;
 
         /* Set response code X'0100' if SCCB crosses a page boundary */
         if ((sccb_absolute_addr & STORAGE_KEY_PAGEMASK) !=
@@ -1076,7 +1085,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     case SCLP_READ_CSI_INFO:
 
         /* Set the main storage change bit */
-        STORAGE_KEY(sccb_absolute_addr) |= STORKEY_CHANGE;
+        STORAGE_KEY(sccb_absolute_addr, regs) |= STORKEY_CHANGE;
 
         /* Set response code X'0100' if SCCB crosses a page boundary */
         if ((sccb_absolute_addr & STORAGE_KEY_PAGEMASK) !=
@@ -1117,7 +1126,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     case SCLP_WRITE_EVENT_DATA:
 
         /* Set the main storage change bit */
-        STORAGE_KEY(sccb_absolute_addr) |= STORKEY_CHANGE;
+        STORAGE_KEY(sccb_absolute_addr, regs) |= STORKEY_CHANGE;
 
         /* Set response code X'0100' if SCCB crosses a page boundary */
         if ((sccb_absolute_addr & STORAGE_KEY_PAGEMASK) !=
@@ -1153,7 +1162,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                     event_msg = (BYTE*)(mto_bk+1);
                     event_msglen = obj_len -
                             (sizeof(SCCB_OBJ_HDR) + sizeof(SCCB_MTO_BK));
-                    if (event_msglen < 0)
+                    if ((int)event_msglen < 0)
                     {
                         sccb->reas = SCCB_REAS_BUFF_LEN_ERR;
                         sccb->resp = SCCB_RESP_BUFF_LEN_ERR;
@@ -1163,15 +1172,10 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                     /* Print line unless it is a response prompt */
                     if (!(mto_bk->ltflag[0] & SCCB_MTO_LTFLG0_PROMPT))
                     {
-#ifndef NO_CYGWIN_STACK_BUG
-                        message = malloc (4089);
-                        for (i = 0, j = 0; i < event_msglen && message; i++)
-#else
                         for (i = 0, j = 0; i < event_msglen; i++)
-#endif
                         {
-                            message[j++] = isprint(ebcdic_to_ascii[event_msg[i]]) ?
-                                ebcdic_to_ascii[event_msg[i]] : 0x20;
+                            message[j++] = isprint(guest_to_host(event_msg[i])) ?
+                                guest_to_host(event_msg[i]) : 0x20;
                                 /* Break the line if too long */
                                 if(j > 79)
                                 {
@@ -1193,10 +1197,6 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                 (BYTE*)obj_hdr += obj_len;
             }
     
-#ifndef NO_CYGWIN_STACK_BUG
-            if(message) free(message);
-#endif
-
             /* Indicate Event Processed */
             evd_hdr->flag |= SCCB_EVD_FLAG_PROC;
 
@@ -1217,22 +1217,23 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
             
                 for(i = 0; i < 8; i++)
                 {
-                    systype[i] = ebcdic_to_ascii[cpi_bk->system_type[i]];
-                    sysname[i] = ebcdic_to_ascii[cpi_bk->system_name[i]];
-                    sysplex[i] = ebcdic_to_ascii[cpi_bk->sysplex_name[i]];
+                    systype[i] = guest_to_host(cpi_bk->system_type[i]);
+                    sysname[i] = guest_to_host(cpi_bk->system_name[i]);
+                    sysplex[i] = guest_to_host(cpi_bk->sysplex_name[i]);
                 }
                 systype[8] = sysname[8] = sysplex[8] = 0;
                 FETCH_DW(syslevel,cpi_bk->system_level);
 
 #if 1
-                logmsg("HHC707I CPI: System Type: %s Name: %s Sysplex: %s\n",
+                logmsg(_("HHCCP040I CPI: System Type: %s Name: %s "
+                         "Sysplex: %s\n"),
                     systype,sysname,sysplex);
 #else
-                logmsg("HHC770I Control Program Information:\n");
-                logmsg("HHC771I System Type  = %s\n",systype);
-                logmsg("HHC772I System Name  = %s\n",sysname);
-                logmsg("HHC773I Sysplex Name = %s\n",sysplex);
-                logmsg("HHC774I System Level = %16.16llX\n",syslevel);
+                logmsg(_("HHC770I Control Program Information:\n"));
+                logmsg(_("HHC771I System Type  = %s\n",systype));
+                logmsg(_("HHC772I System Name  = %s\n",sysname));
+                logmsg(_("HHC773I Sysplex Name = %s\n",sysplex));
+                logmsg(_("HHC774I System Level = %16.16llX\n"),syslevel);
 #endif
             }
 
@@ -1249,7 +1250,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         default:
 
 #if 0
-            logmsg("HHC799I Unknown event received type = %2.2X\n",
+            logmsg(_("HHC799I Unknown event received type = %2.2X\n"),
               evd_hdr->type);
 #endif
             /* Set response code X'73F0' in SCCB header */
@@ -1265,7 +1266,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     case SCLP_READ_EVENT_DATA:
 
         /* Set the main storage change bit */
-        STORAGE_KEY(sccb_absolute_addr) |= STORKEY_CHANGE;
+        STORAGE_KEY(sccb_absolute_addr, regs) |= STORKEY_CHANGE;
 
         /* Set response code X'0100' if SCCB crosses a page boundary */
         if ((sccb_absolute_addr & STORAGE_KEY_PAGEMASK) !=
@@ -1354,7 +1355,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
         /* Copy and translate command */
         for (i = 0; i < event_msglen; i++)
-                event_msg[i] = ascii_to_ebcdic[sysblk.scpcmdstr[i]];
+                event_msg[i] = host_to_guest(sysblk.scpcmdstr[i]);
 
         /* Clear the command string (It has been read) */
         sysblk.scpcmdstr[0] = '\0';
@@ -1368,7 +1369,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     case SCLP_WRITE_EVENT_MASK:
 
         /* Set the main storage change bit */
-        STORAGE_KEY(sccb_absolute_addr) |= STORKEY_CHANGE;
+        STORAGE_KEY(sccb_absolute_addr, regs) |= STORKEY_CHANGE;
 
         /* Set response code X'0100' if SCCB crosses a page boundary */
         if ((sccb_absolute_addr & STORAGE_KEY_PAGEMASK) !=
@@ -1422,9 +1423,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
          || (sysblk.cp_send_mask & sysblk.sclp_recv_mask) != old_cp_send_mask)
         {
             if (sysblk.cp_recv_mask != 0 || sysblk.cp_send_mask != 0)
-                logmsg ("HHC701I SYSCONS interface active\n");
+                logmsg (_("HHCCP041I SYSCONS interface active\n"));
             else
-                logmsg ("HHC702I SYSCONS interface inactive\n");
+                logmsg (_("HHCCP042I SYSCONS interface inactive\n"));
         }
 // logmsg("cp_send_mask=%8.8X cp_recv_mask=%8.8X\n",sysblk.cp_send_mask,sysblk.cp_recv_mask);
 
@@ -1439,7 +1440,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
    case SCLP_READ_XST_MAP:
 
         /* Set the main storage change bit */
-        STORAGE_KEY(sccb_absolute_addr) |= STORKEY_CHANGE;
+        STORAGE_KEY(sccb_absolute_addr, regs) |= STORKEY_CHANGE;
 
         /* Set response code X'0100' if SCCB crosses a page boundary */
         if ((sccb_absolute_addr & STORAGE_KEY_PAGEMASK) !=
@@ -1548,7 +1549,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         }
 
         if(sysblk.regs[i].vf->online)
-            logmsg("CPU%4.4X: Vector Facility configured offline\n",i);
+            logmsg(_("CPU%4.4X: Vector Facility configured offline\n"),i);
 
         /* Take the VF out of the configuration */
         sysblk.regs[i].vf->online = 0;
@@ -1579,7 +1580,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         }
 
         if(!sysblk.regs[i].vf->online)
-            logmsg("CPU%4.4X: Vector Facility configured online\n",i);
+            logmsg(_("CPU%4.4X: Vector Facility configured online\n"),i);
 
         /* Mark the VF online to the CPU */
         sysblk.regs[i].vf->online = 1;
@@ -1596,13 +1597,13 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     default:
 
 #if 0
-        logmsg("Invalid service call command word:%8.8X SCCB=%8.8X\n",
+        logmsg(_("Invalid service call command word:%8.8X SCCB=%8.8X\n"),
             sclp_command, sccb_absolute_addr);
 
         logmsg("SCCB data area:\n");
         for(i = 0; i < sccblen; i++)
         {
-            logmsg("%2.2X",sysblk.mainstor[sccb_real_addr + i]);
+            logmsg("%2.2X",regs->mainstor[sccb_real_addr + i]);
             if(i % 32 == 31)
                 logmsg("\n");
             else
@@ -1671,7 +1672,7 @@ CHSC_RSP *chsc_rsp;                             /* Response structure*/
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     abs = LOGICAL_TO_ABS(n, r1, regs, ACCTYPE_READ, regs->psw.pkey);
-    chsc_req = (CHSC_REQ*)(sysblk.mainstor + abs);
+    chsc_req = (CHSC_REQ*)(regs->mainstor + abs);
 
     /* Fetch length of request field */
     FETCH_HW(length, chsc_req->length);

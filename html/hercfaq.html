@@ -66,7 +66,7 @@ implemented in Hercules. Some special utilities in the form of standalone
 programs are known to run well. I can particularly recommend Jan Jaeger's
 excellent standalone editor (ZZSA) which is included in the Hercules
 distribution, or it can be downloaded from <A
-HREF="http://home.worldonline.nl/~jen">http://home.worldonline.nl/~jen</A>;
+HREF="http://www.cbttape.org/~jjaeger">http://www.cbttape.org/~jjaeger</A>;
 I use it regularly to look at DASD while debugging an OS installation, which
 is just what it's designed to do. Note: ZZSA runs in ESA/390 mode.
 See Jan Jaeger's website for more information and special
@@ -366,6 +366,7 @@ September 1999 issue of NaSPA Technical Support magazine. </P>
 <li>Vector Facility</li>
 <li>Multiple Controlled Data Space (VM dataspaces) </li>
 <LI>Extended Translation </LI>
+<li>Extended Translation Facility 2</li>
 <LI>Store System Information </LI>
 <li>64-bit operations</li>
 <LI>Cancel I/O Facility</LI>
@@ -381,15 +382,10 @@ September 1999 issue of NaSPA Technical Support magazine. </P>
 <P>The following optional features have been partially implemented: </P>
 <UL>
 <LI>Channel-Subsystem Call </LI>
-<li>Extended Translation Facility 2
 </UL>
-<p>The following optional features will be implemented:
-<ul>
-<li>Extended Translation Facility 2
-</ul>
-<P>The following features are not implemented, and are unlikely to be,
-either due to lack of documentation, limited host system capability, or lack
-of supporting hardware: </P>
+<P>The following features are not yet implemented, either due to lack
+of documentation, limited host system capability, or lack of
+supporting hardware: </P>
 <UL>
 <LI>Asynchronous Data Mover Facility </LI>
 <LI>Asynchronous Pageout Facility </LI>
@@ -404,9 +400,10 @@ Reconfiguration, SCP-initiated Reset, Processor Availability </LI>
 <LI>PR/SM </LI>
 <LI>Sysplex Timer (ETR) </LI>
 <LI>VM/370 assists </LI></UL>
-<p>Hercules is compliant with both IBM's ALS-1 and ALS-2 architectural level
-sets to the degree necessary to run all OS/390 versions through 2.10 and
-z/OS version 1.1 in ARCHLVL 1 mode, and Linux and z/VM in both ESA/390 and
+<p>Hercules is compliant with IBM's ALS-1, ALS-2 and ALS-3
+architectural level sets to the degree necessary to run all OS/390
+versions through 2.10 and known versions of z/OS in both ARCHLVL 1
+and ARCHLVL 2 mode, and Linux and z/VM in both ESA/390 and
 z/Architecture mode.</p>
 <H4>What z/Architecture features are implemented?</H4>
 <P>z/Architecture includes as standard all of the features of ESA/390,
@@ -423,7 +420,7 @@ HREF="http://www.snipix.freeserve.co.uk/people.htm">Roger Bowler</A>
 (original author)
 <li><A HREF="http://www.conmicro.cx/">Jay Maynard</A> (current
 maintainer)
-<li><A HREF="http://home.worldonline.nl/~jen">Jan Jaeger</A>
+<li><A HREF="http://www.cbttape.org/~jjaeger">Jan Jaeger</A>
 <li>Volker Bandke
 <li>David Barth
 <li>Malcolm Beattie
@@ -431,7 +428,6 @@ maintainer)
 <li>Vic Cross
 <li>Juergen Dobrinski
 <li>Fritz Elfert
-<li>Tomas Fott
 <li>Steve Gay
 <li>Roland Goetschi
 <li>Glen Herrmannsfeldt
@@ -445,15 +441,16 @@ maintainer)
 <li>Paul Leisy
 <li>Albert Louw
 <li>Peter Macdonald
-<li>Tomas Masek
 <li>Rick McKelvy
 <li>Dave Morton
 <li>Mike Noel
+<li>Andy Norrie
 <li><A HREF="http://www.sysun.com/museum">Dutch Owen</A>
 <li>Reed H. Petty
 <li>Valery Pogonchenko
-<li>David Pritchard
+<li>Emerson Santos
 <li>Axel Schwarzer
+<li>Paul Scott
 <li>Daniel Seagraves
 <li>Greg Smith
 <li>Adam Thornton
@@ -491,5 +488,5 @@ HREF="http://groups.yahoo.com/group/hercules-390">http://groups.yahoo.com/group/
 <P ALIGN="CENTER"><hr width="15%" noshade><A
 HREF="index.html"><IMG SRC="gifs/back.gif" BORDER=0 ALT="back"></A></P>
 <P><small>
-Last updated 3 July 2002</P></BODY>
+Last updated 1 February 2003</P></BODY>
 </HTML>

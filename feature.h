@@ -1,12 +1,12 @@
-/* FEATURES.H	(c) Copyright Jan Jaeger, 2000-2002		     */
-/*		Architecture-dependent macro definitions	     */
+/* FEATURES.H   (c) Copyright Jan Jaeger, 2000-2003          */
+/*      Architecture-dependent macro definitions         */
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
 
 /*-------------------------------------------------------------------*/
-/* S/370, ESA/390 and ESAME features implemented		     */
+/* S/370, ESA/390 and ESAME features implemented             */
 /*-------------------------------------------------------------------*/
 #if !defined(FEATCHK_CHECK_DONE)
 #include  "featall.h"
@@ -15,7 +15,7 @@
 #include  "feat900.h"
 #define   FEATCHK_CHECK_ALL
 #include  "featchk.h"
-#undef	  FEATCHK_CHECK_ALL
+#undef    FEATCHK_CHECK_ALL
 #define   FEATCHK_CHECK_DONE
 #endif /*!defined(FEATCHK_CHECK_DONE)*/
 
@@ -27,9 +27,9 @@
 #endif
 
 #include  "featall.h"
-#if	  __GEN_ARCH == 370
+#if   __GEN_ARCH == 370
  #include "feat370.h"
-#elif	  __GEN_ARCH == 390
+#elif     __GEN_ARCH == 390
  #include "feat390.h"
 #elif     __GEN_ARCH == 900
  #include "feat900.h"
@@ -98,6 +98,7 @@
 #undef VE
 #endif /*defined(OPTION_AEA_BUFFER)*/
 #undef SIEBK
+#undef ZPB
 #undef TLB_STD
 #undef TLB_VADDR
 #undef TLB_PTE
@@ -110,28 +111,28 @@
 
 #if __GEN_ARCH == 370
 
-#define ARCH_MODE	ARCH_370
+#define ARCH_MODE   ARCH_370
 
 #define DEF_INST(_name) \
-ATTR_REGPARM(3) void s370_ ## _name (BYTE inst[], int execflag, REGS *regs)
+void (ATTR_REGPARM(3) s370_ ## _name) (BYTE inst[], int execflag, REGS *regs)
 
 #define ARCH_DEP(_name) \
 s370_ ## _name
 
 #define APPLY_PREFIXING(addr,pfx) \
-	((((addr)&0x7FFFF000)==0)?((addr)&0xFFF)|pfx:\
-	(((addr)&0x7FFFF000)==pfx)?(addr)&0xFFF:(addr))
+    (((U32)((addr)&0x7FFFF000)==(U32)0)?((addr)&0xFFF)|pfx:\
+    ((U32)((addr)&0x7FFFF000)==(U32)pfx)?(addr)&0xFFF:(addr))
 
 #define AMASK   AMASK_L
 
 #define ADDRESS_MAXWRAP(_register_context) \
-	(AMASK24)
+    (AMASK24)
 
 #define ADDRESS_MAXWRAP_E(_register_context) \
 	(AMASK31)
 
 #define REAL_MODE(p) \
-	((p)->ecmode==0 || ((p)->sysmask & PSW_DATMODE)==0)
+    ((p)->ecmode==0 || ((p)->sysmask & PSW_DATMODE)==0)
 
 #if defined(_FEATURE_SIE)
 #define PER_MODE(_regs) \
@@ -194,34 +195,35 @@ s370_ ## _name
 #define VE(_r)	VE_L(_r)
 #endif /*defined(OPTION_AEA_BUFFER)*/
 #define SIEBK                   SIE1BK
+#define ZPB                     ZPB1
 #define TLB_STD   TLB_STD_L
 #define TLB_VADDR TLB_VADDR_L
 #define TLB_PTE   TLB_PTE_L
 
 #elif __GEN_ARCH == 390
 
-#define ARCH_MODE	ARCH_390
+#define ARCH_MODE   ARCH_390
 
 #define DEF_INST(_name) \
-ATTR_REGPARM(3) void s390_ ## _name (BYTE inst[], int execflag, REGS *regs)
+void (ATTR_REGPARM(3) s390_ ## _name) (BYTE inst[], int execflag, REGS *regs)
 
 #define ARCH_DEP(_name) \
 s390_ ## _name
 
 #define APPLY_PREFIXING(addr,pfx) \
-	((((addr)&0x7FFFF000)==0)?((addr)&0xFFF)|pfx:\
-	(((addr)&0x7FFFF000)==pfx)?(addr)&0xFFF:(addr))
+    ((((addr)&0x7FFFF000)==0)?((addr)&0xFFF)|pfx:\
+    (((addr)&0x7FFFF000)==pfx)?(addr)&0xFFF:(addr))
 
 #define AMASK   AMASK_L
 
 #define ADDRESS_MAXWRAP(_register_context) \
-	((_register_context)->psw.AMASK)
+    ((_register_context)->psw.AMASK)
 
 #define ADDRESS_MAXWRAP_E(_register_context) \
 	((_register_context)->psw.AMASK)
 
 #define REAL_MODE(p) \
-	(((p)->sysmask & PSW_DATMODE)==0)
+    (((p)->sysmask & PSW_DATMODE)==0)
 
 #if defined(_FEATURE_SIE)
 #define PER_MODE(_regs) \
@@ -293,28 +295,29 @@ s390_ ## _name
 #define VE(_r)	VE_L(_r)
 #endif /*defined(OPTION_AEA_BUFFER)*/
 #define SIEBK                   SIE1BK
+#define ZPB                     ZPB1
 #define TLB_STD   TLB_STD_L
 #define TLB_VADDR TLB_VADDR_L
 #define TLB_PTE   TLB_PTE_L
 
 #elif __GEN_ARCH == 900
 
-#define ARCH_MODE	ARCH_900
+#define ARCH_MODE   ARCH_900
 
 #define APPLY_PREFIXING(addr,pfx) \
-	((((addr)&0xFFFFFFFFFFFFE000ULL)==0)?((addr)&0x1FFF)|pfx:\
-	(((addr)&0xFFFFFFFFFFFFE000ULL)==pfx)?(addr)&0x1FFF:(addr))
+    ((((addr)&0xFFFFFFFFFFFFE000ULL)==0)?((addr)&0x1FFF)|pfx:\
+    (((addr)&0xFFFFFFFFFFFFE000ULL)==pfx)?(addr)&0x1FFF:(addr))
 
 #define AMASK   AMASK_G
 
 #define ADDRESS_MAXWRAP(_register_context) \
-	((_register_context)->psw.AMASK)
+    ((_register_context)->psw.AMASK)
 
 #define ADDRESS_MAXWRAP_E(_register_context) \
 	((_register_context)->psw.AMASK)
 
 #define REAL_MODE(p) \
-	(((p)->sysmask & PSW_DATMODE)==0)
+    (((p)->sysmask & PSW_DATMODE)==0)
 
 #if defined(_FEATURE_SIE)
 #define PER_MODE(_regs) \
@@ -325,29 +328,29 @@ s390_ ## _name
         ((_regs)->psw.sysmask & PSW_PERMODE)
 #endif
 
-#define ASF_ENABLED(_regs)	1 /* ASF is always enabled for ESAME */
+#define ASF_ENABLED(_regs)  1 /* ASF is always enabled for ESAME */
 
 #define ASTE_AS_DESIGNATOR(_aste) \
-	(((U64)((_aste)[2])<<32)|(U64)((_aste)[3]))
+    (((U64)((_aste)[2])<<32)|(U64)((_aste)[3]))
 
 #define ASTE_LT_DESIGNATOR(_aste) \
-	((_aste)[6])
+    ((_aste)[6])
 
-#define SAEVENT_BIT	ASCE_S
-#define SSEVENT_BIT	ASCE_X
-#define SSGROUP_BIT	ASCE_G
+#define SAEVENT_BIT ASCE_S
+#define SSEVENT_BIT ASCE_X
+#define SSGROUP_BIT ASCE_G
 
-#define LSED_UET_HDR	Z_LSED_UET_HDR
-#define LSED_UET_TLR	Z_LSED_UET_TLR
-#define LSED_UET_BAKR	Z_LSED_UET_BAKR
-#define LSED_UET_PC	Z_LSED_UET_PC
+#define LSED_UET_HDR    Z_LSED_UET_HDR
+#define LSED_UET_TLR    Z_LSED_UET_TLR
+#define LSED_UET_BAKR   Z_LSED_UET_BAKR
+#define LSED_UET_PC Z_LSED_UET_PC
 #define CR12_BRTRACE    Z_CR12_BRTRACE
 #define CR12_TRACEEA    Z_CR12_TRACEEA
 
 #define CHM_GPR2_RESV   Z_CHM_GPR2_RESV
 
 #define DEF_INST(_name) \
-ATTR_REGPARM(3) void z900_ ## _name (BYTE inst[], int execflag, REGS *regs)
+void (ATTR_REGPARM(3) z900_ ## _name) (BYTE inst[], int execflag, REGS *regs)
 
 #define ARCH_DEP(_name) \
 z900_ ## _name
@@ -387,6 +390,7 @@ z900_ ## _name
 #define VE(_r)	VE_G(_r)
 #endif /*defined(OPTION_AEA_BUFFER)*/
 #define SIEBK                   SIE2BK
+#define ZPB                     ZPB2
 #define TLB_STD   TLB_STD_G
 #define TLB_VADDR TLB_VADDR_G
 #define TLB_PTE   TLB_PTE_G
@@ -403,26 +407,26 @@ z900_ ## _name
 #undef PAGEFRAME_PAGEMASK
 #undef MAXADDRESS
 #if defined(FEATURE_ESAME)
- #define PAGEFRAME_PAGESIZE	4096
- #define PAGEFRAME_PAGESHIFT	12
- #define PAGEFRAME_BYTEMASK	0x00000FFF
- #define PAGEFRAME_PAGEMASK	0xFFFFFFFFFFFFF000ULL
+ #define PAGEFRAME_PAGESIZE 4096
+ #define PAGEFRAME_PAGESHIFT    12
+ #define PAGEFRAME_BYTEMASK 0x00000FFF
+ #define PAGEFRAME_PAGEMASK 0xFFFFFFFFFFFFF000ULL
  #define MAXADDRESS             0xFFFFFFFFFFFFFFFFULL
 #elif defined(FEATURE_S390_DAT)
- #define PAGEFRAME_PAGESIZE	4096
- #define PAGEFRAME_PAGESHIFT	12
- #define PAGEFRAME_BYTEMASK	0x00000FFF
- #define PAGEFRAME_PAGEMASK	0x7FFFF000
+ #define PAGEFRAME_PAGESIZE 4096
+ #define PAGEFRAME_PAGESHIFT    12
+ #define PAGEFRAME_BYTEMASK 0x00000FFF
+ #define PAGEFRAME_PAGEMASK 0x7FFFF000
  #define MAXADDRESS             0x7FFFFFFF
 #else /* S/370 */
- #define PAGEFRAME_PAGESIZE	2048
- #define PAGEFRAME_PAGESHIFT	11
- #define PAGEFRAME_BYTEMASK	0x000007FF
- #define PAGEFRAME_PAGEMASK	0x7FFFF800
+ #define PAGEFRAME_PAGESIZE 2048
+ #define PAGEFRAME_PAGESHIFT    11
+ #define PAGEFRAME_BYTEMASK 0x000007FF
+ #define PAGEFRAME_PAGEMASK 0x7FFFF800
  #if defined(FEATURE_370E_EXTENDED_ADDRESSING)
   #define MAXADDRESS             0x03FFFFFF
  #else
- #define MAXADDRESS             0x00FFFFFF
+  #define MAXADDRESS             0x00FFFFFF
  #endif
 #endif
 
@@ -444,39 +448,39 @@ z900_ ## _name
  #else
   #define STORAGE_KEY_PAGESHIFT 12
  #endif
- #define STORAGE_KEY_PAGESIZE	4096
+ #define STORAGE_KEY_PAGESIZE   4096
  #if defined(FEATURE_ESAME)
-  #define STORAGE_KEY_PAGEMASK	0xFFFFFFFFFFFFF000ULL
+  #define STORAGE_KEY_PAGEMASK  0xFFFFFFFFFFFFF000ULL
  #else
-  #define STORAGE_KEY_PAGEMASK	0x7FFFF000
+  #define STORAGE_KEY_PAGEMASK  0x7FFFF000
  #endif
- #define STORAGE_KEY_BYTEMASK	0x00000FFF
+ #define STORAGE_KEY_BYTEMASK   0x00000FFF
 #else
- #define STORAGE_KEY_PAGESHIFT	11
- #define STORAGE_KEY_PAGESIZE	2048
- #define STORAGE_KEY_PAGEMASK	0x7FFFF800
- #define STORAGE_KEY_BYTEMASK	0x000007FF
+ #define STORAGE_KEY_PAGESHIFT  11
+ #define STORAGE_KEY_PAGESIZE   2048
+ #define STORAGE_KEY_PAGEMASK   0x7FFFF800
+ #define STORAGE_KEY_BYTEMASK   0x000007FF
 #endif
 
-#define STORAGE_KEY(_addr) \
-   sysblk.storkeys[(_addr)>>STORAGE_KEY_PAGESHIFT]
+#define STORAGE_KEY(_addr, _pointer) \
+   (_pointer)->storkeys[(_addr)>>STORAGE_KEY_PAGESHIFT]
 
 #if defined(_FEATURE_2K_STORAGE_KEYS)
- #define STORAGE_KEY1(_addr) \
-    sysblk.storkeys[((_addr)>>STORAGE_KEY_PAGESHIFT)&~1]
- #define STORAGE_KEY2(_addr) \
-    sysblk.storkeys[((_addr)>>STORAGE_KEY_PAGESHIFT)|1]
+ #define STORAGE_KEY1(_addr, _pointer) \
+    (_pointer)->storkeys[((_addr)>>STORAGE_KEY_PAGESHIFT)&~1]
+ #define STORAGE_KEY2(_addr, _pointer) \
+    (_pointer)->storkeys[((_addr)>>STORAGE_KEY_PAGESHIFT)|1]
 #endif
 
 
-#define XSTORE_INCREMENT_SIZE	0x00100000
-#define XSTORE_PAGESHIFT	12
-#define XSTORE_PAGESIZE 	4096
-#undef	 XSTORE_PAGEMASK
+#define XSTORE_INCREMENT_SIZE   0x00100000
+#define XSTORE_PAGESHIFT    12
+#define XSTORE_PAGESIZE     4096
+#undef   XSTORE_PAGEMASK
 #if defined(FEATURE_ESAME) || defined(_FEATURE_ZSIE)
- #define XSTORE_PAGEMASK	0xFFFFFFFFFFFFF000ULL
+ #define XSTORE_PAGEMASK    0xFFFFFFFFFFFFF000ULL
 #else
- #define XSTORE_PAGEMASK	0x7FFFF000
+ #define XSTORE_PAGEMASK    0x7FFFF000
 #endif
 
 /* end of FEATURES.H */

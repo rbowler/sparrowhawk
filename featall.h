@@ -1,4 +1,4 @@
-/* FEATALL.H    (c) Copyright Jan Jaeger, 2000-2002                  */
+/* FEATALL.H    (c) Copyright Jan Jaeger, 2000-2003                  */
 /*              Architecture-dependent macro definitions             */
 
 /*-------------------------------------------------------------------*/
@@ -33,8 +33,6 @@
 #define OPTION_FAST_LOGICAL             /* Performance option        */
 #define OPTION_FAST_PREFIX              /* Performance option        */
 #define OPTION_REDUCED_INVAL            /* Performance option        */
-#define OPTION_FETCHIBYTE               /* Performance option        */
-#undef  OPTION_CS_USLEEP                /* Sleep if CS collision     */
 #define OPTION_FAST_INTCOND             /* Ea CPU has intcond COND   */
 #define OPTION_SYNCIO                   /* Synchronous I/O option    */
 #define OPTION_IODELAY_KLUDGE           /* IODELAY kludge for linux  */
@@ -43,27 +41,15 @@
 #undef  OPTION_INSTRUCTION_COUNTING     /* First use trace and count */
 #define OPTION_CKD_KEY_TRACING          /* Trace CKD search keys     */
 #undef  OPTION_CMPSC_DEBUGLVL      /* 3 ** 1=Exp 2=Comp 3=Both debug */
+#ifdef  WIN32
+#define OPTION_SELECT_KLUDGE         10 /* fd's to reserve for select*/
+#endif
 #undef  MODEL_DEPENDENT_STCM            /* STCM, STCMH always store  */
 #define OPTION_NOP_MODEL158_DIAGNOSE    /* NOP mod 158 specific diags*/
 #define FEATURE_ALD_FORMAT            0
+#define FEATURE_SIE_MAXZONES          8
 
 #define OPTION_HTTP_SERVER              /* HTTP server support       */
-
-
-/////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////
-/*
-  The following option is currently hard-coded, but only while
-  development and testing is still in progress. Once development
-  and testing is complete, control of the setting of this option
-  should be moved to the configure script. (Either that or it
-  should be removed altogether and made a permanent feature.)
-*/
-#if defined(WIN32)
-#define OPTION_W32_CTCI
-#endif // defined(WIN32)
-/////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////
 
 
 /* Allow for compiler command line overrides */
@@ -77,13 +63,18 @@
  #undef OPTION_900_MODE
 #endif
 
-
 /* OPTION_FISHIO only possible with OPTION_FTHREADS */
 #if defined(OPTION_FTHREADS)
   #define OPTION_FISHIO
 #else // !defined(OPTION_FTHREADS)
   #undef OPTION_FISHIO
 #endif
+
+
+/* CTCI-W32 only valid for Win32 */
+#if defined(WIN32)
+#define OPTION_W32_CTCI
+#endif // defined(WIN32)
 
 
 #undef FEATURE_4K_STORAGE_KEYS
@@ -110,10 +101,12 @@
 #undef FEATURE_ESAME
 #undef FEATURE_ESAME_N3_ESA390
 #undef FEATURE_EXPANDED_STORAGE
+#undef FEATURE_EXPEDITED_SIE_SUBSET  
 #undef FEATURE_EXTENDED_STORAGE_KEYS
 #undef FEATURE_EXTENDED_TOD_CLOCK
 #undef FEATURE_EXTENDED_TRANSLATION
 #undef FEATURE_EXTENDED_TRANSLATION_FACILITY_2
+#undef FEATURE_EXTERNAL_INTERRUPT_ASSIST
 #undef FEATURE_FETCH_PROTECTION_OVERRIDE
 #undef FEATURE_FPS_EXTENSIONS
 #undef FEATURE_HERCULES_DIAGCALLS
@@ -124,6 +117,7 @@
 #undef FEATURE_INCORRECT_LENGTH_INDICATION_SUPPRESSION
 #undef FEATURE_INTERPRETIVE_EXECUTION
 #undef FEATURE_INTERVAL_TIMER
+#undef FEATURE_IO_ASSIST
 #undef FEATURE_LINKAGE_STACK
 #undef FEATURE_LOAD_REVERSED
 #undef FEATURE_LOCK_PAGE
@@ -136,6 +130,8 @@
 #undef FEATURE_PER
 #undef FEATURE_PER2
 #undef FEATURE_PRIVATE_SPACE
+#undef FEATURE_PROTECTION_INTERCEPTION_CONTROL
+#undef FEATURE_REGION_RELOCATE
 #undef FEATURE_RESUME_PROGRAM
 #undef FEATURE_S370_CHANNEL
 #undef FEATURE_S390_DAT
@@ -154,5 +150,6 @@
 #undef FEATURE_TEST_BLOCK
 #undef FEATURE_TRACING
 #undef FEATURE_VECTOR_FACILITY
+#undef FEATURE_WAITSTATE_ASSIST
 
 /* end of FEATALL.H */

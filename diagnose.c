@@ -1,4 +1,4 @@
-/* DIAGNOSE.C   (c) Copyright Roger Bowler, 2000-2002                */
+/* DIAGNOSE.C   (c) Copyright Roger Bowler, 2000-2003                */
 /*              ESA/390 Diagnose Functions                           */
 
 /*-------------------------------------------------------------------*/
@@ -9,7 +9,7 @@
 /* Additional credits:                                               */
 /*      Hercules-specific diagnose calls by Jay Maynard.             */
 /*      Set/reset bad frame indicator call by Jan Jaeger.            */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -38,6 +38,17 @@ U32             n;                      /* 32-bit operand value      */
 
     switch(code) {
 
+
+#if defined(FEATURE_IO_ASSIST)
+    case 0x002:
+    /*---------------------------------------------------------------*/
+    /* Diagnose 002: Update Interrupt Interlock Control Bit in PMCW  */
+    /*---------------------------------------------------------------*/
+
+        ARCH_DEP(diagnose_002) (regs, r1, r2);
+
+        break;
+#endif
 
     case 0x01F:
     /*---------------------------------------------------------------*/
@@ -146,7 +157,7 @@ U32             n;                      /* 32-bit operand value      */
     /* Diagnose 060: Virtual Machine Storage Size                    */
     /*---------------------------------------------------------------*/
         /* Load main storage size in bytes into R1 register */
-        regs->GR_L(r1) = regs->mainsize;
+        regs->GR_L(r1) = sysblk.mainsize;
         break;
 
     case 0x064:
@@ -266,15 +277,15 @@ U32             n;                      /* 32-bit operand value      */
         n = APPLY_PREFIXING (n, regs->PX);
 
         /* Addressing exception if block is outside main storage */
-        if ( n >= regs->mainsize )
+        if ( n > regs->mainlim )
         {
             ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
             break;
         }
 
         /* Update the storage key from R1 register bit 31 */
-        STORAGE_KEY(n) &= ~(STORKEY_BADFRM);
-        STORAGE_KEY(n) |= regs->GR_L(r1) & STORKEY_BADFRM;
+        STORAGE_KEY(n, regs) &= ~(STORKEY_BADFRM);
+        STORAGE_KEY(n, regs) |= regs->GR_L(r1) & STORKEY_BADFRM;
 
         break;
 

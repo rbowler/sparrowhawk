@@ -1,4 +1,4 @@
-/* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2002                  */
+/* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2003                  */
 /*              ESA/390 Diagnose Functions                           */
 
 /*-------------------------------------------------------------------*/
@@ -8,7 +8,7 @@
 /* LPAR RMF interface call                                           */
 /*                                                                   */
 /*                                             04/12/1999 Jan Jaeger */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -175,7 +175,7 @@ typedef struct _DIAG204_PART_CPU {
 /*-------------------------------------------------------------------*/
 void ARCH_DEP(scpend_call) (void)
 {
-        usleep(1L);                     /* Just go to the dispatcher
+        sched_yield();                  /* Just go to the dispatcher
                                            for a minimum delay       */
 } /* end function scpend_call */
 
@@ -187,7 +187,7 @@ int ARCH_DEP(mssf_call) (int r1, int r2, REGS *regs)
 {
 U32     spccb_absolute_addr;            /* Absolute addr of SPCCB    */
 U32     mssf_command;                   /* MSSF command word         */
-int               spccblen;            /* Length of SPCCB            */
+U32               spccblen;            /* Length of SPCCB            */
 SPCCB_HEADER      *spccb;              /* -> SPCCB header            */
 SPCCB_CONFIG_INFO *spccbconfig;        /* -> SPCCB CONFIG info       */
 SPCCB_CPU_INFO    *spccbcpu;           /* -> SPCCB CPU information   */
@@ -207,23 +207,23 @@ DEVBLK            *dev;                /* Device block pointer       */
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Program check if SPCCB is outside main storage */
-    if ( spccb_absolute_addr >= regs->mainsize )
+    if ( spccb_absolute_addr > regs->mainlim )
         ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
 //  /*debug*/logmsg("MSSF call %8.8X SPCCB=%8.8X\n",
 //  /*debug*/       mssf_command, spccb_absolute_addr);
 
     /* Point to Service Processor Command Control Block */
-    spccb = (SPCCB_HEADER*)(sysblk.mainstor + spccb_absolute_addr);
+    spccb = (SPCCB_HEADER*)(regs->mainstor + spccb_absolute_addr);
 
     /* Load SPCCB length from header */
     FETCH_HW(spccblen,spccb->length);
 
     /* Mark page referenced */
-    STORAGE_KEY(spccb_absolute_addr) |= STORKEY_REF;
+    STORAGE_KEY(spccb_absolute_addr, regs) |= STORKEY_REF;
 
     /* Program check if end of SPCCB falls outside main storage */
-    if ( regs->mainsize - spccblen < spccb_absolute_addr )
+    if ( sysblk.mainsize - spccblen < spccb_absolute_addr )
         ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Obtain the interrupt lock */
@@ -258,7 +258,7 @@ DEVBLK            *dev;                /* Device block pointer       */
             memset (spccbconfig, 0, sizeof(SPCCB_CONFIG_INFO));
 
             /* Set main storage size in SPCCB */
-            spccbconfig->totstori = regs->mainsize >> 20;
+            spccbconfig->totstori = sysblk.mainsize >> 20;
             spccbconfig->storisiz = 1;
             spccbconfig->hex04 = 0x04;
             spccbconfig->hex01 = 0x01;
@@ -341,7 +341,7 @@ DEVBLK            *dev;                /* Device block pointer       */
         } /* end switch(mssf_command) */
 
     /* Mark page changed */
-    STORAGE_KEY(spccb_absolute_addr) |= STORKEY_CHANGE;
+    STORAGE_KEY(spccb_absolute_addr, regs) |= STORKEY_CHANGE;
 
     /* Set service signal external interrupt pending */
     sysblk.servparm &= ~SERVSIG_ADDR;
@@ -367,7 +367,7 @@ DIAG204_PART      *partinfo;           /* Partition info             */
 DIAG204_PART_CPU  *cpuinfo;            /* CPU info                   */
 RADR              abs;                 /* abs addr of data area      */
 U64               dreg;                /* work doubleword            */
-int               i;                   /* loop counter               */
+U32               i;                   /* loop counter               */
 struct rusage     usage;               /* RMF type data              */
 static char       lparname[] = "HERCULES";
 static char       physical[] = "PHYSICAL";
@@ -380,7 +380,7 @@ static U64        diag204tod;          /* last diag204 tod           */
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Program check if RMF data area is outside main storage */
-    if ( abs >= regs->mainsize )
+    if ( abs > regs->mainlim )
         ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Test DIAG204 command word */
@@ -404,10 +404,10 @@ static U64        diag204tod;          /* last diag204 tod           */
         release_lock (&sysblk.todlock);
 
         /* Point to DIAG 204 data area */
-        hdrinfo = (DIAG204_HDR*)(sysblk.mainstor + abs);
+        hdrinfo = (DIAG204_HDR*)(regs->mainstor + abs);
 
         /* Mark page referenced */
-        STORAGE_KEY(abs) |= STORKEY_REF | STORKEY_CHANGE;
+        STORAGE_KEY(abs, regs) |= STORKEY_REF | STORKEY_CHANGE;
 
         memset(hdrinfo, 0, sizeof(DIAG204_HDR));
         hdrinfo->numpart = 1;
@@ -422,7 +422,7 @@ static U64        diag204tod;          /* last diag204 tod           */
         partinfo->partnum = 1;
         partinfo->virtcpu = sysblk.numcpu;
         for(i = 0; i < sizeof(partinfo->partname); i++)
-            partinfo->partname[i] = ascii_to_ebcdic[(int)lparname[i]];
+            partinfo->partname[i] = host_to_guest((int)lparname[i]);
 
         /* hercules cpu's */
         getrusage(RUSAGE_SELF,&usage);
@@ -455,7 +455,7 @@ static U64        diag204tod;          /* last diag204 tod           */
         partinfo->partnum = 0;
         partinfo->virtcpu = 1;
         for(i = 0; i < sizeof(partinfo->partname); i++)
-            partinfo->partname[i] = ascii_to_ebcdic[(int)physical[i]];
+            partinfo->partname[i] = host_to_guest((int)physical[i]);
         cpuinfo = (DIAG204_PART_CPU*)(partinfo + 1);
         memset(cpuinfo, 0, sizeof(DIAG204_PART_CPU));
 //      STORE_HW(cpuinfo->cpaddr,0);

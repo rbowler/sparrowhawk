@@ -1,11 +1,11 @@
-/* GENERAL1.C   (c) Copyright Roger Bowler, 1994-2002                */
+/* GENERAL1.C   (c) Copyright Roger Bowler, 1994-2003                */
 /*              ESA/390 CPU Emulator                                 */
 /*              Instructions A-M                                     */
 
 /*              (c) Copyright Peter Kuschnerus, 1999 (UPT & CFC)     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all general instructions of the            */
@@ -279,16 +279,16 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         npa2 = LOGICAL_TO_ABS (npv2, b2, regs, ACCTYPE_READ, akey);
 
     /* all operands and page crossers valid, now alter ref & chg bits */
-    STORAGE_KEY(abs1) |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(abs1, regs) |= (STORKEY_REF | STORKEY_CHANGE);
     if (npa1)
-        STORAGE_KEY(npa1) |= (STORKEY_REF | STORKEY_CHANGE);
+        STORAGE_KEY(npa1, regs) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Process operands from left to right */
     for ( i = 0; i <= l; i++ )
     {
         /* Fetch a byte from each operand */
-        byte1 = sysblk.mainstor[abs1];
-        byte2 = sysblk.mainstor[abs2];
+        byte1 = regs->mainstor[abs1];
+        byte2 = regs->mainstor[abs2];
 
         /* Copy low digit of operand 2 to operand 1 */
         byte1 &=  byte2;
@@ -297,7 +297,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         if (byte1 != 0) cc = 1;
 
         /* Store the result in the destination operand */
-        sysblk.mainstor[abs1] = byte1;
+        regs->mainstor[abs1] = byte1;
 
         /* Increment first operand address */
         effective_addr1++;
@@ -1188,7 +1188,7 @@ U32     n;                              /* 32-bit operand values     */
 
 /*-------------------------------------------------------------------*/
 /* B21A CFC   - Compare and Form Codeword                        [S] */
-/*              (c) Copyright Peter Kuschnerus, 1999-2002            */
+/*              (c) Copyright Peter Kuschnerus, 1999-2003            */
 /* 64BIT INCOMPLETE                                                  */
 /*-------------------------------------------------------------------*/
 DEF_INST(compare_and_form_codeword)
@@ -1298,6 +1298,7 @@ DEF_INST(compare_and_swap)
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
+RADR    abs2;                           /* absolute address          */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -1306,13 +1307,21 @@ VADR    effective_addr2;                /* effective address         */
     /* Perform serialization before starting operation */
     PERFORM_SERIALIZATION (regs);
 
+    /* Get operand absolute address */
+    abs2 = LOGICAL_TO_ABS (effective_addr2, b2, regs,
+                           ACCTYPE_WRITE, regs->psw.pkey);
+
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
-    COMPARE_AND_SWAP(r1, r3, effective_addr2, b2, regs );
+    /* Attempt to exchange the values */
+    regs->psw.cc = cmpxchg4 (&regs->GR_L(r1), regs->GR_L(r3), regs->mainstor + abs2);
 
     /* Release main-storage access lock */
     RELEASE_MAINLOCK(regs);
+
+    /* Perform serialization after completing operation */
+    PERFORM_SERIALIZATION (regs);
 
     if (regs->psw.cc == 1)
     {
@@ -1339,6 +1348,8 @@ DEF_INST(compare_double_and_swap)
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
+RADR    abs2;                           /* absolute address          */
+U64     old, new;                       /* old, new values           */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -1349,10 +1360,19 @@ VADR    effective_addr2;                /* effective address         */
     /* Perform serialization before starting operation */
     PERFORM_SERIALIZATION (regs);
 
+    /* Get operand absolute address */
+    abs2 = LOGICAL_TO_ABS (effective_addr2, b2, regs,
+                           ACCTYPE_WRITE, regs->psw.pkey);
+
+    /* Get old, new values */
+    old = ((U64)(regs->GR_L(r1)) << 32) | regs->GR_L(r1+1);
+    new = ((U64)(regs->GR_L(r3)) << 32) | regs->GR_L(r3+1);
+
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
-    COMPARE_DOUBLE_AND_SWAP(r1, r3, effective_addr2, b2, regs );
+    /* Attempt to exchange the values */
+    regs->psw.cc = cmpxchg8 (&old, new, regs->mainstor + abs2);
 
     /* Release main-storage access lock */
     RELEASE_MAINLOCK(regs);
@@ -1362,6 +1382,8 @@ VADR    effective_addr2;                /* effective address         */
 
     if (regs->psw.cc == 1)
     {
+        regs->GR_L(r1) = old >> 32;
+        regs->GR_L(r1+1) = old & 0xffffffff;
 #if defined(_FEATURE_SIE)
         if((regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CS1)))
         {
@@ -2027,7 +2049,7 @@ GREG    nlen2;                          /* Next operand 2 length     */
 U16     uvwxy;                          /* Unicode work area         */
 U16     unicode1;                       /* Unicode character         */
 U16     unicode2;                       /* Unicode low surrogate     */
-int     n;                              /* Number of UTF-8 bytes - 1 */
+GREG    n;                              /* Number of UTF-8 bytes - 1 */
 BYTE    utf[4];                         /* UTF-8 bytes               */
 
     RRE(inst, execflag, regs, r1, r2);
@@ -2156,7 +2178,7 @@ int     pair;                           /* 1=Store Unicode pair      */
 U16     uvwxy;                          /* Unicode work area         */
 U16     unicode1;                       /* Unicode character         */
 U16     unicode2 = 0;                   /* Unicode low surrogate     */
-int     n;                              /* Number of UTF-8 bytes - 1 */
+GREG    n;                              /* Number of UTF-8 bytes - 1 */
 BYTE    utf[4];                         /* UTF-8 bytes               */
 
     RRE(inst, execflag, regs, r1, r2);
@@ -2614,16 +2636,16 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         npa2 = LOGICAL_TO_ABS (npv2, b2, regs, ACCTYPE_READ, akey);
 
     /* all operands and page crossers valid, now alter ref & chg bits */
-    STORAGE_KEY(abs1) |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(abs1, regs) |= (STORKEY_REF | STORKEY_CHANGE);
     if (npa1)
-        STORAGE_KEY(npa1) |= (STORKEY_REF | STORKEY_CHANGE);
+        STORAGE_KEY(npa1, regs) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Process operands from left to right */
     for ( i = 0; i <= l; i++ )
     {
         /* Fetch a byte from each operand */
-        byte1 = sysblk.mainstor[abs1];
-        byte2 = sysblk.mainstor[abs2];
+        byte1 = regs->mainstor[abs1];
+        byte2 = regs->mainstor[abs2];
 
         /* XOR operand 1 with operand 2 */
         byte1 ^= byte2;
@@ -2632,7 +2654,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         if (byte1 != 0) cc = 1;
 
         /* Store the result in the destination operand */
-        sysblk.mainstor[abs1] = byte1;
+        regs->mainstor[abs1] = byte1;
 
         /* Increment first operand address */
         effective_addr1++;
@@ -3226,7 +3248,7 @@ GREG    n;                              /* Work area                 */
 BYTE    obyte;                          /* Operand byte              */
 BYTE    pad;                            /* Padding byte              */
 #ifdef OPTION_FAST_MOVELONG
-RADR    abs1, abs2;
+RADR	abs1, abs2;
 GREG    len3;
 #endif
 
@@ -3261,8 +3283,10 @@ GREG    len3;
             GR_A(r1, regs) = addr1;
             GR_A(r2, regs) = addr2;
             regs->psw.cc =  3;
-            logmsg ("MVCL destructive overlap: ");
+#if 0
+            logmsg (_("MVCL destructive overlap: "));
             ARCH_DEP(display_inst) (regs, inst);
+#endif
             return;
         }
     }
@@ -3284,7 +3308,7 @@ GREG    len3;
 
             abs1 = LOGICAL_TO_ABS (addr1, r1, regs, ACCTYPE_WRITE,
                                    regs->psw.pkey);
-            memset(sysblk.mainstor+abs1, pad, len3);
+            memset(regs->mainstor+abs1, pad, len3);
 
 #if defined(FEATURE_PER)
             if( EN_IC_PER_SA(regs)
@@ -3331,7 +3355,7 @@ GREG    len3;
         abs1 = LOGICAL_TO_ABS (addr1, r1, regs, ACCTYPE_WRITE, regs->psw.pkey);
         abs2 = LOGICAL_TO_ABS (addr2, r2, regs, ACCTYPE_READ, regs->psw.pkey);
 
-        memcpy(sysblk.mainstor+abs1, sysblk.mainstor+abs2, len1);
+        memcpy(regs->mainstor+abs1, regs->mainstor+abs2, len1);
 
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SA(regs)
@@ -3361,7 +3385,7 @@ GREG    len3;
         abs2 = LOGICAL_TO_ABS (addr2, r2, regs, ACCTYPE_READ, regs->psw.pkey);
         abs1 = LOGICAL_TO_ABS (addr1, r1, regs, ACCTYPE_WRITE, regs->psw.pkey);
 
-        memcpy(sysblk.mainstor+abs1, sysblk.mainstor+abs2, 256);
+        memcpy(regs->mainstor+abs1, regs->mainstor+abs2, 256);
 
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SA(regs)
@@ -3571,22 +3595,22 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         npa2 = LOGICAL_TO_ABS (npv2, b2, regs, ACCTYPE_READ, akey);
 
     /* all operands and page crossers valid, now alter ref & chg bits */
-    STORAGE_KEY(abs1) |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(abs1, regs) |= (STORKEY_REF | STORKEY_CHANGE);
     if (npa1)
-        STORAGE_KEY(npa1) |= (STORKEY_REF | STORKEY_CHANGE);
+        STORAGE_KEY(npa1, regs) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Process operands from left to right */
     for ( i = 0; i <= l; i++ )
     {
         /* Fetch a byte from each operand */
-        byte1 = sysblk.mainstor[abs1];
-        byte2 = sysblk.mainstor[abs2];
+        byte1 = regs->mainstor[abs1];
+        byte2 = regs->mainstor[abs2];
 
         /* Copy low digit of operand 2 to operand 1 */
         byte1 = (byte1 & 0xF0) | (byte2 & 0x0F);
 
         /* Store the result in the destination operand */
-        sysblk.mainstor[abs1] = byte1;
+        regs->mainstor[abs1] = byte1;
 
         /* Increment first operand address */
         effective_addr1++;
@@ -3784,22 +3808,22 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         npa2 = LOGICAL_TO_ABS (npv2, b2, regs, ACCTYPE_READ, akey);
 
     /* all operands and page crossers valid, now alter ref & chg bits */
-    STORAGE_KEY(abs1) |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(abs1, regs) |= (STORKEY_REF | STORKEY_CHANGE);
     if (npa1)
-        STORAGE_KEY(npa1) |= (STORKEY_REF | STORKEY_CHANGE);
+        STORAGE_KEY(npa1, regs) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Process operands from left to right */
     for ( i = 0; i <= l; i++ )
     {
         /* Fetch a byte from each operand */
-        byte1 = sysblk.mainstor[abs1];
-        byte2 = sysblk.mainstor[abs2];
+        byte1 = regs->mainstor[abs1];
+        byte2 = regs->mainstor[abs2];
 
         /* Copy high digit of operand 2 to operand 1 */
         byte1 = (byte1 & 0x0F) | (byte2 & 0xF0);
 
         /* Store the result in the destination operand */
-        sysblk.mainstor[abs1] = byte1;
+        regs->mainstor[abs1] = byte1;
 
         /* Increment first operand address */
         effective_addr1++;

@@ -1,4 +1,4 @@
-/* CCKDCDSK.C   (c) Copyright Roger Bowler, 1999-2002                */
+/* CCKDCDSK.C   (c) Copyright Roger Bowler, 1999-2003                */
 /*       Perform chkdsk for a Compressed CKD Direct Access Storage   */
 /*       Device file.                                                */
 
@@ -28,8 +28,15 @@ int             cckd_chkdsk_rc = 0;     /* Program return code       */
 char           *fn;                     /* File name                 */
 int             fd;                     /* File descriptor           */
 int             level=1;                /* Chkdsk level checking     */
-int             ro=0;                   /* 1 = Open readonly         */
+int             ro=0;                   /* 1=Open readonly           */
+int             force=0;                /* 1=Check if OPENED bit on  */
 CCKDDASD_DEVHDR cdevhdr;                /* Compressed CKD device hdr */
+
+#if defined(ENABLE_NLS)
+    setlocale(LC_ALL, "");
+    bindtextdomain(PACKAGE, LOCALEDIR);
+    textdomain(PACKAGE);
+#endif
 
 #ifdef EXTERNALGUI
     if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
@@ -38,9 +45,6 @@ CCKDDASD_DEVHDR cdevhdr;                /* Compressed CKD device hdr */
         argc--;
     }
 #endif /*EXTERNALGUI*/
-
-    /* Display the program identification message */
-    display_version (stderr, "Hercules cckd chkdsk program ");
 
     /* parse the arguments */
     for (argc--, argv++ ; argc > 0 ; argc--, argv++)
@@ -51,13 +55,20 @@ CCKDDASD_DEVHDR cdevhdr;                /* Compressed CKD device hdr */
         {
             case '0':
             case '1':
+            case '2':
             case '3':  if (argv[0][2] != '\0') return syntax ();
                        level = (argv[0][1] & 0xf);
+                       break;
+            case 'f':  if (argv[0][2] != '\0') return syntax ();
+                       force = 1;
                        break;
             case 'r':  if (argv[0][2] == 'o' && argv[0][3] == '\0')
                            ro = 1;
                        else return syntax ();
                        break;
+            case 'v':  if (argv[0][2] != '\0') return syntax ();
+                       display_version (stderr, "Hercules cckd chkdsk program ");
+                       return 0;
             default:   return syntax ();
         }
     }
@@ -72,37 +83,60 @@ CCKDDASD_DEVHDR cdevhdr;                /* Compressed CKD device hdr */
     if (fd < 0)
     {
         fprintf (stderr,
-                 "cckdcdsk: error opening file %s: %s\n",
+                 _("cckdcdsk: error opening file %s: %s\n"),
                  fn, strerror(errno));
         return -1;
+    }
+
+    /* Check CCKD_OPENED bit if -f not specified */
+    if (!force)
+    {
+        if (lseek (fd, CKDDASD_DEVHDR_SIZE, SEEK_SET) < 0)
+        {
+            fprintf (stderr, _("cckdcdsk: lseek error: %s\n"),strerror(errno));
+            close (fd);
+            return -1;
+        }
+        if (read (fd, &cdevhdr, CCKDDASD_DEVHDR_SIZE) < CCKDDASD_DEVHDR_SIZE)
+        {
+            fprintf (stderr, _("cckdcdsk: read error: %s\n"),strerror(errno));
+            close (fd);
+            return -1;
+        }
+        if (cdevhdr.options & CCKD_OPENED)
+        {
+            fprintf (stderr, _("cckdcdsk: OPENED bit is on, use `-f'\n"));
+            close (fd);
+            return -1;
+        }
     }
 
     /* call the actual chkdsk function */
     cckd_chkdsk_rc = cckd_chkdsk (fd, stderr, level);
 
     /* print some statistics */
-	if (lseek (fd, CKDDASD_DEVHDR_SIZE, SEEK_SET) < 0)
-	{
-		fprintf (stderr, "lseek error: %s\n",strerror(errno));
-		if (!cckd_chkdsk_rc) cckd_chkdsk_rc = 1;
-	}
-	else
-	{
-		if (read (fd, &cdevhdr, CCKDDASD_DEVHDR_SIZE) < 0)
-		{
-			fprintf (stderr, "read error: %s\n",strerror(errno));
-			if (!cckd_chkdsk_rc) cckd_chkdsk_rc = 1;
-		}
-		else
-		{
-			if (cckd_endian() != ((cdevhdr.options & CCKD_BIGENDIAN) != 0))
-				cckd_swapend_chdr (&cdevhdr);
+    if (lseek (fd, CKDDASD_DEVHDR_SIZE, SEEK_SET) < 0)
+    {
+        fprintf (stderr, _("lseek error: %s\n"),strerror(errno));
+        if (!cckd_chkdsk_rc) cckd_chkdsk_rc = 1;
+    }
+    else
+    {
+        if (read (fd, &cdevhdr, CCKDDASD_DEVHDR_SIZE) < 0)
+        {
+            fprintf (stderr, _("read error: %s\n"),strerror(errno));
+            if (!cckd_chkdsk_rc) cckd_chkdsk_rc = 1;
+        }
+        else
+        {
+            if (cckd_endian() != ((cdevhdr.options & CCKD_BIGENDIAN) != 0))
+                cckd_swapend_chdr (&cdevhdr);
 
-			fprintf (stdout, "size %d used %d free %d first 0x%x number %d\n",
-					 cdevhdr.size, cdevhdr.used, cdevhdr.free_total,
-					 cdevhdr.free, cdevhdr.free_number);
-		}
-	}
+            fprintf (stdout, _("size %d used %d free %d first 0x%x number %d\n"),
+                     cdevhdr.size, cdevhdr.used, cdevhdr.free_total,
+                     cdevhdr.free, cdevhdr.free_number);
+        }
+    }
 
     close (fd);
 
@@ -114,13 +148,18 @@ CCKDDASD_DEVHDR cdevhdr;                /* Compressed CKD device hdr */
 /*-------------------------------------------------------------------*/
 int syntax()
 {
-    fprintf (stderr, "cckdcdsk [-level] [-ro] file-name\n"
+    fprintf (stderr, _("\ncckdcdsk [-v] [-f] [-level] [-ro] file-name\n"
                 "\n"
-                "       where level is a digit 0 - 3:\n"
-                "         0  --  minimal checking\n"
-                "         1  --  normal  checking\n"
-                "         3  --  maximal checking\n"
+                "          -v      display version and exit\n"
                 "\n"
-                "       ro open file readonly, no repairs\n");
+                "          -f      force check even if OPENED bit is on\n"
+                "\n"
+                "        level is a digit 0 - 3:\n"
+                "          -0  --  minimal checking\n"
+                "          -1  --  normal  checking\n"
+                "          -3  --  maximal checking\n"
+                "\n"
+                "          -ro     open file readonly, no repairs\n"
+                "\n"));
     return -1;
 }

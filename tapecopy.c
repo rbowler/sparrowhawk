@@ -1,4 +1,4 @@
-/* TAPECOPY.C   (c) Copyright Roger Bowler, 1999-2002                */
+/* TAPECOPY.C   (c) Copyright Roger Bowler, 1999-2003                */
 /*              Convert SCSI tape into AWSTAPE format                */
 
 /*-------------------------------------------------------------------*/
@@ -7,6 +7,14 @@
 /* If no disk file name is supplied, then the program simply         */
 /* prints a summary of the tape files and blocksizes.                */
 /*-------------------------------------------------------------------*/
+
+#if defined(__APPLE__)
+int sysblk;
+int main (int argc, char *argv[])
+{
+       return 0;
+}
+#else
 
 #include "hercules.h"
 
@@ -24,6 +32,8 @@ typedef struct _AWSTAPE_BLKHDR {
 #define AWSTAPE_FLAG1_NEWREC    0x80    /* Start of new record       */
 #define AWSTAPE_FLAG1_TAPEMARK  0x40    /* Tape mark                 */
 #define AWSTAPE_FLAG1_ENDREC    0x20    /* End of record             */
+
+SYSBLK sysblk; /* Currently only used for codepage mapping */
 
 /*-------------------------------------------------------------------*/
 /* Static data areas                                                 */
@@ -62,16 +72,11 @@ static struct mt_tape_info densinfo[] = {
 static BYTE buf[65500];
 
 /*-------------------------------------------------------------------*/
-/* ASCII to EBCDIC translate tables                                  */
-/*-------------------------------------------------------------------*/
-#include "codeconv.h"
-
-/*-------------------------------------------------------------------*/
 /* Subroutine to print tape status                                   */
 /*-------------------------------------------------------------------*/
 static void print_status (BYTE *devname, long stat)
 {
-    printf ("%s status: %8.8lX", devname, stat);
+    printf ("HHCTC015I %s status: %8.8lX", devname, stat);
     if (GMT_EOF(stat)) printf (" EOF");
     if (GMT_BOT(stat)) printf (" BOT");
     if (GMT_EOT(stat)) printf (" EOT");
@@ -99,7 +104,7 @@ struct mtget    stblk;                  /* Area for MTIOCGET ioctl   */
     rc = ioctl (devfd, MTIOCGET, (char*)&stblk);
     if (rc < 0)
     {
-        printf ("tapecopy: Error reading status of %s: %s\n",
+        printf ("HHCTC016E Error reading status of %s: %s\n",
                 devname, strerror(errno));
         return -1;
     }
@@ -140,6 +145,18 @@ struct mtget    stblk;                  /* Area for MTIOCGET ioctl   */
 long            density;                /* Tape density code         */
 BYTE            labelrec[81];           /* Standard label (ASCIIZ)   */
 AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
+char   *scodepage;
+
+    /* set_codepage() uses the logmsg macro which requires msgpipew */
+    sysblk.msgpipew = stdout;
+    if(!sysblk.codepage)
+    {
+        if((scodepage = getenv("HERCULES_CP")))
+            set_codepage(scodepage);
+        else
+            set_codepage("default");
+    }
+
 
 #ifdef EXTERNALGUI
     if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
@@ -174,7 +191,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
     devfd = open (devname, O_RDONLY|O_BINARY);
     if (devfd < 0)
     {
-        printf ("tapecopy: Error opening %s: %s\n",
+        printf ("HHCTC001E Error opening %s: %s\n",
                 devname, strerror(errno));
         exit (3);
     }
@@ -183,7 +200,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
     rc = ioctl (devfd, MTIOCGET, (char*)&stblk);
     if (rc < 0)
     {
-        printf ("tapecopy: Error reading status of %s: %s\n",
+        printf ("HHCTC002E Error reading status of %s: %s\n",
                 devname, strerror(errno));
         exit (7);
     }
@@ -193,9 +210,9 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
                 && tapeinfo[i].t_type != stblk.mt_type; i++);
 
     if (tapeinfo[i].t_name != NULL)
-        printf ("%s device type: %s\n", devname, tapeinfo[i].t_name);
+        printf ("HHCTC003I %s device type: %s\n", devname, tapeinfo[i].t_name);
     else
-        printf ("%s device type: 0x%lX\n", devname, stblk.mt_type);
+        printf ("HHCTC003I %s device type: 0x%lX\n", devname, stblk.mt_type);
 
     density = (stblk.mt_dsreg & MT_ST_DENSITY_MASK)
                 >> MT_ST_DENSITY_SHIFT;
@@ -204,9 +221,10 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
                 && densinfo[i].t_type != density; i++);
 
     if (densinfo[i].t_name != NULL)
-        printf ("%s tape density: %s\n", devname, densinfo[i].t_name);
+        printf ("HHCTC004I %s tape density: %s\n",
+                devname, densinfo[i].t_name);
     else
-        printf ("%s tape density code: 0x%lX\n", devname, density);
+        printf ("HHCTC004I %s tape density code: 0x%lX\n", devname, density);
 
     if (stblk.mt_gstat != 0)
     {
@@ -219,7 +237,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
     rc = ioctl (devfd, MTIOCTOP, (char*)&opblk);
     if (rc < 0)
     {
-        printf ("tapecopy: Error setting attributes for %s: %s\n",
+        printf ("HHCTC005E Error setting attributes for %s: %s\n",
                 devname, strerror(errno));
         exit (5);
     }
@@ -230,7 +248,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
     rc = ioctl (devfd, MTIOCTOP, (char*)&opblk);
     if (rc < 0)
     {
-        printf ("tapecopy: Error rewinding %s: %s\n",
+        printf ("HHCTC006E Error rewinding %s: %s\n",
                 devname, strerror(errno));
         exit (6);
     }
@@ -242,7 +260,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
                         S_IRUSR | S_IWUSR | S_IRGRP);
         if (outfd < 0)
         {
-            printf ("tapecopy: Error opening %s: %s\n",
+            printf ("HHCTC007E Error opening %s: %s\n",
                     filename, strerror(errno));
             exit (4);
         }
@@ -264,7 +282,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
         len = read (devfd, buf, sizeof(buf));
         if (len < 0)
         {
-            printf ("tapecopy: Error reading %s: %s\n",
+            printf ("HHCTC008E Error reading %s: %s\n",
                     devname, strerror(errno));
             obtain_status (devname, devfd);
             exit (8);
@@ -274,7 +292,8 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
         if (len == 0)
         {
             /* Print summary of current file */
-            printf ("File %u: Blocks=%u, block size min=%u, max=%u\n",
+            printf ("HHCTC009I File %u: Blocks=%u, block size min=%u, "
+                    "max=%u\n",
                     fileno, blkcount, minblksz, maxblksz);
 
             /* Write tape mark to output file */
@@ -290,9 +309,9 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
 
                 /* Write block header to output file */
                 rc = write (outfd, &awshdr, sizeof(AWSTAPE_BLKHDR));
-                if (rc < sizeof(AWSTAPE_BLKHDR))
+                if (rc < (int)sizeof(AWSTAPE_BLKHDR))
                 {
-                    printf ("tapecopy: Error writing %s: %s\n",
+                    printf ("HHCTC010E Error writing %s: %s\n",
                             filename, strerror(errno));
                     exit (9);
                 } /* end if(rc) */
@@ -308,7 +327,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
             /* Determine whether end of tape has been read */
             rc = obtain_status (devname, devfd);
             if (rc == 0) continue;
-            if (rc > 0) printf ("End of tape\n");
+            if (rc > 0) printf ("HHCTC011I End of tape\n");
             break;
 
         } /* end if(tapemark) */
@@ -326,9 +345,9 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
                 || memcmp(buf, eovlbl, 3) == 0))
         {
             for (i=0; i < 80; i++)
-                labelrec[i] = ebcdic_to_ascii[buf[i]];
+                labelrec[i] = guest_to_host(buf[i]);
             labelrec[i] = '\0';
-            printf ("%s\n", labelrec);
+            printf ("HHCTC012I %s\n", labelrec);
         }
         else
         {
@@ -349,9 +368,9 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
 
             /* Write block header to output file */
             rc = write (outfd, &awshdr, sizeof(AWSTAPE_BLKHDR));
-            if (rc < sizeof(AWSTAPE_BLKHDR))
+            if (rc < (int)sizeof(AWSTAPE_BLKHDR))
             {
-                printf ("tapecopy: Error writing %s: %s\n",
+                printf ("HHCTC013I Error writing %s: %s\n",
                         filename, strerror(errno));
                 exit (10);
             } /* end if(rc) */
@@ -360,7 +379,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
             rc = write (outfd, buf, len);
             if (rc < len)
             {
-                printf ("tapecopy: Error writing %s: %s\n",
+                printf ("HHCTC014I Error writing %s: %s\n",
                         filename, strerror(errno));
                 exit (11);
             } /* end if(rc) */
@@ -376,4 +395,4 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
     return 0;
 
 } /* end function main */
-
+#endif /* defined(__APPLE__) */

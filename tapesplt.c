@@ -1,4 +1,4 @@
-/* tapesplt.C  (c) Copyright Jay Maynard, 2000-2002                 */
+/* tapesplt.C  (c) Copyright Jay Maynard, 2000-2003                 */
 /*              Split AWSTAPE format tape image                      */
 
 /*-------------------------------------------------------------------*/
@@ -33,10 +33,7 @@ static BYTE eoflbl[] = "\xC5\xD6\xC6";  /* EBCDIC characters "EOF"   */
 static BYTE eovlbl[] = "\xC5\xD6\xE5";  /* EBCDIC characters "EOV"   */
 static BYTE buf[65500];
 
-/*-------------------------------------------------------------------*/
-/* ASCII to EBCDIC translate tables                                  */
-/*-------------------------------------------------------------------*/
-#include "codeconv.h"
+SYSBLK sysblk; /* Currently only used for codepage mapping */
 
 #ifdef EXTERNALGUI
 /* Special flag to indicate whether or not we're being
@@ -72,6 +69,18 @@ int             outfilecount;           /* Current # files copied    */
 int             files2copy;             /* Current # files to copy   */
 BYTE            labelrec[81];           /* Standard label (ASCIIZ)   */
 AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
+char   *scodepage;
+
+    /* set_codepage() uses the logmsg macro which requires msgpipew */
+    sysblk.msgpipew = stdout;
+    if(!sysblk.codepage)
+    {
+        if((scodepage = getenv("HERCULES_CP")))
+            set_codepage(scodepage);
+        else
+            set_codepage("default");
+    }
+
 
 #ifdef EXTERNALGUI
     if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
@@ -152,7 +161,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
             }
 
             /* Did we finish too soon? */
-            if ((len > 0) && (len < sizeof(AWSTAPE_BLKHDR)))
+            if ((len > 0) && (len < (int)sizeof(AWSTAPE_BLKHDR)))
             {
                 printf ("tapesplt: incomplete block header on %s\n",
                         infilename);
@@ -181,7 +190,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
 
             /* Copy the header to the output file. */
             rc = write(outfd, buf, sizeof(AWSTAPE_BLKHDR));
-            if (rc < sizeof(AWSTAPE_BLKHDR))
+            if (rc < (int)sizeof(AWSTAPE_BLKHDR))
             {
                 printf ("tapesplt: error writing block header to %s: %s\n",
                         outfilename, strerror(errno));
@@ -272,7 +281,7 @@ AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
                         || memcmp(buf, eovlbl, 3) == 0))
                 {
                     for (i=0; i < 80; i++)
-                        labelrec[i] = ebcdic_to_ascii[buf[i]];
+                        labelrec[i] = guest_to_host(buf[i]);
                     labelrec[i] = '\0';
                     printf ("%s\n", labelrec);
                 }

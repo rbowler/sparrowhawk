@@ -1,6 +1,6 @@
 /* TIMER.C   */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
 
 #include "hercules.h"
 
@@ -28,8 +28,8 @@ void check_timer_event(void);
 /*-------------------------------------------------------------------*/
 void update_TOD_clock(void)
 {
-struct timeval	tv;			/* Current time              */
-U64		dreg;			/* Double register work area */
+struct timeval  tv;         /* Current time              */
+U64     dreg;           /* Double register work area */
 
     /* Get current time */
     gettimeofday (&tv, NULL);
@@ -44,7 +44,7 @@ U64		dreg;			/* Double register work area */
 #ifdef OPTION_TODCLOCK_DRAG_FACTOR
     if (sysblk.toddrag > 1)
         dreg = sysblk.todclock_init +
-		(dreg - sysblk.todclock_init) / sysblk.toddrag;
+        (dreg - sysblk.todclock_init) / sysblk.toddrag;
 #endif /*OPTION_TODCLOCK_DRAG_FACTOR*/
 
     /* Shift left 4 bits so that bits 0-7=TOD Clock Epoch,
@@ -118,14 +118,14 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
                 intmask |= regs->cpumask;
             }
         }
-        else
+        else if (IS_IC_CLKC(regs))
             OFF_IC_CLKC(regs);
 
 #if defined(_FEATURE_SIE)
         /* If running under SIE also check the SIE copy */
         if(regs->sie_active)
         {
-	    /* Signal clock comparator interrupt if needed */
+        /* Signal clock comparator interrupt if needed */
             if((sysblk.todclk + regs->guestregs->todoffset) > regs->guestregs->clkc)
             {
                 ON_IC_CLKC(regs->guestregs);
@@ -151,7 +151,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
                 intmask |= regs->cpumask;
             }
         }
-        else
+        else if(IS_IC_PTIMER(regs))
             OFF_IC_PTIMER(regs);
 
 #if defined(_FEATURE_SIE)
@@ -184,7 +184,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
         if(regs->arch_mode == ARCH_370)
         {
             /* Point to PSA in main storage */
-            psa = (PSA_3XX*)(sysblk.mainstor + regs->PX);
+            psa = (PSA_3XX*)(regs->mainstor + regs->PX);
 
                     /* Decrement the location 80 timer */
             FETCH_FW(itimer,psa->inttimer);
@@ -271,12 +271,17 @@ REGS   *regs;                           /* -> CPU register context   */
 U64     prev = 0;                       /* Previous TOD clock value  */
 U64     diff;                           /* Difference between new and
                                            previous TOD clock values */
+U64     waittime;                       /* CPU wait time in interval */
+U64     now = 0;                        /* Current time of day (us)  */
+U64     then;                           /* Previous time of day (us) */
+int     interval;                       /* Interval (us)             */
 #endif /*OPTION_MIPS_COUNTING*/
 struct  timeval tv;                     /* Structure for gettimeofday
                                            and select function calls */
+  UNREFERENCED(argp);
 
     /* Display thread started message on control panel */
-    logmsg ("HHC610I Timer thread started: tid="TIDPAT", pid=%d\n",
+    logmsg (_("HHCCP012I Timer thread started: tid="TIDPAT", pid=%d\n"),
             thread_id(), getpid());
 
 #ifdef OPTION_TODCLOCK_DRAG_FACTOR
@@ -290,7 +295,7 @@ struct  timeval tv;                     /* Structure for gettimeofday
     sysblk.todclock_init = sysblk.todclock_init * 1000000 + tv.tv_usec;
 #endif /*OPTION_TODCLOCK_DRAG_FACTOR*/
 
-    while (1)
+    while (sysblk.numcpu)
     {
         /* Obtain the TOD lock */
         obtain_lock (&sysblk.todlock);
@@ -299,8 +304,7 @@ struct  timeval tv;                     /* Structure for gettimeofday
         update_TOD_clock();
 
 #ifdef OPTION_MIPS_COUNTING
-        /* Calculate MIPS rate...allow for the Alpha's 1024 ticks/second
-           internal clock, as well as everyone else's 100/second */
+        /* Calculate MIPS rate and percentage CPU busy */
 
         /* Get the difference between the last TOD saved and this one */
         diff = (prev == 0 ? 0 : sysblk.todclk - prev);
@@ -317,22 +321,44 @@ struct  timeval tv;                     /* Structure for gettimeofday
             /* Access the diffent register contexts with the intlock held */
             obtain_lock(&sysblk.intlock);
 
+            /* Get current time, we may have had to wait for the intlock */
+            then = now;
+            gettimeofday (&tv, NULL);
+            now = (U64)tv.tv_sec;
+            now = now * 1000000 + tv.tv_usec;
+            interval = (int)(now - then);
+
             for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
             {
-                if ((sysblk.regs[cpu].cpumask & sysblk.started_mask) == 0)
-                    continue;
-
                 /* Point to the CPU register context */
                 regs = sysblk.regs + cpu;
 
+                /* 0% if no cpu thread or first time thru */
+                if (regs->cputid == 0 || then == 0 || regs->waittod == 0)
+                {
+                    regs->mipsrate = regs->siosrate = 0;
+                    regs->cpupct = 0.0;
+                    continue;
+                }
+
                 /* Calculate instructions/millisecond for this CPU */
                 regs->mipsrate =
-                    (regs->instcount - regs->prevcount) / msecctr;
+                    ((regs->instcount - regs->prevcount)*1000) / interval;
                 regs->siosrate = regs->siocount;
 
                 /* Save the instruction counter */
                 regs->prevcount = regs->instcount;
                 regs->siocount = 0;
+
+                /* Calculate CPU busy percentage */
+                waittime = regs->waittime;
+                if ((sysblk.waitmask & regs->cpumask) != 0)
+                    waittime += now - regs->waittod;
+                regs->cpupct = ((interval - waittime)*1.0) / (interval*1.0);
+
+                /* Reset the wait values */
+                regs->waittime = 0;
+                regs->waittod = now;
 
             } /* end for(cpu) */
 
@@ -355,6 +381,8 @@ struct  timeval tv;                     /* Structure for gettimeofday
         select (0, NULL, NULL, NULL, &tv);
 
     } /* end while */
+
+    logmsg (_("HHCCP013I Timer thread ended\n"));
 
     return NULL;
 

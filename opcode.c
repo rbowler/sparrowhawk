@@ -1,9 +1,9 @@
-/* OPCODE.C     (c) Copyright Jan Jaeger, 2000-2002                  */
+/* OPCODE.C     (c) Copyright Jan Jaeger, 2000-2003                  */
 /*              Instruction decoding functions                       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
 
 
 #include "feature.h"
@@ -146,14 +146,18 @@
 
 
 #if !defined(FEATURE_DUAL_ADDRESS_SPACE)
- UNDEF_INST(insert_address_space_control)
- UNDEF_INST(set_secondary_asn)
  UNDEF_INST(extract_primary_asn)
  UNDEF_INST(extract_secondary_asn)
+ UNDEF_INST(insert_address_space_control)
+ UNDEF_INST(insert_virtual_storage_key)
+ UNDEF_INST(load_address_space_parameters)
+ UNDEF_INST(move_to_primary)
+ UNDEF_INST(move_to_secondary)
+ UNDEF_INST(move_with_key)
  UNDEF_INST(program_call)
  UNDEF_INST(program_transfer)
  UNDEF_INST(set_address_space_control_x)
- UNDEF_INST(load_address_space_parameters)
+ UNDEF_INST(set_secondary_asn)
 #endif /*!defined(FEATURE_DUAL_ADDRESS_SPACE)*/
 
 
@@ -173,10 +177,6 @@
  UNDEF_INST(reset_reference_bit_extended)
  UNDEF_INST(set_storage_key_extended)
 #endif /*!defined(FEATURE_EXTENDED_STORAGE_KEYS)*/
-
-#if !defined(FEATURE_TEST_BLOCK)
- UNDEF_INST(test_block)
-#endif /*!defined(FEATURE_TEST_BLOCK)*/
 
 
 #if !defined(FEATURE_EXTENDED_TOD_CLOCK)
@@ -393,6 +393,9 @@
  UNDEF_INST(load_and_test_bfp_ext_reg)
  UNDEF_INST(load_and_test_bfp_long_reg)
  UNDEF_INST(load_and_test_bfp_short_reg)
+ UNDEF_INST(load_fp_int_ext_reg)
+ UNDEF_INST(load_fp_int_long_reg)
+ UNDEF_INST(load_fp_int_short_reg)
  UNDEF_INST(load_complement_bfp_ext_reg)
  UNDEF_INST(load_complement_bfp_long_reg)
  UNDEF_INST(load_complement_bfp_short_reg)
@@ -455,6 +458,17 @@
 #if !defined(FEATURE_INTERPRETIVE_EXECUTION)
  UNDEF_INST(start_interpretive_execution)
 #endif /*!defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+
+#if !defined(FEATURE_REGION_RELOCATE)
+ UNDEF_INST(store_zone_parameter);
+ UNDEF_INST(set_zone_parameter);
+#endif /*!defined(FEATURE_REGION_RELOCATE)*/
+
+
+#if !defined(FEATURE_IO_ASSIST)
+ UNDEF_INST(test_pending_zone_interrupt);
+#endif /*!defined(FEATURE_IO_ASSIST)*/
 
 
 #if !defined(FEATURE_CHANNEL_SWITCHING)
@@ -671,7 +685,7 @@ DEF_INST(operation_exception)
 
 DEF_INST(dummy_instruction)
 {
-    logmsg("Dummy instruction: "); ARCH_DEP(display_inst) (regs, inst);
+//  logmsg(_("Dummy instruction: ")); ARCH_DEP(display_inst) (regs, inst);
 
     if( !execflag )
     {
@@ -691,6 +705,7 @@ void disasm_ ## _table (BYTE inst[], BYTE unused[]) \
 { \
 func disasm_fn; \
 BYTE* mnemonic; \
+    UNREFERENCED(unused); \
     mnemonic = (void*)opcode_ ## _table [inst _route ][GEN_MAXARCH-1]; \
     disasm_fn = (void*)opcode_ ## _table [inst _route ][GEN_MAXARCH-2]; \
     disasm_fn(inst, mnemonic); \
@@ -730,11 +745,13 @@ DISASM_ROUTE(edxx,[5]);
 
 void disasm_none (BYTE inst[], BYTE mnemonic[])
 {
+    UNREFERENCED(inst);
     logmsg("%s\n",mnemonic);
 }
 
 void disasm_E (BYTE inst[], BYTE mnemonic[])
 {
+    UNREFERENCED(inst);
     logmsg("%s\n",mnemonic);
 }
 
@@ -1239,16 +1256,16 @@ zz_func opcode_table[256][GEN_MAXARCH] = {
  /*DE*/   GENx370x390x900 (edit_x_edit_and_mark,SS_L,"ED"),
  /*DF*/   GENx370x390x900 (edit_x_edit_and_mark,SS_L,"EDMK"),
  /*E0*/   GENx___x___x___ ,
- /*E1*/   GENx___x___x900 (pack_unicode,SS_L,"PKU"),
- /*E2*/   GENx___x___x900 (unpack_unicode,SS_L,"UNPKU"),
+ /*E1*/   GENx___x390x900 (pack_unicode,SS_L,"PKU"),
+ /*E2*/   GENx___x390x900 (unpack_unicode,SS_L,"UNPKU"),
  /*E3*/   GENx___x390x900 (execute_e3xx,e3xx,""),
  /*E4*/   GENx370x390x___ (execute_e4xx,e4xx,""),
  /*E5*/   GENx370x390x900 (execute_e5xx,e5xx,""),
  /*E6*/   GENx___x___x___ ,
  /*E7*/   GENx___x___x___ ,
  /*E8*/   GENx370x390x900 (move_inverse,SS_L,"MVCIN"),
- /*E9*/   GENx___x___x900 (pack_ascii,SS_L,"PKA"),
- /*EA*/   GENx___x___x900 (unpack_ascii,SS_L,"UNPKA"),
+ /*E9*/   GENx___x390x900 (pack_ascii,SS_L,"PKA"),
+ /*EA*/   GENx___x390x900 (unpack_ascii,SS_L,"UNPKA"),
  /*EB*/   GENx___x390x900 (execute_ebxx,ebxx,""),
  /*EC*/   GENx___x390x900 (execute_ecxx,ecxx,""),
  /*ED*/   GENx___x390x900 (execute_edxx,edxx,""),
@@ -1896,9 +1913,9 @@ zz_func opcode_b2xx[256][GEN_MAXARCH] = {
  /*B23A*/ GENx___x390x900 (store_channel_path_status,S,"STCPS"),
  /*B23B*/ GENx___x390x900 (reset_channel_path,S,"RCHP"),
  /*B23C*/ GENx___x390x900 (set_channel_monitor,S,"SCHM"),
- /*B23D*/ GENx___x___x___ ,                                     /*.STZP      */
- /*B23E*/ GENx___x___x___ ,                                     /*.SZP       */
- /*B23F*/ GENx___x___x___ ,                                     /*.TPZI      */
+ /*B23D*/ GENx___x390x900 (store_zone_parameter,S,"STZP"),
+ /*B23E*/ GENx___x390x900 (set_zone_parameter,S,"SZP"),
+ /*B23F*/ GENx___x390x900 (test_pending_zone_interrupt,S,"TPZI"),
  /*B240*/ GENx___x390x900 (branch_and_stack,RRE,"BAKR"),
  /*B241*/ GENx___x390x900 (checksum,RRE,"CKSM"),
  /*B242*/ GENx___x___x___ ,                                     /**Add FRR   */
@@ -1950,8 +1967,8 @@ zz_func opcode_b2xx[256][GEN_MAXARCH] = {
  /*B270*/ GENx___x___x___ ,                                     /*%SPCS      */
  /*B271*/ GENx___x___x___ ,                                     /*%STPCS     */
  /*B272*/ GENx___x___x___ ,                                     /* Sysplex   */
- /*B273*/ GENx___x___x___ ,                                     /*%SIGA      */
- /*B274*/ GENx___x___x___ ,
+ /*B273*/ GENx___x___x___ ,
+ /*B274*/ GENx___x___x___ ,                                     /*%SIGA      */
  /*B275*/ GENx___x___x___ ,
  /*B276*/ GENx___x390x900 (cancel_subchannel,S,"XSCH"),
  /*B277*/ GENx___x390x900 (resume_program,S,"RP"),
@@ -1960,7 +1977,7 @@ zz_func opcode_b2xx[256][GEN_MAXARCH] = {
  /*B27A*/ GENx___x___x___ ,                                     /* Sysplex   */
  /*B27B*/ GENx___x___x___ ,                                     /* TFF/Sysplx*/
  /*B27C*/ GENx___x___x___ ,                                     /* Sysplex   */
- /*B27D*/ GENx___x390x900 (store_system_information,S,"STSI"),
+ /*B27D*/ GENx370x390x900 (store_system_information,S,"STSI"),
  /*B27E*/ GENx___x___x___ ,                                     /* Sysplex   */
  /*B27F*/ GENx___x___x___ ,                                     /* Sysplex   */
  /*B280*/ GENx___x___x___ ,                                     /*#LN L      */
@@ -2101,17 +2118,17 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B302*/ GENx___x390x900 (load_and_test_bfp_short_reg,RRE,"LTEBR"),
  /*B303*/ GENx___x390x900 (load_complement_bfp_short_reg,RRE,"LCEBR"),
  /*B304*/ GENx___x390x900 (loadlength_bfp_short_to_long_reg,RRE,"LDEBR"),
- /*B305*/ GENx___x___x___ ,
- /*B306*/ GENx___x___x___ ,
- /*B307*/ GENx___x___x___ ,
+ /*B305*/ GENx___x390x900 (dummy_instruction,RRE,"LXDBR"),
+ /*B306*/ GENx___x390x900 (dummy_instruction,RRE,"LXEBR"),
+ /*B307*/ GENx___x390x900 (dummy_instruction,RRE,"MXDBR"),
  /*B308*/ GENx___x390x900 (compare_and_signal_bfp_short_reg,RRE,"KEBR"),
  /*B309*/ GENx___x390x900 (compare_bfp_short_reg,RRE,"CEBR"),
  /*B30A*/ GENx___x390x900 (add_bfp_short_reg,RRE,"AEBR"),
  /*B30B*/ GENx___x390x900 (subtract_bfp_short_reg,RRE,"SEBR"),
- /*B30C*/ GENx___x___x___ ,
+ /*B30C*/ GENx___x390x900 (dummy_instruction,RRE,"MDEBR"),
  /*B30D*/ GENx___x390x900 (divide_bfp_short_reg,RRE,"DEBR"),
- /*B30E*/ GENx___x___x___ ,
- /*B30F*/ GENx___x___x___ ,
+ /*B30E*/ GENx___x390x900 (dummy_instruction,RRE,"MAEBR"),
+ /*B30F*/ GENx___x390x900 (dummy_instruction,RRE,"MSEBR"),
  /*B310*/ GENx___x390x900 (load_positive_bfp_long_reg,RRE,"LPDBR"),
  /*B311*/ GENx___x390x900 (load_negative_bfp_long_reg,RRE,"LNDBR"),
  /*B312*/ GENx___x390x900 (load_and_test_bfp_long_reg,RRE,"LTDBR"),
@@ -2126,8 +2143,8 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B31B*/ GENx___x390x900 (subtract_bfp_long_reg,RRE,"SDBR"),
  /*B31C*/ GENx___x390x900 (multiply_bfp_long_reg,RRE,"MDBR"),
  /*B31D*/ GENx___x390x900 (divide_bfp_long_reg,RRE,"DDBR"),
- /*B31E*/ GENx___x___x___ ,
- /*B31F*/ GENx___x___x___ ,
+ /*B31E*/ GENx___x390x900 (dummy_instruction,RRE,"MAEBR"),
+ /*B31F*/ GENx___x390x900 (dummy_instruction,RRE,"MSDBR"),
  /*B320*/ GENx___x___x___ ,
  /*B321*/ GENx___x___x___ ,
  /*B322*/ GENx___x___x___ ,
@@ -2165,9 +2182,9 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B342*/ GENx___x390x900 (load_and_test_bfp_ext_reg,RRE,"LTXBR"),
  /*B343*/ GENx___x390x900 (load_complement_bfp_ext_reg,RRE,"LCXBR"),
  /*B344*/ GENx___x390x900 (round_bfp_long_to_short_reg,RRE,"LEDBR"),
- /*B345*/ GENx___x___x___ ,
- /*B346*/ GENx___x___x___ ,
- /*B347*/ GENx___x___x___ ,
+ /*B345*/ GENx___x390x900 (dummy_instruction,RRE,"LDXBR"),
+ /*B346*/ GENx___x390x900 (dummy_instruction,RRE,"LEXBR"),
+ /*B347*/ GENx___x390x900 (load_fp_int_ext_reg,RRF_M,"FIXBR"),
  /*B348*/ GENx___x390x900 (compare_and_signal_bfp_ext_reg,RRE,"KXBR"),
  /*B349*/ GENx___x390x900 (compare_bfp_ext_reg,RRE,"CXBR"),
  /*B34A*/ GENx___x390x900 (add_bfp_ext_reg,RRE,"AXBR"),
@@ -2179,19 +2196,19 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B350*/ GENx___x390x900 (convert_float_long_to_bfp_short_reg,RRF_M,"TBEDR"),
  /*B351*/ GENx___x390x900 (convert_float_long_to_bfp_long_reg,RRF_M,"TBDR"),
  /*B352*/ GENx___x___x___ ,
- /*B353*/ GENx___x___x___ ,
+ /*B353*/ GENx___x390x900 (dummy_instruction,RRF_M,"DIEBR"),
  /*B354*/ GENx___x___x___ ,
  /*B355*/ GENx___x___x___ ,
  /*B356*/ GENx___x___x___ ,
- /*B357*/ GENx___x___x___ ,
+ /*B357*/ GENx___x390x900 (load_fp_int_short_reg,RRF_M,"FIEBR"),
  /*B358*/ GENx___x390x900 (convert_bfp_short_to_float_long_reg,RRE,"THDER"),
  /*B359*/ GENx___x390x900 (convert_bfp_long_to_float_long_reg,RRE,"THDR"),
  /*B35A*/ GENx___x___x___ ,
- /*B35B*/ GENx___x___x___ ,
+ /*B35B*/ GENx___x390x900 (dummy_instruction,RRF_M,"DIDBR"),
  /*B35C*/ GENx___x___x___ ,
  /*B35D*/ GENx___x___x___ ,
  /*B35E*/ GENx___x___x___ ,
- /*B35F*/ GENx___x___x___ ,
+ /*B35F*/ GENx___x390x900 (load_fp_int_long_reg,RRF_M,"FIDBR"),
  /*B360*/ GENx___x390x900 (load_positive_float_ext_reg,RRE,"LPXR"),
  /*B361*/ GENx___x390x900 (load_negative_float_ext_reg,RRE,"LNXR"),
  /*B362*/ GENx___x390x900 (load_and_test_float_ext_reg,RRE,"LTXR"),
@@ -2246,11 +2263,11 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B393*/ GENx___x___x___ ,
  /*B394*/ GENx___x390x900 (convert_fix32_to_bfp_short_reg,RRE,"CEFBR"),
  /*B395*/ GENx___x390x900 (convert_fix32_to_bfp_long_reg,RRE,"CDFBR"),
- /*B396*/ GENx___x___x___ ,
+ /*B396*/ GENx___x390x900 (dummy_instruction,RRE,"CXFBR"),
  /*B397*/ GENx___x___x___ ,
  /*B398*/ GENx___x390x900 (convert_bfp_short_to_fix32_reg,RRF_M,"CFEBR"),
  /*B399*/ GENx___x390x900 (convert_bfp_long_to_fix32_reg,RRF_M,"CFDBR"),
- /*B39A*/ GENx___x___x___ ,
+ /*B39A*/ GENx___x390x900 (dummy_instruction,RRF_M,"CFXBR"),
  /*B39B*/ GENx___x___x___ ,
  /*B39C*/ GENx___x___x___ ,
  /*B39D*/ GENx___x___x___ ,
@@ -2262,11 +2279,11 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B3A3*/ GENx___x___x___ ,
  /*B3A4*/ GENx___x___x900 (convert_fix64_to_bfp_short_reg,RRE,"CEGBR"),
  /*B3A5*/ GENx___x___x900 (convert_fix64_to_bfp_long_reg,RRE,"CDGBR"),
- /*B3A6*/ GENx___x___x___ ,                                     /*!CXGBR     */
+ /*B3A6*/ GENx___x___x900 (dummy_instruction,RRE,"CXGBR"),
  /*B3A7*/ GENx___x___x___ ,
  /*B3A8*/ GENx___x___x900 (convert_bfp_short_to_fix64_reg,RRF_M,"CGEBR"),
  /*B3A9*/ GENx___x___x900 (convert_bfp_long_to_fix64_reg,RRF_M,"CGDBR"),
- /*B3AA*/ GENx___x___x___ ,
+ /*B3AA*/ GENx___x___x900 (dummy_instruction,RRF_M,"CGXBR"),
  /*B3AB*/ GENx___x___x___ ,
  /*B3AC*/ GENx___x___x___ ,
  /*B3AD*/ GENx___x___x___ ,
@@ -2292,13 +2309,13 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B3C1*/ GENx___x___x___ ,
  /*B3C2*/ GENx___x___x___ ,
  /*B3C3*/ GENx___x___x___ ,
- /*B3C4*/ GENx___x___x___ ,                                     /*!CEGR      */
- /*B3C5*/ GENx___x___x___ ,                                     /*!CDGR      */
- /*B3C6*/ GENx___x___x___ ,                                     /*!CXGR      */
+ /*B3C4*/ GENx___x___x900 (dummy_instruction,RRE,"CEGR"),
+ /*B3C5*/ GENx___x___x900 (dummy_instruction,RRE,"CDGR"),
+ /*B3C6*/ GENx___x___x900 (dummy_instruction,RRE,"CXGR"),
  /*B3C7*/ GENx___x___x___ ,
- /*B3C8*/ GENx___x___x___ ,                                     /*!CGER      */
- /*B3C9*/ GENx___x___x___ ,                                     /*!CGDR      */
- /*B3CA*/ GENx___x___x___ ,                                     /*!CGXR      */
+ /*B3C8*/ GENx___x___x900 (dummy_instruction,RRF_R,"CGER"),
+ /*B3C9*/ GENx___x___x900 (dummy_instruction,RRF_R,"CGDR"),
+ /*B3CA*/ GENx___x___x900 (dummy_instruction,RRF_R,"CGXR"),
  /*B3CB*/ GENx___x___x___ ,
  /*B3CC*/ GENx___x___x___ ,
  /*B3CD*/ GENx___x___x___ ,
@@ -2502,10 +2519,10 @@ zz_func opcode_b9xx[256][GEN_MAXARCH] = {
  /*B98D*/ GENx___x390x900 (extract_psw,RRE,"EPSW"),
  /*B98E*/ GENx___x___x___ ,
  /*B98F*/ GENx___x___x___ ,
- /*B990*/ GENx___x___x900 (dummy_instruction,RRE,"TRTT"),
- /*B991*/ GENx___x___x900 (dummy_instruction,RRE,"TRTO"),
- /*B992*/ GENx___x___x900 (dummy_instruction,RRE,"TROT"),
- /*B993*/ GENx___x___x900 (dummy_instruction,RRE,"TROO"),
+ /*B990*/ GENx___x390x900 (translate_two_to_two,RRE,"TRTT"),
+ /*B991*/ GENx___x390x900 (translate_two_to_one,RRE,"TRTO"),
+ /*B992*/ GENx___x390x900 (translate_one_to_two,RRE,"TROT"),
+ /*B993*/ GENx___x390x900 (translate_one_to_one,RRE,"TROO"),
  /*B994*/ GENx___x___x___ ,
  /*B995*/ GENx___x___x___ ,
  /*B996*/ GENx___x390x900 (multiply_logical_register,RRE,"MLR"),
@@ -2904,8 +2921,10 @@ zz_func opcode_e3xx[256][GEN_MAXARCH] = {
 zz_func opcode_e5xx[256][GEN_MAXARCH] = {
  /*E500*/ GENx370x390x900 (load_address_space_parameters,SSE,"LASP"),
  /*E501*/ GENx370x390x900 (test_protection,SSE,"TPROT"),
- /*E502*/ GENx___x___x900 (store_real_address,SSE,"STRAG"),
- /*E503*/ GENx370x390x___ (svc_assist,SSE,"Assist"),
+ /* The following opcode has been re-used in z/Arch */
+#define s370_store_real_address s370_fix_page
+ /*E502*/ GENx370x___x900 (store_real_address,SSE,"STRAG"),
+ /*E503*/ GENx370x390x900 (svc_assist,SSE,"Assist"),
  /*E504*/ GENx370x390x900 (obtain_local_lock,SSE,"Assist"),
  /*E505*/ GENx370x390x900 (release_local_lock,SSE,"Assist"),
  /*E506*/ GENx370x390x900 (obtain_cms_lock,SSE,"Assist"),
@@ -3306,8 +3325,8 @@ zz_func opcode_ebxx[256][GEN_MAXARCH] = {
  /*EB8B*/ GENx___x___x___ ,
  /*EB8C*/ GENx___x___x___ ,
  /*EB8D*/ GENx___x___x___ ,
- /*EB8E*/ GENx___x___x900 (dummy_instruction,RSE,"MVCLU"),
- /*EB8F*/ GENx___x___x900 (dummy_instruction,RSE,"CLCLU"),
+ /*EB8E*/ GENx___x390x900 (move_long_unicode,RSE,"MVCLU"),
+ /*EB8F*/ GENx___x390x900 (compare_logical_long_unicode,RSE,"CLCLU"),
  /*EB90*/ GENx___x___x___ ,
  /*EB91*/ GENx___x___x___ ,
  /*EB92*/ GENx___x___x___ ,
@@ -3356,7 +3375,7 @@ zz_func opcode_ebxx[256][GEN_MAXARCH] = {
  /*EBBD*/ GENx___x___x___ ,
  /*EBBE*/ GENx___x___x___ ,
  /*EBBF*/ GENx___x___x___ ,
- /*EBC0*/ GENx___x___x900 (test_decimal,RSL,"TP"),
+ /*EBC0*/ GENx___x390x900 (test_decimal,RSL,"TP"),
  /*EBC1*/ GENx___x___x___ ,
  /*EBC2*/ GENx___x___x___ ,
  /*EBC3*/ GENx___x___x___ ,
@@ -3693,17 +3712,17 @@ zz_func opcode_edxx[256][GEN_MAXARCH] = {
  /*ED02*/ GENx___x___x___ ,
  /*ED03*/ GENx___x___x___ ,
  /*ED04*/ GENx___x390x900 (loadlength_bfp_short_to_long,RXE,"LDEB"),
- /*ED05*/ GENx___x___x___ ,
- /*ED06*/ GENx___x___x___ ,
- /*ED07*/ GENx___x___x___ ,
+ /*ED05*/ GENx___x390x900 (dummy_instruction,RXE,"LXDB"),
+ /*ED06*/ GENx___x390x900 (dummy_instruction,RXE,"LXEB"),
+ /*ED07*/ GENx___x390x900 (dummy_instruction,RXE,"MXDB"),
  /*ED08*/ GENx___x390x900 (compare_and_signal_bfp_short,RXE,"KEB"),
  /*ED09*/ GENx___x390x900 (compare_bfp_short,RXE,"CEB"),
  /*ED0A*/ GENx___x390x900 (add_bfp_short,RXE,"AEB"),
  /*ED0B*/ GENx___x390x900 (subtract_bfp_short,RXE,"SEB"),
- /*ED0C*/ GENx___x___x___ ,
+ /*ED0C*/ GENx___x390x900 (dummy_instruction,RXE,"MDEB"),
  /*ED0D*/ GENx___x390x900 (divide_bfp_short,RXE,"DEB"),
- /*ED0E*/ GENx___x___x___ ,
- /*ED0F*/ GENx___x___x___ ,
+ /*ED0E*/ GENx___x390x900 (dummy_instruction,RXE,"MAEB"),
+ /*ED0F*/ GENx___x390x900 (dummy_instruction,RXE,"MSDB"),
  /*ED10*/ GENx___x390x900 (testdataclass_bfp_short,RXE,"TCEB"),
  /*ED11*/ GENx___x390x900 (testdataclass_bfp_long,RXE,"TCDB"),
  /*ED12*/ GENx___x390x900 (testdataclass_bfp_ext,RXE,"TCXB"),
@@ -3718,8 +3737,8 @@ zz_func opcode_edxx[256][GEN_MAXARCH] = {
  /*ED1B*/ GENx___x390x900 (subtract_bfp_long,RXE,"SDB"),
  /*ED1C*/ GENx___x390x900 (multiply_bfp_long,RXE,"MDB"),
  /*ED1D*/ GENx___x390x900 (divide_bfp_long,RXE,"DDB"),
- /*ED1E*/ GENx___x___x___ ,
- /*ED1F*/ GENx___x___x___ ,
+ /*ED1E*/ GENx___x390x900 (dummy_instruction,RXE,"MADB"),
+ /*ED1F*/ GENx___x390x900 (dummy_instruction,RXE,"MSDB"),
  /*ED20*/ GENx___x___x___ ,
  /*ED21*/ GENx___x___x___ ,
  /*ED22*/ GENx___x___x___ ,

@@ -1,14 +1,14 @@
 AC_INIT(hercules.h)
 AC_CONFIG_AUX_DIR(autoconf)
 
-AM_INIT_AUTOMAKE(hercules,2.16.5)
+AM_INIT_AUTOMAKE(hercules,2.17)
 AM_CONFIG_HEADER(config.h)
 AM_MAINTAINER_MODE
 
 AC_CANONICAL_HOST
 
 # Initialization
-CFLAGS="-Wall $CFLAGS"
+CFLAGS="-W -Wall $CFLAGS"
 
 # Programs
 AC_PROG_CC
@@ -16,17 +16,24 @@ AC_PROG_CC
 # OS-specific settings that we can't figure out any other way (yet)
 
 case "$host_os" in
-	linux*)
-		build_hercifc=true
-		;;
+        darwin*)    
+               if test $host_vendor = apple ; then
+                   CPPFLAGS=-traditional-cpp
+                   AC_DEFINE([_BSD_SOCKLEN_T_],[int])     
+                   AC_DEFINE([_INTL_REDIRECT_MACROS])     
+               fi
+               ;;
+        linux*)
+                build_hercifc=true
+                ;;
         *cygwin*)
-		build_hercifc=false
-		AC_DEFINE([WIN32])
-		AC_DEFINE([NO_SIGABEND_HANDLER])
-		;;
-	*)
-		build_hercifc=false
-		;;
+                build_hercifc=false
+                AC_DEFINE([WIN32])
+                AC_DEFINE([NO_SIGABEND_HANDLER])
+                ;;
+        *)
+                build_hercifc=false
+                ;;
 esac
 
 # Arch-specific settings that we can't figure out any other way (yet)
@@ -39,6 +46,9 @@ esac
 
 AM_CONDITIONAL(BUILD_HERCIFC, [test "x$build_hercifc" = "xtrue"])
 
+# System Services
+AC_SYS_LARGEFILE
+
 # Libraries
 AC_CHECK_LIB(m, sqrt)
 AC_CHECK_LIB(socket, connect)
@@ -49,6 +59,8 @@ dnl AC_CHECK_LIB(z, zlibVersion)
 AC_CHECK_LIB(z, main)
 AC_CHECK_LIB(bz2, BZ2_bzBuffToBuffDecompress,
 [have_libbz2=yes],[have_libbz2=no])
+
+AM_GNU_GETTEXT()
 
 AC_ARG_ENABLE(fthreads,
               AC_HELP_STRING([--enable-fthreads],
@@ -86,7 +98,7 @@ AC_ARG_ENABLE(fishhang,
                 yes)
                   fishhang=true
                   CFLAGS="-DFISH_HANG $CFLAGS"
-		  AC_DEFINE([FISH_HANG])
+                  AC_DEFINE([FISH_HANG])
                   ;;
                 no) fishhang=false ;;
                 *) AC_MSG_ERROR([bad value ${enableval} for --enable-fishhang]) ;;
@@ -173,16 +185,62 @@ AC_CACHE_CHECK([whether gcc supports __attribute__((regparm(n)))],
                   CFLAGS="$SAVE_CFLAGS"
                 fi])
 
+if test x$ac_cv_attr_regparm = xyes; then
+   case "$host_os" in
+        *cygwin*)
+                AC_CACHE_CHECK([for cygwin regparm bug],
+                               [ac_cv_attr_regparm_cygwin_bug],
+                               [AC_TRY_RUN([
+/* from Fish */
+
+typedef struct _REGS
+{
+        int a, b, c, d;
+        char e[4000];
+}
+REGS;
+
+__attribute__ ((regparm(3))) int func1 (int a, int b, int c, REGS *regs);
+__attribute__ ((regparm(3))) int func2 (int a, int b, int c, REGS *regs);
+
+int main ( int argc, char *argv[] )
+{
+        REGS* regs = 0;
+        exit(func1 (1, 2, 3, regs));
+}
+
+__attribute__ ((regparm(3))) int func1 (int a, int b, int c, REGS *regs)
+{
+        REGS iregs;
+        return func2 (a, b, c, &iregs);
+}
+
+__attribute__ ((regparm(3))) int func2 (int a, int b, int c, REGS *regs)
+{
+        return ((a == 1 && b == 2 && c == 3) ? 0 : 1);
+}
+],
+        ac_cv_attr_regparm_cygwin_bug=no,
+        ac_cv_attr_regparm_cygwin_bug=yes,
+        true)])
+        ;;
+   esac
+
+   if test x$ac_cv_attr_regparm_cygwin_bug = xyes; then
+      ac_cv_attr_regparm=no
+   fi
+fi
+
 if test x$ac_cv_attr_regparm != xyes; then
   AC_DEFINE(NO_ATTR_REGPARM)
 fi
 
 case "$host_cpu" in
-	  i486|i586|i686) ;;
-  	  *)
+          i486|i586|i686) ;;
+          *)
             # byteswap assembler routines are i486+-only
             AC_DEFINE(NO_ASM_BYTESWAP)
-	    ;;
+            ;;
 esac
 
 AC_ARG_ENABLE(cckd-bzip2,
@@ -223,9 +281,21 @@ fi
 
 # Library functions
 
-AC_CHECK_FUNCS(sqrtl ldexpl fabsl fmodl)
-AC_CHECK_FUNCS([setresuid setreuid],
-               [enable_setuid=true;break])
+AC_CHECK_FUNCS(sqrtl ldexpl fabsl fmodl frexpl)
+AC_CHECK_FUNCS(strsignal)
+AC_CHECK_FUNC(InitializeCriticalSectionAndSpinCount)
+
+# If we have setresuid AND getresuid, we can do setuid stuff
+AC_CHECK_FUNCS([setresuid getresuid],
+               [enable_setuid=true],[enable_setuid=false;break])
+
+if test x$enable_setuid != xtrue; then
+   # Likewise if we have setreuid AND getreuid
+   AC_CHECK_FUNCS([setreuid getreuid],
+                  [enable_setuid=true],[enable_setuid=false;break])
+fi
+
+# Otherwise, not
 if test x$enable_setuid != xtrue; then
   AC_DEFINE([NO_SETUID])
 fi
@@ -249,7 +319,7 @@ AC_ARG_ENABLE(debug,
                 yes)
                   debug=true
                   CFLAGS="-g $CFLAGS"
-		  AC_DEFINE([DEBUG])
+                  AC_DEFINE([DEBUG])
                   ;;
                 no) debug=false ;;
                 *) AC_MSG_ERROR([bad value ${enableval} for --enable-debug]) ;;
@@ -281,19 +351,22 @@ AC_ARG_ENABLE(optimization,
 
 if test x$auto_optimize = xtrue; then
   case "$host_cpu" in
-	  i586|i686)
-	    if test "$GCC" = "yes"; then
-		OFLAGS="-O3 -march=$host_cpu $OFLAGS"
+          powerpc)
+            OFLAGS="-O3 $OFLAGS"
+            ;;
+          i586|i686)
+            if test "$GCC" = "yes"; then
+                OFLAGS="-O3 -march=$host_cpu $OFLAGS"
                 if test x$enable_profiling != xtrue && test x$debug != xtrue; then
                   OFLAGS="-fomit-frame-pointer $OFLAGS"
                 fi
-	    else
-                OFLAGS="-O2 $OFLAGS"
-	    fi
-	    ;;
-	  *)
-	    OFLAGS="-O2 $OFLAGS"
-	    ;;
+            else
+                OFLAGS="$OFLAGS"
+            fi
+            ;;
+          *)
+            OFLAGS="$OFLAGS"
+            ;;
   esac
 fi
 
@@ -329,30 +402,31 @@ AC_ARG_ENABLE(custom,
 dnl This is ugly. The object is to get the value of PKGDATADIR into
 dnl config.h, but this is the only way I've found to do so. The incantation
 dnl "${prefix}/share" is needed because ${datadir} doesn't expand to the
-dnl desired data directory. The sed is necessary to remove the
-dnl RPM_BUILD_ROOT portion of the pathname if we're building under RPM.
-dnl If there's a better way to get there, PLEASE replace this. --JRM
+dnl desired data directory. If there's a better way to get there, PLEASE
+dnl replace this. --JRM
 if test "x$prefix" = "xNONE"; then
   PKGDATADIR="/usr/local/share/${PACKAGE}"
 else
-  if test "x$RPM_BUILD_ROOT" = "x"; then
-    PKGDATADIR="${prefix}/share/${PACKAGE}"
-  else
-    PKGDATADIR=`echo ${prefix} | sed "s!${RPM_BUILD_ROOT}!!"`/share/${PACKAGE}
-  fi
+  PKGDATADIR="${prefix}/share/${PACKAGE}"
 fi
 AC_DEFINE_UNQUOTED([PKGDATADIR], "${PKGDATADIR}")
+if test "x$prefix" = "xNONE"; then
+  LOCALEDIR="/usr/local/share/locale"
+else
+  PKGDATADIR="${prefix}/share/locale}"
+fi
+AC_DEFINE_UNQUOTED([LOCALEDIR], "${LOCALEDIR}")
 
 AH_TEMPLATE([NO_ATTR_REGPARM],
-	    [Define if your gcc does not support __attribute__((regparm(n)))])
+            [Define if your gcc does not support __attribute__((regparm(n)))])
 AH_TEMPLATE([NO_ASM_BYTESWAP],
-	    [Define to disable assembler routines for byte swapping])
+            [Define to disable assembler routines for byte swapping])
 AH_TEMPLATE([NO_IEEE_SUPPORT],
-	    [Define to disable IEEE floating point support])
+            [Define to disable IEEE floating point support])
 AH_TEMPLATE([CCKD_BZIP2],
-	    [Define to enable bzip2 compression in emulated DASDs])
+            [Define to enable bzip2 compression in emulated DASDs])
 AH_TEMPLATE([HET_BZIP2],
-	    [Define to enable bzip2 compression in emulated tapes])
+            [Define to enable bzip2 compression in emulated tapes])
 AH_TEMPLATE([EXTERNALGUI],
             [Define to build interface to external Windows GUI])
 AH_TEMPLATE([HAVE_U_INT],
@@ -375,5 +449,11 @@ AH_TEMPLATE([FISH_HANG],
             [Define to debug correct fthreads LOCK handling (requires fthreads)])
 AH_TEMPLATE([PKGDATADIR],
             [Directory where the HTTP server will find documents])
+AH_TEMPLATE([LOCALEDIR],
+            [Directory where to find NLS data])
+AH_TEMPLATE([_BSD_SOCKLEN_T_],
+            [Define missing macro on apple darwin (osx) platform])
+AH_TEMPLATE([_INTL_REDIRECT_MACROS],
+            [Define to 1 if non-Intel architecture (gettext)])
 
-AC_OUTPUT(Makefile util/Makefile html/Makefile)
+AC_OUTPUT([Makefile util/Makefile html/Makefile po/Makefile.in po/Makefile intl/Makefile m4/Makefile ])

@@ -1,11 +1,11 @@
-/* GENERAL2.C   (c) Copyright Roger Bowler, 1994-2002                */
+/* GENERAL2.C   (c) Copyright Roger Bowler, 1994-2003                */
 /*              ESA/390 CPU Emulator                                 */
 /*              Instructions N-Z                                     */
 
 /*              (c) Copyright Peter Kuschnerus, 1999 (UPT & CFC)     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all general instructions of the            */
@@ -136,16 +136,16 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         npa2 = LOGICAL_TO_ABS (npv2, b2, regs, ACCTYPE_READ, akey);
 
     /* all operands and page crossers valid, now alter ref & chg bits */
-    STORAGE_KEY(abs1) |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(abs1, regs) |= (STORKEY_REF | STORKEY_CHANGE);
     if (npa1)
-        STORAGE_KEY(npa1) |= (STORKEY_REF | STORKEY_CHANGE);
+        STORAGE_KEY(npa1, regs) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Process operands from left to right */
     for ( i = 0; i <= l; i++ )
     {
         /* Fetch a byte from each operand */
-        byte1 = sysblk.mainstor[abs1];
-        byte2 = sysblk.mainstor[abs2];
+        byte1 = regs->mainstor[abs1];
+        byte2 = regs->mainstor[abs2];
 
         /* OR operand 1 with operand 2 */
         byte1 |= byte2;
@@ -154,7 +154,7 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         if (byte1 != 0) cc = 1;
 
         /* Store the result in the destination operand */
-        sysblk.mainstor[abs1] = byte1;
+        regs->mainstor[abs1] = byte1;
 
         /* Increment first operand address */
         effective_addr1++;
@@ -423,16 +423,8 @@ VADR    effective_addr2,
         /* Release main-storage access lock */
         RELEASE_MAINLOCK(regs);
 
-#if MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP)
-        /* It this is a failed locked operation
-           and there is more then 1 CPU in the configuration
-           and there is no broadcast synchronization in progress
-           then call the hypervisor to end this timeslice,
-           this to prevent this virtual CPU monopolizing
-           the physical CPU on a spinlock */
         if(regs->psw.cc && sysblk.numcpu > 1)
-            usleep(1L);
-#endif /* MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP) */
+            sched_yield();
 
     }
 }
@@ -549,7 +541,7 @@ int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
 U32     n;                              /* 32-bit operand values     */
 U64     dreg;                           /* Double register work area */
-int     h, i, j, m;                     /* Integer work areas        */
+U32     h, i, j, m;                     /* Integer work areas        */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -631,7 +623,7 @@ int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
 U32     n, n1, n2;                      /* 32-bit operand values     */
-int     i, j;                           /* Integer work areas        */
+U32     i, j;                           /* Integer work areas        */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -1214,7 +1206,7 @@ int     new_ilc;                        /* New ilc to set            */
     SIE_TRANSLATE(&px, ACCTYPE_WRITE, regs);
 
     /* Set the main storage reference and change bits */
-    STORAGE_KEY(px) |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(px, regs) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Use the I-byte to set the SVC interruption code */
     regs->psw.intcode = i;
@@ -1228,7 +1220,7 @@ int     new_ilc;                        /* New ilc to set            */
 #endif
 
     /* Point to PSA in main storage */
-    psa = (void*)(sysblk.mainstor + px);
+    psa = (void*)(regs->mainstor + px);
 
 #if defined(FEATURE_BCMODE)
     /* For ECMODE, store SVC interrupt code at PSA+X'88' */
@@ -1256,7 +1248,9 @@ int     new_ilc;                        /* New ilc to set            */
     ARCH_DEP(store_psw) ( regs, psa->svcold );
 
     /* Load new PSW from PSA+X'60' */
+    obtain_lock(&sysblk.intlock);
     rc = ARCH_DEP(load_psw) ( regs, psa->svcnew );
+    release_lock(&sysblk.intlock);
     if ( rc )
         ARCH_DEP(program_interrupt) (regs, rc);
 
@@ -1282,16 +1276,27 @@ DEF_INST(test_and_set)
 {
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
+RADR    abs2;                           /* Real address              */
+BYTE    old;                            /* Old value                 */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
     /* Perform serialization before starting operation */
     PERFORM_SERIALIZATION (regs);
 
+    /* Get operand absolute address */
+    abs2 = LOGICAL_TO_ABS (effective_addr2, b2, regs,
+                           ACCTYPE_WRITE, regs->psw.pkey);
+
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
-    TEST_AND_SET(effective_addr2, b2, regs);
+    /* Get old value */
+    old = regs->mainstor[abs2];
+
+    /* Attempt to exchange the values */
+    while (cmpxchg1(&old, 255, regs->mainstor + abs2));
+    regs->psw.cc = old >> 7;
 
     /* Release main-storage access lock */
     RELEASE_MAINLOCK(regs);
@@ -1676,7 +1681,7 @@ BYTE    lbyte;                          /* Left result byte of pair  */
 
 /*-------------------------------------------------------------------*/
 /* 0102 UPT   - Update Tree                                      [E] */
-/*              (c) Copyright Peter Kuschnerus, 1999-2002            */
+/*              (c) Copyright Peter Kuschnerus, 1999-2003            */
 /* 64BIT INCOMPLETE                                                  */
 /*-------------------------------------------------------------------*/
 DEF_INST(update_tree)
@@ -1689,6 +1694,8 @@ int     cc;                             /* Condition code            */
 int     ar1 = 4;                        /* Access register number    */
 
     E(inst, execflag, regs);
+
+    UNREFERENCED(inst);
 
     /* Check GR4, GR5 doubleword alligned */
     if ( regs->GR_L(4) & 0x00000007 || regs->GR_L(5) & 0x00000007 )

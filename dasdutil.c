@@ -1,4 +1,4 @@
-/* DASDUTIL.C   (c) Copyright Roger Bowler, 1999-2002                */
+/* DASDUTIL.C   (c) Copyright Roger Bowler, 1999-2003                */
 /*              Hercules DASD Utilities: Common subroutines          */
 
 /*-------------------------------------------------------------------*/
@@ -7,12 +7,12 @@
 
 #include "hercules.h"
 #include "dasdblks.h"
+#include "devtype.h"
 
 /*-------------------------------------------------------------------*/
 /* External references         (defined in ckddasd.c)                */
 /*-------------------------------------------------------------------*/
-extern int ckddasd_init_handler(DEVBLK *dev, int argc, BYTE *argv[]);
-extern int ckddasd_close_device(DEVBLK *dev);
+extern DEVHND ckddasd_device_hndinfo;
 
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
@@ -28,10 +28,7 @@ static BYTE iplpsw[8]    = {0x00,0x06,0x00,0x00,0x00,0x00,0x00,0x0F};
 static BYTE iplccw1[8]   = {0x03,0x00,0x00,0x00,0x00,0x00,0x00,0x01};
 static BYTE iplccw2[8]   = {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
 
-/*-------------------------------------------------------------------*/
-/* ASCII to EBCDIC translate tables                                  */
-/*-------------------------------------------------------------------*/
-#include "codeconv.h"
+SYSBLK sysblk; /* Currently only used for codepage mapping */
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to convert a null-terminated string to upper case      */
@@ -62,10 +59,21 @@ int     i;                              /* Array subscript           */
 /*-------------------------------------------------------------------*/
 void convert_to_ebcdic (BYTE *dest, int len, BYTE *source)
 {
+char   *scodepage;
 int     i;                              /* Array subscript           */
 
+    /* set_codepage() uses the logmsg macro which requires msgpipew */
+    sysblk.msgpipew = stdout;
+    if(!sysblk.codepage)
+    {
+        if((scodepage = getenv("HERCULES_CP")))
+            set_codepage(scodepage);
+        else
+            set_codepage("default");
+    }
+
     for (i = 0; i < len && source[i] != '\0'; i++)
-        dest[i] = ascii_to_ebcdic[source[i]];
+        dest[i] = host_to_guest(source[i]);
 
     while (i < len)
         dest[i++] = 0x40;
@@ -80,9 +88,21 @@ int     i;                              /* Array subscript           */
 int make_asciiz (BYTE *dest, int destlen, BYTE *src, int srclen)
 {
 int             len;                    /* Result length             */
+char   *scodepage;
+
+    /* set_codepage() uses the logmsg macro which requires msgpipew */
+    sysblk.msgpipew = stdout;
+    if(!sysblk.codepage)
+    {
+        if((scodepage = getenv("HERCULES_CP")))
+            set_codepage(scodepage);
+        else
+            set_codepage("default");
+    }
+
 
     for (len=0; len < srclen && len < destlen-1; len++)
-        dest[len] = ebcdic_to_ascii[src[len]];
+        dest[len] = guest_to_host(src[len]);
     while (len > 0 && dest[len-1] == SPACE) len--;
     dest[len] = '\0';
 
@@ -104,6 +124,18 @@ BYTE            hex_chars[64];
 BYTE            prev_hex[64] = "";
 int             firstsame = 0;
 int             lastsame = 0;
+char   *scodepage;
+
+    /* set_codepage() uses the logmsg macro which requires msgpipew */
+    sysblk.msgpipew = stdout;
+    if(!sysblk.codepage)
+    {
+        if((scodepage = getenv("HERCULES_CP")))
+            set_codepage(scodepage);
+        else
+            set_codepage("default");
+    }
+
 
     pchar = (unsigned char*)addr;
 
@@ -141,7 +173,7 @@ int             lastsame = 0;
             }
         }
 
-        if ( offset >= len ) break;
+        if ( offset >= (U32)len ) break;
 
         memset ( print_chars, 0, sizeof(print_chars) );
         memset ( hex_chars, SPACE, sizeof(hex_chars) );
@@ -149,11 +181,11 @@ int             lastsame = 0;
         for (xi=0, i=0; i < 16; i++)
         {
             c = *pchar++;
-            if (offset < len) {
+            if (offset < (U32)len) {
                 sprintf(hex_chars+xi, "%2.2X", c);
                 print_chars[i] = '.';
                 if (isprint(c)) print_chars[i] = c;
-                c = ebcdic_to_ascii[c];
+                c = guest_to_host(c);
                 if (isprint(c)) print_chars[i] = c;
             }
             offset++;
@@ -182,153 +214,48 @@ int             lastsame = 0;
 int read_track (CIFBLK *cif, int cyl, int head)
 {
 int             rc;                     /* Return code               */
-int             i;                      /* Loop index                */
-int             len;                    /* Record length             */
-off_t           seekpos;                /* Seek position for lseek   */
-CKDDASD_TRKHDR *trkhdr;                 /* -> Track header           */
 DEVBLK         *dev;                    /* -> CKD device block       */
+BYTE            unitstat;               /* Unit status               */
 
     /* Exit if required track is already in buffer */
     if (cif->curcyl == cyl && cif->curhead == head)
         return 0;
 
-    /* Write out the track buffer if it has been modified */
-    rc = rewrite_track (cif);
-    if (rc < 0) return -1;
-
-    if (verbose)
-    {
-       /* Issue progress message */
-       fprintf (stdout,
-               "Reading cyl %d head %d\n",
-               cyl, head);
-    }
-
     dev = &cif->devblk;
 
-    /* Determine which file contains the requested cylinder */
-    for (i = 0; cyl > dev->ckdhicyl[i]; i++)
+    if (cif->trkmodif)
     {
-        if (dev->ckdhicyl[i] == 0 || i == dev->ckdnumfd - 1)
-            break;
+        cif->trkmodif = 0;
+        if (verbose) /* Issue progress message */
+           fprintf (stdout, "HHCDU001I Updating cyl %d head %d\n",
+                    cif->curcyl, cif->curhead);
+        rc = (dev->ckdupdtrk)(dev, NULL, cif->trksz, &unitstat);
+        if (rc < 0)
+        {
+            fprintf (stderr, "HHCDU002E %s write track error: stat=%2.2X\n",
+                    cif->fname, unitstat);
+            return -1;
+        }
     }
-    dev->ckdtrkfn = i;
 
-    /* Set the device file descriptor to the selected file */
-    cif->fd = dev->fd = dev->ckdfd[i];
+    if (verbose) /* Issue progress message */
+       fprintf (stdout, "HHCDU003I Reading cyl %d head %d\n", cyl, head);
 
-    /* Seek to start of track header */
-    seekpos = CKDDASD_DEVHDR_SIZE
-            + ((((cyl - dev->ckdlocyl[i]) * dev->ckdheads) + head)
-                * dev->ckdtrksz);
-
-    rc = ckd_lseek (dev, cif->fd, seekpos, SEEK_SET);
-    if (rc == -1)
+    rc = (dev->ckdrdtrk)(dev, cyl, head, &unitstat);
+    if (rc < 0)
     {
-        fprintf (stderr,
-                "%s lseek error: %s\n",
-                cif->fname, strerror(errno));
+        fprintf (stderr, "HHCDU004E %s read track error: stat=%2.2X\n",
+                cif->fname, unitstat);
         return -1;
     }
 
-    /* Read the track */
-    len = ckd_read (dev, cif->fd, cif->trkbuf, cif->trksz);
-    if (len < 0)
-    {
-        fprintf (stderr,
-                "%s read error: %s\n",
-                cif->fname, strerror(errno));
-        return -1;
-    }
-
-    /* Validate the track header */
-    trkhdr = (CKDDASD_TRKHDR*)(cif->trkbuf);
-    if (trkhdr->bin != 0
-        || trkhdr->cyl[0] != (cyl >> 8)
-        || trkhdr->cyl[1] != (cyl & 0xFF)
-        || trkhdr->head[0] != (head >> 8)
-        || trkhdr->head[1] != (head & 0xFF))
-    {
-        fprintf (stderr, "Invalid track header\n");
-        return -1;
-    }
-
-    /* Set current cylinder and head */
+    /* Set current buf, cylinder and head */
+    cif->trkbuf = dev->buf;
     cif->curcyl = cyl;
     cif->curhead = head;
 
     return 0;
 } /* end function read_track */
-
-/*-------------------------------------------------------------------*/
-/* Subroutine to rewrite current track if buffer was modified        */
-/* Input:                                                            */
-/*      cif     -> CKD image file descriptor structure               */
-/*                                                                   */
-/* Return value is 0 if successful, -1 if error                      */
-/*-------------------------------------------------------------------*/
-int rewrite_track (CIFBLK *cif)
-{
-int             rc;                     /* Return code               */
-int             i;                      /* Loop index                */
-int             len;                    /* Record length             */
-off_t           seekpos;                /* Seek position for lseek   */
-DEVBLK         *dev;                    /* -> CKD device block       */
-
-    /* Exit if track buffer has not been modified */
-    if (cif->trkmodif == 0)
-        return 0;
-
-    if (verbose)
-    {
-       /* Issue progress message */
-       fprintf (stdout,
-               "Writing cyl %d head %d\n",
-               cif->curcyl, cif->curhead);
-    }
-
-    dev = &cif->devblk;
-
-    /* Determine which file contains the requested cylinder */
-    for (i = 0; cif->curcyl > dev->ckdhicyl[i]; i++)
-    {
-        if (dev->ckdhicyl[i] == 0 || i == dev->ckdnumfd - 1)
-            break;
-    }
-    dev->ckdtrkfn = i;
-
-    /* Set the device file descriptor to the selected file */
-    cif->fd = dev->fd = dev->ckdfd[i];
-
-    /* Seek to start of track header */
-    seekpos = CKDDASD_DEVHDR_SIZE
-            + ((((cif->curcyl - dev->ckdlocyl[i]) * dev->ckdheads) + cif->curhead)
-                * dev->ckdtrksz);
-
-    rc = ckd_lseek (dev, cif->fd, seekpos, SEEK_SET);
-    if (rc == -1)
-    {
-        fprintf (stderr,
-                "%s lseek error: %s\n",
-                cif->fname, strerror(errno));
-        return -1;
-    }
-
-    /* Write the track */
-    len = ckd_write (dev, cif->fd, cif->trkbuf, cif->trksz);
-    if (len < cif->trksz)
-    {
-        fprintf (stderr,
-                "%s write error: %s\n",
-                cif->fname, strerror(errno));
-        return -1;
-    }
-
-    /* Reset the track modified flag */
-    cif->trkmodif = 0;
-
-    return 0;
-} /* end function rewrite_track */
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to read a block from the CKD DASD image                */
@@ -438,7 +365,7 @@ int             dl;                     /* Data length               */
     if (verbose)
     {
        fprintf (stdout,
-               "Searching extent %d begin (%d,%d) end (%d,%d)\n",
+               "HHCDU005I Searching extent %d begin (%d,%d) end (%d,%d)\n",
                cext, ccyl, chead, ecyl, ehead);
     }
 
@@ -510,7 +437,7 @@ int             dl;                     /* Data length               */
        if (verbose)
        {
            fprintf (stdout,
-                   "Searching extent %d begin (%d,%d) end (%d,%d)\n",
+                   "HHCDU006I Searching extent %d begin (%d,%d) end (%d,%d)\n",
                    cext, ccyl, chead, ecyl, ehead);
        }
 
@@ -571,7 +498,7 @@ int             extsize;                /* Extent size in tracks     */
     } /* end for(i) */
 
     fprintf (stderr,
-            "Track %d not found in extent table\n",
+            "HHCDU007E Track %d not found in extent table\n",
             tt);
     return -1;
 
@@ -588,7 +515,8 @@ int             extsize;                /* Extent size in tracks     */
 /* Return value is a pointer to the CKD image file descriptor        */
 /* structure if successful, or NULL if unsuccessful.                 */
 /*-------------------------------------------------------------------*/
-CIFBLK* open_ckd_image (BYTE *fname, BYTE *sfname, int omode)
+CIFBLK* open_ckd_image (BYTE *fname, BYTE *sfname, int omode,
+                       int dasdcopy)
 {
 int             fd;                     /* File descriptor           */
 int             rc;                     /* Return code               */
@@ -601,7 +529,7 @@ BYTE           *sfxptr;                 /* -> Last char of file name */
 U16             devnum;                 /* Device number             */
 BYTE            c;                      /* Work area for sscanf      */
 BYTE           *argv[2];                /* Arguments to              */
-int             argc=0;                 /*     ckddasd_init_handler  */
+int             argc=0;                 /*                           */
 BYTE            sfxname[1024];          /* Suffixed file name        */
 
     /* Obtain storage for the file descriptor structure */
@@ -609,7 +537,8 @@ BYTE            sfxname[1024];          /* Suffixed file name        */
     if (cif == NULL)
     {
         fprintf (stderr,
-                "Cannot obtain storage for track buffer: %s\n",
+                "HHCDU008E Cannot obtain storage for device descriptor "
+                "buffer: %s\n",
                 strerror(errno));
         return NULL;
     }
@@ -619,6 +548,7 @@ BYTE            sfxname[1024];          /* Suffixed file name        */
     dev->msgpipew = stderr;
     if ((omode & O_RDWR) == 0) dev->ckdrdonly = 1;
     dev->batch = 1;
+    dev->dasdcopy = dasdcopy;
 
     /* Read the device header so we can determine the device type */
     strcpy (sfxname, fname);
@@ -664,7 +594,8 @@ BYTE            sfxname[1024];          /* Suffixed file name        */
         }
         if (fd<0)
         {
-            fprintf (stderr, "Cannot open %s: %s\n", fname, strerror(errno));
+            fprintf (stderr, "HHCDU009E Cannot open %s: %s\n",
+                     fname, strerror(errno));
             free (cif);
             return NULL;
         }
@@ -672,17 +603,18 @@ BYTE            sfxname[1024];          /* Suffixed file name        */
     len = read (fd, &devhdr, CKDDASD_DEVHDR_SIZE);
     if (len < 0)
     {
-        fprintf (stderr, "%s read error: %s\n", fname, strerror(errno));
+        fprintf (stderr, "HHCDU010E %s read error: %s\n",
+                 fname, strerror(errno));
         close (fd);
         free (cif);
         return NULL;
     }
     close (fd);
-    if (len < CKDDASD_DEVHDR_SIZE
-     || (memcmp(devhdr.devid, "CKD_P370", 8) != 0
-      && memcmp(devhdr.devid, "CKD_C370", 8) != 0))
+    if (len < (int)CKDDASD_DEVHDR_SIZE
+     || (memcmp(devhdr.devid, "CKD_P370", 8)
+      && memcmp(devhdr.devid, "CKD_C370", 8)))
     {
-        fprintf (stderr, "%s CKD header invalid\n", fname);
+        fprintf (stderr, "HHCDU011E %s CKD header invalid\n", fname);
         free (cif);
         return NULL;
     }
@@ -691,12 +623,16 @@ BYTE            sfxname[1024];          /* Suffixed file name        */
     ckd = dasd_lookup (DASD_CKDDEV, NULL, devhdr.devtype, 0);
     if (ckd == NULL)
     {
-        fprintf(stderr, "DASD table entry not found for devtype 0x%2.2X\n",
+        fprintf(stderr, "HHCDU012E DASD table entry not found for "
+                        "devtype 0x%2.2X\n",
                 devhdr.devtype);
         free (cif);
         return NULL;
     }
     dev->devtype = ckd->devt;
+
+    /* Set the device handlers */
+    dev->hnd = &ckddasd_device_hndinfo;
 
     /* If the end of the filename is a valid device address then
        use that as the device number, otherwise default to 0x0000 */
@@ -716,11 +652,12 @@ BYTE            sfxname[1024];          /* Suffixed file name        */
         argc++;
     }
 
-    /* Call the CKD device handler initialization function */
-    rc = ckddasd_init_handler(dev, argc, argv);
+    /* Call the device handler initialization function */
+    rc = (dev->hnd->init)(dev, argc, argv);
     if (rc < 0)
     {
-        fprintf (stderr, "CKD initialization failed for %s\n", fname);
+        fprintf (stderr, "HHCDU013E CKD initialization failed for %s\n",
+                 fname);
         free (cif);
         return NULL;
     }
@@ -738,19 +675,8 @@ BYTE            sfxname[1024];          /* Suffixed file name        */
     if (verbose)
     {
        fprintf (stderr,
-               "%s heads=%d trklen=%d\n",
+               "HHCDU014I %s heads=%d trklen=%d\n",
                cif->fname, cif->heads, cif->trksz);
-    }
-
-    /* Obtain the track buffer */
-    cif->trkbuf = malloc (cif->trksz);
-    if (cif->trkbuf == NULL)
-    {
-        fprintf (stderr,
-                "Cannot obtain storage for track buffer: %s\n",
-                strerror(errno));
-        free (cif);
-        return NULL;
     }
 
     /* Indicate that the track buffer is empty */
@@ -774,22 +700,139 @@ int close_ckd_image (CIFBLK *cif)
 {
 int             rc;                     /* Return code               */
 DEVBLK         *dev;                    /* -> CKD device block       */
+BYTE            unitstat;               /* Unit status               */
 
-    /* Rewrite the track buffer if it has been modified */
-    rc = rewrite_track (cif);
-    if (rc < 0) return -1;
+    dev = &cif->devblk;
+
+    /* Write the last track if modified */
+    if (cif->trkmodif)
+    {
+        if (verbose) /* Issue progress message */
+           fprintf (stdout, "HHCDU015I Updating cyl %d head %d\n",
+                    cif->curcyl, cif->curhead);
+        rc = (dev->ckdupdtrk)(dev, NULL, cif->trksz, &unitstat);
+        if (rc < 0)
+        {
+            fprintf (stderr, "HHCDU016E %s write track error: stat=%2.2X\n",
+                    cif->fname, unitstat);
+        }
+    }
 
     /* Close the CKD image file */
-    dev = &cif->devblk;
-    rc = ckddasd_close_device (dev);
-    if (rc < 0) return -1;
+    (dev->hnd->close)(dev);
 
-    /* Release the track buffer and the file descriptor structure */
-    free (cif->trkbuf);
+    /* Release the file descriptor structure */
     free (cif);
 
     return 0;
 } /* end function close_ckd_image */
+
+/*-------------------------------------------------------------------*/
+/* Subroutine to open a FBA image file                               */
+/* Input:                                                            */
+/*      fname   FBA image file name                                  */
+/*      omode   Open mode: O_RDONLY or O_RDWR                        */
+/*                                                                   */
+/* The FBA image file is opened, a track buffer is obtained,         */
+/* and a FBA image file descriptor structure is built.               */
+/* Return value is a pointer to the FBA image file descriptor        */
+/* structure if successful, or NULL if unsuccessful.                 */
+/*-------------------------------------------------------------------*/
+CIFBLK* open_fba_image (BYTE *fname, BYTE *sfname, int omode,
+                        int dasdcopy)
+{
+int             rc;                     /* Return code               */
+CIFBLK         *cif;                    /* FBA image file descriptor */
+DEVBLK         *dev;                    /* FBA device block          */
+FBADEV         *fba;                    /* FBA DASD table entry      */
+BYTE           *sfxptr;                 /* -> Last char of file name */
+U16             devnum;                 /* Device number             */
+BYTE            c;                      /* Work area for sscanf      */
+BYTE           *argv[2];                /* Arguments to              */
+int             argc=0;                 /*  device open              */
+
+    /* Obtain storage for the file descriptor structure */
+    cif = (CIFBLK*) calloc (sizeof(CIFBLK), 1);
+    if (cif == NULL)
+    {
+        fprintf (stderr,
+                "HHCDU017E Cannot obtain storage for device descriptor "
+                "buffer: %s\n",
+                strerror(errno));
+        return NULL;
+    }
+
+    /* Initialize the devblk */
+    dev = &cif->devblk;
+    dev->msgpipew = stderr;
+    if ((omode & O_RDWR) == 0) dev->ckdrdonly = 1;
+    dev->batch = 1;
+    dev->dasdcopy = dasdcopy;
+
+    /* Set the device type */
+    fba = dasd_lookup (DASD_FBADEV, NULL, DEFAULT_FBA_TYPE, 0);
+    if (fba == NULL)
+    {
+        fprintf(stderr, "HHCDU018E DASD table entry not found for "
+                        "devtype 0x%2.2X\n",
+                DEFAULT_FBA_TYPE);
+        free (cif);
+        return NULL;
+    }
+    dev->devtype = fba->devt;
+
+    /* Set the device handlers */
+    dev->hnd = &fbadasd_device_hndinfo;
+
+    /* If the end of the filename is a valid device address then
+       use that as the device number, otherwise default to 0x0000 */
+    sfxptr = strrchr (fname, '/');
+    if (sfxptr == NULL) sfxptr = fname + 1;
+    sfxptr = strchr (sfxptr, '.');
+    if (sfxptr != NULL)
+        if (sscanf(sfxptr+1, "%hx%c", &devnum, &c) == 1)
+            dev->devnum = devnum;
+
+    /* Build arguments for fbadasd_init_handler */
+    argv[0] = fname;
+    argc++;
+    if (sfname != NULL)
+    {
+        argv[1] = sfname;
+        argc++;
+    }
+
+    /* Call the device handler initialization function */
+    rc = (dev->hnd->init)(dev, argc, argv);
+    if (rc < 0)
+    {
+        fprintf (stderr, "HHCDU019E FBA initialization failed for %s\n",
+                 fname);
+        free (cif);
+        return NULL;
+    }
+
+    /* Set CIF fields */
+    cif->fname = fname;
+    cif->fd = dev->fd;
+
+    /* Extract the number of sectors and the sector size */
+    cif->heads = dev->fbanumblk;
+    cif->trksz = dev->fbablksiz;
+    if (verbose)
+    {
+       fprintf (stderr,
+               "HHCDU020I %s sectors=%d size=%d\n",
+               cif->fname, cif->heads, cif->trksz);
+    }
+
+    /* Indicate that the track buffer is empty */
+    cif->curcyl = -1;
+    cif->curhead = -1;
+    cif->trkmodif = 0;
+
+    return cif;
+} /* end function open_fba_image */
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to build extent array for specified dataset            */
@@ -825,7 +868,7 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
     if (rc < 0) return -1;
     if (rc > 0)
     {
-        fprintf (stderr, "VOL1 record not found\n");
+        fprintf (stderr, "HHCDU021E VOL1 record not found\n");
         return -1;
     }
 
@@ -838,7 +881,7 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
     if (verbose)
     {
        fprintf (stdout,
-               "VOLSER=%s VTOC=%4.4X%4.4X%2.2X\n",
+               "HHCDU022I VOLSER=%s VTOC=%4.4X%4.4X%2.2X\n",
                 volser, cyl, head, rec);
     }
 
@@ -848,14 +891,14 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
     if (rc < 0) return -1;
     if (rc > 0)
     {
-        fprintf (stderr, "F4DSCB record not found\n");
+        fprintf (stderr, "HHCDU023E F4DSCB record not found\n");
         return -1;
     }
 
     if (verbose)
     {
        fprintf (stdout,
-               "VTOC start %2.2X%2.2X%2.2X%2.2X "
+               "HHCDU023I VTOC start %2.2X%2.2X%2.2X%2.2X "
                "end %2.2X%2.2X%2.2X%2.2X\n",
                f4dscb->ds4vtoce.xtbcyl[0], f4dscb->ds4vtoce.xtbcyl[1],
                f4dscb->ds4vtoce.xtbtrk[0], f4dscb->ds4vtoce.xtbtrk[1],
@@ -871,7 +914,7 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
     if (rc > 0)
     {
         fprintf (stderr,
-                "Dataset %s not found in VTOC\n",
+                "HHCDU024E Dataset %s not found in VTOC\n",
                 dsnama);
         return -1;
     }
@@ -879,7 +922,7 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
     if (verbose)
     {
        fprintf (stdout,
-               "DSNAME=%s F1DSCB CCHHR=%4.4X%4.4X%2.2X\n",
+               "HHCDU025I DSNAME=%s F1DSCB CCHHR=%4.4X%4.4X%2.2X\n",
                dsnama, cyl, head, rec);
     }
 
@@ -889,7 +932,7 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
     if (rc < 0) return -1;
     if (rc > 0)
     {
-        fprintf (stderr, "F1DSCB record not found\n");
+        fprintf (stderr, "HHCDU026E F1DSCB record not found\n");
         return -1;
     }
 
@@ -911,7 +954,7 @@ BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
         if (rc < 0) return -1;
         if (rc > 0)
         {
-            fprintf (stderr, "F3DSCB record not found\n");
+            fprintf (stderr, "HHCDU027E F3DSCB record not found\n");
             return -1;
         }
 
@@ -1091,7 +1134,7 @@ int             fl1, fl2, int1, int2;   /* 3380/3390/9345 calculation*/
 static int
 create_ckd_file (BYTE *fname, int fseqn, U16 devtype, U32 heads,
                 U32 trksize, BYTE *buf, U32 start, U32 end,
-                U32 volcyls, BYTE *volser, BYTE comp)
+                U32 volcyls, BYTE *volser, BYTE comp, int dasdcopy)
 {
 int             rc;                     /* Return code               */
 int             fd;                     /* File descriptor           */
@@ -1104,6 +1147,7 @@ CKDDASD_RECHDR *rechdr;                 /* -> Record header          */
 U32             cyl;                    /* Cylinder number           */
 U32             head;                   /* Head number               */
 BYTE           *pos;                    /* -> Next position in buffer*/
+int             len = 0;                /* Length used in track      */
 int             keylen = 4;             /* Length of keys            */
 int             ipl1len = 24;           /* Length of IPL1 data       */
 int             ipl2len = 144;          /* Length of IPL2 data       */
@@ -1111,6 +1155,7 @@ int             vol1len = 80;           /* Length of VOL1 data       */
 int             rec0len = 8;            /* Length of R0 data         */
 int             fileseq;                /* CKD header sequence number*/
 int             highcyl;                /* CKD header high cyl number*/
+int             x=O_EXCL;               /* Open option               */
 
     /* Set file sequence number to zero if this is the only file */
     if (fseqn == 1 && end + 1 == volcyls)
@@ -1124,12 +1169,15 @@ int             highcyl;                /* CKD header high cyl number*/
     else
         highcyl = end;
 
+    /* if `dasdcopy' > 1 then we can replace the existing file */
+    if (dasdcopy > 1) x = 0;
+
     /* Create the DASD image file */
-    fd = open (fname, O_WRONLY | O_CREAT | O_EXCL | O_BINARY,
+    fd = open (fname, O_WRONLY | O_CREAT | x | O_BINARY,
                 S_IRUSR | S_IWUSR | S_IRGRP);
     if (fd < 0)
     {
-        fprintf (stderr, "%s open error: %s\n",
+        fprintf (stderr, "HHCDU028E %s open error: %s\n",
                 fname, strerror(errno));
         return -1;
     }
@@ -1155,9 +1203,9 @@ int             highcyl;                /* CKD header high cyl number*/
 
     /* Write the device header */
     rc = write (fd, &devhdr, CKDDASD_DEVHDR_SIZE);
-    if (rc < CKDDASD_DEVHDR_SIZE)
+    if (rc < (int)CKDDASD_DEVHDR_SIZE)
     {
-        fprintf (stderr, "%s device header write error: %s\n",
+        fprintf (stderr, "HHCDU029E %s device header write error: %s\n",
                 fname, errno ? strerror(errno) : "incomplete");
         return -1;
     }
@@ -1165,7 +1213,7 @@ int             highcyl;                /* CKD header high cyl number*/
     /* Build a compressed CKD file */
     if (comp != 0xff)
     {
-        /* Create the compressed device header */ 
+        /* Create the compressed device header */
         memset(&cdevhdr, 0, CCKDDASD_DEVHDR_SIZE);
         cdevhdr.vrm[0] = CCKD_VERSION;
         cdevhdr.vrm[1] = CCKD_RELEASE;
@@ -1183,9 +1231,10 @@ int             highcyl;                /* CKD header high cyl number*/
 
         /* Write the compressed device header */
         rc = write (fd, &cdevhdr, CCKDDASD_DEVHDR_SIZE);
-        if (rc < CCKDDASD_DEVHDR_SIZE)
+        if (rc < (int)CCKDDASD_DEVHDR_SIZE)
         {
-            fprintf (stderr, "%s compressed device header write error: %s\n",
+            fprintf (stderr, "HHCDU030E %s compressed device header "
+                             "write error: %s\n",
                     fname, errno ? strerror(errno) : "incomplete");
             return -1;
         }
@@ -1194,7 +1243,7 @@ int             highcyl;                /* CKD header high cyl number*/
         l1 = calloc (cdevhdr.numl1tab, CCKD_L1ENT_SIZE);
         if (l1 == NULL)
         {
-            fprintf (stderr, "Cannot obtain l1tab buffer: %s\n",
+            fprintf (stderr, "HHCDU031E Cannot obtain l1tab buffer: %s\n",
                     strerror(errno));
             return -1;
         }
@@ -1202,9 +1251,10 @@ int             highcyl;                /* CKD header high cyl number*/
 
         /* Write the primary lookup table */
         rc = write (fd, l1, cdevhdr.numl1tab * CCKD_L1ENT_SIZE);
-        if (rc < cdevhdr.numl1tab * CCKD_L1ENT_SIZE)
+        if (rc < (int)(cdevhdr.numl1tab * CCKD_L1ENT_SIZE))
         {
-            fprintf (stderr, "%s primary lookup table write error: %s\n",
+            fprintf (stderr, "HHCDU032E %s primary lookup table "
+                             "write error: %s\n",
                     fname, errno ? strerror(errno) : "incomplete");
             return -1;
         }
@@ -1216,137 +1266,155 @@ int             highcyl;                /* CKD header high cyl number*/
 
         /* Write the seondary lookup table */
         rc = write (fd, &l2, CCKD_L2TAB_SIZE);
-        if (rc < CCKD_L2TAB_SIZE)
+        if (rc < (int)CCKD_L2TAB_SIZE)
         {
-            fprintf (stderr, "%s secondary lookup table write error: %s\n",
+            fprintf (stderr, "HHCDU033E %s secondary lookup table "
+                             "write error: %s\n",
                     fname, errno ? strerror(errno) : "incomplete");
             return -1;
         }
     }
 
-    /* Write each cylinder */
-    for (cyl = start; cyl <= end; cyl++)
+    /* Just allocate file space if `dasdcopy' bit is on */
+    if (dasdcopy && comp == 0xff)
     {
-        /* Display progress message every 10 cylinders */
-        if (cyl && !(cyl % 10))
+        off_t sz = ((end - start + 1) * heads * trksize) + CKDDASD_DEVHDR_SIZE;
+        rc = ftruncate (fd, sz);
+        if (rc < 0)
         {
+            fprintf (stderr, "HHCDU034E %s dasdcopy ftruncate error: %s\n",
+                    fname, strerror(errno));
+            return -1;
+        }
+        cyl = end + 1;
+    }
+    else
+    {
+        /* Write each cylinder */
+        for (cyl = start; cyl <= end; cyl++)
+        {
+            /* Display progress message every 10 cylinders */
+            if (cyl && !(cyl % 10))
+            {
 #ifdef EXTERNALGUI
-            if (extgui)
-                fprintf (stderr, "CYL=%u\n", cyl);
-            else
+                if (extgui)
+                    fprintf (stderr, "CYL=%u\n", cyl);
+                else
 #endif /*EXTERNALGUI*/
                 fprintf (stderr, "Writing cylinder %u\r", cyl);
-        }
-
-        for (head = 0; head < heads; head++)
-        {
-            /* Clear the track to zeroes */
-            memset (buf, 0, trksize);
-
-            /* Build the track header */
-            trkhdr = (CKDDASD_TRKHDR*)buf;
-            trkhdr->bin = 0;
-            trkhdr->cyl[0] = (cyl >> 8) & 0xFF;
-            trkhdr->cyl[1] = cyl & 0xFF;
-            trkhdr->head[0] = (head >> 8) & 0xFF;
-            trkhdr->head[1] = head & 0xFF;
-            pos = buf + CKDDASD_TRKHDR_SIZE;
-
-            /* Build record zero */
-            rechdr = (CKDDASD_RECHDR*)pos;
-            pos += CKDDASD_RECHDR_SIZE;
-            rechdr->cyl[0] = (cyl >> 8) & 0xFF;
-            rechdr->cyl[1] = cyl & 0xFF;
-            rechdr->head[0] = (head >> 8) & 0xFF;
-            rechdr->head[1] = head & 0xFF;
-            rechdr->rec = 0;
-            rechdr->klen = 0;
-            rechdr->dlen[0] = (rec0len >> 8) & 0xFF;
-            rechdr->dlen[1] = rec0len & 0xFF;
-            pos += rec0len;
-
-            /* Cyl 0 head 0 contains IPL records and volume label */
-            if (cyl == 0 && head == 0)
-            {
-                /* Build the IPL1 record */
-                rechdr = (CKDDASD_RECHDR*)pos;
-                pos += CKDDASD_RECHDR_SIZE;
-                rechdr->cyl[0] = (cyl >> 8) & 0xFF;
-                rechdr->cyl[1] = cyl & 0xFF;
-                rechdr->head[0] = (head >> 8) & 0xFF;
-                rechdr->head[1] = head & 0xFF;
-                rechdr->rec = 1;
-                rechdr->klen = keylen;
-                rechdr->dlen[0] = (ipl1len >> 8) & 0xFF;
-                rechdr->dlen[1] = ipl1len & 0xFF;
-                convert_to_ebcdic (pos, keylen, "IPL1");
-                pos += keylen;
-                memcpy (pos, iplpsw, 8);
-                memcpy (pos+8, iplccw1, 8);
-                memcpy (pos+16, iplccw2, 8);
-                pos += ipl1len;
-
-                /* Build the IPL2 record */
-                rechdr = (CKDDASD_RECHDR*)pos;
-                pos += CKDDASD_RECHDR_SIZE;
-                rechdr->cyl[0] = (cyl >> 8) & 0xFF;
-                rechdr->cyl[1] = cyl & 0xFF;
-                rechdr->head[0] = (head >> 8) & 0xFF;
-                rechdr->head[1] = head & 0xFF;
-                rechdr->rec = 2;
-                rechdr->klen = keylen;
-                rechdr->dlen[0] = (ipl2len >> 8) & 0xFF;
-                rechdr->dlen[1] = ipl2len & 0xFF;
-                convert_to_ebcdic (pos, keylen, "IPL2");
-                pos += keylen;
-                pos += ipl2len;
-
-                /* Build the VOL1 record */
-                rechdr = (CKDDASD_RECHDR*)pos;
-                pos += CKDDASD_RECHDR_SIZE;
-                rechdr->cyl[0] = (cyl >> 8) & 0xFF;
-                rechdr->cyl[1] = cyl & 0xFF;
-                rechdr->head[0] = (head >> 8) & 0xFF;
-                rechdr->head[1] = head & 0xFF;
-                rechdr->rec = 3;
-                rechdr->klen = keylen;
-                rechdr->dlen[0] = (vol1len >> 8) & 0xFF;
-                rechdr->dlen[1] = vol1len & 0xFF;
-                convert_to_ebcdic (pos, keylen, "VOL1");
-                pos += keylen;
-                convert_to_ebcdic (pos, 4, "VOL1");
-                convert_to_ebcdic (pos+4, 6, volser);
-                convert_to_ebcdic (pos+37, 14, "HERCULES");
-                pos += vol1len;
-
-            } /* end if(cyl==0 && head==0) */
-
-            /* Build the end of track marker */
-            memcpy (pos, eighthexFF, 8);
-            pos += 8;
-
-            /* Write the track to the file */
-            if (comp != 0xff)
-                trksize = pos - buf;
-            rc = write (fd, buf, trksize);
-            if (rc < trksize)
-            {
-                fprintf (stderr,
-                        "%s cylinder %u head %u write error: %s\n",
-                        fname, cyl, head,
-                        errno ? strerror(errno) : "incomplete");
-                return -1;
             }
-            if (comp != 0xff) break;
 
-        } /* end for(head) */
-        if (comp != 0xff) break;
-    } /* end for(cyl) */
+            for (head = 0; head < heads; head++)
+            {
+                /* Clear the track to zeroes */
+                memset (buf, 0, trksize);
+
+                /* Build the track header */
+                trkhdr = (CKDDASD_TRKHDR*)buf;
+                trkhdr->bin = 0;
+                trkhdr->cyl[0] = (cyl >> 8) & 0xFF;
+                trkhdr->cyl[1] = cyl & 0xFF;
+                trkhdr->head[0] = (head >> 8) & 0xFF;
+                trkhdr->head[1] = head & 0xFF;
+                pos = buf + CKDDASD_TRKHDR_SIZE;
+
+                /* Build record zero */
+                rechdr = (CKDDASD_RECHDR*)pos;
+                pos += CKDDASD_RECHDR_SIZE;
+                rechdr->cyl[0] = (cyl >> 8) & 0xFF;
+                rechdr->cyl[1] = cyl & 0xFF;
+                rechdr->head[0] = (head >> 8) & 0xFF;
+                rechdr->head[1] = head & 0xFF;
+                rechdr->rec = 0;
+                rechdr->klen = 0;
+                rechdr->dlen[0] = (rec0len >> 8) & 0xFF;
+                rechdr->dlen[1] = rec0len & 0xFF;
+                pos += rec0len;
+
+                /* Cyl 0 head 0 contains IPL records and volume label */
+                if (cyl == 0 && head == 0)
+                {
+                    /* Build the IPL1 record */
+                    rechdr = (CKDDASD_RECHDR*)pos;
+                    pos += CKDDASD_RECHDR_SIZE;
+                    rechdr->cyl[0] = (cyl >> 8) & 0xFF;
+                    rechdr->cyl[1] = cyl & 0xFF;
+                    rechdr->head[0] = (head >> 8) & 0xFF;
+                    rechdr->head[1] = head & 0xFF;
+                    rechdr->rec = 1;
+                    rechdr->klen = keylen;
+                    rechdr->dlen[0] = (ipl1len >> 8) & 0xFF;
+                    rechdr->dlen[1] = ipl1len & 0xFF;
+                    convert_to_ebcdic (pos, keylen, "IPL1");
+                    pos += keylen;
+                    memcpy (pos, iplpsw, 8);
+                    memcpy (pos+8, iplccw1, 8);
+                    memcpy (pos+16, iplccw2, 8);
+                    pos += ipl1len;
+
+                    /* Build the IPL2 record */
+                    rechdr = (CKDDASD_RECHDR*)pos;
+                    pos += CKDDASD_RECHDR_SIZE;
+                    rechdr->cyl[0] = (cyl >> 8) & 0xFF;
+                    rechdr->cyl[1] = cyl & 0xFF;
+                    rechdr->head[0] = (head >> 8) & 0xFF;
+                    rechdr->head[1] = head & 0xFF;
+                    rechdr->rec = 2;
+                    rechdr->klen = keylen;
+                    rechdr->dlen[0] = (ipl2len >> 8) & 0xFF;
+                    rechdr->dlen[1] = ipl2len & 0xFF;
+                    convert_to_ebcdic (pos, keylen, "IPL2");
+                    pos += keylen;
+                    pos += ipl2len;
+
+                    /* Build the VOL1 record */
+                    rechdr = (CKDDASD_RECHDR*)pos;
+                    pos += CKDDASD_RECHDR_SIZE;
+                    rechdr->cyl[0] = (cyl >> 8) & 0xFF;
+                    rechdr->cyl[1] = cyl & 0xFF;
+                    rechdr->head[0] = (head >> 8) & 0xFF;
+                    rechdr->head[1] = head & 0xFF;
+                    rechdr->rec = 3;
+                    rechdr->klen = keylen;
+                    rechdr->dlen[0] = (vol1len >> 8) & 0xFF;
+                    rechdr->dlen[1] = vol1len & 0xFF;
+                    convert_to_ebcdic (pos, keylen, "VOL1");
+                    pos += keylen;
+                    convert_to_ebcdic (pos, 4, "VOL1");
+                    convert_to_ebcdic (pos+4, 6, volser);
+                    convert_to_ebcdic (pos+37, 14, "HERCULES");
+                    pos += vol1len;
+
+                } /* end if(cyl==0 && head==0) */
+
+                /* Build the end of track marker */
+                memcpy (pos, eighthexFF, 8);
+                pos += 8;
+
+                len = comp == 0xff ? (int)trksize : (int)(pos - buf);
+
+                /* Write the track to the file */
+                rc = write (fd, buf, len);
+                if (rc != len)
+                {
+                    fprintf (stderr,
+                            "HHCDU035E %s cylinder %u head %u "
+                            "write error: %s\n",
+                            fname, cyl, head,
+                            errno ? strerror(errno) : "incomplete");
+                    return -1;
+                }
+                if (comp != 0xff) break;
+
+            } /* end for(head) */
+            if (comp != 0xff) break;
+        } /* end for(cyl) */
+    } /* `dasdcopy' bit is off */
 
     /* Complete building the compressed file */
     if (comp != 0xff)
     {
-        cdevhdr.size = cdevhdr.used = CCKD_L1TAB_POS + 
+        cdevhdr.size = cdevhdr.used = CCKD_L1TAB_POS +
                                       cdevhdr.numl1tab * CCKD_L1ENT_SIZE +
                                       CCKD_L2TAB_SIZE + trksize;
 
@@ -1354,35 +1422,40 @@ int             highcyl;                /* CKD header high cyl number*/
         rc = lseek (fd, CKDDASD_DEVHDR_SIZE, SEEK_SET);
         if (rc == -1)
         {
-            fprintf (stderr, "%s compressed device header lseek error: %s\n",
+            fprintf (stderr, "HHCDU036E %s compressed device header "
+                             "lseek error: %s\n",
                     fname, strerror(errno));
             return -1;
         }
         rc = write (fd, &cdevhdr, CCKDDASD_DEVHDR_SIZE);
-        if (rc < CCKDDASD_DEVHDR_SIZE)
+        if (rc < (int)CCKDDASD_DEVHDR_SIZE)
         {
-            fprintf (stderr, "%s compressed device header write error: %s\n",
+            fprintf (stderr, "HHCDU037E %s compressed device header "
+                             "write error: %s\n",
                     fname, errno ? strerror(errno) : "incomplete");
             return -1;
         }
 
-        l2[0].len = l2[0].size = trksize;
+        l2[0].len = l2[0].size = len;
 
         /* Rewrite the secondary lookup table */
         rc = lseek (fd, CCKD_L1TAB_POS + cdevhdr.numl1tab * CCKD_L1ENT_SIZE, SEEK_SET);
         if (rc == -1)
         {
-            fprintf (stderr, "%s secondary lookup table lseek error: %s\n",
+            fprintf (stderr, "HHCDU038E %s secondary lookup table "
+                             "lseek error: %s\n",
                     fname, strerror(errno));
             return -1;
         }
         rc = write (fd, &l2, CCKD_L2TAB_SIZE);
-        if (rc < CCKD_L2TAB_SIZE)
+        if (rc < (int)CCKD_L2TAB_SIZE)
         {
-            fprintf (stderr, "%s secondary lookup table write error: %s\n",
+            fprintf (stderr, "HHCDU039E %s secondary lookup table "
+                             "write error: %s\n",
                     fname, errno ? strerror(errno) : "incomplete");
             return -1;
         }
+        rc = ftruncate(fd, (off_t)cdevhdr.size);
 
         free (l1);
         cyl = volcyls;
@@ -1392,14 +1465,14 @@ int             highcyl;                /* CKD header high cyl number*/
     rc = close (fd);
     if (rc < 0)
     {
-        fprintf (stderr, "%s close error: %s\n",
+        fprintf (stderr, "HHCDU040E %s close error: %s\n",
                 fname, strerror(errno));
         return -1;
     }
 
     /* Display completion message */
     fprintf (stderr,
-            "%u cylinders successfully written to file %s\n",
+            "HHCDU041I %u cylinders successfully written to file %s\n",
             cyl - start, fname);
     return 0;
 
@@ -1423,8 +1496,8 @@ int             highcyl;                /* CKD header high cyl number*/
 /* Otherwise a single file is created without a suffix.              */
 /*-------------------------------------------------------------------*/
 int
-create_ckd (BYTE *fname, U16 devtype, U32 heads,
-            U32 maxdlen, U32 volcyls, BYTE *volser, BYTE comp)
+create_ckd (BYTE *fname, U16 devtype, U32 heads, U32 maxdlen,
+           U32 volcyls, BYTE *volser, BYTE comp, int lfs, int dasdcopy)
 {
 int             i;                      /* Array subscript           */
 int             rc;                     /* Return code               */
@@ -1453,9 +1526,9 @@ U32             trksize;                /* DASD image track length   */
     /* Compute minimum and maximum number of cylinders */
     cylsize = trksize * heads;
     mincyls = 1;
-    if (comp == 0xff)
+    if (comp == 0xff && !lfs)
     {
-        maxcpif = 0x80000000 / cylsize;
+        maxcpif = (0x7fffffff - CKDDASD_DEVHDR_SIZE + 1) / cylsize;
         maxcyls = maxcpif * CKD_MAXFILES;
     }
     else
@@ -1466,7 +1539,7 @@ U32             trksize;                /* DASD image track length   */
     if (volcyls < mincyls || volcyls > maxcyls)
     {
         fprintf (stderr,
-                "Cylinder count %u is outside range %u-%u\n",
+                "HHCDU042E Cylinder count %u is outside range %u-%u\n",
                 volcyls, mincyls, maxcyls);
         return -1;
     }
@@ -1475,14 +1548,14 @@ U32             trksize;                /* DASD image track length   */
     buf = malloc(trksize);
     if (buf == NULL)
     {
-        fprintf (stderr, "Cannot obtain track buffer: %s\n",
+        fprintf (stderr, "HHCDU043E Cannot obtain track buffer: %s\n",
                 strerror(errno));
         return -1;
     }
 
     /* Display progress message */
     fprintf (stderr,
-            "Creating %4.4X volume %s: %u cyls, "
+            "HHCDU044I Creating %4.4X volume %s: %u cyls, "
             "%u trks/cyl, %u bytes/track\n",
             devtype, volser, volcyls, heads, trksize);
 
@@ -1537,7 +1610,8 @@ U32             trksize;                /* DASD image track length   */
 
         /* Create a CKD DASD image file */
         rc = create_ckd_file (sfname, fileseq, devtype, heads,
-                    trksize, buf, cyl, endcyl, volcyls, volser, comp);
+                    trksize, buf, cyl, endcyl, volcyls, volser,
+                    comp, dasdcopy);
         if (rc < 0) return -1;
     }
 
@@ -1557,11 +1631,10 @@ U32             trksize;                /* DASD image track length   */
 /*      volser  Volume serial number                                 */
 /*      comp    Compression algorithm for a compressed device.       */
 /*              Will be 0xff if device is not to be compressed.      */
-/*              FBA compression is NOT currently supported.          */
 /*-------------------------------------------------------------------*/
 int
-create_fba (BYTE *fname, U16 devtype,
-            U32 sectsz, U32 sectors, BYTE *volser, BYTE comp)
+create_fba (BYTE *fname, U16 devtype, U32 sectsz, U32 sectors,
+            BYTE *volser, BYTE comp, int lfs, int dasdcopy)
 {
 int             rc;                     /* Return code               */
 int             fd;                     /* File descriptor           */
@@ -1569,16 +1642,25 @@ U32             sectnum;                /* Sector number             */
 BYTE           *buf;                    /* -> Sector data buffer     */
 U32             minsect;                /* Minimum sector count      */
 U32             maxsect;                /* Maximum sector count      */
+int             x=O_EXCL;               /* Open option               */
+
+    /* Special processing for compressed fba */
+    if (comp != 0xff)
+    {
+        rc = create_compressed_fba (fname, devtype, sectsz, sectors,
+                                    volser, comp, lfs, dasdcopy);
+        return rc;
+    }
 
     /* Compute minimum and maximum number of sectors */
     minsect = 64;
     maxsect = 0x80000000 / sectsz;
 
     /* Check for valid number of sectors */
-    if (sectors < minsect || sectors > maxsect)
+    if (sectors < minsect || (!lfs && sectors > maxsect))
     {
         fprintf (stderr,
-                "Sector count %u is outside range %u-%u\n",
+                "HHCDU045E Sector count %u is outside range %u-%u\n",
                 sectors, minsect, maxsect);
         return -1;
     }
@@ -1587,67 +1669,86 @@ U32             maxsect;                /* Maximum sector count      */
     buf = malloc(sectsz);
     if (buf == NULL)
     {
-        fprintf (stderr, "Cannot obtain sector buffer: %s\n",
+        fprintf (stderr, "HHCDU046E Cannot obtain sector buffer: %s\n",
                 strerror(errno));
         return -1;
     }
 
     /* Display progress message */
     fprintf (stderr,
-            "Creating %4.4X volume %s: "
+            "HHCDU047I Creating %4.4X volume %s: "
             "%u sectors, %u bytes/sector\n",
             devtype, volser, sectors, sectsz);
 
+    /* if `dasdcopy' > 1 then we can replace the existing file */
+    if (dasdcopy > 1) x = 0;
+
     /* Create the DASD image file */
-    fd = open (fname, O_WRONLY | O_CREAT | O_EXCL | O_BINARY,
+    fd = open (fname, O_WRONLY | O_CREAT | x | O_BINARY,
                 S_IRUSR | S_IWUSR | S_IRGRP);
     if (fd < 0)
     {
-        fprintf (stderr, "%s open error: %s\n",
+        fprintf (stderr, "HHCDU048I %s open error: %s\n",
                 fname, strerror(errno));
         return -1;
     }
 
-    /* Write each sector */
-    for (sectnum = 0; sectnum < sectors; sectnum++)
+    /* If the `dasdcopy' bit is on then simply allocate the space */
+    if (dasdcopy)
     {
-        /* Clear the sector to zeroes */
-        memset (buf, 0, sectsz);
-
-        /* Sector 1 contains the volume label */
-        if (sectnum == 1)
+        off_t sz = sectors * sectsz;
+        rc = ftruncate (fd, sz);
+        if (rc < 0)
         {
-            convert_to_ebcdic (buf, 4, "VOL1");
-            convert_to_ebcdic (buf+4, 6, volser);
-        } /* end if(sectnum==1) */
-
-        /* Display progress message every 100 sectors */
-        if ((sectnum % 100) == 0)
-#ifdef EXTERNALGUI
-        {
-            if (extgui) fprintf (stderr, "BLK=%u\n", sectnum);
-            else fprintf (stderr, "Writing sector %u\r", sectnum);
+            fprintf (stderr, "HHCDU049E %s dasdcopy ftruncate error: %s\n",
+                    fname, strerror(errno));
+            return -1;
         }
+        sectnum = sectors + 1;
+    }
+    /* Write each sector */
+    else
+    {
+        for (sectnum = 0; sectnum < sectors; sectnum++)
+        {
+            /* Clear the sector to zeroes */
+            memset (buf, 0, sectsz);
+
+            /* Sector 1 contains the volume label */
+            if (sectnum == 1)
+            {
+                convert_to_ebcdic (buf, 4, "VOL1");
+                convert_to_ebcdic (buf+4, 6, volser);
+            } /* end if(sectnum==1) */
+
+            /* Display progress message every 100 sectors */
+            if ((sectnum % 100) == 0)
+#ifdef EXTERNALGUI
+            {
+                if (extgui) fprintf (stderr, "BLK=%u\n", sectnum);
+                else fprintf (stderr, "Writing sector %u\r", sectnum);
+            }
 #else /*!EXTERNALGUI*/
             fprintf (stderr, "Writing sector %u\r", sectnum);
 #endif /*EXTERNALGUI*/
 
-        /* Write the sector to the file */
-        rc = write (fd, buf, sectsz);
-        if (rc < sectsz)
-        {
-            fprintf (stderr, "%s sector %u write error: %s\n",
-                    fname, sectnum,
-                    errno ? strerror(errno) : "incomplete");
-            return -1;
-        }
-    } /* end for(sectnum) */
+            /* Write the sector to the file */
+            rc = write (fd, buf, sectsz);
+            if (rc < (int)sectsz)
+            {
+                fprintf (stderr, "HHCDU050E %s sector %u write error: %s\n",
+                        fname, sectnum,
+                        errno ? strerror(errno) : "incomplete");
+                return -1;
+            }
+        } /* end for(sectnum) */
+    } /* `dasdcopy' bit is off */
 
     /* Close the DASD image file */
     rc = close (fd);
     if (rc < 0)
     {
-        fprintf (stderr, "%s close error: %s\n",
+        fprintf (stderr, "HHCDU051E %s close error: %s\n",
                 fname, strerror(errno));
         return -1;
     }
@@ -1657,11 +1758,225 @@ U32             maxsect;                /* Maximum sector count      */
 
     /* Display completion message */
     fprintf (stderr,
-            "%u sectors successfully written to file %s\n",
+            "HHCDU052I %u sectors successfully written to file %s\n",
             sectnum, fname);
 
     return 0;
 } /* end function create_fba */
+
+/*-------------------------------------------------------------------*/
+/* Subroutine to create a compressed FBA DASD image file             */
+/* Input:                                                            */
+/*      fname   DASD image file name                                 */
+/*      devtype Device type                                          */
+/*      sectsz  Sector size                                          */
+/*      sectors Number of sectors                                    */
+/*      volser  Volume serial number                                 */
+/*      comp    Compression algorithm for a compressed device.       */
+/*-------------------------------------------------------------------*/
+int
+create_compressed_fba (BYTE *fname, U16 devtype, U32 sectsz,
+           U32 sectors, BYTE *volser, BYTE comp, int lfs, int dasdcopy)
+{
+int             rc;                     /* Return code               */
+off_t           rcoff;                  /* Return value from lseek() */
+int             fd;                     /* File descriptor           */
+CKDDASD_DEVHDR  devhdr;                 /* Device header             */
+CCKDDASD_DEVHDR cdevhdr;                /* Compressed device header  */
+int             blkgrps;                /* Number block groups       */
+int             numl1tab, l1tabsz;      /* Level 1 entries, size     */
+CCKD_L1ENT     *l1;                     /* Level 1 table pointer     */
+CCKD_L2ENT      l2[256];                /* Level 2 table             */
+unsigned long   len2;                   /* Compressed buffer length  */
+BYTE            buf2[256];              /* Compressed buffer         */
+BYTE            buf[65536];             /* Buffer                    */
+int             x=O_EXCL;               /* Open option               */
+
+    UNREFERENCED(lfs);
+
+    /* Calculate the size of the level 1 table */
+    blkgrps = (sectors / CFBA_BLOCK_NUM) + 1;
+    numl1tab = (blkgrps + 255) / 256;
+    l1tabsz = numl1tab * CCKD_L1ENT_SIZE;
+    if (l1tabsz > 65536)
+    {
+        fprintf (stderr, "HHCDU053E File size too large: %lld [%d]\n",
+                 (long long)(sectors * sectsz), numl1tab);
+        return -1;
+    }
+
+    /* if `dasdcopy' > 1 then we can replace the existing file */
+    if (dasdcopy > 1) x = 0;
+
+    /* Create the DASD image file */
+    fd = open (fname, O_WRONLY | O_CREAT | x | O_BINARY,
+                S_IRUSR | S_IWUSR | S_IRGRP);
+    if (fd < 0)
+    {
+        fprintf (stderr, "HHCDU054E %s open error: %s\n",
+                fname, strerror(errno));
+        return -1;
+    }
+
+    /* Display progress message */
+    fprintf (stderr,
+            "HHCDU055I Creating %4.4X compressed volume %s: "
+            "%u sectors, %u bytes/sector\n",
+            devtype, volser, sectors, sectsz);
+
+    /* Write the device header */
+    memset (&devhdr, 0, CKDDASD_DEVHDR_SIZE);
+    memcpy (&devhdr.devid, "FBA_C370", 8);
+    rc = write (fd, &devhdr, CKDDASD_DEVHDR_SIZE);
+    if (rc < (int)CKDDASD_DEVHDR_SIZE)
+    {
+        fprintf (stderr, "HHCDU056E %s devhdr write error: %s\n",
+                 fname, errno ? strerror(errno) : "incomplete");
+            return -1;
+    }
+
+    /* Write the compressed device header */
+    memset (&cdevhdr, 0, CCKDDASD_DEVHDR_SIZE);
+    cdevhdr.vrm[0] = CCKD_VERSION;
+    cdevhdr.vrm[1] = CCKD_RELEASE;
+    cdevhdr.vrm[2] = CCKD_MODLVL;
+    if (cckd_endian())  cdevhdr.options |= CCKD_BIGENDIAN;
+    cdevhdr.options |= (CCKD_ORDWR | CCKD_NOFUDGE);
+    cdevhdr.numl1tab = numl1tab;
+    cdevhdr.numl2tab = 256;
+    cdevhdr.cyls[3] = (sectors >> 24) & 0xFF;
+    cdevhdr.cyls[2] = (sectors >> 16) & 0xFF;
+    cdevhdr.cyls[1] = (sectors >>    8) & 0xFF;
+    cdevhdr.cyls[0] = sectors & 0xFF;
+    cdevhdr.compress = comp;
+    cdevhdr.compress_parm = -1;
+    rc = write (fd, &cdevhdr, CCKDDASD_DEVHDR_SIZE);
+    if (rc < (int)CCKDDASD_DEVHDR_SIZE)
+    {
+        fprintf (stderr, "HHCDU057E %s cdevhdr write error: %s\n",
+                 fname, errno ? strerror(errno) : "incomplete");
+        return -1;
+    }
+
+    /* Write the level 1 table */
+    l1 = (CCKD_L1ENT *)&buf;
+    memset (l1, 0, l1tabsz);
+    l1[0] = CKDDASD_DEVHDR_SIZE + CCKDDASD_DEVHDR_SIZE + l1tabsz;
+    rc = write (fd, l1, l1tabsz);
+    if (rc < l1tabsz)
+    {
+        fprintf (stderr, "HHCDU058E %s l1tab write error: %s\n",
+                 fname, errno ? strerror(errno) : "incomplete");
+        return -1;
+    }
+
+    /* Write the 1st level 2 table */
+    memset (&l2, 0, CCKD_L2TAB_SIZE);
+    l2[0].pos = CKDDASD_DEVHDR_SIZE + CCKDDASD_DEVHDR_SIZE + l1tabsz +
+                CCKD_L2TAB_SIZE;
+    rc = write (fd, &l2, CCKD_L2TAB_SIZE);
+    if (rc < (int)CCKD_L2TAB_SIZE)
+    {
+        fprintf (stderr, "HHCDU059E %s l2tab write error: %s\n",
+                 fname, errno ? strerror(errno) : "incomplete");
+        return -1;
+    }
+
+    /* Write the 1st block group */
+    memset (&buf, 0, CKDDASD_DEVHDR_SIZE + CFBA_BLOCK_SIZE);
+    convert_to_ebcdic (&buf[CKDDASD_TRKHDR_SIZE+sectsz], 4, "VOL1");
+    convert_to_ebcdic (&buf[CKDDASD_TRKHDR_SIZE+sectsz+4], 6, volser);
+    len2 = sizeof(buf2);
+#ifdef CCKD_COMPRESS_ZLIB
+    rc = compress2 (&buf2[0], &len2, &buf[CKDDASD_TRKHDR_SIZE],
+                    CFBA_BLOCK_SIZE, -1);
+    if (comp && rc == Z_OK)
+    {
+        buf[0] = CCKD_COMPRESS_ZLIB;
+        rc = write (fd, &buf, CKDDASD_TRKHDR_SIZE);
+        if (rc < (int)CKDDASD_TRKHDR_SIZE)
+        {
+            fprintf (stderr, "HHCDU060E %s block header write error: %s\n",
+                     fname, errno ? strerror(errno) : "incomplete");
+            return -1;
+        }
+        rc = write (fd, &buf2, len2);
+        if (rc < (int)len2)
+        {
+            fprintf (stderr, "HHCDU061E %s block write error: %s\n",
+                     fname, errno ? strerror(errno) : "incomplete");
+            return -1;
+        }
+        l2[0].len = l2[0].size = CKDDASD_TRKHDR_SIZE + len2;
+        cdevhdr.size = cdevhdr.used = CKDDASD_DEVHDR_SIZE +
+                       CCKDDASD_DEVHDR_SIZE + l1tabsz + CCKD_L2TAB_SIZE +
+                       CKDDASD_TRKHDR_SIZE + len2;
+    }
+    else
+#endif // defined(CCKD_COMPRESS_ZLIB)
+    {
+        rc = write (fd, &buf, CKDDASD_TRKHDR_SIZE + CFBA_BLOCK_SIZE);
+        if (rc < (int)(CKDDASD_TRKHDR_SIZE + CFBA_BLOCK_SIZE))
+        {
+            fprintf (stderr, "HHCDU062E %s block write error: %s\n",
+                     fname, errno ? strerror(errno) : "incomplete");
+            return -1;
+        }
+        l2[0].len = l2[0].size = CKDDASD_TRKHDR_SIZE + CFBA_BLOCK_SIZE;
+        cdevhdr.size = cdevhdr.used = CKDDASD_DEVHDR_SIZE +
+                       CCKDDASD_DEVHDR_SIZE + l1tabsz + CCKD_L2TAB_SIZE +
+                       CKDDASD_TRKHDR_SIZE + CFBA_BLOCK_SIZE;
+    }
+
+    /* Re-write the compressed device header */
+    rcoff = lseek (fd, CKDDASD_DEVHDR_SIZE, SEEK_SET);
+    if (rcoff < 0)
+    {
+        fprintf (stderr, "HHCDU063E %s cdevhdr lseek error: %s\n",
+                 fname, strerror(errno));
+        return -1;
+    }
+    rc = write (fd, &cdevhdr, CCKDDASD_DEVHDR_SIZE);
+    if (rc < (int)CCKDDASD_DEVHDR_SIZE)
+    {
+        fprintf (stderr, "HHCDU064E %s cdevhdr rewrite error: %s\n",
+                 fname, errno ? strerror(errno) : "incomplete");
+        return -1;
+    }
+
+    /* Re-write the 1st level 2 table */
+    rcoff = lseek (fd, CKDDASD_DEVHDR_SIZE + CCKDDASD_DEVHDR_SIZE + l1tabsz, SEEK_SET);
+    if (rcoff < 0)
+    {
+        fprintf (stderr, "HHCDU065E %s l2tab lseek error: %s\n",
+                 fname, strerror(errno));
+        return -1;
+    }
+    rc = write (fd, &l2, CCKD_L2TAB_SIZE);
+    if (rc < (int)CCKD_L2TAB_SIZE)
+    {
+        fprintf (stderr, "HHCDU066E %s l2tab rewrite error: %s\n",
+                 fname, errno ? strerror(errno) : "incomplete");
+        return -1;
+    }
+
+    /* Close the DASD image file */
+    rc = close (fd);
+    if (rc < 0)
+    {
+        fprintf (stderr, "HHCDU067E %s close error: %s\n",
+                fname, strerror(errno));
+        return -1;
+    }
+
+    /* Display completion message */
+    fprintf (stderr,
+            "HHCDU068I %u sectors successfully written to file %s\n",
+            sectors, fname);
+
+    return 0;
+} /* end function create_compressed_fba */
+
 
 int get_verbose_util(void)
 {

@@ -1,4 +1,4 @@
-/* ASSIST.C     (c) Copyright Roger Bowler, 1999-2002                */
+/* ASSIST.C     (c) Copyright Roger Bowler, 1999-2003                */
 /*              ESA/390 MVS Assist Routines                          */
 
 /*-------------------------------------------------------------------*/
@@ -8,7 +8,7 @@
 
 /*              Instruction decode rework - Jan Jaeger               */
 /*              Correct address wraparound - Jan Jaeger              */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
 /*              Add dummy assist instruction - Jay Maynard,          */
 /*                  suggested by Brandon Hill                        */
 
@@ -48,7 +48,26 @@
 #endif /*!defined(_ASSIST_C)*/
 
 
-#if !defined(FEATURE_ESAME)
+#if !defined(FEATURE_S390_DAT) && !defined(FEATURE_ESAME)
+/*-------------------------------------------------------------------*/
+/* E502       - Page Fix                                       [SSE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(fix_page)
+{
+int     b1, b2;                         /* Values of base field      */
+VADR    effective_addr1,
+        effective_addr2;                /* Effective addresses       */
+
+    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+
+    PRIV_CHECK(regs);
+
+    /*INCOMPLETE*/
+
+}
+#endif /*!defined(FEATURE_S390_DAT) && !defined(FEATURE_ESAME)*/
+
+
 /*-------------------------------------------------------------------*/
 /* E503       - SVC assist                                     [SSE] */
 /*-------------------------------------------------------------------*/
@@ -66,7 +85,6 @@ VADR    effective_addr1,
                   AND MVS WILL HAVE TO HANDLE THE SITUATION*/
 
 }
-#endif /*!defined(FEATURE_ESAME)*/
 
 
 /*-------------------------------------------------------------------*/

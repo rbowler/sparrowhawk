@@ -1,7 +1,7 @@
 /* XSTORE.C   Expanded storage related instructions - Jan Jaeger     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
 
 /* MVPG moved from cpu.c to xstore.c   05/07/00 Jan Jaeger */
 
@@ -68,7 +68,7 @@ U32     xaddr;                          /* Expanded storage address  */
     maddr &= XSTORE_PAGEMASK;
 
     /* Copy data from expanded to main */
-    memcpy (sysblk.mainstor + maddr, sysblk.xpndstor + xaddr,
+    memcpy (regs->mainstor + maddr, sysblk.xpndstor + xaddr,
             XSTORE_PAGESIZE);
 
     /* cc0 means pgin ok */
@@ -131,11 +131,11 @@ U32     xaddr;                          /* Expanded storage address  */
 
     /* Obtain abs address, verify access and set ref/change bits */
     maddr = LOGICAL_TO_ABS (regs->GR(r1) & ADDRESS_MAXWRAP(regs),
-         USE_REAL_ADDR, regs, ACCTYPE_READ, regs->psw.pkey);
+         USE_REAL_ADDR, regs, ACCTYPE_READ, 0);
     maddr &= XSTORE_PAGEMASK;
 
     /* Copy data from main to expanded */
-    memcpy (sysblk.xpndstor + xaddr, sysblk.mainstor + maddr,
+    memcpy (sysblk.xpndstor + xaddr, regs->mainstor + maddr,
             XSTORE_PAGESIZE);
 
     /* cc0 means pgout ok */
@@ -156,6 +156,11 @@ int     r1, r2;                         /* Values of R fields        */
     RRE(inst, execflag, regs, r1, r2);
 
     PRIV_CHECK(regs);
+
+#if defined(_FEATURE_SIE)
+    if(regs->sie_state && !(regs->siebk->ec[0] & SIE_EC0_MVPG))
+        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Perform serialization before operation */
     PERFORM_SERIALIZATION (regs);
@@ -197,7 +202,7 @@ DEF_INST(move_page)
 {
 int     r1, r2;                         /* Register values           */
 int     rc = 0;                         /* Return code               */
-int     cc = 0;				/* Condition code            */
+int     cc = 0;             /* Condition code            */
 VADR    vaddr1, vaddr2;                 /* Virtual addresses         */
 RADR    raddr1, raddr2, xpkeya;         /* Real addresses            */
 RADR    aaddr1 = 0, aaddr2 = 0;         /* Absolute addresses        */
@@ -215,6 +220,11 @@ BYTE    xpkey1 = 0, xpkey2 = 0;         /* Expanded storage keys     */
 #endif /*defined(FEATURE_EXPANDED_STORAGE)*/
 
     RRE(inst, execflag, regs, r1, r2);
+
+#if defined(_FEATURE_SIE)
+    if(regs->sie_state && !(regs->siebk->ec[0] & SIE_EC0_MVPG))
+        longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Use PSW key as access key for both operands */
     akey1 = akey2 = regs->psw.pkey;
@@ -255,21 +265,55 @@ BYTE    xpkey1 = 0, xpkey2 = 0;         /* Expanded storage keys     */
     vaddr2 &= XSTORE_PAGEMASK;
 
     /* Obtain the real or expanded address of each operand */
-    if (!REAL_MODE(&regs->psw))
+    if (!REAL_MODE(&regs->psw)
+#if defined(_FEATURE_SIE)
+        || regs->sie_state
+#endif /*defined(_FEATURE_SIE)*/
+                              )
     {
         /* Translate the second operand address to a real address */
-        rc = ARCH_DEP(translate_addr) (vaddr2, r2, regs, ACCTYPE_READ, &raddr2,
-                        &xcode, &priv, &prot, &stid);
+        if(!REAL_MODE(&regs->psw))
+            rc = ARCH_DEP(translate_addr) (vaddr2, r2, regs, ACCTYPE_READ,
+                        &raddr2, &xcode, &priv, &prot, &stid);
+        else
+            raddr2 = vaddr2;
 
-	raddr2 = APPLY_PREFIXING (raddr2, regs->PX);
+    raddr2 = APPLY_PREFIXING (raddr2, regs->PX);
 
-        if (raddr2 < regs->mainsize)
-            SIE_TRANSLATE(&raddr2,ACCTYPE_READ,regs);
+        if (raddr2 > regs->mainlim)
+            ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+
+#if defined(_FEATURE_SIE)
+        if(regs->sie_state  && !regs->sie_pref)
+        {
+        U32 sie_stid;
+        U16 sie_xcode;
+        int sie_private;
+
+#if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+            if (SIE_TRANSLATE_ADDR (regs->sie_mso + raddr2,
+                ((regs->siebk->mx & SIE_MX_XC) && regs->psw.armode && r2 > 0) ?
+                    r2 :
+                    USE_PRIMARY_SPACE,
+                    regs->hostregs, ACCTYPE_SIE, &raddr2, &sie_xcode,
+                    &sie_private, &prot, &sie_stid))
+#else /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+            if (SIE_TRANSLATE_ADDR (regs->sie_mso + raddr2,
+                    USE_PRIMARY_SPACE,
+                    regs->hostregs, ACCTYPE_SIE, &raddr2, &sie_xcode,
+                    &sie_private, &prot, &sie_stid))
+#endif /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+                (regs->sie_hostpi) (regs->hostregs, sie_xcode);
+
+            /* Convert host real address to host absolute address */
+            raddr2 = APPLY_PREFIXING (raddr2, regs->hostregs->PX);
+        }
+#endif /*defined(_FEATURE_SIE)*/
 
 #if defined(FEATURE_EXPANDED_STORAGE)
         if(rc == 2)
         {
-	    FETCH_W(pte2,sysblk.mainstor + raddr2);
+        FETCH_W(pte2,regs->mainstor + raddr2);
             /* If page is invalid in real storage but valid in expanded
                storage then xpblk2 now contains expanded storage block# */
             if(pte2 & PAGETAB_ESVALID)
@@ -299,11 +343,11 @@ BYTE    xpkey1 = 0, xpkey2 = 0;         /* Expanded storage keys     */
                 /* For ESA/390 mode, the XPTE lies directly beyond 
                    the PTE, and each entry is 12 bytes long, we must
                    therefor add 1024 + 8 times the page index */
-	                             1024 + ((vaddr2 & 0x000FF000) >> 9);
+                                 1024 + ((vaddr2 & 0x000FF000) >> 9);
 #endif /*!defined(FEATURE_ESAME)*/
-                if (xpkeya > regs->mainsize)
+                if (xpkeya > regs->mainlim)
                     ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
-                xpkey2 = sysblk.mainstor[xpkeya]; 
+                xpkey2 = regs->mainstor[xpkeya]; 
 
 /*DEBUG logmsg("MVPG pte2 = " F_CREG ", xkey2 = %2.2X, xpblk2 = %5.5X, akey2 = %2.2X\n",
                   pte2,xpkey2,xpblk2,akey2);  */
@@ -321,25 +365,55 @@ BYTE    xpkey1 = 0, xpkey2 = 0;         /* Expanded storage keys     */
            in either main storage or expanded storage */
         if (rc)
         {
-	    cc = 2;
+        cc = 2;
             goto mvpg_progck;
-	}
+    }
 
         /* Reset protection indication before calling translate_addr() */
         prot = 0;
         /* Translate the first operand address to a real address */
-        rc = ARCH_DEP(translate_addr) (vaddr1, r1, regs, ACCTYPE_WRITE, &raddr1,
-                        &xcode, &priv, &prot, &stid);
+        if(!REAL_MODE(&regs->psw))
+            rc = ARCH_DEP(translate_addr) (vaddr1, r1, regs, ACCTYPE_WRITE,
+                        &raddr1, &xcode, &priv, &prot, &stid);
+        else
+            raddr1 = vaddr1;
 
-	raddr1 = APPLY_PREFIXING (raddr1, regs->PX);
+    raddr1 = APPLY_PREFIXING (raddr1, regs->PX);
 
-        if (raddr1 < regs->mainsize)
-            SIE_TRANSLATE(&raddr1,ACCTYPE_READ,regs);
+        if (raddr1 > regs->mainlim)
+            ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+
+#if defined(_FEATURE_SIE)
+        if(regs->sie_state  && !regs->sie_pref)
+        {
+        U32 sie_stid;
+        U16 sie_xcode;
+        int sie_private;
+
+#if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+            if (SIE_TRANSLATE_ADDR (regs->sie_mso + raddr1,
+                ((regs->siebk->mx & SIE_MX_XC) && regs->psw.armode && r1 > 0) ?
+                    r1 :
+                    USE_PRIMARY_SPACE,
+                    regs->hostregs, ACCTYPE_SIE, &raddr1, &sie_xcode,
+                    &sie_private, &prot, &sie_stid))
+#else /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+            if (SIE_TRANSLATE_ADDR (regs->sie_mso + raddr1,
+                    USE_PRIMARY_SPACE,
+                    regs->hostregs, ACCTYPE_SIE, &raddr1, &sie_xcode,
+                    &sie_private, &prot, &sie_stid))
+#endif /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+                (regs->sie_hostpi) (regs->hostregs, sie_xcode);
+
+            /* Convert host real address to host absolute address */
+            raddr1 = APPLY_PREFIXING (raddr1, regs->hostregs->PX);
+        }
+#endif /*defined(_FEATURE_SIE)*/
 
 #if defined(FEATURE_EXPANDED_STORAGE)
         if(rc == 2)
         {
-	    FETCH_W(pte1,sysblk.mainstor + raddr1);
+        FETCH_W(pte1,regs->mainstor + raddr1);
             /* If page is invalid in real storage but valid in expanded
                storage then xpblk1 now contains expanded storage block# */
             if(pte1 & PAGETAB_ESVALID)
@@ -369,11 +443,11 @@ BYTE    xpkey1 = 0, xpkey2 = 0;         /* Expanded storage keys     */
                 /* For ESA/390 mode, the XPTE lies directly beyond 
                    the PTE, and each entry is 12 bytes long, we must
                    therefor add 1024 + 8 times the page index */
-	                          1024 + ((vaddr1 & 0x000FF000) >> 9);
+                              1024 + ((vaddr1 & 0x000FF000) >> 9);
 #endif /*!defined(FEATURE_ESAME)*/
-                if (xpkeya > regs->mainsize)
+                if (xpkeya > regs->mainlim)
                     ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
-                xpkey1 = sysblk.mainstor[xpkeya]; 
+                xpkey1 = regs->mainstor[xpkeya]; 
 
 /*DEBUG  logmsg("MVPG pte1 = " F_CREG ", xkey1 = %2.2X, xpblk1 = %5.5X, akey1 = %2.2X\n",
                   pte1,xpkey1,xpblk1,akey1);  */
@@ -389,9 +463,9 @@ BYTE    xpkey1 = 0, xpkey2 = 0;         /* Expanded storage keys     */
         /* Program check if operand not valid in main or expanded */
         if (rc)
         {
-	    cc = 1;
+        cc = 1;
             goto mvpg_progck;
-	}
+    }
 
         /* Program check if page protection or access-list controlled
            protection applies to the first operand */
@@ -481,40 +555,40 @@ BYTE    xpkey1 = 0, xpkey2 = 0;         /* Expanded storage keys     */
     if (xpvalid2)
     {
         /* Set the main storage reference and change bits */
-        STORAGE_KEY(aaddr1) |= (STORKEY_REF | STORKEY_CHANGE);
+        STORAGE_KEY(aaddr1, regs) |= (STORKEY_REF | STORKEY_CHANGE);
 
-	/* Set Expanded Storage reference bit in the PTE */
-        STORE_W(sysblk.mainstor + raddr2, pte2 | PAGETAB_ESREF);
+    /* Set Expanded Storage reference bit in the PTE */
+        STORE_W(regs->mainstor + raddr2, pte2 | PAGETAB_ESREF);
         
 
         /* Move 4K bytes from expanded storage to main storage */
-        memcpy (sysblk.mainstor + aaddr1,
+        memcpy (regs->mainstor + aaddr1,
                 sysblk.xpndstor + (xpblk2 << XSTORE_PAGESHIFT),
                 XSTORE_PAGESIZE);
     }
     else if (xpvalid1)
     {
         /* Set the main storage reference bit */
-        STORAGE_KEY(aaddr2) |= STORKEY_REF;
+        STORAGE_KEY(aaddr2, regs) |= STORKEY_REF;
 
-	/* Set Expanded Storage reference and change bits in the PTE */
-        STORE_W(sysblk.mainstor + raddr1, pte1 | PAGETAB_ESREF | PAGETAB_ESCHA);
+    /* Set Expanded Storage reference and change bits in the PTE */
+        STORE_W(regs->mainstor + raddr1, pte1 | PAGETAB_ESREF | PAGETAB_ESCHA);
 
         /* Move 4K bytes from main storage to expanded storage */
         memcpy (sysblk.xpndstor + (xpblk1 << XSTORE_PAGESHIFT),
-                sysblk.mainstor + aaddr2,
+                regs->mainstor + aaddr2,
                 XSTORE_PAGESIZE);
     }
     else
 #endif /*defined(FEATURE_EXPANDED_STORAGE)*/
     {
         /* Set the main storage reference and change bits */
-        STORAGE_KEY(aaddr1) |= (STORKEY_REF | STORKEY_CHANGE);
-        STORAGE_KEY(aaddr2) |= STORKEY_REF;
+        STORAGE_KEY(aaddr1, regs) |= (STORKEY_REF | STORKEY_CHANGE);
+        STORAGE_KEY(aaddr2, regs) |= STORKEY_REF;
 
         /* Move 4K bytes from main storage to main storage */
-        memcpy (sysblk.mainstor + aaddr1,
-                sysblk.mainstor + aaddr2,
+        memcpy (regs->mainstor + aaddr1,
+                regs->mainstor + aaddr2,
                 XSTORE_PAGESIZE);
     }
 

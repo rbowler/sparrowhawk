@@ -1,7 +1,7 @@
 /*
 || ----------------------------------------------------------------------------
 ||
-|| HETLIB.C     (c) Copyright Leland Lucius, 2000-2002
+|| HETLIB.C     (c) Copyright Leland Lucius, 2000-2003
 ||              Released under terms of the Q Public License.
 ||
 || Library for managing Hercules Emulated Tapes.  
@@ -19,7 +19,9 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
+#if defined(HAVE_LIBZ)
 #include <zlib.h>
+#endif
 #if defined( HET_BZIP2 )
 #include <bzlib.h>
 #endif /* defined( HET_BZIP2 ) */
@@ -133,7 +135,7 @@ int
 het_open( HETB **hetb, char *filename, int flags )
 {
     HETB *thetb;
-	char *omode;
+    char *omode;
     int rc;
     int fd;
 
@@ -170,7 +172,7 @@ het_open( HETB **hetb, char *filename, int flags )
     */
     omode = "r+b";
     fd = open( filename, O_RDWR | flags, S_IRUSR | S_IWUSR | S_IRGRP );
-    if( fd == -1 && ( errno == EROFS || errno == EACCES ) )
+    if( fd == -1 && (errno == EROFS || errno == EACCES) )
     {
         /*
         || Retry open if file resides on readonly file system
@@ -830,7 +832,7 @@ het_read( HETB *hetb, void *sbuf )
         || Finally read in the chunk data
         */
         rc = fread( tptr, 1, slen, hetb->fd );
-        if( rc != slen )
+        if( rc != (int)slen )
         {
             if( feof( hetb->fd ) )
             {
@@ -863,6 +865,7 @@ het_read( HETB *hetb, void *sbuf )
             case 0:
             break;
 
+#if defined(HAVE_LIBZ)
             case HETHDR_FLAGS1_ZLIB:
                 slen = HETMAX_BLOCKSIZE;
     
@@ -875,6 +878,7 @@ het_read( HETB *hetb, void *sbuf )
     
                 tlen = slen;
             break;
+#endif
     
 #if defined( HET_BZIP2 )
             case HETHDR_FLAGS1_BZLIB:
@@ -1187,6 +1191,7 @@ het_write( HETB *hetb, void *sbuf, int slen )
     {
         switch( hetb->method )
         {
+#if defined(HAVE_LIBZ)
             case HETHDR_FLAGS1_ZLIB:
                 tlen = sizeof( tbuf );
 
@@ -1197,13 +1202,14 @@ het_write( HETB *hetb, void *sbuf, int slen )
                     return( HETE_COMPERR );
                 }
 
-                if( tlen < slen )
+                if( (int)tlen < slen )
                 {
                     sbuf = tbuf;
                     slen = tlen;
                     flags |= HETHDR_FLAGS1_ZLIB;
                 }
             break;
+#endif
 
 #if defined( HET_BZIP2 )
             case HETHDR_FLAGS1_BZLIB:
@@ -1222,7 +1228,7 @@ het_write( HETB *hetb, void *sbuf, int slen )
                     return( HETE_COMPERR );
                 }
 
-                if( tlen < slen )
+                if( (int)tlen < slen )
                 {
                     sbuf = tbuf;
                     slen = tlen;
@@ -1246,7 +1252,7 @@ het_write( HETB *hetb, void *sbuf, int slen )
         /*
         || Last chunk for this block?
         */
-        if( slen <= hetb->chksize )
+        if( slen <= (int)hetb->chksize )
         {
             flags |= HETHDR_FLAGS1_EOR;
             tlen = slen;
@@ -1269,7 +1275,7 @@ het_write( HETB *hetb, void *sbuf, int slen )
         || Write the block
         */
         rc = fwrite( sbuf, 1, tlen, hetb->fd );
-        if( rc != tlen )
+        if( rc != (int)tlen )
         {
             return( HETE_ERROR );
         }
@@ -1446,7 +1452,7 @@ het_locate( HETB *hetb, int block )
     /*
     || Forward space until we reach the desired block
     */
-    while( hetb->cblk < block )
+    while( (int)hetb->cblk < block )
     {
         rc = het_fsb( hetb );
         if( rc < 0 )
@@ -2096,7 +2102,7 @@ het_error( int rc )
     /*
     || Within range?
     */
-    if( rc >= HET_ERRSTR_MAX )
+    if( rc >= (int)HET_ERRSTR_MAX )
     {
         rc = HET_ERRSTR_MAX - 1;
     }

@@ -1,4 +1,4 @@
-/* VERSION.C    (c) Copyright Roger Bowler, 1999-2002                */
+/* VERSION.C    (c) Copyright Roger Bowler, 1999-2003                */
 /*              Hercules Initialization Module                       */
 
 /*-------------------------------------------------------------------*/
@@ -10,6 +10,7 @@
 #include <config.h>
 #endif
 
+#include "hercnls.h"
 #include "feature.h"
 #include "hostinfo.h"
 #include "version.h"
@@ -106,6 +107,10 @@ static const char *build_info[] = {
     "No HET BZIP2 support",
 #endif
 
+#if defined(ENABLE_NLS)
+    "National Language Support",
+#endif
+
   " "
 
 };
@@ -135,7 +140,7 @@ void display_version (FILE *f, char *prog)
 
         /* Log version */
 
-    fprintf (f, "%sVersion %s\n", prog, VERSION);
+    fprintf (f, _("%sVersion %s\n"), prog, VERSION);
 
         /* Log Copyright */
 
@@ -143,11 +148,11 @@ void display_version (FILE *f, char *prog)
 
         /* Log build date/time */
 
-    fprintf (f, "Built on %s at %s\n", __DATE__, __TIME__);
+    fprintf (f, _("Built on %s at %s\n"), __DATE__, __TIME__);
 
         /* Log "unusual" build options */
 
-    fprintf (f, "Build information:\n");
+    fprintf (f, _("Build information:\n"));
 
     if (sizeof(build_info) == 0)
       fprintf(f, "  (none)\n");

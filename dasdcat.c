@@ -1,8 +1,8 @@
 /*
  * dasdcat
  *
- * Vast swathes copied from dasdpdsu.c (c) Copyright Roger Bowler, 1999-2002
- * Changes and additions Copyright 2000-2002 by Malcolm Beattie
+ * Vast swathes copied from dasdpdsu.c (c) Copyright Roger Bowler, 1999-2003
+ * Changes and additions Copyright 2000-2003 by Malcolm Beattie
  */
 #include "hercules.h"
 #include "dasdblks.h"
@@ -31,7 +31,7 @@ int do_cat_cards(BYTE *buf, int len, unsigned long optflags)
 {
  if (len % 80 != 0) {
  fprintf(stderr,
- "Can't make 80 column card images from block length %d\n", len);
+ _("HHCDT002E Can't make 80 column card images from block length %d\n"), len);
  return -1;
  }
 
@@ -55,6 +55,18 @@ int process_member(CIFBLK *cif, int noext, DSXTENT extent[],
 {
  int rc, trk, len, cyl, head, rec;
  BYTE *buf;
+ char   *scodepage;
+
+    /* set_codepage() uses the logmsg macro which requires msgpipew */
+    sysblk.msgpipew = stdout;
+    if(!sysblk.codepage)
+    {
+        if((scodepage = getenv("HERCULES_CP")))
+            set_codepage(scodepage);
+        else
+            set_codepage("default");
+    }
+
 
  trk = (ttr[0] << 8) | ttr[1];
  rec = ttr[2];
@@ -82,7 +94,7 @@ int process_member(CIFBLK *cif, int noext, DSXTENT extent[],
  else if (optflags & OPT_ASCIIFY) {
  BYTE *p;
  for (p = buf; len--; p++)
- putchar(ebcdic_to_ascii[*p]);
+ putchar(guest_to_host(*p));
  } else {
  fwrite(buf, len, 1, stdout);
  }
@@ -102,7 +114,7 @@ int process_dirblk(CIFBLK *cif, int noext, DSXTENT extent[], BYTE *dirblk,
  /* Load number of bytes in directory block */
  dirrem = (dirblk[0] << 8) | dirblk[1];
  if (dirrem < 2 || dirrem > 256) {
- fprintf(stderr, "Directory block byte count is invalid\n");
+ fprintf(stderr, _("HHCDT003E Directory block byte count is invalid\n"));
  return -1;
  }
 
@@ -200,7 +212,11 @@ int do_cat_pdsmember(CIFBLK *cif, DSXTENT *extent, int noext,
 int do_cat_nonpds(CIFBLK *cif, DSXTENT *extent, int noext,
  unsigned long optflags)
 {
- fprintf(stderr, "non-PDS-members not yet supported\n");
+ UNREFERENCED(cif);
+ UNREFERENCED(extent);
+ UNREFERENCED(noext);
+ UNREFERENCED(optflags);
+ fprintf(stderr, _("HHCDT004E non-PDS-members not yet supported\n"));
  return -1;
 }
 
@@ -230,7 +246,7 @@ int do_cat(CIFBLK *cif, char *file)
  else if (*p == 'c')
  optflags |= OPT_CARDS;
  else
- fprintf(stderr, "unknown dataset name option: '%c'\n", *p);
+ fprintf(stderr, _("HHCDT005E unknown dataset name option: '%c'\n"), *p);
  }
  }
 
@@ -323,9 +339,9 @@ int main(int argc, char **argv)
              close_ckd_image(cif);
              cif = 0;
          }
-         cif = open_ckd_image(fn, sfn, O_RDONLY);
+         cif = open_ckd_image(fn, sfn, O_RDONLY, 0);
          if (!cif)
-             fprintf(stderr, "failed to open image %s\n", *argv);
+             fprintf(stderr, _("HHCDT001E failed to open image %s\n"), *argv);
      }
      else
      {

@@ -1,11 +1,11 @@
-/* FEATCHK.H	(c) Copyright Jan Jaeger, 2000-2002		     */
-/*		Feature definition consistency checks		     */
+/* FEATCHK.H    (c) Copyright Jan Jaeger, 2000-2003          */
+/*      Feature definition consistency checks            */
 
 /*-------------------------------------------------------------------*/
-/* Perform various checks on feature combinations, and set	     */
-/* additional flags to percolate certain features such as	     */
-/* SIE down to lower architecture levels such that these	     */
-/* can include emulation support				     */
+/* Perform various checks on feature combinations, and set       */
+/* additional flags to percolate certain features such as        */
+/* SIE down to lower architecture levels such that these         */
+/* can include emulation support                     */
 /*-------------------------------------------------------------------*/
 
 #if defined(FEATCHK_CHECK_ALL)
@@ -19,6 +19,9 @@
  #define _FEATURE_SIE
  #if defined(FEATURE_ESAME)
   #define _FEATURE_ZSIE
+ #endif
+ #if defined(FEATURE_PROTECTION_INTERCEPTION_CONTROL)
+  #define _FEATURE_PROTECTION_INTERCEPTION_CONTROL
  #endif
 #endif
 
@@ -68,6 +71,26 @@
 
 #if defined(FEATURE_PER2)
  #define _FEATURE_PER2
+#endif
+
+#if defined(FEATURE_EXPEDITED_SIE_SUBSET)
+#define _FEATURE_EXPEDITED_SIE_SUBSET
+#endif
+
+#if defined(FEATURE_REGION_RELOCATE)
+ #define _FEATURE_REGION_RELOCATE
+#endif
+
+#if defined(FEATURE_IO_ASSIST)
+ #define _FEATURE_IO_ASSIST
+#endif
+
+#if defined(FEATURE_WAITSTATE_ASSIST)
+ #define _FEATURE_WAITSTATE_ASSIST
+#endif
+
+#if defined(FEATURE_EXTERNAL_INTERRUPT_ASSIST)
+ #define _FEATURE_EXTERNAL_INTERRUPT_ASSIST
 #endif
 
 #undef _VSTORE_C_STATIC
@@ -142,11 +165,11 @@
 #endif
 
 #if defined(_ARCHMODE3)
- #define GEN_MAXARCH	3+2
+ #define GEN_MAXARCH    3+2
 #elif defined(_ARCHMODE2)
- #define GEN_MAXARCH	2+2
+ #define GEN_MAXARCH    2+2
 #else 
- #define GEN_MAXARCH	1+2
+ #define GEN_MAXARCH    1+2
 #endif
 
 #if defined(_900) && !defined(_390)
@@ -198,6 +221,11 @@
  #error MCDS only supported with SIE
 #endif
 
+#if defined(FEATURE_PROTECTION_INTERCEPTION_CONTROL) \
+ && !defined(FEATURE_INTERPRETIVE_EXECUTION)
+ #error Protection Interception Control only supported with SIE
+#endif
+
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE) \
  && !defined(FEATURE_STORAGE_KEY_ASSIST)
  #error MCDS requires storage key assist
@@ -211,6 +239,26 @@
 #if defined(FEATURE_STORAGE_KEY_ASSIST) \
  && !defined(FEATURE_INTERPRETIVE_EXECUTION)
  #error Storage Key assist only supported with SIE
+#endif
+
+#if defined(FEATURE_REGION_RELOCATE) \
+ && !defined(FEATURE_INTERPRETIVE_EXECUTION)
+ #error Region Relocate Facility only supported with SIE
+#endif
+
+#if defined(FEATURE_IO_ASSIST) \
+ && !defined(_FEATURE_SIE)
+ #error I/O Assist Feature only supported with SIE
+#endif
+
+#if defined(FEATURE_EXTERNAL_INTERRUPT_ASSIST) \
+ && !defined(_FEATURE_SIE)
+ #error External Interruption assist only supported with SIE
+#endif
+
+#if defined(FEATURE_EXPEDITED_SIE_SUBSET) \
+ && !defined(_FEATURE_SIE)
+ #error Expedited SIE Subset only supported with SIE
 #endif
 
 #if defined(FEATURE_ESAME) \

@@ -1,4 +1,4 @@
-/* CONSOLE.C    (c)Copyright Roger Bowler, 1999-2002                 */
+/* CONSOLE.C    (c)Copyright Roger Bowler, 1999-2003                 */
 /*              ESA/390 Console Device Handler                       */
 
 /*-------------------------------------------------------------------*/
@@ -189,7 +189,7 @@ static BYTE sba_code[] = { "\x40\xC1\xC2\xC3\xC4\xC5\xC6\xC7"
 #define TNSERROR(_format,_args...) \
         logmsg("console: " _format, ## _args)
 
-#define BUFLEN_3270     32768           /* 3270 Send/Receive buffer  */
+#define BUFLEN_3270     65536           /* 3270 Send/Receive buffer  */
 #define BUFLEN_1052     150             /* 1052 Send/Receive buffer  */
 #define SPACE           ((BYTE)' ')
 
@@ -224,7 +224,7 @@ unsigned char print_chars[17];
                 logmsg("%2.2X", c);
                 print_chars[i] = '.';
                 if (isprint(c)) print_chars[i] = c;
-                c = ebcdic_to_ascii[c];
+                c = guest_to_host(c);
                 if (isprint(c)) print_chars[i] = c;
             }
             else {
@@ -290,7 +290,7 @@ int     m, n, c;
     } /* end for */
 
     if (n < m) {
-        TNSDEBUG3( "%d IAC bytes removed, newlen=%d\n", m-n, n);
+        TNSDEBUG3("%d IAC bytes removed, newlen=%d\n", m-n, n);
         packet_trace (buf, n);
     }
 
@@ -317,7 +317,7 @@ int     m, n, x, newlen;
 
     /* Insert extra IAC bytes backwards from the end of the buffer */
     newlen = len + x;
-    TNSDEBUG3( "%d IAC bytes added, newlen=%d\n", x, newlen);
+    TNSDEBUG3("%d IAC bytes added, newlen=%d\n", x, newlen);
     for (n=newlen, m=len; n > m; ) {
         buf[--n] = buf[--m];
         if (buf[n] == IAC) buf[--n] = IAC;
@@ -340,7 +340,7 @@ BYTE    c;                              /* Character work area       */
     for (i = 0; str[i] != '\0'; i++)
     {
         c = str[i];
-        str[i] = (isprint(c) ? ascii_to_ebcdic[c] : SPACE);
+        str[i] = (isprint(c) ? host_to_guest(c) : SPACE);
     }
 
     return str;
@@ -356,7 +356,7 @@ send_packet (int csock, BYTE *buf, int len, char *caption)
 int     rc;                             /* Return code               */
 
     if (caption != NULL) {
-        TNSDEBUG2( "Sending %s\n", caption);
+        TNSDEBUG2("Sending %s\n", caption);
         packet_trace (buf, len);
     }
 
@@ -405,7 +405,7 @@ int     rcvlen=0;                       /* Length of data received   */
         }
 
         if (rc == 0) {
-            TNSDEBUG1( "Connection closed by client\n");
+            TNSDEBUG1("Connection closed by client\n");
             return -1;
         }
 
@@ -416,7 +416,7 @@ int     rcvlen=0;                       /* Length of data received   */
             break;
     }
 
-    TNSDEBUG2( "Packet received length=%d\n", rcvlen);
+    TNSDEBUG2("Packet received length=%d\n", rcvlen);
     packet_trace (buf, rcvlen);
 
     return rcvlen;
@@ -439,6 +439,8 @@ static BYTE do_bin[] = { IAC, DO, BINARY, IAC, WILL, BINARY };
 static BYTE will_bin[] = { IAC, WILL, BINARY, IAC, DO, BINARY };
 #endif
 
+    UNREFERENCED(caption);
+
     rc = recv_packet (csock, buf, len, 0);
     if (rc < 0) return -1;
 
@@ -452,10 +454,10 @@ static BYTE will_bin[] = { IAC, WILL, BINARY, IAC, DO, BINARY };
     if (memcmp(buf, expected, len) != 0)
 #endif
     {
-        TNSDEBUG2( "Expected %s\n", caption);
+        TNSDEBUG2("Expected %s\n", caption);
         return -1;
     }
-    TNSDEBUG2( "Received %s\n", caption);
+    TNSDEBUG2("Received %s\n", caption);
 
     return 0;
 
@@ -535,15 +537,15 @@ static BYTE dont_echo[] = { IAC, DONT, ECHO_OPTION };
     rc = recv_packet (csock, buf, sizeof(buf)-2, SE);
     if (rc < 0) return -1;
 
-    if (rc < sizeof(type_is) + 2
+    if (rc < (int)(sizeof(type_is) + 2)
         || memcmp(buf, type_is, sizeof(type_is)) != 0
         || buf[rc-2] != IAC || buf[rc-1] != SE) {
-        TNSDEBUG2( "Expected IAC SB TERMINAL_TYPE IS\n");
+        TNSDEBUG2("Expected IAC SB TERMINAL_TYPE IS\n");
         return -1;
     }
     buf[rc-2] = '\0';
     termtype = buf + sizeof(type_is);
-    TNSDEBUG2( "Received IAC SB TERMINAL_TYPE IS %s IAC SE\n",
+    TNSDEBUG2("Received IAC SB TERMINAL_TYPE IS %s IAC SE\n",
             termtype);
 
     /* Check terminal type string for device name suffix */
@@ -688,7 +690,7 @@ int     eor = 0;                        /* 1=End of record received  */
 
     /* If zero bytes were received then client has closed connection */
     if (rc == 0) {
-        logmsg ("HHC603I Device %4.4X connection closed by client %s\n",
+        logmsg (_("HHCTE007I Device %4.4X connection closed by client %s\n"),
                 dev->devnum, inet_ntoa(dev->ipaddr));
         dev->sense[0] = SENSE_IR;
         return (CSW_ATTN | CSW_UC | CSW_DE);
@@ -718,7 +720,7 @@ int     eor = 0;                        /* 1=End of record received  */
     /* If record is incomplete, test for buffer full */
     if (eor == 0 && dev->rlen3270 >= BUFLEN_3270)
     {
-        TNSDEBUG1( "3270 buffer overflow\n");
+        TNSDEBUG1("3270 buffer overflow\n");
         dev->sense[0] = SENSE_DC;
         return (CSW_ATTN | CSW_UC);
     }
@@ -727,7 +729,7 @@ int     eor = 0;                        /* 1=End of record received  */
     if (eor == 0) return 0;
 
     /* Trace the complete 3270 data packet */
-    TNSDEBUG2( "Packet received length=%d\n", dev->rlen3270);
+    TNSDEBUG2("Packet received length=%d\n", dev->rlen3270);
     packet_trace (dev->buf, dev->rlen3270);
 
     /* Strip off the telnet EOR marker */
@@ -792,7 +794,7 @@ BYTE            buf[32];                /* tn3270 write buffer       */
     do {
         len = dev->rlen3270;
         rc = recv_3270_data (dev);
-        TNSDEBUG2( "read buffer: %d bytes received\n",
+        TNSDEBUG2("read buffer: %d bytes received\n",
                 dev->rlen3270 - len);
     } while(rc == 0);
 
@@ -851,14 +853,14 @@ BYTE    c;                              /* Character work area       */
 
     /* If zero bytes were received then client has closed connection */
     if (num == 0) {
-        logmsg ("HHC606I Device %4.4X connection closed by client %s\n",
+        logmsg (_("HHCTE008I Device %4.4X connection closed by client %s\n"),
                 dev->devnum, inet_ntoa(dev->ipaddr));
         dev->sense[0] = SENSE_IR;
         return (CSW_ATTN | CSW_UC);
     }
 
     /* Trace the bytes received */
-    TNSDEBUG2( "Bytes received length=%d\n", num);
+    TNSDEBUG2("Bytes received length=%d\n", num);
     packet_trace (buf, num);
 
     /* Copy received bytes to keyboard buffer */
@@ -881,7 +883,7 @@ BYTE    c;                              /* Character work area       */
         /* Return unit check if buffer is full */
         if (dev->keybdrem >= BUFLEN_1052)
         {
-            TNSDEBUG1( "Console keyboard buffer overflow\n");
+            TNSDEBUG1("Console keyboard buffer overflow\n");
             dev->keybdrem = 0;
             dev->sense[0] = SENSE_EC;
             return (CSW_ATTN | CSW_UC);
@@ -938,7 +940,7 @@ BYTE    c;                              /* Character work area       */
             && dev->buf[dev->keybdrem - 1] == '\n'
             && i < num - 1)
         {
-            TNSDEBUG1( "Console keyboard buffer overrun\n");
+            TNSDEBUG1("Console keyboard buffer overrun\n");
             dev->keybdrem = 0;
             dev->sense[0] = SENSE_OR;
             return (CSW_ATTN | CSW_UC);
@@ -953,7 +955,7 @@ BYTE    c;                              /* Character work area       */
         return 0;
 
     /* Trace the complete keyboard data packet */
-    TNSDEBUG2( "Packet received length=%d\n", dev->keybdrem);
+    TNSDEBUG2("Packet received length=%d\n", dev->keybdrem);
     packet_trace (dev->buf, dev->keybdrem);
 
     /* Strip off the CRLF sequence */
@@ -963,11 +965,11 @@ BYTE    c;                              /* Character work area       */
     for (i = 0; i < dev->keybdrem; i++)
     {
         c = dev->buf[i];
-        dev->buf[i] = (isprint(c) ? ascii_to_ebcdic[c] : SPACE);
+        dev->buf[i] = (isprint(c) ? host_to_guest(c) : SPACE);
     } /* end for(i) */
 
     /* Trace the EBCDIC input data */
-    TNSDEBUG2( "Input data line length=%d\n", dev->keybdrem);
+    TNSDEBUG2("Input data line length=%d\n", dev->keybdrem);
     packet_trace (dev->buf, dev->keybdrem);
 
     /* Return attention status */
@@ -979,7 +981,8 @@ BYTE    c;                              /* Character work area       */
 /*-------------------------------------------------------------------*/
 /* NEW CLIENT CONNECTION THREAD                                      */
 /*-------------------------------------------------------------------*/
-static void *connect_client (int *csockp)
+static void *
+connect_client (int *csockp)
 {
 int                     rc;             /* Return code               */
 DEVBLK                 *dev;            /* -> Device block           */
@@ -1007,7 +1010,7 @@ BYTE                    rejmsg[80];     /* Rejection message         */
     rc = getpeername (csock, (struct sockaddr *)&client, &namelen);
 
     /* Log the client's IP address and hostname */
-    clientip = inet_ntoa(client.sin_addr);
+    clientip = strdup(inet_ntoa(client.sin_addr));
 
     pHE = gethostbyaddr ((unsigned char*)(&client.sin_addr),
                          sizeof(client.sin_addr), AF_INET);
@@ -1019,7 +1022,7 @@ BYTE                    rejmsg[80];     /* Rejection message         */
         clientname = "host name unknown";
     }
 
-    TNSDEBUG1( "Received connection from %s (%s)\n",
+    TNSDEBUG1("Received connection from %s (%s)\n",
             clientip, clientname);
 
     /* Negotiate telnet parameters */
@@ -1027,6 +1030,7 @@ BYTE                    rejmsg[80];     /* Rejection message         */
     if (rc != 0)
     {
         close (csock);
+        if (clientip) free(clientip);
         return NULL;
     }
 
@@ -1135,10 +1139,11 @@ BYTE                    rejmsg[80];     /* Rejection message         */
         /* Close the connection and terminate the thread */
         sleep (5);
         close (csock);
+        if (clientip) free(clientip);
         return NULL;
     }
 
-    logmsg ("HHC604I Client %s connected to %4.4X device %4.4X\n",
+    logmsg (_("HHCTE009I Client %s connected to %4.4X device %4.4X\n"),
             clientip, dev->devtype, dev->devnum);
 
     /* Send connection message to client */
@@ -1166,6 +1171,7 @@ BYTE                    rejmsg[80];     /* Rejection message         */
     /* Signal connection thread to redrive its select loop */
     signal_thread (sysblk.cnsltid, SIGUSR2);
 
+    if (clientip) free(clientip);
     return NULL;
 
 } /* end function connect_client */
@@ -1174,13 +1180,13 @@ BYTE                    rejmsg[80];     /* Rejection message         */
 /*-------------------------------------------------------------------*/
 /* CONSOLE CONNECTION AND ATTENTION HANDLER THREAD                   */
 /*-------------------------------------------------------------------*/
-void *console_connection_handler (void *arg)
+static void *
+console_connection_handler (void *arg)
 {
-int                     rc;             /* Return code               */
+int                     rc = 0;         /* Return code               */
 int                     lsock;          /* Socket for listening      */
 int                     csock;          /* Socket for conversation   */
 struct sockaddr_in      server;         /* Server address structure  */
-int                     term_flag=0;    /* Termination flag          */
 fd_set                  readset;        /* Read bit map for select   */
 int                     maxfd;          /* Highest fd for select     */
 int                     optval;         /* Argument for setsockopt   */
@@ -1188,13 +1194,18 @@ TID                     tidneg;         /* Negotiation thread id     */
 DEVBLK                 *dev;            /* -> Device block           */
 BYTE                    unitstat;       /* Status after receive data */
 
+    UNREFERENCED(arg);
+
     /* Display thread started message on control panel */
-    logmsg ("HHC600I Console connection thread started: "
-            "tid="TIDPAT", pid=%d\n",
+    logmsg (_("HHCTE001I Console connection thread started: "
+            "tid="TIDPAT", pid=%d\n"),
             thread_id(), getpid());
 
     /* Get information about this system */
     uname (&hostinfo);
+
+    /* Wait for system to finish coming up */
+    while (!initdone) sleep(1);
 
     /* Obtain a socket */
     lsock = socket (AF_INET, SOCK_STREAM, 0);
@@ -1218,13 +1229,13 @@ BYTE                    unitstat;       /* Status after receive data */
     server.sin_port = htons(server.sin_port);
 
     /* Attempt to bind the socket to the port */
-    while (1)
+    while (sysblk.cnslcnt)
     {
         rc = bind (lsock, (struct sockaddr *)&server, sizeof(server));
 
         if (rc == 0 || errno != EADDRINUSE) break;
 
-        logmsg ("HHC601I Waiting for port %u to become free\n",
+        logmsg (_("HHCTE002W Waiting for port %u to become free\n"),
                 sysblk.cnslport);
         sleep(10);
     } /* end while */
@@ -1244,11 +1255,11 @@ BYTE                    unitstat;       /* Status after receive data */
         return NULL;
     }
 
-    logmsg ("HHC602I Waiting for console connection on port %u\n",
+    logmsg (_("HHCTE003I Waiting for console connection on port %u\n"),
             sysblk.cnslport);
 
     /* Handle connection requests and attention interrupts */
-    while (term_flag == 0) {
+    while (sysblk.cnslcnt) {
 
         /* Initialize the select parameters */
         maxfd = lsock;
@@ -1273,10 +1284,10 @@ BYTE                    unitstat;       /* Status after receive data */
 
         /* Wait for a file descriptor to become ready */
 #ifdef WIN32
-	{
-	    struct timeval tv={0,500000};	/* half a second */
-	    rc = select ( maxfd+1, &readset, NULL, NULL, &tv );
-	}
+    {
+        struct timeval tv={0,500000};   /* half a second */
+        rc = select ( maxfd+1, &readset, NULL, NULL, &tv );
+    }
 #else /* WIN32 */
         rc = select ( maxfd+1, &readset, NULL, NULL, NULL );
 #endif /* WIN32 */
@@ -1353,25 +1364,26 @@ BYTE                    unitstat;       /* Status after receive data */
                 /* Indicate that data is available at the device */
                 if(dev->rlen3270)
                     dev->readpending = 1;
-
+  
                 /* Release the device lock */
                 release_lock (&dev->lock);
 
                 /* Raise attention interrupt for the device */
-  /* Do not raise attention interrupt for 3287  */
-  /* Otherwise zVM loops after ENABLE ccuu     */
-  /* Following 5 lines are repeated on Hercules console: */
-  /* console: sending 3270 data */
-  /* +0000   F5C2FFEF     */
-  /* console: Packet received length=7 */
-  /* +0000   016CD902 00FFEF */   /* I do not know what is this */
-  /* console: CCUU attention requests raised */
+                /* Do not raise attention interrupt for 3287  */
+                /* Otherwise zVM loops after ENABLE ccuu     */
+                /* Following 5 lines are repeated on Hercules console: */
+                /* console: sending 3270 data */
+                /* +0000   F5C2FFEF     */
+                /* console: Packet received length=7 */
+                /* +0000   016CD902 00FFEF */   
+                /*         I do not know what is this */
+                /* console: CCUU attention requests raised */
                 if (dev->devtype != 0x3287)
                 {
                 rc = device_attention (dev, unitstat);
 
                 /* Trace the attention request */
-                TNSDEBUG2( "%4.4X attention request %s\n",
+                TNSDEBUG2("%4.4X attention request %s\n",
                         dev->devnum,
                         (rc == 0 ? "raised" : "rejected"));
                 }
@@ -1388,16 +1400,57 @@ BYTE                    unitstat;       /* Status after receive data */
     /* Close the listening socket */
     close (lsock);
 
+    logmsg (_("HHCTE004I Console connection thread terminated\n"));
+
     return NULL;
 
 } /* end function console_connection_handler */
 
 
+static int
+console_initialise()
+{
+    if(!(sysblk.cnslcnt++))
+    {
+        if ( create_thread (&sysblk.cnsltid, &sysblk.detattr,
+                            console_connection_handler, NULL) )
+        {
+            logmsg (_("HHCTE005E Cannot create console thread: %s\n"),
+                    strerror(errno));
+            return 1;
+        }
+    }
+    return 0;
+}
+
+
+static void
+console_remove(DEVBLK *dev)
+{
+    if(dev->fd > 2)
+        close (dev->fd);
+    dev->fd = -1;
+
+    /* Reset device dependent flags */
+    dev->connected = 0;
+    dev->console = 0;
+
+    if(!sysblk.cnslcnt--)
+        logmsg(_("console_remove() error\n"));
+
+    signal_thread (sysblk.cnsltid, SIGUSR2);
+}
+
+
 /*-------------------------------------------------------------------*/
 /* INITIALIZE THE 3270 DEVICE HANDLER                                */
 /*-------------------------------------------------------------------*/
-int loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
+static int
+loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 {
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
+
     /* Indicate that this is a console device */
     dev->console = 1;
 
@@ -1428,14 +1481,15 @@ int loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
      }
     dev->numdevid = 7;
 
-    return 0;
+    return console_initialise();
 } /* end function loc3270_init_handler */
 
 
 /*-------------------------------------------------------------------*/
 /* QUERY THE 3270 DEVICE DEFINITION                                  */
 /*-------------------------------------------------------------------*/
-void loc3270_query_device (DEVBLK *dev, BYTE **class,
+static void
+loc3270_query_device (DEVBLK *dev, BYTE **class,
                 int buflen, BYTE *buffer)
 {
 
@@ -1453,14 +1507,10 @@ void loc3270_query_device (DEVBLK *dev, BYTE **class,
 /*-------------------------------------------------------------------*/
 /* CLOSE THE 3270 DEVICE HANDLER                                     */
 /*-------------------------------------------------------------------*/
-int loc3270_close_device ( DEVBLK *dev )
+static int
+loc3270_close_device ( DEVBLK *dev )
 {
-    /* Close the device file */
-    close (dev->fd);
-    dev->fd = -1;
-
-    /* Reset device dependent flags */
-    dev->connected = 0;
+    console_remove(dev);
 
     return 0;
 } /* end function loc3270_close_device */
@@ -1469,8 +1519,10 @@ int loc3270_close_device ( DEVBLK *dev )
 /*-------------------------------------------------------------------*/
 /* INITIALIZE THE 1052/3215 DEVICE HANDLER                           */
 /*-------------------------------------------------------------------*/
-int constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
+static int
+constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 {
+
     /* Indicate that this is a console device */
     dev->console = 1;
 
@@ -1483,6 +1535,17 @@ int constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     /* Set length of print buffer */
     dev->bufsize = BUFLEN_1052;
 
+    /* Assume we want to prompt */
+    dev->prompt1052 = 1;
+    
+    /* Is there an argument? */
+    if (argc == 1)
+    {
+        /* Look at the argument and set noprompt flag if specified. */
+        if (strcmp(argv[0], "noprompt") == 0)
+            dev->prompt1052 = 0;
+    }
+    
     /* Initialize the device identifier bytes */
     dev->devid[0] = 0xFF;
     dev->devid[1] = dev->devtype >> 8;
@@ -1493,24 +1556,29 @@ int constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     dev->devid[6] = 0x00;
     dev->numdevid = 7;
 
-    return 0;
+    return console_initialise();
+
 } /* end function constty_init_handler */
 
 
 /*-------------------------------------------------------------------*/
 /* QUERY THE 1052/3215 DEVICE DEFINITION                             */
 /*-------------------------------------------------------------------*/
-void constty_query_device (DEVBLK *dev, BYTE **class,
+static void
+constty_query_device (DEVBLK *dev, BYTE **class,
                 int buflen, BYTE *buffer)
 {
 
     *class = "CON";
 
     if (dev->connected)
-        snprintf (buffer, buflen, "%s",
+        snprintf (buffer, buflen, "%s ",
                 (BYTE*)inet_ntoa(dev->ipaddr));
     else
         buffer[0] = '\0';
+
+    if (dev->prompt1052 == 0)
+        strcat(buffer,"noprompt");
 
 } /* end function constty_query_device */
 
@@ -1518,14 +1586,10 @@ void constty_query_device (DEVBLK *dev, BYTE **class,
 /*-------------------------------------------------------------------*/
 /* CLOSE THE 1052/3215 DEVICE HANDLER                                */
 /*-------------------------------------------------------------------*/
-int constty_close_device ( DEVBLK *dev )
+static int
+constty_close_device ( DEVBLK *dev )
 {
-    /* Close the device file */
-    close (dev->fd);
-    dev->fd = -1;
-
-    /* Reset device dependent flags */
-    dev->connected = 0;
+    console_remove(dev);
 
     return 0;
 } /* end function constty_close_device */
@@ -1647,7 +1711,7 @@ int     woff;                           /* Current offset in buffer  */
         /* Exit if desired screen position has been reached */
         if (wpos >= pos)
         {
-//          logmsg ("console: Pos %4.4X reached at %4.4X\n",
+//          logmsg (_("console: Pos %4.4X reached at %4.4X\n"),
 //                  wpos, woff);
 
 #ifdef FIX_QWS_BUG_FOR_MCS_CONSOLES
@@ -1663,7 +1727,7 @@ int     woff;                           /* Current offset in buffer  */
                 && buf[woff+6] == O3270_SFE)
             {
                 woff += 8;
-//              logmsg ("console: Pos %4.4X adjusted to %4.4X\n",
+//              logmsg (_("console: Pos %4.4X adjusted to %4.4X\n"),
 //                      wpos, woff);
         }
 #endif /*FIX_QWS_BUG_FOR_MCS_CONSOLES*/
@@ -1710,7 +1774,8 @@ int     woff = 0;                       /* Current offset in buffer  */
 /*-------------------------------------------------------------------*/
 /* EXECUTE A 3270 CHANNEL COMMAND WORD                               */
 /*-------------------------------------------------------------------*/
-void loc3270_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
+static void
+loc3270_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
         BYTE chained, U16 count, BYTE prevcode, int ccwseq,
         BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual )
 {
@@ -1718,9 +1783,12 @@ int             rc;                     /* Return code               */
 int             num;                    /* Number of bytes to copy   */
 int             len;                    /* Data length               */
 int             aid;                    /* First read: AID present   */
-int             off;                    /* Offset in device buffer   */
+U32             off;                    /* Offset in device buffer   */
 BYTE            cmd;                    /* tn3270 command code       */
 BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
+
+    UNREFERENCED(prevcode);
+    UNREFERENCED(ccwseq);
 
     /* Clear the current screen position at start of CCW chain */
     if (!chained)
@@ -1820,7 +1888,8 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
         /* Calculate number of bytes to move and residual byte count */
         num = sizeof(buf) / 2;
         num = (count < num) ? count : num;
-	if (cmd == R3270_EAU) num = 0;
+        if(cmd == R3270_EAU) 
+           num = 0;
         *residual = count - num;
 
         /* Move the 3270 command code to the first byte of the buffer
@@ -2123,7 +2192,8 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
 /*-------------------------------------------------------------------*/
 /* EXECUTE A 1052/3215 CHANNEL COMMAND WORD                          */
 /*-------------------------------------------------------------------*/
-void constty_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
+static void
+constty_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
         BYTE chained, U16 count, BYTE prevcode, int ccwseq,
         BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual )
 {
@@ -2132,6 +2202,10 @@ int     len;                            /* Length of data            */
 int     num;                            /* Number of bytes to move   */
 BYTE    c;                              /* Print character           */
 BYTE    stat;                           /* Unit status               */
+
+    UNREFERENCED(chained);
+    UNREFERENCED(prevcode);
+    UNREFERENCED(ccwseq);
 
     /* Unit check with intervention required if no client connected */
     if (dev->connected == 0 && !IS_CCW_SENSE(code))
@@ -2161,7 +2235,7 @@ BYTE    stat;                           /* Unit status               */
         /* Translate data in channel buffer to ASCII */
         for (len = 0; len < num; len++)
         {
-            c = ebcdic_to_ascii[iobuf[len]];
+            c = guest_to_host(iobuf[len]);
             if (!isprint(c) && c != 0x0a && c != 0x0d) c = SPACE;
             iobuf[len] = c;
         } /* end for(len) */
@@ -2206,16 +2280,19 @@ BYTE    stat;                           /* Unit status               */
         /* Solicit console input if no data in the device buffer */
         if (dev->keybdrem == 0)
         {
-            /* Display prompting message on console */
-            len = sprintf (dev->buf,
-                    "HHC901I Enter input for console device %4.4X\r\n",
-                    dev->devnum);
-            rc = send_packet (dev->fd, dev->buf, len, NULL);
-            if (rc < 0)
+            /* Display prompting message on console if allowed */
+            if (dev->prompt1052 == 1)
             {
-                dev->sense[0] = SENSE_EC;
-                *unitstat = CSW_CE | CSW_DE | CSW_UC;
-                break;
+                len = sprintf (dev->buf,
+                        "HHCTE006A Enter input for console device %4.4X\r\n",
+                        dev->devnum);
+                rc = send_packet (dev->fd, dev->buf, len, NULL);
+                if (rc < 0)
+                {
+                    dev->sense[0] = SENSE_EC;
+                    *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                    break;
+                }
             }
 
             /* Accumulate client input data into device buffer */
@@ -2324,7 +2401,8 @@ DEVHND constty_device_hndinfo = {
         &constty_init_handler,
         &constty_execute_ccw,
         &constty_close_device,
-        &constty_query_device
+        &constty_query_device,
+        NULL, NULL, NULL, NULL
 };
 
 
@@ -2332,5 +2410,6 @@ DEVHND loc3270_device_hndinfo = {
         &loc3270_init_handler,
         &loc3270_execute_ccw,
         &loc3270_close_device,
-        &loc3270_query_device
+        &loc3270_query_device,
+        NULL, NULL, NULL, NULL
 };

@@ -1,4 +1,4 @@
-/* CGIBIN.C     (c)Copyright Jan Jaeger, 2002                        */
+/* CGIBIN.C     (c)Copyright Jan Jaeger, 2002-2003                   */
 /*              HTTP cgi-bin routines                                */
 
 /* This file contains all cgi routines that may be executed on the   */
@@ -253,6 +253,7 @@ int msgcount = 22;
 
     fprintf(webblk->hsock, "<FORM method=post>Command:\n");
     fprintf(webblk->hsock, "<INPUT type=text name=command size=80>\n");
+    fprintf(webblk->hsock, "<INPUT type=submit name=send value=\"Send\">\n");
     fprintf(webblk->hsock, "<INPUT type=hidden name=%srefresh value=1>\n",autorefresh ? "auto" : "no");
     fprintf(webblk->hsock, "<INPUT type=hidden name=refresh_interval value=%d>\n",refresh_interval);
     fprintf(webblk->hsock, "<INPUT type=hidden name=msgcount value=%d>\n",msgcount);
@@ -593,7 +594,7 @@ U32 addr = 0;
                                   "<td></td>\n",
                                   i + addr);
 
-	for(j = 0; j < 4; i += 4, j++)
+    for(j = 0; j < 4; i += 4, j++)
         {
         U32 m;
             FETCH_FW(m,sysblk.mainstor + i + addr);
@@ -612,48 +613,105 @@ U32 addr = 0;
 
 void cgibin_ipl(WEBBLK *webblk)
 {
-int i;
+U32 i;
+char *value;
 DEVBLK *dev;
+U32 ipldev;
+U32 iplcpu;
+U32 doipl;
 
     html_header(webblk);
 
-    fprintf(webblk->hsock,"<h1>Function not yet implemented</h1>\n");
+    fprintf(webblk->hsock,"<h1>Perform Initial Program Load</h1>\n");
 
-    fprintf(webblk->hsock,"<form method=post>\n"
-                          "<select type=submit name=cpu>\n");
+    if(cgi_variable(webblk,"doipl"))
+        doipl = 1;
+    else
+        doipl = 0;
 
-    for(i = 0;
+    if((value = cgi_variable(webblk,"device")))
+        sscanf(value,"%x",&ipldev);
+    else
+        ipldev = sysblk.ipldev;
+
+    if((value = cgi_variable(webblk,"cpu")))
+        sscanf(value,"%x",&iplcpu);
+    else
+        iplcpu = sysblk.iplcpu;
+
+    if((value = cgi_variable(webblk,"loadparm")))
+    {
+        for(i = 0; i < strlen(value); i++)
+            sysblk.loadparm[i] = host_to_guest((int)value[i]);
+        for(; i < 8; i++)
+            sysblk.loadparm[i] = host_to_guest(' ');
+    }
+
+    /* Validate CPU number */
+    if(
 #if defined(_FEATURE_CPU_RECONFIG)
-        i < MAX_CPU_ENGINES;
+            iplcpu >= MAX_CPU_ENGINES
 #else
-        i < sysblk.numcpu;
+            iplcpu >= sysblk.numcpu
 #endif
-        i++)
-        if(sysblk.regs[i].cpuonline)
-            fprintf(webblk->hsock,"<option value=%4.4X>CPU%4.4X</option>\n",i,i);
+      || !sysblk.regs[iplcpu].cpuonline)
+        doipl = 0;
+  
+    if(!doipl)
+    {
+        /* Present IPL parameters */
+        fprintf(webblk->hsock,"<form method=post>\n"
+                              "<select type=submit name=cpu>\n");
 
-    fprintf(webblk->hsock,"</select>\n"
-                          "<select type=submit name=devnum>\n");
+        for(i = 0;
+#if defined(_FEATURE_CPU_RECONFIG)
+            i < MAX_CPU_ENGINES;
+#else
+            i < sysblk.numcpu;
+#endif
+            i++)
+            if(sysblk.regs[i].cpuonline)
+                fprintf(webblk->hsock,"<option value=%4.4X%s>CPU%4.4X</option>\n",
+                  i, ((sysblk.regs[i].cpuad == iplcpu) ? " selected" : ""), i);
 
-    for(dev = sysblk.firstdev; dev; dev = dev->nextdev)
-        if(dev->pmcw.flag5 & PMCW5_V)
-            fprintf(webblk->hsock,"<option value=%4.4X>DEV%4.4X</option>\n",
-              dev->devnum, dev->devnum);
+        fprintf(webblk->hsock,"</select>\n"
+                              "<select type=submit name=device>\n");
 
-    fprintf(webblk->hsock,"</select>\n");
+        for(dev = sysblk.firstdev; dev; dev = dev->nextdev)
+            if(dev->pmcw.flag5 & PMCW5_V)
+                fprintf(webblk->hsock,"<option value=%4.4X%s>DEV%4.4X</option>\n",
+                  dev->devnum, ((dev->devnum == ipldev) ? " selected" : ""), dev->devnum);
 
-    fprintf(webblk->hsock,"Loadparm:<input type=text size=8 value=\"%c%c%c%c%c%c%c%c\">\n",
-      ebcdic_to_ascii[sysblk.loadparm[0]],
-      ebcdic_to_ascii[sysblk.loadparm[1]],
-      ebcdic_to_ascii[sysblk.loadparm[2]],
-      ebcdic_to_ascii[sysblk.loadparm[3]],
-      ebcdic_to_ascii[sysblk.loadparm[4]],
-      ebcdic_to_ascii[sysblk.loadparm[5]],
-      ebcdic_to_ascii[sysblk.loadparm[6]],
-      ebcdic_to_ascii[sysblk.loadparm[7]]);
+        fprintf(webblk->hsock,"</select>\n");
 
-    fprintf(webblk->hsock,"<input type=submit name=doipl value=\"IPL\">\n"
+        fprintf(webblk->hsock,"Loadparm:<input type=text name=loadparm size=8 value=\"%c%c%c%c%c%c%c%c\">\n",
+          guest_to_host(sysblk.loadparm[0]),
+          guest_to_host(sysblk.loadparm[1]),
+          guest_to_host(sysblk.loadparm[2]),
+          guest_to_host(sysblk.loadparm[3]),
+          guest_to_host(sysblk.loadparm[4]),
+          guest_to_host(sysblk.loadparm[5]),
+          guest_to_host(sysblk.loadparm[6]),
+          guest_to_host(sysblk.loadparm[7]));
+
+        fprintf(webblk->hsock,"<input type=submit name=doipl value=\"IPL\">\n"
                           "</form>\n");
+
+    }
+    else
+    {
+        /* Perform IPL function */
+        if( load_ipl(ipldev, sysblk.regs + iplcpu) )
+        {
+            fprintf(webblk->hsock,"<h3>IPL failed, see the "
+                                  "<a href=\"syslog#bottom\">system log</a> "
+                                  "for details</h3>\n");
+        }
+        else
+        {
+            fprintf(webblk->hsock,"<h3>IPL completed</h3>\n");
+        }
+    }
 
     html_footer(webblk);
 
@@ -676,20 +734,20 @@ BYTE   buf[80];
                           "<th>Type</th>"
                           "<th>Status</th></tr>\n");
 
-    for(dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+    for(dev = sysblk.firstdev; dev; dev = dev->nextdev)
         if(dev->pmcw.flag5 & PMCW5_V)
         {
              (dev->hnd->query)(dev, &class, sizeof(buf), buf);
 
              fprintf(webblk->hsock,"<tr>"
                                    "<td>%4.4X</td>"
-                                   "<td><a href=\"detail?devnum=%4.4X\">%4.4X</a></td>"
+                                   "<td><a href=\"detail?subchan=%4.4X\">%4.4X</a></td>"
                                    "<td>%s</td>"
                                    "<td>%4.4X</td>"
                                    "<td>%s%s%s</td>"
                                    "</tr>\n",
                                    dev->devnum,
-                                   dev->devnum,dev->subchan,
+                                   dev->subchan,dev->subchan,
                                    class,
                                    dev->devtype,
                                    (dev->fd > 2 ? "open " : ""),
@@ -709,26 +767,30 @@ void cgibin_debug_device_detail(WEBBLK *webblk)
 {
 DEVBLK *sel, *dev = NULL;
 char *value;
-int devnum;
+int subchan;
 
     html_header(webblk);
 
-    if((value = cgi_variable(webblk,"devnum"))
-      && sscanf(value,"%x",&devnum) == 1)
+    if((value = cgi_variable(webblk,"subchan"))
+      && sscanf(value,"%x",&subchan) == 1)
         for(dev = sysblk.firstdev; dev; dev = dev->nextdev)
-            if((dev->pmcw.flag5 & PMCW5_V)
-              && (dev->devnum == devnum))
+            if(dev->subchan == subchan)
                 break;
 
     fprintf(webblk->hsock,"<h3>Subchannel Details</h3>\n");
 
     fprintf(webblk->hsock,"<form method=post>\n"
-                          "<select type=submit name=devnum>\n");
+                          "<select type=submit name=subchan>\n");
 
     for(sel = sysblk.firstdev; sel; sel = sel->nextdev)
+    {
+        fprintf(webblk->hsock,"<option value=%4.4X%s>Subchannel %4.4X",
+          sel->subchan, ((sel == dev) ? " selected" : ""), sel->subchan);
         if(sel->pmcw.flag5 & PMCW5_V)
-            fprintf(webblk->hsock,"<option value=%4.4X%s>Device %4.4X</option>\n",
-              sel->devnum, ((sel == dev) ? " selected" : ""), sel->devnum);
+            fprintf(webblk->hsock," Device %4.4X</option>\n",sel->devnum);
+        else
+            fprintf(webblk->hsock,"</option>\n");
+    }
 
     fprintf(webblk->hsock,"</select>\n"
                           "<input type=submit value=\"Select / Refresh\">\n"
@@ -737,8 +799,10 @@ int devnum;
     if(dev)
     {
 
-        fprintf(webblk->hsock,"<h3>Path Management Control Word for Subchannel %4.4X</h3>\n"
-                              "<table border>\n",dev->subchan);
+        fprintf(webblk->hsock,"<table border>\n"
+                              "<caption align=left>"
+                              "<h3>Path Management Control Word</h3>"
+                              "</caption>\n");
 
         fprintf(webblk->hsock,"<tr><th colspan=32>Interruption Parameter</th></tr>\n");
 
@@ -748,7 +812,8 @@ int devnum;
 
         fprintf(webblk->hsock,"<tr><th colspan=2>00</th>"
                               "<th colspan=3>ISC</th>"
-                              "<th colspan=3>000</th>"
+                              "<th colspan=2>00</th>"
+                              "<th>A</th>"
                               "<th>E</th>"
                               "<th colspan=2>LM</th>"
                               "<th colspan=2>MM</th>"
@@ -758,8 +823,9 @@ int devnum;
                               "<th colspan=16>DEVNUM</th></tr>\n");
 
         fprintf(webblk->hsock,"<tr><td colspan=2></td>"
-                              "<td colspan=3>%d%d%d</td>"
-                              "<td colspan=3></td>"
+                              "<td colspan=3>%d</td>"
+                              "<td colspan=2></td>"
+                              "<td>%d</td>"
                               "<td>%d</td>"
                               "<td colspan=2>%d%d</td>"
                               "<td colspan=2>%d%d</td>"
@@ -767,9 +833,8 @@ int devnum;
                               "<td>%d</td>"
                               "<td>%d</td>"
                               "<td colspan=16>%2.2X%2.2X</td></tr>\n",
-                              ((dev->pmcw.flag4 >> 5) & 1),
-                              ((dev->pmcw.flag4 >> 4) & 1),
-                              ((dev->pmcw.flag4 >> 3) & 1),
+                              ((dev->pmcw.flag4 & PMCW4_ISC) >> 3),
+                              (dev->pmcw.flag4 & 1),
                               ((dev->pmcw.flag5 >> 7) & 1),
                               ((dev->pmcw.flag5 >> 6) & 1),
                               ((dev->pmcw.flag5 >> 5) & 1),
@@ -835,12 +900,25 @@ int devnum;
                               dev->pmcw.chpid[6],
                               dev->pmcw.chpid[7]);
 
-        fprintf(webblk->hsock,"<tr><th colspan=31>0000000000000000000000000000000</th>"
+        fprintf(webblk->hsock,"<tr><th colspan=8>ZONE</th>"
+                              "<th colspan=5>00000</th>"
+                              "<th colspan=3>VISC</th>"
+                              "<th colspan=8>00000000</th>"
+                              "<th>I</th>"
+                              "<th colspan=6>000000</th>"
                               "<th>S</th></tr>\n");
 
-        fprintf(webblk->hsock,"<tr><td colspan=31></td>"
+        fprintf(webblk->hsock,"<tr><td colspan=8>%2.2X</td>"
+                              "<td colspan=5></td>"
+                              "<td colspan=3>%d</td>"
+                              "<td colspan=8></td>"
+                              "<td>%d</td>"
+                              "<td colspan=6></td>"
                               "<td>%d</td></tr>\n",
-                              (dev->pmcw.flag27 & 1));
+                              dev->pmcw.zone,
+                              (dev->pmcw.flag25 & PMCW25_VISC),
+                              (dev->pmcw.flag27 & PMCW27_I) >> 7,
+                              (dev->pmcw.flag27 & PMCW27_S));
 
         fprintf(webblk->hsock,"</table>\n");
 
@@ -849,6 +927,82 @@ int devnum;
     html_footer(webblk);
 
 }
+
+
+void cgibin_debug_misc(WEBBLK *webblk)
+{
+int zone;
+
+    html_header(webblk);
+
+    fprintf(webblk->hsock,"<h2>Miscellaneous Registers<h2>\n");
+
+
+    fprintf(webblk->hsock,"<table border>\n"
+                          "<caption align=left>"
+                          "<h3>Zone related Registers</h3>"
+                          "</caption>\n");
+
+    fprintf(webblk->hsock,"<tr><th>Zone</th>"
+                          "<th>CS Origin</th>"
+                          "<th>CS Limit</th>"
+                          "<th>ES Origin</th>"
+                          "<th>ES Limit</th>"
+                          "<th>Measurement Block</th>"
+                          "<th>Key</th></tr>\n");
+
+    for(zone = 0; zone < FEATURE_SIE_MAXZONES; zone++)
+    {
+        fprintf(webblk->hsock,"<tr><td>%2.2X</td>"
+                              "<td>%8.8X</td>"
+                              "<td>%8.8X</td>"
+                              "<td>%8.8X</td>"
+                              "<td>%8.8X</td>"
+                              "<td>%8.8X</td>"
+                              "<td>%2.2X</td></tr>\n",
+                              zone,
+                              (U32)sysblk.zpb[zone].mso << 20,
+                              ((U32)sysblk.zpb[zone].msl << 20) | 0xFFFFF,
+                              (U32)sysblk.zpb[zone].eso << 20,
+                              ((U32)sysblk.zpb[zone].esl << 20) | 0xFFFFF,
+                              (U32)sysblk.zpb[zone].mbo,
+                              sysblk.zpb[zone].mbk);
+
+    }
+
+    fprintf(webblk->hsock,"</table>\n");
+
+
+    fprintf(webblk->hsock,"<table border>\n"
+                          "<caption align=left>"
+                          "<h3>Alternate Measurement</h3>"
+                          "</caption>\n");
+
+    fprintf(webblk->hsock,"<tr><th>Measurement Block</th>"
+                          "<th>Key</th></tr>\n");
+
+    fprintf(webblk->hsock,"<tr><td>%8.8X</td>"
+                          "<td>%2.2X</td></tr>\n",
+                          (U32)sysblk.mbo,
+                          sysblk.mbk);
+
+    fprintf(webblk->hsock,"</table>\n");
+
+
+    fprintf(webblk->hsock,"<table border>\n"
+                          "<caption align=left>"
+                          "<h3>Address Limit Register</h3>"
+                          "</caption>\n");
+
+    fprintf(webblk->hsock,"<tr><td>%8.8X</td></tr>\n",
+                              (U32)sysblk.addrlimval);
+
+    fprintf(webblk->hsock,"</table>\n");
+
+    html_footer(webblk);
+
+}
+
 
 
 void cgibin_debug_version_info(WEBBLK *webblk)
@@ -869,10 +1023,11 @@ void cgibin_debug_version_info(WEBBLK *webblk)
 /* associates directory filenames with cgibin routines               */
 
 CGITAB cgidir[] = {
-    { "syslog", &cgibin_syslog },
-    { "ipl", &cgibin_ipl },
+    { "tasks/syslog", &cgibin_syslog },
+    { "tasks/ipl", &cgibin_ipl },
     { "debug/registers", &cgibin_debug_registers },
     { "debug/storage", &cgibin_debug_storage },
+    { "debug/misc", &cgibin_debug_misc },
     { "debug/version_info", &cgibin_debug_version_info },
     { "debug/device/list", &cgibin_debug_device_list },
     { "debug/device/detail", &cgibin_debug_device_detail },

@@ -1,14 +1,14 @@
-/* VM.C         (c) Copyright Roger Bowler, 2000-2002                */
+/* VM.C         (c) Copyright Roger Bowler, 2000-2003                */
 /*              ESA/390 VM Diagnose calls and IUCV instruction       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2002      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements miscellaneous diagnose functions           */
 /* described in SC24-5670 VM/ESA CP Programming Services             */
 /* and SC24-5855 VM/ESA CP Diagnosis Reference.                      */
 /*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2002      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -155,8 +155,8 @@ U16             devnum;                 /* Device number             */
 /*-------------------------------------------------------------------*/
 int ARCH_DEP(syncblk_io) (int r1, int r2, REGS *regs)
 {
-int             i;                      /* Array subscript           */
-int             numsense;               /* Number of sense bytes     */
+U32             i;                      /* Array subscript           */
+U32             numsense;               /* Number of sense bytes     */
 U32             iopaddr;                /* Address of HCPSBIOP       */
 HCPSBIOP        ioparm;                 /* I/O parameter list        */
 DEVBLK         *dev;                    /* -> Device block           */
@@ -173,6 +173,7 @@ BYTE            unitstat = 0;           /* Device status             */
 BYTE            chanstat = 0;           /* Subchannel status         */
 BYTE            skey1, skey2;           /* Storage keys of first and
                                            last byte of I/O buffer   */
+    UNREFERENCED(r2);
 
     /* Register R1 contains the real address of the parameter list */
     iopaddr = regs->GR_L(r1);
@@ -297,9 +298,9 @@ BYTE            skey1, skey2;           /* Storage keys of first and
            and is not subject to fetch-protection override
            or storage-protection override mechanisms, and
            an SBILIST entry cannot cross a page boundary */
-        if (sbiaddr >= regs->mainsize
-            || ((STORAGE_KEY(sbiaddr) & STORKEY_FETCH)
-                && (STORAGE_KEY(sbiaddr) & STORKEY_KEY) != ioparm.akey
+        if (sbiaddr > regs->mainlim
+            || ((STORAGE_KEY(sbiaddr, regs) & STORKEY_FETCH)
+                && (STORAGE_KEY(sbiaddr, regs) & STORKEY_KEY) != ioparm.akey
                 && ioparm.akey != 0))
         {
             regs->GR_L(15) = 10;
@@ -320,7 +321,7 @@ BYTE            skey1, skey2;           /* Storage keys of first and
         }
 
         /* Return code 12 and cond code 2 if buffer exceeds storage */
-        if (absadr >= regs->mainsize - blksize)
+        if (absadr > regs->mainlim - blksize)
         {
             regs->GR_L(15) = 12;
             return 2;
@@ -332,8 +333,8 @@ BYTE            skey1, skey2;           /* Storage keys of first and
            pages, and the access is not subject to fetch-protection
            override, storage-protection override, or low-address
            protection */
-        skey1 = STORAGE_KEY(absadr);
-        skey2 = STORAGE_KEY(absadr + blksize - 1);
+        skey1 = STORAGE_KEY(absadr, regs);
+        skey2 = STORAGE_KEY(absadr + blksize - 1, regs);
         if (ioparm.akey != 0
             && (
                    ((skey1 & STORKEY_KEY) != ioparm.akey
@@ -350,7 +351,7 @@ BYTE            skey1, skey2;           /* Storage keys of first and
 
         /* Call device handler to read or write one block */
         fbadasd_syncblk_io (dev, ioparm.type, blknum, blksize,
-                            sysblk.mainstor + absadr,
+                            regs->mainstor + absadr,
                             &unitstat, &residual);
 
         /* Set incorrect length if residual count is non-zero */
@@ -417,8 +418,8 @@ BYTE            skey1, skey2;           /* Storage keys of first and
 /*-------------------------------------------------------------------*/
 int ARCH_DEP(syncgen_io) (int r1, int r2, REGS *regs)
 {
-int             i;                      /* Array subscript           */
-int             numsense;               /* Number of sense bytes     */
+U32             i;                      /* Array subscript           */
+U32             numsense;               /* Number of sense bytes     */
 U32             iopaddr;                /* Address of HCPSGIOP       */
 HCPSGIOP        ioparm;                 /* I/O parameter list        */
 DEVBLK         *dev;                    /* -> Device block           */
@@ -429,6 +430,8 @@ U32             lastccw;                /* CCW address at interrupt  */
 BYTE            accum;                  /* Work area                 */
 BYTE            unitstat = 0;           /* Device status             */
 BYTE            chanstat = 0;           /* Subchannel status         */
+
+    UNREFERENCED(r2);
 
     /* Register R1 contains the real address of the parameter list */
     iopaddr = regs->GR_L(r1);
@@ -485,7 +488,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
        or if CCW address exceeds maximum according to CCW format */
     if ((ccwaddr & 0x00000007) || ccwaddr >
            ((ioparm.flag & HCPSGIOP_FORMAT1_CCW) ?
-                        0x7FFFFFFF : 0x00FFFFFF))
+                        (U32)0x7FFFFFFF : (U32)0x00FFFFFF))
     {
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
         return 0;
@@ -673,7 +676,7 @@ BYTE            c;                      /* Character work area       */
     for (i = 0; i < 8; i++)
     {
         c = (*puser == '\0' ? SPACE : *(puser++));
-        buf[16+i] = ascii_to_ebcdic[toupper(c)];
+        buf[16+i] = host_to_guest(toupper(c));
     }
 
     /* Bytes 24-31 contain the program product bitmap */
@@ -724,8 +727,8 @@ BYTE            c;                      /* Character work area       */
 /*-------------------------------------------------------------------*/
 int ARCH_DEP(cpcmd_call) (int r1, int r2, REGS *regs)
 {
-int     i;                              /* Array subscript           */
-int     cc = 0;                         /* Condition code            */
+U32     i;                              /* Array subscript           */
+U32     cc = 0;                         /* Condition code            */
 U32     cmdaddr;                        /* Address of command string */
 U32     cmdlen;                         /* Length of command string  */
 U32     respadr;                        /* Address of response buffer*/
@@ -771,7 +774,7 @@ BYTE    resp[256];                      /* Response buffer (ASCIIZ)  */
 
     /* Display the command on the console */
     for (i = 0; i < cmdlen; i++)
-        buf[i] = ebcdic_to_ascii[buf[i]];
+        buf[i] = guest_to_host(buf[i]);
     buf[i] = '\0';
     logmsg ("HHC660I %s\n", buf);
 
@@ -781,7 +784,7 @@ BYTE    resp[256];                      /* Response buffer (ASCIIZ)  */
         strcpy (resp, "HHC661I Command complete");
         resplen = strlen(resp);
         for (i = 0; i < resplen; i++)
-            resp[i] = ascii_to_ebcdic[resp[i]];
+            resp[i] = host_to_guest(resp[i]);
 
         respadr = regs->GR_L(r1+1);
         maxrlen = regs->GR_L(r2+1);
@@ -863,7 +866,7 @@ static  BYTE timefmt[]="%m/%d/%y%H:%M:%S%m/%d/%Y%Y-%m-%d";
     tmptr = localtime(&timeval);
     strftime(dattim, sizeof(dattim), timefmt, tmptr);
     for (i = 0; dattim[i] != '\0'; i++)
-        dattim[i] = ascii_to_ebcdic[dattim[i]];
+        dattim[i] = host_to_guest(dattim[i]);
 
     /* Obtain buffer address and length from R1 and R2 registers */
     bufadr = regs->GR_L(r1);
@@ -973,7 +976,7 @@ BYTE    func;                           /* Function code...          */
 
     /* Validate start/end addresses if function is not CAPR */
     if (func != DIAG214_CAPR
-        && (start > end || end >= regs->mainsize))
+        && (start > end || end > regs->mainlim))
     {
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
@@ -997,8 +1000,8 @@ BYTE    func;                           /* Function code...          */
         /* Set storage key for each frame within specified range */
         for (abs = start; abs <= end; abs += STORAGE_KEY_PAGESIZE)
         {
-            STORAGE_KEY(abs) &= ~(STORKEY_KEY | STORKEY_FETCH);
-            STORAGE_KEY(abs) |= skey;
+            STORAGE_KEY(abs, regs) &= ~(STORKEY_KEY | STORKEY_FETCH);
+            STORAGE_KEY(abs, regs) |= skey;
         } /* end for(abs) */
 
         break;

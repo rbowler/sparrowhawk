@@ -106,6 +106,13 @@
                         | IC_PER_GRA \
                         | IC_PER_STURA )
 
+/* SIE & Assist supported events */
+#define IC_SIE_INT      ( IC_BROADCAST \
+                        | IC_IOPENDING \
+                        | CR0_XM_CLKC \
+                        | CR0_XM_PTIMER \
+                        | CR0_XM_ITIMER )
+
 /* Bit manipulation macros */
 #define SET_IC_INITIAL_MASK(_regs) (_regs)->ints_mask= \
               (IC_INITIAL_MASK|((_regs)->ints_state&IC_DEBUG_BIT))
@@ -128,7 +135,7 @@ do { \
 
 #undef SET_IC_IO_MASK
 #ifdef FEATURE_BCMODE
-  #define SET_IC_IO_MASK(_regs) \
+#define SET_IC_IO_MASK(_regs) \
   if( ((_regs)->psw.ecmode ? ((_regs)->psw.sysmask&PSW_IOMASK) : \
                              ((_regs)->psw.sysmask&0xFE)) ) \
      (_regs)->ints_mask |= IC_IOPENDING; \
@@ -324,7 +331,7 @@ do { \
    (((_regs)->ints_state|sysblk.ints_state) & ((_regs)->ints_mask|IC_PER_MASK))
 
 #define SIE_IC_INTERRUPT_CPU(_regs) \
-   (((_regs)->ints_state|(sysblk.ints_state&IC_BROADCAST)) & ((_regs)->ints_mask|IC_PER_MASK))
+   (((_regs)->ints_state|(sysblk.ints_state&IC_SIE_INT)) & ((_regs)->ints_mask|IC_PER_MASK))
 
 #else /*!INTERRUPTS_FAST_CHECK*/
 

@@ -1,8 +1,8 @@
 /*
  * dasdls
  *
- * Copyright 2000-2002 by Malcolm Beattie
- * Based on code copyright by Roger Bowler, 1999-2002
+ * Copyright 2000-2003 by Malcolm Beattie
+ * Based on code copyright by Roger Bowler, 1999-2003
  */
 #include "hercules.h"
 #include "dasdblks.h"
@@ -109,7 +109,7 @@ int do_ls_cif(CIFBLK *cif)
 
 int do_ls(char *file, char *sfile)
 {
-    CIFBLK *cif = open_ckd_image(file, sfile, O_RDONLY|O_BINARY);
+    CIFBLK *cif = open_ckd_image(file, sfile, O_RDONLY|O_BINARY, 0);
 
     if (!cif || do_ls_cif(cif) || close_ckd_image(cif))
         return -1;
@@ -125,7 +125,7 @@ int main(int argc, char **argv)
     if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
     {
         extgui = 1;
-		argv[--argc] = 0;
+        argv[--argc] = 0;
     }
 #endif /*EXTERNALGUI*/
 

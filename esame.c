@@ -1,4 +1,4 @@
-/* ESAME.C      (c) Copyright Jan Jaeger, 2000-2002                  */
+/* ESAME.C      (c) Copyright Jan Jaeger, 2000-2003                  */
 /*              ESAME (z/Architecture) instructions                  */
 
 /*-------------------------------------------------------------------*/
@@ -226,6 +226,8 @@ DEF_INST(trap2)
 {
     E(inst, execflag, regs);
 
+    UNREFERENCED(inst);
+
     SIE_MODE_XC_SOPEX(regs);
 
     ARCH_DEP(trap_x) (0, execflag, regs, 0);
@@ -292,7 +294,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
     /* Fetch flags from the instruction address space */
     abs = LOGICAL_TO_ABS (pl_addr, 0, regs,
             ACCTYPE_INSTFETCH, regs->psw.pkey);
-    FETCH_HW(flags, sysblk.mainstor + abs);
+    FETCH_HW(flags, regs->mainstor + abs);
 
 #if defined(FEATURE_ESAME)
     /* Bits 0-12 must be zero */
@@ -306,17 +308,17 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
     /* Fetch the offset to the new psw */
     abs = LOGICAL_TO_ABS (pl_addr + 2, 0, regs,
             ACCTYPE_INSTFETCH, regs->psw.pkey);
-    FETCH_HW(psw_offset, sysblk.mainstor + abs);
+    FETCH_HW(psw_offset, regs->mainstor + abs);
 
     /* Fetch the offset to the new ar */
     abs = LOGICAL_TO_ABS (pl_addr + 4, 0, regs,
             ACCTYPE_INSTFETCH, regs->psw.pkey);
-    FETCH_HW(ar_offset, sysblk.mainstor + abs);
+    FETCH_HW(ar_offset, regs->mainstor + abs);
 
     /* Fetch the offset to the new gr */
     abs = LOGICAL_TO_ABS (pl_addr + 6, 0, regs,
             ACCTYPE_INSTFETCH, regs->psw.pkey);
-    FETCH_HW(gr_offset, sysblk.mainstor + abs);
+    FETCH_HW(gr_offset, regs->mainstor + abs);
 
 #if defined(FEATURE_ESAME)
     /* Fetch the offset to the new disjoint gr_h */
@@ -324,7 +326,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
     {
         abs = LOGICAL_TO_ABS (pl_addr + 8, 0, regs,
             ACCTYPE_INSTFETCH, regs->psw.pkey);
-        FETCH_HW(grd_offset, sysblk.mainstor + abs);
+        FETCH_HW(grd_offset, regs->mainstor + abs);
     }
 #endif /*defined(FEATURE_ESAME)*/
 
@@ -401,6 +403,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
       && ((psw[2] & 0xC0) == 0xC0) )
         ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
+    obtain_lock(&sysblk.intlock);
  
 #if defined(FEATURE_ESAME)
     if(flags & 0x0004) 
@@ -409,6 +412,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         psw[1] &= ~0x08;
         if( ARCH_DEP(load_psw) (regs, psw) )/* only check invalid IA not odd */
         {
+            release_lock(&sysblk.intlock);
             /* restore the psw */
             regs->psw = save_psw;
             /* And generate a program interrupt */
@@ -424,6 +428,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
 #endif /*defined(FEATURE_ESAME)*/
         if( s390_load_psw(regs, psw) )
         {
+            release_lock(&sysblk.intlock);
             /* restore the psw */
             regs->psw = save_psw;
             /* And generate a program interrupt */
@@ -433,6 +438,8 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         regs->psw.notesame = 0;
 #endif /*defined(FEATURE_ESAME)*/
     }
+
+    release_lock(&sysblk.intlock);
 
     /* load_psw() has set the ILC to zero.  This needs to
        be reset to 4 for an eventual PER event */
@@ -507,7 +514,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
             if (regs->CR(13) & SSEVENT_BIT)
                 regs->TEA |= TEA_SSEVENT;
         }
-	regs->psw.ilc = 4;
+    regs->psw.ilc = 4;
         ARCH_DEP(program_interrupt) (regs, PGM_SPACE_SWITCH_EVENT);
     }
 
@@ -2266,7 +2273,7 @@ DEF_INST(compare_and_swap_long)
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
-U64     n;                              /* 64-bit operand value      */
+RADR    abs2;                           /* absolute address          */
 
     RSE(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -2275,25 +2282,15 @@ U64     n;                              /* 64-bit operand value      */
     /* Perform serialization before starting operation */
     PERFORM_SERIALIZATION (regs);
 
+    /* Get operand absolute address */
+    abs2 = LOGICAL_TO_ABS (effective_addr2, b2, regs,
+                           ACCTYPE_WRITE, regs->psw.pkey);
+
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
-    /* Load second operand from operand address  */
-    n = ARCH_DEP(vfetch8) ( effective_addr2, b2, regs );
-
-    /* Compare operand with R1 register contents */
-    if ( regs->GR_G(r1) == n )
-    {
-        /* If equal, store R3 at operand location and set cc=0 */
-        ARCH_DEP(vstore8) ( regs->GR_G(r3), effective_addr2, b2, regs );
-        regs->psw.cc = 0;
-    }
-    else
-    {
-        /* If unequal, load R1 from operand and set cc=1 */
-        regs->GR_G(r1) = n;
-        regs->psw.cc = 1;
-    }
+    /* Attempt to exchange the values */
+    regs->psw.cc = cmpxchg8 (&regs->GR_G(r1), regs->GR_G(r3), regs->mainstor + abs2);
 
     /* Release main-storage access lock */
     RELEASE_MAINLOCK(regs);
@@ -2301,27 +2298,21 @@ U64     n;                              /* 64-bit operand value      */
     /* Perform serialization after completing operation */
     PERFORM_SERIALIZATION (regs);
 
-#if MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP)
-    /* It this is a failed compare and swap
-       and there is more then 1 CPU in the configuration
-       and there is no broadcast synchronization in progress
-       then call the hypervisor to end this timeslice,
-       this to prevent this virtual CPU monopolizing
-       the physical CPU on a spinlock */
-    if(regs->psw.cc && sysblk.numcpu > 1)
-        usleep(1L);
-#endif /* MAX_CPU_ENGINES > 1 && defined)OPTION_CS_USLEEP) */
-
-#if defined(_FEATURE_ZSIE)
-    if((regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CS1))
-      && regs->psw.cc == 1)
+    if (regs->psw.cc == 1)
     {
-        if( !OPEN_IC_PERINT(regs) )
-            longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#if defined(_FEATURE_ZSIE)
+        if((regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CS1)))
+        {
+            if( !OPEN_IC_PERINT(regs) )
+                longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+            else
+                longjmp(regs->progjmp, SIE_INTERCEPT_INSTCOMP);
+        }
         else
-            longjmp(regs->progjmp, SIE_INTERCEPT_INSTCOMP);
-    }
 #endif /*defined(_FEATURE_ZSIE)*/
+            if (sysblk.numcpu > 1)
+                sched_yield();
+    }
 
 } /* end DEF_INST(compare_and_swap_long) */
 #endif /*defined(FEATURE_ESAME)*/
@@ -2336,7 +2327,7 @@ DEF_INST(compare_double_and_swap_long)
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
-U64     n1, n2;                         /* 64-bit operand values     */
+RADR    abs2;                           /* absolute address          */
 
     RSE(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -2347,30 +2338,18 @@ U64     n1, n2;                         /* 64-bit operand values     */
     /* Perform serialization before starting operation */
     PERFORM_SERIALIZATION (regs);
 
+    /* Get operand absolute address */
+    abs2 = LOGICAL_TO_ABS (effective_addr2, b2, regs,
+                           ACCTYPE_WRITE, regs->psw.pkey);
+
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
-    /* Load second operand from operand address  */
-    n1 = ARCH_DEP(vfetch8) ( effective_addr2, b2, regs );
-    n2 = ARCH_DEP(vfetch8) ( effective_addr2 + 8, b2, regs );
 
-    /* Compare doubleword operand with R1:R1+1 register contents */
-    if ( regs->GR_G(r1) == n1 && regs->GR_G(r1+1) == n2 )
-    {
-        /* If equal, store R3:R3+1 at operand location and set cc=0 */
-        ARCH_DEP(validate_operand) (effective_addr2 + 8, b2, 8-1,
-                                                         ACCTYPE_WRITE, regs);
-        ARCH_DEP(vstore8) ( regs->GR_G(r3), effective_addr2, b2, regs );
-        ARCH_DEP(vstore8) ( regs->GR_G(r3+1), effective_addr2 + 8, b2, regs );
-        regs->psw.cc = 0;
-    }
-    else
-    {
-        /* If unequal, load R1:R1+1 from operand and set cc=1 */
-        regs->GR_G(r1) = n1;
-        regs->GR_G(r1+1) = n2;
-        regs->psw.cc = 1;
-    }
+    /* Attempt to exchange the values */
+    regs->psw.cc = cmpxchg16 (&regs->GR_G(r1), &regs->GR_G(r1+1),
+                              regs->GR_G(r3), regs->GR_G(r3+1),
+                              regs->mainstor + abs2);
 
     /* Release main-storage access lock */
     RELEASE_MAINLOCK(regs);
@@ -2378,27 +2357,21 @@ U64     n1, n2;                         /* 64-bit operand values     */
     /* Perform serialization after completing operation */
     PERFORM_SERIALIZATION (regs);
 
-#if MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP)
-    /* It this is a failed compare and swap
-       and there is more then 1 CPU in the configuration
-       and there is no broadcast synchronization in progress
-       then call the hypervisor to end this timeslice,
-       this to prevent this virtual CPU monopolizing
-       the physical CPU on a spinlock */
-    if(regs->psw.cc && sysblk.numcpu > 1)
-        usleep(1L);
-#endif /* MAX_CPU_ENGINES > 1 && defined(OPTION_CS_USLEEP) */
-
-#if defined(_FEATURE_ZSIE)
-    if((regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CDS1))
-      && regs->psw.cc == 1)
+    if (regs->psw.cc == 1)
     {
-        if( !OPEN_IC_PERINT(regs) )
-            longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+#if defined(_FEATURE_ZSIE)
+        if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_CS1))
+        {
+            if( !OPEN_IC_PERINT(regs) )
+                longjmp(regs->progjmp, SIE_INTERCEPT_INST);
+            else
+                longjmp(regs->progjmp, SIE_INTERCEPT_INSTCOMP);
+        }
         else
-            longjmp(regs->progjmp, SIE_INTERCEPT_INSTCOMP);
-    }
 #endif /*defined(_FEATURE_ZSIE)*/
+            if (sysblk.numcpu > 1)
+                sched_yield();
+    }
 
 } /* end DEF_INST(compare_double_and_swap_long) */
 #endif /*defined(FEATURE_ESAME)*/
@@ -3347,11 +3320,11 @@ U64     n;                              /* Integer work areas        */
 /*-------------------------------------------------------------------*/
 DEF_INST(shift_left_single_long)
 {
-int     r1, r3;                         /* Register numbers          */
-int     b2;                             /* effective address base    */
+U32     r1, r3;                         /* Register numbers          */
+U32     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
 U64     n, n1, n2;                      /* 64-bit operand values     */
-int     i, j;                           /* Integer work areas        */
+U32     i, j;                           /* Integer work areas        */
 
     RSE(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -4006,7 +3979,6 @@ int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 int     i, d;                           /* Integer work areas        */
 BYTE    rwork[128];                     /* Register work areas       */
-BYTE    dism;                           /* Disabled int subcl mask   */
 
     RSE(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -4040,9 +4012,6 @@ BYTE    dism;                           /* Disabled int subcl mask   */
 
     INVALIDATE_AEA_ALL(regs);
 
-    /* Save disabled I/O subclasses */
-    dism = ~regs->CR_LHHCH(6);
-
     /* Load control registers from work area */
     for ( i = r1, d = 0; ; )
     {
@@ -4056,17 +4025,10 @@ BYTE    dism;                           /* Disabled int subcl mask   */
         i++; i &= 15;
     }
 
-    /* Force I/O interrupt check when enabling an I/O subclass */
-    if(dism & regs->CR_LHHCH(6))
-    {
-        obtain_lock(&sysblk.intlock);
-        ON_IC_IOPENDING;
-        release_lock(&sysblk.intlock);
-    }
-
     SET_IC_EXTERNAL_MASK(regs);
     SET_IC_MCK_MASK(regs);
     SET_IC_PER_MASK(regs);
+    SET_IC_IO_MASK(regs);
 
     RETURN_INTCHECK(regs);
 
@@ -4211,6 +4173,8 @@ DEF_INST(test_addressing_mode)
 {
     E(inst, execflag, regs);
 
+    UNREFERENCED(inst);
+
     regs->psw.cc =
 #if defined(FEATURE_ESAME)
                    (regs->psw.amode64 << 1) |
@@ -4230,6 +4194,8 @@ DEF_INST(set_addressing_mode_24)
 VADR    ia = regs->psw.IA;              /* Unupdated instruction addr*/
 
     E(inst, execflag, regs);
+
+    UNREFERENCED(inst);
 
     /* Program check if instruction is located above 16MB */
     if (ia > 0xFFFFFFULL)
@@ -4261,6 +4227,8 @@ VADR    ia = regs->psw.IA;              /* Unupdated instruction addr*/
 
     E(inst, execflag, regs);
 
+    UNREFERENCED(inst);
+
     /* Program check if instruction is located above 2GB */
     if (ia > 0x7FFFFFFFULL)
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
@@ -4288,6 +4256,8 @@ VADR    ia = regs->psw.IA;              /* Unupdated instruction addr*/
 DEF_INST(set_addressing_mode_64)
 {
     E(inst, execflag, regs);
+
+    UNREFERENCED(inst);
 
 #if defined(FEATURE_ESAME)
     /* Add a mode trace entry when switching in/out of 64 bit mode */
@@ -4480,7 +4450,9 @@ int     rc;
     ARCH_DEP(vfetchc) ( qword, 16-1, effective_addr2, b2, regs );
 
     /* Load updated PSW */
+    obtain_lock(&sysblk.intlock);
     rc = ARCH_DEP(load_psw) ( regs, qword );
+    release_lock(&sysblk.intlock);
     if ( rc )
         ARCH_DEP(program_interrupt) (regs, rc);
 
@@ -4571,10 +4543,10 @@ PSA    *psa;                            /* -> Prefixed storage area  */
     SIE_INTERCEPT(regs);
 
     /* Set the main storage reference and change bits */
-    STORAGE_KEY(regs->PX) |= (STORKEY_REF | STORKEY_CHANGE);
+    STORAGE_KEY(regs->PX, regs) |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Point to PSA in main storage */
-    psa = (void*)(sysblk.mainstor + regs->PX);
+    psa = (void*)(regs->mainstor + regs->PX);
 
     psa->stfl[0] = 0
 #if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
@@ -4929,6 +4901,471 @@ int     cc;                             /* Condition code            */
     regs->psw.cc = cc;
 
 } /* end DEF_INST(unpack_unicode) */
+#endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
+
+
+#if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+/*-------------------------------------------------------------------*/
+/* B993 TROO  - Translate One to One                           [RRE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(translate_one_to_one)
+{
+int     r1, r2;                         /* Values of R fields        */
+VADR    addr1, addr2, trtab;            /* Effective addresses       */
+GREG    len; 
+BYTE    svalue, dvalue, tvalue;
+
+    RRE(inst, execflag, regs, r1, r2);
+
+    ODD_CHECK(r1, regs);
+
+    /* Determine length */
+    len = GR_A(r1 + 1,regs);
+
+    /* Determine destination, source and translate table address */
+    addr1 = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
+    addr2 = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
+    trtab = regs->GR(1) & ADDRESS_MAXWRAP(regs) & ~7;
+
+    /* Determine test value */
+    tvalue = regs->GR_LHLCL(0);
+
+    /* Preset condition code to zero in case of zero length */
+    if(!len)
+        regs->psw.cc = 0;
+
+    while(len)
+    {
+        svalue = ARCH_DEP(vfetchb) (addr2, r2, regs);
+
+        /* Fetch value from translation table */
+        dvalue = ARCH_DEP(vfetchb) (((trtab + svalue)
+                                   & ADDRESS_MAXWRAP(regs) ), 1, regs);
+
+        /* If the testvalue was found then exit with cc1 */
+        if(dvalue == tvalue)
+        {
+            regs->psw.cc = 1;
+            break;
+        }
+
+        /* Store destination value */
+        ARCH_DEP(vstoreb) (dvalue, addr1, r1, regs);
+
+        /* Adjust source addr, destination addr and length */
+        addr1++; addr1 &= ADDRESS_MAXWRAP(regs);
+        addr2++; addr2 &= ADDRESS_MAXWRAP(regs);
+        len--;
+
+        /* Update the registers */
+        GR_A(r1, regs) = addr1;
+        GR_A(r1 + 1, regs) = len;
+        GR_A(r2, regs) = addr2;
+
+        /* Set cc0 when all values have been processed */
+        regs->psw.cc = len ? 3 : 0;
+
+        /* exit on the cpu determined number of bytes */
+        if((len != 0) && (!(addr1 & 0xfff) || !addr2 & 0xfff))
+            break;
+
+    } /* end while */
+
+} /* end DEF_INST(translate_one_to_one) */
+#endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
+
+
+#if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+/*-------------------------------------------------------------------*/
+/* B992 TROT  - Translate One to Two                           [RRE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(translate_one_to_two)
+{
+int     r1, r2;                         /* Values of R fields        */
+VADR    addr1, addr2, trtab;            /* Effective addresses       */
+GREG    len; 
+BYTE    svalue;
+BYTE    dvalue, tvalue;
+
+    RRE(inst, execflag, regs, r1, r2);
+
+    ODD_CHECK(r1, regs);
+
+    /* Determine length */
+    len = GR_A(r1 + 1,regs);
+
+    /* Determine destination, source and translate table address */
+    addr1 = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
+    addr2 = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
+    trtab = regs->GR(1) & ADDRESS_MAXWRAP(regs) & ~7;
+
+    /* Determine test value */
+    tvalue = regs->GR_LHL(0);
+
+    /* Preset condition code to zero in case of zero length */
+    if(!len)
+        regs->psw.cc = 0;
+
+    while(len)
+    {
+        svalue = ARCH_DEP(vfetchb) (addr2, r2, regs);
+
+        /* Fetch value from translation table */
+        dvalue = ARCH_DEP(vfetch2) (((trtab + (svalue << 1))
+                                   & ADDRESS_MAXWRAP(regs) ), 1, regs);
+
+        /* If the testvalue was found then exit with cc1 */
+        if(dvalue == tvalue)
+        {
+            regs->psw.cc = 1;
+            break;
+        }
+
+        /* Store destination value */
+        ARCH_DEP(vstore2) (dvalue, addr1, r1, regs);
+
+        /* Adjust source addr, destination addr and length */
+        addr1 += 2; addr1 &= ADDRESS_MAXWRAP(regs);
+        addr2++; addr2 &= ADDRESS_MAXWRAP(regs);
+        len--;
+
+        /* Update the registers */
+        GR_A(r1, regs) = addr1;
+        GR_A(r1 + 1, regs) = len;
+        GR_A(r2, regs) = addr2;
+
+        /* Set cc0 when all values have been processed */
+        regs->psw.cc = len ? 3 : 0;
+
+        /* exit on the cpu determined number of bytes */
+        if((len != 0) && (!(addr1 & 0xfff) || !addr2 & 0xfff))
+            break;
+
+    } /* end while */
+
+} /* end DEF_INST(translate_one_to_two) */
+#endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
+
+
+#if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+/*-------------------------------------------------------------------*/
+/* B991 TRTO  - Translate Two to One                           [RRE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(translate_two_to_one)
+{
+int     r1, r2;                         /* Values of R fields        */
+VADR    addr1, addr2, trtab;            /* Effective addresses       */
+GREG    len; 
+U16     svalue;
+BYTE    dvalue, tvalue;
+
+    RRE(inst, execflag, regs, r1, r2);
+
+    ODD_CHECK(r1, regs);
+
+    /* Determine length */
+    len = GR_A(r1 + 1,regs);
+
+    ODD_CHECK(len, regs);
+
+    /* Determine destination, source and translate table address */
+    addr1 = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
+    addr2 = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
+    trtab = regs->GR(1) & ADDRESS_MAXWRAP(regs) & ~0xfff;
+
+    /* Determine test value */
+    tvalue = regs->GR_LHLCL(0);
+
+    /* Preset condition code to zero in case of zero length */
+    if(!len)
+        regs->psw.cc = 0;
+
+    while(len)
+    {
+        svalue = ARCH_DEP(vfetch2) (addr2, r2, regs);
+
+        /* Fetch value from translation table */
+        dvalue = ARCH_DEP(vfetchb) (((trtab + svalue)
+                                   & ADDRESS_MAXWRAP(regs) ), 1, regs);
+
+        /* If the testvalue was found then exit with cc1 */
+        if(dvalue == tvalue)
+        {
+            regs->psw.cc = 1;
+            break;
+        }
+
+        /* Store destination value */
+        ARCH_DEP(vstoreb) (dvalue, addr1, r1, regs);
+
+        /* Adjust source addr, destination addr and length */
+        addr1++; addr1 &= ADDRESS_MAXWRAP(regs);
+        addr2 += 2; addr2 &= ADDRESS_MAXWRAP(regs);
+        len -= 2;
+
+        /* Update the registers */
+        GR_A(r1, regs) = addr1;
+        GR_A(r1 + 1, regs) = len;
+        GR_A(r2, regs) = addr2;
+
+        /* Set cc0 when all values have been processed */
+        regs->psw.cc = len ? 3 : 0;
+
+        /* exit on the cpu determined number of bytes */
+        if((len != 0) && (!(addr1 & 0xfff) || !addr2 & 0xfff))
+            break;
+
+    } /* end while */
+
+} /* end DEF_INST(translate_two_to_one) */
+#endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
+
+
+#if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+/*-------------------------------------------------------------------*/
+/* B990 TRTT  - Translate Two to Two                           [RRE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(translate_two_to_two)
+{
+int     r1, r2;                         /* Values of R fields        */
+VADR    addr1, addr2, trtab;            /* Effective addresses       */
+GREG    len; 
+U16     svalue, dvalue, tvalue; 
+
+    RRE(inst, execflag, regs, r1, r2);
+
+    ODD_CHECK(r1, regs);
+
+    /* Determine length */
+    len = GR_A(r1 + 1,regs);
+
+    ODD_CHECK(len, regs);
+
+    /* Determine destination, source and translate table address */
+    addr1 = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
+    addr2 = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
+    trtab = regs->GR(1) & ADDRESS_MAXWRAP(regs) & ~0xfff;
+
+    /* Determine test value */
+    tvalue = regs->GR_LHL(0);
+
+    /* Preset condition code to zero in case of zero length */
+    if(!len)
+        regs->psw.cc = 0;
+
+    while(len)
+    {
+        svalue = ARCH_DEP(vfetch2) (addr2, r2, regs);
+
+        /* Fetch value from translation table */
+        dvalue = ARCH_DEP(vfetch2) (((trtab + (svalue << 1))
+                                   & ADDRESS_MAXWRAP(regs) ), 1, regs);
+
+        /* If the testvalue was found then exit with cc1 */
+        if(dvalue == tvalue)
+        {
+            regs->psw.cc = 1;
+            break;
+        }
+
+        /* Store destination value */
+        ARCH_DEP(vstore2) (dvalue, addr1, r1, regs);
+
+        /* Adjust source addr, destination addr and length */
+        addr1 += 2; addr1 &= ADDRESS_MAXWRAP(regs);
+        addr2 += 2; addr2 &= ADDRESS_MAXWRAP(regs);
+        len -= 2;
+
+        /* Update the registers */
+        GR_A(r1, regs) = addr1;
+        GR_A(r1 + 1, regs) = len;
+        GR_A(r2, regs) = addr2;
+
+        /* Set cc0 when all values have been processed */
+        regs->psw.cc = len ? 3 : 0;
+
+        /* exit on the cpu determined number of bytes */
+        if((len != 0) && (!(addr1 & 0xfff) || !addr2 & 0xfff))
+            break;
+
+    } /* end while */
+
+} /* end DEF_INST(translate_two_to_two) */
+#endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
+
+
+#if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+/*-------------------------------------------------------------------*/
+/* EB8E MVCLU - Move Long Unicode                              [RSE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(move_long_unicode)
+{
+int     r1, r3;                         /* Register numbers          */
+int     b2;                             /* effective address base    */
+VADR    effective_addr2;                /* effective address         */
+int     i;                              /* Loop counter              */
+int     cc;                             /* Condition code            */
+VADR    addr1, addr3;                   /* Operand addresses         */
+GREG    len1, len3;                     /* Operand lengths           */
+U16     odbyte;                         /* Operand double byte       */
+U16     pad;                            /* Padding double byte       */
+int     cpu_length;                     /* cpu determined length     */
+
+    RSE(inst, execflag, regs, r1, r3, b2, effective_addr2);
+
+    ODD2_CHECK(r1, r3, regs);
+
+    /* Load operand lengths from bits 0-31 of R1+1 and R3+1 */
+    len1 = GR_A(r1 + 1, regs);
+    len3 = GR_A(r3 + 1, regs);
+
+    ODD2_CHECK(len1, len3, regs);
+
+    /* Load padding doublebyte from bits 48-63 of effective address */
+    pad = effective_addr2 & 0xFFFF;
+
+    /* Determine the destination and source addresses */
+    addr1 = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
+    addr3 = regs->GR(r3) & ADDRESS_MAXWRAP(regs);
+
+    /* set cpu_length as shortest distance to new page */
+    if ((addr1 & 0xFFF) > (addr3 & 0xFFF))
+        cpu_length = 0x1000 - (addr1 & 0xFFF);
+    else
+        cpu_length = 0x1000 - (addr3 & 0xFFF);
+
+    /* Set the condition code according to the lengths */
+    cc = (len1 < len3) ? 1 : (len1 > len3) ? 2 : 0;
+
+    /* Process operands from left to right */
+    for (i = 0; len1 > 0; i += 2)
+    {
+        /* If cpu determined length has been moved, exit with cc=3 */
+        if (i >= cpu_length)
+        {
+            cc = 3;
+            break;
+        }
+
+        /* Fetch byte from source operand, or use padding double byte */
+        if (len3 > 0)
+        {
+            odbyte = ARCH_DEP(vfetch2) ( addr3, r3, regs );
+            addr3 += 2;
+            addr3 &= ADDRESS_MAXWRAP(regs);
+            len3 -= 2;
+        }
+        else
+            odbyte = pad;
+
+        /* Store the double byte in the destination operand */
+        ARCH_DEP(vstore2) ( odbyte, addr1, r1, regs );
+        addr1 +=2;
+        addr1 &= ADDRESS_MAXWRAP(regs);
+        len1 -= 2;
+
+        /* Update the registers */
+        GR_A(r1, regs) = addr1;
+        GR_A(r1 + 1, regs) = len1;
+        GR_A(r3, regs) = addr3;
+        GR_A(r3 + 1, regs) = len3;
+
+    } /* end for(i) */
+
+    regs->psw.cc = cc;
+
+}
+#endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
+
+
+#if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+/*-------------------------------------------------------------------*/
+/* EB8F CLCLU - Compare Logical Long Unicode                   [RSE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(compare_logical_long_unicode)
+{
+int     r1, r3;                         /* Register numbers          */
+int     b2;                             /* effective address base    */
+VADR    effective_addr2;                /* effective address         */
+int     i;                              /* Loop counter              */
+int     cc = 0;                         /* Condition code            */
+VADR    addr1, addr3;                   /* Operand addresses         */
+GREG    len1, len3;                     /* Operand lengths           */
+U16     dbyte1, dbyte3;                 /* Operand double bytes      */
+U16     pad;                            /* Padding double byte       */
+int     cpu_length;                     /* cpu determined length     */
+
+    RSE(inst, execflag, regs, r1, r3, b2, effective_addr2);
+
+    ODD2_CHECK(r1, r3, regs);
+
+    /* Load operand lengths from bits 0-31 of R1+1 and R3+1 */
+    len1 = GR_A(r1 + 1, regs);
+    len3 = GR_A(r3 + 1, regs);
+
+    ODD2_CHECK(len1, len3, regs);
+
+    /* Load padding doublebyte from bits 48-64 of effective address */
+    pad = effective_addr2 & 0xFFFF;
+
+    /* Determine the destination and source addresses */
+    addr1 = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
+    addr3 = regs->GR(r3) & ADDRESS_MAXWRAP(regs);
+
+    /* set cpu_length as shortest distance to new page */
+    if ((addr1 & 0xFFF) > (addr3 & 0xFFF))
+        cpu_length = 0x1000 - (addr1 & 0xFFF);
+    else
+        cpu_length = 0x1000 - (addr3 & 0xFFF);
+
+    /* Process operands from left to right */
+    for (i = 0; len1 > 0 || len3 > 0 ; i += 2)
+    {
+        /* If max 4096 bytes have been compared, exit with cc=3 */
+        if (i >= cpu_length)
+        {
+            cc = 3;
+            break;
+        }
+
+        /* Fetch a byte from each operand, or use padding double byte */
+        dbyte1 = (len1 > 0) ? ARCH_DEP(vfetch2) (addr1, r1, regs) : pad;
+        dbyte3 = (len3 > 0) ? ARCH_DEP(vfetch2) (addr3, r3, regs) : pad;
+
+        /* Compare operand bytes, set condition code if unequal */
+        if (dbyte1 != dbyte3)
+        {
+            cc = (dbyte1 < dbyte3) ? 1 : 2;
+            break;
+        } /* end if */
+
+        /* Update the first operand address and length */
+        if (len1 > 0)
+        {
+            addr1 += 2;
+            addr1 &= ADDRESS_MAXWRAP(regs);
+            len1 -= 2;
+        }
+
+        /* Update the second operand address and length */
+        if (len3 > 0)
+        {
+            addr3 += 2;
+            addr3 &= ADDRESS_MAXWRAP(regs);
+            len3 -= 2;
+        }
+
+    } /* end for(i) */
+
+    /* Update the registers */
+    GR_A(r1, regs) = addr1;
+    GR_A(r1 + 1, regs) = len1;
+    GR_A(r3, regs) = addr3;
+    GR_A(r3 + 1, regs) = len3;
+
+    regs->psw.cc = cc;
+
+}
 #endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
 
 
