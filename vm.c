@@ -1,13 +1,14 @@
-/* VM.C         (c) Copyright Roger Bowler, 2000-2001                */
+/* VM.C         (c) Copyright Roger Bowler, 2000                     */
 /*              ESA/390 VM Diagnose calls and IUCV instruction       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements miscellaneous diagnose functions           */
 /* described in SC24-5670 VM/ESA CP Programming Services             */
 /* and SC24-5855 VM/ESA CP Diagnosis Reference.                      */
 /*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -17,6 +18,11 @@
 #include "inline.h"
 
 #if defined(FEATURE_EMULATE_VM)
+
+#if !defined(_VM_C)
+
+#define _VM_C
+
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
 /*-------------------------------------------------------------------*/
@@ -74,31 +80,6 @@ typedef struct _HCPSGIOP {
 
 
 /*-------------------------------------------------------------------*/
-/* B2F0 IUCV  - Inter User Communications Vehicle                [S] */
-/*-------------------------------------------------------------------*/
-void zz_inter_user_communication_vehicle (BYTE inst[], int execflag, REGS *regs)
-{
-int     b2;                             /* Effective addr base       */
-U32     effective_addr2;                /* Effective address         */
-
-    S(inst, execflag, regs, b2, effective_addr2);
-
-    /* Program check if in problem state,
-       the IUCV instruction generates an operation exception
-       rather then a priviliged operation exception when
-       executed in problem state                                 *JJ */
-    if ( regs->psw.prob )
-        program_interrupt (regs, PGM_OPERATION_EXCEPTION);
-
-    SIE_INTERCEPT(regs);
-
-    /* Set condition code to indicate IUCV not available */
-    regs->psw.cc = 3;
-
-}
-
-
-/*-------------------------------------------------------------------*/
 /* Device Type and Features (Function code 0x024)                    */
 /*-------------------------------------------------------------------*/
 int diag_devtype (int r1, int r2, REGS *regs)
@@ -109,13 +90,13 @@ DEVBLK         *dev;                    /* -> Device block           */
 U16             devnum;                 /* Device number             */
 
     /* Return console information if R1 register is all ones */
-    if (regs->gpr[r1] == 0xFFFFFFFF)
+    if (regs->GR_L(r1) == 0xFFFFFFFF)
     {
-        regs->gpr[r1] = 0x00000009;
+        regs->GR_L(r1) = 0x00000009;
     }
 
     /* Extract the device number from the R1 register */
-    devnum = regs->gpr[r1];
+    devnum = regs->GR_L(r1);
 
     /* Locate the device block */
     dev = find_device_by_devnum (devnum);
@@ -151,11 +132,11 @@ U16             devnum;                 /* Device number             */
     } /* end switch */
 
     /* Return virtual device information in the R2 register */
-    regs->gpr[r2] = vdevinfo;
+    regs->GR_L(r2) = vdevinfo;
 
     /* Return real device information in the R2+1 register */
     if (r2 != 15)
-        regs->gpr[r2+1] = rdevinfo;
+        regs->GR_L(r2+1) = rdevinfo;
 
     logmsg ("Diagnose X\'024\':"
             "devnum=%4.4X vdevinfo=%8.8X rdevinfo=%8.8X\n",
@@ -191,21 +172,21 @@ BYTE            skey1, skey2;           /* Storage keys of first and
                                            last byte of I/O buffer   */
 
     /* Register R1 contains the real address of the parameter list */
-    iopaddr = regs->gpr[r1];
+    iopaddr = regs->GR_L(r1);
 
     /* Program check if parameter list not on fullword boundary */
     if (iopaddr & 0x00000003)
     {
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
     /* Ensure that parameter list operand is addressable */
-    validate_operand (iopaddr, USE_REAL_ADDR, sizeof(ioparm)-1,
+    ARCH_DEP(validate_operand) (iopaddr, USE_REAL_ADDR, sizeof(ioparm)-1,
                         ACCTYPE_WRITE, regs);
 
     /* Fetch the parameter list from real storage */
-    vfetchc (&ioparm, sizeof(ioparm)-1, iopaddr, USE_REAL_ADDR, regs);
+    ARCH_DEP(vfetchc) (&ioparm, sizeof(ioparm)-1, iopaddr, USE_REAL_ADDR, regs);
 
     /* Load numeric fields from the parameter list */
     devnum = (ioparm.devnum[0] << 8) | ioparm.devnum[1];
@@ -229,7 +210,7 @@ BYTE            skey1, skey2;           /* Storage keys of first and
        or does not support the synchronous I/O call */
     if (dev == NULL || dev->devtype != 0x3370)
     {
-        regs->gpr[15] = 2;
+        regs->GR_L(15) = 2;
         return 1;
     }
 
@@ -239,7 +220,7 @@ BYTE            skey1, skey2;           /* Storage keys of first and
         || !(ioparm.type == HCPSBIOP_WRITE
             || ioparm.type == HCPSBIOP_READ))
     {
-        program_interrupt (regs, PGM_OPERAND_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
         return 0;
     }
 
@@ -247,14 +228,14 @@ BYTE            skey1, skey2;           /* Storage keys of first and
     if (!(blksize == 512 || blksize == 1024
             || blksize == 2048 || blksize == 4096))
     {
-        regs->gpr[15] = 8;
+        regs->GR_L(15) = 8;
         return 2;
     }
 
     /* Program check if SBILIST is not on a doubleword boundary */
     if (sbiaddr & 0x00000007)
     {
-        program_interrupt (regs, PGM_OPERAND_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
         return 0;
     }
 
@@ -265,14 +246,14 @@ BYTE            skey1, skey2;           /* Storage keys of first and
         accum |= ioparm.resv2[i];
     if (accum != 0)
     {
-        program_interrupt (regs, PGM_OPERAND_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
         return 0;
     }
 
     /* Set return code 11 and cond code 2 if SBI count is invalid */
     if (sbicount < 1 || sbicount > 500)
     {
-        regs->gpr[15] = 11;
+        regs->GR_L(15) = 11;
         return 2;
     }
 
@@ -285,7 +266,7 @@ BYTE            skey1, skey2;           /* Storage keys of first and
         || (dev->pciscsw.flag3 & SCSW3_SC_PEND))
     {
         release_lock (&dev->lock);
-        regs->gpr[15] = 5;
+        regs->GR_L(15) = 5;
         return 1;
     }
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
@@ -294,7 +275,7 @@ BYTE            skey1, skey2;           /* Storage keys of first and
     if (dev->busy || dev->pending)
     {
         release_lock (&dev->lock);
-        regs->gpr[15] = 5;
+        regs->GR_L(15) = 5;
         return 1;
     }
 
@@ -318,13 +299,13 @@ BYTE            skey1, skey2;           /* Storage keys of first and
                 && (STORAGE_KEY(sbiaddr) & STORKEY_KEY) != ioparm.akey
                 && ioparm.akey != 0))
         {
-            regs->gpr[15] = 10;
+            regs->GR_L(15) = 10;
             return 2;
         }
 
         /* Load block number and data address from SBILIST */
-        blknum = fetch_fullword_absolute(sbiaddr, regs);
-        absadr = fetch_fullword_absolute(sbiaddr+4, regs);
+        blknum = ARCH_DEP(fetch_fullword_absolute)(sbiaddr, regs);
+        absadr = ARCH_DEP(fetch_fullword_absolute)(sbiaddr+4, regs);
 
         if (dev->ccwtrace || dev->ccwstep)
         {
@@ -338,7 +319,7 @@ BYTE            skey1, skey2;           /* Storage keys of first and
         /* Return code 12 and cond code 2 if buffer exceeds storage */
         if (absadr >= regs->mainsize - blksize)
         {
-            regs->gpr[15] = 12;
+            regs->GR_L(15) = 12;
             return 2;
         }
 
@@ -413,17 +394,17 @@ BYTE            skey1, skey2;           /* Storage keys of first and
     }
 
     /* Store the updated parameter list in real storage */
-    vstorec (&ioparm, sizeof(ioparm)-1, iopaddr, USE_REAL_ADDR, regs);
+    ARCH_DEP(vstorec) (&ioparm, sizeof(ioparm)-1, iopaddr, USE_REAL_ADDR, regs);
 
     /* If I/O error occurred, set return code 13 and cond code 3 */
     if (unitstat != (CSW_CE | CSW_DE) || chanstat != 0)
     {
-        regs->gpr[15] = 13;
+        regs->GR_L(15) = 13;
         return 3;
     }
 
     /* Set return code 0 and cond code 0 */
-    regs->gpr[15] = 0;
+    regs->GR_L(15) = 0;
     return 0;
 
 } /* end function syncblk_io */
@@ -447,21 +428,21 @@ BYTE            unitstat = 0;           /* Device status             */
 BYTE            chanstat = 0;           /* Subchannel status         */
 
     /* Register R1 contains the real address of the parameter list */
-    iopaddr = regs->gpr[r1];
+    iopaddr = regs->GR_L(r1);
 
     /* Program check if parameter list not on fullword boundary */
     if (iopaddr & 0x00000003)
     {
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
     /* Ensure that parameter list operand is addressable */
-    validate_operand (iopaddr, USE_REAL_ADDR, sizeof(ioparm)-1,
+    ARCH_DEP(validate_operand) (iopaddr, USE_REAL_ADDR, sizeof(ioparm)-1,
                         ACCTYPE_WRITE, regs);
 
     /* Fetch the parameter list from real storage */
-    vfetchc (&ioparm, sizeof(ioparm)-1, iopaddr, USE_REAL_ADDR, regs);
+    ARCH_DEP(vfetchc) (&ioparm, sizeof(ioparm)-1, iopaddr, USE_REAL_ADDR, regs);
 
     /* Load numeric fields from the parameter list */
     devnum = (ioparm.devnum[0] << 8) | ioparm.devnum[1];
@@ -476,7 +457,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
     /* Set return code 1 and cond code 1 if device does not exist */
     if (dev == NULL)
     {
-        regs->gpr[15] = 1;
+        regs->GR_L(15) = 1;
         return 1;
     }
 
@@ -484,7 +465,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
        or if the reserved bits in the flag byte are not zero */
     if ((ioparm.akey & 0x0F) || (ioparm.flag & HCPSGIOP_FLAG_RESV))
     {
-        program_interrupt (regs, PGM_OPERAND_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
         return 0;
     }
 
@@ -492,7 +473,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
     /* Program check if flag byte specifies format-1 CCW */
     if (ioparm.flag & HCPSGIOP_FORMAT1_CCW)
     {
-        program_interrupt (regs, PGM_OPERAND_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
         return 0;
     }
 #endif /*FEATURE_S370_CHANNEL*/
@@ -503,7 +484,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
            ((ioparm.flag & HCPSGIOP_FORMAT1_CCW) ?
                         0x7FFFFFFF : 0x00FFFFFF))
     {
-        program_interrupt (regs, PGM_OPERAND_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
         return 0;
     }
 
@@ -518,7 +499,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
         accum |= ioparm.resv4[i];
     if (accum != 0)
     {
-        program_interrupt (regs, PGM_OPERAND_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
         return 0;
     }
 
@@ -531,7 +512,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
         || (dev->pciscsw.flag3 & SCSW3_SC_PEND))
     {
         release_lock (&dev->lock);
-        regs->gpr[15] = 5;
+        regs->GR_L(15) = 5;
         return 1;
     }
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
@@ -540,7 +521,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
     if (dev->busy || dev->pending)
     {
         release_lock (&dev->lock);
-        regs->gpr[15] = 5;
+        regs->GR_L(15) = 5;
         return 1;
     }
 
@@ -550,12 +531,15 @@ BYTE            chanstat = 0;           /* Subchannel status         */
     /* Release the device lock */
     release_lock (&dev->lock);
 
-    /* Execute the channel program synchronously */
-    dev->ccwaddr = ccwaddr;
-    dev->ccwfmt = ((ioparm.flag & HCPSGIOP_FORMAT1_CCW) ? 1 : 0);
-    dev->ccwkey = ioparm.akey;
+    /* Build the operation request block */                    /*@IWZ*/
+    memset (&dev->orb, 0, sizeof(ORB));                        /*@IWZ*/
+    STORE_FW(dev->orb.ccwaddr, ccwaddr);                       /*@IWZ*/
+    dev->orb.flag4 = ioparm.akey & ORB4_KEY;                   /*@IWZ*/
+    if (ioparm.flag & HCPSGIOP_FORMAT1_CCW)                    /*@IWZ*/
+        dev->orb.flag5 |= ORB5_F;                              /*@IWZ*/
 
-    execute_ccw_chain (dev);
+    /* Execute the channel program synchronously */
+    ARCH_DEP(execute_ccw_chain) (dev);
 
     /* Obtain status, CCW address, and residual byte count */
 #ifdef FEATURE_S370_CHANNEL
@@ -610,12 +594,12 @@ BYTE            chanstat = 0;           /* Subchannel status         */
     }
 
     /* Store the updated parameter list in real storage */
-    vstorec (&ioparm, sizeof(ioparm)-1, iopaddr, USE_REAL_ADDR, regs);
+    ARCH_DEP(vstorec) (&ioparm, sizeof(ioparm)-1, iopaddr, USE_REAL_ADDR, regs);
 
     /* If I/O error occurred, set return code 13 and cond code 3 */
     if (unitstat != (CSW_CE | CSW_DE) || chanstat != 0)
     {
-        regs->gpr[15] = 13;
+        regs->GR_L(15) = 13;
         return 3;
     }
 
@@ -639,22 +623,22 @@ BYTE           *puser;                  /* Pointer to user name      */
 BYTE            c;                      /* Character work area       */
 
     /* Load storage operand address from R1 register */
-    idaddr = regs->gpr[r1];
+    idaddr = regs->GR_L(r1);
 
     /* Program check if operand is not on a doubleword boundary */
     if (idaddr & 0x00000007)
     {
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 
     /* Load storage operand length from R2 register */
-    idlen = regs->gpr[r2];
+    idlen = regs->GR_L(r2);
 
     /* Program check if operand length is invalid */
     if (idlen < 1)
     {
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 
@@ -725,10 +709,10 @@ BYTE            c;                      /* Character work area       */
         idlen = sizeof(buf);
 
     /* Store the extended identification code at operand address */
-    vstorec (buf, idlen-1, idaddr, r1, regs);
+    ARCH_DEP(vstorec) (buf, idlen-1, idaddr, r1, regs);
 
     /* Deduct number of bytes from the R2 register */
-    regs->gpr[r2] -= idlen;
+    regs->GR_L(r2) -= idlen;
 
 } /* end function extid_call */
 
@@ -753,11 +737,11 @@ BYTE    buf[256];                       /* Command buffer (ASCIIZ)   */
 BYTE    resp[256];                      /* Response buffer (ASCIIZ)  */
 
     /* Obtain command address from R1 register */
-    cmdaddr = regs->gpr[r1];
+    cmdaddr = regs->GR_L(r1);
 
     /* Obtain command length and flags from R2 register */
-    cmdflags = regs->gpr[r2] >> 24;
-    cmdlen = regs->gpr[r2] & 0x00FFFFFF;
+    cmdflags = regs->GR_L(r2) >> 24;
+    cmdlen = regs->GR_L(r2) & 0x00FFFFFF;
 
     /* Program check if invalid flags, or if command string
        is too long, or if response buffer is specified and
@@ -767,7 +751,7 @@ BYTE    resp[256];                      /* Response buffer (ASCIIZ)  */
         || ((cmdflags & CMDFLAGS_RESPONSE)
             && (r1 == 15 || r2 == 15 || r1 == r2 + 1 || r2 == r1 + 1)))
     {
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -779,7 +763,7 @@ BYTE    resp[256];                      /* Response buffer (ASCIIZ)  */
     }
 
     /* Obtain the command string from storage */
-    vfetchc (buf, cmdlen-1, cmdaddr, r1, regs);
+    ARCH_DEP(vfetchc) (buf, cmdlen-1, cmdaddr, r1, regs);
 
     /* Display the command on the console */
     for (i = 0; i < cmdlen; i++)
@@ -795,25 +779,25 @@ BYTE    resp[256];                      /* Response buffer (ASCIIZ)  */
         for (i = 0; i < resplen; i++)
             resp[i] = ascii_to_ebcdic[resp[i]];
 
-        respadr = regs->gpr[r1+1];
-        maxrlen = regs->gpr[r2+1];
+        respadr = regs->GR_L(r1+1);
+        maxrlen = regs->GR_L(r2+1);
 
         if (resplen <= maxrlen)
         {
-            vstorec (resp, resplen-1, respadr, r1+1, regs);
-            regs->gpr[r2+1] = resplen;
+            ARCH_DEP(vstorec) (resp, resplen-1, respadr, r1+1, regs);
+            regs->GR_L(r2+1) = resplen;
             cc = 0;
         }
         else
         {
-            vstorec (resp, maxrlen-1, respadr, r1+1, regs);
-            regs->gpr[r2+1] = resplen - maxrlen;
+            ARCH_DEP(vstorec) (resp, maxrlen-1, respadr, r1+1, regs);
+            regs->GR_L(r2+1) = resplen - maxrlen;
             cc = 1;
         }
     }
 
     /* Set R2 register to CP completion code */
-    regs->gpr[r2] = 0;
+    regs->GR_L(r2) = 0;
 
     /* Return condition code */
     return cc;
@@ -829,13 +813,13 @@ U32     bufadr;                         /* Real addr of data buffer  */
 U32     buflen;                         /* Length of data buffer     */
 
     /* Obtain buffer address and length from R1 and R2 registers */
-    bufadr = regs->gpr[r1];
-    buflen = regs->gpr[r2];
+    bufadr = regs->GR_L(r1);
+    buflen = regs->GR_L(r2);
 
     /* Program check if buffer length is negative */
     if ((S32)buflen < 0)
     {
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 
@@ -843,11 +827,11 @@ U32     buflen;                         /* Length of data buffer     */
     if (buflen > 0)
     {
         /* Store one byte of zero to indicate no IPL information */
-        vstoreb (0, bufadr, USE_REAL_ADDR, regs);
+        ARCH_DEP(vstoreb) (0, bufadr, USE_REAL_ADDR, regs);
     }
 
     /* Return code 4 means no re-IPL information available */
-    regs->gpr[r2] = 4;
+    regs->GR_L(r2) = 4;
 
 } /* end function access_reipl_data */
 
@@ -878,8 +862,8 @@ static  BYTE timefmt[]="%m/%d/%y%H:%M:%S%m/%d/%Y%Y-%m-%d";
         dattim[i] = ascii_to_ebcdic[dattim[i]];
 
     /* Obtain buffer address and length from R1 and R2 registers */
-    bufadr = regs->gpr[r1];
-    buflen = regs->gpr[r2];
+    bufadr = regs->GR_L(r1);
+    buflen = regs->GR_L(r2);
 
     /* Use length 32 if R2 is zero or function code is 00C */
     if (r2 == 0 || code == 0x00C)
@@ -894,7 +878,7 @@ static  BYTE timefmt[]="%m/%d/%y%H:%M:%S%m/%d/%Y%Y-%m-%d";
         || bufadr == 0
         || (bufadr & 0x00000007))
     {
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
         return;
     }
 
@@ -952,7 +936,7 @@ static  BYTE timefmt[]="%m/%d/%y%H:%M:%S%m/%d/%Y%Y-%m-%d";
         buflen = sizeof(buf);
 
     /* Store the response buffer at the operand location */
-    vstorec (buf, buflen-1, bufadr, USE_REAL_ADDR, regs);
+    ARCH_DEP(vstorec) (buf, buflen-1, bufadr, USE_REAL_ADDR, regs);
 
 } /* end function pseudo_timer */
 
@@ -972,22 +956,22 @@ BYTE    func;                           /* Function code...          */
     /* Program check if R1 is not an even-numbered register */
     if (r1 & 1)
     {
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
     /* Extract the function code from R1+1 register bits 24-31 */
-    func = regs->gpr[r1+1] & 0xFF;
+    func = regs->GR_L(r1+1) & 0xFF;
 
     /* Extract the start/end addresses from R1 and R1+1 registers */
-    start = regs->gpr[r1] & STORAGE_KEY_PAGEMASK;
-    end = regs->gpr[r1+1] & STORAGE_KEY_PAGEMASK;
+    start = regs->GR_L(r1) & STORAGE_KEY_PAGEMASK;
+    end = regs->GR_L(r1+1) & STORAGE_KEY_PAGEMASK;
 
     /* Validate start/end addresses if function is not CAPR */
     if (func != DIAG214_CAPR
         && (start > end || end >= regs->mainsize))
     {
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
@@ -1004,7 +988,7 @@ BYTE    func;                           /* Function code...          */
         if (r2 == 0) break;
 
         /* Obtain key from R2 register bits 24-28 */
-        skey = regs->gpr[r2] & (STORKEY_KEY | STORKEY_FETCH);
+        skey = regs->GR_L(r2) & (STORKEY_KEY | STORKEY_FETCH);
 
         /* Set storage key for each frame within specified range */
         for (abs = start; abs <= end; abs += STORAGE_KEY_PAGESIZE)
@@ -1019,7 +1003,7 @@ BYTE    func;                           /* Function code...          */
         break;
 
     default:            /* Invalid function code */
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
         return 0;
     } /* end switch(func) */
 
@@ -1027,4 +1011,50 @@ BYTE    func;                           /* Function code...          */
     return 0;
 
 } /* end function diag_ppagerel */
+
+
+#endif /*!defined(_VM_C)*/
+
+
+/*-------------------------------------------------------------------*/
+/* B2F0 IUCV  - Inter User Communications Vehicle                [S] */
+/*-------------------------------------------------------------------*/
+DEF_INST(inter_user_communication_vehicle)
+{
+int     b2;                             /* Effective addr base       */
+U32     effective_addr2;                /* Effective address         */
+
+    S(inst, execflag, regs, b2, effective_addr2);
+
+    /* Program check if in problem state,
+       the IUCV instruction generates an operation exception
+       rather then a priviliged operation exception when
+       executed in problem state                                 *JJ */
+    if ( regs->psw.prob )
+        ARCH_DEP(program_interrupt) (regs, PGM_OPERATION_EXCEPTION);
+
+    SIE_INTERCEPT(regs);
+
+    /* Set condition code to indicate IUCV not available */
+    regs->psw.cc = 3;
+
+}
+
+
+#if !defined(_GEN_ARCH)
+
+// #define  _GEN_ARCH 964
+// #include "vm.c"
+
+// #undef   _GEN_ARCH
+#define  _GEN_ARCH 390
+#include "vm.c"
+
+#undef   _GEN_ARCH
+#define  _GEN_ARCH 370
+#include "vm.c"
+
+#endif /*!defined(_GEN_ARCH)*/
+
+
 #endif /*FEATURE_EMULATE_VM*/

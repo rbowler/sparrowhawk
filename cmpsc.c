@@ -1,705 +1,885 @@
-/*--------------------------------------------------------------*/
-/* This module implements the compression call instruction of   */
-/* S/390 architecture, described in the manual SA22-7208-01:    */
-/* Data Compression.                                            */
-/*                                                              */
-/* This instruction is under construction, but if you need it,  */
-/* you can #define FEATURE_CMPSC in hercules.h. Then you get a  */
-/* copy function. Compress and expand just copies the data. So  */
-/* compressed on hercules will also expand ;-).                 */
-/*                                                              */
-/*                      2001 (c) Copyright Bernard van der Helm */
-/*--------------------------------------------------------------*/
+/*----------------------------------------------------------------------------*/
+/* file: cmpsc.c                                                              */
+/*                                                                            */
+/* Implementation of the S/390 compression call instruction described in      */
+/* SA22-7208-01: Data Compression within the Hercules S/390 emulator.         */
+/* This implementation couldn't be done without the test programs from        */
+/* Mario Bezzi. Thanks Mario!                                                 */
+/*                                                                            */
+/*                              (c) Copyright Bernard van der Helm, 2000-2001 */
+/*                              Noordwijkerhout, The Netherlands.             */
+/*                                                                            */
+/* 2001-02-01: Implemented conform pop z/Architecture                         */
+/*             Fix storing index symbol with symbol translation               */
+/*                                                                            */
+/* Q: I'm having problems?                                                    */
+/* A: Uncomment the line #define OPTION_CMPSC_DEBUGLVL 3                      */
+/*    Compile Hercules and redirect the output                                */
+/*    Replay the problem and send the ouput to zHercules@egroups.com          */
+/*----------------------------------------------------------------------------*/
 
 #include "hercules.h"
-
 #include "opcode.h"
-
 #include "inline.h"
 
-#ifdef IBUF
-#include "ibuf.h"
-#endif
+#ifdef FEATURE_COMPRESSION
 
-/* Comment next four lines if you want to try the code that is
-   still under construction */
-#ifdef FEATURE_CMPSC
-#define FEATURE_CMPSC_COPY
-#undef FEATURE_CMPSC
-#endif /* FEATURE_CMPSC */
+/*----------------------------------------------------------------------------*/
+/* Debugging options:                                                         */
+/*   0x00: Debug CMPSC calling                                                */
+/*   0x01: Debug compression                                                  */
+/*   0x02: Debug expansion                                                    */
+/*----------------------------------------------------------------------------*/
+//#define OPTION_CMPSC_DEBUGLVL 3       /* Debug all                          */
 
-/*--------------------------------------------------------------*/
-/* Constants                                                    */
-/*--------------------------------------------------------------*/
-#define CMPDEBUG
-#define CMPEND_DESTINATION	1
-#define CMPEND_SOURCE		2
-#define CMPFOUND		3
-#define CMPMATCH		4
-#define CMPMORE_260_CHILDREN    5
-#define CMPNO_MATCH		6
-#define CMPNOT_FOUND		7
-#define CMPPROCESSMAX 		2048
-
-/*--------------------------------------------------------------*/
-/* Compression Character Entry macro's                          */
-/*--------------------------------------------------------------*/
-#define CMPCCE_cct(cce)  ((BYTE)((((BYTE*)&(cce))[0])>>5))
-#define CMPCCE_x1(cce)   ((((BYTE*)&(cce))[0])&0x10)
-#define CMPCCE_x2(cce)   ((((BYTE*)&(cce))[0])&0x08)
-#define CMPCCE_x3(cce)   ((((BYTE*)&(cce))[0])&0x04)
-#define CMPCCE_x4(cce)   ((((BYTE*)&(cce))[0])&0x02)
-#define CMPCCE_x5(cce)   ((((BYTE*)&(cce))[0])&0x01)
-#define CMPCCE_y1(cce)   ((((BYTE*)&(cce))[1])&0x80)
-#define CMPCCE_y2(cce)   ((((BYTE*)&(cce))[1])&0x40)
-#define CMPCCE_d(cce)    ((((BYTE*)&(cce))[1])&0x20)
-#define CMPCCE_act(cce)  ((BYTE)((((BYTE*)&(cce))[1])>>5))
-#define CMPCCE_cptr(cce) ((U16)((((((BYTE*)&(cce))[1])&0x1F)<<8)|(((BYTE*)&(cce))[2])))
-#define CMPCCE_prt(cce) \
-	logmsg("Character Entry\n"); \
-        logmsg("cct     : %d\n", CMPCCE_cct(cce)); \
-        logmsg("x1      : %s\n", CMPCCE_x1(cce) ? "True" : "False"); \
-        logmsg("x2      : %s\n", CMPCCE_x2(cce) ? "True" : "False"); \
-        logmsg("x3      : %s\n", CMPCCE_x3(cce) ? "True" : "False"); \
-        logmsg("x4      : %s\n", CMPCCE_x4(cce) ? "True" : "False"); \
-        logmsg("x5      : %s\n", CMPCCE_x5(cce) ? "True" : "False"); \
-        logmsg("y1      : %s\n", CMPCCE_y1(cce) ? "True" : "False"); \
-        logmsg("y2      : %s\n", CMPCCE_y2(cce) ? "True" : "False"); \
-        logmsg("d       : %s\n", CMPCCE_d(cce) ? "True" : "False"); \
-        logmsg("act     : %d\n", CMPCCE_act(cce)); \
-        logmsg("cptr    : %08X\n", CMPCCE_cptr(cce));
-
-/*--------------------------------------------------------------*/
-/* Format-0 Sibling Descriptors macro's                         */
-/*--------------------------------------------------------------*/
-#define CMPSD0_sct(sd0) ((BYTE)((((BYTE*)&(sd0))[0])>>5))
-#define CMPSD0_y1(sd0)  ((((BYTE*)&(sd0))[0])&0x10)
-#define CMPSD0_y2(sd0)  ((((BYTE*)&(sd0))[0])&0x08)
-#define CMPSD0_y3(sd0)  ((((BYTE*)&(sd0))[0])&0x04)
-#define CMPSD0_y4(sd0)  ((((BYTE*)&(sd0))[0])&0x02)
-#define CMPSD0_y5(sd0)  ((((BYTE*)&(sd0))[0])&0x01)
-#define CMPSD0_prt(sd0) \
-	logmsg("Format-0 Sibling Descriptor\n"); \
-	logmsg("sct     : %d\n", CMPSD0_sct(sd0)); \
-        logmsg("y1      : %s\n", CMPSD0_y1(sd0) ? "True" : "False"); \
-        logmsg("y2      : %s\n", CMPSD0_y2(sd0) ? "True" : "False"); \
-        logmsg("y3      : %s\n", CMPSD0_y3(sd0) ? "True" : "False"); \
-        logmsg("y4      : %s\n", CMPSD0_y4(sd0) ? "True" : "False"); \
-        logmsg("y5      : %s\n", CMPSD0_y5(sd0) ? "True" : "False");
-
-/*--------------------------------------------------------------*/
-/* Format-1 Sibling Descriptors macro's                         */
-/*--------------------------------------------------------------*/
-#define CMPSD1_sct(sd1) ((BYTE)(((BYTE*)&(sd1))[0]>>4))
-#define CMPSD1_y1(sd1)  ((((BYTE*)&(sd1))[0])&0x08)
-#define CMPSD1_y2(sd1)  ((((BYTE*)&(sd1))[0])&0x04)
-#define CMPSD1_y3(sd1)  ((((BYTE*)&(sd1))[0])&0x02)
-#define CMPSD1_y4(sd1)  ((((BYTE*)&(sd1))[0])&0x01)
-#define CMPSD1_y5(sd1)  ((((BYTE*)&(sd1))[1])&0x80)
-#define CMPSD1_y6(sd1)  ((((BYTE*)&(sd1))[1])&0x40)
-#define CMPSD1_y7(sd1)  ((((BYTE*)&(sd1))[1])&0x20)
-#define CMPSD1_y8(sd1)  ((((BYTE*)&(sd1))[1])&0x10)
-#define CMPSD1_y9(sd1)  ((((BYTE*)&(sd1))[1])&0x08)
-#define CMPSD1_y10(sd1) ((((BYTE*)&(sd1))[1])&0x04)
-#define CMPSD1_y11(sd1) ((((BYTE*)&(sd1))[1])&0x02)
-#define CMPSD1_y12(sd1) ((((BYTE*)&(sd1))[1])&0x01)
-#define CMPSD1_prt(sd0) \
-        logmsg("Format-1 Sibling Descriptor\n"); \
-        logmsg("sct     : %d\n", CMPSD1_sct(sd1)); \
-        logmsg("y1      : %s\n", CMPSD1_y1(sd1) ? "True" : "False"); \
-        logmsg("y2      : %s\n", CMPSD1_y2(sd1) ? "True" : "False"); \
-        logmsg("y3      : %s\n", CMPSD1_y3(sd1) ? "True" : "False"); \
-        logmsg("y4      : %s\n", CMPSD1_y4(sd1) ? "True" : "False"); \
-        logmsg("y5      : %s\n", CMPSD1_y5(sd1) ? "True" : "False"); \
-        logmsg("y6      : %s\n", CMPSD1_y6(sd1) ? "True" : "False"); \
-        logmsg("y7      : %s\n", CMPSD1_y7(sd1) ? "True" : "False"); \
-        logmsg("y8      : %s\n", CMPSD1_y8(sd1) ? "True" : "False"); \
-        logmsg("y9      : %s\n", CMPSD1_y9(sd1) ? "True" : "False"); \
-        logmsg("y10     : %s\n", CMPSD1_y10(sd1) ? "True" : "False"); \
-        logmsg("y11     : %s\n", CMPSD1_y11(sd1) ? "True" : "False"); \
-        logmsg("y12     : %s\n", CMPSD1_y12(sd1) ? "True" : "False");
-
-/*--------------------------------------------------------------*/
-/* Expansion Character Entry macro's                            */
-/*--------------------------------------------------------------*/
-#define CMPECE_psl(ece)  ((BYTE)((((BYTE*)&(ece))[0])>>5))
-#define CMPECE_csl(ece)  ((BYTE)((((BYTE*)&(ece))[0])&0x07))
-#define CMPECE_pptr(ece) ((U16)((((((BYTE*)&(ece))[0])&0x1F)<<8)|(((BYTE*)(ece))[1])))
-#define CMPECE_ofst(ece) ((BYTE)(((BYTE*)&(ece))[7]))
-#define CMPECE_prt(ece) \
-	logmsg("Expansion Character Entry\n"); \
- 	logmsg("psl     : %d\n", CMPECE_psl(ece)); \
-        logmsg("csl     : %d\n", CMPECE_csl(ece)); \
-        logmsg("pptr    : %d\n", CMPECE_pptr(ece)); \
-        logmsg("ofst    : %d\n", CMPECE_ofst(ece));
-
-/*--------------------------------------------------------------*/
-/* RRE macro's                                                  */
-/*--------------------------------------------------------------*/
-#define CMPRRE_r1(inst) ((BYTE)(((BYTE*)(inst))[3]>>4))
-#define CMPRRE_r2(inst) ((BYTE)(((BYTE*)(inst))[3]&0x0F))
-#define CMPRRE_prt(inst) \
-	logmsg("CMPSC instruction\n"); \
-        logmsg("r1      : %d\n", CMPRRE_r1(inst)); \
-	logmsg("address : %08X\n", CMP_addr(CMPRRE_r1(inst), regs)); \
-        logmsg("length  : %08X\n", regs->gpr[CMPRRE_r1(inst) + 1]); \
-        logmsg("r2      : %d\n", CMPRRE_r2(inst)); \
-        logmsg("address : %08X\n", CMP_addr(CMPRRE_r2(inst), regs)); \
-        logmsg("length  : %08X\n", regs->gpr[CMPRRE_r2(inst) + 1]);
-
-/*--------------------------------------------------------------*/
-/* Register macro                                               */
-/*--------------------------------------------------------------*/
-#define CMP_addr(r, regs) ((U32)(regs)->gpr[(r)]&((regs)->psw.amode?0x7FFFFFFF:0x00FFFFFF))
-
-/*--------------------------------------------------------------*/
-/* GR0 macro's                                                  */
-/*--------------------------------------------------------------*/
-#define CMPGR0_st(regs)   ((regs)->gpr[0]&0x00010000)
-#define CMPGR0_cdss(regs) ((BYTE)(((regs)->gpr[0]&0x0000F000)>>12))
-#define CMPGR0_f1(regs)   ((regs)->gpr[0]&0x00000200)
-#define CMPGR0_e(regs)    ((regs)->gpr[0]&0x00000100)
-#define CMPGR0_prt(regs) \
-	logmsg("General purpose register 0: %08X\n", regs->gpr[0]); \
-        logmsg("st      : %d\n", CMPGR0_st(regs)); \
-        logmsg("cdss    : %d\n", CMPGR0_cdss(regs)); \
-        logmsg("f1      : %s\n", CMPGR0_f1(regs) ? "True" : "False"); \
-        logmsg("e       : %s\n", CMPGR0_st(regs) ? "True" : "False");
-
-/*--------------------------------------------------------------*/
-/* GR1 macro's                                                  */
-/*--------------------------------------------------------------*/
-#define CMPGR1_dictor(regs)      ((U16)((regs)->gpr[1])&((regs)->psw.amode?0x7FFFF000:0x00FFF000))
-#define CMPGR1_sttoff(regs)      ((U16)((regs)->gpr[1]&0x00000FF8)>>3)
-#define CMPGR1_cbn(regs)         ((BYTE)((regs)->gpr[1]&0x00000007))
-#define CMPGR1_setcbn(regs, cbn) ((regs)->gpr[1]=((regs)->gpr[1]&0xFFFFFFF8)|(((U32)cbn)&0x00000007))
-#define CMPGR1_prt(regs) \
-	logmsg("General purpose register 1: %08X\n", regs->gpr[1]); \
-        logmsg("dictor  : %08X\n", CMPGR1_dictor(regs)); \
-        logmsg("sttoff  : %d\n", CMPGR1_sttoff(regs)); \
-        logmsg("cbn     : %d\n", CMPGR1_cbn(regs));
-
-/*--------------------------------------------------------------*/
-/* handy macro's                                                */
-/*--------------------------------------------------------------*/
-#define CMPEVEN(i) ((i)&0x02)
-#ifdef CMPDEBUG
-#define CMPGETCH(r2, regs, ch) \
-	if (!regs->gpr[r2 + 1]) \
-          return (CMPEND_SOURCE); \
-  	ch = vfetchb (regs->gpr[r2], r2, regs); \
-        logmsg("  character %02X read\n", ch);
+/*----------------------------------------------------------------------------*/
+/* Don't touch high order bits in ESAME when not 64-bit addressing            */
+/*----------------------------------------------------------------------------*/
+#if !defined(_GEN_ARCH)
+#define _GR(r, regs) 		((regs)->psw.amode64 ? (regs)->GR ((r)) : (regs)->GR_L ((r)))
+#define ADRFMT			"%016llX"
 #else
-#define CMPGETCH(r2, regs, ch) \
-        if (!regs->gpr[r2 + 1]) \
-          return (CMPEND_SOURCE); \
-        ch = vfetchb (regs->gpr[r2], r2, regs);
-#endif /* CMPDEBUG */
-#define CMPODD(i)  ((i)&0x01)
+#undef _GR
+#undef ADRFMT
+#define _GR(r, regs)		(regs)->GR ((r))
+#define ADRFMT			"%08X"
+#endif /* !defined(_GEN_ARCH) */
 
-#ifdef FEATURE_CMPSC
+/*----------------------------------------------------------------------------*/
+/* Compression Character Entry macro's (CCE)                                  */
+/*----------------------------------------------------------------------------*/
+/* act    : additional-extension-character count                              */
+/* cc     : index (in CCE) of first child character                           */
+/* cct    : child count                                                       */
+/* cptr   : child pointer; index of first child                               */
+/* d      : double-character entry                                            */
+/* ec     : index (in CCE) of first additional-extension-character            */
+/* more_cc: indication of wether there are more children than cc              */
+/*----------------------------------------------------------------------------*/
+#define CCE_act(cce)      	(CCE_cct ((cce)) <= 1 ? (cce)[1] >> 5 : CCE_d ((cce)))
+#define CCE_cc(cce) 		(&(cce)[3 + (CCE_cct ((cce)) <= 1 ? CCE_act ((cce)) : CCE_d ((cce)))])
+#define CCE_cct(cce)            (((cce)[0] >> 5) - CCE_more_cc ((cce)))
+#define CCE_cptr(cce)           ((((cce)[1] & 0x1F) << 8) | ((cce)[2]))
+#define CCE_d(cce)              ((cce)[1] & 0x20 ? 1 : 0)
+#define CCE_ec(cce)             (&(cce)[3])
+#define CCE_more_cc(cce)        (((cce)[0] >> 5) + CCE_d ((cce)) == 6 ? 1 : 0)
 
-/*--------------------------------------------------------------*/
-/* Function proto types                                         */
-/*--------------------------------------------------------------*/
-int cmpcheck_extension_characters (int r1, int r2, REGS * regs, U64 * child_entry);
-void cmpcompress (int r1, int r2, REGS * regs);
-void cmpexpand (int r1, int r2, REGS * regs);
-int cmpget_indexsymbol (int r1, int r2, REGS * regs, U32 * indexsymbol);
-int cmpsearch_character_entry (int r1, int r2, REGS * regs, U64 parent_entry, U32 * child_pointer, U64 * child_entry);
-int cmpsearch_child (int r1, int r2, REGS * regs, U64 parent_entry, U32 * child_pointer, U64 * child_entry);
-int cmpsearch_sibling_descriptors (int r1, int r2, REGS * regs, U64 parent_entry, U32 * child_pointer, U64 * child_entry);
-void cmpstore_indexsymbol (int r1, REGS * regs, U32 indexsymbol);
-void cmpsymbol_translate (int r1, int r2, REGS * regs);
+/*----------------------------------------------------------------------------*/
+/* Format-0 Sibling Descriptors macro's (SD0)                                 */
+/*----------------------------------------------------------------------------*/
+/* more_sc: indication another descriptor follows 7th sibling                 */
+/* sc     : index (in SD0) of first sibling character                         */
+/* sct    : sibling count                                                     */
+/*----------------------------------------------------------------------------*/
+#define SD0_more_sc(sd0) 	((sd0)[0] >> 5 == 0 ? 1 : 0)
+#define SD0_sc(sd0)      	(&(sd0)[1])
+#define SD0_sct(sd0)     	(SD0_more_sc ((sd0)) ? 7 : (sd0)[0] >> 5)
 
-/*--------------------------------------------------------------*/
-/* cmpcheck_extension_characters                                */
-/*--------------------------------------------------------------*/
-int
-cmpcheck_extension_characters (int r1, int r2, REGS * regs, U64 * child_entry)
-{
-  int act = CMPCCE_act (*child_entry);
-  BYTE ch;
-  int index;
+/*----------------------------------------------------------------------------*/
+/* Format-1 Sibling Descriptors macro's (SD1)                                 */
+/*----------------------------------------------------------------------------*/
+/* more_sc : indication another descriptor follows 14th sibling               */
+/* sc      : index (in SD1) of first sibling character                        */
+/* sct     : sibling count                                                    */
+/*----------------------------------------------------------------------------*/
+#define SD1_more_sc(sd1) 	((sd1)[0] >> 4 == 15 ? 1 : 0)
+#define SD1_sc(sd0) 		(&(sd0)[2])
+#define SD1_sct(sd1)		(((sd1)[0] >> 4) - SD1_more_sc ((sd1)))
 
-#ifdef CMPDEBUG
-  logmsg ("cmpcheck_extension_characters\n");
-#endif
+/*----------------------------------------------------------------------------*/
+/* Format independent sibling descriptor macro's                              */
+/*----------------------------------------------------------------------------*/
+#define SD_more_sc(regs, sd) 	(GR0_f1 ((regs)) ? SD1_more_sc ((sd)) : SD0_more_sc ((sd)))
+#define SD_sc(regs, sd)         (GR0_f1 ((regs)) ? SD1_sc ((sd)) : SD0_sc ((sd)))
+#define SD_sct(regs, sd)        (GR0_f1 ((regs)) ? SD1_sct ((sd)) : SD0_sct ((sd)))
 
-  /* Now check all aditional extension characters */
-  for (index = 0; index < act; index++)
-    {
-      CMPGETCH (r2, regs, ch);
-      if (ch != ((BYTE *) & child_entry)[3 + index])
-	{
-#ifdef CMPDEBUG
-	  logmsg ("  No match\n");
-#endif
-	  return (CMPNO_MATCH);
-	}
-    }
+/*----------------------------------------------------------------------------*/
+/* Expansion Character Entry macro's (ECE)                                    */
+/*----------------------------------------------------------------------------*/
+/* csl   : complete symbol length                                             */
+/* ec    : index (in ECE) of first extension character                        */
+/* ofst  : offset from current position in output area                        */
+/* pptr  : predecessor pointer                                                */
+/* psl   : partial symbol length                                              */
+/* unprec: indication wheter entry is unpreceeded                             */
+/*----------------------------------------------------------------------------*/
+#define ECE_csl(ece)            ((ece)[0] & 0x07)
+#define ECE_ec(ece)             (ECE_unprec ((ece)) ? &(ece)[1] : &(ece)[2])
+#define ECE_ofst(ece)           ((ece)[7])
+#define ECE_pptr(ece)           ((((ece)[0] & 0x1F) << 8) | ((ece)[1]))
+#define ECE_psl(ece)            ((ece)[0] >> 5)
+#define ECE_unprec(ece)         (ECE_psl ((ece)) == 0 ? 1 : 0)
 
-  /* We matched all additional extension characters (can be 0) */
-#ifdef CMPDEBUG
-  logmsg ("  Match\n");
-#endif
-  return (CMPMATCH);
+/*----------------------------------------------------------------------------*/
+/* General Purpose Register 0 macro's (GR0)                                   */
+/*----------------------------------------------------------------------------*/
+/* cdss       : compressed-data symbol size                                   */
+/* dictor_size: dictionary size                                               */
+/* e          : expansion operation                                           */
+/* f1         : format-1 sibling descriptors                                  */
+/* st         : symbol-translation option                                     */
+/* symbol_size: symbol size                                                   */
+/*----------------------------------------------------------------------------*/
+#define GR0_cdss(regs)          (((regs)->GR_L (0) & 0x0000F000) >> 12)
+#define GR0_dictor_size(regs)   (2048 << GR0_cdss ((regs)))
+#define GR0_e(regs)             ((regs)->GR_L (0) & 0x00000100)
+#define GR0_f1(regs)            ((regs)->GR_L (0) & 0x00000200)
+#define GR0_st(regs)            ((regs)->GR_L (0) & 0x00010000)
+#define GR0_symbol_size(regs)   (GR0_cdss ((regs)) + 8)
+
+/*----------------------------------------------------------------------------*/
+/* General Purpose Register 1 macro's (GR1)                                   */
+/*----------------------------------------------------------------------------*/
+/* cbn   : compressed-data bit number                                         */
+/* dictor: compression dictionary or expansion dictionary                     */
+/* setcbn: set macro for cbn                                                  */
+/* sttoff: symbol-translation-table offset                                    */
+/*----------------------------------------------------------------------------*/
+#define GR1_cbn(regs)           (((regs)->GR_L (1) & 0x00000007))
+#define GR1_dictor(regs)        (_GR (1, regs) & ((GREG) 0xFFFFFFFFFFFFF000ULL))
+#define GR1_setcbn(regs, cbn) 	((regs)->GR_L (1) = ((regs)->GR_L (1) & 0xFFFFFFF8) | ((cbn) & 0x00000007))
+#define GR1_sttoff(regs)        (((regs)->GR_L (1) & 0x00000FF8) >> 3)
+
+/*----------------------------------------------------------------------------*/
+/* Adjust registers conform length                                            */
+/*----------------------------------------------------------------------------*/
+#define ADJUSTREGS(r, regs, len) \
+{ \
+  _GR ((r), (regs)) = (_GR ((r), (regs)) + (len)) & ADDRESS_MAXWRAP((regs)); \
+  _GR ((r) + 1, (regs)) -= (len); \
 }
 
-/*--------------------------------------------------------------*/
-/* cmpcompress                                                  */
-/*--------------------------------------------------------------*/
-void
-cmpcompress (int r1, int r2, REGS * regs)
+/*----------------------------------------------------------------------------*/
+/* Constants                                                                  */
+/*----------------------------------------------------------------------------*/
+#define PROCESS_MAX             4096	/* CPU-determined amount of data      */
+
+/*----------------------------------------------------------------------------*/
+/* Type definitions                                                           */
+/*----------------------------------------------------------------------------*/
+typedef struct
 {
-  U32 indexsymbol;
-  int xlated = 0;
+  int cbn;			/* compressed-data bit number                 */
+  GREG vr2;			/* value register 2                           */
+  GREG vr2plus1;		/* value register 2 + 1                       */
+}
+ARCH_DEP (SRCPOS);
 
-#ifdef CMPDEBUG
-  logmsg ("cmpcompress\n");
-#endif
+/*----------------------------------------------------------------------------*/
+/* Function proto types                                                       */
+/*----------------------------------------------------------------------------*/
+static void ARCH_DEP (compress) (int r1, int r2, REGS * regs);
+static void ARCH_DEP (expand) (int r1, int r2, REGS * regs);
+static void ARCH_DEP (fetch_cce) (REGS * regs, BYTE * cce, int index);
+static int ARCH_DEP (fetch_ch) (int r2, REGS * regs, BYTE * ch, int offset);
+static void ARCH_DEP (fetch_ece) (REGS * regs, BYTE * ece, int index);
+static int ARCH_DEP (fetch_is) (int r2, REGS * regs, U16 * index_symbol);
+static void ARCH_DEP (fetch_sd) (REGS * regs, BYTE * sd, int index);
+static int ARCH_DEP (store_ch) (int r1, int r2, REGS * regs, BYTE * data, int length, int offset, ARCH_DEP (SRCPOS) * srcpos);
+static void ARCH_DEP (store_is) (int r1, REGS * regs, U16 index_symbol);
+static int ARCH_DEP (test_ch261) (REGS * regs, int * processed, int length);
+static int ARCH_DEP (test_ec) (int r2, REGS * regs, BYTE * cce, int * ec_match);
+			
+/*----------------------------------------------------------------------------*/
+/* compress                                                                   */
+/*----------------------------------------------------------------------------*/
+static void ARCH_DEP (compress) (int r1, int r2, REGS * regs)
+{
+  int cc_index;			/* child character index                      */
+  BYTE cce_child[8];		/* child compression character entry          */
+  BYTE cce_parent[8];		/* parent compression character entry         */
+  BYTE ch;			/* character read                             */
+  int child_tested;		/* Indication if a possible child is tested   */
+  U16 index_symbol;		/* Index symbol                               */
+  int parent_found;		/* indicator if parent is found               */
+  int sc_index;			/* sibling character index                    */
+  BYTE sd[16];			/* sibling descriptor format-0 and format-1   */
+  int sd_ptr;			/* pointer to sibling descriptor              */
+  int searched;			/* number of children searched                */
+  int translated;		/* number of bytes processed                  */
 
-  /* Try to process the model dependent maximum */
-  while (xlated++ < CMPPROCESSMAX)
+  /* Try to process the CPU-determined amount of data */
+  translated = 0;
+  while (translated++ < PROCESS_MAX)
     {
-      switch (cmpget_indexsymbol (r1, r2, regs, &indexsymbol))
+
+      /* First check if we can write */
+      if (GR0_st (regs))
 	{
-	case CMPFOUND:
-	  /* Indexsymbol found, store it */
-	  cmpstore_indexsymbol (r1, regs, indexsymbol);
-	  break;
 
-	case CMPMORE_260_CHILDREN:
-	  /* More than 260 children found */
-	  program_interrupt (regs, PGM_DATA_EXCEPTION);
-	  return;
-
-	case CMPEND_SOURCE:
-	  /* We have reached the end of the source */
-	  regs->psw.cc = 0;
-	  return;
-
-	case CMPEND_DESTINATION:
-	  /* We have reached the end of the destination */
-	  regs->psw.cc = 1;
-	  return;
+	  /* Can we write an interchange symbol */
+	  if (_GR (r1 + 1, regs) < 2)
+	    {
+	      regs->psw.cc = 1;
+	      return;
+	    }
 	}
+      else
+	{
+
+	  /* Can we write an index symbol */
+	  if (((GR1_cbn (regs) + GR0_symbol_size (regs)) / 8) > _GR (r1 + 1, regs))
+	    {
+	      regs->psw.cc = 1;
+	      return;
+	    }
+	}
+
+
+      /* Get the alphabet entry, return on end of source */
+      if (ARCH_DEP (fetch_ch) (r2, regs, &ch, 0))
+	return;
+      ARCH_DEP (fetch_cce) (regs, cce_parent, ch);
+
+      /* We always match the alpabet entry, so set last match */
+      ADJUSTREGS (r2, regs, 1);
+      index_symbol = ch;
+
+      parent_found = 1;
+
+      /* As long there is a parent */
+      while (parent_found)
+	{
+
+	  /* Get the next character when there are children */
+	  if (CCE_cct (cce_parent) && ARCH_DEP (fetch_ch) (r2, regs, &ch, 0))
+	    {
+
+	      /* Reached end of source, store last match */
+	      ARCH_DEP (store_is) (r1, regs, index_symbol);
+	      return;
+	    }
+
+	  /* Lower parent_found */
+	  parent_found = 0;
+
+	  /* Lower child_tested */
+	  child_tested = 0;
+
+	  /* Now check all children in parent */
+	  for (cc_index = 0; cc_index < CCE_cct (cce_parent); cc_index++)
+	    {
+
+	      /* Stop searching when child tested and no consecutive child character */
+	      if (child_tested && CCE_cc (cce_parent)[cc_index] != CCE_cc (cce_parent)[0])
+		break;
+
+	      /* Compare character with child */
+	      if (ch == CCE_cc (cce_parent)[cc_index])
+		{
+
+		  /* Raise child tested indicator */
+		  child_tested = 1;
+
+		  /* Found a child get the character entry */
+		  ARCH_DEP (fetch_cce) (regs, cce_child, CCE_cptr (cce_parent) + cc_index);
+
+		  /* Check if additional extension characters match */
+		  if (ARCH_DEP (test_ec) (r2, regs, cce_child, &parent_found))
+		    {
+
+			/* Reached end of source, store last match */
+			ARCH_DEP (store_is) (r1, regs, index_symbol);
+			return;
+		    }
+		  if (parent_found)
+		    {
+
+		      /* Set last match */
+		      ADJUSTREGS (r2, regs, CCE_act (cce_child) + 1);
+		      index_symbol = CCE_cptr (cce_parent) + cc_index;
+
+#if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1
+		      logmsg ("compress : index %03X parent\n", index_symbol);
+#endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1 */
+
+		      /* Found a matching child, make it parent */
+		      memcpy (cce_parent, cce_child, 8);
+
+		      /* We found a parent, stop searching for a child */
+		      break;
+		    }
+		}
+	    }
+
+
+	  /* if no parent found and no child tested, are there sibling characters? */
+	  if (!parent_found && !child_tested && CCE_more_cc (cce_parent))
+	    {
+
+	      /* Sibling follows last possible child */
+	      sd_ptr = CCE_cct (cce_parent);
+
+	      /* set searched childs */
+	      searched = sd_ptr;
+
+	      /* As long there are sibling characters */
+	      do
+		{
+
+		  /* Get the sibling descriptor */
+		  ARCH_DEP (fetch_sd) (regs, sd, CCE_cptr (cce_parent) + sd_ptr);
+
+		  /* Check all children in sibling descriptor */
+		  for (sc_index = 0; sc_index < SD_sct (regs, sd); sc_index++)
+		    {
+		      if (ch == SD_sc (regs, sd)[sc_index])
+			{
+
+			  /* Raise child tested indicator */
+			  child_tested = 1;
+
+			  /* Found a child get the character entry */
+			  ARCH_DEP (fetch_cce) (regs, cce_child, CCE_cptr (cce_parent) + sd_ptr + sc_index + 1);
+
+			  /* Check if additional extension characters match */
+			  if (ARCH_DEP (test_ec) (r2, regs, cce_child, &parent_found))
+		    	    {
+
+			      /* Reached end of source, store last match */
+			      ARCH_DEP (store_is) (r1, regs, index_symbol);
+			      return;
+		            }
+			  if (parent_found)
+			    {
+
+			      /* Set last match */
+			      ADJUSTREGS (r2, regs, CCE_act (cce_child) + 1);
+			      index_symbol = CCE_cptr (cce_parent) + sd_ptr + sc_index + 1;
+
+#if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1
+			      logmsg ("compress : index %03X parent\n", index_symbol);
+#endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1 */
+
+			      /* Found a matching child, make it parent */
+			      memcpy (cce_parent, cce_child, 8);
+
+			      /* We found a parent, stop searching */
+			      break;
+			    }
+			}
+		    }
+
+
+		  /* Next sibling follows last possible child */
+		  sd_ptr += SD_sct (regs, sd) + 1;
+
+		  /* test for searching child 261 */
+		  if (ARCH_DEP (test_ch261) (regs, &searched, SD_sct (regs, sd)))
+		    return;
+		}
+	      while (!child_tested && SD_more_sc (regs, sd));
+	    }
+	}
+
+      /* Write the last match, this can be the alphabet entry */
+      ARCH_DEP (store_is) (r1, regs, index_symbol);
     }
 
   /* Reached model dependent CPU processing amount */
   regs->psw.cc = 3;
 }
 
-/*--------------------------------------------------------------*/
-/* cmpexpand                                                    */
-/*--------------------------------------------------------------*/
-void
-cmpexpand (int r1, int r2, REGS * regs)
+/*----------------------------------------------------------------------------*/
+/* expand                                                                     */
+/*----------------------------------------------------------------------------*/
+static void ARCH_DEP (expand) (int r1, int r2, REGS * regs)
 {
-#ifdef CMPDEBUG
-  logmsg ("cmpexpand\n");
-#endif
+  BYTE byte;			/* a byte                                     */
+  U16 index_symbol;		/* Index symbol                               */
+  BYTE ece[8];			/* Expansion Character Entry                  */
+  U16 pptr;			/* predecessor pointer                        */
+  ARCH_DEP (SRCPOS) srcpos;	/* posistion in source                        */
+  int translated;		/* number of bytes generated                  */
+  int written;			/* Childs written                             */
 
-  logmsg ("CMPSC expand not implemented yet\n");
-}
 
-/*--------------------------------------------------------------*/
-/* cmpget_indexsymbol                                           */
-/*--------------------------------------------------------------*/
-int
-cmpget_indexsymbol (int r1, int r2, REGS * regs, U32 * indexsymbol)
-{
-  int act;
-  BYTE ch;
-  U64 child_entry;
-  U32 child_pointer;
-  U32 dictionary = CMPGR1_dictor (regs);
-  U64 parent_entry;
-
-#ifdef CMPDEBUG
-  logmsg ("cmpget_indexsymbol\n");
-#endif
-
-  /* First check if we can write an indexsymbol */
-  if (((CMPGR1_cbn (regs) + CMPGR0_cdss (regs) + 1) / 8) > regs->gpr[r1 + 1])
+  /* Try to generate the CPU-determined amount of data */
+  translated = 0;
+  while (translated++ < PROCESS_MAX)
     {
-#ifdef CMPDEBUG
-      logmsg ("  End of destination\n");
-#endif
-      return (CMPEND_DESTINATION);
-    }
 
-  /* Get the alphabet entry */
-  CMPGETCH (r2, regs, ch);
-  parent_entry = vfetch8 (dictionary + ch * 8, 1, regs);
+      /* Store the current source position */
+      srcpos.cbn = GR1_cbn (regs);
+      srcpos.vr2 = regs->GR (r2);
+      srcpos.vr2plus1 = regs->GR (r2 + 1);
 
-  /* We always match the alpabet entry, so set last match */
-  regs->gpr[r2]++;
-  regs->gpr[r2 + 1]--;
-  *indexsymbol = ch;
+      /* Get an index symbol, return on end of source */
+      if (ARCH_DEP (fetch_is) (r2, regs, &index_symbol))
+	return;
 
-  while (1)
-    {
-      switch (cmpsearch_child (r1, r2, regs, parent_entry, &child_pointer, &child_entry))
+      /* Check if this is an alphabet entry */
+      if (index_symbol <= 0xff)
 	{
-	case CMPFOUND:
-	  /* Set last match */
-	  act = CMPCCE_act (child_entry);
-	  regs->gpr[r2] += act;
-	  regs->gpr[r2 + 1] += act;
-	  *indexsymbol = child_pointer;
 
-	  /* Now look for grand children */
-	  parent_entry = child_entry;
+	  /* Write the alphabet entry, return on trouble */
+	  byte = index_symbol;
+	  if (ARCH_DEP (store_ch) (r1, r2, regs, &byte, 1, 0, &srcpos))
+	    return;
 
-	  break;
+	  /* Adjust destination registers */
+	  ADJUSTREGS (r1, regs, 1);
+	}
+      else
+	{
 
-	case CMPEND_SOURCE:
-	  /* Registers ??? */
-	  return (CMPEND_SOURCE);
+	  /* Get the Expansion character entry */
+	  ARCH_DEP (fetch_ece) (regs, ece, index_symbol);
 
-	case CMPNOT_FOUND:
-	  /* Return last match */
-	  return (CMPFOUND);
+          /* Reset child counter */
+          written = 0;
 
-	case CMPMORE_260_CHILDREN:
-	  /* Trying to read child number 261 */
-	  return (CMPMORE_260_CHILDREN);
+	  /* Process the whole tree to the top */
+	  while (!ECE_unprec (ece))
+	    {
+
+              /* Check for writing child 261 */
+              if (ARCH_DEP (test_ch261) (regs, &written, ECE_psl (ece)))
+                return;
+
+	      /* Output extension characters in preceeded entry, return on trouble */
+	      if (ARCH_DEP (store_ch) (r1, r2, regs, ECE_ec (ece), ECE_psl (ece), ECE_ofst (ece), &srcpos))
+		return;
+
+	      /* Get the preceeding entry */
+	      pptr = ECE_pptr (ece);
+	      ARCH_DEP (fetch_ece) (regs, ece, pptr);
+	    }
+	
+          /* Check for writing child 261 */
+          if (ARCH_DEP (test_ch261) (regs, &written, ECE_csl (ece)))
+            return;
+	
+	  /* Output extension characters in last or only unpreceeded entry, return on trouble */
+	  if (ARCH_DEP (store_ch) (r1, r2, regs, ECE_ec (ece), ECE_csl (ece), 0, &srcpos))
+	    return;
+
+	  /* Adjust destination registers */
+	  ADJUSTREGS (r1, regs, written);
 	}
     }
+
+  /* CPU-determined amount of data processed */
+  regs->psw.cc = 3;
 }
 
-/*--------------------------------------------------------------*/
-/* cmpsc                                                        */
-/*--------------------------------------------------------------*/
-void
-zz_compression_call (BYTE inst[], int execflag, REGS * regs)
+/*----------------------------------------------------------------------------*/
+/* fetch_cce                                                                  */
+/*----------------------------------------------------------------------------*/
+static void ARCH_DEP (fetch_cce) (REGS * regs, BYTE * cce, int index)
 {
-  int cdss = CMPGR0_cdss (regs);
+#if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1
+  int i;
+  int prt_detail;
+#endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1 */
+
+  ARCH_DEP (vfetchc) (cce, 7, (GR1_dictor (regs) + index * 8) & ADDRESS_MAXWRAP (regs), 1, regs);
+
+#if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1
+  logmsg ("fetch_cce: index %03X\n", index);
+  logmsg ("cce      : ");
+  prt_detail = 0;
+  for (i = 0; i < 8; i++)
+    {
+      if (!prt_detail && cce[i])
+        prt_detail = 1;
+      logmsg ("%02X", cce[i]);
+    }
+  logmsg ("\n");
+  if (prt_detail)
+    {
+      logmsg ("cct      : %d\n", CCE_cct (cce));
+      logmsg ("more_cc  : %s\n", CCE_more_cc (cce) ? "Yes" : "No");
+      logmsg ("d        : %s\n", CCE_d (cce) ? "True" : "False");
+      logmsg ("act      : %d\n", CCE_act (cce));
+      logmsg ("cptr     : %04X\n", CCE_cptr (cce));
+      logmsg ("ec's     : ");
+      for (i = 0; i < CCE_act (cce); i++)
+        logmsg ("%02X ", CCE_ec (cce)[i]);
+      logmsg ("\ncc's     : ");
+      for (i = 0; i < CCE_cct (cce); i++)
+        logmsg ("%02X ", CCE_cc (cce)[i]);
+      logmsg ("\n");
+    }
+#endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1 */
+}
+
+/*----------------------------------------------------------------------------*/
+/* fetch_ch                                                                   */
+/*----------------------------------------------------------------------------*/
+static int ARCH_DEP (fetch_ch) (int r2, REGS * regs, BYTE * ch, int offset)
+{
+  if (_GR (r2 + 1, regs) <= offset)
+    {
+
+#if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1
+      logmsg ("fetch_ch : reached end of source\n");
+#endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1 */
+
+      regs->psw.cc = 0;
+      return (1);
+    }
+  *ch = ARCH_DEP (vfetchb) ((_GR (r2, regs) + offset) & ADDRESS_MAXWRAP (regs), r2, regs);
+
+#if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1
+  logmsg ("fetch_ch : %02X at " ADRFMT "\n", *ch, (_GR (r2, regs) + offset));
+#endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1 */
+
+  return (0);
+}
+
+/*----------------------------------------------------------------------------*/
+/* fetch_ece                                                                  */
+/*----------------------------------------------------------------------------*/
+static void ARCH_DEP (fetch_ece) (REGS * regs, BYTE * ece, int index)
+{
+#if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 2
+  int i;
+  int prt_detail;
+#endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1 */
+
+  ARCH_DEP (vfetchc) (ece, 7, (GR1_dictor (regs) + index * 8) & ADDRESS_MAXWRAP (regs), 1, regs);
+
+#if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 2
+    logmsg ("fetch_ece: index %03X\n", index);
+    logmsg ("ece      : ");
+    prt_detail = 0;
+    for (i = 0; i < 8; i++)
+      {
+        if (!prt_detail && ece[i])
+          prt_detail = 1;
+        logmsg ("%02X", ece[i]);
+      }
+    logmsg ("\n");
+    if (prt_detail)
+      {
+        logmsg ("psl      : %d\n", ECE_psl (ece));
+        logmsg ("csl      : %d\n", ECE_csl (ece));
+        logmsg ("pptr     : %04X\n", ECE_pptr (ece));
+        logmsg ("ofst     : %02X\n", ECE_ofst (ece));
+        logmsg ("unprec   : %s\n", ECE_unprec (ece) ? "True" : "False");
+        if (ECE_unprec (ece))
+          {
+            logmsg ("ec's     :");
+            for (i = 0; i < ECE_csl (ece); i++)
+              logmsg (" %02X", ECE_ec (ece)[i]);
+            logmsg ("\n");
+          }
+        else
+          {
+            logmsg ("ec's     :");
+            for (i = 0; i < ECE_psl (ece); i++)
+              logmsg (" %02X", ECE_ec (ece)[i]);
+            logmsg ("\n");
+          }
+      }
+#endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1 */
+}
+
+/*----------------------------------------------------------------------------*/
+/* fetch_is                                                                   */
+/*----------------------------------------------------------------------------*/
+static int ARCH_DEP (fetch_is) (int r2, REGS * regs, U16 * index_symbol)
+{
+  U32 mask;
+  BYTE work[3];
+
+  /* Check if we can read an index symbol */
+  if (((GR1_cbn (regs) + GR0_symbol_size (regs)) / 8) > _GR (r2 + 1, regs))
+    {
+      regs->psw.cc = 0;
+      return (1);
+    }
+
+  /* Get the storage */
+  memset (work, 0, 3);
+  ARCH_DEP (vfetchc) (&work, (GR0_symbol_size (regs) + GR1_cbn (regs) - 1) / 8, _GR (r2, regs) & ADDRESS_MAXWRAP (regs), r2, regs);
+
+  /* Get the bits */
+  mask = work[0] << 16 | work[1] << 8 | work[3];
+  mask >>= (24 - GR0_symbol_size (regs) - GR1_cbn (regs));
+  mask &= 0xFFFF >> (16 - GR0_symbol_size (regs));
+  *index_symbol = mask;
+
+  /* Adjust source registers */
+  ADJUSTREGS (r2, regs, (GR1_cbn (regs) + GR0_symbol_size (regs)) / 8);
+
+  /* Calculate and set the new compressed-data bit number */
+  GR1_setcbn (regs, (GR1_cbn (regs) + GR0_symbol_size (regs)) % 8);
+
+#if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 2
+  logmsg ("fetch_is : %03X, cbn=%d, GR%02d=" ADRFMT ", GR%02d=" ADRFMT "\n", *index_symbol, GR1_cbn (regs), r2, regs->GR (r2), r2 + 1, regs->GR (r2 + 1));
+#endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 2 */
+
+  return (0);
+}
+
+/*----------------------------------------------------------------------------*/
+/* fetch_sd                                                                   */
+/*----------------------------------------------------------------------------*/
+static void ARCH_DEP (fetch_sd) (REGS * regs, BYTE * sd, int index)
+{
+#if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1
+  int i;
+  int prt_detail;
+#endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1 */
+
+  ARCH_DEP (vfetchc) (sd, 7, (GR1_dictor (regs) + index * 8) & ADDRESS_MAXWRAP (regs), 1, regs);
+  if (GR0_f1 (regs))
+    ARCH_DEP (vfetchc) (&sd[8], 7, (GR1_dictor (regs) + GR0_dictor_size(regs) + index * 8) & ADDRESS_MAXWRAP (regs), 1, regs);
+
+#if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1
+  if (GR0_f1 (regs))
+    {
+      logmsg ("fetch_sd1: index %03X\n", index);
+      logmsg ("sd1      : ");
+      prt_detail = 0;
+      for (i = 0; i < 16; i++)
+        {
+          if (!prt_detail && sd[i])
+            prt_detail = 1;
+          logmsg ("%02X", sd[i]);
+        }
+      logmsg ("\n");
+      if (prt_detail)
+        {
+          logmsg ("sct      : %d\n", SD1_sct (sd));
+          logmsg ("more_sc  : %s\n", SD1_more_sc (sd) ? "Yes" : "No");
+          logmsg ("sc's     : ");
+          for (i = 0; i < SD1_sct (sd); i++)
+            logmsg ("%02X ", SD1_sc (sd)[i]);
+          logmsg ("\n");
+        }
+    }
+  else
+    {
+      logmsg ("fetch_sd0: index %03X\n", index);
+      logmsg ("sd0      : ");
+      prt_detail = 0;
+      for (i = 0; i < 8; i++)
+        {
+          if (!prt_detail && sd[i])
+            prt_detail = 1;
+          logmsg ("%02X", sd[i]);
+        }
+      logmsg ("\n");
+      if (prt_detail)
+        {
+          logmsg ("sct      : %d\n", SD0_sct (sd));
+          logmsg ("more_sc  : %s\n", SD0_more_sc (sd) ? "Yes" : "No");
+          logmsg ("sc's     : ");
+          for (i = 0; i < SD0_sct (sd); i++)
+            logmsg ("%02X ", SD0_sc (sd)[i]);
+          logmsg ("\n");
+        }
+    }
+#endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1 */
+}
+
+/*----------------------------------------------------------------------------*/
+/* store_ch                                                                   */
+/*----------------------------------------------------------------------------*/
+static int ARCH_DEP (store_ch) (int r1, int r2, REGS * regs, BYTE * data, int length, int offset, ARCH_DEP (SRCPOS) * srcpos)
+{
+
+  /* Check destination size */
+  if (_GR (r1 + 1, regs) + offset < length)
+    {
+
+#if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 2
+      logmsg ("expand_store: Reached end of destination\n");
+#endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 2 */
+
+      /* Restore source position */
+      GR1_setcbn (regs, srcpos->cbn);
+      regs->GR (r2) = srcpos->vr2;
+      regs->GR (r2 + 1) = srcpos->vr2plus1;
+
+      /* Indicate end of destination */
+      regs->psw.cc = 1;
+      return (1);
+    }
+
+  /* Store the data */
+  ARCH_DEP (vstorec) (data, length - 1, (_GR (r1, regs) + offset) & ADDRESS_MAXWRAP (regs), r1, regs);
+
+#if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 2
+  logmsg ("expand_store: at " ADRFMT "\n", (regs->GR (r1) + offset));
+#endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 2 */
+
+  return (0);
+}
+
+/*----------------------------------------------------------------------------*/
+/* store_is                                                                   */
+/*----------------------------------------------------------------------------*/
+static void ARCH_DEP (store_is) (int r1, REGS * regs, U16 index_symbol)
+{
+  U32 clear_mask;		/* mask to clear the bits                     */
+  U32 set_mask;			/* mask to set the bits                       */
+  BYTE work[3];			/* work bytes                                 */
+
+  /* Check if symbol translation is requested */
+  if (GR0_st (regs))
+    {
+
+      /* Get the interchange symbol at sttoff+indexsymbol after the compression dictionary */
+      ARCH_DEP (vfetchc) (work, 1, (GR1_dictor (regs) + GR0_dictor_size (regs) + GR1_sttoff (regs) + index_symbol * 2) & ADDRESS_MAXWRAP (regs), 1, regs);
+
+      /* Store the 2 bytes interchange symbol */
+      ARCH_DEP (vstorec) (work, 1, (_GR (r1, regs)) & ADDRESS_MAXWRAP (regs), r1, regs);
+
+      /* Adjust destination registers */
+      ADJUSTREGS (r1, regs, 2);
+      return;
+    }
+
+  /* Calculate clear mask */
+  clear_mask = ~(0xFFFF >> (16 - GR0_symbol_size (regs)) << (24 - GR0_symbol_size (regs)) >> GR1_cbn (regs));
+
+  /* Calculate set mask */
+  set_mask = index_symbol << (24 - GR0_symbol_size (regs)) >> GR1_cbn (regs);
+
+  /* Get the storage */
+  if (set_mask & 0xFF)
+    ARCH_DEP (vfetchc) (work, 2, _GR (r1, regs) & ADDRESS_MAXWRAP (regs), r1, regs);
+  else
+    ARCH_DEP (vfetchc) (work, 1, _GR (r1, regs) & ADDRESS_MAXWRAP (regs), r1, regs);
+
+  /* Do the job */
+  work[0] &= clear_mask >> 16;
+  work[0] |= set_mask >> 16;
+  work[1] &= (clear_mask >> 8) & 0xFF;
+  work[1] |= (set_mask >> 8) & 0xFF;
+  if (set_mask & 0xFF)
+    {
+      work[2] &= clear_mask & 0xFF;
+      work[2] &= set_mask & 0xFF;
+    }
+
+  /* Set the storage */
+  if (set_mask & 0xFF)
+    ARCH_DEP (vstorec) (work, 2, _GR (r1, regs) & ADDRESS_MAXWRAP (regs), r1, regs);
+  else
+    ARCH_DEP (vstorec) (work, 1, _GR (r1, regs) & ADDRESS_MAXWRAP (regs), r1, regs);
+
+  /* Adjust destination registers */
+  ADJUSTREGS (r1, regs, (GR1_cbn (regs) + GR0_symbol_size (regs)) / 8);
+
+  /* Calculate and set the new Compressed-data Bit Number */
+  GR1_setcbn (regs, (GR1_cbn (regs) + GR0_symbol_size (regs)) % 8);
+
+#if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1
+  logmsg ("store_is : %03X, cbn=%d, GR%02d=" ADRFMT ", GR%02d=" ADRFMT "\n", index_symbol, GR1_cbn (regs), r1, regs->GR (r1), r1 + 1, regs->GR (r1 + 1));
+#endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 1 */
+}
+
+/*----------------------------------------------------------------------------*/
+/* test_ch261                                                                 */
+/*----------------------------------------------------------------------------*/
+static int ARCH_DEP (test_ch261) (REGS * regs, int * processed, int length)
+{
+
+ /* Check for processing child 261 */
+  *processed += length;
+  if (*processed > 260)
+    {
+
+#if defined(OPTION_CMPSC_DEBUGLVL)
+      logmsg ("test_ch261: trying to process child 261\n");
+#endif /* defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 2 */
+
+      ARCH_DEP (program_interrupt) (regs, PGM_DATA_EXCEPTION);
+      return (1);
+    }
+  return (0);
+}
+
+/*----------------------------------------------------------------------------*/
+/* test_ec                                                                    */
+/*----------------------------------------------------------------------------*/
+static int ARCH_DEP (test_ec) (int r2, REGS * regs, BYTE * cce, int * ec_match)
+{
+  BYTE ch;
+  int i;
+
+  *ec_match = 1;
+  for (i = 0; i < CCE_act (cce); i++)
+    {
+      if (ARCH_DEP (fetch_ch) (r2, regs, &ch, i + 1))
+	{		
+	
+	  /* Reached end of source, store last match */
+	  return (1);
+	}
+      if (ch != CCE_ec (cce)[i])
+	{
+	  *ec_match = 0;
+				
+	  /* No match, stop checking extension characters */
+	  break;
+	}
+    }
+  return(0);
+}
+
+
+/*----------------------------------------------------------------------------*/
+/* compression_call                                                           */
+/*----------------------------------------------------------------------------*/
+DEF_INST (compression_call)
+{
   int r1;
   int r2;
 
-  RRE(inst, execflag, regs, r1, r2);
+  RRE (inst, execflag, regs, r1, r2);
 
-#ifdef CMPDEBUG
-  CMPRRE_prt (inst);
-  CMPGR0_prt (regs);
-  CMPGR1_prt (regs);
-#endif
+#ifdef OPTION_CMPSC_DEBUGLVL
+  logmsg ("CMPSC: compression call\n");
+  logmsg ("r1          : GR%02d\n", r1);
+  logmsg ("address     : " ADRFMT "\n", regs->GR (r1));
+  logmsg ("length      : " ADRFMT "\n", regs->GR (r1 + 1));
+  logmsg ("r2          : GR%02d\n", r2);
+  logmsg ("address     : " ADRFMT "\n", regs->GR (r2));
+  logmsg ("length      : " ADRFMT "\n\n", regs->GR (r2 + 1));
 
-  /* Check the registers on even-odd pairs and
-     check if compression-data symbol size is valid */
-  if (CMPODD (r1) || CMPODD (r2) || !cdss || cdss > 5)
+  logmsg ("GR00        : " ADRFMT "\n", (regs)->GR (0));
+  logmsg ("st          : %s\n", GR0_st ((regs)) ? "True" : "False");
+  logmsg ("cdss        : %d\n", GR0_cdss ((regs)));
+  logmsg ("symbol_size : %d\n", GR0_symbol_size ((regs)));
+  logmsg ("dictor_size : %08X\n", GR0_dictor_size ((regs)));
+  logmsg ("f1          : %s\n", GR0_f1 ((regs)) ? "True" : "False");
+  logmsg ("e           : %s\n\n", GR0_e ((regs)) ? "True" : "False");
+
+  logmsg ("GR01        : " ADRFMT "\n", (regs)->GR (1));
+  logmsg ("dictor      : " ADRFMT "\n", GR1_dictor ((regs)));
+  logmsg ("sttoff      : %d\n", GR1_sttoff ((regs)));
+  logmsg ("cbn         : %d\n\n", GR1_cbn ((regs)));
+#endif /* OPTION_CMPSC_DEBUGLVL */
+
+  /* Check the registers on even-odd pairs and valid compression-data symbol size */
+  if (r1 & 0x01 || r2 & 0x01 || !GR0_cdss (regs) || GR0_cdss (regs) > 5)
     {
-      program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+      ARCH_DEP (program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
       return;
     }
 
   /* Now go to the requested function */
-  if (CMPGR0_e (regs))
-    cmpexpand (r1, r2, regs);
-  else if (CMPGR0_st (regs))
-    cmpsymbol_translate (r1, r2, regs);
+  if (GR0_e (regs))
+    ARCH_DEP (expand) (r1, r2, regs);
   else
-    cmpcompress (r1, r2, regs);
+    ARCH_DEP (compress) (r1, r2, regs);
 }
 
-/*--------------------------------------------------------------*/
-/* cmpsearch_character_entry                                    */
-/*--------------------------------------------------------------*/
-int
-cmpsearch_character_entry (int r1, int r2, REGS * regs, U64 parent_entry, U32 * child_pointer, U64 * child_entry)
-{
-  int act = CMPCCE_act (parent_entry);
-  int cct = CMPCCE_cct (parent_entry);
-  BYTE ch;
-  U32 cptr = CMPCCE_cptr (parent_entry);
-  int d = CMPCCE_d (parent_entry);
-  U32 dictionary = CMPGR1_dictor (regs);
-  int index;
+#endif /* FEATURE_COMPRESSION */
 
-#ifdef CMPDEBUG
-  logmsg ("cmpsearch_character_entry\n");
-#endif
+#if !defined(_GEN_ARCH)
 
-  /* Get the next character */
-  CMPGETCH (r2, regs, ch);
+#define  _GEN_ARCH 390
+#include "cmpsc.c"
 
-  /* Determine number of children */
-  if ((d && cct == 5) || (!d && cct == 6))
-    cct--;
+#undef   _GEN_ARCH
+#define  _GEN_ARCH 370
+#include "cmpsc.c"
 
-  /* Check all children */
-  for (index = 0; index < cct; index++)
-    {
-      if (ch == ((BYTE *) & parent_entry)[3 + index + act])
-	{
-	  /* We found a child, check additional extension characters */
-	  *child_entry = vfetch8 (dictionary + cptr + index * 8, 1, regs);
-	  switch (cmpcheck_extension_characters (r1, r2, regs, child_entry))
-	    {
-	    case CMPMATCH:
-	      *child_pointer = cptr + index * 8;
-	      return (CMPFOUND);
-
-	    case CMPEND_SOURCE:
-	      return (CMPEND_SOURCE);
-	    }
-	}
-    }
-  return (CMPNOT_FOUND);
-}
-
-/*--------------------------------------------------------------*/
-/* cmpsearch_child                                              */
-/*--------------------------------------------------------------*/
-int
-cmpsearch_child (int r1, int r2, REGS * regs, U64 parent_entry, U32 * child_pointer, U64 * child_entry)
-{
-  int rc;
-
-#ifdef CMPDEBUG
-  logmsg ("cmpsearch_child\n");
-#endif
-
-  rc = cmpsearch_character_entry (r1, r2, regs, parent_entry, child_pointer, child_entry);
-  if (rc == CMPNOT_FOUND)
-    return (cmpsearch_sibling_descriptors (r1, r2, regs, parent_entry, child_pointer, child_entry));
-  return (rc);
-}
-
-/*--------------------------------------------------------------*/
-/* cmpsearch_sibling_descriptors                                */
-/*--------------------------------------------------------------*/
-int
-cmpsearch_sibling_descriptors (int r1, int r2, REGS * regs, U64 parent_entry, U32 * child_pointer, U64 * child_entry)
-{
-  int cct = CMPCCE_cct (parent_entry);
-  BYTE ch;
-  int children_searched;
-  int cptr = CMPCCE_cptr (parent_entry);
-  int d = CMPCCE_d (parent_entry);
-  U32 dictionary = CMPGR1_dictor (regs);
-  U32 dictionary_size = 2048 << CMPGR0_cdss (regs);
-  int f1 = CMPGR0_f1 (regs);
-  int index;
-  int more_siblings = 1;
-  int sct;
-  U32 sibling_address;
-  U64 sibling_descriptor[2];
-
-#ifdef CMPDEBUG
-  logmsg ("cmpsearch_sibling_descriptors\n");
-#endif
-
-  /* Are there sibling characters */
-  if ((!d && cct != 6) || (d && cct != 5))
-    return (CMPNOT_FOUND);
-
-  /* Set already searched children in character entry */
-  if (d)
-    children_searched = 4;
-  else
-    children_searched = 5;
-
-  /* Calculate the address */
-  sibling_address = dictionary + cptr + cct * 8;
-
-  while (more_siblings)
-    {
-      more_siblings = 0;
-
-      /* Get the format-0 sibling descriptor */
-      sibling_descriptor[0] = vfetch8 (sibling_address, 1, regs);
-
-      /* Check and get the format-1 entry from the expansion dictionary */
-      if (f1)
-	{
-	  sibling_descriptor[1] = vfetch8 (sibling_address + dictionary_size, 1, regs);
-	  sct = CMPSD1_sct (*sibling_descriptor);
-	  if (sct == 15)
-	    {
-	      sct = 14;
-	      more_siblings = 1;
-	    }
-	}
-      else
-	{
-	  sct = CMPSD0_sct (*sibling_descriptor);
-	  if (!sct)
-	    {
-	      sct = 7;
-	      more_siblings = 1;
-	    }
-	}
-
-      /* Is this child 261 */
-      if (children_searched++ == 260)
-	return (CMPMORE_260_CHILDREN);
-
-      /* Get the next character */
-      CMPGETCH (r2, regs, ch);
-
-      /* Compare read character */
-      for (index = 0; index < sct; index++)
-	{
-	  if (ch == ((BYTE *) sibling_descriptor)[2 + index])
-	    {
-	      /* We found a child, check additional extension characters */
-	      *child_entry = vfetch8 (sibling_address + (index + 1) * 8, 1, regs);
-	      switch (cmpcheck_extension_characters (r1, r2, regs, child_entry))
-		{
-		case CMPMATCH:
-		  *child_pointer = cptr + index * 8;
-		  return (CMPFOUND);
-
-		case CMPEND_SOURCE:
-		  return (CMPEND_SOURCE);
-		}
-	    }
-	}
-      if (more_siblings)
-	sibling_address += sct * 8;
-    }
-  return (CMPNOT_FOUND);
-}
-
-/*--------------------------------------------------------------*/
-/* cmpstore_indexsymbol                                         */
-/*--------------------------------------------------------------*/
-void
-cmpstore_indexsymbol (int r1, REGS * regs, U32 indexsymbol)
-{
-  BYTE cbn = CMPGR1_cbn (regs);
-  int increment;
-  U16 symbolsize = CMPGR0_cdss (regs) + 1;
-  U32 work;
-
-#ifdef CMPDEBUG
-  logmsg ("cmpstore_indexsymbol %X\n", indexsymbol);
-#endif
-
-  /* Calculate the increment in storage */
-  increment = (cbn + symbolsize) / 8;
-
-  /* Get the storage */
-  vfetchc (&work, increment, regs->gpr[r1], r1, regs);
-
-  /* Clear the bits */
-  work &= ~((0xFFFFFFFF << (32 - symbolsize)) >> cbn);
-
-  /* Set the bits */
-  work |= (indexsymbol << (32 - symbolsize - cbn));
-
-  /* Set the storage */
-  vstorec (&work, increment, regs->gpr[r1], r1, regs);
-
-  /* Set the new address and length */
-  regs->gpr[r1] += increment;
-  regs->gpr[r1 + 1] -= increment;
-
-  /* Calculate and set the new Compressed-data Bit Number */
-  cbn = (cbn + symbolsize) % symbolsize;
-  CMPGR1_setcbn (regs, cbn);
-}
-
-/*--------------------------------------------------------------*/
-/* cmpsymbol_translate                                          */
-/*--------------------------------------------------------------*/
-void
-cmpsymbol_translate (int r1, int r2, REGS * regs)
-{
-#ifdef CMPDEBUG
-  logmsg ("cmpsymbol_translate\n");
-#endif
-
-  logmsg ("CMPSC symbol translation not implemented yet\n");
-}
-
-#endif /* FEATURE_CMPSC */
-
-#ifdef FEATURE_CMPSC_COPY
-/*--------------------------------------------------------------*/
-/* cmpsc                                                        */
-/*                                                              */
-/* This is the routine you can use if you desperately need a    */
-/* CMPSC instruction. It just copies the data from the source   */
-/* to the destination. So compress and expand on hercules will  */
-/* work fine ;-). As you can see I'm still working on the real  */
-/* implementation.                                              */
-/*--------------------------------------------------------------*/
-void
-zz_compression_call (BYTE inst[], int execflag, REGS * regs)
-{
-  BYTE cdss = CMPGR0_cdss (regs);
-  U32 length;
-  int r1;
-  int r2;
-  U32 dst_addr;
-  U32 src_addr;
-
-#if 1
-logmsg("CMPSC: ");
-LOAD_INST(regs);
-display_inst (regs, regs->inst);
-#endif
-
-  RRE(inst, execflag, regs, r1, r2);
-
-  dst_addr = CMP_addr (r1, regs);
-  src_addr = CMP_addr (r2, regs);
-
-// #ifdef CMPDEBUG
-//   CMPRRE_prt (inst);
-//   CMPGR0_prt (regs);
-//   CMPGR1_prt (regs);
-// #endif
-
-  /* Check if R1 and R2 are even-odd pairs and if compressed-data symbol
-     size is valid */
-  if (CMPODD (r1) || CMPODD (r2) || !cdss || cdss > 5)
-    {
-      program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
-      return;
-    }
-
-  /* How many bytes do we have to copy */
-  if (regs->gpr[r1 + 1] < regs->gpr[r2 + 1])
-    {
-      /* End of first operand reached and end of second operand not
-         reached */
-      length = regs->gpr[r1 + 1];
-
-      /* Set CC code */
-      regs->psw.cc = 1;
-    }
-  else
-    {
-      /* End of second operand reached */
-      length = regs->gpr[r2 + 1];
-
-      /* Set CC code */
-      regs->psw.cc = 0;
-    }
-
-  /* We copy maximum 256 bytes a time */
-  if (length > 256)
-    {
-      /* CPU-determined amount of data processed */
-      length = 256;
-
-      /* Set CC code */
-      regs->psw.cc = 3;
-    }
-
-  /* Now copy the data */
-  move_chars (dst_addr, r1, regs->psw.pkey,
-	      src_addr, r2, regs->psw.pkey, length - 1, regs);
-
-  /* Adjust length and address */
-  regs->gpr[r1] += length;
-  regs->gpr[r1 + 1] -= length;
-  regs->gpr[r2] += length;
-  regs->gpr[r2 + 1] -= length;
-}
-#endif /* FEATURE_CMPSC_JUST_COPY */
+#endif /*!defined(_GEN_ARCH) */

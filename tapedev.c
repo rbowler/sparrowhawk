@@ -49,6 +49,8 @@
 /*      3480 commands contributed by Jan Jaeger                      */
 /*      Sense byte improvements by Jan Jaeger                        */
 /*      3480 Read Block ID and Locate CCWs by Brandon Hill           */
+/*      Unloaded tape support by Brandon Hill                    v209*/
+/*      HET format support by Leland Lucius                      v209*/
 /*-------------------------------------------------------------------*/
 
 /*-------------------------------------------------------------------*/
@@ -227,7 +229,7 @@ static PARSER ptab[] =
     { "compress", "%d" },
     { "method", "%d" },
     { "level", "%d" },
-	{ "chunksize", "%d" },
+    { "chunksize", "%d" },
     { NULL, NULL },
 };
 
@@ -239,7 +241,7 @@ enum
     TDPARM_COMPRESS,
     TDPARM_METHOD,
     TDPARM_LEVEL,
-	TDPARM_CHKSIZE,
+    TDPARM_CHKSIZE,
 };
 
 /*-------------------------------------------------------------------*/
@@ -265,7 +267,7 @@ int             rc;                     /* Return code               */
     rc = open (dev->filename, O_RDWR | O_BINARY);
 
     /* If file is read-only, attempt to open again */
-    if (rc < 0 && errno == EROFS)
+    if (rc < 0 && (errno == EROFS || errno == EACCES))
     {
         dev->readonly = 1;
         rc = open (dev->filename, O_RDONLY | O_BINARY);
@@ -783,15 +785,6 @@ static int open_het (DEVBLK *dev, BYTE *unitstat)
 {
 int             rc;                     /* Return code               */
 
-    /* Check for no tape in drive */
-    if (!strcmp (dev->filename, TAPE_UNLOADED))
-    {
-        dev->sense[0] = SENSE_IR;
-        dev->sense[1] = SENSE1_TAPE_TUB;
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
-        return -1;
-    }
-
     /* Open the HET file */
     rc = het_open (&dev->hetb, dev->filename, HETOPEN_CREATE );
     if (rc >= 0)
@@ -834,8 +827,8 @@ int             rc;                     /* Return code               */
         return -1;
     }
     
-	/* Indicate file opened */
-	dev->fd = 1;
+    /* Indicate file opened */
+    dev->fd = 1;
 
     return 0;
 
@@ -852,8 +845,8 @@ static void close_het (DEVBLK *dev)
     /* Close the HET file */
     het_close (&dev->hetb);
 
-	/* Reinitialize the DEV fields */
-	dev->fd = -1;
+    /* Reinitialize the DEV fields */
+    dev->fd = -1;
 
     return;
 
@@ -1186,7 +1179,7 @@ BYTE            buf[100];               /* Status string (ASCIIZ)    */
         dev->curfilen = 1;
         dev->nxtblkpos = 0;
         dev->prvblkpos = -1;
-	dev->blockid = 0;
+        dev->blockid = 0;
     }
 
     /* Return tape status */
@@ -1437,7 +1430,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     if (rc < 0 && fsrerrno == EIO && GMT_EOF(stat))
     {
         dev->curfilen++;
-	dev->blockid++;
+        dev->blockid++;
         return 0;
     }
 
@@ -1503,7 +1496,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     if (rc < 0 && bsrerrno == EIO)
     {
         dev->curfilen--;
-	dev->blockid--;
+        dev->blockid--;
         return 0;
     }
 
@@ -2597,7 +2590,7 @@ S32             nxthdro;                /* Offset of next header     */
         rc = bsf_omatape (dev, unitstat);
         if (rc < 0) return -1;
 
-	dev->blockid--;
+        dev->blockid--;
 
         /* Return zero to indicate tapemark detected */
         return 0;
@@ -2889,7 +2882,7 @@ union
             break;
         }
     }
- 
+
     /* Set number of sense bytes */
     dev->numsense = 24;
 
@@ -2967,20 +2960,19 @@ void tapedev_query_device (DEVBLK *dev, BYTE **class,
 int tapedev_close_device ( DEVBLK *dev )
 {
     /* Close the device file */
-	switch (dev->tapedevt)
-	{
-	default:
-	case TAPEDEVT_AWSTAPE:
-	case TAPEDEVT_SCSITAPE:
-	case TAPEDEVT_OMATAPE:
-		close (dev->fd);
-		break;
+    switch (dev->tapedevt)
+    {
+    default:
+    case TAPEDEVT_AWSTAPE:
+    case TAPEDEVT_SCSITAPE:
+    case TAPEDEVT_OMATAPE:
+        close (dev->fd);
+        break;
 
-	case TAPEDEVT_HET:
-		close_het (dev);
-		break;
-	} /* end switch(dev->tapedevt) */
-
+    case TAPEDEVT_HET:
+        close_het (dev);
+        break;
+    } /* end switch(dev->tapedevt) */
     dev->fd = -1;
 
     /* Release the OMA descriptor array if allocated */
@@ -3014,7 +3006,7 @@ int             len;                    /* Length of data block      */
 long            num;                    /* Number of bytes to read   */
 OMATAPE_DESC   *omadesc;                /* -> OMA descriptor entry   */
 struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
-long		locblock;		/* Block Id for Locate Block */
+long            locblock;               /* Block Id for Locate Block */
 
     /* If this is a data-chained READ, then return any data remaining
        in the buffer which was not used by the previous CCW */
@@ -3066,7 +3058,7 @@ long		locblock;		/* Block Id for Locate Block */
             break;
         } /* end switch(dev->tapedevt) */
 
-	dev->blockid = 0;
+        dev->blockid = 0;
 
         /* Exit with unit status if open was unsuccessful */
         if (rc < 0) return;
@@ -3110,7 +3102,7 @@ long		locblock;		/* Block Id for Locate Block */
         if (rc < 0)
             break;
 
-	dev->blockid++;
+        dev->blockid++;
 
         /* Set normal status */
         *residual = 0;
@@ -3172,7 +3164,7 @@ long		locblock;		/* Block Id for Locate Block */
         dev->curblkrem = len - num;
         dev->curbufoff = num;
 
-	dev->blockid++;
+        dev->blockid++;
 
         /* Exit with unit exception status if tapemark was read */
         if (len == 0)
@@ -3189,7 +3181,7 @@ long		locblock;		/* Block Id for Locate Block */
     /*---------------------------------------------------------------*/
     /* CONTROL NO-OPERATION                                          */
     /*---------------------------------------------------------------*/
-	*residual = 0;
+        *residual = 0;
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -3240,7 +3232,7 @@ long		locblock;		/* Block Id for Locate Block */
         /* For HET file, just rewind it */
         if (dev->tapedevt == TAPEDEVT_HET)
         {
-			rc = het_rewind (dev->hetb);
+            rc = het_rewind (dev->hetb);
             if (rc < 0)
             {
                 /* Handle seek error condition */
@@ -3259,7 +3251,7 @@ long		locblock;		/* Block Id for Locate Block */
         dev->nxtblkpos = 0;
         dev->prvblkpos = -1;
 
-	dev->blockid = 0;
+        dev->blockid = 0;
 
         /* Set unit status */
         *residual = 0;
@@ -3286,8 +3278,7 @@ long		locblock;		/* Block Id for Locate Block */
             } /* end if(rc) */
         } /* end if(SCSITAPE) */
 
-	if ((dev->tapedevt == TAPEDEVT_AWSTAPE) ||
-	    (dev->tapedevt == TAPEDEVT_HET))
+	if (dev->tapedevt == TAPEDEVT_AWSTAPE)
         {
 	    strcpy(dev->filename, TAPE_UNLOADED);
             logmsg ("HHC287I Tape %4.4X unloaded\n",
@@ -3308,12 +3299,13 @@ long		locblock;		/* Block Id for Locate Block */
             close_het (dev);
             break;
         } /* end switch(dev->tapedevt) */
+
         dev->fd = -1;
         dev->curfilen = 1;
         dev->nxtblkpos = 0;
         dev->prvblkpos = -1;
 
-	dev->blockid = 0;
+        dev->blockid = 0;
 
         /* Set unit status */
         *residual = 0;
@@ -3395,24 +3387,24 @@ long		locblock;		/* Block Id for Locate Block */
             break;
         }
 
-	/* Calculate number of bytes and residual byte count */
-	len = 2*sizeof(dev->blockid);
-	num = (count < len) ? count : len;
-	*residual = count - num;
-	if (count < len) *more = 1;
+        /* Calculate number of bytes and residual byte count */
+        len = 2*sizeof(dev->blockid);
+        num = (count < len) ? count : len;
+        *residual = count - num;
+        if (count < len) *more = 1;
 
-	/* Copy Block Id to channel I/O buffer */
-	iobuf[0] = 0x01;
-	iobuf[1] = (dev->blockid >> 16) & 0x3F;
-	iobuf[2] = (dev->blockid >> 8 ) & 0xFF;
-	iobuf[3] = (dev->blockid      ) & 0xFF;
-	iobuf[4] = 0x01;
-	iobuf[5] = (dev->blockid >> 16) & 0x3F;
-	iobuf[6] = (dev->blockid >> 8 ) & 0xFF;
-	iobuf[7] = (dev->blockid      ) & 0xFF;
+        /* Copy Block Id to channel I/O buffer */
+        iobuf[0] = 0x01;
+        iobuf[1] = (dev->blockid >> 16) & 0x3F;
+        iobuf[2] = (dev->blockid >> 8 ) & 0xFF;
+        iobuf[3] = (dev->blockid      ) & 0xFF;
+        iobuf[4] = 0x01;
+        iobuf[5] = (dev->blockid >> 16) & 0x3F;
+        iobuf[6] = (dev->blockid >> 8 ) & 0xFF;
+        iobuf[7] = (dev->blockid      ) & 0xFF;
 
-	*unitstat = CSW_CE | CSW_DE;
-	break;
+        *unitstat = CSW_CE | CSW_DE;
+        break;
 
     case 0x27:
     /*---------------------------------------------------------------*/
@@ -3574,8 +3566,8 @@ long		locblock;		/* Block Id for Locate Block */
     /*---------------------------------------------------------------*/
     /* SYNCHRONIZE                                                   */
     /*---------------------------------------------------------------*/
-	*unitstat = CSW_CE | CSW_DE;
-	break;
+        *unitstat = CSW_CE | CSW_DE;
+        break;
 
     case 0x4F:
     /*---------------------------------------------------------------*/
@@ -3597,23 +3589,23 @@ long		locblock;		/* Block Id for Locate Block */
             break;
         }
 
-	/* Check for minimum count field */
-	if (count < sizeof(dev->blockid))
-	{
-	    dev->sense[0] = SENSE_CR;
-	    *unitstat = CSW_CE | CSW_DE | CSW_UC;
-	    break;
-	}
+        /* Check for minimum count field */
+        if (count < sizeof(dev->blockid))
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
 
-	/* Block to seek */
-	len = sizeof(locblock);
-	locblock =  ((U32)(iobuf[3]) << 24)
-	          | ((U32)(iobuf[2]) << 16)
-	          | ((U32)(iobuf[1]) <<  8);
+        /* Block to seek */
+        len = sizeof(locblock);
+        locblock =  ((U32)(iobuf[3]) << 24)
+                  | ((U32)(iobuf[2]) << 16)
+                  | ((U32)(iobuf[1]) <<  8);
 
-	/* Calculate residual byte count */
-	num = (count < len) ? count : len;
-	*residual = count - num;
+        /* Calculate residual byte count */
+        num = (count < len) ? count : len;
+        *residual = count - num;
 
         /* For SCSI tape, issue rewind command */
         if (dev->tapedevt == TAPEDEVT_SCSITAPE)
@@ -3670,54 +3662,54 @@ long		locblock;		/* Block Id for Locate Block */
         dev->nxtblkpos = 0;
         dev->prvblkpos = -1;
 
-	dev->blockid = 0;
+        dev->blockid = 0;
 
-	/* Start of block locate code */
-	logmsg("tapedev: Locate block 0x%8.8lX on %4.4X\n",
-	       locblock, dev->devnum);
-	
+        /* Start of block locate code */
+        logmsg("tapedev: Locate block 0x%8.8lX on %4.4X\n",
+                locblock, dev->devnum);
+    
         switch (dev->tapedevt)
         {
         default:
         case TAPEDEVT_AWSTAPE:
-	    rc = 0;
-	    while ((dev->blockid < locblock) && (rc >= 0))
-		rc = fsb_awstape(dev, unitstat);
+            rc = 0;
+            while ((dev->blockid < locblock) && (rc >= 0))
+                rc = fsb_awstape(dev, unitstat);
             break;
 
         case TAPEDEVT_HET:
-	    rc = 0;
-	    while ((dev->blockid < locblock) && (rc >= 0))
-		rc = fsb_het(dev, unitstat);
+            rc = 0;
+            while ((dev->blockid < locblock) && (rc >= 0))
+                rc = fsb_het (dev, unitstat);
             break;
 
         case TAPEDEVT_SCSITAPE:
-	    rc = 0;
-	    while ((dev->blockid < locblock) && (rc >= 0))
-		rc = fsb_scsitape(dev, unitstat);
+            rc = 0;
+            while ((dev->blockid < locblock) && (rc >= 0))
+                rc = fsb_scsitape(dev, unitstat);
             break;
 
         } /* end switch(dev->tapedevt) */
 
-	if (rc < 0)
-	{
-	    /* Set Unit Check with Equipment Check */
-	    dev->sense[1] = SENSE1_PER;
-	    *unitstat = CSW_CE | CSW_DE | CSW_UC;
-	    break;
-	}
+        if (rc < 0)
+        {
+            /* Set Unit Check with Equipment Check */
+            dev->sense[1] = SENSE1_PER;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
 
-	*unitstat = CSW_CE | CSW_DE;
-	break;
+        *unitstat = CSW_CE | CSW_DE;
+        break;
 
     case 0x77:
     /*---------------------------------------------------------------*/
     /* PERFORM SUBSYSTEM FUNCTION                                    */
     /*---------------------------------------------------------------*/
-	/* Not yet implemented */
-	*residual = 0;
-	*unitstat = CSW_CE | CSW_DE;
-	break;
+        /* Not yet implemented */
+        *residual = 0;
+        *unitstat = CSW_CE | CSW_DE;
+        break;
 
     case 0xCB: /* 9-track 800 bpi */
     case 0xC3: /* 9-track 1600 bpi */

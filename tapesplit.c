@@ -1,4 +1,4 @@
-/* TAPESPLIT.C  (c) Copyright Jay Maynard, 2000-2001                 */
+/* TAPESPLIT.C  (c) Copyright Jay Maynard, 2000                      */
 /*              Split AWSTAPE format tape image                      */
 
 /*-------------------------------------------------------------------*/

@@ -1,13 +1,16 @@
-/* TRACE.C      Implicit tracing functions - Jan Jaeger              */
+/* TRACE.C      (c) Copyright Jan Jaeger, 2000-2001                  */
+/*              Implicit tracing functions                           */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
 
 #include "hercules.h"
 
-#if defined(FEATURE_TRACING)
-
 #include "opcode.h"
+
 #include "inline.h"
+
+#if defined(FEATURE_TRACING)
 
 /*-------------------------------------------------------------------*/
 /* Form implicit branch trace entry                                  */
@@ -21,82 +24,70 @@
 /*                                                                   */
 /*      This function does not return if a program check occurs.     */
 /*-------------------------------------------------------------------*/
-U32 trace_br (int amode, U32 ia, REGS *regs)
+CREG ARCH_DEP(trace_br) (int amode, VADR ia, REGS *regs)
 {
-U32     n;                              /* Addr of trace table entry */
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
-U32     ag,                             /* Abs Guest addr of TTE     */
+RADR    n;                              /* Addr of trace table entry */
+#if defined(_FEATURE_SIE)
+RADR    ag,                             /* Abs Guest addr of TTE     */
         ah;                             /* Abs Host addr of TTE      */
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
-#ifdef IBUF
-U32     haddr;
-#endif
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Obtain the trace entry address from control register 12 */
-    n = regs->cr[12] & CR12_TRACEEA;
+    n = regs->CR(12) & CR12_TRACEEA;
 
-    /* Low-address protection program check if trace entry
-       address is 0-511 and bit 3 of control register 0 is set */
-    if ( n < 512 && (regs->cr[0] & CR0_LOW_PROT) )
+    /* Apply low-address protection to trace entry address */
+    if (ARCH_DEP(is_low_address_protected) (n, 0, regs))
     {
 #ifdef FEATURE_SUPPRESSION_ON_PROTECTION
-        regs->tea = (n & TEA_EFFADDR);
+        regs->TEA = (n & STORAGE_KEY_PAGEMASK);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
     }
 
     /* Program check if trace entry is outside main storage */
     if ( n >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Program check if storing would overflow a 4K page boundary */
-    if ( ((n + 4) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
-        program_interrupt (regs, PGM_TRACE_TABLE_EXCEPTION);
+    if ( ((n + 4) & PAGEFRAME_PAGEMASK) != (n & PAGEFRAME_PAGEMASK) )
+        ARCH_DEP(program_interrupt) (regs, PGM_TRACE_TABLE_EXCEPTION);
 
     /* Convert trace entry real address to absolute address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     ag = n;
 
     SIE_TRANSLATE(&n, ACCTYPE_WRITE, regs);
 
     ah = n;
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
 
-#ifdef IBUF
-    haddr = n;
-#endif
-
     /* Build the branch trace entry */
+    STORE_FW(sysblk.mainstor + n, ia);
     if (amode)
-        sysblk.mainstor[n++] = 0x80 | ((ia & 0x7F000000) >> 24);
-    else
-        sysblk.mainstor[n++] = 0x00;
-    sysblk.mainstor[n++] = (ia & 0xFF0000) >> 16;
-    sysblk.mainstor[n++] = (ia & 0xFF00) >> 8;
-    sysblk.mainstor[n++] = ia & 0xFF;
+        sysblk.mainstor[n] |= 0x80;
+    n += 4;
 
-    FRAG_INVALIDATE(haddr, 4);
-
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     /* Recalculate the Guest absolute address */
     n = ag + (n - ah);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Convert trace entry absolue address back to real address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
     /* Return updated value of control register 12 */
-    return (regs->cr[12] & ~CR12_TRACEEA) | n;
+    return (regs->CR(12) & ~CR12_TRACEEA) | n;
 
-} /* end function trace_br */
+} /* end function ARCH_DEP(trace_br) */
 
 
+#if defined(FEATURE_SUBSPACE_GROUP)
 /*-------------------------------------------------------------------*/
 /* Form implicit BSG trace entry                                     */
 /*                                                                   */
@@ -109,79 +100,69 @@ U32     haddr;
 /*                                                                   */
 /*      This function does not return if a program check occurs.     */
 /*-------------------------------------------------------------------*/
-U32 trace_bsg (U32 alet, U32 ia, REGS *regs)
+CREG ARCH_DEP(trace_bsg) (U32 alet, VADR ia, REGS *regs)
 {
-U32     n;                              /* Addr of trace table entry */
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
-U32     ag,                             /* Abs Guest addr of TTE     */
+RADR    n;                              /* Addr of trace table entry */
+#if defined(_FEATURE_SIE)
+RADR    ag,                             /* Abs Guest addr of TTE     */
         ah;                             /* Abs Host addr of TTE      */
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
-#ifdef IBUF
-U32     haddr;
-#endif
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Obtain the trace entry address from control register 12 */
-    n = regs->cr[12] & CR12_TRACEEA;
+    n = regs->CR(12) & CR12_TRACEEA;
 
-    /* Low-address protection program check if trace entry
-       address is 0-511 and bit 3 of control register 0 is set */
-    if ( n < 512 && (regs->cr[0] & CR0_LOW_PROT) )
+    /* Apply low-address protection to trace entry address */
+    if (ARCH_DEP(is_low_address_protected) (n, 0, regs))
     {
 #ifdef FEATURE_SUPPRESSION_ON_PROTECTION
-        regs->tea = (n & TEA_EFFADDR);
+        regs->TEA = (n & STORAGE_KEY_PAGEMASK);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
     }
 
     /* Program check if trace entry is outside main storage */
     if ( n >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Program check if storing would overflow a 4K page boundary */
-    if ( ((n + 8) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
-        program_interrupt (regs, PGM_TRACE_TABLE_EXCEPTION);
+    if ( ((n + 8) & PAGEFRAME_PAGEMASK) != (n & PAGEFRAME_PAGEMASK) )
+        ARCH_DEP(program_interrupt) (regs, PGM_TRACE_TABLE_EXCEPTION);
 
     /* Convert trace entry real address to absolute address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     ag = n;
 
     SIE_TRANSLATE(&n, ACCTYPE_WRITE, regs);
 
     ah = n;
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
-#ifdef IBUF
-    haddr = n;
-#endif
 
     /* Build the Branch in Subspace Group trace entry */
     sysblk.mainstor[n++] = 0x41;
     sysblk.mainstor[n++] = (regs->psw.prob << 7) | ((alet & 0x7F0000) >> 16);
-    sysblk.mainstor[n++] = (alet & 0xFF00) >> 8;
-    sysblk.mainstor[n++] = alet & 0xFF;
-    sysblk.mainstor[n++] = (regs->psw.ia & 0xFF000000) >> 24;
-    sysblk.mainstor[n++] = (regs->psw.ia & 0xFF0000) >> 16;
-    sysblk.mainstor[n++] = (regs->psw.ia & 0xFF00) >> 8;
-    sysblk.mainstor[n++] = regs->psw.ia & 0xFF;
-    FRAG_INVALIDATE(haddr, 8);
+    STORE_HW(sysblk.mainstor + n, alet); n += 2;
+    STORE_FW(sysblk.mainstor + n, regs->psw.IA | (regs->psw.amode << 31));
+    n += 4;
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     /* Recalculate the Guest absolute address */
     n = ag + (n - ah);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Convert trace entry absolue address back to real address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
     /* Return updated value of control register 12 */
-    return (regs->cr[12] & ~CR12_TRACEEA) | n;
+    return (regs->CR(12) & ~CR12_TRACEEA) | n;
 
-} /* end function trace_bsg */
+} /* end function ARCH_DEP(trace_bsg) */
+#endif /*defined(FEATURE_SUBSPACE_GROUP)*/
 
 
 /*-------------------------------------------------------------------*/
@@ -195,76 +176,66 @@ U32     haddr;
 /*                                                                   */
 /*      This function does not return if a program check occurs.     */
 /*-------------------------------------------------------------------*/
-U32 trace_ssar (U16 sasn, REGS *regs)
+CREG ARCH_DEP(trace_ssar) (U16 sasn, REGS *regs)
 {
-U32     n;                              /* Addr of trace table entry */
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
-U32     ag,                             /* Abs Guest addr of TTE     */
+RADR    n;                              /* Addr of trace table entry */
+#if defined(_FEATURE_SIE)
+RADR    ag,                             /* Abs Guest addr of TTE     */
         ah;                             /* Abs Host addr of TTE      */
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
-#ifdef IBUF
-U32     haddr;
-#endif
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Obtain the trace entry address from control register 12 */
-    n = regs->cr[12] & CR12_TRACEEA;
+    n = regs->CR(12) & CR12_TRACEEA;
 
-    /* Low-address protection program check if trace entry
-       address is 0-511 and bit 3 of control register 0 is set */
-    if ( n < 512 && (regs->cr[0] & CR0_LOW_PROT) )
+    /* Apply low-address protection to trace entry address */
+    if (ARCH_DEP(is_low_address_protected) (n, 0, regs))
     {
 #ifdef FEATURE_SUPPRESSION_ON_PROTECTION
-        regs->tea = (n & TEA_EFFADDR);
+        regs->TEA = (n & STORAGE_KEY_PAGEMASK);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
     }
 
     /* Program check if trace entry is outside main storage */
     if ( n >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Program check if storing would overflow a 4K page boundary */
-    if ( ((n + 4) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
-        program_interrupt (regs, PGM_TRACE_TABLE_EXCEPTION);
+    if ( ((n + 4) & PAGEFRAME_PAGEMASK) != (n & PAGEFRAME_PAGEMASK) )
+        ARCH_DEP(program_interrupt) (regs, PGM_TRACE_TABLE_EXCEPTION);
 
     /* Convert trace entry real address to absolute address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     ag = n;
 
     SIE_TRANSLATE(&n, ACCTYPE_WRITE, regs);
 
     ah = n;
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
-#ifdef IBUF
-    haddr = n;
-#endif
 
     /* Build the Set Secondary ASN trace entry */
     sysblk.mainstor[n++] = 0x10;
     sysblk.mainstor[n++] = 0x00;
-    sysblk.mainstor[n++] = (sasn & 0xFF00) >> 8;
-    sysblk.mainstor[n++] = sasn & 0xFF;
+    STORE_HW(sysblk.mainstor + n, sasn); n += 2;
 
-    FRAG_INVALIDATE(haddr, 4);
-
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     /* Recalculate the Guest absolute address */
     n = ag + (n - ah);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Convert trace entry absolue address back to real address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
     /* Return updated value of control register 12 */
-    return (regs->cr[12] & ~CR12_TRACEEA) | n;
+    return (regs->CR(12) & ~CR12_TRACEEA) | n;
 
-} /* end function trace_ssar */
+} /* end function ARCH_DEP(trace_ssar) */
 
 
 /*-------------------------------------------------------------------*/
@@ -278,83 +249,72 @@ U32     haddr;
 /*                                                                   */
 /*      This function does not return if a program check occurs.     */
 /*-------------------------------------------------------------------*/
-U32 trace_pc (U32 pcnum, REGS *regs)
+CREG ARCH_DEP(trace_pc) (U32 pcnum, REGS *regs)
 {
-U32     n;                              /* Addr of trace table entry */
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
-U32     ag,                             /* Abs Guest addr of TTE     */
+RADR    n;                              /* Addr of trace table entry */
+#if defined(_FEATURE_SIE)
+RADR    ag,                             /* Abs Guest addr of TTE     */
         ah;                             /* Abs Host addr of TTE      */
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
-#ifdef IBUF
-U32     haddr;
-#endif
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Obtain the trace entry address from control register 12 */
-    n = regs->cr[12] & CR12_TRACEEA;
+    n = regs->CR(12) & CR12_TRACEEA;
 
-    /* Low-address protection program check if trace entry
-       address is 0-511 and bit 3 of control register 0 is set */
-    if ( n < 512 && (regs->cr[0] & CR0_LOW_PROT) )
+    /* Apply low-address protection to trace entry address */
+    if (ARCH_DEP(is_low_address_protected) (n, 0, regs))
     {
 #ifdef FEATURE_SUPPRESSION_ON_PROTECTION
-        regs->tea = (n & TEA_EFFADDR);
+        regs->TEA = (n & STORAGE_KEY_PAGEMASK);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
     }
 
     /* Program check if trace entry is outside main storage */
     if ( n >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Program check if storing would overflow a 4K page boundary */
-    if ( ((n + 8) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
-        program_interrupt (regs, PGM_TRACE_TABLE_EXCEPTION);
+    if ( ((n + 8) & PAGEFRAME_PAGEMASK) != (n & PAGEFRAME_PAGEMASK) )
+        ARCH_DEP(program_interrupt) (regs, PGM_TRACE_TABLE_EXCEPTION);
 
     /* Convert trace entry real address to absolute address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     ag = n;
 
     SIE_TRANSLATE(&n, ACCTYPE_WRITE, regs);
 
     ah = n;
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
-#ifdef IBUF
-    haddr = n;
-#endif
 
     /* Build the program call trace entry */
     sysblk.mainstor[n++] = 0x21;
     sysblk.mainstor[n++] = regs->psw.pkey | ((pcnum & 0xF0000) >> 16);
-    sysblk.mainstor[n++] = (pcnum & 0xFF00) >> 8;
-    sysblk.mainstor[n++] = pcnum & 0xFF;
-    sysblk.mainstor[n++] = (regs->psw.amode << 31)
-                           | ((regs->psw.ia & 0x7F000000) >> 24);
-    sysblk.mainstor[n++] = (regs->psw.ia & 0xFF0000) >> 16;
-    sysblk.mainstor[n++] = (regs->psw.ia & 0xFF00) >> 8;
-    sysblk.mainstor[n++] = (regs->psw.ia & 0xFE) | regs->psw.prob;
+    STORE_HW(sysblk.mainstor + n, pcnum); n += 2;
+    STORE_FW(sysblk.mainstor + n, (regs->psw.amode << 31)
+                                | regs->psw.IA | regs->psw.prob);
+    n += 4;
 
-    FRAG_INVALIDATE(haddr, 8);
-
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     /* Recalculate the Guest absolute address */
     n = ag + (n - ah);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Convert trace entry absolue address back to real address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
     /* Return updated value of control register 12 */
-    return (regs->cr[12] & ~CR12_TRACEEA) | n;
+    return (regs->CR(12) & ~CR12_TRACEEA) | n;
 
-} /* end function trace_pc */
+} /* end function ARCH_DEP(trace_pc) */
 
 
+#if defined(FEATURE_LINKAGE_STACK)
 /*-------------------------------------------------------------------*/
 /* Form implicit PR trace entry                                      */
 /*                                                                   */
@@ -366,89 +326,76 @@ U32     haddr;
 /*                                                                   */
 /*      This function does not return if a program check occurs.     */
 /*-------------------------------------------------------------------*/
-U32 trace_pr (REGS *newregs, REGS *regs)
+CREG ARCH_DEP(trace_pr) (REGS *newregs, REGS *regs)
 {
-U32     n;                              /* Addr of trace table entry */
+RADR    n;                              /* Addr of trace table entry */
 U16     pasn;                           /* New PASN                  */
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
-U32     ag,                             /* Abs Guest addr of TTE     */
+#if defined(_FEATURE_SIE)
+RADR    ag,                             /* Abs Guest addr of TTE     */
         ah;                             /* Abs Host addr of TTE      */
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
-#ifdef IBUF
-U32     haddr;
-#endif
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Obtain the trace entry address from control register 12 */
-    n = regs->cr[12] & CR12_TRACEEA;
+    n = regs->CR(12) & CR12_TRACEEA;
 
-    /* Low-address protection program check if trace entry
-       address is 0-511 and bit 3 of control register 0 is set */
-    if ( n < 512 && (regs->cr[0] & CR0_LOW_PROT) )
+    /* Apply low-address protection to trace entry address */
+    if (ARCH_DEP(is_low_address_protected) (n, 0, regs))
     {
 #ifdef FEATURE_SUPPRESSION_ON_PROTECTION
-        regs->tea = (n & TEA_EFFADDR);
+        regs->TEA = (n & STORAGE_KEY_PAGEMASK);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
     }
 
     /* Program check if trace entry is outside main storage */
     if ( n >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Program check if storing would overflow a 4K page boundary */
-    if ( ((n + 12) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
-        program_interrupt (regs, PGM_TRACE_TABLE_EXCEPTION);
+    if ( ((n + 12) & PAGEFRAME_PAGEMASK) != (n & PAGEFRAME_PAGEMASK) )
+        ARCH_DEP(program_interrupt) (regs, PGM_TRACE_TABLE_EXCEPTION);
 
     /* Convert trace entry real address to absolute address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     ag = n;
 
     SIE_TRANSLATE(&n, ACCTYPE_WRITE, regs);
 
     ah = n;
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
-#ifdef IBUF
-    haddr = n;
-#endif
 
-    pasn = newregs->cr[4] & CR4_PASN;
+    pasn = newregs->CR(4) & CR4_PASN;
 
     /* Build the program return trace entry */
     sysblk.mainstor[n++] = 0x32;
     sysblk.mainstor[n++] = regs->psw.pkey;
-    sysblk.mainstor[n++] = (pasn & 0xFF00) >> 8;
-    sysblk.mainstor[n++] = pasn & 0xFF;
-    sysblk.mainstor[n++] = (regs->psw.amode << 31)
-                           | ((regs->psw.ia & 0x7F000000) >> 24);
-    sysblk.mainstor[n++] = (regs->psw.ia & 0xFF0000) >> 16;
-    sysblk.mainstor[n++] = (regs->psw.ia & 0xFF00) >> 8;
-    sysblk.mainstor[n++] = (regs->psw.ia & 0xFE) | newregs->psw.prob;
-    sysblk.mainstor[n++] = (newregs->psw.amode << 31)
-                           | ((newregs->psw.ia & 0x7F000000) >> 24);
-    sysblk.mainstor[n++] = (newregs->psw.ia & 0xFF0000) >> 16;
-    sysblk.mainstor[n++] = (newregs->psw.ia & 0xFF00) >> 8;
-    sysblk.mainstor[n++] = newregs->psw.ia & 0xFF;
+    STORE_HW(sysblk.mainstor + n,pasn); n += 2;
+    STORE_FW(sysblk.mainstor + n, (regs->psw.amode << 31)
+                                | regs->psw.IA | newregs->psw.prob);
+    n += 4;
+    STORE_FW(sysblk.mainstor + n, (newregs->psw.amode << 31)
+                                 | newregs->psw.IA);
+    n += 4;
 
-    FRAG_INVALIDATE(haddr, 12);
-
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     /* Recalculate the Guest absolute address */
     n = ag + (n - ah);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Convert trace entry absolue address back to real address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
     /* Return updated value of control register 12 */
-    return (regs->cr[12] & ~CR12_TRACEEA) | n;
+    return (regs->CR(12) & ~CR12_TRACEEA) | n;
 
-} /* end function trace_pr */
+} /* end function ARCH_DEP(trace_pr) */
+#endif /*defined(FEATURE_LINKAGE_STACK)*/
 
 
 /*-------------------------------------------------------------------*/
@@ -463,78 +410,82 @@ U32     haddr;
 /*                                                                   */
 /*      This function does not return if a program check occurs.     */
 /*-------------------------------------------------------------------*/
-U32 trace_pt (U16 pasn, U32 gpr2, REGS *regs)
+CREG ARCH_DEP(trace_pt) (U16 pasn, GREG gpr2, REGS *regs)
 {
-U32     n;                              /* Addr of trace table entry */
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
-U32     ag,                             /* Abs Guest addr of TTE     */
+RADR    n;                              /* Addr of trace table entry */
+#if defined(_FEATURE_SIE)
+RADR    ag,                             /* Abs Guest addr of TTE     */
         ah;                             /* Abs Host addr of TTE      */
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
-#ifdef IBUF
-U32     haddr;
-#endif
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Obtain the trace entry address from control register 12 */
-    n = regs->cr[12] & CR12_TRACEEA;
+    n = regs->CR(12) & CR12_TRACEEA;
 
-    /* Low-address protection program check if trace entry
-       address is 0-511 and bit 3 of control register 0 is set */
-    if ( n < 512 && (regs->cr[0] & CR0_LOW_PROT) )
+    /* Apply low-address protection to trace entry address */
+    if (ARCH_DEP(is_low_address_protected) (n, 0, regs))
     {
 #ifdef FEATURE_SUPPRESSION_ON_PROTECTION
-        regs->tea = (n & TEA_EFFADDR);
+        regs->TEA = (n & STORAGE_KEY_PAGEMASK);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
     }
 
     /* Program check if trace entry is outside main storage */
     if ( n >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Program check if storing would overflow a 4K page boundary */
-    if ( ((n + 8) & STORAGE_KEY_PAGEMASK) != (n & STORAGE_KEY_PAGEMASK) )
-        program_interrupt (regs, PGM_TRACE_TABLE_EXCEPTION);
+    if ( ((n + 8) & PAGEFRAME_PAGEMASK) != (n & PAGEFRAME_PAGEMASK) )
+        ARCH_DEP(program_interrupt) (regs, PGM_TRACE_TABLE_EXCEPTION);
 
     /* Convert trace entry real address to absolute address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     ag = n;
 
     SIE_TRANSLATE(&n, ACCTYPE_WRITE, regs);
 
     ah = n;
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
-#ifdef IBUF
-    haddr = n;
-#endif
 
     /* Build the program transfer trace entry */
     sysblk.mainstor[n++] = 0x31;
     sysblk.mainstor[n++] = regs->psw.pkey;
-    sysblk.mainstor[n++] = (pasn & 0xFF00) >> 8;
-    sysblk.mainstor[n++] = pasn & 0xFF;
-    sysblk.mainstor[n++] = (gpr2 & 0xFF000000) >> 24;
-    sysblk.mainstor[n++] = (gpr2 & 0xFF0000) >> 16;
-    sysblk.mainstor[n++] = (gpr2 & 0xFF00) >> 8;
-    sysblk.mainstor[n++] = gpr2 & 0xFF;
+    STORE_HW(sysblk.mainstor + n,pasn); n += 2;
+    STORE_FW(sysblk.mainstor + n,gpr2); n += 4;
 
-    FRAG_INVALIDATE(haddr, 8);
-
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     /* Recalculate the Guest absolute address */
     n = ag + (n - ah);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Convert trace entry absolue address back to real address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
     /* Return updated value of control register 12 */
-    return (regs->cr[12] & ~CR12_TRACEEA) | n;
+    return (regs->CR(12) & ~CR12_TRACEEA) | n;
 
-} /* end function trace_pt */
+} /* end function ARCH_DEP(trace_pt) */
+
 #endif /*defined(FEATURE_TRACING)*/
+
+
+#if !defined(_GEN_ARCH)
+
+// #define  _GEN_ARCH 964
+// #include "trace.c"
+
+// #undef   _GEN_ARCH
+#define  _GEN_ARCH 390
+#include "trace.c"
+
+#undef   _GEN_ARCH
+#define  _GEN_ARCH 370
+#include "trace.c"
+
+#endif /*!defined(_GEN_ARCH)*/

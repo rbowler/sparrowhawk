@@ -1,14 +1,12 @@
 /*
-||
 || ----------------------------------------------------------------------------
 ||
 || HETLIB.C     (c) Copyright Leland Lucius, 2000-2001
-||              Released under whatever license Hercules uses.
+||              Released under terms of the Q Public License.
 ||
 || Creates IEHINITT or NL format Hercules Emulated Tapes.
 ||
 || ----------------------------------------------------------------------------
-||
 */
 
 #include "hetlib.h"

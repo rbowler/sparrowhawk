@@ -1,4 +1,4 @@
-/* CKDDASD.C    (c) Copyright Roger Bowler, 1999-2001                */
+/* CKDDASD.C    (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 CKD Direct Access Storage Device Handler     */
 
 /*-------------------------------------------------------------------*/
@@ -270,7 +270,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
          && argv[i][4] >= '0' && argv[i][4] <= '0' + CCKD_MAX_DFW)
             continue;
 
-        logmsg ("HHC351I parameter %d is invalid: %s\n", 
+        logmsg ("HHC351I parameter %d is invalid: %s\n",
                 i + 1, argv[i]);
         return -1;
     }
@@ -677,7 +677,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
        a single buffer before passing data to the device handler */
     dev->cdwmerge = 1;
 
-    if (cckd == 0 && dev->ckdsfn[0] == '\0')
+    if (cckd == 0)
         return 0;
     else
         return cckddasd_init_handler(dev, argc, argv);
@@ -727,8 +727,7 @@ int	i;				/* Index                     */
             free (dev->ckdcache);
         }
 
-        if (dev->ckdcachehits || dev->ckdcachemisses)
-            DEVTRACE("ckddasd: cache hits %d misses %d\n",
+        DEVTRACE("ckddasd: cache hits %d misses %d\n",
                  dev->ckdcachehits, dev->ckdcachemisses);
 
         /* clear full track/cache fields */
@@ -947,7 +946,7 @@ int             lru;                    /* LRU cache entry index     */
                      dev->ckdtrkbuf[1], dev->ckdtrkbuf[2],
                      dev->ckdtrkbuf[3], dev->ckdtrkbuf[4]);
             DEVTRACE("ckddasd:    file %d fd %d offset %d length %d\n",
-                     dev->ckdtrkfn + 1, fd, (int)dev->ckdtrkpos, 
+                     dev->ckdtrkfn + 1, fd, (int)dev->ckdtrkpos,
                      dev->ckdtrksz);
 
             /* calculate old file offset - another dependency here:
@@ -1025,7 +1024,7 @@ int             rc;                     /* Return code               */
         if (dev->ckdcurpos + N > dev->ckdtrkpos + dev->ckdtrksz)
             N = dev->ckdtrkpos + dev->ckdtrksz - dev->ckdcurpos;
 
-        /* copy the data to the track buffer */  
+        /* copy the data to the track buffer */
         memcpy (&dev->ckdtrkbuf[dev->ckdcurpos - dev->ckdtrkpos], buf,
                 N);
 
@@ -1035,7 +1034,7 @@ int             rc;                     /* Return code               */
 
         /* perform actual write if nolazywrite */
         if (!dev->ckdlazywrt)
-        {   
+        {
             /* seek to current file position */
             rc = lseek (fd, dev->ckdcurpos, SEEK_SET);
             if (rc == -1)
@@ -1061,7 +1060,7 @@ int             rc;                     /* Return code               */
         /* check for highest position written on the track */
         if (dev->ckdcurpos > dev->ckdhipos)
             dev->ckdhipos = dev->ckdcurpos;
-        
+
         return N;
     }
     else
@@ -1246,7 +1245,7 @@ off_t           seekpos;                /* Seek position for lseek   */
         || trkhdr->head[1] != (head & 0xFF))
     {
         logmsg ("%4.4X ckddasd: invalid track header for cyl %d head %d %2.2x%2.2x%2.2x%2.2x%2.2x\n",
-                dev->devnum, cyl, head, 
+                dev->devnum, cyl, head,
                 trkhdr->bin,trkhdr->cyl[0],trkhdr->cyl[1],trkhdr->head[0],trkhdr->head[1]);
 
         /* Unit check with invalid track format */
@@ -3205,11 +3204,11 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         else
             *unitstat = CSW_CE | CSW_DE;
 
-#ifdef CKD_KEY_TRACING
+#ifdef OPTION_CKD_KEY_TRACING
         /* If the search was successful, trace the first 8 bytes of
            the key, which will usually be a dataset name or member
            name and can provide useful debugging information */
-        if (*unitstat & CSW_SM)
+        if ((*unitstat & CSW_SM) && isprint(ebcdic_to_ascii[iobuf[0]]))
         {
             BYTE module[45]; int i;
             for (i=0; i < sizeof(module)-1 && i < num; i++)
@@ -3217,7 +3216,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             module[i] = '\0';
             logmsg ("ckddasd: search key %s\n", module);
         }
-#endif /*CKD_KEY_TRACING*/
+#endif /*OPTION_CKD_KEY_TRACING*/
 
         /* Set flag if entire key was equal for SEARCH KEY EQUAL */
         if (rc == 0 && num == dev->ckdcurkl && (code & 0x7F) == 0x29)

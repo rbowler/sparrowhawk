@@ -1,5 +1,7 @@
-/* MACHCHK.C    (c) Copyright Jan Jaeger, 2000-2001                  */
+/* MACHCHK.C    (c) Copyright Jan Jaeger, 2000                       */
 /*              ESA/390 Machine Check Functions                      */
+
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
 
 /*-------------------------------------------------------------------*/
 /* The machine check function supports dynamic I/O configuration.    */
@@ -12,62 +14,11 @@
 
 #include "hercules.h"
 
-/*-------------------------------------------------------------------*/
-/* Present Machine Check Interrupt                                   */
-/* Input:                                                            */
-/*      regs    Pointer to the CPU register context                  */
-/* Output:                                                           */
-/*      mcic    Machine check interrupt code                         */
-/*      xdmg    External damage code                                 */
-/*      fsta    Failing storage address                              */
-/* Return code:                                                      */
-/*      0=No machine check, 1=Machine check presented                */
-/*                                                                   */
-/* Generic machine check function.  At the momement the only         */
-/* supported machine check is the channel report.                    */
-/*                                                                   */
-/* This routine must be called with the sysblk.intlock held          */
-/*-------------------------------------------------------------------*/
-int present_mck_interrupt(REGS *regs, U64 *mcic, U32 *xdmg, U32 *fsta)
-{
-int rc = 0;
+#include "opcode.h"
 
-#ifdef FEATURE_CHANNEL_SUBSYSTEM
-    /* If there is a crw pending and we are enabled for the channel
-       report interrupt subclass then process the interrupt */
-    if(sysblk.crwpending && (regs->cr[14] & CR14_CHANRPT))
-    {
-        *mcic =  MCIC_CP |
-               MCIC_WP |
-               MCIC_MS |
-               MCIC_PM |
-               MCIC_IA |
-#ifdef FEATURE_HEXADECIMAL_FLOATING_POINT
-               MCIC_FP |
-#endif /*FEATURE_HEXADECIMAL_FLOATING_POINT*/
-               MCIC_GR |
-               MCIC_CR |
-               MCIC_ST |
-#ifdef FEATURE_ACCESS_REGISTERS
-               MCIC_AR |
-#endif /*FEATURE_ACCESS_REGISTERS*/
-               MCIC_AP |
-               MCIC_CT |
-               MCIC_CC ;
-        *xdmg = 0;
-        *fsta = 0;
-        sysblk.crwpending = 0;
-        rc = 1;
-    }
+#if !defined(_MACHCHK_C)
 
-    if(!sysblk.crwpending)
-#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
-        sysblk.mckpending = 0;
-
-    set_doint(NULL);
-
-    return rc;
-} /* end function present_mck_interrupt */
+#define _MACHCHK_C
 
 /*-------------------------------------------------------------------*/
 /* Return pending channel report                                     */
@@ -105,9 +56,82 @@ void machine_check_crwpend()
     /* Signal waiting CPUs that an interrupt may be pending */
     obtain_lock (&sysblk.intlock);
     sysblk.mckpending = sysblk.crwpending = 1;
-    set_doint(NULL);
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 
 } /* end function machine_check_crwpend */
 
+
+#endif /*!defined(_MACHCHK_C)*/
+
+
+/*-------------------------------------------------------------------*/
+/* Present Machine Check Interrupt                                   */
+/* Input:                                                            */
+/*      regs    Pointer to the CPU register context                  */
+/* Output:                                                           */
+/*      mcic    Machine check interrupt code                         */
+/*      xdmg    External damage code                                 */
+/*      fsta    Failing storage address                              */
+/* Return code:                                                      */
+/*      0=No machine check, 1=Machine check presented                */
+/*                                                                   */
+/* Generic machine check function.  At the momement the only         */
+/* supported machine check is the channel report.                    */
+/*                                                                   */
+/* This routine must be called with the sysblk.intlock held          */
+/*-------------------------------------------------------------------*/
+int ARCH_DEP(present_mck_interrupt)(REGS *regs, U64 *mcic, U32 *xdmg, RADR *fsta)
+{
+int rc = 0;
+
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+    /* If there is a crw pending and we are enabled for the channel
+       report interrupt subclass then process the interrupt */
+    if(sysblk.crwpending && (regs->CR(14) & CR14_CHANRPT))
+    {
+        *mcic =  MCIC_CP |
+               MCIC_WP |
+               MCIC_MS |
+               MCIC_PM |
+               MCIC_IA |
+#ifdef FEATURE_HEXADECIMAL_FLOATING_POINT
+               MCIC_FP |
+#endif /*FEATURE_HEXADECIMAL_FLOATING_POINT*/
+               MCIC_GR |
+               MCIC_CR |
+               MCIC_ST |
+#ifdef FEATURE_ACCESS_REGISTERS
+               MCIC_AR |
+#endif /*FEATURE_ACCESS_REGISTERS*/
+               MCIC_AP |
+               MCIC_CT |
+               MCIC_CC ;
+        *xdmg = 0;
+        *fsta = 0;
+        sysblk.crwpending = 0;
+        rc = 1;
+    }
+
+    if(!sysblk.crwpending)
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+        sysblk.mckpending = 0;
+
+    return rc;
+} /* end function present_mck_interrupt */
+
+
+#if !defined(_GEN_ARCH)
+
+// #define  _GEN_ARCH 964
+// #include "machchk.c"
+
+// #undef   _GEN_ARCH
+#define  _GEN_ARCH 390
+#include "machchk.c"
+
+#undef   _GEN_ARCH
+#define  _GEN_ARCH 370
+#include "machchk.c"
+
+#endif /*!defined(_GEN_ARCH)*/

@@ -1,7 +1,7 @@
-/* CONFIG.C     (c) Copyright Roger Bowler, 1999-2001                */
+/* CONFIG.C     (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 Configuration Builder                        */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
 
 /*-------------------------------------------------------------------*/
 /* This module builds the configuration tables for the Hercules      */
@@ -18,9 +18,24 @@
 /*      Dynamic device attach/detach by Jan Jaeger                   */
 /*      OSTAILOR parameter by Jay Maynard                            */
 /*      PANRATE parameter by Reed H. Petty                           */
+/*      CFCC hardware loader by Jan Jaeger                           */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
 /*-------------------------------------------------------------------*/
 
+
 #include "hercules.h"
+
+#include "opcode.h"
+
+#if !defined(_GEN_ARCH)
+
+#define  _GEN_ARCH 370
+#include "config.c"
+#undef   _GEN_ARCH
+
+#define  _GEN_ARCH 390
+#include "config.c"
+#undef   _GEN_ARCH
 
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
@@ -99,6 +114,7 @@ ascii_to_ebcdic[] = {
 static int read_config (BYTE *fname, FILE *fp)
 {
 int     i;                              /* Array subscript           */
+int     c;                              /* Character work area       */
 int     stmtlen;                        /* Statement length          */
 
     while (1)
@@ -107,32 +123,42 @@ int     stmtlen;                        /* Statement length          */
         stmt++;
 
         /* Read next statement from configuration file */
-        if ( fgets (buf, sizeof(buf), fp) == NULL )
+        for (stmtlen = 0; ;)
         {
-            if (feof(fp)) return -1;
+            /* Read character from configuration file */
+            c = fgetc(fp);
 
-            fprintf (stderr,
-                    "HHC001I Error reading file %s line %d: %s\n",
+            /* Check for I/O error */
+            if (ferror(fp))
+            {
+            logmsg( "HHC001I Error reading file %s line %d: %s\n",
                     fname, stmt, strerror(errno));
             exit(1);
         }
 
-        /* Check for DOS end of file character */
-        if (buf[0] == '\x1A') return -1;
+            /* Check for end of file */
+            if (stmtlen == 0 && (c == EOF || c == '\x1A'))
+                return -1;
 
-        /* Check that statement ends with a newline */
-        stmtlen = strlen(buf);
-        if (stmtlen == 0 || buf[stmtlen-1] != '\n')
+            /* Check for end of line */
+            if (c == '\n' || c == EOF || c == '\x1A')
+                break;
+
+            /* Ignore nulls and carriage returns */
+            if (c == '\0' || c == '\r') continue;
+
+            /* Check that statement does not overflow buffer */
+            if (stmtlen >= sizeof(buf) - 1)
         {
-            fprintf (stderr,
-                    "HHC002I File %s line %d is too long\n",
+            logmsg( "HHC002I File %s line %d is too long\n",
                     fname, stmt);
             exit(1);
         }
 
-        /* Remove trailing carriage return and line feed */
-        stmtlen--;
-        if (stmtlen > 0 && buf[stmtlen-1] == '\r') stmtlen--;
+            /* Append character to buffer */
+            buf[stmtlen++] = c;
+
+        } /* end for(stmtlen) */
 
         /* Remove trailing blanks and tabs */
         while (stmtlen > 0 && (buf[stmtlen-1] == SPACE
@@ -180,6 +206,7 @@ BYTE   *sxpndsize;                      /* -> Expanded size string   */
 BYTE   *scnslport;                      /* -> Console port number    */
 BYTE   *snumcpu;                        /* -> Number of CPUs         */
 BYTE   *snumvec;                        /* -> Number of VFs          */
+BYTE   *sarchmode;                      /* -> Architectural mode     */
 BYTE   *sloadparm;                      /* -> IPL load parameter     */
 BYTE   *ssysepoch;                      /* -> System epoch           */
 BYTE   *stzoffset;                      /* -> System timezone offset */
@@ -195,6 +222,7 @@ U16     xpndsize;                       /* Expanded storage size (MB)*/
 U16     cnslport;                       /* Console port number       */
 U16     numcpu;                         /* Number of CPUs            */
 U16     numvec;                         /* Number of VFs             */
+int     archmode;                       /* Architectural mode        */
 S32     sysepoch;                       /* System epoch year         */
 S32     tzoffset;                       /* System timezone offset    */
 int     toddrag;                        /* TOD clock drag factor     */
@@ -206,12 +234,17 @@ U16     devnum;                         /* Device number             */
 U16     devtype;                        /* Device type               */
 BYTE    c;                              /* Work area for sscanf      */
 
+    /* Clear the system configuration block */
+    memset (&sysblk, 0, sizeof(SYSBLK));
+
+    /* Direct logmsg output to stderr during initialization */
+    sysblk.msgpipew = stderr;
+
     /* Open the configuration file */
     fp = fopen (fname, "r");
     if (fp == NULL)
     {
-        fprintf (stderr,
-                "HHC003I Cannot open file %s: %s\n",
+        logmsg( "HHC003I Cannot open file %s: %s\n",
                 fname, strerror(errno));
         exit(1);
     }
@@ -228,6 +261,7 @@ BYTE    c;                              /* Work area for sscanf      */
     sysepoch = 1900;
     tzoffset = 0;
     toddrag = 1;
+    archmode = ARCH_390;
     ostailor = OS_NONE;
     panrate = PANEL_REFRESH_RATE_SLOW;
 
@@ -237,8 +271,7 @@ BYTE    c;                              /* Work area for sscanf      */
         /* Read next record from the configuration file */
         if ( read_config (fname, fp) )
         {
-            fprintf (stderr,
-                    "HHC004I No device records in file %s\n",
+            logmsg( "HHC004I No device records in file %s\n",
                     fname);
             exit(1);
         }
@@ -256,6 +289,7 @@ BYTE    c;                              /* Work area for sscanf      */
         scnslport = NULL;
         snumcpu = NULL;
         snumvec = NULL;
+        sarchmode = NULL;
         sloadparm = NULL;
         ssysepoch = NULL;
         stzoffset = NULL;
@@ -317,12 +351,12 @@ BYTE    c;                              /* Work area for sscanf      */
             {
                 stzoffset = operand;
             }
-#ifdef TODCLOCK_DRAG_FACTOR
+#ifdef OPTION_TODCLOCK_DRAG_FACTOR
             else if (strcasecmp (keyword, "toddrag") == 0)
             {
                 stoddrag = operand;
             }
-#endif /*TODCLOCK_DRAG_FACTOR*/
+#endif /*OPTION_TODCLOCK_DRAG_FACTOR*/
 #ifdef PANEL_REFRESH_RATE
             else if (strcasecmp (keyword, "panrate") == 0)
             {
@@ -333,10 +367,20 @@ BYTE    c;                              /* Work area for sscanf      */
             {
                 sostailor = operand;
             }
+// #if defined(FEATURE_HARDWARE_LOADER)
+            else if (strcasecmp (keyword, "cfccimage") == 0)
+            {
+                /* Set the CFCC image file name in the system block */
+                strncpy(sysblk.hwl_fname,operand,sizeof(sysblk.hwl_fname));
+            }
+// #endif /*defined(FEATURE_HARDWARE_LOADER)*/
+            else if (strcasecmp (keyword, "archmode") == 0)
+            {
+                sarchmode = operand;
+            }
             else
             {
-                fprintf (stderr,
-                        "HHC006I Error in %s line %d: "
+                logmsg( "HHC006I Error in %s line %d: "
                         "Unrecognized keyword %s\n",
                         fname, stmt, keyword);
                 exit(1);
@@ -345,13 +389,38 @@ BYTE    c;                              /* Work area for sscanf      */
             /* Check for one and only one operand */
             if (operand == NULL || addargc != 0)
             {
-                fprintf (stderr,
-                        "HHC005I Error in %s line %d: "
+                logmsg( "HHC005I Error in %s line %d: "
                         "Incorrect number of operands\n",
                         fname, stmt);
                 exit(1);
             }
         }
+
+        if (sarchmode != NULL)
+        {
+            if (strcasecmp (sarchmode, "S/370") == 0)
+            {
+                archmode = ARCH_370;
+            }
+            else if (strcasecmp (sarchmode, "ESA/390") == 0)
+            {
+                archmode = ARCH_390;
+            }
+            else if (strcasecmp (sarchmode, "ESAME") == 0)
+            {
+                archmode = ARCH_900;
+            }
+            else
+            {
+                logmsg( "HHC017I Error in %s line %d: "
+                        "Unknown ARCHMODE specification %s\n",
+                        fname, stmt, sarchmode);
+                exit(1);
+            }
+        }
+        sysblk.arch_mode = archmode;
+        /* Indicate if z/Architecture is supported */
+        sysblk.arch_z900 = sysblk.arch_mode != ARCH_390;
 
         /* Parse CPU serial number operand */
         if (sserial != NULL)
@@ -359,8 +428,7 @@ BYTE    c;                              /* Work area for sscanf      */
             if (strlen(sserial) != 6
                 || sscanf(sserial, "%x%c", &serial, &c) != 1)
             {
-                fprintf (stderr,
-                        "HHC007I Error in %s line %d: "
+                logmsg( "HHC007I Error in %s line %d: "
                         "%s is not a valid serial number\n",
                         fname, stmt, sserial);
                 exit(1);
@@ -373,8 +441,7 @@ BYTE    c;                              /* Work area for sscanf      */
             if (strlen(smodel) != 4
                 || sscanf(smodel, "%hx%c", &model, &c) != 1)
             {
-                fprintf (stderr,
-                        "HHC008I Error in %s line %d: "
+                logmsg( "HHC008I Error in %s line %d: "
                         "%s is not a valid CPU model\n",
                         fname, stmt, smodel);
                 exit(1);
@@ -387,8 +454,7 @@ BYTE    c;                              /* Work area for sscanf      */
             if (sscanf(smainsize, "%hu%c", &mainsize, &c) != 1
                 || mainsize < 2 || mainsize > 256)
             {
-                fprintf (stderr,
-                        "HHC009I Error in %s line %d: "
+                logmsg( "HHC009I Error in %s line %d: "
                         "Invalid main storage size %s\n",
                         fname, stmt, smainsize);
                 exit(1);
@@ -401,8 +467,7 @@ BYTE    c;                              /* Work area for sscanf      */
             if (sscanf(sxpndsize, "%hu%c", &xpndsize, &c) != 1
                 || xpndsize > 1024)
             {
-                fprintf (stderr,
-                        "HHC010I Error in %s line %d: "
+                logmsg( "HHC010I Error in %s line %d: "
                         "Invalid expanded storage size %s\n",
                         fname, stmt, sxpndsize);
                 exit(1);
@@ -415,8 +480,7 @@ BYTE    c;                              /* Work area for sscanf      */
             if (sscanf(scnslport, "%hu%c", &cnslport, &c) != 1
                 || cnslport == 0)
             {
-                fprintf (stderr,
-                        "HHC011I Error in %s line %d: "
+                logmsg( "HHC011I Error in %s line %d: "
                         "Invalid console port number %s\n",
                         fname, stmt, scnslport);
                 exit(1);
@@ -429,8 +493,7 @@ BYTE    c;                              /* Work area for sscanf      */
             if (sscanf(snumcpu, "%hu%c", &numcpu, &c) != 1
                 || numcpu < 1 || numcpu > MAX_CPU_ENGINES)
             {
-                fprintf (stderr,
-                        "HHC012I Error in %s line %d: "
+                logmsg( "HHC012I Error in %s line %d: "
                         "Invalid number of CPUs %s\n",
                         fname, stmt, snumcpu);
                 exit(1);
@@ -440,19 +503,17 @@ BYTE    c;                              /* Work area for sscanf      */
         /* Parse number of VFs operand */
         if (snumvec != NULL)
         {
-#ifdef FEATURE_VECTOR_FACILITY
+#ifdef _FEATURE_VECTOR_FACILITY
             if (sscanf(snumvec, "%hu%c", &numvec, &c) != 1
                 || numvec > MAX_CPU_ENGINES)
             {
-                fprintf (stderr,
-                        "HHC018I Error in %s line %d: "
+                logmsg( "HHC018I Error in %s line %d: "
                         "Invalid number of VFs %s\n",
                         fname, stmt, snumvec);
                 exit(1);
             }
 #else /*!FEATURE_VECTOR_FACILITY*/
-            fprintf (stderr,
-                    "HHC019I Vector Facility Support not configured\n");
+            logmsg( "HHC019I Vector Facility Support not configured\n");
             exit(1);
 #endif /*!FEATURE_VECTOR_FACILITY*/
         }
@@ -462,8 +523,7 @@ BYTE    c;                              /* Work area for sscanf      */
         {
             if (strlen(sloadparm) > 8)
             {
-                fprintf (stderr,
-                        "HHC013I Error in %s line %d: "
+                logmsg( "HHC013I Error in %s line %d: "
                         "Load parameter %s exceeds 8 characters\n",
                         fname, stmt, sloadparm);
                 exit(1);
@@ -482,8 +542,7 @@ BYTE    c;                              /* Work area for sscanf      */
                 || sscanf(ssysepoch, "%d%c", &sysepoch, &c) != 1
                 || (sysepoch < 1900) || (sysepoch > 2000))
             {
-                fprintf (stderr,
-                        "HHC014I Error in %s line %d: "
+                logmsg( "HHC014I Error in %s line %d: "
                         "%s is not a valid system epoch\n",
                         fname, stmt, ssysepoch);
                 exit(1);
@@ -497,29 +556,27 @@ BYTE    c;                              /* Work area for sscanf      */
                 || sscanf(stzoffset, "%d%c", &tzoffset, &c) != 1
                 || (tzoffset < -2359) || (tzoffset > 2359))
             {
-                fprintf (stderr,
-                        "HHC015I Error in %s line %d: "
+                logmsg( "HHC015I Error in %s line %d: "
                         "%s is not a valid timezone offset\n",
                         fname, stmt, stzoffset);
                 exit(1);
             }
         }
 
-#ifdef TODCLOCK_DRAG_FACTOR
+#ifdef OPTION_TODCLOCK_DRAG_FACTOR
         /* Parse TOD clock drag factor operand */
         if (stoddrag != NULL)
         {
             if (sscanf(stoddrag, "%u%c", &toddrag, &c) != 1
                 || toddrag < 1 || toddrag > 10000)
             {
-                fprintf (stderr,
-                        "HHC016I Error in %s line %d: "
+                logmsg( "HHC016I Error in %s line %d: "
                         "Invalid TOD clock drag factor %s\n",
                         fname, stmt, stoddrag);
                 exit(1);
             }
         }
-#endif /*TODCLOCK_DRAG_FACTOR*/
+#endif /*OPTION_TODCLOCK_DRAG_FACTOR*/
 
 #ifdef PANEL_REFRESH_RATE
         /* Parse panel refresh rate operand */
@@ -537,10 +594,9 @@ BYTE    c;                              /* Work area for sscanf      */
                     if (sscanf(spanrate, "%u%c", &panrate, &c) != 1
                         || panrate < (1000/CLK_TCK) || panrate > 5000)
                     {
-                        fprintf (stderr,
-                            "HHC045I Error in %s line %d: "
-                            "Invalid panel refresh rate %s\n",
-                            fname, stmt, spanrate);
+                        logmsg( "HHC045I Error in %s line %d: "
+                                "Invalid panel refresh rate %s\n",
+                                fname, stmt, spanrate);
                         exit(1);
                     }
             }
@@ -555,6 +611,10 @@ BYTE    c;                              /* Work area for sscanf      */
             {
                 ostailor = OS_OS390;
             }
+            else if (strcasecmp (sostailor, "VSE") == 0)
+            {
+                ostailor = OS_VSE;
+            }
             else if (strcasecmp (sostailor, "VM") == 0)
             {
                 ostailor = OS_VM;
@@ -563,10 +623,13 @@ BYTE    c;                              /* Work area for sscanf      */
             {
                 ostailor = OS_LINUX;
             }
+            else if (strcasecmp (sostailor, "NULL") == 0)
+            {
+                ostailor = 0xFFFFFFFFFFFFFFFFULL;
+            }
             else
             {
-                fprintf (stderr,
-                        "HHC017I Error in %s line %d: "
+                logmsg( "HHC017I Error in %s line %d: "
                         "Unknown OS tailor specification %s\n",
                         fname, stmt, sostailor);
                 exit(1);
@@ -575,37 +638,29 @@ BYTE    c;                              /* Work area for sscanf      */
 
     } /* end for(scount) */
 
-    /* Clear the system configuration block */
-    memset (&sysblk, 0, sizeof(SYSBLK));
-
-    /* Direct logmsg output to stderr during initialization */
-    sysblk.msgpipew = stderr;
-
     /* Obtain main storage */
     sysblk.mainsize = mainsize * 1024 * 1024;
     sysblk.mainstor = malloc(sysblk.mainsize);
     if (sysblk.mainstor == NULL)
     {
-        fprintf (stderr,
-                "HHC020I Cannot obtain %dMB main storage: %s\n",
+        logmsg( "HHC020I Cannot obtain %dMB main storage: %s\n",
                 mainsize, strerror(errno));
         exit(1);
     }
 
     /* Obtain main storage key array */
-    sysblk.storkeys = malloc(sysblk.mainsize / STORAGE_KEY_PAGESIZE);
+    sysblk.storkeys = malloc(sysblk.mainsize / STORAGE_KEY_UNITSIZE);
     if (sysblk.storkeys == NULL)
     {
-        fprintf (stderr,
-                "HHC021I Cannot obtain storage key array: %s\n",
+        logmsg( "HHC021I Cannot obtain storage key array: %s\n",
                 strerror(errno));
         exit(1);
     }
 
 #if 0   /*DEBUG-JJ-20/03/2000*/
     /* Mark selected frames invalid for debugging purposes */
-    for (i = 64 ; i < (regs->mainsize / STORAGE_KEY_PAGESIZE); i += 2)
-        if (i < (regs->mainsize / STORAGE_KEY_PAGESIZE) - 64)
+    for (i = 64 ; i < (regs->mainsize / STORAGE_KEY_UNITSIZE); i += 2)
+        if (i < (regs->mainsize / STORAGE_KEY_UNITSIZE) - 64)
             sysblk.storkeys[i] = STORKEY_BADFRM;
         else
             sysblk.storkeys[i++] = STORKEY_BADFRM;
@@ -619,15 +674,13 @@ BYTE    c;                              /* Work area for sscanf      */
         sysblk.xpndstor = malloc(sysblk.xpndsize * XSTORE_PAGESIZE);
         if (sysblk.xpndstor == NULL)
         {
-            fprintf (stderr,
-                    "HHC022I Cannot obtain %dMB expanded storage: "
+            logmsg( "HHC022I Cannot obtain %dMB expanded storage: "
                     "%s\n",
                     xpndsize, strerror(errno));
             exit(1);
         }
 #else /*!FEATURE_EXPANDED_STORAGE*/
-        fprintf (stderr,
-                "HHC024I Expanded storage support not installed\n");
+        logmsg( "HHC024I Expanded storage support not installed\n");
         exit(1);
 #endif /*!FEATURE_EXPANDED_STORAGE*/
     } /* end if(sysblk.xpndsize) */
@@ -698,15 +751,15 @@ BYTE    c;                              /* Work area for sscanf      */
         /* Perform initial CPU reset */
         initial_cpu_reset (sysblk.regs + cpu);
 
-#if defined(FEATURE_VECTOR_FACILITY)
+#if defined(_FEATURE_VECTOR_FACILITY)
         sysblk.regs[cpu].vf = &sysblk.vf[cpu];
-#endif /*defined(FEATURE_VECTOR_FACILITY)*/
+#endif /*defined(_FEATURE_VECTOR_FACILITY)*/
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
         sysblk.sie_regs[cpu] = sysblk.regs[cpu];
         sysblk.sie_regs[cpu].hostregs = &sysblk.regs[cpu];
         sysblk.regs[cpu].guestregs = &sysblk.sie_regs[cpu];
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     } /* end for(cpu) */
 
@@ -719,8 +772,7 @@ BYTE    c;                              /* Work area for sscanf      */
 
         if (sdevnum == NULL || sdevtype == NULL)
         {
-            fprintf (stderr,
-                    "HHC030I Error in %s line %d: "
+            logmsg( "HHC030I Error in %s line %d: "
                     "Missing device number or device type\n",
                     fname, stmt);
             exit(1);
@@ -729,8 +781,7 @@ BYTE    c;                              /* Work area for sscanf      */
         if (strlen(sdevnum) > 4
             || sscanf(sdevnum, "%hx%c", &devnum, &c) != 1)
         {
-            fprintf (stderr,
-                    "HHC031I Error in %s line %d: "
+            logmsg( "HHC031I Error in %s line %d: "
                     "%s is not a valid device number\n",
                     fname, stmt, sdevnum);
             exit(1);
@@ -738,8 +789,7 @@ BYTE    c;                              /* Work area for sscanf      */
 
         if (sscanf(sdevtype, "%hx%c", &devtype, &c) != 1)
         {
-            fprintf (stderr,
-                    "HHC032I Error in %s line %d: "
+            logmsg( "HHC032I Error in %s line %d: "
                     "%s is not a valid device type\n",
                     fname, stmt, sdevtype);
             exit(1);
@@ -759,8 +809,7 @@ BYTE    c;                              /* Work area for sscanf      */
     rc = pipe (pfd);
     if (rc < 0)
     {
-        fprintf (stderr,
-                "HHC033I Message pipe creation failed: %s\n",
+        logmsg( "HHC033I Message pipe creation failed: %s\n",
                 strerror(errno));
         exit(1);
     }
@@ -773,50 +822,78 @@ BYTE    c;                              /* Work area for sscanf      */
 #endif
     if (sysblk.msgpipew == NULL)
     {
-        fprintf (stderr,
-                "HHC034I Message pipe open failed: %s\n",
+        sysblk.msgpipew = stderr;
+        logmsg( "HHC034I Message pipe open failed: %s\n",
                 strerror(errno));
         exit(1);
     }
     setvbuf (sysblk.msgpipew, NULL, _IOLBF, 0);
 
     /* Display the version identifier on the control panel */
-    logmsg ("Hercules %s version %s "
-            "(c)Copyright Roger Bowler, 1994-2001\n",
-            ARCHITECTURE_NAME, MSTRING(VERSION));
+    logmsg ("Hercules version %s build at %s %s\n"
+            "(c)Copyright 1999-2001 by "
+            "Roger Bowler, Jan Jaeger, and others\n",
+            MSTRING(VERSION), __DATE__, __TIME__);
 
-#ifdef FEATURE_VECTOR_FACILITY
+#ifdef _FEATURE_VECTOR_FACILITY
     for(i = 0; i < numvec && i < numcpu; i++)
         sysblk.regs[i].vf->online = 1;
-#endif /*FEATURE_VECTOR_FACILITY*/
+#endif /*_FEATURE_VECTOR_FACILITY*/
 
     for(i = 0; i < numcpu; i++)
         configure_cpu(sysblk.regs + i);
 
 } /* end function build_config */
 
+
+/*-------------------------------------------------------------------*/
+/* Function to terminate all CPUs and devices                        */
+/*-------------------------------------------------------------------*/
+void release_config()
+{
+DEVBLK *dev;
+int     cpu;
+
+    /* Detach all devices */
+    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+       if (dev->pmcw.flag5 & PMCW5_V)
+           detach_device(dev->devnum);
+
+    /* Deconfigure all CPU's */
+    for(cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
+        if(sysblk.regs[cpu].cpuonline)
+            deconfigure_cpu(sysblk.regs + cpu);
+
+} /* end function release_config */
+
+
+/*-------------------------------------------------------------------*/
+/* Function to start a new CPU thread                                */
+/*-------------------------------------------------------------------*/
 int configure_cpu(REGS *regs)
 {
     if(regs->cpuonline)
         return -1;
     regs->cpuonline = 1;
     regs->cpustate = CPUSTATE_STARTING;
-    if ( create_thread (&(regs->cputid), &sysblk.detattr,
-                        cpu_thread, regs) )
+    regs->arch_mode = sysblk.arch_mode;
+    if ( create_thread (&(regs->cputid), &sysblk.detattr, cpu_thread, regs) )
     {
         regs->cpuonline = 0;
-#ifdef FEATURE_VECTOR_FACILITY
+#ifdef _FEATURE_VECTOR_FACILITY
         regs->vf->online = 0;
-#endif /*FEATURE_VECTOR_FACILITY*/
+#endif /*_FEATURE_VECTOR_FACILITY*/
         logmsg( "HHC034I Cannot create CPU%4.4X thread: %s\n",
                 regs->cpuad, strerror(errno));
         return -1;
     }
     return 0;
-} /* end configure_cpu */
+} /* end function configure_cpu */
 
-/* Remove CPU from the configuration 
-   This routine MUST be called with the intlock held */
+/*-------------------------------------------------------------------*/
+/* Function to remove a CPU from the configuration                   */
+/* This routine MUST be called with the intlock held                 */
+/*-------------------------------------------------------------------*/
 int deconfigure_cpu(REGS *regs)
 {
     if(regs->cpuonline)
@@ -832,8 +909,9 @@ int deconfigure_cpu(REGS *regs)
     else
         return -1;
     
-}
+} /* end function deconfigure_cpu */
 
+#if !defined(OPTION_NO_DEVICE_THREAD)
 /*-------------------------------------------------------------------*/
 /* Run as a separate thread for each device to run execute_ccw_chain */
 /* LOOPER_DIE isn't actually used yet but is there if anyone wants it*/
@@ -851,14 +929,15 @@ void device_loop (DEVBLK *dev)
 	/* It's LOOPER_EXEC */
 	dev->loopercmd = LOOPER_WAIT;
 	release_lock(&dev->lock);
-	execute_ccw_chain(dev);
+	ARCH_DEP(execute_ccw_chain)(dev);
     }
     release_lock(&dev->lock);
 
     /* It's our responsibility to free the device structure */
     /* otherwise it's a headache to synchronise with the config thread */
     free(dev);
-}
+} /* end function device_loop */
+#endif /*!defined(OPTION_NO_DEVICE_THREAD)*/
 
 /*-------------------------------------------------------------------*/
 /* Function to build a device configuration block                    */
@@ -992,11 +1071,14 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
         /* Initialize the device lock and conditions */
         initialize_lock (&dev->lock);
         initialize_condition (&dev->resumecond);
+#if !defined(OPTION_NO_DEVICE_THREAD)
         initialize_condition (&dev->loopercond);
+#endif /*!defined(OPTION_NO_DEVICE_THREAD)*/
 
         /* Assign new subchannel number */
         dev->subchan = sysblk.highsubchan++;
 
+#if !defined(OPTION_NO_DEVICE_THREAD)
 	/* Ensure command for new thread is LOOPER_WAIT */
 	/* (Yeah, it's zero anyway but let's be pedantic) */
 	dev->loopercmd = LOOPER_WAIT;
@@ -1008,6 +1090,7 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
                     devnum, strerror(errno));
             return 1;
 	}
+#endif /*!defined(OPTION_NO_DEVICE_THREAD)*/
     }
 
     /* Obtain the device lock */
@@ -1247,4 +1330,7 @@ DEVBLK *dev;
     return dev;
 
 } /* end function find_device_by_subchan */
+
+
+#endif /*!defined(_GEN_ARCH)*/
 

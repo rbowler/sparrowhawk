@@ -1,5 +1,13 @@
- 
-#define _XOPEN_SOURCE
+/*
+|| ----------------------------------------------------------------------------
+||
+|| SLLIB.C      (c) Copyright Leland Lucius, 2000-2001
+||              Released under terms of the Q Public License.
+||
+|| Library for managing Standard Label tapes.
+||
+|| ----------------------------------------------------------------------------
+*/
 
 #include <time.h>
 #include <string.h>
@@ -9,9 +17,9 @@
 
 #include "sllib.h"
 
-/*==========================================================================\\
-|| Local constant data                                                      ||
-\\==========================================================================*/
+/*
+|| Local constant data
+*/
 
 /*
 || Label IDs in EBCDIC
@@ -184,10 +192,6 @@ sl_atoetab[] =
     "\x73\xE1\x74\x75\x76\x77\x78\x80\x8C\x8D\x8E\xEB\x8F\xED\xEE\xEF"
     "\x90\x9A\x9B\x9D\x9F\xA0\xAC\xAE\xAF\xFD\xFE\xFB\x3F\xEA\xFA\xFF"
 };
-
-/*==========================================================================\\
-|| Public functions                                                         ||
-\\==========================================================================*/
 
 /*==DOC==
 
@@ -711,7 +715,7 @@ sl_fmtdate( char *dest, char *src, int fromto )
         if( tm.tm_year < 100 )
         {
             /*
-            || 1900s is indicated by a blank.
+            || 1900s are indicated by a blank.
             */
             wbuf[ 1 ] = ' ';
         }
@@ -1292,7 +1296,7 @@ sl_ds1( SLLABEL *lab,
             SLE_BLKSIZE         Block size out of range
             SLE_JOBNAME         Missing or invalid job name
             SLE_STEPNAME        Missing or invalid step name
-            SLE_TRTCH           Invalid record technique 
+            SLE_TRTCH           Invalid recording technique 
 
     NOTES
             This routine is normally accessed using the supplied "sl_hdr1",

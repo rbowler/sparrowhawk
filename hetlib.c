@@ -1,14 +1,12 @@
 /*
-||
 || ----------------------------------------------------------------------------
 ||
 || HETLIB.C     (c) Copyright Leland Lucius, 2000-2001
-||              Released under whatever license Hercules uses.
+||              Released under terms of the Q Public License.
 ||
 || Library for managing Hercules Emulated Tapes.  
 ||
 || ----------------------------------------------------------------------------
-||
 */
 
 #include "hetlib.h"
@@ -20,12 +18,11 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <string.h>
 
 #include <zlib.h>
-#ifdef HET_BZIP2
+#if defined( HET_BZIP2 )
 #include <bzlib.h>
-#endif
+#endif /* defined( HET_BZIP2 ) */
 
 #undef HETDEBUGR
 #undef HETDEBUGW
@@ -122,7 +119,7 @@ static const char *het_errstr[] =
                     printf( "%s successfully created\n", argv[ 1 ] );
                 }
 
-                het_close( hetb );
+                het_close( &hetb );
 
                 return( 0 );
             }
@@ -876,7 +873,7 @@ het_read( HETB *hetb, void *sbuf )
                 tlen = slen;
             break;
     
-#ifdef HET_BZIP2
+#if defined( HET_BZIP2 )
             case HETHDR_FLAGS1_BZLIB:
                 slen = HETMAX_BLOCKSIZE;
     
@@ -894,7 +891,7 @@ het_read( HETB *hetb, void *sbuf )
     
                 tlen = slen;
             break;
-#endif /* HET_BZIP2 */
+#endif /* defined( HET_BZIP2 ) */
     
             default:
                 return( HETE_UNKMETH );
@@ -1205,7 +1202,7 @@ het_write( HETB *hetb, void *sbuf, int slen )
                 }
             break;
 
-#ifdef HET_BZIP2
+#if defined( HET_BZIP2 )
             case HETHDR_FLAGS1_BZLIB:
                 tlen = sizeof( tbuf );
 
@@ -1229,7 +1226,7 @@ het_write( HETB *hetb, void *sbuf, int slen )
                     flags |= HETHDR_FLAGS1_BZLIB;
                 }
             break;
-#endif /* HET_BZIP2 */
+#endif /* defined( HET_BZIP2 ) */
         }
     }
 

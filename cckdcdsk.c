@@ -48,7 +48,7 @@ int cdsk_valid_trk (int, unsigned char *, int, int, char *);
 int cdsk_build_gap (SPCTAB *, int *, SPCTAB *);
 int cdsk_build_gap_long (SPCTAB *, int *, SPCTAB *);
 
-#ifdef CCKD_CHKDSK_MAIN
+#ifndef CCKD_CHKDSK_NOMAIN
 int syntax ();
 
 /*-------------------------------------------------------------------*/

@@ -1,12 +1,8 @@
 #
-# Makefile for Hercules S/370 and ESA/390 emulator
-#
-# This makefile will make executables for both architectures at the same
-# time; the 370 program is hercules-370, and the 390 one is hercules-390.
-#
+# Makefile for Hercules S/370, ESA/390 and z/Architecture emulator
 #
 
-VERSION  = 1.71
+VERSION  = 2.10
 
 # Change this if you want to install the Hercules executables somewhere
 #   besides /usr/bin. The $PREFIX (which defaults to nothing) can be
@@ -15,92 +11,73 @@ VERSION  = 1.71
 DESTDIR  = $(PREFIX)/usr/bin
 
 # Standard flags for all architectures
-CFLAGS	 = -O2 -Wall -fPIC -DARCH=390
-CFL_370  = -O2 -Wall -fPIC -DARCH=370
-LFLAGS	 = -lpthread -lz
+CFLAGS	 = -Wall -fomit-frame-pointer -DVERSION=$(VERSION) -DNO_BYTESWAP_H
+LFLAGS	 = -lpthread
 
 # Add default flags for Pentium compilations
 ifndef HOST_ARCH
-CFLAGS	 += -malign-double -march=pentium
-CFL_370  += -malign-double -march=pentium
+CFLAGS	 += -O3 -malign-double -march=pentium
 endif
 
 # Handle host architecture if specified
 ifeq ($(HOST_ARCH),i386)
-CFLAGS	 += -malign-double
-CFL_370	 += -malign-double
+CFLAGS	 += -O3 -malign-double -DNO_ASM_BYTESWAP
 endif
 ifeq ($(HOST_ARCH),i586)
-CFLAGS	 += -malign-double -march=pentium
-CFL_370  += -malign-double -march=pentium
+CFLAGS	 += -O3 -malign-double -march=pentium
 endif
 ifeq ($(HOST_ARCH),i686)
-CFLAGS	 += -malign-double -march=pentiumpro
-CFL_370  += -malign-double -march=pentiumpro
+CFLAGS	 += -O3 -malign-double -march=pentiumpro
 endif
-
-# Reverse the comments below to disable Compressed CKD Dasd support
-#CFLAGS	+= -DNO_CCKD
-#CFL_370	+= -DNO_CCKD
-
-# Uncomment these lines to enable Compressed CKD bzip2 compression
-#CFLAGS	+= -DCCKD_BZIP2
-#CFL_370	+= -DCCKD_BZIP2
-#LFLAGS	+= -lbz2
-
-# Uncomment these lines to enable HET bzip2 compression
-#CFLAGS	+= -DHET_BZIP2
-#CFL_370	+= -DHET_BZIP2
-#LFLAGS	+= -lbz2
+ifeq ($(HOST_ARCH),alpha)
+CFLAGS	 += -O2 -DNO_ASM_BYTESWAP
+endif
+ifeq ($(HOST_ARCH),other)
+CFLAGS	 += -O3 -DNO_ASM_BYTESWAP
+endif
 
 # Uncomment these lines for NetBSD, with either the unproven-pthreads
 #   or pth packages
 #CFLAGS  += -I/usr/pkg/pthreads/include -I/usr/pkg/include
-#CFL_370  += -I/usr/pkg/pthreads/include -I/usr/pkg/include
 #LFLAGS	 += -L/usr/pkg/pthreads/lib -R/usr/pkg/pthreads
 #LFLAGS	 += -L/usr/pkg/lib -R/usr/pkg/pthreads/lib
 
-EXEFILES = hercules-370 hercules-390 \
+# Reverse the comments below to disable Compressed CKD Dasd support
+#CFLAGS  += -DNO_CCKD
+LFLAGS	 += -lz
+
+# Uncomment these lines to enable Compressed CKD bzip2 compression
+#CFLAGS  += -DCCKD_BZIP2
+
+# Uncomment these lines to enable HET bzip2 compression
+#CFLAGS	+= -DHET_BZIP2
+#LFLAGS	+= -lbz2
+
+EXEFILES = hercules hercifc \
 	   dasdinit dasdisup dasdload dasdls dasdpdsu \
-	   tapecopy tapemap tapesplit \
+	   tapecopy tapelist tapemap tapesplit \
 	   cckd2ckd cckdcdsk ckd2cckd cckdcomp \
 	   hetget hetinit hetmap hetupd
 
 TARFILES = makefile *.c *.h hercules.cnf tapeconv.jcl dasdlist \
-	   obj370 obj390 html zzsa.cnf zzsacard.bin \
-	   cckddump.hla
+	   html zzsa.cnf zzsacard.bin
 
-HRC_370_OBJS = obj370/impl.o obj370/config.o obj370/panel.o \
-	   obj370/ipl.o obj370/assist.o obj370/dat.o \
-	   obj370/stack.o obj370/cpu.o \
-           obj370/general.o obj370/control.o obj370/io.o \
-	   obj370/decimal.o obj370/service.o obj370/opcode.o \
-	   obj370/diagnose.o obj370/diagmssf.o obj370/vm.o \
-	   obj370/channel.o obj370/ckddasd.o obj370/fbadasd.o \
-	   obj370/tapedev.o obj370/cardrdr.o obj370/cardpch.o \
-	   obj370/printer.o obj370/console.o obj370/external.o \
-	   obj370/float.o obj370/ctcadpt.o obj370/trace.o \
-	   obj370/machchk.o obj370/vector.o obj370/xstore.o \
-	   obj370/cmpsc.o obj370/ibuf.o \
-	   obj370/cckddasd.o obj370/cckdcdsk.o \
-	   obj370/parser.o obj370/hetlib.o
-           
+HRC_OBJS = impl.o config.o panel.o \
+	   ipl.o assist.o dat.o \
+	   stack.o cpu.o vstore.o \
+	   general.o control.o io.o \
+	   decimal.o service.o opcode.o \
+	   diagnose.o diagmssf.o vm.o \
+	   channel.o ckddasd.o fbadasd.o \
+	   tapedev.o cardrdr.o cardpch.o \
+	   printer.o console.o external.o \
+	   float.o ctcadpt.o trace.o \
+	   machchk.o vector.o xstore.o \
+	   cmpsc.o sie.o ses.o timer.o \
+	   esame.o cckddasd.o cckdcdsx.o \
+	   parser.o hetlib.o
 
-HRC_390_OBJS = obj390/impl.o obj390/config.o obj390/panel.o \
-	   obj390/ipl.o obj390/assist.o obj390/dat.o \
-	   obj390/stack.o obj390/cpu.o \
-           obj390/general.o obj390/control.o obj390/io.o \
-	   obj390/decimal.o obj390/service.o obj390/opcode.o \
-	   obj390/diagnose.o obj390/diagmssf.o obj390/vm.o \
-	   obj390/channel.o obj390/ckddasd.o obj390/fbadasd.o \
-	   obj390/tapedev.o obj390/cardrdr.o obj390/cardpch.o \
-	   obj390/printer.o obj390/console.o obj390/external.o \
-	   obj390/float.o obj390/ctcadpt.o obj390/trace.o \
-	   obj390/machchk.o obj390/vector.o obj390/xstore.o \
-	   obj390/cmpsc.o obj390/sie.o obj390/ibuf.o \
-	   obj390/cckddasd.o obj390/cckdcdsk.o \
-	   obj390/parser.o obj390/hetlib.o
-           
+HIFC_OBJ = hercifc.o
 
 DIN_OBJS = dasdinit.o dasdutil.o
 
@@ -120,13 +97,13 @@ TMA_OBJS = tapemap.o
 
 TSP_OBJS = tapesplit.o
 
-CC2C_OBJ = cckd2ckd.o
-
 CCHK_OBJ = cckdcdsk.o
+
+COMP_OBJ = cckdcomp.o cckdcdsx.o
 
 C2CC_OBJ = ckd2cckd.o
 
-COMP_OBJ = cckdcomp.o obj390/cckdcdsk.o
+CC2C_OBJ = cckd2ckd.o
 
 HGT_OBJS = hetget.o hetlib.o sllib.o
 
@@ -136,21 +113,23 @@ HMA_OBJS = hetmap.o hetlib.o sllib.o
 
 HUP_OBJS = hetupd.o hetlib.o sllib.o
 
-HEADERS  = hercules.h esa390.h version.h opcode.h inline.h ibuf.h hetlib.h
+HEADERS  = feat370.h feat390.h feat900.h featall.h featchk.h features.h \
+	   esa390.h opcode.h hercules.h inline.h dat.h vstore.h \
+	   byteswap.h \
+	   dasdblks.h \
+	   hetlib.h \
+	   version.h
 
 all:	   $(EXEFILES)
 
-hercules-370:  $(HRC_370_OBJS)
-	$(CC) -o hercules-370 $(HRC_370_OBJS) $(LFLAGS)
+hercules:  $(HRC_OBJS)
+	$(CC) -o hercules $(HRC_OBJS) $(LFLAGS)
 
-hercules-390:  $(HRC_390_OBJS)
-	$(CC) -o hercules-390 $(HRC_390_OBJS) $(LFLAGS)
-
-$(HRC_370_OBJS): obj370/%.o: %.c $(HEADERS)
-	$(CC) $(CFL_370) -o $@ -c $<
-
-$(HRC_390_OBJS): obj390/%.o: %.c $(HEADERS)
+$(HRC_OBJS): %.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -o $@ -c $<
+
+hercifc:  $(HIFC_OBJ)
+	$(CC) -o hercifc $(HIFC_OBJ)
 
 dasdinit:  $(DIN_OBJS)
 	$(CC) -o dasdinit $(DIN_OBJS)
@@ -171,7 +150,7 @@ tapecopy:  $(TCY_OBJS)
 	$(CC) -o tapecopy $(TCY_OBJS)
 
 tapelist:  $(TLS_OBJS)
-	$(CC) -o tapemap $(TLS_OBJS)
+	$(CC) -o tapelist $(TLS_OBJS)
 
 tapemap:  $(TMA_OBJS)
 	$(CC) -o tapemap $(TMA_OBJS)
@@ -183,7 +162,7 @@ hetget:  $(HGT_OBJS)
 	$(CC) -o hetget $(HGT_OBJS) $(LFLAGS)
 
 hetinit:  $(HIN_OBJS)
-	$(CC) -o hetinit $(HGT_OBJS) $(LFLAGS)
+	$(CC) -o hetinit $(HIN_OBJS) $(LFLAGS)
 
 hetmap:  $(HMA_OBJS)
 	$(CC) -o hetmap $(HMA_OBJS) $(LFLAGS)
@@ -219,7 +198,7 @@ hetmap.o: hetmap.c hetlib.h sllib.h
 
 hetupd.o: hetupd.c hetlib.h sllib.h
 
-cckd:      cckd2ckd cckdcdsk ckd2cckd cckd2comp
+cckd:	   cckd2ckd cckdcdsk ckd2cckd cckdcomp
 
 cckd2ckd:  $(CC2C_OBJ)
 	$(CC) -o cckd2ckd $(CC2C_OBJ) $(LFLAGS)
@@ -234,15 +213,18 @@ cckdcomp:  $(COMP_OBJ)
 	$(CC) -o cckdcomp $(COMP_OBJ) $(LFLAGS)
 
 $(CCHK_OBJ): %.o: %.c $(HEADERS)
-	$(CC) $(CFLAGS) -DCCKD_CHKDSK_MAIN -o $@ -c $<
-
+	$(CC) $(CFLAGS) -o $@ -c $<
 
 clean:
-	rm -rf $(EXEFILES) *.o obj370 obj390; mkdir obj370 obj390
+	rm -rf $(EXEFILES) *.o
 
-tar:    clean
+tar:	clean
 	(cd ..; tar cvzf hercules-$(VERSION).tar.gz hercules-$(VERSION))
 
 install:  $(EXEFILES)
 	cp $(EXEFILES) $(DESTDIR)
 	cp dasdlist $(DESTDIR)
+	chown root $(DESTDIR)/hercifc
+	chmod 0751 $(DESTDIR)/hercifc
+	chmod +s $(DESTDIR)/hercifc
+	rm hercifc

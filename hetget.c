@@ -1,14 +1,12 @@
 /*
-||
 || ----------------------------------------------------------------------------
 ||
 || HETGET.C     (c) Copyright Leland Lucius, 2000-2001
-||              Released under whatever license Hercules uses.
+||              Released under terms of the Q Public License.
 ||
-|| Extracts file from an HET file
+|| Extract files from an HET file
 ||
 || ----------------------------------------------------------------------------
-||
 */
 
 #include <unistd.h>
@@ -50,8 +48,8 @@ opts =
 || Local constant data
 */
 static const char help[] =
-    "%s - Extract files from HET file\n\n"
-    "Usage: %s [options] infile outfile fileno [recfm lrecl blksize]\n\n"
+    "%s - Extract files from an HET file\n\n"
+    "Usage: %s [options] hetfile outfile fileno [recfm lrecl blksize]\n\n"
     "Options:\n"
     "  -a  convert to ASCII (implies -u)\n"
     "  -h  display usage summary\n"
@@ -171,6 +169,9 @@ merge( SLLABEL *lab )
         }
     }
 
+    /*
+    || Locate final RECFM string
+    */
     for( i = 0 ; i < VALFMCNT ; i++ )
     {
         if( strcasecmp( fmt.slds2.recfm, valfm[ i ].recfm ) == 0 )
@@ -179,6 +180,9 @@ merge( SLLABEL *lab )
         }
     }
 
+    /*
+    || Print DCB attributes
+    */
     printf( "DCB Attributes used:\n" );
     printf( "  RECFM=%-4.4s  LRECL=%-5.5d  BLKSIZE=%d\n",
         valfm[ i ].recfm,

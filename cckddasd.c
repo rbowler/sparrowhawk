@@ -3399,11 +3399,6 @@ logmsg ("%4.4X:cckddasd: print_itrace\n", dev->devnum);
 
 #else /* NO_CCKD */
 
-void cckd_print_itrace (DEVBLK *dev)
-{
-    logmsg ("%4.4X cckddasd support not generated\n", dev->devnum);
-}
-
 int cckddasd_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 {
     logmsg ("%4.4X cckddasd support not generated\n", dev->devnum);

@@ -2,16 +2,14 @@
 #define _HETLIB_H_
 
 /*
-||
 || ----------------------------------------------------------------------------
 ||
 || HETLIB.H     (c) Copyright Leland Lucius, 2000-2001
-||              Released under whatever license Hercules uses.
+||              Released under terms of the Q Public License.
 ||
 || Header for the Hercules Emulated Tape library.
 ||
 || ----------------------------------------------------------------------------
-||
 */
 
 #include <sys/types.h>
@@ -91,7 +89,11 @@ typedef struct _hetb
 || Limits
 */
 #define HETMIN_METHOD           1       /* Minimum compression method       */
+#if defined( HET_BZIP2 )
 #define HETMAX_METHOD           2       /* Maximum compression method       */
+#else 
+#define HETMAX_METHOD           1       /* Maximum compression method       */
+#endif /* defined( HET_BZIP2 ) */
 #define HETMIN_LEVEL            1       /* Minimum compression level        */
 #define HETMAX_LEVEL            9       /* Maximum compression level        */
 #define HETMIN_CHUNKSIZE        4096    /* Minimum chunksize                */

@@ -1,4 +1,4 @@
-/* CONSOLE.C    (c)Copyright Roger Bowler, 1999-2001                 */
+/* CONSOLE.C    (c)Copyright Roger Bowler, 1999-2000                 */
 /*              ESA/390 Console Device Handler                       */
 
 /*-------------------------------------------------------------------*/
@@ -12,27 +12,31 @@
 
 /*-------------------------------------------------------------------*/
 /* This module also takes care of the differences between the        */
-/* remote 3270 and local nonsna 3270 devices.  In perticular         */
+/* remote 3270 and local non-SNA 3270 devices.  In particular        */
 /* the support of command chaining, which is not supported on        */
 /* the remote 3270 implementation on which telnet 3270 is based.     */
-/* In the local nonsna environtments a chained read or write will    */
+/* In the local non-SNA environment a chained read or write will     */
 /* continue at the buffer address where the previous command ended.  */
 /* In order to achieve this, this module will keep track of the      */
-/* buffer location, and ajust the buffer address on chained read and */
-/* write operations.                                                 */
-/*                                                                   */
+/* buffer location, and adjust the buffer address on chained read    */
+/* and write operations.                                             */
 /*                                           03/06/00 Jan Jaeger.    */
 /*-------------------------------------------------------------------*/
 
 /*-------------------------------------------------------------------*/
 /* Add code to bypass bug in telnet client from TCP/IP for OS/390    */
 /* where telnet responds with the server response rather then the    */
-/* client response as documented in RCF1576.                         */
+/* client response as documented in RFC1576.                         */
 /*                                           20/06/00 Jan Jaeger.    */
 /*-------------------------------------------------------------------*/
 
 /*-------------------------------------------------------------------*/
-/*                                                                   */
+/* Corrections to buffer position calculations in find_buffer_pos    */
+/* and get_screen_pos subroutines (symptom: message IEE305I)         */
+/*                                           09/12/00 Roger Bowler.  */
+/*-------------------------------------------------------------------*/
+
+/*-------------------------------------------------------------------*/
 /* When using VTAM with local non-SNA 3270 devices, ensure that      */
 /* enough bufferspace is available when doing IND$FILE type          */
 /* filetransfers.  Code IOBUF=(,3992) in ATCSTRxx, and/or BUFNUM=xxx */
@@ -41,6 +45,8 @@
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
+
+#include "opcode.h"
 
 /*-------------------------------------------------------------------*/
 /* Telnet command definitions                                        */
@@ -184,6 +190,8 @@ static BYTE sba_code[] = { "\x40\xC1\xC2\xC3\xC4\xC5\xC6\xC7"
 #define BUFLEN_1052     150             /* 1052 Send/Receive buffer  */
 #define SPACE           ((BYTE)' ')
 
+
+#undef  FIX_QWS_BUG_FOR_MCS_CONSOLES
 
 /*-------------------------------------------------------------------*/
 /* Static data areas                                                 */
@@ -672,7 +680,7 @@ int     eor = 0;                        /* 1=End of record received  */
 
     /* If zero bytes were received then client has closed connection */
     if (rc == 0) {
-        TNSDEBUG1( "Device %4.4X connection closed by client %s\n",
+        logmsg ("HHC603I Device %4.4X connection closed by client %s\n",
                 dev->devnum, inet_ntoa(dev->ipaddr));
         dev->sense[0] = SENSE_IR;
         return (CSW_ATTN | CSW_UC);
@@ -835,7 +843,7 @@ BYTE    c;                              /* Character work area       */
 
     /* If zero bytes were received then client has closed connection */
     if (num == 0) {
-        TNSDEBUG1( "Device %4.4X connection closed by client %s\n",
+        logmsg ("HHC606I Device %4.4X connection closed by client %s\n",
                 dev->devnum, inet_ntoa(dev->ipaddr));
         dev->sense[0] = SENSE_IR;
         return (CSW_ATTN | CSW_UC);
@@ -1072,8 +1080,8 @@ BYTE                    rejmsg[80];     /* Rejection message         */
                 hostinfo.nodename, hostinfo.sysname,
                 hostinfo.release);
     len = snprintf (conmsg, sizeof(conmsg),
-                "Hercules %s version %s",
-                ARCHITECTURE_NAME, MSTRING(VERSION));
+                "Hercules version %s build at %s %s",
+                MSTRING(VERSION), __DATE__, __TIME__);
 
     if (dev != NULL)
         len += sprintf (conmsg + len, " device %4.4X", dev->devnum);
@@ -1118,7 +1126,7 @@ BYTE                    rejmsg[80];     /* Rejection message         */
         return NULL;
     }
 
-    TNSDEBUG1( "Client %s connected to %4.4X device %4.4X\n",
+    logmsg ("HHC604I Client %s connected to %4.4X device %4.4X\n",
             clientip, dev->devtype, dev->devnum);
 
     /* Send connection message to client */
@@ -1490,121 +1498,179 @@ int constty_close_device ( DEVBLK *dev )
 
 
 /*-------------------------------------------------------------------*/
-/* find_buffer_pos() returns the offset of the screen position       */
+/* SUBROUTINE TO ADVANCE TO NEXT CHAR OR ORDER IN A 3270 DATA STREAM */
+/* Input:                                                            */
+/*      buf     Buffer containing 3270 data stream                   */
+/*      off     Offset in buffer of current character or order       */
+/*      pos     Position on screen of current character or order     */
+/* Output:                                                           */
+/*      off     Offset in buffer of next character or order          */
+/*      pos     Position on screen of next character or order        */
 /*-------------------------------------------------------------------*/
-int find_buffer_pos (BYTE *buf, int size, int pos)
-{
-int     i, j;
-
-    for(j = i = 0; i < size; i++)
-        if(j >= pos)
-            return i;
-        else
-            switch(buf[i]) {
-                case O3270_SBA: 
-                    i += 2;
-                    break;
-                case O3270_EUA:
-                case O3270_SA:
-                    i += 2;
-                    break;
-                case O3270_RA:
-                    if(buf[i+3] == O3270_GE)
-                        i++;
-                case O3270_SFE:
-                case O3270_MF:
-                    i += 3;
-                    break;
-                case O3270_IC:
-                case O3270_PT:
-                    break;
-                case O3270_SF:
-                case O3270_GE:
-                    i += 1;
-                default:
-                    j++;
-                    break;
-            }
-    /* Return offset zero if the position cannot be determined */
-    return 0;
-}
-
-
-/*-------------------------------------------------------------------*/
-/* get_screen_pos() updates the current screen position              */
-/*-------------------------------------------------------------------*/
-void get_screen_pos (int *pos, BYTE *buf, int size)
+static void
+next_3270_pos (BYTE *buf, int *off, int *pos)
 {
 int     i;
 
-    for(i = 0; i < size; i++)
-        switch(buf[i]) {
-            case O3270_RA:
-                /* The Repeat to Address order has 3 argument bytes
-                   and in case of a Graphics Escape 4 bytes
-                   repeat to address sets the buffer address */
+    /* Copy the offset and advance the offset by 1 byte */
+    i = (*off)++;
 
+    /* Advance the offset past the argument bytes and set position */
+    switch (buf[i]) {
+
+    /* The Repeat to Address order has 3 argument bytes (or in case
+       of a Graphics Escape 4 bytes) and sets the screen position */
+            case O3270_RA:
+
+        *off += (buf[i+3] == O3270_GE) ? 4 : 3;
                 if ((buf[i+1] & 0xC0) == 0x00)
                     *pos = (buf[i+1] << 8) | buf[i+2];
                 else
                     *pos = ((buf[i+1] & 0x3F) << 6)
                                  | (buf[i+2] & 0x3F);
-                if(buf[i+3] == O3270_GE)
-                    i++;
-                /*fallthru*/
+        break;
             
+    /* The Start Field Extended and Modify Field orders have
+       a count byte followed by a variable number of type-
+       attribute pairs, and advance the screen position by 1 */
             case O3270_SFE:
             case O3270_MF:
-                /* Start Field Extended and Modify Field have 
-                   both 3 argument bytes, and do not change 
-                   buffer address */
 
-                i += 3;
+        *off += (1 + 2*buf[i+1]);
+        (*pos)++;
                 break;
 
+    /* The Set Buffer Address and Erase Unprotected to Address
+       orders have 2 argument bytes and set the screen position */
             case O3270_SBA:
             case O3270_EUA:
-                /* Set Buffer Address and Erase Unprotected to
-                   Address have 2 argument bytes and set the buffer 
-                   address */ 
 
+        *off += 2;
                 if ((buf[i+1] & 0xC0) == 0x00)
                     *pos = (buf[i+1] << 8) | buf[i+2];
                 else
                     *pos = ((buf[i+1] & 0x3F) << 6)
                                  | (buf[i+2] & 0x3F);
-                /*fallthru*/
+        break;
 
+    /* The Set Attribute order has 2 argument bytes and
+       does not change the screen position */
             case O3270_SA:
-                /* Set Attribute has 2 argument bytes and does not
-                   change the buffer address */
 
-                i += 2;
+        *off += 2;
                 break;
 
+    /* Insert Cursor and Program Tab have no argument
+       bytes and do not change the screen position */
             case O3270_IC:
             case O3270_PT:
-                /* Insert Cursor and Program Tab have no argument 
-                   bytes and do not change the buffer address */
 
                 break;
 
+    /* The Start Field and Graphics Escape orders have one
+       argument byte, and advance the screen position by 1 */
             case O3270_SF:
             case O3270_GE:
-                /* Start Field and Graphics Escape have one argument
-                   byte, and take 1 screen position, so advance the buffer
-                   address by 1 */
 
-                i += 1;
-                /*fallthru*/
+        (*off)++;
+        (*pos)++;
+        break;
 
+    /* All other characters advance the screen position by 1 */
             default:
-                /* Any other character takes one screen position */
 
                 (*pos)++;
                 break;
+
+    } /* end switch */
+
+} /* end function next_3270_pos */
+
+
+/*-------------------------------------------------------------------*/
+/* SUBROUTINE TO FIND A GIVEN SCREEN POSITION IN A 3270 READ BUFFER  */
+/* Input:                                                            */
+/*      buf     Buffer containing an inbound 3270 data stream        */
+/*      size    Number of bytes in buffer                            */
+/*      pos     Screen position whose offset in buffer is desired    */
+/* Return value:                                                     */
+/*      Offset in buffer of the character or order corresponding to  */
+/*      the given screen position, or zero if position not found.    */
+/*-------------------------------------------------------------------*/
+static int
+find_buffer_pos (BYTE *buf, int size, int pos)
+{
+int     wpos;                           /* Current screen position   */
+int     woff;                           /* Current offset in buffer  */
+
+    /* Screen position 0 is at offset 3 in the device buffer,
+       following the AID and cursor address bytes */
+    wpos = 0;
+    woff = 3;
+
+    while (woff < size)
+    {
+        /* Exit if desired screen position has been reached */
+        if (wpos >= pos)
+        {
+//          logmsg ("console: Pos %4.4X reached at %4.4X\n",
+//                  wpos, woff);
+
+#ifdef FIX_QWS_BUG_FOR_MCS_CONSOLES
+            /* There is a bug in QWS3270 when used to emulate an
+               MCS console with EAB.  At position 1680 the Read
+               Buffer contains two 6-byte SFE orders (12 bytes)
+               preceding the entry area, whereas MCS expects the
+               entry area to start 4 bytes after screen position
+               1680 in the buffer.  The bypass is to add 8 to the
+               calculated buffer offset if this appears to be an
+               MCS console read buffer command */
+            if (pos == 0x0690 && buf[woff] == O3270_SFE
+                && buf[woff+6] == O3270_SFE)
+            {
+                woff += 8;
+//              logmsg ("console: Pos %4.4X adjusted to %4.4X\n",
+//                      wpos, woff);
         }
-}
+#endif /*FIX_QWS_BUG_FOR_MCS_CONSOLES*/
+
+            return woff;
+        }
+
+        /* Process next character or order, update screen position */
+        next_3270_pos (buf, &woff, &wpos);
+
+    } /* end while */
+
+    /* Return offset zero if the position cannot be determined */
+    return 0;
+
+} /* end function find_buffer_pos */
+
+
+/*-------------------------------------------------------------------*/
+/* SUBROUTINE TO UPDATE THE CURRENT SCREEN POSITION                  */
+/* Input:                                                            */
+/*      pos     Current screen position                              */
+/*      buf     Pointer to the byte in the 3270 data stream          */
+/*              corresponding to the current screen position         */
+/*      size    Number of bytes remaining in buffer                  */
+/* Output:                                                           */
+/*      pos     Updated screen position after end of buffer          */
+/*-------------------------------------------------------------------*/
+static void
+get_screen_pos (int *pos, BYTE *buf, int size)
+{
+int     woff = 0;                       /* Current offset in buffer  */
+
+    while (woff < size)
+    {
+        /* Process next character or order, update screen position */
+        next_3270_pos (buf, &woff, pos);
+
+    } /* end while */
+
+} /* end function get_screen_pos */
 
 
 /*-------------------------------------------------------------------*/
@@ -1618,7 +1684,7 @@ int             rc;                     /* Return code               */
 int             num;                    /* Number of bytes to copy   */
 int             len;                    /* Data length               */
 int             aid;                    /* First read: AID present   */
-int             pos;                    /* Position in screen        */
+int             off;                    /* Offset in device buffer   */
 BYTE            cmd;                    /* tn3270 command code       */
 BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
 
@@ -1641,7 +1707,6 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
     /*---------------------------------------------------------------*/
     /* CONTROL NO-OPERATION                                          */
     /*---------------------------------------------------------------*/
-
         /* Reset the buffer address */
         dev->pos3270 = 0;
 
@@ -1656,7 +1721,6 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
     /*---------------------------------------------------------------*/
     /* SELECT                                                        */
     /*---------------------------------------------------------------*/
-
         /* Reset the buffer address */
         dev->pos3270 = 0;
 
@@ -1699,9 +1763,18 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
     /*---------------------------------------------------------------*/
     /* WRITE STRUCTURED FIELD                                        */
     /*---------------------------------------------------------------*/
+        /* Process WSF command if device has extended attributes */
+        if (dev->eab3270)
+        {
         dev->pos3270 = 0;
         cmd = R3270_WSF;
-//      goto write;
+            goto write;
+        }
+
+        /* Operation check, device does not have extended attributes */
+        dev->sense[0] = SENSE_OC;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        break;
 
     write:
     /*---------------------------------------------------------------*/
@@ -1753,12 +1826,12 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
                from another write or read, this does not apply for the 
                write structured field command */
             if(cmd != R3270_WSF)
-                get_screen_pos(&dev->pos3270, iobuf+1,num-1);
+                get_screen_pos (&dev->pos3270, iobuf+1, num-1);
 
         } /* if(!data_chained) */
         else /* if(data_chained) */
             if(cmd != R3270_WSF)
-                get_screen_pos(&dev->pos3270, iobuf,num);
+                get_screen_pos (&dev->pos3270, iobuf, num);
 
         /* Copy data from channel buffer to device buffer */
         memcpy (buf + len, iobuf, num);
@@ -1815,10 +1888,14 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
             dev->aid3270 = dev->buf[0];
             if(dev->pos3270 != 0 && dev->aid3270 != SF3270_AID)
             {
-                /* Find current position in buffer */
-                pos = find_buffer_pos(dev->buf+3,dev->rlen3270-3,dev->pos3270);
-                memmove(dev->buf+3, dev->buf+3+pos, dev->rlen3270-(pos+3));
-                dev->rlen3270 -= pos;
+                /* Find offset in buffer of current screen position */
+                off = find_buffer_pos (dev->buf, dev->rlen3270,
+                                        dev->pos3270);
+
+                /* Shift out unwanted characters from buffer */
+                num = (dev->rlen3270 > off ? dev->rlen3270 - off : 0);
+                memmove (dev->buf + 3, dev->buf + off, num);
+                dev->rlen3270 = 3 + num;
             }
 
         } /* end if(!CCW_FLAGS_CD) */
@@ -1895,10 +1972,14 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
             dev->aid3270 = dev->buf[0];
             if(dev->pos3270 != 0 && dev->aid3270 != SF3270_AID)
             {
-                /* Find current position in buffer */
-                pos = find_buffer_pos(dev->buf+3,dev->rlen3270-3,dev->pos3270);
-                memmove(dev->buf+3, dev->buf+3+pos, dev->rlen3270-(pos+3));
-                dev->rlen3270 -= pos;
+                /* Find offset in buffer of current screen position */
+                off = find_buffer_pos (dev->buf, dev->rlen3270,
+                                        dev->pos3270);
+
+                /* Shift out unwanted characters from buffer */
+                num = (dev->rlen3270 > off ? dev->rlen3270 - off : 0);
+                memmove (dev->buf + 3, dev->buf + off, num);
+                dev->rlen3270 = 3 + num;
             }
 
         } /* end if(!CCW_FLAGS_CD) */

@@ -1,14 +1,12 @@
 /*
-||
 || ----------------------------------------------------------------------------
 ||
 || HETMAP.C     (c) Copyright Leland Lucius, 2000-2001
-||              Released under whatever license Hercules uses.
+||              Released under terms of the Q Public License.
 ||
 || Displays information about the structure of a Hercules Emulated Tape. 
 ||
 || ----------------------------------------------------------------------------
-||
 */
 
 
@@ -208,6 +206,7 @@ main( int argc, char *argv[] )
     {
         printf( "het_open() returned %d\n", rc );
         het_close( &hetb );
+        exit( 1 );
     }
 
     fileno = 0;

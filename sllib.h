@@ -2,16 +2,14 @@
 #define _SLLIB_H_
 
 /*
-||
 || ----------------------------------------------------------------------------
 ||
 || SLLIB.H      (c) Copyright Leland Lucius, 2000-2001
-||              Released under whatever license Hercules uses.
+||              Released under terms of the Q Public License.
 ||
-|| Header for Standard Label library
+|| Header for Standard Label library.
 ||
 || ----------------------------------------------------------------------------
-||
 */
 
 #if !defined( TRUE )

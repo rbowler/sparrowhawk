@@ -1,4 +1,4 @@
-/* DECIMAL.C    (c) Copyright Roger Bowler, 1991-2001                */
+/* DECIMAL.C    (c) Copyright Roger Bowler, 1991-2000                */
 /*              ESA/390 Packed Decimal Routines                      */
 
 /*-------------------------------------------------------------------*/
@@ -15,6 +15,8 @@
 /*                                               Jan Jaeger 01/07/00 */
 /* Add trialrun to ED and EDMK                   Jan Jaeger 19/07/00 */
 /* Fix random MP bug - Mario Bezzi                                   */
+/* Clear TEA on data exception - Peter Kuschnerus                V209*/
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -23,128 +25,15 @@
 
 #include "inline.h"
 
+#if !defined(_DECIMAL_C)
+
+#define _DECIMAL_C
+
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
 /*-------------------------------------------------------------------*/
 #define MAX_DECIMAL_LENGTH      16
 #define MAX_DECIMAL_DIGITS      (((MAX_DECIMAL_LENGTH)*2)-1)
-
-/*-------------------------------------------------------------------*/
-/* Load a packed decimal storage operand into a decimal byte string  */
-/*                                                                   */
-/* Input:                                                            */
-/*      addr    Logical address of packed decimal storage operand    */
-/*      len     Length minus one of storage operand (range 0-15)     */
-/*      arn     Access register number associated with operand       */
-/*      regs    CPU register context                                 */
-/* Output:                                                           */
-/*      result  Points to a 31-byte area into which the decimal      */
-/*              digits are loaded.  One decimal digit is loaded      */
-/*              into the low-order 4 bits of each byte, and the      */
-/*              result is padded to the left with high-order zeroes  */
-/*              if the storage operand contains less than 31 digits. */
-/*      count   Points to an integer to receive the number of        */
-/*              digits in the result excluding leading zeroes.       */
-/*              This field is set to zero if the result is all zero. */
-/*      sign    Points to an integer which will be set to -1 if a    */
-/*              negative sign was loaded from the operand, or +1 if  */
-/*              a positive sign was loaded from the operand.         */
-/*                                                                   */
-/*      A program check may be generated if the logical address      */
-/*      causes an addressing, translation, or fetch protection       */
-/*      exception, or if the operand causes a data exception         */
-/*      because of invalid decimal digits or sign.                   */
-/*-------------------------------------------------------------------*/
-static void load_decimal (U32 addr, int len, int arn, REGS *regs,
-                        BYTE *result, int *count, int *sign)
-{
-int     h;                              /* Hexadecimal digit         */
-int     i, j;                           /* Array subscripts          */
-int     n;                              /* Significant digit counter */
-BYTE    pack[MAX_DECIMAL_LENGTH];       /* Packed decimal work area  */
-
-    /* Fetch the packed decimal operand into work area */
-    memset (pack, 0, sizeof(pack));
-    vfetchc (pack+sizeof(pack)-len-1, len, addr, arn, regs);
-
-    /* Unpack digits into result */
-    for (i=0, j=0, n=0; i < MAX_DECIMAL_DIGITS; i++)
-    {
-        /* Load source digit */
-        if (i & 1)
-            h = pack[j++] & 0x0F;
-        else
-            h = pack[j] >> 4;
-
-        /* Check for valid numeric */
-        if (h > 9) {
-            program_interrupt (regs, PGM_DATA_EXCEPTION);
-            return;
-        }
-
-        /* Count significant digits */
-        if (n > 0 || h != 0)
-            n++;
-
-        /* Store decimal digit in result */
-        result[i] = h;
-
-    } /* end for */
-
-    /* Check for valid sign */
-    h = pack[MAX_DECIMAL_LENGTH-1] & 0x0F;
-    if ( h < 0x0A ) {
-        program_interrupt (regs, PGM_DATA_EXCEPTION);
-        return;
-    }
-
-    /* Set number of significant digits */
-    *count = n;
-
-    /* Set sign of operand */
-    *sign = (h == 0x0B || h == 0x0D) ? -1 : 1;
-
-} /* end function load_decimal */
-
-/*-------------------------------------------------------------------*/
-/* Store decimal byte string into packed decimal storage operand     */
-/*                                                                   */
-/* Input:                                                            */
-/*      addr    Logical address of packed decimal storage operand    */
-/*      len     Length minus one of storage operand (range 0-15)     */
-/*      arn     Access register number associated with operand       */
-/*      regs    CPU register context                                 */
-/*      dec     A 31-byte area containing the decimal digits to be   */
-/*              stored.  Each byte contains one decimal digit in     */
-/*              the low-order 4 bits of the byte.                    */
-/*      sign    -1 if a negative sign is to be stored, or +1 if a    */
-/*              positive sign is to be stored.                       */
-/*                                                                   */
-/*      A program check may be generated if the logical address      */
-/*      causes an addressing, translation, or protection exception.  */
-/*-------------------------------------------------------------------*/
-static void store_decimal (U32 addr, int len, int arn, REGS *regs,
-                        BYTE *dec, int sign)
-{
-int     i, j;                           /* Array subscripts          */
-BYTE    pack[MAX_DECIMAL_LENGTH];       /* Packed decimal work area  */
-
-    /* Pack digits into packed decimal work area */
-    for (i=0, j=0; i < MAX_DECIMAL_DIGITS; i++)
-    {
-        if (i & 1)
-            pack[j++] |= dec[i];
-        else
-            pack[j] = dec[i] << 4;
-    } /* end for */
-
-    /* Pack the sign into low-order digit of work area */
-    pack[MAX_DECIMAL_LENGTH-1] |= (sign < 0 ? 0x0D : 0x0C);
-
-    /* Store the result at the operand location */
-    vstorec (pack+sizeof(pack)-len-1, len, addr, arn, regs);
-
-} /* end function store_decimal */
 
 /*-------------------------------------------------------------------*/
 /* Add two decimal byte strings as unsigned decimal numbers          */
@@ -453,15 +342,137 @@ int     temp3, temp4, temp5, qtest;     /* Work areas for algorithm  */
 
 } /* end function divide_decimal */
 
+#endif /*!defined(_DECIMAL_C)*/
+
+/*-------------------------------------------------------------------*/
+/* Load a packed decimal storage operand into a decimal byte string  */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr    Logical address of packed decimal storage operand    */
+/*      len     Length minus one of storage operand (range 0-15)     */
+/*      arn     Access register number associated with operand       */
+/*      regs    CPU register context                                 */
+/* Output:                                                           */
+/*      result  Points to a 31-byte area into which the decimal      */
+/*              digits are loaded.  One decimal digit is loaded      */
+/*              into the low-order 4 bits of each byte, and the      */
+/*              result is padded to the left with high-order zeroes  */
+/*              if the storage operand contains less than 31 digits. */
+/*      count   Points to an integer to receive the number of        */
+/*              digits in the result excluding leading zeroes.       */
+/*              This field is set to zero if the result is all zero. */
+/*      sign    Points to an integer which will be set to -1 if a    */
+/*              negative sign was loaded from the operand, or +1 if  */
+/*              a positive sign was loaded from the operand.         */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or fetch protection       */
+/*      exception, or if the operand causes a data exception         */
+/*      because of invalid decimal digits or sign.                   */
+/*-------------------------------------------------------------------*/
+static void ARCH_DEP(load_decimal) (VADR addr, int len, int arn, REGS *regs,
+                        BYTE *result, int *count, int *sign)
+{
+int     h;                              /* Hexadecimal digit         */
+int     i, j;                           /* Array subscripts          */
+int     n;                              /* Significant digit counter */
+BYTE    pack[MAX_DECIMAL_LENGTH];       /* Packed decimal work area  */
+
+    /* Fetch the packed decimal operand into work area */
+    memset (pack, 0, sizeof(pack));
+    ARCH_DEP(vfetchc) (pack+sizeof(pack)-len-1, len, addr, arn, regs);
+
+    /* Unpack digits into result */
+    for (i=0, j=0, n=0; i < MAX_DECIMAL_DIGITS; i++)
+    {
+        /* Load source digit */
+        if (i & 1)
+            h = pack[j++] & 0x0F;
+        else
+            h = pack[j] >> 4;
+
+        /* Check for valid numeric */
+        if (h > 9)
+        {
+            regs->TEA = 0;
+            ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
+            return;
+        }
+
+        /* Count significant digits */
+        if (n > 0 || h != 0)
+            n++;
+
+        /* Store decimal digit in result */
+        result[i] = h;
+
+    } /* end for */
+
+    /* Check for valid sign */
+    h = pack[MAX_DECIMAL_LENGTH-1] & 0x0F;
+    if (h < 0x0A)
+    {
+        regs->TEA = 0;
+        ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
+        return;
+    }
+
+    /* Set number of significant digits */
+    *count = n;
+
+    /* Set sign of operand */
+    *sign = (h == 0x0B || h == 0x0D) ? -1 : 1;
+
+} /* end function ARCH_DEP(load_decimal) */
+
+/*-------------------------------------------------------------------*/
+/* Store decimal byte string into packed decimal storage operand     */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr    Logical address of packed decimal storage operand    */
+/*      len     Length minus one of storage operand (range 0-15)     */
+/*      arn     Access register number associated with operand       */
+/*      regs    CPU register context                                 */
+/*      dec     A 31-byte area containing the decimal digits to be   */
+/*              stored.  Each byte contains one decimal digit in     */
+/*              the low-order 4 bits of the byte.                    */
+/*      sign    -1 if a negative sign is to be stored, or +1 if a    */
+/*              positive sign is to be stored.                       */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or protection exception.  */
+/*-------------------------------------------------------------------*/
+static void ARCH_DEP(store_decimal) (VADR addr, int len, int arn, REGS *regs,
+                        BYTE *dec, int sign)
+{
+int     i, j;                           /* Array subscripts          */
+BYTE    pack[MAX_DECIMAL_LENGTH];       /* Packed decimal work area  */
+
+    /* Pack digits into packed decimal work area */
+    for (i=0, j=0; i < MAX_DECIMAL_DIGITS; i++)
+    {
+        if (i & 1)
+            pack[j++] |= dec[i];
+        else
+            pack[j] = dec[i] << 4;
+    } /* end for */
+
+    /* Pack the sign into low-order digit of work area */
+    pack[MAX_DECIMAL_LENGTH-1] |= (sign < 0 ? 0x0D : 0x0C);
+
+    /* Store the result at the operand location */
+    ARCH_DEP(vstorec) (pack+sizeof(pack)-len-1, len, addr, arn, regs);
+
+} /* end function ARCH_DEP(store_decimal) */
 
 /*-------------------------------------------------------------------*/
 /* FA   AP    - Add Decimal                                     [SS] */
 /*-------------------------------------------------------------------*/
-void zz_add_decimal (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(add_decimal)
 {
 int     l1, l2;                         /* Lenght values             */
 int     b1, b2;                         /* Values of base registers  */
-U32     effective_addr1,
+VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 int     cc;                             /* Condition code            */
 BYTE    dec1[MAX_DECIMAL_DIGITS];       /* Work area for operand 1   */
@@ -474,8 +485,8 @@ int     sign1, sign2, sign3;            /* Sign of operands & result */
                                      b2, effective_addr2);
 
     /* Load operands into work areas */
-    load_decimal (effective_addr1, l1, b1, regs, dec1, &count1, &sign1);
-    load_decimal (effective_addr2, l2, b2, regs, dec2, &count2, &sign2);
+    ARCH_DEP(load_decimal) (effective_addr1, l1, b1, regs, dec1, &count1, &sign1);
+    ARCH_DEP(load_decimal) (effective_addr2, l2, b2, regs, dec2, &count2, &sign2);
 
     /* Add or subtract operand values */
     if (count2 == 0)
@@ -517,14 +528,14 @@ int     sign1, sign2, sign3;            /* Sign of operands & result */
         sign3 = 1;
 
     /* Store result into first operand location */
-    store_decimal (effective_addr1, l1, b1, regs, dec3, sign3);
+    ARCH_DEP(store_decimal) (effective_addr1, l1, b1, regs, dec3, sign3);
 
     /* Set condition code */
     regs->psw.cc = cc;
 
     /* Program check if overflow and PSW program mask is set */
     if (cc == 3 && regs->psw.domask)
-        program_interrupt (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
 
 }
 
@@ -532,11 +543,11 @@ int     sign1, sign2, sign3;            /* Sign of operands & result */
 /*-------------------------------------------------------------------*/
 /* F9   CP    - Compare Decimal                                 [SS] */
 /*-------------------------------------------------------------------*/
-void zz_compare_decimal (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(compare_decimal)
 {
 int     l1, l2;                         /* Lenght values             */
 int     b1, b2;                         /* Values of base registers  */
-U32     effective_addr1,
+VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 BYTE    dec1[MAX_DECIMAL_DIGITS];       /* Work area for operand 1   */
 BYTE    dec2[MAX_DECIMAL_DIGITS];       /* Work area for operand 2   */
@@ -548,8 +559,8 @@ int     rc;                             /* Return code               */
                                      b2, effective_addr2);
 
     /* Load operands into work areas */
-    load_decimal (effective_addr1, l1, b1, regs, dec1, &count1, &sign1);
-    load_decimal (effective_addr2, l2, b2, regs, dec2, &count2, &sign2);
+    ARCH_DEP(load_decimal) (effective_addr1, l1, b1, regs, dec1, &count1, &sign1);
+    ARCH_DEP(load_decimal) (effective_addr2, l2, b2, regs, dec2, &count2, &sign2);
 
     /* Result is equal if both operands are zero */
     if (count1 == 0 && count2 == 0)
@@ -590,11 +601,11 @@ int     rc;                             /* Return code               */
 /*-------------------------------------------------------------------*/
 /* FD   DP    - Divide Decimal                                  [SS] */
 /*-------------------------------------------------------------------*/
-void zz_divide_decimal (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(divide_decimal)
 {
 int     l1, l2;                         /* Lenght values             */
 int     b1, b2;                         /* Values of base registers  */
-U32     effective_addr1,
+VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 BYTE    dec1[MAX_DECIMAL_DIGITS];       /* Operand 1 (dividend)      */
 BYTE    dec2[MAX_DECIMAL_DIGITS];       /* Operand 2 (divisor)       */
@@ -610,15 +621,15 @@ int     signq, signr;                   /* Sign of quotient/remainder*/
     /* Program check if the second operand length exceeds 15 digits
        or is equal to or greater than the first operand length */
     if (l2 > 7 || l2 >= l1)
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Load operands into work areas */
-    load_decimal (effective_addr1, l1, b1, regs, dec1, &count1, &sign1);
-    load_decimal (effective_addr2, l2, b2, regs, dec2, &count2, &sign2);
+    ARCH_DEP(load_decimal) (effective_addr1, l1, b1, regs, dec1, &count1, &sign1);
+    ARCH_DEP(load_decimal) (effective_addr2, l2, b2, regs, dec2, &count2, &sign2);
 
     /* Program check if second operand value is zero */
     if (count2 == 0)
-        program_interrupt (regs, PGM_DECIMAL_DIVIDE_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_DECIMAL_DIVIDE_EXCEPTION);
 
     /* Perform trial comparison to determine potential overflow.
        The leftmost digit of the divisor is aligned one digit to
@@ -630,7 +641,7 @@ int     signq, signr;                   /* Sign of quotient/remainder*/
     if (memcmp(dec2 + (MAX_DECIMAL_DIGITS - l2*2 - 2),
                 dec1 + (MAX_DECIMAL_DIGITS - l1*2 - 1),
                 l2*2 + 2) <= 0)
-        program_interrupt (regs, PGM_DECIMAL_DIVIDE_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_DECIMAL_DIVIDE_EXCEPTION);
 
     /* Perform decimal division */
     divide_decimal (dec1, count1, dec2, count2, quot, rem);
@@ -646,10 +657,10 @@ int     signq, signr;                   /* Sign of quotient/remainder*/
        field will be filled in order to check for store protection.
        Subsequently the quotient will be stored in the leftmost bytes
        of the first operand location, overwriting high order zeroes */
-    store_decimal (effective_addr1, l1, b1, regs, rem, signr);
+    ARCH_DEP(store_decimal) (effective_addr1, l1, b1, regs, rem, signr);
 
     /* Store quotient in leftmost bytes of first operand location */
-    store_decimal (effective_addr1, l1-l2-1, b1, regs, quot, signq);
+    ARCH_DEP(store_decimal) (effective_addr1, l1-l2-1, b1, regs, quot, signq);
 
 }
 
@@ -658,11 +669,11 @@ int     signq, signr;                   /* Sign of quotient/remainder*/
 /* DE   ED    - Edit                                            [SS] */
 /* DF   EDMK  - Edit and Mark                                   [SS] */
 /*-------------------------------------------------------------------*/
-void zz_edit_x_edit_and_mark (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(edit_x_edit_and_mark)
 {
 int     l;                              /* Lenght value              */
 int     b1, b2;                         /* Values of base registers  */
-U32     effective_addr1,
+VADR    effective_addr1,
         effective_addr2,                /* Effective addresses       */
         addr1,
         addr2;
@@ -701,11 +712,11 @@ BYTE    rbyte;                          /* Result byte               */
         for (i = 0, d = 0; i < l+1; i++)
         {
             /* Fetch pattern byte from first operand */
-            pbyte = vfetchb ( addr1, b1, regs );
-    
+            pbyte = ARCH_DEP(vfetchb) ( addr1, b1, regs );
+
             /* The first pattern byte is also the fill byte */
             if (i == 0) fbyte = pbyte;
-    
+
             /* If pattern byte is digit selector (X'20') or
                significance starter (X'21') then fetch next
                hexadecimal digit from the second operand */
@@ -714,19 +725,22 @@ BYTE    rbyte;                          /* Result byte               */
                 if (d == 0)
                 {
                     /* Fetch source byte and extract left digit */
-                    sbyte = vfetchb ( addr2, b2, regs );
+                    sbyte = ARCH_DEP(vfetchb) ( addr2, b2, regs );
                     h = sbyte >> 4;
                     sbyte &= 0x0F;
                     d = 1;
-    
+
                     /* Increment second operand address */
                     addr2++;
                     addr2 &= ADDRESS_MAXWRAP(regs);
-    
+
                     /* Program check if left digit is not numeric */
                     if (h > 9)
-                        program_interrupt (regs, PGM_DATA_EXCEPTION);
-    
+                    {
+                        regs->TEA = 0;
+                        ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
+                    }
+
                 }
                 else
                 {
@@ -734,38 +748,40 @@ BYTE    rbyte;                          /* Result byte               */
                     h = sbyte;
                     d = 0;
                 }
-    
+
                 /* For the EDMK instruction only, insert address of
                    result byte into general register 1 if the digit
                    is non-zero and significance indicator was off */
                 if (!trial_run && (inst[0] == 0xDF) && h > 0 && sig == 0)
                 {
+#if defined(FEATURE_ESAME)
+                    if (regs->psw.amode64)
+                        regs->GR_G(1) = addr1;
+                    else
+#endif
                     if ( regs->psw.amode )
-                    {
-                        regs->gpr[1] = addr1;
-                    } else {
-                        regs->gpr[1] &= 0xFF000000;
-                        regs->gpr[1] |= addr1;
-                    }
+                        regs->GR_L(1) = addr1;
+                    else
+                        regs->GR_LA24(1) = addr1;
                 }
-    
+
                 /* Replace the pattern byte by the fill character
                    or by a zoned decimal digit */
                 rbyte = (sig == 0 && h == 0) ? fbyte : (0xF0 | h);
                 if(!trial_run)
-                    vstoreb ( rbyte, addr1, b1, regs );
+                    ARCH_DEP(vstoreb) ( rbyte, addr1, b1, regs );
                 else
-                    validate_operand (addr1, b1, 0, ACCTYPE_WRITE, regs);
-    
+                    ARCH_DEP(validate_operand) (addr1, b1, 0, ACCTYPE_WRITE, regs);
+
                 /* Set condition code 2 if digit is non-zero */
                 if (h > 0) cc = 2;
-    
+
                 /* Turn on significance indicator if pattern
                    byte is significance starter or if source
                    digit is non-zero */
                 if (pbyte == 0x21 || h > 0)
                     sig = 1;
-    
+
                 /* Examine right digit for sign code */
                 if (d == 1 && sbyte > 9)
                 {
@@ -773,25 +789,25 @@ BYTE    rbyte;                          /* Result byte               */
                        the right digit is a plus sign code */
                     if (sbyte != 0x0B && sbyte != 0x0D)
                         sig = 0;
-    
+
                     /* Take next digit from next source byte */
                     d = 0;
                 }
             }
-    
+
             /* If pattern byte is field separator (X'22') then
                replace it by the fill character, turn off the
                significance indicator, and zeroize conditon code  */
             else if (pbyte == 0x22)
             {
                 if(!trial_run)
-                    vstoreb ( fbyte, addr1, b1, regs );
+                    ARCH_DEP(vstoreb) ( fbyte, addr1, b1, regs );
                 else
-                    validate_operand (addr1, b1, 0, ACCTYPE_WRITE, regs);
+                    ARCH_DEP(validate_operand) (addr1, b1, 0, ACCTYPE_WRITE, regs);
                 sig = 0;
                 cc = 0;
             }
-    
+
             /* If pattern byte is a message byte (anything other
                than X'20', X'21', or X'22') then replace it by
                the fill byte if the significance indicator is off */
@@ -800,18 +816,18 @@ BYTE    rbyte;                          /* Result byte               */
                 if (sig == 0)
                 {
                     if (!trial_run)
-                        vstoreb ( fbyte, addr1, b1, regs );
+                        ARCH_DEP(vstoreb) ( fbyte, addr1, b1, regs );
                     else
-                        validate_operand (addr1, b1, 0, ACCTYPE_WRITE, regs);
+                        ARCH_DEP(validate_operand) (addr1, b1, 0, ACCTYPE_WRITE, regs);
                 }
             }
-    
+
             /* Increment first operand address */
             addr1++;
             addr1 &= ADDRESS_MAXWRAP(regs);
-    
+
         } /* end for(i) */
-    
+
     } /* end for(trial_run) */
 
     /* Replace condition code 2 by condition code 1 if the
@@ -820,18 +836,18 @@ BYTE    rbyte;                          /* Result byte               */
 
     /* Set condition code */
     regs->psw.cc = cc;
-    
+
 }
 
 
 /*-------------------------------------------------------------------*/
 /* FC   MP    - Multiply Decimal                                [SS] */
 /*-------------------------------------------------------------------*/
-void zz_multiply_decimal (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(multiply_decimal)
 {
 int     l1, l2;                         /* Lenght values             */
 int     b1, b2;                         /* Values of base registers  */
-U32     effective_addr1,
+VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 BYTE    dec1[MAX_DECIMAL_DIGITS];       /* Work area for operand 1   */
 BYTE    dec2[MAX_DECIMAL_DIGITS];       /* Work area for operand 2   */
@@ -846,19 +862,22 @@ int     carry;                          /* Carry indicator           */
                                      b2, effective_addr2);
 
     /* Load operands into work areas */
-    load_decimal (effective_addr1, l1, b1, regs, dec1, &count1, &sign1);
-    load_decimal (effective_addr2, l2, b2, regs, dec2, &count2, &sign2);
+    ARCH_DEP(load_decimal) (effective_addr1, l1, b1, regs, dec1, &count1, &sign1);
+    ARCH_DEP(load_decimal) (effective_addr2, l2, b2, regs, dec2, &count2, &sign2);
 
     /* Program check if the second operand length exceeds 15 digits
        or is equal to or greater than the first operand length */
     if (l2 > 7 || l2 >= l1)
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Program check if the number of bytes in the second operand
        is less than the number of bytes of high-order zeroes in the
        first operand; this ensures that overflow cannot occur */
     if (l2 > l1 - (count1/2 + 1))
-        program_interrupt (regs, PGM_DATA_EXCEPTION);
+    {
+        regs->TEA = 0;
+        ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
+    }
 
     /* Clear the result field */
     memset (dec3, 0, MAX_DECIMAL_DIGITS);
@@ -883,7 +902,7 @@ int     carry;                          /* Carry indicator           */
     sign3 = (sign1 == sign2) ? 1 : -1;
 
     /* Store result into first operand location */
-    store_decimal (effective_addr1, l1, b1, regs, dec3, sign3);
+    ARCH_DEP(store_decimal) (effective_addr1, l1, b1, regs, dec3, sign3);
 
 }
 
@@ -891,11 +910,11 @@ int     carry;                          /* Carry indicator           */
 /*-------------------------------------------------------------------*/
 /* F0   SRP   - Shift and Round Decimal                         [SS] */
 /*-------------------------------------------------------------------*/
-void zz_shift_and_round_decimal (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(shift_and_round_decimal)
 {
 int     l1, i3;                         /* Lenght and rounding       */
 int     b1, b2;                         /* Values of base registers  */
-U32     effective_addr1,
+VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 int     cc;                             /* Condition code            */
 BYTE    dec[MAX_DECIMAL_DIGITS];        /* Work area for operand     */
@@ -909,11 +928,14 @@ int     carry;                          /* Carry indicator           */
                                      b2, effective_addr2);
 
     /* Load operand into work area */
-    load_decimal (effective_addr1, l1, b1, regs, dec, &count, &sign);
+    ARCH_DEP(load_decimal) (effective_addr1, l1, b1, regs, dec, &count, &sign);
 
     /* Program check if rounding digit is invalid */
     if (i3 > 9)
-        program_interrupt (regs, PGM_DATA_EXCEPTION);
+    {
+        regs->TEA = 0;
+        ARCH_DEP(program_interrupt) (regs, PGM_DATA_EXCEPTION);
+    }
 
     /* Isolate low-order six bits of shift count */
     effective_addr2 &= 0x3F;
@@ -965,14 +987,14 @@ int     carry;                          /* Carry indicator           */
         sign = +1;
 
     /* Store result into operand location */
-    store_decimal (effective_addr1, l1, b1, regs, dec, sign);
+    ARCH_DEP(store_decimal) (effective_addr1, l1, b1, regs, dec, sign);
 
     /* Set condition code */
     regs->psw.cc = cc;
 
     /* Program check if overflow and PSW program mask is set */
     if (cc == 3 && regs->psw.domask)
-        program_interrupt (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
 
 }
 
@@ -980,11 +1002,11 @@ int     carry;                          /* Carry indicator           */
 /*-------------------------------------------------------------------*/
 /* FB   SP    - Subtract Decimal                                [SS] */
 /*-------------------------------------------------------------------*/
-void zz_subtract_decimal (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(subtract_decimal)
 {
 int     l1, l2;                         /* Lenght values             */
 int     b1, b2;                         /* Values of base registers  */
-U32     effective_addr1,
+VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 int     cc;                             /* Condition code            */
 BYTE    dec1[MAX_DECIMAL_DIGITS];       /* Work area for operand 1   */
@@ -997,8 +1019,8 @@ int     sign1, sign2, sign3;            /* Sign of operands & result */
                                      b2, effective_addr2);
 
     /* Load operands into work areas */
-    load_decimal (effective_addr1, l1, b1, regs, dec1, &count1, &sign1);
-    load_decimal (effective_addr2, l2, b2, regs, dec2, &count2, &sign2);
+    ARCH_DEP(load_decimal) (effective_addr1, l1, b1, regs, dec1, &count1, &sign1);
+    ARCH_DEP(load_decimal) (effective_addr2, l2, b2, regs, dec2, &count2, &sign2);
 
     /* Add or subtract operand values */
     if (count2 == 0)
@@ -1040,14 +1062,14 @@ int     sign1, sign2, sign3;            /* Sign of operands & result */
         sign3 = 1;
 
     /* Store result into first operand location */
-    store_decimal (effective_addr1, l1, b1, regs, dec3, sign3);
+    ARCH_DEP(store_decimal) (effective_addr1, l1, b1, regs, dec3, sign3);
 
     /* Return condition code */
     regs->psw.cc = cc;
 
     /* Program check if overflow and PSW program mask is set */
     if (cc == 3 && regs->psw.domask)
-        program_interrupt (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
 
 }
 
@@ -1055,11 +1077,11 @@ int     sign1, sign2, sign3;            /* Sign of operands & result */
 /*-------------------------------------------------------------------*/
 /* F8   ZAP   - Zero and Add                                    [SS] */
 /*-------------------------------------------------------------------*/
-void zz_zero_and_add (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(zero_and_add)
 {
 int     l1, l2;                         /* Lenght values             */
 int     b1, b2;                         /* Values of base registers  */
-U32     effective_addr1,
+VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 int     cc;                             /* Condition code            */
 BYTE    dec[MAX_DECIMAL_DIGITS];        /* Work area for operand     */
@@ -1070,7 +1092,7 @@ int     sign;                           /* Sign                      */
                                      b2, effective_addr2);
 
     /* Load second operand into work area */
-    load_decimal (effective_addr2, l2, b2, regs, dec, &count, &sign);
+    ARCH_DEP(load_decimal) (effective_addr2, l2, b2, regs, dec, &count, &sign);
 
     /* Set condition code */
     cc = (count == 0) ? 0 : (sign < 1) ? 1 : 2;
@@ -1084,14 +1106,29 @@ int     sign;                           /* Sign                      */
         sign = +1;
 
     /* Store result into first operand location */
-    store_decimal (effective_addr1, l1, b1, regs, dec, sign);
+    ARCH_DEP(store_decimal) (effective_addr1, l1, b1, regs, dec, sign);
 
     /* Return condition code */
     regs->psw.cc = cc;
 
     /* Program check if overflow and PSW program mask is set */
     if (cc == 3 && regs->psw.domask)
-        program_interrupt (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
 
 }
 
+
+#if !defined(_GEN_ARCH)
+
+// #define  _GEN_ARCH 964
+// #include "decimal.c"
+
+// #undef   _GEN_ARCH
+#define  _GEN_ARCH 390
+#include "decimal.c"
+
+#undef   _GEN_ARCH
+#define  _GEN_ARCH 370
+#include "decimal.c"
+
+#endif /*!defined(_GEN_ARCH)*/

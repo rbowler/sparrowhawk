@@ -1,4 +1,4 @@
-/* ASSIST.C     (c) Copyright Roger Bowler, 1999-2001                */
+/* ASSIST.C     (c) Copyright Roger Bowler, 1999                     */
 /*              ESA/390 MVS Assist Routines                          */
 
 /*-------------------------------------------------------------------*/
@@ -8,14 +8,20 @@
 
 /*              Instruction decode rework - Jan Jaeger               */
 /*              Correct address wraparound - Jan Jaeger              */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
 /*              Add dummy assist instruction - Jay Maynard,          */
 /*                  suggested by Brandon Hill                        */
+
 
 #include "hercules.h"
 
 #include "opcode.h"
 
 #include "inline.h"
+
+#if !defined(_ASSIST_C)
+
+#define _ASSIST_C
 
 /*-------------------------------------------------------------------*/
 /* Control block offsets fixed by architecture                       */
@@ -39,11 +45,38 @@
 #define LITOCMS         (-8)            /* Obtain CMS error exit     */
 #define LITRCMS         (-4)            /* Release CMS error exit    */
 
+#endif /*!defined(_ASSIST_C)*/
+
+
+#if !defined(FEATURE_ESAME)
+/*-------------------------------------------------------------------*/
+/* E503       - SVC assist                                     [SSE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(svc_assist)
+{
+int     b1, b2;                         /* Values of base field      */
+U32     effective_addr1,
+        effective_addr2;                /* Effective addresses       */
+
+    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+
+    PRIV_CHECK(regs);
+
+    /* Specification exception if operands are not on word boundary */
+    if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /*INCOMPLETE: NO ACTION IS TAKEN, THE SVC IS UNASSISTED
+                  AND MVS WILL HAVE TO HANDLE THE SITUATION*/
+
+}
+#endif /*!defined(FEATURE_ESAME)*/
+
 
 /*-------------------------------------------------------------------*/
 /* E504       - Obtain Local Lock                              [SSE] */
 /*-------------------------------------------------------------------*/
-void zz_obtain_local_lock (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(obtain_local_lock)
 {
 int     b1, b2;                         /* Values of base field      */
 U32     effective_addr1,
@@ -63,7 +96,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
 
     /* Specification exception if operands are not on word boundary */
     if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     PERFORM_SERIALIZATION(regs);
 
@@ -71,18 +104,18 @@ U32     newia;                          /* Unsuccessful branch addr  */
     OBTAIN_MAINLOCK(regs);
 
     /* Load ASCB address from first operand location */
-    ascb_addr = VFETCH4 ( effective_addr1, b1, regs );
+    ascb_addr = ARCH_DEP(vfetch4) ( effective_addr1, b1, regs );
 
     /* Load locks held bits from second operand location */
-    hlhi_word = VFETCH4 ( effective_addr2, b2, regs );
+    hlhi_word = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
 
     /* Fetch our logical CPU address from PSALCPUA */
-    lcpa = VFETCH4 ( PSALCPUA, 0, regs );
+    lcpa = ARCH_DEP(vfetch4) ( PSALCPUA, 0, regs );
 
     lock_addr = (ascb_addr + ASCBLOCK) & ADDRESS_MAXWRAP(regs);
 
     /* Fetch the local lock from the ASCB */
-    lock = VFETCH4 ( lock_addr, 0, regs );
+    lock = ARCH_DEP(vfetch4) ( lock_addr, 0, regs );
 
     /* Obtain the local lock if not already held by any CPU */
     if (lock == 0
@@ -90,35 +123,35 @@ U32     newia;                          /* Unsuccessful branch addr  */
     {
         /* Store the unchanged value into the second operand to
            ensure suppression in the event of an access exception */
-        vstore4 ( hlhi_word, effective_addr2, b2, regs );
+        ARCH_DEP(vstore4) ( hlhi_word, effective_addr2, b2, regs );
 
         /* Store our logical CPU address in ASCBLOCK */
-        vstore4 ( lcpa, lock_addr, 0, regs );
+        ARCH_DEP(vstore4) ( lcpa, lock_addr, 0, regs );
 
         /* Set the local lock held bit in the second operand */
         hlhi_word |= PSALCLLI;
-        vstore4 ( hlhi_word, effective_addr2, b2, regs );
+        ARCH_DEP(vstore4) ( hlhi_word, effective_addr2, b2, regs );
 
         /* Set register 13 to zero to indicate lock obtained */
-        regs->gpr[13] = 0;
+        regs->GR_L(13) = 0;
     }
     else
     {
         /* Fetch the lock interface table address from the
            second word of the second operand, and load the
            new instruction address and amode from LITOLOC */
-        lit_addr = VFETCH4 ( effective_addr2 + 4, b2, regs ) + LITOLOC;
+        lit_addr = ARCH_DEP(vfetch4) ( effective_addr2 + 4, b2, regs ) + LITOLOC;
         lit_addr &= ADDRESS_MAXWRAP(regs);
-        newia = VFETCH4 ( lit_addr, 0, regs );
+        newia = ARCH_DEP(vfetch4) ( lit_addr, 0, regs );
 
         /* Save the link information in register 12 */
-        regs->gpr[12] = regs->psw.ia;
+        regs->GR_L(12) = regs->psw.IA;
 
         /* Copy LITOLOC into register 13 to signify obtain failure */
-        regs->gpr[13] = newia;
+        regs->GR_L(13) = newia;
 
         /* Update the PSW instruction address */
-        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+        regs->psw.IA = newia & ADDRESS_MAXWRAP(regs);
     }
 
     /* Release main-storage access lock */
@@ -132,7 +165,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
 /*-------------------------------------------------------------------*/
 /* E505       - Release Local Lock                             [SSE] */
 /*-------------------------------------------------------------------*/
-void zz_release_local_lock (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(release_local_lock)
 {
 int     b1, b2;                         /* Values of base field      */
 U32     effective_addr1,
@@ -154,25 +187,25 @@ U32     newia;                          /* Unsuccessful branch addr  */
 
     /* Specification exception if operands are not on word boundary */
     if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
     /* Load ASCB address from first operand location */
-    ascb_addr = VFETCH4 ( effective_addr1, b1, regs );
+    ascb_addr = ARCH_DEP(vfetch4) ( effective_addr1, b1, regs );
 
     /* Load locks held bits from second operand location */
-    hlhi_word = VFETCH4 ( effective_addr2, b2, regs );
+    hlhi_word = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
 
     /* Fetch our logical CPU address from PSALCPUA */
-    lcpa = VFETCH4 ( PSALCPUA, 0, regs );
+    lcpa = ARCH_DEP(vfetch4) ( PSALCPUA, 0, regs );
 
     /* Fetch the local lock and the suspend queue from the ASCB */
     lock_addr = (ascb_addr + ASCBLOCK) & ADDRESS_MAXWRAP(regs);
     susp_addr = (ascb_addr + ASCBLSWQ) & ADDRESS_MAXWRAP(regs);
-    lock = VFETCH4 ( lock_addr, 0, regs );
-    susp = VFETCH4 ( susp_addr, 0, regs );
+    lock = ARCH_DEP(vfetch4) ( lock_addr, 0, regs );
+    susp = ARCH_DEP(vfetch4) ( susp_addr, 0, regs );
 
     /* Test if this CPU holds the local lock, and does not hold
        any CMS lock, and the local lock suspend queue is empty */
@@ -182,35 +215,35 @@ U32     newia;                          /* Unsuccessful branch addr  */
     {
         /* Store the unchanged value into the second operand to
            ensure suppression in the event of an access exception */
-        vstore4 ( hlhi_word, effective_addr2, b2, regs );
+        ARCH_DEP(vstore4) ( hlhi_word, effective_addr2, b2, regs );
 
         /* Set the local lock to zero */
-        vstore4 ( 0, lock_addr, 0, regs );
+        ARCH_DEP(vstore4) ( 0, lock_addr, 0, regs );
 
         /* Clear the local lock held bit in the second operand */
         hlhi_word &= ~PSALCLLI;
-        vstore4 ( hlhi_word, effective_addr2, b2, regs );
+        ARCH_DEP(vstore4) ( hlhi_word, effective_addr2, b2, regs );
 
         /* Set register 13 to zero to indicate lock released */
-        regs->gpr[13] = 0;
+        regs->GR_L(13) = 0;
     }
     else
     {
         /* Fetch the lock interface table address from the
            second word of the second operand, and load the
            new instruction address and amode from LITRLOC */
-        lit_addr = VFETCH4 ( effective_addr2 + 4, b2, regs ) + LITRLOC;
+        lit_addr = ARCH_DEP(vfetch4) ( effective_addr2 + 4, b2, regs ) + LITRLOC;
         lit_addr &= ADDRESS_MAXWRAP(regs);
-        newia = VFETCH4 ( lit_addr, 0, regs );
+        newia = ARCH_DEP(vfetch4) ( lit_addr, 0, regs );
 
         /* Save the link information in register 12 */
-        regs->gpr[12] = regs->psw.ia;
+        regs->GR_L(12) = regs->psw.IA;
 
         /* Copy LITRLOC into register 13 to signify release failure */
-        regs->gpr[13] = newia;
+        regs->GR_L(13) = newia;
 
         /* Update the PSW instruction address */
-        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+        regs->psw.IA = newia & ADDRESS_MAXWRAP(regs);
     }
 
     /* Release main-storage access lock */
@@ -222,7 +255,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
 /*-------------------------------------------------------------------*/
 /* E506       - Obtain CMS Lock                                [SSE] */
 /*-------------------------------------------------------------------*/
-void zz_obtain_cms_lock (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(obtain_cms_lock)
 {
 int     b1, b2;                         /* Values of base field      */
 U32     effective_addr1,
@@ -242,25 +275,25 @@ U32     newia;                          /* Unsuccessful branch addr  */
 
     /* Specification exception if operands are not on word boundary */
     if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     PERFORM_SERIALIZATION(regs);
 
     /* General register 11 contains the lock address */
-    lock_addr = regs->gpr[11] & ADDRESS_MAXWRAP(regs);
+    lock_addr = regs->GR_L(11) & ADDRESS_MAXWRAP(regs);
     lock_arn = 11;
 
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
     /* Load ASCB address from first operand location */
-    ascb_addr = VFETCH4 ( effective_addr1, b1, regs );
+    ascb_addr = ARCH_DEP(vfetch4) ( effective_addr1, b1, regs );
 
     /* Load locks held bits from second operand location */
-    hlhi_word = VFETCH4 ( effective_addr2, b2, regs );
+    hlhi_word = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
 
     /* Fetch the lock addressed by general register 11 */
-    lock = VFETCH4 ( lock_addr, lock_arn, regs );
+    lock = ARCH_DEP(vfetch4) ( lock_addr, lock_arn, regs );
 
     /* Obtain the lock if not held by any ASCB, and if this CPU
        holds the local lock and does not hold a CMS lock */
@@ -269,35 +302,35 @@ U32     newia;                          /* Unsuccessful branch addr  */
     {
         /* Store the unchanged value into the second operand to
            ensure suppression in the event of an access exception */
-        vstore4 ( hlhi_word, effective_addr2, b2, regs );
+        ARCH_DEP(vstore4) ( hlhi_word, effective_addr2, b2, regs );
 
         /* Store the ASCB address in the CMS lock */
-        vstore4 ( ascb_addr, lock_addr, lock_arn, regs );
+        ARCH_DEP(vstore4) ( ascb_addr, lock_addr, lock_arn, regs );
 
         /* Set the CMS lock held bit in the second operand */
         hlhi_word |= PSACMSLI;
-        vstore4 ( hlhi_word, effective_addr2, b2, regs );
+        ARCH_DEP(vstore4) ( hlhi_word, effective_addr2, b2, regs );
 
         /* Set register 13 to zero to indicate lock obtained */
-        regs->gpr[13] = 0;
+        regs->GR_L(13) = 0;
     }
     else
     {
         /* Fetch the lock interface table address from the
            second word of the second operand, and load the
            new instruction address and amode from LITOCMS */
-        lit_addr = VFETCH4 ( effective_addr2 + 4, b2, regs ) + LITOCMS;
+        lit_addr = ARCH_DEP(vfetch4) ( effective_addr2 + 4, b2, regs ) + LITOCMS;
         lit_addr &= ADDRESS_MAXWRAP(regs);
-        newia = VFETCH4 ( lit_addr, 0, regs );
+        newia = ARCH_DEP(vfetch4) ( lit_addr, 0, regs );
 
         /* Save the link information in register 12 */
-        regs->gpr[12] = regs->psw.ia;
+        regs->GR_L(12) = regs->psw.IA;
 
         /* Copy LITOCMS into register 13 to signify obtain failure */
-        regs->gpr[13] = newia;
+        regs->GR_L(13) = newia;
 
         /* Update the PSW instruction address */
-        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+        regs->psw.IA = newia & ADDRESS_MAXWRAP(regs);
     }
 
     /* Release main-storage access lock */
@@ -311,7 +344,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
 /*-------------------------------------------------------------------*/
 /* E507       - Release CMS Lock                               [SSE] */
 /*-------------------------------------------------------------------*/
-void zz_release_cms_lock (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(release_cms_lock)
 {
 int     b1, b2;                         /* Values of base field      */
 U32     effective_addr1,
@@ -332,24 +365,24 @@ U32     newia;                          /* Unsuccessful branch addr  */
 
     /* Specification exception if operands are not on word boundary */
     if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* General register 11 contains the lock address */
-    lock_addr = regs->gpr[11] & ADDRESS_MAXWRAP(regs);
+    lock_addr = regs->GR_L(11) & ADDRESS_MAXWRAP(regs);
     lock_arn = 11;
 
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
     /* Load ASCB address from first operand location */
-    ascb_addr = VFETCH4 ( effective_addr1, b1, regs );
+    ascb_addr = ARCH_DEP(vfetch4) ( effective_addr1, b1, regs );
 
     /* Load locks held bits from second operand location */
-    hlhi_word = VFETCH4 ( effective_addr2, b2, regs );
+    hlhi_word = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
 
     /* Fetch the CMS lock and the suspend queue word */
-    lock = VFETCH4 ( lock_addr, lock_arn, regs );
-    susp = VFETCH4 ( lock_addr + 4, lock_arn, regs );
+    lock = ARCH_DEP(vfetch4) ( lock_addr, lock_arn, regs );
+    susp = ARCH_DEP(vfetch4) ( lock_addr + 4, lock_arn, regs );
 
     /* Test if current ASCB holds this lock, the locks held indicators
        show a CMS lock is held, and the lock suspend queue is empty */
@@ -359,35 +392,35 @@ U32     newia;                          /* Unsuccessful branch addr  */
     {
         /* Store the unchanged value into the second operand to
            ensure suppression in the event of an access exception */
-        vstore4 ( hlhi_word, effective_addr2, b2, regs );
+        ARCH_DEP(vstore4) ( hlhi_word, effective_addr2, b2, regs );
 
         /* Set the CMS lock to zero */
-        vstore4 ( 0, lock_addr, lock_arn, regs );
+        ARCH_DEP(vstore4) ( 0, lock_addr, lock_arn, regs );
 
         /* Clear the CMS lock held bit in the second operand */
         hlhi_word &= ~PSACMSLI;
-        vstore4 ( hlhi_word, effective_addr2, b2, regs );
+        ARCH_DEP(vstore4) ( hlhi_word, effective_addr2, b2, regs );
 
         /* Set register 13 to zero to indicate lock released */
-        regs->gpr[13] = 0;
+        regs->GR_L(13) = 0;
     }
     else
     {
         /* Fetch the lock interface table address from the
            second word of the second operand, and load the
            new instruction address and amode from LITRCMS */
-        lit_addr = VFETCH4 ( effective_addr2 + 4, b2, regs ) + LITRCMS;
+        lit_addr = ARCH_DEP(vfetch4) ( effective_addr2 + 4, b2, regs ) + LITRCMS;
         lit_addr &= ADDRESS_MAXWRAP(regs);
-        newia = VFETCH4 ( lit_addr, 0, regs );
+        newia = ARCH_DEP(vfetch4) ( lit_addr, 0, regs );
 
         /* Save the link information in register 12 */
-        regs->gpr[12] = regs->psw.ia;
+        regs->GR_L(12) = regs->psw.IA;
 
         /* Copy LITRCMS into register 13 to signify release failure */
-        regs->gpr[13] = newia;
+        regs->GR_L(13) = newia;
 
         /* Update the PSW instruction address */
-        regs->psw.ia = newia & ADDRESS_MAXWRAP(regs);
+        regs->psw.IA = newia & ADDRESS_MAXWRAP(regs);
     }
 
     /* Release main-storage access lock */
@@ -395,23 +428,152 @@ U32     newia;                          /* Unsuccessful branch addr  */
 
 } /* end function release_cms_lock */
 
+
+#if !defined(FEATURE_TRACING)
 /*-------------------------------------------------------------------*/
-/* E5xx       - Dummy assist instruction                       [SSE] */
+/* E508       - Trace SVC Interruption                         [SSE] */
 /*-------------------------------------------------------------------*/
-/* This routine may be used to no-op any instruction desired, while  */
-/* making SIE happy. It was originally used to dummy out the MVS/XA- */
-/* specific instruction E503.                                        */
-/*-------------------------------------------------------------------*/
-void dummy_assist_instruction (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(trace_svc_interruption)
 {
-    LOAD_INST(regs);
+int     b1, b2;                         /* Values of base field      */
+U32     effective_addr1,
+        effective_addr2;                /* Effective addresses       */
 
-    if( !execflag )
-    {
-        regs->psw.ilc = (inst[0] < 0x40) ? 2 :
-                        (inst[0] < 0xC0) ? 4 : 6;
-        regs->psw.ia += regs->psw.ilc;
-        regs->psw.ia &= ADDRESS_MAXWRAP(regs);
-    }
+    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
 
-} /* end function dummy_assist_instruction */
+    PRIV_CHECK(regs);
+
+    /* Specification exception if operands are not on word boundary */
+    if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /*INCOMPLETE: NO TRACE ENTRY IS GENERATED*/
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* E509       - Trace Program Interruption                     [SSE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(trace_program_interruption)
+{
+int     b1, b2;                         /* Values of base field      */
+U32     effective_addr1,
+        effective_addr2;                /* Effective addresses       */
+
+    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+
+    PRIV_CHECK(regs);
+
+    /* Specification exception if operands are not on word boundary */
+    if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /*INCOMPLETE: NO TRACE ENTRY IS GENERATED*/
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* E50A       - Trace Initial SRB Dispatch                     [SSE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(trace_initial_srb_dispatch)
+{
+int     b1, b2;                         /* Values of base field      */
+U32     effective_addr1,
+        effective_addr2;                /* Effective addresses       */
+
+    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+
+    PRIV_CHECK(regs);
+
+    /* Specification exception if operands are not on word boundary */
+    if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /*INCOMPLETE: NO TRACE ENTRY IS GENERATED*/
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* E50B       - Trace I/O Interruption                         [SSE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(trace_io_interruption)
+{
+int     b1, b2;                         /* Values of base field      */
+U32     effective_addr1,
+        effective_addr2;                /* Effective addresses       */
+
+    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+
+    PRIV_CHECK(regs);
+
+    /* Specification exception if operands are not on word boundary */
+    if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /*INCOMPLETE: NO TRACE ENTRY IS GENERATED*/
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* E50C       - Trace Task Dispatch                            [SSE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(trace_task_dispatch)
+{
+int     b1, b2;                         /* Values of base field      */
+U32     effective_addr1,
+        effective_addr2;                /* Effective addresses       */
+
+    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+
+    PRIV_CHECK(regs);
+
+    /* Specification exception if operands are not on word boundary */
+    if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /*INCOMPLETE: NO TRACE ENTRY IS GENERATED*/
+
+}
+
+
+/*-------------------------------------------------------------------*/
+/* E50C       - Trace SVC Return                               [SSE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(trace_svc_return)
+{
+int     b1, b2;                         /* Values of base field      */
+U32     effective_addr1,
+        effective_addr2;                /* Effective addresses       */
+
+    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+
+    PRIV_CHECK(regs);
+
+    /* Specification exception if operands are not on word boundary */
+    if ((effective_addr1 & 0x00000003) || (effective_addr2 & 0x00000003))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /*INCOMPLETE: NO TRACE ENTRY IS GENERATED*/
+
+}
+#endif /*!defined(FEATURE_TRACING)*/
+
+
+#if !defined(_GEN_ARCH)
+
+// #define  _GEN_ARCH 964
+// #include "assist.c"
+
+// #undef   _GEN_ARCH
+#define  _GEN_ARCH 390
+#include "assist.c"
+
+#undef   _GEN_ARCH
+#define  _GEN_ARCH 370
+#include "assist.c"
+
+#endif /*!defined(_GEN_ARCH)*/

@@ -1,7 +1,8 @@
 /* CONTROL.C    (c) Copyright Roger Bowler, 1994-2001                */
 /*              ESA/390 CPU Emulator                                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all control instructions of the            */
@@ -20,7 +21,9 @@
 /*      Instruction decode rework - Jan Jaeger                       */
 /*      PR may lose pending interrupts - Jan Jaeger                  */
 /*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
-/*      STSI instruction by Jan Jaeger                               */
+/*      ESAME low-address protection - Roger Bowler                  */
+/*      ESAME linkage stack operations - Roger Bowler                */
+/*      ESAME BSA instruction - Roger Bowler                    v209c*/
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -29,119 +32,149 @@
 
 #include "inline.h"
 
-#ifdef IBUF
-#include "ibuf.h"
-#endif
 
+#if defined(FEATURE_BRANCH_AND_SET_AUTHORITY)
 /*-------------------------------------------------------------------*/
 /* B25A BSA   - Branch and Set Authority                       [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_branch_and_set_authority (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(branch_and_set_authority)
 {
 int     r1, r2;                         /* Values of R fields        */
 U32     ducto;                          /* DUCT origin               */
-U32     duct8;                          /* DUCT word 8               */
-U32     duct9;                          /* DUCT word 9               */
+U32     duct_pkrp;                      /* DUCT PKM/Key/RA/P word    */
+RADR    duct_reta;                      /* DUCT return address/amode */
 BYTE    key;                            /* New PSW key               */
 #ifdef FEATURE_TRACING
-U32     newcr12 = 0;                    /* CR12 upon completion      */
+CREG    newcr12 = 0;                    /* CR12 upon completion      */
 #endif /*FEATURE_TRACING*/
 
     RRE(inst, execflag, regs, r1, r2);
 
-    SIE_MODE_XA(regs);
+    /* Special operation exception if ASF is not enabled */
+    if (ASF_ENABLED(regs) == 0)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
-    /* Special operation exception if CR0 bit 15 is zero */
-    if ((regs->cr[0] & CR0_ASF) == 0)
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
-
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[1] & SIE_IC1_BSA))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
 #ifdef FEATURE_TRACING
     /* Perform tracing */
-    if ((regs->cr[12] & CR12_BRTRACE) && (r2 != 0))
-        newcr12 = trace_br (regs->gpr[r2] & 0x80000000,
-                                regs->gpr[r2], regs);
+    if ((regs->CR(12) & CR12_BRTRACE) && (r2 != 0))
+        newcr12 = ARCH_DEP(trace_br) (regs->GR_L(r2) & 0x80000000,
+                                regs->GR_L(r2), regs);
 #endif /*FEATURE_TRACING*/
 
     /* Load real address of dispatchable unit control table */
-    ducto = regs->cr[2] & CR2_DUCTO;
+    ducto = regs->CR(2) & CR2_DUCTO;
 
     /* Apply low-address protection to stores into the DUCT */
-    if (ducto < 512 && (regs->cr[0] & CR0_LOW_PROT))
+    if (ARCH_DEP(is_low_address_protected) (ducto, 0, regs))
     {
 #ifdef FEATURE_SUPPRESSION_ON_PROTECTION
-        regs->tea = (ducto & TEA_EFFADDR);
+        regs->TEA = (ducto & STORAGE_KEY_PAGEMASK);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
     }
 
     /* Convert DUCT real address to absolute address */
-    ducto = APPLY_PREFIXING (ducto, regs->pxr);
+    ducto = APPLY_PREFIXING (ducto, regs->PX);
 
     /* Program check if DUCT origin address is invalid */
     if (ducto >= regs->mainsize)
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-    /* Load DUCT words 8 and 9 */
-    duct8 = fetch_fullword_absolute (ducto+32, regs);
-    duct9 = fetch_fullword_absolute (ducto+36, regs);
+  #if defined(FEATURE_ESAME)
+    /* For ESAME, load the PKM/Key/RA/P from DUCT word 5, and load
+       the return address and amode from DUCT words 8 and 9
+       (note: the DUCT cannot cross a page boundary) */
+    duct_pkrp = ARCH_DEP(fetch_fullword_absolute) (ducto+20, regs);
+    duct_reta = ARCH_DEP(fetch_doubleword_absolute) (ducto+32, regs);
+  #else /*!defined(FEATURE_ESAME)*/
+    /* For ESA/390, load the PKM/Key/RA/P from DUCT word 9, and load
+       the return address and amode from DUCT word 8
+       (note: the DUCT cannot cross a page boundary) */
+    duct_pkrp = ARCH_DEP(fetch_fullword_absolute) (ducto+36, regs);
+    duct_reta = ARCH_DEP(fetch_fullword_absolute) (ducto+32, regs);
+  #endif /*!defined(FEATURE_ESAME)*/
 
     /* Perform base authority or reduced authority operation */
-    if ((duct9 & DUCT9_RA) == 0)
+    if ((duct_pkrp & DUCT_RA) == 0)
     {
         /* In base authority state R2 cannot specify register zero */
         if (r2 == 0)
-            program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
         /* Obtain the new PSW key from R1 register bits 24-27 */
-        key = regs->gpr[r1] & 0x000000F0;
+        key = regs->GR_L(r1) & 0x000000F0;
 
         /* Privileged operation exception if in problem state and
            current PSW key mask does not permit new key value */
         if (regs->psw.prob
-            && ((regs->cr[3] << (key >> 4)) & 0x80000000) == 0 )
-            program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            && ((regs->CR(3) << (key >> 4)) & 0x80000000) == 0 )
+            ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
         /* Save current PSW amode and instruction address */
-        duct8 = regs->psw.ia & DUCT8_IA;
-        if (regs->psw.amode) duct8 |= DUCT8_AMODE;
+      #if defined(FEATURE_ESAME)
+        if (regs->psw.amode64)
+        {
+            duct_reta = regs->psw.IA;
+        }
+        else
+      #endif /*!defined(FEATURE_ESAME)*/
+        {
+            duct_reta = regs->psw.IA & DUCT_IA31;
+            if (regs->psw.amode) duct_reta |= DUCT_AM31;
+        }
 
         /* Save current PSW key mask, PSW key, and problem state */
-        duct9 = (regs->cr[3] & CR3_KEYMASK) | regs->psw.pkey;
-        if (regs->psw.prob) duct9 |= DUCT9_PROB;
+        duct_pkrp = (regs->CR(3) & CR3_KEYMASK) | regs->psw.pkey;
+        if (regs->psw.prob) duct_pkrp |= DUCT_PROB;
 
         /* Set the reduced authority bit */
-        duct9 |= DUCT9_RA;
+        duct_pkrp |= DUCT_RA;
 
-        /* Store the updated values in DUCT words 8 and 9 */
-        store_fullword_absolute (duct8, ducto+32, regs);
-        store_fullword_absolute (duct9, ducto+36, regs);
+      #if defined(FEATURE_ESAME)
+        /* For ESAME, store the PKM/Key/RA/P into DUCT word 5, and
+           store the return address and amode into DUCT words 8 and 9
+           (note: the DUCT cannot cross a page boundary) */
+        ARCH_DEP(store_fullword_absolute) (duct_pkrp, ducto+20, regs);
+        ARCH_DEP(store_doubleword_absolute) (duct_reta, ducto+32, regs);
+      #else /*!defined(FEATURE_ESAME)*/
+        /* For ESA/390, store the PKM/Key/RA/P into DUCT word 9, and
+           store the return address and amode into DUCT word 8
+           (note: the DUCT cannot cross a page boundary) */
+        ARCH_DEP(store_fullword_absolute) (duct_pkrp, ducto+36, regs);
+        ARCH_DEP(store_fullword_absolute) (duct_reta, ducto+32, regs);
+      #endif /*!defined(FEATURE_ESAME)*/
 
         /* Load new PSW key and PSW key mask from R1 register */
         regs->psw.pkey = key;
-        regs->cr[3] &= ~CR3_KEYMASK;
-        regs->cr[3] |= regs->gpr[r1] & CR3_KEYMASK;
+        regs->CR(3) &= ~CR3_KEYMASK;
+        regs->CR(3) |= regs->GR_L(r1) & CR3_KEYMASK;
 
         /* Set the problem state bit in the current PSW */
         regs->psw.prob = 1;
 
         /* Set PSW instruction address and amode from R2 register */
-        if (regs->gpr[r2] & 0x80000000)
+      #if defined(FEATURE_ESAME)
+        if (regs->psw.amode64)
+        {
+            regs->psw.IA = regs->GR_G(r2);
+        }
+        else
+      #endif /*defined(FEATURE_ESAME)*/
+        if (regs->GR_L(r2) & 0x80000000)
         {
             regs->psw.amode = 1;
-            regs->psw.ia = regs->gpr[r2] & 0x7FFFFFFF;
-            LASTPAGE_INVALIDATE(regs);
+            regs->psw.IA = regs->GR_L(r2) & 0x7FFFFFFF;
         }
         else
         {
             regs->psw.amode = 0;
-            regs->psw.ia = regs->gpr[r2] & 0x00FFFFFF;
-            LASTPAGE_INVALIDATE(regs);
+            regs->psw.IA = regs->GR_L(r2) & 0x00FFFFFF;
         }
 
     } /* end if(BSA-ba) */
@@ -150,132 +183,158 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
 
         /* In reduced authority state R2 must specify register zero */
         if (r2 != 0)
-            program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
         /* If R1 is non-zero, save the current PSW addressing mode
            and instruction address in the R1 register */
         if (r1 != 0)
         {
-            regs->gpr[r1] = regs->psw.ia;
-            if (regs->psw.amode) regs->gpr[r1] |= 0x80000000;
+          #if defined(FEATURE_ESAME)
+            if (regs->psw.amode64)
+            {
+                regs->GR_G(r1) = regs->psw.IA;
+            }
+            else
+          #endif /*defined(FEATURE_ESAME)*/
+            {
+                regs->GR_L(r1) = regs->psw.IA;
+                if (regs->psw.amode) regs->GR_L(r1) |= 0x80000000;
+            }
         }
 
         /* Restore PSW amode and instruction address from the DUCT */
-        regs->psw.ia = duct8 & DUCT8_IA;
-        regs->psw.amode = (duct8 & DUCT8_AMODE) ? 1 : 0;
-        LASTPAGE_INVALIDATE(regs);
+      #if defined(FEATURE_ESAME)
+        if (regs->psw.amode64)
+        {
+            regs->psw.IA = duct_reta;
+        }
+        else
+      #endif /*defined(FEATURE_ESAME)*/
+        {
+            regs->psw.IA = duct_reta & DUCT_IA31;
+            regs->psw.amode = (duct_reta & DUCT_AM31) ? 1 : 0;
+        }
 
         /* Restore the PSW key mask from the DUCT */
-        regs->cr[3] &= ~CR3_KEYMASK;
-        regs->cr[3] |= duct9 & DUCT9_PKM;
+        regs->CR(3) &= ~CR3_KEYMASK;
+        regs->CR(3) |= duct_pkrp & DUCT_PKM;
 
         /* Restore the PSW key from the DUCT */
-        regs->psw.pkey = duct9 & DUCT9_KEY;
+        regs->psw.pkey = duct_pkrp & DUCT_KEY;
 
         /* Restore the problem state bit from the DUCT */
-        regs->psw.prob = (duct9 & DUCT9_PROB) ? 1 : 0;
+        regs->psw.prob = (duct_pkrp & DUCT_PROB) ? 1 : 0;
 
         /* Reset the reduced authority bit in the DUCT */
-        duct9 &= ~DUCT9_RA;
-        store_fullword_absolute (duct9, ducto+36, regs);
+        duct_pkrp &= ~DUCT_RA;
+      #if defined(FEATURE_ESAME)
+        ARCH_DEP(store_fullword_absolute) (duct_pkrp, ducto+20, regs);
+      #else /*!defined(FEATURE_ESAME)*/
+        ARCH_DEP(store_fullword_absolute) (duct_pkrp, ducto+36, regs);
+      #endif /*!defined(FEATURE_ESAME)*/
 
         /* Specification exception if the PSW is now invalid */
-        if ((regs->psw.ia & 1)
-            || (regs->psw.amode == 0 && regs->psw.ia > 0x00FFFFFF))
+        if ((regs->psw.IA & 1)
+      #if defined(FEATURE_ESAME)
+            || (regs->psw.amode64 == 0 && regs->psw.amode == 1
+                && regs->psw.IA > 0x7FFFFFFF)
+            || (regs->psw.amode64 == 0 && regs->psw.amode == 0
+                && regs->psw.IA > 0x00FFFFFF))
+      #else /*!defined(FEATURE_ESAME)*/
+            || (regs->psw.amode == 0 && regs->psw.IA > 0x00FFFFFF))
+      #endif /*!defined(FEATURE_ESAME)*/
         {
             regs->psw.ilc = 0;
-            program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
         }
 
     } /* end if(BSA-ra) */
 
 #ifdef FEATURE_TRACING
     /* Update trace table address if branch tracing is on */
-    if ((regs->cr[12] & CR12_BRTRACE) && (r2 != 0))
-        regs->cr[12] = newcr12;
+    if ((regs->CR(12) & CR12_BRTRACE) && (r2 != 0))
+        regs->CR(12) = newcr12;
 #endif /*FEATURE_TRACING*/
 
-    LASTPAGE_INVALIDATE(regs);
-    REASSIGN_FRAG(regs);
 }
+#endif /*defined(FEATURE_BRANCH_AND_SET_AUTHORITY)*/
 
 
+#if defined(FEATURE_SUBSPACE_GROUP)
 /*-------------------------------------------------------------------*/
 /* B258 BSG   - Branch in Subspace Group                       [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_branch_in_subspace_group (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(branch_in_subspace_group)
 {
 int     r1, r2;                         /* Values of R fields        */
 U32     alet;                           /* Destination subspace ALET */
 U32     dasteo;                         /* Destination ASTE origin   */
 U32     daste[16];                      /* ASN second table entry    */
-U32     ducto;                          /* DUCT origin               */
+RADR    ducto;                          /* DUCT origin               */
 U32     duct0;                          /* DUCT word 0               */
 U32     duct1;                          /* DUCT word 1               */
 U32     duct3;                          /* DUCT word 3               */
-U32     abs;                            /* Absolute address          */
-U32     newia;                          /* New instruction address   */
+RADR    abs;                            /* Absolute address          */
+VADR    newia;                          /* New instruction address   */
 int     protect = 0;                    /* 1=ALE protection detected
                                            by ART (ignored by BSG)   */
 U16     xcode;                          /* Exception code            */
 #ifdef FEATURE_TRACING
-U32     newcr12 = 0;                    /* CR12 upon completion      */
+CREG    newcr12 = 0;                    /* CR12 upon completion      */
 #endif /*FEATURE_TRACING*/
 
     RRE(inst, execflag, regs, r1, r2);
 
-    SIE_MODE_XA(regs);
-
-    /* Special operation exception if DAT is off or CR0 bit 15 is 0 */
+    /* Special operation exception if DAT is off or ASF not enabled */
     if (REAL_MODE(&(regs->psw))
-        || (regs->cr[0] & CR0_ASF) == 0)
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        || ASF_ENABLED(regs) == 0)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
 #ifdef FEATURE_TRACING
     /* Perform tracing */
-    if (regs->cr[12] & CR12_ASNTRACE)
-        newcr12 = trace_bsg ((r2 == 0) ? 0 : regs->ar[r2],
-                                regs->gpr[r2], regs);
+    if (regs->CR(12) & CR12_ASNTRACE)
+        newcr12 = ARCH_DEP(trace_bsg) ((r2 == 0) ? 0 : regs->AR(r2),
+                                regs->GR_L(r2), regs);
     else
-        if (regs->cr[12] & CR12_BRTRACE)
-            newcr12 = trace_br (regs->gpr[r2] & 0x80000000,
-                                regs->gpr[r2], regs);
+        if (regs->CR(12) & CR12_BRTRACE)
+            newcr12 = ARCH_DEP(trace_br) (regs->GR_L(r2) & 0x80000000,
+                                regs->GR_L(r2), regs);
 #endif /*FEATURE_TRACING*/
 
     /* Load real address of dispatchable unit control table */
-    ducto = regs->cr[2] & CR2_DUCTO;
+    ducto = regs->CR(2) & CR2_DUCTO;
 
     /* Apply low-address protection to stores into the DUCT */
-    if (ducto < 512 && (regs->cr[0] & CR0_LOW_PROT))
+    if (ARCH_DEP(is_low_address_protected) (ducto, 0, regs))
     {
 #ifdef FEATURE_SUPPRESSION_ON_PROTECTION
-        regs->tea = (ducto & TEA_EFFADDR);
+        regs->TEA = (ducto & STORAGE_KEY_PAGEMASK);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
     }
 
     /* Convert DUCT real address to absolute address */
-    ducto = APPLY_PREFIXING (ducto, regs->pxr);
+    ducto = APPLY_PREFIXING (ducto, regs->PX);
 
     /* Program check if DUCT origin address is invalid */
     if (ducto >= regs->mainsize)
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Fetch DUCT words 0, 1, and 3 from absolute storage
        (note: the DUCT cannot cross a page boundary) */
-    duct0 = fetch_fullword_absolute (ducto, regs);
-    duct1 = fetch_fullword_absolute (ducto+4, regs);
-    duct3 = fetch_fullword_absolute (ducto+12, regs);
+    duct0 = ARCH_DEP(fetch_fullword_absolute) (ducto, regs);
+    duct1 = ARCH_DEP(fetch_fullword_absolute) (ducto+4, regs);
+    duct3 = ARCH_DEP(fetch_fullword_absolute) (ducto+12, regs);
 
     /* Special operation exception if the current primary ASTE origin
        is not the same as the base ASTE for the dispatchable unit */
-    if ((regs->cr[5] & CR5_PASTEO) != (duct0 & DUCT0_BASTEO))
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+    if ((regs->CR_L(5) & CR5_PASTEO) != (duct0 & DUCT0_BASTEO))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Obtain the destination ALET from the R2 access register,
        except that register zero means destination ALET is zero */
-    alet = (r2 == 0) ? 0 : regs->ar[r2];
+    alet = (r2 == 0) ? 0 : regs->AR(r2);
 
     /* Perform special ALET translation to obtain destination ASTE */
     switch (alet) {
@@ -286,15 +345,16 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
         dasteo = duct0 & DUCT0_BASTEO;
 
         /* Convert the ASTE origin to an absolute address */
-        abs = APPLY_PREFIXING (dasteo, regs->pxr);
+        abs = APPLY_PREFIXING (dasteo, regs->PX);
 
         /* Program check if ASTE origin address is invalid */
         if (abs >= regs->mainsize)
-            program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+            ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-        /* Fetch destination ASTE word 2 from absolute storage
+        /* Fetch destination ASTE words 2 and 3 from absolute storage
            (note: the ASTE cannot cross a page boundary) */
-        daste[2] = fetch_fullword_absolute (abs+8, regs);
+        daste[2] = ARCH_DEP(fetch_fullword_absolute) (abs+8, regs);
+        daste[3] = ARCH_DEP(fetch_fullword_absolute) (abs+12, regs);
 
         break;
 
@@ -305,98 +365,110 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
 
         /* Special operation exception if SSASTEO is zero */
         if (dasteo == 0)
-            program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
         /* Convert the ASTE origin to an absolute address */
-        abs = APPLY_PREFIXING (dasteo, regs->pxr);
+        abs = APPLY_PREFIXING (dasteo, regs->PX);
 
         /* Program check if ASTE origin address is invalid */
         if (abs >= regs->mainsize)
-            program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+            ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-        /* Fetch subspace ASTE words 0, 2, and 5 from absolute
+        /* Fetch subspace ASTE words 0, 2, 3, and 5 from absolute
            storage (note: the ASTE cannot cross a page boundary) */
-        daste[0] = fetch_fullword_absolute (abs, regs);
-        daste[2] = fetch_fullword_absolute (abs+8, regs);
-        daste[5] = fetch_fullword_absolute (abs+20, regs);
+        daste[0] = ARCH_DEP(fetch_fullword_absolute) (abs, regs);
+        daste[2] = ARCH_DEP(fetch_fullword_absolute) (abs+8, regs);
+        daste[3] = ARCH_DEP(fetch_fullword_absolute) (abs+12, regs);
+        daste[5] = ARCH_DEP(fetch_fullword_absolute) (abs+20, regs);
 
         /* ASTE validity exception if ASTE invalid bit is one */
         if (daste[0] & ASTE0_INVALID)
-            program_interrupt (regs, PGM_ASTE_VALIDITY_EXCEPTION);
+            ARCH_DEP(program_interrupt) (regs, PGM_ASTE_VALIDITY_EXCEPTION);
 
         /* ASTE sequence exception if the subspace ASTE sequence
            number does not match the sequence number in the DUCT */
         if ((daste[5] & ASTE5_ASTESN) != (duct3 & DUCT3_SSASTESN))
-            program_interrupt (regs, PGM_ASTE_SEQUENCE_EXCEPTION);
+            ARCH_DEP(program_interrupt) (regs, PGM_ASTE_SEQUENCE_EXCEPTION);
 
         break;
 
     default: /* ALET not 0 or 1 */
 
         /* Perform special ART to obtain destination ASTE */
-        xcode = translate_alet (alet, 0, ACCTYPE_BSG, regs,
+        xcode = ARCH_DEP(translate_alet) (alet, 0, ACCTYPE_BSG, regs,
                                 &dasteo, daste, &protect);
 
         /* Program check if ALET translation error */
         if (xcode != 0)
-            program_interrupt (regs, xcode);
+            ARCH_DEP(program_interrupt) (regs, xcode);
 
         /* Special operation exception if the destination ASTE
            is the base space of a different subspace group */
         if (dasteo != (duct0 & DUCT0_BASTEO)
-                && ((daste[2] & STD_GROUP) == 0
+                && ((ASTE_AS_DESIGNATOR(daste) & SSGROUP_BIT) == 0
                     || (daste[0] & ASTE0_BASE) == 0))
-            program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     } /* end switch(alet) */
 
-    /* Update the primary STD from word 2 of the destination ASTE */
+    /* Update the primary STD (or ASCE) from the destination ASTE */
     if (dasteo == (duct0 & DUCT0_BASTEO))
     {
-        /* When the destination ASTE is the base space,
-           replace the primary STD by the STD in the ASTE*/
-        regs->cr[1] = daste[2];
+        /* When the destination ASTE is the base space, replace the
+           primary STD (or ASCE) by the STD (or ASCE) in the ASTE */
+        regs->CR(1) = ASTE_AS_DESIGNATOR(daste);
     }
     else
     {
         /* When the destination ASTE is a subspace, replace
-           bits 1-23 and 25-31 of the primary STD with the
-           corresponding bits from the STD in the ASTE */
-        regs->cr[1] &= (STD_SSEVENT | STD_SAEVENT);
-        regs->cr[1] |= (daste[2] & ~(STD_SSEVENT | STD_SAEVENT));
+           the primary STD or ASCE by the STD or ASTE in the
+           ASTE, except for the space-switch event and storage
+           alteration event bits, which remain unchanged */
+        regs->CR(1) &= (SSEVENT_BIT | SAEVENT_BIT);
+        regs->CR(1) |= (ASTE_AS_DESIGNATOR(daste)
+                        & ~((RADR)(SSEVENT_BIT | SAEVENT_BIT)));
     }
 
     /* Compute the branch address from the R2 operand */
-    newia = regs->gpr[r2];
+    newia = regs->GR(r2);
 
     /* If R1 is non-zero, save the current PSW addressing mode
        and instruction address in the R1 register */
     if (r1 != 0)
     {
-        regs->gpr[r1] = regs->psw.ia;
-        if (regs->psw.amode) regs->gpr[r1] |= 0x80000000;
+      #if defined(FEATURE_ESAME)
+        if (regs->psw.amode64)
+            regs->GR_G(r1) = regs->psw.IA;
+        else
+      #endif /*!defined(FEATURE_ESAME)*/
+            regs->GR_L(r1) = regs->psw.IA |
+                                (regs->psw.amode ? 0x80000000 : 0);
     }
 
     /* Set mode and branch to address specified by R2 operand */
-    if ( newia & 0x80000000 )
+    regs->psw.IA = newia;
+
+  #if defined(FEATURE_ESAME)
+    if (regs->psw.amode64 == 0 && (newia & 0x80000000))
+  #else /*!defined(FEATURE_ESAME)*/
+    if (newia & 0x80000000)
+  #endif /*!defined(FEATURE_ESAME)*/
     {
         regs->psw.amode = 1;
-        regs->psw.ia = newia & 0x7FFFFFFF;
-        LASTPAGE_INVALIDATE(regs);
+        regs->psw.IA = newia & 0x7FFFFFFF;
     }
     else
     {
         regs->psw.amode = 0;
-        regs->psw.ia = newia & 0x00FFFFFF;
-        LASTPAGE_INVALIDATE(regs);
+        regs->psw.IA = newia & 0x00FFFFFF;
     }
 
-    /* Set SSTD equal to PSTD */
-    regs->cr[7] = regs->cr[1];
+    /* Set the SSTD (or SASCE) equal to PSTD (or PASCE) */
+    regs->CR(7) = regs->CR(1);
 
     /* Set SASN equal to PASN */
-    regs->cr[3] &= ~CR3_SASN;
-    regs->cr[3] |= (regs->cr[4] & CR4_PASN);
+    regs->CR(3) &= ~CR3_SASN;
+    regs->CR(3) |= (regs->CR(4) & CR4_PASN);
 
     /* Reset the subspace fields in the DUCT */
     if (dasteo == (duct0 & DUCT0_BASTEO))
@@ -404,14 +476,14 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
         /* When the destination ASTE is the base space,
            reset the subspace active bit in the DUCT */
         duct1 &= ~DUCT1_SA;
-        store_fullword_absolute (duct1, ducto+4, regs);
+        ARCH_DEP(store_fullword_absolute) (duct1, ducto+4, regs);
     }
     else if (alet == ALET_SECONDARY)
     {
         /* When the destination ASTE specifies a subspace by means
            of ALET 1, set the subspace active bit in the DUCT */
         duct1 |= DUCT1_SA;
-        store_fullword_absolute (duct1, ducto+4, regs);
+        ARCH_DEP(store_fullword_absolute) (duct1, ducto+4, regs);
     }
     else
     {
@@ -419,102 +491,112 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
            of an ALET other than ALET 1, set the subspace active
            bit and store the subspace ASTE origin in the DUCT */
         duct1 = DUCT1_SA | dasteo;
-        store_fullword_absolute (duct1, ducto+4, regs);
+        ARCH_DEP(store_fullword_absolute) (duct1, ducto+4, regs);
 
         /* Set the subspace ASTE sequence number in the DUCT
            equal to the destination ASTE sequence number */
         duct3 = daste[5];
-        store_fullword_absolute (duct3, ducto+12, regs);
+        ARCH_DEP(store_fullword_absolute) (duct3, ducto+12, regs);
     }
 
 #ifdef FEATURE_TRACING
     /* Update trace table address if ASN tracing or branch tracing */
-    if (regs->cr[12] & (CR12_ASNTRACE | CR12_BRTRACE))
-        regs->cr[12] = newcr12;
+    if (regs->CR(12) & (CR12_ASNTRACE | CR12_BRTRACE))
+        regs->CR(12) = newcr12;
 #endif /*FEATURE_TRACING*/
 
-    LASTPAGE_INVALIDATE(regs);
-    REASSIGN_FRAG(regs);
 }
+#endif /*defined(FEATURE_SUBSPACE_GROUP)*/
 
 
+#if defined(FEATURE_LINKAGE_STACK)
 /*-------------------------------------------------------------------*/
 /* B240 BAKR  - Branch and Stack Register                      [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_branch_and_stack (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(branch_and_stack)
 {
 int     r1, r2;                         /* Values of R fields        */
-U32     n1, n2;                         /* Fullword workareas        */
+VADR    n1, n2;                         /* Operand values            */
 #ifdef FEATURE_TRACING
-U32     n = 0;                          /* Fullword workareas        */
+VADR    n = 0;                          /* Work area                 */
 #endif /*FEATURE_TRACING*/
 
     RRE(inst, execflag, regs, r1, r2);
 
     SIE_MODE_XC_OPEX(regs);
 
-    SIE_MODE_XA(regs);
-
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[3] & SIE_IC3_BAKR))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Obtain the return address and addressing mode from
        the R1 register, or use updated PSW if R1 is zero */
     if ( r1 != 0 )
     {
-        n1 = regs->gpr[r1];
+        n1 = regs->GR(r1);
+      #if defined(FEATURE_ESAME)
+        if ( (n1 & 0x01) == 0 )
+            n1 &= (n1 & 0x80000000) ? 0xFFFFFFFF : 0x00FFFFFF;
+      #else /*!defined(FEATURE_ESAME)*/
         if ( (n1 & 0x80000000) == 0 )
             n1 &= 0x00FFFFFF;
+      #endif /*!defined(FEATURE_ESAME)*/
     }
     else
     {
-        n1 = regs->psw.ia;
+        n1 = regs->psw.IA;
+      #if defined(FEATURE_ESAME)
+        if ( regs->psw.amode64 )
+            n1 |= 0x01;
+        else
+      #endif /*defined(FEATURE_ESAME)*/
         if ( regs->psw.amode )
             n1 |= 0x80000000;
     }
 
     /* Obtain the branch address from the R2 register, or use
        the updated PSW instruction address if R2 is zero */
-    n2 = (r2 != 0) ? regs->gpr[r2] : regs->psw.ia;
+    n2 = (r2 != 0) ? regs->GR(r2) : regs->psw.IA;
+    n2 &= ADDRESS_MAXWRAP(regs);
 
     /* Set the addressing mode bit in the branch address */
+  #if defined(FEATURE_ESAME)
+    if ( regs->psw.amode64 )
+        n2 |= 0x01;
+    else
+  #endif /*defined(FEATURE_ESAME)*/
     if ( regs->psw.amode )
         n2 |= 0x80000000;
-    else
-        n2 &= 0x00FFFFFF;
 
 #ifdef FEATURE_TRACING
     /* Form the branch trace entry */
-    if((regs->cr[12] & CR12_BRTRACE) && (r2 != 0))
-        n = trace_br(regs->psw.amode, regs->gpr[r2], regs);
+    if((regs->CR(12) & CR12_BRTRACE) && (r2 != 0))
+        n = ARCH_DEP(trace_br)(regs->psw.amode, regs->GR_L(r2), regs);
 #endif /*FEATURE_TRACING*/
 
     /* Form the linkage stack entry */
-    form_stack_entry (LSED_UET_BAKR, n1, n2, 0, regs);
+    ARCH_DEP(form_stack_entry) (LSED_UET_BAKR, n1, n2, 0, 0, regs);
 
 #ifdef FEATURE_TRACING
     /* Update CR12 to reflect the new branch trace entry */
-    if((regs->cr[12] & CR12_BRTRACE) && (r2 != 0))
-        regs->cr[12] = n;
+    if((regs->CR(12) & CR12_BRTRACE) && (r2 != 0))
+        regs->CR(12) = n;
 #endif /*FEATURE_TRACING*/
 
     /* Execute the branch unless R2 specifies register 0 */
     if ( r2 != 0 )
-    {
-        regs->psw.ia = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
-        GET_FRAGENTRY(regs);
-    }
+        regs->psw.IA = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
 
 }
+#endif /*defined(FEATURE_LINKAGE_STACK)*/
 
 
 #if defined(FEATURE_BROADCASTED_PURGING)
 /*-------------------------------------------------------------------*/
 /* B250 CSP   - Compare and Swap and Purge                     [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_compare_and_swap_and_purge (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(compare_and_swap_and_purge)
 {
 int     r1, r2;                         /* Values of R fields        */
 U32     n1, n2;                         /* 32 Bit work               */
@@ -525,10 +607,10 @@ U32     n1, n2;                         /* 32 Bit work               */
 
     ODD_CHECK(r1, regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_IPTECSP))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Perform serialization before starting operation */
     PERFORM_SERIALIZATION (regs);
@@ -536,26 +618,29 @@ U32     n1, n2;                         /* 32 Bit work               */
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && regs->sie_scao)
+    {
+        STORAGE_KEY(regs->sie_scao) |= STORKEY_REF;
         if(sysblk.mainstor[regs->sie_scao] & 0x80)
         {
             RELEASE_MAINLOCK(regs);
             longjmp(regs->progjmp, SIE_INTERCEPT_INST);
         }
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+    }
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Obtain 2nd operand address from r2 */
-    n2 = regs->gpr[r2] & 0x7FFFFFFC & ADDRESS_MAXWRAP(regs);
+    n2 = regs->GR(r2) & 0xFFFFFFFFFFFFFFFCULL & ADDRESS_MAXWRAP(regs);
 
     /* Load second operand from operand address  */
-    n1 = vfetch4 ( n2, r2, regs );
+    n1 = ARCH_DEP(vfetch4) ( n2, r2, regs );
 
     /* Compare operand with R1 register contents */
-    if ( regs->gpr[r1] == n1 )
+    if ( regs->GR_L(r1) == n1 )
     {
         /* If equal, store R1+1 at operand location and set cc=0 */
-        vstore4 ( regs->gpr[r1+1], n2, r2, regs );
+        ARCH_DEP(vstore4) ( regs->GR_L(r1+1), n2, r2, regs );
         regs->psw.cc = 0;
 
         /* Release main-storage access lock
@@ -565,34 +650,34 @@ U32     n1, n2;                         /* 32 Bit work               */
         RELEASE_MAINLOCK(regs);
 
         /* Purge the TLB if bit 31 of r2 register is set */
-        if (regs->gpr[r2] & 0x00000001)
+        if (regs->GR_L(r2) & 0x00000001)
         {
 #if MAX_CPU_ENGINES == 1
-            purge_tlb(regs);
+            ARCH_DEP(purge_tlb) (regs);
 #else /*!MAX_CPU_ENGINES == 1*/
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
             if(regs->sie_state && !regs->sie_scao)
-                purge_tlb(regs);
+                ARCH_DEP(purge_tlb) (regs);
             else
                 if(regs->sie_state)
                     synchronize_broadcast(regs->hostregs, &sysblk.brdcstptlb);
                 else
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
                     synchronize_broadcast(regs, &sysblk.brdcstptlb);
 #endif /*!MAX_CPU_ENGINES == 1*/
         }
 
         /* Purge the ALB if bit 30 of r2 register is set */
-        if (regs->gpr[r2] & 0x00000002)
+        if (regs->GR_L(r2) & 0x00000002)
         {
 #if MAX_CPU_ENGINES == 1
-            purge_alb(regs);
+            ARCH_DEP(purge_alb) (regs);
 #else /*!MAX_CPU_ENGINES == 1*/
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
             if(regs->sie_state)
                 synchronize_broadcast(regs->hostregs, &sysblk.brdcstpalb);
             else
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
                 synchronize_broadcast(regs, &sysblk.brdcstpalb);
 #endif /*!MAX_CPU_ENGINES == 1*/
         }
@@ -601,7 +686,7 @@ U32     n1, n2;                         /* 32 Bit work               */
     else
     {
         /* If unequal, load R1 from operand and set cc=1 */
-        regs->gpr[r1] = n1;
+        regs->GR_L(r1) = n1;
         regs->psw.cc = 1;
 
         /* Release main-storage access lock */
@@ -618,25 +703,20 @@ U32     n1, n2;                         /* 32 Bit work               */
 /*-------------------------------------------------------------------*/
 /* 83         - Diagnose                                             */
 /*-------------------------------------------------------------------*/
-void zz_diagnose (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(diagnose)
 {
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
-#ifdef FEATURE_HERCULES_DIAGCALLS
-    if (effective_addr2 < 0xF00 || effective_addr2 > 0xF10)
-        PRIV_CHECK(regs);
-#else
     PRIV_CHECK(regs);
-#endif
 
     SIE_INTERCEPT(regs);
 
     /* Process diagnose instruction */
-    diagnose_call (effective_addr2, r1, r3, regs);
+    ARCH_DEP(diagnose_call) (effective_addr2, r1, r3, regs);
 
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
@@ -644,10 +724,11 @@ U32     effective_addr2;                /* Effective address         */
 }
 
 
+#if defined(FEATURE_DUAL_ADDRESS_SPACE)
 /*-------------------------------------------------------------------*/
 /* B226 EPAR  - Extract Primary ASN                            [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_extract_primary_asn (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(extract_primary_asn)
 {
 int     r1, r2;                         /* Values of R fields        */
 
@@ -657,24 +738,26 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* Special operation exception if DAT is off */
     if ( (regs->psw.sysmask & PSW_DATMODE) == 0 )
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Privileged operation exception if in problem state
        and the extraction-authority control bit is zero */
     if ( regs->psw.prob
-         && (regs->cr[0] & CR0_EXT_AUTH) == 0 )
-        program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+         && (regs->CR(0) & CR0_EXT_AUTH) == 0 )
+        ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Load R1 with PASN from control register 4 bits 16-31 */
-    regs->gpr[r1] = regs->cr[4] & CR4_PASN;
+    regs->GR_L(r1) = regs->CR(4) & CR4_PASN;
 
 }
+#endif /*defined(FEATURE_DUAL_ADDRESS_SPACE)*/
 
 
+#if defined(FEATURE_DUAL_ADDRESS_SPACE)
 /*-------------------------------------------------------------------*/
 /* B227 ESAR  - Extract Secondary ASN                          [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_extract_secondary_asn (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(extract_secondary_asn)
 {
 int     r1, r2;                         /* Values of R fields        */
 
@@ -684,102 +767,99 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* Special operation exception if DAT is off */
     if ( (regs->psw.sysmask & PSW_DATMODE) == 0 )
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Privileged operation exception if in problem state
        and the extraction-authority control bit is zero */
     if ( regs->psw.prob
-         && (regs->cr[0] & CR0_EXT_AUTH) == 0 )
-        program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+         && (regs->CR(0) & CR0_EXT_AUTH) == 0 )
+        ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Load R1 with SASN from control register 3 bits 16-31 */
-    regs->gpr[r1] = regs->cr[3] & CR3_SASN;
+    regs->GR_L(r1) = regs->CR(3) & CR3_SASN;
 
 }
+#endif /*defined(FEATURE_DUAL_ADDRESS_SPACE)*/
 
 
+#if defined(FEATURE_LINKAGE_STACK)
 /*-------------------------------------------------------------------*/
 /* B249 EREG  - Extract Stacked Registers                      [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_extract_stacked_registers (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(extract_stacked_registers)
 {
 int     r1, r2;                         /* Values of R fields        */
 LSED    lsed;                           /* Linkage stack entry desc. */
-U32     lsea;                           /* Linkage stack entry addr  */
+VADR    lsea;                           /* Linkage stack entry addr  */
 
     RRE(inst, execflag, regs, r1, r2);
 
     SIE_MODE_XC_OPEX(regs);
 
-    SIE_MODE_XA(regs);
-
     /* Find the virtual address of the entry descriptor
        of the current state entry in the linkage stack */
-    lsea = locate_stack_entry (0, &lsed, regs);
+    lsea = ARCH_DEP(locate_stack_entry) (0, &lsed, regs);
 
     /* Load registers from the stack entry */
-    unstack_registers (lsea, r1, r2, regs);
+    ARCH_DEP(unstack_registers) (0, lsea, r1, r2, regs);
 
 }
+#endif /*defined(FEATURE_LINKAGE_STACK)*/
 
 
+#if defined(FEATURE_LINKAGE_STACK)
 /*-------------------------------------------------------------------*/
 /* B24A ESTA  - Extract Stacked State                          [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_extract_stacked_state (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(extract_stacked_state)
 {
 int     r1, r2;                         /* Values of R fields        */
 BYTE    code;                           /* Extraction code           */
 LSED    lsed;                           /* Linkage stack entry desc. */
-U32     lsea;                           /* Linkage stack entry addr  */
-U32     abs;                            /* Absolute address          */
+VADR    lsea;                           /* Linkage stack entry addr  */
+
+#undef  MAX_ESTA_CODE
+#if defined(FEATURE_ESAME)
+#define MAX_ESTA_CODE   4
+#else /*!defined(FEATURE_ESAME)*/
+#define MAX_ESTA_CODE   3
+#endif /*!defined(FEATURE_ESAME)*/
 
     RRE(inst, execflag, regs, r1, r2);
 
     SIE_MODE_XC_OPEX(regs);
 
-    SIE_MODE_XA(regs);
+    if (REAL_MODE(&regs->psw)
+        || SECONDARY_SPACE_MODE(&regs->psw)
+        || ASF_ENABLED(regs) == 0)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
-    /* Load the extraction code from R2 register bits 24-31 */
-    code = regs->gpr[r2] & 0xFF;
+    /* Load the extraction code from low-order byte of R2 register */
+    code = regs->GR_LHLCL(r2);
 
     /* Program check if r1 is odd, or if extraction code is invalid */
-    if ((r1 & 1) || code > 3)
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+    if ((r1 & 1) || code > MAX_ESTA_CODE)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Find the virtual address of the entry descriptor
        of the current state entry in the linkage stack */
-    lsea = locate_stack_entry (0, &lsed, regs);
+    lsea = ARCH_DEP(locate_stack_entry) (0, &lsed, regs);
 
-    /* Point back to byte 128 of the state entry */
-    lsea -= LSSE_SIZE - sizeof(LSED);
-    lsea += 128;
-
-    /* Point to byte 128, 136, 144, or 152 depending on the code */
-    lsea += code * 8;
-    lsea &= 0x7FFFFFFF;
-
-    /* Load the general register pair from the state entry */
-    abs = abs_stack_addr (lsea, regs, ACCTYPE_READ);
-    regs->gpr[r1] = (sysblk.mainstor[abs] << 24)
-                  | (sysblk.mainstor[abs+1] << 16)
-                  | (sysblk.mainstor[abs+2] << 8)
-                  | sysblk.mainstor[abs+3];
-    regs->gpr[r1+1] = (sysblk.mainstor[abs+4] << 24)
-                    | (sysblk.mainstor[abs+5] << 16)
-                    | (sysblk.mainstor[abs+6] << 8)
-                    | sysblk.mainstor[abs+7];
+    /* Load general register pair from state entry */
+    ARCH_DEP(stack_extract) (lsea, r1, code, regs);
 
     /* Set condition code depending on entry type */
     regs->psw.cc =  ((lsed.uet & LSED_UET_ET) == LSED_UET_PC) ? 1 : 0;
 
 }
+#endif /*defined(FEATURE_LINKAGE_STACK)*/
 
 
+#if defined(FEATURE_DUAL_ADDRESS_SPACE)
 /*-------------------------------------------------------------------*/
 /* B224 IAC   - Insert Address Space Control                   [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_insert_address_space_control (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(insert_address_space_control)
 {
 int     r1, r2;                         /* Values of R fields        */
 
@@ -792,85 +872,94 @@ int     r1, r2;                         /* Values of R fields        */
       && !(regs->sie_state && (regs->siebk->mx & SIE_MX_XC) )
 #endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
         )
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Privileged operation exception if in problem state
        and the extraction-authority control bit is zero */
     if ( regs->psw.prob
-         && !(regs->cr[0] & CR0_EXT_AUTH) 
+         && !(regs->CR(0) & CR0_EXT_AUTH)
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
          /* Ignore extraction control in XC mode */
          && !(regs->sie_state && (regs->siebk->mx & SIE_MX_XC) )
 #endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
         )
-        program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Extract the address-space control bits from the PSW */
     regs->psw.cc = (regs->psw.armode << 1) | (regs->psw.space);
 
     /* Clear bits 16-23 of the general purpose register */
-    regs->gpr[r1] &= 0xFFFF00FF;
+    regs->GR_L(r1) &= 0xFFFF00FF;
 
     /* Insert address-space mode into register bits 22-23 */
-    regs->gpr[r1] |= regs->psw.cc << 8;
+    regs->GR_L(r1) |= regs->psw.cc << 8;
 
 }
+#endif /*defined(FEATURE_DUAL_ADDRESS_SPACE)*/
 
 
 /*-------------------------------------------------------------------*/
 /* B20B IPK   - Insert PSW Key                                   [S] */
 /*-------------------------------------------------------------------*/
-void zz_insert_psw_key (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(insert_psw_key)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
     /* Privileged operation exception if in problem state
        and the extraction-authority control bit is zero */
     if ( regs->psw.prob
-         && (regs->cr[0] & CR0_EXT_AUTH) == 0 )
-        program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+         && (regs->CR(0) & CR0_EXT_AUTH) == 0 )
+        ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Insert PSW key into bits 24-27 of general register 2
        and set bits 28-31 of general register 2 to zero */
-    regs->gpr[2] &= 0xFFFFFF00;
-    regs->gpr[2] |= (regs->psw.pkey & 0xF0);
+    regs->GR_L(2) &= 0xFFFFFF00;
+    regs->GR_L(2) |= (regs->psw.pkey & 0xF0);
 
 }
 
 
+#if defined(FEATURE_BASIC_STORAGE_KEYS)
 /*-------------------------------------------------------------------*/
 /* 09   ISK   - Insert Storage Key                              [RR] */
 /*-------------------------------------------------------------------*/
-void zz_insert_storage_key (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(insert_storage_key)
 {
 int     r1, r2;                         /* Values of R fields        */
-U32     n;                              /* Absolute storage addr     */
+RADR    n;                              /* Absolute storage addr     */
 BYTE    storkey = 0;
 
     RR(inst, execflag, regs, r1, r2);
 
-    SIE_MODE_370(regs);
-
     PRIV_CHECK(regs);
 
+#if defined(FEATURE_4K_STORAGE_KEYS) || defined(_FEATURE_SIE)
+    if(
+#if defined(_FEATURE_SIE) && !defined(FEATURE_4K_STORAGE_KEYS)
+        regs->sie_state &&
+#endif
+        !(regs->CR(0) & CR0_STORKEY_4K) )
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+#endif
+
     /* Program check if R2 bits 28-31 are not zeroes */
-    if ( regs->gpr[r2] & 0x0000000F )
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+    if ( regs->GR_L(r2) & 0x0000000F )
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Load 2K block address from R2 register */
-    n = regs->gpr[r2] & 0x00FFF800;
+    n = regs->GR_L(r2) & 0x00FFF800;
 
     /* Convert real address to absolute address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
     /* Addressing exception if block is outside main storage */
     if ( n >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state)
     {
         if(regs->siebk->ic[2] & SIE_IC2_ISKE)
@@ -882,81 +971,87 @@ BYTE    storkey = 0;
         int  private,
              protect,
              stid;
-        U32  rcpa;
+        RADR rcpa;
         BYTE rcpkey;
 
-#if defined(FEATURE_STORAGE_KEY_ASSIST)
-            /* If storage key assist is enabled then cause 
+#if defined(_FEATURE_STORAGE_KEY_ASSIST)
+            /* If storage key assist is enabled then cause
                an interception to occur, as this is not yet
                implemented. *JJ */
             if(regs->siebk->rcpo[0] & SIE_RCPO0_SKA)
                 longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_STORAGE_KEY_ASSIST)*/
+#endif /*defined(_FEATURE_STORAGE_KEY_ASSIST)*/
 
             /* Obtain address of the RCP area from the state desc */
             rcpa = regs->sie_rcpo &= 0x7FFFF000;
 
-            /* frame index as byte offset */
-            rcpa += n >> STORAGE_KEY_PAGESHIFT;
+            /* frame index as byte offset to 4K keys in RCP area */
+            rcpa += n >> 12;
 
             /* guest absolute to host real */
-            if (translate_addr (regs->sie_mso + n, USE_PRIMARY_SPACE,
+            if (SIE_TRANSLATE_ADDR (regs->sie_mso + n, USE_PRIMARY_SPACE,
                 regs->hostregs, ACCTYPE_SIE, &n, &xcode, &private,
                 &protect, &stid, NULL, NULL))
                 longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 
             /* host real to host absolute */
-            n = APPLY_PREFIXING(n, regs->hostregs->pxr);
+            n = APPLY_PREFIXING(n, regs->hostregs->PX);
 
             /* fetch the RCP key */
-            rcpkey = vfetchb(rcpa, USE_PRIMARY_SPACE, regs->hostregs);
+            SIE_TRANSLATE(&rcpa, ACCTYPE_SIE, regs);
+            rcpkey = sysblk.mainstor[rcpa];
+            STORAGE_KEY(rcpa) |= STORKEY_REF;
             /* The storage key is obtained by logical or
                or the real and guest RC bits */
             storkey = rcpkey & (STORKEY_REF | STORKEY_CHANGE);
         }
     }
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Insert the storage key into R1 register bits 24-31 */
-    regs->gpr[r1] &= 0xFFFFFF00;
-    regs->gpr[r1] |= storkey | (STORAGE_KEY(n) & 0xFE);
+#if !defined(_FEATURE_2K_STORAGE_KEYS)
+    regs->GR_LHLCL(r1) = storkey | (STORAGE_KEY(n) & 0xFE);
+#else
+    regs->GR_LHLCL(r1) = storkey | (( STORAGE_KEY1(n)
+                                    | STORAGE_KEY2(n)) & 0xFE);
+#endif
 
     /* In BC mode, clear bits 29-31 of R1 register */
     if ( regs->psw.ecmode == 0 )
-        regs->gpr[r1] &= 0xFFFFFFF8;
+        regs->GR_L(r1) &= 0xFFFFFFF8;
 
 //  /*debug*/logmsg("ISK storage block %8.8X key %2.2X\n",
-//                  regs->gpr[r2], regs->gpr[r1] & 0xFE);
+//                  regs->GR_L(r2), regs->GR_L(r1) & 0xFE);
 
 }
+#endif /*defined(FEATURE_BASIC_STORAGE_KEYS)*/
 
 
+#if defined(FEATURE_EXTENDED_STORAGE_KEYS)
 /*-------------------------------------------------------------------*/
 /* B229 ISKE  - Insert Storage Key Extended                    [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_insert_storage_key_extended (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(insert_storage_key_extended)
 {
 int     r1, r2;                         /* Values of R fields        */
-U32     n;                              /* Workarea                  */
+RADR    n;                              /* Workarea                  */
 BYTE    storkey = 0;
 
     RRE(inst, execflag, regs, r1, r2);
 
-    SIE_MODE_XA(regs);
-
     PRIV_CHECK(regs);
 
     /* Load 4K block address from R2 register */
-    n = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
+    n = regs->GR_L(r2) & ADDRESS_MAXWRAP(regs);
 
     /* Convert real address to absolute address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
     /* Addressing exception if block is outside main storage */
     if ( n >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state)
     {
         if(regs->siebk->ic[2] & SIE_IC2_ISKE)
@@ -968,16 +1063,16 @@ BYTE    storkey = 0;
         int  private,
              protect,
              stid;
-        U32  rcpa;
+        RADR rcpa;
         BYTE rcpkey;
 
-#if defined(FEATURE_STORAGE_KEY_ASSIST)
-            /* If storage key assist is enabled then cause 
+#if defined(_FEATURE_STORAGE_KEY_ASSIST)
+            /* If storage key assist is enabled then cause
                an interception to occur, as this is not yet
                implemented. *JJ */
             if(regs->siebk->rcpo[0] & SIE_RCPO0_SKA)
                 longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_STORAGE_KEY_ASSIST)*/
+#endif /*defined(_FEATURE_STORAGE_KEY_ASSIST)*/
 
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
             if(regs->siebk->mx & SIE_MX_XC)
@@ -991,80 +1086,85 @@ BYTE    storkey = 0;
             rcpa += n >> STORAGE_KEY_PAGESHIFT;
 
             /* guest absolute to host real */
-            if (translate_addr (regs->sie_mso + n, USE_PRIMARY_SPACE,
+            if (SIE_TRANSLATE_ADDR (regs->sie_mso + n, USE_PRIMARY_SPACE,
                 regs->hostregs, ACCTYPE_SIE, &n, &xcode, &private,
                 &protect, &stid, NULL, NULL))
                 longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 
             /* host real to host absolute */
-            n = APPLY_PREFIXING(n, regs->hostregs->pxr);
+            n = APPLY_PREFIXING(n, regs->hostregs->PX);
 
             /* fetch the RCP key */
-            rcpkey = vfetchb(rcpa, USE_PRIMARY_SPACE, regs->hostregs);
+            SIE_TRANSLATE(&rcpa, ACCTYPE_SIE, regs);
+            rcpkey = sysblk.mainstor[rcpa];
+            STORAGE_KEY(rcpa) |= STORKEY_REF;
             /* The storage key is obtained by logical or
                or the real and guest RC bits */
             storkey = rcpkey & (STORKEY_REF | STORKEY_CHANGE);
         }
     }
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Insert the storage key into R1 register bits 24-31 */
-    regs->gpr[r1] &= 0xFFFFFF00;
-    regs->gpr[r1] |= storkey | (STORAGE_KEY(n) & 0xFE);
+    regs->GR_L(r1) &= 0xFFFFFF00;
+#if !defined(_FEATURE_2K_STORAGE_KEYS)
+    regs->GR_L(r1) |= storkey | (STORAGE_KEY(n) & 0xFE);
+#else
+    regs->GR_L(r1) |= storkey | ((STORAGE_KEY1(n) | STORAGE_KEY2(n)) & 0xFE);
+#endif
 
 }
+#endif /*defined(FEATURE_EXTENDED_STORAGE_KEYS)*/
 
 
 /*-------------------------------------------------------------------*/
 /* B223 IVSK  - Insert Virtual Storage Key                     [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_insert_virtual_storage_key (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(insert_virtual_storage_key)
 {
 int     r1, r2;                         /* Values of R fields        */
-U32     effective_addr;                 /* Virtual storage addr      */
+VADR    effective_addr;                 /* Virtual storage addr      */
 U16     xcode;                          /* Exception code            */
 int     private;                        /* 1=Private address space   */
 int     protect;                        /* 1=ALE or page protection  */
 int     stid;                           /* Segment table indication  */
-U32     n;                              /* 32-bit operand values     */
+RADR    n;                              /* 32-bit operand values     */
 
     RRE(inst, execflag, regs, r1, r2);
 
-    SIE_MODE_XC_OPEX(regs);
-
     /* Special operation exception if DAT is off */
     if ( (regs->psw.sysmask & PSW_DATMODE) == 0 )
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Privileged operation exception if in problem state
        and the extraction-authority control bit is zero */
     if ( regs->psw.prob
-         && (regs->cr[0] & CR0_EXT_AUTH) == 0 )
-        program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+         && (regs->CR(0) & CR0_EXT_AUTH) == 0 )
+        ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Load virtual storage address from R2 register */
-    effective_addr = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
+    effective_addr = regs->GR_L(r2) & ADDRESS_MAXWRAP(regs);
 
     /* Translate virtual address to real address */
-    if (translate_addr (effective_addr, r2, regs, ACCTYPE_IVSK,
+    if (ARCH_DEP(translate_addr) (effective_addr, r2, regs, ACCTYPE_IVSK,
         &n, &xcode, &private, &protect, &stid, NULL, NULL))
-        program_interrupt (regs, xcode);
+        ARCH_DEP(program_interrupt) (regs, xcode);
 
     /* Convert real address to absolute address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
     /* Addressing exception if block is outside main storage */
     if ( n >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     SIE_TRANSLATE(&n, ACCTYPE_SIE, regs);
 
     /* Insert the storage key into R1 register bits 24-31 */
-    regs->gpr[r1] &= 0xFFFFFF00;
-    regs->gpr[r1] |= (STORAGE_KEY(n) & 0xFE);
+    regs->GR_L(r1) &= 0xFFFFFF00;
+    regs->GR_L(r1) |= (STORAGE_KEY(n) & 0xFE);
 
     /* Clear bits 29-31 of R1 register */
-    regs->gpr[r1] &= 0xFFFFFFF8;
+    regs->GR_L(r1) &= 0xFFFFFFF8;
 
 }
 
@@ -1072,7 +1172,7 @@ U32     n;                              /* 32-bit operand values     */
 /*-------------------------------------------------------------------*/
 /* B221 IPTE  - Invalidate Page Table Entry                    [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_invalidate_page_table_entry (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(invalidate_page_table_entry)
 {
 int     r1, r2;                         /* Values of R fields        */
 
@@ -1080,39 +1180,42 @@ int     r1, r2;                         /* Values of R fields        */
 
     PRIV_CHECK(regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_IPTECSP))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Perform serialization before operation */
     PERFORM_SERIALIZATION (regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && regs->sie_scao)
     {
         OBTAIN_MAINLOCK(regs);
+        STORAGE_KEY(regs->sie_scao) |= STORKEY_REF;
         if(sysblk.mainstor[regs->sie_scao] & 0x80)
         {
             RELEASE_MAINLOCK(regs);
             longjmp(regs->progjmp, SIE_INTERCEPT_INST);
         }
         sysblk.mainstor[regs->sie_scao] |= 0x80;
+        STORAGE_KEY(regs->sie_scao) |= (STORKEY_REF|STORKEY_CHANGE);
         RELEASE_MAINLOCK(regs);
     }
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Invalidate page table entry */
-    invalidate_pte (inst[1], r1, r2, regs);
+    ARCH_DEP(invalidate_pte) (inst[1], r1, r2, regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && regs->sie_scao)
     {
         OBTAIN_MAINLOCK(regs);
         sysblk.mainstor[regs->sie_scao] &= 0x7F;
+        STORAGE_KEY(regs->sie_scao) |= (STORKEY_REF|STORKEY_CHANGE);
         RELEASE_MAINLOCK(regs);
     }
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Perform serialization after operation */
     PERFORM_SERIALIZATION (regs);
@@ -1120,13 +1223,14 @@ int     r1, r2;                         /* Values of R fields        */
 }
 
 
+#if defined(FEATURE_DUAL_ADDRESS_SPACE)
 /*-------------------------------------------------------------------*/
 /* E500 LASP  - Load Address Space Parameters                  [SSE] */
 /*-------------------------------------------------------------------*/
-void zz_load_address_space_parameters (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(load_address_space_parameters)
 {
 int     b1, b2;                         /* Values of base field      */
-U32     effective_addr1,
+VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 U64     dreg;
 U16     pkm_d;
@@ -1134,9 +1238,9 @@ U16     sasn_d;
 U16     ax_d;
 U16     pasn_d;
 U32     aste[16];                       /* ASN second table entry    */
-U32     pstd;                           /* Primary STD               */
-U32     sstd;                           /* Secondary STD             */
-U32     ltd;                            /* Linkage table descriptor  */
+RADR    pstd;                           /* Primary STD               */
+RADR    sstd;                           /* Secondary STD             */
+U32     ltd;                            /* Linkage table designation */
 U32     pasteo;                         /* Primary ASTE origin       */
 U32     sasteo;                         /* Secondary ASTE origin     */
 U16     ax;                             /* Authorisation index       */
@@ -1144,7 +1248,7 @@ U16     ax;                             /* Authorisation index       */
 U16     xcode;                          /* Exception code            */
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
-    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2); 
+    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
 
     SIE_MODE_XC_OPEX(regs);
 
@@ -1152,48 +1256,52 @@ U16     xcode;                          /* Exception code            */
 
     /* Special operation exception if ASN translation control
        (bit 12 of control register 14) is zero */
-    if ( (regs->cr[14] & CR14_ASN_TRAN) == 0 )
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+    if ( (regs->CR(14) & CR14_ASN_TRAN) == 0 )
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     DW_CHECK(effective_addr1, regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[2] & SIE_IC2_LASP))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Fetch PKM, SASN, AX, and PASN from first operand */
-    dreg = vfetch8 ( effective_addr1, b1, regs );
+    dreg = ARCH_DEP(vfetch8) ( effective_addr1, b1, regs );
     pkm_d = (dreg >> 48) & 0xFFFF;
     sasn_d = (dreg >> 32) & 0xFFFF;
     ax_d = (dreg >> 16) & 0xFFFF;
     pasn_d = dreg & 0xFFFF;
+
+    INVALIDATE_AEA_ALL(regs);
 
     /* PASN translation */
 
     /* Perform PASN translation if PASN not equal to current
        PASN, or if LASP function bit 29 is set */
     if ((effective_addr2 & 0x00000004)
-        || pasn_d != (regs->cr[4] & CR4_PASN))
+        || pasn_d != (regs->CR(4) & CR4_PASN))
     {
         /* Translate PASN and return condition code 1 if
            AFX- or ASX-translation exception condition */
-        if (translate_asn (pasn_d, regs, &pasteo, aste))
+        if (ARCH_DEP(translate_asn) (pasn_d, regs, &pasteo, aste))
         {
             regs->psw.cc = 1;
             return;
         }
 
+        INVALIDATE_AIA(regs);
+
         /* Obtain new PSTD and LTD from ASTE */
-        pstd = aste[2];
-        ltd = aste[3];
+        pstd = ASTE_AS_DESIGNATOR(aste);
+        ltd = ASTE_LT_DESIGNATOR(aste);
         ax = (aste[1] & ASTE1_AX) >> 16;
 
 #ifdef FEATURE_SUBSPACE_GROUP
         /* Perform subspace replacement on new PSTD */
-        pstd = subspace_replace (pstd, pasteo, &xcode, regs);
+        pstd = ARCH_DEP(subspace_replace) (pstd, pasteo, &xcode, regs);
 
-        /* Return with condition code 1 if ASTE exception was recognized */
+        /* Return with condition code 1 if ASTE exception recognized */
         if (xcode != 0)
         {
             regs->psw.cc = 1;
@@ -1203,8 +1311,8 @@ U16     xcode;                          /* Exception code            */
 
         /* Return with condition code 3 if either current STD
            or new STD indicates a space switch event */
-        if ((regs->cr[1] & STD_SSEVENT)
-            || (aste[2] & STD_SSEVENT))
+        if ((regs->CR(1) & SSEVENT_BIT)
+            || (ASTE_AS_DESIGNATOR(aste) & SSEVENT_BIT))
         {
             regs->psw.cc = 3;
             return;
@@ -1214,10 +1322,10 @@ U16     xcode;                          /* Exception code            */
     else
     {
         /* Load current PSTD and LTD or PASTEO */
-        pstd = regs->cr[1];
-        ltd = regs->cr[5];
-        pasteo = regs->cr[5];
-        ax = (regs->cr[4] & CR4_AX) >> 16;
+        pstd = regs->CR(1);
+        ltd = regs->CR_L(5);
+        pasteo = regs->CR_L(5);
+        ax = (regs->CR(4) & CR4_AX) >> 16;
     }
 
     /* If bit 30 of the LASP function bits is zero,
@@ -1241,28 +1349,29 @@ U16     xcode;                          /* Exception code            */
        is 1, use current SSTD in control register 7 */
         if (!(effective_addr2 & 0x00000004)
             && (effective_addr2 & 0x00000001)
-            && (sasn_d == (regs->cr[3] & CR3_SASN)))
+            && (sasn_d == (regs->CR(3) & CR3_SASN)))
         {
-            sstd = regs->cr[7];
+            sstd = regs->CR(7);
         }
         else
         {
             /* Translate SASN and return condition code 2 if
                AFX- or ASX-translation exception condition */
-            if (translate_asn (sasn_d, regs, &sasteo, aste))
+            if (ARCH_DEP(translate_asn) (sasn_d, regs, &sasteo, aste))
             {
                 regs->psw.cc = 2;
                 return;
             }
 
-            /* Obtain new SSTD from secondary ASTE */
-            sstd = aste[2];
+            /* Obtain new SSTD or SASCE from secondary ASTE */
+            sstd = ASTE_AS_DESIGNATOR(aste);
 
 #ifdef FEATURE_SUBSPACE_GROUP
             /* Perform subspace replacement on new SSTD */
-            sstd = subspace_replace (sstd, sasteo, &xcode, regs);
+            sstd = ARCH_DEP(subspace_replace) (sstd, sasteo,
+                                                &xcode, regs);
 
-            /* Return condition code 2 if ASTE exception was recognized */
+            /* Return condition code 2 if ASTE exception recognized */
             if (xcode != 0)
             {
                 regs->psw.cc = 2;
@@ -1275,7 +1384,8 @@ U16     xcode;                          /* Exception code            */
             if (!(effective_addr2 & 0x00000001))
             {
                 /* Condition code 2 if SASN authorization fails */
-                if (authorize_asn (ax, aste, ATE_SECONDARY, regs))
+                if (ARCH_DEP(authorize_asn) (ax, aste, ATE_SECONDARY,
+                                                        regs))
                 {
                     regs->psw.cc = 2;
                     return;
@@ -1288,33 +1398,27 @@ U16     xcode;                          /* Exception code            */
     } /* end if(SASN = PASN) */
 
     /* Perform control-register loading */
-    regs->cr[1] = pstd;
-    regs->cr[3] = (pkm_d << 16) | sasn_d;
-    regs->cr[4] = (ax << 16) | pasn_d;
-    regs->cr[5] = (regs->cr[0] & CR0_ASF) ? pasteo : ltd;
-    regs->cr[7] = sstd;
-
-    obtain_lock(&sysblk.intlock);
-    set_doint(regs);
-    release_lock(&sysblk.intlock);
+    regs->CR(1) = pstd;
+    regs->CR_L(3) = (pkm_d << 16) | sasn_d;
+    regs->CR_L(4) = (ax << 16) | pasn_d;
+    regs->CR_L(5) = ASF_ENABLED(regs) ? pasteo : ltd;
+    regs->CR(7) = sstd;
 
     /* Return condition code zero */
     regs->psw.cc = 0;
 
-    LASTPAGE_INVALIDATE(regs);
-    REASSIGN_FRAG(regs);
-
-} 
+}
+#endif /*defined(FEATURE_DUAL_ADDRESS_SPACE)*/
 
 
 /*-------------------------------------------------------------------*/
 /* B7   LCTL  - Load Control                                    [RS] */
 /*-------------------------------------------------------------------*/
-void zz_load_control (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(load_control)
 {
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 int     i, d;                           /* Integer work areas        */
 BYTE    rwork[64];                      /* Register work areas       */
 
@@ -1324,12 +1428,12 @@ BYTE    rwork[64];                      /* Register work areas       */
 
     FW_CHECK(effective_addr2, regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state)
     {
     U32 n;
         for(i = r1, n = 0x80008000 >> r1; ; )
-        {    
+        {
             if(regs->siebk->lctl_ctl[i < 8 ? 0 : 1] & (i < 8) ? n >> 8 : n)
                 longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 
@@ -1337,21 +1441,23 @@ BYTE    rwork[64];                      /* Register work areas       */
             i++; i &= 15;
         }
     }
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Calculate the number of bytes to be loaded */
     d = (((r3 < r1) ? r3 + 16 - r1 : r3 - r1) + 1) * 4;
 
     /* Fetch new control register contents from operand address */
-    vfetchc ( rwork, d-1, effective_addr2, b2, regs );
+    ARCH_DEP(vfetchc) ( rwork, d-1, effective_addr2, b2, regs );
+
+    INVALIDATE_AIA(regs);
+
+    INVALIDATE_AEA_ALL(regs);
 
     /* Load control registers from work area */
     for ( i = r1, d = 0; ; )
     {
         /* Load one control register from work area */
-        regs->cr[i] = (rwork[d] << 24) | (rwork[d+1] << 16)
-                    | (rwork[d+2] << 8) | rwork[d+3];
-        d += 4;
+        FETCH_FW(regs->CR(i), rwork + d); d += 4;
 
         /* Instruction is complete when r3 register is done */
         if ( i == r3 ) break;
@@ -1359,25 +1465,18 @@ BYTE    rwork[64];                      /* Register work areas       */
         /* Update register number, wrapping from 15 to 0 */
         i++; i &= 15;
     }
-    obtain_lock(&sysblk.intlock);
-    set_doint(regs);
-    release_lock(&sysblk.intlock);
-
-    LASTPAGE_INVALIDATE(regs);
-    REASSIGN_FRAG(regs);
 }
-
 
 
 /*-------------------------------------------------------------------*/
 /* 82   LPSW  - Load Program Status Word                         [S] */
 /*-------------------------------------------------------------------*/
-void zz_load_psw (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(load_program_status_word)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 DWORD   dword;
-int     rc;                             
+int     rc;
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -1385,34 +1484,26 @@ int     rc;
 
     DW_CHECK(effective_addr2, regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[1] & SIE_IC1_LPSW))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Perform serialization and checkpoint synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
     /* Fetch new PSW from operand address */
-    vfetchc ( dword, 7, effective_addr2, b2, regs );
+    ARCH_DEP(vfetchc) ( dword, 7, effective_addr2, b2, regs );
 
     /* Load updated PSW */
-    rc = load_psw ( regs, dword );
-
-    obtain_lock(&sysblk.intlock);
-    set_doint(regs);
-    release_lock(&sysblk.intlock);
-
+    rc = ARCH_DEP(load_psw) ( regs, dword );
     if ( rc )
-        program_interrupt (regs, rc);
+        ARCH_DEP(program_interrupt) (regs, rc);
 
     /* Perform serialization and checkpoint synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
-
-    LASTPAGE_INVALIDATE(regs);
-    REASSIGN_FRAG(regs);
 
 }
 
@@ -1420,17 +1511,17 @@ int     rc;
 /*-------------------------------------------------------------------*/
 /* B1   LRA   - Load Real Address                               [RX] */
 /*-------------------------------------------------------------------*/
-void zz_load_real_address (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(load_real_address)
 {
 int     r1;                             /* Register number           */
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 U16     xcode;                          /* Exception code            */
 int     private;                        /* 1=Private address space   */
 int     protect;                        /* 1=ALE or page protection  */
 int     stid;                           /* Segment table indication  */
 int     cc;                             /* Condition code            */
-U32     n;                              /* 32-bit operand values     */
+RADR    n;                              /* 32-bit operand values     */
 
     RX(inst, execflag, regs, r1, b2, effective_addr2);
 
@@ -1439,19 +1530,23 @@ U32     n;                              /* 32-bit operand values     */
     PRIV_CHECK(regs);
 
     /* Translate the effective address to a real address */
-    cc = translate_addr (effective_addr2, b2, regs, ACCTYPE_LRA,
+    cc = ARCH_DEP(translate_addr) (effective_addr2, b2, regs, ACCTYPE_LRA,
             &n, &xcode, &private, &protect, &stid, NULL, NULL);
 
     /* If ALET exception, set exception code in R1 bits 16-31
        set high order bit of R1, and set condition code 3 */
     if (cc == 4) {
-        regs->gpr[r1] = 0x80000000 | xcode;
+        regs->GR_L(r1) = 0x80000000 | xcode;
         regs->psw.cc = 3;
     }
     else
     {
+#if defined(FEATURE_ESAME)
+        if(n > 0x7FFFFFFFULL)
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+#endif /*defined(FEATURE_ESAME)*/
         /* Set r1 and condition code as returned by translate_addr */
-        regs->gpr[r1] = n;
+        regs->GR_L(r1) = n;
         regs->psw.cc = cc;
     }
 
@@ -1461,80 +1556,118 @@ U32     n;                              /* 32-bit operand values     */
 /*-------------------------------------------------------------------*/
 /* B24B LURA  - Load Using Real Address                        [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_load_using_real_address (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(load_using_real_address)
 {
 int     r1, r2;                         /* Values of R fields        */
-U32     n;                              /* Unsigned work             */
+RADR    n;                              /* Unsigned work             */
 
     RRE(inst, execflag, regs, r1, r2);
 
     PRIV_CHECK(regs);
 
     /* R2 register contains operand real storage address */
-    n = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
+    n = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
 
     /* Program check if operand not on fullword boundary */
     FW_CHECK(n, regs);
 
     /* Load R1 register from second operand */
-    regs->gpr[r1] = vfetch4 ( n, USE_REAL_ADDR, regs );
+    regs->GR_L(r1) = ARCH_DEP(vfetch4) ( n, USE_REAL_ADDR, regs );
 
 }
 
 
+#if defined(FEATURE_LOCK_PAGE)
+/*-------------------------------------------------------------------*/
+/* B262 LKPG  - Lock Page                                      [RRE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(lock_page)
+{
+int     r1, r2;                         /* Values of R fields        */
+VADR    n2;                             /* effective addr of r2      */
+RADR    raddr;                          /* Real address              */
+int     private;                        /* 1=Private address space   */
+int     protect;                        /* 1=ALE or page protection  */
+int     stid;                           /* Segment table indication  */
+U16     xcode;                          /* Exception code            */
+
+    RRE(inst, execflag, regs, r1, r2);
+
+    PRIV_CHECK(regs);
+
+    if(REAL_MODE(&(regs->psw)))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+
+    if(regs->GR_L(0) & LKPG_GPR0_RESV)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    n2 = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
+
+    /* Access to PTE must be serialized */
+    OBTAIN_MAINLOCK(regs);
+
+    /* Return condition code 3 if translation exception */
+    if (ARCH_DEP(translate_addr) (n2, r2, regs, (regs->GR_L(0) & LKPG_GPR0_LOCKBIT)
+                ? ACCTYPE_LOCKPAGE : ACCTYPE_UNLKPAGE,
+                &raddr, &xcode, &private, &protect, &stid, NULL, NULL))
+        regs->psw.cc = 3;
+
+    RELEASE_MAINLOCK(regs);
+
+    if((regs->GR_L(0) & LKPG_GPR0_LOCKBIT) && regs->psw.cc == 0)
+        regs->GR(r1) = raddr;
+}
+#endif /*defined(FEATURE_LOCK_PAGE)*/
+
+
+#if defined(FEATURE_LINKAGE_STACK)
 /*-------------------------------------------------------------------*/
 /* B247 MSTA  - Modify Stacked State                           [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_modify_stacked_state (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(modify_stacked_state)
 {
 int     r1, unused;                     /* Values of R fields        */
+U32     m1, m2;                         /* Modify values             */
 LSED    lsed;                           /* Linkage stack entry desc. */
-U32     lsea;                           /* Linkage stack entry addr  */
-U32     abs;                            /* Absolute address          */
+VADR    lsea;                           /* Linkage stack entry addr  */
 
     RRE(inst, execflag, regs, r1, unused);
 
     SIE_MODE_XC_OPEX(regs);
 
-    SIE_MODE_XA(regs);
+    if (REAL_MODE(&regs->psw)
+        || SECONDARY_SPACE_MODE(&regs->psw)
+        || ASF_ENABLED(regs) == 0)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     ODD_CHECK(r1, regs);
 
     /* Find the virtual address of the entry descriptor
        of the current state entry in the linkage stack */
-    lsea = locate_stack_entry (0, &lsed, regs);
+    lsea = ARCH_DEP(locate_stack_entry) (0, &lsed, regs);
 
-    /* Point back to byte 152 of the state entry */
-    lsea -= LSSE_SIZE - sizeof(LSED);
-    lsea += 152;
-    lsea &= 0x7FFFFFFF;
+    /* Load values from rightmost 32 bits of R1 and R1+1 registers */
+    m1 = regs->GR_L(r1);
+    m2 = regs->GR_L(r1+1);
 
-    /* Store the general register pair into the state entry */
-    abs = abs_stack_addr (lsea, regs, ACCTYPE_WRITE);
-    sysblk.mainstor[abs] = (regs->gpr[r1] >> 24) & 0xFF;
-    sysblk.mainstor[abs+1] = (regs->gpr[r1] >> 16) & 0xFF;
-    sysblk.mainstor[abs+2] = (regs->gpr[r1] >> 8) & 0xFF;
-    sysblk.mainstor[abs+3] = regs->gpr[r1] & 0xFF;
-    sysblk.mainstor[abs+4] = (regs->gpr[r1+1] >> 24) & 0xFF;
-    sysblk.mainstor[abs+5] = (regs->gpr[r1+1] >> 16) & 0xFF;
-    sysblk.mainstor[abs+6] = (regs->gpr[r1+1] >> 8) & 0xFF;
-    sysblk.mainstor[abs+7] = regs->gpr[r1+1] & 0xFF;
-
+    /* Store two 32-bit values into modifiable area of state entry */
+    ARCH_DEP(stack_modify) (lsea, m1, m2, regs);
 }
+#endif /*defined(FEATURE_LINKAGE_STACK)*/
 
 
 /*-------------------------------------------------------------------*/
 /* DA   MVCP  - Move to Primary                                 [SS] */
 /*-------------------------------------------------------------------*/
-void zz_move_to_primary (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(move_to_primary)
 {
 int     r1, r3;                         /* Register numbers          */
 int     b1, b2;                         /* Values of base registers  */
-U32     effective_addr1,
+VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 int     cc;                             /* Condition code            */
 int     k;                              /* Integer workarea          */
-U32     l;                              /* Unsigned workarea         */
+GREG    l;                              /* Unsigned workarea         */
 
     SS(inst, execflag, regs, r1, r3, b1, effective_addr1,
                                      b2, effective_addr2);
@@ -1543,13 +1676,13 @@ U32     l;                              /* Unsigned workarea         */
 
     /* Program check if secondary space control (CR0 bit 5) is 0,
        or if DAT is off, or if in AR mode or home-space mode */
-    if ((regs->cr[0] & CR0_SEC_SPACE) == 0
+    if ((regs->CR(0) & CR0_SEC_SPACE) == 0
         || REAL_MODE(&regs->psw)
         || regs->psw.armode)
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Load true length from R1 register */
-    l = regs->gpr[r1];
+    l = regs->GR_L(r1);
 
     /* If the true length does not exceed 256, set condition code
        zero, otherwise set cc=3 and use effective length of 256 */
@@ -1561,18 +1694,18 @@ U32     l;                              /* Unsigned workarea         */
     }
 
     /* Load secondary space key from R3 register bits 24-27 */
-    k = regs->gpr[r3] & 0xF0;
+    k = regs->GR_L(r3) & 0xF0;
 
     /* Program check if in problem state and key mask in
        CR3 bits 0-15 is not 1 for the specified key */
     if ( regs->psw.prob
-        && ((regs->cr[3] << (k >> 4)) & 0x80000000) == 0 )
-        program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        && ((regs->CR(3) << (k >> 4)) & 0x80000000) == 0 )
+        ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Move characters from secondary address space to primary
        address space using secondary key for second operand */
     if (l > 0)
-        move_chars (effective_addr1, USE_PRIMARY_SPACE,
+        ARCH_DEP(move_chars) (effective_addr1, USE_PRIMARY_SPACE,
                     regs->psw.pkey,
                     effective_addr2, USE_SECONDARY_SPACE,
                     k, l-1, regs);
@@ -1586,15 +1719,15 @@ U32     l;                              /* Unsigned workarea         */
 /*-------------------------------------------------------------------*/
 /* DB   MVCS  - Move to Secondary                               [SS] */
 /*-------------------------------------------------------------------*/
-void zz_move_to_secondary (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(move_to_secondary)
 {
 int     r1, r3;                         /* Register numbers          */
 int     b1, b2;                         /* Values of base registers  */
-U32     effective_addr1,
+VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 int     cc;                             /* Condition code            */
 int     k;                              /* Integer workarea          */
-U32     l;                              /* Unsigned workarea         */
+GREG    l;                              /* Unsigned workarea         */
 
     SS(inst, execflag, regs, r1, r3, b1, effective_addr1,
                                      b2, effective_addr2);
@@ -1603,13 +1736,13 @@ U32     l;                              /* Unsigned workarea         */
 
     /* Program check if secondary space control (CR0 bit 5) is 0,
        or if DAT is off, or if in AR mode or home-space mode */
-    if ((regs->cr[0] & CR0_SEC_SPACE) == 0
+    if ((regs->CR(0) & CR0_SEC_SPACE) == 0
         || REAL_MODE(&regs->psw)
         || regs->psw.armode)
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Load true length from R1 register */
-    l = regs->gpr[r1];
+    l = regs->GR_L(r1);
 
     /* If the true length does not exceed 256, set condition code
        zero, otherwise set cc=3 and use effective length of 256 */
@@ -1621,18 +1754,18 @@ U32     l;                              /* Unsigned workarea         */
     }
 
     /* Load secondary space key from R3 register bits 24-27 */
-    k = regs->gpr[r3] & 0xF0;
+    k = regs->GR_L(r3) & 0xF0;
 
     /* Program check if in problem state and key mask in
        CR3 bits 0-15 is not 1 for the specified key */
     if ( regs->psw.prob
-        && ((regs->cr[3] << (k >> 4)) & 0x80000000) == 0 )
-        program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        && ((regs->CR(3) << (k >> 4)) & 0x80000000) == 0 )
+        ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Move characters from primary address space to secondary
        address space using secondary key for first operand */
     if (l > 0)
-        move_chars (effective_addr1, USE_SECONDARY_SPACE, k,
+        ARCH_DEP(move_chars) (effective_addr1, USE_SECONDARY_SPACE, k,
                     effective_addr2, USE_PRIMARY_SPACE,
                     regs->psw.pkey, l-1, regs);
 
@@ -1645,29 +1778,29 @@ U32     l;                              /* Unsigned workarea         */
 /*-------------------------------------------------------------------*/
 /* E50F MVCDK - Move with Destination Key                      [SSE] */
 /*-------------------------------------------------------------------*/
-void zz_move_with_destination_key (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(move_with_destination_key)
 {
 int     b1, b2;                         /* Values of base registers  */
-U32     effective_addr1,
+VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 int     k, l;                           /* Integer workarea          */
 
-    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2); 
+    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
 
     /* Load operand length-1 from register 0 bits 24-31 */
-    l = regs->gpr[0] & 0xFF;
+    l = regs->GR_L(0) & 0xFF;
 
     /* Load destination key from register 1 bits 24-27 */
-    k = regs->gpr[1] & 0xF0;
+    k = regs->GR_L(1) & 0xF0;
 
     /* Program check if in problem state and key mask in
        CR3 bits 0-15 is not 1 for the specified key */
     if ( regs->psw.prob
-        && ((regs->cr[3] << (k >> 4)) & 0x80000000) == 0 )
-        program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        && ((regs->CR(3) << (k >> 4)) & 0x80000000) == 0 )
+        ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Move characters using destination key for operand 1 */
-    move_chars (effective_addr1, b1, k,
+    ARCH_DEP(move_chars) (effective_addr1, b1, k,
                 effective_addr2, b2, regs->psw.pkey,
                 l, regs);
 
@@ -1677,21 +1810,21 @@ int     k, l;                           /* Integer workarea          */
 /*-------------------------------------------------------------------*/
 /* D9   MVCK  - Move with Key                                   [SS] */
 /*-------------------------------------------------------------------*/
-void zz_move_with_key (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(move_with_key)
 {
 int     r1, r3;                         /* Register numbers          */
 int     b1, b2;                         /* Values of base registers  */
-U32     effective_addr1,
+VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 int     cc;                             /* Condition code            */
 int     k;                              /* Integer workarea          */
-U32     l;                              /* Unsigned workarea         */
+GREG    l;                              /* Unsigned workarea         */
 
     SS(inst, execflag, regs, r1, r3, b1, effective_addr1,
                                      b2, effective_addr2);
 
     /* Load true length from R1 register */
-    l = regs->gpr[r1];
+    l = regs->GR_L(r1);
 
     /* If the true length does not exceed 256, set condition code
        zero, otherwise set cc=3 and use effective length of 256 */
@@ -1703,17 +1836,17 @@ U32     l;                              /* Unsigned workarea         */
     }
 
     /* Load source key from R3 register bits 24-27 */
-    k = regs->gpr[r3] & 0xF0;
+    k = regs->GR_L(r3) & 0xF0;
 
     /* Program check if in problem state and key mask in
        CR3 bits 0-15 is not 1 for the specified key */
     if ( regs->psw.prob
-        && ((regs->cr[3] << (k >> 4)) & 0x80000000) == 0 )
-        program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        && ((regs->CR(3) << (k >> 4)) & 0x80000000) == 0 )
+        ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Move characters using source key for second operand */
     if (l > 0)
-        move_chars (effective_addr1, b1, regs->psw.pkey,
+        ARCH_DEP(move_chars) (effective_addr1, b1, regs->psw.pkey,
                     effective_addr2, b2, k, l-1, regs);
 
     /* Set condition code */
@@ -1725,111 +1858,128 @@ U32     l;                              /* Unsigned workarea         */
 /*-------------------------------------------------------------------*/
 /* E50E MVCSK - Move with Source Key                           [SSE] */
 /*-------------------------------------------------------------------*/
-void zz_move_with_source_key (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(move_with_source_key)
 {
 int     b1, b2;                         /* Values of base registers  */
-U32     effective_addr1,
+VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 int     k, l;                           /* Integer workarea          */
 
-    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2); 
+    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
 
     /* Load operand length-1 from register 0 bits 24-31 */
-    l = regs->gpr[0] & 0xFF;
+    l = regs->GR_L(0) & 0xFF;
 
     /* Load source key from register 1 bits 24-27 */
-    k = regs->gpr[1] & 0xF0;
+    k = regs->GR_L(1) & 0xF0;
 
     /* Program check if in problem state and key mask in
        CR3 bits 0-15 is not 1 for the specified key */
     if ( regs->psw.prob
-        && ((regs->cr[3] << (k >> 4)) & 0x80000000) == 0 )
-        program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        && ((regs->CR(3) << (k >> 4)) & 0x80000000) == 0 )
+        ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Move characters using source key for second operand */
-    move_chars (effective_addr1, b1, regs->psw.pkey,
+    ARCH_DEP(move_chars) (effective_addr1, b1, regs->psw.pkey,
                 effective_addr2, b2, k, l, regs);
 
 }
 
 
+#if defined(FEATURE_DUAL_ADDRESS_SPACE)
 /*-------------------------------------------------------------------*/
 /* B218 PC    - Program Call                                     [S] */
 /*-------------------------------------------------------------------*/
-void zz_program_call (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(program_call)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
-U32     abs;                            /* Absolute address          */
+U32     pcnum;                          /* Program call number       */
+VADR    effective_addr2;                /* Effective address         */
+RADR    abs;                            /* Absolute address          */
+RADR    pstd;                           /* Primary STD or ASCE       */
 U32     ltd;                            /* Linkage table designation */
-U32     pstd;                           /* Primary STD               */
 U32     pasteo;                         /* Primary ASTE origin       */
-U32     lto;                            /* Linkage table origin      */
+RADR    lto;                            /* Linkage table origin      */
 int     ltl;                            /* Linkage table length      */
 U32     lte;                            /* Linkage table entry       */
-U32     eto;                            /* Entry table origin        */
+RADR    eto;                            /* Entry table origin        */
 int     etl;                            /* Entry table length        */
 U32     ete[8];                         /* Entry table entry         */
 int     numwords;                       /* ETE size (4 or 8 words)   */
 int     i;                              /* Array subscript           */
 int     ssevent = 0;                    /* 1=space switch event      */
-U32     retn;                           /* Return address and amode  */
 U32     aste[16];                       /* ASN second table entry    */
+U32     akm;                            /* Bits 0-15=AKM, 16-31=zero */
 U16     xcode;                          /* Exception code            */
 U16     pasn;                           /* Primary ASN               */
-U32     csi = 0;                        /* Called Space ID           */
+#if defined(FEATURE_LINKAGE_STACK)
+U32     csi;                            /* Called-space identifier   */
+VADR    retn;                           /* Return address and amode  */
+#endif /*defined(FEATURE_LINKAGE_STACK)*/
 #ifdef FEATURE_TRACING
-U32     newcr12 = 0;                    /* CR12 upon completion      */
+CREG    newcr12 = 0;                    /* CR12 upon completion      */
 #endif /*FEATURE_TRACING*/
 
     S(inst, execflag, regs, b2, effective_addr2);
 
     SIE_MODE_XC_OPEX(regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    INVALIDATE_AEA_ALL(regs);
+
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[2] & SIE_IC2_PC))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
+    /* Load the PC number from the low-order 20 bits of the operand */
+    pcnum = effective_addr2 & (PC_LX | PC_EX);
+
     /* Special operation exception if DAT is off, or if
        in secondary space mode or home space mode */
     if (REAL_MODE(&(regs->psw)) || regs->psw.space == 1)
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* [5.5.3.1] Load the linkage table designation */
-    if ((regs->cr[0] & CR0_ASF) == 0)
+    if (ASF_ENABLED(regs) == 0)
     {
         /* Obtain the LTD from control register 5 */
-        ltd = regs->cr[5];
+        ltd = regs->CR_L(5);
     }
     else
     {
         /* Obtain the primary ASTE origin from control register 5 */
-        pasteo = regs->cr[5] & CR5_PASTEO;
-        pasteo = APPLY_PREFIXING (pasteo, regs->pxr);
+        pasteo = regs->CR_L(5) & CR5_PASTEO;
+
+        /* Convert the PASTE origin to an absolute address */
+        abs = APPLY_PREFIXING (pasteo, regs->PX);
 
         /* Program check if PASTE is outside main storage */
-        if (pasteo >= regs->mainsize)
-            program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        if (abs >= regs->mainsize)
+            ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-        /* Fetch LTD from PASTE word 3 */
-        ltd = fetch_fullword_absolute(pasteo+12, regs);
+        /* Fetch primary ASTE words 3 and 6 from absolute storage
+           (note: the ASTE cannot cross a page boundary) */
+        aste[3] = ARCH_DEP(fetch_fullword_absolute) (abs+12, regs);
+        aste[6] = ARCH_DEP(fetch_fullword_absolute) (abs+48, regs);
+
+        /* Load LTD from primary ASTE word 3 or 6 */
+        ltd = ASTE_LT_DESIGNATOR(aste);
     }
 
 #ifdef FEATURE_TRACING
     /* Form trace entry if ASN tracing is active */
-    if (regs->cr[12] & CR12_ASNTRACE)
-        newcr12 = trace_pc (effective_addr2, regs);
+    if (regs->CR(12) & CR12_ASNTRACE)
+        newcr12 = ARCH_DEP(trace_pc) (pcnum, regs);
 #endif /*FEATURE_TRACING*/
 
     /* Special operation exception if subsystem linkage
        control bit in linkage table designation is zero */
     if ((ltd & LTD_SSLINK) == 0)
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* [5.5.3.2] Linkage table lookup */
 
@@ -1838,30 +1988,30 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
     ltl = ltd & LTD_LTL;
 
     /* Program check if linkage index is outside the linkage table */
-    if (ltl < ((effective_addr2 & PC_LX) >> 13))
+    if (ltl < ((pcnum & PC_LX) >> 13))
     {
-        regs->tea = effective_addr2;
-        program_interrupt (regs, PGM_LX_TRANSLATION_EXCEPTION);
+        regs->TEA = pcnum;
+        ARCH_DEP(program_interrupt) (regs, PGM_LX_TRANSLATION_EXCEPTION);
     }
 
     /* Calculate the address of the linkage table entry */
-    lto += (effective_addr2 & PC_LX) >> 6;
+    lto += (pcnum & PC_LX) >> 6;
     lto &= 0x7FFFFFFF;
 
     /* Program check if linkage table entry is outside real storage */
     if (lto >= regs->mainsize)
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Fetch linkage table entry from real storage.  All bytes
        must be fetched concurrently as observed by other CPUs */
-    lto = APPLY_PREFIXING (lto, regs->pxr);
-    lte = fetch_fullword_absolute(lto, regs);
+    lto = APPLY_PREFIXING (lto, regs->PX);
+    lte = ARCH_DEP(fetch_fullword_absolute)(lto, regs);
 
     /* Program check if linkage entry invalid bit is set */
     if (lte & LTE_INVALID)
     {
-        regs->tea = effective_addr2;
-        program_interrupt (regs, PGM_LX_TRANSLATION_EXCEPTION);
+        regs->TEA = pcnum;
+        ARCH_DEP(program_interrupt) (regs, PGM_LX_TRANSLATION_EXCEPTION);
     }
 
     /* [5.5.3.3] Entry table lookup */
@@ -1871,31 +2021,32 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
     etl = lte & LTE_ETL;
 
     /* Program check if entry index is outside the entry table */
-    if (etl < ((effective_addr2 & PC_EX) >> 2))
+    if (etl < ((pcnum & PC_EX) >> 2))
     {
-        regs->tea = effective_addr2;
-        program_interrupt (regs, PGM_EX_TRANSLATION_EXCEPTION);
+        regs->TEA = pcnum;
+        ARCH_DEP(program_interrupt) (regs, PGM_EX_TRANSLATION_EXCEPTION);
     }
 
     /* Calculate the starting address of the entry table entry */
-    eto += (effective_addr2 & PC_EX) << ((regs->cr[0] & CR0_ASF) ? 5 : 4);
+    eto += (pcnum & PC_EX) << (ASF_ENABLED(regs) ? 5 : 4);
     eto &= 0x7FFFFFFF;
 
     /* Determine the size of the entry table entry */
-    numwords = (regs->cr[0] & CR0_ASF) ? 8 : 4;
+    numwords = ASF_ENABLED(regs) ? 8 : 4;
 
     /* Fetch the 4- or 8-word entry table entry from real
        storage.  Each fullword of the ETE must be fetched
-       concurrently as observed by other CPUs */
+       concurrently as observed by other CPUs.  The entry
+       table cannot cross a page boundary. */
     for (i = 0; i < numwords; i++)
     {
         /* Program check if address is outside main storage */
-        abs = APPLY_PREFIXING (eto, regs->pxr);
+        abs = APPLY_PREFIXING (eto, regs->PX);
         if (abs >= regs->mainsize)
-            program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+            ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
         /* Fetch one word of the entry table entry */
-        ete[i] = fetch_fullword_absolute (abs, regs);
+        ete[i] = ARCH_DEP(fetch_fullword_absolute) (abs, regs);
         eto += 4;
         eto &= 0x7FFFFFFF;
     }
@@ -1905,43 +2056,98 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
 
     /* Program check if basic program call in AR mode */
     if ((ete[4] & ETE4_T) == 0 && regs->psw.armode)
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
-    /* Program check if addressing mode is zero and the
+#if defined(FEATURE_ESAME)
+    /* Program check if basic program call is attempting
+       to switch into or out of 64-bit addressing mode */
+    if ((ete[4] & ETE4_T) == 0
+        && ((ete[4] & ETE4_G) ? 1 : 0) != regs->psw.amode64)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+#endif /*defined(FEATURE_ESAME)*/
+
+    /* Program check if resulting addressing mode is 24 and the
        entry instruction address is not a 24-bit address */
     if ((ete[1] & ETE1_AMODE) == 0
+      #if defined(FEATURE_ESAME)
+        && (ete[4] & ETE4_G) == 0
+      #endif /*defined(FEATURE_ESAME)*/
         && (ete[1] & ETE1_EIA) > 0x00FFFFFF)
-        program_interrupt (regs, PGM_PC_TRANSLATION_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_PC_TRANSLATION_SPECIFICATION_EXCEPTION);
+
+    /* Obtain the authorization key mask from the entry table */
+  #if defined(FEATURE_ESAME)
+    akm = ete[2] & ETE2_AKM;
+  #else /*!defined(FEATURE_ESAME)*/
+    akm = ete[0] & ETE0_AKM;
+  #endif /*!defined(FEATURE_ESAME)*/
 
     /* Program check if in problem state and the PKM in control
        register 3 produces zero when ANDed with the AKM in the ETE */
     if (regs->psw.prob
-        && ((regs->cr[3] & CR3_KEYMASK) & (ete[0] & ETE0_AKM)) == 0)
-        program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        && ((regs->CR(3) & CR3_KEYMASK) & akm) == 0)
+        ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Obtain the new primary ASN from the entry table */
+  #if defined(FEATURE_ESAME)
+    pasn = ete[2] & ETE2_ASN;
+  #else /*!defined(FEATURE_ESAME)*/
     pasn = ete[0] & ETE0_ASN;
+  #endif /*!defined(FEATURE_ESAME)*/
 
-    /* Perform ASN translation if ASN is non-zero */
+    /* Obtain the ASTE if ASN is non-zero */
     if (pasn != 0)
     {
+        INVALIDATE_AIA(regs);
+
         /* Program check if ASN translation control is zero */
-        if ((regs->cr[14] & CR14_ASN_TRAN) == 0)
-            program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        if ((regs->CR(14) & CR14_ASN_TRAN) == 0)
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
-        /* Perform ASN translation to obtain ASTE */
-        xcode = translate_asn (pasn, regs, &pasteo, aste);
+        /* For ESA/390 when ASF control is not enabled, the ASTE
+           is obtained by ASN translation.  For ESAME, and for
+           ESA/390 when ASF control is enabled, the ASTE is loaded
+           using the ASTE real address from the entry table */
+        if (ASF_ENABLED(regs) == 0)
+        {
+            /* Perform ASN translation to obtain ASTE */
+            xcode = ARCH_DEP(translate_asn) (pasn, regs, &pasteo, aste);
 
-        /* Program check if ASN translation exception */
-        if (xcode != 0)
-            program_interrupt (regs, xcode);
+            /* Program check if ASN translation exception */
+            if (xcode != 0)
+                ARCH_DEP(program_interrupt) (regs, xcode);
+        }
+        else
+        {
+            /* Load the ASTE origin from the entry table */
+            pasteo = ete[5] & ETE5_ASTE;
 
-        /* Obtain the new PSTD from the ASTE */
-        pstd = aste[2];
+            /* Convert the ASTE origin to an absolute address */
+            abs = APPLY_PREFIXING (pasteo, regs->PX);
+
+            /* Program check if ASTE origin address is invalid */
+            if (abs >= regs->mainsize)
+                ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+
+            /* Fetch the 16-word ASTE from absolute storage
+               (note: the ASTE cannot cross a page boundary) */
+            for (i = 0; i < 16; i++)
+            {
+                aste[i] = ARCH_DEP(fetch_fullword_absolute) (abs, regs);
+                abs += 4;
+            }
+
+            /* ASX translation exception if ASTE invalid bit is one */
+            if (aste[0] & ASTE0_INVALID)
+                ARCH_DEP(program_interrupt) (regs, PGM_ASX_TRANSLATION_EXCEPTION);
+        }
+
+        /* Obtain the new PSTD or PASCE from the ASTE */
+        pstd = ASTE_AS_DESIGNATOR(aste);
 
 #ifdef FEATURE_SUBSPACE_GROUP
         /* Perform subspace replacement on new PSTD */
-        pstd = subspace_replace (pstd, pasteo, NULL, regs);
+        pstd = ARCH_DEP(subspace_replace) (pstd, pasteo, NULL, regs);
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
     } /* end if(PC-ss) */
@@ -1949,7 +2155,7 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
     { /* PC-cp */
 
         /* For PC to current primary, load current primary STD */
-        pstd = regs->cr[1];
+        pstd = regs->CR(1);
 
     } /* end if(PC-cp) */
 
@@ -1957,149 +2163,219 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
     if ((ete[4] & ETE4_T) == 0)
     {
         /* For basic PC, load linkage info into general register 14 */
-        regs->gpr[14] = regs->psw.ia | regs->psw.prob;
-        if (regs->psw.amode) regs->gpr[14] |= 0x80000000;
+      #if defined(FEATURE_ESAME)
+        if (regs->psw.amode64)
+            regs->GR_G(14) = regs->psw.IA | regs->psw.prob;
+        else
+            regs->GR_L(14) = (regs->psw.amode ? 0x80000000 : 0)
+                            | regs->psw.IA | regs->psw.prob;
+      #else /*!defined(FEATURE_ESAME)*/
+        regs->GR_L(14) = (regs->psw.amode ? 0x80000000 : 0)
+                        | regs->psw.IA | regs->psw.prob;
+      #endif /*!defined(FEATURE_ESAME)*/
 
         /* Update the PSW from the entry table */
+      #if defined(FEATURE_ESAME)
+        if (regs->psw.amode64)
+            regs->psw.IA = ((U64)(ete[0]) << 32)
+                                | (U64)(ete[1] & 0xFFFFFFFE);
+        else
+        {
+            regs->psw.amode = (ete[1] & ETE1_AMODE) ? 1 : 0;
+            regs->psw.IA = ete[1] & ETE1_EIA;
+        }
+      #else /*!defined(FEATURE_ESAME)*/
         regs->psw.amode = (ete[1] & ETE1_AMODE) ? 1 : 0;
-        regs->psw.ia = ete[1] & ETE1_EIA;
+        regs->psw.IA = ete[1] & ETE1_EIA;
+      #endif /*!defined(FEATURE_ESAME)*/
         regs->psw.prob = (ete[1] & ETE1_PROB) ? 1 : 0;
-        LASTPAGE_INVALIDATE(regs);
 
         /* Load the current PKM and PASN into general register 3 */
-        regs->gpr[3] = (regs->cr[3] & CR3_KEYMASK)
-                        | (regs->cr[4] & CR4_PASN);
+        regs->GR_L(3) = (regs->CR(3) & CR3_KEYMASK)
+                        | (regs->CR(4) & CR4_PASN);
 
         /* OR the EKM into the current PKM */
-        regs->cr[3] |= (ete[3] & ETE3_EKM);
+        regs->CR(3) |= (ete[3] & ETE3_EKM);
 
         /* Load the entry parameter into general register 4 */
-        regs->gpr[4] = ete[2];
+      #if defined(FEATURE_ESAME)
+        if (regs->psw.amode64)
+            regs->GR_G(4) = ((U64)(ete[6]) << 32) | (U64)(ete[7]);
+        else
+            regs->GR_L(4) = ete[7];
+      #else /*!defined(FEATURE_ESAME)*/
+        regs->GR_L(4) = ete[2];
+      #endif /*!defined(FEATURE_ESAME)*/
 
     } /* end if(basic PC) */
     else
+#if defined(FEATURE_LINKAGE_STACK)
     { /* stacking PC */
 
-#ifdef FEATURE_CALLED_SPACE_IDENTIFICATION
-        /* Set the called space identification */
+        /* Set the called-space identification */
         csi = (pasn == 0) ? 0 : pasn << 16 | (aste[5] & 0x0000FFFF);
-#endif /*FEATURE_CALLED_SPACE_IDENTIFICATION*/
+
+        /* Set the addressing mode bits in the return address */
+        retn = regs->psw.IA;
+      #if defined(FEATURE_ESAME)
+        if ( regs->psw.amode64 )
+            retn |= 0x01;
+        else
+      #endif /*defined(FEATURE_ESAME)*/
+        if ( regs->psw.amode )
+            retn |= 0x80000000;
+
+      #if defined(FEATURE_ESAME)
+        /* Set the high-order bit of the PC number if
+           the resulting addressing mode is 64-bit */
+        if (ete[4] & ETE4_G)
+            pcnum |= 0x80000000;
+      #endif /*defined(FEATURE_ESAME)*/
 
         /* Perform the stacking process */
-        retn = regs->psw.ia;
-        if (regs->psw.amode) retn |= 0x80000000;
-        form_stack_entry (LSED_UET_PC, retn, effective_addr2, csi, regs);
+        ARCH_DEP(form_stack_entry) (LSED_UET_PC, retn, 0, csi,
+                                        pcnum, regs);
 
         /* Update the PSW from the entry table */
+      #if defined(FEATURE_ESAME)
+        if (ete[4] & ETE4_G)
+        {
+            regs->psw.amode64 = 1;
+            regs->psw.amode = 1;
+            regs->psw.IA = ((U64)(ete[0]) << 32)
+                                | (U64)(ete[1] & 0xFFFFFFFE);
+        }
+        else
+        {
+            regs->psw.amode64 = 0;
+            regs->psw.amode = (ete[1] & ETE1_AMODE) ? 1 : 0;
+            regs->psw.IA = ete[1] & ETE1_EIA;
+        }
+      #else /*!defined(FEATURE_ESAME)*/
         regs->psw.amode = (ete[1] & ETE1_AMODE) ? 1 : 0;
-        regs->psw.ia = ete[1] & ETE1_EIA;
+        regs->psw.IA = ete[1] & ETE1_EIA;
+      #endif /!*defined(FEATURE_ESAME)*/
         regs->psw.prob = (ete[1] & ETE1_PROB) ? 1 : 0;
-        LASTPAGE_INVALIDATE(regs);
 
         /* Replace the PSW key by the entry key if the K bit is set */
-        if (ete[4] & ETE4_K)
+        if (ete[4] & ETE4_K) {
+            INVALIDATE_AIA(regs);
             regs->psw.pkey = (ete[4] & ETE4_EK) >> 16;
+        }
 
         /* Replace the PSW key mask by the EKM if the M bit is set,
            otherwise OR the EKM into the current PSW key mask */
         if (ete[4] & ETE4_M)
-            regs->cr[3] &= ~CR3_KEYMASK;
-        regs->cr[3] |= (ete[3] & ETE3_EKM);
+            regs->CR(3) &= ~CR3_KEYMASK;
+        regs->CR(3) |= (ete[3] & ETE3_EKM);
 
         /* Replace the EAX key by the EEAX if the E bit is set */
         if (ete[4] & ETE4_E)
         {
-            regs->cr[8] &= ~CR8_EAX;
-            regs->cr[8] |= (ete[4] & ETE4_EEAX) << 16;
+            regs->CR(8) &= ~CR8_EAX;
+            regs->CR(8) |= (ete[4] & ETE4_EEAX) << 16;
         }
 
         /* Set the access mode according to the C bit */
         regs->psw.armode = (ete[4] & ETE4_C) ? 1 : 0;
 
         /* Load the entry parameter into general register 4 */
-        regs->gpr[4] = ete[2];
+      #if defined(FEATURE_ESAME)
+        if (ete[4] & ETE4_G)
+            regs->GR_G(4) = ((U64)(ete[6]) << 32) | (U64)(ete[7]);
+        else
+            regs->GR_L(4) = ete[7];
+      #else /*!defined(FEATURE_ESAME)*/
+        regs->GR_L(4) = ete[2];
+      #endif /*!defined(FEATURE_ESAME)*/
 
     } /* end if(stacking PC) */
+#else /*!defined(FEATURE_LINKAGE_STACK)*/
+    ARCH_DEP(program_interrupt) (regs, PGM_PC_TRANSLATION_SPECIFICATION_EXCEPTION);
+#endif /*!defined(FEATURE_LINKAGE_STACK)*/
 
     /* If new ASN is zero, perform program call to current primary */
     if (pasn == 0)
     {
         /* Set SASN equal to PASN */
-        regs->cr[3] &= ~CR3_SASN;
-        regs->cr[3] |= (regs->cr[4] & CR4_PASN);
+        regs->CR(3) &= ~CR3_SASN;
+        regs->CR(3) |= (regs->CR(4) & CR4_PASN);
 
         /* Set SSTD equal to PSTD */
-        regs->cr[7] = regs->cr[1];
+        regs->CR(7) = regs->CR(1);
 
     } /* end if(PC-cp) */
     else
     { /* Program call with space switching */
 
         /* Set SASN and SSTD equal to current PASN and PSTD */
-        regs->cr[3] &= ~CR3_SASN;
-        regs->cr[3] |= (regs->cr[4] & CR4_PASN);
-        regs->cr[7] = regs->cr[1];
+        regs->CR(3) &= ~CR3_SASN;
+        regs->CR(3) |= (regs->CR(4) & CR4_PASN);
+        regs->CR(7) = regs->CR(1);
 
         /* Set flag if either the current or new PSTD indicates
            a space switch event, or if PER mode is set */
-        if ((regs->cr[1] & STD_SSEVENT) || (aste[2] & STD_SSEVENT)
+        if ((regs->CR(1) & SSEVENT_BIT)
+            || (ASTE_AS_DESIGNATOR(aste) & SSEVENT_BIT)
             || (regs->psw.sysmask & PSW_PERMODE))
         {
             /* [6.5.2.34] Set the translation exception address equal
                to the old primary ASN, with the high-order bit set if
                the old primary space-switch-event control bit is one */
-            regs->tea = regs->cr[4] & CR4_PASN;
-            if (regs->cr[1] & STD_SSEVENT)
-                regs->tea |= TEA_SSEVENT;
+            regs->TEA = regs->CR(4) & CR4_PASN;
+            if (regs->CR(1) & SSEVENT_BIT)
+                regs->TEA |= TEA_SSEVENT;
 
             /* Indicate space-switch event required */
             ssevent = 1;
         }
 
         /* Obtain new AX from the ASTE and new PASN from the ET */
-        regs->cr[4] = (aste[1] & ASTE1_AX) | pasn;
+        regs->CR_L(4) = (aste[1] & ASTE1_AX) | pasn;
 
-        /* Load the new primary STD */
-        regs->cr[1] = pstd;
+        /* Load the new primary STD or ASCE */
+        regs->CR(1) = pstd;
 
         /* Update control register 5 with the new PASTEO or LTD */
-        regs->cr[5] = (regs->cr[0] & CR0_ASF) ? pasteo : aste[3];
+        regs->CR_L(5) = ASF_ENABLED(regs) ?
+                                pasteo : ASTE_LT_DESIGNATOR(aste);
 
+#if defined(FEATURE_LINKAGE_STACK)
         /* For stacking PC when the S-bit in the entry table is
            one, set SASN and SSTD equal to new PASN and PSTD */
         if ((ete[4] & ETE4_T) && (ete[4] & ETE4_S))
         {
-            regs->cr[3] &= ~CR3_SASN;
-            regs->cr[3] |= (regs->cr[4] & CR4_PASN);
-            regs->cr[7] = regs->cr[1];
+            regs->CR(3) &= ~CR3_SASN;
+            regs->CR(3) |= (regs->CR(4) & CR4_PASN);
+            regs->CR(7) = regs->CR(1);
         }
+#endif /*defined(FEATURE_LINKAGE_STACK)*/
 
     } /* end if(PC-ss) */
 
 #ifdef FEATURE_TRACING
     /* Update trace table address if ASN tracing is active */
-    if (regs->cr[12] & CR12_ASNTRACE)
-        regs->cr[12] = newcr12;
+    if (regs->CR(12) & CR12_ASNTRACE)
+        regs->CR(12) = newcr12;
 #endif /*FEATURE_TRACING*/
 
     /* Generate space switch event if required */
     if (ssevent)
-        program_interrupt (regs, PGM_SPACE_SWITCH_EVENT);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPACE_SWITCH_EVENT);
 
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
-    LASTPAGE_INVALIDATE(regs);
-    REASSIGN_FRAG(regs);
-
 }
+#endif /*defined(FEATURE_DUAL_ADDRESS_SPACE)*/
 
 
+#if defined(FEATURE_LINKAGE_STACK)
 /*-------------------------------------------------------------------*/
 /* 0101 PR    - Program Return                                   [E] */
 /*-------------------------------------------------------------------*/
-void zz_program_return (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(program_return)
 {
 REGS    newregs;                        /* Copy of CPU registers     */
 int     etype;                          /* Entry type unstacked      */
@@ -2120,10 +2396,10 @@ U16     xcode;                          /* Exception code            */
 
     SIE_MODE_XC_OPEX(regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[3] & SIE_IC3_PR))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
@@ -2133,21 +2409,21 @@ U16     xcode;                          /* Exception code            */
     newregs = *regs;
 
     /* Save the current primary ASN from CR4 bits 16-31 */
-    oldpasn = regs->cr[4] & CR4_PASN;
+    oldpasn = regs->CR(4) & CR4_PASN;
 
     /* Perform the unstacking process */
-    etype = program_return_unstack (&newregs, &alsed);
+    etype = ARCH_DEP(program_return_unstack) (&newregs, &alsed);
 
     /* Perform PR-cp or PR-ss if unstacked entry was a program call */
     if (etype == LSED_UET_PC)
     {
         /* Extract the new primary ASN from CR4 bits 16-31 */
-        pasn = newregs.cr[4] & CR4_PASN;
+        pasn = newregs.CR(4) & CR4_PASN;
 
 #ifdef FEATURE_TRACING
         /* Perform tracing if ASN tracing is on */
-        if (regs->cr[12] & CR12_ASNTRACE)
-            newregs.cr[12] = trace_pr (&newregs, regs);
+        if (regs->CR(12) & CR12_ASNTRACE)
+            newregs.CR(12) = ARCH_DEP(trace_pr) (&newregs, regs);
 #endif /*FEATURE_TRACING*/
 
         /* Perform PASN translation if new PASN not equal old PASN */
@@ -2155,83 +2431,84 @@ U16     xcode;                          /* Exception code            */
         {
             /* Special operation exception if ASN translation
                control (control register 14 bit 12) is zero */
-            if ((regs->cr[14] & CR14_ASN_TRAN) == 0)
-                program_interrupt (&newregs, PGM_SPECIAL_OPERATION_EXCEPTION);
+            if ((regs->CR(14) & CR14_ASN_TRAN) == 0)
+                ARCH_DEP(program_interrupt) (&newregs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
             /* Translate new primary ASN to obtain ASTE */
-            xcode = translate_asn (pasn, &newregs, &pasteo, aste);
+            xcode = ARCH_DEP(translate_asn) (pasn, &newregs, &pasteo, aste);
 
             /* Program check if ASN translation exception */
             if (xcode != 0)
-                program_interrupt (&newregs, xcode);
+                ARCH_DEP(program_interrupt) (&newregs, xcode);
 
             /* Space switch if either current PSTD or new PSTD
                space-switch-event control bit is set to 1 */
-            if ((regs->cr[1] & STD_SSEVENT) || (aste[2] & STD_SSEVENT))
+            if ((regs->CR(1) & SSEVENT_BIT)
+                || (ASTE_AS_DESIGNATOR(aste) & SSEVENT_BIT))
             {
                 /* [6.5.2.34] Set translation exception address equal
                    to old primary ASN, and set high-order bit if old
                    primary space-switch-event control bit is one */
-                newregs.tea = regs->cr[4] & CR4_PASN;
-                if (newregs.cr[1] & STD_SSEVENT)
-                    newregs.tea |= TEA_SSEVENT;
+                newregs.TEA = regs->CR(4) & CR4_PASN;
+                if (newregs.CR(1) & SSEVENT_BIT)
+                    newregs.TEA |= TEA_SSEVENT;
 
                 /* Indicate space-switch event required */
                 ssevent = 1;
             }
 
-            /* Obtain new PSTD and AX from the ASTE */
-            newregs.cr[1] = aste[2];
-            newregs.cr[4] &= ~CR4_AX;
-            newregs.cr[4] |= aste[1] & ASTE1_AX;
+            /* Obtain new PSTD (or PASCE) and AX from the ASTE */
+            newregs.CR(1) = ASTE_AS_DESIGNATOR(aste);
+            newregs.CR(4) &= ~CR4_AX;
+            newregs.CR(4) |= aste[1] & ASTE1_AX;
 
             /* Load CR5 with the primary ASTE origin address */
-            newregs.cr[5] = pasteo;
+            newregs.CR_L(5) = pasteo;
 
 #ifdef FEATURE_SUBSPACE_GROUP
             /* Perform subspace replacement on new PSTD */
-            newregs.cr[1] = subspace_replace (newregs.cr[1],
+            newregs.CR(1) = ARCH_DEP(subspace_replace) (newregs.CR(1),
                                             pasteo, NULL, &newregs);
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
         } /* end if(pasn!=oldpasn) */
 
         /* Extract the new secondary ASN from CR3 bits 16-31 */
-        sasn = newregs.cr[3] & CR3_SASN;
+        sasn = newregs.CR(3) & CR3_SASN;
 
         /* Set SSTD = PSTD if new SASN is equal to new PASN */
         if (sasn == pasn)
         {
-            newregs.cr[7] = newregs.cr[1];
+            newregs.CR(7) = newregs.CR(1);
         }
         else /* sasn != pasn */
         {
             /* Special operation exception if ASN translation
                control (control register 14 bit 12) is zero */
-            if ((regs->cr[14] & CR14_ASN_TRAN) == 0)
-                program_interrupt (&newregs, PGM_SPECIAL_OPERATION_EXCEPTION);
+            if ((regs->CR(14) & CR14_ASN_TRAN) == 0)
+                ARCH_DEP(program_interrupt) (&newregs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
             /* Translate new secondary ASN to obtain ASTE */
-            xcode = translate_asn (sasn, &newregs, &sasteo, aste);
+            xcode = ARCH_DEP(translate_asn) (sasn, &newregs, &sasteo, aste);
 
             /* Program check if ASN translation exception */
             if (xcode != 0)
-                program_interrupt (&newregs, xcode);
+                ARCH_DEP(program_interrupt) (&newregs, xcode);
 
-            /* Obtain new SSTD from secondary ASTE */
-            newregs.cr[7] = aste[2];
+            /* Obtain new SSTD or SASCE from secondary ASTE */
+            newregs.CR(7) = ASTE_AS_DESIGNATOR(aste);
 
             /* Perform SASN authorization using new AX */
-            ax = (newregs.cr[4] & CR4_AX) >> 16;
-            if (authorize_asn (ax, aste, ATE_SECONDARY, &newregs))
+            ax = (newregs.CR(4) & CR4_AX) >> 16;
+            if (ARCH_DEP(authorize_asn) (ax, aste, ATE_SECONDARY, &newregs))
             {
-                newregs.tea = sasn;
-                program_interrupt (&newregs, PGM_SECONDARY_AUTHORITY_EXCEPTION);
+                newregs.TEA = sasn;
+                ARCH_DEP(program_interrupt) (&newregs, PGM_SECONDARY_AUTHORITY_EXCEPTION);
             }
 
 #ifdef FEATURE_SUBSPACE_GROUP
             /* Perform subspace replacement on new SSTD */
-            newregs.cr[7] = subspace_replace (newregs.cr[7],
+            newregs.CR(7) = ARCH_DEP(subspace_replace) (newregs.CR(7),
                                             sasteo, NULL, &newregs);
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
@@ -2240,7 +2517,7 @@ U16     xcode;                          /* Exception code            */
     } /* end if(LSED_UET_PC) */
 
     /* Update the updated CPU registers from the working copy */
-    memcpy(regs->gpr, &newregs.gpr, sizeof(newregs.gpr));
+    memcpy(regs->gr, &newregs.gr, sizeof(newregs.gr));
     memcpy(regs->ar, &newregs.ar, sizeof(newregs.ar));
     memcpy(regs->cr, &newregs.cr, sizeof(newregs.cr));
     memcpy(&regs->psw, &newregs.psw, sizeof(newregs.psw));
@@ -2253,51 +2530,53 @@ U16     xcode;                          /* Exception code            */
     lsedp = (LSED*)(sysblk.mainstor + alsed);
     lsedp->nes[0] = 0;
     lsedp->nes[1] = 0;
-    FRAG_INVALIDATE(alsed, 2);
 
     /* Generate space switch event if required */
     if (ssevent)
-        program_interrupt (&newregs, PGM_SPACE_SWITCH_EVENT);
+        ARCH_DEP(program_interrupt) (&newregs, PGM_SPACE_SWITCH_EVENT);
 
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
-    LASTPAGE_INVALIDATE(regs);
-    REASSIGN_FRAG(regs);
 }
+#endif /*defined(FEATURE_LINKAGE_STACK)*/
 
 
+#if defined(FEATURE_DUAL_ADDRESS_SPACE)
 /*-------------------------------------------------------------------*/
 /* B228 PT    - Program Transfer                               [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_program_transfer (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(program_transfer)
 {
 int     r1, r2;                         /* Values of R fields        */
 U16     pkm;                            /* New program key mask      */
 U16     pasn;                           /* New primary ASN           */
 int     amode;                          /* New amode                 */
-U32     ia;                             /* New instruction address   */
+VADR    ia;                             /* New instruction address   */
 int     prob;                           /* New problem state bit     */
+RADR    abs;                            /* Absolute address          */
 U32     ltd;                            /* Linkage table designation */
 U32     pasteo;                         /* Primary ASTE origin       */
 U32     aste[16];                       /* ASN second table entry    */
-U32     pstd;                           /* Primary STD               */
+RADR    pstd;                           /* Primary STD               */
 U16     ax;                             /* Authorization index       */
 U16     xcode;                          /* Exception code            */
 int     ssevent = 0;                    /* 1=space switch event      */
 #ifdef FEATURE_TRACING
-U32     newcr12 = 0;                    /* CR12 upon completion      */
+CREG    newcr12 = 0;                    /* CR12 upon completion      */
 #endif /*FEATURE_TRACING*/
 
     RRE(inst, execflag, regs, r1, r2);
 
     SIE_MODE_XC_OPEX(regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    INVALIDATE_AEA_ALL(regs);
+
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[2] & SIE_IC2_PT))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
@@ -2307,167 +2586,185 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
        not in primary space mode */
     if (REAL_MODE(&(regs->psw))
         || !PRIMARY_SPACE_MODE(&(regs->psw)))
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Extract the PSW key mask from R1 register bits 0-15 */
-    pkm = regs->gpr[r1] >> 16;
+    pkm = regs->GR_L(r1) >> 16;
 
     /* Extract the ASN from R1 register bits 16-31 */
-    pasn = regs->gpr[r1] & 0xFFFF;
+    pasn = regs->GR_L(r1) & 0xFFFF;
 
 #ifdef FEATURE_TRACING
     /* Build trace entry if ASN tracing is on */
-    if (regs->cr[12] & CR12_ASNTRACE)
-        newcr12 = trace_pt (pasn, regs->gpr[r2], regs);
+    if (regs->CR(12) & CR12_ASNTRACE)
+        newcr12 = ARCH_DEP(trace_pt) (pasn, regs->GR_L(r2), regs);
 #endif /*FEATURE_TRACING*/
 
-    /* Extract the amode bit from R2 register bit 0 */
-    amode = (regs->gpr[r2] & 0x80000000) ? 1 : 0;
+    /* Determine instruction address, amode, and problem state */
+#if defined(FEATURE_ESAME)
+    if (regs->psw.amode64)
+    {
+        /* In 64-bit address mode, extract instruction address from
+           R2 register bits 0-62, and leave address mode unchanged */
+        ia = regs->GR_G(r2) & 0xFFFFFFFFFFFFFFFEULL;
+        amode = regs->psw.amode;
+    }
+    else
+#endif /*defined(FEATURE_ESAME)*/
+    {
+        /* In 31- or 24-bit mode, extract new amode from R2 bit 0 */
+        amode = (regs->GR_L(r2) & 0x80000000) ? 1 : 0;
 
-    /* Extract the instruction address from R2 bits 1-30 */
-    ia = regs->gpr[r2] & 0x7FFFFFFE;
+        /* Extract the instruction address from R2 bits 1-30 */
+        ia = regs->GR_L(r2) & 0x7FFFFFFE;
+    }
 
     /* Extract the problem state bit from R2 register bit 31 */
-    prob = regs->gpr[r2] & 0x00000001;
+    prob = regs->GR_L(r2) & 0x00000001;
 
     /* [5.5.3.1] Load the linkage table designation */
-    if ((regs->cr[0] & CR0_ASF) == 0)
+    if (ASF_ENABLED(regs) == 0)
     {
         /* Obtain the LTD from control register 5 */
-        ltd = regs->cr[5];
+        ltd = regs->CR_L(5);
     }
     else
     {
         /* Obtain the primary ASTE origin from control register 5 */
-        pasteo = regs->cr[5] & CR5_PASTEO;
-        pasteo = APPLY_PREFIXING (pasteo, regs->pxr);
+        pasteo = regs->CR_L(5) & CR5_PASTEO;
+
+        /* Convert the PASTE origin to an absolute address */
+        abs = APPLY_PREFIXING (pasteo, regs->PX);
 
         /* Program check if PASTE is outside main storage */
-        if (pasteo >= regs->mainsize)
-            program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        if (abs >= regs->mainsize)
+            ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-        /* Fetch LTD from PASTE word 3 */
-        ltd = fetch_fullword_absolute(pasteo+12, regs);
+        /* Fetch primary ASTE words 3 and 6 from absolute storage
+           (note: the ASTE cannot cross a page boundary) */
+        aste[3] = ARCH_DEP(fetch_fullword_absolute) (abs+12, regs);
+        aste[6] = ARCH_DEP(fetch_fullword_absolute) (abs+48, regs);
+
+        /* Load LTD from primary ASTE word 3 or 6 */
+        ltd = ASTE_LT_DESIGNATOR(aste);
     }
 
     /* Special operation exception if subsystem linkage
        control bit in linkage table designation is zero */
     if ((ltd & LTD_SSLINK) == 0)
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Privileged operation exception if in problem state and
        problem bit indicates a change to supervisor state */
     if (regs->psw.prob && prob == 0)
-        program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
-    /* Specification exception if amode is zero and
+    /* Specification exception if new amode is 24-bit and
        new instruction address is not a 24-bit address */
     if (amode == 0 && ia > 0x00FFFFFF)
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Space switch if ASN not equal to current PASN */
-    if (pasn != (regs->cr[4] & CR4_PASN))
+    if (pasn != (regs->CR(4) & CR4_PASN))
     {
+        INVALIDATE_AIA(regs);
+
         /* Special operation exception if ASN translation
            control (control register 14 bit 12) is zero */
-        if ((regs->cr[14] & CR14_ASN_TRAN) == 0)
-            program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        if ((regs->CR(14) & CR14_ASN_TRAN) == 0)
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
         /* Translate ASN and generate program check if
            AFX- or ASX-translation exception condition */
-        xcode = translate_asn (pasn, regs, &pasteo, aste);
+        xcode = ARCH_DEP(translate_asn) (pasn, regs, &pasteo, aste);
         if (xcode != 0)
-            program_interrupt (regs, xcode);
+            ARCH_DEP(program_interrupt) (regs, xcode);
 
         /* Perform primary address space authorization
            using current authorization index */
-        ax = (regs->cr[4] & CR4_AX) >> 16;
-        if (authorize_asn (ax, aste, ATE_PRIMARY, regs))
+        ax = (regs->CR(4) & CR4_AX) >> 16;
+        if (ARCH_DEP(authorize_asn) (ax, aste, ATE_PRIMARY, regs))
         {
-            regs->tea = pasn;
-            program_interrupt (regs, PGM_PRIMARY_AUTHORITY_EXCEPTION);
+            regs->TEA = pasn;
+            ARCH_DEP(program_interrupt) (regs, PGM_PRIMARY_AUTHORITY_EXCEPTION);
         }
 
-        /* Obtain new primary STD from the ASTE */
-        pstd = aste[2];
+        /* Obtain new primary STD or ASCE from the ASTE */
+        pstd = ASTE_AS_DESIGNATOR(aste);
 
 #ifdef FEATURE_SUBSPACE_GROUP
         /* Perform subspace replacement on new PSTD */
-        pstd = subspace_replace (pstd, pasteo, NULL, regs);
+        pstd = ARCH_DEP(subspace_replace) (pstd, pasteo, NULL, regs);
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
         /* Space switch if either current PSTD or new PSTD
            space-switch-event control bit is set to 1 */
-        if ((regs->cr[1] & STD_SSEVENT) || (pstd & STD_SSEVENT))
+        if ((regs->CR(1) & SSEVENT_BIT) || (pstd & SSEVENT_BIT))
         {
             /* [6.5.2.34] Set the translation exception address equal
                to the old primary ASN, with the high-order bit set if
                the old primary space-switch-event control bit is one */
-            regs->tea = regs->cr[4] & CR4_PASN;
-            if (regs->cr[1] & STD_SSEVENT)
-                regs->tea |= TEA_SSEVENT;
+            regs->TEA = regs->CR(4) & CR4_PASN;
+            if (regs->CR(1) & SSEVENT_BIT)
+                regs->TEA |= TEA_SSEVENT;
 
             /* Indicate space-switch event required */
             ssevent = 1;
         }
 
-        /* Load new primary STD into control register 1 */
-        regs->cr[1] = pstd;
+        /* Load new primary STD or ASCE into control register 1 */
+        regs->CR(1) = pstd;
 
         /* Load new AX and PASN into control register 4 */
-        regs->cr[4] = (aste[1] & ASTE1_AX) | pasn;
+        regs->CR_L(4) = (aste[1] & ASTE1_AX) | pasn;
 
         /* Load new PASTEO or LTD into control register 5 */
-        regs->cr[5] = (regs->cr[0] & CR0_ASF) ? pasteo : aste[3];
+        regs->CR_L(5) = ASF_ENABLED(regs) ?
+                                pasteo : ASTE_LT_DESIGNATOR(aste);
 
     } /* end if(PT-ss) */
     else
     {
-        /* For PT-cp use current primary STD */
-        pstd = regs->cr[1];
+        /* For PT-cp use current primary STD or ASCE */
+        pstd = regs->CR(1);
     }
 
 #ifdef FEATURE_TRACING
     /* Update trace table address if ASN tracing is on */
-    if (regs->cr[12] & CR12_ASNTRACE)
-        regs->cr[12] = newcr12;
+    if (regs->CR(12) & CR12_ASNTRACE)
+        regs->CR(12) = newcr12;
 #endif /*FEATURE_TRACING*/
 
     /* Replace PSW amode, instruction address, and problem state bit */
     regs->psw.amode = amode;
-    regs->psw.ia = ia;
+    regs->psw.IA = ia;
     regs->psw.prob = prob;
-    LASTPAGE_INVALIDATE(regs);
 
     /* AND control register 3 bits 0-15 with the supplied PKM value
        and replace the SASN in CR3 bits 16-31 with new PASN */
-    regs->cr[3] &= (pkm << 16);
-    regs->cr[3] |= pasn;
+    regs->CR(3) &= (pkm << 16);
+    regs->CR(3) |= pasn;
 
-    obtain_lock(&sysblk.intlock);
-    set_doint(regs);
-    release_lock(&sysblk.intlock);
-
-    /* Set secondary STD equal to new primary STD */
-    regs->cr[7] = pstd;
+    /* Set secondary STD or ASCE equal to new primary STD or ASCE */
+    regs->CR(7) = pstd;
 
     /* Generate space switch event if required */
     if (ssevent)
-        program_interrupt (regs, PGM_SPACE_SWITCH_EVENT);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPACE_SWITCH_EVENT);
 
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
-    LASTPAGE_INVALIDATE(regs);
-    REASSIGN_FRAG(regs);
 }
+#endif /*defined(FEATURE_DUAL_ADDRESS_SPACE)*/
 
 
+#if defined(FEATURE_ACCESS_REGISTERS)
 /*-------------------------------------------------------------------*/
 /* B248 PALB  - Purge ALB                                      [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_purge_alb (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(purge_accesslist_lookaside_buffer)
 {
 int     r1, r2;                         /* Register values (unused)  */
 
@@ -2481,24 +2778,25 @@ int     r1, r2;                         /* Register values (unused)  */
 
     PRIV_CHECK(regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[1] & SIE_IC1_PXLB))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Purge the ART lookaside buffer for this CPU */
-    purge_alb (regs);
+    ARCH_DEP(purge_alb) (regs);
 
 }
+#endif /*defined(FEATURE_ACCESS_REGISTERS)*/
 
 
 /*-------------------------------------------------------------------*/
 /* B20D PTLB  - Purge TLB                                        [S] */
 /*-------------------------------------------------------------------*/
-void zz_purge_tlb (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(purge_translation_lookaside_buffer)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -2510,30 +2808,38 @@ U32     effective_addr2;                /* Effective address         */
 
     PRIV_CHECK(regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[1] & SIE_IC1_PXLB))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Purge the translation lookaside buffer for this CPU */
-    purge_tlb (regs);
+    ARCH_DEP(purge_tlb) (regs);
 
 }
 
 
+#if defined(FEATURE_BASIC_STORAGE_KEYS)
 /*-------------------------------------------------------------------*/
 /* B213 RRB   - Reset Reference Bit                              [S] */
 /*-------------------------------------------------------------------*/
-void zz_reset_reference_bit (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(reset_reference_bit)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
-U32     n;                              /* Absolute storage addr     */
+VADR    effective_addr2;                /* Effective address         */
+RADR    n;                              /* Absolute storage addr     */
 BYTE    storkey;                        /* Storage key               */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
-    SIE_MODE_370(regs);
+#if defined(FEATURE_4K_STORAGE_KEYS) || defined(_FEATURE_SIE)
+    if(
+#if defined(_FEATURE_SIE) && !defined(FEATURE_4K_STORAGE_KEYS)
+        regs->sie_state &&
+#endif
+        !(regs->CR(0) & CR0_STORKEY_4K) )
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+#endif
 
     PRIV_CHECK(regs);
 
@@ -2541,13 +2847,13 @@ BYTE    storkey;                        /* Storage key               */
     n = effective_addr2 & 0x00FFF800;
 
     /* Convert real address to absolute address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
     /* Addressing exception if block is outside main storage */
     if ( n >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state)
     {
         if(regs->siebk->ic[2] & SIE_IC2_RRBE)
@@ -2556,20 +2862,20 @@ BYTE    storkey;                        /* Storage key               */
         if(!regs->sie_pref)
         {
         BYTE rcpkey, realkey;
-        U32  ra;
-        U32  rcpa;
+        RADR ra;
+        RADR rcpa;
         U16  xcode;
         int  private,
              protect,
              stid;
 
-#if defined(FEATURE_STORAGE_KEY_ASSIST)
-            /* If storage key assist is enabled then cause 
+#if defined(_FEATURE_STORAGE_KEY_ASSIST)
+            /* If storage key assist is enabled then cause
                an interception to occur, as this is not yet
                implemented. *JJ */
             if(regs->siebk->rcpo[0] & SIE_RCPO0_SKA)
                 longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_STORAGE_KEY_ASSIST)*/
+#endif /*defined(_FEATURE_STORAGE_KEY_ASSIST)*/
 
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
             if(regs->siebk->mx & SIE_MX_XC)
@@ -2579,20 +2885,34 @@ BYTE    storkey;                        /* Storage key               */
             /* Obtain address of the RCP area from the state desc */
             rcpa = regs->sie_rcpo &= 0x7FFFF000;
 
-            /* frame index as byte offset */
-            rcpa += n >> STORAGE_KEY_PAGESHIFT;
+            /* frame index as byte offset to 4K keys in RCP area */
+            rcpa += n >> 12;
 
             /* fetch the RCP key */
-            rcpkey = vfetchb(rcpa, USE_PRIMARY_SPACE, regs->hostregs);
+            SIE_TRANSLATE(&rcpa, ACCTYPE_SIE, regs);
+            rcpkey = sysblk.mainstor[rcpa];
+            STORAGE_KEY(rcpa) |= STORKEY_REF;
 
-            if (!translate_addr (regs->sie_mso + n, USE_PRIMARY_SPACE,
+            if (!SIE_TRANSLATE_ADDR (regs->sie_mso + n, USE_PRIMARY_SPACE,
                 regs->hostregs, ACCTYPE_SIE, &ra, &xcode, &private,
                 &protect, &stid, NULL, NULL))
             {
-                ra = APPLY_PREFIXING(ra, regs->hostregs->pxr);
-                realkey = STORAGE_KEY(ra) & (STORKEY_REF | STORKEY_CHANGE);
-                /* Reset the reference and change bits in the storage key */
+                ra = APPLY_PREFIXING(ra, regs->hostregs->PX);
+            realkey =
+#if !defined(_FEATURE_2K_STORAGE_KEYS)
+                      STORAGE_KEY(n)
+#else
+                      (STORAGE_KEY1(n) | STORAGE_KEY2(n))
+#endif
+                      & (STORKEY_REF | STORKEY_CHANGE);
+
+                /* Reset reference and change bits in storage key */
+#if !defined(_FEATURE_2K_STORAGE_KEYS)
                 STORAGE_KEY(ra) &= ~(STORKEY_REF | STORKEY_CHANGE);
+#else
+                STORAGE_KEY1(ra) &= ~(STORKEY_REF | STORKEY_CHANGE);
+                STORAGE_KEY2(ra) &= ~(STORKEY_REF | STORKEY_CHANGE);
+#endif
             }
             else
                 realkey = 0;
@@ -2604,17 +2924,23 @@ BYTE    storkey;                        /* Storage key               */
             rcpkey |= realkey << 4;
             /* reset the reference bit */
             rcpkey &= ~(STORKEY_REF);
-            vstoreb(rcpkey, rcpa, USE_PRIMARY_SPACE, regs->hostregs);
+            sysblk.mainstor[rcpa] = rcpkey;
+            STORAGE_KEY(rcpa) |= (STORKEY_REF|STORKEY_CHANGE);
         }
         else
         {
             storkey = STORAGE_KEY(n);
             /* Reset the reference bit in the storage key */
+#if !defined(_FEATURE_2K_STORAGE_KEYS)
             STORAGE_KEY(n) &= ~(STORKEY_REF);
+#else
+            STORAGE_KEY1(n) &= ~(STORKEY_REF);
+            STORAGE_KEY2(n) &= ~(STORKEY_REF);
+#endif
         }
     }
     else
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
     {
         storkey = STORAGE_KEY(n);
         /* Reset the reference bit in the storage key */
@@ -2628,34 +2954,34 @@ BYTE    storkey;                        /* Storage key               */
        | ((storkey & STORKEY_CHANGE) ? 1 : 0);
 
 }
+#endif /*defined(FEATURE_BASIC_STORAGE_KEYS)*/
 
 
+#if defined(FEATURE_EXTENDED_STORAGE_KEYS)
 /*-------------------------------------------------------------------*/
 /* B22A RRBE  - Reset Reference Bit Extended                   [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_reset_reference_bit_extended (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(reset_reference_bit_extended)
 {
 int     r1, r2;                         /* Register values           */
-U32     n;                              /* Abs frame addr stor key   */
+RADR    n;                              /* Abs frame addr stor key   */
 BYTE    storkey;                        /* Storage key               */
 
     RRE(inst, execflag, regs, r1, r2);
 
-    SIE_MODE_XA(regs);
-
     PRIV_CHECK(regs);
 
     /* Load 4K block address from R2 register */
-    n = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
+    n = regs->GR_L(r2) & ADDRESS_MAXWRAP(regs);
 
     /* Convert real address to absolute address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
     /* Addressing exception if block is outside main storage */
     if ( n >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state)
     {
         if(regs->siebk->ic[2] & SIE_IC2_RRBE)
@@ -2664,39 +2990,51 @@ BYTE    storkey;                        /* Storage key               */
         if(!regs->sie_pref)
         {
         BYTE rcpkey, realkey;
-        U32  ra;
-        U32  rcpa;
+        RADR ra;
+        RADR rcpa;
         U16  xcode;
         int  private,
              protect,
              stid;
 
-#if defined(FEATURE_STORAGE_KEY_ASSIST)
-            /* If storage key assist is enabled then cause 
+#if defined(_FEATURE_STORAGE_KEY_ASSIST)
+            /* If storage key assist is enabled then cause
                an interception to occur, as this is not yet
                implemented. *JJ */
             if(regs->siebk->rcpo[0] & SIE_RCPO0_SKA)
                 longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_STORAGE_KEY_ASSIST)*/
+#endif /*defined(_FEATURE_STORAGE_KEY_ASSIST)*/
 
             /* Obtain address of the RCP area from the state desc */
             rcpa = regs->sie_rcpo &= 0x7FFFF000;
-    
+
             /* frame index as byte offset */
             rcpa += n >> STORAGE_KEY_PAGESHIFT;
 
             /* fetch the RCP key */
-            rcpkey = vfetchb(rcpa, USE_PRIMARY_SPACE, regs->hostregs);
+            SIE_TRANSLATE(&rcpa, ACCTYPE_SIE, regs);
+            rcpkey = sysblk.mainstor[rcpa];
+            STORAGE_KEY(rcpa) |= STORKEY_REF;
 
-            if (!translate_addr (regs->sie_mso + n, USE_PRIMARY_SPACE,
+            if (!SIE_TRANSLATE_ADDR (regs->sie_mso + n, USE_PRIMARY_SPACE,
                 regs->hostregs, ACCTYPE_SIE, &ra, &xcode, &private,
                 &protect, &stid, NULL, NULL))
             {
-                ra = APPLY_PREFIXING(ra, regs->hostregs->pxr);
+                ra = APPLY_PREFIXING(ra, regs->hostregs->PX);
+#if !defined(_FEATURE_2K_STORAGE_KEYS)
                 realkey = STORAGE_KEY(ra) & (STORKEY_REF | STORKEY_CHANGE);
-                /* Reset the reference and change bits in 
+#else
+                realkey = (STORAGE_KEY1(ra) | STORAGE_KEY2(ra))
+                          & (STORKEY_REF | STORKEY_CHANGE);
+#endif
+                /* Reset the reference and change bits in
                    the real machine storage key */
+#if !defined(_FEATURE_2K_STORAGE_KEYS)
                 STORAGE_KEY(ra) &= ~(STORKEY_REF | STORKEY_CHANGE);
+#else
+                STORAGE_KEY1(ra) &= ~(STORKEY_REF | STORKEY_CHANGE);
+                STORAGE_KEY2(ra) &= ~(STORKEY_REF | STORKEY_CHANGE);
+#endif
             }
             else
                 realkey = 0;
@@ -2708,21 +3046,44 @@ BYTE    storkey;                        /* Storage key               */
             rcpkey |= realkey << 4;
             /* reset the reference bit */
             rcpkey &= ~(STORKEY_REF);
-            vstoreb(rcpkey, rcpa, USE_PRIMARY_SPACE, regs->hostregs);
+            sysblk.mainstor[rcpa] = rcpkey;
+            STORAGE_KEY(rcpa) |= (STORKEY_REF|STORKEY_CHANGE);
         }
         else
         {
+#if !defined(_FEATURE_2K_STORAGE_KEYS)
             storkey = STORAGE_KEY(n);
+#else
+            storkey = STORAGE_KEY1(n)
+                      | (STORAGE_KEY2(n) & (STORKEY_REF|STORKEY_CHANGE))
+#endif
+                                    ;
             /* Reset the reference bit in the storage key */
+#if !defined(_FEATURE_2K_STORAGE_KEYS)
             STORAGE_KEY(n) &= ~(STORKEY_REF);
+#else
+            STORAGE_KEY1(n) &= ~(STORKEY_REF);
+            STORAGE_KEY2(n) &= ~(STORKEY_REF);
+#endif
         }
     }
     else
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
     {
+#if !defined(_FEATURE_2K_STORAGE_KEYS)
         storkey = STORAGE_KEY(n);
+#else
+        storkey = STORAGE_KEY1(n)
+                  | (STORAGE_KEY2(n) & (STORKEY_REF|STORKEY_CHANGE))
+#endif
+                                ;
         /* Reset the reference bit in the storage key */
+#if !defined(_FEATURE_2K_STORAGE_KEYS)
         STORAGE_KEY(n) &= ~(STORKEY_REF);
+#else
+        STORAGE_KEY1(n) &= ~(STORKEY_REF);
+        STORAGE_KEY2(n) &= ~(STORKEY_REF);
+#endif
     }
 
     /* Set the condition code according to the original state
@@ -2732,21 +3093,25 @@ BYTE    storkey;                        /* Storage key               */
        | ((storkey & STORKEY_CHANGE) ? 1 : 0);
 
 }
+#endif /*defined(FEATURE_EXTENDED_STORAGE_KEYS)*/
 
 
+#if defined(FEATURE_DUAL_ADDRESS_SPACE)
 /*-------------------------------------------------------------------*/
 /* B219 SAC   - Set Address Space Control                        [S] */
 /* B279 SACF  - Set Address Space Control Fast                   [S] */
 /*-------------------------------------------------------------------*/
-void zz_set_address_space_control_x (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(set_address_space_control_x)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 BYTE    mode;                           /* New addressing mode       */
 BYTE    oldmode;                        /* Current addressing mode   */
 int     ssevent = 0;                    /* 1=space switch event      */
 
     S(inst, execflag, regs, b2, effective_addr2);
+
+    INVALIDATE_AEA_ALL(regs);
 
     if(inst[1] == 0x19)
     {
@@ -2761,22 +3126,22 @@ int     ssevent = 0;                    /* 1=space switch event      */
     /* Special operation exception if DAT is off or
        secondary-space control bit is zero */
     if ((REAL_MODE(&(regs->psw))
-         || (regs->cr[0] & CR0_SEC_SPACE) == 0)
+         || (regs->CR(0) & CR0_SEC_SPACE) == 0)
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
          && !(regs->sie_state && (regs->siebk->mx & SIE_MX_XC))
 #endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
         )
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Privileged operation exception if setting home-space
        mode while in problem state */
     if (mode == 3 && regs->psw.prob)
-        program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
     /* Special operation exception if setting AR mode
        and address-space function control bit is zero */
-    if (mode == 2 && (regs->cr[0] & CR0_ASF) == 0)
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+    if (mode == 2 && ASF_ENABLED(regs) == 0)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Specification exception if mode is invalid */
     if (mode > 3
@@ -2787,7 +3152,7 @@ int     ssevent = 0;                    /* 1=space switch event      */
         && (mode == 1 || mode == 3) )
 #endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
         )
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Save the current address-space control bits */
     oldmode = (regs->psw.armode << 1) | (regs->psw.space);
@@ -2796,14 +3161,16 @@ int     ssevent = 0;                    /* 1=space switch event      */
     regs->psw.space = mode & 1;
     regs->psw.armode = mode >> 1;
 
+    INVALIDATE_AIA(regs);
+
     /* If switching into or out of home-space mode, and also:
        primary space-switch-event control bit is set; or
        home space-switch-event control bit is set; or
        PER event is to be indicated
        then indicate a space-switch-event */
     if (((oldmode != 3 && mode == 3) || (oldmode == 3 && mode != 3))
-         && ( regs->cr[1] & STD_SSEVENT
-              || regs->cr[13] & STD_SSEVENT
+         && (regs->CR(1) & SSEVENT_BIT
+              || regs->CR(13) & SSEVENT_BIT
               || regs->psw.sysmask & PSW_PERMODE ))
       {
         /* Indicate space-switch event required */
@@ -2816,9 +3183,9 @@ int     ssevent = 0;                    /* 1=space switch event      */
                translation exception address equal to the primary
                ASN, with the high-order bit set equal to the value
                of the primary space-switch-event control bit */
-            regs->tea = regs->cr[4] & CR4_PASN;
-            if (regs->cr[1] & STD_SSEVENT)
-                regs->tea |= TEA_SSEVENT;
+            regs->TEA = regs->CR(4) & CR4_PASN;
+            if (regs->CR(1) & SSEVENT_BIT)
+                regs->TEA |= TEA_SSEVENT;
         }
         else
         {
@@ -2826,15 +3193,15 @@ int     ssevent = 0;                    /* 1=space switch event      */
                translation exception address equal to zero, with
                the high-order bit set equal to the value of the
                home space-switch-event control bit */
-            regs->tea = 0;
-            if (regs->cr[13] & STD_SSEVENT)
-                regs->tea |= TEA_SSEVENT;
+            regs->TEA = 0;
+            if (regs->CR(13) & SSEVENT_BIT)
+                regs->TEA |= TEA_SSEVENT;
         }
     }
 
     /* Generate a space-switch-event if indicated */
     if (ssevent)
-        program_interrupt (regs, PGM_SPACE_SWITCH_EVENT);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPACE_SWITCH_EVENT);
 
     if(inst[1] == 0x19)
     {
@@ -2842,19 +3209,17 @@ int     ssevent = 0;                    /* 1=space switch event      */
         PERFORM_SERIALIZATION (regs);
         PERFORM_CHKPT_SYNC (regs);
     }
-
-    LASTPAGE_INVALIDATE(regs);
-    REASSIGN_FRAG(regs);
 }
+#endif /*defined(FEATURE_DUAL_ADDRESS_SPACE)*/
 
 
 /*-------------------------------------------------------------------*/
 /* B204 SCK   - Set Clock                                        [S] */
 /*-------------------------------------------------------------------*/
-void zz_set_clock (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(set_clock)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 U64     dreg;                           /* Clock value               */
 int     cpu;
 
@@ -2869,7 +3234,7 @@ int     cpu;
     DW_CHECK(effective_addr2, regs);
 
     /* Fetch new TOD clock value from operand address */
-    dreg = vfetch8 ( effective_addr2, b2, regs);
+    dreg = ARCH_DEP(vfetch8) ( effective_addr2, b2, regs);
 
     /* Obtain the TOD clock update lock */
     obtain_lock (&sysblk.todlock);
@@ -2897,10 +3262,10 @@ int     cpu;
 /*-------------------------------------------------------------------*/
 /* B206 SCKC  - Set Clock Comparator                             [S] */
 /*-------------------------------------------------------------------*/
-void zz_set_clock_comparator (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(set_clock_comparator)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 U64     dreg;                           /* Clock value               */
 
 
@@ -2910,13 +3275,13 @@ U64     dreg;                           /* Clock value               */
 
     DW_CHECK(effective_addr2, regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[3] & SIE_IC3_SCKC))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Fetch clock comparator value from operand location */
-    dreg = vfetch8 ( effective_addr2, b2, regs )
+    dreg = ARCH_DEP(vfetch8) ( effective_addr2, b2, regs )
                 & 0xFFFFFFFFFFFFF000ULL;
 
 //  /*debug*/logmsg("Set clock comparator=%16.16llX\n", dreg);
@@ -2930,13 +3295,9 @@ U64     dreg;                           /* Clock value               */
     /* reset the clock comparator pending flag according to
        the setting of the tod clock */
     if( (sysblk.todclk + regs->todoffset) > regs->clkc )
-        regs->ckpend = 1;
+        regs->cpuint = regs->ckpend = 1;
     else
         regs->ckpend = 0;
-
-    obtain_lock(&sysblk.intlock);
-    set_doint(regs);
-    release_lock(&sysblk.intlock);
 
     /* Release the TOD clock update lock */
     release_lock (&sysblk.todlock);
@@ -2944,31 +3305,33 @@ U64     dreg;                           /* Clock value               */
 }
 
 
+#if defined(FEATURE_EXTENDED_TOD_CLOCK)
 /*-------------------------------------------------------------------*/
 /* 0107 SCKPF - Set Clock Programmable Field                     [E] */
 /*-------------------------------------------------------------------*/
-void zz_set_clock_programmable_field (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(set_clock_programmable_field)
 {
     E(inst, execflag, regs);
 
     PRIV_CHECK(regs);
 
     /* Program check if register 0 bits 0-15 are not zeroes */
-    if ( regs->gpr[0] & 0xFFFF0000 )
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+    if ( regs->GR_L(0) & 0xFFFF0000 )
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Set TOD programmable register from register 0 */
-    regs->todpr = regs->gpr[0] & 0x0000FFFF;
+    regs->todpr = regs->GR_L(0) & 0x0000FFFF;
 }
+#endif /*defined(FEATURE_EXTENDED_TOD_CLOCK)*/
 
 
 /*-------------------------------------------------------------------*/
 /* B208 SPT   - Set CPU Timer                                    [S] */
 /*-------------------------------------------------------------------*/
-void zz_set_cpu_timer (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(set_cpu_timer)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 U64     dreg;                           /* Timer value               */
 
     S(inst, execflag, regs, b2, effective_addr2);
@@ -2977,13 +3340,13 @@ U64     dreg;                           /* Timer value               */
 
     DW_CHECK(effective_addr2, regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[3] & SIE_IC3_SPT))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Fetch the CPU timer value from operand location */
-    dreg = vfetch8 ( effective_addr2, b2, regs )
+    dreg = ARCH_DEP(vfetch8) ( effective_addr2, b2, regs )
                 & 0xFFFFFFFFFFFFF000ULL;
 
     /* Obtain the TOD clock update lock */
@@ -2994,13 +3357,9 @@ U64     dreg;                           /* Timer value               */
 
     /* reset the cpu timer pending flag according to its value */
     if( (S64)regs->ptimer < 0 )
-        regs->ptpend = 1;
+        regs->cpuint = regs->ptpend = 1;
     else
         regs->ptpend = 0;
-
-    obtain_lock(&sysblk.intlock);
-    set_doint(regs);
-    release_lock(&sysblk.intlock);
 
     /* Release the TOD clock update lock */
     release_lock (&sysblk.todlock);
@@ -3013,11 +3372,11 @@ U64     dreg;                           /* Timer value               */
 /*-------------------------------------------------------------------*/
 /* B210 SPX   - Set Prefix                                       [S] */
 /*-------------------------------------------------------------------*/
-void zz_set_prefix (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(set_prefix)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
-U32     n;                              /* Prefix value              */
+VADR    effective_addr2;                /* Effective address         */
+RADR    n;                              /* Prefix value              */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -3031,21 +3390,27 @@ U32     n;                              /* Prefix value              */
     PERFORM_SERIALIZATION (regs);
 
     /* Load new prefix value from operand address */
-    n = vfetch4 ( effective_addr2, b2, regs );
+    n = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
 
     /* Isolate bits 1-19 of new prefix value */
+#if defined(FEATURE_ESAME)
+    n &= 0x7FFFE000;
+#else /*!defined(FEATURE_ESAME)*/
     n &= 0x7FFFF000;
+#endif /*!defined(FEATURE_ESAME)*/
 
     /* Program check if prefix is invalid absolute address */
     if ( n >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Load new value into prefix register */
-    regs->pxr = n;
+    regs->PX = n;
 
     /* Invalidate the ALB and TLB */
-    purge_alb (regs);
-    purge_tlb (regs);
+    ARCH_DEP(purge_tlb) (regs);
+#if defined(FEATURE_ACCESS_REGISTERS)
+    ARCH_DEP(purge_alb) (regs);
+#endif /*defined(FEATURE_ACCESS_REGISTERS)*/
 
     /* Perform serialization after completing the operation */
     PERFORM_SERIALIZATION (regs);
@@ -3056,10 +3421,10 @@ U32     n;                              /* Prefix value              */
 /*-------------------------------------------------------------------*/
 /* B20A SPKA  - Set PSW Key from Address                         [S] */
 /*-------------------------------------------------------------------*/
-void zz_set_psw_key_from_address (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(set_psw_key_from_address)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 int     n;                              /* Storage key workarea      */
 
     S(inst, execflag, regs, b2, effective_addr2);
@@ -3070,8 +3435,12 @@ int     n;                              /* Storage key workarea      */
     /* Privileged operation exception if in problem state
        and the corresponding PSW key mask bit is zero */
     if ( regs->psw.prob
-        && ((regs->cr[3] << (n >> 4)) & 0x80000000) == 0 )
-        program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        && ((regs->CR(3) << (n >> 4)) & 0x80000000) == 0 )
+        ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+
+    INVALIDATE_AIA(regs);
+
+    INVALIDATE_AEA_ALL(regs);
 
     /* Set PSW key */
     regs->psw.pkey = n;
@@ -3079,25 +3448,28 @@ int     n;                              /* Storage key workarea      */
 }
 
 
+#if defined(FEATURE_DUAL_ADDRESS_SPACE)
 /*-------------------------------------------------------------------*/
 /* B225 SSAR  - Set Secondary ASN                              [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_set_secondary_asn (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(set_secondary_asn)
 {
 int     r1, r2;                         /* Register numbers          */
-U32     sasn;                           /* New Secondary ASN         */
-U32     sstd;                           /* Secondary STD             */
+U16     sasn;                           /* New Secondary ASN         */
+RADR    sstd;                           /* Secondary STD             */
 U32     sasteo;                         /* Secondary ASTE origin     */
 U32     aste[16];                       /* ASN second table entry    */
 U16     xcode;                          /* Exception code            */
 U16     ax;                             /* Authorization index       */
 #ifdef FEATURE_TRACING
-U32     newcr12 = 0;                    /* CR12 upon completion      */
+CREG    newcr12 = 0;                    /* CR12 upon completion      */
 #endif /*FEATURE_TRACING*/
 
     RRE(inst, execflag, regs, r1, r2);
 
     SIE_MODE_XC_OPEX(regs);
+
+    INVALIDATE_AEA_ALL(regs);
 
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
@@ -3105,109 +3477,116 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
 
     /* Special operation exception if ASN translation control
        (bit 12 of control register 14) is zero or DAT is off */
-    if ((regs->cr[14] & CR14_ASN_TRAN) == 0
+    if ((regs->CR(14) & CR14_ASN_TRAN) == 0
         || REAL_MODE(&(regs->psw)))
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Load the new ASN from R1 register bits 16-31 */
-    sasn = regs->gpr[r1] & CR3_SASN;
+    sasn = regs->GR_L(r1) & CR3_SASN;
 
 #ifdef FEATURE_TRACING
     /* Form trace entry if ASN tracing is on */
-    if (regs->cr[12] & CR12_ASNTRACE)
-        newcr12 = trace_ssar (sasn, regs);
+    if (regs->CR(12) & CR12_ASNTRACE)
+        newcr12 = ARCH_DEP(trace_ssar) (sasn, regs);
 #endif /*FEATURE_TRACING*/
 
     /* Test for SSAR to current primary */
-    if (sasn == (regs->cr[4] & CR4_PASN))
+    if (sasn == (regs->CR(4) & CR4_PASN))
     {
         /* Set new secondary STD equal to primary STD */
-        sstd = regs->cr[1];
+        sstd = regs->CR(1);
 
     } /* end if(SSAR-cp) */
     else
     { /* SSAR with space-switch */
 
         /* Perform ASN translation to obtain ASTE */
-        xcode = translate_asn (sasn, regs, &sasteo, aste);
+        xcode = ARCH_DEP(translate_asn) (sasn, regs, &sasteo, aste);
 
         /* Program check if ASN translation exception */
         if (xcode != 0)
-            program_interrupt (regs, xcode);
+            ARCH_DEP(program_interrupt) (regs, xcode);
 
         /* Perform ASN authorization using current AX */
-        ax = (regs->cr[4] & CR4_AX) >> 16;
-        if (authorize_asn (ax, aste, ATE_SECONDARY, regs))
+        ax = (regs->CR(4) & CR4_AX) >> 16;
+        if (ARCH_DEP(authorize_asn) (ax, aste, ATE_SECONDARY, regs))
         {
-            regs->tea = sasn;
-            program_interrupt (regs, PGM_SECONDARY_AUTHORITY_EXCEPTION);
+            regs->TEA = sasn;
+            ARCH_DEP(program_interrupt) (regs, PGM_SECONDARY_AUTHORITY_EXCEPTION);
         }
 
-        /* Load new secondary STD from ASTE word 2 */
-        sstd = aste[2];
+        /* Load new secondary STD or ASCE from the ASTE */
+        sstd = ASTE_AS_DESIGNATOR(aste);
 
 #ifdef FEATURE_SUBSPACE_GROUP
         /* Perform subspace replacement on new SSTD */
-        sstd = subspace_replace (sstd, sasteo, NULL, regs);
+        sstd = ARCH_DEP(subspace_replace) (sstd, sasteo, NULL, regs);
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
     } /* end if(SSAR-ss) */
 
 #ifdef FEATURE_TRACING
     /* Update trace table address if ASN tracing is on */
-    if (regs->cr[12] & CR12_ASNTRACE)
-        regs->cr[12] = newcr12;
+    if (regs->CR(12) & CR12_ASNTRACE)
+        regs->CR(12) = newcr12;
 #endif /*FEATURE_TRACING*/
 
     /* Load the new secondary ASN into control register 3 */
-    regs->cr[3] &= ~CR3_SASN;
-    regs->cr[3] |= sasn;
+    regs->CR(3) &= ~CR3_SASN;
+    regs->CR(3) |= sasn;
 
     /* Load the new secondary STD into control register 7 */
-    regs->cr[7] = sstd;
-
-    obtain_lock(&sysblk.intlock);
-    set_doint(regs);
-    release_lock(&sysblk.intlock);
+    regs->CR(7) = sstd;
 
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
-    LASTPAGE_INVALIDATE(regs);
-    REASSIGN_FRAG(regs);
 }
+#endif /*defined(FEATURE_DUAL_ADDRESS_SPACE)*/
 
 
+#if defined(FEATURE_BASIC_STORAGE_KEYS)
 /*-------------------------------------------------------------------*/
 /* 08   SSK   - Set Storage Key                                 [RR] */
 /*-------------------------------------------------------------------*/
-void zz_set_storage_key (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(set_storage_key)
 {
 int     r1, r2;                         /* Values of R fields        */
-U32     n;                              /* Absolute storage addr     */
+RADR    n;                              /* Absolute storage addr     */
 
     RR(inst, execflag, regs, r1, r2);
 
-    SIE_MODE_370(regs);
-
     PRIV_CHECK(regs);
 
+#if defined(FEATURE_4K_STORAGE_KEYS) || defined(_FEATURE_SIE)
+    if(
+#if defined(_FEATURE_SIE) && !defined(FEATURE_4K_STORAGE_KEYS)
+        regs->sie_state &&
+#endif
+        !(regs->CR(0) & CR0_STORKEY_4K) )
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+#endif
+
+    INVALIDATE_AIA(regs);
+
+    INVALIDATE_AEA_ALL(regs);
+
     /* Program check if R2 bits 28-31 are not zeroes */
-    if ( regs->gpr[r2] & 0x0000000F )
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+    if ( regs->GR_L(r2) & 0x0000000F )
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Load 2K block address from R2 register */
-    n = regs->gpr[r2] & 0x00FFF800;
+    n = regs->GR_L(r2) & 0x00FFF800;
 
     /* Convert real address to absolute address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
     /* Addressing exception if block is outside main storage */
     if ( n >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state)
     {
         if(regs->siebk->ic[2] & SIE_IC2_SSKE)
@@ -3221,94 +3600,128 @@ U32     n;                              /* Absolute storage addr     */
              stid;
         BYTE realkey,
              rcpkey;
-        U32  rcpa;
+        RADR rcpa;
 
-#if defined(FEATURE_STORAGE_KEY_ASSIST)
-            /* If storage key assist is enabled then cause 
+#if defined(_FEATURE_STORAGE_KEY_ASSIST)
+            /* If storage key assist is enabled then cause
                an interception to occur, as this is not yet
                implemented. *JJ */
             if(regs->siebk->rcpo[0] & SIE_RCPO0_SKA)
                 longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_STORAGE_KEY_ASSIST)*/
+#endif /*defined(_FEATURE_STORAGE_KEY_ASSIST)*/
 
             /* Obtain address of the RCP area from the state desc */
             rcpa = regs->sie_rcpo &= 0x7FFFF000;
 
-            /* frame index as byte offset */
-            rcpa += n >> STORAGE_KEY_PAGESHIFT;
+            /* frame index as byte offset to 4K keys in RCP area */
+            rcpa += n >> 12;
 
             /* guest absolute to host real */
-            if (translate_addr (regs->sie_mso + n, USE_PRIMARY_SPACE,
+            if (SIE_TRANSLATE_ADDR (regs->sie_mso + n, USE_PRIMARY_SPACE,
                 regs->hostregs, ACCTYPE_SIE, &n, &xcode, &private,
                 &protect, &stid, NULL, NULL))
                 longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 
             /* host real to host absolute */
-            n = APPLY_PREFIXING(n, regs->hostregs->pxr);
+            n = APPLY_PREFIXING(n, regs->hostregs->PX);
 
-            realkey = STORAGE_KEY(n) & (STORKEY_REF | STORKEY_CHANGE);
+            realkey =
+#if !defined(_FEATURE_2K_STORAGE_KEYS)
+                      STORAGE_KEY(n)
+#else
+                      (STORAGE_KEY1(n) | STORAGE_KEY2(n))
+#endif
+                      & (STORKEY_REF | STORKEY_CHANGE);
 
             /* fetch the RCP key */
-            rcpkey = vfetchb(rcpa, USE_PRIMARY_SPACE, regs->hostregs);
+            SIE_TRANSLATE(&rcpa, ACCTYPE_SIE, regs);
+            rcpkey = sysblk.mainstor[rcpa];
+            STORAGE_KEY(rcpa) |= STORKEY_REF;
             /* or with host set */
             rcpkey |= realkey << 4;
             /* or new settings with guest set */
-            rcpkey |= regs->gpr[r1] & (STORKEY_REF | STORKEY_CHANGE);
-            vstoreb(rcpkey, rcpa, USE_PRIMARY_SPACE, regs->hostregs);
+            rcpkey |= regs->GR_L(r1) & (STORKEY_REF | STORKEY_CHANGE);
+            sysblk.mainstor[rcpa] = rcpkey;
+            STORAGE_KEY(rcpa) |= (STORKEY_REF|STORKEY_CHANGE);
             /* Inser key in new storage key */
+#if !defined(_FEATURE_2K_STORAGE_KEYS)
             STORAGE_KEY(n) &= STORKEY_BADFRM;
-            STORAGE_KEY(n) |= regs->gpr[r1] & STORKEY_KEY;
+            STORAGE_KEY(n) |= regs->GR_L(r1) & STORKEY_KEY;
+#else
+            STORAGE_KEY1(n) &= STORKEY_BADFRM;
+            STORAGE_KEY1(n) |= regs->GR_L(r1) & STORKEY_KEY;
+            STORAGE_KEY2(n) &= STORKEY_BADFRM;
+            STORAGE_KEY2(n) |= regs->GR_L(r1) & STORKEY_KEY;
+#endif
         }
         else
         {
             /* Update the storage key from R1 register bits 24-30 */
+#if !defined(_FEATURE_2K_STORAGE_KEYS)
             STORAGE_KEY(n) &= STORKEY_BADFRM;
-            STORAGE_KEY(n) |= regs->gpr[r1] & ~(STORKEY_BADFRM);
+            STORAGE_KEY(n) |= regs->GR_L(r1) & ~(STORKEY_BADFRM);
+#else
+            STORAGE_KEY1(n) &= STORKEY_BADFRM;
+            STORAGE_KEY1(n) |= regs->GR_L(r1) & ~(STORKEY_BADFRM);
+            STORAGE_KEY2(n) &= STORKEY_BADFRM;
+            STORAGE_KEY2(n) |= regs->GR_L(r1) & ~(STORKEY_BADFRM);
+#endif
         }
     }
     else
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
     {
         /* Update the storage key from R1 register bits 24-30 */
+#if defined(FEATURE_4K_STORAGE_KEYS) && !defined(_FEATURE_2K_STORAGE_KEYS)
         STORAGE_KEY(n) &= STORKEY_BADFRM;
-        STORAGE_KEY(n) |= regs->gpr[r1] & ~(STORKEY_BADFRM);
+        STORAGE_KEY(n) |= regs->GR_L(r1) & ~(STORKEY_BADFRM);
+#else
+        STORAGE_KEY1(n) &= STORKEY_BADFRM;
+        STORAGE_KEY1(n) |= regs->GR_L(r1) & ~(STORKEY_BADFRM);
+        STORAGE_KEY2(n) &= STORKEY_BADFRM;
+        STORAGE_KEY2(n) |= regs->GR_L(r1) & ~(STORKEY_BADFRM);
+#endif
     }
 
 //  /*debug*/logmsg("SSK storage block %8.8X key %2.2X\n",
-//  /*debug*/       regs->gpr[r2], regs->gpr[r1] & 0xFE);
+//  /*debug*/       regs->GR_L(r2), regs->GR_L(r1) & 0xFE);
 
 }
+#endif /*defined(FEATURE_BASIC_STORAGE_KEYS)*/
 
 
+#if defined(FEATURE_EXTENDED_STORAGE_KEYS)
 /*-------------------------------------------------------------------*/
 /* B22B SSKE  - Set Storage Key extended                       [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_set_storage_key_extended (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(set_storage_key_extended)
 {
 int     r1, r2;                         /* Register numbers          */
-U32     n;                              /* Abs frame addr stor key   */
+RADR    n;                              /* Abs frame addr stor key   */
 
     RRE(inst, execflag, regs, r1, r2);
 
-    SIE_MODE_XA(regs);
-
     PRIV_CHECK(regs);
 
+    INVALIDATE_AIA(regs);
+
+    INVALIDATE_AEA_ALL(regs);
+
     /* Load 4K block address from R2 register */
-    n = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
+    n = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
 
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
     /* Convert real address to absolute address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
     /* Addressing exception if block is outside main storage */
     if ( n >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state)
     {
         if(regs->siebk->ic[2] & SIE_IC2_SSKE)
@@ -3322,15 +3735,15 @@ U32     n;                              /* Abs frame addr stor key   */
              stid;
         BYTE realkey,
              rcpkey;
-        U32  rcpa;
+        RADR rcpa;
 
-#if defined(FEATURE_STORAGE_KEY_ASSIST)
-            /* If storage key assist is enabled then cause 
+#if defined(_FEATURE_STORAGE_KEY_ASSIST)
+            /* If storage key assist is enabled then cause
                an interception to occur, as this is not yet
                implemented. *JJ */
             if(regs->siebk->rcpo[0] & SIE_RCPO0_SKA)
                 longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_STORAGE_KEY_ASSIST)*/
+#endif /*defined(_FEATURE_STORAGE_KEY_ASSIST)*/
 
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
             if(regs->siebk->mx & SIE_MX_XC)
@@ -3344,40 +3757,64 @@ U32     n;                              /* Abs frame addr stor key   */
             rcpa += n >> STORAGE_KEY_PAGESHIFT;
 
             /* guest absolute to host real */
-            if (translate_addr (regs->sie_mso + n, USE_PRIMARY_SPACE,
+            if (SIE_TRANSLATE_ADDR (regs->sie_mso + n, USE_PRIMARY_SPACE,
                 regs->hostregs, ACCTYPE_SIE, &n, &xcode, &private,
                 &protect, &stid, NULL, NULL))
                 longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 
             /* host real to host absolute */
-            n = APPLY_PREFIXING(n, regs->hostregs->pxr);
+            n = APPLY_PREFIXING(n, regs->hostregs->PX);
 
             realkey = STORAGE_KEY(n) & (STORKEY_REF | STORKEY_CHANGE);
 
             /* fetch the RCP key */
-            rcpkey = vfetchb(rcpa, USE_PRIMARY_SPACE, regs->hostregs);
+            SIE_TRANSLATE(&rcpa, ACCTYPE_SIE, regs);
+            rcpkey = sysblk.mainstor[rcpa];
+            STORAGE_KEY(rcpa) |= STORKEY_REF;
             /* or with host set */
             rcpkey |= realkey << 4;
             /* or new settings with guest set */
-            rcpkey |= regs->gpr[r1] & (STORKEY_REF | STORKEY_CHANGE);
-            vstoreb(rcpkey, rcpa, USE_PRIMARY_SPACE, regs->hostregs);
+            rcpkey |= regs->GR_L(r1) & (STORKEY_REF | STORKEY_CHANGE);
+            sysblk.mainstor[rcpa] = rcpkey;
+            STORAGE_KEY(rcpa) |= (STORKEY_REF|STORKEY_CHANGE);
             /* Insert key in new storage key */
+#if !defined(_FEATURE_2K_STORAGE_KEYS)
             STORAGE_KEY(n) &= STORKEY_BADFRM;
-            STORAGE_KEY(n) |= regs->gpr[r1] & STORKEY_KEY;
+            STORAGE_KEY(n) |= regs->GR_L(r1) & STORKEY_KEY;
+#else
+            STORAGE_KEY1(n) &= STORKEY_BADFRM;
+            STORAGE_KEY1(n) |= regs->GR_L(r1) & STORKEY_KEY;
+            STORAGE_KEY2(n) &= STORKEY_BADFRM;
+            STORAGE_KEY2(n) |= regs->GR_L(r1) & STORKEY_KEY;
+#endif
         }
         else
         {
             /* Update the storage key from R1 register bits 24-30 */
+#if !defined(_FEATURE_2K_STORAGE_KEYS)
             STORAGE_KEY(n) &= STORKEY_BADFRM;
-            STORAGE_KEY(n) |= regs->gpr[r1] & ~(STORKEY_BADFRM);
+            STORAGE_KEY(n) |= regs->GR_L(r1) & ~(STORKEY_BADFRM);
+#else
+            STORAGE_KEY1(n) &= STORKEY_BADFRM;
+            STORAGE_KEY1(n) |= regs->GR_L(r1) & ~(STORKEY_BADFRM);
+            STORAGE_KEY2(n) &= STORKEY_BADFRM;
+            STORAGE_KEY2(n) |= regs->GR_L(r1) & ~(STORKEY_BADFRM);
+#endif
         }
     }
     else
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
     {
         /* Update the storage key from R1 register bits 24-30 */
+#if defined(FEATURE_4K_STORAGE_KEYS) && !defined(_FEATURE_2K_STORAGE_KEYS)
         STORAGE_KEY(n) &= STORKEY_BADFRM;
-        STORAGE_KEY(n) |= regs->gpr[r1] & ~(STORKEY_BADFRM);
+        STORAGE_KEY(n) |= regs->GR_L(r1) & ~(STORKEY_BADFRM);
+#else
+        STORAGE_KEY1(n) &= STORKEY_BADFRM;
+        STORAGE_KEY1(n) |= regs->GR_L(r1) & ~(STORKEY_BADFRM);
+        STORAGE_KEY2(n) &= STORKEY_BADFRM;
+        STORAGE_KEY2(n) |= regs->GR_L(r1) & ~(STORKEY_BADFRM);
+#endif
     }
 
     /* Perform serialization and checkpoint-synchronization */
@@ -3385,52 +3822,53 @@ U32     n;                              /* Abs frame addr stor key   */
     PERFORM_CHKPT_SYNC (regs);
 
 }
+#endif /*defined(FEATURE_EXTENDED_STORAGE_KEYS)*/
 
 
 /*-------------------------------------------------------------------*/
 /* 80   SSM   - Set System Mask                                  [S] */
 /*-------------------------------------------------------------------*/
-void zz_set_system_mask (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(set_system_mask)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
     /* Special operation exception if SSM-suppression is active */
-    if ( (regs->cr[0] & CR0_SSM_SUPP)
+    if ( (regs->CR(0) & CR0_SSM_SUPP)
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
       /* SSM-suppression is ignored in XC mode */
       && !(regs->sie_state && (regs->siebk->mx & SIE_MX_XC))
 #endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
         )
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[1] & SIE_IC1_SSM))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Load new system mask value from operand address */
-    regs->psw.sysmask = vfetchb ( effective_addr2, b2, regs );
+    regs->psw.sysmask = ARCH_DEP(vfetchb) ( effective_addr2, b2, regs );
 
-    obtain_lock(&sysblk.intlock);
-    set_doint(regs);
-    release_lock(&sysblk.intlock);
+    INVALIDATE_AIA(regs);
+
+    INVALIDATE_AEA_ALL(regs);
 
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
     /* DAT must be off in XC mode */
     if(regs->sie_state
       && (regs->siebk->mx & SIE_MX_XC)
       && (regs->psw.sysmask & PSW_DATMODE) )
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 #endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
 
     /* For ECMODE, bits 0 and 2-4 of system mask must be zero */
     if (regs->psw.ecmode && (regs->psw.sysmask & 0xB8) != 0)
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
 }
 
@@ -3438,17 +3876,21 @@ U32     effective_addr2;                /* Effective address         */
 /*-------------------------------------------------------------------*/
 /* AE   SIGP  - Signal Processor                                [RS] */
 /*-------------------------------------------------------------------*/
-void zz_signal_procesor (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(signal_procesor)
 {
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
-U32     effective_addr2;                /* effective address         */
+VADR    effective_addr2;                /* effective address         */
 REGS   *tregs;                          /* -> Target CPU registers   */
-U32     parm;                           /* Signal parameter          */
-U32     status = 0;                     /* Signal status             */
-U32     abs;                            /* Absolute address          */
+GREG    parm;                           /* Signal parameter          */
+GREG    status = 0;                     /* Signal status             */
+RADR    abs;                            /* Absolute address          */
 U16     cpad;                           /* Target CPU address        */
 BYTE    order;                          /* SIGP order code           */
+#if defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME) || defined(FEATURE_HERCULES_DIAGCALLS)
+int     cpu;                            /* cpu number                */
+int     set_arch = 0;                   /* Need to switch mode       */
+#endif /*defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)*/
 static char *ordername[] = {    "Unassigned",
         /* SIGP_SENSE     */    "Sense",
         /* SIGP_EXTCALL   */    "External call",
@@ -3466,7 +3908,8 @@ static char *ordername[] = {    "Unassigned",
         /* SIGP_STORE     */    "Store status",
         /* 0x0F           */    "Unassigned",
         /* 0x10           */    "Unassigned",
-        /* SIGP_STOREX    */    "Store extended status at address" };
+        /* SIGP_STOREX    */    "Store extended status at address",
+        /* SIGP_SETARCH   */    "Set Architecture Mode" };
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
@@ -3478,35 +3921,45 @@ static char *ordername[] = {    "Unassigned",
     PERFORM_SERIALIZATION (regs);
 
     /* Load the target CPU address from R3 bits 16-31 */
-    cpad = regs->gpr[r3] & 0xFFFF;
+    cpad = regs->GR_L(r3) & 0xFFFF;
 
     /* Load the order code from operand address bits 24-31 */
     order = effective_addr2 & 0xFF;
 
     /* Load the parameter from R1 (if R1 odd), or R1+1 (if even) */
-    parm = (r1 & 1) ? regs->gpr[r1] : regs->gpr[r1+1];
+    parm = (r1 & 1) ? regs->GR_L(r1) : regs->GR_L(r1+1);
 
     /* Return condition code 3 if target CPU does not exist */
-#ifdef FEATURE_CPU_RECONFIG
-    if (cpad >= MAX_CPU_ENGINES)
-#else /*!FEATURE_CPU_RECONFIG*/
-    if (cpad >= sysblk.numcpu)
-#endif /*!FEATURE_CPU_RECONFIG*/
+#ifdef _FEATURE_CPU_RECONFIG
+    if (cpad >= MAX_CPU_ENGINES && order != SIGP_SETARCH)
+#else /*!_FEATURE_CPU_RECONFIG*/
+    if (cpad >= sysblk.numcpu && order != SIGP_SETARCH)
+#endif /*!_FEATURE_CPU_RECONFIG*/
     {
         regs->psw.cc = 3;
         return;
     }
 
     /* Point to CPU register context for the target CPU */
-    tregs = sysblk.regs + cpad;
+    if(order != SIGP_SETARCH)
+        tregs = sysblk.regs + cpad;
+    else
+        tregs = regs;
 
     /* Trace SIGP unless Sense, External Call, Emergency Signal,
        or the target CPU is configured offline */
-    if (order > SIGP_EMERGENCY || !tregs->cpuonline)
+    if (order > LOG_SIGPORDER || !tregs->cpuonline)
+#if !defined(FEATURE_ESAME)
         logmsg ("CPU%4.4X: SIGP CPU%4.4X %s PARM %8.8X\n",
                 regs->cpuad, cpad,
-                order > SIGP_STOREX ? ordername[0] : ordername[order],
+                order > MAX_SIGPORDER ? ordername[0] : ordername[order],
                 parm);
+#else /*defined(FEATURE_ESAME)*/
+        logmsg ("CPU%4.4X: SIGP CPU%4.4X %s PARM %16.16llX\n",
+                regs->cpuad, cpad,
+                order > MAX_SIGPORDER ? ordername[0] : ordername[order],
+                parm);
+#endif /*defined(FEATURE_ESAME)*/
 
     /* [4.9.2.1] Claim the use of the CPU signaling and response
        facility, and return condition code 2 if the facility is
@@ -3581,16 +4034,14 @@ static char *ordername[] = {    "Unassigned",
             }
 
             /* Raise an external call interrupt pending condition */
-            tregs->extcall = 1;
-            set_doint(tregs);
+            tregs->cpuint = tregs->extcall = 1;
             tregs->extccpu = regs->cpuad;
 
             break;
 
         case SIGP_EMERGENCY:
             /* Raise an emergency signal interrupt pending condition */
-            tregs->emersig = 1;
-            set_doint(tregs);
+            tregs->cpuint = tregs->emersig = 1;
             tregs->emercpu[regs->cpuad] = 1;
 
             break;
@@ -3598,7 +4049,6 @@ static char *ordername[] = {    "Unassigned",
         case SIGP_START:
             /* Restart the target CPU if it is in the stopped state */
             tregs->cpustate = CPUSTATE_STARTED;
-            set_doint(tregs);
 
             break;
 
@@ -3611,7 +4061,6 @@ static char *ordername[] = {    "Unassigned",
         case SIGP_RESTART:
             /* Make restart interrupt pending in the target CPU */
             tregs->restart = 1;
-            set_doint(tregs);
             /* Set cpustate to stopping. If the restart is successful,
                then the cpustate will be set to started in cpu.c */
             if(tregs->cpustate == CPUSTATE_STOPPED)
@@ -3674,11 +4123,13 @@ static char *ordername[] = {    "Unassigned",
             }
 
             /* Load new value into prefix register of target CPU */
-            tregs->pxr = abs;
+            tregs->PX = abs;
 
             /* Invalidate the ALB and TLB of the target CPU */
-            purge_alb (tregs);
-            purge_tlb (tregs);
+            ARCH_DEP(purge_tlb) (tregs);
+#if defined(FEATURE_ACCESS_REGISTERS)
+            ARCH_DEP(purge_alb) (tregs);
+#endif /*defined(FEATURE_ACCESS_REGISTERS)*/
 
             /* Perform serialization and checkpoint-sync on target CPU */
 //          perform_serialization (tregs);
@@ -3713,7 +4164,7 @@ static char *ordername[] = {    "Unassigned",
             }
 
             /* Store status at specified main storage address */
-            store_status (tregs, abs);
+            ARCH_DEP(store_status) (tregs, abs);
 
             /* Perform serialization and checkpoint-sync on target CPU */
 //          perform_serialization (tregs);
@@ -3723,6 +4174,66 @@ static char *ordername[] = {    "Unassigned",
             break;
 
         case SIGP_STOREX:
+            /*INCOMPLETE*/
+
+            break;
+
+#if defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME) || defined(FEATURE_HERCULES_DIAGCALLS)
+        case SIGP_SETARCH:
+
+            /* CPU must have ESAME support */
+            if(!sysblk.arch_z900)
+                status = SIGP_STATUS_INVALID_ORDER;
+
+            PERFORM_SERIALIZATION (tregs);
+            PERFORM_CHKPT_SYNC (tregs);
+
+#ifdef _FEATURE_CPU_RECONFIG
+            for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
+#else /*!_FEATURE_CPU_RECONFIG*/
+            for (cpu = 0; cpu < sysblk.numcpu; cpu++)
+#endif /*!_FEATURE_CPU_RECONFIG*/
+                if(sysblk.regs[cpu].cpuonline
+                    && sysblk.regs[cpu].cpustate != CPUSTATE_STOPPED
+                    && sysblk.regs[cpu].cpuad != regs->cpuad)
+                    status |= SIGP_STATUS_INCORRECT_STATE;
+
+            if(!status)
+                switch(parm) {
+                    case 0:
+                        if(sysblk.arch_mode == ARCH_390)
+                            status = SIGP_STATUS_INVALID_ORDER;
+                        sysblk.arch_mode = ARCH_390;
+                        regs->psw.notesame = 1;
+                        set_arch = 1;
+                        break;
+                    case 1:
+                        if(sysblk.arch_mode == ARCH_900)
+                            status = SIGP_STATUS_INVALID_ORDER;
+                        sysblk.arch_mode = ARCH_900;
+                        regs->psw.notesame = 0;
+                        regs->psw.IA_H = 0;
+                        regs->PX_L &= 0xFFFFE000;
+                        set_arch = 1;
+                        break;
+#if defined(FEATURE_HERCULES_DIAGCALLS)
+                    case 370:
+                        if(sysblk.arch_mode == ARCH_370)
+                            status = SIGP_STATUS_INVALID_ORDER;
+                        sysblk.arch_mode = ARCH_370;
+                        set_arch = 1;
+                        break;
+#endif /*defined(FEATURE_HERCULES_DIAGCALLS)*/
+                    default:
+                        status |= SIGP_STATUS_INVALID_PARAMETER;
+                }
+
+
+            PERFORM_SERIALIZATION (tregs);
+            PERFORM_CHKPT_SYNC (tregs);
+
+            break;
+#endif /*defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)*/
 
         default:
             status = SIGP_STATUS_INVALID_ORDER;
@@ -3741,7 +4252,7 @@ static char *ordername[] = {    "Unassigned",
        the R1 register and return condition code 1 */
     if (status != 0)
     {
-        regs->gpr[r1] = status;
+        regs->GR_L(r1) = status;
         regs->psw.cc = 1;
     }
     else
@@ -3750,16 +4261,21 @@ static char *ordername[] = {    "Unassigned",
     /* Perform serialization after completing operation */
     PERFORM_SERIALIZATION (regs);
 
+#if defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME) || defined(FEATURE_HERCULES_DIAGCALLS)
+    if(set_arch)
+        longjmp(regs->archjmp, 0);
+#endif /*defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)*/
+
 }
 
 
 /*-------------------------------------------------------------------*/
 /* B207 STCKC - Store Clock Comparator                           [S] */
 /*-------------------------------------------------------------------*/
-void zz_store_clock_comparator (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(store_clock_comparator)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 U64     dreg;                           /* Clock value               */
 
     S(inst, execflag, regs, b2, effective_addr2);
@@ -3768,10 +4284,10 @@ U64     dreg;                           /* Clock value               */
 
     DW_CHECK(effective_addr2, regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[3] & SIE_IC3_SCKC))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Obtain the TOD clock update lock */
     obtain_lock (&sysblk.todlock);
@@ -3783,7 +4299,7 @@ U64     dreg;                           /* Clock value               */
     release_lock (&sysblk.todlock);
 
     /* Store clock comparator value at operand location */
-    vstore8 ( dreg, effective_addr2, b2, regs );
+    ARCH_DEP(vstore8) ( dreg, effective_addr2, b2, regs );
 
 //  /*debug*/logmsg("Store clock comparator=%16.16llX\n", dreg);
 
@@ -3793,11 +4309,11 @@ U64     dreg;                           /* Clock value               */
 /*-------------------------------------------------------------------*/
 /* B6   STCTL - Store Control                                   [RS] */
 /*-------------------------------------------------------------------*/
-void zz_store_control (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(store_control)
 {
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 int     i, d;                           /* Integer work areas        */
 BYTE    rwork[64];                      /* Register work areas       */
 
@@ -3807,19 +4323,16 @@ BYTE    rwork[64];                      /* Register work areas       */
 
     FW_CHECK(effective_addr2, regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[1] & SIE_IC1_STCTL))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Copy control registers into work area */
     for ( i = r1, d = 0; ; )
     {
         /* Copy contents of one control register to work area */
-        rwork[d++] = (regs->cr[i] & 0xFF000000) >> 24;
-        rwork[d++] = (regs->cr[i] & 0xFF0000) >> 16;
-        rwork[d++] = (regs->cr[i] & 0xFF00) >> 8;
-        rwork[d++] = regs->cr[i] & 0xFF;
+        STORE_FW(rwork + d, regs->CR(i)); d += 4;
 
         /* Instruction is complete when r3 register is done */
         if ( i == r3 ) break;
@@ -3829,7 +4342,7 @@ BYTE    rwork[64];                      /* Register work areas       */
     }
 
     /* Store control register contents at operand address */
-    vstorec ( rwork, d-1, effective_addr2, b2, regs );
+    ARCH_DEP(vstorec) ( rwork, d-1, effective_addr2, b2, regs );
 
 }
 
@@ -3837,10 +4350,10 @@ BYTE    rwork[64];                      /* Register work areas       */
 /*-------------------------------------------------------------------*/
 /* B212 STAP  - Store CPU Address                                [S] */
 /*-------------------------------------------------------------------*/
-void zz_store_cpu_address (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(store_cpu_address)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -3851,7 +4364,7 @@ U32     effective_addr2;                /* Effective address         */
     ODD_CHECK(effective_addr2, regs);
 
     /* Store CPU address at operand address */
-    vstore2 ( regs->cpuad, effective_addr2, b2, regs );
+    ARCH_DEP(vstore2) ( regs->cpuad, effective_addr2, b2, regs );
 
 }
 
@@ -3859,10 +4372,10 @@ U32     effective_addr2;                /* Effective address         */
 /*-------------------------------------------------------------------*/
 /* B202 STIDP - Store CPU ID                                     [S] */
 /*-------------------------------------------------------------------*/
-void zz_store_cpu_id (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(store_cpu_id)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 U64     dreg;                           /* Double word workarea      */
 
     S(inst, execflag, regs, b2, effective_addr2);
@@ -3881,7 +4394,7 @@ U64     dreg;                           /* Double word workarea      */
         dreg |= (U64)(regs->cpuad & 0x0F) << 52;
 
     /* Store CPU ID at operand address */
-    vstore8 ( dreg, effective_addr2, b2, regs );
+    ARCH_DEP(vstore8) ( dreg, effective_addr2, b2, regs );
 
 }
 
@@ -3889,10 +4402,10 @@ U64     dreg;                           /* Double word workarea      */
 /*-------------------------------------------------------------------*/
 /* B209 STPT  - Store CPU Timer                                  [S] */
 /*-------------------------------------------------------------------*/
-void zz_store_cpu_timer (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(store_cpu_timer)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 U64     dreg;                           /* Double word workarea      */
 
     S(inst, execflag, regs, b2, effective_addr2);
@@ -3901,10 +4414,10 @@ U64     dreg;                           /* Double word workarea      */
 
     DW_CHECK(effective_addr2, regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[3] & SIE_IC3_SPT))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Obtain the TOD clock update lock */
     obtain_lock (&sysblk.todlock);
@@ -3914,19 +4427,15 @@ U64     dreg;                           /* Double word workarea      */
 
     /* reset the cpu timer pending flag according to its value */
     if( (S64)regs->ptimer < 0 )
-        regs->ptpend = 1;
+        regs->cpuint = regs->ptpend = 1;
     else
         regs->ptpend = 0;
-
-    obtain_lock(&sysblk.intlock);
-    set_doint(regs);
-    release_lock(&sysblk.intlock);
 
     /* Release the TOD clock update lock */
     release_lock (&sysblk.todlock);
 
     /* Store CPU timer value at operand location */
-    vstore8 ( dreg, effective_addr2, b2, regs );
+    ARCH_DEP(vstore8) ( dreg, effective_addr2, b2, regs );
 
 //  /*debug*/logmsg("Store CPU timer=%16.16llX\n", dreg);
 
@@ -3936,10 +4445,10 @@ U64     dreg;                           /* Double word workarea      */
 /*-------------------------------------------------------------------*/
 /* B211 STPX  - Store Prefix                                     [S] */
 /*-------------------------------------------------------------------*/
-void zz_store_prefix (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(store_prefix)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
+VADR    effective_addr2;                /* Effective address         */
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -3950,7 +4459,7 @@ U32     effective_addr2;                /* Effective address         */
     FW_CHECK(effective_addr2, regs);
 
     /* Store prefix register at operand address */
-    vstore4 ( regs->pxr, effective_addr2, b2, regs );
+    ARCH_DEP(vstore4) ( regs->PX, effective_addr2, b2, regs );
 
 }
 
@@ -3959,11 +4468,11 @@ U32     effective_addr2;                /* Effective address         */
 /*-------------------------------------------------------------------*/
 /* B27D STSI  - Store System Information                         [S] */
 /*-------------------------------------------------------------------*/
-void zz_store_system_information (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(store_system_information)
 {
 int     b2;                             /* Base of effective addr    */
-U32     effective_addr2;                /* Effective address         */
-U32     n;                              /* Absolute address          */
+VADR    effective_addr2;                /* Effective address         */
+RADR    n;                              /* Absolute address          */
 int     i;
 SYSIB111  *sysib111;                    /* Basic machine conf        */
 SYSIB121  *sysib121;                    /* Basic machine CPU         */
@@ -3994,37 +4503,37 @@ static BYTE mpfact[32] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
     SIE_INTERCEPT(regs);
 
     /* Check function code */
-    if((regs->gpr[0] & STSI_GPR0_FC_MASK) > STSI_GPR0_FC_BASIC)
+    if((regs->GR_L(0) & STSI_GPR0_FC_MASK) > STSI_GPR0_FC_BASIC)
     {
         regs->psw.cc = 3;
         return;
     }
 
     /* Program check if reserved bit not zero */
-    if(regs->gpr[0] & STSI_GPR0_RESERVED
-       || regs->gpr[1] & STSI_GPR1_RESERVED)
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+    if(regs->GR_L(0) & STSI_GPR0_RESERVED
+       || regs->GR_L(1) & STSI_GPR1_RESERVED)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Return current level if function code is zero */
-    if((regs->gpr[0] & STSI_GPR0_FC_MASK) == STSI_GPR0_FC_CURRENT)
+    if((regs->GR_L(0) & STSI_GPR0_FC_MASK) == STSI_GPR0_FC_CURRENT)
     {
-        regs->gpr[0] |= STSI_GPR0_FC_BASIC;
+        regs->GR_L(0) |= STSI_GPR0_FC_BASIC;
         regs->psw.cc = 0;
         return;
     }
 
     /* Program check if operand not on a page boundary */
     if ( effective_addr2 & 0x00000FFF )
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Return with cc3 if selector codes invalid */
-    if( ((regs->gpr[0] & STSI_GPR0_FC_MASK) == 1
-      && ((regs->gpr[0] & STSI_GPR0_SEL1_MASK) > 1
-      || (regs->gpr[1] & STSI_GPR1_SEL2_MASK) > 1))
-     || (regs->gpr[0] & STSI_GPR0_SEL1_MASK) == 0
-      || (regs->gpr[1] & STSI_GPR1_SEL2_MASK) == 0
-      || (regs->gpr[0] & STSI_GPR0_SEL1_MASK) > 2
-      || (regs->gpr[1] & STSI_GPR1_SEL2_MASK) > 2)
+    if( ((regs->GR_L(0) & STSI_GPR0_FC_MASK) == 1
+      && ((regs->GR_L(0) & STSI_GPR0_SEL1_MASK) > 1
+      || (regs->GR_L(1) & STSI_GPR1_SEL2_MASK) > 1))
+     || (regs->GR_L(0) & STSI_GPR0_SEL1_MASK) == 0
+      || (regs->GR_L(1) & STSI_GPR1_SEL2_MASK) == 0
+      || (regs->GR_L(0) & STSI_GPR0_SEL1_MASK) > 2
+      || (regs->GR_L(1) & STSI_GPR1_SEL2_MASK) > 2)
     {
         regs->psw.cc = 3;
         return;
@@ -4032,18 +4541,18 @@ static BYTE mpfact[32] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
 
     /* Obtain absolute address of main storage block,
        check protection, and set reference and change bits */
-    n = logical_to_abs (effective_addr2, b2, regs,
+    n = LOGICAL_TO_ABS (effective_addr2, b2, regs,
                         ACCTYPE_WRITE, regs->psw.pkey);
 
-    switch(regs->gpr[0] & STSI_GPR0_FC_MASK) {
+    switch(regs->GR_L(0) & STSI_GPR0_FC_MASK) {
 
     case STSI_GPR0_FC_BASIC:
 
-        switch(regs->gpr[0] & STSI_GPR0_SEL1_MASK) {
+        switch(regs->GR_L(0) & STSI_GPR0_SEL1_MASK) {
 
         case 1:
 
-            switch(regs->gpr[1] & STSI_GPR1_SEL2_MASK) {
+            switch(regs->GR_L(1) & STSI_GPR1_SEL2_MASK) {
 
             case 1:
                 sysib111 = (SYSIB111*)(sysblk.mainstor + n);
@@ -4069,7 +4578,7 @@ static BYTE mpfact[32] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
 
         case 2:
 
-            switch(regs->gpr[1] & STSI_GPR1_SEL2_MASK) {
+            switch(regs->GR_L(1) & STSI_GPR1_SEL2_MASK) {
 
             case 1:
                 sysib121 = (SYSIB121*)(sysblk.mainstor + n);
@@ -4079,24 +4588,17 @@ static BYTE mpfact[32] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
                     sysib121->seqc[(sizeof(sysib121->seqc) - 6) + i] =
                         hexebcdic[sysblk.cpuid >> (52 - (i*4)) & 0x0F];
                 memcpy(sysib121->plant,plant,sizeof(plant));
-                sysib121->cpuad[0] = regs->cpuad >> 8;
-                sysib121->cpuad[1] = regs->cpuad & 0xFF;
+                STORE_HW(sysib121->cpuad,regs->cpuad);
                 regs->psw.cc = 0;
                 break;
 
             case 2:
                 sysib122 = (SYSIB122*)(sysblk.mainstor + n);
                 memset(sysib122, 0x00, sizeof(SYSIB122));
-                sysib122->cap[0] = STSI_CAPACITY >> 24;
-                sysib122->cap[1] = (STSI_CAPACITY >> 16) & 0xFF;
-                sysib122->cap[2] = (STSI_CAPACITY >> 8) & 0xFF;
-                sysib122->cap[3] = STSI_CAPACITY & 0xFF;
-                sysib122->totcpu[0] = MAX_CPU_ENGINES >> 8;
-                sysib122->totcpu[1] = MAX_CPU_ENGINES & 0xFF;
-                sysib122->confcpu[0] = sysblk.numcpu >> 8;
-                sysib122->confcpu[1] = sysblk.numcpu & 0xFF;
-                sysib122->sbcpu[0] = (MAX_CPU_ENGINES - sysblk.numcpu) >> 8;
-                sysib122->sbcpu[1] = (MAX_CPU_ENGINES - sysblk.numcpu) & 0xFF;
+                STORE_FW(sysib122->cap, STSI_CAPACITY);
+                STORE_HW(sysib122->totcpu, MAX_CPU_ENGINES);
+                STORE_HW(sysib122->confcpu, sysblk.numcpu);
+                STORE_HW(sysib122->sbcpu, MAX_CPU_ENGINES - sysblk.numcpu);
                 memcpy(sysib122->mpfact,mpfact,(MAX_CPU_ENGINES-1)*2);
                 regs->psw.cc = 0;
                 break;
@@ -4120,105 +4622,107 @@ static BYTE mpfact[32] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
 
 
 /*-------------------------------------------------------------------*/
-/* AC   STNSM - Store Then And System Mask                      [SI] */
+/* AC   STNSM - Store Then And Systen Mask                      [SI] */
 /*-------------------------------------------------------------------*/
-void zz_store_then_and_system_mask (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(store_then_and_system_mask)
 {
 BYTE    i2;                             /* Immediate byte of opcode  */
 int     b1;                             /* Base of effective addr    */
-U32     effective_addr1;                /* Effective address         */
+VADR    effective_addr1;                /* Effective address         */
 
     SI(inst, execflag, regs, i2, b1, effective_addr1);
 
     PRIV_CHECK(regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[1] & SIE_IC1_STNSM))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Store current system mask value into storage operand */
-    vstoreb ( regs->psw.sysmask, effective_addr1, b1, regs );
+    ARCH_DEP(vstoreb) ( regs->psw.sysmask, effective_addr1, b1, regs );
+
+    INVALIDATE_AIA(regs);
+
+    INVALIDATE_AEA_ALL(regs);
 
     /* AND system mask with immediate operand */
     regs->psw.sysmask &= i2;
-    obtain_lock(&sysblk.intlock);
-    set_doint(regs);
-    release_lock(&sysblk.intlock);
 
 }
 
 
 /*-------------------------------------------------------------------*/
-/* AD   STOSM - Store Then Or System Mask                       [SI] */
+/* AD   STOSM - Store Then Or Systen Mask                       [SI] */
 /*-------------------------------------------------------------------*/
-void zz_store_then_or_system_mask (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(store_then_or_system_mask)
 {
 BYTE    i2;                             /* Immediate byte of opcode  */
 int     b1;                             /* Base of effective addr    */
-U32     effective_addr1;                /* Effective address         */
+VADR    effective_addr1;                /* Effective address         */
 
     SI(inst, execflag, regs, i2, b1, effective_addr1);
 
     PRIV_CHECK(regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[1] & SIE_IC1_STOSM))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Store current system mask value into storage operand */
-    vstoreb ( regs->psw.sysmask, effective_addr1, b1, regs );
+    ARCH_DEP(vstoreb) ( regs->psw.sysmask, effective_addr1, b1, regs );
 
     /* OR system mask with immediate operand */
     regs->psw.sysmask |= i2;
 
-    obtain_lock(&sysblk.intlock);
-    set_doint(regs);
-    release_lock(&sysblk.intlock);
+    INVALIDATE_AIA(regs);
+
+    INVALIDATE_AEA_ALL(regs);
 
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
     /* DAT must be off in XC mode */
     if(regs->sie_state
       && (regs->siebk->mx & SIE_MX_XC)
       && (regs->psw.sysmask & PSW_DATMODE) )
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 #endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
 
     /* For ECMODE, bits 0 and 2-4 of system mask must be zero */
     if (regs->psw.ecmode && (regs->psw.sysmask & 0xB8) != 0)
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
- 
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
 }
 
 /*-------------------------------------------------------------------*/
 /* B246 STURA - Store Using Real Address                       [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_store_using_real_address (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(store_using_real_address)
 {
 int     r1, r2;                         /* Values of R fields        */
-U32     n;                              /* Unsigned work             */
+RADR    n;                              /* Unsigned work             */
 
     RRE(inst, execflag, regs, r1, r2);
 
     PRIV_CHECK(regs);
 
     /* R2 register contains operand real storage address */
-    n = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
+    n = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
 
     /* Program check if operand not on fullword boundary */
     FW_CHECK(n, regs);
 
     /* Store R1 register at second operand location */
-    vstore4 (regs->gpr[r1], n, USE_REAL_ADDR, regs );
+    ARCH_DEP(vstore4) (regs->GR_L(r1), n, USE_REAL_ADDR, regs );
 
 }
 
 
+#if defined(FEATURE_ACCESS_REGISTERS)
 /*-------------------------------------------------------------------*/
 /* B24C TAR   - Test Access                                    [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_test_access (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(test_access)
 {
 int     r1, r2;                         /* Values of R fields        */
 U32     asteo;                          /* Real address of ASTE      */
@@ -4228,18 +4732,18 @@ int     protect;                        /* 1=ALE or page protection  */
     RRE(inst, execflag, regs, r1, r2);
 
     /* Program check if ASF control bit is zero */
-    if ((regs->cr[0] & CR0_ASF) == 0)
-        program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+    if (ASF_ENABLED(regs) == 0)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Set condition code 0 if ALET value is 0 */
-    if (regs->ar[r1] == ALET_PRIMARY)
+    if (regs->AR(r1) == ALET_PRIMARY)
     {
         regs->psw.cc = 0;
         return;
     }
 
     /* Set condition code 3 if ALET value is 1 */
-    if (regs->ar[r1] == ALET_SECONDARY)
+    if (regs->AR(r1) == ALET_SECONDARY)
     {
         regs->psw.cc = 3;
         return;
@@ -4247,11 +4751,11 @@ int     protect;                        /* 1=ALE or page protection  */
 
     /* Perform ALET translation using EAX value from register
        R2 bits 0-15, and set condition code 3 if exception */
-    if (translate_alet (regs->ar[r1], (regs->gpr[r2] >> 16),
+    if (ARCH_DEP(translate_alet) (regs->AR(r1), (regs->GR_L(r2) >> 16),
                         ACCTYPE_TAR,
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
                         (regs->sie_state && (regs->siebk->mx & SIE_MX_XC))
-                          ? regs->hostregs : 
+                          ? regs->hostregs :
 #endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
                         regs,
                         &asteo, aste, &protect));
@@ -4262,18 +4766,19 @@ int     protect;                        /* 1=ALE or page protection  */
 
     /* Set condition code 1 or 2 according to whether
        the ALET designates the DUCT or the PASTE */
-    regs->psw.cc = (regs->ar[r1] & ALET_PRI_LIST) ? 2 : 1;
+    regs->psw.cc = (regs->AR(r1) & ALET_PRI_LIST) ? 2 : 1;
 
 }
+#endif /*defined(FEATURE_ACCESS_REGISTERS)*/
 
 
 /*-------------------------------------------------------------------*/
 /* B22C TB    - Test Block                                     [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_test_block (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(test_block)
 {
 int     r1, r2;                         /* Values of R fields        */
-U32     n;                              /* Real address              */
+RADR    n;                              /* Real address              */
 
     RRE(inst, execflag, regs, r1, r2);
 
@@ -4282,31 +4787,31 @@ U32     n;                              /* Real address              */
     SIE_INTERCEPT(regs);
 
     /* Load 4K block address from R2 register */
-    n = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
-    n &= 0xFFFFF000;
+    n = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
+    n &= PAGEFRAME_PAGEMASK;
 
     /* Perform serialization */
     PERFORM_SERIALIZATION (regs);
 
     /* Addressing exception if block is outside main storage */
     if ( n >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Protection exception if low-address protection is set */
-    if ( n == 0 && (regs->cr[0] & CR0_LOW_PROT) )
+    if (ARCH_DEP(is_low_address_protected) (n, 0, regs))
     {
 #ifdef FEATURE_SUPPRESSION_ON_PROTECTION
-        regs->tea = (n & TEA_EFFADDR);
+        regs->TEA = (n & STORAGE_KEY_PAGEMASK);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
     }
 
     /* Convert real address to absolute address */
-    n = APPLY_PREFIXING (n, regs->pxr);
+    n = APPLY_PREFIXING (n, regs->PX);
 
     /* Clear the 4K block to zeroes */
-    memset (sysblk.mainstor + n, 0x00, 4096);
+    memset (sysblk.mainstor + n, 0x00, PAGEFRAME_PAGESIZE);
 
     /* Set condition code 0 if storage usable, 1 if unusable */
     if (STORAGE_KEY(n) & STORKEY_BADFRM)
@@ -4318,7 +4823,7 @@ U32     n;                              /* Real address              */
     PERFORM_SERIALIZATION (regs);
 
     /* Clear general register 0 */
-    regs->gpr[0] = 0;
+    regs->GR(0) = 0;
 
 }
 
@@ -4326,13 +4831,13 @@ U32     n;                              /* Real address              */
 /*-------------------------------------------------------------------*/
 /* E501 TPROT - Test Protection                                [SSE] */
 /*-------------------------------------------------------------------*/
-void zz_test_protection (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(test_protection)
 {
 int     b1, b2;                         /* Values of base registers  */
-U32     effective_addr1,
+VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
-U32     raddr;                          /* Real address              */
-U32     aaddr;                          /* Absolute address          */
+RADR    raddr;                          /* Real address              */
+RADR    aaddr;                          /* Absolute address          */
 BYTE    skey;                           /* Storage key               */
 BYTE    akey;                           /* Access key                */
 int     private = 0;                    /* 1=Private address space   */
@@ -4340,22 +4845,24 @@ int     protect = 0;                    /* 1=ALE or page protection  */
 int     stid;                           /* Segment table indication  */
 U16     xcode;                          /* Exception code            */
 
-    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2); 
+    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state && (regs->siebk->ic[2] & SIE_IC2_TPROT))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Convert logical address to real address */
     if (REAL_MODE(&regs->psw))
         raddr = effective_addr1;
     else {
         /* Return condition code 3 if translation exception */
-        if (translate_addr (effective_addr1, b1, regs, ACCTYPE_TPROT, &raddr,
-                &xcode, &private, &protect, &stid, NULL, NULL))
+        if (ARCH_DEP(translate_addr) (effective_addr1, b1, regs,
+                                        ACCTYPE_TPROT, &raddr,
+                                        &xcode, &private, &protect,
+                                        &stid, NULL, NULL))
         {
             regs->psw.cc = 3;
             return;
@@ -4363,39 +4870,42 @@ U16     xcode;                          /* Exception code            */
     }
 
     /* Convert real address to absolute address */
-    aaddr = APPLY_PREFIXING (raddr, regs->pxr);
+    aaddr = APPLY_PREFIXING (raddr, regs->PX);
 
     /* Program check if absolute address is outside main storage */
     if (aaddr >= regs->mainsize)
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     if(regs->sie_state  && !regs->sie_pref)
     {
-    U32 sie_stid;
     U16 sie_xcode;
-    int sie_private;
+    int sie_private,
+        sie_stid;
 
-        /* Under SIE TPROT also indicates if the host is using 
+        /* Under SIE TPROT also indicates if the host is using
            page protection */
-        if (translate_addr (regs->sie_mso + aaddr,
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+        if (SIE_TRANSLATE_ADDR (regs->sie_mso + aaddr,
                 b1,
-#else /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
-                USE_PRIMARY_SPACE,
-#endif /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
                 regs->hostregs, ACCTYPE_SIE, &aaddr, &sie_xcode,
                 &sie_private, &protect, &sie_stid, NULL, NULL))
+#else /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+        if (SIE_TRANSLATE_ADDR (regs->sie_mso + aaddr,
+                USE_PRIMARY_SPACE,
+                regs->hostregs, ACCTYPE_SIE, &aaddr, &sie_xcode,
+                &sie_private, &protect, &sie_stid, NULL, NULL))
+#endif /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
             longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 
         /* Convert host real address to host absolute address */
-        aaddr = APPLY_PREFIXING (aaddr, regs->hostregs->pxr);
+        aaddr = APPLY_PREFIXING (aaddr, regs->hostregs->PX);
 
         if (aaddr >= regs->hostregs->mainsize)
-            program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+            ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     }
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Load access key from operand 2 address bits 24-27 */
     akey = effective_addr2 & 0xF0;
@@ -4404,39 +4914,39 @@ U16     xcode;                          /* Exception code            */
     skey = STORAGE_KEY(aaddr);
 
     /* Return condition code 2 if location is fetch protected */
-    if (is_fetch_protected (effective_addr1, skey, akey, private, regs))
+    if (ARCH_DEP(is_fetch_protected) (effective_addr1, skey, akey,
+                                        private, regs))
         regs->psw.cc = 2;
     else
         /* Return condition code 1 if location is store protected */
-        if (is_store_protected (effective_addr1, skey, akey,
-                                                private, protect, regs))
+        if (ARCH_DEP(is_store_protected) (effective_addr1, skey, akey,
+                                            private, protect, regs))
             regs->psw.cc = 1;
         else
             /* Return condition code 0 if location is not protected */
             regs->psw.cc = 0;
 
-} 
+}
 
+
+#if defined(FEATURE_TRACING)
 /*-------------------------------------------------------------------*/
 /* 99   TRACE - Trace                                           [RS] */
 /*-------------------------------------------------------------------*/
-void zz_trace (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(trace)
 {
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
-U32     effective_addr2;                /* effective address         */
+VADR    effective_addr2;                /* effective address         */
 #if defined(FEATURE_TRACING)
-U32     n1,                             /* Addr of trace table entry */
+VADR    n1,                             /* Addr of trace table entry */
         n2;                             /* Operand                   */
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
-U32     ag,                             /* Abs Guest addr of TTE     */
+#if defined(_FEATURE_SIE)
+RADR    ag,                             /* Abs Guest addr of TTE     */
         ah;                             /* Abs Host addr of TTE      */
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 int     i;                              /* Loop counter              */
 U64     dreg;                           /* 64-bit work area          */
-#ifdef IBUF
-U32     haddr;
-#endif
 #endif /*defined(FEATURE_TRACING)*/
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
@@ -4447,11 +4957,11 @@ U32     haddr;
 
 #if defined(FEATURE_TRACING)
     /* Exit if explicit tracing (control reg 12 bit 31) is off */
-    if ( (regs->cr[12] & CR12_EXTRACE) == 0 )
+    if ( (regs->CR(12) & CR12_EXTRACE) == 0 )
         return;
 
     /* Fetch the trace operand */
-    n2 = vfetch4 ( effective_addr2, b2, regs );
+    n2 = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
 
     /* Exit if bit zero of the trace operand is one */
     if ( (n2 & 0x80000000) )
@@ -4462,38 +4972,37 @@ U32     haddr;
     PERFORM_CHKPT_SYNC (regs);
 
     /* Obtain the trace entry address from control register 12 */
-    n1 = regs->cr[12] & CR12_TRACEEA;
+    n1 = regs->CR(12) & CR12_TRACEEA;
 
-    /* Low-address protection program check if trace entry
-       address is 0-511 and bit 3 of control register 0 is set */
-    if ( n1 < 512 && (regs->cr[0] & CR0_LOW_PROT) )
+    /* Apply low-address protection to trace entry address */
+    if (ARCH_DEP(is_low_address_protected) (n1, 0, regs))
     {
 #ifdef FEATURE_SUPPRESSION_ON_PROTECTION
-        regs->tea = (n1 & TEA_EFFADDR);
+        regs->TEA = (n1 & STORAGE_KEY_PAGEMASK);
         regs->excarid = 0;
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        program_interrupt (regs, PGM_PROTECTION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
     }
 
     /* Program check if trace entry is outside main storage */
     if ( n1 >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Program check if storing the maximum length trace
        entry (76 bytes) would overflow a 4K page boundary */
-    if ( ((n1 + 76) & STORAGE_KEY_PAGEMASK) != (n1 & STORAGE_KEY_PAGEMASK) )
-        program_interrupt (regs, PGM_TRACE_TABLE_EXCEPTION);
+    if ( ((n1 + 76) & PAGEFRAME_PAGEMASK) != (n1 & PAGEFRAME_PAGEMASK) )
+        ARCH_DEP(program_interrupt) (regs, PGM_TRACE_TABLE_EXCEPTION);
 
     /* Convert trace entry real address to absolute address */
-    n1 = APPLY_PREFIXING (n1, regs->pxr);
+    n1 = APPLY_PREFIXING (n1, regs->PX);
 
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     ag = n1;
 
     SIE_TRANSLATE(&n1, ACCTYPE_WRITE, regs);
 
     ah = n1;
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Calculate the number of registers to be traced, minus 1 */
     i = ( r3 < r1 ) ? r3 + 16 - r1 : r3 - r1;
@@ -4512,31 +5021,19 @@ U32     haddr;
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n1) |= (STORKEY_REF | STORKEY_CHANGE);
-#ifdef IBUF
-    haddr = n1;
-#endif
 
     /* Build the explicit trace entry */
-    sysblk.mainstor[n1++] = (0x70 | i);
-    sysblk.mainstor[n1++] = 0x00;
-    sysblk.mainstor[n1++] = ((dreg >> 40) & 0xFF);
-    sysblk.mainstor[n1++] = ((dreg >> 32) & 0xFF);
-    sysblk.mainstor[n1++] = ((dreg >> 24) & 0xFF);
-    sysblk.mainstor[n1++] = ((dreg >> 16) & 0xFF);
-    sysblk.mainstor[n1++] = ((dreg >> 8) & 0xFF);
-    sysblk.mainstor[n1++] = (dreg & 0xFF);
-    sysblk.mainstor[n1++] = ((n2 >> 24) & 0xFF);
-    sysblk.mainstor[n1++] = ((n2 >> 16) & 0xFF);
-    sysblk.mainstor[n1++] = ((n2 >> 8) & 0xFF);
-    sysblk.mainstor[n1++] = (n2 & 0xFF);
+    STORE_DW(sysblk.mainstor + n1, dreg);
+    sysblk.mainstor[n1] = (0x70 | i);
+    sysblk.mainstor[n1+1] = 0x00;
+    n1 += 8;
+    STORE_FW(sysblk.mainstor + n1, n2);
+    n1 += 4;
 
     /* Store general registers r1 through r3 in the trace entry */
     for ( i = r1; ; )
     {
-        sysblk.mainstor[n1++] = ((regs->gpr[i] >> 24) & 0xFF);
-        sysblk.mainstor[n1++] = ((regs->gpr[i] >> 16) & 0xFF);
-        sysblk.mainstor[n1++] = ((regs->gpr[i] >> 8) & 0xFF);
-        sysblk.mainstor[n1++] = (regs->gpr[i] & 0xFF);
+        STORE_FW(sysblk.mainstor + n1, regs->GR_L(i)); n1 += 4;
 
         /* Instruction is complete when r3 register is done */
         if ( i == r3 ) break;
@@ -4544,19 +5041,18 @@ U32     haddr;
         /* Update register number, wrapping from 15 to 0 */
         i++; i &= 15;
     }
-    FRAG_INVALIDATE(haddr, 32);
 
     /* Update trace entry address in control register 12 */
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+#if defined(_FEATURE_SIE)
     /* Recalculate the Guest absolute address */
     n1 = ag + (n1 - ah);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#endif /*defined(_FEATURE_SIE)*/
 
     /* Convert trace entry absolue address back to real address */
-    n1 = APPLY_PREFIXING (n1, regs->pxr);
+    n1 = APPLY_PREFIXING (n1, regs->PX);
 
-    regs->cr[12] &= ~CR12_TRACEEA;
-    regs->cr[12] |= n1;
+    regs->CR(12) &= ~CR12_TRACEEA;
+    regs->CR(12) |= n1;
 
 #endif /*defined(FEATURE_TRACING)*/
 
@@ -4564,4 +5060,21 @@ U32     haddr;
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
-} 
+}
+#endif /*defined(FEATURE_TRACING)*/
+
+
+#if !defined(_GEN_ARCH)
+
+// #define  _GEN_ARCH 964
+// #include "control.c"
+
+// #undef   _GEN_ARCH
+#define  _GEN_ARCH 390
+#include "control.c"
+
+#undef   _GEN_ARCH
+#define  _GEN_ARCH 370
+#include "control.c"
+
+#endif /*!defined(_GEN_ARCH)*/

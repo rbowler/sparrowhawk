@@ -1,34 +1,31 @@
 <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 3.0//EN" "html.dtd">
 <HTML>
 <HEAD>
-<TITLE>Hercules: Frequently-Asked Questions</TITLE>
+<TITLE>Hercules Version 2: Frequently-Asked Questions</TITLE>
+<LINK REL=STYLESHEET TYPE="text/css" HREF="hercules.css">
 </HEAD>
 <BODY TEXT="#000000" LINK="#0000A0" VLINK="#008040" BGCOLOR="#ffffcc"
-	 ALINK="#000000">
-<H1>Hercules: Frequently-Asked Questions</H1>
+         ALINK="#000000">
+<H1>Hercules Version 2: Frequently-Asked Questions</H1>
 <P><HR></P>
 <H4>What is Hercules?</H4>
-<P>Hercules is a software implementation of the System/370 and ESA/390
+<P>Hercules is a software implementation of the System/370, ESA/390
+and z/Architecture
 hardware which runs under Linux on several hardware platforms including the
 Intel Pentium PC, and under Windows NT and Windows 2000.</P>
-<P>Hercules was created by Roger Bowler and is maintained by
-Jay Maynard.</P>
 <H4>So what exactly does that mean?</H4>
 <P>It means that your PC can emulate an IBM mainframe processor. The
-mainframe can range from a 360 to a 390 - running in "System/370" mode or
-"ESA/390" mode. Hercules executes S/370 and ESA/390 instructions and channel
-programs. It emulates mainframe I/O devices by using PC devices. For
+mainframe can range from a 360 to a z900 - running in "System/370" mode,
+"ESA/390" mode, or "z/Architecture" mode.
+Hercules executes S/370, ESA/390, and z/Architecture instructions and channel
+programs.  It emulates mainframe I/O devices by using PC devices.  For
 example, 3390 DASD devices are emulated by large files on your hard disk,
 and local 3270 screens are emulated by tn3270 sessions. (Note: Not all 370
 and 390 features have been implemented in Hercules. See the list of
-particulars later in this document. Also, certain non-standard models,
+particulars later in this document.  Also, certain non-standard models,
 360/20s, and the 360/67 virtual memory mode are not emulated.)</P>
-<P>The Hercules emulator program comes in 2 flavors: hercules-370 and
-hercules-390. It runs in 370 mode under the program "hercules-370", and in
-390 mode under the program "hercules-390". Both versions are automatically
-generated with the downloaded distribution. (System/360 and 370 mainframes
-are emulated by hercules-370.)</P>
-<P>Hercules implements only the raw S/370 and ESA/390 instruction set; it
+<P>Hercules implements only the raw S/370, ESA/390, and z/Architecture
+instruction set; it
 does not provide any operating system facilities. This means that you need
 to provide an operating system or standalone program which Hercules can load
 from an emulated disk or tape device. You will have to write the operating
@@ -61,15 +58,16 @@ licensed to run the OS. </LI>
 license (but I really don't recommend depending on Hercules to be your
 disaster recovery solution!). </LI></OL>
 <H4>What other programs will run under Hercules? </H4>
-<P>Any program which uses the S/370 or ESA/390 instruction set, as
+<P>Any program which uses the S/370, ESA/390, or z/Architecture
+instruction set, as
 implemented in Hercules. Some special utilities in the form of standalone
 programs are known to run well. I can particularly recommend Jan Jaeger's
 excellent standalone editor (ZZSA) which is included in the Hercules
 distribution, or it can be downloaded from <A
 HREF="http://home.worldonline.nl/~jjaeger">http://home.worldonline.nl/~jjaeger</A>;
 I use it regularly to look at DASD while debugging an OS installation, which
-is just what it's designed to do. Note: ZZSA runs under hercules-390 - not
-hercules-370. See Jan Jaeger's website for more information and special
+is just what it's designed to do. Note: ZZSA runs in ESA/390 mode.
+See Jan Jaeger's website for more information and special
 logon procedures.</P>
 <H4>Where can I obtain OS/360?</H4>
 <P>1. Rick Fochtman's OS/360 archive CD is now obtainable by download from
@@ -130,12 +128,11 @@ href="http://www.opensource.org">Open Source Definition</a>, provides the
 benefits and protections of open source for both users and developers,
 without the political baggage that has come to be associated with the GPL.</P>
 <H4>What PC hardware do I need to run Hercules?</H4>
-<P>It depends how fast you want it to run. A Pentium 166 with 16Mb RAM is
+<P>It depends how fast you want it to run. A Pentium 200 with 32Mb RAM is
 probably the minimum practical requirement; 500+ MHz with 128Mb RAM would be
 much better. Hercules doesn't use any fancy graphics, but it does need a
-fast processor to achieve a reasonable MIPS rate. A Celeron processor (with
-as high a clock speed as you can afford) will probably give the best
-price/performance ratio. </P>
+fast processor to achieve a reasonable MIPS rate.
+</P>
 <P>If you can afford a multiprocessor system, so much the better. Hercules
 makes extensive use of multithreading to overlap I/O with CPU activity, so
 you should find that a dual or quad Pentium 200 system will outperform a
@@ -195,17 +192,17 @@ Attachmate Extra, or Dynacomm Elite should also work in most cases, but
 be aware that some tn3270 clients have bugs which make them unusable
 as OS/360 or MVS consoles.</P>
 <H4>What sort of MIPS rate can I expect?</H4>
-<P>Don't get excited... On a Pentium Pro 200, I am seeing an execution speed
-of around 0.5 MIPS. That's enough to run OS/360 (MFT or MVT) with a response
-time similar to that of a 370/145 from the 1970's. It's also fast enough to
-run VSE/ESA with a slow but acceptable response time. If you want to run
-OS/390 instead of OS/360, you'd better get a gigahertz or so Pentium III.
-Releases 1.60 and above of Hercules incorporated many performance
-improvements, and on a fast Pentium III, it's now not unusual to see 5 MIPS
-or better.</P>
+<P>With the performance enhancements which began around release 1.60,
+thanks to work by Juergen Dobrinski, Valery Pogonchenko, and Jan Jaeger,
+you should now see an execution speed of around 0.8 to 1 MIPS, even on a
+Pentium 200.  That's enough to run OS/360 (MFT or MVT) with a response
+time similar to that of a 3033 from the 1970's. It's also fast enough to
+run VSE/ESA with an acceptable response time. If you want to run OS/390
+instead of OS/360, you'd better get a gigahertz or so Pentium III.  On a
+fast dual Pentium III it's now not unusual to see 5 MIPS or better.</P>
 <P>Typical I/O rates of around 50 EXCP/second are reported on average
 hardware, with rates over 500/second achievable with hardware RAID. </P>
-<H4>Which C compiler should I use to build Hercules?</H4> 
+<H4>Which C compiler should I use to build Hercules?</H4>
 <P>You <EM>must</EM> use the egcs C compiler. I am using the version that
 came with Red Hat 6.1 and it seems to work OK. The version number reported
 by the Linux command <code>cc -v</code> is: egcs-2.91.66 19990314/Linux
@@ -336,11 +333,11 @@ September 1999 issue of NaSPA Technical Support magazine. </P>
 <LI>Expanded Storage </LI>
 <LI>Halfword-Immediate instructions </LI>
 <LI>Branch-Relative instructions </LI>
+<li>Interpretive Execution (SIE) </li>
 <LI>Move Inverse </LI>
 <LI>Move Page (Facility 2) </LI>
 <LI>Private Space </LI>
 <LI>Set Address Space Control Fast </LI>
-<li>SIE I/O Assist</li>
 <li>Square Root</li>
 <LI>Storage-Protection Override </LI>
 <LI>String instructions </LI>
@@ -354,6 +351,7 @@ September 1999 issue of NaSPA Technical Support magazine. </P>
 <li>Vector Facility</li>
 <LI>Extended Translation </LI>
 <LI>Store System Information </LI>
+<li>64-bit operations</li>
 </ul>
 <P>The following standard features have not yet been implemented: </P>
 <UL>
@@ -365,7 +363,6 @@ be in due course: </P>
 <LI>Address-Limit Checking </LI>
 <LI>Incorrect-Length-Indication Suppression </LI>
 <LI>MVS assists </LI>
-<li>64-bit operations</li>
 </UL>
 <P>The following features are not implemented, and are unlikely to be,
 either due to lack of documentation, limited host system capability, or lack
@@ -388,17 +385,25 @@ Reconfiguration, SCP-initiated Reset, Processor Availability </LI>
 <LI>Program-Event Recording </LI>
 <LI>PER extensions </LI>
 <LI>PR/SM </LI>
-<LI>SCLP (Service Call Logical Processor) Facility </LI>
 <LI>Sysplex </LI>
 <LI>Sysplex Timer (ETR) </LI>
 <LI>VM assists </LI></UL>
 <p>Hercules is compliant with both IBM's ALS-1 and ALS-2 architectural level
 sets to the degree necessary to run all OS/390 versions through 2.10 and
-z/OS version 1.1.</p>
+z/OS version 1.1 in ARCHLVL 1 mode.</p>
+<H4>What z/Architecture features are implemented?</H4>
+<P>z/Architecture includes as standard all of the features of ESA/390,
+except vector operations, which is not part of the z/Architecture.
+It also includes new standard features such as 5-level DAT, 64-bit
+addressing, IDAW format-2, and many new instructions.
+<p>The following optional features of z/Architecture will be implemented:
+<ul>
+<li>Extended Translation Facility 2
+</ul>
 <H4>Who are the Herculeans?</H4>
 
 <P>The following people are among those who have contributed to this
-project, either as coders or as testers or both: 
+project, either as coders or as testers or both:
 <sl>
 <li><A
 HREF="http://www.snipix.freeserve.co.uk/people.htm">Roger Bowler</A>
@@ -451,7 +456,7 @@ maintainer)
 <li>Alex Friis
 <li>Tony Harminc
 <li>Henk Stegeman
-<li>Mike Ross 
+<li>Mike Ross
 <li>Richard Higson
 </sl></P>
 <P>If anyone feels they have been unfairly omitted from either of these
@@ -464,5 +469,5 @@ HREF="http://www.onelist.com/community/hercules-390">http://www.onelist.com/comm
 <P ALIGN="CENTER"><hr width="15%" noshade><A
 HREF="hercules.html"><IMG SRC="gifs/back.gif" BORDER=0 ALT="back"></A></P>
 <P><small>
-Last updated 18 January 2001</P></BODY>
+Last updated 01 February 2001</P></BODY>
 </HTML>

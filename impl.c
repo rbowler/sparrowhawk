@@ -1,4 +1,4 @@
-/* IMPL.C       (c) Copyright Roger Bowler, 1999-2001                */
+/* IMPL.C       (c) Copyright Roger Bowler, 1999-2000                */
 /*              Hercules Initialization Module                       */
 
 /*-------------------------------------------------------------------*/
@@ -42,7 +42,6 @@ static void sigint_handler (int signo)
 
     /* Activate instruction stepping */
     sysblk.inststep = 1;
-    set_doinst();
     return;
 } /* end function sigint_handler */
 
@@ -56,9 +55,8 @@ int     c;                              /* Work area for getopt      */
 
     /* Display the version identifier */
     fprintf (stderr,
-            "Hercules %s version %s "
-            "(c)Copyright Roger Bowler, 1994-2001\n",
-            ARCHITECTURE_NAME, MSTRING(VERSION));
+            "Hercules version %s build at %s %s\n",
+            MSTRING(VERSION), __DATE__, __TIME__);
 
     /* Process the command line options */
     while ((c = getopt(argc, argv, "f:")) != EOF)

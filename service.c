@@ -1,7 +1,8 @@
-/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2001                */
+/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2000                */
 /*              ESA/390 Service Processor                            */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2001      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2000      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements service processor functions                */
@@ -16,12 +17,16 @@
 /*      Dynamic CPU reconfiguration - Jan Jaeger                     */
 /*      Suppress superflous HHC701I/HHC702I messages - Jan Jaeger    */
 /*      Break syscons output if too long - Jan Jaeger                */
+/*      //Sysplex support: hardware CFCC loader - Jan Jaeger         */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
 
-#include "inline.h"
 #include "opcode.h"
+
+#if !defined(_SERVICE_C)
+
+#define _SERVICE_C
 
 /*-------------------------------------------------------------------*/
 /* Service Call Logical Processor command word definitions           */
@@ -84,7 +89,7 @@ typedef struct _SCCB_HEADER {
 #define SCCB_RESP_BACKOUT       0x40    /* Command backed out        */
 #define SCCB_RESP_REJECT        0xF0    /* Command reject            */
 
-#ifdef FEATURE_SYSTEM_CONSOLE
+// #ifdef FEATURE_SYSTEM_CONSOLE
 #define SCCB_REAS_NO_EVENTS     0x60    /* No outstanding EVENTs     */
 #define SCCB_RESP_NO_EVENTS     0xF0
 #define SCCB_REAS_EVENTS_SUP    0x62    /* All events suppressed     */
@@ -101,7 +106,7 @@ typedef struct _SCCB_HEADER {
 #define SCCB_RESP_INVALID_MSKL  0xF0
 #define SCCB_REAS_EXCEEDS_SCCB  0x75    /* Exceeds SCCB max capacity */
 #define SCCB_RESP_EXCEEDS_SCCB  0xF0
-#endif /*FEATURE_SYSTEM_CONSOLE*/
+// #endif /*FEATURE_SYSTEM_CONSOLE*/
 
 /* SCP information data area */
 typedef struct _SCCB_SCP_INFO {
@@ -178,6 +183,7 @@ typedef struct _SCCB_SCP_INFO {
 #define SCCB_CFG0_SUPPRESSION_ON_PROTECTION             0x20
 #define SCCB_CFG0_INITIATE_RESET                        0x10
 #define SCCB_CFG0_STORE_CHANNEL_SUBSYS_CHARACTERISTICS  0x08
+#define SCCB_CFG0_FAST_SYNCHRONOUS_DATA_MOVER           0x01
 #define SCCB_CFG0_MVPG_FOR_ALL_GUESTS                   0x04
 #define SCCB_CFG0_UNKNOWN_BUT_SET_UNDER_VM              0x02
 #define SCCB_CFG1_CSLO                                  0x40
@@ -190,10 +196,13 @@ typedef struct _SCCB_SCP_INFO {
 #define SCCB_CFG3_COMPARE_AND_MOVE_EXTENDED             0x08
 #define SCCB_CFG3_BRANCH_AND_SET_AUTHORITY              0x04
 #define SCCB_CFG3_EXTENDED_FLOATING_POINT               0x02
-#define SCCB_CFG3_UNKNOWN_BUT_SET_UNDER_VM              0x01
+#define SCCB_CFG3_EXTENDED_LOGICAL_COMPUTATION_FACILITY 0x01
 #define SCCB_CFG4_EXTENDED_TOD_CLOCK                    0x80
 #define SCCB_CFG4_EXTENDED_TRANSLATION                  0x40
+#define SCCB_CFG4_LOAD_REVERSED_FACILITY                0x20
+#define SCCB_CFG4_EXTENDED_TRANSLATION_FACILITY2        0x10
 #define SCCB_CFG4_STORE_SYSTEM_INFORMATION              0x08
+#define SCCB_CFG5_ESAME                                 0x01
 
 /* CPU information array entry */
 typedef struct _SCCB_CPU_INFO {
@@ -266,7 +275,7 @@ typedef struct _SCCB_CSI_INFO {
 #define SCCB_CSI0_CANCEL_IO_REQUEST_FACILITY            0x02
 #define SCCB_CSI0_CONCURRENT_SENSE_FACILITY             0x01
 
-#ifdef FEATURE_SYSTEM_CONSOLE
+// #ifdef FEATURE_SYSTEM_CONSOLE
 /* Write Event Mask */
 typedef struct _SCCB_EVENT_MASK {
         HWORD   reserved;
@@ -288,6 +297,10 @@ typedef struct _SCCB_EVD_HDR {
 #define SCCB_EVD_TYPE_OPCMD     0x01    /* Operator command          */
 #define SCCB_EVD_TYPE_MSG       0x02    /* Message from Control Pgm  */
 #define SCCB_EVD_TYPE_PRIOR     0x09    /* Priority message/command  */
+// #if defined(FEATURE_HARDWARE_LOADER)
+#define SCCB_EVD_TYPE_HARDWARE  0x0C    /* Hardware load request     */
+#define SCCB_EVENT_HWL_MASK             0x00100000
+// #endif /*defined(FEATURE_HARDWARE_LOADER)*/
         BYTE    flag;
 #define SCCB_EVD_FLAG_PROC      0x80    /* Event successful          */
         HWORD   resv;                   /* Reserved for future use   */
@@ -384,9 +397,28 @@ typedef struct _SCCB_NLS_BK {
         HWORD   dcpgid;                 /* CPGID for DBCS (def 037)  */
         HWORD   dcpsgid;                /* CPSGID for DBCS (def 637) */
     } SCCB_NLS_BK;
-#endif /*FEATURE_SYSTEM_CONSOLE*/
 
-#ifdef FEATURE_EXPANDED_STORAGE
+// #if defined(FEATURE_HARDWARE_LOADER)
+/* Hardware load request */
+typedef struct _SCCB_HWL_BK {
+        BYTE    type;
+#define SCCB_HWL_TYPE_LOAD      0x00    /* Load request              */
+#define SCCB_HWL_TYPE_RESET     0x01    /* Reset request             */
+#define SCCB_HWL_TYPE_INFO      0x02    /* Load info request         */
+        BYTE    resv1;
+        FWORD   resv2[2];
+        FWORD   hwl;                    /* Pointer to HWL structure  */
+        FWORD   resv3[2];
+        FWORD   sto;                    /* Segment Table Origin      */
+        FWORD   resv4[3];
+        FWORD   size;                   /* Length in pages           */
+    } SCCB_HWL_BK;
+
+// #endif /*defined(FEATURE_HARDWARE_LOADER)*/
+
+// #endif /*FEATURE_SYSTEM_CONSOLE*/
+
+// #ifdef FEATURE_EXPANDED_STORAGE
 typedef struct _SCCB_XST_INFO {
         HWORD   elmid;                  /* Extended storage element
                                                                 id   */
@@ -404,12 +436,272 @@ typedef struct _SCCB_XST_MAP {
 //      BYTE    map[];                  /* Bitmap of all usable
 //                                         expanded storage blocks   */
     } SCCB_XST_MAP;
-#endif /*FEATURE_EXPANDED_STORAGE*/
+// #endif /*FEATURE_EXPANDED_STORAGE*/
 
+// #ifdef FEATURE_SYSTEM_CONSOLE
+/*-------------------------------------------------------------------*/
+/* Issue SCP command                                                 */
+/*                                                                   */
+/* This function is called from the control panel when the operator  */
+/* enters an HMC system console SCP command or SCP priority message. */
+/* The command is queued for processing by the SCLP_READ_EVENT_DATA  */
+/* service call, and a service signal interrupt is made pending.     */
+/*                                                                   */
+/* Input:                                                            */
+/*      command Null-terminated ASCII command string                 */
+/*      priomsg 0=SCP command, 1=SCP priority message                */
+/*-------------------------------------------------------------------*/
+void scp_command (BYTE *command, int priomsg)
+{
+    /* Error if disabled for priority messages */
+    if (priomsg && !(sysblk.cp_recv_mask & 0x00800000))
+    {
+        logmsg ("HHC703I SCP not receiving priority messages\n");
+        return;
+    }
+
+    /* Error if disabled for commands */
+    if (!priomsg && !(sysblk.cp_recv_mask & 0x80000000))
+    {
+        logmsg ("HHC704I SCP not receiving commands\n");
+        return;
+    }
+
+    /* Error if command string is missing */
+    if (strlen(command) < 1)
+    {
+        logmsg ("HHC705I No SCP command\n");
+        return;
+    }
+
+    /* Obtain the interrupt lock */
+    obtain_lock (&sysblk.intlock);
+
+    /* If a service signal is pending then reject the command
+       with message indicating that service processor is busy */
+    if (sysblk.servsig)
+    {
+        logmsg ("HHC706I Service Processor busy\n");
+
+        /* Release the interrupt lock */
+        release_lock (&sysblk.intlock);
+        return;
+    }
+
+    /* Save command string and message type for read event data */
+    sysblk.scpcmdtype = priomsg;
+    strncpy (sysblk.scpcmdstr, command, sizeof(sysblk.scpcmdstr));
+
+    /* Ensure termination of the command string */
+    sysblk.scpcmdstr[sizeof(sysblk.scpcmdstr)-1] = '\0';
+
+    /* Set service signal interrupt pending for read event data */
+    sysblk.servparm = 1;
+    sysblk.extpending = sysblk.servsig = 1;
+    signal_condition (&sysblk.intcond);
+
+    /* Release the interrupt lock */
+    release_lock (&sysblk.intlock);
+
+} /* end function scp_command */
+
+
+#endif /*!defined(_SERVICE_C)*/
+
+#if defined(FEATURE_HARDWARE_LOADER)
+
+
+void ARCH_DEP(hwl_thread)(SCCB_HWL_BK *hwl_bk)
+{
+int servpendok = 0;
+
+    switch(hwl_bk->type) {
+
+    /* INFO request returns the required region size in Mb */
+    case SCCB_HWL_TYPE_INFO:
+        {
+        struct stat st;
+
+            if(! stat(sysblk.hwl_fname, &st) )
+            {
+            U32     size;
+
+                size = st.st_size;
+                size += 0x000FFFFF;
+                size &= 0xFFF00000;
+                size >>= 12;
+
+                STORE_FW(hwl_bk->size,size);
+            }
+            else
+                logmsg("HHChwlI Hardware loader %s: %s\n",
+                                            sysblk.hwl_fname,strerror(errno));
+        }
+        break;
+
+    /* Load request will load the image into fixed virtual storage
+       the Segment Table Origin is listed in the hwl_bk */
+    case SCCB_HWL_TYPE_LOAD:
+        {
+        U32 sto;
+        int fd;
+
+            fd = open (sysblk.hwl_fname, O_RDONLY|O_BINARY);
+            if (fd < 0)
+            {
+                logmsg ("HHChwlI %s open error: %s\n",
+                    sysblk.hwl_fname, strerror(errno));
+                break;
+            }
+//          else
+//              logmsg("HHChwlI Loading %s\n",sysblk.hwl_fname);
+
+            /* Segment Table Origin */
+            FETCH_FW(sto,hwl_bk->sto);
+            sto &= STD_STO;
+
+            for( ; ; sto += 4)
+            {
+            FWORD *ste;
+            U32 pto, pti;
+
+                /* Fetch segment table entry and calc Page Table Origin */
+                if( sto >= sysblk.mainsize)
+                    goto eof;
+                ste = (FWORD*)(sysblk.mainstor + sto);
+                FETCH_FW(pto, ste);
+                if( pto & SEGTAB_INVALID )
+                    goto eof;
+                pto &= SEGTAB_PTO;
+
+                for(pti = 0; pti < 256 ; pti++, pto += 4)
+                {
+                FWORD *pte;
+                U32 pgo;
+                BYTE *page;
+
+                    /* Fetch Page Table Entry to get page origin */
+                    if( pto >= sysblk.mainsize)
+                        goto eof;
+                    pte = (FWORD*)(sysblk.mainstor + pto);
+                    FETCH_FW(pgo, pte);
+                    if( pgo & PAGETAB_INVALID )
+                        goto eof;
+                    pgo &= PAGETAB_PFRA;
+
+                    /* Read page into main storage */
+                    if( pgo >= sysblk.mainsize)
+                        goto eof;
+                    page = sysblk.mainstor + pgo;
+                    if( !read(fd, page, STORAGE_KEY_PAGESIZE) ) 
+                        goto eof;
+                    STORAGE_KEY(pgo) |= (STORKEY_REF|STORKEY_CHANGE);
+                }
+            }
+           eof:
+           close(fd);
+
+        }
+        break;
+
+    }
+
+    do {
+        sleep(1);
+        obtain_lock(&sysblk.intlock);
+        if(!sysblk.servsig)
+        {
+            sysblk.servparm = 1;
+            sysblk.extpending = sysblk.servsig = servpendok = 1;
+            sysblk.hwl_tid = 0;
+            signal_condition (&sysblk.intcond);
+        }
+        release_lock(&sysblk.intlock);
+    } while(!servpendok);
+}
+
+
+int ARCH_DEP(hwl_request)(U32 sclp_command, SCCB_HWL_BK *hwl_bk)
+{
+static SCCB_HWL_BK static_hwl_bk;
+static int hwl_pending;
+
+    if(sclp_command == SCLP_READ_EVENT_DATA)
+    {
+    int pending_req = hwl_pending;
+
+        /* Return no data if the hardware loader thread is still active */
+        if(sysblk.hwl_tid)
+            return 0;
+
+        /* Update the hwl_bk copy in the SCCB */
+        if(hwl_pending)
+            *hwl_bk = static_hwl_bk;
+
+        /* Reset the pending flag */
+        hwl_pending = 0;
+
+        /* Return true if a request was pending */
+        return pending_req;
+
+    }
+
+    switch(hwl_bk->type) {
+
+    case SCCB_HWL_TYPE_INFO:
+    case SCCB_HWL_TYPE_LOAD:
+
+        /* Return error if the hwl thread is already active */
+        if( sysblk.hwl_tid )
+            return -1;
+
+        /* Take a copy of the hwl_bk in the SCCB */
+        static_hwl_bk = *hwl_bk;
+
+        /* Reset pending flag */
+        hwl_pending = 0;
+
+        /* Create the hwl thread */
+        if( create_thread(&sysblk.hwl_tid, &sysblk.detattr,
+            ARCH_DEP(hwl_thread), &static_hwl_bk) )
+            return -1;
+
+        /* Set pending flag */
+        hwl_pending = 1;
+
+        return 0;
+
+
+    case SCCB_HWL_TYPE_RESET:
+
+        /* Kill the hwl thread if it is active */
+        if( sysblk.hwl_tid )
+        {
+            signal_thread(sysblk.hwl_tid, SIGKILL);
+            sysblk.hwl_tid = 0;
+            hwl_pending = 0;
+        }
+        return 0;
+
+
+    default:
+        logmsg("HHChwlI Unknown hardware loader request type %2.2X\n",
+                                                        hwl_bk->type);
+        return -1;
+
+    }
+
+}
+
+#endif /*defined(FEATURE_HARDWARE_LOADER)*/
+
+// #endif /*FEATURE_SYSTEM_CONSOLE*/
+
+#if defined(FEATURE_SERVICE_PROCESSOR)
 /*-------------------------------------------------------------------*/
 /* B220 SERVC - Service Call                                   [RRE] */
 /*-------------------------------------------------------------------*/
-void zz_service_call (BYTE inst[], int execflag, REGS *regs)
+DEF_INST(service_call)
 {
 int             r1, r2;                 /* Values of R fields        */
 U32             sclp_command;           /* SCLP command code         */
@@ -489,6 +781,14 @@ U32             old_cp_recv_mask;       /* Masks before write event  */
 U32             old_cp_send_mask;       /*              mask command */
 #endif /*FEATURE_SYSTEM_CONSOLE*/
 
+
+#if defined(FEATURE_HARDWARE_LOADER)
+
+SCCB_HWL_BK    *hwl_bk;                 /* -> Hardware loader block  */
+
+#endif /*defined(FEATURE_HARDWARE_LOADER)*/
+
+
 #ifdef FEATURE_EXPANDED_STORAGE
 SCCB_XST_MAP    *sccbxmap;              /* Xstore usability map      */
 int             xstincnum;              /* Number of expanded storage
@@ -506,21 +806,21 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     SIE_INTERCEPT(regs);
 
     /* R1 is SCLP command word */
-    sclp_command = regs->gpr[r1];
+    sclp_command = regs->GR_L(r1);
 
     /* R2 is real address of service call control block */
-    sccb_real_addr = regs->gpr[r2];
+    sccb_real_addr = regs->GR_L(r2);
 
     /* Obtain the absolute address of the SCCB */
-    sccb_absolute_addr = APPLY_PREFIXING(sccb_real_addr, regs->pxr);
+    sccb_absolute_addr = APPLY_PREFIXING(sccb_real_addr, regs->PX);
 
     /* Program check if SCCB is not on a doubleword boundary */
     if ( sccb_absolute_addr & 0x00000007 )
-        program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Program check if SCCB is outside main storage */
     if ( sccb_absolute_addr >= regs->mainsize )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
 //  /*debug*/logmsg("Service call %8.8X SCCB=%8.8X\n",
 //  /*debug*/       sclp_command, sccb_absolute_addr);
@@ -529,14 +829,14 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     sccb = (SCCB_HEADER*)(sysblk.mainstor + sccb_absolute_addr);
 
     /* Load SCCB length from header */
-    sccblen = (sccb->length[0] << 8) | sccb->length[1];
+    FETCH_HW(sccblen, sccb->length);
 
     /* Set the main storage reference bit */
     STORAGE_KEY(sccb_absolute_addr) |= STORKEY_REF;
 
     /* Program check if end of SCCB falls outside main storage */
     if ( regs->mainsize - sccblen < sccb_absolute_addr )
-        program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Obtain lock if immediate response is not requested */
     if (!(sccb->flag & SCCB_FLAG_SYNC)
@@ -593,60 +893,45 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
         /* Set main storage size in SCCB */
         realmb = regs->mainsize >> 20;
-        sccbscp->realinum[0] = (realmb & 0xFF00) >> 8;
-        sccbscp->realinum[1] = realmb & 0xFF;
+        STORE_HW(sccbscp->realinum, realmb);
         sccbscp->realiszm = 1;
         sccbscp->realbszk = 4;
-        sccbscp->realiint[0] = 0;
-        sccbscp->realiint[1] = 1;
+        STORE_HW(sccbscp->realiint, 1);
 
 #ifdef FEATURE_EXPANDED_STORAGE
         /* Set expanded storage size in SCCB */
         xstincnum = (sysblk.xpndsize << XSTORE_PAGESHIFT)
                         / XSTORE_INCREMENT_SIZE;
-        sccbscp->xpndinum[0] = (xstincnum & 0xFF0000) >> 24;
-        sccbscp->xpndinum[1] = (xstincnum & 0xFF00) >> 16;
-        sccbscp->xpndinum[2] = (xstincnum & 0xFF) >> 8;
-        sccbscp->xpndinum[3] = xstincnum & 0xFF;
+        STORE_FW(sccbscp->xpndinum, xstincnum);
         xstblkinc = XSTORE_INCREMENT_SIZE >> XSTORE_PAGESHIFT;
-        sccbscp->xpndsz4K[0] = (xstblkinc & 0xFF000000) >> 24;
-        sccbscp->xpndsz4K[1] = (xstblkinc & 0xFF0000) >> 16;
-        sccbscp->xpndsz4K[2] = (xstblkinc & 0xFF00) >> 8;
-        sccbscp->xpndsz4K[3] = xstblkinc & 0xFF;
+        STORE_FW(sccbscp->xpndsz4K, xstblkinc);
 #endif /*FEATURE_EXPANDED_STORAGE*/
 
 #ifdef FEATURE_VECTOR_FACILITY
         /* Set the Vector section size in the SCCB */
-        sccbscp->vectssiz[0] = (VECTOR_SECTION_SIZE & 0xFF00) >> 8;
-        sccbscp->vectssiz[1] = VECTOR_SECTION_SIZE & 0xFF;
+        STORE_HW(sccbscp->vectssiz, VECTOR_SECTION_SIZE);
         /* Set the Vector partial sum number in the SCCB */
-        sccbscp->vectpsum[0] = (VECTOR_PARTIAL_SUM_NUMBER & 0xFF00) >> 8;
-        sccbscp->vectpsum[1] = VECTOR_PARTIAL_SUM_NUMBER & 0xFF;
+        STORE_HW(sccbscp->vectpsum, VECTOR_PARTIAL_SUM_NUMBER);
 #endif /*FEATURE_VECTOR_FACILITY*/
 
 #ifdef FEATURE_CPU_RECONFIG
         /* Set CPU array count and offset in SCCB */
-        sccbscp->numcpu[0] = (MAX_CPU_ENGINES & 0xFF00) >> 8;
-        sccbscp->numcpu[1] = MAX_CPU_ENGINES & 0xFF;
+        STORE_HW(sccbscp->numcpu, MAX_CPU_ENGINES);
 #else /*!FEATURE_CPU_RECONFIG*/
         /* Set CPU array count and offset in SCCB */
-        sccbscp->numcpu[0] = (sysblk.numcpu & 0xFF00) >> 8;
-        sccbscp->numcpu[1] = sysblk.numcpu & 0xFF;
+        STORE_HW(sccbscp->numcpu, sysblk.numcpu);
 #endif /*!FEATURE_CPU_RECONFIG*/
         offset = sizeof(SCCB_HEADER) + sizeof(SCCB_SCP_INFO);
-        sccbscp->offcpu[0] = (offset & 0xFF00) >> 8;
-        sccbscp->offcpu[1] = offset & 0xFF;
+        STORE_HW(sccbscp->offcpu, offset);
 
         /* Set HSA array count and offset in SCCB */
-        sccbscp->numhsa[0] = 0;
-        sccbscp->numhsa[1] = 0;
+        STORE_HW(sccbscp->numhsa, 0);
 #ifdef FEATURE_CPU_RECONFIG
         offset += sizeof(SCCB_CPU_INFO) * MAX_CPU_ENGINES;
 #else /*!FEATURE_CPU_RECONFIG*/
         offset += sizeof(SCCB_CPU_INFO) * sysblk.numcpu;
 #endif /*!FEATURE_CPU_RECONFIG*/
-        sccbscp->offhsa[0] = (offset & 0xFF00) >> 8;
-        sccbscp->offhsa[1] = offset & 0xFF;
+        STORE_HW(sccbscp->offhsa, offset);
 
         /* Move IPL load parameter to SCCB */
         memcpy (sccbscp->loadparm, sysblk.loadparm, 8);
@@ -699,7 +984,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 //                      | SCCB_CFG0_INITIATE_RESET
 //                      | SCCB_CFG0_STORE_CHANNEL_SUBSYS_CHARACTERISTICS
 //                      | SCCB_CFG0_MVPG_FOR_ALL_GUESTS
-//                      | SCCB_CFG0_UNKNOWN_BUT_SET_UNDER_VM
+//                      | SCCB_CFG0_FAST_SYNCHRONOUS_DATA_MOVER
                         ;
         sccbscp->cfg[1] = 0
 //                      | SCCB_CFG1_CSLO
@@ -715,9 +1000,9 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                         ;
         sccbscp->cfg[3] = 0
 //                      | SCCB_CFG3_RESUME_PROGRAM
-#if defined(FEATURE_PLO)
+#if defined(FEATURE_PERFORM_LOCKED_OPERATION)
                         | SCCB_CFG3_PERFORM_LOCKED_OPERATION
-#endif /*defined(FEATURE_PLO)*/
+#endif /*defined(FEATURE_PERFORM_LOCKED_OPERATION)*/
 #ifdef FEATURE_IMMEDIATE_AND_RELATIVE
                         | SCCB_CFG3_IMMEDIATE_AND_RELATIVE
 #endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
@@ -728,18 +1013,28 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                         | SCCB_CFG3_BRANCH_AND_SET_AUTHORITY
 #endif /*FEATURE_BRANCH_AND_SET_AUTHORITY*/
 //                      | SCCB_CFG3_EXTENDED_FLOATING_POINT
-//                      | SCCB_CFG3_UNKNOWN_BUT_SET_UNDER_VM
+//                      | SCCB_CFG3_EXTENDED_LOGICAL_COMPUTATION_FACILITY
                         ;
         sccbscp->cfg[4] = 0
 #ifdef FEATURE_EXTENDED_TOD_CLOCK
                         | SCCB_CFG4_EXTENDED_TOD_CLOCK
 #endif /*FEATURE_EXTENDED_TOD_CLOCK*/
-#ifdef FEATURE_EXTENDED_TRANSLATION
+#if defined(FEATURE_EXTENDED_TRANSLATION)
                         | SCCB_CFG4_EXTENDED_TRANSLATION
-#endif /*FEATURE_EXTENDED_TRANSLATION*/
-#ifdef FEATURE_STORE_SYSTEM_INFORMATION
+#endif /*defined(FEATURE_EXTENDED_TRANSLATION)*/
+#if defined(FEATURE_LOAD_REVERSED)
+                        | SCCB_CFG4_LOAD_REVERSED_FACILITY            
+#endif /*defined(FEATURE_LOAD_REVERSED)*/
+//                      | SCCB_CFG4_EXTENDED_TRANSLATION_FACILITY2   
+#if defined(FEATURE_STORE_SYSTEM_INFORMATION)
                         | SCCB_CFG4_STORE_SYSTEM_INFORMATION
 #endif /*FEATURE_STORE_SYSTEM_INFORMATION*/
+                        ;
+
+        sccbscp->cfg[5] = 0
+#if defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)
+                        | (sysblk.arch_z900 ? SCCB_CFG5_ESAME : 0)
+#endif /*defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)*/
                         ;
 
         /* Build the CPU information array after the SCP info */
@@ -822,8 +1117,6 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccb->reas = SCCB_REAS_NONE;
         sccb->resp = SCCB_RESP_INFO;
 
-        FRAG_INVALIDATE((sccb_absolute_addr & STORAGE_KEY_PAGEMASK),
-                         STORAGE_KEY_PAGESIZE);
         break;
 
     case SCLP_READ_CHP_INFO:
@@ -884,8 +1177,6 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccb->reas = SCCB_REAS_NONE;
         sccb->resp = SCCB_RESP_INFO;
 
-        FRAG_INVALIDATE((sccb_absolute_addr & STORAGE_KEY_PAGEMASK),
-                         STORAGE_KEY_PAGESIZE);
         break;
 
     case SCLP_READ_CSI_INFO:
@@ -924,8 +1215,6 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccb->reas = SCCB_REAS_NONE;
         sccb->resp = SCCB_RESP_INFO;
 
-        FRAG_INVALIDATE((sccb_absolute_addr & STORAGE_KEY_PAGEMASK),
-                         STORAGE_KEY_PAGESIZE);
         break;
 
 #ifdef FEATURE_SYSTEM_CONSOLE
@@ -945,73 +1234,106 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
         /* Point to SCCB data area following SCCB header */
         evd_hdr = (SCCB_EVD_HDR*)(sccb+1);
-        evd_len = (evd_hdr->totlen[0] << 8) | evd_hdr->totlen[1];
+        FETCH_HW(evd_len,evd_hdr->totlen);
 
-        if (evd_hdr->type != SCCB_EVD_TYPE_MSG &&
-            evd_hdr->type != SCCB_EVD_TYPE_PRIOR)
-        {
-            sccb->reas = SCCB_REAS_NONE;
-            sccb->resp = SCCB_RESP_REJECT;
-            break;
-        }
+        switch(evd_hdr->type) {
 
-        /* Indicate Event Processed */
-        evd_hdr->flag |= SCCB_EVD_FLAG_PROC;
+        case SCCB_EVD_TYPE_MSG:
+        case SCCB_EVD_TYPE_PRIOR:
 
-        /* Point to the Message Control Data Block */
-        mcd_bk = (SCCB_MCD_BK*)(evd_hdr+1);
-        mcd_len = (mcd_bk->length[0] << 8) | mcd_bk->length[1];
+            /* Point to the Message Control Data Block */
+            mcd_bk = (SCCB_MCD_BK*)(evd_hdr+1);
+            FETCH_HW(mcd_len,mcd_bk->length);
 
-        obj_hdr = (SCCB_OBJ_HDR*)(mcd_bk+1);
+            obj_hdr = (SCCB_OBJ_HDR*)(mcd_bk+1);
 
-        while (mcd_len > sizeof(SCCB_MCD_BK))
-        {
-            obj_len = (obj_hdr->length[0] << 8) | obj_hdr->length[1];
-            obj_type = (obj_hdr->type[0] << 8) | obj_hdr->type[1];
-            if (obj_type == SCCB_OBJ_TYPE_MESSAGE)
+            while (mcd_len > sizeof(SCCB_MCD_BK))
             {
-                mto_bk = (SCCB_MTO_BK*)(obj_hdr+1);
-                event_msg = (BYTE*)(mto_bk+1);
-                event_msglen = obj_len -
-                        (sizeof(SCCB_OBJ_HDR) + sizeof(SCCB_MTO_BK));
-                if (event_msglen < 0)
+                FETCH_HW(obj_len,obj_hdr->length);
+                FETCH_HW(obj_type,obj_hdr->type);
+                if (obj_type == SCCB_OBJ_TYPE_MESSAGE)
                 {
-                    sccb->reas = SCCB_REAS_BUFF_LEN_ERR;
-                    sccb->resp = SCCB_RESP_BUFF_LEN_ERR;
-                    break;
-                }
-
-                /* Print line unless it is a response prompt */
-                if (!(mto_bk->ltflag[0] & SCCB_MTO_LTFLG0_PROMPT))
-                {
-                    for (i = 0, j = 0; i < event_msglen; i++)
+                    mto_bk = (SCCB_MTO_BK*)(obj_hdr+1);
+                    event_msg = (BYTE*)(mto_bk+1);
+                    event_msglen = obj_len -
+                            (sizeof(SCCB_OBJ_HDR) + sizeof(SCCB_MTO_BK));
+                    if (event_msglen < 0)
                     {
-                        message[j++] = isprint(ebcdic_to_ascii[event_msg[i]]) ?
-                            ebcdic_to_ascii[event_msg[i]] : 0x20;
-                            /* Break the line if too long */
-                            if(j > 79)
-                            {
-                                message[j] = '\0';
-                                logmsg ("%s\n", message);
-                                j = 0;
-                            }
+                        sccb->reas = SCCB_REAS_BUFF_LEN_ERR;
+                        sccb->resp = SCCB_RESP_BUFF_LEN_ERR;
+                        break;
                     }
-                    message[j] = '\0';
-                    if(j > 0)
-                        logmsg ("%s\n", message);
+    
+                    /* Print line unless it is a response prompt */
+                    if (!(mto_bk->ltflag[0] & SCCB_MTO_LTFLG0_PROMPT))
+                    {
+                        for (i = 0, j = 0; i < event_msglen; i++)
+                        {
+                            message[j++] = isprint(ebcdic_to_ascii[event_msg[i]]) ?
+                                ebcdic_to_ascii[event_msg[i]] : 0x20;
+                                /* Break the line if too long */
+                                if(j > 79)
+                                {
+                                    message[j] = '\0';
+                                    logmsg ("%s\n", message);
+                                    j = 0;
+                                }
+                        }
+                        message[j] = '\0';
+                        if(j > 0)
+                            logmsg ("%s\n", message);
 // if(!memcmp(message,"*IEE479W",8)) regs->cpustate = CPUSTATE_STOPPING;
+                    }
                 }
+                mcd_len -= obj_len;
+                (BYTE*)obj_hdr += obj_len;
             }
-            mcd_len -= obj_len;
-            (BYTE*)obj_hdr += obj_len;
+    
+            /* Indicate Event Processed */
+            evd_hdr->flag |= SCCB_EVD_FLAG_PROC;
+
+            /* Set response code X'0020' in SCCB header */
+            sccb->reas = SCCB_REAS_NONE;
+            sccb->resp = SCCB_RESP_COMPLETE;
+
+            break;
+
+
+#if defined(FEATURE_HARDWARE_LOADER)
+        case SCCB_EVD_TYPE_HARDWARE:
+
+            /* Indicate Event Processed */
+            evd_hdr->flag |= SCCB_EVD_FLAG_PROC;
+
+            hwl_bk = (SCCB_HWL_BK*)(evd_hdr+1);
+
+            if( ARCH_DEP(hwl_request)(sclp_command, hwl_bk) )
+            {
+                /* Set response code X'0040' in SCCB header */
+                sccb->reas = SCCB_REAS_NONE;
+                sccb->resp = SCCB_RESP_BACKOUT;
+            }
+            else
+            {
+                /* Set response code X'0020' in SCCB header */
+                sccb->reas = SCCB_REAS_NONE;
+                sccb->resp = SCCB_RESP_COMPLETE;
+            }
+
+            break;
+#endif /*defined(FEATURE_HARDWARE_LOADER)*/
+
+
+        default:
+
+            /* Set response code X'73F0' in SCCB header */
+            sccb->reas = SCCB_REAS_SYNTAX_ERROR;
+            sccb->resp = SCCB_RESP_SYNTAX_ERROR;
+
+            break;
+
         }
 
-        /* Set response code X'0020' in SCCB header */
-        sccb->reas = SCCB_REAS_NONE;
-        sccb->resp = SCCB_RESP_COMPLETE;
-
-        FRAG_INVALIDATE((sccb_absolute_addr & STORAGE_KEY_PAGEMASK),
-                         STORAGE_KEY_PAGESIZE);
         break;
 
     case SCLP_READ_EVENT_DATA:
@@ -1036,6 +1358,41 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
             break;
         }
 
+        /* Point to SCCB data area following SCCB header */
+        evd_hdr = (SCCB_EVD_HDR*)(sccb+1);
+
+#if defined(FEATURE_HARDWARE_LOADER)
+        hwl_bk = (SCCB_HWL_BK*)(evd_hdr+1);
+
+        if( ARCH_DEP(hwl_request)(sclp_command, hwl_bk) )
+        {
+            /* Zero all fields */
+            memset (evd_hdr, 0, sizeof(SCCB_EVD_HDR));
+
+            /* Set length in event header */
+            evd_len = sizeof(SCCB_EVD_HDR) + sizeof(SCCB_HWL_BK);
+            STORE_HW(evd_hdr->totlen, evd_len);
+
+            /* Set type in event header */
+            evd_hdr->type = SCCB_EVD_TYPE_HARDWARE;
+
+            /* Update SCCB length field if variable request */
+            if (sccb->type & SCCB_TYPE_VARIABLE)
+            {
+                /* Set new SCCB length */
+                sccblen = evd_len + sizeof(SCCB_HEADER);
+                STORE_HW(sccb->length, sccblen);
+                sccb->type &= ~SCCB_TYPE_VARIABLE;
+            }
+        
+            /* Set response code X'0020' in SCCB header */
+            sccb->reas = SCCB_REAS_NONE;
+            sccb->resp = SCCB_RESP_COMPLETE;
+            break;
+        }
+#endif /*defined(FEATURE_HARDWARE_LOADER)*/
+
+
         /* Set response code X'60F0' if no outstanding events */
         event_msglen = strlen(sysblk.scpcmdstr);
         if (event_msglen == 0)
@@ -1044,9 +1401,6 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
             sccb->resp = SCCB_RESP_NO_EVENTS;
             break;
         }
-
-        /* Point to SCCB data area following SCCB header */
-        evd_hdr = (SCCB_EVD_HDR*)(sccb+1);
 
         /* Point to the Event Data Block */
         evd_bk = (SCCB_EVD_BK*)(evd_hdr+1);
@@ -1073,14 +1427,12 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         {
             /* Set new SCCB length */
             sccblen = evd_len + sizeof(SCCB_HEADER);
-            sccb->length[0] = (sccblen >> 8) & 0xFF;
-            sccb->length[1] = sccblen & 0xFF;
+            STORE_HW(sccb->length, sccblen);
             sccb->type &= ~SCCB_TYPE_VARIABLE;
         }
 
         /* Set length in event header */
-        evd_hdr->totlen[0] = (evd_len >> 8) & 0xFF;
-        evd_hdr->totlen[1] = evd_len & 0xFF;
+        STORE_HW(evd_hdr->totlen, evd_len);
 
         /* Set type in event header */
         evd_hdr->type = sysblk.scpcmdtype ?
@@ -1088,18 +1440,15 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
         /* Set message length in event data block */
         i = evd_len - sizeof(SCCB_EVD_HDR);
-        evd_bk->msglen[0] = (i >> 8) & 0xFF;
-        evd_bk->msglen[1] = i & 0xFF;
+        STORE_HW(evd_bk->msglen, i);
         memcpy (evd_bk->const1, const1_template,
                                 sizeof(const1_template));
         i -= sizeof(const1_template) + 2;
-        evd_bk->cplen[0] = (i >> 8) & 0xFF;
-        evd_bk->cplen[1] = i & 0xFF;
+        STORE_HW(evd_bk->cplen, i);
         memcpy (evd_bk->const2, const2_template,
                                 sizeof(const2_template));
         i -= sizeof(const2_template) + 2;
-        evd_bk->tdlen[0] = (i >> 8) & 0xFF;
-        evd_bk->tdlen[1] = i & 0xFF;
+        STORE_HW(evd_bk->tdlen, i);
         memcpy (evd_bk->const3, const3_template,
                                 sizeof(const3_template));
         i -= sizeof(const3_template) + 2;
@@ -1120,8 +1469,6 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccb->reas = SCCB_REAS_NONE;
         sccb->resp = SCCB_RESP_COMPLETE;
 
-        FRAG_INVALIDATE((sccb_absolute_addr & STORAGE_KEY_PAGEMASK),
-                         STORAGE_KEY_PAGESIZE);
         break;
 
     case SCLP_WRITE_EVENT_MASK:
@@ -1142,7 +1489,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         evd_mask = (SCCB_EVENT_MASK*)(sccb+1);
 
         /* Get length of single mask field */
-        masklen = (evd_mask->length[0] << 8) | evd_mask->length[1];
+        FETCH_HW(masklen, evd_mask->length);
 
         /* Save old mask settings in order to suppress superflous messages */
         old_cp_recv_mask = sysblk.cp_recv_mask;
@@ -1162,6 +1509,14 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         /* Initialize sclp send and receive masks */
         sysblk.sclp_recv_mask = SCCB_EVENT_SUPP_RECV_MASK;
         sysblk.sclp_send_mask = SCCB_EVENT_SUPP_SEND_MASK;
+
+#if defined(FEATURE_HARDWARE_LOADER)
+        if(strlen(sysblk.hwl_fname))
+        {
+            sysblk.sclp_recv_mask |= SCCB_EVENT_HWL_MASK;
+            sysblk.sclp_send_mask |= SCCB_EVENT_HWL_MASK;
+        }
+#endif /*defined(FEATURE_HARDWARE_LOADER)*/
 
         /* Clear any pending command */
         sysblk.scpcmdstr[0] = '\0';
@@ -1183,15 +1538,13 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
             if (sysblk.cp_recv_mask != 0 || sysblk.cp_send_mask != 0)
                 logmsg ("HHC701I SYSCONS interface active\n")
             else
-                logmsg ("HHC702I SYSCONS interface inactive\n");
+                logmsg ("HHC702I SYSCONS interface inactive\n")
         }
 
         /* Set response code X'0020' in SCCB header */
         sccb->reas = SCCB_REAS_NONE;
         sccb->resp = SCCB_RESP_COMPLETE;
 
-        FRAG_INVALIDATE((sccb_absolute_addr & STORAGE_KEY_PAGEMASK),
-                         STORAGE_KEY_PAGESIZE);
         break;
 #endif /*FEATURE_SYSTEM_CONSOLE*/
 
@@ -1229,8 +1582,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         /* Verify expanded storage increment number */
         xstincnum = (sysblk.xpndsize << XSTORE_PAGESHIFT)
                         / XSTORE_INCREMENT_SIZE;
-        i = sccbxmap->incnum[0] << 24 | sccbxmap->incnum[1] << 16
-          | sccbxmap->incnum[2] << 8 | sccbxmap->incnum[3];
+        FETCH_FW(i, sccbxmap->incnum);
         if ( i < 1 || i > xstincnum )
         {
             sccb->reas = SCCB_REAS_INVALID_RSC;
@@ -1248,8 +1600,6 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccb->reas = SCCB_REAS_NONE;
         sccb->resp = SCCB_RESP_INFO;
 
-        FRAG_INVALIDATE((sccb_absolute_addr & STORAGE_KEY_PAGEMASK),
-                         STORAGE_KEY_PAGESIZE);
         break;
 
 #endif /*FEATURE_EXPANDED_STORAGE*/
@@ -1372,7 +1722,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                 if(i % 4 == 3)
                     logmsg(" ");
         }
-        if(i % 32 != 31)
+        if(i % 32 != 0)
             logmsg("\n");
 #endif    
 
@@ -1395,10 +1745,6 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     /* Set service signal external interrupt pending */
     sysblk.servparm = sccb_absolute_addr;
     sysblk.extpending = sysblk.servsig = 1;
-    set_doint(regs);
-
-    FRAG_INVALIDATE((sccb_absolute_addr & STORAGE_KEY_PAGEMASK), 
-                     STORAGE_KEY_PAGESIZE);
 
     /* Release the interrupt lock */
     release_lock (&sysblk.intlock);
@@ -1407,70 +1753,16 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     regs->psw.cc = 0;
 
 } /* end function service_call */
+#endif /*defined(FEATURE_SERVICE_PROCESSOR)*/
 
-#ifdef FEATURE_SYSTEM_CONSOLE
-/*-------------------------------------------------------------------*/
-/* Issue SCP command                                                 */
-/*                                                                   */
-/* This function is called from the control panel when the operator  */
-/* enters an HMC system console SCP command or SCP priority message. */
-/* The command is queued for processing by the SCLP_READ_EVENT_DATA  */
-/* service call, and a service signal interrupt is made pending.     */
-/*                                                                   */
-/* Input:                                                            */
-/*      command Null-terminated ASCII command string                 */
-/*      priomsg 0=SCP command, 1=SCP priority message                */
-/*-------------------------------------------------------------------*/
-void scp_command (BYTE *command, int priomsg)
-{
-    /* Error if disabled for priority messages */
-    if (priomsg && !(sysblk.cp_recv_mask & 0x00800000))
-    {
-        logmsg ("HHC703I SCP not receiving priority messages\n");
-        return;
-    }
 
-    /* Error if disabled for commands */
-    if (!priomsg && !(sysblk.cp_recv_mask & 0x80000000))
-    {
-        logmsg ("HHC704I SCP not receiving commands\n");
-        return;
-    }
+#if !defined(_GEN_ARCH)
 
-    /* Error if command string is missing */
-    if (strlen(command) < 1)
-    {
-        logmsg ("HHC705I No SCP command\n");
-        return;
-    }
+// #define  _GEN_ARCH 964
+// #include "service.c"
 
-    /* Obtain the interrupt lock */
-    obtain_lock (&sysblk.intlock);
+// #undef   _GEN_ARCH
+#define  _GEN_ARCH 390
+#include "service.c"
 
-    /* If a service signal is pending then reject the command
-       with message indicating that service processor is busy */
-    if (sysblk.servsig)
-    {
-        logmsg ("HHC706I Service Processor busy\n");
-
-        /* Release the interrupt lock */
-        release_lock (&sysblk.intlock);
-        return;
-    }
-
-    /* Save command string and message type for read event data */
-    sysblk.scpcmdtype = priomsg;
-    strncpy (sysblk.scpcmdstr, command, sizeof(sysblk.scpcmdstr));
-
-    /* Ensure termination of the command string */
-    sysblk.scpcmdstr[sizeof(sysblk.scpcmdstr)-1] = '\0';
-
-    /* Set service signal interrupt pending for read event data */
-    sysblk.servparm = 1;
-    sysblk.extpending = sysblk.servsig = 1;
-
-    /* Release the interrupt lock */
-    release_lock (&sysblk.intlock);
-
-} /* end function scp_command */
-#endif /*FEATURE_SYSTEM_CONSOLE*/
+#endif /*!defined(_GEN_ARCH)*/

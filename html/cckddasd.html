@@ -2,6 +2,7 @@
 <HTML>
 <HEAD><TITLE>
 Hercules: Compressed CKD Dasd Emulation</TITLE>
+<LINK REL=STYLESHEET TYPE="text/css" HREF="hercules.css">
 </HEAD>
 <BODY BGCOLOR="#ffffcc" TEXT="#000000" LINK="#0000A0"
       VLINK="#008040" ALINK="#000000">
@@ -258,7 +259,7 @@ These routines (as we all know;-) perform the following functions:
 <tr><td align="left" valign="top"><b>lseek</b></td>
      <td>Sets the current file offset to the specified value</td>
 <tr><td align="left" valign="top"><b>read </b></td>
-    <td>Reads the specified number of bytes from the current file offset 
+    <td>Reads the specified number of bytes from the current file offset
         to a buffer and increments the current file offset accordingly</td>
 <tr><td align="left" valign="top"><b>write</b></td>
     <td>Writes the specified number of bytes from a buffer to the current
@@ -294,8 +295,8 @@ Function <i>cckd_read_trk</i> scans the <i>track cache</i> array to see if the n
 image is cached.  (By default, a cylinder's worth of track images are cached).
 If the new track is found to be cached, then the <i>timestamp</i> in the cache entry
 is updated, and the track image pointed to by the cache entry is made <i>active</i>
-(this is known as a <i>cache hit</i>). 
-Otherwise, the cache entry with the oldest <i>timestamp</i> (called the 
+(this is known as a <i>cache hit</i>).
+Otherwise, the cache entry with the oldest <i>timestamp</i> (called the
 <i>least recently used</i> or <i>lru</i> entry) is <i>stolen</i>.
 <p>
 If the <i>stolen</i> cache entry has had it's track image buffer updated
@@ -326,7 +327,7 @@ signals 1 or more readahead threads, implemented in function <i>cckd_ra</i>.
 track.  <b>Note</b> readahead is currently <i>disabled</i> for windows32 due
 to some, as yet unknown, problem in the pthreads implementation.
 <p>
-If the <i>stolen</i> cache entry had had its track image buffer updated (and 
+If the <i>stolen</i> cache entry had had its track image buffer updated (and
 <i>cckd_write_trk</i> was called), then the <i>deferred-write-thread</i> is
 signalled to actually begin the process of writing the old updated track image.
 We see that the updated track image is not sheduled to be written until <i>after</i>
@@ -461,7 +462,7 @@ automatically converted when the blocks are read.
 The <i>ckd2cckd</i> utility can be used to create a new compressed CKD file from a
 regular CKD file.  Your disk images can be a combination of regular CKD files and
 compressed CKD files. Simply specify the names of your new compressed ckd files in
-<code>hercules.cnf</code> in place of the regular CKD file names.  
+<code>hercules.cnf</code> in place of the regular CKD file names.
 You can also use the <i>cckddump</i> program on an os/390 system to build a
 compressed CKD file from a real disk that can be transferred to your Hercules machine
 and used right away.
@@ -500,7 +501,7 @@ where <i>xxxx</i> is the device unit address.  For example,
 <b>sf=0500 ../mvs/shadows/mvsres_1.500</b>.
 <p>
 Specifying a <i>shadow_file_name</i> does not explicitly create a shadow file
-if the base file or current shadow file 
+if the base file or current shadow file
 is able to be opened read-write.  Otherwise, if the base file and all existing
 shadow files (if any) can only be opened read-only, then a new shadow file is created.
 <p>
@@ -531,7 +532,7 @@ To display the status and statistics for a shadow-enabled file,
 issue the following command on the Hercules console:
 <p><center>sfd<i>xxxx</i></center><br>
 This command displays status and statistics for the base file and all shadow files
-representing the emulated dasd.  The following data is displayed: 
+representing the emulated dasd.  The following data is displayed:
 <table>
 <tr><td>&nbsp <td valign="top"><b>size</b>    <td>The total size of the file
 <tr><td>&nbsp <td valign="top"><b>free</b>    <td>The amount of free space in the file as a percentage
