@@ -496,7 +496,7 @@ int     subchan;                        /* Subchannel number         */
         {
             fprintf (stderr,
                     "HHC022I Error in %s line %d: "
-                    "Device initialization failed for device %4.4X\n",
+                    "Initialization failed for device %4.4X\n",
                     fname, stmt, devnum);
             exit(1);
         }

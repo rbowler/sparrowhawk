@@ -1586,7 +1586,7 @@ int             outrec = 0;             /* Output record number      */
         return -1;
     }
 
-    /* Create the output file, with error if file already exists */
+    /* Create the output file */
     ofd = open (ofname, O_WRONLY | O_CREAT,
                 S_IRUSR | S_IWUSR | S_IRGRP);
     if (ofd < 0)

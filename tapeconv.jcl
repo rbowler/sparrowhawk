@@ -19,17 +19,17 @@
 //SYSUT2   DD  DSN=IBMUSER.AWSTAPE.DATASET,DISP=(,CATLG),               00181000
 //             UNIT=SYSDA,VOL=SER=VVVVVV,SPACE=(CYL,(5,5),RLSE)         00181100
 //        PEND                                                          00182000
-//GENTAPE EXEC ASMCLG                                                   00183000
-GENTAPE  TITLE 'Convert file to AWSTAPE format'                         00184000
+//ASMCLG  EXEC ASMCLG                                                   00183000
+TAPECONV TITLE 'Convert file to AWSTAPE format'                         00184000
 *---------------------------------------------------------------------* 00185000
 * Function:                                                           * 00186000
 *        This program converts a tape file to AWSTAPE format.         * 00187000
 *        It reads undefined length blocks of data from SYSUT1 and     * 00188000
 *        writes each block, prefixed by a 6-byte header, to SYSUT2.   * 00189000
 *---------------------------------------------------------------------* 00226000
-GENTAPE  CSECT                                                          03740000
+TAPECONV CSECT                                                          03740000
          LR    R12,R15                  Load base register              03750000
-         USING GENTAPE,R12              Establish addressability        03760000
+         USING TAPECONV,R12             Establish addressability        03760000
          OPEN  (SYSUT1,INPUT)           Open input DCB                  03770000
          TM    SYSUT1+48,X'10'          Is DCB open?                    03780000
          BZ    EXIT020                  No, exit with RC=20             03790000
@@ -43,6 +43,7 @@ GENLOOP  EQU   *                                                        03800000
          MVC   HDRPRVLN,HDRCURLN        Copy previous block length      03830000
          STCM  R4,B'0001',HDRCURLN      Store low-order length byte     03840000
          STCM  R4,B'0010',HDRCURLN+1    Store high-order length byte    03850000
+         MVI   HDRFLAG1,HDRF1BOR+HDRF1EOR  Set complete record flags
          MVC   SYSUT2+82(2),=H'6'       Set header length in DCB        03851001
          PUT   SYSUT2,HEADER            Write block header to SYSUT2    03860000
          STH   R4,SYSUT2+82             Set block length in DCB         03870001
@@ -51,6 +52,7 @@ GENLOOP  EQU   *                                                        03800000
 GENEOF   DS    0H                                                       03900000
          MVC   HDRPRVLN,HDRCURLN        Copy previous block length      03901000
          XC    HDRCURLN,HDRCURLN        Clear current block length      03901100
+         MVI   HDRFLAG1,HDRF1TMK        Set tape mark flag
          MVC   SYSUT2+82(2),=H'6'       Set header length in DCB        03902001
          PUT   SYSUT2,HEADER            Write block header to SYSUT2    03903000
          CLOSE (SYSUT1,,SYSUT2)         Close DCBs                      03910000
@@ -66,7 +68,11 @@ EXIT020  DS    0H                                                       04050000
 HEADER   DS    0CL6                     Block header                    04090000
 HDRCURLN DC    XL2'0000'                Current block length            04100100
 HDRPRVLN DC    XL2'0000'                Previous block length           04100202
-HDRFLAGS DC    XL2'0000'                Flags                           04100300
+HDRFLAG1 DC    X'00'                    Flags byte 1...                 04100300
+HDRF1BOR EQU   X'80'                    ...beginning of record
+HDRF1TMK EQU   X'40'                    ...tape mark
+HDRF1EOR EQU   X'20'                    ...end of record
+HDRFLAG2 DC    X'00'                    Flags byte 2
 *                                                                       04100400
 * Data Control Blocks                                                   04100500
 *                                                                       04100600

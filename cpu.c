@@ -5183,8 +5183,8 @@ static BYTE module[8];                  /* Module name               */
 
             /* Fetch PKM, SASN, AX, and PASN from first operand */
             dreg = vfetch8 ( effective_addr, ar1, regs );
-            pkm = (dreg & 0xFFFF000000000000) >> 48;
-            sasn = (dreg & 0xFFFF00000000) >> 32;
+            pkm = (dreg & 0xFFFF000000000000ULL) >> 48;
+            sasn = (dreg & 0xFFFF00000000ULL) >> 32;
             ax = (dreg & 0xFFFF0000) >> 16;
             pasn = dreg & 0xFFFF;
 

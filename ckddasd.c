@@ -1801,6 +1801,15 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
     /* RECALIBRATE                                                   */
     /*---------------------------------------------------------------*/
+        /* Command reject if recalibrate is issued to a 3390 */
+        if (dev->devtype == 0x3390)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_1);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
         /* Command reject if within the domain of a Locate Record */
         if (dev->ckdlocat)
         {
@@ -2697,7 +2706,7 @@ BYTE            key[256];               /* Key for search operations */
         case CKDOPER_ORIENT_HOME:
             /* For home orientation, compare the search CCHH
                with the CCHH in the track header */
-            if (memcmp (&trkhdr, cchhr, 4) != 0)
+            if (memcmp (&(trkhdr.cyl), cchhr, 4) != 0)
             {
                 ckd_build_sense (dev, 0, SENSE1_NRF, 0, 0, 0);
                 *unitstat = CSW_CE | CSW_DE | CSW_UC;

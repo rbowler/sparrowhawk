@@ -23,6 +23,7 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
+#include <sys/mtio.h>
 #include <sys/utsname.h>
 #include <sys/time.h>
 #include <netinet/in.h>
@@ -253,6 +254,9 @@ typedef struct _DEVBLK {
 	int	printrem;		/* Number of bytes remaining
 					   in print buffer	     */
 	/* Device dependent fields for tapedev */
+	BYTE	tapedevt;		/* Tape device type	     */
+	void   *omadesc;		/* -> OMA descriptor array   */
+	U32	curfilen;		/* Current file number	     */
 	long	curblkpos;		/* Offset from start of file
 					   to current block	     */
 	long	nxtblkpos;		/* Offset from start of file
@@ -261,6 +265,8 @@ typedef struct _DEVBLK {
 					   to previous block	     */
 	U32	curblkrem;		/* Number of bytes unread
 					   from current block	     */
+	U32	curbufoff;		/* Offset into buffer of data
+					   for next data chained CCW */
 	/* Device dependent fields for fbadasd */
 	unsigned int			/* Flags		     */
 		fbaxtdef:1;		/* 1=Extent defined	     */
