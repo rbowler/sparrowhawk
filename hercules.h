@@ -168,24 +168,26 @@ typedef void DEVXF (struct _DEVBLK *dev, BYTE code, BYTE flags,
 /* Structure definition for CPU register context		     */
 /*-------------------------------------------------------------------*/
 typedef struct _REGS {			/* Processor registers	     */
+	U64	ptimer; 		/* CPU timer		     */
+	U64	clkc;			/* Clock comparator	     */
+	U64	instcount;		/* Instruction counter	     */
+	TLBE	tlb[16];		/* Translation lookaside buf */
 	TID	cputid; 		/* CPU thread identifier     */
-	PSW	psw;			/* Program status word	     */
 	U32	gpr[16];		/* General purpose registers */
 	U32	cr[16]; 		/* Control registers	     */
 	U32	ar[16]; 		/* Access registers	     */
 	U32	fpr[8]; 		/* Floating point registers  */
 	U32	pxr;			/* Prefix register	     */
+	U32	tea;			/* Translation exception addr*/
 	U16	cpuad;			/* CPU address for STAP      */
+	PSW	psw;			/* Program status word	     */
+	BYTE	excarid;		/* Exception access register */
 	BYTE	itimer_pending; 	/* 1=Interrupt is pending for
 					     the interval timer      */
 	BYTE	cpustate;		/* CPU stopped/started state */
 	BYTE	restart;		/* 1=Restart interrpt pending*/
-	U64	ptimer; 		/* CPU timer		     */
-	U64	clkc;			/* Clock comparator	     */
-	U64	instcount;		/* Instruction counter	     */
 	jmp_buf progjmp;		/* longjmp destination for
 					   program check return      */
-	TLBE	tlb[16];		/* Translation lookaside buf */
     } REGS;
 
 /* Definitions for CPU state */
@@ -264,6 +266,7 @@ typedef struct _DEVBLK {
 	BYTE	devid[32];		/* Device identifier bytes   */
 	int	numdevchar;		/* Number of devchar bytes   */
 	BYTE	devchar[64];		/* Device characteristics    */
+	BYTE	pgid[11];		/* Path Group ID	     */
 	TID	tid;			/* Thread-id executing CCW   */
 	U32	ccwaddr;		/* Address of first CCW      */
 	int	ccwfmt; 		/* CCW format (0 or 1)	     */
@@ -538,6 +541,10 @@ void perform_external_interrupt (REGS *regs);
 int  service_call (U32 sclp_command, U32 sccb_absolute_addr);
 void *timer_update_thread (void *argp);
 
+/* Functions in module sort.c */
+int  compare_and_form_codeword (REGS *regs, U32 eaddr);
+int  update_tree (REGS *regs);
+
 /* Functions in module stack.c */
 void form_stack_entry (BYTE etype, U32 retna, U32 calla, REGS *regs);
 int  program_return_unstack (REGS *regs, U32 *lsedap);
@@ -575,6 +582,10 @@ int  device_attention (DEVBLK *dev, BYTE unitstat);
 /* Functions in module cardrdr.c */
 DEVIF cardrdr_init_handler;
 DEVXF cardrdr_execute_ccw;
+
+/* Functions in module cardpch.c */
+DEVIF cardpch_init_handler;
+DEVXF cardpch_execute_ccw;
 
 /* Functions in module console.c */
 void *console_connection_handler (void *arg);

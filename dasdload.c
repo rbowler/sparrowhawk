@@ -1076,7 +1076,7 @@ int             tolfact;                /* Device tolerance          */
     f4dscb->ds4hcchh[3] = 0;
     f4dscb->ds4noatk[0] = 0;
     f4dscb->ds4noatk[1] = 0;
-    f4dscb->ds4vtoci = DS4VTOCI_DOS;
+    f4dscb->ds4vtoci = 0;
     f4dscb->ds4noext = 1;
     f4dscb->ds4devsz[0] = (numcyls >> 8) & 0xFF;
     f4dscb->ds4devsz[1] = numcyls & 0xFF;

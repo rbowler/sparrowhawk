@@ -43,7 +43,7 @@
 
 /*-------------------------------------------------------------------*/
 /* Additional credits:                                               */
-/*      3480 Load Display command contributed by Jan Jaeger          */
+/*      3480 commands contributed by Jan Jaeger                      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -79,6 +79,15 @@
 #define SPG_PATHMODE_SINGLE     0x00    /* ...single path mode       */
 #define SPG_PATHMODE_RESV       0x08    /* ...reserved bit setting   */
 #define SPG_RESERVED            0x07    /* Reserved bits, must be 0  */
+
+/* Function control byte for Set Path Group ID command */
+#define SPG_SET_MULTIPATH       0x80    /* Set multipath mode        */
+#define SPG_SET_COMMAND         0x60    /* Set path command bits...  */
+#define SPG_SET_ESTABLISH       0x00    /* ...establish group        */
+#define SPG_SET_DISBAND         0x20    /* ...disband group          */
+#define SPG_SET_RESIGN          0x40    /* ...resign from group      */
+#define SPG_SET_COMMAND_RESV    0x60    /* ...reserved bit setting   */
+#define SPG_SET_RESV            0x1F    /* Reserved bits, must be 0  */
 
 /*-------------------------------------------------------------------*/
 /* Definitions for tape device type field in device block            */
@@ -1760,6 +1769,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     case 0xCB: /* 9-track 800 bpi */
     case 0xC3: /* 9-track 1600 bpi */
     case 0xD3: /* 9-track 6250 bpi */
+    case 0xDB: /* 3480 mode set */
     /*---------------------------------------------------------------*/
     /* MODE SET                                                      */
     /*---------------------------------------------------------------*/
@@ -1825,7 +1835,42 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
                 | SPG_PATHMODE_SINGLE;
 
         /* Bytes 1-11 contain the path group identifier */
-        memset (iobuf+1, 0x00, 11);
+        memcpy (iobuf+1, dev->pgid, 11);
+
+        /* Return unit status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0xAF:
+    /*---------------------------------------------------------------*/
+    /* SET PATH GROUP ID                                             */
+    /*---------------------------------------------------------------*/
+        /* Command reject if path group feature is not available */
+        if (dev->devtype != 0x3480)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Calculate residual byte count */
+        num = (count < 12) ? count : 12;
+        *residual = count - num;
+
+        /* Control information length must be at least 12 bytes */
+        if (count < 12)
+        {
+            dev->sense[0] = SENSE_CR;
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Byte 0 is the path group state byte */
+        if ((iobuf[0] & SPG_SET_COMMAND) == SPG_SET_ESTABLISH)
+        {
+            /* Bytes 1-11 contain the path group identifier */
+            memcpy (dev->pgid, iobuf+1, 11);
+        }
 
         /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;
@@ -1870,7 +1915,6 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         /* Calculate residual byte count */
         num = (count < 17) ? count : 17;
         *residual = count - num;
-        if (count < 17) *more = 1;
 
         /* Issue message on 3480 matrix display */
         issue_mount_msg (dev, iobuf);
@@ -1880,8 +1924,9 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         break;
 
     case 0xB7:
+    case 0xC7:
     /*---------------------------------------------------------------*/
-    /* ASSIGN                                                        */
+    /* ASSIGN/UNASSIGN                                               */
     /*---------------------------------------------------------------*/
         /* Command reject if path assignment is not supported */
         if (dev->devtype != 0x3480)

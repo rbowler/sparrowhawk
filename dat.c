@@ -247,10 +247,12 @@ asn_prog_check:
 
 /* Conditions which the caller may or may not program check */
 asn_afx_tran_excp:
+    regs->tea = asn;
     code = PGM_AFX_TRANSLATION_EXCEPTION;
     return code;
 
 asn_asx_tran_excp:
+    regs->tea = asn;
     code = PGM_ASX_TRANSLATION_EXCEPTION;
     return code;
 
@@ -616,22 +618,50 @@ TLBE   *tlbp;                           /* -> TLB entry              */
 U32     alet;                           /* Access list entry token   */
 U32     asteo;                          /* Real address of ASTE      */
 U32     aste[16];                       /* ASN second table entry    */
+int     stid;                           /* Segment table identifier..*/
+#define STID_PRIMARY    0               /* ..primary segment table   */
+#define STID_ARMODE     1               /* ..access register mode    */
+#define STID_SECONDARY  2               /* ..secondary segment table */
+#define STID_HOME       3               /* ..home segment table      */
+int     cc;                             /* Condition code            */
 U16     eax;                            /* Authorization index       */
 
     /* [3.11.3.1] Load the effective segment table descriptor */
     if (acctype == ACCTYPE_INSTFETCH)
-        std = (HOME_SPACE_MODE(&regs->psw)) ? regs->cr[13] :
-            regs->cr[1];
+    {
+        if (HOME_SPACE_MODE(&regs->psw))
+        {
+            stid = STID_HOME;
+            std = regs->cr[13];
+        }
+        else
+        {
+            stid = STID_PRIMARY;
+            std = regs->cr[1];
+        }
+    }
     else if (acctype == ACCTYPE_STACK)
+    {
+        stid = STID_HOME;
         std = regs->cr[13];
+    }
     else if (PRIMARY_SPACE_MODE(&regs->psw)
             || arn == USE_PRIMARY_SPACE)
+    {
+        stid = STID_PRIMARY;
         std = regs->cr[1];
+    }
     else if (SECONDARY_SPACE_MODE(&regs->psw)
             || arn == USE_SECONDARY_SPACE)
+    {
+        stid = STID_SECONDARY;
         std = regs->cr[7];
+    }
     else if (HOME_SPACE_MODE(&regs->psw))
+    {
+        stid = STID_HOME;
         std = regs->cr[13];
+    }
     else /* ACCESS_REGISTER_MODE */
     {
         /* [5.8.4.1] Select the access-list-entry token */
@@ -642,11 +672,13 @@ U16     eax;                            /* Authorization index       */
 
         case ALET_PRIMARY:
             /* [5.8.4.2] Obtain primary segment table designation */
+            stid = STID_PRIMARY;
             std = regs->cr[1];
             break;
 
         case ALET_SECONDARY:
             /* [5.8.4.2] Obtain secondary segment table designation */
+            stid = STID_SECONDARY;
             std = regs->cr[7];
             break;
 
@@ -663,6 +695,7 @@ U16     eax;                            /* Authorization index       */
                 goto tran_alet_excp;
 
             /* [5.8.4.9] Obtain the STD from word 2 of the ASTE */
+            stid = STID_ARMODE;
             std = aste[2];
 
         } /* end switch(alet) */
@@ -804,25 +837,48 @@ tran_prog_check:
 seg_tran_invalid:
     *xcode = PGM_SEGMENT_TRANSLATION_EXCEPTION;
     *raddr = sto;
-    return 1;
+    cc = 1;
+    goto tran_excp_addr;
 
 page_tran_invalid:
     *xcode = PGM_PAGE_TRANSLATION_EXCEPTION;
     *raddr = pto;
-    return 2;
+    cc = 2;
+    goto tran_excp_addr;
 
 page_tran_length:
     *xcode = PGM_PAGE_TRANSLATION_EXCEPTION;
     *raddr = pto;
-    return 3;
+    cc = 3;
+    goto tran_excp_addr;
 
 seg_tran_length:
     *xcode = PGM_SEGMENT_TRANSLATION_EXCEPTION;
     *raddr = sto;
-    return 3;
+    cc = 3;
+    goto tran_excp_addr;
 
 tran_alet_excp:
+    regs->excarid = arn;
     return 4;
+
+tran_excp_addr:
+    /* Set the translation exception address */
+    regs->tea = vaddr & 0x7FFFF000;
+    regs->tea |= stid;
+
+    /* Set bit 0 of the translation exception address if primary
+       or secondary mode and secondary segment table was selected */
+    if ((PRIMARY_SPACE_MODE(&regs->psw)
+        || SECONDARY_SPACE_MODE(&regs->psw))
+        && stid == STID_SECONDARY)
+        regs->tea |= 0x80000000;
+
+    /* Set the exception access identification */
+    regs->excarid = (acctype == ACCTYPE_INSTFETCH) ? 0 : arn;
+
+    /* Return condition code */
+    return cc;
 
 } /* end function translate_addr */
 
@@ -959,7 +1015,9 @@ U32     aaddr;                          /* Absolute address          */
 U32     block;                          /* 4K block number           */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=ALE or page protection  */
+#ifdef FEATURE_INTERVAL_TIMER
 PSA    *psa;                            /* -> Prefixed storage area  */
+#endif /*FEATURE_INTERVAL_TIMER*/
 U16     xcode;                          /* Exception code            */
 
     /* Convert logical address to real address */
@@ -1028,32 +1086,6 @@ vabs_prot_excp:
     return 0;
 
 vabs_prog_check:
-    /* Point to the PSA in main storage */
-    psa = (PSA*)(sysblk.mainstor + regs->pxr);
-
-    if (xcode == PGM_ALEN_TRANSLATION_EXCEPTION
-        || xcode == PGM_ALE_SEQUENCE_EXCEPTION
-        || xcode == PGM_ASTE_VALIDITY_EXCEPTION
-        || xcode == PGM_ASTE_SEQUENCE_EXCEPTION
-        || xcode == PGM_EXTENDED_AUTHORITY_EXCEPTION)
-        /* Store the access register number at PSA+160 */
-        psa->excarid = arn;
-
-    if (xcode == PGM_PAGE_TRANSLATION_EXCEPTION
-        || xcode == PGM_SEGMENT_TRANSLATION_EXCEPTION)
-    {
-        /* Store the access register number at PSA+160 */
-        psa->excarid = (acctype == ACCTYPE_INSTFETCH) ? 0 : arn;
-
-        /* Store the translation exception address at PSA+144 */
-        psa->tea[0] = (addr & 0x7F000000) >> 24;
-        psa->tea[1] = (addr & 0xFF0000) >> 16;
-        psa->tea[2] = (addr & 0xF000) >> 8;
-        psa->tea[3] = (regs->psw.space << 1) | regs->psw.armode;
-        if (SECONDARY_SPACE_MODE(&regs->psw)
-            && acctype != ACCTYPE_INSTFETCH)
-            psa->tea[0] |= 0x80;
-    }
     program_check (xcode);
     return 0;
 

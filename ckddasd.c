@@ -868,6 +868,82 @@ int             skiplen;                /* Number of bytes to skip   */
 
 
 /*-------------------------------------------------------------------*/
+/* Erase remainder of track                                          */
+/*-------------------------------------------------------------------*/
+static int ckd_erase ( DEVBLK *dev, BYTE *buf, U16 len, int *size,
+                BYTE *unitstat)
+{
+int             rc;                     /* Return code               */
+CKDDASD_RECHDR  rechdr;                 /* CKD record header         */
+BYTE            keylen;                 /* Key length                */
+U16             datalen;                /* Data length               */
+int             skiplen;                /* Number of bytes to skip   */
+
+    /* If oriented to count or key field, skip key and data */
+    if (dev->ckdorient == CKDORIENT_COUNT)
+        skiplen = dev->ckdcurkl + dev->ckdcurdl;
+    else if (dev->ckdorient == CKDORIENT_KEY)
+        skiplen = dev->ckdcurdl;
+    else
+        skiplen = 0;
+
+    if (skiplen > 0)
+    {
+        rc = ckd_skip (dev, skiplen, unitstat);
+        if (rc < 0) return rc;
+    }
+
+    /* Copy the count field from the buffer */
+    memset (&rechdr, 0, CKDDASD_RECHDR_SIZE);
+    memcpy (&rechdr, buf, (len < CKDDASD_RECHDR_SIZE) ?
+                                len : CKDDASD_RECHDR_SIZE);
+
+    /* Extract the key length and data length */
+    keylen = rechdr.klen;
+    datalen = (rechdr.dlen[0] << 8) + rechdr.dlen[1];
+
+    /* Return total count key and data size */
+    *size = CKDDASD_RECHDR_SIZE + keylen + datalen;
+
+    /* Logically erase rest of track by writing end of track marker */
+    rc = write (dev->fd, eighthexFF, 8);
+    if (rc < CKDDASD_RECHDR_SIZE)
+    {
+        /* Handle write error condition */
+        logmsg ("ckddasd: write error: %s\n",
+                strerror(errno));
+
+        /* Set unit check with equipment check */
+        ckd_build_sense (dev, SENSE_EC, 0, 0,
+                        FORMAT_1, MESSAGE_0);
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Backspace over end of track marker */
+    rc = lseek (dev->fd, -(CKDDASD_RECHDR_SIZE), SEEK_CUR);
+    if (rc < 0)
+    {
+        /* Handle seek error condition */
+        logmsg ("ckddasd: lseek error: %s\n",
+                strerror(errno));
+
+        /* Set unit check with equipment check */
+        ckd_build_sense (dev, SENSE_EC, 0, 0,
+                        FORMAT_1, MESSAGE_0);
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
+    /* Set the device orientation fields */
+    dev->ckdrem = 0;
+    dev->ckdorient = CKDORIENT_DATA;
+
+    return 0;
+} /* end function ckd_erase */
+
+
+/*-------------------------------------------------------------------*/
 /* Write count key and data fields                                   */
 /*-------------------------------------------------------------------*/
 static int ckd_write_ckd ( DEVBLK *dev, BYTE *buf, U16 len,
@@ -2481,6 +2557,67 @@ BYTE            key[256];               /* Key for search operations */
 
         /* Calculate number of bytes written and set residual count */
         size = dev->ckdcurkl + dev->ckdcurdl;
+        num = (count < size) ? count : size;
+        *residual = count - num;
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+
+        break;
+
+    case 0x11:
+    /*---------------------------------------------------------------*/
+    /* ERASE                                                         */
+    /*---------------------------------------------------------------*/
+        /* Command reject if the current track is in the DSF area */
+        if (dev->ckdcurcyl >= dev->ckdcyls)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Command reject if not within the domain of a Locate Record
+           and not preceded by either a Search ID Equal or Search Key
+           Equal that compared equal on all bytes, or a Write R0 or
+           Write CKD not within the domain of a Locate Record */
+        if (dev->ckdlcount == 0 && dev->ckdideq == 0
+            && dev->ckdkyeq == 0 && dev->ckdwckd == 0)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Command reject if file mask does not permit Write CKD */
+        if ((dev->ckdfmask & CKDMASK_WRCTL) != CKDMASK_WRCTL_ALLWRT
+            && (dev->ckdfmask & CKDMASK_WRCTL) != CKDMASK_WRCTL_INHWR0)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Check operation code if within domain of a Locate Record */
+        if (dev->ckdlcount > 0)
+        {
+            if ((dev->ckdloper & CKDOPER_CODE) != CKDOPER_WRTTRK)
+            {
+                ckd_build_sense (dev, SENSE_CR, 0, 0,
+                                FORMAT_0, MESSAGE_2);
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                break;
+            }
+        }
+
+        /* Write end of track marker */
+        rc = ckd_erase (dev, iobuf, count, &size, unitstat);
+        if (rc < 0) break;
+
+        /* Calculate number of bytes used and set residual count */
         num = (count < size) ? count : size;
         *residual = count - num;
 

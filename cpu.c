@@ -29,7 +29,7 @@ int     cc;
     cc = (r < -2147483648LL || r > 2147483647LL)? 3 :
         (r == 0)? 0 : (r < 0)? 1 : 2;
     return cc;
-}
+} /* end function add_signed */
 
 /*-------------------------------------------------------------------*/
 /* Subtract two signed fullwords giving a signed fullword result     */
@@ -46,7 +46,7 @@ int     cc;
     cc = (r < -2147483648LL || r > 2147483647LL)? 3 :
         (r == 0)? 0 : (r < 0)? 1 : 2;
     return cc;
-}
+} /* end function sub_signed */
 
 /*-------------------------------------------------------------------*/
 /* Add two unsigned fullwords giving an unsigned fullword result     */
@@ -63,7 +63,7 @@ int     cc;
     if ((r >> 32) == 0) cc = ((U32)r == 0)? 0 : 1;
     else cc = ((U32)r == 0)? 2 : 3;
     return cc;
-}
+} /* end function add_logical */
 
 /*-------------------------------------------------------------------*/
 /* Subtract two unsigned fullwords giving an unsigned fullword       */
@@ -79,7 +79,7 @@ int     cc;
     *result = (U32)r;
     cc = ((U32)r == 0) ? 2 : ((r >> 32) == 0) ? 1 : 3;
     return cc;
-}
+} /* end function sub_logical */
 
 /*-------------------------------------------------------------------*/
 /* Multiply two signed fullwords giving a signed doubleword result   */
@@ -92,7 +92,7 @@ S64     r;
     r = (S64)op1 * (S32)op2;
     *resulthi = (U64)r >> 32;
     *resultlo = (U64)r & 0xFFFFFFFF;
-}
+} /* end function mul_signed */
 
 /*-------------------------------------------------------------------*/
 /* Divide a signed doubleword dividend by a signed fullword divisor  */
@@ -114,7 +114,7 @@ S64     quot, rem;
     *quotient = (U32)quot;
     *remainder = (U32)rem;
     return 0;
-}
+} /* end function div_signed */
 
 /*-------------------------------------------------------------------*/
 /* Perform serialization                                             */
@@ -311,13 +311,41 @@ REGS   *regs = &(sysblk.regs[0]);
     /* Point to PSA in main storage */
     psa = (PSA*)(sysblk.mainstor + regs->pxr);
 
-    /* For ECMODE, store program interrupt code at PSA+X'8C' */
+    /* For ECMODE, store extended interrupt information in PSA */
     if ( regs->psw.ecmode )
     {
+        /* Store the program interrupt code at PSA+X'8C' */
         psa->pgmint[0] = 0;
         psa->pgmint[1] = regs->psw.ilc;
         psa->pgmint[2] = code >> 8;
         psa->pgmint[3] = code & 0xFF;
+
+        /* Store the access register number at PSA+160 */
+        if (code == PGM_PAGE_TRANSLATION_EXCEPTION
+            || code == PGM_SEGMENT_TRANSLATION_EXCEPTION
+            || code == PGM_ALEN_TRANSLATION_EXCEPTION
+            || code == PGM_ALE_SEQUENCE_EXCEPTION
+            || code == PGM_ASTE_VALIDITY_EXCEPTION
+            || code == PGM_ASTE_SEQUENCE_EXCEPTION
+            || code == PGM_EXTENDED_AUTHORITY_EXCEPTION)
+            psa->excarid = regs->excarid;
+
+        /* Store the translation exception address at PSA+144 */
+        if (code == PGM_PAGE_TRANSLATION_EXCEPTION
+            || code == PGM_SEGMENT_TRANSLATION_EXCEPTION
+            || code == PGM_AFX_TRANSLATION_EXCEPTION
+            || code == PGM_ASX_TRANSLATION_EXCEPTION
+            || code == PGM_PRIMARY_AUTHORITY_EXCEPTION
+            || code == PGM_SECONDARY_AUTHORITY_EXCEPTION
+            || code == PGM_SPACE_SWITCH_EVENT
+            || code == PGM_LX_TRANSLATION_EXCEPTION
+            || code == PGM_EX_TRANSLATION_EXCEPTION)
+        {
+            psa->tea[0] = (regs->tea & 0xFF000000) >> 24;
+            psa->tea[1] = (regs->tea & 0xFF0000) >> 16;
+            psa->tea[2] = (regs->tea & 0xFF00) >> 8;
+            psa->tea[3] = regs->tea & 0xFF;
+        }
     }
 
     /* Store current PSW at PSA+X'28' */
@@ -520,6 +548,16 @@ static BYTE module[8];                  /* Module name               */
             if (rc) {
                 program_check (PGM_SPACE_SWITCH_EVENT);
             }
+
+            break;
+
+        case 0x02:
+        /*-----------------------------------------------------------*/
+        /* 0102: UPT - Update Tree                               [E] */
+        /*-----------------------------------------------------------*/
+
+            /* Update Tree and set condition code */
+            regs->psw.cc = update_tree (regs);
 
             break;
 
@@ -2096,6 +2134,10 @@ static BYTE module[8];                  /* Module name               */
         /* Shift the signed value of the R1 register */
         (S32)regs->gpr[r1] >>= n;
 
+        /* Set the condition code */
+        regs->psw.cc = (S32)regs->gpr[r1] > 0 ? 2 :
+                       (S32)regs->gpr[r1] < 0 ? 1 : 0;
+
         break;
 
     case 0x8B:
@@ -2106,8 +2148,39 @@ static BYTE module[8];                  /* Module name               */
         /* Use rightmost six bits of operand address as shift count */
         n = effective_addr & 0x3F;
 
-        /* Shift the signed value of the R1 register */
-        (S32)regs->gpr[r1] <<= n;
+        /* Load the numeric and sign portions from the R1 register */
+        n1 = regs->gpr[r1] & 0x7FFFFFFF;
+        n2 = regs->gpr[r1] & 0x80000000;
+
+        /* Shift the numeric portion left n positions */
+        for (i = 0, j = 0; i < n; i++)
+        {
+            /* Shift bits 1-31 left one bit position */
+            n1 <<= 1;
+
+            /* Overflow if bit shifted out is unlike the sign bit */
+            if ((n1 & 0x80000000) != n2)
+                j = 1;
+        }
+
+        /* Load the updated value into the R1 register */
+        regs->gpr[r1] = (n1 & 0x7FFFFFFF) | n2;
+
+        /* Condition code 3 and program check if overflow occurred */
+        if (j)
+        {
+            regs->psw.cc = 3;
+            if ( regs->psw.fomask )
+            {
+                program_check (PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+                goto terminate;
+            }
+            break;
+        }
+
+        /* Set the condition code */
+        regs->psw.cc = (S32)regs->gpr[r1] > 0 ? 2 :
+                       (S32)regs->gpr[r1] < 0 ? 1 : 0;
 
         break;
 
@@ -2178,6 +2251,9 @@ static BYTE module[8];                  /* Module name               */
         regs->gpr[r1] = dreg >> 32;
         regs->gpr[r1+1] = dreg & 0xFFFFFFFF;
 
+        /* Set the condition code */
+        regs->psw.cc = (S64)dreg > 0 ? 2 : (S64)dreg < 0 ? 1 : 0;
+
         break;
 
     case 0x8F:
@@ -2195,11 +2271,40 @@ static BYTE module[8];                  /* Module name               */
         /* Use rightmost six bits of operand address as shift count */
         n = effective_addr & 0x3F;
 
-        /* Shift the R1 and R1+1 registers */
+        /* Load the signed value from the R1 and R1+1 registers */
         dreg = (U64)regs->gpr[r1] << 32 | regs->gpr[r1+1];
-        dreg = (U64)((S64)dreg << n);
+        m = ((S64)dreg < 0) ? 1 : 0;
+
+        /* Shift the numeric portion of the value */
+        for (i = 0, j = 0; i < n; i++)
+        {
+            /* Shift bits 1-63 left one bit position */
+            dreg <<= 1;
+
+            /* Overflow if bit shifted out is unlike the sign bit */
+            h = ((S64)dreg < 0) ? 1 : 0;
+            if (h != m)
+                j = 1;
+        }
+
+        /* Load updated value into the R1 and R1+1 registers */
         regs->gpr[r1] = dreg >> 32;
         regs->gpr[r1+1] = dreg & 0xFFFFFFFF;
+
+        /* Condition code 3 and program check if overflow occurred */
+        if (j)
+        {
+            regs->psw.cc = 3;
+            if ( regs->psw.fomask )
+            {
+                program_check (PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+                goto terminate;
+            }
+            break;
+        }
+
+        /* Set the condition code */
+        regs->psw.cc = (S64)dreg > 0 ? 2 : (S64)dreg < 0 ? 1 : 0;
 
         break;
 
@@ -3411,6 +3516,17 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 #endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+
+        case 0x1A:
+        /*-----------------------------------------------------------*/
+        /* B21A: CFC - Compare and Form Codeword                 [S] */
+        /*-----------------------------------------------------------*/
+
+            /* Compare and form codeword and set condition code */
+            regs->psw.cc =
+                compare_and_form_codeword (regs, effective_addr);
+
+            break;
 
         case 0x20:
         /*-----------------------------------------------------------*/

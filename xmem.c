@@ -188,6 +188,7 @@ U32     ssaste5;                        /* Subspace ASTE word 5      */
 int set_address_space_control (BYTE mode, REGS *regs)
 {
 BYTE    oldmode;                        /* Current addressing mode   */
+int     ssevent = 0;                    /* 1=space switch event      */
 
     /* Special operation exception if DAT is off or
        secondary-space control bit is zero */
@@ -238,10 +239,34 @@ BYTE    oldmode;                        /* Current addressing mode   */
               || regs->cr[13] & STD_SSEVENT
               || regs->psw.sysmask & PSW_PERMODE ))
     {
-        return 1;
+        /* Indicate space-switch event required */
+        ssevent = 1;
+
+        /* [6.5.2.34] Set the translation exception address */
+        if (mode == 3)
+        {
+            /* When switching into home-space mode, set the
+               translation exception address equal to the primary
+               ASN, with the high-order bit set equal to the value
+               of the primary space-switch-event control bit */
+            regs->tea = regs->cr[4] & CR4_PASN;
+            if (regs->cr[1] & STD_SSEVENT)
+                regs->tea |= 0x80000000;
+        }
+        else
+        {
+            /* When switching out of home-space mode, set the
+               translation exception address equal to zero, with
+               the high-order bit set equal to the value of the
+               home space-switch-event control bit */
+            regs->tea = 0;
+            if (regs->cr[13] & STD_SSEVENT)
+                regs->tea |= 0x80000000;
+        }
     }
 
-    return 0;
+    /* Return the space switch event flag */
+    return ssevent;
 
 } /* end function set_address_space_control */
 
@@ -336,6 +361,7 @@ U16     ax;                             /* Authorization index       */
         ax = (regs->cr[4] & CR4_AX) >> 16;
         if (authorize_asn (ax, aste, ATE_SECONDARY, regs))
         {
+            regs->tea = sasn;
             program_check (PGM_SECONDARY_AUTHORITY_EXCEPTION);
             return;
         }
@@ -525,7 +551,7 @@ U32     aste[16];                       /* ASN second table entry    */
 U32     pstd;                           /* Primary STD               */
 U16     ax;                             /* Authorization index       */
 U16     xcode;                          /* Exception code            */
-int     ssevent;                        /* 1=space switch event      */
+int     ssevent = 0;                    /* 1=space switch event      */
 
     /* Special operation exception if DAT is off, or
        not in primary space mode */
@@ -608,6 +634,7 @@ int     ssevent;                        /* 1=space switch event      */
         ax = (regs->cr[4] & CR4_AX) >> 16;
         if (authorize_asn (ax, aste, ATE_PRIMARY, regs))
         {
+            regs->tea = pasn;
             program_check (PGM_PRIMARY_AUTHORITY_EXCEPTION);
             return 0;
         }
@@ -620,9 +647,20 @@ int     ssevent;                        /* 1=space switch event      */
         pstd = subspace_replace (pstd, pasteo, NULL, regs);
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
-        /* Set flag if either current PSTD or new PSTD
-           space switch event bit is set to 1 */
-        ssevent = (regs->cr[1] & STD_SSEVENT) || (pstd & STD_SSEVENT);
+        /* Space switch if either current PSTD or new PSTD
+           space-switch-event control bit is set to 1 */
+        if ((regs->cr[1] & STD_SSEVENT) || (pstd & STD_SSEVENT))
+        {
+            /* [6.5.2.34] Set the translation exception address equal
+               to the old primary ASN, with the high-order bit set if
+               the old primary space-switch-event control bit is one */
+            regs->tea = regs->cr[4] & CR4_PASN;
+            if (regs->cr[1] & STD_SSEVENT)
+                regs->tea |= 0x80000000;
+
+            /* Indicate space-switch event required */
+            ssevent = 1;
+        }
 
         /* Load new primary STD into control register 1 */
         regs->cr[1] = pstd;
@@ -638,9 +676,6 @@ int     ssevent;                        /* 1=space switch event      */
     {
         /* For PT-cp use current primary STD */
         pstd = regs->cr[1];
-
-        /* Clear space switch event flag */
-        ssevent = 0;
     }
 
     /* Replace PSW amode, instruction address, and problem state bit */
@@ -724,10 +759,20 @@ U16     xcode;                          /* Exception code            */
                 return 0;
             }
 
-            /* Set flag if either the current PSTD or the
-               new PSTD indicates a space switch event */
-            ssevent = (regs->cr[1] & STD_SSEVENT)
-                        || (aste[2] & STD_SSEVENT);
+            /* Space switch if either current PSTD or new PSTD
+               space-switch-event control bit is set to 1 */
+            if ((regs->cr[1] & STD_SSEVENT) || (aste[2] & STD_SSEVENT))
+            {
+                /* [6.5.2.34] Set translation exception address equal
+                   to old primary ASN, and set high-order bit if old
+                   primary space-switch-event control bit is one */
+                regs->tea = regs->cr[4] & CR4_PASN;
+                if (regs->cr[1] & STD_SSEVENT)
+                    regs->tea |= 0x80000000;
+
+                /* Indicate space-switch event required */
+                ssevent = 1;
+            }
 
             /* Obtain new PSTD and AX from the ASTE */
             newregs.cr[1] = aste[2];
@@ -780,6 +825,7 @@ U16     xcode;                          /* Exception code            */
             ax = (newregs.cr[4] & CR4_AX) >> 16;
             if (authorize_asn (ax, aste, ATE_SECONDARY, &newregs))
             {
+                regs->tea = sasn;
                 program_check (PGM_SECONDARY_AUTHORITY_EXCEPTION);
                 return 0;
             }
@@ -836,7 +882,7 @@ int     etl;                            /* Entry table length        */
 U32     ete[8];                         /* Entry table entry         */
 int     numwords;                       /* ETE size (4 or 8 words)   */
 int     i;                              /* Array subscript           */
-int     ssevent;                        /* 1=space switch event      */
+int     ssevent = 0;                    /* 1=space switch event      */
 U32     retn;                           /* Return address and amode  */
 U32     aste[16];                       /* ASN second table entry    */
 U16     xcode;                          /* Exception code            */
@@ -890,6 +936,7 @@ U16     pasn;                           /* Primary ASN               */
     /* Program check if linkage index is outside the linkage table */
     if (ltl < ((pcnum & PC_LX) >> 13))
     {
+        regs->tea = pcnum;
         program_check (PGM_LX_TRANSLATION_EXCEPTION);
         return 0;
     }
@@ -913,6 +960,7 @@ U16     pasn;                           /* Primary ASN               */
     /* Program check if linkage entry invalid bit is set */
     if (lte & LTE_INVALID)
     {
+        regs->tea = pcnum;
         program_check (PGM_LX_TRANSLATION_EXCEPTION);
         return 0;
     }
@@ -926,6 +974,7 @@ U16     pasn;                           /* Primary ASN               */
     /* Program check if entry index is outside the entry table */
     if (etl < ((pcnum & PC_EX) >> 2))
     {
+        regs->tea = pcnum;
         program_check (PGM_EX_TRANSLATION_EXCEPTION);
         return 0;
     }
@@ -1095,9 +1144,6 @@ U16     pasn;                           /* Primary ASN               */
         /* Set SSTD equal to PSTD */
         regs->cr[7] = regs->cr[1];
 
-        /* Reset space switch event flag */
-        ssevent = 0;
-
     } /* end if(PC-cp) */
     else
     { /* Program call with space switching */
@@ -1109,9 +1155,19 @@ U16     pasn;                           /* Primary ASN               */
 
         /* Set flag if either the current or new PSTD indicates
            a space switch event, or if PER mode is set */
-        ssevent = (regs->cr[1] & STD_SSEVENT)
-                        || (aste[2] & STD_SSEVENT)
-                        || (regs->psw.sysmask & PSW_PERMODE);
+        if ((regs->cr[1] & STD_SSEVENT) || (aste[2] & STD_SSEVENT)
+            || (regs->psw.sysmask & PSW_PERMODE))
+        {
+            /* [6.5.2.34] Set the translation exception address equal
+               to the old primary ASN, with the high-order bit set if
+               the old primary space-switch-event control bit is one */
+            regs->tea = regs->cr[4] & CR4_PASN;
+            if (regs->cr[1] & STD_SSEVENT)
+                regs->tea |= 0x80000000;
+
+            /* Indicate space-switch event required */
+            ssevent = 1;
+        }
 
         /* Obtain new AX from the ASTE and new PASN from the ET */
         regs->cr[4] = (aste[1] & ASTE1_AX) | pasn;

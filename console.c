@@ -1054,6 +1054,9 @@ BYTE                    unitstat;       /* Status after receive data */
                 /* Indicate that data is available at the device */
                 dev->readpending = 1;
 
+                /* Release the device lock */
+                release_lock (&dev->lock);
+
                 /* Raise attention interrupt for the device */
                 rc = device_attention (dev, unitstat);
 
@@ -1062,6 +1065,7 @@ BYTE                    unitstat;       /* Status after receive data */
                         dev->devnum,
                         (rc == 0 ? "raised" : "rejected"));
 
+                continue;
             } /* end if(data available) */
 
             /* Release the device lock */

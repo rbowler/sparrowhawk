@@ -435,6 +435,11 @@ int     subchan;                        /* Subchannel number         */
             devexec = &cardrdr_execute_ccw;
             break;
 
+        case 0x3525:
+            devinit = &cardpch_init_handler;
+            devexec = &cardpch_execute_ccw;
+            break;
+
         case 0x1403:
         case 0x3211:
             devinit = &printer_init_handler;

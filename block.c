@@ -93,15 +93,15 @@ BYTE    pad;                            /* Padding byte              */
         addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
         len1--;
 
-    } /* end while(len1) */
+        /* Update the registers */
+        regs->gpr[r1] = addr1;
+        regs->gpr[r1+1] &= 0xFF000000;
+        regs->gpr[r1+1] |= len1;
+        regs->gpr[r2] = addr2;
+        regs->gpr[r2+1] &= 0xFF000000;
+        regs->gpr[r2+1] |= len2;
 
-    /* Update the registers */
-    regs->gpr[r1] = addr1;
-    regs->gpr[r1+1] &= 0xFF000000;
-    regs->gpr[r1+1] |= len1;
-    regs->gpr[r2] = addr2;
-    regs->gpr[r2+1] &= 0xFF000000;
-    regs->gpr[r2+1] |= len2;
+    } /* end while(len1) */
 
     return cc;
 
@@ -172,6 +172,14 @@ BYTE    pad;                            /* Padding byte              */
         else
             byte2 = pad;
 
+        /* Update the registers */
+        regs->gpr[r1] = addr1;
+        regs->gpr[r1+1] &= 0xFF000000;
+        regs->gpr[r1+1] |= len1;
+        regs->gpr[r2] = addr2;
+        regs->gpr[r2+1] &= 0xFF000000;
+        regs->gpr[r2+1] |= len2;
+
         /* Compare operand bytes, set condition code if unequal */
         if (byte1 != byte2)
         {
@@ -180,14 +188,6 @@ BYTE    pad;                            /* Padding byte              */
         } /* end if */
 
     } /* end while(len1||len2) */
-
-    /* Update the registers */
-    regs->gpr[r1] = addr1;
-    regs->gpr[r1+1] &= 0xFF000000;
-    regs->gpr[r1+1] |= len1;
-    regs->gpr[r2] = addr2;
-    regs->gpr[r2+1] &= 0xFF000000;
-    regs->gpr[r2+1] |= len2;
 
     return cc;
 
@@ -265,13 +265,13 @@ BYTE    pad;                            /* Padding byte              */
         addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
         len1--;
 
-    } /* end for(i) */
+        /* Update the registers */
+        regs->gpr[r1] = addr1;
+        regs->gpr[r1+1] = len1;
+        regs->gpr[r3] = addr2;
+        regs->gpr[r3+1] = len2;
 
-    /* Update the registers */
-    regs->gpr[r1] = addr1;
-    regs->gpr[r1+1] = len1;
-    regs->gpr[r3] = addr2;
-    regs->gpr[r3+1] = len2;
+    } /* end for(i) */
 
     return cc;
 
@@ -351,6 +351,12 @@ BYTE    pad;                            /* Padding byte              */
         else
             byte2 = pad;
 
+        /* Update the registers */
+        regs->gpr[r1] = addr1;
+        regs->gpr[r1+1] = len1;
+        regs->gpr[r3] = addr2;
+        regs->gpr[r3+1] = len2;
+
         /* Compare operand bytes, set condition code if unequal */
         if (byte1 != byte2)
         {
@@ -359,12 +365,6 @@ BYTE    pad;                            /* Padding byte              */
         } /* end if */
 
     } /* end for(i) */
-
-    /* Update the registers */
-    regs->gpr[r1] = addr1;
-    regs->gpr[r1+1] = len1;
-    regs->gpr[r3] = addr2;
-    regs->gpr[r3+1] = len2;
 
     return cc;
 

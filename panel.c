@@ -345,11 +345,8 @@ BYTE    c;                              /* Character work area       */
         if (delim == '.') *eaddr += *saddr - 1;
     }
 
-    *saddr &= 0x7FFFFFFF;
-    *eaddr &= 0x7FFFFFFF;
-
     /* Check for valid range */
-    if (*eaddr < *saddr)
+    if (*saddr > 0x7FFFFFFF || *eaddr > 0x7FFFFFFF || *eaddr < *saddr)
     {
         logmsg ("Invalid range: %s\n", operand);
         return -1;
@@ -670,14 +667,8 @@ BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
             return NULL;
         }
 
-        /* Obtain the device lock */
-        obtain_lock (&dev->lock);
-
         /* Raise attention interrupt for the device */
         rc = device_attention (dev, CSW_ATTN);
-
-        /* Release the device lock */
-        release_lock (&dev->lock);
 
         /* Issue error message is device was busy or pending */
         if (rc != 0)

@@ -463,7 +463,7 @@ int     rem;                            /* Byte count for zero fill  */
         rba = (dev->fbalcblk - dev->fbaxfirst
                 + dev->fbaxblkn) * dev->fbablksiz;
 
-        DEVTRACE("fbadasd: Positioning to %8.8lx (%lu)\n", rba, rba);
+        DEVTRACE("fbadasd: Positioning to %8.8lX (%lu)\n", rba, rba);
 
         rc = lseek (dev->fd, rba, SEEK_SET);
         if (rc < 0)

@@ -99,7 +99,9 @@ BYTE            c;                      /* Print character           */
     /* Open the device file if necessary */
     if (dev->fd < 0 && !IS_CCW_SENSE(code))
     {
-        rc = open (dev->filename, O_WRONLY);
+        rc = open (dev->filename,
+                    O_WRONLY | O_CREAT | O_TRUNC,
+                    S_IRUSR | S_IWUSR | S_IRGRP);
         if (rc < 0)
         {
             /* Handle open failure */

@@ -1539,17 +1539,22 @@ DEVBLK *dev;                            /* -> Device control block   */
 /*-------------------------------------------------------------------*/
 /* DEVICE ATTENTION                                                  */
 /* Raises an unsolicited interrupt condition for a specified device. */
-/* Note: The caller MUST hold the device lock for the device.        */
 /* Return value is 0 if successful, 1 if device is busy or pending   */
 /*-------------------------------------------------------------------*/
 int
 device_attention (DEVBLK *dev, BYTE unitstat)
 {
+    /* Obtain the device lock */
+    obtain_lock (&dev->lock);
+
     /* If device is already busy or interrupt pending or
        status pending then do not present interrupt */
     if (dev->busy || dev->pending
         || (dev->scsw.flag3 & SCSW3_SC_PEND))
+    {
+        release_lock (&dev->lock);
         return 1;
+    }
 
 #ifdef FEATURE_S370_CHANNEL
     /* Set CSW for attention interrupt */
@@ -1581,6 +1586,9 @@ device_attention (DEVBLK *dev, BYTE unitstat)
 
     /* Set the interrupt pending flag for this device */
     dev->pending = 1;
+
+    /* Release the device lock */
+    release_lock (&dev->lock);
 
     /* Signal waiting CPUs that an interrupt is pending */
     obtain_lock (&sysblk.intlock);
