@@ -9,6 +9,9 @@
 /* and function prototypes.					     */
 /*-------------------------------------------------------------------*/
 
+#define _REENTRANT    /* Ensure that reentrant code is generated *JJ */
+#define _THREAD_SAFE            /* Some systems use this instead *JJ */
+
 #include "features.h"
 
 #if !defined(_HERCULES_H)
@@ -122,21 +125,6 @@ typedef pthread_attr_t			ATTR;
 	pthread_mutex_init((plk),NULL)
 #define obtain_lock(plk) \
 	pthread_mutex_lock((plk))
-#if MAX_CPU_ENGINES == 1
- #define OBTAIN_MAINLOCK(_register_context)
- #define RELEASE_MAINLOCK(_register_context)
-#else
- #define OBTAIN_MAINLOCK(_register_context) \
-	{ \
-	    pthread_mutex_lock(&sysblk.mainlock); \
-	    (_register_context)->mainlock = 1; \
-	}
- #define RELEASE_MAINLOCK(_register_context) \
-	{ \
-	    (_register_context)->mainlock = 0; \
-	    pthread_mutex_unlock(&sysblk.mainlock); \
-	}
-#endif
 #define release_lock(plk) \
 	pthread_mutex_unlock((plk))
 #define initialize_condition(pcond) \
@@ -176,8 +164,6 @@ typedef int				ATTR;
 #define signal_thread(tid,signo)	raise(signo)
 #define thread_id()			0
 #define wait_timed_condition(pcond,plk,tm) *(pcond)=1
-#define OBTAIN_MAINLOCK(_register_context)
-#define RELEASE_MAINLOCK(_register_context)
 #endif
 
 /*-------------------------------------------------------------------*/
@@ -351,7 +337,8 @@ typedef struct _REGS {			/* Processor registers	     */
 	U32	brdcstpalb;		/* purge_alb() pending	     */
 	U32	brdcstptlb;		/* purge_tlb() pending	     */
 	unsigned int			/* Flags		     */
-		mainlock:1;		/* MAINLOCK held indicator   */
+		mainlock:1,		/* MAINLOCK held indicator   */
+		mainsync:1;		/* MAINLOCK sync wait        */
 // #ifdef SMP_SERIALIZATION
 		/* Locking and unlocking the serialisation lock causes
 		   the processor cache to be flushed this is used to
@@ -430,6 +417,7 @@ typedef struct _SYSBLK {
 	int	panrate;		/* Panel refresh rate	     */
 	struct _DEVBLK *firstdev;	/* -> First device block     */
 	U16	highsubchan;		/* Highest subchannel + 1    */
+        U32     chp_reset[8];           /* Channel path reset masks  */
         struct _DEVBLK *ioq;            /* I/O queue                 */
         LOCK    ioqlock;                /* I/O queue lock            */
         COND    ioqcond;                /* I/O queue condition       */
@@ -457,6 +445,9 @@ typedef struct _SYSBLK {
 #endif /*INTERRUPTS_FAST_CHECK*/
 		sigpbusy:1,		/* 1=Signal facility in use  */
 		sigintreq:1,		/* 1=SIGINT request pending  */
+#ifdef OPTION_CKD_KEY_TRACING
+                ckdkeytrace:1,          /* 1=Log CKD_KEY_TRACE       */
+#endif /*OPTION_CKD_KEY_TRACING*/
 		insttrace:1,		/* 1=Instruction trace	     */
 		inststep:1,		/* 1=Instruction step	     */
 		instbreak:1;		/* 1=Have breakpoint	     */
@@ -474,11 +465,6 @@ typedef struct _SYSBLK {
 	int	msgpiper;		/* Message pipe read handle  */
 	U64	pgminttr;		/* Program int trace mask    */
 	int	pcpu;			/* Tgt CPU panel cmd & displ */
-// #if defined(FEATURE_HARDWARE_LOADER)
-	TID	hwl_tid;		/* Thread id of the hardware
-					   loader		 *JJ */
-	BYTE	hwl_fname[256]; 	/* CFCC core image	 *JJ */
-// #endif /*defined(FEATURE_HARDWARE_LOADER)*/
 
 #if defined(OPTION_INSTRUCTION_COUNTING)
 #define IMAP_FIRST sysblk.imap01
@@ -596,6 +582,7 @@ typedef struct _DEVBLK {
 					   in keyboard read buffer   */
 	/* Device dependent fields for cardrdr */
 	unsigned int			/* Flags		     */
+		multifile:1,	/* 1=auto-open next i/p file */
 		rdreof:1,		/* 1=Unit exception at EOF   */
 		ebcdic:1,		/* 1=Card deck is EBCDIC     */
 		ascii:1,		/* 1=Convert ASCII to EBCDIC */
@@ -1009,6 +996,12 @@ extern int extgui;              /* external gui present */
 #endif /*EXTERNALGUI*/
 
 /*-------------------------------------------------------------------*/
+/* Global data areas and functions in module cpu.c                   */
+/*-------------------------------------------------------------------*/
+extern const char* arch_name[];
+extern const char* get_arch_mode_string(REGS* regs);
+
+/*-------------------------------------------------------------------*/
 /* Function prototypes						     */
 /*-------------------------------------------------------------------*/
 
@@ -1041,7 +1034,7 @@ void panel_display (void);
 #define ACCTYPE_IVSK		7	/* Insert Virtual Storage Key*/
 #define ACCTYPE_STACK		8	/* Linkage stack operations  */
 #define ACCTYPE_BSG		9	/* Branch in Subspace Group  */
-#define ACCTYPE_LOCKPAGE       10	/* Lock page		     */
+#define ACCTYPE_PTE            10	/* Return PTE raddr          */
 #define ACCTYPE_SIE	       11	/* SIE host translation      */
 #define ACCTYPE_STRAG	       12	/* Store real address	     */
 

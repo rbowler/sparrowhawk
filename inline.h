@@ -19,7 +19,7 @@ _DAT_C_STATIC U16 ARCH_DEP(translate_alet) (U32 alet, U16 eax,
 _DAT_C_STATIC void ARCH_DEP(purge_alb) (REGS *regs);
 _DAT_C_STATIC int ARCH_DEP(translate_addr) (VADR vaddr, int arn,
 	   REGS *regs, int acctype, RADR *raddr, U16 *xcode, int *priv,
-		       int *prot, int *pstid, U32 *xpblk, BYTE *xpkey);
+		                                int *prot, int *pstid);
 _DAT_C_STATIC void ARCH_DEP(purge_tlb) (REGS *regs);
 _DAT_C_STATIC void ARCH_DEP(invalidate_pte) (BYTE ibyte, int r1,
 						   int r2, REGS *regs);
@@ -31,7 +31,7 @@ _DAT_C_STATIC RADR s390_logical_to_abs (U32 addr, int arn, REGS *regs,
 					       int acctype, BYTE akey);
 _DAT_C_STATIC int s390_translate_addr (U32 vaddr, int arn, REGS *regs,
 		       int acctype, RADR *raddr, U16 *xcode, int *priv,
-		       int *prot, int *pstid, U32 *xpblk, BYTE *xpkey);
+		                                int *prot, int *pstid);
 #endif /*defined(_FEATURE_SIE)*/
 
 #if defined(_FEATURE_ZSIE)
@@ -39,7 +39,7 @@ _DAT_C_STATIC RADR z900_logical_to_abs (U64 addr, int arn, REGS *regs,
 					       int acctype, BYTE akey);
 _DAT_C_STATIC int z900_translate_addr (U64 vaddr, int arn, REGS *regs,
 		       int acctype, RADR *raddr, U16 *xcode, int *priv,
-		       int *prot, int *pstid, U32 *xpblk, BYTE *xpkey);
+		                                int *prot, int *pstid);
 #endif /*defined(_FEATURE_ZSIE)*/
 
 _VSTORE_C_STATIC void ARCH_DEP(vstorec) (void *src, BYTE len,
@@ -62,7 +62,7 @@ _VSTORE_C_STATIC U32 ARCH_DEP(vfetch4) (VADR addr, int arn,
 							   REGS *regs);
 _VSTORE_C_STATIC U64 ARCH_DEP(vfetch8) (VADR addr, int arn,
 							   REGS *regs);
-_VSTORE_C_STATIC void ARCH_DEP(instfetch) (BYTE *dest, VADR addr,
+_VFETCH_C_STATIC void ARCH_DEP(instfetch) (BYTE *dest, VADR addr,
 							   REGS *regs);
 _VSTORE_C_STATIC void ARCH_DEP(move_chars) (VADR addr1, int arn1,
       BYTE key1, VADR addr2, int arn2, BYTE key2, int len, REGS *regs);
@@ -70,11 +70,11 @@ _VSTORE_C_STATIC void ARCH_DEP(validate_operand) (VADR addr, int arn,
 				     int len, int acctype, REGS *regs);
 
 #if defined(_FEATURE_SIE)
-_VSTORE_C_STATIC void s370_instfetch (BYTE *dest, U32 addr, REGS *regs);
+_VFETCH_C_STATIC void s370_instfetch (BYTE *dest, U32 addr, REGS *regs);
 #endif /*defined(_FEATURE_SIE)*/
 
 #if defined(_FEATURE_ZSIE)
-_VSTORE_C_STATIC void s390_instfetch (BYTE *dest, U32 addr, REGS *regs);
+_VFETCH_C_STATIC void s390_instfetch (BYTE *dest, U32 addr, REGS *regs);
 #endif /*defined(_FEATURE_ZSIE)*/
 
 #if !defined(_INLINE_H)

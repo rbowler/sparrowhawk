@@ -419,8 +419,7 @@ VADR    effective_addr2,
            then call the hypervisor to end this timeslice,
            this to prevent this virtual CPU monopolizing
            the physical CPU on a spinlock */
-        if(regs->psw.cc && sysblk.numcpu > 1
-            && sysblk.brdcstncpu == 0)
+        if(regs->psw.cc && sysblk.numcpu > 1)
             usleep(1L);
 #endif MAX_CPU_ENGINES > 1
 
@@ -1236,6 +1235,8 @@ int     rc;                             /* Return code               */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
+    RETURN_INTCHECK(regs);
+
 }
 
 
@@ -1246,6 +1247,7 @@ DEF_INST(test_and_set)
 {
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
+RADR    abs;                            /* Absolute address          */
 BYTE    obyte;                          /* Operand byte              */
 
     S(inst, execflag, regs, b2, effective_addr2);
@@ -1253,14 +1255,18 @@ BYTE    obyte;                          /* Operand byte              */
     /* Perform serialization before starting operation */
     PERFORM_SERIALIZATION (regs);
 
+    abs = LOGICAL_TO_ABS (effective_addr2, b2, regs,
+					ACCTYPE_WRITE, regs->psw.pkey);
+
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
     /* Fetch byte from operand address */
-    obyte = ARCH_DEP(vfetchb) ( effective_addr2, b2, regs );
+    obyte = sysblk.mainstor[abs];
 
     /* Set all bits of operand to ones */
-    ARCH_DEP(vstoreb) ( 0xFF, effective_addr2, b2, regs );
+    if(obyte != 0xFF)
+        sysblk.mainstor[abs] = 0xFF;
 
     /* Release main-storage access lock */
     RELEASE_MAINLOCK(regs);
@@ -1275,6 +1281,17 @@ BYTE    obyte;                          /* Operand byte              */
     if(regs->sie_state && (regs->siebk->ic[0] & SIE_IC0_TS1))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 #endif /*defined(_FEATURE_SIE)*/
+
+#if MAX_CPU_ENGINES > 1
+        /* It this is a failed locked operation
+           and there is more then 1 CPU in the configuration
+           and there is no broadcast synchronization in progress
+           then call the hypervisor to end this timeslice,
+           this to prevent this virtual CPU monopolizing
+           the physical CPU on a spinlock */
+        if(regs->psw.cc && sysblk.numcpu > 1)
+            usleep(1L);
+#endif MAX_CPU_ENGINES > 1
 
 }
 
@@ -1448,7 +1465,8 @@ int     i;                              /* Integer work areas        */
         dbyte = ARCH_DEP(vfetchb) ( effective_addr1, b1, regs );
 
         /* Fetch function byte from second operand */
-        sbyte = ARCH_DEP(vfetchb) ( effective_addr2 + dbyte, b2, regs );
+        sbyte = ARCH_DEP(vfetchb) ( (effective_addr2 + dbyte) 
+                                   & ADDRESS_MAXWRAP(regs), b2, regs );
 
         /* Test for non-zero function byte */
         if (sbyte != 0) {
@@ -1656,11 +1674,10 @@ int     ar1 = 4;                        /* Access register number    */
             break;
         }
 
-        regs->GR_L(5) = tempword1;
-
         /* Check bit 0 of GR0 */
         if ( ((U32) regs->GR_L(0)) < 0 )
         {
+            regs->GR_L(5) = tempword1;
             cc = 3;
             break;
         }
@@ -1671,6 +1688,8 @@ int     ar1 = 4;                        /* Access register number    */
         tempaddress &= ADDRESS_MAXWRAP(regs);
         tempword2 = ARCH_DEP(vfetch4) ( tempaddress, ar1, regs );
         tempword3 = ARCH_DEP(vfetch4) ( tempaddress + 4, ar1, regs );
+
+        regs->GR_L(5) = tempword1;
 
         if ( regs->GR_L(0) == tempword2 )
         {

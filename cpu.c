@@ -269,7 +269,7 @@ static char *pgmintname[] = {
         /* 16 */        "Trace-table exception",
         /* 17 */        "ASN-translation exception",
         /* 18 */        "Page access exception",
-        /* 19 */        "Vector operation exception",
+        /* 19 */        "Vector/Crypto operation exception",
         /* 1A */        "Page state exception",
         /* 1B */        "Page transition exception",
         /* 1C */        "Space-switch event",
@@ -407,6 +407,8 @@ static char *pgmintname[] = {
       || code == PGM_SPECIFICATION_EXCEPTION
       || code == PGM_TRANSLATION_SPECIFICATION_EXCEPTION ))
     {
+            realregs->psw.ilc = (realregs->inst[0] < 0x40) ? 2 :
+                                (realregs->inst[0] < 0xC0) ? 4 : 6;
             realregs->psw.IA += realregs->psw.ilc;
             realregs->psw.IA &= ADDRESS_MAXWRAP(realregs);
     }
@@ -457,6 +459,8 @@ static char *pgmintname[] = {
       /* Interception is mandatory for the following exceptions */
       (  code != PGM_PROTECTION_EXCEPTION
       && code != PGM_ADDRESSING_EXCEPTION
+      && code != PGM_SPECIFICATION_EXCEPTION
+      && code != PGM_SPECIAL_OPERATION_EXCEPTION
 #ifdef FEATURE_VECTOR_FACILITY
       && code != PGM_VECTOR_OPERATION_EXCEPTION
 #endif /*FEATURE_VECTOR_FACILITY*/
@@ -485,13 +489,24 @@ static char *pgmintname[] = {
     }
     else
     {
-        /* Set the main storage reference and change bits */
-        STORAGE_KEY(regs->sie_state) |= (STORKEY_REF | STORKEY_CHANGE);
-
         /* This is a guest interruption interception so point to
            the interruption parm area in the state descriptor
-           rather then the PSA */
-        psa = (void*)(sysblk.mainstor + regs->sie_state + SIE_IP_PSA_OFFSET);
+           rather then the PSA, except for the operation exception */
+        if(code != PGM_OPERATION_EXCEPTION)
+        {
+            psa = (void*)(sysblk.mainstor + regs->sie_state + SIE_IP_PSA_OFFSET);
+            /* Set the main storage reference and change bits */
+            STORAGE_KEY(regs->sie_state) |= (STORKEY_REF | STORKEY_CHANGE);
+        }
+        else
+        {
+            /* Point to PSA in main storage */
+            psa = (void*)(sysblk.mainstor + px);
+
+            /* Set the main storage reference and change bits */
+            STORAGE_KEY(px) |= (STORKEY_REF | STORKEY_CHANGE);
+        }
+
         nointercept = 0;
     }
 #endif /*defined(_FEATURE_SIE)*/
@@ -606,11 +621,11 @@ static char *pgmintname[] = {
         ARCH_DEP(store_psw) (realregs, psa->pgmold);
 
         /* Load new PSW from PSA+X'68' or PSA+X'1D0' for ESAME */
-        if ( ARCH_DEP(load_psw) (realregs, psa->pgmnew) )
+        if ( (code = ARCH_DEP(load_psw) (realregs, psa->pgmnew)) )
         {
 #if defined(_FEATURE_SIE)
             if(realregs->sie_state)
-                longjmp(realregs->progjmp, SIE_INTERCEPT_VALIDITY);
+                longjmp(realregs->progjmp, code);
             else
 #endif /*defined(_FEATURE_SIE)*/
             {
@@ -823,8 +838,6 @@ void s390_run_cpu (REGS *regs);
 void z900_run_cpu (REGS *regs);
 static void (* run_cpu[GEN_MAXARCH]) (REGS *regs) =
                 { s370_run_cpu, s390_run_cpu, z900_run_cpu };
-static char *arch_name[GEN_MAXARCH] =
-                { "S/370", "ESA/390", "ESAME" };
 
 void *cpu_thread (REGS *regs)
 {
@@ -843,8 +856,8 @@ void *cpu_thread (REGS *regs)
             getpriority(PRIO_PROCESS,0));
 #endif
 
-    logmsg ("HHC630I CPU%4.4X Architecture Mode %s\n",regs->cpuad,
-                                arch_name[regs->arch_mode]);
+    logmsg ("HHC630I CPU%4.4X Architecture Mode %s\n",
+		regs->cpuad,get_arch_mode_string(regs));
 
 #ifdef FEATURE_VECTOR_FACILITY
     if (regs->vf->online)
@@ -854,7 +867,7 @@ void *cpu_thread (REGS *regs)
 
     /* Add this CPU to the configuration. Also ajust
        the number of CPU's to perform synchronisation as the
-       synchonization process relies on the number of CPU's
+       synchronization process relies on the number of CPU's
        in the configuration to accurate */
     obtain_lock(&sysblk.intlock);
     if(regs->cpustate != CPUSTATE_STARTING)
@@ -877,16 +890,14 @@ void *cpu_thread (REGS *regs)
     release_lock(&sysblk.intlock);
 
     /* Establish longjmp destination to switch architecture mode */
-    if( setjmp(regs->archjmp) < SIE_NO_INTERCEPT)
-        logmsg("Interception error\n");
+    setjmp(regs->archjmp);
 
     /* Switch from architecture mode if appropriate */
     if(sysblk.arch_mode != regs->arch_mode)
     {
         regs->arch_mode = sysblk.arch_mode;
         logmsg ("HHC631I CPU%4.4X Architecture Mode set to %s\n",
-                                    regs->cpuad,
-                                    arch_name[regs->arch_mode]);
+			regs->cpuad,get_arch_mode_string(regs));
     }
 
     /* Execute the program in specified mode */
@@ -910,43 +921,14 @@ void *cpu_thread (REGS *regs)
 #endif /*!defined(_GEN_ARCH)*/
 
 
-void ARCH_DEP(run_cpu) (REGS *regs)
+void ARCH_DEP(process_interrupt)(REGS *regs)
 {
-int     tracethis;                      /* Trace this instruction    */
-int     stepthis;                       /* Stop on this instruction  */
-int     shouldbreak;                    /* 1=Stop at breakpoint      */
-U32     prevmask;
-
-    /* Establish longjmp destination for program check */
-    setjmp(regs->progjmp);
-
-    /* Reset instruction trace indicators */
-    tracethis = 0;
-    stepthis = 0;
-
-    while (1)
-    {
-#if 0
-        U32 oldmask = regs->ints_mask;
-	    SET_IC_EXTERNAL_MASK(regs);
-	    SET_IC_IO_MASK(regs);
-	    SET_IC_MCK_MASK(regs);
-            if( oldmask != regs->ints_mask)
-            {
-                logmsg("Interrupt mask error oldmask=%8.8x, newmask=%8.8x\n",
-                  oldmask,regs->ints_mask);
-                ARCH_DEP(display_inst) (regs, regs->instvalid ? regs->inst : NULL);
-            }
-#endif
-        
-        /* Test for interrupts if it appears that one may be pending */
-        if( IC_INTERRUPT_CPU(regs) )
-        {
             /* Obtain the interrupt lock */
             obtain_lock (&sysblk.intlock);
 
             if( OPEN_IC_DEBUG(regs) )
             {
+            U32 prevmask;
                 prevmask = regs->ints_mask;
 	        SET_IC_EXTERNAL_MASK(regs);
 	        SET_IC_IO_MASK(regs);
@@ -965,7 +947,7 @@ U32     prevmask;
                no more broadcast pending because synchronize_broadcast()
                releases and reacquires the mainlock. */
             while (sysblk.brdcstncpu != 0)
-                synchronize_broadcast(regs, NULL);
+                ARCH_DEP(synchronize_broadcast)(regs);
 #endif /*MAX_CPU_ENGINES > 1*/
 
             /* Take interrupts if CPU is not stopped */
@@ -1011,7 +993,7 @@ U32     prevmask;
                 {
                     /* Remove this CPU from the configuration. Only do this
                        when no synchronization is in progress as the
-                       synchonization process relies on the number of CPU's
+                       synchronization process relies on the number of CPU's
                        in the configuration to accurate. The first thing
                        we do during interrupt processing is synchronize
                        the broadcast functions so we are safe to manipulate
@@ -1036,6 +1018,10 @@ U32     prevmask;
                     PERFORM_SERIALIZATION (regs);
                     PERFORM_CHKPT_SYNC (regs);
                     ARCH_DEP (initial_cpu_reset) (regs);
+#ifdef OPTION_CPU_UNROLL
+                    release_lock(&sysblk.intlock);
+                    longjmp(regs->progjmp, SIE_NO_INTERCEPT);
+#endif
                 }
 
                 /* If a CPU reset is pending then perform the reset */
@@ -1044,6 +1030,10 @@ U32     prevmask;
                     PERFORM_SERIALIZATION (regs);
                     PERFORM_CHKPT_SYNC (regs);
                     ARCH_DEP(cpu_reset) (regs);
+#ifdef OPTION_CPU_UNROLL
+                    release_lock(&sysblk.intlock);
+                    longjmp(regs->progjmp, SIE_NO_INTERCEPT);
+#endif
                 }
 
                 /* Store status at absolute location 0 if requested */
@@ -1051,6 +1041,13 @@ U32     prevmask;
                 {
                     OFF_IC_STORSTAT(regs);
                     ARCH_DEP(store_status) (regs, 0);
+                    logmsg ("HHC611I CPU%4.4X store status completed.\n",
+                        regs->cpuad);
+
+#ifdef OPTION_CPU_UNROLL
+                    release_lock(&sysblk.intlock);
+                    longjmp(regs->progjmp, SIE_NO_INTERCEPT);
+#endif
                 }
             } /* end if(cpustate == STOPPING) */
 
@@ -1074,8 +1071,8 @@ U32     prevmask;
                 release_lock (&sysblk.intlock);
                 /* If the architecture mode has changed we must adapt */
                 if(sysblk.arch_mode != regs->arch_mode)
-                    longjmp(regs->archjmp,0);
-                continue;
+                    longjmp(regs->archjmp,SIE_NO_INTERCEPT);
+                longjmp(regs->progjmp, SIE_NO_INTERCEPT);
             } /* end if(cpustate == STOPPED) */
 
             /* Test for wait state */
@@ -1091,7 +1088,7 @@ U32     prevmask;
                     INVALIDATE_AIA(regs);
                     INVALIDATE_AEA_ALL(regs);
                     release_lock (&sysblk.intlock);
-                    continue;
+                    longjmp(regs->progjmp, SIE_NO_INTERCEPT);
                 }
 
                 INVALIDATE_AIA(regs);
@@ -1101,29 +1098,16 @@ U32     prevmask;
                 /* Wait for I/O, external or restart interrupt */
                 wait_condition (&sysblk.intcond, &sysblk.intlock);
                 release_lock (&sysblk.intlock);
-                continue;
+                longjmp(regs->progjmp, SIE_NO_INTERCEPT);
             } /* end if(wait) */
 
             /* Release the interrupt lock */
             release_lock (&sysblk.intlock);
+}
 
-        } /* end if(interrupt) */
-
-        /* Clear the instruction validity flag in case an access
-           error occurs while attempting to fetch next instruction */
-        regs->instvalid = 0;
-
-        /* Fetch the next sequential instruction */
-        INSTRUCTION_FETCH(regs->inst, regs->psw.IA, regs);
-
-        /* Set the instruction validity flag */
-        regs->instvalid = 1;
-
-        /* Count instruction usage */
-        regs->instcount++;
-
-        if( IS_IC_TRACE )
-            {
+void ARCH_DEP(process_trace)(REGS *regs, int tracethis, int stepthis)
+{
+int     shouldbreak;                    /* 1=Stop at breakpoint      */
 
             /* Test for breakpoint */
             shouldbreak = sysblk.instbreak
@@ -1147,17 +1131,89 @@ U32     prevmask;
                     release_lock (&sysblk.intlock);
                 }
             }
+}
+
+void ARCH_DEP(run_cpu) (REGS *regs)
+{
+int     tracethis;                      /* Trace this instruction    */
+int     stepthis;                       /* Stop on this instruction  */
+
+    /* Establish longjmp destination for program check */
+    setjmp(regs->progjmp);
+
+    /* Reset instruction trace indicators */
+    tracethis = 0;
+    stepthis = 0;
+
+    while (1)
+    {
+#if 0
+        U32 oldmask = regs->ints_mask;
+	    SET_IC_EXTERNAL_MASK(regs);
+	    SET_IC_IO_MASK(regs);
+	    SET_IC_MCK_MASK(regs);
+            if( oldmask != regs->ints_mask)
+            {
+                logmsg("Interrupt mask error oldmask=%8.8x, newmask=%8.8x\n",
+                  oldmask,regs->ints_mask);
+                ARCH_DEP(display_inst) (regs, regs->instvalid ? regs->inst : NULL);
+            }
+#endif
+        
+        /* Test for interrupts if it appears that one may be pending */
+        if( IC_INTERRUPT_CPU(regs) )
+        {
+            ARCH_DEP(process_interrupt)(regs);
+            if (!regs->cpuonline)
+                return;
+        } /* end if(interrupt) */
+
+        /* Clear the instruction validity flag in case an access
+           error occurs while attempting to fetch next instruction */
+        regs->instvalid = 0;
+
+        /* Fetch the next sequential instruction */
+        INSTRUCTION_FETCH(regs->inst, regs->psw.IA, regs);
+
+        /* Set the instruction validity flag */
+        regs->instvalid = 1;
+
+#ifndef OPTION_CPU_UNROLL
+        /* Count instruction usage */
+        regs->instcount++;
+#endif
+
+        if( IS_IC_TRACE )
+        {
+            ARCH_DEP(process_trace)(regs, tracethis, stepthis);
+
     
             /* Reset instruction trace indicators */
             tracethis = 0;
             stepthis = 0;
-
+#ifdef OPTION_CPU_UNROLL
+            regs->instcount++;
+            EXECUTE_INSTRUCTION (regs->inst, 0, regs);
+            longjmp(regs->progjmp, SIE_NO_INTERCEPT);
+#endif
         }
 
         /* Execute the instruction */
         EXECUTE_INSTRUCTION (regs->inst, 0, regs);
-    }
 
+#ifdef OPTION_CPU_UNROLL
+        UNROLLED_EXECUTE(regs);
+        UNROLLED_EXECUTE(regs);
+        UNROLLED_EXECUTE(regs);
+        UNROLLED_EXECUTE(regs);
+        UNROLLED_EXECUTE(regs);
+        UNROLLED_EXECUTE(regs);
+        UNROLLED_EXECUTE(regs);
+
+        regs->instcount += 8;
+#endif
+
+    }
 } /* end function cpu_thread */
 
 
@@ -1219,5 +1275,14 @@ QWORD   qword;                            /* quadword work area      */
 
 
 } /* end function display_psw */
+
+const char* arch_name[GEN_MAXARCH] =
+	{ "S/370", "ESA/390", "ESAME" };
+
+const char* get_arch_mode_string(REGS* regs)
+{
+	if (!regs) return arch_name[sysblk.arch_mode];
+	else return arch_name[regs->arch_mode];
+}
 
 #endif /*!defined(_GEN_ARCH)*/

@@ -279,8 +279,7 @@ int             rc;                     /* Return code               */
         logmsg ("HHC201I Error opening %s: %s\n",
                 dev->filename, strerror(errno));
 
-	if (dev->tapedevt == TAPEDEVT_AWSTAPE)
-	    strcpy(dev->filename, TAPE_UNLOADED);
+        strcpy(dev->filename, TAPE_UNLOADED);
         dev->sense[0] = SENSE_IR;
         dev->sense[1] = SENSE1_TAPE_TUB;
         dev->sense[7] = SENSE7_TAPE_LOADFAIL;
@@ -785,6 +784,15 @@ static int open_het (DEVBLK *dev, BYTE *unitstat)
 {
 int             rc;                     /* Return code               */
 
+    /* Check for no tape in drive */
+    if (!strcmp (dev->filename, TAPE_UNLOADED))
+    {
+        dev->sense[0] = SENSE_IR;
+        dev->sense[1] = SENSE1_TAPE_TUB;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return -1;
+    }
+
     /* Open the HET file */
     rc = het_open (&dev->hetb, dev->filename, HETOPEN_CREATE );
     if (rc >= 0)
@@ -820,6 +828,7 @@ int             rc;                     /* Return code               */
         logmsg ("HHC290I Error opening %s: %s(%s)\n",
                 dev->filename, het_error(rc), strerror(errno));
 
+        strcpy(dev->filename, TAPE_UNLOADED);
         dev->sense[0] = SENSE_IR;
         dev->sense[1] = SENSE1_TAPE_TUB;
         dev->sense[7] = SENSE7_TAPE_LOADFAIL;
@@ -3285,7 +3294,8 @@ long            locblock;               /* Block Id for Locate Block */
             } /* end if(rc) */
         } /* end if(SCSITAPE) */
 
-	if (dev->tapedevt == TAPEDEVT_AWSTAPE)
+	if ((dev->tapedevt == TAPEDEVT_AWSTAPE) ||
+	    (dev->tapedevt == TAPEDEVT_HET))
         {
 	    strcpy(dev->filename, TAPE_UNLOADED);
             logmsg ("HHC287I Tape %4.4X unloaded\n",
@@ -3848,6 +3858,19 @@ long            locblock;               /* Block Id for Locate Block */
         /* Byte 0 is the path group state byte */
         if ((iobuf[0] & SPG_SET_COMMAND) == SPG_SET_ESTABLISH)
         {
+            /* Only accept the new pathgroup id when
+               1) it has not yet been set (ie contains zeros) or
+               2) It is set, but we are setting the same value */
+            if(memcmp(dev->pgid,
+                 "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", 11)
+              && memcmp(dev->pgid, iobuf+1, 11))
+            {
+                dev->sense[0] = SENSE_CR;
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                break;
+            }
+
+            /* Bytes 1-11 contain the path group identifier */
             /* Bytes 1-11 contain the path group identifier */
             memcpy (dev->pgid, iobuf+1, 11);
         }

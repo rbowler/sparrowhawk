@@ -102,6 +102,7 @@ int NPregdisp = 0;      /* which regs are displayed 0=gpr, 1=cr, 2=ar, 3=fpr */
 int NPaddress = 0;      /* Address switches */
 int NPdata = 0;         /* Data switches */
 int NPipl = 0;          /* IPL address switches */
+int NPquiet = 0;        /* Panel quiet flag */
 
 int NPcmd = 0;          /* 1 when command mode for NP is in effect */
 int NPdataentry = 0;    /* 1 when data entry for NP is in progress */
@@ -198,14 +199,13 @@ static void NP_screen(FILE *confp)
     int p, a;
     char c[2];
     char devnam[128];
-    static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
 
     fprintf(confp, ANSI_WHT_BLK);
     fprintf(confp, ANSI_CLEAR);
     fprintf(confp, ANSI_WHT_BLU);
     fprintf(confp, ANSI_CURSOR, 1, 1);
     fprintf(confp, " Hercules        CPU         %7.7s ",
-                                        arch_name[sysblk.arch_mode]);
+                                        get_arch_mode_string(NULL));
     fprintf(confp, ANSI_CURSOR, 1, 38);
     fprintf(confp, "|             Peripherals                  ");
     fprintf(confp, ANSI_GRY_BLK);
@@ -890,7 +890,7 @@ int pid, status;
 /*-------------------------------------------------------------------*/
 static void *panel_command (void *cmdline)
 {
-BYTE    cmd[80];                        /* Copy of panel command     */
+BYTE    cmd[32767];                     /* Copy of panel command     */
 int     cpu;                            /* CPU engine number         */
 REGS   *regs;                           /* -> CPU register context   */
 U32     aaddr;                          /* Absolute storage address  */
@@ -922,7 +922,6 @@ int     devargc;                        /* Arg count for devinit     */
 BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
 BYTE   *devclass;                       /* -> Device class name      */
 BYTE   *cmdarg;                         /* -> Command argument       */
-static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
 
     /* Copy panel command to work area */
     memset (cmd, 0, sizeof(cmd));
@@ -934,6 +933,14 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
 
     /* Set target CPU for commands and displays */
     regs = sysblk.regs + sysblk.pcpu;
+
+#ifdef OPTION_CKD_KEY_TRACING
+ #define TSPLUS_CMD \
+  "t+=trace, s+=step, t+ckd=CKD_KEY trace, t+devn=CCW trace, s+devn=CCW step\n"
+#else
+ #define TSPLUS_CMD \
+  "t+=trace, s+=step, t+devn=CCW trace, s+devn=CCW step\n"
+#endif /*OPTION_CKD_KEY_TRACING*/
 
 #if MAX_CPU_ENGINES > 1
  #define STSPALL_CMD "startall/stopall=start/stop all CPUs\n"
@@ -969,7 +976,7 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
     if (cmd[0] == '?')
     {
         logmsg ("Panel command summary:\n"
-            "t+=trace, s+=step, t+devn=CCW trace, s+devn=CCW step\n"
+            TSPLUS_CMD
             "g=go, psw=display psw, pr=prefix reg\n"
             "gpr=general purpose regs, cr=control regs\n"
             "ar=access regs, fpr=floating point regs\n"
@@ -1046,13 +1053,20 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
         return NULL;
     }
 
+    /* quiet command - quiet PANEL */
+    if (strcmp(cmd,"quiet") == 0)
+    {
+        NPquiet = !NPquiet;
+        return NULL;
+    }
+
     /* Archmode command - Set architecture mode */
     if (memcmp(cmd,"archmode",8)==0)
     {
         archmode = strtok (cmd + 8, " \t");
         if(archmode == NULL)
         {
-            logmsg("Architecture mode = %s\n",arch_name[sysblk.arch_mode]);
+            logmsg("Architecture mode = %s\n",get_arch_mode_string(NULL));
             return NULL;
         }
         else
@@ -1075,6 +1089,8 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
                 logmsg("Invalid architecture mode %s\n",archmode);
                 return NULL;
             }
+
+            logmsg("Architecture successfully set to %s mode.\n",get_arch_mode_string(NULL));
 
             /* Indicate if z/Architecture is supported */
             sysblk.arch_z900 = sysblk.arch_mode != ARCH_390;
@@ -1252,9 +1268,19 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
             logmsg("CPU%4.4X: Emergency signal %spending\n",
                 sysblk.regs[i].cpuad,
 		         IS_IC_EMERSIG(sysblk.regs+i) ? "" : "not ");
+            logmsg("CPU%4.4X: CPU %swaiting for interlock\n",
+                sysblk.regs[i].cpuad,
+		         sysblk.regs[i].mainsync ? "" : "not ");
+            logmsg("CPU%4.4X: CPU interlock %sheld\n",
+                sysblk.regs[i].cpuad,
+		         sysblk.regs[i].mainlock ? "" : "not ");
         }
         logmsg("Machine check interrupt %spending\n",
                                 IS_IC_MCKPENDING ? "" : "not ");
+        logmsg("Service signal %spending\n",
+                                IS_IC_SERVSIG ? "" : "not ");
+        logmsg("Signaling facility %sbusy\n",
+                                sysblk.sigpbusy ? "" : "not ");
         logmsg("I/O interrupt %spending\n",
                                 IS_IC_IOPENDING ? "" : "not ");
         for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
@@ -1325,7 +1351,8 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
     {
         toddrag = 0;
         sscanf(cmd+7, "%d", &toddrag);
-        if (toddrag > 0 && toddrag <= 10000) sysblk.toddrag = toddrag;
+        if (toddrag > 0 && toddrag <= 10000)
+            sysblk.toddrag = toddrag;
         logmsg ("TOD clock drag factor = %d\n", sysblk.toddrag);
         return NULL;
     }
@@ -1416,6 +1443,16 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
             logmsg ("Instruction stepping is now %s\n", onoroff);
             return NULL;
         }
+
+#ifdef OPTION_CKD_KEY_TRACING
+        /* t+ckd and t-ckd commands - turn CKD_KEY tracing on/off */
+        if ((cmd[0] == 't') && (memcmp(cmd+2, "ckd", 3) == 0))
+        {
+            sysblk.ckdkeytrace = oneorzero;
+            logmsg("CKD KEY trace is now %s\n",onoroff);
+            return NULL;
+        }
+#endif /*OPTION_CKD_KEY_TRACING*/
 
         /* t+devn and t-devn commands - turn CCW tracing on/off */
         /* s+devn and s-devn commands - turn CCW stepping on/off */
@@ -1576,6 +1613,10 @@ static char *arch_name[] = { "S/370", "ESA/390", "ESAME" };
     {
         obtain_lock(&sysblk.intlock);
         ON_IC_INTKEY;
+
+        /* Signal waiting CPUs that an interrupt is pending */
+        signal_condition (&sysblk.intcond);
+
         release_lock(&sysblk.intlock);
         logmsg ("Interrupt key depressed\n");
         return NULL;
@@ -2135,11 +2176,7 @@ int     firstmsgn = 0;                  /* Number of first message to
 #define MSG_SIZE                80      /* Size of one message       */
 #define BUF_SIZE    (MAX_MSGS*MSG_SIZE) /* Total size of buffer      */
 #define NUM_LINES               22      /* Number of scrolling lines */
-#ifdef EXTERNALGUI
-#define CMD_SIZE              1024      /* Length of command line    */
-#else /*!EXTERNALGUI*/
-#define CMD_SIZE                60      /* Length of command line    */
-#endif /*EXTERNALGUI*/
+#define CMD_SIZE             32767      /* Length of command line    */
 REGS   *regs;                           /* -> CPU register context   */
 QWORD   curpsw;                         /* Current PSW               */
 QWORD   prvpsw;                         /* Previous PSW              */
@@ -2844,7 +2881,7 @@ struct  timeval tv;                     /* Select timeout structure  */
             if (!extgui)
 #endif /*EXTERNALGUI*/
             /* Rewrite the screen if display update indicators are set */
-            if (redraw_msgs)
+            if (redraw_msgs && !NPquiet)
             {
                 /* Display messages in scrolling area */
                 for (i=0; i < NUM_LINES && firstmsgn + i < nummsgs; i++)
@@ -2866,7 +2903,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                     fprintf (confp, ANSI_ROW22_COL80 "V");
             } /* end if(redraw_msgs) */
 
-            if (redraw_status)
+            if (redraw_status && !NPquiet)
             {
                 /* Display the PSW and instruction counter for CPU 0 */
                 fprintf (confp,
@@ -3191,7 +3228,7 @@ REGS    wrkregs = *regs;                /* Working copy of CPU regs  */
     wrkregs.panelregs = 1;
 
     rc = ARCH_DEP(translate_addr) (vaddr, arn, &wrkregs, acctype,
-                &raddr, &xcode, &private, &protect, siptr, NULL, NULL);
+                &raddr, &xcode, &private, &protect, siptr);
     if (rc) return xcode;
 
     *raptr = raddr;

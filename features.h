@@ -41,6 +41,8 @@
 #undef LSED_UET_TLR
 #undef LSED_UET_BAKR
 #undef LSED_UET_PC
+#undef CR12_BRTRACE
+#undef CR12_TRACEEA
 #undef CHM_GPR2_RESV
 #undef DEF_INST
 #undef ARCH_DEP
@@ -79,9 +81,12 @@
 #undef VE
 #endif /*defined(OPTION_AEA_BUFFER)*/
 #undef SIEBK
+#undef TLB_STD
+#undef TLB_VADDR
+#undef TLB_PTE
 /* The default mode is 900, basic ESAME */
 
-#if !defined(NO_ATTR_REGPARM)
+#if !defined(NO_ATTR_REGPARM) & !defined(PROFILE_CPU)
 #define ATTR_REGPARM(n) __attribute__ ((regparm(n)))
 #else
 #define ATTR_REGPARM(n) /* nothing */
@@ -165,6 +170,9 @@ s370_ ## _name
 #define VE(_r)	VE_L(_r)
 #endif /*defined(OPTION_AEA_BUFFER)*/
 #define SIEBK                   SIE1BK
+#define TLB_STD   TLB_STD_L
+#define TLB_VADDR TLB_VADDR_L
+#define TLB_PTE   TLB_PTE_L
 
 #elif _GEN_ARCH == 390
 
@@ -204,6 +212,8 @@ s390_ ## _name
 #define LSED_UET_TLR	S_LSED_UET_TLR
 #define LSED_UET_BAKR	S_LSED_UET_BAKR
 #define LSED_UET_PC	S_LSED_UET_PC
+#define CR12_BRTRACE    S_CR12_BRTRACE
+#define CR12_TRACEEA    S_CR12_TRACEEA
 
 #define CHM_GPR2_RESV   S_CHM_GPR2_RESV
 
@@ -247,6 +257,9 @@ s390_ ## _name
 #define VE(_r)	VE_L(_r)
 #endif /*defined(OPTION_AEA_BUFFER)*/
 #define SIEBK                   SIE1BK
+#define TLB_STD   TLB_STD_L
+#define TLB_VADDR TLB_VADDR_L
+#define TLB_PTE   TLB_PTE_L
 
 #elif _GEN_ARCH == 900
 
@@ -280,6 +293,8 @@ s390_ ## _name
 #define LSED_UET_TLR	Z_LSED_UET_TLR
 #define LSED_UET_BAKR	Z_LSED_UET_BAKR
 #define LSED_UET_PC	Z_LSED_UET_PC
+#define CR12_BRTRACE    Z_CR12_BRTRACE
+#define CR12_TRACEEA    Z_CR12_TRACEEA
 
 #define CHM_GPR2_RESV   Z_CHM_GPR2_RESV
 
@@ -292,7 +307,7 @@ z900_ ## _name
 #define PSA	PSA_900
 #define PSA_SIZE 8192
 #define IA	IA_G
-#define PX	PX_G
+#define PX	PX_L
 #define CR(_r)	CR_G(_r)
 #define GR(_r)	GR_G(_r)
 #define GR_A(_r, _regs) ((_regs)->psw.amode64 ? (_regs)->GR_G((_r)) : (_regs)->GR_L((_r)))
@@ -324,6 +339,9 @@ z900_ ## _name
 #define VE(_r)	VE_G(_r)
 #endif /*defined(OPTION_AEA_BUFFER)*/
 #define SIEBK                   SIE2BK
+#define TLB_STD   TLB_STD_G
+#define TLB_VADDR TLB_VADDR_G
+#define TLB_PTE   TLB_PTE_G
 
 #else
 

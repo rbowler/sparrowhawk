@@ -70,10 +70,12 @@ static inline int div_logical_long
     if (high >= d) return 1;
     for (i = 0; i < 64; i++)
     {
+    int ovf;
+        ovf = high >> 63;
         high = (high << 1) | (lo >> 63);
-        lo = (lo << 1);
+        lo <<= 1;
         *quot <<= 1;
-        if (high >= d)
+        if (high >= d || ovf)
         {
             *quot += 1;
             high -= d;
@@ -89,18 +91,22 @@ static inline int mult_logical_long
 {
     int i;
 
-    *high = ((md & 1) ? mr : 0);
+    *high = 0; *lo = 0;
     for (i = 0; i < 64; i++)
     {
-        *lo = (*lo >> 1) | (*high << 63);
-        *high >>= 1;
-        md >>= 1;
+    U64 ovf;
+        ovf = *high;
         if (md & 1)
             *high += mr;
+        md >>= 1;
+        *lo = (*lo >> 1) | (*high << 63);
+        if(ovf > *high)
+            *high = (*high >> 1) | 0x8000000000000000ULL;
+        else
+            *high >>= 1;
     }
     return 0;
 } /* end mult_logical_long() */
-
 #endif /*!defined(_LONG_MATH)*/
 
 
@@ -260,18 +266,17 @@ U16     flags;                          /* Flags in parmfield        */
 U16     psw_offset;                     /* Offset to new PSW         */
 U16     ar_offset;                      /* Offset to new AR          */
 U16     gr_offset;                      /* Offset to new GR          */
-FWORD   ar;                             /* Copy of new AR            */
+U32     ar;                             /* Copy of new AR            */
 #if defined(FEATURE_ESAME)
 U16     grd_offset;                     /* Offset of disjoint GR_H   */
 BYTE    psw[16];                        /* Copy of new PSW           */
-DWORD   gr;                             /* Copy of new GR            */
+U64     gr;                             /* Copy of new GR            */
 #else /*!defined(FEATURE_ESAME)*/
 BYTE    psw[8];                         /* Copy of new PSW           */
-FWORD   gr;                             /* Copy of new GR            */
+U32     gr;                             /* Copy of new GR            */
 #endif /*!defined(FEATURE_ESAME)*/
 PSW     save_psw;                       /* Saved copy of current PSW */
 RADR    abs;                            /* Absolute address of parm  */
-int     i;
 
     S(inst, execflag, regs, b2, effective_addr2);
 
@@ -283,8 +288,13 @@ int     i;
             ACCTYPE_INSTFETCH, regs->psw.pkey);
     FETCH_HW(flags, sysblk.mainstor + abs);
 
+#if defined(FEATURE_ESAME)
     /* Bits 0-12 must be zero */
     if(flags & 0xFFF8)
+#else /*!defined(FEATURE_ESAME)*/
+    /* All flag bits must be zero in ESA/390 mode */
+    if(flags)
+#endif /*!defined(FEATURE_ESAME)*/
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Fetch the offset to the new psw */
@@ -312,66 +322,38 @@ int     i;
     }
 #endif /*defined(FEATURE_ESAME)*/
 
-    /* Fetch the PSW from the instruction address space */
-#if defined(FEATURE_ESAME)
-    for(i = 0; i < (flags & 0x0004) ? 16 : 8; i++)
-#else /*!defined(FEATURE_ESAME)*/
-    for(i = 0; i < 8; i++)
-#endif /*defined(FEATURE_ESAME)*/
-    {
-        abs = LOGICAL_TO_ABS (pl_addr - 2 + psw_offset + i, 0, regs,
-            ACCTYPE_INSTFETCH, regs->psw.pkey);
-        psw[i] = sysblk.mainstor[abs];
-    }
 
-    /* Fetch the new ar from the instruction address space */
-    for(i = 0; i < 4; i++)
-    {
-        abs = LOGICAL_TO_ABS (pl_addr - 2 + ar_offset + i, 0, regs,
-            ACCTYPE_INSTFETCH, regs->psw.pkey);
-        ar[i] = sysblk.mainstor[abs];
-    }
-
-    /* Fetch the new gr from the instruction address space */
+    /* Fetch the PSW from the operand address + psw offset */
 #if defined(FEATURE_ESAME)
-    if(flags & 0x0002)
-    {
-        if(flags & 0x0001)
-        {
-            /* Fetch GR disjoint */
-            for(i = 0; i < 4; i++)
-            {
-                abs = LOGICAL_TO_ABS (pl_addr - 2 + gr_offset + i, 0, regs,
-                    ACCTYPE_INSTFETCH, regs->psw.pkey);
-                gr[i+4] = sysblk.mainstor[abs];
-            }
-            for(i = 0; i < 4; i++)
-            {
-                abs = LOGICAL_TO_ABS (pl_addr - 2 + grd_offset + i, 0, regs,
-                    ACCTYPE_INSTFETCH, regs->psw.pkey);
-                gr[i] = sysblk.mainstor[abs];
-            }
-        }
-        else
-        {
-            for(i = 0; i < 8; i++)
-            {
-                abs = LOGICAL_TO_ABS (pl_addr - 2 + gr_offset + i, 0, regs,
-                    ACCTYPE_INSTFETCH, regs->psw.pkey);
-                gr[i] = sysblk.mainstor[abs];
-            }
-        }
-    }
+    if(flags & 0x0004)
+        ARCH_DEP(vfetchc) (psw, 15, effective_addr2 + psw_offset, b2, regs);
     else
 #endif /*defined(FEATURE_ESAME)*/
-    {
-        for(i = 0; i < 4; i++)
-        {
-            abs = LOGICAL_TO_ABS (pl_addr - 2 + gr_offset + i, 0, regs,
-                ACCTYPE_INSTFETCH, regs->psw.pkey);
-            gr[i] = sysblk.mainstor[abs];
-        }
-    }
+        ARCH_DEP(vfetchc) (psw, 7, effective_addr2 + psw_offset, b2, regs);
+
+
+    /* Fetch new AR (B2) from operand address + AR offset */
+    ar = ARCH_DEP(vfetch4) (effective_addr2 + ar_offset, b2, regs);
+
+
+    /* Fetch the new gr from operand address + GPR offset */
+#if defined(FEATURE_ESAME)
+    if(flags & 0x0002)
+        gr = ARCH_DEP(vfetch8) (effective_addr2 + gr_offset, b2, regs);
+    else
+#endif /*defined(FEATURE_ESAME)*/
+        gr = ARCH_DEP(vfetch4) (effective_addr2 + gr_offset, b2, regs);
+
+
+    /* Save current PSW */
+    save_psw = regs->psw;
+
+
+    /* Use bits 16-23, 32-63 of psw in operand, other bits from old psw */
+    psw[0] = save_psw.sysmask;
+    psw[1] = save_psw.pkey | 0x08 | save_psw.mach | save_psw.wait | save_psw.prob;
+    psw[3] = 0;
+
 
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
     if(regs->sie_state
@@ -380,25 +362,16 @@ int     i;
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 #endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
 
-    /* Save current PSW */
-    save_psw = regs->psw;
 
-    /* Specification exception when setting home 
+    /* Privileged Operation exception when setting home 
        space mode in problem state */
     if(!REAL_MODE(&regs->psw)
       && regs->psw.prob
       && ((psw[2] & 0xC0) == 0xC0) )
-        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+        ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
-    /* Make bits 12 and 31 valid, as these are ignored by RP */
-#if defined(FEATURE_ESAME)
-    psw[1] &= ~(0x08);
-#else /*!defined(FEATURE_ESAME)*/
-    psw[1] |= 0x08;
-    psw[3] &= ~(0x01);
-#endif /*!defined(FEATURE_ESAME)*/
-
-    if( ARCH_DEP(load_psw) (regs, psw) )
+ 
+    if( ARCH_DEP(load_psw) (regs, psw) )/* only check invalid IA not odd */
     {
         /* restore the psw */
         regs->psw = save_psw;
@@ -406,11 +379,14 @@ int     i;
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
     }
 
-    regs->psw.prob = save_psw.prob;
-    regs->psw.wait = save_psw.wait;
-    regs->psw.mach = save_psw.mach;
-    regs->psw.sysmask = save_psw.sysmask;
-    regs->psw.pkey = save_psw.pkey;
+    /* Check for odd IA in psw */
+    if(regs->psw.IA & 0x01)
+    {
+        /* restore the psw */
+        regs->psw = save_psw;
+        /* And generate a program interrupt */
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+    }
 
     SET_IC_EXTERNAL_MASK(regs);
     SET_IC_MCK_MASK(regs);
@@ -418,20 +394,46 @@ int     i;
     SET_IC_PSW_WAIT(regs);
 
     /* Update access register b2 */
-    FETCH_FW(regs->AR(b2), ar);
+    regs->AR(b2) = ar;
 
     /* Update general register b2 */
 #if defined(FEATURE_ESAME)
     if(flags & 0x0002)
-        FETCH_DW(regs->GR_G(b2), gr);
+        regs->GR_G(b2) = gr;
     else
 #endif /*defined(FEATURE_ESAME)*/
-        FETCH_FW(regs->GR_L(b2), gr);
+        regs->GR_L(b2) = gr;
 
     /* Space switch event when switching into or
-       out of home space mode */
-    if(HOME_SPACE_MODE(&(regs->psw)) ^ HOME_SPACE_MODE(&save_psw))
+       out of home space mode AND space-switch-event on in CR1 or CR13 */
+    if((HOME_SPACE_MODE(&(regs->psw)) ^ HOME_SPACE_MODE(&save_psw))
+     && ((regs->CR(1) & SSEVENT_BIT) || (regs->CR(13) & SSEVENT_BIT)))
+    {
+        if (HOME_SPACE_MODE(&(regs->psw)))
+        {
+            /* When switching into home-space mode, set the
+               translation exception address equal to the primary
+               ASN, with the high-order bit set equal to the value
+               of the primary space-switch-event control bit */
+            regs->TEA = regs->CR_LHL(4);
+            if (regs->CR(1) & SSEVENT_BIT)
+                regs->TEA |= TEA_SSEVENT;
+        }
+        else
+        {
+            /* When switching out of home-space mode, set the
+               translation exception address equal to zero, with
+               the high-order bit set equal to the value of the
+               home space-switch-event control bit */
+            regs->TEA = 0;
+            if (regs->CR(13) & SSEVENT_BIT)
+                regs->TEA |= TEA_SSEVENT;
+        }
+
         ARCH_DEP(program_interrupt) (regs, PGM_SPACE_SWITCH_EVENT);
+    }
+
+    RETURN_INTCHECK(regs);
 
 } /* end DEF_INST(resume_program) */
 #endif /*defined(FEATURE_RESUME_PROGRAM)*/
@@ -509,7 +511,7 @@ U64     oreg = 0;                       /* 64 bit overflow work reg  */
         oreg = dreg;
 
         /* Check for valid low-order digit or sign */
-        if (i < 7)
+        if (i < 15)
         {
             /* Check for valid low-order digit */
             if (d > 9)
@@ -1876,12 +1878,12 @@ BYTE    cwork[4];                       /* Character work areas      */
 
     } /* end for(i) */
 
-    /* If the mask is all zero, we nevertheless access one byte
-       from the storage operand, because POP states that an
-       access exception may be recognized on the first byte */
     if (j == 0)
     {
 #if defined(MODEL_DEPENDENT)
+        /* If the mask is all zero, we nevertheless access one byte
+           from the storage operand, because POP states that an
+           access exception may be recognized on the first byte */
         ARCH_DEP(validate_operand) (effective_addr2, b2, 0, ACCTYPE_WRITE, regs);
 #endif /*defined(MODEL_DEPENDENT)*/
         return;
@@ -2137,7 +2139,7 @@ U64     n;                              /* 64-bit operand value      */
        then call the hypervisor to end this timeslice,
        this to prevent this virtual CPU monopolizing
        the physical CPU on a spinlock */
-    if(regs->psw.cc && sysblk.numcpu > 1 && sysblk.brdcstncpu == 0)
+    if(regs->psw.cc && sysblk.numcpu > 1)
         usleep(1L);
 #endif MAX_CPU_ENGINES > 1
 
@@ -2208,7 +2210,7 @@ U64     n1, n2;                         /* 64-bit operand values     */
        then call the hypervisor to end this timeslice,
        this to prevent this virtual CPU monopolizing
        the physical CPU on a spinlock */
-    if(regs->psw.cc && sysblk.numcpu > 1 && sysblk.brdcstncpu == 0)
+    if(regs->psw.cc && sysblk.numcpu > 1)
         usleep(1L);
 #endif MAX_CPU_ENGINES > 1
 
@@ -2698,13 +2700,14 @@ int     r1, r2;                         /* Values of R fields        */
 DEF_INST(load_positive_long_fullword_register)
 {
 int     r1, r2;                         /* Values of R fields        */
+S64     gpr2l;
 
     RRE(inst, execflag, regs, r1, r2);
 
+    gpr2l = (S32)regs->GR_L(r2);
+
     /* Load positive value of second operand and set cc */
-    (S64)regs->GR_G(r1) = (S32)regs->GR_L(r2) < 0 ?
-                            -((S32)regs->GR_L(r2)) :
-                            (S32)regs->GR_L(r2);
+    (S64)regs->GR_G(r1) = gpr2l < 0 ? -gpr2l : gpr2l;
 
     regs->psw.cc = (S64)regs->GR_G(r1) == 0 ? 0 : 2;
 
@@ -2740,13 +2743,14 @@ int     r1, r2;                         /* Values of R fields        */
 DEF_INST(load_negative_long_fullword_register)
 {
 int     r1, r2;                         /* Values of R fields        */
+S64     gpr2l;
 
     RRE(inst, execflag, regs, r1, r2);
 
+    gpr2l = (S32)regs->GR_L(r2);
+
     /* Load negative value of second operand and set cc */
-    (S64)regs->GR_G(r1) = (S32)regs->GR_L(r2) > 0 ?
-                            -((S32)regs->GR_L(r2)) :
-                            (S32)regs->GR_L(r2);
+    (S64)regs->GR_G(r1) = gpr2l > 0 ? -gpr2l : gpr2l;
 
     regs->psw.cc = (S64)regs->GR_G(r1) == 0 ? 0 : 1;
 
@@ -2831,11 +2835,14 @@ int     r1, r2;                         /* Values of R fields        */
 DEF_INST(load_complement_long_fullword_register)
 {
 int     r1, r2;                         /* Values of R fields        */
+S64     gpr2l;
 
     RRE(inst, execflag, regs, r1, r2);
 
+    gpr2l = (S32)regs->GR_L(r2);
+
     /* Load complement of second operand and set condition code */
-    (S64)regs->GR_G(r1) = -((S32)regs->GR_L(r2));
+    (S64)regs->GR_G(r1) = -gpr2l;
 
     regs->psw.cc = (S64)regs->GR_G(r1) < 0 ? 1 :
                    (S64)regs->GR_G(r1) > 0 ? 2 : 0;
@@ -3797,9 +3804,9 @@ BYTE    rwork[128];                     /* Register work areas       */
     if(regs->sie_state)
     {
     U32 n;
-        for(i = r1, n = 0x80008000 >> r1; ; )
+        for(i = r1, n = 0x8000 >> r1; ; )
         {
-            if(regs->siebk->lctl_ctl[i < 8 ? 0 : 1] & (i < 8) ? n >> 8 : n)
+            if(regs->siebk->lctl_ctl[i < 8 ? 0 : 1] & ((i < 8) ? n >> 8 : n))
                 longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 
             if ( i == r3 ) break;
@@ -3833,6 +3840,8 @@ BYTE    rwork[128];                     /* Register work areas       */
 
     SET_IC_EXTERNAL_MASK(regs);
     SET_IC_MCK_MASK(regs);
+
+    RETURN_INTCHECK(regs);
 
 } /* end DEF_INST(load_control_long) */
 #endif /*defined(FEATURE_ESAME)*/
@@ -4087,7 +4096,7 @@ RADR    n;                              /* 64-bit operand values     */
 
     /* Translate virtual address to real address */
     if (ARCH_DEP(translate_addr) (effective_addr2, b2, regs, ACCTYPE_STRAG,
-        &n, &xcode, &private, &protect, &stid, NULL, NULL))
+        &n, &xcode, &private, &protect, &stid))
         ARCH_DEP(program_interrupt) (regs, xcode);
 
     /* Store register contents at operand address */
@@ -4231,6 +4240,8 @@ int     rc;
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
+    RETURN_INTCHECK(regs);
+
 } /* end DEF_INST(load_program_status_word_extended) */
 #endif /*defined(FEATURE_ESAME)*/
 
@@ -4259,8 +4270,7 @@ RADR    n;                              /* 64-bit operand values     */
 
     /* Translate the effective address to a real address */
     cc = ARCH_DEP(translate_addr) (effective_addr2, b2, regs,
-            ACCTYPE_LRA, &n, &xcode, &private, &protect, &stid,
-            NULL, NULL);
+            ACCTYPE_LRA, &n, &xcode, &private, &protect, &stid);
 
     /* If ALET exception or ASCE-type or region translation
        exception, or if the segment table entry is outside the
@@ -4315,23 +4325,22 @@ PSA    *psa;                            /* -> Prefixed storage area  */
     psa = (void*)(sysblk.mainstor + regs->PX);
 
     psa->stfl[0] = 0
-#if defined(FEATURE_ESAME_N3_ESA390)
-                 | 0x80
-#endif /*defined(FEATURE_ESAME_N3_ESA390)*/
+#if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
+                 | STFL_0_N3
+#endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
 #if defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)
-                 | (
-#if defined(_FEATURE_ZSIE)
-                   (regs->sie_state 
-                     && (regs->hostregs->arch_mode != ARCH_900) ) ? 0 :
-#endif /*defined(_FEATURE_ZSIE)*/
-                   (sysblk.arch_z900 ? 0x40 : 0) )
+                 | (sysblk.arch_z900 ? STFL_0_ESAME_INSTALLED : 0)
 #endif /*defined(FEATURE_ESAME_INSTALLED) || defined(FEATURE_ESAME)*/
 #if defined(FEATURE_ESAME)
-                 | 0x20
+                 | STFL_0_ESAME_ACTIVE
 #endif /*defined(FEATURE_ESAME)*/
                  ;
     psa->stfl[1] = 0;
-    psa->stfl[2] = 0;
+    psa->stfl[2] = 0
+#if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
+                 | STFL_2_TRAN_FAC2
+#endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
+                 ;
     psa->stfl[3] = 0;
 
 } /* end DEF_INST(store_facilities_list) */

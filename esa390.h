@@ -121,9 +121,15 @@ typedef struct _PSW {
 
 /* Structure definition for translation-lookaside buffer entry */
 typedef struct _TLBE {
-	U32	std;			/* Segment table designation */
-	U32	vaddr;			/* Virtual page address      */
-	U32	pte;			/* Copy of page table entry  */
+	DW 	std;			/* Segment table designation */
+#define TLB_STD_G 	std.D
+#define TLB_STD_L	std.F.L.F
+	DW 	vaddr;			/* Virtual page address      */
+#define TLB_VADDR_G 	vaddr.D
+#define TLB_VADDR_L	vaddr.F.L.F
+	DW 	pte;			/* Copy of page table entry  */
+#define TLB_PTE_G 	pte.D
+#define TLB_PTE_L	pte.F.L.F
 	BYTE	valid;			/* 1=TLB entry is valid      */
 	BYTE	common; 		/* 1=Page in common segment  */
 	BYTE	protect;		/* 1=Page in protected segmnt*/
@@ -207,8 +213,11 @@ typedef struct _TLBE {
 #define CR9_GRMASK	0x0000FFFF	/* GR mask bits 	     */
 
 /* Bit definitions for control register 12 */
-#define CR12_BRTRACE	0x80000000	/* Branch trace control      */
-#define CR12_TRACEEA	0x7FFFFFFC	/* Trace entry address	     */
+#define S_CR12_BRTRACE	0x80000000	/* Branch trace control      */
+#define Z_CR12_BRTRACE	0x8000000000000000ULL /* Branch trace control*/
+#define CR12_MTRACE 	0x4000000000000000ULL /* Mode trace control  */
+#define S_CR12_TRACEEA	0x7FFFFFFC	/* Trace entry address	     */
+#define Z_CR12_TRACEEA	0x3FFFFFFFFFFFFFFCULL /* Trace entry address */
 #define CR12_ASNTRACE	0x00000002	/* ASN trace control	     */
 #define CR12_EXTRACE	0x00000001	/* Explicit trace control    */
 
@@ -278,7 +287,10 @@ typedef struct _TLBE {
 #define ZPGETAB_I	0x400		/* Invalid page 	     */
 #define ZPGETAB_P	0x200		/* Protected page	     */
 #define ZPGETAB_ESVALID 0x100	        /* Valid in expanded storage */
-#define ZPGETAB_RESV	0x800		/* Reserved bits - must be 0 */
+#define ZPGETAB_ESREF   0x080           /* ES Referenced             */
+#define ZPGETAB_ESCHA   0x040           /* ES Changed                */
+#define ZPGETAB_ESLCK   0x020           /* ES Locked                 */
+#define ZPGETAB_RESV	0x900		/* Reserved bits - must be 0 */
 
 /* Segment table designation bit definitions (ESA/390 mode) */
 #define STD_SSEVENT	0x80000000	/* Space switch event	     */
@@ -301,6 +313,9 @@ typedef struct _TLBE {
 #define PAGETAB_INVALID 0x00000400	/* Invalid page 	     */
 #define PAGETAB_PROT	0x00000200	/* Protected page	     */
 #define PAGETAB_ESVALID 0x00000100	/* Valid in expanded storage */
+#define PAGETAB_ESREF   0x00000080      /* ES Referenced             */
+#define PAGETAB_ESCHA   0x00000040      /* ES Changed                */
+#define PAGETAB_ESLCK   0x00000020      /* ES Locked                 */
 #define PAGETAB_PGLOCK	0x00000001	/* Page lock (LKPG)	     */
 #define PAGETAB_RESV	0x80000900	/* Reserved bits - must be 0 */
 
@@ -1115,6 +1130,17 @@ typedef struct _MBK {
 #define PLO_CSTSTGR		22	/* C/S/TS              ESAME */
 #define PLO_CSTSTX 		23	/* C/S/TS              ESAME */
 
+/* Bit definitions for Store Facilities List instruction */
+#define STFL_0_N3		0x80	/* Instructions marked N3 in
+					   the reference summary are
+					   available in ESA/390 mode */
+#define STFL_0_ESAME_INSTALLED	0x40	/* ESAME mode is available on
+					   this processor	     */
+#define STFL_0_ESAME_ACTIVE	0x20	/* ESAME mode is active on 
+					   this processor            */
+#define STFL_2_TRAN_FAC2	0x80	/* Extended translation 
+					   facility 2 is installed   */
+
 /* Bit definitions for the Vector Facility */
 #define VSR_M	 0x0001000000000000ULL	/* Vector mask mode bit      */
 #define VSR_VCT  0x0000FFFF00000000ULL	/* Vector count 	     */
@@ -1197,8 +1223,8 @@ typedef struct _SIE1BK { 		/* SIE State Descriptor      */
 #define SIE_IC1_SSM	0x10		/* Intercept SSM	     */
 #define SIE_IC1_BSA	0x08		/* Intercept BSA	     */
 #define SIE_IC1_STCTL	0x04		/* Intercept STCTL	     */
-#define SIE_IC1_STOSM	0x02		/* Intercept STOSM	     */
-#define SIE_IC1_STNSM	0x01		/* Intercept STNSM	     */
+#define SIE_IC1_STNSM	0x02		/* Intercept STNSM	     */
+#define SIE_IC1_STOSM	0x01		/* Intercept STOSM	     */
 #define SIE_IC2_STCK	0x80		/* Intercept STCK	     */
 #define SIE_IC2_ISKE	0x40		/* Intercept ISK/ISKE	     */
 #define SIE_IC2_SSKE	0x20		/* Intercept SSK/SSKE	     */
@@ -1326,8 +1352,8 @@ typedef struct _SIE2BK { 		/* SIE State Descriptor      */
 #define SIE_IC1_SSM	0x10		/* Intercept SSM	     */
 #define SIE_IC1_BSA	0x08		/* Intercept BSA	     */
 #define SIE_IC1_STCTL	0x04		/* Intercept STCTL	     */
-#define SIE_IC1_STOSM	0x02		/* Intercept STOSM	     */
-#define SIE_IC1_STNSM	0x01		/* Intercept STNSM	     */
+#define SIE_IC1_STNSM	0x02		/* Intercept STNSM	     */
+#define SIE_IC1_STOSM	0x01		/* Intercept STOSM	     */
 #define SIE_IC2_STCK	0x80		/* Intercept STCK	     */
 #define SIE_IC2_ISKE	0x40		/* Intercept ISK/ISKE	     */
 #define SIE_IC2_SSKE	0x20		/* Intercept SSK/SSKE	     */

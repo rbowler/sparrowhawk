@@ -1,3 +1,82 @@
+05 Jul 2001 Restrict TODEPOCH to 1900, 1928, 1960, 1970, or 1988, and
+            correct offset calculation - Michael Koehne
+05 Jul 2001 Add unmount option to HET code - Michael Koehne
+05 Jul 2001 Add quiet command to shut off status messages to panel - Michael
+            Koehne
+05 Jul 2001 Add ARCHMODE to HHC105I IPL failure message - Fish
+05 Jul 2001 Add multifile parameter to card reader definition - Fish
+05 Jul 2001 Increase panel command buffer length to 32K - Fish
+20 Jun 2001 CMPSC armode fix - Bernard van der Helm
+20 Jun 2001 CTCT CTC over TCP/IP support - Vic Cross
+20 Jun 2001 Remove subchannel enabled check from console - Jan Jaeger
+19 Jun 2001 Correct check for MVCL in different spaces - Jan Jaeger
+19 Jun 2001 Prevent msg HHC611I during machine check - Jan Jaeger
+19 Jun 2001 Enhance MVCL cc3 diagostics - Jan Jaeger
+18 Jun 2001 Add missing obtain_lock(devlock) to halt function - Fish
+18 Jun 2001 Reset channel path function - Jan Jaeger
+17 Jun 2001 Address limit checking - Jan Jaeger
+16 Jun 2001 Correctons to LPGFR/LNGFR/LCGFR - Jan Jaeger
+16 Jun 2001 Fix index-symbol translation - Bernard van der Helm
+16 Jun 2001 TLB implementation for z/Architecture - Jan Jaeger
+15 Jun 2001 Fix interrupt key processing - Jan Jaeger
+13 Jun 2001 Zero highbyte in 24 bit branch trace entry - Paul Leisy
+13 Jun 2001 Correct attention processing on suspended devices - Jan Jaeger
+13 Jun 2001 Clear DPS arrays during I/O reset - Jan Jaeger
+13 Jun 2001 Fix false protection indication on MVPG - Paul Leisy
+11 Jun 2001 Initialize conditions & locks earlier in init routine,
+            including initializing cachelock (thanks Fish) - Greg Smith
+11 Jun 2001 Correct excarid in ESAME mode - Jan Jaeger
+10 Jun 2001 Correct tea on MVPG protection exception - Paul Leisy
+10 Jun 2001 Correct halt subchannel function - Jan Jaeger
+10 Jun 2001 Correct set pathgroup id ccw - Jan Jaeger
+10 Jun 2001 Correct clear subchannel function - Jan Jaeger
+09 Jun 2001 Fix CUTFU/CUUTF with zero op2 length - Paul Leisy
+09 Jun 2001 Fix STSI condition code - Paul Leisy
+09 Jun 2001 Add t+ckd/t-ckd ckd keytrace command - Valery Pogonchenko
+03 Jun 2001 Fix TRAP save area access - Paul Leisy
+03 Jun 2001 Fix priority of interruptions in stacking PC - Jan Jaeger
+03 Jun 2001 Fix priority of interruptions in BAKR - Paul Leisy
+03 Jun 2001 Fix typo in setting amode in BSA - Paul Leisy
+02 Jun 2001 Moved IEEE option from featall.h to makefile.w32 - Jan Jaeger
+02 Jun 2001 Correct tea on asx translation exception in PC - Paul Leisy
+02 Jun 2001 Fix update of GR5 in UPT - Paul Leisy
+01 Jun 2001 Clear effective and instruction address cache in BSG - Paul Leisy
+01 Jun 2001 Correct TEA stid identification bits - Paul Leisy
+31 May 2001 Correct TLB purging on SIE dispatch - Jan Jaeger
+31 May 2001 IVSK SIE fix - Paul Leisy
+30 May 2001 Added CHSC channel subsystem call instruction - Jan Jaeger
+28 May 2001 Fix logic error in CPU interlocking - Jan Jaeger
+28 May 2001 Wakeup waiting CPU when interrupt key is processed - Jan Jaeger
+27 May 2001 Correct mainstorage interlocked update/reference - Jan Jaeger
+26 May 2001 Add _REENTRANT and _THREAD_SAFE flags - Jan Jaeger
+25 May 2001 Various multi processing and SIE fixes - Jan Jaeger
+24 May 2001 Performance enhancements - Juergen Dobrinski
+24 May 2001 Added CGEBR/CGDBR - Jan Jaeger
+24 May 2001 Added CEGBR/CDGBR - Kris
+23 May 2001 CKD 9345 support - Greg Smith
+21 May 2001 Correct availability of N3 instructions in S/390 mode - Jan Jaeger
+19 May 2001 Compression corrections - Bernard van der Helm
+19 May 2001 Correct multiply/divide long - Jan Jaeger
+19 May 2001 Correct RCP host address when nonzero MSO - Paul Leisy
+18 May 2001 Correct CEFBR/CFEBR register use - Jan Jaeger
+18 May 2001 Correct STOSM/STNSM interception - Paul Leisy
+18 May 2001 Correct TRAP save area page crosser - Paul Leisy
+18 May 2001 Correct operation exception interception - Paul Leisy
+17 May 2001 Correct address wrap when SIE is interrupted - Jan Jaeger
+17 May 2001 Correct specification exception interception - Jan Jaeger
+16 May 2001 Correct CPU addr in PSA during external interrupts - Paul Leisy
+15 May 2001 Correct STFL installed facility bit settings - Jan Jaeger
+15 May 2001 Correct PR register update - Jan Jaeger
+15 May 2001 Correct prefix storage key update in TPI - Jan Jaeger
+15 May 2001 Correct TEA on STURA/LURA protection exception - Paul Leisy
+09 May 2001 Correct TRT address wrap - Paul Leisy
+08 May 2001 Fixes for RP instruction - Paul Leisy
+08 May 2001 Fix gr15 in TRAP instruction - Paul Leisy
+07 May 2001 CMPSC fix - Bernard van der Helm
+07 May 2001 Correct false data exception in CVDG - Jan Jaeger
+06 May 2001 Fix to Lock Page - Jan Jaeger
+06 May 2001 Complete Storage Key Assist - Jan Jaeger
+06 May 2001 Complete Move Page Facility 2 - Jan Jaeger
 04 May 2001 Correct fbadasd.c syntax error - Greg Smith
 04 May 2001 Correct RRB/RRBE rcpkey - Paul Leisy
 03 May 2001 Try to open FBA emulated device readonly if open for
@@ -287,8 +366,6 @@
 07 Oct 2000 Fix for random bug in MP instruction (Mario Bezzi)
 07 Oct 2000 Treat all 3505 card reader read CCWs the same (Jay Maynard)
 26 Sep 2000 STCRW instruction nullification correction - Jan Jaeger
-16 Sep 2000 Add ses.c containing sysplex specific instructions (Jan Jaeger)
-09 Sep 2000 Add CFCC hardware loader (Jan Jaeger)
 05 Sep 2000 I/O rate meter on graphical panel (Valery Pogonchenko)
 05 Sep 2000 Sense correction for track overflow processing (Valery
             Pogonchenko)

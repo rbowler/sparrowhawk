@@ -35,7 +35,7 @@
         (((_guestregs)->siebk->v & SIE_V_EXT) \
           && ((_guestregs)->psw.sysmask & PSW_EXTMASK))
 
-#define SIE_I_HOST(_hostregs) SIE_IC_INTERRUPT_CPU(_hostregs)
+#define SIE_I_HOST(_hostregs) IC_INTERRUPT_CPU(_hostregs)
 
 #endif /*!defined(_SIE_C)*/
 
@@ -59,7 +59,7 @@
 DEF_INST(start_interpretive_execution)
 {
 int     b2;                             /* Values of R fields        */
-VADR    effective_addr2;                /* address of state desc.    */
+RADR    effective_addr2;                /* address of state desc.    */
 int     gpv;                            /* guest psw validity        */
 int     n;                              /* Loop counter              */
 U16     lhcpu;                          /* Last Host CPU address     */
@@ -90,11 +90,8 @@ int     icode;                          /* Interception code         */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
-    /* Absolute address of state descriptor block */
-    GUESTREGS->sie_state = effective_addr2;
-
 #if defined(SIE_DEBUG)
-    logmsg("SIE: state descriptor " F_RADR "\n",GUESTREGS->sie_state);
+    logmsg("SIE: state descriptor " F_RADR "\n",effective_addr2);
 #endif /*defined(SIE_DEBUG)*/
 
     /* Direct pointer to state descriptor block */
@@ -230,8 +227,16 @@ int     icode;                          /* Interception code         */
 
     /* If this is not the last host cpu that dispatched this state
        descriptor then clear the guest TLB entries */
-    if(regs->cpuad != lhcpu)
+    if((regs->cpuad != lhcpu)
+      || (GUESTREGS->sie_state != effective_addr2))
     {
+        /* Absolute address of state descriptor block */
+        GUESTREGS->sie_state = effective_addr2;
+
+        /* Update Last Host CPU address */
+        STORE_HW(STATEBK->lhcpu, regs->cpuad);
+
+        /* Purge guest TLB entries */
         ARCH_DEP(purge_tlb) (GUESTREGS);
         ARCH_DEP(purge_alb) (GUESTREGS);
     }
@@ -298,7 +303,6 @@ int     icode;                          /* Interception code         */
     /* Perform serialization and checkpoint synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
-
 } 
 
 
@@ -325,7 +329,7 @@ int     n;
            /* If a host interrupt is pending
               then backup the psw and exit */
             regs->psw.IA -= regs->psw.ilc;
-            regs->psw.IA &= 0x7FFFFFFF;
+            regs->psw.IA &= ADDRESS_MAXWRAP(regs);
             break;
         case SIE_HOST_PGMINT:
             break;
@@ -363,9 +367,6 @@ int     n;
             STATEBK->c = SIE_C_PGMINT;
             break;
     }
-
-    /* Update Last Host CPU address */
-    STORE_HW(STATEBK->lhcpu, regs->cpuad);
 
     /* Save CPU timer  */
     STORE_DW(STATEBK->cputimer, GUESTREGS->ptimer);
@@ -450,10 +451,22 @@ int ARCH_DEP(sie_run) (REGS *regs)
                && ! SIE_I_HOST(regs) )
             {
 
-                if(OPEN_IC_CPUINT(GUESTREGS))
+                if( SIE_IC_INTERRUPT_CPU(GUESTREGS) )
                 {
-                    obtain_lock(&sysblk.intlock);
-                    ARCH_DEP(perform_external_interrupt) (GUESTREGS);
+                    obtain_lock (&sysblk.intlock);
+#if MAX_CPU_ENGINES > 1
+                    /* Perform broadcasted purge of ALB and TLB if requested
+                       synchronize_broadcast() must be called until there are
+                       no more broadcast pending because synchronize_broadcast()
+                       releases and reacquires the mainlock. */
+
+                    while (sysblk.brdcstncpu != 0)
+                        ARCH_DEP(synchronize_broadcast)(regs);
+#endif /*MAX_CPU_ENGINES > 1*/
+
+                    if( OPEN_IC_CPUINT(GUESTREGS) )
+                        ARCH_DEP(perform_external_interrupt) (GUESTREGS);
+
                     release_lock(&sysblk.intlock);
                 }
 
@@ -463,8 +476,6 @@ int ARCH_DEP(sie_run) (REGS *regs)
 
                 GUESTREGS->instvalid = 1;
 
-                regs->instcount++;
-
 #if defined(SIE_DEBUG)
                 /* Display the instruction */
                 ARCH_DEP(display_inst) (GUESTREGS, GUESTREGS->inst);
@@ -472,23 +483,24 @@ int ARCH_DEP(sie_run) (REGS *regs)
 
                 EXECUTE_INSTRUCTION(GUESTREGS->inst, 0, GUESTREGS);
 
-#if MAX_CPU_ENGINES > 1
-                /* Perform broadcasted purge of ALB and TLB if requested
-                   synchronize_broadcast() must be called until there are
-                   no more broadcast pending because synchronize_broadcast()
-                   releases and reacquires the mainlock. */
+#if !defined(OPTION_CPU_UNROLL)
+                regs->instcount++;
+#else
 
-                while (sysblk.brdcstncpu != 0)
-                {
-                    obtain_lock (&sysblk.intlock);
-                    synchronize_broadcast(regs, NULL);
-                    release_lock (&sysblk.intlock);
-                }
-#endif /*MAX_CPU_ENGINES > 1*/
+                UNROLLED_EXECUTE(GUESTREGS);
+                UNROLLED_EXECUTE(GUESTREGS);
+                UNROLLED_EXECUTE(GUESTREGS);
+                UNROLLED_EXECUTE(GUESTREGS);
+                UNROLLED_EXECUTE(GUESTREGS);
+                UNROLLED_EXECUTE(GUESTREGS);
+                UNROLLED_EXECUTE(GUESTREGS);
+
+                regs->instcount += 8;
+#endif
 
             }
 
-        if(icode == 0)
+        if(icode == 0 || icode == SIE_NO_INTERCEPT)
         {
             if( SIE_I_EXT(GUESTREGS) )
                 icode = SIE_INTERCEPT_EXTREQ;

@@ -590,6 +590,22 @@ int             cckd=0;                 /* 1 if compressed CKD       */
         f1 = 0; f2 = 0; f3 = 0; f4 = 0; f5 = 0; f6 = 0;
         rpscalc = 0x0000;
         break;
+    case 0x9345:
+        cutype = 0x9343; cumodel = 0xe0; cucode = 0x11;
+        if (dev->ckdcyls > 1440)
+            { devmodel = 0x04; sctlfeat = 0x80000000; } /*9345-2*/
+        else
+            { devmodel = 0x00; sctlfeat = 0x80000000; } /*9345-1*/
+        devtcode = 0x04;
+        dev->ckdsectors = 213;
+        dev->ckdmaxr0len = 48174;
+        dev->ckdmaxr1len = 46456;
+        tracklen = 48280;
+        har0len = 1184;
+        formula = 2;
+        f1 = 34; f2 = 18; f3 = 7; f4 = 6; f5 = 116; f6 = 6;
+        rpscalc = 0x8b07;
+        break;
     case 0x3340:
         cutype = 0x3830; cumodel = 0x02; cucode = 0x00;
         devmodel = 0x00; devtcode = 0x00;
@@ -3251,7 +3267,8 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         /* If the search was successful, trace the first 8 bytes of
            the key, which will usually be a dataset name or member
            name and can provide useful debugging information */
-        if ((*unitstat & CSW_SM) && isprint(ebcdic_to_ascii[iobuf[0]]))
+        if ((*unitstat & CSW_SM) && sysblk.ckdkeytrace
+            && isprint(ebcdic_to_ascii[iobuf[0]]))
         {
             BYTE module[45]; int i;
             for (i=0; i < sizeof(module)-1 && i < num; i++)
@@ -4436,8 +4453,10 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             break;
         }
 
-        /* Command reject if not 3380 or 3390 */
-        if ((dev->devtype != 0x3380) && (dev->devtype != 0x3390))
+        /* Command reject if not 3380 or 3390 or 9345 */
+        if ((dev->devtype != 0x3380)
+         && (dev->devtype != 0x3390)
+         && (dev->devtype != 0x9345))
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -4670,6 +4689,18 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         /* Byte 0 is the path group state byte */
         if ((iobuf[0] & SPG_SET_COMMAND) == SPG_SET_ESTABLISH)
         {
+            /* Only accept the new pathgroup id when
+               1) it has not yet been set (ie contains zeros) or
+               2) It is set, but we are setting the same value */
+            if(memcmp(dev->pgid,
+                 "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", 11)
+              && memcmp(dev->pgid, iobuf+1, 11))
+            {
+                dev->sense[0] = SENSE_CR;
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                break;
+            }
+
             /* Bytes 1-11 contain the path group identifier */
             memcpy (dev->pgid, iobuf+1, 11);
         }

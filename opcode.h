@@ -94,7 +94,7 @@ extern zz_func opcode_edxx[][GEN_MAXARCH];
 #if defined(OPTION_INSTRUCTION_COUNTING)
 
 #define COUNT_INST(_inst, _regs) \
-{ \
+do { \
 int used; \
     switch((_inst)[0]) { \
 	case 0x01: \
@@ -150,12 +150,73 @@ int used; \
 	logmsg("First use: "); \
 	ARCH_DEP(display_inst) ((_regs), (_inst)); \
     } \
-}
+} while(0)
 
 #else
 
 #define COUNT_INST(_inst, _regs)
 
+#endif
+
+
+#define UNROLLED_EXECUTE(_regs) \
+do { \
+    (_regs)->instvalid = 0; \
+    INSTRUCTION_FETCH((_regs)->inst, (_regs)->psw.IA, (_regs)); \
+    (_regs)->instvalid = 1; \
+    EXECUTE_INSTRUCTION ((_regs)->inst, 0, (_regs)); \
+} while(0)
+
+
+/* Main storage access locking 
+   This routine will ensure that a given CPU 
+   has exclusive access to main storage and hence
+   will be able to perform as what appears as an
+   interlocked update to other CPU's - Jan Jaeger */
+
+/* OBTAIN_MAINLOCK() may cause a retry of the instruction */
+
+#if MAX_CPU_ENGINES == 1
+ #define OBTAIN_MAINLOCK(_regs)
+ #define RELEASE_MAINLOCK(_regs)
+ #define BROADCAST_PTLB(_regs) \
+         ARCH_DEP(purge_tlb)((_regs))
+ #define BROADCAST_PALB(_regs) \
+         ARCH_DEP(purge_alb)((_regs))
+ #define SYNCHRONIZE_BROADCAST(_regs)
+#else
+#define OBTAIN_MAINLOCK(_register_context) \
+do { \
+    pthread_mutex_lock(&sysblk.mainlock); \
+    (_register_context)->mainlock = 1; \
+} while(0)
+
+#define RELEASE_MAINLOCK(_register_context) \
+do { \
+    (_register_context)->mainlock = 0; \
+    pthread_mutex_unlock(&sysblk.mainlock); \
+} while(0)
+
+#define BROADCAST_PTLB(_regs) \
+do { \
+    pthread_mutex_lock(&sysblk.intlock); \
+    sysblk.brdcstptlb++; \
+    pthread_mutex_unlock(&sysblk.intlock); \
+} while(0)
+
+#define BROADCAST_PALB(_regs) \
+do { \
+    pthread_mutex_lock(&sysblk.intlock); \
+    sysblk.brdcstpalb++; \
+    pthread_mutex_unlock(&sysblk.intlock); \
+} while(0)
+
+#define SYNCHRONIZE_BROADCAST(_regs) \
+do { \
+    pthread_mutex_lock(&sysblk.intlock); \
+    ARCH_DEP(synchronize_broadcast)((_regs)); \
+    pthread_mutex_unlock(&sysblk.intlock); \
+} while(0)
 #endif
 
 
@@ -166,23 +227,31 @@ int used; \
 #if !defined(OPTION_FOOTPRINT_BUFFER)
 
 #define EXECUTE_INSTRUCTION(_instruction, _execflag, _regs) \
-    { \
-	COUNT_INST((_instruction), (_regs)); \
-	opcode_table[((_instruction)[0])][ARCH_MODE]((_instruction), (_execflag), (_regs)); \
-    }
+do { \
+    COUNT_INST((_instruction), (_regs)); \
+    opcode_table[((_instruction)[0])][ARCH_MODE]((_instruction), (_execflag), (_regs)); \
+} while(0)
 
 #else /*defined(OPTION_FOOTPRINT_BUFFER)*/
 
 #define EXECUTE_INSTRUCTION(_instruction, _execflag, _regs) \
-    { \
-	sysblk.footprregs[(_regs)->cpuad][sysblk.footprptr[(_regs)->cpuad]] = *(_regs); \
-	memcpy(&sysblk.footprregs[(_regs)->cpuad][sysblk.footprptr[(_regs)->cpuad]++].inst,(_instruction),6); \
-	sysblk.footprptr[(_regs)->cpuad] &= OPTION_FOOTPRINT_BUFFER - 1; \
-	COUNT_INST((_instruction), (_regs)); \
-	opcode_table[((_instruction)[0])][ARCH_MODE]((_instruction), (_execflag), (_regs)); \
-    }
+do { \
+    sysblk.footprregs[(_regs)->cpuad][sysblk.footprptr[(_regs)->cpuad]] = *(_regs); \
+    memcpy(&sysblk.footprregs[(_regs)->cpuad][sysblk.footprptr[(_regs)->cpuad]++].inst,(_instruction),6); \
+    sysblk.footprptr[(_regs)->cpuad] &= OPTION_FOOTPRINT_BUFFER - 1; \
+    COUNT_INST((_instruction), (_regs)); \
+    opcode_table[((_instruction)[0])][ARCH_MODE]((_instruction), (_execflag), (_regs)); \
+} while(0)
 
 #endif /*defined(OPTION_FOOTPRINT_BUFFER)*/
+
+#if defined(OPTION_CPU_UNROLL)
+#define RETURN_INTCHECK(_regs) \
+        longjmp((_regs)->progjmp, SIE_NO_INTERCEPT)
+#else
+#define RETURN_INTCHECK(_regs) \
+        return
+#endif
 
 
 #define ODD_CHECK(_r, _regs) \
@@ -347,18 +416,18 @@ int used; \
 #undef	INVALIDATE_AIA
 
 #define INSTRUCTION_FETCH(_dest, _addr, _regs) \
+do { \
+    if( (_regs)->VI == ((_addr) & PAGEFRAME_PAGEMASK) \
+      && ((_addr) & PAGEFRAME_BYTEMASK) <= PAGEFRAME_PAGESIZE - 6) \
     { \
-	if( (_regs)->VI == ((_addr) & PAGEFRAME_PAGEMASK) \
-	 && ((_addr) & PAGEFRAME_BYTEMASK) <= PAGEFRAME_PAGESIZE - 6) \
-	{ \
-	    if ((_addr) & 0x01) \
-		ARCH_DEP(program_interrupt) ((_regs), PGM_SPECIFICATION_EXCEPTION); \
-	    memcpy ((_dest), sysblk.mainstor + (_regs)->AI + \
+        if((_addr) & 0x01) \
+            ARCH_DEP(program_interrupt)((_regs), PGM_SPECIFICATION_EXCEPTION); \
+        memcpy ((_dest), sysblk.mainstor + (_regs)->AI + \
 				    ((_addr) & PAGEFRAME_BYTEMASK) , 6); \
-	} \
-	else \
-	    ARCH_DEP(instfetch) ((_dest), (_addr), (_regs)); \
-    }
+    } \
+    else \
+        ARCH_DEP(instfetch) ((_dest), (_addr), (_regs)); \
+} while(0)
 
 #define INVALIDATE_AIA(_regs) \
     (_regs)->VI = 1
@@ -391,11 +460,11 @@ int used; \
 	(_regs)->VE((_arn)) = 1
 
 #define INVALIDATE_AEA_ALL(_regs) \
-    { \
-	int i; \
-	for(i = 0; i < 16; i++) \
-	    (_regs)->VE(i) = 1; \
-    }
+do { \
+    int i; \
+    for(i = 0; i < 16; i++) \
+        (_regs)->VE(i) = 1; \
+} while(0)
 
 #else /*!defined(OPTION_AEA_BUFFER)*/
 
@@ -869,17 +938,17 @@ int used; \
 #endif
 
 #define SIE_INTERCEPT(_regs) \
-	{ \
-	    if((_regs)->sie_state) \
-		longjmp((_regs)->progjmp, SIE_INTERCEPT_INST); \
-	}
+do { \
+    if((_regs)->sie_state) \
+	longjmp((_regs)->progjmp, SIE_INTERCEPT_INST); \
+} while(0)
 
 #define SIE_TRANSLATE(_addr, _acctype, _regs) \
-	{ \
-	    if((_regs)->sie_state && !(_regs)->sie_pref) \
-		*(_addr) = SIE_LOGICAL_TO_ABS ((_regs)->sie_mso + *(_addr), \
-		  USE_PRIMARY_SPACE, (_regs)->hostregs, (_acctype), 0); \
-	}
+do { \
+    if((_regs)->sie_state && !(_regs)->sie_pref) \
+	*(_addr) = SIE_LOGICAL_TO_ABS ((_regs)->sie_mso + *(_addr), \
+	  USE_PRIMARY_SPACE, (_regs)->hostregs, (_acctype), 0); \
+} while(0)
 
 #define SIE_ONLY_INSTRUCTION(_regs) \
     if(!(_regs)->sie_state) \
@@ -915,6 +984,7 @@ int used; \
 #define SIE_MODE_XC_SOPEX(_regs)
 
 #endif /*!defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+
 
 #if defined(FEATURE_VECTOR_FACILITY)
 
@@ -1082,6 +1152,7 @@ int  resume_subchan (REGS *regs, DEVBLK *dev);
 int  ARCH_DEP(present_io_interrupt) (REGS *regs, U32 *ioid,
         U32 *ioparm, U32 *iointid, BYTE *csw);
 void io_reset (void);
+int  chp_reset(BYTE chpid);
 int  device_attention (DEVBLK *dev, BYTE unitstat);
 int  ARCH_DEP(device_attention) (DEVBLK *dev, BYTE unitstat);
 
@@ -1132,9 +1203,9 @@ void ARCH_DEP(diag204_call) (int r1, int r2, REGS *regs);
 
 
 /* Functions in module external.c */
+void ARCH_DEP(synchronize_broadcast) (REGS *regs);
 void ARCH_DEP(perform_external_interrupt) (REGS *regs);
 void ARCH_DEP(store_status) (REGS *ssreg, RADR aaddr);
-void synchronize_broadcast (REGS *regs, U32 *type);
 void store_status (REGS *ssreg, U64 aaddr);
 
 
@@ -1602,6 +1673,7 @@ DEF_INST(disconnect_channel_set);
 
 /* Instructions in service.c */
 DEF_INST(service_call);
+DEF_INST(channel_subsystem_call);
 
 
 /* Instructions in xstore.c */
@@ -1638,30 +1710,6 @@ DEF_INST(v_load_vix_from_address);
 DEF_INST(v_store_vector_parameters);
 DEF_INST(v_save_vac);
 DEF_INST(v_restore_vac);
-
-
-/* Instructions in ses.c */
-DEF_INST(ses_opcode_0105);
-DEF_INST(ses_opcode_0106);
-DEF_INST(ses_opcode_0108);
-DEF_INST(ses_opcode_0109);
-DEF_INST(ses_opcode_B260);
-DEF_INST(ses_opcode_B261);
-DEF_INST(ses_opcode_B264);
-DEF_INST(ses_opcode_B265);
-DEF_INST(ses_opcode_B266);
-DEF_INST(ses_opcode_B267);
-DEF_INST(ses_opcode_B268);
-DEF_INST(ses_opcode_B272);
-DEF_INST(ses_opcode_B27A);
-DEF_INST(ses_opcode_B27B);
-DEF_INST(ses_opcode_B27C);
-DEF_INST(ses_opcode_B27E);
-DEF_INST(ses_opcode_B27F);
-DEF_INST(ses_opcode_B2A4);
-DEF_INST(ses_opcode_B2A8);
-DEF_INST(ses_opcode_B2F1);
-DEF_INST(ses_opcode_B2F6);
 
 
 /* Instructions in esame.c */
@@ -1847,8 +1895,12 @@ DEF_INST(compare_and_signal_bfp_short_reg);
 DEF_INST(compare_and_signal_bfp_short);
 DEF_INST(convert_fix32_to_bfp_long_reg);
 DEF_INST(convert_fix32_to_bfp_short_reg);
+DEF_INST(convert_fix64_to_bfp_long_reg);
+DEF_INST(convert_fix64_to_bfp_short_reg);
 DEF_INST(convert_bfp_long_to_fix32_reg);
 DEF_INST(convert_bfp_short_to_fix32_reg);
+DEF_INST(convert_bfp_long_to_fix64_reg);
+DEF_INST(convert_bfp_short_to_fix64_reg);
 DEF_INST(divide_bfp_ext_reg);
 DEF_INST(divide_bfp_long_reg);
 DEF_INST(divide_bfp_long);
@@ -1882,6 +1934,5 @@ DEF_INST(subtract_bfp_long_reg);
 DEF_INST(subtract_bfp_long);
 DEF_INST(subtract_bfp_short_reg);
 DEF_INST(subtract_bfp_short);
-
 
 /* end of OPCODE.H */

@@ -183,6 +183,25 @@ char           *kw, *op;                /* Argument keyword/option   */
     if (cckd->max_dfw < 1) cckd->max_dfw = 1;
     if (cckd->max_wt < 1) cckd->max_wt = CCKD_MAX_WRITE_TIME;
 
+    /* Initialize locks, conditions and attributes */
+    initialize_lock (&cckd->filelock);
+    initialize_lock (&cckd->dfwlock);
+    initialize_lock (&cckd->gclock);
+    initialize_lock (&cckd->termlock);
+    initialize_lock (&cckd->cachelock);
+    initialize_condition (&cckd->dfwcond);
+    initialize_condition (&cckd->gccond);
+    initialize_condition (&cckd->rtcond);
+    initialize_condition (&cckd->termcond);
+    initialize_detach_attr (&cckd->gcattr);
+    initialize_detach_attr (&cckd->dfwattr);
+    for (i = 0; i < cckd->max_ra; i++)
+    {   /* read-ahead locks, conditions and attributes */
+        initialize_lock (&cckd->ralock[i]);
+        initialize_condition (&cckd->racond[i]);
+        initialize_detach_attr (&cckd->raattr[i]);
+    }
+
     cckd->l1x = cckd->sfx = -1;
 
     /* Read the compressed device header */
@@ -227,24 +246,6 @@ char           *kw, *op;                /* Argument keyword/option   */
 
     /* Set current ckddasd position */
     cckd->curpos = 512;
-
-    /* Initialize locks, conditions and attributes */
-    initialize_lock (&cckd->filelock);
-    initialize_lock (&cckd->dfwlock);
-    initialize_lock (&cckd->gclock);
-    initialize_lock (&cckd->termlock);
-    initialize_condition (&cckd->dfwcond);
-    initialize_condition (&cckd->gccond);
-    initialize_condition (&cckd->rtcond);
-    initialize_condition (&cckd->termcond);
-    initialize_detach_attr (&cckd->gcattr);
-    initialize_detach_attr (&cckd->dfwattr);
-    for (i = 0; i < cckd->max_ra; i++)
-    {   /* read-ahead locks, conditions and attributes */
-        initialize_lock (&cckd->ralock[i]);
-        initialize_condition (&cckd->racond[i]);
-        initialize_detach_attr (&cckd->raattr[i]);
-    }
 
     /* set default cache limit for cckd_read_trk */
     if (dev->ckdcachenbr < 1)
@@ -2260,6 +2261,7 @@ int             cyls3350[]   = {555, 0};
 int             cyls3375[]   = {959, 0};
 int             cyls3380[]   = {885, 1770, 2655, 0};
 int             cyls3390[]   = {1113, 2226, 3339, 10017, 0};
+int             cyls9345[]   = {1440, 2156, 0};
 
     cckd = dev->cckd_ext;
 
@@ -2314,6 +2316,8 @@ int             cyls3390[]   = {1113, 2226, 3339, 10017, 0};
     case 0x3380: cyltab = cyls3380;
                  break;
     case 0x3390: cyltab = cyls3390;
+                 break;
+    case 0x9345: cyltab = cyls9345;
                  break;
     default:     logmsg ("Unsupported device type %4.4x\n",
                        dev->devtype);

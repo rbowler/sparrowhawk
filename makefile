@@ -2,7 +2,7 @@
 # Makefile for Hercules S/370, ESA/390 and z/Architecture emulator
 #
 
-VERSION  = 2.12
+VERSION  = 2.13
 
 # Change this if you want to install the Hercules executables somewhere
 #   besides /usr/bin. The $PREFIX (which defaults to nothing) can be
@@ -25,25 +25,25 @@ ifeq ($(HOST_ARCH),i686)
 ARCH_FLAGS = -O3 -march=pentiumpro
 endif
 ifeq ($(HOST_ARCH),alpha)
-ARCH_FLAGS = -O2
+ARCH_FLAGS = -O2 -DNO_BYTESWAP_H -DNO_ASM_BYTESWAP -DNO_ATTR_REGPARM
 endif
 
 ifndef ARCH_FLAGS
-ARCH_FLAGS = -O3
+ARCH_FLAGS = -O3 -DNO_BYTESWAP_H -DNO_ASM_BYTESWAP -DNO_ATTR_REGPARM
 endif
 
 # For Linux use:
-#CFLAGS  = -O3 -Wall -march=pentium -fomit-frame-pointer \
-#	   -DVERSION=$(VERSION)
+CFLAGS  = $(ARCH_FLAGS) -Wall -fomit-frame-pointer -DVERSION=$(VERSION)
+# For Linux use (with gprof profiling):
+#CFLAGS  = $(ARCH_FLAGS) -Wall -DPROFILE_CPU -pg -DVERSION=$(VERSION)
 # For older Linux versions use:
-CFLAGS  = $(ARCH_FLAGS) -fomit-frame-pointer \
-	  -DVERSION=$(VERSION) -DNO_BYTESWAP_H -DNO_ASM_BYTESWAP \
-	  -DNO_ATTR_REGPARM
-# For Linux/390 use:
-#CFLAGS  = -O3 -DVERSION=$(VERSION) -DNO_BYTESWAP_H -DNO_ASM_BYTESWAP\
+#CFLAGS  = $(ARCH_FLAGS) -fomit-frame-pointer \
+#	  -DVERSION=$(VERSION) -DNO_BYTESWAP_H -DNO_ASM_BYTESWAP \
 #	  -DNO_ATTR_REGPARM
 
 LFLAGS	 = -lpthread -lm -lz
+# For Linux use (with gprof profiling):
+#LFLAGS	 = -lpthread -lm -lz -pg
 
 # Uncomment the lines below to enable Compressed CKD bzip2 compression
 #CFLAGS	+= -DCCKD_BZIP2
@@ -75,7 +75,7 @@ HRC_OBJS = impl.o config.o panel.o version.o \
 	   printer.o console.o external.o \
 	   float.o ctcadpt.o trace.o \
 	   machchk.o vector.o xstore.o \
-	   cmpsc.o sie.o ses.o timer.o \
+	   cmpsc.o sie.o timer.o \
 	   esame.o cckddasd.o cckdcdsx.o \
 	   parser.o hetlib.o ieee.o
 
@@ -221,14 +221,12 @@ clean:
 	rm -rf $(EXEFILES) *.o core
 
 tar:	clean
-	(cd ..; tar cvzf hercules-$(VERSION).tar.gz --exclude \*CVS hercules-$(VERSION))
+	(cd ..; tar cvzf hercules-$(VERSION).tar.gz hercules-$(VERSION))
 
 install:  $(EXEFILES)
 	cp $(EXEFILES) $(DESTDIR)
 	cp util/dasdlist $(DESTDIR)
-ifndef RPM_OPT_FLAGS
 	chown root $(DESTDIR)/hercifc
 	chmod 0751 $(DESTDIR)/hercifc
 	chmod +s $(DESTDIR)/hercifc
 	rm hercifc
-endif

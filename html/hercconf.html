@@ -53,6 +53,8 @@ PANRATE   FAST
 0300    3370    sysres.300
 0400    3088    CTCI /dev/tun0 1500 192.168.200.1 192.168.200.2 255.255.255.0
 0401    3088    CTCI /dev/tun0 1500 192.168.200.1 192.168.200.2 255.255.255.0
+0410    3088    CTCT 30880 192.168.100.2 30880 2048
+0411    3088    CTCT 30881 192.168.100.2 30881 2048
 0580    3420    ickdsf.ipl
 0581    3420    /dev/st0
 0582    3420    /cdrom/tapes/uaa196.tdf
@@ -136,10 +138,6 @@ The following system parameters may be specified:
     is the same as 500, and FAST is the same as 50. A value less than the
     Linux system clock tick interval (10 on Intel, 1 on Alpha), or more than
     5000, will be rejected. SLOW is the default.
-<dt><code>CFCCIMAGE <em>xxxxx</em></code>
-<dd>specifies the name of the file containing the coupling-facility
-    control code image which will be loaded by the service processor
-    in a VM/ESA environment.
 <dt><code>ARCHMODE S/370 &#124 ESA/390 &#124 ESAME</code>
 <dd>specifies the initial architecture mode.
     Use <code>S/370</code> for OS/360, VM/370, and MVS 3.8.
@@ -151,35 +149,33 @@ The following system parameters may be specified:
     This is handled automatically by all z/Architecture operating systems.
 <dt><code>DEVTMAX -1 &#124 0 &#124 1-n</code>
 <dd>specifies the maximum number of device threads allowed.
-    <p>Specify <code>-1</code> to cause 'one time only' temporary threads to
-	be created to service each I/O request to a device. Once the I/O
-	request is complete, the thread exits. Subsequent I/O to the same
-	device will cause another worker thread to be created again. 
-    <p>Specify <code>0</code> to cause an unlimited number of
-        'semi-permanent' threads to be created on an 'as-needed' basis. With
-	this option, a thread is created to service an I/O request for a
-	device if one doesn't already exist, but once the I/O is complete,
-	the thread enters an idle state waiting for new work. If a new I/O
-	request for the device arrives before the timeout period expires,
-	the existing thread will be reused. The timeout value is currently
-	hard coded at 5 minutes. Note that this option can cause one thread
+    <p>Specify <code>-1</code> to cause 'one time only' temporary threads to be
+	created to service each I/O request to a device. Once the I/O request is
+	complete, the thread exits. Subsequent I/O to the same device will cause
+	another worker thread to be created again.
+    <p>Specify <code>0</code> to cause an unlimited number of 'semi-permanent'
+	threads to be created on an 'as-needed' basis. With this option, a thread
+	is created to service an I/O request for a device if one doesn't already
+	exist, but once the I/O is complete, the thread enters an idle state waiting
+	for new work. If a new I/O request for the device arrives before the timeout
+	period expires, the existing thread will be reused. The timeout value is
+	currently hard coded at 5 minutes. Note that this option can cause one thread
 	(or possibly more) to be created for each device defined in your
-	configuration.  Specifying <code>0</code> means there is no limit to
-	the number of threads that can be created.  <p>Specify a value from
-	<code>1</code> to <code>n</code> to set an upper limit to the number
-	of threads that can be created to service any I/O request to any
-	device. Like the <code>0</code> option, each thread, once done
-	servicing an I/O request, enters an idle state. If a new request
-	arrives before the timeout period expires, the thread is reused. If
-	all threads are busy when a new I/O request arrives however, a new
-	thread is created <i>only</i> if the specified maximum has not yet
-	been reached. If the specified maximum number of threads has already
-	been reached, then the I/O request is placed in a queue and will be
-	serviced by the first available thread (i.e. by whichever thread
-	becomes idle first). This option was created to address a threading
-	issue (possibly related to the cygwin Pthreads implementation) on
-	Windows systems.  <p>The default for Windows is <code>8</code>. The
-	default for all other systems is <code>0</code>.
+	configuration. Specifying <code>0</code> means there is no limit to the
+	number of threads that can be created.
+	<p>Specify a value from <code>1</code> to <code>n</code> to set an upper limit
+	to the number of threads that can be created to service any I/O request to
+	any device. Like the <code>0</code> option, each thread, once done servicing
+	an I/O request, enters an idle state. If a new request arrives before the
+	timeout period expires, the thread is reused. If all threads are busy when
+	a new I/O request arrives however, a new thread is created <i>only</i> if the
+	specified maximum has not yet been reached. If the specified maximum number
+	of threads has already been reached, then the I/O request is placed in a queue
+	and will be serviced by the first available thread (i.e. by whichever thread
+	becomes idle first). This option was created to address a threading issue
+	(possibly related to the cygwin Pthreads implementation) on Windows systems.
+	<p>The default for Windows is <code>8</code>. The default for all other systems
+	is <code>0</code>.
 </dl>
 <p>
 A comment preceded by a pound sign may be appended to any system
@@ -235,7 +231,7 @@ the device record is:
         <td><a href="#fbadasd">FBA direct access storage devices</a></td>
         <td>Disk file</td>
     </tr>
-    <tr><td>2311, 2314, 3330<br>3340, 3350, 3375<br>3380, 3390</td>
+    <tr><td>2311, 2314, 3330<br>3340, 3350, 3375<br>3380, 3390, 9345</td>
         <td><a href="#ckddasd">CKD direct access storage devices</a></td>
         <td>Disk file</td>
     </tr>
@@ -295,6 +291,13 @@ the device record is:
         reading the last card in the file.  If <code>eof</code> is not
         specified, then end of file results in unit check status
         with intervention required in the sense bytes.
+    <dt><code>multifile</code>
+    <dd>specifies, when multiple input files are entered, to
+        automatically open the next input file and continue reading
+        whenever EOF is encountered on a given file. If not specified,
+        then reading stops once EOF is reached on a given file and
+        an attention interrupt is then required to open and begin
+        reading the next file.
     </dl>
     <p>
     If neither <code>ebcdic</code> nor <code>ascii</code> is
@@ -447,6 +450,28 @@ the device record is:
     <dd>A point-to-point IP connection with the TCP/IP stack of the
         driving system on which Hercules is running.  See the
         <a href="herctcp.html">Hercules TCP/IP</a> page for details.
+    <P><dt><b>CTCT</b>
+    <dd>An emulated CTCA to another Hercules system. This is the only
+        type of CTCA currently supported under Windows. Four arguments
+        are required:
+        <dl>
+            <dt><code><em>lport</em></code>
+            <dd>specifies the local TCP port. This is the TCP port that
+                Hercules will listen on for this CTCA.
+            <dt><code><em>rhost</em></code>
+            <dd>specifies the remote host. This is the name or IP address
+                of the remote system that Hercules is running on, not the
+                name or IP address of the OS running on that copy of
+                Hercules.
+            <dt><code><em>rport</em></code>
+            <dd>specifies the remote TCP port. The rport parameter on this
+                system must match the lport parameter on the remote system,
+                and vice versa.
+            <dt><code><em>bufsize</em></code>
+            <dd>specifies the buffer size for the link. If this link is used
+                for IP traffic, this parameter should be more than the MTU
+                of the interface definition in the OS.
+        </dl>
     </dl>
     <p>If the first parameter is not one of the recognized CTC emulation
     types, then the driver will operate as in Hercules Version 1, using
@@ -514,6 +539,6 @@ If you have a question about Hercules, see the
 <a href="hercinst.html"><img src="gifs/back.gif" border=0 alt="back"></a>
 </center>
 <small>
-<p>Last updated 20 April 2001
+<p>Last updated 5 July 2001
 </BODY>
 </HTML>

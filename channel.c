@@ -21,6 +21,20 @@
 
 #include "opcode.h"
 
+#undef CHADDRCHK
+#if defined(FEATURE_ADDRESS_LIMIT_CHECKING)
+#define CHADDRCHK(_addr,_dev)                   \
+  (   ((_addr) >= sysblk.mainsize)              \
+    || ((dev->orb.flag5 & ORB5_A)               \
+      && ((((_dev)->pmcw.flag5 & PMCW5_LM_LOW)  \
+        && ((_addr) < sysblk.addrlimval))       \
+      || (((_dev)->pmcw.flag5 & PMCW5_LM_HIGH)  \
+        && ((_addr) >= sysblk.addrlimval)) ) ))
+#else /*!defined(FEATURE_ADDRESS_LIMIT_CHECKING)*/
+#define CHADDRCHK(_addr,_dev) \
+        ((_addr) >= sysblk.mainsize)
+#endif /*!defined(FEATURE_ADDRESS_LIMIT_CHECKING)*/
+
 #if !defined(_CHANNEL_C)
 
 #define _CHANNEL_C
@@ -67,9 +81,6 @@ BYTE    area[64];                       /* Data display area         */
             dev->devnum,
             ccw[0], ccw[1], ccw[2], ccw[3],
             ccw[4], ccw[5], ccw[6], ccw[7], area);
-
-//  if (dev->ccwstep)
-//      panel_command (&(sysblk.regs[0]));
 
 } /* end function display_ccw */
 
@@ -198,6 +209,9 @@ int testio (REGS *regs, DEVBLK *dev, BYTE ibyte)
 int     cc;                             /* Condition code            */
 PSA_3XX *psa;                           /* -> Prefixed storage area  */
 
+if (dev->ccwtrace || dev->ccwstep)
+    logmsg ("%4.4X: Test I/O\n", dev->devnum);
+
     /* Obtain the device lock */
     obtain_lock (&dev->lock);
 
@@ -265,6 +279,9 @@ int haltio (REGS *regs, DEVBLK *dev, BYTE ibyte)
 {
 int     cc;                             /* Condition code            */
 PSA_3XX *psa;                           /* -> Prefixed storage area  */
+
+    if (dev->ccwtrace || dev->ccwstep)
+        logmsg ("%4.4X: Halt I/O\n", dev->devnum);
 
     /* Obtain the device lock */
     obtain_lock (&dev->lock);
@@ -471,31 +488,17 @@ int     cc;                             /* Condition code            */
 /*-------------------------------------------------------------------*/
 void clear_subchan (REGS *regs, DEVBLK *dev)
 {
-//  /*debug*/ logmsg ("%4.4X: Clear subchannel\n", dev->devnum);
+    if (dev->ccwtrace || dev->ccwstep)
+        logmsg ("%4.4X: Clear subchannel\n", dev->devnum);
 
     /* Obtain the device lock */
     obtain_lock (&dev->lock);
-
-    /* [15.3.2] Perform clear function subchannel modification */
-    dev->pmcw.pom = 0xFF;
-    dev->pmcw.lpum = 0x00;
-    dev->pmcw.pnom = 0x00;
-
-    /* [15.3.3] Perform clear function signaling and completion */
-    dev->scsw.flag2 &= ~(SCSW2_FC | SCSW2_AC);
-    dev->scsw.flag2 |= SCSW2_FC_CLEAR;
-    dev->scsw.flag3 &= ~(SCSW3_AC | SCSW3_SC);
-    dev->scsw.flag3 = SCSW3_SC_PRI | SCSW3_SC_PEND;
-
-    /* Clear any pending interrupt */
-    dev->pcipending = 0;
-    dev->pending = 0;
 
     /* If the device is busy then signal the device to clear */
     if (dev->busy)
     {
         /* Set clear pending condition */
-        dev->scsw.flag2 |= SCSW2_AC_CLEAR;
+        dev->scsw.flag2 |= SCSW2_FC_CLEAR | SCSW2_AC_CLEAR;
 
         /* Signal the subchannel to resume if it is suspended */
         if (dev->scsw.flag3 & SCSW3_AC_SUSP)
@@ -504,14 +507,23 @@ void clear_subchan (REGS *regs, DEVBLK *dev)
             signal_condition (&dev->resumecond);
         }
 
-        /* Raise a clear pending interrupt */
-        dev->pending = 1;
+        /* Release the device lock */
+        release_lock (&dev->lock);
     }
     else
     {
-        /* Clear subchannel and make device interrupt pending */
+        /* [15.3.2] Perform clear function subchannel modification */
+        dev->pmcw.pom = 0xFF;
+        dev->pmcw.lpum = 0x00;
+        dev->pmcw.pnom = 0x00;
+
+        /* [15.3.3] Perform clear function signaling and completion */
         dev->scsw.flag0 = 0;
         dev->scsw.flag1 = 0;
+        dev->scsw.flag2 &= ~(SCSW2_FC | SCSW2_AC);
+        dev->scsw.flag2 |= SCSW2_FC_CLEAR;
+        dev->scsw.flag3 &= ~(SCSW3_AC | SCSW3_SC);
+        dev->scsw.flag3 |= SCSW3_SC_PEND;
         dev->scsw.ccwaddr[0] = 0;
         dev->scsw.ccwaddr[1] = 0;
         dev->scsw.ccwaddr[2] = 0;
@@ -520,30 +532,31 @@ void clear_subchan (REGS *regs, DEVBLK *dev)
         dev->scsw.unitstat = 0;
         dev->scsw.count[0] = 0;
         dev->scsw.count[1] = 0;
+        dev->pcipending = 0;
         dev->pending = 1;
+
+        /* For 3270 device, clear any pending input */
+        if (dev->devtype == 0x3270)
+        {
+            dev->readpending = 0;
+            dev->rlen3270 = 0;
+        }
+
+        /* Signal console thread to redrive select */
+        if (dev->console)
+        {
+            signal_thread (sysblk.cnsltid, SIGHUP);
+        }
+
+        /* Release the device lock */
+        release_lock (&dev->lock);
+
+        /* Signal waiting CPUs that an interrupt may be pending */
+        obtain_lock (&sysblk.intlock);
+        ON_IC_IOPENDING;
+        signal_condition (&sysblk.intcond);
+        release_lock (&sysblk.intlock);
     }
-
-    /* For 3270 device, clear any pending input */
-    if (dev->devtype == 0x3270)
-    {
-        dev->readpending = 0;
-        dev->rlen3270 = 0;
-    }
-
-    /* Signal console thread to redrive select */
-    if (dev->console)
-    {
-        signal_thread (sysblk.cnsltid, SIGHUP);
-    }
-
-    /* Release the device lock */
-    release_lock (&dev->lock);
-
-    /* Signal waiting CPUs that an interrupt may be pending */
-    obtain_lock (&sysblk.intlock);
-    ON_IC_IOPENDING;
-    signal_condition (&sysblk.intcond);
-    release_lock (&sysblk.intlock);
 
 } /* end function clear_subchan */
 
@@ -561,6 +574,9 @@ void clear_subchan (REGS *regs, DEVBLK *dev)
 int halt_subchan (REGS *regs, DEVBLK *dev)
 {
 
+    if (dev->ccwtrace || dev->ccwstep)
+        logmsg ("%4.4X: Halt subchannel\n", dev->devnum);
+
     /* Obtain the device lock */
     obtain_lock (&dev->lock);
 
@@ -571,29 +587,28 @@ int halt_subchan (REGS *regs, DEVBLK *dev)
             && (dev->scsw.flag3 &
                     (SCSW3_SC_ALERT | SCSW3_SC_PRI | SCSW3_SC_SEC))))
     {
-        logmsg ("%4.4X: Halt subchannel: cc=1\n", dev->devnum);
+        if (dev->ccwtrace || dev->ccwstep)
+            logmsg ("%4.4X: Halt subchannel: cc=1\n", dev->devnum);
         release_lock (&dev->lock);
         return 1;
     }
 
     /* Set condition code 2 if the halt function or the clear
        function is already in progress at the subchannel */
-    if (dev->scsw.flag2 & (SCSW2_FC_HALT | SCSW2_FC_CLEAR))
+    if (dev->scsw.flag2 & (SCSW2_AC_HALT | SCSW2_AC_CLEAR))
     {
-        logmsg ("%4.4X: Halt subchannel: cc=2\n", dev->devnum);
+        if (dev->ccwtrace || dev->ccwstep)
+            logmsg ("%4.4X: Halt subchannel: cc=2\n", dev->devnum);
         release_lock (&dev->lock);
         return 2;
     }
 
-    /* [15.4.2] Perform halt function signaling and completion */
-    dev->scsw.flag2 |= SCSW2_FC_HALT;
-    dev->scsw.flag3 &= ~SCSW3_SC_PEND;
-
     /* If the device is busy then signal subchannel to halt */
     if (dev->busy)
     {
-        /* Set halt pending condition */
-        dev->scsw.flag2 |= SCSW2_AC_HALT;
+        /* Set halt pending condition and reset pending condition */
+        dev->scsw.flag2 |= (SCSW2_FC_HALT | SCSW2_AC_HALT);
+        dev->scsw.flag3 &= ~SCSW3_SC_PEND;
 
         /* Clear any pending interrupt */
         dev->pcipending = 0;
@@ -605,40 +620,46 @@ int halt_subchan (REGS *regs, DEVBLK *dev)
             dev->scsw.flag2 |= SCSW2_AC_RESUM;
             signal_condition (&dev->resumecond);
         }
+
+        /* Release the device lock */
+        release_lock (&dev->lock);
+
     }
     else
     {
-        /* If device is idle, make subchannel status pending */
+        /* [15.4.2] Perform halt function signaling and completion */
+        dev->scsw.flag2 |= SCSW2_FC_HALT;
         dev->scsw.flag3 |= SCSW3_SC_PEND;
-        dev->scsw.unitstat = 0;
-        dev->scsw.chanstat = 0;
+        dev->pcipending = 0;
         dev->pending = 1;
+
+        /* For 3270 device, clear any pending input */
+        if (dev->devtype == 0x3270)
+        {
+            dev->readpending = 0;
+            dev->rlen3270 = 0;
+        }
+
+        /* Signal console thread to redrive select */
+        if (dev->console)
+        {
+            signal_thread (sysblk.cnsltid, SIGHUP);
+        }
+
+        /* Release the device lock */
+        release_lock (&dev->lock);
+
+        /* Signal waiting CPUs that an interrupt may be pending */
+        obtain_lock (&sysblk.intlock);
+        ON_IC_IOPENDING;
+        signal_condition (&sysblk.intcond);
+        release_lock (&sysblk.intlock);
     }
-
-    /* For 3270 device, clear any pending input */
-    if (dev->devtype == 0x3270)
-    {
-        dev->readpending = 0;
-        dev->rlen3270 = 0;
-    }
-
-    /* Signal console thread to redrive select */
-    if (dev->console)
-    {
-        signal_thread (sysblk.cnsltid, SIGHUP);
-    }
-
-    /* Release the device lock */
-    release_lock (&dev->lock);
-
-    /* Signal waiting CPUs that an interrupt may be pending */
-    obtain_lock (&sysblk.intlock);
-    ON_IC_IOPENDING;
-    signal_condition (&sysblk.intcond);
-    release_lock (&sysblk.intlock);
 
     /* Return condition code zero */
-//  logmsg ("%4.4X: Halt subchannel: cc=0\n", dev->devnum);
+    if (dev->ccwtrace || dev->ccwstep)
+        logmsg ("%4.4X: Halt subchannel: cc=0\n", dev->devnum);
+
     return 0;
 
 } /* end function halt_subchan */
@@ -663,7 +684,8 @@ int resume_subchan (REGS *regs, DEVBLK *dev)
     /* Set condition code 1 if subchannel has status pending */
     if (dev->scsw.flag3 & SCSW3_SC_PEND)
     {
-        logmsg ("%4.4X: Resume subchannel: cc=1\n", dev->devnum);
+        if (dev->ccwtrace || dev->ccwstep)
+            logmsg ("%4.4X: Resume subchannel: cc=1\n", dev->devnum);
         release_lock (&dev->lock);
         return 1;
     }
@@ -675,7 +697,8 @@ int resume_subchan (REGS *regs, DEVBLK *dev)
         || (dev->scsw.flag2 & SCSW2_AC_RESUM)
         || (dev->scsw.flag0 & SCSW0_S) == 0)
     {
-        logmsg ("%4.4X: Resume subchannel: cc=2\n", dev->devnum);
+        if (dev->ccwtrace || dev->ccwstep)
+            logmsg ("%4.4X: Resume subchannel: cc=2\n", dev->devnum);
         release_lock (&dev->lock);
         return 2;
     }
@@ -684,10 +707,17 @@ int resume_subchan (REGS *regs, DEVBLK *dev)
     if (dev->scsw.flag3 & SCSW3_AC_SUSP)
         dev->pmcw.pnom = 0x00;
 
+    /* Signal console thread to redrive select */
+    if (dev->console)
+    {
+        signal_thread (sysblk.cnsltid, SIGHUP);
+    }
+
     /* Set the resume pending flag and signal the subchannel */
     dev->scsw.flag2 |= SCSW2_AC_RESUM;
     signal_condition (&dev->resumecond);
-//  logmsg ("%4.4X: Resume subchannel: cc=0\n", dev->devnum);
+    if (dev->ccwtrace || dev->ccwstep)
+        logmsg ("%4.4X: Resume subchannel: cc=0\n", dev->devnum);
 
     /* Release the device lock */
     release_lock (&dev->lock);
@@ -697,6 +727,68 @@ int resume_subchan (REGS *regs, DEVBLK *dev)
 
 } /* end function resume_subchan */
 // #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+void
+device_reset (DEVBLK *dev)
+{
+    obtain_lock (&dev->lock);
+
+    dev->pending = 0;
+    if(dev->busy)
+        signal_condition(&dev->resumecond);
+    dev->busy = 0;
+    dev->readpending = 0;
+    dev->pcipending = 0;
+    dev->crwpending = 0;
+    dev->pmcw.intparm[0] = 0;
+    dev->pmcw.intparm[1] = 0;
+    dev->pmcw.intparm[2] = 0;
+    dev->pmcw.intparm[3] = 0;
+    dev->pmcw.flag4 &= ~PMCW4_ISC;
+    dev->pmcw.flag5 &= ~(PMCW5_E | PMCW5_LM | PMCW5_MM | PMCW5_D);
+    dev->pmcw.pnom = 0;
+    dev->pmcw.lpum = 0;
+    dev->pmcw.mbi[0] = 0;
+    dev->pmcw.mbi[1] = 0;
+    dev->pmcw.flag27 &= ~PMCW27_S;
+    memset (&dev->scsw, 0, sizeof(SCSW));
+    memset (&dev->pciscsw, 0, sizeof(SCSW));
+    memset (dev->sense, 0, sizeof(dev->sense));
+    memset (dev->pgid, 0, sizeof(dev->pgid));
+
+    release_lock (&dev->lock);
+
+} /* end device_reset() */
+
+
+int
+chp_reset(BYTE chpid)
+{
+DEVBLK *dev;                            /* -> Device control block   */
+int i;
+int operational = 3;
+
+    /* Reset each device in the configuration */
+    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+    {
+        for(i = 0; i < 8; i++)
+        { 
+            if((chpid == dev->pmcw.chpid[i])
+              && (dev->pmcw.pim & dev->pmcw.pam & dev->pmcw.pom & (0x80 >> i)) )
+            {
+                operational = 0;
+                device_reset(dev);
+            }
+        }
+    }
+
+    /* Signal console thread to redrive select */
+    signal_thread (sysblk.cnsltid, SIGHUP);
+
+    return operational;
+
+} /* end function chp_reset */
+
 
 /*-------------------------------------------------------------------*/
 /* I/O RESET                                                         */
@@ -711,32 +803,7 @@ DEVBLK *dev;                            /* -> Device control block   */
 
     /* Reset each device in the configuration */
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
-    {
-        obtain_lock (&dev->lock);
-
-        dev->pending = 0;
-        dev->busy = 0;
-        dev->readpending = 0;
-        dev->pcipending = 0;
-        dev->crwpending = 0;
-        dev->pmcw.intparm[0] = 0;
-        dev->pmcw.intparm[1] = 0;
-        dev->pmcw.intparm[2] = 0;
-        dev->pmcw.intparm[3] = 0;
-        dev->pmcw.flag4 &= ~PMCW4_ISC;
-        dev->pmcw.flag5 &= ~(PMCW5_E | PMCW5_LM | PMCW5_MM | PMCW5_D);
-        dev->pmcw.pnom = 0;
-        dev->pmcw.lpum = 0;
-        dev->pmcw.mbi[0] = 0;
-        dev->pmcw.mbi[1] = 0;
-        dev->pmcw.flag27 &= ~PMCW27_S;
-        memset (&dev->scsw, 0, sizeof(SCSW));
-        memset (&dev->pciscsw, 0, sizeof(SCSW));
-        memset (dev->sense, 0, sizeof(dev->sense));
-
-        release_lock (&dev->lock);
-
-    } /* end for(dev) */
+        device_reset(dev);
 
     /* No crws pending anymore */
     OFF_IC_CHANRPT;
@@ -814,6 +881,7 @@ void device_thread ()
 /* FETCH A CHANNEL COMMAND WORD FROM MAIN STORAGE                    */
 /*-------------------------------------------------------------------*/
 static void ARCH_DEP(fetch_ccw) (
+                        DEVBLK *dev,    /* -> Device block           */
                         BYTE ccwkey,    /* Bits 0-3=key, 4-7=zeroes  */
                         BYTE ccwfmt,    /* CCW format (0 or 1)   @IWZ*/
                         U32 ccwaddr,    /* Main storage addr of CCW  */
@@ -828,7 +896,7 @@ BYTE   *ccw;                            /* CCW pointer               */
 
     /* Channel program check if CCW is not on a doubleword
        boundary or is outside limit of main storage */
-    if ((ccwaddr & 0x00000007) || ccwaddr >= sysblk.mainsize)
+    if ( (ccwaddr & 0x00000007) || CHADDRCHK(ccwaddr, dev) )
     {
         *chanstat = CSW_PROGC;
         return;
@@ -873,6 +941,7 @@ BYTE   *ccw;                            /* CCW pointer               */
 /* FETCH AN INDIRECT DATA ADDRESS WORD FROM MAIN STORAGE             */
 /*-------------------------------------------------------------------*/
 static void ARCH_DEP(fetch_idaw) (
+                        DEVBLK *dev,    /* -> Device block           */
                         BYTE code,      /* CCW operation code        */
                         BYTE ccwkey,    /* Bits 0-3=key, 4-7=zeroes  */
                         BYTE idawfmt,   /* IDAW format (1 or 2)  @IWZ*/
@@ -893,7 +962,7 @@ BYTE    storkey;                        /* Storage key               */
     /* Channel program check if IDAW is not on correct           @IWZ
        boundary or is outside limit of main storage */
     if ((idawaddr & ((idawfmt == 2) ? 0x07 : 0x03))            /*@IWZ*/
-        || idawaddr >= sysblk.mainsize)
+        || CHADDRCHK(idawaddr, dev) )
     {
         *chanstat = CSW_PROGC;
         return;
@@ -949,7 +1018,7 @@ BYTE    storkey;                        /* Storage key               */
 
     /* Channel program check if IDAW data
        location is outside main storage */
-    if (idaw > sysblk.mainsize)
+    if ( CHADDRCHK(idaw, dev) )
     {
         *chanstat = CSW_PROGC;
         return;
@@ -1016,7 +1085,7 @@ BYTE    area[64];                       /* Data display area         */
         for (idaseq = 0; idacount > 0; idaseq++)
         {
             /* Fetch the IDAW and set IDA pointer and length */
-            ARCH_DEP(fetch_idaw) (code, ccwkey, idawfmt,       /*@IWZ*/
+            ARCH_DEP(fetch_idaw) (dev, code, ccwkey, idawfmt,  /*@IWZ*/
                         idapmask, idaseq, idawaddr,            /*@IWZ*/
                         &idadata, &idalen, chanstat);
 
@@ -1078,7 +1147,7 @@ BYTE    area[64];                       /* Data display area         */
     } else {                            /* Non-IDA data addressing */
 
         /* Channel program check if data is outside main storage */
-        if (addr > sysblk.mainsize || sysblk.mainsize - count < addr)
+        if ( CHADDRCHK(addr, dev) || CHADDRCHK(addr + (count - 1), dev) )
         {
             *chanstat = CSW_PROGC;
             return;
@@ -1143,14 +1212,31 @@ int ARCH_DEP(device_attention) (DEVBLK *dev, BYTE unitstat)
     }
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
-    /* If device is already busy or interrupt pending or
-       status pending then do not present interrupt */
+    /* If device is already busy or interrupt pending */
     if (dev->busy || dev->pending
         || (dev->scsw.flag3 & SCSW3_SC_PEND))
     {
+        /* Resume the suspended device with attention set */
+        if(dev->scsw.flag3 & SCSW3_AC_SUSP) 
+        {
+            dev->scsw.flag3 |= SCSW3_SC_ALERT | SCSW3_SC_PEND;
+            dev->scsw.unitstat |= unitstat;
+            dev->scsw.flag2 |= SCSW2_AC_RESUM;
+            signal_condition(&dev->resumecond);
+            release_lock (&dev->lock);
+
+            if (dev->ccwtrace || dev->ccwstep)
+                logmsg ("DEV%4.4X: attention signalled \n", dev->devnum);
+
+            return 0;
+        }
+            
         release_lock (&dev->lock);
         return 1;
     }
+
+    if (dev->ccwtrace || dev->ccwstep)
+        logmsg ("DEV%4.4X: attention\n", dev->devnum);
 
 #ifdef FEATURE_S370_CHANNEL
     /* Set CSW for attention interrupt */
@@ -1397,7 +1483,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
     {
         mbaddr = sysblk.mbo;
         mbaddr += (dev->pmcw.mbi[0] << 8 | dev->pmcw.mbi[1]) << 5;
-        if ((mbaddr < sysblk.mainsize)
+        if ( !CHADDRCHK(mbaddr, dev)
             && (((STORAGE_KEY(mbaddr) & STORKEY_KEY) == sysblk.mbk)
                 || (sysblk.mbk == 0)))
         {
@@ -1411,8 +1497,8 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
                check or protection check, and set the subchannel
                measurement-block-update-enable to zero */
             dev->pmcw.flag5 &= ~PMCW5_MM_MBU;
-            dev->esw.scl0 |= (mbaddr < sysblk.mainsize) ?
-                SCL0_ESF_MBPTK : SCL0_ESF_MBPGK;
+            dev->esw.scl0 |= !CHADDRCHK(mbaddr, dev) ?
+                                 SCL0_ESF_MBPTK : SCL0_ESF_MBPGK;
             /*INCOMPLETE*/
         }
     }
@@ -1438,8 +1524,9 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         /* Release the device lock */
         release_lock (&dev->lock);
 
-//      logmsg ("channel: Device %4.4X initial status interrupt\n",
-//              dev->devnum);
+        if (dev->ccwtrace || dev->ccwstep || tracethis)
+            logmsg ("channel: Device %4.4X initial status interrupt\n",
+                dev->devnum);
 
         /* Signal waiting CPUs that interrupt is pending */
         obtain_lock (&sysblk.intlock);
@@ -1452,12 +1539,145 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
     /* Execute the CCW chain */
     while ( chain )
     {
+        /* Test for attention status from device */
+        if (dev->scsw.flag3 & SCSW3_SC_ALERT)
+        {
+            /* Obtain the device lock */
+            obtain_lock (&dev->lock);
+
+            dev->pending = 1;
+
+            /* Reset device busy indicator */
+            dev->busy = 0;
+
+            /* Release the device lock */
+            release_lock (&dev->lock);
+
+            /* Signal waiting CPUs that an interrupt may be pending */
+            obtain_lock (&sysblk.intlock);
+            ON_IC_IOPENDING;
+            signal_condition (&sysblk.intcond);
+            release_lock (&sysblk.intlock);
+
+            if (dev->ccwtrace || dev->ccwstep || tracethis)
+                logmsg ("channel: Device %4.4X attention completed\n",
+                        dev->devnum);
+
+            return NULL;
+        } /* end attention processing */
+
+        /* Test for clear subchannel request */
+        if (dev->scsw.flag2 & SCSW2_AC_CLEAR)
+        {
+            /* Obtain the device lock */
+            obtain_lock (&dev->lock);
+
+            /* [15.3.2] Perform clear function subchannel modification */
+            dev->pmcw.pom = 0xFF;
+            dev->pmcw.lpum = 0x00;
+            dev->pmcw.pnom = 0x00;
+
+            /* [15.3.3] Perform clear function signaling and completion */
+            dev->scsw.flag0 = 0;
+            dev->scsw.flag1 = 0;
+            dev->scsw.flag2 &= ~((SCSW2_FC - SCSW2_FC_CLEAR) | SCSW2_AC);
+            dev->scsw.flag3 &= ~(SCSW3_AC | SCSW3_SC);
+            dev->scsw.flag3 |= SCSW3_SC_PEND;
+            dev->scsw.ccwaddr[0] = 0;
+            dev->scsw.ccwaddr[1] = 0;
+            dev->scsw.ccwaddr[2] = 0;
+            dev->scsw.ccwaddr[3] = 0;
+            dev->scsw.chanstat = 0;
+            dev->scsw.unitstat = 0;
+            dev->scsw.count[0] = 0;
+            dev->scsw.count[1] = 0;
+            dev->pcipending = 0;
+
+            dev->pending = 1;
+
+            /* For 3270 device, clear any pending input */
+            if (dev->devtype == 0x3270)
+            {
+                dev->readpending = 0;
+                dev->rlen3270 = 0;
+            }
+
+            /* Signal console thread to redrive select */
+            if (dev->console)
+            {
+                signal_thread (sysblk.cnsltid, SIGHUP);
+            }
+
+            /* Reset device busy indicator */
+            dev->busy = 0;
+
+            /* Release the device lock */
+            release_lock (&dev->lock);
+
+            /* Signal waiting CPUs that an interrupt may be pending */
+            obtain_lock (&sysblk.intlock);
+            ON_IC_IOPENDING;
+            signal_condition (&sysblk.intcond);
+            release_lock (&sysblk.intlock);
+
+            if (dev->ccwtrace || dev->ccwstep || tracethis)
+                logmsg ("channel: Device %4.4X clear completed\n",
+                        dev->devnum);
+
+            return NULL;
+        } /* end perform clear subchannel */
+
+        /* Test for halt subchannel request */
+        if (dev->scsw.flag2 & SCSW2_AC_HALT)
+        {
+            /* Obtain the device lock */
+            obtain_lock (&dev->lock);
+
+            /* [15.4.2] Perform halt function signaling and completion */
+            dev->scsw.flag2 &= ~SCSW2_AC_HALT;
+            dev->scsw.flag3 |= SCSW3_SC_PEND;
+            dev->scsw.unitstat |= CSW_CE | CSW_DE;
+            dev->pcipending = 0;
+            dev->pending = 1;
+
+            /* For 3270 device, clear any pending input */
+            if (dev->devtype == 0x3270)
+            {
+                dev->readpending = 0;
+                dev->rlen3270 = 0;
+            }
+
+            /* Signal console thread to redrive select */
+            if (dev->console)
+            {
+                signal_thread (sysblk.cnsltid, SIGHUP);
+            }
+    
+            /* Reset device busy indicator */
+            dev->busy = 0;
+
+            /* Release the device lock */
+            release_lock (&dev->lock);
+
+            /* Signal waiting CPUs that an interrupt may be pending */
+            obtain_lock (&sysblk.intlock);
+            ON_IC_IOPENDING;
+            signal_condition (&sysblk.intcond);
+            release_lock (&sysblk.intlock);
+
+            if (dev->ccwtrace || dev->ccwstep || tracethis)
+                logmsg ("channel: Device %4.4X halt completed\n",
+                        dev->devnum);
+
+            return NULL;
+        } /* end perform halt subchannel */
+
         /* Clear the channel status and unit status */
         chanstat = 0;
         unitstat = 0;
 
         /* Fetch the next CCW */
-        ARCH_DEP(fetch_ccw) (ccwkey, ccwfmt, ccwaddr, &opcode, &addr,
+        ARCH_DEP(fetch_ccw) (dev, ccwkey, ccwfmt, ccwaddr, &opcode, &addr,
                     &flags, &count, &chanstat);
 
         /* Point to the CCW in main storage */
@@ -1471,22 +1691,6 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
         /* Exit if fetch_ccw detected channel program check */
         if (chanstat != 0) break;
-
-        /* Test for halt subchannel request */
-        if (dev->scsw.flag2 & SCSW2_FC_HALT)
-        {
-            /* Clear the halt pending flag and exit */
-            dev->scsw.flag2 &= SCSW2_AC_HALT;
-            break;
-        }
-
-        /* Test for clear subchannel request */
-        if (dev->scsw.flag2 & SCSW2_FC_CLEAR)
-        {
-            /* Clear the clear pending flag and exit */
-            dev->scsw.flag2 &= SCSW2_AC_CLEAR;
-            break;
-        }
 
         /* Display the CCW */
         if (dev->ccwtrace || dev->ccwstep)
@@ -1603,13 +1807,27 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
                     obtain_lock (&dev->lock);
                 }
 
+                /* Signal console thread to redrive select */
+                if (dev->console)
+                {
+                    signal_thread (sysblk.cnsltid, SIGHUP);
+                }
+
                 /* Suspend the device until resume instruction */
                 if (dev->ccwtrace || dev->ccwstep || tracethis)
                     logmsg ("channel: Device %4.4X suspended\n",
                             dev->devnum);
 
-                while ((dev->scsw.flag2 & SCSW2_AC_RESUM) == 0)
+                while (dev->busy && (dev->scsw.flag2 & SCSW2_AC_RESUM) == 0)
                     wait_condition (&dev->resumecond, &dev->lock);
+
+                /* If the device has been reset then simply return */
+                if(!dev->busy)
+                {
+                    
+                    release_lock (&dev->lock);
+                    return NULL;
+                }
 
                 if (dev->ccwtrace || dev->ccwstep || tracethis)
                     logmsg ("channel: Device %4.4X resumed\n",

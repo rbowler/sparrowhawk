@@ -20,25 +20,20 @@
 #define OPTION_AEA_BUFFER		/* Effective addr cache      */
 #define OPTION_NO_INLINE_DAT		/* Performance option	     */
 #undef  OPTION_NO_INLINE_VSTORE 	/* Performance option	     */
-#undef  OPTION_FOOTPRINT_BUFFER  /* 256 ** Size must be a power of 2 */
+#define OPTION_NO_INLINE_IFETCH 	/* Performance option	     */
+#define OPTION_CPU_UNROLL       	/* Performance option	     */
+#define OPTION_FAST_MOVECHAR    	/* Performance option	     */
+#define OPTION_FAST_MOVELONG    	/* Performance option	     */
+#undef  OPTION_FOOTPRINT_BUFFER /* 2048 ** Size must be a power of 2 */
 #undef  OPTION_INSTRUCTION_COUNTING	/* First use trace and count */
 #define OPTION_CKD_KEY_TRACING		/* Trace CKD search keys     */
 #undef	OPTION_CMPSC_DEBUGLVL	   /* 3 ** 1=Exp 2=Comp 3=Both debug */
-
-
-/* <fenv.h> has not been ported by CygWin yet; thus it does not apply for WIN32 builds */
-
-#if defined(WIN32)
-#define OPTION_NO_IEEE_SUPPORT          /* No/downlevel IEEE support */
-#else
-#undef  OPTION_NO_IEEE_SUPPORT          /* No/downlevel IEEE support */
-#endif
-
 
 #define FEATURE_ALD_FORMAT            0
 
 #undef FEATURE_4K_STORAGE_KEYS
 #undef FEATURE_ACCESS_REGISTERS
+#undef FEATURE_ADDRESS_LIMIT_CHECKING
 #undef FEATURE_BASIC_FP_EXTENSIONS
 #undef FEATURE_BASIC_STORAGE_KEYS
 #undef FEATURE_BCMODE
@@ -65,7 +60,6 @@
 #undef FEATURE_EXTENDED_TRANSLATION_FACILITY_2
 #undef FEATURE_FETCH_PROTECTION_OVERRIDE
 #undef FEATURE_FPS_EXTENSIONS
-#undef FEATURE_HARDWARE_LOADER
 #undef FEATURE_HERCULES_DIAGCALLS
 #undef FEATURE_HEXADECIMAL_FLOATING_POINT
 #undef FEATURE_HFP_EXTENSIONS
@@ -90,11 +84,11 @@
 #undef FEATURE_S390_DAT
 #undef FEATURE_SERVICE_PROCESSOR
 #undef FEATURE_SEGMENT_PROTECTION
+#undef FEATURE_CHSC
 #undef FEATURE_SQUARE_ROOT
 #undef FEATURE_STORAGE_KEY_ASSIST
 #undef FEATURE_STORAGE_PROTECTION_OVERRIDE
 #undef FEATURE_STORE_SYSTEM_INFORMATION
-#undef FEATURE_STRUCTURED_EXTERNAL_STORAGE
 #undef FEATURE_SUBSPACE_GROUP
 #undef FEATURE_SUPPRESSION_ON_PROTECTION
 #undef FEATURE_SYSTEM_CONSOLE

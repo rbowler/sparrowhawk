@@ -43,10 +43,6 @@
  #define _FEATURE_VECTOR_FACILITY
 #endif
 
-#if defined(FEATURE_HARDWARE_LOADER)
- #define _FEATURE_HARDWARE_LOADER
-#endif
-
 #if defined(FEATURE_CHANNEL_SUBSYSTEM)
  #define _FEATURE_CHANNEL_SUBSYSTEM
 #endif
@@ -54,13 +50,6 @@
 #if defined(FEATURE_EXPANDED_STORAGE)
  #define _FEATURE_EXPANDED_STORAGE
 #endif
-
-/* When ESAME is installed then all instructions
-   marked N3 in the reference are also available
-   in ESA/390 mode */
-#if defined(FEATURE_ESAME_INSTALLED)
- #define FEATURE_ESAME_N3_ESA390
-#endif /*defined(FEATURE_ESAME_INSTALLED)*/
 
 #if defined(_FEATURE_SIE) && defined(FEATURE_STORAGE_KEY_ASSIST)
  #define _FEATURE_STORAGE_KEY_ASSIST
@@ -77,6 +66,13 @@
  #define _VSTORE_C_STATIC
 #endif
 
+#undef _VFETCH_C_STATIC
+#if !defined(OPTION_NO_INLINE_IFETCH)
+ #define _VFETCH_C_STATIC static inline
+#else
+ #define _VFETCH_C_STATIC
+#endif
+
 #undef _DAT_C_STATIC
 #if !defined(OPTION_NO_INLINE_DAT)
  #define _DAT_C_STATIC static inline
@@ -85,6 +81,13 @@
 #endif
 
 #else /*!defined(FEATCHK_CHECK_ALL)*/
+
+/* When ESAME is installed then all instructions
+   marked N3 in the reference are also available
+   in ESA/390 mode */
+#if defined(FEATURE_ESAME_INSTALLED)
+ #define FEATURE_ESAME_N3_ESA390
+#endif /*defined(FEATURE_ESAME_INSTALLED)*/
 
 #if !defined(FEATURE_2K_STORAGE_KEYS) \
  && !defined(FEATURE_4K_STORAGE_KEYS)
@@ -132,7 +135,7 @@
 #endif
 
 #if defined(FEATURE_BINARY_FLOATING_POINT) \
- && defined(OPTION_NO_IEEE_SUPPORT)
+ && defined(NO_IEEE_SUPPORT)
  #undef FEATURE_BINARY_FLOATING_POINT
 #endif
 
