@@ -54,8 +54,8 @@
 /*-------------------------------------------------------------------*/
 /* Performance options                                               */
 /*-------------------------------------------------------------------*/
-#undef  EXPERIMENTAL
-#define CHECK_OPTIMIZATION
+#define  EXPERIMENTAL
+#undef CHECK_OPTIMIZATION
 
 #ifdef EXPERIMENTAL
 #ifdef CHECK_OPTIMIZATION
@@ -110,7 +110,7 @@
 #undef CHECK_PTR                    /* check fragment/entry pointer  */
 #undef FLUSHLOG                     /* use logfile with flush        */
 
-#undef  FEATURE_OPTIMIZE_SAME_PAGE   /* fast address translation      */
+#define FEATURE_OPTIMIZE_SAME_PAGE   /* fast address translation      */
 #undef  CHECK_PAGEADDR              /* check fast address translation*/
 
 #undef FEATURE_WATCHPOINT           /* watchpoint for phys. addr     */
@@ -1179,7 +1179,7 @@ extern BYTE	ebcdic_to_ascii[];	/* Translate table	     */
 
 #define FRAG_BYTEMASK   (0x7FFFFFFF - (FRAG_BYTESIZE -1))
 
-#define FRAG_BUFFER     2048      /* Number of fragments in cache  */
+#define FRAG_BUFFER     256      /* Number of fragments in cache  */
 
 #define FRAG_BUFFERMASK (((FRAG_BUFFER * FRAG_BYTESIZE) - 1) - (FRAG_BYTESIZE - 1))
 
@@ -1202,10 +1202,22 @@ extern BYTE	ebcdic_to_ascii[];	/* Translate table	     */
                    ((FRAG*)(regs->fragbuffer))[(((U32)_a) & \
                                      (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH].valid = 0; \
            else \
-               for (j=(((U32)_a) & (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH; \
-                    j <= (((U32)((_a) + (_s))) & (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH; \
-                    j++) \
-                   ((FRAG*)(regs->fragbuffer))[j].valid = 0; \
+               { \
+               int j0 = (((U32)_a) & (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH; \
+               int jn = (((U32)((_a) + (_s))) & (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH; \
+               if (j0 < jn) \
+               { \
+                   for (j=j0; j <= jn; j++) \
+                       ((FRAG*)(regs->fragbuffer))[j].valid = 0; \
+               } \
+               else \
+               { \
+                   for (j=j0; j < FRAG_BUFFER; j++) \
+                       ((FRAG*)(regs->fragbuffer))[j].valid = 0; \
+                   for (j=0; j < jn; j++) \
+                       ((FRAG*)(regs->fragbuffer))[j].valid = 0; \
+               } \
+               } \
            } \
            } \
            }
@@ -1217,10 +1229,22 @@ extern BYTE	ebcdic_to_ascii[];	/* Translate table	     */
                    ((FRAG*)(regs->fragbuffer))[(((U32)_a) & \
                                      (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH].valid = 0; \
            else \
-               for (j=(((U32)_a) & (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH; \
-                    j <= (((U32)((_a) + (_s))) & (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH; \
-                    j++) \
-                   ((FRAG*)(regs->fragbuffer))[j].valid = 0; \
+               { \
+               int j0 = (((U32)_a) & (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH; \
+               int jn = (((U32)((_a) + (_s))) & (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH; \
+               if (j0 < jn) \
+               { \
+                   for (j=j0; j <= jn; j++) \
+                       ((FRAG*)(regs->fragbuffer))[j].valid = 0; \
+               } \
+               else \
+               { \
+                   for (j=j0; j < FRAG_BUFFER; j++) \
+                       ((FRAG*)(regs->fragbuffer))[j].valid = 0; \
+                   for (j=0; j < jn; j++) \
+                       ((FRAG*)(regs->fragbuffer))[j].valid = 0; \
+               } \
+               } \
            } 
 #endif
 #else
@@ -1247,19 +1271,18 @@ typedef struct _RADDR {	/* Compiled Register and Address */
 
 typedef struct _FRAGENTRY {	/* Compiled Code Entry */
         zz_func code;
-        void    *lbl;
         BYTE    *inst;
         RADDR   raddr;
         U32     ia;
-        U32     iaabs;
-        int     valid;
 #ifdef CHECK_FRAGPARMS
+        U32     iaabs;
         BYTE    oinst[6];
 #endif
     } FRAGENTRY;
 
 typedef struct _FRAG {		/* Compliled Code Fragments */
         U32     firstia;                  /* first log. address     */
+        U32     minabs;                   /* abs. addr. of frag     */
         int     valid;                    /* fragment validity      */
         U16     dict[FRAG_BYTESIZE];    /* offsets to cmp inst */
         FRAGENTRY entry[FRAG_INSTSIZE+1]; /* includes stop entry */

@@ -8,8 +8,29 @@
 
 #include "opcode.h"
 
+#ifdef FOOTPRINT_BUFFER
 #define JEXECUTE_INSTRUCTION(_regs) \
-        (((FRAGENTRY*)(_regs->actentry))->code)((((FRAGENTRY*)(_regs->actentry))->inst), 0, (_regs))
+        { \
+            FRAGENTRY *entry = _regs->actentry; \
+            int len; \
+            if (entry->inst[0] < 0x40) \
+                len = 2; \
+            else \
+                if (entry->inst[0] < 0xC0) \
+                    len = 4; \
+                else \
+                    len = 6; \
+            sysblk.footprregs[(_regs)->cpuad][sysblk.footprptr[(_regs)->cpuad]] = *(_regs); \
+            memcpy(&sysblk.footprregs[(_regs)->cpuad][sysblk.footprptr[(_regs)->cpuad]++].inst, entry->inst, len); \
+            sysblk.footprptr[(_regs)->cpuad] &= FOOTPRINT_BUFFER - 1; \
+            (entry->code)(entry->inst, 0, (_regs)); \
+        }
+#else
+#define JEXECUTE_INSTRUCTION(_regs) \
+{ \
+        (((FRAGENTRY*)(_regs->actentry))->code)((((FRAGENTRY*)(_regs->actentry))->inst), 0, (_regs)); \
+}
+#endif
 
 #include "ibuf.h"
 
@@ -124,6 +145,8 @@ int eoc;
     maxabs = minabs + FRAG_BYTESIZE;
     off = abs - minabs;
 
+    frag->minabs = minabs;
+
     startptr = sysblk.mainstor+minabs;
 
     code = NULL;
@@ -140,7 +163,6 @@ int eoc;
         entry->code = code;
         entry->inst = startptr+off;
         entry->ia = minia + off;
-        entry->valid = 1;
 #ifdef CHECK_FRAGPARMS
         entry->iaabs = minabs + off;
 #endif
@@ -508,6 +530,54 @@ REGS *regs = pregs;
             ibuf_assign_fragment(regs, regs->psw.ia);
 
         } /* end if(interrupt) */
+#ifdef TRACE_INTERRUPT_DELAY
+        else
+        {
+          if (((sysblk.extpending || regs->cpuint)
+              && (regs->psw.sysmask & PSW_EXTMASK))
+              || (sysblk.mckpending && regs->psw.mach)
+#ifndef FEATURE_BCMODE
+              || (sysblk.iopending && (regs->psw.sysmask & PSW_IOMASK))
+#else /*FEATURE_BCMODE*/
+              ||  (sysblk.iopending &&
+                  (regs->psw.sysmask & (regs->psw.ecmode ? PSW_IOMASK : 0xFE)))
+#endif /*FEATURE_BCMODE*/
+#if MAX_CPU_ENGINES > 1
+              || sysblk.brdcstncpu != 0
+#endif /*MAX_CPU_ENGINES > 1*/
+              || (sysblk.intkey && (regs->cr[0] & CR0_XM_INTKEY))
+              || (sysblk.servsig && (regs->cr[0] & CR0_XM_SERVSIG))
+              || regs->psw.wait)
+          {
+            regs->int2count++;
+            logmsg("Missing interrupts: %llu ", regs->instcount);
+            if ((sysblk.extpending || regs->cpuint)
+                 && (regs->psw.sysmask & PSW_EXTMASK))
+              logmsg("extpending/cpuint\n");
+
+            if (sysblk.mckpending && regs->psw.mach)
+              logmsg("mckpending\n");
+#ifndef FEATURE_BCMODE
+            if (sysblk.iopending && (regs->psw.sysmask & PSW_IOMASK))
+              logmsg("iopending\n");
+#else /*FEATURE_BCMODE*/
+            if (sysblk.iopending &&
+               (regs->psw.sysmask & (regs->psw.ecmode ? PSW_IOMASK : 0xFE)))
+              logmsg("iopending\n");
+#endif /*FEATURE_BCMODE*/
+#if MAX_CPU_ENGINES > 1
+            if (sysblk.brdcstncpu != 0)
+              logmsg("broadcast\n");
+#endif /*MAX_CPU_ENGINES > 1*/
+            if (sysblk.intkey && (regs->cr[0] & CR0_XM_INTKEY))
+              logmsg("intkey\n");
+            if (sysblk.servsig && (regs->cr[0] & CR0_XM_SERVSIG))
+              logmsg("servsig\n");
+            if (regs->psw.wait)
+              logmsg("wait\n");
+          }
+        }
+#endif
 
         CHECK_FRAGPTR(regs, " aft interrupt");
 
@@ -634,6 +704,8 @@ REGS *regs = pregs;
 #ifdef LASTINST
             save_lastinst(regs->lastinst, regs->inst);
 #endif
+            if (opcode_table[regs->inst[0]] == &operation_exception)
+                logmsg("EXECUTE \n");
             EXECUTE_INSTRUCTION (regs->inst, 0, regs);
 #ifdef NO_REASSIGN
             ibuf_assign_fragment (regs, regs->psw.ia);
@@ -654,6 +726,8 @@ REGS *regs = pregs;
                           ((FRAGENTRY*)(regs->actentry))->inst);
 #endif
             CHECK_FRAGPTR(regs, " bef JEXECUTE ");
+            if (((FRAGENTRY*)regs->actentry)->code == &operation_exception)
+                logmsg("JEXECUTE\n");
             JEXECUTE_INSTRUCTION (regs);
 #ifdef NO_REASSIGN
             ibuf_assign_fragment (regs, regs->psw.ia);

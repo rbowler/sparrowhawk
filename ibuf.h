@@ -11,15 +11,6 @@ FRAGENTRY *fragentry;
 U32  abs;                            /* Absolute storage address  */
 BYTE akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
-#if 0
-  if (regs->actentry)
-  {
-      if ((((FRAGENTRY*)(regs->actentry))->inst[0] == 0x0a) ||
-          (((FRAGENTRY*)(regs->actentry))->inst[0] == 0x82))
-          logmsg("ibuf_assign %2x\n", ia);
-  }
-#endif
-
   /* search compiled fragment in buffer  */
 
   regs->ibufsearch++;
@@ -41,20 +32,12 @@ BYTE akey;                           /* Bits 0-3=key, 4-7=zeroes  */
   regs->actfrag = frag;
 
   
-  if (frag->valid)
+  if (frag->valid && (frag->minabs == (abs & FRAG_BYTEMASK)))
   {
       fragentry = &frag->entry[frag->dict[ia & (FRAG_BYTESIZE - 1)]];
       if (ia == fragentry->ia)
       {
           debugmsg("ibuf_get end\n");
-#if 0
-          if (regs->actentry)
-          {
-              if ((((FRAGENTRY*)(regs->actentry))->inst[0] == 0x0a) ||
-                  (((FRAGENTRY*)(regs->actentry))->inst[0] == 0x82))
-                   logmsg("ibuf_assign found %2x\n", fragentry->ia);
-          }
-#endif
           regs->actentry = fragentry;
           return;
       }
@@ -76,17 +59,6 @@ static inline void ibuf_get_fragentry (REGS *regs, U32 ia)
 FRAG *frag;
 FRAGENTRY *fragentry;
 
-//  debugmsg("ibuf_get begin %4x %llu\n", ia, regs->instcount);
-
-#if 0
-  if (regs->actentry)
-  {
-      if ((((FRAGENTRY*)(regs->actentry))->inst[0] == 0x0a) ||
-          (((FRAGENTRY*)(regs->actentry))->inst[0] == 0x82))
-          logmsg("ibuf_get %2x\n", ia);
-  }
-#endif
-
   /* check if address is in current segment */
 
   frag = regs->actfrag;
@@ -95,15 +67,6 @@ FRAGENTRY *fragentry;
   
   if (ia == fragentry->ia)
   {
-//      debugmsg("ibuf_get end\n");
-#if 0
-      if (regs->actentry)
-      {
-          if ((((FRAGENTRY*)(regs->actentry))->inst[0] == 0x0a) ||
-              (((FRAGENTRY*)(regs->actentry))->inst[0] == 0x82))
-              logmsg("ibuf_get found %2x\n", fragentry->ia);
-      }
-#endif
       regs->actentry = fragentry;
       return;
   }

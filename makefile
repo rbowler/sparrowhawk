@@ -6,7 +6,7 @@
 #
 #
 
-VERSION  = 1.68
+VERSION  = 1.69
 
 # Change this if you want to install the Hercules executables somewhere
 #   besides /usr/bin. The $PREFIX (which defaults to nothing) can be

@@ -1,7 +1,7 @@
 <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 3.0//EN" "html.dtd">
 <HTML>
 <HEAD><TITLE>
-Hercules: Compressed CKD Dasd Emulation    --      <small>patch cckd167c</TITLE>
+Hercules: Compressed CKD Dasd Emulation</TITLE>
 </HEAD>
 <BODY BGCOLOR="#ffffcc" TEXT="#000000" LINK="#0000A0"
       VLINK="#008040" ALINK="#000000">
@@ -482,30 +482,19 @@ should be considered <b>beta</b> status.  Ensure that you have
 backups of any virtual CKD volumes that you wish to compress.</em>
 
 <p>
-The current cckd patch file is for base Hercules 1.67 with the
-herc167a.patch.gz patch.  The patch updates <code>hercules.h</code> and the
-<code>makefile</code> and may not be compatible with other patches
-for Hercules 1.67.  However, it should not be very difficult
-to fix the patch to work with the other patches.
-
-<p>
 Compressed emulation is currently disabled for Windows32.  I need
 to do some research to see if there is a Windows32 api for zlib.
 
 <p>
 The following steps should get you up and running:
 <ol>
-<li>Install Hercules and apply the patches:<br>
-    <code>tar xzf hercules-1.67.tar.gz</code><br>
-    <code>cd hercules-1.67</code><br>
-    <code>patch &lt ../herc167a.patch</code><br>
-    <code>patch &lt ../cckd167b.patch</code>
-    <code>patch &lt ../cckd167c.patch</code>
+<li>Install Hercules as usual.<br>
 <li>Review the <code>makefile</code>.  If you wish to add support for
     <a href="http://sourceware.cygnus.com/bzip2/"><b>bzip2</b></a>,
     uncomment the indicated lines in the <code>makefile</code>.
 <li>Make hercules:<br>
     <code>make</code>
+    <code>make install</code>
 <li>Create some compressed CKD Dasd emulation files:<br>
     &nbsp &nbsp <code>./ckd2cckd</code>&nbsp &nbsp  <i>source-file &nbsp &nbsp target-file</i><br>
     creates a compressed file using zlib.
@@ -886,6 +875,6 @@ Let me know at <a href="mailto:gsmith@nc.rr.com"><em>gsmith</em>&#064;<em>nc.rr.
 <p>
 greg smith
 
-<p><small>Last updated 7 September 2000</small>
+<p><small>Last updated 29 October 2000</small>
 </BODY>
 </HTML>

@@ -2153,6 +2153,10 @@ U32     npv1, npv2;                     /* Next page virtual addrs   */
 U32     npa1 = 0, npa2 = 0;             /* Next page absolute addrs  */
 int     i;                              /* Loop counter              */
 BYTE    obyte;                          /* Operand byte              */
+#ifdef IBUF
+U32     habs1;
+BYTE    l1;
+#endif
 
     /* Translate addresses of leftmost operand bytes */
     abs1 = logical_to_abs (addr1, arn1, regs, ACCTYPE_WRITE, key1);
@@ -2169,6 +2173,10 @@ BYTE    obyte;                          /* Operand byte              */
         npa1 = logical_to_abs (npv1, arn1, regs, ACCTYPE_WRITE, key1);
     if (npv2 != (addr2 & STORAGE_KEY_PAGEMASK))
         npa2 = logical_to_abs (npv2, arn2, regs, ACCTYPE_READ, key2);
+
+#ifdef IBUF
+    habs1 = abs1;
+#endif
 
     /* Process operands from left to right */
     for ( i = 0; i < len+1; i++ )
@@ -2198,6 +2206,18 @@ BYTE    obyte;                          /* Operand byte              */
             abs2 = npa2;
 
     } /* end for(i) */
+
+#ifdef IBUF
+    if (!npa1)
+        FRAG_INVALIDATE(habs1, len)
+    else
+    {
+        l1 = (habs1 & STORAGE_KEY_PAGEMASK) + 
+              STORAGE_KEY_PAGESIZE - habs1;
+        FRAG_INVALIDATE(habs1, l1);
+        FRAG_INVALIDATE(npa1, len - l1);
+    }
+#endif
 
 } /* end function move_chars */
 

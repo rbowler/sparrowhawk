@@ -1,3 +1,13 @@
+29 Oct 2000 Correct AXR and SXR instruction results when significance
+            exception raised (Peter Kuschnerus, with help from Mario Bezzi)
+29 Oct 2000 Correct CD and CDR instruction condition code logic (Peter
+            Kuschnerus)
+29 Oct 2000 Do not generate support for square root instructions in 370 mode
+            (Peter Kuschnerus)
+29 Oct 2000 Floating point arithmetic tuning (Peter Kuschnerus)
+29 Oct 2000 Performance optimization fixes (Juergen Dobrinski)
+29 Oct 2000 Spelling corrections (Adam Thornton)
+29 Oct 2000 Fixed version number (Jay Maynard)
 07 Oct 2000 Rewritten and updated FAQ (Dave Morton)
 07 Oct 2000 Compressed CKD DASD support (Greg Smith)
 07 Oct 2000 Many performance improvements (Juergen Dobrinski, with help from

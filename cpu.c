@@ -208,7 +208,7 @@ U32    haddr;
 
 static char *pgmintname[] = { 
         /* 01 */        "Operation exception",
-        /* 02 */        "Priviledged-operation exception",
+        /* 02 */        "Privileged-operation exception",
         /* 03 */        "Execute exception",
         /* 04 */        "Protection exception",
         /* 05 */        "Addressing exception",

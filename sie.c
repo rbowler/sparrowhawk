@@ -251,8 +251,8 @@ U16     lhcpu;                          /* Last Host CPU address     */
                         | ((U32)(guestregs->sie_psa->inttimer[2]) << 8)
                         | (U32)(guestregs->sie_psa->inttimer[3]));
 
-        /* Bit position 23 of the interval timer is deremented 
-           once for each multiple of 3,333 usecs containded in 
+        /* Bit position 23 of the interval timer is decremented 
+           once for each multiple of 3,333 usecs contained in 
            bit position 0-19 of the residue counter */
         itimer = olditimer - ((residue / 3333) >> 4);
 
@@ -279,7 +279,7 @@ U16     lhcpu;                          /* Last Host CPU address     */
                && ! SIE_I_STOP(guestregs)
                && ! SIE_I_EXT(guestregs)
                && ! SIE_I_IO(guestregs)
-              /* also exit if pendig interrupts for the host cpu */
+              /* also exit if pending interrupts for the host cpu */
                && ! SIE_I_HOST(regs) )
             {
 

@@ -9,9 +9,10 @@ Hercules: Installation and Operation</TITLE>
 <h1>Installing and Operating Hercules</h1>
 
 <h2>Installation Procedure</h2>
+<h3>Building from source</h3>
 <ol>
 <li>Download the distribution file
-<a href="hercules-1.68.tar.gz">hercules-1.68.tar.gz</a>
+<a href="hercules-1.69.tar.gz">hercules-1.69.tar.gz</a>
 <p>
 <em>Notes:</em>
 <ol>
@@ -24,8 +25,8 @@ Hercules: Installation and Operation</TITLE>
 </ol>
 <p>
 <li>Use these commands to unzip the distribution file:
-<pre>tar xvzf ../hercules-1.68.tar.gz
-cd hercules-1.68</pre>
+<pre>tar xvzf ../hercules-1.69.tar.gz
+cd hercules-1.69</pre>
 <li>Build the executable files:
 <br><code>make </code>[<code>HOST_ARCH=<i>arch</i></code>]<br>
 The <code>HOST_ARCH</code> argument is optional. It specifies the machine
@@ -39,10 +40,11 @@ package will not run on 386 or 486 systems.
 resulting package will not run on 386, 486, or Pentium systems.
 <li>Anything else will remove the Intel-specific compiler flag.
 </ul>
-The default is i586. If building for an Intel-based system, you must not
-give HOST_ARCH an undefined value, as this will cause Hercules to break in
-weird and wonderful ways. If, on the other hand, you are building for a
-non-Intel platform, you must give HOST_ARCH a non-Intel value.
+The default is i586, since most Hercules users appear to be running
+Pentiums. If building for an Intel-based system, you must not give HOST_ARCH
+an undefined value, as this will cause Hercules to break in weird and
+wonderful ways. If, on the other hand, you are building for a non-Intel
+platform, you must give HOST_ARCH a non-Intel value.
 <li>Install the programs: as root,
 <br><code>make install</code>
 </ol>
@@ -53,6 +55,25 @@ Refer to the <a href="hercfaq.html#software">
 Hercules Frequently-Asked Questions</a> page for required
 compiler and other software levels.
 
+<h3>Installing prebuilt RPMs:</h3>
+<ol>
+<li>Download the RPM file you want:
+<ul>
+<li><a href="hercules-1.69-1.i686.rpm">hercules-1.69-1.i686.rpm</a>: Intel
+Pentium Pro/Pentium II
+<li><a href="hercules-1.69-1.i586.rpm">hercules-1.69-1.i586.rpm</a>: Intel
+Pentium
+<li><a href="hercules-1.69-1.i386.rpm">hercules-1.69-1.i386.rpm</a>: Intel 386
+<li><a href="hercules-1.69-1.alpha.rpm">hercules-1.69-1.alpha.rpm</a>: Alpha
+(all flavors)
+</ul>
+<li>Install the RPM:
+<br><code>rpm -Uvh</code> <i>RPMfile</i>
+</ol>
+This will leave the Hercules executables in /usr/bin, where you can run them
+from anywhere. Sample configuration files will be placed in /etc/hercules,
+and the IPLable card deck for the ZZSA standalone utility will be placed in
+/var/share/hercules.
 
 <h2>Configuration Procedure</h2>
 <p>
@@ -195,6 +216,6 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 8 October 2000
+<p>Last updated 29 October 2000
 </BODY>
 </HTML>
