@@ -25,8 +25,9 @@ int     i;                              /* Array subscript           */
 REGS   *regs;                           /* -> CPU register context   */
 
     /* Display the version identifier */
-    printf ("Hercules %s (c)Copyright Roger Bowler, 1994-1999\n",
-            MSTRING(VERSION));
+    printf ("Hercules %s version %s "
+            "(c)Copyright Roger Bowler, 1994-1999\n",
+            ARCHITECTURE_NAME, MSTRING(VERSION));
 
     /* Obtain IPL device number from argument */
     if (argc < 2 || strlen(argv[1]) > 4) {

@@ -61,6 +61,12 @@ U32     i;
 
 /*-------------------------------------------------------------------*/
 /* Obtain Local Lock                                                 */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr1   Logical address of ASCB pointer                      */
+/*      ar1     Access register number associated with operand 1     */
+/*      addr2   Logical address of highest lock held indicators      */
+/*      ar2     Access register number associated with operand 1     */
 /*-------------------------------------------------------------------*/
 void obtain_local_lock (U32 addr1, int ar1, U32 addr2, int ar2,
                         REGS *regs)
@@ -156,6 +162,12 @@ U32     newia;                          /* Unsuccessful branch addr  */
 
 /*-------------------------------------------------------------------*/
 /* Release Local Lock                                                */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr1   Logical address of ASCB pointer                      */
+/*      ar1     Access register number associated with operand 1     */
+/*      addr2   Logical address of highest lock held indicators      */
+/*      ar2     Access register number associated with operand 1     */
 /*-------------------------------------------------------------------*/
 void release_local_lock (U32 addr1, int ar1, U32 addr2, int ar2,
                         REGS *regs)
@@ -210,7 +222,7 @@ U32     newia;                          /* Unsuccessful branch addr  */
         vstore4 ( hlhi_word, addr2, ar2, regs );
 
         /* Set the local lock to zero */
-        vstore4 ( lcpa, ascb_addr + ASCBLOCK, 0, regs );
+        vstore4 ( 0, ascb_addr + ASCBLOCK, 0, regs );
 
         /* Clear the local lock held bit in the second operand */
         hlhi_word &= ~PSALCLLI;
@@ -253,4 +265,219 @@ U32     newia;                          /* Unsuccessful branch addr  */
     release_lock (&sysblk.mainlock);
 
 } /* end function release_local_lock */
+
+/*-------------------------------------------------------------------*/
+/* Obtain CMS Lock                                                   */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr1   Logical address of ASCB pointer                      */
+/*      ar1     Access register number associated with operand 1     */
+/*      addr2   Logical address of highest lock held indicators      */
+/*      ar2     Access register number associated with operand 1     */
+/*-------------------------------------------------------------------*/
+void obtain_cms_lock (U32 addr1, int ar1, U32 addr2, int ar2,
+                        REGS *regs)
+{
+U32     ascb_addr;                      /* Virtual address of ASCB   */
+U32     hlhi_word;                      /* Highest lock held word    */
+U32     lit_addr;                       /* Virtual address of lock
+                                           interface table           */
+U32     lock_addr;                      /* Lock address              */
+int     lock_arn;                       /* Lock access register      */
+U32     lock;                           /* Lock value                */
+U32     newia;                          /* Unsuccessful branch addr  */
+
+    /* Privileged operation exception if in problem state */
+    if (regs->psw.prob)
+    {
+        program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        return;
+    }
+
+    /* Specification exception if operands are not on word boundary */
+    if ((addr1 & 0x00000003) || (addr2 & 0x00000003))
+    {
+        program_check (PGM_SPECIFICATION_EXCEPTION);
+        return;
+    }
+
+    /* General register 11 contains the lock address */
+    lock_addr = regs->gpr[11] &
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    lock_arn = 11;
+
+    /* Obtain main-storage access lock */
+    obtain_lock (&sysblk.mainlock);
+
+    /* Load ASCB address from first operand location */
+    ascb_addr = vfetch4 ( addr1, ar1, regs );
+
+    /* Load locks held bits from second operand location */
+    hlhi_word = vfetch4 ( addr2, ar2, regs );
+
+    /* Fetch the lock addressed by general register 11 */
+    lock = vfetch4 ( lock_addr, lock_arn, regs );
+
+    /* Obtain the lock if not held by any ASCB, and if this CPU
+       holds the local lock and does not hold a CMS lock */
+    if (lock == 0
+        && (hlhi_word & (PSALCLLI | PSACMSLI)) == PSALCLLI)
+    {
+        /* Store the unchanged value into the second operand to
+           ensure suppression in the event of an access exception */
+        vstore4 ( hlhi_word, addr2, ar2, regs );
+
+        /* Store the ASCB address in the CMS lock */
+        vstore4 ( ascb_addr, lock_addr, lock_arn, regs );
+
+        /* Set the CMS lock held bit in the second operand */
+        hlhi_word |= PSACMSLI;
+        vstore4 ( hlhi_word, addr2, ar2, regs );
+
+        /* Set register 13 to zero to indicate lock obtained */
+        regs->gpr[13] = 0;
+    }
+    else
+    {
+        /* Fetch the lock interface table address from the
+           second word of the second operand, and load the
+           new instruction address and amode from LITOCMS */
+        lit_addr = vfetch4 ( addr2 + 4, ar2, regs );
+        newia = vfetch4 ( lit_addr + LITOCMS, 0, regs );
+
+        /* Save the link information in register 12 */
+        if (regs->psw.amode)
+            regs->gpr[12] = 0x80000000 | regs->psw.ia;
+        else
+            regs->gpr[12] = regs->psw.ia & 0x00FFFFFF;
+
+        /* Copy LITOCMS into register 13 to signify obtain failure */
+        regs->gpr[13] = newia;
+
+        /* Update the PSW instruction address and addressing mode */
+        if ( newia & 0x80000000 )
+        {
+            regs->psw.amode = 1;
+            regs->psw.ia = newia & 0x7FFFFFFF;
+        }
+        else
+        {
+            regs->psw.amode = 0;
+            regs->psw.ia = newia & 0x00FFFFFF;
+        }
+    }
+
+    /* Release main-storage access lock */
+    release_lock (&sysblk.mainlock);
+
+} /* end function obtain_cms_lock */
+
+/*-------------------------------------------------------------------*/
+/* Release CMS Lock                                                  */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr1   Logical address of ASCB pointer                      */
+/*      ar1     Access register number associated with operand 1     */
+/*      addr2   Logical address of highest lock held indicators      */
+/*      ar2     Access register number associated with operand 1     */
+/*-------------------------------------------------------------------*/
+void release_cms_lock (U32 addr1, int ar1, U32 addr2, int ar2,
+                        REGS *regs)
+{
+U32     ascb_addr;                      /* Virtual address of ASCB   */
+U32     hlhi_word;                      /* Highest lock held word    */
+U32     lit_addr;                       /* Virtual address of lock
+                                           interface table           */
+U32     lock_addr;                      /* Lock address              */
+int     lock_arn;                       /* Lock access register      */
+U32     lock;                           /* Lock value                */
+U32     susp;                           /* Lock suspend queue        */
+U32     newia;                          /* Unsuccessful branch addr  */
+
+    /* Privileged operation exception if in problem state */
+    if (regs->psw.prob)
+    {
+        program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+        return;
+    }
+
+    /* Specification exception if operands are not on word boundary */
+    if ((addr1 & 0x00000003) || (addr2 & 0x00000003))
+    {
+        program_check (PGM_SPECIFICATION_EXCEPTION);
+        return;
+    }
+
+    /* General register 11 contains the lock address */
+    lock_addr = regs->gpr[11] &
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    lock_arn = 11;
+
+    /* Obtain main-storage access lock */
+    obtain_lock (&sysblk.mainlock);
+
+    /* Load ASCB address from first operand location */
+    ascb_addr = vfetch4 ( addr1, ar1, regs );
+
+    /* Load locks held bits from second operand location */
+    hlhi_word = vfetch4 ( addr2, ar2, regs );
+
+    /* Fetch the CMS lock and the suspend queue word */
+    lock = vfetch4 ( lock_addr, lock_arn, regs );
+    susp = vfetch4 ( lock_addr + 4, lock_arn, regs );
+
+    /* Test if current ASCB holds this lock, the locks held indicators
+       show a CMS lock is held, and the lock suspend queue is empty */
+    if (lock == ascb_addr
+        && (hlhi_word & PSACMSLI)
+        && susp == 0)
+    {
+        /* Store the unchanged value into the second operand to
+           ensure suppression in the event of an access exception */
+        vstore4 ( hlhi_word, addr2, ar2, regs );
+
+        /* Set the CMS lock to zero */
+        vstore4 ( 0, lock_addr, lock_arn, regs );
+
+        /* Clear the CMS lock held bit in the second operand */
+        hlhi_word &= ~PSACMSLI;
+        vstore4 ( hlhi_word, addr2, ar2, regs );
+
+        /* Set register 13 to zero to indicate lock released */
+        regs->gpr[13] = 0;
+    }
+    else
+    {
+        /* Fetch the lock interface table address from the
+           second word of the second operand, and load the
+           new instruction address and amode from LITRCMS */
+        lit_addr = vfetch4 ( addr2 + 4, ar2, regs );
+        newia = vfetch4 ( lit_addr + LITRCMS, 0, regs );
+
+        /* Save the link information in register 12 */
+        if (regs->psw.amode)
+            regs->gpr[12] = 0x80000000 | regs->psw.ia;
+        else
+            regs->gpr[12] = regs->psw.ia & 0x00FFFFFF;
+
+        /* Copy LITRCMS into register 13 to signify release failure */
+        regs->gpr[13] = newia;
+
+        /* Update the PSW instruction address and addressing mode */
+        if ( newia & 0x80000000 )
+        {
+            regs->psw.amode = 1;
+            regs->psw.ia = newia & 0x7FFFFFFF;
+        }
+        else
+        {
+            regs->psw.amode = 0;
+            regs->psw.ia = newia & 0x00FFFFFF;
+        }
+    }
+
+    /* Release main-storage access lock */
+    release_lock (&sysblk.mainlock);
+
+} /* end function release_cms_lock */
 

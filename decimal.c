@@ -1015,3 +1015,512 @@ int     signq, signr;                   /* Sign of quotient/remainder*/
 
 } /* end function divide_packed */
 
+/*-------------------------------------------------------------------*/
+/* Convert binary value to 8-byte packed decimal                     */
+/*                                                                   */
+/* Input:                                                            */
+/*      r1      Register number containing binary value              */
+/*      addr    Logical address of packed decimal storage operand    */
+/*      arn     Access register number associated with operand       */
+/*      regs    CPU register context                                 */
+/* Output:                                                           */
+/*      The 8-byte storage operand is updated with the 15-digit      */
+/*      packed decimal equivalent of the binary value contained      */
+/*      in the register.                                             */
+/*                                                                   */
+/*      A program check may be generated if the operand address      */
+/*      causes an addressing, translation, or protection exception.  */
+/*-------------------------------------------------------------------*/
+void convert_to_decimal (int r1, U32 addr, int arn, REGS *regs)
+{
+U64     dreg;                           /* 64-bit result accumulator */
+int     i;                              /* Loop counter              */
+int     d;                              /* Decimal digit             */
+U32     n;                              /* Absolute value to convert */
+
+    /* Load absolute value and generate sign */
+    if (regs->gpr[r1] < 0x80000000)
+    {
+        /* Value is positive */
+        n = regs->gpr[r1];
+        dreg = 0x0C;
+    }
+    else if (regs->gpr[r1] > 0x80000000 )
+    {
+        /* Value is negative */
+        n = -((S32)(regs->gpr[r1]));
+        dreg = 0x0D;
+    }
+    else
+    {
+        /* Special case when R1 is maximum negative value */
+        n = 0;
+        dreg = 0x2147483648DULL;
+    }
+
+    /* Generate decimal digits */
+    for (i = 4; n != 0; i += 4)
+    {
+        d = n % 10;
+        n /= 10;
+        dreg |= (U64)d << i;
+    }
+
+    /* Store packed decimal result at operand address */
+    vstore8 ( dreg, addr, arn, regs );
+
+} /* end function convert_to_decimal */
+
+/*-------------------------------------------------------------------*/
+/* Convert to 8-byte packed decimal to binary                        */
+/*                                                                   */
+/* Input:                                                            */
+/*      r1      Register number to receive binary value              */
+/*      addr    Logical address of packed decimal storage operand    */
+/*      arn     Access register number associated with operand       */
+/*      regs    CPU register context                                 */
+/* Output:                                                           */
+/*      The register is loaded with the 32-bit signed binary         */
+/*      equivalent of the 15-digit packed decimal number fetched     */
+/*      from the 8-byte storage operand.                             */
+/*                                                                   */
+/*      A program check may be generated if the operand address      */
+/*      causes an addressing, translation, or fetch protection       */
+/*      exception, or if the operand contains invalid decimal digits */
+/*      or sign.  If the value is outside the range that can be      */
+/*      converted to a 32-bit signed binary value, then the low      */
+/*      order 32 bits are placed in the result register and a        */
+/*      fixed point divide exception is generated.                   */
+/*-------------------------------------------------------------------*/
+void convert_to_binary (int r1, U32 addr, int arn, REGS *regs)
+{
+U64     dreg;                           /* 64-bit result accumulator */
+int     i;                              /* Loop counter              */
+int     h, d;                           /* Decimal digits            */
+BYTE    sbyte;                          /* Source operand byte       */
+
+    /* Initialize binary result */
+    dreg = 0;
+
+    /* Convert digits to binary */
+    for (i = 0; i < 8; i++)
+    {
+        /* Load next byte of operand */
+        sbyte = vfetchb ( addr, arn, regs );
+
+        /* Isolate high-order and low-order digits */
+        h = (sbyte & 0xF0) >> 4;
+        d = sbyte & 0x0F;
+
+        /* Check for valid high-order digit */
+        if (h > 9)
+        {
+            program_check (PGM_DATA_EXCEPTION);
+            return;
+        }
+
+        /* Accumulate high-order digit into result */
+        dreg *= 10;
+        dreg += h;
+
+        /* Check for valid low-order digit or sign */
+        if (i < 7)
+        {
+            /* Check for valid low-order digit */
+            if (d > 9)
+            {
+                program_check (PGM_DATA_EXCEPTION);
+                return;
+            }
+
+            /* Accumulate low-order digit into result */
+            dreg *= 10;
+            dreg += d;
+        }
+        else
+        {
+            /* Check for valid sign */
+            if (d < 10)
+            {
+                program_check (PGM_DATA_EXCEPTION);
+                return;
+            }
+        }
+
+        /* Increment operand address */
+        addr++;
+
+    } /* end for(i) */
+
+    /* Result is negative if sign is X'B' or X'D' */
+    if (d == 0x0B || d == 0x0D)
+    {
+        (S64)dreg = -((S64)dreg);
+    }
+
+    /* Store low-order 32 bits of result into R1 register */
+    regs->gpr[r1] = dreg & 0xFFFFFFFF;
+
+    /* Program check if overflow */
+    if ((S64)dreg < -2147483648LL || (S64)dreg > 2147483647LL)
+    {
+        program_check (PGM_FIXED_POINT_DIVIDE_EXCEPTION);
+        return;
+    }
+
+} /* end function convert_to_binary */
+
+/*-------------------------------------------------------------------*/
+/* Move with offset                                                  */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr1   Logical address of storage operand 1                 */
+/*      len1    Length minus one of storage operand 1 (range 0-15)   */
+/*      arn1    Access register number associated with operand 1     */
+/*      addr2   Logical address of storage operand 2                 */
+/*      len2    Length minus one of storage operand 2 (range 0-15)   */
+/*      arn2    Access register number associated with operand 2     */
+/*      regs    CPU register context                                 */
+/* Output:                                                           */
+/*      The second operand, shifted four bits to the left, is placed */
+/*      adjacent to the rightmost four bits of the first operand.    */
+/*      The operand is not checked for valid decimal digits or sign. */
+/*                                                                   */
+/*      A program check may be generated if either logical address   */
+/*      causes an addressing, translation, or fetch protection       */
+/*      exception, or if the first operand is store protected.       */
+/*-------------------------------------------------------------------*/
+void move_with_offset (U32 addr1, int len1, int arn1,
+                        U32 addr2, int len2, int arn2, REGS *regs)
+{
+int     i, j;                           /* Loop counters             */
+BYTE    sbyte;                          /* Source operand byte       */
+BYTE    dbyte;                          /* Destination operand byte  */
+
+    /* Fetch the rightmost byte from the source operand */
+    addr2 += len2;
+    sbyte = vfetchb ( addr2, arn2, regs );
+
+    /* Fetch the rightmost byte from the destination operand */
+    addr1 += len1;
+    dbyte = vfetchb ( addr1, arn1, regs );
+
+    /* Move low digit of source byte to high digit of destination */
+    dbyte &= 0x0F;
+    dbyte |= sbyte << 4;
+    vstoreb ( dbyte, addr1, arn1, regs );
+
+    /* Process remaining bytes from right to left */
+    for (i = len1, j = len2; i > 0; i--)
+    {
+        /* Move previous high digit to destination low digit */
+        dbyte = sbyte >> 4;
+
+        /* Fetch next byte from second operand */
+        if ( j-- > 0 )
+            sbyte = vfetchb ( --addr2, arn2, regs );
+        else
+            sbyte = 0x00;
+
+        /* Move low digit to destination high digit */
+        dbyte |= sbyte << 4;
+        vstoreb ( dbyte, --addr1, arn1, regs );
+
+        /* Wraparound according to addressing mode */
+        addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+
+    } /* end for(i) */
+
+} /* end function move_with_offset */
+
+/*-------------------------------------------------------------------*/
+/* Pack zoned decimal operand into packed decimal operand            */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr1   Logical address of storage operand 1                 */
+/*      len1    Length minus one of storage operand 1 (range 0-15)   */
+/*      arn1    Access register number associated with operand 1     */
+/*      addr2   Logical address of storage operand 2                 */
+/*      len2    Length minus one of storage operand 2 (range 0-15)   */
+/*      arn2    Access register number associated with operand 2     */
+/*      regs    CPU register context                                 */
+/* Output:                                                           */
+/*      The zoned decimal second operand is converted to packed      */
+/*      decimal and the result is stored in the first operand.       */
+/*      The operand is not checked for valid decimal digits or sign. */
+/*                                                                   */
+/*      A program check may be generated if either logical address   */
+/*      causes an addressing, translation, or fetch protection       */
+/*      exception, or if the first operand is store protected.       */
+/*-------------------------------------------------------------------*/
+void zoned_to_packed (U32 addr1, int len1, int arn1,
+                        U32 addr2, int len2, int arn2, REGS *regs)
+{
+int     i, j;                           /* Loop counters             */
+BYTE    sbyte;                          /* Source operand byte       */
+BYTE    dbyte;                          /* Destination operand byte  */
+
+    /* Exchange the digits in the rightmost byte */
+    addr1 += len1;
+    addr2 += len2;
+    sbyte = vfetchb ( addr2, arn2, regs );
+    dbyte = (sbyte << 4) | (sbyte >> 4);
+    vstoreb ( dbyte, addr1, arn1, regs );
+
+    /* Process remaining bytes from right to left */
+    for (i = len1, j = len2; i > 0; i--)
+    {
+        /* Fetch source bytes from second operand */
+        if (j-- > 0)
+        {
+            sbyte = vfetchb ( --addr2, arn2, regs );
+            dbyte = sbyte & 0x0F;
+
+            if (j-- > 0)
+            {
+                addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+                sbyte = vfetchb ( --addr2, arn2, regs );
+                dbyte |= sbyte << 4;
+            }
+        }
+        else
+        {
+            dbyte = 0;
+        }
+
+        /* Store packed digits at first operand address */
+        vstoreb ( dbyte, --addr1, arn1, regs );
+
+        /* Wraparound according to addressing mode */
+        addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+
+    } /* end for(i) */
+
+} /* end function zoned_to_packed */
+
+/*-------------------------------------------------------------------*/
+/* Unpack packed decimal operand into zoned decimal operand          */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr1   Logical address of storage operand 1                 */
+/*      len1    Length minus one of storage operand 1 (range 0-15)   */
+/*      arn1    Access register number associated with operand 1     */
+/*      addr2   Logical address of storage operand 2                 */
+/*      len2    Length minus one of storage operand 2 (range 0-15)   */
+/*      arn2    Access register number associated with operand 2     */
+/*      regs    CPU register context                                 */
+/* Output:                                                           */
+/*      The packed decimal second operand is converted to zoned      */
+/*      decimal and the result is stored in the first operand.       */
+/*      The operand is not checked for valid decimal digits or sign. */
+/*                                                                   */
+/*      A program check may be generated if either logical address   */
+/*      causes an addressing, translation, or fetch protection       */
+/*      exception, or if the first operand is store protected.       */
+/*-------------------------------------------------------------------*/
+void packed_to_zoned (U32 addr1, int len1, int arn1,
+                        U32 addr2, int len2, int arn2, REGS *regs)
+{
+int     i, j;                           /* Loop counters             */
+BYTE    sbyte;                          /* Source operand byte       */
+BYTE    rbyte;                          /* Right result byte of pair */
+BYTE    lbyte;                          /* Left result byte of pair  */
+
+    /* Exchange the digits in the rightmost byte */
+    addr1 += len1;
+    addr2 += len2;
+    sbyte = vfetchb ( addr2, arn2, regs );
+    rbyte = (sbyte << 4) | (sbyte >> 4);
+    vstoreb ( rbyte, addr1, arn1, regs );
+
+    /* Process remaining bytes from right to left */
+    for (i = len1, j = len2; i > 0; i--)
+    {
+        /* Fetch source byte from second operand */
+        if (j-- > 0)
+        {
+            sbyte = vfetchb ( --addr2, arn2, regs );
+            rbyte = (sbyte & 0x0F) | 0xF0;
+            lbyte = (sbyte >> 4) | 0xF0;
+        }
+        else
+        {
+            rbyte = 0xF0;
+            lbyte = 0xF0;
+        }
+
+        /* Store unpacked bytes at first operand address */
+        vstoreb ( rbyte, --addr1, arn1, regs );
+        if (--i > 0)
+        {
+            addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            vstoreb ( lbyte, --addr1, arn1, regs );
+        }
+
+        /* Wraparound according to addressing mode */
+        addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+
+    } /* end for(i) */
+
+} /* end function packed_to_zoned */
+
+/*-------------------------------------------------------------------*/
+/* Edit packed decimal operand into pattern operand                  */
+/*                                                                   */
+/* Input:                                                            */
+/*      edmk    1=Edit and Mark, 0=Edit                              */
+/*      addr1   Logical address of storage operand 1                 */
+/*      len1    Length minus one of storage operand 1 (range 0-255)  */
+/*      arn1    Access register number associated with operand 1     */
+/*      addr2   Logical address of storage operand 2                 */
+/*      arn2    Access register number associated with operand 2     */
+/*      regs    CPU register context                                 */
+/* Output:                                                           */
+/*      The packed decimal second operand is edited into the pattern */
+/*      contained in the first operand.  The function return value   */
+/*      is the condition code for the ED or EDMK instruction.        */
+/*      EDMK additionally loads the address of the result byte into  */
+/*      general register 1 if the result byte is a zoned source      */
+/*      digit and the significance indicator was off before the      */
+/*      examination.  If no result byte meets the criteria, general  */
+/*      register 1 remains unchanged; if more than one result byte   */
+/*      meets the criteria, the address of the rightmost such        */
+/*      result byte is inserted.                                     */
+/*                                                                   */
+/*      A program check may be generated if either logical address   */
+/*      causes an addressing, translation, or fetch protection       */
+/*      exception, or if the first operand is store protected, or    */
+/*      if an invalid digit code is fetched from the second operand. */
+/*-------------------------------------------------------------------*/
+int edit_packed (int edmk, U32 addr1, int len1, int arn1,
+                        U32 addr2, int arn2, REGS *regs)
+{
+int     cc = 0;                         /* Condition code            */
+int     sig = 0;                        /* Significance indicator    */
+int     i;                              /* Loop counter              */
+int     d;                              /* 1=Use right source digit  */
+int     h;                              /* Hexadecimal digit         */
+BYTE    sbyte = 0;                      /* Source operand byte       */
+BYTE    fbyte = 0;                      /* Fill byte                 */
+BYTE    pbyte;                          /* Pattern byte              */
+BYTE    rbyte;                          /* Result byte               */
+
+    /* Process first operand from left to right */
+    for (i = 0, d = 0; i < len1+1; i++)
+    {
+        /* Fetch pattern byte from first operand */
+        pbyte = vfetchb ( addr1, arn1, regs );
+
+        /* The first pattern byte is also the fill byte */
+        if (i == 0) fbyte = pbyte;
+
+        /* If pattern byte is digit selector (X'20') or
+           significance starter (X'21') then fetch next
+           hexadecimal digit from the second operand */
+        if (pbyte == 0x20 || pbyte == 0x21)
+        {
+            if (d == 0)
+            {
+                /* Fetch source byte and extract left digit */
+                sbyte = vfetchb ( addr2, arn2, regs );
+                h = sbyte >> 4;
+                sbyte &= 0x0F;
+                d = 1;
+
+                /* Increment second operand address */
+                addr2++;
+                addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+
+                /* Program check if left digit is not numeric */
+                if (h > 9)
+                {
+                    program_check (PGM_DATA_EXCEPTION);
+                    return 0;
+                }
+
+            }
+            else
+            {
+                /* Use right digit of source byte */
+                h = sbyte;
+                d = 0;
+            }
+
+            /* For the EDMK instruction only, insert address of
+               result byte into general register 1 if the digit
+               is non-zero and significance indicator was off */
+            if (edmk && h > 0 && sig == 0)
+            {
+                if ( regs->psw.amode )
+                {
+                    regs->gpr[1] = addr1;
+                } else {
+                    regs->gpr[1] &= 0xFF000000;
+                    regs->gpr[1] |= addr1;
+                }
+            }
+
+            /* Replace the pattern byte by the fill character
+               or by a zoned decimal digit */
+            rbyte = (sig == 0 && h == 0) ? fbyte : (0xF0 | h);
+            vstoreb ( rbyte, addr1, arn1, regs );
+
+            /* Set condition code 2 if digit is non-zero */
+            if (h > 0) cc = 2;
+
+            /* Turn on significance indicator if pattern
+               byte is significance starter or if source
+               digit is non-zero */
+            if (pbyte == 0x21 || h > 0)
+                sig = 1;
+
+            /* Examine right digit for sign code */
+            if (d == 1 && sbyte > 9)
+            {
+                /* Turn off the significance indicator if
+                   the right digit is a plus sign code */
+                if (sbyte != 0x0B && sbyte != 0x0D)
+                    sig = 0;
+
+                /* Take next digit from next source byte */
+                d = 0;
+            }
+        }
+
+        /* If pattern byte is field separator (X'22') then
+           replace it by the fill character, turn off the
+           significance indicator, and zeroize conditon code  */
+        else if (pbyte == 0x22)
+        {
+            vstoreb ( fbyte, addr1, arn1, regs );
+            sig = 0;
+            cc = 0;
+        }
+
+        /* If pattern byte is a message byte (anything other
+           than X'20', X'21', or X'22') then replace it by
+           the fill byte if the significance indicator is off */
+        else
+        {
+            if (sig == 0)
+                vstoreb ( fbyte, addr1, arn1, regs );
+        }
+
+        /* Increment first operand address */
+        addr1++;
+        addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+
+    } /* end for(i) */
+
+    /* Replace condition code 2 by condition code 1 if the
+       significance indicator is on at the end of editing */
+    if (sig && cc == 2) cc = 1;
+
+    /* Return condition code */
+    return cc;
+
+} /* end function edit_packed */
+

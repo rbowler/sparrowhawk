@@ -53,8 +53,8 @@ int simtape_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 /* Execute a Channel Command Word                                    */
 /*-------------------------------------------------------------------*/
 void simtape_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
-        BYTE chained, U16 count, BYTE prevcode, BYTE *iobuf,
-        BYTE *more, BYTE *unitstat, U16 *residual )
+        BYTE chained, U16 count, BYTE prevcode, int ccwseq,
+        BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual )
 {
 SIMTAPE_BLKHDR  hdr;                    /* Tape block header         */
 int             rc;                     /* Return code               */
@@ -253,6 +253,25 @@ long            num;                    /* Number of bytes to read   */
     /* MODE SET                                                      */
     /*---------------------------------------------------------------*/
         *residual = 0;
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0x04:
+    /*---------------------------------------------------------------*/
+    /* SENSE                                                         */
+    /*---------------------------------------------------------------*/
+        /* Calculate residual byte count */
+        num = (count < dev->numsense) ? count : dev->numsense;
+        *residual = count - num;
+        if (count < dev->numsense) *more = 1;
+
+        /* Copy device sense bytes to channel I/O buffer */
+        memcpy (iobuf, dev->sense, num);
+
+        /* Clear the device sense bytes */
+        memset (dev->sense, 0, sizeof(dev->sense));
+
+        /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;
         break;
 

@@ -33,25 +33,58 @@
 /* ESA/390 features implemented                                      */
 /*-------------------------------------------------------------------*/
 #define MAX_CPU_ENGINES         4
-#undef  FEATURE_S370
-#undef  FEATURE_370XA
-#undef  FEATURE_ESA370
-#define FEATURE_ESA390
+#define FEATURE_ALD_FORMAT      0
+#undef  FEATURE_ACCESS_REGISTERS
+#undef  FEATURE_BASIC_STORAGE_KEYS
+#undef  FEATURE_BCMODE
+#undef  FEATURE_BIMODAL_ADDRESSING
+#undef  FEATURE_BRANCH_AND_SET_AUTHORITY
+#undef  FEATURE_CHANNEL_SUBSYSTEM
+#undef  FEATURE_DIRECT_CONTROL
+#undef  FEATURE_DUAL_ADDRESS_SPACE
+#undef  FEATURE_EXPANDED_STORAGE
+#undef  FEATURE_EXTENDED_STORAGE_KEYS
+#undef  FEATURE_HALFWORD_IMMEDIATE
+#undef  FEATURE_LINKAGE_STACK
+#undef  FEATURE_MVS_ASSIST
+#undef  FEATURE_PAGE_PROTECTION
+#undef  FEATURE_PRIVATE_SPACE
+#undef  FEATURE_RELATIVE_BRANCH
+#undef  FEATURE_S370_CHANNEL
+#undef  FEATURE_SEGMENT_PROTECTION
+#undef  FEATURE_STORAGE_PROTECTION_OVERRIDE
+#undef  FEATURE_SUBSPACE_GROUP
+#undef  FEATURE_SUPPRESSION_ON_PROTECTION
+#undef  FEATURE_TRACING
 
-#ifdef  FEATURE_S370
+#if     ARCH == 370
+ #define ARCHITECTURE_NAME      "S/370"
+ #define FEATURE_BASIC_STORAGE_KEYS
+ #define FEATURE_BCMODE
  #define FEATURE_S370_CHANNEL
- #undef  FEATURE_CHANNEL_SUBSYSTEM
-#else
- #undef  FEATURE_S370_CHANNEL
+ #define FEATURE_SEGMENT_PROTECTION
+#elif   ARCH == 390
+ #define ARCHITECTURE_NAME      "ESA/390"
+ #define FEATURE_ACCESS_REGISTERS
+ #define FEATURE_BIMODAL_ADDRESSING
+ #define FEATURE_BRANCH_AND_SET_AUTHORITY
  #define FEATURE_CHANNEL_SUBSYSTEM
+ #define FEATURE_DUAL_ADDRESS_SPACE
+ #define FEATURE_EXTENDED_STORAGE_KEYS
+ #define FEATURE_HALFWORD_IMMEDIATE
+ #define FEATURE_MVS_ASSIST
+ #define FEATURE_LINKAGE_STACK
+ #define FEATURE_PAGE_PROTECTION
+ #define FEATURE_PRIVATE_SPACE
+ #define FEATURE_RELATIVE_BRANCH
+ #define FEATURE_STORAGE_PROTECTION_OVERRIDE
+ #define FEATURE_SUBSPACE_GROUP
+ #define FEATURE_SUPPRESSION_ON_PROTECTION
+ #define FEATURE_TRACING
+#else
+ #error Either ARCH=370 or ARCH=390 must be specified
 #endif
 
-#define FEATURE_ALD_FORMAT      0
-#define FEATURE_STORAGE_PROTECTION_OVERRIDE
-#define FEATURE_SUBSPACE_GROUP
-#undef  FEATURE_SUPPRESSION_ON_PROTECTION
-#undef  FEATURE_EXPANDED_STORAGE
-#define FEATURE_MVS_ASSIST
 
 /*-------------------------------------------------------------------*/
 /* Macro definitions for tracing                                     */
@@ -96,6 +129,8 @@ typedef void*THREAD_FUNC(void*);
         pthread_create(ptid,pat,(THREAD_FUNC*)&fn,arg)
 #define signal_thread(tid,signo) \
         pthread_kill(tid,signo)
+#define thread_id() \
+        pthread_self()
 #else
 typedef int                             TID;
 typedef int                             LOCK;
@@ -110,6 +145,7 @@ typedef int                             ATTR;
 #define initialize_detach_attr(pat)     *(pat)=1
 #define create_thread(ptid,pat,fn,arg)  (*(ptid)=0,fn(arg),0)
 #define signal_thread(tid,signo)        raise(signo)
+#define thread_id()                     0
 #endif
 
 /*-------------------------------------------------------------------*/
@@ -117,8 +153,8 @@ typedef int                             ATTR;
 /*-------------------------------------------------------------------*/
 struct _DEVBLK;
 typedef int DEVIF (struct _DEVBLK *dev, int argc, BYTE *argv[]);
-typedef void DEVXF (struct _DEVBLK *dev,
-        BYTE code, BYTE flags, BYTE chained, U16 count, BYTE prevcode,
+typedef void DEVXF (struct _DEVBLK *dev, BYTE code, BYTE flags,
+        BYTE chained, U16 count, BYTE prevcode, int ccwseq,
         BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual);
 
 /*-------------------------------------------------------------------*/
@@ -149,6 +185,7 @@ typedef struct _SYSBLK {
         unsigned int                    /* Flags                     */
                 servsig:1,              /* 1=Service signal pending  */
                 intkey:1,               /* 1=Interrupt key pending   */
+                sigintreq:1,            /* 1=SIGINT request pending  */
                 insttrace:1,            /* 1=Instruction trace       */
                 inststep:1;             /* 1=Instruction step        */
     } SYSBLK;
@@ -166,8 +203,9 @@ typedef struct _DEVBLK {
         unsigned int                    /* Flags                     */
                 pending:1,              /* 1=Interrupt pending       */
                 busy:1,                 /* 1=Device busy             */
-                connected:1,            /* 1=3270 client connected   */
-                readpending:1,          /* 1=3270 data read pending  */
+                console:1,              /* 1=Console device          */
+                connected:1,            /* 1=Console client connected*/
+                readpending:1,          /* 1=Console read pending    */
                 ccwtrace:1,             /* 1=CCW trace               */
                 ccwstep:1;              /* 1=CCW single step         */
         PMCW    pmcw;                   /* Path management ctl word  */
@@ -404,6 +442,16 @@ void multiply_packed (U32 addr1, int len1, int arn1,
         U32 addr2, int len2, int arn2, REGS *regs);
 void divide_packed (U32 addr1, int len1, int arn1,
         U32 addr2, int len2, int arn2, REGS *regs);
+void convert_to_decimal (int r1, U32 addr, int arn, REGS *regs);
+void convert_to_binary (int r1, U32 addr, int arn, REGS *regs);
+void move_with_offset (U32 addr1, int len1, int arn1,
+        U32 addr2, int len2, int arn2, REGS *regs);
+void zoned_to_packed (U32 addr1, int len1, int arn1,
+        U32 addr2, int len2, int arn2, REGS *regs);
+void packed_to_zoned (U32 addr1, int len1, int arn1,
+        U32 addr2, int len2, int arn2, REGS *regs);
+int  edit_packed (int edmk, U32 addr1, int len1, int arn1,
+        U32 addr2, int arn2, REGS *regs);
 
 /* Functions in module block.c */
 int  move_long (int r1, int r2, REGS *regs);

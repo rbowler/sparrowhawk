@@ -42,16 +42,6 @@ int printer_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     /* Set number of sense bytes */
     dev->numsense = 1;
 
-    /* Initialize the device identifier bytes */
-    dev->devid[0] = 0xFF;
-    dev->devid[1] = 0x28; /* Control unit type is 2821-1 */
-    dev->devid[2] = 0x21;
-    dev->devid[3] = 0x01;
-    dev->devid[4] = dev->devtype >> 8;
-    dev->devid[5] = dev->devtype & 0xFF;
-    dev->devid[6] = 0x01;
-    dev->numdevid = 7;
-
     /* Activate I/O tracing */
     dev->ccwtrace = 1;
 
@@ -63,8 +53,8 @@ int printer_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 /* Execute a Channel Command Word                                    */
 /*-------------------------------------------------------------------*/
 void printer_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
-        BYTE chained, U16 count, BYTE prevcode, BYTE *iobuf,
-        BYTE *more, BYTE *unitstat, U16 *residual )
+        BYTE chained, U16 count, BYTE prevcode, int ccwseq,
+        BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual )
 {
 int     i;                              /* Loop counter              */
 int     num;                            /* Number of bytes to move   */
@@ -296,6 +286,25 @@ BYTE    c;                              /* Print character           */
 
         /* Reset fold indicator and return normal status */
         dev->fold = 0;
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0x04:
+    /*---------------------------------------------------------------*/
+    /* SENSE                                                         */
+    /*---------------------------------------------------------------*/
+        /* Calculate residual byte count */
+        num = (count < dev->numsense) ? count : dev->numsense;
+        *residual = count - num;
+        if (count < dev->numsense) *more = 1;
+
+        /* Copy device sense bytes to channel I/O buffer */
+        memcpy (iobuf, dev->sense, num);
+
+        /* Clear the device sense bytes */
+        memset (dev->sense, 0, sizeof(dev->sense));
+
+        /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;
         break;
 

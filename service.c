@@ -24,8 +24,22 @@ typedef struct _SCCB_HEADER {
         BYTE    resp;                   /* Response class code       */
     } SCCB_HEADER;
 
-/* Bit settings for SCCB header flag byte */
+/* Bit definitions for SCCB header flag byte */
 #define SCCB_FLAG_SYNC          0x80    /* Synchronous request       */
+
+/* Bit definitions for SCCB header reason code */
+#define SCCB_REAS_NONE          0x00    /* No reason                 */
+#define SCCB_REAS_NOT_ALIGNED   0x01    /* SCCB not on 2K boundary   */
+#define SCCB_REAS_ODD_LENGTH    0x02    /* Length not multiple of 8  */
+#define SCCB_REAS_TOO_SHORT     0x03    /* Length is inadequate      */
+#define SCCB_REAS_INVALID_CMD   0x01    /* Invalid SCLP command code */
+
+/* Bit definitions for SCCB header response class code */
+#define SCCB_RESP_BLOCK_ERROR   0x00    /* Data block error          */
+#define SCCB_RESP_INFO          0x10    /* Information returned      */
+#define SCCB_RESP_COMPLETE      0x20    /* Command complete          */
+#define SCCB_RESP_BACKOUT       0x40    /* Command backed out        */
+#define SCCB_RESP_REJECT        0xF0    /* Command reject            */
 
 /* SCP information data area */
 typedef struct _SCCB_SCP_INFO {
@@ -273,15 +287,15 @@ SCCB_SCP_INFO  *sccbscp;                /* -> SCCB SCP information   */
 SCCB_CPU_INFO  *sccbcpu;                /* -> SCCB CPU information   */
 U16             offset;                 /* Offset from start of SCCB */
 
-    /* Program check if SCCB not on page boundary */
-    if ( sccb_absolute_addr & 0x00000FFF )
+    /* Program check if SCCB is not on a doubleword boundary */
+    if ( sccb_absolute_addr & 0x00000007 )
     {
         program_check (PGM_SPECIFICATION_EXCEPTION);
         return 3;
     }
 
-    /* Program check if SCCB outside main storage */
-    if ( sccb_absolute_addr > sysblk.mainsize )
+    /* Program check if SCCB is outside main storage */
+    if ( sccb_absolute_addr >= sysblk.mainsize )
     {
         program_check (PGM_ADDRESSING_EXCEPTION);
         return 3;
@@ -293,11 +307,13 @@ U16             offset;                 /* Offset from start of SCCB */
     /* Point to service call control block */
     sccb = (SCCB_HEADER*)(sysblk.mainstor + sccb_absolute_addr);
 
-    /* Program check if SCCB length is incorrect */
+    /* Load SCCB length from header */
     sccblen = (sccb->length[0] << 8) | sccb->length[1];
-    if ( sccblen != 4096 )
+
+    /* Program check if end of SCCB falls outside main storage */
+    if ( sysblk.mainsize - sccblen < sccb_absolute_addr )
     {
-        program_check (PGM_SPECIFICATION_EXCEPTION);
+        program_check (PGM_ADDRESSING_EXCEPTION);
         return 3;
     }
 
@@ -305,6 +321,16 @@ U16             offset;                 /* Offset from start of SCCB */
     switch (sclp_command) {
 
     case SCLP_READ_SCP_INFO:
+
+        /* Set response code X'0300' if SCCB length
+           is insufficient to contain SCP info */
+        if ( sccblen < sizeof(SCCB_HEADER) + sizeof(SCCB_SCP_INFO)
+                + (sizeof(SCCB_CPU_INFO) * sysblk.numcpu))
+        {
+            sccb->reas = SCCB_REAS_TOO_SHORT;
+            sccb->resp = SCCB_RESP_BLOCK_ERROR;
+            break;
+        }
 
         /* Point to SCCB data area following SCCB header */
         sccbscp = (SCCB_SCP_INFO*)(sccb+1);
@@ -372,15 +398,19 @@ U16             offset;                 /* Offset from start of SCCB */
             sccbcpu->cpf2 = SCCB_CPF2_PRIVATE_SPACE_BIT_INSTALLED;
         }
 
-        /* Set response codes in SCCB header */
-        sccb->reas = 0x00;
-        sccb->resp = 0x10;
+        /* Set response code X'0010' in SCCB header */
+        sccb->reas = SCCB_REAS_NONE;
+        sccb->resp = SCCB_RESP_INFO;
 
         break;
 
     default:
-        /* Return condition code 2 for invalid SCLP command */
-        return 2;
+        /* Set response code X'01F0' for invalid SCLP command */
+        sccb->reas = SCCB_REAS_INVALID_CMD;
+        sccb->resp = SCCB_RESP_REJECT;
+
+        break;
+
     } /* end switch(sclp_command) */
 
     /* If immediate response is requested, return condition code 1 */

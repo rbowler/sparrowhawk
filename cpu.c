@@ -2,9 +2,10 @@
 /*              ESA/390 CPU Emulator                                 */
 
 /*-------------------------------------------------------------------*/
-/* This module implements the CPU instruction execution function     */
-/* of the ESA/390 architecture, described in the manual              */
-/* SA22-7201-04 ESA/390 Principles of Operation.                     */
+/* This module implements the CPU instruction execution function of  */
+/* the S/370 and ESA/390 architectures, as described in the manuals  */
+/* GA22-7000-03 System/370 Principles of Operation                   */
+/* SA22-7201-04 ESA/390 Principles of Operation                      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -198,21 +199,35 @@ int load_psw (PSW *psw, BYTE *addr)
         if (addr[3] != 0)
             return PGM_SPECIFICATION_EXCEPTION;
 
-#ifdef FEATURE_S370
-        /* For S/370, bits 32-39 must be zero */
-        if (addr[4] != 0x00)
+#ifndef FEATURE_DUAL_ADDRESS_SPACE
+        /* If DAS feature not installed then bit 16 must be zero */
+        if (psw->space)
             return PGM_SPECIFICATION_EXCEPTION;
-#else /*!FEATURE_S370*/
+#endif /*!FEATURE_DUAL_ADDRESS_SPACE*/
+
+#ifndef FEATURE_ACCESS_REGISTERS
+        /* If not ESA/370 or ESA/390 then bit 17 must be zero */
+        if (psw->armode)
+            return PGM_SPECIFICATION_EXCEPTION;
+#endif /*!FEATURE_ACCESS_REGISTERS*/
+
+#ifdef FEATURE_BIMODAL_ADDRESSING
         /* For 370-XA, ESA/370, and ESA/390,
            if amode=24, bits 33-39 must be zero */
         if (addr[4] > 0x00 && addr[4] < 0x80)
             return PGM_SPECIFICATION_EXCEPTION;
-#endif /*!FEATURE_S370*/
+#else /*!FEATURE_BIMODAL_ADDRESSING*/
+        /* For S/370, bits 32-39 must be zero */
+        if (addr[4] != 0x00)
+            return PGM_SPECIFICATION_EXCEPTION;
+#endif /*!FEATURE_BIMODAL_ADDRESSING*/
 
     } else {
 
-#ifdef FEATURE_S370
+#ifdef FEATURE_BCMODE
         /* Processing for S/370 BC mode PSW */
+        psw->space = 0;
+        psw->armode = 0;
         psw->intcode = (addr[2] << 8) | addr[3];
         psw->ilc = (addr[4] >> 6) * 2;
         psw->cc = (addr[4] & 0x30) >> 4;
@@ -222,15 +237,16 @@ int load_psw (PSW *psw, BYTE *addr)
         psw->sgmask = addr[4] & 0x01;
         psw->amode = 0;
         psw->ia = (addr[5] << 16) | (addr[6] << 8) | addr[7];
-#else /*!FEATURE_S370*/
+#else /*!FEATURE_BCMODE*/
         /* BC mode is not valid for 370-XA, ESA/370, or ESA/390 */
         return PGM_SPECIFICATION_EXCEPTION;
-#endif /*!FEATURE_S370*/
+#endif /*!FEATURE_BCMODE*/
 
     }
 
     /* Check for wait state PSW */
-    if (psw->wait && (sysblk.insttrace || sysblk.inststep))
+    if (psw->wait && (sysblk.insttrace || sysblk.inststep
+        || psw->ia != 0))
     {
         printf("Wait state PSW loaded: "
                 "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
@@ -333,17 +349,14 @@ U32     newia;                          /* New instruction address   */
 int     ilc;                            /* Instruction length code   */
 int     m;                              /* Condition code mask       */
 U32     n, n1, n2;                      /* 32-bit operand values     */
-U16     h1, h2, h3;                     /* 16-bit operand values     */
-U16     xcode;                          /* Exception code            */
 int     private;                        /* 1=Private address space   */
 int     protect;                        /* 1=ALE or page protection  */
 int     cc;                             /* Condition code            */
-BYTE    obyte, sbyte, dbyte, fbyte;     /* Byte work areas           */
+BYTE    obyte, sbyte, dbyte;            /* Byte work areas           */
 DWORD   dword;                          /* Doubleword work area      */
 U64     dreg;                           /* Double register work area */
 int     d, h, i, j;                     /* Integer work areas        */
 int     divide_overflow;                /* 1=divide overflow         */
-int     sig;                            /* Significance indicator    */
 int     effective_addr = 0;             /* Effective address         */
 int     effective_addr2 = 0;            /* Effective address         */
 int     ar1, ar2;                       /* Access register numbers   */
@@ -355,14 +368,19 @@ int     ccwfmt;                         /* CCW format (0 or 1)       */
 BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
 U32     ioparm;                         /* I/O interruption parameter*/
 struct  timeval tv;                     /* Structure for gettimeofday*/
-#ifndef FEATURE_S370
+U16     xcode;                          /* Exception code            */
+#if defined(FEATURE_HALFWORD_IMMEDIATE) \
+    || defined(FEATURE_RELATIVE_BRANCH)
+U16     h1, h2, h3;                     /* 16-bit operand values     */
+#endif /*FEATURE_HALFWORD_IMMEDIATE || FEATURE_RELATIVE_BRANCH*/
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
 U32     asteo;                          /* Real address of ASTE      */
 U32     aste[16];                       /* ASN second table entry    */
 U16     ax;                             /* Authorization index       */
 U16     pkm;                            /* PSW key mask              */
 U16     pasn;                           /* Primary ASN               */
 U16     sasn;                           /* Secondary ASN             */
-#endif /*!FEATURE_S370*/
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
 U32     ioid;                           /* I/O interruption address  */
 PMCW    pmcw;                           /* Path management ctl word  */
@@ -565,7 +583,7 @@ static BYTE module[8];                  /* Module name               */
 
         break;
 
-#ifdef FEATURE_S370
+#ifdef FEATURE_BASIC_STORAGE_KEYS
     case 0x08:
     /*---------------------------------------------------------------*/
     /* SSK      Set Storage Key                                 [RR] */
@@ -602,8 +620,8 @@ static BYTE module[8];                  /* Module name               */
         n >>= 12;
         sysblk.storkeys[n] = regs->gpr[r1] & 0xFE;
 
-        /*debug*/printf("SSK storage block %8.8lX key %2.2lX\n",
-                        regs->gpr[r2], regs->gpr[r1] & 0xFE);
+//      /*debug*/printf("SSK storage block %8.8lX key %2.2lX\n",
+//                      regs->gpr[r2], regs->gpr[r1] & 0xFE);
 
         break;
 
@@ -652,7 +670,7 @@ static BYTE module[8];                  /* Module name               */
                         regs->gpr[r2], regs->gpr[r1] & 0xFE);
 
         break;
-#endif /*FEATURE_S370*/
+#endif /*FEATURE_BASIC_STORAGE_KEYS*/
 
     case 0x0A:
     /*---------------------------------------------------------------*/
@@ -701,19 +719,6 @@ static BYTE module[8];                  /* Module name               */
         }
 #endif /*SVC_TRACE*/
 
-#ifdef FAKE_CAMLST
-        /* Fake camlst locate *//*debug*/
-        if (ibyte == 26)
-        {
-            n = vfetch4 (regs->gpr[1]+12, 0, regs);
-            memcpy(sysblk.mainstor+n,
-                   "\x00\x01\x30\x00\x20\x01\xE2\xE8\xE2\xD9\xC5\xE2",
-                  12);
-            regs->gpr[15] = 0;
-            break;
-        }
-#endif /*FAKE_CAMLST*/
-
         /* Point to PSA in main storage */
         psa = (PSA*)(sysblk.mainstor + regs->pxr);
 
@@ -743,7 +748,7 @@ static BYTE module[8];                  /* Module name               */
 
         break;
 
-#ifndef FEATURE_S370
+#ifdef FEATURE_BIMODAL_ADDRESSING
     case 0x0B:
     /*---------------------------------------------------------------*/
     /* BSM      Branch and Set Mode                             [RR] */
@@ -807,7 +812,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         break;
-#endif /*!FEATURE_S370*/
+#endif /*FEATURE_BIMODAL_ADDRESSING*/
 
     case 0x0D:
     /*---------------------------------------------------------------*/
@@ -1432,36 +1437,8 @@ static BYTE module[8];                  /* Module name               */
     /* CVD      Convert to Decimal                              [RX] */
     /*---------------------------------------------------------------*/
 
-        /* Load positive value from register and generate sign */
-        if ( regs->gpr[r1] < 0x80000000 )
-        {
-            /* Value is positive */
-            n = regs->gpr[r1];
-            dreg = 0x0C;
-        }
-        else if ( regs->gpr[r1] > 0x80000000 )
-        {
-            /* Value is negative */
-            n = -((S32)regs->gpr[r1]);
-            dreg = 0x0D;
-        }
-        else
-        {
-            /* Special case when R1 is maximum negative value */
-            n = 0;
-            dreg = 0x2147483648DULL;
-        }
-
-        /* Generate decimal digits */
-        for ( i = 4; n != 0; i += 4 )
-        {
-            d = n % 10;
-            n /= 10;
-            dreg |= (U64)d << i;
-        }
-
-        /* Store packed decimal result at operand address */
-        vstore8 ( dreg, effective_addr, ar1, regs );
+        /* Convert R1 register to packed decimal */
+        convert_to_decimal (r1, effective_addr, ar1, regs);
 
         break;
 
@@ -1470,74 +1447,8 @@ static BYTE module[8];                  /* Module name               */
     /* CVB      Convert to Binary                               [RX] */
     /*---------------------------------------------------------------*/
 
-        /* Initialize binary result */
-        dreg = 0;
-
-        /* Convert digits to binary */
-        for( i = 0; i < 8; i++ )
-        {
-            /* Load next byte of operand */
-            sbyte = vfetchb ( effective_addr, ar1, regs );
-
-            /* Isolate high-order and low-order digits */
-            h = (sbyte & 0xF0) >> 4;
-            d = sbyte & 0x0F;
-
-            /* Check for valid high-order digit */
-            if ( h > 9 )
-            {
-                program_check (PGM_DATA_EXCEPTION);
-                goto terminate;
-            }
-
-            /* Accumulate high-order digit into result */
-            dreg *= 10;
-            dreg += h;
-
-            /* Check for valid low-order digit or sign */
-            if ( i < 7 )
-            {
-                /* Check for valid low-order digit */
-                if ( d > 9 )
-                {
-                    program_check (PGM_DATA_EXCEPTION);
-                    goto terminate;
-                }
-
-                /* Accumulate low-order digit into result */
-                dreg *= 10;
-                dreg += d;
-            }
-            else
-            {
-                /* Check for valid sign */
-                if ( d < 10 )
-                {
-                    program_check (PGM_DATA_EXCEPTION);
-                    goto terminate;
-                }
-            }
-
-            /* Increment operand address */
-            effective_addr++;
-
-        } /* end for(i) */
-
-        /* Result is negative if sign is X'B' or X'D' */
-        if ( d == 0x0B || d == 0x0D )
-        {
-            (S64)dreg = -((S64)dreg);
-        }
-
-        /* Store low-order 32 bits of result into R1 register */
-        regs->gpr[r1] = dreg & 0xFFFFFFFF;
-
-        /* Program check if overflow */
-        if ( (S64)dreg < -2147483648LL || (S64)dreg > 2147483647LL )
-        {
-            program_check (PGM_FIXED_POINT_DIVIDE_EXCEPTION);
-            goto terminate;
-        }
+        /* Convert packed decimal storage operand into R1 register */
+        convert_to_binary (r1, effective_addr, ar1, regs);
 
         break;
 
@@ -1944,7 +1855,7 @@ static BYTE module[8];                  /* Module name               */
 
 //      break;
 
-#ifndef FEATURE_S370
+#ifdef FEATURE_RELATIVE_BRANCH
     case 0x84:
     /*---------------------------------------------------------------*/
     /* BRXH     Branch Relative on Index High                  [RSI] */
@@ -1996,7 +1907,7 @@ static BYTE module[8];                  /* Module name               */
             goto setia;
 
         break;
-#endif /*!FEATURE_S370*/
+#endif /*FEATURE_RELATIVE_BRANCH*/
 
     case 0x86:
     /*---------------------------------------------------------------*/
@@ -2351,6 +2262,7 @@ static BYTE module[8];                  /* Module name               */
 
         break;
 
+#ifdef FEATURE_TRACING
     case 0x99:
     /*---------------------------------------------------------------*/
     /* TRACE    Trace                                           [RS] */
@@ -2393,7 +2305,7 @@ static BYTE module[8];                  /* Module name               */
         if ( n < 512 && (regs->cr[0] & CR0_LOW_PROT) )
         {
             program_check (PGM_PROTECTION_EXCEPTION);
-            goto suppress;
+            goto terminate;
         }
 
         /* Convert trace entry real address to absolute address */
@@ -2403,7 +2315,7 @@ static BYTE module[8];                  /* Module name               */
         if ( n >= sysblk.mainsize )
         {
             program_check (PGM_ADDRESSING_EXCEPTION);
-            goto suppress;
+            goto terminate;
         }
 
         /* Program check if storing the maximum length trace
@@ -2411,7 +2323,7 @@ static BYTE module[8];                  /* Module name               */
         if ( ((n + 76) & 0xFFFFF000) != (n & 0xFFFFF000) )
         {
             program_check (PGM_TRACE_TABLE_EXCEPTION);
-            goto suppress;
+            goto terminate;
         }
 
         /* Calculate the number of registers to be traced, minus 1 */
@@ -2456,7 +2368,9 @@ static BYTE module[8];                  /* Module name               */
         perform_chkpt_sync ();
 
         break;
+#endif /*FEATURE_TRACING*/
 
+#ifdef FEATURE_ACCESS_REGISTERS
     case 0x9A:
     /*---------------------------------------------------------------*/
     /* LAM      Load Access Multiple                            [RS] */
@@ -2514,6 +2428,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         break;
+#endif /*FEATURE_ACCESS_REGISTERS*/
 
 #ifdef FEATURE_S370_CHANNEL
     case 0x9C:
@@ -2606,6 +2521,7 @@ static BYTE module[8];                  /* Module name               */
         /* Bits 12-15 of instruction determine the operation code */
         switch (r3) {
 
+#ifdef FEATURE_HALFWORD_IMMEDIATE
         case 0x0:
         /*-----------------------------------------------------------*/
         /* A7x0: TMH - Test under Mask High                     [RI] */
@@ -2651,7 +2567,9 @@ static BYTE module[8];                  /* Module name               */
                     2;                          /* leftmost bit one  */
 
             break;
+#endif /*FEATURE_HALFWORD_IMMEDIATE*/
 
+#ifdef FEATURE_RELATIVE_BRANCH
         case 0x4:
         /*-----------------------------------------------------------*/
         /* A7x4: BRC - Branch Relative on Condition             [RI] */
@@ -2709,7 +2627,9 @@ static BYTE module[8];                  /* Module name               */
                 goto setia;
 
             break;
+#endif /*FEATURE_RELATIVE_BRANCH*/
 
+#ifdef FEATURE_HALFWORD_IMMEDIATE
         case 0x8:
         /*-----------------------------------------------------------*/
         /* A7x8: LHI - Load Halfword Immediate                  [RI] */
@@ -2777,6 +2697,7 @@ static BYTE module[8];                  /* Module name               */
                     (S32)regs->gpr[r1] > (S16)h1 ? 2 : 0;
 
             break;
+#endif /*FEATURE_HALFWORD_IMMEDIATE*/
 
         default:
         /*-----------------------------------------------------------*/
@@ -3295,7 +3216,7 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 
-#ifdef FEATURE_S370
+#ifdef FEATURE_BASIC_STORAGE_KEYS
         case 0x13:
         /*-----------------------------------------------------------*/
         /* B213: RRB - Reset Reference Bit                       [S] */
@@ -3332,9 +3253,9 @@ static BYTE module[8];                  /* Module name               */
             sysblk.storkeys[n] &= ~(STORKEY_REF);
 
             break;
-#endif /*FEATURE_S370*/
+#endif /*FEATURE_BASIC_STORAGE_KEYS*/
 
-#ifndef FEATURE_S370
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
         case 0x18:
         /*-----------------------------------------------------------*/
         /* B218: PC - Program Call                               [S] */
@@ -3382,7 +3303,7 @@ static BYTE module[8];                  /* Module name               */
                 program_check (PGM_SPACE_SWITCH_EVENT);
 
             break;
-#endif /*FEATURE_S370*/
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
 
         case 0x20:
         /*-----------------------------------------------------------*/
@@ -3408,7 +3329,6 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 
-#ifndef FEATURE_S370
         case 0x21:
         /*-----------------------------------------------------------*/
         /* B221: IPTE - Invalidate Page Table Entry            [RRE] */
@@ -3532,6 +3452,7 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
         case 0x24:
         /*-----------------------------------------------------------*/
         /* B224: IAC - Insert Address Space Control            [RRE] */
@@ -3663,6 +3584,9 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+
+#ifdef FEATURE_EXTENDED_STORAGE_KEYS
         case 0x29:
         /*-----------------------------------------------------------*/
         /* B229: ISKE - Insert Storage Key Extended            [RRE] */
@@ -3773,6 +3697,7 @@ static BYTE module[8];                  /* Module name               */
             perform_chkpt_sync ();
 
             break;
+#endif /*FEATURE_EXTENDED_STORAGE_KEYS*/
 
         case 0x2C:
         /*-----------------------------------------------------------*/
@@ -3824,7 +3749,6 @@ static BYTE module[8];                  /* Module name               */
             regs->gpr[0] = 0;
 
             break;
-#endif /*!FEATURE_S370*/
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
         case 0x32:
@@ -4157,7 +4081,7 @@ static BYTE module[8];                  /* Module name               */
             break;
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
-#ifndef FEATURE_S370
+#ifdef FEATURE_LINKAGE_STACK
         case 0x40:
         /*-----------------------------------------------------------*/
         /* B240: BAKR - Branch and Stack Register              [RRE] */
@@ -4199,6 +4123,7 @@ static BYTE module[8];                  /* Module name               */
             } /* end if(r2!=0) */
 
             break;
+#endif /*FEATURE_LINKAGE_STACK*/
 
         case 0x41:
         /*-----------------------------------------------------------*/
@@ -4239,6 +4164,7 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 
+#ifdef FEATURE_LINKAGE_STACK
         case 0x47:
         /*-----------------------------------------------------------*/
         /* B247: MSTA - Modify Stacked State                   [RRE] */
@@ -4248,7 +4174,9 @@ static BYTE module[8];                  /* Module name               */
             modify_stacked_state (r1, regs);
 
             break;
+#endif /*FEATURE_LINKAGE_STACK*/
 
+#ifdef FEATURE_ACCESS_REGISTERS
         case 0x48:
         /*-----------------------------------------------------------*/
         /* B248: PALB - Purge ALB                              [RRE] */
@@ -4265,7 +4193,9 @@ static BYTE module[8];                  /* Module name               */
             purge_alb (regs);
 
             break;
+#endif /*FEATURE_ACCESS_REGISTERS*/
 
+#ifdef FEATURE_LINKAGE_STACK
         case 0x49:
         /*-----------------------------------------------------------*/
         /* B249: EREG - Extract Stacked Registers              [RRE] */
@@ -4290,6 +4220,7 @@ static BYTE module[8];                  /* Module name               */
                 extract_stacked_state (r1, obyte, regs);
 
             break;
+#endif /*FEATURE_LINKAGE_STACK*/
 
         case 0x4B:
         /*-----------------------------------------------------------*/
@@ -4319,6 +4250,7 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 
+#ifdef FEATURE_ACCESS_REGISTERS
         case 0x4C:
         /*-----------------------------------------------------------*/
         /* B24C: TAR - Test Access                             [RRE] */
@@ -4390,6 +4322,7 @@ static BYTE module[8];                  /* Module name               */
             regs->gpr[r1] = regs->ar[r2];
 
             break;
+#endif /*FEATURE_ACCESS_REGISTERS*/
 
         case 0x52:
         /*-----------------------------------------------------------*/
@@ -4434,6 +4367,7 @@ static BYTE module[8];                  /* Module name               */
             break;
 #endif /*FEATURE_SUBSPACE_GROUP*/
 
+#ifdef FEATURE_BRANCH_AND_SET_AUTHORITY
         case 0x5A:
         /*-----------------------------------------------------------*/
         /* B25A: BSA - Branch and Set Authority                [RRE] */
@@ -4443,6 +4377,7 @@ static BYTE module[8];                  /* Module name               */
             branch_and_set_authority (r1, r2, regs);
 
             break;
+#endif /*FEATURE_BRANCH_AND_SET_AUTHORITY*/
 
         case 0x5D:
         /*-----------------------------------------------------------*/
@@ -4464,6 +4399,7 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
         case 0x79:
         /*-----------------------------------------------------------*/
         /* B279: SACF - Set Address Space Control Fast           [S] */
@@ -4480,7 +4416,7 @@ static BYTE module[8];                  /* Module name               */
                 program_check (PGM_SPACE_SWITCH_EVENT);
 
             break;
-#endif /*!FEATURE_S370*/
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
 
         default:
         /*-----------------------------------------------------------*/
@@ -5193,133 +5129,23 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
     /* EDIT     Edit                                            [SS] */
     /*---------------------------------------------------------------*/
+
+        /* Edit packed decimal value and set condition code */
+        regs->psw.cc =
+            edit_packed (0, effective_addr, ibyte, ar1,
+                        effective_addr2, ar2, regs);
+
+        break;
+
     case 0xDF:
     /*---------------------------------------------------------------*/
     /* EDMK     Edit and Mark                                   [SS] */
     /*---------------------------------------------------------------*/
 
-        /* Clear the condition code */
-        regs->psw.cc = 0;
-
-        /* Turn off the significance indicator */
-        sig = 0;
-
-        /* Clear fill byte and source byte */
-        fbyte = 0;
-        sbyte = 0;
-
-        /* Process first operand from left to right */
-        for ( i = 0, d = 0; i < ibyte+1; i++ )
-        {
-            /* Fetch pattern byte from first operand */
-            dbyte = vfetchb ( effective_addr, ar1, regs );
-
-            /* The first pattern byte is also the fill byte */
-            if (i == 0) fbyte = dbyte;
-
-            /* If pattern byte is digit selector (X'20') or
-               significance starter (X'21') then fetch next
-               hexadecimal digit from the second operand */
-            if (dbyte == 0x20 || dbyte == 0x21)
-            {
-                if (d == 0)
-                {
-                    /* Fetch source byte and extract left digit */
-                    sbyte = vfetchb ( effective_addr2, ar2, regs );
-                    h = sbyte >> 4;
-                    sbyte &= 0x0F;
-                    d = 1;
-
-                    /* Increment second operand address */
-                    effective_addr2++;
-                    effective_addr2 &=
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-                    /* Program check if left digit is not numeric */
-                    if (h > 9)
-                    {
-                        program_check (PGM_DATA_EXCEPTION);
-                        goto terminate;
-                    }
-
-                }
-                else
-                {
-                    /* Use right digit of source byte */
-                    h = sbyte;
-                    d = 0;
-                }
-
-                /* For the EDMK instruction only, insert address of
-                   result byte into general register 1 if the digit
-                   is non-zero and significance indicator was off */
-                if (opcode == 0xDF && h > 0 && sig == 0)
-                {
-                    if ( regs->psw.amode )
-                    {
-                        regs->gpr[1] = effective_addr;
-                    } else {
-                        regs->gpr[1] &= 0xFF000000;
-                        regs->gpr[1] |= effective_addr;
-                    }
-                }
-
-                /* Replace the pattern byte by the fill character
-                   or by a zoned decimal digit */
-                obyte = (sig == 0 && h == 0) ? fbyte : (0xF0 | h);
-                vstoreb ( obyte, effective_addr, ar1, regs );
-
-                /* Set condition code 2 if digit is non-zero */
-                if (h > 0) regs->psw.cc = 2;
-
-                /* Turn on significance indicator if pattern
-                   byte is significance starter or if source
-                   digit is non-zero */
-                if (dbyte == 0x21 || h > 0)
-                    sig = 1;
-
-                /* Examine right digit for sign code */
-                if (d == 1 && sbyte > 9)
-                {
-                    /* Turn off the significance indicator if
-                       the right digit is a plus sign code */
-                    if (sbyte != 0x0B && sbyte != 0x0D)
-                        sig = 0;
-
-                    /* Take next digit from next source byte */
-                    d = 0;
-                }
-            }
-
-            /* If pattern byte is field separator (X'22') then
-               replace it by the fill character, turn off the
-               significance indicator, and zeroize conditon code  */
-            else if (dbyte == 0x22)
-            {
-                vstoreb ( fbyte, effective_addr, ar1, regs );
-                sig = 0;
-                regs->psw.cc = 0;
-            }
-
-            /* If pattern byte is a message byte (anything other
-               than X'20', X'21', or X'22') then replace it by
-               the fill byte if the significance indicator is off */
-            else
-            {
-                if (sig == 0)
-                    vstoreb ( fbyte, effective_addr, ar1, regs );
-            }
-
-            /* Increment first operand address */
-            effective_addr++;
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-        } /* end for(i) */
-
-        /* Replace condition code 2 by condition code 1 if the
-           significance indicator is on at the end of editing */
-        if (sig && regs->psw.cc == 2) regs->psw.cc = 1;
+        /* Edit and mark packed decimal value and set condition code */
+        regs->psw.cc =
+            edit_packed (1, effective_addr, ibyte, ar1,
+                        effective_addr2, ar2, regs);
 
         break;
 
@@ -5331,7 +5157,7 @@ static BYTE module[8];                  /* Module name               */
         /* The immediate byte determines the instruction opcode */
         switch ( ibyte ) {
 
-#ifndef FEATURE_S370
+#ifdef FEATURE_DUAL_ADDRESS_SPACE
         case 0x00:
         /*-----------------------------------------------------------*/
         /* E500: LASP - Load Address Space Parameters          [SSE] */
@@ -5372,7 +5198,7 @@ static BYTE module[8];                  /* Module name               */
                                 effective_addr2, regs);
 
             break;
-#endif /*!FEATURE_S370*/
+#endif /*FEATURE_DUAL_ADDRESS_SPACE*/
 
         case 0x01:
         /*-----------------------------------------------------------*/
@@ -5420,6 +5246,34 @@ static BYTE module[8];                  /* Module name               */
 
             /* Call MVS assist to release lock */
             release_local_lock (effective_addr, ar1,
+                                effective_addr2, ar2, regs);
+
+            break;
+
+        case 0x06:
+        /*-----------------------------------------------------------*/
+        /* E506: Obtain CMS Lock                               [SSE] */
+        /*-----------------------------------------------------------*/
+
+            /* Perform serialization before starting operation */
+            perform_serialization ();
+
+            /* Call MVS assist to obtain lock */
+            obtain_cms_lock (effective_addr, ar1,
+                                effective_addr2, ar2, regs);
+
+            /* Perform serialization after completing operation */
+            perform_serialization ();
+
+            break;
+
+        case 0x07:
+        /*-----------------------------------------------------------*/
+        /* E507: Release CMS Lock                              [SSE] */
+        /*-----------------------------------------------------------*/
+
+            /* Call MVS assist to release lock */
+            release_cms_lock (effective_addr, ar1,
                                 effective_addr2, ar2, regs);
 
             break;
@@ -5536,42 +5390,9 @@ static BYTE module[8];                  /* Module name               */
     /* MVO      Move with Offset                                [SS] */
     /*---------------------------------------------------------------*/
 
-        /* Fetch the rightmost byte from the source operand */
-        effective_addr2 += r2;
-        sbyte = vfetchb ( effective_addr2, ar2, regs );
-
-        /* Fetch the rightmost byte from the destination operand */
-        effective_addr += r1;
-        dbyte = vfetchb ( effective_addr, ar1, regs );
-
-        /* Move low digit of source byte to high digit of destination */
-        dbyte &= 0x0F;
-        dbyte |= sbyte << 4;
-        vstoreb ( dbyte, effective_addr, ar1, regs );
-
-        /* Process remaining bytes from right to left */
-        for ( i = r1, j = r2; i > 0; )
-        {
-            /* Move previous high digit to destination low digit */
-            dbyte = sbyte >> 4;
-
-            /* Fetch next byte from second operand */
-            if ( j-- > 0 )
-                sbyte = vfetchb ( --effective_addr2, ar2, regs );
-            else
-                sbyte = 0x00;
-
-            /* Move low digit to destination high digit */
-            dbyte |= sbyte << 4;
-            vstoreb ( dbyte, --effective_addr, ar1, regs );
-
-            /* Wraparound according to addressing mode */
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            effective_addr2 &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-        } /* end for(i) */
+        /* Move shifted second operand to first operand */
+        move_with_offset (effective_addr, r1, ar1,
+                        effective_addr2, r2, ar2, regs);
 
         break;
 
@@ -5580,45 +5401,9 @@ static BYTE module[8];                  /* Module name               */
     /* PACK     Pack                                            [SS] */
     /*---------------------------------------------------------------*/
 
-        /* Exchange the digits in the rightmost byte */
-        effective_addr += r1;
-        effective_addr2 += r2;
-        sbyte = vfetchb ( effective_addr2, ar2, regs );
-        dbyte = (sbyte << 4) | (sbyte >> 4);
-        vstoreb ( dbyte, effective_addr, ar1, regs );
-
-        /* Process remaining bytes from right to left */
-        for ( i = r1, j = r2; i > 0; i-- )
-        {
-            /* Fetch source bytes from second operand */
-            if ( j-- > 0 )
-            {
-                sbyte = vfetchb ( --effective_addr2, ar2, regs );
-                dbyte = sbyte & 0x0F;
-
-                if ( j-- > 0 )
-                {
-                    effective_addr2 &=
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-                    sbyte = vfetchb ( --effective_addr2, ar2, regs );
-                    dbyte |= sbyte << 4;
-                }
-            }
-            else
-            {
-                dbyte = 0;
-            }
-
-            /* Store packed digits at first operand address */
-            vstoreb ( dbyte, --effective_addr, ar1, regs );
-
-            /* Wraparound according to addressing mode */
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            effective_addr2 &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-        } /* end for(i) */
+        /* Pack second operand into first operand */
+        zoned_to_packed (effective_addr, r1, ar1,
+                        effective_addr2, r2, ar2, regs);
 
         break;
 
@@ -5627,45 +5412,9 @@ static BYTE module[8];                  /* Module name               */
     /* UNPK     Unpack                                          [SS] */
     /*---------------------------------------------------------------*/
 
-        /* Exchange the digits in the rightmost byte */
-        effective_addr += r1;
-        effective_addr2 += r2;
-        sbyte = vfetchb ( effective_addr2, ar2, regs );
-        dbyte = (sbyte << 4) | (sbyte >> 4);
-        vstoreb ( dbyte, effective_addr, ar1, regs );
-
-        /* Process remaining bytes from right to left */
-        for ( i = r1, j = r2; i > 0; i-- )
-        {
-            /* Fetch source byte from second operand */
-            if ( j-- > 0 )
-            {
-                sbyte = vfetchb ( --effective_addr2, ar2, regs );
-                dbyte = (sbyte & 0x0F) | 0xF0;
-                obyte = (sbyte >> 4) | 0xF0;
-            }
-            else
-            {
-                dbyte = 0xF0;
-                obyte = 0xF0;
-            }
-
-            /* Store unpacked bytes at first operand address */
-            vstoreb ( dbyte, --effective_addr, ar1, regs );
-            if ( --i > 0 )
-            {
-                effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-                vstoreb ( obyte, --effective_addr, ar1, regs );
-            }
-
-            /* Wraparound according to addressing mode */
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            effective_addr2 &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-        } /* end for(i) */
+        /* Unpack second operand into first operand */
+        packed_to_zoned (effective_addr, r1, ar1,
+                        effective_addr2, r2, ar2, regs);
 
         break;
 
@@ -5753,7 +5502,6 @@ static BYTE module[8];                  /* Module name               */
     default:
         program_check (PGM_OPERATION_EXCEPTION);
     terminate:
-    suppress:
         break;
     } /* end switch(opcode) */
 

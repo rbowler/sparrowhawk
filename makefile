@@ -1,17 +1,20 @@
 #
-# Makefile for Hercules ESA/390 emulator
+# Makefile for Hercules S/370 and ESA/390 emulator
+#
+# Syntax:
+#	make ARCH=370
+#	make ARCH=390
 #
 
-VERSION  = 1.29
+VERSION  = 1.30
 
-CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION)
+CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=$(ARCH)
 #	   -march=pentium -malign-double -mwide-multiply
 LFLAGS	 = -lpthread
 
 all:	   cpu ipl dasdinit
 
-TARFILES = makefile *.c *.h hercules.cnf cpu ipl dasdinit \
-	   gentape.jcl
+TARFILES = makefile *.c *.h hercules.cnf gentape.jcl
 
 ALL_OBJS = config.o panel.o cpu.o assist.o dat.o decimal.o \
 	   block.o stack.o xmem.o \
@@ -81,5 +84,3 @@ clean:
 tar:
 	tar cvzf hercules-$(VERSION).tar.gz $(TARFILES)
 
-fdtar:
-	tar cvf /dev/fd0 $(TARFILES)

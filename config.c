@@ -112,7 +112,8 @@ static int read_config (BYTE *fname, FILE *fp)
 /*-------------------------------------------------------------------*/
 static void sighup_handler (int signo)
 {
-    //printf ("config: sighup handler entered\n"); /*debug*/
+//  printf ("config: sighup handler entered for thread %lu\n",/*debug*/
+//          thread_id());                                     /*debug*/
     return;
 } /* end function sighup_handler */
 
@@ -121,7 +122,19 @@ static void sighup_handler (int signo)
 /*-------------------------------------------------------------------*/
 static void sigint_handler (int signo)
 {
-    //printf ("config: sigint handler entered\n"); /*debug*/
+//  printf ("config: sigint handler entered for thread %lu\n",/*debug*/
+//          thread_id());                                     /*debug*/
+
+    /* Ignore signal unless presented on console thread */
+    if (thread_id() != sysblk.cnsltid)
+        return;
+
+    /* Exit if previous SIGINT request was not actioned */
+    if (sysblk.sigintreq)
+        exit(1);
+
+    /* Set SIGINT request pending flag */
+    sysblk.sigintreq = 1;
 
     /* Activate instruction stepping */
     sysblk.inststep = 1;

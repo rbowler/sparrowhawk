@@ -201,6 +201,25 @@ int     m, n, x, newlen;
 
 
 /*-------------------------------------------------------------------*/
+/* SUBROUTINE TO TRANSLATE A NULL-TERMINATED STRING TO EBCDIC        */
+/*-------------------------------------------------------------------*/
+static BYTE *
+translate_to_ebcdic (BYTE *str)
+{
+int     i;                              /* Array subscript           */
+BYTE    c;                              /* Character work area       */
+
+    for (i = 0; str[i] != '\0'; i++)
+    {
+        c = str[i];
+        str[i] = (isprint(c) ? ascii_to_ebcdic[c] : SPACE);
+    }
+
+    return str;
+} /* end function translate_to_ebcdic */
+
+
+/*-------------------------------------------------------------------*/
 /* SUBROUTINE TO SEND A DATA PACKET TO THE CLIENT                    */
 /*-------------------------------------------------------------------*/
 static int
@@ -742,7 +761,9 @@ char                   *clientname;     /* Addr of client hostname   */
 BYTE                    class;          /* D=3270, K=3215/1052       */
 BYTE                    model;          /* 3270 model (2,3,4,5,X)    */
 BYTE                    extended;       /* Extended attributes (Y,N) */
-BYTE                    buf[512];       /* Message buffer            */
+BYTE                    buf[200];       /* Message buffer            */
+BYTE                    conmsg[80];     /* Connection message        */
+BYTE                    rejmsg[80];     /* Rejection message         */
 
     /* Load the socket address from the thread parameter */
     csock = *csockp;
@@ -766,13 +787,6 @@ BYTE                    buf[512];       /* Message buffer            */
 
     TNSDEBUG(1, "Received connection from %s (%s)\n",
             clientip, clientname);
-
-    /* Send connection message to client */
-    len = sprintf (buf,
-                "Connected to Hercules %s at %s (%s %s)\r\n",
-                MSTRING(VERSION), hostinfo.nodename,
-                hostinfo.sysname, hostinfo.release);
-    rc = send_packet (csock, buf, len, NULL);
 
     /* Negotiate telnet parameters */
     rc = negotiate (csock, &class, &model, &extended);
@@ -812,17 +826,65 @@ BYTE                    buf[512];       /* Message buffer            */
 
     } /* end for(dev) */
 
+    /* Build connection message for client */
+    len = sprintf (conmsg,
+                "Hercules %s version %s at %s (%s %s)",
+                ARCHITECTURE_NAME, MSTRING(VERSION),
+                hostinfo.nodename, hostinfo.sysname,
+                hostinfo.release);
+
+    if (dev != NULL)
+        len += sprintf (conmsg + len, " device %4.4X", dev->devnum);
+
     /* Reject the connection if no available console device */
     if (dev == NULL)
     {
-        len = sprintf (buf,
-                "Connection rejected, no available %s device\n",
+        /* Build the rejection message */
+        len = sprintf (rejmsg,
+                "Connection rejected, no available %s device",
                 (class=='D' ? "3270" : "1052 or 3215"));
-        rc = send_packet (csock, buf, len, NULL);
-        TNSDEBUG(1, "%s", buf);
+        TNSDEBUG(1, "%s\n", rejmsg);
+
+        /* Send connection rejection message to client */
+        if (class == 'D')
+        {
+            len = sprintf (buf,
+                        "\xF5\x40\x11\x40\x40\x1D\x60%s"
+                        "\x11\xC1\x50\x1D\x60%s",
+                        translate_to_ebcdic(conmsg),
+                        translate_to_ebcdic(rejmsg));
+            buf[len++] = IAC;
+            buf[len++] = EOR_MARK;
+        }
+        else
+        {
+            len = sprintf (buf, "%s\r\n%s\r\n", conmsg, rejmsg);
+        }
+        rc = send_packet (csock, buf, len, "CONNECTION RESPONSE");
+
+        /* Close the connection and terminate the thread */
+        sleep (5);
         close (csock);
         return NULL;
     }
+
+    TNSDEBUG(1, "Client %s connected to %4.4X device %4.4X\n",
+            clientip, dev->devtype, dev->devnum);
+
+    /* Send connection message to client */
+    if (class == 'D')
+    {
+        len = sprintf (buf,
+                    "\xF5\x40\x11\x40\x40\x1D\x60%s",
+                    translate_to_ebcdic(conmsg));
+        buf[len++] = IAC;
+        buf[len++] = EOR_MARK;
+    }
+    else
+    {
+        len = sprintf (buf, "%s\r\n", conmsg);
+    }
+    rc = send_packet (csock, buf, len, "CONNECTION RESPONSE");
 
     /* Signal IPL thread that a console is now available */
     obtain_lock (&sysblk.conslock);
@@ -916,10 +978,9 @@ BYTE                    unitstat;       /* Status after receive data */
         /* Include the socket for each connected console */
         for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
         {
-            if ((dev->devtype == 0x3270
-                    || dev->devtype == 0x1052
-                    || dev->devtype == 0x3215)
-                && dev->connected)
+            if (dev->console
+                && dev->connected
+                && dev->busy == 0)
             {
                 FD_SET (dev->csock, &readset);
                 if (dev->csock > maxfd) maxfd = dev->csock;
@@ -968,9 +1029,7 @@ BYTE                    unitstat;       /* Status after receive data */
             obtain_lock (&dev->lock);
 
             /* Test for connected console with data available */
-            if ((dev->devtype == 0x3270
-                    || dev->devtype == 0x1052
-                    || dev->devtype == 0x3215)
+            if (dev->console
                 && dev->connected
                 && FD_ISSET (dev->csock, &readset)
                 && dev->busy == 0)
@@ -1068,6 +1127,9 @@ BYTE                    unitstat;       /* Status after receive data */
 /*-------------------------------------------------------------------*/
 int loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 {
+    /* Indicate that this is a console device */
+    dev->console = 1;
+
     /* Set number of sense bytes */
     dev->numsense = 1;
 
@@ -1075,7 +1137,7 @@ int loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     dev->bufsize = BUFLEN_3270;
 
     /* Activate CCW tracing */
-    dev->ccwtrace = 1;
+//  dev->ccwtrace = 1;
 
     return 0;
 } /* end function loc3270_init_handler */
@@ -1086,6 +1148,8 @@ int loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 /*-------------------------------------------------------------------*/
 int constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 {
+    /* Indicate that this is a console device */
+    dev->console = 1;
 
     /* Set number of sense bytes */
     dev->numsense = 1;
@@ -1097,7 +1161,7 @@ int constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     dev->bufsize = LINE_LENGTH;
 
     /* Activate I/O tracing */
-    dev->ccwtrace = 1;
+//  dev->ccwtrace = 1;
 
     return 0;
 } /* end function constty_init_handler */
@@ -1107,8 +1171,8 @@ int constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 /* EXECUTE A 3270 CHANNEL COMMAND WORD                               */
 /*-------------------------------------------------------------------*/
 void loc3270_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
-        BYTE chained, U16 count, BYTE prevcode, BYTE *iobuf,
-        BYTE *more, BYTE *unitstat, U16 *residual )
+        BYTE chained, U16 count, BYTE prevcode, int ccwseq,
+        BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual )
 {
 int             rc;                     /* Return code               */
 int             num;                    /* Number of bytes to copy   */
@@ -1117,7 +1181,7 @@ BYTE            wcc;                    /* tn3270 write control char */
 BYTE            buf[4096];              /* tn3270 write buffer       */
 
     /* Unit check with intervention required if no client connected */
-    if (dev->connected == 0)
+    if (dev->connected == 0 && !IS_CCW_SENSE(code))
     {
         dev->sense[0] = SENSE_IR;
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -1268,6 +1332,25 @@ BYTE            buf[4096];              /* tn3270 write buffer       */
 
         break;
 
+    case 0x04:
+    /*---------------------------------------------------------------*/
+    /* SENSE                                                         */
+    /*---------------------------------------------------------------*/
+        /* Calculate residual byte count */
+        num = (count < dev->numsense) ? count : dev->numsense;
+        *residual = count - num;
+        if (count < dev->numsense) *more = 1;
+
+        /* Copy device sense bytes to channel I/O buffer */
+        memcpy (iobuf, dev->sense, num);
+
+        /* Clear the device sense bytes */
+        memset (dev->sense, 0, sizeof(dev->sense));
+
+        /* Return unit status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
     default:
     /*---------------------------------------------------------------*/
     /* INVALID OPERATION                                             */
@@ -1285,8 +1368,8 @@ BYTE            buf[4096];              /* tn3270 write buffer       */
 /* EXECUTE A 1052/3215 CHANNEL COMMAND WORD                          */
 /*-------------------------------------------------------------------*/
 void constty_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
-        BYTE chained, U16 count, BYTE prevcode, BYTE *iobuf,
-        BYTE *more, BYTE *unitstat, U16 *residual )
+        BYTE chained, U16 count, BYTE prevcode, int ccwseq,
+        BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual )
 {
 int     rc;                             /* Return code               */
 int     len;                            /* Length of data            */
@@ -1295,7 +1378,7 @@ BYTE    c;                              /* Print character           */
 BYTE    stat;                           /* Unit status               */
 
     /* Unit check with intervention required if no client connected */
-    if (dev->connected == 0)
+    if (dev->connected == 0 && !IS_CCW_SENSE(code))
     {
         dev->sense[0] = SENSE_IR;
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -1430,6 +1513,25 @@ BYTE    stat;                           /* Unit status               */
     /*---------------------------------------------------------------*/
         rc = send_packet (dev->csock, "\a", 1, NULL);
         *residual = 0;
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0x04:
+    /*---------------------------------------------------------------*/
+    /* SENSE                                                         */
+    /*---------------------------------------------------------------*/
+        /* Calculate residual byte count */
+        num = (count < dev->numsense) ? count : dev->numsense;
+        *residual = count - num;
+        if (count < dev->numsense) *more = 1;
+
+        /* Copy device sense bytes to channel I/O buffer */
+        memcpy (iobuf, dev->sense, num);
+
+        /* Clear the device sense bytes */
+        memset (dev->sense, 0, sizeof(dev->sense));
+
+        /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;
         break;
 

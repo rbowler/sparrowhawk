@@ -27,7 +27,7 @@
 #define CKDMASK_AAUTH           0x06    /* Access auth bits...       */
 #define CKDMASK_AAUTH_NORMAL    0x00    /* ...normal authorization   */
 #define CKDMASK_AAUTH_DSF       0x02    /* ...device support auth    */
-#define CKDMASK_AAUTH_OLT       0x04    /* ...diagnostic auth        */
+#define CKDMASK_AAUTH_DIAG      0x04    /* ...diagnostic auth        */
 #define CKDMASK_AAUTH_DSFNCR    0x06    /* ...device support with no
                                               correction or retry    */
 #define CKDMASK_PCI_FETCH       0x01    /* PCI fetch mode            */
@@ -564,7 +564,8 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
         dev->ckdcurkl = rechdr->klen;
         dev->ckdcurdl = (rechdr->dlen[0] << 8) + rechdr->dlen[1];
 
-        DEVTRACE("ckddasd: record %d kl %d dl %d\n",
+        DEVTRACE("ckddasd: cyl %d head %d record %d kl %d dl %d\n",
+                dev->ckdcurcyl, dev->ckdcurhead,
                 dev->ckdcurrec, dev->ckdcurkl, dev->ckdcurdl);
 
         /* Skip record zero if user data record required */
@@ -797,8 +798,8 @@ int             skiplen;                /* Number of bytes to skip   */
     /* Pad the I/O buffer with zeroes if necessary */
     while (len < ckdlen) buf[len++] = '\0';
 
-    DEVTRACE("ckddasd: writing record %d kl %d dl %d\n",
-            recnum, keylen, datalen);
+    DEVTRACE("ckddasd: writing cyl %d head %d record %d kl %d dl %d\n",
+            dev->ckdcurcyl, dev->ckdcurhead, recnum, keylen, datalen);
 
     /* Write count key and data */
     rc = write (dev->fd, buf, ckdlen);
@@ -966,8 +967,8 @@ int             skiplen;                /* Number of bytes to skip   */
 /*-------------------------------------------------------------------*/
 /* Execute a Channel Command Word                                    */
 /*-------------------------------------------------------------------*/
-void ckddasd_execute_ccw ( DEVBLK *dev, BYTE code,
-        BYTE flags, BYTE chained, U16 count, BYTE prevcode,
+void ckddasd_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
+        BYTE chained, U16 count, BYTE prevcode, int ccwseq,
         BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual )
 {
 int             rc;                     /* Return code               */
@@ -1619,6 +1620,49 @@ BYTE            key[256];               /* Key for search operations */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
+    case 0x13:
+    /*---------------------------------------------------------------*/
+    /* RECALIBRATE                                                   */
+    /*---------------------------------------------------------------*/
+        /* Command reject if within the domain of a Locate Record */
+        if (dev->ckdlocat)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* File protected if the file mask does not allow recalibrate,
+           or if the file mask specifies diagnostic authorization */
+        if ((dev->ckdfmask & CKDMASK_SKCTL) != CKDMASK_SKCTL_ALLSKR
+            || (dev->ckdfmask & CKDMASK_AAUTH) == CKDMASK_AAUTH_DIAG)
+        {
+            ckd_build_sense (dev, 0, SENSE1_FP, 0, 0, 0);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* File protected if cyl 0 head 0 is outside defined extent */
+        if (dev->ckdxtdef
+            && (dev->ckdxbcyl > 0 || dev->ckdxbhead > 0))
+        {
+            ckd_build_sense (dev, 0, SENSE1_FP, 0, 0, 0);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Seek to cylinder 0 head 0 */
+        rc = ckd_seek (dev, 0, 0, &trkhdr, unitstat);
+        if (rc < 0) break;
+
+        /* Set command processed flag */
+        dev->ckdrecal = 1;
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
     case 0x1F:
     /*---------------------------------------------------------------*/
     /* SET FILE MASK                                                 */
@@ -1902,7 +1946,7 @@ BYTE            key[256];               /* Key for search operations */
         *residual = count - num;
 
         /* Compare CCHH portion of track header with search argument */
-        rc = memcmp(&trkhdr+1, iobuf, num);
+        rc = memcmp(&(trkhdr.cyl), iobuf, num);
 
         /* Return status modifier if compare result matches */
         if (rc == 0)
@@ -2647,6 +2691,7 @@ BYTE            key[256];               /* Key for search operations */
            or indeed if preceded by any command at all apart from
            Suspend Multipath Reconnection */
         if (dev->ckdlocat
+            || ccwseq > 1
             || (chained && prevcode != 0x5B))
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
@@ -2657,6 +2702,19 @@ BYTE            key[256];               /* Key for search operations */
 
         /* Perform the operation of a sense command */
         goto sense;
+
+    case 0x04:
+    /*---------------------------------------------------------------*/
+    /* SENSE                                                         */
+    /*---------------------------------------------------------------*/
+        /* Command reject if within the domain of a Locate Record */
+        if (dev->ckdlocat)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
 
     sense:
         /* Calculate residual byte count */
@@ -2670,6 +2728,31 @@ BYTE            key[256];               /* Key for search operations */
         /* Clear the device sense bytes */
         memset (dev->sense, 0, sizeof(dev->sense));
 
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0xE4:
+    /*---------------------------------------------------------------*/
+    /* SENSE ID                                                      */
+    /*---------------------------------------------------------------*/
+        /* Command reject if within the domain of a Locate Record */
+        if (dev->ckdlocat)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Calculate residual byte count */
+        num = (count < dev->numdevid) ? count : dev->numdevid;
+        *residual = count - num;
+        if (count < dev->numdevid) *more = 1;
+
+        /* Copy device identifier bytes to channel I/O buffer */
+        memcpy (iobuf, dev->devid, num);
+
+        /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;
         break;
 

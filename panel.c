@@ -258,6 +258,9 @@ BYTE   *onoroff;                        /* "on" or "off"             */
         printf ("Enter panel command or press enter to continue\n");
         fflush (stdout);
 
+        /* Indicate SIGINT request accepted */
+        sysblk.sigintreq = 0;
+
         /* Read command from console */
         fgets (buf, sizeof(buf), stdin);
         if (buf[strlen(buf)-1] == '\n') buf[strlen(buf)-1] = '\0';

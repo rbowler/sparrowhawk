@@ -201,8 +201,8 @@ BYTE    c;                              /* Input character           */
 /* Execute a Channel Command Word                                    */
 /*-------------------------------------------------------------------*/
 void cardrdr_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
-        BYTE chained, U16 count, BYTE prevcode, BYTE *iobuf,
-        BYTE *more, BYTE *unitstat, U16 *residual )
+        BYTE chained, U16 count, BYTE prevcode, int ccwseq,
+        BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual )
 {
 int     rc;                             /* Return code               */
 int     num;                            /* Number of bytes to move   */
@@ -231,7 +231,6 @@ int     num;                            /* Number of bytes to move   */
     /*---------------------------------------------------------------*/
     /* READ                                                          */
     /*---------------------------------------------------------------*/
-
         /* Read next card if not data-chained from previous CCW */
         if ((chained & CCW_FLAGS_CD) == 0)
         {
@@ -271,6 +270,25 @@ int     num;                            /* Number of bytes to move   */
     /* CONTROL NO-OPERATION                                          */
     /*---------------------------------------------------------------*/
         *residual = 0;
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0x04:
+    /*---------------------------------------------------------------*/
+    /* SENSE                                                         */
+    /*---------------------------------------------------------------*/
+        /* Calculate residual byte count */
+        num = (count < dev->numsense) ? count : dev->numsense;
+        *residual = count - num;
+        if (count < dev->numsense) *more = 1;
+
+        /* Copy device sense bytes to channel I/O buffer */
+        memcpy (iobuf, dev->sense, num);
+
+        /* Clear the device sense bytes */
+        memset (dev->sense, 0, sizeof(dev->sense));
+
+        /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;
         break;
 

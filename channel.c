@@ -3,7 +3,7 @@
 
 /*-------------------------------------------------------------------*/
 /* This module contains the channel subsystem functions for the      */
-/* Hercules ESA/390 emulator.                                        */
+/* Hercules S/370 and ESA/390 emulator.                              */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -29,7 +29,7 @@ BYTE *a;
 } /* end function display_data */
 
 /*-------------------------------------------------------------------*/
-/* DISPLAY CCW AND DATA                                              */
+/* DISPLAY CHANNEL COMMAND WORD AND DATA                             */
 /*-------------------------------------------------------------------*/
 static void display_ccw (DEVBLK *dev, BYTE ccw[], U32 addr)
 {
@@ -47,7 +47,7 @@ static void display_ccw (DEVBLK *dev, BYTE ccw[], U32 addr)
 
 #ifdef FEATURE_S370_CHANNEL
 /*-------------------------------------------------------------------*/
-/* DISPLAY CSW                                                       */
+/* DISPLAY CHANNEL STATUS WORD                                       */
 /*-------------------------------------------------------------------*/
 static void display_csw (DEVBLK *dev)
 {
@@ -62,7 +62,7 @@ static void display_csw (DEVBLK *dev)
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
 /*-------------------------------------------------------------------*/
-/* DISPLAY SCSW                                                      */
+/* DISPLAY SUBCHANNEL STATUS WORD                                    */
 /*-------------------------------------------------------------------*/
 static void display_scsw (DEVBLK *dev)
 {
@@ -277,6 +277,12 @@ int start_io (DEVBLK *dev, U32 ccwaddr, int ccwfmt, BYTE ccwkey,
     /* Set the device busy indicator */
     dev->busy = 1;
 
+    /* Signal console thread to redrive select */
+    if (dev->console)
+    {
+        signal_thread (sysblk.cnsltid, SIGHUP);
+    }
+
     /* Release the device lock */
     release_lock (&dev->lock);
 
@@ -321,10 +327,13 @@ BYTE    tic = 1;                        /* Previous CCW was a TIC    */
 BYTE    chain = 1;                      /* 1=Chain to next CCW       */
 BYTE    chained = 0;                    /* Command chain and data chain
                                            bits from previous CCW    */
+BYTE    prev_chained = 0;               /* Chaining flags from CCW
+                                           preceding the data chain  */
 BYTE    prevcode = 0;                   /* Previous CCW opcode       */
 BYTE    tracethis = 0;                  /* 1=Trace this CCW only     */
 DEVXF  *devexec;                        /* -> Execute CCW function   */
-int     num;                            /* Number of bytes to move   */
+int     ccwseq = 0;                     /* CCW sequence number       */
+int     bufpos = 0;                     /* Position in I/O buffer    */
 BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
     /* Point to the device handler for this device */
@@ -429,12 +438,21 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         }
 
         /* Channel program check if unsupported flags */
-        if (flags & (CCW_FLAGS_PCI | CCW_FLAGS_SUSP))
+        if (flags & CCW_FLAGS_SUSP)
         {
-            printf ("channel: Unsupported PCI/SUSP for device %4.4X\n",
+            printf ("channel: Unsupported SUSP for device %4.4X\n",
                     dev->devnum);
             chanstat = CSW_PROGC;
             break;
+        }
+
+        /* Present I/O interrupt if PCI flag is set */
+        if (flags & CCW_FLAGS_PCI)
+        {
+            printf ("channel: PCI ignored for device %4.4X\n",
+                    dev->devnum);
+//          chanstat = CSW_PCI;
+            /*INCOMPLETE*/
         }
 
         /* Channel program check if invalid count */
@@ -449,9 +467,44 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
            from main storage into channel buffer */
         if (IS_CCW_WRITE(code) || IS_CCW_CONTROL(code))
         {
+            /* Channel program check if data exceeds buffer size */
+            if (bufpos + count > sizeof(iobuf))
+            {
+                chanstat = CSW_PROGC;
+                break;
+            }
+
+            /* Copy data into channel buffer */
             copy_iobuf (code, flags, addr, count,
-                        ccwkey, iobuf, &chanstat);
+                        ccwkey, iobuf + bufpos, &chanstat);
             if (chanstat != 0) break;
+
+            /* Update number of bytes in channel buffer */
+            bufpos += count;
+
+            /* If data chaining then move data from all CCWs in
+               chain before passing buffer to device handler */
+            if (flags & CCW_FLAGS_CD)
+            {
+                /* If this is the first CCW in the data chain, then
+                   save the chaining flags from the previous CCW */
+                if ((chained & CCW_FLAGS_CD) == 0)
+                    prev_chained = chained;
+
+                /* Process next CCW in data chain */
+                chained = CCW_FLAGS_CD;
+                chain = 1;
+                continue;
+            }
+
+            /* If this is the last CCW in the data chain, then
+               restore the chaining flags from the previous CCW */
+            if (chained & CCW_FLAGS_CD)
+                chained = prev_chained;
+
+            /* Reset the total count at end of data chain */
+            count = bufpos;
+            bufpos = 0;
         }
 
         /* Set chaining flag */
@@ -461,74 +514,18 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         residual = count;
         more = 0;
 
-        /* Process depending on CCW opcode */
-        if (code == 0x04) {
-            /*-------------------------------------------------------*/
-            /* Basic SENSE                                           */
-            /*-------------------------------------------------------*/
-
-            /* Obtain the device lock */
-            obtain_lock (&dev->lock);
-
-            /* Calculate residual byte count */
-            num = (count < dev->numsense) ? count : dev->numsense;
-            residual = count - num;
-            if (count < dev->numsense) more = 1;
-
-            /* Copy device sense bytes to channel I/O buffer */
-            memcpy (iobuf, dev->sense, num);
-
-            /* Clear the device sense bytes */
-            memset (dev->sense, 0, sizeof(dev->sense));
-
-            /* Release the device lock */
-            release_lock (&dev->lock);
-
-            /* Set unit status */
-            unitstat = CSW_CE | CSW_DE;
-
-        }
-
-        else if (code == 0xE4) {
-            /*-------------------------------------------------------*/
-            /* SENSE ID                                              */
-            /*-------------------------------------------------------*/
-
-            /* Calculate residual byte count */
-            num = (count < dev->numdevid) ? count : dev->numdevid;
-            residual = count - num;
-            if (count < dev->numdevid) more = 1;
-
-            /* Copy device identifier bytes to channel I/O buffer */
-            memcpy (iobuf, dev->devid, num);
-
-            /* Set unit status */
-            unitstat = CSW_CE | CSW_DE;
-
-        }
-
-        else if (IS_CCW_WRITE(code) || IS_CCW_READ(code)
+        /* Channel program check if invalid CCW opcode */
+        if (!(IS_CCW_WRITE(code) || IS_CCW_READ(code)
                 || IS_CCW_CONTROL(code) || IS_CCW_SENSE(code)
-                || IS_CCW_RDBACK(code)) {
-            /*-------------------------------------------------------*/
-            /* WRITE, READ, CONTROL, other SENSE, and READ BACKWARD  */
-            /*-------------------------------------------------------*/
-
-            /* Pass the CCW to the device handler for execution */
-            (*devexec) (dev, code, flags, chained, count, prevcode,
-                        iobuf, &more, &unitstat, &residual);
-
+                || IS_CCW_RDBACK(code)))
+        {
+            chanstat = CSW_PROGC;
+            break;
         }
 
-        else {
-            /*-------------------------------------------------------*/
-            /* INVALID OPERATION                                     */
-            /*-------------------------------------------------------*/
-
-                chanstat = CSW_PROGC;
-                chain = 0;
-
-        } /* end if(code) */
+        /* Pass the CCW to the device handler for execution */
+        (*devexec) (dev, code, flags, chained, count, prevcode,
+                    ccwseq, iobuf, &more, &unitstat, &residual);
 
         /* For READ, SENSE, and READ BACKWARD operations, copy data
            from channel buffer to main storage, unless SKIP is set */
@@ -554,17 +551,18 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         /* Force tracing for this CCW if any unusual status occurred */
         if (chanstat != 0
             || (unitstat & ~(CSW_SM | CSW_UX)) != (CSW_CE | CSW_DE))
+        {
+            /* Trace the CCW if not already done */
+            if (!(dev->ccwtrace || dev->ccwstep || tracethis))
+                display_ccw (dev, ccw, addr);
+
+            /* Activate tracing for this CCW chain only */
             tracethis = 1;
-        else
-            tracethis = 0;
+        }
 
         /* Trace the results of CCW execution */
         if (dev->ccwtrace || dev->ccwstep || tracethis)
         {
-            /* Trace the CCW if not already done */
-            if (!(dev->ccwtrace || dev->ccwstep))
-                display_ccw (dev, ccw, addr);
-
             /* Display status and residual byte count */
             printf ("%4.4X:Stat=%2.2X%2.2X Count=%4.4X ",
                     dev->devnum, unitstat, chanstat, residual);
@@ -606,6 +604,10 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         /* Update the chaining flags */
         chained = flags & (CCW_FLAGS_CD | CCW_FLAGS_CC);
 
+        /* Update the CCW sequence number unless data chained */
+        if ((flags & CCW_FLAGS_CD) == 0)
+            ccwseq++;
+
     } /* end while(chain) */
 
 #ifdef FEATURE_S370_CHANNEL
@@ -639,6 +641,12 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
     /* Set the interrupt pending flag for this device */
     dev->busy = 0;
     dev->pending = 1;
+
+    /* Signal console thread to redrive select */
+    if (dev->console)
+    {
+        signal_thread (sysblk.cnsltid, SIGHUP);
+    }
 
     /* Signal waiting CPUs that an interrupt is pending */
     obtain_lock (&sysblk.intlock);
@@ -729,9 +737,10 @@ PSA    *psa;                            /* -> Prefixed storage area  */
         dev->pending = 0;
 
         /* Signal console thread to redrive select */
-        if (dev->devtype == 0x3270
-            || dev->devtype == 0x3215 || dev->devtype == 0x1052)
+        if (dev->console)
+        {
             signal_thread (sysblk.cnsltid, SIGHUP);
+        }
     }
     else
     {
@@ -799,9 +808,10 @@ int     cc;                             /* Condition code            */
         dev->scsw.flag3 &= ~(SCSW3_SC);
 
         /* Signal console thread to redrive select */
-        if (dev->devtype == 0x3270
-            || dev->devtype == 0x3215 || dev->devtype == 0x1052)
+        if (dev->console)
+        {
             signal_thread (sysblk.cnsltid, SIGHUP);
+        }
     }
     else
     {
@@ -933,9 +943,10 @@ DEVBLK *dev;                            /* -> Device control block   */
     dev->busy = 0;
 
     /* Signal console thread to redrive select */
-    if (dev->devtype == 0x3270
-        || dev->devtype == 0x3215 || dev->devtype == 0x1052)
+    if (dev->console)
+    {
         signal_thread (sysblk.cnsltid, SIGHUP);
+    }
 
     /* Release the device lock */
     release_lock (&dev->lock);

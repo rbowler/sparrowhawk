@@ -48,8 +48,9 @@ PSW     psw;
 REGS   *regs;
 
     /* Display the version identifier */
-    printf ("Hercules %s (c)Copyright Roger Bowler, 1994-1999\n",
-            MSTRING(VERSION));
+    printf ("Hercules %s version %s "
+            "(c)Copyright Roger Bowler, 1994-1999\n",
+            ARCHITECTURE_NAME, MSTRING(VERSION));
 
     /* Check that instruction arguments are present */
     if (argc < 2) {
