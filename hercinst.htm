@@ -12,14 +12,14 @@ Installing and Operating Hercules</TITLE>
 <h2>Installation Procedure</h2>
 <ol>
 <li>Download the distribution file
-<a href="hercules/hercules-1.50.tar.gz">hercules-1.50.tar.gz</a>
+<a href="hercules/hercules-1.51.tar.gz">hercules-1.51.tar.gz</a>
 <p><em>Note:</em> By downloading this file you agree to the terms
 of the <a href="herclic.htm">Hercules Public Licence</a>.
 <p>
 <li>Use these commands to unzip the distribution file:
 <pre>mkdir hercules
 cd hercules
-tar xvzf ../hercules-1.50.tar.gz</pre>
+tar xvzf ../hercules-1.51.tar.gz</pre>
 <li>Build the executable files:
 <br><code>make</code>
 </ol>
@@ -123,16 +123,19 @@ store   Store status
 quit    Terminate Hercules
 
 devlist Display configured devices
-devinit <em>xxxx</em> [ <em>args</em> ]
-        Reinitialize device xxxx by closing and reopening.
-        The <em>args</em> (if specified) override the arguments
-        specified in the configuration file for this device.
-        The device type cannot be changed and must not be specified.
-        Can be used for example to rewind a tape, to change the
-        file attached to a disk or tape device, or to load a new
-        card deck into a reader.
+devinit <em>xxxx</em> [ <em>args</em> ]  Reinitialize device xxxx
+
+.<em>text</em>   Enter an SCP command via the HMC system console
+!<em>text</em>   Enter an SCP priority message via the HMC system console
 </pre>
 
+<p>
+The <em>devinit</em> command can be used to to rewind a tape, to
+change the file attached to a disk or tape device, or to load a new
+card deck into a reader.
+The <em>args</em> (if specified) override the arguments
+specified in the configuration file for this device.
+The device type cannot be changed and must not be specified.
 <p>
 In single-step mode, pressing the enter key will advance to the
 next instruction.
@@ -150,7 +153,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 10 Feb 2000
+<p>Last updated 15 Feb 2000
 </BODY>
 </HTML>
 

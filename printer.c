@@ -28,7 +28,7 @@ int             rc;                     /* Return code               */
     /* Equipment check if error writing to printer file */
     if (rc < len)
     {
-        logmsg ("HHC413I Error writing to %s: %s\n",
+        logmsg ("HHC414I Error writing to %s: %s\n",
                 dev->filename,
                 (errno == 0 ? "incomplete": strerror(errno)));
         dev->sense[0] = SENSE_EC;
@@ -43,6 +43,7 @@ int             rc;                     /* Return code               */
 /*-------------------------------------------------------------------*/
 int printer_init_handler (DEVBLK *dev, int argc, BYTE *argv[])
 {
+int     i;                              /* Array subscript           */
 
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
@@ -61,6 +62,21 @@ int printer_init_handler (DEVBLK *dev, int argc, BYTE *argv[])
     dev->printrem = LINE_LENGTH;
     dev->diaggate = 0;
     dev->fold = 0;
+    dev->crlf = 0;
+
+    /* Process the driver arguments */
+    for (i = 1; i < argc; i++)
+    {
+        if (strcasecmp(argv[i], "crlf") == 0)
+        {
+            dev->crlf = 1;
+            continue;
+        }
+
+        fprintf (stderr, "HHC412I Invalid argument: %s\n",
+                argv[i]);
+        return -1;
+    }
 
     /* Set length of print buffer */
     dev->bufsize = LINE_LENGTH + 8;
@@ -79,7 +95,7 @@ int printer_init_handler (DEVBLK *dev, int argc, BYTE *argv[])
     dev->numdevid = 7;
 
     /* Activate I/O tracing */
-    dev->ccwtrace = 1;
+//  dev->ccwtrace = 1;
 
     return 0;
 } /* end function printer_init_handler */
@@ -112,7 +128,7 @@ BYTE            c;                      /* Print character           */
         if (rc < 0)
         {
             /* Handle open failure */
-            logmsg ("HHC412I Error opening file %s: %s\n",
+            logmsg ("HHC413I Error opening file %s: %s\n",
                     dev->filename, strerror(errno));
 
             /* Set unit check with intervention required */
@@ -137,28 +153,28 @@ BYTE            c;                      /* Print character           */
     /*---------------------------------------------------------------*/
     /* WRITE AND SPACE 1 LINE                                        */
     /*---------------------------------------------------------------*/
-        eor = "\r\n";
+        eor = dev->crlf ? "\r\n" : "\n";
         goto write;
 
     case 0x11:
     /*---------------------------------------------------------------*/
     /* WRITE AND SPACE 2 LINES                                       */
     /*---------------------------------------------------------------*/
-        eor = "\r\n\n";
+        eor = dev->crlf ? "\r\n\n" : "\n\n";
         goto write;
 
     case 0x19:
     /*---------------------------------------------------------------*/
     /* WRITE AND SPACE 3 LINES                                       */
     /*---------------------------------------------------------------*/
-        eor = "\r\n\n\n";
+        eor = dev->crlf ? "\r\n\n\n" : "\n\n\n";
         goto write;
 
     case 0x89:
     /*---------------------------------------------------------------*/
     /* WRITE AND SKIP TO CHANNEL 1                                   */
     /*---------------------------------------------------------------*/
-        eor = "\r\f";
+        eor = dev->crlf ? "\r\f" : "\f";
         goto write;
 
     write:
@@ -286,7 +302,8 @@ BYTE            c;                      /* Print character           */
     /*---------------------------------------------------------------*/
     /* SPACE 1 LINE IMMEDIATE                                        */
     /*---------------------------------------------------------------*/
-        write_buffer (dev, "\r\n", 2, unitstat);
+        eor = dev->crlf ? "\r\n" : "\n";
+        write_buffer (dev, eor, strlen(eor), unitstat);
         if (*unitstat != 0) break;
 
         *unitstat = CSW_CE | CSW_DE;
@@ -296,7 +313,8 @@ BYTE            c;                      /* Print character           */
     /*---------------------------------------------------------------*/
     /* SPACE 2 LINES IMMEDIATE                                       */
     /*---------------------------------------------------------------*/
-        write_buffer (dev, "\r\n\n", 3, unitstat);
+        eor = dev->crlf ? "\r\n\n" : "\n\n";
+        write_buffer (dev, eor, strlen(eor), unitstat);
         if (*unitstat != 0) break;
 
         *unitstat = CSW_CE | CSW_DE;
@@ -306,7 +324,8 @@ BYTE            c;                      /* Print character           */
     /*---------------------------------------------------------------*/
     /* SPACE 3 LINES IMMEDIATE                                       */
     /*---------------------------------------------------------------*/
-        write_buffer (dev, "\r\n\n\n", 4, unitstat);
+        eor = dev->crlf ? "\r\n\n\n" : "\n\n\n";
+        write_buffer (dev, eor, strlen(eor), unitstat);
         if (*unitstat != 0) break;
 
         *unitstat = CSW_CE | CSW_DE;
@@ -346,7 +365,8 @@ BYTE            c;                      /* Print character           */
     /*---------------------------------------------------------------*/
     /* SKIP TO CHANNEL 1 IMMEDIATE                                   */
     /*---------------------------------------------------------------*/
-        write_buffer (dev, "\r\f", 2, unitstat);
+        eor = dev->crlf ? "\r\f" : "\f";
+        write_buffer (dev, eor, strlen(eor), unitstat);
         if (*unitstat != 0) break;
 
         *unitstat = CSW_CE | CSW_DE;

@@ -16,6 +16,9 @@ static void external_interrupt (int code, REGS *regs)
 PSA    *psa;
 int     rc;
 
+    /* Set the main storage reference and change bits */
+    sysblk.storkeys[regs->pxr >> 12] |= (STORKEY_REF | STORKEY_CHANGE);
+
     /* Store the interrupt code in the PSW */
     regs->psw.intcode = code;
 
@@ -189,10 +192,8 @@ U16     cpuad;                          /* Originating CPU address   */
     if (sysblk.servsig
         && (regs->cr[0] & CR0_XM_SERVSIG))
     {
-        sysblk.servparm = APPLY_PREFIXING (sysblk.servparm, regs->pxr);
-
-        logmsg ("External interrupt: Service signal %8.8X\n",
-                sysblk.servparm);
+//      logmsg ("External interrupt: Service signal %8.8X\n",
+//              sysblk.servparm);
 
         /* Store service signal parameter at PSA+X'80' */
         psa = (PSA*)(sysblk.mainstor + regs->pxr);
@@ -240,8 +241,8 @@ struct  timeval tv;                     /* Structure for gettimeofday
                                            milliseconds              */
 
     /* Display thread started message on control panel */
-//  logmsg ("HHC610I Timer thread started: id=%ld\n",
-//          thread_id());
+    logmsg ("HHC610I Timer thread started: tid=%8.8lX, pid=%d\n",
+            thread_id(), getpid());
 
     while (1)
     {

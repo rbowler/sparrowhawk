@@ -5,7 +5,12 @@
 /* This module implements the CPU instruction execution function of  */
 /* the S/370 and ESA/390 architectures, as described in the manuals  */
 /* GA22-7000-03 System/370 Principles of Operation                   */
-/* SA22-7201-04 ESA/390 Principles of Operation                      */
+/* SA22-7201-06 ESA/390 Principles of Operation                      */
+/*-------------------------------------------------------------------*/
+
+/*-------------------------------------------------------------------*/
+/* Additional credits:                                               */
+/*      Floating point instructions by Peter Kuschnerus              */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -254,9 +259,7 @@ int load_psw (PSW *psw, BYTE *addr)
     }
 
     /* Check for wait state PSW */
-    if (psw->wait && (sysblk.insttrace || sysblk.inststep
-//      || psw->ia != 0
-        ))
+    if (psw->wait && (sysblk.insttrace || sysblk.inststep))
     {
         logmsg ("Wait state PSW loaded: "
                 "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
@@ -276,6 +279,9 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 int     rc;                             /* Return code               */
 U32     tea;                            /* Translation exception addr*/
 BYTE    excarid;                        /* Exception access reg id   */
+
+    /* Set the main storage reference and change bits */
+    sysblk.storkeys[regs->pxr >> 12] |= (STORKEY_REF | STORKEY_CHANGE);
 
     /* Save the translation exception address and AR identifier */
     tea = regs->tea;
@@ -399,6 +405,9 @@ static int psw_restart (REGS *regs)
 int     rc;                             /* Return code               */
 PSA    *psa;                            /* -> Prefixed storage area  */
 
+    /* Set the main storage reference and change bits */
+    sysblk.storkeys[regs->pxr >> 12] |= (STORKEY_REF | STORKEY_CHANGE);
+
     /* Zeroize the interrupt code in the PSW */
     regs->psw.intcode = 0;
 
@@ -453,10 +462,9 @@ DEVBLK *dev;                            /* -> device block for SIO   */
 U32     ccwaddr;                        /* CCW address for start I/O */
 U32     ioparm;                         /* I/O interruption parameter*/
 U16     xcode;                          /* Exception code            */
-#if defined(FEATURE_HALFWORD_IMMEDIATE) \
-    || defined(FEATURE_RELATIVE_BRANCH)
+#if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
 U16     h1, h2, h3;                     /* 16-bit operand values     */
-#endif /*FEATURE_HALFWORD_IMMEDIATE || FEATURE_RELATIVE_BRANCH*/
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
 #ifdef FEATURE_DUAL_ADDRESS_SPACE
 U32     asteo;                          /* Real address of ASTE      */
 U32     aste[16];                       /* ASN second table entry    */
@@ -799,6 +807,10 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
     /* SVC      Supervisor Call                                 [RR] */
     /*---------------------------------------------------------------*/
+
+        /* Set the main storage reference and change bits */
+        sysblk.storkeys[regs->pxr >> 12] |=
+                                (STORKEY_REF | STORKEY_CHANGE);
 
         /* Use the I-byte to set the SVC interruption code */
         regs->psw.intcode = ibyte;
@@ -1255,14 +1267,164 @@ static BYTE module[8];                  /* Module name               */
 
         break;
 
+#ifdef FEATURE_HEXADECIMAL_FLOATING_POINT
+    case 0x20:
+    /*---------------------------------------------------------------*/
+    /* LPDR     Load Positive Floating Point Long Register      [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Copy register contents, clear the sign bit */
+        regs->fpr[r1] = regs->fpr[r2] & 0x7FFFFFFF;
+        regs->fpr[r1+1] = regs->fpr[r2+1];
+
+        /* Set condition code */
+        regs->psw.cc =
+            ((regs->fpr[r1] & 0x00FFFFFF) || regs->fpr[r1+1]) ? 2 : 0;
+
+        break;
+
+    case 0x21:
+    /*---------------------------------------------------------------*/
+    /* LNDR     Load Negative Floating Point Long Register      [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Copy register contents, set the sign bit */
+        regs->fpr[r1] = regs->fpr[r2] | 0x80000000;
+        regs->fpr[r1+1] = regs->fpr[r2+1];
+
+        /* Set condition code */
+        regs->psw.cc =
+            ((regs->fpr[r1] & 0x00FFFFFF) || regs->fpr[r1+1]) ? 1 : 0;
+
+        break;
+
+    case 0x22:
+    /*---------------------------------------------------------------*/
+    /* LTDR     Load and Test Floating Point Long Register      [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Copy register contents */
+        regs->fpr[r1] = regs->fpr[r2];
+        regs->fpr[r1+1] = regs->fpr[r2+1];
+
+        /* Set condition code */
+        if ((regs->fpr[r1] & 0x00FFFFFF) || regs->fpr[r1+1]) {
+            regs->psw.cc = (regs->fpr[r1] & 0x80000000) ? 1 : 2;
+        } else
+            regs->psw.cc = 0;
+
+        break;
+
+    case 0x23:
+    /*---------------------------------------------------------------*/
+    /* LCDR     Load Complement Floating Point Long Register    [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Copy register contents, invert sign bit */
+        regs->fpr[r1] = regs->fpr[r2] ^ 0x80000000;
+        regs->fpr[r1+1] = regs->fpr[r2+1];
+
+        /* Set condition code */
+        if ((regs->fpr[r1] & 0x00FFFFFF) || regs->fpr[r1+1]) {
+            regs->psw.cc = (regs->fpr[r1] & 0x80000000) ? 1 : 2;
+        } else
+            regs->psw.cc = 0;
+
+        break;
+
+    case 0x24:
+    /*---------------------------------------------------------------*/
+    /* HDR      Halve Floating Point Long Register              [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        halve_float_long_reg (r1, r2, regs);
+
+        break;
+
+    case 0x25:
+    /*---------------------------------------------------------------*/
+    /* LRDR     Load Rounded Floating Point Long Register       [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0, 2, 4, or 6 */
+        /* or if R2 is not 0 or 4 */
+        if (( r1 & 9) || (r2 & 11)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        round_float_long_reg (r1, r2, regs);
+
+        break;
+
+    case 0x26:
+    /*---------------------------------------------------------------*/
+    /* MXR      Multiply Floating Point Extended Register       [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0 or 4 */
+        if (( r1 & 11) || (r2 & 11)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        multiply_float_ext_reg (r1, r2, regs);
+
+        break;
+
+    case 0x27:
+    /*---------------------------------------------------------------*/
+    /* MXDR     Multiply Floating Point Long to Extended Reg.   [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0 or 4 */
+        /* or if R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 11) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        multiply_float_long_to_ext_reg (r1, r2, regs);
+
+        break;
+
     case 0x28:
     /*---------------------------------------------------------------*/
     /* LDR      Load Floating Point Long Register               [RR] */
     /*---------------------------------------------------------------*/
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
-        if ( r1 & 1 || r1 > 6 || r2 & 1 || r2 > 6)
-        {
+        if (( r1 & 9) || (r2 & 9)) {
             program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
@@ -1273,21 +1435,250 @@ static BYTE module[8];                  /* Module name               */
 
         break;
 
+    case 0x29:
+    /*---------------------------------------------------------------*/
+    /* CDR      Compare Floating Point Long Register            [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        compare_float_long_reg (r1, r2, regs);
+
+        break;
+
+    case 0x2A:
+    /*---------------------------------------------------------------*/
+    /* ADR      Add Floating Point Long Register                [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        add_float_long_reg (r1, r2, regs);
+
+        break;
+
+    case 0x2B:
+    /*---------------------------------------------------------------*/
+    /* SDR      Subtract Floating Point Long Register           [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        subtract_float_long_reg (r1, r2, regs);
+
+        break;
+
+    case 0x2C:
+    /*---------------------------------------------------------------*/
+    /* MDR      Multiply Floating Point Long Register           [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        multiply_float_long_reg (r1, r2, regs);
+
+        break;
+
+    case 0x2D:
+    /*---------------------------------------------------------------*/
+    /* DDR      Divide Floating Point Long Register             [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        divide_float_long_reg (r1, r2, regs);
+
+        break;
+
+    case 0x2E:
+    /*---------------------------------------------------------------*/
+    /* AWR      Add Unnormalized Floating Point Long Register   [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        add_unnormal_float_long_reg (r1, r2, regs);
+
+        break;
+
+    case 0x2F:
+    /*---------------------------------------------------------------*/
+    /* SWR      Subtract Unnormalized Floating Point Long Reg.  [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        subtract_unnormal_float_long_reg (r1, r2, regs);
+
+        break;
+
+    case 0x30:
+    /*---------------------------------------------------------------*/
+    /* LPER     Load Positive Floating Point Short Register     [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Copy register contents, clear sign bit */
+        regs->fpr[r1] = regs->fpr[r2] & 0x7FFFFFFF;
+
+        /* Set condition code */
+        regs->psw.cc = (regs->fpr[r1] & 0x00FFFFFF) ? 2 : 0;
+
+        break;
+
+    case 0x31:
+    /*---------------------------------------------------------------*/
+    /* LNER     Load Negative Floating Point Short Register     [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Copy register contents, set sign bit */
+        regs->fpr[r1] = regs->fpr[r2] | 0x80000000;
+
+        /* Set condition code */
+        regs->psw.cc = (regs->fpr[r1] & 0x00FFFFFF) ? 1 : 0;
+
+        break;
+
+    case 0x32:
+    /*---------------------------------------------------------------*/
+    /* LTER     Load and Test Floating Point Short Register     [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Copy register contents */
+        regs->fpr[r1] = regs->fpr[r2];
+
+        /* Set condition code */
+        if (regs->fpr[r1] & 0x00FFFFFF) {
+            regs->psw.cc = (regs->fpr[r1] & 0x80000000) ? 1 : 2;
+        } else
+            regs->psw.cc = 0;
+
+        break;
+
+    case 0x33:
+    /*---------------------------------------------------------------*/
+    /* LCER     Load Complement Floating Point Short Register   [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        /* Copy register contents, invert sign bit */
+        regs->fpr[r1] = regs->fpr[r2] ^ 0x80000000;
+
+        /* Set condition code */
+        if (regs->fpr[r1] & 0x00FFFFFF) {
+            regs->psw.cc = (regs->fpr[r1] & 0x80000000) ? 1 : 2;
+        } else
+            regs->psw.cc = 0;
+
+        break;
+
+    case 0x34:
+    /*---------------------------------------------------------------*/
+    /* HER      Halve Floating Point Short Register             [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        halve_float_short_reg (r1, r2, regs);
+
+        break;
+
     case 0x35:
     /*---------------------------------------------------------------*/
     /* LRER     Load Rounded Floating Point Short Register      [RR] */
     /*---------------------------------------------------------------*/
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
-        if ( r1 & 1 || r1 > 6 || r2 & 1 || r2 > 6)
-        {
+        if (( r1 & 9) || (r2 & 9)) {
             program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
-        /* Copy and round register contents */
-        regs->fpr[r1] = regs->fpr[r2];
-        /*INCOMPLETE*/
+        round_float_short_reg (r1, r2, regs);
+
+        break;
+
+    case 0x36:
+    /*---------------------------------------------------------------*/
+    /* AXR      Add Floating Point Extended Register            [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0 or 4 */
+        if (( r1 & 11) || (r2 & 11)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        add_float_ext_reg (r1, r2, regs);
+
+        break;
+
+    case 0x37:
+    /*---------------------------------------------------------------*/
+    /* SXR      Subtract Floating Point Extended Register       [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0 or 4 */
+        if (( r1 & 11) || (r2 & 11)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        subtract_float_ext_reg (r1, r2, regs);
 
         break;
 
@@ -1297,16 +1688,121 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
-        if ( r1 & 1 || r1 > 6 || r2 & 1 || r2 > 6)
-        {
+        if (( r1 & 9) || (r2 & 9)) {
             program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
-        /* Copy register contents */
+        /* Copy register content */
         regs->fpr[r1] = regs->fpr[r2];
 
         break;
+
+    case 0x39:
+    /*---------------------------------------------------------------*/
+    /* CER      Compare Floating Point Short Register           [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        compare_float_short_reg (r1, r2, regs);
+
+        break;
+
+    case 0x3A:
+    /*---------------------------------------------------------------*/
+    /* AER      Add Floating Point Short Register               [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        add_float_short_reg (r1, r2, regs);
+
+        break;
+
+    case 0x3B:
+    /*---------------------------------------------------------------*/
+    /* SER      Subtract Floating Point Short Register          [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        subtract_float_short_reg (r1, r2, regs);
+
+        break;
+
+    case 0x3C:
+    /*---------------------------------------------------------------*/
+    /* MER      Multiply Short to Long Floating Point Register  [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        multiply_float_short_to_long_reg (r1, r2, regs);
+
+        break;
+
+    case 0x3D:
+    /*---------------------------------------------------------------*/
+    /* DER      Divide Floating Point Short Register            [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        divide_float_short_reg (r1, r2, regs);
+
+        break;
+
+    case 0x3E:
+    /*---------------------------------------------------------------*/
+    /* AUR      Add Unnormalized Floating Point Short Register  [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        add_unnormal_float_short_reg (r1, r2, regs);
+
+        break;
+
+    case 0x3F:
+    /*---------------------------------------------------------------*/
+    /* SUR      Subtract Unnormalized Floating Point Short Reg. [RR] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 or R2 is not 0, 2, 4, or 6 */
+        if (( r1 & 9) || (r2 & 9)) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        subtract_unnormal_float_short_reg (r1, r2, regs);
+
+        break;
+#endif /*FEATURE_HEXADECIMAL_FLOATING_POINT*/
 
     case 0x40:
     /*---------------------------------------------------------------*/
@@ -1840,15 +2336,29 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
-        if ( r1 & 1 || r1 > 6 )
-        {
+        if ( r1 & 9 ) {
             program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
         /* Store register contents at operand address */
         dreg = ((U64)regs->fpr[r1] << 32) | regs->fpr[r1+1];
-        vstore8 ( dreg, effective_addr, ar1, regs );
+        vstore8 (dreg, effective_addr, ar1, regs);
+
+        break;
+
+    case 0x67:
+    /*---------------------------------------------------------------*/
+    /* MXD      Multiply Floating Point Long to Extended        [RX] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0 or 4 */
+        if ( r1 & 11) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        multiply_float_long_to_ext (r1, effective_addr, ar1, regs);
 
         break;
 
@@ -1858,18 +2368,122 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
-        if ( r1 & 1 || r1 > 6 )
-        {
+        if ( r1 & 9 ) {
             program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
         /* Fetch value from operand address */
-        dreg = vfetch8 ( effective_addr, ar1, regs );
+        dreg = vfetch8 (effective_addr, ar1, regs );
 
         /* Update register contents */
         regs->fpr[r1] = dreg >> 32;
-        regs->fpr[r1+1] = dreg & 0xFFFFFFFF;
+        regs->fpr[r1+1] = dreg;
+
+        break;
+
+    case 0x69:
+    /*---------------------------------------------------------------*/
+    /* CD       Compare Floating Point Long                     [RX] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0, 2, 4, or 6 */
+        if ( r1 & 9 ) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        compare_float_long (r1, effective_addr, ar1, regs);
+
+        break;
+
+    case 0x6A:
+    /*---------------------------------------------------------------*/
+    /* AD       Add Floating Point Long                         [RX] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0, 2, 4, or 6 */
+        if ( r1 & 9 ) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        add_float_long (r1, effective_addr, ar1, regs);
+
+        break;
+
+    case 0x6B:
+    /*---------------------------------------------------------------*/
+    /* SD       Subtract Floating Point Long                    [RX] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0, 2, 4, or 6 */
+        if ( r1 & 9 ) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        subtract_float_long (r1, effective_addr, ar1, regs);
+
+        break;
+
+    case 0x6C:
+    /*---------------------------------------------------------------*/
+    /* MD       Multiply Floating Point Long                    [RX] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0, 2, 4, or 6 */
+        if ( r1 & 9 ) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        multiply_float_long (r1, effective_addr, ar1, regs);
+
+        break;
+
+    case 0x6D:
+    /*---------------------------------------------------------------*/
+    /* DD       Divide Floating Point Long                      [RX] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0, 2, 4, or 6 */
+        if ( r1 & 9 ) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        divide_float_long (r1, effective_addr, ar1, regs);
+
+        break;
+
+    case 0x6E:
+    /*---------------------------------------------------------------*/
+    /* AW       Add Unnormalized Floating Point Long            [RX] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0, 2, 4, or 6 */
+        if ( r1 & 9 ) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        add_unnormal_float_long (r1, effective_addr, ar1, regs);
+
+        break;
+
+    case 0x6F:
+    /*---------------------------------------------------------------*/
+    /* SW       Subtract Unnormalized Floating Point Long       [RX] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0, 2, 4, or 6 */
+        if ( r1 & 9 ) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        subtract_unnormal_float_long (r1, effective_addr, ar1, regs);
 
         break;
 
@@ -1879,17 +2493,17 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
-        if ( r1 & 1 || r1 > 6 )
-        {
+        if ( r1 & 9 ) {
             program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
         /* Store register contents at operand address */
-        vstore4 ( regs->fpr[r1], effective_addr, ar1, regs );
+        vstore4 (regs->fpr[r1], effective_addr, ar1, regs);
 
         break;
 
+#ifdef FEATURE_IMMEDIATE_AND_RELATIVE
     case 0x71:
     /*---------------------------------------------------------------*/
     /* MS       Multiply Single                                 [RX] */
@@ -1902,6 +2516,7 @@ static BYTE module[8];                  /* Module name               */
         (S32)regs->gpr[r1] *= (S32)n;
 
         break;
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
 
     case 0x78:
     /*---------------------------------------------------------------*/
@@ -1909,14 +2524,118 @@ static BYTE module[8];                  /* Module name               */
     /*---------------------------------------------------------------*/
 
         /* Program check if R1 is not 0, 2, 4, or 6 */
-        if ( r1 & 1 || r1 > 6 )
-        {
+        if ( r1 & 9 ) {
             program_check (regs, PGM_SPECIFICATION_EXCEPTION);
             goto terminate;
         }
 
         /* Update first 32 bits of register from operand address */
-        regs->fpr[r1] = vfetch4 ( effective_addr, ar1, regs );
+        regs->fpr[r1] = vfetch4 (effective_addr, ar1, regs);
+
+        break;
+
+    case 0x79:
+    /*---------------------------------------------------------------*/
+    /* CE       Compare Floating Point Short                    [RX] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0, 2, 4, or 6 */
+        if ( r1 & 9 ) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        compare_float_short (r1, effective_addr, ar1, regs);
+
+        break;
+
+    case 0x7A:
+    /*---------------------------------------------------------------*/
+    /* AE       Add Floating Point Short                        [RX] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0, 2, 4, or 6 */
+        if ( r1 & 9 ) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        add_float_short (r1, effective_addr, ar1, regs);
+
+        break;
+
+    case 0x7B:
+    /*---------------------------------------------------------------*/
+    /* SE       Subtract Floating Point Short                   [RX] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0, 2, 4, or 6 */
+        if ( r1 & 9 ) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        subtract_float_short (r1, effective_addr, ar1, regs);
+
+        break;
+
+    case 0x7C:
+    /*---------------------------------------------------------------*/
+    /* ME       Multiply Floating Point Short to Long           [RX] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0, 2, 4, or 6 */
+        if ( r1 & 9 ) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        multiply_float_short_to_long (r1, effective_addr, ar1, regs);
+
+        break;
+
+    case 0x7D:
+    /*---------------------------------------------------------------*/
+    /* DE       Divide Floating Point Short                     [RX] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0, 2, 4, or 6 */
+        if ( r1 & 9 ) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        divide_float_short (r1, effective_addr, ar1, regs);
+
+        break;
+
+    case 0x7E:
+    /*---------------------------------------------------------------*/
+    /* AU       Add Unnormalized Floating Point Short           [RX] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0, 2, 4, or 6 */
+        if ( r1 & 9 ) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        add_unnormal_float_short (r1, effective_addr, ar1, regs);
+
+        break;
+
+    case 0x7F:
+    /*---------------------------------------------------------------*/
+    /* SU       Subtract Unnormalized Floating Point Short      [RX] */
+    /*---------------------------------------------------------------*/
+
+        /* Program check if R1 is not 0, 2, 4, or 6 */
+        if ( r1 & 9 ) {
+            program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+            goto terminate;
+        }
+
+        subtract_unnormal_float_short (r1, effective_addr, ar1, regs);
 
         break;
 
@@ -2057,7 +2776,7 @@ static BYTE module[8];                  /* Module name               */
 
         break;
 
-#ifdef FEATURE_RELATIVE_BRANCH
+#ifdef FEATURE_IMMEDIATE_AND_RELATIVE
     case 0x84:
     /*---------------------------------------------------------------*/
     /* BRXH     Branch Relative on Index High                  [RSI] */
@@ -2109,7 +2828,7 @@ static BYTE module[8];                  /* Module name               */
             goto setia;
 
         break;
-#endif /*FEATURE_RELATIVE_BRANCH*/
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
 
     case 0x86:
     /*---------------------------------------------------------------*/
@@ -2817,6 +3536,7 @@ static BYTE module[8];                  /* Module name               */
         break;
 #endif /*FEATURE_S370_CHANNEL*/
 
+#ifdef FEATURE_IMMEDIATE_AND_RELATIVE
     case 0xA7:
     /*---------------------------------------------------------------*/
     /* Register Immediate instructions (opcode A7xx)                 */
@@ -2825,7 +3545,6 @@ static BYTE module[8];                  /* Module name               */
         /* Bits 12-15 of instruction determine the operation code */
         switch (r3) {
 
-#ifdef FEATURE_HALFWORD_IMMEDIATE
         case 0x0:
         /*-----------------------------------------------------------*/
         /* A7x0: TMH - Test under Mask High                     [RI] */
@@ -2871,9 +3590,7 @@ static BYTE module[8];                  /* Module name               */
                     2;                          /* leftmost bit one  */
 
             break;
-#endif /*FEATURE_HALFWORD_IMMEDIATE*/
 
-#ifdef FEATURE_RELATIVE_BRANCH
         case 0x4:
         /*-----------------------------------------------------------*/
         /* A7x4: BRC - Branch Relative on Condition             [RI] */
@@ -2931,9 +3648,7 @@ static BYTE module[8];                  /* Module name               */
                 goto setia;
 
             break;
-#endif /*FEATURE_RELATIVE_BRANCH*/
 
-#ifdef FEATURE_HALFWORD_IMMEDIATE
         case 0x8:
         /*-----------------------------------------------------------*/
         /* A7x8: LHI - Load Halfword Immediate                  [RI] */
@@ -3001,7 +3716,6 @@ static BYTE module[8];                  /* Module name               */
                     (S32)regs->gpr[r1] > (S16)h1 ? 2 : 0;
 
             break;
-#endif /*FEATURE_HALFWORD_IMMEDIATE*/
 
         default:
         /*-----------------------------------------------------------*/
@@ -3013,6 +3727,7 @@ static BYTE module[8];                  /* Module name               */
         } /* end switch(r3) */
 
         break;
+#endif /*FEATURE_IMMEDIATE_AND_RELATIVE*/
 
     case 0xA8:
     /*---------------------------------------------------------------*/
@@ -3689,7 +4404,6 @@ static BYTE module[8];                  /* Module name               */
 
             /* R2 is real address of service call control block */
             n2 = regs->gpr[r2];
-            n2 = APPLY_PREFIXING (n2, regs->pxr);
 
             /* Call service processor and set condition code */
             regs->psw.cc = service_call ( n1, n2, regs );
@@ -4120,6 +4834,23 @@ static BYTE module[8];                  /* Module name               */
             regs->gpr[0] = 0;
 
             break;
+
+#ifdef FEATURE_HEXADECIMAL_FLOATING_POINT
+        case 0x2D:
+        /*-----------------------------------------------------------*/
+        /* B22D: DXR - Divide Float Extended Register          [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if R1 or R2 is not 0 or 4 */
+            if (( r1 & 11 || r2 & 11)) {
+                program_check (regs, PGM_SPECIFICATION_EXCEPTION);
+                goto terminate;
+            }
+
+            divide_float_ext_reg (r1, r2, regs);
+
+            break;
+#endif /*FEATURE_HEXADECIMAL_FLOATING_POINT*/
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
         case 0x30:
@@ -6011,6 +6742,9 @@ DWORD   csw;                            /* CSW for S/370 channels    */
     /* Exit if no interrupt was presented */
     if (rc == 0) return;
 
+    /* Set the main storage reference and change bits */
+    sysblk.storkeys[regs->pxr >> 12] |= (STORKEY_REF | STORKEY_CHANGE);
+
     /* Point to the PSA in main storage */
     psa = (PSA*)(sysblk.mainstor + regs->pxr);
 
@@ -6104,8 +6838,8 @@ int     icidx;                          /* Instruction counter index */
 #endif /*INSTRUCTION_COUNTING*/
 
     /* Display thread started message on control panel */
-//  logmsg ("HHC620I CPU%d thread started: id=%ld\n",
-//          regs->cpuad, thread_id());
+    logmsg ("HHC620I CPU%d thread started: tid=%8.8lX, pid=%d\n",
+            regs->cpuad, thread_id(), getpid());
 
 #ifdef INSTRUCTION_COUNTING
     /* Clear instruction counters */

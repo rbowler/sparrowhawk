@@ -22,7 +22,7 @@
 #---    ----    --------------------
 000C    3505    adrdmprs.rdr
 000D    3525    punch00d.txt ascii
-000E    1403    print00e.txt
+000E    1403    print00e.txt crlf
 001F    3270
 0580    3420    ickdsf.ipl
 0120    3380    mvsv5r.120

@@ -60,15 +60,22 @@ int     i;                              /* Array subscript           */
     /* Initialize device dependent fields */
     dev->fd = -1;
     dev->ascii = 0;
+    dev->crlf = 0;
     dev->cardpos = 0;
     dev->cardrem = CARD_LENGTH;
 
     /* Process the driver arguments */
     for (i = 1; i < argc; i++)
     {
-        if (strcmp(argv[i], "ascii") == 0)
+        if (strcasecmp(argv[i], "ascii") == 0)
         {
             dev->ascii = 1;
+            continue;
+        }
+
+        if (strcasecmp(argv[i], "crlf") == 0)
+        {
+            dev->crlf = 1;
             continue;
         }
 
@@ -94,7 +101,7 @@ int     i;                              /* Array subscript           */
     dev->numdevid = 7;
 
     /* Activate I/O tracing */
-    dev->ccwtrace = 1;
+//  dev->ccwtrace = 1;
 
     return 0;
 } /* end function cardpch_init_handler */
@@ -178,8 +185,8 @@ BYTE            c;                      /* Output character          */
                     if (dev->buf[i-1] != SPACE) break;
 
                 /* Append carriage return and line feed */
-                strcpy (dev->buf + i, "\r\n");
-                i += 2;
+                if (dev->crlf) dev->buf[i++] = '\r';
+                dev->buf[i++] = '\n';
             }
             else
             {

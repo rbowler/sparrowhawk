@@ -118,7 +118,7 @@ int     i;                              /* Array subscript           */
     dev->numdevid = 7;
 
     /* Activate I/O tracing */
-    dev->ccwtrace = 1;
+//  dev->ccwtrace = 1;
 
     return 0;
 } /* end function cardrdr_init_handler */

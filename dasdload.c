@@ -15,6 +15,15 @@
 #include "dasdblks.h"
 
 /*-------------------------------------------------------------------*/
+/* Internal table sizes                                              */
+/*-------------------------------------------------------------------*/
+#define MAXDBLK 3000                    /* Maximum number of directory
+                                           blocks per dataset        */
+#define MAXTTR  10000                   /* Maximum number of TTRs
+                                           per dataset               */
+#define MAXDSCB 500                     /* Maximum number of DSCBs   */
+
+/*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
 /*-------------------------------------------------------------------*/
 #define SPACE           ((BYTE)' ')
@@ -895,7 +904,8 @@ CKDDASD_RECHDR  rechdr;                 /* Record header             */
 /*-------------------------------------------------------------------*/
 /* Subroutine to build a format 1 DSCB                               */
 /* Input:                                                            */
-/*      blkpp   Address of pointer to chain field of previous DSCB   */
+/*      dscbtab Array of pointers to DSCB data blocks                */
+/*      dscbnum Number of entries in dscbtab array                   */
 /*      dsname  Dataset name (ASCIIZ)                                */
 /*      volser  Volume serial number (ASCIIZ)                        */
 /*      dsorg   1st byte of dataset organization bits                */
@@ -917,10 +927,11 @@ CKDDASD_RECHDR  rechdr;                 /* Record header             */
 /*      The return value is 0 if successful, or -1 if error          */
 /*                                                                   */
 /* This subroutine allocates a DATABLK structure, builds a DSCB      */
-/* within the structure, and adds the structure to the DSCB chain.   */
+/* within the structure, and adds the structure to the DSCB array.   */
 /*-------------------------------------------------------------------*/
 static int
-build_format1_dscb (DATABLK ***blkpp, BYTE *dsname, BYTE *volser,
+build_format1_dscb (DATABLK *dscbtab[], int dscbnum,
+                BYTE *dsname, BYTE *volser,
                 BYTE dsorg, BYTE recfm, int lrecl, int blksz,
                 int keyln, int dirblu, int lasttrk, int lastrec,
                 int trkbal, BYTE units, int spsec,
@@ -946,11 +957,17 @@ time_t          timeval;                /* Current time value        */
         return -1;
     }
 
-    /* Clear the data block and chain it to the previous one */
+    /* Check that there is room in the DSCB pointer array */
+    if (dscbnum >= MAXDSCB)
+    {
+        XMERRF ("DSCB count exceeds %d, increase MAXDSCB\n",
+                MAXDSCB);
+        return -1;
+    }
+
+    /* Clear the data block and save its address in the DSCB array */
     memset (datablk, 0, blklen);
-    **blkpp = datablk;
-    datablk->header = 0;
-    *blkpp = (DATABLK**)(&datablk->header);
+    dscbtab[dscbnum] = datablk;
 
     /* Point to the DSCB within the data block */
     f1dscb = (FORMAT1_DSCB*)(datablk->kdarea);
@@ -1012,13 +1029,14 @@ time_t          timeval;                /* Current time value        */
 /*-------------------------------------------------------------------*/
 /* Subroutine to build a format 4 DSCB                               */
 /* Input:                                                            */
-/*      blkpp   Address of pointer to chain field of previous DSCB   */
+/*      dscbtab Array of pointers to DSCB data blocks                */
+/*      dscbnum Number of entries in dscbtab array                   */
 /*      devtype Output device type                                   */
 /* Output:                                                           */
 /*      The return value is 0 if successful, or -1 if error          */
 /*                                                                   */
 /* This subroutine allocates a DATABLK structure, builds a DSCB      */
-/* within the structure, and adds the structure to the DSCB chain.   */
+/* within the structure, and adds the structure to the DSCB array.   */
 /*                                                                   */
 /* Note: The VTOC extent descriptor, the highest F1 DSCB address,    */
 /* and the number of unused DSCBs, are set to zeroes here and must   */
@@ -1028,7 +1046,7 @@ time_t          timeval;                /* Current time value        */
 /* cylinders written to the volume is known.                         */
 /*-------------------------------------------------------------------*/
 static int
-build_format4_dscb (DATABLK ***blkpp, U16 devtype)
+build_format4_dscb (DATABLK *dscbtab[], int dscbnum, U16 devtype)
 {
 DATABLK        *datablk;                /* -> Data block structure   */
 FORMAT4_DSCB   *f4dscb;                 /* -> DSCB within data block */
@@ -1063,11 +1081,17 @@ int             tolfact;                /* Device tolerance          */
         return -1;
     }
 
-    /* Clear the data block and chain it to the previous one */
+    /* Check that there is room in the DSCB pointer array */
+    if (dscbnum >= MAXDSCB)
+    {
+        XMERRF ("DSCB count exceeds %d, increase MAXDSCB\n",
+                MAXDSCB);
+        return -1;
+    }
+
+    /* Clear the data block and save its address in the DSCB array */
     memset (datablk, 0, blklen);
-    **blkpp = datablk;
-    datablk->header = 0;
-    *blkpp = (DATABLK**)(&datablk->header);
+    dscbtab[dscbnum] = datablk;
 
     /* Point to the DSCB within the data block */
     f4dscb = (FORMAT4_DSCB*)(datablk->kdarea);
@@ -1104,12 +1128,13 @@ int             tolfact;                /* Device tolerance          */
 /*-------------------------------------------------------------------*/
 /* Subroutine to build a format 5 DSCB                               */
 /* Input:                                                            */
-/*      blkpp   Address of pointer to chain field of previous DSCB   */
+/*      dscbtab Array of pointers to DSCB data blocks                */
+/*      dscbnum Number of entries in dscbtab array                   */
 /* Output:                                                           */
 /*      The return value is 0 if successful, or -1 if error          */
 /*                                                                   */
 /* This subroutine allocates a DATABLK structure, builds a DSCB      */
-/* within the structure, and adds the structure to the DSCB chain.   */
+/* within the structure, and adds the structure to the DSCB array.   */
 /*                                                                   */
 /* Note: The format 5 DSCB is built with no free space extents.      */
 /* The DOS bit which is set in ds4vtoci forces the operating system  */
@@ -1117,7 +1142,7 @@ int             tolfact;                /* Device tolerance          */
 /* the format 5 DSCB the first time the volume is accessed.          */
 /*-------------------------------------------------------------------*/
 static int
-build_format5_dscb (DATABLK ***blkpp)
+build_format5_dscb (DATABLK *dscbtab[], int dscbnum)
 {
 DATABLK        *datablk;                /* -> Data block structure   */
 FORMAT5_DSCB   *f5dscb;                 /* -> DSCB within data block */
@@ -1133,11 +1158,17 @@ int             blklen;                 /* Size of data block        */
         return -1;
     }
 
-    /* Clear the data block and chain it to the previous one */
+    /* Check that there is room in the DSCB pointer array */
+    if (dscbnum >= MAXDSCB)
+    {
+        XMERRF ("DSCB count exceeds %d, increase MAXDSCB\n",
+                MAXDSCB);
+        return -1;
+    }
+
+    /* Clear the data block and save its address in the DSCB array */
     memset (datablk, 0, blklen);
-    **blkpp = datablk;
-    datablk->header = 0;
-    *blkpp = (DATABLK**)(&datablk->header);
+    dscbtab[dscbnum] = datablk;
 
     /* Point to the DSCB within the data block */
     f5dscb = (FORMAT5_DSCB*)(datablk->kdarea);
@@ -1152,8 +1183,8 @@ int             blklen;                 /* Size of data block        */
 /*-------------------------------------------------------------------*/
 /* Subroutine to write the VTOC                                      */
 /* Input:                                                            */
+/*      dscbtab Array of pointers to DSCB data blocks                */
 /*      numdscb Number of DSCBs including format 4 and format 5      */
-/*      blkptr  Pointer to data block containing first DSCB          */
 /*      ofd     Output file descriptor                               */
 /*      ofname  Output file name                                     */
 /*      devtype Output device type                                   */
@@ -1177,7 +1208,7 @@ int             blklen;                 /* Size of data block        */
 /* and nexthead are updated to point past the end of the VTOC.       */
 /*-------------------------------------------------------------------*/
 static int
-write_vtoc (int numdscb, DATABLK *blkptr, int ofd, BYTE *ofname,
+write_vtoc (DATABLK *dscbtab[], int numdscb, int ofd, BYTE *ofname,
             U16 devtype, int reqcyls, int heads, int trklen,
             BYTE *trkbuf, int vtoctrk, int vtocext,
             int *nxtcyl, int *nxthead, BYTE volvtoc[])
@@ -1215,7 +1246,7 @@ BYTE            dsnama[45];             /* Dataset name (ASCIIZ)     */
     prealloc = (vtoctrk != 0 && vtocext != 0);
 
     /* Point to the format 4 DSCB within the first data block */
-    f4dscb = (FORMAT4_DSCB*)(blkptr->kdarea);
+    f4dscb = (FORMAT4_DSCB*)(dscbtab[0]->kdarea);
 
     /* Calculate the minimum number of tracks required for the VTOC */
     dscbpertrk = f4dscb->ds4devdt;
@@ -1340,9 +1371,11 @@ BYTE            dsnama[45];             /* Dataset name (ASCIIZ)     */
     init_track (trklen, trkbuf, outcyl, outhead, &outusedv);
 
     /* Write the format 4, format 5, and format 1 DSCBs to the VTOC */
-    datablk = blkptr;
     for (i = 0; i < numdscb; i++)
     {
+        /* Load the data block pointer from the DSCB table */
+        datablk = dscbtab[i];
+
         /* Extract the dataset name from the format 1 DSCB */
         memset (dsnama, 0, sizeof(dsnama));
         f1dscb = (FORMAT1_DSCB*)(datablk->kdarea);
@@ -1365,8 +1398,6 @@ BYTE            dsnama[45];             /* Dataset name (ASCIIZ)     */
                 datablk->kdarea[0] == 0x05 ? 5 : 1,
                 outcyl, outhead, outrec, outtrk, outrec, dsnama);
         if (infolvl >= 5) data_dump (datablk, 152);
-
-        datablk = (DATABLK*)(datablk->header);
 
     } /* end for(i) */
 
@@ -1999,20 +2030,21 @@ int     i;                              /* Array subscript           */
 /*      cyl     Cylinder number of directory block in output file    */
 /*      head    Head number of directory block in output file        */
 /*      rec     Record number of directory block in output file      */
-/*      blkpp   Address of pointer to chain field of previous block  */
+/*      dirblka Array of pointers to directory blocks                */
+/*      dirblkn Number of directory blocks in dirblka array          */
 /* Output:                                                           */
 /*      dirblu  Number of bytes used in directory block              */
 /*      The return value is 0 if successful, 1 if end of directory,  */
 /*      or -1 if an error occurred.                                  */
 /*                                                                   */
-/* Each directory block is saved in a chained list.                  */
+/* A pointer to the directory block is saved in the dirblka array.   */
 /* The copy of the data block is updated with the cylinder, head,    */
 /* and record number of the directory block in the output file.      */
 /* Directory information is listed if infolvl is 3 or greater.       */
 /*-------------------------------------------------------------------*/
 static int
 process_dirblk (DATABLK *xbuf, int blklen, int cyl, int head, int rec,
-                DATABLK ***blkpp, int *dirblu)
+                DATABLK *dirblka[], int dirblkn, int *dirblu)
 {
 int             size;                   /* Size of directory entry   */
 int             i, j;                   /* Array subscripts          */
@@ -2047,11 +2079,20 @@ BYTE            c, hex[49], chars[25];  /* Character work areas      */
         return -1;
     }
 
-    /* Copy the directory block to the end of the chained list */
+    /* Copy the directory block */
     memcpy (blkp, xbuf, blklen);
-    **blkpp = blkp;
-    blkp->header = 0;
-    *blkpp = (DATABLK**)(&blkp->header);
+
+    /* Check that there is room in the directory block pointer array */
+    if (dirblkn >= MAXDBLK)
+    {
+        XMERRF ("Number of directory blocks exceeds %d, "
+                "increase MAXDBLK\n",
+                MAXDBLK);
+        return -1;
+    }
+
+    /* Add the directory block to the pointer array */
+    dirblka[dirblkn] = blkp;
 
     /* Update the CCHHR in the copy of the directory block */
     blkp->cyl[0] = (cyl >> 8) & 0xFF;
@@ -2524,6 +2565,7 @@ process_xmit_file (BYTE *xfname, BYTE *ofname, int ofd, BYTE *trkbuf,
                 int *numtrks, int *nxtcyl, int *nxthead)
 {
 int             rc = 0;                 /* Return code               */
+int             i;                      /* Array subscript           */
 int             xfd;                    /* XMIT file descriptor      */
 int             dsstart;                /* Relative track number of
                                            start of output dataset   */
@@ -2552,9 +2594,8 @@ int             origheads = 0;          /* Number of tracks/cylinder
                                            on original dataset       */
 int             numext = 0;             /* Number of extents         */
 EXTDESC         xarray[16];             /* Extent descriptor array   */
-DATABLK        *dirblkp;                /* -> First directory block  */
-DATABLK       **dirblkpp;               /* -> Directory chain pointer*/
-int             dirblkn;                /* #of directory blocks read */
+DATABLK       **dirblka;                /* -> Directory block array  */
+int             dirblkn = 0;            /* #of directory blocks read */
 int             outusedv = 0;           /* Output bytes used on track
                                            of virtual device         */
 int             outusedr = 0;           /* Output bytes used on track
@@ -2563,7 +2604,6 @@ int             outtrkbr = 0;           /* Output bytes remaining on
                                            track of real device      */
 int             outtrk = 0;             /* Output relative track     */
 int             outrec = 0;             /* Output record number      */
-#define MAXTTR  10000                   /* TTR conversion table size */
 TTRCONV        *ttrtab;                 /* -> TTR conversion table   */
 int             numttr = 0;             /* TTR table array index     */
 
@@ -2586,13 +2626,25 @@ int             numttr = 0;             /* TTR table array index     */
         return -1;
     }
 
+    /* Obtain storage for the directory block array */
+    dirblka = (DATABLK**)malloc (sizeof(DATABLK*) * MAXDBLK);
+    if (dirblka == NULL)
+    {
+        XMERRF ("Cannot obtain storage for directory block array: %s\n",
+                strerror(errno));
+        free (xbuf);
+        close (xfd);
+        return -1;
+    }
+
     /* Obtain storage for the TTR conversion table */
-    ttrtab = (TTRCONV*)malloc (sizeof(TTRCONV)*MAXTTR);
+    ttrtab = (TTRCONV*)malloc (sizeof(TTRCONV) * MAXTTR);
     if (ttrtab == NULL)
     {
         XMERRF ("Cannot obtain storage for TTR table: %s\n",
                 strerror(errno));
         free (xbuf);
+        free (dirblka);
         close (xfd);
         return -1;
     }
@@ -2602,11 +2654,6 @@ int             numttr = 0;             /* TTR table array index     */
 
     /* Display the file information message */
     XMINFF (1, "Processing file %s\n", xfname);
-
-    /* Initialize the directory block chain */
-    dirblkp = NULL;
-    dirblkpp = &dirblkp;
-    dirblkn = 0;
 
     /* Read each logical record */
     while (1)
@@ -2720,7 +2767,7 @@ int             numttr = 0;             /* TTR table array index     */
             {
                 rc = process_dirblk (datablk, blklen,
                                     outcyl, outhead, outrec,
-                                    &dirblkpp, dirblu);
+                                    dirblka, dirblkn, dirblu);
                 if (rc < 0) return -1;
                 enddir = rc;
 
@@ -2765,9 +2812,11 @@ int             numttr = 0;             /* TTR table array index     */
     if (rc < 0) return -1;
 
     /* Update the directory and rewrite to output file */
-    for (datablk = dirblkp; datablk != NULL;
-                datablk = (DATABLK*)(datablk->header))
+    for (i = 0; i < dirblkn; i++)
     {
+        /* Obtain the directory block pointer from the array */
+        datablk = dirblka[i];
+
         /* Update TTR pointers in this directory block */
         rc = update_dirblk (ofd, ofname, heads, trklen, dsstart,
                             datablk, ttrtab, numttr);
@@ -2784,16 +2833,13 @@ int             numttr = 0;             /* TTR table array index     */
                         blkrec, keylen, datalen, heads, trklen);
         if (rc < 0) return -1;
 
-    } /* end for(datablk) */
+    } /* end for(i) */
 
     /* Close input file and release buffers */
     close (xfd);
-    while (dirblkp != NULL)
-    {
-        datablk = (DATABLK*)(dirblkp->header);
-        free (dirblkp);
-        dirblkp = datablk;
-    }
+    for (i = 0; i < dirblkn; i++)
+        free (dirblka[i]);
+    free (dirblka);
     free (xbuf);
     free (ttrtab);
 
@@ -3725,6 +3771,7 @@ process_control_file (FILE *cfp, BYTE *cfname, BYTE *ofname, int ofd,
                 int trklen, BYTE *trkbuf, int outcyl, int outhead)
 {
 int             rc;                     /* Return code               */
+int             i;                      /* Array subscript           */
 int             n;                      /* Integer work area         */
 BYTE            dsname[45];             /* Dataset name (ASCIIZ)     */
 BYTE            method;                 /* Initialization method     */
@@ -3745,9 +3792,7 @@ int             maxtrks;                /* Maximum size of dataset   */
 int             outusedv;               /* Bytes used in track buffer*/
 int             tracks = 0;             /* Tracks used in dataset    */
 int             numdscb = 0;            /* Number of DSCBs           */
-DATABLK        *firstdscb = NULL;       /* -> First DSCB in chain    */
-DATABLK       **dscbpp = &firstdscb;    /* -> DSCB chain pointer     */
-DATABLK        *datablk;                /* -> Data block structure   */
+DATABLK       **dscbtab;                /* -> Array of DSCB pointers */
 int             dirblu;                 /* Bytes used in last dirblk */
 int             lasttrk;                /* Relative track number of
                                            last used track of dataset*/
@@ -3764,12 +3809,21 @@ BYTE            volvtoc[5];             /* VTOC begin CCHHR          */
 off_t           seekpos;                /* Seek position for lseek   */
 int             fsflag = 0;             /* 1=Free space message sent */
 
-    /* Initialize the DSCB chain with format 4 and format 5 DSCBs */
-    rc = build_format4_dscb (&dscbpp, devtype);
+    /* Obtain storage for the array of DSCB pointers */
+    dscbtab = (DATABLK**)malloc (sizeof(DATABLK*) * MAXDSCB);
+    if (dscbtab == NULL)
+    {
+        XMERRF ("Cannot obtain storage for DSCB pointer array: %s\n",
+                strerror(errno));
+        return -1;
+    }
+
+    /* Initialize the DSCB array with format 4 and format 5 DSCBs */
+    rc = build_format4_dscb (dscbtab, numdscb, devtype);
     if (rc < 0) return -1;
     numdscb++;
 
-    rc = build_format5_dscb (&dscbpp);
+    rc = build_format5_dscb (dscbtab, numdscb);
     if (rc < 0) return -1;
     numdscb++;
 
@@ -3911,7 +3965,7 @@ int             fsflag = 0;             /* 1=Free space message sent */
         /* Create format 1 DSCB for the dataset */
         if (method != METHOD_VTOC)
         {
-            rc = build_format1_dscb (&dscbpp, dsname, volser,
+            rc = build_format1_dscb (dscbtab, numdscb, dsname, volser,
                                     dsorg, recfm, lrecl, blksz,
                                     keyln, dirblu, lasttrk, lastrec,
                                     trkbal, units, spsec,
@@ -3923,7 +3977,7 @@ int             fsflag = 0;             /* 1=Free space message sent */
     } /* end while */
 
     /* Write the VTOC */
-    rc = write_vtoc (numdscb, firstdscb, ofd, ofname, devtype,
+    rc = write_vtoc (dscbtab, numdscb, ofd, ofname, devtype,
                     reqcyls, heads, trklen, trkbuf, vtoctrk, vtocext,
                     &outcyl, &outhead, volvtoc);
     if (rc < 0) return -1;
@@ -3987,12 +4041,11 @@ int             fsflag = 0;             /* 1=Free space message sent */
     }
 
     /* Release the DSCB buffers */
-    while (firstdscb != NULL)
-    {
-        datablk = (DATABLK*)(firstdscb->header);
-        free (firstdscb);
-        firstdscb = datablk;
-    }
+    for (i = 0; i < numdscb; i++)
+        free (dscbtab[i]);
+
+    /* Release the array of DSCB pointers */
+    free (dscbtab);
 
     return 0;
 

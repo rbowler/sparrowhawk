@@ -206,22 +206,42 @@ the device record is:
 <dt><em>Card punch devices</em>
 <dd>The argument specifies the name of a file to which the punched
     output will be written.
-    If no additional arguments are specified, the output is written as
-    fixed length 80-byte EBCDIC records with no line-end delimiters.
-    <p>The <code>ascii</code> argument may be specified after the file
-    name to indicate that the file will be written as variable length
-    lines of ASCII characters delimited by carriage return line feed
-    sequences at the end of each line.  Trailing blanks are removed
-    from each line.
+    Additional arguments may be specified after the file name:
+    <p>
+    <dl>
+    <dt><code>ascii</code>
+    <dd>specifies that the file will be written as variable length
+        lines of ASCII characters delimited by line feeds or
+        carriage return line feed sequences at the end of each line.
+        Trailing blanks are removed from each line.
+        If the <code>ascii</code> argument is not specified, the
+        file is written as fixed length 80-byte EBCDIC records with
+        no line-end delimiters.
+    <dt><code>crlf</code>
+    <dd>specifies, for ASCII files, that carriage return line feed
+        sequences are written at the end of each line.
+        If the <code>crlf</code> argument is not specified, then
+        line-feeds only are written at the end of each line.
+    </dl>
 <p>
 <a name="printer">
 <dt><em>Line printer devices</em>
 <dd>The argument specifies the name of a file to which the printer
     output will be written.  The output is written in the form of
-    variable length ASCII records delimited by carriage return line
-    feed sequences.  Carriage control characters are translated to
-    blank lines or ASCII form feed characters.  If the file exists
-    it will be overwritten.
+    variable length lines of ASCII characters delimited by line
+    feeds or by carriage return line feed sequences.  Trailing
+    blanks are removed from each line.  Carriage control characters
+    are translated to blank lines or ASCII form feed characters.
+    If the file exists it will be overwritten.
+    Additional arguments may be specified after the file name:
+    <p>
+    <dl>
+    <dt><code>crlf</code>
+    <dd>specifies, for ASCII files, that carriage return line feed
+        sequences are written at the end of each line.
+        If the <code>crlf</code> argument is not specified, then
+        line-feeds only are written at the end of each line.
+    </dl>
 <p>
 <a name="tapedev">
 <dt><em>Emulated tape devices</em>
@@ -297,7 +317,7 @@ If you have a question about Hercules, see the
 </center>
 
 <small>
-<p>Last updated 10 Feb 2000
+<p>Last updated 15 Feb 2000
 </BODY>
 </HTML>
 

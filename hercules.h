@@ -41,6 +41,7 @@
 #undef	FEATURE_BASIC_STORAGE_KEYS
 #undef	FEATURE_BCMODE
 #undef	FEATURE_BIMODAL_ADDRESSING
+#undef	FEATURE_BINARY_FLOATING_POINT
 #undef	FEATURE_BRANCH_AND_SET_AUTHORITY
 #undef	FEATURE_CHANNEL_SUBSYSTEM
 #undef	FEATURE_DIRECT_CONTROL
@@ -48,25 +49,27 @@
 #undef	FEATURE_EXPANDED_STORAGE
 #undef	FEATURE_EXTENDED_STORAGE_KEYS
 #undef	FEATURE_EXTENDED_TOD_CLOCK
+#undef	FEATURE_HEXADECIMAL_FLOATING_POINT
+#undef	FEATURE_IMMEDIATE_AND_RELATIVE
 #undef	FEATURE_INTERVAL_TIMER
-#undef	FEATURE_HALFWORD_IMMEDIATE
 #undef	FEATURE_LINKAGE_STACK
 #undef	FEATURE_MSSF_CALL
 #undef	FEATURE_MVS_ASSIST
 #undef	FEATURE_PAGE_PROTECTION
 #undef	FEATURE_PRIVATE_SPACE
-#undef	FEATURE_RELATIVE_BRANCH
 #undef	FEATURE_S370_CHANNEL
 #undef	FEATURE_SEGMENT_PROTECTION
 #undef	FEATURE_STORAGE_PROTECTION_OVERRIDE
 #undef	FEATURE_SUBSPACE_GROUP
 #undef	FEATURE_SUPPRESSION_ON_PROTECTION
+#undef	FEATURE_SYSTEM_CONSOLE
 #undef	FEATURE_TRACING
 
 #if	ARCH == 370
  #define ARCHITECTURE_NAME	"S/370"
  #define FEATURE_BASIC_STORAGE_KEYS
  #define FEATURE_BCMODE
+ #define FEATURE_HEXADECIMAL_FLOATING_POINT
  #define FEATURE_INTERVAL_TIMER
  #define FEATURE_S370_CHANNEL
  #define FEATURE_SEGMENT_PROTECTION
@@ -79,16 +82,17 @@
  #define FEATURE_DUAL_ADDRESS_SPACE
  #define FEATURE_EXTENDED_STORAGE_KEYS
  #define FEATURE_EXTENDED_TOD_CLOCK
- #define FEATURE_HALFWORD_IMMEDIATE
+ #define FEATURE_HEXADECIMAL_FLOATING_POINT
+ #define FEATURE_IMMEDIATE_AND_RELATIVE
  #define FEATURE_LINKAGE_STACK
  #define FEATURE_MSSF_CALL
  #define FEATURE_MVS_ASSIST
  #define FEATURE_PAGE_PROTECTION
  #define FEATURE_PRIVATE_SPACE
- #define FEATURE_RELATIVE_BRANCH
  #define FEATURE_STORAGE_PROTECTION_OVERRIDE
  #define FEATURE_SUBSPACE_GROUP
  #define FEATURE_SUPPRESSION_ON_PROTECTION
+ #define FEATURE_SYSTEM_CONSOLE
  #define FEATURE_TRACING
 #else
  #error Either ARCH=370 or ARCH=390 must be specified
@@ -221,6 +225,7 @@ typedef struct _SYSBLK {
 	U64	cpuid;			/* CPU identifier for STIDP  */
 	U64	todclk; 		/* 0-7=TOD clock epoch,
 					   8-63=TOD clock bits 0-55  */
+	S64	todoff; 		/* TOD clock offset	     */
 	LOCK	todlock;		/* TOD clock update lock     */
 	TID	todtid; 		/* Thread-id for TOD update  */
 	U32	toduniq;		/* TOD clock uniqueness value*/
@@ -236,6 +241,12 @@ typedef struct _SYSBLK {
 	U16	cnslport;		/* Port number for console   */
 	struct _DEVBLK *firstdev;	/* -> First device block     */
 	U32	servparm;		/* Service signal parameter  */
+	U32	cp_recv_mask;		/* Syscons CP receive mask   */
+	U32	cp_send_mask;		/* Syscons CP send mask      */
+	U32	sclp_recv_mask; 	/* Syscons SCLP receive mask */
+	U32	sclp_send_mask; 	/* Syscons SCLP send mask    */
+	BYTE	scpcmdstr[123+1];	/* Operator command string   */
+	int	scpcmdtype;		/* Operator command type     */
 	unsigned int			/* Flags		     */
 		iopending:1,		/* 1=I/O interrupt pending   */
 		sigpbusy:1,		/* 1=Signal facility in use  */
@@ -315,6 +326,7 @@ typedef struct _DEVBLK {
 					   in keyboard read buffer   */
 	/* Device dependent fields for printer */
 	unsigned int			/* Flags		     */
+		crlf:1, 		/* 1=CRLF delimiters, 0=LF   */
 		diaggate:1,		/* 1=Diagnostic gate command */
 		fold:1; 		/* 1=Fold to upper case      */
 	int	printpos;		/* Number of bytes already
@@ -551,6 +563,50 @@ void packed_to_zoned (U32 addr1, int len1, int arn1,
 int  edit_packed (int edmk, U32 addr1, int len1, int arn1,
 	U32 addr2, int arn2, REGS *regs);
 
+/* Functions in module float.c */
+void halve_float_long_reg (int r1, int r2, REGS *regs);
+void round_float_long_reg (int r1, int r2, REGS *regs);
+void multiply_float_ext_reg (int r1, int r2, REGS *regs);
+void multiply_float_long_to_ext_reg (int r1, int r2, REGS *regs);
+void compare_float_long_reg (int r1, int r2, REGS *regs);
+void add_float_long_reg (int r1, int r2, REGS *regs);
+void subtract_float_long_reg (int r1, int r2, REGS *regs);
+void multiply_float_long_reg (int r1, int r2, REGS *regs);
+void divide_float_long_reg (int r1, int r2, REGS *regs);
+void add_unnormal_float_long_reg (int r1, int r2, REGS *regs);
+void subtract_unnormal_float_long_reg (int r1, int r2, REGS *regs);
+void halve_float_short_reg (int r1, int r2, REGS *regs);
+void round_float_short_reg (int r1, int r2, REGS *regs);
+void add_float_ext_reg (int r1, int r2, REGS *regs);
+void subtract_float_ext_reg (int r1, int r2, REGS *regs);
+void compare_float_short_reg (int r1, int r2, REGS *regs);
+void add_float_short_reg (int r1, int r2, REGS *regs);
+void subtract_float_short_reg (int r1, int r2, REGS *regs);
+void multiply_float_short_to_long_reg (int r1, int r2, REGS *regs);
+void divide_float_short_reg (int r1, int r2, REGS *regs);
+void add_unnormal_float_short_reg (int r1, int r2, REGS *regs);
+void subtract_unnormal_float_short_reg (int r1, int r2, REGS *regs);
+void multiply_float_long_to_ext (int r1, U32 addr, int arn,
+	REGS *regs);
+void compare_float_long (int r1, U32 addr, int arn, REGS *regs);
+void add_float_long (int r1, U32 addr, int arn, REGS *regs);
+void subtract_float_long (int r1, U32 addr, int arn, REGS *regs);
+void multiply_float_long (int r1, U32 addr, int arn, REGS *regs);
+void divide_float_long (int r1, U32 addr, int arn, REGS *regs);
+void add_unnormal_float_long (int r1, U32 addr, int arn, REGS *regs);
+void subtract_unnormal_float_long (int r1, U32 addr, int arn,
+	REGS *regs);
+void compare_float_short (int r1, U32 addr, int arn, REGS *regs);
+void add_float_short (int r1, U32 addr, int arn, REGS *regs);
+void subtract_float_short (int r1, U32 addr, int arn, REGS *regs);
+void multiply_float_short_to_long (int r1, U32 addr, int arn,
+	REGS *regs);
+void divide_float_short (int r1, U32 addr, int arn, REGS *regs);
+void add_unnormal_float_short (int r1, U32 addr, int arn, REGS *regs);
+void subtract_unnormal_float_short (int r1, U32 addr, int arn,
+	REGS *regs);
+void divide_float_ext_reg (int r1, int r2, REGS *regs);
+
 /* Functions in module block.c */
 int  move_long (int r1, int r2, REGS *regs);
 int  compare_long (int r1, int r2, REGS *regs);
@@ -575,8 +631,8 @@ void store_status (REGS *ssreg, U32 aaddr);
 int  signal_processor (int r1, int r3, U32 eaddr, REGS *regs);
 
 /* Functions in module service.c */
-int  service_call (U32 sclp_command, U32 sccb_absolute_addr,
-	REGS *regs);
+int  service_call (U32 sclp_command, U32 sccb_real_addr, REGS *regs);
+void scp_command (BYTE *command, int priomsg);
 
 /* Functions in module sort.c */
 int  compare_and_form_codeword (REGS *regs, U32 eaddr);

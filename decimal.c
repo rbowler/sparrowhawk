@@ -540,6 +540,7 @@ int     carry;                          /* Carry indicator           */
     /* Program check if overflow and PSW program mask is set */
     if (cc == 3 && regs->psw.domask)
     {
+        regs->psw.cc = cc;
         program_check (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
     }
 
@@ -598,6 +599,7 @@ int     sign;                           /* Sign                      */
     /* Program check if overflow and PSW program mask is set */
     if (cc == 3 && regs->psw.domask)
     {
+        regs->psw.cc = cc;
         program_check (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
     }
 
@@ -744,6 +746,7 @@ int     sign1, sign2, sign3;            /* Sign of operands & result */
     /* Program check if overflow and PSW program mask is set */
     if (cc == 3 && regs->psw.domask)
     {
+        regs->psw.cc = cc;
         program_check (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
     }
 
@@ -833,6 +836,7 @@ int     sign1, sign2, sign3;            /* Sign of operands & result */
     /* Program check if overflow and PSW program mask is set */
     if (cc == 3 && regs->psw.domask)
     {
+        regs->psw.cc = cc;
         program_check (regs, PGM_DECIMAL_OVERFLOW_EXCEPTION);
     }
 

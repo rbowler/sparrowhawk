@@ -17,6 +17,7 @@
 /*      breakpoint command contributed by Dan Horak                  */
 /*      devinit command contributed by Jay Maynard                   */
 /*      New Panel Display contributed by Dutch Owen                  */
+/*      HMC system console commands contributed by Jan Jaeger        */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -232,6 +233,8 @@ static void NP_screen(FILE *confp)
              strcat(devnam, " ebcdic");
          if (dev->ascii)
              strcat(devnam, " ascii");
+         if (dev->crlf)
+             strcat(devnam, " crlf");
          if (dev->trunc)
              strcat(devnam, " trunc");
          if (dev->rdreof)
@@ -530,6 +533,8 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
              strcat(devnam, " ebcdic");
          if (dev->ascii)
              strcat(devnam, " ascii");
+         if (dev->crlf)
+             strcat(devnam, " crlf");
          if (dev->trunc)
              strcat(devnam, " trunc");
          if (dev->rdreof)
@@ -1022,6 +1027,12 @@ BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
     cpu = 0;
     regs = sysblk.regs + cpu;
 
+#ifdef FEATURE_SYSTEM_CONSOLE
+ #define SYSCONS_CMD ".xxx=scp command, !xxx=scp priority messsage\n"
+#else
+ #define SYSCONS_CMD
+#endif /*FEATURE_SYSTEM_CONSOLE*/
+
     /* ? command - display help text */
     if (cmd[0] == '?')
     {
@@ -1041,6 +1052,7 @@ BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
             "loadparm xxxxxxxx=set IPL parameter, ipl devn=IPL\n"
             "devinit devn arg [arg...] = reinitialize device\n"
             "devlist=list devices\n"
+            SYSCONS_CMD
             "quit/exit=terminate, Esc=alternate panel display\n");
         return NULL;
     }
@@ -1087,6 +1099,16 @@ BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
         store_status (regs, 0);
         return NULL;
     }
+
+#ifdef FEATURE_SYSTEM_CONSOLE
+    /* .xxx and !xxx commands - send command or priority message
+       to SCP via the HMC system console facility */
+    if (cmd[0] == '.' || cmd[0] == '!')
+    {
+       scp_command (cmd+1, cmd[0] == '!');
+       return NULL;
+    }
+#endif /*FEATURE_SYSTEM_CONSOLE*/
 
     /* x+ and x- commands - turn switches on or off */
     if (cmd[1] == '+' || cmd[1] == '-')
@@ -1431,9 +1453,8 @@ BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
     {
         for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
         {
-            logmsg ("%4.4X %4.4X %d %s %s%s%s\n",
+            logmsg ("%4.4X %4.4X %s %s%s%s\n",
                     dev->devnum, dev->devtype,
-                    (int)(dev->tid),
                     ((dev->console && dev->connected) ?
                         (BYTE*)inet_ntoa(dev->ipaddr) : dev->filename),
                     (dev->fd > 2 ? "open " : ""),
@@ -1637,6 +1658,11 @@ int     maxfd;                          /* Highest file descriptor   */
 fd_set  readset;                        /* Select file descriptors   */
 struct  timeval tv;                     /* Select timeout structure  */
 #define INACTIVITY_INTERVAL     500     /* Interval in milliseconds  */
+
+    /* Display thread started message on control panel */
+    logmsg ("HHC650I Control panel thread started: "
+            "tid=%8.8lX, pid=%d\n",
+            thread_id(), getpid());
 
     /* Obtain storage for the circular message buffer */
     msgbuf = malloc (BUF_SIZE);
