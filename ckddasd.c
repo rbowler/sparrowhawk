@@ -183,12 +183,12 @@ CKDDASD_DEVHDR  devhdr;                 /* Device header             */
 
     /* Initialize the device identifier bytes */
     dev->devid[0] = 0xFF;
-    dev->devid[1] = 0x38; /* Control unit type is 3880-1 */
-    dev->devid[2] = 0x80;
-    dev->devid[3] = 0x01;
+    dev->devid[1] = 0x39; /* Control unit type is 3990-C2 */
+    dev->devid[2] = 0x90;
+    dev->devid[3] = 0xC2;
     dev->devid[4] = dev->devtype >> 8;
     dev->devid[5] = dev->devtype & 0xFF;
-    dev->devid[6] = 0x01;
+    dev->devid[6] = 0x16;
     dev->numdevid = 7;
 
     /* Activate I/O tracing */
@@ -370,15 +370,25 @@ static int ckd_read_count ( DEVBLK *dev, BYTE code,
 int             rc;                     /* Return code               */
 int             skiplen;                /* Number of bytes to skip   */
 int             skipr0 = 0;             /* 1=Skip record zero        */
-int             i;                      /* Loop counter              */
+U16             cyl;                    /* Cylinder number for seek  */
+U16             head;                   /* Head number for seek      */
+CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
 
     /* For Read Count and Read Count Key and Data, skip record zero */
     if ((code & 0x7F) == 0x12 || (code & 0x7F) == 0x1E)
         skipr0 = 1;
 
     /* Search for next count field */
-    for ( i=0; ; i++ )
+    for ( ; ; )
     {
+        /* Skip record 0 on if end of track already passed for all
+           operations except Search Id Equal/High/Equal or High */
+        if (dev->ckdxmark
+            && (code & 0x7F) != 0x31
+            && (code & 0x7F) != 0x51
+            && (code & 0x7F) != 0x71)
+            skipr0 = 1;
+
         /* If oriented to count or key field, skip key and data */
         if (dev->ckdorient == CKDORIENT_COUNT)
             skiplen = dev->ckdcurkl + dev->ckdcurdl;
@@ -424,33 +434,35 @@ int             i;                      /* Loop counter              */
         if (memcmp(rechdr, eighthexFF, 8) != 0)
             break;
 
-        /* No record found error if non-multitrack operation */
-        if ((code & 0x80) != 0x80)
+        /* No record found error if this is the second end of track
+           in this channel program without an intervening read of
+           the home address or data area, or without an intervening
+           write, sense, or control command */
+        if (dev->ckdxmark)
         {
             dev->sense[1] = SENSE1_NRF;
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
             return -1;
         }
 
-        /* No record found error if not within domain of Locate Record,
-           a track switch has already been done, and no record found */
-        if (dev->ckdlocat == 0 && i > 0)
+        /* Set index marker found flag */
+        dev->ckdxmark = 1;
+
+        /* Test for multitrack operation */
+        if ((code & 0x80) == 0)
         {
-            dev->sense[1] = SENSE1_NRF;
-            *unitstat = CSW_CE | CSW_DE | CSW_UC;
-            return -1;
+            /* If non-multitrack, return to start of current track */
+            cyl = dev->ckdcurcyl;
+            head = dev->ckdcurhead;
+            rc = ckd_seek (dev, cyl, head, &trkhdr, unitstat);
+            if (rc < 0) return -1;
         }
-
-        /* Attempt to advance to next track */
-        rc = mt_advance (dev, unitstat);
-        if (rc < 0) return -1;
-
-        /* Skip record 0 on subsequent tracks for all multitrack
-           operations except Search Id Equal/High/Equal or High */
-        if ((code & 0x7F) != 0x31
-            && (code & 0x7F) != 0x51
-            && (code & 0x7F) != 0x71)
-            skipr0 = 1;
+        else
+        {
+            /* If multitrack, attempt to advance to next track */
+            rc = mt_advance (dev, unitstat);
+            if (rc < 0) return -1;
+        }
 
     } /* end for */
 
@@ -586,7 +598,17 @@ BYTE            key[256];               /* Key for search operations */
         dev->ckdrecal = 0;
         dev->ckdrdipl = 0;
         dev->ckdfmask = 0;
+        dev->ckdxmark = 0;
     }
+
+    /* Reset index marker flag if write, sense, or control command,
+       or any read command except read count or read sector */
+    if (IS_CCW_WRITE(code) || IS_CCW_SENSE(code)
+        || IS_CCW_CONTROL(code)
+        || (IS_CCW_READ(code)
+            && (code & 0x7F) != 0x12
+            && (code & 0x7F) != 0x22))
+        dev->ckdxmark = 0;
 
     /* Process depending on CCW opcode */
     switch (code) {
@@ -870,8 +892,11 @@ BYTE            key[256];               /* Key for search operations */
 
         /* For multitrack operation outside domain of a Locate Record,
            attempt to advance to the next track before reading R0 */
-        rc = mt_advance (dev, unitstat);
-        if (rc < 0) break;
+        if ((code & 0x80) && dev->ckdlocat == 0)
+        {
+            rc = mt_advance (dev, unitstat);
+            if (rc < 0) break;
+        }
 
         /* Seek to beginning of track */
         rc = ckd_seek (dev, dev->ckdcurcyl, dev->ckdcurhead,
@@ -943,8 +968,11 @@ BYTE            key[256];               /* Key for search operations */
 
         /* For multitrack operation outside domain of a Locate Record,
            attempt to advance to the next track before reading HA */
-        rc = mt_advance (dev, unitstat);
-        if (rc < 0) break;
+        if ((code & 0x80) && dev->ckdlocat == 0)
+        {
+            rc = mt_advance (dev, unitstat);
+            if (rc < 0) break;
+        }
 
         /* Seek to beginning of track */
         rc = ckd_seek (dev, dev->ckdcurcyl, dev->ckdcurhead,

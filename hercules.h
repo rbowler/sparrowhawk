@@ -32,7 +32,7 @@
 /*-------------------------------------------------------------------*/
 /* ESA/390 features implemented                                      */
 /*-------------------------------------------------------------------*/
-#define CPU_ENGINES             4
+#define MAX_CPU_ENGINES         4
 #undef  FEATURE_S370_CHANNEL
 #define FEATURE_CHANNEL_SUBSYSTEM
 #define FEATURE_ALD_FORMAT      0
@@ -111,7 +111,9 @@ typedef struct _SYSBLK {
         BYTE   *xpndstor;               /* -> Expanded storage       */
         U64     cpuid;                  /* CPU identifier for STIDP  */
         U64     todclk;                 /* TOD clock                 */
-        REGS    regs[CPU_ENGINES];      /* Registers for each CPU    */
+        BYTE    loadparm[8];            /* IPL load parameter        */
+        U16     numcpu;                 /* Number of CPUs installed  */
+        REGS    regs[MAX_CPU_ENGINES];  /* Registers for each CPU    */
         LOCK    mainlock;               /* Main storage lock         */
         COND    intcond;                /* Interrupt condition       */
         LOCK    intlock;                /* Interrupt lock            */
@@ -121,7 +123,9 @@ typedef struct _SYSBLK {
         TID     tid3270;                /* Thread-id for tn3270d     */
         U16     port3270;               /* Port number for tn3270d   */
         struct _DEVBLK *firstdev;       /* -> First device block     */
+        U32     servparm;               /* Service signal parameter  */
         unsigned int                    /* Flags                     */
+                servsig:1,              /* 1=Service signal pending  */
                 insttrace:1,            /* 1=Instruction trace       */
                 inststep:1;             /* 1=Instruction step        */
     } SYSBLK;
@@ -215,7 +219,8 @@ typedef struct _DEVBLK {
                 ckdseek:1,              /* 1=Seek command processed  */
                 ckdskcyl:1,             /* 1=Seek cylinder processed */
                 ckdrecal:1,             /* 1=Recalibrate processed   */
-                ckdrdipl:1;             /* 1=Read IPL processed      */
+                ckdrdipl:1,             /* 1=Read IPL processed      */
+                ckdxmark:1;             /* 1=End of track mark found */
         U16     ckdcyls;                /* Number of cylinders       */
         U16     ckdtrks;                /* Number of tracks          */
         U16     ckdheads;               /* #of heads per cylinder    */
@@ -298,6 +303,10 @@ void instfetch (BYTE *dest, U32 addr, REGS *regs);
 #define ACCTYPE_TAR             4       /* Test Access               */
 #define ACCTYPE_LRA             5       /* Load Real Address         */
 #define ACCTYPE_TPROT           6       /* Test Protection           */
+
+/* Functions in module service.c */
+void perform_external_interrupt (REGS *regs);
+int  service_call (U32 sclp_command, U32 sccb_absolute_addr);
 
 /* Functions in module channel.c */
 int  start_io (DEVBLK *dev, U32 ccwaddr, int ccwfmt, BYTE ccwkey,

@@ -258,7 +258,8 @@ REGS   *regs = &(sysblk.regs[0]);
     }
 
     /* Trace the program check */
-    printf ("Program check CODE=%4.4X ILC=%d ", code, regs->psw.ilc);
+    printf ("Program check CODE=%4.4X ILC=%d ",
+            code, regs->psw.ilc);
     instfetch (dword, regs->psw.ia - regs->psw.ilc, regs);
     display_inst (regs, dword);
     panel_command (regs);
@@ -294,49 +295,6 @@ REGS   *regs = &(sysblk.regs[0]);
     longjmp (regs->progjmp, code);
 
 } /* end function program_check */
-
-/*-------------------------------------------------------------------*/
-/* Load external interrupt new PSW                                   */
-/*-------------------------------------------------------------------*/
-static void external_interrupt (int code, REGS *regs)
-{
-PSA    *psa;
-int     rc;
-DWORD   dword;
-
-    printf ("External interrupt CODE=%4.4X ILC=%d ",
-            code, regs->psw.ilc);
-    instfetch (dword, regs->psw.ia - regs->psw.ilc, regs);
-    display_inst (regs, dword);
-//  panel_command (regs);
-
-    /* Point to PSA in main storage */
-    psa = (PSA*)(sysblk.mainstor + regs->pxr);
-
-    /* Store current PSW at PSA+X'18' */
-    store_psw (&(regs->psw), psa->extold);
-
-    /* Store CPU address at PSA+X'84' */
-    psa->extcpad[0] = regs->cpuad >> 8;
-    psa->extcpad[1] = regs->cpuad & 0xFF;
-
-    /* Store external interruption code at PSA+X'86' */
-    psa->extint[0] = code >> 8;
-    psa->extint[1] = code & 0xFF;
-
-    /* Load new PSW from PSA+X'58' */
-    rc = load_psw (&(regs->psw), psa->extnew);
-    if ( rc )
-    {
-        printf ("Invalid external interrupt new PSW: "
-                "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
-                psa->extnew[0], psa->extnew[1], psa->extnew[2],
-                psa->extnew[3], psa->extnew[4], psa->extnew[5],
-                psa->extnew[6], psa->extnew[7]);
-        exit(1);
-    }
-
-} /* end function external_interrupt */
 
 /*-------------------------------------------------------------------*/
 /* Execute an instruction                                            */
@@ -392,33 +350,6 @@ ESW     esw;                            /* Extended status word      */
 FWORD   fword;                          /* Fullword work area        */
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
-//  if (regs->psw.ecmode && (regs->psw.sysmask & PSW_DATMODE)) {
-//      printf ("Entering DAT mode\n");
-//      sysblk.inststep = 1;
-//  }
-
-    /* Decrement the CPU timer and external interrupt if negative */
-    (S64)regs->timer -= 0x1000;
-    if ((S64)regs->timer < 0
-        && (regs->psw.sysmask & PSW_EXTMASK)
-        && (regs->cr[0] & CR0_XM_PTIMER))
-    {
-        printf ("External interrupt: CPU timer=%16.16llX\n",
-                regs->timer);
-        external_interrupt (EXT_CPU_TIMER_INTERRUPT, regs);
-        return;
-    }
-
-    /* External interrupt if TOD clock exceeds clock comparator */
-    if (sysblk.todclk > regs->clkc
-        && (regs->psw.sysmask & PSW_EXTMASK)
-        && (regs->cr[0] & CR0_XM_CLKC))
-    {
-        printf ("External interrupt: Clock comparator\n");
-        external_interrupt (EXT_CLOCK_COMPARATOR_INTERRUPT, regs);
-        return;
-    }
-
     /* Extract the opcode and R1/R2/I fields */
     opcode = inst[0];
     ibyte = inst[1];
@@ -464,6 +395,8 @@ FWORD   fword;                          /* Fullword work area        */
         ar2 = b2;
         alet2 = regs->ar[ar2];
     }
+
+    if (opcode == 0xB2 && ibyte == 0x20) sysblk.inststep = 1;
 
     /* Display the instruction */
     if (sysblk.insttrace || sysblk.inststep)
@@ -3471,6 +3404,30 @@ FWORD   fword;                          /* Fullword work area        */
 
             break;
 
+        case 0x20:
+        /*-----------------------------------------------------------*/
+        /* B220: Service Call                                  [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Program check if in problem state */
+            if ( regs->psw.prob )
+            {
+                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+                goto terminate;
+            }
+
+            /* R1 is SCLP command word */
+            n1 = regs->gpr[r1];
+
+            /* R2 is real address of service call control block */
+            n2 = regs->gpr[r2];
+            n2 = APPLY_PREFIXING (n2, regs->pxr);
+
+            /* Call service processor and set condition code */
+            regs->psw.cc = service_call ( n1, n2 );
+
+            break;
+
         case 0x22:
         /*-----------------------------------------------------------*/
         /* B222: IPM - Insert Program Mask                     [RRE] */
@@ -5819,6 +5776,7 @@ DWORD   csw;                            /* CSW for S/370 channels    */
 /*-------------------------------------------------------------------*/
 void start_cpu (U32 pswaddr, REGS *regs)
 {
+PSA    *psa;                            /* -> Prefixed storage area  */
 DWORD   dword;                          /* Doubleword work area      */
 #ifdef INSTRUCTION_COUNTING
 struct {
@@ -5862,6 +5820,11 @@ int     icidx;                          /* Instruction counter index */
 
         /* Obtain the interrupt lock */
         obtain_lock (&sysblk.intlock);
+
+        /* If enabled for external interrupts, invite the
+           service processor to present a pending interrupt */
+        if (regs->psw.sysmask & PSW_EXTMASK)
+            perform_external_interrupt (regs);
 
         /* If enabled for I/O interrupts, invite the channel
            subsystem to present a pending interrupt */

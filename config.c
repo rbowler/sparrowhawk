@@ -128,12 +128,15 @@ BYTE   *sserial;                        /* -> CPU serial string      */
 BYTE   *smainsize;                      /* -> Main size string       */
 BYTE   *sxpndsize;                      /* -> Expanded size string   */
 BYTE   *sport3270;                      /* -> Port number for tn3270d*/
+BYTE   *snumcpu;                        /* -> Number of CPUs         */
+BYTE   *sloadparm;                      /* -> IPL load parameter     */
 BYTE    version = 0x00;                 /* CPU version code          */
 U32     serial;                         /* CPU serial number         */
 U16     model = 0x0586;                 /* CPU model number          */
 U16     mainsize;                       /* Main storage size (MB)    */
 U16     xpndsize;                       /* Expanded storage size (MB)*/
 U16     port3270;                       /* Port number for tn3270d   */
+U16     numcpu;                         /* Number of CPUs            */
 BYTE   *sdevnum;                        /* -> Device number string   */
 BYTE   *sdevtype;                       /* -> Device type string     */
 U16     devnum;                         /* Device number             */
@@ -172,9 +175,11 @@ int     subchan;                        /* Subchannel number         */
     smainsize = strtok (NULL, " \t\n");
     sxpndsize = strtok (NULL, " \t\n");
     sport3270 = strtok (NULL, " \t\n");
+    snumcpu = strtok (NULL, " \t\n");
+    sloadparm = strtok (NULL, " \t\n");
 
     if (sserial == NULL || smainsize == NULL || sxpndsize == NULL
-        || sport3270 == NULL)
+        || sport3270 == NULL || snumcpu == NULL || sloadparm == NULL)
     {
         fprintf (stderr,
                 "HHC005I Error in %s line %d: Missing fields\n",
@@ -193,7 +198,7 @@ int     subchan;                        /* Subchannel number         */
     }
 
     if (sscanf(smainsize, "%hu%c", &mainsize, &c) != 1
-        || mainsize == 0)
+        || mainsize < 2 || mainsize > 256)
     {
         fprintf (stderr,
                 "HHC007I Error in %s line %d: "
@@ -202,7 +207,8 @@ int     subchan;                        /* Subchannel number         */
         exit(1);
     }
 
-    if (sscanf(sxpndsize, "%hu%c", &xpndsize, &c) != 1)
+    if (sscanf(sxpndsize, "%hu%c", &xpndsize, &c) != 1
+        || xpndsize > 1024)
     {
         fprintf (stderr,
                 "HHC008I Error in %s line %d: "
@@ -221,11 +227,31 @@ int     subchan;                        /* Subchannel number         */
         exit(1);
     }
 
+    if (sscanf(snumcpu, "%hu%c", &numcpu, &c) != 1
+        || numcpu < 1 || numcpu > MAX_CPU_ENGINES)
+    {
+        fprintf (stderr,
+                "HHC010I Error in %s line %d: "
+                "Invalid number of CPUs %s\n",
+                fname, stmt, snumcpu);
+        exit(1);
+    }
+
+    if (strlen(sloadparm) > 8)
+    {
+        fprintf (stderr,
+                "HHC011I Error in %s line %d: "
+                "Load parameter %s exceeds 8 characters\n",
+                fname, stmt, sloadparm);
+        exit(1);
+    }
+
     /* Clear the system configuration block */
     memset (&sysblk, 0, sizeof(SYSBLK));
 
     /* Initialize the CPU registers */
-    for (i = 0; i < CPU_ENGINES; i++)
+    sysblk.numcpu = numcpu;
+    for (i = 0; i < MAX_CPU_ENGINES; i++)
     {
         sysblk.regs[i].cpuad = i;
     } /* end for(i) */
@@ -236,7 +262,7 @@ int     subchan;                        /* Subchannel number         */
     if (sysblk.mainstor == NULL)
     {
         fprintf (stderr,
-                "HHC010I Cannot obtain %dMB main storage: %s\n",
+                "HHC012I Cannot obtain %dMB main storage: %s\n",
                 mainsize, strerror(errno));
         exit(1);
     }
@@ -246,7 +272,7 @@ int     subchan;                        /* Subchannel number         */
     if (sysblk.storkeys == NULL)
     {
         fprintf (stderr,
-                "HHC011I Cannot obtain storage key array: %s\n",
+                "HHC013I Cannot obtain storage key array: %s\n",
                 strerror(errno));
         exit(1);
     }
@@ -257,7 +283,7 @@ int     subchan;                        /* Subchannel number         */
     if (sysblk.xpndstor == NULL)
     {
         fprintf (stderr,
-                "HHC012I Cannot obtain %dMB expanded storage: %s\n",
+                "HHC014I Cannot obtain %dMB expanded storage: %s\n",
                 xpndsize, strerror(errno));
         exit(1);
     }
@@ -269,6 +295,11 @@ int     subchan;                        /* Subchannel number         */
     sysblk.cpuid = ((U64)version << 56)
                  | ((U64)serial << 32)
                  | (model << 16);
+
+    /* Set the load parameter */
+    memset (sysblk.loadparm, 0x4B, 8);
+    for (i = 0; i < strlen(sloadparm); i++)
+        sysblk.loadparm[i] = ascii_to_ebcdic[sloadparm[i]];
 
     /* Initialize locks, conditions, and attributes */
     initialize_lock (&sysblk.mainlock);
@@ -293,7 +324,7 @@ int     subchan;                        /* Subchannel number         */
         if (sdevnum == NULL || sdevtype == NULL)
         {
             fprintf (stderr,
-                    "HHC013I Error in %s line %d: "
+                    "HHC015I Error in %s line %d: "
                     "Missing device number or device type\n",
                     fname, stmt);
             exit(1);
@@ -303,7 +334,7 @@ int     subchan;                        /* Subchannel number         */
             || sscanf(sdevnum, "%hx%c", &devnum, &c) != 1)
         {
             fprintf (stderr,
-                    "HHC014I Error in %s line %d: "
+                    "HHC016I Error in %s line %d: "
                     "%s is not a valid device number\n",
                     fname, stmt, sdevnum);
             exit(1);
@@ -312,7 +343,7 @@ int     subchan;                        /* Subchannel number         */
         if (sscanf(sdevtype, "%hx%c", &devtype, &c) != 1)
         {
             fprintf (stderr,
-                    "HHC015I Error in %s line %d: "
+                    "HHC017I Error in %s line %d: "
                     "%s is not a valid device type\n",
                     fname, stmt, sdevtype);
             exit(1);
@@ -364,7 +395,7 @@ int     subchan;                        /* Subchannel number         */
 
         default:
             fprintf (stderr,
-                    "HHC016I Error in %s line %d: "
+                    "HHC018I Error in %s line %d: "
                     "Device type %4.4X not recognized\n",
                     fname, stmt, devtype);
             exit(1);
@@ -375,7 +406,7 @@ int     subchan;                        /* Subchannel number         */
         if (dev == NULL)
         {
             fprintf (stderr,
-                    "HHC017I Cannot obtain device block "
+                    "HHC019I Cannot obtain device block "
                     "for device %4.4X: %s\n",
                     devnum, strerror(errno));
             exit(1);
@@ -406,7 +437,7 @@ int     subchan;                        /* Subchannel number         */
         if (rc < 0)
         {
             fprintf (stderr,
-                    "HHC018I Error in %s line %d: "
+                    "HHC020I Error in %s line %d: "
                     "Device initialization failed for device %4.4X\n",
                     fname, stmt, devnum);
             exit(1);
@@ -419,7 +450,7 @@ int     subchan;                        /* Subchannel number         */
             if (dev->buf == NULL)
             {
                 fprintf (stderr,
-                        "HHC019I Cannot obtain buffer "
+                        "HHC021I Cannot obtain buffer "
                         "for device %4.4X: %s\n",
                         dev->devnum, strerror(errno));
                 exit(1);
@@ -437,7 +468,7 @@ int     subchan;                        /* Subchannel number         */
     if (sysblk.firstdev == NULL)
     {
         fprintf (stderr,
-                "HHC019I No device records in file %s\n",
+                "HHC022I No device records in file %s\n",
                 fname);
         exit(1);
     }

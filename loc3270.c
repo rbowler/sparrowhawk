@@ -494,7 +494,7 @@ BYTE                    buf[512];       /* Message buffer            */
 
     /* Send connection message to client */
     len = sprintf (buf,
-                "Connected to Hercules ESA/390 %s at %s (%s %s)\r\n",
+                "Connected to Hercules %s at %s (%s %s)\r\n",
                 MSTRING(VERSION), hostinfo.nodename,
                 hostinfo.sysname, hostinfo.release);
     rc = send_packet (dev->csock, buf, len, NULL);

@@ -1,6 +1,11 @@
 /* CHANNEL.C    (c) Copyright Roger Bowler, 1999                     */
 /*              ESA/390 Channel Emulator                             */
 
+/*-------------------------------------------------------------------*/
+/* This module contains the channel subsystem functions for the      */
+/* Hercules ESA/390 emulator.                                        */
+/*-------------------------------------------------------------------*/
+
 #include "hercules.h"
 
 /*-------------------------------------------------------------------*/
