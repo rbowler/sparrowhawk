@@ -195,7 +195,7 @@ int     rc;
     rc = load_psw (&(regs->psw), psa->extnew);
     if ( rc )
     {
-        printf ("Invalid external interrupt new PSW: "
+        logmsg ("Invalid external interrupt new PSW: "
                 "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
                 psa->extnew[0], psa->extnew[1], psa->extnew[2],
                 psa->extnew[3], psa->extnew[4], psa->extnew[5],
@@ -213,12 +213,12 @@ void perform_external_interrupt (REGS *regs)
 PSA    *psa;                            /* -> Prefixed storage area  */
 
     /* External interrupt if CPU timer is negative */
-    if ((S64)regs->timer < 0
+    if ((S64)regs->ptimer < 0
         && (regs->psw.sysmask & PSW_EXTMASK)
         && (regs->cr[0] & CR0_XM_PTIMER))
     {
-        printf ("External interrupt: CPU timer=%16.16llX\n",
-                regs->timer);
+        logmsg ("External interrupt: CPU timer=%16.16llX\n",
+                regs->ptimer);
         external_interrupt (EXT_CPU_TIMER_INTERRUPT, regs);
         return;
     }
@@ -228,17 +228,29 @@ PSA    *psa;                            /* -> Prefixed storage area  */
         && (regs->psw.sysmask & PSW_EXTMASK)
         && (regs->cr[0] & CR0_XM_CLKC))
     {
-        printf ("External interrupt: Clock comparator\n");
+        logmsg ("External interrupt: Clock comparator\n");
         external_interrupt (EXT_CLOCK_COMPARATOR_INTERRUPT, regs);
         return;
     }
+
+#ifdef FEATURE_INTERVAL_TIMER
+    if (regs->itimer_pending
+        && (regs->psw.sysmask & PSW_EXTMASK)
+        && (regs->cr[0] & CR0_XM_ITIMER))
+    {
+        logmsg ("External interrupt: Interval timer\n");
+        external_interrupt (EXT_INTERVAL_TIMER_INTERRUPT, regs);
+        regs->itimer_pending = 0;
+        return;
+    }
+#endif /*FEATURE_INTERVAL_TIMER*/
 
     /* External interrupt if service signal is pending */
     if (sysblk.servsig
         && (regs->psw.sysmask & PSW_EXTMASK)
         && (regs->cr[0] & CR0_XM_SERVSIG))
     {
-        printf ("External interrupt: Service signal %8.8lX\n",
+        logmsg ("External interrupt: Service signal %8.8lX\n",
                 sysblk.servparm);
 
         /* Store service signal parameter at PSA+X'80' */
@@ -261,7 +273,7 @@ PSA    *psa;                            /* -> Prefixed storage area  */
         && (regs->psw.sysmask & PSW_EXTMASK)
         && (regs->cr[0] & CR0_XM_INTKEY))
     {
-        printf ("External interrupt: Interrupt key\n");
+        logmsg ("External interrupt: Interrupt key\n");
 
         /* Reset interrupt key pending */
         sysblk.intkey = 0;
@@ -300,7 +312,7 @@ U16             offset;                 /* Offset from start of SCCB */
         return 3;
     }
 
-    /*debug*/printf("Service call %8.8lX SCCB=%8.8lX\n",
+    /*debug*/logmsg("Service call %8.8lX SCCB=%8.8lX\n",
     /*debug*/       sclp_command, sccb_absolute_addr);
 
     /* Point to service call control block */
@@ -442,6 +454,11 @@ U16             offset;                 /* Offset from start of SCCB */
 /*-------------------------------------------------------------------*/
 void *timer_update_thread (void *argp)
 {
+#ifdef FEATURE_INTERVAL_TIMER
+PSA    *psa;                            /* -> Prefixed storage area  */
+S32     itimer;                         /* Interval timer value      */
+S32     olditimer;                      /* Previous interval timer   */
+#endif /*FEATURE_INTERVAL_TIMER*/
 int     cpu;                            /* CPU engine number         */
 REGS   *regs;                           /* -> CPU register context   */
 int     intflag = 0;                    /* 1=Interrupt possible      */
@@ -451,8 +468,12 @@ U64     diff;                           /* Difference between new and
 U64     dreg;                           /* Double register work area */
 struct  timeval tv;                     /* Structure for gettimeofday
                                            and select function calls */
-#define CLOCK_RESOLUTION        1       /* TOD clock resolution in
+#define CLOCK_RESOLUTION        10      /* TOD clock resolution in
                                            milliseconds              */
+
+    /* Display thread started message on control panel */
+//  logmsg ("HHC610I Timer thread started: id=%ld\n",
+//          thread_id());
 
     while (1)
     {
@@ -492,13 +513,38 @@ struct  timeval tv;                     /* Structure for gettimeofday
             regs = sysblk.regs + cpu;
 
             /* Decrement the CPU timer */
-            (S64)regs->timer -= diff;
+            (S64)regs->ptimer -= diff;
 
             /* Set interrupt flag if the CPU timer is negative or
                if the TOD clock value exceeds the clock comparator */
-            if ((S64)regs->timer < 0
+            if ((S64)regs->ptimer < 0
                 || sysblk.todclk > regs->clkc)
                 intflag = 1;
+
+#ifdef FEATURE_INTERVAL_TIMER
+            /* Point to PSA in main storage */
+            psa = (PSA*)(sysblk.mainstor + regs->pxr);
+
+            /* Decrement bit position 26 of the location 80 timer */
+            itimer = (S32)(((U32)(psa->inttimer[0]) << 24)
+                                | ((U32)(psa->inttimer[1]) << 16)
+                                | ((U32)(psa->inttimer[2]) << 8)
+                                | (U32)(psa->inttimer[3]));
+            olditimer = itimer;
+            itimer -= 32 * CLOCK_RESOLUTION;
+            psa->inttimer[0] = ((U32)itimer >> 24) & 0xFF;
+            psa->inttimer[1] = ((U32)itimer >> 16) & 0xFF;
+            psa->inttimer[2] = ((U32)itimer >> 8) & 0xFF;
+            psa->inttimer[3] = (U32)itimer & 0xFF;
+
+            /* Set interrupt flag and interval timer interrupt pending
+               if the interval timer went from positive to negative */
+            if (itimer < 0 && olditimer > 0)
+            {
+                intflag = 1;
+                regs->itimer_pending = 1;
+            }
+#endif /*FEATURE_INTERVAL_TIMER*/
 
         } /* end for(cpu) */
 

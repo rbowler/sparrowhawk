@@ -3,75 +3,45 @@
 
 /*-------------------------------------------------------------------*/
 /* This module implements the Initial Program Load (IPL) function    */
-/* of the ESA/390 architecture, described in the manual              */
-/* SA22-7201-04 ESA/390 Principles of Operation.                     */
+/* of the S/370 and ESA/390 architectures, described in the manuals  */
+/* GA22-7000-03 System/370 Principles of Operation                   */
+/* SA22-7201-04 ESA/390 Principles of Operation                      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
 
 /*-------------------------------------------------------------------*/
-/* IPL main entry point                                              */
+/* Function to run initial CCW chain from IPL device and load IPLPSW */
+/* Returns 0 if successful, -1 if error                              */
 /*-------------------------------------------------------------------*/
-int main (int argc, char *argv[])
+int load_ipl (U16 devnum, REGS *regs)
 {
-U16     devnum;                         /* Device number             */
+int     rc;                             /* Return code               */
+int     i;                              /* Array subscript           */
+int     cpu;                            /* CPU number                */
 DEVBLK *dev;                            /* -> Device control block   */
 PSA    *psa;                            /* -> Prefixed storage area  */
-BYTE    c;                              /* Work area for sscanf      */
-int     stop = 0;                       /* 1=STOP argument present   */
 BYTE    unitstat;                       /* IPL device unit status    */
 BYTE    chanstat;                       /* IPL device channel status */
-int     i;                              /* Array subscript           */
-REGS   *regs;                           /* -> CPU register context   */
 
-    /* Display the version identifier */
-    printf ("Hercules %s version %s "
-            "(c)Copyright Roger Bowler, 1994-1999\n",
-            ARCHITECTURE_NAME, MSTRING(VERSION));
+    /* Perform CPU reset */
+    for (cpu = 0; cpu < sysblk.numcpu; cpu++)
+        cpu_reset (sysblk.regs + cpu);
 
-    /* Obtain IPL device number from argument */
-    if (argc < 2 || strlen(argv[1]) > 4) {
-        fprintf (stderr,
-                "HHC100I Usage: %s xxxx [stop]\n"
-                "\twhere xxxx=IPL device number\n",
-                argv[0]);
-        exit(1);
-    }
-
-    if (sscanf(argv[1], "%hx%c", &devnum, &c) != 1) {
-        fprintf (stderr,
-                "HHC101I %s is not a valid device number\n",
-                argv[1]);
-        exit(1);
-    }
-
-    if (argc > 2) {
-        if (strcasecmp(argv[2], "stop") != 0) {
-            fprintf (stderr,
-                    "HHC102I %s parameter invalid\n",
-                    argv[2]);
-            exit(1);
-        }
-        stop = 1;
-    }
-
-    /* Build system configuration */
-    build_config ("hercules.cnf");
+    /* Perform I/O reset */
+    io_reset ();
 
     /* Point to the device block for the IPL device */
     dev = find_device_by_devnum (devnum);
-    if (dev == NULL) {
-        fprintf (stderr,
-                "HHC103I Device %4.4X not in configuration\n",
+    if (dev == NULL)
+    {
+        logmsg ("HHC103I Device %4.4X not in configuration\n",
                 devnum);
-        exit(1);
+        return -1;
     }
 
-    /* Point to the register context for CPU 0 */
-    regs = &(sysblk.regs[0]);
-
     /* Point to the PSA in main storage */
-    psa = (PSA*)(sysblk.mainstor);
+    psa = (PSA*)(sysblk.mainstor + regs->pxr);
 
     /* Build the IPL CCW at location 0 */
     psa->iplpsw[0] = 0x02;              /* CCW command = Read */
@@ -109,22 +79,20 @@ REGS   *regs;                           /* -> CPU register context   */
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
     if (unitstat != (CSW_CE | CSW_DE) || chanstat != 0) {
-        fprintf (stderr,
-                "HHC105I IPL failed, CSW status=%2.2X%2.2X\n",
+        logmsg ("HHC105I IPL failed: CSW status=%2.2X%2.2X\n",
                 unitstat, chanstat);
-        fprintf (stderr,
-                "HHC106I Sense=");
+        logmsg ("HHC106I Sense=");
         for (i=0; i < dev->numsense; i++)
         {
-            fprintf (stderr, "%2.2X", dev->sense[i]);
-            if ((i & 3) == 3) fprintf (stderr, " ");
+            logmsg ("%2.2X", dev->sense[i]);
+            if ((i & 3) == 3) logmsg(" ");
         }
-        fprintf (stderr, "\n");
-        exit(1);
+        logmsg ("\n");
+        return -1;
     }
 
     /* Reset CCW tracing for the IPL device */
-//  dev->ccwtrace = 0;
+    dev->ccwtrace = 0;
 
     /* Clear the interrupt pending and device busy conditions */
     dev->pending = 0;
@@ -161,18 +129,70 @@ REGS   *regs;                           /* -> CPU register context   */
     memset (psa->ioparm, 0, 4);
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
-    /* Wait for loc3270 to connect a console */
-    obtain_lock (&sysblk.conslock);
-    wait_condition (&sysblk.conscond, &sysblk.conslock);
-    release_lock (&sysblk.conslock);
-    fprintf (stderr,
-            "HHC107I IPL proceeding\n");
+    /* Zeroize the interrupt code in the PSW */
+    regs->psw.intcode = 0;
 
-    /* Set single-instruction stepping if STOP was specified */
-    if (stop) sysblk.inststep = 1;
+    /* Point to PSA in main storage */
+    psa = (PSA*)(sysblk.mainstor + regs->pxr);
 
-    /* Start CPU 0 using initial PSW at location 0 */
-    start_cpu (0, regs);
+    /* Load IPL PSW from PSA+X'0' */
+    rc = load_psw (&(regs->psw), psa->iplpsw);
+    if ( rc )
+    {
+        logmsg ("HHC107I IPL failed: Invalid IPL PSW: "
+                "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
+                psa->iplpsw[0], psa->iplpsw[1], psa->iplpsw[2],
+                psa->iplpsw[3], psa->iplpsw[4], psa->iplpsw[5],
+                psa->iplpsw[6], psa->iplpsw[7]);
+        return -1;
+    }
+
+    /* Set the CPU into the started state */
+    regs->cpustate = CPUSTATE_STARTED;
+
+    /* Signal all CPUs to retest stopped indicator */
+    obtain_lock (&sysblk.intlock);
+    signal_condition (&sysblk.intcond);
+    release_lock (&sysblk.intlock);
 
     return 0;
-} /* end function main */
+} /* end function load_ipl */
+
+/*-------------------------------------------------------------------*/
+/* Function to perform CPU reset                                     */
+/*-------------------------------------------------------------------*/
+void cpu_reset (REGS *regs)
+{
+    /* Clear the registers */
+    memset (&regs->psw, 0, sizeof(PSW));
+    memset (regs->gpr, 0, sizeof(regs->gpr));
+    memset (regs->cr, 0, sizeof(regs->cr));
+    memset (regs->ar, 0, sizeof(regs->ar));
+    memset (regs->fpr, 0, sizeof(regs->fpr));
+    regs->pxr = 0;
+    regs->itimer_pending = 0;
+    regs->restart = 0;
+    regs->ptimer = 0;
+    regs->clkc = 0;
+    regs->instcount = 0;
+
+    /* Initialize external interrupt masks in control register 0 */
+    regs->cr[0] = CR0_XM_ITIMER | CR0_XM_INTKEY | CR0_XM_EXTSIG;
+
+#ifdef FEATURE_S370_CHANNEL
+    /* For S/370 initialize the channel masks in CR2 */
+    regs->cr[2] = 0xFFFFFFFF;
+#endif /*FEATURE_S370_CHANNEL*/
+
+    /* Initialize the machine check masks in control register 14 */
+    regs->cr[14] = CR14_CHKSTOP | CR14_SYNCMCEL | CR14_XDMGRPT;
+
+#ifndef FEATURE_LINKAGE_STACK
+    /* For S/370 initialize the MCEL address in CR15 */
+    regs->cr[15] = 512;
+#endif /*!FEATURE_LINKAGE_STACK*/
+
+    /* Put the CPU into the stopped state */
+    regs->cpustate = CPUSTATE_STOPPED;
+
+} /* end function cpu_reset */

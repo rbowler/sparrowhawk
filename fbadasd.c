@@ -43,7 +43,8 @@ struct  stat statbuf;                   /* File information          */
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
     {
-        printf ("HHC301I File name missing or invalid\n");
+        fprintf (stderr,
+                "HHC301I File name missing or invalid\n");
         return -1;
     }
 
@@ -54,7 +55,8 @@ struct  stat statbuf;                   /* File information          */
     dev->fd = open (dev->filename, O_RDWR);
     if (dev->fd < 0)
     {
-        printf ("HHC302I File %s open error: %s\n",
+        fprintf (stderr,
+                "HHC302I File %s open error: %s\n",
                 dev->filename, strerror(errno));
         return -1;
     }
@@ -63,7 +65,8 @@ struct  stat statbuf;                   /* File information          */
     rc = fstat (dev->fd, &statbuf);
     if (rc < 0)
     {
-        printf ("HHC303I File %s fstat error: %s\n",
+        fprintf (stderr,
+                "HHC303I File %s fstat error: %s\n",
                 dev->filename, strerror(errno));
         return -1;
     }
@@ -161,7 +164,8 @@ int     rem;                            /* Byte count for zero fill  */
         if (rc < 0)
         {
             /* Handle seek error condition */
-            perror("fbadasd: lseek error");
+            logmsg ("fbadasd: lseek error: %s\n",
+                    strerror(errno));
 
             /* Set unit check with equipment check */
             dev->sense[0] = SENSE_EC;
@@ -188,9 +192,10 @@ int     rem;                            /* Byte count for zero fill  */
         {
             /* Handle read error condition */
             if (rc < 0)
-                perror("fbadasd: read error");
+                logmsg ("fbadasd: read error: %s\n",
+                        strerror(errno));
             else
-                printf("fbadasd: unexpected end of file\n");
+                logmsg ("fbadasd: unexpected end of file\n");
 
             /* Set unit check with equipment check */
             dev->sense[0] = SENSE_EC;
@@ -257,7 +262,8 @@ int     rem;                            /* Byte count for zero fill  */
                 if (rc < num)
                 {
                     /* Handle write error condition */
-                    perror("fbadasd: write error");
+                    logmsg ("fbadasd: write error: %s\n",
+                            strerror(errno));
 
                     /* Set unit check with equipment check */
                     dev->sense[0] = SENSE_EC;
@@ -274,7 +280,8 @@ int     rem;                            /* Byte count for zero fill  */
                 if (rc < rem)
                 {
                     /* Handle write error condition */
-                    perror("fbadasd: write error");
+                    logmsg ("fbadasd: write error: %s\n",
+                            strerror(errno));
 
                     /* Set unit check with equipment check */
                     dev->sense[0] = SENSE_EC;
@@ -339,9 +346,10 @@ int     rem;                            /* Byte count for zero fill  */
             {
                 /* Handle read error condition */
                 if (rc < 0)
-                    perror("fbadasd: read error");
+                    logmsg ("fbadasd: read error: %s\n",
+                            strerror(errno));
                 else
-                    printf("fbadasd: unexpected end of file\n");
+                    logmsg ("fbadasd: unexpected end of file\n");
 
                 /* Set unit check with equipment check */
                 dev->sense[0] = SENSE_EC;
@@ -455,14 +463,14 @@ int     rem;                            /* Byte count for zero fill  */
         rba = (dev->fbalcblk - dev->fbaxfirst
                 + dev->fbaxblkn) * dev->fbablksiz;
 
-        printf ("fbadasd: Positioning to %8.8lx (%lu)\n", /*debug*/
-                rba, rba);                                /*debug*/
+        DEVTRACE("fbadasd: Positioning to %8.8lx (%lu)\n", rba, rba);
 
         rc = lseek (dev->fd, rba, SEEK_SET);
         if (rc < 0)
         {
             /* Handle seek error condition */
-            perror("fbadasd: lseek error");
+            logmsg ("fbadasd: lseek error: %s\n",
+                    strerror(errno));
 
             /* Set unit check with equipment check */
             dev->sense[0] = SENSE_EC;

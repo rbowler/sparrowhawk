@@ -139,8 +139,8 @@ int     i;                              /* Array subscript           */
     memcpy (&lsed, sysblk.mainstor+absold, sizeof(LSED));
 
 #ifdef STACK_DEBUG
-    printf ("stack: Current stack entry at %8.8lX\n", lsea);
-    printf ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X nes=%2.2X%2.2X\n",
+    logmsg ("stack: Current stack entry at %8.8lX\n", lsea);
+    logmsg ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X nes=%2.2X%2.2X\n",
             lsed.uet, lsed.si, lsed.rfs[0],
             lsed.rfs[1], lsed.nes[0], lsed.nes[1]);
 #endif /*STACK_DEBUG*/
@@ -168,7 +168,7 @@ int     i;                              /* Array subscript           */
                 | sysblk.mainstor[abs+7];
 
 #ifdef STACK_DEBUG
-        printf ("stack: Forward section header addr %8.8lX\n", fsha);
+        logmsg ("stack: Forward section header addr %8.8lX\n", fsha);
 #endif /*STACK_DEBUG*/
 
         /* Stack full exception if forward address is not valid */
@@ -187,7 +187,7 @@ int     i;                              /* Array subscript           */
         memcpy (&lsed, sysblk.mainstor+abs, sizeof(LSED));
 
 #ifdef STACK_DEBUG
-        printf ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X "
+        logmsg ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X "
                 "nes=%2.2X%2.2X\n",
                 lsed.uet, lsed.si, lsed.rfs[0],
                 lsed.rfs[1], lsed.nes[0], lsed.nes[1]);
@@ -230,7 +230,7 @@ int     i;                              /* Array subscript           */
     lsea &= 0x7FFFFFFF;
 
 #ifdef STACK_DEBUG
-    printf ("stack: New stack entry at %8.8lX\n", lsea);
+    logmsg ("stack: New stack entry at %8.8lX\n", lsea);
 #endif /*STACK_DEBUG*/
 
     /* Store general registers 0-15 in bytes 0-63 of the new entry */
@@ -244,7 +244,7 @@ int     i;                              /* Array subscript           */
         sysblk.mainstor[abs+3] = regs->gpr[i] & 0xFF;
 
 #ifdef STACK_DEBUG
-        printf ("stack: GPR%d=%8.8lX stored at V:%8.8lX A:%8.8lX\n",
+        logmsg ("stack: GPR%d=%8.8lX stored at V:%8.8lX A:%8.8lX\n",
                 i, regs->gpr[i], lsea, abs);
 #endif /*STACK_DEBUG*/
 
@@ -269,7 +269,7 @@ int     i;                              /* Array subscript           */
         sysblk.mainstor[abs+3] = regs->ar[i] & 0xFF;
 
 #ifdef STACK_DEBUG
-        printf ("stack: AR%d=%8.8lX stored at V:%8.8lX A:%8.8lX\n",
+        logmsg ("stack: AR%d=%8.8lX stored at V:%8.8lX A:%8.8lX\n",
                 i, regs->ar[i], lsea, abs);
 #endif /*STACK_DEBUG*/
 
@@ -313,7 +313,7 @@ int     i;                              /* Array subscript           */
     sysblk.mainstor[abs+7] = retna & 0xFF;
 
 #ifdef STACK_DEBUG
-    printf ("stack: PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X "
+    logmsg ("stack: PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X "
             "stored at V:%8.8lX A:%8.8lX\n",
             sysblk.mainstor[abs], sysblk.mainstor[abs+1],
             sysblk.mainstor[abs+2], sysblk.mainstor[abs+3],
@@ -370,8 +370,8 @@ int     i;                              /* Array subscript           */
     memcpy (sysblk.mainstor+abs, &lsed2, sizeof(LSED));
 
 #ifdef STACK_DEBUG
-    printf ("stack: New stack entry at %8.8lX\n", lsea);
-    printf ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X nes=%2.2X%2.2X\n",
+    logmsg ("stack: New stack entry at %8.8lX\n", lsea);
+    logmsg ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X nes=%2.2X%2.2X\n",
             lsed2.uet, lsed2.si, lsed2.rfs[0],
             lsed2.rfs[1], lsed2.nes[0], lsed2.nes[1]);
 #endif /*STACK_DEBUG*/
@@ -382,9 +382,9 @@ int     i;                              /* Array subscript           */
     memcpy (sysblk.mainstor+absold, &lsed, sizeof(LSED));
 
 #ifdef STACK_DEBUG
-    printf ("stack: Previous stack entry updated at A:%8.8lX\n",
+    logmsg ("stack: Previous stack entry updated at A:%8.8lX\n",
             absold);
-    printf ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X nes=%2.2X%2.2X\n",
+    logmsg ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X nes=%2.2X%2.2X\n",
             lsed.uet, lsed.si, lsed.rfs[0],
             lsed.rfs[1], lsed.nes[0], lsed.nes[1]);
 #endif /*STACK_DEBUG*/
@@ -393,7 +393,7 @@ int     i;                              /* Array subscript           */
     regs->cr[15] = lsea & CR15_LSEA;
 
 #ifdef STACK_DEBUG
-    printf ("stack: CR15=%8.8lX\n", regs->cr[15]);
+    logmsg ("stack: CR15=%8.8lX\n", regs->cr[15]);
 #endif /*STACK_DEBUG*/
 
 } /* end function form_stack_entry */
@@ -452,8 +452,8 @@ U32     bsea;                           /* Backward stack entry addr */
     memcpy (lsedptr, sysblk.mainstor+abs, sizeof(LSED));
 
 #ifdef STACK_DEBUG
-    printf ("stack: Stack entry located at %8.8lX\n", lsea);
-    printf ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X nes=%2.2X%2.2X\n",
+    logmsg ("stack: Stack entry located at %8.8lX\n", lsea);
+    logmsg ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X nes=%2.2X%2.2X\n",
             lsedptr->uet, lsedptr->si, lsedptr->rfs[0],
             lsedptr->rfs[1], lsedptr->nes[0], lsedptr->nes[1]);
 #endif /*STACK_DEBUG*/
@@ -497,8 +497,8 @@ U32     bsea;                           /* Backward stack entry addr */
         memcpy (lsedptr, sysblk.mainstor+abs, sizeof(LSED));
 
 #ifdef STACK_DEBUG
-        printf ("stack: Stack entry located at %8.8lX\n", lsea);
-        printf ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X "
+        logmsg ("stack: Stack entry located at %8.8lX\n", lsea);
+        logmsg ("stack: et=%2.2X si=%2.2X rfs=%2.2X%2.2X "
                 "nes=%2.2X%2.2X\n",
                 lsedptr->uet, lsedptr->si, lsedptr->rfs[0],
                 lsedptr->rfs[1], lsedptr->nes[0], lsedptr->nes[1]);
@@ -581,7 +581,7 @@ int     tranreqd;                       /* 1=Translation required    */
     tranreqd = 1;
 
 #ifdef STACK_DEBUG
-    printf ("stack: Unstacking registers %d-%d from %8.8lX\n",
+    logmsg ("stack: Unstacking registers %d-%d from %8.8lX\n",
             r1, r2, lsea);
 #endif /*STACK_DEBUG*/
 
@@ -609,7 +609,7 @@ int     tranreqd;                       /* 1=Translation required    */
                             | sysblk.mainstor[abs+3];
 
 #ifdef STACK_DEBUG
-            printf ("stack: GPR%d=%8.8lX "
+            logmsg ("stack: GPR%d=%8.8lX "
                     "loaded from V:%8.8lX A:%8.8lX\n",
                     i, regs->gpr[i], lsea, abs);
 #endif /*STACK_DEBUG*/
@@ -646,7 +646,7 @@ int     tranreqd;                       /* 1=Translation required    */
                             | sysblk.mainstor[abs+3];
 
 #ifdef STACK_DEBUG
-            printf ("stack: AR%d=%8.8lX "
+            logmsg ("stack: AR%d=%8.8lX "
                     "loaded from V:%8.8lX A:%8.8lX\n",
                     i, regs->ar[i], lsea, abs);
 #endif /*STACK_DEBUG*/
@@ -759,7 +759,7 @@ U16     pasn;                           /* Primary ASN               */
     permode = (regs->psw.sysmask & PSW_PERMODE) ? 1 : 0;
 
 #ifdef STACK_DEBUG
-    printf ("stack: PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X "
+    logmsg ("stack: PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X "
             "loaded from V:%8.8lX A:%8.8lX\n",
             sysblk.mainstor[abs], sysblk.mainstor[abs+1],
             sysblk.mainstor[abs+2], sysblk.mainstor[abs+3],
@@ -793,7 +793,7 @@ U16     pasn;                           /* Primary ASN               */
     regs->cr[15] = lsea & CR15_LSEA;
 
 #ifdef STACK_DEBUG
-    printf ("stack: CR15=%8.8lX\n", regs->cr[15]);
+    logmsg ("stack: CR15=%8.8lX\n", regs->cr[15]);
 #endif /*STACK_DEBUG*/
 
     /* Return the entry type of the unstacked state entry */

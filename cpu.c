@@ -245,9 +245,10 @@ int load_psw (PSW *psw, BYTE *addr)
 
     /* Check for wait state PSW */
     if (psw->wait && (sysblk.insttrace || sysblk.inststep
-        || psw->ia != 0))
+//      || psw->ia != 0
+        ))
     {
-        printf("Wait state PSW loaded: "
+        logmsg ("Wait state PSW loaded: "
                 "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
                 addr[0], addr[1], addr[2], addr[3],
                 addr[4], addr[5], addr[6], addr[7]);
@@ -261,9 +262,9 @@ int load_psw (PSW *psw, BYTE *addr)
 /*-------------------------------------------------------------------*/
 void program_check (int code)
 {
-PSA    *psa;
-int     rc;
-DWORD   dword;
+PSA    *psa;                            /* -> Prefixed storage area  */
+int     rc;                             /* Return code               */
+DWORD   dword;                          /* Doubleword work area      */
 REGS   *regs = &(sysblk.regs[0]);
 
     /* Back up the PSW for exceptions which cause nullification */
@@ -296,7 +297,7 @@ REGS   *regs = &(sysblk.regs[0]);
     regs->psw.intcode = code;
 
     /* Trace the program check */
-    printf ("Program check CODE=%4.4X ILC=%d ",
+    logmsg ("Program check CODE=%4.4X ILC=%d ",
             code, regs->psw.ilc);
     instfetch (dword, regs->psw.ia - regs->psw.ilc, regs);
     display_inst (regs, dword);
@@ -323,18 +324,50 @@ REGS   *regs = &(sysblk.regs[0]);
     rc = load_psw (&(regs->psw), psa->pgmnew);
     if ( rc )
     {
-        printf ("Invalid program-check new PSW: "
+        logmsg ("Invalid program-check new PSW: "
                 "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
                 psa->pgmnew[0], psa->pgmnew[1], psa->pgmnew[2],
                 psa->pgmnew[3], psa->pgmnew[4], psa->pgmnew[5],
                 psa->pgmnew[6], psa->pgmnew[7]);
-        exit(1);
+        regs->cpustate = CPUSTATE_STOPPED;
     }
 
-    /* Return directly to start_cpu function */
+    /* Return directly to cpu_thread function */
     longjmp (regs->progjmp, code);
 
 } /* end function program_check */
+
+/*-------------------------------------------------------------------*/
+/* Load restart new PSW                                              */
+/*-------------------------------------------------------------------*/
+static int psw_restart (REGS *regs)
+{
+int     rc;                             /* Return code               */
+PSA    *psa;                            /* -> Prefixed storage area  */
+
+    /* Zeroize the interrupt code in the PSW */
+    regs->psw.intcode = 0;
+
+    /* Point to PSA in main storage */
+    psa = (PSA*)(sysblk.mainstor + regs->pxr);
+
+    /* Store current PSW at PSA+X'8' */
+    store_psw (&(regs->psw), psa->iplccw1);
+
+    /* Load new PSW from PSA+X'0' */
+    rc = load_psw (&(regs->psw), psa->iplpsw);
+    if ( rc )
+    {
+        logmsg ("Invalid restart new PSW: "
+                "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
+                psa->iplpsw[0], psa->iplpsw[1], psa->iplpsw[2],
+                psa->iplpsw[3], psa->iplpsw[4], psa->iplpsw[5],
+                psa->iplpsw[6], psa->iplpsw[7]);
+        return rc;
+    }
+
+    return 0;
+} /* end function psw_restart */
 
 /*-------------------------------------------------------------------*/
 /* Execute an instruction                                            */
@@ -618,7 +651,7 @@ static BYTE module[8];                  /* Module name               */
         n >>= 12;
         sysblk.storkeys[n] = regs->gpr[r1] & 0xFE;
 
-//      /*debug*/printf("SSK storage block %8.8lX key %2.2lX\n",
+//      /*debug*/logmsg("SSK storage block %8.8lX key %2.2lX\n",
 //                      regs->gpr[r2], regs->gpr[r1] & 0xFE);
 
         break;
@@ -664,7 +697,7 @@ static BYTE module[8];                  /* Module name               */
         if ( regs->psw.ecmode == 0 )
             regs->gpr[r1] &= 0xFFFFFFF8;
 
-        /*debug*/printf("ISK storage block %8.8lX key %2.2lX\n",
+        /*debug*/logmsg("ISK storage block %8.8lX key %2.2lX\n",
                         regs->gpr[r2], regs->gpr[r1] & 0xFE);
 
         break;
@@ -679,6 +712,23 @@ static BYTE module[8];                  /* Module name               */
         regs->psw.intcode = ibyte;
 
 #ifdef SVC_TRACE
+        /* Trace BLDL/FIND */
+        if (ibyte == 18)
+        {
+            BYTE memname[8];
+            n = regs->gpr[0];
+            if ((regs->gpr[1] & 0x80000000) == 0) n += 4;
+            n &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            vfetchc (memname, 7, n, 0, regs);
+            for (i=0; i < 8; i++)
+                memname[i] = ebcdic_to_ascii[memname[i]];
+            display_inst (regs, inst);
+            logmsg ("SVC %u (%s):%8.8s\n", ibyte,
+                (regs->gpr[1] & 0x80000000) ? "FIND" : "BLDL",
+                memname);
+        }
+
+    #if 0
         /* Trace LINK and XCTL module name */
         if (ibyte == 6 || ibyte == 7)
         {
@@ -690,7 +740,8 @@ static BYTE module[8];                  /* Module name               */
             vfetchc (epname, 7, n, 0, regs);
             for (i=0; i < 8; i++)
                 epname[i] = ebcdic_to_ascii[epname[i]];
-            printf ("SVC %u:%8.8s\n", ibyte, epname);
+            display_inst (regs, inst);
+            logmsg ("SVC %u:%8.8s\n", ibyte, epname);
         }
 
         /* Trace WTO and SVC34 */
@@ -706,14 +757,16 @@ static BYTE module[8];                  /* Module name               */
             for (i=4; i < n; i++)
                 message[i] = ebcdic_to_ascii[message[i]];
             message[i] = '\0';
-            printf ("SVC %u:%s\n", ibyte, message+4);
+            display_inst (regs, inst);
+            logmsg ("SVC %u:%s\n", ibyte, message+4);
         }
+    #endif
 
         /* Stop on selected SVC numbers */
         if (ibyte == 13)
         {
             display_inst (regs, inst);
-            panel_command (regs);
+//          panel_command (regs);
         }
 #endif /*SVC_TRACE*/
 
@@ -1289,7 +1342,7 @@ static BYTE module[8];                  /* Module name               */
             vfetchc (module, 7, regs->psw.ia + 1, 0, regs);
             for (i=0; i < 8; i++)
                 module[i] = ebcdic_to_ascii[module[i]];
-            printf ("Entering %8.8s at %8.8lX\n",
+            logmsg ("Entering %8.8s at %8.8lX\n",
                     module, regs->psw.ia - 4);
 //          if (memcmp(module, "????????", 8) == 0) sysblk.inststep = 1;
         }
@@ -2806,7 +2859,7 @@ static BYTE module[8];                  /* Module name               */
         /* Load the parameter from R1 (if R1 odd), or R1+1 (if even) */
         n = (r1 & 1) ? regs->gpr[r1] : regs->gpr[r1+1];
 
-        /*debug*/printf("SIGP CPU %4.4X OPERATION %2.2X PARM %8.8lX\n",
+        /*debug*/logmsg("SIGP CPU %4.4X OPERATION %2.2X PARM %8.8lX\n",
                         i, d, n);
 
         /* Set condition code 3 if target CPU does not exist */
@@ -2942,7 +2995,7 @@ static BYTE module[8];                  /* Module name               */
             /* Release the TOD clock update lock */
             release_lock (&sysblk.todlock);
 
-            /*debug*/printf("Store TOD clock=%16.16llX\n", dreg);
+//          /*debug*/logmsg("Store TOD clock=%16.16llX\n", dreg);
 
             /* Store TOD clock value at operand address */
             vstore8 ( dreg, effective_addr, ar1, regs );
@@ -2977,8 +3030,8 @@ static BYTE module[8];                  /* Module name               */
             /* Fetch clock comparator value from operand location */
             regs->clkc = vfetch8 ( effective_addr, ar1, regs )
                         & 0xFFFFFFFFFFFFF000ULL;
-            /*debug*/printf("Set clock comparator=%16.16llX\n",
-            /*debug*/       regs->clkc);
+//          /*debug*/logmsg("Set clock comparator=%16.16llX\n",
+//          /*debug*/       regs->clkc);
 
             break;
 
@@ -3003,8 +3056,8 @@ static BYTE module[8];                  /* Module name               */
 
             /* Store clock comparator at operand location */
             vstore8 ( regs->clkc, effective_addr, ar1, regs );
-            /*debug*/printf("Store clock comparator=%16.16llX\n",
-            /*debug*/       regs->clkc);
+//          /*debug*/logmsg("Store clock comparator=%16.16llX\n",
+//          /*debug*/       regs->clkc);
 
             break;
 
@@ -3028,9 +3081,9 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Fetch the CPU timer value from operand location */
-            regs->timer = vfetch8 ( effective_addr, ar1, regs )
+            regs->ptimer = vfetch8 ( effective_addr, ar1, regs )
                         & 0xFFFFFFFFFFFFF000ULL;
-            /*debug*/printf("Set CPU timer=%16.16llX\n", regs->timer);
+//          /*debug*/logmsg("Set CPU timer=%16.16llX\n", regs->ptimer);
 
             break;
 
@@ -3054,8 +3107,8 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Store the CPU timer at operand location */
-            vstore8 ( regs->timer, effective_addr, ar1, regs );
-            /*debug*/printf("Store CPU timer=%16.16llX\n", regs->timer);
+            vstore8 ( regs->ptimer, effective_addr, ar1, regs );
+//          /*debug*/logmsg("Store CPU timer=%16.16llX\n", regs->ptimer);
 
             break;
 
@@ -5543,7 +5596,7 @@ DWORD   csw;                            /* CSW for S/370 channels    */
 
     /* Trace the I/O interrupt */
     if (sysblk.insttrace || sysblk.inststep)
-        printf ("I/O interrupt code=%4.4X "
+        logmsg ("I/O interrupt code=%4.4X "
                 "CSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
                 regs->psw.intcode,
                 csw[0], csw[1], csw[2], csw[3],
@@ -5565,7 +5618,7 @@ DWORD   csw;                            /* CSW for S/370 channels    */
 
     /* Trace the I/O interrupt */
     if (sysblk.insttrace || sysblk.inststep)
-        printf ("I/O interrupt code=%2.2X%2.2X%2.2X%2.2X "
+        logmsg ("I/O interrupt code=%2.2X%2.2X%2.2X%2.2X "
                 "parm=%2.2X%2.2X%2.2X%2.2X\n",
                 psa->ioid[0], psa->ioid[1],
                 psa->ioid[2], psa->ioid[3],
@@ -5586,17 +5639,17 @@ DWORD   csw;                            /* CSW for S/370 channels    */
 } /* end function perform_io_interrupt */
 
 /*-------------------------------------------------------------------*/
-/* Start executing CPU instructions                                  */
+/* CPU instruction execution thread                                  */
 /*-------------------------------------------------------------------*/
-void start_cpu (U32 pswaddr, REGS *regs)
+void *cpu_thread (REGS *regs)
 {
-DWORD   dword;                          /* Doubleword work area      */
+DWORD   inst;                           /* Instruction area          */
 int     rc;                             /* Return code               */
 int     tracethis;                      /* Trace this instruction    */
 int     stepthis;                       /* Stop on this instruction  */
+int     diswait;                        /* 1=Disabled wait state     */
 #ifdef INSTRUCTION_COUNTING
 struct {
-    int overall;                        /* Overall inst counter      */
     int general[256];                   /* General inst counters     */
     int op01[256];                      /* 01xx instruction counters */
     int opA4[256];                      /* A4xx instruction counters */
@@ -5614,26 +5667,20 @@ int    *picta;                          /* -> Inst counter array     */
 int     icidx;                          /* Instruction counter index */
 #endif /*INSTRUCTION_COUNTING*/
 
+    /* Display thread started message on control panel */
+//  logmsg ("HHC620I CPU%d thread started: id=%ld\n",
+//          regs->cpuad, thread_id());
+
 #ifdef INSTRUCTION_COUNTING
     /* Clear instruction counters */
     memset (&instcount, 0, sizeof(instcount));
 #endif /*INSTRUCTION_COUNTING*/
 
-    /* Load initial PSW from main storage */
-    rc = load_psw (&(regs->psw), sysblk.mainstor + pswaddr);
-    if ( rc )
-    {
-        printf ("Invalid initial PSW: "
-                "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
-                sysblk.mainstor[pswaddr], sysblk.mainstor[pswaddr+1],
-                sysblk.mainstor[pswaddr+2], sysblk.mainstor[pswaddr+3],
-                sysblk.mainstor[pswaddr+4], sysblk.mainstor[pswaddr+5],
-                sysblk.mainstor[pswaddr+6], sysblk.mainstor[pswaddr+7]);
-        exit(1);
-    }
-
     /* Establish longjmp destination for program check */
     setjmp(regs->progjmp);
+
+    /* Clear the disabled wait state flag */
+    diswait = 0;
 
     /* Execute the program */
     while (1) {
@@ -5641,18 +5688,6 @@ int     icidx;                          /* Instruction counter index */
         /* Reset instruction trace indicators */
         tracethis = 0;
         stepthis = 0;
-
-        /* Test for disabled wait PSW */
-        if (regs->psw.wait && (regs->psw.sysmask &
-                (regs->psw.ecmode ? (PSW_IOMASK | PSW_EXTMASK) : 0xFF))
-                == 0) {
-            printf ("Disabled wait state code %8.8lX\n", regs->psw.ia);
-#ifdef INSTRUCTION_COUNTING
-            printf ("%d instructions executed\n", instcount.overall);
-#endif /*INSTRUCTION_COUNTING*/
-            panel_command (regs);
-            continue;
-        }
 
         /* Obtain the interrupt lock */
         obtain_lock (&sysblk.intlock);
@@ -5664,19 +5699,66 @@ int     icidx;                          /* Instruction counter index */
 
         /* If enabled for I/O interrupts, invite the channel
            subsystem to present a pending interrupt */
-        if (regs->psw.sysmask & PSW_IOMASK)
+        if (regs->psw.sysmask &
+                (regs->psw.ecmode ? PSW_IOMASK : 0xFE))
             perform_io_interrupt (regs);
 
-        /* Test for wait state */
+        /* Perform restart interrupt if pending */
+        if (regs->restart)
+        {
+            regs->restart = 0;
+            rc = psw_restart (regs);
+            if (rc == 0) regs->cpustate = CPUSTATE_STARTED;
+        }
+
+        /* If CPU is stopping, change status to stopped */
+        if (regs->cpustate == CPUSTATE_STOPPING)
+            regs->cpustate = CPUSTATE_STOPPED;
+
+        /* Test for stopped state */
+        if (regs->cpustate == CPUSTATE_STOPPED)
+        {
+            /* Wait for start command from panel */
+            wait_condition (&sysblk.intcond, &sysblk.intlock);
+            release_lock (&sysblk.intlock);
+            continue;
+        }
+
+        /* Test for disabled wait PSW */
+        if (regs->psw.wait && (regs->psw.sysmask &
+                (regs->psw.ecmode ? (PSW_IOMASK | PSW_EXTMASK) : 0xFF))
+                == 0)
+        {
+            if (diswait == 0)
+            {
+                logmsg ("Disabled wait state code %8.8lX\n",
+                        regs->psw.ia);
+#ifdef INSTRUCTION_COUNTING
+                logmsg ("%llu instructions executed\n",
+                        regs->instcount);
+#endif /*INSTRUCTION_COUNTING*/
+                diswait = 1;
+            }
+
+            /* Wait for restart command from panel */
+            wait_condition (&sysblk.intcond, &sysblk.intlock);
+            release_lock (&sysblk.intlock);
+            continue;
+        }
+
+        /* Reset disabled wait state indicator */
+        diswait = 0;
+
+        /* Test for enabled wait state */
         if (regs->psw.wait)
         {
-            /* Accept panel command if instruction stepping */
-            if (sysblk.inststep)
-            {
-                release_lock (&sysblk.intlock);
-                panel_command (regs);
-                continue;
-            }
+//          /* Accept panel command if instruction stepping */
+//          if (sysblk.inststep)
+//          {
+//              release_lock (&sysblk.intlock);
+//              panel_command (regs);
+//              continue;
+//          }
 
             /* Wait for I/O or external interrupt */
             wait_condition (&sysblk.intcond, &sysblk.intlock);
@@ -5688,69 +5770,79 @@ int     icidx;                          /* Instruction counter index */
         release_lock (&sysblk.intlock);
 
         /* Fetch the next sequential instruction */
-        instfetch (dword, regs->psw.ia, regs);
+        instfetch (inst, regs->psw.ia, regs);
+
+        /* Count instruction usage */
+        regs->instcount++;
 
 #ifdef INSTRUCTION_COUNTING
         /* Find instruction counter for this opcode */
-        switch (dword[0]) {
-        case 0x01: picta = instcount.op01; icidx = dword[1]; break;
-        case 0xA4: picta = instcount.opA4; icidx = dword[1]; break;
-        case 0xA5: picta = instcount.opA5; icidx = dword[1]; break;
-        case 0xA6: picta = instcount.opA6; icidx = dword[1]; break;
-        case 0xA7: picta = instcount.opA7; icidx = dword[1] & 0x0F;
+        switch (inst[0]) {
+        case 0x01: picta = instcount.op01; icidx = inst[1]; break;
+        case 0xA4: picta = instcount.opA4; icidx = inst[1]; break;
+        case 0xA5: picta = instcount.opA5; icidx = inst[1]; break;
+        case 0xA6: picta = instcount.opA6; icidx = inst[1]; break;
+        case 0xA7: picta = instcount.opA7; icidx = inst[1] & 0x0F;
                    break;
-        case 0xB2: picta = instcount.opB2; icidx = dword[1]; break;
-        case 0xB3: picta = instcount.opB3; icidx = dword[1]; break;
-        case 0xE4: picta = instcount.opE4; icidx = dword[1]; break;
-        case 0xE5: picta = instcount.opE5; icidx = dword[1]; break;
-        case 0xE6: picta = instcount.opE6; icidx = dword[1]; break;
-        case 0xED: picta = instcount.opED; icidx = dword[1]; break;
-        default: picta = instcount.general; icidx = dword[0];
+        case 0xB2: picta = instcount.opB2; icidx = inst[1]; break;
+        case 0xB3: picta = instcount.opB3; icidx = inst[1]; break;
+        case 0xE4: picta = instcount.opE4; icidx = inst[1]; break;
+        case 0xE5: picta = instcount.opE5; icidx = inst[1]; break;
+        case 0xE6: picta = instcount.opE6; icidx = inst[1]; break;
+        case 0xED: picta = instcount.opED; icidx = inst[1]; break;
+        default: picta = instcount.general; icidx = inst[0];
         } /* end switch */
 
         /* Test for first usage of this opcode */
-        if (picta[icidx] == 0 && instcount.overall >= 256) {
+        if (picta[icidx] == 0 && regs->instcount >= 256) {
             if (picta == instcount.general)
-                printf ("First use of instruction %2.2X\n",
-                        dword[0]);
+                logmsg ("First use of instruction %2.2X\n",
+                        inst[0]);
             else
-                printf ("First use of instruction %2.2X%2.2X\n",
-                        dword[0], icidx);
+                logmsg ("First use of instruction %2.2X%2.2X\n",
+                        inst[0], icidx);
             tracethis = 1;
         }
 
-        /* Count instruction usage by opcode and overall */
+        /* Count instruction usage by opcode */
         picta[icidx]++;
-        instcount.overall++;
-        if (instcount.overall % 1000000 == 0)
-            printf ("%d instructions executed\n", instcount.overall);
+        if (regs->instcount % 1000000 == 0)
+            logmsg ("%llu instructions executed\n", regs->instcount);
 #endif /*INSTRUCTION_COUNTING*/
 
         /* Turn on trace for specific instructions */
-//      if (dword[0] == 0xB2 && dword[1] == 0x20) sysblk.inststep = 1; /*SERVC*/
-//      if (dword[0] == 0xB2 && dword[1] == 0x25) sysblk.inststep = 1; /*SSAR*/
-//      if (dword[0] == 0xB2 && dword[1] == 0x40) sysblk.inststep = 1; /*BAKR*/
-//      if (dword[0] == 0xB2 && dword[1] == 0x18) sysblk.inststep = 1; /*PC*/
-//      if (dword[0] == 0xB2 && dword[1] == 0x28) sysblk.inststep = 1; /*PT*/
-//      if (dword[0] == 0xB2 && dword[1] == 0x47) sysblk.inststep = 1; /*MSTA*/
-//      if (dword[0] == 0xB2 && dword[1] == 0x49) sysblk.inststep = 1; /*EREG*/
-//      if (dword[0] == 0xB2 && dword[1] == 0x4A) sysblk.inststep = 1; /*ESTA*/
-//      if (dword[0] == 0x01 && dword[1] == 0x01) sysblk.inststep = 1; /*PR*/
-//      if (dword[0] == 0xE5) sysblk.inststep = 1; /*LASP & MVS assists*/
-        if (dword[0] == 0xFC) sysblk.inststep = 1; /*MP*/
-        if (dword[0] == 0xFD) sysblk.inststep = 1; /*DP*/
+//      if (inst[0] == 0xB2 && inst[1] == 0x20) sysblk.inststep = 1; /*SERVC*/
+//      if (inst[0] == 0xB2 && inst[1] == 0x25) sysblk.inststep = 1; /*SSAR*/
+//      if (inst[0] == 0xB2 && inst[1] == 0x40) sysblk.inststep = 1; /*BAKR*/
+//      if (inst[0] == 0xB2 && inst[1] == 0x18) sysblk.inststep = 1; /*PC*/
+//      if (inst[0] == 0xB2 && inst[1] == 0x28) sysblk.inststep = 1; /*PT*/
+//      if (inst[0] == 0xB2 && inst[1] == 0x47) sysblk.inststep = 1; /*MSTA*/
+//      if (inst[0] == 0xB2 && inst[1] == 0x49) sysblk.inststep = 1; /*EREG*/
+//      if (inst[0] == 0xB2 && inst[1] == 0x4A) sysblk.inststep = 1; /*ESTA*/
+//      if (inst[0] == 0x01 && inst[1] == 0x01) sysblk.inststep = 1; /*PR*/
+//      if (inst[0] == 0xE5) sysblk.inststep = 1; /*LASP & MVS assists*/
+        if (inst[0] == 0xFC) sysblk.inststep = 1; /*MP*/
+        if (inst[0] == 0xFD) sysblk.inststep = 1; /*DP*/
 
         /* Display the instruction */
         if (sysblk.insttrace || sysblk.inststep
             || tracethis || stepthis)
         {
-            display_inst (regs, dword);
+            display_inst (regs, inst);
             if (sysblk.inststep || stepthis)
-                panel_command (regs);
+            {
+                /* Put CPU into stopped state */
+                regs->cpustate = CPUSTATE_STOPPED;
+
+                /* Wait for start command from panel */
+                wait_condition (&sysblk.intcond, &sysblk.intlock);
+                release_lock (&sysblk.intlock);
+            }
         }
 
         /* Execute the instruction */
-        execute_instruction (dword, 0, regs);
+        execute_instruction (inst, 0, regs);
     }
 
-} /* end function start_cpu */
+    return NULL;
+} /* end function cpu_thread */

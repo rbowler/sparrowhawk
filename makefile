@@ -6,24 +6,20 @@
 #	make ARCH=390
 #
 
-VERSION  = 1.34
+VERSION  = 1.35
 
 CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=$(ARCH)
 #	   -march=pentium -malign-double -mwide-multiply
 LFLAGS	 = -lpthread
 
-EXEFILES = cpu ipl dasdinit dasdload tapecopy
+EXEFILES = hercules dasdinit dasdload tapecopy
 
 TARFILES = makefile *.c *.h hercules.cnf tapeconv.jcl dasdlist
 
-ALL_OBJS = config.o panel.o cpu.o assist.o dat.o decimal.o \
-	   block.o stack.o xmem.o \
+HRC_OBJS = impl.o config.o panel.o ipl.o cpu.o assist.o \
+	   dat.o decimal.o block.o stack.o xmem.o \
 	   channel.o service.o ckddasd.o fbadasd.o \
 	   tapedev.o cardrdr.o printer.o console.o
-
-CPU_OBJS = cputest.o $(ALL_OBJS)
-
-IPL_OBJS = ipl.o $(ALL_OBJS)
 
 DIN_OBJS = dasdinit.o
 
@@ -35,11 +31,8 @@ HEADERS  = hercules.h esa390.h
 
 all:	   $(EXEFILES)
 
-cpu:	   $(CPU_OBJS)
-	cc $(LFLAGS) -o cpu $(CPU_OBJS)
-
-ipl:	   $(IPL_OBJS)
-	cc $(LFLAGS) -o ipl $(IPL_OBJS)
+hercules:  $(HRC_OBJS)
+	cc $(LFLAGS) -o hercules $(HRC_OBJS)
 
 dasdinit:  $(DIN_OBJS)
 	cc -o dasdinit $(DIN_OBJS)
@@ -54,7 +47,7 @@ assist.o:  assist.c $(HEADERS)
 
 cardrdr.o: cardrdr.c $(HEADERS)
 
-config.o:  config.c $(HEADERS)
+config.o:  config.c $(HEADERS) makefile
 
 console.o: console.c $(HEADERS) makefile
 
@@ -63,8 +56,6 @@ panel.o:   panel.c $(HEADERS)
 printer.o: printer.c $(HEADERS)
 
 cpu.o:	   cpu.c $(HEADERS)
-
-cputest.o: cputest.c $(HEADERS) makefile
 
 dat.o:	   dat.c $(HEADERS)
 
@@ -76,7 +67,9 @@ block.o:   block.c $(HEADERS)
 
 xmem.o:    xmem.c $(HEADERS)
 
-ipl.o:	   ipl.c $(HEADERS) makefile
+impl.o:    impl.c $(HEADERS) makefile
+
+ipl.o:	   ipl.c $(HEADERS)
 
 channel.o: channel.c $(HEADERS)
 

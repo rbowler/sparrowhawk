@@ -23,7 +23,8 @@ int printer_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
     {
-        printf ("HHC401I File name missing or invalid\n");
+        fprintf (stderr,
+                "HHC401I File name missing or invalid\n");
         return -1;
     }
 
@@ -169,7 +170,7 @@ BYTE    c;                              /* Print character           */
         /* Equipment check if error occurred writing to printer file */
         if (ferror(dev->fp))
         {
-            printf ("printer: error writing to %s: %s\n",
+            logmsg ("printer: error writing to %s: %s\n",
                     dev->filename, strerror(errno));
             dev->sense[0] = SENSE_EC;
             *unitstat = CSW_CE | CSW_DE | CSW_UC;

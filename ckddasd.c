@@ -157,7 +157,8 @@ U32             sctlfeat;               /* Storage control features  */
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
     {
-        printf ("HHC351I File name missing or invalid\n");
+        fprintf (stderr,
+                "HHC351I File name missing or invalid\n");
         return -1;
     }
 
@@ -168,7 +169,8 @@ U32             sctlfeat;               /* Storage control features  */
     dev->fd = open (dev->filename, O_RDWR);
     if (dev->fd < 0)
     {
-        printf ("HHC352I %s open error: %s\n",
+        fprintf (stderr,
+                "HHC352I %s open error: %s\n",
                 dev->filename, strerror(errno));
         return -1;
     }
@@ -177,7 +179,8 @@ U32             sctlfeat;               /* Storage control features  */
     rc = fstat (dev->fd, &statbuf);
     if (rc < 0)
     {
-        printf ("HHC353I %s fstat error: %s\n",
+        fprintf (stderr,
+                "HHC353I %s fstat error: %s\n",
                 dev->filename, strerror(errno));
         return -1;
     }
@@ -187,10 +190,12 @@ U32             sctlfeat;               /* Storage control features  */
     if (rc < CKDDASD_DEVHDR_SIZE)
     {
         if (rc < 0)
-            printf ("HHC354I %s read error: %s\n",
+            fprintf (stderr,
+                    "HHC354I %s read error: %s\n",
                     dev->filename, strerror(errno));
         else
-            printf ("HHC355I %s CKD header incomplete\n",
+            fprintf (stderr,
+                    "HHC355I %s CKD header incomplete\n",
                     dev->filename);
         return -1;
     }
@@ -198,8 +203,10 @@ U32             sctlfeat;               /* Storage control features  */
     /* Check the device header identifier */
     if (memcmp(devhdr.devid, "CKD_P370", 8) != 0)
     {
-        printf ("HHC356I %s CKD header invalid\n",
+        fprintf (stderr,
+                "HHC356I %s CKD header invalid\n",
                 dev->filename);
+        return -1;
     }
 
     /* Set device dependent fields */
@@ -209,7 +216,7 @@ U32             sctlfeat;               /* Storage control features  */
                         / dev->ckdtrksz;
     dev->ckdcyls = dev->ckdtrks / dev->ckdheads;
 
-    printf ("ckddasd: %s cyls=%d heads=%d tracks=%d trklen=%d\n",
+    logmsg ("ckddasd: %s cyls=%d heads=%d tracks=%d trklen=%d\n",
             dev->filename, dev->ckdcyls, dev->ckdheads,
             dev->ckdtrks, dev->ckdtrksz);
 
@@ -218,8 +225,10 @@ U32             sctlfeat;               /* Storage control features  */
         || (dev->ckdtrks * dev->ckdtrksz) + CKDDASD_DEVHDR_SIZE
                         != statbuf.st_size)
     {
-        printf ("HHC357I %s CKD header inconsistent with file size\n",
+        fprintf (stderr,
+                "HHC357I %s CKD header inconsistent with file size\n",
                 dev->filename);
+        return -1;
     }
 
     /* Set number of sense bytes */
@@ -461,7 +470,8 @@ int             rc;                     /* Return code               */
     if (rc < 0)
     {
         /* Handle seek error condition */
-        perror("ckddasd: lseek error");
+        logmsg ("ckddasd: lseek error: %s\n",
+                strerror(errno));
 
         /* Set unit check with equipment check */
         ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -501,7 +511,8 @@ off_t           seekpos;                /* Seek position for lseek   */
     if (rc < 0)
     {
         /* Handle seek error condition */
-        perror("ckddasd: lseek error");
+        logmsg ("ckddasd: lseek error: %s\n",
+                strerror(errno));
 
         /* Set unit check with equipment check */
         ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -515,7 +526,8 @@ off_t           seekpos;                /* Seek position for lseek   */
     if (rc < CKDDASD_TRKHDR_SIZE)
     {
         /* Handle read error condition */
-        perror("ckddasd: read error");
+        logmsg ("ckddasd: read error: %s\n",
+                strerror(errno));
 
         /* Set unit check with equipment check */
         ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -531,7 +543,7 @@ off_t           seekpos;                /* Seek position for lseek   */
         || trkhdr->head[0] != (head >> 8)
         || trkhdr->head[1] != (head & 0xFF))
     {
-        printf("ckddasd: invalid track header\n");
+        logmsg ("ckddasd: invalid track header\n");
 
         /* Unit check with invalid track format */
         ckd_build_sense (dev, 0, SENSE1_ITF, 0, 0, 0);
@@ -661,7 +673,8 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
         if (rc < CKDDASD_RECHDR_SIZE)
         {
             /* Handle read error condition */
-            perror("ckddasd: read error");
+            logmsg ("ckddasd: read error: %s\n",
+                    strerror(errno));
 
             /* Set unit check with equipment check */
             ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -767,7 +780,8 @@ CKDDASD_RECHDR  rechdr;                 /* CKD record header         */
         if (rc < dev->ckdcurkl)
         {
             /* Handle read error condition */
-            perror("ckddasd: read error");
+            logmsg ("ckddasd: read error: %s\n",
+                    strerror(errno));
 
             /* Set unit check with equipment check */
             ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -824,7 +838,8 @@ int             skiplen;                /* Number of bytes to skip   */
         if (rc < dev->ckdcurdl)
         {
             /* Handle read error condition */
-            perror("ckddasd: read error");
+            logmsg ("ckddasd: read error: %s\n",
+                    strerror(errno));
 
             /* Set unit check with equipment check */
             ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -890,7 +905,8 @@ int             skiplen;                /* Number of bytes to skip   */
     if (curpos < 0)
     {
         /* Handle seek error condition */
-        perror("ckddasd: lseek error");
+        logmsg ("ckddasd: lseek error: %s\n",
+                strerror(errno));
 
         /* Set unit check with equipment check */
         ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -925,7 +941,8 @@ int             skiplen;                /* Number of bytes to skip   */
     if (rc < ckdlen)
     {
         /* Handle write error condition */
-        perror("ckddasd: write error");
+        logmsg ("ckddasd: write error: %s\n",
+                strerror(errno));
 
         /* Set unit check with equipment check */
         ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -939,7 +956,8 @@ int             skiplen;                /* Number of bytes to skip   */
     if (rc < CKDDASD_RECHDR_SIZE)
     {
         /* Handle write error condition */
-        perror("ckddasd: write error");
+        logmsg ("ckddasd: write error: %s\n",
+                strerror(errno));
 
         /* Set unit check with equipment check */
         ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -953,7 +971,8 @@ int             skiplen;                /* Number of bytes to skip   */
     if (rc < 0)
     {
         /* Handle seek error condition */
-        perror("ckddasd: lseek error");
+        logmsg ("ckddasd: lseek error: %s\n",
+                strerror(errno));
 
         /* Set unit check with equipment check */
         ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -985,7 +1004,7 @@ U16             kdlen;                  /* Key+data length           */
     /* Unit check if not oriented to count area */
     if (dev->ckdorient != CKDORIENT_COUNT)
     {
-        printf("ckddasd: Write KD orientation error\n");
+        logmsg ("ckddasd: Write KD orientation error\n");
         ckd_build_sense (dev, SENSE_CR, 0, 0,
                         FORMAT_0, MESSAGE_2);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -1007,7 +1026,8 @@ U16             kdlen;                  /* Key+data length           */
     if (rc < kdlen)
     {
         /* Handle write error condition */
-        perror("ckddasd: write error");
+        logmsg ("ckddasd: write error: %s\n",
+                strerror(errno));
 
         /* Set unit check with equipment check */
         ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -1037,7 +1057,7 @@ int             skiplen;                /* Number of bytes to skip   */
     if (dev->ckdorient != CKDORIENT_COUNT
         && dev->ckdorient != CKDORIENT_KEY)
     {
-        printf("ckddasd: Write data orientation error\n");
+        logmsg ("ckddasd: Write data orientation error\n");
         ckd_build_sense (dev, SENSE_CR, 0, 0,
                         FORMAT_0, MESSAGE_2);
         *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -1068,7 +1088,8 @@ int             skiplen;                /* Number of bytes to skip   */
     if (rc < dev->ckdcurdl)
     {
         /* Handle write error condition */
-        perror("ckddasd: write error");
+        logmsg ("ckddasd: write error: %s\n",
+                strerror(errno));
 
         /* Set unit check with equipment check */
         ckd_build_sense (dev, SENSE_EC, 0, 0,
@@ -1125,7 +1146,7 @@ BYTE            key[256];               /* Key for search operations */
         && (code & 0x7F) != 0x16 && (code & 0x7F) != 0x12
         && (code & 0x7F) != 0x0E && (code & 0x7F) != 0x06)
     {
-        printf("ckddasd: Data chaining not supported for CCW %2.2X\n",
+        logmsg("ckddasd: Data chaining not supported for CCW %2.2X\n",
                 code);
         ckd_build_sense (dev, SENSE_CR, 0, 0,
                         FORMAT_0, MESSAGE_1);
@@ -2125,7 +2146,7 @@ BYTE            key[256];               /* Key for search operations */
             BYTE module[8]; int i;
             for (i=0; i < 8; i++)
                 module[i] = ebcdic_to_ascii[iobuf[i]];
-            printf ("Search key %8.8s\n", module);
+            logmsg ("Search key %8.8s\n", module);
         }
 #endif /*CKD_KEY_TRACING*/
 

@@ -1017,8 +1017,8 @@ U16     pasn;                           /* Primary ASN               */
     if ((ete[4] & ETE4_T) == 0)
     {
         /* For basic PC, load linkage info into general register 14 */
-        regs->gpr[14] = (regs->psw.amode << 31)
-                        | regs->psw.ia | regs->psw.prob;
+        regs->gpr[14] = regs->psw.ia | regs->psw.prob;
+        if (regs->psw.amode) regs->gpr[14] |= 0x80000000;
 
         /* Update the PSW from the entry table */
         regs->psw.amode = (ete[1] & ETE1_AMODE) ? 1 : 0;
@@ -1040,7 +1040,8 @@ U16     pasn;                           /* Primary ASN               */
     { /* stacking PC */
 
         /* Perform the stacking process */
-        retn = (regs->psw.amode << 31) | regs->psw.ia;
+        retn = regs->psw.ia;
+        if (regs->psw.amode) retn |= 0x80000000;
         form_stack_entry (LSED_UET_PC, retn, pcnum, regs);
 
         /* Update the PSW from the entry table */

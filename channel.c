@@ -9,39 +9,40 @@
 #include "hercules.h"
 
 /*-------------------------------------------------------------------*/
-/* DISPLAY DATA                                                      */
+/* FORMAT I/O BUFFER DATA                                            */
 /*-------------------------------------------------------------------*/
-static void display_data (U32 addr)
+static void format_iobuf_data (U32 addr, BYTE *area)
 {
 BYTE *a;
 
-    if (addr < sysblk.mainsize - 16) {
+    area[0] = '\0';
+    if (addr < sysblk.mainsize - 16)
+    {
         a = sysblk.mainstor + addr;
-        printf (" Data=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X"
+        sprintf (area,
+                " Data=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X"
                 " %2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X",
                 a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7],
                 a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15]);
-//      if (memcmp(a+5, "\xc9\xc5\xc1\xc9\xd7\xd3\xf0\xf5", 8)==0)
-//          sysblk.insttrace = 1;
     }
-    printf("\n");
 
-} /* end function display_data */
+} /* end function format_iobuf_data */
 
 /*-------------------------------------------------------------------*/
 /* DISPLAY CHANNEL COMMAND WORD AND DATA                             */
 /*-------------------------------------------------------------------*/
 static void display_ccw (DEVBLK *dev, BYTE ccw[], U32 addr)
 {
+BYTE    area[64];
 
-    printf ("%4.4X:CCW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X",
+    format_iobuf_data (addr, area);
+    logmsg ("%4.4X:CCW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X%s\n",
             dev->devnum,
             ccw[0], ccw[1], ccw[2], ccw[3],
-            ccw[4], ccw[5], ccw[6], ccw[7]);
-    display_data (addr);
+            ccw[4], ccw[5], ccw[6], ccw[7], area);
 
-    if (dev->ccwstep)
-        panel_command (&(sysblk.regs[0]));
+//  if (dev->ccwstep)
+//      panel_command (&(sysblk.regs[0]));
 
 } /* end function display_ccw */
 
@@ -51,7 +52,7 @@ static void display_ccw (DEVBLK *dev, BYTE ccw[], U32 addr)
 /*-------------------------------------------------------------------*/
 static void display_csw (DEVBLK *dev, BYTE csw[])
 {
-    printf ("%4.4X:Stat=%2.2X%2.2X Count=%2.2X%2.2X  "
+    logmsg ("%4.4X:Stat=%2.2X%2.2X Count=%2.2X%2.2X  "
             "CCW=%2.2X%2.2X%2.2X\n",
             dev->devnum,
             csw[4], csw[5], csw[6], csw[7],
@@ -64,15 +65,15 @@ static void display_csw (DEVBLK *dev, BYTE csw[])
 /*-------------------------------------------------------------------*/
 /* DISPLAY SUBCHANNEL STATUS WORD                                    */
 /*-------------------------------------------------------------------*/
-static void display_scsw (DEVBLK *dev)
+static void display_scsw (DEVBLK *dev, SCSW scsw)
 {
-    printf ("%4.4X:Stat=%2.2X%2.2X Count=%2.2X%2.2X  "
+    logmsg ("%4.4X:Stat=%2.2X%2.2X Count=%2.2X%2.2X  "
             "CCW=%2.2X%2.2X%2.2X%2.2X\n",
             dev->devnum,
-            dev->scsw.unitstat, dev->scsw.chanstat,
-            dev->scsw.count[0], dev->scsw.count[1],
-            dev->scsw.ccwaddr[0], dev->scsw.ccwaddr[1],
-            dev->scsw.ccwaddr[2], dev->scsw.ccwaddr[3]);
+            scsw.unitstat, scsw.chanstat,
+            scsw.count[0], scsw.count[1],
+            scsw.ccwaddr[0], scsw.ccwaddr[1],
+            scsw.ccwaddr[2], scsw.ccwaddr[3]);
 
 } /* end function display_scsw */
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
@@ -104,7 +105,7 @@ BYTE    storkey;                        /* Storage key               */
 
     /* Channel protection check if IDAW is fetch protected */
     storkey = sysblk.storkeys[idawaddr >> 12];
-    if ((storkey & STORKEY_FETCH)
+    if (ccwkey != 0 && (storkey & STORKEY_FETCH)
         && (storkey & STORKEY_KEY) != ccwkey)
     {
         *chanstat = CSW_PROTC;
@@ -146,7 +147,8 @@ BYTE    storkey;                        /* Storage key               */
 /*-------------------------------------------------------------------*/
 /* COPY DATA BETWEEN CHANNEL I/O BUFFER AND MAIN STORAGE             */
 /*-------------------------------------------------------------------*/
-static void copy_iobuf (BYTE code,      /* CCW operation code        */
+static void copy_iobuf (DEVBLK *dev,    /* -> Device block           */
+                        BYTE code,      /* CCW operation code        */
                         BYTE flags,     /* CCW flags                 */
                         U32 addr,       /* Data address              */
                         U16 count,      /* Data count                */
@@ -162,6 +164,10 @@ U16     idalen;                         /* IDA data length           */
 BYTE    storkey;                        /* Storage key               */
 int     i, firstpage, lastpage;         /* 4K page numbers           */
 BYTE    readcmd;                        /* 1=READ, SENSE, or RDBACK  */
+
+    /* Exit if no bytes are to be copied */
+    if (count == 0)
+        return;
 
     /* Set flag to indicate direction of data movement */
     readcmd = IS_CCW_READ(code)
@@ -180,15 +186,21 @@ BYTE    readcmd;                        /* 1=READ, SENSE, or RDBACK  */
             fetch_idaw (code, ccwkey, idaseq, idawaddr,
                         &idadata, &idalen, chanstat);
 
-            printf ("IDAW@%8.8lX:%8.8lX len=%4.4X\n",
-                    idawaddr, idadata, idalen);
+            /* Display the IDAW if CCW tracing is on */
+            if (dev->ccwtrace || dev->ccwstep)
+            {
+                logmsg ("%4.4X:IDAW@%8.8lX:%8.8lX len=%4.4X\n",
+                        dev->devnum, idawaddr, idadata, idalen);
+            }
+
+            /* Exit if fetch_idaw detected channel program check */
             if (*chanstat != 0) return;
 
             /* Channel protection check if IDAW data location is
                fetch protected, or if location is store protected
                and command is READ, READ BACKWARD, or SENSE */
             storkey = sysblk.storkeys[idadata >> 12];
-            if ((storkey & STORKEY_KEY) != ccwkey
+            if (ccwkey != 0 && (storkey & STORKEY_KEY) != ccwkey
                 && ((storkey & STORKEY_FETCH) || readcmd))
             {
                 *chanstat = CSW_PROTC;
@@ -230,7 +242,7 @@ BYTE    readcmd;                        /* 1=READ, SENSE, or RDBACK  */
         for (i = firstpage; i <= lastpage; i++)
         {
             storkey = sysblk.storkeys[i];
-            if ((storkey & STORKEY_KEY) != ccwkey
+            if (ccwkey != 0 && (storkey & STORKEY_KEY) != ccwkey
                 && ((storkey & STORKEY_FETCH) || readcmd))
             {
                 *chanstat = CSW_PROTC;
@@ -260,7 +272,8 @@ int start_io (DEVBLK *dev, U32 ccwaddr, int ccwfmt, BYTE ccwkey,
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
     /* Return condition code 1 if status pending */
-    if (dev->scsw.flag3 & SCSW3_SC_PEND)
+    if ((dev->scsw.flag3 & SCSW3_SC_PEND)
+        || (dev->pciscsw.flag3 & SCSW3_SC_PEND))
     {
         release_lock (&dev->lock);
         return 1;
@@ -331,6 +344,7 @@ BYTE    prev_chained = 0;               /* Chaining flags from CCW
                                            preceding the data chain  */
 BYTE    prevcode = 0;                   /* Previous CCW opcode       */
 BYTE    tracethis = 0;                  /* 1=Trace this CCW only     */
+BYTE    area[64];                       /* Message area              */
 DEVXF  *devexec;                        /* -> Execute CCW function   */
 int     ccwseq = 0;                     /* CCW sequence number       */
 int     bufpos = 0;                     /* Position in I/O buffer    */
@@ -356,7 +370,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
         /* Channel protection check if CCW is fetch protected */
         storkey = sysblk.storkeys[ccwaddr >> 12];
-        if ((storkey & STORKEY_FETCH)
+        if (ccwkey != 0 && (storkey & STORKEY_FETCH)
             && (storkey & STORKEY_KEY) != ccwkey)
         {
             chanstat = CSW_PROTC;
@@ -440,7 +454,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         /* Channel program check if unsupported flags */
         if (flags & CCW_FLAGS_SUSP)
         {
-            printf ("channel: Unsupported SUSP for device %4.4X\n",
+            logmsg ("channel: Unsupported SUSP for device %4.4X\n",
                     dev->devnum);
             chanstat = CSW_PROGC;
             break;
@@ -449,13 +463,16 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         /* Signal I/O interrupt if PCI flag is set */
         if (flags & CCW_FLAGS_PCI)
         {
-#ifdef FEATURE_S370_CHANNEL
             /* Obtain the device lock */
             obtain_lock (&dev->lock);
 
-            /* Set PCI interrupt pending flag and save PCI CSW
-               replacing any previous pending PCI interrupt */
+            /* Set PCI interrupt pending flag */
             dev->pcipending = 1;
+
+/*debug*/   logmsg ("%4.4X: PCI flag on CCW %2.2X\n",
+/*debug*/           dev->devnum, code);
+#ifdef FEATURE_S370_CHANNEL
+            /* Save the PCI CSW replacing any previous pending PCI */
             dev->pcicsw[0] = ccwkey;
             dev->pcicsw[1] = (ccwaddr & 0xFF0000) >> 16;
             dev->pcicsw[2] = (ccwaddr & 0xFF00) >> 8;
@@ -464,17 +481,28 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             dev->pcicsw[5] = CSW_PCI;
             dev->pcicsw[6] = 0;
             dev->pcicsw[7] = 0;
-
-            /* Release the device lock */
-            release_lock (&dev->lock);
+/*debug*/   display_csw (dev, dev->pcicsw);
 #endif /*FEATURE_S370_CHANNEL*/
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
-            printf ("channel: Unsupported PCI for device %4.4X\n",
-                    dev->devnum);
-            chanstat = CSW_PROGC;
-            break;
+            dev->pciscsw.flag0 = ccwkey & SCSW0_KEY;
+            dev->pciscsw.flag1 = (ccwfmt == 1 ? SCSW1_F : 0);
+            dev->pciscsw.flag2 = SCSW2_FC_START;
+            dev->pciscsw.flag3 = SCSW3_AC_SCHAC | SCSW3_AC_DEVAC
+                                | SCSW3_SC_INTER | SCSW3_SC_PEND;
+            dev->pciscsw.ccwaddr[0] = (ccwaddr & 0xFF000000) >> 24;
+            dev->pciscsw.ccwaddr[1] = (ccwaddr & 0xFF0000) >> 16;
+            dev->pciscsw.ccwaddr[2] = (ccwaddr & 0xFF00) >> 8;
+            dev->pciscsw.ccwaddr[3] = ccwaddr & 0xFF;
+            dev->pciscsw.unitstat = 0;
+            dev->pciscsw.chanstat = CSW_PCI;
+            dev->pciscsw.count[0] = 0;
+            dev->pciscsw.count[1] = 0;
+/*debug*/   display_scsw (dev, dev->pciscsw);
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
+
+            /* Release the device lock */
+            release_lock (&dev->lock);
         }
 
         /* Channel program check if invalid count */
@@ -497,7 +525,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             }
 
             /* Copy data into channel buffer */
-            copy_iobuf (code, flags, addr, count,
+            copy_iobuf (dev, code, flags, addr, count,
                         ccwkey, iobuf + bufpos, &chanstat);
             if (chanstat != 0) break;
 
@@ -556,7 +584,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
                 || IS_CCW_SENSE(code)
                 || IS_CCW_RDBACK(code)))
         {
-            copy_iobuf (code, flags, addr, count - residual,
+            copy_iobuf (dev, code, flags, addr, count - residual,
                         ccwkey, iobuf, &chanstat);
         }
 
@@ -585,20 +613,20 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         /* Trace the results of CCW execution */
         if (dev->ccwtrace || dev->ccwstep || tracethis)
         {
-            /* Display status and residual byte count */
-            printf ("%4.4X:Stat=%2.2X%2.2X Count=%4.4X ",
-                    dev->devnum, unitstat, chanstat, residual);
-
-            /* Display data for READ or SENSE commands only */
+            /* Format data for READ or SENSE commands only */
             if (IS_CCW_READ(code) || IS_CCW_SENSE(code))
-                display_data (addr);
+                format_iobuf_data (addr, area);
             else
-                printf ("\n");
+                area[0] = '\0';
+
+            /* Display status and residual byte count */
+            logmsg ("%4.4X:Stat=%2.2X%2.2X Count=%4.4X %s\n",
+                    dev->devnum, unitstat, chanstat, residual, area);
 
             /* Display sense bytes if unit check is indicated */
             if (unitstat & CSW_UC)
             {
-                printf ("%4.4X:Sense=%2.2X%2.2X%2.2X%2.2X "
+                logmsg ("%4.4X:Sense=%2.2X%2.2X%2.2X%2.2X "
                         "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X "
                         "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X "
                         "%2.2X%2.2X%2.2X%2.2X\n",
@@ -613,7 +641,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
                         dev->sense[23]);
                 if (dev->sense[0] != 0 || dev->sense[1] != 0)
                 {
-                    printf ("%4.4X:Sense=%s%s%s%s%s%s%s%s"
+                    logmsg ("%4.4X:Sense=%s%s%s%s%s%s%s%s"
                             "%s%s%s%s%s%s%s%s\n",
                             dev->devnum,
                             (dev->sense[0] & SENSE_CR) ? "CMDREJ " : "",
@@ -836,9 +864,6 @@ int     cc;                             /* Condition code            */
     /* Obtain the device lock */
     obtain_lock (&dev->lock);
 
-    /* Copy the subchannel status word to the IRB */
-    irb->scsw = dev->scsw;
-
     /* Build the extended status word in the IRB */
     memset (&irb->esw, 0, sizeof(ESW));
     irb->esw.lpum = 0x80;
@@ -847,6 +872,29 @@ int     cc;                             /* Condition code            */
 
     /* Zeroize the extended control word in the IRB */
     memset (irb->ecw, 0, sizeof(irb->ecw));
+
+    /* Return PCI SCSW if PCI status is pending */
+    if (dev->pciscsw.flag3 & SCSW3_SC_PEND)
+    {
+        /*debug*/logmsg ("%4.4X: PCI SCSW stored\n", dev->devnum);
+
+        /* Copy the PCI SCSW to the IRB */
+        irb->scsw = dev->pciscsw;
+
+        /* Clear the pending PCI status */
+        dev->pciscsw.flag2 &= ~(SCSW2_FC | SCSW2_AC);
+        dev->pciscsw.flag3 &= ~(SCSW3_SC);
+
+        /* Release the device lock */
+        release_lock (&dev->lock);
+
+        /* Return condition code 0 to indicate status was pending */
+        return 0;
+
+    } /* end if(pcipending) */
+
+    /* Copy the subchannel status word to the IRB */
+    irb->scsw = dev->scsw;
 
     /* Clear any pending interrupt */
     dev->pending = 0;
@@ -859,7 +907,7 @@ int     cc;                             /* Condition code            */
 
         /* Display the subchannel status word */
         if (dev->ccwtrace || dev->ccwstep)
-            display_scsw (dev);
+            display_scsw (dev, dev->scsw);
 
         /* Clear the subchannel status bits in the device block */
         dev->scsw.flag2 &= ~(SCSW2_FC | SCSW2_AC);
@@ -996,6 +1044,8 @@ DEVBLK *dev;                            /* -> Device control block   */
     /* Reset the interrupt pending and busy flags for the device */
     if (dev->pcipending)
     {
+        /*debug*/logmsg ("%4.4X: PCI interrupt presented\n",
+        /*debug*/       dev->devnum);
         dev->pcipending = 0;
     }
     else
@@ -1017,4 +1067,35 @@ DEVBLK *dev;                            /* -> Device control block   */
     return 1;
 
 } /* end function present_io_interrupt */
+
+/*-------------------------------------------------------------------*/
+/* I/O RESET                                                         */
+/* Resets status of all devices ready for IPL.  Note that device     */
+/* positioning is not affected by I/O reset; thus the system can     */
+/* be IPLed from current position in a tape or card reader file.     */
+/*-------------------------------------------------------------------*/
+void
+io_reset (void)
+{
+DEVBLK *dev;                            /* -> Device control block   */
+
+    /* Reset each device in the configuration */
+    for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+    {
+        obtain_lock (&dev->lock);
+
+        dev->pending = 0;
+        dev->busy = 0;
+        dev->readpending = 0;
+        dev->pcipending = 0;
+        dev->pmcw.flag5 &= ~PMCW5_E;
+        memset (&dev->scsw, 0, sizeof(SCSW));
+        memset (&dev->pciscsw, 0, sizeof(SCSW));
+        memset (dev->sense, 0, sizeof(dev->sense));
+
+        release_lock (&dev->lock);
+
+    } /* end for(dev) */
+
+} /* end function io_reset */
 

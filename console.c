@@ -18,7 +18,7 @@
 #define BINARY          0       /* Binary Transmission */
 #define IS              0       /* Used by terminal-type negotiation */
 #define SEND            1       /* Used by terminal-type negotiation */
-#define ECHO            1       /* Echo option */
+#define ECHO_OPTION     1       /* Echo option */
 #define SUPPRESS_GA     3       /* Suppress go-ahead option */
 #define TIMING_MARK     6       /* Timing mark option */
 #define TERMINAL_TYPE   24      /* Terminal type option */
@@ -60,9 +60,9 @@
 /* Internal macro definitions                                        */
 /*-------------------------------------------------------------------*/
 #define TNSDEBUG(lvl,format,a...) \
-        if(debug>=lvl)fprintf(stderr,"console: " format, ## a)
+        if(debug>=lvl)logmsg("console: " format, ## a)
 #define TNSERROR(format,a...) \
-        fprintf(stderr,"console: " format, ## a)
+        logmsg("console: " format, ## a)
 #define BUFLEN_3270     4096
 #define LINE_LENGTH     150
 #define SPACE           ((BYTE)' ')
@@ -91,26 +91,26 @@ unsigned char print_chars[17];
     for (offset=0; offset < len; )
     {
         memset(print_chars,0,sizeof(print_chars));
-        fprintf(stderr, "+%4.4X  ", offset);
+        logmsg("+%4.4X  ", offset);
         for (i=0; i < 16; i++)
         {
             c = *addr++;
             if (offset < len) {
-                fprintf(stderr, "%2.2X", c);
+                logmsg("%2.2X", c);
                 print_chars[i] = '.';
                 if (isprint(c)) print_chars[i] = c;
                 c = ebcdic_to_ascii[c];
                 if (isprint(c)) print_chars[i] = c;
             }
             else {
-                fprintf(stderr, "  ");
+                logmsg("  ");
             }
             offset++;
             if ((offset & 3) == 0) {
-                fprintf(stderr, " ");
+                logmsg(" ");
             }
         } /* end for(i) */
-        fprintf(stderr, " %s\n", print_chars);
+        logmsg(" %s\n", print_chars);
     } /* end for(offset) */
 
 } /* end function packet_trace */
@@ -365,8 +365,8 @@ static BYTE will_tmark[] = { IAC, WILL, TIMING_MARK };
 static BYTE wont_sga[] = { IAC, WONT, SUPPRESS_GA };
 static BYTE dont_sga[] = { IAC, DONT, SUPPRESS_GA };
 #endif
-static BYTE wont_echo[] = { IAC, WONT, ECHO };
-static BYTE dont_echo[] = { IAC, DONT, ECHO };
+static BYTE wont_echo[] = { IAC, WONT, ECHO_OPTION };
+static BYTE dont_echo[] = { IAC, DONT, ECHO_OPTION };
 
     /* Perform terminal-type negotiation */
     rc = send_packet (csock, do_term, sizeof(do_term),
@@ -886,11 +886,6 @@ BYTE                    rejmsg[80];     /* Rejection message         */
     }
     rc = send_packet (csock, buf, len, "CONNECTION RESPONSE");
 
-    /* Signal IPL thread that a console is now available */
-    obtain_lock (&sysblk.conslock);
-    signal_condition (&sysblk.conscond);
-    release_lock (&sysblk.conslock);
-
     /* Signal connection thread to redrive its select loop */
     signal_thread (sysblk.cnsltid, SIGHUP);
 
@@ -916,6 +911,10 @@ TID                     tidneg;         /* Negotiation thread id     */
 DEVBLK                 *dev;            /* -> Device block           */
 BYTE                    unitstat;       /* Status after receive data */
 
+    /* Display thread started message on control panel */
+//  logmsg ("HHC600I Console connection thread started: id=%ld\n",
+//          thread_id());
+
     /* Get information about this system */
     uname (&hostinfo);
 
@@ -925,7 +924,7 @@ BYTE                    unitstat;       /* Status after receive data */
     if (lsock < 0)
     {
         TNSERROR("socket: %s\n", strerror(errno));
-        exit(2);
+        return NULL;
     }
 
     /* Prepare the sockaddr structure for the bind */
@@ -942,8 +941,7 @@ BYTE                    unitstat;       /* Status after receive data */
 
         if (rc == 0 || errno != EADDRINUSE) break;
 
-        fprintf (stderr,
-                "HHC601I Waiting for port %u to become free\n",
+        logmsg ("HHC601I Waiting for port %u to become free\n",
                 sysblk.cnslport);
         sleep(10);
     } /* end for(i) */
@@ -951,7 +949,7 @@ BYTE                    unitstat;       /* Status after receive data */
     if (rc != 0)
     {
         TNSERROR("bind: %s\n", strerror(errno));
-        exit(3);
+        return NULL;
     }
 
     /* Put the socket into listening state */
@@ -960,11 +958,10 @@ BYTE                    unitstat;       /* Status after receive data */
     if (rc < 0)
     {
         TNSERROR("listen: %s\n", strerror(errno));
-        exit(4);
+        return NULL;
     }
 
-    fprintf (stderr,
-            "HHC602I Waiting for console connection on port %u\n",
+    logmsg ("HHC602I Waiting for console connection on port %u\n",
             sysblk.cnslport);
 
     /* Handle connection requests and attention interrupts */

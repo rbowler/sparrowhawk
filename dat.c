@@ -844,7 +844,7 @@ int     i;                              /* Array subscript           */
         if ((regs->tlb[i].pte & PAGETAB_PFRA) == (pte & PAGETAB_PFRA))
         {
             regs->tlb[i].valid = 0;
-            printf ("dat: TLB entry %d invalidated\n", i); /*debug*/
+            logmsg ("dat: TLB entry %d invalidated\n", i); /*debug*/
         }
     } /* end for(i) */
 
@@ -968,6 +968,18 @@ U16     xcode;                          /* Exception code            */
     /* Program check if absolute address is outside main storage */
     if (aaddr >= sysblk.mainsize)
         goto vabs_addr_excp;
+
+#ifdef FEATURE_INTERVAL_TIMER
+    /* Check for access to interval timer at location 80 */
+    if (raddr < 88 && raddr >= 76)
+    {
+        psa = (PSA*)(sysblk.mainstor + regs->pxr);
+        logmsg ("dat.c: Interval timer accessed: "
+                "%2.2X%2.2X%2.2X%2.2X\n",
+                psa->inttimer[0], psa->inttimer[1],
+                psa->inttimer[2], psa->inttimer[3]);
+    }
+#endif /*FEATURE_INTERVAL_TIMER*/
 
     /* Check protection and set reference and change bits */
     block = aaddr >> 12;

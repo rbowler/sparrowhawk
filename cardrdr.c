@@ -24,7 +24,7 @@ int     i;                              /* Array subscript           */
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
     {
-        printf ("HHC401I File name missing or invalid\n");
+        fprintf (stderr, "HHC401I File name missing or invalid\n");
         return -1;
     }
 
@@ -65,7 +65,7 @@ int     i;                              /* Array subscript           */
             dev->trunc = 1;
             continue;
         }
-        printf ("HHC402I Invalid argument: %s\n",
+        fprintf (stderr, "HHC402I Invalid argument: %s\n",
                 argv[i]);
         return -1;
     }
@@ -115,10 +115,10 @@ int     rc;                             /* Return code               */
     if (rc < CARD_SIZE)
     {
         if (rc < 0)
-            printf ("HHC403I Error reading file %s: %s\n",
+            logmsg ("HHC403I Error reading file %s: %s\n",
                     dev->filename, strerror(errno));
         else
-            printf ("HHC404I Unexpected end of file on %s\n",
+            logmsg ("HHC404I Unexpected end of file on %s\n",
                     dev->filename);
 
         /* Set unit check with equipment check */
@@ -164,7 +164,7 @@ BYTE    c;                              /* Input character           */
         /* Handle read error condition */
         if (rc < 0)
         {
-            printf ("HHC405I Error reading file %s: %s\n",
+            logmsg ("HHC405I Error reading file %s: %s\n",
                     dev->filename, strerror(errno));
 
             /* Set unit check with equipment check */
@@ -217,7 +217,7 @@ int     num;                            /* Number of bytes to move   */
         if (rc < 0)
         {
             /* Handle open failure */
-            printf ("HHC406I Error opening file %s: %s\n",
+            logmsg ("HHC406I Error opening file %s: %s\n",
                     dev->filename, strerror(errno));
 
             /* Set unit check with intervention required */

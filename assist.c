@@ -134,25 +134,14 @@ U32     newia;                          /* Unsuccessful branch addr  */
         newia = vfetch4 ( lit_addr + LITOLOC, 0, regs );
 
         /* Save the link information in register 12 */
-        if (regs->psw.amode)
-            regs->gpr[12] = 0x80000000 | regs->psw.ia;
-        else
-            regs->gpr[12] = regs->psw.ia & 0x00FFFFFF;
+        regs->gpr[12] = regs->psw.ia;
 
         /* Copy LITOLOC into register 13 to signify obtain failure */
         regs->gpr[13] = newia;
 
-        /* Update the PSW instruction address and addressing mode */
-        if ( newia & 0x80000000 )
-        {
-            regs->psw.amode = 1;
-            regs->psw.ia = newia & 0x7FFFFFFF;
-        }
-        else
-        {
-            regs->psw.amode = 0;
-            regs->psw.ia = newia & 0x00FFFFFF;
-        }
+        /* Update the PSW instruction address */
+        regs->psw.ia = newia &
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
     }
 
     /* Release main-storage access lock */
@@ -240,25 +229,14 @@ U32     newia;                          /* Unsuccessful branch addr  */
         newia = vfetch4 ( lit_addr + LITRLOC, 0, regs );
 
         /* Save the link information in register 12 */
-        if (regs->psw.amode)
-            regs->gpr[12] = 0x80000000 | regs->psw.ia;
-        else
-            regs->gpr[12] = regs->psw.ia & 0x00FFFFFF;
+        regs->gpr[12] = regs->psw.ia;
 
         /* Copy LITRLOC into register 13 to signify release failure */
         regs->gpr[13] = newia;
 
-        /* Update the PSW instruction address and addressing mode */
-        if ( newia & 0x80000000 )
-        {
-            regs->psw.amode = 1;
-            regs->psw.ia = newia & 0x7FFFFFFF;
-        }
-        else
-        {
-            regs->psw.amode = 0;
-            regs->psw.ia = newia & 0x00FFFFFF;
-        }
+        /* Update the PSW instruction address */
+        regs->psw.ia = newia &
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
     }
 
     /* Release main-storage access lock */
@@ -346,25 +324,14 @@ U32     newia;                          /* Unsuccessful branch addr  */
         newia = vfetch4 ( lit_addr + LITOCMS, 0, regs );
 
         /* Save the link information in register 12 */
-        if (regs->psw.amode)
-            regs->gpr[12] = 0x80000000 | regs->psw.ia;
-        else
-            regs->gpr[12] = regs->psw.ia & 0x00FFFFFF;
+        regs->gpr[12] = regs->psw.ia;
 
         /* Copy LITOCMS into register 13 to signify obtain failure */
         regs->gpr[13] = newia;
 
-        /* Update the PSW instruction address and addressing mode */
-        if ( newia & 0x80000000 )
-        {
-            regs->psw.amode = 1;
-            regs->psw.ia = newia & 0x7FFFFFFF;
-        }
-        else
-        {
-            regs->psw.amode = 0;
-            regs->psw.ia = newia & 0x00FFFFFF;
-        }
+        /* Update the PSW instruction address */
+        regs->psw.ia = newia &
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
     }
 
     /* Release main-storage access lock */
@@ -455,25 +422,14 @@ U32     newia;                          /* Unsuccessful branch addr  */
         newia = vfetch4 ( lit_addr + LITRCMS, 0, regs );
 
         /* Save the link information in register 12 */
-        if (regs->psw.amode)
-            regs->gpr[12] = 0x80000000 | regs->psw.ia;
-        else
-            regs->gpr[12] = regs->psw.ia & 0x00FFFFFF;
+        regs->gpr[12] = regs->psw.ia;
 
         /* Copy LITRCMS into register 13 to signify release failure */
         regs->gpr[13] = newia;
 
-        /* Update the PSW instruction address and addressing mode */
-        if ( newia & 0x80000000 )
-        {
-            regs->psw.amode = 1;
-            regs->psw.ia = newia & 0x7FFFFFFF;
-        }
-        else
-        {
-            regs->psw.amode = 0;
-            regs->psw.ia = newia & 0x00FFFFFF;
-        }
+        /* Update the PSW instruction address */
+        regs->psw.ia = newia &
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
     }
 
     /* Release main-storage access lock */

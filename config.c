@@ -128,46 +128,14 @@ int     stmtlen;                        /* Statement length          */
 } /* end function read_config */
 
 /*-------------------------------------------------------------------*/
-/* Signal handler for SIGHUP signal                                  */
-/*-------------------------------------------------------------------*/
-static void sighup_handler (int signo)
-{
-//  printf ("config: sighup handler entered for thread %lu\n",/*debug*/
-//          thread_id());                                     /*debug*/
-    return;
-} /* end function sighup_handler */
-
-/*-------------------------------------------------------------------*/
-/* Signal handler for SIGINT signal                                  */
-/*-------------------------------------------------------------------*/
-static void sigint_handler (int signo)
-{
-//  printf ("config: sigint handler entered for thread %lu\n",/*debug*/
-//          thread_id());                                     /*debug*/
-
-    /* Ignore signal unless presented on console thread */
-    if (thread_id() != sysblk.cnsltid)
-        return;
-
-    /* Exit if previous SIGINT request was not actioned */
-    if (sysblk.sigintreq)
-        exit(1);
-
-    /* Set SIGINT request pending flag */
-    sysblk.sigintreq = 1;
-
-    /* Activate instruction stepping */
-    sysblk.inststep = 1;
-    return;
-} /* end function sigint_handler */
-
-/*-------------------------------------------------------------------*/
 /* Function to build system configuration                            */
 /*-------------------------------------------------------------------*/
 void build_config (BYTE *fname)
 {
 int     rc;                             /* Return code               */
 int     i;                              /* Array subscript           */
+int     cpu;                            /* CPU number                */
+int     pfd[2];                         /* Message pipe handles      */
 FILE   *fp;                             /* Configuration file pointer*/
 BYTE   *sserial;                        /* -> CPU serial string      */
 BYTE   *smainsize;                      /* -> Main size string       */
@@ -296,10 +264,15 @@ int     subchan;                        /* Subchannel number         */
 
     /* Initialize the CPU registers */
     sysblk.numcpu = numcpu;
-    for (i = 0; i < MAX_CPU_ENGINES; i++)
+    for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
     {
-        sysblk.regs[i].cpuad = i;
-    } /* end for(i) */
+        /* Initialize the processor address register for STAP */
+        sysblk.regs[cpu].cpuad = cpu;
+
+        /* Perform CPU reset */
+        cpu_reset (sysblk.regs + cpu);
+
+    } /* end for(cpu) */
 
     /* Obtain main storage */
     sysblk.mainsize = mainsize * 1024 * 1024;
@@ -371,10 +344,34 @@ int     subchan;                        /* Subchannel number         */
     initialize_lock (&sysblk.todlock);
     initialize_lock (&sysblk.mainlock);
     initialize_lock (&sysblk.intlock);
-    initialize_lock (&sysblk.conslock);
     initialize_condition (&sysblk.intcond);
-    initialize_condition (&sysblk.conscond);
     initialize_detach_attr (&sysblk.detattr);
+
+    /* Create the message pipe */
+    rc = pipe (pfd);
+    if (rc < 0)
+    {
+        fprintf (stderr,
+                "HHC017I Message pipe creation failed: %s\n",
+                strerror(errno));
+        exit(1);
+    }
+
+    sysblk.msgpiper = pfd[0];
+    sysblk.msgpipew = fdopen (pfd[1], "w");
+    if (sysblk.msgpipew == NULL)
+    {
+        fprintf (stderr,
+                "HHC018I Message pipe open failed: %s\n",
+                strerror(errno));
+        exit(1);
+    }
+    setvbuf (sysblk.msgpipew, NULL, _IOLBF, 0);
+
+    /* Display the version identifier on the control panel */
+    logmsg ("Hercules %s version %s "
+            "(c)Copyright Roger Bowler, 1994-1999\n",
+            ARCHITECTURE_NAME, MSTRING(VERSION));
 
     /* Build the device configuration blocks */
     dvpp = &(sysblk.firstdev);
@@ -391,7 +388,7 @@ int     subchan;                        /* Subchannel number         */
         if (sdevnum == NULL || sdevtype == NULL)
         {
             fprintf (stderr,
-                    "HHC017I Error in %s line %d: "
+                    "HHC022I Error in %s line %d: "
                     "Missing device number or device type\n",
                     fname, stmt);
             exit(1);
@@ -401,7 +398,7 @@ int     subchan;                        /* Subchannel number         */
             || sscanf(sdevnum, "%hx%c", &devnum, &c) != 1)
         {
             fprintf (stderr,
-                    "HHC018I Error in %s line %d: "
+                    "HHC023I Error in %s line %d: "
                     "%s is not a valid device number\n",
                     fname, stmt, sdevnum);
             exit(1);
@@ -410,7 +407,7 @@ int     subchan;                        /* Subchannel number         */
         if (sscanf(sdevtype, "%hx%c", &devtype, &c) != 1)
         {
             fprintf (stderr,
-                    "HHC019I Error in %s line %d: "
+                    "HHC024I Error in %s line %d: "
                     "%s is not a valid device type\n",
                     fname, stmt, sdevtype);
             exit(1);
@@ -473,7 +470,7 @@ int     subchan;                        /* Subchannel number         */
 
         default:
             fprintf (stderr,
-                    "HHC020I Error in %s line %d: "
+                    "HHC025I Error in %s line %d: "
                     "Device type %4.4X not recognized\n",
                     fname, stmt, devtype);
             devinit = NULL;
@@ -486,7 +483,7 @@ int     subchan;                        /* Subchannel number         */
         if (dev == NULL)
         {
             fprintf (stderr,
-                    "HHC021I Cannot obtain device block "
+                    "HHC026I Cannot obtain device block "
                     "for device %4.4X: %s\n",
                     devnum, strerror(errno));
             exit(1);
@@ -517,7 +514,7 @@ int     subchan;                        /* Subchannel number         */
         if (rc < 0)
         {
             fprintf (stderr,
-                    "HHC022I Error in %s line %d: "
+                    "HHC027I Error in %s line %d: "
                     "Initialization failed for device %4.4X\n",
                     fname, stmt, devnum);
             exit(1);
@@ -530,7 +527,7 @@ int     subchan;                        /* Subchannel number         */
             if (dev->buf == NULL)
             {
                 fprintf (stderr,
-                        "HHC023I Cannot obtain buffer "
+                        "HHC028I Cannot obtain buffer "
                         "for device %4.4X: %s\n",
                         dev->devnum, strerror(errno));
                 exit(1);
@@ -548,46 +545,8 @@ int     subchan;                        /* Subchannel number         */
     if (sysblk.firstdev == NULL)
     {
         fprintf (stderr,
-                "HHC024I No device records in file %s\n",
+                "HHC029I No device records in file %s\n",
                 fname);
-        exit(1);
-    }
-
-    /* Register the SIGHUP handler */
-    if ( signal (SIGHUP, sighup_handler) == SIG_ERR )
-    {
-        fprintf (stderr,
-                "HHC025I Cannot register SIGHUP handler: %s\n",
-                strerror(errno));
-        exit(1);
-    }
-
-    /* Register the SIGINT handler */
-    if ( signal (SIGINT, sigint_handler) == SIG_ERR )
-    {
-        fprintf (stderr,
-                "HHC026I Cannot register SIGINT handler: %s\n",
-                strerror(errno));
-        exit(1);
-    }
-
-    /* Start the console connection thread */
-    if ( create_thread (&sysblk.cnsltid, &sysblk.detattr,
-                        console_connection_handler, NULL) )
-    {
-        fprintf (stderr,
-                "HHC027I Cannot create console thread: %s\n",
-                strerror(errno));
-        exit(1);
-    }
-
-    /* Start the TOD clock and CPU timer thread */
-    if ( create_thread (&sysblk.todtid, &sysblk.detattr,
-                        timer_update_thread, NULL) )
-    {
-        fprintf (stderr,
-                "HHC028I Cannot create timer thread: %s\n",
-                strerror(errno));
         exit(1);
     }
 
