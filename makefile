@@ -6,7 +6,7 @@
 #
 #
 
-VERSION  = 1.67
+VERSION  = 1.68
 
 # Change this if you want to install the Hercules executables somewhere
 #   besides /usr/bin. The $PREFIX (which defaults to nothing) can be
@@ -14,27 +14,56 @@ VERSION  = 1.67
 #   (the directory is only used when installing).
 DESTDIR  = $(PREFIX)/usr/bin
 
-#CFLAGS	 = -O0 -Wall -DARCH=390
-CFLAGS	 = -O2 -Wall -fPIC -malign-double -DARCH=390
-#	   -march=pentium -malign-double -mwide-multiply
-#CFL_370  = -O0 -Wall -DARCH=370
-CFL_370  = -O2 -Wall -fPIC -malign-double -DARCH=370
-#	   -march=pentium -malign-double -mwide-multiply
+# Standard flags for all architectures
+CFLAGS	 = -O2 -Wall -fPIC -DARCH=390
+CFL_370  = -O2 -Wall -fPIC -DARCH=370
 LFLAGS	 = -lpthread
+
+# Add default flags for Pentium compilations
+ifndef HOST_ARCH
+CFLAGS	 += -malign-double -march=pentium
+CFL_370  += -malign-double -march=pentium
+endif
+
+# Handle host architecture if specified
+ifeq ($(HOST_ARCH),i386)
+CFLAGS	 += -malign-double
+CFL_370	 += -malign-double
+endif
+ifeq ($(HOST_ARCH),i586)
+CFLAGS	 += -malign-double -march=pentium
+CFL_370  += -malign-double -march=pentium
+endif
+ifeq ($(HOST_ARCH),i686)
+CFLAGS	 += -malign-double -march=pentiumpro
+CFL_370  += -malign-double -march=pentiumpro
+endif
+
+# Reverse the comments below to disable Compressed CKD Dasd support
+#CFLAGS	+= -DNO_CCKD
+#CFL_370	+= -DNO_CCKD
+LFLAGS	+= -lz
+
+# Uncomment these lines to enable Compressed CKD bzip2 compression
+#CFLAGS	+= -DCCKD_BZIP2
+#CFL_370	+= -DCCKD_BZIP2
+#LFLAGS	+= -lbz2
 
 # Uncomment these lines for NetBSD, with either the unproven-pthreads
 #   or pth packages
-#CFLAGS += -I/usr/pkg/pthreads/include -I/usr/pkg/include
-#CFL_370	+= -I/usr/pkg/pthreads/include -I/usr/pkg/include
-#LFLAGS += -L/usr/pkg/pthreads/lib -R/usr/pkg/pthreads
-#LFLAGS += -L/usr/pkg/lib -R/usr/pkg/pthreads/lib
+#CFLAGS  += -I/usr/pkg/pthreads/include -I/usr/pkg/include
+#CFL_370  += -I/usr/pkg/pthreads/include -I/usr/pkg/include
+#LFLAGS	 += -L/usr/pkg/pthreads/lib -R/usr/pkg/pthreads
+#LFLAGS	 += -L/usr/pkg/lib -R/usr/pkg/pthreads/lib
 
 EXEFILES = hercules-370 hercules-390 \
 	   dasdinit dasdisup dasdload dasdls dasdpdsu \
-	   tapecopy tapemap tapesplit
+	   tapecopy tapemap tapesplit \
+	   cckd2ckd cckdcdsk ckd2cckd
 
 TARFILES = makefile *.c *.h hercules.cnf tapeconv.jcl dasdlist \
-	   obj370 obj390 html zzsa.cnf zzsacard.bin
+	   obj370 obj390 html zzsa.cnf zzsacard.bin \
+	   cckddump.bal
 
 HRC_370_OBJS = obj370/impl.o obj370/config.o obj370/panel.o \
 	   obj370/ipl.o obj370/assist.o obj370/dat.o \
@@ -47,7 +76,8 @@ HRC_370_OBJS = obj370/impl.o obj370/config.o obj370/panel.o \
 	   obj370/printer.o obj370/console.o obj370/external.o \
 	   obj370/float.o obj370/ctcadpt.o obj370/trace.o \
 	   obj370/machchk.o obj370/vector.o obj370/xstore.o \
-	   obj370/cmpsc.o
+	   obj370/cmpsc.o obj370/ibuf.o \
+	   obj370/cckddasd.o obj370/cckdcdsk.o
            
 
 HRC_390_OBJS = obj390/impl.o obj390/config.o obj390/panel.o \
@@ -61,7 +91,8 @@ HRC_390_OBJS = obj390/impl.o obj390/config.o obj390/panel.o \
 	   obj390/printer.o obj390/console.o obj390/external.o \
 	   obj390/float.o obj390/ctcadpt.o obj390/trace.o \
 	   obj390/machchk.o obj390/vector.o obj390/xstore.o \
-	   obj390/cmpsc.o obj390/sie.o
+	   obj390/cmpsc.o obj390/sie.o obj390/ibuf.o \
+	   obj390/cckddasd.o obj390/cckdcdsk.o
            
 
 DIN_OBJS = dasdinit.o dasdutil.o
@@ -80,7 +111,19 @@ TMA_OBJS = tapemap.o
 
 TSP_OBJS = tapesplit.o
 
-HEADERS  = hercules.h esa390.h version.h opcode.h inline.h
+CC2C_OBJ = cckd2ckd.o
+
+CCHK_OBJ = cckdcdsk.o
+
+C2CC_OBJ = ckd2cckd.o
+
+CC2C_OBJ = cckd2ckd.o
+
+CCHK_OBJ = cckdcdsk.o
+
+C2CC_OBJ = ckd2cckd.o
+
+HEADERS  = hercules.h esa390.h version.h opcode.h inline.h ibuf.h
 
 all:	   $(EXEFILES)
 
@@ -137,6 +180,20 @@ tapecopy.o: tapecopy.c $(HEADERS)
 tapemap.o: tapemap.c $(HEADERS)
 
 tapesplit.o: tapesplit.c $(HEADERS)
+
+cckd:      cckd2ckd cckdcdsk ckd2cckd
+
+cckd2ckd:  $(CC2C_OBJ)
+	$(CC) -o cckd2ckd $(CC2C_OBJ) $(LFLAGS)
+
+cckdcdsk:  $(CCHK_OBJ)
+	$(CC) -o cckdcdsk $(CCHK_OBJ) $(LFLAGS)
+
+ckd2cckd:  $(C2CC_OBJ)
+	$(CC) -o ckd2cckd $(C2CC_OBJ) $(LFLAGS)
+
+$(CCHK_OBJ): %.o: %.c $(HEADERS)
+	$(CC) $(CFLAGS) -DCCKD_CHKDSK_MAIN -o $@ -c $<
 
 clean:
 	rm -rf $(EXEFILES) *.o obj370 obj390; mkdir obj370 obj390

@@ -292,7 +292,11 @@ BYTE    area[64];                       /* Data display area         */
 
             /* Copy data between main storage and channel buffer */
             if (readcmd)
+            {
+                WATCH("bef memcpy 1");
                 memcpy (sysblk.mainstor + idadata, iobuf, idalen);
+                FRAG_INVALIDATE(idadata, idalen);
+            }
             else
                 memcpy (iobuf, sysblk.mainstor + idadata, idalen);
 
@@ -312,6 +316,7 @@ BYTE    area[64];                       /* Data display area         */
             idawaddr += 4;
 
         } /* end for(idaseq) */
+        WATCH("copybuf 1");
 
     } else {                            /* Non-IDA data addressing */
 
@@ -347,9 +352,25 @@ BYTE    area[64];                       /* Data display area         */
 
         /* Copy data between main storage and channel buffer */
         if (readcmd)
+        {
+            WATCH("bef memcpy 2");
             memcpy (sysblk.mainstor + addr, iobuf, count);
+            if (firstpage == lastpage)
+            {
+                FRAG_INVALIDATE(addr, count);
+            }
+            else
+            {
+                for (i = firstpage; i <= lastpage; i++)
+                {
+                    FRAG_INVALIDATE((U32)(i * (U32)STORAGE_KEY_PAGESIZE), 
+                                             STORAGE_KEY_PAGESIZE);
+                }
+            }
+        }
         else
             memcpy (iobuf, sysblk.mainstor + addr, count);
+        WATCH("copybuf 2");
 
     } /* end if(!IDA) */
 
@@ -439,16 +460,13 @@ int start_io (DEVBLK *dev, U32 ioparm, BYTE orb4, BYTE orb5,
     dev->pmcw.intparm[2] = (ioparm >> 8) & 0xFF;
     dev->pmcw.intparm[3] = ioparm & 0xFF;
 
+    /* Execute the CCW chain in the device's own thread by prodding it */
+    /* code courtesy of Malcolm Beattie                                */
+    dev->loopercmd = LOOPER_EXEC;
+    signal_condition(&dev->loopercond);
+    
     /* Release the device lock */
     release_lock (&dev->lock);
-
-    /* Execute the CCW chain on a separate thread */
-    if ( create_thread (&dev->tid, &sysblk.detattr,
-                        execute_ccw_chain, dev) )
-    {
-        perror("start_io: create_thread");
-        return 2;
-    }
 
     /* Return with condition code zero */
     return 0;
@@ -517,6 +535,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             mbcount++;
             mbk->srcount[0] = mbcount >> 8;
             mbk->srcount[1] = mbcount & 0xFF;
+            FRAG_INVALIDATE(mbaddr, 2);
         } else {
             /* Generate subchannel logout indicating program
                check or protection check, and set the subchannel
@@ -558,11 +577,13 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         /* Signal waiting CPUs that interrupt is pending */
         obtain_lock (&sysblk.intlock);
         sysblk.iopending = 1;
+        set_doint(NULL);
         signal_condition (&sysblk.intcond);
         release_lock (&sysblk.intlock);
     }
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
+    WATCH("execute_ccw bef while");
     /* Execute the CCW chain */
     while ( chain )
     {
@@ -714,6 +735,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
                     /* Signal waiting CPUs that interrupt is pending */
                     obtain_lock (&sysblk.intlock);
                     sysblk.iopending = 1;
+                    set_doint(NULL);
                     signal_condition (&sysblk.intcond);
                     release_lock (&sysblk.intlock);
 
@@ -812,6 +834,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             /* Signal waiting CPUs that an interrupt is pending */
             obtain_lock (&sysblk.intlock);
             sysblk.iopending = 1;
+            set_doint(NULL);
             signal_condition (&sysblk.intcond);
             release_lock (&sysblk.intlock);
 
@@ -890,9 +913,11 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             break;
         }
 
+        WATCH("bef devexec");
         /* Pass the CCW to the device handler for execution */
         (*devexec) (dev, code, flags, chained, count, prevcode,
                     ccwseq, iobuf, &more, &unitstat, &residual);
+        WATCH("aft devexec");
 
         /* For READ, SENSE, and READ BACKWARD operations, copy data
            from channel buffer to main storage, unless SKIP is set */
@@ -904,6 +929,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             copy_iobuf (dev, code, flags, addr, count - residual,
                         ccwkey, iobuf, &chanstat);
         }
+        WATCH("aft copybuf");
 
         /* Check for incorrect length */
         if (residual != 0
@@ -984,10 +1010,12 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
                 }
             }
         }
+        WATCH("bef increment");
 
         /* Increment CCW address if device returned status modifier */
         if (unitstat & CSW_SM)
             ccwaddr += 8;
+        WATCH("aft increment");
 
         /* Terminate the channel program if any unusual status */
         if (chanstat != 0
@@ -1002,6 +1030,8 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             ccwseq++;
 
     } /* end while(chain) */
+
+    WATCH("execute_ccw aft while");
 
     /* Obtain the device lock */
     obtain_lock (&dev->lock);
@@ -1070,6 +1100,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
     /* Signal waiting CPUs that an interrupt is pending */
     obtain_lock (&sysblk.intlock);
     sysblk.iopending = 1;
+    set_doint(NULL);
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 
@@ -1515,6 +1546,7 @@ void clear_subchan (REGS *regs, DEVBLK *dev)
     /* Signal waiting CPUs that an interrupt may be pending */
     obtain_lock (&sysblk.intlock);
     sysblk.iopending = 1;
+    set_doint(NULL);
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 
@@ -1607,6 +1639,7 @@ int halt_subchan (REGS *regs, DEVBLK *dev)
     /* Signal waiting CPUs that an interrupt may be pending */
     obtain_lock (&sysblk.intlock);
     sysblk.iopending = 1;
+    set_doint(NULL);
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 
@@ -1760,6 +1793,8 @@ DEVBLK *dev;                            /* -> Device control block   */
         }
         release_lock (&dev->lock);
     } /* end for(dev) */
+
+    set_doint(NULL);
 
     /* If no enabled interrupt pending, exit with condition code 0 */
     if (dev == NULL)
@@ -1926,6 +1961,7 @@ device_attention (DEVBLK *dev, BYTE unitstat)
     /* Signal waiting CPUs that an interrupt is pending */
     obtain_lock (&sysblk.intlock);
     sysblk.iopending = 1;
+    set_doint(NULL);
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 

@@ -2,7 +2,9 @@
 
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2000      */
 
+#if 0
 typedef void (*zz_func) (BYTE inst[], int execflag, REGS *regs);
+#endif
 
 extern zz_func opcode_table[];
 extern zz_func opcode_01xx[];
@@ -100,6 +102,97 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
             } \
         }
 
+#ifdef IBUF
+#ifdef CHECK_FRAGPARMS
+#define RR(_inst, _execflag, _regs, _r1, _r2) \
+        { \
+        if ((_regs)->actentry) \
+        { \
+            RADDR *raddr; \
+            FRAGENTRY *entry; \
+            FRAG *frag; \
+            int ok = 0; \
+            frag = (FRAG*)(_regs)->actfrag; \
+            entry = (FRAGENTRY*)(_regs)->actentry; \
+            raddr = &entry->raddr; \
+            (_r1) = (_inst)[1] >> 4; \
+            (_r2) = (_inst)[1] & 0x0F; \
+            if (((_r1) != raddr->r1) || \
+                ((_r2) != raddr->r2)) \
+               ok = 1; \
+            else \
+            { \
+                (_r1) = raddr->r1; \
+                (_r2) = raddr->r2; \
+            }; \
+            if (ok) \
+               logmsg("ERROR COMPILE RR %llu %4x %4x %4x op %x %x decoded: %x %x %x\n",  \
+                       (_regs)->instcount, \
+                       entry->iaabs, \
+                       (_regs)->psw.ia, \
+                       entry->ia, \
+                       (_inst)[0], \
+                       (_inst)[1], \
+                       entry->oinst[0], \
+                       raddr->r1, \
+                       raddr->r2); \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 2; \
+                (_regs)->psw.ia += 2; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        } \
+        else \
+        { \
+            (_r1) = (_inst)[1] >> 4; \
+            (_r2) = (_inst)[1] & 0x0F; \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 2; \
+                (_regs)->psw.ia += 2; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        } \
+        }
+#else
+#define RR(_inst, _execflag, _regs, _r1, _r2) \
+        { \
+        if ((_regs)->actentry) \
+        { \
+            RADDR *raddr; \
+            FRAGENTRY *entry; \
+            entry = (FRAGENTRY*)(_regs)->actentry; \
+            raddr = &entry->raddr; \
+            (_r1) = raddr->r1; \
+            (_r2) = raddr->r2; \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 2; \
+                (_regs)->psw.ia += 2; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        } \
+        else \
+        { \
+            (_r1) = (_inst)[1] >> 4; \
+            (_r2) = (_inst)[1] & 0x0F; \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 2; \
+                (_regs)->psw.ia += 2; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        } \
+        }
+#endif
+
+#define IBUF_RR(_inst, _r1, _r2) \
+        { \
+            (_r1) = (_inst)[1] >> 4; \
+            (_r2) = (_inst)[1] & 0x0F; \
+        }
+#else
 #define RR(_inst, _execflag, _regs, _r1, _r2) \
         { \
             (_r1) = (_inst)[1] >> 4; \
@@ -111,6 +204,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
             } \
         }
+#endif
 
 #define RR_SVC(_inst, _execflag, _regs, _svc) \
         { \
@@ -123,6 +217,160 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
             } \
         }
 
+#ifdef IBUF
+#ifdef CHECK_FRAGPARMS
+#define RX(_inst, _execflag, _regs, _r1, _b2, _effective_addr2) \
+        { \
+        if ((_regs)->actentry) \
+        { \
+            RADDR *raddr; \
+            FRAGENTRY *entry; \
+            int ok = 0; \
+            entry = (FRAGENTRY*)(_regs)->actentry; \
+            raddr = &entry->raddr; \
+            (_r1) = (_inst)[1] >> 4; \
+            (_b2) = (_inst)[1] & 0x0F; \
+            if (((_r1) != raddr->r1) || \
+                ((_b2) != raddr->r2)) \
+               ok = 1; \
+            else \
+            { \
+                (_r1) = raddr->r1; \
+                (_b2) = raddr->r2; \
+            };  \
+            (_effective_addr2) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
+            if ((_effective_addr2) != raddr->addr) \
+               ok = 1; \
+            else \
+               (_effective_addr2) = raddr->addr; \
+            if((_b2) != 0) \
+            { \
+                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
+                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            (_b2) = (_inst)[2] >> 4; \
+            if ((_b2) != raddr->r3) \
+                ok = 1; \
+            else \
+                (_b2) = raddr->r3; \
+            if((_b2) != 0) \
+            { \
+                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
+                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            if (ok) \
+            { \
+               FRAG *frag; \
+               frag = (FRAG*)(_regs)->actfrag; \
+               logmsg("ERROR COMPILE RX %llu %4x %4x %4x op %x %x %x decoded: %x %x %x %x %4x\n",  \
+                       (_regs)->instcount, \
+                       entry->iaabs, \
+                       (_regs)->psw.ia, \
+                       entry->ia, \
+                       (_inst)[0], \
+                       (_inst)[1], \
+                       (_inst)[2], \
+                       entry->oinst[0], \
+                       raddr->r1, \
+                       raddr->r2, \
+                       raddr->r3, \
+                       raddr->addr); \
+            }; \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 4; \
+                (_regs)->psw.ia += 4; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        } \
+        else \
+        { \
+            (_r1) = (_inst)[1] >> 4; \
+            (_b2) = (_inst)[1] & 0x0F; \
+            (_effective_addr2) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
+            if((_b2) != 0) \
+            { \
+                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
+                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            (_b2) = (_inst)[2] >> 4; \
+            if((_b2) != 0) \
+            { \
+                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
+                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 4; \
+                (_regs)->psw.ia += 4; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        } \
+        }
+#else
+#define RX(_inst, _execflag, _regs, _r1, _b2, _effective_addr2) \
+        { \
+        if ((_regs)->actentry) \
+        { \
+            RADDR *raddr; \
+            FRAGENTRY *entry; \
+            entry = (FRAGENTRY*)(_regs)->actentry; \
+            raddr = &entry->raddr; \
+            (_r1) = raddr->r1; \
+            (_b2) = raddr->r2; \
+            (_effective_addr2) = raddr->addr; \
+            if((_b2) != 0) \
+            { \
+                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
+                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            (_b2) = raddr->r3; \
+            if((_b2) != 0) \
+            { \
+                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
+                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 4; \
+                (_regs)->psw.ia += 4; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        } \
+        else \
+        { \
+            (_r1) = (_inst)[1] >> 4; \
+            (_b2) = (_inst)[1] & 0x0F; \
+            (_effective_addr2) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
+            if((_b2) != 0) \
+            { \
+                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
+                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            (_b2) = (_inst)[2] >> 4; \
+            if((_b2) != 0) \
+            { \
+                (_effective_addr2) += (_regs)->gpr[(_b2)]; \
+                (_effective_addr2) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            if( !(_execflag) ) \
+            { \
+                (_regs)->psw.ilc = 4; \
+                (_regs)->psw.ia += 4; \
+                (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+        } \
+        }
+#endif
+
+#define IBUF_RX(_inst, _r1, _x2, _b3, _addr) \
+        { \
+            (_r1) = (_inst)[1] >> 4; \
+            (_x2) = (_inst)[1] & 0x0F; \
+            (_addr) = (((_inst)[2] & 0x0F) << 8) | (_inst)[3]; \
+            (_b3) = (_inst)[2] >> 4; \
+        }
+#else
 #define RX(_inst, _execflag, _regs, _r1, _b2, _effective_addr2) \
         { \
             (_r1) = (_inst)[1] >> 4; \
@@ -146,6 +394,7 @@ void dummy_instruction (BYTE inst[], int execflag, REGS *regs);
                 (_regs)->psw.ia &= ADDRESS_MAXWRAP((_regs)); \
             } \
         }
+#endif
 
 #define S(_inst, _execflag, _regs, _b2, _effective_addr2) \
         { \

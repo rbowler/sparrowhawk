@@ -817,6 +817,8 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccb->reas = SCCB_REAS_NONE;
         sccb->resp = SCCB_RESP_INFO;
 
+        FRAG_INVALIDATE((sccb_absolute_addr & STORAGE_KEY_PAGEMASK),
+                         STORAGE_KEY_PAGESIZE);
         break;
 
     case SCLP_READ_CHP_INFO:
@@ -877,6 +879,8 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccb->reas = SCCB_REAS_NONE;
         sccb->resp = SCCB_RESP_INFO;
 
+        FRAG_INVALIDATE((sccb_absolute_addr & STORAGE_KEY_PAGEMASK),
+                         STORAGE_KEY_PAGESIZE);
         break;
 
     case SCLP_READ_CSI_INFO:
@@ -915,6 +919,8 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccb->reas = SCCB_REAS_NONE;
         sccb->resp = SCCB_RESP_INFO;
 
+        FRAG_INVALIDATE((sccb_absolute_addr & STORAGE_KEY_PAGEMASK),
+                         STORAGE_KEY_PAGESIZE);
         break;
 
 #ifdef FEATURE_SYSTEM_CONSOLE
@@ -999,6 +1005,8 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccb->reas = SCCB_REAS_NONE;
         sccb->resp = SCCB_RESP_COMPLETE;
 
+        FRAG_INVALIDATE((sccb_absolute_addr & STORAGE_KEY_PAGEMASK),
+                         STORAGE_KEY_PAGESIZE);
         break;
 
     case SCLP_READ_EVENT_DATA:
@@ -1107,6 +1115,8 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccb->reas = SCCB_REAS_NONE;
         sccb->resp = SCCB_RESP_COMPLETE;
 
+        FRAG_INVALIDATE((sccb_absolute_addr & STORAGE_KEY_PAGEMASK),
+                         STORAGE_KEY_PAGESIZE);
         break;
 
     case SCLP_WRITE_EVENT_MASK:
@@ -1166,7 +1176,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
          || sysblk.cp_send_mask != old_cp_send_mask)
         {
             if (sysblk.cp_recv_mask != 0 || sysblk.cp_send_mask != 0)
-                logmsg ("HHC701I SYSCONS interface active\n");
+                logmsg ("HHC701I SYSCONS interface active\n")
             else
                 logmsg ("HHC702I SYSCONS interface inactive\n");
         }
@@ -1175,6 +1185,8 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccb->reas = SCCB_REAS_NONE;
         sccb->resp = SCCB_RESP_COMPLETE;
 
+        FRAG_INVALIDATE((sccb_absolute_addr & STORAGE_KEY_PAGEMASK),
+                         STORAGE_KEY_PAGESIZE);
         break;
 #endif /*FEATURE_SYSTEM_CONSOLE*/
 
@@ -1231,6 +1243,8 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccb->reas = SCCB_REAS_NONE;
         sccb->resp = SCCB_RESP_INFO;
 
+        FRAG_INVALIDATE((sccb_absolute_addr & STORAGE_KEY_PAGEMASK),
+                         STORAGE_KEY_PAGESIZE);
         break;
 
 #endif /*FEATURE_EXPANDED_STORAGE*/
@@ -1376,6 +1390,10 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     /* Set service signal external interrupt pending */
     sysblk.servparm = sccb_absolute_addr;
     sysblk.extpending = sysblk.servsig = 1;
+    set_doint(regs);
+
+    FRAG_INVALIDATE((sccb_absolute_addr & STORAGE_KEY_PAGEMASK), 
+                     STORAGE_KEY_PAGESIZE);
 
     /* Release the interrupt lock */
     release_lock (&sysblk.intlock);

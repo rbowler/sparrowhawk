@@ -11,6 +11,11 @@
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
+#include "inline.h"
+#include "opcode.h"
+#ifdef IBUF
+#include "ibuf.h"
+#endif
 
 /*-------------------------------------------------------------------*/
 /* Function to run initial CCW chain from IPL device and load IPLPSW */
@@ -145,6 +150,10 @@ BYTE    chanstat;                       /* IPL device channel status */
 
     /* Load IPL PSW from PSA+X'0' */
     rc = load_psw (regs, psa->iplpsw);
+
+    obtain_lock(&sysblk.intlock);
+    set_doint(regs);
+    release_lock(&sysblk.intlock);
     if ( rc )
     {
         logmsg ("HHC107I IPL failed: Invalid IPL PSW: "
@@ -160,6 +169,9 @@ BYTE    chanstat;                       /* IPL device channel status */
 
     /* Signal all CPUs to retest stopped indicator */
     obtain_lock (&sysblk.intlock);
+    set_doint(regs);
+    FRAG_INVALIDATE(regs->pxr, 512);
+    LASTPAGE_INVALIDATE(regs);
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 
@@ -203,6 +215,8 @@ int             i;                      /* Array subscript           */
         cpu_reset(regs->guestregs);
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
+    set_doint(regs);
+
 } /* end function cpu_reset */
 
 /*-------------------------------------------------------------------*/
@@ -244,6 +258,8 @@ void initial_cpu_reset (REGS *regs)
    if(regs->guestregs)
         initial_cpu_reset(regs->guestregs);
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+   set_doint(regs);
 
 } /* end function initial_cpu_reset */
 

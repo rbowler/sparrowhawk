@@ -31,7 +31,11 @@ static void external_interrupt (int code, REGS *regs)
 {
 PSA    *psa;
 int     rc;
+#ifdef IBUF
+U32 haddr;
+#endif
 
+#if 0
     /* reset the cpuint indicator */
     regs->cpuint = regs->storstat
 #ifdef FEATURE_INTERVAL_TIMER
@@ -47,6 +51,9 @@ int     rc;
                     || regs->emersig
                     || regs->ckpend
                     || regs->ptpend;
+#else
+    set_doint(regs);
+#endif
 
     release_lock(&sysblk.intlock);
 
@@ -57,6 +64,9 @@ int     rc;
         /* Point to SIE copy of PSA in state descriptor */
         psa = (PSA*)(sysblk.mainstor + regs->sie_state + SIE_IP_PSA_OFFSET);
         STORAGE_KEY(regs->sie_state) |= (STORKEY_REF | STORKEY_CHANGE);
+#ifdef IBUF
+        haddr = regs->sie_state + SIE_IP_PSA_OFFSET;
+#endif
     }
     else
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
@@ -64,6 +74,9 @@ int     rc;
         /* Point to PSA in main storage */
         psa = (PSA*)(sysblk.mainstor + regs->pxr);
         STORAGE_KEY(regs->pxr) |= (STORKEY_REF | STORKEY_CHANGE);
+#ifdef IBUF
+        haddr = regs->pxr;
+#endif
     }
 
     /* Store the interrupt code in the PSW */
@@ -87,6 +100,11 @@ int     rc;
         /* Load new PSW from PSA+X'58' */
         rc = load_psw (regs, psa->extnew);
 
+        obtain_lock(&sysblk.intlock);
+        set_doint(regs);
+        regs->int3count++;
+        release_lock(&sysblk.intlock);
+
         if ( rc )
         {
             logmsg ("CPU%4.4X: Invalid external new PSW: "
@@ -98,6 +116,7 @@ int     rc;
             program_interrupt(regs, rc);
         }
     }
+    FRAG_INVALIDATE(haddr, 512);
 
     longjmp (regs->progjmp, SIE_INTERCEPT_EXT);
 } /* end function external_interrupt */
@@ -169,7 +188,8 @@ U16     cpuad;                          /* Originating CPU address   */
         {
             if (regs->emercpu[cpuad])
             {
-                regs->cpuint = regs->emersig = 1;
+                regs->emersig = 1;
+                set_doint(regs);
                 break;
             }
         } /* end while */
@@ -203,6 +223,7 @@ U16     cpuad;                          /* Originating CPU address   */
         && sysblk.inststep == 0
         && (regs->cr[0] & CR0_XM_CLKC))
     {
+        regs->ckpend = 0;
         if (sysblk.insttrace || sysblk.inststep)
         {
             logmsg ("External interrupt: Clock comparator\n");
@@ -214,10 +235,11 @@ U16     cpuad;                          /* Originating CPU address   */
     if ((S64)regs->ptimer < 0
         && (regs->cr[0] & CR0_XM_PTIMER))
     {
+        regs->ptpend = 0;
         if (sysblk.insttrace || sysblk.inststep)
         {
             logmsg ("External interrupt: CPU timer=%16.16llX\n",
-                    regs->ptimer);
+                    (long long)regs->ptimer);
         }
         external_interrupt (EXT_CPU_TIMER_INTERRUPT, regs);
     }
@@ -268,6 +290,7 @@ U16     cpuad;                          /* Originating CPU address   */
         external_interrupt (EXT_SERVICE_SIGNAL_INTERRUPT, regs);
     }
 
+#if 0
     /* reset the cpuint indicator */
     regs->cpuint = regs->storstat
 #ifdef FEATURE_INTERVAL_TIMER
@@ -283,6 +306,9 @@ U16     cpuad;                          /* Originating CPU address   */
                     || regs->emersig
                     || regs->ckpend
                     || regs->ptpend;
+#else
+    set_doint(regs);
+#endif
 
 } /* end function perform_external_interrupt */
 
@@ -350,9 +376,10 @@ REGS	       *regs;			/* -> CPU register context   */
 
 	/* Signal clock comparator interrupt if needed */
         if((sysblk.todclk + regs->todoffset) > regs->clkc)
-            regs->cpuint = regs->ckpend = intflag = 1;
+            regs->ckpend = intflag = 1;
         else
             regs->ckpend = 0;
+        set_doint(regs);
 
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
         /* If running under SIE also check the SIE copy */
@@ -460,6 +487,9 @@ struct  timeval tv;                     /* Structure for gettimeofday
                 regs->cpuint = regs->ptpend = intflag = 1;
             else
                 regs->ptpend = 0;
+            obtain_lock(&sysblk.intlock);
+            set_doint(regs);
+            release_lock(&sysblk.intlock);
 
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
             /* When running under SIE also update the SIE copy */
@@ -471,9 +501,12 @@ struct  timeval tv;                     /* Structure for gettimeofday
 
                 /* Set interrupt flag if the CPU timer is negative */
                 if ((S64)regs->guestregs->ptimer < 0)
-                    regs->guestregs->cpuint = regs->guestregs->ptpend = 1;
+                    regs->guestregs->ptpend = 1;
                 else
                     regs->guestregs->ptpend = 0;
+                obtain_lock(&sysblk.intlock);
+                set_doint(regs->guestregs);
+                release_lock(&sysblk.intlock);
 
                 if((regs->guestregs->siebk->m & SIE_M_370)
                   && !(regs->guestregs->siebk->m & SIE_M_ITMOF))
@@ -503,7 +536,10 @@ struct  timeval tv;                     /* Structure for gettimeofday
                     /* Set interrupt flag and interval timer interrupt pending
                        if the interval timer went from positive to negative */
                     if (itimer < 0 && olditimer >= 0)
-                        regs->guestregs->cpuint = regs->guestregs->itimer_pending = 1;
+                        regs->guestregs->itimer_pending = 1;
+                    obtain_lock(&sysblk.intlock);
+                    set_doint(regs->guestregs);
+                    release_lock(&sysblk.intlock);
 
                     /* The residu field in the state descriptor needs
                        to be ajusted with the amount of CPU time spend, minus
@@ -541,7 +577,10 @@ struct  timeval tv;                     /* Structure for gettimeofday
             /* Set interrupt flag and interval timer interrupt pending
                if the interval timer went from positive to negative */
             if (itimer < 0 && olditimer >= 0)
-                regs->cpuint = regs->itimer_pending = intflag = 1;
+                regs->itimer_pending = intflag = 1;
+            obtain_lock(&sysblk.intlock);
+            set_doint(regs);
+            release_lock(&sysblk.intlock);
 #endif /*FEATURE_INTERVAL_TIMER*/
 
         } /* end for(cpu) */
@@ -578,9 +617,11 @@ struct  timeval tv;                     /* Structure for gettimeofday
                 /* Calculate instructions/millisecond for this CPU */
                 regs->mipsrate =
                     (regs->instcount - regs->prevcount) / msecctr;
+               regs->siosrate = regs->siocount;
 
                 /* Save the instruction counter */
                 regs->prevcount = regs->instcount;
+               regs->siocount = 0;
 
             } /* end for(cpu) */
 

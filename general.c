@@ -32,6 +32,10 @@
 
 #include "inline.h"
 
+#ifdef IBUF
+#include "ibuf.h"
+#endif
+
 /*-------------------------------------------------------------------*/
 /* 1A   AR    - Add Register                                    [RR] */
 /*-------------------------------------------------------------------*/
@@ -256,6 +260,10 @@ int     i;                              /* Loop counter              */
 int     cc = 0;                         /* Condition code            */
 BYTE    byte1, byte2;                   /* Operand bytes             */
 BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+#ifdef IBUF
+U32     habs1;
+BYTE    l1;
+#endif
 
     SS_L(inst, execflag, regs, l, b1, effective_addr1,
                                   b2, effective_addr2);
@@ -278,6 +286,10 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         npa1 = logical_to_abs (npv1, b1, regs, ACCTYPE_WRITE, akey);
     if (npv2 != (effective_addr2 & STORAGE_KEY_PAGEMASK))
         npa2 = logical_to_abs (npv2, b2, regs, ACCTYPE_READ, akey);
+
+#ifdef IBUF
+    habs1 = abs1;
+#endif
 
     /* Process operands from left to right */
     for ( i = 0; i <= l; i++ )
@@ -317,8 +329,19 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
     regs->psw.cc = cc;
 
-}
+#ifdef IBUF
+    if (!npa1)
+        FRAG_INVALIDATE(habs1, l)
+    else
+    {
+        l1 = (habs1 & STORAGE_KEY_PAGEMASK) +
+              STORAGE_KEY_PAGESIZE - habs1;
+        FRAG_INVALIDATE(habs1, l1);
+        FRAG_INVALIDATE(npa1, l - l1);
+    }
+#endif
 
+}
 
 /*-------------------------------------------------------------------*/
 /* 05   BALR  - Branch and Link Register                        [RR] */
@@ -353,7 +376,10 @@ U32     newia;                          /* New instruction address   */
 
     /* Execute the branch unless R2 specifies register 0 */
     if ( r2 != 0 )
+    {
         regs->psw.ia = newia;
+        GET_FRAGENTRY(regs);
+    }
 }
 
 
@@ -380,8 +406,10 @@ U32     effective_addr2;                /* Effective address         */
             | regs->psw.ia;
 
     regs->psw.ia = effective_addr2;
+    GET_FRAGENTRY(regs);
 
 }
+
 
 /*-------------------------------------------------------------------*/
 /* 0D   BASR  - Branch and Save Register                        [RR] */
@@ -411,7 +439,10 @@ U32     newia;                          /* New instruction address   */
 
     /* Execute the branch unless R2 specifies register 0 */
     if ( r2 != 0 )
+    {
         regs->psw.ia = newia;
+        GET_FRAGENTRY(regs);
+    }
 }
 
 
@@ -433,6 +464,7 @@ U32     effective_addr2;                /* Effective address         */
         regs->gpr[r1] = regs->psw.ia & 0x00FFFFFF;
 
     regs->psw.ia = effective_addr2;
+    GET_FRAGENTRY(regs);
 }
 
 /*-------------------------------------------------------------------*/
@@ -470,11 +502,13 @@ U32     newia;                          /* New instruction address   */
         {
             regs->psw.amode = 1;
             regs->psw.ia = newia & 0x7FFFFFFF;
+            GET_FRAGENTRY(regs);
         }
         else
         {
             regs->psw.amode = 0;
             regs->psw.ia = newia & 0x00FFFFFF;
+            GET_FRAGENTRY(regs);
         }
     }
 }
@@ -510,11 +544,13 @@ U32     newia;                          /* New instruction address   */
         {
             regs->psw.amode = 1;
             regs->psw.ia = newia & 0x7FFFFFFF;
+            GET_FRAGENTRY(regs);
         }
         else
         {
             regs->psw.amode = 0;
             regs->psw.ia = newia & 0x00FFFFFF;
+            GET_FRAGENTRY(regs);
         }
     }
 }
@@ -541,7 +577,10 @@ int     m;                              /* Condition code mask       */
 
     /* Branch if R1 mask bit is set and R2 is not register 0 */
     if ( (r1 & m) != 0 && r2 != 0 )
+    {
         regs->psw.ia = newia;
+        GET_FRAGENTRY(regs);
+    }
     else
         /* Perform serialization and checkpoint synchronization if
            the mask is all ones and the register is all zeroes */
@@ -573,7 +612,10 @@ int     m;                              /* Condition code mask       */
 
     /* Branch to operand address if r1 mask bit is set */
     if ( (r1 & m) != 0 )
+    {
         regs->psw.ia = effective_addr2;
+        GET_FRAGENTRY(regs);
+    }
 
 }
 
@@ -594,7 +636,10 @@ U32     newia;                          /* New instruction address   */
     /* Subtract 1 from the R1 operand and branch if result
            is non-zero and R2 operand is not register zero */
     if ( --(regs->gpr[r1]) && r2 != 0 )
+    {
         regs->psw.ia = newia;
+        GET_FRAGENTRY(regs);
+    }
    
 }
 
@@ -612,7 +657,10 @@ U32     effective_addr2;                /* Effective address         */
 
     /* Subtract 1 from the R1 operand and branch if non-zero */
     if ( --(regs->gpr[r1]) )
+    {
         regs->psw.ia = effective_addr2;
+        GET_FRAGENTRY(regs);
+    }
 
 }
 
@@ -640,7 +688,10 @@ S32     i, j;                           /* Integer work areas        */
 
     /* Branch if result compares high */
     if ( (S32)regs->gpr[r1] > j )
+    {
         regs->psw.ia = effective_addr2;
+        GET_FRAGENTRY(regs);
+    }
 
 }
 
@@ -668,7 +719,10 @@ S32     i, j;                           /* Integer work areas        */
 
     /* Branch if result compares low or equal */
     if ( (S32)regs->gpr[r1] <= j )
+    {
         regs->psw.ia = effective_addr2;
+        GET_FRAGENTRY(regs);
+    }
 
 }
 
@@ -692,9 +746,12 @@ int     j;                              /* Work                      */
 
     /* Branch if R1 mask bit is set */
     if ( (r1 & j) != 0 )
+    {
         /* Calculate the relative branch address */
         regs->psw.ia = (regs->psw.ia - 4 + 2*(S16)i2)
                                               & ADDRESS_MAXWRAP(regs);
+        GET_FRAGENTRY(regs);
+    }
 }
 
 
@@ -719,6 +776,7 @@ U16     i2;                             /* 16-bit operand values     */
     /* Calculate the relative branch address */
     regs->psw.ia = (regs->psw.ia - 4 + 2*(S16)i2)
                                               & ADDRESS_MAXWRAP(regs);
+    GET_FRAGENTRY(regs);
 }
 
 
@@ -735,8 +793,11 @@ U16     i2;                             /* 16-bit operand values     */
 
     /* Subtract 1 from the R1 operand and branch if non-zero */
     if ( --(regs->gpr[r1]) )
+    {
         regs->psw.ia = (regs->psw.ia - 4 + 2*(S16)i2)
                                               & ADDRESS_MAXWRAP(regs);
+        GET_FRAGENTRY(regs);
+    }
 }
 
 
@@ -762,8 +823,11 @@ int     i,j;                            /* Integer workareas         */
 
     /* Branch if result compares high */
     if ( (S32)regs->gpr[r1] > j )
+    {
         regs->psw.ia = (regs->psw.ia - 4 + 2*(S16)i2)
                                               & ADDRESS_MAXWRAP(regs);
+        GET_FRAGENTRY(regs);
+    }
 
 }
 
@@ -790,8 +854,11 @@ int     i,j;                            /* Integer workareas         */
 
     /* Branch if result compares low or equal */
     if ( (S32)regs->gpr[r1] <= j )
+    {
         regs->psw.ia = (regs->psw.ia - 4 + 2*(S16)i2)
                                               & ADDRESS_MAXWRAP(regs);
+        GET_FRAGENTRY(regs);
+    }
 
 }
 
@@ -1391,6 +1458,7 @@ BYTE    pad;                            /* Padding byte              */
         {
             regs->psw.ia -= regs->psw.ilc;
             regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+            GET_FRAGENTRY(regs);
             break;
         }
 
@@ -2000,6 +2068,10 @@ int     i;                              /* Loop counter              */
 int     cc = 0;                         /* Condition code            */
 BYTE    byte1, byte2;                   /* Operand bytes             */
 BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+#ifdef IBUF
+U32     habs1;
+BYTE    l1;
+#endif
 
     SS_L(inst, execflag, regs, l, b1, effective_addr1,
                                   b2, effective_addr2);
@@ -2022,6 +2094,10 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         npa1 = logical_to_abs (npv1, b1, regs, ACCTYPE_WRITE, akey);
     if (npv2 != (effective_addr2 & STORAGE_KEY_PAGEMASK))
         npa2 = logical_to_abs (npv2, b2, regs, ACCTYPE_READ, akey);
+
+#ifdef IBUF
+    habs1 = abs1;
+#endif
 
     /* Process operands from left to right */
     for ( i = 0; i <= l; i++ )
@@ -2062,6 +2138,17 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     /* Set condition code */
     regs->psw.cc = cc;
 
+#ifdef IBUF
+    if (!npa1)
+        FRAG_INVALIDATE(habs1, l)
+    else
+    {
+        l1 = (habs1 & STORAGE_KEY_PAGEMASK) +
+              STORAGE_KEY_PAGESIZE - habs1;
+        FRAG_INVALIDATE(habs1, l1);
+        FRAG_INVALIDATE(npa1, l - l1);
+    }
+#endif
 }
 
 
@@ -2094,10 +2181,18 @@ U32     effective_addr2;                /* Effective address         */
 
     /* Or 2nd byte of instruction with low-order byte of R1 */
     if ( r1 != 0 )
+    {
         regs->exinst[1] |= (regs->gpr[r1] & 0xFF);
+        FRAG_INVALIDATE(effective_addr2, 1);
+    }
 
     /* Execute the target instruction */
+#ifdef IBUF
+    regs->actentry = NULL;
+#endif
     EXECUTE_INSTRUCTION (regs->exinst, 1, regs);
+    LASTPAGE_INVALIDATE(regs);
+    REASSIGN_FRAG(regs);
 
 }
 
@@ -2223,7 +2318,6 @@ int     r1, unused;                     /* Value of R field          */
             | (regs->psw.eumask << 25)
             | (regs->psw.sgmask << 24);
 }
-
 
 /*-------------------------------------------------------------------*/
 /* 58   L     - Load                                            [RX] */
@@ -2700,6 +2794,7 @@ BYTE    pad;                            /* Padding byte              */
         {
             regs->psw.ia -= regs->psw.ilc;
             regs->psw.ia &= ADDRESS_MAXWRAP(regs);
+            GET_FRAGENTRY(regs);
             break;
         }
 
@@ -2798,6 +2893,10 @@ U32     npa1 = 0, npa2 = 0;             /* Next page absolute addrs  */
 int     i;                              /* Loop counter              */
 BYTE    byte1, byte2;                   /* Operand bytes             */
 BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+#ifdef IBUF
+U32     habs1;
+BYTE    l1;
+#endif
 
     SS_L(inst, execflag, regs, l, b1, effective_addr1,
                                   b2, effective_addr2);
@@ -2820,6 +2919,10 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         npa1 = logical_to_abs (npv1, b1, regs, ACCTYPE_WRITE, akey);
     if (npv2 != (effective_addr2 & STORAGE_KEY_PAGEMASK))
         npa2 = logical_to_abs (npv2, b2, regs, ACCTYPE_READ, akey);
+
+#ifdef IBUF
+    habs1 = abs1;
+#endif
 
     /* Process operands from left to right */
     for ( i = 0; i <= l; i++ )
@@ -2853,6 +2956,18 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
             abs2 = npa2;
 
     } /* end for(i) */
+
+#ifdef IBUF
+    if (!npa1)
+       FRAG_INVALIDATE(habs1, l)
+    else
+    {
+        l1 = (habs1 & STORAGE_KEY_PAGEMASK) +
+              STORAGE_KEY_PAGESIZE - habs1;
+        FRAG_INVALIDATE(habs1, l1);
+        FRAG_INVALIDATE(npa1, l - l1);
+    }
+#endif
 
 }
 
@@ -2993,6 +3108,10 @@ U32     npa1 = 0, npa2 = 0;             /* Next page absolute addrs  */
 int     i;                              /* Loop counter              */
 BYTE    byte1, byte2;                   /* Operand bytes             */
 BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+#ifdef IBUF
+U32     habs1;
+BYTE    l1;
+#endif
 
     SS_L(inst, execflag, regs, l, b1, effective_addr1,
                                   b2, effective_addr2);
@@ -3015,6 +3134,10 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         npa1 = logical_to_abs (npv1, b1, regs, ACCTYPE_WRITE, akey);
     if (npv2 != (effective_addr2 & STORAGE_KEY_PAGEMASK))
         npa2 = logical_to_abs (npv2, b2, regs, ACCTYPE_READ, akey);
+
+#ifdef IBUF
+    habs1 = abs1;
+#endif
 
     /* Process operands from left to right */
     for ( i = 0; i <= l; i++ )
@@ -3048,6 +3171,18 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
             abs2 = npa2;
 
     } /* end for(i) */
+
+#ifdef IBUF
+    if (!npa1)
+       FRAG_INVALIDATE(habs1, l)
+    else
+    {
+        l1 = (habs1 & STORAGE_KEY_PAGEMASK) +
+              STORAGE_KEY_PAGESIZE - habs1;
+        FRAG_INVALIDATE(habs1, l1);
+        FRAG_INVALIDATE(npa1, l - l1);
+    }
+#endif
 
 }
 
@@ -3250,6 +3385,10 @@ int     i;                              /* Loop counter              */
 int     cc = 0;                         /* Condition code            */
 BYTE    byte1, byte2;                   /* Operand bytes             */
 BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+#ifdef IBUF
+U32     habs1;
+BYTE    l1;
+#endif
 
     SS_L(inst, execflag, regs, l, b1, effective_addr1,
                                   b2, effective_addr2);
@@ -3272,6 +3411,10 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         npa1 = logical_to_abs (npv1, b1, regs, ACCTYPE_WRITE, akey);
     if (npv2 != (effective_addr2 & STORAGE_KEY_PAGEMASK))
         npa2 = logical_to_abs (npv2, b2, regs, ACCTYPE_READ, akey);
+
+#ifdef IBUF
+    habs1 = abs1;
+#endif
 
     /* Process operands from left to right */
     for ( i = 0; i <= l; i++ )
@@ -3311,6 +3454,18 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 
     /* Set condition code */
     regs->psw.cc = cc;
+
+#ifdef IBUF
+    if (!npa1)
+       FRAG_INVALIDATE(habs1, l)
+    else
+    {
+        l1 = (habs1 & STORAGE_KEY_PAGEMASK) +
+              STORAGE_KEY_PAGESIZE - habs1;
+        FRAG_INVALIDATE(habs1, l1);
+        FRAG_INVALIDATE(npa1, l - l1);
+    }
+#endif
 
 }
 
@@ -3436,12 +3591,12 @@ U32     effective_addr2,
                     FW_CHECK(effective_addr4, regs);
 
                     /* Load second operand from operand address  */
-                    op2 = vfetch4 ( effective_addr2, b2, regs );
+                    op2 = VFETCH4 ( effective_addr2, b2, regs );
 
                     if(regs->gpr[r1] == op2)
                     {
                         
-                        op4 = vfetch4 ( effective_addr4, b4, regs );
+                        op4 = VFETCH4 ( effective_addr4, b4, regs );
                         regs->gpr[r3] = op4;
                         regs->psw.cc = 0;
                     }
@@ -3467,10 +3622,10 @@ U32     effective_addr2,
                     DW_CHECK(effective_addr2, regs);
 
                     /* load second operand */
-                    op2 = vfetch8(effective_addr2, b2, regs);
+                    op2 = VFETCH8(effective_addr2, b2, regs);
 
                     /* load 1st op. compare value */
-                    op1c = vfetch8(effective_addr4 + 8, b4, regs);
+                    op1c = VFETCH8(effective_addr4 + 8, b4, regs);
 
                     if(op1c == op2)
                     {
@@ -3478,7 +3633,7 @@ U32     effective_addr2,
                            operand. The alet is fetched from the pl */
                         if(ACCESS_REGISTER_MODE(&(regs->psw)))
                         {
-                            op4alet = vfetch4(effective_addr4 + 68, b4, regs);
+                            op4alet = VFETCH4(effective_addr4 + 68, b4, regs);
                             if(op4alet)
                             {
                                 if(r3 == 0)
@@ -3488,22 +3643,22 @@ U32     effective_addr2,
                         }
 
                         /* Load address of operand 4 */
-                        op4addr = vfetch4(effective_addr4 + 76, b4, regs);
+                        op4addr = VFETCH4(effective_addr4 + 76, b4, regs);
                         op4addr &= ADDRESS_MAXWRAP(regs);
                         DW_CHECK(op4addr, regs);
 
                         /* Load operand 4, using ar3 when in ar mode */
-                        op4 = vfetch8(op4addr, op4alet ? r3 : 0, regs);
+                        op4 = VFETCH8(op4addr, op4alet ? r3 : 0, regs);
 
                         /* replace the 3rd operand with the 4th operand */
-                        vstore8(op4, effective_addr4 + 40, b4, regs);
+                        VSTORE8(op4, effective_addr4 + 40, b4, regs);
 
                         regs->psw.cc = 0;
                     }
                     else
                     {
                         /* replace the first op compare value with 2nd op */
-                        vstore8(op2, effective_addr4 + 8, b4, regs);
+                        VSTORE8(op2, effective_addr4 + 8, b4, regs);
 
                         regs->psw.cc = 1;
                     }
@@ -3519,13 +3674,13 @@ U32     effective_addr2,
                     FW_CHECK(effective_addr2, regs);
 
                     /* Load second operand from operand address  */
-                    op2 = vfetch4 ( effective_addr2, b2, regs );
+                    op2 = VFETCH4 ( effective_addr2, b2, regs );
 
                     /* Compare operand with R1 register contents */
                     if ( regs->gpr[r1] == op2 )
                     {
                         /* If equal, store R1+1 at operand loc and set cc=0 */
-                        vstore4 ( regs->gpr[r1+1], effective_addr2, b2, regs );
+                        VSTORE4 ( regs->gpr[r1+1], effective_addr2, b2, regs );
 
                         regs->psw.cc = 0;
                     }
@@ -3551,25 +3706,25 @@ U32     effective_addr2,
                     DW_CHECK(effective_addr2, regs);
 
                     /* Load first op compare value */
-                    op1c = vfetch8(effective_addr4 + 8, b4, regs);
+                    op1c = VFETCH8(effective_addr4 + 8, b4, regs);
 
                     /* Load 2nd operand */
-                    op2 = vfetch8(effective_addr2, b2, regs);
+                    op2 = VFETCH8(effective_addr2, b2, regs);
 
                     if(op1c == op2)
                     {
                         /* Load 1st op replacement value */
-                        op1r = vfetch8(effective_addr4 + 24, b4, regs);
+                        op1r = VFETCH8(effective_addr4 + 24, b4, regs);
 
                         /* Store at 2nd operand location */
-                        vstore8(op1r, effective_addr2, b2, regs);
+                        VSTORE8(op1r, effective_addr2, b2, regs);
 
                         regs->psw.cc = 0;
                     }
                     else
                     {
                         /* Replace 1st op comp value by 2nd op */
-                        vstore8(op2, effective_addr4 + 8, b4, regs);
+                        VSTORE8(op2, effective_addr4 + 8, b4, regs);
 
                         regs->psw.cc = 1;
                     }
@@ -3587,7 +3742,7 @@ U32     effective_addr2,
                     FW_CHECK(effective_addr4, regs);
 
                     /* Load second operands from operand addresses  */
-                    op2 = vfetch4 ( effective_addr2, b2, regs );
+                    op2 = VFETCH4 ( effective_addr2, b2, regs );
 
                     if(regs->gpr[r1] != op2)
                     {
@@ -3597,7 +3752,7 @@ U32     effective_addr2,
                     }
                     else
                     {
-                        op4 = vfetch4 ( effective_addr4, b4, regs );
+                        op4 = VFETCH4 ( effective_addr4, b4, regs );
 
                         /* Compare operand with register contents */
                         if (regs->gpr[r3] != op4)
@@ -3613,8 +3768,8 @@ U32     effective_addr2,
                                 ACCTYPE_WRITE, regs);
 
                             /* If equal, store replacement and set cc=0 */
-                            vstore4 ( regs->gpr[r3+1], effective_addr4, b4, regs );
-                            vstore4 ( regs->gpr[r1+1], effective_addr2, b2, regs );
+                            VSTORE4 ( regs->gpr[r3+1], effective_addr4, b4, regs );
+                            VSTORE4 ( regs->gpr[r1+1], effective_addr2, b2, regs );
 
                             regs->psw.cc = 0;
                         }
@@ -3639,28 +3794,28 @@ U32     effective_addr2,
                     DW_CHECK(effective_addr4, regs);
 
                     /* load 1st op compare value from the pl */
-                    op1c = vfetch8(effective_addr4 + 8, b4, regs);
+                    op1c = VFETCH8(effective_addr4 + 8, b4, regs);
 
                     /* load 2nd operand */
-                    op2 = vfetch8(effective_addr2, b2, regs);
+                    op2 = VFETCH8(effective_addr2, b2, regs);
 
                     if(op1c != op2)
                     {
                         /* replace the 1st op compare value with 2nd op */
-                        vstore8(op2, effective_addr4 + 8, b4, regs);
+                        VSTORE8(op2, effective_addr4 + 8, b4, regs);
 
                         regs->psw.cc = 1;
                     }
                     else
                     {
                         /* Load 3rd op compare value */
-                        op3c = vfetch8(effective_addr4 + 40, b4, regs);
+                        op3c = VFETCH8(effective_addr4 + 40, b4, regs);
 
                         /* When in ar mode, ar3 is used to access the 
                            operand. The alet is fetched from the pl */
                         if(ACCESS_REGISTER_MODE(&(regs->psw)))
                         {
-                            op4alet = vfetch4(effective_addr4 + 68, b4, regs);
+                            op4alet = VFETCH4(effective_addr4 + 68, b4, regs);
                             if(op4alet)
                             {
                                 if(r3 == 0)
@@ -3670,33 +3825,33 @@ U32     effective_addr2,
                         }
 
                         /* Load address of operand 4 */
-                        op4addr = vfetch4(effective_addr4 + 76, b4, regs);
+                        op4addr = VFETCH4(effective_addr4 + 76, b4, regs);
                         op4addr &= ADDRESS_MAXWRAP(regs);
                         DW_CHECK(op4addr, regs);
 
                         /* Load operand 4, using ar3 when in ar mode */
-                        op4 = vfetch8(op4addr, op4alet ? r3 : 0, regs);
+                        op4 = VFETCH8(op4addr, op4alet ? r3 : 0, regs);
 
                         if(op3c != op4)
                         {
-                            vstore8(op4, effective_addr4 + 40, b4, regs);
+                            VSTORE8(op4, effective_addr4 + 40, b4, regs);
                             regs->psw.cc = 2;
                         }
                         else
                         {
                             /* load replacement values */
-                            op1r = vfetch8(effective_addr4 + 24, b4, regs);
-                            op3r = vfetch8(effective_addr4 + 56, b4, regs);
+                            op1r = VFETCH8(effective_addr4 + 24, b4, regs);
+                            op3r = VFETCH8(effective_addr4 + 56, b4, regs);
 
                             /* Verify access to 2nd operand */
                             validate_operand (effective_addr2, b2, 8-1,
                                 ACCTYPE_WRITE, regs);
 
                             /* Store 3rd op replacement at 4th op */
-                            vstore8(op3r, op4addr, op4alet ? r3 : 0, regs);
+                            VSTORE8(op3r, op4addr, op4alet ? r3 : 0, regs);
 
                             /* Store 1st op replacement at 2nd op */
-                            vstore8(op1r, effective_addr2, b2, regs);
+                            VSTORE8(op1r, effective_addr2, b2, regs);
 
                             regs->psw.cc = 0;
                         }
@@ -3715,7 +3870,7 @@ U32     effective_addr2,
                     FW_CHECK(effective_addr4, regs);
 
                     /* Load second operand from operand address  */
-                    op2 = vfetch4 ( effective_addr2, b2, regs );
+                    op2 = VFETCH4 ( effective_addr2, b2, regs );
 
                     /* Compare operand with register contents */
                     if ( regs->gpr[r1] == op2)
@@ -3725,8 +3880,8 @@ U32     effective_addr2,
                             ACCTYPE_WRITE, regs);
 
                         /* If equal, store replacement and set cc=0 */
-                        vstore4 ( regs->gpr[r3], effective_addr4, b4, regs );
-                        vstore4 ( regs->gpr[r1+1], effective_addr2, b2, regs );
+                        VSTORE4 ( regs->gpr[r3], effective_addr4, b4, regs );
+                        VSTORE4 ( regs->gpr[r1+1], effective_addr2, b2, regs );
 
                         regs->psw.cc = 0;
                     }
@@ -3753,13 +3908,13 @@ U32     effective_addr2,
                     DW_CHECK(effective_addr2, regs);
                     DW_CHECK(effective_addr4, regs);
 
-                    op1c = vfetch8(effective_addr4 + 8, b4, regs);
-                    op2 = vfetch8(effective_addr2, b2, regs);
+                    op1c = VFETCH8(effective_addr4 + 8, b4, regs);
+                    op2 = VFETCH8(effective_addr2, b2, regs);
                     
                     if(op1c == op2)
                     {
-                        op1r = vfetch8(effective_addr4 + 24, b4, regs);
-                        op3 = vfetch8(effective_addr4 + 56, b4, regs);
+                        op1r = VFETCH8(effective_addr4 + 24, b4, regs);
+                        op3 = VFETCH8(effective_addr4 + 56, b4, regs);
                         
                         /* Verify access to 2nd operand */
                         validate_operand (effective_addr2, b2, 8-1,
@@ -3769,7 +3924,7 @@ U32     effective_addr2,
                            operand. The alet is fetched from the pl */
                         if(ACCESS_REGISTER_MODE(&(regs->psw)))
                         {
-                            op4alet = vfetch4(effective_addr4 + 68, b4, regs);
+                            op4alet = VFETCH4(effective_addr4 + 68, b4, regs);
                             if(op4alet)
                             {
                                 if(r3 == 0)
@@ -3779,19 +3934,19 @@ U32     effective_addr2,
                         }
 
                         /* Load address of operand 4 */
-                        op4addr = vfetch4(effective_addr4 + 76, b4, regs);
+                        op4addr = VFETCH4(effective_addr4 + 76, b4, regs);
                         op4addr &= ADDRESS_MAXWRAP(regs);
                         DW_CHECK(op4addr, regs);
 
-                        vstore8(op3, op4addr, op4alet ? r3 : 0, regs);
-                        vstore8(op1r, effective_addr2, b2, regs);
+                        VSTORE8(op3, op4addr, op4alet ? r3 : 0, regs);
+                        VSTORE8(op1r, effective_addr2, b2, regs);
 
                         regs->psw.cc = 0;
                     }
                     else
                     {
                         /* Store 2nd op at 1st op comare value */
-                        vstore8(op2, effective_addr4 + 8, b4, regs);
+                        VSTORE8(op2, effective_addr4 + 8, b4, regs);
                         regs->psw.cc = 1;
                     }
 
@@ -3813,12 +3968,12 @@ U32     effective_addr2,
                     FW_CHECK(effective_addr2, regs);
                     FW_CHECK(effective_addr4, regs);
 
-                    op2 = vfetch4(effective_addr2, b2, regs);
+                    op2 = VFETCH4(effective_addr2, b2, regs);
 
                     if(regs->gpr[r1] == op2)
                     {
-                        op3 = vfetch4(effective_addr4 + 60, b4, regs);
-                        op5 = vfetch4(effective_addr4 + 92, b4, regs);
+                        op3 = VFETCH4(effective_addr4 + 60, b4, regs);
+                        op5 = VFETCH4(effective_addr4 + 92, b4, regs);
 
                         /* Verify access to 2nd operand */
                         validate_operand (effective_addr2, b2, 4-1,
@@ -3828,8 +3983,8 @@ U32     effective_addr2,
                            operand. The alet is fetched from the pl */
                         if(ACCESS_REGISTER_MODE(&(regs->psw)))
                         {
-                            op4alet = vfetch4(effective_addr4 + 68, b4, regs);
-                            op6alet = vfetch4(effective_addr4 + 100, b4, regs);
+                            op4alet = VFETCH4(effective_addr4 + 68, b4, regs);
+                            op6alet = VFETCH4(effective_addr4 + 100, b4, regs);
                             if(op4alet || op6alet)
                             {
                                 if(r3 == 0)
@@ -3839,12 +3994,12 @@ U32     effective_addr2,
                         }
 
                         /* Load address of operand 4 */
-                        op4addr = vfetch4(effective_addr4 + 76, b4, regs);
+                        op4addr = VFETCH4(effective_addr4 + 76, b4, regs);
                         op4addr &= ADDRESS_MAXWRAP(regs);
                         FW_CHECK(op4addr, regs);
 
                         /* Load address of operand 6 */
-                        op6addr = vfetch4(effective_addr4 + 108, b4, regs);
+                        op6addr = VFETCH4(effective_addr4 + 108, b4, regs);
                         op6addr &= ADDRESS_MAXWRAP(regs);
                         FW_CHECK(op6addr, regs);
 
@@ -3855,15 +4010,15 @@ U32     effective_addr2,
                         /* Store 5th op at 6th op */
                         if(op6alet)
                             regs->ar[r3] = op6alet;
-                        vstore4(op5, op6addr, op6alet ? r3 : 0, regs);
+                        VSTORE4(op5, op6addr, op6alet ? r3 : 0, regs);
 
                         /* Store 3th op at 4th op */
                         if(op4alet)
                             regs->ar[r3] = op4alet;
-                        vstore4(op3, op4addr, op4alet ? r3 : 0, regs);
+                        VSTORE4(op3, op4addr, op4alet ? r3 : 0, regs);
 
                         /* Store 1st op at 2nd op */
-                        vstore4(regs->gpr[r1+1], effective_addr2, b2, regs);
+                        VSTORE4(regs->gpr[r1+1], effective_addr2, b2, regs);
 
                         regs->psw.cc = 0;
                     }
@@ -3891,14 +4046,14 @@ U32     effective_addr2,
                     DW_CHECK(effective_addr2, regs);
                     DW_CHECK(effective_addr4, regs);
 
-                    op1c = vfetch8(effective_addr4 + 8, b4, regs);
-                    op2 = vfetch8(effective_addr2, b2, regs);
+                    op1c = VFETCH8(effective_addr4 + 8, b4, regs);
+                    op2 = VFETCH8(effective_addr2, b2, regs);
 
                     if(op1c == op2)
                     {
-                        op1r = vfetch8(effective_addr4 + 24, b4, regs);
-                        op3 = vfetch8(effective_addr4 + 56, b4, regs);
-                        op5 = vfetch8(effective_addr4 + 88, b4, regs);
+                        op1r = VFETCH8(effective_addr4 + 24, b4, regs);
+                        op3 = VFETCH8(effective_addr4 + 56, b4, regs);
+                        op5 = VFETCH8(effective_addr4 + 88, b4, regs);
 
                         /* Verify access to 2nd operand */
                         validate_operand (effective_addr2, b2, 8-1,
@@ -3908,8 +4063,8 @@ U32     effective_addr2,
                            operand. The alet is fetched from the pl */
                         if(ACCESS_REGISTER_MODE(&(regs->psw)))
                         {
-                            op4alet = vfetch4(effective_addr4 + 68, b4, regs);
-                            op6alet = vfetch4(effective_addr4 + 100, b4, regs);
+                            op4alet = VFETCH4(effective_addr4 + 68, b4, regs);
+                            op6alet = VFETCH4(effective_addr4 + 100, b4, regs);
                             if(op4alet || op6alet)
                             {
                                 if(r3 == 0)
@@ -3919,12 +4074,12 @@ U32     effective_addr2,
                         }
 
                         /* Load address of operand 4 */
-                        op4addr = vfetch4(effective_addr4 + 76, b4, regs);
+                        op4addr = VFETCH4(effective_addr4 + 76, b4, regs);
                         op4addr &= ADDRESS_MAXWRAP(regs);
                         DW_CHECK(op4addr, regs);
 
                         /* Load address of operand 6 */
-                        op6addr = vfetch4(effective_addr4 + 108, b4, regs);
+                        op6addr = VFETCH4(effective_addr4 + 108, b4, regs);
                         op6addr &= ADDRESS_MAXWRAP(regs);
                         DW_CHECK(op6addr, regs);
 
@@ -3935,21 +4090,21 @@ U32     effective_addr2,
                         /* Store 5th op at 6th op */
                         if(op6alet)
                             regs->ar[r3] = op6alet;
-                        vstore8(op5, op6addr, op6alet ? r3 : 0, regs);
+                        VSTORE8(op5, op6addr, op6alet ? r3 : 0, regs);
 
                         /* Store 3th op at 4th op */
                         if(op4alet)
                             regs->ar[r3] = op4alet;
-                        vstore8(op3, op4addr, op4alet ? r3 : 0, regs);
+                        VSTORE8(op3, op4addr, op4alet ? r3 : 0, regs);
 
                         /* Store 1st op replacement at 2nd op */
-                        vstore8(op1r, effective_addr2, b2, regs);
+                        VSTORE8(op1r, effective_addr2, b2, regs);
 
                         regs->psw.cc = 0;
                     }
                     else
                     {
-                        vstore8(op2, effective_addr4 + 8, b4, regs);
+                        VSTORE8(op2, effective_addr4 + 8, b4, regs);
                         regs->psw.cc = 1;
                     }
                 }
@@ -3973,13 +4128,13 @@ U32     effective_addr2,
                     FW_CHECK(effective_addr2, regs);
                     FW_CHECK(effective_addr4, regs);
 
-                    op2 = vfetch4(effective_addr2, b2, regs);
+                    op2 = VFETCH4(effective_addr2, b2, regs);
 
                     if(regs->gpr[r1] == op2)
                     {
-                        op3 = vfetch4(effective_addr4 + 60, b4, regs);
-                        op5 = vfetch4(effective_addr4 + 92, b4, regs);
-                        op7 = vfetch4(effective_addr4 + 124, b4, regs);
+                        op3 = VFETCH4(effective_addr4 + 60, b4, regs);
+                        op5 = VFETCH4(effective_addr4 + 92, b4, regs);
+                        op7 = VFETCH4(effective_addr4 + 124, b4, regs);
 
                         /* Verify access to 2nd operand */
                         validate_operand (effective_addr2, b2, 4-1,
@@ -3989,9 +4144,9 @@ U32     effective_addr2,
                            operand. The alet is fetched from the pl */
                         if(ACCESS_REGISTER_MODE(&(regs->psw)))
                         {
-                            op4alet = vfetch4(effective_addr4 + 68, b4, regs);
-                            op6alet = vfetch4(effective_addr4 + 100, b4, regs);
-                            op8alet = vfetch4(effective_addr4 + 132, b4, regs);
+                            op4alet = VFETCH4(effective_addr4 + 68, b4, regs);
+                            op6alet = VFETCH4(effective_addr4 + 100, b4, regs);
+                            op8alet = VFETCH4(effective_addr4 + 132, b4, regs);
                             if(op4alet || op6alet || op8alet)
                             {
                                 if(r3 == 0)
@@ -4001,17 +4156,17 @@ U32     effective_addr2,
                         }
 
                         /* Load address of operand 4 */
-                        op4addr = vfetch4(effective_addr4 + 76, b4, regs);
+                        op4addr = VFETCH4(effective_addr4 + 76, b4, regs);
                         op4addr &= ADDRESS_MAXWRAP(regs);
                         FW_CHECK(op4addr, regs);
 
                         /* Load address of operand 6 */
-                        op6addr = vfetch4(effective_addr4 + 108, b4, regs);
+                        op6addr = VFETCH4(effective_addr4 + 108, b4, regs);
                         op6addr &= ADDRESS_MAXWRAP(regs);
                         FW_CHECK(op6addr, regs);
 
                         /* Load address of operand 8 */
-                        op8addr = vfetch4(effective_addr4 + 140, b4, regs);
+                        op8addr = VFETCH4(effective_addr4 + 140, b4, regs);
                         op8addr &= ADDRESS_MAXWRAP(regs);
                         FW_CHECK(op8addr, regs);
 
@@ -4028,20 +4183,20 @@ U32     effective_addr2,
                         /* Store 7th op at 8th op */
                         if(op8alet)
                             regs->ar[r3] = op8alet;
-                        vstore4(op7, op8addr, op8alet ? r3 : 0, regs);
+                        VSTORE4(op7, op8addr, op8alet ? r3 : 0, regs);
 
                         /* Store 5th op at 6th op */
                         if(op6alet)
                             regs->ar[r3] = op6alet;
-                        vstore4(op5, op6addr, op6alet ? r3 : 0, regs);
+                        VSTORE4(op5, op6addr, op6alet ? r3 : 0, regs);
 
                         /* Store 3rd op at 4th op */
                         if(op4alet)
                             regs->ar[r3] = op4alet;
-                        vstore4(op3, op4addr, op4alet ? r3 : 0, regs);
+                        VSTORE4(op3, op4addr, op4alet ? r3 : 0, regs);
 
                         /* Store 1st op replacement at 2nd op */
-                        vstore4(regs->gpr[r1+1], effective_addr2, b2, regs);
+                        VSTORE4(regs->gpr[r1+1], effective_addr2, b2, regs);
 
                         regs->psw.cc = 0;
                     }
@@ -4072,15 +4227,15 @@ U32     effective_addr2,
                     DW_CHECK(effective_addr2, regs);
                     DW_CHECK(effective_addr4, regs);
 
-                    op1c = vfetch8(effective_addr4 + 8, b4, regs);
-                    op2 = vfetch8(effective_addr2, b2, regs);
+                    op1c = VFETCH8(effective_addr4 + 8, b4, regs);
+                    op2 = VFETCH8(effective_addr2, b2, regs);
 
                     if(op1c == op2)
                     {
-                        op1r = vfetch8(effective_addr4 + 24, b4, regs);
-                        op3 = vfetch8(effective_addr4 + 56, b4, regs);
-                        op5 = vfetch8(effective_addr4 + 88, b4, regs);
-                        op7 = vfetch8(effective_addr4 + 120, b4, regs);
+                        op1r = VFETCH8(effective_addr4 + 24, b4, regs);
+                        op3 = VFETCH8(effective_addr4 + 56, b4, regs);
+                        op5 = VFETCH8(effective_addr4 + 88, b4, regs);
+                        op7 = VFETCH8(effective_addr4 + 120, b4, regs);
 
                         /* Verify access to 2nd operand */
                         validate_operand (effective_addr2, b2, 8-1,
@@ -4090,9 +4245,9 @@ U32     effective_addr2,
                            operand. The alet is fetched from the pl */
                         if(ACCESS_REGISTER_MODE(&(regs->psw)))
                         {
-                            op4alet = vfetch4(effective_addr4 + 68, b4, regs);
-                            op6alet = vfetch4(effective_addr4 + 100, b4, regs);
-                            op8alet = vfetch4(effective_addr4 + 132, b4, regs);
+                            op4alet = VFETCH4(effective_addr4 + 68, b4, regs);
+                            op6alet = VFETCH4(effective_addr4 + 100, b4, regs);
+                            op8alet = VFETCH4(effective_addr4 + 132, b4, regs);
                             if(op4alet || op6alet || op8alet)
                             {
                                 if(r3 == 0)
@@ -4102,17 +4257,17 @@ U32     effective_addr2,
                         }
 
                         /* Load address of operand 4 */
-                        op4addr = vfetch4(effective_addr4 + 76, b4, regs);
+                        op4addr = VFETCH4(effective_addr4 + 76, b4, regs);
                         op4addr &= ADDRESS_MAXWRAP(regs);
                         DW_CHECK(op4addr, regs);
 
                         /* Load address of operand 6 */
-                        op6addr = vfetch4(effective_addr4 + 108, b4, regs);
+                        op6addr = VFETCH4(effective_addr4 + 108, b4, regs);
                         op6addr &= ADDRESS_MAXWRAP(regs);
                         DW_CHECK(op6addr, regs);
 
                         /* Load address of operand 8 */
-                        op8addr = vfetch4(effective_addr4 + 140, b4, regs);
+                        op8addr = VFETCH4(effective_addr4 + 140, b4, regs);
                         op8addr &= ADDRESS_MAXWRAP(regs);
                         DW_CHECK(op8addr, regs);
 
@@ -4129,26 +4284,26 @@ U32     effective_addr2,
                         /* Store 7th op at 8th op */
                         if(op8alet)
                             regs->ar[r3] = op8alet;
-                        vstore8(op7, op8addr, op8alet ? r3 : 0, regs);
+                        VSTORE8(op7, op8addr, op8alet ? r3 : 0, regs);
 
                         /* Store 5th op at 6th op */
                         if(op6alet)
                             regs->ar[r3] = op6alet;
-                        vstore8(op5, op6addr, op6alet ? r3 : 0, regs);
+                        VSTORE8(op5, op6addr, op6alet ? r3 : 0, regs);
                 
                         /* Store 3th op at 4th op */
                         if(op4alet)
                             regs->ar[r3] = op4alet;
-                        vstore8(op3, op4addr, op4alet ? r3 : 0, regs);
+                        VSTORE8(op3, op4addr, op4alet ? r3 : 0, regs);
 
                         /* Store 1st op replacement value at 2nd op */
-                        vstore8(op1r, effective_addr2, b2, regs);
+                        VSTORE8(op1r, effective_addr2, b2, regs);
 
                         regs->psw.cc = 0;
                     }
                     else
                     {
-                        vstore8(op2, effective_addr4 + 8, b4, regs);
+                        VSTORE8(op2, effective_addr4 + 8, b4, regs);
                         regs->psw.cc = 1;
                     }
                 }
@@ -4969,6 +5124,7 @@ int     rc;                             /* Return code               */
         psa->svcint[1] = regs->psw.ilc;
         psa->svcint[2] = 0;
         psa->svcint[3] = i;
+        FRAG_INVALIDATE(pxr, 512);
     }
 
     /* Store current PSW at PSA+X'20' */
@@ -4976,12 +5132,18 @@ int     rc;                             /* Return code               */
 
     /* Load new PSW from PSA+X'60' */
     rc = load_psw ( regs, psa->svcnew );
+    obtain_lock(&sysblk.intlock);
+    set_doint(regs);
+    release_lock(&sysblk.intlock);
     if ( rc )
         program_interrupt (regs, rc);
 
     /* Perform serialization and checkpoint synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
+
+    LASTPAGE_INVALIDATE(regs);
+    REASSIGN_FRAG(regs);
 
 }
 
@@ -5361,5 +5523,6 @@ int     ar1 = 4;                        /* Access register number    */
 
     regs->psw.cc = cc;
 }
+
 
 

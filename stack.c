@@ -18,6 +18,8 @@
 
 #include "hercules.h"
 
+#include "inline.h"
+
 #include "opcode.h"
 
 #undef  STACK_DEBUG
@@ -93,7 +95,11 @@ U16     xcode;                          /* Exception code            */
     /* Set the reference and change bits in the storage key */
     STORAGE_KEY(aaddr) |= STORKEY_REF;
     if (acctype == ACCTYPE_WRITE)
+    {
         STORAGE_KEY(aaddr) |= STORKEY_CHANGE;
+        FRAG_INVALIDATE((aaddr & STORAGE_KEY_PAGEMASK), 
+                        STORAGE_KEY_PAGESIZE); 
+    }
 
     /* Return absolute address */
     return aaddr;
@@ -751,6 +757,10 @@ U16     pasn;                           /* Primary ASN               */
         regs->psw.sysmask |= PSW_PERMODE;
     else
         regs->psw.sysmask &= ~PSW_PERMODE;
+
+    obtain_lock(&sysblk.intlock);
+    set_doint(regs);
+    release_lock(&sysblk.intlock);
 
     /* [5.12.4.4] Calculate the virtual address of the entry
        descriptor of the preceding linkage stack entry.  The

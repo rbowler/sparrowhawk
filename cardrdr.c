@@ -301,7 +301,7 @@ int     rc;                             /* Return code               */
     {
         if (rc < 0)
             logmsg ("HHC407I Error reading file %s: %s\n",
-                    dev->filename, strerror(errno));
+                    dev->filename, strerror(errno))
         else
             logmsg ("HHC408I Unexpected end of file on %s\n",
                     dev->filename);
@@ -422,6 +422,9 @@ int     num;                            /* Number of bytes to move   */
         rc = open_cardrdr (dev, unitstat);
         if (rc) return;
     }
+
+    /* Turn all read/feed commands into read, feed, select stacker 1 */
+    if ((code & 0x17) == 0x02) code = 0x02;
 
     /* Process depending on CCW opcode */
     switch (code) {

@@ -28,6 +28,10 @@
 
 #include "inline.h"
 
+#ifdef IBUF
+#include "ibuf.h"
+#endif
+
 /*-------------------------------------------------------------------*/
 /* B25A BSA   - Branch and Set Authority                       [RRE] */
 /*-------------------------------------------------------------------*/
@@ -130,11 +134,13 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
         {
             regs->psw.amode = 1;
             regs->psw.ia = regs->gpr[r2] & 0x7FFFFFFF;
+            LASTPAGE_INVALIDATE(regs);
         }
         else
         {
             regs->psw.amode = 0;
             regs->psw.ia = regs->gpr[r2] & 0x00FFFFFF;
+            LASTPAGE_INVALIDATE(regs);
         }
 
     } /* end if(BSA-ba) */
@@ -156,6 +162,7 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
         /* Restore PSW amode and instruction address from the DUCT */
         regs->psw.ia = duct8 & DUCT8_IA;
         regs->psw.amode = (duct8 & DUCT8_AMODE) ? 1 : 0;
+        LASTPAGE_INVALIDATE(regs);
 
         /* Restore the PSW key mask from the DUCT */
         regs->cr[3] &= ~CR3_KEYMASK;
@@ -187,6 +194,8 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
         regs->cr[12] = newcr12;
 #endif /*FEATURE_TRACING*/
 
+    LASTPAGE_INVALIDATE(regs);
+    REASSIGN_FRAG(regs);
 }
 
 
@@ -372,11 +381,13 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
     {
         regs->psw.amode = 1;
         regs->psw.ia = newia & 0x7FFFFFFF;
+        LASTPAGE_INVALIDATE(regs);
     }
     else
     {
         regs->psw.amode = 0;
         regs->psw.ia = newia & 0x00FFFFFF;
+        LASTPAGE_INVALIDATE(regs);
     }
 
     /* Set SSTD equal to PSTD */
@@ -421,6 +432,8 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
         regs->cr[12] = newcr12;
 #endif /*FEATURE_TRACING*/
 
+    LASTPAGE_INVALIDATE(regs);
+    REASSIGN_FRAG(regs);
 }
 
 
@@ -488,7 +501,10 @@ U32     n = 0;                          /* Fullword workareas        */
 
     /* Execute the branch unless R2 specifies register 0 */
     if ( r2 != 0 )
+    {
         regs->psw.ia = regs->gpr[r2] & ADDRESS_MAXWRAP(regs);
+        GET_FRAGENTRY(regs);
+    }
 
 }
 
@@ -609,7 +625,12 @@ U32     effective_addr2;                /* Effective address         */
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
 
+#ifdef FEATURE_HERCULES_DIAGCALLS
+    if (effective_addr2 < 0xF00 || effective_addr2 > 0xF10)
+        PRIV_CHECK(regs);
+#else
     PRIV_CHECK(regs);
+#endif
 
     SIE_INTERCEPT(regs);
 
@@ -1272,8 +1293,15 @@ U16     xcode;                          /* Exception code            */
     regs->cr[5] = (regs->cr[0] & CR0_ASF) ? pasteo : ltd;
     regs->cr[7] = sstd;
 
+    obtain_lock(&sysblk.intlock);
+    set_doint(regs);
+    release_lock(&sysblk.intlock);
+
     /* Return condition code zero */
     regs->psw.cc = 0;
+
+    LASTPAGE_INVALIDATE(regs);
+    REASSIGN_FRAG(regs);
 
 } 
 
@@ -1330,6 +1358,12 @@ BYTE    rwork[64];                      /* Register work areas       */
         /* Update register number, wrapping from 15 to 0 */
         i++; i &= 15;
     }
+    obtain_lock(&sysblk.intlock);
+    set_doint(regs);
+    release_lock(&sysblk.intlock);
+
+    LASTPAGE_INVALIDATE(regs);
+    REASSIGN_FRAG(regs);
 }
 
 
@@ -1364,12 +1398,20 @@ int     rc;
 
     /* Load updated PSW */
     rc = load_psw ( regs, dword );
+
+    obtain_lock(&sysblk.intlock);
+    set_doint(regs);
+    release_lock(&sysblk.intlock);
+
     if ( rc )
         program_interrupt (regs, rc);
 
     /* Perform serialization and checkpoint synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
+
+    LASTPAGE_INVALIDATE(regs);
+    REASSIGN_FRAG(regs);
 
 }
 
@@ -1921,6 +1963,7 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
         regs->psw.amode = (ete[1] & ETE1_AMODE) ? 1 : 0;
         regs->psw.ia = ete[1] & ETE1_EIA;
         regs->psw.prob = (ete[1] & ETE1_PROB) ? 1 : 0;
+        LASTPAGE_INVALIDATE(regs);
 
         /* Load the current PKM and PASN into general register 3 */
         regs->gpr[3] = (regs->cr[3] & CR3_KEYMASK)
@@ -1950,6 +1993,7 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
         regs->psw.amode = (ete[1] & ETE1_AMODE) ? 1 : 0;
         regs->psw.ia = ete[1] & ETE1_EIA;
         regs->psw.prob = (ete[1] & ETE1_PROB) ? 1 : 0;
+        LASTPAGE_INVALIDATE(regs);
 
         /* Replace the PSW key by the entry key if the K bit is set */
         if (ete[4] & ETE4_K)
@@ -2044,6 +2088,9 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
+
+    LASTPAGE_INVALIDATE(regs);
+    REASSIGN_FRAG(regs);
 
 }
 
@@ -2205,6 +2252,7 @@ U16     xcode;                          /* Exception code            */
     lsedp = (LSED*)(sysblk.mainstor + alsed);
     lsedp->nes[0] = 0;
     lsedp->nes[1] = 0;
+    FRAG_INVALIDATE(alsed, 2);
 
     /* Generate space switch event if required */
     if (ssevent)
@@ -2214,6 +2262,8 @@ U16     xcode;                          /* Exception code            */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
+    LASTPAGE_INVALIDATE(regs);
+    REASSIGN_FRAG(regs);
 }
 
 
@@ -2386,11 +2436,16 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
     regs->psw.amode = amode;
     regs->psw.ia = ia;
     regs->psw.prob = prob;
+    LASTPAGE_INVALIDATE(regs);
 
     /* AND control register 3 bits 0-15 with the supplied PKM value
        and replace the SASN in CR3 bits 16-31 with new PASN */
     regs->cr[3] &= (pkm << 16);
     regs->cr[3] |= pasn;
+
+    obtain_lock(&sysblk.intlock);
+    set_doint(regs);
+    release_lock(&sysblk.intlock);
 
     /* Set secondary STD equal to new primary STD */
     regs->cr[7] = pstd;
@@ -2403,6 +2458,8 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
+    LASTPAGE_INVALIDATE(regs);
+    REASSIGN_FRAG(regs);
 }
 
 
@@ -2785,6 +2842,8 @@ int     ssevent = 0;                    /* 1=space switch event      */
         PERFORM_CHKPT_SYNC (regs);
     }
 
+    LASTPAGE_INVALIDATE(regs);
+    REASSIGN_FRAG(regs);
 }
 
 
@@ -2870,9 +2929,13 @@ U64     dreg;                           /* Clock value               */
     /* reset the clock comparator pending flag according to
        the setting of the tod clock */
     if( (sysblk.todclk + regs->todoffset) > regs->clkc )
-        regs->cpuint = regs->ckpend = 1;
+        regs->ckpend = 1;
     else
         regs->ckpend = 0;
+
+    obtain_lock(&sysblk.intlock);
+    set_doint(regs);
+    release_lock(&sysblk.intlock);
 
     /* Release the TOD clock update lock */
     release_lock (&sysblk.todlock);
@@ -2930,9 +2993,13 @@ U64     dreg;                           /* Timer value               */
 
     /* reset the cpu timer pending flag according to its value */
     if( (S64)regs->ptimer < 0 )
-        regs->cpuint = regs->ptpend = 1;
+        regs->ptpend = 1;
     else
         regs->ptpend = 0;
+
+    obtain_lock(&sysblk.intlock);
+    set_doint(regs);
+    release_lock(&sysblk.intlock);
 
     /* Release the TOD clock update lock */
     release_lock (&sysblk.todlock);
@@ -3098,10 +3165,16 @@ U32     newcr12 = 0;                    /* CR12 upon completion      */
     /* Load the new secondary STD into control register 7 */
     regs->cr[7] = sstd;
 
+    obtain_lock(&sysblk.intlock);
+    set_doint(regs);
+    release_lock(&sysblk.intlock);
+
     /* Perform serialization and checkpoint-synchronization */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
+    LASTPAGE_INVALIDATE(regs);
+    REASSIGN_FRAG(regs);
 }
 
 
@@ -3342,6 +3415,10 @@ U32     effective_addr2;                /* Effective address         */
     /* Load new system mask value from operand address */
     regs->psw.sysmask = vfetchb ( effective_addr2, b2, regs );
 
+    obtain_lock(&sysblk.intlock);
+    set_doint(regs);
+    release_lock(&sysblk.intlock);
+
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
     /* DAT must be off in XC mode */
     if(regs->sie_state
@@ -3503,14 +3580,16 @@ static char *ordername[] = {    "Unassigned",
             }
 
             /* Raise an external call interrupt pending condition */
-            tregs->cpuint = tregs->extcall = 1;
+            tregs->extcall = 1;
+            set_doint(tregs);
             tregs->extccpu = regs->cpuad;
 
             break;
 
         case SIGP_EMERGENCY:
             /* Raise an emergency signal interrupt pending condition */
-            tregs->cpuint = tregs->emersig = 1;
+            tregs->emersig = 1;
+            set_doint(tregs);
             tregs->emercpu[regs->cpuad] = 1;
 
             break;
@@ -3518,6 +3597,7 @@ static char *ordername[] = {    "Unassigned",
         case SIGP_START:
             /* Restart the target CPU if it is in the stopped state */
             tregs->cpustate = CPUSTATE_STARTED;
+            set_doint(tregs);
 
             break;
 
@@ -3530,6 +3610,7 @@ static char *ordername[] = {    "Unassigned",
         case SIGP_RESTART:
             /* Make restart interrupt pending in the target CPU */
             tregs->restart = 1;
+            set_doint(tregs);
             /* Set cpustate to stopping. If the restart is successful,
                then the cpustate will be set to started in cpu.c */
             if(tregs->cpustate == CPUSTATE_STOPPED)
@@ -3832,9 +3913,13 @@ U64     dreg;                           /* Double word workarea      */
 
     /* reset the cpu timer pending flag according to its value */
     if( (S64)regs->ptimer < 0 )
-        regs->cpuint = regs->ptpend = 1;
+        regs->ptpend = 1;
     else
         regs->ptpend = 0;
+
+    obtain_lock(&sysblk.intlock);
+    set_doint(regs);
+    release_lock(&sysblk.intlock);
 
     /* Release the TOD clock update lock */
     release_lock (&sysblk.todlock);
@@ -3892,6 +3977,9 @@ U32     effective_addr1;                /* Effective address         */
 
     /* AND system mask with immediate operand */
     regs->psw.sysmask &= i2;
+    obtain_lock(&sysblk.intlock);
+    set_doint(regs);
+    release_lock(&sysblk.intlock);
 
 }
 
@@ -3919,6 +4007,10 @@ U32     effective_addr1;                /* Effective address         */
 
     /* OR system mask with immediate operand */
     regs->psw.sysmask |= i2;
+
+    obtain_lock(&sysblk.intlock);
+    set_doint(regs);
+    release_lock(&sysblk.intlock);
 
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
     /* DAT must be off in XC mode */
@@ -4177,6 +4269,9 @@ U32     ag,                             /* Abs Guest addr of TTE     */
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 int     i;                              /* Loop counter              */
 U64     dreg;                           /* 64-bit work area          */
+#ifdef IBUF
+U32     haddr;
+#endif
 #endif /*defined(FEATURE_TRACING)*/
 
     RS(inst, execflag, regs, r1, r3, b2, effective_addr2);
@@ -4252,6 +4347,9 @@ U64     dreg;                           /* 64-bit work area          */
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n1) |= (STORKEY_REF | STORKEY_CHANGE);
+#ifdef IBUF
+    haddr = n1;
+#endif
 
     /* Build the explicit trace entry */
     sysblk.mainstor[n1++] = (0x70 | i);
@@ -4281,6 +4379,7 @@ U64     dreg;                           /* 64-bit work area          */
         /* Update register number, wrapping from 15 to 0 */
         i++; i &= 15;
     }
+    FRAG_INVALIDATE(haddr, 32);
 
     /* Update trace entry address in control register 12 */
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)

@@ -25,6 +25,8 @@
 
 #include "hercules.h"
 
+#include "inline.h"
+
 /*=NP================================================================*/
 /* Global data for new panel display                                 */
 /*   (Note: all NPD mods are identified by the string =NP=           */
@@ -184,7 +186,7 @@ static void NP_screen(FILE *confp)
     fprintf(confp, "DATA:");
     fprintf(confp, ANSI_CURSOR, 20, 2);
 #ifdef MIPS_COUNTING
-    fprintf(confp, "MIPS");
+    fprintf(confp, " MIPS  SIO/s");
 #else
     fprintf(confp, "instructions");
 #endif
@@ -285,6 +287,7 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
     int savadr;
 #ifdef MIPS_COUNTING
     U32 mipsrate;
+    U32 siosrate;
 #endif
 
     if (NPhelpup == 1) {
@@ -402,14 +405,19 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
     fprintf(confp, ANSI_YLW_BLK);
 #ifdef MIPS_COUNTING
 #ifdef FEATURE_CPU_RECONFIG
-    for(mipsrate = i = 0; i < MAX_CPU_ENGINES; i++)
+    for(mipsrate = siosrate = i = 0; i < MAX_CPU_ENGINES; i++)
       if(sysblk.regs[i].cpuonline)
 #else /*!FEATURE_CPU_RECONFIG*/
-    for(mipsrate = i = 0; i < sysblk.numcpu; i++)
+    for(mipsrate = siosrate = i = 0; i < sysblk.numcpu; i++)
 #endif /*!FEATURE_CPU_RECONFIG*/
+    {
         mipsrate += sysblk.regs[i].mipsrate;
-    fprintf(confp, "%1.1d.%2.2d",
-            mipsrate / 1000, (mipsrate % 1000) / 10);
+        siosrate += sysblk.regs[i].siosrate;
+    }
+    if (mipsrate > 100000) mipsrate = 0;	/* ignore wildly high rate */
+    fprintf(confp, "%2.1d.%2.2d  %5d",
+            mipsrate / 1000, (mipsrate % 1000) / 10,
+           siosrate);
 #else
     fprintf(confp, "%12.12u", (unsigned)regs->instcount);
 #endif
@@ -971,6 +979,8 @@ BYTE    c;                              /* Character work area       */
     return 0;
 } /* end function parse_range */
 
+void    cckd_print_itrace (DEVBLK *);
+
 /*-------------------------------------------------------------------*/
 /* Execute a panel command                                           */
 /*-------------------------------------------------------------------*/
@@ -1081,6 +1091,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
     if (strcmp(cmd,"g") == 0)
     {
         sysblk.inststep = 0;
+        set_doinst();
         strcpy (cmd, "start");
     }
 
@@ -1093,6 +1104,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
 
         /* Restart the CPU if it is in the stopped state */
         regs->cpustate = CPUSTATE_STARTED;
+        set_doint(regs);
 
         /* Signal stopped CPUs to retest stopped indicator */
         signal_condition (&sysblk.intcond);
@@ -1117,7 +1129,10 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         obtain_lock (&sysblk.intlock);
         for (i = 0; i < MAX_CPU_ENGINES; i++)
             if(sysblk.regs[i].cpuonline)
+            {
                 sysblk.regs[i].cpustate = CPUSTATE_STARTED;
+                set_doint(&sysblk.regs[i]);
+            }
         signal_condition (&sysblk.intcond);
         release_lock (&sysblk.intlock);
         return NULL;
@@ -1229,6 +1244,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         if (cmd[0]=='t' && cmd[2]=='\0')
         {
             sysblk.insttrace = oneorzero;
+            set_doinst();
             logmsg ("Instruction tracing is now %s\n", onoroff);
             return NULL;
         }
@@ -1237,6 +1253,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         if (cmd[0]=='s' && cmd[2]=='\0')
         {
             sysblk.inststep = oneorzero;
+            set_doinst();
             logmsg ("Instruction stepping is now %s\n", onoroff);
             return NULL;
         }
@@ -1350,6 +1367,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
                 aaddr = APPLY_PREFIXING (aaddr, regs->pxr);
                 sysblk.mainstor[aaddr] = newval[i];
                 STORAGE_KEY(aaddr) |= (STORKEY_REF | STORKEY_CHANGE);
+                FRAG_INVALIDATE(aaddr, 1);
             } /* end for(i) */
         }
 
@@ -1389,6 +1407,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
                 aaddr = APPLY_PREFIXING (raddr, regs->pxr);
                 sysblk.mainstor[aaddr] = newval[i];
                 STORAGE_KEY(aaddr) |= (STORKEY_REF | STORKEY_CHANGE);
+                FRAG_INVALIDATE(aaddr, 1);
             } /* end for(i) */
         }
 
@@ -1418,12 +1437,14 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         {
             logmsg ("Deleting breakpoint\n");
             sysblk.instbreak = 0;
+            set_doinst();
             return NULL;
         }
 
         if (sscanf(cmd+1, "%x%c", &sysblk.breakaddr, &c) == 1)
         {
             sysblk.instbreak = 1;
+            set_doinst();
             logmsg ("Setting breakpoint at %8.8X\n", sysblk.breakaddr);
             return NULL;
         }
@@ -1458,6 +1479,7 @@ BYTE   *cmdarg;                         /* -> Command argument       */
     {
         obtain_lock(&sysblk.intlock);
         sysblk.extpending = sysblk.intkey = 1;
+        set_doint(regs);
         release_lock(&sysblk.intlock);
         logmsg ("Interrupt key depressed\n");
         return NULL;
@@ -1569,15 +1591,24 @@ BYTE   *cmdarg;                         /* -> Command argument       */
 #else /*!FEATURE_CPU_RECONFIG*/
         if(cpu < 0 || cpu > sysblk.numcpu)
 #endif /*!FEATURE_CPU_RECONFIG*/
-            logmsg ("CPU%4.4X not configured\n",cpu);
+            logmsg ("CPU%4.4X not configured\n",cpu)
         else
             sysblk.pcpu = cpu;
         return NULL;
     }
 
     /* quit or exit command - terminate the emulator */
-    if (strcmp(cmd,"quit") == 0 || strcmp(cmd,"exit") == 0)
+    if (memcmp(cmd,"quit",4) == 0 || memcmp(cmd,"exit",4) == 0)
     {
+        devascii = strtok(cmd+4," \t");
+
+        if (devascii != NULL && strcmp("now",devascii) == 0) exit (0);
+
+        /* detach all devices */
+        for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+           if (dev->fd > 2 && dev->pmcw.flag5 & PMCW5_V)
+               detach_device(dev->devnum);
+
         exit(0);
     }
 
@@ -1763,6 +1794,20 @@ BYTE   *cmdarg;                         /* -> Command argument       */
         else
             sysblk.pgminttr |= ((U64)1 << (n - 1));
         
+        return NULL;
+    }
+
+    /* k command - print out cckd internal trace */
+    if (cmd[0] == 'k'
+        && sscanf(cmd+1, "%hx%c", &devnum, &c) == 1)
+    {
+        dev = find_device_by_devnum (devnum);
+        if (dev == NULL)
+        {
+            logmsg ("Device number %4.4X not found\n", devnum);
+            return NULL;
+        }
+        cckd_print_itrace (dev);
         return NULL;
     }
 
@@ -2499,7 +2544,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                         (pswwait && pswmask == 0) ? "DISABLED WAIT" :
                         pswwait ? "ENABLED WAIT" :
                         "RUNNING"),
-                    regs->instcount);
+                    (long long)regs->instcount);
             } /* end if(redraw_status) */
 
             if (redraw_cmd)

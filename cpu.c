@@ -21,15 +21,23 @@
 /*          Jan Jaeger, after a suggestion by Willem Koynenberg      */
 /*      Instruction decode rework - Jan Jaeger                       */
 /*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
+/*      External interrupt masking by Valery Pogonchenko             */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
 
 #include "opcode.h"
 
+#include "inline.h"
+
+#ifdef IBUF
+#include "ibuf.h"
+#endif
+
 //#define MODULE_TRACE
 //#define INSTRUCTION_COUNTING
 //#define SVC_TRACE
+#undef TRACESTEPTHIS
 
 /*-------------------------------------------------------------------*/
 /* Store current PSW at a specified address in main storage          */
@@ -92,13 +100,20 @@ int load_psw (REGS *regs, BYTE *addr)
         regs->psw.ia = ((addr[4] & 0x7F) << 24)
                 | (addr[5] << 16) | (addr[6] << 8) | addr[7];
 
+        LASTPAGE_INVALIDATE(regs);
+
+
         /* Bits 0 and 2-4 of system mask must be zero */
         if ((addr[0] & 0xB8) != 0)
+        {
             return PGM_SPECIFICATION_EXCEPTION;
+        }
 
         /* Bits 24-31 must be zero */
         if (addr[3] != 0)
+        {
             return PGM_SPECIFICATION_EXCEPTION;
+        }
 
 #ifndef FEATURE_DUAL_ADDRESS_SPACE
         /* If DAS feature not installed then bit 16 must be zero */
@@ -144,6 +159,9 @@ int load_psw (REGS *regs, BYTE *addr)
         regs->psw.sgmask = addr[4] & 0x01;
         regs->psw.amode = 0;
         regs->psw.ia = (addr[5] << 16) | (addr[6] << 8) | addr[7];
+
+        LASTPAGE_INVALIDATE(regs);
+        REASSIGN_FRAG(regs);
 #else /*!FEATURE_BCMODE*/
         /* BC mode is not valid for 370-XA, ESA/370, or ESA/390 */
         return PGM_SPECIFICATION_EXCEPTION;
@@ -184,6 +202,9 @@ int     nointercept;                    /* True for virtual pgmint   */
 #if defined(FOOTPRINT_BUFFER)
 U32     n;
 #endif /*defined(FOOTPRINT_BUFFER)*/
+#ifdef IBUF
+U32    haddr;
+#endif
 
 static char *pgmintname[] = { 
         /* 01 */        "Operation exception",
@@ -260,6 +281,8 @@ static char *pgmintname[] = {
 #else /*!defined(FEATURE_INTERPRETIVE_EXECUTION)*/
     realregs = sysblk.regs + regs->cpuad;
 #endif /*!defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+    LOAD_INST(realregs);
 
 #if MAX_CPU_ENGINES > 1
     /* Unlock the main storage lock if held */
@@ -389,6 +412,9 @@ static char *pgmintname[] = {
 
         /* Point to PSA in main storage */
         psa = (PSA*)(sysblk.mainstor + pxr);
+#ifdef IBUF
+        haddr = pxr;
+#endif
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
         nointercept = 1;
     }
@@ -401,6 +427,9 @@ static char *pgmintname[] = {
            the interruption parm area in the state descriptor
            rather then the PSA */
         psa = (PSA*)(sysblk.mainstor + regs->sie_state + SIE_IP_PSA_OFFSET);
+#ifdef IBUF
+        haddr = regs->sie_state + SIE_IP_PSA_OFFSET;
+#endif
         nointercept = 0;
     }
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
@@ -461,6 +490,7 @@ static char *pgmintname[] = {
             psa->moncode[2] = (regs->moncode & 0xFF00) >> 8;
             psa->moncode[3] = regs->moncode & 0xFF;
         }
+        FRAG_INVALIDATE(haddr, 512);
     }
 
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
@@ -468,6 +498,7 @@ static char *pgmintname[] = {
     {
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
+        realregs->int3count++;
         /* Store current PSW at PSA+X'28' */
         store_psw (realregs, psa->pgmold);
 
@@ -487,10 +518,18 @@ static char *pgmintname[] = {
             realregs->cpustate = CPUSTATE_STOPPED;
         }
 
+        obtain_lock(&sysblk.intlock);
+        set_doint(realregs);
+        release_lock(&sysblk.intlock);
+
         longjmp(realregs->progjmp, SIE_NO_INTERCEPT);
 
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
     }
+
+    obtain_lock(&sysblk.intlock);
+    set_doint(realregs);
+    release_lock(&sysblk.intlock);
 
     longjmp (realregs->progjmp, code);
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
@@ -500,7 +539,7 @@ static char *pgmintname[] = {
 /*-------------------------------------------------------------------*/
 /* Load restart new PSW                                              */
 /*-------------------------------------------------------------------*/
-static void restart_interrupt (REGS *regs)
+void restart_interrupt (REGS *regs)
 {
 int     rc;                             /* Return code               */
 PSA    *psa;                            /* -> Prefixed storage area  */
@@ -517,8 +556,12 @@ PSA    *psa;                            /* -> Prefixed storage area  */
     /* Store current PSW at PSA+X'8' */
     store_psw (regs, psa->iplccw1);
 
+    regs->int3count++;
+
     /* Load new PSW from PSA+X'0' */
     rc = load_psw (regs, psa->iplpsw);
+
+    set_doint(regs);
 
     release_lock(&sysblk.intlock);
 
@@ -543,7 +586,7 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 /* Perform I/O interrupt if pending                                  */
 /* Note: The caller MUST hold the interrupt lock (sysblk.intlock)    */
 /*-------------------------------------------------------------------*/
-static void perform_io_interrupt (REGS *regs)
+void perform_io_interrupt (REGS *regs)
 {
 int     rc;                             /* Return code               */
 PSA    *psa;                            /* -> Prefixed storage area  */
@@ -611,11 +654,17 @@ DWORD   csw;                            /* CSW for S/370 channels    */
                 psa->ioparm[2], psa->ioparm[3]);
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
+    FRAG_INVALIDATE(regs->pxr, 512);
+
     /* Store current PSW at PSA+X'38' */
     store_psw ( regs, psa->iopold );
 
+    regs->int3count++;
+
     /* Load new PSW from PSA+X'78' */
     rc = load_psw ( regs, psa->iopnew );
+
+    set_doint(regs);
 
     release_lock(&sysblk.intlock);
 
@@ -637,7 +686,7 @@ DWORD   csw;                            /* CSW for S/370 channels    */
 /* Perform Machine Check interrupt if pending                        */
 /* Note: The caller MUST hold the interrupt lock (sysblk.intlock)    */
 /*-------------------------------------------------------------------*/
-static void perform_mck_interrupt (REGS *regs)
+void perform_mck_interrupt (REGS *regs)
 {
 int     rc;                             /* Return code               */
 PSA    *psa;                            /* -> Prefixed storage area  */
@@ -693,12 +742,18 @@ U32     fsta;                           /* Failing storage address   */
     psa->mcstorad[1] = (fsta > 16) & 0xFF;
     psa->mcstorad[2] = (fsta > 8) & 0xFF;
     psa->mcstorad[3] = fsta & 0xFF;
+    
+    FRAG_INVALIDATE(regs->pxr, 512);
 
     /* Store current PSW at PSA+X'30' */
     store_psw ( regs, psa->mckold );
 
+    regs->int3count++;
+
     /* Load new PSW from PSA+X'70' */
     rc = load_psw ( regs, psa->mcknew );
+
+    set_doint(regs);
 
     release_lock(&sysblk.intlock);
 
@@ -716,13 +771,16 @@ U32     fsta;                           /* Failing storage address   */
     longjmp (regs->progjmp, SIE_INTERCEPT_MCK);
 } /* end function perform_mck_interrupt */
 
+#ifndef IBUF
 /*-------------------------------------------------------------------*/
 /* CPU instruction execution thread                                  */
 /*-------------------------------------------------------------------*/
 void *cpu_thread (REGS *regs)
 {
-int     tracethis;                      /* Trace this instruction    */
-int     stepthis;                       /* Stop on this instruction  */
+#if TRACESTEPTHIS
+int     tracethis = 0;                  /* Trace this instruction    */
+#endif
+int     stepthis = 0;                   /* Stop on this instruction  */
 int     diswait;                        /* 1=Disabled wait state     */
 int     shouldbreak;                    /* 1=Stop at breakpoint      */
 #ifdef INSTRUCTION_COUNTING
@@ -805,14 +863,33 @@ int     icidx;                          /* Instruction counter index */
     /* Execute the program */
     while (1)
     {
+#ifdef TRACESTEPTHIS
         /* Reset instruction trace indicators */
         tracethis = 0;
         stepthis = 0;
+#endif
 
+#ifdef INTERRUPT_OPTIMIZE
+#if MAX_CPU_ENGINES > 1
+        if (regs->doint || (sysblk.brdcstncpu != 0))
+#else
+        if (regs->doint)
+#endif
+#else
         /* Test for interrupts if it appears that one may be pending */
         if ((sysblk.mckpending && regs->psw.mach)
             || ((sysblk.extpending || regs->cpuint)
-                && (regs->psw.sysmask & PSW_EXTMASK))
+                && (regs->psw.sysmask & PSW_EXTMASK)
+                && (regs->psw.sysmask & PSW_EXTMASK)
+#if ARCH == 390
+                && ( (regs->emersig && (regs->cr[0] & CR0_XM_EMERSIG))
+                   || (regs->extcall && (regs->cr[0] & CR0_XM_EXTCALL))
+                   || (regs->ckpend && (regs->cr[0] & CR0_XM_CLKC))
+                   || (regs->ptpend && (regs->cr[0] & CR0_XM_PTIMER))
+                   || (sysblk.intkey && (regs->cr[0] & CR0_XM_INTKEY))
+                   || (sysblk.servsig && (regs->cr[0] & CR0_XM_SERVSIG)) )
+#endif
+               )                                                               
             || regs->restart
 #ifndef FEATURE_BCMODE
             || (sysblk.iopending && (regs->psw.sysmask & PSW_IOMASK))
@@ -825,7 +902,9 @@ int     icidx;                          /* Instruction counter index */
             || sysblk.brdcstncpu != 0
 #endif /*MAX_CPU_ENGINES > 1*/
             || regs->cpustate != CPUSTATE_STARTED)
+#endif
         {
+            regs->int1count++;
             /* Obtain the interrupt lock */
             obtain_lock (&sysblk.intlock);
 
@@ -983,6 +1062,8 @@ int     icidx;                          /* Instruction counter index */
                     diswait = 1;
                 }
 
+                regs->int3count++;
+
                 /* Wait for I/O, external or restart interrupt */
                 wait_condition (&sysblk.intcond, &sysblk.intlock);
                 release_lock (&sysblk.intlock);
@@ -996,6 +1077,54 @@ int     icidx;                          /* Instruction counter index */
             release_lock (&sysblk.intlock);
 
         } /* end if(interrupt) */
+#ifdef TRACE_INTERRUPT_DELAY
+        else
+        {
+          if (((sysblk.extpending || regs->cpuint)
+              && (regs->psw.sysmask & PSW_EXTMASK))
+              || (sysblk.mckpending && regs->psw.mach)
+#ifndef FEATURE_BCMODE
+              || (sysblk.iopending && (regs->psw.sysmask & PSW_IOMASK))
+#else /*FEATURE_BCMODE*/
+              ||  (sysblk.iopending &&
+                  (regs->psw.sysmask & (regs->psw.ecmode ? PSW_IOMASK : 0xFE)))
+#endif /*FEATURE_BCMODE*/
+#if MAX_CPU_ENGINES > 1
+              || sysblk.brdcstncpu != 0
+#endif /*MAX_CPU_ENGINES > 1*/
+              || (sysblk.intkey && (regs->cr[0] & CR0_XM_INTKEY))
+              || (sysblk.servsig && (regs->cr[0] & CR0_XM_SERVSIG))
+              || regs->psw.wait)
+          {
+            regs->int2count++;
+            logmsg("Missing interrupts: %llu ", regs->instcount);
+            if ((sysblk.extpending || regs->cpuint)
+                 && (regs->psw.sysmask & PSW_EXTMASK))
+              logmsg("extpending/cpuint\n");
+
+            if (sysblk.mckpending && regs->psw.mach)
+              logmsg("mckpending\n");
+#ifndef FEATURE_BCMODE
+            if (sysblk.iopending && (regs->psw.sysmask & PSW_IOMASK))
+              logmsg("iopending\n");
+#else /*FEATURE_BCMODE*/
+            if (sysblk.iopending &&
+               (regs->psw.sysmask & (regs->psw.ecmode ? PSW_IOMASK : 0xFE)))
+              logmsg("iopending\n");
+#endif /*FEATURE_BCMODE*/
+#if MAX_CPU_ENGINES > 1
+            if (sysblk.brdcstncpu != 0)
+              logmsg("broadcast\n");
+#endif /*MAX_CPU_ENGINES > 1*/
+            if (sysblk.intkey && (regs->cr[0] & CR0_XM_INTKEY))
+              logmsg("intkey\n");
+            if (sysblk.servsig && (regs->cr[0] & CR0_XM_SERVSIG))
+              logmsg("servsig\n");
+            if (regs->psw.wait)
+              logmsg("wait\n");
+          }
+        }
+#endif
 
         /* Clear the instruction validity flag in case an access
            error occurs while attempting to fetch next instruction */
@@ -1081,6 +1210,8 @@ int     icidx;                          /* Instruction counter index */
 
 //      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x14) sysblk.inststep = 1; /*SIE*/
 //      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x14) tracethis = 1; /*SIE*/
+
+#ifdef TRACESTEPTHIS
         /* Test for breakpoint */
         shouldbreak = sysblk.instbreak
                         && (regs->psw.ia == sysblk.breakaddr);
@@ -1088,6 +1219,17 @@ int     icidx;                          /* Instruction counter index */
         /* Display the instruction */
         if (sysblk.insttrace || sysblk.inststep || shouldbreak
             || tracethis || stepthis)
+        {
+#else
+        if (sysblk.doinst)
+        {
+            /* Test for breakpoint */
+            shouldbreak = sysblk.instbreak
+                            && (regs->psw.ia == sysblk.breakaddr);
+            /* Display the instruction */
+            if (sysblk.insttrace || sysblk.inststep || shouldbreak)
+#endif
+
         {
             display_inst (regs, regs->inst);
             if (sysblk.inststep || stepthis || shouldbreak)
@@ -1102,6 +1244,9 @@ int     icidx;                          /* Instruction counter index */
                 release_lock (&sysblk.intlock);
             }
         }
+#ifndef TRACESTEPTHIS
+        }
+#endif
 
         /* Execute the instruction */
         EXECUTE_INSTRUCTION (regs->inst, 0, regs);
@@ -1109,3 +1254,64 @@ int     icidx;                          /* Instruction counter index */
 
     return NULL;
 } /* end function cpu_thread */
+#endif
+
+void *set_doint (REGS *regs)
+{
+    int i;
+    REGS *hregs;
+
+    if (!regs)
+      {
+      for (i = 0; i < MAX_CPU_ENGINES; i++)
+        {
+        hregs = &sysblk.regs[i];
+        set_doint (hregs);
+        }
+
+      return NULL;
+    }
+
+    regs->cpuint = regs->storstat
+#ifdef FEATURE_INTERVAL_TIMER
+                    || regs->itimer_pending
+#endif /*FEATURE_INTERVAL_TIMER*/
+                    || (regs->ptpend && (regs->cr[0] & CR0_XM_PTIMER))
+                    || (regs->ckpend && sysblk.insttrace == 0
+                           && sysblk.inststep == 0
+                           && (regs->cr[0] & CR0_XM_CLKC))
+                    || (regs->extcall && (regs->cr[0] & CR0_XM_EXTCALL))
+                    || (regs->emersig && (regs->cr[0] & CR0_XM_EMERSIG));
+    /* Test for interrupts if it appears that one may be pending */
+    regs->doint = 0;
+    if (((sysblk.extpending || regs->cpuint)
+            && (regs->psw.sysmask & PSW_EXTMASK))
+         || regs->restart
+         || (regs->cpustate != CPUSTATE_STARTED)
+         || (sysblk.mckpending && regs->psw.mach)
+#ifndef FEATURE_BCMODE
+         || (sysblk.iopending && (regs->psw.sysmask & PSW_IOMASK))
+#else /*FEATURE_BCMODE*/
+         ||  (sysblk.iopending &&
+             (regs->psw.sysmask & (regs->psw.ecmode ? PSW_IOMASK : 0xFE)))
+#endif /*FEATURE_BCMODE*/
+#if MAX_CPU_ENGINES > 1
+         || sysblk.brdcstncpu != 0
+#endif /*MAX_CPU_ENGINES > 1*/
+         || (sysblk.intkey && (regs->cr[0] & CR0_XM_INTKEY))
+         || (sysblk.servsig && (regs->cr[0] & CR0_XM_SERVSIG))
+         || regs->psw.wait)
+     regs->doint = 1;
+   return NULL;
+
+}
+
+void *set_doinst ()
+{
+   sysblk.doinst = 0;
+   if (sysblk.insttrace || sysblk.inststep || sysblk.instbreak)
+     sysblk.doinst = 1;
+
+   return NULL;
+
+}

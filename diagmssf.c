@@ -347,9 +347,13 @@ DEVBLK            *dev;                /* Device block pointer       */
     /* Mark page changed */
     STORAGE_KEY(spccb_absolute_addr) |= STORKEY_CHANGE;
 
+    FRAG_INVALIDATE((spccb_absolute_addr & STORAGE_KEY_PAGEMASK),
+                     STORAGE_KEY_PAGESIZE);
+
     /* Set service signal external interrupt pending */
     sysblk.servparm = spccb_absolute_addr;
     sysblk.extpending = sysblk.servsig = 1; 
+    set_doint(regs);
 
     /* Release the interrupt lock */
     release_lock (&sysblk.intlock);
@@ -417,6 +421,7 @@ static U64        diag204tod;          /* last diag204 tod           */
 
         /* Mark page referenced */
         STORAGE_KEY(abs) |= STORKEY_REF | STORKEY_CHANGE;
+        FRAG_INVALIDATE((abs & STORAGE_KEY_PAGEMASK), STORAGE_KEY_PAGESIZE);
 
         memset(hdrinfo, 0, sizeof(DIAG204_HDR));
         hdrinfo->numpart = 1;

@@ -6,6 +6,11 @@
 
 #include "opcode.h"
 
+#ifdef IBUF
+#include "inline.h"
+#include "ibuf.h"
+#endif
+
 #if !defined(FEATURE_CHANNEL_SUBSYSTEM)
  #define zz_clear_subchannel                    operation_exception
  #define zz_halt_subchannel                     operation_exception
@@ -2344,6 +2349,8 @@ zz_func opcode_e4xx[256] = {
 void execute_01xx (BYTE inst[], int execflag, REGS *regs)
 {
     opcode_01xx[inst[1]](inst, execflag, regs);
+    LASTPAGE_INVALIDATE(regs);
+    REASSIGN_FRAG(regs);
 }
 
 
@@ -2356,12 +2363,16 @@ void execute_a7xx (BYTE inst[], int execflag, REGS *regs)
 void execute_b2xx (BYTE inst[], int execflag, REGS *regs)
 {
     opcode_b2xx[inst[1]](inst, execflag, regs);
+    LASTPAGE_INVALIDATE(regs);
+    REASSIGN_FRAG(regs);
 }
 
 
 void execute_e5xx (BYTE inst[], int execflag, REGS *regs)
 {
     opcode_e5xx[inst[1]](inst, execflag, regs);
+    LASTPAGE_INVALIDATE(regs);
+    REASSIGN_FRAG(regs);
 }
 
 
@@ -2416,6 +2427,7 @@ void operation_exception (BYTE inst[], int execflag, REGS *regs)
 
 void dummy_instruction (BYTE inst[], int execflag, REGS *regs)
 {
+    LOAD_INST(regs);
     logmsg("Dummy instruction: "); display_inst (regs, inst);
 
     if( !execflag )

@@ -24,11 +24,14 @@
 /*      CONCS instruction added - Jan Jaeger                         */
 /*      DISCS instruction added - Jan Jaeger                         */
 /*      TPI fix - Jay Maynard, found by Greg Smith                   */
+/*      I/O rate counter - Valery Pogonchenko                        */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
 
 #include "opcode.h"
+
+#include "inline.h"
 
 
 #if defined(FEATURE_CHANNEL_SUBSYSTEM)
@@ -418,10 +421,14 @@ ORB     orb;                            /* Operation request block   */
                 | (orb.intparm[2] << 8) | orb.intparm[3];
 
     /* Start the channel program and set the condition code */
+    WATCH("bef start");
     regs->psw.cc =
         start_io (dev, ioparm, orb.flag4, orb.flag5,
                         orb.lpm, orb.flag7, ccwaddr);
 
+    WATCH("aft start");
+    /* Bump the I/O counter */
+    regs->siocount++;
 }
 
 
@@ -708,6 +715,9 @@ BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
     /* Start the channel program and set the condition code */
     regs->psw.cc =
         start_io (dev, 0, ccwkey, 0, 0, 0, ccwaddr);
+
+    /* Bump the I/O counter */
+    regs->siocount++;
 
 #endif /*!defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 

@@ -13,6 +13,8 @@
 
 #include "opcode.h"
 
+#include "inline.h"
+
 /*-------------------------------------------------------------------*/
 /* Control block offsets fixed by architecture                       */
 /*-------------------------------------------------------------------*/
@@ -67,18 +69,18 @@ U32     newia;                          /* Unsuccessful branch addr  */
     OBTAIN_MAINLOCK(regs);
 
     /* Load ASCB address from first operand location */
-    ascb_addr = vfetch4 ( effective_addr1, b1, regs );
+    ascb_addr = VFETCH4 ( effective_addr1, b1, regs );
 
     /* Load locks held bits from second operand location */
-    hlhi_word = vfetch4 ( effective_addr2, b2, regs );
+    hlhi_word = VFETCH4 ( effective_addr2, b2, regs );
 
     /* Fetch our logical CPU address from PSALCPUA */
-    lcpa = vfetch4 ( PSALCPUA, 0, regs );
+    lcpa = VFETCH4 ( PSALCPUA, 0, regs );
 
     lock_addr = (ascb_addr + ASCBLOCK) & ADDRESS_MAXWRAP(regs);
 
     /* Fetch the local lock from the ASCB */
-    lock = vfetch4 ( lock_addr, 0, regs );
+    lock = VFETCH4 ( lock_addr, 0, regs );
 
     /* Obtain the local lock if not already held by any CPU */
     if (lock == 0
@@ -103,9 +105,9 @@ U32     newia;                          /* Unsuccessful branch addr  */
         /* Fetch the lock interface table address from the
            second word of the second operand, and load the
            new instruction address and amode from LITOLOC */
-        lit_addr = vfetch4 ( effective_addr2 + 4, b2, regs ) + LITOLOC;
+        lit_addr = VFETCH4 ( effective_addr2 + 4, b2, regs ) + LITOLOC;
         lit_addr &= ADDRESS_MAXWRAP(regs);
-        newia = vfetch4 ( lit_addr, 0, regs );
+        newia = VFETCH4 ( lit_addr, 0, regs );
 
         /* Save the link information in register 12 */
         regs->gpr[12] = regs->psw.ia;
@@ -156,19 +158,19 @@ U32     newia;                          /* Unsuccessful branch addr  */
     OBTAIN_MAINLOCK(regs);
 
     /* Load ASCB address from first operand location */
-    ascb_addr = vfetch4 ( effective_addr1, b1, regs );
+    ascb_addr = VFETCH4 ( effective_addr1, b1, regs );
 
     /* Load locks held bits from second operand location */
-    hlhi_word = vfetch4 ( effective_addr2, b2, regs );
+    hlhi_word = VFETCH4 ( effective_addr2, b2, regs );
 
     /* Fetch our logical CPU address from PSALCPUA */
-    lcpa = vfetch4 ( PSALCPUA, 0, regs );
+    lcpa = VFETCH4 ( PSALCPUA, 0, regs );
 
     /* Fetch the local lock and the suspend queue from the ASCB */
     lock_addr = (ascb_addr + ASCBLOCK) & ADDRESS_MAXWRAP(regs);
     susp_addr = (ascb_addr + ASCBLSWQ) & ADDRESS_MAXWRAP(regs);
-    lock = vfetch4 ( lock_addr, 0, regs );
-    susp = vfetch4 ( susp_addr, 0, regs );
+    lock = VFETCH4 ( lock_addr, 0, regs );
+    susp = VFETCH4 ( susp_addr, 0, regs );
 
     /* Test if this CPU holds the local lock, and does not hold
        any CMS lock, and the local lock suspend queue is empty */
@@ -195,9 +197,9 @@ U32     newia;                          /* Unsuccessful branch addr  */
         /* Fetch the lock interface table address from the
            second word of the second operand, and load the
            new instruction address and amode from LITRLOC */
-        lit_addr = vfetch4 ( effective_addr2 + 4, b2, regs ) + LITRLOC;
+        lit_addr = VFETCH4 ( effective_addr2 + 4, b2, regs ) + LITRLOC;
         lit_addr &= ADDRESS_MAXWRAP(regs);
-        newia = vfetch4 ( lit_addr, 0, regs );
+        newia = VFETCH4 ( lit_addr, 0, regs );
 
         /* Save the link information in register 12 */
         regs->gpr[12] = regs->psw.ia;
@@ -250,13 +252,13 @@ U32     newia;                          /* Unsuccessful branch addr  */
     OBTAIN_MAINLOCK(regs);
 
     /* Load ASCB address from first operand location */
-    ascb_addr = vfetch4 ( effective_addr1, b1, regs );
+    ascb_addr = VFETCH4 ( effective_addr1, b1, regs );
 
     /* Load locks held bits from second operand location */
-    hlhi_word = vfetch4 ( effective_addr2, b2, regs );
+    hlhi_word = VFETCH4 ( effective_addr2, b2, regs );
 
     /* Fetch the lock addressed by general register 11 */
-    lock = vfetch4 ( lock_addr, lock_arn, regs );
+    lock = VFETCH4 ( lock_addr, lock_arn, regs );
 
     /* Obtain the lock if not held by any ASCB, and if this CPU
        holds the local lock and does not hold a CMS lock */
@@ -282,9 +284,9 @@ U32     newia;                          /* Unsuccessful branch addr  */
         /* Fetch the lock interface table address from the
            second word of the second operand, and load the
            new instruction address and amode from LITOCMS */
-        lit_addr = vfetch4 ( effective_addr2 + 4, b2, regs ) + LITOCMS;
+        lit_addr = VFETCH4 ( effective_addr2 + 4, b2, regs ) + LITOCMS;
         lit_addr &= ADDRESS_MAXWRAP(regs);
-        newia = vfetch4 ( lit_addr, 0, regs );
+        newia = VFETCH4 ( lit_addr, 0, regs );
 
         /* Save the link information in register 12 */
         regs->gpr[12] = regs->psw.ia;
@@ -338,14 +340,14 @@ U32     newia;                          /* Unsuccessful branch addr  */
     OBTAIN_MAINLOCK(regs);
 
     /* Load ASCB address from first operand location */
-    ascb_addr = vfetch4 ( effective_addr1, b1, regs );
+    ascb_addr = VFETCH4 ( effective_addr1, b1, regs );
 
     /* Load locks held bits from second operand location */
-    hlhi_word = vfetch4 ( effective_addr2, b2, regs );
+    hlhi_word = VFETCH4 ( effective_addr2, b2, regs );
 
     /* Fetch the CMS lock and the suspend queue word */
-    lock = vfetch4 ( lock_addr, lock_arn, regs );
-    susp = vfetch4 ( lock_addr + 4, lock_arn, regs );
+    lock = VFETCH4 ( lock_addr, lock_arn, regs );
+    susp = VFETCH4 ( lock_addr + 4, lock_arn, regs );
 
     /* Test if current ASCB holds this lock, the locks held indicators
        show a CMS lock is held, and the lock suspend queue is empty */
@@ -372,9 +374,9 @@ U32     newia;                          /* Unsuccessful branch addr  */
         /* Fetch the lock interface table address from the
            second word of the second operand, and load the
            new instruction address and amode from LITRCMS */
-        lit_addr = vfetch4 ( effective_addr2 + 4, b2, regs ) + LITRCMS;
+        lit_addr = VFETCH4 ( effective_addr2 + 4, b2, regs ) + LITRCMS;
         lit_addr &= ADDRESS_MAXWRAP(regs);
-        newia = vfetch4 ( lit_addr, 0, regs );
+        newia = VFETCH4 ( lit_addr, 0, regs );
 
         /* Save the link information in register 12 */
         regs->gpr[12] = regs->psw.ia;

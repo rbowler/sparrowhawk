@@ -14,11 +14,14 @@
 /* Complete rework for reworked instruction decode/execution code    */
 /*                                               Jan Jaeger 01/07/00 */
 /* Add trialrun to ED and EDMK                   Jan Jaeger 19/07/00 */
+/* Fix random MP bug - Mario Bezzi                                   */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
 
 #include "opcode.h"
+
+#include "inline.h"
 
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
@@ -866,7 +869,7 @@ int     carry;                          /* Carry indicator           */
         if (dec2[i2] != 0)
         {
             for (i1 = MAX_DECIMAL_DIGITS - 1, i3 = i2, carry = 0;
-                        i1 >= 0; i1--, i3--)
+                        i3 >= 0; i1--, i3--)
             {
                 d = carry + dec1[i1]*dec2[i2] + dec3[i3];
                 dec3[i3] = d % 10;

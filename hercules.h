@@ -52,6 +52,84 @@
 #define VECTOR_PARTIAL_SUM_NUMBER 1     /* Vector partial sum number */
 
 /*-------------------------------------------------------------------*/
+/* Performance options                                               */
+/*-------------------------------------------------------------------*/
+#undef  EXPERIMENTAL
+#define CHECK_OPTIMIZATION
+
+#ifdef EXPERIMENTAL
+#ifdef CHECK_OPTIMIZATION
+#define INLINE_FETCH                /* inline code for dat.c         */
+#define INTERRUPT_OPTIMIZE          /* enable check for doint flag   */
+#undef  TRACE_INTERRUPT_DELAY       /* trace missing interrups       */
+
+#define IBUF                        /* inst. prefetch and buffering  */
+#define CHECK_FRAGPARMS             /* check compiled operation parms*/
+#define CHECK_FRAGADDRESS           /* check inst.addr in comp. op   */
+#undef  NO_REASSIGN                 /* No get fragment in zz_*       */
+#undef  DO_INSTFETCH                /* Do allways instfetch          */
+#define CHECK_PTR                   /* check fragment/entry pointer  */
+#undef  FLUSHLOG                    /* use logfile with flush        */
+
+#define FEATURE_OPTIMIZE_SAME_PAGE  /* fast address translation      */
+#define CHECK_PAGEADDR              /* check fast address translation*/
+
+#define FEATURE_WATCHPOINT          /* watchpoint for phys. addr     */
+#undef  INSTSTAT                    /* instruction stat              */
+#else /* no CHECK_OPIMIZATION */
+#define INLINE_FETCH                /* inline code for dat.c         */
+#define INTERRUPT_OPTIMIZE          /* enable check for doint flag   */
+#undef  TRACE_INTERRUPT_DELAY       /* trace missing interrups       */
+
+#define IBUF                        /* inst. prefetch and buffering  */
+#undef  CHECK_FRAGPARMS             /* check compiled operation parms*/
+#undef  CHECK_FRAGADDRESS           /* check inst.addr in comp. op   */
+#undef  NO_REASSIGN                 /* No get fragment in zz_*       */
+#undef  DO_INSTFETCH                /* Do allways instfetch          */
+#undef  CHECK_PTR                   /* check fragment/entry pointer  */
+#undef  FLUSHLOG                    /* use logfile with flush        */
+
+#define FEATURE_OPTIMIZE_SAME_PAGE  /* fast address translation      */
+#undef  CHECK_PAGEADDR              /* check fast address translation*/
+
+#undef  FEATURE_WATCHPOINT          /* watchpoint for phys. addr     */
+#undef  INSTSTAT                    /* instruction stat              */
+#endif
+#else /* No EXPERIMENTAL */
+#define INLINE_FETCH                /* inline code for dat.c         */
+#define INTERRUPT_OPTIMIZE          /* enable check for doint flag   */
+#undef  TRACE_INTERRUPT_DELAY       /* trace missing interrups       */
+
+
+#undef IBUF                         /* inst. prefetch and buffering  */
+#undef CHECK_FRAGPARMS              /* check compiled operation parms*/
+#undef CHECK_FRAGADDRESS            /* check inst.addr in comp. op   */
+#undef NO_REASSIGN                  /* Allway new translation        */
+#undef DO_INSTFETCH                 /* Do allways instfetch          */
+#undef CORRECT_FRAGADDRESS          /* check and correct inst. adr   */
+#undef CHECK_PTR                    /* check fragment/entry pointer  */
+#undef FLUSHLOG                     /* use logfile with flush        */
+
+#undef  FEATURE_OPTIMIZE_SAME_PAGE   /* fast address translation      */
+#undef  CHECK_PAGEADDR              /* check fast address translation*/
+
+#undef FEATURE_WATCHPOINT           /* watchpoint for phys. addr     */
+#endif
+
+#undef LASTINST
+#ifdef CHECK_FRAGADDRESS
+#define LASTINST
+#else
+#ifdef CHECK_PAGEADDR
+#define LASTINST
+#else
+#ifdef FEATURE_WATCHPOINT
+#define LASTINST
+#endif
+#endif
+#endif
+
+/*-------------------------------------------------------------------*/
 /* Windows 32-specific definitions                                   */
 /*-------------------------------------------------------------------*/
 #ifndef O_BINARY
@@ -69,6 +147,8 @@
 #define _WINSOCK_H
 #define HANDLE int
 #define DWORD int	/* will be undefined later */
+#define NO_CCKD		/* disable cckd support for windows for the
+			   time being */
 #endif
 
 /*-------------------------------------------------------------------*/
@@ -122,7 +202,7 @@
 #undef	FEATURE_HERCULES_DIAGCALLS
 #undef	FEATURE_EMULATE_VM
 #undef  FEATURE_CMPSC
-#undef  FEATURE_PLO  
+#undef  FEATURE_PLO
 
 #if	ARCH == 370
  #define ARCHITECTURE_NAME	"S/370"
@@ -180,7 +260,7 @@
  #define FEATURE_HERCULES_DIAGCALLS
  #define FEATURE_EMULATE_VM
  #define FEATURE_CMPSC
- #define FEATURE_PLO  
+ #define FEATURE_PLO
 #else
  #error Either ARCH=370 or ARCH=390 must be specified
 #endif
@@ -239,8 +319,18 @@
 /*-------------------------------------------------------------------*/
 /* Macro definitions for tracing				     */
 /*-------------------------------------------------------------------*/
+#ifndef FLUSHLOG
 #define logmsg(a...) \
-	fprintf(sysblk.msgpipew, a)
+        { \
+	fprintf(sysblk.msgpipew, a); \
+        }
+#else
+#define logmsg(a...) \
+        { \
+	fprintf(sysblk.msgpipew, a); \
+        fflush(sysblk.msgpipew); \
+        }
+#endif
 #define DEVTRACE(format, a...) \
 	if(dev->ccwtrace||dev->ccwstep) \
 	fprintf(sysblk.msgpipew, "%4.4X:" format, dev->devnum, a)
@@ -300,6 +390,8 @@ typedef void*THREAD_FUNC(void*);
 	pthread_kill(tid,signo)
 #define thread_id() \
 	pthread_self()
+#define wait_timed_condition(pcond,plk,tm) \
+	pthread_cond_timedwait((pcond),(plk),(tm))
 #else
 typedef int				TID;
 typedef int				LOCK;
@@ -315,6 +407,7 @@ typedef int				ATTR;
 #define create_thread(ptid,pat,fn,arg)	(*(ptid)=0,fn(arg),0)
 #define signal_thread(tid,signo)	raise(signo)
 #define thread_id()			0
+#define wait_timed_condition(pcond,plk,tm) *(pcond)=1
 #define OBTAIN_MAINLOCK(_register_context)
 #define RELEASE_MAINLOCK(_register_context)
 #endif
@@ -346,6 +439,109 @@ typedef struct _VFREGS {		/* Vector Facility Registers*/
 #endif /*FEATURE_VECTOR_FACILITY*/
 
 /*-------------------------------------------------------------------*/
+/* Structure definition for page translation optimization	     */
+/*-------------------------------------------------------------------*/
+#ifdef FEATURE_OPTIMIZE_SAME_PAGE
+typedef struct _LASTPAGE {		/* Vector Facility Registers*/
+        int     valid;
+        U32     vaddr;
+        int     arn;
+        U32     aaddr;
+    } LASTPAGE;
+
+#define LASTPAGE_INVALIDATE(_r) { \
+           int i; \
+           for (i = 0; i < 3; i++) \
+               regs->lastpage[i].valid = 0; \
+           }
+#else
+#define LASTPAGE_INVALIDATE(_r)
+#endif /*FEATURE_OPTIMIZE_SAME_PAGE*/
+
+
+/*-------------------------------------------------------------------*/
+/* Definition for instruction buffering                              */
+/*-------------------------------------------------------------------*/
+#ifdef IBUF
+#ifdef NO_REASSIGN
+#define REASSIGN_FRAG(_r)
+#define GET_FRAGENTRY(_r)
+#else
+#define REASSIGN_FRAG(_r) { \
+        if ((_r)->actfrag && !(_r)->psw.wait) \
+            { \
+                ibuf_assign_fragment((_r), (_r)->psw.ia); \
+                ((FRAGENTRY*)(_r)->actentry)--; \
+            } \
+        }
+
+#define GET_FRAGENTRY(_r) { \
+        if ((_r)->actfrag && !(_r)->psw.wait) \
+            { \
+            debugmsg("GET FRAGENTRY %llu, %4x ", (_r)->instcount, \
+                    (_r)->psw.ia); \
+            ibuf_get_fragentry((_r), (_r)->psw.ia); \
+            debugmsg("%4x \n", \
+                    ((FRAGENTRY*)((_r)->actentry))->ia); \
+            ((FRAGENTRY*)(_r)->actentry)--; \
+            } \
+        }
+#endif
+
+#ifdef CHECK_PTR
+#define CHECK_FRAGPTR(_r, _s) \
+        { \
+            if (!_r->actfrag) \
+                logmsg("actfrag = NULL %llu %s\n", _r->instcount, _s) \
+            else \
+                if (!_r->actentry) \
+                { \
+                    logmsg("actentry = NULL %llu %s\n", _r->instcount, _s); \
+                    GET_FRAGENTRY(_r); \
+                    if (!_r->actentry) \
+                        logmsg("actentry = NULL aft get %s\n", _s); \
+                } \
+        }
+#else
+#define CHECK_FRAGPTR(_r, _s) 
+#endif
+#define LOAD_INST(_r) ibuf_loadinst(_r)
+#else
+#define REASSIGN_FRAG(_r)
+#define GET_FRAGENTRY(_r)
+#define CHECK_FRAGPTR(_r, _s) 
+#define LOAD_INST(_r)
+#endif
+
+#if 0
+#define debugmsg(a...) logmsg(a)
+#else
+#define debugmsg(a...)
+#endif
+
+/*-------------------------------------------------------------------*/
+/* Definition for watchpoints                                        */
+/*-------------------------------------------------------------------*/
+#ifdef FEATURE_WATCHPOINT
+#define WATCH(_s) \
+     { \
+           REGS *regs; \
+           BYTE *ptr; \
+           regs = &sysblk.regs[0]; \
+           ptr = (sysblk.mainstor+regs->watchpoint); \
+           if (*ptr != regs->oldvalue) \
+           { \
+              logmsg("watchpoint %s %4x %x %x \n",  \
+                      _s, \
+                      regs->watchpoint, \
+                      regs->oldvalue, *ptr); \
+              regs->oldvalue = *ptr; \
+           } \
+       };
+#else
+#define WATCH(_s) 
+#endif
+/*-------------------------------------------------------------------*/
 /* Structure definition for CPU register context		     */
 /*-------------------------------------------------------------------*/
 typedef struct _REGS {			/* Processor registers	     */
@@ -356,6 +552,8 @@ typedef struct _REGS {			/* Processor registers	     */
 	U64	instcount;		/* Instruction counter	     */
 	U64	prevcount;		/* Previous instruction count*/
 	U32	mipsrate;		/* Instructions/millisecond  */
+	U32	siocount;		/* SIO/SSCH counter          */
+	U32	siosrate;		/* IOs per second            */
 	TLBE	tlb[256];		/* Translation lookaside buf */
 	TID	cputid; 		/* CPU thread identifier     */
 	U32	gpr[16];		/* General purpose registers */
@@ -381,7 +579,7 @@ typedef struct _REGS {			/* Processor registers	     */
         SIEBK  *siebk;                  /* Sie State Desc structure  */
         struct _REGS *hostregs;         /* Pointer to the hypervisor
                                            register context          */
-        struct _REGS *guestregs;        /* Pointer to the guest 
+        struct _REGS *guestregs;        /* Pointer to the guest
                                            register context          */
         PSA    *sie_psa;                /* PSA of guest CPU          */
         U32     sie_mso;                /* Main Storage Origin       */
@@ -435,6 +633,39 @@ typedef struct _REGS {			/* Processor registers	     */
 
 	jmp_buf progjmp;		/* longjmp destination for
 					   program check return      */
+	U64	int1count;		
+	U64	int2count;		
+	U64	int3count;
+
+#ifdef FEATURE_WATCHPOINT
+        U32     watchpoint;
+        BYTE    oldvalue;
+#endif
+        int     doint;
+#ifdef IBUF
+        U64     ibufrecompile;
+        U64     ibufsearch;		
+        U64     ibuffound;	
+        U64     ibufcodechange;	
+        void*   fragbuffer;
+        void*   actfrag;
+        void*   actentry;
+
+#ifdef CHECK_FRAGPARMS
+        U32     iaabs;
+#endif
+
+#ifdef LASTINST
+        BYTE    lastinst[3];
+#endif
+#endif
+
+#ifdef FEATURE_OPTIMIZE_SAME_PAGE
+        LASTPAGE lastpage[3];
+#endif
+#ifdef INSTSTAT
+        U64     instcountx[256];
+#endif
     } REGS;
 
 /* Definitions for CPU state */
@@ -521,6 +752,7 @@ typedef struct _SYSBLK {
 	int	msgpiper;		/* Message pipe read handle  */
         U64     pgminttr;               /* Program int trace mask    */
         int     pcpu;                   /* Tgt CPU panel cmd & displ */
+        int     doinst;
     } SYSBLK;
 
 /* Definitions for OS tailoring - msb eq mon event, lsb eq oper exc. */
@@ -542,6 +774,8 @@ typedef struct _DEVBLK {
 	DEVCF  *devclos;		/* -> Close device function  */
 	LOCK	lock;			/* Device block lock	     */
 	COND	resumecond;		/* Resume condition	     */
+	COND	loopercond;		/* Loop or die condition     */
+	int	loopercmd;		/* Loop or die command       */
 	struct _DEVBLK *nextdev;	/* -> next device block      */
 	unsigned int			/* Flags		     */
 		pending:1,		/* 1=Interrupt pending	     */
@@ -662,7 +896,9 @@ typedef struct _DEVBLK {
 		ckdideq:1,		/* 1=Search ID Equal	     */
 		ckdkyeq:1,		/* 1=Search Key Equal	     */
 		ckdwckd:1,		/* 1=Write R0 or Write CKD   */
-		ckdtrkof:1;		/* 1=Track ovfl on this blk  */
+		ckdtrkof:1,		/* 1=Track ovfl on this blk  */
+		ckdlazywrt:1,		/* 1=Lazy write on trk update*/
+		ckdnoftio:1; 		/* 1=No full track i/o       */
 	U16	ckdcyls;		/* Number of cylinders	     */
 	U16	ckdtrks;		/* Number of tracks	     */
 	U16	ckdheads;		/* #of heads per cylinder    */
@@ -699,8 +935,24 @@ typedef struct _DEVBLK {
 					   in each CKD image file    */
 	U16	ckdhicyl[CKD_MAXFILES]; /* Highest cylinder number
 					   in each CKD image file    */
-
+	BYTE   *ckdtrkbuf;		/* Track image buffer        */
+	int	ckdtrkfd;		/* Track image fd            */
+	int	ckdtrkfn;		/* Track image file nbr      */
+	off_t	ckdtrkpos;		/* Track image offset        */
+	off_t	ckdcurpos;		/* Current offset            */
+	off_t	ckdlopos;		/* Write low offset          */
+	off_t	ckdhipos;		/* Write high offset         */
+	struct _CKDDASD_CACHE *ckdcache;/* Cache table               */
+	int 	ckdcachenbr;		/* Cache table size          */
+	int	ckdcachehits;		/* Cache hits                */
+	int	ckdcachemisses;		/* Cache misses              */
+	void   *cckd_ext;		/* -> Compressed ckddasd
+					   extension otherwise NULL  */
     } DEVBLK;
+
+#define LOOPER_WAIT 0
+#define LOOPER_EXEC 1
+#define LOOPER_DIE  2
 
 /*-------------------------------------------------------------------*/
 /* Structure definitions for CKD headers			     */
@@ -736,9 +988,177 @@ typedef struct _CKDDASD_RECHDR {	/* Record header	     */
 	HWORD	dlen;			/* Data length		     */
     } CKDDASD_RECHDR;
 
+typedef struct _CKDDASD_CACHE {		/* Cache entry               */
+	int 	trk;			/* Track number              */
+	BYTE   *buf;			/* Buffer address            */
+	struct timeval	tv;		/* Time last used            */
+    } CKDDASD_CACHE;
+
 #define CKDDASD_DEVHDR_SIZE	sizeof(CKDDASD_DEVHDR)
 #define CKDDASD_TRKHDR_SIZE	sizeof(CKDDASD_TRKHDR)
 #define CKDDASD_RECHDR_SIZE	sizeof(CKDDASD_RECHDR)
+#define CKDDASD_CACHE_SIZE 	sizeof(CKDDASD_CACHE)
+
+/*-------------------------------------------------------------------*/
+/* Structure definitions for Compressed CKD devices                  */
+/*-------------------------------------------------------------------*/
+typedef struct _CCKD_GCOL {             /* Garbage collection parms  */
+        U32              algorithm;     /* Algorithm                 */
+        U32              interval;      /* Collection interval (sec) */
+        U32              iterations;    /* Iterations per interval   */
+        U32              size;          /* Bytes per iteration       */
+    } CCKD_GCOL;
+#define GC_PERCOLATE 0                  /*    Percolate free space   */
+#define GC_COMBINE   1                  /*    Combine free space     */
+
+typedef struct _CCKDDASD_DEVHDR {       /* Compress device header    */
+/*  0 */BYTE             vrm[3];        /* Version Release Modifier  */
+/*  3 */BYTE             options;       /* Options byte              */
+/*  4 */U32              numl1tab;      /* Size of lvl 1 table       */
+/*  8 */U32              numl2tab;      /* Size of lvl 2 tables      */
+/* 12 */U32              size;          /* File size                 */
+/* 16 */U32              used;          /* File used                 */
+/* 20 */U32              free;          /* Position to free space    */
+/* 24 */U32              free_total;    /* Total free space          */
+/* 28 */U32              free_largest;  /* Largest free space        */
+/* 32 */U32              free_number;   /* Number free spaces        */
+/* 36 */U32              free_imbed;    /* Imbedded free space       */
+/* 40 */FWORD            cyls;          /* Cylinders on device       */
+/* 44 */BYTE             resv1;         /* Reserved                  */
+/* 45 */BYTE             compress;      /* Compression algorithm     */
+/* 46 */S16              compress_parm; /* Compression parameter     */
+/* 48 */CCKD_GCOL        gcol[5];       /* Garbage collection parms  */
+/*128 */BYTE             resv2[384];    /* Reserved                  */
+    } CCKDDASD_DEVHDR;
+
+#define CCKD_VERSION           0
+#define CCKD_RELEASE           1
+#define CCKD_MODLVL            2
+
+#define CCKD_NOFUDGE           1
+#define CCKD_BIGENDIAN         2
+#define CCKD_OPENED            128
+
+
+#define CCKD_FREEHDR           size
+#define CCKD_FREEHDR_SIZE      28
+#define CCKD_FREEHDR_POS       CKDDASD_DEVHDR_SIZE+12
+
+#define CCKD_GCHDR             gcol[0]
+#define CCKD_GCHDR_SIZE        80
+#define CCKD_GCHDR_POS         CKDDASD_DEVHDR_SIZE+48
+
+#define CCKD_COMPRESS_NONE     0
+#define CCKD_COMPRESS_ZLIB     1
+#ifndef CCKD_BZIP2
+#define CCKD_COMPRESS_MAX      CCKD_COMPRESS_ZLIB
+#else
+#define CCKD_COMPRESS_BZIP2    2
+#define CCKD_COMPRESS_MAX      CCKD_COMPRESS_BZIP2
+#endif
+
+typedef struct _CCKD_DFWQE {            /* Defferred write queue elem*/
+        struct _CCKD_DFWQE *next;       /* -> next queue element     */
+        void            *buf;           /* Buffer address            */
+        unsigned int     buflen;        /* Buffer length             */
+        unsigned int     trk;           /* Track number              */
+        unsigned int     busy:1,        /* Busy indicator            */
+                         retry:1;       /* Retry write               */
+        BYTE             compress;      /* Compression algorithm     */
+    } CCKD_DFWQE;
+
+typedef struct _CCKD_L2TAB {            /* Level 2 table entry       */
+        U32              pos;           /* Track image positon       */
+        U16              len;           /* Track image length        */
+        U16              size;          /* Track image size          */
+    } CCKD_L2TAB;
+
+typedef U32              CCKD_L1TAB;    /* Level 1 table entry       */
+
+typedef struct _CCKD_FREEBLK {          /* Free block                */
+        U32              pos;           /* Position next free blk    */
+        U32              len;           /* Length this free blk      */
+    } CCKD_FREEBLK;
+
+typedef struct _CCKD_CACHE {		/* Cache structure           */
+	unsigned int     trk;		/* Cached track number       */
+	unsigned char   *buf;		/* Cached buffer address     */
+	struct timeval	 tv;		/* Time last used            */
+        unsigned int     active:1,      /* Cache buf is the active 1 */
+                         used:1,        /* Cache buf was used        */
+                         updated:1,     /* Cache buf was updated     */
+                         wrtpending:1,  /* Cache buf pending write   */
+                         writing:1,     /* Cache buf being written   */
+                         reading:1,     /* Cache buf being read      */
+                         waiting:1;     /* Thread waiting for i/o    */
+        BYTE             compress;      /* Compression for track     */
+    } CCKD_CACHE;
+
+typedef struct _CCKDDASD_EXT {          /* Ext for compressed ckd    */
+        off_t            curpos;        /* Current ckd file position */
+        CCKD_CACHE      *active;        /* Active cache entry        */
+        unsigned int     lasttrk;       /* Previous track            */
+        unsigned int     curtrk;        /* Current track             */
+        unsigned int     nexttrk;       /* Next track                */
+        off_t            trkpos;        /* Current track position    */
+        unsigned char    compress;      /* Compression algorithm     */
+        unsigned int     writeinit:1,   /* Write threads init'd      */
+                         gcinit:1,      /* Garbage collection init'd */
+                         rainit:1,      /* Read-ahead thread init'd  */
+                         threading:1,   /* Threading is active       */
+                         write:1;       /* Deprecated                */
+        unsigned int     writetime;     /* Deprecated                */
+        int              ramisses;      /* Deprecated                */
+        unsigned int     reads;         /* Total number reads        */
+        unsigned int     writes;        /* Total number writes       */
+        LOCK             filelock;      /* File lock                 */
+        CCKDDASD_DEVHDR  cdevhdr;       /* Cckd device header        */
+        CCKD_L1TAB      *l1tab;         /* Level 1 table address     */
+        unsigned char   *buf;           /* Buffer address            */
+        unsigned char   *cbuf;          /* Compressed buffer address */
+        COND             gccond;        /* GC condition              */
+        LOCK             gclock;        /* GC lock                   */
+        ATTR             gcattr;        /* GC thread attribute       */
+        TID              gctid;         /* GC thread id              */
+        time_t           gctime;        /* GC last collection        */
+        char            *gcbuf;         /* GC buffer address         */
+        unsigned int     gcbuflen;      /* GC buffer length          */
+        int              gcl1x;         /* GC lvl 1 index (see gclen)*/
+        int              gcl2x;         /* GC lvl 2 index (see gclen)*/
+        CCKD_L2TAB       gcl2tab;       /* GC lvl 2 entry (see gclen)*/
+        unsigned int     gctrkgrp;      /* GC lvl 1 index for trim   */
+        ATTR             dfwattr;       /* Deferred write thread attr*/
+        TID              dfwtid;        /* Deferred write thread id  */
+        LOCK             dfwlock;       /* Deferred write lock       */
+        COND             dfwcond;       /* Deferred write condition  */
+        CCKD_DFWQE      *dfwq;          /* Deffered write queue      */
+        ATTR             raattr;        /* Read-ahead thread attr    */
+        TID              ratid;         /* Read-ahead thread id      */
+        LOCK             ralock;        /* Read-ahead lock           */
+        COND             racond;        /* Read-ahead condition      */
+        COND             rtcond;        /* Read track condition      */
+	LOCK		 cachelock;	/* Cache lock                */
+	int		 cachenbr;      /* Cache number entries      */
+        int              cachemisses;   /* Cache misses              */
+        int     	 cachehits;     /* Cache hits                */
+        int              cacheunused;   /* Cache entries not used    */
+	CCKD_CACHE	*cache;		/* Cache pointer             */
+	unsigned int	 readaheads;    /* Number trks read ahead    */
+#ifdef  CCKD_ITRACEMAX
+        char            *itrace;        /* Internal trace table      */
+        int              itracex;       /* Internal trace index      */
+#endif
+    } CCKDDASD_EXT;
+
+#define CCKDDASD_DEVHDR_SIZE   sizeof(CCKDDASD_DEVHDR)
+#define CCKD_L1TAB_SIZE        sizeof(CCKD_L1TAB)
+#define CCKD_L1TAB_POS         CKDDASD_DEVHDR_SIZE+CCKDDASD_DEVHDR_SIZE
+#define CCKD_L2TAB_SIZE        sizeof(CCKD_L2TAB)
+#define CCKD_DFQWE_SIZE        sizeof(CCKD_DFWQE)
+#define CCKD_FREEBLK_SIZE      sizeof(CCKD_FREEBLK)
+#define CCKD_CACHE_SIZE        sizeof(CCKD_CACHE)
+#define CCKD_NULLRCD_SIZE      37
+#define CCKD_MAX_WRITE_TIME    5
 
 /*-------------------------------------------------------------------*/
 /* Global data areas in module config.c 			     */
@@ -748,8 +1168,120 @@ extern BYTE	ascii_to_ebcdic[];	/* Translate table	     */
 extern BYTE	ebcdic_to_ascii[];	/* Translate table	     */
 
 /*-------------------------------------------------------------------*/
+/* structure definitions for module ibuf.c          			     */
+/*-------------------------------------------------------------------*/
+
+#define FRAG_ADDRESSLENGTH   9     /* Bits of the fragment size     */
+
+#define FRAG_BYTESIZE    512       /* Size of /370 code fragments   */
+
+#define FRAG_INSTSIZE   (FRAG_BYTESIZE / 2) /* number of cmp. inst */
+
+#define FRAG_BYTEMASK   (0x7FFFFFFF - (FRAG_BYTESIZE -1))
+
+#define FRAG_BUFFER     2048      /* Number of fragments in cache  */
+
+#define FRAG_BUFFERMASK (((FRAG_BUFFER * FRAG_BYTESIZE) - 1) - (FRAG_BYTESIZE - 1))
+
+#define FRAG_BUFFERADDRESS(_r, _a) &((FRAG*)(_r->fragbuffer))[(((U32)_a) & \
+                                     (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH] 
+
+#ifdef IBUF
+#if 1
+#if MAX_CPU_ENGINES > 1
+#define FRAG_INVALIDATE(_a, _s) { \
+           int i; \
+           int j; \
+           REGS *regs; \
+           for (i=0; i < MAX_CPU_ENGINES; i++) \
+           { \
+           regs = &sysblk.regs[i]; \
+           if (regs->fragbuffer) \
+           { \
+           if (((U32)(_a) & (FRAG_BUFFERMASK)) == ((U32)(_a + _s) & (FRAG_BUFFERMASK))) \
+                   ((FRAG*)(regs->fragbuffer))[(((U32)_a) & \
+                                     (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH].valid = 0; \
+           else \
+               for (j=(((U32)_a) & (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH; \
+                    j <= (((U32)((_a) + (_s))) & (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH; \
+                    j++) \
+                   ((FRAG*)(regs->fragbuffer))[j].valid = 0; \
+           } \
+           } \
+           }
+#else
+#define FRAG_INVALIDATE(_a, _s) { \
+           int j; \
+           REGS *regs = &sysblk.regs[0]; \
+           if (((U32)(_a) & (FRAG_BUFFERMASK)) == ((U32)(_a + _s) & (FRAG_BUFFERMASK))) \
+                   ((FRAG*)(regs->fragbuffer))[(((U32)_a) & \
+                                     (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH].valid = 0; \
+           else \
+               for (j=(((U32)_a) & (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH; \
+                    j <= (((U32)((_a) + (_s))) & (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH; \
+                    j++) \
+                   ((FRAG*)(regs->fragbuffer))[j].valid = 0; \
+           } 
+#endif
+#else
+#define FRAG_INVALIDATE(_a, _s) { \
+           REGS *regs = &sysblk.regs[0]; \
+           ((FRAG*)(regs->fragbuffer))[(((U32)_a) & \
+                                     (FRAG_BUFFERMASK)) >> FRAG_ADDRESSLENGTH].valid = 0; \
+           }
+#endif
+#else
+#define FRAG_INVALIDATE(_a, _s)
+#endif
+
+#define FRAG_PER_PAGE    (STORAGE_KEY_PAGESIZE / FRAG_BYTESIZE)
+
+typedef void (*zz_func) (BYTE inst[], int execflag, REGS *regs);
+
+typedef struct _RADDR {	/* Compiled Register and Address */
+        int r1;
+        int r2;
+        int r3;
+        U32 addr;
+    } RADDR;
+
+typedef struct _FRAGENTRY {	/* Compiled Code Entry */
+        zz_func code;
+        void    *lbl;
+        BYTE    *inst;
+        RADDR   raddr;
+        U32     ia;
+        U32     iaabs;
+        int     valid;
+#ifdef CHECK_FRAGPARMS
+        BYTE    oinst[6];
+#endif
+    } FRAGENTRY;
+
+typedef struct _FRAG {		/* Compliled Code Fragments */
+        U32     firstia;                  /* first log. address     */
+        int     valid;                    /* fragment validity      */
+        U16     dict[FRAG_BYTESIZE];    /* offsets to cmp inst */
+        FRAGENTRY entry[FRAG_INSTSIZE+1]; /* includes stop entry */
+    } FRAG;
+
+/*-------------------------------------------------------------------*/
 /* Function prototypes						     */
 /*-------------------------------------------------------------------*/
+
+#ifdef INLINE_FETCH
+#define VFETCH2(addr, arn, regs)  xvfetch2(addr, arn, regs)
+#define VFETCH4(addr, arn, regs)  xvfetch4(addr, arn, regs)
+#define VFETCH8(addr, arn, regs)  xvfetch8(addr, arn, regs)
+#define VSTORE4(value, addr, arn, regs)  xvstore4(value, addr, arn, regs)
+#define VSTORE8(value, addr, arn, regs)  xvstore8(value, addr, arn, regs)
+#else
+#define VFETCH2(addr, arn, regs)  vfetch2(addr, arn, regs)
+#define VFETCH4(addr, arn, regs)  vfetch4(addr, arn, regs)
+#define VFETCH8(addr, arn, regs)  vfetch8(addr, arn, regs)
+#define VSTORE4(value, addr, arn, regs)  vstore4(value, addr, arn, regs)
+#define VSTORE8(value, addr, arn, regs)  vstore8(value, addr, arn, regs)
+#endif
 
 /* Functions in module config.c */
 void build_config (BYTE *fname);
@@ -776,19 +1308,31 @@ void initial_cpu_reset (REGS *regs);
 void store_psw (REGS *regs, BYTE *addr);
 int  load_psw (REGS *regs, BYTE *addr);
 void program_interrupt (REGS *regs, int code);
+void restart_interrupt (REGS *regs);
+void perform_io_interrupt (REGS *regs);
+void perform_mck_interrupt (REGS *regs);
 void *cpu_thread (REGS *regs);
+void *set_doint(REGS *regs);
+void *set_doinst();
+#ifdef IBUF
+void ibuf_loadinst(REGS *regs);
+void ibuf_compile_frag (REGS *regs, U32 ia);
+#endif
 
 /* Functions in module dat.c */
 U16  translate_asn (U16 asn, REGS *regs, U32 *asteo, U32 aste[]);
 int  authorize_asn (U16 ax, U32 aste[], int atemask, REGS *regs);
 U16  translate_alet (U32 alet, U16 eax, int acctype, REGS *regs,
 	U32 *asteo, U32 aste[], int *prot);
+#ifndef INLINE_FETCH
 int  translate_addr (U32 vaddr, int arn, REGS *regs, int acctype,
 	U32 *raddr, U16 *xcode, int *priv, int *prot, int *pstid,
 	U32 *xpblk, BYTE *xpkey);
+#endif
 void purge_alb (REGS *regs);
 void purge_tlb (REGS *regs);
 void invalidate_pte (BYTE ibyte, int r1, int r2, REGS *regs);
+#ifndef INLINE_FETCH
 U32  logical_to_abs (U32 addr, int arn, REGS *regs, int acctype,
 	BYTE akey);
 void vstorec (void *src, BYTE len, U32 addr, int arn, REGS *regs);
@@ -802,6 +1346,14 @@ U16  vfetch2 (U32 addr, int arn, REGS *regs);
 U32  vfetch4 (U32 addr, int arn, REGS *regs);
 U64  vfetch8 (U32 addr, int arn, REGS *regs);
 void instfetch (BYTE *dest, U32 addr, REGS *regs);
+#else
+BYTE  xvfetchb (U32 addr, int arn, REGS *regs);
+U16  xvfetch2 (U32 addr, int arn, REGS *regs);
+U32  xvfetch4 (U32 addr, int arn, REGS *regs);
+U64  xvfetch8 (U32 addr, int arn, REGS *regs);
+void xvstore4 (U32 value, U32 addr, int arn, REGS *regs);
+void xvstore8 (U64 value, U32 addr, int arn, REGS *regs);
+#endif
 void validate_operand (U32 addr, int arn, int len,
 	int acctype, REGS *regs);
 void move_chars (U32 addr1, int arn1, BYTE key1, U32 addr2,
@@ -963,3 +1515,10 @@ DEVXF fbadasd_execute_ccw;
 DEVCF fbadasd_close_device;
 void fbadasd_syncblk_io (DEVBLK *dev, BYTE type, U32 blknum,
 	U32 blksize, BYTE *iobuf, BYTE *unitstat, U16 *residual);
+
+/* Functions in module cckddasd.c */
+DEVIF   cckddasd_init_handler;
+int 	cckddasd_close_device (DEVBLK *);
+off_t   cckd_lseek(DEVBLK *, int, off_t, int);
+ssize_t cckd_read(DEVBLK *, int, char *, size_t);
+ssize_t cckd_write(DEVBLK *, int, const void *, size_t);

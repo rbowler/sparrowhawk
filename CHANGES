@@ -1,3 +1,17 @@
+07 Oct 2000 Rewritten and updated FAQ (Dave Morton)
+07 Oct 2000 Compressed CKD DASD support (Greg Smith)
+07 Oct 2000 Many performance improvements (Juergen Dobrinski, with help from
+            Albert Louw, David Pritchard, and Valery Pogonchenko)
+07 Oct 2000 DASD I/O optimizations (Greg Smith and Malcolm Beattie)
+07 Oct 2000 Simplified building on non-Intel architectures (Jay Maynard)
+07 Oct 2000 Fix for random bug in MP instruction (Mario Bezzi)
+07 Oct 2000 Treat all 3505 card reader read CCWs the same (Jay Maynard)
+05 Sep 2000 External interrupt masking fixes (Valery Pogonchenko)
+05 Sep 2000 I/O rate meter on graphical panel (Valery Pogonchenko)
+05 Sep 2000 Sense correction for track overflow processing (Valery
+            Pogonchenko)
+05 Sep 2000 Another fix for 64K segment length checking in 370 DAT (Jay
+            Maynard, found by Mario Bezzi)
 04 Sep 2000 Win32 portability changes (John Kozak)
 04 Sep 2000 Fix for 64K segment length checking in 370 DAT (Jay Maynard,
             found by Mario Bezzi)

@@ -1,0 +1,891 @@
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 3.0//EN" "html.dtd">
+<HTML>
+<HEAD><TITLE>
+Hercules: Compressed CKD Dasd Emulation    --      <small>patch cckd167c</TITLE>
+</HEAD>
+<BODY BGCOLOR="#ffffcc" TEXT="#000000" LINK="#0000A0"
+      VLINK="#008040" ALINK="#000000">
+<h1>Compressed CKD Dasd Emulation</h1>
+<hr noshade>
+<h2>Contents</h2>
+<ul>
+<li><a href="#description">        Description        </a>
+<li><a href="#method">             Method             </a>
+<li><a href="#implementation">     Implementation     </a>
+<li><a href="#writing">            Writing            </a>
+<li><a href="#reading">            Reading            </a>
+<li><a href="#free_space">         Free Space         </a>
+<li><a href="#garbage_collection"> Garbage Collection </a>
+<li><a href="#organization">       Organization       </a>
+<li><a href="#byte_order">         Byte Order         </a>
+<li><a href="#recovery_corruption">Recovery/Corruption</a>
+<li><a href="#utilities">          Utilities          </a>
+<li><a href="#quick_start">        Quick Start        </a>
+<li><a href="#faq">                FAQ                </a>
+<li><a href="#todo">               To Do              </a>
+<li><a href="#bugs">               Bugs               </a>
+<li><a href="#cckddump">           cckddump os/390 hlasm program</a>
+</ul>
+
+<hr noshade>
+<h3><a NAME="description">Description</a></h3>
+A compresssed CKD Dasd file is an additional alternative file for
+emulated CKD Dasd devices.  The space required for a compressed
+file can be significantly less than a regular file.  For example,
+an os/390 sysres volume that was using 90% of a 3390-3 occupied 450M
+(as opposed to 2.4G).
+Each track image is compressed using
+<a href="http://www.info-zip.org/pub/infozip/zlib/"><b>zlib</b></a>
+or
+<a href="http://sourceware.cygnus.com/bzip2/"><b>bzip2</b></a>,
+and each compressed track image occupies only the space necessary
+in the file.  Additionally, unused or null tracks (tracks that
+contain only an end-of-file marker) do not occupy any
+space at all in the file.
+
+<hr noshade>
+<p><h3><a NAME="method">Method</a></h3>
+The logical byte offset of a track image in a regular file is
+directly calculated from the track number:
+<blockquote><code>
+    offset = 512 + trk_nbr * max_trk_sz;
+</code></blockquote>
+This is a logical offset because there may be more than one
+real file emulating the CKD Dasd device.  The offset of a
+compressed track image in a compressed file is determined
+by performing a two table lookup using the track number.
+This is an actual offset because only a single compressed
+file is supported.  The quotient of the track number
+divided by 256 indexes into the <i>primary lookup table</i>.
+The primary lookup table entry contains the offset of the
+<i>secondary lookup table</i>.  The remainder of the track
+number divided by 256 indexes into the secondary lookup table.
+The secondary lookup table entry contains the compressed
+track's offset and length.  The primary lookup table resides
+in memory during execution of the program, file i/o is
+performed for entries in the secondary lookup tables.
+For example:
+<blockquote><code>
+    lseek (fd, prime[trk_nbr/256] + (trk_nbr % 256) * sizeof(second), SEEK_SET);<br>
+    read (fd, &second, sizeof(second));<br>
+    offset = second.offset;
+</code></blockquote>
+Notice that a compressed file contains a single primary lookup table
+but contains a number of secondary lookup tables.  This number
+depends on the number of tracks for the emulated CKD device.
+Since each secondary lookup table references 256 tracks, the
+maximum number of tables is the total number of tracks divided by
+256, rounded up.  For example, a 3390-3 contains 50085 tracks
+and would require up to 196 secondary lookup tables.  However,
+if all 256 tracks for any secondary lookup table are null tracks,
+then that secondary lookup table doesn't exist and the corresponding
+entry in the primary lookup table is zero.
+
+<hr noshade>
+<p><h3><a NAME="implementation">Implementation</a></h3>
+The compressed function is implemented in <code>ckddasd.c</code> by
+replacing the
+<code>read()</code>/<code>write()</code>/<code>lseek()</code>
+library calls with intermediate function calls to
+<code>ckd_read()</code>/<code>ckd_write()</code>/<code>ckd_lseek()</code>.
+If the emulation file is a regular (uncompressed) file, then
+these routines simply call the library routines; otherwise the
+routines will call functions
+<code>cckd_read()</code>/<code>cckd_write()</code>/<code>cckd_lseek()</code>
+located in <code>cckddasd.c</code>.
+<p>
+Note</a> that <code>cckd_read()</code> and <code>cckd_write()</code> functions
+do not perform file i/o; they merely cause data to be copied from/to
+the current uncompressed track image buffer.  A call to
+<code>cckd_lseek()</code>, however, if it causes
+a track switch, will cause the current track image buffer to be
+scheduled for compression and writing (if it has been written
+to) and will cause the new compressed track image to be read
+and uncompressed.
+<p>
+A regular or uncompressed emulation file is distinguished from a
+compressed emulation file by the eye-catcher in the device header
+at the beginning of the file.  A regular file contains "<small><b>CKD_P370</b></small>"
+and a compressed file contains "<small><b>CKD_C370</b></small>".
+<p>
+The data areas required for a compressed CKD Dasd device are in
+an extension pointed to by a field in the <font size=-1>CKD DASD</font> section
+of the <font size=-1>DEVBLK</font>, <code>cckd_ext</code>.  If this field
+is <code>NULL</code> then the emulation file is a regular file.
+
+<hr noshade>
+<p><h3><a NAME="writing">Writing</a></h3>
+When a track image needs to be written, it is scheduled.
+That is, it is placed in a queue, called the <i>deferred write queue</i> (dfwq)
+and the <i>deferred write thread</i> is signalled.  The deferred write
+thread compresses the track image (usually compression is more expensive
+than uncompression), finds space in the file for the compressed image,
+writes the compressed image, and updates the lookup tables.  A compressed
+track image in the file may contain <i>imbedded free space</i>; this allows
+the compressed track image to increase in size without having to free
+the current space and obtain new space.  Generally, the smaller the track
+image, the larger the imbedded free space is (based on the assumption that
+smaller track images will tend to grow).  If the new track image is too
+large to fit in its current space, then this space is freed and new space
+is acquired within or at the end of the file.  Conversely, if the size of a
+compressed track image decreases enough, some of its imbedded free space will
+also be freed.
+
+<hr noshade>
+<p><h3><a NAME="reading">Reading</a></h3>
+When a new track image is to be read, it is possible that the image
+is still pending writing, so the <i>deferred write queue</i> is searched
+first.  If found, a bit is set telling the <i>deferred write thread</i>
+not to free the buffer.  Otherwise, the two table lookup is performed,
+the compressed track image is read and is synchronously uncompressed
+(fortunately, uncompression as a rule is less expensive than compression).
+If, however, either offset in the primary or secondary lookup table
+is zero, then a <i>null track image</i> is constructed instead
+(a null track image only contains an end-of-file marker).
+
+<hr noshade>
+<p><h3><a NAME="free_space">Free Space</a></h3>
+The compressed CKD Dasd emulation file contains two types of free space:
+<i>imbedded free space</i>, which allows a compressed track image to
+increase in size, and <i>regular free space</i>, or just <i>free space</i>,
+which is available for allocation.  <i>Total free space</i> is just the
+sum of all imbedded free space and all (regular) free space.  Free space
+within the file has the following attributes:
+<ul>
+<li>Spaces are singly linked from lowest offset to highest offset
+<li>No two free spaces are adjacent.  When this circumstance occurs,
+    they are combined into a single free space.
+<li>There is no free space at the end of the file.  When free space
+    occurs at the end of the file, the file is truncated.
+<li>Each free space is at least 8 bytes: a 4 byte
+    offset to the next free space and a 4 byte length.
+</ul>
+
+<hr noshade>
+<p><h3><a NAME="garbage_collection">Garbage Collection</a></h3>
+A garbage collection thread is started whenever the first track
+image is written.  Simply, the garbage collector moves free space
+towards the end of the file until it just falls off.  This is
+called <i>percolation</i> in the program.  Additionally, the
+garbage collector may <i>trim</i> imbedded free space if the ratio
+of imbedded free space to total free space reaches a certain
+threshold.  If the ratio of total free space to file size is severe
+enough, the garbage collector will invoke a more intensive
+algorithm called <i>combination</i>, which attempts to combine
+near free spaces (to satisfy allocation requests) and to push them
+off the end of the file (to reduce the file size).  In this situation
+the responsiveness of the emulated device will be degraded
+until the ratio becomes more acceptable.
+<p>
+By default, the following garbage collection parameters are set:
+<table>
+<tr><th><small>ratio</small>
+    <th><small>state</small>
+    <th><small>algorithm</small>
+    <th><small>size</small>
+    <th><small>iterations</small>
+    <th><small>interval</small>
+<tr><td align="center">50%-100%
+    <td align="left">critical
+    <td align="left">combination
+    <td align="right">256K
+    <td align="right">8
+    <td align="right">2
+<tr><td align="center">25%-50%
+    <td align="left">severe
+    <td align="left">combination
+    <td align="right">128K
+    <td align="right">4
+    <td align="right">4
+<tr><td align="center">12.5%-25%
+    <td align="left">moderate
+    <td align="left">percolation
+    <td align="right"><i>max_trk_sz</i>
+    <td align="right">4
+    <td align="right">8
+<tr><td align="center">6.25%-12.5%
+    <td align="left">light
+    <td align="left">percolation
+    <td align="right"><i>max_trk_sz</i>
+    <td align="right">2
+    <td align="right">10
+<tr><td align="center">0%-6.25%
+    <td align="left">none
+    <td align="left">percolation
+    <td align="right">32K
+    <td align="right">1
+    <td align="right">20
+</table>
+<p>
+The <i>ratio</i> (and <i>state</i>) is hard-coded in the program and
+is determined by continually dividing the file size by
+2 until this number is less than the total free space.
+<i>size</i> indicates how far a free space is moved towards
+the end of the file in a single iteration; <i>max_trk_sz</i>  is
+the maximum track size for the emulated device.
+<i>iterations</i> indicate how many times the algorithm is called
+within a particular interval.  Note - the emulation file lock
+is released and reacquired between each iteration; this
+allows i/o operations to proceed while the garbage collecter is
+active.  <i>interval</i> is the number of seconds the
+collector sleeps before starting over.
+
+<hr noshade>
+<p><h3><a NAME="organization">Organization</a></h3>
+Like a regular CKD emulation file, the first 512 bytes
+of the compressed file contains a <code>CKDDASD_DEVHDR</code>
+block.  The eye-catcher (<code>devid</code>) is slightly different
+(<b>CKD-C370</b> vs <b>CKD_P370</b>) to distinguish it from a
+regular file.  The next 512 bytes contain a compressed device
+header or <code>CCKDDASD_DEVHDR</code> block.  This contains space
+statistics, options, and garbage collection parameters.  Next is
+the primary lookup table or the <code>L1TAB</code>.  Each 4 byte
+entry in the <code>L1TAB</code> contains the offset of a secondary
+lookup table (or <code>L2TAB</code>) and represents 256 tracks.
+The size of the <code>L1TAB</code> is dependent on the number
+of tracks of the emulated device.
+<center>
+<table border=1>
+<tr><td align="left"><code>CKDDASD_DEVHDR</code><br><br><br><br></td>
+<tr><td align="left"><code>CCKDDASD_DEVHDR</code><br><br><br><br></td>
+<tr><td align="left"><code>L1TAB</code><br><br>
+                     <center>.&nbsp&nbsp.&nbsp&nbsp.</center><br><br></td>
+</table>
+</center>
+<p>
+Following the <code>L1TAB</code>,
+in no particular order, are <code>L2TAB</code>s, compressed track
+images, and free spaces.
+<p>
+<code><b>L2TAB</b></code>s contain 256 8-byte
+entries,and each are, consequently, 2048 bytes in length.  Each entry
+contains the <i>offset</i>, <i>length</i>, and <i>size</i> of a
+compressed track image.  <i>length</i> is the amount of space that
+is actually occupied by the compressed track image.  <i>size</i> is
+the total amount of space occupied by the track image, including
+<i>imbedded free space</i> (sometimes called <i>fudge</i>).  <i>size</i>
+must, then, always be greater than or equal to the <i>length</i>.<br>
+<center><code><b>L2TAB</b></code> entry
+<table border=1>
+<tr><td><code><b>offset</b></code><br>4 bytes</td>
+    <td><code><b>length</b></code><br>2 bytes</td>
+    <td><code><b>size</b></code><br>2 bytes</td>
+</table>
+</center>
+<p>
+A <b>compressed track image</b> contains 3 fields in the following order:
+<ul>
+<li> A <i>track header</i>, also called a <i>home address</i> or a <i>track index</i>.
+     The track header is <b>never</b> compressed.
+<li> The track image, beginning with the <i>R0 count</i> and ending with the
+     <i>end-of-track</i> marker, which is a count field containing all hex 0xff's.
+     The track image may or may not be compressed by a compression algorithm.
+<li> <i>imbedded free space</i> (or <i>fudge</i>) which is space that the
+     track image can expand into if it increases in size.  Imbedded free space
+     may or may not exist for any given track image; if it does exist it contains
+     residual (ie unpredictable) data.
+</ul>
+<table border=1>
+<tr><td><code><b>HA</b></code><br>5 bytes</td>
+    <td><b>track image</b> (compressed or uncompressed)</br><i>length</i> bytes</td>
+    <td><b>imbedded free space</b><br>(<i>size</i> - <i>length</i>) bytes</td>
+</table>
+<p>
+The <b>HA</b> contains <code>0CCHH</code>, that is, a byte of zeroes, 2 bytes indicating
+the <i>cylinder</i> of the track, and 2 bytes indicating the <i>head</i> of the track
+on the cylinder.  Both <code>CC</code> and <code>HH</code> are stored in
+<i>big-endian</i> byte order.  The track number is computed by
+<br><center><code>trk_nbr = (CC * <i>trks_per_cyl</i>) + HH</code></center><br>
+Since the first byte of the <code>HA</code> is always 0x00 (at least in emulated
+CKD files), this byte as stored in the compressed CKD Dasd emulation file actually
+indicates the compression algorithm used for the remainder of the track image
+(<b>0</b> = no compression, <b>1</b> = zlib compression, <b>2</b> = bzip2 compression)
+and is set back to 0x00 after the track image is uncompressed.<br>
+The <b>HA</b> is uncompressed for the following reasons:
+<ul>
+<li>The first byte indicates the compression algorithm for the remainder of the track
+<li>The garbage collector can recognize this space as a track image without having
+    to scan all <code>L2TAB</code> entries.  By calculating the track number using the
+    formula above, the collector can read a single <code>l2TAB</code> entry and
+    determine if the space is a track image (that is, the <i>offset</i> in the
+    <code>L2TAB</code> entry for the track (as calculated by the formula above)
+    should match the current file offset for the space.
+<li>Space recovery and repair (<code>cckdcdsk.c</code>) can determine using the
+    HA if the current space is a compressed track image.
+</ul>
+<p>
+<b>Free space</b> contains a 4-byte <i>offset</i> to the next free space,
+a 4-byte <i>length</i> of the free space, and zero or more bytes of residual
+(ie unpredictable) data following.
+<center><b>Free Space</b> entry
+<table border=1>
+<tr><td><code><b>offset</b></code><br>4 bytes</td>
+    <td><code><b>length</b></code><br>4 bytes</td>
+    <td><code><b>residual</b></code><br>(<i>length</i> - 8) bytes</td>
+</table>
+</center>
+<p>The minimum length of a free space, then, is 8 bytes.
+Since free space is ordered by file offset and no two free spaces are adjacent,
+<i>offset</i> in the free space entry is always greater than the current free space
+offset + the current free space <i>length</i>, unless the <i>offset</i> is zero,
+which indicates the free space list is terminated.
+
+<hr noshade>
+<p><h3><a NAME="byte_order">Byte Order</a></h3>
+As described above, a number of fields in the various blocks that comprise the
+spaces in a compressed CKD Dasd emulation file contain offsets and lengths that
+are more than 1 byte in length.  Values in multiple bytes may be stored in
+either <i>little-endian</i> or <i>big-endian</i> byte order.  For example,
+<b>Intel</b> architecture stores values in little-endian byte order and <b>S390</b>
+architecture stores values in big-endian byte order.  Consider the value <code>0x00010203</code>;
+stored in little-endian byte order, we would see "<code>03020100</code>"; stored in big-endian
+byte order, we would see "<code>00010203</code>".  The values in the compressed CKD Dasd emulation
+file are stored in byte order of the host machine; a bit in the <code>CCKDDASD_DEVHDR</code>
+indicates which order its values are stored.  If a file is opened with the wrong
+byte order, then the initialization routine will automatically reverse all the values
+before continuing.
+
+<hr noshade>
+<p><h3><a NAME="recovery_corruption">Recovery/Corruption</a></h3>
+When a track image is written to a new offset in the file, the <i>secondary
+lookup table</i> must also be updated with the new offset, length and size.
+If the secondary lookup table doesn't exist yet, then space must be
+obtained for the table and the <i>primary lookup table</i> must be updated.
+If the program is interrupted before this update(s), then the compressed CKD Dasd
+emulation file is <i>corrupted</i>.  Possible scenarios for interruptions
+are power failure, operating system failure, or program failure.
+Once a track has been written, the <i>garbage collection
+thread</i> is created and runs at unpredictable times.  While the garbage collector
+is active, it is continually moving track images and secondary lookup tables
+towards the beginning of the file while moving free space towards the end
+of the file.  This, in turn, requires synchronization with the lookup tables.
+The <b>quit</b> command will cause an orderly shutdown of the <i>garbage
+collection thread</i> and the <i>deferred write thread</i> for the device.
+<p>
+The program updates the compressed file in a sequence that allows
+recovery to occur.  For example, when a track image is written to a new
+offset in the compressed CKD Dasd emulation file, the following sequence
+occurs:
+<center>
+<table>
+<tr><td><small><b>1</b></small><td>Space is obtained for the new track image
+<tr><td><td align="center"><small>state <b>A</b></small>
+<tr><td><small><b>2</b></small><td>New track image is written to the new offset
+<tr><td><td align="center"><small>state <b>B</b></small>
+<tr><td><small><b>3</b></small><td><i>Secondary lookup table</i> is updated with the new offset
+<tr><td><td align="center"><small>state <b>C</b></small>
+<tr><td><small><b>4</b></small><td>Space for the old track image is released
+</table>
+</center>
+If a failure occurs at state A or at state B then free space will
+need to be rebuilt and the new track image will be lost.  However,
+the old track image is still intact.  If the failure occurs at
+state C then free space will need to be rebuilt and the new track
+image will be used.<br>
+The program that performs compressed CKD Dasd emulation file integrity checking
+and repair is <code>cckdcdsk.c</code>.
+
+<hr noshade>
+<p><h3><a NAME="utilities">Utilities</a></h3>
+<a NAME="ckd2cckd">
+<ul><li><b>ckd2cckd</b> <i>[options] source-file target-file</i>
+   <ul><li><small><b>Description</b></small> Copies a regular CKD Dasd emulation
+                 file to a compressed CKD Dasd emulation file.  The target
+                 file cannot previously exist.  If the emulated Dasd device
+                 is in more than 1 file then specify the <em>first</em> file.
+                 After the copy completes, the target file contains no
+                 free space, imbedded or otherwise.
+       <li><small><b>Options</b></small>
+           <ul><li><b>-c</b>ompress <i>n</i><br>Compression Algorithm
+               <ul><li><b>0</b> don't compress
+                   <li><b>1</b> compress using zlib
+                   <li><b>2</b> compress using bzip2
+               </ul>
+               <li><b>-d</b>ontcompress <i>n</i><br>Same as <i>-compress 0</i>
+               <li><b>-m</b>axerrs <i>errs</i><br>Maximum number of errors
+                      that can occur before the copy is terminated;
+                      if 0 then errors are ignored.  Default is 5.
+               <li><b>-n</b>ofudge<br>Turn on the bit to disable <i>imbedded
+                      free space</i> in the file.  Note that ckd2cckd does
+                      not produce any imbedded free space itself.
+               <li><b>-q</b>uiet<br>Quiet mode; don't display status
+               <li><b>-z</b> <i>parm</i><br>Parameter passed to compression
+                      <br>
+                      <br>zlib compression level:
+                      <br>0 = no compression
+                      <br>1=fastest ... 9=best
+                      <br>
+                      <br>bzip2 blockSize100k value:
+                      <br>1=fastest ... 9=best
+           </ul>
+       </ul>
+   </ul>
+<a NAME="cckd2ckd">
+    <li><b>cckd2ckd</b> <i>[options] source-file target-file</i>
+   <ul><li><small><b>Description</b></small> Copies a compressed CKD Dasd emulation
+                 file to a regular CKD Dasd emulation file.  The target
+                 file cannot previously exist.  More than 1 target file may
+                 be created.
+       <li><small><b>Options</b></small>
+           <ul><li><b>-c</b>yls <i>n</i><br>Number of cylinders to copy
+                      if the entire file isn't to be copied.  If <b>0</b>
+                      then only the number of cylinders in use are copied.
+               <li><b>-m</b>axerrs <i>errs</i><br>Maximum number of errors
+                      that can occur before the copy is terminated;
+                      if 0 then errors are ignored.  Default is 5.
+               <li><b>-q</b>uiet<br>Quiet mode; don't display status
+               <li><b>-v</b>alidate<br>Validate track images [default]
+               <li><b>-n</b>ovalidate<br>Don't Validate track images
+           </ul>
+       </ul>
+   </ul>
+<a NAME="cckdcdsk">
+    <li><b>cckdcdsk</b> <i>[-level] file-name</i>
+   <ul><li><small><b>Description</b></small> Performs compressed CKD Dasd emulation
+                 file integrity verification and recovery and repair.
+       <li><small><b>Options</b></small>
+           <ul><li>-<i>level</i><br>A digit 0, 1 or 3 that specifies
+                   the level of checking.  The higher the level, the
+                   longer the integrity check takes.
+               <ul><li><b>0</b> Minimal checking.  Device headers are verified,
+                       free space is verified, primary lookup table and secondary
+                       lookup tables are verified.
+                   <li><b>1</b> Same checks as level 0 plus all 5-byte track headers
+                       are verified.
+                   <li><b>3</b> Same checks as level 1 plus all track images are
+                       read, uncompressed and verified.
+               </ul>
+           </ul>
+       </ul>
+   </ul>
+<a NAME="cckdfix">
+    <li><b>cckdfix</b> <i>file-name</i>
+   <ul><li><small><b>Description</b></small> This is a skeleton program that is
+                 not compiled during make.  It can be edited to change/repair
+                 the device headers.  For example,  it can be used to change
+                 the default garbage collection parameters.
+       <li><small><b>Compiling</b></small> Enter `<i>cc -o cckdfix -DARCH=390 cckdfix.c</i>'
+                 to compile and link the edited program.
+   </ul>
+    <li><b>cckddump</b>
+   <ul><li><small><b>Description</b></small> This is an os/390 hlasm (High Level
+                 Assembler) program that will create a compressed CKD emulation file
+                 from an actual CKD device.  See <a href="#cckddump">below</a> for
+                 a description on how to build and run this program.
+   </ul>
+</ul>
+
+<hr noshade>
+<p><h3><a NAME="quick_start">Quick Start</a></h3>
+<em><b>Warning</b> Compressed CKD Dasd emulation file support
+should be considered <b>beta</b> status.  Ensure that you have
+backups of any virtual CKD volumes that you wish to compress.</em>
+
+<p>
+The current cckd patch file is for base Hercules 1.67 with the
+herc167a.patch.gz patch.  The patch updates <code>hercules.h</code> and the
+<code>makefile</code> and may not be compatible with other patches
+for Hercules 1.67.  However, it should not be very difficult
+to fix the patch to work with the other patches.
+
+<p>
+Compressed emulation is currently disabled for Windows32.  I need
+to do some research to see if there is a Windows32 api for zlib.
+
+<p>
+The following steps should get you up and running:
+<ol>
+<li>Install Hercules and apply the patches:<br>
+    <code>tar xzf hercules-1.67.tar.gz</code><br>
+    <code>cd hercules-1.67</code><br>
+    <code>patch &lt ../herc167a.patch</code><br>
+    <code>patch &lt ../cckd167b.patch</code>
+    <code>patch &lt ../cckd167c.patch</code>
+<li>Review the <code>makefile</code>.  If you wish to add support for
+    <a href="http://sourceware.cygnus.com/bzip2/"><b>bzip2</b></a>,
+    uncomment the indicated lines in the <code>makefile</code>.
+<li>Make hercules:<br>
+    <code>make</code>
+<li>Create some compressed CKD Dasd emulation files:<br>
+    &nbsp &nbsp <code>./ckd2cckd</code>&nbsp &nbsp  <i>source-file &nbsp &nbsp target-file</i><br>
+    creates a compressed file using zlib.
+    To create a compressed CKD Dasd emulation file using bzip2:<br>
+    &nbsp &nbsp <code>./ckd2cckd -c 2</code>&nbsp &nbsp  <i>source-file &nbsp &nbsp target-file</i><br>
+<li>Update the <code>hercules.cnf</code> file to point to the
+    new compressed CKD Dasd emulation files.
+</ol>
+At this point you are ready to bring Hercules up and IPL.
+<p>
+
+
+<hr noshade>
+<p><h3><a NAME="faq">FAQ</a></h3>
+<table>
+<tr><td valign="top"><b>Q.</b><td>
+             What devices are supported ?
+<tr><td valign="top"><b>A.</b><td>
+             2311, 2314, 3330, 3340, 3350, 3375, 3380 and 3390.
+             However, I have only tested using 3390 devices.
+<br><br>
+
+<tr><td valign="top"><b>Q.</b><td>
+             Is a 3390 model 9 supported ?
+<tr><td valign="top"><b>A.</b><td>
+             The short answer is "no".  Long answer, "sort of".
+             A 3390-9 should compress to a file size less than
+             the 2G limit.  However, the compressed dasd program
+             "hooks" into <code>ckddasd.c</code> by replacing
+             the lseek, read and write library calls with a call
+             to an intermediate function.  The file offset parameter
+             passed to lseek is a 32-bit signed number.  For a
+             compressed file, the cckd code treats this number as
+             unsigned (for SEEK_SET) and uses this number to
+             calculate the dasd track and offset.  That is, for a
+             compressed file, the file offset maintained by
+             <code>ckddasd.c</code> is just a number that indicates
+             a track and the offset into the track.  That means
+             that the largest offset is 4G-1, which is not a problem
+             for a 3390-3 but only references about half of a 3390-9.
+             It would be possible to modify <code>ckddasd.c</code>
+             to use <code>long long</code> when dealing with file
+             offsets, but I wanted to minimize changes to
+             <code>ckddasd.c</code> and this change seemed a
+             little too intrusive.
+<br><br>
+
+<tr><td valign="top"><b>Q.</b><td>
+             When I start hercules, I get these messages showing
+             all this free space in my compressed files.  How do
+             I get rid of that free space ?
+<tr><td valign="top"><b>A.</b><td>
+             Once the total amount of free space falls below 6% of
+             the total file size, the garbage collector is not very
+             aggressive about eliminating free space.  To remove
+             all free space from the file, copy the compressed
+             file to a regular file using the
+             <a href=#cckd2ckd><code>cckd2ckd</code></a> utility
+             and then rebuild the compressed file by using the
+             <a href=#ckd2cckd><code>ckd2cckd</code></a> utility.
+<br><br>
+
+<tr><td valign="top"><b>Q.</b><td>
+             How can I display the space statistics for a compressed
+             file ?
+<tr><td valign="top"><b>A.</b><td>
+             The statistics are displayed when the compressed file
+             is opened.  Currently, there is no supplied method to
+             display these statistics at any other time.  However,
+             it shouldn't be too hard to write a shell script
+             (similar to <code>dasdlist</code>) to display these
+             statistics.  The statistics are contained in the
+             <code>CCKDDASD_DEVHDR</code> which is at offset 512
+             in the compressed file; the header is mapped in
+             <code>hercules.h</code>.
+<br><br>
+
+<tr><td valign="top"><b>Q.</b><td>
+             What is a "null track" anyway ?
+<tr><td valign="top"><b>A.</b><td>
+             The term "null track" is just something I made up.  It is
+             what is returned when a zero offset is found in either the
+             primary or secondary lookup table for the track.  It contains
+             the folllowing fields:
+             <table>
+             <tr><td><code>0CCHH</code></td><td>Home address</td>
+             <tr><td><code>CCHH0008 00000000</code></td><td>standard R0</td>
+             <tr><td><code>CCHH1000</code></td><td>end-of-file marker</td>
+             <tr><td><code>ffffffff</code></td><td>end-of-track marker</td>
+             </table>
+             When a null track is written, space previously occupied by
+             the track is freed and the offset in the secondary lookup table
+             is set to zero.  If all offsets in the secondary lookup table
+             are zero, then the secondary lookup table is freed and the
+             primary lookup table entry is zeroed.
+<br><br>
+
+<tr><td valign="top"><b>Q.</b><td>
+             I want to try bzip2 but I'm getting compiler errors.
+             What am I doing wrong ?
+<tr><td valign="top"><b>A.</b><td>
+             Probably bzip2 is not installed or is not installed
+             properly. You can obtain bzip2 from
+             <a href="http://sourceware.cygnus.com/bzip2/">here</a>.
+             If bzip2 is installed, then you need to find the directory
+             where <code>bzlib.h</code> is installed and the
+             directory where <code>libbz2.a</code> is installed.
+             You can then add "-I <i>bzlib.h-directory</i>" to the
+             CFLAGS in the make file and add "-L <i>libbz2.a-directory</i>"
+             to the LFLAGS.
+<br><br>
+
+<tr><td valign="top"><b>Q.</b><td>
+             Which is better, zlib or bzip2 ?
+<tr><td valign="top"><b>A.</b><td>
+             This is a religious question.  I have no actual preference,
+             I just wanted to make a choice available.
+<br><br>
+
+<tr><td valign="top"><b>Q.</b><td>
+             Can other compression programs be used ?
+<tr><td valign="top"><b>A.</b><td>
+             Yes.  The program is architecturally structured so that other
+             compression algorithms can be added rather painlessly.  This
+             will require, of course, an update to the source.
+<br><br>
+
+<tr><td valign="top"><b>Q.</b><td>
+             Can this compression scheme be used for FBA devices too ?
+<tr><td valign="top"><b>A.</b><td>
+             I have not worked with FBA devices for over 20 years.
+             However, it seems to me that a similar program for FBA
+             devices should be simpler than this program for CKD devices
+             (none of those count/key/data fields mucking everything
+             up).  Since an FBA block is 512 bytes, it might not
+             be efficient to have each block compressed individually;
+             it might be better to compress blocks in 32K or 64K chunks.
+             If someone asks very nicely, I may consider looking into it;-)
+<br><br>
+
+</table>
+
+<hr noshade>
+<p><h3><a NAME="todo">TODO</a></h3>
+<ul>
+<li>The <code>cckddump.hla</code> has a number of potential enhancements
+    that could be added.
+<li>Windows32 support needs to be researched.
+</ul>
+
+<hr noshade>
+<p><h3><a NAME="bugs">BUGS</a></h3>
+This code should be considered <i>beta</i> status.  I have tested only using
+3390-3 devices and only using hercules-390.  I have IPLed os/390 2.8 using an
+8 volume system, all compressed CKD Dasd, and I am not currently aware of any
+outstanding problems.  That doesn't mean that there aren't any logic errors
+out there that could irrevocably corrupt a compressed file.
+
+<p>
+Actually, I have found a couple of bugs:
+<ul>
+<li>cckdcdsk sometimes doesn't completely recover a corrupted file
+<li>occasional segmentation fault during close processing
+</ul>
+
+<hr noshade>
+<p><h3><a NAME="cckddump">cckddump os/390 hlasm program</a></h3>
+The cckddump program (supplied in file <code>cckddump.hla</code>) is an
+os/390 assembler language program that creates a compressed CKD Dasd emulation
+file from a real DASD volume.  This program must be APF-authorized since
+it modifies the DEB to be able to read all tracks from the real device.
+The program executes 16 or so instructions while in supervisor state/key 0;
+otherwise the program runs entirely in problem state/key 8.
+It is not the prettiest assembler language program I've ever written, and
+there are plenty of enhancements that I originally intended to put into the
+program that I haven't yet; once I got the program working good enough, I
+spent the rest of my time writing the fun stuff, the Hercules part.
+<p>The real CKD Dasd volume that is dumped must be an ECKD device (ie support
+'Locate Record' and 'Read Track' CCWs); this shouldn't be a problem because
+I don't think any os/390 release supports a non-ECKD device.  The output file
+must be a DASD file; its characteristics are LRECL=4096, BLKSIZE=4096, RECFM=F.
+The program only dumps allocated tracks (plus track 0) and only dumps tracks up
+to DS1LSTAR for DSORG=PS and DSORG=PO files.  The program will call zlib
+to compress the track images if the zlib routines have been linked with the
+program; however, I don't think the program will be advantageous if it can't
+call zlib.
+<p>
+<h4>Preparing zlib</h4>
+<ul>
+<li>zlib can be obtained from
+    <a href="http://www.info-zip.org/pub/infozip/zlib/"><b>here</b></a>
+<li>Copy or ftp the *.c files to a LRECL=255,RECFM=VB partitioned dataset;
+    here we will call the dataset <i>prefix</i>.ZLIB.C
+<li>Similarly, copy or ftp the *.h files to a LRECL=255,RECFM=VB partitioned
+    dataset; we'll call it <i>prefix</i>.ZLIB.H
+<li>Edit member <i>prefix</i>.ZLIB.H(ZCONF).  Near the bottom, before the 2nd
+    to last <code>#endif</code>, add the following lines:<br><pre>
+    #   pragma map(compress,"COMPRESS")
+    #   pragma map(compress2,"COMPRES2")
+    #   pragma map(uncompress,"UNCOMPRE")
+    </pre>
+<li>Allocate an object partitioned dataset <i>prefix</i>.ZLIB.OBJ;
+    LRECL=80,BLKSIZE=3200,RECFM=FB.<br>Submit the following job to compile zlib:
+    <pre>
+//         JOB
+//CC    JCLLIB ORDER=(CBC.SCBCPRC)
+//*
+//ADLER32 EXEC EDCC,INFILE='<i>prefix</i>.ZLIB.C(ADLER32)',
+//             CPARM='RENT,LIST,SOURCE,LONGNAME,AGG,OPT(2)',
+//             OUTFILE='<i>prefix</i>.ZLIB.OBJ(ADLER32),DISP=SHR'
+//USERLIB   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.H
+//*
+//COMPRESS EXEC EDCC,INFILE='<i>prefix</i>.ZLIB.C(COMPRESS)',
+//             CPARM='RENT,LIST,SOURCE,LONGNAME,AGG,OPT(2)',
+//             OUTFILE='<i>prefix</i>.ZLIB.OBJ(COMPRESS),DISP=SHR'
+//USERLIB   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.H
+//*
+//CRC32   EXEC EDCC,INFILE='<i>prefix</i>.ZLIB.C(CRC32)',
+//             CPARM='RENT,LIST,SOURCE,LONGNAME,AGG,OPT(2)',
+//             OUTFILE='<i>prefix</i>.ZLIB.OBJ(CRC32),DISP=SHR'
+//USERLIB   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.H
+//*
+//DEFLATE EXEC EDCC,INFILE='<i>prefix</i>.ZLIB.C(DEFLATE)',
+//             CPARM='RENT,LIST,SOURCE,LONGNAME,AGG,OPT(2)',
+//             OUTFILE='<i>prefix</i>.ZLIB.OBJ(DEFLATE),DISP=SHR'
+//USERLIB   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.H
+//*
+//EXAMPLE EXEC EDCC,INFILE='<i>prefix</i>.ZLIB.C(EXAMPLE)',
+//             CPARM='RENT,LIST,SOURCE,LONGNAME,AGG,OPT(2)',
+//             OUTFILE='<i>prefix</i>.ZLIB.OBJ(EXAMPLE),DISP=SHR'
+//USERLIB   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.H
+//*
+//GZIO    EXEC EDCC,INFILE='<i>prefix</i>.ZLIB.C(GZIO)',
+//             CPARM='RENT,LIST,SOURCE,LONGNAME,AGG,OPT(2)',
+//             OUTFILE='<i>prefix</i>.ZLIB.OBJ(GZIO),DISP=SHR'
+//USERLIB   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.H
+//*
+//INFBLOCK EXEC EDCC,INFILE='<i>prefix</i>.ZLIB.C(INFBLOCK)',
+//             CPARM='RENT,LIST,SOURCE,LONGNAME,AGG,OPT(2)',
+//             OUTFILE='<i>prefix</i>.ZLIB.OBJ(INFBLOCK),DISP=SHR'
+//USERLIB   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.H
+//*
+//INFCODES EXEC EDCC,INFILE='<i>prefix</i>.ZLIB.C(INFCODES)',
+//             CPARM='RENT,LIST,SOURCE,LONGNAME,AGG,OPT(2)',
+//             OUTFILE='<i>prefix</i>.ZLIB.OBJ(INFCODES),DISP=SHR'
+//USERLIB   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.H
+//*
+//INFFAST EXEC EDCC,INFILE='<i>prefix</i>.ZLIB.C(INFFAST)',
+//             CPARM='RENT,LIST,SOURCE,LONGNAME,AGG,OPT(2)',
+//             OUTFILE='<i>prefix</i>.ZLIB.OBJ(INFFAST),DISP=SHR'
+//USERLIB   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.H
+//*
+//INFLATE EXEC EDCC,INFILE='<i>prefix</i>.ZLIB.C(INFLATE)',
+//             CPARM='RENT,LIST,SOURCE,LONGNAME,AGG,OPT(2)',
+//             OUTFILE='<i>prefix</i>.ZLIB.OBJ(INFLATE),DISP=SHR'
+//USERLIB   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.H
+//*
+//INFTREES EXEC EDCC,INFILE='<i>prefix</i>.ZLIB.C(INFTREES)',
+//             CPARM='RENT,LIST,SOURCE,LONGNAME,AGG,OPT(2)',
+//             OUTFILE='<i>prefix</i>.ZLIB.OBJ(INFTREES),DISP=SHR'
+//USERLIB   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.H
+//*
+//INFUTIL EXEC EDCC,INFILE='<i>prefix</i>.ZLIB.C(INFUTIL)',
+//             CPARM='RENT,LIST,SOURCE,LONGNAME,AGG,OPT(2)',
+//             OUTFILE='<i>prefix</i>.ZLIB.OBJ(INFUTIL),DISP=SHR'
+//USERLIB   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.H
+//*
+//TREES   EXEC EDCC,INFILE='<i>prefix</i>.ZLIB.C(TREES)',
+//             CPARM='RENT,LIST,SOURCE,LONGNAME,AGG,OPT(2)',
+//             OUTFILE='<i>prefix</i>.ZLIB.OBJ(TREES),DISP=SHR'
+//USERLIB   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.H
+//*
+//UNCOMPR EXEC EDCC,INFILE='<i>prefix</i>.ZLIB.C(UNCOMPR)',
+//             CPARM='RENT,LIST,SOURCE,LONGNAME,AGG,OPT(2)',
+//             OUTFILE='<i>prefix</i>.ZLIB.OBJ(UNCOMPR),DISP=SHR'
+//USERLIB   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.H
+//*
+//ZUTIL   EXEC EDCC,INFILE='<i>prefix</i>.ZLIB.C(ZUTIL)',
+//             CPARM='RENT,LIST,SOURCE,LONGNAME,AGG,OPT(2)',
+//             OUTFILE='<i>prefix</i>.ZLIB.OBJ(ZUTIL),DISP=SHR'
+//USERLIB   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.H
+</pre>
+<li>Prelink zlib using the following job:
+<pre>
+//        JOB
+//PLKED  EXEC PGM=EDCPRLK
+//SYSMSGS  DD DISP=SHR,DSN=CEE.SCEEMSGP(EDCPMSGE)
+//SYSLIB   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ
+//         DD DISP=SHR,DSN=CEE.SCEEOBJ
+//SYSOUT   DD SYSOUT=*
+//SYSPRINT DD SYSOUT=*
+//SYSIN    DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ(ADLER32)
+//         DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ(COMPRESS)
+//         DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ(CRC32)
+//         DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ(DEFLATE)
+//         DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ(GZIO)
+//         DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ(INFBLOCK)
+//         DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ(INFCODES)
+//         DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ(INFFAST)
+//         DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ(INFLATE)
+//         DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ(INFTREES)
+//         DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ(INFUTIL)
+//         DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ(TREES)
+//         DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ(UNCOMPR)
+//         DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ(ZUTIL)
+//SYSMOD   DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ(ZLIB)
+</pre>
+</ul>
+
+<h4>Assemble and linkedit cckddump</h4>
+<ul>
+<li>Allocate partitioned dataset <i>prefix.cckddump.source</i>;
+    LRECL=80,RECFM=FB and copy or ftp file cckddump.hla
+<li>Submit the following job:
+<pre>
+//        JOB
+//C      EXEC PGM=ASMA90
+//SYSLIB   DD DISP=SHR,DSN=SYS1.MACLIB
+//         DD DISP=SHR,DSN=SYS1.MODGEN
+//SYSPRINT DD SYSOUT=*
+//SYSIN    DD DISP=SHR,DSN=<i>prefix.cckddump.source</i>(CCKDDUMP)
+//SYSUT1   DD UNIT=SYSDA,SPACE=(CYL,(1,1))
+//SYSLIN   DD DISP=(,PASS),DSN=&&OBJ,UNIT=SYSDA,SPACE=(CYL,(1,1))
+//            LRECL=80,BLKSIZE=3200,RECFM=FB
+//L      EXEC PGM=HEWL
+//SYSPRINT DD SYSOUT=*
+//SYSUT1   DD UNIT=SYSDA,SPACE=(CYL,(1,1))
+//SYSLIB   DD DISP=SHR,DSN=CEE.SCEESPC
+//         DD DISP=SHR,DSN=CEE.SCEELKED
+//ZLIB     DD DISP=SHR,DSN=<i>prefix</i>.ZLIB.OBJ
+//SYSLMOD  DD DISP=SHR,DSN=<i>apfauth.load</i>
+//SYSLIN   DD DISP=(OLD,DELETE),DSN=&&OBJ
+//         DD *
+  INCLUDE  ZLIB(ZLIB)
+  INCLUDE  SYSLIB(EDCXHOTL)
+  INCLUDE  SYSLIB(EDCXHOTU)
+  INCLUDE  SYSLIB(EDCXHOTT)
+  ORDER    MAIN(P)
+  ENTRY    MAIN
+  SETCODE  AC(1)
+  NAME     CCKDDUMP(R)
+</pre>
+<li>The assemble step (C) should complete with condition code 4.
+    This is a `feature' due to the way IBM macro IECSDSL1 is coded.
+    The linkedit step (L) should complete with condition code 0.
+</ul>
+
+<h4>Executing cckddump</h4>
+<ul>
+<li>The volume to be dumped is identified by the SYSUT1 DD statement;
+    the output compressed CKD Dasd emulation file is identified by the
+    SYSUT2 DD statement.
+<li>Submit a job similar to the following:
+<pre>
+//        JOB
+//S1     EXEC PGM=CCKDDUMP
+//STEPLIB  DD DISP=SHR,DSN=<i>apfauth.load</i>
+//SYSPRINT DD SYSOUT=*,RECFM=VB,LRECL=255,BLKSIZE=4096
+//SYSUT1   DD DISP=OLD,UNIT=SYSDA,VOL=SER=<i>volser</i>
+//SYSUT2   DD DISP=(,CATLG),DSN=<i>prefix.volser.cckd</i>,
+//            UNIT=SYSDA,SPACE=(TRK,(7500,1500),RLSE),
+//            LRECL=4096,BLKSIZE=4096,RECFM=F
+</pre>
+</ul>
+
+
+<h4>Make the file available to Hercules</h4>
+<ul>
+<li>Copy or ftp <i>prefix.volser.cckd</i> in <b>binary</b> mode
+    to your platform running Hercules.
+</ul>
+
+<hr noshade>
+<p><h3><a NAME="feedback">Feedback</a></h3>
+Questions ?? Problems ?? Comments ?? Suggestions ?? Corrections ?? Bugs ??<br>
+Let me know at <a href="mailto:gsmith@nc.rr.com"><em>gsmith</em>&#064;<em>nc.rr.com</em></a>
+
+<p>
+greg smith
+
+<p><small>Last updated 7 September 2000</small>
+</BODY>
+</HTML>

@@ -64,6 +64,8 @@ int rc = 0;
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
         sysblk.mckpending = 0;
 
+    set_doint(NULL);
+
     return rc;
 } /* end function present_mck_interrupt */
 
@@ -103,6 +105,7 @@ void machine_check_crwpend()
     /* Signal waiting CPUs that an interrupt may be pending */
     obtain_lock (&sysblk.intlock);
     sysblk.mckpending = sysblk.crwpending = 1;
+    set_doint(NULL);
     signal_condition (&sysblk.intcond);
     release_lock (&sysblk.intlock);
 

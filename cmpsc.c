@@ -15,6 +15,12 @@
 
 #include "opcode.h"
 
+#include "inline.h"
+
+#ifdef IBUF
+#include "ibuf.h"
+#endif
+
 /* Comment next four lines if you want to try the code that is
    still under construction */
 #ifdef FEATURE_CMPSC
@@ -634,6 +640,7 @@ zz_compression_call (BYTE inst[], int execflag, REGS * regs)
 
 #if 1
 logmsg("CMPSC: ");
+LOAD_INST(regs);
 display_inst (regs, regs->inst);
 #endif
 

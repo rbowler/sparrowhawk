@@ -9,6 +9,8 @@
 
 #include "opcode.h"
 
+#include "inline.h"
+
 #if defined(FEATURE_EXPANDED_STORAGE)
 /*-------------------------------------------------------------------*/
 /* B22E PGIN  - Page in from expanded storage                  [RRE] */
@@ -71,6 +73,10 @@ U32     xaddr;                          /* Expanded storage address  */
 
     /* cc0 means pgin ok */
     regs->psw.cc = 0;
+
+#ifdef IBUF
+    FRAG_INVALIDATE(maddr, XSTORE_PAGESIZE);
+#endif
 
 } 
 
@@ -410,6 +416,7 @@ BYTE    xpkey1, xpkey2;                 /* Expanded storage keys     */
         memcpy (sysblk.mainstor + aaddr1,
                 sysblk.xpndstor + (xpblk2 << XSTORE_PAGESHIFT),
                 XSTORE_PAGESIZE);
+        FRAG_INVALIDATE(aaddr, XSTORE_PAGESIZE);
     }
     else if (xpvalid1)
     {
@@ -431,6 +438,7 @@ BYTE    xpkey1, xpkey2;                 /* Expanded storage keys     */
         memcpy (sysblk.mainstor + aaddr1,
                 sysblk.mainstor + aaddr2,
                 XSTORE_PAGESIZE);
+        FRAG_INVALIDATE(aaddr1, XSTORE_PAGESIZE);
     }
 
     /* Return condition code zero */

@@ -14,6 +14,7 @@
 
 #include "hercules.h"
 #include "opcode.h"
+#include "inline.h"
 
 /*-------------------------------------------------------------------*/
 /* Structure definition for internal short floatingpoint format      */

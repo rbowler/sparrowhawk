@@ -13,6 +13,10 @@
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
 
 #include "opcode.h"
+#include "inline.h"
+#ifdef IBUF
+#include "ibuf.h"
+#endif
 
 #define SIE_I_WAIT(_guestregs) \
         ((_guestregs)->psw.wait)
@@ -267,6 +271,8 @@ U16     lhcpu;                          /* Last Host CPU address     */
 
     }
 
+    LASTPAGE_INVALIDATE (regs);
+
     do {
         if(!(icode = setjmp(guestregs->progjmp)))
             while(! SIE_I_WAIT(guestregs)
@@ -295,6 +301,9 @@ U16     lhcpu;                          /* Last Host CPU address     */
                 /* Display the instruction */
 // /*ZZDEBUG*/  display_inst (guestregs, guestregs->inst);
 
+#ifdef IBUF
+                regs->actentry = NULL;
+#endif
                 EXECUTE_INSTRUCTION(guestregs->inst, 0, guestregs);
 
 #if MAX_CPU_ENGINES > 1
@@ -485,6 +494,9 @@ int     n;
 
     /* Indicate we have left SIE mode */
     regs->sie_active = 0;
+
+    LASTPAGE_INVALIDATE(regs);
+    REASSIGN_FRAG (regs);
 
 }
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/

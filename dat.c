@@ -459,6 +459,7 @@ void purge_alb (REGS *regs)
 {
 } /* end function purge_alb */
 
+#ifndef INLINE_FETCH
 /*-------------------------------------------------------------------*/
 /* Translate a 31-bit virtual address to a real address              */
 /*                                                                   */
@@ -696,7 +697,7 @@ U16     eax;                            /* Authorization index       */
     
             /* Check that virtual address is within the segment table */
             if (((regs->cr[0] & CR0_SEG_SIZE) == CR0_SEG_SZ_64K) &&
-                (vaddr >> 20) > stl)
+                ((vaddr << 4) & STD_370_STL) > stl)
                 goto seg_tran_length;
     
             /* Generate addressing exception if outside real storage */
@@ -1018,6 +1019,7 @@ tran_excp_addr:
     return cc;
 
 } /* end function translate_addr */
+#endif
 
 /*-------------------------------------------------------------------*/
 /* Purge the translation lookaside buffer                            */
@@ -1166,7 +1168,7 @@ U32     pte;
 
 } /* end function invalidate_pte */
 
-
+#ifndef INLINE_FETCH
 /*-------------------------------------------------------------------*/
 /* Convert logical address to absolute address and check protection  */
 /*                                                                   */
@@ -1210,6 +1212,22 @@ S32     itimer;                         /* Interval timer value      */
 S32     olditimer;                      /* Previous interval timer   */
 #endif /*FEATURE_INTERVAL_TIMER*/
 U16     xcode;                          /* Exception code            */
+#ifdef FEATURE_OPTIMIZE_SAME_PAGE
+LASTPAGE *lastpage;
+
+#ifndef CHECK_PAGEADDR
+    if (acctype <=3)
+    {
+        lastpage = &regs->lastpage[acctype - 1];
+        if (lastpage->vaddr == (addr & STORAGE_KEY_PAGEMASK) &&
+            lastpage->arn == arn &&
+            (lastpage->valid))
+        {
+            return (lastpage->aaddr + (addr & STORAGE_KEY_BYTEMASK));
+        }
+    }
+#endif
+#endif
 
     /* Convert logical address to real address */
     if ((REAL_MODE(&regs->psw) || arn == USE_REAL_ADDR)
@@ -1328,6 +1346,34 @@ U16     xcode;                          /* Exception code            */
         break;
     } /* end switch */
 
+#ifdef FEATURE_OPTIMIZE_SAME_PAGE
+
+#ifdef CHECK_PAGEADDR
+    if (acctype <=3)
+    {
+        lastpage = &regs->lastpage[acctype - 1];
+        if (lastpage->vaddr == (addr & STORAGE_KEY_PAGEMASK) &&
+            lastpage->arn == arn &&
+            (lastpage->valid))
+        {
+           if (lastpage->aaddr != (aaddr & STORAGE_KEY_PAGEMASK))
+              logmsg("WRONG PAGEADDR: %llu %x4 %x4 %x4 %4x %d %x %x\n",
+                            regs->instcount, regs->psw.ia, 
+                            addr, aaddr, lastpage->aaddr, arn,
+                            regs->lastinst[0], regs->lastinst[1]); 
+        }
+    }
+#endif
+
+    if (acctype <=3)
+    {
+        lastpage = &regs->lastpage[acctype - 1];
+        lastpage->vaddr = addr & STORAGE_KEY_PAGEMASK;
+        lastpage->aaddr = aaddr & STORAGE_KEY_PAGEMASK;
+        lastpage->arn = arn;
+        lastpage->valid = 1;
+    }
+#endif
     /* Return the absolute address */
     return aaddr;
 
@@ -1384,6 +1430,9 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     if (addr2 == (addr & STORAGE_KEY_PAGEMASK)) {
         addr = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE, akey);
         memcpy (sysblk.mainstor+addr, src, len+1);
+#ifdef IBUF
+        FRAG_INVALIDATE(addr, len+1);
+#endif
     } else {
         len1 = addr2 - addr;
         len2 = len - len1 + 1;
@@ -1412,6 +1461,9 @@ void vstoreb (BYTE value, U32 addr, int arn, REGS *regs)
     addr = logical_to_abs (addr, arn, regs, ACCTYPE_WRITE,
                                 regs->psw.pkey);
     sysblk.mainstor[addr] = value;
+#ifdef IBUF
+    FRAG_INVALIDATE(addr, 1);
+#endif
 } /* end function vstoreb */
 
 /*-------------------------------------------------------------------*/
@@ -1452,6 +1504,16 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     sysblk.mainstor[abs1] = value >> 8;
     sysblk.mainstor[abs2] = value & 0xFF;
 
+#ifdef IBUF
+    if ((abs1 + 1) == abs2)
+        FRAG_INVALIDATE(abs1, 2)
+    else
+    {
+        FRAG_INVALIDATE(abs1, 1);
+        FRAG_INVALIDATE(abs2, 1);
+    }
+#endif
+
 } /* end function vstore2 */
 
 /*-------------------------------------------------------------------*/
@@ -1474,6 +1536,11 @@ int     k;                              /* Shift counter             */
 U32     addr2;                          /* Page address of last byte */
 U32     abs, abs2;                      /* Absolute addresses        */
 BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+#ifdef IBUF
+U32     habs;
+U32     habs2;
+BYTE    l1 = 0;
+#endif
 
     /* Obtain current access key from PSW */
     akey = regs->psw.pkey;
@@ -1485,6 +1552,9 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     if ((addr & 0x03) == 0)
     {
         *((U32*)(sysblk.mainstor + abs)) = htonl(value);
+#ifdef IBUF
+        FRAG_INVALIDATE(abs, 4);
+#endif
         return;
     }
 
@@ -1494,6 +1564,11 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     addr2 = (addr + 3) & ADDRESS_MAXWRAP(regs);
     addr2 &= STORAGE_KEY_PAGEMASK;
     abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE, akey);
+
+#ifdef IBUF
+    habs = abs;
+    habs2 = abs2;
+#endif
 
     /* Store integer value byte by byte at operand location */
     for (i=0, k=24; i < 4; i++, k -= 8) {
@@ -1511,6 +1586,18 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
             abs = abs2;
 
     } /* end for */
+
+#ifdef IBUF
+    if ((habs & STORAGE_KEY_PAGEMASK) == (habs2 & STORAGE_KEY_PAGEMASK))
+        FRAG_INVALIDATE(habs, 4)
+    else
+    {
+        l1 = (habs & STORAGE_KEY_PAGEMASK) +
+              STORAGE_KEY_PAGESIZE - habs;
+        FRAG_INVALIDATE(habs, l1);
+        FRAG_INVALIDATE(habs2, 4 - l1);
+    }
+#endif
 
 } /* end function vstore4 */
 
@@ -1534,6 +1621,11 @@ int     k;                              /* Shift counter             */
 U32     addr2;                          /* Page address of last byte */
 U32     abs, abs2;                      /* Absolute addresses        */
 BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+#ifdef IBUF
+U32     habs;
+U32     habs2;
+BYTE    l1 = 0;
+#endif
 
     /* Obtain current access key from PSW */
     akey = regs->psw.pkey;
@@ -1551,6 +1643,9 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
         sysblk.mainstor[abs+5] = (value >> 16) & 0xFF;
         sysblk.mainstor[abs+6] = (value >> 8) & 0xFF;
         sysblk.mainstor[abs+7] = value & 0xFF;
+#ifdef IBUF
+        FRAG_INVALIDATE(abs, 8);
+#endif
         return;
     }
 
@@ -1560,6 +1655,11 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     addr2 = (addr + 7) & ADDRESS_MAXWRAP(regs);
     addr2 &= STORAGE_KEY_PAGEMASK;
     abs2 = logical_to_abs (addr2, arn, regs, ACCTYPE_WRITE, akey);
+
+#ifdef IBUF
+    habs = abs;
+    habs2 = abs2;
+#endif
 
     /* Store integer value byte by byte at operand location */
     for (i=0, k=56; i < 8; i++, k -= 8) {
@@ -1577,6 +1677,18 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
             abs = abs2;
 
     } /* end for */
+
+#ifdef IBUF
+    if ((habs & STORAGE_KEY_PAGEMASK) == (habs2 & STORAGE_KEY_PAGEMASK))
+        FRAG_INVALIDATE(habs, 8)
+    else
+    {
+        l1 = (habs & STORAGE_KEY_PAGEMASK) +
+              STORAGE_KEY_PAGESIZE - habs;
+        FRAG_INVALIDATE(habs, l1);
+        FRAG_INVALIDATE(habs2, 8 - l1);
+    }
+#endif
 
 } /* end function vstore8 */
 
@@ -1845,12 +1957,18 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     if ((addr & STORAGE_KEY_BYTEMASK) <= STORAGE_KEY_PAGESIZE - 6)
     {
         abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
+#ifdef CHECK_FRAGPARMS
+        regs->iaabs = abs;
+#endif
         memcpy (dest, sysblk.mainstor+abs, 6);
         return;
     }
 
     /* Fetch first two bytes of instruction */
     abs = logical_to_abs (addr, 0, regs, ACCTYPE_INSTFETCH, akey);
+#ifdef CHECK_FRAGPARMS
+    regs->iaabs = abs;
+#endif
     memcpy (dest, sysblk.mainstor+abs, 2);
 
     /* Return if two-byte instruction */
@@ -1878,6 +1996,118 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
     memcpy (dest+4, sysblk.mainstor+abs, 2);
 
 } /* end function instfetch */
+
+#else
+/*-------------------------------------------------------------------*/
+/* Fetch a single byte operand from virtual storage                  */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr    Logical address of operand character                 */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/* Returns:                                                          */
+/*      Operand byte                                                 */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or fetch protection       */
+/*      exception, and in this case the function does not return.    */
+/*-------------------------------------------------------------------*/
+BYTE xvfetchb (U32 addr, int arn, REGS *regs)
+{
+    return(vfetchb(addr, arn, regs));
+}
+/*-------------------------------------------------------------------*/
+/* Fetch a two-byte integer operand from virtual storage             */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr    Logical address of leftmost byte of operand          */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/* Returns:                                                          */
+/*      Operand in 16-bit integer format                             */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or fetch protection       */
+/*      exception, and in this case the function does not return.    */
+/*-------------------------------------------------------------------*/
+U16 xvfetch2 (U32 addr, int arn, REGS *regs)
+
+{
+    return(vfetch2(addr, arn, regs));
+}
+
+/*-------------------------------------------------------------------*/
+/* Fetch a four-byte integer operand from virtual storage            */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr    Logical address of leftmost byte of operand          */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/* Returns:                                                          */
+/*      Operand in 32-bit integer format                             */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or fetch protection       */
+/*      exception, and in this case the function does not return.    */
+/*-------------------------------------------------------------------*/
+U32 xvfetch4 (U32 addr, int arn, REGS *regs)
+{
+    return(vfetch4(addr, arn, regs));
+}
+
+/*-------------------------------------------------------------------*/
+/* Fetch an eight-byte integer operand from virtual storage          */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr    Logical address of leftmost byte of operand          */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/* Returns:                                                          */
+/*      Operand in 64-bit integer format                             */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or fetch protection       */
+/*      exception, and in this case the function does not return.    */
+/*-------------------------------------------------------------------*/
+U64 xvfetch8 (U32 addr, int arn, REGS *regs)
+{
+    return(vfetch8(addr, arn, regs));
+}
+/*-------------------------------------------------------------------*/
+/* Store a four-byte integer into virtual storage operand            */
+/*                                                                   */
+/* Input:                                                            */
+/*      value   32-bit integer value to be stored                    */
+/*      addr    Logical address of leftmost operand byte             */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or protection             */
+/*      exception, and in this case the function does not return.    */
+/*-------------------------------------------------------------------*/
+void xvstore4 (U32 value, U32 addr, int arn, REGS *regs)
+{
+    vstore4(value, addr, arn, regs);
+}
+/*-------------------------------------------------------------------*/
+/* Store an eight-byte integer into virtual storage operand          */
+/*                                                                   */
+/* Input:                                                            */
+/*      value   64-bit integer value to be stored                    */
+/*      addr    Logical address of leftmost operand byte             */
+/*      arn     Access register number                               */
+/*      regs    CPU register context                                 */
+/*                                                                   */
+/*      A program check may be generated if the logical address      */
+/*      causes an addressing, translation, or protection             */
+/*      exception, and in this case the function does not return.    */
+/*-------------------------------------------------------------------*/
+void xvstore8 (U64 value, U32 addr, int arn, REGS *regs)
+{
+    vstore8(value, addr, arn, regs);
+}
+#endif
 
 /*-------------------------------------------------------------------*/
 /* Move characters using specified keys and address spaces           */

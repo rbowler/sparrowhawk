@@ -204,6 +204,7 @@ U32             n;                      /* 32-bit operand value      */
     /* Diagnose F00: Hercules normal mode                            */
     /*---------------------------------------------------------------*/
         sysblk.inststep = 0;
+        set_doinst();
         break;
 
     case 0xF04:
@@ -211,6 +212,7 @@ U32             n;                      /* 32-bit operand value      */
     /* Diagnose F04: Hercules single step mode                       */
     /*---------------------------------------------------------------*/
         sysblk.inststep = 1;
+        set_doinst();
         break;
 
     case 0xF08:
@@ -218,6 +220,17 @@ U32             n;                      /* 32-bit operand value      */
     /* Diagnose F08: Hercules get instruction counter                */
     /*---------------------------------------------------------------*/
         regs->gpr[r1] = (U32)regs->instcount;
+//        logmsg("Diagnose F08 %llu %4x\n", regs->instcount, regs->psw.ia);
+#ifdef INSTSTAT
+        {
+        BYTE i;
+        for (i=; i < 0xff; i++)
+        {
+            logmsg("Inst %x %llu\n", i, regs->instcountx[i]);
+            regs->instcountx[i] = 0;
+        }
+        }
+#endif
         break;
 
     case 0xF0C:

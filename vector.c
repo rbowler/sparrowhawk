@@ -15,6 +15,8 @@
 
 #include "opcode.h"
 
+#include "inline.h"
+
 #if defined(FEATURE_VECTOR_FACILITY)
 
 /* The vector save area must be aligned on a boundary 8 times the 

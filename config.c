@@ -766,7 +766,11 @@ BYTE    c;                              /* Work area for sscanf      */
     }
 
     sysblk.msgpiper = pfd[0];
+#ifndef FLUSHLOG
     sysblk.msgpipew = fdopen (pfd[1], "w");
+#else
+    sysblk.msgpipew = fopen("logfile", "w");
+#endif
     if (sysblk.msgpipew == NULL)
     {
         fprintf (stderr,
@@ -829,6 +833,33 @@ int deconfigure_cpu(REGS *regs)
         return -1;
     
 }
+
+/*-------------------------------------------------------------------*/
+/* Run as a separate thread for each device to run execute_ccw_chain */
+/* LOOPER_DIE isn't actually used yet but is there if anyone wants it*/
+/*                                                                   */
+/* code courtesy of Malcome Beattie                                  */
+/*-------------------------------------------------------------------*/
+void device_loop (DEVBLK *dev)
+{
+    while (1) {
+	obtain_lock(&dev->lock);
+	while (dev->loopercmd == LOOPER_WAIT)
+	    wait_condition(&dev->loopercond, &dev->lock);
+	if (dev->loopercmd == LOOPER_DIE)
+	    break;
+	/* It's LOOPER_EXEC */
+	dev->loopercmd = LOOPER_WAIT;
+	release_lock(&dev->lock);
+	execute_ccw_chain(dev);
+    }
+    release_lock(&dev->lock);
+
+    /* It's our responsibility to free the device structure */
+    /* otherwise it's a headache to synchronise with the config thread */
+    free(dev);
+}
+
 /*-------------------------------------------------------------------*/
 /* Function to build a device configuration block                    */
 /*-------------------------------------------------------------------*/
@@ -958,12 +989,25 @@ int     newdevblk = 0;                  /* 1=Newly created devblk    */
         /* Indicate a newly allocated devblk */
         newdevblk = 1;
 
-        /* Initialize the device lock and condition */
+        /* Initialize the device lock and conditions */
         initialize_lock (&dev->lock);
         initialize_condition (&dev->resumecond);
+        initialize_condition (&dev->loopercond);
 
         /* Assign new subchannel number */
         dev->subchan = sysblk.highsubchan++;
+
+	/* Ensure command for new thread is LOOPER_WAIT */
+	/* (Yeah, it's zero anyway but let's be pedantic) */
+	dev->loopercmd = LOOPER_WAIT;
+
+	/* Start a thread for this device */
+	if ( create_thread (&dev->tid, &sysblk.detattr, device_loop, dev) )
+	{
+            logmsg ("HHC045I Cannot create thread for device %4.4X: %s\n",
+                    devnum, strerror(errno));
+            return 1;
+	}
     }
 
     /* Obtain the device lock */
@@ -1105,6 +1149,7 @@ DEVBLK *dev;                            /* -> Device block           */
 
     return 0;
 } /* end function detach_device */
+
 
 /*-------------------------------------------------------------------*/
 /* Function to rename a device configuration block                   */

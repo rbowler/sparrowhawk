@@ -7,6 +7,7 @@
 #if defined(FEATURE_TRACING)
 
 #include "opcode.h"
+#include "inline.h"
 
 /*-------------------------------------------------------------------*/
 /* Form implicit branch trace entry                                  */
@@ -27,6 +28,9 @@ U32     n;                              /* Addr of trace table entry */
 U32     ag,                             /* Abs Guest addr of TTE     */
         ah;                             /* Abs Host addr of TTE      */
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#ifdef IBUF
+U32     haddr;
+#endif
 
     /* Obtain the trace entry address from control register 12 */
     n = regs->cr[12] & CR12_TRACEEA;
@@ -64,6 +68,10 @@ U32     ag,                             /* Abs Guest addr of TTE     */
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
 
+#ifdef IBUF
+    haddr = n;
+#endif
+
     /* Build the branch trace entry */
     if (amode)
         sysblk.mainstor[n++] = 0x80 | ((ia & 0x7F000000) >> 24);
@@ -72,6 +80,8 @@ U32     ag,                             /* Abs Guest addr of TTE     */
     sysblk.mainstor[n++] = (ia & 0xFF0000) >> 16;
     sysblk.mainstor[n++] = (ia & 0xFF00) >> 8;
     sysblk.mainstor[n++] = ia & 0xFF;
+
+    FRAG_INVALIDATE(haddr, 4);
 
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
     /* Recalculate the Guest absolute address */
@@ -106,6 +116,9 @@ U32     n;                              /* Addr of trace table entry */
 U32     ag,                             /* Abs Guest addr of TTE     */
         ah;                             /* Abs Host addr of TTE      */
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#ifdef IBUF
+U32     haddr;
+#endif
 
     /* Obtain the trace entry address from control register 12 */
     n = regs->cr[12] & CR12_TRACEEA;
@@ -142,6 +155,9 @@ U32     ag,                             /* Abs Guest addr of TTE     */
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
+#ifdef IBUF
+    haddr = n;
+#endif
 
     /* Build the Branch in Subspace Group trace entry */
     sysblk.mainstor[n++] = 0x41;
@@ -152,6 +168,7 @@ U32     ag,                             /* Abs Guest addr of TTE     */
     sysblk.mainstor[n++] = (regs->psw.ia & 0xFF0000) >> 16;
     sysblk.mainstor[n++] = (regs->psw.ia & 0xFF00) >> 8;
     sysblk.mainstor[n++] = regs->psw.ia & 0xFF;
+    FRAG_INVALIDATE(haddr, 8);
 
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
     /* Recalculate the Guest absolute address */
@@ -185,6 +202,9 @@ U32     n;                              /* Addr of trace table entry */
 U32     ag,                             /* Abs Guest addr of TTE     */
         ah;                             /* Abs Host addr of TTE      */
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#ifdef IBUF
+U32     haddr;
+#endif
 
     /* Obtain the trace entry address from control register 12 */
     n = regs->cr[12] & CR12_TRACEEA;
@@ -221,12 +241,17 @@ U32     ag,                             /* Abs Guest addr of TTE     */
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
+#ifdef IBUF
+    haddr = n;
+#endif
 
     /* Build the Set Secondary ASN trace entry */
     sysblk.mainstor[n++] = 0x10;
     sysblk.mainstor[n++] = 0x00;
     sysblk.mainstor[n++] = (sasn & 0xFF00) >> 8;
     sysblk.mainstor[n++] = sasn & 0xFF;
+
+    FRAG_INVALIDATE(haddr, 4);
 
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
     /* Recalculate the Guest absolute address */
@@ -260,6 +285,9 @@ U32     n;                              /* Addr of trace table entry */
 U32     ag,                             /* Abs Guest addr of TTE     */
         ah;                             /* Abs Host addr of TTE      */
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#ifdef IBUF
+U32     haddr;
+#endif
 
     /* Obtain the trace entry address from control register 12 */
     n = regs->cr[12] & CR12_TRACEEA;
@@ -296,6 +324,9 @@ U32     ag,                             /* Abs Guest addr of TTE     */
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
+#ifdef IBUF
+    haddr = n;
+#endif
 
     /* Build the program call trace entry */
     sysblk.mainstor[n++] = 0x21;
@@ -307,6 +338,8 @@ U32     ag,                             /* Abs Guest addr of TTE     */
     sysblk.mainstor[n++] = (regs->psw.ia & 0xFF0000) >> 16;
     sysblk.mainstor[n++] = (regs->psw.ia & 0xFF00) >> 8;
     sysblk.mainstor[n++] = (regs->psw.ia & 0xFE) | regs->psw.prob;
+
+    FRAG_INVALIDATE(haddr, 8);
 
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
     /* Recalculate the Guest absolute address */
@@ -341,6 +374,9 @@ U16     pasn;                           /* New PASN                  */
 U32     ag,                             /* Abs Guest addr of TTE     */
         ah;                             /* Abs Host addr of TTE      */
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#ifdef IBUF
+U32     haddr;
+#endif
 
     /* Obtain the trace entry address from control register 12 */
     n = regs->cr[12] & CR12_TRACEEA;
@@ -377,6 +413,9 @@ U32     ag,                             /* Abs Guest addr of TTE     */
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
+#ifdef IBUF
+    haddr = n;
+#endif
 
     pasn = newregs->cr[4] & CR4_PASN;
 
@@ -395,6 +434,8 @@ U32     ag,                             /* Abs Guest addr of TTE     */
     sysblk.mainstor[n++] = (newregs->psw.ia & 0xFF0000) >> 16;
     sysblk.mainstor[n++] = (newregs->psw.ia & 0xFF00) >> 8;
     sysblk.mainstor[n++] = newregs->psw.ia & 0xFF;
+
+    FRAG_INVALIDATE(haddr, 12);
 
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
     /* Recalculate the Guest absolute address */
@@ -429,6 +470,9 @@ U32     n;                              /* Addr of trace table entry */
 U32     ag,                             /* Abs Guest addr of TTE     */
         ah;                             /* Abs Host addr of TTE      */
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+#ifdef IBUF
+U32     haddr;
+#endif
 
     /* Obtain the trace entry address from control register 12 */
     n = regs->cr[12] & CR12_TRACEEA;
@@ -465,6 +509,9 @@ U32     ag,                             /* Abs Guest addr of TTE     */
 
     /* Set the main storage change and reference bits */
     STORAGE_KEY(n) |= (STORKEY_REF | STORKEY_CHANGE);
+#ifdef IBUF
+    haddr = n;
+#endif
 
     /* Build the program transfer trace entry */
     sysblk.mainstor[n++] = 0x31;
@@ -475,6 +522,8 @@ U32     ag,                             /* Abs Guest addr of TTE     */
     sysblk.mainstor[n++] = (gpr2 & 0xFF0000) >> 16;
     sysblk.mainstor[n++] = (gpr2 & 0xFF00) >> 8;
     sysblk.mainstor[n++] = gpr2 & 0xFF;
+
+    FRAG_INVALIDATE(haddr, 8);
 
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
     /* Recalculate the Guest absolute address */
