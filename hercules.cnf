@@ -1,0 +1,31 @@
+#
+# Configuration file for Hercules ESA/390 emulator
+#
+
+# .-----------------------------CPU serial number
+# |     .-----------------------Main storage (MB)
+# |     |       .---------------Expanded storage (MB)
+# |     |       |       .-------tn3270 port number
+# |     |       |       |
+# V     V       V       V
+#-----  ----    ----    ----
+000611  64      0       3270
+
+# .-----------------------------Device number
+# |     .-----------------------Device type
+# |     |       .---------------File name
+# |     |       |
+# V     V       V
+#---    ----    --------------------
+000C    3505    adrdmprs.rdr
+001F    3270
+0580    3420    ickdsf.ipl
+0120    3380    mvsv5r.120
+0121    3380    mvsv5d.121
+0122    3380    mvswk1.122
+0140    3370    dosres.140
+0141    3370    syswk1.141
+0200    3270
+0201    3270
+0202    3270
+0300    3370    sysres.300
