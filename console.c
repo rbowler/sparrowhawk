@@ -900,7 +900,6 @@ BYTE                    rejmsg[80];     /* Rejection message         */
 void *console_connection_handler (void *arg)
 {
 int                     rc;             /* Return code               */
-int                     i;              /* Loop counter              */
 int                     lsock;          /* Socket for listening      */
 int                     csock;          /* Socket for conversation   */
 struct sockaddr_in      server;         /* Server address structure  */
@@ -935,7 +934,7 @@ BYTE                    unitstat;       /* Status after receive data */
     server.sin_port = htons(server.sin_port);
 
     /* Attempt to bind the socket to the port */
-    for (i = 0; i < 10; i++)
+    while (1)
     {
         rc = bind (lsock, (struct sockaddr *)&server, sizeof(server));
 
@@ -944,7 +943,7 @@ BYTE                    unitstat;       /* Status after receive data */
         logmsg ("HHC601I Waiting for port %u to become free\n",
                 sysblk.cnslport);
         sleep(10);
-    } /* end for(i) */
+    } /* end while */
 
     if (rc != 0)
     {

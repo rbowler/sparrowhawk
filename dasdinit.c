@@ -133,7 +133,7 @@ U32             trksize;                /* DASD image track length   */
     if (rc < CKDDASD_DEVHDR_SIZE)
     {
         fprintf (stderr, "%s device header write error: %s\n",
-                fname, strerror(errno));
+                fname, errno ? strerror(errno) : "incomplete");
         exit(1);
     }
 
@@ -236,7 +236,8 @@ U32             trksize;                /* DASD image track length   */
             {
                 fprintf (stderr,
                         "%s cylinder %lu head %lu write error: %s\n",
-                        fname, cyl, head, strerror(errno));
+                        fname, cyl, head,
+                        errno ? strerror(errno) : "incomplete");
                 exit(1);
             }
 
@@ -322,7 +323,8 @@ U32             maxsect;                /* Maximum sector count      */
         if (rc < sectsz)
         {
             fprintf (stderr, "%s sector %lu write error: %s\n",
-                    fname, sectnum, strerror(errno));
+                    fname, sectnum,
+                    errno ? strerror(errno) : "incomplete");
             exit(1);
         }
     } /* end for(sectnum) */

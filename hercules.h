@@ -295,6 +295,7 @@ typedef struct _DEVBLK {
 	/* Device dependent fields for tapedev */
 	BYTE	tapedevt;		/* Tape device type	     */
 	void   *omadesc;		/* -> OMA descriptor array   */
+	U16	omafiles;		/* Number of OMA tape files  */
 	U16	curfilen;		/* Current file number	     */
 	U16	curblklen;		/* Length of current block   */
 	long	curblkpos;		/* Offset from start of file
@@ -552,8 +553,8 @@ void branch_and_set_authority (int r1, int r2, REGS *regs);
 void branch_in_subspace_group (int r1, int r2, REGS *regs);
 
 /* Functions in module channel.c */
-int  start_io (DEVBLK *dev, U32 ccwaddr, int ccwfmt, BYTE ccwkey,
-	U32 ioparm, int suspctl, int suspsup, int intstat);
+int  start_io (DEVBLK *dev, U32 ioparm, BYTE orb4, BYTE orb5,
+	BYTE orb6, BYTE orb7, U32 ccwaddr);
 void *execute_ccw_chain (DEVBLK *dev);
 int  test_channel (REGS *regs, U16 chan);
 int  test_io (REGS *regs, DEVBLK *dev, BYTE ibyte);
@@ -590,11 +591,4 @@ DEVXF ckddasd_execute_ccw;
 /* Functions in module fbadasd.c */
 DEVIF fbadasd_init_handler;
 DEVXF fbadasd_execute_ccw;
-
-/* Functions in module dasdutil.c */
-void string_to_upper (BYTE *source);
-void string_to_lower (BYTE *source);
-void convert_to_ebcdic (BYTE *dest, int len, BYTE *source);
-int  make_asciiz (BYTE *dest, int destlen, BYTE *src, int srclen);
-void data_dump (void *addr, int len);
 

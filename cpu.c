@@ -399,12 +399,7 @@ PSA    *psa;                            /* -> prefixed storage area  */
 int     rc;                             /* Return code               */
 DEVBLK *dev;                            /* -> device block for SIO   */
 U32     ccwaddr;                        /* CCW address for start I/O */
-int     ccwfmt;                         /* CCW format (0 or 1)       */
-BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
 U32     ioparm;                         /* I/O interruption parameter*/
-int     suspctl;                        /* 1=Suspend/Resume allowed  */
-int     suspsup;                        /* 1=Suppress suspend intrupt*/
-int     intstat;                        /* 1=Initial status interrupt*/
 U16     xcode;                          /* Exception code            */
 #if defined(FEATURE_HALFWORD_IMMEDIATE) \
     || defined(FEATURE_RELATIVE_BRANCH)
@@ -418,6 +413,9 @@ U16     pkm;                            /* PSW key mask              */
 U16     pasn;                           /* Primary ASN               */
 U16     sasn;                           /* Secondary ASN             */
 #endif /*FEATURE_DUAL_ADDRESS_SPACE*/
+#ifdef FEATURE_S370_CHANNEL
+BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
+#endif /*FEATURE_S370_CHANNEL*/
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
 U32     ioid;                           /* I/O interruption address  */
 PMCW    pmcw;                           /* Path management ctl word  */
@@ -2524,15 +2522,9 @@ static BYTE module[8];                  /* Module name               */
         ccwkey = psa->caw[0] & 0xF0;
         ccwaddr = (psa->caw[1] << 16) | (psa->caw[2] << 8)
                         | psa->caw[3];
-        ccwfmt = 0;
-        ioparm = 0;
-        suspctl = 0;
-        suspsup = 0;
-        intstat = 0;
 
         /* Start the channel program and set the condition code */
-        regs->psw.cc = start_io (dev, ccwaddr, ccwfmt, ccwkey,
-                                ioparm, suspctl, suspsup, intstat);
+        regs->psw.cc = start_io (dev, 0, ccwkey, 0, 0, 0, ccwaddr);
 
         break;
 
@@ -4014,24 +4006,15 @@ static BYTE module[8];                  /* Module name               */
             /* Clear the path not operational mask */
             dev->pmcw.pnom = 0;
 
-            /* Set key, CCW format, CCW address, and I/O parameter */
-            ccwkey = orb.flag4 & ORB4_KEY;
-            ccwfmt = (orb.flag5 & ORB5_F) ? 1 : 0;
+            /* Extract CCW address and I/O parameter */
             ccwaddr = (orb.ccwaddr[0] << 24) | (orb.ccwaddr[1] << 16)
                         | (orb.ccwaddr[2] << 8) | orb.ccwaddr[3];
             ioparm = (orb.intparm[0] << 24) | (orb.intparm[1] << 16)
                         | (orb.intparm[2] << 8) | orb.intparm[3];
 
-            /* Extract from the ORB the suspend control bit,
-               the suppress suspended interruption control bit,
-               and the initial status interruption control bit */
-            suspctl = (orb.flag4 & ORB4_S) ? 1 : 0;
-            suspsup = (orb.flag5 & ORB5_U) ? 1 : 0;
-            intstat = (orb.flag5 & ORB5_I) ? 1 : 0;
-
             /* Start the channel program and set the condition code */
-            regs->psw.cc = start_io (dev, ccwaddr, ccwfmt, ccwkey,
-                                    ioparm, suspctl, suspsup, intstat);
+            regs->psw.cc = start_io (dev, ioparm, orb.flag4, orb.flag5,
+                                    orb.lpm, orb.flag7, ccwaddr);
 
             break;
 

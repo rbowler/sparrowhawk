@@ -13,17 +13,27 @@
 /*-------------------------------------------------------------------*/
 static void format_iobuf_data (U32 addr, BYTE *area)
 {
-BYTE *a;
+BYTE   *a;                              /* -> Byte in main storage   */
+int     i, j;                           /* Array subscripts          */
+BYTE    c;                              /* Character work area       */
 
     area[0] = '\0';
     if (addr < sysblk.mainsize - 16)
     {
         a = sysblk.mainstor + addr;
-        sprintf (area,
-                " Data=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X"
-                " %2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X",
+        j = sprintf (area,
+                "=>%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X"
+                " %2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X ",
                 a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7],
                 a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15]);
+
+        for (i = 0; i < 16; i++)
+        {
+            c = ebcdic_to_ascii[*a++];
+            if (!isprint(c)) c = '.';
+            area[j++] = c;
+        }
+        area[j] = '\0';
     }
 
 } /* end function format_iobuf_data */
@@ -33,7 +43,7 @@ BYTE *a;
 /*-------------------------------------------------------------------*/
 static void display_ccw (DEVBLK *dev, BYTE ccw[], U32 addr)
 {
-BYTE    area[64];
+BYTE    area[64];                       /* Data display area         */
 
     format_iobuf_data (addr, area);
     logmsg ("%4.4X:CCW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X%s\n",
@@ -166,6 +176,7 @@ U16     idalen;                         /* IDA data length           */
 BYTE    storkey;                        /* Storage key               */
 int     i, firstpage, lastpage;         /* 4K page numbers           */
 BYTE    readcmd;                        /* 1=READ, SENSE, or RDBACK  */
+BYTE    area[64];                       /* Data display area         */
 
     /* Exit if no bytes are to be copied */
     if (count == 0)
@@ -187,13 +198,6 @@ BYTE    readcmd;                        /* 1=READ, SENSE, or RDBACK  */
             /* Fetch the IDAW and set IDA pointer and length */
             fetch_idaw (code, ccwkey, idaseq, idawaddr,
                         &idadata, &idalen, chanstat);
-
-            /* Display the IDAW if CCW tracing is on */
-            if (dev->ccwtrace || dev->ccwstep)
-            {
-                logmsg ("%4.4X:IDAW@%8.8lX:%8.8lX len=%4.4X\n",
-                        dev->devnum, idawaddr, idadata, idalen);
-            }
 
             /* Exit if fetch_idaw detected channel program check */
             if (*chanstat != 0) return;
@@ -217,6 +221,14 @@ BYTE    readcmd;                        /* 1=READ, SENSE, or RDBACK  */
                 memcpy (sysblk.mainstor + idadata, iobuf, idalen);
             else
                 memcpy (iobuf, sysblk.mainstor + idadata, idalen);
+
+            /* Display the IDAW if CCW tracing is on */
+            if (dev->ccwtrace || dev->ccwstep)
+            {
+                format_iobuf_data (idadata, area);
+                logmsg ("%4.4X:IDAW=%8.8lX L=%4.4X %s\n",
+                        dev->devnum, idadata, idalen, area);
+            }
 
             /* Decrement remaining count, increment buffer pointer */
             idacount -= idalen;
@@ -268,21 +280,25 @@ BYTE    readcmd;                        /* 1=READ, SENSE, or RDBACK  */
 /*-------------------------------------------------------------------*/
 /* Input                                                             */
 /*      dev     -> Device control block                              */
-/*      ccwaddr Absolute address of start of channel program         */
-/*      ccwfmt  1=Format-1 CCWs, 0=Format-0 CCWs                     */
-/*      ccwkey  Bits 0-3 = Protect key; Bits 4-7 = zeroes            */
 /*      ioparm  I/O interruption parameter from ORB                  */
-/*      suspctl 1=Suspend/Resume allowed, 0=Suspend/Resume prohibited*/
-/*      suspsup 1=Suppress interruption on suspend                   */
-/*      intstat 1=Initial status interruption requested              */
+/*      orb4    ORB byte 4 (protect key and suspend control bit)     */
+/*      orb5    ORB byte 5 (CCW format, prefetch control, initial    */
+/*              status interrupt control, address limit checking,    */
+/*              and suppress suspend interrupt control bits)         */
+/*      orb6    ORB byte 6 (logical path mask)                       */
+/*      orb7    ORB byte 7 (incorrect length suppression control)    */
+/*      ccwaddr Absolute address of start of channel program         */
 /* Output                                                            */
 /*      The I/O parameters are stored in the device block, and a     */
 /*      thread is created to execute the CCW chain asynchronously.   */
 /*      The return value is the condition code for the SIO or        */
 /*      SSCH instruction.                                            */
+/* Note                                                              */
+/*      For S/370 SIO, only the protect key and CCW address are      */
+/*      valid, all other ORB parameters are set to zero.             */
 /*-------------------------------------------------------------------*/
-int start_io (DEVBLK *dev, U32 ccwaddr, int ccwfmt, BYTE ccwkey,
-                U32 ioparm, int suspctl, int suspsup, int intstat)
+int start_io (DEVBLK *dev, U32 ioparm, BYTE orb4, BYTE orb5,
+                BYTE orb6, BYTE orb7, U32 ccwaddr)
 {
 
     /* Obtain the device lock */
@@ -316,22 +332,24 @@ int start_io (DEVBLK *dev, U32 ccwaddr, int ccwfmt, BYTE ccwkey,
 
     /* Store the start I/O parameters in the device block */
     dev->ccwaddr = ccwaddr;
-    dev->ccwfmt = ccwfmt;
-    dev->ccwkey = ccwkey;
+    dev->ccwfmt = (orb5 & ORB5_F) ? 1 : 0;
+    dev->ccwkey = orb4 & ORB4_KEY;
 
     /* Initialize the subchannel status word */
     memset (&dev->scsw, 0, sizeof(SCSW));
     memset (&dev->pciscsw, 0, sizeof(SCSW));
-    dev->scsw.flag0 = (ccwkey & SCSW0_KEY);
-    if (suspctl) dev->scsw.flag0 |= SCSW0_S;
-    if (ccwfmt) dev->scsw.flag1 |= SCSW1_F;
-    if (suspsup) dev->scsw.flag1 |= SCSW1_U;
-    if (intstat) dev->scsw.flag1 |= SCSW1_Z;
+    dev->scsw.flag0 = (dev->ccwkey & SCSW0_KEY);
+    if (orb4 & ORB4_S) dev->scsw.flag0 |= SCSW0_S;
+    if (orb5 & ORB5_F) dev->scsw.flag1 |= SCSW1_F;
+    if (orb5 & ORB5_P) dev->scsw.flag1 |= SCSW1_P;
+    if (orb5 & ORB5_I) dev->scsw.flag1 |= SCSW1_I;
+    if (orb5 & ORB5_A) dev->scsw.flag1 |= SCSW1_A;
+    if (orb5 & ORB5_U) dev->scsw.flag1 |= SCSW1_U;
 
     /* Make the subchannel start-pending */
     dev->scsw.flag2 = SCSW2_FC_START | SCSW2_AC_START;
 
-    /* Initialize the path management control word */
+    /* Copy the I/O parameter to the path management control word */
     dev->pmcw.intparm[0] = (ioparm >> 24) & 0xFF;
     dev->pmcw.intparm[1] = (ioparm >> 16) & 0xFF;
     dev->pmcw.intparm[2] = (ioparm >> 8) & 0xFF;
@@ -360,7 +378,7 @@ void *execute_ccw_chain (DEVBLK *dev)
 {
 U32     ccwaddr = dev->ccwaddr;         /* Address of CCW            */
 int     ccwfmt = dev->ccwfmt;           /* CCW format (0 or 1)       */
-BYTE    ccwkey = dev->ccwkey;           /* Protection key            */
+BYTE    ccwkey = dev->ccwkey;           /* Bits 0-3=key, 4-7=zero    */
 BYTE    storkey;                        /* Storage key               */
 BYTE    code = 0;                       /* CCW operation code        */
 BYTE    flags;                          /* CCW flags                 */
@@ -383,7 +401,6 @@ BYTE    area[64];                       /* Message area              */
 DEVXF  *devexec;                        /* -> Execute CCW function   */
 int     ccwseq = 0;                     /* CCW sequence number       */
 int     bufpos = 0;                     /* Position in I/O buffer    */
-int     n;                              /* Integer work area         */
 BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
     /* Point to the device handler for this device */
@@ -397,7 +414,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
     /* Generate an initial status I/O interruption if requested */
-    if (dev->scsw.flag1 & SCSW1_Z)
+    if (dev->scsw.flag1 & SCSW1_I)
     {
         /* Obtain the device lock */
         obtain_lock (&dev->lock);
@@ -407,6 +424,9 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         dev->scsw.ccwaddr[1] = (ccwaddr & 0xFF0000) >> 16;
         dev->scsw.ccwaddr[2] = (ccwaddr & 0xFF00) >> 8;
         dev->scsw.ccwaddr[3] = ccwaddr & 0xFF;
+
+        /* Set the zero condition-code flag in the SCSW */
+        dev->scsw.flag1 |= SCSW1_Z;
 
         /* Set intermediate status in the SCSW */
         dev->scsw.flag3 = SCSW3_SC_INTER | SCSW3_SC_PEND;
@@ -544,7 +564,13 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         /* Suspend channel program if suspend flag is set */
         if (flags & CCW_FLAGS_SUSP)
         {
-/*debug*/   dev->ccwtrace = 1;
+///*debug*/ /* Trace the CCW if not already done */
+///*debug*/ if (!(dev->ccwtrace || dev->ccwstep || tracethis))
+///*debug*/ {
+///*debug*/     display_ccw (dev, ccw, addr);
+///*debug*/     tracethis = 1;
+///*debug*/ }
+
             /* Channel program check if the ORB suspend control bit
                was zero, or if this is a data chained CCW */
             if ((dev->scsw.flag0 & SCSW0_S) == 0
@@ -562,9 +588,12 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             {
                 /* Set the subchannel status word to suspended */
                 dev->scsw.flag3 = SCSW3_AC_SUSP
-                                    | SCSW3_SC_ALERT | SCSW3_SC_INTER
-                                    | SCSW3_SC_PRI | SCSW3_SC_SEC
+                                    | SCSW3_SC_INTER
                                     | SCSW3_SC_PEND;
+                dev->scsw.unitstat = 0;
+                dev->scsw.chanstat = 0;
+                dev->scsw.count[0] = count >> 8;
+                dev->scsw.count[1] = count & 0xFF;
 
                 /* Generate I/O interrupt unless the ORB specified
                    that suspend interrupts are to be suppressed */
@@ -586,14 +615,14 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
                 }
 
                 /* Suspend the device until resume instruction */
-                if (dev->ccwtrace || dev->ccwstep)
+                if (dev->ccwtrace || dev->ccwstep || tracethis)
                     logmsg ("channel: Device %4.4X suspended\n",
                             dev->devnum);
 
                 while ((dev->scsw.flag2 & SCSW2_AC_RESUM) == 0)
                     wait_condition (&dev->resumecond, &dev->lock);
 
-                if (dev->ccwtrace || dev->ccwstep)
+                if (dev->ccwtrace || dev->ccwstep || tracethis)
                     logmsg ("channel: Device %4.4X resumed\n",
                             dev->devnum);
 
@@ -634,8 +663,14 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             /* Set PCI interrupt pending flag */
             dev->pcipending = 1;
 
-// /*debug*/logmsg ("%4.4X: PCI flag on CCW %2.2X\n",
-// /*debug*/        dev->devnum, code);
+///*debug*/ /* Trace the CCW if not already done */
+///*debug*/ if (!(dev->ccwtrace || dev->ccwstep || tracethis))
+///*debug*/ {
+///*debug*/     display_ccw (dev, ccw, addr);
+///*debug*/     tracethis = 1;
+///*debug*/ }
+///*debug*/ logmsg ("%4.4X: PCI flag set\n", dev->devnum);
+
 #ifdef FEATURE_S370_CHANNEL
             /* Save the PCI CSW replacing any previous pending PCI */
             dev->pcicsw[0] = ccwkey;
@@ -646,7 +681,6 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             dev->pcicsw[5] = CSW_PCI;
             dev->pcicsw[6] = 0;
             dev->pcicsw[7] = 0;
-// /*debug*/display_csw (dev, dev->pcicsw);
 #endif /*FEATURE_S370_CHANNEL*/
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
@@ -664,7 +698,6 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             dev->pciscsw.chanstat = CSW_PCI;
             dev->pciscsw.count[0] = 0;
             dev->pciscsw.count[1] = 0;
-// /*debug*/display_scsw (dev, dev->pciscsw);
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
             /* Release the device lock */
@@ -871,7 +904,8 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
     /* Complete the subchannel status word */
-    dev->scsw.flag3 = SCSW3_SC_PRI | SCSW3_SC_SEC | SCSW3_SC_PEND;
+    dev->scsw.flag3 &= ~(SCSW3_AC_SCHAC | SCSW3_AC_DEVAC);
+    dev->scsw.flag3 |= (SCSW3_SC_PRI | SCSW3_SC_SEC | SCSW3_SC_PEND);
     dev->scsw.ccwaddr[0] = (ccwaddr & 0x7F000000) >> 24;
     dev->scsw.ccwaddr[1] = (ccwaddr & 0xFF0000) >> 16;
     dev->scsw.ccwaddr[2] = (ccwaddr & 0xFF00) >> 8;
@@ -897,10 +931,9 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
     {
         dev->scsw.flag1 |= SCSW1_E;
         dev->esw.erw0 |= ERW0_S;
-        n = (dev->numsense < sizeof(dev->ecw)) ?
-                dev->numsense : sizeof(dev->ecw);
-        dev->esw.erw1 = n;
-        memcpy (dev->ecw, dev->sense, n);
+        dev->esw.erw1 = (dev->numsense < sizeof(dev->ecw)) ?
+                        dev->numsense : sizeof(dev->ecw);
+        memcpy (dev->ecw, dev->sense, dev->esw.erw1 & ERW1_SCNT);
         memset (dev->sense, 0, sizeof(dev->sense));
     }
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
@@ -1065,7 +1098,9 @@ int     cc;                             /* Condition code            */
     /* Return PCI SCSW if PCI status is pending */
     if (dev->pciscsw.flag3 & SCSW3_SC_PEND)
     {
-//      /*debug*/logmsg ("%4.4X: PCI SCSW stored\n", dev->devnum);
+        /* Display the subchannel status word */
+        if (dev->ccwtrace || dev->ccwstep)
+            display_scsw (dev, dev->pciscsw);
 
         /* Copy the PCI SCSW to the IRB */
         irb->scsw = dev->pciscsw;
@@ -1109,8 +1144,48 @@ int     cc;                             /* Condition code            */
         if (dev->ccwtrace || dev->ccwstep)
             display_scsw (dev, dev->scsw);
 
-        /* Clear the subchannel status bits in the device block */
-        dev->scsw.flag2 &= ~(SCSW2_FC | SCSW2_AC);
+        /* [14.3.13] If status is anything other than intermediate with
+           pending then clear the function control, activity control,
+           status control, and path not-operational bits in the SCSW */
+        if ((dev->scsw.flag3 & SCSW3_SC)
+                                != (SCSW3_SC_INTER | SCSW3_SC_PEND))
+        {
+            dev->scsw.flag2 &= ~(SCSW2_FC | SCSW2_AC);
+            dev->scsw.flag3 &= ~(SCSW3_AC_SUSP);
+            dev->scsw.flag1 &= ~(SCSW1_N);
+        }
+        else
+        {
+            /* [14.3.13] Clear the function control bits if function
+               code is halt and the channel program is suspended */
+            if ((dev->scsw.flag2 & SCSW2_FC_HALT)
+                && (dev->scsw.flag3 & SCSW3_AC_SUSP))
+                dev->scsw.flag2 &= ~(SCSW2_FC);
+
+            /* [14.3.13] Clear the activity control bits if function
+               code is start+halt and channel program is suspended */
+            if ((dev->scsw.flag2 & (SCSW2_FC_START | SCSW2_FC_HALT))
+                                    == (SCSW2_FC_START | SCSW2_FC_HALT)
+                && (dev->scsw.flag3 & SCSW3_AC_SUSP))
+            {
+                dev->scsw.flag2 &= ~(SCSW2_AC);
+                dev->scsw.flag3 &= ~(SCSW3_AC_SUSP);
+                dev->scsw.flag1 &= ~(SCSW1_N);
+            }
+
+            /* [14.3.13] Clear the resume pending bit if function code
+               is start without halt and channel program suspended */
+            if ((dev->scsw.flag2 & (SCSW2_FC_START | SCSW2_FC_HALT))
+                                        == SCSW2_FC_START
+                && (dev->scsw.flag3 & SCSW3_AC_SUSP))
+            {
+                dev->scsw.flag2 &= ~(SCSW2_AC_RESUM);
+                dev->scsw.flag1 &= ~(SCSW1_N);
+            }
+
+        } /* end if(INTER+PEND) */
+
+        /* Clear the status bits in the SCSW */
         dev->scsw.flag3 &= ~(SCSW3_SC);
 
         /* Signal console thread to redrive select */
@@ -1122,7 +1197,7 @@ int     cc;                             /* Condition code            */
     else
     {
         /* Wait for one microsecond */
-//      yield ();
+        yield ();
 
         /* Set condition code 1 if status not pending */
         cc = 1;
@@ -1204,6 +1279,7 @@ int resume_subchan (REGS *regs, DEVBLK *dev)
     /* Set condition code 1 if subchannel has status pending */
     if (dev->scsw.flag3 & SCSW3_SC_PEND)
     {
+        logmsg ("%4.4X: Resume subchannel: cc=1\n", dev->devnum);
         release_lock (&dev->lock);
         return 1;
     }
@@ -1215,6 +1291,7 @@ int resume_subchan (REGS *regs, DEVBLK *dev)
         || (dev->scsw.flag2 & SCSW2_AC_RESUM)
         || (dev->scsw.flag0 & SCSW0_S) == 0)
     {
+        logmsg ("%4.4X: Resume subchannel: cc=2\n", dev->devnum);
         release_lock (&dev->lock);
         return 2;
     }
@@ -1226,6 +1303,7 @@ int resume_subchan (REGS *regs, DEVBLK *dev)
     /* Set the resume pending flag and signal the subchannel */
     dev->scsw.flag2 |= SCSW2_AC_RESUM;
     signal_condition (&dev->resumecond);
+//  logmsg ("%4.4X: Resume subchannel: cc=0\n", dev->devnum);
 
     /* Release the device lock */
     release_lock (&dev->lock);
@@ -1346,8 +1424,6 @@ DEVBLK *dev;                            /* -> Device control block   */
     /* Reset the interrupt pending flag for the device */
     if (dev->pcipending)
     {
-//      /*debug*/logmsg ("%4.4X: PCI interrupt presented\n",
-//      /*debug*/       dev->devnum);
         dev->pcipending = 0;
     }
     else

@@ -11,6 +11,11 @@
 /* all messages to a log file if stdout is redirected.               */
 /*-------------------------------------------------------------------*/
 
+/*-------------------------------------------------------------------*/
+/* Additional credits:                                               */
+/*      Breakpoint command contributed by Dan Horak                  */
+/*-------------------------------------------------------------------*/
+
 #include "hercules.h"
 
 /*-------------------------------------------------------------------*/
@@ -408,7 +413,7 @@ BYTE    newval[32];                     /* Storage alteration value  */
             "stop=stop CPU, start=start CPU, restart=PSW restart\n"
             "loadcore filename=load core image from file\n"
             "loadparm xxxxxxxx=set IPL parameter, ipl devn=IPL\n"
-            "quit=terminate\n");
+            "quit/exit=terminate\n");
         return NULL;
     }
 
@@ -771,10 +776,15 @@ BYTE    newval[32];                     /* Storage alteration value  */
         {
             memset (sysblk.loadparm, 0x4B, 8);
             for (i = 0; i < strlen(loadparm) && i < 8; i++)
-                sysblk.loadparm[i] = ascii_to_ebcdic[loadparm[i]];
+            {
+                c = loadparm[i];
+                c = toupper(c);
+                if (!isprint(c)) c = '.';
+                sysblk.loadparm[i] = ascii_to_ebcdic[c];
+            }
         }
         /* Display IPL parameter */
-        logmsg ("Loadparm=%c%c%c%c%c%c%c%c\n",
+        logmsg ("LOADPARM=%c%c%c%c%c%c%c%c\n",
                 ebcdic_to_ascii[sysblk.loadparm[0]],
                 ebcdic_to_ascii[sysblk.loadparm[1]],
                 ebcdic_to_ascii[sysblk.loadparm[2]],
@@ -803,8 +813,8 @@ BYTE    newval[32];                     /* Storage alteration value  */
         return NULL;
     }
 
-    /* quit command - terminate the emulator */
-    if (strcmp(cmd,"quit") == 0)
+    /* quit or exit command - terminate the emulator */
+    if (strcmp(cmd,"quit") == 0 || strcmp(cmd,"exit") == 0)
     {
         exit(0);
     }

@@ -664,7 +664,8 @@ int             rc;                     /* Return code               */
     if (rc < trklen)
     {
         XMERRF ("%s cyl %u head %u write error: %s\n",
-                ofname, *cyl, *head, strerror(errno));
+                ofname, *cyl, *head,
+                errno ? strerror(errno) : "incomplete");
         return -1;
     }
 

@@ -126,6 +126,11 @@
 #define MESSAGE_E               14      /* Message E                 */
 #define MESSAGE_F               15      /* Message F                 */
 
+/*-------------------------------------------------------------------*/
+/* Definitions for Read Configuration Data command                   */
+/*-------------------------------------------------------------------*/
+#define CONFIG_DATA_SIZE        256     /* Number of bytes returned
+                                           by Read Config Data CCW   */
 
 /*-------------------------------------------------------------------*/
 /* Static data areas                                                 */
@@ -329,6 +334,11 @@ U32             sctlfeat;               /* Storage control features  */
     dev->devid[4] = dev->devtype >> 8;
     dev->devid[5] = dev->devtype & 0xFF;
     dev->devid[6] = devmodel;
+    dev->devid[7] = 0x00;
+    dev->devid[8] = 0x40;
+    dev->devid[9] = 0xFA; /* Read Config Data CCW opcode */
+    dev->devid[10] = CONFIG_DATA_SIZE >> 8;
+    dev->devid[11] = CONFIG_DATA_SIZE & 0xFF;
     dev->numdevid = 7;
 
     /* Initialize the device characteristics bytes */
@@ -576,7 +586,7 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
 
     /* File protect error if not within domain of Locate Record
        and file mask inhibits seek and multitrack operations */
-    if (dev->ckdlocat == 0 &&
+    if (dev->ckdlcount == 0 &&
         (dev->ckdfmask & CKDMASK_SKCTL) == CKDMASK_SKCTL_INHSMT)
     {
         ckd_build_sense (dev, 0, SENSE1_FP, 0, 0, 0);
@@ -586,7 +596,7 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
 
     /* End of cylinder error if not within domain of Locate Record
        and current track is last track of cylinder */
-    if (dev->ckdlocat == 0
+    if (dev->ckdlcount == 0
         && dev->ckdcurhead >= dev->ckdheads - 1)
     {
         ckd_build_sense (dev, 0, SENSE1_EOC, 0, 0, 0);
@@ -1198,7 +1208,7 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
         /* Command reject if preceded by a Define Extent or
            Set File Mask, or within the domain of a Locate Record */
-        if (dev->ckdxtdef || dev->ckdsetfm || dev->ckdlocat)
+        if (dev->ckdxtdef || dev->ckdsetfm || dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -1261,7 +1271,7 @@ BYTE            key[256];               /* Key for search operations */
     /* CONTROL NO-OPERATION                                          */
     /*---------------------------------------------------------------*/
         /* Command reject if within the domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -1277,6 +1287,15 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
     /* RESTORE                                                       */
     /*---------------------------------------------------------------*/
+        /* Command reject if within the domain of a Locate Record */
+        if (dev->ckdlcount > 0)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
         /* Return normal status */
         *unitstat = CSW_CE | CSW_DE;
         break;
@@ -1300,7 +1319,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Check operation code if within domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             if (!((dev->ckdloper & CKDOPER_CODE) == CKDOPER_RDDATA
                   || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_RDANY
@@ -1362,7 +1381,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Check operation code if within domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             if (!((dev->ckdloper & CKDOPER_CODE) == CKDOPER_RDDATA
                   || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_RDANY
@@ -1427,13 +1446,14 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Check operation code if within domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             if (!((dev->ckdloper & CKDOPER_CODE) == CKDOPER_RDDATA
                   || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_RDANY
                   || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_READ
                   || ((dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRITE
-                      && (dev->ckdlaux & CKDLAUX_RDCNTSUF))))
+                      && (dev->ckdlaux & CKDLAUX_RDCNTSUF)
+                      && dev->ckdlcount == 1)))
             {
                 ckd_build_sense (dev, SENSE_CR, 0, 0,
                                 FORMAT_0, MESSAGE_2);
@@ -1482,7 +1502,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Check operation code if within domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             if (!((dev->ckdloper & CKDOPER_CODE) == CKDOPER_RDDATA
                   || ((dev->ckdloper & CKDOPER_CODE) == CKDOPER_READ
@@ -1501,7 +1521,7 @@ BYTE            key[256];               /* Key for search operations */
 
         /* For multitrack operation outside domain of a Locate Record,
            attempt to advance to the next track before reading R0 */
-        if ((code & 0x80) && dev->ckdlocat == 0)
+        if ((code & 0x80) && dev->ckdlcount == 0)
         {
             rc = mt_advance (dev, unitstat);
             if (rc < 0) break;
@@ -1567,7 +1587,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Check operation code if within domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             if (!((dev->ckdloper & CKDOPER_CODE) == CKDOPER_RDDATA
                   || ((dev->ckdloper & CKDOPER_CODE) == CKDOPER_READ
@@ -1584,7 +1604,7 @@ BYTE            key[256];               /* Key for search operations */
 
         /* For multitrack operation outside domain of a Locate Record,
            attempt to advance to the next track before reading HA */
-        if ((code & 0x80) && dev->ckdlocat == 0)
+        if ((code & 0x80) && dev->ckdlcount == 0)
         {
             rc = mt_advance (dev, unitstat);
             if (rc < 0) break;
@@ -1632,7 +1652,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Check operation code if within domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             if (!((dev->ckdloper & CKDOPER_CODE) == CKDOPER_RDDATA
                   || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_RDANY
@@ -1685,8 +1705,12 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
     /* READ MULTIPLE COUNT KEY AND DATA                              */
     /*---------------------------------------------------------------*/
-        /* Command reject if within the domain of a Locate Record */
-        if (dev->ckdlocat)
+        /* For 3990, command reject if not preceded by Seek, Seek Cyl,
+           Locate Record, Read IPL, or Recalibrate */
+        if (dev->ckd3990
+            && dev->ckdseek == 0 && dev->ckdskcyl == 0
+            && dev->ckdlocat == 0 && dev->ckdrdipl == 0
+            && dev->ckdrecal == 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -1694,12 +1718,8 @@ BYTE            key[256];               /* Key for search operations */
             break;
         }
 
-        /* For 3990, command reject if not preceded by Seek, Seek Cyl,
-           Locate Record, Read IPL, or Recalibrate */
-        if (dev->ckd3990
-            && dev->ckdseek == 0 && dev->ckdskcyl == 0
-            && dev->ckdlocat == 0 && dev->ckdrdipl == 0
-            && dev->ckdrecal == 0)
+        /* Command reject if within the domain of a Locate Record */
+        if (dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -1754,7 +1774,7 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
         /* Command reject if not within the domain of a Locate Record
            that specifies a read tracks operation */
-        if (dev->ckdlocat == 0
+        if (dev->ckdlcount == 0
             || (dev->ckdloper & CKDOPER_CODE) != CKDOPER_RDTRKS)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
@@ -1829,7 +1849,7 @@ BYTE            key[256];               /* Key for search operations */
     /* SEEK                                                          */
     /*---------------------------------------------------------------*/
         /* Command reject if within the domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -1931,7 +1951,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Command reject if within the domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -1975,7 +1995,7 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
         /* Command reject if preceded by a Define Extent or
            Set File Mask, or within the domain of a Locate Record */
-        if (dev->ckdxtdef || dev->ckdsetfm || dev->ckdlocat)
+        if (dev->ckdxtdef || dev->ckdsetfm || dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -2019,8 +2039,17 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
     /* READ SECTOR                                                   */
     /*---------------------------------------------------------------*/
+        /* Command reject if non-RPS device */
+        if (dev->ckdsectors == 0)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_1);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
         /* Command reject if within the domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -2044,8 +2073,17 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
     /* SET SECTOR                                                    */
     /*---------------------------------------------------------------*/
+        /* Command reject if non-RPS device */
+        if (dev->ckdsectors == 0)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_1);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
         /* Command reject if within the domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -2103,7 +2141,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Command reject if within the domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -2143,10 +2181,11 @@ BYTE            key[256];               /* Key for search operations */
            name and can provide useful debugging information */
         if (*unitstat & CSW_SM)
         {
-            BYTE module[8]; int i;
-            for (i=0; i < 8; i++)
+            BYTE module[45]; int i;
+            for (i=0; i < sizeof(module)-1 && i < num; i++)
                 module[i] = ebcdic_to_ascii[iobuf[i]];
-            logmsg ("ckddasd: search key %8.8s\n", module);
+            module[i] = '\0';
+            logmsg ("ckddasd: search key %s\n", module);
         }
 #endif /*CKD_KEY_TRACING*/
 
@@ -2178,7 +2217,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Command reject if within the domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -2231,7 +2270,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Command reject if within the domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -2291,7 +2330,7 @@ BYTE            key[256];               /* Key for search operations */
            /*INCOMPLETE*/ /*Write CKD allows intervening Read/Write
              key and data commands, Write Data does not!!! Rethink
              the handling of these flags*/
-        if (dev->ckdlocat == 0 && dev->ckdideq == 0
+        if (dev->ckdlcount == 0 && dev->ckdideq == 0
             && dev->ckdkyeq == 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
@@ -2310,7 +2349,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Check operation code if within domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             if (!(((dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRITE
                        && dev->ckdlcount ==
@@ -2344,7 +2383,7 @@ BYTE            key[256];               /* Key for search operations */
                     break;
                 }
             }
-        } /* end if(ckdlocat) */
+        } /* end if(ckdlcount) */
 
         /* If data length is zero, terminate with unit exception */
         if (dev->ckdcurdl == 0)
@@ -2386,7 +2425,7 @@ BYTE            key[256];               /* Key for search operations */
            /*INCOMPLETE*/ /*Write CKD allows intervening Read/Write
              key and data commands, Write Key Data does not!!! Rethink
              the handling of these flags*/
-        if (dev->ckdlocat == 0 && dev->ckdideq == 0)
+        if (dev->ckdlcount == 0 && dev->ckdideq == 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -2404,7 +2443,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Check operation code if within domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             if (!(((dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRITE
                        && dev->ckdlcount ==
@@ -2427,7 +2466,7 @@ BYTE            key[256];               /* Key for search operations */
                 *unitstat = CSW_CE | CSW_DE | CSW_UC;
                 break;
             }
-        } /* end if(ckdlocat) */
+        } /* end if(ckdlcount) */
 
         /* If data length is zero, terminate with unit exception */
         if (dev->ckdcurdl == 0)
@@ -2467,7 +2506,7 @@ BYTE            key[256];               /* Key for search operations */
            and not preceded by either a Search Home Address that
            compared equal on all 4 bytes, or a Write Home Address not
            within the domain of a Locate Record */
-        if (dev->ckdlocat == 0 && dev->ckdhaeq == 0)
+        if (dev->ckdlcount == 0 && dev->ckdhaeq == 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -2485,7 +2524,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Check operation code if within domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             if (!((dev->ckdloper & CKDOPER_CODE) == CKDOPER_FORMAT
                     && ((dev->ckdloper & CKDOPER_ORIENTATION)
@@ -2514,7 +2553,7 @@ BYTE            key[256];               /* Key for search operations */
         *unitstat = CSW_CE | CSW_DE;
 
         /* Set flag if Write R0 outside domain of a locate record */
-        if (dev->ckdlocat == 0)
+        if (dev->ckdlcount == 0)
             dev->ckdwckd = 1;
         else
             dev->ckdwckd = 0;
@@ -2541,7 +2580,7 @@ BYTE            key[256];               /* Key for search operations */
            and not preceded by either a Search ID Equal or Search Key
            Equal that compared equal on all bytes, or a Write R0 or
            Write CKD not within the domain of a Locate Record */
-        if (dev->ckdlocat == 0 && dev->ckdideq == 0
+        if (dev->ckdlcount == 0 && dev->ckdideq == 0
             && dev->ckdkyeq == 0 && dev->ckdwckd == 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
@@ -2561,7 +2600,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Check operation code if within domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             if (!((dev->ckdloper & CKDOPER_CODE) == CKDOPER_FORMAT
                   || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRTTRK))
@@ -2586,7 +2625,7 @@ BYTE            key[256];               /* Key for search operations */
         *unitstat = CSW_CE | CSW_DE;
 
         /* Set flag if Write CKD outside domain of a locate record */
-        if (dev->ckdlocat == 0)
+        if (dev->ckdlcount == 0)
             dev->ckdwckd = 1;
         else
             dev->ckdwckd = 0;
@@ -2599,7 +2638,7 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
         /* Command reject if not within the domain of a Locate Record
            that specifies a format write operation */
-        if (dev->ckdlocat == 0
+        if (dev->ckdlcount == 0
             || (dev->ckdloper & CKDOPER_CODE) != CKDOPER_FORMAT)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
@@ -2660,7 +2699,7 @@ BYTE            key[256];               /* Key for search operations */
 
         /* Command reject if within the domain of a Locate Record,
            or not preceded by a Define Extent or Read IPL command */
-        if (dev->ckdlocat
+        if (dev->ckdlcount > 0
             || (dev->ckdxtdef == 0 && dev->ckdrdipl == 0))
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
@@ -2901,7 +2940,7 @@ BYTE            key[256];               /* Key for search operations */
         /* Command reject if within the domain of a Locate Record, or
            preceded by Define Extent, Space Count, or Set File Mask,
            or (for 3390 only) preceded by Read IPL */
-        if (dev->ckdlocat
+        if (dev->ckdlcount > 0
             || dev->ckdxtdef || dev->ckdspcnt || dev->ckdsetfm
             || (dev->ckdrdipl && dev->devtype == 0x3390))
         {
@@ -2994,7 +3033,7 @@ BYTE            key[256];               /* Key for search operations */
     /* READ DEVICE CHARACTERISTICS                                   */
     /*---------------------------------------------------------------*/
         /* Command reject if within the domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -3019,7 +3058,7 @@ BYTE            key[256];               /* Key for search operations */
     /*---------------------------------------------------------------*/
         /* Command reject if within the domain of a Locate Record
            or if chained from any other CCW */
-        if (dev->ckdlocat || chained)
+        if (dev->ckdlcount > 0 || chained)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -3049,7 +3088,7 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Command reject if within the domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -3098,7 +3137,7 @@ BYTE            key[256];               /* Key for search operations */
         /* Command reject if within the domain of a Locate Record, or
            preceded by Define Extent, Space Count, or Set File Mask,
            or (for 3390 only) preceded by Read IPL */
-        if (dev->ckdlocat
+        if (dev->ckdlcount > 0
             || dev->ckdxtdef || dev->ckdspcnt || dev->ckdsetfm
             || (dev->ckdrdipl && dev->devtype == 0x3390))
         {
@@ -3119,7 +3158,7 @@ BYTE            key[256];               /* Key for search operations */
         /* Command reject if within the domain of a Locate Record,
            or indeed if preceded by any command at all apart from
            Suspend Multipath Reconnection */
-        if (dev->ckdlocat
+        if (dev->ckdlcount > 0
             || ccwseq > 1
             || (chained && prevcode != 0x5B))
         {
@@ -3137,7 +3176,7 @@ BYTE            key[256];               /* Key for search operations */
     /* SENSE                                                         */
     /*---------------------------------------------------------------*/
         /* Command reject if within the domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -3165,7 +3204,7 @@ BYTE            key[256];               /* Key for search operations */
     /* SENSE ID                                                      */
     /*---------------------------------------------------------------*/
         /* Command reject if within the domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -3194,7 +3233,7 @@ BYTE            key[256];               /* Key for search operations */
            is Read Device Characteristics, Read Configuration Data, or
            a Suspend Multipath Reconnection command that was the first
            command in the chain */
-        if (dev->ckdlocat
+        if (dev->ckdlcount > 0
             || (chained && prevcode != 0x64 && prevcode != 0xFA
                 && prevcode != 0x5B)
             || (chained && prevcode == 0x5B && ccwseq > 1))
@@ -3223,7 +3262,7 @@ BYTE            key[256];               /* Key for search operations */
     /* READ CONFIGURATION DATA                                       */
     /*---------------------------------------------------------------*/
         /* Command reject if within the domain of a Locate Record */
-        if (dev->ckdlocat)
+        if (dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -3232,12 +3271,12 @@ BYTE            key[256];               /* Key for search operations */
         }
 
         /* Calculate residual byte count */
-        num = (count < 256) ? count : 256;
+        num = (count < CONFIG_DATA_SIZE) ? count : CONFIG_DATA_SIZE;
         *residual = count - num;
-        if (count < 256) *more = 1;
+        if (count < CONFIG_DATA_SIZE) *more = 1;
 
         /* Clear the configuration data area */
-        memset (iobuf, 0x00, 256);
+        memset (iobuf, 0x00, CONFIG_DATA_SIZE);
 
         /* Bytes 0-31 contain node element descriptor 1 (HDA) data */
         iobuf[0] = 0xC0;
@@ -3254,7 +3293,7 @@ BYTE            key[256];               /* Key for search operations */
         /* Bytes 128-223 contain zeroes */
 
         /* Bytes 224-255 contain node element qualifier data */
-        iobuf[96] = 0x80;
+        iobuf[224] = 0x80;
 
         /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;
@@ -3298,14 +3337,10 @@ BYTE            key[256];               /* Key for search operations */
 
     /* If within the domain of a locate record then decrement the
        count of CCWs remaining to be processed within the domain */
-    if (dev->ckdlocat && code != 0x047)
+    if (dev->ckdlcount > 0 && code != 0x047)
     {
-        if (dev->ckdlcount > 0)
-            dev->ckdlcount--;
-
-        /* Reset flag if no more CCWs in the domain */
-        if (dev->ckdlcount == 0)
-            dev->ckdlocat = 0;
+        /* Decrement the count of CCWs remaining in the domain */
+        dev->ckdlcount--;
 
         /* Command reject with incomplete domain if CCWs remain
            but command chaining is not specified */
@@ -3314,7 +3349,7 @@ BYTE            key[256];               /* Key for search operations */
             ckd_build_sense (dev, SENSE_CR | SENSE_OC, 0, 0, 0, 0);
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
         }
-    } /* end if(ckdlocat) */
+    } /* end if(ckdlcount) */
 
 } /* end function ckddasd_execute_ccw */
 

@@ -6,13 +6,13 @@
 #	make ARCH=390
 #
 
-VERSION  = 1.39
+VERSION  = 1.40
 
 CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=$(ARCH)
 #	   -march=pentium -malign-double -mwide-multiply
 LFLAGS	 = -lpthread
 
-EXEFILES = hercules dasdinit dasdload dasdpdsu tapecopy
+EXEFILES = hercules dasdinit dasdisup dasdload dasdpdsu tapecopy
 
 TARFILES = makefile *.c *.h hercules.cnf tapeconv.jcl dasdlist
 
@@ -22,6 +22,8 @@ HRC_OBJS = impl.o config.o panel.o ipl.o cpu.o assist.o \
 	   tapedev.o cardrdr.o printer.o console.o
 
 DIN_OBJS = dasdinit.o dasdutil.o
+
+DIS_OBJS = dasdisup.o dasdutil.o
 
 DLD_OBJS = dasdload.o dasdutil.o
 
@@ -34,10 +36,13 @@ HEADERS  = hercules.h esa390.h
 all:	   $(EXEFILES)
 
 hercules:  $(HRC_OBJS)
-	cc $(LFLAGS) -o hercules $(HRC_OBJS)
+	cc -o hercules $(HRC_OBJS) $(LFLAGS)
 
 dasdinit:  $(DIN_OBJS)
 	cc -o dasdinit $(DIN_OBJS)
+
+dasdisup:  $(DIS_OBJS)
+	cc -o dasdisup $(DIS_OBJS)
 
 dasdload:  $(DLD_OBJS)
 	cc -o dasdload $(DLD_OBJS)
@@ -87,6 +92,8 @@ ckddasd.o: ckddasd.c $(HEADERS)
 fbadasd.o: fbadasd.c $(HEADERS)
 
 dasdinit.o: dasdinit.c $(HEADERS) dasdblks.h makefile
+
+dasdisup.o: dasdisup.c $(HEADERS) dasdblks.h makefile
 
 dasdload.o: dasdload.c $(HEADERS) dasdblks.h makefile
 
