@@ -393,6 +393,19 @@ typedef struct _PSA {			/* Prefixed storage area     */
 /*0E8*/ DWORD mckint;			/* Machine check int code    */
 } PSA;
 
+/* Bit settings for translation exception address */
+#define TEA_SECADDR	0x80000000	/* Secondary address	     */
+#define TEA_EFFADDR	0x7FFFF000	/* Effective address	     */
+#define TEA_PROT_AP	0x00000004	/* Access-list/page protected*/
+#define TEA_ST		0x00000003	/* Segment table indication..*/
+#define TEA_ST_PRIMARY	0x00000000	/* ..primary segment table   */
+#define TEA_ST_ARMODE	0x00000001	/* ..access register mode    */
+#define TEA_ST_SECNDRY	0x00000002	/* ..secondary segment table */
+#define TEA_ST_HOME	0x00000003	/* ..home segment table      */
+#define TEA_SSEVENT	0x80000000	/* Space switch event bit    */
+#define TEA_ASN 	0x0000FFFF	/* Address space number      */
+#define TEA_PCN 	0x000FFFFF	/* Program call number	     */
+
 /* Program interruption codes */
 #define PGM_OPERATION_EXCEPTION 			0x0001
 #define PGM_PRIVILEGED_OPERATION_EXCEPTION		0x0002

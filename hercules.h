@@ -21,6 +21,7 @@
 #include <fcntl.h>
 #include <termios.h>
 #include <sys/types.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
@@ -254,7 +255,9 @@ typedef struct _DEVBLK {
 		readpending:1,		/* 1=Console read pending    */
 		pcipending:1,		/* 1=PCI interrupt pending   */
 		ccwtrace:1,		/* 1=CCW trace		     */
-		ccwstep:1;		/* 1=CCW single step	     */
+		ccwstep:1,		/* 1=CCW single step	     */
+		cdwmerge:1;		/* 1=Channel will merge data
+					     chained write CCWs      */
 	PMCW	pmcw;			/* Path management ctl word  */
 	SCSW	scsw;			/* Subchannel status word(XA)*/
 	SCSW	pciscsw;		/* PCI subchannel status word*/
@@ -461,7 +464,7 @@ int  authorize_asn (U16 ax, U32 aste[], int atemask, REGS *regs);
 U16  translate_alet (U32 alet, U16 eax, int acctype, REGS *regs,
 	U32 *asteo, U32 aste[], int *prot);
 int  translate_addr (U32 vaddr, int arn, REGS *regs, int acctype,
-	U32 *raddr, U16 *xcode, int *priv, int *prot);
+	U32 *raddr, U16 *xcode, int *priv, int *prot, int *pstid);
 void purge_alb (REGS *regs);
 void purge_tlb (REGS *regs);
 void invalidate_tlb_entry (U32 pte, REGS *regs);
@@ -479,6 +482,10 @@ U64  vfetch8 (U32 addr, int arn, REGS *regs);
 void instfetch (BYTE *dest, U32 addr, REGS *regs);
 void move_chars (U32 addr1, int arn1, BYTE key1, U32 addr2,
 	int arn2, BYTE key2, int len, REGS *regs);
+int  ss_operation (BYTE opcode, U32 addr1, int arn1, U32 addr2,
+	int arn2, int len, REGS *regs);
+void validate_operand (U32 addr, int arn, int len,
+	int acctype, REGS *regs);
 
 /* Access type parameter passed to translate functions in dat.c */
 #define ACCTYPE_READ		1	/* Read operand data	     */
@@ -537,11 +544,14 @@ int  compare_until_substring_equal (int r1, int r2, REGS *regs);
 /* Functions in module diagnose.c */
 void scpend_call (void);
 int  mssf_call (U32 mssf_command, U32 spccb_absolute_addr);
+void diag204_call (int r1, int r2, REGS *regs);
+
+/* Functions in module external.c */
+void perform_external_interrupt (REGS *regs);
+void *timer_update_thread (void *argp);
 
 /* Functions in module service.c */
-void perform_external_interrupt (REGS *regs);
 int  service_call (U32 sclp_command, U32 sccb_absolute_addr);
-void *timer_update_thread (void *argp);
 
 /* Functions in module sort.c */
 int  compare_and_form_codeword (REGS *regs, U32 eaddr);

@@ -569,6 +569,8 @@ void purge_alb (REGS *regs)
 /*      xcode   Pointer to field to receive exception code           */
 /*      priv    Pointer to field to receive private indicator        */
 /*      prot    Pointer to field to receive protection indicator     */
+/*      pstid   Pointer to field to receive indication of which      */
+/*              segment table was used for the translation           */
 /*                                                                   */
 /* Output:                                                           */
 /*      The return value is set to facilitate the setting of the     */
@@ -598,12 +600,20 @@ void purge_alb (REGS *regs)
 /*      successful and either access-list controlled protection or   */
 /*      page protection is active; otherwise it remains unchanged.   */
 /*                                                                   */
+/*      The segment table indication field is set to one of the      */
+/*      values TEA_ST_PRIMARY, TEA_ST_SECNDRY, TEA_ST_HOME, or       */
+/*      TEA_ST_ARMODE if the translation was successful.  This       */
+/*      indication is used to set bits 30-31 of the translation      */
+/*      exception address in the event of a protection exception     */
+/*      when the suppression on protection facility is used.         */
+/*                                                                   */
 /*      A program check may be generated for addressing and          */
 /*      translation specification exceptions, in which case the      */
 /*      function does not return.                                    */
 /*-------------------------------------------------------------------*/
 int translate_addr (U32 vaddr, int arn, REGS *regs, int acctype,
-                    U32 *raddr, U16 *xcode, int *priv, int *prot)
+                    U32 *raddr, U16 *xcode, int *priv, int *prot,
+                    int *pstid)
 {
 U32     std;                            /* Segment table descriptor  */
 U32     sto;                            /* Segment table origin      */
@@ -618,11 +628,7 @@ TLBE   *tlbp;                           /* -> TLB entry              */
 U32     alet;                           /* Access list entry token   */
 U32     asteo;                          /* Real address of ASTE      */
 U32     aste[16];                       /* ASN second table entry    */
-int     stid;                           /* Segment table identifier..*/
-#define STID_PRIMARY    0               /* ..primary segment table   */
-#define STID_ARMODE     1               /* ..access register mode    */
-#define STID_SECONDARY  2               /* ..secondary segment table */
-#define STID_HOME       3               /* ..home segment table      */
+int     stid;                           /* Segment table indication  */
 int     cc;                             /* Condition code            */
 U16     eax;                            /* Authorization index       */
 
@@ -631,35 +637,43 @@ U16     eax;                            /* Authorization index       */
     {
         if (HOME_SPACE_MODE(&regs->psw))
         {
-            stid = STID_HOME;
+            stid = TEA_ST_HOME;
             std = regs->cr[13];
         }
         else
         {
-            stid = STID_PRIMARY;
+            stid = TEA_ST_PRIMARY;
             std = regs->cr[1];
         }
     }
     else if (acctype == ACCTYPE_STACK)
     {
-        stid = STID_HOME;
+        stid = TEA_ST_HOME;
         std = regs->cr[13];
     }
-    else if (PRIMARY_SPACE_MODE(&regs->psw)
-            || arn == USE_PRIMARY_SPACE)
+    else if (arn == USE_PRIMARY_SPACE)
     {
-        stid = STID_PRIMARY;
+        stid = TEA_ST_PRIMARY;
         std = regs->cr[1];
     }
-    else if (SECONDARY_SPACE_MODE(&regs->psw)
-            || arn == USE_SECONDARY_SPACE)
+    else if (arn == USE_SECONDARY_SPACE)
     {
-        stid = STID_SECONDARY;
+        stid = TEA_ST_SECNDRY;
+        std = regs->cr[7];
+    }
+    else if (PRIMARY_SPACE_MODE(&regs->psw))
+    {
+        stid = TEA_ST_PRIMARY;
+        std = regs->cr[1];
+    }
+    else if (SECONDARY_SPACE_MODE(&regs->psw))
+    {
+        stid = TEA_ST_SECNDRY;
         std = regs->cr[7];
     }
     else if (HOME_SPACE_MODE(&regs->psw))
     {
-        stid = STID_HOME;
+        stid = TEA_ST_HOME;
         std = regs->cr[13];
     }
     else /* ACCESS_REGISTER_MODE */
@@ -672,13 +686,13 @@ U16     eax;                            /* Authorization index       */
 
         case ALET_PRIMARY:
             /* [5.8.4.2] Obtain primary segment table designation */
-            stid = STID_PRIMARY;
+            stid = TEA_ST_PRIMARY;
             std = regs->cr[1];
             break;
 
         case ALET_SECONDARY:
             /* [5.8.4.2] Obtain secondary segment table designation */
-            stid = STID_SECONDARY;
+            stid = TEA_ST_SECNDRY;
             std = regs->cr[7];
             break;
 
@@ -695,7 +709,7 @@ U16     eax;                            /* Authorization index       */
                 goto tran_alet_excp;
 
             /* [5.8.4.9] Obtain the STD from word 2 of the ASTE */
-            stid = STID_ARMODE;
+            stid = TEA_ST_ARMODE;
             std = aste[2];
 
         } /* end switch(alet) */
@@ -816,6 +830,9 @@ U16     eax;                            /* Authorization index       */
     if (private) *priv = 1;
     if (protect) *prot = 1;
 
+    /* Set the segment table identification indication */
+    *pstid = stid;
+
     /* Clear exception code and return with zero return code */
     *xcode = 0;
     return 0;
@@ -864,18 +881,18 @@ tran_alet_excp:
 
 tran_excp_addr:
     /* Set the translation exception address */
-    regs->tea = vaddr & 0x7FFFF000;
+    regs->tea = vaddr & TEA_EFFADDR;
     regs->tea |= stid;
 
     /* Set bit 0 of the translation exception address if primary
        or secondary mode and secondary segment table was selected */
     if ((PRIMARY_SPACE_MODE(&regs->psw)
         || SECONDARY_SPACE_MODE(&regs->psw))
-        && stid == STID_SECONDARY)
-        regs->tea |= 0x80000000;
+        && stid == TEA_ST_SECNDRY)
+        regs->tea |= TEA_SECADDR;
 
     /* Set the exception access identification */
-    regs->excarid = (acctype == ACCTYPE_INSTFETCH) ? 0 : arn;
+    regs->excarid = (arn < 0 ? 0 : arn);
 
     /* Return condition code */
     return cc;
@@ -940,6 +957,7 @@ U32     aaddr;                          /* Absolute address          */
 BYTE    skey;                           /* Storage key               */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=ALE or page protection  */
+int     stid;                           /* Segment table indication  */
 U16     xcode;                          /* Exception code            */
 
     /* Convert logical address to real address */
@@ -948,7 +966,7 @@ U16     xcode;                          /* Exception code            */
     else {
         /* Return condition code 3 if translation exception */
         if (translate_addr (addr, arn, regs, ACCTYPE_TPROT, &raddr,
-                            &xcode, &private, &protect))
+                            &xcode, &private, &protect, &stid))
             return 3;
     }
 
@@ -1016,6 +1034,7 @@ U32     aaddr;                          /* Absolute address          */
 U32     block;                          /* 4K block number           */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=ALE or page protection  */
+int     stid;                           /* Segment table indication  */
 #ifdef FEATURE_INTERVAL_TIMER
 PSA    *psa;                            /* -> Prefixed storage area  */
 #endif /*FEATURE_INTERVAL_TIMER*/
@@ -1026,7 +1045,7 @@ U16     xcode;                          /* Exception code            */
         raddr = addr;
     else {
         if (translate_addr (addr, arn, regs, acctype, &raddr, &xcode,
-                            &private, &protect))
+                            &private, &protect, &stid))
             goto vabs_prog_check;
     }
 
@@ -1083,6 +1102,13 @@ vabs_addr_excp:
     return 0;
 
 vabs_prot_excp:
+#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
+    regs->tea = addr & TEA_EFFADDR;
+    if (protect && acctype == ACCTYPE_WRITE)
+        regs->tea |= TEA_PROT_AP;
+    regs->tea |= stid;
+    regs->excarid = (arn > 0 ? arn : 0);
+#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
     program_check (PGM_PROTECTION_EXCEPTION);
     return 0;
 
@@ -1639,7 +1665,8 @@ BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
 /*      This function implements the MVC, MVCP, MVCS, MVCK, MVCSK,   */
 /*      and MVCDK instructions.  These instructions move up to 256   */
 /*      characters using the address space and key specified by      */
-/*      the caller for each operand.                                 */
+/*      the caller for each operand.  Operands are moved byte by     */
+/*      byte to ensure correct processing of overlapping operands.   */
 /*                                                                   */
 /*      The arn parameter for each operand may be an access          */
 /*      register number, in which case the operand is in the         */
@@ -1713,4 +1740,171 @@ BYTE    obyte;                          /* Operand byte              */
     } /* end for(i) */
 
 } /* end function move_chars */
+
+/*-------------------------------------------------------------------*/
+/* Storage-to-storage operation                                      */
+/*                                                                   */
+/* Input:                                                            */
+/*      opcode  Instruction operation code                           */
+/*      addr1   Effective address of first operand                   */
+/*      arn1    Access register number for first operand             */
+/*      addr2   Effective address of second operand                  */
+/*      arn2    Access register number for second operand            */
+/*      len     Operand length minus 1 (range 0-255)                 */
+/*      regs    Pointer to the CPU register context                  */
+/* Returns:                                                          */
+/*      0 if result is all zero, 1 if result is non zero.            */
+/*                                                                   */
+/*      This function implements the MVN, MVZ, NC, OC, and XC        */
+/*      instructions.  These instructions combine up to 256          */
+/*      characters from the first and second operands, and           */
+/*      store the result in the first operand.  The operands         */
+/*      are processed byte by byte to ensure correct handling        */
+/*      of overlapping operands.                                     */
+/*                                                                   */
+/*      A program check may be generated if either logical address   */
+/*      causes an addressing, protection, or translation exception,  */
+/*      and in this case the function does not return.               */
+/*-------------------------------------------------------------------*/
+int ss_operation (BYTE opcode, U32 addr1, int arn1, U32 addr2,
+                int arn2, int len, REGS *regs)
+{
+U32     abs1, abs2;                     /* Absolute addresses        */
+U32     npv1, npv2;                     /* Next page virtual addrs   */
+U32     npa1 = 0, npa2 = 0;             /* Next page absolute addrs  */
+int     i;                              /* Loop counter              */
+int     cc = 0;                         /* Condition code            */
+BYTE    byte1, byte2;                   /* Operand bytes             */
+BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+
+    /* Obtain current access key from PSW */
+    akey = regs->psw.pkey;
+
+    /* Translate addresses of leftmost operand bytes */
+    abs1 = logical_to_abs (addr1, arn1, regs, ACCTYPE_WRITE, akey);
+    abs2 = logical_to_abs (addr2, arn2, regs, ACCTYPE_READ, akey);
+
+    /* Calculate page addresses of rightmost operand bytes */
+    npv1 = (addr1 + len)
+                & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    npv1 &= 0xFFFFF000;
+    npv2 = (addr2 + len)
+                & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    npv2 &= 0xFFFFF000;
+
+    /* Translate next page addresses if page boundary crossed */
+    if (npv1 != (addr1 & 0xFFFFF000))
+        npa1 = logical_to_abs (npv1, arn1, regs, ACCTYPE_WRITE, akey);
+    if (npv2 != (addr2 & 0xFFFFF000))
+        npa2 = logical_to_abs (npv2, arn2, regs, ACCTYPE_READ, akey);
+
+    /* Process operands from left to right */
+    for ( i = 0; i < len+1; i++ )
+    {
+        /* Fetch a byte from each operand */
+        byte1 = sysblk.mainstor[abs1];
+        byte2 = sysblk.mainstor[abs2];
+
+        /* Combine the bytes according to the operation code */
+        switch (opcode)
+        {
+        case 0xD1: /* MVN */
+            /* Copy low digit of operand 2 to operand 1 */
+            byte1 = (byte1 & 0xF0) | ( byte2 & 0x0F);
+            break;
+
+        case 0xD3: /* MVZ */
+            /* Copy high digit of operand 2 to operand 1 */
+            byte1 = (byte1 & 0x0F) | ( byte2 & 0xF0);
+            break;
+
+        case 0xD4: /* NC */
+            /* AND operand 1 with operand 2 */
+            byte1 &= byte2;
+            break;
+
+        case 0xD6: /* OC */
+            /* OR operand 1 with operand 2 */
+            byte1 |= byte2;
+            break;
+
+        case 0xD7: /* XC */
+            /* XOR operand 1 with operand 2 */
+            byte1 ^= byte2;
+            break;
+
+        } /* end switch(opcode) */
+
+        /* Set condition code 1 if result is non-zero */
+        if (byte1 != 0) cc = 1;
+
+        /* Store the result in the destination operand */
+        sysblk.mainstor[abs1] = byte1;
+
+        /* Increment first operand address */
+        addr1++;
+        addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        abs1++;
+
+        /* Adjust absolute address if page boundary crossed */
+        if ((addr1 & 0xFFF) == 0x000)
+            abs1 = npa1;
+
+        /* Increment second operand address */
+        addr2++;
+        addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        abs2++;
+
+        /* Adjust absolute address if page boundary crossed */
+        if ((addr2 & 0xFFF) == 0x000)
+            abs2 = npa2;
+
+    } /* end for(i) */
+
+    /* Return condition code */
+    return cc;
+
+} /* end function ss_operation */
+
+/*-------------------------------------------------------------------*/
+/* Validate operand                                                  */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr    Effective address of operand                         */
+/*      arn     Access register number                               */
+/*      len     Operand length minus 1 (range 0-255)                 */
+/*      acctype Type of access requested: READ or WRITE              */
+/*      regs    Pointer to the CPU register context                  */
+/*                                                                   */
+/*      The purpose of this function is to allow an instruction      */
+/*      operand to be validated for addressing, protection, and      */
+/*      translation exceptions, thus allowing the instruction to     */
+/*      be nullified or suppressed before any updates occur.         */
+/*                                                                   */
+/*      A program check is generated if the operand causes an        */
+/*      addressing, protection, or translation exception, and        */
+/*      in this case the function does not return.                   */
+/*-------------------------------------------------------------------*/
+void validate_operand (U32 addr, int arn, int len,
+                int acctype, REGS *regs)
+{
+U32     npv;                            /* Next page virtual address */
+BYTE    akey;                           /* Bits 0-3=key, 4-7=zeroes  */
+
+    /* Obtain current access key from PSW */
+    akey = regs->psw.pkey;
+
+    /* Translate address of leftmost operand byte */
+    logical_to_abs (addr, arn, regs, acctype, akey);
+
+    /* Calculate page address of rightmost operand byte */
+    npv = (addr + len)
+                & (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+    npv &= 0xFFFFF000;
+
+    /* Translate next page address if page boundary crossed */
+    if (npv != (addr & 0xFFFFF000))
+        logical_to_abs (npv, arn, regs, acctype, akey);
+
+} /* end function validate_operand */
 

@@ -2,8 +2,8 @@
 /*              ESA/390 Service Processor                            */
 
 /*-------------------------------------------------------------------*/
-/* This module implements the service processor and external         */
-/* interrupt functions for the Hercules ESA/390 emulator.            */
+/* This module implements service processor functions                */
+/* for the Hercules ESA/390 emulator.                                */
 /*-------------------------------------------------------------------*/
 
 /*-------------------------------------------------------------------*/
@@ -18,6 +18,7 @@
 /*-------------------------------------------------------------------*/
 #define SCLP_READ_SCP_INFO      0x00020001
 #define SCLP_READ_CHP_INFO      0x00030001
+#define SCLP_READ_CSI_INFO      0x001C0001
 
 /*-------------------------------------------------------------------*/
 /* Service Call Control Block structure definitions                  */
@@ -74,14 +75,7 @@ typedef struct _SCCB_SCP_INFO {
         HWORD   resv3;                  /* Reserved                  */
         HWORD   vectssiz;               /* Vector section size       */
         HWORD   vectpsum;               /* Vector partial sum number */
-        BYTE    ifm1;                   /* Installed facilities 1    */
-        BYTE    ifm2;                   /* Installed facilities 2    */
-        BYTE    ifm3;                   /* Installed facilities 3    */
-        BYTE    ifm4;                   /* Installed facilities 4    */
-        BYTE    ifm5;                   /* Installed facilities 5    */
-        BYTE    ifm6;                   /* Installed facilities 6    */
-        BYTE    ifm7;                   /* Installed facilities 7    */
-        BYTE    ifm8;                   /* Installed facilities 8    */
+        BYTE    ifm[8];                 /* Installed facilities      */
         BYTE    resv4[8];               /* Reserved                  */
         HWORD   maxresgp;               /* Maximum resource group    */
         BYTE    resv5[6];               /* Reserved                  */
@@ -90,12 +84,7 @@ typedef struct _SCCB_SCP_INFO {
         HWORD   offmpf;                 /* Offset from start of SCCB
                                            to MPF information array  */
         BYTE    resv6[4];               /* Reserved                  */
-        BYTE    cfg1;                   /* Config characteristics 1  */
-        BYTE    cfg2;                   /* Config characteristics 2  */
-        BYTE    cfg3;                   /* Config characteristics 3  */
-        BYTE    cfg4;                   /* Config characteristics 4  */
-        BYTE    cfg5;                   /* Config characteristics 5  */
-        BYTE    cfg6;                   /* Config characteristics 6  */
+        BYTE    cfg[6];                 /* Config characteristics    */
         FWORD   rcci;                   /* Capacity                  */
         BYTE    resv7;                  /* Reserved                  */
         BYTE    numcrl;                 /* Max #of copy and reassign
@@ -105,57 +94,82 @@ typedef struct _SCCB_SCP_INFO {
     } SCCB_SCP_INFO;
 
 /* Bit definitions for installed facilities */
-#define SCCB_IFM1_CHANNEL_PATH_INFORMATION              0x80
-#define SCCB_IFM1_CHANNEL_PATH_SUBSYSTEM_COMMAND        0x40
-#define SCCB_IFM1_CHANNEL_PATH_RECONFIG                 0x20
-#define SCCB_IFM1_CPU_INFORMATION                       0x08
-#define SCCB_IFM1_CPU_RECONFIG                          0x04
-#define SCCB_IFM2_SIGNAL_ALARM                          0x80
-#define SCCB_IFM2_WRITE_OPERATOR_MESSAGE                0x40
-#define SCCB_IFM2_STORE_STATUS_ON_LOAD                  0x20
-#define SCCB_IFM2_RESTART_REASONS                       0x10
-#define SCCB_IFM2_INSTRUCTION_ADDRESS_TRACE_BUFFER      0x08
-#define SCCB_IFM2_LOAD_PARAMETER                        0x04
-#define SCCB_IFM2_READ_AND_WRITE_DATA                   0x02
-#define SCCB_IFM3_REAL_STORAGE_INCREMENT_RECONFIG       0x80
-#define SCCB_IFM3_REAL_STORAGE_ELEMENT_INFO             0x40
-#define SCCB_IFM3_REAL_STORAGE_ELEMENT_RECONFIG         0x20
-#define SCCB_IFM3_COPY_AND_REASSIGN_STORAGE             0x10
-#define SCCB_IFM3_EXTENDED_STORAGE_USABILITY_MAP        0x08
-#define SCCB_IFM3_EXTENDED_STORAGE_ELEMENT_INFO         0x04
-#define SCCB_IFM3_EXTENDED_STORAGE_ELEMENT_RECONFIG     0x02
-#define SCCB_IFM3_COPY_AND_REASSIGN_STORAGE_LIST        0x01
-#define SCCB_IFM4_VECTOR_FEATURE_RECONFIG               0x80
-#define SCCB_IFM4_READ_WRITE_EVENT_FEATURE              0x40
-#define SCCB_IFM4_READ_RESOURCE_GROUP_INFO              0x08
+#define SCCB_IFM0_CHANNEL_PATH_INFORMATION              0x80
+#define SCCB_IFM0_CHANNEL_PATH_SUBSYSTEM_COMMAND        0x40
+#define SCCB_IFM0_CHANNEL_PATH_RECONFIG                 0x20
+#define SCCB_IFM0_CPU_INFORMATION                       0x08
+#define SCCB_IFM0_CPU_RECONFIG                          0x04
+#define SCCB_IFM1_SIGNAL_ALARM                          0x80
+#define SCCB_IFM1_WRITE_OPERATOR_MESSAGE                0x40
+#define SCCB_IFM1_STORE_STATUS_ON_LOAD                  0x20
+#define SCCB_IFM1_RESTART_REASONS                       0x10
+#define SCCB_IFM1_INSTRUCTION_ADDRESS_TRACE_BUFFER      0x08
+#define SCCB_IFM1_LOAD_PARAMETER                        0x04
+#define SCCB_IFM1_READ_AND_WRITE_DATA                   0x02
+#define SCCB_IFM2_REAL_STORAGE_INCREMENT_RECONFIG       0x80
+#define SCCB_IFM2_REAL_STORAGE_ELEMENT_INFO             0x40
+#define SCCB_IFM2_REAL_STORAGE_ELEMENT_RECONFIG         0x20
+#define SCCB_IFM2_COPY_AND_REASSIGN_STORAGE             0x10
+#define SCCB_IFM2_EXTENDED_STORAGE_USABILITY_MAP        0x08
+#define SCCB_IFM2_EXTENDED_STORAGE_ELEMENT_INFO         0x04
+#define SCCB_IFM2_EXTENDED_STORAGE_ELEMENT_RECONFIG     0x02
+#define SCCB_IFM2_COPY_AND_REASSIGN_STORAGE_LIST        0x01
+#define SCCB_IFM3_VECTOR_FEATURE_RECONFIG               0x80
+#define SCCB_IFM3_READ_WRITE_EVENT_FEATURE              0x40
+#define SCCB_IFM3_READ_RESOURCE_GROUP_INFO              0x08
 
 /* Bit definitions for configuration characteristics */
-#define SCCB_CFG1_LOGICALLY_PARTITIONED                 0x80
-#define SCCB_CFG1_SUPPRESSION_ON_PROTECTION             0x20
-#define SCCB_CFG1_INITIATE_RESET                        0x10
-#define SCCB_CFG1_STORE_CHANNEL_SUBSYS_CHARACTERISTICS  0x08
-#define SCCB_CFG2_CSLO                                  0x40
-#define SCCB_CFG3_DEVICE_ACTIVE_ONLY_MEASUREMENT        0x40
-#define SCCB_CFG3_CHECKSUM_INSTRUCTION                  0x01
-#define SCCB_CFG4_PERFORM_LOCKED_OPERATION              0x40
+#define SCCB_CFG0_LOGICALLY_PARTITIONED                 0x80
+#define SCCB_CFG0_SUPPRESSION_ON_PROTECTION             0x20
+#define SCCB_CFG0_INITIATE_RESET                        0x10
+#define SCCB_CFG0_STORE_CHANNEL_SUBSYS_CHARACTERISTICS  0x08
+#define SCCB_CFG0_MVPG_FOR_ALL_GUESTS                   0x04
+#define SCCB_CFG1_CSLO                                  0x40
+#define SCCB_CFG2_DEVICE_ACTIVE_ONLY_MEASUREMENT        0x40
+#define SCCB_CFG2_CALLED_SPACE_IDENTIFICATION           0x02
+#define SCCB_CFG2_CHECKSUM_INSTRUCTION                  0x01
+#define SCCB_CFG3_RESUME_PROGRAM                        0x80
+#define SCCB_CFG3_PERFORM_LOCKED_OPERATION              0x40
+#define SCCB_CFG3_IMMEDIATE_AND_RELATIVE                0x10
+#define SCCB_CFG3_COMPARE_AND_MOVE_EXTENDED             0x08
+#define SCCB_CFG3_BRANCH_AND_SET_AUTHORITY              0x04
+#define SCCB_CFG3_EXTENDED_FLOATING_POINT               0x02
+#define SCCB_CFG4_EXTENDED_TOD_CLOCK                    0x80
+#define SCCB_CFG4_EXTENDED_TRANSLATION                  0x40
+#define SCCB_CFG4_STORE_SYSTEM_INFORMATION              0x08
 
 /* CPU information array entry */
 typedef struct _SCCB_CPU_INFO {
         BYTE    cpa;                    /* CPU address               */
         BYTE    tod;                    /* TOD clock number          */
-        BYTE    resv1[2];               /* Reserved                  */
-        BYTE    cpf1;                   /* CPU installed features 1  */
-        BYTE    cpf2;                   /* CPU installed features 2  */
-        BYTE    resv2[10];              /* Reserved                  */
+        BYTE    cpf[14];                /* RCPU facility map         */
     } SCCB_CPU_INFO;
 
 /* Bit definitions for CPU installed features */
-#define SCCB_CPF1_VECTOR_FEATURE_INSTALLED              0x80
-#define SCCB_CPF1_VECTOR_FEATURE_CONNECTED              0x40
-#define SCCB_CPF1_VECTOR_FEATURE_STANDBY_STATE          0x20
-#define SCCB_CPF1_CRYPTO_FEATURE_INSTALLED              0x10
-#define SCCB_CPF2_PRIVATE_SPACE_BIT_INSTALLED           0x80
-#define SCCB_CPF2_PER2_INSTALLED                        0x01
+#define SCCB_CPF0_SIE_370_MODE                          0x80
+#define SCCB_CPF0_SIE_XA_MODE                           0x40
+#define SCCB_CPF0_SIE_SET_II_370_MODE                   0x20
+#define SCCB_CPF0_SIE_SET_II_XA_MODE                    0x10
+#define SCCB_CPF0_SIE_NEW_INTERCEPT_FORMAT              0x08
+#define SCCB_CPF0_STORAGE_KEY_ASSIST                    0x04
+#define SCCB_CPF0_MULTIPLE_CONTROLLED_DATA_SPACE        0x02
+#define SCCB_CPF1_IO_INTERPRETATION_LEVEL_2             0x40
+#define SCCB_CPF1_GUEST_PER_ENHANCED                    0x20
+#define SCCB_CPF1_SIGP_INTERPRETATION_ASSIST            0x08
+#define SCCB_CPF1_RCP_BYPASS_FACILITY                   0x04
+#define SCCB_CPF1_REGION_RELOCATE_FACILITY              0x02
+#define SCCB_CPF1_EXPEDITE_TIMER_PROCESSING             0x01
+#define SCCB_CPF2_VECTOR_FEATURE_INSTALLED              0x80
+#define SCCB_CPF2_VECTOR_FEATURE_CONNECTED              0x40
+#define SCCB_CPF2_VECTOR_FEATURE_STANDBY_STATE          0x20
+#define SCCB_CPF2_CRYPTO_FEATURE_ACCESSED               0x10
+#define SCCB_CPF2_EXPEDITE_RUN_PROCESSING               0x04
+#define SCCB_CPF3_PRIVATE_SPACE_FEATURE                 0x80
+#define SCCB_CPF3_FETCH_ONLY_BIT                        0x40
+#define SCCB_CPF3_PER2_INSTALLED                        0x01
+#define SCCB_CPF4_OMISION_GR_ALTERATION_370             0x80
+#define SCCB_CPF5_GUEST_WAIT_STATE_ASSIST               0x40
+#define SCCB_CPF13_CRYPTO_UNIT_ID                       0x01
 
 /* HSA information array entry */
 typedef struct _SCCB_HSA_INFO {
@@ -181,130 +195,16 @@ typedef struct _SCCB_CHP_INFO {
         BYTE    resv[23];               /* Reserved, set to zero     */
     } SCCB_CHP_INFO;
 
+/* Read Channel Subsystem Information data area */
+typedef struct _SCCB_CSI_INFO {
+        BYTE    csif[8];                /* Channel Subsystem installed
+                                           facility field            */
+        BYTE    resv[48];
+    } SCCB_CSI_INFO;
 
-/*-------------------------------------------------------------------*/
-/* Load external interrupt new PSW                                   */
-/*-------------------------------------------------------------------*/
-static void external_interrupt (int code, REGS *regs)
-{
-PSA    *psa;
-int     rc;
-
-    /* Store the interrupt code in the PSW */
-    regs->psw.intcode = code;
-
-    /* Point to PSA in main storage */
-    psa = (PSA*)(sysblk.mainstor + regs->pxr);
-
-    /* Store current PSW at PSA+X'18' */
-    store_psw (&(regs->psw), psa->extold);
-
-    /* Store CPU address at PSA+X'84' */
-    psa->extcpad[0] = regs->cpuad >> 8;
-    psa->extcpad[1] = regs->cpuad & 0xFF;
-
-    /* For ECMODE, store external interrupt code at PSA+X'86' */
-    if ( regs->psw.ecmode )
-    {
-        psa->extint[0] = code >> 8;
-        psa->extint[1] = code & 0xFF;
-    }
-
-    /* Load new PSW from PSA+X'58' */
-    rc = load_psw (&(regs->psw), psa->extnew);
-    if ( rc )
-    {
-        logmsg ("Invalid external interrupt new PSW: "
-                "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
-                psa->extnew[0], psa->extnew[1], psa->extnew[2],
-                psa->extnew[3], psa->extnew[4], psa->extnew[5],
-                psa->extnew[6], psa->extnew[7]);
-        regs->cpustate = CPUSTATE_STOPPED;
-    }
-
-} /* end function external_interrupt */
-
-/*-------------------------------------------------------------------*/
-/* Perform external interrupt if pending                             */
-/*-------------------------------------------------------------------*/
-void perform_external_interrupt (REGS *regs)
-{
-PSA    *psa;                            /* -> Prefixed storage area  */
-
-    /* External interrupt if CPU timer is negative */
-    if ((S64)regs->ptimer < 0
-        && (regs->psw.sysmask & PSW_EXTMASK)
-        && (regs->cr[0] & CR0_XM_PTIMER))
-    {
-        logmsg ("External interrupt: CPU timer=%16.16llX\n",
-                regs->ptimer);
-        external_interrupt (EXT_CPU_TIMER_INTERRUPT, regs);
-        return;
-    }
-
-    /* External interrupt if TOD clock exceeds clock comparator */
-    if (sysblk.todclk > regs->clkc
-        && (regs->psw.sysmask & PSW_EXTMASK)
-        && (regs->cr[0] & CR0_XM_CLKC))
-    {
-        logmsg ("External interrupt: Clock comparator\n");
-        external_interrupt (EXT_CLOCK_COMPARATOR_INTERRUPT, regs);
-        return;
-    }
-
-#ifdef FEATURE_INTERVAL_TIMER
-    if (regs->itimer_pending
-        && (regs->psw.sysmask & PSW_EXTMASK)
-        && (regs->cr[0] & CR0_XM_ITIMER))
-    {
-        logmsg ("External interrupt: Interval timer\n");
-        external_interrupt (EXT_INTERVAL_TIMER_INTERRUPT, regs);
-        regs->itimer_pending = 0;
-        return;
-    }
-#endif /*FEATURE_INTERVAL_TIMER*/
-
-    /* External interrupt if service signal is pending */
-    if (sysblk.servsig
-        && (regs->psw.sysmask & PSW_EXTMASK)
-        && (regs->cr[0] & CR0_XM_SERVSIG))
-    {
-        sysblk.servparm = APPLY_PREFIXING (sysblk.servparm, regs->pxr);
-
-        logmsg ("External interrupt: Service signal %8.8X\n",
-                sysblk.servparm);
-
-        /* Store service signal parameter at PSA+X'80' */
-        psa = (PSA*)(sysblk.mainstor + regs->pxr);
-        psa->extparm[0] = (sysblk.servparm & 0xFF000000) >> 24;
-        psa->extparm[1] = (sysblk.servparm & 0xFF0000) >> 16;
-        psa->extparm[2] = (sysblk.servparm & 0xFF00) >> 8;
-        psa->extparm[3] = sysblk.servparm & 0xFF;
-
-        /* Reset service signal pending */
-        sysblk.servsig = 0;
-
-        /* Generate service signal interrupt */
-        external_interrupt (EXT_SERVICE_SIGNAL_INTERRUPT, regs);
-        return;
-    }
-
-    /* External interrupt if console interrupt key was depressed */
-    if (sysblk.intkey
-        && (regs->psw.sysmask & PSW_EXTMASK)
-        && (regs->cr[0] & CR0_XM_INTKEY))
-    {
-        logmsg ("External interrupt: Interrupt key\n");
-
-        /* Reset interrupt key pending */
-        sysblk.intkey = 0;
-
-        /* Generate interrupt key interrupt */
-        external_interrupt (EXT_INTERRUPT_KEY_INTERRUPT, regs);
-        return;
-    }
-
-} /* end function perform_external_interrupt */
+/* Bit definitions for channel subsystem installed facilities */
+#define SCCB_CSI0_CANCEL_IO_REQUEST_FACILITY            0x02
+#define SCCB_CSI0_CONCURRENT_SENSE_FACILITY             0x01
 
 /*-------------------------------------------------------------------*/
 /* Process service call instruction and return condition code        */
@@ -318,6 +218,7 @@ SCCB_HEADER    *sccb;                   /* -> SCCB header            */
 SCCB_SCP_INFO  *sccbscp;                /* -> SCCB SCP information   */
 SCCB_CPU_INFO  *sccbcpu;                /* -> SCCB CPU information   */
 SCCB_CHP_INFO  *sccbchp;                /* -> SCCB channel path info */
+SCCB_CSI_INFO  *sccbcsi;                /* -> SCCB channel subsys inf*/
 U16             offset;                 /* Offset from start of SCCB */
 DEVBLK         *dev;                    /* Used to find CHPIDs       */
 int             chpbyte;                /* Offset to byte for CHPID  */
@@ -441,18 +342,69 @@ int             chpbit;                 /* Bit number for CHPID      */
         memcpy (sccbscp->loadparm, sysblk.loadparm, 8);
 
         /* Set installed features bit mask in SCCB */
-        sccbscp->ifm1 = SCCB_IFM1_CHANNEL_PATH_INFORMATION
-//                    | SCCB_IFM1_CHANNEL_PATH_SUBSYSTEM_COMMAND
-//                    | SCCB_IFM1_CHANNEL_PATH_RECONFIG
-                      | SCCB_IFM1_CPU_INFORMATION;
-//                    | SCCB_IFM1_CPU_RECONFIG;
-//      sccbscp->ifm2 = SCCB_IFM2_SIGNAL_ALARM
-//                    | SCCB_IFM2_STORE_STATUS_ON_LOAD
-//                    | SCCB_IFM2_RESTART_REASONS
-//                    | SCCB_IFM2_LOAD_PARAMETER;
-        sccbscp->ifm2 = SCCB_IFM2_LOAD_PARAMETER;
-//      sccbscp->cfg1 = SCCB_CFG1_SUPPRESSION_ON_PROTECTION
-//                    | SCCB_CFG1_STORE_CHANNEL_SUBSYS_CHARACTERISTICS;
+        sccbscp->ifm[0] = 0
+                        | SCCB_IFM0_CHANNEL_PATH_INFORMATION
+                        | SCCB_IFM0_CHANNEL_PATH_SUBSYSTEM_COMMAND
+//                      | SCCB_IFM0_CHANNEL_PATH_RECONFIG
+                        | SCCB_IFM0_CPU_INFORMATION
+//                      | SCCB_IFM0_CPU_RECONFIG
+                        ;
+        sccbscp->ifm[1] = 0
+//                      | SCCB_IFM1_SIGNAL_ALARM
+//                      | SCCB_IFM1_WRITE_OPERATOR_MESSAGE
+//                      | SCCB_IFM1_STORE_STATUS_ON_LOAD
+//                      | SCCB_IFM1_RESTART_REASONS
+//                      | SCCB_IFM1_INSTRUCTION_ADDRESS_TRACE_BUFFER
+                        | SCCB_IFM1_LOAD_PARAMETER
+                        ;
+        sccbscp->ifm[2] = 0
+//                      | SCCB_IFM2_REAL_STORAGE_INCREMENT_RECONFIG
+//                      | SCCB_IFM2_REAL_STORAGE_ELEMENT_INFO
+//                      | SCCB_IFM2_REAL_STORAGE_ELEMENT_RECONFIG
+//                      | SCCB_IFM2_COPY_AND_REASSIGN_STORAGE
+//                      | SCCB_IFM2_EXTENDED_STORAGE_USABILITY_MAP
+//                      | SCCB_IFM2_EXTENDED_STORAGE_ELEMENT_INFO
+//                      | SCCB_IFM2_EXTENDED_STORAGE_ELEMENT_RECONFIG
+                        ;
+        sccbscp->ifm[3] = 0
+//                      | SCCB_IFM3_VECTOR_FEATURE_RECONFIG
+//                      | SCCB_IFM3_READ_WRITE_EVENT_FEATURE
+//                      | SCCB_IFM3_READ_RESOURCE_GROUP_INFO
+                        ;
+        sccbscp->cfg[0] = 0
+                        | SCCB_CFG0_LOGICALLY_PARTITIONED
+#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
+                        | SCCB_CFG0_SUPPRESSION_ON_PROTECTION
+#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
+//                      | SCCB_CFG0_INITIATE_RESET
+//                      | SCCB_CFG0_STORE_CHANNEL_SUBSYS_CHARACTERISTICS
+//                      | SCCB_CFG0_MVPG_FOR_ALL_GUESTS
+                        ;
+        sccbscp->cfg[1] = 0
+//                      | SCCB_CFG1_CSLO
+                        ;
+        sccbscp->cfg[2] = 0
+//                      | SCCB_CFG2_DEVICE_ACTIVE_ONLY_MEASUREMENT
+//                      | SCCB_CFG2_CALLED_SPACE_IDENTIFICATION
+                        | SCCB_CFG2_CHECKSUM_INSTRUCTION
+                        ;
+        sccbscp->cfg[3] = 0
+//                      | SCCB_CFG3_RESUME_PROGRAM
+//                      | SCCB_CFG3_PERFORM_LOCKED_OPERATION
+#ifdef FEATURE_RELATIVE_BRANCH
+                        | SCCB_CFG3_IMMEDIATE_AND_RELATIVE
+#endif /*FEATURE_RELATIVE_BRANCH*/
+                        | SCCB_CFG3_COMPARE_AND_MOVE_EXTENDED
+#ifdef FEATURE_BRANCH_AND_SET_AUTHORITY
+                        | SCCB_CFG3_BRANCH_AND_SET_AUTHORITY
+#endif /*FEATURE_BRANCH_AND_SET_AUTHORITY*/
+//                      | SCCB_CFG3_EXTENDED_FLOATING_POINT
+                        ;
+        sccbscp->cfg[4] = 0
+//                      | SCCB_CFG4_EXTENDED_TOD_CLOCK
+//                      | SCCB_CFG4_EXTENDED_TRANSLATION
+//                      | SCCB_CFG4_STORE_SYSTEM_INFORMATION
+                        ;
 
         /* Build the CPU information array after the SCP info */
         sccbcpu = (SCCB_CPU_INFO*)(sccbscp+1);
@@ -461,7 +413,46 @@ int             chpbit;                 /* Bit number for CHPID      */
             memset (sccbcpu, 0, sizeof(SCCB_CPU_INFO));
             sccbcpu->cpa = sysblk.regs[i].cpuad;
             sccbcpu->tod = 0;
-            sccbcpu->cpf2 = SCCB_CPF2_PRIVATE_SPACE_BIT_INSTALLED;
+            sccbcpu->cpf[0] = 0
+//                          | SCCB_CPF0_SIE_370_MODE
+//                          | SCCB_CPF0_SIE_XA_MODE
+//                          | SCCB_CPF0_SIE_SET_II_370_MODE
+//                          | SCCB_CPF0_SIE_SET_II_XA_MODE
+//                          | SCCB_CPF0_SIE_NEW_INTERCEPT_FORMAT
+//                          | SCCB_CPF0_STORAGE_KEY_ASSIST
+//                          | SCCB_CPF0_MULTIPLE_CONTROLLED_DATA_SPACE
+                            ;
+            sccbcpu->cpf[1] = 0
+//                          | SCCB_CPF1_IO_INTERPRETATION_LEVEL_2
+//                          | SCCB_CPF1_GUEST_PER_ENHANCED
+//                          | SCCB_CPF1_SIGP_INTERPRETATION_ASSIST
+//                          | SCCB_CPF1_RCP_BYPASS_FACILITY
+//                          | SCCB_CPF1_REGION_RELOCATE_FACILITY
+//                          | SCCB_CPF1_EXPEDITE_TIMER_PROCESSING
+                            ;
+            sccbcpu->cpf[2] = 0
+//                          | SCCB_CPF2_VECTOR_FEATURE_INSTALLED
+//                          | SCCB_CPF2_VECTOR_FEATURE_CONNECTED
+//                          | SCCB_CPF2_VECTOR_FEATURE_STANDBY_STATE
+//                          | SCCB_CPF2_CRYPTO_FEATURE_ACCESSED
+//                          | SCCB_CPF2_EXPEDITE_RUN_PROCESSING
+                            ;
+            sccbcpu->cpf[3] = 0
+#ifdef FEATURE_PRIVATE_SPACE
+                            | SCCB_CPF3_PRIVATE_SPACE_FEATURE
+                            | SCCB_CPF3_FETCH_ONLY_BIT
+#endif /*FEATURE_PRIVATE_SPACE*/
+//                          | SCCB_CPF3_PER2_INSTALLED
+                            ;
+            sccbcpu->cpf[4] = 0
+//                          | SCCB_CPF4_OMISION_GR_ALTERATION_370
+                            ;
+            sccbcpu->cpf[5] = 0
+//                          | SCCB_CPF5_GUEST_WAIT_STATE_ASSIST
+                            ;
+            sccbcpu->cpf[13] = 0
+//                          | SCCB_CPF13_CRYPTO_UNIT_ID
+                            ;
         }
 
         /* Set response code X'0010' in SCCB header */
@@ -526,6 +517,45 @@ int             chpbit;                 /* Bit number for CHPID      */
 
         break;
 
+    case SCLP_READ_CSI_INFO:
+
+        /* Set the main storage change bit */
+        sysblk.storkeys[sccb_absolute_addr >> 12] |= STORKEY_CHANGE;
+
+        /* Set response code X'0100' if SCCB crosses a page boundary */
+        if ((sccb_absolute_addr & 0x7FFFF000) !=
+            ((sccb_absolute_addr + sccblen - 1) & 0x7FFFF000))
+        {
+            sccb->reas = SCCB_REAS_NOT_4KBNDRY;
+            sccb->resp = SCCB_RESP_BLOCK_ERROR;
+            break;
+        }
+
+        /* Set response code X'0300' if SCCB length
+           is insufficient to contain channel path info */
+        if ( sccblen < sizeof(SCCB_HEADER) + sizeof(SCCB_CSI_INFO))
+        {
+            sccb->reas = SCCB_REAS_TOO_SHORT;
+            sccb->resp = SCCB_RESP_BLOCK_ERROR;
+            break;
+        }
+
+        /* Point to SCCB data area following SCCB header */
+        sccbcsi = (SCCB_CSI_INFO*)(sccb+1);
+        memset (sccbcsi, 0, sizeof(SCCB_CSI_INFO));
+
+        sccbcsi->csif[0] = 0
+//                      | SCCB_CSI0_CANCEL_IO_REQUEST_FACILITY
+                        | SCCB_CSI0_CONCURRENT_SENSE_FACILITY
+                        ;
+
+        /* Set response code X'0010' in SCCB header */
+        sccb->reas = SCCB_REAS_NONE;
+        sccb->resp = SCCB_RESP_INFO;
+
+        break;
+
+
     default:
         /* Set response code X'01F0' for invalid SCLP command */
         sccb->reas = SCCB_REAS_INVALID_CMD;
@@ -550,129 +580,3 @@ int             chpbit;                 /* Bit number for CHPID      */
     return 0;
 
 } /* end function service_call */
-
-/*-------------------------------------------------------------------*/
-/* TOD clock and timer thread                                        */
-/*                                                                   */
-/* This function runs as a separate thread.  It wakes up every       */
-/* x milliseconds, updates the TOD clock, and decrements the         */
-/* CPU timer for each CPU.  If any CPU timer goes negative, or       */
-/* if the TOD clock exceeds the clock comparator for any CPU,        */
-/* it signals any waiting CPUs to wake up and process interrupts.    */
-/*-------------------------------------------------------------------*/
-void *timer_update_thread (void *argp)
-{
-#ifdef FEATURE_INTERVAL_TIMER
-PSA    *psa;                            /* -> Prefixed storage area  */
-S32     itimer;                         /* Interval timer value      */
-S32     olditimer;                      /* Previous interval timer   */
-#endif /*FEATURE_INTERVAL_TIMER*/
-int     cpu;                            /* CPU engine number         */
-REGS   *regs;                           /* -> CPU register context   */
-int     intflag = 0;                    /* 1=Interrupt possible      */
-U64     prev;                           /* Previous TOD clock value  */
-U64     diff;                           /* Difference between new and
-                                           previous TOD clock values */
-U64     dreg;                           /* Double register work area */
-struct  timeval tv;                     /* Structure for gettimeofday
-                                           and select function calls */
-#define CLOCK_RESOLUTION        10      /* TOD clock resolution in
-                                           milliseconds              */
-
-    /* Display thread started message on control panel */
-//  logmsg ("HHC610I Timer thread started: id=%ld\n",
-//          thread_id());
-
-    while (1)
-    {
-        /* Get current time */
-        gettimeofday (&tv, NULL);
-
-        /* Load number of seconds since 00:00:00 01 Jan 1970 */
-        dreg = (U64)tv.tv_sec;
-
-        /* Add number of seconds from 1900 to 1970 */
-        dreg += 86400ULL * (70*365 + 17);
-
-        /* Convert to microseconds */
-        dreg = dreg * 1000000 + tv.tv_usec;
-
-        /* Convert to TOD clock format */
-        dreg <<= 12;
-
-        /* Obtain the TOD clock update lock */
-        obtain_lock (&sysblk.todlock);
-
-        /* Calculate the difference between the new TOD clock
-           value and the previous value, if the clock is set */
-        prev = sysblk.todclk & 0xFFFFFFFFFFFFF000ULL;
-        diff = (prev == 0 ? 0 : dreg - prev);
-
-        /* Update the TOD clock */
-        sysblk.todclk = dreg;
-
-        /* Release the TOD clock update lock */
-        release_lock (&sysblk.todlock);
-
-        /* Decrement the CPU timer for each CPU */
-        for (cpu = 0; cpu < sysblk.numcpu; cpu++)
-        {
-            /* Point to the CPU register context */
-            regs = sysblk.regs + cpu;
-
-            /* Decrement the CPU timer */
-            (S64)regs->ptimer -= diff;
-
-            /* Set interrupt flag if the CPU timer is negative or
-               if the TOD clock value exceeds the clock comparator */
-            if ((S64)regs->ptimer < 0
-                || sysblk.todclk > regs->clkc)
-                intflag = 1;
-
-#ifdef FEATURE_INTERVAL_TIMER
-            /* Point to PSA in main storage */
-            psa = (PSA*)(sysblk.mainstor + regs->pxr);
-
-            /* Decrement bit position 26 of the location 80 timer */
-            itimer = (S32)(((U32)(psa->inttimer[0]) << 24)
-                                | ((U32)(psa->inttimer[1]) << 16)
-                                | ((U32)(psa->inttimer[2]) << 8)
-                                | (U32)(psa->inttimer[3]));
-            olditimer = itimer;
-            itimer -= 32 * CLOCK_RESOLUTION;
-            psa->inttimer[0] = ((U32)itimer >> 24) & 0xFF;
-            psa->inttimer[1] = ((U32)itimer >> 16) & 0xFF;
-            psa->inttimer[2] = ((U32)itimer >> 8) & 0xFF;
-            psa->inttimer[3] = (U32)itimer & 0xFF;
-
-            /* Set interrupt flag and interval timer interrupt pending
-               if the interval timer went from positive to negative */
-            if (itimer < 0 && olditimer > 0)
-            {
-                intflag = 1;
-                regs->itimer_pending = 1;
-            }
-#endif /*FEATURE_INTERVAL_TIMER*/
-
-        } /* end for(cpu) */
-
-        /* If a CPU timer or clock comparator interrupt condition
-           was detected for any CPU, then wake up all waiting CPUs */
-        if (intflag)
-        {
-            obtain_lock (&sysblk.intlock);
-            signal_condition (&sysblk.intcond);
-            release_lock (&sysblk.intlock);
-        }
-
-        /* Sleep for CLOCK_RESOLUTION milliseconds */
-        tv.tv_sec = CLOCK_RESOLUTION / 1000;
-        tv.tv_usec = (CLOCK_RESOLUTION * 1000) % 1000000;
-        select (0, NULL, NULL, NULL, &tv);
-
-    } /* end while */
-
-    return NULL;
-
-} /* end function timer_update_thread */
-

@@ -251,7 +251,7 @@ int     ssevent = 0;                    /* 1=space switch event      */
                of the primary space-switch-event control bit */
             regs->tea = regs->cr[4] & CR4_PASN;
             if (regs->cr[1] & STD_SSEVENT)
-                regs->tea |= 0x80000000;
+                regs->tea |= TEA_SSEVENT;
         }
         else
         {
@@ -261,7 +261,7 @@ int     ssevent = 0;                    /* 1=space switch event      */
                home space-switch-event control bit */
             regs->tea = 0;
             if (regs->cr[13] & STD_SSEVENT)
-                regs->tea |= 0x80000000;
+                regs->tea |= TEA_SSEVENT;
         }
     }
 
@@ -656,7 +656,7 @@ int     ssevent = 0;                    /* 1=space switch event      */
                the old primary space-switch-event control bit is one */
             regs->tea = regs->cr[4] & CR4_PASN;
             if (regs->cr[1] & STD_SSEVENT)
-                regs->tea |= 0x80000000;
+                regs->tea |= TEA_SSEVENT;
 
             /* Indicate space-switch event required */
             ssevent = 1;
@@ -768,7 +768,7 @@ U16     xcode;                          /* Exception code            */
                    primary space-switch-event control bit is one */
                 regs->tea = regs->cr[4] & CR4_PASN;
                 if (regs->cr[1] & STD_SSEVENT)
-                    regs->tea |= 0x80000000;
+                    regs->tea |= TEA_SSEVENT;
 
                 /* Indicate space-switch event required */
                 ssevent = 1;
@@ -1163,7 +1163,7 @@ U16     pasn;                           /* Primary ASN               */
                the old primary space-switch-event control bit is one */
             regs->tea = regs->cr[4] & CR4_PASN;
             if (regs->cr[1] & STD_SSEVENT)
-                regs->tea |= 0x80000000;
+                regs->tea |= TEA_SSEVENT;
 
             /* Indicate space-switch event required */
             ssevent = 1;
@@ -1224,6 +1224,10 @@ BYTE    key;                            /* New PSW key               */
     /* Apply low-address protection to stores into the DUCT */
     if (ducto < 512 && (regs->cr[0] & CR0_LOW_PROT))
     {
+#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
+        regs->tea = (ducto & TEA_EFFADDR);
+        regs->excarid = 0;
+#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
         program_check (PGM_PROTECTION_EXCEPTION);
         return;
     }
@@ -1389,6 +1393,10 @@ U16     xcode;                          /* Exception code            */
     /* Apply low-address protection to stores into the DUCT */
     if (ducto < 512 && (regs->cr[0] & CR0_LOW_PROT))
     {
+#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
+        regs->tea = (ducto & TEA_EFFADDR);
+        regs->excarid = 0;
+#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
         program_check (PGM_PROTECTION_EXCEPTION);
         return;
     }

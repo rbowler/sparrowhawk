@@ -38,11 +38,12 @@ U32     aaddr;                          /* Absolute address          */
 U32     block;                          /* 4K block number           */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=ALE or page protection  */
+int     stid;                           /* Segment table indication  */
 U16     xcode;                          /* Exception code            */
 
     /* Convert to real address using home segment table */
     rc = translate_addr (vaddr, 0, regs, ACCTYPE_STACK, &raddr,
-                            &xcode, &private, &protect);
+                            &xcode, &private, &protect, &stid);
     if (rc != 0)
     {
         program_check (xcode);
@@ -56,6 +57,10 @@ U16     xcode;                          /* Exception code            */
         && (regs->cr[0] & CR0_LOW_PROT)
         && private == 0)
     {
+#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
+        regs->tea = (vaddr & TEA_EFFADDR) | TEA_ST_HOME;
+        regs->excarid = 0;
+#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
         program_check (PGM_PROTECTION_EXCEPTION);
         return 0;
     }
@@ -63,6 +68,10 @@ U16     xcode;                          /* Exception code            */
     /* Page protection prohibits all stores into the page */
     if (acctype == ACCTYPE_WRITE && protect)
     {
+#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
+        regs->tea = (vaddr & TEA_EFFADDR) | TEA_PROT_AP | TEA_ST_HOME;
+        regs->excarid = 0;
+#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
         program_check (PGM_PROTECTION_EXCEPTION);
         return 0;
     }

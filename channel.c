@@ -787,25 +787,30 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             /* Update number of bytes in channel buffer */
             bufpos += count;
 
-            /* If data chaining then move data from all CCWs in
-               chain before passing buffer to device handler */
-            if (flags & CCW_FLAGS_CD)
+            /* If device handler has requested merging of data
+               chained write CCWs, then collect data from all CCWs
+               in chain before passing buffer to device handler */
+            if (dev->cdwmerge)
             {
-                /* If this is the first CCW in the data chain, then
-                   save the chaining flags from the previous CCW */
-                if ((chained & CCW_FLAGS_CD) == 0)
-                    prev_chained = chained;
+                if (flags & CCW_FLAGS_CD)
+                {
+                    /* If this is the first CCW in the data chain, then
+                       save the chaining flags from the previous CCW */
+                    if ((chained & CCW_FLAGS_CD) == 0)
+                        prev_chained = chained;
 
-                /* Process next CCW in data chain */
-                chained = CCW_FLAGS_CD;
-                chain = 1;
-                continue;
-            }
+                    /* Process next CCW in data chain */
+                    chained = CCW_FLAGS_CD;
+                    chain = 1;
+                    continue;
+                }
 
-            /* If this is the last CCW in the data chain, then
-               restore the chaining flags from the previous CCW */
-            if (chained & CCW_FLAGS_CD)
-                chained = prev_chained;
+                /* If this is the last CCW in the data chain, then
+                   restore the chaining flags from the previous CCW */
+                if (chained & CCW_FLAGS_CD)
+                    chained = prev_chained;
+
+            } /* end if(dev->cdwmerge) */
 
             /* Reset the total count at end of data chain */
             count = bufpos;

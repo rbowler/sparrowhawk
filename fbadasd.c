@@ -174,7 +174,7 @@ BYTE    unittyp;                        /* Unit type                 */
     dev->numdevchar = 32;
 
     /* Activate I/O tracing */
-    dev->ccwtrace = 1;
+//  dev->ccwtrace = 1;
 
     return 0;
 } /* end function fbadasd_init_handler */
@@ -304,6 +304,10 @@ int     repcnt;                         /* Replication count         */
         /* Write physical blocks of data to the device */
         while (dev->fbalcnum > 0)
         {
+            /* Exit if data chaining and this CCW is exhausted */
+            if ((flags & CCW_FLAGS_CD) && count == 0)
+                break;
+
             /* Overrun if data chaining within a physical block */
             if ((flags & CCW_FLAGS_CD) && count < dev->fbablksiz)
             {

@@ -156,6 +156,7 @@ U32     raddr;                          /* Real address              */
 U16     xcode;                          /* Exception code            */
 int     private = 0;                    /* 1=Private address space   */
 int     protect = 0;                    /* 1=ALE or page protection  */
+int     stid;                           /* Segment table indication  */
 
     if (REAL_MODE(&regs->psw) && acctype != ACCTYPE_LRA) {
         *raptr = vaddr;
@@ -163,7 +164,7 @@ int     protect = 0;                    /* 1=ALE or page protection  */
     }
 
     rc = translate_addr (vaddr, arn, regs, acctype,
-                        &raddr, &xcode, &private, &protect);
+                        &raddr, &xcode, &private, &protect, &stid);
     if (rc) return xcode;
 
     *raptr = raddr;

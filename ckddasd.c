@@ -392,7 +392,11 @@ U32             sctlfeat;               /* Storage control features  */
     dev->numdevchar = 64;
 
     /* Activate I/O tracing */
-    dev->ccwtrace = 1;
+//  dev->ccwtrace = 1;
+
+    /* Request the channel to merge data chained write CCWs into
+       a single buffer before passing data to the device handler */
+    dev->cdwmerge = 1;
 
     return 0;
 } /* end function ckddasd_init_handler */

@@ -323,7 +323,11 @@ int     rc;                             /* Return code               */
             || code == PGM_ALE_SEQUENCE_EXCEPTION
             || code == PGM_ASTE_VALIDITY_EXCEPTION
             || code == PGM_ASTE_SEQUENCE_EXCEPTION
-            || code == PGM_EXTENDED_AUTHORITY_EXCEPTION)
+            || code == PGM_EXTENDED_AUTHORITY_EXCEPTION
+#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
+            || code == PGM_PROTECTION_EXCEPTION
+#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
+           )
             psa->excarid = regs->excarid;
 
         /* Store the translation exception address at PSA+144 */
@@ -335,7 +339,11 @@ int     rc;                             /* Return code               */
             || code == PGM_SECONDARY_AUTHORITY_EXCEPTION
             || code == PGM_SPACE_SWITCH_EVENT
             || code == PGM_LX_TRANSLATION_EXCEPTION
-            || code == PGM_EX_TRANSLATION_EXCEPTION)
+            || code == PGM_EX_TRANSLATION_EXCEPTION
+#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
+            || code == PGM_PROTECTION_EXCEPTION
+#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
+           )
         {
             psa->tea[0] = (regs->tea & 0xFF000000) >> 24;
             psa->tea[1] = (regs->tea & 0xFF0000) >> 16;
@@ -410,6 +418,7 @@ int     m;                              /* Condition code mask       */
 U32     n, n1, n2;                      /* 32-bit operand values     */
 int     private;                        /* 1=Private address space   */
 int     protect;                        /* 1=ALE or page protection  */
+int     stid;                           /* Segment table indication  */
 int     cc;                             /* Condition code            */
 BYTE    obyte, sbyte, dbyte;            /* Byte work areas           */
 DWORD   dword;                          /* Doubleword work area      */
@@ -1982,6 +1991,16 @@ static BYTE module[8];                  /* Module name               */
             break;
 #endif /*FEATURE_MSSF_CALL*/
 
+        case 0x204:
+        /*-----------------------------------------------------------*/
+        /* Diagnose 204: LPAR RMF Interface                          */
+        /*-----------------------------------------------------------*/
+
+            diag204_call (r1, r2, regs);
+            regs->psw.cc = 0;
+
+            break;
+
         default:
         /*-----------------------------------------------------------*/
         /* Diagnose xxx: Invalid function code                       */
@@ -2309,20 +2328,24 @@ static BYTE module[8];                  /* Module name               */
     /* STM      Store Multiple                                  [RS] */
     /*---------------------------------------------------------------*/
 
-        for ( n = r1; ; )
+        /* Copy register contents into work area */
+        for ( n = r1, d = 0; ; )
         {
-            /* Store register contents at operand address */
-            vstore4 ( regs->gpr[n], effective_addr, ar1, regs );
+            /* Copy contents of one register to work area */
+            cwork1[d++] = (regs->gpr[n] & 0xFF000000) >> 24;
+            cwork1[d++] = (regs->gpr[n] & 0xFF0000) >> 16;
+            cwork1[d++] = (regs->gpr[n] & 0xFF00) >> 8;
+            cwork1[d++] = regs->gpr[n] & 0xFF;
 
             /* Instruction is complete when r3 register is done */
             if ( n == r3 ) break;
 
             /* Update register number, wrapping from 15 to 0 */
             n++; n &= 15;
-
-            /* Update effective address to next fullword */
-            effective_addr += 4;
         }
+
+        /* Store register contents at operand address */
+        vstorec ( cwork1, d-1, effective_addr, ar1, regs );
 
         break;
 
@@ -2450,19 +2473,25 @@ static BYTE module[8];                  /* Module name               */
     /* LM       Load Multiple                                   [RS] */
     /*---------------------------------------------------------------*/
 
-        for ( n = r1; ; )
+        /* Calculate the number of bytes to be loaded */
+        d = (((r3 < r1) ? r3 + 16 - r1 : r3 - r1) + 1) * 4;
+
+        /* Fetch new register contents from operand address */
+        vfetchc ( cwork1, d-1, effective_addr, ar1, regs );
+
+        /* Load registers from work area */
+        for ( n = r1, d = 0; ; )
         {
-            /* Load register from operand address */
-            regs->gpr[n] = vfetch4 ( effective_addr, ar1, regs );
+            /* Load one register from work area */
+            regs->gpr[n] = (cwork1[d] << 24) | (cwork1[d+1] << 16)
+                            | (cwork1[d+2] << 8) | cwork1[d+3];
+            d += 4;
 
             /* Instruction is complete when r3 register is done */
             if ( n == r3 ) break;
 
             /* Update register number, wrapping from 15 to 0 */
             n++; n &= 15;
-
-            /* Update effective address to next fullword */
-            effective_addr += 4;
         }
 
         break;
@@ -2509,6 +2538,10 @@ static BYTE module[8];                  /* Module name               */
            address is 0-511 and bit 3 of control register 0 is set */
         if ( n < 512 && (regs->cr[0] & CR0_LOW_PROT) )
         {
+#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
+            regs->tea = (n & TEA_EFFADDR);
+            regs->excarid = 0;
+#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
             program_check (PGM_PROTECTION_EXCEPTION);
             goto terminate;
         }
@@ -2532,7 +2565,7 @@ static BYTE module[8];                  /* Module name               */
         }
 
         /* Calculate the number of registers to be traced, minus 1 */
-        i = ( r3 > r1 ) ? r3 + 16 - r1 : r3 - r1;
+        i = ( r3 < r1 ) ? r3 + 16 - r1 : r3 - r1;
 
         /* Obtain the TOD clock update lock */
         obtain_lock (&sysblk.todlock);
@@ -2599,19 +2632,25 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        for ( n = r1; ; )
+        /* Calculate the number of bytes to be loaded */
+        d = (((r3 < r1) ? r3 + 16 - r1 : r3 - r1) + 1) * 4;
+
+        /* Fetch new access register contents from operand address */
+        vfetchc ( cwork1, d-1, effective_addr, ar1, regs );
+
+        /* Load access registers from work area */
+        for ( n = r1, d = 0; ; )
         {
-            /* Load access register from operand address */
-            regs->ar[n] = vfetch4 ( effective_addr, ar1, regs );
+            /* Load one access register from work area */
+            regs->ar[n] = (cwork1[d] << 24) | (cwork1[d+1] << 16)
+                        | (cwork1[d+2] << 8) | cwork1[d+3];
+            d += 4;
 
             /* Instruction is complete when r3 register is done */
             if ( n == r3 ) break;
 
             /* Update register number, wrapping from 15 to 0 */
             n++; n &= 15;
-
-            /* Update effective address to next fullword */
-            effective_addr += 4;
         }
 
         break;
@@ -2628,20 +2667,24 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        for ( n = r1; ; )
+        /* Copy access registers into work area */
+        for ( n = r1, d = 0; ; )
         {
-            /* Store access register contents at operand address */
-            vstore4 ( regs->ar[n], effective_addr, ar1, regs );
+            /* Copy contents of one access register to work area */
+            cwork1[d++] = (regs->ar[n] & 0xFF000000) >> 24;
+            cwork1[d++] = (regs->ar[n] & 0xFF0000) >> 16;
+            cwork1[d++] = (regs->ar[n] & 0xFF00) >> 8;
+            cwork1[d++] = regs->ar[n] & 0xFF;
 
             /* Instruction is complete when r3 register is done */
             if ( n == r3 ) break;
 
             /* Update register number, wrapping from 15 to 0 */
             n++; n &= 15;
-
-            /* Update effective address to next fullword */
-            effective_addr += 4;
         }
+
+        /* Store access register contents at operand address */
+        vstorec ( cwork1, d-1, effective_addr, ar1, regs );
 
         break;
 #endif /*FEATURE_ACCESS_REGISTERS*/
@@ -3029,8 +3072,8 @@ static BYTE module[8];                  /* Module name               */
         /* Perform serialization before starting operation */
         perform_serialization ();
 
-        /* Set condition code 2 because SIGP is not implemented yet */
-        regs->psw.cc = 2;
+        /* Set condition code 3 because SIGP is not implemented yet */
+        regs->psw.cc = 3;
 
         /* Perform serialization after completing operation */
         perform_serialization ();
@@ -3084,7 +3127,7 @@ static BYTE module[8];                  /* Module name               */
 
         /* Translate the effective address to a real address */
         cc = translate_addr (effective_addr, ar1, regs, ACCTYPE_LRA,
-                &n, &xcode, &private, &protect);
+                &n, &xcode, &private, &protect, &stid);
 
         /* If ALET exception, set exception code in R1 bits 16-31
            set high order bit of R1, and set condition code 3 */
@@ -3645,7 +3688,7 @@ static BYTE module[8];                  /* Module name               */
 
             /* Translate virtual address to real address */
             if (translate_addr (effective_addr, r2, regs, ACCTYPE_IVSK,
-                &n, &xcode, &private, &protect))
+                &n, &xcode, &private, &protect, &stid))
             {
                 program_check (xcode);
                 goto terminate;
@@ -3938,9 +3981,6 @@ static BYTE module[8];                  /* Module name               */
             /* Perform serialization */
             perform_serialization ();
 
-            /* Convert real address to absolute address */
-            n = APPLY_PREFIXING (n, regs->pxr);
-
             /* Addressing exception if block is outside main storage */
             if ( n >= sysblk.mainsize )
             {
@@ -3951,9 +3991,16 @@ static BYTE module[8];                  /* Module name               */
             /* Protection exception if low-address protection is set */
             if ( n == 0 && (regs->cr[0] & CR0_LOW_PROT) )
             {
+#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
+                regs->tea = (n & TEA_EFFADDR);
+                regs->excarid = 0;
+#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
                 program_check (PGM_PROTECTION_EXCEPTION);
                 goto terminate;
             }
+
+            /* Convert real address to absolute address */
+            n = APPLY_PREFIXING (n, regs->pxr);
 
             /* Clear the 4K block to zeroes */
             memset (sysblk.mainstor + n, 0x00, 4096);
@@ -4743,20 +4790,24 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        for ( n = r1; ; )
+        /* Copy control registers into work area */
+        for ( n = r1, d = 0; ; )
         {
-            /* Store control register contents at operand address */
-            vstore4 ( regs->cr[n], effective_addr, ar1, regs );
+            /* Copy contents of one control register to work area */
+            cwork1[d++] = (regs->cr[n] & 0xFF000000) >> 24;
+            cwork1[d++] = (regs->cr[n] & 0xFF0000) >> 16;
+            cwork1[d++] = (regs->cr[n] & 0xFF00) >> 8;
+            cwork1[d++] = regs->cr[n] & 0xFF;
 
             /* Instruction is complete when r3 register is done */
             if ( n == r3 ) break;
 
             /* Update register number, wrapping from 15 to 0 */
             n++; n &= 15;
-
-            /* Update effective address to next fullword */
-            effective_addr += 4;
         }
+
+        /* Store control register contents at operand address */
+        vstorec ( cwork1, d-1, effective_addr, ar1, regs );
 
         break;
 
@@ -4779,19 +4830,25 @@ static BYTE module[8];                  /* Module name               */
             goto terminate;
         }
 
-        for ( n = r1; ; )
+        /* Calculate the number of bytes to be loaded */
+        d = (((r3 < r1) ? r3 + 16 - r1 : r3 - r1) + 1) * 4;
+
+        /* Fetch new control register contents from operand address */
+        vfetchc ( cwork1, d-1, effective_addr, ar1, regs );
+
+        /* Load control registers from work area */
+        for ( n = r1, d = 0; ; )
         {
-            /* Load control register from operand address */
-            regs->cr[n] = vfetch4 ( effective_addr, ar1, regs );
+            /* Load one control register from work area */
+            regs->cr[n] = (cwork1[d] << 24) | (cwork1[d+1] << 16)
+                        | (cwork1[d+2] << 8) | cwork1[d+3];
+            d += 4;
 
             /* Instruction is complete when r3 register is done */
             if ( n == r3 ) break;
 
             /* Update register number, wrapping from 15 to 0 */
             n++; n &= 15;
-
-            /* Update effective address to next fullword */
-            effective_addr += 4;
         }
 
         break;
@@ -4937,15 +4994,14 @@ static BYTE module[8];                  /* Module name               */
         /* Load value from register */
         n = regs->gpr[r1];
 
-        /* Store characters from register to operand address */
-        for ( i = 0; i < 4; i++ )
+        /* Copy characters from register to work area */
+        for ( i = 0, j = 0; i < 4; i++ )
         {
             /* Test mask bit corresponding to this character */
             if ( r3 & 0x08 )
             {
-                /* Store character from register to operand */
-                dbyte = n >> 24;
-                vstoreb ( dbyte, effective_addr++, ar1, regs );
+                /* Copy character from register to work area */
+                cwork1[j++] = n >> 24;
             }
 
             /* Shift mask and register for next byte */
@@ -4953,6 +5009,12 @@ static BYTE module[8];                  /* Module name               */
             n <<= 8;
 
         } /* end for(i) */
+
+        /* Exit if mask is all zero */
+        if (j == 0) break;
+
+        /* Store result at operand location */
+        vstorec ( cwork1, j-1, effective_addr, ar1, regs );
 
         break;
 
@@ -5020,29 +5082,9 @@ static BYTE module[8];                  /* Module name               */
     /* MVN      Move Numerics                                   [SS] */
     /*---------------------------------------------------------------*/
 
-        /* Process operands from left to right */
-        for ( i = 0; i < ibyte+1; i++ )
-        {
-            /* Fetch bytes from source and destination operands */
-            sbyte = vfetchb ( effective_addr2, ar2, regs );
-            dbyte = vfetchb ( effective_addr, ar1, regs );
-
-            /* Copy low digit of source byte to destination byte */
-            dbyte = (dbyte & 0xF0) | ( sbyte & 0x0F);
-
-            /* Store result at destination operand address */
-            vstoreb ( dbyte, effective_addr, ar1, regs );
-
-            /* Increment operand addresses */
-            effective_addr++;
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            effective_addr2++;
-            effective_addr2 &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-        } /* end for(i) */
-
+        /* Copy low digits of source bytes to destination bytes */
+        ss_operation (opcode, effective_addr, ar1,
+                effective_addr2, ar2, ibyte, regs);
         break;
 
     case 0xD2:
@@ -5053,7 +5095,6 @@ static BYTE module[8];                  /* Module name               */
         /* Move characters using current addressing mode and key */
         move_chars (effective_addr, ar1, regs->psw.pkey,
                 effective_addr2, ar2, regs->psw.pkey, ibyte, regs);
-
         break;
 
     case 0xD3:
@@ -5061,29 +5102,9 @@ static BYTE module[8];                  /* Module name               */
     /* MVZ      Move Zones                                      [SS] */
     /*---------------------------------------------------------------*/
 
-        /* Process operands from left to right */
-        for ( i = 0; i < ibyte+1; i++ )
-        {
-            /* Fetch bytes from source and destination operands */
-            sbyte = vfetchb ( effective_addr2, ar2, regs );
-            dbyte = vfetchb ( effective_addr, ar1, regs );
-
-            /* Copy high digit of source byte to destination byte */
-            dbyte = (dbyte & 0x0F) | ( sbyte & 0xF0);
-
-            /* Store result at destination operand address */
-            vstoreb ( dbyte, effective_addr, ar1, regs );
-
-            /* Increment operand addresses */
-            effective_addr++;
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            effective_addr2++;
-            effective_addr2 &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-        } /* end for(i) */
-
+        /* Copy high digits of source bytes to destination bytes */
+        ss_operation (opcode, effective_addr, ar1,
+                effective_addr2, ar2, ibyte, regs);
         break;
 
     case 0xD4:
@@ -5091,32 +5112,9 @@ static BYTE module[8];                  /* Module name               */
     /* NC       And Characters                                  [SS] */
     /*---------------------------------------------------------------*/
 
-        /* Clear the condition code */
-        regs->psw.cc = 0;
-
-        /* Process operands from left to right */
-        for ( i = 0; i < ibyte+1; i++ )
-        {
-            /* Fetch bytes from source and destination operands */
-            sbyte = vfetchb ( effective_addr2, ar2, regs );
-            dbyte = vfetchb ( effective_addr, ar1, regs );
-
-            /* AND operand bytes and set condition code */
-            if ( dbyte &= sbyte ) regs->psw.cc = 1;
-
-            /* Store result at destination operand address */
-            vstoreb ( dbyte, effective_addr, ar1, regs );
-
-            /* Increment operand addresses */
-            effective_addr++;
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            effective_addr2++;
-            effective_addr2 &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-        } /* end for(i) */
-
+        /* Perform AND operation and set condition code */
+        regs->psw.cc = ss_operation (opcode, effective_addr, ar1,
+                                effective_addr2, ar2, ibyte, regs);
         break;
 
     case 0xD5:
@@ -5141,32 +5139,9 @@ static BYTE module[8];                  /* Module name               */
     /* OC       Or Characters                                   [SS] */
     /*---------------------------------------------------------------*/
 
-        /* Clear the condition code */
-        regs->psw.cc = 0;
-
-        /* Process operands from left to right */
-        for ( i = 0; i < ibyte+1; i++ )
-        {
-            /* Fetch bytes from source and destination operands */
-            sbyte = vfetchb ( effective_addr2, ar2, regs );
-            dbyte = vfetchb ( effective_addr, ar1, regs );
-
-            /* OR operand bytes and set condition code */
-            if ( dbyte |= sbyte ) regs->psw.cc = 1;
-
-            /* Store result at destination operand address */
-            vstoreb ( dbyte, effective_addr, ar1, regs );
-
-            /* Increment operand addresses */
-            effective_addr++;
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            effective_addr2++;
-            effective_addr2 &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-        } /* end for(i) */
-
+        /* Perform OR operation and set condition code */
+        regs->psw.cc = ss_operation (opcode, effective_addr, ar1,
+                                effective_addr2, ar2, ibyte, regs);
         break;
 
     case 0xD7:
@@ -5174,32 +5149,9 @@ static BYTE module[8];                  /* Module name               */
     /* XC       Exclusive Or Characters                         [SS] */
     /*---------------------------------------------------------------*/
 
-        /* Clear the condition code */
-        regs->psw.cc = 0;
-
-        /* Process operands from left to right */
-        for ( i = 0; i < ibyte+1; i++ )
-        {
-            /* Fetch bytes from source and destination operands */
-            sbyte = vfetchb ( effective_addr2, ar2, regs );
-            dbyte = vfetchb ( effective_addr, ar1, regs );
-
-            /* XOR operand bytes and set condition code */
-            if ( dbyte ^= sbyte ) regs->psw.cc = 1;
-
-            /* Store result at destination operand address */
-            vstoreb ( dbyte, effective_addr, ar1, regs );
-
-            /* Increment operand addresses */
-            effective_addr++;
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            effective_addr2++;
-            effective_addr2 &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-        } /* end for(i) */
-
+        /* Perform XOR operation and set condition code */
+        regs->psw.cc = ss_operation (opcode, effective_addr, ar1,
+                                effective_addr2, ar2, ibyte, regs);
         break;
 
     case 0xD9:
@@ -5349,14 +5301,36 @@ static BYTE module[8];                  /* Module name               */
     /* TR       Translate                                       [SS] */
     /*---------------------------------------------------------------*/
 
-        /* Process first operand from left to right */
-        for ( i = 0; i < ibyte+1; i++ )
-        {
-            /* Fetch byte from first operand address */
-            dbyte = vfetchb ( effective_addr, ar1, regs );
+        /* Validate the first operand for write access */
+        validate_operand ( effective_addr, ar1, ibyte,
+                        ACCTYPE_WRITE, regs);
 
-            /* Fetch byte from translate table */
-            sbyte = vfetchb ( effective_addr2 + dbyte, ar2, regs );
+        /* Fetch first operand into work area */
+        vfetchc ( cwork1, ibyte, effective_addr, ar1, regs );
+
+        /* Determine the second operand range by scanning the
+           first operand to find the bytes with the highest
+           and lowest values */
+        for ( i = 0, d = 255, h = 0; i <= ibyte; i++ )
+        {
+            if (cwork1[i] < d) d = cwork1[i];
+            if (cwork1[i] > h) h = cwork1[i];
+        }
+
+        /* Validate the referenced portion of the second operand */
+        n = (effective_addr2 + d) &
+                (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        validate_operand ( n, ar2, h-d, ACCTYPE_READ, regs);
+
+        /* Process first operand from left to right, refetching
+           second operand and storing the result byte by byte
+           to ensure correct handling of overlapping operands */
+        for ( i = 0; i <= ibyte; i++ )
+        {
+            /* Fetch byte from second operand */
+            n = (effective_addr2 + cwork1[i]) &
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            sbyte = vfetchb ( n, ar2, regs );
 
             /* Store result at first operand address */
             vstoreb ( sbyte, effective_addr, ar1, regs );
@@ -5379,7 +5353,7 @@ static BYTE module[8];                  /* Module name               */
         regs->psw.cc = 0;
 
         /* Process first operand from left to right */
-        for ( i = 0; i < ibyte+1; i++ )
+        for ( i = 0; i <= ibyte; i++ )
         {
             /* Fetch argument byte from first operand */
             dbyte = vfetchb ( effective_addr, ar1, regs );
@@ -5643,11 +5617,18 @@ static BYTE module[8];                  /* Module name               */
     /* MVCIN    Move Characters Inverse                         [SS] */
     /*---------------------------------------------------------------*/
 
+        /* Validate the operands for addressing and protection */
+        validate_operand (effective_addr, ar1, ibyte,
+                        ACCTYPE_WRITE, regs);
+        n = (effective_addr2 - ibyte) &
+                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        validate_operand (n, ar2, ibyte, ACCTYPE_READ, regs);
+
         /* Process the destination operand from left to right,
            and the source operand from right to left */
         effective_addr2 += ibyte;
 
-        for ( i = 0; i < ibyte+1; i++ )
+        for ( i = 0; i <= ibyte; i++ )
         {
             /* Fetch a byte from the source operand */
             sbyte = vfetchb ( effective_addr2, ar2, regs );
@@ -6046,6 +6027,13 @@ int     icidx;                          /* Instruction counter index */
                 logmsg ("First use of instruction %2.2X%2.2X\n",
                         regs->inst[0], icidx);
             tracethis = 1;
+//          if (regs->inst[0] == 0x90 || regs->inst[0] == 0x98
+//              || regs->inst[0] == 0x9A || regs->inst[0] == 0x9B
+//              || regs->inst[0] == 0xB6 || regs->inst[0] == 0xB7
+//              || regs->inst[0] == 0xD1 || regs->inst[0] == 0xD3
+//              || regs->inst[0] == 0xD4 || regs->inst[0] == 0xD6
+//              || regs->inst[0] == 0xD7 || regs->inst[0] == 0xDC)
+//              sysblk.inststep = 1;
         }
 
         /* Count instruction usage by opcode */
@@ -6065,7 +6053,7 @@ int     icidx;                          /* Instruction counter index */
 //      if (regs->inst[0] == 0xB2 && regs->inst[1] == 0x4A) sysblk.inststep = 1; /*ESTA*/
 //      if (regs->inst[0] == 0x01 && regs->inst[1] == 0x01) sysblk.inststep = 1; /*PR*/
 //      if (regs->inst[0] == 0xE5) sysblk.inststep = 1; /*LASP & MVS assists*/
-        if (regs->inst[0] == 0xFC) sysblk.inststep = 1; /*MP*/
+//      if (regs->inst[0] == 0xFC) sysblk.inststep = 1; /*MP*/
         if (regs->inst[0] == 0xFD) sysblk.inststep = 1; /*DP*/
 
         /* Test for breakpoint */

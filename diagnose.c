@@ -5,6 +5,7 @@
 /* This module implements various diagnose functions                 */
 /* MSSF call as described in SA22-7098-0                             */
 /* SCPEND as described in GC19-6215-0 which is also used with PR/SM  */
+/* LPAR RMF interface call                                           */
 /*                                                                   */
 /*                                             04/12/1999 Jan Jaeger */
 /*-------------------------------------------------------------------*/
@@ -130,6 +131,34 @@ typedef struct _SPCCB_CHP_STATUS {
                                            map.                      */
         BYTE    reserved[152];          /* Reserved.                 */
     } SPCCB_CHP_STATUS;
+
+typedef struct _DIAG204_HDR {
+        BYTE    numpart;                /* Number of partitions      */
+        BYTE    flags;                  /* Flag Byte                 */
+#define DIAG204_PHYSICAL_PRESENT        0x80
+        HWORD   resv;                   /* Unknown , 0 on 2003,
+                                           0x0005 under VM           */
+        HWORD   physcpu;                /* Number of phys CP's       */
+        HWORD   offown;                 /* Offset to own partition   */
+        DWORD   diagstck;               /* TOD of last diag204       */
+    } DIAG204_HDR;
+
+typedef struct _DIAG204_PART {
+        BYTE    partnum;                /* Logical partition number
+                                           starts with 1             */
+        BYTE    virtcpu;                /* Number of virt CP's       */
+        HWORD   resv1[3];
+        BYTE    partname[8];            /* Partition name            */
+    } DIAG204_PART;
+
+typedef struct _DIAG204_PART_CPU {
+        HWORD   cpaddr;                 /* CP address                */
+        HWORD   resv2[2];
+        HWORD   relshare;               /* Relative share            */
+        DWORD   totdispatch;            /* Total dispatch time       */
+        DWORD   effdispatch;            /* Effective dispatch time   */
+    } DIAG204_PART_CPU;
+
 
 /*-------------------------------------------------------------------*/
 /* Process SCPEND call (Function code 0x044)                         */
@@ -309,3 +338,155 @@ DEVBLK            *dev;                /* Device block pointer       */
 
 } /* end function mssf_call */
 #endif /* FEATURE_MSSF_CALL */
+
+/*-------------------------------------------------------------------*/
+/* Process LPAR DIAG 204 call                                        */
+/*-------------------------------------------------------------------*/
+void diag204_call (int r1, int r2, REGS *regs)
+{
+DIAG204_HDR       *hdrinfo;            /* Header                     */
+DIAG204_PART      *partinfo;           /* Partition info             */
+DIAG204_PART_CPU  *cpuinfo;            /* CPU info                   */
+U32               abs;                 /* abs addr of data area      */
+U64               dreg;                /* work doubleword            */
+int               i;                   /* loop counter               */
+struct rusage     usage;               /* RMF type data              */
+static char       lparname[] = "HERCULES";
+static char       physical[] = "PHYSICAL";
+static U64        diag204tod;          /* last diag204 tod           */
+
+    abs = APPLY_PREFIXING (regs->gpr[r1], regs->pxr);
+
+    /* Program check if RMF data is not on a page boundary */
+    if ( abs & 0x00000FFF )
+    {
+        program_check (PGM_SPECIFICATION_EXCEPTION);
+        return;
+    }
+
+    /* Program check if RMF data area is outside main storage */
+    if ( abs >= sysblk.mainsize )
+    {
+        program_check (PGM_ADDRESSING_EXCEPTION);
+        return;
+    }
+
+    /* Test DIAG204 command word */
+    switch (regs->gpr[r2]) {
+
+    case 0x04:
+
+        /* Obtain the TOD clock update lock */
+        obtain_lock (&sysblk.todlock);
+
+        /* save last diag204 tod */
+        dreg = diag204tod;
+
+        /* Retrieve the TOD clock value and update diag204tod */
+        diag204tod = sysblk.todclk;
+
+        /* Increment bit position 63 to ensure unique values */
+        sysblk.todclk++;
+
+        /* Release the TOD clock update lock */
+        release_lock (&sysblk.todlock);
+
+        /* Point to DIAG 204 data area */
+        hdrinfo = (DIAG204_HDR*)(sysblk.mainstor + abs);
+
+        /* Mark page referenced */
+        sysblk.storkeys[abs >> 12] |= STORKEY_REF | STORKEY_CHANGE;
+
+        memset(hdrinfo, 0, sizeof(DIAG204_HDR));
+        hdrinfo->numpart = 1;
+        hdrinfo->flags = DIAG204_PHYSICAL_PRESENT;
+        hdrinfo->physcpu[0] = (sysblk.numcpu & 0xFF00) >> 8;
+        hdrinfo->physcpu[1] = sysblk.numcpu & 0xFF;
+        hdrinfo->offown[0] = (sizeof(DIAG204_HDR) & 0xFF00) >> 8;
+        hdrinfo->offown[1] = sizeof(DIAG204_HDR) & 0xFF;
+        hdrinfo->diagstck[0] = (dreg >> 56) & 0xFF;
+        hdrinfo->diagstck[1] = (dreg >> 48) & 0xFF;
+        hdrinfo->diagstck[2] = (dreg >> 40) & 0xFF;
+        hdrinfo->diagstck[3] = (dreg >> 32) & 0xFF;
+        hdrinfo->diagstck[4] = (dreg >> 24) & 0xFF;
+        hdrinfo->diagstck[5] = (dreg >> 16) & 0xFF;
+        hdrinfo->diagstck[6] = (dreg >> 8) & 0xFF;
+        hdrinfo->diagstck[7] = dreg & 0xFF;
+
+        /* hercules partition */
+        partinfo = (DIAG204_PART*)(hdrinfo + 1);
+        memset(partinfo, 0, sizeof(DIAG204_PART));
+        partinfo->partnum = 1;
+        partinfo->virtcpu = sysblk.numcpu;
+        for(i = 0; i < sizeof(partinfo->partname); i++)
+            partinfo->partname[i] = ascii_to_ebcdic[(int)lparname[i]];
+
+        /* hercules cpu's */
+        cpuinfo = (DIAG204_PART_CPU*)(partinfo + 1);
+        for(i = 0; i < sysblk.numcpu;i++) {
+            memset(cpuinfo, 0, sizeof(DIAG204_PART_CPU));
+            cpuinfo->cpaddr[0] = (sysblk.regs[i].cpuad & 0xFF00) >> 8;
+            cpuinfo->cpaddr[1] = sysblk.regs[i].cpuad & 0xFF;
+            cpuinfo->relshare[0] = (100 & 0xFF00) >> 8;
+            cpuinfo->relshare[1] = 100 & 0xFF;
+            getrusage(RUSAGE_SELF,&usage);
+            dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) / sysblk.numcpu;
+            dreg = dreg * 1000000 + (i ? 0 : usage.ru_utime.tv_usec + usage.ru_stime.tv_usec);
+            dreg <<= 12;
+            cpuinfo->totdispatch[0] = (dreg >> 56) & 0xFF;
+            cpuinfo->totdispatch[1] = (dreg >> 48) & 0xFF;
+            cpuinfo->totdispatch[2] = (dreg >> 40) & 0xFF;
+            cpuinfo->totdispatch[3] = (dreg >> 32) & 0xFF;
+            cpuinfo->totdispatch[4] = (dreg >> 24) & 0xFF;
+            cpuinfo->totdispatch[5] = (dreg >> 16) & 0xFF;
+            cpuinfo->totdispatch[6] = (dreg >> 8) & 0xFF;
+            cpuinfo->totdispatch[7] = dreg & 0xFF;
+            dreg = (U64)(usage.ru_utime.tv_sec) / sysblk.numcpu;
+            dreg = dreg * 1000000 + (i ? 0 : usage.ru_utime.tv_usec );
+            dreg <<= 12;
+            cpuinfo->effdispatch[0] = (dreg >> 56) & 0xFF;
+            cpuinfo->effdispatch[1] = (dreg >> 48) & 0xFF;
+            cpuinfo->effdispatch[2] = (dreg >> 40) & 0xFF;
+            cpuinfo->effdispatch[3] = (dreg >> 32) & 0xFF;
+            cpuinfo->effdispatch[4] = (dreg >> 24) & 0xFF;
+            cpuinfo->effdispatch[5] = (dreg >> 16) & 0xFF;
+            cpuinfo->effdispatch[6] = (dreg >> 8) & 0xFF;
+            cpuinfo->effdispatch[7] = dreg & 0xFF;
+            cpuinfo += 1;
+        }
+
+        /* lpar management */
+        partinfo = (DIAG204_PART*)cpuinfo;
+        memset(partinfo, 0, sizeof(DIAG204_PART));
+        partinfo->partnum = 0;
+        partinfo->virtcpu = 1;
+        for(i = 0; i < sizeof(partinfo->partname); i++)
+            partinfo->partname[i] = ascii_to_ebcdic[(int)physical[i]];
+        cpuinfo = (DIAG204_PART_CPU*)(partinfo + 1);
+        memset(cpuinfo, 0, sizeof(DIAG204_PART_CPU));
+//      cpuinfo->cpaddr[0] = 0;
+//      cpuinfo->cpaddr[1] = 0;
+        getrusage(RUSAGE_CHILDREN,&usage);
+        dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) / sysblk.numcpu;
+        dreg = dreg * 1000000 + (i ? 0 : usage.ru_utime.tv_usec + usage.ru_stime.tv_usec);
+        dreg <<= 12;
+        cpuinfo->totdispatch[0] = (dreg >> 56) & 0xFF;
+        cpuinfo->totdispatch[1] = (dreg >> 48) & 0xFF;
+        cpuinfo->totdispatch[2] = (dreg >> 40) & 0xFF;
+        cpuinfo->totdispatch[3] = (dreg >> 32) & 0xFF;
+        cpuinfo->totdispatch[4] = (dreg >> 24) & 0xFF;
+        cpuinfo->totdispatch[5] = (dreg >> 16) & 0xFF;
+        cpuinfo->totdispatch[6] = (dreg >> 8) & 0xFF;
+        cpuinfo->totdispatch[7] = dreg & 0xFF;
+//      cpuinfo->effdispatch = 0;
+
+        regs->gpr[r2] = 0;
+
+        break;
+
+    default:
+        regs->gpr[r2] = 4;
+
+    } /*switch(regs->gpr[r2])*/
+
+} /* end function diag204_call */

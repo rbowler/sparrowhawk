@@ -101,6 +101,18 @@ BYTE    pad;                            /* Padding byte              */
         regs->gpr[r2+1] &= 0xFF000000;
         regs->gpr[r2+1] |= len2;
 
+        /* Instruction can be interrupted when a CPU determined
+           number of bytes have been processed.  The instruction
+           address will be backed up, and the instruction will
+           be re-executed.  This is consistent with operation
+           under a hypervisor such as LPAR or VM.                *JJ */
+        if ((len1 > 255) && !(addr1 & 0xFFF))
+        {
+            regs->psw.ia -= regs->psw.ilc;
+            regs->psw.ia &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            break;
+        }
+
     } /* end while(len1) */
 
     return cc;
@@ -150,35 +162,9 @@ BYTE    pad;                            /* Padding byte              */
     /* Process operands from left to right */
     while (len1 > 0 || len2 > 0)
     {
-        /* Fetch byte from first operand, or use padding byte */
-        if (len1 > 0)
-        {
-            byte1 = vfetchb ( addr1, r1, regs );
-            addr1++;
-            addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            len1--;
-        }
-        else
-            byte1 = pad;
-
-        /* Fetch byte from second operand, or use padding byte */
-        if (len2 > 0)
-        {
-            byte2 = vfetchb ( addr2, r2, regs );
-            addr2++;
-            addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            len2--;
-        }
-        else
-            byte2 = pad;
-
-        /* Update the registers */
-        regs->gpr[r1] = addr1;
-        regs->gpr[r1+1] &= 0xFF000000;
-        regs->gpr[r1+1] |= len1;
-        regs->gpr[r2] = addr2;
-        regs->gpr[r2+1] &= 0xFF000000;
-        regs->gpr[r2+1] |= len2;
+        /* Fetch a byte from each operand, or use padding byte */
+        byte1 = (len1 > 0) ? vfetchb (addr1, r1, regs) : pad;
+        byte2 = (len2 > 0) ? vfetchb (addr2, r2, regs) : pad;
 
         /* Compare operand bytes, set condition code if unequal */
         if (byte1 != byte2)
@@ -187,7 +173,43 @@ BYTE    pad;                            /* Padding byte              */
             break;
         } /* end if */
 
+        /* Update the first operand address and length */
+        if (len1 > 0)
+        {
+            addr1++;
+            addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            len1--;
+        }
+
+        /* Update the second operand address and length */
+        if (len2 > 0)
+        {
+            addr2++;
+            addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            len2--;
+        }
+
+        /* Instruction can be interrupted when a CPU determined
+           number of bytes have been processed.  The instruction
+           address will be backed up, and the instruction will
+           be re-executed.  This is consistent with operation
+           under a hypervisor such as LPAR or VM.                *JJ */
+        if ((len1 + len2 > 255) && !((addr1 - len2) & 0xFFF))
+        {
+            regs->psw.ia -= regs->psw.ilc;
+            regs->psw.ia &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            break;
+        }
+
     } /* end while(len1||len2) */
+
+    /* Update the registers */
+    regs->gpr[r1] = addr1;
+    regs->gpr[r1+1] &= 0xFF000000;
+    regs->gpr[r1+1] |= len1;
+    regs->gpr[r2] = addr2;
+    regs->gpr[r2+1] &= 0xFF000000;
+    regs->gpr[r2+1] |= len2;
 
     return cc;
 
@@ -329,33 +351,9 @@ BYTE    pad;                            /* Padding byte              */
             break;
         }
 
-        /* Fetch byte from first operand, or use padding byte */
-        if (len1 > 0)
-        {
-            byte1 = vfetchb ( addr1, r1, regs );
-            addr1++;
-            addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            len1--;
-        }
-        else
-            byte1 = pad;
-
-        /* Fetch byte from second operand, or use padding byte */
-        if (len2 > 0)
-        {
-            byte2 = vfetchb ( addr2, r3, regs );
-            addr2++;
-            addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            len2--;
-        }
-        else
-            byte2 = pad;
-
-        /* Update the registers */
-        regs->gpr[r1] = addr1;
-        regs->gpr[r1+1] = len1;
-        regs->gpr[r3] = addr2;
-        regs->gpr[r3+1] = len2;
+        /* Fetch a byte from each operand, or use padding byte */
+        byte1 = (len1 > 0) ? vfetchb (addr1, r1, regs) : pad;
+        byte2 = (len2 > 0) ? vfetchb (addr2, r3, regs) : pad;
 
         /* Compare operand bytes, set condition code if unequal */
         if (byte1 != byte2)
@@ -364,7 +362,29 @@ BYTE    pad;                            /* Padding byte              */
             break;
         } /* end if */
 
+        /* Update the first operand address and length */
+        if (len1 > 0)
+        {
+            addr1++;
+            addr1 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            len1--;
+        }
+
+        /* Update the second operand address and length */
+        if (len2 > 0)
+        {
+            addr2++;
+            addr2 &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            len2--;
+        }
+
     } /* end for(i) */
+
+    /* Update the registers */
+    regs->gpr[r1] = addr1;
+    regs->gpr[r1+1] = len1;
+    regs->gpr[r3] = addr2;
+    regs->gpr[r3+1] = len2;
 
     return cc;
 
@@ -393,6 +413,7 @@ int     xpvalid1 = 0, xpvalid2 = 0;     /* 1=Operand in expanded stg */
 U32     xpblk1, xpblk2;                 /* Expanded storage block#   */
 int     priv = 0;                       /* 1=Private address space   */
 int     prot = 0;                       /* 1=Protected page          */
+int     stid;                           /* Segment table indication  */
 U32     xaddr;                          /* Address causing exception */
 U16     xcode;                          /* Exception code            */
 BYTE    akey;                           /* Access key                */
@@ -438,7 +459,7 @@ BYTE    akey;                           /* Access key                */
 
     /* Translate the second operand address to a real address */
     rc = translate_addr (vaddr2, r2, regs, ACCTYPE_READ,
-                        &raddr2, &xcode, &priv, &prot);
+                        &raddr2, &xcode, &priv, &prot, &stid);
 
 #ifdef FACILITY_EXPANDED_STORAGE
     /* If page invalid, locate the page in expanded storage using the
@@ -459,7 +480,7 @@ BYTE    akey;                           /* Access key                */
 
     /* Translate the first operand address to a real address */
     rc = translate_addr (vaddr1, r1, regs, ACCTYPE_WRITE,
-                        &raddr1, &xcode, &priv, &prot);
+                        &raddr1, &xcode, &priv, &prot, &stid);
 
 #ifdef FACILITY_EXPANDED_STORAGE
     /* If page invalid, locate the page in expanded storage using the

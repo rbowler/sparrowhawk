@@ -6,7 +6,7 @@
 #
 #
 
-VERSION  = 1.44
+VERSION  = 1.45
 
 CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=390
 CFL_370  = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=370
@@ -25,7 +25,7 @@ HRC_370_OBJS = obj370/impl.o obj370/config.o obj370/panel.o \
 	   obj370/decimal.o obj370/diagnose.o obj370/service.o \
 	   obj370/channel.o obj370/ckddasd.o obj370/fbadasd.o \
 	   obj370/tapedev.o obj370/cardrdr.o obj370/cardpch.o \
-	   obj370/printer.o obj370/console.o
+	   obj370/printer.o obj370/console.o obj370/external.o
 
 HRC_390_OBJS = obj390/impl.o obj390/config.o obj390/panel.o \
 	   obj390/ipl.o obj390/cpu.o obj390/assist.o obj390/dat.o \
@@ -33,7 +33,7 @@ HRC_390_OBJS = obj390/impl.o obj390/config.o obj390/panel.o \
 	   obj390/decimal.o obj390/diagnose.o obj390/service.o \
 	   obj390/channel.o obj390/ckddasd.o obj390/fbadasd.o \
 	   obj390/tapedev.o obj390/cardrdr.o obj390/cardpch.o \
-	   obj390/printer.o obj390/console.o
+	   obj390/printer.o obj390/console.o obj390/external.o
 
 DIN_OBJS = dasdinit.o dasdutil.o
 

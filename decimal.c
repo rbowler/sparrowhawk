@@ -1197,6 +1197,10 @@ int     i, j;                           /* Loop counters             */
 BYTE    sbyte;                          /* Source operand byte       */
 BYTE    dbyte;                          /* Destination operand byte  */
 
+    /* Validate the operands for addressing and protection */
+    validate_operand (addr1, arn1, len1, ACCTYPE_WRITE, regs);
+    validate_operand (addr2, arn2, len2, ACCTYPE_READ, regs);
+
     /* Fetch the rightmost byte from the source operand */
     addr2 += len2;
     sbyte = vfetchb ( addr2, arn2, regs );
@@ -1260,6 +1264,10 @@ void zoned_to_packed (U32 addr1, int len1, int arn1,
 int     i, j;                           /* Loop counters             */
 BYTE    sbyte;                          /* Source operand byte       */
 BYTE    dbyte;                          /* Destination operand byte  */
+
+    /* Validate the operands for addressing and protection */
+    validate_operand (addr1, arn1, len1, ACCTYPE_WRITE, regs);
+    validate_operand (addr2, arn2, len2, ACCTYPE_READ, regs);
 
     /* Exchange the digits in the rightmost byte */
     addr1 += len1;
@@ -1327,6 +1335,10 @@ int     i, j;                           /* Loop counters             */
 BYTE    sbyte;                          /* Source operand byte       */
 BYTE    rbyte;                          /* Right result byte of pair */
 BYTE    lbyte;                          /* Left result byte of pair  */
+
+    /* Validate the operands for addressing and protection */
+    validate_operand (addr1, arn1, len1, ACCTYPE_WRITE, regs);
+    validate_operand (addr2, arn2, len2, ACCTYPE_READ, regs);
 
     /* Exchange the digits in the rightmost byte */
     addr1 += len1;
