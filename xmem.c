@@ -24,6 +24,20 @@ U32     i;
 } /* end function fetch_fullword_absolute */
 
 /*-------------------------------------------------------------------*/
+/* Store a fullword into absolute storage.                           */
+/* All bytes of the word are stored concurrently as observed by      */
+/* other CPUs.  The bytes of the word are reversed if necessary      */
+/* and the word is then stored as an integer in absolute storage.    */
+/*-------------------------------------------------------------------*/
+static inline void store_fullword_absolute (U32 value, U32 addr)
+{
+U32     i;
+
+    i = htonl(value);
+    *((U32*)(sysblk.mainstor + addr)) = i;
+} /* end function store_fullword_absolute */
+
+/*-------------------------------------------------------------------*/
 /* Set Address Space Control                                         */
 /*                                                                   */
 /* Input:                                                            */
@@ -1052,4 +1066,157 @@ details are in "Subspace-Replacement Operations" in topic 5.9.2.
     return ssevent;
 
 } /* end function program_call */
+
+/*-------------------------------------------------------------------*/
+/* Branch and Set Authority                                          */
+/*                                                                   */
+/* Input:                                                            */
+/*      r1      First operand register number                        */
+/*      r2      Second operand register number                       */
+/*      regs    Pointer to the CPU register context                  */
+/*                                                                   */
+/*      This function does not return if a program check occurs.     */
+/*-------------------------------------------------------------------*/
+void branch_and_set_authority (int r1, int r2, REGS *regs)
+{
+U32     ducto;                          /* DUCT origin               */
+U32     duct8;                          /* DUCT word 8               */
+U32     duct9;                          /* DUCT word 9               */
+BYTE    key;                            /* New PSW key               */
+
+    /* Special operation exception if CR0 bit 15 is zero */
+    if ((regs->cr[0] & CR0_ASF) == 0)
+    {
+        program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+        return;
+    }
+
+    /* Load real address of dispatchable unit control table */
+    ducto = regs->cr[2] & CR2_DUCTO;
+
+    /* Apply low-address protection to stores into the DUCT */
+    if (ducto < 512 && (regs->cr[0] & CR0_LOW_PROT))
+    {
+        program_check (PGM_PROTECTION_EXCEPTION);
+        return;
+    }
+
+    /* Convert DUCT real address to absolute address */
+    ducto = APPLY_PREFIXING (ducto, regs->pxr);
+    if (ducto >= sysblk.mainsize)
+    {
+        program_check (PGM_ADDRESSING_EXCEPTION);
+        return;
+    }
+
+    /* Load DUCT words 8 and 9 */
+    duct8 = fetch_fullword_absolute (ducto+32);
+    duct9 = fetch_fullword_absolute (ducto+36);
+
+    /* Perform base authority or reduced authority operation */
+    if ((duct9 & DUCT9_RA) == 0)
+    {
+        /* In base authority state R2 cannot specify register zero */
+        if (r2 == 0)
+        {
+            program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+            return;
+        }
+
+        /* Obtain the new PSW key from R1 register bits 24-27 */
+        key = regs->gpr[r1] & 0x000000F0;
+
+        /* Privileged operation exception if in problem state and
+           current PSW key mask does not permit new key value */
+        if (regs->psw.prob
+            && ((regs->cr[3] << (key >> 4)) & 0x80000000) == 0 )
+        {
+            program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
+            return;
+        }
+
+        /* Save current PSW amode and instruction address */
+        duct8 = regs->psw.ia & DUCT8_IA;
+        if (regs->psw.amode) duct8 |= DUCT8_AMODE;
+
+        /* Save current PSW key mask, PSW key, and problem state */
+        duct9 = (regs->cr[3] & CR3_KEYMASK) | regs->psw.pkey;
+        if (regs->psw.prob) duct9 |= DUCT9_PROB;
+
+        /* Set the reduced authority bit */
+        duct9 |= DUCT9_RA;
+
+        /* Store the updated values in DUCT words 8 and 9 */
+        store_fullword_absolute (duct8, ducto+32);
+        store_fullword_absolute (duct9, ducto+36);
+
+        /* Load new PSW key and PSW key mask from R1 register */
+        regs->psw.pkey = key;
+        regs->cr[3] &= ~CR3_KEYMASK;
+        regs->cr[3] |= regs->gpr[r1] & CR3_KEYMASK;
+
+        /* Set the problem state bit in the current PSW */
+        regs->psw.prob = 1;
+
+        /* Set PSW instruction address and amode from R2 register */
+        if (regs->gpr[r2] & 0x80000000)
+        {
+            regs->psw.amode = 1;
+            regs->psw.ia = regs->gpr[r2] & 0x7FFFFFFF;
+        }
+        else
+        {
+            regs->psw.amode = 0;
+            regs->psw.ia = regs->gpr[r2] & 0x00FFFFFF;
+        }
+
+    } /* end if(BSA-ba) */
+    else
+    { /* BSA-ra */
+
+        /* In reduced authority state R2 must specify register zero */
+        if (r2 != 0)
+        {
+            program_check (PGM_SPECIAL_OPERATION_EXCEPTION);
+            return;
+        }
+
+        /* If R1 is non-zero, save the current PSW addressing mode
+           and instruction address in the R1 register */
+        if (r1 != 0)
+        {
+            regs->gpr[r1] = regs->psw.ia;
+            if (regs->psw.amode) regs->gpr[r1] |= 0x80000000;
+        }
+
+        /* Restore PSW amode and instruction address from the DUCT */
+        regs->psw.ia = duct8 & DUCT8_IA;
+        regs->psw.amode = (duct8 & DUCT8_AMODE) ? 1 : 0;
+
+        /* Restore the PSW key mask from the DUCT */
+        regs->cr[3] &= ~CR3_KEYMASK;
+        regs->cr[3] |= duct9 & DUCT9_PKM;
+
+        /* Restore the PSW key from the DUCT */
+        regs->psw.pkey = duct9 & DUCT9_KEY;
+
+        /* Restore the problem state bit from the DUCT */
+        regs->psw.prob = (duct9 & DUCT9_PROB) ? 1 : 0;
+
+        /* Reset the reduced authority bit in the DUCT */
+        duct9 &= ~DUCT9_RA;
+        store_fullword_absolute (duct9, ducto+36);
+
+        /* Specification exception if the PSW is now invalid */
+        if ((regs->psw.ia & 1)
+            || (regs->psw.amode == 0 && regs->psw.ia > 0x00FFFFFF))
+        {
+            regs->psw.ilc = 0;
+            program_check (PGM_SPECIFICATION_EXCEPTION);
+            return;
+        }
+
+    } /* end if(BSA-ra) */
+
+} /* end branch_and_set_authority */
 

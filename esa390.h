@@ -107,6 +107,7 @@ typedef struct _REGS {                  /* Processor registers       */
 #define CR0_XM_ITIMER   0x00000080      /* Interval timer mask  S/370*/
 #define CR0_XM_INTKEY   0x00000040      /* Interrupt key mask        */
 #define CR0_XM_EXTSIG   0x00000020      /* External signal mask S/370*/
+#define CR0_PC_FAST     0x00000008      /* PCF instruction control   */
 
 /* Bit definitions for control register 1 */
 /* CR1 is the primary segment table descriptor */
@@ -230,9 +231,9 @@ typedef struct _REGS {                  /* Processor registers       */
 #define ASTE1_AX        0xFFFF0000      /* Authorization index       */
 #define ASTE1_ATL       0x0000FFF0      /* Authority-table length    */
 #define ASTE1_RESV      0x0000000F      /* Reserved bits - must be 0 */
-/* ASTE word 2 is the segment table descriptor */
-/* ASTE word 3 is the linkage-table origin */
-/* ASTE word 4 is the access-list origin */
+/* ASTE word 2 is the segment table designation */
+/* ASTE word 3 is the linkage-table designation */
+/* ASTE word 4 is the access-list designation */
 #define ASTE5_ASTESN    0xFFFFFFFF      /* ASTE sequence number      */
 #define ASTE6_RESV      0xFFFFFFFF      /* Reserved bits - must be 0 */
 /* ASTE word 7 is unused */
@@ -240,6 +241,30 @@ typedef struct _REGS {                  /* Processor registers       */
 /* Authority table entry bit definitions */
 #define ATE_PRIMARY     0x80            /* Primary authority bit     */
 #define ATE_SECONDARY   0x40            /* Secondary authority bit   */
+
+/* Dispatchable unit control table bit definitions */
+#define DUCT0_BASTEO    0x7FFFFFC0      /* Base ASTE origin          */
+#define DUCT1_SA        0x80000000      /* Subspace active           */
+#define DUCT1_SSASTEO   0x7FFFFFC0      /* Subspace ASTE origin      */
+/* DUCT word 2 is unused */
+#define DUCT3_SSASTESN  0xFFFFFFFF      /* Subspace ASTE seq number  */
+/* DUCT word 4 is the access-list designation */
+/* DUCT word 5 is unused */
+/* DUCT word 6 is unused */
+/* DUCT word 7 is for control program use */
+#define DUCT8_AMODE     0x80000000      /* Addressing mode           */
+#define DUCT8_IA        0x7FFFFFFF      /* Return address            */
+#define DUCT9_PKM       0xFFFF0000      /* PSW key mask              */
+#define DUCT9_KEY       0x000000F0      /* PSW key                   */
+#define DUCT9_RA        0x00000008      /* Reduced authority state   */
+#define DUCT9_PROB      0x00000001      /* Problem state             */
+/* DUCT word 10 is unused */
+#define DUCT11_TCBA     0x7FFFFFF8      /* Trap control block address*/
+#define DUCT11_TE       0x00000001      /* Trap enabled              */
+/* DUCT word 12 is unused */
+/* DUCT word 13 is unused */
+/* DUCT word 14 is unused */
+/* DUCT word 15 is unused */
 
 /* Linkage stack entry descriptor structure definition */
 typedef struct _LSED {

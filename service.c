@@ -298,6 +298,18 @@ U16             offset;                 /* Offset from start of SCCB */
         sccbscp->realiint[0] = 0;
         sccbscp->realiint[1] = 1;
 
+        /* Set expanded storage size in SCCB */
+        sccbscp->xpndinum[0] = 0;
+        sccbscp->xpndinum[1] = 0;
+        sccbscp->xpndinum[2] = 0;
+        sccbscp->xpndinum[3] = 1;
+        sccbscp->xpndsz4K[0] = (sysblk.xpndsize & 0xFF000000) >> 24;
+        sccbscp->xpndsz4K[1] = (sysblk.xpndsize & 0xFF0000) >> 16;
+        sccbscp->xpndsz4K[2] = (sysblk.xpndsize & 0xFF00) >> 8;
+        sccbscp->xpndsz4K[3] = sysblk.xpndsize & 0xFF;
+        sccbscp->xpndenum[0] = 0;
+        sccbscp->xpndenum[1] = 1;
+
         /* Set CPU array count and offset in SCCB */
         sccbscp->numcpu[0] = (sysblk.numcpu & 0xFF00) >> 8;
         sccbscp->numcpu[1] = sysblk.numcpu & 0xFF;
@@ -336,7 +348,7 @@ U16             offset;                 /* Offset from start of SCCB */
             memset (sccbcpu, 0, sizeof(SCCB_CPU_INFO));
             sccbcpu->cpa = i;
             sccbcpu->tod = 0;
-//          sccbcpu->cpf2 = SCCB_CPF2_PRIVATE_SPACE_BIT_INSTALLED;
+            sccbcpu->cpf2 = SCCB_CPF2_PRIVATE_SPACE_BIT_INSTALLED;
         }
 
         /* Set response codes in SCCB header */

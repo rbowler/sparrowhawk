@@ -277,16 +277,37 @@ int     subchan;                        /* Subchannel number         */
         exit(1);
     }
 
-    /* Obtain expanded storage */
-    sysblk.xpndsize = xpndsize * 1024 * 1024;
-    sysblk.xpndstor = malloc(sysblk.xpndsize);
-    if (sysblk.xpndstor == NULL)
+    if (xpndsize != 0)
     {
+#ifdef FEATURE_EXPANDED_STORAGE
+        /* Obtain expanded storage */
+        sysblk.xpndsize = xpndsize * 256;
+        sysblk.xpndstor = malloc(sysblk.xpndsize * 4096);
+        if (sysblk.xpndstor == NULL)
+        {
+            fprintf (stderr,
+                    "HHC014I Cannot obtain %dMB expanded storage: "
+                    "%s\n",
+                    xpndsize, strerror(errno));
+            exit(1);
+        }
+
+        /* Obtain main storage key array */
+        sysblk.xpndkeys = malloc(sysblk.xpndsize);
+        if (sysblk.xpndkeys == NULL)
+        {
+            fprintf (stderr,
+                    "HHC015I Cannot obtain expanded storage key "
+                    "array: %s\n",
+                    strerror(errno));
+            exit(1);
+        }
+#else /*!FEATURE_EXPANDED_STORAGE*/
         fprintf (stderr,
-                "HHC014I Cannot obtain %dMB expanded storage: %s\n",
-                xpndsize, strerror(errno));
+                "HHC016I Expanded storage support not installed\n");
         exit(1);
-    }
+#endif /*!FEATURE_EXPANDED_STORAGE*/
+    } /* end if(sysblk.xpndsize) */
 
     /* Save the port number for tn3270d */
     sysblk.port3270 = port3270;
@@ -324,7 +345,7 @@ int     subchan;                        /* Subchannel number         */
         if (sdevnum == NULL || sdevtype == NULL)
         {
             fprintf (stderr,
-                    "HHC015I Error in %s line %d: "
+                    "HHC017I Error in %s line %d: "
                     "Missing device number or device type\n",
                     fname, stmt);
             exit(1);
@@ -334,7 +355,7 @@ int     subchan;                        /* Subchannel number         */
             || sscanf(sdevnum, "%hx%c", &devnum, &c) != 1)
         {
             fprintf (stderr,
-                    "HHC016I Error in %s line %d: "
+                    "HHC018I Error in %s line %d: "
                     "%s is not a valid device number\n",
                     fname, stmt, sdevnum);
             exit(1);
@@ -343,7 +364,7 @@ int     subchan;                        /* Subchannel number         */
         if (sscanf(sdevtype, "%hx%c", &devtype, &c) != 1)
         {
             fprintf (stderr,
-                    "HHC017I Error in %s line %d: "
+                    "HHC019I Error in %s line %d: "
                     "%s is not a valid device type\n",
                     fname, stmt, sdevtype);
             exit(1);
@@ -395,7 +416,7 @@ int     subchan;                        /* Subchannel number         */
 
         default:
             fprintf (stderr,
-                    "HHC018I Error in %s line %d: "
+                    "HHC020I Error in %s line %d: "
                     "Device type %4.4X not recognized\n",
                     fname, stmt, devtype);
             devinit = NULL;
@@ -408,7 +429,7 @@ int     subchan;                        /* Subchannel number         */
         if (dev == NULL)
         {
             fprintf (stderr,
-                    "HHC019I Cannot obtain device block "
+                    "HHC021I Cannot obtain device block "
                     "for device %4.4X: %s\n",
                     devnum, strerror(errno));
             exit(1);
@@ -439,7 +460,7 @@ int     subchan;                        /* Subchannel number         */
         if (rc < 0)
         {
             fprintf (stderr,
-                    "HHC020I Error in %s line %d: "
+                    "HHC022I Error in %s line %d: "
                     "Device initialization failed for device %4.4X\n",
                     fname, stmt, devnum);
             exit(1);
@@ -452,7 +473,7 @@ int     subchan;                        /* Subchannel number         */
             if (dev->buf == NULL)
             {
                 fprintf (stderr,
-                        "HHC021I Cannot obtain buffer "
+                        "HHC023I Cannot obtain buffer "
                         "for device %4.4X: %s\n",
                         dev->devnum, strerror(errno));
                 exit(1);
@@ -470,7 +491,7 @@ int     subchan;                        /* Subchannel number         */
     if (sysblk.firstdev == NULL)
     {
         fprintf (stderr,
-                "HHC022I No device records in file %s\n",
+                "HHC024I No device records in file %s\n",
                 fname);
         exit(1);
     }

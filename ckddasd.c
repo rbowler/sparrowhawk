@@ -2204,7 +2204,7 @@ BYTE            key[256];               /* Key for search operations */
         /* Command reject if within the domain of a Locate Record,
            or not preceded by a Define Extent or Read IPL command */
         if (dev->ckdlocat
-            || dev->ckdxtdef == 0 || dev->ckdrdipl == 0)
+            || (dev->ckdxtdef == 0 && dev->ckdrdipl == 0))
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);

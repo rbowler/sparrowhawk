@@ -24,7 +24,6 @@ int     cc;
 
     r = (S64)(S32)op1 + (S64)(S32)op2;
     *result = (U32)r;
-//  printf("Result=%16.16llX\n", (U64)r);
     cc = (r < -2147483648LL || r > 2147483647LL)? 3 :
         (r == 0)? 0 : (r < 0)? 1 : 2;
     return cc;
@@ -42,7 +41,6 @@ int     cc;
 
     r = (S64)(S32)op1 - (S64)(S32)op2;
     *result = (U32)r;
-//  printf("Result=%16.16llX\n", (U64)r);
     cc = (r < -2147483648LL || r > 2147483647LL)? 3 :
         (r == 0)? 0 : (r < 0)? 1 : 2;
     return cc;
@@ -60,7 +58,6 @@ int     cc;
 
     r = (U64)op1 + (U64)op2;
     *result = (U32)r;
-//  printf("Result=%16.16llX\n", (U64)r);
     if ((r >> 32) == 0) cc = (r == 0)? 0 : 1;
     else cc = (r == 0)? 2 : 3;
     return cc;
@@ -78,7 +75,6 @@ int     cc;
 
     r = (U64)op1 - (U64)op2;
     *result = (U32)r;
-//  printf("Result=%16.16llX\n", (U64)r);
     if ((r >> 32) == 0) cc = (r == 0)? 0 : 1;
     else cc = (r == 0)? 2 : 3;
     return cc;
@@ -93,7 +89,6 @@ mul_signed ( U32 *resulthi, U32 *resultlo, U32 op1, U32 op2 )
 S64     r;
 
     r = (S64)op1 * (S32)op2;
-//  printf("Result=%16.16llX\n", (U64)r);
     *resulthi = (U64)r >> 32;
     *resultlo = (U64)r & 0xFFFFFFFF;
 }
@@ -108,11 +103,15 @@ div_signed ( U32 *remainder, U32 *dividend, U32 quotienthi,
            U32 quotientlo, U32 divisor )
 {
 U64     quotient;
+S64     dvd, rem;
 
+    if (divisor == 0) return 1;
     quotient = (U64)quotienthi << 32 | quotientlo;
-    *dividend = (U32)((S64)quotient / (S32)divisor);
-    *remainder = (U32)((S64)quotient % (S32)divisor);
-    /*INCOMPLETE*/ /*NEED TO CHECK FOR DIVIDE OVERFLOW*/
+    dvd = (S64)quotient / (S32)divisor;
+    rem = (S64)quotient % (S32)divisor;
+    if (dvd < -2147483648LL || dvd > 2147483647LL) return 1;
+    *dividend = (U32)dvd;
+    *remainder = (U32)rem;
     return 0;
 }
 
@@ -674,84 +673,8 @@ static BYTE module[8];                  /* Module name               */
     /* MVCL     Move Long                                       [RR] */
     /*---------------------------------------------------------------*/
 
-        /* Program check if either R1 or R2 register is odd */
-        if ( (r1 & 1) || (r2 & 1) )
-        {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
-            goto terminate;
-        }
-
-        /* Determine the destination and source addresses */
-        effective_addr = regs->gpr[r1] &
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        effective_addr2 = regs->gpr[r2] &
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        ar1 = r1;
-        ar2 = r2;
-
-        /* Load padding byte from bits 0-7 of R2+1 register */
-        obyte = regs->gpr[r2+1] >> 24;
-
-        /* Load operand lengths from bits 8-31 of R1+1 and R2+1 */
-        n1 = regs->gpr[r1+1] & 0x00FFFFFF;
-        n2 = regs->gpr[r2+1] & 0x00FFFFFF;
-
-        /* Test for destructive overlap */
-        if ( n2 > 1
-            && (!ACCESS_REGISTER_MODE(&(regs->psw))
-                || (r1 == 0 ? 0 : regs->ar[r1])
-                   != (r2 == 0 ? 0 : regs->ar[r2])))
-        {
-            n = effective_addr2 + ((n2<n1)?n2:n1) - 1;
-            n &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            if ( ( n > effective_addr2
-                    && (effective_addr > effective_addr2
-                        && effective_addr <= n ) )
-              || ( n <= effective_addr2
-                    && (effective_addr > effective_addr2
-                        || effective_addr <= n ) ) )
-            {
-                regs->gpr[r1] = effective_addr;
-                regs->gpr[r2] = effective_addr2;
-                regs->psw.cc = 3;
-                break;
-            }
-        }
-
-        /* Set the condition code according to the lengths */
-        regs->psw.cc = (n1 < n2) ? 1 : (n1 > n2) ? 2 : 0;
-
-        /* Process operands from left to right */
-        while ( n1 > 0 )
-        {
-            /* Fetch byte from source operand, or use padding byte */
-            if ( n2 > 0 )
-            {
-                sbyte = vfetchb ( effective_addr2, ar2, regs );
-                effective_addr2++;
-                effective_addr2 &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-                n2--;
-            }
-            else
-                sbyte = obyte;
-
-            /* Store the byte in the destination operand */
-            vstoreb ( sbyte, effective_addr, ar1, regs );
-            effective_addr++;
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            n1--;
-
-        } /* end while(n1) */
-
-        /* Update the registers */
-        regs->gpr[r1] = effective_addr;
-        regs->gpr[r1+1] &= 0xFF000000;
-        regs->gpr[r1+1] |= n1;
-        regs->gpr[r2] = effective_addr2;
-        regs->gpr[r2+1] &= 0xFF000000;
-        regs->gpr[r2+1] |= n2;
+        /* Perform move long and set condition code */
+        regs->psw.cc = move_long (r1, r2, regs);
 
         break;
 
@@ -760,74 +683,8 @@ static BYTE module[8];                  /* Module name               */
     /* CLCL     Compare Logical Long                            [RR] */
     /*---------------------------------------------------------------*/
 
-        /* Program check if either R1 or R2 register is odd */
-        if ( (r1 & 1) || (r2 & 1) )
-        {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
-            goto terminate;
-        }
-
-        /* Determine the destination and source addresses */
-        effective_addr = regs->gpr[r1] &
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        effective_addr2 = regs->gpr[r2] &
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        ar1 = r1;
-        ar2 = r2;
-
-        /* Load padding byte from bits 0-7 of R2+1 register */
-        obyte = regs->gpr[r2+1] >> 24;
-
-        /* Load operand lengths from bits 8-31 of R1+1 and R2+1 */
-        n1 = regs->gpr[r1+1] & 0x00FFFFFF;
-        n2 = regs->gpr[r2+1] & 0x00FFFFFF;
-
-        /* Set the condition code to zero */
-        regs->psw.cc = 0;
-
-        /* Process operands from left to right */
-        while ( n1 > 0 || n2 > 0 )
-        {
-            /* Fetch byte from first operand, or use padding byte */
-            if ( n1 > 0 )
-            {
-                dbyte = vfetchb ( effective_addr, ar1, regs );
-                effective_addr++;
-                effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-                n1--;
-            }
-            else
-                dbyte = obyte;
-
-            /* Fetch byte from second operand, or use padding byte */
-            if ( n2 > 0 )
-            {
-                sbyte = vfetchb ( effective_addr2, ar2, regs );
-                effective_addr2++;
-                effective_addr2 &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-                n2--;
-            }
-            else
-                sbyte = obyte;
-
-            /* Compare operand bytes, set condition code if unequal */
-            if ( dbyte != sbyte )
-            {
-                regs->psw.cc = (dbyte < sbyte) ? 1 : 2;
-                break;
-            } /* end if */
-
-        } /* end while(n1||n2) */
-
-        /* Update the registers */
-        regs->gpr[r1] = effective_addr;
-        regs->gpr[r1+1] &= 0xFF000000;
-        regs->gpr[r1+1] |= n1;
-        regs->gpr[r2] = effective_addr2;
-        regs->gpr[r2+1] &= 0xFF000000;
-        regs->gpr[r2+1] |= n2;
+        /* Perform compare long and set condition code */
+        regs->psw.cc = compare_long (r1, r2, regs);
 
         break;
 
@@ -2755,67 +2612,9 @@ static BYTE module[8];                  /* Module name               */
     /* MVCLE    Move Long Extended                              [RS] */
     /*---------------------------------------------------------------*/
 
-        /* Program check if either R1 or R3 register is odd */
-        if ( (r1 & 1) || (r3 & 1) )
-        {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
-            goto terminate;
-        }
-
-        /* Load padding byte from bits 24-31 of effective address */
-        obyte = effective_addr & 0xFF;
-
-        /* Determine the destination and source addresses */
-        effective_addr = regs->gpr[r1] &
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        effective_addr2 = regs->gpr[r3] &
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        ar1 = r1;
-        ar2 = r3;
-
-        /* Load operand lengths from bits 0-31 of R1+1 and R3+1 */
-        n1 = regs->gpr[r1+1];
-        n2 = regs->gpr[r3+1];
-
-        /* Set the condition code according to the lengths */
-        regs->psw.cc = (n1 < n2) ? 1 : (n1 > n2) ? 2 : 0;
-
-        /* Process operands from left to right */
-        for ( i = 0; n1 > 0 || n2 > 0 ; i++ )
-        {
-            /* If 4096 bytes have been moved, exit with cc=3 */
-            if ( i >= 4096 )
-            {
-                regs->psw.cc = 3;
-                break;
-            }
-
-            /* Fetch byte from source operand, or use padding byte */
-            if ( n2 > 0 )
-            {
-                sbyte = vfetchb ( effective_addr2, ar2, regs );
-                effective_addr2++;
-                effective_addr2 &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-                n2--;
-            }
-            else
-                sbyte = obyte;
-
-            /* Store the byte in the destination operand */
-            vstoreb ( sbyte, effective_addr, ar1, regs );
-            effective_addr++;
-            effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            n1--;
-
-        } /* end for(i) */
-
-        /* Update the registers */
-        regs->gpr[r1] = effective_addr;
-        regs->gpr[r1+1] = n1;
-        regs->gpr[r3] = effective_addr2;
-        regs->gpr[r3+1] = n2;
+        /* Perform move long extended and set condition code */
+        regs->psw.cc =
+            move_long_extended (r1, r3, effective_addr, regs);
 
         break;
 
@@ -2824,79 +2623,9 @@ static BYTE module[8];                  /* Module name               */
     /* CLCLE    Compare Logical Long Extended                   [RS] */
     /*---------------------------------------------------------------*/
 
-        /* Program check if either R1 or R3 register is odd */
-        if ( (r1 & 1) || (r3 & 1) )
-        {
-            program_check (PGM_SPECIFICATION_EXCEPTION);
-            goto terminate;
-        }
-
-        /* Load padding byte from bits 24-31 of effective address */
-        obyte = effective_addr & 0xFF;
-
-        /* Determine the destination and source addresses */
-        effective_addr = regs->gpr[r1] &
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        effective_addr2 = regs->gpr[r3] &
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        ar1 = r1;
-        ar2 = r3;
-
-        /* Load operand lengths from bits 0-31 of R1+1 and R3+1 */
-        n1 = regs->gpr[r1+1];
-        n2 = regs->gpr[r3+1];
-
-        /* Set the condition code to zero */
-        regs->psw.cc = 0;
-
-        /* Process operands from left to right */
-        for ( i = 0; n1 > 0 || n2 > 0 ; i++ )
-        {
-            /* If 4096 bytes have been compared, exit with cc=3 */
-            if ( i >= 4096 )
-            {
-                regs->psw.cc = 3;
-                break;
-            }
-
-            /* Fetch byte from first operand, or use padding byte */
-            if ( n1 > 0 )
-            {
-                dbyte = vfetchb ( effective_addr, ar1, regs );
-                effective_addr++;
-                effective_addr &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-                n1--;
-            }
-            else
-                dbyte = obyte;
-
-            /* Fetch byte from second operand, or use padding byte */
-            if ( n2 > 0 )
-            {
-                sbyte = vfetchb ( effective_addr2, ar2, regs );
-                effective_addr2++;
-                effective_addr2 &=
-                    (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-                n2--;
-            }
-            else
-                sbyte = obyte;
-
-            /* Compare operand bytes, set condition code if unequal */
-            if ( dbyte != sbyte )
-            {
-                regs->psw.cc = (dbyte < sbyte) ? 1 : 2;
-                break;
-            } /* end if */
-
-        } /* end for(i) */
-
-        /* Update the registers */
-        regs->gpr[r1] = effective_addr;
-        regs->gpr[r1+1] = n1;
-        regs->gpr[r3] = effective_addr2;
-        regs->gpr[r3+1] = n2;
+        /* Perform compare long extended and set condition code */
+        regs->psw.cc =
+            compare_long_extended (r1, r3, effective_addr, regs);
 
         break;
 
@@ -3813,8 +3542,6 @@ static BYTE module[8];                  /* Module name               */
 
             /* Update the storage key from R1 register bits 24-30 */
             n >>= 12;
-// /*debug*/printf ("SSKE setting storage key %2.2X for block %8.8lX\n",
-// /*debug*/            (BYTE)(regs->gpr[r1] & 0xFE), n);
             sysblk.storkeys[n] = regs->gpr[r1] & 0xFE;
 
             /* Perform serialization and checkpoint-synchronization */
@@ -4247,6 +3974,17 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 
+        case 0x41:
+        /*-----------------------------------------------------------*/
+        /* B241: CKSM - Checksum                               [RRE] */
+        /*-----------------------------------------------------------*/
+
+            /* Compute checksum and set condition code */
+            regs->psw.cc =
+                compute_checksum (r1, r2, regs);
+
+            break;
+
         case 0x46:
         /*-----------------------------------------------------------*/
         /* B246: STURA - Store Using Real Address              [RRE] */
@@ -4441,66 +4179,38 @@ static BYTE module[8];                  /* Module name               */
         /* B255: MVST - Move String                            [RRE] */
         /*-----------------------------------------------------------*/
 
-            /* Program check if bits 0-23 of register 0 not zero */
-            if ( (regs->gpr[0] & 0xFFFFFF00) != 0)
-            {
-                program_check (PGM_SPECIFICATION_EXCEPTION);
-                goto terminate;
-            }
+            /* Perform move string and set condition code */
+            regs->psw.cc = move_string (r1, r2, regs);
 
-            /* Load string terminating character from
-               bits 24-31 of general register 0 */
-            obyte = regs->gpr[0] & 0xFF;
+            break;
 
-            /* Determine the destination and source addresses */
-            effective_addr = regs->gpr[r1] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            effective_addr2 = regs->gpr[r2] &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-            ar1 = r1;
-            ar2 = r2;
+        case 0x5A:
+        /*-----------------------------------------------------------*/
+        /* B25A: BSA - Branch and Set Authority                [RRE] */
+        /*-----------------------------------------------------------*/
 
-            /* Initialize condition code to 3 */
-            regs->psw.cc = 3;
+            /* Enter or leave the reduced authority state */
+            branch_and_set_authority (r1, r2, regs);
 
-            /* Move up to 4096 bytes until terminating character */
-            for ( i = 0; i < 4096; i++ )
-            {
-                /* Fetch a byte from the source operand */
-                sbyte = vfetchb ( effective_addr2, ar2, regs );
+            break;
 
-                /* Store the byte in the destination operand */
-                vstoreb ( sbyte, effective_addr, ar1, regs );
+        case 0x5D:
+        /*-----------------------------------------------------------*/
+        /* B25D: CLST - Compare Logical String                 [RRE] */
+        /*-----------------------------------------------------------*/
 
-                /* Check if string terminating character was moved */
-                if ( sbyte == obyte )
-                {
-                    /* Set r1 to point to terminating character */
-                    regs->gpr[r1] = effective_addr;
+            /* Perform compare string and set condition code */
+            regs->psw.cc = compare_string (r1, r2, regs);
 
-                    /* Set condition code to 1 */
-                    regs->psw.cc = 1;
+            break;
 
-                    break;
-                }
+        case 0x5E:
+        /*-----------------------------------------------------------*/
+        /* B25E: SRST - Search String                          [RRE] */
+        /*-----------------------------------------------------------*/
 
-                /* Increment operand addresses */
-                effective_addr++;
-                effective_addr &=
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-                effective_addr2++;
-                effective_addr2 &=
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-            } /* end for(i) */
-
-            /* If terminating character was not found, set r1 and
-               r2 to point to next character of each operand */
-            if ( regs->psw.cc == 3 )
-            {
-                regs->gpr[r1] = effective_addr;
-                regs->gpr[r2] = effective_addr2;
-            }
+            /* Perform search string and set condition code */
+            regs->psw.cc = search_string (r1, r2, regs);
 
             break;
 

@@ -49,6 +49,8 @@
 #define FEATURE_ALD_FORMAT      0
 #define FEATURE_STORAGE_PROTECTION_OVERRIDE
 #undef  FEATURE_SUBSPACE_GROUP
+#undef  FEATURE_SUPPRESSION_ON_PROTECTION
+#undef  FEATURE_EXPANDED_STORAGE
 #define FEATURE_MVS_ASSIST
 
 /*-------------------------------------------------------------------*/
@@ -116,11 +118,12 @@ typedef void DEVXF (struct _DEVBLK *dev,
 /* System configuration block                                        */
 /*-------------------------------------------------------------------*/
 typedef struct _SYSBLK {
-        U32     mainsize;               /* Main storage size         */
+        U32     mainsize;               /* Main storage size (bytes) */
         BYTE   *mainstor;               /* -> Main storage           */
         BYTE   *storkeys;               /* -> Main storage key array */
-        U32     xpndsize;               /* Expanded storage size     */
+        U32     xpndsize;               /* Expanded size (4K pages)  */
         BYTE   *xpndstor;               /* -> Expanded storage       */
+        BYTE   *xpndkeys;               /* -> Expanded storage keys  */
         U64     cpuid;                  /* CPU identifier for STIDP  */
         U64     todclk;                 /* TOD clock                 */
         BYTE    loadparm[8];            /* IPL load parameter        */
@@ -350,6 +353,17 @@ void multiply_packed (U32 addr1, int len1, int arn1,
 void divide_packed (U32 addr1, int len1, int arn1,
         U32 addr2, int len2, int arn2, REGS *regs);
 
+/* Functions in module block.c */
+int  move_long (int r1, int r2, REGS *regs);
+int  compare_long (int r1, int r2, REGS *regs);
+int  move_long_extended (int r1, int r3, U32 effect, REGS *regs);
+int  compare_long_extended (int r1, int r3, U32 effect, REGS *regs);
+int  move_page (int r1, int r2, REGS *regs);
+int  compute_checksum (int r1, int r2, REGS *regs);
+int  move_string (int r1, int r2, REGS *regs);
+int  compare_string (int r1, int r2, REGS *regs);
+int  search_string (int r1, int r2, REGS *regs);
+
 /* Functions in module service.c */
 void perform_external_interrupt (REGS *regs);
 int  service_call (U32 sclp_command, U32 sccb_absolute_addr);
@@ -371,6 +385,7 @@ int  program_transfer (U16 pkm, U16 pasn, int amode, U32 ia,
         int prob, REGS *regs);
 int  program_return (REGS *regs);
 int  program_call (U32 pcnum, REGS *regs);
+void branch_and_set_authority (int r1, int r2, REGS *regs);
 
 /* Functions in module channel.c */
 int  start_io (DEVBLK *dev, U32 ccwaddr, int ccwfmt, BYTE ccwkey,
