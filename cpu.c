@@ -367,7 +367,6 @@ U32     ccwaddr;                        /* CCW address for start I/O */
 int     ccwfmt;                         /* CCW format (0 or 1)       */
 BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
 U32     ioparm;                         /* I/O interruption parameter*/
-struct  timeval tv;                     /* Structure for gettimeofday*/
 U16     xcode;                          /* Exception code            */
 #if defined(FEATURE_HALFWORD_IMMEDIATE) \
     || defined(FEATURE_RELATIVE_BRANCH)
@@ -2329,8 +2328,16 @@ static BYTE module[8];                  /* Module name               */
         /* Calculate the number of registers to be traced, minus 1 */
         i = ( r3 > r1 ) ? r3 + 16 - r1 : r3 - r1;
 
-        /* Build the explicit trace entry */
+        /* Obtain the TOD clock update lock */
+        obtain_lock (&sysblk.todlock);
+
+        /* Retrieve the TOD clock value */
         dreg = sysblk.todclk;
+
+        /* Release the TOD clock update lock */
+        release_lock (&sysblk.todlock);
+
+        /* Build the explicit trace entry */
         sysblk.mainstor[n++] = (0x70 | i);
         sysblk.mainstor[n++] = 0x00;
         sysblk.mainstor[n++] = ((dreg >> 40) & 0xFF);
@@ -2924,27 +2931,18 @@ static BYTE module[8];                  /* Module name               */
             /* Perform serialization before fetching clock */
             perform_serialization ();
 
-            /* Get current time */
-            gettimeofday (&tv, NULL);
+            /* Obtain the TOD clock update lock */
+            obtain_lock (&sysblk.todlock);
 
-            /* Load number of seconds since 00:00:00 01 Jan 1970 */
-            dreg = (U64)tv.tv_sec;
+            /* Retrieve the TOD clock value */
+            dreg = sysblk.todclk;
 
-            /* Add number of seconds from 1900 to 1970 */
-            dreg += 86400ULL * (70*365 + 17);
-
-            /* Convert to microseconds */
-            dreg = dreg * 1000000 + tv.tv_usec;
-
-            /* Convert to TOD clock format */
-            dreg <<= 12;
+            /* Release the TOD clock update lock */
+            release_lock (&sysblk.todlock);
 
             /*debug*/printf("Store TOD clock=%16.16llX\n", dreg);
 
-            /*INCOMPLETE*/ /* Set TOD clock */
-            sysblk.todclk = dreg;
-
-            /* Store clock value at operand address */
+            /* Store TOD clock value at operand address */
             vstore8 ( dreg, effective_addr, ar1, regs );
 
             /* Perform serialization after storing clock */
@@ -3002,7 +3000,6 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Store clock comparator at operand location */
-            /*INCOMPLETE*/
             vstore8 ( regs->clkc, effective_addr, ar1, regs );
             /*debug*/printf("Store clock comparator=%16.16llX\n",
             /*debug*/       regs->clkc);
@@ -3055,7 +3052,6 @@ static BYTE module[8];                  /* Module name               */
             }
 
             /* Store the CPU timer at operand location */
-            /*INCOMPLETE*/
             vstore8 ( regs->timer, effective_addr, ar1, regs );
             /*debug*/printf("Store CPU timer=%16.16llX\n", regs->timer);
 

@@ -8,7 +8,7 @@
 
 #include "hercules.h"
 
-#undef CKD_KEY_TRACING
+#undef  CKD_KEY_TRACING
 
 /*-------------------------------------------------------------------*/
 /* Bit definitions for File Mask                                     */
@@ -82,6 +82,20 @@
 #define CKDORIENT_DATA          4       /* Oriented after data field */
 
 /*-------------------------------------------------------------------*/
+/* Bit definitions for Diagnostic Control subcommand byte            */
+/*-------------------------------------------------------------------*/
+#define DIAGCTL_INHIBIT_WRITE   0x02    /* Inhibit Write             */                             ¦
+#define DIAGCTL_SET_GUAR_PATH   0x04    /* Set Guaranteed Path       */
+#define DIAGCTL_ENABLE_WRITE    0x08    /* Enable Write              */
+#define DIAGCTL_3380_TC_MODE    0x09    /* 3380 Track Compat Mode    */
+#define DIAGCTL_INIT_SUBSYS     0x0B    /* Diagnostic Init Subsys    */
+#define DIAGCTL_UNFENCE         0x0C    /* Unfence                   */
+#define DIAGCTL_ACCDEV_UNKCOND  0x0F    /* Access Device Unknown Cond*/
+#define DIAGCTL_MAINT_RESERVE   0x10    /* Media Maintenance Reserve */
+#define DIAGCTL_MAINT_RELEASE   0x11    /* Media Maintenance Release */
+#define DIAGCTL_MAINT_QUERY     0x12    /* Media Maintenance Query   */
+
+/*-------------------------------------------------------------------*/
 /* Definitions for sense data format codes and message codes         */
 /*-------------------------------------------------------------------*/
 #define FORMAT_0                0       /* Program or System Checks  */
@@ -127,7 +141,11 @@ int ckddasd_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 int             rc;                     /* Return code               */
 struct stat     statbuf;                /* File information          */
 CKDDASD_DEVHDR  devhdr;                 /* Device header             */
+int             tracklen;               /* Physical track length     */
 int             har0len;                /* Length of HA + R0         */
+int             rpscalc;                /* RPS calculation factors   */
+int             formula;                /* Track capacity formula    */
+int             f1, f2, f3, f4, f5, f6; /* Track capacity factors    */
 U16             cutype;                 /* Control unit type         */
 BYTE            cumodel;                /* Control unit model number */
 BYTE            cucode;                 /* Control unit type code    */
@@ -204,38 +222,93 @@ U32             sctlfeat;               /* Storage control features  */
                 dev->filename);
     }
 
-    /* Calculate maximum record sizes */
-    har0len = CKDDASD_TRKHDR_SIZE + CKDDASD_RECHDR_SIZE + 8;
-    dev->ckdmaxr0len = dev->ckdtrksz - har0len;
-    dev->ckdmaxr1len = dev->ckdtrksz - 104;
-
     /* Set number of sense bytes */
     dev->numsense = 32;
 
     /* Set the device and control unit identifiers */
-    cutype = 0x3990;
-    cumodel = 0xC2;
-    cucode = 0x10;
     devclass = 0x20;
 
     switch (dev->devtype) {
     case 0x3390:
-        devmodel = 0x06;
-        devtcode = 0x27;
+        cutype = 0x3990; cumodel = 0xC2; cucode = 0x10;
+        if (dev->ckdcyls > 3339)
+            { devmodel = 0x0C; devtcode = 0x32; } /*3390-9*/
+        else if (dev->ckdcyls > 2226)
+            { devmodel = 0x0A; devtcode = 0x24; } /*3390-3*/
+        else if (dev->ckdcyls > 1113)
+            { devmodel = 0x06; devtcode = 0x27; } /*3390-2*/
+        else
+            { devmodel = 0x02; devtcode = 0x26; } /*3390-1*/
         dev->ckdsectors = 224;
+        dev->ckdmaxr0len = 57326;
+        dev->ckdmaxr1len = 56664;
+        tracklen = 58786;
+        har0len = 1428;
         sctlfeat = 0xD0000002;
+        formula = 2;
+        f1 = 34; f2 = 19; f3 = 9; f4 = 6; f5 = 116; f6 = 6;
+        rpscalc = 0x7708;
         break;
     case 0x3380:
-        devmodel = 0x02;
-        devtcode = 0x26;
+        cutype = 0x3880; cumodel = 0x03; cucode = 0x10;
+        if (dev->ckdcyls > 1770)
+            { devmodel = 0x1E; sctlfeat = 0xD0000003; } /*3880K*/
+        else if (dev->ckdcyls > 885)
+            { devmodel = 0x0A; sctlfeat = 0x50000003; } /*3880E*/
+        else
+            { devmodel = 0x02; sctlfeat = 0x50000003; } /*3880A*/
+        devtcode = 0x0E;
         dev->ckdsectors = 222;
-        sctlfeat = 0x50000003;
+        dev->ckdmaxr0len = 47988;
+        dev->ckdmaxr1len = 47476;
+        tracklen = 47968;
+        har0len = 1088;
+        formula = 1;
+        f1 = 32; f2 = 1; f3 = 0xEC; f4 = 0; f5 = 0xEC; f6 = 0;
+        rpscalc = 0x5007;
+        break;
+    case 0x3350:
+        cutype = 0x3880; cumodel = 0x01; cucode = 0x00;
+        devmodel = 0x00; devtcode = 0x00;
+        dev->ckdsectors = 128;
+        dev->ckdmaxr0len = 19254;
+        dev->ckdmaxr1len = 19069;
+        tracklen = 19254;
+        har0len = 185;
+        sctlfeat = 0x50000103;
+        formula = 0;
+        f1 = 0; f2 = 0; f3 = 0; f4 = 0; f5 = 0; f6 = 0;
+        rpscalc = 0x0000;
+        break;
+    case 0x3330:
+        cutype = 0x3880; cumodel = 0x01; cucode = 0x00;
+        if (dev->ckdcyls > 404)
+            devmodel = 0x11; /*3330-11*/
+        else
+            devmodel = 0x01; /*3330-1*/
+        devtcode = 0x00;
+        dev->ckdsectors = 128;
+        dev->ckdmaxr0len = 13165;
+        dev->ckdmaxr1len = 13030;
+        tracklen = 19165;
+        har0len = 135;
+        sctlfeat = 0x50000103;
+        formula = 0;
+        f1 = 0; f2 = 0; f3 = 0; f4 = 0; f5 = 0; f6 = 0;
+        rpscalc = 0x0000;
         break;
     default:
-        devmodel = 0x01;
-        devtcode = 0x00;
-        dev->ckdsectors = 200;
+        cutype = 0x3880; cumodel = 0x01; cucode = 0x10;
+        devmodel = 0x00; devtcode = 0x00;
+        dev->ckdsectors = 0;
+        dev->ckdmaxr0len = 0;
+        dev->ckdmaxr1len = 0;
+        tracklen = 0;
+        har0len = 0;
         sctlfeat = 0x50000103;
+        formula = 0;
+        f1 = 0; f2 = 0; f3 = 0; f4 = 0; f5 = 0; f6 = 0;
+        rpscalc = 0x0000;
     } /* end switch(dev->devtype) */
 
     /* Initialize the device identifier bytes */
@@ -262,17 +335,40 @@ U32             sctlfeat;               /* Storage control features  */
     dev->devchar[14] = (dev->ckdheads >> 8) & 0xFF;
     dev->devchar[15] = dev->ckdheads & 0xFF;
     dev->devchar[16] = dev->ckdsectors;
-    dev->devchar[17] = (dev->ckdtrksz >> 16) & 0xFF;
-    dev->devchar[18] = (dev->ckdtrksz >> 8) & 0xFF;
-    dev->devchar[19] = dev->ckdtrksz & 0xFF;
+    dev->devchar[17] = (tracklen >> 16) & 0xFF;
+    dev->devchar[18] = (tracklen >> 8) & 0xFF;
+    dev->devchar[19] = tracklen & 0xFF;
     dev->devchar[20] = (har0len >> 8) & 0xFF;
     dev->devchar[21] = har0len & 0xFF;
-    dev->devchar[22] = 1;
+    dev->devchar[22] = formula;
+    dev->devchar[23] = f1;
+    dev->devchar[24] = f2;
+    dev->devchar[25] = f3;
+    dev->devchar[26] = f4;
+    dev->devchar[27] = f5;
+    dev->devchar[28] = (dev->ckdcyls >> 8) & 0xFF;
+    dev->devchar[29] = dev->ckdcyls & 0xFF;
+    dev->devchar[30] = 0;
+    dev->devchar[31] = 0;
+    dev->devchar[32] = (dev->ckdcyls >> 8) & 0xFF;
+    dev->devchar[33] = dev->ckdcyls & 0xFF;
+    dev->devchar[34] = 0;
+    dev->devchar[35] = 0;
+    dev->devchar[36] = (dev->ckdcyls >> 8) & 0xFF;
+    dev->devchar[37] = dev->ckdcyls & 0xFF;
+    dev->devchar[38] = 0;
+    dev->devchar[39] = 0;
     dev->devchar[40] = devtcode;
     dev->devchar[41] = devtcode;
     dev->devchar[42] = cucode;
+    dev->devchar[43] = 0;
     dev->devchar[44] = (dev->ckdmaxr0len >> 8) & 0xFF;
     dev->devchar[45] = dev->ckdmaxr0len & 0xFF;
+    dev->devchar[46] = 0;
+    dev->devchar[47] = 0;
+    dev->devchar[48] = f6;
+    dev->devchar[49] = (rpscalc >> 8) & 0xFF;
+    dev->devchar[50] = rpscalc & 0xFF;
     dev->numdevchar = 64;
 
     /* Activate I/O tracing */
@@ -517,13 +613,14 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
 
     /* Skip record 0 for all operations except READ TRACK, READ R0,
        SEARCH ID EQUAL, SEARCH ID HIGH, SEARCH ID EQUAL OR HIGH,
-       and LOCATE RECORD */
+       LOCATE RECORD, and WRITE CKD NEXT TRACK */
     if (code != 0xDE
         && (code & 0x7F) != 0x16
         && (code & 0x7F) != 0x31
         && (code & 0x7F) != 0x51
         && (code & 0x7F) != 0x71
-        && code != 0x47)
+        && code != 0x47
+        && code != 0x9D)
         skipr0 = 1;
 
     /* Search for next count field */
@@ -576,12 +673,18 @@ CKDDASD_TRKHDR  trkhdr;                 /* CKD track header          */
         if (memcmp(rechdr, eighthexFF, 8) != 0)
             break;
 
-        /* End of track found, so terminate with no record found error
-           if this is a LOCATE RECORD; or if this is the second end of
-           track in this channel program without an intervening read
-           of the home address or data area and without an intervening
-           write, sense, or control command */
-        if (code == 0x47 || dev->ckdxmark)
+        /* If this is a READ TRACK command, return with the
+           end of track marker in the record header field */
+        if (code == 0xDE)
+            break;
+
+        /* End of track found, so terminate with no record found
+           error if this is a LOCATE RECORD or WRITE CKD NEXT TRACK
+           command; or if this is the second end of track in this
+           channel program without an intervening read of the home
+           address or data area and without an intervening write,
+           sense, or control command */
+        if (code == 0x47 || code == 0x9D || dev->ckdxmark)
         {
             ckd_build_sense (dev, 0, SENSE1_NRF, 0, 0, 0);
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -1526,6 +1629,80 @@ BYTE            key[256];               /* Key for search operations */
 
         break;
 
+    case 0xDE:
+    /*---------------------------------------------------------------*/
+    /* READ TRACK                                                    */
+    /*---------------------------------------------------------------*/
+        /* Command reject if not within the domain of a Locate Record
+           that specifies a read tracks operation */
+        if (dev->ckdlocat == 0
+            || (dev->ckdloper & CKDOPER_CODE) != CKDOPER_RDTRKS)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Command reject if not chained from a Locate Record
+           command or from another Read Track command */
+        if (chained == 0
+            || (prevcode != 0x47 && prevcode != 0xDE))
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Advance to next track if chained from previous read track */
+        if (prevcode == 0xDE)
+        {
+            rc = mt_advance (dev, unitstat);
+            if (rc < 0) break;
+        }
+
+        /* Read each record on the track into the I/O buffer */
+        for (size = 0; ; )
+        {
+            /* Read next count field */
+            rc = ckd_read_count (dev, code, &rechdr, unitstat);
+            if (rc < 0) break;
+
+            /* Copy count field to I/O buffer */
+            memcpy (iobuf + size, &rechdr, CKDDASD_RECHDR_SIZE);
+            size += CKDDASD_RECHDR_SIZE;
+
+            /* Exit if end of track marker was read */
+            if (memcmp (&rechdr, eighthexFF, 8) == 0)
+                break;
+
+            /* Read key field */
+            rc = ckd_read_key (dev, code, iobuf + size, unitstat);
+            if (rc < 0) break;
+            size += dev->ckdcurkl;
+
+            /* Read data field */
+            rc = ckd_read_data (dev, code, iobuf + size, unitstat);
+            if (rc < 0) break;
+            size += dev->ckdcurdl;
+
+        } /* end for(size) */
+
+        /* Set the residual count */
+        num = (count < size) ? count : size;
+        *residual = count - num;
+        if (count < size) *more = 1;
+
+        /* Save size and offset of data not used by this CCW */
+        dev->ckdrem = size - num;
+        dev->ckdpos = num;
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+
+        break;
+
     case 0x07: /* SEEK */
     case 0x0B: /* SEEK CYLINDER */
     case 0x1B: /* SEEK HEAD */
@@ -2014,14 +2191,25 @@ BYTE            key[256];               /* Key for search operations */
             }
 
             /* If not operating in CKD conversion mode, check that the
-               data length is equal to the transfer length factor */
-            if ((dev->ckdxgattr & CKDGATR_CKDCONV) == 0
-                && dev->ckdcurdl != dev->ckdltranlf)
+               data length is equal to the transfer length factor,
+               except when writing a R0 data area under the control
+               of a Locate Record Write Track operation, in which
+               case a transfer length factor of 8 is used instead */
+            if ((dev->ckdxgattr & CKDGATR_CKDCONV) == 0)
             {
-                /* Unit check with invalid track format */
-                ckd_build_sense (dev, 0, SENSE1_ITF, 0, 0, 0);
-                *unitstat = CSW_CE | CSW_DE | CSW_UC;
-                break;
+                if ((dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRTTRK
+                    && dev->ckdcurrec == 0)
+                    num = 8;
+                else
+                    num = dev->ckdltranlf;
+
+                if (dev->ckdcurdl != num)
+                {
+                    /* Unit check with invalid track format */
+                    ckd_build_sense (dev, 0, SENSE1_ITF, 0, 0, 0);
+                    *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                    break;
+                }
             }
         } /* end if(ckdlocat) */
 
@@ -2272,6 +2460,54 @@ BYTE            key[256];               /* Key for search operations */
 
         break;
 
+    case 0x9D:
+    /*---------------------------------------------------------------*/
+    /* WRITE COUNT KEY AND DATA NEXT TRACK                           */
+    /*---------------------------------------------------------------*/
+        /* Command reject if not within the domain of a Locate Record
+           that specifies a format write operation */
+        if (dev->ckdlocat == 0
+            || (dev->ckdloper & CKDOPER_CODE) != CKDOPER_FORMAT)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Command reject if not chained from a Write CKD or
+           another Write CKD Next Track command */
+        if (chained == 0
+            || (prevcode != 0x1D && prevcode != 0x9D))
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Advance to next track */
+        rc = mt_advance (dev, unitstat);
+        if (rc < 0) break;
+
+        /* Read the count field for record zero */
+        rc = ckd_read_count (dev, code, &rechdr, unitstat);
+        if (rc < 0) break;
+
+        /* Write count key and data */
+        rc = ckd_write_ckd (dev, iobuf, count, unitstat);
+        if (rc < 0) break;
+
+        /* Calculate number of bytes written and set residual count */
+        size = CKDDASD_RECHDR_SIZE + dev->ckdcurkl + dev->ckdcurdl;
+        num = (count < size) ? count : size;
+        *residual = count - num;
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+
+        break;
+
     case 0x47:
     /*---------------------------------------------------------------*/
     /* LOCATE RECORD                                                 */
@@ -2480,7 +2716,7 @@ BYTE            key[256];               /* Key for search operations */
                 if (rc < 0) break;
 
                 /* Compare the count field with the search CCHHR */
-                if (memcmp( &rechdr, cchhr, 5) == 0)
+                if (memcmp (&rechdr, cchhr, 5) == 0)
                     break;
 
             } /* end while */
@@ -2605,7 +2841,7 @@ BYTE            key[256];               /* Key for search operations */
         if (dev->ckdxecyl < dev->ckdxbcyl
             || (dev->ckdxecyl == dev->ckdxbcyl
                 && dev->ckdxehead < dev->ckdxbhead)
-            || dev->ckdxecyl >= dev->ckdcyls
+//          || dev->ckdxecyl >= dev->ckdcyls
             || dev->ckdxbhead >= dev->ckdheads
             || dev->ckdxehead >= dev->ckdheads)
         {
@@ -2654,6 +2890,66 @@ BYTE            key[256];               /* Key for search operations */
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0xF3:
+    /*---------------------------------------------------------------*/
+    /* DIAGNOSTIC CONTROL                                            */
+    /*---------------------------------------------------------------*/
+        /* Calculate residual byte count */
+        num = (count < 4) ? count : 4;
+        *residual = count - num;
+
+        /* Control information length must be at least 4 bytes */
+        if (count < 4)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_3);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Command reject if within the domain of a Locate Record */
+        if (dev->ckdlocat)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Command reject if byte 0 does not contain a valid
+           subcommand code, or if bytes 2-3 are not zero */
+        if (!(iobuf[0] == DIAGCTL_MAINT_QUERY
+//            || iobuf[0] == DIAGCTL_MAINT_RESERVE
+//            || iobuf[0] == DIAGCTL_MAINT_RELEASE
+//            || iobuf[0] == DIAGCTL_INHIBIT_WRITE
+//            || iobuf[0] == DIAGCTL_SET_GUAR_PATH
+//            || iobuf[0] == DIAGCTL_ENABLE_WRITE
+//            || iobuf[0] == DIAGCTL_3380_TC_MODE
+//            || iobuf[0] == DIAGCTL_INIT_SUBSYS
+//            || iobuf[0] == DIAGCTL_UNFENCE
+//            || iobuf[0] == DIAGCTL_ACCDEV_UNKCOND
+             ) || iobuf[2] != 0 || iobuf[3] != 0)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_4);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Command reject if file mask does not specify
+           diagnostic or device support authorization */
+        if ((dev->ckdfmask & CKDMASK_AAUTH) == CKDMASK_AAUTH_NORMAL)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_5);
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
             break;
         }

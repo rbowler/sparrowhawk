@@ -6,7 +6,7 @@
 #	make ARCH=390
 #
 
-VERSION  = 1.30
+VERSION  = 1.31
 
 CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=$(ARCH)
 #	   -march=pentium -malign-double -mwide-multiply
@@ -19,7 +19,7 @@ TARFILES = makefile *.c *.h hercules.cnf gentape.jcl
 ALL_OBJS = config.o panel.o cpu.o assist.o dat.o decimal.o \
 	   block.o stack.o xmem.o \
 	   channel.o service.o ckddasd.o fbadasd.o \
-	   simtape.o cardrdr.o printer.o console.o
+	   tapedev.o cardrdr.o printer.o console.o
 
 CPU_OBJS = cputest.o $(ALL_OBJS)
 
@@ -70,7 +70,7 @@ channel.o: channel.c $(HEADERS)
 
 service.o: service.c $(HEADERS)
 
-simtape.o: simtape.c $(HEADERS)
+tapedev.o: tapedev.c $(HEADERS)
 
 ckddasd.o: ckddasd.c $(HEADERS)
 

@@ -49,13 +49,13 @@ static void display_ccw (DEVBLK *dev, BYTE ccw[], U32 addr)
 /*-------------------------------------------------------------------*/
 /* DISPLAY CHANNEL STATUS WORD                                       */
 /*-------------------------------------------------------------------*/
-static void display_csw (DEVBLK *dev)
+static void display_csw (DEVBLK *dev, BYTE csw[])
 {
     printf ("%4.4X:Stat=%2.2X%2.2X Count=%2.2X%2.2X  "
             "CCW=%2.2X%2.2X%2.2X\n",
             dev->devnum,
-            dev->csw[4], dev->csw[5], dev->csw[6], dev->csw[7],
-            dev->csw[1], dev->csw[2], dev->csw[3]);
+            csw[4], csw[5], csw[6], csw[7],
+            csw[1], csw[2], csw[3]);
 
 } /* end function display_csw */
 #endif /*FEATURE_S370_CHANNEL*/
@@ -446,13 +446,35 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             break;
         }
 
-        /* Present I/O interrupt if PCI flag is set */
+        /* Signal I/O interrupt if PCI flag is set */
         if (flags & CCW_FLAGS_PCI)
         {
-            printf ("channel: PCI ignored for device %4.4X\n",
+#ifdef FEATURE_S370_CHANNEL
+            /* Obtain the device lock */
+            obtain_lock (&dev->lock);
+
+            /* Set PCI interrupt pending flag and save PCI CSW
+               replacing any previous pending PCI interrupt */
+            dev->pcipending = 1;
+            dev->pcicsw[0] = ccwkey;
+            dev->pcicsw[1] = (ccwaddr & 0xFF0000) >> 16;
+            dev->pcicsw[2] = (ccwaddr & 0xFF00) >> 8;
+            dev->pcicsw[3] = ccwaddr & 0xFF;
+            dev->pcicsw[4] = 0;
+            dev->pcicsw[5] = CSW_PCI;
+            dev->pcicsw[6] = 0;
+            dev->pcicsw[7] = 0;
+
+            /* Release the device lock */
+            release_lock (&dev->lock);
+#endif /*FEATURE_S370_CHANNEL*/
+
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+            printf ("channel: Unsupported PCI for device %4.4X\n",
                     dev->devnum);
-//          chanstat = CSW_PCI;
-            /*INCOMPLETE*/
+            chanstat = CSW_PROGC;
+            break;
+#endif /*FEATURE_CHANNEL_SUBSYSTEM*/
         }
 
         /* Channel program check if invalid count */
@@ -688,7 +710,7 @@ DEVBLK *dev;                            /* -> Device control block   */
         devcount++;
 
         /* Exit with condition code 1 if interrupt pending */
-        if (dev->pending)
+        if (dev->pending || dev->pcipending)
             return 1;
 
     } /* end for(dev) */
@@ -722,6 +744,20 @@ PSA    *psa;                            /* -> Prefixed storage area  */
         /* Set condition code 2 if device is busy */
         cc = 2;
     }
+    else if (dev->pcipending)
+    {
+        /* Set condition code 1 if PCI interrupt pending */
+        cc = 1;
+
+        /* Store the channel status word at PSA+X'40' */
+        psa = (PSA*)(sysblk.mainstor + regs->pxr);
+        memcpy (psa->csw, dev->pcicsw, 8);
+        if (dev->ccwtrace || dev->ccwstep)
+            display_csw (dev, dev->pcicsw);
+
+        /* Clear the pending PCI interrupt */
+        dev->pcipending = 0;
+    }
     else if (dev->pending)
     {
         /* Set condition code 1 if interrupt pending */
@@ -731,7 +767,7 @@ PSA    *psa;                            /* -> Prefixed storage area  */
         psa = (PSA*)(sysblk.mainstor + regs->pxr);
         memcpy (psa->csw, dev->csw, 8);
         if (dev->ccwtrace || dev->ccwstep)
-            display_csw (dev);
+            display_csw (dev, dev->csw);
 
         /* Clear the pending interrupt */
         dev->pending = 0;
@@ -904,7 +940,8 @@ DEVBLK *dev;                            /* -> Device control block   */
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
     {
         obtain_lock (&dev->lock);
-        if (dev->pending && interrupt_enabled(regs, dev))
+        if ((dev->pending || dev->pcipending)
+            && interrupt_enabled(regs, dev))
             break;
         release_lock (&dev->lock);
     } /* end for(dev) */
@@ -921,11 +958,11 @@ DEVBLK *dev;                            /* -> Device control block   */
 #ifdef FEATURE_S370_CHANNEL
     /* Extract the I/O address and CSW */
     *ioid = dev->devnum;
-    memcpy (csw, dev->csw, 8);
+    memcpy (csw, dev->pcipending ? dev->pcicsw : dev->csw, 8);
 
     /* Display the channel status word */
     if (dev->ccwtrace || dev->ccwstep)
-        display_csw (dev);
+        display_csw (dev, csw);
 #endif /*FEATURE_S370_CHANNEL*/
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
@@ -939,8 +976,15 @@ DEVBLK *dev;                            /* -> Device control block   */
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
     /* Reset the interrupt pending and busy flags for the device */
-    dev->pending = 0;
-    dev->busy = 0;
+    if (dev->pcipending)
+    {
+        dev->pcipending = 0;
+    }
+    else
+    {
+        dev->pending = 0;
+        dev->busy = 0;
+    }
 
     /* Signal console thread to redrive select */
     if (dev->console)

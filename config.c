@@ -6,8 +6,8 @@
 /* ESA/390 emulator.  It reads information about the processors      */
 /* and I/O devices from a configuration file.  It allocates          */
 /* main storage and expanded storage, initializes control blocks,    */
-/* and creates a detached thread to receive console connection       */
-/* requests and attention interrupts.                                */
+/* and creates detached threads to handle console attention          */
+/* requests and to maintain the TOD clock and CPU timers.            */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -348,6 +348,7 @@ int     subchan;                        /* Subchannel number         */
         sysblk.loadparm[i] = ascii_to_ebcdic[sloadparm[i]];
 
     /* Initialize locks, conditions, and attributes */
+    initialize_lock (&sysblk.todlock);
     initialize_lock (&sysblk.mainlock);
     initialize_lock (&sysblk.intlock);
     initialize_lock (&sysblk.conslock);
@@ -424,8 +425,8 @@ int     subchan;                        /* Subchannel number         */
 
         case 0x3420:
         case 0x3480:
-            devinit = &simtape_init_handler;
-            devexec = &simtape_execute_ccw;
+            devinit = &tapedev_init_handler;
+            devexec = &tapedev_execute_ccw;
             break;
 
         case 0x2314:
@@ -554,6 +555,16 @@ int     subchan;                        /* Subchannel number         */
     {
         fprintf (stderr,
                 "HHC027I Cannot create console thread: %s\n",
+                strerror(errno));
+        exit(1);
+    }
+
+    /* Start the TOD clock and CPU timer thread */
+    if ( create_thread (&sysblk.todtid, &sysblk.detattr,
+                        timer_update_thread, NULL) )
+    {
+        fprintf (stderr,
+                "HHC028I Cannot create timer thread: %s\n",
                 strerror(errno));
         exit(1);
     }

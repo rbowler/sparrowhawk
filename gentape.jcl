@@ -16,14 +16,14 @@
 //             SPACE=(TRK,(5,5,5)),DCB=(RECFM=U,BLKSIZE=6144)           00160000
 //GO      EXEC PGM=*.IEWL.SYSLMOD,COND=((0,NE,IEUASM),(0,NE,IEWL))      00170000
 //SYSUT1   DD  DSN=TAPE.DATASET,UNIT=3480,VOL=SER=AAAAAA,DISP=OLD       00180000
-//SYSUT2   DD  DSN=IBMUSER.DASDTAPE.DATASET,DISP=(,CATLG),              00181000
+//SYSUT2   DD  DSN=IBMUSER.AWSTAPE.DATASET,DISP=(,CATLG),               00181000
 //             UNIT=SYSDA,VOL=SER=VVVVVV,SPACE=(CYL,(5,5),RLSE)         00181100
 //        PEND                                                          00182000
 //GENTAPE EXEC ASMCLG                                                   00183000
-GENTAPE  TITLE 'Convert file to DASDTAPE format'                        00184000
+GENTAPE  TITLE 'Convert file to AWSTAPE format'                         00184000
 *---------------------------------------------------------------------* 00185000
 * Function:                                                           * 00186000
-*        This program converts a tape file to DASDTAPE format.        * 00187000
+*        This program converts a tape file to AWSTAPE format.         * 00187000
 *        It reads undefined length blocks of data from SYSUT1 and     * 00188000
 *        writes each block, prefixed by a 6-byte header, to SYSUT2.   * 00189000
 *---------------------------------------------------------------------* 00226000
@@ -61,7 +61,7 @@ EXIT020  DS    0H                                                       04050000
          SVC   3                        Exit with RC=20                 04070000
          DROP  R12                      Drop base register              04080000
 *                                                                       04081000
-* DASDTAPE block header                                                 04082000
+* AWSTAPE block header                                                  04082000
 *                                                                       04083000
 HEADER   DS    0CL6                     Block header                    04090000
 HDRCURLN DC    XL2'0000'                Current block length            04100100

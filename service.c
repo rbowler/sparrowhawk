@@ -212,8 +212,7 @@ void perform_external_interrupt (REGS *regs)
 {
 PSA    *psa;                            /* -> Prefixed storage area  */
 
-    /* Decrement the CPU timer and external interrupt if negative */
-    (S64)regs->timer -= 0x1000;
+    /* External interrupt if CPU timer is negative */
     if ((S64)regs->timer < 0
         && (regs->psw.sysmask & PSW_EXTMASK)
         && (regs->cr[0] & CR0_XM_PTIMER))
@@ -431,3 +430,93 @@ U16             offset;                 /* Offset from start of SCCB */
     return 0;
 
 } /* end function service_call */
+
+/*-------------------------------------------------------------------*/
+/* TOD clock and timer thread                                        */
+/*                                                                   */
+/* This function runs as a separate thread.  It wakes up every       */
+/* x milliseconds, updates the TOD clock, and decrements the         */
+/* CPU timer for each CPU.  If any CPU timer goes negative, or       */
+/* if the TOD clock exceeds the clock comparator for any CPU,        */
+/* it signals any waiting CPUs to wake up and process interrupts.    */
+/*-------------------------------------------------------------------*/
+void *timer_update_thread (void *argp)
+{
+int     cpu;                            /* CPU engine number         */
+REGS   *regs;                           /* -> CPU register context   */
+int     intflag = 0;                    /* 1=Interrupt possible      */
+U64     diff;                           /* Difference between new and
+                                           previous TOD clock values */
+U64     dreg;                           /* Double register work area */
+struct  timeval tv;                     /* Structure for gettimeofday
+                                           and select function calls */
+#define CLOCK_RESOLUTION        100     /* TOD clock resolution in
+                                           milliseconds              */
+
+    while (1)
+    {
+        /* Get current time */
+        gettimeofday (&tv, NULL);
+
+        /* Load number of seconds since 00:00:00 01 Jan 1970 */
+        dreg = (U64)tv.tv_sec;
+
+        /* Add number of seconds from 1900 to 1970 */
+        dreg += 86400ULL * (70*365 + 17);
+
+        /* Convert to microseconds */
+        dreg = dreg * 1000000 + tv.tv_usec;
+
+        /* Convert to TOD clock format */
+        dreg <<= 12;
+
+        /* Calculate the difference between the new TOD clock
+           value and the previous value, if the clock is set */
+        diff = (sysblk.todclk == 0 ? 0 : dreg - sysblk.todclk);
+
+        /* Obtain the TOD clock update lock */
+        obtain_lock (&sysblk.todlock);
+
+        /* Update the TOD clock */
+        sysblk.todclk = dreg;
+
+        /* Release the TOD clock update lock */
+        release_lock (&sysblk.todlock);
+
+        /* Decrement the CPU timer for each CPU */
+        for (cpu = 0; cpu < sysblk.numcpu; cpu++)
+        {
+            /* Point to the CPU register context */
+            regs = sysblk.regs + cpu;
+
+            /* Decrement the CPU timer */
+            (S64)regs->timer -= diff;
+
+            /* Set interrupt flag if the CPU timer is negative or
+               if the TOD clock value exceeds the clock comparator */
+            if ((S64)regs->timer < 0
+                || sysblk.todclk > regs->clkc)
+                intflag = 1;
+
+        } /* end for(cpu) */
+
+        /* If a CPU timer or clock comparator interrupt condition
+           was detected for any CPU, then wake up all waiting CPUs */
+        if (intflag)
+        {
+            obtain_lock (&sysblk.intlock);
+            signal_condition (&sysblk.intcond);
+            release_lock (&sysblk.intlock);
+        }
+
+        /* Sleep for CLOCK_RESOLUTION milliseconds */
+        tv.tv_sec = CLOCK_RESOLUTION / 1000;
+        tv.tv_usec = (CLOCK_RESOLUTION * 1000) % 1000000;
+        select (0, NULL, NULL, NULL, &tv);
+
+    } /* end while */
+
+    return NULL;
+
+} /* end function timer_update_thread */
+

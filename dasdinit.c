@@ -12,8 +12,8 @@
 /* filename     is the name of the disk image file to be created     */
 /*              (this program will not overwrite an existing file)   */
 /* devtype      is the emulated device type.                         */
-/*              CKD device types are: 2314, 3330, 3350, 3380, 3390   */
-/*              FBA device types are: 3310, 3370                     */
+/*              CKD: 2311, 2314, 3330, 3350, 3380, 3390              */
+/*              FBA: 3310, 3370                                      */
 /* volser       is the volume serial number (1-6 characters)         */
 /* size         is the size of the device (in cylinders for CKD      */
 /*              devices, or in 512-byte sectors for FBA devices)     */
@@ -53,13 +53,14 @@ ascii_to_ebcdic[] = {
 /*-------------------------------------------------------------------*/
 /* Subroutine to display command syntax and exit                     */
 /*-------------------------------------------------------------------*/
-static void argexit ( int code )
+static void
+argexit ( int code )
 {
     fprintf (stderr,
             "Syntax:\tdasdinit filename devtype volser size\n"
             "where:\tfilename = name of file to be created\n"
-            "\tdevtype  = 2314, 3330, 3350, 3380, 3390 (CKD devices)\n"
-            "\t           3310, 3370 (FBA devices)\n"
+            "\tdevtype  = 2311, 2314, 3330, 3350, 3380, 3390 (CKD)\n"
+            "\t           3310, 3370 (FBA)\n"
             "\tvolser   = volume serial number (1-6 characters)\n"
             "\tsize     = volume size in cylinders (CKD devices)\n"
             "\t           or in 512-byte sectors (FBA devices)\n");
@@ -67,9 +68,23 @@ static void argexit ( int code )
 } /* end function argexit */
 
 /*-------------------------------------------------------------------*/
+/* Subroutine to convert a null-terminated string to upper case      */
+/*-------------------------------------------------------------------*/
+static void
+string_to_upper (BYTE *source)
+{
+int     i;                              /* Array subscript           */
+
+    for (i = 0; source[i] != '\0'; i++)
+        source[i] = toupper(source[i]);
+
+} /* end function string_to_upper */
+
+/*-------------------------------------------------------------------*/
 /* Subroutine to convert a string to EBCDIC and pad with blanks      */
 /*-------------------------------------------------------------------*/
-static void convert_to_ebcdic (BYTE *dest, int len, BYTE *source)
+static void
+convert_to_ebcdic (BYTE *dest, int len, BYTE *source)
 {
 int     i;                              /* Array subscript           */
 
@@ -83,9 +98,18 @@ int     i;                              /* Array subscript           */
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to create a CKD DASD image file                        */
+/* Input:                                                            */
+/*      fname   DASD image file name                                 */
+/*      fd      DASD image file descriptor                           */
+/*      devtype Device type                                          */
+/*      heads   Number of heads per cylinder                         */
+/*      trksize Length of a track on DASD image file                 */
+/*      cyls    Number of cylinders                                  */
+/*      volser  Volume serial number                                 */
 /*-------------------------------------------------------------------*/
-static void create_ckd (BYTE *fname, int fd, BYTE *devtype, U32 heads,
-                        U32 trksize, U32 cyls, BYTE *volser)
+static void
+create_ckd (BYTE *fname, int fd, U16 devtype, U32 heads,
+            U32 trksize, U32 cyls, BYTE *volser)
 {
 int             rc;                     /* Return code               */
 CKDDASD_DEVHDR  devhdr;                 /* Device header             */
@@ -103,6 +127,9 @@ int             ipl1len = 24;           /* Length of IPL1 data       */
 int             ipl2len = 4096;         /* Length of IPL2 data       */
 int             vol1len = 80;           /* Length of VOL1 data       */
 int             rec0len = 8;            /* Length of R0 data         */
+U16             vtoccyl = 0;            /* VTOC cylinder number      */
+U16             vtochead = 1;           /* VTOC head number          */
+BYTE            vtocrec = 1;            /* VTOC record number        */
 
     /* Compute minimum and maximum number of cylinders */
     cylsize = trksize * heads;
@@ -130,7 +157,7 @@ int             rec0len = 8;            /* Length of R0 data         */
 
     /* Display progress message */
     fprintf (stderr,
-            "Creating %s volume %s: %lu cyls, "
+            "Creating %4.4X volume %s: %lu cyls, "
             "%lu trks/cyl, %lu bytes/track\n",
             devtype, volser, cyls, heads, trksize);
 
@@ -231,6 +258,13 @@ int             rec0len = 8;            /* Length of R0 data         */
                 pos += keylen;
                 convert_to_ebcdic (pos, 4, "VOL1");
                 convert_to_ebcdic (pos+4, 6, volser);
+                pos[10] = 0x40;
+                pos[11] = (vtoccyl >> 8) & 0xFF;
+                pos[12] = vtoccyl & 0xFF;
+                pos[13] = (vtochead >> 8) & 0xFF;
+                pos[14] = vtochead & 0xFF;
+                pos[15] = vtocrec;
+                convert_to_ebcdic (pos+37, 14, "HERCULES");
                 pos += vol1len;
 
             } /* end if(cyl==0 && head==0) */
@@ -262,19 +296,27 @@ int             rec0len = 8;            /* Length of R0 data         */
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to create an FBA DASD image file                       */
+/* Input:                                                            */
+/*      fname   DASD image file name                                 */
+/*      fd      DASD image file descriptor                           */
+/*      devtype Device type                                          */
+/*      sectsz  Sector size                                          */
+/*      sectors Number of sectors                                    */
+/*      volser  Volume serial number                                 */
 /*-------------------------------------------------------------------*/
-static void create_fba (BYTE *fname, int fd, BYTE *devtype,
-                        U32 sectsize, U32 sectors, BYTE *volser)
+static void
+create_fba (BYTE *fname, int fd, U16 devtype,
+            U32 sectsz, U32 sectors, BYTE *volser)
 {
-int     rc;                             /* Return code               */
-U32     sectnum;                        /* Sector number             */
-BYTE   *buf;                            /* -> Sector data buffer     */
-U32     minsect;                        /* Minimum sector count      */
-U32     maxsect;                        /* Maximum sector count      */
+int             rc;                     /* Return code               */
+U32             sectnum;                /* Sector number             */
+BYTE           *buf;                    /* -> Sector data buffer     */
+U32             minsect;                /* Minimum sector count      */
+U32             maxsect;                /* Maximum sector count      */
 
     /* Compute minimum and maximum number of sectors */
     minsect = 64;
-    maxsect = 0x80000000 / sectsize;
+    maxsect = 0x80000000 / sectsz;
 
     /* Check for valid number of sectors */
     if (sectors < minsect || sectors > maxsect)
@@ -286,7 +328,7 @@ U32     maxsect;                        /* Maximum sector count      */
     }
 
     /* Obtain sector data buffer */
-    buf = malloc(sectsize);
+    buf = malloc(sectsz);
     if (buf == NULL)
     {
         fprintf (stderr, "Cannot obtain sector buffer: %s\n",
@@ -296,15 +338,15 @@ U32     maxsect;                        /* Maximum sector count      */
 
     /* Display progress message */
     fprintf (stderr,
-            "Creating %s volume %s: "
+            "Creating %4.4X volume %s: "
             "%lu sectors, %lu bytes/sector\n",
-            devtype, volser, sectors, sectsize);
+            devtype, volser, sectors, sectsz);
 
     /* Write each sector */
     for (sectnum = 0; sectnum < sectors; sectnum++)
     {
         /* Clear the sector to zeroes */
-        memset (buf, 0, sectsize);
+        memset (buf, 0, sectsz);
 
         /* Sector 1 contains the volume label */
         if (sectnum == 1)
@@ -318,8 +360,8 @@ U32     maxsect;                        /* Maximum sector count      */
             fprintf (stderr, "Writing sector %lu\r", sectnum);
 
         /* Write the sector to the file */
-        rc = write (fd, buf, sectsize);
-        if (rc < sectsize)
+        rc = write (fd, buf, sectsz);
+        if (rc < sectsz)
         {
             fprintf (stderr, "%s sector %lu write error: %s\n",
                     fname, sectnum, strerror(errno));
@@ -340,18 +382,17 @@ U32     maxsect;                        /* Maximum sector count      */
 /*-------------------------------------------------------------------*/
 int main ( int argc, char *argv[] )
 {
-BYTE    fname[256];                     /* File name                 */
-BYTE    devtype[9];                     /* Device type               */
-BYTE    volser[7];                      /* Volume serial number      */
-BYTE    c;                              /* Character work area       */
+int     fd;                             /* File descriptor           */
 U32     size;                           /* Volume size               */
-BYTE    type;                           /* C=CKD, F=FBA              */
 U32     heads = 0;                      /* Number of tracks/cylinder */
 U32     trksize = 0;                    /* Track size                */
 U32     sectsize = 0;                   /* Sector size               */
 U32     trkovhd;                        /* CKD track overhead        */
-int     fd;                             /* File descriptor           */
-int     i;                              /* Array subscript           */
+U16     devtype;                        /* Device type               */
+BYTE    type;                           /* C=CKD, F=FBA              */
+BYTE    fname[256];                     /* File name                 */
+BYTE    volser[7];                      /* Volume serial number      */
+BYTE    c;                              /* Character work area       */
 
     /* Display the program identification message */
     fprintf (stderr,
@@ -371,11 +412,9 @@ int     i;                              /* Array subscript           */
     strcpy (fname, argv[1]);
 
     /* The second argument is the device type */
-    if (argv[2] == NULL || strlen(argv[2]) == 0
-        || strlen(argv[2]) > sizeof(devtype)-1)
+    if (argv[2] == NULL || strlen(argv[2]) != 4
+        || sscanf(argv[2], "%hx%c", &devtype, &c) != 1)
         argexit(2);
-
-    strcpy (devtype, argv[2]);
 
     /* The third argument is the volume serial number */
     if (argv[3] == NULL || strlen(argv[3]) == 0
@@ -383,8 +422,7 @@ int     i;                              /* Array subscript           */
         argexit(3);
 
     strcpy (volser, argv[3]);
-    for (i=0; i < strlen(volser); i++)
-        volser[i] = toupper(volser[i]);
+    string_to_upper (volser);
 
     /* The fourth argument is the volume size */
     if (argv[4] == NULL || strlen(argv[4]) == 0
@@ -395,51 +433,60 @@ int     i;                              /* Array subscript           */
     trkovhd = 140;
 
     /* Check the device type */
-    if (strcmp(devtype, "2314") == 0)
-    {
+    switch (devtype) {
+
+    case 0x2311:
+        type = 'C';
+        heads = 10;
+        trksize = 3625 + trkovhd;
+        break;
+
+    case 0x2314:
         type = 'C';
         heads = 20;
         trksize = 7294 + trkovhd;
-    }
-    else if (strcmp(devtype, "3330") == 0)
-    {
+        break;
+
+    case 0x3330:
         type = 'C';
         heads = 19;
         trksize = 13030 + trkovhd;
-    }
-    else if (strcmp(devtype, "3350") == 0)
-    {
+        break;
+
+    case 0x3350:
         type = 'C';
         heads = 30;
         trksize = 19069 + trkovhd;
-    }
-    else if (strcmp(devtype, "3380") == 0)
-    {
+        break;
+
+    case 0x3380:
         type = 'C';
         heads = 15;
         trksize = 47476 + trkovhd;
-    }
-    else if (strcmp(devtype, "3390") == 0)
-    {
+        break;
+
+    case 0x3390:
         type = 'C';
         heads = 15;
         trksize = 56664 + trkovhd;
-    }
-    else if (strcmp(devtype, "3310") == 0)
-    {
+        break;
+
+    case 0x3310:
         type = 'F';
         sectsize = 512;
-    }
-    else if (strcmp(devtype, "3370") == 0)
-    {
+        break;
+
+    case 0x3370:
         type = 'F';
         sectsize = 512;
-    }
-    else
-    {
-        fprintf (stderr, "Unknown device type: %s\n", devtype);
+        break;
+
+    default:
+        type = '?';
+        fprintf (stderr, "Unknown device type: %4.4X\n", devtype);
         exit(3);
-    }
+
+    } /* end switch(devtype) */
 
     /* Create a new file, with error if file already exists */
     fd = open (fname, O_WRONLY | O_CREAT | O_EXCL,
