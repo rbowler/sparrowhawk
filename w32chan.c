@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //         w32chan.c           Fish's new i/o scheduling logic
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2001-2003. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2001-2004. Released under the Q Public License
 // (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
@@ -20,7 +20,8 @@ int dummy = 0;
 #include <stdarg.h>     // (need "va_list", etc)
 #include <stdio.h>      // (need "FILE", "vfprintf", etc)
 #include <malloc.h>     // (need "malloc", etc)
-#include "logger.h"
+#include <sys/time.h>   // (need "struct timeval" for hscutl.h)
+#include "logger.h"     // (need "logmsg" macro and functions)
 #include "fthreads.h"   // (need "fthread_create")
 #include "w32chan.h"    // (function prototypes for this module)
 #include "linklist.h"   // (linked list macros)
@@ -185,7 +186,7 @@ int  ScheduleIORequest(void* pDevBlk, unsigned short wDevNum, int* pnDevPrio)
 
     if (!pIORequest)
     {
-        logmsg(_("HHC762I malloc(DEVIOREQUEST) failed; device=%4.4X, strerror=\"%s\"\n"),
+        logmsg(_("HHCCP084E malloc(DEVIOREQUEST) failed; device=%4.4X, strerror=\"%s\"\n"),
             wDevNum,strerror(errno));
         return 2;
     }
@@ -248,7 +249,7 @@ int  ScheduleIORequest(void* pDevBlk, unsigned short wDevNum, int* pnDevPrio)
 
             if (ios_devtmax && ios_devtnbr >= ios_devtmax)  // max threads already created?
             {
-                logmsg(_("HHC765I *WARNING* max device threads exceeded.\n"));
+                logmsg(_("HHCCP085W *WARNING* max device threads exceeded.\n"));
                 ios_devtunavail++;          // (count occurrences)
             }
 
@@ -345,7 +346,7 @@ DEVTHREADPARMS*  CreateDeviceThread(unsigned short wDevNum)
 
     if (!pThreadParms)
     {
-        logmsg(_("HHC761I malloc(DEVTHREADPARMS) failed; device=%4.4X, strerror=\"%s\"\n"),
+        logmsg(_("HHCCP086E malloc(DEVTHREADPARMS) failed; device=%4.4X, strerror=\"%s\"\n"),
             wDevNum,strerror(errno));
         return NULL;    // (error)
     }
@@ -354,7 +355,7 @@ DEVTHREADPARMS*  CreateDeviceThread(unsigned short wDevNum)
 
     if (!pThreadParms->hShutdownEvent)
     {
-        logmsg(_("HHC763I CreateEvent(hShutdownEvent) failed; device=%4.4X, strerror=\"%s\"\n"),
+        logmsg(_("HHCCP087E CreateEvent(hShutdownEvent) failed; device=%4.4X, strerror=\"%s\"\n"),
             wDevNum,strerror(errno));
         free(pThreadParms);
         return NULL;    // (error)
@@ -364,7 +365,7 @@ DEVTHREADPARMS*  CreateDeviceThread(unsigned short wDevNum)
 
     if (!pThreadParms->hRequestQueuedEvent)
     {
-        logmsg(_("HHC764I CreateEvent(hRequestQueuedEvent) failed; device=%4.4X, strerror=\"%s\"\n"),
+        logmsg(_("HHCCP088E CreateEvent(hRequestQueuedEvent) failed; device=%4.4X, strerror=\"%s\"\n"),
             wDevNum,strerror(errno));
         MyCloseHandle(pThreadParms->hShutdownEvent);
         free(pThreadParms);
@@ -385,7 +386,7 @@ DEVTHREADPARMS*  CreateDeviceThread(unsigned short wDevNum)
     if (fthread_create(&dwThreadID,NULL,DeviceThread,pThreadParms) != 0)
 #endif
     {
-        logmsg(_("HHC760I fthread_create(DeviceThread) failed; device=%4.4X, strerror=\"%s\"\n"),
+        logmsg(_("HHCCP089E fthread_create(DeviceThread) failed; device=%4.4X, strerror=\"%s\"\n"),
             wDevNum,strerror(errno));
         MyCloseHandle(pThreadParms->hShutdownEvent);
         MyCloseHandle(pThreadParms->hRequestQueuedEvent);

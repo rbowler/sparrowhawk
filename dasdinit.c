@@ -1,4 +1,4 @@
-/* DASDINIT.C   (c) Copyright Roger Bowler, 1999-2003                */
+/* DASDINIT.C   (c) Copyright Roger Bowler, 1999-2004                */
 /*              Hercules DASD Utilities: DASD image builder          */
 
 /*-------------------------------------------------------------------*/
@@ -78,6 +78,9 @@ argexit ( int code, char *m )
     case 5:
         fprintf (stderr, "Invalid number of arguments\n");
         break;
+    case 6:
+        fprintf (stderr, "`-linux' only supported for device type 3390\n");
+        break;
     default:
 
         display_version (stderr,
@@ -99,11 +102,16 @@ argexit ( int code, char *m )
 "  -bz2       build compressed dasd image file using bzip2\n"
 #endif
 "  -0         build compressed dasd image file with no compression\n"
-#if _FILE_OFFSET_BITS == 64 || defined(_LARGE_FILES)
-"  -lfs       build a large (uncompressed) dasd file\n"
-#endif
+);
+        if (sizeof(off_t) > 4) fprintf(stderr,
+"  -lfs       build a large (uncompressed) dasd file (if supported)\n"
+);
+        fprintf(stderr,
 "  -a         build dasd image file that includes alternate cylinders\n"
-"             (option ignored if size is manually specified)\n\n"
+"             (option ignored if size is manually specified)\n"
+
+"  -linux     null track images will look like linux dasdfmt'ed images\n"
+"             (3390 device type only)\n\n"
 
 "  filename   name of dasd image file to be created\n\n"
 
@@ -137,12 +145,13 @@ U32     sectsize = 0;                   /* Sector size               */
 U16     devtype = 0;                    /* Device type               */
 BYTE    comp = 0xff;                    /* Compression algoritm      */
 BYTE    type = 0;                       /* C=CKD, F=FBA              */
-BYTE    fname[1024];                    /* File name                 */
-BYTE    volser[7];                      /* Volume serial number      */
+char    fname[1024];                    /* File name                 */
+char    volser[7];                      /* Volume serial number      */
 BYTE    c;                              /* Character work area       */
 CKDDEV *ckd;                            /* -> CKD device table entry */
 FBADEV *fba;                            /* -> FBA device table entry */
-int     lfs = 0;                        /* 1 = Build large file      */
+int     lfs = 0;                        /* 1=Build large file        */
+int     nullfmt = CKDDASD_NULLTRK_FMT1; /* Null track format type    */
 
 #ifdef EXTERNALGUI
     if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
@@ -171,10 +180,10 @@ int     lfs = 0;                        /* 1 = Build large file      */
 #endif
         else if (strcmp("a", &argv[1][1]) == 0)
             altcylflag = 1;
-#if _FILE_OFFSET_BITS == 64 || defined(_LARGE_FILES)
-        else if (strcmp("lfs", &argv[1][1]) == 0)
+        else if (strcmp("lfs", &argv[1][1]) == 0 && sizeof(off_t) > 4)
             lfs = 1;
-#endif
+        else if (strcmp("linux", &argv[1][1]) == 0)
+            nullfmt = CKDDASD_NULLTRK_FMT2;
         else argexit(0, argv[1]);
     }
 
@@ -244,6 +253,10 @@ int     lfs = 0;                        /* 1 = Build large file      */
         altcylflag = 0;
     }
 
+    /* `-linux' only supported for 3390 device type */
+    if (nullfmt == CKDDASD_NULLTRK_FMT2 && devtype != 0x3390)
+        argexit(6, NULL);
+
     if (altcylflag)
         size += altsize;
 
@@ -251,7 +264,7 @@ int     lfs = 0;                        /* 1 = Build large file      */
 
     if (type == 'C')
         create_ckd (fname, devtype, heads, maxdlen, size, volser,
-                    comp, lfs, 0);
+                    comp, lfs, 0, nullfmt);
     else
         create_fba (fname, devtype, sectsize, size, volser, comp,
                     lfs, 0);

@@ -33,6 +33,9 @@
 /* Define to debug correct fthreads LOCK handling (requires fthreads) */
 #undef FISH_HANG
 
+/* Semantic to use for gcry_cipher_open function */
+#undef GCRYPT_OPENFORMAT
+
 /* Define to 1 if you have `alloca', as a function or macro. */
 #undef HAVE_ALLOCA
 
@@ -474,6 +477,21 @@
 
 /* Define if <inttypes.h> exists and defines unusable PRI* macros. */
 #undef PRI_MACROS_BROKEN
+
+/* The size of a `int', as computed by sizeof. */
+#undef SIZEOF_INT
+
+/* The size of a `int *', as computed by sizeof. */
+#undef SIZEOF_INT_P
+
+/* The size of a `long', as computed by sizeof. */
+#undef SIZEOF_LONG
+
+/* The size of a `size_t', as computed by sizeof. */
+#undef SIZEOF_SIZE_T
+
+/* The size of a `struct sizeoftest', as computed by sizeof. */
+#undef SIZEOF_STRUCT_SIZEOFTEST
 
 /* If using the C implementation of alloca, define if you know the
    direction of stack growth for your system; otherwise it will be

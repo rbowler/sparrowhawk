@@ -1,5 +1,251 @@
-#### Don't forget to change the version number in configure.ac! ####
 
+####   Don't forget to change the version number in configure.ac!   ####
+
+10 Dec 2004 ppc assembler assists for cmpxchg1, cmpxchg4 - Greg Smith
+08 Dec 2004 dasdinit -linux option support - Greg Smith
+06 Dec 2004 Keep crx in sync with INST_SPACE - Jan Jaeger
+04 Dec 2004 Make chkdsk faster if disk is readonly - Greg Smith
+03 Dec 2004 Optimize clearing memory - Greg Smith
+02 Dec 2004 Fix ref & change recording in relation to SSKE/RRBE - Jan Jaeger
+02 Dec 2004 Fix SIE guest timer interrupt handling - Jan Jaeger
+30 Nov 2004 Use SLEEP() to ensure sleep for `n' seconds - Greg Smith
+30 Nov 2004 Get mainstor after device initialization - Greg Smith
+29 Nov 2004 Fix reference and change recording in dat-off mode - Jan Jaeger
+28 Nov 2004 Binary Floating Point feature completed - Roger Bowler
+28 Nov 2004 TBEDR,TBDR instructions - Roger Bowler
+26 Nov 2004 Improve stack access - Jan Jaeger
+25 Nov 2004 Fix MCK in ECPS:VM - Ivan Warren
+23 Nov 2004 Improve access register translation - Jan Jaeger
+22 Nov 2004 Fix incorrect protection/access in ar mode - Jan Jaeger
+21 Nov 2004 Correction to TRTR - Roger Bowler
+20 Nov 2004 Add CHSC commands for linux/390 - Jan Jaeger
+19 Nov 2004 Document OSTAILOR QUIET - Ivan Warren
+18 Nov 2004 Fix zero ilc & pgm oldpsw problem - Jan Jaeger
+18 Nov 2004 DIEBR,DIDBR instructions - Roger Bowler
+18 Nov 2004 VPATH Build enablement - Ivan Warren
+17 Nov 2004 Fix instruction operand trace display - Jan Jaeger
+17 Nov 2004 MADBR,MADB,MAEBR,MAEB,MSDBR,MSDB,MSEBR,MSEB instructions - Roger Bowler
+16 Nov 2004 MXDBR,MXDB,MDEBR,MDEB instructions - Roger Bowler
+15 Nov 2004 LDXBR,LEXBR,CXFBR,CXGBR,CFXBR,CGXBR instructions - Roger Bowler
+14 Nov 2004 Fix AR-mode translation when alet is 2 - Greg Smith
+13 Nov 2004 LXEB,LXEBR,LXDB,LXDBR instructions - Roger Bowler
+01 Nov 2004 Simplify ALRF integration in LASP (Suggested by RB) - Ivan Warren
+15 Oct 2004 Apply CKD Shadow file update to FBA devices - Ivan Warren
+14 Oct 2004 Resolved pointers to signed/unsigned types issues
+            revealed by gcc 4.0 pre-release experiments - Ivan Warren
+12 Oct 2004 Tweak cckd free space processing - Greg Smith
+12 Oct 2004 Fix broken suspend/resume - Greg Smith
+11 Oct 2004 Changed libgcrypt requirement to 1.1.90 or better - Ivan Warren
+10 Oct 2004 Repaired some deprecated warnings dyncrypt.c - Bernard van der Helm
+07 Oct 2004 OPTION_WAKEUP_SELECT_VIA_PIPE - Ivan Warren by Fish
+05 Oct 2004 cr_mask.pat - Fix SIE intercept logic for LCTL - Greg Smith
+05 Oct 2004 no_ffs.pat - Remove ffs ia32 assembler assist - Greg Smith
+01 Oct 2004 Fix segfault when IPLing with IPL CPU offline - Ivan Warren
+29 Sep 2004 Fix load/store multiple change (21 Sep 2004) to actually
+            improve performance - Greg Smith
+28 Sep 2004 Fix directive inside macro problem in tapecopy.c - Greg Smith
+28 Sep 2004 Fix resume-suspend logic in channel.c - Greg Smith
+28 Sep 2004 Added iplc (IPL Clear), sysreset (System reset) and
+            sysclear (System reset clear) panel commands - Ivan Warren
+26 Sep 2004 Fix segfault when multiple ckd files for dasd volume - Greg Smith
+26 Sep 2004 Fix segfault when no cckd shadow file - Greg Smith
+24 Sep 2004 Remove (most) int/ptr mismatch warnings for 64 bit machines
+            tentative x86_64 support in autoconf
+            prevent redefining "ffs" if built-in (for non-ia32) - Ivan Warren
+24 Sep 2004 Tapecopy: progress msgs for external gui -- Fish
+23 Sep 2004 Restore '-Wall -W' flags to gcc, Pass along CFLAGS to configure
+            Eliminated all but 8 warnings -- Ivan Warren
+22 Sep 2004 Fix tapecopy -- Fish
+21 Sep 2004 cckd `sf-xxx force' command, cckd rewrite - Greg Smith
+21 Sep 2004 Performance enhancement for multi-byte opcodes - Greg Smith
+21 Sep 2004 Performance enhancement for load/store multiple type
+            instructions (LCTL STCTL LMD LMH LMG STCTG LCTLG STMG
+            STMH LAMY LMY STAMY STMY LAM LM STAM STM) - Greg Smith
+21 Sep 2004 Performance enhancement for BCR, BRC, BRCL -
+            inspired by Bernard by Greg Smith
+21 Sep 2004 Fix CKD sense codes - Tomas by Greg Smith
+19 Sep 2004 Fix/enhance SCSI tape display/mount msgs - Fish
+15 Sep 2004 Enable pentium4 specifics for gcc. Fixes
+                - SIGFPE in CFEBR (due to possible bug in feclearexcept)
+                - Allow use of assisted MEMCPY/MEMSET/etc.. for P4
+                - ./configure ... --host|--build=pentium4|i786-<os>
+                  - Ivan Warren
+12 Sep 2004 Fix crash in CTCI_Query when device group incomplete - Fish
+06 Sep 2004 emulated positioning error fix for read blockid - Fish
+05 Sep 2004 tapedev.c/scsiptape.h: blockid s/b maintained by media handlers,
+            minor tweak to when scsi automount thread started, fthreads.h:
+            change default fthreads mutex type from recursive to errorcheck
+            to prevent unintended introduction of deadlock situations due
+            to difference between Windows/Linux's threading model - Fish
+05 Sep 2004 1. Fix deadlock introduced by me in scsitape.h, 2. rescind
+            30 Jul 2004 bldcfg.c fix that I'm told is actually contrary
+            to a change/decision made by Jan back on 2003/03/20 that I
+            was unaware of - Fish
+02 Sep 2004 Re-enable build without dynamic loading suppt - Ivan Warren
+28 Aug 2004 SCSI tape mods part 1 (cont'd): don't retreive tape status
+            until it's actually needed for error determination - Fish
+27 Aug 2004 Removed all conditional and cast lvalues to accomodate for
+            gcc 3.4 and beyond - Ivan Warren
+19 Aug 2004 Suspend/resume loadparm value - Christopher by Greg Smith
+19 Aug 2004 cckd fix: Honor readonly option on sf- to base file - Greg Smith
+18 Aug 2004 cckd fixes: possible sf- corruption, messages - Greg Smith
+16 Aug 2004 DAT-enhancement facility: IDTE instruction - Roger Bowler
+10 Aug 2004 Fix dasdcopy to large ckd file - Fish & Greg
+04 Aug 2004 PIC1 all ALRF only instructions when ALRF disabled
+            Also fix code limit for ESTA - Ivan Warren
+30 Jul 2004 SCSI tape mods part 1: Auto-detect SCSI tape mounts - Fish
+30 Jul 2004 Fix bug in bldcfg that was causing device initialization
+            failures to not abort Herc statup as they should -- Fish
+30 Jul 2004 Make config symbol sub more generalized - Ivan Warren
+30 Jul 2004 SIE Perf boost patch correction for pending irpts - Ivan Warren
+28 Jul 2004 Remove opctab from run_cpu stack - Greg Smith
+28 Jul 2004 Some more SIE perf updates - Ivan Warren P/O Greg Smith
+27 Jul 2004 SIE Perf boost. Look for string ISW20040727 to revert - Ivan Warren
+27 Jul 2004 SR Fix affecting suspended CCWs - Ivan Warren P/O Greg Smith
+26 Jul 2004 Hercules suspend/resume command support - Greg Smith
+26 Jul 2004 Clear PSW Bit 12 when switching to ESAME via SIGP - Ivan Warren
+26 Jul 2004 Added ASN_AND_LX_REUSE config statement - Ivan Warren
+25 Jul 2004 cfba fixes (I hope) - Greg Smith
+23 Jul 2004 DAT-enhancement facility: CSPG instruction - Roger Bowler
+22 Jul 2004 Fix 370 address lookup for USE_REAL_ADDR - Greg Smith
+22 Jul 2004 Activate ASN-and-LX-reuse facility - Roger Bowler
+22 Jul 2004 ASN-and-LX-reuse facility: changes for LASP - Roger Bowler
+22 Jul 2004 defsym fix and env var fallback - Ivan Warren
+21 Jul 2004 Invalidate AIA for s370 on dat-mode change - Greg Smith
+21 Jul 2004 ASN-and-LX-reuse facility: changes for BSG - Roger Bowler
+20 Jul 2004 Updated CTC Device def stmt doc for TCP/IP - Ivan Warren
+15 Jul 2004 Fixed tape "at loadpoint" sense issue - Ivan Warren
+08 Jul 2004 cfba fixes - Greg Smith
+08 Jul 2004 ASN-and-LX-reuse facility: SSAR, SSAIR - Roger Bowler
+07 Jul 2004 ASN-and-LX-reuse facility: PT, PTI - Roger Bowler
+01 Jul 2004 Fix error introduced into BCTR - Juergen & Greg
+01 Jul 2004 Minor performance update macro ILC - Bernard van der Helm
+29 Jun 2004 exilc.pat - Remove execflag check from INST_UPDATE_PSW - Greg
+29 Jun 2004 noilc.pat - Calculate ILC on demand - Greg Smith
+27 Jun 2004 pr.pat - Performance tweak for PR - Greg Smith
+27 Jun 2004 cckdwrs.pat - Prevent extra writer threads from starting - Greg
+26 Jun 2004 if.pat - Minor tweaks to instfetch - Greg Smith
+26 Jun 2004 gen.pat - Performance tweaks to L,LM,SLA,SLR,ST,STM - Greg Smith
+26 Jun 2004 tlbx2.pat - Fix real mode bug in tlbx.pat - Greg Smith
+26 Jun 2004 iawrap2.pat - Fix performance bug in iawrap.pat - Greg Smith
+24 Jun 2004 cckdhang.pat - Fix hang on shutdown if using cckd - Greg Smith
+19 Jun 2004 lfs.pat - Allow large files if sizeof(off_t) > 4 - Fish & Greg
+17 Jun 2004 iawrap.pat - Performance improvement for instruction address
+            wrapping - Greg Smith
+17 Jun 2004 ex4.pat - Performance improvement for 4 byte inst - Greg Smith
+17 Jun 2004 tlbx.pat - accelerated address lookup improvements - Greg Smith
+17 Jun 2004 Tuntap duplicate MAC address fix/workaround - Fish
+15 Jun 2004 ASN-and-LX-reuse facility: PC number translation - Roger Bowler
+14 Jun 2004 ASN-and-LX-reuse facility changes for PR - Roger Bowler
+11 Jun 2004 Minor ETF3 optimalizations - Bernard van der Helm
+10 Jun 2004 Prevent multiple console threads from being created - Fish
+10 Jun 2004 ETF3 fixes Roger Bowler/Bernard van der Helm
+10 Jun 2004 ipaddr/mask filtering support for terminal devices - Fish
+08 Jun 2004 Extended translation facility 3 completed - Bernard van der Helm
+05 Jun 2004 ASN-and-LX-reuse facility changes for ESTA,BAKR - Roger Bowler
+05 Jun 2004 Added CU14, CU24 - Bernard van der Helm
+04 Jun 2004 Fix startall bug (thanks Greg) - Fish
+04 Jun 2004 Framework for ASN-and-LX-reuse facility,EPAIR,ESAIR - Roger Bowler
+04 Jun 2004 Added TRTR + skeleton extended translation facility 3 - Bernard van der Helm
+29 May 2004 dyngui.c: fix UpdateTargetCPU, new "maxrates" cmd - Fish
+29 May 2004 Fixed stopall/startall - Fish
+29 May 2004 Remove "fake loading of <windows.h>" in hercules.h - Fish
+28 May 2004 TUNTAP_SetDestAddr: 'ifr_addr' (NOT 'ifr_dstaddr') - Fish
+28 May 2004 ffs.pat - SMP fix for ffs macro - Greg Smith
+24 May 2004 Mac OS X CTC support - Jay Maynard
+24 May 2004 gcwait.pat, cckdfat.pat - cckd fixes - Greg Smith
+22 May 2004 Fix crypto/Makefile.am warning about CFLAGS use - Ivan Warren
+22 May 2004 Fix warning about CONTAINING_RECORD macro (linklist.h) - Fish
+14 May 2004 libgcrypt API variations automagic integration - Greg & Ivan
+13 May 2004 bc.pat - Yet another BC optimization - Greg Smith
+13 May 2004 fetch_main_absolute.pat - Resolve absolute addresses only
+            once for multiple addresses in the same page - Greg Smith
+13 May 2004 sieregs.pat - Obtain guestregs on first execute of SIE - Greg Smith
+13 May 2004 immed.pat - ni/xi/oi optimizations - Greg Smith
+04 May 2004 cckdbuf.pat - cckd fixes - Greg Smith
+17 Apr 2004 Correct merged PER guest interrupt propagation - Jan Jaeger
+10 Apr 2004 Use signal shutdown on quit - Jan Jaeger
+09 Apr 2004 PMCW QDIO bit no longer reserved - Jan Jaeger
+08 Apr 2004 QDIO device handler changes - Jan Jaeger
+08 Apr 2004 Correct false PIC 04 on TRAP2/4 instructions - Jan Jaeger
+04 Apr 2004 Undo change 14 May - Bernard van der Helm
+30 Mar 2004 Add debug entry point for watchdog signal - Jan Jaeger
+26 Mar 2004 Program old PSW fix (ESAME) - Jan Jaeger
+25 Mar 2004 Program old PSW fix (S/390) - Jan Jaeger
+24 Mar 2004 More of Greg's CLC improvements + no direct SK manipulation
+            when dealing with non-crossing MVCs - Ivan Warren
+22 Mar 2004 Fix DXC codes in ieee.c - Jan Jaeger
+21 Mar 2004 Fix false PIC 04's under SIE - Jan Jaeger
+18 Mar 2004 re-enable ECPS:VM + VTIMER fix - Ivan Warren
+17 Mar 2004 clc.pat - Optimize CLC - Ivan & Greg - Greg Smith
+17 Mar 2004 l2m.pat - Tweaks to logical_to_main - Greg Smith
+17 Mar 2004 protected.pat - Optimization for is_fetch_protected - Greg Smith
+17 Mar 2004 prefixing.pat - Optimize APPLY_PREFIXING using xor - Greg Smith
+14 Mar 2004 tlb1024.pat - Increase TLB size to 1024 - Greg Smith
+14 Mar 2004 permode.pat - bit check for PER mode - Greg Smith
+14 Mar 2004 maddr.pat - virtual address translation returns mainstor
+            address - Greg Smith
+11 Mar 2004 CLC performance improvement - Ivan Warren
+10 Mar 2004 Changed MAXTTR in DASDLOAD.C to 50000 - Volker Bandke
+08 Mar 2004 Optimised non crossing/non overlap MVCs with length
+            2,4,8,12 and 16 - Ivan Warren
+06 Mar 2004 RR, RRE, RRF_* macro optimalization - Bernard van der Helm
+05 Mar 2004 Restructure loadparm handling - Jan Jaeger
+05 Mar 2004 Fix locking during ipl from web interface - Jan Jaeger
+05 Mar 2004 LPAR name restructure - Jan Jaeger
+05 Mar 2004 Initialize loadparm to blanks instead of dots - Jan Jaeger
+28 Feb 2004 Simplify translate_addr() parameter list - Greg Smith
+28 Feb 2004 vstore/vfetch updates for boundary crosses - Greg Smith
+28 Feb 2004 Fix TB (B22C) under SIE - Greg Smith
+27 Feb 2004 Special I/O processing for Immediate Commands - Ivan Warren
+26 Feb 2004 Set iodelay correctly for 0 value; dasdtab comments - Greg Smith
+25 Feb 2004 Don't set incorrect length on printer immediate CCWs - Jay Maynard
+21 Feb 2004 Added system parameter lparname - Bernard van der Helm
+16 Feb 2004 clc.pat - Optimize CLC - Greg Smith
+16 Feb 2004 move_chars.pat - Optimize move_chars - Greg Smith
+16 Feb 2004 radr.pat - Make type RADR type U32 for 32 bit machines - Greg Smith
+16 Feb 2004 sie_mode.pat - Check sie_mode bit for sie mode regs - Greg Smith
+16 Feb 2004 vfethc.pat - Optimize vfetchc - Greg Smith
+16 Feb 2004 execflag.pat - Remove execflag from inst calls - Greg Smith
+16 Feb 2004 skp.pat - Reduce setting storage key bits - Greg Smith
+16 Feb 2004 psw.pat - Revise internal psw format - Greg Smith
+07 Feb 2004 Device groups descriminators for console devices - Ivan Warren
+07 Feb 2004 Update cpuints.h bit processing - Greg Smith
+06 Feb 2004 Add SIE_STATNB macro - Jan Jaeger
+06 Feb 2004 Correct SIE feature byte tests - Jan Jaeger
+05 Feb 2004 Reverse armode patch - problems with XC mode - Greg Smith
+05 Feb 2004 PR (Program Return) fix - Jan Jaeger
+04 Feb 2004 Add SIE_STATE macro - Jan Jaeger
+04 Feb 2004 Aff SIE_STATB macro - Jan Jaeger
+04 Feb 2004 Change SIE host page protect logic - Jan Jaeger
+03 Feb 2004 Fix segfault in ipl from CDROM - Jan Jaeger
+02 Feb 2004 Fix instr display for SIE'd prog interrupt - Ivan Warren
+01 Feb 2004 Breakpoint range, suggested by Binyamin Dissen - Greg Smith
+31 Jan 2004 Fix possible CKD/FBA corruption - Karl-Heinz Lohner by Greg Smith
+30 Jan 2004 LOGICAL_TO_ABS/logical_to_abs performance enhancement -
+            Greg Smith
+30 Jan 2004 vfetch/vstore, RR format Optimisation
+            re-instate static/inline for IFETCH & LOGICAL - Ivan Warren
+21 Jan 2004 Correct 'unloaded' tape processing - Ivan Warren
+20 Jan 2004 Fix references to regs->inst to regs->ip - Greg Smith
+19 Jan 2004 Return 'Already at BOT' sense on BSF when at BOT
+            (Detected by Mark Drummond) - Ivan Warren
+16 Jan 2004 Performance Enhancement: REGS on run_cpu stack - Greg Smith
+16 Jan 2004 Performance Enhancement: instfetch - Greg Smith
+14 Jan 2004 CPU reconfig fixes - Jan Jaeger
+07 Jan 2004 DIAG 204 fix - Jan Jaeger
+07 Jan 2004 Add log command to dynamically redirect system log - Jan Jaeger
+19 Dec 2003 Correct Keyboard Shortcuts for pseudo-graphical Console - Volker
+            Bandke, code by Marian Gasparovic
+17 Dec 2003 Correct structure size boundaries for ARM compiles - Ivan Warren
+12 Dec 2003 Clear tlb every 2^16 invalidations instead of 2^8 - Greg Smith
+09 Dec 2003 Fix false PIC 05 on MVPG - Jan Jaeger
+05 Dec 2003 Move IS_IC_TRACE check to slowloop in run_cpu - Greg Smith
+05 Dec 2003 Clear regs->ve every 2^20 invalidations instead of 2^12 - Greg Smith
+05 Dec 2003 Add "filename completion" shortcut via TAB character to panel.c -
+            Volker Bandke, original code by Marian Gasparovic
+04 Dec 2003 Add sclp reset to io reset - Jan Jaeger
+01 Dec 2003 Signal Quiesce (shutdown) & ssd command - Jan Jaeger
 29 Nov 2003 Fix race condition in console.c recv_3270_data causing 100%
             CPU utilization, zero MIPS" Hercules hang symptom (version
             in configure.ac version bumped to 3.00a.5) - Fish

@@ -1,4 +1,4 @@
-/* CARDPCH.C    (c) Copyright Roger Bowler, 1999-2003                */
+/* CARDPCH.C    (c) Copyright Roger Bowler, 1999-2004                */
 /*              ESA/390 Card Punch Device Handler                    */
 
 /*-------------------------------------------------------------------*/
@@ -14,7 +14,6 @@
 /* Internal macro definitions                                        */
 /*-------------------------------------------------------------------*/
 #define CARD_LENGTH     80
-#define SPACE           ((BYTE)' ')
 #define HEX40           ((BYTE)0x40)
 
 /*-------------------------------------------------------------------*/
@@ -44,7 +43,7 @@ int             rc;                     /* Return code               */
 /*-------------------------------------------------------------------*/
 /* Initialize the device handler                                     */
 /*-------------------------------------------------------------------*/
-static int cardpch_init_handler (DEVBLK *dev, int argc, BYTE *argv[])
+static int cardpch_init_handler (DEVBLK *dev, int argc, char *argv[])
 {
 int     i;                              /* Array subscript           */
 
@@ -119,8 +118,8 @@ int     i;                              /* Array subscript           */
 /*-------------------------------------------------------------------*/
 /* Query the device definition                                       */
 /*-------------------------------------------------------------------*/
-static void cardpch_query_device (DEVBLK *dev, BYTE **class,
-                int buflen, BYTE *buffer)
+static void cardpch_query_device (DEVBLK *dev, char **class,
+                int buflen, char *buffer)
 {
 
     *class = "PCH";
@@ -304,11 +303,24 @@ BYTE            c;                      /* Output character          */
 static
 #endif
 DEVHND cardpch_device_hndinfo = {
-        &cardpch_init_handler,
-        &cardpch_execute_ccw,
-        &cardpch_close_device,
-        &cardpch_query_device,
-        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+        &cardpch_init_handler,         /* Device Initialisation      */
+        &cardpch_execute_ccw,          /* Device CCW execute         */
+        &cardpch_close_device,         /* Device Close               */
+        &cardpch_query_device,         /* Device Query               */
+        NULL,                          /* Device Start channel pgm   */
+        NULL,                          /* Device End channel pgm     */
+        NULL,                          /* Device Resume channel pgm  */
+        NULL,                          /* Device Suspend channel pgm */
+        NULL,                          /* Device Read                */
+        NULL,                          /* Device Write               */
+        NULL,                          /* Device Query used          */
+        NULL,                          /* Device Reserve             */
+        NULL,                          /* Device Release             */
+        NULL,                          /* Immediate CCW Codes        */
+        NULL,                          /* Signal Adapter Input       */
+        NULL,                          /* Signal Adapter Output      */
+        NULL,                          /* Hercules suspend           */
+        NULL                           /* Hercules resume            */
 };
 
 /* Libtool static name colision resolution */

@@ -1,4 +1,4 @@
-/* PANEL.C      (c) Copyright Roger Bowler, 1999-2003                */
+/* PANEL.C      (c) Copyright Roger Bowler, 1999-2004                */
 /*              ESA/390 Control Panel Commands                       */
 /*                                                                   */
 /*              Modified for New Panel Display =NP=                  */
@@ -17,7 +17,7 @@
 /*      Set/reset bad frame indicator command by Jan Jaeger          */
 /*      attach/detach/define commands by Jan Jaeger                  */
 /*      Panel refresh rate triva by Reed H. Petty                    */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 /*      64-bit address support by Roger Bowler                       */
 /*      Display subchannel command by Nobumichi Kozawa               */
 /*      External GUI logic contributed by "Fish" (David B. Trout)    */
@@ -30,6 +30,7 @@
 #include "opcode.h"
 #include "history.h"
 // #include "inline.h"
+#include "fillfnam.h"
 
 #define  DISPLAY_INSTRUCTION_OPERANDS
 
@@ -183,7 +184,7 @@ static int     nummsgs = 0;             /* Number of msgs in buffer  */
 #if 1
 //
 //
-//  THE FOLLOWING CODE IS HERE TO PROVIDE COMPATIBILIY WITH THE CURRENT 
+//  THE FOLLOWING CODE IS HERE TO PROVIDE COMPATIBILIY WITH THE CURRENT
 //  PANEL IMPLEMENTATION
 //
 //  THE PANEL DISPLAY SHOULD AT SOME POINT BE REWRITTEN TO USE LOG_LINE
@@ -193,6 +194,7 @@ static int     nummsgs = 0;             /* Number of msgs in buffer  */
 FILE   *compat_msgpipew;                /* Message pipe write handle */
 int     compat_msgpiper;                /* Message pipe read handle  */
 int     compat_shutdown;                /* Shutdown flag             */
+TID     compat_tid = 0;
 
 #if defined(OPTION_DYNAMIC_LOAD)
 void *(*panel_command) (void *);
@@ -208,6 +210,7 @@ void *(*debug_sclp_unknown_command) (U32, void *, REGS *);
 void *(*debug_sclp_unknown_event) (void *, void *, REGS *);
 void *(*debug_sclp_event_data) (void *, void *, REGS *);
 void *(*debug_chsc_unknown_request) (void *, void *, REGS *);
+void *(*debug_watchdog_signal) (REGS *);
 #endif
 
 static char *lmsbuf;
@@ -218,7 +221,7 @@ static void *panel_compat_thread(void *arg)
 
     UNREFERENCED(arg);
 
-    while(!compat_shutdown) 
+    while(!compat_shutdown)
         if((lmscnt = log_read(&lmsbuf, &lmsnum, LOG_BLOCK)))
             fwrite(lmsbuf,lmscnt,1,compat_msgpipew);
 
@@ -232,7 +235,6 @@ static void panel_compat_init()
 {
 ATTR compat_attr;
 int rc, pfd[2];
-TID compat_tid;
 
     rc = pipe (pfd);
     if (rc < 0)
@@ -296,7 +298,7 @@ static void NP_screen(FILE *confp)
 {
 
     DEVBLK *dev;
-    BYTE *devclass;
+    char *devclass;
     int p, a;
     char c[2];
     char devnam[128];
@@ -423,15 +425,11 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
     REGS *regs;
     BYTE pswwait;                        /* PSW wait state bit        */
     DEVBLK *dev;
-    BYTE *devclass;
+    char *devclass;
     int p, a;
     char ch[2];
     U32 aaddr;
     int savadr;
-#ifdef OPTION_MIPS_COUNTING
-    U32 mipsrate;
-    U32 siosrate;
-#endif
 
     if (NPhelpup == 1) {
         if (NPhelpdown == 1) {
@@ -470,7 +468,9 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
         return;
         }
     }
-    regs = sysblk.regs + sysblk.pcpu;
+
+    regs = sysblk.regs[sysblk.pcpu];
+    if (!regs) regs = &sysblk.dummyregs;
 
 #if defined(OPTION_MIPS_COUNTING)
     fprintf(confp, ANSI_WHT_BLU);
@@ -486,7 +486,7 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
 #endif /*defined(_FEATURE_SIE)*/
 
     memset (curpsw, 0x00, sizeof(curpsw));
-    store_psw (regs, curpsw);
+    copy_psw (regs, curpsw);
     if( regs->arch_mode == ARCH_900 )
     {
         curpsw[1] |= 0x08;
@@ -509,9 +509,9 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
                     pswwait ? 'W' : '.',
                     regs->loadstate ? 'L' : '.',
                     regs->checkstop ? 'C' : '.',
-                    regs->psw.prob ? 'P' : '.',
+                    PROBSTATE(&regs->psw) ? 'P' : '.',
 #if defined(_FEATURE_SIE)
-                    regs->sie_state ? 'S' : '.',
+                    SIE_MODE(regs) ? 'S' : '.',
 #else /*!defined(_FEATURE_SIE)*/
                     '.',
 #endif /*!defined(_FEATURE_SIE)*/
@@ -581,27 +581,13 @@ static void NP_update(FILE *confp, char *cmdline, int cmdoff)
     fprintf(confp, ANSI_CURSOR, 19, 2);
     fprintf(confp, ANSI_YLW_BLK);
 #ifdef OPTION_MIPS_COUNTING
-#ifdef _FEATURE_CPU_RECONFIG
-    for(mipsrate = siosrate = i = 0; i < MAX_CPU_ENGINES; i++)
-      if(sysblk.regs[i].cpuonline)
-#else /*!_FEATURE_CPU_RECONFIG*/
-    for(mipsrate = siosrate = i = 0; i < sysblk.numcpu; i++)
-#endif /*!_FEATURE_CPU_RECONFIG*/
-    {
-        mipsrate += sysblk.regs[i].mipsrate;
-        siosrate += sysblk.regs[i].siosrate;
-    }
-#ifdef OPTION_SHARED_DEVICES
-    siosrate += sysblk.shrdrate;
-#endif
-    if (mipsrate > 100000) mipsrate = 0;        /* ignore wildly high rate */
     fprintf(confp, "%2.1d.%2.2d  %5d",
-            mipsrate / 1000, (mipsrate % 1000) / 10,
-           siosrate);
+            sysblk.mipsrate / 1000, (sysblk.mipsrate % 1000) / 10,
+            sysblk.siosrate);
 #else
     fprintf(confp, "%12.12u",
 #if defined(_FEATURE_SIE)
-        regs->sie_state ? (unsigned)regs->hostregs->instcount :
+        SIE_MODE(regs) ? (unsigned)regs->hostregs->instcount :
 #endif /*defined(_FEATURE_SIE)*/
         (unsigned)regs->instcount);
 #endif
@@ -764,6 +750,7 @@ int i,n;
 char c;
 
     compat_shutdown = 1;
+    log_wakeup(NULL);
 
     /* Restore the terminal mode */
     tcgetattr (STDIN_FILENO, &kbattr);
@@ -828,16 +815,16 @@ BYTE    pswwait;                        /* PSW wait state bit        */
 BYTE    redraw_msgs;                    /* 1=Redraw message area     */
 BYTE    redraw_cmd;                     /* 1=Redraw command line     */
 BYTE    redraw_status;                  /* 1=Redraw status line      */
-BYTE    readbuf[MSG_SIZE];              /* Message read buffer       */
+char    readbuf[MSG_SIZE];              /* Message read buffer       */
 int     readoff = 0;                    /* Number of bytes in readbuf*/
-BYTE    cmdline[CMD_SIZE+1];            /* Command line buffer       */
+char    cmdline[CMD_SIZE+1];            /* Command line buffer       */
 int     cmdoff = 0;                     /* Cursor position in cmdline*/
-int     cmdlen = 0;                     /* Number of bytes in cmdline*/  
+int     cmdlen = 0;                     /* Number of bytes in cmdline*/
 BYTE    c;                              /* Character work area       */
 FILE   *confp;                          /* Console file pointer      */
 struct termios kbattr;                  /* Terminal I/O structure    */
 size_t  kbbufsize = CMD_SIZE;           /* Size of keyboard buffer   */
-BYTE   *kbbuf = NULL;                   /* Keyboard input buffer     */
+char   *kbbuf = NULL;                   /* Keyboard input buffer     */
 int     kblen;                          /* Number of chars in kbbuf  */
 int     pipefd;                         /* Pipe file descriptor      */
 int     keybfd;                         /* Keyboard file descriptor  */
@@ -904,7 +891,8 @@ struct  timeval tv;                     /* Select timeout structure  */
     while (1)
     {
         /* Set target CPU for commands and displays */
-        regs = sysblk.regs + sysblk.pcpu;
+        regs = sysblk.regs[sysblk.pcpu];
+        if (!regs) regs = &sysblk.dummyregs;
 
 #if defined(_FEATURE_SIE)
         /* Point to SIE copy in SIE state */
@@ -965,9 +953,15 @@ struct  timeval tv;                     /* Select timeout structure  */
                         kbbuf[0] = '\0';
                         redraw_status = 1;
                     }
+            cmdline[0] = '\0';
+            cmdlen = 0;
+            cmdoff = 0;
                     switch(kbbuf[0]) {
                         case 0x1b:                  /* ESC */
                             NPDup = 0;
+                cmdline[0] = '\0';
+                cmdoff = 0;
+                cmdlen = 0;
                             break;
                         case '?':
                             NPhelpup = 1;
@@ -1247,7 +1241,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                     redraw_cmd = 1;
                     break;
                 }
-                
+
                 /* Process LEFT_ARROW character              */
                 if (strcmp(kbbuf+i, KBD_LEFT_ARROW) == 0
                     || strcmp(kbbuf+i, xKBD_LEFT_ARROW) == 0)
@@ -1265,7 +1259,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                     || strcmp(kbbuf+i, KBD_INSERT) == 0)
                 {
                     redraw_msgs = 1;
-                    if (cmdoff < cmdlen) 
+                    if (cmdoff < cmdlen)
                         cmdoff++;
                     break;
                 }
@@ -1276,14 +1270,28 @@ struct  timeval tv;                     /* Select timeout structure  */
                     /* =NP= : Switch to new panel display */
                     NP_init();
                     NPDup = 1;
+            cmdline[0] = '\0';
+            cmdoff = 0;
+            cmdlen = 0;
                     /* =END= */
                     break;
+                }
+
+                /* Process TAB character              */
+                if (kbbuf[i] == '\t' || kbbuf[i] == '\x7F')
+                {
+                   tab_pressed(cmdline, &cmdoff);
+                   cmdlen = strlen(cmdline);
+                   /* cmdoff = cmdlen;                */
+                   i++;
+                   redraw_cmd = 1;
+                   break;
                 }
 
                 /* Process the command if newline was read */
                 if (kbbuf[i] == '\n')
                 {
-                    if (cmdlen == 0) {
+                    if (cmdlen == 0 && NPDup == 0) {
                         history_show();
                     } else {
                         cmdline[cmdlen] = '\0';
@@ -1341,6 +1349,9 @@ struct  timeval tv;                     /* Select timeout structure  */
                                     break;
                             }
                             redraw_status = 1;
+                cmdline[0] = '\0';
+                cmdlen = 0;
+                cmdoff = 0;
                         }
                         /* =END= */
                         redraw_cmd = 1;
@@ -1364,7 +1375,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                             cmdline[j+1] = cmdline[j];
                         cmdline[cmdoff++] = kbbuf[i];
                     }
-                    else 
+                    else
                         cmdline[cmdoff++] = kbbuf[i];
                     cmdlen++;
                 }
@@ -1467,7 +1478,7 @@ struct  timeval tv;                     /* Select timeout structure  */
 
         /* Obtain the PSW for target CPU */
         memset (curpsw, 0x00, sizeof(curpsw));
-        store_psw (regs, curpsw);
+        copy_psw (regs, curpsw);
 
         /* Isolate the PSW interruption wait bit */
         pswwait = curpsw[1] & 0x02;
@@ -1477,7 +1488,7 @@ struct  timeval tv;                     /* Select timeout structure  */
            the CPU stopped state has changed */
         if (memcmp(curpsw, prvpsw, sizeof(curpsw)) != 0 || (
 #if defined(_FEATURE_SIE)
-                  regs->sie_state ?  regs->hostregs->instcount :
+                  SIE_MODE(regs) ?  regs->hostregs->instcount :
 #endif /*defined(_FEATURE_SIE)*/
                   regs->instcount) != prvicount
 #if defined(OPTION_SHARED_DEVICES)
@@ -1489,7 +1500,7 @@ struct  timeval tv;                     /* Select timeout structure  */
             memcpy (prvpsw, curpsw, sizeof(prvpsw));
             prvicount =
 #if defined(_FEATURE_SIE)
-                        regs->sie_state ? regs->hostregs->instcount :
+                        SIE_MODE(regs) ? regs->hostregs->instcount :
 #endif /*defined(_FEATURE_SIE)*/
                         regs->instcount;
             prvstate = regs->cpustate;
@@ -1530,7 +1541,7 @@ struct  timeval tv;                     /* Select timeout structure  */
 
             if (redraw_status && !sysblk.npquiet)
             {
-                if(sysblk.regs[sysblk.pcpu].cpuonline)
+                if(IS_CPU_ONLINE(sysblk.pcpu))
                 /* Display the PSW and instruction counter for CPU 0 */
                 fprintf (confp,
                     "%s"
@@ -1550,9 +1561,9 @@ struct  timeval tv;                     /* Select timeout structure  */
                     pswwait ? 'W' : '.',
                     regs->loadstate ? 'L' : '.',
                     regs->checkstop ? 'C' : '.',
-                    regs->psw.prob ? 'P' : '.',
+                    PROBSTATE(&regs->psw) ? 'P' : '.',
 #if defined(_FEATURE_SIE)
-                    regs->sie_state ? 'S' : '.',
+                    SIE_MODE(regs) ? 'S' : '.',
 #else /*!defined(_FEATURE_SIE)*/
                     '.',
 #endif /*!defined(_FEATURE_SIE)*/
@@ -1562,7 +1573,7 @@ struct  timeval tv;                     /* Select timeout structure  */
                     ' ',
 #endif
 #if defined(_FEATURE_SIE)
-                    regs->sie_state ?  (long long) regs->hostregs->instcount :
+                    SIE_MODE(regs) ?  (long long) regs->hostregs->instcount :
 #endif /*defined(_FEATURE_SIE)*/
                     (long long)regs->instcount,
                     ANSI_ERASE_EOL);

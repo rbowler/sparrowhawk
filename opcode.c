@@ -1,9 +1,9 @@
-/* OPCODE.C     (c) Copyright Jan Jaeger, 2000-2003                  */
+/* OPCODE.C     (c) Copyright Jan Jaeger, 2000-2004                  */
 /*              Instruction decoding functions                       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 
 
 #include "feature.h"
@@ -33,7 +33,7 @@
 
 #define UNDEF_INST(_x) \
         DEF_INST(_x) { ARCH_DEP(operation_exception) \
-        (inst,execflag,regs); }
+        (inst,regs); }
 
 
 #if !defined(FEATURE_CHANNEL_SUBSYSTEM)
@@ -159,6 +159,14 @@
  UNDEF_INST(set_address_space_control_x)
  UNDEF_INST(set_secondary_asn)
 #endif /*!defined(FEATURE_DUAL_ADDRESS_SPACE)*/
+
+
+#if !defined(FEATURE_ASN_AND_LX_REUSE)
+ UNDEF_INST(extract_primary_asn_and_instance)
+ UNDEF_INST(extract_secondary_asn_and_instance)
+ UNDEF_INST(program_transfer_with_instance)
+ UNDEF_INST(set_secondary_asn_with_instance)
+#endif /*!defined(FEATURE_ASN_AND_LX_REUSE)*/
 
 
 #if !defined(FEATURE_ACCESS_REGISTERS)
@@ -389,12 +397,16 @@
  UNDEF_INST(compare_bfp_long_reg)
  UNDEF_INST(compare_bfp_short)
  UNDEF_INST(compare_bfp_short_reg)
+ UNDEF_INST(convert_bfp_ext_to_fix32_reg)
  UNDEF_INST(convert_bfp_long_to_fix32_reg)
  UNDEF_INST(convert_bfp_short_to_fix32_reg)
+ UNDEF_INST(convert_fix32_to_bfp_ext_reg)
  UNDEF_INST(convert_fix32_to_bfp_long_reg)
  UNDEF_INST(convert_fix32_to_bfp_short_reg)
+ UNDEF_INST(convert_fix64_to_bfp_ext_reg);
  UNDEF_INST(convert_fix64_to_bfp_long_reg);
  UNDEF_INST(convert_fix64_to_bfp_short_reg);
+ UNDEF_INST(convert_bfp_ext_to_fix64_reg);
  UNDEF_INST(convert_bfp_long_to_fix64_reg);
  UNDEF_INST(convert_bfp_short_to_fix64_reg);
  UNDEF_INST(divide_bfp_ext_reg)
@@ -402,6 +414,8 @@
  UNDEF_INST(divide_bfp_long_reg)
  UNDEF_INST(divide_bfp_short)
  UNDEF_INST(divide_bfp_short_reg)
+ UNDEF_INST(divide_integer_bfp_long_reg)
+ UNDEF_INST(divide_integer_bfp_short_reg)
  UNDEF_INST(load_and_test_bfp_ext_reg)
  UNDEF_INST(load_and_test_bfp_long_reg)
  UNDEF_INST(load_and_test_bfp_short_reg)
@@ -419,12 +433,30 @@
  UNDEF_INST(load_positive_bfp_short_reg)
  UNDEF_INST(loadlength_bfp_short_to_long)
  UNDEF_INST(loadlength_bfp_short_to_long_reg)
+ UNDEF_INST(loadlength_bfp_long_to_ext)
+ UNDEF_INST(loadlength_bfp_long_to_ext_reg)
+ UNDEF_INST(loadlength_bfp_short_to_ext)
+ UNDEF_INST(loadlength_bfp_short_to_ext_reg)
  UNDEF_INST(multiply_bfp_ext_reg)
+ UNDEF_INST(multiply_bfp_long_to_ext_reg)
+ UNDEF_INST(multiply_bfp_long_to_ext)
  UNDEF_INST(multiply_bfp_long)
  UNDEF_INST(multiply_bfp_long_reg)
+ UNDEF_INST(multiply_bfp_short_to_long_reg)
+ UNDEF_INST(multiply_bfp_short_to_long)
  UNDEF_INST(multiply_bfp_short)
  UNDEF_INST(multiply_bfp_short_reg)
+ UNDEF_INST(multiply_add_bfp_long_reg)
+ UNDEF_INST(multiply_add_bfp_long)
+ UNDEF_INST(multiply_add_bfp_short_reg)
+ UNDEF_INST(multiply_add_bfp_short)
+ UNDEF_INST(multiply_subtract_bfp_long_reg)
+ UNDEF_INST(multiply_subtract_bfp_long)
+ UNDEF_INST(multiply_subtract_bfp_short_reg)
+ UNDEF_INST(multiply_subtract_bfp_short)
  UNDEF_INST(round_bfp_long_to_short_reg)
+ UNDEF_INST(round_bfp_ext_to_long_reg)
+ UNDEF_INST(round_bfp_ext_to_short_reg)
  UNDEF_INST(squareroot_bfp_ext_reg)
  UNDEF_INST(squareroot_bfp_long)
  UNDEF_INST(squareroot_bfp_long_reg)
@@ -496,8 +528,8 @@
 
 #if !defined(FEATURE_EXTENDED_TRANSLATION)
  UNDEF_INST(translate_extended)
- UNDEF_INST(convert_unicode_to_utf8)
- UNDEF_INST(convert_utf8_to_unicode)
+ UNDEF_INST(convert_utf16_to_utf8)
+ UNDEF_INST(convert_utf8_to_utf16)
 #endif /*!defined(FEATURE_EXTENDED_TRANSLATION)*/
 
 
@@ -514,6 +546,16 @@
  UNDEF_INST(unpack_ascii)
  UNDEF_INST(unpack_unicode)
 #endif /*!defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
+
+
+#if !defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_3)
+ UNDEF_INST(convert_utf16_to_utf32)
+ UNDEF_INST(convert_utf32_to_utf16)
+ UNDEF_INST(convert_utf32_to_utf8)
+ UNDEF_INST(convert_utf8_to_utf32)
+ UNDEF_INST(search_string_unicode)
+ UNDEF_INST(translate_and_test_reversed)
+#endif /*!defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_3)*/
 
 
 #if !defined(FEATURE_LOAD_REVERSED) && !defined(FEATURE_ESAME_N3_ESA390)
@@ -676,81 +718,85 @@
    as the called routine has the same arguments, and the routine
    exits immediately after the call.                             *JJ */
 
+#if ARCH_MODE != ARCH_370
 DEF_INST(execute_01xx)
 {
-    opcode_01xx[inst[1]][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_01xx)[inst[1]](inst, regs);
 }
 
 
 DEF_INST(execute_a7xx)
 {
-    opcode_a7xx[inst[1] & 0x0F][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_a7xx)[inst[1]](inst, regs);
 }
+#endif
 
 
 DEF_INST(execute_b2xx)
 {
-    opcode_b2xx[inst[1]][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_b2xx)[inst[1]](inst, regs);
 }
 
 
 #if defined(FEATURE_BASIC_FP_EXTENSIONS)
 DEF_INST(execute_b3xx)
 {
-    opcode_b3xx[inst[1]][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_b3xx)[inst[1]](inst, regs);
 }
 
 DEF_INST(execute_edxx)
 {
-    opcode_edxx[inst[5]][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_edxx)[inst[5]](inst, regs);
 }
 #endif /*defined(FEATURE_BASIC_FP_EXTENSIONS)*/
 
 
 DEF_INST(execute_e5xx)
 {
-    opcode_e5xx[inst[1]][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_e5xx)[inst[1]](inst, regs);
 }
 
+#if ARCH_MODE == ARCH_370
 DEF_INST(execute_e6xx)
 {
-    opcode_e6xx[inst[1]][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_e6xx)[inst[1]](inst, regs);
 }
+#endif
 
 #if defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390)
 DEF_INST(execute_a5xx)
 {
-    opcode_a5xx[inst[1] & 0x0F][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_a5xx)[inst[1]](inst, regs);
 }
 
 
 DEF_INST(execute_b9xx)
 {
-    opcode_b9xx[inst[1]][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_b9xx)[inst[1]](inst, regs);
 }
 
 
 DEF_INST(execute_e3xx)
 {
-    opcode_e3xx[inst[5]][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_e3xx)[inst[5]](inst, regs);
 }
 
 
 DEF_INST(execute_ebxx)
 {
-    opcode_ebxx[inst[5]][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_ebxx)[inst[5]](inst, regs);
 }
 
 
 DEF_INST(execute_ecxx)
 {
-    opcode_ecxx[inst[5]][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_ecxx[inst[5]])(inst, regs);
 }
 
 
 DEF_INST(execute_c0xx)
 {
-    opcode_c0xx[inst[1] & 0x0F][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_c0xx)[inst[1]](inst, regs);
 }
 #endif /*defined(FEATURE_ESAME)*/
 
@@ -759,25 +805,25 @@ DEF_INST(execute_c0xx)
 
 DEF_INST(execute_a4xx)
 {
-    v_opcode_a4xx[inst[1]][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_a4xx)[inst[1]](inst, regs);
 }
 
 
 DEF_INST(execute_a5xx)
 {
-    v_opcode_a5xx[inst[1]][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_a5xx)[inst[1]](inst, regs);
 }
 
 
 DEF_INST(execute_a6xx)
 {
-    v_opcode_a6xx[inst[1]][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_a6xx)[inst[1]](inst, regs);
 }
 
 
 DEF_INST(execute_e4xx)
 {
-    v_opcode_e4xx[inst[1]][ARCH_MODE](inst, execflag, regs);
+    regs->ARCH_DEP(opcode_e4xx)[inst[1]](inst, regs);
 }
 
 #endif /*defined(FEATURE_VECTOR_FACILITY)*/
@@ -785,19 +831,13 @@ DEF_INST(execute_e4xx)
 
 DEF_INST(operation_exception)
 {
-    if( !execflag )
-    {
-        regs->psw.ilc = (inst[0] < 0x40) ? 2 :
-                        (inst[0] < 0xC0) ? 4 : 6;
-        regs->psw.IA += regs->psw.ilc;
-        regs->psw.IA &= ADDRESS_MAXWRAP(regs);
-    }
+    INST_UPDATE_PSW (regs, ILC(inst[0]));
 
 #if defined(MODEL_DEPENDENT)
 #if defined(_FEATURE_SIE)
     /* The B2XX extended opcodes which are not defined are always
        intercepted by SIE when issued in supervisor state */
-    if(!regs->psw.prob && inst[0] == 0xB2)
+    if(!PROBSTATE(&regs->psw) && inst[0] == 0xB2)
         SIE_INTERCEPT(regs);
 #endif /*defined(_FEATURE_SIE)*/
 #endif /*defined(MODEL_DEPENDENT)*/
@@ -809,15 +849,7 @@ DEF_INST(operation_exception)
 DEF_INST(dummy_instruction)
 {
 //  logmsg(_("Dummy instruction: ")); ARCH_DEP(display_inst) (regs, inst);
-
-    if( !execflag )
-    {
-        regs->psw.ilc = (inst[0] < 0x40) ? 2 :
-                        (inst[0] < 0xC0) ? 4 : 6;
-        regs->psw.IA += regs->psw.ilc;
-        regs->psw.IA &= ADDRESS_MAXWRAP(regs);
-    }
-
+    INST_UPDATE_PSW (regs, ILC(inst[0]));
 }
 
 
@@ -915,7 +947,7 @@ int m3,r1,r2;
     m3 = inst[2] >> 4;
     r1 = inst[3] >> 4;
     r2 = inst[3] & 0x0F;
-    logmsg("%-6.6s%d,%d,%d\n",mnemonic,m3,r1,r2);
+    logmsg("%-6.6s%d,%d,%d\n",mnemonic,r1,m3,r2);
 }
 
 void disasm_RRF_RM (BYTE inst[], BYTE mnemonic[])
@@ -925,7 +957,7 @@ int r3,m4,r1,r2;
     m4 = inst[2] & 0x0F;
     r1 = inst[3] >> 4;
     r2 = inst[3] & 0x0F;
-    logmsg("%-6.6s%d,%d,%d,%d\n",mnemonic,r3,m4,r1,r2);
+    logmsg("%-6.6s%d,%d,%d,%d\n",mnemonic,r1,r3,r2,m4);
 }
 
 void disasm_RX (BYTE inst[], BYTE mnemonic[])
@@ -1180,8 +1212,145 @@ int d2,b2;
 
 /* Gabor Hoffer (performance option) */
 zz_func s370_opcode_table[256];
+static zz_func s370_opcode_a4xx[256];
+static zz_func s370_opcode_a5xx[256]; 
+static zz_func s370_opcode_a6xx[256];
+static zz_func s370_opcode_b2xx[256];
+static zz_func s370_opcode_e4xx[256];
+static zz_func s370_opcode_e5xx[256];
+static zz_func s370_opcode_e6xx[256];
+
 zz_func s390_opcode_table[256];
+static zz_func s390_opcode_01xx[256];
+static zz_func s390_opcode_a4xx[256];
+static zz_func s390_opcode_a5xx[256]; 
+static zz_func s390_opcode_a6xx[256];
+static zz_func s390_opcode_a7xx[256];
+static zz_func s390_opcode_b2xx[256];
+static zz_func s390_opcode_b3xx[256];
+static zz_func s390_opcode_b9xx[256];
+static zz_func s390_opcode_c0xx[256];
+static zz_func s390_opcode_e3xx[256];
+static zz_func s390_opcode_e4xx[256];
+static zz_func s390_opcode_e5xx[256];
+static zz_func s390_opcode_ebxx[256];
+static zz_func s390_opcode_ecxx[256];
+static zz_func s390_opcode_edxx[256];
+
 zz_func z900_opcode_table[256];
+static zz_func z900_opcode_01xx[256];
+static zz_func z900_opcode_a5xx[256]; 
+static zz_func z900_opcode_a7xx[256];
+static zz_func z900_opcode_b2xx[256];
+static zz_func z900_opcode_b3xx[256];
+static zz_func z900_opcode_b9xx[256];
+static zz_func z900_opcode_c0xx[256];
+static zz_func z900_opcode_e3xx[256];
+static zz_func z900_opcode_e5xx[256];
+static zz_func z900_opcode_ebxx[256];
+static zz_func z900_opcode_ecxx[256];
+static zz_func z900_opcode_edxx[256];
+
+void copy_opcode_tables()
+{
+int i;
+
+    for (i = 0; i < 256; i++)
+    {
+#if defined(_370)
+        s370_opcode_table[i] = opcode_table[i][ARCH_370];
+        s370_opcode_a4xx [i] = v_opcode_a4xx [i][ARCH_370];
+        s370_opcode_a5xx [i] = v_opcode_a5xx [i][ARCH_370];
+        s370_opcode_a6xx [i] = v_opcode_a6xx [i][ARCH_370];
+        s370_opcode_b2xx [i] = opcode_b2xx [i][ARCH_370];
+        s370_opcode_e4xx [i] = v_opcode_e4xx [i][ARCH_370];
+        s370_opcode_e5xx [i] = opcode_e5xx [i][ARCH_370];
+        s370_opcode_e6xx [i] = opcode_e6xx [i][ARCH_370];
+#endif
+
+#if defined(_390)
+        s390_opcode_table[i] = opcode_table[i][ARCH_390];
+        s390_opcode_01xx [i] = opcode_01xx [i][ARCH_390];
+        s390_opcode_a4xx [i] = v_opcode_a4xx [i][ARCH_390];
+        s390_opcode_a5xx [i] = v_opcode_a5xx [i][ARCH_390];
+        s390_opcode_a6xx [i] = v_opcode_a6xx [i][ARCH_390];
+        s390_opcode_a7xx [i] = opcode_a7xx [i&0x0F][ARCH_390];
+        s390_opcode_b2xx [i] = opcode_b2xx [i][ARCH_390];
+        s390_opcode_b3xx [i] = opcode_b3xx [i][ARCH_390];
+        s390_opcode_b9xx [i] = opcode_b9xx [i][ARCH_390];
+        s390_opcode_c0xx [i] = opcode_c0xx [i&0x0F][ARCH_390];
+        s390_opcode_e3xx [i] = opcode_e3xx [i][ARCH_390];
+        s390_opcode_e4xx [i] = v_opcode_e4xx [i][ARCH_390];
+        s390_opcode_e5xx [i] = opcode_e5xx [i][ARCH_390];
+        s390_opcode_ebxx [i] = opcode_ebxx [i][ARCH_390];
+        s390_opcode_ecxx [i] = opcode_ecxx [i][ARCH_390];
+        s390_opcode_edxx [i] = opcode_edxx [i][ARCH_390];
+#endif
+
+#if defined(_900)
+        z900_opcode_table[i] = opcode_table[i][ARCH_900];
+        z900_opcode_01xx [i] = opcode_01xx [i][ARCH_900];
+        z900_opcode_a5xx [i] = opcode_a5xx [i&0x0F][ARCH_900];
+        z900_opcode_a7xx [i] = opcode_a7xx [i&0x0F][ARCH_900];
+        z900_opcode_b2xx [i] = opcode_b2xx [i][ARCH_900];
+        z900_opcode_b3xx [i] = opcode_b3xx [i][ARCH_900];
+        z900_opcode_b9xx [i] = opcode_b9xx [i][ARCH_900];
+        z900_opcode_c0xx [i] = opcode_c0xx [i&0x0F][ARCH_900];
+        z900_opcode_e3xx [i] = opcode_e3xx [i][ARCH_900];
+        z900_opcode_e5xx [i] = opcode_e5xx [i][ARCH_900];
+        z900_opcode_ebxx [i] = opcode_ebxx [i][ARCH_900];
+        z900_opcode_ecxx [i] = opcode_ecxx [i][ARCH_900];
+        z900_opcode_edxx [i] = opcode_edxx [i][ARCH_900];
+#endif
+    }
+}
+
+void set_opcode_pointers(REGS *regs)
+{
+#if defined(_370)
+    regs->s370_opcode_table= s370_opcode_table;
+    regs->s370_opcode_a4xx = s370_opcode_a4xx;
+    regs->s370_opcode_a5xx = s370_opcode_a5xx;
+    regs->s370_opcode_a6xx = s370_opcode_a6xx;
+    regs->s370_opcode_b2xx = s370_opcode_b2xx;
+    regs->s370_opcode_e4xx = s370_opcode_e4xx;
+    regs->s370_opcode_e5xx = s370_opcode_e5xx;
+    regs->s370_opcode_e6xx = s370_opcode_e6xx;
+#endif
+#if defined(_390)
+    regs->s390_opcode_table= s390_opcode_table;
+    regs->s390_opcode_01xx = s390_opcode_01xx;
+    regs->s390_opcode_a4xx = s390_opcode_a4xx;
+    regs->s390_opcode_a5xx = s390_opcode_a5xx;
+    regs->s390_opcode_a6xx = s390_opcode_a6xx;
+    regs->s390_opcode_a7xx = s390_opcode_a7xx;
+    regs->s390_opcode_b2xx = s390_opcode_b2xx;
+    regs->s390_opcode_b3xx = s390_opcode_b3xx;
+    regs->s390_opcode_b9xx = s390_opcode_b9xx;
+    regs->s390_opcode_c0xx = s390_opcode_c0xx;
+    regs->s390_opcode_e3xx = s390_opcode_e3xx;
+    regs->s390_opcode_e4xx = s390_opcode_e4xx;
+    regs->s390_opcode_e5xx = s390_opcode_e5xx;
+    regs->s390_opcode_ebxx = s390_opcode_ebxx;
+    regs->s390_opcode_ecxx = s390_opcode_ecxx;
+    regs->s390_opcode_edxx = s390_opcode_edxx;
+#endif
+#if defined(_900)
+    regs->z900_opcode_table= z900_opcode_table;
+    regs->z900_opcode_01xx = z900_opcode_01xx;
+    regs->z900_opcode_a5xx = z900_opcode_a5xx;
+    regs->z900_opcode_a7xx = z900_opcode_a7xx;
+    regs->z900_opcode_b2xx = z900_opcode_b2xx;
+    regs->z900_opcode_b3xx = z900_opcode_b3xx;
+    regs->z900_opcode_b9xx = z900_opcode_b9xx;
+    regs->z900_opcode_c0xx = z900_opcode_c0xx;
+    regs->z900_opcode_e3xx = z900_opcode_e3xx;
+    regs->z900_opcode_e5xx = z900_opcode_e5xx;
+    regs->z900_opcode_ebxx = z900_opcode_ebxx;
+    regs->z900_opcode_ecxx = z900_opcode_ecxx;
+    regs->z900_opcode_edxx = z900_opcode_edxx;
+#endif
+}
 
 zz_func opcode_table[256][GEN_MAXARCH] = {
  /*00*/   GENx___x___x___ ,
@@ -1392,7 +1561,7 @@ zz_func opcode_table[256][GEN_MAXARCH] = {
  /*CD*/   GENx___x___x___ ,
  /*CE*/   GENx___x___x___ ,
  /*CF*/   GENx___x___x___ ,
- /*D0*/   GENx___x___x___ ,
+ /*D0*/   GENx___x___x900 (translate_and_test_reversed,SS_L,"TRTR"),
  /*D1*/   GENx370x390x900 (move_numerics,SS_L,"MVN"),
  /*D2*/   GENx370x390x900 (move_character,SS_L,"MVC"),
  /*D3*/   GENx370x390x900 (move_zones,SS_L,"MVZ"),
@@ -2171,8 +2340,8 @@ zz_func opcode_b2xx[256][GEN_MAXARCH] = {
  /*B2A3*/ GENx___x___x___ ,
  /*B2A4*/ GENx___x___x___ ,                                     /* Sysplex   */
  /*B2A5*/ GENx___x390x900 (translate_extended,RRE,"TRE"),
- /*B2A6*/ GENx___x390x900 (convert_unicode_to_utf8,RRE,"CUUTF"),
- /*B2A7*/ GENx___x390x900 (convert_utf8_to_unicode,RRE,"CUTFU"),
+ /*B2A6*/ GENx___x390x900 (convert_utf16_to_utf8,RRE,"CU21 (CUUTF)"),
+ /*B2A7*/ GENx___x390x900 (convert_utf8_to_utf16,RRE,"CU12 (CUTFU)"),
  /*B2A8*/ GENx___x___x___ ,                                     /* Sysplex   */
  /*B2A9*/ GENx___x___x___ ,
  /*B2AA*/ GENx___x___x___ ,
@@ -2271,17 +2440,17 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B302*/ GENx___x390x900 (load_and_test_bfp_short_reg,RRE,"LTEBR"),
  /*B303*/ GENx___x390x900 (load_complement_bfp_short_reg,RRE,"LCEBR"),
  /*B304*/ GENx___x390x900 (loadlength_bfp_short_to_long_reg,RRE,"LDEBR"),
- /*B305*/ GENx___x390x900 (dummy_instruction,RRE,"LXDBR"),
- /*B306*/ GENx___x390x900 (dummy_instruction,RRE,"LXEBR"),
- /*B307*/ GENx___x390x900 (dummy_instruction,RRE,"MXDBR"),
+ /*B305*/ GENx___x390x900 (loadlength_bfp_long_to_ext_reg,RRE,"LXDBR"),
+ /*B306*/ GENx___x390x900 (loadlength_bfp_short_to_ext_reg,RRE,"LXEBR"),
+ /*B307*/ GENx___x390x900 (multiply_bfp_long_to_ext_reg,RRE,"MXDBR"),
  /*B308*/ GENx___x390x900 (compare_and_signal_bfp_short_reg,RRE,"KEBR"),
  /*B309*/ GENx___x390x900 (compare_bfp_short_reg,RRE,"CEBR"),
  /*B30A*/ GENx___x390x900 (add_bfp_short_reg,RRE,"AEBR"),
  /*B30B*/ GENx___x390x900 (subtract_bfp_short_reg,RRE,"SEBR"),
- /*B30C*/ GENx___x390x900 (dummy_instruction,RRE,"MDEBR"),
+ /*B30C*/ GENx___x390x900 (multiply_bfp_short_to_long_reg,RRE,"MDEBR"),
  /*B30D*/ GENx___x390x900 (divide_bfp_short_reg,RRE,"DEBR"),
- /*B30E*/ GENx___x390x900 (dummy_instruction,RRF_R,"MAEBR"),
- /*B30F*/ GENx___x390x900 (dummy_instruction,RRF_R,"MSEBR"),
+ /*B30E*/ GENx___x390x900 (multiply_add_bfp_short_reg,RRF_R,"MAEBR"),
+ /*B30F*/ GENx___x390x900 (multiply_subtract_bfp_short_reg,RRF_R,"MSEBR"),
  /*B310*/ GENx___x390x900 (load_positive_bfp_long_reg,RRE,"LPDBR"),
  /*B311*/ GENx___x390x900 (load_negative_bfp_long_reg,RRE,"LNDBR"),
  /*B312*/ GENx___x390x900 (load_and_test_bfp_long_reg,RRE,"LTDBR"),
@@ -2296,8 +2465,8 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B31B*/ GENx___x390x900 (subtract_bfp_long_reg,RRE,"SDBR"),
  /*B31C*/ GENx___x390x900 (multiply_bfp_long_reg,RRE,"MDBR"),
  /*B31D*/ GENx___x390x900 (divide_bfp_long_reg,RRE,"DDBR"),
- /*B31E*/ GENx___x390x900 (dummy_instruction,RRF_R,"MAEBR"),
- /*B31F*/ GENx___x390x900 (dummy_instruction,RRF_R,"MSDBR"),
+ /*B31E*/ GENx___x390x900 (multiply_add_bfp_long_reg,RRF_R,"MADBR"),
+ /*B31F*/ GENx___x390x900 (multiply_subtract_bfp_long_reg,RRF_R,"MSDBR"),
  /*B320*/ GENx___x___x___ ,
  /*B321*/ GENx___x___x___ ,
  /*B322*/ GENx___x___x___ ,
@@ -2335,8 +2504,8 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B342*/ GENx___x390x900 (load_and_test_bfp_ext_reg,RRE,"LTXBR"),
  /*B343*/ GENx___x390x900 (load_complement_bfp_ext_reg,RRE,"LCXBR"),
  /*B344*/ GENx___x390x900 (round_bfp_long_to_short_reg,RRE,"LEDBR"),
- /*B345*/ GENx___x390x900 (dummy_instruction,RRE,"LDXBR"),
- /*B346*/ GENx___x390x900 (dummy_instruction,RRE,"LEXBR"),
+ /*B345*/ GENx___x390x900 (round_bfp_ext_to_long_reg,RRE,"LDXBR"),
+ /*B346*/ GENx___x390x900 (round_bfp_ext_to_short_reg,RRE,"LEXBR"),
  /*B347*/ GENx___x390x900 (load_fp_int_ext_reg,RRF_M,"FIXBR"),
  /*B348*/ GENx___x390x900 (compare_and_signal_bfp_ext_reg,RRE,"KXBR"),
  /*B349*/ GENx___x390x900 (compare_bfp_ext_reg,RRE,"CXBR"),
@@ -2349,7 +2518,7 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B350*/ GENx___x390x900 (convert_float_long_to_bfp_short_reg,RRF_M,"TBEDR"),
  /*B351*/ GENx___x390x900 (convert_float_long_to_bfp_long_reg,RRF_M,"TBDR"),
  /*B352*/ GENx___x___x___ ,
- /*B353*/ GENx___x390x900 (dummy_instruction,RRF_M,"DIEBR"),
+ /*B353*/ GENx___x390x900 (divide_integer_bfp_short_reg,RRF_RM,"DIEBR"),
  /*B354*/ GENx___x___x___ ,
  /*B355*/ GENx___x___x___ ,
  /*B356*/ GENx___x___x___ ,
@@ -2357,7 +2526,7 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B358*/ GENx___x390x900 (convert_bfp_short_to_float_long_reg,RRE,"THDER"),
  /*B359*/ GENx___x390x900 (convert_bfp_long_to_float_long_reg,RRE,"THDR"),
  /*B35A*/ GENx___x___x___ ,
- /*B35B*/ GENx___x390x900 (dummy_instruction,RRF_M,"DIDBR"),
+ /*B35B*/ GENx___x390x900 (divide_integer_bfp_long_reg,RRF_RM,"DIDBR"),
  /*B35C*/ GENx___x___x___ ,
  /*B35D*/ GENx___x___x___ ,
  /*B35E*/ GENx___x___x___ ,
@@ -2416,11 +2585,11 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B393*/ GENx___x___x___ ,
  /*B394*/ GENx___x390x900 (convert_fix32_to_bfp_short_reg,RRE,"CEFBR"),
  /*B395*/ GENx___x390x900 (convert_fix32_to_bfp_long_reg,RRE,"CDFBR"),
- /*B396*/ GENx___x390x900 (dummy_instruction,RRE,"CXFBR"),
+ /*B396*/ GENx___x390x900 (convert_fix32_to_bfp_ext_reg,RRE,"CXFBR"),
  /*B397*/ GENx___x___x___ ,
  /*B398*/ GENx___x390x900 (convert_bfp_short_to_fix32_reg,RRF_M,"CFEBR"),
  /*B399*/ GENx___x390x900 (convert_bfp_long_to_fix32_reg,RRF_M,"CFDBR"),
- /*B39A*/ GENx___x390x900 (dummy_instruction,RRF_M,"CFXBR"),
+ /*B39A*/ GENx___x390x900 (convert_bfp_ext_to_fix32_reg,RRF_M,"CFXBR"),
  /*B39B*/ GENx___x___x___ ,
  /*B39C*/ GENx___x___x___ ,
  /*B39D*/ GENx___x___x___ ,
@@ -2432,11 +2601,11 @@ zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B3A3*/ GENx___x___x___ ,
  /*B3A4*/ GENx___x___x900 (convert_fix64_to_bfp_short_reg,RRE,"CEGBR"),
  /*B3A5*/ GENx___x___x900 (convert_fix64_to_bfp_long_reg,RRE,"CDGBR"),
- /*B3A6*/ GENx___x___x900 (dummy_instruction,RRE,"CXGBR"),
+ /*B3A6*/ GENx___x___x900 (convert_fix64_to_bfp_ext_reg,RRE,"CXGBR"),
  /*B3A7*/ GENx___x___x___ ,
  /*B3A8*/ GENx___x___x900 (convert_bfp_short_to_fix64_reg,RRF_M,"CGEBR"),
  /*B3A9*/ GENx___x___x900 (convert_bfp_long_to_fix64_reg,RRF_M,"CGDBR"),
- /*B3AA*/ GENx___x___x900 (dummy_instruction,RRF_M,"CGXBR"),
+ /*B3AA*/ GENx___x___x900 (convert_bfp_ext_to_fix64_reg,RRF_M,"CGXBR"),
  /*B3AB*/ GENx___x___x___ ,
  /*B3AC*/ GENx___x___x___ ,
  /*B3AD*/ GENx___x___x___ ,
@@ -2670,7 +2839,7 @@ zz_func opcode_b9xx[256][GEN_MAXARCH] = {
  /*B98B*/ GENx___x___x___ ,
  /*B98C*/ GENx___x___x___ ,
  /*B98D*/ GENx___x390x900 (extract_psw,RRE,"EPSW"),
- /*B98E*/ GENx___x___x900 (invalidate_dat_table_entry,RRF_R,"IDTE"),
+ /*B98E*/ GENx___x___x900 (invalidate_dat_table_entry,RRF_M,"IDTE"),
  /*B98F*/ GENx___x___x___ ,
  /*B990*/ GENx___x390x900 (translate_two_to_two,RRE,"TRTT"),
  /*B991*/ GENx___x390x900 (translate_two_to_one,RRE,"TRTO"),
@@ -2682,12 +2851,12 @@ zz_func opcode_b9xx[256][GEN_MAXARCH] = {
  /*B997*/ GENx___x390x900 (divide_logical_register,RRE,"DLR"),
  /*B998*/ GENx___x390x900 (add_logical_carry_register,RRE,"ALCR"),
  /*B999*/ GENx___x390x900 (subtract_logical_borrow_register,RRE,"SLBR"),
- /*B99A*/ GENx___x___x___ ,
- /*B99B*/ GENx___x___x___ ,
+ /*B99A*/ GENx___x___x900 (extract_primary_asn_and_instance,RRE,"EPAIR"),
+ /*B99B*/ GENx___x___x900 (extract_secondary_asn_and_instance,RRE,"ESAIR"),
  /*B99C*/ GENx___x___x___ ,
  /*B99D*/ GENx___x___x900 (extract_and_set_extended_authority,RRE,"ESEA"),
- /*B99E*/ GENx___x___x___ ,
- /*B99F*/ GENx___x___x___ ,
+ /*B99E*/ GENx___x___x900 (program_transfer_with_instance,RRE,"PTI"),
+ /*B99F*/ GENx___x___x900 (set_secondary_asn_with_instance,RRE,"SSAIR"),
  /*B9A0*/ GENx___x___x___ ,
  /*B9A1*/ GENx___x___x___ ,
  /*B9A2*/ GENx___x___x___ ,
@@ -2704,10 +2873,10 @@ zz_func opcode_b9xx[256][GEN_MAXARCH] = {
  /*B9AD*/ GENx___x___x___ ,
  /*B9AE*/ GENx___x___x___ ,
  /*B9AF*/ GENx___x___x___ ,
- /*B9B0*/ GENx___x___x___ ,
- /*B9B1*/ GENx___x___x___ ,
- /*B9B2*/ GENx___x___x___ ,
- /*B9B3*/ GENx___x___x___ ,
+ /*B9B0*/ GENx___x___x900 (convert_utf8_to_utf32,RRE,"CU14"),
+ /*B9B1*/ GENx___x___x900 (convert_utf16_to_utf32,RRE,"CU24"),
+ /*B9B2*/ GENx___x___x900 (convert_utf32_to_utf8,RRE,"CU41"),
+ /*B9B3*/ GENx___x___x900 (convert_utf32_to_utf16,RRE,"CU42"),
  /*B9B4*/ GENx___x___x___ ,
  /*B9B5*/ GENx___x___x___ ,
  /*B9B6*/ GENx___x___x___ ,
@@ -2718,7 +2887,7 @@ zz_func opcode_b9xx[256][GEN_MAXARCH] = {
  /*B9BB*/ GENx___x___x___ ,
  /*B9BC*/ GENx___x___x___ ,
  /*B9BD*/ GENx___x___x___ ,
- /*B9BE*/ GENx___x___x___ ,
+ /*B9BE*/ GENx___x___x900 (search_string_unicode,SS_L,"SRSTU"),
  /*B9BF*/ GENx___x___x___ ,
  /*B9C0*/ GENx___x___x___ ,
  /*B9C1*/ GENx___x___x___ ,
@@ -4122,17 +4291,17 @@ zz_func opcode_edxx[256][GEN_MAXARCH] = {
  /*ED02*/ GENx___x___x___ ,
  /*ED03*/ GENx___x___x___ ,
  /*ED04*/ GENx___x390x900 (loadlength_bfp_short_to_long,RXE,"LDEB"),
- /*ED05*/ GENx___x390x900 (dummy_instruction,RXE,"LXDB"),
- /*ED06*/ GENx___x390x900 (dummy_instruction,RXE,"LXEB"),
- /*ED07*/ GENx___x390x900 (dummy_instruction,RXE,"MXDB"),
+ /*ED05*/ GENx___x390x900 (loadlength_bfp_long_to_ext,RXE,"LXDB"),
+ /*ED06*/ GENx___x390x900 (loadlength_bfp_short_to_ext,RXE,"LXEB"),
+ /*ED07*/ GENx___x390x900 (multiply_bfp_long_to_ext,RXE,"MXDB"),
  /*ED08*/ GENx___x390x900 (compare_and_signal_bfp_short,RXE,"KEB"),
  /*ED09*/ GENx___x390x900 (compare_bfp_short,RXE,"CEB"),
  /*ED0A*/ GENx___x390x900 (add_bfp_short,RXE,"AEB"),
  /*ED0B*/ GENx___x390x900 (subtract_bfp_short,RXE,"SEB"),
- /*ED0C*/ GENx___x390x900 (dummy_instruction,RXE,"MDEB"),
+ /*ED0C*/ GENx___x390x900 (multiply_bfp_short_to_long,RXE,"MDEB"),
  /*ED0D*/ GENx___x390x900 (divide_bfp_short,RXE,"DEB"),
- /*ED0E*/ GENx___x390x900 (dummy_instruction,RXF,"MAEB"),
- /*ED0F*/ GENx___x390x900 (dummy_instruction,RXF,"MSDB"),
+ /*ED0E*/ GENx___x390x900 (multiply_add_bfp_short,RXF,"MAEB"),
+ /*ED0F*/ GENx___x390x900 (multiply_subtract_bfp_short,RXF,"MSEB"),
  /*ED10*/ GENx___x390x900 (testdataclass_bfp_short,RXE,"TCEB"),
  /*ED11*/ GENx___x390x900 (testdataclass_bfp_long,RXE,"TCDB"),
  /*ED12*/ GENx___x390x900 (testdataclass_bfp_ext,RXE,"TCXB"),
@@ -4147,8 +4316,8 @@ zz_func opcode_edxx[256][GEN_MAXARCH] = {
  /*ED1B*/ GENx___x390x900 (subtract_bfp_long,RXE,"SDB"),
  /*ED1C*/ GENx___x390x900 (multiply_bfp_long,RXE,"MDB"),
  /*ED1D*/ GENx___x390x900 (divide_bfp_long,RXE,"DDB"),
- /*ED1E*/ GENx___x390x900 (dummy_instruction,RXF,"MADB"),
- /*ED1F*/ GENx___x390x900 (dummy_instruction,RXF,"MSDB"),
+ /*ED1E*/ GENx___x390x900 (multiply_add_bfp_long,RXF,"MADB"),
+ /*ED1F*/ GENx___x390x900 (multiply_subtract_bfp_long,RXF,"MSDB"),
  /*ED20*/ GENx___x___x___ ,
  /*ED21*/ GENx___x___x___ ,
  /*ED22*/ GENx___x___x___ ,

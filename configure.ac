@@ -1,7 +1,7 @@
 AC_INIT(hercules.h)
 AC_CONFIG_AUX_DIR(autoconf)
 
-AM_INIT_AUTOMAKE(hercules,3.01)
+AM_INIT_AUTOMAKE(hercules,3.02)
 AM_CONFIG_HEADER(config.h)
 AM_MAINTAINER_MODE
 
@@ -20,18 +20,19 @@ AM_MAINTAINER_MODE
 ## AC_PROG_LIBTOOL
 ##
 
-# Initialization
-CFLAGS="-W -Wall $CFLAGS"
-# ISW20030826-2 : add -I./intl as specified by gettext/info - Maintainers - Adjusting files - src/Makefile.in - Paragraph before last
-# added line below
-CPPFLAGS="-I ./intl"
+AC_CANONICAL_HOST
 
+CFLAGS="-W -Wall $CFLAGS"
+
+#
+# NOTE : The following no longer applies (ISW)
+#
 # Programs  (Note use "HC_PROG_CC" and not "AC_PROG_CC". We now
 #            have our own "hercules.m4" macro defined in the
 #            autoconf directory that fixes an undesired compiler
 #            optimization flags issue)
 
-HC_PROG_CC
+AC_PROG_CC
 
 ##
 ## End JAP unwanted "-g -O2" optimization flags fix...
@@ -70,14 +71,15 @@ is_cygwin=false
 
 case "$host_os" in
         darwin*)
-               if test $host_vendor = apple ; then
-                   AC_DEFINE([_BSD_SOCKLEN_T_],[int])
+                if test $host_vendor = apple ; then
+##                 AC_DEFINE([_BSD_SOCKLEN_T_],[int])
                    AC_DEFINE([_INTL_REDIRECT_MACROS])
-##            Do whatever is necessary to get the following symbol defined
+##              Do whatever is necessary to get the following symbol defined
 ##               so the included libltdl will be built and used
 ##                 AC_PROVIDE_AC_LIBTOOL_DLOPEN
-               fi
-               ;;
+                build_hercifc=true
+                fi
+                ;;
         linux*)
                 build_hercifc=true
                 ;;
@@ -85,8 +87,9 @@ case "$host_os" in
                 is_cygwin=true
                 build_hercifc=false
                 use_dlltool=true
+                CFLAGS="$CFLAGS -Wno-format"
                 AC_DEFINE([WIN32])
-                AC_DEFINE([NO_SIGABEND_HANDLER])
+##              AC_DEFINE([NO_SIGABEND_HANDLER])
                 ;;
         *)
                 build_hercifc=false
@@ -100,6 +103,9 @@ AM_CONDITIONAL(BUILD_HERCIFC, [test "x$build_hercifc" = "xtrue"])
 case "$host_cpu-$GCC" in
         hppa*-yes)
                 CFLAGS="$CFLAGS -ffunction-sections"
+        ;;
+        x86_64-yes|s390x-yes)
+                CFLAGS="$CFLAGS -m64"
         ;;
 esac
 
@@ -135,8 +141,53 @@ have_dlopen=false
 # AC_CHECK_LIB(ltdl,lt_dlopen)
 # AC_CHECK_LIB(ltdl,lt_dlopen, have_lt_dlopen=true, have_lt_dlopen=false )
 
-AC_CHECK_LIB(gcrypt,gcry_cipher_open, have_gcrypt=true, have_gcrypt=false )
+# AC_CHECK_LIB(gcrypt,gcry_cipher_open, have_gcrypt=true, have_gcrypt=false )
+
+# ISW20041011 :
+# Was :
+# AM_PATH_LIBGCRYPT("0.4.4",[have_gcrypt=true],[have_gcrypt=false])
+AM_PATH_LIBGCRYPT("1.1.90",[have_gcrypt=true],[have_gcrypt=false])
+
 AM_CONDITIONAL(HAVE_GCRYPT, [test "x$have_gcrypt" = "xtrue"])
+
+if test "x$have_gcrypt" = "xtrue" ; then
+    OCFLAGS="$CFLAGS"
+    CFLAGS="$CFLAGS $GCRYPT_CFLAGS"
+    AC_MSG_CHECKING([whether gcry_cipher_open takes 3 or 4 args])
+    AC_COMPILE_IFELSE([
+#include <gcrypt.h>
+int main()
+{
+  GCRY_CIPHER_HD hd;
+  hd = gcry_cipher_open(0,0,0);
+  return 0;
+}
+],[gcrypt_form=3],
+    AC_COMPILE_IFELSE(
+[
+#include <gcrypt.h>
+int main()
+{
+  gcry_cipher_hd_t hd;
+  gcry_cipher_open(&hd,0,0,0);
+  return 0;
+}
+],[gcrypt_form=4],[gcrypt_form=0]))
+    case $gcrypt_form in
+        3)
+        AC_MSG_RESULT([3])
+        ;;
+        4)
+        AC_MSG_RESULT([4])
+        ;;
+        *)
+        AC_MSG_RESULT([unknown])
+        ;;
+    esac
+    CFLAGS="$OCFLAGS"
+    AC_DEFINE_UNQUOTED(GCRYPT_OPENFORMAT,${gcrypt_form})
+
+fi
 
 opt_dynamic_load=true
 
@@ -323,6 +374,47 @@ AC_CHECK_HEADERS(linux/if_tun.h)
 # Compiler characteristics
 
 AC_C_BIGENDIAN
+
+
+#
+# TEST FOR STRUCTURE ALIGNEMENT
+#
+cat > conftest.h << __EOF
+#include <stdio.h>
+struct sizeoftest
+{
+    unsigned char a;
+};
+__EOF
+
+AC_CHECK_SIZEOF(int)
+AC_CHECK_SIZEOF(long)
+AC_CHECK_SIZEOF(size_t)
+AC_CHECK_SIZEOF(int *)
+# FIXME: Disabled - because some builtin ffs seem to be causing problem
+#        however, gcc 3.4 will barf on certain march= 
+# AC_CHECK_FUNCS(ffs)
+
+AC_CHECK_SIZEOF(struct sizeoftest,,[#include "conftest.h"])
+
+AC_MSG_CHECKING([whether ${CC-cc} can/needs a byte structure alignement flag])
+hc_cv_sizeok=1
+hc_cv_needflag=no
+if test "x$ac_cv_sizeof_struct_sizeoftest" != "x1"; then
+    case "$host_cpu-$GCC" in
+        arm*-yes|xscale*-yes|sh*-yes|pxa*-yes)
+               CFLAGS="$CFLAGS -mstructure-size-boundary=8"
+                hc_cv_needflag=yes
+               ;;
+        *)
+                hc_cv_sizeok=0
+                ;;
+    esac
+fi
+if test "x$hc_cv_sizeok" = "x0"; then
+    AC_MSG_ERROR([Size of structures are aligned/rounded and we don't know how to tell the compiler otherwise])
+fi
+AC_MSG_RESULT([$hc_cv_needflag])
 
 
 # GCC only seems to support regparm on i386 right now, but that could
@@ -593,12 +685,22 @@ if test x$opt_configsymbols = xtrue; then
 fi
 
 if test x$auto_optimize = xtrue; then
-  case "$host_cpu" in
-          powerpc)
-            OFLAGS="-O3 $OFLAGS"
+  case "$host_cpu-$GCC" in
+          arm-yes)
+            OFLAGS="-O3 -frename-registers"
             ;;
-          i386|i486|i586|i686)
-            ac_xarch=$host_cpu
+          xscale-yes|arm*-yes)
+            OFLAGS="-O3 -frename-registers -mcpu=$host_cpu -mtune=$host_cpu"
+            ;;
+          x86_64-yes)
+                OFLAGS="-O3 -march=k8 -fomit-frame-pointer"
+           ;;
+          i386-yes|i486-yes|i586-yes|i686-yes|i786-yes)
+            if test $host_cpu = "i786" ; then
+                ac_xarch=pentium4
+            else
+                ac_xarch=$host_cpu
+            fi
             if test "$GCC" = "yes"; then
                 if ${CC-cc} -E - << __EOF | fgrep "yes" > /dev/null 2>&1
 #if __GNUC__ == 2 && __GNUC_MINOR__ == 96
@@ -621,7 +723,7 @@ __EOF
             fi
             ;;
           *)
-            OFLAGS="$OFLAGS"
+            OFLAGS="-O3 $OFLAGS"
             ;;
   esac
 elif test x$ac_cv_cygwin_gcc_alloca_bug = xyes; then
@@ -731,5 +833,7 @@ AH_TEMPLATE([NEED_GETOPT_OPTRESET],
             [Define to indicate optreset exists])
 AH_TEMPLATE([MODULESDIR],
             [Directory where HERCULES modules are installed])
+AH_TEMPLATE([GCRYPT_OPENFORMAT],
+            [Semantic to use for gcry_cipher_open function])
 
 AC_OUTPUT([Makefile util/Makefile html/Makefile crypto/Makefile po/Makefile.in po/Makefile man/Makefile intl/Makefile m4/Makefile ])

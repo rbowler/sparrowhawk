@@ -2,8 +2,8 @@
 // Hercules Interface Control Program
 // ====================================================================
 //
-// Copyright    (C) Copyright Roger Bowler, 2000-2003
-//              (C) Copyright James A. Pierson, 2002-2003
+// Copyright    (C) Copyright Roger Bowler, 2000-2004
+//              (C) Copyright James A. Pierson, 2002-2004
 //
 
 #ifndef __HERCIFC_H_
@@ -43,14 +43,14 @@
 
 typedef struct _CTLREQ
 {
-    long   iType;
-    int    iProcID;
-    int    iCtlOp;
-    char   szIFName[IFNAMSIZ];
+    long                 iType;
+    int                  iProcID;
+    unsigned long int    iCtlOp;
+    char                 szIFName[IFNAMSIZ];
     union 
     {
-        struct ifreq   ifreq;
-        struct rtentry rtentry;
+        struct ifreq     ifreq;
+        struct rtentry   rtentry;
     } iru;
 }   CTLREQ, *PCTLREQ;
 

@@ -1,4 +1,4 @@
-/* CARDRDR.C    (c) Copyright Roger Bowler, 1999-2003                */
+/* CARDRDR.C    (c) Copyright Roger Bowler, 1999-2004                */
 /*              ESA/390 Card Reader Device Handler                   */
 
 /*-------------------------------------------------------------------*/
@@ -36,7 +36,7 @@
 /*-------------------------------------------------------------------*/
 /* Initialize the device handler                                     */
 /*-------------------------------------------------------------------*/
-static int cardrdr_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
+static int cardrdr_init_handler ( DEVBLK *dev, int argc, char *argv[] )
 {
 int     i;                              /* Array subscript           */
 int     fc;                             /* File counter              */
@@ -313,8 +313,8 @@ int     fc;                             /* File counter              */
 /*-------------------------------------------------------------------*/
 /* Query the device definition                                       */
 /*-------------------------------------------------------------------*/
-static void cardrdr_query_device (DEVBLK *dev, BYTE **class,
-                int buflen, BYTE *buffer)
+static void cardrdr_query_device (DEVBLK *dev, char **class,
+                int buflen, char *buffer)
 {
     *class = "RDR";
 
@@ -875,11 +875,24 @@ int     num;                            /* Number of bytes to move   */
 static
 #endif
 DEVHND cardrdr_device_hndinfo = {
-        &cardrdr_init_handler,
-        &cardrdr_execute_ccw,
-        &cardrdr_close_device,
-        &cardrdr_query_device,
-        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+        &cardrdr_init_handler,         /* Device Initialisation      */
+        &cardrdr_execute_ccw,          /* Device CCW execute         */
+        &cardrdr_close_device,         /* Device Close               */
+        &cardrdr_query_device,         /* Device Query               */
+        NULL,                          /* Device Start channel pgm   */
+        NULL,                          /* Device End channel pgm     */
+        NULL,                          /* Device Resume channel pgm  */
+        NULL,                          /* Device Suspend channel pgm */
+        NULL,                          /* Device Read                */
+        NULL,                          /* Device Write               */
+        NULL,                          /* Device Query used          */
+        NULL,                          /* Device Reserve             */
+        NULL,                          /* Device Release             */
+        NULL,                          /* Immediate CCW Codes        */
+        NULL,                          /* Signal Adapter Input       */
+        NULL,                          /* Signal Adapter Output      */
+        NULL,                          /* Hercules suspend           */
+        NULL                           /* Hercules resume            */
 };
 
 /* Libtool static name colision resolution */

@@ -1,6 +1,6 @@
 /***********************************************************/
 /* HERCULES ECPS:VM Support                                */
-/* (c) Copyright 2003 Roger Bowler and Others              */
+/* (c) Copyright 2003-2004 Roger Bowler and Others         */
 /* Use of this program is governed by the QPL License      */
 /* Original Author : Ivan Warren                           */
 /* Prime Maintainer : Ivan Warren                          */
@@ -54,6 +54,8 @@
 #include "inline.h"
 
 #include "ecpsvm.h"
+
+#ifdef FEATURE_ECPSVM
 
 static ECPSVM_CMDENT ecpsvm_cmdtab[];
 ECPSVM_CMDENT *ecpsvm_getcmdent(char *cmd);
@@ -176,28 +178,43 @@ struct _ECPSVM_SASTATS
 
 #define BR14 regs->psw.IA=regs->GR_L(14) & ADDRESS_MAXWRAP(regs)
 
-#ifdef _FEATURE_SIE
-#define INITSIESTATE(x) (x).sie_state=0;
+#if defined(_FEATURE_SIE)
+#define INITSIESTATE(_regs)       \
+    do {                          \
+        SIE_STATE(&(_regs)) = 0;  \
+        (_regs).sie_mode = 0;     \
+    } while(0)
 #else
-#define INITSIESTATE(x)
+#define INITSIESTATE(_regs)
 #endif
+
+#define INITPSEUDOIP(_regs) \
+    do {    \
+        (_regs).ip="\0\0";  \
+    } while(0)
+
+#define INITPSEUDOREGS(_regs) \
+    do { \
+        INITSIESTATE((_regs)); \
+        INITPSEUDOIP((_regs)); \
+    } while(0)
+
 
 #define CPASSIST_HIT(_stat) ecpsvm_cpstats._stat.hit++
 
 #define SASSIST_HIT(_stat) ecpsvm_sastats._stat.hit++
 
 #define SASSIST_LPSW(_regs) \
-        regs->psw.IA=_regs.psw.IA; \
+        regs->psw.IA=(_regs.psw.IA & ADDRESS_MAXWRAP(_regs)); \
         regs->psw.cc=_regs.psw.cc; \
         regs->psw.pkey=_regs.psw.pkey; \
-        regs->psw.domask=_regs.psw.domask; \
-        regs->psw.fomask=_regs.psw.fomask; \
-        regs->psw.eumask=_regs.psw.eumask; \
-        regs->psw.sgmask=_regs.psw.sgmask;
+        regs->psw.progmask=_regs.psw.progmask;
 
-#define SASSIST_PROLOG( _instname ) \
+
+#define SASSIST_PROLOGX( _instname, _cput ) \
     VADR amicblok; \
     VADR vpswa; \
+    BYTE *vpswa_p; \
     REGS vpregs; \
     BYTE  micpend; \
     U32   CR6; \
@@ -206,7 +223,7 @@ struct _ECPSVM_SASTATS
     BYTE micevma2; \
     BYTE micevma3; \
     BYTE micevma4; \
-    if(!regs->psw.prob) \
+    if(!PROBSTATE(&regs->psw)) \
     { \
           return(1); \
     } \
@@ -236,14 +253,25 @@ struct _ECPSVM_SASTATS
         DEBUG_SASSISTX(_instname,logmsg(_("HHCEV300D : SASSIST "#_instname" Micblok @ %6.6X crosses page frame\n"),amicblok)); \
         return(1); \
     } \
-    amicblok=LOGICAL_TO_ABS(amicblok,USE_REAL_ADDR,regs,ACCTYPE_READ,0); \
     /* Load the micblok copy */ \
-    FETCH_FW(micblok.MICRSEG,regs->mainstor+amicblok); \
-    FETCH_FW(micblok.MICCREG,regs->mainstor+amicblok+4); \
-    FETCH_FW(micblok.MICVPSW,regs->mainstor+amicblok+8); \
-    FETCH_FW(micblok.MICWORK,regs->mainstor+amicblok+12); \
-    FETCH_FW(micblok.MICVTMR,regs->mainstor+amicblok+16); \
-    FETCH_FW(micblok.MICACF,regs->mainstor+amicblok+20); \
+    if((_cput)) \
+    { \
+        micblok.MICRSEG=EVM_L(amicblok); \
+        micblok.MICCREG=EVM_L(amicblok+4); \
+        micblok.MICVPSW=EVM_L(amicblok+8); \
+        micblok.MICWORK=EVM_L(amicblok+12); \
+        micblok.MICVTMR=EVM_L(amicblok+16); \
+        micblok.MICACF=EVM_L(amicblok+20); \
+    } \
+    else \
+    { \
+        FETCH_FW(micblok.MICRSEG,regs->mainstor+amicblok); \
+        FETCH_FW(micblok.MICCREG,regs->mainstor+amicblok+4); \
+        FETCH_FW(micblok.MICVPSW,regs->mainstor+amicblok+8); \
+        FETCH_FW(micblok.MICWORK,regs->mainstor+amicblok+12); \
+        FETCH_FW(micblok.MICVTMR,regs->mainstor+amicblok+16); \
+        FETCH_FW(micblok.MICACF,regs->mainstor+amicblok+20); \
+    } \
     micpend=(micblok.MICVPSW >> 24); \
     vpswa=micblok.MICVPSW & ADDRESS_MAXWRAP(regs); \
     micevma=(micblok.MICACF >> 24); \
@@ -251,22 +279,35 @@ struct _ECPSVM_SASTATS
     micevma3=((micblok.MICACF & 0x0000ff00) >> 8); \
     micevma4=(micblok.MICACF  & 0x000000ff); \
     /* Set ref bit on page where Virtual PSW is stored */ \
-    vpswa=LOGICAL_TO_ABS(vpswa,USE_REAL_ADDR,regs,ACCTYPE_READ,0); \
-    /* Load the Virtual PSW in a temporary REGS structure */ \
-    INITSIESTATE(vpregs); \
-    ARCH_DEP(load_psw) (&vpregs,&regs->mainstor[vpswa]); \
+    if((_cput)) \
+    { \
+        vpswa_p=MADDR(vpswa,USE_REAL_ADDR,regs,ACCTYPE_READ,0); \
+    } \
+    DEBUG_SASSISTX(_instname,logmsg(_("HHCEV300D : SASSIST "#_instname" VPSWA= %8.8X Virtual "),vpswa)); \
     DEBUG_SASSISTX(_instname,logmsg(_("HHCEV300D : SASSIST "#_instname" CR6= %8.8X\n"),CR6)); \
     DEBUG_SASSISTX(_instname,logmsg(_("HHCEV300D : SASSIST "#_instname" MICVTMR= %8.8X\n"),micblok.MICVTMR)); \
-    DEBUG_SASSISTX(_instname,logmsg(_("HHCEV300D : SASSIST "#_instname" VPSWA= %8.8X Virtual "),vpswa)); \
-    DEBUG_SASSISTX(_instname,display_psw(&vpregs)); \
     DEBUG_SASSISTX(_instname,logmsg(_("HHCEV300D : SASSIST "#_instname" Real "))); \
-    DEBUG_SASSISTX(_instname,display_psw(regs));
+    DEBUG_SASSISTX(_instname,display_psw(regs)); \
+    if((_cput)) \
+    { \
+        /* Load the Virtual PSW in a temporary REGS structure */ \
+        INITPSEUDOREGS(vpregs); \
+        ARCH_DEP(load_psw) (&vpregs,vpswa_p); \
+        DEBUG_SASSISTX(_instname,display_psw(&vpregs)); \
+    } \
+
+
+#define SASSIST_PROLOG( _instname ) \
+    SASSIST_PROLOGX(_instname,1)
+
+#define SASSIST_PROLOG_VT( _instname ) \
+    SASSIST_PROLOGX(_instname,0)
 
 #define ECPSVM_PROLOG(_inst) \
 int     b1, b2; \
 VADR    effective_addr1, \
         effective_addr2; \
-     SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2); \
+     SSE(inst, regs, b1, effective_addr1, b2, effective_addr2); \
      PRIV_CHECK(regs); \
      if(!sysblk.ecpsvm.available) \
      { \
@@ -329,7 +370,6 @@ VADR    effective_addr1, \
     (_x)=(_y); \
 }
 
-#ifdef FEATURE_ECPSVM
 
 int ecpsvm_do_fretx(REGS *regs,VADR block,U16 numdw,VADR maxsztbl,VADR fretl);
 
@@ -617,6 +657,7 @@ int ecpsvm_do_disp2(REGS *regs,VADR dl,VADR el)
     U32 F_VMIOINT,F_VMPXINT;
     U32 F_VMVCR0;
     U32 NCR0,NCR1;
+    BYTE *work_p;
 
     vmb=regs->GR_L(11);
     DEBUG_CPASSISTX(DISP2,logmsg("DISP2 Data list=%6.6X VM=%6.6X\n",dl,vmb));
@@ -816,14 +857,13 @@ int ecpsvm_do_disp2(REGS *regs,VADR dl,VADR el)
         }
 
         memset(&wregs,0,sizeof(wregs));
-        INITSIESTATE(wregs);
-        ARCH_DEP(load_psw) (&wregs,regs->mainstor+vmb+VMPSW);    /* Load user's Virtual PSW in work structure */
-        /* Clear ILC from Virtual PSW */
-        wregs.psw.ilc=0;
+        INITPSEUDOREGS(wregs);
+    work_p=MADDR(vmb+VMPSW,0,regs,USE_REAL_ADDR,0);
+        ARCH_DEP(load_psw) (&wregs,work_p);    /* Load user's Virtual PSW in work structure */
 
         /* Build REAL PSW */
         memset(&rregs,0,sizeof(rregs));
-        INITSIESTATE(rregs);
+        INITPSEUDOREGS(rregs);
         /* Copy IAR */
         rregs.psw.IA=wregs.psw.IA & ADDRESS_MAXWRAP(regs);
         /* Copy CC, PSW KEYs and PGM Mask */
@@ -831,15 +871,11 @@ int ecpsvm_do_disp2(REGS *regs,VADR dl,VADR el)
         rregs.psw.pkey=wregs.psw.pkey;
         /* Indicate Translation + I/O + Ext + Ecmode + Problem + MC */
         rregs.psw.sysmask=0x07; /* I/O + EXT + Trans */
-        rregs.psw.ecmode=1;     /* ECMODE */
-        rregs.psw.prob=1;       /* Problem state */
-        rregs.psw.mach=1;       /* MC Enabled */
+        rregs.psw.states = BIT(PSW_EC_BIT)         /* ECMODE */
+                         | BIT(PSW_PROB_BIT)       /* Problem state */
+                         | BIT(PSW_MACH_BIT);      /* MC Enabled */
         rregs.psw.intcode=0;    /* Clear intcode */
-        rregs.psw.ilc=0;
-        rregs.psw.domask=wregs.psw.domask;
-        rregs.psw.fomask=wregs.psw.fomask;
-        rregs.psw.eumask=wregs.psw.eumask;
-        rregs.psw.sgmask=wregs.psw.sgmask;
+        rregs.psw.progmask=wregs.psw.progmask;
 
         NCR0=EVM_L(CPCREG0);    /* Assume for now */
         NCR1=EVM_L(vmb+VMSEG);  /* Ditto          */
@@ -904,7 +940,7 @@ int ecpsvm_do_disp2(REGS *regs,VADR dl,VADR el)
                     /* Cannot allow ISK/SSK in shared sys VM */
                     B_VMMCR6|=VMMNOSK;
                 }
-                if(wregs.psw.prob)
+                if(PROBSTATE(&wregs.psw))
                 {
                     B_VMMCR6|=VMMPROB;
                 }
@@ -1024,7 +1060,8 @@ int ecpsvm_do_disp2(REGS *regs,VADR dl,VADR el)
         EVM_STC(B_VMESTAT,vmb+VMESTAT);
         EVM_STC(B_VMPSTAT,vmb+VMPSTAT);
         EVM_STC(B_VMOSTAT,vmb+VMOSTAT);
-        ARCH_DEP(store_psw) (&wregs,regs->mainstor+vmb+VMPSW);
+        work_p=MADDR(vmb+VMPSW,USE_REAL_ADDR,regs,ACCTYPE_WRITE,0); \
+        ARCH_DEP(store_psw) (&wregs,work_p);
 
 
         /* Stop charging current VM Block for Supervisor time */
@@ -1036,10 +1073,11 @@ int ecpsvm_do_disp2(REGS *regs,VADR dl,VADR el)
         /* Might be used by later CP Modules (including DMKPRV) */
         EVM_ST(NCR0,RUNCR0);
         EVM_ST(NCR1,RUNCR1);
-        ARCH_DEP(store_psw) (&rregs,regs->mainstor+RUNPSW);
+        work_p=MADDR(RUNPSW,USE_REAL_ADDR,regs,ACCTYPE_WRITE,0); \
+        ARCH_DEP(store_psw) (&rregs,work_p);
         DEBUG_CPASSISTX(DISP2,logmsg("DISP2 : Entry Real "));
         DEBUG_CPASSISTX(DISP2,display_psw(regs));
-        ARCH_DEP(load_psw) (regs,regs->mainstor+RUNPSW);
+        ARCH_DEP(load_psw) (regs,work_p);
         DEBUG_CPASSISTX(DISP2,logmsg("DISP2 : VMB @ %6.6X Now being dispatched\n",vmb));
         DEBUG_CPASSISTX(DISP2,logmsg("DISP2 : Real "));
         DEBUG_CPASSISTX(DISP2,display_psw(regs));
@@ -1047,13 +1085,9 @@ int ecpsvm_do_disp2(REGS *regs,VADR dl,VADR el)
         DEBUG_CPASSISTX(DISP2,display_psw(&wregs));
         /* TEST */
         ARCH_DEP(purge_tlb)(regs);
-        /* HERCULES STUFF - Invalidate AEA & AIA */
-        INVALIDATE_AIA(regs);
-        INVALIDATE_AEA_ALL(regs);
-        SET_IC_EXTERNAL_MASK(regs);
-        SET_IC_MCK_MASK(regs);
-        SET_IC_PER_MASK(regs);
-        SET_IC_IO_MASK(regs);
+        SET_IC_MASK(regs);
+        SET_AEA_MODE(regs);
+        SET_AEA_COMMON(regs);
         /* Dispatch..... */
         DEBUG_CPASSISTX(DISP2,logmsg(_("HHCPEV300D : DISP2 - Next Instruction : %2.2X\n"),ARCH_DEP(vfetchb)(regs->psw.IA,USE_PRIMARY_SPACE,regs)));
         DEBUG_CPASSISTX(DISP2,display_regs(regs));
@@ -1101,12 +1135,10 @@ DEF_INST(ecpsvm_disp1)
 }
 static int ecpsvm_int_lra(REGS *regs,VADR pgadd,RADR *raddr)
 {
-    U16 xcode;
-    int private;
-    int protect;
-    int stid;
-    return(ARCH_DEP(translate_addr) (pgadd , USE_PRIMARY_SPACE,  regs,
-                  ACCTYPE_LRA, raddr , &xcode, &private, &protect, &stid));
+    int cc;
+    cc = ARCH_DEP(translate_addr) (pgadd , USE_PRIMARY_SPACE, regs, ACCTYPE_LRA);
+    *raddr = regs->dat.raddr;
+    return cc;
 }
 /* TRANBRNG/TRANLOCK Common code */
 static int ecpsvm_tranbrng(REGS *regs,VADR cortabad,VADR pgadd,RADR *raddr)
@@ -2013,13 +2045,13 @@ int     ecpsvm_check_pswtrans(REGS *regs,ECPSVM_MICBLOK *micblok, BYTE micpend, 
     UNREFERENCED(micblok);
     UNREFERENCED(regs);
     /* Check for a switch from BC->EC or EC->BC */
-    if(oldr->psw.ecmode!=newr->psw.ecmode)
+    if(ECMODE(&oldr->psw)!=ECMODE(&newr->psw))
     {
         DEBUG_SASSISTX(LPSW,logmsg(_("HHCEV300D : New and Old PSW have a EC/BC transition\n")));
         return(1);
     }
     /* Check if PER or DAT is being changed */
-    if(newr->psw.ecmode)
+    if(ECMODE(&newr->psw))
     {
         if((newr->psw.sysmask & 0x44) != (oldr->psw.sysmask & 0x44))
         {
@@ -2030,7 +2062,7 @@ int     ecpsvm_check_pswtrans(REGS *regs,ECPSVM_MICBLOK *micblok, BYTE micpend, 
     /* Check if a Virtual interrupt is pending and new interrupts are being enabled */
     if(micpend & 0x80)
     {
-        if(newr->psw.ecmode)
+        if(ECMODE(&newr->psw))
         {
             if(((~oldr->psw.sysmask) & 0x03) & newr->psw.sysmask)
             {
@@ -2047,12 +2079,12 @@ int     ecpsvm_check_pswtrans(REGS *regs,ECPSVM_MICBLOK *micblok, BYTE micpend, 
             }
         }
     }
-    if(newr->psw.wait)
+    if(WAITSTATE(&newr->psw))
     {
         DEBUG_SASSISTX(LPSW,logmsg(_("HHCEV300D : New PSW is a WAIT PSW\n")));
         return(1);
     }
-    if(newr->psw.ecmode)
+    if(ECMODE(&newr->psw))
     {
         if(newr->psw.sysmask & 0xb8)
         {
@@ -2070,7 +2102,7 @@ int     ecpsvm_check_pswtrans(REGS *regs,ECPSVM_MICBLOK *micblok, BYTE micpend, 
 int     ecpsvm_dossm(REGS *regs,int b2,VADR effective_addr2)
 {
     BYTE  reqmask;
-    RADR  cregs;
+    BYTE *cregs;
     U32   creg0;
     REGS  npregs;
 
@@ -2091,8 +2123,8 @@ int     ecpsvm_dossm(REGS *regs,int b2,VADR effective_addr2)
     }
     */
     /* Get CR0 - set ref bit on  fetched CR0 (already done in prolog for MICBLOK) */
-    cregs=LOGICAL_TO_ABS(micblok.MICCREG,USE_REAL_ADDR,regs,ACCTYPE_READ,0);
-    FETCH_FW(creg0,&regs->mainstor[cregs]);
+    cregs=MADDR(micblok.MICCREG,USE_REAL_ADDR,regs,ACCTYPE_READ,0);
+    FETCH_FW(creg0,cregs);
 
     /* Reject if V CR0 specifies SSM Suppression */
     if(creg0 & 0x40000000)
@@ -2105,10 +2137,10 @@ int     ecpsvm_dossm(REGS *regs,int b2,VADR effective_addr2)
     /* but also fetch protection control, ref bit, etc.. */
     reqmask=ARCH_DEP(vfetchb) (effective_addr2,b2,regs);
 
-    INITSIESTATE(npregs);
+    INITPSEUDOREGS(npregs);
     /* Load the virtual PSW AGAIN in a new structure */
 
-    ARCH_DEP(load_psw) (&npregs,&regs->mainstor[vpswa]);
+    ARCH_DEP(load_psw) (&npregs,vpswa_p);
 
     npregs.psw.sysmask=reqmask;
 
@@ -2122,9 +2154,9 @@ int     ecpsvm_dossm(REGS *regs,int b2,VADR effective_addr2)
     npregs.psw.IA=regs->psw.IA & ADDRESS_MAXWRAP(regs);
 
     /* Set the change bit */
-    LOGICAL_TO_ABS(vpswa,USE_REAL_ADDR,regs,ACCTYPE_WRITE,0);
+    MADDR(vpswa,USE_REAL_ADDR,regs,ACCTYPE_WRITE,0);
     /* store the new PSW */
-    ARCH_DEP(store_psw) (&npregs,&regs->mainstor[vpswa]);
+    ARCH_DEP(store_psw) (&npregs,vpswa_p);
     DEBUG_SASSISTX(SSM,logmsg("HHCEV300D : SASSIST SSM Complete : new SM = %2.2X\n",reqmask));
     DEBUG_SASSISTX(LPSW,logmsg("HHCEV300D : SASSIST SSM New VIRT "));
     DEBUG_SASSISTX(LPSW,display_psw(&npregs));
@@ -2153,21 +2185,18 @@ int     ecpsvm_dosvc(REGS *regs,int svccode)
     }
     /* Get what the NEW PSW should be */
 
-    psa=(PSA_3XX *)&regs->mainstor[LOGICAL_TO_ABS((VADR)0 , USE_PRIMARY_SPACE, regs, ACCTYPE_READ, 0)];
+    psa=(PSA_3XX *)MADDR((VADR)0 , USE_PRIMARY_SPACE, regs, ACCTYPE_READ, 0);
                                                                                          /* Use all around access key 0 */
                                                                                          /* Also sets reference bit     */
-    INITSIESTATE(newr);
+    INITPSEUDOREGS(newr);
     ARCH_DEP(load_psw) (&newr, (BYTE *)&psa->svcnew);   /* Ref bit set above */
     DEBUG_SASSISTX(SVC,logmsg("HHCEV300D : SASSIST SVC NEW VIRT "));
     DEBUG_SASSISTX(SVC,display_psw(&newr));
     /* Get some stuff from the REAL Running PSW to put in OLD SVC PSW */
-    vpregs.psw.IA=regs->psw.IA;                   /* Instruction Address */
+    vpregs.psw.IA=(regs->psw.IA & ADDRESS_MAXWRAP(regs)); /* Instruction Address */
     vpregs.psw.cc=regs->psw.cc;                   /* Condition Code      */
     vpregs.psw.pkey=regs->psw.pkey;               /* Protection Key      */
-    vpregs.psw.domask=regs->psw.domask;           /* Dec Overflow        */
-    vpregs.psw.fomask=regs->psw.fomask;           /* Fixed Pt Overflow   */
-    vpregs.psw.eumask=regs->psw.eumask;           /* Exponent Underflow  */
-    vpregs.psw.sgmask=regs->psw.sgmask;           /* Significance        */
+    vpregs.psw.progmask=regs->psw.progmask;       /* Program Mask        */
     vpregs.psw.intcode=svccode;                   /* SVC Interrupt code  */
     DEBUG_SASSISTX(SVC,logmsg("HHCEV300D : SASSIST SVC OLD VIRT "));
     DEBUG_SASSISTX(SVC,display_psw(&vpregs));
@@ -2178,7 +2207,7 @@ int     ecpsvm_dosvc(REGS *regs,int svccode)
         return(1); /* Something in the NEW PSW we can't handle.. let CP do it */
     }
     /* Store the OLD SVC PSW */
-    psa=(PSA_3XX *)&regs->mainstor[LOGICAL_TO_ABS((VADR)0, USE_PRIMARY_SPACE, regs, ACCTYPE_WRITE, 0)];
+    psa=(PSA_3XX *)MADDR((VADR)0, USE_PRIMARY_SPACE, regs, ACCTYPE_WRITE, 0);
                                                                                          /* Use all around access key 0 */
                                                                                          /* Also sets change bit        */
     /* Set intcode in PSW (for BC mode) */
@@ -2186,7 +2215,7 @@ int     ecpsvm_dosvc(REGS *regs,int svccode)
 
     ARCH_DEP(store_psw) (&vpregs, (BYTE *)&psa->svcold);
 
-    if(vpregs.psw.ecmode)
+    if(ECMODE(&vpregs.psw))
     {
         /* Also set SVC interrupt code */
         /* and ILC                     */
@@ -2199,7 +2228,7 @@ int     ecpsvm_dosvc(REGS *regs,int svccode)
     /*
      * Now store the new PSW in the area pointed by the MICBLOK
      */
-    ARCH_DEP(store_psw) (&newr,regs->mainstor+vpswa);
+    ARCH_DEP(store_psw) (&newr,vpswa_p);
     DEBUG_SASSISTX(SVC,logmsg("HHCEV300D : SASSIST SVC Done\n"));
     SASSIST_HIT(SVC);
     return(0);
@@ -2207,7 +2236,7 @@ int     ecpsvm_dosvc(REGS *regs,int svccode)
 /* LPSW Assist */
 int ecpsvm_dolpsw(REGS *regs,int b2,VADR e2)
 {
-    VADR nlpsw;
+    BYTE * nlpsw;
     REGS nregs;
 
     SASSIST_PROLOG(LPSW);
@@ -2229,9 +2258,9 @@ int ecpsvm_dolpsw(REGS *regs,int b2,VADR e2)
         return(1);
 
     }
-    nlpsw=LOGICAL_TO_ABS(e2,b2,regs,ACCTYPE_READ,regs->psw.pkey);
-    INITSIESTATE(nregs);
-    ARCH_DEP(load_psw) (&nregs,regs->mainstor+nlpsw);
+    nlpsw=MADDR(e2,b2,regs,ACCTYPE_READ,regs->psw.pkey);
+    INITPSEUDOREGS(nregs);
+    ARCH_DEP(load_psw) (&nregs,nlpsw);
     if(ecpsvm_check_pswtrans(regs,&micblok,micpend,&vpregs,&nregs))
     {
         DEBUG_SASSISTX(LPSW,logmsg("HHCEV300D : SASSIST LPSW Rejected - Cannot make PSW transition\n"));
@@ -2239,9 +2268,9 @@ int ecpsvm_dolpsw(REGS *regs,int b2,VADR e2)
 
     }
     SASSIST_LPSW(nregs);
-    LOGICAL_TO_ABS(vpswa,USE_REAL_ADDR,regs,ACCTYPE_WRITE,0);
+    MADDR(vpswa,USE_REAL_ADDR,regs,ACCTYPE_WRITE,0);
                         /* Set ref bit in address pointed by MICBLOK */
-    ARCH_DEP(store_psw) (&nregs,regs->mainstor+vpswa);
+    ARCH_DEP(store_psw) (&nregs,vpswa_p);
     DEBUG_SASSISTX(LPSW,logmsg("HHCEV300D : SASSIST LPSW New VIRT "));
     DEBUG_SASSISTX(LPSW,display_psw(&nregs));
     DEBUG_SASSISTX(LPSW,logmsg("HHCEV300D : SASSIST LPSW New REAL "));
@@ -2255,16 +2284,14 @@ int ecpsvm_testvtimer(REGS *regs,int td)
     U32 vtmr;
     U32 ovtmr;
     int doint=0;
-    SASSIST_PROLOG(VTIMER);
+    SASSIST_PROLOG_VT(VTIMER);
     if(!(CR6 & ECPSVM_CR6_VIRTTIMR))
     {
         DEBUG_SASSISTX(VTIMER,logmsg("HHCEV300D : SASSIST VTIMER reject : Disabled by CR6\n"));
         return(1);
     }
     /* Update the Virt timer */
-    /* Do not set ref/change bit there */
-    /* this is a hardware timer update */
-    /* ALSO ! Not subject to fetch/store protection */
+
     FETCH_FW(vtmr,regs->mainstor+micblok.MICVTMR);
     ovtmr=vtmr;
     vtmr-=td;
@@ -2298,7 +2325,7 @@ int     ecpsvm_virttmr_ext(REGS *regs)
         DEBUG_SASSISTX(VTIMER,logmsg("HHCEV300D : SASSIST VTIMER Not pending\n"));
         return(1);
     }
-    if(!(regs->psw.prob))
+    if(!PROBSTATE(&regs->psw))
     {
         DEBUG_SASSISTX(VTIMER,logmsg("HHCEV300D : SASSIST VTIMER Not dispatching a VM\n"));
         return(1);
@@ -2357,6 +2384,7 @@ int ecpsvm_dolctl(REGS *regs,int r1,int r3,int b2,VADR effective_addr2)
     U32 crs[16];        /* New CRs */
     U32 rcrs[16];       /* REAL CRs */
     U32 ocrs[16];       /* Old CRs */
+    BYTE *ecb_p;
     VADR F_ECBLOK,vmb;
     BYTE B_VMPSTAT;
 
@@ -2371,7 +2399,7 @@ int ecpsvm_dolctl(REGS *regs,int r1,int r3,int b2,VADR effective_addr2)
     }
 
     vmb=vpswa-0xA8;
-    B_VMPSTAT=regs->mainstor[vmb+VMPSTAT];
+    B_VMPSTAT=EVM_IC(vmb+VMPSTAT);
 
     if((!(B_VMPSTAT & VMV370R)) && ((r1!=r3) || (r1!=0)))
     {
@@ -2398,26 +2426,19 @@ int ecpsvm_dolctl(REGS *regs,int r1,int r3,int b2,VADR effective_addr2)
     }
     if(B_VMPSTAT & VMV370R)
     {
-        F_ECBLOK=EVM_L(vmb+VMECEXT);
-        /* Ensure ref bit set */
-        LOGICAL_TO_ABS(F_ECBLOK,USE_REAL_ADDR,regs,ACCTYPE_READ,0);
-        if((F_ECBLOK & 0x7FF) != ((F_ECBLOK+((numcrs-1)*4)) & 0x7FF))
-        {
-            /* set ref bit in 2nd 2K Page is necessary */
-            LOGICAL_TO_ABS(F_ECBLOK+((numcrs-1)*4),USE_REAL_ADDR,regs,ACCTYPE_READ,0);
-        }
-        /* Load OLD Crs from ECBLOK */
-        for(i=0;i<16;i++)
-        {
-            FETCH_FW(ocrs[i],regs->mainstor+F_ECBLOK+(i*4));
-        }
+        F_ECBLOK=fetch_fw(regs->mainstor+vmb+VMECEXT);
+    for(i=0;i<16;i++)
+    {
+        ecb_p=MADDR(F_ECBLOK+(i*4),USE_REAL_ADDR,regs,ACCTYPE_READ,0);
+        ocrs[i]=fetch_fw(ecb_p);
+    }
     }
     else
     {
         F_ECBLOK=vmb+VMECEXT;  /* Update ECBLOK ADDRESS for VCR0 Update */
+    ecb_p=MADDR(F_ECBLOK,USE_REAL_ADDR,regs,ACCTYPE_READ,0);
         /* Load OLD CR0 From VMBLOK */
-        /* Note : ref bit already set in proglog */
-        FETCH_FW(ocrs[0],regs->mainstor+F_ECBLOK);
+    ocrs[0]=fetch_fw(ecb_p);
     }
     for(i=0;i<16;i++)
     {
@@ -2514,23 +2535,17 @@ int ecpsvm_dolctl(REGS *regs,int r1,int r3,int b2,VADR effective_addr2)
         regs->CR_L(i)=rcrs[i];
     }
     /* Update ECBLOK/VMBLOK Control regs */
-    /* Set change bit in ECBLOCK (or VMBLOCK) */
     /* Note : if F_ECBLOK addresses VMVCR0 in the VMBLOCK */
     /*        check has already been done to make sure    */
     /*        r1=0 and numcrs=1                           */
-    LOGICAL_TO_ABS(F_ECBLOK,USE_REAL_ADDR,regs,ACCTYPE_WRITE,0);
-    if((F_ECBLOK & 0x7FF) != ((F_ECBLOK+((numcrs-1)*4)) & 0x7FF))
-    {
-        /* set change bit in 2nd 2K Page is necessary */
-        LOGICAL_TO_ABS(F_ECBLOK+((numcrs-1)*4),USE_REAL_ADDR,regs,ACCTYPE_WRITE,0);
-    }
     for(j=r1,i=0;i<numcrs;i++,j++)
     {
         if(j>15)
         {
             j-=16;
         }
-        STORE_FW(regs->mainstor+F_ECBLOK+(j*4),ocrs[j]);
+    ecb_p=MADDR(F_ECBLOK+(j*4),USE_REAL_ADDR,regs,ACCTYPE_WRITE,0);
+    store_fw(ecb_p,ocrs[j]);
     }
     DEBUG_SASSISTX(LCTL,logmsg("HHCEV300D : SASSIST LCTL %d,%d Done\n",r1,r3));
     SASSIST_HIT(LCTL);
@@ -2927,43 +2942,25 @@ void ecpsvm_command(int ac,char **av)
     ce->fun(ac-1,av+1);
     logmsg(_("HHCEV011I ECPS:VM Command processor complete\n"));
 }
-/* NOTE : THE FOLLOWING 2 ROUTINES ARE ONLY DEFINED TO ELEVIATE A COMPILER WARNING */
-/*        DO NOT INVOKE THEM. IF IT IS NECESSARY TO PERFORM S/390 OR z/Arch DAT    */
-/*        THEN IT WILL BE NECESSARY TO PERFORM ARCH_DEP AUTO INCLUSION             */
-/*        AND THE NECESSARY ROUTINES WILL BE AUTOMATICALLY DEFINED                 */
-
-static int s390_translate_addr (U32 vaddr, int arn, REGS *regs,
-               int acctype, RADR *raddr, U16 *xcode, int *priv,
-               int *prot, int *pstid)
-{
-    abort();
-    UNREFERENCED(vaddr);
-    UNREFERENCED(arn);
-    UNREFERENCED(regs);
-    UNREFERENCED(acctype);
-    UNREFERENCED(raddr);
-    UNREFERENCED(xcode);
-    UNREFERENCED(priv);
-    UNREFERENCED(prot);
-    UNREFERENCED(pstid);
-    return(0);
-}
-static int z900_translate_addr (U64 vaddr, int arn, REGS *regs,
-               int acctype, RADR *raddr, U16 *xcode, int *priv,
-               int *prot, int *pstid)
-{
-    abort();
-    UNREFERENCED(vaddr);
-    UNREFERENCED(arn);
-    UNREFERENCED(regs);
-    UNREFERENCED(acctype);
-    UNREFERENCED(raddr);
-    UNREFERENCED(xcode);
-    UNREFERENCED(priv);
-    UNREFERENCED(prot);
-    UNREFERENCED(pstid);
-    return(0);
-}
-
 
 #endif /* ifdef FEATURE_ECPSVM */
+
+/* Note : The following forces inclusion for S/390 & z/ARCH */
+/*        This is necessary just in order to properly define */
+/*        S/390 auxialiary routines invoked by S/370 routines */
+/*        because of SIE                                     */
+
+#if !defined(_GEN_ARCH)
+
+#if defined(_ARCHMODE2)
+ #define  _GEN_ARCH _ARCHMODE2
+ #include "ecpsvm.c"
+#endif
+
+#if defined(_ARCHMODE3)
+ #undef   _GEN_ARCH
+ #define  _GEN_ARCH _ARCHMODE3
+ #include "ecpsvm.c"
+#endif
+
+#endif /*!defined(_GEN_ARCH)*/

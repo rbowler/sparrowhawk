@@ -1,4 +1,4 @@
-/* DIAGNOSE.C   (c) Copyright Roger Bowler, 2000-2003                */
+/* DIAGNOSE.C   (c) Copyright Roger Bowler, 2000-2004                */
 /*              ESA/390 Diagnose Functions                           */
 
 /*-------------------------------------------------------------------*/
@@ -9,7 +9,7 @@
 /* Additional credits:                                               */
 /*      Hercules-specific diagnose calls by Jay Maynard.             */
 /*      Set/reset bad frame indicator call by Jan Jaeger.            */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -25,7 +25,6 @@
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
 /*-------------------------------------------------------------------*/
-#define SPACE   ((BYTE)' ')
 
 #endif /*!defined(_DIAGNOSE_H)*/
 
@@ -33,7 +32,7 @@
 
 void ARCH_DEP(diagf14_call)(int r1, int r3, REGS *regs)
 {
-BYTE name[32+1];
+char name[32+1];
 char entry[64];
 unsigned int  i;
 void (*dllcall)(int, int, REGS *);
@@ -115,7 +114,7 @@ U32   code;
             ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
         regs->cpustate = CPUSTATE_STOPPING;
-        ON_IC_CPU_NOT_STARTED(regs);
+        ON_IC_INTERRUPT(regs);
 
         /* Release the configuration */
         release_config();
@@ -308,7 +307,7 @@ U32   code;
     /* Diagnose F04: Hercules single step mode                       */
     /*---------------------------------------------------------------*/
         sysblk.inststep = 1;
-        ON_IC_TRACE;
+        SET_IC_TRACE;
         break;
 
     case 0xF08:
@@ -346,7 +345,7 @@ U32   code;
     /* Diagnose F10: Hercules CPU stop                               */
     /*---------------------------------------------------------------*/
         regs->cpustate = CPUSTATE_STOPPING;
-        ON_IC_CPU_NOT_STARTED(regs);
+        ON_IC_INTERRUPT(regs);
         break;
 
 #if defined(OPTION_DYNAMIC_LOAD)
@@ -400,7 +399,7 @@ U32   code;
     /*---------------------------------------------------------------*/
     /* Diagnose FFC: Simulate Wait                                   */
     /*---------------------------------------------------------------*/
-        sleep(300);
+        SLEEP(300);
         break;
 #endif /*!defined(NO_SIGABEND_HANDLER)*/
 
@@ -432,7 +431,7 @@ U32   code;
         if (0x0000FFFF == ARCH_DEP(vfetch4)(effective_addr2, b2, regs))
         {
             regs->cpustate = CPUSTATE_STOPPING;
-            ON_IC_CPU_NOT_STARTED(regs);
+            ON_IC_INTERRUPT(regs);
 
             /* Release the configuration */
             release_config();

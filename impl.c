@@ -1,4 +1,4 @@
-/* IMPL.C       (c) Copyright Roger Bowler, 1999-2003                */
+/* IMPL.C       (c) Copyright Roger Bowler, 1999-2004                */
 /*              Hercules Initialization Module                       */
 
 /*-------------------------------------------------------------------*/
@@ -14,6 +14,8 @@
 #include "devtype.h"
 #include "herc_getopt.h"
 #include "httpmisc.h"
+#include "hostinfo.h"
+#include "history.h"
 
 #if defined(FISH_HANG)
 extern  int   bFishHangAtExit;  // (set to true when shutting down)
@@ -40,7 +42,7 @@ static void sigint_handler (int signo)
 
     signal(SIGINT, sigint_handler);
     /* Ignore signal unless presented on console thread */
-    if (thread_id() != sysblk.cnsltid)
+    if ( !equal_threads( thread_id(), sysblk.cnsltid ) )
         return;
 
     /* Exit if previous SIGINT request was not actioned */
@@ -56,7 +58,7 @@ static void sigint_handler (int signo)
 
     /* Activate instruction stepping */
     sysblk.inststep = 1;
-    ON_IC_TRACE;
+    SET_IC_TRACE;
     return;
 } /* end function sigint_handler */
 
@@ -77,43 +79,41 @@ int i;
         setpriority(PRIO_PROCESS, 0, sysblk.cpuprio+1);
 #endif
 
-    while(1)
+    for (i = 0; i < MAX_CPU_ENGINES; i ++) savecount[i] = -1;
+
+    while(!sysblk.shutdown)
     {
-#ifdef FEATURE_CPU_RECONFIG
-        for (i = 0; i < MAX_CPU_ENGINES; i++)
-#else /*!FEATURE_CPU_RECONFIG*/
-        for (i = 0; i < sysblk.numcpu; i++)
-#endif /*!FEATURE_CPU_RECONFIG*/
+        for (i = 0; i < MAX_CPU; i++)
         {
-            if(sysblk.regs[i].cpustate == CPUSTATE_STARTED
-              && (!sysblk.regs[i].psw.wait
+//          obtain_lock (&sysblk.cpulock[i]);
+            if (IS_CPU_ONLINE(i)
+             && sysblk.regs[i]->cpustate == CPUSTATE_STARTED
+             && (!WAITSTATE(&sysblk.regs[i]->psw)
 #if defined(_FEATURE_WAITSTATE_ASSIST)
-              && !(sysblk.regs[i].sie_state && sysblk.regs[i].guestregs->psw.wait)
+             && !(sysblk.regs[i]->sie_active && WAITSTATE(&sysblk.regs[i]->guestregs->psw))
 #endif
                                            ))
             {
                 /* If the cpu is running but not executing
                    instructions then it must be malfunctioning */
-                if(sysblk.regs[i].instcount == (U64)savecount[i])
+                if((sysblk.regs[i]->instcount == (U64)savecount[i])
+                  && !HDC(debug_watchdog_signal, sysblk.regs[i]) )
                 {
-                    if(!try_obtain_lock(&sysblk.intlock))
-                    {
-                        /* Send signal to looping CPU */
-                        signal_thread(sysblk.regs[i].cputid, SIGUSR1);
-                        savecount[i] = -1;
-                        release_lock(&sysblk.intlock);
-                    }
+                    /* Send signal to looping CPU */
+                    signal_thread(sysblk.cputid[i], SIGUSR1);
+                    savecount[i] = -1;
                 }
                 else
                     /* Save current instcount */
-                    savecount[i] = sysblk.regs[i].instcount;
+                    savecount[i] = sysblk.regs[i]->instcount;
             }
             else
                 /* mark savecount invalid as CPU not in running state */
                 savecount[i] = -1;
+//          release_lock (&sysblk.cpulock[i]);
         }
         /* Sleep for 20 seconds */
-        sleep(20);
+        SLEEP(20);
     }
 
     return NULL;
@@ -127,7 +127,7 @@ int i;
 
 void* process_rc_file (void* dummy)
 {
-BYTE   *rcname;                         /* hercules.rc name pointer  */
+char   *rcname;                         /* hercules.rc name pointer  */
 
     UNREFERENCED(dummy);
 
@@ -150,7 +150,7 @@ BYTE   *rcname;                         /* hercules.rc name pointer  */
 static int daemon_mode = 0;
 int impl(int argc, char *argv[])
 {
-BYTE   *cfgfile;                        /* -> Configuration filename */
+char   *cfgfile;                        /* -> Configuration filename */
 int     c;                              /* Work area for getopt      */
 int     arg_error = 0;                  /* 1=Invalid arguments       */
 char   *msgbuf;                         /*                           */
@@ -299,6 +299,18 @@ TID     rctid;                          /* RC file thread identifier */
                 strerror(errno));
     }
 
+#if defined( OPTION_WAKEUP_SELECT_VIA_PIPE )
+    {
+        int fds[2];
+        pipe(fds);
+        sysblk.cnslwpipe=fds[1];
+        sysblk.cnslrpipe=fds[0];
+        pipe(fds);
+        sysblk.sockwpipe=fds[1];
+        sysblk.sockrpipe=fds[0];
+    }
+#endif
+
 #if !defined(NO_SIGABEND_HANDLER)
     {
     struct sigaction sa;
@@ -426,10 +438,10 @@ void system_shutdown (void)
                  it would be better to call a synchronous termination
                  routine, which only returns when the shutdown of
                  the function in question has been completed */
-                 
-    sysblk.shutdown = 1;
 
+    sysblk.shutdown = 1;
     release_config();
+    usleep(50000);
 
     /* Call all termination routines in LIFO order */
     hdl_shut();

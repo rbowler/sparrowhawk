@@ -1,4 +1,4 @@
-/* HDLMAIN.C    (c) Copyright Jan Jaeger, 2003                       */
+/* HDLMAIN.C    (c) Copyright Jan Jaeger, 2003-2004                  */
 /*              Hercules Dynamic Loader                              */
 
 
@@ -16,13 +16,13 @@
 #if defined(_ARCHMODE2)
  #define  _GEN_ARCH _ARCHMODE2
  #include "hdlmain.c"
-#endif 
+#endif
 
 #if defined(_ARCHMODE3)
  #undef   _GEN_ARCH
  #define  _GEN_ARCH _ARCHMODE3
  #include "hdlmain.c"
-#endif 
+#endif
 
 
 #if defined(OPTION_DYNAMIC_LOAD)
@@ -43,6 +43,7 @@ HDLPRE hdl_preload[] = {
     { NULL,             0  } };
 */
 
+
 HDL_DEPENDENCY_SECTION;
 {
      HDL_DEPENDENCY(HERCULES);
@@ -56,6 +57,7 @@ END_DEPENDENCY_SECTION;
 
 HDL_REGISTER_SECTION;
 {
+    HDL_REGISTER( parse_args,                 parse_args      );
     HDL_REGISTER( panel_command,              panel_command_r );
     HDL_REGISTER( panel_display,              panel_display_r );
     HDL_REGISTER( config_command,             UNRESOLVED      );
@@ -69,6 +71,7 @@ HDL_REGISTER_SECTION;
     HDL_REGISTER( debug_sclp_unknown_event,   UNRESOLVED      );
     HDL_REGISTER( debug_sclp_event_data,      UNRESOLVED      );
     HDL_REGISTER( debug_chsc_unknown_request, UNRESOLVED      );
+    HDL_REGISTER( debug_watchdog_signal,      UNRESOLVED      );
 #if defined(OPTION_W32_CTCI)
     HDL_REGISTER( debug_tt32_stats,           UNRESOLVED      );
 #endif
@@ -182,7 +185,7 @@ HDL_DEVICE_SECTION;
     HDL_DEVICE(3422, tapedev_device_hndinfo );
     HDL_DEVICE(3430, tapedev_device_hndinfo );
 
-#if !defined(__APPLE__)
+//#if !defined(__APPLE__)
     /* Communications devices */
     HDL_DEVICE(3088, ctcadpt_device_hndinfo );
     HDL_DEVICE(CTCI, ctci_device_hndinfo    );
@@ -192,7 +195,7 @@ HDL_DEVICE_SECTION;
     HDL_DEVICE(CTCT, ctct_device_hndinfo    );
     HDL_DEVICE(LCS,  lcs_device_hndinfo     );
     HDL_DEVICE(VMNET,vmnet_device_hndinfo   );
-#endif /* !defined(__APPLE__) */
+//#endif /* !defined(__APPLE__) */
 
 #endif /*!defined(OPTION_DYNAMIC_LOAD)*/
 

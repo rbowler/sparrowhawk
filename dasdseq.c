@@ -1,5 +1,5 @@
-/* Code borrowed from dasdpdsu Copyright 1999-2003 Roger Bowler      */
-/* Changes and additions Copyright 2001-2003, James M. Morrison      */
+/* Code borrowed from dasdpdsu Copyright 1999-2004 Roger Bowler      */
+/* Changes and additions Copyright 2001-2004, James M. Morrison      */
 
 /*-------------------------------------------------------------------*/
 /*                                                                   */
@@ -106,14 +106,14 @@ void showf1(    FILE            *fmsg,
                 int             verbose) {
 
         int     i, dsorg, lrecl, blksize, volseq, x, y, num_extents;
-        BYTE    volser[sizeof(f1dscb->ds1dssn) + 1];
-        BYTE    dsn[sizeof(f1dscb->ds1dsnam) + 1];
-        BYTE    txtcredt[9];                            // creation date
-        BYTE    txtexpdt[9] = "(n/a)";                  // expiration date
-        BYTE    txtscr[20];
-        BYTE    txtsyscd[14];
-        BYTE    txtdsorg[5] = "";                       // dsorg text
-        BYTE    txtrecfm[5] = "";                       // recfm text
+        char    volser[sizeof(f1dscb->ds1dssn) + 1];
+        char    dsn[sizeof(f1dscb->ds1dsnam) + 1];
+        char    txtcredt[9];                            // creation date
+        char    txtexpdt[9] = "(n/a)";                  // expiration date
+        char    txtscr[20];
+        char    txtsyscd[14];
+        char    txtdsorg[5] = "";                       // dsorg text
+        char    txtrecfm[5] = "";                       // recfm text
 
     if (verbose > 2) {
         fprintf(fmsg, "showf1 F1 DSCB\n");
@@ -239,8 +239,9 @@ int fbcopy(     FILE            *fout,
         int     rc_copy = 0;
         int     recs_written = 0, lrecl, num_extents;
         int     lstartrack = 0, lstarrec = 0, lstarvalid = 0;
-        BYTE    *buffer, *pascii = NULL;
-        BYTE    zdsn[sizeof(f1dscb->ds1dsnam) + 1];     // ascii dsn
+        BYTE    *buffer;
+        char    *pascii = NULL;
+        char    zdsn[sizeof(f1dscb->ds1dsnam) + 1];     // ascii dsn
 
     // Kludge to avoid rewriting this code (for now):
     memcpy(&extent, (void *)&(dadsm->f1ext), sizeof(extent));
@@ -678,7 +679,7 @@ int getlabel(
         void    *plabel;
 
     if (verbose) fprintf(stderr, "getlabel reading volume label\n");
-    rc = read_block(cif, 0, 0, 3, NULL, NULL, (BYTE **) &plabel, &len);
+    rc = read_block(cif, 0, 0, 3, NULL, NULL, (void *) &plabel, &len);
     if (rc) {
         fprintf(stderr, "getlabel error reading volume label, rc %d\n", rc);
         return 1;
@@ -746,7 +747,7 @@ int getF4dscb(
 
     if (verbose)
         fprintf(stderr, "getF4dscb reading VTOC F4 DSCB\n");
-    rc = read_block(cif, cyl, head, rec, (BYTE **) &f4key, &f4kl, (BYTE **) &f4data, &f4dl);
+    rc = read_block(cif, cyl, head, rec, (void *) &f4key, &f4kl, (void *) &f4data, &f4dl);
     if (rc) {
         fprintf(stderr, "getF4dscb error reading F4 DSCB, rc %d\n", rc);
         return 1;
@@ -834,7 +835,7 @@ int getF1dscb(
                 DSXTENT         *vtocext[],
                 int             verbose) {
 
-        BYTE    zdsn[sizeof(f1dscb->ds1dsnam) + 1];     // zASCII dsn
+        char    zdsn[sizeof(f1dscb->ds1dsnam) + 1];     // zASCII dsn
         BYTE    edsn[sizeof(f1dscb->ds1dsnam)];         // EBCDIC dsn
         void    *f1key, *f1data;
         int     f1kl, f1dl;
@@ -868,8 +869,8 @@ int getF1dscb(
     if (verbose)
         fprintf(stderr, "getF1dscb reading F1 DSCB\n");
     rc = read_block(cif, cyl, head, rec, 
-                (BYTE **)&f1key, &f1kl, 
-                (BYTE **) &f1data, &f1dl);
+                (void *)&f1key, &f1kl, 
+                (void *) &f1data, &f1dl);
     if (rc) {
         fprintf(stderr, "getF1dscb error reading F1 DSCB, rc %d\n", rc);
         return 2;
@@ -958,8 +959,8 @@ int getF3dscb(
         fprintf(stderr, "getF3dscb reading F3 DSCB "
                 "cyl %d head %d rec %d\n", cyl, head, rec);
     rc = read_block (cif, cyl, head, rec, 
-                (BYTE **)&f3key, &f3kl, 
-                (BYTE **)&f3data, &f3dl);
+                (void *)&f3key, &f3kl, 
+                (void *)&f3data, &f3dl);
     if (rc) {
         fprintf(stderr, 
                 "getF3dscb error reading F3 DSCB, rc %d\n", rc);
@@ -1100,8 +1101,8 @@ int main(int argc, char **argv) {
         CIFBLK          *cif;
         int             dsn_recs_written = 0, bail, dsorg, rc;
 
-    fprintf(stderr, "dasdseq %s Copyright 1999-2003 Roger Bowler\n"
-        "Portions Copyright 2001-2003 James M. Morrison\n", VERSION);
+    fprintf(stderr, "dasdseq %s Copyright 1999-2004 Roger Bowler\n"
+        "Portions Copyright 2001-2004 James M. Morrison\n", VERSION);
     if (debug) fprintf(stderr, "DEBUG enabled\n");
 
 //  Parse command line

@@ -2,14 +2,14 @@
 // Hercules IP Channel-to-Channel Support (CTCI)
 // ====================================================================
 //
-// Copyright    (C) Copyright James A. Pierson, 2002-2003
-//              (C) Copyright "Fish" (David B. Trout), 2002-2003
-//              (C) Copyright Roger Bowler, 2000-2003
+// Copyright    (C) Copyright James A. Pierson, 2002-2004
+//              (C) Copyright "Fish" (David B. Trout), 2002-2004
+//              (C) Copyright Roger Bowler, 2000-2004
 //
-// linux 2.4 modifications (c) Copyright Fritz Elfert, 2001-2003
+// linux 2.4 modifications (c) Copyright Fritz Elfert, 2001-2004
 //
 
-#if !defined(__APPLE__)
+//#if !defined(__APPLE__)
 
 #include "hercules.h"
 #include "devtype.h"
@@ -27,6 +27,37 @@
 /* getopt dynamic linking kludge */
 #include "herc_getopt.h"
 
+/*-------------------------------------------------------------------*/
+/* Ivan Warren 20040227                                              */
+/* This table is used by channel.c to determine if a CCW code is an  */
+/* immediate command or not                                          */
+/* The tape is addressed in the DEVHND structure as 'DEVIMM immed'   */
+/* 0 : Command is NOT an immediate command                           */
+/* 1 : Command is an immediate command                               */
+/* Note : An immediate command is defined as a command which returns */
+/* CE (channel end) during initialisation (that is, no data is       */
+/* actually transfered. In this case, IL is not indicated for a CCW  */
+/* Format 0 or for a CCW Format 1 when IL Suppression Mode is in     */
+/* effect                                                            */
+/*-------------------------------------------------------------------*/
+
+static BYTE CTCI_Immed_Commands[256]=
+{ 0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
 // ====================================================================
 // Declarations
@@ -46,11 +77,24 @@ static int      ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
 
 DEVHND ctci_device_hndinfo =
 {
-    &CTCI_Init,
-    &CTCI_ExecuteCCW,
-    &CTCI_Close,
-    &CTCI_Query,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+        &CTCI_Init,                    /* Device Initialisation      */
+        &CTCI_ExecuteCCW,              /* Device CCW execute         */
+        &CTCI_Close,                   /* Device Close               */
+        &CTCI_Query,                   /* Device Query               */
+        NULL,                          /* Device Start channel pgm   */
+        NULL,                          /* Device End channel pgm     */
+        NULL,                          /* Device Resume channel pgm  */
+        NULL,                          /* Device Suspend channel pgm */
+        NULL,                          /* Device Read                */
+        NULL,                          /* Device Write               */
+        NULL,                          /* Device Query used          */
+        NULL,                          /* Device Reserve             */
+        NULL,                          /* Device Release             */
+        CTCI_Immed_Commands,           /* Immediate CCW Codes        */
+        NULL,                          /* Signal Adapter Input       */
+        NULL,                          /* Signal Adapter Output      */
+        NULL,                          /* Hercules suspend           */
+        NULL                           /* Hercules resume            */
 };
 
 // ====================================================================
@@ -61,14 +105,44 @@ DEVHND ctci_device_hndinfo =
 // CTCI_Init
 //
 
-int  CTCI_Init( DEVBLK* pDEVBLK, int argc, BYTE *argv[] )
+#define CTC_DEVICES_IN_GROUP   2  // a read and write device
+
+int  CTCI_Init( DEVBLK* pDEVBLK, int argc, char *argv[] )
 {
     PCTCBLK         pWrkCTCBLK = NULL;  // Working CTCBLK
     PCTCBLK         pDevCTCBLK = NULL;  // Device  CTCBLK
-    DEVBLK*         pDEVBLK2 = NULL;    // Paired  DEVBLK
     int             rc = 0;             // Return code
+    int             nIFType;            // Interface type
+    int             nIFFlags;           // Interface flags
+
+    nIFType =               // Interface type
+        0
+        | IFF_TUN           // ("TUN", not "tap")
+        | IFF_NO_PI         // (no packet info)
+        ;
+
+    // ZZ FIXME: Technically, IFF_RUNNING should NOT be set by the user.
+    //           Only the interface itself should set IFF_RUNNING when-
+    //           ever it is successfully created/initialized (i.e. is
+    //           operational). Once it's operational (running), then it
+    //           may be enabled via IFF_UP. If it's not in IFF_RUNNING
+    //           state however, then IFF_UP cannot be set because the
+    //           interface is technically "broken" (not operational),
+    //           and non-operational (non-working) interfaces cannot be
+    //           enabled.  --  Fish, June 2004.
+
+    nIFFlags =              // Interface flags
+        0
+        | IFF_UP            // (interface has been enabled)
+        | IFF_RUNNING       // (interface is operational)
+        | IFF_BROADCAST     // (interface broadcast addr is valid)
+        ;
 
     pDEVBLK->devtype = 0x3088;
+
+    // CTC is a group device
+    if(!group_device(pDEVBLK, CTC_DEVICES_IN_GROUP))
+        return 0;
 
     // Housekeeping
     pWrkCTCBLK = malloc( sizeof( CTCBLK ) );
@@ -89,152 +163,173 @@ int  CTCI_Init( DEVBLK* pDEVBLK, int argc, BYTE *argv[] )
         return -1;
     }
 
-    if( !pWrkCTCBLK->fOldFormat )
+    // Allocate the device CTCBLK and copy parsed information.
+
+    pDevCTCBLK = malloc( sizeof( CTCBLK ) );
+
+    if( !pDevCTCBLK )
     {
-        // Allocate the device CTCBLK and copy parsed information.
+        logmsg( _("HHCCT038E %4.4X: Unable to allocate CTCBLK\n"),
+                pDEVBLK->devnum );
+        free( pWrkCTCBLK );
+        return -1;
+    }
 
-        pDevCTCBLK = malloc( sizeof( CTCBLK ) );
+    memcpy( pDevCTCBLK, pWrkCTCBLK, sizeof( CTCBLK ) );
 
-        if( !pDevCTCBLK )
-        {
-            logmsg( _("HHCCT038E %4.4X: Unable to allocate CTCBLK\n"),
-                    pDEVBLK->devnum );
-            free( pWrkCTCBLK );
-            return -1;
-        }
+    // New format has only one device statement for both addresses
+    // We need to dynamically allocate the read device block
 
-        memcpy( pDevCTCBLK, pWrkCTCBLK, sizeof( CTCBLK ) );
+    pDevCTCBLK->pDEVBLK[0] = pDEVBLK->group->memdev[0];
+    pDevCTCBLK->pDEVBLK[1] = pDEVBLK->group->memdev[1];
 
-        // New format has only one device statement for both addresses
-        // We need to dynamically allocate the read device block
+    pDevCTCBLK->pDEVBLK[0]->dev_data = pDevCTCBLK;
+    pDevCTCBLK->pDEVBLK[1]->dev_data = pDevCTCBLK;
 
-        pDevCTCBLK->pDEVBLK[0] = NULL;
-        pDevCTCBLK->pDEVBLK[1] = pDEVBLK;
+    SetSIDInfo( pDevCTCBLK->pDEVBLK[0], 0x3088, 0x08, 0x3088, 0x01 );
+    SetSIDInfo( pDevCTCBLK->pDEVBLK[1], 0x3088, 0x08, 0x3088, 0x01 );
 
-        AddDevice( &pDevCTCBLK->pDEVBLK[0], pDEVBLK->devnum,
-                   pDEVBLK );
+    pDevCTCBLK->pDEVBLK[0]->ctctype  = CTC_CTCI;
+    pDevCTCBLK->pDEVBLK[0]->ctcxmode = 1;
 
-        AddDevice( &pDevCTCBLK->pDEVBLK[1], pDEVBLK->devnum + 1,
-                   pDEVBLK );
+    pDevCTCBLK->pDEVBLK[1]->ctctype  = CTC_CTCI;
+    pDevCTCBLK->pDEVBLK[1]->ctcxmode = 1;
 
-        pDevCTCBLK->pDEVBLK[0]->dev_data = pDevCTCBLK;
-        pDevCTCBLK->pDEVBLK[1]->dev_data = pDevCTCBLK;
+    pDevCTCBLK->sMTU                = atoi( pDevCTCBLK->szMTU );
+    pDevCTCBLK->iMaxFrameBufferSize = pDevCTCBLK->sMTU + sizeof( IP4FRM );
 
-        SetSIDInfo( pDevCTCBLK->pDEVBLK[0], 0x3088, 0x08, 0x3088, 0x01 );
-        SetSIDInfo( pDevCTCBLK->pDEVBLK[1], 0x3088, 0x08, 0x3088, 0x01 );
+    initialize_lock( &pDevCTCBLK->Lock );
+    initialize_lock( &pDevCTCBLK->EventLock );
+    initialize_condition( &pDevCTCBLK->Event );
 
-        pDevCTCBLK->pDEVBLK[0]->ctctype  = CTC_CTCI;
-        pDevCTCBLK->pDEVBLK[0]->ctcxmode = 1;
+    // Give both Herc devices a reasonable name...
 
-        pDevCTCBLK->pDEVBLK[1]->ctctype  = CTC_CTCI;
-        pDevCTCBLK->pDEVBLK[1]->ctcxmode = 1;
+    strlcpy( pDevCTCBLK->pDEVBLK[0]->filename,
+             pDevCTCBLK->szTUNCharName,
+     sizeof( pDevCTCBLK->pDEVBLK[0]->filename ) );
 
-        pDEVBLK2 = pDEVBLK;
+    strlcpy( pDevCTCBLK->pDEVBLK[1]->filename,
+             pDevCTCBLK->szTUNCharName,
+     sizeof( pDevCTCBLK->pDEVBLK[1]->filename ) );
+
+    rc = TUNTAP_CreateInterface( pDevCTCBLK->szTUNCharName,
+                                 IFF_TUN | IFF_NO_PI,
+                                 &pDevCTCBLK->fd,
+                                 pDevCTCBLK->szTUNDevName );
+
+    if( rc < 0 )
+    {
+        free( pWrkCTCBLK );
+        return -1;
     }
     else
     {
-        // Old format has paired device statements
-        // Find device block for paired CTC adapter device number
-        pDEVBLK2 = find_device_by_devnum( pDEVBLK->devnum ^ 0x01 );
-
-        // First pass through?
-        if( !pDEVBLK2 )
-        {
-            // Allocate the CTCBLK
-            pDevCTCBLK = malloc( sizeof( CTCBLK ) );
-
-            if( !pDevCTCBLK )
-            {
-                logmsg( _("HHCCT039E %4.4X: Unable to allocate CTCBLK\n"),
-                        pDEVBLK->devnum );
-                free( pWrkCTCBLK );
-                return -1;
-            }
-
-            memcpy( pDevCTCBLK, pWrkCTCBLK, sizeof( CTCBLK ) );
-
-            pDEVBLK->dev_data = pDevCTCBLK;
-
-            pDevCTCBLK->pDEVBLK[0] = pDEVBLK;
-        }
-        else
-        {
-            // Use CTCBLK from the paired DEVBLK
-            pDevCTCBLK = (PCTCBLK)pDEVBLK2->dev_data;
-
-            pDEVBLK->dev_data  = pDevCTCBLK;
-
-            pDevCTCBLK->pDEVBLK[1] = pDEVBLK;
-        }
-
-        // Update SENSEID information
-        SetSIDInfo( pDEVBLK, 0x3088, 0x08, 0x3088, 0x01 );
-
-        pDEVBLK->ctctype             = CTC_CTCI;
-        pDEVBLK->ctcxmode            = 1;
+        logmsg(_("HHCCT073I %4.4X: TUN device %s opened\n"),
+                  pDevCTCBLK->pDEVBLK[0]->devnum,
+                  pDevCTCBLK->szTUNDevName);
     }
 
-    if( pDEVBLK2 )
+#if !defined(__APPLE__)
+    if( !pDevCTCBLK->szMACAddress[0] )   // (if MAC address unspecified)
     {
-        // pDEVBLK2 is non-null if:
-        //   Old format and this is the 2nd pass or
-        //   New format unconditionally
+        // Build a default MAC addr based on the guest (destination) ip
+        // address so as to effectively *UNOFFICIALLY* assign ourselves
+        // the following Ethernet address block:
 
-        pDevCTCBLK->sMTU                = atoi( pDevCTCBLK->szMTU );
-        pDevCTCBLK->iMaxFrameBufferSize = pDevCTCBLK->sMTU + sizeof( IP4FRM );
+        /* (from: http://www.iana.org/assignments/ethernet-numbers)
+           (only the first 2 and last 2 paragraphs are of interest)
 
-        initialize_lock( &pDevCTCBLK->Lock );
-        initialize_lock( &pDevCTCBLK->EventLock );
-        initialize_condition( &pDevCTCBLK->Event );
+            IANA ETHERNET ADDRESS BLOCK - UNICAST USE
 
-        // Give both Herc devices a reasonable name...
+            The IANA owns an Ethernet address block which may be used for
+            unicast address asignments or other special purposes.
 
-        strlcpy( pDevCTCBLK->pDEVBLK[0]->filename,
-                 pDevCTCBLK->szTUNCharName,
-         sizeof( pDevCTCBLK->pDEVBLK[0]->filename ) );
+            The IANA may assign unicast global IEEE 802 MAC address from it's
+            assigned OUI (00-00-5E) for use in IETF standard track protocols.  The
+            intended usage is for dynamic mapping between IP addresses and IEEE
+            802 MAC addresses.  These IEEE 802 MAC addresses are not to be
+            permanently assigned to any hardware interface, nor is this a
+            substitute for a network equipment supplier getting its own OUI.
 
-        strlcpy( pDevCTCBLK->pDEVBLK[1]->filename,
-                 pDevCTCBLK->szTUNCharName,
-         sizeof( pDevCTCBLK->pDEVBLK[1]->filename ) );
+            ... (snipped)
 
-        rc = TUNTAP_CreateInterface( pDevCTCBLK->szTUNCharName,
-                                     IFF_TUN | IFF_NO_PI,
-                                     &pDevCTCBLK->fd,
-                                     pDevCTCBLK->szTUNDevName );
+            Using this representation, the range of Internet Unicast addresses is:
 
-        if( rc < 0 )
+                   00-00-5E-00-00-00  to  00-00-5E-FF-FF-FF  in hex, ...
+
+            ... (snipped)
+
+            The low order 24 bits of these unicast addresses are assigned as
+            follows:
+
+            Dotted Decimal          Description                     Reference
+            ----------------------- ------------------------------- ---------
+            000.000.000-000.000.255 Reserved                        [IANA]
+            000.001.000-000.001.255 Virual Router Redundancy (VRRP) [Hinden]
+            000.002.000-127.255.255 Reserved                        [IANA]
+            128.000.000-255.255.255 Hercules TUNTAP (CTCI)          [Fish]
+        */
+
+        // Here's what we're basically doing:
+
+        //    00-00-5E-00-00-00  to  00-00-5E-00-00-FF  =  'Reserved' by IANA
+        //    00-00-5E-00-01-00  to  00-00-5E-00-01-FF  =  'VRRP' by Hinden
+        //    00-00-5E-00-02-00  to  00-00-5E-7F-FF-FF  =  (unassigned)
+        //    00-00-5E-80-00-00  to  00-00-5E-FF-FF-FF  =  'Hercules' by Fish
+
+        //    00-00-5E-00-00-00   (starting value)
+        //    00-00-5E-ip-ip-ip   (move in low-order 3 bytes of destination IP address)
+        //    00-00-5E-8p-ip-ip   ('OR' on the x'80' high-order bit)
+
+        in_addr_t  wrk_guest_ip_addr;
+
+        if ((in_addr_t)-1 != (wrk_guest_ip_addr = inet_addr( pDevCTCBLK->szGuestIPAddr )))
         {
-            free( pWrkCTCBLK );
-            return -1;
+            *(((BYTE*)&wrk_guest_ip_addr) + sizeof(wrk_guest_ip_addr) - 3 ) |= 0x80;
+
+            snprintf
+            (
+                pDevCTCBLK->szMACAddress,  sizeof( pDevCTCBLK->szMACAddress ),
+
+                "00:00:5E:%2.2X:%2.2X:%2.2X"
+
+                ,*(((BYTE*)&wrk_guest_ip_addr) + sizeof(wrk_guest_ip_addr) - 3 )
+                ,*(((BYTE*)&wrk_guest_ip_addr) + sizeof(wrk_guest_ip_addr) - 2 )
+                ,*(((BYTE*)&wrk_guest_ip_addr) + sizeof(wrk_guest_ip_addr) - 1 )
+            );
         }
-
-        TUNTAP_SetIPAddr  ( pDevCTCBLK->szTUNDevName,
-                            pDevCTCBLK->szDriveIPAddr );
-
-        TUNTAP_SetDestAddr( pDevCTCBLK->szTUNDevName,
-                            pDevCTCBLK->szGuestIPAddr );
-
-        TUNTAP_SetNetMask ( pDevCTCBLK->szTUNDevName,
-                            pDevCTCBLK->szNetMask );
-
-        TUNTAP_SetMTU     ( pDevCTCBLK->szTUNDevName,
-                            pDevCTCBLK->szMTU );
-
-#if defined( WIN32 )
-        if( pDevCTCBLK->szMACAddress[0] != '\0' )
-            TUNTAP_SetMACAddr( pDevCTCBLK->szTUNDevName,
-                               pDevCTCBLK->szMACAddress );
-#endif
-
-        TUNTAP_SetFlags   ( pDevCTCBLK->szTUNDevName,
-                            IFF_UP | IFF_RUNNING | IFF_BROADCAST );
-
-        // Copy the fd to make panel.c happy
-        pDevCTCBLK->pDEVBLK[0]->fd =
-        pDevCTCBLK->pDEVBLK[1]->fd = pDevCTCBLK->fd;
-
-        create_thread( &pDevCTCBLK->tid, NULL, CTCI_ReadThread, pDevCTCBLK );
     }
+
+    TRACE
+    (
+        "** CTCI_Init: %4.4X (%s): IP %s  -->  default MAC %s\n"
+
+        ,pDevCTCBLK->pDEVBLK[0]->devnum
+        ,pDevCTCBLK->szTUNDevName
+        ,pDevCTCBLK->szGuestIPAddr
+        ,pDevCTCBLK->szMACAddress
+    );
+
+    VERIFY( TUNTAP_SetMACAddr ( pDevCTCBLK->szTUNDevName, pDevCTCBLK->szMACAddress  ) == 0 );
+#endif /*!defined(__APPLE__) */
+
+    VERIFY( TUNTAP_SetIPAddr  ( pDevCTCBLK->szTUNDevName, pDevCTCBLK->szDriveIPAddr ) == 0 );
+
+    VERIFY( TUNTAP_SetDestAddr( pDevCTCBLK->szTUNDevName, pDevCTCBLK->szGuestIPAddr ) == 0 );
+
+#if !defined(__APPLE__)
+    VERIFY( TUNTAP_SetNetMask ( pDevCTCBLK->szTUNDevName, pDevCTCBLK->szNetMask     ) == 0 );
+#endif /* !defined(__APPLE__) */
+
+    VERIFY( TUNTAP_SetMTU     ( pDevCTCBLK->szTUNDevName, pDevCTCBLK->szMTU         ) == 0 );
+
+    VERIFY( TUNTAP_SetFlags   ( pDevCTCBLK->szTUNDevName, nIFFlags                  ) == 0 );
+
+    // Copy the fd to make panel.c happy
+    pDevCTCBLK->pDEVBLK[0]->fd =
+    pDevCTCBLK->pDEVBLK[1]->fd = pDevCTCBLK->fd;
+
+    create_thread( &pDevCTCBLK->tid, NULL, CTCI_ReadThread, pDevCTCBLK );
 
     free( pWrkCTCBLK );
 
@@ -465,26 +560,23 @@ void  CTCI_ExecuteCCW( DEVBLK* pDEVBLK, BYTE  bCode,
 
 int  CTCI_Close( DEVBLK* pDEVBLK )
 {
-    DEVBLK* pDEVBLK2;
+    /* DEVBLK* pDEVBLK2; */
     PCTCBLK pCTCBLK  = (PCTCBLK)pDEVBLK->dev_data;
-
-    pDEVBLK2 = find_device_by_devnum( pDEVBLK->devnum ^ 0x01 );
 
     // Close the device file (if not already closed)
     if( pCTCBLK->fd >= 0 )
     {
         pCTCBLK->fCloseInProgress = 1;
 
-        TUNTAP_Close( pCTCBLK->fd );
+        VERIFY( TUNTAP_Close( pCTCBLK->fd ) == 0 );
 
         pCTCBLK->fd = -1;
-        pDEVBLK->fd = -1;           // indicate we're now closed
-
-        if( pDEVBLK2 )              // if paired device exists,
-            pDEVBLK2->fd = -1;      // then it's now closed too.
 
         pCTCBLK->fCloseInProgress = 0;
     }
+
+    pDEVBLK->fd = -1;           // indicate we're now closed
+
 
     return 0;
 }
@@ -494,12 +586,19 @@ int  CTCI_Close( DEVBLK* pDEVBLK )
 // CTCI_Query
 // -------------------------------------------------------------------
 
-void  CTCI_Query( DEVBLK* pDEVBLK, BYTE** ppszClass,
-                  int     iBufLen, BYTE*  pBuffer )
+void  CTCI_Query( DEVBLK* pDEVBLK, char** ppszClass,
+                  int     iBufLen, char*  pBuffer )
 {
     PCTCBLK     pCTCBLK  = (PCTCBLK)pDEVBLK->dev_data;
 
     *ppszClass = "CTCA";
+
+    if(!pCTCBLK)
+    {
+        strlcpy(pBuffer,"*Uninitialised",iBufLen);
+        return;
+    }
+
     snprintf( pBuffer, iBufLen, "CTCI %s/%s (%s)",
               pCTCBLK->szGuestIPAddr,
               pCTCBLK->szDriveIPAddr,
@@ -822,7 +921,7 @@ static void*  CTCI_ReadThread( PCTCBLK pCTCBLK )
 {
     DEVBLK*  pDEVBLK = pCTCBLK->pDEVBLK[0];
     int      iLength;
-    char     szBuff[2048];
+    BYTE     szBuff[2048];
 
     pCTCBLK->pid = getpid();
 
@@ -839,7 +938,7 @@ static void*  CTCI_ReadThread( PCTCBLK pCTCBLK )
             logmsg( _("HHCCT048E %4.4X: Error reading from %s: %s\n"),
                 pDEVBLK->devnum, pCTCBLK->szTUNDevName,
                 strerror( errno ) );
-            sleep(1);           // (purposeful long delay)
+            SLEEP(1);           // (purposeful long delay)
             continue;
         }
 
@@ -1396,4 +1495,3 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
 
     return 0;
 }
-#endif /* !defined(__APPLE__) */

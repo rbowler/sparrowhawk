@@ -1,4 +1,4 @@
-/* HTTPSERV.C   (c)Copyright Jan Jaeger, 2002-2003                   */
+/* HTTPSERV.C   (c)Copyright Jan Jaeger, 2002-2004                   */
 /*              HTTP Server                                          */
 
 /* This file contains all code required for the HTTP server,         */
@@ -29,6 +29,7 @@
 
 #include "hercules.h"
 #include "httpmisc.h"
+#include "hostinfo.h"
 
 
 #if defined(OPTION_HTTP_SERVER)
@@ -128,7 +129,7 @@ static void http_error(WEBBLK *webblk, char *err, char *header, char *info)
 {
     fprintf(webblk->hsock,"HTTP/1.0 %s\n%sConnection: close\n"
                           "Content-Type: text/html\n\n"
-                          "<HTML><HEAD><TITLE>%s</TITLE></HEAD>" 
+                          "<HTML><HEAD><TITLE>%s</TITLE></HEAD>"
                           "<BODY><H1>%s</H1><P>%s</BODY></HTML>\n\n",
                           err, header, err, err, info);
     http_exit(webblk);
@@ -202,7 +203,7 @@ static char *http_unescape(char *buffer)
             pointer++;
             continue;
         }
-    
+
         if (lownibble >= '0' && lownibble <= '9')
             lownibble = lownibble - '0';
         else if (lownibble >= 'A' && lownibble <= 'F')
@@ -214,13 +215,13 @@ static char *http_unescape(char *buffer)
             pointer++;
             continue;
         }
-                        
+
         *pointer = (highnibble<<4) | lownibble;
 
         memcpy(pointer+1, pointer+3, strlen(pointer+3)+1);
 
         pointer++;
-    } 
+    }
 
     return buffer;
 }
@@ -238,12 +239,12 @@ CGIVAR **cgivar;
          cgivar = &((*cgivar)->next));
 
     for (name = strtok_r(qstring,"&; ",&strtok_str);
-         name; 
+         name;
          name = strtok_r(NULL,"&; ",&strtok_str))
     {
         if(!(value = strchr(name,'=')))
             continue;
-                        
+
         *value++ = '\0';
 
         (*cgivar) = malloc(sizeof(CGIVAR));
@@ -319,7 +320,7 @@ static int http_authenticate(WEBBLK *webblk, char *type, char *userpass)
                 *pointer = 0;
                 user = userpass;
                 passwd = pointer+1;
-    
+
                 /* Hardcoded userid and password in configuration file */
                 if(sysblk.httpuser && sysblk.httppass)
                 {
@@ -342,9 +343,9 @@ static int http_authenticate(WEBBLK *webblk, char *type, char *userpass)
 // ZZ No password check is being performed yet...
                     if((pass = getpwnam(user))
                       &&
-                       (pass->pw_uid == 0 
+                       (pass->pw_uid == 0
                           || pass->pw_uid == getuid()))
-                    { 
+                    {
                         webblk->user = strdup(user);
                         return TRUE;
                     }
@@ -375,7 +376,7 @@ static void http_download(WEBBLK *webblk, char *filename)
 
     http_verify_path(webblk,fullname);
 
-    if(stat(fullname,&st)) 
+    if(stat(fullname,&st))
         http_error(webblk, "404 File Not Found","",
                            strerror(errno));
 
@@ -489,7 +490,7 @@ static void *http_request(FILE *hsock)
                 *pointer = fgetc(webblk->hsock);
                 if(*pointer != '\n' && *pointer != '\r')
                     pointer++;
-            } 
+            }
             *pointer = '\0';
             http_interpret_variable_string(webblk, post_arg, VARTYPE_POST);
             free(post_arg);
@@ -497,7 +498,7 @@ static void *http_request(FILE *hsock)
     }
 
     if (!authok)
-        http_error(webblk, "401 Authorization Required", 
+        http_error(webblk, "401 Authorization Required",
                            "WWW-Authenticate: Basic realm=\"HERCULES\"\n",
                            "You must be authenticated to use this service");
 
@@ -663,7 +664,7 @@ TID                     httptid;        /* Negotiation thread id     */
 
         logmsg (_("HHCHT003W Waiting for port %u to become free\n"),
                 sysblk.httpport);
-        sleep(10);
+        SLEEP(10);
     } /* end while */
 
     if (rc != 0)
@@ -692,14 +693,7 @@ TID                     httptid;        /* Negotiation thread id     */
         FD_SET (lsock, &selset);
 
         /* Wait for a file descriptor to become ready */
-#if defined(WIN32)
-    {
-        struct timeval tv={0,500000};   /* half a second */
-        rc = select ( lsock+1, &selset, NULL, NULL, &tv );
-    }
-#else /*!defined(WIN32)*/
         rc = select ( lsock+1, &selset, NULL, NULL, NULL );
-#endif /*!defined(WIN32)*/
 
         if (rc == 0) continue;
 

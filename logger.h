@@ -1,4 +1,4 @@
-/* LOGGER.H     (c) Copyright Jan Jaeger, 2003                       */
+/* LOGGER.H     (c) Copyright Jan Jaeger, 2003-2004                  */
 /*              System logger functions                              */
 
 #ifndef __LOGGER_H__
@@ -55,17 +55,19 @@ void logger_init(void);
 
 int log_read(char **buffer, int *msgindex, int block);
 int log_line(int linenumber);
+void log_sethrdcpy(char *filename);
+void log_wakeup(void *arg);
 
 /* Log routing section */
-typedef void LOG_WRITER(void *,unsigned char *);
+typedef void LOG_WRITER(void *,char *);
 typedef void LOG_CLOSER(void *);
 
 int log_open(LOG_WRITER,LOG_CLOSER,void *);
 void log_close(void);
-void log_write(int,unsigned char *,...);
+void log_write(int,char *,...);
 /* End of log routing section */
 
 /* Log routing utility */
-unsigned char *log_capture(void *(*)(void *),void *);
+char *log_capture(void *(*)(void *),void *);
 
 #endif

@@ -1,8 +1,8 @@
-/* STACK.C      (c) Copyright Roger Bowler, 1999-2003                */
+/* STACK.C      (c) Copyright Roger Bowler, 1999-2004                */
 /*              ESA/390 Linkage Stack Operations                     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the linkage stack functions of ESA/390     */
@@ -19,6 +19,7 @@
 /* ESAME linkage stack operations                 v208e Roger Bowler */
 /* TRAP support added                                     Jan Jaeger */
 /* Correction to stack types in ESAME mode                Jan Jaeger */
+/* ASN-and-LX-reuse facility                  June 2004 Roger Bowler */
 /*-------------------------------------------------------------------*/
 
 // #define  STACK_DEBUG
@@ -107,7 +108,27 @@
 
 
 #if defined(FEATURE_LINKAGE_STACK)
-void ARCH_DEP(trap_x) (int trap_is_trap4, int execflag, REGS *regs, U32 trap_operand)
+
+static inline RADR ARCH_DEP(abs_stack_addr) (VADR vaddr, REGS *regs, int acctype)
+{
+    return MADDR(vaddr, USE_HOME_SPACE, regs, acctype, 0) - regs->mainstor;
+}
+
+
+static inline RADR ARCH_DEP(abs_trap_addr) (VADR vaddr, REGS *regs, int acctype)
+{
+    return MADDR(vaddr, USE_HOME_SPACE, regs, acctype, regs->psw.pkey) - regs->mainstor;
+}
+
+/*-------------------------------------------------------------------*/
+/* Subroutine called by the TRAP2 and TRAP4 instructions             */
+/*                                                                   */
+/* Input:                                                            */
+/*      trap4   0=TRAP2 instruction, 1=TRAP4 instruction             */
+/*      regs    Pointer to the CPU register context                  */
+/*      operand Effective address if TRAP4                           */
+/*-------------------------------------------------------------------*/
+void ARCH_DEP(trap_x) (int trap_is_trap4, REGS *regs, U32 trap_operand)
 {
 RADR ducto;
 U32  duct11;
@@ -209,9 +230,9 @@ int  i;
         ON_IC_PER_SB(regs);
 #endif /*defined(FEATURE_PER)*/
 
-    trap_flags = regs->psw.ilc << 16;
+    trap_flags = REAL_ILC(regs) << 16;
 
-    if(execflag)
+    if(regs->execflag)
         trap_flags |= TRAP0_EXECUTE;
 
     if(trap_is_trap4)
@@ -253,16 +274,24 @@ int  i;
     memcpy(regs->mainstor + tsaa1, trap_psw, 8);
     tsaa1 += 8;
     if((tsaa1 & PAGEFRAME_BYTEMASK) == 0)
+    {
         tsaa1 = tsaa2;
+    }
 
 #if defined(FEATURE_ESAME)
     /* If the P bit is one then store the PSW in esame format */
     /* bits 64-127 of PSW at offset +24 */
     if(tcba0 & TCB0_P)
+    {
         memcpy(regs->mainstor + tsaa1, trap_psw + 8, 8);
+    }
     else
+    {
 #endif /*defined(FEATURE_ESAME)*/
         memset(regs->mainstor + tsaa1, 0, 8);
+#if defined(FEATURE_ESAME)
+    }
+#endif /*defined(FEATURE_ESAME)*/
     tsaa1 += 8;
     if((tsaa1 & PAGEFRAME_BYTEMASK) == 0)
         tsaa1 = tsaa2;
@@ -298,246 +327,10 @@ int  i;
     regs->psw.AMASK = AMASK31;
     regs->psw.IA = trap_ia;
     /* set PSW to primary space */
-    regs->psw.space = 0;
-    regs->psw.armode = 0;
-    INVALIDATE_AIA(regs);
-    INVALIDATE_AEA_ALL(regs);
+    regs->psw.asc = 0;
+    SET_AEA_MODE(regs);
 }
 
-/*-------------------------------------------------------------------*/
-/* Convert trap virtual address to absolute address                  */
-/*                                                                   */
-/* Input:                                                            */
-/*      vaddr   Virtual address of trap area                         */
-/*      regs    Pointer to the CPU register context                  */
-/*      acctype Type of access requested: READ or WRITE              */
-/* Return value:                                                     */
-/*      Absolute address of trap area                                */
-/*                                                                   */
-/*      The virtual address is translated using the segment table    */
-/*      for the home address space.  Key-controlled protection does  */
-/*      apply to trap addresses, as well as page protection          */
-/*      and low-address protection.                                  */
-/*                                                                   */
-/*      A program check may be generated if the stack address causes */
-/*      an addressing, protection, or translation exception, and in  */
-/*      this case the function does not return.                      */
-/*-------------------------------------------------------------------*/
-RADR ARCH_DEP(abs_trap_addr) (VADR vaddr, REGS *regs, int acctype)
-{
-int     rc;                             /* Return code               */
-RADR    raddr;                          /* Real address              */
-RADR    aaddr;                          /* Absolute address          */
-int     private = 0;                    /* 1=Private address space   */
-int     protect = 0;                    /* 1=page 2=ALE protection   */
-int     stid;                           /* Segment table indication  */
-U16     xcode;                          /* Exception code            */
-
-    /* Convert to real address using home segment table */
-    rc = ARCH_DEP(translate_addr) (vaddr, 0, regs, ACCTYPE_STACK,
-                &raddr, &xcode, &private, &protect, &stid);
-    if (rc != 0)
-        ARCH_DEP(program_interrupt) (regs, xcode);
-
-    /* Low-address protection prohibits stores into PSA locations */
-    if (acctype == ACCTYPE_WRITE
-        && ARCH_DEP(is_low_address_protected) (vaddr, private, regs))
-        goto trap_prot;
-
-    /* Page protection prohibits all stores into the page */
-    if (acctype == ACCTYPE_WRITE && protect)
-        goto trap_prot;
-
-    /* Convert real address to absolute address */
-    aaddr = APPLY_PREFIXING (raddr, regs->PX);
-
-    /* Program check if absolute address is outside main storage */
-    if (aaddr > regs->mainlim)
-        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
-
-#if defined(_FEATURE_SIE)
-    if(regs->sie_state  && !regs->sie_pref)
-    {
-    int sie_stid;
-    U16 sie_xcode;
-    int sie_private;
-
-        if (SIE_TRANSLATE_ADDR (regs->sie_mso + aaddr,
-                USE_PRIMARY_SPACE,
-                regs->hostregs, ACCTYPE_SIE, &aaddr, &sie_xcode,
-                &sie_private, &protect, &sie_stid))
-            (regs->sie_hostpi) (regs->hostregs, sie_xcode);
-
-        /* Convert host real address to host absolute address */
-        aaddr = APPLY_PREFIXING (aaddr, regs->hostregs->PX);
-    }
-
-    /* Check for HOST Page protection */
-    if (acctype == ACCTYPE_WRITE && protect)
-        goto trap_prot;
-#endif /*defined(_FEATURE_SIE)*/
-
-    if (!((regs->psw.pkey == 0)
-        || ((regs->CR(0) & CR0_STORE_OVRD)
-        && ((STORAGE_KEY(aaddr, regs) & STORKEY_KEY) == 0x90))))
-    {
-        protect = 0; /* clear ALE, PTE protect flag */
-        /* Check Key protection for store */
-        if (acctype == ACCTYPE_WRITE
-            && ((STORAGE_KEY(aaddr, regs) & STORKEY_KEY) != regs->psw.pkey))
-            goto trap_prot;
-
-        /* Check Key protection for fetch */
-        if (acctype == ACCTYPE_READ
-            && (STORAGE_KEY(aaddr, regs) & STORKEY_FETCH)
-            && ((STORAGE_KEY(aaddr, regs) & STORKEY_KEY) != regs->psw.pkey))
-            goto trap_prot;
-    }
-    /* Set the reference bits in the storage key */
-    STORAGE_KEY(aaddr, regs) |= STORKEY_REF;
-
-#if defined(FEATURE_PER)
-    if (acctype == ACCTYPE_WRITE)
-    {
-        if( EN_IC_PER_SA(regs)
-#if defined(FEATURE_PER2)
-          && ( REAL_MODE(&regs->psw) ||
-               ARCH_DEP(check_sa_per2) (vaddr, 0, ACCTYPE_STACK, regs) )
-#endif /*defined(FEATURE_PER2)*/
-          && PER_RANGE_CHECK(vaddr,regs->CR(10),regs->CR(11)) )
-            ON_IC_PER_SA(regs);
-    }
-#endif /*defined(FEATURE_PER)*/
-
-    /* Return absolute address */
-    return aaddr;
-
-trap_prot:
-#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
-        regs->TEA = (vaddr & STORAGE_KEY_PAGEMASK)
-                        | protect << 2 | TEA_ST_HOME;
-        regs->excarid = 0;
-#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
-
-    return -1; /* avoid compiler warnings */
-
-} /* end function ARCH_DEP(abs_trap_addr) */
-
-/*-------------------------------------------------------------------*/
-/* Convert linkage stack virtual address to absolute address         */
-/*                                                                   */
-/* Input:                                                            */
-/*      vaddr   Virtual address of stack entry                       */
-/*      regs    Pointer to the CPU register context                  */
-/*      acctype Type of access requested: READ or WRITE              */
-/* Return value:                                                     */
-/*      Absolute address of stack entry.                             */
-/*                                                                   */
-/*      The virtual address is translated using the segment table    */
-/*      for the home address space.  Key-controlled protection does  */
-/*      not apply to linkage stack operations, but page protection   */
-/*      and low-address protection do apply.                         */
-/*                                                                   */
-/*      A program check may be generated if the stack address causes */
-/*      an addressing, protection, or translation exception, and in  */
-/*      this case the function does not return.                      */
-/*-------------------------------------------------------------------*/
-RADR ARCH_DEP(abs_stack_addr) (VADR vaddr, REGS *regs, int acctype)
-{
-int     rc;                             /* Return code               */
-RADR    raddr;                          /* Real address              */
-RADR    aaddr;                          /* Absolute address          */
-int     private = 0;                    /* 1=Private address space   */
-int     protect = 0;                    /* 1=ALE or page protection  */
-int     stid;                           /* Segment table indication  */
-U16     xcode;                          /* Exception code            */
-
-    /* Convert to real address using home segment table */
-    rc = ARCH_DEP(translate_addr) (vaddr, 0, regs, ACCTYPE_STACK,
-                &raddr, &xcode, &private, &protect, &stid);
-    if (rc != 0)
-        ARCH_DEP(program_interrupt) (regs, xcode);
-
-    /* Low-address protection prohibits stores into PSA locations */
-    if (acctype == ACCTYPE_WRITE
-        && ARCH_DEP(is_low_address_protected) (vaddr, private, regs))
-    {
-#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
-        regs->TEA = (vaddr & STORAGE_KEY_PAGEMASK) | TEA_ST_HOME;
-        regs->excarid = 0;
-#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
-    }
-
-    /* Page protection prohibits all stores into the page */
-    if (acctype == ACCTYPE_WRITE && protect)
-    {
-#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
-        regs->TEA = (vaddr & STORAGE_KEY_PAGEMASK)
-                        | TEA_PROT_AP | TEA_ST_HOME;
-        regs->excarid = 0;
-#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
-    }
-
-    /* Convert real address to absolute address */
-    aaddr = APPLY_PREFIXING (raddr, regs->PX);
-
-    /* Program check if absolute address is outside main storage */
-    if (aaddr > regs->mainlim)
-        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
-
-#if defined(_FEATURE_SIE)
-    if(regs->sie_state  && !regs->sie_pref)
-    {
-    int sie_stid;
-    U16 sie_xcode;
-    int sie_private;
-
-        if (SIE_TRANSLATE_ADDR (regs->sie_mso + aaddr,
-                USE_PRIMARY_SPACE,
-                regs->hostregs, ACCTYPE_SIE, &aaddr, &sie_xcode,
-                &sie_private, &protect, &sie_stid))
-            (regs->sie_hostpi) (regs->hostregs, sie_xcode);
-
-        /* Convert host real address to host absolute address */
-        aaddr = APPLY_PREFIXING (aaddr, regs->hostregs->PX);
-    }
-
-    /* Check for HOST Page protection */
-    if (acctype == ACCTYPE_WRITE && protect)
-    {
-#ifdef FEATURE_SUPPRESSION_ON_PROTECTION
-        regs->TEA = (vaddr & STORAGE_KEY_PAGEMASK)
-                        | TEA_PROT_AP | TEA_ST_HOME;
-        regs->excarid = 0;
-#endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
-        ARCH_DEP(program_interrupt) (regs, PGM_PROTECTION_EXCEPTION);
-    }
-#endif /*defined(_FEATURE_SIE)*/
-
-    /* Set the reference and change bits in the storage key */
-    STORAGE_KEY(aaddr, regs) |= STORKEY_REF;
-    if (acctype == ACCTYPE_WRITE)
-    {
-        STORAGE_KEY(aaddr, regs) |= STORKEY_CHANGE;
-
-#if defined(FEATURE_PER)
-        if( EN_IC_PER_SA(regs)
-#if defined(FEATURE_PER2)
-          && ( REAL_MODE(&regs->psw) ||
-               ARCH_DEP(check_sa_per2) (vaddr, 0, ACCTYPE_STACK, regs) )
-#endif /*defined(FEATURE_PER2)*/
-          && PER_RANGE_CHECK(vaddr,regs->CR(10),regs->CR(11)) )
-            ON_IC_PER_SA(regs);
-#endif /*defined(FEATURE_PER)*/
-    }
-
-    /* Return absolute address */
-    return aaddr;
-
-} /* end function ARCH_DEP(abs_stack_addr) */
 
 /*-------------------------------------------------------------------*/
 /* Form a new entry on the linkage stack                             */
@@ -896,6 +689,27 @@ int     i;                              /* Array subscript           */
     if ((lsea & PAGEFRAME_BYTEMASK) == 0x000)
         abs = abs2;
 
+    /* If ASN-and-LX-reuse is installed and active, store
+       the SASTEIN (CR3 bits 0-31) in bytes 176-179, and
+       store the PASTEIN (CR4 bits 0-31) in bytes 180-183 */
+    if (ASN_AND_LX_REUSE_ENABLED(regs))
+    {
+        STORE_FW(regs->mainstor + abs, regs->CR_H(3));
+        STORE_FW(regs->mainstor + abs + 4, regs->CR_H(4));
+
+      #ifdef STACK_DEBUG
+        logmsg (_("stack: SASTEIN=%2.2X%2.2X%2.2X%2.2X "
+                "PASTEIN=%2.2X%2.2X%2.2X%2.2X \n"
+                "stored at V:" F_VADR " A:" F_RADR "\n"),
+                regs->mainstor[abs], regs->mainstor[abs+1],
+                regs->mainstor[abs+2], regs->mainstor[abs+3],
+                regs->mainstor[abs+4], regs->mainstor[abs+5],
+                regs->mainstor[abs+6], regs->mainstor[abs+7],
+                lsea, abs);
+      #endif /*STACK_DEBUG*/
+
+    } /* end if(ASN_AND_LX_REUSE_ENABLED) */
+
     /* Skip bytes 176-223 of the new stack entry */
     lsea += 48;
     LSEA_WRAP(lsea);
@@ -1135,6 +949,7 @@ RADR    abs;                            /* Absolute address          */
 /*              2 = Bytes 144-151 (Branch address or PC number)      */
 /*              3 = Bytes 152-159 (Modifiable area)                  */
 /*              4 = Bytes 136-143 and 168-175 (ESAME-format PSW)     */
+/*              5 = Bytes 176-183 (SASTEIN,PASTEIN)                  */
 /*      regs    Pointer to the CPU register context                  */
 /*                                                                   */
 /*      This function extracts 64 or 128 bits of information from    */
@@ -1146,6 +961,9 @@ RADR    abs;                            /* Absolute address          */
 /*      R1+1 registers are updated (the leftmost 32 bits remain      */
 /*      unchanged for ESAME).  For code 4, which is valid only for   */
 /*      ESAME, all 64 bits of the R1 and R1+1 registers are loaded.  */
+/*      For code 5 (valid only if the ASN-and-LX-reuse facility is   */
+/*      installed), the leftmost 32 bits of the R1 and R1+1 regs     */
+/*      are updated, and the rightmost 32 bits remain unchanged.     */
 /*                                                                   */
 /*      If a translation exception occurs when accessing the stack   */
 /*      entry, then a program check will be generated by the         */
@@ -1206,6 +1024,25 @@ RADR    abs;                            /* Absolute address          */
     } /* if(code==1||code==4) */
   #endif /*defined(FEATURE_ESAME)*/
 
+  #if defined(FEATURE_ASN_AND_LX_REUSE)
+    /* For code 5, extract bytes 176-183 */
+    if (code == 5)
+    {
+        /* Point to byte 176 of the state entry */
+        lsea += 48;
+        LSEA_WRAP(lsea);
+
+        /* Load the SASTEIN, PASTEIN from bytes 176-179, 180-183*/
+        abs = ARCH_DEP(abs_stack_addr) (lsea, regs, ACCTYPE_READ);
+        FETCH_FW(regs->GR_H(r1), regs->mainstor + abs);
+        FETCH_FW(regs->GR_H(r1+1), regs->mainstor + abs + 4);
+
+        return;
+
+    } /* if(code==5) */
+  #endif /*defined(FEATURE_ASN_AND_LX_REUSE)*/
+
+    /* For codes 0,2,3 in ESAME, and codes 0,1,2,3 in ESA/390 */
     /* Point to byte 128, 136, 144, or 152 depending on the code */
     lsea += code * 8;
     LSEA_WRAP(lsea);
@@ -1342,6 +1179,7 @@ int     i;                              /* Array subscript           */
             || (r1 > r2 && (i >= r1 || i <= r2)))
         {
             FETCH_FW(regs->AR(i),regs->mainstor + abs);
+            SET_AEA_AR(regs, i);
 
           #ifdef STACK_DEBUG
             logmsg (_("stack: AR%d=" F_AREG " loaded from V:" F_VADR
@@ -1500,9 +1338,38 @@ VADR    lsep;                           /* Virtual addr of entry desc.
     /* Copy ESAME PSW bits 64-127 from bytes 168-175 */
     memcpy (newpsw + 8, regs->mainstor + abs, 8);
 
-#endif /*defined(FEATURE_ESAME)*/
+    /* Update virtual and absolute addresses to point to byte 176 */
+    lsea += 8;
+    LSEA_WRAP(lsea);
+    abs += 8;
 
-    obtain_lock(&sysblk.intlock);
+    /* Recalculate absolute address if page boundary crossed */
+    if ((lsea & PAGEFRAME_BYTEMASK) == 0x000)
+        abs = ARCH_DEP(abs_stack_addr) (lsea, regs, ACCTYPE_READ);
+
+    /* For a call state entry only, if ASN-and-LX-reuse is installed and
+       active, load the SASTEIN (high word of CR3) from bytes 176-179,  
+       and load the PASTEIN (high word of CR4) from bytes 180-183 */
+    if ((lsed.uet & LSED_UET_ET) == LSED_UET_PC
+        && ASN_AND_LX_REUSE_ENABLED(regs))
+    {
+        FETCH_FW(regs->CR_H(3), regs->mainstor + abs);
+        FETCH_FW(regs->CR_H(4), regs->mainstor + abs + 4);
+
+      #ifdef STACK_DEBUG
+        logmsg (_("stack: SASTEIN=%2.2X%2.2X%2.2X%2.2X "
+                "PASTEIN=%2.2X%2.2X%2.2X%2.2X \n"
+                "loaded from V:" F_VADR " A:" F_RADR "\n"),
+                regs->mainstor[abs], regs->mainstor[abs+1],
+                regs->mainstor[abs+2], regs->mainstor[abs+3],
+                regs->mainstor[abs+4], regs->mainstor[abs+5],
+                regs->mainstor[abs+6], regs->mainstor[abs+7],
+                lsea, abs);
+      #endif /*STACK_DEBUG*/
+
+    } /* end if(LSED_UET_PC && ASN_AND_LX_REUSE_ENABLED) */
+
+#endif /*defined(FEATURE_ESAME)*/
 
     /* Load new PSW using the bytes extracted from the stack entry */
     /* The rc will be checked by calling routine for PIC 06        */
@@ -1515,9 +1382,7 @@ VADR    lsep;                           /* Virtual addr of entry desc.
         regs->psw.sysmask &= ~PSW_PERMODE;
 
     /* restore PER masks which could have been wiped out by load_psw */
-    SET_IC_PER_MASK(regs);
-
-    release_lock(&sysblk.intlock);
+    SET_IC_MASK(regs);
 
     /* [5.12.4.4] Pass back the absolute address of the entry
        descriptor of the preceding linkage stack entry.  The

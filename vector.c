@@ -8,8 +8,8 @@
 /*                                             28/05/2000 Jan Jaeger */
 /*                                                                   */
 /* Instruction decoding rework                 09/07/2000 Jan Jaeger */
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -33,7 +33,7 @@ DEF_INST(v_test_vmr)
 int     unused1, unused2;
 U32     n, n1;
 
-    RRE(inst, execflag, regs, unused1, unused2);
+    RRE(inst, regs, unused1, unused2);
 
     VOP_CHECK(regs);
         
@@ -70,7 +70,7 @@ DEF_INST(v_complement_vmr)
 int     unused1, unused2;
 U32     n, n1, n2;
 
-    RRE(inst, execflag, regs, unused1, unused2);
+    RRE(inst, regs, unused1, unused2);
 
     VOP_CHECK(regs);
 
@@ -100,7 +100,7 @@ DEF_INST(v_count_left_zeros_in_vmr)
 int     gr1, unused2;
 U32     n, n1;
 
-    RRE(inst, execflag, regs, gr1, unused2);
+    RRE(inst, regs, gr1, unused2);
 
     VOP_CHECK(regs);
 
@@ -147,7 +147,7 @@ DEF_INST(v_count_ones_in_vmr)
 int     gr1, unused2;
 U32     n, n1;
 
-    RRE(inst, execflag, regs, gr1, unused2);
+    RRE(inst, regs, gr1, unused2);
 
     VOP_CHECK(regs);
 
@@ -190,7 +190,7 @@ DEF_INST(v_extract_vct)
 {
 int     gr1, unused2;
 
-    RRE(inst, execflag, regs, gr1, unused2);
+    RRE(inst, regs, gr1, unused2);
 
     VOP_CHECK(regs);
 
@@ -206,7 +206,7 @@ DEF_INST(v_extract_vector_modes)
 {
 int     gr1, unused2;
 
-    RRE(inst, execflag, regs, gr1, unused2);
+    RRE(inst, regs, gr1, unused2);
 
     VOP_CHECK(regs);
 
@@ -224,7 +224,7 @@ int     gr1, unused2;
 U32     n, n1, n2;
 U64     d;
 
-    RRE(inst, execflag, regs, gr1, unused2);
+    RRE(inst, regs, gr1, unused2);
 
     VOP_CHECK(regs);
         
@@ -248,7 +248,7 @@ U64     d;
     if( VR_INUSE(n2, regs) )
     {
         /* Set the vector changed bit if in problem state */
-        if( regs->psw.prob )
+        if( PROBSTATE(&regs->psw) )
             SET_VR_CHANGED(n2, regs);
 
         for(; n1 < VECTOR_SECTION_SIZE; n1++)
@@ -266,7 +266,7 @@ U64     d;
             regs->GR_L(gr1) += 8;
 #if 0
             /* This is where the instruction may be interrupted */
-            regs->psw.IA -= regs->psw.ilc;
+            regs->psw.IA -= REAL_ILC(regs);
             return;
 #endif
         }
@@ -301,7 +301,7 @@ int     gr1, unused2;
 U32     n, n1, n2;
 U64     d;
 
-    RRE(inst, execflag, regs, gr1, unused2);
+    RRE(inst, regs, gr1, unused2);
 
     VOP_CHECK(regs);
 
@@ -340,7 +340,7 @@ U64     d;
             regs->GR_L(gr1) += 8;
 #if 0
             /* This is where the instruction may be interrupted */
-            regs->psw.IA -= regs->psw.ilc;
+            regs->psw.IA -= REAL_ILC(regs);
             return;
 #endif
         }
@@ -378,7 +378,7 @@ int     gr1, unused2;
 U32     n, n1, n2;
 U64     d;
 
-    RRE(inst, execflag, regs, gr1, unused2);
+    RRE(inst, regs, gr1, unused2);
 
     VOP_CHECK(regs);
 
@@ -415,7 +415,7 @@ U64     d;
             regs->GR_L(gr1) += 8;
 #if 0
             /* This is where the instruction may be interrupted */
-            regs->psw.IA -= regs->psw.ilc;
+            regs->psw.IA -= REAL_ILC(regs);
             return;
 #endif
         }
@@ -449,7 +449,7 @@ DEF_INST(v_load_vmr)
 int     rs2;
 U32     n, n1;
 
-    VS(inst, execflag, regs, rs2);
+    VS(inst, regs, rs2);
 
     VOP_CHECK(regs);
 
@@ -476,7 +476,7 @@ DEF_INST(v_load_vmr_complement)
 int     rs2;
 U32     n, n1, n2;
 
-    VS(inst, execflag, regs, rs2);
+    VS(inst, regs, rs2);
 
     VOP_CHECK(regs);
 
@@ -509,7 +509,7 @@ DEF_INST(v_store_vmr)
 int     rs2;
 U32     n;
 
-    VS(inst, execflag, regs, rs2);
+    VS(inst, regs, rs2);
 
     VOP_CHECK(regs);
 
@@ -531,7 +531,7 @@ int     rs2;
 U32     n, n1, n2;
 BYTE    workvmr[VECTOR_SECTION_SIZE/8];
 
-    VS(inst, execflag, regs, rs2);
+    VS(inst, regs, rs2);
 
     VOP_CHECK(regs);
 
@@ -565,7 +565,7 @@ int     rs2;
 U32     n, n1, n2;
 BYTE    workvmr[VECTOR_SECTION_SIZE/8];
 
-    VS(inst, execflag, regs, rs2);
+    VS(inst, regs, rs2);
 
     VOP_CHECK(regs);
 
@@ -599,7 +599,7 @@ int     rs2;
 U32     n, n1, n2;
 BYTE    workvmr[VECTOR_SECTION_SIZE/8];
 
-    VS(inst, execflag, regs, rs2);
+    VS(inst, regs, rs2);
 
     VOP_CHECK(regs);
 
@@ -632,7 +632,7 @@ DEF_INST(v_save_vsr)
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     VOP_CHECK(regs);
 
@@ -651,7 +651,7 @@ DEF_INST(v_save_vmr)
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     VOP_CHECK(regs);
 
@@ -671,7 +671,7 @@ VADR    effective_addr2;                /* Effective address         */
 U32     n1, n2;
 U64     d;
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     VOP_CHECK(regs);
 
@@ -690,7 +690,7 @@ U64     d;
     
     /* In problem state the change bit are set corresponding
        the inuse bits */
-    if(regs->psw.prob)
+    if(PROBSTATE(&regs->psw))
     {
         d &= ~VSR_VCH;
         d |= (d & VSR_VIU) >> 8;
@@ -722,7 +722,7 @@ DEF_INST(v_restore_vmr)
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     VOP_CHECK(regs);
 
@@ -741,7 +741,7 @@ int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 U32     n;
 
-    S_NW(inst, execflag, regs, b2, effective_addr2);
+    S_NW(inst, regs, b2, effective_addr2);
 
     VOP_CHECK(regs);
 
@@ -768,7 +768,7 @@ int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 U32     n, n1, n2;
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     VOP_CHECK(regs);
 
@@ -801,7 +801,7 @@ DEF_INST(v_set_vector_mask_mode)
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     VOP_CHECK(regs);
 
@@ -822,7 +822,7 @@ int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 U32     n;
 
-    S_NW(inst, execflag, regs, b2, effective_addr2);
+    S_NW(inst, regs, b2, effective_addr2);
 
     VOP_CHECK(regs);
 
@@ -848,7 +848,7 @@ DEF_INST(v_store_vector_parameters)
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     VOP_CHECK(regs);
 
@@ -869,7 +869,7 @@ DEF_INST(v_save_vac)
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     VOP_CHECK(regs);
 
@@ -878,7 +878,7 @@ VADR    effective_addr2;                /* Effective address         */
     DW_CHECK(effective_addr2, regs);
 
 #if defined(_FEATURE_SIE)
-    if(regs->sie_state && (regs->siebk->ic[3] & SIE_IC3_VACSV))
+    if(SIE_STATB(regs, IC3, VACSV))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 #endif /*defined(_FEATURE_SIE)*/
 
@@ -895,7 +895,7 @@ DEF_INST(v_restore_vac)
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     VOP_CHECK(regs);
 
@@ -904,7 +904,7 @@ VADR    effective_addr2;                /* Effective address         */
     DW_CHECK(effective_addr2, regs);
 
 #if defined(_FEATURE_SIE)
-    if(regs->sie_state && (regs->siebk->ic[3] & SIE_IC3_VACRS))
+    if(SIE_STATB(regs, IC3, VACRS))
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 #endif /*defined(_FEATURE_SIE)*/
 

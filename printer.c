@@ -1,4 +1,4 @@
-/* PRINTER.C    (c) Copyright Roger Bowler, 1999-2003                */
+/* PRINTER.C    (c) Copyright Roger Bowler, 1999-2004                */
 /*              ESA/390 Line Printer Device Handler                  */
 
 /*-------------------------------------------------------------------*/
@@ -13,10 +13,52 @@
 #include "opcode.h"
 
 /*-------------------------------------------------------------------*/
+/* Ivan Warren 20040227                                              */
+/* This table is used by channel.c to determine if a CCW code is an  */
+/* immediate command or not                                          */
+/* The tape is addressed in the DEVHND structure as 'DEVIMM immed'   */
+/* 0 : Command is NOT an immediate command                           */
+/* 1 : Command is an immediate command                               */
+/* Note : An immediate command is defined as a command which returns */
+/* CE (channel end) during initialisation (that is, no data is       */
+/* actually transfered. In this case, IL is not indicated for a CCW  */
+/* Format 0 or for a CCW Format 1 when IL Suppression Mode is in     */
+/* effect                                                            */
+/*-------------------------------------------------------------------*/
+
+/* Printer Specific : 1403 */
+/* The following are considered IMMEDIATE commands : */
+/* CTL-NOOP, Skip Channel 'n' Immediate, Block Data check , Allow Data Check
+ * Space 1,2,3 Lines Immediate, UCS Gate Load, Load UCS Buffer & Fold,
+ * Load UCS Buffer (No Fold)
+ */
+
+static BYTE printer_immed_commands[256]=
+/*
+ *0 1 2 3 4 5 6 7 8 9 A B C D E F
+*/
+
+{ 0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,
+  0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,
+  0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,
+  0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,
+  0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,
+  0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,
+  0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,
+  0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,
+  0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0};
+
+/*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
 /*-------------------------------------------------------------------*/
 #define LINE_LENGTH     150
-#define SPACE           ((BYTE)' ')
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to open the printer file or pipe                       */
@@ -101,16 +143,13 @@ pid_t           pid;                    /* Child process identifier  */
 
         /* Execute the specified pipe receiver program */
 
-#if defined(WIN32)
+#if defined(OPTION_FISH_STUPID_GUI_PRTSPLR_EXPERIMENT)
         {
             /* The dev=, pid= and extgui= arguments are for informational
                purposes only so the spooler knows who/what it's spooling. */
-
             BYTE  cmdline[256];
-
             snprintf(cmdline,256,"\"%s\" pid=%d dev=%4.4X",
                 dev->filename+1,getpid(),dev->devnum);
-
             rc = system (cmdline);
         }
 #else
@@ -150,7 +189,7 @@ pid_t           pid;                    /* Child process identifier  */
 /* Subroutine to write data to the printer                           */
 /*-------------------------------------------------------------------*/
 static void
-write_buffer (DEVBLK *dev, BYTE *buf, int len, BYTE *unitstat)
+write_buffer (DEVBLK *dev, char *buf, int len, BYTE *unitstat)
 {
 int             rc;                     /* Return code               */
 
@@ -173,7 +212,7 @@ int             rc;                     /* Return code               */
 /*-------------------------------------------------------------------*/
 /* Initialize the device handler                                     */
 /*-------------------------------------------------------------------*/
-static int printer_init_handler (DEVBLK *dev, int argc, BYTE *argv[])
+static int printer_init_handler (DEVBLK *dev, int argc, char *argv[])
 {
 int     i;                              /* Array subscript           */
 
@@ -240,8 +279,8 @@ int     i;                              /* Array subscript           */
 /*-------------------------------------------------------------------*/
 /* Query the device definition                                       */
 /*-------------------------------------------------------------------*/
-static void printer_query_device (DEVBLK *dev, BYTE **class,
-                int buflen, BYTE *buffer)
+static void printer_query_device (DEVBLK *dev, char **class,
+                int buflen, char *buffer)
 {
     *class = "PRT";
     snprintf (buffer, buflen, "%s%s%s",
@@ -389,11 +428,11 @@ BYTE            c;                      /* Print character           */
                 if (dev->buf[i-1] != SPACE) break;
 
             /* Append carriage return and line feed(s) */
-            strcpy (dev->buf + i, eor);
+            strcpy ((char *)(dev->buf + i), eor);
             i += strlen(eor);
 
             /* Write print line */
-            write_buffer (dev, dev->buf, i, unitstat);
+            write_buffer (dev, (char *)dev->buf, i, unitstat);
             if (*unitstat != 0) break;
 
         } /* end if(!data-chaining) */
@@ -486,6 +525,9 @@ BYTE            c;                      /* Print character           */
         write_buffer (dev, eor, strlen(eor), unitstat);
         if (*unitstat != 0) break;
 
+    /*
+        *residual = 0;
+    */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -497,6 +539,9 @@ BYTE            c;                      /* Print character           */
         write_buffer (dev, eor, strlen(eor), unitstat);
         if (*unitstat != 0) break;
 
+    /*
+        *residual = 0;
+    */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -508,6 +553,9 @@ BYTE            c;                      /* Print character           */
         write_buffer (dev, eor, strlen(eor), unitstat);
         if (*unitstat != 0) break;
 
+    /*
+        *residual = 0;
+    */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -531,6 +579,9 @@ BYTE            c;                      /* Print character           */
     /*---------------------------------------------------------------*/
     /* BLOCK DATA CHECK                                              */
     /*---------------------------------------------------------------*/
+    /*
+        *residual = 0;
+    */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -538,6 +589,9 @@ BYTE            c;                      /* Print character           */
     /*---------------------------------------------------------------*/
     /* ALLOW DATA CHECK                                              */
     /*---------------------------------------------------------------*/
+    /*
+        *residual = 0;
+    */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -549,6 +603,9 @@ BYTE            c;                      /* Print character           */
         write_buffer (dev, eor, strlen(eor), unitstat);
         if (*unitstat != 0) break;
 
+    /*
+        *residual = 0;
+    */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -560,6 +617,9 @@ BYTE            c;                      /* Print character           */
         write_buffer (dev, eor, strlen(eor), unitstat);
         if (*unitstat != 0) break;
 
+    /*
+        *residual = 0;
+    */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -571,6 +631,9 @@ BYTE            c;                      /* Print character           */
         write_buffer (dev, eor, strlen(eor), unitstat);
         if (*unitstat != 0) break;
 
+    /*
+        *residual = 0;
+    */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -613,7 +676,9 @@ BYTE            c;                      /* Print character           */
 
         /* Set fold indicator and return normal status */
         dev->fold = 1;
+    /*
         *residual = 0;
+    */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -631,7 +696,9 @@ BYTE            c;                      /* Print character           */
 
         /* Reset fold indicator and return normal status */
         dev->fold = 0;
+    /*
         *residual = 0;
+    */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -687,11 +754,24 @@ BYTE            c;                      /* Print character           */
 static
 #endif
 DEVHND printer_device_hndinfo = {
-        &printer_init_handler,
-        &printer_execute_ccw,
-        &printer_close_device,
-        &printer_query_device,
-        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+        &printer_init_handler,         /* Device Initialisation      */
+        &printer_execute_ccw,          /* Device CCW execute         */
+        &printer_close_device,         /* Device Close               */
+        &printer_query_device,         /* Device Query               */
+        NULL,                          /* Device Start channel pgm   */
+        NULL,                          /* Device End channel pgm     */
+        NULL,                          /* Device Resume channel pgm  */
+        NULL,                          /* Device Suspend channel pgm */
+        NULL,                          /* Device Read                */
+        NULL,                          /* Device Write               */
+        NULL,                          /* Device Query used          */
+        NULL,                          /* Device Reserve             */
+        NULL,                          /* Device Release             */
+        printer_immed_commands,        /* Immediate CCW Codes        */
+        NULL,                          /* Signal Adapter Input       */
+        NULL,                          /* Signal Adapter Output      */
+        NULL,                          /* Hercules suspend           */
+        NULL                           /* Hercules resume            */
 };
 
 /* Libtool static name colision resolution */

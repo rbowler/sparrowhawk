@@ -1,4 +1,4 @@
-/* CGIBIN.C     (c)Copyright Jan Jaeger, 2002-2003                   */
+/* CGIBIN.C     (c)Copyright Jan Jaeger, 2002-2004                   */
 /*              HTTP cgi-bin routines                                */
 
 /* This file contains all cgi routines that may be executed on the   */
@@ -55,7 +55,10 @@ void cgibin_reg_control(WEBBLK *webblk)
 {
 int i;
 
-    REGS *regs = sysblk.regs + sysblk.pcpu;
+    REGS *regs;
+
+    regs = sysblk.regs[sysblk.pcpu];
+    if (!regs) regs = &sysblk.dummyregs;
 
     html_header(webblk);
 
@@ -81,7 +84,10 @@ void cgibin_reg_general(WEBBLK *webblk)
 {
 int i;
 
-    REGS *regs = sysblk.regs + sysblk.pcpu;
+    REGS *regs;
+
+    regs = sysblk.regs[sysblk.pcpu];
+    if (!regs) regs = &sysblk.dummyregs;
 
     html_header(webblk);
 
@@ -103,16 +109,19 @@ int i;
 }
 
 
-void store_psw (REGS *regs, BYTE *addr);
+// void copy_psw (REGS *regs, BYTE *addr);
 
 void cgibin_psw(WEBBLK *webblk)
 {
-    REGS *regs = sysblk.regs + sysblk.pcpu;
+    REGS *regs;
     QWORD   qword;                            /* quadword work area      */  
 
     char *value;
     int autorefresh=0;
     int refresh_interval=5;
+
+    regs = sysblk.regs[sysblk.pcpu];
+    if (!regs) regs = &sysblk.dummyregs;
 
     html_header(webblk);
 
@@ -151,14 +160,14 @@ void cgibin_psw(WEBBLK *webblk)
 
     if( regs->arch_mode != ARCH_900 )
     {
-        store_psw (regs, qword);
+        copy_psw (regs, qword);
         fprintf(webblk->hsock, "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
                 qword[0], qword[1], qword[2], qword[3],
                 qword[4], qword[5], qword[6], qword[7]);
     }
     else
     {
-        store_psw (regs, qword);
+        copy_psw (regs, qword);
         fprintf(webblk->hsock, "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X "
                 "%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X\n",
                 qword[0], qword[1], qword[2], qword[3],
@@ -315,23 +324,13 @@ REGS *regs;
         select_ar = 0;
 
     /* Validate cpu number */
-#if defined(_FEATURE_CPU_RECONFIG)
-    if(cpu < 0 || cpu > MAX_CPU_ENGINES
-       || !sysblk.regs[cpu].cpuonline)
-#else
-    if(cpu < 0 || cpu > sysblk.numcpu)
-#endif
-        for(cpu = 0;
-#if defined(_FEATURE_CPU_RECONFIG)
-            cpu < MAX_CPU_ENGINES;
-#else
-            cpu < sysblk.numcpu;
-#endif
-                cpu++)
-            if(sysblk.regs[cpu].cpuonline)
+    if (cpu < 0 || cpu >= MAX_CPU)
+        for (cpu = 0; cpu < MAX_CPU; cpu++)
+            if(IS_CPU_ONLINE(cpu))
                 break;
 
-    regs = sysblk.regs + cpu;
+    regs = sysblk.regs[sysblk.pcpu];
+    if (!regs) regs = &sysblk.dummyregs;
 
     if((value = cgi_variable(webblk,"alter_gr")) && *value == 'A')
     {
@@ -344,7 +343,11 @@ REGS *regs;
                 if(regs->arch_mode != ARCH_900)
                     sscanf(value,"%x",&(regs->GR_L(i)));
                 else
+#if SIZEOF_LONG==8
+                    sscanf(value,"%lx",&(regs->GR_G(i)));
+#else
                     sscanf(value,"%llx",&(regs->GR_G(i)));
+#endif
             }
         }
     }
@@ -360,7 +363,11 @@ REGS *regs;
                 if(regs->arch_mode != ARCH_900)
                     sscanf(value,"%x",&(regs->CR_L(i)));
                 else
+#if SIZEOF_LONG==8
+                    sscanf(value,"%lx",&(regs->CR_G(i)));
+#else
                     sscanf(value,"%llx",&(regs->CR_G(i)));
+#endif
             }
         }
     }
@@ -381,14 +388,8 @@ REGS *regs;
     fprintf(webblk->hsock,"<form method=post>\n"
                           "<select type=submit name=cpu>\n");
 
-    for(i = 0;
-#if defined(_FEATURE_CPU_RECONFIG)
-        i < MAX_CPU_ENGINES;
-#else
-        i < sysblk.numcpu;
-#endif
-        i++)
-        if(sysblk.regs[i].cpuonline)
+    for(i = 0; i < MAX_CPU; i++)
+        if(IS_CPU_ONLINE(i))
             fprintf(webblk->hsock,"<option value=%d%s>CPU%4.4X</option>\n",
               i,i==cpu?" selected":"",i);
 
@@ -598,7 +599,7 @@ void cgibin_ipl(WEBBLK *webblk)
 U32 i;
 char *value;
 DEVBLK *dev;
-U32 ipldev;
+U16 ipldev;
 U32 iplcpu;
 U32 doipl;
 
@@ -612,7 +613,7 @@ U32 doipl;
         doipl = 0;
 
     if((value = cgi_variable(webblk,"device")))
-        sscanf(value,"%x",&ipldev);
+        sscanf(value,"%hx",&ipldev);
     else
         ipldev = sysblk.ipldev;
 
@@ -622,21 +623,10 @@ U32 doipl;
         iplcpu = sysblk.iplcpu;
 
     if((value = cgi_variable(webblk,"loadparm")))
-    {
-        for(i = 0; i < strlen(value); i++)
-            sysblk.loadparm[i] = host_to_guest((int)value[i]);
-        for(; i < 8; i++)
-            sysblk.loadparm[i] = host_to_guest(' ');
-    }
+	set_loadparm(value);
 
     /* Validate CPU number */
-    if(
-#if defined(_FEATURE_CPU_RECONFIG)
-            iplcpu >= MAX_CPU_ENGINES
-#else
-            iplcpu >= sysblk.numcpu
-#endif
-      || !sysblk.regs[iplcpu].cpuonline)
+    if(iplcpu >= MAX_CPU)
         doipl = 0;
   
     if(!doipl)
@@ -645,16 +635,10 @@ U32 doipl;
         fprintf(webblk->hsock,"<form method=post>\n"
                               "<select type=submit name=cpu>\n");
 
-        for(i = 0;
-#if defined(_FEATURE_CPU_RECONFIG)
-            i < MAX_CPU_ENGINES;
-#else
-            i < sysblk.numcpu;
-#endif
-            i++)
-            if(sysblk.regs[i].cpuonline)
+        for(i = 0; i < MAX_CPU; i++)
+            if(IS_CPU_ONLINE(i))
                 fprintf(webblk->hsock,"<option value=%4.4X%s>CPU%4.4X</option>\n",
-                  i, ((sysblk.regs[i].cpuad == iplcpu) ? " selected" : ""), i);
+                  i, ((sysblk.regs[i]->cpuad == iplcpu) ? " selected" : ""), i);
 
         fprintf(webblk->hsock,"</select>\n"
                               "<select type=submit name=device>\n");
@@ -666,15 +650,7 @@ U32 doipl;
 
         fprintf(webblk->hsock,"</select>\n");
 
-        fprintf(webblk->hsock,"Loadparm:<input type=text name=loadparm size=8 value=\"%c%c%c%c%c%c%c%c\">\n",
-          guest_to_host(sysblk.loadparm[0]),
-          guest_to_host(sysblk.loadparm[1]),
-          guest_to_host(sysblk.loadparm[2]),
-          guest_to_host(sysblk.loadparm[3]),
-          guest_to_host(sysblk.loadparm[4]),
-          guest_to_host(sysblk.loadparm[5]),
-          guest_to_host(sysblk.loadparm[6]),
-          guest_to_host(sysblk.loadparm[7]));
+        fprintf(webblk->hsock,"Loadparm:<input type=text name=loadparm size=8 value=\"%s\">\n", str_loadparm());
 
         fprintf(webblk->hsock,"<input type=submit name=doipl value=\"IPL\">\n"
                           "</form>\n");
@@ -682,8 +658,9 @@ U32 doipl;
     }
     else
     {
+        obtain_lock (&sysblk.intlock);
         /* Perform IPL function */
-        if( load_ipl(ipldev, sysblk.regs + iplcpu) )
+        if( load_ipl(ipldev, iplcpu,0) )
         {
             fprintf(webblk->hsock,"<h3>IPL failed, see the "
                                   "<a href=\"syslog#bottom\">system log</a> "
@@ -693,6 +670,7 @@ U32 doipl;
         {
             fprintf(webblk->hsock,"<h3>IPL completed</h3>\n");
         }
+        release_lock (&sysblk.intlock);
     }
 
     html_footer(webblk);
@@ -703,8 +681,8 @@ U32 doipl;
 void cgibin_debug_device_list(WEBBLK *webblk)
 {
 DEVBLK *dev;
-BYTE   *class;
-BYTE   buf[80];
+char   *class;
+char   buf[80];
 
     html_header(webblk);
 

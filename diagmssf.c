@@ -1,4 +1,4 @@
-/* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2003                  */
+/* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2004                  */
 /*              ESA/390 Diagnose Functions                           */
 
 /*-------------------------------------------------------------------*/
@@ -8,7 +8,7 @@
 /* LPAR RMF interface call                                           */
 /*                                                                   */
 /*                                             04/12/1999 Jan Jaeger */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -264,36 +264,24 @@ DEVBLK            *dev;                /* Device block pointer       */
             spccbconfig->hex01 = 0x01;
 
             /* Set CPU array count and offset in SPCCB */
-#ifdef _FEATURE_CPU_RECONFIG
-            STORE_HW(spccbconfig->toticpu,MAX_CPU_ENGINES);
-#else /*!_FEATURE_CPU_RECONFIG*/
-            STORE_HW(spccbconfig->toticpu,sysblk.numcpu);
-#endif /*!_FEATURE_CPU_RECONFIG*/
+            STORE_HW(spccbconfig->toticpu,MAX_CPU);
             offset = sizeof(SPCCB_HEADER) + sizeof(SPCCB_CONFIG_INFO);
             STORE_HW(spccbconfig->officpu,offset);
 
             /* Set HSA array count and offset in SPCCB */
             STORE_HW(spccbconfig->tothsa,0);
-#ifdef _FEATURE_CPU_RECONFIG
-            offset += sizeof(SPCCB_CPU_INFO) * MAX_CPU_ENGINES;
-#else /*!_FEATURE_CPU_RECONFIG*/
-            offset += sizeof(SPCCB_CPU_INFO) * sysblk.numcpu;
-#endif /*!_FEATURE_CPU_RECONFIG*/
+            offset += sizeof(SPCCB_CPU_INFO) * MAX_CPU;
             STORE_HW(spccbconfig->offhsa,offset);
 
             /* Move IPL load parameter to SPCCB */
-            memcpy (spccbconfig->loadparm, sysblk.loadparm, 8);
+            get_loadparm (spccbconfig->loadparm);
 
             /* Build the CPU information array after the SCP info */
             spccbcpu = (SPCCB_CPU_INFO*)(spccbconfig+1);
-#ifdef _FEATURE_CPU_RECONFIG
-            for (i = 0; i < MAX_CPU_ENGINES; i++, spccbcpu++)
-#else /*!_FEATURE_CPU_RECONFIG*/
-            for (i = 0; i < sysblk.numcpu; i++, spccbcpu++)
-#endif /*!_FEATURE_CPU_RECONFIG*/
+            for (i = 0; i < MAX_CPU; i++, spccbcpu++)
             {
                 memset (spccbcpu, 0, sizeof(SPCCB_CPU_INFO));
-                spccbcpu->cpuaddr = sysblk.regs[i].cpuad;
+                spccbcpu->cpuaddr = i;
                 spccbcpu->todid = 0;
             }
 
@@ -369,24 +357,24 @@ RADR              abs;                 /* abs addr of data area      */
 U64               dreg;                /* work doubleword            */
 U32               i;                   /* loop counter               */
 struct rusage     usage;               /* RMF type data              */
-static char       lparname[] = "HERCULES";
-static char       physical[] = "PHYSICAL";
+static BYTE       physical[8] =
+              {0xD7,0xC8,0xE8,0xE2,0xC9,0xC3,0xC1,0xD3}; /* PHYSICAL */
 static U64        diag204tod;          /* last diag204 tod           */
-
-    abs = APPLY_PREFIXING (regs->GR_L(r1), regs->PX);
-
-    /* Program check if RMF data is not on a page boundary */
-    if ( (abs & PAGEFRAME_BYTEMASK) != 0x000)
-        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
-
-    /* Program check if RMF data area is outside main storage */
-    if ( abs > regs->mainlim )
-        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Test DIAG204 command word */
     switch (regs->GR_L(r2)) {
 
     case 0x04:
+
+        abs = APPLY_PREFIXING (regs->GR_L(r1), regs->PX);
+
+        /* Program check if RMF data is not on a page boundary */
+        if ( (abs & PAGEFRAME_BYTEMASK) != 0x000)
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+        /* Program check if RMF data area is outside main storage */
+        if ( abs > regs->mainlim )
+            ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
         /* Obtain the TOD clock update lock */
         obtain_lock (&sysblk.todlock);
@@ -412,7 +400,7 @@ static U64        diag204tod;          /* last diag204 tod           */
         memset(hdrinfo, 0, sizeof(DIAG204_HDR));
         hdrinfo->numpart = 1;
         hdrinfo->flags = DIAG204_PHYSICAL_PRESENT;
-        STORE_HW(hdrinfo->physcpu,sysblk.numcpu);
+        STORE_HW(hdrinfo->physcpu,sysblk.cpus);
         STORE_HW(hdrinfo->offown,sizeof(DIAG204_HDR));
         STORE_DW(hdrinfo->diagstck,dreg);
 
@@ -420,33 +408,28 @@ static U64        diag204tod;          /* last diag204 tod           */
         partinfo = (DIAG204_PART*)(hdrinfo + 1);
         memset(partinfo, 0, sizeof(DIAG204_PART));
         partinfo->partnum = 1;
-        partinfo->virtcpu = sysblk.numcpu;
-        for(i = 0; i < sizeof(partinfo->partname); i++)
-            partinfo->partname[i] = host_to_guest((int)lparname[i]);
+        partinfo->virtcpu = sysblk.cpus;
+        get_lparname(partinfo->partname);
 
         /* hercules cpu's */
         getrusage(RUSAGE_SELF,&usage);
         cpuinfo = (DIAG204_PART_CPU*)(partinfo + 1);
-#ifdef _FEATURE_CPU_RECONFIG
-        for(i = 0; i < MAX_CPU_ENGINES;i++)
-          if(sysblk.regs[i].cpuonline)
-#else /*!_FEATURE_CPU_RECONFIG*/
-        for(i = 0; i < sysblk.numcpu;i++)
-#endif /*!_FEATURE_CPU_RECONFIG*/
-        {
-            memset(cpuinfo, 0, sizeof(DIAG204_PART_CPU));
-            STORE_HW(cpuinfo->cpaddr,sysblk.regs[i].cpuad);
-            STORE_HW(cpuinfo->relshare,100);
-            dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) / sysblk.numcpu;
-            dreg = dreg * 1000000 + (i ? 0 : usage.ru_utime.tv_usec + usage.ru_stime.tv_usec);
-            dreg <<= 12;
-            STORE_DW(cpuinfo->totdispatch,dreg);
-            dreg = (U64)(usage.ru_utime.tv_sec) / sysblk.numcpu;
-            dreg = dreg * 1000000 + (i ? 0 : usage.ru_utime.tv_usec );
-            dreg <<= 12;
-            STORE_DW(cpuinfo->effdispatch,dreg);
-            cpuinfo += 1;
-        }
+        for(i = 0; i < MAX_CPU; i++)
+          if (IS_CPU_ONLINE(i))
+          {
+              memset(cpuinfo, 0, sizeof(DIAG204_PART_CPU));
+              STORE_HW(cpuinfo->cpaddr,sysblk.regs[i]->cpuad);
+              STORE_HW(cpuinfo->relshare,100);
+              dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) / sysblk.cpus;
+              dreg = dreg * 1000000 + (i ? 0 : usage.ru_utime.tv_usec + usage.ru_stime.tv_usec);
+              dreg <<= 12;
+              STORE_DW(cpuinfo->totdispatch,dreg);
+              dreg = (U64)(usage.ru_utime.tv_sec) / sysblk.cpus;
+              dreg = dreg * 1000000 + (i ? 0 : usage.ru_utime.tv_usec );
+              dreg <<= 12;
+              STORE_DW(cpuinfo->effdispatch,dreg);
+              cpuinfo += 1;
+          }
 
         /* lpar management */
         getrusage(RUSAGE_CHILDREN,&usage);
@@ -454,12 +437,11 @@ static U64        diag204tod;          /* last diag204 tod           */
         memset(partinfo, 0, sizeof(DIAG204_PART));
         partinfo->partnum = 0;
         partinfo->virtcpu = 1;
-        for(i = 0; i < sizeof(partinfo->partname); i++)
-            partinfo->partname[i] = host_to_guest((int)physical[i]);
+        memcpy(partinfo->partname,physical,sizeof(physical));
         cpuinfo = (DIAG204_PART_CPU*)(partinfo + 1);
         memset(cpuinfo, 0, sizeof(DIAG204_PART_CPU));
 //      STORE_HW(cpuinfo->cpaddr,0);
-        dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) / sysblk.numcpu;
+        dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) / sysblk.cpus;
         dreg = dreg * 1000000 + (i ? 0 : usage.ru_utime.tv_usec + usage.ru_stime.tv_usec);
         dreg <<= 12;
         STORE_DW(cpuinfo->totdispatch,dreg);

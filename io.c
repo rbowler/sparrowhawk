@@ -1,8 +1,8 @@
-/* IO.C         (c) Copyright Roger Bowler, 1994-2003                */
+/* IO.C         (c) Copyright Roger Bowler, 1994-2004                */
 /*              ESA/390 CPU Emulator                                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all I/O instructions of the                */
@@ -47,12 +47,12 @@ int     b2;                             /* Effective addr base       */
 VADR    effective_addr2;                /* Effective address         */
 DEVBLK *dev;                            /* -> device block           */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
 #if defined(_FEATURE_IO_ASSIST)
-    if(regs->sie_state && !regs->sie_pref && !(regs->siebk->ec[0] & SIE_EC0_IOA))
+    if(SIE_STATNB(regs, EC0, IOA) && !regs->sie_pref)
 #endif
        SIE_INTERCEPT(regs);
 
@@ -93,12 +93,12 @@ int     b2;                             /* Effective addr base       */
 VADR    effective_addr2;                /* Effective address         */
 DEVBLK *dev;                            /* -> device block           */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
 #if defined(_FEATURE_IO_ASSIST)
-    if(regs->sie_state && !regs->sie_pref && !(regs->siebk->ec[0] & SIE_EC0_IOA))
+    if(SIE_STATNB(regs, EC0, IOA) && !regs->sie_pref)
 #endif
        SIE_INTERCEPT(regs);
 
@@ -138,7 +138,7 @@ VADR    effective_addr2;                /* Effective address         */
 DEVBLK *dev;                            /* -> device block           */
 PMCW    pmcw;                           /* Path management ctl word  */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -158,7 +158,6 @@ PMCW    pmcw;                           /* Path management ctl word  */
         || (pmcw.flag25 & PMCW25_VISC)
         || (pmcw.flag27 & PMCW27_I)
 #endif
-        || (pmcw.flag25 & PMCW25_RESV)
         || (pmcw.flag26 != 0)
         || (pmcw.flag27 & PMCW27_RESV))
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
@@ -223,7 +222,8 @@ PMCW    pmcw;                           /* Path management ctl word  */
     memcpy (dev->pmcw.intparm, pmcw.intparm, sizeof(FWORD));
 
     /* Update the ISC and A fields */
-    dev->pmcw.flag4 = pmcw.flag4;
+    dev->pmcw.flag4 &= ~(PMCW4_ISC | PMCW4_A);
+    dev->pmcw.flag4 |= (pmcw.flag4 & (PMCW4_ISC | PMCW4_A));
 
     /* Update the path management (LPM and POM) fields */
     dev->pmcw.lpm = pmcw.lpm;
@@ -231,7 +231,8 @@ PMCW    pmcw;                           /* Path management ctl word  */
 
     /* Update zone, VISC, I and S bit */
     dev->pmcw.zone = pmcw.zone;
-    dev->pmcw.flag25 = pmcw.flag25;
+    dev->pmcw.flag25 &= ~(PMCW25_VISC);
+    dev->pmcw.flag25 |= (pmcw.flag25 & PMCW25_VISC);
     dev->pmcw.flag26 = pmcw.flag26;
     dev->pmcw.flag27 = pmcw.flag27;
 
@@ -271,7 +272,7 @@ int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 BYTE    chpid;
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -288,7 +289,7 @@ BYTE    chpid;
         obtain_lock(&sysblk.intlock);
         sysblk.chp_reset[chpid/32] |= 0x80000000 >> (chpid % 32);
         ON_IC_CHANRPT;
-        WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
+        WAKEUP_CPUS_MASK (sysblk.waiting_mask);
         release_lock (&sysblk.intlock);
     }
 
@@ -306,12 +307,12 @@ int     b2;                             /* Effective addr base       */
 VADR    effective_addr2;                /* Effective address         */
 DEVBLK *dev;                            /* -> device block           */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
 #if defined(_FEATURE_IO_ASSIST)
-    if(regs->sie_state && !regs->sie_pref && !(regs->siebk->ec[0] & SIE_EC0_IOA))
+    if(SIE_STATNB(regs, EC0, IOA) && !regs->sie_pref)
 #endif
        SIE_INTERCEPT(regs);
 
@@ -350,7 +351,7 @@ DEF_INST(set_address_limit)
 int     b2;                             /* Effective addr base       */
 VADR    effective_addr2;                /* Effective address         */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -371,12 +372,12 @@ DEF_INST(set_channel_monitor)
 int     b2;                             /* Effective addr base       */
 VADR    effective_addr2;                /* Effective address         */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
 #if defined(_FEATURE_IO_ASSIST)
-    if(regs->sie_state && !regs->sie_pref && !(regs->siebk->ec[0] & SIE_EC0_IOA))
+    if(SIE_STATNB(regs, EC0, IOA) && !regs->sie_pref)
 #endif
         SIE_INTERCEPT(regs);
 
@@ -392,7 +393,7 @@ VADR    effective_addr2;                /* Effective address         */
 
 #if defined(_FEATURE_IO_ASSIST)
     /* Virtual use of I/O Assist features must be intercepted */
-    if(regs->sie_state
+    if(SIE_MODE(regs)
       && ( (regs->GR_L(1) & CHM_GPR1_ZONE)
         || (regs->GR_L(1) & CHM_GPR1_A) ))
         SIE_INTERCEPT(regs);
@@ -420,7 +421,7 @@ VADR    effective_addr2;                /* Effective address         */
 #if defined(_FEATURE_IO_ASSIST)
     else
     {
-    int zone = regs->sie_state ? regs->siebk->zone :
+    int zone = SIE_MODE(regs) ? regs->siebk->zone :
                                ((regs->GR_L(1) & CHM_GPR1_ZONE) >> 16);
 
         /* Set the measurement block origin address */
@@ -451,12 +452,12 @@ VADR    effective_addr2;                /* Effective address         */
 DEVBLK *dev;                            /* -> device block           */
 ORB     orb;                            /* Operation request block   */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
 #if defined(_FEATURE_IO_ASSIST)
-    if(regs->sie_state && !regs->sie_pref && !(regs->siebk->ec[0] & SIE_EC0_IOA))
+    if(SIE_STATNB(regs, EC0, IOA) && !regs->sie_pref)
 #endif
         SIE_INTERCEPT(regs);
 
@@ -528,7 +529,7 @@ int     b2;                             /* Effective addr base       */
 VADR    effective_addr2;                /* Effective address         */
 BYTE    work[32];                       /* Work area                 */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -556,7 +557,7 @@ int     b2;                             /* Effective addr base       */
 VADR    effective_addr2;                /* Effective address         */
 U32     n;                              /* Integer work area         */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -590,7 +591,7 @@ VADR    effective_addr2;                /* Effective address         */
 DEVBLK *dev;                            /* -> device block           */
 SCHIB   schib;                          /* Subchannel information blk*/
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -653,12 +654,12 @@ U32     iointid;                        /* I/O interruption ident    */
 int     icode;                          /* Intercept code            */
 RADR    pfx;                            /* Prefix                    */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
 #if defined(_FEATURE_IO_ASSIST)
-    if(regs->sie_state && !regs->sie_pref && !(regs->siebk->ec[0] & SIE_EC0_IOA))
+    if(SIE_STATNB(regs, EC0, IOA) && !regs->sie_pref)
 #endif
        SIE_INTERCEPT(regs);
 
@@ -698,8 +699,8 @@ RADR    pfx;                            /* Prefix                    */
                 if(icode != SIE_NO_INTERCEPT)
                 {
                     /* Point to SIE copy of PSA in state descriptor */
-                    psa = (void*)(regs->hostregs->mainstor + regs->sie_state + SIE_II_PSA_OFFSET);
-                    STORAGE_KEY(regs->sie_state, regs->hostregs) |= (STORKEY_REF | STORKEY_CHANGE);
+                    psa = (void*)(regs->hostregs->mainstor + SIE_STATE(regs) + SIE_II_PSA_OFFSET);
+                    STORAGE_KEY(SIE_STATE(regs), regs->hostregs) |= (STORKEY_REF | STORKEY_CHANGE);
                 }
                 else
 #endif
@@ -756,12 +757,12 @@ DEVBLK *dev;                            /* -> device block           */
 IRB     irb;                            /* Interruption response blk */
 int     cc;                             /* Condition Code            */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
 #if defined(_FEATURE_IO_ASSIST)
-    if(regs->sie_state && !regs->sie_pref && !(regs->siebk->ec[0] & SIE_EC0_IOA))
+    if(SIE_STATNB(regs, EC0, IOA) && !regs->sie_pref)
 #endif
         SIE_INTERCEPT(regs);
 
@@ -816,12 +817,12 @@ int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 DEVBLK *dev;                            /* -> device block           */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
 #if defined(_FEATURE_IO_ASSIST)
-    if(regs->sie_state && !regs->sie_pref && !(regs->siebk->ec[0] & SIE_EC0_IOA))
+    if(SIE_STATNB(regs, EC0, IOA) && !regs->sie_pref)
 #endif
        SIE_INTERCEPT(regs);
 
@@ -870,7 +871,7 @@ ORB     orb;                            /* Operation request blk @IZW*/
 VADR    ccwaddr;                        /* CCW address for start I/O */
 BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 #if defined(FEATURE_ECPSVM)
     if((inst[1])!=0x02)
     {
@@ -928,7 +929,7 @@ int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 DEVBLK *dev;                            /* -> device block for SIO   */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -950,6 +951,12 @@ DEVBLK *dev;                            /* -> device block for SIO   */
 
     /* Test the device and set the condition code */
     regs->psw.cc = testio (regs, dev, inst[1]);
+    /* Yield time slice so that device handler may get some time */
+    /* to possibly complete an I/O - to prevent a TIO Busy Loop  */
+    if(regs->psw.cc==2)
+    {
+	    sched_yield();
+    }
 
 }
 
@@ -964,7 +971,7 @@ int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 DEVBLK *dev;                            /* -> device block for SIO   */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -1002,12 +1009,12 @@ BYTE    channelid;
 U16     tch_ctl;
 #endif /*defined(_FEATURE_SIE)*/
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
 #if defined(_FEATURE_SIE)
-    if(!regs->sie_state)
+    if(!SIE_MODE(regs))
     {
 #endif /*defined(_FEATURE_SIE)*/
         /* Test for pending interrupt and set condition code */
@@ -1037,7 +1044,7 @@ DEF_INST(store_channel_id)
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -1060,7 +1067,7 @@ int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 int     i;
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -1069,7 +1076,7 @@ int     i;
     effective_addr2 &= 0xFFFF;
 
     /* Hercules has as many channelsets as CPU's */
-    if(effective_addr2 >= MAX_CPU_ENGINES)
+    if(effective_addr2 >= MAX_CPU)
     {
         regs->psw.cc = 3;
         return;
@@ -1090,9 +1097,10 @@ int     i;
 
     /* If the addressed channelset is connected to another
        CPU then return with cc1 */
-    for(i = 0; i < MAX_CPU_ENGINES; i++)
+    for (i = 0; i < MAX_CPU; i++)
     {
-        if(sysblk.regs[i].chanset == effective_addr2)
+        if (IS_CPU_ONLINE(i)
+         && sysblk.regs[i]->chanset == effective_addr2)
         {
             release_lock(&sysblk.intlock);
             regs->psw.cc = 1;
@@ -1122,14 +1130,14 @@ int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 int     i;
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
     SIE_INTERCEPT(regs);
 
     /* Hercules has as many channelsets as CPU's */
-    if(effective_addr2 >= MAX_CPU_ENGINES)
+    if(effective_addr2 >= MAX_CPU)
     {
         regs->psw.cc = 3;
         return;
@@ -1148,13 +1156,14 @@ int     i;
 
     /* If the addressed channelset is connected to another
        CPU then return with cc0 */
-    for(i = 0; i < MAX_CPU_ENGINES; i++)
+    for(i = 0; i < MAX_CPU; i++)
     {
-        if(sysblk.regs[i].chanset == effective_addr2)
+        if (IS_CPU_ONLINE(i)
+         && sysblk.regs[i]->chanset == effective_addr2)
         {
-            if(sysblk.regs[i].cpustate != CPUSTATE_STARTED)
+            if(sysblk.regs[i]->cpustate != CPUSTATE_STARTED)
             {
-                sysblk.regs[i].chanset = 0xFFFF;
+                sysblk.regs[i]->chanset = 0xFFFF;
                 regs->psw.cc = 0;
             }
             else

@@ -1,6 +1,6 @@
 /*********************************************************************/
 /* DYNGUI.C     Hercules External GUI Interface DLL                  */
-/*              (c) Copyright "Fish" (David B. Trout), 2003          */
+/*              (c) Copyright "Fish" (David B. Trout), 2003-2004     */
 /*                                                                   */
 /* Primary contact:   Fish   [fish@infidels.com]                     */
 /*                                                                   */
@@ -8,10 +8,18 @@
 /*                                                                   */
 /* Change log:                                                       */
 /*                                                                   */
-/* dd/mm/yy  Description...                                          */
+/* mm/dd/yy  Description...                                          */
 /* --------  ------------------------------------------------------- */
 /*                                                                   */
-/* 22/06/03  Created.                                                */
+/* 06/22/03  Created.                                                */
+/* 05/29/04  Minor fix to UpdateTargetCPU, remove max MIPS rate      */
+/*           check in UpdateCPUStatus (trust Herc to be correct),    */
+/*           use Herc-calculate MIPS/SIOS rate.                      */
+/* 06/01/04  Minor fix to detect switching to a different displayed  */
+/*           (target) CPU when no other status has otherwise changed.*/
+/* 06/09/04  Minor fix to UpdateDeviceStatus for terminal devices.   */
+/* 07/28/04  Minor fix to UpdateDeviceStatus for non-terminal devices*/
+/* 10/04/04  Change default maxrates interval to 1440 mins (1 day).  */
 /*                                                                   */
 /*********************************************************************/
 
@@ -48,16 +56,19 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Our global variables...    (initialized by our "Initialize" function)
 
-#define  INPUT_STREAM_FILE_PTR    ( stdin )
+#define  INPUT_STREAM_FILE_PTR    ( stdin  )
+#define  OUTPUT_STREAM_FILE_PTR   ( stdout )
 #define  STATUS_STREAM_FILE_PTR   ( stderr )
-#define  MAX_COMMAND_LEN          ( 1024 )
+#define  MAX_COMMAND_LEN          (  1024  )
+#define  DEF_MAXRATES_RPT_INTVL   (  1440  )
 
 #if defined(WIN32) && !defined(HDL_USE_LIBTOOL)
-SYSBLK   *psysblk;                      // (ptr to Herc's SYSBLK structure)
-#define sysblk (*psysblk)
-void *(*panel_command) (void *);
+SYSBLK            *psysblk;                    // (ptr to Herc's SYSBLK structure)
+#define  sysblk  (*psysblk)
+void* (*panel_command) (void*);
 #endif
 static FILE*    fInputStream         = NULL;   // (stdin stream)
+static FILE*    fOutputStream        = NULL;   // (stdout stream)
 static FILE*    fStatusStream        = NULL;   // (stderr stream)
 static int      nInputStreamFileNum  =  -1;    // (file descriptor for stdin stream)
 
@@ -128,35 +139,42 @@ void  UpdateTargetCPU ()
     // unless it's no longer online (enabled), in which case
     // we'll default to the first one we find that's online
 
-    // Note: sysblk.pcpu   =   number of online CPUs
-    //       pTargetCPU_REGS       ->  first online CPU
+    //     sysblk.cpus      =   number online cpu's
+    //     sysblk.pcpu      =   panel target cpu
+    //     pTargetCPU_REGS  ->  panel target cpu
 
-    pTargetCPU_REGS = sysblk.regs + sysblk.pcpu;
+    obtain_lock (&sysblk.intlock);
 
-    if (!pTargetCPU_REGS->cpuonline)    // (requested CPU online/available?)
+    if (sysblk.pcpu >= MAX_CPU)
+        sysblk.pcpu = 0;
+
+    if (sysblk.cpus && IS_CPU_ONLINE(sysblk.pcpu))
+        pTargetCPU_REGS = sysblk.regs[sysblk.pcpu];
+    else
     {
-        // Find first available CPU that's online...
+        pTargetCPU_REGS = NULL;
 
-        int i;                          // (work)
-        sysblk.pcpu = 0;        // (no cpus currently online)
-        pTargetCPU_REGS = NULL;         // (target CPU currently unknown)
-
-        for (i=0; i < MAX_CPU_ENGINES; i++)
+        if (sysblk.cpus)
         {
-            if (sysblk.regs[i].cpuonline)
+            // Default to first cpu we find that's online...
+            int i;
+            for (i=0; i < MAX_CPU; i++)
             {
-                sysblk.pcpu++;  // (count #of online cpus)
-                if (!pTargetCPU_REGS)
-                     pTargetCPU_REGS = sysblk.regs + i;
+                if (IS_CPU_ONLINE(i))
+                {
+                    pTargetCPU_REGS = sysblk.regs[sysblk.pcpu = i];
+                    break;
+                }
             }
         }
+
+        if (!pTargetCPU_REGS)
+        {
+            // Default to CPU #0 (we *MUST* have
+            // a cpu and registers to work with!)
+            pTargetCPU_REGS = sysblk.regs[sysblk.pcpu = 0];
+        }
     }
-
-    // If no CPUs are online yet, we'll default to CPU0000...
-    // (We MUST have a CPU + registers to work with!)
-
-    if (!pTargetCPU_REGS)
-         pTargetCPU_REGS = sysblk.regs;
 
     // If SIE is active, use the guest regs rather than the host regs...
 
@@ -164,11 +182,13 @@ void  UpdateTargetCPU ()
     if (pTargetCPU_REGS->sie_active)
         pTargetCPU_REGS = pTargetCPU_REGS->guestregs;
 #endif
+
+    release_lock(&sysblk.intlock);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-BYTE*  pszInputBuff    = NULL;                  // ptr to buffer
+char*  pszInputBuff    = NULL;                  // ptr to buffer
 int    nInputBuffSize  = (MAX_COMMAND_LEN+1);   // how big the buffer is
 int    nInputLen       = 0;                     // amount of data it's holding
 
@@ -180,7 +200,7 @@ void ReadInputData ( size_t  nTimeoutMillsecs )
     struct timeval  wait_interval_timeval;
     size_t          nMaxBytesToRead;
     int             nBytesRead;
-    BYTE*           pReadBuffer;
+    char*           pReadBuffer;
     int             rc;
 
     // Wait for keyboard input data to arrive...
@@ -254,7 +274,7 @@ void ReadInputData ( size_t  nTimeoutMillsecs )
 
 ///////////////////////////////////////////////////////////////////////////////
 
-BYTE*  pszCommandBuff    = NULL;                // ptr to buffer
+char*  pszCommandBuff    = NULL;                // ptr to buffer
 int    nCommandBuffSize  = (MAX_COMMAND_LEN+1); // how big the buffer is
 int    nCommandLen       = 0;                   // amount of data it's holding
 
@@ -263,7 +283,7 @@ int    nCommandLen       = 0;                   // amount of data it's holding
 
 void  ProcessInputData ()
 {
-    BYTE*  pNewLineChar;
+    char*  pNewLineChar;
 
     // Ensure our buffer is NULL terminated...
 
@@ -311,6 +331,23 @@ BYTE   gui_wants_devlist   = 1;
 BYTE   gui_wants_cpupct    = 0;
 #endif
 
+#ifdef OPTION_MIPS_COUNTING
+
+U32    prev_mips_rate = 0;
+U32    prev_sios_rate = 0;
+
+U32    curr_high_mips_rate = 0;   // (high water mark for current interval)
+U32    curr_high_sios_rate = 0;   // (high water mark for current interval)
+
+U32    prev_high_mips_rate = 0;   // (saved high water mark for previous interval)
+U32    prev_high_sios_rate = 0;   // (saved high water mark for previous interval)
+
+time_t int_start_time      = 0;   // (start time of current interval)
+time_t prev_int_start_time = 0;   // (start time of previous interval)
+U32    rpt_interval        = DEF_MAXRATES_RPT_INTVL;
+
+#endif
+
 ///////////////////////////////////////////////////////////////////////////////
 // Our Hercules "panel_command" override...
 
@@ -353,7 +390,11 @@ void*  gui_panel_command (char* pszCommand)
 
     if (strncasecmp(pszCommand,"]MAINSTOR=",10) == 0)
     {
+#if SIZEOF_INT_P==4
         fprintf(fStatusStream,"MAINSTOR=%d\n",(U32)pTargetCPU_REGS->mainstor);
+#else
+        fprintf(fStatusStream,"MAINSTOR=%ld\n",(U64)pTargetCPU_REGS->mainstor);
+#endif
         fprintf(fStatusStream,"MAINSIZE=%d\n",(U32)sysblk.mainsize);
         return NULL;
     }
@@ -365,6 +406,108 @@ void*  gui_panel_command (char* pszCommand)
         return NULL;
     }
 #endif
+
+    // Process any other special commands we happen to support...
+
+    {
+        // Programming note: must use 'pszCommandWork' because
+        // "parse_args" modifies the original command line (by
+        // inserting embedded NULLS as argument delimiters)
+
+        char*  pszCommandWork;
+        int    nArgs;
+        char*  pszArgPtrArray[MAX_ARGS];
+
+        pszCommandWork = strdup( pszCommand );
+        parse_args( pszCommandWork, MAX_ARGS, pszArgPtrArray, &nArgs );
+
+#ifdef OPTION_MIPS_COUNTING
+        if ( nArgs && strcasecmp( pszArgPtrArray[0], "maxrates" ) == 0 )
+        {
+            logmsg( "%s\n", pszCommand );     // (echo command to console)
+
+            if (nArgs > 1)
+            {
+                if (nArgs > 2)
+                {
+                    logmsg( _("ERROR: Improper command format. Format: \"maxrates [minutes]\"\n") );
+                }
+                else
+                {
+                    int   interval = 0;
+                    BYTE  c;                      /* Character work area       */
+
+                    if ( sscanf( pszArgPtrArray[1], "%d%c", &interval, &c ) != 1 || interval < 1 )
+                        logmsg( _("ERROR: \"%s\" is an invalid maxrates interval.\n"), pszArgPtrArray[1] );
+                    else
+                    {
+                        rpt_interval = interval;
+                        logmsg( _("Maxrates interval = %d minutes.\n"), rpt_interval );
+                    }
+                }
+            }
+            else
+            {
+                char*   pszPrevIntervalStartDateTime;
+                char*   pszCurrIntervalStartDateTime;
+                char*   pszCurrentDateTime;
+                time_t  current_time;
+
+                current_time = time( NULL );
+
+                pszPrevIntervalStartDateTime = strdup( ctime( &prev_int_start_time ) );
+                pszCurrIntervalStartDateTime = strdup( ctime(   &int_start_time    ) );
+                pszCurrentDateTime           = strdup( ctime(    &current_time     ) );
+
+                fprintf
+                (
+                    fOutputStream,
+
+                    "Highest observed MIPS/SIOS rates:\n\n"
+
+                    "  From: %s"
+                    "  To:   %s\n"
+
+                    "        MIPS: %2.1d.%2.2d\n"
+                    "        SIOS: %d\n\n"
+
+                    "  From: %s"
+                    "  To:   %s\n"
+
+                    "        MIPS: %2.1d.%2.2d\n"
+                    "        SIOS: %d\n\n"
+
+                    "Maxrates interval = %d minutes.\n"
+
+                    ,pszPrevIntervalStartDateTime
+                    ,pszCurrIntervalStartDateTime
+
+                    ,prev_high_mips_rate / 1000
+                    ,prev_high_mips_rate % 1000
+                    ,prev_high_sios_rate
+
+                    ,pszCurrIntervalStartDateTime
+                    ,pszCurrentDateTime
+
+                    ,curr_high_mips_rate / 1000
+                    ,curr_high_mips_rate % 1000
+                    ,curr_high_sios_rate
+
+                    ,rpt_interval
+                );
+
+                free( pszPrevIntervalStartDateTime );
+                free( pszCurrIntervalStartDateTime );
+                free( pszCurrentDateTime           );
+            }
+
+            free( pszCommandWork );
+            return NULL;
+        }
+#endif // OPTION_MIPS_COUNTING
+
+        free( pszCommandWork );
+    }
 
     // Ignore "commands" that are actually just comments (start with '*' or '#')
 
@@ -391,8 +534,9 @@ void*  gui_panel_command (char* pszCommand)
 
 QWORD  psw, prev_psw;
 BYTE   wait_bit;
-BYTE   prev_cpustate  = 0xFF;
-U64    prev_instcount = 0;
+BYTE   prev_cpustate       = 0xFF;
+U64    prev_instcount      = 0;
+REGS*  pPrevTargetCPU_REGS = NULL;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Send status information messages back to the gui...
@@ -401,7 +545,7 @@ void  UpdateStatus ()
 {
     BOOL  bStatusChanged = FALSE;   // (whether or not anything has changed)
 
-    store_psw(pTargetCPU_REGS, psw);
+    copy_psw(pTargetCPU_REGS, psw);
     wait_bit = (psw[1] & 0x02);
 
     // The SYS light and %CPU-Utilization
@@ -423,7 +567,7 @@ void  UpdateStatus ()
 #if defined(OPTION_MIPS_COUNTING)
     if (gui_wants_cpupct)
     {
-        BYTE  cpupct[10];
+        char  cpupct[10];
 
         if (CPUSTATE_STOPPED == pTargetCPU_REGS->cpustate)
             strcpy(cpupct,"0");
@@ -448,11 +592,12 @@ void  UpdateStatus ()
     bStatusChanged = FALSE;     // (whether or not anything has changed)
 
     if (0
+        || pTargetCPU_REGS != pPrevTargetCPU_REGS
         || memcmp(prev_psw, psw, sizeof(prev_psw)) != 0
         || prev_cpustate   != pTargetCPU_REGS->cpustate
         || (prev_instcount != (
 #if defined(_FEATURE_SIE)
-                pTargetCPU_REGS->sie_state ?  pTargetCPU_REGS->hostregs->instcount :
+                SIE_MODE(pTargetCPU_REGS) ?  pTargetCPU_REGS->hostregs->instcount :
 #endif
                 pTargetCPU_REGS->instcount)
            )
@@ -462,11 +607,12 @@ void  UpdateStatus ()
 
         // Save new values for next time...
 
+        pPrevTargetCPU_REGS = pTargetCPU_REGS;
         memcpy(prev_psw, psw, sizeof(prev_psw));
         prev_cpustate = pTargetCPU_REGS->cpustate;
         prev_instcount = (
 #if defined(_FEATURE_SIE)
-            pTargetCPU_REGS->sie_state ? pTargetCPU_REGS->hostregs->instcount :
+            SIE_MODE(pTargetCPU_REGS) ? pTargetCPU_REGS->hostregs->instcount :
 #endif
             pTargetCPU_REGS->instcount);
     }
@@ -490,20 +636,11 @@ void  UpdateStatus ()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-
-#ifdef OPTION_MIPS_COUNTING
-U32    mips_rate      = 0;
-U32    prev_mips_rate = 0;
-U32    sios_rate      = 0;
-U32    prev_sios_rate = 0;
-#endif
-
-///////////////////////////////////////////////////////////////////////////////
 // Send status information messages back to the gui...
 
 void  UpdateCPUStatus ()
 {
-    size_t  i;
+    /* size_t  i; */
 
     // CPU status line...  (PSW, status indicators, and instruction count)
 
@@ -530,10 +667,10 @@ void  UpdateCPUStatus ()
         ,wait_bit                                      ? 'W' : '.'
         ,pTargetCPU_REGS->loadstate                    ? 'L' : '.'
         ,pTargetCPU_REGS->checkstop                    ? 'C' : '.'
-        ,pTargetCPU_REGS->psw.prob                     ? 'P' : '.'
+        ,PROBSTATE(&pTargetCPU_REGS->psw)              ? 'P' : '.'
         ,
 #if        defined(_FEATURE_SIE)
-        pTargetCPU_REGS->sie_state                     ? 'S' : '.'
+        SIE_MODE(pTargetCPU_REGS)                      ? 'S' : '.'
 #else  // !defined(_FEATURE_SIE)
                                                                '.'
 #endif //  defined(_FEATURE_SIE)
@@ -545,7 +682,7 @@ void  UpdateCPUStatus ()
 #endif //  defined(_900)
         ,(long long)(
 #if       defined(_FEATURE_SIE)
-        pTargetCPU_REGS->sie_state ? pTargetCPU_REGS->hostregs->instcount :
+        SIE_MODE(pTargetCPU_REGS) ? pTargetCPU_REGS->hostregs->instcount :
 #endif // defined(_FEATURE_SIE)
         pTargetCPU_REGS->instcount)
     );
@@ -554,62 +691,62 @@ void  UpdateCPUStatus ()
 
 #if defined(OPTION_MIPS_COUNTING)
 
-    mips_rate = 0;
-    sios_rate = 0;
-
-#if       !defined(FEATURE_CPU_RECONFIG)
-
-    for (i = 0; i < sysblk.numcpu; i++)
-
-#else  //  defined(FEATURE_CPU_RECONFIG)
-
-    for (i = 0; i < MAX_CPU_ENGINES; i++)
-
-        if(sysblk.regs[i].cpuonline)
-
-#endif // !defined(FEATURE_CPU_RECONFIG)
-
-        {
-            mips_rate  +=  sysblk.regs[i].mipsrate;
-            sios_rate  +=  sysblk.regs[i].siosrate;
-        }
-
-#ifdef OPTION_SHARED_DEVICES
-    sios_rate  +=  sysblk.shrdrate;
-#endif
-
-    // (ignore wildly high MIPS rates...)
-
-    if (mips_rate > 100000)         // (100 MIPS?!!)
-        mips_rate = 0;              // (Not hardly!)
-
     // MIPS rate...
 
-    if (mips_rate != prev_mips_rate)
+    if (sysblk.mipsrate != prev_mips_rate)
     {
         fprintf(fStatusStream,
 
             "MIPS=%2.1d.%2.2d\n"
 
-            , mips_rate / 1000
-            ,(mips_rate % 1000) / 10
+            , sysblk.mipsrate / 1000
+            ,(sysblk.mipsrate % 1000) / 10
         );
 
-        prev_mips_rate = mips_rate;
+        prev_mips_rate = sysblk.mipsrate;
     }
 
     // SIOS rate...
 
-    if (sios_rate != prev_sios_rate)
+    if (sysblk.siosrate != prev_sios_rate)
     {
         fprintf(fStatusStream,
 
             "SIOS=%5d\n"
 
-            ,sios_rate
+            ,sysblk.siosrate
         );
 
-        prev_sios_rate = sios_rate;
+        prev_sios_rate = sysblk.siosrate;
+    }
+
+    // Save high water marks for current interval...
+
+    if (curr_high_mips_rate < sysblk.mipsrate)
+        curr_high_mips_rate = sysblk.mipsrate;
+
+    if (curr_high_sios_rate < sysblk.siosrate)
+        curr_high_sios_rate = sysblk.siosrate;
+
+    {
+        time_t  current_time = 0;
+        U32     elapsed_secs = 0;
+
+        time( &current_time );
+
+        elapsed_secs = current_time - int_start_time;
+
+        if ( elapsed_secs >= ( rpt_interval * 60 ) )
+        {
+            prev_high_mips_rate = curr_high_mips_rate;
+            prev_high_sios_rate = curr_high_sios_rate;
+
+            curr_high_mips_rate = 0;
+            curr_high_sios_rate = 0;
+
+            prev_int_start_time = int_start_time;
+            int_start_time = current_time;
+        }
     }
 
 #endif // defined(OPTION_MIPS_COUNTING)
@@ -725,7 +862,7 @@ void  UpdateRegisters ()
 
 ///////////////////////////////////////////////////////////////////////////////
 
-BYTE  szQueryDeviceBuff[ MAX_DEVICEQUERY_LEN + 1 ]; // (always +1 for safety!)
+char  szQueryDeviceBuff[ MAX_DEVICEQUERY_LEN + 1 ]; // (always +1 for safety!)
 
 ///////////////////////////////////////////////////////////////////////////////
 // Send status information messages back to the gui...
@@ -733,7 +870,7 @@ BYTE  szQueryDeviceBuff[ MAX_DEVICEQUERY_LEN + 1 ]; // (always +1 for safety!)
 void  UpdateDeviceStatus ()
 {
     DEVBLK* pDEVBLK;
-    BYTE*   pDEVClass;
+    char*   pDEVClass;
     BYTE    chOnlineStat, chBusyStat, chPendingStat, chOpenStat;
 
     // Process ALL the devices in the entire configuration each time...
@@ -770,7 +907,8 @@ void  UpdateDeviceStatus ()
                                                                               chPendingStat =
                                                                               chOpenStat    = '0';
 
-        if (pDEVBLK->filename[0] || (pDEVBLK->console && pDEVBLK->connected)) chOnlineStat  = '1';
+        if ((!pDEVBLK->console && pDEVBLK->fd >= 0) ||
+            ( pDEVBLK->console && pDEVBLK->connected))                        chOnlineStat  = '1';
         if (pDEVBLK->busy)                                                    chBusyStat    = '1';
         if (IOPENDING(pDEVBLK))                                               chPendingStat = '1';
         if (pDEVBLK->fd > max(STDIN_FILENO,max(STDOUT_FILENO,STDERR_FILENO))) chOpenStat    = '1';
@@ -849,19 +987,25 @@ void *(*next_debug_call)(REGS *);
 
 void  Initialize ()
 {
+#ifdef OPTION_MIPS_COUNTING
+    int_start_time      = time( NULL );
+    prev_int_start_time = int_start_time;
+#endif
+
     // reject any unload attempt
     gui_nounload = 1;
 
     // Initialize streams...
 
     fInputStream  = INPUT_STREAM_FILE_PTR;
+    fOutputStream = OUTPUT_STREAM_FILE_PTR;
     fStatusStream = STATUS_STREAM_FILE_PTR;
 
     nInputStreamFileNum = fileno(fInputStream);
 
     // Allocate input stream buffer...
 
-    if (!(pszInputBuff = (BYTE*) malloc( nInputBuffSize )))
+    if (!(pszInputBuff = (char *) malloc( nInputBuffSize )))
     {
         fprintf(stderr,
             _("HHCDG006S malloc pszInputBuff failed: %s\n")
@@ -874,7 +1018,7 @@ void  Initialize ()
 
     // Allocate command processing buffer...
 
-    if (!(pszCommandBuff = (BYTE*) malloc( nCommandBuffSize )))
+    if (!(pszCommandBuff = (char *) malloc( nCommandBuffSize )))
     {
         fprintf(stderr,
             _("HHCDG007S malloc pszCommandBuff failed: %s\n")

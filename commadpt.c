@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------*/
 /* Hercules Communication Line Driver                                */
-/* (c) 1999-2003 Roger Bowler & Others                               */
+/* (c) 1999-2004 Roger Bowler & Others                               */
 /* Use of this program is governed by the QPL License                */
 /* Original Author : Ivan Warren                                     */
 /* Prime Maintainer : Ivan Warren                                    */
@@ -17,6 +17,38 @@
  SYSBLK *psysblk;
  #define sysblk (*psysblk)
 #endif
+
+ /*-------------------------------------------------------------------*/
+ /* Ivan Warren 20040227                                              */
+ /* This table is used by channel.c to determine if a CCW code is an  */
+ /* immediate command or not                                          */
+ /* The tape is addressed in the DEVHND structure as 'DEVIMM immed'   */
+ /* 0 : Command is NOT an immediate command                           */
+ /* 1 : Command is an immediate command                               */
+ /* Note : An immediate command is defined as a command which returns */
+ /* CE (channel end) during initialisation (that is, no data is       */
+ /* actually transfered. In this case, IL is not indicated for a CCW  */
+ /* Format 0 or for a CCW Format 1 when IL Suppression Mode is in     */
+ /* effect                                                            */
+ /*-------------------------------------------------------------------*/
+
+static BYTE commadpt_immed_command[256]=
+{ 0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
 COMMADPT_PEND_TEXT;     /* Defined in commadpt.h                     */
                         /* Defines commadpt_pendccw_text array       */
@@ -1253,7 +1285,7 @@ static void msg016w017i(DEVBLK *dev,char *dialt,char *kw,char *kv)
 /*-------------------------------------------------------------------*/
 /* Device Initialisation                                             */
 /*-------------------------------------------------------------------*/
-static int commadpt_init_handler (DEVBLK *dev, int argc, BYTE *argv[])
+static int commadpt_init_handler (DEVBLK *dev, int argc, char *argv[])
 {
     int i;
     int rc;
@@ -1569,7 +1601,7 @@ static int commadpt_init_handler (DEVBLK *dev, int argc, BYTE *argv[])
         dev->commadpt->curpending=COMMADPT_PEND_TINIT;
         if(create_thread(&dev->commadpt->cthread,&sysblk.detattr,commadpt_thread,dev->commadpt))
         {
-            logmsg(D_("HHCCAxxxE create_thread: %s\n"),strerror(errno));
+            logmsg(D_("HHCCA022E create_thread: %s\n"),strerror(errno));
             release_lock(&dev->commadpt->lock);
             return -1;
         }
@@ -1598,8 +1630,8 @@ static char *commadpt_lnctl_names[]={
 /*-------------------------------------------------------------------*/
 /* Query the device definition                                       */
 /*-------------------------------------------------------------------*/
-static void commadpt_query_device (DEVBLK *dev, BYTE **class,
-                int buflen, BYTE *buffer)
+static void commadpt_query_device (DEVBLK *dev, char **class,
+                int buflen, char *buffer)
 {
     *class = "LINE";
     snprintf(buffer,buflen,"%s STA=%s CN=%s, EIB=%s OP=%s",
@@ -2422,12 +2454,26 @@ BYTE    gotdle;                 /* Write routine DLE marker */
 static
 #endif
 DEVHND comadpt_device_hndinfo = {
-        &commadpt_init_handler,
-        &commadpt_execute_ccw,
-        &commadpt_close_device,
-        &commadpt_query_device,
-        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+        &commadpt_init_handler,        /* Device Initialisation      */
+        &commadpt_execute_ccw,         /* Device CCW execute         */
+        &commadpt_close_device,        /* Device Close               */
+        &commadpt_query_device,        /* Device Query               */
+        NULL,                          /* Device Start channel pgm   */
+        NULL,                          /* Device End channel pgm     */
+        NULL,                          /* Device Resume channel pgm  */
+        NULL,                          /* Device Suspend channel pgm */
+        NULL,                          /* Device Read                */
+        NULL,                          /* Device Write               */
+        NULL,                          /* Device Query used          */
+        NULL,                          /* Device Reserve             */
+        NULL,                          /* Device Release             */
+        commadpt_immed_command,        /* Immediate CCW Codes        */
+        NULL,                          /* Signal Adapter Input       */
+        NULL,                          /* Signal Adapter Output      */
+        NULL,                          /* Hercules suspend           */
+        NULL                           /* Hercules resume            */
 };
+
 
 /* Libtool static name colision resolution */
 /* note : lt_dlopen will look for symbol & modulename_LTX_symbol */

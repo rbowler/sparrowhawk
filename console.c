@@ -1,4 +1,4 @@
-/* CONSOLE.C    (c)Copyright Roger Bowler, 1999-2003                 */
+/* CONSOLE.C    (c)Copyright Roger Bowler, 1999-2004                 */
 /*              ESA/390 Console Device Handler                       */
 
 /*-------------------------------------------------------------------*/
@@ -56,18 +56,68 @@
 
 #include "opcode.h"
 
+#include "sr.h"
 
 #if defined(OPTION_DYNAMIC_LOAD) && defined(WIN32) && !defined(HDL_USE_LIBTOOL)
  SYSBLK *psysblk;
  #define sysblk (*psysblk)
  #define config_cnslport (*config_cnslport)
-static 
+static
 #else
 extern
 #endif
        char *config_cnslport;
 
+/*-------------------------------------------------------------------*/
+/* Ivan Warren 20040227                                              */
+/* This table is used by channel.c to determine if a CCW code is an  */
+/* immediate command or not                                          */
+/* The tape is addressed in the DEVHND structure as 'DEVIMM immed'   */
+/* 0 : Command is NOT an immediate command                           */
+/* 1 : Command is an immediate command                               */
+/* Note : An immediate command is defined as a command which returns */
+/* CE (channel end) during initialisation (that is, no data is       */
+/* actually transfered. In this case, IL is not indicated for a CCW  */
+/* Format 0 or for a CCW Format 1 when IL Suppression Mode is in     */
+/* effect                                                            */
+/*-------------------------------------------------------------------*/
+static BYTE constty_immed[256]=
+ /* 0 1 2 3 4 5 6 7 8 9 A B C D E F */
+  { 0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,  /* 00 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 10 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 20 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 30 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 40 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 50 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 60 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 70 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 80 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 90 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* A0 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* B0 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* C0 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* D0 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* E0 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}; /* F0 */
 
+static BYTE loc3270_immed[256]=
+ /* 0 1 2 3 4 5 6 7 8 9 A B C D E F */
+  { 0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,  /* 00 */
+    0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,  /* 10 */
+    0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,  /* 20 */
+    0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,  /* 30 */
+    0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,  /* 40 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 50 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 60 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 70 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 80 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 90 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* A0 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* B0 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* C0 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* D0 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* E0 */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}; /* F0 */
 /*-------------------------------------------------------------------*/
 /* Telnet command definitions                                        */
 /*-------------------------------------------------------------------*/
@@ -192,8 +242,8 @@ static BYTE sba_code[] = { "\x40\xC1\xC2\xC3\xC4\xC5\xC6\xC7"
 #define TNSDEBUG1(_format, _args...) \
         logmsg("console: " _format, ## _args)
 #define TNSDEBUG2(_format, _args...) \
-        logmsg("console: " _format, ## _args) 
-#define TNSDEBUG3(_format, _args...) 
+        logmsg("console: " _format, ## _args)
+#define TNSDEBUG3(_format, _args...)
 #endif
 #if DEBUG_LVL == 3
 #define TNSDEBUG1(_format, _args...) \
@@ -209,7 +259,6 @@ static BYTE sba_code[] = { "\x40\xC1\xC2\xC3\xC4\xC5\xC6\xC7"
 
 #define BUFLEN_3270     65536           /* 3270 Send/Receive buffer  */
 #define BUFLEN_1052     150             /* 1052 Send/Receive buffer  */
-#define SPACE           ((BYTE)' ')
 
 
 #undef  FIX_QWS_BUG_FOR_MCS_CONSOLES
@@ -283,7 +332,7 @@ struct sockaddr_in *sin;
 
     sin->sin_family = AF_INET;
 
-    if(host) 
+    if(host)
     {
     struct hostent *hostent;
 
@@ -425,7 +474,7 @@ int     m, n, x, newlen;
 /* SUBROUTINE TO TRANSLATE A NULL-TERMINATED STRING TO EBCDIC        */
 /*-------------------------------------------------------------------*/
 static BYTE *
-translate_to_ebcdic (BYTE *str)
+translate_to_ebcdic (char *str)
 {
 int     i;                              /* Array subscript           */
 BYTE    c;                              /* Character work area       */
@@ -436,7 +485,7 @@ BYTE    c;                              /* Character work area       */
         str[i] = (isprint(c) ? host_to_guest(c) : SPACE);
     }
 
-    return str;
+    return (BYTE *)str;
 } /* end function translate_to_ebcdic */
 
 
@@ -526,7 +575,7 @@ expect (int csock, BYTE *expected, int len, char *caption)
 int     rc;                             /* Return code               */
 BYTE    buf[512];                       /* Receive buffer            */
 #if 1
-/* TCP/IP for MVS returns the server sequence rather then 
+/* TCP/IP for MVS returns the server sequence rather then
    the client sequence during bin negotiation    19/06/00 Jan Jaeger */
 static BYTE do_bin[] = { IAC, DO, BINARY, IAC, WILL, BINARY };
 static BYTE will_bin[] = { IAC, WILL, BINARY, IAC, DO, BINARY };
@@ -540,10 +589,10 @@ static BYTE will_bin[] = { IAC, WILL, BINARY, IAC, DO, BINARY };
 #if 1
         /* TCP/IP FOR MVS DOES NOT COMPLY TO RFC 1576 THIS IS A BYPASS */
         if(memcmp(buf, expected, len) != 0
-          && !(len == sizeof(will_bin) 
+          && !(len == sizeof(will_bin)
               && memcmp(expected, will_bin, len) == 0
               && memcmp(buf, do_bin, len) == 0) )
-#else 
+#else
     if (memcmp(buf, expected, len) != 0)
 #endif
     {
@@ -589,11 +638,12 @@ static BYTE will_bin[] = { IAC, WILL, BINARY, IAC, DO, BINARY };
 /*      0=negotiation successful, -1=negotiation error               */
 /*-------------------------------------------------------------------*/
 static int
-negotiate(int csock, BYTE *class, BYTE *model, BYTE *extatr, U16 *devn)
+negotiate(int csock, BYTE *class, BYTE *model, BYTE *extatr, U16 *devn,char *group)
 {
 int    rc;                              /* Return code               */
-BYTE  *termtype;                        /* Pointer to terminal type  */
-BYTE  *s;                               /* String pointer            */
+char  *termtype;                        /* Pointer to terminal type  */
+char  *s;                               /* String pointer            */
+BYTE   c;                               /* Trailing character        */
 U16    devnum;                          /* Requested device number   */
 BYTE   buf[512];                        /* Telnet negotiation buffer */
 static BYTE do_term[] = { IAC, DO, TERMINAL_TYPE };
@@ -632,7 +682,7 @@ static BYTE will_naws[] = { IAC, WILL, NAWS };
     if (rc < 0) return -1;
 
     /* Ignore Negotiate About Window Size */
-    if (rc >= sizeof(will_naws) &&
+    if (rc >= (int)sizeof(will_naws) &&
         memcmp (buf, will_naws, sizeof(will_naws)) == 0)
     {
         memmove(buf, &buf[sizeof(will_naws)], (rc - sizeof(will_naws)));
@@ -646,16 +696,33 @@ static BYTE will_naws[] = { IAC, WILL, NAWS };
         return -1;
     }
     buf[rc-2] = '\0';
-    termtype = buf + sizeof(type_is);
+    termtype = (char *)(buf + sizeof(type_is));
     TNSDEBUG2("DBG009: Received IAC SB TERMINAL_TYPE IS %s IAC SE\n",
             termtype);
 
     /* Check terminal type string for device name suffix */
     s = strchr (termtype, '@');
-    if (s != NULL && sscanf (s, "@%hx", &devnum) == 1)
-        *devn = devnum;
+    if(s!=NULL)
+    {
+        if(strlen(s)<16)
+        {
+            strlcpy(group,&s[1],16);
+        }
+    }
     else
+    {
+        group[0]=0;
+    }
+
+    if (s != NULL && sscanf (s, "@%hx%c", &devnum,&c) == 1)
+    {
+        *devn = devnum;
+        group[0]=0;
+    }
+    else
+    {
         *devn = 0xFFFF;
+    }
 
     /* Test for non-display terminal type */
     if (memcmp(termtype, "IBM-", 4) != 0)
@@ -780,9 +847,12 @@ int     eor = 0;                        /* 1=End of record received  */
         dev->readpending = 0;
     }
 
+    /*
+        The following chunk of code was added to try and catch
+        a race condition that may or may no longer still exist.
+    */
     TNSDEBUG1("DBG031: verifying data is available...\n");
     {
-
         fd_set readset;
         struct timeval tv = {0,0};      /* (non-blocking poll) */
 
@@ -817,7 +887,11 @@ int     eor = 0;                        /* 1=End of record received  */
                BUFLEN_3270 - dev->rlen3270, 0);
 
     if (rc < 0) {
-        TNSERROR("DBG023: recv: %s\n", strerror(errno));
+        if ( ECONNRESET == errno )
+            logmsg( _( "HHCTE014E: %4.4X device %4.4X disconnected.\n" ),
+                dev->devtype, dev->devnum );
+        else
+            TNSERROR("DBG023: recv: %s\n", strerror(errno));
         dev->sense[0] = SENSE_EC;
         return (CSW_ATTN | CSW_UC);
     }
@@ -1112,12 +1186,11 @@ BYTE    c;                              /* Character work area       */
 
 } /* end function recv_1052_data */
 
- 
+
 /* o_rset identifies the filedescriptors of all known connections    */
 
 static fd_set o_rset;
 static int    o_mfd;
-
 
 /*-------------------------------------------------------------------*/
 /* NEW CLIENT CONNECTION THREAD                                      */
@@ -1127,7 +1200,7 @@ connect_client (int *csockp)
 {
 int                     rc;             /* Return code               */
 DEVBLK                 *dev;            /* -> Device block           */
-int                     len;            /* Data length               */
+size_t                  len;            /* Data length               */
 int                     csock;          /* Socket for conversation   */
 struct sockaddr_in      client;         /* Client address structure  */
 socklen_t               namelen;        /* Length of client structure*/
@@ -1138,10 +1211,12 @@ U16                     devnum;         /* Requested device number   */
 BYTE                    class;          /* D=3270, P=3287, K=3215/1052 */
 BYTE                    model;          /* 3270 model (2,3,4,5,X)    */
 BYTE                    extended;       /* Extended attributes (Y,N) */
-BYTE                    buf[256];       /* Message buffer            */
-BYTE                    conmsg[256];     /* Connection message        */
-BYTE                    hostmsg[256];    /* Host ID message           */
-BYTE                    rejmsg[256];     /* Rejection message         */
+char                    buf[256];       /* Message buffer            */
+char                    conmsg[256];    /* Connection message        */
+char                    devmsg[16];     /* Device message            */
+char                    hostmsg[256];   /* Host ID message           */
+char                    rejmsg[256];    /* Rejection message         */
+char                    group[16];      /* Console group             */
 
     /* Load the socket address from the thread parameter */
     csock = *csockp;
@@ -1167,7 +1242,7 @@ BYTE                    rejmsg[256];     /* Rejection message         */
             clientip, clientname);
 
     /* Negotiate telnet parameters */
-    rc = negotiate (csock, &class, &model, &extended, &devnum);
+    rc = negotiate (csock, &class, &model, &extended, &devnum, group);
     if (rc != 0)
     {
         close (csock);
@@ -1198,12 +1273,35 @@ BYTE                    rejmsg[256];     /* Rejection message         */
         if (devnum != 0xFFFF && dev->devnum != devnum)
             continue;
 
+        /* Loop if no specific devnum was requested
+         *    AND
+         *    a group was requested OR the device is in a group
+         *       AND
+         *          The groups match
+         * this device is not in that device group */
+        if(devnum==0xFFFF && (group[0] || dev->filename[0]))
+        {
+           if(strncmp(group,dev->filename,16)!=0)
+           {
+               continue;
+           }
+        }
         /* Obtain the device lock */
         obtain_lock (&dev->lock);
 
         /* Test for available device */
         if (dev->connected == 0)
         {
+            /* Check if client allowed on this device */
+            if ( (client.sin_addr.s_addr & dev->acc_ipmask) != dev->acc_ipaddr )
+            {
+                release_lock (&dev->lock);
+                if ( 0xFFFF == devnum )
+                    continue;
+                dev = NULL;
+                break;
+            }
+
             /* Claim this device for the client */
             dev->connected = 1;
             dev->fd = csock;
@@ -1221,7 +1319,7 @@ BYTE                    rejmsg[256];     /* Rejection message         */
             dev->busy = dev->reserved = dev->suspended =
             dev->pending = dev->pcipending = dev->attnpending = 0;
 
-            /* Set device in old readset such that the associated 
+            /* Set device in old readset such that the associated
                file descriptor will be closed after detach */
             FD_SET (dev->fd, &o_rset);
             if (dev->fd > o_mfd) o_mfd = dev->fd;
@@ -1237,54 +1335,92 @@ BYTE                    rejmsg[256];     /* Rejection message         */
     } /* end for(dev) */
 
     /* Build connection message for client */
-    len = snprintf (hostmsg, sizeof(hostmsg),
+    snprintf (hostmsg, sizeof(hostmsg),
                 "running on %s (%s %s)",
                 hostinfo.nodename, hostinfo.sysname,
                 hostinfo.release);
-    len = snprintf (conmsg, sizeof(conmsg),
+    snprintf (conmsg, sizeof(conmsg),
                 "Hercules version %s built at %s %s",
                 VERSION, __DATE__, __TIME__);
 
-    if (dev != NULL)
-        len += sprintf (conmsg + len, " device %4.4X", dev->devnum);
+    if (dev)
+    {
+        snprintf (devmsg, sizeof(devmsg), " device %4.4X", dev->devnum);
+        strlcat(conmsg,devmsg,sizeof(conmsg));
+    }
 
     /* Reject the connection if no available console device */
     if (dev == NULL)
     {
         /* Build the rejection message */
         if (devnum == 0xFFFF)
-            len = sprintf (rejmsg,
-                    "Connection rejected, no available %s device",
-       (class=='D' ? "3270" : (class=='P' ? "3287" : "1052 or 3215")));
+        {
+            if(!group[0])
+            {
+                snprintf (rejmsg, sizeof(rejmsg),
+                        "Connection rejected, no available %s device",
+                        (class=='D' ? "3270" : (class=='P' ? "3287" : "1052 or 3215")));
+            }
+            else
+            {
+                snprintf (rejmsg, sizeof(rejmsg),
+                        "Connection rejected, no available %s devices in the %s group",
+                        (class=='D' ? "3270" : (class=='P' ? "3287" : "1052 or 3215")),group);
+            }
+        }
         else
-            len = sprintf (rejmsg,
+        {
+            snprintf (rejmsg, sizeof(rejmsg),
                     "Connection rejected, device %4.4X unavailable",
                     devnum);
+        }
 
         TNSDEBUG1( "DBG019: %s\n", rejmsg);
 
         /* Send connection rejection message to client */
         if (class != 'K')
         {
-            len = sprintf (buf,
+            snprintf (buf, sizeof(buf),
                         "\xF5\x40\x11\x40\x40\x1D\x60%s"
                         "\x11\xC1\x50\x1D\x60%s"
                         "\x11\xC2\x60\x1D\x60%s",
                         translate_to_ebcdic(conmsg),
                         translate_to_ebcdic(hostmsg),
                         translate_to_ebcdic(rejmsg));
-            buf[len++] = IAC;
-            buf[len++] = EOR_MARK;
+
+            len = strlen(buf);
+
+            if (len < sizeof(buf))
+            {
+                buf[len++] = IAC;
+            }
+            else
+            {
+                ASSERT(FALSE);
+            }
+
+            if (len < sizeof(buf))
+            {
+                buf[len++] = EOR_MARK;
+            }
+            else
+            {
+                ASSERT(FALSE);
+            }
         }
         else
         {
-            len = sprintf (buf, "%s\r\n%s\r\n%s\r\n", conmsg, hostmsg, rejmsg);
+            snprintf (buf, sizeof(buf), "%s\r\n%s\r\n%s\r\n", conmsg, hostmsg, rejmsg);
         }
+
         if (class != 'P')  /* do not write connection resp on 3287 */
-        rc = send_packet (csock, buf, len, "CONNECTION RESPONSE");
+        {
+            len = strlen(buf);
+            rc = send_packet (csock, (BYTE *)buf, len, "CONNECTION RESPONSE");
+        }
 
         /* Close the connection and terminate the thread */
-        sleep (5);
+        SLEEP (5);
         close (csock);
         if (clientip) free(clientip);
         return NULL;
@@ -1296,25 +1432,49 @@ BYTE                    rejmsg[256];     /* Rejection message         */
     /* Send connection message to client */
     if (class != 'K')
     {
-        len = sprintf (buf,
+        snprintf (buf, sizeof(buf),
                     "\xF5\x40\x11\x40\x40\x1D\x60%s"
                     "\x11\xC1\x50\x1D\x60%s",
                     translate_to_ebcdic(conmsg),
                     translate_to_ebcdic(hostmsg));
-        buf[len++] = IAC;
-        buf[len++] = EOR_MARK;
+
+        len = strlen(buf);
+
+        if (len < sizeof(buf))
+        {
+            buf[len++] = IAC;
+        }
+        else
+        {
+            ASSERT(FALSE);
+        }
+
+        if (len < sizeof(buf))
+        {
+            buf[len++] = EOR_MARK;
+        }
+        else
+        {
+            ASSERT(FALSE);
+        }
     }
     else
     {
-        len = sprintf (buf, "%s\r\n%s\r\n", conmsg, hostmsg);
+        snprintf (buf, sizeof(buf), "%s\r\n%s\r\n", conmsg, hostmsg);
     }
+
     if (class != 'P')  /* do not write connection resp on 3287 */
-    rc = send_packet (csock, buf, len, "CONNECTION RESPONSE");
+    {
+        len = strlen(buf);
+        rc = send_packet (csock, (BYTE *)buf, len, "CONNECTION RESPONSE");
+    }
 
     /* Raise attention interrupt for the device */
     if (class != 'P')  /* do not raise attention for  3287 */
-    /* rc = device_attention (dev, CSW_ATTN); *ISW3274DR* - Removed */
-    rc = device_attention (dev, CSW_DE);        /* *ISW3274DR - Added */
+    {
+        /* rc = device_attention (dev, CSW_ATTN); ISW3274DR - Removed */
+        rc = device_attention (dev, CSW_DE);   /* ISW3274DR - Added   */
+    }
 
     /* Signal connection thread to redrive its select loop */
     signal_thread (sysblk.cnsltid, SIGUSR2);
@@ -1394,7 +1554,7 @@ BYTE                    unitstat;       /* Status after receive data */
 
         logmsg (_("HHCTE002W Waiting for port %u to become free\n"),
                 ntohs(server->sin_port));
-        sleep(10);
+        SLEEP(10);
     } /* end while */
 
     if (rc != 0)
@@ -1422,11 +1582,17 @@ BYTE                    unitstat;       /* Status after receive data */
     while (console_cnslcnt) {
 
         /* Initialize the select parameters */
-        maxfd = lsock;
-        FD_ZERO (&readset);
-        FD_SET (lsock, &readset);
 
-        FD_ZERO(&c_rset);
+        FD_ZERO ( &readset );
+        FD_SET  ( lsock, &readset );
+#if defined( OPTION_WAKEUP_SELECT_VIA_PIPE )
+        FD_SET  ( sysblk.cnslrpipe, &readset );
+        maxfd = lsock > sysblk.cnslrpipe ? lsock : sysblk.cnslrpipe;
+#else
+        maxfd = lsock;
+#endif
+
+        FD_ZERO ( &c_rset );
         c_mfd = 0;
 
         /* Include the socket for each connected console */
@@ -1434,7 +1600,7 @@ BYTE                    unitstat;       /* Status after receive data */
         {
             if (dev->console
                 && dev->connected
-// NOT S/370    && (dev->pmcw.flag5 & PMCW5_E) 
+// NOT S/370    && (dev->pmcw.flag5 & PMCW5_E)
                 && (dev->pmcw.flag5 & PMCW5_V) )
             {
                 FD_SET (dev->fd, &c_rset);
@@ -1464,23 +1630,21 @@ BYTE                    unitstat;       /* Status after receive data */
 
 
         /* Wait for a file descriptor to become ready */
-#ifdef WIN32
-    {
-        struct timeval tv={0,500000};   /* half a second */
-        rc = select ( maxfd+1, &readset, NULL, NULL, &tv );
-    }
-#else /* WIN32 */
         rc = select ( maxfd+1, &readset, NULL, NULL, NULL );
-#endif /* WIN32 */
-
-        if (rc == 0) continue;
-
         if (rc < 0 )
         {
-            if (errno == EINTR) continue;
+            if ( EINTR == errno ) continue;
             TNSERROR("DBG028: select: %s\n", strerror(errno));
             break;
         }
+#if defined( OPTION_WAKEUP_SELECT_VIA_PIPE )
+        if ( FD_ISSET( sysblk.cnslrpipe, &readset ) )
+        {
+            BYTE c;
+            VERIFY( read( sysblk.cnslrpipe, &c, 1 ) == 1 );
+            continue;
+        }
+#endif
 
         /* If a client connection request has arrived then accept it */
         if (FD_ISSET(lsock, &readset))
@@ -1546,7 +1710,7 @@ BYTE                    unitstat;       /* Status after receive data */
                 /* Indicate that data is available at the device */
                 if(dev->rlen3270)
                     dev->readpending = 1;
-  
+
                 /* Release the device lock */
                 release_lock (&dev->lock);
 
@@ -1558,7 +1722,7 @@ BYTE                    unitstat;       /* Status after receive data */
                 /* console: sending 3270 data */
                 /*   +0000   F5C2FFEF     */
                 /*   console: Packet received length=7 */
-                /*   +0000   016CD902 00FFEF */   
+                /*   +0000   016CD902 00FFEF */
                 /*           I do not know what is this */
                 /*   console: CCUU attention requests raised */
                 if (dev->devtype != 0x3287)
@@ -1592,7 +1756,7 @@ BYTE                    unitstat;       /* Status after receive data */
     free(server);
 
     logmsg (_("HHCTE004I Console connection thread terminated\n"));
-
+    sysblk.cnsltid = 0;
     return NULL;
 
 } /* end function console_connection_handler */
@@ -1601,7 +1765,7 @@ BYTE                    unitstat;       /* Status after receive data */
 static int
 console_initialise()
 {
-    if(!(console_cnslcnt++))
+    if(!(console_cnslcnt++) && !sysblk.cnsltid)
     {
         if ( create_thread (&sysblk.cnsltid, &sysblk.detattr,
                             console_connection_handler, NULL) )
@@ -1634,10 +1798,13 @@ console_remove(DEVBLK *dev)
 /* INITIALIZE THE 3270 DEVICE HANDLER                                */
 /*-------------------------------------------------------------------*/
 static int
-loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
+loc3270_init_handler ( DEVBLK *dev, int argc, char *argv[] )
 {
+    int ac = 0;
+    /*
     UNREFERENCED(argc);
     UNREFERENCED(argv);
+    */
 
     /* Indicate that this is a console device */
     dev->console = 1;
@@ -1661,16 +1828,65 @@ loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     dev->devid[3] = 0x1D;
     dev->devid[4] = 0x32; /* Device type is 3278-2 */
     if ((dev->devtype & 0xFF)==0x70)
-     {
-    dev->devid[5] = 0x78;
-    dev->devid[6] = 0x02;
-     }
+    {
+        dev->devid[5] = 0x78;
+        dev->devid[6] = 0x02;
+    }
     else
-     {
-     dev->devid[5] = dev->devtype & 0xFF; /* device type is 3287-1 */
-     dev->devid[6] = 0x01;
-     }
+    {
+        dev->devid[5] = dev->devtype & 0xFF; /* device type is 3287-1 */
+        dev->devid[6] = 0x01;
+    }
     dev->numdevid = 7;
+
+    dev->filename[0] = 0;
+    dev->acc_ipaddr = 0;
+    dev->acc_ipmask = 0;
+
+    if (argc > 0)   // group name?
+    {
+        if ('*' == argv[ac][0] && '\0' == argv[ac][1])
+            ;   // NOP (not really a group name; an '*' is
+                // simply used as an argument place holder)
+        else
+            strlcpy(dev->filename,argv[ac],sizeof(dev->filename));
+
+        argc--; ac++;
+        if (argc > 0)   // ip address?
+        {
+            if ((dev->acc_ipaddr = inet_addr(argv[ac])) == (in_addr_t)(-1))
+            {
+                logmsg(_("HHCTE011E Device %4.4X: Invalid IP address: %s\n"),
+                    dev->devnum, argv[ac]);
+                return -1;
+            }
+            else
+            {
+                argc--; ac++;
+                if (argc > 0)   // ip addr mask?
+                {
+                    if ((dev->acc_ipmask = inet_addr(argv[ac])) == (in_addr_t)(-1))
+                    {
+                        logmsg(_("HHCTE012E Device %4.4X: Invalid mask value: %s\n"),
+                            dev->devnum, argv[ac]);
+                        return -1;
+                    }
+                    else
+                    {
+                        argc--; ac++;
+                        if (argc > 0)   // too many args?
+                        {
+                            logmsg(_("HHCTE013E Device %4.4X: Extraneous argument(s): %s...\n"),
+                                dev->devnum, argv[ac] );
+                            return -1;
+                        }
+                    }
+                }
+                else
+                    dev->acc_ipmask = (in_addr_t)(-1);
+            }
+        }
+    }
 
     return console_initialise();
 } /* end function loc3270_init_handler */
@@ -1680,17 +1896,59 @@ loc3270_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 /* QUERY THE 3270 DEVICE DEFINITION                                  */
 /*-------------------------------------------------------------------*/
 static void
-loc3270_query_device (DEVBLK *dev, BYTE **class,
-                int buflen, BYTE *buffer)
+loc3270_query_device (DEVBLK *dev, char **class,
+                int buflen, char *buffer)
 {
-
     *class = "DSP";
 
     if (dev->connected)
+    {
         snprintf (buffer, buflen, "%s",
-                (BYTE*)inet_ntoa(dev->ipaddr));
+            inet_ntoa(dev->ipaddr));
+    }
     else
-        buffer[0] = '\0';
+    {
+        char  acc[48];
+
+        if (dev->acc_ipaddr || dev->acc_ipmask)
+        {
+            char  ip   [16];
+            char  mask [16];
+            struct in_addr  xxxx;
+
+            xxxx.s_addr = dev->acc_ipaddr;
+
+            snprintf( ip, sizeof( ip ),
+                "%s", inet_ntoa( xxxx ));
+
+            xxxx.s_addr = dev->acc_ipmask;
+
+            snprintf( mask, sizeof( mask ),
+                "%s", inet_ntoa( xxxx ));
+
+            snprintf( acc, sizeof( acc ),
+                "%s mask %s", ip, mask );
+        }
+        else
+            acc[0] = 0;
+
+        if (dev->filename[0])
+        {
+            snprintf(buffer, buflen,
+                "GROUP=%s%s%s",
+                dev->filename, acc[0] ? " " : "", acc);
+        }
+        else
+        {
+            if (acc[0])
+            {
+                snprintf(buffer, buflen,
+                    "* %s", acc);
+            }
+            else
+                buffer[0] = 0;
+        }
+    }
 
 } /* end function loc3270_query_device */
 
@@ -1708,11 +1966,124 @@ loc3270_close_device ( DEVBLK *dev )
 
 
 /*-------------------------------------------------------------------*/
+/* 3270 Hercules Suspend/Resume text units                           */
+/*-------------------------------------------------------------------*/
+#define SR_DEV_3270_BUF          ( SR_DEV_3270 | 0x001 )
+#define SR_DEV_3270_EWA          ( SR_DEV_3270 | 0x002 )
+#define SR_DEV_3270_POS          ( SR_DEV_3270 | 0x003 )
+
+/*-------------------------------------------------------------------*/
+/* 3270 Hercules Suspend Routine                                     */
+/*-------------------------------------------------------------------*/
+static int
+loc3270_hsuspend(DEVBLK *dev, void *file)
+{
+    size_t rc, len;
+    BYTE buf[BUFLEN_3270];
+
+    if (!dev->connected) return 0;
+    SR_WRITE_VALUE(file, SR_DEV_3270_POS, dev->pos3270, sizeof(dev->pos3270));
+    SR_WRITE_VALUE(file, SR_DEV_3270_EWA, dev->ewa3270, 1);
+    obtain_lock(&dev->lock);
+    rc = solicit_3270_data (dev, R3270_RB);
+    if (rc == 0 && dev->rlen3270 > 0 && dev->rlen3270 <= BUFLEN_3270)
+    {
+        len = dev->rlen3270;
+        memcpy (buf, dev->buf, len);
+    }
+    else
+        len = 0;
+    release_lock(&dev->lock);
+    if (len)
+        SR_WRITE_BUF(file, SR_DEV_3270_BUF, buf, len);
+    return 0;
+}
+
+/*-------------------------------------------------------------------*/
+/* 3270 Hercules Resume Routine                                      */
+/*-------------------------------------------------------------------*/
+static int
+loc3270_hresume(DEVBLK *dev, void *file)
+{
+    size_t rc, key, len, rbuflen = 0, pos = 0;
+    BYTE *rbuf = NULL, buf[BUFLEN_3270];
+
+    do {
+        SR_READ_HDR(file, key, len);
+        switch (key) {
+        case SR_DEV_3270_POS:
+            SR_READ_VALUE(file, len, &pos, sizeof(pos));
+            break;
+        case SR_DEV_3270_EWA:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ewa3270 = rc;
+            break;
+        case SR_DEV_3270_BUF:
+            rbuflen = len;
+            rbuf = malloc(len);
+            if (rbuf == NULL)
+            {
+                logmsg(_("HHCTE090E %4.4X malloc() failed for resume buf: %s\n"),
+                       dev->devnum, strerror(errno));
+                return 0;
+            }
+            SR_READ_BUF(file, rbuf, rbuflen);
+            break;
+        default:
+            SR_READ_SKIP(file, len);
+            break;
+        } /* switch (key) */
+    } while ((key & SR_DEV_MASK) == SR_DEV_3270);
+
+    /* Dequeue any I/O interrupts for this device */
+    DEQUEUE_IO_INTERRUPT(&dev->ioint);
+    DEQUEUE_IO_INTERRUPT(&dev->pciioint);
+    DEQUEUE_IO_INTERRUPT(&dev->attnioint);
+
+    /* Restore the 3270 screen image if connected and buf was provided */
+    if (dev->connected && rbuf && rbuflen > 3)
+    {
+        obtain_lock(&dev->lock);
+
+        /* Construct buffer to send to the 3270 */
+        len = 0;
+        buf[len++] = dev->ewa3270 ? R3270_EWA : R3270_EW;
+        buf[len++] = 0xC2;
+        memcpy (&buf[len], &rbuf[3], rbuflen - 3);
+        len += rbuflen - 3;
+        buf[len++] = O3270_SBA;
+        buf[len++] = rbuf[1];
+        buf[len++] = rbuf[2];
+        buf[len++] = O3270_IC;
+
+        /* Double up any IAC's in the data */
+        len = double_up_iac (buf, len);
+
+        /* Append telnet EOR marker */
+        buf[len++] = IAC;
+        buf[len++] = EOR_MARK;
+
+        /* Restore the 3270 screen */
+        rc = send_packet(dev->fd, buf, len, "3270 data");
+
+        dev->pos3270 = pos;
+
+        release_lock(&dev->lock);
+    }
+
+    if (rbuf) free(rbuf);
+
+    return 0;
+}
+
+
+/*-------------------------------------------------------------------*/
 /* INITIALIZE THE 1052/3215 DEVICE HANDLER                           */
 /*-------------------------------------------------------------------*/
 static int
-constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
+constty_init_handler ( DEVBLK *dev, int argc, char *argv[] )
 {
+    int ac=0;
 
     /* Indicate that this is a console device */
     dev->console = 1;
@@ -1728,15 +2099,19 @@ constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 
     /* Assume we want to prompt */
     dev->prompt1052 = 1;
-    
+
     /* Is there an argument? */
-    if (argc == 1)
+    if (argc > 0)
     {
         /* Look at the argument and set noprompt flag if specified. */
-        if (strcmp(argv[0], "noprompt") == 0)
+        if (strcasecmp(argv[ac], "noprompt") == 0)
+        {
             dev->prompt1052 = 0;
+            ac++; argc--;
+        }
+        // (else it's a group name...)
     }
-    
+
     if(!sscanf(dev->typname,"%hx",&(dev->devtype)))
         dev->devtype = 0x1052;
 
@@ -1750,8 +2125,56 @@ constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
     dev->devid[6] = 0x00;
     dev->numdevid = 7;
 
-    return console_initialise();
+    dev->filename[0] = 0;
+    dev->acc_ipaddr = 0;
+    dev->acc_ipmask = 0;
 
+    if (argc > 0)   // group name?
+    {
+        if ('*' == argv[ac][0] && '\0' == argv[ac][1])
+            ;   // NOP (not really a group name; an '*' is
+                // simply used as an argument place holder)
+        else
+            strlcpy(dev->filename,argv[ac],sizeof(dev->filename));
+
+        argc--; ac++;
+        if (argc > 0)   // ip address?
+        {
+            if ((dev->acc_ipaddr = inet_addr(argv[ac])) == (in_addr_t)(-1))
+            {
+                logmsg(_("HHCTE011E Device %4.4X: Invalid IP address: %s\n"),
+                    dev->devnum, argv[ac]);
+                return -1;
+            }
+            else
+            {
+                argc--; ac++;
+                if (argc > 0)   // ip addr mask?
+                {
+                    if ((dev->acc_ipmask = inet_addr(argv[ac])) == (in_addr_t)(-1))
+                    {
+                        logmsg(_("HHCTE012E Device %4.4X: Invalid mask value: %s\n"),
+                            dev->devnum, argv[ac]);
+                        return -1;
+                    }
+                    else
+                    {
+                        argc--; ac++;
+                        if (argc > 0)   // too many args?
+                        {
+                            logmsg(_("HHCTE013E Device %4.4X: Extraneous argument(s): %s...\n"),
+                                dev->devnum, argv[ac] );
+                            return -1;
+                        }
+                    }
+                }
+                else
+                    dev->acc_ipmask = (in_addr_t)(-1);
+            }
+        }
+    }
+
+    return console_initialise();
 } /* end function constty_init_handler */
 
 
@@ -1759,21 +2182,71 @@ constty_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
 /* QUERY THE 1052/3215 DEVICE DEFINITION                             */
 /*-------------------------------------------------------------------*/
 static void
-constty_query_device (DEVBLK *dev, BYTE **class,
-                int buflen, BYTE *buffer)
+constty_query_device (DEVBLK *dev, char **class,
+                int buflen, char *buffer)
 {
-
     *class = "CON";
 
     if (dev->connected)
-        snprintf (buffer, buflen, "%s ",
-                (BYTE*)inet_ntoa(dev->ipaddr));
+    {
+        snprintf (buffer, buflen, "%s%s",
+            inet_ntoa(dev->ipaddr),
+            dev->prompt1052 ? "" : " noprompt");
+    }
     else
-        buffer[0] = '\0';
+    {
+        char  acc[48];
 
-    if (dev->prompt1052 == 0)
-        strcat(buffer,"noprompt");
+        if (dev->acc_ipaddr || dev->acc_ipmask)
+        {
+            char  ip   [16];
+            char  mask [16];
+            struct in_addr  xxxx;
 
+            xxxx.s_addr = dev->acc_ipaddr;
+
+            snprintf( ip, sizeof( ip ),
+                "%s", inet_ntoa( xxxx ));
+
+            xxxx.s_addr = dev->acc_ipmask;
+
+            snprintf( mask, sizeof( mask ),
+                "%s", inet_ntoa( xxxx ));
+
+            snprintf( acc, sizeof( acc ),
+                "%s mask %s", ip, mask );
+        }
+        else
+            acc[0] = 0;
+
+        if (dev->filename[0])
+        {
+            snprintf(buffer, buflen,
+                "GROUP=%s%s%s%s",
+                dev->filename,
+                !dev->prompt1052 ? " noprompt" : "",
+                acc[0] ? " " : "", acc);
+        }
+        else
+        {
+            if (acc[0])
+            {
+                if (!dev->prompt1052)
+                    snprintf(buffer, buflen,
+                        "noprompt %s", acc);
+                else
+                    snprintf(buffer, buflen,
+                        "* %s", acc);
+            }
+            else
+            {
+                if (!dev->prompt1052)
+                    strlcpy(buffer,"noprompt",buflen);
+                else
+                    buffer[0] = 0;
+            }
+        }
+    }
 } /* end function constty_query_device */
 
 
@@ -1821,7 +2294,7 @@ int     i;
                     *pos = ((buf[i+1] & 0x3F) << 6)
                                  | (buf[i+2] & 0x3F);
         break;
-            
+
     /* The Start Field Extended and Modify Field orders have
        a count byte followed by a variable number of type-
        attribute pairs, and advance the screen position by 1 */
@@ -2021,7 +2494,9 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
         /* Reset the buffer address */
         dev->pos3270 = 0;
 
+    /*
         *residual = 0;
+    */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -2046,6 +2521,7 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
     /*---------------------------------------------------------------*/
         dev->pos3270 = 0;
         cmd = R3270_EW;
+        dev->ewa3270 = 0;
         goto write;
 
     case L3270_EWA:
@@ -2054,6 +2530,7 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
     /*---------------------------------------------------------------*/
         dev->pos3270 = 0;
         cmd = R3270_EWA;
+        dev->ewa3270 = 1;
         goto write;
 
     case L3270_WSF:
@@ -2083,7 +2560,7 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
         /* Calculate number of bytes to move and residual byte count */
         num = sizeof(buf) / 2;
         num = (count < num) ? count : num;
-        if(cmd == R3270_EAU) 
+        if(cmd == R3270_EAU)
            num = 0;
         *residual = count - num;
 
@@ -2122,7 +2599,7 @@ BYTE            buf[BUFLEN_3270];       /* tn3270 write buffer       */
 
             /* Save the screen position at completion of the write.
                This is necessary in case a Read Buffer command is chained
-               from another write or read, this does not apply for the 
+               from another write or read, this does not apply for the
                write structured field command */
             if(cmd != R3270_WSF)
                 get_screen_pos (&dev->pos3270, iobuf+1, num-1);
@@ -2413,7 +2890,7 @@ BYTE    stat;                           /* Unit status               */
     if (dev->connected == 0 && !IS_CCW_SENSE(code))
     {
         dev->sense[0] = SENSE_IR;
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        *unitstat = CSW_UC;
         return;
     }
 
@@ -2442,16 +2919,20 @@ BYTE    stat;                           /* Unit status               */
             iobuf[len] = c;
         } /* end for(len) */
 
+        ASSERT(len == num);
+
         /* Perform end of record processing if not data-chaining */
         if ((flags & CCW_FLAGS_CD) == 0)
         {
             /* Append carriage return and newline if required */
             if (code == 0x09)
             {
-                iobuf[len++] = '\r';
-                iobuf[len++] = '\n';
-            }
+                if (len < BUFLEN_1052)
+                    iobuf[len++] = '\r';
 
+                if (len < BUFLEN_1052)
+                    iobuf[len++] = '\n';
+            }
         } /* end if(!data-chaining) */
 
         /* Send the data to the client */
@@ -2480,14 +2961,15 @@ BYTE    stat;                           /* Unit status               */
     /*---------------------------------------------------------------*/
 
         /* Solicit console input if no data in the device buffer */
-        if (dev->keybdrem == 0)
+        if (!dev->keybdrem)
         {
             /* Display prompting message on console if allowed */
-            if (dev->prompt1052 == 1)
+            if (dev->prompt1052)
             {
-                len = sprintf (dev->buf,
-                        _("HHCTE006A Enter input for console device %4.4X%c\n"),
-                        dev->devnum,'\r');
+                snprintf ((char *)dev->buf, dev->bufsize,
+                        _("HHCTE006A Enter input for console device %4.4X\r\n"),
+                        dev->devnum);
+                len = strlen((char *)dev->buf);
                 rc = send_packet (dev->fd, dev->buf, len, NULL);
                 if (rc < 0)
                 {
@@ -2546,8 +3028,10 @@ BYTE    stat;                           /* Unit status               */
     /*---------------------------------------------------------------*/
     /* AUDIBLE ALARM                                                 */
     /*---------------------------------------------------------------*/
-        rc = send_packet (dev->fd, "\a", 1, NULL);
+        rc = send_packet (dev->fd, (BYTE *)"\a", 1, NULL);
+    /*
         *residual = 0;
+    */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
@@ -2602,11 +3086,24 @@ BYTE    stat;                           /* Unit status               */
 static
 #endif
 DEVHND constty_device_hndinfo = {
-        &constty_init_handler,
-        &constty_execute_ccw,
-        &constty_close_device,
-        &constty_query_device,
-        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+        &constty_init_handler,         /* Device Initialisation      */
+        &constty_execute_ccw,          /* Device CCW execute         */
+        &constty_close_device,         /* Device Close               */
+        &constty_query_device,         /* Device Query               */
+        NULL,                          /* Device Start channel pgm   */
+        NULL,                          /* Device End channel pgm     */
+        NULL,                          /* Device Resume channel pgm  */
+        NULL,                          /* Device Suspend channel pgm */
+        NULL,                          /* Device Read                */
+        NULL,                          /* Device Write               */
+        NULL,                          /* Device Query used          */
+        NULL,                          /* Device Reserve             */
+        NULL,                          /* Device Release             */
+        constty_immed,                 /* Immediate CCW Codes        */
+        NULL,                          /* Signal Adapter Input       */
+        NULL,                          /* Signal Adapter Output      */
+        NULL,                          /* Hercules suspend           */
+        NULL                           /* Hercules resume            */
 };
 
 /* Libtool static name colision resolution */
@@ -2624,11 +3121,24 @@ DEVHND constty_device_hndinfo = {
 static
 #endif
 DEVHND loc3270_device_hndinfo = {
-        &loc3270_init_handler,
-        &loc3270_execute_ccw,
-        &loc3270_close_device,
-        &loc3270_query_device,
-        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+        &loc3270_init_handler,         /* Device Initialisation      */
+        &loc3270_execute_ccw,          /* Device CCW execute         */
+        &loc3270_close_device,         /* Device Close               */
+        &loc3270_query_device,         /* Device Query               */
+        NULL,                          /* Device Start channel pgm   */
+        NULL,                          /* Device End channel pgm     */
+        NULL,                          /* Device Resume channel pgm  */
+        NULL,                          /* Device Suspend channel pgm */
+        NULL,                          /* Device Read                */
+        NULL,                          /* Device Write               */
+        NULL,                          /* Device Query used          */
+        NULL,                          /* Device Reserve             */
+        NULL,                          /* Device Release             */
+        loc3270_immed,                 /* Immediate CCW Codes        */
+        NULL,                          /* Signal Adapter Input       */
+        NULL,                          /* Signal Adapter Output      */
+        &loc3270_hsuspend,             /* Hercules suspend           */
+        &loc3270_hresume               /* Hercules resume            */
 };
 
 

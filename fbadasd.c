@@ -1,4 +1,4 @@
-/* FBADASD.C    (c) Copyright Roger Bowler, 1999-2003                */
+/* FBADASD.C    (c) Copyright Roger Bowler, 1999-2004                */
 /*              ESA/390 FBA Direct Access Storage Device Handler     */
 
 /*-------------------------------------------------------------------*/
@@ -15,6 +15,7 @@
 
 #include "dasdblks.h"  // (need #define DEFAULT_FBA_TYPE)
 #include "devtype.h"
+#include "sr.h"
 
 #if !defined(WIN32) && !defined(__APPLE__)
 /* Note : "man sd" says to include 'linux/fs.h' - But including kernel
@@ -52,7 +53,7 @@
 /*-------------------------------------------------------------------*/
 /* Initialize the device handler                                     */
 /*-------------------------------------------------------------------*/
-int fbadasd_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
+int fbadasd_init_handler ( DEVBLK *dev, int argc, char *argv[] )
 {
 int     rc;                             /* Return code               */
 struct  stat statbuf;                   /* File information          */
@@ -163,7 +164,18 @@ CCKDDASD_DEVHDR cdevhdr;                /* Compressed device header  */
              && memcmp ("sf=", argv[i], 3) == 0)
             {
                 if (strlen(argv[i]+3) < 256)
-                    strcpy (dev->dasdsfn, argv[i]+3);
+                    dev->dasdsfn=strdup (argv[i]+3);
+                    if (dev->dasdsfn)
+                    {
+                    /* Set the pointer to the suffix character */
+                        dev->dasdsfx = strrchr (dev->dasdsfn, '/');
+                        if (dev->dasdsfx == NULL)
+                            dev->dasdsfx = dev->dasdsfn + 1;
+                        dev->dasdsfx = strchr (dev->dasdsfx, '.');
+                        if (dev->dasdsfx == NULL)
+                            dev->dasdsfx = dev->dasdsfn + strlen(dev->dasdsfn);
+                        dev->dasdsfx--;
+                    }
                 continue;
             }
             if (strcasecmp ("nosyncio", argv[i]) == 0
@@ -198,7 +210,7 @@ CCKDDASD_DEVHDR cdevhdr;                /* Compressed device header  */
             dev->fd = -1;
             return -1;
         }
-#if !defined(WIN32) && !defined(__APPLE__)
+#if !defined(WIN32) && !defined(__APPLE__) && defined(BLKGETSIZE)
         if(S_ISBLK(statbuf.st_mode))
         {
             rc=ioctl(dev->fd,BLKGETSIZE,&statbuf.st_size);
@@ -216,17 +228,13 @@ CCKDDASD_DEVHDR cdevhdr;                /* Compressed device header  */
             logmsg("REAL FBA Opened\n");
         }
         else
-        {
 #endif
-
+        {
             /* Set block size, device origin, and device size in blocks */
             dev->fbablksiz = 512;
             dev->fbaorigin = 0;
             dev->fbanumblk = statbuf.st_size / dev->fbablksiz;
-#if !defined(WIN32) && !defined(__APPLE__)
         }
-#endif
-
 
         /* The second argument is the device origin block number */
         if (argc >= 2)
@@ -301,8 +309,8 @@ CCKDDASD_DEVHDR cdevhdr;                /* Compressed device header  */
 /*-------------------------------------------------------------------*/
 /* Query the device definition                                       */
 /*-------------------------------------------------------------------*/
-void fbadasd_query_device (DEVBLK *dev, BYTE **class,
-                int buflen, BYTE *buffer)
+void fbadasd_query_device (DEVBLK *dev, char **class,
+                int buflen, char *buffer)
 {
 
     *class = "DASD";
@@ -551,8 +559,8 @@ fba_read_blkgrp_retry:
     /* Cache hit */
     if (i >= 0)
     {
-        cache_setflag(CACHE_DEVBUF, dev->cache, ~0, FBA_CACHE_ACTIVE);
-        cache_setage(CACHE_DEVBUF, dev->cache);
+        cache_setflag(CACHE_DEVBUF, i, ~0, FBA_CACHE_ACTIVE);
+        cache_setage(CACHE_DEVBUF, i);
         cache_unlock(CACHE_DEVBUF);
 
         DEVTRACE (_("HHCDA071I read blkgrp %d cache hit, using cache[%d]\n"),
@@ -1342,18 +1350,152 @@ int     blkfactor;                      /* Number of device blocks
 
 } /* end function fbadasd_syncblk_io */
 
+/*-------------------------------------------------------------------*/
+/* Hercules suspend/resume text unit key values                      */
+/*-------------------------------------------------------------------*/
+#define SR_DEV_FBA_BUFCUR       ( SR_DEV_FBA | 0x001 )
+#define SR_DEV_FBA_BUFOFF       ( SR_DEV_FBA | 0x002 )
+#define SR_DEV_FBA_ORIGIN       ( SR_DEV_FBA | 0x003 )
+#define SR_DEV_FBA_NUMBLK       ( SR_DEV_FBA | 0x004 )
+#define SR_DEV_FBA_RBA          ( SR_DEV_FBA | 0x005 )
+#define SR_DEV_FBA_END          ( SR_DEV_FBA | 0x006 )
+#define SR_DEV_FBA_DXBLKN       ( SR_DEV_FBA | 0x007 )
+#define SR_DEV_FBA_DXFIRST      ( SR_DEV_FBA | 0x008 )
+#define SR_DEV_FBA_DXLAST       ( SR_DEV_FBA | 0x009 )
+#define SR_DEV_FBA_LCBLK        ( SR_DEV_FBA | 0x00a )
+#define SR_DEV_FBA_LCNUM        ( SR_DEV_FBA | 0x00b )
+#define SR_DEV_FBA_BLKSIZ       ( SR_DEV_FBA | 0x00c )
+#define SR_DEV_FBA_XTDEF        ( SR_DEV_FBA | 0x00d )
+#define SR_DEV_FBA_OPER         ( SR_DEV_FBA | 0x00e )
+#define SR_DEV_FBA_MASK         ( SR_DEV_FBA | 0x00f )
+
+/*-------------------------------------------------------------------*/
+/* Hercules suspend                                                  */
+/*-------------------------------------------------------------------*/
+int fbadasd_hsuspend(DEVBLK *dev, void *file) {
+    if (dev->bufcur >= 0)
+    {
+        SR_WRITE_VALUE(file, SR_DEV_FBA_BUFCUR, dev->bufcur, sizeof(dev->bufcur));
+        SR_WRITE_VALUE(file, SR_DEV_FBA_BUFOFF, dev->bufoff, sizeof(dev->bufoff));
+    }
+    SR_WRITE_VALUE(file, SR_DEV_FBA_ORIGIN, dev->fbaorigin, sizeof(dev->fbaorigin));
+    SR_WRITE_VALUE(file, SR_DEV_FBA_NUMBLK, dev->fbanumblk, sizeof(dev->fbanumblk));
+    SR_WRITE_VALUE(file, SR_DEV_FBA_RBA, dev->fbarba, sizeof(dev->fbarba));
+    SR_WRITE_VALUE(file, SR_DEV_FBA_END, dev->fbaend, sizeof(dev->fbaend));
+    SR_WRITE_VALUE(file, SR_DEV_FBA_DXBLKN, dev->fbaxblkn, sizeof(dev->fbaxblkn));
+    SR_WRITE_VALUE(file, SR_DEV_FBA_DXFIRST, dev->fbaxfirst, sizeof(dev->fbaxfirst));
+    SR_WRITE_VALUE(file, SR_DEV_FBA_DXLAST, dev->fbaxlast, sizeof(dev->fbaxlast));
+    SR_WRITE_VALUE(file, SR_DEV_FBA_LCBLK, dev->fbalcblk, sizeof(dev->fbalcblk));
+    SR_WRITE_VALUE(file, SR_DEV_FBA_LCNUM, dev->fbalcnum, sizeof(dev->fbalcnum));
+    SR_WRITE_VALUE(file, SR_DEV_FBA_BLKSIZ, dev->fbablksiz, sizeof(dev->fbablksiz));
+    SR_WRITE_VALUE(file, SR_DEV_FBA_XTDEF, dev->fbaxtdef, 1);
+    SR_WRITE_VALUE(file, SR_DEV_FBA_OPER, dev->fbaoper, sizeof(dev->fbaoper));
+    SR_WRITE_VALUE(file, SR_DEV_FBA_MASK, dev->fbamask, sizeof(dev->fbamask));
+    return 0;
+}
+
+/*-------------------------------------------------------------------*/
+/* Hercules resume                                                   */
+/*-------------------------------------------------------------------*/
+int fbadasd_hresume(DEVBLK *dev, void *file)
+{
+size_t  rc, key, len;
+BYTE byte;
+
+    do {
+        SR_READ_HDR(file, key, len);
+        switch (key) {
+        case SR_DEV_FBA_BUFCUR:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            rc = (dev->hnd->read) ? (dev->hnd->read)(dev, rc, &byte) : -1;
+            if ((int)rc < 0) return -1;
+            break;
+        case SR_DEV_FBA_BUFOFF:
+            SR_READ_VALUE(file, len, &dev->bufoff, sizeof(dev->bufoff));
+            break;
+        case SR_DEV_FBA_ORIGIN:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            if ((int)rc != dev->fbaorigin)
+            {
+                logmsg(_("HHCDA901E %4.4x FBA origin mismatch: %d, expected %d,\n"),
+                       rc, dev->fbaorigin);
+                return -1;
+            }
+            break;
+        case SR_DEV_FBA_NUMBLK:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            if ((int)rc != dev->fbanumblk)
+            {
+                logmsg(_("HHCDA902E %4.4x FBA numblk mismatch: %d, expected %d,\n"),
+                       rc, dev->fbanumblk);
+                return -1;
+            }
+            break;
+        case SR_DEV_FBA_RBA:
+            SR_READ_VALUE(file, len, &dev->fbarba, sizeof(dev->fbarba));
+            break;
+        case SR_DEV_FBA_END:
+            SR_READ_VALUE(file, len, &dev->fbaend, sizeof(dev->fbaend));
+            break;
+        case SR_DEV_FBA_DXBLKN:
+            SR_READ_VALUE(file, len, &dev->fbaxblkn, sizeof(dev->fbaxblkn));
+            break;
+        case SR_DEV_FBA_DXFIRST:
+            SR_READ_VALUE(file, len, &dev->fbaxfirst, sizeof(dev->fbaxfirst));
+            break;
+        case SR_DEV_FBA_DXLAST:
+            SR_READ_VALUE(file, len, &dev->fbaxlast, sizeof(dev->fbaxlast));
+            break;
+        case SR_DEV_FBA_LCBLK:
+            SR_READ_VALUE(file, len, &dev->fbalcblk, sizeof(dev->fbalcblk));
+            break;
+        case SR_DEV_FBA_LCNUM:
+            SR_READ_VALUE(file, len, &dev->fbalcnum, sizeof(dev->fbalcnum));
+            break;
+        case SR_DEV_FBA_BLKSIZ:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            if ((int)rc != dev->fbablksiz)
+            {
+                logmsg(_("HHCDA903E %4.4x FBA blksiz mismatch: %d, expected %d,\n"),
+                       rc, dev->fbablksiz);
+                return -1;
+            }
+            break;
+        case SR_DEV_FBA_XTDEF:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->fbaxtdef = rc;
+            break;
+        case SR_DEV_FBA_OPER:
+            SR_READ_VALUE(file, len, &dev->fbaoper, sizeof(dev->fbaoper));
+            break;
+        case SR_DEV_FBA_MASK:
+            SR_READ_VALUE(file, len, &dev->fbamask, sizeof(dev->fbamask));
+            break;
+        default:
+            SR_READ_SKIP(file, len);
+            break;
+        } /* switch (key) */
+    } while ((key & SR_DEV_MASK) == SR_DEV_FBA);
+    return 0;
+}
+
 DEVHND fbadasd_device_hndinfo = {
-        &fbadasd_init_handler,         /* Device Initialisation      */
-        &fbadasd_execute_ccw,          /* Device CCW execute         */
-        &fbadasd_close_device,         /* Device Close               */
-        &fbadasd_query_device,         /* Device Query               */
-        NULL,                          /* Device Start channel pgm   */
-        &fbadasd_end,                  /* Device End channel pgm     */
-        NULL,                          /* Device Resume channel pgm  */
-        &fbadasd_end,                  /* Device Suspend channel pgm */
-        &fbadasd_read_blkgrp,          /* Device Read                */
-        &fbadasd_update_blkgrp,        /* Device Write               */
-        &fbadasd_used,                 /* Device Query used          */
-        NULL,                          /* Device Reserve             */
-        NULL                           /* Device Release             */
+        &fbadasd_init_handler,          /* Device Initialisation      */
+        &fbadasd_execute_ccw,           /* Device CCW execute         */
+        &fbadasd_close_device,          /* Device Close               */
+        &fbadasd_query_device,          /* Device Query               */
+        NULL,                           /* Device Start channel pgm   */
+        &fbadasd_end,                   /* Device End channel pgm     */
+        NULL,                           /* Device Resume channel pgm  */
+        &fbadasd_end,                   /* Device Suspend channel pgm */
+        &fbadasd_read_blkgrp,           /* Device Read                */
+        &fbadasd_update_blkgrp,         /* Device Write               */
+        &fbadasd_used,                  /* Device Query used          */
+        NULL,                           /* Device Reserve             */
+        NULL,                           /* Device Release             */
+        NULL,                           /* Immediate CCW Codes        */
+        NULL,                           /* Signal Adapter Input       */
+        NULL,                           /* Signal Adapter Ouput       */
+        &fbadasd_hsuspend,              /* Hercules suspend           */
+        &fbadasd_hresume                /* Hercules resume            */
 };

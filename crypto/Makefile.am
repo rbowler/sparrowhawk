@@ -7,7 +7,11 @@ lns=@LN_S@
 
 LDADD = @LTLIBINTL@ @LTLIBICONV@ @LIBS@
 
-LDADD += -lgcrypt
+LDADD += $(LIBGCRYPT_LIBS)
+
+# AM_CFLAGS = $(LIBGCRYPT_CFLAGS)
+
+AM_CPPFLAGS = -I$(top_srcdir)/intl -I$(top_srcdir) $(LIBGCRYPT_CFLAGS)
 
 dyncrypt_SRC     = dyncrypt.c \
                    sha1.c

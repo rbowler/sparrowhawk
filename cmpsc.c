@@ -7,7 +7,7 @@
 /* Mario Bezzi. Thanks Mario! Also special thanks to Greg Smith who           */
 /* introduced iregs, needed when a page fault occurs.                         */
 /*                                                                            */
-/*                              (c) Copyright Bernard van der Helm, 2000-2003 */
+/*                              (c) Copyright Bernard van der Helm, 2000-2004 */
 /*                              Noordwijkerhout, The Netherlands.             */
 /*                                                                            */
 /*----------------------------------------------------------------------------*/
@@ -195,14 +195,14 @@
 /*----------------------------------------------------------------------------*/
 /* Bit operation macro's                                                      */
 /*----------------------------------------------------------------------------*/
-/* BIT    : return bit in byte                                                */
+/* TBIT   : return bit in byte                                                */
 /* BITS   : return bits in byte                                               */
 /* SBIT   : return bit in bytes                                               */
 /* SBITS  : return bits in bytes (bits must be in one byte!)                  */
 /*----------------------------------------------------------------------------*/
-#define BIT(byte, bit)      ((byte) & (0x80 >> (bit)) ? TRUE : FALSE)
+#define TBIT(byte, bit)      ((byte) & (0x80 >> (bit)) ? TRUE : FALSE)
 #define BITS(byte, start, end)  (((BYTE)((byte) << (start))) >> (7 - (end) + (start)))
-#define SBIT(bytes, bit)    (BIT((bytes)[(bit) / 8], (bit) % 8))
+#define SBIT(bytes, bit)    (TBIT((bytes)[(bit) / 8], (bit) % 8))
 #define SBITS(bytes, strt, end) (BITS((bytes)[(strt) / 8], (strt) % 8, (end) % 8))
 
 /******************************************************************************/
@@ -224,8 +224,8 @@
 #if !defined(ADJUSTREGS)
 #define ADJUSTREGS(r, regs, iregs, len) \
 {\
-  GR_A((r), (iregs)) = (GR_A((r), (iregs)) + (len)) & ADDRESS_MAXWRAP((regs));\
-  GR_A((r) + 1, (iregs)) -= (len);\
+  SET_GR_A((r), (iregs), (GR_A((r), (iregs)) + (len)) & ADDRESS_MAXWRAP((regs)));\
+  SET_GR_A((r) + 1, (iregs), GR_A((r)+1, (iregs)) - (len));\
 }
 #endif /* !defined(ADJUSTREGS) */
 
@@ -238,11 +238,11 @@
 #if !defined(COMMITREGS)
 #define COMMITREGS(regs, iregs, r1, r2) \
 {\
-  GR_A(1, (regs)) = GR_A(1, (iregs));\
-  GR_A((r1), (regs)) = GR_A((r1), (iregs));\
-  GR_A((r1) + 1, (regs)) = GR_A((r1) + 1, (iregs));\
-  GR_A((r2), (regs)) = GR_A((r2), (iregs));\
-  GR_A((r2) + 1, (regs)) = GR_A((r2) + 1, (iregs));\
+  SET_GR_A(1, (regs), GR_A(1, (iregs)));\
+  SET_GR_A((r1), (regs), GR_A((r1), (iregs)));\
+  SET_GR_A((r1) + 1, (regs), GR_A((r1) + 1, (iregs)));\
+  SET_GR_A((r2), (regs), GR_A((r2), (iregs)));\
+  SET_GR_A((r2) + 1, (regs), GR_A((r2) + 1, (iregs)));\
 }
 #endif /* !defined(COMMITREGS) */
 
@@ -933,7 +933,7 @@ static int ARCH_DEP(store_ch)(int r1, REGS *regs, REGS *iregs, BYTE *data, int l
 {
 
   /* Check destination size */
-  if(GR_A(r1 + 1, iregs) < length + (U32) offset -1)
+  if(GR_A(r1 + 1, iregs) < length + (U32) offset)
     {
 
 #if defined(OPTION_CMPSC_DEBUGLVL) && OPTION_CMPSC_DEBUGLVL & 2
@@ -1058,7 +1058,7 @@ DEF_INST(compression_call)
   int r1;
   int r2;
 
-  RRE(inst, execflag, regs, r1, r2);
+  RRE(inst, regs, r1, r2);
 
 #ifdef OPTION_CMPSC_DEBUGLVL
   logmsg("CMPSC: compression call\n");

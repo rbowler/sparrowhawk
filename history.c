@@ -36,15 +36,16 @@ void copy_to_historyCmdLine(char* cmdline)
 int history_init() {
   history_lines = NULL;
   history_lines_end = NULL;
-  historyCmdLine = (BYTE*) malloc(255);
+  historyCmdLine = (char *) malloc(255);
   history_requested = 0;
   backup = NULL;
   history_count = 0;
   history_ptr = NULL;
+  return(0);
 }
 
 /* add commandline to history list */
-int history_add(BYTE *cmdline) {
+int history_add(char *cmdline) {
   HISTORY *tmp;
 
   /* if there is some backup line remaining, remove it */
@@ -56,7 +57,7 @@ int history_add(BYTE *cmdline) {
 
   /* allocate space and copy string */
   tmp = (HISTORY*) malloc(sizeof(HISTORY));
-  tmp->cmdline = (BYTE*) malloc(strlen(cmdline) + 1);
+  tmp->cmdline = (char*) malloc(strlen(cmdline) + 1);
   strcpy(tmp->cmdline, cmdline);
   tmp->next = NULL;
   tmp->prev = NULL;
@@ -82,6 +83,7 @@ int history_add(BYTE *cmdline) {
     backup->next = NULL;
     history_lines->prev = NULL;
   }
+  return(0);
 }
 
 /* show list of lines in history */
@@ -92,6 +94,7 @@ int history_show() {
     logmsg("%4d %s\n", tmp->number, tmp->cmdline);
     tmp = tmp->next;
   }
+  return(0);
 }
 
 /* remove last line from history list (called only when history command was invoked) */
@@ -122,11 +125,11 @@ int history_remove() {
     history_lines = backup;
     backup = NULL;
   }
+  return(0);
 }
 
 int history_relative_line(int x) {
   HISTORY *tmp = history_lines_end;
-  int i;
 
   if (-x > HISTORY_MAX) {
     logmsg("History limited to last %d commands\n", HISTORY_MAX);
@@ -144,9 +147,10 @@ int history_relative_line(int x) {
   }
   copy_to_historyCmdLine(tmp->cmdline);
   history_ptr = NULL;
+  return(0);
 }
 
-int history_absolute_line(x) {
+int history_absolute_line(int x) {
   HISTORY *tmp = history_lines_end;
   int lowlimit;
 
@@ -167,6 +171,7 @@ int history_absolute_line(x) {
 
   copy_to_historyCmdLine(tmp->cmdline);
   history_ptr = NULL;
+  return(0);
 }
 
 int history_next() {
@@ -182,6 +187,7 @@ int history_next() {
   else 
     history_ptr = history_ptr->next;
   copy_to_historyCmdLine(history_ptr->cmdline);
+  return(0);
 }
 
 int history_prev() {
@@ -197,4 +203,5 @@ int history_prev() {
   else 
     history_ptr = history_ptr->prev;
   copy_to_historyCmdLine(history_ptr->cmdline);
+  return(0);
 }

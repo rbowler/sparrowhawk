@@ -1,4 +1,4 @@
-/* SHARED.C     (c)Copyright Greg Smith, 2002-2003                   */
+/* SHARED.C     (c)Copyright Greg Smith, 2002-2004                   */
 /*              Shared Device Server                                 */
 
 #define _HERCULES_SHARED_C
@@ -8,6 +8,9 @@
 #include <sys/un.h>     /* (need "sockaddr_un") */
 
 #define FBA_BLKGRP_SIZE (120*512)
+
+/* Change the following to "define" when Shared FBA support is implemented */
+#undef FBA_SHARED
 
 /*-------------------------------------------------------------------*/
 /* Definitions for sense data format codes and message codes         */
@@ -93,21 +96,21 @@ int      i, j;                          /* Indexes                   */
 /*-------------------------------------------------------------------
  * CKD init exit (client side)
  *-------------------------------------------------------------------*/
-int shared_ckd_init (DEVBLK *dev, int argc, BYTE *argv[] )
+int shared_ckd_init (DEVBLK *dev, int argc, char *argv[] )
 {
 int      rc;                            /* Return code               */
 int      i;                             /* Loop index                */
 int      retry;                         /* 1=Connection being retried*/
-BYTE    *ipname;                        /* Remote name or address    */
-BYTE    *port = NULL;                   /* Remote port               */
-BYTE    *rmtnum = NULL;                 /* Remote device number      */
+char    *ipname;                        /* Remote name or address    */
+char    *port = NULL;                   /* Remote port               */
+char    *rmtnum = NULL;                 /* Remote device number      */
 struct   hostent *he;                   /* -> hostent structure      */
-BYTE    *kw;                            /* Argument keyword          */
-BYTE    *op;                            /* Argument operand          */
+char    *kw;                            /* Argument keyword          */
+char    *op;                            /* Argument operand          */
 BYTE     c;                             /* Used for parsing          */
-BYTE    *cu = NULL;                     /* Specified control unit    */
+char    *cu = NULL;                     /* Specified control unit    */
 FWORD    cyls;                          /* Remote number cylinders   */
-BYTE    *p, buf[1024];                  /* Work buffer               */
+char    *p, buf[1024];                  /* Work buffer               */
 
     retry = dev->connecting;
 
@@ -224,7 +227,7 @@ init_retry:
         {
             logmsg (_("HHCSH002W %4.4X connect pending to %s\n"),
                     dev->devnum, dev->filename);
-            if (retry) sleep(5);
+            if (retry) SLEEP(5);
         }
     } while (retry && rc < 0);
 
@@ -364,22 +367,22 @@ static int shared_ckd_close ( DEVBLK *dev )
 /*-------------------------------------------------------------------
  * FBA init exit (client side)
  *-------------------------------------------------------------------*/
-int shared_fba_init (DEVBLK *dev, int argc, BYTE *argv[] )
+int shared_fba_init (DEVBLK *dev, int argc, char *argv[] )
 {
 int      rc;                            /* Return code               */
 int      i;                             /* Loop index                */
 int      retry;                         /* 1=Connection being retried*/
-BYTE    *ipname;                        /* Remote name or address    */
-BYTE    *port = NULL;                   /* Remote port               */
-BYTE    *rmtnum = NULL;                 /* Remote device number      */
+char    *ipname;                        /* Remote name or address    */
+char    *port = NULL;                   /* Remote port               */
+char    *rmtnum = NULL;                 /* Remote device number      */
 struct   hostent *he;                   /* -> hostent structure      */
-BYTE    *kw;                            /* Argument keyword          */
-BYTE    *op;                            /* Argument operand          */
-BYTE     c;                             /* Work for sscanf           */
+char    *kw;                            /* Argument keyword          */
+char    *op;                            /* Argument operand          */
+char     c;                             /* Work for sscanf           */
 FWORD    origin;                        /* FBA origin                */
 FWORD    numblks;                       /* FBA number blocks         */
 FWORD    blksiz;                        /* FBA block size            */
-BYTE    *p, buf[1024];                  /* Work buffer               */
+char    *p, buf[1024];                  /* Work buffer               */
 
     retry = dev->connecting;
 
@@ -472,7 +475,7 @@ init_retry:
         {
             logmsg (_("HHCSH011I %4.4X connect pending to %s\n"),
                     dev->devnum, dev->filename);
-            if (retry) sleep(5);
+            if (retry) SLEEP(5);
         }
     } while (retry && rc < 0);
 
@@ -899,6 +902,7 @@ int             sz;                     /* Size so far               */
     return sz;
 }
 
+#if defined(FBA_SHARED)
 /*-------------------------------------------------------------------
  * Shared fba read block exit (client side)
  *-------------------------------------------------------------------*/
@@ -1060,6 +1064,7 @@ int             rc;                     /* Return code               */
     return len;
 }
 
+
 /*-------------------------------------------------------------------*/
 /* Calculate length of an FBA block group                            */
 /*-------------------------------------------------------------------*/
@@ -1073,6 +1078,8 @@ off_t   offset;                         /* Offset of block group     */
     else
         return FBA_BLKGRP_SIZE;
 }
+
+#endif /* FBA_SHARED */
 
 /*-------------------------------------------------------------------
  * Shared usage exit (client side)
@@ -1367,7 +1374,7 @@ retry :
     {
         if (cmd != SHRD_CONNECT && retries--)
         {
-            sleep (1);
+            SLEEP (1);
             clientConnect (dev, 1);
             goto retry;
         }
@@ -1471,7 +1478,7 @@ BYTE     cbuf[SHRD_HDR_SIZE + 65536];   /* Combined buffer           */
 
     if (cmd & SHRD_COMP)
         shrdtrc("client_send %2.2x %2.2x %2.2x %d %d (compressed)\n",
-                cmd, flag, devnum, id, sendlen - SHRD_HDR_SIZE);
+                cmd, flag, devnum, id, (int)(sendlen - SHRD_HDR_SIZE));
 
 retry:
 
@@ -1659,7 +1666,7 @@ BYTE                    cbuf[65536];    /* Compressed buffer         */
             memcpy (buf, cbuf, off);
 
         newlen = buflen - off;
-        rc = BZ2_bzBuffToBuffDecompress(buf + off, &newlen, cbuf + off, len - off, 0, 0);
+        rc = BZ2_bzBuffToBuffDecompress((void *)(buf + off), &newlen, (void *)(cbuf + off), len - off, 0, 0);
         if (rc == BZ_OK)
             recvlen = (int)newlen + off;
         else
@@ -2131,7 +2138,7 @@ int      id;                            /* Identifier                */
  * Respond with an error message (server side)
  *-------------------------------------------------------------------*/
 static int serverError (DEVBLK *dev, int ix, int code, int status,
-                        BYTE *msg)
+                        char *msg)
 {
 int rc;                                 /* Return code               */
 int len;                                /* Message length            */
@@ -2147,7 +2154,7 @@ BYTE hdr[SHRD_HDR_SIZE];                /* Header                    */
 
     shrdtrc("server_error %2.2x %2.2x: %s\n", code, status, msg);
 
-    rc = serverSend (dev, ix, hdr, msg, len);
+    rc = serverSend (dev, ix, hdr, (BYTE *)msg, len);
     return rc;
 
 } /* serverError */
@@ -2680,7 +2687,7 @@ TID                     tid;            /* Negotiation thread id     */
         if (rc == 0 || errno != EADDRINUSE) break;
         logmsg (_("HHCSH052W Waiting for port %u to become free\n"),
                 sysblk.shrdport);
-        sleep(10);
+        SLEEP(10);
     } /* end while */
 
     if (rc != 0)
@@ -2863,7 +2870,7 @@ int shared_cmd(int argc, char *argv[], char *cmdline)
             if (s != NULL)
             {
                 sysblk.shrdtrace = sysblk.shrdtracex = sysblk.shrdtracep = NULL;
-                sleep (1);
+                SLEEP (1);
                 free (s);
             }
             sysblk.shrdtrace = sysblk.shrdtracex = sysblk.shrdtracep = NULL;
@@ -2886,7 +2893,7 @@ int shared_cmd(int argc, char *argv[], char *cmdline)
         /* Print the trace table */
         sysblk.shrdtrace = sysblk.shrdtracex = sysblk.shrdtracep = NULL;
         i = p;
-        sleep(1);
+        SLEEP(1);
         do {
             if (i[0] != '\0') logmsg ("%s",(char *)i);
             if (++i >= x) i = s;
@@ -2906,36 +2913,45 @@ int shared_cmd(int argc, char *argv[], char *cmdline)
 }
 
 DEVHND shared_ckd_device_hndinfo = {
-        &shared_ckd_init,
-        &ckddasd_execute_ccw,
-        &shared_ckd_close,
-        &ckddasd_query_device,
-        &shared_start,
-        &shared_end,
-        &shared_start,
-        &shared_end,
-        &shared_ckd_read,
-        &shared_ckd_write,
-        &shared_used,
-        &shared_reserve,
-        &shared_release
+        &shared_ckd_init,              /* Device Initialisation      */
+        &ckddasd_execute_ccw,          /* Device CCW execute         */
+        &shared_ckd_close,             /* Device Close               */
+        &ckddasd_query_device,         /* Device Query               */
+        &shared_start,                 /* Device Start channel pgm   */
+        &shared_end,                   /* Device End channel pgm     */
+        &shared_start,                 /* Device Resume channel pgm  */
+        &shared_end,                   /* Device Suspend channel pgm */
+        &shared_ckd_read,              /* Device Read                */
+        &shared_ckd_write,             /* Device Write               */
+        &shared_used,                  /* Device Query used          */
+        &shared_reserve,               /* Device Reserve             */
+        &shared_release,               /* Device Release             */
+        NULL,                          /* Immediate CCW Codes        */
+        NULL,                          /* Signal Adapter Input       */
+        NULL,                          /* Signal Adapter Output      */
+        &ckddasd_hsuspend,             /* Hercules suspend           */
+        &ckddasd_hresume               /* Hercules resume            */
 };
 
-
 DEVHND shared_fba_device_hndinfo = {
-        &shared_fba_init,
-        &fbadasd_execute_ccw,
-        &shared_fba_close,
-        &fbadasd_query_device,
-        &shared_start,
-        &shared_end,
-        &shared_start,
-        &shared_end,
-        &shared_fba_read,
-        &shared_fba_write,
-        &shared_used,
-        &shared_reserve,
-        &shared_release
+        &shared_fba_init,              /* Device Initialisation      */
+        &fbadasd_execute_ccw,          /* Device CCW execute         */
+        &shared_fba_close,             /* Device Close               */
+        &fbadasd_query_device,         /* Device Query               */
+        &shared_start,                 /* Device Start channel pgm   */
+        &shared_end,                   /* Device End channel pgm     */
+        &shared_start,                 /* Device Resume channel pgm  */
+        &shared_end,                   /* Device Suspend channel pgm */
+        &shared_ckd_read,              /* Device Read                */
+        &shared_ckd_write,             /* Device Write               */
+        &shared_used,                  /* Device Query used          */
+        &shared_reserve,               /* Device Reserve             */
+        &shared_release,               /* Device Release             */
+        NULL,                          /* Immediate CCW Codes        */
+        NULL,                          /* Signal Adapter Input       */
+        NULL,                          /* Signal Adapter Output      */
+        &fbadasd_hsuspend,             /* Hercules suspend           */
+        &fbadasd_hresume               /* Hercules resume            */
 };
 
 #else

@@ -1,7 +1,7 @@
 /*
 || ----------------------------------------------------------------------------
 ||
-|| HETLIB.C     (c) Copyright Leland Lucius, 2000-2003
+|| HETLIB.C     (c) Copyright Leland Lucius, 2000-2004
 ||              Released under terms of the Q Public License.
 ||
 || Library for managing Hercules Emulated Tapes.
@@ -887,7 +887,7 @@ het_read( HETB *hetb, void *sbuf )
             case HETHDR_FLAGS1_ZLIB:
                 slen = HETMAX_BLOCKSIZE;
 
-                rc = uncompress( sbuf, &slen, tbuf, tlen );
+                rc = uncompress( sbuf, &slen, (unsigned char *)tbuf, tlen );
                 if( rc != Z_OK )
                 {
                     errno = rc;
@@ -903,7 +903,7 @@ het_read( HETB *hetb, void *sbuf )
                 slen = HETMAX_BLOCKSIZE;
 
                 rc = BZ2_bzBuffToBuffDecompress( sbuf,
-                                                 (unsigned int *) &slen,
+                                                 (void *) &slen,
                                                  tbuf,
                                                  tlen,
                                                  0,
@@ -1213,7 +1213,7 @@ het_write( HETB *hetb, void *sbuf, int slen )
             case HETHDR_FLAGS1_ZLIB:
                 tlen = sizeof( tbuf );
 
-                rc = compress2( tbuf, &tlen, sbuf, slen, hetb->level );
+                rc = compress2( (unsigned char *)tbuf, &tlen, sbuf, slen, hetb->level );
                 if( rc != Z_OK )
                 {
                     errno = rc;
@@ -1234,7 +1234,7 @@ het_write( HETB *hetb, void *sbuf, int slen )
                 tlen = sizeof( tbuf );
 
                 rc = BZ2_bzBuffToBuffCompress( tbuf,
-                                               (unsigned int *) &tlen,
+                                               (void *) &tlen,
                                                sbuf,
                                                slen,
                                                hetb->level,

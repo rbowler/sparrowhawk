@@ -1,8 +1,8 @@
-/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2003                */
+/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2004                */
 /*              ESA/390 Service Processor                            */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements service processor functions                */
@@ -17,7 +17,6 @@
 /*      Dynamic CPU reconfiguration - Jan Jaeger                     */
 /*      Suppress superflous HHC701I/HHC702I messages - Jan Jaeger    */
 /*      Break syscons output if too long - Jan Jaeger                */
-/*      Added CHSC - CHannel Subsystem Call - Jan Jaeger 2001-05-30  */
 /*      Added CPI - Control Program Information ev. - JJ 2001-11-19  */
 /*-------------------------------------------------------------------*/
 
@@ -29,6 +28,8 @@
 
 #include "service.h"
 
+#include "sr.h"
+
 
 #if !defined(_SERVICE_C)
 
@@ -36,8 +37,25 @@
 
 static  U32     servc_cp_recv_mask;     /* Syscons CP receive mask   */
 static  U32     servc_cp_send_mask;     /* Syscons CP send mask      */
-static  BYTE    servc_scpcmdstr[123+1]; /* Operator command string   */
+static  char    servc_scpcmdstr[123+1]; /* Operator command string   */
 static  int     servc_scpcmdtype;       /* Operator command type     */
+
+static  int     servc_signal_quiesce_pending = 0;  /* Signal Quiesce */
+static  U16     servc_signal_quiesce_count;
+static  BYTE    servc_signal_quiesce_unit;
+
+void sclp_reset()
+{
+    servc_cp_recv_mask = 0;
+    servc_cp_send_mask = 0;
+    servc_scpcmdstr[0] = '\0';
+    servc_scpcmdtype = 0;
+    servc_signal_quiesce_pending = 0;
+    servc_signal_quiesce_count = 0;
+    servc_signal_quiesce_unit = 0;
+
+    sysblk.servparm = 0;
+}
 
 // #ifdef FEATURE_SYSTEM_CONSOLE
 /*-------------------------------------------------------------------*/
@@ -52,7 +70,7 @@ static  int     servc_scpcmdtype;       /* Operator command type     */
 /*      command Null-terminated ASCII command string                 */
 /*      priomsg 0=SCP command, 1=SCP priority message                */
 /*-------------------------------------------------------------------*/
-void scp_command (BYTE *command, int priomsg)
+void scp_command (char *command, int priomsg)
 {
     /* Error if disabled for priority messages */
     if (priomsg && !(servc_cp_recv_mask & 0x00800000))
@@ -100,17 +118,125 @@ void scp_command (BYTE *command, int priomsg)
     sysblk.servparm |= SERVSIG_PEND;
     
     /* Set service signal interrupt pending for read event data */
-    if (!IS_IC_SERVSIG)
-    {
-        ON_IC_SERVSIG;
-        WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
-    }
+    ON_IC_SERVSIG;
+    WAKEUP_CPUS_MASK (sysblk.waiting_mask);
 
     /* Release the interrupt lock */
     release_lock (&sysblk.intlock);
 
 } /* end function scp_command */
 
+
+int can_signal_quiesce()
+{
+    return (servc_cp_recv_mask & (0x80000000 >> (SCCB_EVD_TYPE_SIGQ-1)));
+}
+
+
+int signal_quiesce (U16 count, BYTE unit)
+{
+    /* Error if disabled for commands */
+    if (!(servc_cp_recv_mask & (0x80000000 >> (SCCB_EVD_TYPE_SIGQ-1))))
+    {
+        logmsg (_("HHCCP081E SCP not receiving quiesce signals\n"));
+        return -1;
+    }
+
+    /* Obtain the interrupt lock */
+    obtain_lock (&sysblk.intlock);
+
+    /* If an event buffer available signal is pending then reject the
+       command with message indicating that service processor is busy */
+    if (IS_IC_SERVSIG && (sysblk.servparm & SERVSIG_PEND))
+    {
+        logmsg (_("HHCCP082E Service Processor busy\n"));
+
+        /* Release the interrupt lock */
+        release_lock (&sysblk.intlock);
+        return -1;
+    }
+
+    /* Save delay values for signal shutdown event read */
+    servc_signal_quiesce_count = count;
+    servc_signal_quiesce_unit = unit;
+
+    servc_signal_quiesce_pending = 1;
+
+    /* Set event pending flag in service parameter */
+    sysblk.servparm |= SERVSIG_PEND;
+    
+    /* Set service signal interrupt pending for read event data */
+    ON_IC_SERVSIG;
+    WAKEUP_CPUS_MASK (sysblk.waiting_mask);
+
+    /* Release the interrupt lock */
+    release_lock (&sysblk.intlock);
+
+    return 0;
+} /* end function signal_quiesce */
+
+#define SR_SYS_SERVC_RECVMASK    ( SR_SYS_SERVC | 0x001 )
+#define SR_SYS_SERVC_SENDMASK    ( SR_SYS_SERVC | 0x002 )
+#define SR_SYS_SERVC_SCPCMD      ( SR_SYS_SERVC | 0x003 )
+#define SR_SYS_SERVC_SCPTYPE     ( SR_SYS_SERVC | 0x004 )
+#define SR_SYS_SERVC_SQP         ( SR_SYS_SERVC | 0x005 )
+#define SR_SYS_SERVC_SQC         ( SR_SYS_SERVC | 0x006 )
+#define SR_SYS_SERVC_SQU         ( SR_SYS_SERVC | 0x007 )
+#define SR_SYS_SERVC_PARM        ( SR_SYS_SERVC | 0x008 )
+
+int servc_hsuspend(void *file)
+{
+    SR_WRITE_VALUE(file, SR_SYS_SERVC_RECVMASK, servc_cp_recv_mask, sizeof(servc_cp_recv_mask));
+    SR_WRITE_VALUE(file, SR_SYS_SERVC_SENDMASK, servc_cp_send_mask, sizeof(servc_cp_send_mask));
+    SR_WRITE_STRING(file, SR_SYS_SERVC_SCPCMD,  servc_scpcmdstr);
+    SR_WRITE_VALUE(file, SR_SYS_SERVC_SCPTYPE,  servc_scpcmdtype,   sizeof(servc_scpcmdtype));
+    SR_WRITE_VALUE(file, SR_SYS_SERVC_SQP,      servc_signal_quiesce_pending,
+                                         sizeof(servc_signal_quiesce_pending));
+    SR_WRITE_VALUE(file, SR_SYS_SERVC_SQC,      servc_signal_quiesce_count,
+                                         sizeof(servc_signal_quiesce_count));
+    SR_WRITE_VALUE(file, SR_SYS_SERVC_SQU,      servc_signal_quiesce_unit,
+                                         sizeof(servc_signal_quiesce_unit));
+    SR_WRITE_VALUE(file, SR_SYS_SERVC_PARM,     sysblk.servparm,
+                                         sizeof(sysblk.servparm));
+    return 0;
+}
+
+int servc_hresume(void *file)
+{
+    size_t key, len;
+
+    sclp_reset();
+    do {
+        SR_READ_HDR(file, key, len);
+        switch (key) {
+        case SR_SYS_SERVC_RECVMASK:
+            SR_READ_VALUE(file, len, &servc_cp_recv_mask, sizeof(servc_cp_recv_mask));
+            break;
+        case SR_SYS_SERVC_SENDMASK:
+            SR_READ_VALUE(file, len, &servc_cp_send_mask, sizeof(servc_cp_send_mask));
+            break;
+        case SR_SYS_SERVC_SQP:
+            SR_READ_VALUE(file, len, &servc_signal_quiesce_pending,
+                              sizeof(servc_signal_quiesce_pending));
+            break;
+        case SR_SYS_SERVC_SQC:
+            SR_READ_VALUE(file, len, &servc_signal_quiesce_count,
+                              sizeof(servc_signal_quiesce_count));
+            break;
+        case SR_SYS_SERVC_SQU:
+            SR_READ_VALUE(file, len, &servc_signal_quiesce_unit,
+                              sizeof(servc_signal_quiesce_unit));
+            break;
+        case SR_SYS_SERVC_PARM:
+            SR_READ_VALUE(file, len, &sysblk.servparm, sizeof(sysblk.servparm));
+            break;
+        default:
+            SR_READ_SKIP(file, len);
+            break;
+        }
+    } while ((key & SR_SYS_MASK) == SR_SYS_SERVC);
+    return 0;
+}
 
 #endif /*!defined(_SERVICE_C)*/
 
@@ -333,6 +459,7 @@ SCCB_EVD_HDR   *evd_hdr;                /* Event header              */
 U32             evd_len;                /* Length of event data      */
 SCCB_EVD_BK    *evd_bk;                 /* Event data                */
 SCCB_MCD_BK    *mcd_bk;                 /* Message Control Data      */
+SCCB_SGQ_BK    *sgq_bk;                 /* Signal Quiesce            */
 U32             mcd_len;                /* Length of MCD             */
 SCCB_OBJ_HDR   *obj_hdr;                /* Object Header             */
 U32             obj_len;                /* Length of Object          */
@@ -399,7 +526,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                                                            available */
 #endif /*FEATURE_EXPANDED_STORAGE*/
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
 
     PRIV_CHECK(regs);
 
@@ -474,13 +601,8 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
         /* Set response code X'0300' if SCCB length
            is insufficient to contain SCP info */
-#ifdef FEATURE_CPU_RECONFIG
         if ( sccblen < sizeof(SCCB_HEADER) + sizeof(SCCB_SCP_INFO)
-                + (sizeof(SCCB_CPU_INFO) * MAX_CPU_ENGINES))
-#else /*!FEATURE_CPU_RECONFIG*/
-        if ( sccblen < sizeof(SCCB_HEADER) + sizeof(SCCB_SCP_INFO)
-                + (sizeof(SCCB_CPU_INFO) * sysblk.numcpu))
-#endif /*!FEATURE_CPU_RECONFIG*/
+                + (sizeof(SCCB_CPU_INFO) * MAX_CPU))
         {
             sccb->reas = SCCB_REAS_TOO_SHORT;
             sccb->resp = SCCB_RESP_BLOCK_ERROR;
@@ -523,27 +645,18 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         STORE_HW(sccbscp->vectpsum, VECTOR_PARTIAL_SUM_NUMBER);
 #endif /*FEATURE_VECTOR_FACILITY*/
 
-#ifdef FEATURE_CPU_RECONFIG
         /* Set CPU array count and offset in SCCB */
-        STORE_HW(sccbscp->numcpu, MAX_CPU_ENGINES);
-#else /*!FEATURE_CPU_RECONFIG*/
-        /* Set CPU array count and offset in SCCB */
-        STORE_HW(sccbscp->numcpu, sysblk.numcpu);
-#endif /*!FEATURE_CPU_RECONFIG*/
+        STORE_HW(sccbscp->numcpu, MAX_CPU);
         offset = sizeof(SCCB_HEADER) + sizeof(SCCB_SCP_INFO);
         STORE_HW(sccbscp->offcpu, offset);
 
         /* Set HSA array count and offset in SCCB */
         STORE_HW(sccbscp->numhsa, 0);
-#ifdef FEATURE_CPU_RECONFIG
-        offset += sizeof(SCCB_CPU_INFO) * MAX_CPU_ENGINES;
-#else /*!FEATURE_CPU_RECONFIG*/
-        offset += sizeof(SCCB_CPU_INFO) * sysblk.numcpu;
-#endif /*!FEATURE_CPU_RECONFIG*/
+        offset += sizeof(SCCB_CPU_INFO) * MAX_CPU;
         STORE_HW(sccbscp->offhsa, offset);
 
         /* Move IPL load parameter to SCCB */
-        memcpy (sccbscp->loadparm, sysblk.loadparm, 8);
+        get_loadparm (sccbscp->loadparm);
 
         /* Set installed features bit mask in SCCB */
         memcpy(sccbscp->ifm, ARCH_DEP(scpinfo_ifm), sizeof(sccbscp->ifm));
@@ -557,28 +670,20 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
         /* Build the CPU information array after the SCP info */
         sccbcpu = (SCCB_CPU_INFO*)(sccbscp+1);
-#ifdef FEATURE_CPU_RECONFIG
-        for (i = 0; i < MAX_CPU_ENGINES; i++, sccbcpu++)
-#else /*!FEATURE_CPU_RECONFIG*/
-        for (i = 0; i < sysblk.numcpu; i++, sccbcpu++)
-#endif /*!FEATURE_CPU_RECONFIG*/
+        for (i = 0; i < MAX_CPU; i++, sccbcpu++)
         {
             memset (sccbcpu, 0, sizeof(SCCB_CPU_INFO));
-            sccbcpu->cpa = sysblk.regs[i].cpuad;
+            sccbcpu->cpa = i;
             sccbcpu->tod = 0;
             memcpy(sccbcpu->cpf, ARCH_DEP(scpinfo_cpf), sizeof(sccbcpu->cpf));
 
 #ifdef FEATURE_VECTOR_FACILITY
-#ifndef FEATURE_CPU_RECONFIG
-            if(sysblk.regs[i].vf->online)
-#endif /*!FEATURE_CPU_RECONFIG*/
-              sccbcpu->cpf[2] |= SCCB_CPF2_VECTOR_FEATURE_INSTALLED;
-            if(sysblk.regs[i].vf->online)
+            if(IS_CPU_ONLINE(i) && sysblk.regs[i]->vf->online)
+                sccbcpu->cpf[2] |= SCCB_CPF2_VECTOR_FEATURE_INSTALLED;
+            if(IS_CPU_ONLINE(i) && sysblk.regs[i]->vf->online)
                 sccbcpu->cpf[2] |= SCCB_CPF2_VECTOR_FEATURE_CONNECTED;
-#ifdef FEATURE_CPU_RECONFIG
-            else
+            if(!IS_CPU_ONLINE(i))
                 sccbcpu->cpf[2] |= SCCB_CPF2_VECTOR_FEATURE_STANDBY_STATE;
-#endif /*FEATURE_CPU_RECONFIG*/
 #endif /*FEATURE_VECTOR_FACILITY*/
 
         }
@@ -758,7 +863,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                     }
                 }
                 mcd_len -= obj_len;
-                (BYTE*)obj_hdr += obj_len;
+                obj_hdr=(SCCB_OBJ_HDR *)((BYTE*)obj_hdr + obj_len);
             }
     
             /* Indicate Event Processed */
@@ -858,8 +963,53 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         event_msglen = strlen(servc_scpcmdstr);
         if (event_msglen == 0)
         {
-            sccb->reas = SCCB_REAS_NO_EVENTS;
-            sccb->resp = SCCB_RESP_NO_EVENTS;
+	    if(servc_signal_quiesce_pending)
+		{
+		    sgq_bk = (SCCB_SGQ_BK*)(evd_hdr+1);
+		    evd_len = sizeof(SCCB_EVD_HDR) + sizeof(SCCB_SGQ_BK);
+
+                    /* Set response code X'75F0' if SCCB length exceeded */
+                    if ((evd_len + sizeof(SCCB_HEADER)) > sccblen)
+                    {
+                        sccb->reas = SCCB_REAS_EXCEEDS_SCCB;
+                        sccb->resp = SCCB_RESP_EXCEEDS_SCCB;
+                        break;
+                    }
+
+                    /* Zero all fields */
+                    memset (evd_hdr, 0, evd_len);
+
+                    /* Update SCCB length field if variable request */
+                    if (sccb->type & SCCB_TYPE_VARIABLE)
+                    {
+                        /* Set new SCCB length */
+                        sccblen = evd_len + sizeof(SCCB_HEADER);
+                        STORE_HW(sccb->length, sccblen);
+                        sccb->type &= ~SCCB_TYPE_VARIABLE;
+                    }
+
+                    /* Set length in event header */
+                    STORE_HW(evd_hdr->totlen, evd_len);
+
+                    /* Set type in event header */
+                    evd_hdr->type = SCCB_EVD_TYPE_SIGQ;
+
+		    STORE_HW(sgq_bk->count, servc_signal_quiesce_count);
+		    sgq_bk->unit = servc_signal_quiesce_unit;
+
+		    servc_signal_quiesce_pending = 0;
+
+                    /* Set response code X'0020' in SCCB header */
+                    sccb->reas = SCCB_REAS_NONE;
+                    sccb->resp = SCCB_RESP_COMPLETE;
+
+                    break;
+	        }
+	    else
+            {
+                sccb->reas = SCCB_REAS_NO_EVENTS;
+                sccb->resp = SCCB_RESP_NO_EVENTS;
+	    }
             break;
         }
 
@@ -1061,7 +1211,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         i = (sclp_command & SCLP_RESOURCE_MASK) >> SCLP_RESOURCE_SHIFT;
 
         /* Return invalid resource in parm if target does not exist */
-        if(i >= MAX_CPU_ENGINES)
+        if(i >= MAX_CPU)
         {
             sccb->reas = SCCB_REAS_INVALID_RSCP;
             sccb->resp = SCCB_RESP_REJECT;
@@ -1069,7 +1219,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         }
 
         /* Add cpu to the configuration */
-        configure_cpu(sysblk.regs + i);
+        configure_cpu(i);
 
         /* Set response code X'0020' in SCCB header */
         sccb->reas = SCCB_REAS_NONE;
@@ -1081,7 +1231,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         i = (sclp_command & SCLP_RESOURCE_MASK) >> SCLP_RESOURCE_SHIFT;
 
         /* Return invalid resource in parm if target does not exist */
-        if(i >= MAX_CPU_ENGINES)
+        if(i >= MAX_CPU)
         {
             sccb->reas = SCCB_REAS_INVALID_RSCP;
             sccb->resp = SCCB_RESP_REJECT;
@@ -1089,7 +1239,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         }
 
         /* Take cpu out of the configuration */
-        deconfigure_cpu(sysblk.regs + i);
+        deconfigure_cpu(i);
 
         /* Set response code X'0020' in SCCB header */
         sccb->reas = SCCB_REAS_NONE;
@@ -1103,18 +1253,18 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         i = (sclp_command & SCLP_RESOURCE_MASK) >> SCLP_RESOURCE_SHIFT;
 
         /* Return invalid resource in parm if target does not exist */
-        if(i >= MAX_CPU_ENGINES)
+        if(i >= MAX_CPU || !IS_CPU_ONLINE(i))
         {
             sccb->reas = SCCB_REAS_INVALID_RSCP;
             sccb->resp = SCCB_RESP_REJECT;
             break;
         }
 
-        if(sysblk.regs[i].vf->online)
+        if(sysblk.regs[i]->vf->online)
             logmsg(_("CPU%4.4X: Vector Facility configured offline\n"),i);
 
         /* Take the VF out of the configuration */
-        sysblk.regs[i].vf->online = 0;
+        sysblk.regs[i]->vf->online = 0;
 
         /* Set response code X'0020' in SCCB header */
         sccb->reas = SCCB_REAS_NONE;
@@ -1126,7 +1276,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         i = (sclp_command & SCLP_RESOURCE_MASK) >> SCLP_RESOURCE_SHIFT;
 
         /* Return invalid resource in parm if target does not exist */
-        if(i >= MAX_CPU_ENGINES)
+        if(i >= MAX_CPU)
         {
             sccb->reas = SCCB_REAS_INVALID_RSCP;
             sccb->resp = SCCB_RESP_REJECT;
@@ -1134,18 +1284,18 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         }
 
         /* Return improper state if associated cpu is offline */
-        if(!sysblk.regs[i].cpuonline)
+        if(!IS_CPU_ONLINE(i))
         {
             sccb->reas = SCCB_REAS_IMPROPER_RSC;
             sccb->resp = SCCB_RESP_REJECT;
             break;
         }
 
-        if(!sysblk.regs[i].vf->online)
+        if(!sysblk.regs[i]->vf->online)
             logmsg(_("CPU%4.4X: Vector Facility configured online\n"),i);
 
         /* Mark the VF online to the CPU */
-        sysblk.regs[i].vf->online = 1;
+        sysblk.regs[i]->vf->online = 1;
 
         /* Set response code X'0020' in SCCB header */
         sccb->reas = SCCB_REAS_NONE;
@@ -1190,66 +1340,6 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
 } /* end function service_call */
 
-
-#if defined(FEATURE_CHSC)
-/*-------------------------------------------------------------------*/
-/* B25F CHSC  - Channel Subsystem Call                         [RRE] */
-/*-------------------------------------------------------------------*/
-DEF_INST(channel_subsystem_call)
-{
-int     r1, r2;                                 /* register values   */
-VADR    n;                                      /* Unsigned work     */
-RADR    abs;                                    /* Unsigned work     */
-U16     length;                                 /* Length of request */
-U16     req;                                    /* Request code      */
-CHSC_REQ *chsc_req;                             /* Request structure */
-CHSC_RSP *chsc_rsp;                             /* Response structure*/
-
-    RRE(inst, execflag, regs, r1, r2);
-
-    PRIV_CHECK(regs);
-
-    SIE_INTERCEPT(regs);
-
-    n = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
-    
-    if(n & 0xFFF)
-        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
-
-    abs = LOGICAL_TO_ABS(n, r1, regs, ACCTYPE_READ, regs->psw.pkey);
-    chsc_req = (CHSC_REQ*)(regs->mainstor + abs);
-
-    /* Fetch length of request field */
-    FETCH_HW(length, chsc_req->length);
-
-    chsc_rsp = (CHSC_RSP*)((BYTE*)chsc_req + length);
-
-    if((length < sizeof(CHSC_REQ))
-      || (length > (0x1000 - sizeof(CHSC_RSP))))
-        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
-
-    FETCH_HW(req,chsc_req->req);
-    switch(req) {
-        /* process various requests here */
-
-        default:
-
-            if( HDC(debug_chsc_unknown_request, chsc_rsp, chsc_req, regs) )
-                break;
-
-            ARCH_DEP(validate_operand) (n, r1, 0, ACCTYPE_WRITE, regs);
-            /* Set response field length */
-            STORE_HW(chsc_rsp->length,sizeof(CHSC_RSP));
-            /* Store unsupported command code */
-            STORE_HW(chsc_rsp->rsp,CHSC_REQ_INVALID);
-            /* No reaon code */
-            STORE_FW(chsc_rsp->info,0);
-
-            regs->psw.cc = 0;
-    }
-
-}
-#endif /*defined(FEATURE_CHSC)*/
 
 #endif /*defined(FEATURE_SERVICE_PROCESSOR)*/
 

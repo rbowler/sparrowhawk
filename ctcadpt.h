@@ -2,7 +2,7 @@
 // Hercules Channel to Channel Emulation Support
 // ====================================================================
 //
-// Copyright (C) 2002-2003 by James A. Pierson
+// Copyright (C) 2002-2004 by James A. Pierson
 //
 
 #ifndef __CTCADPT_H_
@@ -27,10 +27,10 @@
 // External Declarations
 // --------------------------------------------------------------------
 
-extern int      CTCX_Init( DEVBLK* pDEVBLK, int argc, BYTE *argv[] );
+extern int      CTCX_Init( DEVBLK* pDEVBLK, int argc, char *argv[] );
 extern int      CTCX_Close( DEVBLK* pDEVBLK );
-extern void     CTCX_Query( DEVBLK* pDEVBLK, BYTE** ppszClass,
-                            int     iBufLen, BYTE*  pBuffer );
+extern void     CTCX_Query( DEVBLK* pDEVBLK, char** ppszClass,
+                            int     iBufLen, char*  pBuffer );
 extern void     CTCX_ExecuteCCW( DEVBLK* pDEVBLK, BYTE  bCode,
                                  BYTE    bFlags,  BYTE  bChained,
                                  U16     sCount,  BYTE  bPrevCode,
@@ -38,10 +38,10 @@ extern void     CTCX_ExecuteCCW( DEVBLK* pDEVBLK, BYTE  bCode,
                                  BYTE*   pMore,   BYTE* pUnitStat,
                                  U16*    pResidual );
 
-extern int      CTCI_Init( DEVBLK* pDEVBLK, int argc, BYTE *argv[] );
+extern int      CTCI_Init( DEVBLK* pDEVBLK, int argc, char *argv[] );
 extern int      CTCI_Close( DEVBLK* pDEVBLK );
-extern void     CTCI_Query( DEVBLK* pDEVBLK, BYTE** ppszClass,
-                            int     iBufLen, BYTE*  pBuffer );
+extern void     CTCI_Query( DEVBLK* pDEVBLK, char** ppszClass,
+                            int     iBufLen, char*  pBuffer );
 extern void     CTCI_ExecuteCCW( DEVBLK* pDEVBLK, BYTE  bCode,
                                  BYTE    bFlags,  BYTE  bChained,
                                  U16     sCount,  BYTE  bPrevCode,
@@ -56,10 +56,10 @@ extern void     CTCI_Write( DEVBLK* pDEVBLK,   U16   sCount,
                             BYTE*   pIOBuf,    BYTE* UnitStat,
                             U16*    pResidual );
 
-extern int      LCS_Init( DEVBLK* pDEVBLK, int argc, BYTE *argv[] );
+extern int      LCS_Init( DEVBLK* pDEVBLK, int argc, char *argv[] );
 extern int      LCS_Close( DEVBLK* pDEVBLK );
-extern void     LCS_Query( DEVBLK* pDEVBLK, BYTE** ppszClass,
-                           int     iBufLen, BYTE*  pBuffer );
+extern void     LCS_Query( DEVBLK* pDEVBLK, char** ppszClass,
+                           int     iBufLen, char*  pBuffer );
 extern void     LCS_ExecuteCCW( DEVBLK* pDEVBLK, BYTE  bCode,
                                 BYTE    bFlags,  BYTE  bChained,
                                 U16     sCount,  BYTE  bPrevCode,
@@ -77,10 +77,6 @@ extern void     LCS_SDC( DEVBLK* pDEVBLK,   BYTE   bOpCode,
                          U16     sCount,    BYTE*  pIOBuf,
                          BYTE*   UnitStat,  U16*   pResidual,
                          BYTE*   pMore );
-
-extern void     AddDevice( DEVBLK**    ppDEVBLK,
-                           U16         sDevNum,
-                           DEVBLK*     pDevBlk );
 
 extern int      ParseMAC( char* pszMACAddr, BYTE* pbMACAddr );
 extern void     packet_trace( BYTE *addr, int len );
@@ -207,7 +203,7 @@ struct  _CTCBLK
     pid_t       pid;                      // Read Thread pid
 
     DEVBLK*     pDEVBLK[2];               // 0 - Read subchannel
-                                          // 1 - Write cubchannel
+                                          // 1 - Write subchannel
 
     U16         iMaxFrameBufferSize;
     BYTE        bFrameBuffer[CTC_FRAME_BUFFER_SIZE];
@@ -300,7 +296,7 @@ struct  _LCSDEV
     BYTE        bMode;                    // LCSDEV_MODE_XXXXX
     BYTE        bPort;                    // Relative Adapter No.
     BYTE        bType;                    // LCSDEV_TYPE_XXXXX
-    BYTE*       pszIPAddress;             // IP Address (string)
+    char*       pszIPAddress;             // IP Address (string)
     U32         lIPAddress;               // IP Address (binary)
 
     PLCSBLK     pLCSBLK;                  // -> LCSBLK
@@ -393,6 +389,8 @@ struct  _LCSBLK
 
     BYTE
       fDebug:1;
+
+    int         icDevices;                // Number of devices
 
     PLCSDEV     pDevices;                 // -> Device chain
     LCSPORT     Port[LCS_MAX_PORTS];      // Port Blocks

@@ -1,4 +1,4 @@
-/* tapesplt.C  (c) Copyright Jay Maynard, 2000-2003                 */
+/* tapesplt.C  (c) Copyright Jay Maynard, 2000-2004                 */
 /*              Split AWSTAPE format tape image                      */
 
 /*-------------------------------------------------------------------*/
@@ -53,8 +53,8 @@ int             rc;                     /* Return code               */
 int             i;                      /* Array subscript           */
 int             len;                    /* Block length              */
 int             prevlen;                /* Previous block length     */
-BYTE           *infilename;             /* -> Input file name        */
-BYTE           *outfilename;            /* -> Current out file name  */
+char           *infilename;             /* -> Input file name        */
+char           *outfilename;            /* -> Current out file name  */
 int             infd = -1;              /* Input file descriptor     */
 int             outfd = -1;             /* Current out file desc     */
 int             fileno;                 /* Tape file number          */

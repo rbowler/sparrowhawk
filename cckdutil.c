@@ -1,4 +1,4 @@
-/* CCKDUTIL.C   (c) Copyright Roger Bowler, 1999-2003                */
+/* CCKDUTIL.C   (c) Copyright Roger Bowler, 1999-2004                */
 /*       ESA/390 Compressed CKD Common routines                      */
 
 /*-------------------------------------------------------------------*/
@@ -42,7 +42,7 @@ int             typ;                    /* Type of space             */
 
 int cdsk_spctab_comp(const void *, const void *);
 int cdsk_rcvtab_comp(const void *, const void *);
-int cdsk_valid_trk (int, BYTE *, int, int, int, BYTE *);
+int cdsk_valid_trk (int, BYTE *, int, int, int, char *);
 int cdsk_recover_trk (int, BYTE *, int, int, int, int, int, int *);
 int cdsk_build_gap (SPCTAB *, int *, SPCTAB *);
 int cdsk_build_gap_long (SPCTAB *, int *, SPCTAB *);
@@ -126,8 +126,13 @@ U32               o;                    /* Level 2 table offset      */
     rc = lseek (fd, CCKD_L1TAB_POS, SEEK_SET);
     if (rc == -1)
     {
+#if SIZEOF_LONG == 8
+        ENDMSG (m, "lseek error fd %d offset %ld: %s\n",
+                fd, (long)CCKD_L1TAB_POS, strerror(errno));
+#else
         ENDMSG (m, "lseek error fd %d offset %lld: %s\n",
                 fd, (long long)CCKD_L1TAB_POS, strerror(errno));
+#endif
         free (l1);
         return -1;
     }
@@ -146,8 +151,13 @@ U32               o;                    /* Level 2 table offset      */
     rc = lseek (fd, CCKD_L1TAB_POS, SEEK_SET);
     if (rc == -1)
     {
+#if SIZEOF_LONG == 8
+        ENDMSG (m, "lseek error fd %d offset %ld: %s\n",
+                fd, (long)CCKD_L1TAB_POS, strerror(errno));
+#else
         ENDMSG (m, "lseek error fd %d offset %lld: %s\n",
                 fd, (long long)CCKD_L1TAB_POS, strerror(errno));
+#endif
         free (l1);
         return -1;
     }
@@ -654,8 +664,8 @@ int             maxdlen=-1;             /* Max data length for device*/
 int             trksz=-1, hdrtrksz=-1;  /* Track size                */
 off_t           hipos, lopos;           /* Valid high/low offsets    */
 off_t           pos;                    /* File offset               */
-int             hdrerr=0, fsperr=0, l1errs=0, l2errs=0, trkerrs=0,
-                othererrs = 0;          /* Error indicators          */
+int             hdrerr=0, fsperr=0, l1errs=0, l2errs=0, trkerrs=0;
+                                        /* Error indicators          */
 off_t           fsp;                    /* Free space offset         */
 CCKD_FREEBLK    fb;                     /* Free space block          */
 int             n;                      /* Size of space tables      */
@@ -679,9 +689,9 @@ int             trys;                   /* Nbr recovery trys for trk */
 int             comps = 0;              /* Supported compressions    */
 int             badcomps[] = {0, 0, 0}; /* Bad compression counts    */
 char            msg[256];               /* Message                   */
-BYTE *space[]     = {"none", "devhdr", "cdevhdr", "l1tab", "l2tab",
+char *space[]     = {"none", "devhdr", "cdevhdr", "l1tab", "l2tab",
                      "trkimg", "free_blk", "file_end"};
-BYTE *compression[] = {"none", "zlib", "bzip2"};
+char *compression[] = {"none", "zlib", "bzip2"};
 
 #if defined(HAVE_LIBZ)
     comps |= CCKD_COMPRESS_ZLIB;
@@ -887,15 +897,17 @@ BYTE *compression[] = {"none", "zlib", "bzip2"};
     l1tabsz = cdevhdr.numl1tab * CCKD_L1ENT_SIZE;
 
     /* Perform space checks */
-    if ((U32)cdevhdr.size != (U32)fst.st_size
-     || (U32)(cdevhdr.used + cdevhdr.free_total) != (U32)fst.st_size
-     || (U32)cdevhdr.free_largest > (U32)cdevhdr.free_total
-     || (!cdevhdr.free
-      && (cdevhdr.free_total || (U32)cdevhdr.free_number != (U32)0))
-     || (cdevhdr.free
-      && (!cdevhdr.free_total || !cdevhdr.free_number))
-     || (!cdevhdr.free_number && cdevhdr.free_total)
-     || (cdevhdr.free_number && !cdevhdr.free_total))
+    if ((off_t)cdevhdr.size != fst.st_size
+     || (off_t)(cdevhdr.used + cdevhdr.free_total) != fst.st_size
+     || (cdevhdr.free_largest > cdevhdr.free_total - cdevhdr.free_imbed)
+     || (cdevhdr.free == 0
+      && (cdevhdr.free_total != cdevhdr.free_imbed || cdevhdr.free_number != 0))
+     || (cdevhdr.free != 0
+      && (cdevhdr.free_total <= cdevhdr.free_imbed || cdevhdr.free_number == 0))
+     || (cdevhdr.free_number == 0 && cdevhdr.free_total != cdevhdr.free_imbed)
+     || (cdevhdr.free_number != 0 && cdevhdr.free_total <= cdevhdr.free_imbed)
+     || (cdevhdr.free_imbed > cdevhdr.free_total)
+       )
     {
         CDSKMSG (m, "Recoverable header errors found: "
                  "%d %d %d %d %d %d %d\n",
@@ -904,7 +916,7 @@ BYTE *compression[] = {"none", "zlib", "bzip2"};
                  (unsigned int)cdevhdr.used,
                  (unsigned int)cdevhdr.free_total,
                  (unsigned int)cdevhdr.free_largest,
-                 (unsigned int)cdevhdr.free,
+                 (unsigned int)cdevhdr.free_imbed,
                  (unsigned int)cdevhdr.free_number);
         hdrerr = 1;
         if (level < 1)
@@ -949,7 +961,8 @@ BYTE *compression[] = {"none", "zlib", "bzip2"};
             CDSKMSG (m, "forcing check level 1; file not closed\n");
             level = 1;
         }
-        else if ((cdevhdr.options & (CCKD_OPENED | CCKD_ORDWR)) == 0)
+        else if ((cdevhdr.options & CCKD_ORDWR) == 0
+              || (fdflags & O_RDWR) == 0)
             level = -1;
     }
 
@@ -1319,15 +1332,6 @@ space_check:
             /* add track to the space table */
             valid_trks++;
             cdevhdr2.used += l2[j].len;
-            if ((l2[j].size - l2[j].len) && (fdflags & O_RDWR))
-            {
-                if (!fsperr)
-                    CDSKMSG (m, "imbedded free space will be removed%s\n","");
-                fsperr = 1;
-                l2[j].size = l2[j].len;
-                rc = lseek (fd, (off_t)l1[i], SEEK_SET);
-                rc = write (fd, &l2, CCKD_L2TAB_SIZE);
-            }
             cdevhdr2.free_imbed += l2[j].size - l2[j].len;
             cdevhdr2.free_total += l2[j].size - l2[j].len;
             spc[s].pos = l2[j].pos;
@@ -1380,14 +1384,22 @@ space_check:
     trknum = 1;
 
 /*-------------------------------------------------------------------*/
+/* Test for header errors                                            */
+/*-------------------------------------------------------------------*/
+    if (level >= 0
+     && (cdevhdr.size != cdevhdr2.size
+      || cdevhdr.used != cdevhdr2.used
+      || cdevhdr.free != cdevhdr2.free
+      || cdevhdr.free_total != cdevhdr2.free_total
+      || cdevhdr.free_largest != cdevhdr2.free_largest
+      || cdevhdr.free_number != cdevhdr2.free_number
+      || cdevhdr.free_imbed != cdevhdr2.free_imbed))
+        hdrerr = 1;
+
+/*-------------------------------------------------------------------*/
 /* we will rebuild free space on any kind of error                   */
 /*-------------------------------------------------------------------*/
-
-    othererrs = r || l1errs || l2errs || trkerrs;
-    if ((level >= 0
-      && memcmp (&cdevhdr.CCKD_FREEHDR, &cdevhdr2.CCKD_FREEHDR, CCKD_FREEHDR_SIZE))
-     || othererrs)
-        fsperr = 1;
+    fsperr = fsperr || r || l1errs || l2errs || trkerrs || hdrerr;
 
 /*-------------------------------------------------------------------*/
 /* look for gaps and overlaps                                        */
@@ -1883,7 +1895,10 @@ overlap:
             gaps--;
         }
 
-        memset (&cdevhdr.CCKD_FREEHDR, 0, CCKD_FREEHDR_SIZE);
+        cdevhdr.size = cdevhdr.used = cdevhdr.free =
+        cdevhdr.free_total = cdevhdr.free_largest =
+        cdevhdr.free_number = cdevhdr.free_imbed = 0;
+
         cdevhdr.size = hipos;
         if (gaps) cdevhdr.free = gap[0].pos;
         cdevhdr.free_number = gaps;
@@ -2009,7 +2024,7 @@ unsigned int    v1, v2;                 /* Value for entry           */
 /* Validate a track image                                            */
 /*-------------------------------------------------------------------*/
 int cdsk_valid_trk (int trk, BYTE *buf, int heads, int len, int trksz,
-                    BYTE *msg)
+                    char *msg)
 {
 int             rc;                     /* Return code               */
 int             cyl;                    /* Cylinder                  */
@@ -2022,7 +2037,7 @@ BYTE           *bufp;                   /* Buffer pointer            */
 int             bufl;                   /* Buffer length             */
 BYTE            buf2[65536];            /* Uncompressed buffer       */
 int             comps = 0;              /* Supported compressions    */
-BYTE           *compression[] = {"none", "zlib", "bzip2", "????"};
+char           *compression[] = {"none", "zlib", "bzip2", "????"};
 
 #if defined(HAVE_LIBZ)
     comps |= CCKD_COMPRESS_ZLIB;
@@ -2065,7 +2080,7 @@ BYTE           *compression[] = {"none", "zlib", "bzip2", "????"};
         bufp = (BYTE *)&buf2;
         memcpy (&buf2, buf, CKDDASD_TRKHDR_SIZE);
         bufl = sizeof(buf2) - CKDDASD_TRKHDR_SIZE;
-        rc = uncompress (&buf2[CKDDASD_TRKHDR_SIZE], (uLongf *)&bufl,
+        rc = uncompress (&buf2[CKDDASD_TRKHDR_SIZE], (void *)&bufl,
                          &buf[CKDDASD_TRKHDR_SIZE], len);
         if (rc != Z_OK)
         {
@@ -2085,8 +2100,8 @@ BYTE           *compression[] = {"none", "zlib", "bzip2", "????"};
         bufp = (BYTE *)&buf2;
         memcpy (&buf2, buf, CKDDASD_TRKHDR_SIZE);
         bufl = sizeof(buf2) - CKDDASD_TRKHDR_SIZE;
-        rc = BZ2_bzBuffToBuffDecompress ( &buf2[CKDDASD_TRKHDR_SIZE], &bufl,
-                         &buf[CKDDASD_TRKHDR_SIZE], len, 0, 0);
+        rc = BZ2_bzBuffToBuffDecompress ( (void *)&buf2[CKDDASD_TRKHDR_SIZE], (size_t *)&bufl,
+                         (void *)&buf[CKDDASD_TRKHDR_SIZE], len, 0, 0);
         if (rc != BZ_OK)
         {
             if (msg)

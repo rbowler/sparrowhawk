@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //         fthreads.h           Fish's WIN32 version of pthreads
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2001-2003. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2001-2004. Released under the Q Public License
 // (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
@@ -148,6 +148,15 @@ void  fthread_exit
 
 fthread_t  fthread_self
 (
+);
+
+////////////////////////////////////////////////////////////////////////////////////
+// Compare thread-ids...
+
+int  fthread_equal
+(
+    fthread_t  pdwThreadID_1,
+    fthread_t  pdwThreadID_2
 );
 
 ////////////////////////////////////////////////////////////////////////////////////
@@ -334,7 +343,7 @@ int  fthread_cond_timedwait
 
 #define  FTHREAD_MUTEX_ERRORCHECK   0x4F6E6365                  // "Once" in ASCII
 #define  FTHREAD_MUTEX_RECURSIVE    0x4D616E79                  // "Many" in ASCII
-#define  FTHREAD_MUTEX_DEFAULT      FTHREAD_MUTEX_RECURSIVE
+#define  FTHREAD_MUTEX_DEFAULT      FTHREAD_MUTEX_ERRORCHECK
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Initialize a "mutex" attribute...

@@ -10,13 +10,89 @@
 
 #include "esa390.h"
 
+#undef _ext_ia32
+#if defined(__i686__) || defined(__pentiumpro__) || defined(__pentium4__)
+#define _ext_ia32
+#endif
+
+#undef _ext_ppc
+#if defined(__powerpc__) || defined(__PPC__)
+#define _ext_ppc
+#endif
+
 /*-------------------------------------------------------------------*/
 /* Intel pentiumpro/i686                                             */
 /*-------------------------------------------------------------------*/
-#if defined(__i686__) | defined(__pentiumpro__) 
+#if defined(_ext_ia32)
 
-#define FETCHIBYTE1(_ib, _inst) \
-  __asm__("movzbl 1(%%esi),%%eax" : "=a" (_ib) : "S" (_inst));
+#ifdef OPTION_SMP
+#define LOCK_PREFIX "lock ; "
+#else
+#define LOCK_PREFIX ""
+#endif
+
+#define ADDR (*(volatile long *) addr)
+
+#define set_bit(x,y,z) set_bit_i686((y),(z))
+static __inline__ void set_bit_i686(int nr, volatile void * addr)
+{
+	__asm__ __volatile__( LOCK_PREFIX
+		"btsl %1,%0"
+		:"=m" (ADDR)
+		:"Ir" (nr));
+}
+
+#define clear_bit(x,y,z) clear_bit_i686((y),(z))
+static __inline__ void clear_bit_i686(int nr, volatile void * addr)
+{
+	__asm__ __volatile__( LOCK_PREFIX
+		"btrl %1,%0"
+		:"=m" (ADDR)
+		:"Ir" (nr));
+}
+
+#define test_bit(x,y,z) test_bit_i686((x),(y),(z))
+static __inline__ int test_bit_i686(int len, int nr, volatile void *addr)
+{
+    if (__builtin_constant_p(nr) && len == 4)
+        return ((*(const volatile unsigned int *)addr) & (1 << nr));
+    else
+    {
+        int oldbit;
+        __asm__ __volatile__(
+            "btl  %2,%1\n\t"
+            "sbbl %0,%0"
+            :"=r" (oldbit)
+            :"m" (ADDR),"Ir" (nr));
+        return oldbit;
+    }
+}
+
+#define or_bits(x,y,z) or_bits_i686((x),(y),(z))
+static __inline__ void or_bits_i686(int len, int bits, volatile void * addr)
+{
+    switch (len) {
+    case 4:
+	__asm__ __volatile__( LOCK_PREFIX
+		"orl %1,%0"
+		:"=m" (ADDR)
+		:"Ir" (bits));
+        break;
+    }
+}
+
+#define and_bits(x,y,z) and_bits_i686((x),(y),(z))
+static __inline__ void and_bits_i686(int len, int bits, volatile void * addr)
+{
+    switch (len) {
+    case 4:
+	__asm__ __volatile__( LOCK_PREFIX
+		"andl %1,%0"
+		:"=m" (ADDR)
+		:"Ir" (bits));
+        break;
+    }
+}
 
 #define cmpxchg1(x,y,z) cmpxchg1_i686(x,y,z)
 static __inline__ BYTE cmpxchg1_i686(BYTE *old, BYTE new, void *ptr) {
@@ -51,7 +127,6 @@ static __inline__ BYTE cmpxchg4_i686(U32 *old, U32 new, void *ptr) {
          : "ax", "memory");
  return code;
 }
-#define HAVE_CMPXCHG
 
 #if !defined(PIC)
 
@@ -245,7 +320,62 @@ do {                                          \
          : "edx", "memory");                  \
 } while (0)
 
-#endif /* defined(__i686__) | defined(__pentiumpro__) */
+#endif /* defined(_ext_ia32) */
+
+/*-------------------------------------------------------------------*/
+/* PowerPC                                                           */
+/*-------------------------------------------------------------------*/
+#if defined(_ext_ppc)
+
+/* From /usr/src/linux/include/asm-ppc/system.h */
+static __inline__ unsigned long
+__cmpxchg_u32(volatile int *p, int old, int new)
+{
+	int prev;
+
+	__asm__ __volatile__ ("\n\
+1:	lwarx	%0,0,%2 \n\
+	cmpw	0,%0,%3 \n\
+	bne	2f \n\
+ 	stwcx.	%4,0,%2 \n\
+	bne-	1b\n"
+#ifdef OPTION_SMP
+"	sync\n"
+#endif /* OPTION_SMP */
+"2:"
+	: "=&r" (prev), "=m" (*p)
+	: "r" (p), "r" (old), "r" (new), "m" (*p)
+	: "cc", "memory");
+
+	return prev;
+}
+
+#define cmpxchg4(x,y,z) cmpxchg4_ppc(x,y,z)
+static __inline__ BYTE cmpxchg4_ppc(U32 *old, U32 new, void *ptr) {
+/* returns zero on success otherwise returns 1 */
+U32 prev = *old;
+return (prev != (*old = __cmpxchg_u32((int *)ptr, (int)prev, (int)new)));
+}
+
+#define cmpxchg1(x,y,z) cmpxchg1_ppc(x,y,z)
+static __inline__ BYTE cmpxchg1_ppc(BYTE *old, BYTE new, void *ptr) {
+/* returns zero on success otherwise returns 1 */
+long  off, shift;
+BYTE  cc;
+U32  *ptr4, val4, old4, new4;
+
+    off = (long)ptr & 3;
+    shift = (3 - off) * 8;
+    ptr4 = ptr - off;
+    val4 = *ptr4;
+    old4 = (val4 & ~(0xff << shift)) | (*old << shift);
+    new4 = (val4 & ~(0xff << shift)) | (new << shift);
+    cc = cmpxchg4_ppc(&old4, new4, ptr4);
+    *old = (old4 >> shift) & 0xff;
+    return cc;
+}
+
+#endif /* defined(_ext_ppc) */
 
 /*-------------------------------------------------------------------*/
 /* Defaults                                                          */
@@ -293,6 +423,81 @@ static __inline__ U64 fetch_dw(volatile void *ptr) {
 static __inline__ void store_dw(volatile void *ptr, U64 value) {
  U64 tmp = CSWAP64(value);
  memcpy((BYTE *)ptr, &tmp, 8);
+}
+#endif
+
+#ifndef BIT
+#define BIT(nr) (1<<(nr))
+#endif
+
+#ifndef set_bit
+static __inline__ void set_bit(int len, int nr, volatile void * addr)
+{
+    switch (len) {
+    case 1:
+        *(BYTE *)addr |= (BYTE)(BIT(nr));
+        break;
+    case 2:
+        *(U16 *)addr |= (U16)(BIT(nr));
+        break;
+    case 4:
+        *(U32 *)addr |= (U32)(BIT(nr));
+        break;
+    }
+}
+#endif
+
+#ifndef clear_bit
+static __inline__ void clear_bit(int len, int nr, volatile void * addr)
+{
+    switch (len) {
+    case 1:
+        *(BYTE *)addr &= ~((BYTE)(BIT(nr)));
+        break;
+    case 4:
+        *(U32 *)addr &= ~((U32)(BIT(nr)));
+        break;
+    }
+}
+#endif
+
+#ifndef test_bit
+static __inline__ int test_bit(int len, int nr, volatile void * addr)
+{
+    switch (len) {
+    case 1:
+        return ((*(BYTE *)addr & (BYTE)(BIT(nr))) != 0);
+        break;
+    case 2:
+        return ((*(U16 *)addr & (U16)(BIT(nr))) != 0);
+        break;
+    case 4:
+        return ((*(U32 *)addr & (U32)(BIT(nr))) != 0);
+        break;
+    }
+    return 0;
+}
+#endif
+
+#ifndef or_bits
+static __inline__ void or_bits(int len, int bits, volatile void * addr)
+{
+    switch (len) {
+    case 4:
+        *(U32 *)addr |= (U32)bits;
+        break;
+    }
+}
+#endif
+
+#ifndef and_bits
+static __inline__ void and_bits(int len, int bits, volatile void * addr)
+{
+    switch (len) {
+    case 4:
+        *(U32 *)addr &= (U32)bits;
+        break;
+    }
 }
 #endif
 

@@ -1,4 +1,4 @@
-/* CKDDASD.C    (c) Copyright Roger Bowler, 1999-2003                */
+/* CKDDASD.C    (c) Copyright Roger Bowler, 1999-2004                */
 /*              ESA/390 CKD Direct Access Storage Device Handler     */
 
 /*-------------------------------------------------------------------*/
@@ -18,6 +18,7 @@
 
 #include "hercules.h"
 #include "devtype.h"
+#include "sr.h"
 
 /*-------------------------------------------------------------------*/
 /* Bit definitions for File Mask                                     */
@@ -175,7 +176,7 @@ static  BYTE eighthexFF[] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
 /*-------------------------------------------------------------------*/
 /* Initialize the device handler                                     */
 /*-------------------------------------------------------------------*/
-int ckddasd_init_handler ( DEVBLK *dev, int argc, BYTE *argv[] )
+int ckddasd_init_handler ( DEVBLK *dev, int argc, char *argv[] )
 {
 int             rc;                     /* Return code               */
 struct stat     statbuf;                /* File information          */
@@ -183,14 +184,14 @@ CKDDASD_DEVHDR  devhdr;                 /* Device header             */
 CCKDDASD_DEVHDR cdevhdr;                /* Compressed device header  */
 int             i;                      /* Loop index                */
 int             fileseq;                /* File sequence number      */
-BYTE           *sfxptr;                 /* -> Last char of file name */
-BYTE            sfxchar;                /* Last char of file name    */
+char           *sfxptr;                 /* -> Last char of file name */
+char            sfxchar;                /* Last char of file name    */
 int             heads;                  /* #of heads in CKD file     */
 int             trksize;                /* Track size of CKD file    */
 int             trks;                   /* #of tracks in CKD file    */
 int             cyls;                   /* #of cylinders in CKD file */
 int             highcyl;                /* Highest cyl# in CKD file  */
-BYTE           *cu = NULL;              /* Specified control unit    */
+char           *cu = NULL;              /* Specified control unit    */
 char           *kw;                     /* Argument keyword          */
 int             cckd=0;                 /* 1 if compressed CKD       */
 
@@ -283,8 +284,18 @@ int             cckd=0;                 /* 1 if compressed CKD       */
             memcmp ("sf=", argv[i], 3) == 0)
         {
             if ('\"' == argv[i][3]) argv[i]++;
-            if (strlen(argv[i]+3) < 256)
-                strcpy (dev->dasdsfn, argv[i]+3);
+            dev->dasdsfn = strdup(argv[i]+3);
+            if (dev->dasdsfn)
+            {
+                /* Set the pointer to the suffix character */
+                dev->dasdsfx = strrchr (dev->dasdsfn, '/');
+                if (dev->dasdsfx == NULL)
+                    dev->dasdsfx = dev->dasdsfn + 1;
+                dev->dasdsfx = strchr (dev->dasdsfx, '.');
+                if (dev->dasdsfx == NULL)
+                    dev->dasdsfx = dev->dasdsfn + strlen(dev->dasdsfn);
+                dev->dasdsfx--;
+            }
             continue;
         }
         if (strlen (argv[i]) > 3
@@ -327,7 +338,7 @@ int             cckd=0;                 /* 1 if compressed CKD       */
                         O_RDONLY|O_BINARY : O_RDWR|O_BINARY);
         if (dev->fd < 0)
         {   /* Try read-only if shadow file present */
-            if (!dev->ckdrdonly && dev->dasdsfn[0] != '\0')
+            if (!dev->ckdrdonly && dev->dasdsfn != NULL)
                 dev->fd = open (dev->filename, O_RDONLY|O_BINARY);
             if (dev->fd < 0)
             {
@@ -337,14 +348,8 @@ int             cckd=0;                 /* 1 if compressed CKD       */
             }
         }
 
-        /* If `readonly' and shadow files (`sf=') were specified,
-           then turn off the readonly bit.  Might as well make
-           sure the `fakewrite' bit is off, too.               */
-        if (dev->dasdsfn[0] != '\0' && !dev->batch)
-            dev->ckdrdonly = dev->ckdfakewr = 0;
-
         /* If shadow file, only one base file is allowed */
-        if (fileseq > 1 && dev->dasdsfn[0] != '\0')
+        if (fileseq > 1 && dev->dasdsfn != NULL)
         {
             logmsg (_("HHCDA006E %s not in a single file for shadowing\n"),
                     dev->filename);
@@ -528,6 +533,16 @@ int             cckd=0;                 /* 1 if compressed CKD       */
 
     /* Set number of sense bytes */
     dev->numsense = 32;
+    if ((dev->devtype == 0x2311 ) || (dev->devtype == 0x2314 ))
+    {
+        dev->numsense = 6;
+    }
+    if ((dev->devtype == 0x3330 ) || (dev->devtype == 0x3340 )
+     || (dev->devtype == 0x3350 ) || (dev->devtype == 0x3375 )
+     || (dev->devtype == 0x3380 ))
+    {
+        dev->numsense = 24;
+    }
 
     /* Locate the CKD dasd table entry */
     dev->ckdtab = dasd_lookup (DASD_CKDDEV, NULL, dev->devtype, dev->ckdcyls);
@@ -578,8 +593,8 @@ int             cckd=0;                 /* 1 if compressed CKD       */
 /*-------------------------------------------------------------------*/
 /* Query the device definition                                       */
 /*-------------------------------------------------------------------*/
-void ckddasd_query_device (DEVBLK *dev, BYTE **class,
-                int buflen, BYTE *buffer)
+void ckddasd_query_device (DEVBLK *dev, char **class,
+                int buflen, char *buffer)
 {
 
     *class = "DASD";
@@ -804,8 +819,8 @@ ckd_read_track_retry:
     /* Cache hit */
     if (i >= 0)
     {
-        cache_setflag(CACHE_DEVBUF, dev->cache, ~0, FBA_CACHE_ACTIVE);
-        cache_setage(CACHE_DEVBUF, dev->cache);
+        cache_setflag(CACHE_DEVBUF, i, ~0, CKD_CACHE_ACTIVE);
+        cache_setage(CACHE_DEVBUF, i);
         cache_unlock(CACHE_DEVBUF);
 
         DEVTRACE (_("HHCDA028I read trk %d cache hit, using cache[%d]\n"),
@@ -1038,11 +1053,259 @@ int ckddasd_used (DEVBLK *dev)
 }
 
 /*-------------------------------------------------------------------*/
+/* Hercules suspend/resume text unit key values                      */
+/*-------------------------------------------------------------------*/
+#define SR_DEV_CKD_BUFCUR       ( SR_DEV_CKD | 0x001 )
+#define SR_DEV_CKD_BUFOFF       ( SR_DEV_CKD | 0x002 )
+#define SR_DEV_CKD_CURCYL       ( SR_DEV_CKD | 0x003 )
+#define SR_DEV_CKD_CURHEAD      ( SR_DEV_CKD | 0x004 )
+#define SR_DEV_CKD_CURREC       ( SR_DEV_CKD | 0x005 )
+#define SR_DEV_CKD_CURKL        ( SR_DEV_CKD | 0x006 )
+#define SR_DEV_CKD_ORIENT       ( SR_DEV_CKD | 0x007 )
+#define SR_DEV_CKD_CUROPER      ( SR_DEV_CKD | 0x008 )
+#define SR_DEV_CKD_CURDL        ( SR_DEV_CKD | 0x009 )
+#define SR_DEV_CKD_REM          ( SR_DEV_CKD | 0x00a )
+#define SR_DEV_CKD_POS          ( SR_DEV_CKD | 0x00b )
+#define SR_DEV_CKD_DXBLKSZ      ( SR_DEV_CKD | 0x010 )
+#define SR_DEV_CKD_DXBCYL       ( SR_DEV_CKD | 0x011 )
+#define SR_DEV_CKD_DXBHEAD      ( SR_DEV_CKD | 0x012 )
+#define SR_DEV_CKD_DXECYL       ( SR_DEV_CKD | 0x013 )
+#define SR_DEV_CKD_DXEHEAD      ( SR_DEV_CKD | 0x014 )
+#define SR_DEV_CKD_DXFMASK      ( SR_DEV_CKD | 0x015 )
+#define SR_DEV_CKD_DXGATTR      ( SR_DEV_CKD | 0x016 )
+#define SR_DEV_CKD_LRTRANLF     ( SR_DEV_CKD | 0x020 )
+#define SR_DEV_CKD_LROPER       ( SR_DEV_CKD | 0x021 )
+#define SR_DEV_CKD_LRAUX        ( SR_DEV_CKD | 0x022 )
+#define SR_DEV_CKD_LRCOUNT      ( SR_DEV_CKD | 0x023 )
+#define SR_DEV_CKD_3990         ( SR_DEV_CKD | 0x040 )
+#define SR_DEV_CKD_XTDEF        ( SR_DEV_CKD | 0x041 )
+#define SR_DEV_CKD_SETFM        ( SR_DEV_CKD | 0x042 )
+#define SR_DEV_CKD_LOCAT        ( SR_DEV_CKD | 0x043 )
+#define SR_DEV_CKD_SPCNT        ( SR_DEV_CKD | 0x044 )
+#define SR_DEV_CKD_SEEK         ( SR_DEV_CKD | 0x045 )
+#define SR_DEV_CKD_SKCYL        ( SR_DEV_CKD | 0x046 )
+#define SR_DEV_CKD_RECAL        ( SR_DEV_CKD | 0x047 )
+#define SR_DEV_CKD_RDIPL        ( SR_DEV_CKD | 0x048 )
+#define SR_DEV_CKD_XMARK        ( SR_DEV_CKD | 0x049 )
+#define SR_DEV_CKD_HAEQ         ( SR_DEV_CKD | 0x04a )
+#define SR_DEV_CKD_IDEQ         ( SR_DEV_CKD | 0x04b )
+#define SR_DEV_CKD_KYEQ         ( SR_DEV_CKD | 0x04c )
+#define SR_DEV_CKD_WCKD         ( SR_DEV_CKD | 0x04d )
+#define SR_DEV_CKD_TRKOF        ( SR_DEV_CKD | 0x04e )
+#define SR_DEV_CKD_SSI          ( SR_DEV_CKD | 0x04f )
+#define SR_DEV_CKD_WRHA         ( SR_DEV_CKD | 0x050 )
+
+/*-------------------------------------------------------------------*/
+/* Hercules suspend                                                  */
+/*-------------------------------------------------------------------*/
+int ckddasd_hsuspend(DEVBLK *dev, void *file) {
+    if (dev->bufcur >= 0)
+    {
+        SR_WRITE_VALUE(file, SR_DEV_CKD_BUFCUR, dev->bufcur, sizeof(dev->bufcur));
+        SR_WRITE_VALUE(file, SR_DEV_CKD_BUFOFF, dev->bufoff, sizeof(dev->bufoff));
+    }
+    SR_WRITE_VALUE(file, SR_DEV_CKD_CURCYL, dev->ckdcurcyl, sizeof(dev->ckdcurcyl));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_CURHEAD, dev->ckdcurhead, sizeof(dev->ckdcurhead));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_CURREC, dev->ckdcurrec, sizeof(dev->ckdcurrec));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_CURKL, dev->ckdcurkl, sizeof(dev->ckdcurkl));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_ORIENT, dev->ckdorient, sizeof(dev->ckdorient));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_CUROPER, dev->ckdcuroper, sizeof(dev->ckdcuroper));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_CURDL, dev->ckdcurdl, sizeof(dev->ckdcurdl));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_REM, dev->ckdrem, sizeof(dev->ckdrem));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_POS, dev->ckdpos, sizeof(dev->ckdpos));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_DXBLKSZ, dev->ckdxblksz, sizeof(dev->ckdxblksz));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_DXBCYL, dev->ckdxbcyl, sizeof(dev->ckdxbcyl));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_DXBHEAD, dev->ckdxbhead, sizeof(dev->ckdxbhead));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_DXECYL, dev->ckdxecyl, sizeof(dev->ckdxecyl));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_DXEHEAD, dev->ckdxehead, sizeof(dev->ckdxehead));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_DXFMASK, dev->ckdfmask, sizeof(dev->ckdfmask));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_DXGATTR, dev->ckdxgattr, sizeof(dev->ckdxgattr));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_LRTRANLF, dev->ckdltranlf, sizeof(dev->ckdltranlf));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_LROPER, dev->ckdloper, sizeof(dev->ckdloper));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_LRAUX, dev->ckdlaux, sizeof(dev->ckdlaux));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_LRCOUNT, dev->ckdlcount, sizeof(dev->ckdlcount));
+    SR_WRITE_VALUE(file, SR_DEV_CKD_3990, dev->ckd3990, 1);
+    SR_WRITE_VALUE(file, SR_DEV_CKD_XTDEF, dev->ckdxtdef, 1);
+    SR_WRITE_VALUE(file, SR_DEV_CKD_SETFM, dev->ckdsetfm, 1);
+    SR_WRITE_VALUE(file, SR_DEV_CKD_LOCAT, dev->ckdlocat, 1);
+    SR_WRITE_VALUE(file, SR_DEV_CKD_SPCNT, dev->ckdspcnt, 1);
+    SR_WRITE_VALUE(file, SR_DEV_CKD_SEEK, dev->ckdseek, 1);
+    SR_WRITE_VALUE(file, SR_DEV_CKD_SKCYL, dev->ckdskcyl, 1);
+    SR_WRITE_VALUE(file, SR_DEV_CKD_RECAL, dev->ckdrecal, 1);
+    SR_WRITE_VALUE(file, SR_DEV_CKD_RDIPL, dev->ckdrdipl, 1);
+    SR_WRITE_VALUE(file, SR_DEV_CKD_XMARK, dev->ckdxmark, 1);
+    SR_WRITE_VALUE(file, SR_DEV_CKD_HAEQ, dev->ckdhaeq, 1);
+    SR_WRITE_VALUE(file, SR_DEV_CKD_IDEQ, dev->ckdideq, 1);
+    SR_WRITE_VALUE(file, SR_DEV_CKD_KYEQ, dev->ckdkyeq, 1);
+    SR_WRITE_VALUE(file, SR_DEV_CKD_WCKD, dev->ckdwckd, 1);
+    SR_WRITE_VALUE(file, SR_DEV_CKD_TRKOF, dev->ckdtrkof, 1);
+    SR_WRITE_VALUE(file, SR_DEV_CKD_SSI, dev->ckdssi, 1);
+    SR_WRITE_VALUE(file, SR_DEV_CKD_WRHA, dev->ckdwrha, 1);
+    return 0;
+}
+
+/*-------------------------------------------------------------------*/
+/* Hercules resume                                                   */
+/*-------------------------------------------------------------------*/
+int ckddasd_hresume(DEVBLK *dev, void *file)
+{
+size_t  rc, key, len;
+BYTE byte;
+
+    do {
+        SR_READ_HDR(file, key, len);
+        switch (key) {
+        case SR_DEV_CKD_BUFCUR:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            rc = (dev->hnd->read) ? (dev->hnd->read)(dev, rc, &byte) : -1;
+            if ((int)rc < 0) return -1;
+            break;
+        case SR_DEV_CKD_BUFOFF:
+            SR_READ_VALUE(file, len, &dev->bufoff, sizeof(dev->bufoff));
+            break;
+        case SR_DEV_CKD_CURCYL:
+            SR_READ_VALUE(file, len, &dev->ckdcurcyl, sizeof(dev->ckdcurcyl));
+            break;
+        case SR_DEV_CKD_CURHEAD:
+            SR_READ_VALUE(file, len, &dev->ckdcurhead, sizeof(dev->ckdcurhead));
+            break;
+        case SR_DEV_CKD_CURREC:
+            SR_READ_VALUE(file, len, &dev->ckdcurrec, sizeof(dev->ckdcurrec));
+            break;
+        case SR_DEV_CKD_CURKL:
+            SR_READ_VALUE(file, len, &dev->ckdcurkl, sizeof(dev->ckdcurkl));
+            break;
+        case SR_DEV_CKD_ORIENT:
+            SR_READ_VALUE(file, len, &dev->ckdorient, sizeof(dev->ckdorient));
+            break;
+        case SR_DEV_CKD_CUROPER:
+            SR_READ_VALUE(file, len, &dev->ckdcuroper, sizeof(dev->ckdcuroper));
+            break;
+        case SR_DEV_CKD_CURDL:
+            SR_READ_VALUE(file, len, &dev->ckdcurdl, sizeof(dev->ckdcurdl));
+            break;
+        case SR_DEV_CKD_REM:
+            SR_READ_VALUE(file, len, &dev->ckdrem, sizeof(dev->ckdrem));
+            break;
+        case SR_DEV_CKD_POS:
+            SR_READ_VALUE(file, len, &dev->ckdpos, sizeof(dev->ckdpos));
+            break;
+        case SR_DEV_CKD_DXBLKSZ:
+            SR_READ_VALUE(file, len, &dev->ckdxblksz, sizeof(dev->ckdxblksz));
+            break;
+        case SR_DEV_CKD_DXBCYL:
+            SR_READ_VALUE(file, len, &dev->ckdxbcyl, sizeof(dev->ckdxbcyl));
+            break;
+        case SR_DEV_CKD_DXBHEAD:
+            SR_READ_VALUE(file, len, &dev->ckdxbhead, sizeof(dev->ckdxbhead));
+            break;
+        case SR_DEV_CKD_DXECYL:
+            SR_READ_VALUE(file, len, &dev->ckdxecyl, sizeof(dev->ckdxecyl));
+            break;
+        case SR_DEV_CKD_DXEHEAD:
+            SR_READ_VALUE(file, len, &dev->ckdxehead, sizeof(dev->ckdxehead));
+            break;
+        case SR_DEV_CKD_DXFMASK:
+            SR_READ_VALUE(file, len, &dev->ckdfmask, sizeof(dev->ckdfmask));
+            break;
+        case SR_DEV_CKD_DXGATTR:
+            SR_READ_VALUE(file, len, &dev->ckdxgattr, sizeof(dev->ckdxgattr));
+            break;
+        case SR_DEV_CKD_LRTRANLF:
+            SR_READ_VALUE(file, len, &dev->ckdltranlf, sizeof(dev->ckdltranlf));
+            break;
+        case SR_DEV_CKD_LROPER:
+            SR_READ_VALUE(file, len, &dev->ckdloper, sizeof(dev->ckdloper));
+            break;
+        case SR_DEV_CKD_LRAUX:
+            SR_READ_VALUE(file, len, &dev->ckdlaux, sizeof(dev->ckdlaux));
+            break;
+        case SR_DEV_CKD_LRCOUNT:
+            SR_READ_VALUE(file, len, &dev->ckdltranlf, sizeof(dev->ckdltranlf));
+            break;
+        case SR_DEV_CKD_3990:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckd3990 = rc;
+            break;
+        case SR_DEV_CKD_XTDEF:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckdxtdef = rc;
+            break;
+        case SR_DEV_CKD_SETFM:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckdsetfm = rc;
+            break;
+        case SR_DEV_CKD_LOCAT:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckdlocat = rc;
+            break;
+        case SR_DEV_CKD_SPCNT:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckdspcnt = rc;
+            break;
+        case SR_DEV_CKD_SEEK:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckdseek = rc;
+            break;
+        case SR_DEV_CKD_SKCYL:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckdskcyl = rc;
+            break;
+        case SR_DEV_CKD_RECAL:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckdrecal = rc;
+            break;
+        case SR_DEV_CKD_RDIPL:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckdrdipl = rc;
+            break;
+        case SR_DEV_CKD_XMARK:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckdxmark = rc;
+            break;
+        case SR_DEV_CKD_HAEQ:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckdhaeq = rc;
+            break;
+        case SR_DEV_CKD_IDEQ:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckdideq = rc;
+            break;
+        case SR_DEV_CKD_KYEQ:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckdkyeq = rc;
+            break;
+        case SR_DEV_CKD_WCKD:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckdwckd = rc;
+            break;
+        case SR_DEV_CKD_TRKOF:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckdtrkof = rc;
+            break;
+        case SR_DEV_CKD_SSI:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckdssi = rc;
+            break;
+        case SR_DEV_CKD_WRHA:
+            SR_READ_VALUE(file, len, &rc, sizeof(rc));
+            dev->ckdwrha = rc;
+            break;
+        default:
+            SR_READ_SKIP(file, len);
+            break;
+        } /* switch (key) */
+    } while ((key & SR_DEV_MASK) == SR_DEV_CKD);
+    return 0;
+}
+
+/*-------------------------------------------------------------------*/
 /* Build sense data                                                  */
 /*-------------------------------------------------------------------*/
 void ckd_build_sense ( DEVBLK *dev, BYTE sense0, BYTE sense1,
                        BYTE sense2, BYTE format, BYTE message )
 {
+int shift;  /* num of bits to shift left 'high cyl' in sense6 */
     /* Clear the sense bytes */
     memset (dev->sense, 0, sizeof(dev->sense));
 
@@ -1064,6 +1327,46 @@ void ckd_build_sense ( DEVBLK *dev, BYTE sense0, BYTE sense1,
     /* Sense byte 4 is the physical device address */
     dev->sense[4] = 0;
 
+    if (dev->devtype == 0x2311)
+    {
+       /* 0x80=READY, 0x40=ONLINE 0x08=ONLINE 0x04=END OF CYL */
+        dev->sense[3] = (((dev->sense[1]) & 0x20) >> 3) | 0xC8;
+    }
+    if (dev->devtype == 0x2314)
+    {
+       /*             0x40=ONLINE             0x04=END OF CYL */
+        dev->sense[3] = (((dev->sense[1]) & 0x20) >> 3) | 0x40;
+    }
+    if (dev->devtype == 0x3330)
+    {
+     /* bits 0-1 = controller address */
+     /* bits 2-7: drive A = 111000, B = 110001, ... H = 000111 */
+       dev->sense[4] = (dev->devnum & 0x07) | ((~(dev->devnum) & 0x07) << 3);
+    }
+    if (dev->devtype == 0x3340)
+    {
+     /* X'01' = 35 MB drive, X'02' = 70 MB drive  (same as 'model') */
+     /* X'80' RPS feature installed */
+       dev->sense[2] |= 0x80 | dev->devid[6];  /* RPS + model */
+       /* drive A = bit 0 (0x80), ... drive H = bit 7 (0x01) */
+       dev->sense[4] =  0x80 >> (dev->devnum & 0x07);
+    }
+    if (dev->devtype == 0x3350)
+    {
+       /* drive 0 = bit 0 (0x80), ... drive 7 = bit 7 (0x01) */
+       dev->sense[4] =  0x80 >> (dev->devnum & 0x07);
+    }
+    if (dev->devtype == 0x3375)
+    {
+       /* bits 3-4 = controller address, bits 5-7 = device address */
+       dev->sense[4] = dev->devnum & 0x07;
+    }
+    if (dev->devtype == 0x3380)
+    {
+       /* bits 4-7 = device address */
+       dev->sense[4] = dev->devnum & 0x0F;
+    }
+
     /* Sense byte 5 contains bits 8-15 of the cylinder address
        and sense byte 6 contains bits 4-7 of the cylinder
        address followed by bits 12-15 of the head address,
@@ -1076,9 +1379,33 @@ void ckd_build_sense ( DEVBLK *dev, BYTE sense0, BYTE sense1,
     }
     else
     {
+     if ((dev->devtype == 0x2311 ) || (dev->devtype == 0x2314 ))
+     {
+     }
+     else
+     {
         dev->sense[5] = dev->ckdcurcyl & 0xFF;
-        dev->sense[6] = ((dev->ckdcurcyl >> 4) & 0xF0)
-                        | (dev->ckdcurhead & 0x0F);
+
+     /* sense byte 6 bits     c = cyl high byte, h=head    */
+     /*                          0 1 2 3 4 5 6 7   shift   */
+     /* 3330-1                   - c - h h h h h      6    */
+     /* 3330-11 3350             - c c h h h h h      5    */
+     /* 3340                     - c c - h h h h      5    */
+     /* 3375                     c c - - h h h h      6    */
+     /* 3380                     c c c c h h h h      4    */
+       switch (dev->devtype) {
+        case 0x3330:
+             if (dev->devid[6] == 0x01)
+                                   shift = 6; /* 3330-1 */
+             else
+                                   shift = 5; /* 3330-11 */
+        case 0x3340: case 0x3350:  shift = 5;
+        case 0x3375:               shift = 6;
+        default:                   shift = 4;
+       }
+        dev->sense[6] = ( (dev->ckdcurcyl >> 8) << shift )
+                        | (dev->ckdcurhead & 0x1F);
+     }
     }
 
     /* Sense byte 7 contains the format code and message type */
@@ -3889,7 +4216,7 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         }
 
         /* Check for write operation on a read only disk */
-        if ( (dev->ckdrdonly && !dev->ckdfakewr)
+        if ( (dev->ckdrdonly && !dev->ckdfakewr && !dev->dasdsfn)
              &&  ((dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRITE
                || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_FORMAT
                || (dev->ckdloper & CKDOPER_CODE) == CKDOPER_WRTTRK)
@@ -4046,6 +4373,21 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
                 if (memcmp (&rechdr, cchhr, 5) == 0)
                     break;
 
+// NOTE: Code like this breaks VM mini-disks !!!
+#if 0
+                if (memcmp (&rechdr, cchhr, 4) != 0)
+                {
+    	            logmsg ("HHCDA999E wrong recordheader: cc hh r=%d %d %d,"
+		                    "should be:cc hh r=%d %d %d\n",
+                            (rechdr.cyl[0] << 8) | rechdr.cyl[1],
+                            (rechdr.head[0] << 8) | rechdr.head[1],
+                            rechdr.rec,
+                            (cchhr[0] << 8) | cchhr[1],
+                            (cchhr[2] << 8) | cchhr[3],
+                            cchhr[4]);
+                    break;
+                }
+#endif
             } /* end while */
 
         } /* end switch(CKDOPER_ORIENTATION) */
@@ -4217,9 +4559,8 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
     /*---------------------------------------------------------------*/
     /* SUSPEND MULTIPATH RECONNECTION                                */
     /*---------------------------------------------------------------*/
-        /* Command reject if within the domain of a Locate Record
-           or if chained from any other CCW */
-        if (dev->ckdlcount > 0 || chained)
+        /* Command reject if within the domain of a Locate Record */
+        if (dev->ckdlcount > 0)
         {
             ckd_build_sense (dev, SENSE_CR, 0, 0,
                             FORMAT_0, MESSAGE_2);
@@ -4372,6 +4713,10 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         }
 
     sense:
+        /* If sense bytes are cleared then build sense */
+        if ((dev->sense[0] == 0) & (dev->sense[1] == 0))
+            ckd_build_sense (dev, 0, 0, 0, 0, 0);
+
         /* Calculate residual byte count */
         num = (count < dev->numsense) ? count : dev->numsense;
         *residual = count - num;
@@ -4669,19 +5014,23 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
 
 } /* end function ckddasd_execute_ccw */
 
-
 DEVHND ckddasd_device_hndinfo = {
-        &ckddasd_init_handler,
-        &ckddasd_execute_ccw,
-        &ckddasd_close_device,
-        &ckddasd_query_device,
-        &ckddasd_start,
-        &ckddasd_end,
-        &ckddasd_start,
-        &ckddasd_end,
-        &ckddasd_read_track,
-        &ckddasd_update_track,
-        &ckddasd_used,
-        NULL,
-        NULL
+        &ckddasd_init_handler,          /* Device Initialisation      */
+        &ckddasd_execute_ccw,           /* Device CCW execute         */
+        &ckddasd_close_device,          /* Device Close               */
+        &ckddasd_query_device,          /* Device Query               */
+        &ckddasd_start,                 /* Device Start channel pgm   */
+        &ckddasd_end,                   /* Device End channel pgm     */
+        &ckddasd_start,                 /* Device Resume channel pgm  */
+        &ckddasd_end,                   /* Device Suspend channel pgm */
+        &ckddasd_read_track,            /* Device Read                */
+        &ckddasd_update_track,          /* Device Write               */
+        &ckddasd_used,                  /* Device Query used          */
+        NULL,                           /* Device Reserve             */
+        NULL,                           /* Device Release             */
+        NULL,                           /* Immediate CCW Codes        */
+        NULL,                           /* Signal Adapter Input       */
+        NULL,                           /* Signal Adapter Ouput       */
+        &ckddasd_hsuspend,              /* Hercules suspend           */
+        &ckddasd_hresume                /* Hercules resume            */
 };

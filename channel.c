@@ -1,4 +1,4 @@
-/* CHANNEL.C    (c) Copyright Roger Bowler, 1999-2003                */
+/* CHANNEL.C    (c) Copyright Roger Bowler, 1999-2004                */
 /*              ESA/390 Channel Emulator                             */
 
 /*-------------------------------------------------------------------*/
@@ -12,7 +12,7 @@
 /*      Fix program check on NOP due to addressing - Jan Jaeger      */
 /*      Fix program check on TIC as first ccw on RSCH - Jan Jaeger   */
 /*      Fix PCI intermediate status flags             - Jan Jaeger   */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 /*      64-bit IDAW support - Roger Bowler v209                  @IWZ*/
 /*      Incorrect-length-indication-suppression - Jan Jaeger         */
 /*-------------------------------------------------------------------*/
@@ -69,7 +69,7 @@ BYTE    c;                              /* Character work area       */
     if (addr <= dev->mainlim - 16)
     {
         a = dev->mainstor + addr;
-        j = sprintf (area,
+        j = sprintf ((char *)area,
                 "=>%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X"
                 " %2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X ",
                 a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7],
@@ -449,7 +449,7 @@ int     cc;                             /* Condition code            */
     obtain_lock (&dev->lock);
 
 #if defined(_FEATURE_IO_ASSIST)
-    if(regs->sie_state
+    if(SIE_MODE(regs)
       && (regs->siebk->zone != dev->pmcw.zone
         || !(dev->pmcw.flag27 & PMCW27_I)))
     {
@@ -541,7 +541,7 @@ int     cc;                             /* Condition code            */
     obtain_lock (&dev->lock);
 
 #if defined(_FEATURE_IO_ASSIST)
-    if(regs->sie_state
+    if(SIE_MODE(regs)
       && (regs->siebk->zone != dev->pmcw.zone
         || !(dev->pmcw.flag27 & PMCW27_I)))
     {
@@ -556,7 +556,7 @@ int     cc;                             /* Condition code            */
 #if defined(_FEATURE_IO_ASSIST)
         /* For I/O assisted devices we must intercept if type B
            status is present on the subchannel */
-        if(regs->sie_state
+        if(SIE_MODE(regs)
           && ( (regs->siebk->tschds & dev->pciscsw.unitstat)
             || (regs->siebk->tschsc & dev->pciscsw.chanstat) ) )
         {
@@ -609,7 +609,7 @@ int     cc;                             /* Condition code            */
 #if defined(_FEATURE_IO_ASSIST)
         /* For I/O assisted devices we must intercept if type B
            status is present on the subchannel */
-        if(regs->sie_state
+        if(SIE_MODE(regs)
           && ( (regs->siebk->tschds & dev->scsw.unitstat)
             || (regs->siebk->tschsc & dev->scsw.chanstat) ) )
         {
@@ -670,11 +670,6 @@ int     cc;                             /* Condition code            */
         /* Clear the status bits in the SCSW */
         dev->scsw.flag3 &= ~(SCSW3_SC);
 
-        /* Signal console thread to redrive select */
-        if (dev->console)
-        {
-            signal_thread (sysblk.cnsltid, SIGUSR2);
-        }
     }
     else
     {
@@ -684,7 +679,7 @@ int     cc;                             /* Condition code            */
 #if defined(_FEATURE_IO_ASSIST)
             /* For I/O assisted devices we must intercept if type B
                status is present on the subchannel */
-            if(regs->sie_state
+            if(SIE_MODE(regs)
               && ( (regs->siebk->tschds & dev->attnscsw.unitstat)
                 || (regs->siebk->tschsc & dev->attnscsw.chanstat) ) )
             {
@@ -714,10 +709,6 @@ int     cc;                             /* Condition code            */
             dev->attnpending = 0;
 
             /* Signal console thread to redrive select */
-            if (dev->console)
-            {
-                signal_thread (sysblk.cnsltid, SIGUSR2);
-            }
             /* Return condition code 0 to indicate status was pending */
             release_lock (&dev->lock);
             /* ISW20030812 - Added 3 lines */
@@ -725,6 +716,10 @@ int     cc;                             /* Condition code            */
             DEQUEUE_IO_INTERRUPT(&dev->attnioint);
             release_lock(&sysblk.intlock);
             /* ISW20030812 - END */
+            if (dev->console)
+            {
+                signal_thread (sysblk.cnsltid, SIGUSR2);
+            }
             return 0;
         }
         /* Set condition code 1 if status not pending */
@@ -743,6 +738,11 @@ int     cc;                             /* Condition code            */
     DEQUEUE_IO_INTERRUPT(&dev->ioint);
     release_lock(&sysblk.intlock);
     /* ISW20030812 - END */
+    /* Signal console thread to redrive select */
+    if (dev->console)
+    {
+        signal_thread (sysblk.cnsltid, SIGUSR2);
+    }
 
     /* Return the condition code */
     return cc;
@@ -768,7 +768,7 @@ int pending = 0;
     obtain_lock (&dev->lock);
 
 #if defined(_FEATURE_IO_ASSIST)
-    if(regs->sie_state
+    if(SIE_MODE(regs)
       && (regs->siebk->zone != dev->pmcw.zone
         || !(dev->pmcw.flag27 & PMCW27_I)))
     {
@@ -869,7 +869,7 @@ int pending = 0;
     obtain_lock (&dev->lock);
 
 #if defined(_FEATURE_IO_ASSIST)
-    if(regs->sie_state
+    if(SIE_MODE(regs)
       && (regs->siebk->zone != dev->pmcw.zone
         || !(dev->pmcw.flag27 & PMCW27_I)))
     {
@@ -992,7 +992,7 @@ int resume_subchan (REGS *regs, DEVBLK *dev)
     obtain_lock (&dev->lock);
 
 #if defined(_FEATURE_IO_ASSIST)
-    if(regs->sie_state
+    if(SIE_MODE(regs)
       && (regs->siebk->zone != dev->pmcw.zone
         || !(dev->pmcw.flag27 & PMCW27_I)))
     {
@@ -1089,6 +1089,7 @@ void device_reset (DEVBLK *dev)
 #endif
     memset (&dev->scsw, 0, sizeof(SCSW));
     memset (&dev->pciscsw, 0, sizeof(SCSW));
+    memset (&dev->attnscsw, 0, sizeof(SCSW));
 
     dev->readpending = 0;
     dev->crwpending = 0;
@@ -1197,9 +1198,13 @@ int     console = 0;                    /* 1 = console device reset  */
 // #if defined(FEATURE_CHANNEL_SWITCHING)
 int i;
 
+    /* reset sclp interface */
+    sclp_reset();
+
     /* Connect each channel set to its home cpu */
-    for(i = 0; i < MAX_CPU_ENGINES; i++)
-        sysblk.regs[i].chanset = i;
+    for (i = 0; i < MAX_CPU; i++)
+        if (IS_CPU_ONLINE(i))
+            sysblk.regs[i]->chanset = i;
 // #endif /*defined(FEATURE_CHANNEL_SWITCHING)*/
 
     /* Reset each device in the configuration */
@@ -1319,6 +1324,10 @@ BYTE    storkey;                        /* Storage key               */
 BYTE   *ccw;                            /* CCW pointer               */
 
     UNREFERENCED_370(dev);
+    *code=0;
+    *count=0;
+    *flags=0;
+    *addr=0;
 
     /* Channel program check if CCW is not on a doubleword
        boundary or is outside limit of main storage */
@@ -1387,6 +1396,8 @@ BYTE    storkey;                        /* Storage key               */
 
     UNREFERENCED_370(dev);
 
+    *addr = 0;
+    *len = 0;
     /* Channel program check if IDAW is not on correct           @IWZ
        boundary or is outside limit of main storage */
     if ((idawaddr & ((idawfmt == 2) ? 0x07 : 0x03))            /*@IWZ*/
@@ -1793,7 +1804,7 @@ DEVBLK *previoq, *ioq;                  /* Device I/O queue pointers */
     obtain_lock (&dev->lock);
 
 #if defined(_FEATURE_IO_ASSIST)
-    if(regs->sie_state
+    if(SIE_MODE(regs)
       && (regs->siebk->zone != dev->pmcw.zone
         || !(dev->pmcw.flag27 & PMCW27_I)))
     {
@@ -1994,6 +2005,16 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         dev->ioactive = DEV_SYS_LOCAL;
         dev->startpending = 0;
     }
+
+#ifdef FEATURE_CHANNEL_SUBSYSTEM
+    /* For hercules `resume' resume suspended state */
+    if (dev->resumesuspended) 
+    {
+	    dev->resumesuspended=0;
+	    goto resume_suspend;
+    }
+#endif
+
     release_lock (&dev->lock);
 
     /* Call the i/o start exit */
@@ -2431,7 +2452,23 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
                     logmsg (_("HHCCP073I Device %4.4X suspended\n"),
                             dev->devnum);
 
+// FIXME: Not a very elegant way to fix the suspend/resume problem
+                dev->ccwaddr = ccwaddr;
+                dev->idapmask = idapmask;
+                dev->idawfmt = idawfmt;
+                dev->ccwfmt = ccwfmt;
+                dev->ccwkey = ccwkey;
+
+resume_suspend:
+
+                ccwaddr = dev->ccwaddr;
+                idapmask = dev->idapmask;
+                idawfmt = dev->idawfmt;
+                ccwfmt = dev->ccwfmt;
+                ccwkey = dev->ccwkey;
+
                 /* Suspend the device until resume instruction */
+
                 while (dev->suspended && (dev->scsw.flag2 & SCSW2_AC_RESUM) == 0)
                 {
                     wait_condition (&dev->resumecond, &dev->lock);
@@ -2556,8 +2593,10 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             break;
         }
 
+	dev->is_immed=IS_CCW_IMMEDIATE(dev);
         /* For WRITE and CONTROL operations, copy data
            from main storage into channel buffer */
+	/*
         if (IS_CCW_WRITE(dev->code)
             ||
             (
@@ -2565,6 +2604,10 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
                 &&
                 !(IS_CCW_NOP(dev->code) || IS_CCW_SET_EXTENDED(dev->code))
             ))
+	    */
+        if ( IS_CCW_WRITE(dev->code) 
+		|| ( IS_CCW_CONTROL(dev->code)
+		&& (!dev->is_immed)))
         {
             /* Channel program check if data exceeds buffer size */
             if (bufpos + count > 65536)
@@ -2666,7 +2709,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
                for non-NOP CCWs */
             if (((flags & CCW_FLAGS_CD)
                 || (flags & CCW_FLAGS_SLI) == 0)
-                && (dev->code != 0x03)
+                && (!dev->is_immed)
 #if defined(FEATURE_INCORRECT_LENGTH_INDICATION_SUPPRESSION)
                 /* Suppress incorrect length indication if
                    CCW format is one and SLI mode is indicated
@@ -2873,14 +2916,14 @@ int     i;                              /* Interruption subclass     */
 
 #if defined(_FEATURE_IO_ASSIST)
     /* For I/O Assist the zone must match the guest zone */
-    if(regs->sie_state && regs->siebk->zone != dev->pmcw.zone)
+    if(SIE_MODE(regs) && regs->siebk->zone != dev->pmcw.zone)
         return 0;
 #endif
 
 #if defined(_FEATURE_IO_ASSIST)
     /* The interrupt interlock control bit must be on
        if not we must intercept */
-    if(regs->sie_state && !(dev->pmcw.flag27 & PMCW27_I))
+    if(SIE_MODE(regs) && !(dev->pmcw.flag27 & PMCW27_I))
         return SIE_INTERCEPT_IOINT;
 #endif
 
@@ -2890,7 +2933,7 @@ int     i;                              /* Interruption subclass     */
     /* Is this device on a channel connected to this CPU? */
     if(
 #if defined(_FEATURE_IO_ASSIST)
-       !regs->sie_state &&
+       !SIE_MODE(regs) &&
 #endif
        regs->chanset != dev->chanset)
         return 0;
@@ -2898,11 +2941,11 @@ int     i;                              /* Interruption subclass     */
 
     /* Isolate the channel number */
     i = dev->devnum >> 8;
-    if (regs->psw.ecmode == 0 && i < 6)
+    if (!ECMODE(&regs->psw) && i < 6)
     {
 #if defined(_FEATURE_IO_ASSIST)
         /* We must always intercept in BC mode */
-        if(regs->sie_state)
+        if(SIE_MODE(regs))
             return SIE_INTERCEPT_IOINT;
 #endif
         /* For BC mode channels 0-5, test system mask bits 0-5 */
@@ -2920,7 +2963,7 @@ int     i;                              /* Interruption subclass     */
         if ((regs->CR(2) & (0x80000000 >> i)) == 0)
             return
 #if defined(_FEATURE_IO_ASSIST)
-                   regs->sie_state ? SIE_INTERCEPT_IOINTP :
+                   SIE_MODE(regs) ? SIE_INTERCEPT_IOINTP :
 #endif
                                                            0;
     }
@@ -2935,7 +2978,7 @@ int     i;                              /* Interruption subclass     */
     i =
 #if defined(_FEATURE_IO_ASSIST)
         /* For I/O Assisted devices use the guest (V)ISC */
-        regs->sie_state ? (dev->pmcw.flag25 & PMCW25_VISC) :
+        SIE_MODE(regs) ? (dev->pmcw.flag25 & PMCW25_VISC) :
 #endif
         ((dev->pmcw.flag4 & PMCW4_ISC) >> 3);
 
@@ -2943,7 +2986,7 @@ int     i;                              /* Interruption subclass     */
     if ((regs->CR_L(6) & (0x80000000 >> i)) == 0)
         return
 #if defined(_FEATURE_IO_ASSIST)
-                   regs->sie_state ? SIE_INTERCEPT_IOINTP :
+                   SIE_MODE(regs) ? SIE_INTERCEPT_IOINTP :
 #endif
                                                            0;
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
@@ -2981,7 +3024,9 @@ int ARCH_DEP(present_io_interrupt) (REGS *regs, U32 *ioid,
 IOINT  *io;                             /* -> I/O interrupt entry    */
 DEVBLK *dev;                            /* -> Device control block   */
 int     icode = 0;                      /* Intercept code            */
+#if defined(FEATURE_S370_CHANNEL)
 BYTE    *pendcsw;                       /* Pending CSW               */
+#endif
 
     UNREFERENCED_370(ioparm);
     UNREFERENCED_370(iointid);
@@ -3004,7 +3049,7 @@ retry:
             break;
 
         /* See if another CPU can take this interrupt */
-        WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED);
+        WAKEUP_CPU_MASK (sysblk.waiting_mask);
 
     } /* end for(io) */
 
@@ -3012,7 +3057,7 @@ retry:
     /* In the case of I/O assist, do a rescan, to see if there are
        any devices with pending subclasses for which we are not
        enabled, if so cause a interception */
-    if (io == NULL && regs->sie_state)
+    if (io == NULL && SIE_MODE(regs))
     {
         /* Find a device with a pending interrupt, regardless
            of the interrupt subclass mask */
@@ -3054,16 +3099,18 @@ retry:
     if(io->pcipending)
     {
         pendcsw=dev->pcicsw;
+        memcpy (csw, pendcsw , 8);
     }
     if(io->pending)
     {
         pendcsw=dev->csw;
+        memcpy (csw, pendcsw , 8);
     }
     if(io->attnpending)
     {
         pendcsw=dev->attncsw;
+        memcpy (csw, pendcsw , 8);
     }
-    memcpy (csw, pendcsw , 8);
 
     /* Display the channel status word */
     if (dev->ccwtrace || dev->ccwstep)
@@ -3078,7 +3125,7 @@ retry:
     *iointid =
 #if defined(_FEATURE_IO_ASSIST)
     /* For I/O Assisted devices use (V)ISC */
-               (regs->sie_state) ?
+               (SIE_MODE(regs)) ?
                  (icode == SIE_NO_INTERCEPT) ?
                    ((dev->pmcw.flag25 & PMCW25_VISC) << 27) :
                    ((dev->pmcw.flag25 & PMCW25_VISC) << 27)
@@ -3097,10 +3144,10 @@ retry:
 #if defined(_FEATURE_IO_ASSIST)
     /* Do not drain pending interrupts on intercept due to
        zero ISC mask */
-    if(!regs->sie_state || icode != SIE_INTERCEPT_IOINTP)
+    if(!SIE_MODE(regs) || icode != SIE_INTERCEPT_IOINTP)
 #endif
     {
-        if(!regs->sie_state || icode != SIE_NO_INTERCEPT)
+        if(!SIE_MODE(regs) || icode != SIE_NO_INTERCEPT)
             dev->pmcw.flag27 &= ~PMCW27_I;
 
         /* Reset the interrupt pending flag for the device */

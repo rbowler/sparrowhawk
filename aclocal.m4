@@ -898,141 +898,6 @@ AC_DEFUN([AM_MAINTAINER_MODE],
 
 AU_DEFUN([jm_MAINTAINER_MODE], [AM_MAINTAINER_MODE])
 
-# HC_PROG_CC
-# --------------------------------------------------------------------
-# AC_PROG_CC (actually _AC_PROC_CC_G) takes it upon itself to
-# put "-g -O2" in CFLAGS. While this may be good for most packages
-# using autoconf, we have our own "optimize" function that this
-# interferes with.
-#
-# Notes: AC_BEFORE will emit a warning of AC_PROG_CC was expanded
-#        prior to this macro, just in case something gets put in
-#        configure.ac before us.
-#        AC_REQUIRE will expand AC_PROG_CC for us.
-#
-AC_DEFUN([HC_PROG_CC],
-[   AC_BEFORE([HC_PROG_CC],[AC_PROG_CC])
-    AC_REQUIRE([AC_PROG_CC])
-    # Restore the saved CFLAGS from autoconf invocation
-    CFLAGS=$ac_env_CFLAGS_value
-])
-AC_DEFUN([HC_LD_DISALLOWDUPS],
-[
-        AC_REQUIRE([AC_PROG_LIBTOOL])
-        AC_REQUIRE([AC_PROG_LD_GNU])
-        if test "x$lt_cv_prog_gnu_ld" = "xyes"; then
-                LDFLAGS="$LDFLAGS -Wl,--warn-common"
-        fi
-])
-
-AC_DEFUN([HC_LD_DUPSHAREGETOPT],
-[
-    ac_use_dup_sharegetopt=auto
-    AC_ARG_ENABLE(getoptwrapper,
-        AC_HELP_STRING([--enable-getoptwrapper],
-                       [force use of the getopt wrapper kludge]),
-              [case "${enableval}" in
-                yes) 
-                    ac_use_dup_sharegetopt=yes
-                    ;;
-                no) 
-                    ac_use_dup_sharegetopt=no
-                    ;;
-                auto)
-                    ac_use_dup_sharegetopt=auto
-                    ;;
-                *) 
-                    ac_use_dup_sharegetopt=auto
-                    ;;
-               esac],
-                     [
-                    ac_use_dup_sharegetopt=auto
-                     ])
-    _HC_LD_DUPSHAREGETOPT($ac_use_dup_sharegetopt)
-]
-)
-AC_DEFUN([_HC_LD_DUPSHAREGETOPT],
-[
-    rm -f libconftest*
-    rm -f .libs/libconftest*
-    AC_REQUIRE([AC_PROG_LIBTOOL])
-    AC_MSG_CHECKING([whether use of a getopt wrapper is necessary])
-    if test "x$1" = "xauto"; then
-        if test $(./libtool --features | fgrep "enable shared libraries" | wc -l) -eq 1;then
-            cat > conftest1.c << DUPGETOPT1
-            extern char *optarg;
-            extern int optind;
-            extern int test2();
-            int test1()
-            {
-                int i;
-                char *c;
-                i=optind;
-                c=optarg;
-                getopt(0,0,0);
-                test2();
-                return 0;
-            }
-DUPGETOPT1
-            cat > conftest2.c << DUPGETOPT2
-            extern char *optarg;
-            extern int optind;
-            int test2()
-            {
-                int i;
-                char *c;
-                i=optind;
-                c=optarg;
-                getopt(0,0,0);
-                return 0;
-            }
-DUPGETOPT2
-            ./libtool --mode=compile ${CC-cc} conftest1.c -c -o conftest1.lo > /dev/null 2>&1
-            ./libtool --mode=link ${CC-cc} -shared -rpath /lib -no-undefined conftest1.lo -o libconftest1.la > /dev/null 2>&1
-            ./libtool --mode=compile ${CC-cc} conftest2.c -c -o conftest2.lo > /dev/null 2>&1
-            ./libtool --mode=link ${CC-cc} -shared -rpath /lib -no-undefined conftest2.lo libconftest1.la -o libconftest2.la > /tmp/a 2>&1
-            if test $? = 0; then
-                ac_cv_dup_getopt=no
-                ac_cv_dup_getoptmsg=no
-            else
-                ac_cv_dup_getopt=yes
-                ac_cv_dup_getoptmsg=yes
-            fi
-        else
-                ac_cv_dup_getopt=no
-                ac_cv_dup_getoptmsg=no
-        fi
-        rm -f *conftest*
-        rm -f .libs/*conftest*
-    else
-        ac_cv_dup_getopt="$1"
-        ac_cv_dup_getoptmsg="$1 (forced)"
-    fi
-    AC_MSG_RESULT($ac_cv_dup_getoptmsg)
-    if test "x$ac_cv_dup_getopt" = "xyes";then
-        AC_DEFINE([NEED_GETOPT_WRAPPER])
-    fi
-])
-
-AC_DEFUN([HC_HAVE_OPTERR],
-[
-        AC_CACHE_CHECK([whether to use optreset],
-                       [ac_cv_need_optreset],
-                       [AC_TRY_LINK([],
-[extern int optreset;
-optreset=1;
-getopt(0,0,0);
-],
-        ac_cv_need_optreset=yes,
-        ac_cv_need_optreset=no)
-                      ]
-        )
-        if test "x$ac_cv_need_optreset" = "xyes"; then
-            AC_DEFINE([NEED_GETOPT_OPTRESET])
-        fi
-]
-)
-
 # libtool.m4 - Configure libtool for the host system. -*-Autoconf-*-
 
 # serial 47 AC_PROG_LIBTOOL
@@ -9266,5 +9131,249 @@ AC_DEFUN([AM_LC_MESSAGES],
     AC_DEFINE(HAVE_LC_MESSAGES, 1,
       [Define if your <locale.h> file defines LC_MESSAGES.])
   fi
+])
+
+# HC_PROG_CC
+# --------------------------------------------------------------------
+# AC_PROG_CC (actually _AC_PROC_CC_G) takes it upon itself to
+# put "-g -O2" in CFLAGS. While this may be good for most packages
+# using autoconf, we have our own "optimize" function that this
+# interferes with.
+#
+# Notes: AC_BEFORE will emit a warning of AC_PROG_CC was expanded
+#        prior to this macro, just in case something gets put in
+#        configure.ac before us.
+#        AC_REQUIRE will expand AC_PROG_CC for us.
+#
+AC_DEFUN([HC_PROG_CC],
+[   AC_BEFORE([HC_PROG_CC],[AC_PROG_CC])
+    AC_REQUIRE([AC_PROG_CC])
+    # Restore the saved CFLAGS from autoconf invocation
+    CFLAGS=$ac_env_CFLAGS_value
+])
+AC_DEFUN([HC_LD_DISALLOWDUPS],
+[
+        AC_REQUIRE([AC_PROG_LIBTOOL])
+        AC_REQUIRE([AC_PROG_LD_GNU])
+        if test "x$lt_cv_prog_gnu_ld" = "xyes"; then
+                LDFLAGS="$LDFLAGS -Wl,--warn-common"
+        fi
+])
+
+AC_DEFUN([HC_LD_DUPSHAREGETOPT],
+[
+    ac_use_dup_sharegetopt=auto
+    AC_ARG_ENABLE(getoptwrapper,
+        AC_HELP_STRING([--enable-getoptwrapper],
+                       [force use of the getopt wrapper kludge]),
+              [case "${enableval}" in
+                yes) 
+                    ac_use_dup_sharegetopt=yes
+                    ;;
+                no) 
+                    ac_use_dup_sharegetopt=no
+                    ;;
+                auto)
+                    ac_use_dup_sharegetopt=auto
+                    ;;
+                *) 
+                    ac_use_dup_sharegetopt=auto
+                    ;;
+               esac],
+                     [
+                    ac_use_dup_sharegetopt=auto
+                     ])
+    _HC_LD_DUPSHAREGETOPT($ac_use_dup_sharegetopt)
+]
+)
+AC_DEFUN([_HC_LD_DUPSHAREGETOPT],
+[
+    rm -f libconftest*
+    rm -f .libs/libconftest*
+    AC_REQUIRE([AC_PROG_LIBTOOL])
+    AC_MSG_CHECKING([whether use of a getopt wrapper is necessary])
+    if test "x$1" = "xauto"; then
+        if test $(./libtool --features | fgrep "enable shared libraries" | wc -l) -eq 1;then
+            cat > conftest1.c << DUPGETOPT1
+            extern char *optarg;
+            extern int optind;
+            extern int test2();
+            int test1()
+            {
+                int i;
+                char *c;
+                i=optind;
+                c=optarg;
+                getopt(0,0,0);
+                test2();
+                return 0;
+            }
+DUPGETOPT1
+            cat > conftest2.c << DUPGETOPT2
+            extern char *optarg;
+            extern int optind;
+            int test2()
+            {
+                int i;
+                char *c;
+                i=optind;
+                c=optarg;
+                getopt(0,0,0);
+                return 0;
+            }
+DUPGETOPT2
+            ./libtool --mode=compile ${CC-cc} conftest1.c -c -o conftest1.lo > /dev/null 2>&1
+            ./libtool --mode=link ${CC-cc} -shared -rpath /lib -no-undefined conftest1.lo -o libconftest1.la > /dev/null 2>&1
+            ./libtool --mode=compile ${CC-cc} conftest2.c -c -o conftest2.lo > /dev/null 2>&1
+            ./libtool --mode=link ${CC-cc} -shared -rpath /lib -no-undefined conftest2.lo libconftest1.la -o libconftest2.la > /tmp/a 2>&1
+            if test $? = 0; then
+                ac_cv_dup_getopt=no
+                ac_cv_dup_getoptmsg=no
+            else
+                ac_cv_dup_getopt=yes
+                ac_cv_dup_getoptmsg=yes
+            fi
+        else
+                ac_cv_dup_getopt=no
+                ac_cv_dup_getoptmsg=no
+        fi
+        rm -f *conftest*
+        rm -f .libs/*conftest*
+    else
+        ac_cv_dup_getopt="$1"
+        ac_cv_dup_getoptmsg="$1 (forced)"
+    fi
+    AC_MSG_RESULT($ac_cv_dup_getoptmsg)
+    if test "x$ac_cv_dup_getopt" = "xyes";then
+        AC_DEFINE([NEED_GETOPT_WRAPPER])
+    fi
+])
+
+AC_DEFUN([HC_HAVE_OPTERR],
+[
+        AC_CACHE_CHECK([whether to use optreset],
+                       [ac_cv_need_optreset],
+                       [AC_TRY_LINK([],
+[extern int optreset;
+optreset=1;
+getopt(0,0,0);
+],
+        ac_cv_need_optreset=yes,
+        ac_cv_need_optreset=no)
+                      ]
+        )
+        if test "x$ac_cv_need_optreset" = "xyes"; then
+            AC_DEFINE([NEED_GETOPT_OPTRESET])
+        fi
+]
+)
+
+dnl Autoconf macros for libgcrypt
+dnl       Copyright (C) 2002, 2004 Free Software Foundation, Inc.
+dnl
+dnl This file is free software; as a special exception the author gives
+dnl unlimited permission to copy and/or distribute it, with or without
+dnl modifications, as long as this notice is preserved.
+dnl
+dnl This file is distributed in the hope that it will be useful, but
+dnl WITHOUT ANY WARRANTY, to the extent permitted by law; without even the
+dnl implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+
+dnl AM_PATH_LIBGCRYPT([MINIMUM-VERSION,
+dnl                   [ACTION-IF-FOUND [, ACTION-IF-NOT-FOUND ]]])
+dnl Test for libgcrypt and define LIBGCRYPT_CFLAGS and LIBGCRYPT_LIBS.
+dnl MINIMUN-VERSION is a string with the version number optionalliy prefixed
+dnl with the API version to also check the API compatibility. Example:
+dnl a MINIMUN-VERSION of 1:1.2.5 won't pass the test unless the installed 
+dnl version of libgcrypt is at least 1.2.5 *and* the API number is 1.  Using
+dnl this features allows to prevent build against newer versions of libgcrypt
+dnl with a changed API.
+dnl
+AC_DEFUN(AM_PATH_LIBGCRYPT,
+[ AC_ARG_WITH(libgcrypt-prefix,
+            AC_HELP_STRING([--with-libgcrypt-prefix=PFX],
+                           [prefix where LIBGCRYPT is installed (optional)]),
+     libgcrypt_config_prefix="$withval", libgcrypt_config_prefix="")
+  if test x$libgcrypt_config_prefix != x ; then
+     if test x${LIBGCRYPT_CONFIG+set} != xset ; then
+        LIBGCRYPT_CONFIG=$libgcrypt_config_prefix/bin/libgcrypt-config
+     fi
+  fi
+
+  AC_PATH_PROG(LIBGCRYPT_CONFIG, libgcrypt-config, no)
+  tmp=ifelse([$1], ,1:1.2.0,$1)
+  if echo "$tmp" | grep ':' >/dev/null 2>/dev/null ; then
+     req_libgcrypt_api=`echo "$tmp"     | sed 's/\(.*\):\(.*\)/\1/'`
+     min_libgcrypt_version=`echo "$tmp" | sed 's/\(.*\):\(.*\)/\2/'`
+  else
+     req_libgcrypt_api=0
+     min_libgcrypt_version="$tmp"
+  fi
+
+  AC_MSG_CHECKING(for LIBGCRYPT - version >= $min_libgcrypt_version)
+  ok=no
+  if test "$LIBGCRYPT_CONFIG" != "no" ; then
+    req_major=`echo $min_libgcrypt_version | \
+               sed 's/\([[0-9]]*\)\.\([[0-9]]*\)\.\([[0-9]]*\)/\1/'`
+    req_minor=`echo $min_libgcrypt_version | \
+               sed 's/\([[0-9]]*\)\.\([[0-9]]*\)\.\([[0-9]]*\)/\2/'`
+    req_micro=`echo $min_libgcrypt_version | \
+               sed 's/\([[0-9]]*\)\.\([[0-9]]*\)\.\([[0-9]]*\)/\3/'`
+    libgcrypt_config_version=`$LIBGCRYPT_CONFIG --version`
+    major=`echo $libgcrypt_config_version | \
+               sed 's/\([[0-9]]*\)\.\([[0-9]]*\)\.\([[0-9]]*\).*/\1/'`
+    minor=`echo $libgcrypt_config_version | \
+               sed 's/\([[0-9]]*\)\.\([[0-9]]*\)\.\([[0-9]]*\).*/\2/'`
+    micro=`echo $libgcrypt_config_version | \
+               sed 's/\([[0-9]]*\)\.\([[0-9]]*\)\.\([[0-9]]*\).*/\3/'`
+    if test "$major" -gt "$req_major"; then
+        ok=yes
+    else 
+        if test "$major" -eq "$req_major"; then
+            if test "$minor" -gt "$req_minor"; then
+               ok=yes
+            else
+               if test "$minor" -eq "$req_minor"; then
+                   if test "$micro" -ge "$req_micro"; then
+                     ok=yes
+                   fi
+               fi
+            fi
+        fi
+    fi
+  fi
+  if test $ok = yes; then
+    AC_MSG_RESULT(yes)
+  else
+    AC_MSG_RESULT(no)
+  fi
+  if test $ok = yes; then
+     # If we have a recent libgcrypt, we should also check that the
+     # API is compatible
+     if test "$req_libgcrypt_api" -gt 0 ; then
+        tmp=`$LIBGCRYPT_CONFIG --api-version 2>/dev/null || echo 0`
+        if test "$tmp" -gt 0 ; then
+           AC_MSG_CHECKING([LIBGCRYPT API version])
+           if test "$req_libgcrypt_api" -eq "$tmp" ; then
+             AC_MSG_RESULT(okay)
+           else
+             ok=no
+             AC_MSG_RESULT([does not match (want=$req_libgcrypt_api got=$tmp)])
+           fi
+        fi
+     fi
+  fi
+  if test $ok = yes; then
+    LIBGCRYPT_CFLAGS=`$LIBGCRYPT_CONFIG --cflags`
+    LIBGCRYPT_LIBS=`$LIBGCRYPT_CONFIG --libs`
+    ifelse([$2], , :, [$2])
+  else
+    LIBGCRYPT_CFLAGS=""
+    LIBGCRYPT_LIBS=""
+    ifelse([$3], , :, [$3])
+  fi
+  AC_SUBST(LIBGCRYPT_CFLAGS)
+  AC_SUBST(LIBGCRYPT_LIBS)
 ])
 

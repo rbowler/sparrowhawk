@@ -1,8 +1,8 @@
-/* INLINE.H (c) Copyright Jan Jaeger, 2000-2003          */
+/* INLINE.H (c) Copyright Jan Jaeger, 2000-2004          */
 /*      Inline function definitions              */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 
 /* Storage protection override fix       Jan Jaeger 31/08/00 */
 /* ESAME low-address protection      v208d Roger Bowler 20/01/01 */
@@ -18,33 +18,35 @@ _DAT_C_STATIC int ARCH_DEP(authorize_asn) (U16 ax, U32 aste[],
 #endif
 #if defined(FEATURE_ACCESS_REGISTERS)
 _DAT_C_STATIC U16 ARCH_DEP(translate_alet) (U32 alet, U16 eax,
-       int acctype, REGS *regs, U32 *asteo, U32 aste[], int *prot);
+       int acctype, REGS *regs, U32 *asteo, U32 aste[]);
 _DAT_C_STATIC void ARCH_DEP(purge_alb) (REGS *regs);
 #endif
 _DAT_C_STATIC int ARCH_DEP(translate_addr) (VADR vaddr, int arn,
-       REGS *regs, int acctype, RADR *raddr, U16 *xcode, int *priv,
-                                        int *prot, int *pstid);
+                                            REGS *regs, int acctype);
 _DAT_C_STATIC void ARCH_DEP(purge_tlb) (REGS *regs);
 _DAT_C_STATIC void ARCH_DEP(purge_tlbe) (REGS *regs, RADR pfra);
+_DAT_C_STATIC void ARCH_DEP(invalidate_tlb) (REGS *regs, BYTE mask);
+#if ARCH_MODE == ARCH_390 && defined(_900)
+_DAT_C_STATIC void z900_invalidate_tlb (REGS *regs, BYTE mask);
+#endif
+_DAT_C_STATIC void ARCH_DEP(invalidate_tlbe) (REGS *regs, BYTE *main);
 _DAT_C_STATIC void ARCH_DEP(invalidate_pte) (BYTE ibyte, int r1,
                            int r2, REGS *regs);
-_LOGICAL_C_STATIC RADR ARCH_DEP(logical_to_abs) (VADR addr, int arn,
+_LOGICAL_C_STATIC BYTE *ARCH_DEP(logical_to_main) (VADR addr, int arn,
                    REGS *regs, int acctype, BYTE akey);
 
 #if defined(_FEATURE_SIE) && ARCH_MODE != ARCH_900
-_LOGICAL_C_STATIC RADR s390_logical_to_abs (U32 addr, int arn, REGS *regs,
+_LOGICAL_C_STATIC BYTE *s390_logical_to_main (U32 addr, int arn, REGS *regs,
                            int acctype, BYTE akey);
 _DAT_C_STATIC int s390_translate_addr (U32 vaddr, int arn, REGS *regs,
-               int acctype, RADR *raddr, U16 *xcode, int *priv,
-                                        int *prot, int *pstid);
+                           int acctype);
 #endif /*defined(_FEATURE_SIE)*/
 
 #if defined(_FEATURE_ZSIE)
-_LOGICAL_C_STATIC RADR z900_logical_to_abs (U64 addr, int arn, REGS *regs,
+_LOGICAL_C_STATIC BYTE *z900_logical_to_main (U64 addr, int arn, REGS *regs,
                            int acctype, BYTE akey);
 _DAT_C_STATIC int z900_translate_addr (U64 vaddr, int arn, REGS *regs,
-               int acctype, RADR *raddr, U16 *xcode, int *priv,
-                                        int *prot, int *pstid);
+                           int acctype);
 #endif /*defined(_FEATURE_ZSIE)*/
 
 _VSTORE_C_STATIC void ARCH_DEP(vstorec) (void *src, BYTE len,
@@ -67,19 +69,19 @@ _VSTORE_C_STATIC U32 ARCH_DEP(vfetch4) (VADR addr, int arn,
                                REGS *regs);
 _VSTORE_C_STATIC U64 ARCH_DEP(vfetch8) (VADR addr, int arn,
                                REGS *regs);
-_VFETCH_C_STATIC void ARCH_DEP(instfetch) (BYTE *dest, VADR addr,
+_VFETCH_C_STATIC BYTE * ARCH_DEP(instfetch) (BYTE *dest, VADR addr,
                                REGS *regs);
 _VSTORE_C_STATIC void ARCH_DEP(move_chars) (VADR addr1, int arn1,
       BYTE key1, VADR addr2, int arn2, BYTE key2, int len, REGS *regs);
 _VSTORE_C_STATIC void ARCH_DEP(validate_operand) (VADR addr, int arn,
                      int len, int acctype, REGS *regs);
 
-#if defined(_FEATURE_SIE)
-_VFETCH_C_STATIC void s370_instfetch (BYTE *dest, U32 addr, REGS *regs);
+#if defined(_FEATURE_SIE) && defined(_370)
+_VFETCH_C_STATIC BYTE * s370_instfetch (BYTE *dest, U32 addr, REGS *regs);
 #endif /*defined(_FEATURE_SIE)*/
 
-#if defined(_FEATURE_ZSIE)
-_VFETCH_C_STATIC void s390_instfetch (BYTE *dest, U32 addr, REGS *regs);
+#if defined(_FEATURE_ZSIE) && defined(_900)
+_VFETCH_C_STATIC BYTE * s390_instfetch (BYTE *dest, U32 addr, REGS *regs);
 #endif /*defined(_FEATURE_ZSIE)*/
 
 #if !defined(_INLINE_H)
@@ -177,28 +179,31 @@ S64 quot, rem;
 
 
 /*-------------------------------------------------------------------*/
-/* Test for fetch protected storage location.                */
-/*                                   */
-/* Input:                                */
-/*  addr    Logical address of storage location          */
-/*  skey    Storage key with fetch, reference, and change bits   */
-/*      and one low-order zero appended              */
-/*  akey    Access key with 4 low-order zeroes appended      */
-/*  private 1=Location is in a private address space         */
-/*  regs    Pointer to the CPU register context          */
-/* Return value:                             */
-/*  1=Fetch protected, 0=Not fetch protected             */
+/* Test for fetch protected storage location.                        */
+/*                                                                   */
+/* Input:                                                            */
+/*  addr    Logical address of storage location                      */
+/*  skey    Storage key with fetch, reference, and change bits       */
+/*      and one low-order zero appended                              */
+/*  akey    Access key with 4 low-order zeroes appended              */
+/*  private 1=Location is in a private address space                 */
+/*  regs    Pointer to the CPU register context                      */
+/* Return value:                                                     */
+/*  1=Fetch protected, 0=Not fetch protected                         */
 /*-------------------------------------------------------------------*/
 static inline int ARCH_DEP(is_fetch_protected) (VADR addr, BYTE skey,
-                    BYTE akey, int private, REGS *regs)
+                    BYTE akey, REGS *regs)
 {
     UNREFERENCED_370(addr);
-    UNREFERENCED_370(private);
     UNREFERENCED_370(regs);
 
     /* [3.4.1] Fetch is allowed if access key is zero, regardless
        of the storage key and fetch protection bit */
-    if (akey == 0)
+    /* [3.4.1] Fetch protection prohibits fetch if storage key fetch
+       protect bit is on and access key does not match storage key */
+    if (likely(akey == 0
+    || akey == (skey & STORKEY_KEY)
+    || !(skey & STORKEY_FETCH)))
     return 0;
 
 #ifdef FEATURE_FETCH_PROTECTION_OVERRIDE
@@ -206,7 +211,7 @@ static inline int ARCH_DEP(is_fetch_protected) (VADR addr, BYTE skey,
        2K of non-private address spaces if CR0 bit 6 is set */
     if (addr < 2048
     && (regs->CR(0) & CR0_FETCH_OVRD)
-    && private == 0)
+    && regs->dat.private == 0)
     return 0;
 #endif /*FEATURE_FETCH_PROTECTION_OVERRIDE*/
 
@@ -219,29 +224,23 @@ static inline int ARCH_DEP(is_fetch_protected) (VADR addr, BYTE skey,
     return 0;
 #endif /*FEATURE_STORAGE_PROTECTION_OVERRIDE*/
 
-    /* [3.4.1] Fetch protection prohibits fetch if storage key fetch
-       protect bit is on and access key does not match storage key */
-    if ((skey & STORKEY_FETCH)
-    && akey != (skey & STORKEY_KEY))
+    /* Return one if location is fetch protected */
     return 1;
-
-    /* Return zero if location is not fetch protected */
-    return 0;
 
 } /* end function is_fetch_protected */
 
 /*-------------------------------------------------------------------*/
-/* Test for low-address protection.                  */
-/*                                   */
-/* Input:                                */
-/*  addr    Logical address of storage location          */
-/*  private 1=Location is in a private address space         */
-/*  regs    Pointer to the CPU register context          */
-/* Return value:                             */
-/*  1=Low-address protected, 0=Not low-address protected         */
+/* Test for low-address protection.                                  */
+/*                                                                   */
+/* Input:                                                            */
+/*  addr    Logical address of storage location                      */
+/*  private 1=Location is in a private address space                 */
+/*  regs    Pointer to the CPU register context                      */
+/* Return value:                                                     */
+/*  1=Low-address protected, 0=Not low-address protected             */
 /*-------------------------------------------------------------------*/
 static inline int ARCH_DEP(is_low_address_protected) (VADR addr,
-            int private, REGS *regs)
+                                              REGS *regs)
 {
 #if defined (FEATURE_ESAME)
     /* For ESAME, low-address protection applies to locations
@@ -268,7 +267,7 @@ static inline int ARCH_DEP(is_low_address_protected) (VADR addr,
 
     /* Low-address protection does not apply to private address
        spaces */
-    if (private)
+    if (regs->dat.private)
     return 0;
 
     /* Return one if location is low-address protected */
@@ -277,33 +276,33 @@ static inline int ARCH_DEP(is_low_address_protected) (VADR addr,
 } /* end function is_low_address_protected */
 
 /*-------------------------------------------------------------------*/
-/* Test for store protected storage location.                */
-/*                                   */
-/* Input:                                */
-/*  addr    Logical address of storage location          */
-/*  skey    Storage key with fetch, reference, and change bits   */
-/*      and one low-order zero appended              */
-/*  akey    Access key with 4 low-order zeroes appended      */
-/*  private 1=Location is in a private address space         */
-/*  protect 1=Access list protection or page protection applies  */
-/*  regs    Pointer to the CPU register context          */
-/* Return value:                             */
-/*  1=Store protected, 0=Not store protected             */
+/* Test for store protected storage location.                        */
+/*                                                                   */
+/* Input:                                                            */
+/*  addr    Logical address of storage location                      */
+/*  skey    Storage key with fetch, reference, and change bits       */
+/*      and one low-order zero appended                              */
+/*  akey    Access key with 4 low-order zeroes appended              */
+/*  private 1=Location is in a private address space                 */
+/*  protect 1=Access list protection or page protection applies      */
+/*  regs    Pointer to the CPU register context                      */
+/* Return value:                                                     */
+/*  1=Store protected, 0=Not store protected                         */
 /*-------------------------------------------------------------------*/
 static inline int ARCH_DEP(is_store_protected) (VADR addr, BYTE skey,
-               BYTE akey, int private, int protect, REGS *regs)
+               BYTE akey, REGS *regs)
 {
     /* [3.4.4] Low-address protection prohibits stores into certain
        locations in the prefixed storage area of non-private address
        address spaces, if the low-address control bit in CR0 is set,
        regardless of the access key and storage key */
-    if (ARCH_DEP(is_low_address_protected) (addr, private, regs))
+    if (ARCH_DEP(is_low_address_protected) (addr, regs))
     return 1;
 
     /* Access-list controlled protection prohibits all stores into
        the address space, and page protection prohibits all stores
        into the page, regardless of the access key and storage key */
-    if (protect)
+    if (regs->dat.protect)
     return 1;
 
     /* [3.4.1] Store is allowed if access key is zero, regardless
@@ -332,9 +331,38 @@ static inline int ARCH_DEP(is_store_protected) (VADR addr, BYTE skey,
 
 
 /*-------------------------------------------------------------------*/
-/* Fetch a doubleword from absolute storage.                 */
+/* Return mainstor address of absolute address.                      */
 /* The caller is assumed to have already checked that the absolute   */
-/* address is within the limit of main storage.              */
+/* address is within the limit of main storage.                      */
+/*-------------------------------------------------------------------*/
+#if defined(INLINE_STORE_FETCH_ADDR_CHECK)
+static inline BYTE *ARCH_DEP(fetch_main_absolute) (RADR addr,
+                                REGS *regs, int len)
+#else
+static inline BYTE *ARCH_DEP(fetch_main_absolute) (RADR addr,
+                                REGS *regs)
+#endif
+{
+#if defined(INLINE_STORE_FETCH_ADDR_CHECK)
+    if(addr > regs->mainlim - len)
+    ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+#endif /*defined(INLINE_STORE_FETCH_ADDR_CHECK)*/
+
+    SIE_TRANSLATE(&addr, ACCTYPE_READ, regs);
+
+    /* Set the main storage reference bit */
+    STORAGE_KEY(addr, regs) |= STORKEY_REF;
+
+    /* Return absolute storage mainstor address */
+    return (regs->mainstor + addr);
+
+} /* end function fetch_main_absolute */
+
+
+/*-------------------------------------------------------------------*/
+/* Fetch a doubleword from absolute storage.                         */
+/* The caller is assumed to have already checked that the absolute   */
+/* address is within the limit of main storage.                      */
 /* All bytes of the word are fetched concurrently as observed by     */
 /* other CPUs.  The doubleword is first fetched as an integer, then  */
 /* the bytes are reversed into host byte order if necessary.         */
@@ -342,26 +370,14 @@ static inline int ARCH_DEP(is_store_protected) (VADR addr, BYTE skey,
 static inline U64 ARCH_DEP(fetch_doubleword_absolute) (RADR addr,
                                 REGS *regs)
 {
-#if defined(INLINE_STORE_FETCH_ADDR_CHECK)
-    if(addr > regs->mainlim - 8)
-    ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
-#endif /*defined(INLINE_STORE_FETCH_ADDR_CHECK)*/
-
-    SIE_TRANSLATE(&addr, ACCTYPE_READ, regs);
-
-    /* Set the main storage reference bit */
-    STORAGE_KEY(addr, regs) |= STORKEY_REF;
-
-    /* Fetch the doubleword from absolute storage */
-    return fetch_dw(regs->mainstor + addr);
-
+    return fetch_dw(FETCH_MAIN_ABSOLUTE(addr, regs, 8));
 } /* end function fetch_doubleword_absolute */
 
 
 /*-------------------------------------------------------------------*/
-/* Fetch a fullword from absolute storage.               */
+/* Fetch a fullword from absolute storage.                           */
 /* The caller is assumed to have already checked that the absolute   */
-/* address is within the limit of main storage.              */
+/* address is within the limit of main storage.                      */
 /* All bytes of the word are fetched concurrently as observed by     */
 /* other CPUs.  The fullword is first fetched as an integer, then    */
 /* the bytes are reversed into host byte order if necessary.         */
@@ -369,18 +385,7 @@ static inline U64 ARCH_DEP(fetch_doubleword_absolute) (RADR addr,
 static inline U32 ARCH_DEP(fetch_fullword_absolute) (RADR addr,
                                 REGS *regs)
 {
-#if defined(INLINE_STORE_FETCH_ADDR_CHECK)
-    if(addr > regs->mainlim - 4)
-    ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
-#endif /*defined(INLINE_STORE_FETCH_ADDR_CHECK)*/
-
-    SIE_TRANSLATE(&addr, ACCTYPE_READ, regs);
-
-    /* Set the main storage reference bit */
-    STORAGE_KEY(addr, regs) |= STORKEY_REF;
-
-    /* Fetch the fullword from absolute storage */
-    return fetch_fw(regs->mainstor + addr);
+    return fetch_fw(FETCH_MAIN_ABSOLUTE(addr, regs, 4));
 } /* end function fetch_fullword_absolute */
 
 
@@ -395,19 +400,7 @@ static inline U32 ARCH_DEP(fetch_fullword_absolute) (RADR addr,
 static inline U16 ARCH_DEP(fetch_halfword_absolute) (RADR addr,
                                 REGS *regs)
 {
-#if defined(INLINE_STORE_FETCH_ADDR_CHECK)
-    if(addr > regs->mainlim - 2)
-    ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
-#endif /*defined(INLINE_STORE_FETCH_ADDR_CHECK)*/
-
-    SIE_TRANSLATE(&addr, ACCTYPE_READ, regs);
-
-    /* Set the main storage reference bit */
-    STORAGE_KEY(addr, regs) |= STORKEY_REF;
-
-    /* Fetch the halfword from absolute storage */
-    return fetch_hw(regs->mainstor + addr);
-
+    return fetch_hw(FETCH_MAIN_ABSOLUTE(addr, regs, 2));
 } /* end function fetch_halfword_absolute */
 
 
@@ -501,8 +494,9 @@ U32 ducto;              /* DUCT origin           */
 U32 duct0;              /* DUCT word 0           */
 U32 duct1;              /* DUCT word 1           */
 U32 duct3;              /* DUCT word 3           */
-U32 ssasteo;            /* Subspace ASTE origin      */
+U32 ssasteo;            /* Subspace ASTE origin  */
 U32 ssaste[16];         /* Subspace ASTE         */
+BYTE *p;                /* Mainstor pointer      */
 
     /* Clear the exception code field, if provided */
     if (xcode != NULL) *xcode = 0;
@@ -524,9 +518,10 @@ U32 ssaste[16];         /* Subspace ASTE         */
 
     /* Fetch DUCT words 0, 1, and 3 from absolute storage
        (note: the DUCT cannot cross a page boundary) */
-    duct0 = ARCH_DEP(fetch_fullword_absolute) (ducto, regs);
-    duct1 = ARCH_DEP(fetch_fullword_absolute) (ducto+4, regs);
-    duct3 = ARCH_DEP(fetch_fullword_absolute) (ducto+12, regs);
+    p = FETCH_MAIN_ABSOLUTE(ducto, regs, 16);
+    duct0 = fetch_fw(p);
+    duct1 = fetch_fw(p+4);
+    duct3 = fetch_fw(p+12);
 
     /* Return the original STD unchanged if the dispatchable unit is
        not subspace active or if the ASTE obtained by ASN translation
@@ -545,12 +540,13 @@ U32 ssaste[16];         /* Subspace ASTE         */
 
     /* Fetch subspace ASTE words 0, 2, 3, and 5 from absolute
        storage (note: the ASTE cannot cross a page boundary) */
-    ssaste[0] = ARCH_DEP(fetch_fullword_absolute) (ssasteo, regs);
-    ssaste[2] = ARCH_DEP(fetch_fullword_absolute) (ssasteo+8, regs);
+    p = FETCH_MAIN_ABSOLUTE(ssasteo, regs, 24);
+    ssaste[0] = fetch_fw(p);
+    ssaste[2] = fetch_fw(p+8);
 #if defined(FEATURE_ESAME)
-    ssaste[3] = ARCH_DEP(fetch_fullword_absolute) (ssasteo+12, regs);
+    ssaste[3] = fetch_fw(p+12);
 #endif /*defined(FEATURE_ESAME)*/
-    ssaste[5] = ARCH_DEP(fetch_fullword_absolute) (ssasteo+20, regs);
+    ssaste[5] = fetch_fw(p+20);
 
     /* ASTE validity exception if subspace ASTE invalid bit is one */
     if (ssaste[0] & ASTE0_INVALID)

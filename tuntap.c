@@ -2,8 +2,8 @@
 // Hercules - TUN/TAP Abstraction Layer
 // ====================================================================
 //
-// Copyright (C) 2002-2003 by James A. Pierson
-//           (C) 2002-2003 by "Fish" (David B. Trout)
+// Copyright (C) 2002-2004 by James A. Pierson
+//           (C) 2002-2004 by "Fish" (David B. Trout)
 //
 // TUN/TAP implementations differ among platforms. Linux and FreeBSD
 // offer much the same functionality but with differing semantics.
@@ -14,7 +14,6 @@
 // This abstraction layer is an attempt to create a common API set
 // that works on all platforms with (hopefully) equal results.
 
-#if !defined(__APPLE__) 
 #include "hercules.h"
 #include "tuntap.h"
 #include "devtype.h"
@@ -30,7 +29,7 @@
 // ====================================================================
 
 #if !defined( WIN32 )
-static int      IFC_IOCtl( int fd, int iRequest, char* argp );
+static int      IFC_IOCtl( int fd, unsigned long int iRequest, char* argp );
 #endif // !defined( WIN32 )
 
 static int ifc_fd[2] = { -1, -1 };
@@ -162,6 +161,9 @@ int             TUNTAP_CreateInterface( char* pszTUNDevice,
         //        spend a lot of time on this... so it will remain.
         //        My best guess is that this will cause other functions
         //        to fail miserably but I have no way to test it.
+        // This should work on OS X with Christoph Pfisterer's TUN driver,
+        //        since it does set the device name to the basename of the
+        //        file. -- JRM
         char *p = strrchr( pszTUNDevice, '/' );
         
         if( p )
@@ -262,7 +264,7 @@ int             TUNTAP_SetDestAddr( char*   pszNetDevName,
 // 
 // TUNTAP_SetNetMask
 // 
-
+#if !defined(__APPLE__)
 int             TUNTAP_SetNetMask( char*   pszNetDevName,
                                    char*   pszNetMask )
 {
@@ -294,6 +296,7 @@ int             TUNTAP_SetNetMask( char*   pszNetDevName,
 
     return TUNTAP_IOCtl( 0, SIOCSIFNETMASK, (char*)&ifreq );
 }
+#endif /* !defined(__APPLE__) */
 
 // 
 // TUNTAP_SetMTU
@@ -308,7 +311,7 @@ int             TUNTAP_SetMTU( char*   pszNetDevName,
 
     memset( &ifreq, 0, sizeof( struct ifreq ) );
 
-    sin = (struct sockaddr_in*)&ifreq.ifr_netmask;
+    sin = (struct sockaddr_in*)&ifreq.ifr_addr;
 
     sin->sin_family = AF_INET;
 
@@ -345,7 +348,7 @@ int             TUNTAP_SetMTU( char*   pszNetDevName,
 // 
 // TUNTAP_SetMACAddr
 // 
-
+#if !defined(__APPLE__)
 int             TUNTAP_SetMACAddr( char*   pszNetDevName,
                                    char*   pszMACAddr )
 {
@@ -379,6 +382,7 @@ int             TUNTAP_SetMACAddr( char*   pszNetDevName,
 
     return TUNTAP_IOCtl( 0, SIOCSIFHWADDR, (char*)&ifreq );
 }
+#endif /* !defined(__APPLE__) */
 
 // 
 // TUNTAP_SetFlags
@@ -392,7 +396,7 @@ int             TUNTAP_SetFlags ( char*   pszNetDevName,
 
     memset( &ifreq, 0, sizeof( struct ifreq ) );
 
-    sin = (struct sockaddr_in*)&ifreq.ifr_netmask;
+    sin = (struct sockaddr_in*)&ifreq.ifr_addr;
 
     sin->sin_family = AF_INET;
 
@@ -413,7 +417,7 @@ int             TUNTAP_SetFlags ( char*   pszNetDevName,
 // 
 // TUNTAP_AddRoute
 // 
-
+#if !defined(__APPLE__)
 int             TUNTAP_AddRoute( char*   pszNetDevName,
                                  char*   pszDestAddr,
                                  char*   pszNetMask,
@@ -473,11 +477,12 @@ int             TUNTAP_AddRoute( char*   pszNetDevName,
 
     return TUNTAP_IOCtl( 0, SIOCADDRT, (char*)&rtentry );
 }
+#endif /* !defined(__APPLE__) */
 
 // 
 // TUNTAP_DelRoute
 // 
-
+#if !defined(__APPLE__)
 int             TUNTAP_DelRoute( char*   pszNetDevName,
                                  char*   pszDestAddr,
                                  char*   pszNetMask,
@@ -535,6 +540,7 @@ int             TUNTAP_DelRoute( char*   pszNetDevName,
 
     return TUNTAP_IOCtl( 0, SIOCDELRT, (char*)&rtentry );
 }
+#endif /* !defined(__APPLE__) */
 
 #if !defined( WIN32 )
 // ====================================================================
@@ -545,9 +551,11 @@ int             TUNTAP_DelRoute( char*   pszNetDevName,
 // IFC_IOCtl
 // 
 
-static int      IFC_IOCtl( int fd, int iRequest, char* argp )
+static int      IFC_IOCtl( int fd, unsigned long int iRequest, char* argp )
 {
     char*       pszCfgCmd;     // Interface config command
+    /* char*       request_name; */ // debugging: name of ioctl request
+    /* char        unknown_request[]="Unknown (0x00000000)"; */
     int         rc;
     CTLREQ      ctlreq;
 
@@ -557,12 +565,47 @@ static int      IFC_IOCtl( int fd, int iRequest, char* argp )
 
     ctlreq.iCtlOp = iRequest;
 
+#if 0 /* debugging print */
+    // Select string to represent ioctl request for debugging.
+    switch (iRequest) {
+    case SIOCSIFADDR:
+        request_name="SIOCSIFADDR"; break;
+    case SIOCSIFDSTADDR:
+        request_name="SIOCSIFDSTADDR"; break;
+    case SIOCSIFMTU:
+        request_name="SIOCSIFMTU"; break;
+    case SIOCSIFFLAGS:
+        request_name="SIOCSIFFLAGS"; break;
+    case SIOCSIFNETMASK:
+        request_name="SIOCSIFNETMASK"; break;
+#if !defined(__APPLE__)
+    case SIOCSIFHWADDR:
+        request_name="SIOCSIFHWADDR"; break;
+#endif /* !defined(__APPLE__) */
+    case SIOCADDRT:
+        request_name="SIOCADDRT"; break;
+    case SIOCDELRT:
+        request_name="SIOCDELRT"; break;
+    default:
+        sprintf(unknown_request,"Unknown (0x%x)",iRequest);
+        request_name=unknown_request;
+    }
+logmsg(_("HHCTU030I IFC_IOCtl called for %s on FDs %d %d\n"),
+          request_name,ifc_fd[0],ifc_fd[1]);
+#endif /* 0 -- debugging */
+
     if( iRequest == SIOCADDRT ||
         iRequest == SIOCDELRT )
     {
+#if !defined(__APPLE__)
       strcpy( ctlreq.szIFName, ((struct rtentry*)argp)->rt_dev );
       memcpy( &ctlreq.iru.rtentry, argp, sizeof( struct rtentry ) );
       ((struct rtentry*)argp)->rt_dev = NULL;
+#else /* !defined(__APPLE__) */
+      logmsg(_("HHCTU028E Unsupported call to %s a network route on OS X\n"),
+                ((iRequest==SIOCADDRT) ? "add" : "delete"));
+      return -1;
+#endif /* !defined(__APPLE__) */
     }
     else
     {
@@ -581,6 +624,8 @@ static int      IFC_IOCtl( int fd, int iRequest, char* argp )
         // Obtain the name of the interface config program or default
         if( !( pszCfgCmd = getenv( "HERCULES_IFC" ) ) )
             pszCfgCmd = HERCIFC_CMD;
+//DEBUG     logmsg(_("HHCTU029I Executing '%s' to configure interface\n")
+//DEBUG               pszCfgCmd);
 
         // Fork a process to execute the hercifc
         ifc_pid = fork();
@@ -602,8 +647,17 @@ static int      IFC_IOCtl( int fd, int iRequest, char* argp )
             */
             struct rlimit rlim;
             int i;
+            rlim_t file_limit;
             getrlimit(RLIMIT_NOFILE,&rlim);
-            for(i=0;(unsigned int)i<rlim.rlim_max;i++)
+            /* While Linux and Cygwin have limits of 1024 files by default,
+             * Mac OS X does not - its default is -1, or completely unlimited.
+             * The following hack is to defend against trying to close 2
+             * billion files. -- JRM */
+            file_limit=rlim.rlim_max;
+            file_limit=(file_limit>1024)?1024:file_limit;
+//DEBUG     logmsg(_("HHCTU031I Closing %lld files\n"),
+//DEBUG              (long long)file_limit);
+            for(i=0;(unsigned int)i<file_limit;i++)
             {
                 if(i!=ifc_fd[1] && i!=STDOUT_FILENO)
                 {
@@ -637,4 +691,3 @@ static int      IFC_IOCtl( int fd, int iRequest, char* argp )
 }
 
 #endif // !defined( WIN32 )
-#endif /* !defined(__APPLE__) */

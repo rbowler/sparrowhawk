@@ -2,7 +2,7 @@
 /*                                                                    */
 /* HSCUTL2.C                                                          */
 /*                                                                    */
-/* (c) 2003 Mark L. Gaubatz and others                                */
+/* (c) 2003-2004 Mark L. Gaubatz and others                           */
 /*                                                                    */
 /* Implementation of functions used in Hercules that may be missing   */
 /* on some platform ports.                                            */
@@ -21,11 +21,12 @@
 /*                                                                    */
 /**********************************************************************/
 
-#include <stdlib.h>                     /* Needed for size_t declaration */
+#include <stdlib.h>           /* Needed for size_t declaration        */
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
-#include "hscutl.h"                     /* Hercules Utilities         */
+#include <sys/time.h>         /* Need "struct timeval" for hscutl.h   */
+#include "hscutl.h"           /* Hercules Utilities                   */
 
 
 /**********************************************************************/

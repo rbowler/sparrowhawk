@@ -1,4 +1,4 @@
-/* HDTEQ.C      (c) Copyright Jan Jaeger, 2003                       */
+/* HDTEQ.C      (c) Copyright Jan Jaeger, 2003-2004                  */
 /*              Hercules Dynamic Loader                              */
 
 
@@ -54,6 +54,12 @@ static DTEQ dteq[] = {
     { "CTCI",   "3088" },
     { "CTCT",   "3088" },
     { "VMNET",  "3088" },
+
+    { "HCHAN",  "2880" },
+    { "2880",  "2880" },
+    { "2870",  "2880" },
+    { "2860",  "2880" },
+    { "9032",  "2880" },
 
     { NULL,     NULL   } };
 

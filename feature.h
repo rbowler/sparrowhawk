@@ -1,8 +1,13 @@
-/* FEATURES.H   (c) Copyright Jan Jaeger, 2000-2003          */
+/* FEATURES.H   (c) Copyright Jan Jaeger, 2000-2004          */
 /*      Architecture-dependent macro definitions         */
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
+#endif
+
+#include <ctype.h>
+#if defined(WIN32) && !defined(__WORDSIZE)
+#define __WORDSIZE 32
 #endif
 
 /*-------------------------------------------------------------------*/
@@ -49,6 +54,7 @@
 #undef REAL_MODE
 #undef PER_MODE
 #undef ASF_ENABLED
+#undef ASN_AND_LX_REUSE_ENABLED
 #undef ASTE_AS_DESIGNATOR
 #undef ASTE_LT_DESIGNATOR
 #undef SAEVENT_BIT
@@ -70,10 +76,11 @@
 #undef CR
 #undef GR
 #undef GR_A
+#undef SET_GR_A
 #undef MONCODE
 #undef TEA
 #undef DXC
-#undef ET 
+#undef ET
 #undef PX_MASK
 #undef RSTOLD
 #undef RSTNEW
@@ -89,15 +96,21 @@
 #undef F_AREG
 #undef STORE_W
 #undef FETCH_W
-#undef VI
-#undef AI
-#undef AE
-#undef VE
+#undef AIV
+#undef AIE
+#undef VIE
 #undef SIEBK
 #undef ZPB
-#undef TLB_STD
+#undef TLB_REAL_ASD
+#undef TLB_ASD
 #undef TLB_VADDR
 #undef TLB_PTE
+#undef TLB_PAGEMASK
+#undef TLB_BYTEMASK
+#undef TLB_PAGESHIFT
+#undef TLBID_PAGEMASK
+#undef TLBID_BYTEMASK
+#undef ASD_PRIVATE
 #undef BROADCAST_PFRA
 
 #if !defined(NO_ATTR_REGPARM)
@@ -111,14 +124,16 @@
 #define ARCH_MODE   ARCH_370
 
 #define DEF_INST(_name) \
-void (ATTR_REGPARM(3) s370_ ## _name) (BYTE inst[], int execflag, REGS *regs)
+void (ATTR_REGPARM(2) s370_ ## _name) (BYTE inst[], REGS *regs)
 
 #define ARCH_DEP(_name) \
 s370_ ## _name
 
 #define APPLY_PREFIXING(addr,pfx) \
-    (((U32)((addr)&0x7FFFF000)==(U32)0)?((addr)&0xFFF)|pfx:\
-    ((U32)((addr)&0x7FFFF000)==(U32)pfx)?(addr)&0xFFF:(addr))
+    ( ((U32)(addr) & 0x7FFFF000) == 0 || ((U32)(addr) & 0x7FFFF000) == (pfx) \
+      ? (U32)(addr) ^ (pfx) \
+      : (addr) \
+    )
 
 #define AMASK   AMASK_L
 
@@ -129,18 +144,20 @@ s370_ ## _name
     (AMASK31)
 
 #define REAL_MODE(p) \
-    ((p)->ecmode==0 || ((p)->sysmask & PSW_DATMODE)==0)
+    (!ECMODE(p) || ((p)->sysmask & PSW_DATMODE)==0)
 
 #if defined(_FEATURE_SIE)
 #define PER_MODE(_regs) \
-        ( ((_regs)->psw.ecmode && ((_regs)->psw.sysmask & PSW_PERMODE)) \
-          | ((_regs)->sie_state && ((_regs)->siebk->m & SIE_M_GPE)) )
+        ( (ECMODE(&(_regs)->psw) && ((_regs)->psw.sysmask & PSW_PERMODE)) \
+          || (SIE_MODE((_regs)) && ((_regs)->siebk->m & SIE_M_GPE)) )
 #else
 #define PER_MODE(_regs) \
-        ((_regs)->psw.ecmode && ((_regs)->psw.sysmask & PSW_PERMODE))
+        (ECMODE(&(_regs)->psw) && ((_regs)->psw.sysmask & PSW_PERMODE))
 #endif
 
 #define ASF_ENABLED(_regs)  0 /* ASF is never enabled for S/370 */
+
+#define ASN_AND_LX_REUSE_ENABLED(_regs) 0 /* never enabled for S/370 */
 
 #define ASTE_AS_DESIGNATOR(_aste) \
     ((_aste)[2])
@@ -159,6 +176,7 @@ s370_ ## _name
 #define CR(_r)  CR_L(_r)
 #define GR(_r)  GR_L(_r)
 #define GR_A(_r, _regs) ((_regs)->GR_L((_r)))
+#define SET_GR_A(_r, _regs,_v) ((_regs)->GR_L((_r))=(_v))
 #define MONCODE MC_L
 #define TEA EA_L
 #define DXC     tea
@@ -166,6 +184,7 @@ s370_ ## _name
 #define PX_MASK 0x7FFFF000
 #define RSTOLD  iplccw1
 #define RSTNEW  iplpsw
+//#if !defined(_FEATURE_ZSIE) || __WORDSIZE == 32
 #if !defined(_FEATURE_ZSIE)
 #define RADR    U32
 #define F_RADR  "%8.8X"
@@ -183,15 +202,20 @@ s370_ ## _name
 #define F_AREG  "%8.8X"
 #define STORE_W STORE_FW
 #define FETCH_W FETCH_FW
-#define VI  VI_L
-#define AI  AI_L
-#define AE(_r)  AE_L(_r)
-#define VE(_r)  VE_L(_r)
+#define AIV     AIV_L
+#define AIE     AIE_L
 #define SIEBK                   SIE1BK
 #define ZPB                     ZPB1
-#define TLB_STD   TLB_STD_L
-#define TLB_VADDR TLB_VADDR_L
-#define TLB_PTE   TLB_PTE_L
+#define TLB_REAL_ASD  TLB_REAL_ASD_L
+#define TLB_ASD(_n)   TLB_ASD_L(_n)
+#define TLB_VADDR(_n) TLB_VADDR_L(_n)
+#define TLB_PTE(_n)   TLB_PTE_L(_n)
+#define TLB_PAGEMASK  0x00FFF800
+#define TLB_BYTEMASK  0x000007FF
+#define TLB_PAGESHIFT 11
+#define TLBID_PAGEMASK  0x00E00000
+#define TLBID_BYTEMASK  0x001FFFFF
+#define ASD_PRIVATE   SEGTAB_370_CMN
 #define BROADCAST_PFRA BROADCAST_PFRA_L
 
 #elif __GEN_ARCH == 390
@@ -199,14 +223,16 @@ s370_ ## _name
 #define ARCH_MODE   ARCH_390
 
 #define DEF_INST(_name) \
-void (ATTR_REGPARM(3) s390_ ## _name) (BYTE inst[], int execflag, REGS *regs)
+void (ATTR_REGPARM(2) s390_ ## _name) (BYTE inst[], REGS *regs)
 
 #define ARCH_DEP(_name) \
 s390_ ## _name
 
 #define APPLY_PREFIXING(addr,pfx) \
-    (((U32)((addr)&0x7FFFF000)==(U32)0)    ?((addr)&0xFFF)|(pfx):\
-     ((U32)((addr)&0x7FFFF000)==(U32)(pfx))?((addr)&0xFFF):(addr))
+    ( ((U32)(addr) & 0x7FFFF000) == 0 || ((U32)(addr) & 0x7FFFF000) == (pfx) \
+      ? (U32)(addr) ^ (pfx) \
+      : (addr) \
+    )
 
 #define AMASK   AMASK_L
 
@@ -222,13 +248,15 @@ s390_ ## _name
 #if defined(_FEATURE_SIE)
 #define PER_MODE(_regs) \
         ( ((_regs)->psw.sysmask & PSW_PERMODE) \
-          | ((_regs)->sie_state && ((_regs)->siebk->m & SIE_M_GPE)) )
+          || (SIE_MODE((_regs)) && ((_regs)->siebk->m & SIE_M_GPE)) )
 #else
 #define PER_MODE(_regs) \
         ((_regs)->psw.sysmask & PSW_PERMODE)
 #endif
 
 #define ASF_ENABLED(_regs)  ((_regs)->CR(0) & CR0_ASF)
+
+#define ASN_AND_LX_REUSE_ENABLED(_regs) 0 /* never enabled in ESA/390 */
 
 #define ASTE_AS_DESIGNATOR(_aste) \
     ((_aste)[2])
@@ -256,6 +284,7 @@ s390_ ## _name
 #define CR(_r)  CR_L(_r)
 #define GR(_r)  GR_L(_r)
 #define GR_A(_r, _regs) ((_regs)->GR_L((_r)))
+#define SET_GR_A(_r, _regs,_v) ((_regs)->GR_L((_r))=(_v))
 #define MONCODE MC_L
 #define TEA EA_L
 #define DXC     tea
@@ -263,6 +292,7 @@ s390_ ## _name
 #define PX_MASK 0x7FFFF000
 #define RSTNEW  iplpsw
 #define RSTOLD  iplccw1
+//#if !defined(_FEATURE_ZSIE) ||  __WORDSIZE == 32
 #if !defined(_FEATURE_ZSIE)
 #define RADR    U32
 #define F_RADR  "%8.8X"
@@ -280,15 +310,20 @@ s390_ ## _name
 #define F_AREG  "%8.8X"
 #define STORE_W STORE_FW
 #define FETCH_W FETCH_FW
-#define VI  VI_L
-#define AI  AI_L
-#define AE(_r)  AE_L(_r)
-#define VE(_r)  VE_L(_r)
+#define AIV     AIV_L
+#define AIE     AIE_L
 #define SIEBK                   SIE1BK
 #define ZPB                     ZPB1
-#define TLB_STD   TLB_STD_L
-#define TLB_VADDR TLB_VADDR_L
-#define TLB_PTE   TLB_PTE_L
+#define TLB_REAL_ASD  TLB_REAL_ASD_L
+#define TLB_ASD(_n)   TLB_ASD_L(_n)
+#define TLB_VADDR(_n) TLB_VADDR_L(_n)
+#define TLB_PTE(_n)   TLB_PTE_L(_n)
+#define TLB_PAGEMASK  0x7FFFF000
+#define TLB_BYTEMASK  0x00000FFF
+#define TLB_PAGESHIFT 12
+#define TLBID_PAGEMASK  0x7FC00000
+#define TLBID_BYTEMASK  0x003FFFFF
+#define ASD_PRIVATE   STD_PRIVATE
 #define BROADCAST_PFRA BROADCAST_PFRA_L
 
 #elif __GEN_ARCH == 900
@@ -296,8 +331,10 @@ s390_ ## _name
 #define ARCH_MODE   ARCH_900
 
 #define APPLY_PREFIXING(addr,pfx) \
-    (((U64)((addr)&0xFFFFFFFFFFFFE000ULL)==(U64)0)?((addr)&0x1FFF)|(pfx):\
-    ((U64)((addr)&0xFFFFFFFFFFFFE000ULL)==(U64)(pfx))?(addr)&0x1FFF:(addr))
+    ( (U64)((addr) & 0xFFFFFFFFFFFFE000ULL) == (U64)0 || (U64)((addr) & 0xFFFFFFFFFFFFE000ULL) == (pfx) \
+      ? (addr) ^ (pfx) \
+      : (addr) \
+    )
 
 #define AMASK   AMASK_G
 
@@ -313,13 +350,22 @@ s390_ ## _name
 #if defined(_FEATURE_SIE)
 #define PER_MODE(_regs) \
         ( ((_regs)->psw.sysmask & PSW_PERMODE) \
-          | ((_regs)->sie_state && ((_regs)->siebk->m & SIE_M_GPE)) )
+          || (SIE_MODE((_regs)) && ((_regs)->siebk->m & SIE_M_GPE)) )
 #else
 #define PER_MODE(_regs) \
         ((_regs)->psw.sysmask & PSW_PERMODE)
 #endif
 
 #define ASF_ENABLED(_regs)  1 /* ASF is always enabled for ESAME */
+
+/* ASN-and-LX-reuse is enabled if the ASN-and-LX-reuse
+   facility is installed and CR0 bit 44 is 1 */
+#if defined(FEATURE_ASN_AND_LX_REUSE)
+  #define ASN_AND_LX_REUSE_ENABLED(_regs) \
+      (sysblk.asnandlxreuse && ((_regs)->CR_L(0) & CR0_ASN_LX_REUS))
+#else /* !defined(FEATURE_ASN_AND_LX_REUSE) */
+  #define ASN_AND_LX_REUSE_ENABLED(_regs) 0
+#endif /* !defined(FEATURE_ASN_AND_LX_REUSE) */
 
 #define ASTE_AS_DESIGNATOR(_aste) \
     (((U64)((_aste)[2])<<32)|(U64)((_aste)[3]))
@@ -341,7 +387,7 @@ s390_ ## _name
 #define CHM_GPR2_RESV   Z_CHM_GPR2_RESV
 
 #define DEF_INST(_name) \
-void (ATTR_REGPARM(3) z900_ ## _name) (BYTE inst[], int execflag, REGS *regs)
+void (ATTR_REGPARM(2) z900_ ## _name) (BYTE inst[], REGS *regs)
 
 #define ARCH_DEP(_name) \
 z900_ ## _name
@@ -353,6 +399,15 @@ z900_ ## _name
 #define CR(_r)  CR_G(_r)
 #define GR(_r)  GR_G(_r)
 #define GR_A(_r, _regs) ((_regs)->psw.amode64 ? (_regs)->GR_G((_r)) : (_regs)->GR_L((_r)))
+#define SET_GR_A(_r, _regs,_v)  \
+    do  { \
+        if((_regs)->psw.amode64) { \
+            ((_regs)->GR_G((_r))=(_v)); \
+        } else { \
+            ((_regs)->GR_L((_r))=(_v)); \
+        } \
+    } while(0)
+
 #define MONCODE MC_G
 #define TEA EA_G
 #define DXC     dataexc
@@ -360,7 +415,12 @@ z900_ ## _name
 #define PX_MASK 0x7FFFE000
 #define RSTOLD  rstold
 #define RSTNEW  rstnew
+//#if  __WORDSIZE == 32
+#if 0
+#define RADR    U32
+#else
 #define RADR    U64
+#endif
 #define F_RADR  "%16.16llX"
 #define VADR    U64
 #define F_VADR  "%16.16llX"
@@ -372,15 +432,20 @@ z900_ ## _name
 #define F_AREG  "%8.8X"
 #define STORE_W STORE_DW
 #define FETCH_W FETCH_DW
-#define VI  VI_G
-#define AI  AI_G
-#define AE(_r)  AE_G(_r)
-#define VE(_r)  VE_G(_r)
+#define AIV     AIV_G
+#define AIE     AIE_G
 #define SIEBK                   SIE2BK
 #define ZPB                     ZPB2
-#define TLB_STD   TLB_STD_G
-#define TLB_VADDR TLB_VADDR_G
-#define TLB_PTE   TLB_PTE_G
+#define TLB_REAL_ASD  TLB_REAL_ASD_G
+#define TLB_ASD(_n)   TLB_ASD_G(_n)
+#define TLB_VADDR(_n) TLB_VADDR_G(_n)
+#define TLB_PTE(_n)   TLB_PTE_G(_n)
+#define TLB_PAGEMASK  0xFFFFFFFFFFFFF000ULL
+#define TLB_BYTEMASK  0x0000000000000FFFULL
+#define TLB_PAGESHIFT 12
+#define TLBID_PAGEMASK  0xFFFFFFFFFFC00000ULL
+#define TLBID_BYTEMASK  0x00000000003FFFFFULL
+#define ASD_PRIVATE   (ASCE_P|ASCE_R)
 #define BROADCAST_PFRA BROADCAST_PFRA_G
 
 #else
@@ -460,7 +525,6 @@ z900_ ## _name
     (_pointer)->storkeys[((_addr)>>STORAGE_KEY_PAGESHIFT)|1]
 #endif
 
-
 #define XSTORE_INCREMENT_SIZE   0x00100000
 #define XSTORE_PAGESHIFT    12
 #define XSTORE_PAGESIZE     4096
@@ -470,5 +534,202 @@ z900_ ## _name
 #else
  #define XSTORE_PAGEMASK    0x7FFFF000
 #endif
+
+/* Macros for accelerated lookup */
+#undef SPACE_BIT
+#undef AR_BIT
+#undef PRIMARY_SPACE_MODE
+#undef SECONDARY_SPACE_MODE
+#undef ACCESS_REGISTER_MODE
+#undef HOME_SPACE_MODE
+#undef AEA_MODE
+#undef SET_AEA_COMMON
+#undef SET_AEA_MODE
+#undef _CASE_AR_SET_AEA_MODE
+#undef _CASE_DAS_SET_AEA_MODE
+#undef _CASE_HOME_SET_AEA_MODE
+#undef TEST_SET_AEA_MODE
+#undef SET_AEA_AR
+#undef MADDR
+
+
+#if defined(FEATURE_DUAL_ADDRESS_SPACE) && defined(FEATURE_LINKAGE_STACK)
+  #define SET_AEA_COMMON(_regs) \
+  do { \
+    (_regs)->aea_common[1]  = ((_regs)->CR(1)  & ASD_PRIVATE) == 0; \
+    (_regs)->aea_common[7]  = ((_regs)->CR(7)  & ASD_PRIVATE) == 0; \
+    (_regs)->aea_common[13] = ((_regs)->CR(13) & ASD_PRIVATE) == 0; \
+  } while (0)
+#elif defined(FEATURE_DUAL_ADDRESS_SPACE)
+  #define SET_AEA_COMMON(_regs) \
+  do { \
+    (_regs)->aea_common[1]  = ((_regs)->CR(1)  & ASD_PRIVATE) == 0; \
+    (_regs)->aea_common[7]  = ((_regs)->CR(7)  & ASD_PRIVATE) == 0; \
+  } while (0)
+#else
+  #define SET_AEA_COMMON(_regs) \
+  do { \
+    (_regs)->aea_common[1]  = ((_regs)->CR(1)  & ASD_PRIVATE) == 0; \
+  } while (0)
+#endif
+
+
+#if defined(FEATURE_DUAL_ADDRESS_SPACE) || defined(FEATURE_LINKAGE_STACK)
+  #define SPACE_BIT(p) \
+    (((p)->asc & BIT(PSW_SPACE_BIT)) != 0)
+  #define AR_BIT(p) \
+    (((p)->asc & BIT(PSW_AR_BIT)) != 0)
+  #define PRIMARY_SPACE_MODE(p) \
+    ((p)->asc == PSW_PRIMARY_SPACE_MODE)
+  #define SECONDARY_SPACE_MODE(p) \
+    ((p)->asc == PSW_SECONDARY_SPACE_MODE)
+  #define ACCESS_REGISTER_MODE(p) \
+    ((p)->asc == PSW_ACCESS_REGISTER_MODE)
+  #define HOME_SPACE_MODE(p) \
+    ((p)->asc == PSW_HOME_SPACE_MODE)
+  #define AEA_MODE(_regs) \
+    ( ( REAL_MODE(&(_regs)->psw) ? 0 : (((_regs)->psw.asc >> 6) + 1) ) \
+    | ( PER_MODE((_regs)) ? 0x40 : 0 ) \
+    )
+#else
+  #define SPACE_BIT(p) (0)
+  #define AR_BIT(p) (0)
+  #define PRIMARY_SPACE_MODE(p) (1)
+  #define SECONDARY_SPACE_MODE(p) (0)
+  #define ACCESS_REGISTER_MODE(p) (0)
+  #define HOME_SPACE_MODE(p) (0)
+  #define AEA_MODE(_regs) \
+    ( (REAL_MODE(&(_regs)->psw) ? 0 : 1 ) | (PER_MODE((_regs)) ? 0x40 : 0 ) )
+#endif
+
+#if defined(FEATURE_ACCESS_REGISTERS)
+  /*
+   * Update the aea_ar vector whenever an access register
+   * is changed and in armode
+   */
+  #define SET_AEA_AR(_regs, _arn) \
+  do \
+  { \
+    if (ACCESS_REGISTER_MODE(&(_regs)->psw) && (_arn) > 0) { \
+      if ((_regs)->AR((_arn)) == ALET_PRIMARY) \
+        (_regs)->aea_ar[(_arn)] = 1; \
+      else if ((_regs)->AR((_arn)) == ALET_SECONDARY) \
+        (_regs)->aea_ar[(_arn)] = 7; \
+      else \
+        (_regs)->aea_ar[(_arn)] = 0; \
+     } \
+  } while (0)
+#else
+  #define SET_AEA_AR(_regs, _arn)
+#endif
+
+
+/*
+ * Conditionally reset the aea_ar vector
+ */
+#define TEST_SET_AEA_MODE(_regs) \
+do \
+{ \
+  if ((_regs)->aea_mode != AEA_MODE((_regs))) { \
+    SET_AEA_MODE((_regs)); \
+  } \
+} while (0)
+
+
+ /*
+  * Reset aea_ar vector to indicate the appropriate
+  * control register:
+  *   0 - unresolvable (armode and alet is not 0 or 1)
+  *   1 - primary space
+  *   7 - secondary space
+  *  13 - home space
+  *  16 - real
+  */
+#if defined(FEATURE_ACCESS_REGISTERS)
+  #define _CASE_AR_SET_AEA_MODE(_regs) \
+    case 2: /* AR */ \
+      for(i = USE_INST_SPACE; i < 16; i++) \
+          (_regs)->aea_ar[i] = 1; \
+      for (i = 1; i < 16; i++) { \
+        if ((_regs)->AR(i) == ALET_SECONDARY) (_regs)->aea_ar[i] = 7; \
+        else if ((_regs)->AR(i) != ALET_PRIMARY) (_regs)->aea_ar[i] = 0; \
+      } \
+      break;
+#else
+  #define _CASE_AR_SET_AEA_MODE(_regs)
+#endif
+
+#if defined(FEATURE_DUAL_ADDRESS_SPACE)
+  #define _CASE_DAS_SET_AEA_MODE(_regs) \
+    case 3: /* SEC */ \
+      (_regs)->aea_ar[USE_INST_SPACE] = 1; \
+      for(i = 0; i < 16; i++) \
+          (_regs)->aea_ar[i] = 7; \
+      break;
+#else
+  #define _CASE_DAS_SET_AEA_MODE(_regs)
+#endif
+
+#if defined(FEATURE_LINKAGE_STACK)
+  #define _CASE_HOME_SET_AEA_MODE(_regs) \
+    case 4: /* HOME */ \
+      for(i = USE_INST_SPACE; i < 16; i++) \
+          (_regs)->aea_ar[i] = 13; \
+      break;
+#else
+  #define _CASE_HOME_SET_AEA_MODE(_regs)
+#endif
+
+#define SET_AEA_MODE(_regs) \
+do { \
+  int i; \
+  int inst_cr = (_regs)->aea_ar[USE_INST_SPACE]; \
+  BYTE oldmode = (_regs)->aea_mode; \
+  (_regs)->aea_mode = AEA_MODE((_regs)); \
+  switch ((_regs)->aea_mode & 0x0F) { \
+    case 1: /* PRIM */ \
+      for(i = USE_INST_SPACE; i < 16; i++) \
+          (_regs)->aea_ar[i] = 1; \
+      break; \
+    _CASE_AR_SET_AEA_MODE((_regs)) \
+    _CASE_DAS_SET_AEA_MODE((_regs)) \
+    _CASE_HOME_SET_AEA_MODE((_regs)) \
+    default: /* case 0: REAL */ \
+      for(i = USE_INST_SPACE; i < 16; i++) \
+          (_regs)->aea_ar[i] = CR_ASD_REAL; \
+  } \
+  if (inst_cr != (_regs)->aea_ar[USE_INST_SPACE]) \
+    INVALIDATE_AIA((_regs)); \
+  if ((oldmode & PSW_PERMODE) == 0 && ((_regs)->aea_mode & PSW_PERMODE) != 0) { \
+    INVALIDATE_AIA((_regs)); \
+    if (EN_IC_PER_SA((_regs))) \
+      ARCH_DEP(invalidate_tlb)((_regs),~(ACC_WRITE|ACC_CHECK)); \
+  } \
+} while (0)
+
+
+ /*
+  * Accelerated lookup
+  */
+#define MADDR(_addr, _arn, _regs, _acctype, _akey) \
+ ( \
+       likely((_regs)->aea_ar[(_arn)]) \
+   &&  likely( \
+              ((_regs)->CR((_regs)->aea_ar[(_arn)]) == (_regs)->tlb.TLB_ASD(TLBIX(_addr))) \
+           || ((_regs)->aea_common[(_regs)->aea_ar[(_arn)]] & (_regs)->tlb.common[TLBIX(_addr)]) \
+             ) \
+   &&  likely((_akey) == 0 || (_akey) == (_regs)->tlb.skey[TLBIX(_addr)]) \
+   &&  likely((((_addr) & TLBID_PAGEMASK) | (_regs)->tlbID) == (_regs)->tlb.TLB_VADDR(TLBIX(_addr))) \
+   &&  likely((_acctype) & (_regs)->tlb.acc[TLBIX(_addr)]) \
+   ? ( \
+       ((_acctype) & ACC_CHECK) ? \
+       (_regs)->dat.storkey = (_regs)->tlb.storkey[TLBIX(_addr)], \
+       MAINADDR((_regs)->tlb.main[TLBIX(_addr)], (_addr)) : \
+       MAINADDR((_regs)->tlb.main[TLBIX(_addr)], (_addr)) \
+     ) \
+   : ( \
+       ARCH_DEP(logical_to_main) ((_addr), (_arn), (_regs), (_acctype), (_akey)) \
+     ) \
+ )
 
 /* end of FEATURES.H */

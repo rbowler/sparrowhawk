@@ -1,4 +1,4 @@
-/* FEATCHK.H    (c) Copyright Jan Jaeger, 2000-2003          */
+/* FEATCHK.H    (c) Copyright Jan Jaeger, 2000-2004          */
 /*      Feature definition consistency checks            */
 
 /*-------------------------------------------------------------------*/
@@ -99,6 +99,10 @@
 
 #if defined(FEATURE_MESSAGE_SECURITY_ASSIST)
  #define _FEATURE_MESSAGE_SECURITY_ASSIST
+#endif
+
+#if defined(FEATURE_ASN_AND_LX_REUSE)
+ #define _FEATURE_ASN_AND_LX_REUSE
 #endif
 
 #undef _VSTORE_C_STATIC
@@ -275,6 +279,15 @@
  #error Expedited SIE Subset only supported with SIE
 #endif
 
+#if defined(FEATURE_ASN_AND_LX_REUSE) 
+ #if !defined(FEATURE_DUAL_ADDRESS_SPACE)
+  #error ASN-and-LX-Reuse requires Dual Address-Space feature
+ #endif
+ #if !defined(FEATURE_ESAME)
+  #error ASN-and-LX-Reuse is only supported with ESAME
+ #endif
+#endif
+ 
 #if defined(FEATURE_ESAME) \
  && defined(FEATURE_VECTOR_FACILITY)
  #error Vector Facility not supported in ESAME mode

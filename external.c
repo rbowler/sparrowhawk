@@ -1,8 +1,8 @@
-/* EXTERNAL.C   (c) Copyright Roger Bowler, 1999-2003                */
+/* EXTERNAL.C   (c) Copyright Roger Bowler, 1999-2004                */
 /*              ESA/390 External Interrupt and Timer                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements external interrupt, timer, and signalling  */
@@ -58,11 +58,7 @@ U32     i;                              /* Array subscript           */
 REGS   *realregs;                       /* Real REGS if guest        */
 REGS   *tregs;                          /* Target regs               */
 
-    realregs =
-#if defined(_FEATURE_SIE)
-               regs->sie_state ? regs->hostregs :
-#endif /*defined(_FEATURE_SIE)*/
-                                                  regs;
+    realregs = SIE_MODE(regs) ? regs->hostregs : regs;
 
     do {
         if (code)
@@ -72,18 +68,19 @@ REGS   *tregs;                          /* Target regs               */
                 ARCH_DEP(synchronize_broadcast) (realregs, 0, 0);
 
             /* Turn broadcast bit on for all started CPUs */
-            for (i = 0; i < MAX_CPU_ENGINES; i++)
-            {
-                tregs = sysblk.regs + i;
-                if (tregs->cpumask & sysblk.started_mask)
+            for (i = 0; i < MAX_CPU; i++)
+                if (IS_CPU_ONLINE(i))
                 {
-                    ON_IC_BROADCAST(tregs);
-                    sysblk.broadcast_count++;
+                    tregs = sysblk.regs[i];
+                    if ( test_bit(4, tregs->cpuad, &sysblk.started_mask) )
+                    {
+                        ON_IC_BROADCAST(tregs);
+                        sysblk.broadcast_count++;
+                    }
                 }
-            }
             sysblk.broadcast_code = code;
             sysblk.BROADCAST_PFRA = pfra;
-            WAKEUP_WAITING_CPUS(ALL_CPUS, CPUSTATE_STARTED);
+            WAKEUP_CPUS_MASK(sysblk.waiting_mask);
         }
 
         /* Perform the requested functions */
@@ -135,23 +132,20 @@ RADR    pfx;
 PSA     *psa;
 int     rc;
 
-    /* reset the cpuint indicator */
-    RESET_IC_CPUINT(regs);
-
 #if defined(_FEATURE_SIE)
     /* Set the main storage reference and change bits */
-    if(regs->sie_state
+    if(SIE_MODE(regs)
 #if defined(_FEATURE_EXPEDITED_SIE_SUBSET)
-                       && !(regs->siebk->s & SIE_S_EXP_TIMER)
+                       && !SIE_FEATB(regs, S, EXP_TIMER)
 #endif /*defined(_FEATURE_EXPEDITED_SIE_SUBSET)*/
 #if defined(_FEATURE_EXTERNAL_INTERRUPT_ASSIST)
-                       && !(regs->siebk->ec[0] & SIE_EC0_EXTA)
+                       && !SIE_FEATB(regs, EC0, EXTA)
 #endif
                                                             )
     {
         /* Point to SIE copy of PSA in state descriptor */
-        psa = (void*)(regs->hostregs->mainstor + regs->sie_state + SIE_IP_PSA_OFFSET);
-        STORAGE_KEY(regs->sie_state, regs->hostregs) |= (STORKEY_REF | STORKEY_CHANGE);
+        psa = (void*)(regs->hostregs->mainstor + SIE_STATE(regs) + SIE_IP_PSA_OFFSET);
+        STORAGE_KEY(SIE_STATE(regs), regs->hostregs) |= (STORKEY_REF | STORKEY_CHANGE);
     }
     else
 #endif /*defined(_FEATURE_SIE)*/
@@ -175,20 +169,18 @@ int     rc;
 
 #if defined(FEATURE_BCMODE)
     /* For ECMODE, store external interrupt code at PSA+X'86' */
-    if ( regs->psw.ecmode )
+    if ( ECMODE(&regs->psw) )
 #endif /*defined(FEATURE_BCMODE)*/
         STORE_HW(psa->extint,code);
 
-#if defined(_FEATURE_SIE)
-    if(!regs->sie_state
+    if ( !SIE_MODE(regs)
 #if defined(_FEATURE_EXPEDITED_SIE_SUBSET)
-                       || (regs->siebk->s & SIE_S_EXP_TIMER)
+                       || SIE_FEATB(regs, S, EXP_TIMER)
 #endif /*defined(_FEATURE_EXPEDITED_SIE_SUBSET)*/
 #if defined(_FEATURE_EXTERNAL_INTERRUPT_ASSIST)
-                       || (regs->siebk->ec[0] & SIE_EC0_EXTA)
+                       || SIE_FEATB(regs, EC0, EXTA)
 #endif
-                                                            )
-#endif /*defined(_FEATURE_SIE)*/
+       )
     {
         /* Store current PSW at PSA+X'18' */
         ARCH_DEP(store_psw) (regs, psa->extold);
@@ -205,18 +197,16 @@ int     rc;
 
     release_lock(&sysblk.intlock);
 
-#if defined(_FEATURE_SIE)
-    if(regs->sie_state
+    if ( SIE_MODE(regs)
 #if defined(_FEATURE_EXPEDITED_SIE_SUBSET)
-                       && !(regs->siebk->s & SIE_S_EXP_TIMER)
+                       && !SIE_FEATB(regs, S, EXP_TIMER)
 #endif /*defined(_FEATURE_EXPEDITED_SIE_SUBSET)*/
 #if defined(_FEATURE_EXTERNAL_INTERRUPT_ASSIST)
-                       && !(regs->siebk->ec[0] & SIE_EC0_EXTA)
+                       && !SIE_FEATB(regs, EC0, EXTA)
 #endif
-                                                            )
+       )
         longjmp (regs->progjmp, SIE_INTERCEPT_EXT);
     else
-#endif /*defined(_FEATURE_SIE)*/
         longjmp (regs->progjmp, SIE_NO_INTERCEPT);
 
 } /* end function external_interrupt */
@@ -243,11 +233,7 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 U16     cpuad;                          /* Originating CPU address   */
 
     /* External interrupt if console interrupt key was depressed */
-    if (OPEN_IC_INTKEY(regs)
-#if defined(_FEATURE_SIE)
-        && !regs->sie_state
-#endif /*!defined(_FEATURE_SIE)*/
-        )
+    if ( OPEN_IC_INTKEY(regs) && !SIE_MODE(regs) )
     {
         logmsg (_("HHCCP023I External interrupt: Interrupt key\n"));
 
@@ -264,7 +250,7 @@ U16     cpuad;                          /* Originating CPU address   */
         /* Find first CPU which generated a malfunction alert */
         for (cpuad = 0; regs->malfcpu[cpuad] == 0; cpuad++)
         {
-            if (cpuad >= MAX_CPU_ENGINES)
+            if (cpuad >= MAX_CPU)
             {
                 OFF_IC_MALFALT(regs);
                 return;
@@ -284,7 +270,7 @@ U16     cpuad;                          /* Originating CPU address   */
         /* Reset emergency signal pending flag if there are
            no other CPUs which generated emergency signal */
         OFF_IC_MALFALT(regs);
-        while (++cpuad < MAX_CPU_ENGINES)
+        while (++cpuad < MAX_CPU)
         {
             if (regs->malfcpu[cpuad])
             {
@@ -304,7 +290,7 @@ U16     cpuad;                          /* Originating CPU address   */
         /* Find first CPU which generated an emergency signal */
         for (cpuad = 0; regs->emercpu[cpuad] == 0; cpuad++)
         {
-            if (cpuad >= MAX_CPU_ENGINES)
+            if (cpuad >= MAX_CPU)
             {
                 OFF_IC_EMERSIG(regs);
                 return;
@@ -324,7 +310,7 @@ U16     cpuad;                          /* Originating CPU address   */
         /* Reset emergency signal pending flag if there are
            no other CPUs which generated emergency signal */
         OFF_IC_EMERSIG(regs);
-        while (++cpuad < MAX_CPU_ENGINES)
+        while (++cpuad < MAX_CPU)
         {
             if (regs->emercpu[cpuad])
             {
@@ -383,8 +369,7 @@ U16     cpuad;                          /* Originating CPU address   */
 #if defined(FEATURE_INTERVAL_TIMER)
     if (OPEN_IC_ITIMER(regs)
 #if defined(_FEATURE_SIE)
-        && !(regs->sie_state
-          && (regs->siebk->m & SIE_M_ITMOF))
+        && !(SIE_STATB(regs, M, ITMOF))
 #endif /*defined(_FEATURE_SIE)*/
         )
     {
@@ -425,11 +410,7 @@ U16     cpuad;                          /* Originating CPU address   */
 #endif /*FEATURE_INTERVAL_TIMER*/
 
     /* External interrupt if service signal is pending */
-    if (OPEN_IC_SERVSIG(regs)
-#if defined(_FEATURE_SIE)
-        && !regs->sie_state
-#endif /*!defined(_FEATURE_SIE)*/
-        )
+    if ( OPEN_IC_SERVSIG(regs) && !SIE_MODE(regs) )
     {
         /* Apply prefixing if the parameter is a storage address */
         if ( (sysblk.servparm & SERVSIG_ADDR) )
@@ -452,9 +433,6 @@ U16     cpuad;                          /* Originating CPU address   */
         /* Generate service signal interrupt */
         ARCH_DEP(external_interrupt) (EXT_SERVICE_SIGNAL_INTERRUPT, regs);
     }
-
-    /* reset the cpuint indicator */
-    RESET_IC_CPUINT(regs);
 
 } /* end function perform_external_interrupt */
 

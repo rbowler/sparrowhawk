@@ -1,4 +1,4 @@
-/* DEVTYPE.H    (c) Copyright Jan Jaeger, 1999-2003                  */
+/* DEVTYPE.H    (c) Copyright Jan Jaeger, 1999-2004                  */
 /*              Hercules Device Definitions                          */
 
 #if !defined(_DEVICES_H)
@@ -19,6 +19,11 @@ typedef struct _DEVHND {
         DEVUF *used;                   /* Device Query used          */
         DEVRR *reserve;                /* Device Reserve             */
         DEVRR *release;                /* Device Release             */
+	DEVIM immed;                   /* Immediate CCW Codes        */
+	DEVSA *siga_r;                 /* Signal Adapter Input       */
+	DEVSA *siga_w;                 /* Signal Adapter Output      */
+        DEVSR *hsuspend;               /* Hercules suspend           */
+        DEVSR *hresume;                /* Hercules resume            */
 } DEVHND;
 
 

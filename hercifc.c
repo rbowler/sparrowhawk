@@ -2,8 +2,8 @@
 // Hercules Interface Configuration Program
 // ====================================================================
 //
-// Copyright    (C) Copyright Roger Bowler, 2000-2003
-//              (C) Copyright James A. Pierson, 2002-2003
+// Copyright    (C) Copyright Roger Bowler, 2000-2004
+//              (C) Copyright James A. Pierson, 2002-2004
 //
 // Based on code originally written by Roger Bowler
 // Modified to communicate via unix sockets.
@@ -39,9 +39,9 @@ int   extgui=0;
 
 int main( int argc, char **argv )
 {
-    BYTE*       pszProgName  = NULL;    // Name of this program
-    BYTE*       pOp          = NULL;    // Operation text
-    BYTE*       pIF          = NULL;    // -> interface name
+    char*       pszProgName  = NULL;    // Name of this program
+    char*       pOp          = NULL;    // Operation text
+    char*       pIF          = NULL;    // -> interface name
     void*       pArg         = NULL;    // -> ifreq or rtentry 
     CTLREQ      ctlreq;                 // Request Buffer
     int         sockfd;                 // Socket descriptor
@@ -101,12 +101,6 @@ int main( int argc, char **argv )
             pIF  = ctlreq.iru.ifreq.ifr_name;
             break;
 
-        case SIOCSIFNETMASK:
-            pOp  = "SIOCSIFNETMASK";
-            pArg = &ctlreq.iru.ifreq;
-            pIF  = ctlreq.iru.ifreq.ifr_name;
-            break;
-
         case SIOCSIFFLAGS:
             pOp  = "SIOCSIFFLAGS";
             pArg = &ctlreq.iru.ifreq;
@@ -119,12 +113,6 @@ int main( int argc, char **argv )
             pIF  = ctlreq.iru.ifreq.ifr_name;
             break;
 
-        case SIOCSIFHWADDR:
-            pOp  = "SIOCSIFHWADDR";
-            pArg = &ctlreq.iru.ifreq;
-            pIF  = ctlreq.iru.ifreq.ifr_name;
-            break;
-
         case SIOCADDMULTI:
             pOp  = "SIOCADDMULTI";
             pArg = &ctlreq.iru.ifreq;
@@ -133,6 +121,19 @@ int main( int argc, char **argv )
 
         case SIOCDELMULTI:
             pOp  = "SIOCDELMULTI";
+            pArg = &ctlreq.iru.ifreq;
+            pIF  = ctlreq.iru.ifreq.ifr_name;
+            break;
+
+#if !defined(__APPLE__)
+        case SIOCSIFNETMASK:
+            pOp  = "SIOCSIFNETMASK";
+            pArg = &ctlreq.iru.ifreq;
+            pIF  = ctlreq.iru.ifreq.ifr_name;
+            break;
+
+        case SIOCSIFHWADDR:
+            pOp  = "SIOCSIFHWADDR";
             pArg = &ctlreq.iru.ifreq;
             pIF  = ctlreq.iru.ifreq.ifr_name;
             break;
@@ -150,6 +151,7 @@ int main( int argc, char **argv )
             pIF  = ctlreq.szIFName;
             ctlreq.iru.rtentry.rt_dev = ctlreq.szIFName;
             break;
+#endif /* !defined(__APPLE__) */
 
         case CTLREQ_OP_DONE:
             close( STDIN_FILENO  );
@@ -159,7 +161,7 @@ int main( int argc, char **argv )
 
         default:
             sprintf( szMsgBuffer,
-                     _("HHCIF004W %s: Unknown request: %8.8X.\n"),
+                     _("HHCIF004W %s: Unknown request: %8.8lX.\n"),
                      pszProgName, ctlreq.iCtlOp );
             
             write( STDERR_FILENO, szMsgBuffer, strlen( szMsgBuffer ) );
@@ -167,8 +169,14 @@ int main( int argc, char **argv )
             continue;
         }
             
-        rc = ioctl( sockfd, ctlreq.iCtlOp, pArg );
+        sprintf( szMsgBuffer,
+                 _("HHCIF006I %s: Doing %s on %s\n"),
+                 pszProgName, pOp, pIF);
+
+        write( STDERR_FILENO, szMsgBuffer, strlen( szMsgBuffer ) );
     
+        rc = ioctl( sockfd, ctlreq.iCtlOp, pArg );
+
         if( rc < 0 )
         {
             sprintf( szMsgBuffer,

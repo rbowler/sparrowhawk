@@ -149,7 +149,7 @@
     The legal status outside the USA, where something like public domain or
     software without copyright doesn't exist, is "copyrighted software
     provided at no charge". It is a known fact that vendors like
-    <em>amdahl</em>, <em>Hitachi</em>, <em>Nixdorf</em> and others
+    <em>Amdahl</em>, <em>Hitachi</em>, <em>Nixdorf</em> and others
     modified those operating systems, and distributed them as their own
     OS for their own hardware, without asking IBM for permission. But
     law had been changed over that time, so its not clear if the same
@@ -162,12 +162,12 @@
     upgrade.
 </P>
 <P>
-    OS/390 and other ESA versions of OS's are definitely licensed to a
+    OS/390 and other ESA operating systems are definitely licensed to a
     particular machine. Therefore, in practice you cannot run any classic
     ESA operating system on your PC unless you can obtain a license from
     IBM allowing you to do so. It is believed that there are, however,
-    three legal ways you could run OS/390, VM/ESA, or VSE/ESA under
-    Hercules:
+    four ways you could run z/OS, OS/390, VM/ESA, or VSE/ESA under
+    Hercules using currently available licenses:
 </P>
 <OL>
 <LI>
@@ -182,6 +182,10 @@
     license (but I really don't recommend depending on Hercules to be your
     disaster recovery solution!).
 </LI>
+<LI>
+    Using the IBM OS/390 or z/OS DemoPkg, which is available only to
+    IBM employees and IBM Business Partners.
+</LI>
 </OL>
 <H4><A NAME="2.03">2.03</A>
     What other programs will run under Hercules?
@@ -192,7 +196,7 @@
     standalone programs are known to run well. I can particularly recommend
     Jan Jaeger's excellent standalone editor (ZZSA) which is included in the
     Hercules distribution, or it can be downloaded from
-<A HREF="http://home.worldonline.nl/~jjaeger">http://home.worldonline.nl/~jjaeger</A>;
+<A HREF="http://www.cbttape.org/~jjaeger">http://www.cbttape.org/~jjaeger</A>;
     I use it regularly to look at DASD while debugging an OS installation,
     which is just what it's designed to do. Note: ZZSA runs in ESA/390 mode.
     See Jan Jaeger's website for more information and special logon procedures.
@@ -321,7 +325,7 @@
     Consoles and Terminals for Hercules" with this MVT version.
 </P>
 <UL><LI>
-<A HREF="http://users.ox.ac.uk/~mbeattie/hercules/3270.html">http://users.ox.ac.uk/~mbeattie/hercules/3270.html</A>
+<A HREF="http://www.clueful.co.uk/mbeattie/hercules/3270.html">http://www.clueful.co.uk/mbeattie/hercules/3270.html</A>
 </LI></UL>
 <P>
     The N.U.D.E guides can be found at :
@@ -651,6 +655,7 @@
 
 <UL>
 <LI>Access-List-Controlled Protection </LI>
+<LI>Binary Floating-Point instructions </LI>
 <LI>Branch and Set Authority </LI>
 <LI>Broadcasted Purging </LI>
 <LI>Checksum instruction </LI>
@@ -688,13 +693,17 @@
 <LI>Cancel I/O Facility</LI>
 <li>Program Event Recording</li>
 <li>Guest PER enhancement</li>
+<li>HFP Multiply-and-Add/Subtract Facility</li>
+<li>Message Security Assist</li>
+<li>Long-Displacement Facility</li>
+<li>DAT-Enhancement Facility</li>
+<li>Extended-Translation Facility 3</li>
+<li>ASN-and-LX-Reuse Facility</li>
+<li>List-Directed Initial Program Load</li>
 </ul>
 <P>The following standard feature has not yet been implemented: </P>
 <UL>
 <LI>Clear I/O (full functionality for S/370) </LI></ul>
-<p>The following standard feature has been partially implemented: </p>
-<ul>
-<LI>Binary Floating-Point instructions </LI></UL>
 <P>The following optional features have been partially implemented: </P>
 <UL>
 <LI>Channel-Subsystem Call </LI>
@@ -739,7 +748,7 @@ maintainer)
 <li><A HREF="http://www.cbttape.org/~jjaeger">Jan Jaeger</A>
 <li><A HREF="http://www.bsp-gmbh.com/hercules">Volker Bandke</A>
 <li>David Barth
-<li><A HREF="http://users.ox.ac.uk/~mbeattie/hercules/">Malcolm Beattie</A>
+<li><A HREF="http://www.clueful.co.uk/mbeattie/hercules/">Malcolm Beattie</A>
 <li>Mario Bezzi
 <li>Vic Cross
 <li>Juergen Dobrinski
@@ -775,11 +784,11 @@ maintainer)
 <li>John Summerfield
 <li>Mark Szlaga
 <li>Adam Thornton
-<li><A HREF="http://home.sprintmail.com/~dtrout/Hercules/hercgui-index.html">"Fish" (David B. Trout)</A>
+<li><A HREF="http://www.softdevlabs.com/Hercules/hercgui-index.html">"Fish" (David B. Trout)</A>
 <li>Ronen Tzur
 <li>Bernard van der Helm
 <li>Kris Van Hees
-<li>Ivan Warren
+<li><A HREF="http://www.ivansoftware.com/">Ivan Warren</A>
 <li>Matt Zimmerman
 </sl></p>
 <P>And thanks for support and encouragement from:</P>
@@ -791,6 +800,7 @@ maintainer)
 <li>Rick Fochtman
 <li>Alex Friis
 <li>Sam Golob
+<li>Achim Haag
 <li>Cory Hamasaki
 <li>Tony Harminc
 <li>Richard Higson
@@ -861,7 +871,7 @@ lists, please let me (Jay Maynard) know.</P>
 </P>
 <P>
 <small>
-Last updated 3 October 2003
+Last updated 28 Nov 2004
 </small>
 </P>
 </BODY>

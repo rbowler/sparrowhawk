@@ -1,6 +1,6 @@
 /* TIMER.C   */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 
 #include "hercules.h"
 
@@ -96,18 +96,17 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
     obtain_lock (&sysblk.intlock);
 
     /* Check for [1] clock comparator, [2] cpu timer, and
-       [3] interval timer interrupts for each CPU.
-         Note that we do *not* check for the macro
-         _FEATURE_CPU_RECONFIG because we are not running
-         in an ARCH_DEP context */
-    for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
+     * [3] interval timer interrupts for each CPU.
+     */
+    for (cpu = 0; cpu < HI_CPU; cpu++)
     {
         /* Ignore this CPU if it is not started */
-        if((sysblk.regs[cpu].cpumask & sysblk.started_mask) == 0)
+        if (!IS_CPU_ONLINE(cpu)
+         || CPUSTATE_STOPPED == sysblk.regs[cpu]->cpustate)
             continue;
 
         /* Point to the CPU register context */
-        regs = sysblk.regs + cpu;
+        regs = sysblk.regs[cpu];
 
         /*-------------------------------------------*
          * [1] Check for clock comparator interrupt  *
@@ -117,7 +116,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
             if (!IS_IC_CLKC(regs))
             {
                 ON_IC_CLKC(regs);
-                intmask |= regs->cpumask;
+                intmask |= BIT(regs->cpuad);
             }
         }
         else if (IS_IC_CLKC(regs))
@@ -131,7 +130,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
             if((sysblk.todclk + regs->guestregs->todoffset) > regs->guestregs->clkc)
             {
                 ON_IC_CLKC(regs->guestregs);
-                intmask |= regs->cpumask;
+                intmask |= BIT(regs->cpuad);
             }
             else
                 OFF_IC_CLKC(regs->guestregs);
@@ -142,7 +141,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
          * [2] Decrement the CPU timer for each CPU  *
          *-------------------------------------------*/
 
-        (S64)regs->ptimer -= (S64)sysblk.todclock_diff << 8;
+        regs->ptimer = (S64)regs->ptimer - (S64)(sysblk.todclock_diff << 8);
 
         /* Set interrupt flag if the CPU timer is negative */
         if ((S64)regs->ptimer < 0)
@@ -150,7 +149,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
             if (!IS_IC_PTIMER(regs))
             {
                 ON_IC_PTIMER(regs);
-                intmask |= regs->cpumask;
+                intmask |= BIT(regs->cpuad);
             }
         }
         else if(IS_IC_PTIMER(regs))
@@ -161,13 +160,13 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
         if(regs->sie_active)
         {
             /* Decrement the guest CPU timer */
-            (S64)regs->guestregs->ptimer -= (S64)sysblk.todclock_diff << 8;
+            regs->guestregs->ptimer = (S64)regs->guestregs->ptimer - (S64)(sysblk.todclock_diff << 8);
 
             /* Set interrupt flag if the CPU timer is negative */
             if ((S64)regs->guestregs->ptimer < 0)
             {
                 ON_IC_PTIMER(regs->guestregs);
-                intmask |= regs->cpumask;
+                intmask |= BIT(regs->cpuad);
             }
             else
                 OFF_IC_PTIMER(regs->guestregs);
@@ -217,7 +216,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
                 regs->rtimerint=1;      /* To resolve concurrent V/R Int Timer Ints */
 #endif
                 ON_IC_ITIMER(regs);
-                intmask |= regs->cpumask;
+                intmask |= BIT(regs->cpuad);
             }
 #if defined(_FEATURE_ECPSVM)
 #if defined(OPTION_MIPS_COUNTING)
@@ -227,7 +226,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
 #endif /* OPTION_MIPS_COUNTING */
             {
                 ON_IC_ITIMER(regs);
-                intmask |= regs->cpumask;
+                intmask |= BIT(regs->cpuad);
             }
 #endif /* _FEATURE_ECPSVM */
 
@@ -237,8 +236,8 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
         /* When running under SIE also update the SIE copy */
         if(regs->sie_active)
         {
-            if((regs->guestregs->siebk->m & SIE_M_370)
-              && !(regs->guestregs->siebk->m & SIE_M_ITMOF))
+            if(SIE_STATB(regs->guestregs, M, 370)
+              && SIE_STATNB(regs->guestregs, M, ITMOF))
             {
                 /* Decrement the location 80 timer */
                 FETCH_FW(itimer,regs->guestregs->sie_psa->inttimer);
@@ -256,7 +255,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
                 if (itimer < 0 && olditimer >= 0)
                 {
                     ON_IC_ITIMER(regs->guestregs);
-                    intmask |= regs->cpumask;
+                    intmask |= BIT(regs->cpuad);
                 }
             }
         }
@@ -267,7 +266,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
 
     /* If a timer interrupt condition was detected for any CPU
        then wake up those CPUs if they are waiting */
-    WAKEUP_WAITING_CPUS (intmask, CPUSTATE_STARTED);
+    WAKEUP_CPUS_MASK (intmask);
 
     release_lock(&sysblk.intlock);
 
@@ -303,7 +302,7 @@ struct  timeval tv;                     /* Structure for gettimeofday
     /* Set root mode in order to set priority */
     SETMODE(ROOT);
 
-    /* Set CPU thread priority */
+    /* Set timer thread priority */
     if (setpriority(PRIO_PROCESS, 0, sysblk.todprio))
         logmsg (_("HHCTT001W Timer thread set priority %d failed: %s\n"),
                 sysblk.todprio, strerror(errno));
@@ -327,7 +326,7 @@ struct  timeval tv;                     /* Structure for gettimeofday
     sysblk.todclock_init = sysblk.todclock_init * 1000000 + tv.tv_usec;
 #endif /*OPTION_TODCLOCK_DRAG_FACTOR*/
 
-    while (sysblk.numcpu)
+    while (sysblk.cpus)
     {
         /* Obtain the TOD lock */
         obtain_lock (&sysblk.todlock);
@@ -350,10 +349,9 @@ struct  timeval tv;                     /* Structure for gettimeofday
         msecctr += (int)(diff/4096000);
         if (msecctr > 999)
         {
-            /* Access the diffent register contexts with the intlock held */
-            obtain_lock(&sysblk.intlock);
-
-            /* Get current time, we may have had to wait for the intlock */
+            U32  mipsrate = 0;   /* (total for ALL CPUs together) */
+            U32  siosrate = 0;   /* (total for ALL CPUs together) */
+            /* Get current time */
             then = now;
             gettimeofday (&tv, NULL);
             now = (U64)tv.tv_sec;
@@ -363,18 +361,30 @@ struct  timeval tv;                     /* Structure for gettimeofday
 #if defined(OPTION_SHARED_DEVICES)
             sysblk.shrdrate = sysblk.shrdcount;
             sysblk.shrdcount = 0;
+            siosrate = sysblk.shrdrate;
 #endif
 
-            for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
+            for (cpu = 0; cpu < HI_CPU; cpu++)
             {
-                /* Point to the CPU register context */
-                regs = sysblk.regs + cpu;
+                if (!IS_CPU_ONLINE(cpu))
+                    continue;
 
-                /* 0% if no cpu thread or first time thru */
-                if (regs->cputid == 0 || then == 0 || regs->waittod == 0)
+                obtain_lock (&sysblk.cpulock[cpu]);
+
+                if (!IS_CPU_ONLINE(cpu))
+                {
+                    release_lock(&sysblk.cpulock[cpu]);
+                    continue;
+                }
+
+                regs = sysblk.regs[cpu];
+
+                /* 0% if first time thru */
+                if (then == 0 || regs->waittod == 0)
                 {
                     regs->mipsrate = regs->siosrate = 0;
                     regs->cpupct = 0.0;
+                    release_lock(&sysblk.cpulock[cpu]);
                     continue;
                 }
 
@@ -383,13 +393,18 @@ struct  timeval tv;                     /* Structure for gettimeofday
                     ((regs->instcount - regs->prevcount)*1000) / interval;
                 regs->siosrate = regs->siocount;
 
+                /* Total for ALL CPUs together */
+                mipsrate += regs->mipsrate;
+                siosrate += regs->siosrate;
+
                 /* Save the instruction counter */
                 regs->prevcount = regs->instcount;
+                regs->siototal += regs->siocount;
                 regs->siocount = 0;
 
                 /* Calculate CPU busy percentage */
                 waittime = regs->waittime;
-                if ((sysblk.waitmask & regs->cpumask) != 0)
+                if ( test_bit (4, regs->cpuad, &sysblk.waiting_mask) )
                     waittime += now - regs->waittod;
                 regs->cpupct = ((interval - waittime)*1.0) / (interval*1.0);
 
@@ -397,13 +412,16 @@ struct  timeval tv;                     /* Structure for gettimeofday
                 regs->waittime = 0;
                 regs->waittod = now;
 
+                release_lock(&sysblk.cpulock[cpu]);
+
             } /* end for(cpu) */
+
+            /* Total for ALL CPUs together */
+            sysblk.mipsrate = mipsrate;
+            sysblk.siosrate = siosrate;
 
             /* Reset the millisecond counter */
             msecctr = 0;
-
-            /* Release the intlock */
-            release_lock(&sysblk.intlock);
 
         } /* end if(msecctr) */
 #endif /*OPTION_MIPS_COUNTING*/
@@ -420,6 +438,8 @@ struct  timeval tv;                     /* Structure for gettimeofday
     } /* end while */
 
     logmsg (_("HHCTT003I Timer thread ended\n"));
+
+    sysblk.todtid = 0;
 
     return NULL;
 

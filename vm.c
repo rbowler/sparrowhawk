@@ -1,14 +1,14 @@
-/* VM.C         (c) Copyright Roger Bowler, 2000-2003                */
+/* VM.C         (c) Copyright Roger Bowler, 2000-2004                */
 /*              ESA/390 VM Diagnose calls and IUCV instruction       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements miscellaneous diagnose functions           */
 /* described in SC24-5670 VM/ESA CP Programming Services             */
 /* and SC24-5855 VM/ESA CP Diagnosis Reference.                      */
 /*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -26,7 +26,6 @@
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
 /*-------------------------------------------------------------------*/
-#define SPACE   ((BYTE)' ')
 
 /*-------------------------------------------------------------------*/
 /* Synchronous Block I/O Parameter List                              */
@@ -626,7 +625,7 @@ U32             idaddr;                 /* Address of storage operand*/
 U32             idlen;                  /* Length of storage operand */
 BYTE            buf[40];                /* Extended identification   */
 struct passwd  *ppwd;                   /* Pointer to passwd entry   */
-BYTE           *puser;                  /* Pointer to user name      */
+char           *puser;                  /* Pointer to user name      */
 BYTE            c;                      /* Character work area       */
 
     /* Load storage operand address from R1 register */
@@ -740,9 +739,9 @@ BYTE    cmdflags;                       /* Command flags             */
 #define CMDFLAGS_RESPONSE       0x40    /* Return response in buffer */
 #define CMDFLAGS_REQPASSW       0x20    /* Prompt for password       */
 #define CMDFLAGS_RESERVED       0x1F    /* Reserved bits, must be 0  */
-BYTE    buf[256];                       /* Command buffer (ASCIIZ)   */
-BYTE    resp[256];                      /* Response buffer (ASCIIZ)  */
-BYTE    *dresp;                         /* Default response (ASCIIZ) */
+char    buf[256];                       /* Command buffer (ASCIIZ)   */
+char    resp[256];                      /* Response buffer (ASCIIZ)  */
+char    *dresp;                         /* Default response (ASCIIZ) */
 int     freeresp;                       /* Flag to free resp bfr     */
 int     j,k;
 
@@ -769,7 +768,7 @@ int     j,k;
     if (cmdlen == 0)
     {
         regs->cpustate = CPUSTATE_STOPPED;
-        ON_IC_CPU_NOT_STARTED(regs);
+        ON_IC_INTERRUPT(regs);
         return 0;
     }
 
@@ -898,18 +897,18 @@ time_t  timeval;                        /* Current time              */
 struct  tm *tmptr;                      /* -> Current time structure */
 U32     bufadr;                         /* Real addr of data buffer  */
 U32     buflen;                         /* Length of data buffer     */
-BYTE    buf[64];                        /* Response buffer           */
+char    buf[64];                        /* Response buffer           */
 BYTE    dattim[64];                     /* Date and time (EBCDIC)    */
 #define DIAG_DATEFMT_SHORT      0x80    /* Date format mm/dd/yy      */
 #define DIAG_DATEFMT_FULL       0x40    /* Date format mm/dd/yyyy    */
 #define DIAG_DATEFMT_ISO        0x20    /* Date format yyyy-mm-dd    */
 #define DIAG_DATEFMT_SYSDFLT    0x10    /* System-wide default format*/
-static  BYTE timefmt[]="%m/%d/%y%H:%M:%S%m/%d/%Y%Y-%m-%d";
+static  char timefmt[]="%m/%d/%y%H:%M:%S%m/%d/%Y%Y-%m-%d";
 
     /* Get the current date and time in EBCDIC */
     timeval = time(NULL);
     tmptr = localtime(&timeval);
-    strftime(dattim, sizeof(dattim), timefmt, tmptr);
+    strftime((char *)dattim, sizeof(dattim), timefmt, tmptr);
     for (i = 0; dattim[i] != '\0'; i++)
         dattim[i] = host_to_guest(dattim[i]);
 
@@ -1073,7 +1072,7 @@ DEF_INST(inter_user_communication_vehicle)
 int     b2;                             /* Effective addr base       */
 VADR    effective_addr2;                /* Effective address         */
 
-    S(inst, execflag, regs, b2, effective_addr2);
+    S(inst, regs, b2, effective_addr2);
 #if defined(FEATURE_ECPSVM)
     if(ecpsvm_doiucv(regs,b2,effective_addr2)==0)
     {
@@ -1086,7 +1085,7 @@ VADR    effective_addr2;                /* Effective address         */
        the IUCV instruction generates an operation exception
        rather then a priviliged operation exception when
        executed in problem state                                 *JJ */
-    if ( regs->psw.prob )
+    if ( PROBSTATE(&regs->psw) )
         ARCH_DEP(program_interrupt) (regs, PGM_OPERATION_EXCEPTION);
 
     SIE_INTERCEPT(regs);

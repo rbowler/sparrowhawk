@@ -1,5 +1,5 @@
 /*-------------------------------------------------------------------
- * Shared device support           (c)Copyright Greg Smith, 2002-2003
+ * Shared device support           (c)Copyright Greg Smith, 2002-2004
  *
  * Shared device support allows multiple Hercules instances to share
  * devices.  The device will be `local' to one instance and `remote'
@@ -317,6 +317,7 @@
 #define _HERCULES_SHARED_H 1
 
 #define OPTION_SHARED_DEVICES
+#undef FBA_SHARED
 
   /*
    * Differing version levels are not compatible
@@ -454,8 +455,8 @@ do { \
 } while (0)
 
 int    shared_update_notify (DEVBLK *dev, int block);
-int    shared_ckd_init (DEVBLK *dev, int argc, BYTE *argv[] );
-int    shared_fba_init (DEVBLK *dev, int argc, BYTE *argv[] );
+int    shared_ckd_init (DEVBLK *dev, int argc, char *argv[] );
+int    shared_fba_init (DEVBLK *dev, int argc, char *argv[] );
 void  *shared_server (void *arg);
 int    shared_cmd(int argc, char *argv[], char *cmdline);
 
@@ -468,10 +469,14 @@ static int     shared_ckd_read (DEVBLK *dev, int trk, BYTE *unitstat);
 static int     shared_ckd_write (DEVBLK *dev, int trk, int off,
                       BYTE *buf, int len, BYTE *unitstat);
 static int     shared_ckd_trklen (DEVBLK *dev, BYTE *buf);
+
+#if defined(FBA_SHARED)
 static int     shared_fba_read (DEVBLK *dev, int blkgrp, BYTE *unitstat);
 static int     shared_fba_write (DEVBLK *dev, int blkgrp, int off,
                       BYTE *buf, int len, BYTE *unitstat);
 static int     shared_fba_blkgrp_len (DEVBLK *dev, int blkgrp);
+#endif
+
 static int     shared_used (DEVBLK *dev);
 static void    shared_reserve (DEVBLK *dev);
 static void    shared_release (DEVBLK *dev);
@@ -488,7 +493,7 @@ static void    serverRequest (DEVBLK *dev, int ix, BYTE *hdr, BYTE *buf);
 static int     serverLocate (DEVBLK *dev, int id, int *avail);
 static int     serverId (DEVBLK *dev);
 static int     serverError (DEVBLK *dev, int ix, int code, int status,
-                      BYTE *msg);
+                      char *msg);
 static int     serverSend (DEVBLK *dev, int ix, BYTE *hdr, BYTE *buf,
                       int buflen);
 static int     serverDisconnectable (DEVBLK *dev, int ix);

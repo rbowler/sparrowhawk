@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //         fthreads.c           Fish's WIN32 version of pthreads
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2001-2003. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2001-2004. Released under the Q Public License
 // (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
@@ -924,9 +924,11 @@ FTHREAD, *PFTHREAD;
 FTHREAD*  FindFTHREAD ( DWORD dwThreadID )
 {
     FTHREAD*     pFTHREAD;
-    LIST_ENTRY*  pListEntry = ThreadListHead.Flink;
+    LIST_ENTRY*  pListEntry;
 
     LockThreadsList();      // (acquire thread list lock)
+
+    pListEntry = ThreadListHead.Flink;
 
     while ( pListEntry != &ThreadListHead )
     {
@@ -966,7 +968,6 @@ DWORD  __stdcall  FTWin32ThreadFunc
     PFT_THREAD_FUNC        pfnTheirThreadFunc;
     void*                  pvTheirThreadArgs;
     FTHREAD*               pFTHREAD;
-    void*                  ExitVal;
 
     pCallTheirThreadParms = (FT_CALL_THREAD_PARMS*) pMyArgs;
 
@@ -1429,6 +1430,18 @@ fthread_t  fthread_self ()
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
+// Compare thread-ids...
+
+int  fthread_equal
+(
+    fthread_t  pdwThreadID_1,
+    fthread_t  pdwThreadID_2
+)
+{
+    return ( pdwThreadID_1 == pdwThreadID_2 );
+}
+
+////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////
 // Initialize a lock...
@@ -1443,7 +1456,7 @@ int  fthread_mutex_init
     const fthread_mutexattr_t*  pFT_MUTEX_ATTR
 )
 {
-    DWORD  dwMutexType;
+    DWORD  dwMutexType = 0;
 
     if ( !pFTUSER_MUTEX )
         return RC(EINVAL);      // (invalid mutex ptr)

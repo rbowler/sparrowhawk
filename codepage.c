@@ -1,4 +1,4 @@
-/* CODEPAGE.C   (c) Copyright Jan Jaeger, 1999-2003                  */
+/* CODEPAGE.C   (c) Copyright Jan Jaeger, 1999-2004                  */
 /*              Code Page conversion                                 */
 
 #include "hercules.h"
@@ -245,7 +245,7 @@ size_t nibytes, nobytes;
 
     ibytes = &ibyte; obytes = &obyte;
     nibytes = nobytes = 1;
-    if(iconv(codepage_g2h, (const char**)&ibytes, &nibytes, &obytes, &nobytes) == (size_t)(-1) )
+    if(iconv(codepage_g2h, (char**)&ibytes, &nibytes, &obytes, &nobytes) == (size_t)(-1) )
     
     {
         iconv_close(codepage_g2h);
@@ -256,7 +256,7 @@ size_t nibytes, nobytes;
 
     ibytes = &ibyte; obytes = &obyte;
     nibytes = nobytes = 1;
-    if(iconv(codepage_h2g, (const char**)&ibytes, &nibytes, &obytes, &nobytes) == (size_t)(-1) )
+    if(iconv(codepage_h2g, (char**)&ibytes, &nibytes, &obytes, &nobytes) == (size_t)(-1) )
     
     {
         iconv_close(codepage_g2h);
@@ -296,17 +296,17 @@ unsigned char host_to_guest (unsigned char byte)
 #if defined(HAVE_ICONV)
 char obyte;
 char *gbyte = &obyte;
-char *hbyte = &byte;
+char *hbyte = (char *)&byte;
 size_t inbytes = 1, outbytes = 1;
 
     if(codepage_h2g)
     {
-        iconv(codepage_h2g, (const char**)&hbyte, &inbytes, &gbyte, &outbytes);
+        iconv(codepage_h2g, &hbyte, &inbytes, &gbyte, &outbytes);
         return obyte;
     }
     else
 #endif /*defined(HAVE_ICONV)*/
-        return codepage_conv->h2g[byte];
+        return (unsigned char)codepage_conv->h2g[(unsigned int)byte];
 }
 
 
@@ -315,12 +315,12 @@ unsigned char guest_to_host (unsigned char byte)
 #if defined(HAVE_ICONV)
 char obyte;
 char *hbyte = &obyte;
-char *gbyte = &byte;
+char *gbyte = (char *)&byte;
 size_t inbytes = 1, outbytes = 1;
 
     if(codepage_g2h)
     {
-        iconv(codepage_g2h, (const char**)&gbyte, &inbytes, &hbyte, &outbytes);
+        iconv(codepage_g2h, &gbyte, &inbytes, &hbyte, &outbytes);
         return obyte;
     }
     else

@@ -1,8 +1,8 @@
-/* HERCULES.H   (c) Copyright Roger Bowler, 1999-2003                */
+/* HERCULES.H   (c) Copyright Roger Bowler, 1999-2004                */
 /*              ESA/390 Emulator Header File                         */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 
 /*-------------------------------------------------------------------*/
 /* Header file containing Hercules internal data structures          */
@@ -18,6 +18,10 @@
 #include <config.h>
 #endif
 
+#if !defined(_GNU_SOURCE)
+ #define _GNU_SOURCE                   /* required by strsignal() *JJ */
+#endif
+
 #define UNREFERENCED(x)     ((x)=(x))
 #define UNREFERENCED_370(x) ((x)=(x))
 #define UNREFERENCED_390(x) ((x)=(x))
@@ -28,15 +32,10 @@
 
 #include "feature.h"
 
-#if !defined(_GNU_SOURCE)
- #define _GNU_SOURCE                   /* required by strsignal() *JJ */
-#endif
 
 #include "cpuint.h"
 
 #if !defined(_HERCULES_H)
-
-
 
 #include <unistd.h>
 #include <stdio.h>
@@ -133,7 +132,7 @@ int setresgid(gid_t rgid, gid_t egid, gid_t sgid);
 
 #include "dasdtab.h"
 
-#define SPACE           ((BYTE)' ')
+#define SPACE           ' '
 
 /*-------------------------------------------------------------------*/
 /* Windows 32-specific definitions                                   */
@@ -152,15 +151,15 @@ int setresgid(gid_t rgid, gid_t egid, gid_t sgid);
 
 #ifdef WIN32
 #define socklen_t int
-#if !defined(OPTION_FTHREADS)
-/* fake loading of <windows.h> and <winsock.h> so we can use         */
-/* pthreads-win32 instead of the native cygwin pthreads support,     */
-/* which doesn't include pthread_cond bits                           */
-#define _WINDOWS_
-#define _WINSOCKAPI_
-#define _WINDOWS_H
-#define _WINSOCK_H
-#endif // !defined(OPTION_FTHREADS)
+//   #if !defined(OPTION_FTHREADS)
+//   /* fake loading of <windows.h> and <winsock.h> so we can use         */
+//   /* pthreads-win32 instead of the native cygwin pthreads support,     */
+//   /* which doesn't include pthread_cond bits                           */
+//   #define _WINDOWS_
+//   #define _WINSOCKAPI_
+//   #define _WINDOWS_H
+//   #define _WINSOCK_H
+//   #endif // !defined(OPTION_FTHREADS)
 #define HANDLE int
 #define DWORD int       /* will be undefined later */
 #endif
@@ -302,9 +301,10 @@ typedef fthread_attr_t    ATTR;
                                                fthread_attr_setdetachstate((pat),FTHREAD_CREATE_JOINABLE)
 #define join_thread(tid,pcode)                 fthread_join((tid),(pcode))
 #define detach_thread(tid)                     fthread_detach((tid))
-#define signal_thread(tid,signo)               fthread_kill((tid),(signo))
+#define signal_thread(tid,signo)               herc_kill((tid),(signo))
 #define thread_id()                            fthread_self()
 #define exit_thread(exitvar_ptr)               fthread_exit((exitvar_ptr))
+#define equal_threads(tid1,tid2)               fthread_equal((tid1),(tid2))
 #else // !defined(OPTION_FTHREADS)
 typedef pthread_t                       TID;
 typedef pthread_mutex_t                 LOCK;
@@ -351,14 +351,12 @@ typedef void*THREAD_FUNC(void*);
         pthread_create(ptid,pat,(THREAD_FUNC*)&(fn),arg)
 #define exit_thread(_code) \
         pthread_exit((_code))
-//#if !defined(WIN32) // (there's no reason for this that I can see! pthreads supports thread signaling! Fish)
 #define signal_thread(tid,signo) \
-        pthread_kill(tid,signo)
-//#else // defined(WIN32)
-//#define signal_thread(tid,signo)
-//#endif // !defined(WIN32)
+        herc_kill(tid,signo)
 #define thread_id() \
         pthread_self()
+#define equal_threads(tid1,tid2) \
+        pthread_equal(tid1,tid2)
 #endif // defined(OPTION_FTHREADS)
 
 #ifdef OPTION_PTTRACE
@@ -403,19 +401,43 @@ typedef void*THREAD_FUNC(void*);
         ptt_pthread_detach((tid),__FILE__,__LINE__)
 #undef  signal_thread
 #define signal_thread(tid,signo) \
-        ptt_pthread_kill(tid,signo,__FILE__,__LINE__)
+        herc_kill(tid,signo,__FILE__,__LINE__)
 #endif /* OPTION_PTTRACE */
 
 /* Pattern for displaying the thread_id */
 #define TIDPAT "%8.8lX"
 
 /*-------------------------------------------------------------------*/
+/* sleep for as long as we like                                      */
+/*-------------------------------------------------------------------*/
+#define SLEEP(_n) \
+ do { \
+   unsigned int rc = (_n); \
+   while (rc) \
+     if ((rc = sleep (rc))) \
+       sched_yield(); \
+ } while (0)
+
+/*-------------------------------------------------------------------*/
+/* likely and unlikely                                               */
+/*-------------------------------------------------------------------*/
+#undef likely
+#undef unlikely
+#if __GNUC__ >= 3
+#define likely(_c)   __builtin_expect((_c),1)
+#define unlikely(_c) __builtin_expect((_c),0)
+#else
+#define likely(_c)   (_c)
+#define unlikely(_c) (_c)
+#endif
+
+/*-------------------------------------------------------------------*/
 /* Prototype definitions for device handler functions                */
 /*-------------------------------------------------------------------*/
 struct _DEVBLK;
-typedef int DEVIF (struct _DEVBLK *dev, int argc, BYTE *argv[]);
-typedef void DEVQF (struct _DEVBLK *dev, BYTE **class, int buflen,
-        BYTE *buffer);
+typedef int DEVIF (struct _DEVBLK *dev, int argc, char *argv[]);
+typedef void DEVQF (struct _DEVBLK *dev, char **class, int buflen,
+        char *buffer);
 typedef void DEVXF (struct _DEVBLK *dev, BYTE code, BYTE flags,
         BYTE chained, U16 count, BYTE prevcode, int ccwseq,
         BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual);
@@ -426,6 +448,13 @@ typedef int DEVWF (struct _DEVBLK *dev, int rcd, int off, BYTE *buf, int len,
         BYTE *unitstat);
 typedef int DEVUF (struct _DEVBLK *dev);
 typedef void DEVRR (struct _DEVBLK *dev);
+typedef int DEVSA (struct _DEVBLK *dev, U32 qmask);
+typedef int DEVSR (struct _DEVBLK *dev, void *file);
+
+/*-------------------------------------------------------------------*/
+/* Device handler description structures                             */
+/*-------------------------------------------------------------------*/
+typedef BYTE *DEVIM; /* Immediate CCW Codes Table */
 
 /*-------------------------------------------------------------------*/
 /* Structure definition for the Vector Facility                      */
@@ -442,6 +471,7 @@ typedef struct _VFREGS {                /* Vector Facility Registers*/
 #endif /*defined(_FEATURE_VECTOR_FACILITY)*/
 
 typedef void    (*SIEFN) ();
+typedef void    (ATTR_REGPARM(2)(*FUNC))();
 
 /*-------------------------------------------------------------------*/
 /* Structure definition for CPU register context                     */
@@ -449,7 +479,28 @@ typedef void    (*SIEFN) ();
 typedef struct _REGS {                  /* Processor registers       */
 #define HDL_VERS_REGS   "2.17"          /* Internal Version Number   */
 #define HDL_SIZE_REGS   sizeof(REGS)
+
         int     arch_mode;              /* Architectural mode        */
+
+        DW      px;                     /* Prefix register           */
+        PSW     psw;                    /* Program status word       */
+        DW      gr[16];                 /* General registers         */
+
+        DW      cr_special[1];          /* Negative Index into cr    */
+#define CR_ASD_REAL     -1
+        DW      cr[16];                 /* Control registers         */
+#define CR_ALB_OFFSET   16
+        DW      alb[16];                /* Accesslist Lookaside cr   */
+
+        U32     ar[16];                 /* Access registers          */
+        U32     fpr[32];                /* Floating point registers  */
+        U32     fpc;                    /* IEEE Floating Point
+                                                    Control Register */
+        U32     dxc;                    /* Data exception code       */
+        DW      mc;                     /* Monitor Code              */
+        DW      ea;                     /* Exception address         */
+        DW      et;                     /* Execute Target address    */
+
         U64     ptimer;                 /* CPU timer                 */
         U64     clkc;                   /* 0-7=Clock comparator epoch,
                                            8-63=Comparator bits 0-55 */
@@ -459,31 +510,13 @@ typedef struct _REGS {                  /* Processor registers       */
         U32     mipsrate;               /* Instructions/millisecond  */
         U32     siocount;               /* SIO/SSCH counter          */
         U32     siosrate;               /* IOs per second            */
+        U64     siototal;               /* Total SIO/SSCH count      */
         double  cpupct;                 /* Percent CPU busy          */
         U64     waittod;                /* Time of day last wait (us)*/
         U64     waittime;               /* Wait time (us) in interval*/
-#ifdef WIN32
         struct  timeval lasttod;        /* Last gettimeofday         */
-#endif
-        int     tlbID;                  /* Validation identifier     */
-        TLBE    tlb[TLBN];              /* Translation lookaside buf */
-        TID     cputid;                 /* CPU thread identifier     */
-        DW      gr[16];                 /* General registers         */
-        DW      cr[16];                 /* Control registers         */
-        DW      px;                     /* Prefix register           */
-        DW      mc;                     /* Monitor Code              */
-        DW      ea;                     /* Exception address         */
-        DW      et;                     /* Execute Target address    */
-        DW      ai;                     /* Absolute instruction addr */
-        DW      vi;                     /* Virtual instruction addr  */
-        DW      ae[256];                /* Absolute effective addr   */
-        DW      ve[256];                /* Virtual effective addr    */
-        BYTE    aekey[256];             /* Storage Key               */
-        int     aeacc[256];             /* Access type               */
-        int     aearn[256];             /* Access register used      */
-        int     aenoarn;                /* 1=Not in AR mode          */
-        int     aearvalid;              /* 1=Address(es) in AR mode  */
-        U32     aeID;                   /* Validation identifier     */
+        DAT     dat;                    /* Fields for DAT use        */
+
 #define GR_G(_r) gr[(_r)].D
 #define GR_H(_r) gr[(_r)].F.H.F          /* Fullword bits 0-31       */
 #define GR_HHH(_r) gr[(_r)].F.H.H.H.H    /* Halfword bits 0-15       */
@@ -504,44 +537,44 @@ typedef struct _REGS {                  /* Processor registers       */
 #define CR_LHH(_r) cr[(_r)].F.L.H.H.H    /* Halfword bits 32-47      */
 #define CR_LHHCH(_r) cr[(_r)].F.L.H.H.B.H   /* Character, bits 32-39 */
 #define CR_LHL(_r) cr[(_r)].F.L.H.L.H    /* Halfword low, bits 48-63 */
-#define MC_G    mc.D
-#define MC_L    mc.F.L.F
-#define EA_G    ea.D
-#define EA_L    ea.F.L.F
-#define ET_G    et.D
-#define ET_L    et.F.L.F
-#define PX_G    px.D
-#define PX_L    px.F.L.F
-#define AI_G    ai.D
-#define AI_L    ai.F.L.F
-#define VI_G    vi.D
-#define VI_L    vi.F.L.F
-#define AE_G(_r)    ae[(_r)].D
-#define AE_L(_r)    ae[(_r)].F.L.F
-#define VE_G(_r)    ve[(_r)].D
-#define VE_L(_r)    ve[(_r)].F.L.F
-        U32     ar[16];                 /* Access registers          */
-#define AR(_r)  ar[(_r)]
-        U32     fpr[32];                /* Floating point registers  */
-// #if defined(FEATURE_BINARY_FLOATING_POINT)
-        U32     fpc;                    /* IEEE Floating Point
-                                                    Control Register */
-        U32     dxc;                    /* Data exception code       */
-// #endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
+#define CR_SIZE (sizeof(DW)*16)
+#define MC_G      mc.D
+#define MC_L      mc.F.L.F
+#define EA_G      ea.D
+#define EA_L      ea.F.L.F
+#define ET_G      et.D
+#define ET_L      et.F.L.F
+#define PX_G      px.D
+#define PX_L      px.F.L.F
+#define AIV_G     aiv.D
+#define AIV_L     aiv.F.L.F
+#define AIE_G     aie.D
+#define AIE_L     aie.F.L.F
+#define AR(_r)    ar[(_r)]
+
         U16     chanset;                /* Connected channel set     */
         U32     todpr;                  /* TOD programmable register */
         U16     monclass;               /* Monitor event class       */
         U16     cpuad;                  /* CPU address for STAP      */
-        PSW     psw;                    /* Program status word       */
         BYTE    excarid;                /* Exception access register */
         BYTE    opndrid;                /* Operand access register   */
-        DWORD   exinst;                 /* Target of Execute (EX)    */
-
+        BYTE    exinst[8];              /* Target of Execute (EX)    */
         BYTE   *mainstor;               /* -> Main storage           */
         BYTE   *storkeys;               /* -> Main storage key array */
         RADR    mainlim;                /* Central Storage limit or  */
                                         /* guest storage limit (SIE) */
 #if defined(_FEATURE_SIE)
+     /* These notes are to try and maintain my own sanity ... Greg
+      * `sie_state' has the real address of the SIEBK
+      * `siebk' has the mainstor address of the SIEBK
+      * `sie_active' is 1 in hostregs if SIE is executing
+      *         and the current register context is `guestregs'
+      * `sie_mode' is 1 in guestregs always
+      * `hostregs' is always NULL in hostregs
+      *         (sysblk.regs[i]->hostregs == NULL)
+      * `guestregs' is always NULL in guestregs
+      *         (sysblk.regs[i]->guestregs->guestregs == NULL)
+      */
         RADR    sie_state;              /* Address of the SIE state
                                            descriptor block or 0 when
                                            not running under SIE     */
@@ -553,6 +586,7 @@ typedef struct _REGS {                  /* Processor registers       */
         struct _REGS *guestregs;        /* Pointer to the guest
                                            register context          */
         PSA_3XX *sie_psa;               /* PSA of guest CPU          */
+        RADR    sie_px;                 /* Host address of guest px  */
         RADR    sie_mso;                /* Main Storage Origin       */
         RADR    sie_xso;                /* eXpanded Storage Origin   */
         RADR    sie_xsl;                /* eXpanded Storage Limit    */
@@ -561,6 +595,7 @@ typedef struct _REGS {                  /* Processor registers       */
         S64     sie_epoch;              /* TOD offset in state desc. */
         unsigned int
                 sie_active:1,           /* SIE active (host only)    */
+                sie_mode:1,             /* Running under SIE (guest) */
                 sie_pref:1;             /* Preferred-storage mode    */
 #endif /*defined(_FEATURE_SIE)*/
 
@@ -571,21 +606,28 @@ typedef struct _REGS {                  /* Processor registers       */
 // #endif /*defined(FEATURE_PER)*/
 
         BYTE    cpustate;               /* CPU stopped/started state */
-        unsigned int                    /* Flags                     */
-                cpuonline:1,            /* 1=CPU is online           */
-                loadstate:1,            /* 1=CPU is in load state    */
-                checkstop:1,            /* 1=CPU is checkstop-ed     */
+        unsigned int                    /* Flags (cpu thread only)   */
                 mainlock:1,             /* 1=Mainlock held           */
+                todlock:1,              /* 1=TODlock held            */
+                checkstop:1,            /* 1=CPU is checkstop-ed     */
+                hostint:1,              /* 1=Host generated interrupt*/
+                execflag:1,             /* 1=EXecuted instruction    */
+                instvalid:1,            /* 1=Inst field is valid     */
+                permode:1;              /* 1=PER active              */
+        unsigned int                    /* Flags (intlock serialized)*/
+                dummy:1,                /* 1=Dummy regs structure    */
+                configured:1,           /* 1=CPU is online           */
+                loadstate:1,            /* 1=CPU is in load state    */
                 ghostregs:1,            /* 1=Ghost registers (panel) */
-                hostint:1,              /* Host generated interrupt  */
+                invalidate:1,           /* 1=Do AIA/AEA invalidation */
+                tracing:1,              /* 1=Trace is active         */
                 sigpreset:1,            /* 1=SIGP cpu reset received */
                 sigpireset:1,           /* 1=SIGP initial cpu reset  */
                 vtimerint:1,            /* 1=Virtual Timer interrupt */
                                         /* (ECPS:VM)                 */
-                rtimerint:1,            /* 1=Concurrent Virt & Real  */
+                rtimerint:1;            /* 1=Concurrent Virt & Real  */
                                         /* Interval Timer interrupts */
                                         /* (ECPS:VM Only)            */
-                instvalid:1;            /* 1=Inst field is valid     */
         U32     ints_state;             /* CPU Interrupts Status     */
         U32     ints_mask;              /* Respective Interrupts Mask*/
         BYTE    malfcpu                 /* Malfuction alert flags    */
@@ -593,10 +635,13 @@ typedef struct _REGS {                  /* Processor registers       */
         BYTE    emercpu                 /* Emergency signal flags    */
                     [MAX_CPU_ENGINES];  /* for each CPU (1=pending)  */
         U16     extccpu;                /* CPU causing external call */
-        BYTE    inst[6];                /* Last-fetched instruction  */
-        BYTE    *ip;                    /* Pointer to Last-fetched
-                                           instruction (inst might
-                                           not be uptodate           */
+        BYTE    inst[8];                /* Fetched instruction when
+                                           instruction crosses a page
+                                           boundary                  */
+        BYTE    *ip;                    /* Pointer to last-fetched
+                                           instruction (either inst
+                                           above or in mainstor      */
+        BYTE    *invalidate_main;       /* Mainstor addr to invalidat*/
 #if defined(_FEATURE_VECTOR_FACILITY)
         VFREGS *vf;                     /* Vector Facility           */
 #endif /*defined(_FEATURE_VECTOR_FACILITY)*/
@@ -607,7 +652,51 @@ typedef struct _REGS {                  /* Processor registers       */
         jmp_buf archjmp;                /* longjmp destination to
                                            switch architecture mode  */
         COND    intcond;                /* CPU interrupt condition   */
-        U32     cpumask;                /* CPU mask                  */
+
+     /* Opcode table pointers                                        */
+
+        FUNC   *s370_opcode_table;
+        FUNC   *s370_opcode_a4xx, *s370_opcode_a5xx, *s370_opcode_a6xx,
+               *s370_opcode_b2xx, *s370_opcode_e4xx, *s370_opcode_e5xx,
+               *s370_opcode_e6xx, *s370_opcode_edxx;
+
+        FUNC   *s390_opcode_table;
+        FUNC   *s390_opcode_01xx, *s390_opcode_a4xx, *s390_opcode_a5xx,
+               *s390_opcode_a6xx, *s390_opcode_a7xx, *s390_opcode_b2xx,
+               *s390_opcode_b3xx, *s390_opcode_b9xx, *s390_opcode_c0xx,
+               *s390_opcode_e3xx, *s390_opcode_e4xx, *s390_opcode_e5xx,
+               *s390_opcode_ebxx, *s390_opcode_ecxx, *s390_opcode_edxx;
+
+        FUNC   *z900_opcode_table;
+        FUNC   *z900_opcode_01xx, *z900_opcode_a5xx, *z900_opcode_a7xx,
+               *z900_opcode_b2xx, *z900_opcode_b3xx, *z900_opcode_b9xx,
+               *z900_opcode_c0xx, *z900_opcode_e3xx, *z900_opcode_e5xx,
+               *z900_opcode_ebxx, *z900_opcode_ecxx, *z900_opcode_edxx;
+
+     /* AIA - Instruction fetch accelerator                          */
+
+        BYTE   *aim;                    /* Mainstor address          */
+        DW      aiv;                    /* Virtual address           */
+        DW      aie;                    /* Virtual page end address  */
+
+     /* Mainstor address lookup accelerator                          */
+
+        BYTE    aea_mode;               /* aea addressing mode       */
+
+        int     aea_ar_special[5];      /* Negative index into ar    */
+        int     aea_ar[16];             /* arn to cr number          */
+
+        BYTE    aea_common_special[1];  /* real asd                  */
+        BYTE    aea_common[16];         /* 1=asd is not private      */
+        BYTE    aea_common_alb[16];     /* alb pseudo registers      */
+
+        BYTE    aea_aleprot[16];        /* ale protected             */
+
+     /* TLB - Translation lookaside buffer                           */
+
+        unsigned int tlbID;             /* Validation identifier     */
+        TLB     tlb;                    /* Translation lookaside buf */
+
     } REGS;
 
 /* Definitions for CPU state */
@@ -615,30 +704,47 @@ typedef struct _REGS {                  /* Processor registers       */
 #define CPUSTATE_STOPPING       2       /* CPU is stopping           */
 #define CPUSTATE_STARTED        4       /* CPU is started            */
 #define CPUSTATE_STARTING       8       /* CPU is starting           */
-#define CPUSTATE_ALL          255       /* All CPU states            */
 
-#define ALL_CPUS                0xffffffff
+#define IS_CPU_ONLINE(_cpu) \
+  (sysblk.regs[(_cpu)] != NULL)
+
+#if defined(_FEATURE_CPU_RECONFIG)
+ #define MAX_CPU MAX_CPU_ENGINES
+#else
+ #define MAX_CPU sysblk.numcpu
+#endif
+
+#define HI_CPU sysblk.hicpu
 
 /* Macros to signal interrupt condition to a CPU[s] */
-#define WAKEUP_CPU(cpu) signal_condition(&sysblk.regs[(cpu)].intcond)
-#define WAKEUP_WAITING_CPU(mask,statemask) \
- do { int i; \
-   for (i = 0; i < MAX_CPU_ENGINES; i++) \
-     if ((sysblk.regs[i].cpustate & (statemask)) \
-      && (sysblk.regs[i].cpumask  & (mask)) \
-      && (sysblk.regs[i].cpumask  & sysblk.waitmask)) \
-      { \
-        signal_condition(&sysblk.regs[i].intcond); \
-        break; \
-      } \
- } while(0)
-#define WAKEUP_WAITING_CPUS(mask,statemask) \
- do { int i; \
-   for (i = 0; i < MAX_CPU_ENGINES; i++) \
-     if ((sysblk.regs[i].cpustate & (statemask)) \
-      && (sysblk.regs[i].cpumask  & (mask)) \
-      && (sysblk.regs[i].cpumask  & sysblk.waitmask)) \
-        signal_condition(&sysblk.regs[i].intcond); \
+#define WAKEUP_CPU(_regs) \
+ do { \
+   signal_condition(&(_regs)->intcond); \
+ } while (0)
+
+#define WAKEUP_CPU_MASK(_mask) \
+ do { \
+   int i; \
+   U32 mask = (_mask); \
+   for (i = 0; mask; i++) { \
+     if (mask & 1) \
+     { \
+       signal_condition(&sysblk.regs[i]->intcond); \
+       break; \
+     } \
+     mask >>= 1; \
+   } \
+ } while (0)
+
+#define WAKEUP_CPUS_MASK(_mask) \
+ do { \
+   int i; \
+   U32 mask = (_mask); \
+   for (i = 0; mask; i++) { \
+     if (mask & 1) \
+       signal_condition(&sysblk.regs[i]->intcond); \
+     mask >>= 1; \
+   } \
  } while (0)
 
 /* Macros to queue/dequeue a device on the I/O interrupt queue */
@@ -654,7 +760,7 @@ typedef struct _REGS {                  /* Processor registers       */
      (_io)->priority = (_io)->dev->priority; \
    } \
    ON_IC_IOPENDING; \
-   WAKEUP_WAITING_CPU (ALL_CPUS, CPUSTATE_STARTED); \
+   WAKEUP_CPU_MASK (sysblk.waiting_mask); \
  } while (0)
 
 #define DEQUEUE_IO_INTERRUPT(_io) \
@@ -706,9 +812,7 @@ typedef struct _SYSBLK {
                                            8-63=TOD clock bits 0-55  */
         S64     todoffset;              /* Difference in microseconds
                                            between TOD and Unix time */
-// #ifdef OPTION_TODCLOCK_DRAG_FACTOR
         U64     todclock_init;          /* TOD clock value at start  */
-// #endif /* OPTION_TODCLOCK_DRAG_FACTOR */
         U64     todclock_prev;          /* TOD clock previous value  */
         U64     todclock_diff;          /* TOD clock difference      */
         LOCK    todlock;                /* TOD clock update lock     */
@@ -717,19 +821,22 @@ typedef struct _SYSBLK {
         struct timeval   lasttod;       /* Last gettimeofday         */
 #endif
         TID     wdtid;                  /* Thread-id for watchdog    */
-        BYTE    loadparm[8];            /* IPL load parameter        */
         U16     ipldev;                 /* IPL device                */
-        U16     iplcpu;                 /* IPL cpu                   */
-        U16     numcpu;                 /* Number of CPUs installed  */
-        REGS    regs[MAX_CPU_ENGINES];  /* Registers for each CPU    */
+        int     iplcpu;                 /* IPL cpu                   */
+        int     numcpu;                 /* Number of CPUs installed  */
+        int     numvec;                 /* Number vector processors  */
+        int     maxcpu;                 /* Max number of CPUs        */
+        int     cpus;                   /* Number CPUs configured    */
+        int     hicpu;                  /* Hi cpu + 1 configured     */
+        COND    cpucond;                /* CPU config/deconfig cond  */
+        LOCK    cpulock[MAX_CPU_ENGINES];  /* CPU lock               */
+        TID     cputid[MAX_CPU_ENGINES];   /* CPU thread identifiers */
+        REGS   *regs[MAX_CPU_ENGINES+1];   /* Registers for each CPU */
 #if defined(_FEATURE_VECTOR_FACILITY)
         VFREGS  vf[MAX_CPU_ENGINES];    /* Vector Facility           */
 #endif /*defined(_FEATURE_VECTOR_FACILITY)*/
 #if defined(_FEATURE_SIE)
-        REGS    sie_regs[MAX_CPU_ENGINES];  /* SIE copy of regs      */
-// #if defined(FEATURE_REGION_RELOCATE)
         ZPBLK   zpb[FEATURE_SIE_MAXZONES];  /* SIE Zone Parameter Blk*/
-// #endif /*defined(FEATURE_REGION_RELOCATE)*/
 #endif /*defined(_FEATURE_SIE)*/
 #if defined(OPTION_FOOTPRINT_BUFFER)
         REGS    footprregs[MAX_CPU_ENGINES][OPTION_FOOTPRINT_BUFFER];
@@ -741,6 +848,12 @@ typedef struct _SYSBLK {
         ATTR    detattr;                /* Detached thread attribute */
         TID     cnsltid;                /* Thread-id for console     */
         TID     socktid;                /* Thread-id for sockdev     */
+#if defined( OPTION_WAKEUP_SELECT_VIA_PIPE )
+        int     cnslwpipe;              /* Console signaling pipe Wr */
+        int     cnslrpipe;              /* Console signaling pipe Rd */
+        int     sockwpipe;              /* Sockdev signaling pipe Wr */
+        int     sockrpipe;              /* Sockdev signaling pipe Rd */
+#endif
         RADR    mbo;                    /* Measurement block origin  */
         BYTE    mbk;                    /* Measurement block key     */
         int     mbm;                    /* Measurement block mode    */
@@ -749,6 +862,10 @@ typedef struct _SYSBLK {
         int     toddrag;                /* TOD clock drag factor     */
         int     panrate;                /* Panel refresh rate        */
         int     npquiet;                /* New Panel quiet indicator */
+#if defined(OPTION_SCSI_TAPE)
+        int     auto_scsi_mount_secs;   /* Check for SCSI tape mount
+                                           frequency; 0 == disabled  */
+#endif
         struct _DEVBLK *firstdev;       /* -> First device block     */
 #if defined(OPTION_FAST_DEVLOOKUP)
         struct _DEVBLK ***devnum_fl;    /* 1st level table for fast  */
@@ -779,10 +896,13 @@ typedef struct _SYSBLK {
                 inststop:1,             /* 1 = stop on program check */ /*VMA*/
                 vmactive:1,             /* 1 = vma active            */ /*VMA*/
                 mschdelay:1,            /* 1 = delay MSCH instruction*/ /*LNX*/
-                shutdown:1;             /* 1 = shutdown requested    */
+                shutdown:1,             /* 1 = shutdown requested    */
+                main_clear:1,           /* 1 = mainstor is cleared   */
+                xpnd_clear:1;           /* 1 = xpndstor is cleared   */
         U32     ints_state;             /* Common Interrupts Status  */
-        U32     waitmask;               /* Mask for waiting CPUs     */
-        U32     started_mask;           /* Mask for started CPUs     */
+        U32     config_mask;            /* Configured CPUs           */
+        U32     started_mask;           /* Started CPUs              */
+        U32     waiting_mask;           /* Waiting CPUs              */
         int     broadcast_code;         /* Broadcast code            */
 #define BROADCAST_PTLB  1               /* Broadcast purge tlb       */
 #define BROADCAST_PALB  2               /* Broadcast purge alb       */
@@ -792,7 +912,7 @@ typedef struct _SYSBLK {
 #define BROADCAST_PFRA_L broadcast_pfra.F.L.F
         int     broadcast_count;        /* Broadcast CPU count       */
         COND    broadcast_cond;         /* Broadcast condition       */
-        U64     breakaddr;              /* Breakpoint address        */
+        U64     breakaddr[2];           /* Breakpoint addresses      */
 #ifdef FEATURE_ECPSVM
 //
         /* ECPS:VM */
@@ -823,14 +943,15 @@ typedef struct _SYSBLK {
         int     cpuprio;                /* CPU thread priority       */
         int     devprio;                /* Device thread priority    */
         int     pgmprdos;               /* Program product OS flag   */
-// #if defined(OPTION_HTTP_SERVER)
         TID     httptid;                /* HTTP listener thread id   */
         U16     httpport;               /* HTTP port number or zero  */
         int     httpauth;               /* HTTP auth required flag   */
         char   *httpuser;               /* HTTP userid               */
         char   *httppass;               /* HTTP password             */
         char   *httproot;               /* HTTP root                 */
-// #endif /*defined(OPTION_HTTP_SERVER)*/
+#if defined(_FEATURE_ASN_AND_LX_REUSE)
+        int     asnandlxreuse;          /* ASN And LX Reuse enable   */
+#endif
 #if defined(OPTION_SHARED_DEVICES)
         TID     shrdtid;                /* Shared device listener    */
         U16     shrdport;               /* Shared device server port */
@@ -900,6 +1021,8 @@ typedef struct _SYSBLK {
         U32     siosrate;               /* IOs per second            */
 #endif /*defined(OPTION_MIPS_COUNTING)*/
 
+        REGS    dummyregs;              /* Regs for unconfigured CPU */
+
     } SYSBLK;
 
 /* Definitions for OS tailoring - msb eq mon event, lsb eq oper exc. */
@@ -967,6 +1090,14 @@ LIST_ENTRY, *PLIST_ENTRY;
 
 struct _DEVBLK;             // (forward reference)
 
+typedef struct _DEVGRP      // Device Group
+{
+    int members;            // number of member devices in group
+    int acount;             // number of allocated members in group
+    void *grp_data;         // group dependent data (generic)
+    struct _DEVBLK *memdev[];  // member devices
+} DEVGRP;
+
 typedef struct _bind_struct
 {
     LIST_ENTRY bind_link;   // (just a link in the chain)
@@ -1006,6 +1137,7 @@ typedef struct _DEVBLK {
 #define HDL_SIZE_DEVBLK   sizeof(DEVBLK)
         struct _DEVBLK *nextdev;        /* -> next device block      */
         LOCK    lock;                   /* Device block lock         */
+        int     allocated;              /* Device block free/in use  */
 
         /*  device identification                                    */
 
@@ -1016,6 +1148,12 @@ typedef struct _DEVBLK {
                                            device is connected S/370 */
         char    *typname;               /* Device type name          */
 
+        int    member;                  /* Group member number       */
+        DEVGRP *group;                  /* Device Group              */
+
+        int     argc;                   /* Init number arguments     */
+        char    **argv;                 /* Init arguments            */
+
         /*  Storage accessible by device                             */
 
         BYTE   *mainstor;               /* -> Main storage           */
@@ -1024,9 +1162,9 @@ typedef struct _DEVBLK {
                                         /* guest storage limit (SIE) */
 
 #if defined(WIN32)
-        BYTE    filename[1024];         /* Windows pathname          */
+        char    filename[1024];         /* Windows pathname          */
 #else
-        BYTE    filename[256];          /* Unix file name            */
+        char    filename[256];          /* Unix file name            */
 #endif
 
         /*  device i/o fields...                                     */
@@ -1084,6 +1222,12 @@ typedef struct _DEVBLK {
         BYTE    prevcode;               /* Previous CCW opcode       */
         int     ccwseq;                 /* CCW sequence number       */
 
+        U32     ccwaddr;
+        U16     idapmask;
+        BYTE    idawfmt;
+        BYTE    ccwfmt;
+        BYTE    ccwkey;
+
         /*  device handler function pointers...                      */
 
         struct _DEVHND *hnd;            /* -> Device handlers        */
@@ -1096,6 +1240,9 @@ typedef struct _DEVBLK {
 
         void ( *halt_device)(struct _DEVBLK *);         /*      @ISW */
 
+        DEVIM   *immed;                 /* Model Specific IM codes   */
+                                        /* (overrides devhnd immed)  */
+        int     is_immed;               /* Last command is Immediate */
 
         /*  emulated architecture fields...   (MUST be aligned!)     */
 
@@ -1144,6 +1291,7 @@ typedef struct _DEVBLK {
                 localhost:1,            /* 1=Remote is local         */
                 batch:1,                /* 1=Called by dasdutil      */
                 dasdcopy:1,             /* 1=Called by dasdcopy      */
+                oslinux:1,              /* 1=Linux                   */
                 ccwtrace:1,             /* 1=CCW trace               */
                 ccwstep:1,              /* 1=CCW single step         */
                 cdwmerge:1;             /* 1=Channel will merge data
@@ -1157,7 +1305,8 @@ typedef struct _DEVBLK {
                 pending:1,              /* 1=I/O interrupt pending   */
                 pcipending:1,           /* 1=PCI interrupt pending   */
                 attnpending:1,          /* 1=ATTN interrupt pending  */
-                startpending:1;         /* 1=startio pending         */
+                startpending:1,         /* 1=startio pending         */
+                resumesuspended:1;      /* 1=Hresuming suspended dev */
 #define IOPENDING(_dev) ((_dev)->pending || (_dev)->pcipending || (_dev)->attnpending)
         int     crwpending;             /* 1=CRW pending             */
         int     syncio_active;          /* 1=Synchronous I/O active  */
@@ -1196,13 +1345,16 @@ typedef struct _DEVBLK {
 
         /*  Device dependent fields for console                      */
 
-        struct  in_addr ipaddr;         /* Client IP address         */
+        struct in_addr ipaddr;          /* Client IP address         */
+        in_addr_t  acc_ipaddr;          /* Allowable clients IP addr */
+        in_addr_t  acc_ipmask;          /* Allowable clients IP mask */
         U32     rlen3270;               /* Length of data in buffer  */
         int     pos3270;                /* Current screen position   */
         int     keybdrem;               /* Number of bytes remaining
                                            in keyboard read buffer   */
         U32                             /* Flags                     */
                 eab3270:1,              /* 1=Extended attributes     */
+                ewa3270:1,              /* 1=Last erase was EWA      */
                 prompt1052:1;           /* 1=Prompt for linemode i/p */
         BYTE    aid3270;                /* Current input AID value   */
         BYTE    mod3270;                /* 3270 model number         */
@@ -1271,19 +1423,20 @@ typedef struct _DEVBLK {
             U16 compress:1;             /* 1=Compression enabled     */
             U16 method:3;               /* Compression method        */
             U16 level:4;                /* Compression level         */
-        U16 strictsize:1;           /* Strictly enforce MAXSIZE  */
-        U16 displayfeat:1;          /* Device has a display      */
+            U16 strictsize:1;           /* Strictly enforce MAXSIZE  */
+            U16 displayfeat:1;          /* Device has a display      */
                                         /* feature installed         */
             U16 deonirq:1;              /* DE on IRQ on tape motion  */
                                         /* MVS 3.8j workaround       */
-        U16 logical_readonly;       /* Tape is forced READ ONLY  */
+            U16 logical_readonly;       /* Tape is forced READ ONLY  */
             U16 chksize;                /* Chunk size                */
-            size_t maxsize;              /* Maximum allowed TAPE file
+            size_t maxsize;             /* Maximum allowed TAPE file
                                            size                      */
             size_t eotmargin;           /* Amount of space left
                                            before reporting EOT      */
         }       tdparms;                /* HET device parms          */
         U32                             /* Flags                     */
+                poserror:1,             /* Positioning error         */
                 readonly:1,             /* 1=Tape is write-protected */
                 longfmt:1,              /* 1=Long record format (DDR)*/ /*DDR*/
                 sns_pending:1;          /* Contingency Allegiance    */
@@ -1293,38 +1446,68 @@ typedef struct _DEVBLK {
                                         /* NOTE : flag cleared by    */
                                         /*        sense command only */
                                         /*        or a device init   */
-        BYTE    tapedevt;               /* Tape device type          */
-    struct _TAPEMEDIA_HANDLER *tmh; /* Tape Media Handling       */
+#if defined(OPTION_SCSI_TAPE)
+        U32     sstat;                  /* Generic SCSI tape device-
+                                           independent status field  */
+        TID     stape_mountmon_tid;     /* Tape-mount monitor thread */
+#endif
+        BYTE    tapedevt;               /* Hercules tape device type */
+        struct _TAPEMEDIA_HANDLER *tmh; /* Tape Media Handling       */
                                         /* dispatcher                */
-    /* Autoloader feature */
-    struct _TAPEAUTOLOADENTRY *als;  /* Autoloader stack         */
-    int     alss;                    /* Autoloader stack size    */
-    int     alsix;                   /* Current Autoloader index */
-    char    **al_argv;               /* ARGV in autoloader       */
-    int     al_argc;                 /* ARGC in autoloader       */
-    /* end autoloader feature */
+
+        /* ---------- Autoloader feature --------------------------- */
+        struct _TAPEAUTOLOADENTRY *als;  /* Autoloader stack         */
+        int     alss;                    /* Autoloader stack size    */
+        int     alsix;                   /* Current Autoloader index */
+        char  **al_argv;                 /* ARGV in autoloader       */
+        int     al_argc;                 /* ARGC in autoloader       */
+        /* ---------- end Autoloader feature ----------------------- */
+
         /* 3480/3490/3590 Message display */
-        BYTE    tapemsg1[9];            /* 1st 3480 Message          */
-        BYTE    tapemsg2[9];            /* 2nd 3480 Message          */
+
+        char    tapemsg1[9];            /* 1st Host Message          */
+        char    tapemsg2[9];            /* 2nd Host Message          */
+        char    tapesysmsg[32];         /*     Unit Message     (SYS)*/
+        char   *prev_tapemsg;           /* Previously displayed msg  */
+
         BYTE    tapedisptype;           /* Type of message display   */
-#define TAPEDISPLAY_IDLE 0              /* Display SYSTEM message    */
-#define TAPEDISPLAY_MOUNT 1             /* A Mount Message is on     */
-#define TAPEDISPLAY_UNMOUNT 2           /* An Unmount display is on  */
-#define TAPEDISPLAY_UMOUNTMOUNT 3       /* A Unmount then mount msg  */
-#define TAPEDISPLAY_WAITACT 4           /* Display until motion      */
         BYTE    tapedispflags;          /* How the msg is displayed  */
-#define TAPEDISPFLG_ALTERNATE 0x80      /* Alternate msgs 1 & 2      */
-#define TAPEDISPFLG_BLINKING  0x40      /* Selected msg blinks       */
-#define TAPEDISPFLG_MSG2      0x20      /* Display msg 2 instead of 1*/
-#define TAPEDISPFLG_AUTOLOAD  0x10      /* Autoloader index req      */
-#define TAPEDISPFLG_REQMOUNT  0x08      /* Pass through Mount Req Rtn*/
+
+#define TAPEDISPTYP_IDLE           0    /* "READY" "NT RDY" etc (SYS)*/
+#define TAPEDISPTYP_LOCATING       1    /* Locate in progress   (SYS)*/
+#define TAPEDISPTYP_ERASING        2    /* DSE in progress      (SYS)*/
+#define TAPEDISPTYP_REWINDING      3    /* Rewind in progress   (SYS)*/
+#define TAPEDISPTYP_UNLOADING      4    /* Unload in progress   (SYS)*/
+#define TAPEDISPTYP_CLEAN          5    /* Clean recommended    (SYS)*/
+#define TAPEDISPTYP_MOUNT          6    /* Mount Message active      */
+#define TAPEDISPTYP_UNMOUNT        7    /* Unmount message active    */
+#define TAPEDISPTYP_UMOUNTMOUNT    8    /* Unmount/Mount msg active  */
+#define TAPEDISPTYP_WAITACT        9    /* Display until motion      */
+
+#define IS_TAPEDISPTYP_SYSMSG( dev ) \
+    (0 \
+     || TAPEDISPTYP_IDLE      == (dev)->tapedisptype \
+     || TAPEDISPTYP_LOCATING  == (dev)->tapedisptype \
+     || TAPEDISPTYP_ERASING   == (dev)->tapedisptype \
+     || TAPEDISPTYP_REWINDING == (dev)->tapedisptype \
+     || TAPEDISPTYP_UNLOADING == (dev)->tapedisptype \
+     || TAPEDISPTYP_CLEAN     == (dev)->tapedisptype \
+    )
+
+#define TAPEDISPFLG_ALTERNATE   0x80    /* Alternate msgs 1 & 2      */
+#define TAPEDISPFLG_BLINKING    0x40    /* Selected msg blinks       */
+#define TAPEDISPFLG_MESSAGE2    0x20    /* Display msg 2 instead of 1*/
+#define TAPEDISPFLG_AUTOLOADER  0x10    /* Autoloader request        */
+#define TAPEDISPFLG_REQAUTOMNT  0x08    /* ReqAutoMount has work     */
 
        /* Device dependent fields for Comm Line                      */
         struct _COMMADPT *commadpt;     /* Single structure pointer  */
 
         /*  Device dependent fields for dasd (fba and ckd)           */
 
-        BYTE    dasdsfn[256];           /* Shadow file name          */
+        char   *dasdsfn;                /* Shadow file name          */
+        char   *dasdsfx;                /* Pointer to suffix char    */
+
 
         /*  Device dependent fields for fbadasd                      */
 
@@ -1387,7 +1570,7 @@ typedef struct _DEVBLK {
         BYTE    ckdreserved1;           /* Alignment                 */
         void   *cckd_ext;               /* -> Compressed ckddasd
                                            extension otherwise NULL  */
-        U32                            /* Flags                     */
+        U32                             /* Flags                     */
                 ckd3990:1,              /* 1=Control unit is 3990    */
                 ckdxtdef:1,             /* 1=Define Extent processed */
                 ckdsetfm:1,             /* 1=Set File Mask processed */
@@ -1464,6 +1647,16 @@ typedef struct _CKDDASD_RECHDR {        /* Record header             */
 #define CKDDASD_TRKHDR_SIZE     ((ssize_t)sizeof(CKDDASD_TRKHDR))
 #define CKDDASD_RECHDR_SIZE     ((ssize_t)sizeof(CKDDASD_RECHDR))
 
+/* Null track formats */
+#define CKDDASD_NULLTRK_FMT0       0    /* ha r0 r1 eot              */
+#define CKDDASD_NULLTRK_FMT1       1    /* ha r0 eot                 */
+#define CKDDASD_NULLTRK_FMT2       2    /* linux (3390 only)         */
+#define CKDDASD_NULLTRK_FMTMAX     CKDDASD_NULLTRK_FMT2
+
+#define CKDDASD_NULLTRK_SIZE0      (5 + 8 + 8 + 8 + 8)
+#define CKDDASD_NULLTRK_SIZE1      (5 + 8 + 8 + 8)
+#define CKDDASD_NULLTRK_SIZE2      (5 + 8 + 8 + (12 * (8 + 4096)) + 8)
+
 /*-------------------------------------------------------------------*/
 /* Structure definitions for Compressed CKD devices                  */
 /*-------------------------------------------------------------------*/
@@ -1478,9 +1671,9 @@ typedef struct _CCKDDASD_DEVHDR {       /* Compress device header    */
 /* 24 */U32              free_total;    /* Total free space          */
 /* 28 */U32              free_largest;  /* Largest free space        */
 /* 32 */S32              free_number;   /* Number free spaces        */
-/* 36 */S32              free_imbed;    /* [deprecated]              */
+/* 36 */U32              free_imbed;    /* Imbedded free space       */
 /* 40 */FWORD            cyls;          /* Cylinders on device       */
-/* 44 */BYTE             resv1;         /* Reserved                  */
+/* 44 */BYTE             nullfmt;       /* Null track format         */
 /* 45 */BYTE             compress;      /* Compression algorithm     */
 /* 46 */S16              compress_parm; /* Compression parameter     */
 /* 48 */BYTE             resv2[464];    /* Reserved                  */
@@ -1495,17 +1688,6 @@ typedef struct _CCKDDASD_DEVHDR {       /* Compress device header    */
 #define CCKD_ORDWR             64        /* Opened read/write since
                                             last chkdsk              */
 #define CCKD_OPENED            128
-
-/* The first byte of the TRKHDR in a compressed file contains the
-   following bits:
-     nlllllcc
-   where:
-     n      1=track header in new format
-     lllll  low order bits of track image length [for recovery]
-     cc     compression used on the track image                      */
-#define CCKD_FREEHDR           size
-#define CCKD_FREEHDR_SIZE      28
-#define CCKD_FREEHDR_POS       CKDDASD_DEVHDR_SIZE+12
 
 #define CCKD_COMPRESS_NONE     0x00
 #define CCKD_COMPRESS_ZLIB     0x01
@@ -1555,9 +1737,8 @@ typedef char CCKD_TRACE[128];           /* Trace entry               */
 #define CCKD_L2TAB_SIZE        ((ssize_t)sizeof(CCKD_L2TAB))
 #define CCKD_FREEBLK_SIZE      8
 #define CCKD_FREEBLK_ISIZE     ((ssize_t)sizeof(CCKD_FREEBLK))
+#define CCKD_FREE_MIN_SIZE     96
 #define CCKD_CACHE_SIZE        ((ssize_t)sizeof(CCKD_CACHE))
-#define CCKD_NULLTRK_SIZE1     37       /* ha r0 r1 ffff */
-#define CCKD_NULLTRK_SIZE0     29       /* ha r0 ffff */
 
 /* adjustable values */
 
@@ -1584,7 +1765,7 @@ typedef char CCKD_TRACE[128];           /* Trace entry               */
 #define CCKD_DEFAULT_WRITER    2        /* Default number writers    */
 #define CCKD_DEFAULT_GCOL      1        /* Default number garbage
                                               collectors             */
-#define CCKD_DEFAULT_GCOLWAIT  5        /* Default wait (seconds)    */
+#define CCKD_DEFAULT_GCOLWAIT  10       /* Default wait (seconds)    */
 #define CCKD_DEFAULT_GCOLPARM  0        /* Default adjustment parm   */
 #define CCKD_DEFAULT_READAHEADS 2       /* Default nbr to read ahead */
 #define CCKD_DEFAULT_FREEPEND  -1       /* Default freepend cycles   */
@@ -1601,8 +1782,8 @@ typedef struct _CCKDBLK {               /* Global cckd dasd block    */
         DEVBLK          *dev1st;        /* 1st device in cckd queue  */
         int              batch:1;       /* 1=called in batch mode    */
 
-        int              comps;         /* Supported compressions    */
-        int              comp;          /* Override compression      */
+        BYTE             comps;         /* Supported compressions    */
+        BYTE             comp;          /* Override compression      */
         int              compparm;      /* Override compression parm */
 
         LOCK             gclock;        /* Garbage collector lock    */
@@ -1676,9 +1857,11 @@ typedef struct _CCKDDASD_EXT {          /* Ext for compressed ckd    */
         unsigned int     ckddasd:1,     /* 1=CKD dasd                */
                          fbadasd:1,     /* 1=FBA dasd                */
                          ioactive:1,    /* 1=Channel program active  */
+                         bufused:1,     /* 1=newbuf was used         */
                          updated:1,     /* 1=Update occurred         */
                          merging:1,     /* 1=File merge in progress  */
-                         stopping:1;    /* 1=Device is closing       */
+                         stopping:1,    /* 1=Device is closing       */
+                         notnull:1;     /* 1=Device has track images */
         LOCK             filelock;      /* File lock                 */
         LOCK             iolock;        /* I/O lock                  */
         COND             iocond;        /* I/O condition             */
@@ -1691,6 +1874,7 @@ typedef struct _CCKDDASD_EXT {          /* Ext for compressed ckd    */
         CCKD_L2ENT      *l2;            /* Active level 2 table      */
         int              l2active;      /* Active level 2 cache entry*/
         int              active;        /* Active cache entry        */
+        BYTE            *newbuf;        /* Uncompressed buffer       */
         CCKD_FREEBLK    *free;          /* Internal free space chain */
         int              freenbr;       /* Number free space entries */
         int              free1st;       /* Index of 1st entry        */
@@ -1745,42 +1929,54 @@ extern const char* get_arch_mode_string(REGS* regs);
 #include "devtype.h"
 
 /* Functions in module config.c */
-void build_config (BYTE *fname);
+void build_config (char *fname);
 void release_config ();
 DEVBLK *find_device_by_devnum (U16 devnum);
 DEVBLK *find_device_by_subchan (U16 subchan);
 DEVBLK *get_devblk (U16 devnum);
 void ret_devblk (DEVBLK *dev);
 int  attach_device (U16 devnum, char *devtype, int addargc,
-        BYTE *addargv[]);
+        char *addargv[]);
+int  detach_subchan (U16 subchan);
 int  detach_device (U16 devnum);
 int  define_device (U16 olddev, U16 newdev);
-int  configure_cpu (REGS *regs);
-int  deconfigure_cpu (REGS *regs);
-int parse_args (BYTE* p, int maxargc, BYTE** pargv, int* pargc);
+int  group_device(DEVBLK *dev, int members);
+int  configure_cpu (int cpu);
+int  deconfigure_cpu (int cpu);
+int parse_args (char* p, int maxargc, char** pargv, int* pargc);
 #define MAX_ARGS  12                    /* Max argv[] array size     */
 
 /* Access type parameter passed to translate functions in dat.c */
-#define ACCTYPE_HW              0       /* Hardware access           */
-#define ACCTYPE_READ            1       /* Read operand data         */
-#define ACCTYPE_WRITE_SKP       2       /* Write but skip change bit */
-#define ACCTYPE_WRITE           3       /* Write operand data        */
-#define ACCTYPE_INSTFETCH       4       /* Instruction fetch         */
-#define ACCTYPE_TAR             5       /* Test Access               */
-#define ACCTYPE_LRA             6       /* Load Real Address         */
-#define ACCTYPE_TPROT           7       /* Test Protection           */
-#define ACCTYPE_IVSK            8       /* Insert Virtual Storage Key*/
-#define ACCTYPE_STACK           9       /* Linkage stack operations  */
-#define ACCTYPE_BSG             10      /* Branch in Subspace Group  */
-#define ACCTYPE_PTE             11      /* Return PTE raddr          */
-#define ACCTYPE_SIE             12      /* SIE host translation      */
-#define ACCTYPE_SIE_WRITE       13      /* SIE host translation write*/
-#define ACCTYPE_STRAG           14      /* Store real address        */
+
+#define ACC_CHECK          0x01
+#define ACC_WRITE          STORKEY_CHANGE  /* 0x02 */
+#define ACC_READ           STORKEY_REF     /* 0x04 */
+#define ACC_SIE            0x08
+#define ACC_LKUP          (ACC_READ|ACC_WRITE)
+//TODO: Use ACC_SIE and ACC_PTE for lookup
+
+#define ACCTYPE_HW         0x00            /* Hardware access        */
+#define ACCTYPE_INSTFETCH (0x10|ACC_READ)  /* Instruction fetch      */
+#define ACCTYPE_READ      (0x20|ACC_READ)  /* Read storage           */
+#define ACCTYPE_WRITE_SKP (0x30|ACC_CHECK) /* Write, skip change bit */
+#define ACCTYPE_WRITE     (0x40|ACC_WRITE) /* Write storage          */
+#define ACCTYPE_TAR        0x50            /* TAR instruction        */
+#define ACCTYPE_LRA        0x60            /* LRA instruction        */
+#define ACCTYPE_TPROT      0x70            /* TPROT instruction      */
+#define ACCTYPE_IVSK       0x80            /* IVSK instruction       */
+#define ACCTYPE_STACK      0x90            /* Linkage stack          */
+#define ACCTYPE_BSG        0xA0            /* BSG instruction        */
+#define ACCTYPE_PTE        0xB0            /* PTE raddr              */
+#define ACCTYPE_SIE       (0xC0|ACC_SIE)   /* SIE host translation   */
+#define ACCTYPE_SIE_WRITE (0xD0|ACC_SIE)   /* SIE host write         */
+#define ACCTYPE_STRAG      0xE0            /* STRAG instruction      */
 
 /* Special value for arn parameter for translate functions in dat.c */
-#define USE_REAL_ADDR           (-1)    /* Real address              */
-#define USE_PRIMARY_SPACE       (-2)    /* Primary space virtual     */
-#define USE_SECONDARY_SPACE     (-3)    /* Secondary space virtual   */
+#define USE_INST_SPACE          (-1)    /* Instruction space virtual */
+#define USE_REAL_ADDR           (-2)    /* Real address              */
+#define USE_PRIMARY_SPACE       (-3)    /* Primary space virtual     */
+#define USE_SECONDARY_SPACE     (-4)    /* Secondary space virtual   */
+#define USE_HOME_SPACE          (-5)    /* Home space virtual        */
 
 /* Interception codes used by longjmp/SIE */
 #define SIE_NO_INTERCEPT        (-1)    /* Continue (after pgmint)   */
@@ -1834,11 +2030,20 @@ extern void *(*debug_sclp_unknown_command) (U32, void *, REGS *);
 extern void *(*debug_sclp_unknown_event) (void *, void *, REGS *);
 extern void *(*debug_sclp_event_data) (void *, void *, REGS *);
 extern void *(*debug_chsc_unknown_request) (void *, void *, REGS *);
+extern void *(*debug_watchdog_signal) (REGS *);
 
 #else
 void *panel_command (void *cmdline);
 void panel_display (void);
 #endif
+
+/* Functions in module loadparm.c */
+void set_loadparm(char *name);
+void get_loadparm(BYTE *dest);
+char *str_loadparm();
+void set_lparname(char *name);
+void get_lparname(BYTE *dest);
+char *str_lparname();
 
 /* Functions in module impl.c */
 void system_cleanup(void);
@@ -1849,29 +2054,37 @@ void update_TOD_clock (void);
 void *timer_update_thread (void *argp);
 
 /* Functions in module service.c */
-void scp_command (BYTE *command, int priomsg);
+void scp_command (char *command, int priomsg);
+int can_signal_quiesce ();
+int signal_quiesce (U16 count, BYTE unit);
+void sclp_reset();
+int servc_hsuspend(void *file);
+int servc_hresume(void *file);
 
 /* Functions in module ckddasd.c */
 void ckd_build_sense ( DEVBLK *, BYTE, BYTE, BYTE, BYTE, BYTE);
-int ckddasd_init_handler ( DEVBLK *dev, int argc, BYTE *argv[]);
+int ckddasd_init_handler ( DEVBLK *dev, int argc, char *argv[]);
 void ckddasd_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
         BYTE chained, U16 count, BYTE prevcode, int ccwseq,
         BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual );
 int ckddasd_close_device ( DEVBLK *dev );
-void ckddasd_query_device (DEVBLK *dev, BYTE **class,
-                int buflen, BYTE *buffer);
+void ckddasd_query_device (DEVBLK *dev, char **class,
+                int buflen, char *buffer);
+int ckddasd_hsuspend ( DEVBLK *dev, void *file );
+int ckddasd_hresume  ( DEVBLK *dev, void *file );
 
 /* Functions in module fbadasd.c */
 void fbadasd_syncblk_io (DEVBLK *dev, BYTE type, int blknum,
         int blksize, BYTE *iobuf, BYTE *unitstat, U16 *residual);
-int fbadasd_init_handler ( DEVBLK *dev, int argc, BYTE *argv[]);
+int fbadasd_init_handler ( DEVBLK *dev, int argc, char *argv[]);
 void fbadasd_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
         BYTE chained, U16 count, BYTE prevcode, int ccwseq,
         BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual );
 int fbadasd_close_device ( DEVBLK *dev );
-void fbadasd_query_device (DEVBLK *dev, BYTE **class,
-                int buflen, BYTE *buffer);
-
+void fbadasd_query_device (DEVBLK *dev, char **class,
+                int buflen, char *buffer);
+int fbadasd_hsuspend ( DEVBLK *dev, void *file );
+int fbadasd_hresume  ( DEVBLK *dev, void *file );
 
 /* Functions in module cckddasd.c */
 DEVIF   cckddasd_init_handler;
@@ -1882,10 +2095,10 @@ int     cfba_read_block (DEVBLK *, int, BYTE *);
 int     cfba_write_block (DEVBLK *, int, int, BYTE *, int, BYTE *);
 void    cckd_sf_add (DEVBLK *);
 void    cckd_sf_remove (DEVBLK *, int);
-void    cckd_sf_newname (DEVBLK *, BYTE *);
+void    cckd_sf_newname (DEVBLK *, char *);
 void    cckd_sf_stats (DEVBLK *);
 void    cckd_sf_comp (DEVBLK *);
-int     cckd_command(BYTE *, int);
+int     cckd_command(char *, int);
 void    cckd_print_itrace ();
 
 /* Functions in module cckdutil.c */
@@ -1902,14 +2115,20 @@ int     cckd_chkdsk(int, FILE *, int);
 
 /* Functions in module hscmisc.c */
 int herc_system (char* command);
+void do_shutdown();
 void display_regs (REGS *regs);
 void display_fregs (REGS *regs);
 void display_cregs (REGS *regs);
 void display_aregs (REGS *regs);
 void display_subchannel (DEVBLK *dev);
 void get_connected_client (DEVBLK* dev, char** pclientip, char** pclientname);
-void alter_display_real (BYTE *opnd, REGS *regs);
-void alter_display_virt (BYTE *opnd, REGS *regs);
+void alter_display_real (char *opnd, REGS *regs);
+void alter_display_virt (char *opnd, REGS *regs);
+void disasm_stor(REGS *regs, char *opnd);
+
+/* Functions in module sr.c */
+int suspend_cmd(int argc, char *argv[],char *cmdline);
+int resume_cmd(int argc, char *argv[],char *cmdline);
 
 /* Functions in ecpsvm.c that are not *direct* instructions */
 /* but support functions either used by other instruction   */
@@ -1942,5 +2161,15 @@ struct mt_tape_info {
 };
 #define MT_TAPE_INFO   { { 0, NULL } }
 #endif /* defined(__APPLE__) */
+
+/* Utility channel macro */
+#define IS_CCW_IMMEDIATE(_dev) \
+        ( ( (_dev)->hnd->immed \
+                        && (_dev)->hnd->immed[(_dev)->code]) \
+                || ( ( _dev)->immed \
+                        && (_dev)->immed[(_dev)->code]) \
+                || IS_CCW_NOP((_dev)->code) \
+                || IS_CCW_SET_EXTENDED((_dev)->code) \
+        ) \
 
 #endif /*!defined(_HERCULES_H)*/

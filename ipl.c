@@ -1,8 +1,8 @@
-/* IPL.C        (c) Copyright Roger Bowler, 1999-2003                */
+/* IPL.C        (c) Copyright Roger Bowler, 1999-2004                */
 /*              ESA/390 Initial Program Loader                       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2003      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the Initial Program Load (IPL) function    */
@@ -21,24 +21,19 @@
 #include "w32chan.h"
 #endif // defined(OPTION_FISHIO)
 
-/*-------------------------------------------------------------------*/
-/* Function to run initial CCW chain from IPL device and load IPLPSW */
-/* Returns 0 if successful, -1 if error                              */
-/*-------------------------------------------------------------------*/
-int ARCH_DEP(load_ipl) (U16 devnum, REGS *regs)
+
+void ARCH_DEP(system_reset) (int cpu, int clear)
 {
-int     rc;                             /* Return code               */
-int     i;                              /* Array subscript           */
-int     cpu;                            /* CPU number                */
-DEVBLK *dev;                            /* -> Device control block   */
-PSA    *psa;                            /* -> Prefixed storage area  */
-BYTE    unitstat;                       /* IPL device unit status    */
-BYTE    chanstat;                       /* IPL device channel status */
+REGS   *regs;                           /* -> Regs                   */
+    /* Configure the cpu if it is not online */
+    if (!IS_CPU_ONLINE(cpu))
+    {
+        configure_cpu(cpu);
+        if (!IS_CPU_ONLINE(cpu))
+            return;
+    }
 
-    obtain_lock (&sysblk.intlock);
-
-    if(!regs->cpuonline)
-        configure_cpu(regs);
+    regs = sysblk.regs[cpu];
 
     HDC(debug_cpu_state, regs);
 
@@ -50,14 +45,42 @@ BYTE    chanstat;                       /* IPL device channel status */
     ARCH_DEP(initial_cpu_reset) (regs);
 
     /* Perform CPU reset on all other CPUs */
-    for (cpu = 0; cpu < sysblk.numcpu; cpu++)
-        ARCH_DEP(cpu_reset) (sysblk.regs + cpu);
-
-    /* put cpu in load state */
-    regs->loadstate = 1;
+    for (cpu = 0; cpu < MAX_CPU; cpu++)
+        if (IS_CPU_ONLINE(cpu))
+            ARCH_DEP(cpu_reset) (sysblk.regs[cpu]);
 
     /* Perform I/O reset */
     io_reset ();
+
+    /* If requested, clear storage */
+    if(clear)
+    {
+        storage_clear();
+        xstorage_clear();
+    }
+}
+/*-------------------------------------------------------------------*/
+/* Function to run initial CCW chain from IPL device and load IPLPSW */
+/* Returns 0 if successful, -1 if error                              */
+/* intlock MUST be held on entry                                     */
+/*-------------------------------------------------------------------*/
+int ARCH_DEP(load_ipl) (U16 devnum, int cpu, int clear)
+{
+REGS   *regs;                           /* -> Regs                   */
+int     rc;                             /* Return code               */
+int     i;                              /* Array subscript           */
+DEVBLK *dev;                            /* -> Device control block   */
+PSA    *psa;                            /* -> Prefixed storage area  */
+BYTE    unitstat;                       /* IPL device unit status    */
+BYTE    chanstat;                       /* IPL device channel status */
+
+
+    ARCH_DEP(system_reset(cpu,clear));
+
+    regs = sysblk.regs[cpu];
+
+    regs->loadstate = 1;
+
 
     /* Point to the device block for the IPL device */
     dev = find_device_by_devnum (devnum);
@@ -65,10 +88,7 @@ BYTE    chanstat;                       /* IPL device channel status */
     {
         logmsg (_("HHCCP027E Device %4.4X not in configuration\n"),
                 devnum);
-
         HDC(debug_cpu_state, regs);
-
-        release_lock (&sysblk.intlock);
         return -1;
     }
 
@@ -76,10 +96,7 @@ BYTE    chanstat;                       /* IPL device channel status */
       && dev->chanset != regs->chanset)
     {
         logmsg(_("HHCCP028E Device not connected to channelset\n"));
-
         HDC(debug_cpu_state, regs);
-
-        release_lock (&sysblk.intlock);
         return -1;
     }
     /* Point to the PSA in main storage */
@@ -87,6 +104,7 @@ BYTE    chanstat;                       /* IPL device channel status */
 
     /* Set Main Storage Reference and Update bits */
     STORAGE_KEY(regs->PX, regs) |= (STORKEY_REF | STORKEY_CHANGE);
+    sysblk.main_clear = sysblk.xpnd_clear = 0;
 
     /* Build the IPL CCW at location 0 */
     psa->iplpsw[0] = 0x02;              /* CCW command = Read */
@@ -143,10 +161,7 @@ BYTE    chanstat;                       /* IPL device channel status */
             if ((i & 3) == 3) logmsg(" ");
         }
         logmsg ("\n");
-
         HDC(debug_cpu_state, regs);
-
-        release_lock (&sysblk.intlock);
         return -1;
     }
 
@@ -189,19 +204,12 @@ BYTE    chanstat;                       /* IPL device channel status */
                 psa->iplpsw[0], psa->iplpsw[1], psa->iplpsw[2],
                 psa->iplpsw[3], psa->iplpsw[4], psa->iplpsw[5],
                 psa->iplpsw[6], psa->iplpsw[7]);
-
         HDC(debug_cpu_state, regs);
-
-        release_lock (&sysblk.intlock);
         return -1;
     }
 
-    INVALIDATE_AIA(regs);
-    INVALIDATE_AEA_ALL(regs);
-
     /* Set the CPU into the started state */
     regs->cpustate = CPUSTATE_STARTED;
-    OFF_IC_CPU_NOT_STARTED(regs);
 
     /* reset load state */
     regs->loadstate = 0;
@@ -211,12 +219,9 @@ BYTE    chanstat;                       /* IPL device channel status */
     sysblk.iplcpu = regs->cpuad;
 
     /* Signal the CPU to retest stopped indicator */
-    WAKEUP_CPU (regs->cpuad);
-
-    release_lock (&sysblk.intlock);
+    WAKEUP_CPU (regs);
 
     HDC(debug_cpu_state, regs);
-
     return 0;
 } /* end function load_ipl */
 
@@ -238,28 +243,32 @@ BYTE    chanstat;                       /* IPL device channel status */
 /* The location of the image files is relative to the location of   */
 /* the descriptor file.                         Jan Jaeger 10-11-01 */
 /*                                                                  */
-int ARCH_DEP(load_hmc) (char *fname, REGS *regs)
+int ARCH_DEP(load_hmc) (char *fname, int cpu, int clear)
 {
+REGS   *regs;                           /* -> Regs                   */
 int     rc;                             /* Return code               */
 int     rx;                             /* Return code               */
-int     cpu;                            /* CPU number                */
 PSA    *psa;                            /* -> Prefixed storage area  */
 FILE   *fp;
-BYTE    inputline[256];
-BYTE    dirname[256];                   /* dirname of ins file       */
-BYTE   *dirbase;
-BYTE    filename[256];                  /* filename of image file    */
-BYTE    pathname[256];                  /* pathname of image file    */
+char    inputline[256];
+char    dirname[256];                   /* dirname of ins file       */
+char   *dirbase;
+char    filename[256];                  /* filename of image file    */
+char    pathname[256];                  /* pathname of image file    */
 U32     fileaddr;
 
     if(fname == NULL)                   /* Default ipl from DASD     */
         fname = "hercules.ins";         /*   from hercules.ins       */
 
-    obtain_lock (&sysblk.intlock);
+    /* Configure the cpu if it is not online */
+    if (!IS_CPU_ONLINE(cpu))
+    {
+        configure_cpu(cpu);
+        if (!IS_CPU_ONLINE(cpu))
+            return -1;
+    }
 
-    if(!regs->cpuonline)
-        configure_cpu(regs);
-
+    regs = sysblk.regs[cpu];
     HDC(debug_cpu_state, regs);
 
     /* Reset external interrupts */
@@ -270,14 +279,22 @@ U32     fileaddr;
     ARCH_DEP(initial_cpu_reset) (regs);
 
     /* Perform CPU reset on all other CPUs */
-    for (cpu = 0; cpu < sysblk.numcpu; cpu++)
-        ARCH_DEP(cpu_reset) (sysblk.regs + cpu);
+    for (cpu = 0; cpu < MAX_CPU; cpu++)
+        if (IS_CPU_ONLINE(cpu))
+            ARCH_DEP(cpu_reset) (sysblk.regs[cpu]);
 
     /* put cpu in load state */
     regs->loadstate = 1;
 
     /* Perform I/O reset */
     io_reset ();
+
+    /* If requested, clear storage */
+    if(clear)
+    {
+        storage_clear();
+        xstorage_clear();
+    }
 
     /* remove filename from pathname */
     strcpy(dirname,fname);
@@ -288,7 +305,6 @@ U32     fileaddr;
     if(fp == NULL)
     {
         logmsg(_("HHCCP031E Load from %s failed: %s\n"),fname,strerror(errno));
-        release_lock(&sysblk.intlock);
         return -1;
     }
 
@@ -316,12 +332,10 @@ U32     fileaddr;
             if( ARCH_DEP(load_main) (pathname, fileaddr) < 0 )
             {
                 fclose(fp);
-
                 HDC(debug_cpu_state, regs);
-
-                release_lock(&sysblk.intlock);
                 return -1;
             }
+            sysblk.main_clear = sysblk.xpnd_clear = 0;
         }
     } while(rc);
     fclose(fp);
@@ -343,30 +357,20 @@ U32     fileaddr;
                 psa->iplpsw[0], psa->iplpsw[1], psa->iplpsw[2],
                 psa->iplpsw[3], psa->iplpsw[4], psa->iplpsw[5],
                 psa->iplpsw[6], psa->iplpsw[7]);
-
         HDC(debug_cpu_state, regs);
-
-        release_lock(&sysblk.intlock);
         return -1;
     }
 
-    INVALIDATE_AIA(regs);
-    INVALIDATE_AEA_ALL(regs);
-
     /* Set the CPU into the started state */
     regs->cpustate = CPUSTATE_STARTED;
-    OFF_IC_CPU_NOT_STARTED(regs);
 
     /* reset load state */
     regs->loadstate = 0;
 
     /* Signal the CPU to retest stopped indicator */
-    WAKEUP_CPU (regs->cpuad);
-
-    release_lock (&sysblk.intlock);
+    WAKEUP_CPU (regs);
 
     HDC(debug_cpu_state, regs);
-
     return 0;
 } /* end function load_hmc */
 /*-------------------------------------------------------------------*/
@@ -378,23 +382,19 @@ int             i;                      /* Array subscript           */
 
     regs->ip = regs->inst;
 
-    /* Clear pending interrupts and indicators */
+    /* Clear indicators */
     regs->loadstate = 0;
     regs->checkstop = 0;
     regs->sigpreset = 0;
-    OFF_IC_ITIMER(regs);
-    OFF_IC_RESTART(regs);
-    OFF_IC_EXTCALL(regs);
     regs->extccpu = 0;
-    OFF_IC_EMERSIG(regs);
-    for (i = 0; i < MAX_CPU_ENGINES; i++)
+    for (i = 0; i < MAX_CPU; i++)
         regs->emercpu[i] = 0;
-    OFF_IC_STORSTAT(regs);
-    OFF_IC_CPUINT(regs);
     regs->instvalid = 0;
     regs->instcount = 0;
 
+    /* Clear interrupts */
     SET_IC_INITIAL_MASK(regs);
+    SET_IC_INITIAL_STATE(regs);
 
     /* Clear the translation exception identification */
     regs->EA_G = 0;
@@ -404,8 +404,8 @@ int             i;                      /* Array subscript           */
     regs->MC_G = 0;
 
     /* Purge the lookaside buffers */
-    regs->tlbID = 255;
     ARCH_DEP(purge_tlb) (regs);
+
 #if defined(FEATURE_ACCESS_REGISTERS)
     ARCH_DEP(purge_alb) (regs);
 #endif /*defined(FEATURE_ACCESS_REGISTERS)*/
@@ -416,7 +416,7 @@ int             i;                      /* Array subscript           */
     {
         /* Put the CPU into the stopped state */
         regs->cpustate = CPUSTATE_STOPPED;
-        ON_IC_CPU_NOT_STARTED(regs);
+        ON_IC_INTERRUPT(regs);
     }
 
 #if defined(_FEATURE_SIE)
@@ -425,7 +425,6 @@ int             i;                      /* Array subscript           */
         ARCH_DEP(cpu_reset)(regs->guestregs);
         /* CPU state of SIE copy cannot be controlled */
         regs->guestregs->cpustate = CPUSTATE_STARTED;
-        OFF_IC_CPU_NOT_STARTED(regs->guestregs);
    }
 #endif /*defined(_FEATURE_SIE)*/
 
@@ -444,7 +443,7 @@ void ARCH_DEP(initial_cpu_reset) (REGS *regs)
 
     /* Clear the registers */
     memset (&regs->psw, 0, sizeof(PSW));
-    memset (regs->cr, 0, sizeof(regs->cr));
+    memset (regs->cr, 0, CR_SIZE);
     regs->PX = 0;
     regs->todpr = 0;
     regs->ptimer = 0;
@@ -509,7 +508,7 @@ U32  pagesize;
             br += rl;
         }
         pageaddr += PAGEFRAME_PAGESIZE;
-    pageaddr &= PAGEFRAME_PAGEMASK;
+        pageaddr &= PAGEFRAME_PAGEMASK;
         pagesize = PAGEFRAME_PAGESIZE;
     } while (rl == (int)pagesize);
 
@@ -531,38 +530,40 @@ U32  pagesize;
 #endif
 
 
-int load_ipl (U16 devnum, REGS *regs)
+int load_ipl (U16 devnum, int cpu, int clear)
 {
     if(sysblk.arch_mode == ARCH_900)
         sysblk.arch_mode = ARCH_390;
+    sysblk.dummyregs.arch_mode = sysblk.arch_mode;
 #if defined(OPTION_FISHIO)
     ios_arch_mode = sysblk.arch_mode;
 #endif // defined(OPTION_FISHIO)
     switch(sysblk.arch_mode) {
 #if defined(_370)
-        case ARCH_370: return s370_load_ipl(devnum, regs);
+        case ARCH_370: return s370_load_ipl(devnum, cpu, clear);
 #endif
 #if defined(_390)
-        default:       return s390_load_ipl(devnum, regs);
+        default:       return s390_load_ipl(devnum, cpu, clear);
 #endif
     }
     return -1;
 }
 
 
-int load_hmc (char *fname, REGS *regs)
+int load_hmc (char *fname, int cpu, int clear)
 {
     if(sysblk.arch_mode == ARCH_900)
         sysblk.arch_mode = ARCH_390;
+    sysblk.dummyregs.arch_mode = sysblk.arch_mode;
 #if defined(OPTION_FISHIO)
     ios_arch_mode = sysblk.arch_mode;
 #endif // defined(OPTION_FISHIO)
     switch(sysblk.arch_mode) {
 #if defined(_370)
-        case ARCH_370: return s370_load_hmc(fname, regs);
+        case ARCH_370: return s370_load_hmc(fname, cpu, clear);
 #endif
 #if defined(_390)
-        default:       return s390_load_hmc(fname, regs);
+        default:       return s390_load_hmc(fname, cpu, clear);
 #endif
     }
     return -1;
@@ -587,6 +588,21 @@ void initial_cpu_reset(REGS *regs)
     regs->arch_mode = sysblk.arch_mode;
 }
 
+void system_reset(int cpu,int clear)
+{
+    switch(sysblk.arch_mode) {
+#if defined(_370)
+        case ARCH_370:
+            s370_system_reset (cpu,clear);
+            break;
+#endif
+#if defined(_390)
+        default:
+            s390_system_reset (cpu,clear);
+            break;
+#endif
+    }
+}
 
 int load_main(char *fname, RADR startloc)
 {
@@ -602,6 +618,26 @@ int load_main(char *fname, RADR startloc)
 #endif
     }
     return -1;
+}
+
+/* Function to clear storage */
+void storage_clear()
+{
+    if (!sysblk.main_clear)
+    {
+        memset(sysblk.mainstor,0,sysblk.mainsize);
+        memset(sysblk.storkeys,0,sysblk.mainsize / STORAGE_KEY_UNITSIZE);
+        sysblk.main_clear = 1;
+    }
+}
+/* Function to clear expanded storage */
+void xstorage_clear()
+{
+    if(sysblk.xpndsize && !sysblk.xpnd_clear)
+    {
+        memset(sysblk.xpndstor,0,sysblk.xpndsize * XSTORE_PAGESIZE);
+        sysblk.xpnd_clear = 1;
+    }
 }
 
 

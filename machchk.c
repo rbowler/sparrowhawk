@@ -1,7 +1,7 @@
-/* MACHCHK.C    (c) Copyright Jan Jaeger, 2000-2003                  */
+/* MACHCHK.C    (c) Copyright Jan Jaeger, 2000-2004                  */
 /*              ESA/390 Machine Check Functions                      */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 
 /*-------------------------------------------------------------------*/
 /* The machine check function supports dynamic I/O configuration.    */
@@ -82,7 +82,7 @@ void machine_check_crwpend()
     /* Signal waiting CPUs that an interrupt may be pending */
     obtain_lock (&sysblk.intlock);
     ON_IC_CHANRPT;
-    WAKEUP_WAITING_CPUS (ALL_CPUS, CPUSTATE_STARTED);
+    WAKEUP_CPUS_MASK (sysblk.waiting_mask);
     release_lock (&sysblk.intlock);
 
 } /* end function machine_check_crwpend */
@@ -281,14 +281,19 @@ int i;
     if( signo == SIGUSR2 )
     {
     DEVBLK *dev;
-
-        if(tid == sysblk.cnsltid || tid == sysblk.socktid)
+        if ( equal_threads( tid, sysblk.cnsltid ) ||
+             equal_threads( tid, sysblk.socktid ) )
             return;
         for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
-            if (dev->tid == tid || dev->shrdtid == tid) break;
+            if ( equal_threads( dev->tid, tid ) ||
+                 equal_threads( dev->shrdtid, tid ) )
+                 break;
         if( dev == NULL)
-            logmsg(_("HHCCP020E signal USR2 received for undetermined "
-                     "device\n"));
+        {
+            if (!sysblk.shutdown)
+                logmsg(_("HHCCP020E signal USR2 received for "
+                         "undetermined device\n"));
+        }
         else
             if(dev->ccwtrace)
                 logmsg(_("HHCCP021E signal USR2 received for device "
@@ -296,27 +301,23 @@ int i;
         return;
     }
 
-#ifdef FEATURE_CPU_RECONFIG
-    for (i = 0; i < MAX_CPU_ENGINES; i++)
-#else /*!FEATURE_CPU_RECONFIG*/
-    for (i = 0; i < sysblk.numcpu; i++)
-#endif /*!FEATURE_CPU_RECONFIG*/
+    for (i = 0; i < MAX_CPU; i++)
     {
-        if(sysblk.regs[i].cputid == tid)
+        if ( equal_threads( sysblk.cputid[i], tid ) )
         {
-            regs = sysblk.regs + i;
+            regs = sysblk.regs[i];
             break;
         }
     }
 
-    if(regs == NULL)
+    if (regs == NULL)
     {
         signal(signo, SIG_DFL);
         raise(signo);
         return;
     }
-    
-    if(regs->psw.mach)
+
+    if(MACHMASK(&regs->psw))
     {
 #if defined(_FEATURE_SIE)
         logmsg(_("HHCCP017I CPU%4.4X: Machine check due to host error: %s\n"),
@@ -369,29 +370,25 @@ int i;
 #if defined(_FEATURE_SIE)
                      regs->sie_active ? regs->guestregs :
 #endif /*defined(_FEAURE_SIE)*/
-                                                          regs, 
+                                                          regs,
 #if defined(_FEATURE_SIE)
           regs->sie_active ? regs->guestregs->ip :
 #endif /*defined(_FEAURE_SIE)*/
                                                    regs->ip);
         regs->cpustate = CPUSTATE_STOPPING;
         regs->checkstop = 1;
-        ON_IC_CPU_NOT_STARTED(regs);
+        ON_IC_INTERRUPT(regs);
 
         /* Notify other CPU's by means of a malfuction alert if possible */
         if (!try_obtain_lock(&sysblk.sigplock))
         {
             if(!try_obtain_lock(&sysblk.intlock))
             {
-#ifdef FEATURE_CPU_RECONFIG
-                for (i = 0; i < MAX_CPU_ENGINES; i++)
-#else /*!FEATURE_CPU_RECONFIG*/
-                for (i = 0; i < sysblk.numcpu; i++)
-#endif /*!FEATURE_CPU_RECONFIG*/
-                    if(i != regs->cpuad)
+                for (i = 0; i < MAX_CPU; i++)
+                    if (i != regs->cpuad && IS_CPU_ONLINE(i))
                     {
-                        ON_IC_MALFALT(&sysblk.regs[i]);
-                        sysblk.regs[i].malfcpu[regs->cpuad] = 1;
+                        ON_IC_MALFALT(sysblk.regs[i]);
+                        sysblk.regs[i]->malfcpu[regs->cpuad] = 1;
                     }
                 release_lock(&sysblk.intlock);
             }

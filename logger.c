@@ -1,4 +1,4 @@
-/* LOGGER.C     (c) Copyright Jan Jaeger, 2003                       */
+/* LOGGER.C     (c) Copyright Jan Jaeger, 2003-2004                  */
 /*              System logger functions                              */
 
 /* If standard output or standard error is redirected then the log   */
@@ -13,6 +13,7 @@
 
 #include "hercules.h"
 #include "opcode.h"             /* Required for SETMODE macro        */
+
 
 static ATTR  logger_attr;
 static COND  logger_cond;
@@ -67,7 +68,7 @@ int  i;
         {
             for(; linenumber > 0; linenumber--)
             {
-                if(!(tmpbuf = memrchr(msgbuf[i],'\n',msgcnt[i])))
+                if(!(tmpbuf = (void *)memrchr(msgbuf[i],'\n',msgcnt[i])))
                     break;
                 msgcnt[i] = tmpbuf - msgbuf[i];
             }
@@ -225,10 +226,12 @@ int bytes_read;
     while(logger_active)
     {
         bytes_read = read(logger_syslogfd[LOG_READ],logger_buffer + logger_currmsg,
-          ((logger_bufsize - logger_currmsg) > SSIZE_MAX ? SSIZE_MAX : logger_bufsize - logger_currmsg));
+          ((logger_bufsize - logger_currmsg) > LOG_DEFSIZE ? LOG_DEFSIZE : logger_bufsize - logger_currmsg));
 
         if(bytes_read == -1)
         {
+            if (EINTR == errno)
+                continue;
             if(logger_hrdcpy)
                 fprintf(logger_hrdcpy, _("HHCLG002E Error reading syslog pipe: %s\n"),
                   strerror(errno));
@@ -379,4 +382,81 @@ void logger_init(void)
 
     release_lock(&logger_lock);
 
+}
+
+
+void log_sethrdcpy(char *filename)
+{
+FILE *temp_hrdcpy = logger_hrdcpy;
+FILE *new_hrdcpy;
+int   new_hrdcpyfd;
+
+    if(!filename)
+    {
+        if(!logger_hrdcpy)
+        {
+            logmsg(_("HHCLG014E log not active\n"));
+            return;
+        }
+        else
+        {
+            obtain_lock(&logger_lock);
+            logger_hrdcpy = 0;
+        logger_hrdcpyfd = 0;
+            release_lock(&logger_lock);
+            fprintf(temp_hrdcpy,_("HHCLG015I log closed\n"));
+            fclose(temp_hrdcpy);
+            logmsg(_("HHCLG015I log closed\n"));
+            return;
+        }
+    }
+    else
+    {
+        new_hrdcpyfd = open(filename, 
+                O_WRONLY | O_CREAT | O_TRUNC /* O_SYNC */,
+                            S_IRUSR  | S_IWUSR | S_IRGRP);
+        if(new_hrdcpyfd < 0)
+        {
+            logmsg(_("HHCLG016E Error opening logfile %s: %s\n"),
+              filename,strerror(errno));
+            return;
+        }
+        else
+        {
+            if(!(new_hrdcpy = fdopen(new_hrdcpyfd,"w")))
+            {
+                logmsg(_("HHCLG017S log file fdopen failed for %s: %s\n"),
+                  filename, strerror(errno));
+                return;
+            }
+            else
+            {
+                setvbuf(new_hrdcpy, NULL, _IONBF, 0);
+
+                obtain_lock(&logger_lock);
+                logger_hrdcpy = new_hrdcpy;
+                logger_hrdcpyfd = new_hrdcpyfd;
+                release_lock(&logger_lock);
+
+        if(temp_hrdcpy)
+                {
+                    fprintf(temp_hrdcpy,_("HHCLG018I log switched to %s\n"),
+                      filename);
+                    fclose(temp_hrdcpy);
+                }
+            }
+        }
+    }
+}
+
+/* log_wakeup - Wakeup any blocked threads.  Useful during shutdown. */
+void log_wakeup(void *arg)
+{
+    UNREFERENCED(arg);
+
+    obtain_lock(&logger_lock);
+
+    broadcast_condition(&logger_cond);
+
+    release_lock(&logger_lock);
 }

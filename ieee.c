@@ -2,9 +2,13 @@
  * Hercules System/370, ESA/390, z/Architecture emulator
  * ieee.c
  * Binary (IEEE) Floating Point Instructions
- * Copyright (c) 2001 Willem Konynenberg <wfk@xos.nl>
+ * Copyright (c) 2001-2004 Willem Konynenberg <wfk@xos.nl>
  * TCEB, TCDB and TCXB contributed by Per Jessen, 20 September 2001.
  * THDER,THDR by Roger Bowler, 19 July 2003.
+ * Additional instructions by Roger Bowler, November 2004:
+ *  LXDBR,LXDB,LXEBR,LXEB,LDXBR,LEXBR,CXFBR,CXGBR,CFXBR,CGXBR,
+ *  MXDBR,MXDB,MDEBR,MDEB,MADBR,MADB,MAEBR,MAEB,MSDBR,MSDB,
+ *  MSEBR,MSEB,DIEBR,DIDBR,TBEDR,TBDR.
  * Licensed under the Q Public License
  * For details, see html/herclic.html
  */
@@ -18,15 +22,20 @@
  */
 
 /*
- * Based very loosely on float.c by Peter Kuschnerus, (c) 2000-2003.
+ * Based very loosely on float.c by Peter Kuschnerus, (c) 2000-2004.
  */
 
 /*
  * WARNING
- * This code is presently incomplete
- *
- * Instructions:
- * Only a subset of the instructions is actually implemented.
+ * For rapid implementation, this module was written to perform its   
+ * floating point arithmetic using the floating point operations of
+ * the native C compiler. This method is a short-cut which may under
+ * some circumstances produce results different from those required
+ * by the Principles of Operation manuals. For complete conformance
+ * with Principles of Operation, this module would need to be updated
+ * to perform all floating point arithmetic using explicitly coded
+ * bit operations, similar to how float.c implements the hexadecimal
+ * floating point instructions.
  *
  * Rounding:
  * The native IEEE implementation can be set to apply the rounding
@@ -58,6 +67,31 @@
 /* INFINITY.                           */
 #define _ISW_PREVENT_COMPWARN
 
+/* ABOUT THE MACRO BELOW :             */
+/* ISW 2004/09/15                      */
+/* Current GLIBC has an issue with     */
+/* feclearexcept that re-enables       */
+/* FE Traps by re-enabling Intel SSE   */
+/* trap mask. This leads to various    */
+/* machine checks from the CPU receiv- */
+/* ing SIGFPE. feholdexcept reestab-   */
+/* lishes the proper non-stop mask     */
+/*                                     */
+/* Until a proper conditional can be   */
+/* devised to only do the feholdexcept */
+/* when appropriate, it is there for   */
+/* all host architectures              */
+
+#ifndef FECLEAREXCEPT
+#define FECLEAREXCEPT(_e) \
+do { \
+    fenv_t __fe; \
+    feclearexcept((_e)); \
+    fegetenv(&__fe); \
+    feholdexcept(&__fe); \
+} while(0)
+#endif
+
 
 #include "hercules.h"
 #include "opcode.h"
@@ -72,16 +106,21 @@
 #include "ieee-w32.h"
 #endif
 
+/* Definitions of BFP rounding methods */
+#define RM_DEFAULT_ROUNDING             0
+#define RM_BIASED_ROUND_TO_NEAREST      1
+#define RM_ROUND_TO_NEAREST             4
+#define RM_ROUND_TOWARD_ZERO            5
+#define RM_ROUND_TOWARD_POS_INF         6
+#define RM_ROUND_TOWARD_NEG_INF         7
+
+/* Macro to generate program check if invalid BFP rounding method */
+#define BFPRM_CHECK(x,regs) \
+        {if (!((x)==0 || (x)==1 || ((x)>=4 && (x)<=7))) \
+            {program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);}}
+
 #if !defined(_IEEE_C)
 /* Architecture independent code goes within this ifdef */
-
-/* move this into an appropriate header file */
-#define DXC_INCREMENTED (0x04)
-#define DXC_INEXACT (0x08)
-#define DXC_UNDERFLOW   (0x10)
-#define DXC_OVERFLOW    (0x20)
-#define DXC_DIVBYZERO   (0x40)
-#define DXC_INVALID (0x80)
 
 #ifndef FE_INEXACT
 #define FE_INEXACT 0x00
@@ -148,6 +187,9 @@ struct sbfp {
 #define divide_ebfp ARCH_DEP(divide_ebfp)
 #define divide_lbfp ARCH_DEP(divide_lbfp)
 #define divide_sbfp ARCH_DEP(divide_sbfp)
+#define integer_ebfp ARCH_DEP(integer_ebfp)
+#define integer_lbfp ARCH_DEP(integer_lbfp)
+#define integer_sbfp ARCH_DEP(integer_sbfp)
 #define load_test_ebfp ARCH_DEP(load_test_ebfp)
 #define load_test_lbfp ARCH_DEP(load_test_lbfp)
 #define load_test_sbfp ARCH_DEP(load_test_sbfp)
@@ -169,6 +211,8 @@ struct sbfp {
 #define testdataclass_ebfp ARCH_DEP(testdataclass_ebfp)
 #define testdataclass_lbfp ARCH_DEP(testdataclass_lbfp)
 #define testdataclass_sbfp ARCH_DEP(testdataclass_sbfp)
+#define divint_lbfp ARCH_DEP(divint_lbfp)
+#define divint_sbfp ARCH_DEP(divint_sbfp)
 
 /*
  * Convert from C IEEE exception to Pop IEEE exception
@@ -182,25 +226,25 @@ static inline int ieee_exception(int raised, REGS * regs)
          * C doesn't tell use whether it truncated or incremented,
          * so we will just always claim it truncated.
          */
-        dxc = DXC_INEXACT;
+        dxc = DXC_IEEE_INEXACT_INCR;
     }
     /* This sequence sets dxc according to the priorities defined
      * in PoP, Ch. 6, Data Exception Code.
      */
     if (raised & FE_UNDERFLOW) {
-        dxc |= DXC_UNDERFLOW;
+        dxc |= DXC_IEEE_UF_EXACT;
     } else if (raised & FE_OVERFLOW) {
-        dxc |= DXC_OVERFLOW;
+        dxc |= DXC_IEEE_OF_EXACT;
     } else if (raised & FE_DIVBYZERO) {
-        dxc = DXC_DIVBYZERO;
+        dxc = DXC_IEEE_DIV_ZERO;
     } else if (raised & FE_INVALID) {
-        dxc = DXC_INVALID;
+        dxc = DXC_IEEE_INVALID_OP;
     }
 
     if (dxc & ((regs->fpc & FPC_MASK) >> 24)) {
         regs->dxc = dxc;
         regs->fpc |= dxc << 8;
-        if (dxc == DXC_DIVBYZERO || dxc == DXC_INVALID) {
+        if (dxc == DXC_IEEE_DIV_ZERO || dxc == DXC_IEEE_INVALID_OP) {
             /* suppress operation */
             program_interrupt(regs, PGM_DATA_EXCEPTION);
         }
@@ -725,6 +769,78 @@ static void put_sbfp(struct sbfp *op, U32 *fpr)
     fpr[0] = (op->sign ? 1<<31 : 0) | (op->exp<<23) | op->fract;
     //logmsg("sput exp=%d fract=%x r=%8.8x\n", op->exp, op->fract, *fpr);
 }
+ 
+/*
+ * Convert binary float to longer format
+ */
+static void lengthen_short_to_long(struct sbfp *op2, struct lbfp *op1, REGS *regs)
+{
+    switch (sbfpclassify(op2)) {
+    case FP_ZERO:
+        lbfpzero(op1, op2->sign);
+        break;
+    case FP_NAN:
+        if (sbfpissnan(op2)) {
+            ieee_exception(FE_INVALID, regs);
+            lbfpstoqnan(op1);
+        }
+        break;
+    case FP_INFINITE:
+        lbfpinfinity(op1, op2->sign);
+        break;
+    default:
+        sbfpston(op2);
+        op1->v = (double)op2->v;
+        lbfpntos(op1);
+        break;
+    }
+}
+
+static void lengthen_long_to_ext(struct lbfp *op2, struct ebfp *op1, REGS *regs)
+{
+    switch (lbfpclassify(op2)) {
+    case FP_ZERO:
+        ebfpzero(op1, op2->sign);
+        break;
+    case FP_NAN:
+        if (lbfpissnan(op2)) {
+            ieee_exception(FE_INVALID, regs);
+            ebfpstoqnan(op1);
+        }
+        break;
+    case FP_INFINITE:
+        ebfpinfinity(op1, op2->sign);
+        break;
+    default:
+        lbfpston(op2);
+        op1->v = (long double)op2->v;
+        ebfpntos(op1);
+        break;
+    }
+}
+
+static void lengthen_short_to_ext(struct sbfp *op2, struct ebfp *op1, REGS *regs)
+{
+    switch (sbfpclassify(op2)) {
+    case FP_ZERO:
+        ebfpzero(op1, op2->sign);
+        break;
+    case FP_NAN:
+        if (sbfpissnan(op2)) {
+            ieee_exception(FE_INVALID, regs);
+            ebfpstoqnan(op1);
+        }
+        break;
+    case FP_INFINITE:
+        ebfpinfinity(op1, op2->sign);
+        break;
+    default:
+        sbfpston(op2);
+        op1->v = (long double)op2->v;
+        ebfpntos(op1);
+        break;
+    }
+}
 #define _IEEE_C
 #endif  /* !defined(_IEEE_C) */
 
@@ -822,7 +938,115 @@ static int cnvt_bfp_to_hfp (struct lbfp *op, int class, U32 *fpr)
     fpr[0] = r0;
     fpr[1] = r1;
     return cc;
-}
+} /* end function cnvt_bfp_to_hfp */
+
+/*
+ * Convert hexadecimal long floating point register to 
+ * binary floating point and return condition code
+ * Roger Bowler, 28 Nov 2004
+ */
+static int cnvt_hfp_to_bfp (U32 *fpr, int rounding,
+        int bfp_fractbits, int bfp_emax, int bfp_ebias,
+        BYTE *result_sign, int *result_exp, U64 *result_fract)
+{
+    BYTE sign;
+    short expo;
+    U64 fract;
+    int roundup = 0;
+    int cc;
+
+    /* Break the source operand into sign, characteristic, fraction */
+    sign = fpr[0] >> 31;
+    expo = (fpr[0] >> 24) & 0x007F;
+    fract = ((U64)(fpr[0] & 0x00FFFFFF) << 32) | fpr[1];
+
+    /* Determine whether to round up or down */
+    switch (rounding) {
+    case RM_BIASED_ROUND_TO_NEAREST:
+    case RM_ROUND_TO_NEAREST: roundup = 0; break;
+    case RM_DEFAULT_ROUNDING:
+    case RM_ROUND_TOWARD_ZERO: roundup = 0; break;
+    case RM_ROUND_TOWARD_POS_INF: roundup = (sign ? 0 : 1); break;
+    case RM_ROUND_TOWARD_NEG_INF: roundup = sign; break;
+    } /* end switch(rounding) */
+
+    /* Convert HFP zero to BFP zero and return cond code 0 */
+    if (fract == 0) /* a = -0 or +0 */
+    {
+        *result_sign = sign;
+        *result_exp = 0;
+        *result_fract = 0;
+        return 0;
+    }
+
+    /* Set the condition code */
+    cc = sign ? 1 : 2;
+
+    /* Convert the HFP characteristic to a true binary exponent */
+    expo = (expo - 64) * 4;
+
+    /* Convert true binary exponent to a biased exponent */
+    expo += bfp_ebias;
+
+    /* Shift the fraction left until leftmost 1 is in bit 8 */
+    while ((fract & 0x0080000000000000ULL) == 0)
+    {
+        fract <<= 1;
+        expo -= 1;
+    }
+
+    /* Convert 56-bit fraction to 55-bit with implied 1 */
+    expo--;
+    fract &= 0x007FFFFFFFFFFFFFULL;
+
+    if (expo < -(bfp_fractbits-1)) /* |a| < Dmin */
+    {
+        if (expo == -(bfp_fractbits-1) - 1)
+        {
+            if (rounding == RM_BIASED_ROUND_TO_NEAREST
+                || rounding == RM_ROUND_TO_NEAREST)
+                roundup = 1;
+        }
+        if (roundup) { expo = 0; fract = 1; } /* Dmin */
+        else { expo = 0; fract = 0; } /* Zero */
+    }
+    else if (expo < 1) /* Dmin <= |a| < Nmin */
+    {
+        /* Reinstate implied 1 in preparation for denormalization */
+        fract |= 0x0080000000000000ULL;
+
+        /* Denormalize to get exponent back in range */
+        fract >>= (expo + (bfp_fractbits-1));
+        expo = 0;
+    }
+    else if (expo > (bfp_emax+bfp_ebias)) /* |a| > Nmax */
+    {
+        cc = 3;
+        if (roundup) { /* Inf */
+            expo = (bfp_emax+bfp_ebias) + 1;
+            fract = 0;
+        } else { /* Nmax */
+            expo = (bfp_emax+bfp_ebias);
+            fract = 0x007FFFFFFFFFFFFFULL - ((1<<(1+(55-bfp_fractbits)))-1);
+        } /* Nmax */
+    } /* end Nmax < |a| */
+     
+    /* Set the result sign and exponent */
+    *result_sign = sign;
+    *result_exp = expo;
+
+    /* Apply rounding before truncating to final fraction length */
+    if (roundup && (fract & (1<<(55-bfp_fractbits))))
+    {
+        fract += (1<<(55-bfp_fractbits));
+    }
+
+    /* Convert 55-bit fraction to result fraction length */
+    *result_fract = fract >> (55-bfp_fractbits);
+     
+    return cc;
+} /* end function cnvt_hfp_to_bfp */
+
 #define _CBH_FUNC
 #endif /*!defined(_CBH_FUNC)*/
 
@@ -835,7 +1059,7 @@ DEF_INST(convert_bfp_long_to_float_long_reg)
     int r1, r2;
     struct lbfp op2;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("THDR r1=%d r2=%d\n", r1, r2);
     HFPREG2_CHECK(r1, r2, regs);
 
@@ -848,7 +1072,7 @@ DEF_INST(convert_bfp_long_to_float_long_reg)
                          lbfpclassify(&op2),
                          regs->fpr + FPR2I(r1));
 
-}
+} /* end DEF_INST(convert_bfp_long_to_float_long_reg) */
 
 /*
  * B358 THDER - CONVERT BFP TO HFP (short to long)             [RRE]
@@ -860,7 +1084,7 @@ DEF_INST(convert_bfp_short_to_float_long_reg)
     struct sbfp op2;
     struct lbfp lbfp_op2;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("THDER r1=%d r2=%d\n", r1, r2);
     HFPREG2_CHECK(r1, r2, regs);
 
@@ -878,21 +1102,53 @@ DEF_INST(convert_bfp_short_to_float_long_reg)
                          sbfpclassify(&op2),
                          regs->fpr + FPR2I(r1));
 
-}
+} /* end DEF_INST(convert_bfp_short_to_float_long_reg) */
 
-
-/* The following instructions are not yet implemented */
-#define UNDEF_INST(_x) \
-        DEF_INST(_x) { ARCH_DEP(operation_exception) \
-        (inst,execflag,regs); }
 /*
  * B351 TBDR  - CONVERT HFP TO BFP (long)                      [RRF]
  */
- UNDEF_INST(convert_float_long_to_bfp_long_reg)
+DEF_INST(convert_float_long_to_bfp_long_reg)
+{
+    int r1, r2, m3;
+    struct lbfp op1;
+
+    RRF_M(inst, regs, r1, r2, m3);
+    //logmsg("TBDR r1=%d r2=%d\n", r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
+    BFPRM_CHECK(m3,regs);
+
+    regs->psw.cc = 
+        cnvt_hfp_to_bfp (regs->fpr + FPR2I(r1), m3, 
+            /*fractbits*/52, /*emax*/1023, /*ebias*/1023,
+            &(op1.sign), &(op1.exp), &(op1.fract));
+
+    put_lbfp(&op1, regs->fpr + FPR2I(r1));
+
+} /* end DEF_INST(convert_float_long_to_bfp_long_reg) */
+
 /*
  * B350 TBEDR - CONVERT HFP TO BFP (long to short)             [RRF]
  */
- UNDEF_INST(convert_float_long_to_bfp_short_reg)
+DEF_INST(convert_float_long_to_bfp_short_reg)
+{
+    int r1, r2, m3;
+    struct sbfp op1;
+    U64 fract;
+
+    RRF_M(inst, regs, r1, r2, m3);
+    //logmsg("TBEDR r1=%d r2=%d\n", r1, r2);
+    HFPREG2_CHECK(r1, r2, regs);
+    BFPRM_CHECK(m3,regs);
+
+    regs->psw.cc = 
+        cnvt_hfp_to_bfp (regs->fpr + FPR2I(r1), m3, 
+            /*fractbits*/23, /*emax*/127, /*ebias*/127,
+            &(op1.sign), &(op1.exp), &fract);
+    op1.fract = (U32)fract;
+
+    put_sbfp(&op1, regs->fpr + FPR2I(r1));
+
+} /* end DEF_INST(convert_float_long_to_bfp_short_reg) */
 #endif /*defined(FEATURE_FPS_EXTENSIONS)*/
 
 /*
@@ -920,7 +1176,7 @@ static int add_ebfp(struct ebfp *op1, struct ebfp *op2, REGS *regs)
 
     if ((cl1 == FP_NORMAL || cl1 == FP_SUBNORMAL)
       &&(cl2 == FP_NORMAL || cl2 == FP_SUBNORMAL)) {
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         ebfpston(op1);
         ebfpston(op2);
         op1->v += op2->v;
@@ -992,7 +1248,7 @@ DEF_INST(add_bfp_ext_reg)
     struct ebfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("AXBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
     BFPREGPAIR2_CHECK(r1, r2, regs);
@@ -1064,7 +1320,7 @@ static int add_lbfp(struct lbfp *op1, struct lbfp *op2, REGS *regs)
     } else if (cl2 == FP_ZERO) {
         /* result is first operand */
     } else {
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         lbfpston(op1);
         lbfpston(op2);
         op1->v += op2->v;
@@ -1091,7 +1347,7 @@ DEF_INST(add_bfp_long_reg)
     struct lbfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("ADBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -1117,7 +1373,7 @@ DEF_INST(add_bfp_long)
     struct lbfp op1, op2;
     int pgm_check;
 
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("ADB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
 
@@ -1188,7 +1444,7 @@ static int add_sbfp(struct sbfp *op1, struct sbfp *op2, REGS *regs)
     } else if (cl2 == FP_ZERO) {
         /* result is first operand */
     } else {
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         sbfpston(op1);
         sbfpston(op2);
         op1->v += op2->v;
@@ -1215,7 +1471,7 @@ DEF_INST(add_bfp_short_reg)
     struct sbfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("AEBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -1241,7 +1497,7 @@ DEF_INST(add_bfp_short)
     struct sbfp op1, op2;
     int pgm_check;
 
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("AEB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
 
@@ -1321,7 +1577,7 @@ DEF_INST(compare_bfp_ext_reg)
     struct ebfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("CXBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
     BFPREGPAIR2_CHECK(r1, r2, regs);
@@ -1400,7 +1656,7 @@ DEF_INST(compare_bfp_long_reg)
     struct lbfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("CDBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -1424,7 +1680,7 @@ DEF_INST(compare_bfp_long)
     struct lbfp op1, op2;
     int pgm_check;
 
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("CDB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
 
@@ -1502,7 +1758,7 @@ DEF_INST(compare_bfp_short_reg)
     struct sbfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("CEBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -1526,7 +1782,7 @@ DEF_INST(compare_bfp_short)
     struct sbfp op1, op2;
     int pgm_check;
 
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("CEB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
 
@@ -1549,7 +1805,7 @@ DEF_INST(compare_and_signal_bfp_ext_reg)
     struct ebfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("KXBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
     BFPREGPAIR2_CHECK(r1, r2, regs);
@@ -1573,7 +1829,7 @@ DEF_INST(compare_and_signal_bfp_long_reg)
     struct lbfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("KDBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -1597,7 +1853,7 @@ DEF_INST(compare_and_signal_bfp_long)
     struct lbfp op1, op2;
     int pgm_check;
 
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("KDB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
 
@@ -1620,7 +1876,7 @@ DEF_INST(compare_and_signal_bfp_short_reg)
     struct sbfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("KEBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -1644,7 +1900,7 @@ DEF_INST(compare_and_signal_bfp_short)
     struct sbfp op1, op2;
     int pgm_check;
 
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("KEB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
 
@@ -1661,6 +1917,29 @@ DEF_INST(compare_and_signal_bfp_short)
 /*
  * B396 CXFBR - CONVERT FROM FIXED (32 to extended BFP)        [RRE]
  */
+DEF_INST(convert_fix32_to_bfp_ext_reg)
+{
+    int r1, r2;
+    struct ebfp op1;
+    S32 op2;
+
+    RRE(inst, regs, r1, r2);
+    //logmsg("CXFBR r1=%d r2=%d\n", r1, r2);
+    BFPINST_CHECK(regs);
+    BFPREGPAIR2_CHECK(r1, r2, regs);
+
+    op2 = regs->GR_L(r2);
+
+    if (op2) {
+        op1.v = (long double)op2;
+        ebfpntos(&op1);
+    } else {
+        ebfpzero(&op1, 0);
+    }
+
+    put_ebfp(&op1, regs->fpr + FPR2I(r1));
+
+} /* end DEF_INST(convert_fix32_to_bfp_ext_reg) */
 
 /*
  * B395 CDFBR - CONVERT FROM FIXED (32 to long BFP)            [RRE]
@@ -1671,7 +1950,7 @@ DEF_INST(convert_fix32_to_bfp_long_reg)
     struct lbfp op1;
     S32 op2;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("CDFBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -1696,7 +1975,7 @@ DEF_INST(convert_fix32_to_bfp_short_reg)
     struct sbfp op1;
     S32 op2;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("CEFBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -1712,10 +1991,34 @@ DEF_INST(convert_fix32_to_bfp_short_reg)
     put_sbfp(&op1, regs->fpr + FPR2I(r1));
 }
 
+#if defined(FEATURE_ESAME)
 /*
  * B3A6 CXGBR - CONVERT FROM FIXED (64 to extended BFP)        [RRE]
  */
+DEF_INST(convert_fix64_to_bfp_ext_reg)
+{
+    int r1, r2;
+    struct ebfp op1;
+    S64 op2;
 
+    RRE(inst, regs, r1, r2);
+    //logmsg("CXGBR r1=%d r2=%d\n", r1, r2);
+    BFPINST_CHECK(regs);
+    BFPREGPAIR2_CHECK(r1, r2, regs);
+
+    op2 = regs->GR_G(r2);
+
+    if (op2) {
+        op1.v = (long double)op2;
+        ebfpntos(&op1);
+    } else {
+        ebfpzero(&op1, 0);
+    }
+
+    put_ebfp(&op1, regs->fpr + FPR2I(r1));
+
+} /* end DEF_INST(convert_fix64_to_bfp_ext_reg) */
+#endif /*defined(FEATURE_ESAME)*/
 
 #if defined(FEATURE_ESAME)
 /*
@@ -1727,7 +2030,7 @@ DEF_INST(convert_fix64_to_bfp_long_reg)
     struct lbfp op1;
     S64 op2;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("CDGBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -1754,7 +2057,7 @@ DEF_INST(convert_fix64_to_bfp_short_reg)
     struct sbfp op1;
     S64 op2;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("CEGBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -1774,6 +2077,68 @@ DEF_INST(convert_fix64_to_bfp_short_reg)
 /*
  * B39A CFXBR - CONVERT TO FIXED (extended BFP to 32)          [RRF]
  */
+DEF_INST(convert_bfp_ext_to_fix32_reg)
+{
+    int r1, r2, m3, raised;
+    S32 op1;
+    struct ebfp op2;
+    int pgm_check;
+
+    RRF_M(inst, regs, r1, r2, m3);
+    //logmsg("CFXBR r1=%d r2=%d\n", r1, r2);
+    BFPINST_CHECK(regs);
+    BFPREGPAIR2_CHECK(r1, r2, regs);
+    BFPRM_CHECK(m3,regs);
+
+    get_ebfp(&op2, regs->fpr + FPR2I(r2));
+
+    switch (ebfpclassify(&op2)) {
+    case FP_NAN:
+        pgm_check = ieee_exception(FE_INVALID, regs);
+        regs->psw.cc = 3;
+        regs->GR_L(r1) = 0x80000000;
+        if (regs->fpc & FPC_MASK_IMX) {
+            pgm_check = ieee_exception(FE_INEXACT, regs);
+            if (pgm_check) {
+                ebfpston(&op2);logmsg("INEXACT\n");
+                program_interrupt(regs, pgm_check);
+            }
+        }
+        break;
+    case FP_ZERO:
+        regs->psw.cc = 0;
+        regs->GR_L(r1) = 0;
+        break;
+    case FP_INFINITE:
+        pgm_check = ieee_exception(FE_INVALID, regs);
+        regs->psw.cc = 3;
+        if (op2.sign) {
+            regs->GR_L(r1) = 0x80000000;
+        } else {
+            regs->GR_L(r1) = 0x7FFFFFFF;
+        }
+        if (regs->fpc & FPC_MASK_IMX) {
+            pgm_check = ieee_exception(FE_INEXACT, regs);
+            if (pgm_check) {
+                program_interrupt(regs, pgm_check);
+            }
+        }
+        break;
+    default:
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
+        ebfpston(&op2);
+        op1 = (S32)op2.v;
+        raised = fetestexcept(FE_ALL_EXCEPT);
+        if (raised) {
+            pgm_check = ieee_exception(raised, regs);
+            if (pgm_check) {
+                program_interrupt(regs, pgm_check);
+            }
+        }
+        regs->GR_L(r1) = op1;
+        regs->psw.cc = op1 > 0 ? 2 : 1;
+    }
+} /* end DEF_INST(convert_bfp_ext_to_fix32_reg) */
 
 /*
  * B399 CFDBR - CONVERT TO FIXED (long BFP to 32)              [RRF]
@@ -1785,9 +2150,10 @@ DEF_INST(convert_bfp_long_to_fix32_reg)
     struct lbfp op2;
     int pgm_check;
 
-    RRF_M(inst, execflag, regs, r1, r2, m3);
+    RRF_M(inst, regs, r1, r2, m3);
     //logmsg("CFDBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
+    BFPRM_CHECK(m3,regs);
 
     get_lbfp(&op2, regs->fpr + FPR2I(r2));
 
@@ -1824,7 +2190,7 @@ DEF_INST(convert_bfp_long_to_fix32_reg)
         }
         break;
     default:
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         lbfpston(&op2);
         op1 = (S32)op2.v;
         raised = fetestexcept(FE_ALL_EXCEPT);
@@ -1849,9 +2215,10 @@ DEF_INST(convert_bfp_short_to_fix32_reg)
     struct sbfp op2;
     int pgm_check;
 
-    RRF_M(inst, execflag, regs, r1, r2, m3);
+    RRF_M(inst, regs, r1, r2, m3);
     //logmsg("CFEBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
+    BFPRM_CHECK(m3,regs);
 
     get_sbfp(&op2, regs->fpr + FPR2I(r2));
 
@@ -1887,7 +2254,7 @@ DEF_INST(convert_bfp_short_to_fix32_reg)
         }
         break;
     default:
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         sbfpston(&op2);
         op1 = (S32)op2.v;
         raised = fetestexcept(FE_ALL_EXCEPT);
@@ -1902,10 +2269,73 @@ DEF_INST(convert_bfp_short_to_fix32_reg)
     }
 }
 
+#if defined(FEATURE_ESAME)
 /*
  * B3AA CGXBR - CONVERT TO FIXED (extended BFP to 64)          [RRF]
  */
+DEF_INST(convert_bfp_ext_to_fix64_reg)
+{
+    int r1, r2, m3, raised;
+    S64 op1;
+    struct ebfp op2;
+    int pgm_check;
 
+    RRF_M(inst, regs, r1, r2, m3);
+    //logmsg("CGXBR r1=%d r2=%d\n", r1, r2);
+    BFPINST_CHECK(regs);
+    BFPREGPAIR2_CHECK(r1, r2, regs);
+    BFPRM_CHECK(m3,regs);
+
+    get_ebfp(&op2, regs->fpr + FPR2I(r2));
+
+    switch (ebfpclassify(&op2)) {
+    case FP_NAN:
+        pgm_check = ieee_exception(FE_INVALID, regs);
+        regs->psw.cc = 3;
+        regs->GR_G(r1) = 0x8000000000000000ULL;
+        if (regs->fpc & FPC_MASK_IMX) {
+            pgm_check = ieee_exception(FE_INEXACT, regs);
+            if (pgm_check) {
+                ebfpston(&op2);logmsg("INEXACT\n");
+                program_interrupt(regs, pgm_check);
+            }
+        }
+        break;
+    case FP_ZERO:
+        regs->psw.cc = 0;
+        regs->GR_G(r1) = 0;
+        break;
+    case FP_INFINITE:
+        pgm_check = ieee_exception(FE_INVALID, regs);
+        regs->psw.cc = 3;
+        if (op2.sign) {
+            regs->GR_G(r1) = 0x8000000000000000ULL;
+        } else {
+            regs->GR_G(r1) = 0x7FFFFFFFFFFFFFFFULL;
+        }
+        if (regs->fpc & FPC_MASK_IMX) {
+            pgm_check = ieee_exception(FE_INEXACT, regs);
+            if (pgm_check) {
+                program_interrupt(regs, pgm_check);
+            }
+        }
+        break;
+    default:
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
+        ebfpston(&op2);
+        op1 = (S64)op2.v;
+        raised = fetestexcept(FE_ALL_EXCEPT);
+        if (raised) {
+            pgm_check = ieee_exception(raised, regs);
+            if (pgm_check) {
+                program_interrupt(regs, pgm_check);
+            }
+        }
+        regs->GR_G(r1) = op1;
+        regs->psw.cc = op1 > 0 ? 2 : 1;
+    }
+} /* end DEF_INST(convert_bfp_ext_to_fix64_reg) */
+#endif /*defined(FEATURE_ESAME)*/
 
 #if defined(FEATURE_ESAME)
 /*
@@ -1918,9 +2348,10 @@ DEF_INST(convert_bfp_long_to_fix64_reg)
     struct lbfp op2;
     int pgm_check;
 
-    RRF_M(inst, execflag, regs, r1, r2, m3);
+    RRF_M(inst, regs, r1, r2, m3);
     //logmsg("CGDBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
+    BFPRM_CHECK(m3,regs);
 
     get_lbfp(&op2, regs->fpr + FPR2I(r2));
 
@@ -1939,7 +2370,7 @@ DEF_INST(convert_bfp_long_to_fix64_reg)
         break;
     case FP_ZERO:
         regs->psw.cc = 0;
-        regs->GR_L(r1) = 0;
+        regs->GR_G(r1) = 0;
         break;
     case FP_INFINITE:
         pgm_check = ieee_exception(FE_INVALID, regs);
@@ -1957,7 +2388,7 @@ DEF_INST(convert_bfp_long_to_fix64_reg)
         }
         break;
     default:
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         lbfpston(&op2);
         op1 = (S64)op2.v;
         raised = fetestexcept(FE_ALL_EXCEPT);
@@ -1984,9 +2415,10 @@ DEF_INST(convert_bfp_short_to_fix64_reg)
     struct sbfp op2;
     int pgm_check;
 
-    RRF_M(inst, execflag, regs, r1, r2, m3);
+    RRF_M(inst, regs, r1, r2, m3);
     //logmsg("CGEBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
+    BFPRM_CHECK(m3,regs);
 
     get_sbfp(&op2, regs->fpr + FPR2I(r2));
 
@@ -2004,7 +2436,7 @@ DEF_INST(convert_bfp_short_to_fix64_reg)
         break;
     case FP_ZERO:
         regs->psw.cc = 0;
-        regs->GR_L(r1) = 0;
+        regs->GR_G(r1) = 0;
         break;
     case FP_INFINITE:
         pgm_check = ieee_exception(FE_INVALID, regs);
@@ -2022,7 +2454,7 @@ DEF_INST(convert_bfp_short_to_fix64_reg)
         }
         break;
     default:
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         sbfpston(&op2);
         op1 = (S64)op2.v;
         raised = fetestexcept(FE_ALL_EXCEPT);
@@ -2038,6 +2470,141 @@ DEF_INST(convert_bfp_short_to_fix64_reg)
 }
 #endif /*defined(FEATURE_ESAME)*/
 
+
+/*
+ * FP INTEGER (extended)
+ */
+static int integer_ebfp(struct ebfp *op, int mode, REGS *regs)
+{
+    int r, raised;
+    UNREFERENCED(mode);
+
+    switch(ebfpclassify(op)) {
+    case FP_NAN:
+        if (ebfpissnan(op)) {
+            if (regs->fpc & FPC_MASK_IMI) {
+                ebfpstoqnan(op);
+                ieee_exception(FE_INEXACT, regs);
+            } else {
+                ieee_exception(FE_INVALID, regs);
+            }
+        }
+        break;
+    case FP_ZERO:
+    case FP_INFINITE:
+        break;
+    default:
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
+        ebfpston(op);
+        op->v = rint(op->v);
+        if (regs->fpc & FPC_MASK_IMX) {
+            ieee_exception(FE_INEXACT, regs);
+        } else {
+            ieee_exception(FE_INVALID, regs);
+        }
+        ebfpston(op);
+
+        raised = fetestexcept(FE_ALL_EXCEPT);
+        if (raised) {
+            r = ieee_exception(raised, regs);
+            if (r) {
+                return r;
+            }
+        }
+    } /* end switch */
+    return 0;
+
+} /* end function integer_ebfp */
+
+/*
+ * FP INTEGER (long)
+ */
+static int integer_lbfp(struct lbfp *op, int mode, REGS *regs)
+{
+    int r, raised;
+    UNREFERENCED(mode);
+
+    switch(lbfpclassify(op)) {
+    case FP_NAN:
+        if (lbfpissnan(op)) {
+            if (regs->fpc & FPC_MASK_IMI) {
+                lbfpstoqnan(op);
+                ieee_exception(FE_INEXACT, regs);
+            } else {
+                ieee_exception(FE_INVALID, regs);
+            }
+        }
+        break;
+    case FP_ZERO:
+    case FP_INFINITE:
+        break;
+    default:
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
+        lbfpston(op);
+        op->v = rint(op->v);
+        if (regs->fpc & FPC_MASK_IMX) {
+            ieee_exception(FE_INEXACT, regs);
+        } else {
+            ieee_exception(FE_INVALID, regs);
+        }
+        lbfpston(op);
+
+        raised = fetestexcept(FE_ALL_EXCEPT);
+        if (raised) {
+            r = ieee_exception(raised, regs);
+            if (r) {
+                return r;
+            }
+        }
+    } /* end switch */
+    return 0;
+
+} /* end function integer_lbfp */
+
+/*
+ * FP INTEGER (short)
+ */
+static int integer_sbfp(struct sbfp *op, int mode, REGS *regs)
+{
+    int r, raised;
+    UNREFERENCED(mode);
+
+    switch(sbfpclassify(op)) {
+    case FP_NAN:
+        if (sbfpissnan(op)) {
+            if (regs->fpc & FPC_MASK_IMI) {
+                sbfpstoqnan(op);
+                ieee_exception(FE_INEXACT, regs);
+            } else {
+                ieee_exception(FE_INVALID, regs);
+            }
+        }
+        break;
+    case FP_ZERO:
+    case FP_INFINITE:
+        break;
+    default:
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
+        sbfpston(op);
+        op->v = rint(op->v);
+        if (regs->fpc & FPC_MASK_IMX) {
+            ieee_exception(FE_INEXACT, regs);
+        } else {
+            ieee_exception(FE_INVALID, regs);
+        }
+        sbfpston(op);
+
+        raised = fetestexcept(FE_ALL_EXCEPT);
+        if (raised) {
+            r = ieee_exception(raised, regs);
+            if (r) {
+                return r;
+            }
+        }
+    } /* end switch */
+    return 0;
+
+} /* end function integer_sbfp */
 
 /*
  * DIVIDE (extended)
@@ -2099,7 +2666,7 @@ static int divide_ebfp(struct ebfp *op1, struct ebfp *op2, REGS *regs)
         }
         ebfpinfinity(op1, op2->sign ? !(op1->sign) : op1->sign);
     } else {
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         ebfpston(op1);
         ebfpston(op2);
         op1->v /= op2->v;
@@ -2124,7 +2691,7 @@ DEF_INST(divide_bfp_ext_reg)
     struct ebfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("DXBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
     BFPREGPAIR2_CHECK(r1, r2, regs);
@@ -2201,7 +2768,7 @@ static int divide_lbfp(struct lbfp *op1, struct lbfp *op2, REGS *regs)
         }
         lbfpinfinity(op1, op2->sign ? !(op1->sign) : op1->sign);
     } else {
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         lbfpston(op1);
         lbfpston(op2);
         op1->v /= op2->v;
@@ -2226,7 +2793,7 @@ DEF_INST(divide_bfp_long_reg)
     struct lbfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("DDBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -2252,7 +2819,7 @@ DEF_INST(divide_bfp_long)
     struct lbfp op1, op2;
     int pgm_check;
 
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("DDB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
 
@@ -2328,7 +2895,7 @@ static int divide_sbfp(struct sbfp *op1, struct sbfp *op2, REGS *regs)
         }
         sbfpinfinity(op1, op2->sign ? !(op1->sign) : op1->sign);
     } else {
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         sbfpston(op1);
         sbfpston(op2);
         op1->v /= op2->v;
@@ -2353,7 +2920,7 @@ DEF_INST(divide_bfp_short_reg)
     struct sbfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("DEBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -2379,7 +2946,7 @@ DEF_INST(divide_bfp_short)
     struct sbfp op1, op2;
     int pgm_check;
 
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("DEB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
 
@@ -2396,18 +2963,13 @@ DEF_INST(divide_bfp_short)
 }
 
 /*
- * B35B DIDBR - DIVIDE TO INTEGER (long BFP)                   [RRE]
- * B353 DIEBR - DIVIDE TO INTEGER (short BFP)                  [RXE]
- */
-
-/*
  * B38C EFPC  - EXTRACT FPC                                    [RRE]
  */
 DEF_INST(extract_floating_point_control_register)
 {
     int r1, unused;
 
-    RRE(inst, execflag, regs, r1, unused);
+    RRE(inst, regs, r1, unused);
     //logmsg("EFPC r1=%d\n", r1);
 
     regs->GR_L(r1) = regs->fpc;
@@ -2422,7 +2984,7 @@ DEF_INST(load_and_test_bfp_ext_reg)
     struct ebfp op;
     int pgm_check = 0;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("LTXBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
     BFPREGPAIR2_CHECK(r1, r2, regs);
@@ -2462,7 +3024,7 @@ DEF_INST(load_and_test_bfp_long_reg)
     struct lbfp op;
     int pgm_check = 0;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("LTDBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -2501,7 +3063,7 @@ DEF_INST(load_and_test_bfp_short_reg)
     struct sbfp op;
     int pgm_check = 0;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("LTEBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -2532,186 +3094,84 @@ DEF_INST(load_and_test_bfp_short_reg)
 }
 
 /*
- * B343 LCXBR - LOAD COMPLEMENT (extended BFP)                 [RRE]
- * B313 LCDBR - LOAD COMPLEMENT (extended BFP)                 [RRE]
- * B303 LCEBR - LOAD COMPLEMENT (extended BFP)                 [RRE]
- */
-
-/*
- * B357 FIEBR - LOAD FP INTEGER (extended BFP)                 [RRF]
+ * B357 FIEBR - LOAD FP INTEGER (short BFP)                    [RRF]
  */
 DEF_INST(load_fp_int_short_reg)
 {
-    int r1, r2, m3, raised, pgm_check;
-
+    int r1, r2, m3, pgm_check;
     struct sbfp op;
 
-    RRF_M(inst, execflag, regs, r1, r2, m3);
+    RRF_M(inst, regs, r1, r2, m3);
     //logmsg("FIEBR r1=%d, r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
+    BFPRM_CHECK(m3,regs);
+
     get_sbfp(&op, regs->fpr + FPR2I(r2));
 
-    switch(sbfpclassify(&op)) {
-    case FP_NAN:
-        if (sbfpissnan(&op)) {
-            if (regs->fpc & FPC_MASK_IMI) {
-                sbfpstoqnan(&op);
-                ieee_exception(FE_INEXACT, regs);
-            } else {
-                ieee_exception(FE_INVALID, regs);
-            }
-        }
-        break;
-    case FP_ZERO:
-    case FP_INFINITE:
-        break;
-    default:
+    pgm_check = integer_sbfp(&op, m3, regs);
 
-        feclearexcept(FE_ALL_EXCEPT);
-        sbfpston(&op);
-            op.v = rint(op.v);
-
-        if (regs->fpc & FPC_MASK_IMX) {
-            ieee_exception(FE_INEXACT, regs);
-        } else {
-            ieee_exception(FE_INVALID, regs);
-        }
-
-            sbfpston(&op);
-
-        raised = fetestexcept(FE_ALL_EXCEPT);
-
-        if (raised) {
-            pgm_check = ieee_exception(raised, regs);
-            if (pgm_check) {
-                program_interrupt(regs, pgm_check);
-            }
-        }
-
-    } /* end switch */
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
 
     put_sbfp(&op, regs->fpr + FPR2I(r1));
-}
+
+} /* end DEF_INST(load_fp_int_short_reg) */
 
 /*
  * B35F FIDBR - LOAD FP INTEGER (long BFP)                     [RRF]
  */
 DEF_INST(load_fp_int_long_reg)
 {
-    int r1, r2, m3, raised, pgm_check;
-
+    int r1, r2, m3, pgm_check;
     struct lbfp op;
 
-    RRF_M(inst, execflag, regs, r1, r2, m3);
+    RRF_M(inst, regs, r1, r2, m3);
     //logmsg("FIDBR r1=%d, r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
+    BFPRM_CHECK(m3,regs);
+
     get_lbfp(&op, regs->fpr + FPR2I(r2));
 
-    switch(lbfpclassify(&op)) {
-    case FP_NAN:
-        if (lbfpissnan(&op)) {
-            if (regs->fpc & FPC_MASK_IMI) {
-                lbfpstoqnan(&op);
-                ieee_exception(FE_INEXACT, regs);
-            } else {
-                ieee_exception(FE_INVALID, regs);
-            }
-        }
-        break;
-    case FP_ZERO:
-    case FP_INFINITE:
-        break;
-    default:
+    pgm_check = integer_lbfp(&op, m3, regs);
 
-        feclearexcept(FE_ALL_EXCEPT);
-        lbfpston(&op);
-            op.v = rint(op.v);
-
-        if (regs->fpc & FPC_MASK_IMX) {
-            ieee_exception(FE_INEXACT, regs);
-        } else {
-            ieee_exception(FE_INVALID, regs);
-        }
-
-            lbfpston(&op);
-
-        raised = fetestexcept(FE_ALL_EXCEPT);
-
-        if (raised) {
-            pgm_check = ieee_exception(raised, regs);
-            if (pgm_check) {
-                program_interrupt(regs, pgm_check);
-            }
-        }
-
-    } /* end switch */
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
 
     put_lbfp(&op, regs->fpr + FPR2I(r1));
-}
+
+} /* end DEF_INST(load_fp_int_long_reg) */
 
 /*
  * B347 FIXBR - LOAD FP INTEGER (extended BFP)                 [RRF]
  */
-
 DEF_INST(load_fp_int_ext_reg)
 {
-    int r1, r2, m3, raised, pgm_check;
-
+    int r1, r2, m3, pgm_check;
     struct ebfp op;
 
-    RRF_M(inst, execflag, regs, r1, r2, m3);
+    RRF_M(inst, regs, r1, r2, m3);
     //logmsg("FIXBR r1=%d, r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
+    BFPREGPAIR2_CHECK(r1, r2, regs);
+    BFPRM_CHECK(m3,regs);
+
     get_ebfp(&op, regs->fpr + FPR2I(r2));
 
-    switch(ebfpclassify(&op)) {
-    case FP_NAN:
-        if (ebfpissnan(&op)) {
-            if (regs->fpc & FPC_MASK_IMI) {
-                ebfpstoqnan(&op);
-                ieee_exception(FE_INEXACT, regs);
-            } else {
-                ieee_exception(FE_INVALID, regs);
-            }
-        }
-        break;
-    case FP_ZERO:
-    case FP_INFINITE:
-        break;
-    default:
+    pgm_check = integer_ebfp(&op, m3, regs);
 
-        feclearexcept(FE_ALL_EXCEPT);
-        ebfpston(&op);
-            op.v = rint(op.v);
-
-        if (regs->fpc & FPC_MASK_IMX) {
-            ieee_exception(FE_INEXACT, regs);
-        } else {
-            ieee_exception(FE_INVALID, regs);
-        }
-
-            ebfpston(&op);
-
-        raised = fetestexcept(FE_ALL_EXCEPT);
-
-        if (raised) {
-            pgm_check = ieee_exception(raised, regs);
-            if (pgm_check) {
-                program_interrupt(regs, pgm_check);
-            }
-        }
-
-    } /* end switch */
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
 
     put_ebfp(&op, regs->fpr + FPR2I(r1));
-}
+
+} /* end DEF_INST(load_fp_int_ext_reg) */
 
 /*
  * B29D LFPC  - LOAD FPC                                         [S]
- * B305 LXDBR - LOAD LENGTHENED (long to extended BFP)         [RRE]
- * ED05 LXDB  - LOAD LENGTHENED (long to extended BFP)         [RXE]
- * B306 LXEBR - LOAD LENGTHENED (short to extended BFP)        [RRE]
- * ED06 LXEB  - LOAD LENGTHENED (short to extended BFP)        [RXE]
+ * This instruction is in module esame.c
  */
 
 /*
@@ -2723,31 +3183,13 @@ DEF_INST(loadlength_bfp_short_to_long_reg)
     struct lbfp op1;
     struct sbfp op2;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("LDEBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
     get_sbfp(&op2, regs->fpr + FPR2I(r2));
 
-    switch (sbfpclassify(&op2)) {
-    case FP_ZERO:
-        lbfpzero(&op1, op2.sign);
-        break;
-    case FP_NAN:
-        if (sbfpissnan(&op2)) {
-            ieee_exception(FE_INVALID, regs);
-            lbfpstoqnan(&op1);
-        }
-        break;
-    case FP_INFINITE:
-        lbfpinfinity(&op1, op2.sign);
-        break;
-    default:
-        sbfpston(&op2);
-        op1.v = (double)op2.v;
-        lbfpntos(&op1);
-        break;
-    }
+    lengthen_short_to_long(&op2, &op1, regs);
 
     put_lbfp(&op1, regs->fpr + FPR2I(r1));
 }
@@ -2762,33 +3204,101 @@ DEF_INST(loadlength_bfp_short_to_long)
     struct lbfp op1;
     struct sbfp op2;
 
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("LDEB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
 
     vfetch_sbfp(&op2, effective_addr2, b2, regs);
 
-    switch (sbfpclassify(&op2)) {
-    case FP_ZERO:
-        lbfpzero(&op1, op2.sign);
-        break;
-    case FP_NAN:
-        if (sbfpissnan(&op2)) {
-            ieee_exception(FE_INVALID, regs);
-            lbfpstoqnan(&op1);
-        }
-        break;
-    case FP_INFINITE:
-        lbfpinfinity(&op1, op2.sign);
-        break;
-    default:
-        sbfpston(&op2);
-        op1.v = (double)op2.v;
-        lbfpntos(&op1);
-        break;
-    }
+    lengthen_short_to_long(&op2, &op1, regs);
 
     put_lbfp(&op1, regs->fpr + FPR2I(r1));
+}
+
+/*
+ * B305 LXDBR - LOAD LENGTHENED (long to extended BFP)         [RRE]
+ */
+DEF_INST(loadlength_bfp_long_to_ext_reg)
+{
+    int r1, r2;
+    struct ebfp op1;
+    struct lbfp op2;
+
+    RRE(inst, regs, r1, r2);
+    //logmsg("LXDBR r1=%d r2=%d\n", r1, r2);
+    BFPINST_CHECK(regs);
+    BFPREGPAIR2_CHECK(r1, 0, regs);
+
+    get_lbfp(&op2, regs->fpr + FPR2I(r2));
+
+    lengthen_long_to_ext(&op2, &op1, regs);
+
+    put_ebfp(&op1, regs->fpr + FPR2I(r1));
+}
+
+/*
+ * ED05 LXDB  - LOAD LENGTHENED (long to extended BFP)         [RXE]
+ */
+DEF_INST(loadlength_bfp_long_to_ext)
+{
+    int r1, b2;
+    VADR effective_addr2;
+    struct ebfp op1;
+    struct lbfp op2;
+
+    RXE(inst, regs, r1, b2, effective_addr2);
+    //logmsg("LXEB r1=%d b2=%d\n", r1, b2);
+    BFPINST_CHECK(regs);
+    BFPREGPAIR2_CHECK(r1, 0, regs);
+
+    vfetch_lbfp(&op2, effective_addr2, b2, regs);
+
+    lengthen_long_to_ext(&op2, &op1, regs);
+
+    put_ebfp(&op1, regs->fpr + FPR2I(r1));
+}
+
+/*
+ * B306 LXEBR - LOAD LENGTHENED (short to extended BFP)        [RRE]
+ */
+DEF_INST(loadlength_bfp_short_to_ext_reg)
+{
+    int r1, r2;
+    struct ebfp op1;
+    struct sbfp op2;
+
+    RRE(inst, regs, r1, r2);
+    //logmsg("LXEBR r1=%d r2=%d\n", r1, r2);
+    BFPINST_CHECK(regs);
+    BFPREGPAIR2_CHECK(r1, 0, regs);
+
+    get_sbfp(&op2, regs->fpr + FPR2I(r2));
+
+    lengthen_short_to_ext(&op2, &op1, regs);
+
+    put_ebfp(&op1, regs->fpr + FPR2I(r1));
+}
+
+/*
+ * ED06 LXEB  - LOAD LENGTHENED (short to extended BFP)        [RXE]
+ */
+DEF_INST(loadlength_bfp_short_to_ext)
+{
+    int r1, b2;
+    VADR effective_addr2;
+    struct ebfp op1;
+    struct sbfp op2;
+
+    RXE(inst, regs, r1, b2, effective_addr2);
+    //logmsg("LXEB r1=%d b2=%d\n", r1, b2);
+    BFPINST_CHECK(regs);
+    BFPREGPAIR2_CHECK(r1, 0, regs);
+
+    vfetch_sbfp(&op2, effective_addr2, b2, regs);
+
+    lengthen_short_to_ext(&op2, &op1, regs);
+
+    put_ebfp(&op1, regs->fpr + FPR2I(r1));
 }
 
 /*
@@ -2799,7 +3309,7 @@ DEF_INST(load_negative_bfp_ext_reg)
     int r1, r2;
     struct ebfp op;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("LNXBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
     BFPREGPAIR2_CHECK(r1, r2, regs);
@@ -2831,7 +3341,7 @@ DEF_INST(load_negative_bfp_long_reg)
     int r1, r2;
     struct lbfp op;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("LNDBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -2862,7 +3372,7 @@ DEF_INST(load_negative_bfp_short_reg)
     int r1, r2;
     struct sbfp op;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("LNEBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -2893,7 +3403,7 @@ DEF_INST(load_complement_bfp_ext_reg)
     int r1, r2;
     struct ebfp op;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("LCXBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
     BFPREGPAIR2_CHECK(r1, r2, regs);
@@ -2925,7 +3435,7 @@ DEF_INST(load_complement_bfp_long_reg)
     int r1, r2;
     struct lbfp op;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("LCDBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -2956,7 +3466,7 @@ DEF_INST(load_complement_bfp_short_reg)
     int r1, r2;
     struct sbfp op;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("LCEBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -2987,7 +3497,7 @@ DEF_INST(load_positive_bfp_ext_reg)
     int r1, r2;
     struct ebfp op;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("LPXBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
     BFPREGPAIR2_CHECK(r1, r2, regs);
@@ -3019,7 +3529,7 @@ DEF_INST(load_positive_bfp_long_reg)
     int r1, r2;
     struct lbfp op;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("LPDBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -3050,7 +3560,7 @@ DEF_INST(load_positive_bfp_short_reg)
     int r1, r2;
     struct sbfp op;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("LPEBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -3074,11 +3584,6 @@ DEF_INST(load_positive_bfp_short_reg)
 }
 
 /*
- * B345 LDXBR - LOAD ROUNDED (extended to long BFP)             [RRE]
- * B346 LEXBR - LOAD ROUNDED (long to short BFP)                [RRE]
- */
-
-/*
  * B344 LEDBR - LOAD ROUNDED (long to short BFP)                [RRE]
  */
 DEF_INST(round_bfp_long_to_short_reg)
@@ -3088,7 +3593,7 @@ DEF_INST(round_bfp_long_to_short_reg)
     struct lbfp op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("LEDBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -3108,7 +3613,7 @@ DEF_INST(round_bfp_long_to_short_reg)
         sbfpinfinity(&op1, op2.sign);
         break;
     default:
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         lbfpston(&op2);
         op1.v = (double)op2.v;
         sbfpntos(&op1);
@@ -3123,7 +3628,106 @@ DEF_INST(round_bfp_long_to_short_reg)
     }
 
     put_sbfp(&op1, regs->fpr + FPR2I(r1));
-}
+
+} /* end DEF_INST(round_bfp_long_to_short_reg) */
+
+/*
+ * B345 LDXBR - LOAD ROUNDED (extended to long BFP)             [RRE]
+ */
+DEF_INST(round_bfp_ext_to_long_reg)
+{
+    int r1, r2, raised;
+    struct lbfp op1;
+    struct ebfp op2;
+    int pgm_check;
+
+    RRE(inst, regs, r1, r2);
+    //logmsg("LDXBR r1=%d r2=%d\n", r1, r2);
+    BFPINST_CHECK(regs);
+    BFPREGPAIR2_CHECK(r1, r2, regs);
+
+    get_ebfp(&op2, regs->fpr + FPR2I(r2));
+
+    switch (ebfpclassify(&op2)) {
+    case FP_ZERO:
+        lbfpzero(&op1, op2.sign);
+        break;
+    case FP_NAN:
+        if (ebfpissnan(&op2)) {
+            ieee_exception(FE_INVALID, regs);
+            lbfpstoqnan(&op1);
+        }
+        break;
+    case FP_INFINITE:
+        lbfpinfinity(&op1, op2.sign);
+        break;
+    default:
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
+        ebfpston(&op2);
+        op1.v = op2.v;
+        lbfpntos(&op1);
+        raised = fetestexcept(FE_ALL_EXCEPT);
+        if (raised) {
+            pgm_check = ieee_exception(raised, regs);
+            if (pgm_check) {
+                program_interrupt(regs, pgm_check);
+            }
+        }
+        break;
+    }
+
+    put_lbfp(&op1, regs->fpr + FPR2I(r1));
+
+} /* end DEF_INST(round_bfp_ext_to_long_reg) */
+
+/*
+ * B346 LEXBR - LOAD ROUNDED (extended to short BFP)            [RRE]
+ */
+DEF_INST(round_bfp_ext_to_short_reg)
+{
+    int r1, r2, raised;
+    struct sbfp op1;
+    struct ebfp op2;
+    int pgm_check;
+
+    RRE(inst, regs, r1, r2);
+    //logmsg("LEXBR r1=%d r2=%d\n", r1, r2);
+    BFPINST_CHECK(regs);
+    BFPREGPAIR2_CHECK(r1, r2, regs);
+
+    get_ebfp(&op2, regs->fpr + FPR2I(r2));
+
+    switch (ebfpclassify(&op2)) {
+    case FP_ZERO:
+        sbfpzero(&op1, op2.sign);
+        break;
+    case FP_NAN:
+        if (ebfpissnan(&op2)) {
+            ieee_exception(FE_INVALID, regs);
+            sbfpstoqnan(&op1);
+        }
+        break;
+    case FP_INFINITE:
+        sbfpinfinity(&op1, op2.sign);
+        break;
+    default:
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
+        ebfpston(&op2);
+        op1.v = op2.v;
+        sbfpntos(&op1);
+        raised = fetestexcept(FE_ALL_EXCEPT);
+        if (raised) {
+            pgm_check = ieee_exception(raised, regs);
+            if (pgm_check) {
+                program_interrupt(regs, pgm_check);
+            }
+        }
+        break;
+    }
+
+    put_sbfp(&op1, regs->fpr + FPR2I(r1));
+
+} /* end DEF_INST(round_bfp_ext_to_short_reg) */
 
 /*
  * MULTIPLY (extended)
@@ -3184,7 +3788,7 @@ static int multiply_ebfp(struct ebfp *op1, struct ebfp *op2, REGS *regs)
     } else if (cl1 == FP_ZERO || cl2 == FP_ZERO) {
         ebfpzero(op1, op1->sign != op2->sign);
     } else {
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         ebfpston(op1);
         ebfpston(op2);
         op1->v *= op2->v;
@@ -3209,7 +3813,7 @@ DEF_INST(multiply_bfp_ext_reg)
     struct ebfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("MXBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
     BFPREGPAIR2_CHECK(r1, r2, regs);
@@ -3225,6 +3829,67 @@ DEF_INST(multiply_bfp_ext_reg)
         program_interrupt(regs, pgm_check);
     }
 }
+
+/*
+ * B307 MXDBR - MULTIPLY (long to extended BFP)                [RRE]
+ */
+DEF_INST(multiply_bfp_long_to_ext_reg)
+{
+    int r1, r2;
+    struct lbfp op1, op2;
+    struct ebfp eb1, eb2;
+    int pgm_check;
+
+    RRE(inst, regs, r1, r2);
+    //logmsg("MXDBR r1=%d r2=%d\n", r1, r2);
+    BFPINST_CHECK(regs);
+    BFPREGPAIR2_CHECK(r1, 0, regs);
+
+    get_lbfp(&op1, regs->fpr + FPR2I(r1));
+    get_lbfp(&op2, regs->fpr + FPR2I(r2));
+
+    lengthen_long_to_ext(&op1, &eb1, regs);
+    lengthen_long_to_ext(&op2, &eb2, regs);
+
+    pgm_check = multiply_ebfp(&eb1, &eb2, regs);
+
+    put_ebfp(&eb1, regs->fpr + FPR2I(r1));
+
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
+} /* end DEF_INST(multiply_bfp_long_to_ext_reg) */
+
+/*
+ * ED07 MXDB  - MULTIPLY (long to extended BFP)                [RXE]
+ */
+DEF_INST(multiply_bfp_long_to_ext)
+{
+    int r1, b2;
+    VADR effective_addr2;
+    struct lbfp op1, op2;
+    struct ebfp eb1, eb2;
+    int pgm_check;
+
+    RXE(inst, regs, r1, b2, effective_addr2);
+    //logmsg("MXDB r1=%d b2=%d\n", r1, b2);
+    BFPINST_CHECK(regs);
+    BFPREGPAIR2_CHECK(r1, 0, regs);
+
+    get_lbfp(&op1, regs->fpr + FPR2I(r1));
+    vfetch_lbfp(&op2, effective_addr2, b2, regs);
+
+    lengthen_long_to_ext(&op1, &eb1, regs);
+    lengthen_long_to_ext(&op2, &eb2, regs);
+
+    pgm_check = multiply_ebfp(&eb1, &eb2, regs);
+
+    put_ebfp(&eb1, regs->fpr + FPR2I(r1));
+
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
+} /* end DEF_INST(multiply_bfp_long_to_ext) */
 
 /*
  * MULTIPLY (long)
@@ -3285,7 +3950,7 @@ static int multiply_lbfp(struct lbfp *op1, struct lbfp *op2, REGS *regs)
     } else if (cl1 == FP_ZERO || cl2 == FP_ZERO) {
         lbfpzero(op1, op1->sign != op2->sign);
     } else {
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         lbfpston(op1);
         lbfpston(op2);
         op1->v *= op2->v;
@@ -3310,7 +3975,7 @@ DEF_INST(multiply_bfp_long_reg)
     struct lbfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("MDBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -3336,7 +4001,7 @@ DEF_INST(multiply_bfp_long)
     struct lbfp op1, op2;
     int pgm_check;
 
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("MDB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
 
@@ -3353,9 +4018,63 @@ DEF_INST(multiply_bfp_long)
 }
 
 /*
- * B307 MXDBR - MULTIPLY (long to extended BFP)                [RRE]
- * ED07 MXDB  - MULTIPLY (long to extended BFP)                [RXE]
+ * B30C MDEBR - MULTIPLY (short to long BFP)                   [RRE]
  */
+DEF_INST(multiply_bfp_short_to_long_reg)
+{
+    int r1, r2;
+    struct sbfp op1, op2;
+    struct lbfp lb1, lb2;
+    int pgm_check;
+
+    RRE(inst, regs, r1, r2);
+    //logmsg("MDEBR r1=%d r2=%d\n", r1, r2);
+    BFPINST_CHECK(regs);
+
+    get_sbfp(&op1, regs->fpr + FPR2I(r1));
+    get_sbfp(&op2, regs->fpr + FPR2I(r2));
+
+    lengthen_short_to_long(&op1, &lb1, regs);
+    lengthen_short_to_long(&op2, &lb2, regs);
+
+    pgm_check = multiply_lbfp(&lb1, &lb2, regs);
+
+    put_lbfp(&lb1, regs->fpr + FPR2I(r1));
+
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
+} /* end DEF_INST(multiply_bfp_short_to_long_reg) */
+
+/*
+ * ED0C MDEB  - MULTIPLY (short to long BFP)                   [RXE]
+ */
+DEF_INST(multiply_bfp_short_to_long)
+{
+    int r1, b2;
+    VADR effective_addr2;
+    struct sbfp op1, op2;
+    struct lbfp lb1, lb2;
+    int pgm_check;
+
+    RXE(inst, regs, r1, b2, effective_addr2);
+    //logmsg("MDEB r1=%d b2=%d\n", r1, b2);
+    BFPINST_CHECK(regs);
+
+    get_sbfp(&op1, regs->fpr + FPR2I(r1));
+    vfetch_sbfp(&op2, effective_addr2, b2, regs);
+
+    lengthen_short_to_long(&op1, &lb1, regs);
+    lengthen_short_to_long(&op2, &lb2, regs);
+
+    pgm_check = multiply_lbfp(&lb1, &lb2, regs);
+
+    put_lbfp(&lb1, regs->fpr + FPR2I(r1));
+
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
+} /* end DEF_INST(multiply_bfp_short_to_long) */
 
 /*
  * MULTIPLY (short)
@@ -3416,7 +4135,7 @@ static int multiply_sbfp(struct sbfp *op1, struct sbfp *op2, REGS *regs)
     } else if (cl1 == FP_ZERO || cl2 == FP_ZERO) {
         sbfpzero(op1, op1->sign != op2->sign);
     } else {
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         sbfpston(op1);
         sbfpston(op2);
         op1->v *= op2->v;
@@ -3441,7 +4160,7 @@ DEF_INST(multiply_bfp_short_reg)
     struct sbfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("MEEBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -3467,7 +4186,7 @@ DEF_INST(multiply_bfp_short)
     struct sbfp op1, op2;
     int pgm_check;
 
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("MEEB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
 
@@ -3484,18 +4203,237 @@ DEF_INST(multiply_bfp_short)
 }
 
 /*
- * B30C MDEBR - MULTIPLY (short to long BFP)                   [RRE]
- * ED0C MDEB  - MULTIPLY (short to long BFP)                   [RXE]
  * B31E MADBR - MULTIPLY AND ADD (long BFP)                    [RRF]
+ */
+DEF_INST(multiply_add_bfp_long_reg)
+{
+    int r1, r2, r3;
+    struct lbfp op1, op2, op3;
+    int pgm_check;
+
+    RRF_R(inst, regs, r1, r2, r3);
+    //logmsg("MADBR r1=%d r3=%d r2=%d\n", r1, r3, r2);
+    BFPINST_CHECK(regs);
+
+    get_lbfp(&op1, regs->fpr + FPR2I(r1));
+    get_lbfp(&op2, regs->fpr + FPR2I(r2));
+    get_lbfp(&op3, regs->fpr + FPR2I(r3));
+
+    multiply_lbfp(&op2, &op3, regs);
+    pgm_check = add_lbfp(&op1, &op2, regs);
+
+    put_lbfp(&op1, regs->fpr + FPR2I(r1));
+
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
+} /* end DEF_INST(multiply_add_bfp_long_reg) */
+
+/*
  * ED1E MADB  - MULTIPLY AND ADD (long BFP)                    [RXF]
+ */
+DEF_INST(multiply_add_bfp_long)
+{
+    int r1, r3, b2;
+    VADR effective_addr2;
+    struct lbfp op1, op2, op3;
+    int pgm_check;
+
+    RXF(inst, regs, r1, r3, b2, effective_addr2);
+    //logmsg("MADB r1=%d r3=%d b2=%d\n", r1, r3, b2);
+    BFPINST_CHECK(regs);
+
+    get_lbfp(&op1, regs->fpr + FPR2I(r1));
+    vfetch_lbfp(&op2, effective_addr2, b2, regs);
+    get_lbfp(&op3, regs->fpr + FPR2I(r3));
+
+    multiply_lbfp(&op2, &op3, regs);
+    pgm_check = add_lbfp(&op1, &op2, regs);
+
+    put_lbfp(&op1, regs->fpr + FPR2I(r1));
+
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
+} /* end DEF_INST(multiply_add_bfp_long) */
+
+/*
  * B30E MAEBR - MULTIPLY AND ADD (short BFP)                   [RRF]
+ */
+DEF_INST(multiply_add_bfp_short_reg)
+{
+    int r1, r2, r3;
+    struct sbfp op1, op2, op3;
+    int pgm_check;
+
+    RRF_R(inst, regs, r1, r2, r3);
+    //logmsg("MAEBR r1=%d r3=%d r2=%d\n", r1, r3, r2);
+    BFPINST_CHECK(regs);
+
+    get_sbfp(&op1, regs->fpr + FPR2I(r1));
+    get_sbfp(&op2, regs->fpr + FPR2I(r2));
+    get_sbfp(&op3, regs->fpr + FPR2I(r3));
+
+    multiply_sbfp(&op2, &op3, regs);
+    pgm_check = add_sbfp(&op1, &op2, regs);
+
+    put_sbfp(&op1, regs->fpr + FPR2I(r1));
+
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
+} /* end DEF_INST(multiply_add_bfp_short_reg) */
+
+/*
  * ED0E MAEB  - MULTIPLY AND ADD (short BFP)                   [RXF]
+ */
+DEF_INST(multiply_add_bfp_short)
+{
+    int r1, r3, b2;
+    VADR effective_addr2;
+    struct sbfp op1, op2, op3;
+    int pgm_check;
+
+    RXF(inst, regs, r1, r3, b2, effective_addr2);
+    //logmsg("MAEB r1=%d r3=%d b2=%d\n", r1, r3, b2);
+    BFPINST_CHECK(regs);
+
+    get_sbfp(&op1, regs->fpr + FPR2I(r1));
+    vfetch_sbfp(&op2, effective_addr2, b2, regs);
+    get_sbfp(&op3, regs->fpr + FPR2I(r3));
+
+    multiply_sbfp(&op2, &op3, regs);
+    pgm_check = add_sbfp(&op1, &op2, regs);
+
+    put_sbfp(&op1, regs->fpr + FPR2I(r1));
+
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
+} /* end DEF_INST(multiply_add_bfp_short) */
+
+/*
  * B31F MSDBR - MULTIPLY AND SUBTRACT (long BFP)               [RRF]
+ */
+DEF_INST(multiply_subtract_bfp_long_reg)
+{
+    int r1, r2, r3;
+    struct lbfp op1, op2, op3;
+    int pgm_check;
+
+    RRF_R(inst, regs, r1, r2, r3);
+    //logmsg("MSDBR r1=%d r3=%d r2=%d\n", r1, r3, r2);
+    BFPINST_CHECK(regs);
+
+    get_lbfp(&op1, regs->fpr + FPR2I(r1));
+    get_lbfp(&op2, regs->fpr + FPR2I(r2));
+    get_lbfp(&op3, regs->fpr + FPR2I(r3));
+
+    multiply_lbfp(&op2, &op3, regs);
+    op1.sign = !(op1.sign);
+    pgm_check = add_lbfp(&op1, &op2, regs);
+
+    put_lbfp(&op1, regs->fpr + FPR2I(r1));
+
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
+} /* end DEF_INST(multiply_subtract_bfp_long_reg) */
+
+/*
  * ED1F MSDB  - MULTIPLY AND SUBTRACT (long BFP)               [RXF]
+ */
+DEF_INST(multiply_subtract_bfp_long)
+{
+    int r1, r3, b2;
+    VADR effective_addr2;
+    struct lbfp op1, op2, op3;
+    int pgm_check;
+
+    RXF(inst, regs, r1, r3, b2, effective_addr2);
+    //logmsg("MSDB r1=%d r3=%d b2=%d\n", r1, r3, b2);
+    BFPINST_CHECK(regs);
+
+    get_lbfp(&op1, regs->fpr + FPR2I(r1));
+    vfetch_lbfp(&op2, effective_addr2, b2, regs);
+    get_lbfp(&op3, regs->fpr + FPR2I(r3));
+
+    multiply_lbfp(&op2, &op3, regs);
+    op1.sign = !(op1.sign);
+    pgm_check = add_lbfp(&op1, &op2, regs);
+
+    put_lbfp(&op1, regs->fpr + FPR2I(r1));
+
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
+} /* end DEF_INST(multiply_subtract_bfp_long) */
+
+/*
  * B30F MSEBR - MULTIPLY AND SUBTRACT (short BFP)              [RRF]
+ */
+DEF_INST(multiply_subtract_bfp_short_reg)
+{
+    int r1, r2, r3;
+    struct sbfp op1, op2, op3;
+    int pgm_check;
+
+    RRF_R(inst, regs, r1, r2, r3);
+    //logmsg("MSEBR r1=%d r3=%d r2=%d\n", r1, r3, r2);
+    BFPINST_CHECK(regs);
+
+    get_sbfp(&op1, regs->fpr + FPR2I(r1));
+    get_sbfp(&op2, regs->fpr + FPR2I(r2));
+    get_sbfp(&op3, regs->fpr + FPR2I(r3));
+
+    multiply_sbfp(&op2, &op3, regs);
+    op1.sign = !(op1.sign);
+    pgm_check = add_sbfp(&op1, &op2, regs);
+
+    put_sbfp(&op1, regs->fpr + FPR2I(r1));
+
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
+} /* end DEF_INST(multiply_subtract_bfp_short_reg) */
+
+/*
  * ED0F MSEB  - MULTIPLY AND SUBTRACT (short BFP)              [RXF]
+ */
+DEF_INST(multiply_subtract_bfp_short)
+{
+    int r1, r3, b2;
+    VADR effective_addr2;
+    struct sbfp op1, op2, op3;
+    int pgm_check;
+
+    RXF(inst, regs, r1, r3, b2, effective_addr2);
+    //logmsg("MSEB r1=%d r3=%d b2=%d\n", r1, r3, b2);
+    BFPINST_CHECK(regs);
+
+    get_sbfp(&op1, regs->fpr + FPR2I(r1));
+    vfetch_sbfp(&op2, effective_addr2, b2, regs);
+    get_sbfp(&op3, regs->fpr + FPR2I(r3));
+
+    multiply_sbfp(&op2, &op3, regs);
+    op1.sign = !(op1.sign);
+    pgm_check = add_sbfp(&op1, &op2, regs);
+
+    put_sbfp(&op1, regs->fpr + FPR2I(r1));
+
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
+} /* end DEF_INST(multiply_subtract_bfp_short) */
+
+/*
  * B384 SFPC  - SET FPC                                        [RRE]
+ * This instruction is in module esame.c
+ */
+  
+/*
  * B299 SRNM  - SET ROUNDING MODE                                [S]
+ * This instruction is in module esame.c
  */
 
 /*
@@ -3514,7 +4452,7 @@ static int squareroot_ebfp(struct ebfp *op, REGS *regs)
         if (op->sign) {
             return ieee_exception(FE_INVALID, regs);
         }
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         ebfpston(op);
         op->v = sqrtl(op->v);
         ebfpntos(op);
@@ -3536,7 +4474,7 @@ DEF_INST(squareroot_bfp_ext_reg)
     struct ebfp op;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("SQXBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
     BFPREGPAIR2_CHECK(r1, r2, regs);
@@ -3568,7 +4506,7 @@ static int squareroot_lbfp(struct lbfp *op, REGS *regs)
         if (op->sign) {
             return ieee_exception(FE_INVALID, regs);
         }
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         lbfpston(op);
         op->v = sqrtl(op->v);
         lbfpntos(op);
@@ -3590,7 +4528,7 @@ DEF_INST(squareroot_bfp_long_reg)
     struct lbfp op;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("SQDBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -3615,7 +4553,7 @@ DEF_INST(squareroot_bfp_long)
     struct lbfp op;
     int pgm_check;
 
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("SQDB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
 
@@ -3646,7 +4584,7 @@ static int squareroot_sbfp(struct sbfp *op, REGS *regs)
         if (op->sign) {
             return ieee_exception(FE_INVALID, regs);
         }
-        feclearexcept(FE_ALL_EXCEPT);
+        FECLEAREXCEPT(FE_ALL_EXCEPT);
         sbfpston(op);
         op->v = sqrtl(op->v);
         sbfpntos(op);
@@ -3668,7 +4606,7 @@ DEF_INST(squareroot_bfp_short_reg)
     struct sbfp op;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("SQEBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -3693,7 +4631,7 @@ DEF_INST(squareroot_bfp_short)
     struct sbfp op;
     int pgm_check;
 
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("SQEB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
 
@@ -3710,6 +4648,7 @@ DEF_INST(squareroot_bfp_short)
 
 /*
  * B29C STFPC - STORE FPC                                        [S]
+ * This instruction is in module esame.c
  */
 
 /*
@@ -3721,7 +4660,7 @@ DEF_INST(subtract_bfp_ext_reg)
     struct ebfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("SXBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
     BFPREGPAIR2_CHECK(r1, r2, regs);
@@ -3748,7 +4687,7 @@ DEF_INST(subtract_bfp_long_reg)
     struct lbfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("SDBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -3775,7 +4714,7 @@ DEF_INST(subtract_bfp_long)
     struct lbfp op1, op2;
     int pgm_check;
 
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("SDB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
 
@@ -3801,7 +4740,7 @@ DEF_INST(subtract_bfp_short_reg)
     struct sbfp op1, op2;
     int pgm_check;
 
-    RRE(inst, execflag, regs, r1, r2);
+    RRE(inst, regs, r1, r2);
     //logmsg("SEBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
 
@@ -3828,7 +4767,7 @@ DEF_INST(subtract_bfp_short)
     struct sbfp op1, op2;
     int pgm_check;
 
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("SEB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
 
@@ -3857,7 +4796,7 @@ DEF_INST(testdataclass_bfp_short)
     int bit;
 
     // parse instruction
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
 
     //logmsg("TCEB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
@@ -3887,7 +4826,6 @@ DEF_INST(testdataclass_bfp_short)
     regs->psw.cc = (effective_addr2>>bit) & 1;
 }
 
-
 /*
  * ED11 TCDB   - TEST DATA CLASS (long BFP)                   [RXE]
  * Per Jessen, Willem Konynenberg, 20 September 2001
@@ -3900,7 +4838,7 @@ DEF_INST(testdataclass_bfp_long)
     int bit;
 
     // parse instruction
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
 
     //logmsg("TCDB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
@@ -3942,7 +4880,7 @@ DEF_INST(testdataclass_bfp_ext)
     int bit;
 
     // parse instruction
-    RXE(inst, execflag, regs, r1, b2, effective_addr2);
+    RXE(inst, regs, r1, b2, effective_addr2);
 
     //logmsg("TCXB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
@@ -3972,6 +4910,120 @@ DEF_INST(testdataclass_bfp_ext)
     bit=31-bit;
     regs->psw.cc = (effective_addr2>>bit) & 1;
 }
+
+/*
+ * DIVIDE TO INTEGER (long)
+ */
+static int divint_lbfp(struct lbfp *op1, struct lbfp *op2,
+                        struct lbfp *op3, int mode, REGS *regs)
+{
+    int r;
+     
+    *op3 = *op1;
+    r = divide_lbfp(op3, op2, regs);
+    if (r) return r;
+
+    r = integer_lbfp(op3, mode, regs);
+    if (r) return r;
+
+    r = multiply_lbfp(op2, op3, regs);
+    if (r) return r;
+     
+    op2->sign = !(op2->sign);
+    r = add_lbfp(op1, op2, regs);
+    op2->sign = !(op2->sign);
+    if (r) return r;
+     
+    regs->psw.cc = 0;
+    return 0;
+} /* end function divint_lbfp */
+ 
+/*
+ * B35B DIDBR - DIVIDE TO INTEGER (long BFP)                   [RRF]
+ */
+DEF_INST(divide_integer_bfp_long_reg)
+{
+    int r1, r2, r3, m4;
+    struct lbfp op1, op2, op3;
+    int pgm_check;
+
+    RRF_RM(inst, regs, r1, r2, r3, m4);
+    //logmsg("DIDBR r1=%d r3=%d r2=%d m4=%d\n", r1, r3, r2, m4);
+    BFPINST_CHECK(regs);
+    if (r1 == r2 || r2 == r3 || r1 == r3) {
+        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
+    }
+    BFPRM_CHECK(m4,regs);
+
+    get_lbfp(&op1, regs->fpr + FPR2I(r1));
+    get_lbfp(&op2, regs->fpr + FPR2I(r2));
+
+    pgm_check = divint_lbfp(&op1, &op2, &op3, m4, regs);
+
+    put_lbfp(&op1, regs->fpr + FPR2I(r1));
+    put_lbfp(&op3, regs->fpr + FPR2I(r3));
+
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
+} /* end DEF_INST(divide_integer_bfp_long_reg) */
+
+/*
+ * DIVIDE TO INTEGER (short)
+ */
+static int divint_sbfp(struct sbfp *op1, struct sbfp *op2,
+                        struct sbfp *op3, int mode, REGS *regs)
+{
+    int r;
+
+    *op3 = *op1;
+    r = divide_sbfp(op3, op2, regs);
+    if (r) return r;
+
+    r = integer_sbfp(op3, mode, regs);
+    if (r) return r;
+
+    r = multiply_sbfp(op2, op3, regs);
+    if (r) return r;
+     
+    op2->sign = !(op2->sign);
+    r = add_sbfp(op1, op2, regs);
+    op2->sign = !(op2->sign);
+    if (r) return r;
+     
+    regs->psw.cc = 0;
+    return 0;
+} /* end function divint_sbfp */
+
+/*
+ * B353 DIEBR - DIVIDE TO INTEGER (short BFP)                  [RRF]
+ */
+DEF_INST(divide_integer_bfp_short_reg)
+{
+    int r1, r2, r3, m4;
+    struct sbfp op1, op2, op3;
+    int pgm_check;
+
+    RRF_RM(inst, regs, r1, r2, r3, m4);
+    //logmsg("DIEBR r1=%d r3=%d r2=%d m4=%d\n", r1, r3, r2, m4);
+    BFPINST_CHECK(regs);
+    if (r1 == r2 || r2 == r3 || r1 == r3) {
+        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
+    }
+    BFPRM_CHECK(m4,regs);
+
+    get_sbfp(&op1, regs->fpr + FPR2I(r1));
+    get_sbfp(&op2, regs->fpr + FPR2I(r2));
+
+    pgm_check = divint_sbfp(&op1, &op2, &op3, m4, regs);
+
+    put_sbfp(&op1, regs->fpr + FPR2I(r1));
+    put_sbfp(&op3, regs->fpr + FPR2I(r3));
+
+    if (pgm_check) {
+        program_interrupt(regs, pgm_check);
+    }
+} /* end DEF_INST(divide_integer_bfp_short_reg) */
 
 #endif  /* FEATURE_BINARY_FLOATING_POINT */
 

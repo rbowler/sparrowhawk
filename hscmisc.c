@@ -1,5 +1,5 @@
-/* HSCMISC.C    (c) Copyright Roger Bowler, 1999-2003                */
-/*              (c) Copyright Jan Jaeger, 1999-2003                  */
+/* HSCMISC.C    (c) Copyright Roger Bowler, 1999-2004                */
+/*              (c) Copyright Jan Jaeger, 1999-2004                  */
 /*              Misc. system command routines                        */
 
 
@@ -12,6 +12,77 @@
 
 #if !defined(_HSCMISC_C)
 #define _HSCMISC_C
+
+static int wait_sigq_pending = 0;
+
+static int is_wait_sigq_pending()
+{
+int pending;
+
+    obtain_lock(&sysblk.intlock);
+    pending = wait_sigq_pending;
+    release_lock(&sysblk.intlock);
+
+    return pending;
+}
+
+static void wait_sigq_resp()
+{
+int pending, i;
+    /* Wait for all CPU's to stop */
+    do
+    {
+        obtain_lock(&sysblk.intlock);
+        wait_sigq_pending = 0;
+        for (i = 0; i < MAX_CPU_ENGINES; i++)
+        if (IS_CPU_ONLINE(i)
+          && sysblk.regs[i]->cpustate != CPUSTATE_STOPPED)
+            wait_sigq_pending = 1;
+    pending = wait_sigq_pending;
+        release_lock(&sysblk.intlock);
+
+        if(pending)
+            SLEEP(1);
+    }
+    while(is_wait_sigq_pending());
+}
+
+static void cancel_wait_sigq()
+{
+    obtain_lock(&sysblk.intlock);
+    wait_sigq_pending = 0;
+    release_lock(&sysblk.intlock);
+}
+
+static void do_shutdown_now()
+{
+    system_shutdown();
+#if defined(FISH_HANG)
+    FishHangAtExit();
+#endif
+    fprintf(stderr, _("HHCIN099I Hercules terminated\n"));
+    fflush(stderr);
+    exit(0);
+}
+
+static void do_shutdown_wait()
+{
+    logmsg(_("HHCIN098I Shutdown initiated\n"));
+    wait_sigq_resp();
+    do_shutdown_now();
+}
+
+void do_shutdown()
+{
+TID tid;
+    if(is_wait_sigq_pending())
+        cancel_wait_sigq();
+    else
+        if(can_signal_quiesce() && !signal_quiesce(0,0))
+            create_thread(&tid, &sysblk.detattr, do_shutdown_wait, NULL);
+        else
+            do_shutdown_now();
+}
 
 /*-------------------------------------------------------------------*/
 /* Display general purpose registers                                 */
@@ -168,7 +239,7 @@ void display_subchannel (DEVBLK *dev)
 /*           start/end/value are returned in saddr, eaddr, newval    */
 /*      -1 = error message issued                                    */
 /*-------------------------------------------------------------------*/
-static int parse_range (BYTE *operand, U64 maxadr, U64 *sadrp,
+static int parse_range (char *operand, U64 maxadr, U64 *sadrp,
                         U64 *eadrp, BYTE *newval)
 {
 U64     opnd1, opnd2;                   /* Address/length operands   */
@@ -176,11 +247,15 @@ U64     saddr, eaddr;                   /* Range start/end addresses */
 int     rc;                             /* Return code               */
 int     n;                              /* Number of bytes altered   */
 int     h1, h2;                         /* Hexadecimal digits        */
-BYTE   *s;                              /* Alteration value pointer  */
+char    *s;                             /* Alteration value pointer  */
 BYTE    delim;                          /* Operand delimiter         */
 BYTE    c;                              /* Character work area       */
 
+#if SIZEOF_LONG == 8
+    rc = sscanf(operand, "%lx%c%lx%c", &opnd1, &delim, &opnd2, &c);
+#else
     rc = sscanf(operand, "%llx%c%llx%c", &opnd1, &delim, &opnd2, &c);
+#endif
 
     /* Process storage alteration operand */
     if (rc > 2 && delim == '=' && newval)
@@ -293,23 +368,20 @@ void get_connected_client (DEVBLK* dev, char** pclientip, char** pclientname)
 /*      if a translation exception occurs), the translation is       */
 /*      performed using a temporary copy of the CPU registers.       */
 /*-------------------------------------------------------------------*/
-static U16 ARCH_DEP(virt_to_abs) (RADR *aaptr, int *siptr,
+static U16 ARCH_DEP(virt_to_abs) (RADR *raptr, int *siptr,
                         VADR vaddr, int arn, REGS *regs, int acctype)
 {
-RADR    raddr;                          /* Real address              */
-RADR    aaddr;
+RADR    raddr;
 int     icode;
-int  private = 0;
-int  protect = 0;
-U16  xcode;
 REGS    gregs, hgregs;
 
 // FIXME: cygwin emits bad code here so we have the next stmt:
     if (!regs) return 0;
+
     gregs = *regs;
     gregs.ghostregs = 1;
 
-    if(gregs.sie_state)
+    if(SIE_MODE(&gregs))
     {
         hgregs = *gregs.hostregs;
         gregs.hostregs = &hgregs;
@@ -317,42 +389,18 @@ REGS    gregs, hgregs;
     }
 
     hgregs.ghostregs = 1;
-        
-    if(!(icode = setjmp(gregs.progjmp)))
+
+    if( !(icode = setjmp(gregs.progjmp)) )
     {
-//      hgregs.progjmp = gregs.progjmp;
         memcpy(&hgregs.progjmp,&gregs.progjmp,sizeof(jmp_buf));
-
-        /* Convert logical address to real address */
-        if (REAL_MODE(&gregs.psw))
-            raddr = vaddr;
-        else {
-            /* Return condition code 3 if translation exception */
-            if (ARCH_DEP(translate_addr) (vaddr, arn, &gregs,
-                                            acctype, &raddr,
-                                            &xcode, &private, &protect,
-                                            siptr))
-                return xcode;
-
-            /* Convert real address to absolute address */
-            aaddr = APPLY_PREFIXING (raddr, gregs.PX);
-
-            /* Program check if absolute address is outside main storage */
-            if (aaddr > gregs.mainlim)
-                return PGM_ADDRESSING_EXCEPTION;
-
-            SIE_TRANSLATE(&aaddr, ACCTYPE_SIE, &gregs);
-    
-            /* Program check if absolute address is outside main storage */
-            if (aaddr > gregs.mainlim)
-                return PGM_ADDRESSING_EXCEPTION;
-
-        }
+        ARCH_DEP(logical_to_main) (vaddr, arn, &gregs, acctype, 0);
+        raddr = SIE_MODE(&gregs) ? hgregs.dat.raddr : gregs.dat.raddr;
     }
     else
         return icode;
 
-    *aaptr = aaddr;
+    *siptr = gregs.dat.stid;
+    *raptr = raddr;
 
     return 0;
 
@@ -364,13 +412,13 @@ REGS    gregs, hgregs;
 /* Prefixes display by Rxxxxx: if draflag is 1                       */
 /* Returns number of characters placed in display buffer             */
 /*-------------------------------------------------------------------*/
-static int ARCH_DEP(display_real) (REGS *regs, RADR raddr, BYTE *buf,
+static int ARCH_DEP(display_real) (REGS *regs, RADR raddr, char *buf,
                                     int draflag)
 {
 RADR    aaddr;                          /* Absolute storage address  */
 int     i, j;                           /* Loop counters             */
 int     n = 0;                          /* Number of bytes in buffer */
-BYTE    hbuf[40];                       /* Hexadecimal buffer        */
+char    hbuf[40];                       /* Hexadecimal buffer        */
 BYTE    cbuf[17];                       /* Character buffer          */
 BYTE    c;                              /* Character work area       */
 
@@ -416,7 +464,7 @@ BYTE    c;                              /* Character work area       */
 /* Display virtual storage (up to 16 bytes, or until end of page)    */
 /* Returns number of characters placed in display buffer             */
 /*-------------------------------------------------------------------*/
-static int ARCH_DEP(display_virt) (REGS *regs, VADR vaddr, BYTE *buf,
+static int ARCH_DEP(display_virt) (REGS *regs, VADR vaddr, char *buf,
                                     int ar, int acctype)
 {
 RADR    raddr;                          /* Real address              */
@@ -425,9 +473,11 @@ int     stid;                           /* Segment table indication  */
 U16     xcode;                          /* Exception code            */
 
   #if defined(FEATURE_ESAME)
-    n = sprintf (buf, "V:%16.16llX:", (long long)vaddr);
+    n = sprintf (buf, "%c:%16.16llX:", ar == USE_REAL_ADDR ? 'R' : 'V',
+                               (long long)vaddr);
   #else /*!defined(FEATURE_ESAME)*/
-    n = sprintf (buf, "V:%8.8X:", vaddr);
+    n = sprintf (buf, "%c:%8.8X:", ar == USE_REAL_ADDR ? 'R' : 'V',
+                             vaddr);
   #endif /*!defined(FEATURE_ESAME)*/
     xcode = ARCH_DEP(virt_to_abs) (&raddr, &stid,
                                     vaddr, ar, regs, acctype);
@@ -513,7 +563,7 @@ char    type;
         }
 
         opcode = regs->mainstor[aaddr];
-        ilc = (opcode < 0x40) ? 2 : (opcode < 0xC0) ? 4 : 6;
+        ilc = ILC(opcode);
 
         if (aaddr + ilc > regs->mainlim)
         {
@@ -522,7 +572,7 @@ char    type;
         }
 
         memcpy(inst, regs->mainstor + aaddr, ilc);
-        logmsg("%c" F_RADR ": %2.2X%2.2X", 
+        logmsg("%c" F_RADR ": %2.2X%2.2X",
           stid == TEA_ST_PRIMARY ? 'P' :
           stid == TEA_ST_HOME ? 'H' :
           stid == TEA_ST_SECNDRY ? 'S' : 'R',
@@ -547,7 +597,7 @@ char    type;
 /*-------------------------------------------------------------------*/
 /* Process real storage alter/display command                        */
 /*-------------------------------------------------------------------*/
-static void ARCH_DEP(alter_display_real) (BYTE *opnd, REGS *regs)
+static void ARCH_DEP(alter_display_real) (char *opnd, REGS *regs)
 {
 U64     saddr, eaddr;                   /* Range start/end addresses */
 U64     maxadr;                         /* Highest real storage addr */
@@ -556,7 +606,7 @@ RADR    aaddr;                          /* Absolute storage address  */
 int     len;                            /* Number of bytes to alter  */
 int     i;                              /* Loop counter              */
 BYTE    newval[32];                     /* Storage alteration value  */
-BYTE    buf[100];                       /* Message buffer            */
+char    buf[100];                       /* Message buffer            */
 
     /* Set limit for address range */
   #if defined(FEATURE_ESAME)
@@ -596,7 +646,7 @@ BYTE    buf[100];                       /* Message buffer            */
 /*-------------------------------------------------------------------*/
 /* Process virtual storage alter/display command                     */
 /*-------------------------------------------------------------------*/
-static void ARCH_DEP(alter_display_virt) (BYTE *opnd, REGS *regs)
+static void ARCH_DEP(alter_display_virt) (char *opnd, REGS *regs)
 {
 U64     saddr, eaddr;                   /* Range start/end addresses */
 U64     maxadr;                         /* Highest virt storage addr */
@@ -610,7 +660,7 @@ int     n;                              /* Number of bytes in buffer */
 int     arn = 0;                        /* Access register number    */
 U16     xcode;                          /* Exception code            */
 BYTE    newval[32];                     /* Storage alteration value  */
-BYTE    buf[100];                       /* Message buffer            */
+char    buf[100];                       /* Message buffer            */
 
     /* Set limit for address range */
   #if defined(FEATURE_ESAME)
@@ -689,11 +739,11 @@ int     ilc;                            /* Instruction length        */
 int     b1=-1, b2=-1, x1;               /* Register numbers          */
 VADR    addr1 = 0, addr2 = 0;           /* Operand addresses         */
 #endif /*DISPLAY_INSTRUCTION_OPERANDS*/
-BYTE    buf[100];                       /* Message buffer            */
+char    buf[100];                       /* Message buffer            */
 int     n;                              /* Number of bytes in buffer */
 
   #if defined(_FEATURE_SIE)
-    if(regs->sie_state)
+    if(SIE_MODE(regs))
         logmsg(_("SIE: "));
   #endif /*defined(_FEATURE_SIE)*/
 
@@ -709,7 +759,7 @@ int     n;                              /* Number of bytes in buffer */
 
     /* Display the PSW */
     memset (qword, 0x00, sizeof(qword));
-    ARCH_DEP(store_psw) (regs, qword);
+    copy_psw (regs, qword);
     n = sprintf (buf,
                 "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X ",
                 qword[0], qword[1], qword[2], qword[3],
@@ -731,7 +781,7 @@ int     n;                              /* Number of bytes in buffer */
 
     /* Extract the opcode and determine the instruction length */
     opcode = inst[0];
-    ilc = (opcode < 0x40) ? 2 : (opcode < 0xC0) ? 4 : 6;
+    ilc = ILC(opcode);
 
     /* Display the instruction */
     n += sprintf (buf+n, "INST=%2.2X%2.2X", inst[0], inst[1]);
@@ -819,8 +869,9 @@ int     n;                              /* Number of bytes in buffer */
     /* Display storage at first storage operand location */
     if (b1 >= 0)
     {
-        if (REAL_MODE(&regs->psw))
-            n = ARCH_DEP(display_real) (regs, addr1, buf, 1);
+        if(REAL_MODE(&regs->psw))
+            n = ARCH_DEP(display_virt) (regs, addr1, buf, USE_REAL_ADDR,
+                                                ACCTYPE_READ);
         else
             n = ARCH_DEP(display_virt) (regs, addr1, buf, b1,
                                 (opcode == 0x44 ? ACCTYPE_INSTFETCH :
@@ -832,12 +883,14 @@ int     n;                              /* Number of bytes in buffer */
     /* Display storage at second storage operand location */
     if (b2 >= 0)
     {
-        if (REAL_MODE(&regs->psw)
+        if(
+            (REAL_MODE(&regs->psw)
             || (opcode == 0xB2 && inst[1] == 0x4B) /*LURA*/
             || (opcode == 0xB2 && inst[1] == 0x46) /*STURA*/
             || (opcode == 0xB9 && inst[1] == 0x05) /*LURAG*/
-            || (opcode == 0xB9 && inst[1] == 0x25)) /*STURG*/
-            n = ARCH_DEP(display_real) (regs, addr2, buf, 1);
+            || (opcode == 0xB9 && inst[1] == 0x25))) /*STURG*/
+            n = ARCH_DEP(display_virt) (regs, addr2, buf, USE_REAL_ADDR,
+                                                ACCTYPE_READ);
         else
             n = ARCH_DEP(display_virt) (regs, addr2, buf, b2,
                                         ACCTYPE_READ);
@@ -878,7 +931,7 @@ int     n;                              /* Number of bytes in buffer */
 /*-------------------------------------------------------------------*/
 /* Wrappers for architecture-dependent functions                     */
 /*-------------------------------------------------------------------*/
-void alter_display_real (BYTE *opnd, REGS *regs)
+void alter_display_real (char *opnd, REGS *regs)
 {
     switch(sysblk.arch_mode) {
 #if defined(_370)
@@ -898,7 +951,7 @@ void alter_display_real (BYTE *opnd, REGS *regs)
 } /* end function alter_display_real */
 
 
-void alter_display_virt (BYTE *opnd, REGS *regs)
+void alter_display_virt (char *opnd, REGS *regs)
 {
     switch(sysblk.arch_mode) {
 #if defined(_370)
@@ -962,7 +1015,6 @@ void disasm_stor(REGS *regs, char *opnd)
     }
 
 }
-
 
 /*-------------------------------------------------------------------*/
 /* Execute a Unix or Windows command                                 */

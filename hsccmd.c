@@ -1,5 +1,5 @@
-/* HSCCMD.C     (c) Copyright Roger Bowler, 1999-2003                */
-/*              (c) Copyright "Fish" (David B. Trout), 2002-2003     */
+/* HSCCMD.C     (c) Copyright Roger Bowler, 1999-2004                */
+/*              (c) Copyright "Fish" (David B. Trout), 2002-2004     */
 /*              Execute Hercules System Commands                     */
 /*                                                                   */
 /*   Released under the Q Public License (http://www.conmicro.cx/    */
@@ -26,13 +26,15 @@
 #include "w32chan.h"
 #endif /* defined(OPTION_FISHIO) */
 
+#include "tapedev.h"
+
 #if defined(FISH_HANG)
 extern  int   bFishHangAtExit;  // (set to true when shutting down)
 extern  void  FishHangInit(char* pszFileCreated, int nLineCreated);
 extern  void  FishHangReport();
 extern  void  FishHangAtExit();
 #endif // defined(FISH_HANG)
- 
+
 #if defined(FEATURE_ECPSVM)
 extern void ecpsvm_command(int argc,char **argv);
 #endif
@@ -40,11 +42,17 @@ extern void ecpsvm_command(int argc,char **argv);
 /* Added forward declaration to process_script_file ISW20030220-3 */
 int process_script_file(char *,int);
 
+#define MAX_DEVLIST_DEVICES  1024
+
 ///////////////////////////////////////////////////////////////////////
 /* quit or exit command - terminate the emulator */
 
 int quit_cmd(int argc, char *argv[],char *cmdline)
 {
+    /*
+    TID tid;
+    */
+
     UNREFERENCED(cmdline);
 
     /* ZZ FIXME: 'now' has a few nasty side-effects, it does not
@@ -52,20 +60,26 @@ int quit_cmd(int argc, char *argv[],char *cmdline)
                  any threads which might leave hercules in a 'hanging'
                  state.  The 'now' option should probably be removed
                  in a future version */
-    if (!(argc > 1 && !strcasecmp("now",argv[1])))
+    /*           'quit now' now requires 'quit' to be specified first.
+                 If hercules hangs during shutdown (probably due to
+                 some bug) then 'quit now' can be specified. Greg */
+
+    if ((argc > 1 && !strcasecmp("now",argv[1])))
     {
-//      usleep(10000); /* (fix by new shutdown sequence) */
-        system_shutdown();
+        if (!sysblk.shutdown)
+        {
+            logmsg(_("HHCPN151E specify 'quit' first\n"));
+            return -1;
+        }
+#if defined(FISH_HANG)
+        FishHangAtExit();
+#endif
+        fprintf(stderr, _("HHCIN099I Hercules terminated\n"));
+        fflush(stderr);
+        exit(0);
     }
 
-#if defined(FISH_HANG)
-    FishHangAtExit();
-#endif
-
-    fprintf(stderr, _("HHCIN099I Hercules terminated\n"));
-    fflush(stderr);
-
-    exit(0);
+    do_shutdown();
 
     return 0;   /* (make compiler happy) */
 }
@@ -76,7 +90,7 @@ int quit_cmd(int argc, char *argv[],char *cmdline)
 int History(int argc, char *argv[], char *cmdline)
 {
     UNREFERENCED(cmdline);
-    /* last stored command is for sure command 'hst' so remove it 
+    /* last stored command is for sure command 'hst' so remove it
        this is the only place where history_remove is called */
     history_remove();
     history_requested = 1;
@@ -101,7 +115,7 @@ int History(int argc, char *argv[], char *cmdline)
             history_requested = 0;
         }
         else {
-          if (x<0) { 
+          if (x<0) {
             if (history_relative_line(x) == -1)
               history_requested = 0;
           }
@@ -118,31 +132,53 @@ int History(int argc, char *argv[], char *cmdline)
 
 
 ///////////////////////////////////////////////////////////////////////
+/* log command - direct log output */
+
+int log_cmd(int argc, char *argv[],char *cmdline)
+{
+    UNREFERENCED(cmdline);
+
+    if(argc > 1)
+    {
+        if(strcasecmp("off",argv[1]))
+            log_sethrdcpy(argv[1]);
+        else
+            log_sethrdcpy(NULL);
+    }
+    else
+        logmsg(_("HHCPN160E no argument\n"));
+
+    return 0;
+}
+
+///////////////////////////////////////////////////////////////////////
+/* version command - display version information */
+
+int version_cmd(int argc, char *argv[],char *cmdline)
+{
+    UNREFERENCED(cmdline);
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
+    display_version (stdout, "Hercules ", TRUE);
+    return 0;
+}
+
+///////////////////////////////////////////////////////////////////////
 /* start command (or just Enter) - start CPU (or printer device if argument given) */
 
 int start_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
-
     UNREFERENCED(cmdline);
 
     if (argc < 2)
     {
-        /* Obtain the interrupt lock */
         obtain_lock (&sysblk.intlock);
-
-        /* Restart the CPU if it is in the stopped state */
-        regs->cpustate = CPUSTATE_STARTED;
-
-        /* Reset checkstop indicator */
-        regs->checkstop = 0;
-
-        OFF_IC_CPU_NOT_STARTED(regs);
-
-        /* Signal the stopped CPU to retest its stopped indicator */
-        WAKEUP_CPU (regs->cpuad);
-
-        /* Release the interrupt lock */
+        if (IS_CPU_ONLINE(sysblk.pcpu))
+        {
+            sysblk.regs[sysblk.pcpu]->cpustate = CPUSTATE_STARTED;
+            sysblk.regs[sysblk.pcpu]->checkstop = 0;
+            WAKEUP_CPU(sysblk.regs[sysblk.pcpu]);
+        }
         release_lock (&sysblk.intlock);
     }
     else
@@ -152,8 +188,8 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
         U16      devnum;
         int      stopprt;
         DEVBLK*  dev;
-        BYTE*    devclass;
-        BYTE     devnam[256];
+        char*    devclass;
+        char     devnam[256];
         int      rc;
         BYTE    c;                      /* Character work area       */
 
@@ -225,18 +261,17 @@ int g_cmd(int argc, char *argv[], char *cmdline)
 
 int stop_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
-
     UNREFERENCED(cmdline);
 
     if (argc < 2)
     {
         obtain_lock (&sysblk.intlock);
-
-        regs->cpustate = CPUSTATE_STOPPING;
-        ON_IC_CPU_NOT_STARTED(regs);
-        WAKEUP_CPU (regs->cpuad);
-
+        if (IS_CPU_ONLINE(sysblk.pcpu))
+        {
+            sysblk.regs[sysblk.pcpu]->cpustate = CPUSTATE_STOPPING;
+            ON_IC_INTERRUPT(sysblk.regs[sysblk.pcpu]);
+            WAKEUP_CPU (sysblk.regs[sysblk.pcpu]);
+        }
         release_lock (&sysblk.intlock);
     }
     else
@@ -245,8 +280,8 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
         U16      devnum;
         DEVBLK*  dev;
-        BYTE*    devclass;
-        BYTE     devnam[256];
+        char*    devclass;
+        char     devnam[256];
         BYTE    c;                      /* Character work area       */
 
         if (sscanf(argv[1], "%hx%c", &devnum, &c) != 1)
@@ -283,20 +318,24 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
 int startall_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
-    unsigned i;
+    int i;
+    U32 mask;
 
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
     UNREFERENCED(argv);
 
     obtain_lock (&sysblk.intlock);
-
-    for (i = 0; i < MAX_CPU_ENGINES; i++)
-        if(sysblk.regs[i].cpuonline && !regs->checkstop)
-            sysblk.regs[i].cpustate = CPUSTATE_STARTED;
-
-    WAKEUP_WAITING_CPUS (ALL_CPUS, CPUSTATE_ALL);
+    mask = (~sysblk.started_mask) & sysblk.config_mask;
+    for (i = 0; mask; i++)
+    {
+        if (mask & 1)
+        {
+            sysblk.regs[i]->cpustate = CPUSTATE_STARTED;
+            signal_condition(&sysblk.regs[i]->intcond);
+        }
+        mask >>= 1;
+    }
 
     release_lock (&sysblk.intlock);
 
@@ -308,7 +347,8 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
 int stopall_cmd(int argc, char *argv[], char *cmdline)
 {
-    unsigned i;
+    int i;
+    U32 mask;
 
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
@@ -316,18 +356,110 @@ int stopall_cmd(int argc, char *argv[], char *cmdline)
 
     obtain_lock (&sysblk.intlock);
 
-    for (i = 0; i < MAX_CPU_ENGINES; i++)
-        if(sysblk.regs[i].cpuonline)
+    mask = sysblk.started_mask;
+    for (i = 0; mask; i++)
+    {
+        if (mask & 1)
         {
-            sysblk.regs[i].cpustate = CPUSTATE_STOPPING;
-            ON_IC_CPU_NOT_STARTED(sysblk.regs + i);
-            WAKEUP_CPU(i);
+            sysblk.regs[i]->cpustate = CPUSTATE_STOPPING;
+            ON_IC_INTERRUPT(sysblk.regs[i]);
+            signal_condition(&sysblk.regs[i]->intcond);
         }
+        mask >>= 1;
+    }
 
     release_lock (&sysblk.intlock);
 
     return 0;
 }
+
+#ifdef _FEATURE_CPU_RECONFIG
+
+///////////////////////////////////////////////////////////////////////
+/* cf command - configure/deconfigure a CPU */
+
+int cf_cmd(int argc, char *argv[], char *cmdline)
+{
+    int on = -1;
+
+    UNREFERENCED(cmdline);
+
+    if (argc == 2)
+    {
+        if (!strcasecmp(argv[1],"on"))
+            on = 1;
+        else if (!strcasecmp(argv[1], "off"))
+            on = 0;
+    }
+
+    obtain_lock (&sysblk.intlock);
+
+    if (IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        if (on < 0)
+            logmsg(_("HHCPN152I CPU%4.4X online\n"), sysblk.pcpu);
+        else if (on == 0)
+            deconfigure_cpu(sysblk.pcpu);
+    }
+    else
+    {
+        if (on < 0)
+            logmsg(_("HHCPN153I CPU%4.4X offline\n"), sysblk.pcpu);
+        else if (on > 0)
+            configure_cpu(sysblk.pcpu);
+    }
+
+    release_lock (&sysblk.intlock);
+
+    if (on >= 0) cf_cmd (0, NULL, NULL);
+
+    return 0;
+}
+
+///////////////////////////////////////////////////////////////////////
+/* cfall command - configure/deconfigure all CPU's */
+
+int cfall_cmd(int argc, char *argv[], char *cmdline)
+{
+    int i;
+    int on = -1;
+
+    UNREFERENCED(cmdline);
+
+    if (argc == 2)
+    {
+        if (!strcasecmp(argv[1],"on"))
+            on = 1;
+        else if (!strcasecmp(argv[1], "off"))
+            on = 0;
+    }
+
+    obtain_lock (&sysblk.intlock);
+
+    for (i = 0; i < MAX_CPU_ENGINES; i++)
+        if (IS_CPU_ONLINE(i))
+        {
+            if (on < 0)
+                logmsg(_("HHCPN154I CPU%4.4X online\n"), i);
+            else if (on == 0)
+                deconfigure_cpu(i);
+        }
+        else
+        {
+            if (on < 0)
+                logmsg(_("HHCPN155I CPU%4.4X offline\n"), i);
+            else if (on > 0 && i < MAX_CPU)
+                configure_cpu(i);
+        }
+
+    release_lock (&sysblk.intlock);
+
+    if (on >= 0) cfall_cmd (0, NULL, NULL);
+
+    return 0;
+}
+
+#endif /*_FEATURE_CPU_RECONFIG*/
 
 ///////////////////////////////////////////////////////////////////////
 /* quiet command - quiet PANEL */
@@ -355,11 +487,21 @@ int quiet_cmd(int argc, char *argv[], char *cmdline)
 
 int clocks_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs;
 
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
     UNREFERENCED(argv);
+
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
+
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs = sysblk.regs[sysblk.pcpu];
 
     logmsg( _("HHCPN028I tod = %16.16llX\n"),
         (long long)(sysblk.todclk + regs->todoffset) << 8
@@ -385,6 +527,8 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
         FETCH_FW(itimer, psa->inttimer);
         logmsg( "          itm = %8.8X\n", itimer );
     }
+
+    release_lock(&sysblk.cpulock[sysblk.pcpu]);
 
     return 0;
 }
@@ -416,12 +560,100 @@ int iodelay_cmd(int argc, char *argv[], char *cmdline)
 
 #endif /*OPTION_IODELAY_KLUDGE*/
 
+#if defined( OPTION_SCSI_TAPE )
+///////////////////////////////////////////////////////////////////////
+/* scsimount command - display or adjust the SCSI auto-mount option */
+
+int scsimount_cmd(int argc, char *argv[], char *cmdline)
+{
+    DEVBLK*  dev;
+    char*    tapemsg;
+    char     volname[7];
+    BYTE     mountreq;
+    UNREFERENCED(cmdline);
+
+    if (argc > 1)
+    {
+        if ( strcasecmp( argv[1], "no" ) == 0 )
+        {
+            sysblk.auto_scsi_mount_secs = 0;
+        }
+        else
+        {
+            int auto_scsi_mount_secs; BYTE c;
+            if ( sscanf( argv[1], "%d%c", &auto_scsi_mount_secs, &c ) != 1
+                || auto_scsi_mount_secs <= 0 || auto_scsi_mount_secs > 99 )
+            {
+                logmsg
+                (
+                    _( "HHCCF068E Invalid value: %s; Enter \"help scsimount\" for help.\n" )
+
+                    ,argv[1]
+                );
+                return 0;
+            }
+            sysblk.auto_scsi_mount_secs = auto_scsi_mount_secs;
+        }
+    }
+
+    if ( sysblk.auto_scsi_mount_secs )
+        logmsg( _("SCSI auto-mount queries = every %d seconds (when needed)\n"),
+            sysblk.auto_scsi_mount_secs );
+    else
+        logmsg( _("SCSI auto-mount queries are disabled.\n") );
+
+    // Scan the device list looking for SCSI tape devices
+    // with outstanding mount requests...
+
+    for ( dev = sysblk.firstdev; dev; dev = dev->nextdev )
+    {
+        if (0
+            || !dev->allocated
+            ||  TAPEDEVT_SCSITAPE != dev->tapedevt
+            || !dev->tdparms.displayfeat
+            || !dev->stape_mountmon_tid
+            || (1
+                && TAPEDISPTYP_MOUNT       != dev->tapedisptype
+                && TAPEDISPTYP_UNMOUNT     != dev->tapedisptype
+                && TAPEDISPTYP_UMOUNTMOUNT != dev->tapedisptype
+               )
+        )
+            continue;
+
+        mountreq =
+            ( TAPEDISPTYP_MOUNT == dev->tapedisptype )
+            ||
+            (
+                TAPEDISPTYP_UMOUNTMOUNT == dev->tapedisptype
+                &&
+                ( dev->tapedispflags & TAPEDISPFLG_MESSAGE2 )
+            )
+            ? TRUE : FALSE;
+
+        if ( dev->tapedispflags & TAPEDISPFLG_MESSAGE2 )
+            tapemsg = (char *)dev->tapemsg2;
+        else
+            tapemsg = (char *)dev->tapemsg1;
+
+        volname[0]=0; if (*tapemsg && *(tapemsg+1))
+            strncpy( volname, tapemsg+1, sizeof(volname)-1 );
+        volname[sizeof(volname)-1]=0;
+
+        logmsg( _("HHCCF069I %s of volume \"%6.6s\" pending on drive %4.4X = %s\n"),
+            mountreq ? "Mount" : "Dismount",
+            volname, dev->devnum, dev->filename );
+    }
+
+    return 0;
+}
+#endif /* defined( OPTION_SCSI_TAPE ) */
+
 ///////////////////////////////////////////////////////////////////////
 /* cckd command */
 
 int cckd_cmd(int argc, char *argv[], char *cmdline)
 {
-    BYTE* p = strtok(cmdline+4," \t");
+    char* p = strtok(cmdline+4," \t");
 
     UNREFERENCED(argc);
     UNREFERENCED(argv);
@@ -487,11 +719,21 @@ int tt32stats_cmd(int argc, char *argv[], char *cmdline)
 
 int store_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs;
 
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
     UNREFERENCED(argv);
+
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
+
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs = sysblk.regs[sysblk.pcpu];
 
     /* Command is valid only when CPU is stopped */
     if (regs->cpustate != CPUSTATE_STOPPED)
@@ -502,6 +744,8 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
     /* Store status in 512 byte block at absolute location 0 */
     store_status (regs, 0);
+
+    release_lock(&sysblk.cpulock[sysblk.pcpu]);
 
     return 0;
 }
@@ -581,12 +825,26 @@ int sh_cmd(int argc, char *argv[], char *cmdline)
 
 int gpr_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs;
 
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
     UNREFERENCED(argv);
+
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
+
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs = sysblk.regs[sysblk.pcpu];
+
     display_regs (regs);
+
+    release_lock(&sysblk.cpulock[sysblk.pcpu]);
+
     return 0;
 }
 
@@ -595,12 +853,26 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
 int fpr_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs;
 
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
     UNREFERENCED(argv);
+
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
+
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs = sysblk.regs[sysblk.pcpu];
+
     display_fregs (regs);
+
+    release_lock(&sysblk.cpulock[sysblk.pcpu]);
+
     return 0;
 }
 
@@ -609,12 +881,26 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
 int cr_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs;
 
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
     UNREFERENCED(argv);
+
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
+
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs = sysblk.regs[sysblk.pcpu];
+
     display_cregs (regs);
+
+    release_lock(&sysblk.cpulock[sysblk.pcpu]);
+
     return 0;
 }
 
@@ -623,12 +909,26 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
 int ar_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs;
 
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
     UNREFERENCED(argv);
+
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
+
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs = sysblk.regs[sysblk.pcpu];
+
     display_aregs (regs);
+
+    release_lock(&sysblk.cpulock[sysblk.pcpu]);
+
     return 0;
 }
 
@@ -637,15 +937,29 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
 int pr_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs;
 
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
     UNREFERENCED(argv);
+
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
+
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs = sysblk.regs[sysblk.pcpu];
+
     if(regs->arch_mode == ARCH_900)
         logmsg( "Prefix=%16.16llX\n", (long long)regs->PX_G );
     else
         logmsg( "Prefix=%8.8X\n", regs->PX_L );
+
+    release_lock(&sysblk.cpulock[sysblk.pcpu]);
+
     return 0;
 }
 
@@ -654,12 +968,26 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
 int psw_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs;
 
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
     UNREFERENCED(argv);
+
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
+
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs = sysblk.regs[sysblk.pcpu];
+
     display_psw (regs);
+
+    release_lock(&sysblk.cpulock[sysblk.pcpu]);
+
     return 0;
 }
 
@@ -668,8 +996,6 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
 int restart_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
-
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
     UNREFERENCED(argv);
@@ -679,17 +1005,24 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
     /* Obtain the interrupt lock */
     obtain_lock (&sysblk.intlock);
 
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock (&sysblk.intlock);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu );
+        return 0;
+    }
+
     /* Indicate that a restart interrupt is pending */
-    ON_IC_RESTART(regs);
+    ON_IC_RESTART(sysblk.regs[sysblk.pcpu]);
 
     /* Ensure that a stopped CPU will recognize the restart */
-    if (regs->cpustate == CPUSTATE_STOPPED)
-        regs->cpustate = CPUSTATE_STOPPING;
+    if (sysblk.regs[sysblk.pcpu]->cpustate == CPUSTATE_STOPPED)
+        sysblk.regs[sysblk.pcpu]->cpustate = CPUSTATE_STOPPING;
 
-    regs->checkstop = 0;
+    sysblk.regs[sysblk.pcpu]->checkstop = 0;
 
     /* Signal CPU that an interrupt is pending */
-    WAKEUP_CPU (regs->cpuad);
+    WAKEUP_CPU (sysblk.regs[sysblk.pcpu]);
 
     /* Release the interrupt lock */
     release_lock (&sysblk.intlock);
@@ -702,11 +1035,25 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
 int r_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs;
 
     UNREFERENCED(argc);
     UNREFERENCED(argv);
+
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
+
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs = sysblk.regs[sysblk.pcpu];
+
     alter_display_real (cmdline+1, regs);
+
+    release_lock(&sysblk.cpulock[sysblk.pcpu]);
+
     return 0;
 }
 
@@ -715,11 +1062,25 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
 int u_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs;
 
     UNREFERENCED(argc);
     UNREFERENCED(argv);
+
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
+
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs = sysblk.regs[sysblk.pcpu];
+
     disasm_stor (regs, cmdline+2);
+
+    release_lock(&sysblk.cpulock[sysblk.pcpu]);
+
     return 0;
 }
 
@@ -728,11 +1089,25 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
 int v_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs;
 
     UNREFERENCED(argc);
     UNREFERENCED(argv);
+
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
+
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs = sysblk.regs[sysblk.pcpu];
+
     alter_display_virt (cmdline+1, regs);
+
+    release_lock(&sysblk.cpulock[sysblk.pcpu]);
+
     return 0;
 }
 
@@ -741,23 +1116,38 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
 int bset_cmd(int argc, char *argv[], char *cmdline)
 {
-BYTE c;                                 /* Character work area       */
+int  rc;                                /* Return code               */
+BYTE c[2];                              /* Character work area       */
 
     UNREFERENCED(cmdline);
 
-    if (argc < 2)
+    if (argc != 2)
     {
-        logmsg( _("HHCPN039E Missing argument\n") );
+        logmsg( _("HHCPN039E Invalid or missing argument\n") );
         return -1;
     }
 
-    if (sscanf(argv[1], "%llx%c", &sysblk.breakaddr, &c) == 1)
+#if SIZEOF_LONG == 8
+    rc = sscanf(argv[1], "%lx%c%lx%c", &sysblk.breakaddr[0], &c[0],
+                                         &sysblk.breakaddr[1], &c[2]);
+#else
+    rc = sscanf(argv[1], "%llx%c%llx%c", &sysblk.breakaddr[0], &c[0],
+                                         &sysblk.breakaddr[1], &c[2]);
+#endif
+    if (rc == 1 || (rc == 3 && c[0] == '-'))
     {
-        logmsg( _("HHCPN040I Setting breakpoint at %16.16llX\n"),
-            (long long)sysblk.breakaddr
+        if (rc == 1)
+            sysblk.breakaddr[1] = sysblk.breakaddr[0];
+        logmsg( _("HHCPN040I Setting breakpoint at %16.16llX-%16.16llx\n"),
+            (long long)sysblk.breakaddr[0],(long long)sysblk.breakaddr[1]
             );
         sysblk.instbreak = 1;
-        ON_IC_TRACE;
+        SET_IC_TRACE;
+    }
+    else
+    {
+        logmsg( _("HHCPN039E Invalid or missing argument\n") );
+        return -1;
     }
 
     return 0;
@@ -782,7 +1172,7 @@ int bdelete_cmd(int argc, char *argv[], char *cmdline)
 
 int i_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs;
 BYTE c;                                 /* Character work area       */
 
     int      rc = 0;
@@ -826,7 +1216,8 @@ BYTE c;                                 /* Character work area       */
                 break;
     }
 
-    if (rc == 3 && CPUSTATE_STOPPED == regs->cpustate)
+    regs = sysblk.regs[sysblk.pcpu];
+    if (rc == 3 && IS_CPU_ONLINE(sysblk.pcpu) && CPUSTATE_STOPPED == regs->cpustate)
         logmsg( _("HHCPN049W Are you sure you didn't mean 'ipl %4.4X' "
                   "instead?\n"), devnum );
 
@@ -849,7 +1240,7 @@ int ext_cmd(int argc, char *argv[], char *cmdline)
     logmsg( _("HHCPN050I Interrupt key depressed\n") );
 
     /* Signal waiting CPUs that an interrupt is pending */
-    WAKEUP_WAITING_CPUS (ALL_CPUS, CPUSTATE_ALL);
+    WAKEUP_CPUS_MASK (sysblk.waiting_mask);
 
     release_lock(&sysblk.intlock);
 
@@ -861,48 +1252,61 @@ int ext_cmd(int argc, char *argv[], char *cmdline)
 
 int loadparm_cmd(int argc, char *argv[], char *cmdline)
 {
-BYTE c;                                 /* Character work area       */
 
     UNREFERENCED(cmdline);
 
     /* Update IPL parameter if operand is specified */
     if (argc > 1)
-    {
-        unsigned i = 0, k = strlen(argv[1]);
-
-        memset (sysblk.loadparm, 0x4B, 8);
-
-        for (; i < k && i < 8; i++)
-        {
-            c = argv[1][i];
-            c = toupper(c);
-            if (!isprint(c)) c = '.';
-            sysblk.loadparm[i] = host_to_guest(c);
-        }
-    }
+    set_loadparm(argv[1]);
 
     /* Display IPL parameter */
-    logmsg( _("HHCPN051I LOADPARM=%c%c%c%c%c%c%c%c\n"),
-            guest_to_host(sysblk.loadparm[0]),
-            guest_to_host(sysblk.loadparm[1]),
-            guest_to_host(sysblk.loadparm[2]),
-            guest_to_host(sysblk.loadparm[3]),
-            guest_to_host(sysblk.loadparm[4]),
-            guest_to_host(sysblk.loadparm[5]),
-            guest_to_host(sysblk.loadparm[6]),
-            guest_to_host(sysblk.loadparm[7])
-        );
+    logmsg( _("HHCPN051I LOADPARM=%s\n"),str_loadparm());
 
     return 0;
+}
+/* system reset/system reset clear handlers */
+int reset_cmd(int ac,char *av[],char *cmdline,int clear)
+{
+    int i;
+
+    UNREFERENCED(ac);
+    UNREFERENCED(av);
+    UNREFERENCED(cmdline);
+    obtain_lock(&sysblk.intlock);
+
+    for (i = 0; i < MAX_CPU; i++)
+        if (IS_CPU_ONLINE(i)
+         && sysblk.regs[i]->cpustate != CPUSTATE_STOPPED)
+        {
+            release_lock(&sysblk.intlock);
+            logmsg( _("HHCPN053E System reset/clear rejected: All CPU's must be stopped\n") );
+            return -1;
+        }
+
+    system_reset (sysblk.pcpu, clear);
+
+    release_lock (&sysblk.intlock);
+
+    return 0;
+
+}
+int sysr_cmd(int ac,char *av[],char *cmdline)
+{
+    return(reset_cmd(ac,av,cmdline,0));
+}
+int sysc_cmd(int ac,char *av[],char *cmdline)
+{
+    return(reset_cmd(ac,av,cmdline,1));
 }
 
 ///////////////////////////////////////////////////////////////////////
 /* ipl xxxx command - IPL from device xxxx */
 
-int ipl_cmd(int argc, char *argv[], char *cmdline)
+
+int ipl_cmd2(int argc, char *argv[], char *cmdline, int clear)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
 BYTE c;                                 /* Character work area       */
+int  rc;                                /* Return code               */
 
     unsigned i;
     U16      devnum;
@@ -913,10 +1317,13 @@ BYTE c;                                 /* Character work area       */
         return -1;
     }
 
-    for (i = 0; i < MAX_CPU_ENGINES; i++)
-        if(sysblk.regs[i].cpuonline
-            && sysblk.regs[i].cpustate != CPUSTATE_STOPPED)
+    obtain_lock(&sysblk.intlock);
+
+    for (i = 0; i < MAX_CPU; i++)
+        if (IS_CPU_ONLINE(i)
+         && sysblk.regs[i]->cpustate != CPUSTATE_STOPPED)
         {
+            release_lock(&sysblk.intlock);
             logmsg( _("HHCPN053E ipl rejected: All CPU's must be stopped\n") );
             return -1;
         }
@@ -925,9 +1332,22 @@ BYTE c;                                 /* Character work area       */
     /* This is a load from the service processor             */
 
     if (sscanf(argv[1], "%hx%c", &devnum, &c) != 1)
-        return load_hmc(strtok(cmdline+3," \t"), regs);
+        rc = load_hmc(strtok(cmdline+3," \t"), sysblk.pcpu, clear);
+    else
+        rc = load_ipl (devnum, sysblk.pcpu, clear);
 
-    return load_ipl (devnum, regs);
+    release_lock (&sysblk.intlock);
+
+    return rc;
+}
+
+int ipl_cmd(int argc, char *argv[], char *cmdline)
+{
+    return(ipl_cmd2(argc,argv,cmdline,0));
+}
+int iplc_cmd(int argc, char *argv[], char *cmdline)
+{
+    return(ipl_cmd2(argc,argv,cmdline,1));
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -947,24 +1367,16 @@ BYTE c;                                 /* Character work area       */
         return -1;
     }
 
-    if (sscanf(argv[1], "%x%c", &cpu, &c) != 1)
+    if (sscanf(argv[1], "%x%c", &cpu, &c) != 1
+     || cpu < 0 || cpu >= MAX_CPU)
     {
         logmsg( _("HHCPN055E Target CPU %s is invalid\n"), argv[1] );
         return -1;
     }
 
-#ifdef _FEATURE_CPU_RECONFIG
-    if(cpu < 0 || cpu > MAX_CPU_ENGINES
-       || !sysblk.regs[cpu].cpuonline)
-#else /*!_FEATURE_CPU_RECONFIG*/
-    if(cpu < 0 || cpu > sysblk.numcpu)
-#endif /*!_FEATURE_CPU_RECONFIG*/
-    {
-        logmsg( _("HHCPN056E CPU%4.4X not configured\n"), cpu );
-        return -1;
-    }
-
+    sysblk.dummyregs.cpuad = cpu;
     sysblk.pcpu = cpu;
+
     return 0;
 }
 
@@ -997,13 +1409,11 @@ int SortDevBlkPtrsAscendingByDevnum(const void* pDevBlkPtr1, const void* pDevBlk
          (int)((*(DEVBLK**)pDevBlkPtr2)->devnum));
 }
 
-#define MAX_DEVLIST_DEVICES  1024
-
 int devlist_cmd(int argc, char *argv[], char *cmdline)
 {
     DEVBLK*  dev;
-    BYTE*    devclass;
-    BYTE     devnam[1024];
+    char*    devclass;
+    char     devnam[1024];
     DEVBLK** pDevBlkPtr;
     DEVBLK** orig_pDevBlkPtrs;
     size_t   nDevCount, i;
@@ -1140,7 +1550,7 @@ BYTE c;                                 /* Character work area       */
     }
 #endif
 
-    return  attach_device (devnum, argv[2], argc-3, (BYTE**)&argv[3]);
+    return  attach_device (devnum, argv[2], argc-3, &argv[3]);
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -1417,11 +1827,12 @@ int devtmax_cmd(int argc, char *argv[], char *cmdline)
 
 int ShadowFile_cmd(int argc, char *argv[], char *cmdline)
 {
-BYTE   *cmd = (BYTE*) cmdline;      /* Copy of panel command     */
-BYTE   *devascii;                   /* ASCII text device number  */
-DEVBLK *dev;                        /* -> Device block           */
-U16     devnum;                     /* Device number             */
-BYTE c;                                 /* Character work area       */
+char   *cmd = cmdline;                  /* Copy of panel command     */
+char   *devascii;                       /* ASCII text device number  */
+DEVBLK *dev;                            /* -> Device block           */
+U16     devnum;                         /* Device number             */
+BYTE    c;                              /* Character work area       */
+int     flag;                           /* Flag for sf-              */
 
     UNREFERENCED(argc);
     UNREFERENCED(argv);
@@ -1494,15 +1905,21 @@ BYTE c;                                 /* Character work area       */
                       cckd_sf_add (dev);
                       break;
 
-            case '-': if (devascii == NULL
-                       || strcmp(devascii, "merge") == 0)
-                          cckd_sf_remove (dev, 1);
+            case '-': flag = -1;
+                      if (devascii == NULL)
+                          flag = 1;
+                      else if (strcmp(devascii, "merge") == 0)
+                          flag = 1;
                       else if (strcmp(devascii, "nomerge") == 0)
-                          cckd_sf_remove (dev, 0);
+                          flag = 0;
+                      else if (strcmp(devascii, "force") == 0)
+                          flag = 2;
+                      if (flag >= 0)
+                          cckd_sf_remove (dev, flag);
                       else
                       {
                           logmsg( _("HHCPN087E Operand must be "
-                                    "`merge' or `nomerge'\n") );
+                                    "`merge', `nomerge' or `force'\n") );
                           return -1;
                       }
                       break;
@@ -1532,8 +1949,8 @@ BYTE c;                                 /* Character work area       */
                       cckd_sf_stats (dev);
                       break;
 
-            default:  logmsg( _("HHCPN091E Command must be `sf+', `sf-', "
-                                "`sf=', `sfc', or `sfd'\n") );
+            default:  logmsg( _("HHCPN091E Command must be 'sf+', 'sf-', "
+                                "'sf=', 'sfc', or 'sfd'\n") );
                       return -1;
             }
 
@@ -1604,7 +2021,7 @@ BYTE c;                                 /* Character work area       */
     /* Call the device init routine to do the hard work */
     if (argc > 2)
     {
-        if ((dev->hnd->init)(dev, argc-2, (BYTE**)&argv[2]) < 0)
+        if ((dev->hnd->init)(dev, argc-2, &argv[2]) < 0)
         {
             logmsg( _("HHCPN097E Initialization failed for device %4.4X\n"),
                       devnum );
@@ -1625,10 +2042,10 @@ BYTE c;                                 /* Character work area       */
 
 int savecore_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs;
 
-    BYTE   *fname;                      /* -> File name (ASCIIZ)     */
-    BYTE   *loadaddr;                   /* loadcore memory address   */
+    char   *fname;                      /* -> File name (ASCIIZ)     */
+    char   *loadaddr;                   /* loadcore memory address   */
     U32     aaddr;                      /* Absolute storage address  */
     U32     aaddr2;                     /* Absolute storage address  */
     int     fd;                         /* File descriptor           */
@@ -1643,6 +2060,16 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
     }
 
     fname = argv[1];
+
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
+
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs = sysblk.regs[sysblk.pcpu];
 
     if (argc < 3 || '*' == *(loadaddr = argv[2]))
     {
@@ -1659,6 +2086,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
     }
     else if (sscanf(loadaddr, "%x", &aaddr) !=1)
     {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
         logmsg( _("HHCPN100E savecore: invalid starting address: %s \n"),
                   loadaddr );
         return -1;
@@ -1678,6 +2106,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
     }
     else if (sscanf(loadaddr, "%x", &aaddr2) !=1)
     {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
         logmsg( _("HHCPN101E savecore: invalid ending address: %s \n"),
                   loadaddr );
         return -1;
@@ -1686,12 +2115,14 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
     /* Command is valid only when CPU is stopped */
     if (CPUSTATE_STOPPED != regs->cpustate)
     {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
         logmsg( _("HHCPN102E savecore rejected: CPU not stopped\n") );
         return -1;
     }
 
     if (aaddr >= aaddr2)
     {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
         logmsg( _("HHCPN103E invalid range: %8.8X-%8.8X\n"), aaddr, aaddr2 );
         return -1;
     }
@@ -1702,6 +2133,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
     if ((fd = open(fname, O_CREAT|O_WRONLY|O_EXCL|O_BINARY, S_IREAD|S_IWRITE|S_IRGRP)) < 0)
     {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
         logmsg( _("HHCPN105E savecore error creating %s: %s\n"),
                   fname, strerror(errno) );
         return -1;
@@ -1717,6 +2149,8 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
     close(fd);
 
+    release_lock(&sysblk.cpulock[sysblk.pcpu]);
+
     return 0;
 }
 
@@ -1725,11 +2159,11 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
 int loadcore_cmd(int argc, char *argv[], char *cmdline)
 {
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs;
 
-    BYTE   *fname;                      /* -> File name (ASCIIZ)     */
+    char   *fname;                      /* -> File name (ASCIIZ)     */
     struct stat statbuff;               /* Buffer for file status    */
-    BYTE   *loadaddr;                   /* loadcore memory address   */
+    char   *loadaddr;                   /* loadcore memory address   */
     U32     aaddr;                      /* Absolute storage address  */
     int     len;                        /* Number of bytes read      */
 
@@ -1763,9 +2197,20 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
         }
     }
 
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
+
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs = sysblk.regs[sysblk.pcpu];
+
     /* Command is valid only when CPU is stopped */
     if (CPUSTATE_STOPPED != regs->cpustate)
     {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
         logmsg( _("HHCPN111E loadcore rejected: CPU not stopped\n") );
         return -1;
     }
@@ -1774,6 +2219,8 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
     logmsg( _("HHCPN112I Loading %s to location %x \n"), fname, aaddr );
 
     len = load_main(fname, aaddr);
+
+    release_lock(&sysblk.cpulock[sysblk.pcpu]);
 
     logmsg( _("HHCPN113I %d bytes read from %s\n"), len, fname );
 
@@ -1785,14 +2232,14 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
 int loadtext_cmd(int argc, char *argv[], char *cmdline)
 {
-    BYTE   *fname;                      /* -> File name (ASCIIZ)     */
-    BYTE   *loadaddr;                   /* loadcore memory address   */
+    char   *fname;                      /* -> File name (ASCIIZ)     */
+    char   *loadaddr;                   /* loadcore memory address   */
     U32     aaddr;                      /* Absolute storage address  */
     int     fd;                         /* File descriptor           */
     BYTE    buf[80];                    /* Read buffer               */
     int     len;                        /* Number of bytes read      */
     int     n;
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs;
 
     UNREFERENCED(cmdline);
 
@@ -1816,8 +2263,19 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
         }
     }
 
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
+
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs = sysblk.regs[sysblk.pcpu];
+
     if (aaddr > regs->mainlim)
     {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
         logmsg( _("HHCPN116E Address greater than mainstore size\n") );
         return -1;
     }
@@ -1825,6 +2283,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
     /* Command is valid only when CPU is stopped */
     if (CPUSTATE_STOPPED != regs->cpustate)
     {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
         logmsg( _("HHCPN117E loadtext rejected: CPU not stopped\n") );
         return -1;
     }
@@ -1832,6 +2291,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
     /* Open the specified file name */
     if ((fd = open (fname, O_RDONLY | O_BINARY)) < 0)
     {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
         logmsg( _("HHCPN118E Cannot open %s: %s\n"),
             fname, strerror(errno)
             );
@@ -1843,6 +2303,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
         /* Read 80 bytes into buffer */
         if ((len = read (fd, buf, 80)) < 0)
         {
+            release_lock(&sysblk.cpulock[sysblk.pcpu]);
             logmsg( _("HHCPN119E Cannot read %s: %s\n"),
                     fname, strerror(errno)
                 );
@@ -1869,6 +2330,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
     close (fd);
     logmsg( _("HHCPN120I Finished loading TEXT deck file\n") );
     logmsg( _("          Last 'TXT' record had address: %3.3X\n"), n );
+    release_lock(&sysblk.cpulock[sysblk.pcpu]);
 
     return 0;
 }
@@ -1878,118 +2340,111 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 
 int ipending_cmd(int argc, char *argv[], char *cmdline)
 {
-    BYTE   *cmdarg;                     /* -> Command argument       */
     DEVBLK *dev;                        /* -> Device block           */
     IOINT  *io;                         /* -> I/O interrupt entry    */
     unsigned i;
     char    sysid[12];
+    BYTE    curpsw[16];
     char *states[] = {"?", "STOPPED", "STOPPING", "?", "STARTED",
                       "?", "?", "?", "STARTING"};
-REGS *regs = sysblk.regs + sysblk.pcpu;
 
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
     UNREFERENCED(cmdline);
 
-    if (argc > 1)
-        cmdarg = argv[1];
-    else
-        cmdarg = NULL;
-
-    if (cmdarg)
-    {
-        if (strcasecmp(cmdarg,"+debug") != 0 &&
-            strcasecmp(cmdarg,"-debug") != 0)
-        {
-            logmsg( _("HHCPN121E ipending expects {+|-}debug as operand."
-                " %s is invalid\n"), cmdarg
-                );
-            cmdarg = NULL;
-        }
-    }
-
-#ifdef _FEATURE_CPU_RECONFIG
     for (i = 0; i < MAX_CPU_ENGINES; i++)
-        if (sysblk.regs[i].cpuonline)
-#else /*!_FEATURE_CPU_RECONFIG*/
-    for (i = 0; i < sysblk.numcpu; i++)
-#endif /*!_FEATURE_CPU_RECONFIG*/
     {
-        if (cmdarg)
+        if (!IS_CPU_ONLINE(i))
         {
-            logmsg( _("HHCPN122I Interrupt checking debug mode set to ") );
-
-            if ('+' == *cmdarg)
-            {
-                ON_IC_DEBUG(sysblk.regs + i);
-                logmsg( _("ON\n") );
-            }
-            else
-            {
-                OFF_IC_DEBUG(sysblk.regs + i);
-                logmsg( _("OFF\n") );
-            }
+            logmsg(_("HHCPN123I CPU%4.4X: offline\n"), i);
+            continue;
         }
+
 // /*DEBUG*/logmsg( _("CPU%4.4X: Any cpu interrupt %spending\n"),
-// /*DEBUG*/    sysblk.regs[i].cpuad, sysblk.regs[i].cpuint ? "" : _("not ") );
+// /*DEBUG*/    sysblk.regs[i]->cpuad, sysblk.regs[i]->cpuint ? "" : _("not ") );
         logmsg( _("HHCPN123I CPU%4.4X: CPUint=%8.8X "
-                  "(r:%8.8X|s:%8.8X)&(Mask:%8.8X)\n"),
-            sysblk.regs[i].cpuad, IC_INTERRUPT_CPU(sysblk.regs + i),
-            sysblk.regs[i].ints_state,
-            sysblk.ints_state, regs[i].ints_mask
+                  "(State:%8.8X)&(Mask:%8.8X)\n"),
+            sysblk.regs[i]->cpuad, IC_INTERRUPT_CPU(sysblk.regs[i]),
+            sysblk.regs[i]->ints_state, sysblk.regs[i]->ints_mask
+            );
+        logmsg( _("          CPU%4.4X: Interrupt %spending\n"),
+            sysblk.regs[i]->cpuad,
+            IS_IC_INTERRUPT(sysblk.regs[i]) ? "" : _("not ")
+            );
+        logmsg( _("          CPU%4.4X: I/O interrupt %spending\n"),
+            sysblk.regs[i]->cpuad,
+            IS_IC_IOPENDING                 ? "" : _("not ")
             );
         logmsg( _("          CPU%4.4X: Clock comparator %spending\n"),
-            sysblk.regs[i].cpuad,
-            IS_IC_CLKC(sysblk.regs + i) ? "" : _("not ")
+            sysblk.regs[i]->cpuad,
+            IS_IC_CLKC(sysblk.regs[i]) ? "" : _("not ")
             );
         logmsg( _("          CPU%4.4X: CPU timer %spending\n"),
-            sysblk.regs[i].cpuad,
-            IS_IC_PTIMER(sysblk.regs + i) ? "" : _("not ")
+            sysblk.regs[i]->cpuad,
+            IS_IC_PTIMER(sysblk.regs[i]) ? "" : _("not ")
             );
         logmsg( _("          CPU%4.4X: Interval timer %spending\n"),
-            sysblk.regs[i].cpuad,
-            IS_IC_ITIMER(sysblk.regs + i) ? "" : _("not ")
+            sysblk.regs[i]->cpuad,
+            IS_IC_ITIMER(sysblk.regs[i]) ? "" : _("not ")
             );
         logmsg( _("          CPU%4.4X: External call %spending\n"),
-            sysblk.regs[i].cpuad,
-            IS_IC_EXTCALL(sysblk.regs + i) ? "" : _("not ")
+            sysblk.regs[i]->cpuad,
+            IS_IC_EXTCALL(sysblk.regs[i]) ? "" : _("not ")
             );
         logmsg( _("          CPU%4.4X: Emergency signal %spending\n"),
-            sysblk.regs[i].cpuad,
-            IS_IC_EMERSIG(sysblk.regs + i) ? "" : _("not ")
+            sysblk.regs[i]->cpuad,
+            IS_IC_EMERSIG(sysblk.regs[i]) ? "" : _("not ")
+            );
+        logmsg( _("          CPU%4.4X: Machine check interrupt %spending\n"),
+            sysblk.regs[i]->cpuad,
+            IS_IC_MCKPENDING(sysblk.regs[i]) ? "" : _("not ")
+            );
+        logmsg( _("          CPU%4.4X: Service signal %spending\n"),
+            sysblk.regs[i]->cpuad,
+            IS_IC_SERVSIG                    ? "" : _("not ")
             );
         logmsg( _("          CPU%4.4X: CPU interlock %sheld\n"),
-            sysblk.regs[i].cpuad,
-            sysblk.regs[i].mainlock ? "" : _("not ")
+            sysblk.regs[i]->cpuad,
+            sysblk.regs[i]->mainlock ? "" : _("not ")
             );
-        logmsg( _("          CPU%4.4X: CPU state is %s\n"),
-            sysblk.regs[i].cpuad,
-            states[sysblk.regs[i].cpustate]
+        logmsg( _("          CPU%4.4X: lock %sheld\n"),
+            sysblk.regs[i]->cpuad,
+            test_lock(&sysblk.cpulock[i]) ? "" : _("not ")
             );
-
         if (ARCH_370 == sysblk.arch_mode)
         {
-            if (0xFFFF == sysblk.regs[i].chanset)
+            if (0xFFFF == sysblk.regs[i]->chanset)
                 logmsg( _("          CPU%4.4X: No channelset connected\n"),
-                    sysblk.regs[i].cpuad
+                    sysblk.regs[i]->cpuad
                     );
             else
                 logmsg( _("          CPU%4.4X: Connected to channelset "
                           "%4.4X\n"),
-                    sysblk.regs[i].cpuad,sysblk.regs[i].chanset
+                    sysblk.regs[i]->cpuad,sysblk.regs[i]->chanset
                     );
         }
+        logmsg( _("          CPU%4.4X: state %s\n"),
+               sysblk.regs[i]->cpuad,states[sysblk.regs[i]->cpustate]);
+        logmsg( _("          CPU%4.4X: instcount %lld\n"),
+               sysblk.regs[i]->cpuad,(long long)sysblk.regs[i]->instcount);
+        logmsg( _("          CPU%4.4X: siocount %lld\n"),
+               sysblk.regs[i]->cpuad,(long long)sysblk.regs[i]->siototal);
+        copy_psw(sysblk.regs[i], curpsw);
+        logmsg( _("          CPU%4.4X: psw %2.2x%2.2x%2.2x%2.2x %2.2x%2.2x%2.2x%2.2x"),
+               sysblk.regs[i]->cpuad,curpsw[0],curpsw[1],curpsw[2],curpsw[3],
+               curpsw[4],curpsw[5],curpsw[6],curpsw[7]);
+        if (ARCH_900 == sysblk.arch_mode)
+        logmsg( _(" %2.2x%2.2x%2.2x%2.2x%2.2x%2.2x%2.2x%2.2x"),
+               curpsw[8],curpsw[9],curpsw[10],curpsw[11],
+               curpsw[12],curpsw[13],curpsw[14],curpsw[15]);
+        logmsg("\n");
     }
 
-    logmsg( _("          Started mask %8.8X waiting mask %8.8X\n"),
-        sysblk.started_mask, sysblk.waitmask
+    logmsg( _("          Config mask %8.8X started mask %8.8X waiting mask %8.8X\n"),
+        sysblk.config_mask, sysblk.started_mask, sysblk.waiting_mask
         );
     logmsg( _("          Broadcast count %d code %d\n"),
         sysblk.broadcast_count, sysblk.broadcast_code
-        );
-    logmsg( _("          Machine check interrupt %spending\n"),
-        IS_IC_MCKPENDING ? "" : _("not ")
-        );
-    logmsg( _("          Service signal %spending\n"),
-        IS_IC_SERVSIG ? "" : _("not ")
         );
     logmsg( _("          Signaling facility %sbusy\n"),
         test_lock(&sysblk.sigplock) ? "" : _("not ")
@@ -2008,9 +2463,6 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
         test_lock(&sysblk.ioqlock) ? "" : _("not ")
         );
 #endif
-    logmsg( _("          I/O interrupt %spending\n"),
-        IS_IC_IOPENDING ? "" : _("not ")
-        );
 
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
     {
@@ -2252,10 +2704,10 @@ int process_script_file(char *script_name,int isrcfile)
 {
 FILE   *scrfp;                           /* RC file pointer           */
 size_t  scrbufsize = 1024;               /* Size of RC file  buffer   */
-BYTE   *scrbuf = NULL;                   /* RC file input buffer      */
+char   *scrbuf = NULL;                   /* RC file input buffer      */
 int     scrlen;                          /* length of RC file record  */
 int     scr_pause_amt = 0;               /* seconds to pause RC file  */
-BYTE   *p;                              /* (work)                    */
+char   *p;                              /* (work)                    */
 
 
     /* Check the recursion level - if it exceeds a certain amount
@@ -2345,7 +2797,7 @@ BYTE   *p;                              /* (work)                    */
             logmsg (_("HHCPN011I Pausing SCRIPT file processing for %d "
                       "seconds...\n"),
                       scr_pause_amt);
-            sleep(scr_pause_amt);
+            SLEEP(scr_pause_amt);
             logmsg (_("HHCPN012I Resuming SCRIPT file processing...\n"));
 
             continue;
@@ -2396,7 +2848,7 @@ BYTE   *p;                              /* (work)                    */
 
 int archmode_cmd(int argc, char *argv[], char *cmdline)
 {
-    unsigned i;
+    int i;
 
     UNREFERENCED(cmdline);
 
@@ -2407,34 +2859,59 @@ int archmode_cmd(int argc, char *argv[], char *cmdline)
         return 0;
     }
 
+    obtain_lock(&sysblk.intlock);
+
+    /* Make sure all CPUs are deconfigured or stopped */
     for (i = 0; i < MAX_CPU_ENGINES; i++)
-        if (sysblk.regs[i].cpuonline
-            && CPUSTATE_STOPPED != sysblk.regs[i].cpustate)
+        if (IS_CPU_ONLINE(i)
+         && CPUSTATE_STOPPED != sysblk.regs[i]->cpustate)
         {
+            release_lock(&sysblk.intlock);
             logmsg( _("HHCPN127E All CPU's must be stopped to change "
                       "architecture\n") );
             return -1;
         }
 #if defined(_370)
     if (!strcasecmp (argv[1], arch_name[ARCH_370]))
+    {
         sysblk.arch_mode = ARCH_370;
+        sysblk.maxcpu = sysblk.numcpu;
+    }
     else
 #endif
 #if defined(_390)
     if (!strcasecmp (argv[1], arch_name[ARCH_390]))
+    {
         sysblk.arch_mode = ARCH_390;
+#if defined(_FEATURE_CPU_RECONFIG)
+        sysblk.maxcpu = MAX_CPU_ENGINES;
+#else
+        sysblk.maxcpu = sysblk.numcpu;
+#endif
+    }
     else
 #endif
 #if defined(_900)
     if (!strcasecmp (argv[1], arch_name[ARCH_900]))
+    {
         sysblk.arch_mode = ARCH_900;
+#if defined(_FEATURE_CPU_RECONFIG)
+        sysblk.maxcpu = MAX_CPU_ENGINES;
+#else
+        sysblk.maxcpu = sysblk.numcpu;
+#endif
+    }
     else
 #endif
     {
+        release_lock(&sysblk.intlock);
         logmsg( _("HHCPN128E Invalid architecture mode %s\n"), argv[1] );
         return -1;
     }
+    if (sysblk.pcpu >= MAX_CPU)
+        sysblk.pcpu = 0;
 
+    sysblk.dummyregs.arch_mode = sysblk.arch_mode;
 #if defined(OPTION_FISHIO)
     ios_arch_mode = sysblk.arch_mode;
 #endif /* defined(OPTION_FISHIO) */
@@ -2445,6 +2922,18 @@ int archmode_cmd(int argc, char *argv[], char *cmdline)
     logmsg( _("HHCPN129I Architecture successfully set to %s mode.\n"),
               get_arch_mode_string(NULL) );
 
+#if defined(_FEATURE_CPU_RECONFIG) && defined(_S370)
+    /* Configure CPUs for S/370 mode */
+    if (sysblk.archmode == ARCH_S370)
+        for (i = MAX_CPU_ENGINES - 1; i >= 0; i--)
+            if (i < MAX_CPU && !IS_CPU_ONLINE(i))
+                configure_cpu(i);
+            else if (i >= MAX_CPU && IS_CPU_ONLINE(i))
+                deconfigure_cpu(i);
+#endif
+
+    release_lock(&sysblk.intlock);
+
     return 0;
 }
 
@@ -2453,13 +2942,13 @@ int archmode_cmd(int argc, char *argv[], char *cmdline)
 
 int OnOffCommand(int argc, char *argv[], char *cmdline)
 {
-    BYTE   *cmd = (BYTE*) cmdline;      /* Copy of panel command     */
+    char   *cmd = cmdline;              /* Copy of panel command     */
     int     oneorzero;                  /* 1=x+ command, 0=x-        */
-    BYTE   *onoroff;                    /* "on" or "off"             */
+    char   *onoroff;                    /* "on" or "off"             */
     U32     aaddr;                      /* Absolute storage address  */
     DEVBLK* dev;
     U16     devnum;
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs;
 BYTE c;                                 /* Character work area       */
 
     UNREFERENCED(argc);
@@ -2473,6 +2962,16 @@ BYTE c;                                 /* Character work area       */
         onoroff = _("off");
     }
 
+    obtain_lock(&sysblk.intlock);
+
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock(&sysblk.intlock);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs=sysblk.regs[sysblk.pcpu];
+
     /////////////////////////////////////////////////////
     // f- and f+ commands - mark frames unusable/usable
 
@@ -2480,12 +2979,14 @@ BYTE c;                                 /* Character work area       */
     {
         if (aaddr > regs->mainlim)
         {
+            release_lock(&sysblk.cpulock[sysblk.pcpu]);
             logmsg( _("HHCPN130E Invalid frame address %8.8X\n"), aaddr );
             return -1;
         }
         STORAGE_KEY(aaddr, regs) &= ~(STORKEY_BADFRM);
         if (!oneorzero)
             STORAGE_KEY(aaddr, regs) |= STORKEY_BADFRM;
+        release_lock(&sysblk.intlock);
         logmsg( _("HHCPN131I Frame %8.8X marked %s\n"), aaddr,
                 oneorzero ? _("usable") : _("unusable")
             );
@@ -2499,6 +3000,7 @@ BYTE c;                                 /* Character work area       */
     {
         sysblk.insttrace = oneorzero;
         SET_IC_TRACE;
+        release_lock(&sysblk.intlock);
         logmsg( _("HHCPN132I Instruction tracing is now %s\n"), onoroff );
         return 0;
     }
@@ -2510,6 +3012,7 @@ BYTE c;                                 /* Character work area       */
     {
         sysblk.inststep = oneorzero;
         SET_IC_TRACE;
+        release_lock(&sysblk.intlock);
         logmsg( _("HHCPN133I Instruction stepping is now %s\n"), onoroff );
         return 0;
     }
@@ -2525,6 +3028,7 @@ BYTE c;                                 /* Character work area       */
             if (dev->devchar[10] == 0x20)
                 dev->ckdkeytrace = oneorzero;
         }
+        release_lock(&sysblk.intlock);
         logmsg( _("HHCPN134I CKD KEY trace is now %s\n"), onoroff );
         return 0;
     }
@@ -2541,6 +3045,7 @@ BYTE c;                                 /* Character work area       */
         if (dev == NULL)
         {
             logmsg( _("HHCPN135E Device number %4.4X not found\n"), devnum );
+            release_lock(&sysblk.intlock);
             return -1;
         }
 
@@ -2556,40 +3061,150 @@ BYTE c;                                 /* Character work area       */
                 onoroff, devnum
                 );
         }
+        release_lock(&sysblk.intlock);
         return 0;
     }
 
+    release_lock(&sysblk.intlock);
     logmsg( _("HHCPN138E Unrecognized +/- command.\n") );
     return -1;
 }
 
+static inline char *aea_mode_str(BYTE mode)
+{
+static char *name[] = { "DAT-Off", "Primary", "AR", "Secondary", "Home",
+0, 0, 0, "PER/DAT-Off", "PER/Primary", "PER/AR", "PER/Secondary", "PER/Home" };
+
+    return name[(mode & 0x0f) | ((mode & 0xf0) ? 8 : 0)];
+}
+
 ///////////////////////////////////////////////////////////////////////
-/* aea - display aea tables */
+/* aea - display aea values */
 
 int aea_cmd(int argc, char *argv[], char *cmdline)
 {
     int     i;                          /* Index                     */
-    int     matches = 0;                /* Number aeID matches       */
     REGS   *regs;
-    int     cpu = 0;
 
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
     UNREFERENCED(cmdline);
 
-    if (argc == 2) cpu = atoi (argv[1]);
-    if (cpu < 0 || cpu >= MAX_CPU_ENGINES)
-        cpu = 0;
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
 
-    regs = sysblk.regs + cpu;
-    logmsg ("cpu %d aenoarn %d aeID 0x%3.3x\n",cpu,regs->aenoarn,regs->aeID);
-    logmsg (" ix               ve key ar a               ae\n");
-    for (i = 0; i < MAXAEA; i++)
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
     {
-        logmsg("%s%2.2x %16.16llx  %2.2x %2d %d %16.16llx\n",
-         (regs->VE_G(i) & 0xfff) == regs->aeID ? "*" : " ", i, regs->VE_G(i),
-         regs->aekey[i], regs->aearn[i], regs->aeacc[i], regs->AE_G(i));
-        if ((regs->VE_G(i) & 0xfff) == regs->aeID) matches++;
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
     }
-    logmsg("%d aeID matches\n", matches);
+    regs = sysblk.regs[sysblk.pcpu];
+
+    logmsg ("aea mode   %s\n",aea_mode_str(regs->aea_mode));
+
+    logmsg ("aea ar    ");
+    for (i = -5; i < 16; i++)
+         if(regs->aea_ar[i] > 0)
+            logmsg(" %2.2x",regs->aea_ar[i]);
+        else
+            logmsg(" %2d",regs->aea_ar[i]);
+    logmsg ("\n");
+
+    logmsg ("aea common            ");
+    for (i = -1; i < 16; i++)
+        if(regs->aea_common[i] > 0)
+            logmsg(" %2.2x",regs->aea_common[i]);
+        else
+            logmsg(" %2d",regs->aea_common[i]);
+    logmsg ("\n");
+
+    logmsg ("aea cr[1]  %16.16llx\n    cr[7]  %16.16llx\n"
+            "    cr[13] %16.16llx\n",
+            regs->CR_G(1),regs->CR_G(7),regs->CR_G(13));
+
+    logmsg ("    cr[r]  %16.16llx\n",
+            regs->CR_G(CR_ASD_REAL));
+
+    for(i = 0; i < 16; i++)
+        if(regs->aea_ar[i] > 15)
+            logmsg ("    alb[%d] %16.16llx\n",
+                    regs->alb[i]);
+    
+    if (regs->sie_active)
+    {
+        regs = regs->guestregs;
+
+        logmsg ("aea SIE\n");
+        logmsg ("aea mode   %s\n",aea_mode_str(regs->aea_mode));
+
+        logmsg ("aea ar    ");
+        for (i = -5; i < 16; i++)
+        if(regs->aea_ar[i] > 0)
+            logmsg(" %2.2x",regs->aea_ar[i]);
+        else
+            logmsg(" %2d",regs->aea_ar[i]);
+        logmsg ("\n");
+
+        logmsg ("aea common            ");
+        for (i = -1; i < 16; i++)
+        if(regs->aea_common[i] > 0)
+            logmsg(" %2.2x",regs->aea_common[i]);
+        else
+            logmsg(" %2d",regs->aea_common[i]);
+        logmsg ("\n");
+
+        logmsg ("aea cr[1]  %16.16llx\n    cr[7]  %16.16llx\n"
+                "    cr[13] %16.16llx\n",
+                regs->CR_G(1),regs->CR_G(7),regs->CR_G(13));
+
+        logmsg ("    cr[r]  %16.16llx\n",
+                regs->CR_G(CR_ASD_REAL));
+
+        for(i = 0; i < 16; i++)
+            if(regs->aea_ar[i] > 15)
+                logmsg ("    alb[%d] %16.16llx\n",
+                        regs->alb[i]);
+    }
+
+    release_lock (&sysblk.cpulock[sysblk.pcpu]);
+
+    return 0;
+}
+
+///////////////////////////////////////////////////////////////////////
+/* aia - display aia values */
+
+int aia_cmd(int argc, char *argv[], char *cmdline)
+{
+    /* int     i; */                         /* Index                     */
+    REGS   *regs;
+
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
+    UNREFERENCED(cmdline);
+
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
+
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
+    {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs = sysblk.regs[sysblk.pcpu];
+
+    logmsg ("mainstor %p  aim %p  aiv %16.16llx  aie %16.16llx\n",
+            regs->mainstor,regs->aim,regs->aiv,regs->aie);
+
+    if (regs->sie_active)
+    {
+        regs = regs->guestregs;
+        logmsg ("SIE:\n");
+        logmsg ("mainstor %p  aim %p  aiv %16.16llx  aie %16.16llx\n",
+            regs->mainstor,regs->aim,regs->aiv,regs->aie);
+    }
+
+    release_lock (&sysblk.cpulock[sysblk.pcpu]);
 
     return 0;
 }
@@ -2600,29 +3215,74 @@ int aea_cmd(int argc, char *argv[], char *cmdline)
 int tlb_cmd(int argc, char *argv[], char *cmdline)
 {
     int     i;                          /* Index                     */
+    int     shift;                      /* Number of bits to shift   */
+    int     bytemask;                   /* Byte mask                 */
+    U64     pagemask;                   /* Page mask                 */
     int     matches = 0;                /* Number aeID matches       */
     REGS   *regs;
-    int     cpu = 0;
 
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
     UNREFERENCED(cmdline);
 
-    if (argc == 2) cpu = atoi (argv[1]);
-    if (cpu < 0 || cpu >= MAX_CPU_ENGINES)
-        cpu = 0;
+    obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
 
-    regs = sysblk.regs + cpu;
-    logmsg ("cpu %d tlbID 0x%3.3x\n",cpu,regs->tlbID);
-    logmsg (" ix              std            vaddr              pte id c p\n");
-    for (i = 0; i < MAXAEA; i++)
+    if (!IS_CPU_ONLINE(sysblk.pcpu))
     {
-        logmsg("%s%2.2x %16.16llx %16.16llx %16.16llx %2.2x %1d %1d\n",
-         regs->tlb[i].valid == regs->tlbID ? "*" : " ",
-         i,regs->tlb[i].TLB_STD_G,regs->tlb[i].TLB_VADDR_G,
-         regs->tlb[i].TLB_PTE_G,regs->tlb[i].valid, regs->tlb[i].common,
-         regs->tlb[i].protect);
-        matches += (regs->tlb[i].valid == regs->tlbID);
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        logmsg( _("HHCPN160W CPU%4.4X not configured\n"), sysblk.pcpu);
+        return 0;
+    }
+    regs = sysblk.regs[sysblk.pcpu];
+    shift = regs->arch_mode == ARCH_370 ? 11 : 12;
+    bytemask = regs->arch_mode == ARCH_370 ? 0x1FFFFF : 0x3FFFFF;
+    pagemask = regs->arch_mode == ARCH_370 ? 0x00E00000 :
+               regs->arch_mode == ARCH_390 ? 0x7FC00000 :
+                                     0xFFFFFFFFFFC00000ULL;
+
+    logmsg ("tlbID 0x%6.6x mainstor %p\n",regs->tlbID,regs->mainstor);
+    logmsg ("  ix              asd            vaddr              pte   id c p r w ky       main\n");
+    for (i = 0; i < TLBN; i++)
+    {
+        logmsg("%s%3.3x %16.16llx %16.16llx %16.16llx %4.4x %1d %1d %1d %1d %2.2x %8.8x\n",
+         ((regs->tlb.TLB_VADDR_G(i) & bytemask) == regs->tlbID ? "*" : " "),
+         i,regs->tlb.TLB_ASD_G(i),
+         ((regs->tlb.TLB_VADDR_G(i) & pagemask) | (i << shift)),
+         regs->tlb.TLB_PTE_G(i),(int)(regs->tlb.TLB_VADDR_G(i) & bytemask),
+         regs->tlb.common[i],regs->tlb.protect[i],
+         (regs->tlb.acc[i] & ACC_READ) != 0,(regs->tlb.acc[i] & ACC_WRITE) != 0,
+         regs->tlb.skey[i],regs->tlb.main[i] - regs->mainstor);
+        matches += ((regs->tlb.TLB_VADDR(i) & bytemask) == regs->tlbID);
     }
     logmsg("%d tlbID matches\n", matches);
+
+    if (regs->sie_active)
+    {
+        regs = regs->guestregs;
+        shift = regs->guestregs->arch_mode == ARCH_370 ? 11 : 12;
+        bytemask = regs->arch_mode == ARCH_370 ? 0x1FFFFF : 0x3FFFFF;
+        pagemask = regs->arch_mode == ARCH_370 ? 0x00E00000 :
+                   regs->arch_mode == ARCH_390 ? 0x7FC00000 :
+                                         0xFFFFFFFFFFC00000ULL;
+
+        logmsg ("\nSIE: tlbID 0x%4.4x mainstor %p\n",regs->tlbID,regs->mainstor);
+        logmsg ("  ix              asd            vaddr              pte   id c p r w ky       main\n");
+        for (i = matches = 0; i < TLBN; i++)
+        {
+            logmsg("%s%3.3x %16.16llx %16.16llx %16.16llx %4.4x %1d %1d %1d %1d %2.2x %p\n",
+             ((regs->tlb.TLB_VADDR_G(i) & bytemask) == regs->tlbID ? "*" : " "),
+             i,regs->tlb.TLB_ASD_G(i),
+             ((regs->tlb.TLB_VADDR_G(i) & pagemask) | (i << shift)),
+             regs->tlb.TLB_PTE_G(i),(int)(regs->tlb.TLB_VADDR_G(i) & bytemask),
+             regs->tlb.common[i],regs->tlb.protect[i],
+             (regs->tlb.acc[i] & ACC_READ) != 0,(regs->tlb.acc[i] & ACC_WRITE) != 0,
+             regs->tlb.skey[i],regs->tlb.main[i]);
+            matches += ((regs->tlb.TLB_VADDR(i) & bytemask) == regs->tlbID);
+        }
+        logmsg("SIE: %d tlbID matches\n", matches);
+    }
+
+    release_lock (&sysblk.cpulock[sysblk.pcpu]);
 
     return 0;
 }
@@ -2643,6 +3303,22 @@ int spm_cmd(int argc, char *argv[], char *cmdline)
 }
 #endif
 
+#if defined(_FEATURE_SYSTEM_CONSOLE)
+///////////////////////////////////////////////////////////////////////
+/* ssd - signal shutdown command */
+
+int ssd_cmd(int argc, char *argv[], char *cmdline)
+{
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
+    UNREFERENCED(cmdline);
+
+    signal_quiesce(0, 0);
+
+    return 0;
+}
+#endif
+
 #if defined(OPTION_COUNTING)
 ///////////////////////////////////////////////////////////////////////
 /* count - display counts */
@@ -2650,10 +3326,16 @@ int spm_cmd(int argc, char *argv[], char *cmdline)
 int count_cmd(int argc, char *argv[], char *cmdline)
 {
     int     i;                          /* Index                     */
+    U64     instcount = 0;              /* Instruction count         */
 
     UNREFERENCED(argc);
     UNREFERENCED(argv);
     UNREFERENCED(cmdline);
+
+    for (i = 0; i < MAX_CPU; i++)
+        if (IS_CPU_ONLINE(i))
+            instcount += sysblk.regs[i]->instcount;
+    logmsg ("  i: %12lld\n", instcount);
 
     for (i = 0; i < OPTION_COUNTING; i++)
         logmsg ("%3d: %12lld\n", i, sysblk.count[i]);
@@ -2766,6 +3448,25 @@ int evm_cmd(int argc, char *argv[], char *cmdline)
     return 0;
 }
 #endif
+
+///////////////////////////////////////////////////////////////////////
+/* sizeof - Display sizes of various structures/tables */
+int sizeof_cmd(int argc, char *argv[], char *cmdline)
+{
+    UNREFERENCED(cmdline);
+    UNREFERENCED(argc);
+    UNREFERENCED(argv);
+
+    logmsg(_("HHCPN161I (void *) ..........%7d\n"),sizeof(void *));
+    logmsg(_("HHCPN162I (unsigned int) ....%7d\n"),sizeof(unsigned int));
+    logmsg(_("HHCPN163I SYSBLK ............%7d\n"),sizeof(SYSBLK));
+    logmsg(_("HHCPN164I REGS ..............%7d\n"),sizeof(REGS));
+    logmsg(_("HHCPN165I DEVBLK ............%7d\n"),sizeof(DEVBLK));
+    logmsg(_("HHCPN166I TLB entry .........%7d\n"),sizeof(TLB)/TLBN);
+    logmsg(_("HHCPN167I TLB table .........%7d\n"),sizeof(TLB));
+    return 0;
+}
+
 ///////////////////////////////////////////////////////////////////////
 // Layout of command routing table...
 
@@ -2796,7 +3497,10 @@ CMDTAB Commands[] =
 */
 COMMAND ( "?",         ListAllCommands, "list all commands" )
 COMMAND ( "help",      HelpCommand,   "command specific help\n" )
-COMMAND ( "hst",       History,       "history of commands\n" )
+
+COMMAND ( "hst",       History,       "history of commands" )
+COMMAND ( "log",       log_cmd,       "direct log output" )
+COMMAND ( "version",   version_cmd,   "display version information\n" )
 
 COMMAND ( "quit",      quit_cmd,      "terminate the emulator" )
 COMMAND ( "exit",      quit_cmd,      "(synonym for 'quit')\n" )
@@ -2805,18 +3509,25 @@ COMMAND ( "cpu",       cpu_cmd,       "define target cpu for panel display and c
 
 COMMAND ( "start",     start_cmd,     "start CPU (or printer device if argument given)" )
 COMMAND ( "stop",      stop_cmd,      "stop CPU (or printer device if argument given)\n" )
+
 COMMAND ( "startall",  startall_cmd,  "start all CPU's" )
 COMMAND ( "stopall",   stopall_cmd,   "stop all CPU's\n" )
 
+#ifdef _FEATURE_CPU_RECONFIG
+COMMAND ( "cf",        cf_cmd,        "configure CPU online or offline" )
+COMMAND ( "cfall",     cfall_cmd,     "configure all CPU's online or offline\n" )
+#endif
+
 #ifdef _FEATURE_SYSTEM_CONSOLE
 COMMAND ( ".reply",    g_cmd,         "scp command" )
-COMMAND ( "!message",    g_cmd,       "scp priority messsage\n" )
+COMMAND ( "!message",    g_cmd,       "scp priority messsage" )
+COMMAND ( "ssd",       ssd_cmd,       "Signal Shutdown\n" )
 #endif
 
 #ifdef OPTION_PTTRACE
-COMMAND ( "ptt",       ptt_cmd,       "display pthread trace" )
+COMMAND ( "ptt",       ptt_cmd,       "display pthread trace\n" )
 #endif
- 
+
 COMMAND ( "i",         i_cmd,         "generate I/O attention interrupt for device" )
 COMMAND ( "ext",       ext_cmd,       "generate external interrupt" )
 COMMAND ( "restart",   restart_cmd,   "generate restart interrupt\n" )
@@ -2824,7 +3535,10 @@ COMMAND ( "restart",   restart_cmd,   "generate restart interrupt\n" )
 COMMAND ( "store",     store_cmd,     "store CPU status at absolute zero" )
 COMMAND ( "archmode",  archmode_cmd,  "set architecture mode" )
 COMMAND ( "loadparm",  loadparm_cmd,  "set IPL parameter" )
-COMMAND ( "ipl",       ipl_cmd,       "IPL from device xxxx\n" )
+COMMAND ( "ipl",       ipl_cmd,       "IPL Normal from device xxxx" )
+COMMAND ( "iplc",      iplc_cmd,      "IPL Clear from device xxxx" )
+COMMAND ( "sysreset",  sysr_cmd,      "Issue SYSTEM Reset manual operation" )
+COMMAND ( "sysclear",  sysc_cmd,      "Issue SYSTEM Clear Reset manual operation\n" )
 
 COMMAND ( "psw",       psw_cmd,       "display program status word" )
 COMMAND ( "gpr",       gpr_cmd,       "display general purpose registers" )
@@ -2847,6 +3561,10 @@ COMMAND ( "define",    define_cmd,    "rename device" )
 COMMAND ( "devinit",   devinit_cmd,   "reinitialize device" )
 COMMAND ( "devlist",   devlist_cmd,   "list all devices\n" )
 
+#if defined( OPTION_SCSI_TAPE )
+COMMAND ( "scsimount", scsimount_cmd, "automatic SCSI tape mounts\n" )
+#endif /* defined( OPTION_SCSI_TAPE ) */
+
 COMMAND ( "sh",        sh_cmd,        "shell command" )
 COMMAND ( "cache",     cache_cmd,     "cache command" )
 COMMAND ( "cckd",      cckd_cmd,      "cckd command" )
@@ -2865,7 +3583,7 @@ COMMAND ( "loadtext",  loadtext_cmd,  "load a text deck file\n" )
 #if defined(OPTION_DYNAMIC_LOAD)
 COMMAND ( "ldmod",     ldmod_cmd,     "load a module" )
 COMMAND ( "rmmod",     rmmod_cmd,     "delete a module" )
-COMMAND ( "lsmod",     lsmod_cmd,     "list dynamic modules\n" )
+COMMAND ( "lsmod",     lsmod_cmd,     "list dynamic modules" )
 COMMAND ( "lsdep",     lsdep_cmd,     "list module dependencies\n" )
 #endif /*defined(OPTION_DYNAMIC_LOAD)*/
 
@@ -2896,13 +3614,19 @@ COMMAND ( "ecpsvm",   evm_cmd,   "ECPS:VM Commands" )
 #endif
 
 COMMAND ( "aea",       aea_cmd,       "Display AEA tables" )
+COMMAND ( "aia",       aia_cmd,       "Display AIA fields" )
 COMMAND ( "tlb",       tlb_cmd,       "Display TLB tables" )
+
 #if defined(SIE_DEBUG_PERFMON)
 COMMAND ( "spm",       spm_cmd,       "SIE performance monitor" )
 #endif
 #if defined(OPTION_COUNTING)
 COMMAND ( "count",     count_cmd,     "Display counts" )
 #endif
+COMMAND ( "sizeof",    sizeof_cmd,    "Display size of structures" )
+
+COMMAND ( "suspend",    suspend_cmd,  "Suspend hercules" )
+COMMAND ( "resume",     resume_cmd,   "Resume hercules" )
 
 COMMAND ( NULL, NULL, NULL )         /* (end of table) */
 };
@@ -2911,9 +3635,9 @@ COMMAND ( NULL, NULL, NULL )         /* (end of table) */
 // Main panel command processing function...
 
 int    cmd_argc;
-BYTE*  cmd_argv[MAX_ARGS];
+char*  cmd_argv[MAX_ARGS];
 
-int ProcessPanelCommand (const char* pszCmdLine)
+int ProcessPanelCommand (char* pszCmdLine)
 {
     int      rc = -1;
     CMDTAB*  pCmdTab;
@@ -2933,7 +3657,7 @@ int ProcessPanelCommand (const char* pszCmdLine)
 
     /* Parse the command line into its individual arguments...
        Note: original command line now sprinkled with nulls */
-    parse_args((BYTE*)pszCmdLine, MAX_ARGS, cmd_argv, &cmd_argc);
+    parse_args (pszCmdLine, MAX_ARGS, cmd_argv, &cmd_argc);
 
 #if defined(OPTION_DYNAMIC_LOAD)
     if( system_command )
@@ -3060,11 +3784,28 @@ CMDHELP ( "help",      "Enter \"help cmd\" where cmd is the command you need hel
                        "parameters and is not meant to replace reading the documentation.\n"
                        )
 
+#if defined( OPTION_SCSI_TAPE )
+CMDHELP ( "scsimount", "Format:    \"scsimount  [ no | 1-99 ]\".\n\n"
+
+                       "Displays or modifies the automatic SCSI tape mounts option. When entered\n"
+                       "without any operands, it displays the current value and any pending tape\n"
+                       "mount requests. Entering 'no' disables automatic tape mount detection.\n\n"
+
+                       "Entering a value between 1-99 seconds enables the option and specifies\n"
+                       "how often to query SCSI tape drives to automatically detect when a tape\n"
+                       "has been mounted (upon which an unsolicited device-attention interrupt\n"
+                       "will be presented to the guest operating system).\n\n"
+
+                       "NOTE! enabling this option MAY negatively impact Hercules performance,\n"
+                       "depending on how the host operating system (Windows, Linux, etc) processes\n"
+                       "SCSI attached tape drive 'status' queries.\n")
+#endif /* defined( OPTION_SCSI_TAPE ) */
+
 CMDHELP ( "hst",       "Format: \"hst | hst n | hst l\". Command \"hst l\" or \"hst 0\" displays\n"
                        "list of last ten commands entered from command line\n"
                        "hst n, where n is a positive number retrieves n-th command from list\n"
                        "hst n, where n is a negative number retrieves n-th last command\n"
-                       "hst without an argument works exactly as hst -1, it retrieves last command\n") 
+                       "hst without an argument works exactly as hst -1, it retrieves last command\n")
 
 CMDHELP ( "quit",      "Format: \"quit [NOW]\". The optional 'NOW' argument\n"
                        "causes the emulator to immediately terminate without\n"
@@ -3124,11 +3865,12 @@ CMDHELP ( "sh",        "Format: \"sh command [args...]\" where 'command' is any 
                        "shell for processing and the results are displayed on the console.\n"
                        )
 
-CMDHELP ( "b",         "Format: \"b addr\" where 'addr' is the instruction address where you\n"
-                       "wish to halt execution. Once the breakpoint is reached, instruction\n"
-                       "execution is temporarily halted and the next instruction to be executed\n"
-                       "is displayed. You may then examine registers and/or storage, etc. To\n"
-                       "continue execution after reaching a breakpoint, enter the 'g' command.\n"
+CMDHELP ( "b",         "Format: \"b addr\" or \"b addr-addr\" where 'addr' is the instruction\n"
+                       "address or range of addresses where you wish to halt execution. Once\n"
+                       "the breakpoint is reached, instruction execution is temporarily halted\n"
+                       "and the next instruction to be executed is displayed. You may then\n"
+                       "examine registers and/or storage, etc. To continue execution after\n"
+                       "reaching a breakpoint, enter the 'g' command.\n"
                        )
 
 CMDHELP ( "b-",        "Format: \"b-\"  (removes any previously set breakpoint)\n"
@@ -3225,12 +3967,12 @@ void *panel_command (void *cmdline)
 #endif
 {
 #define MAX_CMD_LEN (32768)
-    BYTE  cmd[MAX_CMD_LEN];             /* Copy of panel command     */
-    BYTE *pCmdLine;
+    char  cmd[MAX_CMD_LEN];             /* Copy of panel command     */
+    char *pCmdLine;
     unsigned i;
-REGS *regs = sysblk.regs + sysblk.pcpu;
+REGS *regs = sysblk.regs[sysblk.pcpu];
 
-    pCmdLine = (BYTE*)cmdline; ASSERT(pCmdLine);
+    pCmdLine = cmdline; ASSERT(pCmdLine);
     /* every command will be stored in history list */
     history_add(cmdline);
 
@@ -3261,7 +4003,7 @@ REGS *regs = sysblk.regs + sysblk.pcpu;
 #endif
 
     /* Set target CPU for commands and displays */
-    regs = sysblk.regs + sysblk.pcpu;
+    regs = sysblk.regs[sysblk.pcpu];
 
 #ifdef _FEATURE_SYSTEM_CONSOLE
     if ('.' == cmd[0] || '!' == cmd[0])

@@ -1,11 +1,11 @@
 // Hercules Channel-to-Channel Emulation Support
 // ====================================================================
 //
-// Copyright (C) James A. Pierson, 2002-2003
-//               Roger Bowler, 2000-2003
+// Copyright (C) James A. Pierson, 2002-2004
+//               Roger Bowler, 2000-2004
 //
-// vmnet     (C) Copyright Willem Konynenberg, 2000-2003
-// CTCT      (C) Copyright Vic Cross, 2001-2003
+// vmnet     (C) Copyright Willem Konynenberg, 2000-2004
+// CTCT      (C) Copyright Vic Cross, 2001-2004
 //
 
 // Notes:
@@ -16,7 +16,7 @@
 //
 //   Please read README.NETWORKING for more info.
 //
-#if !defined(__APPLE__)
+//#if !defined(__APPLE__)
 
 #include "hercules.h"
 #include "devtype.h"
@@ -29,7 +29,7 @@
 // Declarations
 // ====================================================================
 
-static int      CTCT_Init( DEVBLK *dev, int argc, BYTE *argv[] );
+static int      CTCT_Init( DEVBLK *dev, int argc, char *argv[] );
 
 static void     CTCT_Read( DEVBLK* pDEVBLK,   U16   sCount,
                            BYTE*   pIOBuf,    BYTE* pUnitStat,
@@ -41,7 +41,7 @@ static void     CTCT_Write( DEVBLK* pDEVBLK,   U16   sCount,
 
 static void*    CTCT_ListenThread( void* argp );
 
-static int      VMNET_Init( DEVBLK *dev, int argc, BYTE *argv[] );
+static int      VMNET_Init( DEVBLK *dev, int argc, char *argv[] );
 
 static int      VMNET_Write( DEVBLK *dev, BYTE *iobuf,
                              U16 count, BYTE *unitstat );
@@ -67,29 +67,68 @@ CTCG_PARMBLK;
 
 DEVHND ctcadpt_device_hndinfo =
 {
-    &CTCX_Init,
-    &CTCX_ExecuteCCW,
-    &CTCX_Close,
-    &CTCX_Query,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+        &CTCX_Init,                    /* Device Initialisation      */
+        &CTCX_ExecuteCCW,              /* Device CCW execute         */
+        &CTCX_Close,                   /* Device Close               */
+        &CTCX_Query,                   /* Device Query               */
+        NULL,                          /* Device Start channel pgm   */
+        NULL,                          /* Device End channel pgm     */
+        NULL,                          /* Device Resume channel pgm  */
+        NULL,                          /* Device Suspend channel pgm */
+        NULL,                          /* Device Read                */
+        NULL,                          /* Device Write               */
+        NULL,                          /* Device Query used          */
+        NULL,                          /* Device Reserve             */
+        NULL,                          /* Device Release             */
+        NULL,                          /* Immediate CCW Codes        */
+        NULL,                          /* Signal Adapter Input       */
+        NULL,                          /* Signal Adapter Output      */
+        NULL,                          /* Hercules suspend           */
+        NULL                           /* Hercules resume            */
 };
 
 DEVHND ctct_device_hndinfo =
 {
-    &CTCT_Init,
-    &CTCX_ExecuteCCW,
-    &CTCX_Close,
-    &CTCX_Query,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+        &CTCT_Init,                    /* Device Initialisation      */
+        &CTCX_ExecuteCCW,              /* Device CCW execute         */
+        &CTCX_Close,                   /* Device Close               */
+        &CTCX_Query,                   /* Device Query               */
+        NULL,                          /* Device Start channel pgm   */
+        NULL,                          /* Device End channel pgm     */
+        NULL,                          /* Device Resume channel pgm  */
+        NULL,                          /* Device Suspend channel pgm */
+        NULL,                          /* Device Read                */
+        NULL,                          /* Device Write               */
+        NULL,                          /* Device Query used          */
+        NULL,                          /* Device Reserve             */
+        NULL,                          /* Device Release             */
+        NULL,                          /* Immediate CCW Codes        */
+        NULL,                          /* Signal Adapter Input       */
+        NULL,                          /* Signal Adapter Output      */
+        NULL,                          /* Hercules suspend           */
+        NULL                           /* Hercules resume            */
 };
 
 DEVHND vmnet_device_hndinfo =
 {
-    &VMNET_Init,
-    &CTCX_ExecuteCCW,
-    &CTCX_Close,
-    &CTCX_Query,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+        &VMNET_Init,                   /* Device Initialisation      */
+        &CTCX_ExecuteCCW,              /* Device CCW execute         */
+        &CTCX_Close,                   /* Device Close               */
+        &CTCX_Query,                   /* Device Query               */
+        NULL,                          /* Device Start channel pgm   */
+        NULL,                          /* Device End channel pgm     */
+        NULL,                          /* Device Resume channel pgm  */
+        NULL,                          /* Device Suspend channel pgm */
+        NULL,                          /* Device Read                */
+        NULL,                          /* Device Write               */
+        NULL,                          /* Device Query used          */
+        NULL,                          /* Device Reserve             */
+        NULL,                          /* Device Release             */
+        NULL,                          /* Immediate CCW Codes        */
+        NULL,                          /* Signal Adapter Input       */
+        NULL,                          /* Signal Adapter Output      */
+        NULL,                          /* Hercules suspend           */
+        NULL                           /* Hercules resume            */
 };
 
 extern DEVHND ctci_device_hndinfo;
@@ -103,7 +142,7 @@ extern DEVHND lcs_device_hndinfo;
 // Device Initialization Handler (Generic)
 // --------------------------------------------------------------------
 
-int  CTCX_Init( DEVBLK* pDEVBLK, int argc, BYTE *argv[] )
+int  CTCX_Init( DEVBLK* pDEVBLK, int argc, char *argv[] )
 {
     pDEVBLK->devtype = 0x3088;
 
@@ -131,9 +170,9 @@ int  CTCX_Init( DEVBLK* pDEVBLK, int argc, BYTE *argv[] )
 // -------------------------------------------------------------------
 
 void  CTCX_Query( DEVBLK* pDEVBLK,
-                  BYTE**  ppszClass,
+                  char**  ppszClass,
                   int     iBufLen,
-                  BYTE*   pBuffer )
+                  char*   pBuffer )
 {
     *ppszClass = "CTCA";
     snprintf( pBuffer, iBufLen, "%s", pDEVBLK->filename );
@@ -400,21 +439,21 @@ void  CTCX_ExecuteCCW( DEVBLK* pDEVBLK, BYTE  bCode,
 // CTCT_Init
 //
 
-static int  CTCT_Init( DEVBLK *dev, int argc, BYTE *argv[] )
+static int  CTCT_Init( DEVBLK *dev, int argc, char *argv[] )
 {
     int            rc;                 // Return code
     int            mtu;                // MTU size (binary)
     int            lport;              // Listen port (binary)
     int            rport;              // Destination port (binary)
-    BYTE*          listenp;            // Listening port number
-    BYTE*          remotep;            // Destination port number
-    BYTE*          mtusize;            // MTU size (characters)
-    BYTE*          remaddr;            // Remote IP address
+    char*          listenp;            // Listening port number
+    char*          remotep;            // Destination port number
+    char*          mtusize;            // MTU size (characters)
+    char*          remaddr;            // Remote IP address
     struct in_addr ipaddr;             // Work area for IP address
     BYTE           c;                  // Character work area
     TID            tid;                // Thread ID for server
     CTCG_PARMBLK   parm;               // Parameters for the server
-    BYTE           address[20]="";     // temp space for IP address
+    char           address[20]="";     // temp space for IP address
 
     dev->devtype = 0x3088;
 
@@ -959,11 +998,11 @@ static void*  CTCT_ListenThread( void* argp )
 /*-------------------------------------------------------------------*/
 /* Functions to support vmnet written by Willem Konynenberg          */
 /*-------------------------------------------------------------------*/
-static int start_vmnet(DEVBLK *dev, DEVBLK *xdev, int argc, BYTE *argv[])
+static int start_vmnet(DEVBLK *dev, DEVBLK *xdev, int argc, char *argv[])
 {
 int sockfd[2];
 int r, i;
-BYTE *ipaddress;
+char *ipaddress;
 
     if (argc < 2) {
         logmsg (_("HHCCT024E %4.4X: Not enough arguments to start vmnet\n"),
@@ -1017,7 +1056,7 @@ BYTE *ipaddress;
     return 0;
 }
 
-static int VMNET_Init(DEVBLK *dev, int argc, BYTE *argv[])
+static int VMNET_Init(DEVBLK *dev, int argc, char *argv[])
 {
 U16             xdevnum;                /* Pair device devnum        */
 BYTE            c;                      /* tmp for scanf             */
@@ -1147,7 +1186,7 @@ int n;
                     return -3;
                 logmsg (_("HHCCT033E %4.4X: Error: read: %s\n"),
                         dev->devnum, strerror(errno));
-                sleep(2);
+                SLEEP(2);
             }
         } while (n <= 0);
         dev->ctcrem = n;
@@ -1277,51 +1316,6 @@ int             lastlen = 2;            /* block length at last pckt */
 // ====================================================================
 
 // ---------------------------------------------------------------------
-// AddDevice
-// ---------------------------------------------------------------------
-//
-// Creates an additional DEVBLK structure for LCS devices.
-//
-// Input:
-//      sDevNum   Unit address for the new DEVBLK
-//      sDevType  Device type for the new DEVBLK
-//
-// Output:
-//      ppDEVBLK  Address of a pointer to receive the new DEVBLK addr
-//
-
-void  AddDevice( DEVBLK**    ppDEVBLK,
-                 U16         sDevNum,
-                 DEVBLK*     pDevBlk )
-{
-
-    // Check whether device number has already been defined
-    if( *ppDEVBLK != NULL && find_device_by_devnum( sDevNum ) != NULL )
-    {
-        logmsg( _("HHCCT034E device %4.4X already exists\n"), sDevNum );
-        return;
-    }
-
-    if( *ppDEVBLK == NULL )
-    {
-        (*ppDEVBLK) = get_devblk(sDevNum);
-        (*ppDEVBLK)->hnd = pDevBlk->hnd;
-        (*ppDEVBLK)->devtype = pDevBlk->devtype;
-        (*ppDEVBLK)->typname = strdup(pDevBlk->typname);
-        // Release the just aquired devblk
-        release_lock( &(*ppDEVBLK)->lock );
-    }
-    else
-    {
-        release_lock( &(*ppDEVBLK)->lock );
-        if((*ppDEVBLK)->devnum != sDevNum)
-            define_device((*ppDEVBLK)->devnum, sDevNum);
-    }
-
-    return;
-}
-
-// ---------------------------------------------------------------------
 // ParseMAC
 // ---------------------------------------------------------------------
 //
@@ -1342,7 +1336,7 @@ void  AddDevice( DEVBLK**    ppDEVBLK,
 
 int             ParseMAC( char* pszMACAddr, BYTE* pbMACAddr )
 {
-    BYTE    work[((LCS_ADDR_LEN*3)-0)];
+    char    work[((LCS_ADDR_LEN*3)-0)];
     BYTE    sep;
     int     x, i;
 
@@ -1432,4 +1426,4 @@ void  packet_trace( BYTE* pAddr, int iLen )
         logmsg( " %s\n", print_chars );
     }
 }
-#endif /* !defined(__APPLE__) */
+//#endif /* !defined(__APPLE__) */

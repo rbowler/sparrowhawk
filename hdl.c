@@ -1,4 +1,4 @@
-/* HDL.C        (c) Copyright Jan Jaeger, 2003                       */
+/* HDL.C        (c) Copyright Jan Jaeger, 2003-2004                  */
 /*              Hercules Dynamic Loader                              */
 
 #include "hercules.h"
@@ -39,6 +39,7 @@ static char *hdl_modpath = HDL_DEFAULT_PATH;
 
 #endif
 
+static LOCK   hdl_sdlock;                /* shutdown lock            */
 static HDLSHD *hdl_shdlist;              /* Shutdown call list       */
 
 /* Global hdl_device_type_equates */
@@ -87,6 +88,7 @@ void hdl_shut (void)
 {
 HDLSHD *shdent;
 
+    obtain_lock (&hdl_sdlock);
     for(shdent = hdl_shdlist; shdent; shdent = hdl_shdlist)
     {
         (shdent->shdcall) (shdent->shdarg);
@@ -94,6 +96,7 @@ HDLSHD *shdent;
         hdl_shdlist = shdent->next;
         free(shdent);
     }
+    release_lock (&hdl_sdlock);
 }
 
 
@@ -537,6 +540,7 @@ void hdl_main (void)
 HDLPRE *preload;
 
     initialize_lock(&hdl_lock);
+    initialize_lock(&hdl_sdlock);
 
     dlinit();
 

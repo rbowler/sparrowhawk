@@ -1,4 +1,4 @@
-/* SERVICE.H    (c) Copyright Jan Jaeger, 1999-2003                  */
+/* SERVICE.H    (c) Copyright Jan Jaeger, 1999-2004                  */
 /*              Service Processor Architectured fields               */
 
 
@@ -286,6 +286,7 @@ typedef struct _SCCB_EVENT_MASK {
         (0x80000000 >> (SCCB_EVD_TYPE_OPCMD-1)) | \
         (0x80000000 >> (SCCB_EVD_TYPE_STATECH-1)) | \
         (0x80000000 >> (SCCB_EVD_TYPE_PRIOR-1)) | \
+        (0x80000000 >> (SCCB_EVD_TYPE_SIGQ-1)) | \
         (0x80000000 >> (SCCB_EVD_TYPE_CPCMD-1)) )
     } SCCB_EVENT_MASK;
 
@@ -299,6 +300,7 @@ typedef struct _SCCB_EVD_HDR {
 #define SCCB_EVD_TYPE_STATECH   0x08    /* State Change              */
 #define SCCB_EVD_TYPE_PRIOR     0x09    /* Priority message/command  */
 #define SCCB_EVD_TYPE_CPIDENT   0x0B    /* CntlProgIdent             */
+#define SCCB_EVD_TYPE_SIGQ      0x1D    /* SigQuiesce                */
 #define SCCB_EVD_TYPE_CPCMD     0x20    /* CntlProgOpCmd             */
         BYTE    flag;
 #define SCCB_EVD_FLAG_PROC      0x80    /* Event successful          */
@@ -411,6 +413,15 @@ typedef struct _SCCB_NLS_BK {
         HWORD   dcpsgid;                /* CPSGID for DBCS (def 637) */
     } SCCB_NLS_BK;
 
+/* Signal Quiesce */
+typedef struct _SCCB_SGQ_BK {
+	HWORD   count;                  /* Countdown in units        */
+	BYTE    unit;                   /* Unit type                 */
+#define SCCB_SGQ_SEC 0
+#define SCCB_SGQ_MIN 1
+#define SCCB_SGQ_HR  2
+    } SCCB_SGQ_BK;
+
 // #endif /*FEATURE_SYSTEM_CONSOLE*/
 
 // #ifdef FEATURE_EXPANDED_STORAGE
@@ -433,20 +444,5 @@ typedef struct _SCCB_XST_MAP {
     } SCCB_XST_MAP;
 // #endif /*FEATURE_EXPANDED_STORAGE*/
 
-
-// #if defined(FEATURE_CHSC)
-typedef struct _CHSC_REQ {
-        HWORD   length;                 /* Offset to response field  */
-        HWORD   req;                    /* Request code              */
-        FWORD   resv[3];
-    } CHSC_REQ;
-
-typedef struct _CHSC_RSP {
-        HWORD   length;                 /* Length of response field  */
-        HWORD   rsp;                    /* Reponse code              */
-#define CHSC_REQ_INVALID        0x0002  /* Invalid request           */
-        FWORD   info;
-    } CHSC_RSP;
-// #endif /*defined(FEATURE_CHSC)*/
 
 #endif /*!defined(_SERVICE_H)*/

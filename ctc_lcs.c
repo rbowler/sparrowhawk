@@ -2,10 +2,10 @@
 // Hercules LAN Channel Station Support
 // ====================================================================
 //
-// Copyright (C) 2002-2003 by James A. Pierson
+// Copyright (C) 2002-2004 by James A. Pierson
 //
 
-#if !defined(__APPLE__)
+//#if !defined(__APPLE__)
 
 #include "hercules.h"
 #include "devtype.h"
@@ -20,6 +20,25 @@
 #include <getopt.h>
 #endif /* defined(HAVE_GETOPT_LONG) */
 #include "herc_getopt.h"
+
+/* CCW Codes 0x03 & 0xC3 are immediate commands */
+static BYTE CTC_Immed_Commands[256]=
+{ 0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
 // ====================================================================
 // Declarations
@@ -50,11 +69,22 @@ static int      ParseArgs( DEVBLK* pDEVBLK, PLCSBLK pLCSBLK,
 //
 // ====================================================================
 
+static DEVBLK * find_group_device(DEVGRP *group, U16 devnum)
+{
+    int i;
+
+    for(i = 0; i < group->acount; i++)
+        if( group->memdev[i]->devnum == devnum )
+            return group->memdev[i];
+
+    return NULL;
+}
+
 //
 // LCS_Init
 //
 
-int  LCS_Init( DEVBLK* pDEVBLK, int argc, BYTE *argv[] )
+int  LCS_Init( DEVBLK* pDEVBLK, int argc, char *argv[] )
 {
     PLCSBLK     pLCSBLK;
     PLCSDEV     pLCSDev;
@@ -64,93 +94,104 @@ int  LCS_Init( DEVBLK* pDEVBLK, int argc, BYTE *argv[] )
 
     pDEVBLK->devtype = 0x3088;
 
-    // Housekeeping
-    pLCSBLK = malloc( sizeof( LCSBLK ) );
-    if( !pLCSBLK )
+    // Return when an existing group has been joined but is still incomplete
+    if(!group_device(pDEVBLK, 0) && pDEVBLK->group)
+        return 0;
+
+    // We need to create a group, and as such determine the number of devices
+    if(!pDEVBLK->group)
     {
-        logmsg( _("HHCLC001E %4.4X unable to allocate LCSBLK\n"),
-                pDEVBLK->devnum );
-        return -1;
-    }
-    memset( pLCSBLK, 0, sizeof( LCSBLK ) );
 
-    for( i = 0; i < LCS_MAX_PORTS; i++ )
-    {
-        memset( &pLCSBLK->Port[i], 0, sizeof ( LCSPORT ) );
+        // Housekeeping
+        pLCSBLK = malloc( sizeof( LCSBLK ) );
+        if( !pLCSBLK )
+        {
+            logmsg( _("HHCLC001E %4.4X unable to allocate LCSBLK\n"),
+                    pDEVBLK->devnum );
+            return -1;
+        }
+        memset( pLCSBLK, 0, sizeof( LCSBLK ) );
+    
+        for( i = 0; i < LCS_MAX_PORTS; i++ )
+        {
+            memset( &pLCSBLK->Port[i], 0, sizeof ( LCSPORT ) );
 
-        pLCSBLK->Port[i].bPort   = i;
-        pLCSBLK->Port[i].pLCSBLK = pLCSBLK;
-
-        // Initialize locking and event mechanisms
-        initialize_lock( &pLCSBLK->Port[i].Lock );
-        initialize_lock( &pLCSBLK->Port[i].EventLock );
-        initialize_condition( &pLCSBLK->Port[i].Event );
-    }
-
-    // Parse configuration file statement
-    if( ParseArgs( pDEVBLK, pLCSBLK, argc, (char**)argv ) != 0 )
-    {
-        free( pLCSBLK );
-        return -1;
-    }
-
-    if( pLCSBLK->pszOATFilename )
-    {
-        // If an OAT file was specified, Parse it and build the
-        // OAT table.
-        if( BuildOAT( pLCSBLK->pszOATFilename, pLCSBLK ) != 0 )
+            pLCSBLK->Port[i].bPort   = i;
+            pLCSBLK->Port[i].pLCSBLK = pLCSBLK;
+    
+            // Initialize locking and event mechanisms
+            initialize_lock( &pLCSBLK->Port[i].Lock );
+            initialize_lock( &pLCSBLK->Port[i].EventLock );
+            initialize_condition( &pLCSBLK->Port[i].Event );
+        }
+    
+        // Parse configuration file statement
+        if( ParseArgs( pDEVBLK, pLCSBLK, argc, (char**)argv ) != 0 )
         {
             free( pLCSBLK );
             return -1;
         }
+    
+        if( pLCSBLK->pszOATFilename )
+        {
+            // If an OAT file was specified, Parse it and build the
+            // OAT table.
+            if( BuildOAT( pLCSBLK->pszOATFilename, pLCSBLK ) != 0 )
+            {
+                free( pLCSBLK );
+                return -1;
+            }
+        }
+        else
+        {
+            // Otherwise, build an OAT based on the address specified
+            // in the config file with an assumption of IP mode.
+            pLCSBLK->pDevices = malloc( sizeof( LCSDEV ) );
+    
+            memset( pLCSBLK->pDevices, 0, sizeof( LCSDEV ) );
+    
+            if( pLCSBLK->pszIPAddress )
+                inet_aton( pLCSBLK->pszIPAddress, &addr );
+    
+            pLCSBLK->pDevices->sAddr        = pDEVBLK->devnum;
+            pLCSBLK->pDevices->bMode        = LCSDEV_MODE_IP;
+            pLCSBLK->pDevices->bPort        = 0;
+            pLCSBLK->pDevices->bType        = 0;
+            pLCSBLK->pDevices->lIPAddress   = addr.s_addr;
+            pLCSBLK->pDevices->pszIPAddress = pLCSBLK->pszIPAddress;
+            pLCSBLK->pDevices->pNext        = NULL;
+
+            pLCSBLK->icDevices = 2;
+        }
+
+        // Now we must create the group
+        if(!group_device(pDEVBLK, pLCSBLK->icDevices))
+        {
+            pDEVBLK->group->grp_data = pLCSBLK;
+            return 0;
+        }
+        else
+            pDEVBLK->group->grp_data = pLCSBLK;
+
     }
     else
-    {
-        // Otherwise, build an OAT based on the address specified
-        // in the config file with an assumption of IP mode.
-        pLCSBLK->pDevices = malloc( sizeof( LCSDEV ) );
+        pLCSBLK = pDEVBLK->group->grp_data;
 
-        memset( pLCSBLK->pDevices, 0, sizeof( LCSDEV ) );
-
-        if( pLCSBLK->pszIPAddress )
-            inet_aton( pLCSBLK->pszIPAddress, &addr );
-
-        pLCSBLK->pDevices->sAddr        = pDEVBLK->devnum;
-        pLCSBLK->pDevices->bMode        = LCSDEV_MODE_IP;
-        pLCSBLK->pDevices->bPort        = 0;
-        pLCSBLK->pDevices->bType        = 0;
-        pLCSBLK->pDevices->lIPAddress   = addr.s_addr;
-        pLCSBLK->pDevices->pszIPAddress = pLCSBLK->pszIPAddress;
-        pLCSBLK->pDevices->pNext        = NULL;
-    }
-
-    // Now build the DEVBLK's.
+    // When this code is reached the last devblk has been allocated...
+    //
+    // Now build the LCSDEV's.
     // If an OAT is specified, the addresses that were specified in the
-    // hercules.conf file are ignored in preference to the addresses given
-    // in the OAT. This presents on opportunity for confusion, but there
-    // was no elegant way I could find to get around this. config.c will
-    // puke if a subsequent device number is specified in the config file
-    // that already exists because of the OAT.
+    // hercules.cnf file must match those that are specified in the OAT.
 
     for( pLCSDev = pLCSBLK->pDevices; pLCSDev; pLCSDev = pLCSDev->pNext )
     {
-        // The DEVBLK that was passed as an argument needs to be used last
-        // to maintain the proper order in the device list. Each slot in the
-        // pDevices list has a NULL DEVBLK pointer which when passed to
-        // AddDevice will cause it to generate a new DEVBLK. On the final pass,
-        // the original DEVBLK is used (a non-NULL pointer telling AddDevice
-        // to use the existing DEVBLK).
-
-        if( !pLCSDev->pNext && pLCSDev->bMode != LCSDEV_MODE_IP )
-            pLCSDev->pDEVBLK[0] = pDEVBLK;
-
-        AddDevice( &pLCSDev->pDEVBLK[0], pLCSDev->sAddr, pDEVBLK );
+        pLCSDev->pDEVBLK[0] = find_group_device(pDEVBLK->group, pLCSDev->sAddr);
 
         if( !pLCSDev->pDEVBLK[0] )
         {
-            logmsg( _("HHCLC040E %4.4X AddDevice failed for LCSDEV %4.4X\n"),
-                pDEVBLK->devnum, pLCSDev->sAddr );
-            continue;
+            logmsg(D_("HHCLC040E %4.4X LCSDEV %4.4X not in configuration\n"),
+                pDEVBLK->group->memdev[0]->devnum, pLCSDev->sAddr );
+            return -1;
         }
 
         // Establish SENSE ID and Command Information Word data.
@@ -168,23 +209,13 @@ int  LCS_Init( DEVBLK* pDEVBLK, int argc, BYTE *argv[] )
         // If this is an IP Passthru address, we need a write address
         if( pLCSDev->bMode == LCSDEV_MODE_IP )
         {
-            if( !pLCSDev->pNext )
-                pLCSDev->pDEVBLK[1] = pDEVBLK;
-
-            AddDevice( &pLCSDev->pDEVBLK[1], pLCSDev->sAddr + 1, pDEVBLK );
+            pLCSDev->pDEVBLK[1] = find_group_device(pDEVBLK->group, pLCSDev->sAddr^1);
 
             if( !pLCSDev->pDEVBLK[1] )
             {
-                // FIXME! - Need to emit an error message here.
-
-                // Cant have one without the other,
-                // so back out the previous device
-
-                obtain_lock(&pLCSDev->pDEVBLK[0]->lock);
-
-                ret_devblk(pLCSDev->pDEVBLK[0]);
-
-                continue;
+                logmsg(D_("HHCLC040E %4.4X LCSDEV %4.4X not in configuration\n"),
+                    pDEVBLK->group->memdev[0]->devnum, pLCSDev->sAddr^1 );
+                return -1;
             }
 
             // Establish SENSE ID and Command Information Word data.
@@ -196,7 +227,6 @@ int  LCS_Init( DEVBLK* pDEVBLK, int argc, BYTE *argv[] )
             pLCSDev->pDEVBLK[1]->ctctype  = CTC_LCS;
             pLCSDev->pDEVBLK[1]->ctcxmode = 1;
             pLCSDev->pDEVBLK[1]->dev_data = pLCSDev;
-            pLCSDev->pLCSBLK              = pLCSBLK;
 
             strcpy( pLCSDev->pDEVBLK[1]->filename, pLCSBLK->pszTUNDevice );
         }
@@ -512,7 +542,7 @@ int  LCS_Close( DEVBLK* pDEVBLK )
             if( pPort->fd >= 0 )
             {
                 TID tid = pPort->tid;
-                TUNTAP_Close( pDEVBLK->fd );
+                VERIFY( TUNTAP_Close( pDEVBLK->fd ) == 0 );
                 signal_thread( tid, SIGINT );
 
                 // Wait for thread to end
@@ -579,12 +609,19 @@ int  LCS_Close( DEVBLK* pDEVBLK )
 // LCS_Query
 //
 
-void  LCS_Query( DEVBLK* pDEVBLK, BYTE** ppszClass,
-                 int     iBufLen, BYTE*  pBuffer )
+void  LCS_Query( DEVBLK* pDEVBLK, char** ppszClass,
+                 int     iBufLen, char*  pBuffer )
 {
     PLCSDEV     pLCSDEV = (PLCSDEV)pDEVBLK->dev_data;
 
     *ppszClass = "CTCA";
+
+    if(!pLCSDEV)
+    {
+        strlcpy(pBuffer,"*Uninitialised",iBufLen);
+        return;
+    }
+
     snprintf( pBuffer, iBufLen, "LCS Port %2.2X %s (%s)",
               pLCSDEV->bPort,
               pLCSDEV->bMode == LCSDEV_MODE_IP ? "IP " : "SNA",
@@ -742,24 +779,36 @@ void  LCS_Write( DEVBLK* pDEVBLK,   U16   sCount,
                 switch( pHeader->bCmdCode )
                 {
                 case LCS_STARTUP:        // Start Host
+                    if( pLCSDEV->pLCSBLK->fDebug )
+                        logmsg( _("HHCLCxxxI %4.4X: Startup\n"),pDEVBLK->devnum);
                     LCS_Startup( pLCSDEV, pHeader );
                     break;
                 case LCS_SHUTDOWN:       // Shutdown Host
+                    if( pLCSDEV->pLCSBLK->fDebug )
+                        logmsg( _("HHCLCxxxI %4.4X: Shutdown\n"),pDEVBLK->devnum);
                     LCS_Shutdown( pLCSDEV, pHeader );
                     break;
 
                 case LCS_STRTLAN:        // Start LAN
+                    if( pLCSDEV->pLCSBLK->fDebug )
+                        logmsg( _("HHCLCxxxI %4.4X: Start LAN\n"),pDEVBLK->devnum);
                     LCS_StartLan( pLCSDEV, pHeader );
                     break;
                 case LCS_STOPLAN:        // Stop  LAN
+                    if( pLCSDEV->pLCSBLK->fDebug )
+                        logmsg( _("HHCLCxxxI %4.4X: Stop LAN\n"),pDEVBLK->devnum);
                     LCS_StopLan( pLCSDEV, pHeader );
                     break;
 
                 case LCS_QIPASSIST:      // Query IP Assists
+                    if( pLCSDEV->pLCSBLK->fDebug )
+                        logmsg( _("HHCLCxxxI %4.4X: Query\n"),pDEVBLK->devnum);
                     LCS_QueryIPAssists( pLCSDEV, pHeader );
                     break;
 
                 case LCS_LANSTAT:        // LAN Stats
+                    if( pLCSDEV->pLCSBLK->fDebug )
+                        logmsg( _("HHCLCxxxI %4.4X: Stat\n"),pDEVBLK->devnum);
                     LCS_LanStats( pLCSDEV, pHeader );
                     break;
 
@@ -962,26 +1011,30 @@ static void  LCS_StartLan( PLCSDEV pLCSDEV, PLCSHDR pHeader )
     // Configure the TAP interface if used
     if( pPort->fUsed && pPort->fCreated && !pPort->fStarted )
     {
-        TUNTAP_SetIPAddr( pPort->szNetDevName, "0.0.0.0" );
-        TUNTAP_SetMTU( pPort->szNetDevName, "1500" );
+        VERIFY( TUNTAP_SetIPAddr( pPort->szNetDevName, "0.0.0.0" ) == 0 );
+        VERIFY( TUNTAP_SetMTU( pPort->szNetDevName, "1500" ) == 0 );
 
         if( pPort->fLocalMAC )
         {
-            TUNTAP_SetMACAddr( pPort->szNetDevName,
-                               pPort->szMACAddress );
+#if !defined(__APPLE__)
+            VERIFY( TUNTAP_SetMACAddr( pPort->szNetDevName,
+                               pPort->szMACAddress ) == 0 );
+#endif /* !defined(__APPLE__) */
         }
 
-        TUNTAP_SetFlags( pPort->szNetDevName,
-                         IFF_UP | IFF_RUNNING | IFF_BROADCAST );
+        VERIFY( TUNTAP_SetFlags( pPort->szNetDevName,
+                         IFF_UP | IFF_RUNNING | IFF_BROADCAST ) == 0 );
 
+#if !defined(__APPLE__)
         for( pRoute = pPort->pRoutes; pRoute; pRoute = pRoute->pNext )
         {
-            TUNTAP_AddRoute( pPort->szNetDevName,
+            VERIFY( TUNTAP_AddRoute( pPort->szNetDevName,
                              pRoute->pszNetAddr,
                              pRoute->pszNetMask,
                              NULL,
-                             RTF_UP );
+                             RTF_UP ) == 0 );
         }
+#endif /* !defined(__APPLE__) */
 
         pPort->sIPAssistsSupported =
 //          LCS_INBOUND_CHECKSUM_SUPPORT  |
@@ -998,19 +1051,21 @@ static void  LCS_StartLan( PLCSDEV pLCSDEV, PLCSHDR pHeader )
 
         pPort->fStarted = 1;
 
-        sleep( 1 );
+        SLEEP( 1 );
     }
 
     release_lock( &pPort->Lock );
 
+#if !defined(__APPLE__)
     if( pLCSDEV->pszIPAddress )
     {
-        TUNTAP_AddRoute( pPort->szNetDevName,
+        VERIFY( TUNTAP_AddRoute( pPort->szNetDevName,
                          pLCSDEV->pszIPAddress,
                          "255.255.255.255",
                          NULL,
-                         RTF_UP | RTF_HOST );
+                         RTF_UP | RTF_HOST ) == 0 );
     }
+#endif /* !defined(__APPLE__) */
 
     // Get a pointer to the next available reply frame
     pReply = (PLCSSTDFRM)LCS_FixupReplyFrame( pLCSDEV,
@@ -1034,14 +1089,16 @@ static void  LCS_StopLan( PLCSDEV pLCSDEV, PLCSHDR pHeader )
 
     pPort->fStarted = 0;
 
+#if !defined(__APPLE__)
     if( pLCSDEV->pszIPAddress )
     {
-        TUNTAP_DelRoute( pPort->szNetDevName,
+        VERIFY( TUNTAP_DelRoute( pPort->szNetDevName,
                          pLCSDEV->pszIPAddress,
                          "255.255.255.255",
                          NULL,
-                         RTF_HOST );
+                         RTF_HOST ) == 0 );
     }
+#endif /* !defined(__APPLE__) */
 
     // FIXME: Really need to iterate through the devices and close
     //        the TAP interface if all devices have been stopped.
@@ -1169,7 +1226,7 @@ static void*  LCS_PortThread( PLCSPORT pPort )
     int         iLength;
     U16         sFrameType;
     U32         lIPAddress;
-    char        szBuff[2048];
+    BYTE        szBuff[2048];
     char        bReported = 0;
 
     pPort->pid = getpid();
@@ -1186,7 +1243,7 @@ static void*  LCS_PortThread( PLCSPORT pPort )
                 break;
             logmsg( _("HHCLC042E Port %2.2X: Read error: %s\n"),
                 pPort->bPort, strerror( errno ) );
-            sleep(1);           // (purposeful long delay)
+            SLEEP(1);           // (purposeful long delay)
             continue;
         }
 
@@ -1662,9 +1719,9 @@ static int  BuildOAT( char* pszOATName, PLCSBLK pLCSBLK )
     U16         sDevNum;
     BYTE        bType;
     U32         lIPAddr      = 0;
-    BYTE*       pszIPAddress = NULL;
-    BYTE*       pszNetAddr   = NULL;
-    BYTE*       pszNetMask   = NULL;
+    char*       pszIPAddress = NULL;
+    char*       pszNetAddr   = NULL;
+    char*       pszNetMask   = NULL;
 
     struct in_addr  addr;               // Work area for addresses
 
@@ -1812,7 +1869,7 @@ static int  BuildOAT( char* pszOATName, PLCSBLK pLCSBLK )
 
             if( strcasecmp( pszOperand, "IP" ) == 0 )
             {
-                bMode = 1;
+                bMode = LCSDEV_MODE_IP;
 
                 if( argc < 1 )
                 {
@@ -1869,7 +1926,7 @@ static int  BuildOAT( char* pszOATName, PLCSBLK pLCSBLK )
             }
             else if( strcasecmp( pszOperand, "SNA" ) == 0 )
             {
-                bMode = 2;
+                bMode = LCSDEV_MODE_SNA;
 
                 if( argc < 1 )
                 {
@@ -1927,6 +1984,11 @@ static int  BuildOAT( char* pszOATName, PLCSBLK pLCSBLK )
             pDev->lIPAddress   = lIPAddr;
             pDev->pszIPAddress = pszIPAddress;
             pDev->pNext        = NULL;
+
+            if(pDev->bMode == LCSDEV_MODE_IP)
+                pLCSBLK->icDevices += 2;
+            else
+                pLCSBLK->icDevices += 1;
         }
     }
 
@@ -2014,16 +2076,30 @@ static char*  ReadOAT( char* pszOATName, FILE* fp, char* pszBuff )
 // --------------------------------------------------------------------
 
 
-#if defined(OPTION_DYNAMIC_LOAD)
-static
-#endif
+/* NOTE : lcs_device_hndinfo is NEVER static as it is referenced by the CTC meta driver */
+// #if defined(OPTION_DYNAMIC_LOAD)
+// static
+// #endif
 DEVHND lcs_device_hndinfo =
 {
-    &LCS_Init,
-    &LCS_ExecuteCCW,
-    &LCS_Close,
-    &LCS_Query,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+        &LCS_Init,                    /* Device Initialisation      */
+        &LCS_ExecuteCCW,              /* Device CCW execute         */
+        &LCS_Close,                   /* Device Close               */
+        &LCS_Query,                   /* Device Query               */
+        NULL,                          /* Device Start channel pgm   */
+        NULL,                          /* Device End channel pgm     */
+        NULL,                          /* Device Resume channel pgm  */
+        NULL,                          /* Device Suspend channel pgm */
+        NULL,                          /* Device Read                */
+        NULL,                          /* Device Write               */
+        NULL,                          /* Device Query used          */
+        NULL,                          /* Device Reserve             */
+        NULL,                          /* Device Release             */
+        CTC_Immed_Commands,            /* Immediate CCW Codes        */
+        NULL,                          /* Signal Adapter Input       */
+        NULL,                          /* Signal Adapter Output      */
+        NULL,                          /* Hercules suspend           */
+        NULL                           /* Hercules resume            */
 };
 
 
@@ -2075,6 +2151,3 @@ HDL_DEVICE_SECTION;
 }
 END_DEVICE_SECTION;
 #endif
-
-
-#endif /* !defined(__APPLE__) */

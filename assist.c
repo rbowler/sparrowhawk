@@ -1,4 +1,4 @@
-/* ASSIST.C     (c) Copyright Roger Bowler, 1999-2003                */
+/* ASSIST.C     (c) Copyright Roger Bowler, 1999-2004                */
 /*              ESA/390 MVS Assist Routines                          */
 
 /*-------------------------------------------------------------------*/
@@ -8,7 +8,7 @@
 
 /*              Instruction decode rework - Jan Jaeger               */
 /*              Correct address wraparound - Jan Jaeger              */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2003      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
 /*              Add dummy assist instruction - Jay Maynard,          */
 /*                  suggested by Brandon Hill                        */
 
@@ -58,7 +58,7 @@ int     b1, b2;                         /* Values of base field      */
 VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 
-    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+    SSE(inst, regs, b1, effective_addr1, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -77,7 +77,7 @@ int     b1, b2;                         /* Values of base field      */
 VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 
-    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+    SSE(inst, regs, b1, effective_addr1, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -105,7 +105,7 @@ U32     lcpa;                           /* Logical CPU address       */
 VADR    newia;                          /* Unsuccessful branch addr  */
 int     acc_mode = 0;                   /* access mode to use        */
 
-    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+    SSE(inst, regs, b1, effective_addr1, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -163,7 +163,7 @@ int     acc_mode = 0;                   /* access mode to use        */
         newia = ARCH_DEP(vfetch4) ( lit_addr, acc_mode, regs );
 
         /* Save the link information in register 12 */
-        regs->GR_L(12) = regs->psw.IA;
+        regs->GR_L(12) = regs->psw.IA & ADDRESS_MAXWRAP(regs);
 
         /* Copy LITOLOC into register 13 to signify obtain failure */
         regs->GR_L(13) = newia;
@@ -200,7 +200,7 @@ U32     lcpa;                           /* Logical CPU address       */
 VADR    newia;                          /* Unsuccessful branch addr  */
 int     acc_mode = 0;                   /* access mode to use        */
 
-    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+    SSE(inst, regs, b1, effective_addr1, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -259,7 +259,7 @@ int     acc_mode = 0;                   /* access mode to use        */
         newia = ARCH_DEP(vfetch4) ( lit_addr, acc_mode, regs );
 
         /* Save the link information in register 12 */
-        regs->GR_L(12) = regs->psw.IA;
+        regs->GR_L(12) = regs->psw.IA & ADDRESS_MAXWRAP(regs);
 
         /* Copy LITRLOC into register 13 to signify release failure */
         regs->GR_L(13) = newia;
@@ -292,7 +292,7 @@ U32     lock;                           /* Lock value                */
 VADR    newia;                          /* Unsuccessful branch addr  */
 int     acc_mode = 0;                   /* access mode to use        */
 
-    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+    SSE(inst, regs, b1, effective_addr1, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -350,7 +350,7 @@ int     acc_mode = 0;                   /* access mode to use        */
         newia = ARCH_DEP(vfetch4) ( lit_addr, acc_mode, regs );
 
         /* Save the link information in register 12 */
-        regs->GR_L(12) = regs->psw.IA;
+        regs->GR_L(12) = regs->psw.IA & ADDRESS_MAXWRAP(regs);
 
         /* Copy LITOCMS into register 13 to signify obtain failure */
         regs->GR_L(13) = newia;
@@ -386,7 +386,7 @@ U32     susp;                           /* Lock suspend queue        */
 VADR    newia;                          /* Unsuccessful branch addr  */
 int     acc_mode = 0;                   /* access mode to use        */
 
-    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+    SSE(inst, regs, b1, effective_addr1, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -444,7 +444,7 @@ int     acc_mode = 0;                   /* access mode to use        */
         newia = ARCH_DEP(vfetch4) ( lit_addr, acc_mode, regs );
 
         /* Save the link information in register 12 */
-        regs->GR_L(12) = regs->psw.IA;
+        regs->GR_L(12) = regs->psw.IA & ADDRESS_MAXWRAP(regs);
 
         /* Copy LITRCMS into register 13 to signify release failure */
         regs->GR_L(13) = newia;
@@ -469,7 +469,7 @@ int     b1, b2;                         /* Values of base field      */
 VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 
-    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+    SSE(inst, regs, b1, effective_addr1, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -491,7 +491,7 @@ int     b1, b2;                         /* Values of base field      */
 VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 
-    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+    SSE(inst, regs, b1, effective_addr1, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -513,7 +513,7 @@ int     b1, b2;                         /* Values of base field      */
 VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 
-    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+    SSE(inst, regs, b1, effective_addr1, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -535,7 +535,7 @@ int     b1, b2;                         /* Values of base field      */
 VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 
-    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+    SSE(inst, regs, b1, effective_addr1, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -557,7 +557,7 @@ int     b1, b2;                         /* Values of base field      */
 VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 
-    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+    SSE(inst, regs, b1, effective_addr1, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 
@@ -579,7 +579,7 @@ int     b1, b2;                         /* Values of base field      */
 VADR    effective_addr1,
         effective_addr2;                /* Effective addresses       */
 
-    SSE(inst, execflag, regs, b1, effective_addr1, b2, effective_addr2);
+    SSE(inst, regs, b1, effective_addr1, b2, effective_addr2);
 
     PRIV_CHECK(regs);
 

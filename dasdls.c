@@ -1,8 +1,8 @@
 /*
  * dasdls
  *
- * Copyright 2000-2003 by Malcolm Beattie
- * Based on code copyright by Roger Bowler, 1999-2003
+ * Copyright 2000-2004 by Malcolm Beattie
+ * Based on code copyright by Roger Bowler, 1999-2004
  */
 #include "hercules.h"
 #include "dasdblks.h"
@@ -17,10 +17,8 @@ int  extgui = 0;
 #endif
 #endif /*EXTERNALGUI*/
 
-int end_of_track(char *ptr)
+int end_of_track(BYTE *p)
 {
-    unsigned char *p = (unsigned char *)ptr;
-
     return p[0] == 0xff && p[1] == 0xff && p[2] == 0xff && p[3] == 0xff
         && p[4] == 0xff && p[5] == 0xff && p[6] == 0xff && p[7] == 0xff;
 }
@@ -43,7 +41,7 @@ int list_contents(CIFBLK *cif, char *volser, DSXTENT *extent)
     needsep = 1;
 
     do {
-        char *ptr;
+        BYTE *ptr;
         int rc = read_track(cif, ccyl, chead);
 
 #ifdef EXTERNALGUI
@@ -99,7 +97,7 @@ int do_ls_cif(CIFBLK *cif)
     head = (vol1data[13] << 8) | vol1data[14];
     rec = vol1data[15];
 
-    rc = read_block(cif, cyl, head, rec, (unsigned char**)&f4dscb, &len, 0, 0);
+    rc = read_block(cif, cyl, head, rec, (void *)&f4dscb, &len, 0, 0);
     if (rc < 0)
         return -1;
     if (rc > 0) {
