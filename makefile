@@ -2,11 +2,11 @@
 # Makefile for Hercules S/370 and ESA/390 emulator
 #
 # This makefile will make executables for both architectures at the same
-#  time; the 370 program is hercules-370, and the 390 one is hercules-390.
+# time; the 370 program is hercules-370, and the 390 one is hercules-390.
 #
 #
 
-VERSION  = 1.42
+VERSION  = 1.43
 
 CFLAGS	 = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=390
 CFL_370  = -O3 -Wall -fPIC -DVERSION=$(VERSION) -DARCH=370
@@ -50,31 +50,31 @@ HEADERS  = hercules.h esa390.h
 all:	   $(EXEFILES)
 
 hercules-370:  $(HRC_370_OBJS)
-	cc -o hercules-370 $(HRC_370_OBJS) $(LFLAGS)
+	$(CC) -o hercules-370 $(HRC_370_OBJS) $(LFLAGS)
 
 hercules-390:  $(HRC_390_OBJS)
-	cc -o hercules-390 $(HRC_390_OBJS) $(LFLAGS)
+	$(CC) -o hercules-390 $(HRC_390_OBJS) $(LFLAGS)
 
 $(HRC_370_OBJS): obj370/%.o: %.c $(HEADERS) makefile
-	cc $(CFL_370) -o $@ -c $<
+	$(CC) $(CFL_370) -o $@ -c $<
 
 $(HRC_390_OBJS): obj390/%.o: %.c $(HEADERS) makefile
-	cc $(CFLAGS) -o $@ -c $<
+	$(CC) $(CFLAGS) -o $@ -c $<
 
 dasdinit:  $(DIN_OBJS)
-	cc -o dasdinit $(DIN_OBJS)
+	$(CC) -o dasdinit $(DIN_OBJS)
 
 dasdisup:  $(DIS_OBJS)
-	cc -o dasdisup $(DIS_OBJS)
+	$(CC) -o dasdisup $(DIS_OBJS)
 
 dasdload:  $(DLD_OBJS)
-	cc -o dasdload $(DLD_OBJS)
+	$(CC) -o dasdload $(DLD_OBJS)
 
 dasdpdsu:  $(DPU_OBJS)
-	cc -o dasdpdsu $(DPU_OBJS)
+	$(CC) -o dasdpdsu $(DPU_OBJS)
 
 tapecopy:  $(TCY_OBJS)
-	cc -o tapecopy $(TCY_OBJS)
+	$(CC) -o tapecopy $(TCY_OBJS)
 
 dasdinit.o: dasdinit.c $(HEADERS) dasdblks.h makefile
 

@@ -1,4 +1,4 @@
-/* SORT.C       Written by Peter Kuschnerus, 1999                    */
+/* SORT.C       (c) Copyright Peter Kuschnerus, 1999                 */
 /*              ESA/390 Sorting Instructions                         */
 
 /*-------------------------------------------------------------------*/
@@ -20,74 +20,89 @@
 /*-------------------------------------------------------------------*/
 int compare_and_form_codeword (REGS *regs, U32 eaddr)
 {
-U32     n, n1, n2;                      /* 32-bit operand values     */
-U16     h1, h2, h3;                     /* 16-bit operand values     */
-BYTE    obyte;                          /* Operand control bit       */
 int     cc;                             /* Condition code            */
 int     ar1 = 1;                        /* Access register number    */
 U32     addr1, addr3;                   /* Operand addresses         */
+U32     work;                           /* 32-bit workarea           */
+U16     index_limit;                    /* Index limit               */
+U16     index;                          /* Index                     */
+U16     temp_hw;                        /* TEMPHW                    */
+U16     op1, op3;                       /* 16-bit operand values     */
+BYTE    operand_control;                /* Operand control bit       */
 
+    /* Check GR1, GR2, GR3 even */
     if ( regs->gpr[1] & 1 || regs->gpr[2] & 1 || regs->gpr[3] & 1 )
     {
         program_check (PGM_SPECIFICATION_EXCEPTION);
         return 3;
     }
 
-    n1 = eaddr & 0x00007FFE;
-    obyte = eaddr & 1;
+    /* Get index limit and operand-control bit */
+    index_limit = eaddr & 0x7FFE;
+    operand_control = eaddr & 1;
 
+    /* Loop until break */
     for (;;)
     {
-        n2 = regs->gpr[2] & 0x0000FFFF;
-        if ( n2 > n1 )
+        /* Check index limit */
+        index = regs->gpr[2];
+        if ( index > index_limit )
         {
-            regs->gpr[2] = regs->gpr[3];
-            regs->gpr[2] |= 0x80000000;
+            regs->gpr[2] = regs->gpr[3] | 0x80000000;
             return 0;
         }
 
+        /* fetch 1st operand */
+        addr1 = (regs->gpr[1] + index) &
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        op1 = vfetch2 ( addr1, ar1, regs );
+
+        /* fetch 3rd operand */
+        addr3 = (regs->gpr[3] + index) &
+                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        op3 = vfetch2 ( addr3, ar1, regs );
+
         regs->gpr[2] += 2;
 
-        addr1 = (regs->gpr[1] + n2) &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        addr3 = (regs->gpr[3] + n2) &
-                        (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-
-        h1 = vfetch2 ( addr1, ar1, regs );
-        h3 = vfetch2 ( addr3, ar1, regs );
-
-        if ( h1 > h3 )
+        /* Compare oprerands */
+        if ( op1 > op3 )
         {
-            if ( obyte )
+            if ( operand_control )
             {
-                h2 = h3;
+                temp_hw = op3;
                 cc = 1;
             }
             else
             {
-                h2 = ~h1;
-                n = regs->gpr[1];
+                temp_hw = ~op1;
+
+                /* Exchange GR1 and GR3 */
+                work = regs->gpr[1];
                 regs->gpr[1] = regs->gpr[3];
-                regs->gpr[3] = n;
+                regs->gpr[3] = work;
+
                 cc = 2;
             }
 
             /* end of loop */
             break;
         }
-        else if ( h1 < h3 )
+        else if ( op1 < op3 )
         {
-            if ( obyte )
+            if ( operand_control )
             {
-                h2 = h1;
-                n = regs->gpr[1];
+                temp_hw = op1;
+
+                /* Exchange GR1 and GR3 */
+                work = regs->gpr[1];
                 regs->gpr[1] = regs->gpr[3];
-                regs->gpr[3] = n;
+                regs->gpr[3] = work;
+
                 cc = 2;
             }
             else
             {
-                h2 = ~h3;
+                temp_hw = ~op3;
                 cc = 1;
             }
 
@@ -97,8 +112,7 @@ U32     addr1, addr3;                   /* Operand addresses         */
         /* if equal continue */
     }
 
-    regs->gpr[2] <<= 16;
-    regs->gpr[2] |= h2;
+    regs->gpr[2] = (regs->gpr[2] << 16) | temp_hw;
 
     /* end of instruction */
     return cc;
@@ -115,51 +129,66 @@ U32     addr1, addr3;                   /* Operand addresses         */
 /*-------------------------------------------------------------------*/
 int update_tree (REGS *regs)
 {
-U32     d, h, i, j;                     /* 32-bit operand values     */
+U32     tempword1;                      /* TEMPWORD1                 */
+U32     tempword2;                      /* TEMPWORD2                 */
+U32     tempword3;                      /* TEMPWORD3                 */
+U32     tempaddress;                    /* TEMPADDRESS               */
 int     cc;                             /* Condition code            */
 int     ar1 = 4;                        /* Access register number    */
 
+    /* Check GR4, GR5 doubleword alligned */
     if ( regs->gpr[4] & 0x00000007 || regs->gpr[5] & 0x00000007 )
     {
         program_check (PGM_SPECIFICATION_EXCEPTION);
         return 0;
     }
 
+    /* Loop until break */
     for (;;)
     {
-        d = (regs->gpr[5] >> 1) & 0xFFFFFFF8;
-        if ( d == 0 )
+        tempword1 = (regs->gpr[5] >> 1) & 0xFFFFFFF8;
+        if ( tempword1 == 0 )
         {
             regs->gpr[5] = 0;
             cc = 1;
             break;
         }
 
-        regs->gpr[5] = d;
+        regs->gpr[5] = tempword1;
+
+        /* Check bit 0 of GR0 */
         if ( ((U32) regs->gpr[0]) < 0 )
         {
             cc = 3;
             break;
         }
 
-        j = regs->gpr[4] + d;
-        j &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        h = vfetch4 ( j, ar1, regs );
-        i = vfetch4 ( j + 4, ar1, regs );
-        if ( regs->gpr[0] == h )
+        tempaddress = regs->gpr[4] + tempword1;
+
+        /* Fetch doubleword from tempaddress to tempword2 and tempword3 */
+        tempaddress &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+        tempword2 = vfetch4 ( tempaddress, ar1, regs );
+        tempword3 = vfetch4 ( tempaddress + 4, ar1, regs );
+
+        if ( regs->gpr[0] == tempword2 )
         {
-            regs->gpr[2] = h;
-            regs->gpr[3] = i;
+            /* Load GR2 and GR3 from tempword2 and tempword3 */
+            regs->gpr[2] = tempword2;
+            regs->gpr[3] = tempword3;
+
             cc = 0;
             break;
         }
 
-        if ( regs->gpr[0] < h )
+        if ( regs->gpr[0] < tempword2 )
         {
-            vstore4 ( regs->gpr[0], j, ar1, regs );
-            vstore4 ( regs->gpr[1], j + 4, ar1, regs );
-            regs->gpr[0] = h;
-            regs->gpr[1] = i;
+            /* Store doubleword from GR0 and GR1 to tempaddress */
+            vstore4 ( regs->gpr[0], tempaddress, ar1, regs );
+            vstore4 ( regs->gpr[1], tempaddress + 4, ar1, regs );
+
+            /* Load GR0 and GR1 from tempword2 and tempword3 */
+            regs->gpr[0] = tempword2;
+            regs->gpr[1] = tempword3;
         }
     }
 

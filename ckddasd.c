@@ -2482,6 +2482,64 @@ BYTE            key[256];               /* Key for search operations */
 
         break;
 
+    case 0x85:
+    /*---------------------------------------------------------------*/
+    /* WRITE UPDATE DATA                                             */
+    /*---------------------------------------------------------------*/
+        /* Command reject if not within the domain of a Locate Record
+           that specifies the Write Data operation code */
+        if (dev->ckdlcount == 0
+            || (dev->ckdloper & CKDOPER_CODE) != CKDOPER_WRITE)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Orient to next user record count field */
+        if (dev->ckdorient != CKDORIENT_COUNT
+            || dev->ckdcurrec == 0)
+        {
+            /* Read next count field */
+            rc = ckd_read_count (dev, code, &rechdr, unitstat);
+            if (rc < 0) break;
+        }
+
+        /* If not operating in CKD conversion mode, check that the
+           data length is equal to the transfer length factor */
+        if ((dev->ckdxgattr & CKDGATR_CKDCONV) == 0)
+        {
+            if (dev->ckdcurdl != dev->ckdltranlf)
+            {
+                /* Unit check with invalid track format */
+                ckd_build_sense (dev, 0, SENSE1_ITF, 0, 0, 0);
+                *unitstat = CSW_CE | CSW_DE | CSW_UC;
+                break;
+            }
+        }
+
+        /* If data length is zero, terminate with unit exception */
+        if (dev->ckdcurdl == 0)
+        {
+            *unitstat = CSW_CE | CSW_DE | CSW_UX;
+            break;
+        }
+
+        /* Write data */
+        rc = ckd_write_data (dev, iobuf, count, unitstat);
+        if (rc < 0) break;
+
+        /* Calculate number of bytes written and set residual count */
+        size = dev->ckdcurdl;
+        num = (count < size) ? count : size;
+        *residual = count - num;
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+
+        break;
+
     case 0x0D:
     /*---------------------------------------------------------------*/
     /* WRITE KEY AND DATA                                            */

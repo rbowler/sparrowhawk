@@ -225,7 +225,7 @@ int     i;                              /* Array subscript           */
     if ((aste[0] & ASTE0_RESV) || (aste[1] & ASTE1_RESV)
         || ((aste[0] & ASTE0_BASE)
 #ifdef FEATURE_SUBSPACE_GROUP
-            && (regs->cr[0] & CR0_ASF)
+            && !(regs->cr[0] & CR0_ASF)
 #endif /*FEATURE_SUBSPACE_GROUP*/
             ))
         goto asn_asn_tran_spec_excp;
@@ -713,11 +713,11 @@ U16     eax;                            /* Authorization index       */
     /* [10.17] Do not use TLB if processing LRA instruction */
 
     /* Only a single entry in the TLB will be looked up, namely the
-       entry associated with the base/access register being used */
-    if (acctype == ACCTYPE_LRA || arn < 0)
+       entry indexed by bits 12-19 of the virtual address */
+    if (acctype == ACCTYPE_LRA)
         tlbp = NULL;
     else
-        tlbp = &(regs->tlb[arn & 0x0F]);
+        tlbp = &(regs->tlb[(vaddr >> 12) & 0xFF]);
 
     if (tlbp != NULL
         && (vaddr & 0x7FFFF000) == tlbp->vaddr
@@ -906,10 +906,11 @@ int     i;                              /* Array subscript           */
 
     for (i = 0; i < (sizeof(regs->tlb)/sizeof(TLBE)); i++)
     {
-        if ((regs->tlb[i].pte & PAGETAB_PFRA) == (pte & PAGETAB_PFRA))
+        if ((regs->tlb[i].pte & PAGETAB_PFRA) == (pte & PAGETAB_PFRA)
+            && regs->tlb[i].valid)
         {
             regs->tlb[i].valid = 0;
-            logmsg ("dat: TLB entry %d invalidated\n", i); /*debug*/
+// /*debug*/logmsg ("dat: TLB entry %d invalidated\n", i); /*debug*/
         }
     } /* end for(i) */
 

@@ -1006,7 +1006,7 @@ U16     pasn;                           /* Primary ASN               */
     }
 
     /* Clear remaining words if fewer than 8 words were loaded */
-    while (i < 8) ete[i] = 0;
+    while (i < 8) ete[i++] = 0;
 
     /* Program check if basic program call in AR mode */
     if ((ete[4] & ETE4_T) == 0 && regs->psw.armode)

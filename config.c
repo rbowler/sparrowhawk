@@ -138,6 +138,7 @@ int     cpu;                            /* CPU number                */
 int     pfd[2];                         /* Message pipe handles      */
 FILE   *fp;                             /* Configuration file pointer*/
 BYTE   *sserial;                        /* -> CPU serial string      */
+BYTE   *smodel;                         /* -> CPU model string       */
 BYTE   *smainsize;                      /* -> Main size string       */
 BYTE   *sxpndsize;                      /* -> Expanded size string   */
 BYTE   *scnslport;                      /* -> Console port number    */
@@ -145,7 +146,7 @@ BYTE   *snumcpu;                        /* -> Number of CPUs         */
 BYTE   *sloadparm;                      /* -> IPL load parameter     */
 BYTE    version = 0x00;                 /* CPU version code          */
 U32     serial;                         /* CPU serial number         */
-U16     model = 0x0586;                 /* CPU model number          */
+U16     model;                          /* CPU model number          */
 U16     mainsize;                       /* Main storage size (MB)    */
 U16     xpndsize;                       /* Expanded storage size (MB)*/
 U16     cnslport;                       /* Console port number       */
@@ -185,14 +186,16 @@ int     subchan;                        /* Subchannel number         */
 
     /* Parse the CPU statement */
     sserial = strtok (buf, " \t");
+    smodel = strtok (NULL, " \t");
     smainsize = strtok (NULL, " \t");
     sxpndsize = strtok (NULL, " \t");
     scnslport = strtok (NULL, " \t");
     snumcpu = strtok (NULL, " \t");
     sloadparm = strtok (NULL, " \t");
 
-    if (sserial == NULL || smainsize == NULL || sxpndsize == NULL
-        || scnslport == NULL || snumcpu == NULL || sloadparm == NULL)
+    if (sserial == NULL || smodel == NULL || smainsize == NULL
+        || sxpndsize == NULL || scnslport == NULL || snumcpu == NULL
+        || sloadparm == NULL)
     {
         fprintf (stderr,
                 "HHC005I Error in %s line %d: Missing fields\n",
@@ -200,13 +203,23 @@ int     subchan;                        /* Subchannel number         */
         exit(1);
     }
 
-    if (strlen(sserial) > 6
+    if (strlen(sserial) != 6
         || sscanf(sserial, "%x%c", &serial, &c) != 1)
     {
         fprintf (stderr,
                 "HHC006I Error in %s line %d: "
                 "%s is not a valid serial number\n",
                 fname, stmt, sserial);
+        exit(1);
+    }
+
+    if (strlen(smodel) != 4
+        || sscanf(smodel, "%hx%c", &model, &c) != 1)
+    {
+        fprintf (stderr,
+                "HHC019I Error in %s line %d: "
+                "%s is not a valid CPU model\n",
+                fname, stmt, smodel);
         exit(1);
     }
 

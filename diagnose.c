@@ -1,4 +1,4 @@
-/* DIAGNOSE.C   Created by Jan Jaeger, 1999                          */
+/* DIAGNOSE.C   (c) Copyright Jan Jaeger, 1999                       */
 /*              ESA/390 Diagnose Functions                           */
 
 /*-------------------------------------------------------------------*/

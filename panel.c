@@ -416,6 +416,7 @@ BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
             "loadcore filename=load core image from file\n"
             "loadparm xxxxxxxx=set IPL parameter, ipl devn=IPL\n"
             "devinit devn arg [arg...] = reinitialize device\n"
+            "devlist=list devices\n"
             "quit/exit=terminate\n");
         return NULL;
     }
@@ -786,6 +787,24 @@ BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
         exit(0);
     }
 
+    /* devlist command - list devices */
+    if (strcmp(cmd,"devlist")==0)
+    {
+        for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
+        {
+            logmsg ("%4.4X %4.4X %d %s %s%s%s\n",
+                    dev->devnum, dev->devtype,
+                    (int)(dev->tid),
+                    ((dev->console && dev->connected) ?
+                        (BYTE*)inet_ntoa(dev->ipaddr) : dev->filename),
+                    (dev->fd > 2 ? "open " : ""),
+                    (dev->busy ? "busy " : ""),
+                    ((dev->pending || dev->pcipending) ?
+                        "pending " : ""));
+        } /* end for(dev) */
+        return NULL;
+    }
+
     /* devinit command - assign/open a file for a configured device */
     if (memcmp(cmd,"devinit",7)==0)
     {
@@ -847,11 +866,11 @@ BYTE   *devargv[MAX_ARGS];              /* Arg array for devinit     */
             }
         }
 
-        /* Raise unsolicited device end interrupt for the device */
-        device_attention (dev, CSW_DE);
-
         /* Release the device lock */
         release_lock (&dev->lock);
+
+        /* Raise unsolicited device end interrupt for the device */
+        device_attention (dev, CSW_DE);
 
         return NULL;
     }

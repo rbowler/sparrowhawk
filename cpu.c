@@ -264,6 +264,7 @@ void program_check (int code)
 {
 PSA    *psa;                            /* -> Prefixed storage area  */
 int     rc;                             /* Return code               */
+U32     ia;                             /* Instruction address       */
 DWORD   dword;                          /* Doubleword work area      */
 REGS   *regs = &(sysblk.regs[0]);
 
@@ -290,7 +291,12 @@ REGS   *regs = &(sysblk.regs[0]);
     {
         regs->psw.ia -= regs->psw.ilc;
         regs->psw.ia &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
-        regs->psw.ilc = 0;
+        ia = regs->psw.ia;
+    }
+    else
+    {
+        ia = regs->psw.ia - regs->psw.ilc;
+        ia &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
     }
 
     /* Store the interrupt code in the PSW */
@@ -301,7 +307,7 @@ REGS   *regs = &(sysblk.regs[0]);
     {
         logmsg ("Program check CODE=%4.4X ILC=%d ",
                 code, regs->psw.ilc);
-        instfetch (dword, regs->psw.ia - regs->psw.ilc, regs);
+        instfetch (dword, ia, regs);
         display_inst (regs, dword);
 //      if (code != PGM_PAGE_TRANSLATION_EXCEPTION
 //          && code != PGM_SEGMENT_TRANSLATION_EXCEPTION)
@@ -6010,6 +6016,10 @@ int     icidx;                          /* Instruction counter index */
 
         /* Release the interrupt lock */
         release_lock (&sysblk.intlock);
+
+        /* Clear the instruction length code in case access error
+           occurs while attempting to fetch next instruction */
+        regs->psw.ilc = 0;
 
         /* Fetch the next sequential instruction */
         instfetch (inst, regs->psw.ia, regs);

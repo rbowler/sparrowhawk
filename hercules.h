@@ -171,7 +171,7 @@ typedef struct _REGS {			/* Processor registers	     */
 	U64	ptimer; 		/* CPU timer		     */
 	U64	clkc;			/* Clock comparator	     */
 	U64	instcount;		/* Instruction counter	     */
-	TLBE	tlb[16];		/* Translation lookaside buf */
+	TLBE	tlb[256];		/* Translation lookaside buf */
 	TID	cputid; 		/* CPU thread identifier     */
 	U32	gpr[16];		/* General purpose registers */
 	U32	cr[16]; 		/* Control registers	     */
