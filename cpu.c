@@ -11,6 +11,7 @@
 
 #undef  MODULE_TRACE
 #undef  INSTRUCTION_COUNTING
+#undef  SVC_TRACE
 
 /*-------------------------------------------------------------------*/
 /* Add two signed fullwords giving a signed fullword result          */
@@ -362,10 +363,6 @@ U16     pkm;                            /* PSW key mask              */
 U16     pasn;                           /* Primary ASN               */
 U16     sasn;                           /* Secondary ASN             */
 #endif /*!FEATURE_S370*/
-#ifdef FEATURE_MVS_ASSIST
-U32     lock;                           /* Lock value                */
-U32     lcpa;                           /* Logical CPU address       */
-#endif /*FEATURE_MVS_ASSIST*/
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
 U32     ioid;                           /* I/O interruption address  */
 PMCW    pmcw;                           /* Path management ctl word  */
@@ -507,7 +504,7 @@ static BYTE module[8];                  /* Module name               */
         /* Compute the branch address from the R2 operand */
         newia = regs->gpr[r2];
 
-        /* Store the link information in R1 */
+        /* Save the link information in the R1 operand */
         regs->gpr[r1] =
             ( regs->psw.amode ) ?
                 0x80000000 | regs->psw.ia :
@@ -665,14 +662,46 @@ static BYTE module[8];                  /* Module name               */
         /* Use the I-byte to set the SVC interruption code */
         regs->psw.intcode = ibyte;
 
+#ifdef SVC_TRACE
+        /* Trace LINK and XCTL module name */
+        if (ibyte == 6 || ibyte == 7)
+        {
+            BYTE epname[8];
+            n = regs->gpr[15];
+            n &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            n = vfetch4 (n, 0, regs);
+            n &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            vfetchc (epname, 7, n, 0, regs);
+            for (i=0; i < 8; i++)
+                epname[i] = ebcdic_to_ascii[epname[i]];
+            printf ("SVC %u:%8.8s\n", ibyte, epname);
+        }
+
+        /* Trace WTO and SVC34 */
+        if (ibyte == 34 || ibyte == 35)
+        {
+            BYTE message[256];
+            n = regs->gpr[1];
+            n &= (regs->psw.amode ? 0x7FFFFFFF : 0x00FFFFFF);
+            n = vfetch2 (n, 0, regs);
+            if (n > 130) n = 130;
+            if (n > 0)
+                vfetchc (message, n-1, regs->gpr[1], 0, regs);
+            for (i=4; i < n; i++)
+                message[i] = ebcdic_to_ascii[message[i]];
+            message[i] = '\0';
+            printf ("SVC %u:%s\n", ibyte, message+4);
+        }
+
         /* Stop on selected SVC numbers */
-        if (ibyte == 13 || ibyte == 26)
+        if (ibyte == 13)
         {
             display_inst (regs, inst);
             panel_command (regs);
         }
+#endif /*SVC_TRACE*/
 
-#if 0
+#ifdef FAKE_CAMLST
         /* Fake camlst locate *//*debug*/
         if (ibyte == 26)
         {
@@ -683,7 +712,7 @@ static BYTE module[8];                  /* Module name               */
             regs->gpr[15] = 0;
             break;
         }
-#endif
+#endif /*FAKE_CAMLST*/
 
         /* Point to PSA in main storage */
         psa = (PSA*)(sysblk.mainstor + regs->pxr);
@@ -756,7 +785,7 @@ static BYTE module[8];                  /* Module name               */
         /* Compute the branch address from the R2 operand */
         newia = regs->gpr[r2];
 
-        /* Store the link information in R1 */
+        /* Save the link information in the R1 operand */
         if ( regs->psw.amode )
             regs->gpr[r1] = 0x80000000 | regs->psw.ia;
         else
@@ -788,7 +817,7 @@ static BYTE module[8];                  /* Module name               */
         /* Compute the branch address from the R2 operand */
         newia = regs->gpr[r2];
 
-        /* Store the link information in R1 */
+        /* Save the link information in the R1 operand */
         if ( regs->psw.amode )
             regs->gpr[r1] = 0x80000000 | regs->psw.ia;
         else
@@ -1208,10 +1237,10 @@ static BYTE module[8];                  /* Module name               */
     /* BAL      Branch and Link                                 [RX] */
     /*---------------------------------------------------------------*/
 
-        /* Use the operand address as the branch address */
+        /* Use the second operand address as the branch address */
         newia = effective_addr;
 
-        /* Store the link information in R1 */
+        /* Save the link information in the R1 operand */
         regs->gpr[r1] =
             ( regs->psw.amode ) ?
                 0x80000000 | regs->psw.ia :
@@ -1384,10 +1413,10 @@ static BYTE module[8];                  /* Module name               */
     /* BAS      Branch and Save                                 [RX] */
     /*---------------------------------------------------------------*/
 
-        /* Use the operand address as the branch address */
+        /* Use the second operand address as the branch address */
         newia = effective_addr;
 
-        /* Store the link information in R1 register */
+        /* Save the link information in the R1 register */
         if ( regs->psw.amode )
             regs->gpr[r1] = 0x80000000 | regs->psw.ia;
         else
@@ -2653,7 +2682,7 @@ static BYTE module[8];                  /* Module name               */
             /* Load immediate operand from instruction bytes 2-3 */
             h1 = (inst[2] << 8) | inst[3];
 
-            /* Store the link information in R1 */
+            /* Save the link information in the R1 operand */
             if ( regs->psw.amode )
                 regs->gpr[r1] = 0x80000000 | regs->psw.ia;
             else
@@ -3353,6 +3382,7 @@ static BYTE module[8];                  /* Module name               */
                 program_check (PGM_SPACE_SWITCH_EVENT);
 
             break;
+#endif /*FEATURE_S370*/
 
         case 0x20:
         /*-----------------------------------------------------------*/
@@ -3378,6 +3408,7 @@ static BYTE module[8];                  /* Module name               */
 
             break;
 
+#ifndef FEATURE_S370
         case 0x21:
         /*-----------------------------------------------------------*/
         /* B221: IPTE - Invalidate Page Table Entry            [RRE] */
@@ -5370,58 +5401,15 @@ static BYTE module[8];                  /* Module name               */
         /* E504: Obtain Local Lock                             [SSE] */
         /*-----------------------------------------------------------*/
 
-            /* Program check if in problem state */
-            if ( regs->psw.prob )
-            {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
-                goto terminate;
-            }
+            /* Perform serialization before starting operation */
+            perform_serialization ();
 
-            /* Obtain main-storage access lock */
-            obtain_lock (&sysblk.mainlock);
+            /* Call MVS assist to obtain lock */
+            obtain_local_lock (effective_addr, ar1,
+                                effective_addr2, ar2, regs);
 
-            /* Load ASCB address from first operand location */
-            n1 = vfetch4 ( effective_addr, ar1, regs );
-
-            /* Load locks held bits from second operand location */
-            n2 = vfetch4 ( effective_addr2, ar2, regs );
-
-            /* Test if any higher lock is already held by this CPU */
-            if (n2 & ~PSALCLLI)
-            {
-                printf ("Lock hierarchy error\n");
-                display_inst (regs, inst);
-                panel_command (regs);
-                /*INCOMPLETE*/
-                release_lock (&sysblk.mainlock);
-                break;
-            }
-
-            /* Load our logical CPU address from PSALCPUA */
-            lcpa = vfetch4 ( PSALCPUA, USE_REAL_ADDR, regs );
-
-            /* Test if local lock is already held by any CPU */
-            lock = vfetch4 ( n1 + ASCBLOCK, 0, regs );
-            if (lock != 0)
-            {
-                printf ("Local lock requested by CPU %8.8lX"
-                        " held by CPU %8.8lX\n", lcpa, lock);
-                display_inst (regs, inst);
-                panel_command (regs);
-                /*INCOMPLETE*/
-                release_lock (&sysblk.mainlock);
-                break;
-            }
-
-            /* Store our logical CPU address in ASCBLOCK */
-            vstore4 ( lcpa, n1 + ASCBLOCK, 0, regs );
-
-            /* Store the local lock held bit in the second operand */
-            n2 |= PSALCLLI;
-            vstore4 ( n2, effective_addr2, ar2, regs );
-
-            /* Release main-storage access lock */
-            release_lock (&sysblk.mainlock);
+            /* Perform serialization after completing operation */
+            perform_serialization ();
 
             break;
 
@@ -5430,58 +5418,9 @@ static BYTE module[8];                  /* Module name               */
         /* E505: Release Local Lock                            [SSE] */
         /*-----------------------------------------------------------*/
 
-            /* Program check if in problem state */
-            if ( regs->psw.prob )
-            {
-                program_check (PGM_PRIVILEGED_OPERATION_EXCEPTION);
-                goto terminate;
-            }
-
-            /* Obtain main-storage access lock */
-            obtain_lock (&sysblk.mainlock);
-
-            /* Load ASCB address from first operand location */
-            n1 = vfetch4 ( effective_addr, ar1, regs );
-
-            /* Load locks held bits from second operand location */
-            n2 = vfetch4 ( effective_addr2, ar2, regs );
-
-            /* Test if any higher lock is already held by this CPU */
-            if (n2 & ~PSALCLLI)
-            {
-                printf ("Lock hierarchy error\n");
-                display_inst (regs, inst);
-                panel_command (regs);
-                /*INCOMPLETE*/
-                release_lock (&sysblk.mainlock);
-                break;
-            }
-
-            /* Load our logical CPU address from PSALCPUA */
-            lcpa = vfetch4 ( PSALCPUA, USE_REAL_ADDR, regs );
-
-            /* Check that local lock is indeed held by our CPU */
-            lock = vfetch4 ( n1 + ASCBLOCK, 0, regs );
-            if (lock != lcpa)
-            {
-                printf ("Local lock release by CPU %8.8lX"
-                        " but held by CPU %8.8lX\n", lcpa, lock);
-                display_inst (regs, inst);
-                panel_command (regs);
-                /*INCOMPLETE*/
-                release_lock (&sysblk.mainlock);
-                break;
-            }
-
-            /* Remove our logical CPU address from ASCBLOCK */
-            vstore4 ( 0, n1 + ASCBLOCK, 0, regs );
-
-            /* Reset the local lock held bit in the second operand */
-            n2 &= ~PSALCLLI;
-            vstore4 ( n2, effective_addr2, ar2, regs );
-
-            /* Release main-storage access lock */
-            release_lock (&sysblk.mainlock);
+            /* Call MVS assist to release lock */
+            release_local_lock (effective_addr, ar1,
+                                effective_addr2, ar2, regs);
 
             break;
 #endif /*FEATURE_MVS_ASSIST*/

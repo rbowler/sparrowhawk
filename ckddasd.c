@@ -8,7 +8,7 @@
 
 #include "hercules.h"
 
-#define CKD_KEY_TRACING
+#undef CKD_KEY_TRACING
 
 /*-------------------------------------------------------------------*/
 /* Bit definitions for File Mask                                     */
@@ -966,9 +966,9 @@ int             skiplen;                /* Number of bytes to skip   */
 /*-------------------------------------------------------------------*/
 /* Execute a Channel Command Word                                    */
 /*-------------------------------------------------------------------*/
-void ckddasd_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
-        BYTE chained, U16 count, BYTE prevcode, BYTE *iobuf,
-        BYTE *more, BYTE *unitstat, U16 *residual )
+void ckddasd_execute_ccw ( DEVBLK *dev, BYTE code,
+        BYTE flags, BYTE chained, U16 count, BYTE prevcode,
+        BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual )
 {
 int             rc;                     /* Return code               */
 CKDDASD_TRKHDR  trkhdr;                 /* CKD track header (HA)     */
@@ -2596,6 +2596,79 @@ BYTE            key[256];               /* Key for search operations */
 
         /* Copy device characteristics bytes to channel buffer */
         memcpy (iobuf, dev->devchar, num);
+
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0x5B:
+    /*---------------------------------------------------------------*/
+    /* SUSPEND MULTIPATH RECONNECTION                                */
+    /*---------------------------------------------------------------*/
+        /* Command reject if within the domain of a Locate Record
+           or if chained from any other CCW */
+        if (dev->ckdlocat || chained)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Return normal status */
+        *unitstat = CSW_CE | CSW_DE;
+        break;
+
+    case 0x94:
+    /*---------------------------------------------------------------*/
+    /* DEVICE RELEASE                                                */
+    /*---------------------------------------------------------------*/
+        /* Command reject if within the domain of a Locate Record, or
+           preceded by Define Extent, Space Count, or Set File Mask,
+           or (for 3390 only) preceded by Read IPL */
+        if (dev->ckdlocat
+            || dev->ckdxtdef || dev->ckdspcnt || dev->ckdsetfm
+            || (dev->ckdrdipl && dev->devtype == 0x3390))
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Perform the operation of a sense command */
+        goto sense;
+
+    case 0x14: /* UNCONDITIONAL RESERVE */
+    case 0xB4: /* DEVICE RESERVE */
+    /*---------------------------------------------------------------*/
+    /* DEVICE RESERVE                                                */
+    /*---------------------------------------------------------------*/
+        /* Command reject if within the domain of a Locate Record,
+           or indeed if preceded by any command at all apart from
+           Suspend Multipath Reconnection */
+        if (dev->ckdlocat
+            || (chained && prevcode != 0x5B))
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_2);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
+        /* Perform the operation of a sense command */
+        goto sense;
+
+    sense:
+        /* Calculate residual byte count */
+        num = (count < dev->numsense) ? count : dev->numsense;
+        *residual = count - num;
+        if (count < dev->numsense) *more = 1;
+
+        /* Copy device sense bytes to channel I/O buffer */
+        memcpy (iobuf, dev->sense, num);
+
+        /* Clear the device sense bytes */
+        memset (dev->sense, 0, sizeof(dev->sense));
 
         *unitstat = CSW_CE | CSW_DE;
         break;

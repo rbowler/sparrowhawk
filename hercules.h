@@ -142,8 +142,8 @@ typedef struct _SYSBLK {
         COND    conscond;               /* Console ready condition   */
         LOCK    conslock;               /* Console ready lock        */
         ATTR    detattr;                /* Detached thread attribute */
-        TID     tid3270;                /* Thread-id for tn3270d     */
-        U16     port3270;               /* Port number for tn3270d   */
+        TID     cnsltid;                /* Thread-id for console     */
+        U16     cnslport;               /* Port number for console   */
         struct _DEVBLK *firstdev;       /* -> First device block     */
         U32     servparm;               /* Service signal parameter  */
         unsigned int                    /* Flags                     */
@@ -166,7 +166,6 @@ typedef struct _DEVBLK {
         unsigned int                    /* Flags                     */
                 pending:1,              /* 1=Interrupt pending       */
                 busy:1,                 /* 1=Device busy             */
-                negotiating:1,          /* 1=3270 client negotiating */
                 connected:1,            /* 1=3270 client connected   */
                 readpending:1,          /* 1=3270 data read pending  */
                 ccwtrace:1,             /* 1=CCW trace               */
@@ -189,9 +188,9 @@ typedef struct _DEVBLK {
         int     bufsize;                /* Device data buffer size   */
         BYTE    filename[256];          /* Unix file name            */
         int     fd;                     /* File descriptor           */
-        /* Device dependent fields for loc3270 */
-        int     csock;                  /* 3270 client socket number */
-        struct  in_addr ipaddr;         /* 3270 client IP address    */
+        /* Device dependent fields for console */
+        int     csock;                  /* Client socket number      */
+        struct  in_addr ipaddr;         /* Client IP address         */
         int     rlen3270;               /* Length of data in buffer  */
         /* Device dependent fields for cardrdr */
         unsigned int                    /* Flags                     */
@@ -324,6 +323,16 @@ extern BYTE     ebcdic_to_ascii[];      /* Translate table           */
 /* Function prototypes                                               */
 /*-------------------------------------------------------------------*/
 
+/* Functions in module assist.c */
+void obtain_local_lock (U32 addr1, int ar1, U32 addr2, int ar2,
+        REGS *regs);
+void release_local_lock (U32 addr1, int ar1, U32 addr2, int ar2,
+        REGS *regs);
+void obtain_cms_lock (U32 addr1, int ar1, U32 addr2, int ar2,
+        REGS *regs);
+void release_cms_lock (U32 addr1, int ar1, U32 addr2, int ar2,
+        REGS *regs);
+
 /* Functions in module config.c */
 void build_config (BYTE *fname);
 DEVBLK *find_device_by_devnum (U16 devnum);
@@ -447,8 +456,11 @@ DEVIF cardrdr_init_handler;
 DEVXF cardrdr_execute_ccw;
 
 /* Functions in module console.c */
-DEVIF console_init_handler;
-DEVXF console_execute_ccw;
+void *console_connection_handler (void *arg);
+DEVIF loc3270_init_handler;
+DEVXF loc3270_execute_ccw;
+DEVIF constty_init_handler;
+DEVXF constty_execute_ccw;
 
 /* Functions in module printer.c */
 DEVIF printer_init_handler;
@@ -465,9 +477,4 @@ DEVXF ckddasd_execute_ccw;
 /* Functions in module fbadasd.c */
 DEVIF fbadasd_init_handler;
 DEVXF fbadasd_execute_ccw;
-
-/* Functions in module loc3270.c */
-void *tn3270d (void *arg);
-DEVIF loc3270_init_handler;
-DEVXF loc3270_execute_ccw;
 

@@ -6,8 +6,8 @@
 /* ESA/390 emulator.  It reads information about the processors      */
 /* and I/O devices from a configuration file.  It allocates          */
 /* main storage and expanded storage, initializes control blocks,    */
-/* and creates a detached thread to receive 3270 connection requests */
-/* and attention interrupts.                                         */
+/* and creates a detached thread to receive console connection       */
+/* requests and attention interrupts.                                */
 /*-------------------------------------------------------------------*/
 
 #include "hercules.h"
@@ -139,7 +139,7 @@ FILE   *fp;                             /* Configuration file pointer*/
 BYTE   *sserial;                        /* -> CPU serial string      */
 BYTE   *smainsize;                      /* -> Main size string       */
 BYTE   *sxpndsize;                      /* -> Expanded size string   */
-BYTE   *sport3270;                      /* -> Port number for tn3270d*/
+BYTE   *scnslport;                      /* -> Console port number    */
 BYTE   *snumcpu;                        /* -> Number of CPUs         */
 BYTE   *sloadparm;                      /* -> IPL load parameter     */
 BYTE    version = 0x00;                 /* CPU version code          */
@@ -147,7 +147,7 @@ U32     serial;                         /* CPU serial number         */
 U16     model = 0x0586;                 /* CPU model number          */
 U16     mainsize;                       /* Main storage size (MB)    */
 U16     xpndsize;                       /* Expanded storage size (MB)*/
-U16     port3270;                       /* Port number for tn3270d   */
+U16     cnslport;                       /* Console port number       */
 U16     numcpu;                         /* Number of CPUs            */
 BYTE   *sdevnum;                        /* -> Device number string   */
 BYTE   *sdevtype;                       /* -> Device type string     */
@@ -186,12 +186,12 @@ int     subchan;                        /* Subchannel number         */
     sserial = strtok (buf, " \t\n");
     smainsize = strtok (NULL, " \t\n");
     sxpndsize = strtok (NULL, " \t\n");
-    sport3270 = strtok (NULL, " \t\n");
+    scnslport = strtok (NULL, " \t\n");
     snumcpu = strtok (NULL, " \t\n");
     sloadparm = strtok (NULL, " \t\n");
 
     if (sserial == NULL || smainsize == NULL || sxpndsize == NULL
-        || sport3270 == NULL || snumcpu == NULL || sloadparm == NULL)
+        || scnslport == NULL || snumcpu == NULL || sloadparm == NULL)
     {
         fprintf (stderr,
                 "HHC005I Error in %s line %d: Missing fields\n",
@@ -229,13 +229,13 @@ int     subchan;                        /* Subchannel number         */
         exit(1);
     }
 
-    if (sscanf(sport3270, "%hu%c", &port3270, &c) != 1
-        || port3270 == 0)
+    if (sscanf(scnslport, "%hu%c", &cnslport, &c) != 1
+        || cnslport == 0)
     {
         fprintf (stderr,
                 "HHC009I Error in %s line %d: "
-                "Invalid 3270 port number %s\n",
-                fname, stmt, sport3270);
+                "Invalid console port number %s\n",
+                fname, stmt, scnslport);
         exit(1);
     }
 
@@ -321,8 +321,8 @@ int     subchan;                        /* Subchannel number         */
 #endif /*!FEATURE_EXPANDED_STORAGE*/
     } /* end if(sysblk.xpndsize) */
 
-    /* Save the port number for tn3270d */
-    sysblk.port3270 = port3270;
+    /* Save the console port number */
+    sysblk.cnslport = cnslport;
 
     /* Build CPU identifier */
     sysblk.cpuid = ((U64)version << 56)
@@ -393,8 +393,8 @@ int     subchan;                        /* Subchannel number         */
 
         case 0x1052:
         case 0x3215:
-            devinit = &console_init_handler;
-            devexec = &console_execute_ccw;
+            devinit = &constty_init_handler;
+            devexec = &constty_execute_ccw;
             break;
 
         case 0x2501:
@@ -535,12 +535,12 @@ int     subchan;                        /* Subchannel number         */
         exit(1);
     }
 
-    /* Start the tn3270d connection thread */
-    if ( create_thread (&sysblk.tid3270, &sysblk.detattr,
-                        tn3270d, NULL) )
+    /* Start the console connection thread */
+    if ( create_thread (&sysblk.cnsltid, &sysblk.detattr,
+                        console_connection_handler, NULL) )
     {
         fprintf (stderr,
-                "HHC027I Cannot create tn3270d thread: %s\n",
+                "HHC027I Cannot create console thread: %s\n",
                 strerror(errno));
         exit(1);
     }

@@ -393,14 +393,6 @@ typedef struct _PSA {                   /* Prefixed storage area     */
 /*0E8*/ DWORD mckint;                   /* Machine check int code    */
 } PSA;
 
-/* Control block offsets fixed by architecture */
-#define PSALCPUA                0x2F4   /* Logical CPU addr for lock */
-#define PSAHLHI                 0x2F8   /* Locks held indicators...  */
-#define PSACMSLI           0x00000002   /* ...CMS lock indicator     */
-#define PSALCLLI           0x00000001   /* ...Local lock indicator   */
-#define ASCBLOCK                0x080   /* Local lock                */
-#define ASCBLSWQ                0x084   /* Local lock suspend queue  */
-
 /* Program interruption codes */
 #define PGM_OPERATION_EXCEPTION                         0x0001
 #define PGM_PRIVILEGED_OPERATION_EXCEPTION              0x0002

@@ -322,6 +322,7 @@ BYTE    chain = 1;                      /* 1=Chain to next CCW       */
 BYTE    chained = 0;                    /* Command chain and data chain
                                            bits from previous CCW    */
 BYTE    prevcode = 0;                   /* Previous CCW opcode       */
+BYTE    tracethis = 0;                  /* 1=Trace this CCW only     */
 DEVXF  *devexec;                        /* -> Execute CCW function   */
 int     num;                            /* Number of bytes to move   */
 BYTE    iobuf[65536];                   /* Channel I/O buffer        */
@@ -550,9 +551,20 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
                 chanstat |= CSW_IL;
         }
 
+        /* Force tracing for this CCW if any unusual status occurred */
+        if (chanstat != 0
+            || (unitstat & ~(CSW_SM | CSW_UX)) != (CSW_CE | CSW_DE))
+            tracethis = 1;
+        else
+            tracethis = 0;
+
         /* Trace the results of CCW execution */
-        if (dev->ccwtrace || dev->ccwstep)
+        if (dev->ccwtrace || dev->ccwstep || tracethis)
         {
+            /* Trace the CCW if not already done */
+            if (!(dev->ccwtrace || dev->ccwstep))
+                display_ccw (dev, ccw, addr);
+
             /* Display status and residual byte count */
             printf ("%4.4X:Stat=%2.2X%2.2X Count=%4.4X ",
                     dev->devnum, unitstat, chanstat, residual);
@@ -562,6 +574,24 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
                 display_data (addr);
             else
                 printf ("\n");
+
+            /* Display sense bytes if unit check is indicated */
+            if (unitstat & CSW_UC)
+            {
+                printf ("%4.4X:Sense=%2.2X%2.2X%2.2X%2.2X "
+                        "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X "
+                        "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X "
+                        "%2.2X%2.2X%2.2X%2.2X\n",
+                        dev->devnum, dev->sense[0], dev->sense[1],
+                        dev->sense[2], dev->sense[3], dev->sense[4],
+                        dev->sense[5], dev->sense[6], dev->sense[7],
+                        dev->sense[8], dev->sense[9], dev->sense[10],
+                        dev->sense[11], dev->sense[12], dev->sense[13],
+                        dev->sense[14], dev->sense[15], dev->sense[16],
+                        dev->sense[17], dev->sense[18], dev->sense[19],
+                        dev->sense[20], dev->sense[21], dev->sense[22],
+                        dev->sense[23]);
+            }
         }
 
         /* Increment CCW address if device returned status modifier */
@@ -679,7 +709,7 @@ PSA    *psa;                            /* -> Prefixed storage area  */
     if (dev->busy)
     {
         /* Wait for one microsecond */
-//      yield ();
+        yield ();
 
         /* Set condition code 2 if device is busy */
         cc = 2;
@@ -697,6 +727,11 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 
         /* Clear the pending interrupt */
         dev->pending = 0;
+
+        /* Signal console thread to redrive select */
+        if (dev->devtype == 0x3270
+            || dev->devtype == 0x3215 || dev->devtype == 0x1052)
+            signal_thread (sysblk.cnsltid, SIGHUP);
     }
     else
     {
@@ -763,9 +798,10 @@ int     cc;                             /* Condition code            */
         dev->scsw.flag2 &= ~(SCSW2_FC | SCSW2_AC);
         dev->scsw.flag3 &= ~(SCSW3_SC);
 
-        /* Signal tn3270 thread to redrive select */
-        if (dev->devtype == 0x3270)
-            signal_thread (sysblk.tid3270, SIGHUP);
+        /* Signal console thread to redrive select */
+        if (dev->devtype == 0x3270
+            || dev->devtype == 0x3215 || dev->devtype == 0x1052)
+            signal_thread (sysblk.cnsltid, SIGHUP);
     }
     else
     {
@@ -876,17 +912,30 @@ DEVBLK *dev;                            /* -> Device control block   */
     /* Extract the I/O address and CSW */
     *ioid = dev->devnum;
     memcpy (csw, dev->csw, 8);
+
+    /* Display the channel status word */
+    if (dev->ccwtrace || dev->ccwstep)
+        display_csw (dev);
 #endif /*FEATURE_S370_CHANNEL*/
 
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
     /* Extract the I/O address and interrupt parameter */
     *ioid = 0x00010000 | dev->subchan;
     *ioparm = dev->ioparm;
+
+    /* Display the subchannel status word */
+    if (dev->ccwtrace || dev->ccwstep)
+        display_scsw (dev);
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
     /* Reset the interrupt pending and busy flags for the device */
     dev->pending = 0;
     dev->busy = 0;
+
+    /* Signal console thread to redrive select */
+    if (dev->devtype == 0x3270
+        || dev->devtype == 0x3215 || dev->devtype == 0x1052)
+        signal_thread (sysblk.cnsltid, SIGHUP);
 
     /* Release the device lock */
     release_lock (&dev->lock);
