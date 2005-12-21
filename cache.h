@@ -1,4 +1,4 @@
-/* CACHE.H    (c)Copyright Greg Smith, 2002-2004                     */
+/* CACHE.H    (c)Copyright Greg Smith, 2002-2005                     */
 /*            Buffer Cache Manager                                   */
 
 /*-------------------------------------------------------------------
@@ -57,7 +57,7 @@
      Notes        [0] `ix' identifies the cache.  This is an integer
                       and is reserved in `cache.h'
                   [1] An empty entry contains a zero key value.
-                      A valid key should not be all zeroes 
+                      A valid key should not be all zeroes
                       (0x0000000000000000) or all ones
                       (0xffffffffffffffff).   All ones is used to
                       indicate an error circumstance.
@@ -87,7 +87,7 @@
 
       void       *cache_getbuf(int ix, int i, int len);
                   Return address of the object buf for the cache entry.
-                  If `len' is non-zero, then if the current object 
+                  If `len' is non-zero, then if the current object
                   is null or `len' is greater than the current object
                   length then the old object is freed and a new
                   object is obtained.
@@ -140,7 +140,7 @@
                   Wait for a non-busy cache entry to become available.
                   Typically called after `cache_lookup' was
                   unsuccessful and `*o' is -1.
- 
+
       int         cache_release(int ix, int i, int flag);
                   Release the cache entry.  If flag is CACHE_FREEBUF
                   then the object buffer is also freed.
@@ -156,6 +156,17 @@
 
 #include "hercules.h"
 
+
+#ifndef _CACHE_C_
+#ifndef _HDASD_DLL_
+#define CCH_DLL_IMPORT DLL_IMPORT
+#else   /* _HDASD_DLL_ */
+#define CCH_DLL_IMPORT extern
+#endif  /* _HDASD_DLL_ */
+#else
+#define CCH_DLL_IMPORT DLL_EXPORT
+#endif
+
 /*-------------------------------------------------------------------*/
 /* Reserve cache indexes here                                        */
 /*-------------------------------------------------------------------*/
@@ -170,7 +181,7 @@
 #define  CACHE_6                      6 /*      (available)          */
 #define  CACHE_7                      7 /*      (available)          */
 
-#ifdef _HERCULES_CACHE_C
+#ifdef _CACHE_C_
 /*-------------------------------------------------------------------*/
 /* Cache entry                                                       */
 /*-------------------------------------------------------------------*/
@@ -178,7 +189,7 @@ typedef struct _CACHE {                 /* Cache entry               */
       U64       key;                    /* Key                       */
       U32       flag;                   /* Flags                     */
       int       len;                    /* Buffer length             */
-      void     *buf;                    /* Buffer address            */ 
+      void     *buf;                    /* Buffer address            */
       int       value;                  /* Arbitrary value           */
       U64       age;                    /* Age                       */
     } CACHE;
@@ -215,9 +226,15 @@ typedef struct _CACHEBLK {              /* Cache header              */
 
 #define CACHE_FREEBUF                 1 /* Free buf on release       */
 
-#ifdef _HERCULES_CACHE_C
+#ifdef _CACHE_C_
 #define CACHE_MAGIC          0x01CACE10 /* Magic number              */
 #define CACHE_DEFAULT_NBR           229 /* Initial entries (prime)   */
+//FIXME the line below increases the size for CACHE_L2.  Since each
+//      cckd device always has an active l2 entry this number
+//      actually limits the number of cckd devices that can be
+//      attached.
+//      This is a workaround to increase the max number of devices
+#define CACHE_DEFAULT_L2_NBR       1031 /* Initial entries for L2    */
 
 #define CACHE_WAITTIME             1000 /* Wait time for entry(usec) */
 
@@ -266,9 +283,9 @@ int         cache_getlen(int ix, int i);
 int         cache_getval(int ix, int i);
 int         cache_setval(int ix, int i, int val);
 int         cache_release(int ix, int i, int flag);
-int         cache_cmd(int argc, char *argv[], char *cmdline);
+CCH_DLL_IMPORT int         cache_cmd(int argc, char *argv[], char *cmdline);
 
-#ifdef _HERCULES_CACHE_C
+#ifdef _CACHE_C_
 static int  cache_create (int ix);
 static int  cache_destroy (int ix);
 static int  cache_check_ix(int ix);

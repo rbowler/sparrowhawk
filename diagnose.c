@@ -1,4 +1,4 @@
-/* DIAGNOSE.C   (c) Copyright Roger Bowler, 2000-2004                */
+/* DIAGNOSE.C   (c) Copyright Roger Bowler, 2000-2005                */
 /*              ESA/390 Diagnose Functions                           */
 
 /*-------------------------------------------------------------------*/
@@ -9,8 +9,17 @@
 /* Additional credits:                                               */
 /*      Hercules-specific diagnose calls by Jay Maynard.             */
 /*      Set/reset bad frame indicator call by Jan Jaeger.            */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 /*-------------------------------------------------------------------*/
+#include "hstdinc.h"
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
+
+#if !defined(_DIAGNOSE_C_)
+#define _DIAGNOSE_C_
+#endif
 
 #include "hercules.h"
 
@@ -106,6 +115,12 @@ U32   code;
     /* Diagnose 01F: Power Off                                       */
     /*---------------------------------------------------------------*/
 
+        /* If diag8cmd is not enabled then we are not allowed
+         * to manipulate the real machine i.e. hercules itself
+         */
+        if(!sysblk.diag8cmd)
+            ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
+
         /* The poweroff diagnose is only valid on the 9221 */
         if(((sysblk.cpuid >> 16 & 0xFFFF) != 0x9221 )
           /* and r1/r2 must contain C'POWEROFF' in EBCDIC */
@@ -177,6 +192,12 @@ U32   code;
     /*---------------------------------------------------------------*/
     /* Diagnose 008: Virtual Console Function                        */
     /*---------------------------------------------------------------*/
+        /* If diag8cmd is not enabled then we are not allowed
+         * to manipulate the real machine i.e. hercules itself
+         */
+        if(!sysblk.diag8cmd)
+            ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
+
         /* Process CP command and set condition code */
         regs->psw.cc = ARCH_DEP(cpcmd_call) (r1, r2, regs);
         break;
@@ -261,6 +282,31 @@ U32   code;
         regs->psw.cc = ARCH_DEP(diag_ppagerel) (r1, r2, regs);
         break;
 
+
+    case 0x220:
+    /*---------------------------------------------------------------*/
+    /* Diagnose 220: TOD Epoch                                       */
+    /*---------------------------------------------------------------*/
+        ODD_CHECK(r2, regs);
+
+        switch(regs->GR_L(r1))
+        {
+            case 0:
+                /* Obtain TOD features */
+                regs->GR_L(r2)  =0xc0000000;
+                regs->GR_L(r2+1)=0x00000000;
+                break;
+            case 1:
+                /* Obtain TOD offset to real TOD in R2, R2+1 */
+                regs->GR_L(r2)  = (regs->tod_epoch >> 24) & 0xFFFFFFFF;
+                regs->GR_L(r2+1)= (regs->tod_epoch << 8) & 0xFFFFFFFF; 
+                break;
+            default:
+                ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
+        }
+        break;
+
+
     case 0x23C:
     /*---------------------------------------------------------------*/
     /* Diagnose 23C: Address Space Services                          */
@@ -298,6 +344,12 @@ U32   code;
     /*---------------------------------------------------------------*/
     /* Diagnose F00: Hercules normal mode                            */
     /*---------------------------------------------------------------*/
+        /* If diag8cmd is not enabled then we are not allowed
+         * to manipulate the real machine i.e. hercules itself
+         */
+        if(!sysblk.diag8cmd)
+            ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
+
         sysblk.inststep = 0;
         SET_IC_TRACE;
         break;
@@ -306,6 +358,12 @@ U32   code;
     /*---------------------------------------------------------------*/
     /* Diagnose F04: Hercules single step mode                       */
     /*---------------------------------------------------------------*/
+        /* If diag8cmd is not enabled then we are not allowed
+         * to manipulate the real machine i.e. hercules itself
+         */
+        if(!sysblk.diag8cmd)
+            ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
+
         sysblk.inststep = 1;
         SET_IC_TRACE;
         break;
@@ -321,6 +379,12 @@ U32   code;
     /*---------------------------------------------------------------*/
     /* Diagnose F0C: Set/reset bad frame indicator                   */
     /*---------------------------------------------------------------*/
+        /* If diag8cmd is not enabled then we are not allowed
+         * to manipulate the real machine i.e. hercules itself
+         */
+        if(!sysblk.diag8cmd)
+            ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
+
         /* Load 4K block address from R2 register */
         n = regs->GR_L(r2) & ADDRESS_MAXWRAP(regs);
 
@@ -344,6 +408,12 @@ U32   code;
     /*---------------------------------------------------------------*/
     /* Diagnose F10: Hercules CPU stop                               */
     /*---------------------------------------------------------------*/
+        /* If diag8cmd is not enabled then we are not allowed
+         * to manipulate the real machine i.e. hercules itself
+         */
+        if(!sysblk.diag8cmd)
+            ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
+
         regs->cpustate = CPUSTATE_STOPPING;
         ON_IC_INTERRUPT(regs);
         break;
@@ -410,7 +480,7 @@ U32   code;
     /* Diagnose xxx: Invalid function code                           */
     /*---------------------------------------------------------------*/
 
-        if( HDC(debug_diagnose, code, r1, r2, regs) )
+        if( HDC4(debug_diagnose, code, r1, r2, regs) )
             return;
 
     /*  Power Off diagnose on 4361, 9371, 9373, 9375, 9377, 9221:    */
@@ -430,6 +500,12 @@ U32   code;
     {
         if (0x0000FFFF == ARCH_DEP(vfetch4)(effective_addr2, b2, regs))
         {
+            /* If diag8cmd is not enabled then we are not allowed
+             * to manipulate the real machine i.e. hercules itself
+             */
+        if(!sysblk.diag8cmd)
+            ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
+
             regs->cpustate = CPUSTATE_STOPPING;
             ON_IC_INTERRUPT(regs);
 

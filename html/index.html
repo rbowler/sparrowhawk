@@ -3,109 +3,134 @@
 <HEAD><TITLE>
 The Hercules System/370, ESA/390, and z/Architecture Emulator</TITLE>
 <LINK REL=STYLESHEET TYPE="text/css" HREF="hercules.css">
+<link rel="shortcut icon" href="images/favicon.ico" />
+<link rel="icon" href="images/favicon.ico" />
 </HEAD>
 <BODY BGCOLOR="#ffffcc" TEXT="#000000" LINK="#0000A0"
       VLINK="#008040" ALINK="#000000">
+
+<table><tr><td>
+
+<table width="300" align="right">
+  <tr>
+   <td></td>
+   <td width="256" align="right">
+     <img vspace="10" src="images/hercpic-rblk-256.gif" alt="Hercules logo" width="256" height="256">
+   </td>
+  </tr>
+  <tr>
+   <td></td>
+   <td width="256" align="right">
+     <center>
+     <a href="http://www.opensource.org/">
+       <img vspace="10" src="images/osi-certified-60x50.jpg" alt="Hercules is OSI Certified Open Source Software" border="1" width="60" height="50">
+     </a>
+     </center>
+   </td>
+  </tr>
+</table>
+
 <h1>The Hercules System/370, ESA/390, and z/Architecture Emulator</h1>
+
 <hr noshade>
+
 <p>
-Hercules is an open source software implementation of the mainframe
+
+<b>Hercules</b> is an open source software implementation of the mainframe
 System/370 and ESA/390 architectures, in addition to the new 64-bit
-z/Architecture. Hercules runs under Linux, Windows 98, Windows NT, Windows
-2000, Windows XP, and Mac OS X 10.2 and later.
+z/Architecture. Hercules runs under Linux, Windows (98, NT, 2000, and XP),
+and Mac OS X (10.3 and later).
+
 <p>
-Hercules was created by Roger Bowler and is maintained by Jay Maynard.
+
+Hercules is <a href="http://www.opensource.org/">OSI Certified Open Source Software</a>
+licensed under the terms of the <a href="herclic.html">Q Public Licence</a>.
+
+<p>
+
+Hercules was created by <a href="http://perso.wanadoo.fr/rbowler/">Roger Bowler</a> and is maintained by Jay Maynard.
 Jan Jaeger designed and implemented many of the advanced features of
 Hercules, including dynamic reconfiguration, integrated console,
-interpretive execution and z/Architecture support.
-<p>
-Follow these links to find out more:
+interpretive execution and z/Architecture support. A dedicated crew of
+programmers is constantly at work implementing new features and fixing bugs.
+
+<p><br>
+
+<h3>To find out more about Hercules, follow these links:</h3>
+
 <ul>
-<li><a href="hercfaq.html">Hercules Frequently-Asked Questions</a>
 <li><a href="hercinst.html">Hercules Installation and Operation</a>
 <li><a href="hercconf.html">Hercules Configuration File</a>
 <li><a href="hercmsg.html">Hercules System Messages</a>
 <li><a href="hercnew.html">What's new in this release</a>
 <li><a href="hercrnot.html">Release notes</a>
+<li><a href="hercfaq.html">Hercules Frequently-Asked Questions</a>
+<li><a href="hercsupp.html">Technical Support</a>
 <li><a href="herclic.html">The Q Public Licence</a>
-<li>Hercules is <a href="http://www.opensource.org/">OSI Certified
-Open Source Software.<br><img src="images/osi-certified-60x50.jpg"></a>
+</ul>
+
+<p><br>
+
+<h3>To download the current release version, use the following links:</h3>
+
+<ul>
+<li>Source tarball:
+<p>
+<ul>
+<li><a href="http://www.hercules-390.org/hercules-3.03.tar.gz">hercules-3.03.tar.gz</a>
 </ul>
 <p>
-Download the current release version, 3.02:
-<ul>
-<li><a href="hercules-3.02.tar.gz">hercules-3.02.tar.gz</a>: Source tarball
-<ul>
 <li>Linux:
+<p>
 <ul>
-<li><a href="hercules-3.02-1.i686.rpm">hercules-3.02-1.i686.rpm</a>: Intel RPM
-<li><a href="hercules-3.02-1.src.rpm">hercules-3.02-1.src.rpm</a>: Source
+<li><a href="http://www.hercules-390.org/hercules-3.03-1.i686.rpm">hercules-3.03-1.i686.rpm</a>: Intel RPM
+<li><a href="http://www.hercules-390.org/hercules-3.03-1.src.rpm">hercules-3.03-1.src.rpm</a>: Source
 RPM (if you want to build RPMs yourself)
 </ul>
-<li>Windows self-extracting archives:
+<p>
+<li>Windows native program:
+<p>
 <ul>
-<li>Fish (optimized) threads version:
+<li><a
+href="http://www.hercules-390.org/hercules-3.03-native.exe">hercules-3.03-native.exe</a>:
+Self-extracting archive
+<li><a
+href="http://www.hercules-390.org/hercules-3.03-native.msi">hercules-3.03-native.msi</a>:
+Windows Installer package
+</ul>
+<p>
+<li><a href="http://www.cygwin.com">Cygwin</a> for Windows self-extracting
+archives:
+<p>
 <ul>
-<li><a href="hercules-3.02-fthreads-p4.exe">hercules-3.02-fthreads-p4.exe</a>:
+<li><a href="http://www.hercules-390.org/hercules-3.03-cygwin-p4.exe">hercules-3.03-cygwin-p4.exe</a>:
 Pentium 4
-<li><a href="hercules-3.02-fthreads-i686.exe">hercules-3.02-fthreads-i686.exe</a>:
+<li><a href="http://www.hercules-390.org/hercules-3.03-cygwin-i686.exe">hercules-3.03-cygwin-i686.exe</a>:
 Pentium Pro, Pentium II, Pentium III, and AMD Athlon and up
-<li><a href="hercules-3.02-fthreads-i586.exe">hercules-3.02-fthreads-i586.exe</a>:
+<li><a href="http://www.hercules-390.org/hercules-3.03-cygwin-i586.exe">hercules-3.03-cygwin-i586.exe</a>:
 Pentium and AMD K6
 </ul>
-<li>Standard pthreads version:
+<p>
+<li>Mac OS X:
+<p>
 <ul>
-<li><a href="hercules-3.02-pthreads-p4.exe">hercules-3.02-pthreads-p4.exe</a>:
-Pentium 4
-<li><a href="hercules-3.02-pthreads-i686.exe">hercules-3.02-pthreads-i686.exe</a>:
-Pentium Pro, Pentium II, Pentium III, and AMD Athlon and up
-<li><a href="hercules-3.02-pthreads-i586.exe">hercules-3.02-pthreads-i586.exe</a>:
-Pentium and AMD K6
+<li><a href="http://www.hercules-390.org/hercules-3.03-panther.dmg">hercules-3.03-panther.dmg</a>: Mac
+OS X 10.3 (Panther) version (without internationalization)
+<li><a href="http://www.hercules-390.org/hercules-3.03-tiger.dmg">herucles-3.03-tiger.dmg</a>: Mac OS X
+10.4 (Tiger) version (with internationalization)
 </ul>
 </ul>
-<li><a href="hercules-3.02.dmg">hercules-3.02.dmg</a>: Mac OS X
-version, compressed disk image
-</ul>
 
-<p><center><hr width=15% noshade></center>
-<h3>
-The CVS version
-</h3>
-<p>
-The complete source code for the current <i>development</i> version of
-Hercules is also available via anonymous access from our CVS source code
-repository. The CVS root is
-<b>CVSROOT=:pserver:anonymous@cvs.conmicro.cx:/usr/cvs/hercules</b>. Doing a
-checkout on module "hercules" will get you the source for all of Hercules.
+<p><br>
 
-<p>
-No password is required; just press enter when asked:
+<center><hr width=15% noshade></center>
 
-<p><tt>
-cvs login<br>
-(Logging in to anonymous@conmicro.cx...)<br>
-CVS password:<br>
-cvs -z9 co hercules<br>
-cvs server: Updating hercules<br>
-</tt>
-
-<p>
-Please note that this will get you the current
-<i>development</i> version of Hercules, which is <i>not</i>
-release quality and thus might not even work (since it's still under
-development). If you want the current, stable, <i>release</i> version
-of Hercules (i.e. one that is known to work properly), then use the
-previously mentioned links instead.
-
-<p>
-Read the file <tt>README.CVS</tt> for additional and updated
-instructions for building the development version.
-
-<p><center><hr width=15% noshade></center>
 <h3>
 What people are saying about Hercules
 </h3>
-<p>
+
+<p><br>
+
 <em>&#147;
 Never in my wildest dreams did I expect to see MVS
 running on a machine that I personally own.
@@ -186,8 +211,21 @@ Congratulations on a magnificent achievement!
 &#148;</em>
 <br>&#151;
 Mike Ross
-
 <p>
+<em>&#147;
+For anyone thinking running Hercules is too much trouble or too hard
+or whatever, I came home from work one day and my 13 year old 8th
+grade son had MVS running under VM under Hercules on Linux. He had
+gotten all the information about how to do this from the Internet.
+When he complained about MVS console configuration and figuring out
+how to get it to work with VM, I knew he had felt all the pain he
+ever needed to feel about mainframes.
+&#148;</em>
+<br>&#151;
+Scott Ledbetter, StorageTek
+
+<p><br><br>
+
 Read Moshe Bar's BYTE.com article about Hercules at
 <a href="http://www.byte.com/documents/s=429/byt20000801s0002/">
 http://www.byte.com/documents/s=429/byt20000801s0002/</a>
@@ -207,45 +245,100 @@ http://www.trustsec.de/deb390/print.php?sid=26</a>
 
 <p>
 View the foils from Jay Maynard's presentation given at
-<a href="http://www.share.org/proceedings/sh97/pprbyses/pprbyses250.html#915">
-SHARE Session 2880</a>
-in Minneapolis
-on Wednesday, 25 July 2001.
+SHARE Session 2880
+in San Francisco on 20 August 2002
+as a PDF file (815K) from
+<a href="http://linuxvm.org/Present/SHARE99/S2880JMa.pdf">
+http://linuxvm.org/Present/SHARE99/S2880JMa.pdf</a>
+
+<p><br><br>
+
+<center><hr width=15% noshade></center>
+<h3>
+The CVS source code repository
+</h3>
+
+<p>
+The complete source code for the current <i>development</i> version of
+Hercules is also available via anonymous access from our CVS source code
+repository. The CVS root is:
+
+<center><b>CVSROOT=:pserver:anonymous@cvs.hercules-390.org:/usr/cvs/hercules</b></center>
+
+<p>
+
+Doing a checkout on module "hercules" will get you the source for all of Hercules.
+&nbsp;No password is required; just press enter when asked:
+
+<blockquote>
+<tt>
+    cvs login<br>
+    (Logging in to anonymous@hercules-390.org...)<br>
+    CVS password:<br>
+    cvs -z9 co hercules<br>
+    cvs server: Updating hercules<br>
+</tt>
+</blockquote>
+
+<p>
+Please note that this will get you the current
+<i>development</i> version of Hercules, which is <i>not</i>
+release quality and thus might not even work (since it's still under
+development). If you want the current, stable, <i>release</i> version
+of Hercules (i.e. one that is known to work properly), then use the
+previously mentioned links instead.
+
+<p>
+Please read the file <tt>README.CVS</tt> included with the source for additional and updated
+instructions for building the development cvs version.
+
+<p><br>
 
 <p><center><hr width=15% noshade></center>
+
 <h3>
 Other Hercules-related sites
 </h3>
+
 <ul>
-<li><a href="http://www.bsp-gmbh.com/hercules">http://www.bsp-gmbh.com/hercules</a>
+<p><li><a href="http://www.ibiblio.org/jmaynard/">http://www.ibiblio.org/jmaynard/</a>
+    <br>Jay Maynard's IBM S/360 and S/370 Public Domain Software Collection
+<p><li><a href="http://www.bsp-gmbh.com/hercules">http://www.bsp-gmbh.com/hercules</a>
     <br>Volker Bandke's Hercules site.  This is <i>the</i> site for
     users of Hercules on Windows, and here you can also obtain Volker's
     MVS 3.8J turnkey system.
-<li><a href="http://www.geocities.com/hackules390">http://www.geocities.com/hackules390</a>
-    <br>A whole host of unofficial Hercules add-ons and patches by an anonymous
-    Hercules enthusiast
-<li><a href="http://ensose.com/mvs38j.html">http://ensose.com/mvs38j.html</a>
+<p><li><a href="http://www.softdevlabs.com/Hercules/hercgui-index.html">
+    http://www.softdevlabs.com/Hercules/hercgui-index.html</a>
+    <br>Fish's Hercules GUI for Windows.
+<p><li><a href="http://www.homerow.net/hax/">http://www.homerow.net/hax/</a>
+    <br>A whole host of unofficial Hercules add-ons and patches by Leland Lucius
+<p><li><a href="http://cbttape.org/~jmorrison/">http://cbttape.org/~jmorrison/</a>
     <br>Jim Morrison's downloads (includes 3380 support for MVS 3.8!)
-<li><a href="http://www.jaymoseley.com/hercules">http://www.jaymoseley.com/hercules</a>
+<p><li><a href="http://www.jaymoseley.com/hercules">http://www.jaymoseley.com/hercules</a>
     <br>Jay Moseley's Hercules site - lots of Hercules and MVS information
-<li><a href="http://www.tommysprinkle.com/mvs">http://www.tommysprinkle.com/mvs</a>
+<p><li><a href="http://www.tommysprinkle.com/mvs">http://www.tommysprinkle.com/mvs</a>
     <br>Tommy Sprinkle's MVS 3.8 documentation
-<li><a href="http://hansen-family.com/mvs">http://hansen-family.com/mvs</a>
+<p><li><a href="http://hansen-family.com/mvs">http://hansen-family.com/mvs</a>
     <br>Bob Hansen's MVS 3.8 documentation
-<li><a href="http://www.schaefernet.de/hercules">http://www.schaefernet.de/hercules</a>
+<p><li><a href="http://www.schaefernet.de/hercules">http://www.schaefernet.de/hercules</a>
     <br>Wolfgang Sch&auml;fer's Hercules site - MVT/MVS tutorials and add-ons
-<li><a href="http://www.kiyoinc.com/herc390.html">http://www.kiyoinc.com/herc390.html</a>
+<p><li><a href="http://www.kiyoinc.com/herc390.html">http://www.kiyoinc.com/herc390.html</a>
     <br>Cory Hamasaki's New Users Documentation Effort
-<li><a href="http://www.kiyoinc.com/herc3088.html">http://www.kiyoinc.com/herc3088.html</a>
+<p><li><a href="http://www.kiyoinc.com/herc3088.html">http://www.kiyoinc.com/herc3088.html</a>
     <br>Axel Schwarzer's 3088 howto documentation
-<li><a href="http://www.ibiblio.org/jmaynard/">http://www.ibiblio.org/jmaynard/</a>
-    <br>Jay Maynard's S/360 and S/370 public domain software archive
+<p><li><a href="http://pweb.uunet.de/schwarzer.d/projects/hercules/">http://pweb.uunet.de/schwarzer.d/projects/hercules/</a>
+    <br>Axel Schwarzer's Hercules Documentation
 </ul>
 
+<p><br>
+
+<center><hr width=15% noshade></center>
+
 <p>
-<img src="gifs/note.gif">
-If you have any questions or comments,
-join the hercules-390 discussion group at
+
+<img src="images/note.gif">
+<b>If you have any questions or comments</b>
+&nbsp;please consider joining the hercules-390 discussion group at
 <a href="http://groups.yahoo.com/group/hercules-390">
 http://groups.yahoo.com/group/hercules-390</a>.
 <p>
@@ -253,11 +346,24 @@ Bug reports (together with your diagnosis of the fault, please)
 may be sent to me, <a href="http://www.conmicro.cx">Jay Maynard</a>,
 at <a href="mailto:jmaynard@conmicro.cx"><em>jmaynard </em>&#064;<em>
 conmicro.cx</em></a>.
+
+<p><br>
+
+<p><center><hr width=15% noshade></center>
+
 <p>
-IBM, System/370, ESA/390, and z/Architecture are trademarks or
-registered trademarks of IBM Corporation.
-Other product names mentioned here are trademarks of other companies.
+
 <small>
-<p>Last updated 12 December 2004
+
+IBM, System/370, ESA/390, and z/Architecture are trademarks or
+registered trademarks of <a href="http://www.ibm.com">IBM Corporation</a>.
+Other product names mentioned here are trademarks of other companies.
+
+</small>
+
+<p class="lastupd">Last updated $Date: 2005/12/20 15:09:05 $ $Revision: 1.48 $</p>
+
+</td></tr></table>
+
 </BODY>
 </HTML>

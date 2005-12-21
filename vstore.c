@@ -1,6 +1,8 @@
 /* VSTORE.C */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
+
+#include "hstdinc.h"
 
 #include "hercules.h"
 

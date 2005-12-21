@@ -1,11 +1,11 @@
-/* GENERAL1.C   (c) Copyright Roger Bowler, 1994-2004                */
+/* GENERAL1.C   (c) Copyright Roger Bowler, 1994-2005                */
 /*              ESA/390 CPU Emulator                                 */
 /*              Instructions A-M                                     */
 
-/*              (c) Copyright Peter Kuschnerus, 1999-2004 (UPT & CFC)*/
+/*              (c) Copyright Peter Kuschnerus, 1999-2005 (UPT & CFC)*/
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all general instructions of the            */
@@ -29,10 +29,18 @@
 /*      Clear TEA on data exception - Peter Kuschnerus           v209*/
 /*-------------------------------------------------------------------*/
 
+#include "hstdinc.h"
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
+
+#if !defined(_GENERAL1_C_)
+#define _GENERAL1_C_
+#endif
+
 #include "hercules.h"
-
 #include "opcode.h"
-
 #include "inline.h"
 
 
@@ -398,7 +406,9 @@ VADR    newia;                          /* New instruction address   */
     /* Execute the branch unless R2 specifies register 0 */
     if ( r2 != 0 )
     {
+        UPDATE_BEAR_A(regs);
         regs->psw.IA = newia;
+        VALIDATE_AIA(regs);
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
@@ -409,7 +419,8 @@ VADR    newia;                          /* New instruction address   */
             ON_IC_PER_SB(regs);
 #endif /*defined(FEATURE_PER)*/
     }
-}
+
+} /* end DEF_INST(branch_and_link_register) */
 
 
 /*-------------------------------------------------------------------*/
@@ -435,7 +446,12 @@ VADR    effective_addr2;                /* Effective address         */
           : (REAL_ILC(regs) << 29)     | (regs->psw.cc << 28)
           | (regs->psw.progmask << 24) | (regs->psw.IA_L & ADDRESS_MAXWRAP(regs));
 
+    /* Update the breaking event address register */
+    UPDATE_BEAR_A(regs);
+
+    /* Update the PSW instruction address */
     regs->psw.IA = effective_addr2;
+    VALIDATE_AIA(regs);
 
 #if defined(FEATURE_PER)
     if( EN_IC_PER_SB(regs)
@@ -447,7 +463,7 @@ VADR    effective_addr2;                /* Effective address         */
         ON_IC_PER_SB(regs);
 #endif /*defined(FEATURE_PER)*/
 
-}
+} /* end DEF_INST(branch_and_link) */
 
 /*-------------------------------------------------------------------*/
 /* 0D   BASR  - Branch and Save Register                        [RR] */
@@ -483,7 +499,9 @@ VADR    newia;                          /* New instruction address   */
     /* Execute the branch unless R2 specifies register 0 */
     if ( r2 != 0 )
     {
+        UPDATE_BEAR_A(regs);
         regs->psw.IA = newia;
+        VALIDATE_AIA(regs);
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
@@ -494,7 +512,8 @@ VADR    newia;                          /* New instruction address   */
             ON_IC_PER_SB(regs);
 #endif /*defined(FEATURE_PER)*/
     }
-}
+
+} /* end DEF_INST(branch_and_save_register) */
 
 
 /*-------------------------------------------------------------------*/
@@ -519,7 +538,12 @@ VADR    effective_addr2;                /* Effective address         */
     else
         regs->GR_L(r1) = regs->psw.IA_LA24;
 
+    /* Update the breaking event address register */
+    UPDATE_BEAR_A(regs);
+
+    /* Update the PSW instruction address */
     regs->psw.IA = effective_addr2;
+    VALIDATE_AIA(regs);
 
 #if defined(FEATURE_PER)
     if( EN_IC_PER_SB(regs)
@@ -531,7 +555,7 @@ VADR    effective_addr2;                /* Effective address         */
         ON_IC_PER_SB(regs);
 #endif /*defined(FEATURE_PER)*/
 
-}
+} /* end DEF_INST(branch_and_save) */
 
 
 #if defined(FEATURE_BIMODAL_ADDRESSING)
@@ -575,6 +599,7 @@ VADR    newia;                          /* New instruction address   */
     /* Set mode and branch to address specified by R2 operand */
     if ( r2 != 0 )
     {
+        UPDATE_BEAR_A(regs);
 #if defined(FEATURE_ESAME)
         if ( newia & 1)
         {
@@ -602,6 +627,7 @@ VADR    newia;                          /* New instruction address   */
             regs->psw.AMASK = AMASK24;
             regs->psw.IA = newia & 0x00FFFFFF;
         }
+        VALIDATE_AIA(regs);
 
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SB(regs)
@@ -615,7 +641,7 @@ VADR    newia;                          /* New instruction address   */
 
     }
 
-}
+} /* end DEF_INST(branch_and_save_and_set_mode) */
 #endif /*defined(FEATURE_BIMODAL_ADDRESSING)*/
 
 
@@ -659,6 +685,7 @@ VADR    newia;                          /* New instruction address   */
     /* Set mode and branch to address specified by R2 operand */
     if ( r2 != 0 )
     {
+        UPDATE_BEAR_A(regs);
 #if defined(FEATURE_ESAME)
         if ( newia & 1)
         {
@@ -686,6 +713,7 @@ VADR    newia;                          /* New instruction address   */
             regs->psw.AMASK = AMASK24;
             regs->psw.IA = newia & 0x00FFFFFF;
         }
+        VALIDATE_AIA(regs);
 
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SB(regs)
@@ -698,7 +726,7 @@ VADR    newia;                          /* New instruction address   */
 #endif /*defined(FEATURE_PER)*/
     }
 
-}
+} /* end DEF_INST(branch_and_set_mode) */
 #endif /*defined(FEATURE_BIMODAL_ADDRESSING)*/
 
 
@@ -714,7 +742,9 @@ DEF_INST(branch_on_condition_register)
     /* Branch if R1 mask bit is set and R2 is not register 0 */
     if ((inst[1] & (0x80 >> regs->psw.cc)) && (inst[1] & 0x0F) != 0)
     {
+        UPDATE_BEAR_N(regs, 2);
         regs->psw.IA = regs->GR(inst[1] & 0x0F) & ADDRESS_MAXWRAP(regs);
+        VALIDATE_AIA(regs);
 #if defined(FEATURE_PER)
         if( unlikely(EN_IC_PER_SB(regs))
 #if defined(FEATURE_PER2)
@@ -736,7 +766,8 @@ DEF_INST(branch_on_condition_register)
             PERFORM_CHKPT_SYNC (regs);
         }
     }
-}
+
+} /* end DEF_INST(branch_on_condition_register) */
 
 
 /*-------------------------------------------------------------------*/
@@ -750,8 +781,10 @@ VADR    effective_addr2;                /* Effective address         */
     /* Branch to operand address if r1 mask bit is set */
     if ((0x80 >> regs->psw.cc) & inst[1])
     {
+        UPDATE_BEAR_N(regs, 4);
         RX_BC(inst, regs, b2, effective_addr2);
         regs->psw.IA = effective_addr2;
+        VALIDATE_AIA(regs);
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
@@ -763,7 +796,7 @@ VADR    effective_addr2;                /* Effective address         */
 #endif /*defined(FEATURE_PER)*/
     } else
         INST_UPDATE_PSW(regs, 4);
-}
+} /* end DEF_INST(branch_on_condition) */
 
 
 /*-------------------------------------------------------------------*/
@@ -779,10 +812,14 @@ int     r1, r2;                         /* Values of R fields        */
            is non-zero and R2 operand is not register zero */
     if ( --(regs->GR_L(r1)) && r2 != 0 )
     {
+        /* Update the breaking event address register */
+        UPDATE_BEAR_A(regs);
+
         /* Compute the branch address from the R2 operand */
         regs->psw.IA = regs->GR(r2);
         if (unlikely(r1 == r2)) regs->psw.IA++;
         regs->psw.IA &= ADDRESS_MAXWRAP(regs);
+        VALIDATE_AIA(regs);
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
@@ -794,7 +831,7 @@ int     r1, r2;                         /* Values of R fields        */
 #endif /*defined(FEATURE_PER)*/
     }
 
-}
+} /* end DEF_INST(branch_on_count_register) */
 
 
 /*-------------------------------------------------------------------*/
@@ -811,8 +848,9 @@ VADR    effective_addr2;                /* Effective address         */
     /* Subtract 1 from the R1 operand and branch if non-zero */
     if ( --(regs->GR_L(r1)) )
     {
+        UPDATE_BEAR_A(regs);
         regs->psw.IA = effective_addr2;
-
+        VALIDATE_AIA(regs);
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
@@ -824,7 +862,7 @@ VADR    effective_addr2;                /* Effective address         */
 #endif /*defined(FEATURE_PER)*/
     }
 
-}
+} /* end DEF_INST(branch_on_count) */
 
 
 /*-------------------------------------------------------------------*/
@@ -851,7 +889,9 @@ S32     i, j;                           /* Integer work areas        */
     /* Branch if result compares high */
     if ( (S32)regs->GR_L(r1) > j )
     {
+        UPDATE_BEAR_A(regs);
         regs->psw.IA = effective_addr2;
+        VALIDATE_AIA(regs);
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
@@ -863,7 +903,7 @@ S32     i, j;                           /* Integer work areas        */
 #endif /*defined(FEATURE_PER)*/
     }
 
-}
+} /* end DEF_INST(branch_on_index_high) */
 
 
 /*-------------------------------------------------------------------*/
@@ -890,7 +930,9 @@ S32     i, j;                           /* Integer work areas        */
     /* Branch if result compares low or equal */
     if ( (S32)regs->GR_L(r1) <= j )
     {
+        UPDATE_BEAR_A(regs);
         regs->psw.IA = effective_addr2;
+        VALIDATE_AIA(regs);
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
@@ -902,7 +944,7 @@ S32     i, j;                           /* Integer work areas        */
 #endif /*defined(FEATURE_PER)*/
     }
 
-}
+} /* end DEF_INST(branch_on_index_low_or_equal) */
 
 
 #if defined(FEATURE_IMMEDIATE_AND_RELATIVE)
@@ -920,9 +962,11 @@ DEF_INST(branch_relative_on_condition)
     /* Branch if R1 mask bit is set */
     if (inst[1] & (0x80 >> regs->psw.cc))
     {
+        UPDATE_BEAR_N(regs, 4);
         /* Calculate the relative branch address */
         regs->psw.IA = (likely(!regs->execflag) ? regs->psw.IA: regs->ET)
                      + 2*(S16)(fetch_fw(inst) & 0xFFFF);
+        VALIDATE_AIA(regs);
 #if defined(FEATURE_PER)
         if( unlikely(EN_IC_PER_SB(regs))
 #if defined(FEATURE_PER2)
@@ -935,7 +979,8 @@ DEF_INST(branch_relative_on_condition)
     }
     else
         INST_UPDATE_PSW(regs, 4);
-}
+
+} /* end DEF_INST(branch_relative_on_condition) */
 #endif /*defined(FEATURE_IMMEDIATE_AND_RELATIVE)*/
 
 
@@ -962,9 +1007,13 @@ U16     i2;                             /* 16-bit operand values     */
     else
         regs->GR_L(r1) = regs->psw.IA_LA24;
 
+    /* Update the breaking event address register */
+    UPDATE_BEAR_A(regs);
+
     /* Calculate the relative branch address */
     regs->psw.IA = ((!regs->execflag ? (regs->psw.IA - 4) : regs->ET)
                                   + 2*(S16)i2);
+    VALIDATE_AIA(regs);
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
@@ -974,7 +1023,8 @@ U16     i2;                             /* 16-bit operand values     */
             )
             ON_IC_PER_SB(regs);
 #endif /*defined(FEATURE_PER)*/
-}
+ 
+} /* end DEF_INST(branch_relative_and_save) */
 #endif /*defined(FEATURE_IMMEDIATE_AND_RELATIVE)*/
 
 
@@ -993,8 +1043,10 @@ U16     i2;                             /* 16-bit operand values     */
     /* Subtract 1 from the R1 operand and branch if non-zero */
     if ( --(regs->GR_L(r1)) )
     {
+        UPDATE_BEAR_A(regs);
         regs->psw.IA = ((!regs->execflag ? (regs->psw.IA - 4) : regs->ET)
                                   + 2*(S16)i2);
+        VALIDATE_AIA(regs);
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
@@ -1005,7 +1057,8 @@ U16     i2;                             /* 16-bit operand values     */
             ON_IC_PER_SB(regs);
 #endif /*defined(FEATURE_PER)*/
     }
-}
+ 
+} /* end DEF_INST(branch_relative_on_count) */
 #endif /*defined(FEATURE_IMMEDIATE_AND_RELATIVE)*/
 
 
@@ -1033,8 +1086,10 @@ S32     i,j;                            /* Integer workareas         */
     /* Branch if result compares high */
     if ( (S32)regs->GR_L(r1) > j )
     {
+        UPDATE_BEAR_A(regs);
         regs->psw.IA = ((!regs->execflag ? (regs->psw.IA - 4) : regs->ET)
                                   + 2*(S16)i2);
+        VALIDATE_AIA(regs);
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
@@ -1046,7 +1101,7 @@ S32     i,j;                            /* Integer workareas         */
 #endif /*defined(FEATURE_PER)*/
     }
 
-}
+} /* end DEF_INST(branch_relative_on_index_high) */
 #endif /*defined(FEATURE_IMMEDIATE_AND_RELATIVE)*/
 
 
@@ -1074,8 +1129,10 @@ S32     i,j;                            /* Integer workareas         */
     /* Branch if result compares low or equal */
     if ( (S32)regs->GR_L(r1) <= j )
     {
+        UPDATE_BEAR_A(regs);
         regs->psw.IA = ((!regs->execflag ? (regs->psw.IA - 4) : regs->ET)
                                   + 2*(S16)i2);
+        VALIDATE_AIA(regs);
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
@@ -1087,7 +1144,7 @@ S32     i,j;                            /* Integer workareas         */
 #endif /*defined(FEATURE_PER)*/
     }
 
-}
+} /* end DEF_INST(branch_relative_on_index_low_or_equal) */
 #endif /*defined(FEATURE_IMMEDIATE_AND_RELATIVE)*/
 
 
@@ -1215,105 +1272,158 @@ U32     n;                              /* 32-bit operand values     */
 
 /*-------------------------------------------------------------------*/
 /* B21A CFC   - Compare and Form Codeword                        [S] */
-/*              (c) Copyright Peter Kuschnerus, 1999-2004            */
-/* 64BIT INCOMPLETE                                                  */
+/*              (c) Copyright Peter Kuschnerus, 1999-2005            */
+/*              (c) Copyright "Fish" (David B. Trout), 2005          */
 /*-------------------------------------------------------------------*/
+
 DEF_INST(compare_and_form_codeword)
 {
 int     b2;                             /* Base of effective addr    */
-VADR    effective_addr2;                /* Effective address         */
-int     cc;                             /* Condition code            */
-int     ar1 = 1;                        /* Access register number    */
-GREG    addr1, addr3;                   /* Operand addresses         */
-U32     work;                           /* 32-bit workarea           */
-U16     index_limit;                    /* Index limit               */
-U16     index;                          /* Index                     */
-U16     temp_hw;                        /* TEMPHW                    */
-U16     op1, op3;                       /* 16-bit operand values     */
-BYTE    operand_control;                /* Operand control bit       */
+int     rc;                             /* memcmp() return code      */
+int     i;                              /* (work var)                */
+VADR    op2_effective_addr;             /* (op2 effective address)   */
+VADR    op1_addr, op3_addr;             /* (op1 & op3 fetch addr)    */
+GREG    work_reg;                       /* (register work area)      */
+U16     index, max_index;               /* (operand index values)    */
+BYTE    op1[CFC_MAX_OPSIZE];            /* (work field)              */
+BYTE    op3[CFC_MAX_OPSIZE];            /* (work field)              */
+BYTE    tmp[CFC_MAX_OPSIZE];            /* (work field)              */
+BYTE    descending;                     /* (sort-order control bit)  */
+#if defined(FEATURE_ESAME)
+BYTE    a64 = regs->psw.amode64;        /* ("64-bit mode" flag)      */
+#endif
+BYTE    op_size      = CFC_OPSIZE;      /* (work constant; uses a64) */
+BYTE    gr2_shift    = CFC_GR2_SHIFT;   /* (work constant; uses a64) */
+GREG    gr2_high_bit = CFC_HIGH_BIT;    /* (work constant; uses a64) */
 
-    S(inst, regs, b2, effective_addr2);
+    S(inst, regs, b2, op2_effective_addr);
 
-    /* Check GR1, GR2, GR3 even */
-    if ( regs->GR_L(1) & 1 || regs->GR_L(2) & 1 || regs->GR_L(3) & 1 )
+    /* All operands must be halfword aligned */
+    if (0
+        || GR_A(1,regs) & 1
+        || GR_A(2,regs) & 1
+        || GR_A(3,regs) & 1
+    )
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
-    /* Get index limit and operand-control bit */
-    index_limit = effective_addr2 & 0x7FFE;
-    operand_control = effective_addr2 & 1;
+    /* Initialize "end-of-operand-data" index value... */
+    max_index = op2_effective_addr & 0x7FFE;
 
-    /* Loop until break */
-    for (;;)
+    /* Loop until we either locate where the two operands
+       differ from one another or until we reach the end of
+       the operand data... */
+    do
     {
-        /* Check index limit */
-        index = regs->GR_L(2);
-        if ( index > index_limit )
+        /* Exit w/cc0 (op1==op3) when end of operands are reached */
+
+        index = GR_A(2,regs) & 0xFFFF;
+
+        if ( index > max_index )
         {
-            regs->GR_L(2) = regs->GR_L(3) | 0x80000000;
-            regs->psw.cc = 0;
+            regs->psw.cc = 0;   // (operands are equal to each other)
+            SET_GR_A( 2, regs, GR_A(3,regs) | gr2_high_bit );
             return;
         }
 
-        /* fetch 1st operand */
-        addr1 = (regs->GR_L(1) + index) & ADDRESS_MAXWRAP(regs);
-        op1 = ARCH_DEP(vfetch2) ( addr1, ar1, regs );
+        /* Fetch next chunk of operand data... */
 
-        /* fetch 3rd operand */
-        addr3 = (regs->GR_L(3) + index) & ADDRESS_MAXWRAP(regs);
-        op3 = ARCH_DEP(vfetch2) ( addr3, ar1, regs );
+        op1_addr = ( regs->GR(1) + index ) & ADDRESS_MAXWRAP(regs);
+        op3_addr = ( regs->GR(3) + index ) & ADDRESS_MAXWRAP(regs);
 
-        regs->GR_L(2) += 2;
+        ARCH_DEP( vfetchc )( op1, op_size, op1_addr, AR1, regs );
+        ARCH_DEP( vfetchc )( op3, op_size, op3_addr, AR1, regs );
 
-        /* Compare oprerands */
-        if ( op1 > op3 )
+        /* Update GR2 operand index value... (Note: we must do this AFTER
+           we fetch the operand data in case of storage access exceptions) */
+
+        SET_GR_A( 2, regs, GR_A(2,regs) + op_size );
+
+        /* Compare operands; continue while still equal... */
+    }
+    while ( !( rc = memcmp( op1, op3, op_size ) ) );
+
+    /* Operands are NOT equal (we found an inequality). Set
+       the condition code, form our codeword, and then exit */
+
+    ASSERT( rc != 0 );     // (we shouldn't be here unless this is true!)
+
+    /* Check to see which sequence the operands should be sorted into so
+       we can know whether or not we need to form our codeword using either
+       the inverse of the higher operand's data (if doing an ascending sort),
+       or the lower operand's data AS-IS (if doing a descending sort). This
+       thus causes either the lower (or higher) operand values (depending on
+       which type of sort we're doing, ascending or descending) to bubble to
+       the top (beginning) of the tree that the UPT (Update Tree) instruction
+       ultimately/eventually updates (which gets built from our codewords).
+    */
+
+    descending = op2_effective_addr & 1;  // (0==ascending, 1==descending)
+
+    if ( rc < 0 )              // (operand-1 < operand-3)
+    {
+        if ( !descending )     // (ascending; in sequence)
         {
-            if ( operand_control )
-            {
-                temp_hw = op3;
-                cc = 1;
-            }
-            else
-            {
-                temp_hw = ~op1;
+            regs->psw.cc = 1;  // (cc1 == in sequence)
 
-                /* Exchange GR1 and GR3 */
-                work = regs->GR_L(1);
-                regs->GR_L(1) = regs->GR_L(3);
-                regs->GR_L(3) = work;
+            /* Ascending sort: use inverse of higher operand's data */
 
-                cc = 2;
-            }
-
-            /* end of loop */
-            break;
+            for ( i=0; i < op_size; i++ )
+                tmp[i] = ~op3[i];
         }
-        else if ( op1 < op3 )
+        else                   // (descending; out-of-sequence)
         {
-            if ( operand_control )
-            {
-                temp_hw = op1;
+            regs->psw.cc = 2;  // (cc2 == out-of-sequence)
 
-                /* Exchange GR1 and GR3 */
-                work = regs->GR_L(1);
-                regs->GR_L(1) = regs->GR_L(3);
-                regs->GR_L(3) = work;
+            /* Descending sort: use lower operand's data as-is */
 
-                cc = 2;
-            }
-            else
-            {
-                temp_hw = ~op3;
-                cc = 1;
-            }
+            memcpy( tmp, op1, op_size );
 
-            /* end of loop */
-            break;
+            /* Swap GR1 & GR3 because out-of-sequence */
+
+            work_reg      =    GR_A(1,regs);
+            SET_GR_A( 1, regs, GR_A(3,regs) );
+            SET_GR_A( 3, regs, work_reg );
         }
-        /* if equal continue */
+    }
+    else                       // (operand-1 > operand-3)
+    {
+        if ( !descending )     // (ascending; out-of-sequence)
+        {
+            regs->psw.cc = 2;  // (cc2 == out-of-sequence)
+
+            /* Ascending sort: use inverse of higher operand's data */
+
+            for ( i=0; i < op_size; i++ )
+                tmp[i] = ~op1[i];
+
+            /* Swap GR1 & GR3 because out-of-sequence */
+
+            work_reg      =    GR_A(1,regs);
+            SET_GR_A( 1, regs, GR_A(3,regs) );
+            SET_GR_A( 3, regs, work_reg );
+        }
+        else                   // (descending; in sequence)
+        {
+            regs->psw.cc = 1;  // (cc1 == in sequence)
+
+            /* Descending sort: use lower operand's data as-is */
+
+            memcpy( tmp, op3, op_size );
+        }
     }
 
-    regs->GR_L(2) = (regs->GR_L(2) << 16) | temp_hw;
-    regs->psw.cc = cc;
+    /* Form a sort/merge codeword to be used to sort the two operands
+       into their proper sequence consisting of a combination of both
+       the index position where the inequality was found (current GR2
+       value) and either the one's complement inverse of the higher
+       operand's data (if doing an ascending sort) or the lower oper-
+       and's data as-is (if doing a descending sort)...
+    */
+
+    for ( work_reg=0, i=0; i < op_size; i++ )
+        work_reg = ( work_reg << 8 ) | tmp[i];
+
+    SET_GR_A( 2, regs, ( GR_A(2,regs) << gr2_shift ) | work_reg );
 }
 
 
@@ -1815,6 +1925,7 @@ BYTE    pad;                            /* Padding byte              */
         {
             regs->psw.IA -= REAL_ILC(regs);
             regs->psw.IA &= ADDRESS_MAXWRAP(regs);
+            VALIDATE_AIA(regs);
             break;
         }
 
@@ -2193,7 +2304,7 @@ S32     remlen1, remlen2;               /* Lengths remaining         */
 
 #ifdef FEATURE_EXTENDED_TRANSLATION
 /*-------------------------------------------------------------------*/
-/* B2A6 CU21 (CUUTF) - Convert Unicode to UTF-8                [RRE] */
+/* B2A6 CU21 (CUUTF) - Convert Unicode to UTF-8                [RRF] */
 /*-------------------------------------------------------------------*/
 DEF_INST(convert_utf16_to_utf8)
 {
@@ -2209,10 +2320,21 @@ U16     unicode1;                       /* Unicode character         */
 U16     unicode2;                       /* Unicode low surrogate     */
 GREG    n;                              /* Number of UTF-8 bytes - 1 */
 BYTE    utf[4];                         /* UTF-8 bytes               */
+#if defined(FEATURE_ETF3_ENHANCEMENT)
+int     wfc;                            /* Well-Formedness-Checking  */
+#endif /*defined(FEATURE_ETF3_ENHANCEMENT)*/
 
     RRE(inst, regs, r1, r2);
 
     ODD2_CHECK(r1, r2, regs);
+
+#if defined(FEATURE_ETF3_ENHANCEMENT)
+    /* Set WellFormednessChecking */
+    if(inst[2] & 0x10)
+      wfc = 1;
+    else
+      wfc = 0;
+#endif /*defined(FEATURE_ETF3_ENHANCEMENT)*/
 
     /* Determine the destination and source addresses */
     addr1 = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
@@ -2278,6 +2400,18 @@ BYTE    utf[4];                         /* UTF-8 bytes               */
             naddr2 &= ADDRESS_MAXWRAP(regs);
             nlen2 -= 2;
 
+#if defined(FEATURE_ETF3_ENHANCEMENT)
+            /* WellFormdnessChecking */
+            if(wfc)
+            {
+              if(unicode2 < 0xdc00 || unicode2 > 0xdf00)
+              {
+                regs->psw.cc = 2;
+                return;
+              }
+            }
+#endif /*defined(FEATURE_ETF3_ENHANCEMENT)*/
+
             /* Convert Unicode surrogate pair to four UTF-8 bytes */
             uvwxy = ((unicode1 & 0x03C0) >> 6) + 1;
             utf[0] = (BYTE)0xF0 | (BYTE)(uvwxy >> 2);
@@ -2312,7 +2446,7 @@ BYTE    utf[4];                         /* UTF-8 bytes               */
         SET_GR_A(r2, regs,addr2);
         SET_GR_A(r2+1, regs,len2);
 
-        if (len1 == 0)
+        if (len1 == 0 && len2 != 0)
             cc = 1;
 
     } /* end for(i) */
@@ -2323,7 +2457,7 @@ BYTE    utf[4];                         /* UTF-8 bytes               */
 
 
 /*-------------------------------------------------------------------*/
-/* B2A7 CU12 (CUTFU) - Convert UTF-8 to Unicode                [RRE] */
+/* B2A7 CU12 (CUTFU) - Convert UTF-8 to Unicode                [RRF] */
 /*-------------------------------------------------------------------*/
 DEF_INST(convert_utf8_to_utf16)
 {
@@ -2338,10 +2472,21 @@ U16     unicode1;                       /* Unicode character         */
 U16     unicode2 = 0;                   /* Unicode low surrogate     */
 GREG    n;                              /* Number of UTF-8 bytes - 1 */
 BYTE    utf[4];                         /* UTF-8 bytes               */
+#if defined(FEATURE_ETF3_ENHANCEMENT)
+int     wfc;                            /* WellFormednessChecking    */
+#endif /*defined(FEATURE_ETF3_ENHANCEMENT)*/
 
     RRE(inst, regs, r1, r2);
 
     ODD2_CHECK(r1, r2, regs);
+
+#if defined(FEATURE_ETF3_ENHANCEMENT)
+    /* Set WellFormednessChecking */
+    if(inst[2] & 0x10)
+      wfc = 1;
+    else
+      wfc = 0;
+#endif /*defined(FEATURE_ETF3_ENHANCEMENT)*/
 
     /* Determine the destination and source addresses */
     addr1 = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
@@ -2377,12 +2522,36 @@ BYTE    utf[4];                         /* UTF-8 bytes               */
         }
         else if ((utf[0] & 0xE0) == 0xC0)
         {
+#if defined(FEATURE_ETF3_ENHANCEMENT)
+            /* WellFormdnessChecking */
+            if(wfc)
+            {
+              if(utf[0] <= 0xc1)
+              {
+                regs->psw.cc = 2;
+                return;
+              }
+            }
+#endif /*defined(FEATURE_ETF3_ENHANCEMENT)*/
+
             /* Exit if fewer than 2 bytes remain in source operand */
             n = 1;
             if (len2 <= n) break;
 
             /* Fetch two UTF-8 bytes from source operand */
             ARCH_DEP(vfetchc) ( utf, n, addr2, r2, regs );
+
+#if defined(FEATURE_ETF3_ENHANCEMENT)
+            /* WellFormednessChecking */
+            if(wfc)
+            {
+              if(utf[1] < 0x80 || utf[1] > 0xbf)
+              {
+                regs->psw.cc = 2;
+                return;
+              }
+            }
+#endif /*defined(FEATURE_ETF3_ENHANCEMENT)*/
 
             /* Convert C0xx-DFxx to Unicode */
             unicode1 = ((U16)(utf[0] & 0x1F) << 6)
@@ -2398,6 +2567,37 @@ BYTE    utf[4];                         /* UTF-8 bytes               */
             /* Fetch three UTF-8 bytes from source operand */
             ARCH_DEP(vfetchc) ( utf, n, addr2, r2, regs );
 
+#if defined(FEATURE_ETF3_ENHANCEMENT)
+            /* WellFormdnessChecking */
+            if(wfc)
+            {
+              if(utf[0] == 0xe0)
+              {
+                if(utf[1] < 0xa0 || utf[1] > 0xbf || utf[2] < 0x80 || utf[2] > 0xbf)
+                {
+                  regs->psw.cc = 2;
+                  return;
+                }
+              }
+              if((utf[0] >= 0xe1 && utf[0] <= 0xec) || (utf[0] >= 0xee && utf[0] < 0xef))
+              {
+                if(utf[1] < 0x80 || utf[1] > 0xbf || utf[2] < 0x80 || utf[2] > 0xbf)
+                {
+                  regs->psw.cc = 2;
+                  return;
+                }
+              }
+              if(utf[0] == 0xed)
+              {
+                if(utf[1] < 0x80 || utf[1] > 0x9f || utf[2] < 0x80 || utf[2] > 0xbf)
+                {
+                  regs->psw.cc = 2;
+                  return;
+                }
+              }
+            }
+#endif /*defined(FEATURE_ETF3_ENHANCEMENT)*/
+
             /* Convert E0xxxx-EFxxxx to Unicode */
             unicode1 = ((U16)(utf[0]) << 12)
                         | ((U16)(utf[1] & 0x3F) << 6)
@@ -2412,6 +2612,37 @@ BYTE    utf[4];                         /* UTF-8 bytes               */
 
             /* Fetch four UTF-8 bytes from source operand */
             ARCH_DEP(vfetchc) ( utf, n, addr2, r2, regs );
+
+#if defined(FEATURE_ETF3_ENHANCEMENT)
+            /* WellFormdnessChecking */
+            if(wfc)
+            {
+              if(utf[0] == 0xf0)
+              {
+                if(utf[1] < 0x90 || utf[1] > 0xbf || utf[2] < 0x80 || utf[2] > 0xbf || utf[3] < 0x80 || utf[3] > 0xbf)
+                {
+                  regs->psw.cc = 2;
+                  return;
+                }
+              }
+              if(utf[0] >= 0xf1 && utf[0] <= 0xf3)
+              {
+                if(utf[1] < 0x80 || utf[1] > 0xbf || utf[2] < 0x80 || utf[2] > 0xbf || utf[3] < 0x80 || utf[3] > 0xbf)
+                {
+                  regs->psw.cc = 2;
+                  return;
+                }
+              }
+              if(utf[0] == 0xf4)
+              {
+                if(utf[1] < 0x80 || utf[1] > 0x8f || utf[2] < 0x80 || utf[2] > 0xbf || utf[3] < 0x80 || utf[3] > 0xbf)
+                {
+                  regs->psw.cc = 2;
+                  return;
+                }
+              }
+            }
+#endif /*defined(FEATURE_ETF3_ENHANCEMENT)*/
 
             /* Convert F0xxxxxx-F7xxxxxx to Unicode surrogate pair */
             uvwxy = ((((U16)(utf[0] & 0x07) << 2)
@@ -2473,7 +2704,7 @@ BYTE    utf[4];                         /* UTF-8 bytes               */
         SET_GR_A(r2, regs,addr2);
         SET_GR_A(r2+1, regs,len2);
 
-        if (len1 == 0)
+        if (len1 == 0 && len2 != 0)
             cc = 1;
 
     } /* end for(i) */
@@ -2723,7 +2954,7 @@ int     cc = 0;                         /* Condition code            */
     sk1 = regs->dat.storkey;
     source1 = MADDR (addr2, b2, regs, ACCTYPE_READ, regs->psw.pkey);
 
-    if ( NOCROSS2K(addr1,len)) 
+    if ( NOCROSS2K(addr1,len))
     {
         if ( NOCROSS2K(addr2,len))
         {
@@ -2731,7 +2962,7 @@ int     cc = 0;                         /* Condition code            */
             if (dest1 == source1)
             {
                /* (1a) - Dest and source are the same */
-               MEMSET(dest1, 0, len + 1);
+               memset(dest1, 0, len + 1);
             }
             else
             {
@@ -2946,7 +3177,7 @@ static const unsigned int               /* Turn reg bytes off by mask*/
     case 15:
         /* Optimized case */
         regs->GR_L(r1) = ARCH_DEP(vfetch4) (effective_addr2, b2, regs);
-        regs->psw.cc = regs->GR_L(r1) ? regs->GR_L(r1) & 0x80000000 ? 
+        regs->psw.cc = regs->GR_L(r1) ? regs->GR_L(r1) & 0x80000000 ?
                        1 : 2 : 0;
         break;
 
@@ -3431,8 +3662,10 @@ BYTE    pad;                            /* Padding byte              */
     ODD2_CHECK(r1, r2, regs);
 
     /* Determine the destination and source addresses */
-    addr1 = regs->GR(r1) = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
-    addr2 = regs->GR(r2) = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
+    addr1 = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
+    SET_GR_A(r1, regs,addr1);
+    addr2 = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
+    SET_GR_A(r2, regs,addr2);
 
     /* Load padding byte from bits 0-7 of R2+1 register */
     pad = regs->GR_LHHCH(r2+1);
@@ -3530,6 +3763,7 @@ BYTE    pad;                            /* Padding byte              */
          && (OPEN_IC_EXTPENDING(regs) || OPEN_IC_IOPENDING(regs)) )
         {
             regs->psw.IA -= REAL_ILC(regs);
+            VALIDATE_AIA(regs);
             break;
         }
 

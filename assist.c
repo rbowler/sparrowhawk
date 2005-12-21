@@ -1,4 +1,4 @@
-/* ASSIST.C     (c) Copyright Roger Bowler, 1999-2004                */
+/* ASSIST.C     (c) Copyright Roger Bowler, 1999-2005                */
 /*              ESA/390 MVS Assist Routines                          */
 
 /*-------------------------------------------------------------------*/
@@ -8,10 +8,20 @@
 
 /*              Instruction decode rework - Jan Jaeger               */
 /*              Correct address wraparound - Jan Jaeger              */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 /*              Add dummy assist instruction - Jay Maynard,          */
 /*                  suggested by Brandon Hill                        */
 
+
+#include "hstdinc.h"
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
+
+#if !defined(_ASSIST_C_)
+#define _ASSIST_C_
+#endif
 
 #include "hercules.h"
 
@@ -170,6 +180,7 @@ int     acc_mode = 0;                   /* access mode to use        */
 
         /* Update the PSW instruction address */
         regs->psw.IA = newia & ADDRESS_MAXWRAP(regs);
+        VALIDATE_AIA(regs);
     }
 
     /* Release main-storage access lock */
@@ -266,6 +277,7 @@ int     acc_mode = 0;                   /* access mode to use        */
 
         /* Update the PSW instruction address */
         regs->psw.IA = newia & ADDRESS_MAXWRAP(regs);
+        VALIDATE_AIA(regs);
     }
 
     /* Release main-storage access lock */
@@ -357,6 +369,7 @@ int     acc_mode = 0;                   /* access mode to use        */
 
         /* Update the PSW instruction address */
         regs->psw.IA = newia & ADDRESS_MAXWRAP(regs);
+        VALIDATE_AIA(regs);
     }
 
     /* Release main-storage access lock */
@@ -451,6 +464,7 @@ int     acc_mode = 0;                   /* access mode to use        */
 
         /* Update the PSW instruction address */
         regs->psw.IA = newia & ADDRESS_MAXWRAP(regs);
+        VALIDATE_AIA(regs);
     }
 
     /* Release main-storage access lock */
@@ -571,7 +585,7 @@ VADR    effective_addr1,
 
 
 /*-------------------------------------------------------------------*/
-/* E50C       - Trace SVC Return                               [SSE] */
+/* E50D       - Trace SVC Return                               [SSE] */
 /*-------------------------------------------------------------------*/
 DEF_INST(trace_svc_return)
 {

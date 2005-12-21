@@ -1,5 +1,5 @@
-/* FEAT390.H    (c) Copyright Jan Jaeger, 2000-2004          */
-/*      ESA/390 feature definitions              */
+/* FEAT390.H    (c) Copyright Jan Jaeger, 2000-2005                  */
+/*              ESA/390 feature definitions                          */
 
 /* This file MUST NOT contain #undef statements */
 #if defined(OPTION_390_MODE)
@@ -17,6 +17,7 @@
 #define FEATURE_CALLED_SPACE_IDENTIFICATION
 #define FEATURE_CHANNEL_SUBSYSTEM
 #define FEATURE_CHECKSUM_INSTRUCTION
+#define FEATURE_CHSC
 #define FEATURE_COMPARE_AND_MOVE_EXTENDED
 #define FEATURE_COMPRESSION
 #define FEATURE_CPU_RECONFIG
@@ -57,7 +58,7 @@
 #define FEATURE_RESUME_PROGRAM
 #define FEATURE_S390_DAT
 #define FEATURE_SERVICE_PROCESSOR
-#define FEATURE_CHSC
+#define FEATURE_SET_ADDRESS_SPACE_CONTROL_FAST
 #define FEATURE_SQUARE_ROOT
 #define FEATURE_STORAGE_KEY_ASSIST
 #define FEATURE_STORAGE_PROTECTION_OVERRIDE
@@ -68,7 +69,6 @@
 #define FEATURE_TEST_BLOCK
 #define FEATURE_TRACING
 #define FEATURE_WAITSTATE_ASSIST
-
 // #define FEATURE_VECTOR_FACILITY
 
 #endif /*defined(OPTION_390_MODE)*/

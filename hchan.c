@@ -1,5 +1,5 @@
-/* GCHAN.C       (c) Copyright Ivan Warren, 2004                     */
-/* Based on work (c)Roger Bowler, Jan Jaeger & Others 1999-2004      */
+/* GCHAN.C       (c) Copyright Ivan Warren, 2005                     */
+/* Based on work (c)Roger Bowler, Jan Jaeger & Others 1999-2005      */
 /*              Generic channel device handler                       */
 /* This code is covered by the QPL Licence                           */
 /**CAUTION*CAUTION*CAUTION*CAUTION*CAUTION*CAUTION*CAUTION*CAUTION****/
@@ -20,7 +20,7 @@
 
 #include "hchan.h"
 
-#if defined(OPTION_DYNAMIC_LOAD) && defined(WIN32) && !defined(HDL_USE_LIBTOOL)
+#if defined(OPTION_DYNAMIC_LOAD) && defined(WIN32) && !defined(HDL_USE_LIBTOOL) && !defined(_MSVC_)
  SYSBLK *psysblk;
  #define sysblk (*psysblk)
 #endif
@@ -200,13 +200,13 @@ HDL_DEPENDENCY_SECTION;
 END_DEPENDENCY_SECTION;
 
 
-#if defined(WIN32) && !defined(HDL_USE_LIBTOOL)
-#undef sysblk
-HDL_RESOLVER_SECTION;
-{
-    HDL_RESOLVE_PTRVAR( psysblk, sysblk );
-}
-END_RESOLVER_SECTION;
+#if defined(WIN32) && !defined(HDL_USE_LIBTOOL) && !defined(_MSVC_)
+  #undef sysblk
+  HDL_RESOLVER_SECTION;
+  {
+      HDL_RESOLVE_PTRVAR( psysblk, sysblk );
+  }
+  END_RESOLVER_SECTION;
 #endif
 
 

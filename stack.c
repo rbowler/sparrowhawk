@@ -1,8 +1,8 @@
-/* STACK.C      (c) Copyright Roger Bowler, 1999-2004                */
+/* STACK.C      (c) Copyright Roger Bowler, 1999-2005                */
 /*              ESA/390 Linkage Stack Operations                     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the linkage stack functions of ESA/390     */
@@ -22,7 +22,17 @@
 /* ASN-and-LX-reuse facility                  June 2004 Roger Bowler */
 /*-------------------------------------------------------------------*/
 
+#include "hstdinc.h"
+
 // #define  STACK_DEBUG
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
+
+#if !defined(_STACK_C_)
+#define _STACK_C_
+#endif
 
 #include "hercules.h"
 
@@ -319,6 +329,9 @@ int  i;
     /* Load the Trap Control Block Address in gr15 */
     regs->GR_L(15) = duct11 & DUCT11_TCBA;
 
+    /* Update the Breaking Event Address Register */
+    UPDATE_BEAR_A(regs);
+
     /* Set the Trap program address as a 31 bit instruction address */
 #if defined(FEATURE_ESAME)
     regs->psw.amode64 = 0;
@@ -326,6 +339,7 @@ int  i;
     regs->psw.amode = 1;
     regs->psw.AMASK = AMASK31;
     regs->psw.IA = trap_ia;
+    VALIDATE_AIA(regs);
     /* set PSW to primary space */
     regs->psw.asc = 0;
     SET_AEA_MODE(regs);

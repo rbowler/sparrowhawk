@@ -8,9 +8,11 @@
 /*                                             28/05/2000 Jan Jaeger */
 /*                                                                   */
 /* Instruction decoding rework                 09/07/2000 Jan Jaeger */
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 /*-------------------------------------------------------------------*/
+
+#include "hstdinc.h"
 
 #include "hercules.h"
 
@@ -267,6 +269,7 @@ U64     d;
 #if 0
             /* This is where the instruction may be interrupted */
             regs->psw.IA -= REAL_ILC(regs);
+            VALIDATE_AIA(regs);
             return;
 #endif
         }
@@ -341,6 +344,7 @@ U64     d;
 #if 0
             /* This is where the instruction may be interrupted */
             regs->psw.IA -= REAL_ILC(regs);
+            VALIDATE_AIA(regs);
             return;
 #endif
         }
@@ -416,6 +420,7 @@ U64     d;
 #if 0
             /* This is where the instruction may be interrupted */
             regs->psw.IA -= REAL_ILC(regs);
+            VALIDATE_AIA(regs);
             return;
 #endif
         }

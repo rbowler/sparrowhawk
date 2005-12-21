@@ -1,5 +1,10 @@
-/* CRYPTO.C     (c) Copyright Jan Jaeger, 2000-2004                  */
+/* CRYPTO.C     (c) Copyright Jan Jaeger, 2000-2005                  */
 /*              Cryptographic instructions                           */
+
+#include "hstdinc.h"
+
+#define _CRYPTO_C_
+#define _HENGINE_DLL_
 
 #include "hercules.h"
 

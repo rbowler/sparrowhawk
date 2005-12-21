@@ -1,4 +1,4 @@
-/* DASDTAB.C    (c) Copyright Roger Bowler, 1999-2004                */
+/* DASDTAB.C    (c) Copyright Roger Bowler, 1999-2005                */
 /*              Hercules Supported DASD definitions                  */
 
 /*-------------------------------------------------------------------*/
@@ -11,6 +11,11 @@
 /* device capacity page at: http://www.sdisw.com/dasd_capacity.html  */
 /* (used with permission)                                            */
 /*-------------------------------------------------------------------*/
+
+#include "hstdinc.h"
+
+#define _DASDTAB_C_
+#define _HDASD_DLL_
 
 #include "hercules.h"
 
@@ -62,6 +67,8 @@ static CKDDEV ckdtab[] = {
  {"3390-9",    0x3390,0x0c,0x20,0x32,10017,3,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990"},
  {"3390-27",   0x3390,0x0c,0x20,0x32,32760,3,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990"},
  {"3390-J",    0x3390,0x0c,0x20,0x32,32760,3,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990"},
+ {"3390-54",   0x3390,0x0c,0x20,0x32,65520,3,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990"},
+ {"3390-JJ",   0x3390,0x0c,0x20,0x32,65520,3,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990"},
 
  {"9345",      0x9345,0x04,0x20,0x04, 1440,0,15,48174,46456,1184,48280,213,0x8b07, 2, 34,18,   7,   6,116,6,"9343"},
  {"9345-1",    0x9345,0x04,0x20,0x04, 1440,0,15,48174,46456,1184,48280,213,0x8b07, 2, 34,18,   7,   6,116,6,"9343"},
@@ -78,6 +85,8 @@ static CKDCU ckdcutab[] = {
  {"3830",       0x3830,0x02,0x00,0x50000103,0,0,0,0,0,0,0,0},
  {"3880",       0x3880,0x05,0x09,0x80000000,0,0,0,0,0,0,0,0},
  {"3990",       0x3990,0xc2,0x10,0xd0000002,0x40fa0100,0,0,0,0,0,0,0},
+ {"3990-3",     0x3990,0xec,0x06,0xd000009e,0x40fa0100,0x41270004,0x423e0040,0,0,0,0,0},
+ {"3990-6",     0x3990,0xe9,0x15,0xd00010fe,0x40fa0100,0x41270004,0x423e0060,0,0,0,0,0},
  {"9343",       0x9343,0xe0,0x11,0x80000000,0,0,0,0,0,0,0,0}
 } ;
 #define CKDCU_NUM (sizeof(ckdcutab)/CKDCU_SIZE)
@@ -139,7 +148,7 @@ static FBADEV fbatab[] = {
 /*-------------------------------------------------------------------*/
 /* Lookup a table entry either by name or type                       */
 /*-------------------------------------------------------------------*/
-void *dasd_lookup (int dtype, char *name, U32 devt, U32 size)
+DLL_EXPORT void *dasd_lookup (int dtype, char *name, U32 devt, U32 size)
 {
 U32 i;                                  /* Loop Index                */
 
@@ -280,20 +289,20 @@ int altcyls;                            /* Number alternate cyls     */
     devchar[13] = (cyls - altcyls) & 0xff;
     devchar[14] = (ckd->heads >> 8) & 0xff;
     devchar[15] = ckd->heads & 0xff;
-    devchar[16] = ckd->sectors;
-    devchar[17] = (ckd->len >> 16) & 0xff;
+    devchar[16] = (BYTE)(ckd->sectors);
+    devchar[17] = 0; // (ckd->len >> 16) & 0xff;
     devchar[18] = (ckd->len >> 8) & 0xff;
     devchar[19] = ckd->len & 0xff;
     devchar[20] = (ckd->har0 >> 8) & 0xff;
     devchar[21] = ckd->har0 & 0xff;
     if (ckd->formula > 0)
     {
-        devchar[22] = ckd->formula;
-        devchar[23] = ckd->f1;
-        devchar[24] = ckd->f2;
-        devchar[25] = ckd->f3;
-        devchar[26] = ckd->f4;
-        devchar[27] = ckd->f5;
+        devchar[22] = (BYTE)(ckd->formula);
+        devchar[23] = (BYTE)(ckd->f1);
+        devchar[24] = (BYTE)(ckd->f2);
+        devchar[25] = (BYTE)(ckd->f3);
+        devchar[26] = (BYTE)(ckd->f4);
+        devchar[27] = (BYTE)(ckd->f5);
     }
     else
     {
@@ -334,7 +343,7 @@ int altcyls;                            /* Number alternate cyls     */
     devchar[45] = ckd->r0 & 0xff;
     devchar[46] = 0;
     devchar[47] = 0;
-    devchar[48] = ckd->f6;
+    devchar[48] = (BYTE)(ckd->f6);
     devchar[49] = (ckd->rpscalc >> 8) & 0xff;
     devchar[50] = ckd->rpscalc & 0xff;
     devchar[56] = 0xff;         // real CU type code

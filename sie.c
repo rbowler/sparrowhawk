@@ -1,4 +1,4 @@
-/* SIE.C        (c) Copyright Jan Jaeger, 1999-2004                  */
+/* SIE.C        (c) Copyright Jan Jaeger, 1999-2005                  */
 /*              Interpretive Execution                               */
 
 /*      This module contains the SIE instruction as                  */
@@ -8,9 +8,20 @@
 /*      Enterprise Systems Architecture / Extended Configuration     */
 /*      Principles of Operation, SC24-5594-02 and SC24-5965-00       */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
+
+#include "hstdinc.h"
 
 // #define SIE_DEBUG
+//
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
+
+#if !defined(_SIE_C_)
+#define _SIE_C_
+#endif
 
 #include "hercules.h"
 
@@ -134,8 +145,8 @@ static char *dbg_name[] = {
         /* 22 */        "SIE intercept LX-translation exception",
         /* 23 */        "SIE intercept EX-translation exception",
         /* 24 */        "SIE intercept Primary-authority exception",
-        /* 25 */        "SIE intercept Secondary-authority exception",
-        /* 26 */        "SIE intercept Page-fault-assist exception",
+        /* 25 */        "SIE intercept LFX-translation exception",
+        /* 26 */        "SIE intercept LSX-translation exception",
         /* 27 */        "SIE intercept Control-switch exception",
         /* 28 */        "SIE intercept ALET-specification exception",
         /* 29 */        "SIE intercept ALEN-translation exception",
@@ -143,8 +154,8 @@ static char *dbg_name[] = {
         /* 2B */        "SIE intercept ASTE-validity exception",
         /* 2C */        "SIE intercept ASTE-sequence exception",
         /* 2D */        "SIE intercept Extended-authority exception",
-        /* 2E */        NULL,
-        /* 2F */        NULL,
+        /* 2E */        "SIE intercept LSTE-sequence exception",
+        /* 2F */        "SIE intercept ASTE-instance exception",
         /* 30 */        "SIE intercept Stack-full exception",
         /* 31 */        "SIE intercept Stack-empty exception",
         /* 32 */        "SIE intercept Stack-specification exception",
@@ -228,8 +239,10 @@ int     icode = 0;                      /* Interception code         */
 
     SIE_PERFMON(SIE_PERF_ENTER);
 
+#if !defined(FEATURE_ESAME) && !defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
     if(!regs->psw.amode || !PRIMARY_SPACE_MODE(&(regs->psw)))
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+#endif
 
     if((effective_addr2 & (sizeof(SIEBK)-1)) != 0
 #if defined(FEATURE_ESAME)
@@ -253,35 +266,46 @@ int     icode = 0;                      /* Interception code         */
     if(effective_addr2 > regs->mainlim - (sizeof(SIEBK)-1))
     ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-    obtain_lock(&sysblk.intlock);
-
-    /* Initialize guestregs if first time */
-    if (GUESTREGS == NULL)
+    /*
+     * As long as regs->sie_active is off, no serialization is
+     * required for GUESTREGS.  sie_active should always be off here.
+     * Any other thread looking at sie_active holds the intlock.
+     */
+    if (regs->sie_active)
     {
-        REGS *gregs = calloc (sizeof(REGS), 1);
-        if (gregs == NULL)
-        {
-             release_lock(&sysblk.intlock);
-            logmsg (_("HHCCP079E CPU%4.4X: calloc failed for sie regs: %s\n"),
-                    regs->cpuad, strerror(errno));
-            signal_thread(sysblk.cputid[regs->cpuad], SIGUSR1);
-            return;
-        }
-        cpu_init (regs->cpuad, gregs, regs);
+        obtain_lock(&sysblk.intlock);
+        regs->sie_active = 0;
+        release_lock(&sysblk.intlock);
     }
+
+     /* Initialize guestregs if first time */
+     if (GUESTREGS == NULL)
+     {
+        GUESTREGS = calloc (sizeof(REGS), 1);
+        if (GUESTREGS == NULL)
+         {
+             logmsg (_("HHCCP079E CPU%4.4X: calloc failed for sie regs: %s\n"),
+                     regs->cpuad, strerror(errno));
+#if !defined(NO_SIGABEND_HANDLER)
+             signal_thread(sysblk.cputid[regs->cpuad], SIGUSR1);
+#endif
+             return;
+         }
+        cpu_init (regs->cpuad, GUESTREGS, regs);
+     }
 
     /* Direct pointer to state descriptor block */
     GUESTREGS->siebk = (void*)(regs->mainstor + effective_addr2);
 
 #if defined(FEATURE_ESAME)
-    if(STATEBK->mx & SIE_MX_ESAME)
+    if (STATEBK->mx & SIE_MX_ESAME)
     {
         GUESTREGS->arch_mode = ARCH_900;
         GUESTREGS->sie_guestpi = (SIEFN)&z900_program_interrupt;
         icode = z900_load_psw(GUESTREGS, STATEBK->psw);
     }
 #else /*!defined(FEATURE_ESAME)*/
-    if(STATEBK->m & SIE_M_370)
+    if (STATEBK->m & SIE_M_370)
     {
 #if defined(_370)
         GUESTREGS->arch_mode = ARCH_370;
@@ -292,14 +316,13 @@ int     icode = 0;                      /* Interception code         */
         SIE_SET_VI(SIE_VI_WHO_CPU, SIE_VI_WHEN_SIENT,
           SIE_VI_WHY_370NI, GUESTREGS);
         STATEBK->c = SIE_C_VALIDITY;
-        release_lock(&sysblk.intlock);
         return;
 #endif
     }
 #endif /*!defined(FEATURE_ESAME)*/
     else
 #if !defined(FEATURE_ESAME)
-    if(STATEBK->m & SIE_M_XA)
+    if (STATEBK->m & SIE_M_XA)
 #endif /*!defined(FEATURE_ESAME)*/
     {
         GUESTREGS->arch_mode = ARCH_390;
@@ -311,14 +334,11 @@ int     icode = 0;                      /* Interception code         */
     {
         /* Validity intercept for invalid mode */
         SIE_SET_VI(SIE_VI_WHO_CPU, SIE_VI_WHEN_SIENT,
-          SIE_VI_WHY_MODE, GUESTREGS);
+                   SIE_VI_WHY_MODE, GUESTREGS);
         STATEBK->c = SIE_C_VALIDITY;
-        release_lock(&sysblk.intlock);
         return;
     }
 #endif /*!defined(FEATURE_ESAME)*/
-
-    release_lock(&sysblk.intlock);
 
     /* Set host program interrupt routine */
     GUESTREGS->sie_hostpi = (SIEFN)&ARCH_DEP(program_interrupt);
@@ -339,7 +359,7 @@ int     icode = 0;                      /* Interception code         */
     if(STATEBK->mx & SIE_MX_RRF)
     {
     RADR mso, msl, eso = 0, esl = 0;
-    
+
         if(STATEBK->zone >= FEATURE_SIE_MAXZONES)
         {
             /* Validity intercept for invalid zone */
@@ -348,7 +368,7 @@ int     icode = 0;                      /* Interception code         */
             STATEBK->c = SIE_C_VALIDITY;
             return;
         }
-       
+
         mso = sysblk.zpb[STATEBK->zone].mso << 20;
         msl = (sysblk.zpb[STATEBK->zone].msl << 20) | 0xFFFFF;
         eso = sysblk.zpb[STATEBK->zone].eso << 20;
@@ -362,7 +382,7 @@ int     icode = 0;                      /* Interception code         */
             STATEBK->c = SIE_C_VALIDITY;
             return;
         }
-       
+
         /* Ensure addressing exceptions on incorrect zone defs */
         if(mso > regs->mainlim || msl > regs->mainlim)
             mso = msl = 0;
@@ -393,7 +413,7 @@ int     icode = 0;                      /* Interception code         */
         {
             /* Validity intercept for invalid zone */
             SIE_SET_VI(SIE_VI_WHO_CPU, SIE_VI_WHEN_SIENT,
-              SIE_VI_WHY_AZNNZ, GUESTREGS);
+                       SIE_VI_WHY_AZNNZ, GUESTREGS);
             STATEBK->c = SIE_C_VALIDITY;
             return;
         }
@@ -410,7 +430,7 @@ int     icode = 0;                      /* Interception code         */
         if(GUESTREGS->sie_mso > GUESTREGS->mainlim)
         {
             SIE_SET_VI(SIE_VI_WHO_CPU, SIE_VI_WHEN_SIENT,
-              SIE_VI_WHY_MSDEF, GUESTREGS);
+                       SIE_VI_WHY_MSDEF, GUESTREGS);
             STATEBK->c = SIE_C_VALIDITY;
             return;
         }
@@ -422,7 +442,7 @@ int     icode = 0;                      /* Interception code         */
         /* Load main storage origin */
         FETCH_HW(GUESTREGS->sie_mso,STATEBK->mso);
         GUESTREGS->sie_mso <<= 16;
-    
+
         /* Load main storage extend */
         FETCH_HW(GUESTREGS->mainlim,STATEBK->mse);
         GUESTREGS->mainlim = ((GUESTREGS->mainlim + 1) << 16) - 1;
@@ -433,7 +453,7 @@ int     icode = 0;                      /* Interception code         */
                            | STATEBK->xso[1] << 8
                            | STATEBK->xso[2];
         GUESTREGS->sie_xso *= (XSTORE_INCREMENT_SIZE >> XSTORE_PAGESHIFT);
-    
+
         /* Load expanded storage limit */
         GUESTREGS->sie_xsl = STATEBK->xsl[0] << 16
                            | STATEBK->xsl[1] << 8
@@ -445,7 +465,7 @@ int     icode = 0;                      /* Interception code         */
     if(GUESTREGS->PX > GUESTREGS->mainlim)
     {
         SIE_SET_VI(SIE_VI_WHO_CPU, SIE_VI_WHEN_SIENT,
-          SIE_VI_WHY_PFOUT, GUESTREGS);
+                   SIE_VI_WHY_PFOUT, GUESTREGS);
         STATEBK->c = SIE_C_VALIDITY;
         return;
     }
@@ -455,28 +475,28 @@ int     icode = 0;                      /* Interception code         */
     if(GUESTREGS->sie_scao > regs->mainlim)
     {
         SIE_SET_VI(SIE_VI_WHO_CPU, SIE_VI_WHEN_SIENT,
-          SIE_VI_WHY_SCADR, GUESTREGS);
+                   SIE_VI_WHY_SCADR, GUESTREGS);
         STATEBK->c = SIE_C_VALIDITY;
         return;
     }
 
     /* Validate MSO */
-    if(GUESTREGS->sie_mso)
+    if (GUESTREGS->sie_mso)
     {
         /* Preferred guest must have zero MSO */
-        if(GUESTREGS->sie_pref)
+        if (GUESTREGS->sie_pref)
         {
             SIE_SET_VI(SIE_VI_WHO_CPU, SIE_VI_WHEN_SIENT,
               SIE_VI_WHY_MSONZ, GUESTREGS);
-            STATEBK->c = SIE_C_VALIDITY; 
+            STATEBK->c = SIE_C_VALIDITY;
             return;
         }
 
         /* MCDS guest must have zero MSO */
-        if(STATEBK->mx & SIE_MX_XC)
+        if (STATEBK->mx & SIE_MX_XC)
         {
             SIE_SET_VI(SIE_VI_WHO_CPU, SIE_VI_WHEN_SIENT,
-              SIE_VI_WHY_MSODS, GUESTREGS);
+                       SIE_VI_WHY_MSODS, GUESTREGS);
             STATEBK->c = SIE_C_VALIDITY;
             return;
         }
@@ -485,10 +505,10 @@ int     icode = 0;                      /* Interception code         */
 #if !defined(FEATURE_ESAME)
     /* Reference and Change Preservation Origin */
     FETCH_FW(GUESTREGS->sie_rcpo, STATEBK->rcpo);
-    if(!GUESTREGS->sie_rcpo && !GUESTREGS->sie_pref)
+    if (!GUESTREGS->sie_rcpo && !GUESTREGS->sie_pref)
     {
         SIE_SET_VI(SIE_VI_WHO_CPU, SIE_VI_WHEN_SIENT,
-          SIE_VI_WHY_RCZER, GUESTREGS);
+                   SIE_VI_WHY_RCZER, GUESTREGS);
         STATEBK->c = SIE_C_VALIDITY;
         return;
     }
@@ -497,34 +517,21 @@ int     icode = 0;                      /* Interception code         */
     /* Load the CPU timer */
     FETCH_DW(GUESTREGS->ptimer, STATEBK->cputimer);
 
-    /* Reset the CPU timer pending flag according to its value */
-    if( (S64)GUESTREGS->ptimer < 0 )
-        ON_IC_PTIMER(GUESTREGS);
-    else
-        OFF_IC_PTIMER(GUESTREGS);
-
     /* Load the TOD clock offset for this guest */
     FETCH_DW(GUESTREGS->sie_epoch, STATEBK->epoch);
-    GUESTREGS->todoffset = regs->todoffset + (GUESTREGS->sie_epoch >> 8);
+    GUESTREGS->tod_epoch = regs->tod_epoch + (GUESTREGS->sie_epoch >> 8);
 
     /* Load the clock comparator */
     FETCH_DW(GUESTREGS->clkc, STATEBK->clockcomp);
     GUESTREGS->clkc >>= 8; /* Internal Hercules format */
 
-    /* Reset the clock comparator pending flag according to
-       the setting of the TOD clock */
-    if( (sysblk.todclk + GUESTREGS->todoffset) > GUESTREGS->clkc )
-        ON_IC_CLKC(GUESTREGS);
-    else
-        OFF_IC_CLKC(GUESTREGS);
-
     /* Load TOD Programmable Field */
     FETCH_HW(GUESTREGS->todpr, STATEBK->todpf);
 
     /* Load the guest registers */
-    memcpy(GUESTREGS->gr, regs->gr, 14 * sizeof(U64));
-    memcpy(GUESTREGS->ar, regs->ar, 16 * sizeof(U32));
-    memcpy(GUESTREGS->fpr, regs->fpr, 32 * sizeof(U32));
+    memcpy(GUESTREGS->gr, regs->gr, 14 * sizeof(regs->gr[0]));
+    memcpy(GUESTREGS->ar, regs->ar, 16 * sizeof(regs->ar[0]));
+    memcpy(GUESTREGS->fpr, regs->fpr, 32 * sizeof(regs->fpr[0]));
 #if defined(FEATURE_BINARY_FLOATING_POINT)
     GUESTREGS->fpc =  regs->fpc;
 #endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
@@ -540,11 +547,12 @@ int     icode = 0;                      /* Interception code         */
         FETCH_W(GUESTREGS->CR(n), STATEBK->cr[n]);
 
     FETCH_HW(lhcpu, STATEBK->lhcpu);
-
-    /* If this is not the last host cpu that dispatched this state
-       descriptor then clear the guest TLB entries */
-         if((regs->cpuad != lhcpu)
-           || (SIE_STATE(GUESTREGS) != effective_addr2))
+    /*
+     * If this is not the last host cpu that dispatched this state
+     * descriptor then clear the guest TLB entries
+     */
+    if (regs->cpuad != lhcpu
+     || SIE_STATE(GUESTREGS) != effective_addr2)
     {
         SIE_PERFMON(SIE_PERF_ENTER_F);
 
@@ -559,17 +567,34 @@ int     icode = 0;                      /* Interception code         */
         ARCH_DEP(purge_alb) (GUESTREGS);
     }
 
-    /* Initialise the last fetched instruction pointer */
-    GUESTREGS->ip = GUESTREGS->inst;
-    GUESTREGS->instvalid = 0;
+    /* Initialize interrupt mask and state */
+    SET_IC_MASK(GUESTREGS);
+    SET_IC_INITIAL_STATE(GUESTREGS);
 
+    /* Initialize accelerated address lookup values */
+    SET_AEA_MODE(GUESTREGS);
+    SET_AEA_COMMON(GUESTREGS);
+
+    /* Force instfetch() to be called for the first instruction */
+    GUESTREGS->instvalid = 0;
+    GUESTREGS->ip = GUESTREGS->inst;
+    GUESTREGS->inst[0] = 0;
+    INVALIDATE_AIA(GUESTREGS);
+
+    /*
+     * Do setjmp(progjmp) because translate_addr() may result in
+     * longjmp(progjmp) for addressing exceptions.
+     */
     if(!setjmp(GUESTREGS->progjmp))
     {
-        /* Set `execflag' to 0 in case EXecuted instruction did progjmp */
-        GUESTREGS->execflag = 0;
-
-        /* Set SIE active */
+        /*
+         * Set sie_active to 1.  This means other threads may now
+         * access guestregs when holding intlock.
+         * This is the *only* place sie_active is set to one.
+         */
+        obtain_lock(&sysblk.intlock);
         regs->sie_active = 1;
+        release_lock(&sysblk.intlock);
 
         /* Get PSA pointer and ensure PSA is paged in */
         if(GUESTREGS->sie_pref)
@@ -583,77 +608,101 @@ int     icode = 0;                      /* Interception code         */
                                           USE_PRIMARY_SPACE, regs, ACCTYPE_SIE))
             {
                 SIE_SET_VI(SIE_VI_WHO_CPU, SIE_VI_WHEN_SIENT,
-                  SIE_VI_WHY_PFACC, GUESTREGS);
+                           SIE_VI_WHY_PFACC, GUESTREGS);
                 STATEBK->c = SIE_C_VALIDITY;
+                obtain_lock(&sysblk.intlock);
                 regs->sie_active = 0;
+                release_lock(&sysblk.intlock);
                 return;
             }
-    
+
             /* Convert host real address to host absolute address */
             GUESTREGS->sie_px = APPLY_PREFIXING (regs->dat.raddr, regs->PX);
-            
+
             if (regs->dat.protect || GUESTREGS->sie_px > regs->mainlim)
             {
                 SIE_SET_VI(SIE_VI_WHO_CPU, SIE_VI_WHEN_SIENT,
-                  SIE_VI_WHY_PFACC, GUESTREGS);
+                           SIE_VI_WHY_PFACC, GUESTREGS);
                 STATEBK->c = SIE_C_VALIDITY;
+                obtain_lock(&sysblk.intlock);
                 regs->sie_active = 0;
+                release_lock(&sysblk.intlock);
                 return;
             }
-    
             GUESTREGS->sie_psa = (PSA_3XX*)(GUESTREGS->mainstor + GUESTREGS->sie_px);
-    
         }
-    
-#if !defined(FEATURE_ESAME)
-        /* If this is a S/370 guest, and the interval timer is enabled
-           then initialize the timer */
-        if( (STATEBK->m & SIE_M_370)
-         && !(STATEBK->m & SIE_M_ITMOF))
+
+        /* Intialize guest timers */
+        obtain_lock(&sysblk.todlock);
+
+        /* CPU timer */
+        if( (S64)GUESTREGS->ptimer < 0 )
         {
-        S32 itimer,
-            olditimer;
-        U32 residue;
-    
-            obtain_lock(&sysblk.todlock);
-    
+            obtain_lock(&sysblk.intlock);
+            ON_IC_PTIMER(GUESTREGS);
+            release_lock(&sysblk.intlock);
+        }
+
+        /* Clock comparator */
+        if( TOD_CLOCK(GUESTREGS) > GUESTREGS->clkc )
+        {
+            obtain_lock(&sysblk.intlock);
+            ON_IC_CLKC(GUESTREGS);
+            release_lock(&sysblk.intlock);
+        }
+
+#if !defined(FEATURE_ESAME)
+        /* Interval timer if S/370 and timer is enabled */
+        if((STATEBK->m & SIE_M_370) && !(STATEBK->m & SIE_M_ITMOF))
+        {
+            S32 itimer, olditimer;
+            U32 residue;
+
             /* Set the interval timer pending according to the T bit
                in the state control */
             if(STATEBK->s & SIE_S_T)
+            {
+                obtain_lock(&sysblk.intlock);
                 ON_IC_ITIMER(GUESTREGS);
-            else
-                OFF_IC_ITIMER(GUESTREGS);
-    
+                release_lock(&sysblk.intlock);
+            }
+
             /* Fetch the residu from the state descriptor */
             FETCH_FW(residue,STATEBK->residue);
-    
+
             /* Fetch the timer value from location 80 */
             FETCH_FW(olditimer,GUESTREGS->sie_psa->inttimer);
-    
-            /* Bit position 23 of the interval timer is deremented 
-               once for each multiple of 3,333 usecs containded in 
+
+            /* Bit position 23 of the interval timer is decremented
+               once for each multiple of 3,333 usecs containded in
                bit position 0-19 of the residue counter */
             itimer = olditimer - ((residue / 3333) >> 4);
-    
+
             /* Store the timer back */
             STORE_FW(GUESTREGS->sie_psa->inttimer, itimer);
-    
-            release_lock(&sysblk.todlock);
-    
+
             /* Set interrupt flag and interval timer interrupt pending
                if the interval timer went from positive to negative */
             if (itimer < 0 && olditimer >= 0)
+            {
+                obtain_lock(&sysblk.intlock);
                 ON_IC_ITIMER(GUESTREGS);
+                release_lock(&sysblk.intlock);
+            }
         }
 #endif /*!defined(FEATURE_ESAME)*/
-    
-        /* Early exceptions associated with the guest PSW */
+
+        /* Finished with timers */
+        release_lock(&sysblk.todlock);
+
+        /* Early exceptions associated with the guest load_psw() */
         if(icode)
             (GUESTREGS->sie_guestpi) (GUESTREGS, icode);
-    
+
         /* Run SIE in guests architecture mode */
         icode = run_sie[GUESTREGS->arch_mode] (regs);
-    }
+
+    } /* if (setjmp(GUESTREGS->progjmp)) */
 
     ARCH_DEP(sie_exit) (regs, icode);
 
@@ -662,7 +711,7 @@ int     icode = 0;                      /* Interception code         */
     PERFORM_CHKPT_SYNC (regs);
 
     longjmp(regs->progjmp, SIE_NO_INTERCEPT);
-} 
+}
 
 
 /* Exit SIE state, restore registers and update the state descriptor */
@@ -680,7 +729,9 @@ int     n;
     SIE_PERFMON(SIE_PERF_PGMINT);
 
     /* Indicate we have left SIE mode */
+    obtain_lock (&sysblk.intlock);
     regs->sie_active = 0;
+    release_lock (&sysblk.intlock);
 
     /* zeroize interception status */
     STATEBK->f = 0;
@@ -692,6 +743,7 @@ int     n;
               then backup the psw and exit */
             regs->psw.IA -= REAL_ILC(regs);
             regs->psw.IA &= ADDRESS_MAXWRAP(regs);
+            VALIDATE_AIA(regs);
             break;
         case SIE_HOST_PGMINT:
             break;
@@ -785,9 +837,9 @@ int     n;
         STORE_W(STATEBK->cr[n], GUESTREGS->CR(n));
 
     /* Update the approprate host registers */
-    memcpy(regs->gr, GUESTREGS->gr, 14 * sizeof(U64));
-    memcpy(regs->ar, GUESTREGS->ar, 16 * sizeof(U32));
-    memcpy(regs->fpr, GUESTREGS->fpr, 32 * sizeof(U32));
+    memcpy(regs->gr, GUESTREGS->gr, 14 * sizeof(regs->gr[0]));
+    memcpy(regs->ar, GUESTREGS->ar, 16 * sizeof(regs->ar[0]));
+    memcpy(regs->fpr, GUESTREGS->fpr, 32 * sizeof(regs->fpr[0]));
 #if defined(FEATURE_BINARY_FLOATING_POINT)
     regs->fpc =  GUESTREGS->fpc;
 #endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
@@ -810,7 +862,7 @@ int     n;
           && ECMODE(&GUESTREGS->psw)
           && (GUESTREGS->psw.sysmask & PSW_PERMODE) )
         {
-        PSA *psa;   
+        PSA *psa;
 #if defined(_FEATURE_PER2)
             GUESTREGS->perc |= OPEN_IC_PERINT(GUESTREGS) >> ((32 - IC_CR9_SHIFT) - 16);
             /* Positions 14 and 15 contain zeros if a storage alteration
@@ -856,14 +908,10 @@ int     n;
 /* Execute guest instructions */
 int ARCH_DEP(run_sie) (REGS *regs)
 {
-    int   icode;
+    int   icode;    /* SIE longjmp intercept code      */
+    BYTE  oldv;     /* siebk->v change check reference */
 
     SIE_PERFMON(SIE_PERF_RUNSIE);
-
-    SET_IC_MASK(GUESTREGS);
-    SET_AEA_MODE(GUESTREGS);
-    SET_AEA_COMMON(GUESTREGS);
-    INVALIDATE_AIA(GUESTREGS);
 
 #if defined(_FEATURE_PER)
     /* Reset any PER pending indication */
@@ -876,6 +924,9 @@ int ARCH_DEP(run_sie) (REGS *regs)
             do
             {
                 SIE_PERFMON(SIE_PERF_RUNLOOP_2);
+
+                /* Keep a copy if SIEBK 'v' field for later checks */
+                oldv=GUESTREGS->siebk->v;
 
                 /* Set `execflag' to 0 in case EXecuted instruction did progjmp */
                 GUESTREGS->execflag = 0;
@@ -896,6 +947,12 @@ int ARCH_DEP(run_sie) (REGS *regs)
                         ARCH_DEP(program_interrupt) (GUESTREGS, PGM_PER_EVENT);
 
                     obtain_lock(&sysblk.intlock);
+
+                    /* Turn off "possible interrupt" flag */
+                    /* Otherwise we come back here every  */
+                    /* time                               */
+                    /* ISW20041224                        */
+                    OFF_IC_INTERRUPT(GUESTREGS);
 
                     /* Perform broadcasted purge of ALB and TLB if requested
                        synchronize_broadcast() must be called until there are
@@ -949,10 +1006,10 @@ int ARCH_DEP(run_sie) (REGS *regs)
                             waittime.tv_sec = now.tv_sec;
                             waittime.tv_nsec = ((now.tv_usec + 3333) * 1000);
 
-                            set_bit (4, regs->cpuad, &sysblk.waiting_mask);
+                            sysblk.waiting_mask |= BIT(regs->cpuad);
                             timed_wait_condition
                                  (&regs->intcond, &sysblk.intlock, &waittime);
-                            clear_bit (4, regs->cpuad, &sysblk.waiting_mask);
+                            sysblk.waiting_mask &= ~BIT(regs->cpuad);
                         }
 
                         release_lock (&sysblk.intlock);
@@ -996,16 +1053,27 @@ int ARCH_DEP(run_sie) (REGS *regs)
                     UNROLLED_EXECUTE(gregs);
                     UNROLLED_EXECUTE(gregs);
                     UNROLLED_EXECUTE(gregs);
-                } while( unlikely(!SIE_I_HOST(regs)
-                                && !SIE_I_WAIT(GUESTREGS)
-                                && !SIE_I_EXT(GUESTREGS)
-                                && !SIE_I_IO(GUESTREGS)
+                } while( likely(!SIE_I_HOST(regs)
+                                && GUESTREGS->siebk->v==oldv
                                 && !SIE_IC_INTERRUPT_CPU(GUESTREGS)));
+                /******************************************/
+                /* ABOVE : Keep executing instructions    */
+                /*         in a tight loop until...       */
+                /*  - A Host Interrupt is made pending    */
+                /*  - An external source changes siebk->v */
+                /*  - A guest interrupt is made pending   */
+                /******************************************/
             } while( unlikely(!SIE_I_HOST(regs)
                             && !SIE_I_WAIT(GUESTREGS)
                             && !SIE_I_EXT(GUESTREGS)
                             && !SIE_I_IO(GUESTREGS)
                             && !SIE_IC_INTERRUPT_CPU(GUESTREGS)));
+            /******************************************/
+            /* ABOVE : Remain in SIE until...         */
+            /*  - A Host Interrupt is made pending    */
+            /*  - A Sie defined irpt becomes enabled  */
+            /*  - A guest interrupt is made pending   */
+            /******************************************/
 
 
         if(icode == 0 || icode == SIE_NO_INTERCEPT)

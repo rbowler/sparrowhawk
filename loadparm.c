@@ -1,5 +1,7 @@
-/* LOADPARM.C   (c) Copyright Jan Jaeger, 2004                       */
+/* LOADPARM.C   (c) Copyright Jan Jaeger, 2004-2005                  */
 /*              SCLP / MSSF loadparm                                 */
+
+#include "hstdinc.h"
 
 #include "hercules.h"
 
@@ -12,7 +14,7 @@ void set_loadparm(char *name)
     size_t i;
 
     for(i = 0; name && i < strlen(name) && i < sizeof(loadparm); i++)
-	if(isprint(name[i]))
+    if(isprint(name[i]))
             loadparm[i] = host_to_guest((int)(islower(name[i]) ? toupper(name[i]) : name[i]));
         else
             loadparm[i] = 0x40;
@@ -37,7 +39,7 @@ char *str_loadparm()
     {
         ret_loadparm[i] = guest_to_host((int)loadparm[i]);
 
-	if(isspace(ret_loadparm[i]) && !ret_loadparm[i+1])
+    if(isspace(ret_loadparm[i]) && !ret_loadparm[i+1])
             ret_loadparm[i] = '\0';
     }
 
@@ -53,7 +55,7 @@ void set_lparname(char *name)
     size_t i;
 
     for(i = 0; name && i < strlen(name) && i < sizeof(lparname); i++)
-	if(isprint(name[i]))
+    if(isprint(name[i]))
             lparname[i] = host_to_guest((int)(islower(name[i]) ? toupper(name[i]) : name[i]));
         else
             lparname[i] = 0x40;
@@ -78,7 +80,7 @@ char *str_lparname()
     {
         ret_lparname[i] = guest_to_host((int)lparname[i]);
 
-	if(isspace(ret_lparname[i]) && !ret_lparname[i+1])
+    if(isspace(ret_lparname[i]) && !ret_lparname[i+1])
             ret_lparname[i] = '\0';
     }
 

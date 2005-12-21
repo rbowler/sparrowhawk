@@ -1,4 +1,4 @@
-/* HTTPMISC.C   (c)Copyright Jan Jaeger, 2002-2004                   */
+/* HTTPMISC.C   (c)Copyright Jan Jaeger, 2002-2005                   */
 /*              HTTP Server                                          */
 
 #if !defined(_HTTPMISC_H)
@@ -6,12 +6,22 @@
 
 
 #if !defined(PKGDATADIR)
- #define HTTP_ROOT   "/usr/local/share/hercules/"
+ #if !defined(_MSVC_)
+  #define HTTP_ROOT   "/usr/local/share/hercules/"
+ #else
+  #define HTTP_ROOT   "%ProgramFiles%\\Hercules\\html\\"
+ #endif
 #else
  #define HTTP_ROOT   PKGDATADIR "/"
 #endif
-#define HTTP_WELCOME "hercules.html"
 
+#if !defined(_MSVC_)
+ #define HTTP_PS "/"
+#else
+ #define HTTP_PS "\\"
+#endif
+
+#define HTTP_WELCOME "hercules.html"
 
 #define HTML_HEADER  "include/header.htmlpart"
 #define HTML_FOOTER  "include/footer.htmlpart"
@@ -50,16 +60,16 @@ typedef struct _CGIVAR {
         ((_webblk)->baseurl)
 
 
-typedef struct _CONTYP {
+typedef struct _MIMETAB {
     char *suffix;
     char *type;
-} CONTYP;
+} MIMETAB;
 
 
 typedef struct _WEBBLK {
 #define HDL_VERS_WEBBLK "2.17"
 #define HDL_SIZE_WEBBLK sizeof(WEBBLK)
-    FILE *hsock;
+    int sock;
     int request_type;
 #define REQTYPE_NONE   0
 #define REQTYPE_GET    1
@@ -84,7 +94,6 @@ typedef struct _CGITAB {
 void html_header(WEBBLK *webblk);
 void html_footer(WEBBLK *webblk);
 int html_include(WEBBLK *webblk, char *filename);
-
 
 char *http_variable(WEBBLK *webblk, char *name, int type);
 void *http_server (void *arg);

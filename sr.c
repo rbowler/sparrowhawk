@@ -1,5 +1,7 @@
-/* SR.C         (c)Copyright Greg Smith, 2004                        */
+/* SR.C         (c)Copyright Greg Smith, 2005                        */
 /*              Suspend/Resume a Hercules session                    */
+
+#include "hstdinc.h"
 
 #define _HERCULES_SR_C
 
@@ -42,6 +44,7 @@ char    *fn = SR_DEFAULT_FILENAME;
 SR_FILE *file;
 U32      started_mask;
 struct   timeval tv;
+time_t   tt;
 int      i, j, rc;
 REGS    *regs;
 DEVBLK  *dev;
@@ -117,8 +120,8 @@ BYTE     psw[16];
     /* Write header */
     SR_WRITE_STRING(file, SR_HDR_ID, SR_ID);
     SR_WRITE_STRING(file, SR_HDR_VERSION, VERSION);
-    gettimeofday(&tv, NULL);
-    SR_WRITE_STRING(file, SR_HDR_DATE, ctime(&tv.tv_sec));
+    gettimeofday(&tv, NULL); tt = tv.tv_sec;
+    SR_WRITE_STRING(file, SR_HDR_DATE, ctime(&tt));
 
     /* Write system data */
     SR_WRITE_STRING(file,SR_SYS_ARCH_NAME,arch_name[sysblk.arch_mode]);
@@ -140,7 +143,7 @@ BYTE     psw[16];
     for (ioq = sysblk.iointq; ioq; ioq = ioq->next)
         if (ioq->pcipending)
             SR_WRITE_VALUE(file,SR_SYS_PCIPENDING, ioq->dev->devnum,sizeof(ioq->dev->devnum));
-        else if (ioq->pcipending)
+        else if (ioq->attnpending)
             SR_WRITE_VALUE(file,SR_SYS_ATTNPENDING, ioq->dev->devnum,sizeof(ioq->dev->devnum));
         else
             SR_WRITE_VALUE(file,SR_SYS_IOPENDING, ioq->dev->devnum,sizeof(ioq->dev->devnum));
@@ -189,6 +192,7 @@ BYTE     psw[16];
         SR_WRITE_VALUE(file, SR_CPU_TODPR, regs->todpr, sizeof(regs->todpr));
         SR_WRITE_VALUE(file, SR_CPU_MONCLASS, regs->monclass, sizeof(regs->monclass));
         SR_WRITE_VALUE(file, SR_CPU_EXCARID, regs->excarid, sizeof(regs->excarid));
+        SR_WRITE_VALUE(file, SR_CPU_BEAR, regs->bear, sizeof(regs->bear));
         SR_WRITE_VALUE(file, SR_CPU_OPNDRID, regs->opndrid, sizeof(regs->opndrid));
         SR_WRITE_VALUE(file, SR_CPU_CHECKSTOP, regs->checkstop, 1);
         SR_WRITE_VALUE(file, SR_CPU_HOSTINT, regs->hostint, 1);
@@ -307,6 +311,7 @@ int      devargx=0;
 DEVBLK  *dev = NULL;
 IOINT   *ioq = NULL;
 char     buf[SR_MAX_STRING_LENGTH+1];
+char     zeros[16];
 
     UNREFERENCED(cmdline);
 
@@ -318,6 +323,8 @@ char     buf[SR_MAX_STRING_LENGTH+1];
 
     if (argc == 2)
         fn = argv[1];
+
+    memset (zeros, 0, sizeof(zeros));
 
     /* Make sure all CPUs are deconfigured or stopped */
     obtain_lock(&sysblk.intlock);
@@ -390,7 +397,10 @@ char     buf[SR_MAX_STRING_LENGTH+1];
             }
 #endif
 #if defined (_900)
-            if (strcasecmp (buf, arch_name[ARCH_900]) == 0)
+            if (0
+                || strcasecmp (buf, arch_name[ARCH_900]) == 0
+                || strcasecmp (buf, "ESAME") == 0
+            )
             {
                 i = ARCH_900;
 #if defined(_FEATURE_CPU_RECONFIG)
@@ -620,21 +630,24 @@ char     buf[SR_MAX_STRING_LENGTH+1];
             switch (regs->arch_mode) {
 #if defined (_370)
             case ARCH_370:
+                len = 8;
                 rc = s370_load_psw(regs, (BYTE *)&buf);
                 break;
 #endif
 #if defined (_390)
             case ARCH_390:
+                len = 8;
                 rc = s390_load_psw(regs, (BYTE *)&buf);
                 break;
 #endif
 #if defined (_900)
             case ARCH_900:
+                len = 16;
                 rc = z900_load_psw(regs, (BYTE *)&buf);
                 break;
 #endif
             } /* switch (regs->arch_mode) */
-            if (rc != 0)
+            if (rc != 0 && memcmp(buf, zeros, len))
             {
                 logmsg( _("HHCSR117E CPU%4.4d error loading psw (%d)\n"),
                        regs->cpuad, rc);
@@ -790,6 +803,11 @@ char     buf[SR_MAX_STRING_LENGTH+1];
         case SR_CPU_EXCARID:
             if (regs == NULL) goto sr_null_regs_exit;
             SR_READ_VALUE(file, len, &regs->excarid, sizeof(regs->excarid));
+            break;
+
+        case SR_CPU_BEAR:
+            if (regs == NULL) goto sr_null_regs_exit;
+            SR_READ_VALUE(file, len, &regs->bear, sizeof(regs->bear));
             break;
 
         case SR_CPU_OPNDRID:
@@ -971,7 +989,7 @@ char     buf[SR_MAX_STRING_LENGTH+1];
                 if (devargv[i]) free(devargv[i]);
                 devargv[i] = NULL;
             }
-            devnum = devargc = devargx = 0;    
+            devnum = devargc = devargx = 0;
             break;
 
         case SR_DEV_ORB:
@@ -1222,7 +1240,7 @@ char     buf[SR_MAX_STRING_LENGTH+1];
     {
         if (dev->suspended && (dev->pmcw.flag5 & PMCW5_V))
         {
-	    dev->resumesuspended=1;
+            dev->resumesuspended=1;
             switch (sysblk.arch_mode) {
 #if defined(_370)
             case ARCH_370:
@@ -1262,8 +1280,9 @@ char     buf[SR_MAX_STRING_LENGTH+1];
     obtain_lock (&sysblk.intlock);
     ON_IC_IOPENDING;
     for (i = 0; i < MAX_CPU_ENGINES; i++)
-        if (IS_CPU_ONLINE(i) && test_bit(4, i, &started_mask))
+        if (IS_CPU_ONLINE(i) && (started_mask & BIT(i)))
         {
+            sysblk.regs[i]->opinterv = 0;
             sysblk.regs[i]->cpustate = CPUSTATE_STARTED;
             sysblk.regs[i]->checkstop = 0;
             WAKEUP_CPU(sysblk.regs[i]);

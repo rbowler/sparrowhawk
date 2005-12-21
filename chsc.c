@@ -1,13 +1,23 @@
-/* CHSC.C       (c) Copyright Jan Jaeger, 2002-2004                  */
+/* CHSC.C       (c) Copyright Jan Jaeger, 2002-2005                  */
 /*              Channel Subsystem Call                               */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements channel subsystem interface functions      */
 /* for the Hercules ESA/390 emulator.                                */
 /*-------------------------------------------------------------------*/
+
+#include "hstdinc.h"
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
+
+#if !defined(_CHSC_C_)
+#define _CHSC_C_
+#endif
 
 #include "hercules.h"
 
@@ -188,7 +198,7 @@ CHSC_RSP *chsc_rsp;                             /* Response structure*/
 #endif
         default:
 
-            if( HDC(debug_chsc_unknown_request, chsc_rsp, chsc_req, regs) )
+            if( HDC3(debug_chsc_unknown_request, chsc_rsp, chsc_req, regs) )
                 break;
 
             /* Set response field length */

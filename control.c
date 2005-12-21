@@ -1,8 +1,8 @@
-/* CONTROL.C    (c) Copyright Roger Bowler, 1994-2004                */
+/* CONTROL.C    (c) Copyright Roger Bowler, 1994-2005                */
 /*              ESA/390 CPU Emulator                                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all control instructions of the            */
@@ -25,7 +25,18 @@
 /*      ESAME linkage stack operations - Roger Bowler                */
 /*      ESAME BSA instruction - Roger Bowler                    v209c*/
 /*      ASN-and-LX-reuse facility - Roger Bowler            June 2004*/
+/*      SIGP orders 11,12.2,13,15 - Fish                     Oct 2005*/
 /*-------------------------------------------------------------------*/
+
+#include "hstdinc.h"
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
+
+#if !defined(_CONTROL_C_)
+#define _CONTROL_C_
+#endif
 
 #include "hercules.h"
 
@@ -162,6 +173,9 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         /* Set the problem state bit in the current PSW */
         regs->psw.states |= BIT(PSW_PROB_BIT);
 
+        /* Update the breaking event address register */
+        UPDATE_BEAR_A(regs);
+
         /* Set PSW instruction address and amode from R2 register */
       #if defined(FEATURE_ESAME)
         if (regs->psw.amode64)
@@ -204,6 +218,9 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
                                         duct_reta &DUCT_IA31, regs);
       #endif /*FEATURE_TRACING*/
 
+        /* Update the breaking event address register */
+        UPDATE_BEAR_A(regs);
+         
         /* If R1 is non-zero, save the current PSW addressing mode
            and instruction address in the R1 register */
         if (r1 != 0)
@@ -236,8 +253,8 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         }
 
         /* Restore the PSW key mask from the DUCT */
-        regs->CR(3) &= 0x0000FFFF;
-        regs->CR(3) |= duct_pkrp & DUCT_PKM;
+        regs->CR_L(3) &= 0x0000FFFF;
+        regs->CR_L(3) |= duct_pkrp & DUCT_PKM;
 
         /* Restore the PSW key from the DUCT */
         regs->psw.pkey = duct_pkrp & DUCT_KEY;
@@ -287,6 +304,8 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         )
         ON_IC_PER_SB(regs);
 #endif /*defined(FEATURE_PER)*/
+
+    VALIDATE_AIA(regs);
 
 } /* end DEF_INST(branch_and_set_authority) */
 #endif /*defined(FEATURE_BRANCH_AND_SET_AUTHORITY)*/
@@ -493,6 +512,9 @@ CREG    inst_cr;                        /* Instruction CR            */
                                 (regs->psw.amode ? 0x80000000 : 0);
     }
 
+    /* Update the breaking event address register */
+    UPDATE_BEAR_A(regs);
+
     /* Set mode and branch to address specified by R2 operand */
     regs->psw.IA = newia;
 
@@ -564,6 +586,8 @@ CREG    inst_cr;                        /* Instruction CR            */
     SET_AEA_COMMON(regs);
     if (inst_cr != regs->CR(regs->aea_ar[USE_INST_SPACE]))
         INVALIDATE_AIA(regs);
+    else
+        VALIDATE_AIA(regs);
 
 #if defined(FEATURE_PER)
     if( EN_IC_PER_SB(regs)
@@ -664,7 +688,9 @@ VADR    n = 0;                          /* Work area                 */
     /* Execute the branch unless R2 specifies register 0 */
     if ( r2 != 0 )
     {
+        UPDATE_BEAR_A(regs);
         regs->psw.IA = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
+
 #if defined(FEATURE_PER)
         if( EN_IC_PER_SB(regs)
 #if defined(FEATURE_PER2)
@@ -675,6 +701,8 @@ VADR    n = 0;                          /* Work area                 */
             ON_IC_PER_SB(regs);
 #endif /*defined(FEATURE_PER)*/
     }
+
+    VALIDATE_AIA(regs);
 
 } /* end DEF_INST(branch_and_stack) */
 #endif /*defined(FEATURE_LINKAGE_STACK)*/
@@ -834,13 +862,15 @@ int     r1, r2;                         /* Values of R fields        */
 /*-------------------------------------------------------------------*/
 DEF_INST(extract_primary_asn_and_instance)
 {
-  int r1, r2;                           /* Values of R fields        */
-  if(!sysblk.asnandlxreuse)
-  {
-      ARCH_DEP(operation_exception)(inst,regs);
-  }
+int r1, r2;                             /* Values of R fields        */
 
-  RRE(inst, regs, r1, r2);
+    /* Operation exception if ASN-and-LX-reuse is not enabled */
+    if(!sysblk.asnandlxreuse)
+    {
+        ARCH_DEP(operation_exception)(inst,regs);
+    }
+
+    RRE(inst, regs, r1, r2);
 
     SIE_MODE_XC_OPEX(regs);
 
@@ -901,13 +931,16 @@ int     r1, r2;                         /* Values of R fields        */
 /*-------------------------------------------------------------------*/
 DEF_INST(extract_secondary_asn_and_instance)
 {
-  int r1, r2;                           /* Values of R fields        */
-  if(!sysblk.asnandlxreuse)
-  {
-      ARCH_DEP(operation_exception)(inst,regs);
-  }
+int r1, r2;                             /* Values of R fields        */
 
-  RRE(inst, regs, r1, r2);
+
+    /* Operation exception if ASN-and-LX-reuse is not enabled */
+    if(!sysblk.asnandlxreuse)
+    {
+        ARCH_DEP(operation_exception)(inst,regs);
+    }
+
+    RRE(inst, regs, r1, r2);
 
     SIE_MODE_XC_OPEX(regs);
 
@@ -1522,7 +1555,7 @@ int     r1, r2;                         /* Values of R fields        */
 #endif /*defined(_FEATURE_SIE)*/
 
     RELEASE_MAINLOCK(regs);
- 
+
 } /* DEF_INST(invalidate_page_table_entry) */
 
 
@@ -1601,7 +1634,7 @@ CREG    inst_cr;                        /* Instruction CR            */
         pasn_d = dreg & 0xFFFF;
     }
     else /* !ASN_AND_LX_REUSE_ENABLED */
-    {  
+    {
         /* When ASN-and-LX-reuse is not installed or not enabled,
            the first operand is one doubleword containing the
            PKM-d, SASN-d, AX-d, and PASN-d (16 bits each) */
@@ -1642,7 +1675,7 @@ CREG    inst_cr;                        /* Instruction CR            */
         ltd = ASTE_LT_DESIGNATOR(aste);
         ax = (aste[1] & ASTE1_AX) >> 16;
 
-        /* When ASN-and-LX-reuse is installed and enabled by CR0, 
+        /* When ASN-and-LX-reuse is installed and enabled by CR0,
            set the new PASTEIN equal to the PASTEIN-d */
         if (ASN_AND_LX_REUSE_ENABLED(regs))
             pastein_new = pastein_d;
@@ -1673,11 +1706,11 @@ CREG    inst_cr;                        /* Instruction CR            */
     {
         /* Load current PSTD and LTD or PASTEO */
         pstd = regs->CR(1);
-        ltd = regs->CR_L(5);
-        pasteo = regs->CR_L(5);
+        ltd = regs->CR_L(5);     /* ZZZ1 NOT SURE ABOUT THE MEANING OF THIS CODE: REFER TO ZZZ2 */
+        pasteo = regs->CR_L(5);  /* ZZZ1 NOT SURE ABOUT THE MEANING OF THIS CODE: REFER TO ZZZ2 */
         ax = (regs->CR(4) & CR4_AX) >> 16;
 
-        /* When ASN-and-LX-reuse is installed and enabled by CR0, 
+        /* When ASN-and-LX-reuse is installed and enabled by CR0,
            load the current PASTEIN */
         if (ASN_AND_LX_REUSE_ENABLED(regs))
             pastein_new = regs->CR_H(4);
@@ -1780,7 +1813,7 @@ CREG    inst_cr;                        /* Instruction CR            */
     regs->CR_LHL(3) = sasn_d;
     regs->CR_LHH(4) = ax;
     regs->CR_LHL(4) = pasn_d;
-    regs->CR_L(5) = ASF_ENABLED(regs) ? pasteo : ltd;
+    regs->CR_L(5) = ASF_ENABLED(regs) ? pasteo : ltd;  /* ZZZ2 NOT SURE ABOUT THE MEANING OF THIS CODE: REFER TO ZZZ1 */
     regs->CR(7) = sstd;
     if (ASN_AND_LX_REUSE_ENABLED(regs))
     {
@@ -1853,14 +1886,14 @@ U16     updated = 0;                    /* Updated control regs      */
     for (i = 0; i < m; i++)
     {
         regs->CR_L((r1 + i) & 0xF) = fetch_fw (p1++);
-        set_bit(2, (r1 + i) & 0xF, &updated);
+        updated |= BIT((r1 + i) & 0xF);
     }
 
     /* Copy from next page */
     for ( ; i < n; i++)
     {
         regs->CR_L((r1 + i) & 0xF) = fetch_fw (p2++);
-        set_bit(2, (r1 + i) & 0xF, &updated);
+        updated |= BIT((r1 + i) & 0xF);
     }
 
     /* Actions based on updated control regs */
@@ -1874,10 +1907,10 @@ U16     updated = 0;                    /* Updated control regs      */
 #else
     if (updated & (BIT(1) | BIT(7) | BIT(13)))
         SET_AEA_COMMON(regs);
-    if (test_bit(2, regs->aea_ar[USE_INST_SPACE], &updated))
+    if (updated & BIT(regs->aea_ar[USE_INST_SPACE]))
         INVALIDATE_AIA(regs);
 #endif
-    if (test_bit(2, 9, &updated) && EN_IC_PER_SA(regs))
+    if ((updated & BIT(9)) && EN_IC_PER_SA(regs))
         ARCH_DEP(invalidate_tlb)(regs,~(ACC_WRITE|ACC_CHECK));
 
     RETURN_INTCHECK(regs);
@@ -1892,7 +1925,7 @@ DEF_INST(load_program_status_word)
 {
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
-DWORD   dword;
+DBLWRD  dword;
 int     rc;
 #if defined(FEATURE_ESAME)
 int     amode64;
@@ -1905,7 +1938,6 @@ int     amode64;
         return;
     }
 #endif
-
 
     PRIV_CHECK(regs);
 
@@ -1923,42 +1955,67 @@ int     amode64;
     /* Fetch new PSW from operand address */
     STORE_DW ( dword, ARCH_DEP(vfetch8) ( effective_addr2, b2, regs ) );
 
+    /* Update the breaking event address register */
+    UPDATE_BEAR_A(regs);
+
     /* Load updated PSW (ESA/390 Format in ESAME mode) */
-#if defined(FEATURE_ESAME)
-    /* save amode64 flag */
+#if !defined(FEATURE_ESAME)
+    if ((rc = ARCH_DEP(load_psw) ( regs, dword )))
+        ARCH_DEP(program_interrupt) (regs, rc);
+#else /*defined(FEATURE_ESAME)*/
+
+    /* Make the PSW valid for ESA/390 mode
+       after first saving our amode64 flag */
     amode64 = dword[3] & 0x01;
-    /* make psw valid for esa390 mode */
     dword[3] &= ~0x01;
+
+    /* Now call 's390_load_psw' to load our ESA/390 PSW for us */
     rc = s390_load_psw ( regs, dword );
-    /* Set the notesame bit to zero as it has been set,
-       and set the amode64 bit according to byte 3 */
-//FIXME: line below is replaced by the 2nd line below; is this right ??
-//  regs->psw.notesame = regs->psw.notesame ? 0 : 1;
-    regs->psw.states ^= BIT(PSW_NOTESAME_BIT);
-    regs->psw.amode64 = amode64;
-    /* s390_load_psw will not have set the AMASK correctly for amode64 */
-    if(amode64)
+
+    /* PROGRAMMING NOTE: z/Arch (ESAME) only supports the loading
+       of ESA/390 mode (Extended Control mode (i.e. EC mode)) PSWs
+       via the LPSW instruction. Thus the above 's390_load_psw' call
+       has already checked to  make sure bit 12 -- the EC mode bit
+       (otherwise also known as the 'NOTESAME' bit) -- was set when
+       the PSW was loaded (otherwise it would not have even returned
+       and instead would have thrown a PGM_SPECIFICATION_EXCEPTION).
+
+       Since we're actually executing in z/Arch (ESAME) mode though
+       we now need to turn that bit off (since it's not supposed to
+       be on for z/Arch (ESAME) mode) as explained in the Principles
+       of Operations manual for the LPSW instruction.
+    */
+    regs->psw.states &= ~BIT(PSW_NOTESAME_BIT);
+
+    /* Restore the amode64 flag setting and set the actual correct
+       AMASK value according to it (if we need to) since we had to
+       force non-amode64 further above to get the 's390_load_psw'
+       function to work right without erroneously program-checking.
+    */
+    if((regs->psw.amode64 = amode64))
     {
         regs->psw.AMASK = AMASK64;
+
         /* amode31 bit must be set when amode64 is set */
         if(!regs->psw.amode)
         {
             regs->psw.zeroilc = 1;
-            rc = PGM_SPECIFICATION_EXCEPTION;
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
         }
     }
-#else /*!defined(FEATURE_ESAME)*/
-    rc = ARCH_DEP(load_psw) ( regs, dword );
-#endif /*!defined(FEATURE_ESAME)*/
-    if (rc)
-    {
-        ARCH_DEP(program_interrupt) (regs, rc);
-    }
+    else
+        /* Clear the high word of the address mask since
+           the 's390_load_psw' function didn't do that for us */
+        regs->psw.AMASK_H = 0;
 
-#if defined(FEATURE_ESAME)
-    /* Clear the high word of the instruction address,
-       as it has not been touched by s390_load_psw */
+    /* Check for Load PSW success/failure */
+    if (rc)
+        ARCH_DEP(program_interrupt) (regs, rc);
+
+    /* Clear the high word of the instruction address since
+       the 's390_load_psw' function didn't do that for us */
     regs->psw.IA_H = 0;
+
 #endif /*defined(FEATURE_ESAME)*/
 
     /* Perform serialization and checkpoint synchronization */
@@ -2462,7 +2519,6 @@ RADR    lfto;                           /* Linkage first table origin*/
 U32     lftl;                           /* Linkage first table length*/
 U32     lfte;                           /* Linkage first table entry */
 RADR    lsto;                           /* Linkage second table orig */
-/* U32     lstl; */                     /* Linkage second table leng */
 U32     lste[2];                        /* Linkage second table entry*/
 RADR    eto;                            /* Entry table origin        */
 U32     etl;                            /* Entry table length        */
@@ -2500,7 +2556,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
     if (!ASN_AND_LX_REUSE_ENABLED(regs))
     {
         /* When ASN-and-LX-reuse is not installed or not enabled, the
-           PC number is the low-order 20 bits of the operand address 
+           PC number is the low-order 20 bits of the operand address
            and the translation exception identification is the 20-bit
            PC number with 12 high order zeroes appended to the left */
         pcnum = effective_addr2 & (PC_LX | PC_EX);
@@ -2579,7 +2635,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         ltdesig = ASTE_LT_DESIGNATOR(aste);
     }
 
-    /* Note: When ASN-and-LX-reuse is installed and enabled 
+    /* Note: When ASN-and-LX-reuse is installed and enabled
        by CR0, ltdesig is an LFTD, otherwise it is an LTD */
 
     /* Special operation exception if subsystem linkage
@@ -2624,7 +2680,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         /* Extract the entry table origin and length from the LTE */
         eto = lte & LTE_ETO;
         etl = lte & LTE_ETL;
-         
+
     }
     else /* ASN_AND_LX_REUSE_ENABLED */
     {
@@ -2640,8 +2696,10 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
            that the first 4 bits of the LFX1 (originally bits 32-35
            of the operand address) must always be 0. The LFX1 was
            loaded from bits 32-43 of the operand address if bit 44
-           of the operand address was 1, otherwise LFX1 is zero. */
-        if (lftl < (pcnum >> 19))
+           of the operand address was 1, otherwise LFX1 is zero.
+           However, when bit 44 of the effective address is zero,
+           the LFTL (Linkage-First-Table Length) is ignored. */
+        if ((effective_addr2 & PC_BIT44) && lftl < (pcnum >> 19))
         {
             regs->TEA = pctea;
             ARCH_DEP(program_interrupt) (regs, PGM_LFX_TRANSLATION_EXCEPTION);
@@ -2649,7 +2707,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
 
         /* Calculate the address of the linkage first table entry
            (it is always a 31-bit address even in ESAME) */
-        lfto += (pcnum & ((PC_LFX1>>1)|PC_LFX2)) >> 11;
+        lfto += (pcnum & ((PC_LFX1>>1)|PC_LFX2)) >> (13-2);
         lfto &= 0x7FFFFFFF;
 
         /* Program check if the LFTE address is outside real storage */
@@ -2673,7 +2731,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
 
         /* Calculate the address of the linkage second table entry
            (it is always a 31-bit address even in ESAME) */
-        lsto += (pcnum & PC_LSX) >> 6;
+        lsto += (pcnum & PC_LSX) >> (8-3);
         lsto &= 0x7FFFFFFF;
 
         /* Program check if the LSTE address is outside real storage */
@@ -2713,13 +2771,13 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
     /* [5.5.3.3] Entry table lookup */
 
     /* Program check if entry index is outside the entry table */
-    if (etl < ((pcnum & PC_EX) >> 2))
+    if (etl < ((pcnum & PC_EX) >> (8-6)))
     {
         regs->TEA = pctea;
         ARCH_DEP(program_interrupt) (regs, PGM_EX_TRANSLATION_EXCEPTION);
     }
 
-    /* Calculate the starting address of the entry table entry 
+    /* Calculate the starting address of the entry table entry
        (it is always a 31-bit address even in ESAME) */
     eto += (pcnum & PC_EX) << (ASF_ENABLED(regs) ? 5 : 4);
     eto &= 0x7FFFFFFF;
@@ -2868,6 +2926,9 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
                         | (regs->psw.IA & ADDRESS_MAXWRAP(regs)) | PROBSTATE(&regs->psw);
       #endif /*!defined(FEATURE_ESAME)*/
 
+        /* Update the breaking event address register */
+        UPDATE_BEAR_A(regs);
+
         /* Update the PSW from the entry table */
       #if defined(FEATURE_ESAME)
         if (regs->psw.amode64)
@@ -2949,6 +3010,9 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         ARCH_DEP(form_stack_entry) (LSED_UET_PC, retn, 0, csi,
                                         pcnum, regs);
 
+        /* Update the breaking event address register */
+        UPDATE_BEAR_A(regs);
+
         /* Update the PSW from the entry table */
       #if defined(FEATURE_ESAME)
         if (ete[4] & ETE4_G)
@@ -3023,6 +3087,11 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         /* Set SSTD equal to PSTD */
         regs->CR(7) = regs->CR(1);
 
+        /* When ASN-and-LX-reuse is installed and enabled,
+           set the SASTEIN equal to the PASTEIN */
+        if (ASN_AND_LX_REUSE_ENABLED(regs))
+            regs->CR_H(3) = regs->CR_H(4);
+
     } /* end if(PC-cp) */
     else
     { /* Program call with space switching */
@@ -3031,10 +3100,15 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         regs->CR_LHL(3) = regs->CR_LHL(4);
         regs->CR(7) = regs->CR(1);
 
+        /* When ASN-and-LX-reuse is installed and enabled,
+           set the SASTEIN equal to the current PASTEIN */
+        if (ASN_AND_LX_REUSE_ENABLED(regs))
+            regs->CR_H(3) = regs->CR_H(4);
+
         /* Set flag if either the current or new PSTD indicates
            a space switch event */
         if ((regs->CR(1) & SSEVENT_BIT)
-            || (ASTE_AS_DESIGNATOR(aste) & SSEVENT_BIT) )
+            || (pstd & SSEVENT_BIT) )
         {
             /* Indicate space-switch event required */
             ssevent = 1;
@@ -3042,6 +3116,11 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
 
         /* Obtain new AX from the ASTE and new PASN from the ET */
         regs->CR_L(4) = (aste[1] & ASTE1_AX) | pasn;
+
+        /* When ASN-and-LX-reuse is installed and enabled,
+           obtain the new PASTEIN from the new primary ASTE */
+        if (ASN_AND_LX_REUSE_ENABLED(regs))
+            regs->CR_H(4) = aste[11];
 
         /* Load the new primary STD or ASCE */
         regs->CR(1) = pstd;
@@ -3057,6 +3136,11 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         {
             regs->CR_LHL(3) = regs->CR_LHL(4);
             regs->CR(7) = regs->CR(1);
+
+            /* When ASN-and-LX-reuse is installed and enabled,
+               also set the SASTEIN equal to the new PASTEIN */
+            if (ASN_AND_LX_REUSE_ENABLED(regs))
+                regs->CR_H(3) = regs->CR_H(4);
         }
 #endif /*defined(FEATURE_LINKAGE_STACK)*/
 
@@ -3143,17 +3227,45 @@ int     rc;                             /* return code from load_psw */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
-    /* Create a working copy of the CPU registers */
-#if defined(PTRININTOK)
-     if((unsigned long)regs + sizeof(REGS) == (unsigned long)(&regs->tlb) + sizeof(TLB)) {
-        memcpy(&newregs, regs, sizeof(REGS)-sizeof(TLB));
-        MEMSET(&newregs.tlb.vaddr, 0, TLBN * sizeof(DW));
+    /* Create a working copy of the CPU registers... */
+
+    /*
+       PROGRAMMING NOTE: The following code is designed to make a copy
+       of everything in the REGS structure *except* the TLB (since it
+       is so large, and besides, we're going to invalidate the entire
+       thing anyway, so why even bother to copy it in the first place?)
+
+       When it was originally written, the TLB was the VERY LAST field
+       defined in the REGS structure. The below code is simply checking
+       to make sure no new fields have been added to the REGS structure
+       *following* the TLB field (since it's designed to only copy the
+       REGS structure *up to* the TLB, but *not* anything else that may
+       be *following* the TLB).
+       
+       If new fields have been added to the REGS structure *following*
+       the TLB however, then the test fails and we simply make a copy
+       of the entire REGS structure (which, as explained, is undesirable
+       since it's a waste of time to copy data you're not going to use
+       anyway). Thus the below test is simply a performance enhancement
+       and nothing more (i.e. it doesn't matter WHICH way we do it, as
+       long as it gets done).
+    */
+    if ((uintptr_t)regs + sizeof(REGS) == (uintptr_t)&regs->tlb + sizeof(TLB))
+    {
+        // Make a working copy of everything *EXCEPT* the TLB...
+        memcpy( &newregs, regs, sizeof(REGS) - sizeof(TLB) );
     }
     else
+    {
+        // Make a COMPLETE copy of the *entire* REGS structure...
         newregs = *regs;
-#else
-    newregs=*regs;
-#endif
+    }
+
+    /* Now INVALIDATE ALL TLB ENTRIES in our working copy.. */
+    memset( &newregs.tlb.vaddr, 0, TLBN * sizeof(DW) );
+
+    /* Update the copy of the breaking event address register */
+    UPDATE_BEAR_A(&newregs);
 
     /* Save the primary ASN (CR4) and primary STD (CR1) */
     oldpasn = regs->CR_LHL(4);
@@ -3203,29 +3315,15 @@ int     rc;                             /* return code from load_psw */
                of CR4 must equal the ASTEIN in word 11 of the ASTE */
             if (ASN_AND_LX_REUSE_ENABLED(regs))
             {
-                if (regs->CR_H(4) != aste[11])
+                if (newregs.CR_H(4) != aste[11])
                 {
                     /* Set bit 2 of the exception access identification
                        to indicate that the program check occurred
                        during PASN translation in a PR instruction */
-                    regs->excarid = 0x20;
+                    newregs.excarid = 0x20;
                     ARCH_DEP(program_interrupt) (&newregs, PGM_ASTE_INSTANCE_EXCEPTION);
                 }
             } /* end if(ASN_AND_LX_REUSE_ENABLED) */
-
-            /* Space switch if either current PSTD or new PSTD
-               space-switch-event control bit is set to 1 */
-            if ((regs->CR(1) & SSEVENT_BIT)
-                || (ASTE_AS_DESIGNATOR(aste) & SSEVENT_BIT))
-            {
-                /* Indicate space-switch event required */
-                ssevent = 1;
-            }
-            else
-            {
-                /* space-switch event maybe - if PER event */
-                ssevent = 2;
-            }
 
             /* Obtain new PSTD (or PASCE) and AX from the ASTE */
             newregs.CR(1) = ASTE_AS_DESIGNATOR(aste);
@@ -3240,6 +3338,20 @@ int     rc;                             /* return code from load_psw */
             newregs.CR(1) = ARCH_DEP(subspace_replace) (newregs.CR(1),
                                             pasteo, NULL, &newregs);
 #endif /*FEATURE_SUBSPACE_GROUP*/
+
+            /* Space switch if either current PSTD or new PSTD
+               space-switch-event control bit is set to 1 */
+            if ((regs->CR(1) & SSEVENT_BIT)
+                || (newregs.CR(1) & SSEVENT_BIT))
+            {
+                /* Indicate space-switch event required */
+                ssevent = 1;
+            }
+            else
+            {
+                /* space-switch event maybe - if PER event */
+                ssevent = 2;
+            }
 
         } /* end if(pasn!=oldpasn) */
 
@@ -3273,12 +3385,12 @@ int     rc;                             /* return code from load_psw */
                of CR3 must equal the ASTEIN in word 11 of the ASTE */
             if (ASN_AND_LX_REUSE_ENABLED(regs))
             {
-                if (regs->CR_H(3) != aste[11])
+                if (newregs.CR_H(3) != aste[11])
                 {
                     /* Set bit 3 of the exception access identification
                        to indicate that the program check occurred
                        during SASN translation in a PR instruction */
-                    regs->excarid = 0x10;
+                    newregs.excarid = 0x10;
                     ARCH_DEP(program_interrupt) (&newregs, PGM_ASTE_INSTANCE_EXCEPTION);
                 }
             } /* end if(ASN_AND_LX_REUSE_ENABLED) */
@@ -3307,8 +3419,9 @@ int     rc;                             /* return code from load_psw */
     /* Update the updated CPU registers from the working copy */
     memcpy(&(regs->psw), &(newregs.psw), sizeof(newregs.psw));
     memcpy(regs->gr, newregs.gr, sizeof(newregs.gr));
-    memcpy(regs->cr, newregs.cr, CR_SIZE);
+    memcpy(regs->cr, newregs.cr, sizeof(newregs.cr));
     memcpy(regs->ar, newregs.ar, sizeof(newregs.ar));
+    regs->bear = newregs.bear;
 
     /* Set the main storage reference and change bits */
     STORAGE_KEY(alsed, regs) |= (STORKEY_REF | STORKEY_CHANGE);
@@ -3349,16 +3462,16 @@ int     rc;                             /* return code from load_psw */
         /* [6.5.2.34] Set translation exception address equal
            to old primary ASN, and set high-order bit if old
            primary space-switch-event control bit is one */
-        newregs.TEA = oldpasn;
+        regs->TEA = oldpasn;
         if (oldpstd & SSEVENT_BIT)
-            newregs.TEA |= TEA_SSEVENT;
+            regs->TEA |= TEA_SSEVENT;
 
-         ARCH_DEP(program_interrupt) (&newregs, PGM_SPACE_SWITCH_EVENT);
+         ARCH_DEP(program_interrupt) (regs, PGM_SPACE_SWITCH_EVENT);
     }
 
     if (rc) /* if new psw has bad format */
     {
-        ARCH_DEP(program_interrupt) (&newregs, rc);
+        ARCH_DEP(program_interrupt) (regs, rc);
     }
 
     /* Perform serialization and checkpoint-synchronization */
@@ -3516,8 +3629,8 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         if (xcode != 0)
             ARCH_DEP(program_interrupt) (regs, xcode);
 
-        /* For PT-ss only, generate a special operation exception 
-           if ASN-and-LX-reuse is enabled and the reusable-ASN bit 
+        /* For PT-ss only, generate a special operation exception
+           if ASN-and-LX-reuse is enabled and the reusable-ASN bit
            in the ASTE is one */
         if (pti_instruction == 0 && ASN_AND_LX_REUSE_ENABLED(regs)
             && (aste[1] & ASTE1_RA) != 0)
@@ -3537,8 +3650,12 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         /* For PTI-ss only, generate an ASTE instance exception
            if the ASTEIN in bits 0-31 of the R1 register does
            not equal the ASTEIN in the ASTE*/
-        if (pti_instruction && aste[11] != regs->GR_H(r1)) 
+        if (pti_instruction && aste[11] != regs->GR_H(r1))
         {
+            /* Set bit 2 of the exception access identification
+               to indicate that the program check occurred
+               during PASN translation in a PTI instruction */
+            regs->excarid = 0x20;
             ARCH_DEP(program_interrupt) (regs, PGM_ASTE_INSTANCE_EXCEPTION);
         } /* end if (PT && ASTE11_ASTEIN != GR_H(r1)) */
 
@@ -3610,6 +3727,9 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         )
         ON_IC_PER_SB(regs);
 #endif /*defined(FEATURE_PER)*/
+
+    /* Update the breaking event address register */
+    UPDATE_BEAR_A(regs);
 
     /* Replace PSW amode, instruction address, and problem state bit */
     regs->psw.amode = amode;
@@ -3691,6 +3811,7 @@ int     r1, r2;                         /* Values of R fields        */
     {
         ARCH_DEP(operation_exception)(inst,regs);
     }
+
     RRE(inst, regs, r1, r2);
     ARCH_DEP(program_transfer_proc) (regs, r1, r2, 1);
 
@@ -4144,7 +4265,7 @@ BYTE    storkey;                        /* Storage key               */
 /* B219 SAC   - Set Address Space Control                        [S] */
 /* B279 SACF  - Set Address Space Control Fast                   [S] */
 /*-------------------------------------------------------------------*/
-DEF_INST(set_address_space_control_x)
+DEF_INST(set_address_space_control)
 {
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
@@ -4154,7 +4275,9 @@ int     ssevent = 0;                    /* 1=space switch event      */
 
     S(inst, regs, b2, effective_addr2);
 
-    if(inst[1] == 0x19)
+#if defined(FEATURE_SET_ADDRESS_SPACE_CONTROL_FAST)
+    if(inst[1] == 0x19) // SAC only
+#endif /*defined(FEATURE_SET_ADDRESS_SPACE_CONTROL_FAST)*/
     {
         /* Perform serialization and checkpoint-synchronization */
         PERFORM_SERIALIZATION (regs);
@@ -4249,7 +4372,9 @@ int     ssevent = 0;                    /* 1=space switch event      */
     if (ssevent)
         ARCH_DEP(program_interrupt) (regs, PGM_SPACE_SWITCH_EVENT);
 
-    if(inst[1] == 0x19)
+#if defined(FEATURE_SET_ADDRESS_SPACE_CONTROL_FAST)
+    if(inst[1] == 0x19) // SAC only
+#endif /*defined(FEATURE_SET_ADDRESS_SPACE_CONTROL_FAST)*/
     {
         /* Perform serialization and checkpoint-synchronization */
         PERFORM_SERIALIZATION (regs);
@@ -4267,7 +4392,6 @@ DEF_INST(set_clock)
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 U64     dreg;                           /* Clock value               */
-int     cpu;
 
     S(inst, regs, b2, effective_addr2);
 
@@ -4285,27 +4409,25 @@ int     cpu;
     /* Obtain the TOD clock update lock */
     obtain_lock (&sysblk.todlock);
 
-    /* Compute the new TOD clock offset in hercules clock units */
-    sysblk.todoffset = (dreg >> 8) - sysblk.todclk;
+    /* Ensure tod clock is current */
+    update_tod_clock();
 
-    /* Update the TOD clock of all CPU's in the configuration
-       as we simulate 1 shared TOD clock, and do not support the
-       TOD clock sync check */
-    for (cpu = 0; cpu < MAX_CPU; cpu++)
-    {
-        obtain_lock(&sysblk.cpulock[cpu]);
-        if (IS_CPU_ONLINE(cpu))
-            sysblk.regs[cpu]->todoffset = sysblk.todoffset;
-        release_lock(&sysblk.cpulock[cpu]);
-    }
+    /* Compute the new TOD clock offset in hercules clock units */
+    set_tod_epoch( (dreg >> 8) - tod_clock);
+
+    /* reset the clock comparator pending flag according to
+       the setting of the tod clock */
+    update_tod_clock();
 
     /* Release the TOD clock update lock */
     release_lock (&sysblk.todlock);
 
-//  /*debug*/logmsg("Set TOD clock=%16.16llX\n", dreg);
-
     /* Return condition code zero */
     regs->psw.cc = 0;
+
+    RETURN_INTCHECK(regs);
+
+//  /*debug*/logmsg("Set TOD clock=%16.16" I64_FMT "X\n", dreg);
 
 }
 
@@ -4335,7 +4457,7 @@ U64     dreg;                           /* Clock value               */
     dreg = ARCH_DEP(vfetch8) ( effective_addr2, b2, regs )
                 & 0xFFFFFFFFFFFFF000ULL;
 
-//  /*debug*/logmsg("Set clock comparator=%16.16llX\n", dreg);
+//  /*debug*/logmsg("Set clock comparator=%16.16" I64_FMT "X\n", dreg);
 
     /* Obtain the TOD clock update lock */
     obtain_lock (&sysblk.todlock);
@@ -4345,7 +4467,7 @@ U64     dreg;                           /* Clock value               */
 
     /* reset the clock comparator pending flag according to
        the setting of the tod clock */
-    update_TOD_clock();
+    update_tod_clock();
 
     /* Release the TOD clock update lock */
     release_lock (&sysblk.todlock);
@@ -4407,12 +4529,12 @@ U64     dreg;                           /* Timer value               */
     regs->ptimer = dreg;
 
     /* reset the cpu timer pending flag according to its value */
-    update_TOD_clock();
+    update_tod_clock();
 
     /* Release the TOD clock update lock */
     release_lock (&sysblk.todlock);
 
-//  /*debug*/logmsg("Set CPU timer=%16.16llX\n", dreg);
+//  /*debug*/logmsg("Set CPU timer=%16.16" I64_FMT "X\n", dreg);
 
     RETURN_INTCHECK(regs);
 }
@@ -4551,8 +4673,8 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         if (xcode != 0)
             ARCH_DEP(program_interrupt) (regs, xcode);
 
-        /* For SSAR-ss only, generate a special operation exception 
-           if ASN-and-LX-reuse is enabled and the reusable-ASN bit 
+        /* For SSAR-ss only, generate a special operation exception
+           if ASN-and-LX-reuse is enabled and the reusable-ASN bit
            in the ASTE is one */
         if (ssair_instruction == 0 && ASN_AND_LX_REUSE_ENABLED(regs)
             && (aste[1] & ASTE1_RA) != 0)
@@ -4572,8 +4694,12 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         /* For SSAIR-ss only, generate an ASTE instance exception
            if the ASTEIN in bits 0-31 of the R1 register does
            not equal the ASTEIN in the ASTE */
-        if (ssair_instruction && aste[11] != regs->GR_H(r1)) 
+        if (ssair_instruction && aste[11] != regs->GR_H(r1))
         {
+            /* Set bit 3 of the exception access identification
+               to indicate that the program check occurred
+               during SASN translation in a SSAIR instruction */
+            regs->excarid = 0x10;
             ARCH_DEP(program_interrupt) (regs, PGM_ASTE_INSTANCE_EXCEPTION);
         } /* end if (SSAIR && ASTE11_ASTEIN != GR_H(r1)) */
 
@@ -5107,7 +5233,7 @@ VADR    effective_addr2;                /* Effective address         */
 
     RETURN_INTCHECK(regs);
 
-}
+} /* end DEF_INST(set_system_mask) */
 
 
 /*-------------------------------------------------------------------*/
@@ -5128,25 +5254,31 @@ BYTE    order;                          /* SIGP order code           */
 int     cpu;                            /* cpu number                */
 int     set_arch = 0;                   /* Need to switch mode       */
 #endif /*defined(_900) || defined(FEATURE_ESAME)*/
-static char *ordername[] = {    "Unassigned",
-        /* SIGP_SENSE     */    "Sense",
-        /* SIGP_EXTCALL   */    "External call",
-        /* SIGP_EMERGENCY */    "Emergency signal",
-        /* SIGP_START     */    "Start",
-        /* SIGP_STOP      */    "Stop",
-        /* SIGP_RESTART   */    "Restart",
-        /* SIGP_IPR       */    "Initial program reset",
-        /* SIGP_PR        */    "Program reset",
-        /* SIGP_STOPSTORE */    "Stop and store status",
-        /* SIGP_IMPL      */    "Initial microprogram load",
-        /* SIGP_INITRESET */    "Initial CPU reset",
-        /* SIGP_RESET     */    "CPU reset",
-        /* SIGP_SETPREFIX */    "Set prefix",
-        /* SIGP_STORE     */    "Store status",
-        /* 0x0F           */    "Unassigned",
-        /* 0x10           */    "Unassigned",
-        /* SIGP_STOREX    */    "Store extended status at address",
-        /* SIGP_SETARCH   */    "Set Architecture Mode" };
+int     log_sigp = 0;                   /* Log SIGP instruction flag */
+static char *ordername[] = {
+    /* 0x00                          */  "Unassigned",
+    /* 0x01 SIGP_SENSE               */  "Sense",
+    /* 0x02 SIGP_EXTCALL             */  "External call",
+    /* 0x03 SIGP_EMERGENCY           */  "Emergency signal",
+    /* 0x04 SIGP_START               */  "Start",
+    /* 0x05 SIGP_STOP                */  "Stop",
+    /* 0x06 SIGP_RESTART             */  "Restart",
+    /* 0x07 SIGP_IPR                 */  "Initial program reset",
+    /* 0x08 SIGP_PR                  */  "Program reset",
+    /* 0x09 SIGP_STOPSTORE           */  "Stop and store status",
+    /* 0x0A SIGP_IMPL                */  "Initial microprogram load",
+    /* 0x0B SIGP_INITRESET           */  "Initial CPU reset",
+    /* 0x0C SIGP_RESET               */  "CPU reset",
+    /* 0x0D SIGP_SETPREFIX           */  "Set prefix",
+    /* 0x0E SIGP_STORE               */  "Store status",
+    /* 0x0F                          */  "Unassigned",
+    /* 0x10                          */  "Unassigned",
+    /* 0x11 SIGP_STOREX              */  "Store extended status at address",
+    /* 0x12 SIGP_SETARCH             */  "Set architecture mode",
+    /* 0x13 SIGP_COND_EMERGENCY      */  "Conditional emergency",
+    /* 0x14                          */  "Unassigned",
+    /* 0x15 SIGP_SENSE_RUNNING_STATE */  "Sense running state"
+};
 
     RS(inst, regs, r1, r3, b2, effective_addr2);
 
@@ -5173,22 +5305,31 @@ static char *ordername[] = {    "Unassigned",
         return;
     }
 
+    /* Issuing Sense to an offline CPU that is >= numcpu or
+       HI_CPU is not now considered unusual especially since
+       we have increased the default max CPU number to 8 */
+    if (order == SIGP_SENSE && !IS_CPU_ONLINE(cpad)
+     && cpad >= sysblk.numcpu && cpad >= HI_CPU)
+    {
+        regs->psw.cc = 3;
+        return;
+    }
+
     /* Trace all "unusual" SIGPs... (anything OTHER THAN Sense,
        External Call and Emergency Signal (which are considered
        normal) to ANY cpu, -or- ANY SIGP at all sent to a CPU
        that is configured offline (which is indeed unusual!)) */
     if (order > LOG_SIGPORDER || !IS_CPU_ONLINE(cpad))
-#if !defined(FEATURE_ESAME)
-        logmsg ("CPU%4.4X: SIGP CPU%4.4X %s PARM %8.8X\n",
-                regs->cpuad, cpad,
-                order > MAX_SIGPORDER ? ordername[0] : ordername[order],
+    {
+        log_sigp = 1;
+        logmsg ("CPU%4.4X: SIGP %s (%2.2X) CPU%4.4X, PARM "F_GREG,
+                regs->cpuad,
+                order >= sizeof(ordername) / sizeof(ordername[0]) ?
+                        "Unassigned" : ordername[order],
+                order,
+                cpad,
                 parm);
-#else /*defined(FEATURE_ESAME)*/
-        logmsg ("CPU%4.4X: SIGP CPU%4.4X %s PARM %16.16llX\n",
-                regs->cpuad, cpad,
-                order > MAX_SIGPORDER ? ordername[0] : ordername[order],
-                (long long)parm);
-#endif /*defined(FEATURE_ESAME)*/
+    }
 
     /* [4.9.2.1] Claim the use of the CPU signaling and response
        facility, and return condition code 2 if the facility is
@@ -5197,6 +5338,8 @@ static char *ordername[] = {    "Unassigned",
     if(try_obtain_lock (&sysblk.sigplock))
     {
         regs->psw.cc = 2;
+        if (log_sigp)
+            logmsg (": CC 2\n");
         return;
     }
 
@@ -5216,6 +5359,8 @@ static char *ordername[] = {    "Unassigned",
         release_lock(&sysblk.intlock);
         release_lock(&sysblk.sigplock);
         regs->psw.cc = 3;
+        if (log_sigp)
+            logmsg (": CC 3\n");
         return;
     }
 
@@ -5231,21 +5376,33 @@ static char *ordername[] = {    "Unassigned",
        && order != SIGP_IPR
 #endif /*defined(FEATURE_S370_CHANNEL)*/
        && order != SIGP_INITRESET)
-       && (tregs->cpustate == CPUSTATE_STOPPING
+       && (tregs) && (tregs->cpustate == CPUSTATE_STOPPING
         || IS_IC_RESTART(tregs)))
     {
         release_lock(&sysblk.intlock);
         release_lock(&sysblk.sigplock);
         regs->psw.cc = 2;
+        if (log_sigp)
+            logmsg (": CC 2\n");
         return;
     }
 
-    /* If the CPU thread is still starting, ie CPU is still performing
-       the IML process then reflect an operator intervening status
-       to the caller */
-    if (IS_CPU_ONLINE(cpad) && tregs->cpustate == CPUSTATE_STARTING)
+    /* The operator-intervening condition, when present, can be indicated
+       in response to all orders, and is indicated in response to sense if
+       it precludes the acceptance of any of the installed orders (which
+       is always true in our case), but cannot arise as a result of a SIGP
+       instruction executed by a CPU addressing itself.
+    */
+    if (1
+        &&  order != SIGP_SENSE     // if this isn't a sense,
+        &&  cpad != regs->cpuad     // and we're not addressing ourselves,
+        &&  (tregs) && tregs->opinterv         // and operator intervening condition...
+    )
+    {
+        // ...then we cannot proceed
         status |= SIGP_STATUS_OPERATOR_INTERVENING;
-    else
+    }
+    else /* (order == SIGP_SENSE || cpad == regs->cpuad || ((tregs) && !tregs->opinterv)) */
         /* Process signal according to order code */
         switch (order)
         {
@@ -5261,6 +5418,10 @@ static char *ordername[] = {    "Unassigned",
             /* Test for checkstop state */
             if(tregs->checkstop)
                 status |= SIGP_STATUS_CHECK_STOP;
+
+            /* Test for operator intervening state */
+            if(cpad != regs->cpuad && tregs->opinterv)
+                status |= SIGP_STATUS_OPERATOR_INTERVENING;
 
             break;
 
@@ -5285,6 +5446,50 @@ static char *ordername[] = {    "Unassigned",
             tregs->extccpu = regs->cpuad;
 
             break;
+
+#if defined(_900) || defined(FEATURE_ESAME)
+
+        case SIGP_COND_EMERGENCY:
+
+            /* Test for checkstop state */
+            if(tregs->checkstop)
+                status |= SIGP_STATUS_CHECK_STOP;
+            else
+            {
+                U16 check_asn = (parm & 0xFFFF);
+
+                if (0
+
+                    /* PSW disabled for external interruptions,
+                       I/O interruptions, or both */
+                    || (!(tregs->psw.sysmask & PSW_EXTMASK) ||
+                        !(tregs->psw.sysmask & PSW_IOMASK))
+
+                    /* CPU in wait state and the PSW instruction
+                       address not zero */
+                    || ( WAITSTATE( &tregs->psw ) && tregs->psw.IA )
+
+                    /* CPU not in wait state and check_asn value
+                       equals an ASN of the CPU (primary, secondary
+                       or both) -- regardless of the setting of PSW
+                       bits 16-17 */
+                    || (1
+                        && !WAITSTATE( &tregs->psw )
+                        && (check_asn == tregs->CR_LHL(3) ||
+                            check_asn == tregs->CR_LHL(4))
+                    )
+                )
+                {
+                    /* Raise an emergency signal interrupt pending condition */
+                    tregs->emercpu[regs->cpuad] = 1;
+                    ON_IC_EMERSIG(tregs);
+                }
+                else
+                    status |= SIGP_STATUS_INCORRECT_STATE;
+            }
+            break;
+
+#endif /* defined(_900) || defined(FEATURE_ESAME) */
 
         case SIGP_EMERGENCY:
             /* Test for checkstop state */
@@ -5494,17 +5699,66 @@ static char *ordername[] = {    "Unassigned",
 
             break;
 
+#if defined(_390)
         case SIGP_STOREX:
+        {
+#if !defined(FEATURE_BASIC_FP_EXTENSIONS)
+            status |= SIGP_STATUS_INVALID_ORDER;
+#else /* defined(FEATURE_BASIC_FP_EXTENSIONS) */
+            RADR  absx;     /* abs addr of extended save area */
+
             /* Test for checkstop state */
             if(tregs->checkstop)
-            {
                 status |= SIGP_STATUS_CHECK_STOP;
-                break;
+
+            /* Check if CPU is not stopped */
+            if (tregs->cpustate != CPUSTATE_STOPPED)
+                status |= SIGP_STATUS_INCORRECT_STATE;
+
+            /* Only proceed if no conditions exist to preclude
+               the acceptance of this signal-processor order */
+            if (!status)
+            {
+                /* Obtain status address from parameter register bits 1-22 */
+                abs = parm & 0x7FFFFE00;
+
+                /* Exit with status bit 23 set if status address invalid */
+                if (abs > regs->mainlim)
+                    status |= SIGP_STATUS_INVALID_PARAMETER;
+                else
+                {
+                    /* Fetch the address of the extended save area */
+                    absx = ARCH_DEP(fetch_fullword_absolute) (abs+212, tregs);
+                    absx &= 0x7FFFF000;
+
+                    /* Invalid parameter if extended save area address invalid */
+                    if (absx > regs->mainlim)
+                        status |= SIGP_STATUS_INVALID_PARAMETER;
+                    else
+                    {   int i;  // (work)
+
+                        /* Store status at specified main storage address */
+                        ARCH_DEP(store_status) (tregs, abs );
+
+                        /* Store extended status at specified main storage address */
+                        for (i = 0; i < 32; i++)
+                            STORE_FW( tregs->mainstor + absx + (i*4), tregs->fpr[i] );
+                        STORE_FW( tregs->mainstor + absx + 128, tregs->fpc );
+                        STORE_FW( tregs->mainstor + absx + 132, 0 );
+                        STORE_FW( tregs->mainstor + absx + 136, 0 );
+                        STORE_FW( tregs->mainstor + absx + 140, 0 );
+
+                        /* Perform serialization and checkpoint-sync on target CPU */
+//                      perform_serialization (tregs);
+//                      perform_chkpt_sync (tregs);
+                    }
+                }
             }
 
-            /*INCOMPLETE*/
-
-            break;
+#endif /* defined(FEATURE_BASIC_FP_EXTENSIONS) */
+        }
+        break;
+#endif /* defined(_390) */
 
 #if defined(_900) || defined(FEATURE_ESAME) || defined(FEATURE_HERCULES_DIAGCALLS)
         case SIGP_SETARCH:
@@ -5522,36 +5776,109 @@ static char *ordername[] = {    "Unassigned",
                  && sysblk.regs[cpu]->cpuad != regs->cpuad)
                     status |= SIGP_STATUS_INCORRECT_STATE;
 
-            if(!status)
+            if(!status) {
                 switch(parm & 0xFF) {
-                    case 0:
+
+#if defined(_900) || defined(FEATURE_ESAME)
+
+                    case 0:  // from: --  z/Arch   --to-->   390
+
                         if(sysblk.arch_mode == ARCH_390)
-                            status = SIGP_STATUS_INVALID_ORDER;
-                        sysblk.arch_mode = ARCH_390;
-                        regs->psw.states |= BIT(PSW_NOTESAME_BIT);
-                        regs->PX_L &= 0x7FFFE000;
-                        set_arch = 1;
+                            status = SIGP_STATUS_INVALID_PARAMETER;
+                        else
+                        {
+                            sysblk.arch_mode = ARCH_390;
+                            set_arch = 1;
+
+                            regs->captured_zpsw = regs->psw;
+                            regs->psw.states |= BIT(PSW_NOTESAME_BIT);
+                            regs->PX_L &= 0x7FFFE000;
+
+                            for (cpu = 0; cpu < MAX_CPU; cpu++)
+                            {
+                                if (IS_CPU_ONLINE(cpu) &&
+                                    sysblk.regs[cpu]->cpuad != regs->cpuad)
+                                {
+                                    sysblk.regs[cpu]->captured_zpsw = sysblk.regs[cpu]->psw;
+                                    sysblk.regs[cpu]->psw.states |= BIT(PSW_NOTESAME_BIT);
+                                    sysblk.regs[cpu]->PX_L &= 0x7FFFE000;
+                                }
+                            }
+                        }
                         break;
-                    case 1:
+
+                    case 1:   // from: --  390   --to-->   z/Arch
+
                         if(sysblk.arch_mode == ARCH_900)
-                            status = SIGP_STATUS_INVALID_ORDER;
-                        sysblk.arch_mode = ARCH_900;
-                        regs->psw.states &= ~BIT(PSW_NOTESAME_BIT);
-                        regs->psw.IA_H = 0;
-                        regs->PX_G &= 0x7FFFE000;
-                        set_arch = 1;
+                            status = SIGP_STATUS_INVALID_PARAMETER;
+                        else
+                        {
+                            sysblk.arch_mode = ARCH_900;
+                            set_arch = 1;
+
+                            regs->psw.states &= ~BIT(PSW_NOTESAME_BIT);
+                            regs->psw.IA_H = 0;
+                            regs->PX_G &= 0x7FFFE000;
+
+                            for (cpu = 0; cpu < MAX_CPU; cpu++)
+                            {
+                                if (IS_CPU_ONLINE(cpu) &&
+                                    sysblk.regs[cpu]->cpuad != regs->cpuad)
+                                {
+                                    sysblk.regs[cpu]->psw.states &= ~BIT(PSW_NOTESAME_BIT);
+                                    sysblk.regs[cpu]->psw.IA_H = 0;
+                                    sysblk.regs[cpu]->PX_G &= 0x7FFFE000;
+                                }
+                            }
+                        }
                         break;
+
+                    case 2:    //  restore CAPTURED z/Arch PSW...
+
+                        if(sysblk.arch_mode == ARCH_900)
+                            status = SIGP_STATUS_INVALID_PARAMETER;
+                        else
+                        {
+                            sysblk.arch_mode = ARCH_900;
+                            set_arch = 1;
+
+                            regs->psw.states &= ~BIT(PSW_NOTESAME_BIT);
+                            regs->psw.IA_H = 0;
+                            regs->PX_G &= 0x7FFFE000;
+
+                            for (cpu = 0; cpu < MAX_CPU; cpu++)
+                            {
+                                if (IS_CPU_ONLINE(cpu) &&
+                                    sysblk.regs[cpu]->cpuad != regs->cpuad)
+                                {
+                                    sysblk.regs[cpu]->psw = sysblk.regs[cpu]->captured_zpsw;
+                                    sysblk.regs[cpu]->PX_G &= 0x7FFFE000;
+                                }
+                            }
+                        }
+                        break;
+
+#endif // defined(_900) || defined(FEATURE_ESAME)
+
 #if defined(FEATURE_HERCULES_DIAGCALLS)
+
                     case 37:
+
                         if(sysblk.arch_mode == ARCH_370)
-                            status = SIGP_STATUS_INVALID_ORDER;
-                        sysblk.arch_mode = ARCH_370;
-                        set_arch = 1;
+                            status = SIGP_STATUS_INVALID_PARAMETER;
+                        else
+                        {
+                            sysblk.arch_mode = ARCH_370;
+                            set_arch = 1;
+                        }
                         break;
+
 #endif /*defined(FEATURE_HERCULES_DIAGCALLS)*/
+
                     default:
                         status |= SIGP_STATUS_INVALID_PARAMETER;
-                }
+                } /* end switch(parm & 0xFF) */
+            } /* end if(!status) */
 
             sysblk.dummyregs.arch_mode = sysblk.arch_mode;
 #if defined(OPTION_FISHIO)
@@ -5568,7 +5895,18 @@ static char *ordername[] = {    "Unassigned",
             PERFORM_CHKPT_SYNC (regs);
 
             break;
-#endif /*defined(_900) || defined(FEATURE_ESAME)*/
+#endif /*defined(_900) || defined(FEATURE_ESAME) || defined(FEATURE_HERCULES_DIAGCALLS)*/
+
+#if defined(FEATURE_SENSE_RUNNING_STATUS)
+
+        case SIGP_SENSE_RUNNING_STATE:
+
+            if (tregs->cpustate != CPUSTATE_STARTED)
+                status = SIGP_STATUS_NOT_RUNNING;
+
+            break;
+
+#endif /*defined(FEATURE_SENSE_RUNNING_STATUS)*/
 
         default:
             status = SIGP_STATUS_INVALID_ORDER;
@@ -5593,6 +5931,15 @@ static char *ordername[] = {    "Unassigned",
     }
     else
         regs->psw.cc = 0;
+
+    /* Log the results if we're interested in this particular SIGP */
+    if (log_sigp)
+    {
+        if (regs->psw.cc == 0)
+            logmsg (": CC 0\n");
+        else
+            logmsg (": CC 1 STATUS %8.8X\n", (U32)status);
+    }
 
     /* Perform serialization after completing operation */
     PERFORM_SERIALIZATION (regs);
@@ -5641,7 +5988,7 @@ U64     dreg;                           /* Clock value               */
 
     /* reset the clock comparator pending flag according to
        the setting of the tod clock */
-    if( (sysblk.todclk + regs->todoffset) > dreg )
+    if( TOD_CLOCK(regs) > dreg )
     {
         ON_IC_CLKC(regs);
 
@@ -5652,6 +5999,7 @@ U64     dreg;                           /* Clock value               */
         {
             regs->psw.IA -= 4;
             release_lock (&sysblk.intlock);
+            VALIDATE_AIA(regs);
             RETURN_INTCHECK(regs);
         }
     }
@@ -5667,7 +6015,7 @@ U64     dreg;                           /* Clock value               */
     /* Store clock comparator value at operand location */
     ARCH_DEP(vstore8) ( dreg, effective_addr2, b2, regs );
 
-//  /*debug*/logmsg("Store clock comparator=%16.16llX\n", dreg);
+//  /*debug*/logmsg("Store clock comparator=%16.16" I64_FMT "X\n", dreg);
 
     RETURN_INTCHECK(regs);
 }
@@ -5769,9 +6117,17 @@ U64     dreg;                           /* Double word workarea      */
     /* Load the CPU ID */
     dreg = sysblk.cpuid;
 
+#if !defined(FEATURE_CPUID_FORMAT_1)
     /* If first digit of serial is zero, insert processor id */
     if ((dreg & 0x00F0000000000000ULL) == 0)
         dreg |= (U64)(regs->cpuad & 0x0F) << 52;
+#else
+    /* The first two digits from the CPUID are now the LP identifier */
+    /* The version code is zero, and we are partition 00  */
+    dreg &= 0x00FFFFFFFFFF0000ULL;
+    /* Indicate format 1 CPUID */
+    dreg |= 0x8000ULL;
+#endif
 
     /* Store CPU ID at operand address */
     ARCH_DEP(vstore8) ( dreg, effective_addr2, b2, regs );
@@ -5825,6 +6181,7 @@ U64     dreg;                           /* Double word workarea      */
             release_lock (&sysblk.intlock);
 
             regs->psw.IA -= 4;
+            VALIDATE_AIA(regs);
             RETURN_INTCHECK(regs);
         }
     }
@@ -5837,7 +6194,7 @@ U64     dreg;                           /* Double word workarea      */
     /* Store CPU timer value at operand location */
     ARCH_DEP(vstore8) ( dreg, effective_addr2, b2, regs );
 
-//  /*debug*/logmsg("Store CPU timer=%16.16llX\n", dreg);
+//  /*debug*/logmsg("Store CPU timer=%16.16" I64_FMT "X\n", dreg);
 
     RETURN_INTCHECK(regs);
 }
@@ -5866,6 +6223,26 @@ VADR    effective_addr2;                /* Effective address         */
 
 
 #ifdef FEATURE_STORE_SYSTEM_INFORMATION
+
+#if !defined(_STSI_CAPABILITY)
+#define _STSI_CAPABILITY
+static inline U32 stsi_capability (REGS *regs)
+{
+U64               dreg;                /* work doubleword            */
+struct rusage     usage;               /* RMF type data              */
+
+#define SUSEC_PER_MIPS 48              /* One MIPS eq 48 SU          */
+
+        getrusage(RUSAGE_SELF,&usage);
+        dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec);
+        dreg = (dreg * 1000000) + (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec);
+        dreg = regs->instcount / (dreg ? dreg : 1);
+        dreg *= SUSEC_PER_MIPS;
+        return 0x800000 / (dreg ? dreg : 1);
+
+} /* end function stsi_capability */
+#endif /*!defined(_STSI_CAPABILITY)*/
+
 /*-------------------------------------------------------------------*/
 /* B27D STSI  - Store System Information                         [S] */
 /*-------------------------------------------------------------------*/
@@ -5884,18 +6261,33 @@ SYSIB222  *sysib222;                    /* LPAR CPUs                 */
 SYSIB322  *sysib322;                    /* VM CPUs                   */
 SYSIBVMDB *sysib322;                    /* VM description block      */
 #endif
+
+                          /*  "H    R    C"  */
 static BYTE manufact[16] = { 0xC8,0xD9,0xC3,0x40,0x40,0x40,0x40,0x40,
                              0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40 };
-static BYTE plant[4] = { 0xE9,0xE9,0x40,0x40 };
-static BYTE hexebcdic[16] = { 0xF0,0xF1,0xF2,0xF3,0xF4,0xF5,0xF6,0xF7,
-                              0xF8,0xF9,0xC1,0xC2,0xC3,0xC4,0xC5,0xC6 };
-static BYTE model[8] = { 0xC5,0xD4,0xE4,0xD3,0xC1,0xE3,0xD6,0xD9 };
-static BYTE mpfact[32] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
-                           0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
-                           0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
-                           0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B };
 
-#define STSI_CAPACITY   2
+                      /*  "Z    Z"  */
+static BYTE plant[4] = { 0xE9,0xE9,0x40,0x40 };
+
+                           /*  "0    1    2    3    4    5    6    7" */
+static BYTE hexebcdic[16] = { 0xF0,0xF1,0xF2,0xF3,0xF4,0xF5,0xF6,0xF7,
+                           /*  "8    9    A    B    C    D    E    F" */
+                              0xF8,0xF9,0xC1,0xC2,0xC3,0xC4,0xC5,0xC6 };
+
+                      /*  "E    M    U    L    A    T    O    R" */
+static BYTE model[8] = { 0xC5,0xD4,0xE4,0xD3,0xC1,0xE3,0xD6,0xD9 };
+
+                        /* x'004B' = 75 = 75% for each subsequent cpu */
+static BYTE mpfact[32*2] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
+                             0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
+                             0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
+                             0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
+                             0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
+                             0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
+                             0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
+                             0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B };
+
+#define STSI_CAPABILITY   stsi_capability(regs)
 
     S(inst, regs, b2, effective_addr2);
 
@@ -5996,7 +6388,7 @@ static BYTE mpfact[32] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
             case 2:
                 sysib122 = (SYSIB122*)(m);
                 memset(sysib122, 0x00, sizeof(SYSIB122));
-                STORE_FW(sysib122->cap, STSI_CAPACITY);
+                STORE_FW(sysib122->cap, STSI_CAPABILITY);
                 STORE_HW(sysib122->totcpu, MAX_CPU);
                 STORE_HW(sysib122->confcpu, sysblk.cpus);
                 STORE_HW(sysib122->sbcpu, MAX_CPU - sysblk.cpus);
@@ -6057,7 +6449,7 @@ VADR    effective_addr1;                /* Effective address         */
 
     RETURN_INTCHECK(regs);
 
-}
+} /* end DEF_INST(store_then_and_system_mask) */
 
 
 /*-------------------------------------------------------------------*/
@@ -6111,7 +6503,8 @@ VADR    effective_addr1;                /* Effective address         */
 
     RETURN_INTCHECK(regs);
 
-}
+} /* end DEF_INST(store_then_or_system_mask) */
+
 
 /*-------------------------------------------------------------------*/
 /* B246 STURA - Store Using Real Address                       [RRE] */
@@ -6144,7 +6537,7 @@ RADR    n;                              /* Unsigned work             */
     }
 #endif /*defined(FEATURE_PER2)*/
 
-}
+} /* end DEF_INST(store_using_real_address) */
 
 
 #if defined(FEATURE_ACCESS_REGISTERS)

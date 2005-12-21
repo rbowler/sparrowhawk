@@ -1,7 +1,7 @@
-/* BLDCFG.C     (c) Copyright Roger Bowler, 1999-2004                */
+/* BLDCFG.C     (c) Copyright Roger Bowler, 1999-2005                */
 /*              ESA/390 Configuration Builder                        */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
 
 /*-------------------------------------------------------------------*/
 /* This module builds the configuration tables for the Hercules      */
@@ -20,8 +20,18 @@
 /*      PANRATE parameter by Reed H. Petty                           */
 /*      CPUPRIO parameter by Jan Jaeger                              */
 /*      HERCPRIO, TODPRIO, DEVPRIO parameters by Mark L. Gaubatz     */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 /*-------------------------------------------------------------------*/
+
+#include "hstdinc.h"
+
+#if !defined(_BLDCFG_C_)
+#define _BLDCFG_C_
+#endif
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
 
 #include "hercules.h"
 #include "devtype.h"
@@ -29,9 +39,9 @@
 #include "httpmisc.h"
 #include "hostinfo.h"
 
-#if defined(OPTION_LPARNAME)
-#include <ctype.h>
-#endif /*defined(OPTION_LPARNAME)*/
+#if defined(OPTION_FISHIO)
+#include "w32chan.h"
+#endif // defined(OPTION_FISHIO)
 
 #if !defined(_GEN_ARCH)
 
@@ -47,34 +57,12 @@
  #undef   _GEN_ARCH
 #endif
 
-#if defined(OPTION_FISHIO)
-#include "w32chan.h"
-#endif // defined(OPTION_FISHIO)
 
 typedef struct _DEVARRAY
 {
     U16 cuu1;
     U16 cuu2;
 } DEVARRAY;
-
-
-/*-------------------------------------------------------------------*/
-/* Internal macro definitions                                        */
-/*-------------------------------------------------------------------*/
-
-/*-------------------------------------------------------------------*/
-/* Global data areas                                                 */
-/*-------------------------------------------------------------------*/
-
-/*-------------------------------------------------------------------*/
-/* External GUI control                                              */
-/*-------------------------------------------------------------------*/
-/* Now defined in hsys.c */
-#if 0
- #ifdef EXTERNALGUI
- int extgui = 0;             /* 1=external gui active                */
- #endif /*EXTERNALGUI*/
-#endif
 
 /*-------------------------------------------------------------------*/
 /* Static data areas                                                 */
@@ -109,7 +97,7 @@ static char *addargv[MAX_ARGS];         /* Additional argument array */
 /* pargc        Pointer to number of arguments integer result.       */
 /* Returns number of arguments found. (same value as at *pargc)      */
 /*-------------------------------------------------------------------*/
-int parse_args (char* p, int maxargc, char** pargv, int* pargc)
+DLL_EXPORT int parse_args (char* p, int maxargc, char** pargv, int* pargc)
 {
     for (*pargc = 0; *pargc < MAX_ARGS; ++*pargc) addargv[*pargc] = NULL;
 
@@ -144,6 +132,8 @@ void delayed_exit (int exit_code)
     /* Delay exiting is to give the system
      * time to display the error message. */
     usleep(100000);
+    hdl_shut();
+    usleep(100000);
     exit(exit_code);
 }
 
@@ -154,9 +144,8 @@ static void config_storage(int mainsize, int xpndsize)
 int off;
 
     /* Obtain main storage */
-    sysblk.mainsize = mainsize * 1024 * 1024;
+    sysblk.mainsize = mainsize * 1024 * 1024L;
 
-#if defined(NO_CYGWIN_MALLOC_BUG) || !defined(WIN32)
     sysblk.mainstor = calloc((size_t)(sysblk.mainsize + 8192), 1);
 
     if (sysblk.mainstor != NULL)
@@ -165,72 +154,6 @@ int off;
         sysblk.mainstor = malloc((size_t)(sysblk.mainsize + 8192));
 
     if (sysblk.mainstor == NULL)
-#else
-    /*     Windows "double memory consumption" bug fix
-           (which should work on all other systems too)
-
-    =============================================================
-    From: golden_dog98 [golden_dog98@yahoo.com]
-    Sent: Monday, July 07, 2003 1:08 AM
-    To: hercules-390@yahoogroups.com
-    Subject: [hercules-390] To "Fish" (was: "Re: How can I use all my
-    physical memory")
-
-    This problem is caused by how CYGWIN allocates memory under Windows
-    2000.  In malloc.cc, malloc() calls sYSMALLOc() to allocate chunks of
-    memory.  sYSMALLOc calls mmap() with flags MAP_PRIVATE and
-    MAP_ANONYMOUS.  mmap() calls mmap64() with the same flags.  Around
-    line 540 of mmap.cc, mmap64() checks to see if MAP_PRIVATE is set and
-    if has_working_copy_on_write() is true (which it is for Win2000) and
-    sets access to FILE_MAP_COPY.  mmap64() then calls
-    fhandler_disk_file::mmap() in mmap.cc.  Because access is set to
-    FILE_MAP_COPY, protect is set to PAGE_WRITECOPY when CreateFileMapping
-    () is called.  Then MapViewOfFileEx() is called with access set to
-    FILE_MAP_COPY.  This allocates the storage with "copy on write
-    acess", which essentially doubles the storage usage.  See
-    http://msdn.microsoft.com/library/default.asp?url=/library/en-
-    us/fileio/base/mapviewoffileex.asp.
-
-    I changed line 1299 of Hercules' config.c to fix the problem:
-
-        sysblk.mainstor = mmap(0, sysblk.mainsize + 8192, PROT_READ |
-    PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
-
-    I also had to include at the top of config.c:
-
-    #include <sys/mmap.h>
-
-    I tested this with a 512MB system and all went well....
-
-    Mark D.
-    =============================================================
-    */
-#if !defined(MAP_ANONYMOUS)    /* (see NOTE just below) */
-    /*
-     ***   NOTE: we can't use the "HAVE_MMAP" test above    ***
-     ***   because of a "Unix-ism" bug in autoconf that     ***
-     ***   causes mmap tests to always fail on Windows      ***
-     ***   systems as explained in the below Cygwin post    ***
-     ***   mailing list post:
-
-        http://www.cygwin.com/ml/cygwin/2002-04/msg00412.html
-    */
-    sysblk.mainstor = calloc((size_t)(sysblk.mainsize + 8192), 1);
-
-    if (sysblk.mainstor != NULL)
-        sysblk.main_clear = 1;
-    else
-        sysblk.mainstor = malloc((size_t)(sysblk.mainsize + 8192));
-
-/* ISW20030828-1 : Check for MALLOC result */
-    if (sysblk.mainstor == NULL)
-#else /* !defined(MAP_ANONYMOUS) */
-    sysblk.mainstor = mmap(0, sysblk.mainsize + 8192,
-        PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
-/* ISW20030828-1 : Check for MMAP result */
-    if (sysblk.mainstor == ((void *)-1))
-#endif /* !defined(MAP_ANONYMOUS) */
-#endif /* NO_CYGWIN_MALLOC_BUG */
     {
         fprintf(stderr, _("HHCCF031S Cannot obtain %dMB main storage: %s\n"),
                 mainsize, strerror(errno));
@@ -309,9 +232,11 @@ int     i;                              /* Array subscript           */
 int     c;                              /* Character work area       */
 int     stmtlen;                        /* Statement length          */
 int     lstarted;                       /* Indicate if non-whitespace*/
-char   *cnfline;
-char    *buf1;
                                         /* has been seen yet in line */
+char   *cnfline;                        /* Pointer to copy of buffer */
+#if defined(OPTION_CONFIG_SYMBOLS)
+char   *buf1;                           /* Pointer to resolved buffer*/
+#endif /*defined(OPTION_CONFIG_SYMBOLS)*/
 
     while (1)
     {
@@ -382,7 +307,7 @@ char    *buf1;
     buf1=resolve_symbol_string(buf);
     if(buf1!=NULL)
     {
-        if(strlen(buf1)>sizeof(buf))
+        if(strlen(buf1)>=sizeof(buf))
         {
             fprintf(stderr, _("HHCCF002S File %s line %d is too long\n"),
                 fname, stmt);
@@ -391,7 +316,7 @@ char    *buf1;
         }
         strcpy(buf,buf1);
     }
-#endif
+#endif /*defined(OPTION_CONFIG_SYMBOLS)*/
 
         parse_args (buf, MAX_ARGS, addargv, &addargc);
 #if defined(OPTION_DYNAMIC_LOAD)
@@ -582,7 +507,7 @@ static size_t parse_devnums(const char *spec,DEVARRAY **da)
     return(gcount);
 }
 
-char *config_cnslport = "3270";
+DLL_EXPORT char *config_cnslport = "3270";
 /*-------------------------------------------------------------------*/
 /* Function to build system configuration                            */
 /*-------------------------------------------------------------------*/
@@ -605,6 +530,7 @@ char   *sloadparm;                      /* -> IPL load parameter     */
 char   *ssysepoch;                      /* -> System epoch           */
 char   *stzoffset;                      /* -> System timezone offset */
 char   *sdiag8cmd;                      /* -> Allow diagnose 8       */
+char   *sshcmdopt;                      /* -> SHCMDOPT shell cmd opt */
 char   *stoddrag;                       /* -> TOD clock drag factor  */
 char   *sostailor;                      /* -> OS to tailor system to */
 char   *spanrate;                       /* -> Panel refresh rate     */
@@ -615,7 +541,7 @@ char   *scpuprio;                       /* -> CPU thread priority    */
 char   *sdevprio;                       /* -> Device thread priority */
 char   *spgmprdos;                      /* -> Program product OS OK  */
 #if defined(_FEATURE_ASN_AND_LX_REUSE)
-char   *sasnandlxreuse;         /* -> ASNLXREUSE Optional    */
+char   *sasnandlxreuse;                 /* -> ASNLXREUSE Optional    */
 #endif
 #if defined(_FEATURE_ECPSVM)
 char   *secpsvmlevel;                   /* -> ECPS:VM Keyword        */
@@ -627,6 +553,7 @@ char   *sshrdport;                      /* -> Shared device port nbr */
 #endif /*defined(OPTION_SHARED_DEVICES)*/
 #ifdef OPTION_IODELAY_KLUDGE
 char   *siodelay;                       /* -> I/O delay value        */
+char   *siodelay_warn = NULL;           /* -> I/O delay warning      */
 #endif /*OPTION_IODELAY_KLUDGE*/
 #if defined(OPTION_PTTRACE)
 char   *sptt;                           /* Pthread trace table size  */
@@ -635,7 +562,10 @@ char   *scckd;                          /* -> CCKD parameters        */
 #if defined( OPTION_SCSI_TAPE )
 char   *sauto_scsi_mount;               /* Auto SCSI tape mounts     */
 #endif /* defined( OPTION_SCSI_TAPE ) */
-BYTE    version = 0x00;                 /* CPU version code          */
+#if defined( HTTP_SERVER_CONNECT_KLUDGE )
+char   *shttp_server_kludge_msecs;
+#endif // defined( HTTP_SERVER_CONNECT_KLUDGE )
+U16     version = 0x00;                 /* CPU version code          */
 int     dfltver = 1;                    /* Default version code      */
 U32     serial;                         /* CPU serial number         */
 U16     model;                          /* CPU model number          */
@@ -650,7 +580,8 @@ int     archmode;                       /* Architectural mode        */
 S32     sysepoch;                       /* System epoch year         */
 S32     tzoffset;                       /* System timezone offset    */
 int     diag8cmd;                       /* Allow diagnose 8 commands */
-int     toddrag;                        /* TOD clock drag factor     */
+BYTE    shcmdopt;                       /* Shell cmd allow option(s) */
+double  toddrag;                        /* TOD clock drag factor     */
 U64     ostailor;                       /* OS to tailor system to    */
 int     panrate;                        /* Panel refresh rate        */
 int     hercprio;                       /* Hercules base priority    */
@@ -658,7 +589,7 @@ int     todprio;                        /* Timer thread priority     */
 int     cpuprio;                        /* CPU thread priority       */
 int     devprio;                        /* Device thread priority    */
 #if defined(_FEATURE_ASN_AND_LX_REUSE)
-int     asnandlxreuse;          /* ASN And LX Reuse option   */
+int     asnandlxreuse;                  /* ASN And LX Reuse option   */
 #endif
 BYTE    pgmprdos;                       /* Program product OS OK     */
 DEVBLK *dev;                            /* -> Device Block           */
@@ -675,6 +606,7 @@ int     ecpsvmlevel;                    /* ECPS:VM declared level    */
 #endif /*defined(_FEATURE_ECPSVM)*/
 #ifdef OPTION_IODELAY_KLUDGE
 int     iodelay=-1;                     /* I/O delay value           */
+int     iodelay_warn = 0;               /* Issue iodelay warning     */
 #endif /*OPTION_IODELAY_KLUDGE*/
 #ifdef OPTION_PTTRACE
 int     ptt = 0;                        /* Pthread trace table size  */
@@ -695,6 +627,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
 char **newargv;
 char **orig_newargv;
 #endif
+BYTE    pathname[MAX_PATH];             /* file path in host format  */
 
 #if !defined(OPTION_CONFIG_SYMBOLS)
     UNREFERENCED(j);
@@ -710,7 +643,8 @@ char **orig_newargv;
 #endif
 
     /* Open the configuration file */
-    fp = fopen (fname, "r");
+    hostpath(pathname, fname, sizeof(pathname));
+    fp = fopen (pathname, "r");
     if (fp == NULL)
     {
         fprintf(stderr, _("HHCCF003S Cannot open file %s: %s\n"),
@@ -728,7 +662,8 @@ char **orig_newargv;
     sysepoch = 1900;
     tzoffset = 0;
     diag8cmd = 0;
-    toddrag = 1;
+    shcmdopt = 0;
+    toddrag = 1.0;
 #if defined(_390)
     archmode = ARCH_390;
 #else
@@ -816,6 +751,7 @@ char **orig_newargv;
         ssysepoch = NULL;
         stzoffset = NULL;
         sdiag8cmd = NULL;
+        sshcmdopt = NULL;
         stoddrag = NULL;
         sostailor = NULL;
         spanrate = NULL;
@@ -849,6 +785,9 @@ char **orig_newargv;
 #if defined( OPTION_SCSI_TAPE )
         sauto_scsi_mount = NULL;
 #endif /* defined( OPTION_SCSI_TAPE ) */
+#if defined( HTTP_SERVER_CONNECT_KLUDGE )
+        shttp_server_kludge_msecs = NULL;
+#endif // defined( HTTP_SERVER_CONNECT_KLUDGE )
 
         /* Check for old-style CPU statement */
         if (scount == 0 && addargc == 5 && strlen(keyword) == 6
@@ -925,12 +864,14 @@ char **orig_newargv;
             {
                 sdiag8cmd = operand;
             }
-#ifdef OPTION_TODCLOCK_DRAG_FACTOR
+            else if (strcasecmp (keyword, "SHCMDOPT") == 0)
+            {
+                sshcmdopt = operand;
+            }
             else if (strcasecmp (keyword, "toddrag") == 0)
             {
                 stoddrag = operand;
             }
-#endif /*OPTION_TODCLOCK_DRAG_FACTOR*/
 #ifdef PANEL_REFRESH_RATE
             else if (strcasecmp (keyword, "panrate") == 0)
             {
@@ -987,18 +928,25 @@ char **orig_newargv;
                 fprintf(stderr, _("HHCCF061W Warning in %s line %d: "
                     "ECPS:VM Statement deprecated. Use ECPSVM instead\n"),
                     fname, stmt);
+                addargc=0;
             }
             else if(strcasecmp(keyword, "ecpsvm") == 0)
             {
                 secpsvmlevel=operand;
                 secpsvmlvl=addargv[0];
                 ecpsvmac=addargc;
+                addargc=0;
             }
 #endif /*defined(_FEATURE_ECPSVM)*/
 #ifdef OPTION_IODELAY_KLUDGE
             else if (strcasecmp (keyword, "iodelay") == 0)
             {
                 siodelay = operand;
+                if (addargc > 0)
+                {
+                    siodelay_warn = addargv[0];
+                    addargc--;
+                }
             }
 #endif /*OPTION_IODELAY_KLUDGE*/
 #ifdef OPTION_PTTRACE
@@ -1108,7 +1056,8 @@ char **orig_newargv;
             }
 #endif /*defined(OPTION_HTTP_SERVER)*/
 #if defined(_FEATURE_ASN_AND_LX_REUSE)
-            else if (strcasecmp(keyword,"asn_and_lx_reuse") == 0)
+            else if (strcasecmp(keyword,"asn_and_lx_reuse") == 0
+                     || strcasecmp(keyword,"alrf") == 0)
             {
                 sasnandlxreuse = operand;
             }
@@ -1138,6 +1087,13 @@ char **orig_newargv;
                sauto_scsi_mount = operand;
             }
 #endif /* defined( OPTION_SCSI_TAPE ) */
+
+#if defined( HTTP_SERVER_CONNECT_KLUDGE )
+            else if (strcasecmp (keyword, "HTTP_SERVER_CONNECT_KLUDGE") == 0)
+            {
+               shttp_server_kludge_msecs = operand;
+            }
+#endif // defined( HTTP_SERVER_CONNECT_KLUDGE )
 
             else
             {
@@ -1174,7 +1130,10 @@ char **orig_newargv;
             else
 #endif
 #if defined(_900)
-            if (strcasecmp (sarchmode, arch_name[ARCH_900]) == 0)
+            if (0
+                || strcasecmp (sarchmode, arch_name[ARCH_900]) == 0
+                || strcasecmp (sarchmode, "ESAME") == 0
+            )
             {
                 archmode = ARCH_900;
             }
@@ -1197,7 +1156,8 @@ char **orig_newargv;
         if (sversion != NULL)
         {
             if (strlen(sversion) != 2
-                || sscanf(sversion, "%hhx%c", &version, &c) != 1)
+                || sscanf(sversion, "%hx%c", &version, &c) != 1
+                || version>255)
             {
                 fprintf(stderr, _("HHCCF012S Error in %s line %d: "
                         "%s is not a valid CPU version code\n"),
@@ -1409,11 +1369,7 @@ char **orig_newargv;
         if (ssysepoch != NULL)
         {
             if (strlen(ssysepoch) != 4
-                || sscanf(ssysepoch, "%d%c", &sysepoch, &c) != 1
-                || ((sysepoch != 1900) && (sysepoch != 1928)
-                 && (sysepoch != 1960) && (sysepoch != 1988)
-                 && (sysepoch != 1970)
-                    ))
+                || sscanf(ssysepoch, "%d%c", &sysepoch, &c) != 1)
             {
                 fprintf(stderr, _("HHCCF022S Error in %s line %d: "
                         "%s is not a valid system epoch.\n"
@@ -1454,12 +1410,28 @@ char **orig_newargv;
             }
         }
 
-#ifdef OPTION_TODCLOCK_DRAG_FACTOR
+        /* Parse SHCMDOPT operand */
+        if (sshcmdopt != NULL)
+        {
+            if (strcasecmp (sshcmdopt, "DISABLE") == 0)
+                shcmdopt = SHCMDOPT_DISABLE;
+            else
+            if (strcasecmp (sshcmdopt, "NODIAG8") == 0)
+                shcmdopt = SHCMDOPT_NODIAG8;
+            else
+            {
+                fprintf(stderr, _("HHCCF052S Error in %s line %d: "
+                        "%s: invalid argument\n"),
+                        fname, stmt, sshcmdopt);
+                delayed_exit(1);
+            }
+        }
+
         /* Parse TOD clock drag factor operand */
         if (stoddrag != NULL)
         {
-            if (sscanf(stoddrag, "%u%c", &toddrag, &c) != 1
-                || toddrag < 1 || toddrag > 10000)
+            if (sscanf(stoddrag, "%lf%c", &toddrag, &c) != 1
+                || toddrag < 0.0001 || toddrag > 10000.0)
             {
                 fprintf(stderr, _("HHCCF024S Error in %s line %d: "
                         "Invalid TOD clock drag factor %s\n"),
@@ -1467,7 +1439,6 @@ char **orig_newargv;
                 delayed_exit(1);
             }
         }
-#endif /*OPTION_TODCLOCK_DRAG_FACTOR*/
 
 #ifdef PANEL_REFRESH_RATE
         /* Parse panel refresh rate operand */
@@ -1500,6 +1471,10 @@ char **orig_newargv;
             if (strcasecmp (sostailor, "OS/390") == 0)
             {
                 ostailor = OS_OS390;
+            }
+            else if (strcasecmp (sostailor, "Z/OS") == 0)
+            {
+                ostailor = OS_ZOS;
             }
             else if (strcasecmp (sostailor, "VSE") == 0)
             {
@@ -1592,7 +1567,7 @@ char **orig_newargv;
                     ecpsvmavail=1;
                     if(ecpsvmac==0)
                     {
-                        fprintf(stderr, _("HHCCF062W Warning in %s line %d: "
+                        logmsg(_("HHCCF062W Warning in %s line %d: "
                                 "Missing ECPSVM level value. 20 Assumed\n"),
                                 fname, stmt);
                         ecpsvmavail=1;
@@ -1601,7 +1576,7 @@ char **orig_newargv;
                     }
                     if (sscanf(secpsvmlvl, "%d%c", &ecpsvmlevel, &c) != 1)
                     {
-                        fprintf(stderr, _("HHCCF051W Warning in %s line %d: "
+                        logmsg(_("HHCCF051W Warning in %s line %d: "
                                 "Invalid ECPSVM level value : %s. 20 Assumed\n"),
                                 fname, stmt, secpsvmlevel);
                         ecpsvmavail=1;
@@ -1613,7 +1588,7 @@ char **orig_newargv;
                 ecpsvmavail=1;
                 if (sscanf(secpsvmlevel, "%d%c", &ecpsvmlevel, &c) != 1)
                 {
-                    fprintf(stderr, _("HHCCF051W Error in %s line %d: "
+                    logmsg(_("HHCCF051W Error in %s line %d: "
                             "Invalid ECPSVM keyword : %s. NO Assumed\n"),
                             fname, stmt, secpsvmlevel);
                     ecpsvmavail=0;
@@ -1622,7 +1597,7 @@ char **orig_newargv;
                 }
                 else
                 {
-                    fprintf(stderr, _("HHCCF063W Warning in %s line %d: "
+                    logmsg(_("HHCCF063W Warning in %s line %d: "
                             "Specifying ECPSVM level directly is deprecated. Use the 'LEVEL' keyword instead.\n"),
                             fname, stmt);
                     break;
@@ -1682,6 +1657,14 @@ char **orig_newargv;
                         fname, stmt, siodelay);
                 delayed_exit(1);
             }
+            /* See http://games.groups.yahoo.com/group/zHercules/message/10688 */
+            iodelay_warn = iodelay;
+            if (siodelay_warn != NULL
+             && (strcasecmp(siodelay_warn, "NOWARN") == 0
+              || strcasecmp(siodelay_warn, "IKNOWWHATIMDOINGDAMMIT") == 0
+                )
+               )
+                iodelay_warn = 0;
         }
 #endif /*OPTION_IODELAY_KLUDGE*/
 
@@ -1739,8 +1722,37 @@ char **orig_newargv;
             sauto_scsi_mount = NULL;
         }
 #endif /* defined( OPTION_SCSI_TAPE ) */
+
+#if defined( HTTP_SERVER_CONNECT_KLUDGE )
+        if ( shttp_server_kludge_msecs )
+        {
+            int http_server_kludge_msecs;
+            if ( sscanf( shttp_server_kludge_msecs, "%d%c", &http_server_kludge_msecs, &c ) != 1
+                || http_server_kludge_msecs <= 0 || http_server_kludge_msecs > 50 )
+            {
+                fprintf
+                (
+                    stderr,
+
+                    _( "HHCCF066S Error in %s line %d: Invalid HTTP_SERVER_CONNECT_KLUDGE value: %s\n" )
+
+                    ,fname
+                    ,stmt
+                    ,shttp_server_kludge_msecs
+                );
+                delayed_exit(1);
+            }
+            sysblk.http_server_kludge_msecs = http_server_kludge_msecs;
+            shttp_server_kludge_msecs = NULL;
+        }
+#endif // defined( HTTP_SERVER_CONNECT_KLUDGE )
+
     } /* end for(scount) */
 
+#if defined( HTTP_SERVER_CONNECT_KLUDGE )
+    if (!sysblk.http_server_kludge_msecs)
+        sysblk.http_server_kludge_msecs = 10;
+#endif // defined( HTTP_SERVER_CONNECT_KLUDGE )
 
     /* Set root mode in order to set priority */
     SETMODE(ROOT);
@@ -1768,6 +1780,7 @@ char **orig_newargv;
 #endif
 
     sysblk.diag8cmd = diag8cmd;
+    sysblk.shcmdopt = shcmdopt;
 
 #if defined(_370) || defined(_390)
     if(dfltver)
@@ -1814,44 +1827,16 @@ char **orig_newargv;
 #endif // defined(OPTION_FISHIO)
 
     /* Set up the system TOD clock offset: compute the number of
-       seconds from the designated year to 1970 for TOD clock
-       adjustment, then add in the specified time zone offset
+     * microseconds offset to the year 1900 */
 
-       The problem here, is that no formular can do it right, as
-       we have to do it wrong in 1928 and 1988 case !
-    */
-    switch (sysepoch) {
-        case 1988:
-            sysblk.todoffset = (18*365 + 4) * -86400ULL;
-            break;
-        case 1960:
-            sysblk.todoffset = (10*365 + 3) * 86400ULL;
-            break;
-        case 1928:
-            sysblk.todoffset = (42*365 + 10) * 86400ULL;
-            break;
-        case 1970:
-            sysblk.todoffset = 0;
-            break;
-        default:
-            sysepoch = 1900;
-        case 1900:
-            sysblk.todoffset = (70*365 + 17) * 86400ULL;
-            break;
-    }
+    sysepoch -= 1900;
+    set_tod_epoch((sysepoch*365+((sysepoch>0?sysepoch-1:sysepoch)/4))*-1382400000000LL);
 
-    /* Compute the timezone offset in seconds and crank that in */
-    tzoffset = (tzoffset/100)*3600 + (tzoffset%100)*60;
-    sysblk.todoffset += tzoffset;
+    /* Set the timezone offset */
+    ajust_tod_epoch((tzoffset/100*3600+(tzoffset%100)*60)*16000000LL);
 
-    /* Convert the TOD clock offset to microseconds */
-    sysblk.todoffset *= 1000000;
-
-    /* Convert for the 'hercules internal' format */
-    sysblk.todoffset <<= 4;
-
-    /* Set the TOD clock drag factor */
-    sysblk.toddrag = toddrag;
+    /* Set clock steering based on drag factor */
+    set_tod_steering(-(1.0-(1.0/toddrag)));
 
     /* Set the system OS tailoring value */
     sysblk.pgminttr = ostailor;
@@ -1862,9 +1847,13 @@ char **orig_newargv;
 #ifdef OPTION_IODELAY_KLUDGE
     /* Set I/O delay value */
     if (iodelay >= 0)
+    {
         sysblk.iodelay = iodelay;
-    else if (ostailor == OS_LINUX)
-        sysblk.iodelay = DEFAULT_LINUX_IODELAY;
+        if (iodelay_warn)
+            logmsg (_("HHCCF037W Nonzero IODELAY value specified.\n"
+             "          This is only necessary if you are running an older Linux kernel.\n"
+             "          Otherwise, performance degradation may result.\n"));
+    }
 #endif /*OPTION_IODELAY_KLUDGE*/
 
     /* Set the panel refresh rate */
@@ -2006,7 +1995,6 @@ char **orig_newargv;
     sysblk.dummyregs.mainstor = sysblk.mainstor;
     sysblk.dummyregs.storkeys = sysblk.storkeys;
     sysblk.dummyregs.mainlim = sysblk.mainsize - 1;
-    sysblk.dummyregs.todoffset = sysblk.todoffset;
     sysblk.dummyregs.dummy = 1;
     initial_cpu_reset (&sysblk.dummyregs);
     sysblk.dummyregs.arch_mode = sysblk.arch_mode;
@@ -2032,6 +2020,20 @@ char **orig_newargv;
 #else
     sysblk.maxcpu = numcpu;
 #endif /*_FEATURE_CPU_RECONFIG*/
+
+    /* Log some significant some RUN OPTIONS */
+
+    logmsg
+    (
+        "HHCCF069I Run-options enabled for this run:\n"
+        "          NUMCPU:           %d\n"
+        "          ASN-and-LX-reuse: %sabled\n"
+        "          DIAG8CMD:         %sabled\n"
+
+        ,sysblk.numcpu
+        ,( sysblk.asnandlxreuse ) ? "EN" : "DIS"
+        ,( sysblk.diag8cmd      ) ? "EN" : "DIS"
+    );
 
     /* Start the CPUs */
     obtain_lock (&sysblk.intlock);

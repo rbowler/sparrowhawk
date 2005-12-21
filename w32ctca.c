@@ -1,69 +1,36 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //    w32ctca.c    CTCI-W32 (Channel to Channel link to Win32 TCP/IP stack)
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2002-2004. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2002-2005. Released under the Q Public License
 // (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
-#if defined(HAVE_CONFIG_H)
-#include <config.h>     // (needed 1st to set OPTION_W32_CTCI flag appropriately)
-#endif
-#include "featall.h"    // (needed 2nd to set OPTION_W32_CTCI flag appropriately)
-
-///////////////////////////////////////////////////////////////////////////////////////////
+#include "hstdinc.h"
+#include "hercules.h"
 
 #if !defined(OPTION_W32_CTCI)
 int w32ctca_dummy = 0;
 #else // defined(OPTION_W32_CTCI)
 
-///////////////////////////////////////////////////////////////////////////////////////////
-
-#include <windows.h>
-#include <winsock2.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <stdarg.h>
-#include <ctype.h>
-#include "logger.h"
 #include "w32ctca.h"
-
-#if !defined( IFNAMSIZ )
-#define IFNAMSIZ 16
-#endif
-
-#include "htypes.h"     // (tt32api.h needs uint32_t)
-#include "tt32api.h"    // (exported TunTap32.dll functions)
-
-///////////////////////////////////////////////////////////////////////////////////////////
-// Debugging
-
-LPCTSTR FormatLastErrorMessage(DWORD dwLastError, LPTSTR pszErrMsgBuff, DWORD dwBuffSize);
-
-#define IsEventSet(hEventHandle) (WaitForSingleObject(hEventHandle,0) == WAIT_OBJECT_0)
-
-#if defined(DEBUG) || defined(_DEBUG)
-    #define TRACE(a...) logmsg(a)
-    #define ASSERT(a) \
-        do \
-        { \
-            if (!(a)) \
-            { \
-                logmsg("** Assertion Failed: %s(%d)\n",__FILE__,__LINE__); \
-            } \
-        } \
-        while(0)
-    #define VERIFY(a) ASSERT((a))
-#else
-    #define TRACE(a...)
-    #define ASSERT(a)
-    #define VERIFY(a) ((void)(a))
+#include "tt32api.h"        // (exported TunTap32.dll functions)
+#ifdef __CYGWIN__
+  #include <sys/cygwin.h>   // (for cygwin_conv_to_full_win32_path)
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 // Global variables...
 
+#define  TT32_DEFAULT_IFACE     "00-00-5E-80-00-00"
+
 char     g_tt32_dllname[MAX_TT32_DLLNAMELEN] = {0};
 HMODULE  g_tt32_hmoddll = NULL;
+
+////////////////// EXPERIMENTAL //////////////////
+ptuntap32_open_ex               g_tt32_pfn_open_ex               = NULL;
+////////////////// EXPERIMENTAL //////////////////
+
+
 
 ptuntap32_copyright_string      g_tt32_pfn_copyright_string      = NULL;
 ptuntap32_version_string        g_tt32_pfn_version_string        = NULL;
@@ -80,28 +47,12 @@ ptuntap32_set_debug_output_func g_tt32_pfn_set_debug_output_func = NULL;
 CRITICAL_SECTION  g_tt32_lock;              // (lock for accessing above variables)
 
 ///////////////////////////////////////////////////////////////////////////////////////////
-// One-time initialization... (called by Herc startup)
 
 BOOL tt32_loaddll();    // (forward reference)
 
-//
-//
-//
-
 void            tt32_init()
 {
-    InitializeCriticalSection(&g_tt32_lock);
-
-    if (!g_tt32_dllname[0])
-    {
-        char* tt32_dllname;
-
-        if (!(tt32_dllname = getenv("HERCULES_IFC")))
-            tt32_dllname = DEF_TT32_DLLNAME;
-
-        strncpy(g_tt32_dllname,tt32_dllname,sizeof(g_tt32_dllname));
-    }
-
+    InitializeCriticalSection( &g_tt32_lock );
 }
 
 //
@@ -110,8 +61,20 @@ void            tt32_init()
 
 int             tt32_open( char* pszGatewayDevice, int iFlags )
 {
+#if 0
     if (!tt32_loaddll()) return -1;
     return g_tt32_pfn_open( pszGatewayDevice, iFlags );
+#else
+    ////////////////// EXPERIMENTAL //////////////////
+    int rc, errnum;
+    if (!tt32_loaddll()) return -1;
+    if (!g_tt32_pfn_open_ex)
+        return g_tt32_pfn_open( pszGatewayDevice, iFlags );
+    rc = g_tt32_pfn_open_ex( pszGatewayDevice, iFlags, &errnum );
+    errno = errnum;
+    return rc;
+    ////////////////// EXPERIMENTAL //////////////////
+#endif
 }
 
 //
@@ -163,8 +126,10 @@ int             tt32_ioctl( int fd, int iRequest, char* argp )
 
 const char*     tt32_get_default_iface()
 {
-    if (!tt32_loaddll()) return "00-00-5E-80-00-00";
-    return g_tt32_pfn_get_default_iface();
+    const char* pszDefaultIFace = NULL;
+    if (tt32_loaddll())
+        pszDefaultIFace = g_tt32_pfn_get_default_iface();
+    return ( pszDefaultIFace ? pszDefaultIFace : TT32_DEFAULT_IFACE );
 }
 
 //
@@ -180,9 +145,6 @@ int             display_tt32_stats( int fd )
     memset(&stats,0,sizeof(stats));
     stats.dwStructSize = sizeof(stats);
 
-    /* ZZ FIXME: Temp workaround of bug in TunTap32.dll's 
-       "CTunTap::GetIFaceStats" function. Remove once fixed. */
-//  if (g_tt32_pfn_get_stats(fd,&stats) < (int)(sizeof(stats))) return -1;
         g_tt32_pfn_get_stats(fd,&stats);
 
     logmsg
@@ -191,16 +153,16 @@ int             display_tt32_stats( int fd )
         "Size of Kernel Hold Buffer:      %5luK\n"
         "Size of DLL I/O Buffer:          %5luK\n"
         "Maximum DLL I/O Bytes Received:  %5luK\n\n"
-        "%12lld Write Calls\n"
-        "%12lld Write I/Os\n"
-        "%12lld Read Calls\n"
-        "%12lld Read I/Os\n"
-        "%12lld Packets Read\n"
-        "%12lld Packets Written\n"
-        "%12lld Bytes Read\n"
-        "%12lld Bytes Written\n"
-        "%12lld Internal Packets\n"
-        "%12lld Ignored Packets\n"
+        "%12" I64_FMT "d Write Calls\n"
+        "%12" I64_FMT "d Write I/Os\n"
+        "%12" I64_FMT "d Read Calls\n"
+        "%12" I64_FMT "d Read I/Os\n"
+        "%12" I64_FMT "d Packets Read\n"
+        "%12" I64_FMT "d Packets Written\n"
+        "%12" I64_FMT "d Bytes Read\n"
+        "%12" I64_FMT "d Bytes Written\n"
+        "%12" I64_FMT "d Internal Packets\n"
+        "%12" I64_FMT "d Ignored Packets\n"
         ,
         g_tt32_dllname
         ,(stats.dwKernelBuffSize   + 1023) / 1024
@@ -238,15 +200,16 @@ void __cdecl tt32_output_debug_string(const char* debug_string)
 
 BOOL tt32_loaddll()
 {
-static int tt32_init_done = 0;
+    char*  pszDLLName;
+    char   tt32_dllname_in_buff  [ MAX_PATH ];
+    char   tt32_dllname_out_buff [ MAX_PATH ] = {0};
+    static int tt32_init_done = 0;
 
     if(!tt32_init_done)
     {
         tt32_init();
         tt32_init_done = 1;
     }
-
-    TCHAR szErrMsgBuff[MAX_ERR_MSG_LEN];
 
     EnterCriticalSection(&g_tt32_lock);
 
@@ -256,17 +219,68 @@ static int tt32_init_done = 0;
         return TRUE;
     }
 
+    // First, determine the name of the DLL we should try loading...
+
+    if ( !( pszDLLName = getenv( "HERCULES_IFC" ) ) )
+        pszDLLName = DEF_TT32_DLLNAME;
+
+    ASSERT( pszDLLName && *pszDLLName );
+
+    // Then check to see if the "name" contains path information or not...
+
+    if ( strchr( pszDLLName, '/' ) || strchr( pszDLLName, '\\' ) )
+    {
+        // It's already a path...
+        strlcpy( tt32_dllname_in_buff, pszDLLName, sizeof(tt32_dllname_in_buff) );
+    }
+    else
+    {
+        // It's not a path, so make it one...
+        strlcpy( tt32_dllname_in_buff, MODULESDIR, sizeof(tt32_dllname_in_buff) );
+        strlcat( tt32_dllname_in_buff,     "/"   , sizeof(tt32_dllname_in_buff) );
+        strlcat( tt32_dllname_in_buff, pszDLLName, sizeof(tt32_dllname_in_buff) );
+    }
+
+    // Now convert it to a full path...
+    
+    // PROGRAMMING NOTE: It's important here to ensure that our end result is a path
+    // with BACKWARD slashes in it and NOT forward slashes! LoadLibrary is one of the
+    // few Win32 functions that cannot handle paths with forward slashes in it. For
+    // 'open', etc, yeah, forward slashes are fine, but for LoadLibrary they're not!
+
+#ifdef _MSVC_
+    if ( !_fullpath( tt32_dllname_out_buff, tt32_dllname_in_buff, sizeof(tt32_dllname_out_buff) ) )
+        strlcpy(     tt32_dllname_out_buff, tt32_dllname_in_buff, sizeof(tt32_dllname_out_buff) );
+#else // (presumed cygwin)
+    cygwin_conv_to_full_win32_path( tt32_dllname_in_buff, tt32_dllname_out_buff );
+#endif // _MSVC_
+
+    tt32_dllname_out_buff[ sizeof(tt32_dllname_out_buff) - 1 ] = 0;
+
+    // Finally, copy it to our global home for it...
+
+    strlcpy( g_tt32_dllname, tt32_dllname_out_buff, sizeof(g_tt32_dllname) );
+
     ASSERT(g_tt32_dllname[0]);
 
     g_tt32_hmoddll = LoadLibraryEx( g_tt32_dllname, NULL, LOAD_WITH_ALTERED_SEARCH_PATH );
 
     if (!g_tt32_hmoddll)
     {
-        DWORD dwLastError = GetLastError();
-        LeaveCriticalSection(&g_tt32_lock);
-        logmsg("** tt32_loaddll: LoadLibraryEx(\"%s\") failed; rc=%ld: %s\n",
-            g_tt32_dllname,dwLastError,FormatLastErrorMessage(dwLastError,szErrMsgBuff,MAX_ERR_MSG_LEN));
-        return FALSE;
+        // Try again WITHOUT the path this time...
+
+        strlcpy( g_tt32_dllname, pszDLLName, sizeof(g_tt32_dllname) );
+
+        g_tt32_hmoddll = LoadLibraryEx( g_tt32_dllname, NULL, LOAD_WITH_ALTERED_SEARCH_PATH );
+
+        if (!g_tt32_hmoddll)
+        {
+            DWORD dwLastError = GetLastError();
+            LeaveCriticalSection(&g_tt32_lock);
+            logmsg("** tt32_loaddll: LoadLibraryEx(\"%s\") failed; rc=%ld: %s\n",
+                g_tt32_dllname,dwLastError,strerror(dwLastError));
+            return FALSE;
+        }
     }
 
     g_tt32_pfn_copyright_string =
@@ -288,6 +302,12 @@ static int tt32_init_done = 0;
     (ptuntap32_open) GetProcAddress(g_tt32_hmoddll,
      "tuntap32_open"); if (!
     g_tt32_pfn_open) goto error;
+
+    ////////////////// EXPERIMENTAL //////////////////
+    g_tt32_pfn_open_ex =
+    (ptuntap32_open_ex) GetProcAddress(g_tt32_hmoddll,
+     "tuntap32_open_ex");
+    ////////////////// EXPERIMENTAL //////////////////
 
     g_tt32_pfn_write =
     (ptuntap32_write) GetProcAddress(g_tt32_hmoddll,
@@ -350,37 +370,6 @@ error:
     LeaveCriticalSection(&g_tt32_lock);
     logmsg("** tt32_loaddll: One of the GetProcAddress calls failed\n");
     return FALSE;
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////
-
-LPCTSTR FormatLastErrorMessage(DWORD dwLastError, LPTSTR pszErrMsgBuff, DWORD dwBuffSize)
-{
-    LPTSTR p = pszErrMsgBuff;
-    DWORD dwBytesReturned = 0;
-
-    ASSERT(pszErrMsgBuff && dwBuffSize);
-
-    dwBytesReturned = FormatMessage
-    (
-        0
-            | FORMAT_MESSAGE_FROM_SYSTEM
-            | FORMAT_MESSAGE_IGNORE_INSERTS
-        ,
-        NULL,
-        dwLastError,
-        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-        pszErrMsgBuff,
-        dwBuffSize,
-        NULL
-    );
-
-    ASSERT(dwBytesReturned);
-
-    for (p += dwBytesReturned - 1; p >= pszErrMsgBuff && isspace(*p); p--);
-    *++p = 0;
-
-    return (LPCTSTR) pszErrMsgBuff;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////

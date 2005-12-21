@@ -1,11 +1,12 @@
-/* CODEPAGE.C   (c) Copyright Jan Jaeger, 1999-2004                  */
+/* CODEPAGE.C   (c) Copyright Jan Jaeger, 1999-2005                  */
 /*              Code Page conversion                                 */
 
-#include "hercules.h"
+#include "hstdinc.h"
 
-#if defined(HAVE_ICONV)
- #include <iconv.h>
-#endif /*defined(HAVE_ICONV)*/
+#define _CODEPAGE_C_
+#define _HUTIL_DLL_
+
+#include "hercules.h"
 
 
 static unsigned char
@@ -270,7 +271,7 @@ size_t nibytes, nobytes;
 #endif /*defined(HAVE_ICONV)*/
 
 
-void set_codepage(char *name)
+DLL_EXPORT void set_codepage(char *name)
 {
     if(name == NULL)
         if(!(name = getenv("HERCULES_CP")))
@@ -291,7 +292,7 @@ void set_codepage(char *name)
 }
 
 
-unsigned char host_to_guest (unsigned char byte)
+DLL_EXPORT unsigned char host_to_guest (unsigned char byte)
 {
 #if defined(HAVE_ICONV)
 char obyte;
@@ -301,7 +302,7 @@ size_t inbytes = 1, outbytes = 1;
 
     if(codepage_h2g)
     {
-        iconv(codepage_h2g, &hbyte, &inbytes, &gbyte, &outbytes);
+        iconv(codepage_h2g, (char**)&hbyte, &inbytes, &gbyte, &outbytes);
         return obyte;
     }
     else
@@ -310,7 +311,7 @@ size_t inbytes = 1, outbytes = 1;
 }
 
 
-unsigned char guest_to_host (unsigned char byte)
+DLL_EXPORT unsigned char guest_to_host (unsigned char byte)
 {
 #if defined(HAVE_ICONV)
 char obyte;
@@ -320,7 +321,7 @@ size_t inbytes = 1, outbytes = 1;
 
     if(codepage_g2h)
     {
-        iconv(codepage_g2h, &gbyte, &inbytes, &hbyte, &outbytes);
+        iconv(codepage_g2h, (char**)&gbyte, &inbytes, &hbyte, &outbytes);
         return obyte;
     }
     else

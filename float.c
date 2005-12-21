@@ -1,4 +1,4 @@
-/* FLOAT.C      (c) Copyright Peter Kuschnerus, 2000-2004            */
+/* FLOAT.C      (c) Copyright Peter Kuschnerus, 2000-2005            */
 /*              ESA/390 Hex Floatingpoint Instructions               */
 
 /*-------------------------------------------------------------------*/
@@ -10,7 +10,7 @@
 /* Incorporated all floating point instructions from cpu.c in order  */
 /* to implement revised instruction decoding.                        */
 /*                                               Jan Jaeger 01/07/00 */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 /*-------------------------------------------------------------------*/
 
 /*-------------------------------------------------------------------*/
@@ -27,6 +27,15 @@
 /* HFP Multiply and Add/Subtract Facility          R.Bowler 10juil03 */
 /*-------------------------------------------------------------------*/
 
+#include "hstdinc.h"
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
+
+#if !defined(_FLOAT_C_)
+#define _FLOAT_C_
+#endif
 
 #include "hercules.h"
 #include "opcode.h"

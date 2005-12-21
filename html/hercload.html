@@ -9,18 +9,38 @@ Hercules Version 3: Creating DASD</TITLE>
 
 <h1>Hercules Version 3: Creating DASD</h1>
 
+<p>
 This page describes various ways of creating and loading DASD
 volumes for use with Hercules.
 
+<p><hr>
+
+<h2>Contents</h2>
+<blockquote>
+        <p>
+                <a href="#prebuilt">Using pre-built DASD images</a>
+        </p>
+        <p>
+                <a href="#loading">Creating, formatting, and loading DASD volumes</a>
+        </p>
+        <p>
+                <a href="#PDS">Building a DASD volume from unloaded PDS files</a>
+        </p>
+        <p>
+                <a href="#utilities">Other DASD utilities</a>
+        </p>
+</blockquote>
+
+<p><hr><a name="prebuilt"></a>
 <h2>Using pre-built DASD images</h2>
 <p>
 IBM distributes pre-built OS/390 and z/OS systems on two
 different CD-ROM packages:
 <dl>
-<dt>The OS/390 and z/OS Application Development CD (ADCD)
+<dt><b>The OS/390 and z/OS Application Development CD (ADCD)</b>
 <dd>available only to members of IBM PartnerWorld for Developers,
 and
-<dt>The OS/390 and z/OS DemoPkg
+<dt><b>The OS/390 and z/OS DemoPkg</b>
 <dd>available only to IBM employees and qualified IBM Business Partners.
 </dl>
 <p>Both of these packages contain pre-built DASD image files
@@ -33,11 +53,11 @@ approved machine in order to obtain the ADCD, and the software on
 the ADCD is licensed for use only on the machine that it was
 shipped with.
 See
-<a href="http://etpgw02.dfw.ibm.com/adcd.html">
-http://etpgw02.dfw.ibm.com/adcd.html</a>.
+<a href="http://www.ibm.com/servers/enable/site/zinfo/adcd.html">
+http://www.ibm.com/servers/enable/site/zinfo/adcd.html</a>.
 If you want Hercules to be an approved machine so that you can
 use the ADCD, then I suggest you lobby IBM Developer Relations
-<!---(fyolton&nbsp;&#064;&nbsp;us.ibm.com)--->
+<!-- ===(fyolton&nbsp;&#064;&nbsp;us.ibm.com)=== -->
 at the address given on their web page.
 <p>
 Different rules apply to the OS/390 and z/OS
@@ -45,6 +65,7 @@ DemoPkg CD which is available only to IBM employees and business
 partners.  If you fall into this category then you probably know
 what the rules are -- I don't :-(
 
+<p><hr><a name="loading"></a>
 <h2>Creating, formatting, and loading DASD volumes</h2>
 
 <h4>Creating an empty DASD volume</h4>
@@ -134,6 +155,8 @@ The current list of device types and models supported is:
         3390-2        2226    1
         3390-3        3339    1
         3390-9       10017    3
+        3390-27      32760    3
+        3390-54      65520    3
 
         9345           [*]
         9345-1        1440    0
@@ -153,6 +176,9 @@ The current list of device types and models supported is:
         3370-A2        712752
         3370-B2        712752
 
+        9313              [*]
+        9313-1         246240
+
         9332              [*]
         9332-200       360036
         9332-400       360036
@@ -165,17 +191,21 @@ The current list of device types and models supported is:
         9336-10        920115
         9336-20       1672881
         9336-25       1672881
+
+        0671-08        513072
+        0671           574560
+        0671-04        624456
 </pre>
-<br>
+<p>
 [<b>*</b>] size may be specified else size defaults to the
            first listed model.
 <p>
-<h5>Volumes exceeding 2GB</h5>
+<h4>Volumes exceeding 2GB</h4>
 <p>
 For CKD volumes which exceed 2GB, such as the 3390-3, and the
 <b>-lfs</b> parameter is not specified, the DASDINIT
 program will create multiple files by appending the characters
-<b><i>_1</b></i>, <b>_2</b></i>, <b>_3</b></i> etc.
+<b>_1</b>, <b>_2</b>, <b>_3</b> etc.
 to the file name specified on the command line.  These characters
 are inserted before the first dot (<b>.</b>) after the last slash
 (<b>/</b>).  If there is no dot, then the characters are appended
@@ -219,6 +249,7 @@ of 3339 cylinders with volume serial number WORK03:
 <pre>
     dasdinit triple.a88 3390-3 work03
 </pre>
+<p>
 Because this volume exceeds 2GB, DASDINIT will create two files
 with <b><i>triple_1.a88</b></i> containing cylinders 0-2518 and
 <b><i>triple_2.a88</b></i> containing cylinders 2519-3339.  If you
@@ -226,6 +257,7 @@ specify
 <pre>
     dasdinit -lfs triple.a88 3390-3 work03
 </pre>
+<p>
 then DASDINIT will create a single file <b><i>triple.a88</i></b>
 containing all the cylinders.  Your platform must support <i>large
 file size</i> to specify the <b>-lfs</b> option.
@@ -260,6 +292,7 @@ ARCHMODE S/370
 000C   1442    init3330.txt
 0151   3330    work01.151
 </code></pre>
+<p>
 After IPLing from card reader device 00A, connect a telnet client
 to port 1052, and press enter.  At the IBCDASDI prompt, enter:
 <pre><code>input=1442 00c</code></pre>
@@ -276,6 +309,7 @@ A standalone program can now be IPLed into Hercules to restore the
 volume image from the virtual tape onto the formatted virtual DASD
 volume.
 
+<p><hr><a name="PDS"></a>
 <h2>Building a DASD volume from unloaded PDS files</h2>
 <p>
 The dasdload program can be run from the Unix shell prompt to
@@ -476,6 +510,7 @@ where
 <em>Note: do not use this procedure except on OS/360 IPL volumes;
 other operating systems do not have XCTL tables.</em>
 
+<p><hr><a name="utilities"></a>
 <h2>Other DASD utilities</h2>
 <p>
 These programs can be used to extract data from CKD DASD images
@@ -592,10 +627,8 @@ If you have a question about Hercules, see the
 <a href="hercfaq.html">Hercules Frequently-Asked Questions</a> page.
 
 <p><center><hr width=15% noshade>
-<a href="hercinst.html"><img src="gifs/back.gif" border=0 alt="back"></a>
+<a href="hercinst.html"><img src="images/back.gif" border=0 alt="back"></a>
 </center>
-
-<small>
-<p>Last updated 4 January 2004
+<p class="lastupd">Last updated $Date: 2005/12/11 22:10:09 $ $Revision: 1.16 $</p>
 </BODY>
 </HTML>

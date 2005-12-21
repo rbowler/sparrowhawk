@@ -1,4 +1,4 @@
-/* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2004                  */
+/* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2005                  */
 /*              ESA/390 Diagnose Functions                           */
 
 /*-------------------------------------------------------------------*/
@@ -8,8 +8,18 @@
 /* LPAR RMF interface call                                           */
 /*                                                                   */
 /*                                             04/12/1999 Jan Jaeger */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 /*-------------------------------------------------------------------*/
+
+#include "hstdinc.h"
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
+
+#if !defined(_DIAGMSSF_C_)
+#define _DIAGMSSF_C_
+#endif
 
 #include "hercules.h"
 
@@ -147,7 +157,7 @@ typedef struct _DIAG204_HDR {
                                            0x0005 under VM           */
         HWORD   physcpu;                /* Number of phys CP's       */
         HWORD   offown;                 /* Offset to own partition   */
-        DWORD   diagstck;               /* TOD of last diag204       */
+        DBLWRD  diagstck;               /* TOD of last diag204       */
     } DIAG204_HDR;
 
 typedef struct _DIAG204_PART {
@@ -162,8 +172,8 @@ typedef struct _DIAG204_PART_CPU {
         HWORD   cpaddr;                 /* CP address                */
         HWORD   resv2[2];
         HWORD   relshare;               /* Relative share            */
-        DWORD   totdispatch;            /* Total dispatch time       */
-        DWORD   effdispatch;            /* Effective dispatch time   */
+        DBLWRD  totdispatch;            /* Total dispatch time       */
+        DBLWRD  effdispatch;            /* Effective dispatch time   */
     } DIAG204_PART_CPU;
 
 
@@ -355,6 +365,7 @@ DIAG204_PART      *partinfo;           /* Partition info             */
 DIAG204_PART_CPU  *cpuinfo;            /* CPU info                   */
 RADR              abs;                 /* abs addr of data area      */
 U64               dreg;                /* work doubleword            */
+U64               tdis = 0, teff = 0;
 U32               i;                   /* loop counter               */
 struct rusage     usage;               /* RMF type data              */
 static BYTE       physical[8] =
@@ -380,13 +391,13 @@ static U64        diag204tod;          /* last diag204 tod           */
         obtain_lock (&sysblk.todlock);
 
         /* Update the TOD clock */
-        update_TOD_clock();
+        update_tod_clock();
 
         /* save last diag204 tod */
         dreg = diag204tod;
 
         /* Retrieve the TOD clock value and shift out the epoch */
-        diag204tod = (sysblk.todclk + regs->todoffset) << 8;
+        diag204tod = TOD_CLOCK(regs) << 8;
 
         /* Release the TOD clock update lock */
         release_lock (&sysblk.todlock);
@@ -421,12 +432,12 @@ static U64        diag204tod;          /* last diag204 tod           */
               STORE_HW(cpuinfo->cpaddr,sysblk.regs[i]->cpuad);
               STORE_HW(cpuinfo->relshare,100);
               dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) / sysblk.cpus;
-              dreg = dreg * 1000000 + (i ? 0 : usage.ru_utime.tv_usec + usage.ru_stime.tv_usec);
-              dreg <<= 12;
+              dreg = (dreg * 1000000) + (i ? 0 : (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec));
+              tdis += dreg;
               STORE_DW(cpuinfo->totdispatch,dreg);
               dreg = (U64)(usage.ru_utime.tv_sec) / sysblk.cpus;
-              dreg = dreg * 1000000 + (i ? 0 : usage.ru_utime.tv_usec );
-              dreg <<= 12;
+              dreg = (dreg * 1000000) + (i ? 0 : (usage.ru_utime.tv_usec) );
+              teff += dreg;
               STORE_DW(cpuinfo->effdispatch,dreg);
               cpuinfo += 1;
           }
@@ -441,11 +452,14 @@ static U64        diag204tod;          /* last diag204 tod           */
         cpuinfo = (DIAG204_PART_CPU*)(partinfo + 1);
         memset(cpuinfo, 0, sizeof(DIAG204_PART_CPU));
 //      STORE_HW(cpuinfo->cpaddr,0);
-        dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) / sysblk.cpus;
-        dreg = dreg * 1000000 + (i ? 0 : usage.ru_utime.tv_usec + usage.ru_stime.tv_usec);
-        dreg <<= 12;
-        STORE_DW(cpuinfo->totdispatch,dreg);
-//      cpuinfo->effdispatch = 0;
+        dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec);
+        dreg = (dreg * 1000000) + (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec);
+    tdis += dreg;
+        STORE_DW(cpuinfo->totdispatch,tdis);
+        dreg = (U64)(usage.ru_utime.tv_sec);
+        dreg = (dreg * 1000000) + (usage.ru_utime.tv_usec);
+    teff += dreg;
+        STORE_DW(cpuinfo->effdispatch,teff);
 
         regs->GR_L(r2) = 0;
 

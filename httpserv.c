@@ -1,4 +1,4 @@
-/* HTTPSERV.C   (c)Copyright Jan Jaeger, 2002-2004                   */
+/* HTTPSERV.C   (c)Copyright Jan Jaeger, 2002-2005                   */
 /*              HTTP Server                                          */
 
 /* This file contains all code required for the HTTP server,         */
@@ -27,6 +27,8 @@
 /*                                                                   */
 /*                                           Jan Jaeger - 28/03/2002 */
 
+#include "hstdinc.h"
+
 #include "hercules.h"
 #include "httpmisc.h"
 #include "hostinfo.h"
@@ -38,17 +40,21 @@
 extern CGITAB cgidir[];
 
 
-static CONTYP mime_types[] = {
+static MIMETAB mime_types[] = {
     { NULL,    NULL },                            /* No suffix entry */
-    { "txt",   "text/plain" },
-    { "jcl",   "text/plain" },
-    { "gif",   "image/gif"  },
-    { "jpg",   "image/jpeg" },
-    { "css",   "text/css"   },
-    { "html",  "text/html"  },
-    { "htm",   "text/html"  },
+    { "txt",   "text/plain"                },
+    { "jcl",   "text/plain"                },
+    { "gif",   "image/gif"                 },
+    { "jpg",   "image/jpeg"                },
+    { "css",   "text/css"                  },
+    { "html",  "text/html"                 },
+    { "htm",   "text/html"                 },
+/* This one should be:
+    { "ico",   "image/vnd.microsoft.icon"  },
+   but Apache 2 sets it as: */
+    { "ico",   "image/x-icon"              },
+/* so we'll go with what's actually in use. --JRM */
     { NULL,    NULL } };                     /* Default suffix entry */
-
 
 int html_include(WEBBLK *webblk, char *filename)
 {
@@ -60,13 +66,13 @@ int html_include(WEBBLK *webblk, char *filename)
     strlcpy( fullname, sysblk.httproot, sizeof(fullname) );
     strlcat( fullname, filename,        sizeof(fullname) );
 
-    inclfile = fopen(fullname,"r");
+    inclfile = fopen(fullname,"rb");
 
     if (!inclfile)
     {
         logmsg(_("HHCHT011E html_include: Cannot open %s: %s\n"),
           fullname,strerror(errno));
-        fprintf(webblk->hsock,_("ERROR: Cannot open %s: %s\n"),
+        hprintf(webblk->sock,_("ERROR: Cannot open %s: %s\n"),
           filename,strerror(errno));
         return FALSE;
     }
@@ -75,30 +81,29 @@ int html_include(WEBBLK *webblk, char *filename)
     {
         ret = fread(buffer, 1, sizeof(buffer), inclfile);
         if (ret <= 0) break;
-        fwrite(buffer, 1, ret, webblk->hsock);
+        hwrite(webblk->sock,buffer, ret);
     }
 
     fclose(inclfile);
     return TRUE;
 }
 
-
 void html_header(WEBBLK *webblk)
 {
     if (webblk->request_type != REQTYPE_POST)
-        fprintf(webblk->hsock,"Expires: 0\n");
+        hprintf(webblk->sock,"Expires: 0\n");
 
-    fprintf(webblk->hsock,"Content-type: text/html;\n\n");
+    hprintf(webblk->sock,"Content-type: text/html;\n\n");
 
     if (!html_include(webblk,HTML_HEADER))
-        fprintf(webblk->hsock,"<HTML>\n<HEAD>\n<TITLE>Hercules</TITLE>\n</HEAD>\n<BODY>\n\n");
+        hprintf(webblk->sock,"<HTML>\n<HEAD>\n<TITLE>Hercules</TITLE>\n</HEAD>\n<BODY>\n\n");
 }
 
 
 void html_footer(WEBBLK *webblk)
 {
     if (!html_include(webblk,HTML_FOOTER))
-        fprintf(webblk->hsock,"\n</BODY>\n</HTML>\n");
+        hprintf(webblk->sock,"\n</BODY>\n</HTML>\n");
 }
 
 
@@ -107,7 +112,7 @@ static void http_exit(WEBBLK *webblk)
 CGIVAR *cgivar;
     if(webblk)
     {
-        fclose(webblk->hsock);
+        close_socket(webblk->sock);
         if(webblk->user) free(webblk->user);
         if(webblk->request) free(webblk->request);
         cgivar = webblk->cgivar;
@@ -127,7 +132,7 @@ CGIVAR *cgivar;
 
 static void http_error(WEBBLK *webblk, char *err, char *header, char *info)
 {
-    fprintf(webblk->hsock,"HTTP/1.0 %s\n%sConnection: close\n"
+    hprintf(webblk->sock,"HTTP/1.0 %s\n%sConnection: close\n"
                           "Content-Type: text/html\n\n"
                           "<HTML><HEAD><TITLE>%s</TITLE></HEAD>"
                           "<BODY><H1>%s</H1><P>%s</BODY></HTML>\n\n",
@@ -281,18 +286,18 @@ char *http_variable(WEBBLK *webblk, char *name, int type)
 static void http_verify_path(WEBBLK *webblk, char *path)
 {
     char resolved_path[HTTP_PATH_LENGTH];
+#if 0
     int i;
 
     for (i = 0; path[i]; i++)
         if (!isalnum((int)path[i]) && !strchr("/.-_", path[i]))
             http_error(webblk, "404 File Not Found","",
                                "Illegal character in filename");
+#endif
 
     if (!realpath( path, resolved_path ))
-    {
         http_error(webblk, "404 File Not Found","",
                            "Invalid pathname");
-    }
 
     // The following verifies the specified file does not lie
     // outside the specified httproot (Note: sysblk.httproot
@@ -369,7 +374,7 @@ static void http_download(WEBBLK *webblk, char *filename)
     char *filetype;
     char fullname[HTTP_PATH_LENGTH];
     struct stat st;
-    CONTYP *mime_type = mime_types;
+    MIMETAB *mime_type = mime_types;
 
     strlcpy( fullname, sysblk.httproot, sizeof(fullname) );
     strlcat( fullname, filename,        sizeof(fullname) );
@@ -384,31 +389,31 @@ static void http_download(WEBBLK *webblk, char *filename)
         http_error(webblk, "404 File Not Found","",
                            "The requested file is not a regular file");
 
-    fd = open(fullname,O_RDONLY,0);
+    fd = open(fullname,O_RDONLY|O_BINARY,0);
     if (fd == -1)
         http_error(webblk, "404 File Not Found","",
                            strerror(errno));
 
-    fprintf(webblk->hsock,"HTTP/1.0 200 OK\n");
+    hprintf(webblk->sock,"HTTP/1.0 200 OK\n");
     if ((filetype = strrchr(filename,'.')))
         for(mime_type++;mime_type->suffix
           && strcasecmp(mime_type->suffix,filetype + 1);
           mime_type++);
     if(mime_type->type)
-        fprintf(webblk->hsock,"Content-Type: %s\n", mime_type->type);
+        hprintf(webblk->sock,"Content-Type: %s\n", mime_type->type);
 
-    fprintf(webblk->hsock,"Expires: %s\n",
+    hprintf(webblk->sock,"Expires: %s\n",
       http_timestring(tbuf,sizeof(tbuf),time(NULL)+HTML_STATIC_EXPIRY_TIME));
 
-    fprintf(webblk->hsock,"Content-Length: %d\n\n", (int)st.st_size);
+    hprintf(webblk->sock,"Content-Length: %d\n\n", (int)st.st_size);
     while ((length = read(fd, buffer, sizeof(buffer))) > 0)
-            fwrite(buffer, 1, length, webblk->hsock);
+            hwrite(webblk->sock,buffer, length);
     close(fd);
     http_exit(webblk);
 }
 
 
-static void *http_request(FILE *hsock)
+static void *http_request(int sock)
 {
     WEBBLK *webblk;
     int authok = !sysblk.httpauth;
@@ -418,14 +423,16 @@ static void *http_request(FILE *hsock)
     char *strtok_str;
     CGITAB *cgient;
     int content_length = 0;
+// MSVC appears to use the same buffer for reading and writing on socket file descriptors
+// as a workaround we dub the fd and open a second file specifically for reading *JJ
 
     if(!(webblk = malloc(sizeof(WEBBLK))))
         http_exit(webblk);
 
     memset(webblk,0,sizeof(WEBBLK));
-    webblk->hsock = hsock;
+    webblk->sock = sock;
 
-    while (fgets(line, sizeof(line), webblk->hsock))
+    while (hgets(line, sizeof(line), webblk->sock))
     {
         if (*line == '\r' || *line == '\n')
             break;
@@ -487,7 +494,7 @@ static void *http_request(FILE *hsock)
         int i;
             for(i = 0; i < content_length; i++)
             {
-                *pointer = fgetc(webblk->hsock);
+                *pointer = hgetc(webblk->sock);
                 if(*pointer != '\n' && *pointer != '\r')
                     pointer++;
             }
@@ -537,8 +544,8 @@ static void *http_request(FILE *hsock)
         if(!strcmp(cgient->path, url))
         {
         char tbuf[80];
-            fprintf(webblk->hsock,"HTTP/1.0 200 OK\nConnection: close\n");
-            fprintf(webblk->hsock,"Date: %s\n",
+            hprintf(webblk->sock,"HTTP/1.0 200 OK\nConnection: close\n");
+            hprintf(webblk->sock,"Date: %s\n",
               http_timestring(tbuf,sizeof(tbuf),time(NULL)));
             (cgient->cgibin) (webblk);
             http_exit(webblk);
@@ -552,8 +559,8 @@ static void *http_request(FILE *hsock)
         if( (dyncgi = HDL_FINDSYM(webblk->baseurl)) )
         {
         char tbuf[80];
-            fprintf(webblk->hsock,"HTTP/1.0 200 OK\nConnection: close\n");
-            fprintf(webblk->hsock,"Date: %s\n",
+            hprintf(webblk->sock,"HTTP/1.0 200 OK\nConnection: close\n");
+            hprintf(webblk->sock,"Date: %s\n",
               http_timestring(tbuf,sizeof(tbuf),time(NULL)));
             dyncgi(webblk);
             http_exit(webblk);
@@ -573,7 +580,6 @@ void *http_server (void *arg)
 int                     rc;             /* Return code               */
 int                     lsock;          /* Socket for listening      */
 int                     csock;          /* Socket for conversation   */
-FILE                   *hsock;          /* Socket for conversation   */
 struct sockaddr_in      server;         /* Server address structure  */
 fd_set                  selset;         /* Read bit map for select   */
 int                     optval;         /* Argument for setsockopt   */
@@ -591,32 +597,34 @@ TID                     httptid;        /* Negotiation thread id     */
        use a reasonable default */
     if (!sysblk.httproot)
         {
-#if defined(WIN32)
+#if defined(_MSVC_)
         char process_dir[HTTP_PATH_LENGTH];
         if (get_process_directory(process_dir,HTTP_PATH_LENGTH) > 0)
+        {
+            strlcat(process_dir,"\\html",HTTP_PATH_LENGTH);
             sysblk.httproot = strdup(process_dir);
+        }
         else
 #endif /*defined(WIN32)*/
         sysblk.httproot = strdup(HTTP_ROOT);
     }
-#if defined(WIN32)
-    if (is_win32_directory(sysblk.httproot))
-    {
-        char  posix_dir[HTTP_PATH_LENGTH];
-        convert_win32_directory_to_posix_directory(sysblk.httproot,posix_dir);
-        free(sysblk.httproot); sysblk.httproot = strdup(posix_dir);
-    }
-#endif /*defined(WIN32)*/
+
     /* Convert the specified HTTPROOT value to an absolute path
        ending with a '/' and save in sysblk.httproot. */
     {
         char absolute_httproot_path[HTTP_PATH_LENGTH];
         char save_working_directory[HTTP_PATH_LENGTH];
         int  rc;
+#if defined(_MSVC_)
+        rc = expand_environ_vars( sysblk.httproot, absolute_httproot_path,
+            sizeof(absolute_httproot_path) );
+        if (rc == 0)
+            free(sysblk.httproot); sysblk.httproot = strdup(absolute_httproot_path);
+#endif /* defined(_MSVC_) */
         if (!realpath(sysblk.httproot,absolute_httproot_path))
         {
-            logmsg( _("HHCCF066E Invalid HTTPROOT: %s\n"),
-                   strerror(errno));
+            logmsg( _("HHCCF066E Invalid HTTPROOT: \"%s\": %s\n"),
+                   sysblk.httproot, strerror(errno));
             return NULL;
         }
         VERIFY(getcwd(save_working_directory,sizeof(save_working_directory)));
@@ -624,29 +632,31 @@ TID                     httptid;        /* Negotiation thread id     */
         VERIFY(!chdir(save_working_directory)); // (restore cwd)
         if (rc != 0)
         {
-            logmsg( _("HHCCF066E Invalid HTTPROOT: %s\n"),
-                   strerror(errno));
+            logmsg( _("HHCCF066E Invalid HTTPROOT: \"%s\": %s\n"),
+                   absolute_httproot_path, strerror(errno));
             return NULL;
         }
-        strlcat(absolute_httproot_path,"/",sizeof(absolute_httproot_path));
+        /* Append trailing [back]slash, but only if needed */
+        rc = strlen(absolute_httproot_path);
+        if (absolute_httproot_path[rc-1] != *HTTP_PS)
+            strlcat(absolute_httproot_path,HTTP_PS,sizeof(absolute_httproot_path));
         free(sysblk.httproot); sysblk.httproot = strdup(absolute_httproot_path);
-        TRACE("HTTPROOT = %s\n",sysblk.httproot);// (debug display)
+        logmsg(_("HHCHT013I Using HTTPROOT directory \"%s\"\n"),sysblk.httproot);
     }
 
-
     /* Obtain a socket */
-    lsock = socket (AF_INET, SOCK_STREAM, 0);
+    lsock = socket (AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
     if (lsock < 0)
     {
-        logmsg(_("HHCHT002E socket: %s\n"), strerror(errno));
+        logmsg(_("HHCHT002E socket: %s\n"), strerror(HSO_errno));
         return NULL;
     }
 
     /* Allow previous instance of socket to be reused */
     optval = 1;
     setsockopt (lsock, SOL_SOCKET, SO_REUSEADDR,
-                &optval, sizeof(optval));
+                (void*)&optval, sizeof(optval));
 
     /* Prepare the sockaddr structure for the bind */
     memset (&server, 0, sizeof(server));
@@ -660,7 +670,7 @@ TID                     httptid;        /* Negotiation thread id     */
     {
         rc = bind (lsock, (struct sockaddr *)&server, sizeof(server));
 
-        if (rc == 0 || errno != EADDRINUSE) break;
+        if (rc == 0 || HSO_errno != HSO_EADDRINUSE) break;
 
         logmsg (_("HHCHT003W Waiting for port %u to become free\n"),
                 sysblk.httpport);
@@ -669,7 +679,7 @@ TID                     httptid;        /* Negotiation thread id     */
 
     if (rc != 0)
     {
-        logmsg(_("HHCHT004E bind: %s\n"), strerror(errno));
+        logmsg(_("HHCHT004E bind: %s\n"), strerror(HSO_errno));
         return NULL;
     }
 
@@ -678,7 +688,7 @@ TID                     httptid;        /* Negotiation thread id     */
 
     if (rc < 0)
     {
-        logmsg(_("HHCHT005E listen: %s\n"), strerror(errno));
+        logmsg(_("HHCHT005E listen: %s\n"), strerror(HSO_errno));
         return NULL;
     }
 
@@ -699,8 +709,8 @@ TID                     httptid;        /* Negotiation thread id     */
 
         if (rc < 0 )
         {
-            if (errno == EINTR) continue;
-            logmsg(_("HHCHT007E select: %s\n"), strerror(errno));
+            if (HSO_errno == HSO_EINTR) continue;
+            logmsg(_("HHCHT007E select: %s\n"), strerror(HSO_errno));
             break;
         }
 
@@ -712,25 +722,17 @@ TID                     httptid;        /* Negotiation thread id     */
 
             if (csock < 0)
             {
-                logmsg(_("HHCHT008E accept: %s\n"), strerror(errno));
-                continue;
-            }
-
-            if(!(hsock = fdopen(csock,"r+")))
-            {
-                logmsg(_("HHCHT009E fdopen: %s\n"),strerror(errno));
-                close(csock);
+                logmsg(_("HHCHT008E accept: %s\n"), strerror(HSO_errno));
                 continue;
             }
 
             /* Create a thread to execute the http request */
             if ( create_thread (&httptid, &sysblk.detattr,
-                                http_request, hsock) )
+                                http_request, (void *)(long)csock) )
             {
                 logmsg(_("HHCHT010E http_request create_thread: %s\n"),
                         strerror(errno));
-                fclose (hsock);
-                close (csock);
+                close_socket (csock);
             }
 
         } /* end if(lsock) */
@@ -738,7 +740,7 @@ TID                     httptid;        /* Negotiation thread id     */
     } /* end while */
 
     /* Close the listening socket */
-    close (lsock);
+    close_socket (lsock);
 
     return NULL;
 

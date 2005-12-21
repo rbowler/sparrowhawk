@@ -1,6 +1,7 @@
-/* HDTEQ.C      (c) Copyright Jan Jaeger, 2003-2004                  */
+/* HDTEQ.C      (c) Copyright Jan Jaeger, 2003-2005                  */
 /*              Hercules Dynamic Loader                              */
 
+#include "hstdinc.h"
 
 #include "hercules.h"
 
@@ -34,6 +35,9 @@ static DTEQ dteq[] = {
     { "3215",   "3270" },
     { "3287",   "3270" },
 
+    { "1052-C", "1052c" },
+    { "3215-C", "1052c" },
+
     { "1442",   "3505" },
     { "2501",   "3505" },
 
@@ -64,6 +68,7 @@ static DTEQ dteq[] = {
     { NULL,     NULL   } };
 
 
+#if defined(OPTION_DYNAMIC_LOAD)
 static char *hdt_device_type_equates(char *typname)
 {
 DTEQ *device_type;
@@ -103,3 +108,4 @@ HDL_REGISTER_SECTION;
     HDL_REGISTER(hdl_device_type_equates,hdt_device_type_equates);
 }
 END_REGISTER_SECTION;
+#endif

@@ -1,8 +1,8 @@
-/* DAT.H        (c) Copyright Roger Bowler, 1999-2004                */
+/* DAT.H        (c) Copyright Roger Bowler, 1999-2005                */
 /*              ESA/390 Dynamic Address Translation                  */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the DAT, ALET, and ASN translation         */
@@ -278,19 +278,19 @@ auth_addr_excp:
 /*      asteo   Pointer to word to receive ASTE origin address       */
 /*      aste    Pointer to 16-word area to receive a copy of the     */
 /*              ASN second table entry associated with the ALET      */
-/*      prot    Pointer to field to receive protection indicator     */
 /*                                                                   */
 /* Output:                                                           */
 /*      If successful, the ASTE is copied into the 16-word area,     */
 /*      the real address of the ASTE is stored into the word pointed */
 /*      word pointed to by asteop, and the return value is zero;     */
-/*      the protection indicator is set to 2 if the fetch-only bit   */
-/*      in the ALE is set, otherwise it remains unchanged.           */
+/*      regs->dat.protect is set to 2 if the fetch-only bit          */
+/*      in the ALE is set, otherwise it is set to zero.              */
 /*                                                                   */
 /*      If unsuccessful, the return value is a non-zero exception    */
 /*      code in the range X'0028' through X'002D' (this is to allow  */
 /*      the TAR, LRA, and TPROT instructions to handle these         */
 /*      exceptions by setting the condition code).                   */
+/*      regs->dat.xcode is also set to the exception code.           */
 /*                                                                   */
 /*      A program check may be generated for addressing and ASN      */
 /*      translation specification exceptions, in which case the      */
@@ -511,25 +511,38 @@ int i;
 /* which was used to determine the source of the ASCE or STD.        */
 /*                                                                   */
 /* Input:                                                            */
-/*      arn     Access register number containing ALET (AR0 is       */
-/*              treated as containing ALET value 0), or special      */
-/*              value USE_PRIMARY_SPACE or USE_SECONDARY_SPACE       */
+/*      arn     Access register number (0-15) to be used if the      */
+/*              address-space control (PSW bits 16-17) indicates     */
+/*              that ARMODE is the current translation mode.         */
+/*              An access register number ORed with the special      */
+/*              value USE_ARMODE forces this routine to use ARMODE   */
+/*              regardless of the PSW address-space control setting. */
+/*              Access register 0 is treated as if it contained 0    */
+/*              and its actual contents are not examined.            */
+/*              Alternatively the arn parameter may contain one      */
+/*              of these special values (defined in hconsts.h):      */
+/*              USE_PRIMARY_SPACE, USE_SECONDARY_SPACE,              */
+/*              USE_HOME_SPACE, USE_REAL_ADDR to force the use of    */
+/*              a specific translation mode instead of the mode      */
+/*              indicated by the address-space control in the PSW.   */
 /*      regs    Pointer to the CPU register context                  */
 /*      acctype Type of access requested: READ, WRITE, INSTFETCH,    */
-/*              LRA, IVSK, TPROT, or STACK                           */
-/*      pasd    Pointer to field to receive ASCE or STD              */
-/*      pstid   Pointer to field to receive indication of which      */
-/*              address space was used to select the ASCE or STD     */
-/*      pprot   Pointer to field to receive protection indicator     */
+/*              LRA, IVSK, TPROT, STACK, PTE, LPTEA                  */
 /*                                                                   */
 /* Output:                                                           */
+/*      regs->dat.asd = the selected ASCE or STD                     */
+/*      regs->dat.stid = TEA_ST_PRIMARY, TEA_ST_SECNDRY,             */
+/*              TEA_ST_HOME, or TEA_ST_ARMODE indicates which        */
+/*              address space was used to select the ASCE or STD.    */
+/*      regs->dat.protect = 2 if in AR mode and access-list          */
+/*              controlled protection is indicated by the ALE        */
+/*              fetch-only bit; otherwise it remains unchanged.      */
+/*                                                                   */
 /*      If an ALET translation error occurs, the return value        */
 /*      is the exception code; otherwise the return value is zero,   */
-/*      the pasd field contains the ASCE or STD, and the pstid field */
-/*      is set to TEA_ST_PRIMARY, TEA_ST_SECNDRY, TEA_ST_HOME, or    */
-/*      TEA_ST_ARMODE.  The pprot field is set to 2 if in AR mode    */
-/*      and access-list controlled protection is indicated by the    */
-/*      ALE fetch-only bit; otherwise it remains unchanged.          */
+/*      regs->dat.asd field contains the ASCE or STD, and            */
+/*      regs->dat.stid is set to TEA_ST_PRIMARY, TEA_ST_SECNDRY,     */
+/*      TEA_ST_HOME, or TEA_ST_ARMODE.                               */
 /*-------------------------------------------------------------------*/
 _DAT_C_STATIC U16 ARCH_DEP(load_address_space_designator) (int arn,
            REGS *regs, int acctype)
@@ -544,48 +557,49 @@ U16     eax;                            /* Authorization index       */
     UNREFERENCED_370(arn);
     UNREFERENCED_370(acctype);
 
-    switch(arn)
-    {
-        case USE_PRIMARY_SPACE:
+    switch(arn) {
+
+    case USE_PRIMARY_SPACE:
+        regs->dat.stid = TEA_ST_PRIMARY;
+        regs->dat.asd = regs->CR(1);
+        break;
+
+    case USE_SECONDARY_SPACE:
+        regs->dat.stid = TEA_ST_SECNDRY;
+        regs->dat.asd = regs->CR(7);
+        break;
+
+    case USE_HOME_SPACE:
+        regs->dat.stid = TEA_ST_HOME;
+        regs->dat.asd = regs->CR(13);
+        break;
+
+    case USE_REAL_ADDR:
+        regs->dat.stid = 0;
+        regs->dat.asd = TLB_REAL_ASD;
+        break;
+
+    case USE_INST_SPACE:
+        switch(regs->aea_ar[USE_INST_SPACE]) {
+
+        case 1:
             regs->dat.stid = TEA_ST_PRIMARY;
-            regs->dat.asd = regs->CR(1);
             break;
-
-        case USE_SECONDARY_SPACE:
+        case 7:
             regs->dat.stid = TEA_ST_SECNDRY;
-            regs->dat.asd = regs->CR(7);
             break;
-
-        case USE_HOME_SPACE:
+        case 13:
             regs->dat.stid = TEA_ST_HOME;
-            regs->dat.asd = regs->CR(13);
             break;
-
-        case USE_REAL_ADDR:
-            regs->dat.stid = 0;
-            regs->dat.asd = TLB_REAL_ASD;
-            break;
-
-        case USE_INST_SPACE:
-            switch(regs->aea_ar[USE_INST_SPACE])
-            {
-                case 1:
-                    regs->dat.stid = TEA_ST_PRIMARY;
-                    break;
-                case 7:
-                    regs->dat.stid = TEA_ST_SECNDRY;
-                    break;
-                case 13:
-                    regs->dat.stid = TEA_ST_HOME;
-                    break;
-                default:
-                    regs->dat.stid = 0;
-            }
-            regs->dat.asd = regs->CR(regs->aea_ar[USE_INST_SPACE]);
-            break;
-
         default:
-            
+            regs->dat.stid = 0;
+        } /* end switch(regs->aea_ar[USE_INST_SPACE]) */
+
+        regs->dat.asd = regs->CR(regs->aea_ar[USE_INST_SPACE]);
+        break;
+
+    default:
+
     #if defined(FEATURE_DUAL_ADDRESS_SPACE)
         if (acctype == ACCTYPE_INSTFETCH)
       #if defined(FEATURE_LINKAGE_STACK)
@@ -616,8 +630,11 @@ U16     eax;                            /* Authorization index       */
             && (regs->guestregs->siebk->mx & SIE_MX_XC)
             && AR_BIT(&regs->guestregs->psw))
         #endif /*defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+          || (arn & USE_ARMODE)
             )
         {
+            /* Remove the USE_ARMODE flag from the arn if present */
+            arn &= ARN_MASK;
             /* [5.8.4.1] Select the access-list-entry token */
             alet = (arn == 0) ? 0 :
         #if defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
@@ -630,22 +647,22 @@ U16     eax;                            /* Authorization index       */
             (regs->sie_active) ? 0 :
         #endif /*defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
                 regs->AR(arn);
-    
+
             /* Use the ALET to determine the segment table origin */
             switch (alet) {
-    
+
             case ALET_PRIMARY:
                 /* [5.8.4.2] Obtain primary segment table designation */
                 regs->dat.stid = TEA_ST_PRIMARY;
                 regs->dat.asd = regs->CR(1);
                 break;
-    
+
             case ALET_SECONDARY:
                 /* [5.8.4.2] Obtain secondary segment table designation */
                 regs->dat.stid = TEA_ST_SECNDRY;
                 regs->dat.asd = regs->CR(7);
                 break;
-    
+
             default:
                 /* ALB Lookup */
                 if(regs->aea_ar[arn] >= CR_ALB_OFFSET)
@@ -658,13 +675,13 @@ U16     eax;                            /* Authorization index       */
                 {
                     /* Extract the extended AX from CR8 bits 0-15 (32-47) */
                     eax = regs->CR_LHH(8);
-    
+
                     /* [5.8.4.3] Perform ALET translation to obtain ASTE */
                     if (ARCH_DEP(translate_alet) (alet, eax, acctype,
                                                   regs, &asteo, aste))
                         /* Exit if ALET translation error */
                         return regs->dat.xcode;
-    
+
                     /* [5.8.4.9] Obtain the STD or ASCE from the ASTE */
                     regs->dat.asd = ASTE_AS_DESIGNATOR(aste);
                     regs->dat.stid = TEA_ST_ARMODE;
@@ -678,17 +695,17 @@ U16     eax;                            /* Authorization index       */
                        regs->dat.asd |= STD_PRIVATE;
     #endif
                    }
-    
+
                     /* Update ALB */
                     regs->CR(CR_ALB_OFFSET + arn) = regs->dat.asd;
                     regs->aea_ar[arn] = CR_ALB_OFFSET + arn;
                     regs->aea_common[CR_ALB_OFFSET + arn] = (regs->dat.asd & ASD_PRIVATE) == 0;
                     regs->aea_aleprot[arn] = regs->dat.protect & 2;
-    
+
                 }
-    
+
             } /* end switch(alet) */
-    
+
         } /* end if(ACCESS_REGISTER_MODE) */
       #endif /*defined(FEATURE_ACCESS_REGISTERS)*/
         else if (PRIMARY_SPACE_MODE(&regs->psw))
@@ -711,29 +728,23 @@ U16     eax;                            /* Authorization index       */
             regs->dat.asd = regs->CR(7);
         }
     #endif /*defined(FEATURE_DUAL_ADDRESS_SPACE)*/
-    
+
     } /* switch(arn) */
     return 0;
 } /* end function load_address_space_designator */
 
 
 /*-------------------------------------------------------------------*/
-/* Translate a 31-bit virtual address to a real address              */
+/* Translate a virtual address to a real address                     */
 /*                                                                   */
 /* Input:                                                            */
-/*      vaddr   31-bit virtual address to be translated              */
-/*      arn     Access register number containing ALET (AR0 is       */
-/*              treated as containing ALET value 0), or special      */
-/*              value USE_PRIMARY_SPACE or USE_SECONDARY_SPACE       */
+/*      vaddr   virtual address to be translated                     */
+/*      arn     Access register number or special value (see         */
+/*              load_address_space_designator function for a         */
+/*              complete description of this parameter)              */
 /*      regs    Pointer to the CPU register context                  */
 /*      acctype Type of access requested: READ, WRITE, INSTFETCH,    */
-/*              LRA, IVSK, TPROT, or STACK                           */
-/*      raddr   Pointer to field to receive real address             */
-/*      xcode   Pointer to field to receive exception code           */
-/*      priv    Pointer to field to receive private indicator        */
-/*      prot    Pointer to field to receive protection indicator     */
-/*      pstid   Pointer to field to receive indication of which      */
-/*              address space was used for the translation           */
+/*              LRA, IVSK, TPROT, STACK, PTE, LPTEA                  */
 /*                                                                   */
 /* Output:                                                           */
 /*      The return value is set to facilitate the setting of the     */
@@ -757,18 +768,49 @@ U16     eax;                            /* Authorization index       */
 /*          is not set; exception code is X'0038' through X'003B'.   */
 /*          The LRA instruction converts this to condition code 3.   */
 /*                                                                   */
-/*      The private indicator is set to 1 if translation was         */
-/*      successful and the STD indicates a private address space;    */
-/*      otherwise it remains unchanged.                              */
+/*      For ACCTYPE_LPTEA, the return value is set to facilitate     */
+/*      setting the condition code by the LPTEA instruction:         */
+/*      0 = Page table entry found, and page protection bit in the   */
+/*          segment table entry is zero; the real address field      */
+/*          contains the real address of the page table entry;       */
+/*          exception code is set to zero.                           */
+/*      1 = Page table entry found, and page protection bit in the   */
+/*          segment table entry is one; the real address field       */
+/*          contains the real address of the page table entry;       */
+/*          exception code is set to zero.                           */
+/*      2 = Region table or segment table entry invalid bit is set;  */
+/*          the real address field contains the real address of the  */
+/*          region table entry or segment table entry, with the      */
+/*          entry type in the low-order two bits of the address.     */
+/*      3 = Region table or segment table length exceeded; real      */
+/*          address field is not set; exception code is set to       */
+/*          X'0010' or X'0039' through X'003B'.                      */
+/*          ALET translation error: real address field is not        */
+/*          set; exception code is set to X'0028' through X'002D'.   */
+/*          ASCE-type error: real address is not set; exception      */
+/*          exception code is X'0038'.                               */
 /*                                                                   */
-/*      The protection indicator is set to 1 if translation was      */
+/*      regs->dat.raddr is set to the real address if translation    */
+/*      was successful; otherwise it may contain the address of      */
+/*      a page or segment table entry as described above.            */
+/*      For ACCTYPE_PTE or ACCTYPE_LPTEA it contains the address of  */
+/*      the page table entry if translation was successful.          */
+/*                                                                   */
+/*      regs->dat.xcode is set to the exception code if translation  */
+/*      was unsuccessful; otherwise it is set to zero.               */
+/*                                                                   */
+/*      regs->dat.private is set to 1 if translation was             */
+/*      successful and the STD indicates a private address space;    */
+/*      otherwise it is set to zero.                                 */
+/*                                                                   */
+/*      regs->dat.protect is set to 1 if translation was             */
 /*      successful and page protection, segment protection, or       */
 /*      segment controlled page protection is in effect; it is       */
 /*      set to 2 if translation was successful and ALE controlled    */
 /*      protection (but not page protection) is in effect;           */
-/*      otherwise it remains unchanged.                              */
+/*      otherwise it is set to zero.                                 */
 /*                                                                   */
-/*      The address space indication field is set to one of the      */
+/*      regs->dat.stid is set to one of the following                */
 /*      values TEA_ST_PRIMARY, TEA_ST_SECNDRY, TEA_ST_HOME, or       */
 /*      TEA_ST_ARMODE if the translation was successful.  This       */
 /*      indication is used to set bits 30-31 of the translation      */
@@ -1109,14 +1151,15 @@ U16     sx, px;                         /* Segment and page index,
     /* Extract the private space bit from the ASCE */
     regs->dat.private = ((regs->dat.asd & (ASCE_P|ASCE_R)) != 0);
 
-//  logmsg("asce=%16.16llX\n",regs->dat.asd);
+//  logmsg("asce=%16.16" I64_FMT "X\n",regs->dat.asd);
 
     /* [3.11.4] Look up the address in the TLB */
     /* [10.17] Do not use TLB if processing LRA instruction */
 
     /* Only a single entry in the TLB will be looked up, namely the
        entry indexed by bits 12-19 of the virtual address */
-    if (acctype != ACCTYPE_LRA && acctype != ACCTYPE_PTE)
+    if (acctype != ACCTYPE_LRA && acctype != ACCTYPE_PTE 
+        && acctype != ACCTYPE_LPTEA) 
         tlbix = TLBIX(vaddr);
 
     if (tlbix >= 0
@@ -1136,9 +1179,15 @@ U16     sx, px;                         /* Segment and page index,
         {
 //      logmsg("asce type = real\n");
 
+            /* Translation specification exception if LKPG for a real-space */
             if(acctype == ACCTYPE_PTE)
                 goto tran_spec_excp;
 
+            /* Special operation exception if LPTEA for a real-space */
+            if(acctype == ACCTYPE_LPTEA)
+                goto spec_oper_excp;
+
+            /* Construct a fake page table entry for real = virtual */
             pte = vaddr & 0xFFFFFFFFFFFFF000ULL;
         }
         else
@@ -1199,12 +1248,12 @@ U16     sx, px;                         /* Segment and page index,
                    All bytes must be fetched concurrently as observed by
                    other CPUs */
                 rte = ARCH_DEP(fetch_doubleword_absolute) (rto, regs);
-//              logmsg("r1te:%16.16llX=>%16.16llX\n",rto,rte);
+//              logmsg("r1te:%16.16" I64_FMT "X=>%16.16" I64_FMT "X\n",rto,rte);
 
                 /* Region-first translation exception if the bit 58 of
                    the region-first table entry is set (region invalid) */
                 if (rte & REGTAB_I)
-                    goto reg_first_excp;
+                    goto reg_first_invalid;
 
                 /* Translation specification exception if bits 60-61 of
                    the region-first table entry do not indicate the
@@ -1246,12 +1295,12 @@ U16     sx, px;                         /* Segment and page index,
                    All bytes must be fetched concurrently as observed by
                    other CPUs */
                 rte = ARCH_DEP(fetch_doubleword_absolute) (rto, regs);
-//              logmsg("r2te:%16.16llX=>%16.16llX\n",rto,rte);
+//              logmsg("r2te:%16.16" I64_FMT "X=>%16.16" I64_FMT "X\n",rto,rte);
 
                 /* Region-second translation exception if the bit 58 of
                    the region-second table entry is set (region invalid) */
                 if (rte & REGTAB_I)
-                    goto reg_second_excp;
+                    goto reg_second_invalid;
 
                 /* Translation specification exception if bits 60-61 of
                    the region-second table entry do not indicate the
@@ -1293,12 +1342,12 @@ U16     sx, px;                         /* Segment and page index,
                    All bytes must be fetched concurrently as observed by
                    other CPUs */
                 rte = ARCH_DEP(fetch_doubleword_absolute) (rto, regs);
-//              logmsg("r3te:%16.16llX=>%16.16llX\n",rto,rte);
+//              logmsg("r3te:%16.16" I64_FMT "X=>%16.16" I64_FMT "X\n",rto,rte);
 
                 /* Region-third translation exception if the bit 58 of
                    the region-third table entry is set (region invalid) */
                 if (rte & REGTAB_I)
-                    goto reg_third_excp;
+                    goto reg_third_invalid;
 
                 /* Translation specification exception if bits 60-61 of
                    the region-third table entry do not indicate the
@@ -1339,7 +1388,7 @@ U16     sx, px;                         /* Segment and page index,
             /* Fetch segment table entry from absolute storage.  All bytes
                must be fetched concurrently as observed by other CPUs */
             ste = ARCH_DEP(fetch_doubleword_absolute) (sto, regs);
-//          logmsg("ste:%16.16llX=>%16.16llX\n",sto,ste);
+//          logmsg("ste:%16.16" I64_FMT "X=>%16.16" I64_FMT "X\n",sto,ste);
 
             /* Segment translation exception if segment invalid */
             if (ste & ZSEGTAB_I)
@@ -1365,6 +1414,15 @@ U16     sx, px;                         /* Segment and page index,
                page table origin, giving address of page table entry */
             pto += px;
 
+            /* For LPTEA instruction, return the address of the PTE */
+            if (acctype == ACCTYPE_LPTEA)
+            {
+                regs->dat.raddr = pto;
+                regs->dat.xcode = 0;
+                cc = (ste & ZSEGTAB_P) ? 1 : 0;
+                return cc;
+            } /* end if(ACCTYPE_LPTEA) */
+
             /* Addressing exception if outside real storage */
             if (pto > regs->mainlim)
                 goto address_excp;
@@ -1372,7 +1430,7 @@ U16     sx, px;                         /* Segment and page index,
             /* Fetch the page table entry from absolute storage.  All bytes
                must be fetched concurrently as observed by other CPUs */
             pte = ARCH_DEP(fetch_doubleword_absolute) (pto, regs);
-//          logmsg("pte:%16.16llX=>%16.16llX\n",pto,pte);
+//          logmsg("pte:%16.16" I64_FMT "X=>%16.16" I64_FMT "X\n",pto,pte);
 
             /* Page translation exception if page invalid */
             if (pte & ZPGETAB_I)
@@ -1428,7 +1486,7 @@ address_excp:
 tran_spec_excp:
 #if defined(FEATURE_ESAME)
 //    logmsg("dat.c: translation specification exception...\n");
-//    logmsg("       pte = %16.16llX, ste = %16.16llX, rte=%16.16llX\n",
+//    logmsg("       pte = %16.16" I64_FMT "X, ste = %16.16" I64_FMT "X, rte=%16.16" I64_FMT "X\n",
 //        pte, ste, rte);
 #else
 //    logmsg("dat.c: translation specification exception...\n");
@@ -1438,11 +1496,26 @@ tran_spec_excp:
     regs->dat.xcode = PGM_TRANSLATION_SPECIFICATION_EXCEPTION;
     goto tran_prog_check;
 
+#if defined(FEATURE_ESAME)
+spec_oper_excp:
+    regs->dat.xcode = PGM_SPECIAL_OPERATION_EXCEPTION;
+    goto tran_prog_check;
+#endif /*defined(FEATURE_ESAME)*/
+
 tran_prog_check:
     ARCH_DEP(program_interrupt) (regs, regs->dat.xcode);
 
 /* Conditions which the caller may or may not program check */
 seg_tran_invalid:
+    /* For LPTEA, return segment table entry address with cc 2 */
+    if (acctype == ACCTYPE_LPTEA)
+    {
+        regs->dat.raddr = sto;
+        cc = 2;
+        return cc;
+    } /* end if(ACCTYPE_LPTEA) */
+
+    /* Otherwise set translation exception code */
     regs->dat.xcode = PGM_SEGMENT_TRANSLATION_EXCEPTION;
     regs->dat.raddr = sto;
     cc = 1;
@@ -1472,10 +1545,47 @@ seg_tran_length:
     goto tran_excp_addr;
 
 tran_alet_excp:
-    regs->excarid = arn;
-    return 4;
+    regs->excarid = arn & ARN_MASK;
+    cc = (acctype == ACCTYPE_LPTEA) ? 3 : 4;
+    return cc;
 
 #if defined(FEATURE_ESAME)
+reg_first_invalid:
+    /* For LPTEA, return region table entry address with cc 2 */
+    if (acctype == ACCTYPE_LPTEA)
+    {
+        regs->dat.raddr = rto | (TT_R1TABL >> 2);
+        cc = 2;
+        return cc;
+    } /* end if(ACCTYPE_LPTEA) */
+
+    /* Otherwise set translation exception code */
+    goto reg_first_excp;
+
+reg_second_invalid:
+    /* For LPTEA, return region table entry address with cc 2 */
+    if (acctype == ACCTYPE_LPTEA)
+    {
+        regs->dat.raddr = rto | (TT_R2TABL >> 2);
+        cc = 2;
+        return cc;
+    } /* end if(ACCTYPE_LPTEA) */
+     
+    /* Otherwise set translation exception code */
+    goto reg_second_excp;
+
+reg_third_invalid:
+    /* For LPTEA, return region table entry address with cc 2 */
+    if (acctype == ACCTYPE_LPTEA)
+    {
+        regs->dat.raddr = rto | (TT_R3TABL >> 2);
+        cc = 2;
+        return cc;
+    } /* end if(ACCTYPE_LPTEA) */
+     
+    /* Otherwise set translation exception code */
+    goto reg_second_excp;
+
 asce_type_excp:
 //  logmsg("rfx = %4.4X, rsx %4.4X, rtx = %4.4X, tt = %1.1X\n",
 //      rfx, rsx, rtx, tt);
@@ -1500,6 +1610,10 @@ reg_third_excp:
 #endif /*defined(FEATURE_ESAME)*/
 
 tran_excp_addr:
+    /* For LPTEA instruction, return xcode with cc = 3 */
+    if (acctype == ACCTYPE_LPTEA) 
+        return 3;
+
     /* Set the translation exception address */
     regs->TEA = vaddr & PAGEFRAME_PAGEMASK;
 
@@ -1547,7 +1661,7 @@ tran_excp_addr:
         && AR_BIT(&regs->guestregs->psw))
 #endif /*defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
        )
-       regs->excarid = (arn < 0 ? 0 : arn);
+       regs->excarid = (arn < 0 ? 0 : arn & ARN_MASK);
 
     /* Return condition code */
     return cc;
@@ -1750,7 +1864,7 @@ int i;
 
 #endif /*defined(_FEATURE_SIE)*/
 
-} /* end function purge_tlbe */
+} /* end function invalidate_tlbe */
 
 
 /*-------------------------------------------------------------------*/
@@ -1895,7 +2009,12 @@ RADR    pfra;
 
 #endif /*!defined(OPTION_NO_INLINE_DAT) || defined(_DAT_C) */
 
+
 #if defined(FEATURE_PER2)
+/*-------------------------------------------------------------------*/
+/* Check for a storage alteration PER2 event                         */
+/* Returns 1 if true, 0 if false                                     */
+/*-------------------------------------------------------------------*/
 static inline int ARCH_DEP(check_sa_per2) (int arn, int acctype, REGS *regs)
 {
     UNREFERENCED(acctype);
@@ -1906,8 +2025,9 @@ static inline int ARCH_DEP(check_sa_per2) (int arn, int acctype, REGS *regs)
         return 1;
     }
     return 0;
-}
+} /* end function check_sa_per2 */
 #endif /*defined(FEATURE_PER2)*/
+
 
 #if !defined(OPTION_NO_INLINE_LOGICAL) || defined(_DAT_C)
 /*-------------------------------------------------------------------*/

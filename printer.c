@@ -1,10 +1,12 @@
-/* PRINTER.C    (c) Copyright Roger Bowler, 1999-2004                */
+/* PRINTER.C    (c) Copyright Roger Bowler, 1999-2005                */
 /*              ESA/390 Line Printer Device Handler                  */
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
 /* System/370 line printer devices.                                  */
 /*-------------------------------------------------------------------*/
+
+#include "hstdinc.h"
 
 #include "hercules.h"
 
@@ -66,15 +68,19 @@ static BYTE printer_immed_commands[256]=
 static int
 open_printer (DEVBLK *dev)
 {
-int             fd;                     /* File descriptor           */
-int             rc;                     /* Return code               */
-int             pipefd[2];              /* Pipe descriptors          */
 pid_t           pid;                    /* Child process identifier  */
+BYTE            pathname[MAX_PATH];     /* file path in host format  */
+#if !defined( _MSVC_ )
+int             pipefd[2];              /* Pipe descriptors          */
+int             rc;                     /* Return code               */
+#endif
 
     /* Regular open if 1st char of filename is not vertical bar */
     if (dev->filename[0] != '|')
     {
-        fd = open (dev->filename,
+        int fd;
+        hostpath(pathname, dev->filename, sizeof(pathname));
+        fd = open (pathname, O_BINARY |
                     O_WRONLY | O_CREAT | O_TRUNC /* | O_SYNC */,
                     S_IRUSR | S_IWUSR | S_IRGRP);
         if (fd < 0)
@@ -86,13 +92,34 @@ pid_t           pid;                    /* Child process identifier  */
 
         /* Save file descriptor in device block and return */
         dev->fd = fd;
+        dev->ispiped = 0;
         return 0;
     }
 
     /* Filename is in format |xxx, set up pipe to program xxx */
 
+    dev->ispiped = 1;
+
+#if defined( _MSVC_ )
+
+    /* "Poor man's" fork... */
+    pid = w32_poor_mans_fork ( dev->filename+1, &dev->fd );
+    if (pid < 0)
+    {
+        logmsg (_("HHCPR006E %4.4X device initialization error: fork: %s\n"),
+                dev->devnum, strerror(errno));
+        return -1;
+    }
+
+    /* Log start of child process */
+    logmsg (_("HHCPR007I pipe receiver (pid=%d) starting for %4.4X\n"),
+            pid, dev->devnum);
+    dev->ptpcpid = pid;
+
+#else /* !defined( _MSVC_ ) */
+
     /* Create a pipe */
-    rc = pipe (pipefd);
+    rc = create_pipe (pipefd);
     if (rc < 0)
     {
         logmsg (_("HHCPR005E %4.4X device initialization error: pipe: %s\n"),
@@ -106,6 +133,8 @@ pid_t           pid;                    /* Child process identifier  */
     {
         logmsg (_("HHCPR006E %4.4X device initialization error: fork: %s\n"),
                 dev->devnum, strerror(errno));
+        close_pipe ( pipefd[0] );
+        close_pipe ( pipefd[1] );
         return -1;
     }
 
@@ -117,7 +146,7 @@ pid_t           pid;                    /* Child process identifier  */
                 getpid(), dev->devnum);
 
         /* Close the write end of the pipe */
-        close (pipefd[1]);
+        close_pipe ( pipefd[1] );
 
         /* Duplicate the read end of the pipe onto STDIN */
         if (pipefd[0] != STDIN_FILENO)
@@ -127,13 +156,13 @@ pid_t           pid;                    /* Child process identifier  */
             {
                 logmsg (_("HHCPR008E %4.4X dup2 error: %s\n"),
                         dev->devnum, strerror(errno));
-                close (pipefd[0]);
+                close_pipe ( pipefd[0] );
                 _exit(127);
             }
         } /* end if(pipefd[0] != STDIN_FILENO) */
 
         /* Close the original descriptor now duplicated to STDIN */
-        close (pipefd[0]);
+        close_pipe ( pipefd[0] );
 
         /* Redirect stderr (screen) to hercules log task */
         dup2(STDOUT_FILENO, STDERR_FILENO);
@@ -177,12 +206,16 @@ pid_t           pid;                    /* Child process identifier  */
     /* The parent process continues as the pipe sender */
 
     /* Close the read end of the pipe */
-    close (pipefd[0]);
+    close_pipe ( pipefd[0] );
 
     /* Save pipe write descriptor in the device block */
     dev->fd = pipefd[1];
+    dev->ptpcpid = pid;
+
+#endif /* defined( _MSVC_ ) */
 
     return 0;
+
 } /* end function open_printer */
 
 /*-------------------------------------------------------------------*/
@@ -295,8 +328,23 @@ static void printer_query_device (DEVBLK *dev, char **class,
 /*-------------------------------------------------------------------*/
 static int printer_close_device ( DEVBLK *dev )
 {
+    if (dev->fd < 0) return 0;  /* (nothing to close!) */
+
     /* Close the device file */
-    close (dev->fd);
+    if ( dev->ispiped )
+    {
+#if !defined( _MSVC_ )
+        close_pipe ( dev->fd );
+#else /* defined( _MSVC_ ) */
+        close (dev->fd);
+        /* Log end of child process */
+        logmsg (_("HHCPR011I pipe receiver (pid=%d) terminating for %4.4X\n"),
+                dev->ptpcpid, dev->devnum);
+#endif /* defined( _MSVC_ ) */
+        dev->ptpcpid = 0;
+    }
+    else
+        close (dev->fd);
     dev->fd = -1;
     dev->stopprt = 0;
 
@@ -623,9 +671,9 @@ BYTE            c;                      /* Print character           */
         *unitstat = CSW_CE | CSW_DE;
         break;
 
-    case 0xE3:
+    case 0xE3: case 0xDB:
     /*---------------------------------------------------------------*/
-    /* SKIP TO CHANNEL 12 IMMEDIATE                                  */
+    /* SKIP TO CHANNEL 12 IMMEDIATE (or 11)                          */
     /*---------------------------------------------------------------*/
         eor = dev->crlf ? "\r\n" : "\n";
         write_buffer (dev, eor, strlen(eor), unitstat);

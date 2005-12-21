@@ -1,8 +1,8 @@
-/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2004                */
+/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2005                */
 /*              ESA/390 Service Processor                            */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements service processor functions                */
@@ -19,6 +19,16 @@
 /*      Break syscons output if too long - Jan Jaeger                */
 /*      Added CPI - Control Program Information ev. - JJ 2001-11-19  */
 /*-------------------------------------------------------------------*/
+
+#include "hstdinc.h"
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
+
+#if !defined(_SERVICE_C_)
+#define _SERVICE_C_
+#endif
 
 #include "hercules.h"
 
@@ -116,7 +126,7 @@ void scp_command (char *command, int priomsg)
 
     /* Set event pending flag in service parameter */
     sysblk.servparm |= SERVSIG_PEND;
-    
+
     /* Set service signal interrupt pending for read event data */
     ON_IC_SERVSIG;
     WAKEUP_CPUS_MASK (sysblk.waiting_mask);
@@ -164,7 +174,7 @@ int signal_quiesce (U16 count, BYTE unit)
 
     /* Set event pending flag in service parameter */
     sysblk.servparm |= SERVSIG_PEND;
-    
+
     /* Set service signal interrupt pending for read event data */
     ON_IC_SERVSIG;
     WAKEUP_CPUS_MASK (sysblk.waiting_mask);
@@ -249,6 +259,9 @@ BYTE ARCH_DEP(scpinfo_ifm)[8] = {
                         | SCCB_IFM0_CHANNEL_PATH_SUBSYSTEM_COMMAND
 //                      | SCCB_IFM0_CHANNEL_PATH_RECONFIG
 //                      | SCCB_IFM0_CPU_INFORMATION
+#ifdef FEATURE_CPU_RECONFIG
+                        | SCCB_IFM0_CPU_RECONFIG
+#endif /*FEATURE_CPU_RECONFIG*/
                         ,
                         0
 //                      | SCCB_IFM1_SIGNAL_ALARM
@@ -257,9 +270,6 @@ BYTE ARCH_DEP(scpinfo_ifm)[8] = {
 //                      | SCCB_IFM1_RESTART_REASONS
 //                      | SCCB_IFM1_INSTRUCTION_ADDRESS_TRACE_BUFFER
                         | SCCB_IFM1_LOAD_PARAMETER
-#ifdef FEATURE_CPU_RECONFIG
-                        | SCCB_IFM0_CPU_RECONFIG
-#endif /*FEATURE_CPU_RECONFIG*/
                         ,
                         0
 //                      | SCCB_IFM2_REAL_STORAGE_INCREMENT_RECONFIG
@@ -341,10 +351,10 @@ BYTE ARCH_DEP(scpinfo_cfg)[6] = {
                         | SCCB_CFG4_EXTENDED_TRANSLATION
 #endif /*defined(FEATURE_EXTENDED_TRANSLATION)*/
 #if defined(FEATURE_LOAD_REVERSED)
-                        | SCCB_CFG4_LOAD_REVERSED_FACILITY            
+                        | SCCB_CFG4_LOAD_REVERSED_FACILITY
 #endif /*defined(FEATURE_LOAD_REVERSED)*/
 #if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
-                        | SCCB_CFG4_EXTENDED_TRANSLATION_FACILITY2   
+                        | SCCB_CFG4_EXTENDED_TRANSLATION_FACILITY2
 #endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)*/
 #if defined(FEATURE_STORE_SYSTEM_INFORMATION)
                         | SCCB_CFG4_STORE_SYSTEM_INFORMATION
@@ -622,7 +632,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
 #if defined(_900) || defined(FEATURE_ESAME)
         /* SIE supports the full address range */
-        sccbscp->maxvm = 0;  
+        sccbscp->maxvm = 0;
         /* realiszm is valid */
         STORE_FW(sccbscp->grzm, 0);
         /* Number of storage increments installed in esame mode */
@@ -849,7 +859,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                         sccb->resp = SCCB_RESP_BUFF_LEN_ERR;
                         break;
                     }
-    
+
                     /* Print line unless it is a response prompt */
                     if (!(mto_bk->ltflag[0] & SCCB_MTO_LTFLG0_PROMPT))
                     {
@@ -865,7 +875,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                 mcd_len -= obj_len;
                 obj_hdr=(SCCB_OBJ_HDR *)((BYTE*)obj_hdr + obj_len);
             }
-    
+
             /* Indicate Event Processed */
             evd_hdr->flag |= SCCB_EVD_FLAG_PROC;
 
@@ -883,7 +893,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
             {
             BYTE systype[9], sysname[9], sysplex[9];
             U64  syslevel;
-            
+
                 for(i = 0; i < 8; i++)
                 {
                     systype[i] = guest_to_host(cpi_bk->system_type[i]);
@@ -902,7 +912,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                 logmsg(_("HHC771I System Type  = %s\n",systype));
                 logmsg(_("HHC772I System Name  = %s\n",sysname));
                 logmsg(_("HHC773I Sysplex Name = %s\n",sysplex));
-                logmsg(_("HHC774I System Level = %16.16llX\n"),syslevel);
+                logmsg(_("HHC774I System Level = %16.16" I64_FMT "X\n"),syslevel);
 #endif
             }
 
@@ -918,7 +928,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
         default:
 
-            if( HDC(debug_sclp_unknown_event, evd_hdr, sccb, regs) )
+            if( HDC3(debug_sclp_unknown_event, evd_hdr, sccb, regs) )
                 break;
 
             /* Set response code X'73F0' in SCCB header */
@@ -956,60 +966,60 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         /* Point to SCCB data area following SCCB header */
         evd_hdr = (SCCB_EVD_HDR*)(sccb+1);
 
-        if( HDC(debug_sclp_event_data, evd_hdr, sccb, regs) )
+        if( HDC3(debug_sclp_event_data, evd_hdr, sccb, regs) )
             break;
 
         /* Set response code X'60F0' if no outstanding events */
         event_msglen = strlen(servc_scpcmdstr);
         if (event_msglen == 0)
         {
-	    if(servc_signal_quiesce_pending)
-		{
-		    sgq_bk = (SCCB_SGQ_BK*)(evd_hdr+1);
-		    evd_len = sizeof(SCCB_EVD_HDR) + sizeof(SCCB_SGQ_BK);
+            if(servc_signal_quiesce_pending)
+            {
+                sgq_bk = (SCCB_SGQ_BK*)(evd_hdr+1);
+                evd_len = sizeof(SCCB_EVD_HDR) + sizeof(SCCB_SGQ_BK);
 
-                    /* Set response code X'75F0' if SCCB length exceeded */
-                    if ((evd_len + sizeof(SCCB_HEADER)) > sccblen)
-                    {
-                        sccb->reas = SCCB_REAS_EXCEEDS_SCCB;
-                        sccb->resp = SCCB_RESP_EXCEEDS_SCCB;
-                        break;
-                    }
-
-                    /* Zero all fields */
-                    memset (evd_hdr, 0, evd_len);
-
-                    /* Update SCCB length field if variable request */
-                    if (sccb->type & SCCB_TYPE_VARIABLE)
-                    {
-                        /* Set new SCCB length */
-                        sccblen = evd_len + sizeof(SCCB_HEADER);
-                        STORE_HW(sccb->length, sccblen);
-                        sccb->type &= ~SCCB_TYPE_VARIABLE;
-                    }
-
-                    /* Set length in event header */
-                    STORE_HW(evd_hdr->totlen, evd_len);
-
-                    /* Set type in event header */
-                    evd_hdr->type = SCCB_EVD_TYPE_SIGQ;
-
-		    STORE_HW(sgq_bk->count, servc_signal_quiesce_count);
-		    sgq_bk->unit = servc_signal_quiesce_unit;
-
-		    servc_signal_quiesce_pending = 0;
-
-                    /* Set response code X'0020' in SCCB header */
-                    sccb->reas = SCCB_REAS_NONE;
-                    sccb->resp = SCCB_RESP_COMPLETE;
-
+                /* Set response code X'75F0' if SCCB length exceeded */
+                if ((evd_len + sizeof(SCCB_HEADER)) > sccblen)
+                {
+                    sccb->reas = SCCB_REAS_EXCEEDS_SCCB;
+                    sccb->resp = SCCB_RESP_EXCEEDS_SCCB;
                     break;
-	        }
-	    else
+                }
+
+                /* Zero all fields */
+                memset (evd_hdr, 0, evd_len);
+
+                /* Update SCCB length field if variable request */
+                if (sccb->type & SCCB_TYPE_VARIABLE)
+                {
+                    /* Set new SCCB length */
+                    sccblen = evd_len + sizeof(SCCB_HEADER);
+                    STORE_HW(sccb->length, sccblen);
+                    sccb->type &= ~SCCB_TYPE_VARIABLE;
+                }
+
+                /* Set length in event header */
+                STORE_HW(evd_hdr->totlen, evd_len);
+
+                /* Set type in event header */
+                evd_hdr->type = SCCB_EVD_TYPE_SIGQ;
+
+                STORE_HW(sgq_bk->count, servc_signal_quiesce_count);
+                sgq_bk->unit = servc_signal_quiesce_unit;
+
+                servc_signal_quiesce_pending = 0;
+
+                /* Set response code X'0020' in SCCB header */
+                sccb->reas = SCCB_REAS_NONE;
+                sccb->resp = SCCB_RESP_COMPLETE;
+
+                break;
+            }
+            else
             {
                 sccb->reas = SCCB_REAS_NO_EVENTS;
                 sccb->resp = SCCB_RESP_NO_EVENTS;
-	    }
+            }
             break;
         }
 
@@ -1308,7 +1318,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
     default:
 
-        if( HDC(debug_sclp_unknown_command, sclp_command, sccb, regs) )
+        if( HDC3(debug_sclp_unknown_command, sclp_command, sccb, regs) )
             break;
 
         /* Set response code X'01F0' for invalid SCLP command */

@@ -1,15 +1,25 @@
-/* VM.C         (c) Copyright Roger Bowler, 2000-2004                */
+/* VM.C         (c) Copyright Roger Bowler, 2000-2005                */
 /*              ESA/390 VM Diagnose calls and IUCV instruction       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements miscellaneous diagnose functions           */
 /* described in SC24-5670 VM/ESA CP Programming Services             */
 /* and SC24-5855 VM/ESA CP Diagnosis Reference.                      */
 /*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 /*-------------------------------------------------------------------*/
+
+#include "hstdinc.h"
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
+
+#if !defined(_VM_C_)
+#define _VM_C_
+#endif
 
 #include "hercules.h"
 
@@ -619,14 +629,19 @@ BYTE            chanstat = 0;           /* Subchannel status         */
 /*-------------------------------------------------------------------*/
 void ARCH_DEP(extid_call) (int r1, int r2, REGS *regs)
 {
-int             i;                      /* Array subscript           */
-int             ver, rel;               /* Version and release number*/
-U32             idaddr;                 /* Address of storage operand*/
-U32             idlen;                  /* Length of storage operand */
-BYTE            buf[40];                /* Extended identification   */
-struct passwd  *ppwd;                   /* Pointer to passwd entry   */
-char           *puser;                  /* Pointer to user name      */
-BYTE            c;                      /* Character work area       */
+int        i;                           /* Array subscript           */
+int        ver, rel;                    /* Version and release number*/
+U32        idaddr;                      /* Address of storage operand*/
+U32        idlen;                       /* Length of storage operand */
+BYTE       buf[40];                     /* Extended identification   */
+#if defined( HAVE_GETLOGIN_R )
+  #if !defined(LOGIN_NAME_MAX)  
+    #define LOGIN_NAME_MAX 100
+  #endif
+char       unam[LOGIN_NAME_MAX+1];      /* User name                 */
+#endif
+char      *puser;                       /* Pointer to user name      */
+BYTE       c;                           /* Character work area       */
 
     /* Load storage operand address from R1 register */
     idaddr = regs->GR_L(r1);
@@ -671,8 +686,13 @@ BYTE            c;                      /* Character work area       */
     buf[15] = regs->cpuad & 0xFF;
 
     /* Bytes 16-23 contain the userid in EBCDIC */
-    ppwd = getpwuid(getuid());
-    puser = (ppwd != NULL ? ppwd->pw_name : "");
+#if defined( HAVE_GETLOGIN_R )
+    memset( unam, 0, sizeof(unam) );
+    VERIFY( getlogin_r ( unam, sizeof(unam) ) == 0 );
+    puser = unam;
+#else
+    puser = "";
+#endif
     for (i = 0; i < 8; i++)
     {
         c = (*puser == '\0' ? SPACE : *(puser++));
@@ -767,6 +787,7 @@ int     j,k;
     /* Put machine into stopped state if command length is zero */
     if (cmdlen == 0)
     {
+        regs->opinterv = 0;
         regs->cpustate = CPUSTATE_STOPPED;
         ON_IC_INTERRUPT(regs);
         return 0;
@@ -787,7 +808,17 @@ int     j,k;
     if(buf && *buf)
     {
 #ifdef FEATURE_HERCULES_DIAGCALLS
-        if(sysblk.diag8cmd)
+        int shcmd = 0;
+        {
+            char* p = buf;
+            while (*p && isspace(*p)) p++;
+            if ((*(p+0) == 's' || *(p+0) == 'S') &&
+                (*(p+1) == 'h' || *(p+1) == 'H') && 
+                isspace(*(p+2))) shcmd = 1;
+        }
+        if (sysblk.diag8cmd
+            && (!shcmd || !(sysblk.shcmdopt & (SHCMDOPT_DISABLE | SHCMDOPT_NODIAG8)))
+        )
         {
             logmsg (_("HHCVM001I *%s* panel command issued by guest\n"), buf);
             if (cmdflags & CMDFLAGS_RESPONSE)

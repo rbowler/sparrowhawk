@@ -1,21 +1,33 @@
-/* OPCODE.H (c) Copyright Jan Jaeger, 2000-2004          */
+/* OPCODE.H (c) Copyright Jan Jaeger, 2000-2005          */
 /*      Instruction decoding macros and prototypes       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 
-#if !defined(_OPCODE_H)
-
+#ifndef _OPCODE_H
 #define _OPCODE_H
 
-#ifdef HAVE_CONFIG_H
-#include <config.h>
-#endif
+#include "hercules.h"
 
-#undef PTRININTOK
-#if defined(SIZEOF_INT) && defined(SIZEOF_INT_P) && SIZEOF_INT == SIZEOF_INT_P
-#define PTRININTOK
-#endif
+#ifndef _CPU_C_
+#ifndef _HENGINE_DLL_
+#define CPU_DLL_IMPORT DLL_IMPORT
+#else   /* _HENGINE_DLL_ */
+#define CPU_DLL_IMPORT extern
+#endif  /* _HENGINE_DLL_ */
+#else   /* _CPU_C_ */
+#define CPU_DLL_IMPORT DLL_EXPORT
+#endif /* _HENGINE_DLL_ */
+
+#ifndef _OPCODE_C_
+#ifndef _HENGINE_DLL_
+#define OPC_DLL_IMPORT DLL_IMPORT
+#else   /* _HENGINE_DLL_ */
+#define OPC_DLL_IMPORT extern
+#endif  /* _HENGINE_DLL_ */
+#else   /* _OPCODE_C_ */
+#define OPC_DLL_IMPORT DLL_EXPORT
+#endif /* _HENGINE_DLL_ */
 
 #if defined(_370)
  #define _GEN370(_name) &s370_ ## _name,
@@ -109,36 +121,37 @@
     }
 
 
-typedef void (ATTR_REGPARM(2) (*zz_func)) (BYTE inst[], REGS *regs);
+typedef void (ATTR_REGPARM(2) *zz_func) (BYTE inst[], REGS *regs);
 
 #define ILC(_b) ((_b) < 0x40 ? 2 : (_b) < 0xc0 ? 4 : 6)
 #define REAL_ILC(_regs) \
  ( (_regs)->psw.zeroilc ? 0 : (_regs)->execflag ? 4 : ILC((_regs)->ip[0]) )
 
 /* Gabor Hoffer (performance option) */
-extern zz_func s370_opcode_table[];
-extern zz_func s390_opcode_table[];
-extern zz_func z900_opcode_table[];
+OPC_DLL_IMPORT zz_func s370_opcode_table[];
+OPC_DLL_IMPORT zz_func s390_opcode_table[];
+OPC_DLL_IMPORT zz_func z900_opcode_table[];
 
-extern zz_func opcode_table[][GEN_MAXARCH];
-extern zz_func opcode_01xx[][GEN_MAXARCH];
-extern zz_func v_opcode_a4xx[][GEN_MAXARCH];
-extern zz_func opcode_a5xx[][GEN_MAXARCH];
-extern zz_func v_opcode_a5xx[][GEN_MAXARCH];
-extern zz_func v_opcode_a6xx[][GEN_MAXARCH];
-extern zz_func opcode_a7xx[][GEN_MAXARCH];
-extern zz_func opcode_b2xx[][GEN_MAXARCH];
-extern zz_func opcode_b3xx[][GEN_MAXARCH];
-extern zz_func opcode_b9xx[][GEN_MAXARCH];
-extern zz_func opcode_c0xx[][GEN_MAXARCH];
-extern zz_func opcode_e3xx[][GEN_MAXARCH];
-extern zz_func opcode_e4xx[][GEN_MAXARCH];
-extern zz_func v_opcode_e4xx[][GEN_MAXARCH];
-extern zz_func opcode_e5xx[][GEN_MAXARCH];
-extern zz_func opcode_e6xx[][GEN_MAXARCH];
-extern zz_func opcode_ebxx[][GEN_MAXARCH];
-extern zz_func opcode_ecxx[][GEN_MAXARCH];
-extern zz_func opcode_edxx[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_table[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_01xx[][GEN_MAXARCH];
+extern         zz_func v_opcode_a4xx[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_a5xx[][GEN_MAXARCH];
+extern         zz_func v_opcode_a5xx[][GEN_MAXARCH];
+extern         zz_func v_opcode_a6xx[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_a7xx[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_b2xx[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_b3xx[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_b9xx[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_c0xx[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_c2xx[][GEN_MAXARCH];                      /*@Z9*/
+OPC_DLL_IMPORT zz_func opcode_e3xx[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_e4xx[][GEN_MAXARCH];
+extern         zz_func v_opcode_e4xx[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_e5xx[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_e6xx[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_ebxx[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_ecxx[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_edxx[][GEN_MAXARCH];
 
 
 #define DISASM_INSTRUCTION(_inst) \
@@ -182,6 +195,9 @@ int used; \
     case 0xC0: \
         used = sysblk.imapc0[(_inst)[1] & 0x0F]++; \
         break; \
+    case 0xC2:                                     /*@Z9*/ \
+        used = sysblk.imapc2[(_inst)[1] & 0x0F]++; /*@Z9*/ \
+        break;                                     /*@Z9*/ \
     case 0xE3: \
         used = sysblk.imape3[(_inst)[5]]++; \
         break; \
@@ -271,16 +287,40 @@ do { \
 #define FOOTPRINT(_regs)
 #endif
 
+/* Accelerator for instruction addresses */
+
+#define VALID_AIA(_regs, _addr) \
+((_addr) < (_regs)->AIE && (_regs)->AIV == ((_addr) & (PAGEFRAME_PAGEMASK | 0x01)))
+
+#define VALIDATE_AIA(_regs) \
+do { \
+  if ((_regs)->AIV != ((_regs)->psw.IA & (PAGEFRAME_PAGEMASK | 0x01))) \
+    INVALIDATE_AIA((_regs)); \
+} while (0)
+
+#define INVALIDATE_AIA(_regs) \
+    (_regs)->AIE = 0
+
+#define INVALIDATE_AIA_MAIN(_regs, _main) \
+do { \
+  if ((_main) == MAINADDR((_regs)->aim, (_regs)->AIV)) \
+    INVALIDATE_AIA(_regs); \
+} while (0)
+
 /* Instruction fetching */
 
 #define INSTRUCTION_FETCH(_dest, _addr, _regs, _valid) \
-  likely((_addr) <= (_regs)->AIE && (_regs)->AIV == ((_addr) & (PAGEFRAME_PAGEMASK | 0x01))) \
+  likely(VALID_AIA((_regs),(_addr))) \
   ? (_regs)->instvalid = 1, MAINADDR((_regs)->aim, (_addr)) \
   : ((_regs)->instvalid = (_valid), \
      ARCH_DEP(instfetch) ((_dest), (_addr), (_regs)) \
     )
 
+
+
+
 /* Instruction execution */
+
 #define EXECUTE_INSTRUCTION(_inst, _regs) \
 do { \
     FOOTPRINT ((_regs)); \
@@ -289,10 +329,9 @@ do { \
 } while(0)
 
 #define UNROLLED_EXECUTE(_regs) \
-do { \
-    (_regs)->ip = INSTRUCTION_FETCH((_regs)->inst, (_regs)->psw.IA, (_regs), 0); \
-    EXECUTE_INSTRUCTION((_regs)->ip, (_regs)); \
-} while(0)
+ if ((_regs)->psw.IA >= (_regs)->AIE) break; \
+ (_regs)->ip = MAINADDR((_regs)->aim, (_regs)->psw.IA); \
+ EXECUTE_INSTRUCTION((_regs)->ip, (_regs))
 
 #define RETURN_INTCHECK(_regs) \
         longjmp((_regs)->progjmp, SIE_NO_INTERCEPT)
@@ -515,42 +554,18 @@ do { \
 
 #endif /*!defined(FEATURE_BASIC_FP_EXTENSIONS)*/
 
-#define INVALIDATE_AIA(_regs) \
-    (_regs)->AIV = 1
-
-#define INVALIDATE_AIA_MAIN(_regs, _main) \
-do { \
-  if ((_main) == MAINADDR((_regs)->aim, (_regs)->AIV)) \
-    INVALIDATE_AIA(_regs); \
-} while (0)
-
 #define TLBIX(_addr) (((_addr) >> TLB_PAGESHIFT) & TLB_MASK)
 
-#if defined(PTRININTOK)
 #define MAINADDR(_main, _addr) \
-   (BYTE *)((unsigned int)(_main) ^ (unsigned int)(_addr))
-#else
-#define MAINADDR(_main, _addr) \
-   (_main) + ((_addr) & TLB_BYTEMASK)
-#endif
+   (BYTE*)((uintptr_t)(_main) ^ (uintptr_t)(_addr))
 
-#if defined(PTRININTOK)
 #define NEW_INSTADDR(_regs, _addr, _ia) \
-   (BYTE *)((unsigned int)(_ia) ^ (unsigned int)(_addr))
-#else
-#define NEW_INSTADDR(_regs, _addr, _ia) \
-   (_ia)
-#endif
+   (BYTE*)((uintptr_t)(_ia) ^ (uintptr_t)(_addr))
 
-#if defined(PTRININTOK)
 #define NEW_MAINADDR(_regs, _addr, _aaddr) \
-   (BYTE *)((unsigned int)((_regs)->mainstor \
-            + ((_aaddr) & PAGEFRAME_PAGEMASK)) \
-            ^ (unsigned int)((_addr) & TLB_PAGEMASK))
-#else
-#define NEW_MAINADDR(_regs, _addr, _aaddr) \
-   (_regs)->mainstor + ((_aaddr) & PAGEFRAME_PAGEMASK)
-#endif
+   (BYTE*)((uintptr_t)((_regs)->mainstor \
+         + (uintptr_t)((_aaddr) & PAGEFRAME_PAGEMASK)) \
+         ^ (uintptr_t)((_addr) & TLB_PAGEMASK))
 
 /* Perform invalidation after storage key update.
  * If the REF or CHANGE bit is turned off for an absolute
@@ -570,7 +585,7 @@ do { \
      obtain_lock (&sysblk.intlock); \
      for (i = 0; i < HI_CPU; i++) { \
        if (IS_CPU_ONLINE(i) && i != (_regs)->cpuad) { \
-         if (test_bit(4, i, &sysblk.waiting_mask)) \
+         if ( sysblk.waiting_mask & BIT(i) ) \
            ARCH_DEP(invalidate_tlbe)(sysblk.regs[i], mn); \
          else { \
            ON_IC_INTERRUPT(sysblk.regs[i]); \
@@ -1094,9 +1109,9 @@ do { \
 #define SIE_TRANSLATE_ADDR(_addr, _arn, _regs, _acctype) \
     ARCH_DEP(translate_addr)((_addr), (_arn), (_regs), (_acctype))
 
-#define SIE_LOGICAL_TO_ABS(_addr, _arn, _regs, _parms...) \
+#define SIE_LOGICAL_TO_ABS(_addr, _arn, _regs, _acctype, _akey) \
   ( \
-    ARCH_DEP(logical_to_main)(_addr, _arn, _regs, _parms), \
+    ARCH_DEP(logical_to_main)((_addr), (_arn), (_regs), (_acctype), (_akey)), \
     (_regs)->dat.aaddr \
   )
 
@@ -1105,9 +1120,9 @@ do { \
 #define SIE_TRANSLATE_ADDR(_addr, _arn, _regs, _acctype)   \
     s390_translate_addr((_addr), (_arn), (_regs), (_acctype))
 
-#define SIE_LOGICAL_TO_ABS(_addr, _arn, _regs, _parms...)   \
+#define SIE_LOGICAL_TO_ABS(_addr, _arn, _regs, _acctype, _akey) \
   ( \
-    s390_logical_to_main((_addr), (_arn), (_regs), _parms), \
+    s390_logical_to_main((_addr), (_arn), (_regs), (_acctype), (_akey)), \
     (_regs)->dat.aaddr \
   )
 
@@ -1118,11 +1133,11 @@ do { \
     s390_translate_addr((_addr), (_arn), (_regs), (_acctype)) : \
     z900_translate_addr((_addr), (_arn), (_regs), (_acctype)) )
 
-#define SIE_LOGICAL_TO_ABS(_addr, _arn, _regs, _parms...)   \
+#define SIE_LOGICAL_TO_ABS(_addr, _arn, _regs, _acctype, _akey) \
   ( \
     (((_regs)->arch_mode == ARCH_390) \
-    ? s390_logical_to_main((_addr), (_arn), (_regs), _parms) \
-    : z900_logical_to_main((_addr), (_arn), (_regs), _parms)), \
+    ? s390_logical_to_main((_addr), (_arn), (_regs), (_acctype), (_akey)) \
+    : z900_logical_to_main((_addr), (_arn), (_regs), (_acctype), (_akey))), \
     (_regs)->dat.aaddr \
   )
 
@@ -1143,10 +1158,10 @@ do { \
 
 #else /*!defined(_FEATURE_SIE)*/
 
-#define SIE_TRANSLATE_ADDR(_parms...)
-#define SIE_LOGICAL_TO_ABS(_parms...)
-#define SIE_INTERCEPT(_parms...)
-#define SIE_TRANSLATE(_parms...)
+#define SIE_TRANSLATE_ADDR(_addr, _arn, _regs, _acctype)
+#define SIE_LOGICAL_TO_ABS(_addr, _arn, _regs, _acctype, _akey)
+#define SIE_INTERCEPT(_regs)
+#define SIE_TRANSLATE(_addr, _acctype, _regs)
 
 #endif /*!defined(_FEATURE_SIE)*/
 
@@ -1274,9 +1289,41 @@ do { \
 
 #endif /*defined(FEATURE_VECTOR_FACILITY)*/
 
-#define PERFORM_SERIALIZATION(_regs)
-#define PERFORM_CHKPT_SYNC(_regs)
+/* Macros for PER3 Breaking Event Address Recording */
+#undef UPDATE_BEAR_A
+#undef UPDATE_BEAR_C
+#undef UPDATE_BEAR_N
+#if defined(FEATURE_PER3)
+ /* UPDATE_BEAR_A updates the Breaking Event Address Register
+    using the updated instruction address in the current PSW */
+ #define UPDATE_BEAR_A(_regs) {(_regs)->bear = \
+                (_regs)->psw.IA - REAL_ILC(_regs);}
+ /* UPDATE_BEAR_C updates the Breaking Event Address Register
+    using the updated instruction address in a copy of the PSW */
+ #define UPDATE_BEAR_C(_regs,_psw) {(_regs)->bear = \
+                _psw.IA - REAL_ILC(_regs);}
+ /* UPDATE_BEAR_N updates the Breaking Event Address Register
+    using the original instruction address in the current PSW
+    (not yet updated with the current instruction length).  If
+    the instruction is the target of an execute, we must add the
+    length of the target instruction (_len) and deduct the length
+    of the execute instruction (4) to arrive at the instruction
+    address, to account for the optimization performed by the
+    execute instruction. Otherwise the PSW contains the address
+    of the current instruction */
+ #define UPDATE_BEAR_N(_regs,_len) {(_regs)->bear = \
+                unlikely((_regs)->execflag) ? \
+                        (_regs)->psw.IA + (_len) - 4 : \
+                        (_regs)->psw.IA;}
+#else /*!defined(FEATURE_PER3)*/
+ /* These macros do nothing if the PER3 facility is not installed. */
+ #define UPDATE_BEAR_A(_regs)
+ #define UPDATE_BEAR_C(_regs,_psw) 
+ #define UPDATE_BEAR_N(_regs,_len)
+#endif /*!defined(FEATURE_PER3)*/
 
+#define PERFORM_SERIALIZATION(_regs) do { } while (0)
+#define PERFORM_CHKPT_SYNC(_regs) do { } while (0)
 
 #if !defined(NO_SETUID)
 
@@ -1400,8 +1447,8 @@ int ARCH_DEP(present_zone_io_interrupt) (U32 *ioid, U32 *ioparm,
 void io_reset (void);
 int  chp_reset(BYTE chpid);
 void channelset_reset(REGS *regs);
-int  device_attention (DEVBLK *dev, BYTE unitstat);
-int  ARCH_DEP(device_attention) (DEVBLK *dev, BYTE unitstat);
+DLL_EXPORT int  device_attention (DEVBLK *dev, BYTE unitstat);
+DLL_EXPORT int  ARCH_DEP(device_attention) (DEVBLK *dev, BYTE unitstat);
 
 
 /* Functions in module cpu.c */
@@ -1423,14 +1470,14 @@ void z900_store_psw (REGS *regs, BYTE *addr);
 int cpu_init (int cpu, REGS *regs, REGS *hostregs);
 void ARCH_DEP(perform_io_interrupt) (REGS *regs);
 #if defined(_FEATURE_SIE)
-void s370_program_interrupt (REGS *regs, int code);
+CPU_DLL_IMPORT void s370_program_interrupt (REGS *regs, int code);
 #endif /*!defined(_FEATURE_SIE)*/
 #if defined(_FEATURE_ZSIE)
-void s390_program_interrupt (REGS *regs, int code);
+CPU_DLL_IMPORT void s390_program_interrupt (REGS *regs, int code);
 #endif /*!defined(_FEATURE_ZSIE)*/
-void ARCH_DEP(program_interrupt) (REGS *regs, int code);
+CPU_DLL_IMPORT void ARCH_DEP(program_interrupt) (REGS *regs, int code);
 void *cpu_thread (int *cpu);
-void copy_psw (REGS *regs, BYTE *addr);
+DLL_EXPORT void copy_psw (REGS *regs, BYTE *addr);
 void display_psw (REGS *regs);
 
 
@@ -1475,19 +1522,20 @@ void store_status (REGS *ssreg, U64 aaddr);
 
 
 /* Functions in module ipl.c */
-int  load_ipl (U16 devnum, int cpu, int clear);
-int  ARCH_DEP(load_ipl) (U16 devnum, int cpu, int clear);
-void ARCH_DEP(cpu_reset) (REGS *regs);
-void initial_cpu_reset (REGS *regs);
-void ARCH_DEP(initial_cpu_reset) (REGS *regs);
-int load_main(char *fname, RADR startloc);
-int ARCH_DEP(load_main) (char *fname, RADR startloc);
-int load_hmc(char *fname, int cpu, int clear);
-int ARCH_DEP(load_hmc) (char *fname, int cpu, int clear);
+int          load_main          (char *fname, RADR startloc);
+int ARCH_DEP(load_main)         (char *fname, RADR startloc);
+int          load_ipl           (U16  devnum, int cpu, int clear);
+int ARCH_DEP(load_ipl)          (U16  devnum, int cpu, int clear);
+int          load_hmc           (char *fname, int cpu, int clear);
+int ARCH_DEP(load_hmc)          (char *fname, int cpu, int clear);
+int          system_reset       (             int cpu, int clear);
+int ARCH_DEP(system_reset)      (             int cpu, int clear);
+int          cpu_reset          (REGS *regs);
+int ARCH_DEP(cpu_reset)         (REGS *regs);
+int          initial_cpu_reset  (REGS *regs);
+int ARCH_DEP(initial_cpu_reset) (REGS *regs);
 void storage_clear(void);
 void xstorage_clear(void);
-void    system_reset(int cpu,int clear);
-void    ARCH_DEP(system_reset)(int cpu,int clear);
 
 
 /* Functions in module machchk.c */
@@ -1500,7 +1548,7 @@ void sigabend_handler (int signo);
 
 
 /* Functions in module opcode.c */
-void copy_opcode_tables ();
+OPC_DLL_IMPORT void copy_opcode_tables ();
 void set_opcode_pointers (REGS *regs);
 
 
@@ -1675,7 +1723,8 @@ DEF_INST(purge_accesslist_lookaside_buffer);
 DEF_INST(purge_translation_lookaside_buffer);
 DEF_INST(reset_reference_bit);
 DEF_INST(reset_reference_bit_extended);
-DEF_INST(set_address_space_control_x);
+DEF_INST(set_address_space_control);
+DEF_INST(set_address_space_control_fast);
 DEF_INST(set_clock);
 DEF_INST(set_clock_comparator);
 DEF_INST(set_clock_programmable_field);
@@ -1824,6 +1873,18 @@ DEF_INST(multiply_subtract_float_short_reg);
 DEF_INST(multiply_subtract_float_long_reg);
 DEF_INST(multiply_subtract_float_short);
 DEF_INST(multiply_subtract_float_long);
+DEF_INST(multiply_unnormal_float_long_to_ext_reg);              /*@Z9*/
+DEF_INST(multiply_unnormal_float_long_to_ext_low_reg);          /*@Z9*/
+DEF_INST(multiply_unnormal_float_long_to_ext_high_reg);         /*@Z9*/
+DEF_INST(multiply_add_unnormal_float_long_to_ext_reg);          /*@Z9*/
+DEF_INST(multiply_add_unnormal_float_long_to_ext_low_reg);      /*@Z9*/
+DEF_INST(multiply_add_unnormal_float_long_to_ext_high_reg);     /*@Z9*/
+DEF_INST(multiply_unnormal_float_long_to_ext);                  /*@Z9*/
+DEF_INST(multiply_unnormal_float_long_to_ext_low);              /*@Z9*/
+DEF_INST(multiply_unnormal_float_long_to_ext_high);             /*@Z9*/
+DEF_INST(multiply_add_unnormal_float_long_to_ext);              /*@Z9*/
+DEF_INST(multiply_add_unnormal_float_long_to_ext_low);          /*@Z9*/
+DEF_INST(multiply_add_unnormal_float_long_to_ext_high);         /*@Z9*/
 DEF_INST(load_float_long_y);
 DEF_INST(load_float_short_y);
 DEF_INST(store_float_long_y);
@@ -1947,6 +2008,7 @@ DEF_INST(store_character);
 DEF_INST(store_characters_under_mask);
 DEF_INST(store_clock);
 DEF_INST(store_clock_extended);
+DEF_INST(store_clock_fast);                                     /*@Z9*/
 DEF_INST(store_halfword);
 DEF_INST(store_multiple);
 DEF_INST(subtract_register);
@@ -1961,7 +2023,7 @@ DEF_INST(test_under_mask_high);
 DEF_INST(test_under_mask_low);
 DEF_INST(translate);
 DEF_INST(translate_and_test);
-DEF_INST(translate_and_test_reversed);
+DEF_INST(translate_and_test_reverse);
 DEF_INST(translate_extended);
 DEF_INST(unpack);
 DEF_INST(update_tree);
@@ -2067,15 +2129,16 @@ DEF_INST(divide_single_long);
 DEF_INST(divide_single_long_fullword);
 DEF_INST(divide_single_long_register);
 DEF_INST(divide_single_long_fullword_register);
-DEF_INST(load_logical_character);
-DEF_INST(load_logical_halfword);
+DEF_INST(load_logical_long_character);
+DEF_INST(load_logical_long_halfword);
 DEF_INST(store_pair_to_quadword);
 DEF_INST(load_pair_from_quadword);
 DEF_INST(extract_stacked_registers_long);
 DEF_INST(extract_psw);
 DEF_INST(extract_and_set_extended_authority);
 DEF_INST(load_address_relative_long);
-DEF_INST(store_facilities_list);
+DEF_INST(store_facility_list);
+DEF_INST(store_facility_list_extended);                         /*@Z9*/
 DEF_INST(load_long_halfword_immediate);
 DEF_INST(add_long_halfword_immediate);
 DEF_INST(multiply_long_halfword_immediate);
@@ -2246,7 +2309,41 @@ DEF_INST(subtract_logical_y);
 DEF_INST(test_under_mask_y);
 DEF_INST(compare_and_swap_and_purge_long);
 DEF_INST(invalidate_dat_table_entry);
-
+DEF_INST(load_page_table_entry_address);                        /*@Z9*/
+DEF_INST(add_fullword_immediate);                               /*@Z9*/
+DEF_INST(add_long_fullword_immediate);                          /*@Z9*/
+DEF_INST(add_logical_fullword_immediate);                       /*@Z9*/
+DEF_INST(add_logical_long_fullword_immediate);                  /*@Z9*/
+DEF_INST(and_immediate_high_fullword);                          /*@Z9*/
+DEF_INST(and_immediate_low_fullword);                           /*@Z9*/
+DEF_INST(compare_fullword_immediate);                           /*@Z9*/
+DEF_INST(compare_long_fullword_immediate);                      /*@Z9*/
+DEF_INST(compare_logical_fullword_immediate);                   /*@Z9*/
+DEF_INST(compare_logical_long_fullword_immediate);              /*@Z9*/
+DEF_INST(exclusive_or_immediate_high_fullword);                 /*@Z9*/
+DEF_INST(exclusive_or_immediate_low_fullword);                  /*@Z9*/
+DEF_INST(insert_immediate_high_fullword);                       /*@Z9*/
+DEF_INST(insert_immediate_low_fullword);                        /*@Z9*/
+DEF_INST(load_long_fullword_immediate);                         /*@Z9*/
+DEF_INST(load_logical_immediate_high_fullword);                 /*@Z9*/
+DEF_INST(load_logical_immediate_low_fullword);                  /*@Z9*/
+DEF_INST(or_immediate_high_fullword);                           /*@Z9*/
+DEF_INST(or_immediate_low_fullword);                            /*@Z9*/
+DEF_INST(subtract_logical_fullword_immediate);                  /*@Z9*/
+DEF_INST(subtract_logical_long_fullword_immediate);             /*@Z9*/
+DEF_INST(load_and_test);                                        /*@Z9*/
+DEF_INST(load_and_test_long);                                   /*@Z9*/
+DEF_INST(load_byte_register);                                   /*@Z9*/
+DEF_INST(load_long_byte_register);                              /*@Z9*/
+DEF_INST(load_halfword_register);                               /*@Z9*/
+DEF_INST(load_long_halfword_register);                          /*@Z9*/
+DEF_INST(load_logical_character);                               /*@Z9*/
+DEF_INST(load_logical_character_register);                      /*@Z9*/
+DEF_INST(load_logical_long_character_register);                 /*@Z9*/
+DEF_INST(load_logical_halfword);                                /*@Z9*/
+DEF_INST(load_logical_halfword_register);                       /*@Z9*/
+DEF_INST(load_logical_long_halfword_register);                  /*@Z9*/
+DEF_INST(find_leftmost_one_long_register);                      /*@Z9*/
 
 
 /* Instructions in ecpsvm.c */

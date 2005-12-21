@@ -1,8 +1,8 @@
-/* IO.C         (c) Copyright Roger Bowler, 1994-2004                */
+/* IO.C         (c) Copyright Roger Bowler, 1994-2005                */
 /*              ESA/390 CPU Emulator                                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all I/O instructions of the                */
@@ -29,6 +29,16 @@
 /*      I/O rate counter - Valery Pogonchenko                        */
 /*      64-bit IDAW support - Roger Bowler v209                  @IWZ*/
 /*-------------------------------------------------------------------*/
+
+#include "hstdinc.h"
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
+
+#if !defined(_IO_C_)
+#define _IO_C_
+#endif
 
 #include "hercules.h"
 
@@ -478,6 +488,12 @@ ORB     orb;                            /* Operation request block   */
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
 #endif /*!defined(FEATURE_INCORRECT_LENGTH_INDICATION_SUPPRESSION)*/
 
+#if !defined(FEATURE_MIDAW)                                     /*@MW*/
+    /* Program check if modified indirect data addressing requested */
+    if (orb.flag7 & ORB7_D)                                     
+        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
+#endif /*!defined(FEATURE_MIDAW)*/                              /*@MW*/
+
     /* Program check if reg 1 bits 0-15 not X'0001' */
     if ( regs->GR_LHH(1) != 0x0001 )
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
@@ -735,13 +751,13 @@ RADR    pfx;                            /* Prefix                    */
     else
     {
 #if defined(_FEATURE_IO_ASSIST)
-        /* If no I/O assisted devices have pending interrupts 
+        /* If no I/O assisted devices have pending interrupts
            then we must intercept */
         SIE_INTERCEPT(regs);
 #endif
         icode = 0;
     }
-    
+
     regs->psw.cc = (icode == 0) ? 0 : 1;
 }
 
@@ -955,7 +971,7 @@ DEVBLK *dev;                            /* -> device block for SIO   */
     /* to possibly complete an I/O - to prevent a TIO Busy Loop  */
     if(regs->psw.cc==2)
     {
-	    sched_yield();
+        sched_yield();
     }
 
 }

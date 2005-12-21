@@ -1,4 +1,4 @@
-/* CGIBIN.C     (c)Copyright Jan Jaeger, 2002-2004                   */
+/* CGIBIN.C     (c)Copyright Jan Jaeger, 2002-2005                   */
 /*              HTTP cgi-bin routines                                */
 
 /* This file contains all cgi routines that may be executed on the   */
@@ -41,8 +41,9 @@
 /*                                                                   */
 /*                                                                   */
 /*                                           Jan Jaeger - 28/03/2002 */
- 
 
+
+#include "hstdinc.h"
 #include "hercules.h"
 #include "devtype.h"
 #include "opcode.h"
@@ -62,18 +63,18 @@ int i;
 
     html_header(webblk);
 
-    fprintf(webblk->hsock, "<H2>Control Registers</H2>\n");
-    fprintf(webblk->hsock, "<PRE>\n");
+    hprintf(webblk->sock, "<H2>Control Registers</H2>\n");
+    hprintf(webblk->sock, "<PRE>\n");
     if(regs->arch_mode != ARCH_900)
         for (i = 0; i < 16; i++)
-            fprintf(webblk->hsock, "CR%2.2d=%8.8X%s", i, regs->CR_L(i),
+            hprintf(webblk->sock, "CR%2.2d=%8.8X%s", i, regs->CR_L(i),
                 ((i & 0x03) == 0x03) ? "\n" : "\t");
     else
         for (i = 0; i < 16; i++)
-            fprintf(webblk->hsock, "CR%1.1X=%16.16llX%s", i,
-                (long long)regs->CR_G(i), ((i & 0x03) == 0x03) ? "\n" : " ");           
+            hprintf(webblk->sock, "CR%1.1X=%16.16" I64_FMT "X%s", i,
+                (U64)regs->CR_G(i), ((i & 0x03) == 0x03) ? "\n" : " ");
 
-    fprintf(webblk->hsock, "</PRE>\n");
+    hprintf(webblk->sock, "</PRE>\n");
 
     html_footer(webblk);
 
@@ -91,18 +92,18 @@ int i;
 
     html_header(webblk);
 
-    fprintf(webblk->hsock, "<H2>General Registers</H2>\n");
-    fprintf(webblk->hsock, "<PRE>\n");
+    hprintf(webblk->sock, "<H2>General Registers</H2>\n");
+    hprintf(webblk->sock, "<PRE>\n");
     if(regs->arch_mode != ARCH_900)
         for (i = 0; i < 16; i++)
-            fprintf(webblk->hsock, "GR%2.2d=%8.8X%s", i, regs->GR_L(i),
+            hprintf(webblk->sock, "GR%2.2d=%8.8X%s", i, regs->GR_L(i),
                 ((i & 0x03) == 0x03) ? "\n" : "\t");
     else
         for (i = 0; i < 16; i++)
-            fprintf(webblk->hsock, "GR%1.1X=%16.16llX%s", i,
-                (long long)regs->GR_G(i), ((i & 0x03) == 0x03) ? "\n" : " ");           
+            hprintf(webblk->sock, "GR%1.1X=%16.16" I64_FMT "X%s", i,
+                (U64)regs->GR_G(i), ((i & 0x03) == 0x03) ? "\n" : " ");
 
-    fprintf(webblk->hsock, "</PRE>\n");
+    hprintf(webblk->sock, "</PRE>\n");
 
     html_footer(webblk);
 
@@ -114,7 +115,7 @@ int i;
 void cgibin_psw(WEBBLK *webblk)
 {
     REGS *regs;
-    QWORD   qword;                            /* quadword work area      */  
+    QWORD   qword;                            /* quadword work area      */
 
     char *value;
     int autorefresh=0;
@@ -136,55 +137,55 @@ void cgibin_psw(WEBBLK *webblk)
     if ((value = cgi_variable(webblk,"refresh_interval")))
         refresh_interval = atoi(value);
 
-    fprintf(webblk->hsock, "<H2>Program Status Word</H2>\n");
+    hprintf(webblk->sock, "<H2>Program Status Word</H2>\n");
 
-    fprintf(webblk->hsock, "<FORM method=post>\n");
+    hprintf(webblk->sock, "<FORM method=post>\n");
 
     if (!autorefresh)
     {
-        fprintf(webblk->hsock, "<INPUT type=submit value=\"Auto Refresh\" name=autorefresh>\n");
-        fprintf(webblk->hsock, "Refresh Interval: ");
-        fprintf(webblk->hsock, "<INPUT type=text size=2 name=\"refresh_interval\" value=%d>\n", 
+        hprintf(webblk->sock, "<INPUT type=submit value=\"Auto Refresh\" name=autorefresh>\n");
+        hprintf(webblk->sock, "Refresh Interval: ");
+        hprintf(webblk->sock, "<INPUT type=text size=2 name=\"refresh_interval\" value=%d>\n",
            refresh_interval);
     }
     else
     {
-        fprintf(webblk->hsock, "<INPUT type=submit value=\"Stop Refreshing\" name=norefresh>\n");
-        fprintf(webblk->hsock, "Refresh Interval: %d\n", refresh_interval);
-        fprintf(webblk->hsock, "<INPUT type=hidden name=\"refresh_interval\" value=%d>\n",refresh_interval);
+        hprintf(webblk->sock, "<INPUT type=submit value=\"Stop Refreshing\" name=norefresh>\n");
+        hprintf(webblk->sock, "Refresh Interval: %d\n", refresh_interval);
+        hprintf(webblk->sock, "<INPUT type=hidden name=\"refresh_interval\" value=%d>\n",refresh_interval);
     }
 
-    fprintf(webblk->hsock, "</FORM>\n");
+    hprintf(webblk->sock, "</FORM>\n");
 
-    fprintf(webblk->hsock, "<P>\n");
+    hprintf(webblk->sock, "<P>\n");
 
     if( regs->arch_mode != ARCH_900 )
     {
         copy_psw (regs, qword);
-        fprintf(webblk->hsock, "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
+        hprintf(webblk->sock, "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n",
                 qword[0], qword[1], qword[2], qword[3],
                 qword[4], qword[5], qword[6], qword[7]);
     }
     else
     {
         copy_psw (regs, qword);
-        fprintf(webblk->hsock, "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X "
+        hprintf(webblk->sock, "PSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X "
                 "%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X%2.2X\n",
                 qword[0], qword[1], qword[2], qword[3],
                 qword[4], qword[5], qword[6], qword[7],
                 qword[8], qword[9], qword[10], qword[11],
                 qword[12], qword[13], qword[14], qword[15]);
     }
- 
+
     if (autorefresh)
     {
         /* JavaScript to cause automatic page refresh */
-        fprintf(webblk->hsock, "<script language=\"JavaScript\">\n");
-        fprintf(webblk->hsock, "<!--\nsetTimeout('window.location.replace(\"%s?refresh_interval=%d&refresh=1\")', %d)\n", 
+        hprintf(webblk->sock, "<script language=\"JavaScript\">\n");
+        hprintf(webblk->sock, "<!--\nsetTimeout('window.location.replace(\"%s?refresh_interval=%d&refresh=1\")', %d)\n",
                cgi_baseurl(webblk),
                refresh_interval,
                refresh_interval*1000);
-        fprintf(webblk->hsock, "//-->\n</script>\n");
+        hprintf(webblk->sock, "//-->\n</script>\n");
     }
 
     html_footer(webblk);
@@ -194,19 +195,22 @@ void cgibin_psw(WEBBLK *webblk)
 
 void cgibin_syslog(WEBBLK *webblk)
 {
-int     msgcnt;
-int     msgnum;
-char   *msgbuf;
-
+int     num_bytes;
+int     logbuf_idx;
+char   *logbuf_ptr;
 char   *command;
-
 char   *value;
 int     autorefresh = 0;
 int     refresh_interval = 5;
 int     msgcount = 22;
 
     if ((command = cgi_variable(webblk,"command")))
+    {
         panel_command(command);
+        // Wait a bit before proceeding in case
+        // the command issues a lot of messages
+        usleep(50000);
+    }
 
     if((value = cgi_variable(webblk,"msgcount")))
         msgcount = atoi(value);
@@ -226,71 +230,122 @@ int     msgcount = 22;
 
     html_header(webblk);
 
-    fprintf(webblk->hsock,"<script language=\"JavaScript\">\n"
+    hprintf(webblk->sock,"<script language=\"JavaScript\">\n"
                           "<!--\n"
                           "document.cookie = \"msgcount=%d\";\n"
                           "//-->\n"
                           "</script>\n",
                           msgcount);
 
-    fprintf(webblk->hsock, "<H2>Hercules System Log</H2>\n");
-    fprintf(webblk->hsock, "<PRE>\n");
+    hprintf(webblk->sock, "<H2>Hercules System Log</H2>\n");
+    hprintf(webblk->sock, "<PRE>\n");
 
-    msgnum = msgcount ? log_line(msgcount) : -1;
-    while((msgcnt = log_read(&msgbuf, &msgnum, LOG_NOBLOCK)))
-        fwrite(msgbuf,msgcnt,1,webblk->hsock);
+    // Get the index to our desired starting message...
 
-    fprintf(webblk->hsock, "</PRE>\n");
+    logbuf_idx = msgcount ? log_line( msgcount ) : -1;
 
-    fprintf(webblk->hsock, "<FORM method=post>Command:\n");
-    fprintf(webblk->hsock, "<INPUT type=text name=command size=80>\n");
-    fprintf(webblk->hsock, "<INPUT type=submit name=send value=\"Send\">\n");
-    fprintf(webblk->hsock, "<INPUT type=hidden name=%srefresh value=1>\n",autorefresh ? "auto" : "no");
-    fprintf(webblk->hsock, "<INPUT type=hidden name=refresh_interval value=%d>\n",refresh_interval);
-    fprintf(webblk->hsock, "<INPUT type=hidden name=msgcount value=%d>\n",msgcount);
-    fprintf(webblk->hsock, "</FORM>\n<BR>\n");
+    // Now read the logfile starting at that index. The return
+    // value is the total #of bytes of messages data there is.
 
-    fprintf(webblk->hsock, "<A name=bottom>\n");
+    if ( (num_bytes = log_read( &logbuf_ptr, &logbuf_idx, LOG_NOBLOCK )) > 0 )
+    {
+        // Copy the message data to a work buffer for processing.
+        // This is to allow for the possibility, however remote,
+        // that the logfile buffer actually wraps around and over-
+        // lays the message data we were going to display (which
+        // could happen if there's a sudden flood of messages)
 
-    fprintf(webblk->hsock, "<FORM method=post>\n");
+        int   sav_bytes  =         num_bytes;
+        char *wrk_bufptr = malloc( num_bytes );
+
+        if ( wrk_bufptr ) strncpy( wrk_bufptr,  logbuf_ptr, num_bytes );
+        else                       wrk_bufptr = logbuf_ptr;
+
+        // We need to convert certain characters that might
+        // possibly be erroneously interpretted as HTML code
+
+#define  AMP_LT    "&lt;"       // (HTML code for '<')
+#define  AMP_GT    "&gt;"       // (HTML code for '>')
+#define  AMP_AMP   "&amp;"      // (HTML code for '&')
+
+        while ( num_bytes-- )
+        {
+            switch ( *wrk_bufptr )
+            {
+            case '<':
+                hwrite( webblk->sock, AMP_LT     , sizeof(AMP_LT) );
+                break;
+            case '>':
+                hwrite( webblk->sock, AMP_GT     , sizeof(AMP_GT) );
+                break;
+            case '&':
+                hwrite( webblk->sock, AMP_AMP    , sizeof(AMP_AMP));
+                break;
+            default:
+                hwrite( webblk->sock, wrk_bufptr , 1              );
+                break;
+            }
+
+            wrk_bufptr++;
+        }
+
+        // (free our work buffer if it's really ours)
+
+        if ( ( wrk_bufptr -= sav_bytes ) != logbuf_ptr )
+            free( wrk_bufptr );
+    }
+
+    hprintf(webblk->sock, "</PRE>\n");
+
+    hprintf(webblk->sock, "<FORM method=post>Command:\n");
+    hprintf(webblk->sock, "<INPUT type=text name=command size=80>\n");
+    hprintf(webblk->sock, "<INPUT type=submit name=send value=\"Send\">\n");
+    hprintf(webblk->sock, "<INPUT type=hidden name=%srefresh value=1>\n",autorefresh ? "auto" : "no");
+    hprintf(webblk->sock, "<INPUT type=hidden name=refresh_interval value=%d>\n",refresh_interval);
+    hprintf(webblk->sock, "<INPUT type=hidden name=msgcount value=%d>\n",msgcount);
+    hprintf(webblk->sock, "</FORM>\n<BR>\n");
+
+    hprintf(webblk->sock, "<A name=bottom>\n");
+
+    hprintf(webblk->sock, "<FORM method=post>\n");
     if(!autorefresh)
     {
-        fprintf(webblk->hsock, "<INPUT type=submit value=\"Auto Refresh\" name=autorefresh>\n");
-        fprintf(webblk->hsock, "Refresh Interval: ");
-        fprintf(webblk->hsock, "<INPUT type=text name=\"refresh_interval\" size=2 value=%d>\n", 
+        hprintf(webblk->sock, "<INPUT type=submit value=\"Auto Refresh\" name=autorefresh>\n");
+        hprintf(webblk->sock, "Refresh Interval: ");
+        hprintf(webblk->sock, "<INPUT type=text name=\"refresh_interval\" size=2 value=%d>\n",
            refresh_interval);
     }
     else
     {
-        fprintf(webblk->hsock, "<INPUT type=submit name=norefresh value=\"Stop Refreshing\">\n");
-        fprintf(webblk->hsock, "<INPUT type=hidden name=refresh_interval value=%d>\n",refresh_interval);
-        fprintf(webblk->hsock, " Refresh Interval: %2d \n", refresh_interval);
+        hprintf(webblk->sock, "<INPUT type=submit name=norefresh value=\"Stop Refreshing\">\n");
+        hprintf(webblk->sock, "<INPUT type=hidden name=refresh_interval value=%d>\n",refresh_interval);
+        hprintf(webblk->sock, " Refresh Interval: %2d \n", refresh_interval);
     }
-    fprintf(webblk->hsock, "<INPUT type=hidden name=msgcount value=%d>\n",msgcount);
-    fprintf(webblk->hsock, "</FORM>\n");
+    hprintf(webblk->sock, "<INPUT type=hidden name=msgcount value=%d>\n",msgcount);
+    hprintf(webblk->sock, "</FORM>\n");
 
-    fprintf(webblk->hsock, "<FORM method=post>\n");
-    fprintf(webblk->hsock, "Only show last ");
-    fprintf(webblk->hsock, "<INPUT type=text name=msgcount size=3 value=%d>",msgcount);
-    fprintf(webblk->hsock, " lines (zero for all loglines)\n");
-    fprintf(webblk->hsock, "<INPUT type=hidden name=%srefresh value=1>\n",autorefresh ? "auto" : "no");
-    fprintf(webblk->hsock, "<INPUT type=hidden name=refresh_interval value=%d>\n",refresh_interval);
-    fprintf(webblk->hsock, "</FORM>\n");
-    
+    hprintf(webblk->sock, "<FORM method=post>\n");
+    hprintf(webblk->sock, "Only show last ");
+    hprintf(webblk->sock, "<INPUT type=text name=msgcount size=3 value=%d>",msgcount);
+    hprintf(webblk->sock, " lines (zero for all loglines)\n");
+    hprintf(webblk->sock, "<INPUT type=hidden name=%srefresh value=1>\n",autorefresh ? "auto" : "no");
+    hprintf(webblk->sock, "<INPUT type=hidden name=refresh_interval value=%d>\n",refresh_interval);
+    hprintf(webblk->sock, "</FORM>\n");
+
     if (autorefresh)
     {
         /* JavaScript to cause automatic page refresh */
-        fprintf(webblk->hsock, "<script language=\"JavaScript\">\n");
-        fprintf(webblk->hsock, "<!--\nsetTimeout('window.location.replace(\"%s"
+        hprintf(webblk->sock, "<script language=\"JavaScript\">\n");
+        hprintf(webblk->sock, "<!--\nsetTimeout('window.location.replace(\"%s"
                "?refresh_interval=%d"
                "&refresh=1"
                "&msgcount=%d"
-               "\")', %d)\n", 
+               "\")', %d)\n",
                cgi_baseurl(webblk),
                refresh_interval,
                msgcount,
                refresh_interval*1000);
-        fprintf(webblk->hsock, "//-->\n</script>\n");
+        hprintf(webblk->sock, "//-->\n</script>\n");
     }
 
     html_footer(webblk);
@@ -324,12 +379,16 @@ REGS *regs;
         select_ar = 0;
 
     /* Validate cpu number */
-    if (cpu < 0 || cpu >= MAX_CPU)
+    if (cpu < 0 || cpu >= MAX_CPU || !IS_CPU_ONLINE(cpu))
         for (cpu = 0; cpu < MAX_CPU; cpu++)
             if(IS_CPU_ONLINE(cpu))
                 break;
 
-    regs = sysblk.regs[sysblk.pcpu];
+    if(cpu < MAX_CPU)
+        regs = sysblk.regs[cpu];
+    else
+        regs = sysblk.regs[sysblk.pcpu];
+
     if (!regs) regs = &sysblk.dummyregs;
 
     if((value = cgi_variable(webblk,"alter_gr")) && *value == 'A')
@@ -341,13 +400,9 @@ REGS *regs;
             if((value = cgi_variable(webblk,regname)))
             {
                 if(regs->arch_mode != ARCH_900)
-                    sscanf(value,"%x",&(regs->GR_L(i)));
+                    sscanf(value,"%"I32_FMT"x",&(regs->GR_L(i)));
                 else
-#if SIZEOF_LONG==8
-                    sscanf(value,"%lx",&(regs->GR_G(i)));
-#else
-                    sscanf(value,"%llx",&(regs->GR_G(i)));
-#endif
+                    sscanf(value,"%"I64_FMT"x",&(regs->GR_G(i)));
             }
         }
     }
@@ -361,13 +416,9 @@ REGS *regs;
             if((value = cgi_variable(webblk,regname)))
             {
                 if(regs->arch_mode != ARCH_900)
-                    sscanf(value,"%x",&(regs->CR_L(i)));
+                    sscanf(value,"%"I32_FMT"x",&(regs->CR_L(i)));
                 else
-#if SIZEOF_LONG==8
-                    sscanf(value,"%lx",&(regs->CR_G(i)));
-#else
-                    sscanf(value,"%llx",&(regs->CR_G(i)));
-#endif
+                    sscanf(value,"%"I64_FMT"x",&(regs->CR_G(i)));
             }
         }
     }
@@ -385,108 +436,108 @@ REGS *regs;
 
     html_header(webblk);
 
-    fprintf(webblk->hsock,"<form method=post>\n"
+    hprintf(webblk->sock,"<form method=post>\n"
                           "<select type=submit name=cpu>\n");
 
     for(i = 0; i < MAX_CPU; i++)
         if(IS_CPU_ONLINE(i))
-            fprintf(webblk->hsock,"<option value=%d%s>CPU%4.4X</option>\n",
+            hprintf(webblk->sock,"<option value=%d%s>CPU%4.4X</option>\n",
               i,i==cpu?" selected":"",i);
 
-    fprintf(webblk->hsock,"</select>\n"
+    hprintf(webblk->sock,"</select>\n"
                           "<input type=submit name=selcpu value=\"Select\">\n"
-                          "<input type=hidden name=cpu value=%d>\n" 
-                          "<input type=hidden name=select_gr value=%c>\n" 
-                          "<input type=hidden name=select_cr value=%c>\n" 
+                          "<input type=hidden name=cpu value=%d>\n"
+                          "<input type=hidden name=select_gr value=%c>\n"
+                          "<input type=hidden name=select_cr value=%c>\n"
                           "<input type=hidden name=select_ar value=%c>\n",
                           cpu, select_gr?'S':'H',select_cr?'S':'H',select_ar?'S':'H');
-    fprintf(webblk->hsock,"Mode: %s\n",get_arch_mode_string(regs));
-    fprintf(webblk->hsock,"</form>\n");
+    hprintf(webblk->sock,"Mode: %s\n",get_arch_mode_string(regs));
+    hprintf(webblk->sock,"</form>\n");
 
     if(!select_gr)
     {
-        fprintf(webblk->hsock,"<form method=post>\n"
+        hprintf(webblk->sock,"<form method=post>\n"
                               "<input type=submit name=select_gr "
                               "value=\"Select General Registers\">\n"
-                              "<input type=hidden name=cpu value=%d>\n" 
-                              "<input type=hidden name=select_cr value=%c>\n" 
-                              "<input type=hidden name=select_ar value=%c>\n" 
+                              "<input type=hidden name=cpu value=%d>\n"
+                              "<input type=hidden name=select_cr value=%c>\n"
+                              "<input type=hidden name=select_ar value=%c>\n"
                               "</form>\n",cpu,select_cr?'S':'H',select_ar?'S':'H');
     }
     else
     {
-        fprintf(webblk->hsock,"<form method=post>\n"
+        hprintf(webblk->sock,"<form method=post>\n"
                               "<input type=submit name=select_gr "
                               "value=\"Hide General Registers\">\n"
-                              "<input type=hidden name=cpu value=%d>\n" 
-                              "<input type=hidden name=select_cr value=%c>\n" 
-                              "<input type=hidden name=select_ar value=%c>\n" 
+                              "<input type=hidden name=cpu value=%d>\n"
+                              "<input type=hidden name=select_cr value=%c>\n"
+                              "<input type=hidden name=select_ar value=%c>\n"
                               "</form>\n",cpu,select_cr?'S':'H',select_ar?'S':'H');
 
-        fprintf(webblk->hsock,"<form method=post>\n"
+        hprintf(webblk->sock,"<form method=post>\n"
                               "<table>\n");
         for(i = 0; i < 16; i++)
         {
             if(regs->arch_mode != ARCH_900)
-                fprintf(webblk->hsock,"%s<td>GR%d</td><td><input type=text name=alter_gr%d size=8 "
+                hprintf(webblk->sock,"%s<td>GR%d</td><td><input type=text name=alter_gr%d size=8 "
                   "value=%8.8X></td>\n%s",
                   (i&3)==0?"<tr>\n":"",i,i,regs->GR_L(i),((i&3)==3)?"</tr>\n":"");
             else
-                fprintf(webblk->hsock,"%s<td>GR%d</td><td><input type=text name=alter_gr%d size=16 "
-                  "value=%16.16llX></td>\n%s",
-                  (i&3)==0?"<tr>\n":"",i,i,(long long)regs->GR_G(i),((i&3)==3)?"</tr>\n":"");
+                hprintf(webblk->sock,"%s<td>GR%d</td><td><input type=text name=alter_gr%d size=16 "
+                  "value=%16.16" I64_FMT "X></td>\n%s",
+                  (i&3)==0?"<tr>\n":"",i,i,(U64)regs->GR_G(i),((i&3)==3)?"</tr>\n":"");
         }
-        fprintf(webblk->hsock,"</table>\n"
+        hprintf(webblk->sock,"</table>\n"
                               "<input type=submit name=refresh value=\"Refresh\">\n"
                               "<input type=submit name=alter_gr value=\"Alter\">\n"
-                              "<input type=hidden name=cpu value=%d>\n" 
-                              "<input type=hidden name=select_gr value=S>\n" 
-                              "<input type=hidden name=select_cr value=%c>\n" 
-                              "<input type=hidden name=select_ar value=%c>\n" 
+                              "<input type=hidden name=cpu value=%d>\n"
+                              "<input type=hidden name=select_gr value=S>\n"
+                              "<input type=hidden name=select_cr value=%c>\n"
+                              "<input type=hidden name=select_ar value=%c>\n"
                               "</form>\n",cpu,select_cr?'S':'H',select_ar?'S':'H');
     }
 
 
     if(!select_cr)
     {
-        fprintf(webblk->hsock,"<form method=post>\n"
+        hprintf(webblk->sock,"<form method=post>\n"
                               "<input type=submit name=select_cr "
                               "value=\"Select Control Registers\">\n"
-                              "<input type=hidden name=cpu value=%d>\n" 
-                              "<input type=hidden name=select_gr value=%c>\n" 
-                              "<input type=hidden name=select_ar value=%c>\n" 
+                              "<input type=hidden name=cpu value=%d>\n"
+                              "<input type=hidden name=select_gr value=%c>\n"
+                              "<input type=hidden name=select_ar value=%c>\n"
                               "</form>\n",cpu,select_gr?'S':'H',select_ar?'S':'H');
     }
     else
     {
-        fprintf(webblk->hsock,"<form method=post>\n"
+        hprintf(webblk->sock,"<form method=post>\n"
                               "<input type=submit name=select_cr "
                               "value=\"Hide Control Registers\">\n"
-                              "<input type=hidden name=cpu value=%d>\n" 
-                              "<input type=hidden name=select_gr value=%c>\n" 
-                              "<input type=hidden name=select_ar value=%c>\n" 
+                              "<input type=hidden name=cpu value=%d>\n"
+                              "<input type=hidden name=select_gr value=%c>\n"
+                              "<input type=hidden name=select_ar value=%c>\n"
                               "</form>\n",cpu,select_gr?'S':'H',select_ar?'S':'H');
 
-        fprintf(webblk->hsock,"<form method=post>\n"
+        hprintf(webblk->sock,"<form method=post>\n"
                               "<table>\n");
         for(i = 0; i < 16; i++)
         {
             if(regs->arch_mode != ARCH_900)
-                fprintf(webblk->hsock,"%s<td>CR%d</td><td><input type=text name=alter_cr%d size=8 "
+                hprintf(webblk->sock,"%s<td>CR%d</td><td><input type=text name=alter_cr%d size=8 "
                   "value=%8.8X></td>\n%s",
                   (i&3)==0?"<tr>\n":"",i,i,regs->CR_L(i),((i&3)==3)?"</tr>\n":"");
             else
-                fprintf(webblk->hsock,"%s<td>CR%d</td><td><input type=text name=alter_cr%d size=16 "
-                  "value=%16.16llX></td>\n%s",
-                  (i&3)==0?"<tr>\n":"",i,i,(long long)regs->CR_G(i),((i&3)==3)?"</tr>\n":"");
+                hprintf(webblk->sock,"%s<td>CR%d</td><td><input type=text name=alter_cr%d size=16 "
+                  "value=%16.16" I64_FMT "X></td>\n%s",
+                  (i&3)==0?"<tr>\n":"",i,i,(U64)regs->CR_G(i),((i&3)==3)?"</tr>\n":"");
         }
-        fprintf(webblk->hsock,"</table>\n"
+        hprintf(webblk->sock,"</table>\n"
                               "<input type=submit name=refresh value=\"Refresh\">\n"
                               "<input type=submit name=alter_cr value=\"Alter\">\n"
-                              "<input type=hidden name=cpu value=%d>\n" 
-                              "<input type=hidden name=select_cr value=S>\n" 
-                              "<input type=hidden name=select_gr value=%c>\n" 
-                              "<input type=hidden name=select_ar value=%c>\n" 
+                              "<input type=hidden name=cpu value=%d>\n"
+                              "<input type=hidden name=select_cr value=S>\n"
+                              "<input type=hidden name=select_gr value=%c>\n"
+                              "<input type=hidden name=select_ar value=%c>\n"
                               "</form>\n",cpu,select_gr?'S':'H',select_ar?'S':'H');
     }
 
@@ -495,39 +546,39 @@ REGS *regs;
     {
         if(!select_ar)
         {
-            fprintf(webblk->hsock,"<form method=post>\n"
+            hprintf(webblk->sock,"<form method=post>\n"
                                   "<input type=submit name=select_ar "
                                   "value=\"Select Access Registers\">\n"
-                                  "<input type=hidden name=cpu value=%d>\n" 
-                                  "<input type=hidden name=select_gr value=%c>\n" 
-                                  "<input type=hidden name=select_cr value=%c>\n" 
+                                  "<input type=hidden name=cpu value=%d>\n"
+                                  "<input type=hidden name=select_gr value=%c>\n"
+                                  "<input type=hidden name=select_cr value=%c>\n"
                                   "</form>\n",cpu,select_gr?'S':'H',select_cr?'S':'H');
         }
         else
         {
-            fprintf(webblk->hsock,"<form method=post>\n"
+            hprintf(webblk->sock,"<form method=post>\n"
                                   "<input type=submit name=select_ar "
                                   "value=\"Hide Access Registers\">\n"
-                                  "<input type=hidden name=cpu value=%d>\n" 
-                                  "<input type=hidden name=select_gr value=%c>\n" 
-                                  "<input type=hidden name=select_cr value=%c>\n" 
+                                  "<input type=hidden name=cpu value=%d>\n"
+                                  "<input type=hidden name=select_gr value=%c>\n"
+                                  "<input type=hidden name=select_cr value=%c>\n"
                                   "</form>\n",cpu,select_gr?'S':'H',select_cr?'S':'H');
-    
-            fprintf(webblk->hsock,"<form method=post>\n"
+
+            hprintf(webblk->sock,"<form method=post>\n"
                                   "<table>\n");
             for(i = 0; i < 16; i++)
             {
-                fprintf(webblk->hsock,"%s<td>AR%d</td><td><input type=text name=alter_ar%d size=8 "
+                hprintf(webblk->sock,"%s<td>AR%d</td><td><input type=text name=alter_ar%d size=8 "
                   "value=%8.8X></td>\n%s",
                   (i&3)==0?"<tr>\n":"",i,i,regs->AR(i),((i&3)==3)?"</tr>\n":"");
             }
-            fprintf(webblk->hsock,"</table>\n"
+            hprintf(webblk->sock,"</table>\n"
                                   "<input type=submit name=refresh value=\"Refresh\">\n"
                                   "<input type=submit name=alter_ar value=\"Alter\">\n"
-                                  "<input type=hidden name=cpu value=%d>\n" 
-                                  "<input type=hidden name=select_gr value=%c>\n" 
-                                  "<input type=hidden name=select_cr value=%c>\n" 
-                                  "<input type=hidden name=select_ar value=S>\n" 
+                                  "<input type=hidden name=cpu value=%d>\n"
+                                  "<input type=hidden name=select_gr value=%c>\n"
+                                  "<input type=hidden name=select_cr value=%c>\n"
+                                  "<input type=hidden name=select_ar value=S>\n"
                                   "</form>\n",cpu,select_gr?'S':'H',select_cr?'S':'H');
         }
     }
@@ -543,10 +594,10 @@ int i, j;
 char *value;
 U32 addr = 0;
 
-    /* INCOMPLETE 
+    /* INCOMPLETE
      * no storage alter
      * no storage type (abs/real/prim virt/sec virt/access reg virt)
-     * no cpu selection for storage other then abs 
+     * no cpu selection for storage other then abs
      */
 
     if((value = cgi_variable(webblk,"alter_a0")))
@@ -557,7 +608,7 @@ U32 addr = 0;
     html_header(webblk);
 
 
-    fprintf(webblk->hsock,"<form method=post>\n"
+    hprintf(webblk->sock,"<form method=post>\n"
                           "<table>\n");
 
     if(addr > sysblk.mainsize || (addr + 128) > sysblk.mainsize)
@@ -566,13 +617,13 @@ U32 addr = 0;
     for(i = 0; i < 128;)
     {
         if(i == 0)
-            fprintf(webblk->hsock,"<tr>\n"
+            hprintf(webblk->sock,"<tr>\n"
                                   "<td><input type=text name=alter_a0 size=8 value=%8.8X>"
                                   "<input type=hidden name=alter_a1 value=%8.8X></td>\n"
                                   "<td><input type=submit name=refresh value=\"Refresh\"></td>\n",
                                   i + addr, i + addr);
         else
-            fprintf(webblk->hsock,"<tr>\n"
+            hprintf(webblk->sock,"<tr>\n"
                                   "<td align=center>%8.8X</td>\n"
                                   "<td></td>\n",
                                   i + addr);
@@ -581,13 +632,13 @@ U32 addr = 0;
         {
         U32 m;
             FETCH_FW(m,sysblk.mainstor + i + addr);
-            fprintf(webblk->hsock,"<td><input type=text name=alter_m%d size=8 value=%8.8X></td>\n",i,m);
+            hprintf(webblk->sock,"<td><input type=text name=alter_m%d size=8 value=%8.8X></td>\n",i,m);
         }
 
-        fprintf(webblk->hsock,"</tr>\n");
+        hprintf(webblk->sock,"</tr>\n");
     }
 
-    fprintf(webblk->hsock,"</table>\n"
+    hprintf(webblk->sock,"</table>\n"
                           "</form>\n");
     html_footer(webblk);
 
@@ -605,7 +656,7 @@ U32 doipl;
 
     html_header(webblk);
 
-    fprintf(webblk->hsock,"<h1>Perform Initial Program Load</h1>\n");
+    hprintf(webblk->sock,"<h1>Perform Initial Program Load</h1>\n");
 
     if(cgi_variable(webblk,"doipl"))
         doipl = 1;
@@ -623,36 +674,36 @@ U32 doipl;
         iplcpu = sysblk.iplcpu;
 
     if((value = cgi_variable(webblk,"loadparm")))
-	set_loadparm(value);
+    set_loadparm(value);
 
     /* Validate CPU number */
     if(iplcpu >= MAX_CPU)
         doipl = 0;
-  
+
     if(!doipl)
     {
         /* Present IPL parameters */
-        fprintf(webblk->hsock,"<form method=post>\n"
+        hprintf(webblk->sock,"<form method=post>\n"
                               "<select type=submit name=cpu>\n");
 
         for(i = 0; i < MAX_CPU; i++)
             if(IS_CPU_ONLINE(i))
-                fprintf(webblk->hsock,"<option value=%4.4X%s>CPU%4.4X</option>\n",
+                hprintf(webblk->sock,"<option value=%4.4X%s>CPU%4.4X</option>\n",
                   i, ((sysblk.regs[i]->cpuad == iplcpu) ? " selected" : ""), i);
 
-        fprintf(webblk->hsock,"</select>\n"
+        hprintf(webblk->sock,"</select>\n"
                               "<select type=submit name=device>\n");
 
         for(dev = sysblk.firstdev; dev; dev = dev->nextdev)
             if(dev->pmcw.flag5 & PMCW5_V)
-                fprintf(webblk->hsock,"<option value=%4.4X%s>DEV%4.4X</option>\n",
+                hprintf(webblk->sock,"<option value=%4.4X%s>DEV%4.4X</option>\n",
                   dev->devnum, ((dev->devnum == ipldev) ? " selected" : ""), dev->devnum);
 
-        fprintf(webblk->hsock,"</select>\n");
+        hprintf(webblk->sock,"</select>\n");
 
-        fprintf(webblk->hsock,"Loadparm:<input type=text name=loadparm size=8 value=\"%s\">\n", str_loadparm());
+        hprintf(webblk->sock,"Loadparm:<input type=text name=loadparm size=8 value=\"%s\">\n", str_loadparm());
 
-        fprintf(webblk->hsock,"<input type=submit name=doipl value=\"IPL\">\n"
+        hprintf(webblk->sock,"<input type=submit name=doipl value=\"IPL\">\n"
                           "</form>\n");
 
     }
@@ -662,13 +713,13 @@ U32 doipl;
         /* Perform IPL function */
         if( load_ipl(ipldev, iplcpu,0) )
         {
-            fprintf(webblk->hsock,"<h3>IPL failed, see the "
+            hprintf(webblk->sock,"<h3>IPL failed, see the "
                                   "<a href=\"syslog#bottom\">system log</a> "
                                   "for details</h3>\n");
         }
         else
         {
-            fprintf(webblk->hsock,"<h3>IPL completed</h3>\n");
+            hprintf(webblk->sock,"<h3>IPL completed</h3>\n");
         }
         release_lock (&sysblk.intlock);
     }
@@ -686,7 +737,7 @@ char   buf[80];
 
     html_header(webblk);
 
-    fprintf(webblk->hsock,"<h2>Attached Device List</h2>\n"
+    hprintf(webblk->sock,"<h2>Attached Device List</h2>\n"
                           "<table>\n"
                           "<tr><th>Number</th>"
                           "<th>Subchannel</th>"
@@ -699,7 +750,7 @@ char   buf[80];
         {
              (dev->hnd->query)(dev, &class, sizeof(buf), buf);
 
-             fprintf(webblk->hsock,"<tr>"
+             hprintf(webblk->sock,"<tr>"
                                    "<td>%4.4X</td>"
                                    "<td><a href=\"detail?subchan=%4.4X\">%4.4X</a></td>"
                                    "<td>%s</td>"
@@ -715,7 +766,7 @@ char   buf[80];
                                    (IOPENDING(dev) ? "pending " : ""));
         }
 
-    fprintf(webblk->hsock,"</table>\n");
+    hprintf(webblk->sock,"</table>\n");
 
     html_footer(webblk);
 
@@ -736,40 +787,40 @@ int subchan;
             if(dev->subchan == subchan)
                 break;
 
-    fprintf(webblk->hsock,"<h3>Subchannel Details</h3>\n");
+    hprintf(webblk->sock,"<h3>Subchannel Details</h3>\n");
 
-    fprintf(webblk->hsock,"<form method=post>\n"
+    hprintf(webblk->sock,"<form method=post>\n"
                           "<select type=submit name=subchan>\n");
 
     for(sel = sysblk.firstdev; sel; sel = sel->nextdev)
     {
-        fprintf(webblk->hsock,"<option value=%4.4X%s>Subchannel %4.4X",
+        hprintf(webblk->sock,"<option value=%4.4X%s>Subchannel %4.4X",
           sel->subchan, ((sel == dev) ? " selected" : ""), sel->subchan);
         if(sel->pmcw.flag5 & PMCW5_V)
-            fprintf(webblk->hsock," Device %4.4X</option>\n",sel->devnum);
+            hprintf(webblk->sock," Device %4.4X</option>\n",sel->devnum);
         else
-            fprintf(webblk->hsock,"</option>\n");
+            hprintf(webblk->sock,"</option>\n");
     }
 
-    fprintf(webblk->hsock,"</select>\n"
+    hprintf(webblk->sock,"</select>\n"
                           "<input type=submit value=\"Select / Refresh\">\n"
                           "</form>\n");
 
     if(dev)
     {
 
-        fprintf(webblk->hsock,"<table border>\n"
+        hprintf(webblk->sock,"<table border>\n"
                               "<caption align=left>"
                               "<h3>Path Management Control Word</h3>"
                               "</caption>\n");
 
-        fprintf(webblk->hsock,"<tr><th colspan=32>Interruption Parameter</th></tr>\n");
+        hprintf(webblk->sock,"<tr><th colspan=32>Interruption Parameter</th></tr>\n");
 
-        fprintf(webblk->hsock,"<tr><td colspan=32>%2.2X%2.2X%2.2X%2.2X</td></tr>\n",
+        hprintf(webblk->sock,"<tr><td colspan=32>%2.2X%2.2X%2.2X%2.2X</td></tr>\n",
                               dev->pmcw.intparm[0], dev->pmcw.intparm[1],
                               dev->pmcw.intparm[2], dev->pmcw.intparm[3]);
 
-        fprintf(webblk->hsock,"<tr><th>Q</th>"
+        hprintf(webblk->sock,"<tr><th>Q</th>"
                               "<th>0</th>"
                               "<th colspan=3>ISC</th>"
                               "<th colspan=2>00</th>"
@@ -782,7 +833,7 @@ int subchan;
                               "<th>V</th>"
                               "<th colspan=16>DEVNUM</th></tr>\n");
 
-        fprintf(webblk->hsock,"<tr><td>%d</td>"
+        hprintf(webblk->sock,"<tr><td>%d</td>"
                               "<td></td>"
                               "<td colspan=3>%d</td>"
                               "<td colspan=2></td>"
@@ -808,12 +859,12 @@ int subchan;
                               dev->pmcw.devnum[0],
                               dev->pmcw.devnum[1]);
 
-        fprintf(webblk->hsock,"<tr><th colspan=8>LPM</th>"
+        hprintf(webblk->sock,"<tr><th colspan=8>LPM</th>"
                               "<th colspan=8>PNOM</th>"
                               "<th colspan=8>LPUM</th>"
                               "<th colspan=8>PIM</th></tr>\n");
 
-        fprintf(webblk->hsock,"<tr><td colspan=8>%2.2X</td>"
+        hprintf(webblk->sock,"<tr><td colspan=8>%2.2X</td>"
                               "<td colspan=8>%2.2X</td>"
                               "<td colspan=8>%2.2X</td>"
                               "<td colspan=8>%2.2X</td></tr>\n",
@@ -822,11 +873,11 @@ int subchan;
                               dev->pmcw.lpum,
                               dev->pmcw.pim);
 
-        fprintf(webblk->hsock,"<tr><th colspan=16>MBI</th>"
+        hprintf(webblk->sock,"<tr><th colspan=16>MBI</th>"
                               "<th colspan=8>POM</th>"
                               "<th colspan=8>PAM</th></tr>\n");
 
-        fprintf(webblk->hsock,"<tr><td colspan=16>%2.2X%2.2X</td>"
+        hprintf(webblk->sock,"<tr><td colspan=16>%2.2X%2.2X</td>"
                               "<td colspan=8>%2.2X</td>"
                               "<td colspan=8>%2.2X</td></tr>\n",
                               dev->pmcw.mbi[0],
@@ -834,12 +885,12 @@ int subchan;
                               dev->pmcw.pom,
                               dev->pmcw.pam);
 
-        fprintf(webblk->hsock,"<tr><th colspan=8>CHPID=0</th>"
+        hprintf(webblk->sock,"<tr><th colspan=8>CHPID=0</th>"
                               "<th colspan=8>CHPID=1</th>"
                               "<th colspan=8>CHPID=2</th>"
                               "<th colspan=8>CHPID=3</th></tr>\n");
 
-        fprintf(webblk->hsock,"<tr><td colspan=8>%2.2X</td>"
+        hprintf(webblk->sock,"<tr><td colspan=8>%2.2X</td>"
                               "<td colspan=8>%2.2X</td>"
                               "<td colspan=8>%2.2X</td>"
                               "<td colspan=8>%2.2X</td></tr>\n",
@@ -848,12 +899,12 @@ int subchan;
                               dev->pmcw.chpid[2],
                               dev->pmcw.chpid[3]);
 
-        fprintf(webblk->hsock,"<tr><th colspan=8>CHPID=4</th>"
+        hprintf(webblk->sock,"<tr><th colspan=8>CHPID=4</th>"
                               "<th colspan=8>CHPID=5</th>"
                               "<th colspan=8>CHPID=6</th>"
                               "<th colspan=8>CHPID=7</th></tr>\n");
 
-        fprintf(webblk->hsock,"<tr><td colspan=8>%2.2X</td>"
+        hprintf(webblk->sock,"<tr><td colspan=8>%2.2X</td>"
                               "<td colspan=8>%2.2X</td>"
                               "<td colspan=8>%2.2X</td>"
                               "<td colspan=8>%2.2X</td></tr>\n",
@@ -862,7 +913,7 @@ int subchan;
                               dev->pmcw.chpid[6],
                               dev->pmcw.chpid[7]);
 
-        fprintf(webblk->hsock,"<tr><th colspan=8>ZONE</th>"
+        hprintf(webblk->sock,"<tr><th colspan=8>ZONE</th>"
                               "<th colspan=5>00000</th>"
                               "<th colspan=3>VISC</th>"
                               "<th colspan=8>00000000</th>"
@@ -870,7 +921,7 @@ int subchan;
                               "<th colspan=6>000000</th>"
                               "<th>S</th></tr>\n");
 
-        fprintf(webblk->hsock,"<tr><td colspan=8>%2.2X</td>"
+        hprintf(webblk->sock,"<tr><td colspan=8>%2.2X</td>"
                               "<td colspan=5></td>"
                               "<td colspan=3>%d</td>"
                               "<td colspan=8></td>"
@@ -882,7 +933,7 @@ int subchan;
                               (dev->pmcw.flag27 & PMCW27_I) >> 7,
                               (dev->pmcw.flag27 & PMCW27_S));
 
-        fprintf(webblk->hsock,"</table>\n");
+        hprintf(webblk->sock,"</table>\n");
 
     }
 
@@ -897,15 +948,15 @@ int zone;
 
     html_header(webblk);
 
-    fprintf(webblk->hsock,"<h2>Miscellaneous Registers<h2>\n");
+    hprintf(webblk->sock,"<h2>Miscellaneous Registers<h2>\n");
 
 
-    fprintf(webblk->hsock,"<table border>\n"
+    hprintf(webblk->sock,"<table border>\n"
                           "<caption align=left>"
                           "<h3>Zone related Registers</h3>"
                           "</caption>\n");
 
-    fprintf(webblk->hsock,"<tr><th>Zone</th>"
+    hprintf(webblk->sock,"<tr><th>Zone</th>"
                           "<th>CS Origin</th>"
                           "<th>CS Limit</th>"
                           "<th>ES Origin</th>"
@@ -915,7 +966,7 @@ int zone;
 
     for(zone = 0; zone < FEATURE_SIE_MAXZONES; zone++)
     {
-        fprintf(webblk->hsock,"<tr><td>%2.2X</td>"
+        hprintf(webblk->sock,"<tr><td>%2.2X</td>"
                               "<td>%8.8X</td>"
                               "<td>%8.8X</td>"
                               "<td>%8.8X</td>"
@@ -932,52 +983,122 @@ int zone;
 
     }
 
-    fprintf(webblk->hsock,"</table>\n");
+    hprintf(webblk->sock,"</table>\n");
 
 
-    fprintf(webblk->hsock,"<table border>\n"
+    hprintf(webblk->sock,"<table border>\n"
                           "<caption align=left>"
                           "<h3>Alternate Measurement</h3>"
                           "</caption>\n");
 
-    fprintf(webblk->hsock,"<tr><th>Measurement Block</th>"
+    hprintf(webblk->sock,"<tr><th>Measurement Block</th>"
                           "<th>Key</th></tr>\n");
 
-    fprintf(webblk->hsock,"<tr><td>%8.8X</td>"
+    hprintf(webblk->sock,"<tr><td>%8.8X</td>"
                           "<td>%2.2X</td></tr>\n",
                           (U32)sysblk.mbo,
                           sysblk.mbk);
 
-    fprintf(webblk->hsock,"</table>\n");
+    hprintf(webblk->sock,"</table>\n");
 
 
-    fprintf(webblk->hsock,"<table border>\n"
+    hprintf(webblk->sock,"<table border>\n"
                           "<caption align=left>"
                           "<h3>Address Limit Register</h3>"
                           "</caption>\n");
 
-    fprintf(webblk->hsock,"<tr><td>%8.8X</td></tr>\n",
+    hprintf(webblk->sock,"<tr><td>%8.8X</td></tr>\n",
                               (U32)sysblk.addrlimval);
 
-    fprintf(webblk->hsock,"</table>\n");
+    hprintf(webblk->sock,"</table>\n");
 
     html_footer(webblk);
 
 }
 
 
+void cgibin_configure_cpu(WEBBLK *webblk)
+{
+int i,j;
+
+    html_header(webblk);
+
+    hprintf(webblk->sock,"<h1>Configure CPU</h1>\n");
+
+    for(i = 0; i < MAX_CPU; i++)
+    {
+    char cpuname[8], *cpustate;
+    int  cpuonline = -1;
+
+        sprintf(cpuname,"cpu%d",i);
+        if((cpustate = cgi_variable(webblk,cpuname)))
+            sscanf(cpustate,"%d",&cpuonline);
+        
+        obtain_lock (&sysblk.intlock);
+
+        switch(cpuonline) {
+
+        case 0:
+            if(IS_CPU_ONLINE(i))
+                deconfigure_cpu(i);
+            break;
+
+        case 1:
+            if(!IS_CPU_ONLINE(i))
+                configure_cpu(i);
+            break;
+        }
+
+        release_lock (&sysblk.intlock);
+    }
+
+    for(i = 0; i < MAX_CPU; i++)
+    {
+        hprintf(webblk->sock,"<p>CPU%4.4X\n"
+                              "<form method=post>\n"
+                              "<select type=submit name=cpu%d>\n",i,i);
+
+        for(j = 0; j < 2; j++)
+            hprintf(webblk->sock,"<option value=%d%s>%sline</option>\n",
+              j, ((j!=0) == (IS_CPU_ONLINE(i)!=0)) ? " selected" : "", (j) ? "On" : "Off");
+
+        hprintf(webblk->sock,"</select>\n"
+                              "<input type=submit value=Update>\n"
+                              "</form>\n");
+    }
+
+    html_footer(webblk);
+
+}
+
 
 void cgibin_debug_version_info(WEBBLK *webblk)
 {
     html_header(webblk);
 
-    fprintf(webblk->hsock,"<h1>Hercules Version Information</h1>\n"
+    hprintf(webblk->sock,"<h1>Hercules Version Information</h1>\n"
                           "<pre>\n");
-    display_version(webblk->hsock,"Hercules HTTP Server ", TRUE);
-    fprintf(webblk->hsock,"</pre>\n");
+    display_version_2(NULL,"Hercules HTTP Server ", TRUE,webblk->sock);
+    hprintf(webblk->sock,"</pre>\n");
 
     html_footer(webblk);
 
+}
+
+/* contributed by Tim Pinkawa [timpinkawa@gmail.com] */
+
+void cgibin_xml_rates_info(WEBBLK *webblk)
+{
+    hprintf(webblk->sock,"Expires: 0\n");
+    hprintf(webblk->sock,"Content-type: text/xml;\n\n");   /* XML document */
+
+    hprintf(webblk->sock,"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    hprintf(webblk->sock,"<hercules>\n");
+    hprintf(webblk->sock,"\t<arch>%d</arch>\n", sysblk.arch_mode);
+    hprintf(webblk->sock,"\t<mips>%.1d.%.2d</mips>\n",
+        sysblk.mipsrate / 1000, (sysblk.mipsrate % 1000) / 10);
+    hprintf(webblk->sock,"\t<siosrate>%d</siosrate>\n", sysblk.siosrate);
+    hprintf(webblk->sock,"</hercules>\n");
 }
 
 
@@ -987,6 +1108,7 @@ void cgibin_debug_version_info(WEBBLK *webblk)
 CGITAB cgidir[] = {
     { "tasks/syslog", &cgibin_syslog },
     { "tasks/ipl", &cgibin_ipl },
+    { "configure/cpu", &cgibin_configure_cpu },
     { "debug/registers", &cgibin_debug_registers },
     { "debug/storage", &cgibin_debug_storage },
     { "debug/misc", &cgibin_debug_misc },
@@ -996,6 +1118,7 @@ CGITAB cgidir[] = {
     { "registers/general", &cgibin_reg_general },
     { "registers/control", &cgibin_reg_control },
     { "registers/psw", &cgibin_psw },
+    { "xml/rates", &cgibin_xml_rates_info },
     { NULL, NULL } };
 
 #endif /*defined(OPTION_HTTP_SERVER)*/

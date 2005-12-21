@@ -1,30 +1,50 @@
-/* VSTORE.H     (c) Copyright Roger Bowler, 1999-2004                */
-/*              ESA/390 Dynamic Address Translation                  */
+/* VSTORE.H     (c) Copyright Roger Bowler, 1999-2005                */
+/*              ESA/390 Virtual Storage Functions                    */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
-
-/*-------------------------------------------------------------------*/
-/* This module implements the DAT, ALET, and ASN translation         */
-/* functions of the ESA/390 architecture, described in the manual    */
-/* SA22-7201-04 ESA/390 Principles of Operation.  The numbers in     */
-/* square brackets in the comments refer to sections in the manual.  */
-/*-------------------------------------------------------------------*/
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 
 /*-------------------------------------------------------------------*/
-/* Additional credits:                                               */
-/*      S/370 DAT support by Jay Maynard (as described in            */
-/*      GA22-7000 System/370 Principles of Operation)                */
-/*      Clear remainder of ASTE when ASF=0 - Jan Jaeger              */
-/*      S/370 DAT support when running under SIE - Jan Jaeger        */
+/* This module contains various functions which store, fetch, and    */
+/* copy values to, from, or between virtual storage locations.       */
+/*                                                                   */
+/* Functions provided in this module are:                            */
+/* vstorec      Store 1 to 256 characters into virtual storage       */
+/* vstoreb      Store a single byte into virtual storage             */
+/* vstore2      Store a two-byte integer into virtual storage        */
+/* vstore4      Store a four-byte integer into virtual storage       */
+/* vstore8      Store an eight-byte integer into virtual storage     */
+/* vfetchc      Fetch 1 to 256 characters from virtual storage       */
+/* vfetchb      Fetch a single byte from virtual storage             */
+/* vfetch2      Fetch a two-byte integer from virtual storage        */
+/* vfetch4      Fetch a four-byte integer from virtual storage       */
+/* vfetch8      Fetch an eight-byte integer from virtual storage     */
+/* instfetch    Fetch instruction from virtual storage               */
+/* move_chars   Move characters using specified keys and addrspaces  */
+/* validate_operand   Validate addressing, protection, translation   */
+/*-------------------------------------------------------------------*/
+
+/*-------------------------------------------------------------------*/
+/*              Operand Length Checking Macros                       */
+/*                                                                   */
+/* The following macros are used to determine whether an operand     */
+/* storage access will cross a 2K page boundary or not.              */
+/*                                                                   */
+/* The first 'plain' pair of macros (without the 'L') are used for   */
+/* 0-based lengths wherein zero = 1 byte is being referenced and 255 */
+/* means 256 bytes are being referenced. They are obviously designed */
+/* for maximum length values of 0-255 as used w/MVC instructions.    */
+/*                                                                   */
+/* The second pair of 'L' macros are using for 1-based lengths where */
+/* 0 = no bytes are being referenced, 1 = one byte, etc. They are    */
+/* designed for 'Large' maximum length values such as occur with the */
+/* MVCL instruction for example (where the length can be up to 16MB) */
 /*-------------------------------------------------------------------*/
 
 #define NOCROSS2K(_addr,_len) likely( ( (int)((_addr) & 0x7FF)) <= ( 0x7FF - (_len) ) )
-
 #define CROSS2K(_addr,_len) unlikely( ( (int)((_addr) & 0x7FF)) > ( 0x7FF - (_len) ) )
 
 #define NOCROSS2KL(_addr,_len) likely( ( (int)((_addr) & 0x7FF)) <= ( 0x800 - (_len) ) )
-
 #define CROSS2KL(_addr,_len) unlikely( ( (int)((_addr) & 0x7FF)) > ( 0x800 - (_len) ) )
 
 #if !defined(OPTION_NO_INLINE_VSTORE) || defined(_VSTORE_C)
@@ -53,7 +73,7 @@ int     len2;                           /* Length to end of page     */
 
     if ( NOCROSS2K(addr,len) )
     {
-        MEMCPY(MADDR(addr, arn, regs, ACCTYPE_WRITE, regs->psw.pkey),
+        memcpy(MADDR(addr, arn, regs, ACCTYPE_WRITE, regs->psw.pkey),
                src, len + 1);
     }
     else
@@ -65,8 +85,8 @@ int     len2;                           /* Length to end of page     */
         main2 = MADDR((addr + len2) & ADDRESS_MAXWRAP(regs), arn,
                       regs, ACCTYPE_WRITE, regs->psw.pkey);
         *sk |= (STORKEY_REF | STORKEY_CHANGE);
-        MEMCPY (main1, src, len2);
-        MEMCPY (main2, src + len2, len + 1 - len2);
+        memcpy (main1, src, len2);
+        memcpy (main2, (BYTE*)src + len2, len + 1 - len2);
     }
 
 } /* end function ARCH_DEP(vstorec) */
@@ -321,11 +341,11 @@ int     len2;                           /* Length to copy on page    */
         if (unlikely(addr == 80))
         {
             obtain_lock( &sysblk.todlock );
-            update_TOD_clock ();
+            update_tod_clock ();
         }
 #endif /*FEATURE_INTERVAL_TIMER*/
 
-        MEMCPY (dest, main1, len + 1);
+        memcpy (dest, main1, len + 1);
 
 #ifdef FEATURE_INTERVAL_TIMER
         if (unlikely(addr == 80))
@@ -337,8 +357,8 @@ int     len2;                           /* Length to copy on page    */
         len2 = 0x800 - (addr & 0x7FF);
         main2 = MADDR ((addr + len2) & ADDRESS_MAXWRAP(regs),
                        arn, regs, ACCTYPE_READ, regs->psw.pkey);
-        MEMCPY (dest, main1, len2);
-        MEMCPY (dest + len2, main2, len + 1 - len2);
+        memcpy (dest, main1, len2);
+        memcpy ((BYTE*)dest + len2, main2, len + 1 - len2);
     }
 
 } /* end function ARCH_DEP(vfetchc) */
@@ -438,7 +458,7 @@ BYTE    temp[4];                        /* Copy destination          */
         if (unlikely(addr == 80))
         {
             obtain_lock( &sysblk.todlock );
-            update_TOD_clock ();
+            update_tod_clock ();
             release_lock( &sysblk.todlock );
           }
 #endif /*FEATURE_INTERVAL_TIMER*/
@@ -509,7 +529,7 @@ BYTE    temp[8];                        /* Copy destination          */
         if (unlikely(addr == 80))
         {
             obtain_lock( &sysblk.todlock );
-            update_TOD_clock ();
+            update_tod_clock ();
             release_lock( &sysblk.todlock );
           }
 #endif /*FEATURE_INTERVAL_TIMER*/
@@ -609,9 +629,23 @@ int     len = 0;                        /* Lengths for page crossing */
         if(!regs->instvalid)
             regs->peradr = addr;
 
+        /* Test for PER instruction-fetching event */
         if( EN_IC_PER_IF(regs)
           && PER_RANGE_CHECK(addr,regs->CR(10),regs->CR(11)) )
+        {
             ON_IC_PER_IF(regs);
+      #if defined(FEATURE_PER3)
+            /* If CR9_IFNUL (PER instruction-fetching nullification) is
+               set, take a program check immediately, without executing
+               the instruction or updating the PSW instruction address */
+            if ( EN_IC_PER_IFNUL(regs) )
+            {
+                ON_IC_PER_IFNUL(regs);
+                regs->psw.zeroilc = 1;
+                ARCH_DEP(program_interrupt) (regs, PGM_PER_EVENT);
+            }
+      #endif /*defined(FEATURE_PER3)*/
+        }
     }
 #endif /*defined(FEATURE_PER)*/
 
@@ -644,7 +678,7 @@ int     len = 0;                        /* Lengths for page crossing */
         int off;
         regs->AIV = addr & TLB_PAGEMASK;
         regs->AIE = (addr & TLB_PAGEMASK)
-                  | (addr < PSA_SIZE ? 0x7FA : (TLB_BYTEMASK -  5));
+                  | (addr < PSA_SIZE ? 0x7FB : (TLB_BYTEMASK -  4));
         off = addr & TLB_BYTEMASK;
         regs->aim = NEW_INSTADDR(regs, addr-off, ia-off);
     }
@@ -699,7 +733,6 @@ BYTE   *dest1, *dest2;                  /* Destination addresses     */
 BYTE   *source1, *source2;              /* Source addresses          */
 BYTE   *sk1, *sk2;                      /* Storage key addresses     */
 int     len2, len3;                     /* Lengths to copy           */
-int     i;                              /* Loop counter              */
 
     /* Quick out if copying just 1 byte */
     if (unlikely(len == 0))
@@ -710,23 +743,19 @@ int     i;                              /* Loop counter              */
         return;
     }
 
+    /* Translate addresses of leftmost operand bytes */
+    source1 = MADDR (addr2, arn2, regs, ACCTYPE_READ, key2);
+    dest1 = MADDR (addr1, arn1, regs, ACCTYPE_WRITE, key1);
+
     /* There are several scenarios (in optimal order):
      * (1) dest boundary and source boundary not crossed
-     *     (a) no operand overlap
-     *     (b) operand overlap
      * (2) dest boundary not crossed and source boundary crossed
      * (3) dest boundary crossed and source boundary not crossed
      * (4) dest boundary and source boundary are crossed
      *     (a) dest and source boundary cross at the same time
      *     (b) dest boundary crossed first
      *     (c) source boundary crossed first
-     * NOTE: for scenarios (2), (3) and (4) we don't check for overlap
-     *     but just perform the copy we would for overlap.  Testing
-     *     shows that less than 4% of the move_chars calls uses one of
-     *     these scenarios.  Over 95% of the calls are scenario (1a).
      */
-
-    /* Translate addresses of leftmost operand bytes */
 
 #ifdef FEATURE_INTERVAL_TIMER
     if (unlikely(addr2 == 80))
@@ -737,78 +766,25 @@ int     i;                              /* Loop counter              */
          * must release the todlock for us.
          */
         regs->todlock = 1;
-        update_TOD_clock ();
+        update_tod_clock ();
     }
 #endif /* FEATURE_INTERVAL_TIMER */
 
     if ( NOCROSS2K(addr1,len) )
     {
-    source1 = MADDR (addr2, arn2, regs, ACCTYPE_READ, key2);
-    dest1 = MADDR (addr1, arn1, regs, ACCTYPE_WRITE, key1);
         if ( NOCROSS2K(addr2,len) )
         {
-             /* (1) - No boundaries are crossed */
-             if ( (dest1 < source1 && dest1 + len < source1)
-               || (source1 < dest1 && source1 + len < dest1) )
-             {
-                 /* (1a) - No overlap */
-         /* Single out memcpys that can be translated */
-         /* into 1 or 2 GCC insns                     */
-         switch(len+1)
-         {
-            case 2: /* MOVHI (2) */
-                 memcpy(dest1,source1,2);
-                 break;
-            case 3: /* MOVHI + MOVQI (2+1) */
-                 memcpy(dest1,source1,3);
-                 break;
-            case 4: /* MOVSI (4) */
-                 memcpy(dest1,source1,4);
-                 break;
-            case 5: /* MOVSI +MOVQI (4+1) */
-                 memcpy(dest1,source1,5);
-                 break;
-            case 6: /* MOVSI + MOVHI (4+2) */
-                 memcpy(dest1,source1,6);
-                 break;
-                /* 7 : Would be MOVSI+MOVHI+MOVQI (4+2+1) */
-            case 8: /* MOVDI 8) */
-                 memcpy(dest1,source1,8);
-                 break;
-            case 9: /* MOVDI+MOVQI (8+1) */
-                 memcpy(dest1,source1,9);
-                 break;
-            case 10: /* MOVDI+MOVHI (8+2) */
-                 memcpy(dest1,source1,10);
-                 break;
-                /* 11 : Would be MOVDI+MOVHI+MOVQI (8+2+1) */
-            case 12: /* MOVDI+MOVSI (8+4) */
-                 memcpy(dest1,source1,12);
-                 break;
-                /* 13, 14, 15 are 3 insns */
-            case 16: /* MOVDI+MOVDI (8+8) */
-                 memcpy(dest1,source1,16);
-                 break;
-            default:
-                        MEMCPY (dest1, source1, len + 1);
-                break;
-         }
-             }
-             else
-             {
-                 /* (1b) - Overlap */
-                 for ( i = 0; i <= len; i++) *dest1++ = *source1++;
-             }
+            /* (1) - No boundaries are crossed */
+            concpy (dest1, source1, len + 1);
         }
         else
         {
-             /* (2) - Second operand crosses a boundary */
-             len2 = 0x800 - (addr2 & 0x7FF);
-             source2 = MADDR ((addr2 + len2) & ADDRESS_MAXWRAP(regs),
+            /* (2) - Second operand crosses a boundary */
+            len2 = 0x800 - (addr2 & 0x7FF);
+            source2 = MADDR ((addr2 + len2) & ADDRESS_MAXWRAP(regs),
                               arn2, regs, ACCTYPE_READ, key2);
-             for ( i = 0; i < len2; i++) *dest1++ = *source1++;
-             len2 = len - len2;
-             for ( i = 0; i <= len2; i++) *dest1++ = *source2++;
+            concpy (dest1, source1, len2);
+            concpy (dest1 + len2, source2, len - len2 + 1);
         }
     }
     else
@@ -816,6 +792,7 @@ int     i;                              /* Loop counter              */
         dest1 = MADDR (addr1, arn1, regs, ACCTYPE_WRITE_SKP, key1);
         sk1 = regs->dat.storkey;
         source1 = MADDR (addr2, arn2, regs, ACCTYPE_READ, key2);
+
         /* First operand crosses a boundary */
         len2 = 0x800 - (addr1 & 0x7FF);
         dest2 = MADDR ((addr1 + len2) & ADDRESS_MAXWRAP(regs),
@@ -825,9 +802,8 @@ int     i;                              /* Loop counter              */
         if ( NOCROSS2K(addr2,len) )
         {
              /* (3) - First operand crosses a boundary */
-             for ( i = 0; i < len2; i++) *dest1++ = *source1++;
-             len2 = len - len2;
-             for ( i = 0; i <= len2; i++) *dest2++ = *source1++;
+             concpy (dest1, source1, len2);
+             concpy (dest2, source1 + len2, len - len2 + 1);
         }
         else
         {
@@ -838,27 +814,22 @@ int     i;                              /* Loop counter              */
             if (len2 == len3)
             {
                 /* (4a) - Both operands cross at the same time */
-                for ( i = 0; i < len2; i++) *dest1++ = *source1++;
-                len2 = len - len2;
-                for ( i = 0; i <= len2; i++) *dest2++ = *source2++;
+                concpy (dest1, source1, len2);
+                concpy (dest2, source2, len - len2 + 1);
             }
             else if (len2 < len3)
             {
                 /* (4b) - First operand crosses first */
-                for ( i = 0; i < len2; i++) *dest1++ = *source1++;
-                len2 = len3 - len2;
-                for ( i = 0; i < len2; i++) *dest2++ = *source1++;
-                len2 = len - len3;
-                for ( i = 0; i <= len2; i++) *dest2++ = *source2++;
+                concpy (dest1, source1, len2);
+                concpy (dest2, source1 + len2, len3 - len2);
+                concpy (dest2 + len3 - len2, source2, len - len3 + 1);
             }
             else
             {
                 /* (4c) - Second operand crosses first */
-                for ( i = 0; i < len3; i++) *dest1++ = *source1++;
-                len3 = len2 - len3;
-                for ( i = 0; i < len3; i++) *dest1++ = *source2++;
-                len3 = len - len2;
-                for ( i = 0; i <= len3; i++) *dest2++ = *source2++;
+                concpy (dest1, source1, len3);
+                concpy (dest1 + len3, source2, len2 - len3);
+                concpy (dest2, source2 + len2 - len3, len - len2 + 1);
             }
         }
     }
@@ -875,7 +846,7 @@ int     i;                              /* Loop counter              */
 
 
 /*-------------------------------------------------------------------*/
-/* Validate operand                                                  */
+/* Validate operand for addressing, protection, translation          */
 /*                                                                   */
 /* Input:                                                            */
 /*      addr    Effective address of operand                         */

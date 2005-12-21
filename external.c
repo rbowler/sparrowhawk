@@ -1,8 +1,8 @@
-/* EXTERNAL.C   (c) Copyright Roger Bowler, 1999-2004                */
+/* EXTERNAL.C   (c) Copyright Roger Bowler, 1999-2005                */
 /*              ESA/390 External Interrupt and Timer                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2004      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2004      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements external interrupt, timer, and signalling  */
@@ -22,6 +22,16 @@
 /*      Fix todclock - Jay Maynard                                   */
 /*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
 /*-------------------------------------------------------------------*/
+
+#include "hstdinc.h"
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
+
+#if !defined(_EXTERNAL_C_)
+#define _EXTERNAL_C_
+#endif
 
 #include "hercules.h"
 
@@ -72,7 +82,7 @@ REGS   *tregs;                          /* Target regs               */
                 if (IS_CPU_ONLINE(i))
                 {
                     tregs = sysblk.regs[i];
-                    if ( test_bit(4, tregs->cpuad, &sysblk.started_mask) )
+                    if ( sysblk.started_mask & BIT(tregs->cpuad) )
                     {
                         ON_IC_BROADCAST(tregs);
                         sysblk.broadcast_count++;
@@ -341,7 +351,7 @@ U16     cpuad;                          /* Originating CPU address   */
     }
 
     /* External interrupt if TOD clock exceeds clock comparator */
-    if ((sysblk.todclk + regs->todoffset) > regs->clkc
+    if ( TOD_CLOCK(regs) > regs->clkc
         && sysblk.insttrace == 0
         && sysblk.inststep == 0
         && OPEN_IC_CLKC(regs) )
@@ -359,7 +369,7 @@ U16     cpuad;                          /* Originating CPU address   */
     {
         if (sysblk.insttrace || sysblk.inststep)
         {
-            logmsg (_("HHCCP025I External interrupt: CPU timer=%16.16llX\n"),
+            logmsg (_("HHCCP025I External interrupt: CPU timer=%16.16" I64_FMT "X\n"),
                     (long long)regs->ptimer);
         }
         ARCH_DEP(external_interrupt) (EXT_CPU_TIMER_INTERRUPT, regs);
@@ -467,7 +477,7 @@ PSA     *sspsa;                         /* -> Store status area      */
     /* ZZ THIS TEST IS NOT CONCLUSIVE */
     if(aaddr != 0 && aaddr != ssreg->PX)
         aaddr -= 512 + 4096 ;
-#endif 
+#endif
 
     aaddr &= 0x7FFFFE00;
 
