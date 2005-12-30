@@ -1,5 +1,15 @@
 
 ####   Don't forget to change the version number in configure.ac!   ####
+
+29 Dec 2005 Fix bug in update_tod_clock preventing cpt from updating - Fish
+29 Dec 2005 Fix cpustate display glitch in ipending command - Fish
+29 Dec 2005 SIE XC interception fixes - Jan Jaeger
+29 Dec 2005 Performance patch STCM, STCMY, STCMH - Bernard van der Helm
+29 Dec 2005 Performance patch ICM, ICMY, ICMH - Bernard van der Helm
+28 Dec 2005 Perform Timing Facility Function - Jan Jaeger / Bernard van der Helm
+27 Dec 2005 Performance patch TM, TMH, TML, TMHH, TMHL, TMY - Bernard van der Helm
+24 Dec 2005 Add IFL SCPINFO support for zLinux zipl code - Jan Jaeger
+23 Dec 2005 Fix for Windows ..\relative path shadow files - Fish
 11 Dec 2005 Correction to format 1 STIDP - Jan Jaeger
 10 Dec 2005 Update FAQ software prerequisite sections - Roger Bowler
 09 Dec 2005 MAX_CPU_ENGINES defaults to 8 for MSVC build too - Ivan Warren

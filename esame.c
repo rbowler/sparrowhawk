@@ -33,6 +33,8 @@
 
 #include "inline.h"
 
+#include "clock.h"
+
 #define CRYPTO_EXTERN extern
 #include "crypto.h"
 
@@ -155,8 +157,6 @@ DEF_INST(trap2)
 
     UNREFERENCED(inst);
 
-    SIE_MODE_XC_SOPEX(regs);
-
     ARCH_DEP(trap_x) (0, regs, 0);
 
 } /* end DEF_INST(trap2) */
@@ -173,8 +173,6 @@ int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 
     S(inst, regs, b2, effective_addr2);
-
-    SIE_MODE_XC_SOPEX(regs);
 
     ARCH_DEP(trap_x) (1, regs, effective_addr2);
 
@@ -942,6 +940,8 @@ BYTE   *mn;                             /* Mainstor address of ASCE  */
 
     RRF_RM(inst, regs, r1, r2, r3, m4);
 
+    SIE_XC_INTERCEPT(regs);
+
     PRIV_CHECK(regs);
 
     /* Program check if bits 44-51 of r2 register are non-zero */
@@ -1061,7 +1061,7 @@ int     cc;                             /* Condition code            */
 
     RRF_RM(inst, regs, r1, r2, r3, m4);
 
-    SIE_MODE_XC_OPEX(regs);
+    SIE_XC_INTERCEPT(regs);
 
     PRIV_CHECK(regs);
 
@@ -1514,7 +1514,7 @@ VADR    lsea;                           /* Linkage stack entry addr  */
 
     RRE(inst, regs, r1, r2);
 
-    SIE_MODE_XC_OPEX(regs);
+    SIE_XC_INTERCEPT(regs);
 
     /* Find the virtual address of the entry descriptor
        of the current state entry in the linkage stack */
@@ -2040,6 +2040,7 @@ BYTE    rbyte[4],                       /* Register bytes            */
 
 
 #if defined(FEATURE_ESAME)
+#if 1 /* Old STCMH */
 /*-------------------------------------------------------------------*/
 /* EB2C STCMH - Store Characters under Mask High               [RSY] */
 /*-------------------------------------------------------------------*/
@@ -2083,10 +2084,100 @@ BYTE    rbyte[4];                       /* Register bytes from mask  */
     } /* switch (r3) */
 
 } /* end DEF_INST(store_characters_under_mask_high) */
+#else /* New STCMH */
+
+/*-------------------------------------------------------------------*/
+/* EB2C STCMH - Store Characters under Mask High               [RSY] */
+/*-------------------------------------------------------------------*/
+DEF_INST(store_characters_under_mask_high)
+{
+  BYTE bytes[4];
+  int b2;
+  VADR effective_addr2;
+  static void *jmptable[] = { &&m0, &&m1, &&m2, &&m3, &&m4, &&m5, &&m6, &&m7, &&m8, &&m9, &&ma, &&mb, &&mc, &&md, &&me, &&mf };
+  int r1;
+  int r3;
+
+  RSY(inst, regs, r1, r3, b2, effective_addr2);
+
+  goto *jmptable[r3]; 
+
+  m0: /* 0000 */
+  ARCH_DEP(validate_operand)(effective_addr2, b2, 0, ACCTYPE_WRITE, regs);  /* stated in POP! */
+  return;
+
+  m1: /* 0001 */
+  ARCH_DEP(vstoreb)((regs->GR_H(r1) & 0x000000ff), effective_addr2, b2, regs);
+  return;
+
+  m2: /* 0010 */
+  ARCH_DEP(vstoreb)(((regs->GR_H(r1) & 0x0000ff00) >> 8), effective_addr2, b2, regs);
+  return;
+
+  m3: /* 0011 */
+  ARCH_DEP(vstore2)((regs->GR_H(r1) & 0x0000ffff), effective_addr2, b2, regs);
+  return;
+
+  m4: /* 0100 */
+  ARCH_DEP(vstoreb)(((regs->GR_H(r1) & 0x00ff0000) >> 16), effective_addr2, b2, regs);
+  return;
+
+  m5: /* 0101 */
+  ARCH_DEP(vstore2)((((regs->GR_H(r1) & 0x00ff0000) >> 8) | (regs->GR_H(r1) & 0x000000ff)), effective_addr2, b2, regs);
+  return;
+
+  m6: /* 0110 */
+  ARCH_DEP(vstore2)((regs->GR_H(r1) & 0x00ffff00) >> 8, effective_addr2, b2, regs);
+  return;
+
+  m7: /* 0111 */
+  store_fw(bytes, ((regs->GR_H(r1) & 0x00ffffff) << 8));
+  ARCH_DEP(vstorec)(bytes, 2, effective_addr2, b2, regs);
+  return;
+
+  m8: /* 1000 */
+  ARCH_DEP(vstoreb)(((regs->GR_H(r1) & 0xff000000) >> 24), effective_addr2, b2, regs);
+  return;
+
+  m9: /* 1001 */
+  ARCH_DEP(vstore2)((((regs->GR_H(r1) & 0xff000000) >> 16) | (regs->GR_H(r1) & 0x000000ff)), effective_addr2, b2, regs);
+  return;
+
+  ma: /* 1010 */
+  ARCH_DEP(vstore2)((((regs->GR_H(r1) & 0xff000000) >> 16) | ((regs->GR_H(r1) & 0x0000ff00) >> 8)), effective_addr2, b2, regs);
+  return;
+
+  mb: /* 1011 */
+  store_fw(bytes, ((regs->GR_H(r1) & 0xff000000) | ((regs->GR_H(r1) & 0x0000ffff) << 8)));
+  ARCH_DEP(vstorec)(bytes, 2, effective_addr2, b2, regs);
+  return;
+
+  mc: /* 1100 */
+  ARCH_DEP(vstore2)(((regs->GR_H(r1) & 0xffff0000) >> 16), effective_addr2, b2, regs);
+  return;
+
+  md: /* 1101 */
+  store_fw(bytes, ((regs->GR_H(r1) & 0xffff0000) | ((regs->GR_H(r1) & 0x000000ff) << 8)));
+  ARCH_DEP(vstorec)(bytes, 2, effective_addr2, b2, regs);
+  return;
+
+  me: /* 1110 */
+  store_fw(bytes, (regs->GR_H(r1) & 0xffffff00));
+  ARCH_DEP(vstorec)(bytes, 2, effective_addr2, b2, regs);
+  return;
+
+  mf: /* 1111 */
+  ARCH_DEP(vstore4)(regs->GR_H(r1), effective_addr2, b2, regs);
+  return;
+}
+
+#endif /* New STCMH */
+
 #endif /*defined(FEATURE_ESAME)*/
 
 
 #if defined(FEATURE_ESAME)
+#if 1 /* Old ICMH */
 /*-------------------------------------------------------------------*/
 /* EB80 ICMH  - Insert Characters under Mask High              [RSY] */
 /*-------------------------------------------------------------------*/
@@ -2143,6 +2234,133 @@ static const unsigned int               /* Turn reg bytes off by mask*/
     } /* switch (r3) */
 
 } /* end DEF_INST(insert_characters_under_mask_high) */
+#else /* New ICMH */
+
+/*-------------------------------------------------------------------*/
+/* EB80 ICMH  - Insert Characters under Mask High              [RSY] */
+/*-------------------------------------------------------------------*/
+DEF_INST(insert_characters_under_mask_high)
+{
+  BYTE bytes[4];
+  int  b2;
+  VADR effective_addr2;
+  int  r1;
+  int  r3;
+  U32  value;
+  static void *jmptable[] = { &&m0, &&m1, &&m2, &&m3, &&m4, &&m5, &&m6, &&m7, &&m8, &&m9, &&ma, &&mb, &&mc, &&md, &&me, &&mf };
+
+  RSY(inst, regs, r1, r3, b2, effective_addr2);
+
+  goto *jmptable[r3]; 
+
+  m0: /* 0000 */
+  ARCH_DEP(vfetchb)(effective_addr2, b2, regs);  /* conform POP! */
+  regs->psw.cc = 0;
+  return;
+
+  m1: /* 0001 */
+  value = ARCH_DEP(vfetchb)(effective_addr2, b2, regs);
+  regs->GR_H(r1) &= 0xffffff00;
+  regs->GR_H(r1) |= value;
+  regs->psw.cc = value ? value & 0x00000080 ? 1 : 2 : 0;
+  return;
+
+  m2: /* 0010 */
+  value = ARCH_DEP(vfetchb)(effective_addr2, b2, regs) << 8;
+  regs->GR_H(r1) &= 0xffff00ff;
+  goto x2;
+
+  m3: /* 0011 */
+  value = ARCH_DEP(vfetch2)(effective_addr2, b2, regs);
+  regs->GR_H(r1) &= 0xffff0000;
+  goto x2;
+
+  m4: /* 0100 */
+  value = ARCH_DEP(vfetchb)(effective_addr2, b2, regs) << 16;
+  regs->GR_H(r1) &= 0xff00ffff;
+  goto x1;
+
+  m5: /* 0101 */
+  ARCH_DEP(vfetchc)(bytes, 1, effective_addr2, b2, regs);
+  value = (bytes[0] << 16) | bytes[1];
+  regs->GR_H(r1) &= 0xff00ff00;
+  goto x1;
+
+  m6: /* 0110 */
+  value = ARCH_DEP(vfetch2)(effective_addr2, b2, regs) << 8;
+  regs->GR_H(r1) &= 0xff0000ff;
+  goto x1;
+
+  m7: /* 0111 */
+  bytes[0] = 0;
+  ARCH_DEP(vfetchc)(&bytes[1], 2, effective_addr2, b2, regs);
+  value = fetch_fw(bytes);
+  regs->GR_H(r1) &= 0xff000000;
+  goto x1;
+
+  m8: /* 1000 */
+  value = ARCH_DEP(vfetchb)(effective_addr2, b2, regs) << 24;
+  regs->GR_H(r1) &= 0x00ffffff;
+  goto x0;
+
+  m9: /* 1001 */
+  ARCH_DEP(vfetchc)(bytes, 1, effective_addr2, b2, regs);
+  value = (bytes[0] << 24) | bytes[1];
+  regs->GR_H(r1) &= 0x00ffff00;
+  goto x0;
+
+  ma: /* 1010 */
+  ARCH_DEP(vfetchc)(bytes, 1, effective_addr2, b2, regs);
+  value = (bytes[0] << 24) | (bytes[1] << 8);
+  regs->GR_H(r1) &= 0x00ff00ff;
+  goto x0;
+
+  mb: /* 1011 */
+  ARCH_DEP(vfetchc)(bytes, 2, effective_addr2, b2, regs);
+  value = (bytes[0] << 24) | (bytes[1] << 8) | bytes[2];
+  regs->GR_H(r1) &= 0x00ff0000;
+  goto x0;
+
+  mc: /* 1100 */
+  value = ARCH_DEP(vfetch2)(effective_addr2, b2, regs) << 16;
+  regs->GR_H(r1) &= 0x0000ffff;
+  goto x0;
+
+  md: /* 1101 */
+  ARCH_DEP(vfetchc)(bytes, 2, effective_addr2, b2, regs);
+  value = (bytes[0] << 24) | (bytes[1] << 16) | bytes[2];
+  regs->GR_H(r1) &= 0x0000ff00;
+  goto x0;
+
+  me: /* 1110 */
+  bytes[3] = 0;
+  ARCH_DEP(vfetchc)(bytes, 2, effective_addr2, b2, regs);
+  value = fetch_fw(bytes);
+  regs->GR_H(r1) &= 0x000000ff;
+  goto x0;
+
+  mf: /* 1111 */
+  value = regs->GR_H(r1) = ARCH_DEP(vfetch4)(effective_addr2, b2, regs);
+  regs->psw.cc = value ? value & 0x80000000 ? 1 : 2 : 0;
+  return;
+
+  x0: /* or, check byte 0 and exit*/
+  regs->GR_H(r1) |= value;
+  regs->psw.cc = value ? value & 0x80000000 ? 1 : 2 : 0;
+  return;
+
+  x1: /* or, check byte 1 and exit*/
+  regs->GR_H(r1) |= value;
+  regs->psw.cc = value ? value & 0x00800000 ? 1 : 2 : 0;
+  return;
+
+  x2: /* or, check byte 2 and exit */
+  regs->GR_H(r1) |= value;
+  regs->psw.cc = value ? value & 0x00008000 ? 1 : 2 : 0;
+  return;
+}
+#endif /* New ICMH */
+
 #endif /*defined(FEATURE_ESAME)*/
 
 
@@ -3117,7 +3335,7 @@ U16     h2;                             /* 16-bit operand values     */
     /* Set condition code according to result */
     regs->psw.cc =
             ( h1 == 0 ) ? 0 :           /* result all zeroes */
-            ((h1 ^ i2) == 0) ? 3 :      /* result all ones   */
+            ( h1 == i2) ? 3 :           /* result all ones   */
             ((h1 & h2) == 0) ? 1 :      /* leftmost bit zero */
             2;                          /* leftmost bit one  */
 
@@ -3148,7 +3366,7 @@ U16     h2;                             /* 16-bit operand values     */
     /* Set condition code according to result */
     regs->psw.cc =
             ( h1 == 0 ) ? 0 :           /* result all zeroes */
-            ((h1 ^ i2) == 0) ? 3 :      /* result all ones   */
+            ( h1 == i2) ? 3 :           /* result all ones   */
             ((h1 & h2) == 0) ? 1 :      /* leftmost bit zero */
             2;                          /* leftmost bit one  */
 
@@ -4610,7 +4828,7 @@ int     cc;                             /* Condition code            */
 
     RXY(inst, regs, r1, b2, effective_addr2);
 
-    SIE_MODE_XC_OPEX(regs);
+    SIE_XC_INTERCEPT(regs);
 
     PRIV_CHECK(regs);
 
@@ -4645,6 +4863,66 @@ int     cc;                             /* Condition code            */
 
 } /* end DEF_INST(load_real_address_long) */
 #endif /*defined(FEATURE_ESAME)*/
+
+
+#if defined(FEATURE_TOD_CLOCK_STEERING)
+/*-------------------------------------------------------------------*/
+/* 0104 PTFF  - Perform Timing Facility Function                 [E] */
+/*-------------------------------------------------------------------*/
+DEF_INST(perform_timing_facility_function)
+{
+    E(inst, regs);
+
+    UNREFERENCED(inst);
+
+    SIE_INTERCEPT(regs);
+
+    if(regs->GR_L(0) & PTFF_GPR0_RESV)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    switch(regs->GR_L(0) & PTFF_GPR0_FC_MASK)
+    {
+        case PTFF_GPR0_FC_QAF:
+            ARCH_DEP(query_available_functions) (regs);
+            regs->psw.cc = 0;
+            break;
+        case PTFF_GPR0_FC_QTO:
+            ARCH_DEP(query_tod_offset) (regs);
+            regs->psw.cc = 0;
+            break;
+        case PTFF_GPR0_FC_QSI:
+            ARCH_DEP(query_steering_information) (regs);
+            regs->psw.cc = 0;
+            break;
+        case PTFF_GPR0_FC_QPT:
+            ARCH_DEP(query_physical_clock) (regs);
+            regs->psw.cc = 0;
+            break;
+        case PTFF_GPR0_FC_ATO:
+            PRIV_CHECK(regs);
+            ARCH_DEP(adjust_tod_offset) (regs);
+            regs->psw.cc = 0;
+            break;
+        case PTFF_GPR0_FC_STO:
+            PRIV_CHECK(regs);
+            ARCH_DEP(set_tod_offset) (regs);
+            regs->psw.cc = 0;
+            break;
+        case PTFF_GPR0_FC_SFS:
+            PRIV_CHECK(regs);
+            ARCH_DEP(set_fine_s_rate) (regs);
+            regs->psw.cc = 0;
+            break;
+        case PTFF_GPR0_FC_SGS:
+            PRIV_CHECK(regs);
+            ARCH_DEP(set_gross_s_rate) (regs);
+            regs->psw.cc = 0;
+            break;
+        default:
+            regs->psw.cc = 3;
+    }
+}
+#endif /*defined(FEATURE_TOD_CLOCK_STEERING)*/
 
 
 #if defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390)
@@ -6292,6 +6570,7 @@ VADR    effective_addr2;                /* Effective address         */
 
 
 #if defined(FEATURE_LONG_DISPLACEMENT)
+#if 1 /* Old ICMY */
 /*-------------------------------------------------------------------*/
 /* EB81 ICMY  - Insert Characters under Mask Long Displacement [RSY] */
 /*-------------------------------------------------------------------*/
@@ -6348,6 +6627,133 @@ static const unsigned int               /* Turn reg bytes off by mask*/
     } /* switch (r3) */
 
 } /* end DEF_INST(insert_characters_under_mask_y) */
+#else /* New ICMY */
+
+/*-------------------------------------------------------------------*/
+/* EB81 ICMY  - Insert Characters under Mask Long Displacement [RSY] */
+/*-------------------------------------------------------------------*/
+DEF_INST(insert_characters_under_mask_y)
+{
+  BYTE bytes[4];
+  int  b2;
+  VADR effective_addr2;
+  int  r1;
+  int  r3;
+  U32  value;
+  static void *jmptable[] = { &&m0, &&m1, &&m2, &&m3, &&m4, &&m5, &&m6, &&m7, &&m8, &&m9, &&ma, &&mb, &&mc, &&md, &&me, &&mf };
+
+  RSY(inst, regs, r1, r3, b2, effective_addr2);
+
+  goto *jmptable[r3]; 
+
+  m0: /* 0000 */
+  ARCH_DEP(vfetchb)(effective_addr2, b2, regs);  /* conform POP! */
+  regs->psw.cc = 0;
+  return;
+
+  m1: /* 0001 */
+  value = ARCH_DEP(vfetchb)(effective_addr2, b2, regs);
+  regs->GR_L(r1) &= 0xffffff00;
+  regs->GR_L(r1) |= value;
+  regs->psw.cc = value ? value & 0x00000080 ? 1 : 2 : 0;
+  return;
+
+  m2: /* 0010 */
+  value = ARCH_DEP(vfetchb)(effective_addr2, b2, regs) << 8;
+  regs->GR_L(r1) &= 0xffff00ff;
+  goto x2;
+
+  m3: /* 0011 */
+  value = ARCH_DEP(vfetch2)(effective_addr2, b2, regs);
+  regs->GR_L(r1) &= 0xffff0000;
+  goto x2;
+
+  m4: /* 0100 */
+  value = ARCH_DEP(vfetchb)(effective_addr2, b2, regs) << 16;
+  regs->GR_L(r1) &= 0xff00ffff;
+  goto x1;
+
+  m5: /* 0101 */
+  ARCH_DEP(vfetchc)(bytes, 1, effective_addr2, b2, regs);
+  value = (bytes[0] << 16) | bytes[1];
+  regs->GR_L(r1) &= 0xff00ff00;
+  goto x1;
+
+  m6: /* 0110 */
+  value = ARCH_DEP(vfetch2)(effective_addr2, b2, regs) << 8;
+  regs->GR_L(r1) &= 0xff0000ff;
+  goto x1;
+
+  m7: /* 0111 */
+  bytes[0] = 0;
+  ARCH_DEP(vfetchc)(&bytes[1], 2, effective_addr2, b2, regs);
+  value = fetch_fw(bytes);
+  regs->GR_L(r1) &= 0xff000000;
+  goto x1;
+
+  m8: /* 1000 */
+  value = ARCH_DEP(vfetchb)(effective_addr2, b2, regs) << 24;
+  regs->GR_L(r1) &= 0x00ffffff;
+  goto x0;
+
+  m9: /* 1001 */
+  ARCH_DEP(vfetchc)(bytes, 1, effective_addr2, b2, regs);
+  value = (bytes[0] << 24) | bytes[1];
+  regs->GR_L(r1) &= 0x00ffff00;
+  goto x0;
+
+  ma: /* 1010 */
+  ARCH_DEP(vfetchc)(bytes, 1, effective_addr2, b2, regs);
+  value = (bytes[0] << 24) | (bytes[1] << 8);
+  regs->GR_L(r1) &= 0x00ff00ff;
+  goto x0;
+
+  mb: /* 1011 */
+  ARCH_DEP(vfetchc)(bytes, 2, effective_addr2, b2, regs);
+  value = (bytes[0] << 24) | (bytes[1] << 8) | bytes[2];
+  regs->GR_L(r1) &= 0x00ff0000;
+  goto x0;
+
+  mc: /* 1100 */
+  value = ARCH_DEP(vfetch2)(effective_addr2, b2, regs) << 16;
+  regs->GR_L(r1) &= 0x0000ffff;
+  goto x0;
+
+  md: /* 1101 */
+  ARCH_DEP(vfetchc)(bytes, 2, effective_addr2, b2, regs);
+  value = (bytes[0] << 24) | (bytes[1] << 16) | bytes[2];
+  regs->GR_L(r1) &= 0x0000ff00;
+  goto x0;
+
+  me: /* 1110 */
+  bytes[3] = 0;
+  ARCH_DEP(vfetchc)(bytes, 2, effective_addr2, b2, regs);
+  value = fetch_fw(bytes);
+  regs->GR_L(r1) &= 0x000000ff;
+  goto x0;
+
+  mf: /* 1111 */
+  value = regs->GR_L(r1) = ARCH_DEP(vfetch4)(effective_addr2, b2, regs);
+  regs->psw.cc = value ? value & 0x80000000 ? 1 : 2 : 0;
+  return;
+
+  x0: /* or, check byte 0 and exit*/
+  regs->GR_L(r1) |= value;
+  regs->psw.cc = value ? value & 0x80000000 ? 1 : 2 : 0;
+  return;
+
+  x1: /* or, check byte 1 and exit*/
+  regs->GR_L(r1) |= value;
+  regs->psw.cc = value ? value & 0x00800000 ? 1 : 2 : 0;
+  return;
+
+  x2: /* or, check byte 2 and exit */
+  regs->GR_L(r1) |= value;
+  regs->psw.cc = value ? value & 0x00008000 ? 1 : 2 : 0;
+  return;
+}
+#endif /* New ICMY */
+
 #endif /*defined(FEATURE_LONG_DISPLACEMENT)*/
 
 
@@ -6713,6 +7119,7 @@ VADR    effective_addr2;                /* Effective address         */
 
 
 #if defined(FEATURE_LONG_DISPLACEMENT)
+#if 1 /* Old STCMY */
 /*-------------------------------------------------------------------*/
 /* EB2D STCMY - Store Characters under Mask (Long Displacement)[RSY] */
 /*-------------------------------------------------------------------*/
@@ -6756,6 +7163,94 @@ BYTE    rbyte[4];                       /* Byte work area            */
     } /* switch (r3) */
 
 } /* end DEF_INST(store_characters_under_mask_y) */
+#else /* New STCMY */
+
+/*-------------------------------------------------------------------*/
+/* EB2D STCMY - Store Characters under Mask (Long Displacement)[RSY] */
+/*-------------------------------------------------------------------*/
+DEF_INST(store_characters_under_mask_y)
+{
+  BYTE bytes[4];
+  int b2;
+  VADR effective_addr2;
+  static void *jmptable[] = { &&m0, &&m1, &&m2, &&m3, &&m4, &&m5, &&m6, &&m7, &&m8, &&m9, &&ma, &&mb, &&mc, &&md, &&me, &&mf };
+  int r1;
+  int r3;
+
+  RSY(inst, regs, r1, r3, b2, effective_addr2);
+
+  goto *jmptable[r3]; 
+
+  m0: /* 0000 */
+  ARCH_DEP(validate_operand)(effective_addr2, b2, 0, ACCTYPE_WRITE, regs);  /* stated in POP! */
+  return;
+
+  m1: /* 0001 */
+  ARCH_DEP(vstoreb)((regs->GR_L(r1) & 0x000000ff), effective_addr2, b2, regs);
+  return;
+
+  m2: /* 0010 */
+  ARCH_DEP(vstoreb)(((regs->GR_L(r1) & 0x0000ff00) >> 8), effective_addr2, b2, regs);
+  return;
+
+  m3: /* 0011 */
+  ARCH_DEP(vstore2)((regs->GR_L(r1) & 0x0000ffff), effective_addr2, b2, regs);
+  return;
+
+  m4: /* 0100 */
+  ARCH_DEP(vstoreb)(((regs->GR_L(r1) & 0x00ff0000) >> 16), effective_addr2, b2, regs);
+  return;
+
+  m5: /* 0101 */
+  ARCH_DEP(vstore2)((((regs->GR_L(r1) & 0x00ff0000) >> 8) | (regs->GR_L(r1) & 0x000000ff)), effective_addr2, b2, regs);
+  return;
+
+  m6: /* 0110 */
+  ARCH_DEP(vstore2)((regs->GR_L(r1) & 0x00ffff00) >> 8, effective_addr2, b2, regs);
+  return;
+
+  m7: /* 0111 */
+  store_fw(bytes, ((regs->GR_L(r1) & 0x00ffffff) << 8));
+  ARCH_DEP(vstorec)(bytes, 2, effective_addr2, b2, regs);
+  return;
+
+  m8: /* 1000 */
+  ARCH_DEP(vstoreb)(((regs->GR_L(r1) & 0xff000000) >> 24), effective_addr2, b2, regs);
+  return;
+
+  m9: /* 1001 */
+  ARCH_DEP(vstore2)((((regs->GR_L(r1) & 0xff000000) >> 16) | (regs->GR_L(r1) & 0x000000ff)), effective_addr2, b2, regs);
+  return;
+
+  ma: /* 1010 */
+  ARCH_DEP(vstore2)((((regs->GR_L(r1) & 0xff000000) >> 16) | ((regs->GR_L(r1) & 0x0000ff00) >> 8)), effective_addr2, b2, regs);
+  return;
+
+  mb: /* 1011 */
+  store_fw(bytes, ((regs->GR_L(r1) & 0xff000000) | ((regs->GR_L(r1) & 0x0000ffff) << 8)));
+  ARCH_DEP(vstorec)(bytes, 2, effective_addr2, b2, regs);
+  return;
+
+  mc: /* 1100 */
+  ARCH_DEP(vstore2)(((regs->GR_L(r1) & 0xffff0000) >> 16), effective_addr2, b2, regs);
+  return;
+
+  md: /* 1101 */
+  store_fw(bytes, ((regs->GR_L(r1) & 0xffff0000) | ((regs->GR_L(r1) & 0x000000ff) << 8)));
+  ARCH_DEP(vstorec)(bytes, 2, effective_addr2, b2, regs);
+  return;
+
+  me: /* 1110 */
+  store_fw(bytes, (regs->GR_L(r1) & 0xffffff00));
+  ARCH_DEP(vstorec)(bytes, 2, effective_addr2, b2, regs);
+  return;
+
+  mf: /* 1111 */
+  ARCH_DEP(vstore4)(regs->GR_L(r1), effective_addr2, b2, regs);
+  return;
+}
+#endif /* New STCMY */
+
 #endif /*defined(FEATURE_LONG_DISPLACEMENT)*/
 
 
@@ -6940,7 +7435,7 @@ BYTE    tbyte;                          /* Work byte                 */
     /* Set condition code according to result */
     regs->psw.cc =
             ( tbyte == 0 ) ? 0 :            /* result all zeroes */
-            ((tbyte^i2) == 0) ? 3 :         /* result all ones   */
+            ( tbyte == i2) ? 3 :            /* result all ones   */
             1 ;                             /* result mixed      */
 
 } /* end DEF_INST(test_under_mask_y) */

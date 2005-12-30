@@ -20,7 +20,7 @@
 
 
 
-SOURCES = $(dyngui_la_SOURCES) $(dyninst_la_SOURCES) $(hdt1052c_la_SOURCES) $(hdt1403_la_SOURCES) $(hdt2703_la_SOURCES) $(hdt2880_la_SOURCES) $(hdt3088_la_SOURCES) $(hdt3270_la_SOURCES) $(hdt3420_la_SOURCES) $(hdt3505_la_SOURCES) $(hdt3525_la_SOURCES) $(hdteq_la_SOURCES) $(hdtqeth_la_SOURCES) $(libfthreads_la_SOURCES) $(libherc_la_SOURCES) $(EXTRA_libherc_la_SOURCES) $(libhercd_la_SOURCES) $(libhercs_la_SOURCES) $(libherct_la_SOURCES) $(libhercu_la_SOURCES) $(cckdcdsk_SOURCES) $(cckdcomp_SOURCES) $(cckddiag_SOURCES) $(cckdswap_SOURCES) $(dasdcat_SOURCES) $(dasdconv_SOURCES) $(dasdcopy_SOURCES) $(dasdinit_SOURCES) $(dasdisup_SOURCES) $(dasdload_SOURCES) $(dasdls_SOURCES) $(dasdpdsu_SOURCES) $(dasdseq_SOURCES) $(dmap2hrc_SOURCES) $(hercifc_SOURCES) $(herclin_SOURCES) $(hercules_SOURCES) $(hetget_SOURCES) $(hetinit_SOURCES) $(hetmap_SOURCES) $(hetupd_SOURCES) $(tapecopy_SOURCES) $(tapemap_SOURCES) $(tapesplt_SOURCES)
+SOURCES = $(dyngui_la_SOURCES) $(dyninst_la_SOURCES) $(hdt1052c_la_SOURCES) $(hdt1403_la_SOURCES) $(hdt2703_la_SOURCES) $(hdt2880_la_SOURCES) $(hdt3088_la_SOURCES) $(hdt3270_la_SOURCES) $(hdt3420_la_SOURCES) $(hdt3505_la_SOURCES) $(hdt3525_la_SOURCES) $(hdteq_la_SOURCES) $(hdtqeth_la_SOURCES) $(libherc_la_SOURCES) $(EXTRA_libherc_la_SOURCES) $(libhercd_la_SOURCES) $(libhercs_la_SOURCES) $(libherct_la_SOURCES) $(libhercu_la_SOURCES) $(cckdcdsk_SOURCES) $(cckdcomp_SOURCES) $(cckddiag_SOURCES) $(cckdswap_SOURCES) $(dasdcat_SOURCES) $(dasdconv_SOURCES) $(dasdcopy_SOURCES) $(dasdinit_SOURCES) $(dasdisup_SOURCES) $(dasdload_SOURCES) $(dasdls_SOURCES) $(dasdpdsu_SOURCES) $(dasdseq_SOURCES) $(dmap2hrc_SOURCES) $(hercifc_SOURCES) $(herclin_SOURCES) $(hercules_SOURCES) $(hetget_SOURCES) $(hetinit_SOURCES) $(hetmap_SOURCES) $(hetupd_SOURCES) $(tapecopy_SOURCES) $(tapemap_SOURCES) $(tapesplt_SOURCES)
 
 srcdir = @srcdir@
 top_srcdir = @top_srcdir@
@@ -174,19 +174,6 @@ am__hdtqeth_la_SOURCES_DIST = qeth.c
 @OPTION_DYNAMIC_LOAD_TRUE@am_hdtqeth_la_OBJECTS = qeth.lo
 hdtqeth_la_OBJECTS = $(am_hdtqeth_la_OBJECTS)
 @OPTION_DYNAMIC_LOAD_TRUE@am_hdtqeth_la_rpath = -rpath $(modexecdir)
-@BUILD_FTHREADS_TRUE@libfthreads_la_DEPENDENCIES =  \
-@BUILD_FTHREADS_TRUE@	$(am__DEPENDENCIES_1)
-am__libfthreads_la_SOURCES_DIST = fthreads.c fishhang.c hostinfo.c
-am__objects_1 = fthreads.lo
-@BUILD_FTHREADS_TRUE@am__objects_2 = $(am__objects_1)
-am__objects_3 = fishhang.lo
-@BUILD_FISHHANG_TRUE@@BUILD_FTHREADS_TRUE@am__objects_4 =  \
-@BUILD_FISHHANG_TRUE@@BUILD_FTHREADS_TRUE@	$(am__objects_3)
-@BUILD_FTHREADS_TRUE@am__objects_5 = hostinfo.lo
-@BUILD_FTHREADS_TRUE@am_libfthreads_la_OBJECTS = $(am__objects_2) \
-@BUILD_FTHREADS_TRUE@	$(am__objects_4) $(am__objects_5)
-libfthreads_la_OBJECTS = $(am_libfthreads_la_OBJECTS)
-@BUILD_FTHREADS_TRUE@am_libfthreads_la_rpath =
 libherc_la_DEPENDENCIES = libhercs.la libhercu.la libherct.la \
 	libhercd.la $(am__DEPENDENCIES_1)
 am__libherc_la_SOURCES_DIST = hconsole.c w32util.c strsignal.c impl.c \
@@ -200,13 +187,13 @@ am__libherc_la_SOURCES_DIST = hconsole.c w32util.c strsignal.c impl.c \
 	console.c cardpch.c cardrdr.c sockdev.c printer.c tapedev.c \
 	scsitape.c hetlib.c ctc_lcs.c ctc_ctci.c ctcadpt.c w32ctca.c \
 	hchan.c tuntap.c qeth.c con1052c.c ecpsvm.c
-am__objects_6 = w32chan.lo
-@BUILD_FTHREADS_TRUE@am__objects_7 = $(am__objects_6)
-am__objects_8 = commadpt.lo console.lo cardpch.lo cardrdr.lo \
+am__objects_1 = w32chan.lo
+@BUILD_FTHREADS_TRUE@am__objects_2 = $(am__objects_1)
+am__objects_3 = commadpt.lo console.lo cardpch.lo cardrdr.lo \
 	sockdev.lo printer.lo tapedev.lo scsitape.lo hetlib.lo \
 	ctc_lcs.lo ctc_ctci.lo ctcadpt.lo w32ctca.lo hchan.lo \
 	tuntap.lo qeth.lo con1052c.lo
-@OPTION_DYNAMIC_LOAD_FALSE@am__objects_9 = $(am__objects_8)
+@OPTION_DYNAMIC_LOAD_FALSE@am__objects_4 = $(am__objects_3)
 am_libherc_la_OBJECTS = hconsole.lo w32util.lo strsignal.lo impl.lo \
 	config.lo bldcfg.lo panel.lo history.lo fillfnam.lo ipl.lo \
 	assist.lo dat.lo stack.lo cpu.lo vstore.lo general1.lo \
@@ -215,7 +202,7 @@ am_libherc_la_OBJECTS = hconsole.lo w32util.lo strsignal.lo impl.lo \
 	channel.lo external.lo float.lo trace.lo machchk.lo vector.lo \
 	xstore.lo cmpsc.lo sie.lo qdio.lo clock.lo timer.lo esame.lo \
 	ieee.lo httpserv.lo cgibin.lo loadparm.lo hsccmd.lo hscmisc.lo \
-	sr.lo $(am__objects_7) $(am__objects_9) ecpsvm.lo
+	sr.lo $(am__objects_2) $(am__objects_4) ecpsvm.lo
 libherc_la_OBJECTS = $(am_libherc_la_OBJECTS)
 libhercd_la_DEPENDENCIES = $(am__DEPENDENCIES_1) libhercs.la \
 	libhercu.la
@@ -229,17 +216,19 @@ libherct_la_DEPENDENCIES = $(am__DEPENDENCIES_1) libhercs.la \
 	libhercu.la
 am_libherct_la_OBJECTS = sllib.lo hetlib.lo
 libherct_la_OBJECTS = $(am_libherct_la_OBJECTS)
-@BUILD_FTHREADS_TRUE@am__DEPENDENCIES_3 = libfthreads.la
-libhercu_la_DEPENDENCIES = $(am__DEPENDENCIES_1) libhercs.la \
-	$(am__DEPENDENCIES_3)
+libhercu_la_DEPENDENCIES = $(am__DEPENDENCIES_1) libhercs.la
 am__libhercu_la_SOURCES_DIST = version.c hscutl.c hscutl2.c codepage.c \
 	logger.c logmsg.c hdl.c hostinfo.c memrchr.c parser.c \
-	pttrace.c ltdl.c
-@BUILD_FTHREADS_FALSE@am__objects_11 = hostinfo.lo
-@OPTION_DYNAMIC_LOAD_TRUE@am__objects_12 = ltdl.lo
+	pttrace.c fthreads.c fishhang.c ltdl.c
+am__objects_5 = fthreads.lo
+@BUILD_FTHREADS_TRUE@am__objects_8 = $(am__objects_5)
+am__objects_6 = fishhang.lo
+@BUILD_FISHHANG_TRUE@@BUILD_FTHREADS_TRUE@am__objects_9 =  \
+@BUILD_FISHHANG_TRUE@@BUILD_FTHREADS_TRUE@	$(am__objects_6)
+@OPTION_DYNAMIC_LOAD_TRUE@am__objects_10 = ltdl.lo
 am_libhercu_la_OBJECTS = version.lo hscutl.lo hscutl2.lo codepage.lo \
-	logger.lo logmsg.lo hdl.lo $(am__objects_11) memrchr.lo \
-	parser.lo pttrace.lo $(am__objects_12)
+	logger.lo logmsg.lo hdl.lo hostinfo.lo memrchr.lo parser.lo \
+	pttrace.lo $(am__objects_8) $(am__objects_9) $(am__objects_10)
 libhercu_la_OBJECTS = $(am_libhercu_la_OBJECTS)
 @BUILD_HERCIFC_TRUE@am__EXEEXT_1 = hercifc$(EXEEXT)
 @BUILD_SHARED_TRUE@am__EXEEXT_2 = herclin$(EXEEXT)
@@ -247,49 +236,49 @@ binPROGRAMS_INSTALL = $(INSTALL_PROGRAM)
 PROGRAMS = $(bin_PROGRAMS)
 am_cckdcdsk_OBJECTS = cckdcdsk.$(OBJEXT)
 cckdcdsk_OBJECTS = $(am_cckdcdsk_OBJECTS)
-am__DEPENDENCIES_4 = libhercs.la libhercu.la libherct.la libhercd.la \
+am__DEPENDENCIES_3 = libhercs.la libhercu.la libherct.la libhercd.la \
 	libherc.la
-am__DEPENDENCIES_5 = $(am__DEPENDENCIES_4) $(am__DEPENDENCIES_1)
-cckdcdsk_DEPENDENCIES = $(am__DEPENDENCIES_5)
+am__DEPENDENCIES_4 = $(am__DEPENDENCIES_3) $(am__DEPENDENCIES_1)
+cckdcdsk_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_cckdcomp_OBJECTS = cckdcomp.$(OBJEXT)
 cckdcomp_OBJECTS = $(am_cckdcomp_OBJECTS)
-cckdcomp_DEPENDENCIES = $(am__DEPENDENCIES_5)
+cckdcomp_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_cckddiag_OBJECTS = cckddiag.$(OBJEXT)
 cckddiag_OBJECTS = $(am_cckddiag_OBJECTS)
-cckddiag_DEPENDENCIES = $(am__DEPENDENCIES_5)
+cckddiag_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_cckdswap_OBJECTS = cckdswap.$(OBJEXT)
 cckdswap_OBJECTS = $(am_cckdswap_OBJECTS)
-cckdswap_DEPENDENCIES = $(am__DEPENDENCIES_5)
+cckdswap_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_dasdcat_OBJECTS = dasdcat.$(OBJEXT)
 dasdcat_OBJECTS = $(am_dasdcat_OBJECTS)
-dasdcat_DEPENDENCIES = $(am__DEPENDENCIES_5)
+dasdcat_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_dasdconv_OBJECTS = dasdconv.$(OBJEXT)
 dasdconv_OBJECTS = $(am_dasdconv_OBJECTS)
-dasdconv_DEPENDENCIES = $(am__DEPENDENCIES_5)
+dasdconv_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_dasdcopy_OBJECTS = dasdcopy.$(OBJEXT)
 dasdcopy_OBJECTS = $(am_dasdcopy_OBJECTS)
-dasdcopy_DEPENDENCIES = $(am__DEPENDENCIES_5)
+dasdcopy_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_dasdinit_OBJECTS = dasdinit.$(OBJEXT)
 dasdinit_OBJECTS = $(am_dasdinit_OBJECTS)
-dasdinit_DEPENDENCIES = $(am__DEPENDENCIES_5)
+dasdinit_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_dasdisup_OBJECTS = dasdisup.$(OBJEXT)
 dasdisup_OBJECTS = $(am_dasdisup_OBJECTS)
-dasdisup_DEPENDENCIES = $(am__DEPENDENCIES_5)
+dasdisup_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_dasdload_OBJECTS = dasdload.$(OBJEXT)
 dasdload_OBJECTS = $(am_dasdload_OBJECTS)
-dasdload_DEPENDENCIES = $(am__DEPENDENCIES_5)
+dasdload_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_dasdls_OBJECTS = dasdls.$(OBJEXT)
 dasdls_OBJECTS = $(am_dasdls_OBJECTS)
-dasdls_DEPENDENCIES = $(am__DEPENDENCIES_5)
+dasdls_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_dasdpdsu_OBJECTS = dasdpdsu.$(OBJEXT)
 dasdpdsu_OBJECTS = $(am_dasdpdsu_OBJECTS)
-dasdpdsu_DEPENDENCIES = $(am__DEPENDENCIES_5)
+dasdpdsu_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_dasdseq_OBJECTS = dasdseq.$(OBJEXT)
 dasdseq_OBJECTS = $(am_dasdseq_OBJECTS)
-dasdseq_DEPENDENCIES = $(am__DEPENDENCIES_5)
+dasdseq_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_dmap2hrc_OBJECTS = dmap2hrc.$(OBJEXT)
 dmap2hrc_OBJECTS = $(am_dmap2hrc_OBJECTS)
-dmap2hrc_DEPENDENCIES = $(am__DEPENDENCIES_5)
+dmap2hrc_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am__hercifc_SOURCES_DIST = hercifc.c
 @BUILD_HERCIFC_TRUE@am_hercifc_OBJECTS = hercifc.$(OBJEXT)
 hercifc_OBJECTS = $(am_hercifc_OBJECTS)
@@ -302,25 +291,25 @@ am_hercules_OBJECTS = bootstrap.$(OBJEXT) hdlmain.$(OBJEXT)
 hercules_OBJECTS = $(am_hercules_OBJECTS)
 am_hetget_OBJECTS = hetget.$(OBJEXT)
 hetget_OBJECTS = $(am_hetget_OBJECTS)
-hetget_DEPENDENCIES = $(am__DEPENDENCIES_5)
+hetget_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_hetinit_OBJECTS = hetinit.$(OBJEXT)
 hetinit_OBJECTS = $(am_hetinit_OBJECTS)
-hetinit_DEPENDENCIES = $(am__DEPENDENCIES_5)
+hetinit_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_hetmap_OBJECTS = hetmap.$(OBJEXT)
 hetmap_OBJECTS = $(am_hetmap_OBJECTS)
-hetmap_DEPENDENCIES = $(am__DEPENDENCIES_5)
+hetmap_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_hetupd_OBJECTS = hetupd.$(OBJEXT)
 hetupd_OBJECTS = $(am_hetupd_OBJECTS)
-hetupd_DEPENDENCIES = $(am__DEPENDENCIES_5)
+hetupd_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_tapecopy_OBJECTS = tapecopy.$(OBJEXT)
 tapecopy_OBJECTS = $(am_tapecopy_OBJECTS)
-tapecopy_DEPENDENCIES = $(am__DEPENDENCIES_5)
+tapecopy_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_tapemap_OBJECTS = tapemap.$(OBJEXT)
 tapemap_OBJECTS = $(am_tapemap_OBJECTS)
-tapemap_DEPENDENCIES = $(am__DEPENDENCIES_5)
+tapemap_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am_tapesplt_OBJECTS = tapesplt.$(OBJEXT)
 tapesplt_OBJECTS = $(am_tapesplt_OBJECTS)
-tapesplt_DEPENDENCIES = $(am__DEPENDENCIES_5)
+tapesplt_DEPENDENCIES = $(am__DEPENDENCIES_4)
 DEFAULT_INCLUDES = -I. -I$(srcdir) -I.
 depcomp = $(SHELL) $(top_srcdir)/autoconf/depcomp
 am__depfiles_maybe = depfiles
@@ -338,18 +327,18 @@ SOURCES = $(dyngui_la_SOURCES) $(dyninst_la_SOURCES) \
 	$(hdt3088_la_SOURCES) $(hdt3270_la_SOURCES) \
 	$(hdt3420_la_SOURCES) $(hdt3505_la_SOURCES) \
 	$(hdt3525_la_SOURCES) $(hdteq_la_SOURCES) \
-	$(hdtqeth_la_SOURCES) $(libfthreads_la_SOURCES) \
-	$(libherc_la_SOURCES) $(EXTRA_libherc_la_SOURCES) \
-	$(libhercd_la_SOURCES) $(libhercs_la_SOURCES) \
-	$(libherct_la_SOURCES) $(libhercu_la_SOURCES) \
-	$(cckdcdsk_SOURCES) $(cckdcomp_SOURCES) $(cckddiag_SOURCES) \
-	$(cckdswap_SOURCES) $(dasdcat_SOURCES) $(dasdconv_SOURCES) \
-	$(dasdcopy_SOURCES) $(dasdinit_SOURCES) $(dasdisup_SOURCES) \
-	$(dasdload_SOURCES) $(dasdls_SOURCES) $(dasdpdsu_SOURCES) \
-	$(dasdseq_SOURCES) $(dmap2hrc_SOURCES) $(hercifc_SOURCES) \
-	$(herclin_SOURCES) $(hercules_SOURCES) $(hetget_SOURCES) \
-	$(hetinit_SOURCES) $(hetmap_SOURCES) $(hetupd_SOURCES) \
-	$(tapecopy_SOURCES) $(tapemap_SOURCES) $(tapesplt_SOURCES)
+	$(hdtqeth_la_SOURCES) $(libherc_la_SOURCES) \
+	$(EXTRA_libherc_la_SOURCES) $(libhercd_la_SOURCES) \
+	$(libhercs_la_SOURCES) $(libherct_la_SOURCES) \
+	$(libhercu_la_SOURCES) $(cckdcdsk_SOURCES) $(cckdcomp_SOURCES) \
+	$(cckddiag_SOURCES) $(cckdswap_SOURCES) $(dasdcat_SOURCES) \
+	$(dasdconv_SOURCES) $(dasdcopy_SOURCES) $(dasdinit_SOURCES) \
+	$(dasdisup_SOURCES) $(dasdload_SOURCES) $(dasdls_SOURCES) \
+	$(dasdpdsu_SOURCES) $(dasdseq_SOURCES) $(dmap2hrc_SOURCES) \
+	$(hercifc_SOURCES) $(herclin_SOURCES) $(hercules_SOURCES) \
+	$(hetget_SOURCES) $(hetinit_SOURCES) $(hetmap_SOURCES) \
+	$(hetupd_SOURCES) $(tapecopy_SOURCES) $(tapemap_SOURCES) \
+	$(tapesplt_SOURCES)
 DIST_SOURCES = $(am__dyngui_la_SOURCES_DIST) \
 	$(am__dyninst_la_SOURCES_DIST) $(am__hdt1052c_la_SOURCES_DIST) \
 	$(am__hdt1403_la_SOURCES_DIST) $(am__hdt2703_la_SOURCES_DIST) \
@@ -357,7 +346,6 @@ DIST_SOURCES = $(am__dyngui_la_SOURCES_DIST) \
 	$(am__hdt3270_la_SOURCES_DIST) $(am__hdt3420_la_SOURCES_DIST) \
 	$(am__hdt3505_la_SOURCES_DIST) $(am__hdt3525_la_SOURCES_DIST) \
 	$(am__hdteq_la_SOURCES_DIST) $(am__hdtqeth_la_SOURCES_DIST) \
-	$(am__libfthreads_la_SOURCES_DIST) \
 	$(am__libherc_la_SOURCES_DIST) $(EXTRA_libherc_la_SOURCES) \
 	$(libhercd_la_SOURCES) $(libhercs_la_SOURCES) \
 	$(libherct_la_SOURCES) $(am__libhercu_la_SOURCES_DIST) \
@@ -534,7 +522,7 @@ AUTOMAKE_OPTIONS = foreign 1.5
 ACLOCAL_AMFLAGS = -I m4
 lns = @LN_S@
 SUBDIRS = m4 po util html man . crypto
-LDADD = @LTLIBINTL@ @LIBS@
+LDADD = @LTLIBICONV@ @LTLIBINTL@ @LIBS@
 AM_CPPFLAGS = -I$(top_srcdir)
 @BUILD_HERCIFC_FALSE@HERCIFC = 
 @BUILD_HERCIFC_TRUE@HERCIFC = hercifc
@@ -547,12 +535,6 @@ fishhang_SRC = fishhang.c
 @BUILD_FTHREADS_TRUE@FTHREADS = $(fthreads_SRC)
 @BUILD_FTHREADS_FALSE@FISHIO = 
 @BUILD_FTHREADS_TRUE@FISHIO = $(fishio_SRC)
-@BUILD_FTHREADS_FALSE@LIBFTHREADS = 
-@BUILD_FTHREADS_TRUE@LIBFTHREADS = libfthreads.la
-@BUILD_FTHREADS_FALSE@FHOSTINFO = 
-@BUILD_FTHREADS_TRUE@FHOSTINFO = hostinfo.c
-@BUILD_FTHREADS_FALSE@HOSTINFO = hostinfo.c
-@BUILD_FTHREADS_TRUE@HOSTINFO = 
 @BUILD_FISHHANG_FALSE@@BUILD_FTHREADS_TRUE@FISHHANG = 
 @BUILD_FISHHANG_TRUE@@BUILD_FTHREADS_TRUE@FISHHANG = $(fishhang_SRC)
 @BUILD_FTHREADS_FALSE@FISHHANG = 
@@ -632,7 +614,7 @@ dyndev_SRC = commadpt.c  \
 #
 # List of Libtool shared libraries & loadable modules
 #
-HERCLIBS = $(LIBFTHREADS)
+HERCLIBS = 
 HERCLIBS2 = libhercs.la  \
               libhercu.la \
               libherct.la \
@@ -704,12 +686,6 @@ lib_LTLIBRARIES = $(HERCLIBS2)
 @OPTION_DYNAMIC_LOAD_TRUE@hdt1052c_la_SOURCES = con1052c.c
 @OPTION_DYNAMIC_LOAD_TRUE@hdt1052c_la_LDFLAGS = $(DYNMOD_LD_FLAGS)
 @OPTION_DYNAMIC_LOAD_TRUE@hdt1052c_la_LIBADD = $(DYNMOD_LD_ADD)
-@BUILD_FTHREADS_TRUE@libfthreads_la_SOURCES = $(FTHREADS)  \
-@BUILD_FTHREADS_TRUE@                           $(FISHHANG)  \
-@BUILD_FTHREADS_TRUE@                           $(FHOSTINFO)
-
-@BUILD_FTHREADS_TRUE@libfthreads_la_LDFLAGS = $(LIB_LD_FLAGS)
-@BUILD_FTHREADS_TRUE@libfthreads_la_LIBADD = $(LDADD)
 
 #
 # Common data areas (shared) library
@@ -751,14 +727,16 @@ libhercu_la_SOURCES = version.c    \
                         logger.c     \
                         logmsg.c     \
                         hdl.c        \
-                        $(HOSTINFO)  \
+                        hostinfo.c   \
                         memrchr.c    \
                         parser.c     \
                         pttrace.c    \
+                        $(FTHREADS)  \
+                        $(FISHHANG)  \
                         $(LTDL)
 
 libhercu_la_LDFLAGS = $(LIB_LD_FLAGS)
-libhercu_la_LIBADD = $(LDADD) libhercs.la $(LIBFTHREADS)
+libhercu_la_LIBADD = $(LDADD) libhercs.la
 
 #
 # Core Hercules (shared) library
@@ -1215,8 +1193,6 @@ hdteq.la: $(hdteq_la_OBJECTS) $(hdteq_la_DEPENDENCIES)
 	$(LINK) $(am_hdteq_la_rpath) $(hdteq_la_LDFLAGS) $(hdteq_la_OBJECTS) $(hdteq_la_LIBADD) $(LIBS)
 hdtqeth.la: $(hdtqeth_la_OBJECTS) $(hdtqeth_la_DEPENDENCIES) 
 	$(LINK) $(am_hdtqeth_la_rpath) $(hdtqeth_la_LDFLAGS) $(hdtqeth_la_OBJECTS) $(hdtqeth_la_LIBADD) $(LIBS)
-libfthreads.la: $(libfthreads_la_OBJECTS) $(libfthreads_la_DEPENDENCIES) 
-	$(LINK) $(am_libfthreads_la_rpath) $(libfthreads_la_LDFLAGS) $(libfthreads_la_OBJECTS) $(libfthreads_la_LIBADD) $(LIBS)
 libherc.la: $(libherc_la_OBJECTS) $(libherc_la_DEPENDENCIES) 
 	$(LINK) -rpath $(libdir) $(libherc_la_LDFLAGS) $(libherc_la_OBJECTS) $(libherc_la_LIBADD) $(LIBS)
 libhercd.la: $(libhercd_la_OBJECTS) $(libhercd_la_DEPENDENCIES) 

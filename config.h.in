@@ -511,6 +511,9 @@
 /* Define to enable bzip2 compression in emulated tapes */
 #undef HET_BZIP2
 
+/* Define as const if the declaration of iconv() needs const. */
+#undef ICONV_CONST
+
 /* Define if the OS needs help to load dependent libraries for dlopen(). */
 #undef LTDL_DLOPEN_DEPLIBS
 
