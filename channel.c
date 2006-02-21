@@ -1,4 +1,4 @@
-/* CHANNEL.C    (c) Copyright Roger Bowler, 1999-2005                */
+/* CHANNEL.C    (c) Copyright Roger Bowler, 1999-2006                */
 /*              ESA/390 Channel Emulator                             */
 
 /*-------------------------------------------------------------------*/
@@ -12,7 +12,7 @@
 /*      Fix program check on NOP due to addressing - Jan Jaeger      */
 /*      Fix program check on TIC as first ccw on RSCH - Jan Jaeger   */
 /*      Fix PCI intermediate status flags             - Jan Jaeger   */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
 /*      64-bit IDAW support - Roger Bowler v209                  @IWZ*/
 /*      Incorrect-length-indication-suppression - Jan Jaeger         */
 /*      Read backward support contributed by Hackules   13jun2002    */
@@ -1260,7 +1260,8 @@ void adjust_thread_priority(int *newprio)
 /*-------------------------------------------------------------------*/
 void *device_thread (void *arg)
 {
-DEVBLK  *dev;
+char    thread_name[32];
+DEVBLK *dev;
 int     current_priority;               /* Current thread priority   */
 
     UNREFERENCED(arg);
@@ -1278,6 +1279,11 @@ int     current_priority;               /* Current thread priority   */
     {
         while ((dev=sysblk.ioq) != NULL)
         {
+            snprintf ( thread_name, sizeof(thread_name),
+                "device %4.4X thread", dev->devnum );
+            thread_name[sizeof(thread_name)-1]=0;
+            SET_THREAD_NAME(thread_name);
+
             sysblk.ioq = dev->nextioq;
             if (sysblk.ioq && sysblk.devtwait)
                 signal_condition(&sysblk.ioqcond);
@@ -1295,6 +1301,8 @@ int     current_priority;               /* Current thread priority   */
             obtain_lock(&sysblk.ioqlock);
             dev->tid = 0;
         }
+
+        SET_THREAD_NAME("idle device thread");
 
         if (sysblk.devtmax < 0
          || (sysblk.devtmax == 0 && sysblk.devtwait > 3)
@@ -1716,8 +1724,8 @@ BYTE    area[64];                       /* Data display area         */
 int     midawseq;                       /* MIDAW counter (0=1st)  @MW*/
 U32     midawptr;                       /* Real addr of MIDAW     @MW*/
 U16     midawrem;                       /* CCW bytes remaining    @MW*/
-U16     midawlen;                       /* MIDAW data length      @MW*/
-RADR    midawdat;                       /* MIDAW data area addr   @MW*/
+U16     midawlen=0;                     /* MIDAW data length      @MW*/
+RADR    midawdat=0;                     /* MIDAW data area addr   @MW*/
 BYTE    midawflg;                       /* MIDAW flags            @MW*/
 #endif /*defined(FEATURE_MIDAW)*/                               /*@MW*/
 
@@ -2219,7 +2227,8 @@ DEVBLK *previoq, *ioq;                  /* Device I/O queue pointers */
             signal_condition(&sysblk.ioqcond);
         else if (sysblk.devtmax == 0 || sysblk.devtnbr < sysblk.devtmax)
         {
-            rc = create_thread(&dev->tid,&sysblk.detattr,device_thread,NULL);
+            rc = create_thread (&dev->tid, &sysblk.detattr,
+                        device_thread, NULL, "idle device thread");
             if (rc != 0 && sysblk.devtnbr == 0)
             {
                 logmsg (_("HHCCP067E %4.4X create_thread error: %s"),
@@ -2236,9 +2245,14 @@ DEVBLK *previoq, *ioq;                  /* Device I/O queue pointers */
     }
     else
     {
+        char thread_name[32];
+        snprintf(thread_name,sizeof(thread_name),
+            "execute %4.4X ccw chain",dev->devnum);
+        thread_name[sizeof(thread_name)-1]=0;
+
         /* Execute the CCW chain on a separate thread */
         if ( create_thread (&dev->tid, &sysblk.detattr,
-                            ARCH_DEP(execute_ccw_chain), dev) )
+                    ARCH_DEP(execute_ccw_chain), dev, thread_name) )
         {
             logmsg (_("HHCCP068E %4.4X create_thread error: %s"),
                     dev->devnum, strerror(errno));

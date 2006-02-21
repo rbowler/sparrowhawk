@@ -1,4 +1,4 @@
-/* LOGGER.C     (c) Copyright Jan Jaeger, 2003-2005                  */
+/* LOGGER.C     (c) Copyright Jan Jaeger, 2003-2006                  */
 /*              System logger functions                              */
 
 /* If standard output or standard error is redirected then the log   */
@@ -462,7 +462,9 @@ DLL_EXPORT void logger_init(void)
 
     setvbuf (logger_syslog[LOG_WRITE], NULL, _IONBF, 0);
 
-    if (create_thread (&logger_tid, &logger_attr, logger_thread, NULL))
+    if (create_thread (&logger_tid, &logger_attr,
+                       logger_thread, NULL, "logger_thread")
+       )
     {
         fprintf(stderr, _("HHCLG012E Cannot create logger thread: %s\n"),
           strerror(errno));
@@ -503,7 +505,7 @@ int   new_hrdcpyfd;
     }
     else
     {
-        BYTE pathname[MAX_PATH];
+        char pathname[MAX_PATH];
         hostpath(pathname, filename, sizeof(pathname));
 
         new_hrdcpyfd = open(pathname,

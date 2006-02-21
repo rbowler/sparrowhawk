@@ -1,4 +1,4 @@
-/* tapesplt.C  (c) Copyright Jay Maynard, 2000-2005                 */
+/* tapesplt.C  (c) Copyright Jay Maynard, 2000-2006                 */
 /*              Split AWSTAPE format tape image                      */
 
 /*-------------------------------------------------------------------*/
@@ -66,7 +66,7 @@ int             outfilecount;           /* Current # files copied    */
 int             files2copy;             /* Current # files to copy   */
 BYTE            labelrec[81];           /* Standard label (ASCIIZ)   */
 AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
-BYTE            pathname[MAX_PATH];     /* file path in host format  */
+char            pathname[MAX_PATH];     /* file path in host format  */
 
     set_codepage(NULL);
 

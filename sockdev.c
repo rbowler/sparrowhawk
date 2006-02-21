@@ -1,4 +1,4 @@
-/* SOCKDEV.C    (c) Copyright Hercules development, 2003-2005        */
+/* SOCKDEV.C    (c) Copyright Hercules development, 2003-2006        */
 /*              Socketdevice support                                 */
 
 #include "hstdinc.h"
@@ -518,7 +518,7 @@ int bind_device (DEVBLK* dev, char* spec)
         ATTR joinable_attr;
         initialize_join_attr( &joinable_attr );
         if ( create_thread( &sysblk.socktid, &joinable_attr,
-                                    socket_thread, NULL ) )
+                            socket_thread, NULL, "socket_thread" ) )
             {
                 logmsg( _( "HHCSD023E Cannot create socketdevice thread: errno=%d: %s\n" ),
                         errno, strerror( errno ) );

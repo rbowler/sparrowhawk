@@ -1,4 +1,4 @@
-/* CLOCK.C      (c) Copyright Jan Jaeger, 2000-2005                  */
+/* CLOCK.C      (c) Copyright Jan Jaeger, 2000-2006                  */
 /*              TOD Clock functions                                  */
 
 /* The emulated hardware clock is based on the host clock, adjusted  */
@@ -22,13 +22,7 @@
 
 #include "clock.h"
 
-static double hw_steering = 0.0;  /* Current TOD clock steering rate */
-
-static U64 hw_episode;           /* TOD of start of steering episode */
-
-static S64 hw_offset = 0;       /* Current offset between TOD and HW */
-
-static int clock_state = CC_CLOCK_SET;
+// static int clock_state = CC_CLOCK_SET;
 
 static CSR old;
 static CSR new;
@@ -70,23 +64,49 @@ static U64 universal_clock(void) /* really: any clock used as a base */
 /* The hercules hardware clock, based on the universal clock, but    */
 /* running at its own speed as optionally set by set_tod_steering()  */
 /* The hardware clock returns a unique value                         */
-static U64 hw_tod = 0;
-U64 hw_clock(void)
-{
-U64 base_tod;
+static double hw_steering = 0.0;  /* Current TOD clock steering rate */
+static U64 hw_episode;           /* TOD of start of steering episode */
+static S64 hw_offset = 0;       /* Current offset between TOD and HW */
+// static U64 hw_tod = 0;             /* Globally defined in clock.h */
 
+static inline U64 hw_adjust(U64 base_tod)
+{
     /* Apply hardware offset, this is the offset achieved by all
        previous steering episodes */
-    base_tod = universal_clock() + hw_offset;
-
+    base_tod += hw_offset;
+    
     /* Apply the steering offset from the current steering episode */
     base_tod += (S64)(base_tod - hw_episode) * hw_steering;
 
     /* Ensure that the clock returns a unique value */
     if(hw_tod < base_tod)
-        hw_tod = base_tod;
+        return base_tod;
     else
-	hw_tod += 0x10;
+	return hw_tod += 0x10;
+}
+
+
+U64 hw_clock(void)
+{
+U64 temp_tod;
+
+    /* Get the time of day (GMT) */
+    temp_tod = universal_clock();
+
+    obtain_lock(&sysblk.todlock);
+
+    /* Ajust speed and ensure uniqueness */
+    hw_tod = hw_adjust(temp_tod);
+
+    release_lock(&sysblk.todlock);
+
+    return hw_tod;
+}
+
+
+static U64 hw_clock_l(void)
+{
+    hw_tod = hw_adjust(universal_clock());
 
     return hw_tod;
 }
@@ -98,9 +118,9 @@ U64 base_tod;
 void set_tod_steering(double steering)
 {
     obtain_lock(&sysblk.todlock);
-    hw_offset = hw_clock() - universal_tod;
-    hw_steering = steering;
+    hw_offset = hw_clock_l() - universal_tod;
     hw_episode = hw_tod;
+    hw_steering = steering;
     release_lock(&sysblk.todlock);
 }
 
@@ -108,7 +128,7 @@ void set_tod_steering(double steering)
 /* Start a new episode */
 static inline void start_new_episode()
 {
-    hw_offset = hw_clock() - universal_tod;
+    hw_offset = hw_tod - universal_tod;
     hw_episode = hw_tod;
     new.start_time = hw_episode;
     hw_steering = ldexp(2,-44) * (S32)(new.fine_s_rate + new.gross_s_rate);
@@ -155,16 +175,27 @@ double get_tod_steering(void)
 
 void set_tod_epoch(S64 epoch)
 {
+    obtain_lock(&sysblk.todlock);
     csr_reset();
-    tod_epoch = adjust_epoch_cpu_all(epoch);
+    tod_epoch = epoch;
+    release_lock(&sysblk.todlock);
+    adjust_epoch_cpu_all(epoch);
 }
 
 
-void ajust_tod_epoch(S64 epoch)
+void adjust_tod_epoch(S64 epoch)
 {
+    obtain_lock(&sysblk.todlock);
     csr_reset();
     tod_epoch += epoch;
+    release_lock(&sysblk.todlock);
     adjust_epoch_cpu_all(tod_epoch);
+}
+
+
+void set_tod_clock(U64 tod)
+{
+    set_tod_epoch(tod - hw_clock());
 }
 
 
@@ -210,6 +241,106 @@ static void adjust_tod_offset(S64 offset)
 }
 
 
+/* The cpu timer is internally kept as an offset to the hw_clock()
+ * the cpu timer counts down as the clock approaches the timer epoch
+ */
+void set_cpu_timer(REGS *regs, S64 timer)
+{
+    regs->cpu_timer = (timer >> 8) + hw_clock();
+}
+
+
+S64 cpu_timer(REGS *regs)
+{
+S64 timer;
+    timer = (regs->cpu_timer - hw_clock()) << 8;
+    return timer;
+}
+
+
+U64 tod_clock(REGS *regs)
+{
+U64 current_tod;
+
+    obtain_lock(&sysblk.todlock);
+
+    current_tod = hw_clock_l();
+    
+    /* If we are in the old episode, and the new episode has arrived
+       then we must take action to start the new episode */
+    if(current == &old)
+        start_new_episode();
+
+    /* Set the clock to the new updated value with offset applied */
+    current_tod += current->base_offset;
+
+    tod_value = current_tod;
+
+    release_lock(&sysblk.todlock);
+
+    return current_tod + regs->tod_epoch;
+}
+
+
+#if defined(_FEATURE_INTERVAL_TIMER)
+
+
+#if defined(_FEATURE_ECPSVM)
+static inline S32 ecps_vtimer(REGS *regs)
+{
+    return (S32)TOD_TO_ITIMER((S64)(regs->ecps_vtimer - hw_clock()));
+}
+
+
+static inline void set_ecps_vtimer(REGS *regs, S32 vtimer)
+{
+    regs->ecps_vtimer = (U64)(hw_clock() + ITIMER_TO_TOD(vtimer));
+    regs->ecps_oldtmr = vtimer;
+}
+#endif /*defined(_FEATURE_ECPSVM)*/
+
+
+S32 int_timer(REGS *regs)
+{
+    return (S32)TOD_TO_ITIMER((S64)(regs->int_timer - hw_clock()));
+}
+
+
+void set_int_timer(REGS *regs, S32 itimer)
+{
+    regs->int_timer = (U64)(hw_clock() + ITIMER_TO_TOD(itimer));
+    regs->old_timer = itimer;
+}
+
+
+int chk_int_timer(REGS *regs)
+{
+S32 itimer;
+int pending = 0;
+
+    itimer = int_timer(regs);
+    if(itimer < 0 && regs->old_timer >= 0)
+    {
+        ON_IC_ITIMER(regs);
+        pending = 1;
+    }
+#if defined(_FEATURE_ECPSVM)
+    if(regs->ecps_vtmrpt)
+    {
+        itimer = ecps_vtimer(regs);
+        if(itimer < 0 && regs->ecps_oldtmr >= 0)
+        {
+            ON_IC_ECPSVTIMER(regs);
+            pending = 1;
+        }
+    }
+#endif /*defined(_FEATURE_ECPSVM)*/
+
+    return pending;
+}
+#endif /*defined(_FEATURE_INTERVAL_TIMER)*/
+
+
 /*-------------------------------------------------------------------*/
 /* Update TOD clock                                                  */
 /*                                                                   */
@@ -228,15 +359,14 @@ static void adjust_tod_offset(S64 offset)
 /* has been adjusted.                                                */
 /*                                                                   */
 /*-------------------------------------------------------------------*/
-static U64 tod_timer;
+// static U64 tod_value;
 U64 update_tod_clock(void)
 {
-U64 new_clock, 
-    tod_delta;
+U64 new_clock;
 
-    new_clock = hw_clock();
-    tod_delta = new_clock - tod_timer;
-    tod_timer = new_clock;
+    obtain_lock(&sysblk.todlock);
+
+    new_clock = hw_clock_l();
     
     /* If we are in the old episode, and the new episode has arrived
        then we must take action to start the new episode */
@@ -244,17 +374,68 @@ U64 new_clock,
         start_new_episode();
 
     /* Set the clock to the new updated value with offset applied */
-    tod_clock = new_clock + current->base_offset;
+    new_clock += current->base_offset;
+    tod_value = new_clock;
+
+    release_lock(&sysblk.todlock);
 
     /* Update the timers and check if either a clock related event has
        become pending */
-    update_cpu_timer(tod_delta);
+    update_cpu_timer();
 
-    return tod_delta;
+    return new_clock;
 }
 
 
 #endif
+
+
+#if defined(FEATURE_INTERVAL_TIMER)
+void ARCH_DEP(store_int_timer) (REGS *regs)
+{
+S32 itimer;
+    FETCH_FW(itimer, regs->psa->inttimer);
+    if(itimer != regs->old_timer)
+    {
+// ZZ   logmsg(D_("Interval timer out of sync, core=%8.8X, internal=%8.8X\n"), itimer, regs->old_timer);
+        set_int_timer(regs, itimer);
+    }
+    else
+        regs->old_timer = itimer = int_timer(regs);
+    STORE_FW(regs->psa->inttimer, itimer);
+#if defined(FEATURE_ECPSVM)
+    if(regs->ecps_vtmrpt)
+    {
+        FETCH_FW(itimer, regs->ecps_vtmrpt);
+        if(itimer != regs->ecps_oldtmr)
+        {
+// ZZ       logmsg(D_("ECPS vtimer out of sync, core=%8.8X, internal=%8.8X\n"), itimer, regs->ecps_vtimer);
+            set_ecps_vtimer(regs, itimer);
+        }
+        else
+            regs->ecps_oldtmr = itimer = ecps_vtimer(regs);
+        STORE_FW(regs->ecps_vtmrpt, itimer);
+    }
+#endif /*defined(FEATURE_ECPSVM)*/
+    chk_int_timer(regs);
+}
+
+
+void ARCH_DEP(fetch_int_timer) (REGS *regs)
+{
+S32 itimer;
+    FETCH_FW(itimer, regs->psa->inttimer);
+    set_int_timer(regs, itimer);
+#if defined(FEATURE_ECPSVM)
+    if(regs->ecps_vtmrpt)
+    {
+        FETCH_FW(itimer, regs->ecps_vtmrpt);
+        set_ecps_vtimer(regs, itimer);
+    }
+#endif /*defined(FEATURE_ECPSVM)*/
+}
+#endif
+
 
 #if defined(FEATURE_TOD_CLOCK_STEERING)
 
@@ -323,7 +504,7 @@ void ARCH_DEP(query_tod_offset) (REGS *regs)
 {
 PTFFQTO qto;
     obtain_lock(&sysblk.todlock);
-    STORE_DW(qto.todoff, (hw_clock() - universal_tod) << 8);
+    STORE_DW(qto.todoff, (hw_clock_l() - universal_tod) << 8);
     STORE_DW(qto.physclk, universal_tod << 8);
     STORE_DW(qto.ltodoff, current->base_offset << 8);
     STORE_DW(qto.todepoch, regs->tod_epoch << 8);

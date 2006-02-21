@@ -1,4 +1,4 @@
-/* SIE.C        (c) Copyright Jan Jaeger, 1999-2005                  */
+/* SIE.C        (c) Copyright Jan Jaeger, 1999-2006                  */
 /*              Interpretive Execution                               */
 
 /*      This module contains the SIE instruction as                  */
@@ -8,7 +8,7 @@
 /*      Enterprise Systems Architecture / Extended Configuration     */
 /*      Principles of Operation, SC24-5594-02 and SC24-5965-00       */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
 
 #include "hstdinc.h"
 
@@ -228,6 +228,7 @@ RADR    effective_addr2;                /* address of state desc.    */
 int     n;                              /* Loop counter              */
 U16     lhcpu;                          /* Last Host CPU address     */
 int     icode = 0;                      /* Interception code         */
+U64     dreg;
 
     S(inst, regs, b2, effective_addr2);
 
@@ -513,7 +514,8 @@ int     icode = 0;                      /* Interception code         */
 #endif /*!defined(FEATURE_ESAME)*/
 
     /* Load the CPU timer */
-    FETCH_DW(GUESTREGS->ptimer, STATEBK->cputimer);
+    FETCH_DW(dreg, STATEBK->cputimer);
+    set_cpu_timer(GUESTREGS, dreg);
 
     /* Load the TOD clock offset for this guest */
     FETCH_DW(GUESTREGS->sie_epoch, STATEBK->epoch);
@@ -597,7 +599,7 @@ int     icode = 0;                      /* Interception code         */
         /* Get PSA pointer and ensure PSA is paged in */
         if(GUESTREGS->sie_pref)
         {
-            GUESTREGS->sie_psa = (PSA_3XX*)(GUESTREGS->mainstor + GUESTREGS->PX);
+            GUESTREGS->psa = (PSA_3XX*)(GUESTREGS->mainstor + GUESTREGS->PX);
             GUESTREGS->sie_px = GUESTREGS->PX;
         }
         else
@@ -627,27 +629,19 @@ int     icode = 0;                      /* Interception code         */
                 release_lock(&sysblk.intlock);
                 return;
             }
-            GUESTREGS->sie_psa = (PSA_3XX*)(GUESTREGS->mainstor + GUESTREGS->sie_px);
+            GUESTREGS->psa = (PSA_3XX*)(GUESTREGS->mainstor + GUESTREGS->sie_px);
         }
 
         /* Intialize guest timers */
-        obtain_lock(&sysblk.todlock);
+        obtain_lock(&sysblk.intlock);
 
         /* CPU timer */
-        if( (S64)GUESTREGS->ptimer < 0 )
-        {
-            obtain_lock(&sysblk.intlock);
+        if(CPU_TIMER(GUESTREGS) < 0)
             ON_IC_PTIMER(GUESTREGS);
-            release_lock(&sysblk.intlock);
-        }
 
         /* Clock comparator */
         if( TOD_CLOCK(GUESTREGS) > GUESTREGS->clkc )
-        {
-            obtain_lock(&sysblk.intlock);
             ON_IC_CLKC(GUESTREGS);
-            release_lock(&sysblk.intlock);
-        }
 
 #if !defined(FEATURE_ESAME)
         /* Interval timer if S/370 and timer is enabled */
@@ -659,17 +653,13 @@ int     icode = 0;                      /* Interception code         */
             /* Set the interval timer pending according to the T bit
                in the state control */
             if(STATEBK->s & SIE_S_T)
-            {
-                obtain_lock(&sysblk.intlock);
                 ON_IC_ITIMER(GUESTREGS);
-                release_lock(&sysblk.intlock);
-            }
 
             /* Fetch the residu from the state descriptor */
             FETCH_FW(residue,STATEBK->residue);
 
             /* Fetch the timer value from location 80 */
-            FETCH_FW(olditimer,GUESTREGS->sie_psa->inttimer);
+            FETCH_FW(olditimer,GUESTREGS->psa->inttimer);
 
             /* Bit position 23 of the interval timer is decremented
                once for each multiple of 3,333 usecs containded in
@@ -677,21 +667,17 @@ int     icode = 0;                      /* Interception code         */
             itimer = olditimer - ((residue / 3333) >> 4);
 
             /* Store the timer back */
-            STORE_FW(GUESTREGS->sie_psa->inttimer, itimer);
+            STORE_FW(GUESTREGS->psa->inttimer, itimer);
 
             /* Set interrupt flag and interval timer interrupt pending
                if the interval timer went from positive to negative */
             if (itimer < 0 && olditimer >= 0)
-            {
-                obtain_lock(&sysblk.intlock);
                 ON_IC_ITIMER(GUESTREGS);
-                release_lock(&sysblk.intlock);
-            }
         }
+
 #endif /*!defined(FEATURE_ESAME)*/
 
-        /* Finished with timers */
-        release_lock(&sysblk.todlock);
+        release_lock(&sysblk.intlock);
 
         /* Early exceptions associated with the guest load_psw() */
         if(icode)
@@ -788,24 +774,26 @@ int     n;
     }
 
     /* Save CPU timer  */
-    STORE_DW(STATEBK->cputimer, GUESTREGS->ptimer);
+    STORE_DW(STATEBK->cputimer, cpu_timer(GUESTREGS));
 
     /* Save clock comparator */
-    GUESTREGS->clkc <<= 8; /* Internal Hercules format */
-    STORE_DW(STATEBK->clockcomp, GUESTREGS->clkc);
+    STORE_DW(STATEBK->clockcomp, GUESTREGS->clkc << 8);
 
-#if !defined(FEATURE_ESAME)
+#if defined(_FEATURE_INTERVAL_TIMER) && !defined(FEATURE_ESAME)
     /* If this is a S/370 guest, and the interval timer is enabled
        then save the timer state control bit */
     if( (STATEBK->m & SIE_M_370)
      && !(STATEBK->m & SIE_M_ITMOF))
     {
+        /* Save the shadow interval timer */
+        s370_store_int_timer(regs);
+
         if(IS_IC_ITIMER(GUESTREGS))
             STATEBK->s |= SIE_S_T;
         else
             STATEBK->s &= ~SIE_S_T;
     }
-#endif /*!defined(FEATURE_ESAME)*/
+#endif /*defined(_FEATURE_INTERVAL_TIMER) && !defined(FEATURE_ESAME)*/
 
     /* Save TOD Programmable Field */
     STORE_HW(STATEBK->todpf, GUESTREGS->todpr);
@@ -915,6 +903,15 @@ int ARCH_DEP(run_sie) (REGS *regs)
     /* Reset any PER pending indication */
     OFF_IC_PER(GUESTREGS);
 #endif /*defined(_FEATURE_PER)*/
+
+#ifdef FEATURE_INTERVAL_TIMER
+    /* Load the shadow interval timer */
+    {
+    S32 itimer;
+        FETCH_FW(itimer,GUESTREGS->psa->inttimer);
+        set_int_timer(GUESTREGS, itimer);
+    }
+#endif
 
     do {
         SIE_PERFMON(SIE_PERF_RUNLOOP_1);

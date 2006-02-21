@@ -1,4 +1,4 @@
-/* CCKDDASD.C   (c) Copyright Roger Bowler, 1999-2005                */
+/* CCKDDASD.C   (c) Copyright Roger Bowler, 1999-2006                */
 /*       ESA/390 Compressed CKD Direct Access Storage Device Handler */
 
 /*-------------------------------------------------------------------*/
@@ -176,6 +176,7 @@ int             i, j;                   /* Loop indexes              */
     initialize_condition (&cckdblk.wrcond);
     initialize_condition (&cckdblk.devcond);
     initialize_condition (&cckdblk.termcond);
+    initialize_join_attr (&cckdblk.attr);
 
     /* Initialize some variables */
     cckdblk.wrprio     = 16;
@@ -543,7 +544,7 @@ int cckd_open (DEVBLK *dev, int sfx, int flags, mode_t mode)
 {
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
 int             err;                    /* 1 = issue error message   */
-BYTE            pathname[MAX_PATH];     /* file path in host format  */
+char            pathname[MAX_PATH];     /* file path in host format  */
 
     cckd = dev->cckd_ext;
 
@@ -1443,7 +1444,7 @@ TID             tid;                    /* Readahead thread id       */
         if (cckdblk.rawaiting)
             signal_condition (&cckdblk.racond);
         else if (cckdblk.ras < cckdblk.ramax)
-            create_thread (&tid, NULL, cckd_ra, NULL);
+            create_thread (&tid, &cckdblk.attr, cckd_ra, NULL, "cckd_ra");
     }
 
     release_lock (&cckdblk.ralock);
@@ -1495,8 +1496,10 @@ TID             tid;                    /* Readahead thread id       */
     }
 
     if (!cckdblk.batch)
-    logmsg (_("HHCCD001I Readahead thread %d started: tid="TIDPAT", pid=%d\n"),
+    {
+        logmsg (_("HHCCD001I Readahead thread %d started: tid="TIDPAT", pid=%d\n"),
             ra, thread_id(), getpid());
+    }
 
     while (ra <= cckdblk.ramax)
     {
@@ -1529,7 +1532,7 @@ TID             tid;                    /* Readahead thread id       */
             if (cckdblk.rawaiting)
                 signal_condition (&cckdblk.racond);
             else if (cckdblk.ras < cckdblk.ramax)
-                create_thread (&tid, NULL, cckd_ra, dev);
+                create_thread (&tid, &cckdblk.attr, cckd_ra, dev, "cckd_ra");
         }
 
         if (!cckd || cckd->stopping || cckd->merging) continue;
@@ -1577,8 +1580,7 @@ TID             tid;                    /* Writer thread id          */
             signal_condition (&cckdblk.wrcond);
         else if (cckdblk.wrs < cckdblk.wrmax)
         {
-            rc = create_thread (&tid, NULL, cckd_writer, (void *)((long)cckdblk.wrs + 1));
-            if (rc == 0) cckdblk.wrs++;
+            create_thread (&tid, &cckdblk.attr, cckd_writer, NULL, "cckd_writer");
         }
     }
     release_lock (&cckdblk.wrlock);
@@ -1659,7 +1661,6 @@ void cckd_writer(void *arg)
 {
 DEVBLK         *dev;                    /* Device block              */
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
-int             rc;                     /* Return code               */
 int             writer;                 /* Writer identifier         */
 int             o;                      /* Cache entry found         */
 U16             devnum;                 /* Device number             */
@@ -1674,6 +1675,8 @@ U32             flag;                   /* Cache flag                */
 static char    *compress[] = {"none", "zlib", "bzip2"};
 BYTE            buf2[65536];            /* Compress buffer           */
 
+    UNREFERENCED(arg);
+
 #ifndef WIN32
     /* Set writer priority just below cpu priority to mimimize the
        compression effect */
@@ -1682,11 +1685,22 @@ BYTE            buf2[65536];            /* Compress buffer           */
 #endif
 
     obtain_lock (&cckdblk.wrlock);
-    writer = (long)arg;
+
+    writer = ++cckdblk.wrs;
+
+    /* Return without messages if too many already started */
+    if (writer > cckdblk.wrmax)
+    {
+        --cckdblk.wrs;
+        release_lock (&cckdblk.wrlock);
+        return;
+    }
 
     if (!cckdblk.batch)
-    logmsg (_("HHCCD002I Writer thread %d started: tid="TIDPAT", pid=%d\n"),
+    {
+        logmsg (_("HHCCD002I Writer thread %d started: tid="TIDPAT", pid=%d\n"),
             writer, thread_id(), getpid());
+    }
 
     while (writer <= cckdblk.wrmax || cckdblk.wrpending)
     {
@@ -1720,8 +1734,7 @@ BYTE            buf2[65536];            /* Compress buffer           */
                 signal_condition (&cckdblk.wrcond);
             else if (cckdblk.wrs < cckdblk.wrmax)
             {
-                rc = create_thread (&tid, NULL, cckd_writer, (void *)((long)cckdblk.wrs + 1));
-                if (rc == 0) cckdblk.wrs++;
+                create_thread (&tid, &cckdblk.attr, cckd_writer, NULL, "cckd_writer");
             }
         }
         release_lock (&cckdblk.wrlock);
@@ -1786,7 +1799,7 @@ BYTE            buf2[65536];            /* Compress buffer           */
 
         /* Schedule the garbage collector */
         if (cckdblk.gcs < cckdblk.gcmax)
-            create_thread (&tid, NULL, cckd_gcol, NULL);
+            create_thread (&tid, &cckdblk.attr, cckd_gcol, NULL, "cckd_gcol");
 
         obtain_lock (&cckd->iolock);
         cache_lock (CACHE_DEVBUF);
@@ -3428,7 +3441,7 @@ CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
 int             rc;                     /* Return code               */
 int             i;                      /* Index                     */
 struct STAT     st;                     /* stat() buffer             */
-BYTE            pathname[MAX_PATH];     /* file path in host format  */
+char            pathname[MAX_PATH];     /* file path in host format  */
 
     cckd = dev->cckd_ext;
 
@@ -4223,8 +4236,10 @@ int             gctab[5]= {             /* default gcol parameters   */
     }
 
     if (!cckdblk.batch)
-    logmsg (_("HHCCD003I Garbage collector thread started: tid="TIDPAT", pid=%d \n"),
+    {
+        logmsg (_("HHCCD003I Garbage collector thread started: tid="TIDPAT", pid=%d \n"),
               thread_id(), getpid());
+    }
 
     while (gcol <= cckdblk.gcmax)
     {
@@ -4665,7 +4680,11 @@ OFF_T           pos, fpos;              /* File offsets              */
         if (i < 0 || fpos >= cckd->l2bounds || cckd->free[i].pending)
             goto cckd_gc_l2_exit;
 
-        if (cckd->free[i].len < CCKD_L2TAB_SIZE)
+        if (cckd->free[i].len < CCKD_L2TAB_SIZE
+         || (cckd->free[i].len != CCKD_L2TAB_SIZE
+          && cckd->free[i].len < CCKD_L2TAB_SIZE + CCKD_FREEBLK_SIZE
+            )
+           )
         {
             for (i = 0; i < cckd->cdevhdr[sfx].numl1tab; i++)
                 if (fpos + cckd->free[i].len == (OFF_T)cckd->l1[sfx][i])
@@ -5324,7 +5343,7 @@ int   val, opts = 0;
             }
             cckd_unlock_devchain();
             if (flag && cckdblk.gcs < cckdblk.gcmax)
-                create_thread (&tid, NULL, cckd_gcol, NULL);
+                create_thread (&tid, &cckdblk.attr, cckd_gcol, NULL, "cckd_gcol");
         }
         else
         {

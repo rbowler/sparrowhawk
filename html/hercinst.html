@@ -58,13 +58,13 @@ Hercules that does <i>not</i> require Cygwin), Fish has instructions on his
 <h3>Building from source - Linux and Mac OS X</h3>
 <ol>
 <li>Download the distribution file
-<a href="http://www.hercules-390.org/hercules-3.03.1.tar.gz">hercules-3.03.1.tar.gz</a>
+<a href="http://www.hercules-390.org/hercules-3.04.tar.gz">hercules-3.04.tar.gz</a>
 <br><em>Note:</em> By downloading this file you agree to the terms
     of the <a href="herclic.html">Q Public Licence</a>.
 <p>
 <li>Use these commands to unzip the distribution file:
-<pre>tar xvzf ../hercules-3.03.1.tar.gz
-cd hercules-3.03.1</pre>
+<pre>tar xvzf ../hercules-3.04.tar.gz
+cd hercules-3.04</pre>
 
 <li>Verify you have all of the correct versions of all of the
 required packages installed:
@@ -102,7 +102,7 @@ compiler and other software levels.
 <ol>
 <li>Download the RPM file you want:
 <ul>
-<li><a href="http://www.hercules-390.org/hercules-3.03.1-1.i686.rpm">hercules-3.03.1-1.i686.rpm</a>: Intel
+<li><a href="http://www.hercules-390.org/hercules-3.04-1.i686.rpm">hercules-3.04-1.i686.rpm</a>: Intel
 </ul>
 <li>Install the RPM:
 <br><code>rpm -Uvh</code> <i>RPMfile</i>
@@ -141,9 +141,9 @@ in subtle ways if the wrong optimization settings are used.</p>
 
 <ol>
 <li>Download the compressed disk image: <a
-href="http://www.hercules-390.org/hercules-3.03.1-panther.dmg">hercules-3.03.1-panther.dmg</a> if you're
+href="http://www.hercules-390.org/hercules-3.04-panther.dmg">hercules-3.04-panther.dmg</a> if you're
 running OS X version 10.3, or <a
-href="http://www.hercules-390.org/hercules-3.03.1-tiger.dmg">hercules-3.03.1-tiger.dmg</a> if you're running
+href="http://www.hercules-390.org/hercules-3.04-tiger.dmg">hercules-3.04-tiger.dmg</a> if you're running
 version 10.4 or later.
 <li>Mount the image by double-clicking on it in the Finder.
 Your web browser may have done that for you already.
@@ -159,9 +159,9 @@ Unfortunately, the Panther driver will not work on Tiger at all.
 <h3>Installing on Windows (without Cygwin):</h3>
 <ol>
 <li>Download the <a
-href="http://www.hercules-390.org/hercules-3.03.1-native.exe">self-extracting
+href="http://www.hercules-390.org/hercules-3.04-native.exe">self-extracting
 Windows archive</a> or the <a
-href="http://www.hercules-390.org/hercules-3.03.1-native.msi">Windows
+href="http://www.hercules-390.org/hercules-3.04-native.msi">Windows
 Installer package</a>.
 <li>If you downloaded the self-extracting archive, simply execute it to
 install Hercules on your system. If you downloaded the Windows Installer
@@ -190,18 +190,18 @@ labeled "<a href="http://www.cygwin.com/setup.exe">Install or update now!
 (using setup.exe)</a>" and select "Save Target As..." and then run it after
 it's been downloaded) If it's not preselected for you,
 select the libintl-2 package when you're presented with a list of packages
-to install. (NOTE: Hercules version 3.03.1 was built with version 1.5.15 
+to install. (NOTE: Hercules version 3.04 was built with version 1.5.15 
 of Cygwin, and may not work with other versions, as the
 Cygwin library tends to have subtle incompatibilities from version
 to version that Hercules seems to stress.)
 
 <li>Download the self-extracting Windows archive: 
 <ul>
-<li><a href="http://www.hercules-390.org/hercules-3.03.1-cygwin-p4.exe">hercules-3.03.1-cygwin-p4.exe</a>:
+<li><a href="http://www.hercules-390.org/hercules-3.04-cygwin-p4.exe">hercules-3.04-cygwin-p4.exe</a>:
 Pentium 4 version
-<li><a href="http://www.hercules-390.org/hercules-3.03.1-cygwin-i686.exe">hercules-3.03.1-cygwin-i686.exe</a>:
+<li><a href="http://www.hercules-390.org/hercules-3.04-cygwin-i686.exe">hercules-3.04-cygwin-i686.exe</a>:
 Pentium Pro/Pentium II and above version
-<li><a href="http://www.hercules-390.org/hercules-3.03.1-cygwin-i586.exe">hercules-3.03.1-cygwin-i586.exe</a>:
+<li><a href="http://www.hercules-390.org/hercules-3.04-cygwin-i586.exe">hercules-3.04-cygwin-i586.exe</a>:
 Pentium version
 </ul>
 <li>Run one of the above self-extracting archives to install the Hercules
@@ -237,13 +237,49 @@ violate the software vendor's licensing terms.</em>
 <h4>Loading a standalone program or operating system</h4>
 <p>
 To start Hercules enter this command at the Unix shell prompt:
-<pre><code>hercules [-f <em>filename</em>] [&gt; <em>logfile</em>]</code></pre>
+<blockquote><code><pre>
+    hercules  [ -f <em>filename</em> ]
+              [ -d ]
+              [ -p <em>dyndir</em> ]  [[-l <em>dynmod</em> ] ... ]
+              [ &gt; <em>logfile</em> ]
+</pre></code>
+</blockquote>
 <p>
-where <code><em>filename</em></code> is the name of the configuration
-file
-(the default is <b><em>hercules.cnf</em></b>),
-and <code><em>logfile</em></code> is an optional log file which will
-receive a copy of all messages displayed on the control panel.
+where:
+<blockquote>
+<dl>
+        <dt><code><em>filename</em></code><p><dd>
+        
+            is the name of the configuration file.
+            The default, if none is specified, is <b><em>hercules.cnf</em></b>.
+            The default may be overridden via the <code>HERCULES_CNF</code>
+            environment variable.
+        <p>
+        <dt><code><em>-d</em></code><p><dd>
+        
+            specifies that Hercules is to be run in 'daemon' mode,
+            wherein it runs invisibly with no attached console.
+        <p>
+        <dt><code><em>dyndir</em></code><p><dd>
+        
+            is the directory from which dynamic modules are to be loaded.
+            The default depends on the host platform on which Hercules
+            is being run. This option overrides the default.
+        <p>
+        <dt><code><em>dynmod</em></code><p><dd>
+        
+            is the name of an additional dynamic module to be loaded
+            at startup. More than one additional module may be specified,
+            although each must be preceded with the <code>-l</code>
+            option specifier.
+        <p>
+        <dt><code><em>logfile</em></code><p><dd>
+        
+            is an optional log file which will receive a copy of
+            all messages displayed on the control panel
+        <p>
+</dl>
+</blockquote>
 
 <p>
 Next connect a tn3270 client to the console port (normally port 3270).
@@ -455,6 +491,6 @@ Please see our <a href="hercsupp.html">Technical Support</a> web page.
 <p><center><hr width=15% noshade>
 <a href="index.html"><img src="images/back.gif" border=0 alt="back"></a>
 </center>
-<p class="lastupd">Last updated $Date: 2005/12/29 10:38:33 $ $Revision: 1.39 $</p>
+<p class="lastupd">Last updated $Date: 2006/02/12 21:58:08 $ $Revision: 1.41 $</p>
 </BODY>
 </HTML>

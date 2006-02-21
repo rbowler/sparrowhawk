@@ -1,8 +1,8 @@
-/* VSTORE.H     (c) Copyright Roger Bowler, 1999-2005                */
+/* VSTORE.H     (c) Copyright Roger Bowler, 1999-2006                */
 /*              ESA/390 Virtual Storage Functions                    */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
 
 /*-------------------------------------------------------------------*/
 /* This module contains various functions which store, fetch, and    */
@@ -23,6 +23,91 @@
 /* move_chars   Move characters using specified keys and addrspaces  */
 /* validate_operand   Validate addressing, protection, translation   */
 /*-------------------------------------------------------------------*/
+/* And provided by means of macro's address wrapping versions of     */
+/* the above:                                                        */
+/* wstoreX                                                           */
+/* wfetchX                                                           */
+/* wmove_chars                                                       */
+/* wvalidate_operand                                                 */
+/*-------------------------------------------------------------------*/
+
+#define s370_wstorec(_src, _len, _addr, _arn, _regs) \
+        s370_vstorec((_src), (_len), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs)) 
+#define s370_wstoreb(_value, _addr, _arn, _regs) \
+        s370_vstoreb((_value), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define s370_wstore2(_value, _addr, _arn, _regs) \
+        s370_vstore2((_value), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define s370_wstore4(_value, _addr, _arn, _regs) \
+        s370_vstore4((_value), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define s370_wstore8(_value, _addr, _arn, _regs) \
+        s370_vstore8((_value), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define s370_wfetchc(_dest, _len, _addr, _arn, _regs) \
+        s370_vfetchc((_dest), (_len), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs)) 
+#define s370_wfetchb(_addr, _arn, _regs) \
+        s370_vfetchb(((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define s370_wfetch2(_addr, _arn, _regs) \
+        s370_vfetch2(((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define s370_wfetch4(_addr, _arn, _regs) \
+        s370_vfetch4(((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define s370_wfetch8(_addr, _arn, _regs) \
+        s370_vfetch8(((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define s370_wmove_chars(_addr1, _arn1, _key1, _addr2, _arn2, _key2, _len, _regs) \
+        s370_move_chars(((_addr1) & ADDRESS_MAXWRAP((_regs))), (_arn1), (_key1), \
+                        ((_addr2) & ADDRESS_MAXWRAP((_regs))), (_arn2), (_key2), (_len), (_regs))
+#define s370_wvalidate_operand(_addr, _arn, _len, _acctype, _regs) \
+        s370_validate_operand(((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_len), (_acctype), (_regs))
+
+#define s390_wstorec(_src, _len, _addr, _arn, _regs) \
+        s390_vstorec((_src), (_len), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs)) 
+#define s390_wstoreb(_value, _addr, _arn, _regs) \
+        s390_vstoreb((_value), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define s390_wstore2(_value, _addr, _arn, _regs) \
+        s390_vstore2((_value), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define s390_wstore4(_value, _addr, _arn, _regs) \
+        s390_vstore4((_value), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define s390_wstore8(_value, _addr, _arn, _regs) \
+        s390_vstore8((_value), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define s390_wfetchc(_dest, _len, _addr, _arn, _regs) \
+        s390_vfetchc((_dest), (_len), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs)) 
+#define s390_wfetchb(_addr, _arn, _regs) \
+        s390_vfetchb(((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define s390_wfetch2(_addr, _arn, _regs) \
+        s390_vfetch2(((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define s390_wfetch4(_addr, _arn, _regs) \
+        s390_vfetch4(((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define s390_wfetch8(_addr, _arn, _regs) \
+        s390_vfetch8(((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define s390_wmove_chars(_addr1, _arn1, _key1, _addr2, _arn2, _key2, _len, _regs) \
+        s390_move_chars(((_addr1) & ADDRESS_MAXWRAP((_regs))), (_arn1), (_key1), \
+                        ((_addr2) & ADDRESS_MAXWRAP((_regs))), (_arn2), (_key2), (_len), (_regs))
+#define s390_wvalidate_operand(_addr, _arn, _len, _acctype, _regs) \
+        s390_validate_operand(((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_len), (_acctype), (_regs))
+
+#define z900_wstorec(_src, _len, _addr, _arn, _regs) \
+        z900_vstorec((_src), (_len), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs)) 
+#define z900_wstoreb(_value, _addr, _arn, _regs) \
+        z900_vstoreb((_value), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define z900_wstore2(_value, _addr, _arn, _regs) \
+        z900_vstore2((_value), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define z900_wstore4(_value, _addr, _arn, _regs) \
+        z900_vstore4((_value), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define z900_wstore8(_value, _addr, _arn, _regs) \
+        z900_vstore8((_value), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define z900_wfetchc(_dest, _len, _addr, _arn, _regs) \
+        z900_vfetchc((_dest), (_len), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs)) 
+#define z900_wfetchb(_addr, _arn, _regs) \
+        z900_vfetchb(((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define z900_wfetch2(_addr, _arn, _regs) \
+        z900_vfetch2(((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define z900_wfetch4(_addr, _arn, _regs) \
+        z900_vfetch4(((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define z900_wfetch8(_addr, _arn, _regs) \
+        z900_vfetch8(((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs))
+#define z900_wmove_chars(_addr1, _arn1, _key1, _addr2, _arn2, _key2, _len, _regs) \
+        z900_move_chars(((_addr1) & ADDRESS_MAXWRAP((_regs))), (_arn1), (_key1), \
+                        ((_addr2) & ADDRESS_MAXWRAP((_regs))), (_arn2), (_key2), (_len), (_regs))
+#define z900_wvalidate_operand(_addr, _arn, _len, _acctype, _regs) \
+        z900_validate_operand(((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_len), (_acctype), (_regs))
 
 /*-------------------------------------------------------------------*/
 /*              Operand Length Checking Macros                       */
@@ -75,6 +160,7 @@ int     len2;                           /* Length to end of page     */
     {
         memcpy(MADDR(addr, arn, regs, ACCTYPE_WRITE, regs->psw.pkey),
                src, len + 1);
+        ITIMER_UPDATE(addr,len,regs);
     }
     else
     {
@@ -111,6 +197,7 @@ BYTE   *main1;                          /* Mainstor address          */
 
     main1 = MADDR(addr, arn, regs, ACCTYPE_WRITE, regs->psw.pkey);
     *main1 = value;
+    ITIMER_UPDATE(addr,1-1,regs);
 
 } /* end function ARCH_DEP(vstoreb) */
 
@@ -138,6 +225,7 @@ BYTE   *sk;                             /* Storage key addresses     */
     {
         main1 = MADDR(addr, arn, regs, ACCTYPE_WRITE, regs->psw.pkey);
         STORE_HW (main1, value);
+        ITIMER_UPDATE(addr,2-1,regs);
     }
     else
     {
@@ -163,6 +251,7 @@ _VSTORE_C_STATIC void ARCH_DEP(vstore2) (U16 value, VADR addr, int arn,
         BYTE *mn;
         mn = MADDR (addr, arn, regs, ACCTYPE_WRITE, regs->psw.pkey);
         STORE_HW(mn, value);
+        ITIMER_UPDATE(addr,2-1,regs);
     }
     else
         ARCH_DEP(vstore2_full)(value, addr, arn, regs);
@@ -194,6 +283,7 @@ BYTE    temp[4];                        /* Copied value              */
     {
         main1 = MADDR (addr, arn, regs, ACCTYPE_WRITE, regs->psw.pkey);
         STORE_FW(main1, value);
+        ITIMER_UPDATE(addr,4-1,regs);
     }
     else
     {
@@ -230,6 +320,7 @@ _VSTORE_C_STATIC void ARCH_DEP(vstore4) (U32 value, VADR addr, int arn,
         BYTE *mn;
         mn = MADDR(addr, arn, regs, ACCTYPE_WRITE, regs->psw.pkey);
         STORE_FW(mn, value);
+        ITIMER_UPDATE(addr,4-1,regs);
     }
     else
         ARCH_DEP(vstore4_full)(value,addr,arn,regs);
@@ -261,6 +352,7 @@ BYTE    temp[8];                        /* Copied value              */
     {
         main1 = MADDR(addr, arn, regs, ACCTYPE_WRITE, regs->psw.pkey);
         STORE_DW(main1, value);
+        ITIMER_UPDATE(addr,8-1,regs);
     }
     else
     {
@@ -307,6 +399,7 @@ _VSTORE_C_STATIC void ARCH_DEP(vstore8) (U64 value, VADR addr, int arn,
         BYTE *mn;
         mn=MADDR(addr,arn,regs,ACCTYPE_WRITE,regs->psw.pkey);
         STORE_DW(mn, value);
+        ITIMER_UPDATE(addr,8-1,regs);
     }
     else
         ARCH_DEP(vstore8_full)(value,addr,arn,regs);
@@ -337,20 +430,8 @@ int     len2;                           /* Length to copy on page    */
 
     if ( NOCROSS2K(addr,len) )
     {
-#ifdef FEATURE_INTERVAL_TIMER
-        if (unlikely(addr == 80))
-        {
-            obtain_lock( &sysblk.todlock );
-            update_tod_clock ();
-        }
-#endif /*FEATURE_INTERVAL_TIMER*/
-
+        ITIMER_SYNC(addr,len,regs);
         memcpy (dest, main1, len + 1);
-
-#ifdef FEATURE_INTERVAL_TIMER
-        if (unlikely(addr == 80))
-            release_lock( &sysblk.todlock );
-#endif /*FEATURE_INTERVAL_TIMER*/
     }
     else
     {
@@ -382,6 +463,7 @@ _VSTORE_C_STATIC BYTE ARCH_DEP(vfetchb) (VADR addr, int arn,
 {
 BYTE   *mn;                           /* Main storage address      */
 
+    ITIMER_SYNC(addr,1-1,regs);
     mn = MADDR (addr, arn, regs, ACCTYPE_READ, regs->psw.pkey);
     return *mn;
 } /* end function ARCH_DEP(vfetchb) */
@@ -409,6 +491,7 @@ BYTE   *main1, *main2;                  /* Main storage addresses    */
 
     if( (addr & 0x7FF) < 0x7FF)
     {
+        ITIMER_SYNC(addr,2-1,regs);
         return fetch_hw (main1);
     }
 
@@ -422,7 +505,8 @@ _VSTORE_C_STATIC U16 ARCH_DEP(vfetch2) (VADR addr, int arn, REGS *regs)
 {
     if(likely(!(addr & 0x01)) || ((addr & 0x7ff) !=0x7ff ))
     {
-        BYTE *mn;
+    BYTE *mn;
+        ITIMER_SYNC(addr,2-1,regs);
         mn = MADDR(addr,arn,regs,ACCTYPE_READ,regs->psw.pkey);
         return fetch_hw(mn);
     }
@@ -454,14 +538,7 @@ BYTE    temp[4];                        /* Copy destination          */
 
     if ((addr & 0x7FF) <= 0x7FC)
     {
-#ifdef FEATURE_INTERVAL_TIMER
-        if (unlikely(addr == 80))
-        {
-            obtain_lock( &sysblk.todlock );
-            update_tod_clock ();
-            release_lock( &sysblk.todlock );
-          }
-#endif /*FEATURE_INTERVAL_TIMER*/
+        ITIMER_SYNC(addr,4-1,regs);
         return fetch_fw(main1);
     }
 
@@ -485,13 +562,10 @@ BYTE    temp[4];                        /* Copy destination          */
 
 _VSTORE_C_STATIC U32 ARCH_DEP(vfetch4) (VADR addr, int arn, REGS *regs)
 {
-    if ( (likely(!(addr & 0x03)) || ((addr & 0x7ff) <= 0x7fc ))
-#if defined(FEATURE_INTERVAL_TIMER)
-     && addr != 80
-#endif
-       )
+    if ( (likely(!(addr & 0x03)) || ((addr & 0x7ff) <= 0x7fc )))
     {
-        BYTE *mn;
+    BYTE *mn;
+        ITIMER_SYNC(addr,4-1,regs);
         mn=MADDR(addr,arn,regs,ACCTYPE_READ,regs->psw.pkey);
         return fetch_fw(mn);
     }
@@ -525,14 +599,7 @@ BYTE    temp[8];                        /* Copy destination          */
     /* Fetch 4 bytes when operand does not cross a boundary */
     if ((addr & 0x7FF) <= 0x7F8)
     {
-#ifdef FEATURE_INTERVAL_TIMER
-        if (unlikely(addr == 80))
-        {
-            obtain_lock( &sysblk.todlock );
-            update_tod_clock ();
-            release_lock( &sysblk.todlock );
-          }
-#endif /*FEATURE_INTERVAL_TIMER*/
+        ITIMER_SYNC(addr,8-1,regs);
         return fetch_dw(main1);
     }
 
@@ -570,7 +637,8 @@ _VSTORE_C_STATIC U64 ARCH_DEP(vfetch8) (VADR addr, int arn, REGS *regs)
 {
     if(likely(!(addr & 0x07)) || ((addr & 0x7ff) <= 0x7f8 ))
     {
-        BYTE *mn;
+    BYTE *mn;
+        ITIMER_SYNC(addr,8-1,regs);
         mn = MADDR (addr, arn, regs, ACCTYPE_READ, regs->psw.pkey);
         return fetch_dw(mn);
     }
@@ -734,12 +802,15 @@ BYTE   *source1, *source2;              /* Source addresses          */
 BYTE   *sk1, *sk2;                      /* Storage key addresses     */
 int     len2, len3;                     /* Lengths to copy           */
 
+    ITIMER_SYNC(addr2,len,regs);
+
     /* Quick out if copying just 1 byte */
     if (unlikely(len == 0))
     {
         source1 = MADDR (addr2, arn2, regs, ACCTYPE_READ, key2);
         dest1 = MADDR (addr1, arn1, regs, ACCTYPE_WRITE, key1);
         *dest1 = *source1;
+        ITIMER_UPDATE(addr1,len,regs);
         return;
     }
 
@@ -756,19 +827,6 @@ int     len2, len3;                     /* Lengths to copy           */
      *     (b) dest boundary crossed first
      *     (c) source boundary crossed first
      */
-
-#ifdef FEATURE_INTERVAL_TIMER
-    if (unlikely(addr2 == 80))
-    {
-        obtain_lock (&sysblk.todlock);
-        /* If a program check occurs during address translation
-         * (when a boundary is crossed), then program_interrupt
-         * must release the todlock for us.
-         */
-        regs->todlock = 1;
-        update_tod_clock ();
-    }
-#endif /* FEATURE_INTERVAL_TIMER */
 
     if ( NOCROSS2K(addr1,len) )
     {
@@ -833,14 +891,7 @@ int     len2, len3;                     /* Lengths to copy           */
             }
         }
     }
-
-#ifdef FEATURE_INTERVAL_TIMER
-    if (unlikely(addr2 == 80))
-    {
-        regs->todlock = 0;
-        release_lock (&sysblk.todlock);
-    }
-#endif /* FEATURE_INTERVAL_TIMER */
+    ITIMER_UPDATE(addr1,len,regs);
 
 } /* end function ARCH_DEP(move_chars) */
 
@@ -876,6 +927,10 @@ _VSTORE_C_STATIC void ARCH_DEP(validate_operand) (VADR addr, int arn,
         MADDR ((addr + len) & ADDRESS_MAXWRAP(regs),
                arn, regs, acctype, regs->psw.pkey);
     }
+#ifdef FEATURE_INTERVAL_TIMER
+    else
+        ITIMER_SYNC(addr,len,regs);
+#endif /*FEATURE_INTERVAL_TIMER*/
 } /* end function ARCH_DEP(validate_operand) */
 
 #endif /*!defined(OPTION_NO_INLINE_VSTORE) || defined(_VSTORE_C)*/

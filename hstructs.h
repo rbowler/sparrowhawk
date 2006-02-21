@@ -1,4 +1,4 @@
-/* HSTRUCTS.H   (c) Copyright Roger Bowler, 1999-2005                */
+/* HSTRUCTS.H   (c) Copyright Roger Bowler, 1999-2006                */
 /*              Hercules Structure Definitions                       */
 
 //      This header auto-#included by 'hercules.h'...
@@ -40,10 +40,15 @@ struct REGS {                           /* Processor registers       */
         DW      ea;                     /* Exception address         */
         DW      et;                     /* Execute Target address    */
 
-        U64     ptimer;                 /* CPU timer                 */
+        S64     cpu_timer;              /* CPU timer epoch           */
+        S64     int_timer;              /* S/370 Interval timer      */
+        S32     old_timer;              /* S/370 Interval timer int  */
         U64     clkc;                   /* 0-7=Clock comparator epoch,
                                            8-63=Comparator bits 0-55 */
         S64     tod_epoch;              /* TOD epoch for this CPU    */
+        S64     ecps_vtimer;            /* ECPS Virtual Int. timer   */
+        S32     ecps_oldtmr;            /* ECPS Virtual Int. tmr int */
+        BYTE   *ecps_vtmrpt;            /* Pointer to VTMR or zero   */
         U64     instcount;              /* Instruction counter       */
         U64     prevcount;              /* Previous instruction count*/
         U32     mipsrate;               /* Instructions per second   */
@@ -122,7 +127,7 @@ struct REGS {                           /* Processor registers       */
                                            register context          */
         REGS   *guestregs;              /* Pointer to the guest
                                            register context          */
-        PSA_3XX *sie_psa;               /* PSA of guest CPU          */
+        PSA_3XX *psa;                   /* PSA of guest CPU          */
         RADR    sie_px;                 /* Host address of guest px  */
         RADR    sie_mso;                /* Main Storage Origin       */
         RADR    sie_xso;                /* eXpanded Storage Origin   */
@@ -149,8 +154,7 @@ struct REGS {                           /* Processor registers       */
         BYTE    cpustate;               /* CPU stopped/started state */
         unsigned int                    /* Flags (cpu thread only)   */
                 opinterv:1,             /* 1=Operator intervening    */
-                mainlock:1,             /* 1=Mainlock held           */
-                todlock:1,              /* 1=TODlock held            */
+                mainlock:2,             /* !0=Mainlock held           */
                 checkstop:1,            /* 1=CPU is checkstop-ed     */
                 hostint:1,              /* 1=Host generated interrupt*/
                 execflag:1,             /* 1=EXecuted instruction    */
@@ -164,12 +168,7 @@ struct REGS {                           /* Processor registers       */
                 invalidate:1,           /* 1=Do AIA/AEA invalidation */
                 tracing:1,              /* 1=Trace is active         */
                 sigpreset:1,            /* 1=SIGP cpu reset received */
-                sigpireset:1,           /* 1=SIGP initial cpu reset  */
-                vtimerint:1,            /* 1=Virtual Timer interrupt */
-                                        /* (ECPS:VM)                 */
-                rtimerint:1;            /* 1=Concurrent Virt & Real  */
-                                        /* Interval Timer interrupts */
-                                        /* (ECPS:VM Only)            */
+                sigpireset:1;           /* 1=SIGP initial cpu reset  */
         U32     ints_state;             /* CPU Interrupts Status     */
         U32     ints_mask;              /* Respective Interrupts Mask*/
         BYTE    malfcpu                 /* Malfuction alert flags    */
@@ -194,6 +193,7 @@ struct REGS {                           /* Processor registers       */
         jmp_buf archjmp;                /* longjmp destination to
                                            switch architecture mode  */
         COND    intcond;                /* CPU interrupt condition   */
+        LOCK    *cpulock;               /* CPU lock for this CPU     */
 
      /* Opcode table pointers                                        */
 
@@ -278,7 +278,7 @@ struct ZPBLK {
 /* System configuration block                                        */
 /*-------------------------------------------------------------------*/
 struct SYSBLK {
-#define HDL_VERS_SYSBLK   "3.03"        /* Internal Version Number   */
+#define HDL_VERS_SYSBLK   "3.04"        /* Internal Version Number   */
 #define HDL_SIZE_SYSBLK   sizeof(SYSBLK)
         int     arch_mode;              /* Architecturual mode       */
                                         /* 0 == S/370                */
@@ -299,6 +299,7 @@ struct SYSBLK {
         int     maxcpu;                 /* Max number of CPUs        */
         int     cpus;                   /* Number CPUs configured    */
         int     hicpu;                  /* Hi cpu + 1 configured     */
+        int     sysepoch;               /* TOD clk epoch (1900/1960) */
         COND    cpucond;                /* CPU config/deconfig cond  */
         LOCK    cpulock[MAX_CPU_ENGINES];  /* CPU lock               */
         TID     cputid[MAX_CPU_ENGINES];   /* CPU thread identifiers */
@@ -1168,6 +1169,8 @@ struct CCKDBLK {                        /* Global cckd dasd block    */
         BYTE             id[8];         /* "CCKDBLK "                */
         DEVBLK          *dev1st;        /* 1st device in cckd queue  */
         int              batch:1;       /* 1=called in batch mode    */
+
+        ATTR             attr;          /* Thread attributes         */
 
         BYTE             comps;         /* Supported compressions    */
         BYTE             comp;          /* Override compression      */

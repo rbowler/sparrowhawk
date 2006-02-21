@@ -7,9 +7,9 @@
 #    in the 'hercules.m4' file in the 'autoconf' subdirectory.
 
 AC_INIT(hercules.h)                     # (package, version, bugreport email, etc)
-AC_REVISION($Revision: 1.175 $)         # (the version of this configure.ac)
+AC_REVISION($Revision: 1.178 $)         # (the version of this configure.ac)
 AC_CONFIG_AUX_DIR(autoconf)             # (directory containing auxillary build tools)
-AM_INIT_AUTOMAKE(hercules,3.03.1)       # (the version of our software package)
+AM_INIT_AUTOMAKE(hercules,3.04)         # (the version of our software package)
 # Don't forget to change it in makefile-dllmod.msvc, too!
 AM_CONFIG_HEADER(config.h)              # (the file the resulting configure script will produce)
 AM_MAINTAINER_MODE()
@@ -315,6 +315,13 @@ case "$host_os" in
         fi
         ;;
 
+    *bsd*)
+        hc_cv_is_nix=yes
+        hc_cv_is_windows=no
+        hc_cv_is_mingw32=no
+        hc_cv_is_apple=no
+        ;;
+
     *)
         hc_cv_is_nix=no
         hc_cv_is_windows=no
@@ -425,6 +432,9 @@ AC_CACHE_SAVE()
 #  for OS X 10.3, a lot of this cruft can be removed, not just here but
 #  anywhere we find ourselves manually including sys/types.h.
 
+#  PROGRAMMING NOTE: on *BSD sys/socket.h must be included before net/if.h,
+#  net/route.h, or netinet/in.h can be #included.
+
 AC_CHECK_HEADERS( sys/socket.h,   [hc_cv_have_sys_socket_h=yes],   [hc_cv_have_sys_socket_h=no],
 [
     #include <sys/types.h>
@@ -456,13 +466,27 @@ AC_CHECK_HEADERS( arpa/inet.h,    [hc_cv_have_arpa_inet_h=yes],    [hc_cv_have_a
 AC_CHECK_HEADERS( linux/if_tun.h, [hc_cv_have_linux_if_tun_h=yes], [hc_cv_have_linux_if_tun_h=no] )
 AC_CHECK_HEADERS( sys/ioctl.h,    [hc_cv_have_sys_ioctl_h=yes],    [hc_cv_have_sys_ioctl_h=no]    )
 AC_CHECK_HEADERS( sys/mman.h,     [hc_cv_have_sys_mman_h=yes],     [hc_cv_have_sys_mman_h=no]     )
-AC_CHECK_HEADERS( sys/mount.h,    [hc_cv_have_sys_mount_h=yes],    [hc_cv_have_sys_mount_h=no]    )
+
+#------------------------------------------------------------------------------
+#  PROGRAMMING NOTE: on *BSD systems sys/param.h must be #included before 
+#  sys/mount.h as it contains the #define of NGROUPS.
+
+AC_CHECK_HEADERS( sys/param.h,    [hc_cv_have_sys_param_h=yes],    [hc_cv_have_sys_param_h=no]    )
+AC_CHECK_HEADERS( sys/mount.h,    [hc_cv_have_sys_mount_h=yes],    [hc_cv_have_sys_mount_h=no],
+[
+    #if HAVE_SYS_PARAM_H
+    #include <sys/param.h>
+    #endif
+] )
+#------------------------------------------------------------------------------
+
 AC_CHECK_HEADERS( sys/mtio.h,     [hc_cv_have_sys_mtio_h=yes],     [hc_cv_have_sys_mtio_h=no]     )
 AC_CHECK_HEADERS( sys/resource.h, [hc_cv_have_sys_resource_h=yes], [hc_cv_have_sys_resource_h=no] )
 AC_CHECK_HEADERS( sys/uio.h,      [hc_cv_have_sys_uio_h=yes],      [hc_cv_have_sys_uio_h=no]      )
 AC_CHECK_HEADERS( sys/utsname.h,  [hc_cv_have_sys_utsname_h=yes],  [hc_cv_have_sys_utsname_h=no]  )
 AC_CHECK_HEADERS( sys/wait.h,     [hc_cv_have_sys_wait_h=yes],     [hc_cv_have_sys_wait_h=no]     )
 AC_CHECK_HEADERS( sys/un.h,       [hc_cv_have_sys_un_h=yes],       [hc_cv_have_sys_un_h=no]       )
+AC_CHECK_HEADERS( byteswap.h,     [hc_cv_have_byteswap_h=yes],     [hc_cv_have_byteswap_h=no]     )
 AC_CHECK_HEADERS( bzlib.h,        [hc_cv_have_bzlib_h=yes],        [hc_cv_have_bzlib_h=no]        )
 AC_CHECK_HEADERS( dlfcn.h,        [hc_cv_have_dlfcn_h=yes],        [hc_cv_have_dlfcn_h=no]        )
 AC_CHECK_HEADERS( fenv.h,         [hc_cv_have_fenv_h=yes],         [hc_cv_have_fenv_h=no]         )

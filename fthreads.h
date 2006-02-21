@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //         fthreads.h           Fish's WIN32 version of pthreads
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2001-2005. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2001-2006. Released under the Q Public License
 // (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
@@ -174,7 +174,8 @@ int  fthread_create
     fthread_t*       pdwThreadID,
     fthread_attr_t*  pThreadAttr,
     PFT_THREAD_FUNC  pfnThreadFunc,
-    void*            pvThreadArgs
+    void*            pvThreadArgs,
+    char*            pszName
 );
 
 ////////////////////////////////////////////////////////////////////////////////////

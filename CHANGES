@@ -1,6 +1,44 @@
 
 ####   Don't forget to change the version number in configure.ac!   ####
 
+21 Feb 2006 Fix string overrun when hitting tab at the wrong time - Bjoern
+            Zeeb
+18 Feb 2006 Reinstate byteswap.h check - Greg Smith
+15 Feb 2006 Fixed spurious specification exception in CXFBR and CXGBR - Greg
+            Smith, found by Pasi Pirhonen
+11 Feb 2006 Added option s to dasdcat to preserve sequence numbers when
+            generating card image output - Jay Maynard
+10 Feb 2006 cckd specifies attr for create_thread - Greg Smith
+08 Feb 2006 FreeBSD portability fixes - Mark Szlaga
+06 Feb 2006 Codepage 1047 conversion tables - Kevin Leonard
+03 Feb 2006 Fixed off-by-one-day bug with SYSEPOCH other than 1900; added
+            new config parameter, YROFFSET, and limited SYSEPOCH to 1900
+            or 1960 - Jay Maynard
+29 Jan 2006 Added 2305-2 and 2305-2 CKD disk and 2835 control unit definitions
+            from CBT file 296 BLKDISK command - Jay Maynard
+28 Jan 2006 Added floating point instr CEGR, CDGR and CXGR - Bernard van der Helm
+24 Jan 2006 Export needed http server functions so people (like me!)
+            can create cgi-bin dynamic modules if they want to - Fish
+19 Jan 2006 Tweaks to SET_THREAD_NAME - Greg Smith
+16 Jan 2006 Fix PLO_CSGR to call plo_csgr instead of plo_clgr - Greg Smith
+15 Jan 2006 Fix stfl_data/adjust_stfl_data flag settings bug - Fish
+15 Jan 2006 Fix 'CVB' overflow check bug in packed_to_binary - Fish
+06 Jan 2006 Correct address wrapping in PLO - Jan Jaeger
+06 Jan 2006 Change clocks panel command to snapshot all values used before
+            formatting and printing for consistency - Jay Maynard
+04 Jan 2006 Change semigraphical panel START and STOP buttons to issue
+            startall and stopall, respectively - Jay Maynard
+04 Jan 2006 Fix cckd_gc_l2 bug - Greg Smith
+04 Jan 2006 Correct bit codes returned in query function with no MSA ext 1 -
+            Bernard van der Helm
+01 Jan 2006 CPU Timer rework - Jan Jaeger
+31 Dec 2005 SET_THREAD_NAME for easier MSVC debugging - Fish
+31 Dec 2005 Fix for Windows ..\relative path dasd files - Fish
+31 Dec 2005 Add space as valid volser char, remove owner field check - Fish
+29 Dec 2005 Fix bug causing semigraphical panel to always devinit the first
+            device, regardless of what device was specified - Jay Maynard
+29 Dec 2005 Add confirmations to semigraphical panel EXT and RST (external
+            interrupt and restart) commands - Jay Maynard
 29 Dec 2005 Fix bug in update_tod_clock preventing cpt from updating - Fish
 29 Dec 2005 Fix cpustate display glitch in ipending command - Fish
 29 Dec 2005 SIE XC interception fixes - Jan Jaeger

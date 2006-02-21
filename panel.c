@@ -1,4 +1,4 @@
-/* PANEL.C      (c) Copyright Roger Bowler, 1999-2005                */
+/* PANEL.C      (c) Copyright Roger Bowler, 1999-2006                */
 /*              ESA/390 Control Panel Commands                       */
 /*                                                                   */
 /*              Modified for New Panel Display =NP=                  */
@@ -17,7 +17,7 @@
 /*      Set/reset bad frame indicator command by Jan Jaeger          */
 /*      attach/detach/define commands by Jan Jaeger                  */
 /*      Panel refresh rate triva by Reed H. Petty                    */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
 /*      64-bit address support by Roger Bowler                       */
 /*      Display subchannel command by Nobumichi Kozawa               */
 /*      External GUI logic contributed by "Fish" (David B. Trout)    */
@@ -1251,6 +1251,8 @@ int     kblen;                          /* Number of chars in kbbuf  */
 U32     aaddr;                          /* Absolute address for STO  */
 char    buf[1024];                      /* Buffer workarea           */
 
+    SET_THREAD_NAME("panel_display");
+
     /* Display thread started message on control panel */
     logmsg (_("HHCPN001I Control panel thread started: "
             "tid="TIDPAT", pid=%d\n"),
@@ -1400,20 +1402,11 @@ char    buf[1024];                      /* Buffer workarea           */
                             break;
                         case 'S':                   /* START */
                         case 's':
-                            panel_command("start");
+                            panel_command("startall");
                             break;
                         case 'P':                   /* STOP */
                         case 'p':
-                            panel_command("stop");
-                            break;
-                        case 'T':                   /* RESTART */
-                        case 't':
-                            panel_command("restart");
-                            break;
-                        case 'E':                   /* Ext int */
-                        case 'e':
-                            panel_command("ext");
-                            redraw_status = 1;
+                            panel_command("stopall");
                             break;
                         case 'O':                   /* Store */
                         case 'o':
@@ -1536,6 +1529,7 @@ char    buf[1024];                      /* Buffer workarea           */
                             }
                             NPdataentry = 1;
                             NPpending = 'n';
+                            NPasgn = i;
                             NPcurrow = 3 + i;
                             NPcurcol = 58;
                             NPdatalen = cons_cols - 57;
@@ -1559,6 +1553,36 @@ char    buf[1024];                      /* Buffer workarea           */
                                 panel_command("quit");
                             }
                             strcpy(NPprompt1, "Powering down");
+                            redraw_status = 1;
+                            break;
+                        case 'T':                   /* Restart */
+                        case 't':
+                            NPdevsel = 1;
+                            NPsel2 = 5;
+                            strcpy(NPprompt1, "Confirm Restart Y or N");
+                            redraw_status = 1;
+                            break;
+                        case 5:                    /* Restart - part 2 */
+                            if (NPdevice == 'y' || NPdevice == 'Y')
+                            {
+                                panel_command("restart");
+                            }
+                            strcpy(NPprompt1, "");
+                            redraw_status = 1;
+                            break;
+                        case 'E':                   /* Ext int */
+                        case 'e':
+                            NPdevsel = 1;
+                            NPsel2 = 6;
+                            strcpy(NPprompt1, "Confirm External Interrupt Y or N");
+                            redraw_status = 1;
+                            break;
+                        case 6:                    /* External - part 2 */
+                            if (NPdevice == 'y' || NPdevice == 'Y')
+                            {
+                                panel_command("ext");
+                            }
+                            strcpy(NPprompt1, "");
                             redraw_status = 1;
                             break;
                         default:

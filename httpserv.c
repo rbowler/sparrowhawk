@@ -1,4 +1,4 @@
-/* HTTPSERV.C   (c)Copyright Jan Jaeger, 2002-2005                   */
+/* HTTPSERV.C   (c)Copyright Jan Jaeger, 2002-2006                   */
 /*              HTTP Server                                          */
 
 /* This file contains all code required for the HTTP server,         */
@@ -29,6 +29,9 @@
 
 #include "hstdinc.h"
 
+#define _HTTPSERV_C_
+#define _HENGINE_DLL_
+
 #include "hercules.h"
 #include "httpmisc.h"
 #include "hostinfo.h"
@@ -56,7 +59,7 @@ static MIMETAB mime_types[] = {
 /* so we'll go with what's actually in use. --JRM */
     { NULL,    NULL } };                     /* Default suffix entry */
 
-int html_include(WEBBLK *webblk, char *filename)
+DLL_EXPORT int html_include(WEBBLK *webblk, char *filename)
 {
     FILE *inclfile;
     char fullname[HTTP_PATH_LENGTH];
@@ -88,7 +91,7 @@ int html_include(WEBBLK *webblk, char *filename)
     return TRUE;
 }
 
-void html_header(WEBBLK *webblk)
+DLL_EXPORT void html_header(WEBBLK *webblk)
 {
     if (webblk->request_type != REQTYPE_POST)
         hprintf(webblk->sock,"Expires: 0\n");
@@ -100,7 +103,7 @@ void html_header(WEBBLK *webblk)
 }
 
 
-void html_footer(WEBBLK *webblk)
+DLL_EXPORT void html_footer(WEBBLK *webblk)
 {
     if (!html_include(webblk,HTML_FOOTER))
         hprintf(webblk->sock,"\n</BODY>\n</HTML>\n");
@@ -273,7 +276,7 @@ static void http_dump_cgi_variables(WEBBLK *webblk)
 #endif
 
 
-char *http_variable(WEBBLK *webblk, char *name, int type)
+DLL_EXPORT char *http_variable(WEBBLK *webblk, char *name, int type)
 {
     CGIVAR *cv;
     for(cv = webblk->cgivar; cv; cv = cv->next)
@@ -614,17 +617,23 @@ TID                     httptid;        /* Negotiation thread id     */
         char save_working_directory[HTTP_PATH_LENGTH];
         int  rc;
 #if defined(_MSVC_)
+        /* Expand any embedded %var% environ vars */
         rc = expand_environ_vars( sysblk.httproot, absolute_httproot_path,
             sizeof(absolute_httproot_path) );
         if (rc == 0)
-            free(sysblk.httproot); sysblk.httproot = strdup(absolute_httproot_path);
+        {
+            free(sysblk.httproot);
+            sysblk.httproot = strdup(absolute_httproot_path);
+        }
 #endif /* defined(_MSVC_) */
+        /* Convert to absolute path */
         if (!realpath(sysblk.httproot,absolute_httproot_path))
         {
             logmsg( _("HHCCF066E Invalid HTTPROOT: \"%s\": %s\n"),
                    sysblk.httproot, strerror(errno));
             return NULL;
         }
+        /* Verify that the absolute path is valid */
         VERIFY(getcwd(save_working_directory,sizeof(save_working_directory)));
         rc = chdir(absolute_httproot_path);     // (verify path)
         VERIFY(!chdir(save_working_directory)); // (restore cwd)
@@ -638,7 +647,9 @@ TID                     httptid;        /* Negotiation thread id     */
         rc = strlen(absolute_httproot_path);
         if (absolute_httproot_path[rc-1] != *HTTP_PS)
             strlcat(absolute_httproot_path,HTTP_PS,sizeof(absolute_httproot_path));
-        free(sysblk.httproot); sysblk.httproot = strdup(absolute_httproot_path);
+        /* Save the absolute path */
+        free(sysblk.httproot);
+        sysblk.httproot = strdup(absolute_httproot_path);
         logmsg(_("HHCHT013I Using HTTPROOT directory \"%s\"\n"),sysblk.httproot);
     }
 
@@ -726,7 +737,9 @@ TID                     httptid;        /* Negotiation thread id     */
 
             /* Create a thread to execute the http request */
             if ( create_thread (&httptid, &sysblk.detattr,
-                                http_request, (void *)(long)csock) )
+                                http_request, (void *)(long)csock,
+                                "http_request")
+               )
             {
                 logmsg(_("HHCHT010E http_request create_thread: %s\n"),
                         strerror(errno));

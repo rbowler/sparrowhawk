@@ -1,8 +1,8 @@
-/* CONTROL.C    (c) Copyright Roger Bowler, 1994-2005                */
+/* CONTROL.C    (c) Copyright Roger Bowler, 1994-2006                */
 /*              ESA/390 CPU Emulator                                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all control instructions of the            */
@@ -319,7 +319,7 @@ DEF_INST(branch_in_subspace_group)
 {
 int     r1, r2;                         /* Values of R fields        */
 U32     alet;                           /* Destination subspace ALET */
-U32     dasteo;                         /* Destination ASTE origin   */
+U32     dasteo=0;                       /* Destination ASTE origin   */
 U32     daste[16];                      /* ASN second table entry    */
 RADR    ducto;                          /* DUCT origin               */
 U32     duct0;                          /* DUCT word 0               */
@@ -783,7 +783,7 @@ U32     old;                            /* old value                 */
 
 
 /*-------------------------------------------------------------------*/
-/* 83   DIAG  - Diagnose                                             */
+/* 83   DIAG  - Diagnose                                        [RS] */
 /*-------------------------------------------------------------------*/
 DEF_INST(diagnose)
 {
@@ -1580,8 +1580,8 @@ U32     aste[16];                       /* ASN second table entry    */
 RADR    pstd;                           /* Primary STD               */
 RADR    sstd;                           /* Secondary STD             */
 U32     ltd;                            /* Linkage table designation */
-U32     pasteo;                         /* Primary ASTE origin       */
-U32     sasteo;                         /* Secondary ASTE origin     */
+U32     pasteo=0;                       /* Primary ASTE origin       */
+U32     sasteo=0;                       /* Secondary ASTE origin     */
 U16     ax;                             /* Authorisation index       */
 #ifdef FEATURE_SUBSPACE_GROUP
 U16     xcode;                          /* Exception code            */
@@ -1858,6 +1858,8 @@ U16     updated = 0;                    /* Updated control regs      */
 
     /* Calculate number of regs to load */
     n = ((r3 - r1) & 0xF) + 1;
+
+    ITIMER_SYNC(effective_addr2,(n*4)-1,regs);
 
 #if defined(_FEATURE_SIE)
     if (SIE_MODE(regs))
@@ -2510,7 +2512,7 @@ RADR    pstd;                           /* Primary STD or ASCE       */
 U32     oldpstd;                        /* Old Primary STD or ASCE   */
 U32     ltdesig;                        /* Linkage table designation
                                            (LTD or LFTD)             */
-U32     pasteo;                         /* Primary ASTE origin       */
+U32     pasteo=0;                       /* Primary ASTE origin       */
 RADR    lto;                            /* Linkage table origin      */
 U32     ltl;                            /* Linkage table length      */
 U32     lte;                            /* Linkage table entry       */
@@ -3201,8 +3203,8 @@ RADR    alsed;                          /* Absolute addr of LSED of
                                            previous stack entry      */
 LSED   *lsedp;                          /* -> LSED in main storage   */
 U32     aste[16];                       /* ASN second table entry    */
-U32     pasteo;                         /* Primary ASTE origin       */
-U32     sasteo;                         /* Secondary ASTE origin     */
+U32     pasteo=0;                       /* Primary ASTE origin       */
+U32     sasteo=0;                       /* Secondary ASTE origin     */
 U16     oldpasn;                        /* Original primary ASN      */
 U32     oldpstd;                        /* Original primary STD      */
 U16     pasn = 0;                       /* New primary ASN           */
@@ -3498,7 +3500,7 @@ VADR    ia;                             /* New instruction address   */
 int     prob;                           /* New problem state bit     */
 RADR    abs;                            /* Absolute address          */
 U32     ltd;                            /* Linkage table designation */
-U32     pasteo;                         /* Primary ASTE origin       */
+U32     pasteo=0;                       /* Primary ASTE origin       */
 U32     aste[16];                       /* ASN second table entry    */
 CREG    pstd;                           /* Primary STD               */
 U32     oldpstd;                        /* Old Primary STD           */
@@ -4403,21 +4405,19 @@ U64     dreg;                           /* Clock value               */
     /* Fetch new TOD clock value from operand address */
     dreg = ARCH_DEP(vfetch8) ( effective_addr2, b2, regs);
 
-    /* Obtain the TOD clock update lock */
-    obtain_lock (&sysblk.todlock);
-
-    /* Ensure tod clock is current */
-    update_tod_clock();
-
-    /* Compute the new TOD clock offset in hercules clock units */
-    set_tod_epoch( (dreg >> 8) - tod_clock);
+    /* Set the clock epoch register */
+    set_tod_clock(dreg >> 8);
 
     /* reset the clock comparator pending flag according to
        the setting of the tod clock */
-    update_tod_clock();
+    obtain_lock(&sysblk.intlock);
 
-    /* Release the TOD clock update lock */
-    release_lock (&sysblk.todlock);
+    if( tod_clock(regs) > regs->clkc )
+        ON_IC_CLKC(regs);
+    else
+        OFF_IC_CLKC(regs);
+
+    release_lock(&sysblk.intlock);
 
     /* Return condition code zero */
     regs->psw.cc = 0;
@@ -4451,23 +4451,24 @@ U64     dreg;                           /* Clock value               */
 #endif /*defined(_FEATURE_SIE)*/
 
     /* Fetch clock comparator value from operand location */
-    dreg = ARCH_DEP(vfetch8) ( effective_addr2, b2, regs )
-                & 0xFFFFFFFFFFFFF000ULL;
+    dreg = ARCH_DEP(vfetch8) ( effective_addr2, b2, regs );
 
 //  /*debug*/logmsg("Set clock comparator=%16.16" I64_FMT "X\n", dreg);
 
-    /* Obtain the TOD clock update lock */
-    obtain_lock (&sysblk.todlock);
+    dreg >>= 8;
 
-    /* Update the clock comparator and set epoch to zero */
-    regs->clkc = dreg >> 8;
+    obtain_lock(&sysblk.intlock);
+
+    regs->clkc = dreg;
 
     /* reset the clock comparator pending flag according to
        the setting of the tod clock */
-    update_tod_clock();
+    if( tod_clock(regs) > dreg )
+        ON_IC_CLKC(regs);
+    else
+        OFF_IC_CLKC(regs);
 
-    /* Release the TOD clock update lock */
-    release_lock (&sysblk.todlock);
+    release_lock (&sysblk.intlock);
 
     RETURN_INTCHECK(regs);
 }
@@ -4502,7 +4503,7 @@ DEF_INST(set_cpu_timer)
 {
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
-U64     dreg;                           /* Timer value               */
+S64     dreg;                           /* Timer value               */
 
     S(inst, regs, b2, effective_addr2);
 
@@ -4516,20 +4517,19 @@ U64     dreg;                           /* Timer value               */
 #endif /*defined(_FEATURE_SIE)*/
 
     /* Fetch the CPU timer value from operand location */
-    dreg = ARCH_DEP(vfetch8) ( effective_addr2, b2, regs )
-                & 0xFFFFFFFFFFFFF000ULL;
+    dreg = ARCH_DEP(vfetch8) ( effective_addr2, b2, regs );
 
-    /* Obtain the TOD clock update lock */
-    obtain_lock (&sysblk.todlock);
+    obtain_lock(&sysblk.intlock);
 
-    /* Update the CPU timer */
-    regs->ptimer = dreg;
+    set_cpu_timer(regs, dreg);
 
     /* reset the cpu timer pending flag according to its value */
-    update_tod_clock();
+    if( CPU_TIMER(regs) < 0 )
+        ON_IC_PTIMER(regs);
+    else
+        OFF_IC_PTIMER(regs);
 
-    /* Release the TOD clock update lock */
-    release_lock (&sysblk.todlock);
+    release_lock(&sysblk.intlock);
 
 //  /*debug*/logmsg("Set CPU timer=%16.16" I64_FMT "X\n", dreg);
 
@@ -4569,6 +4569,9 @@ RADR    n;                              /* Prefix value              */
 
     /* Load new value into prefix register */
     regs->PX = n;
+
+    /* Set pointer to active PSA structure */
+    regs->psa = (PSA_3XX*)(regs->mainstor + regs->PX);
 
     /* Invalidate the ALB and TLB */
     ARCH_DEP(purge_tlb) (regs);
@@ -4619,7 +4622,7 @@ void ARCH_DEP(set_secondary_asn_proc) (REGS *regs,
 {
 U16     sasn;                           /* New Secondary ASN         */
 RADR    sstd;                           /* Secondary STD             */
-U32     sasteo;                         /* Secondary ASTE origin     */
+U32     sasteo=0;                       /* Secondary ASTE origin     */
 U32     aste[16];                       /* ASN second table entry    */
 U32     sastein;                        /* New Secondary ASTEIN      */
 U16     xcode;                          /* Exception code            */
@@ -5642,6 +5645,9 @@ static char *ordername[] = {
             /* Load new value into prefix register of target CPU */
             tregs->PX = abs;
 
+            /* Set pointer to active PSA structure */
+            tregs->psa = (PSA_3XX*)(tregs->mainstor + tregs->PX);
+
             /* Invalidate the ALB and TLB of the target CPU */
             ARCH_DEP(purge_tlb) (tregs);
 #if defined(FEATURE_ACCESS_REGISTERS)
@@ -5972,21 +5978,15 @@ U64     dreg;                           /* Clock value               */
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 #endif /*defined(_FEATURE_SIE)*/
 
-    /* Obtain the TOD clock update lock */
-    obtain_lock (&sysblk.todlock);
+    /* Obtain the interrupt lock */
+    obtain_lock (&sysblk.intlock);
 
     /* Save clock comparator value */
     dreg = regs->clkc;
 
-    /* Release the TOD clock update lock */
-    release_lock (&sysblk.todlock);
-
-    /* Obtain the interrupt lock */
-    obtain_lock (&sysblk.intlock);
-
     /* reset the clock comparator pending flag according to
        the setting of the tod clock */
-    if( TOD_CLOCK(regs) > dreg )
+    if( tod_clock(regs) > dreg )
     {
         ON_IC_CLKC(regs);
 
@@ -5995,8 +5995,8 @@ U64     dreg;                           /* Clock value               */
            and we are enabled for such interrupts *JJ */
         if( OPEN_IC_CLKC(regs) )
         {
-            regs->psw.IA -= 4;
             release_lock (&sysblk.intlock);
+            regs->psw.IA -= 4;
             VALIDATE_AIA(regs);
             RETURN_INTCHECK(regs);
         }
@@ -6004,14 +6004,10 @@ U64     dreg;                           /* Clock value               */
     else
         OFF_IC_CLKC(regs);
 
-    /* Release the interrupt lock */
     release_lock (&sysblk.intlock);
 
-    /* Shift out the epoch */
-    dreg <<= 8;
-
     /* Store clock comparator value at operand location */
-    ARCH_DEP(vstore8) ( dreg, effective_addr2, b2, regs );
+    ARCH_DEP(vstore8) ((dreg << 8), effective_addr2, b2, regs );
 
 //  /*debug*/logmsg("Store clock comparator=%16.16" I64_FMT "X\n", dreg);
 
@@ -6069,6 +6065,8 @@ U32    *p1, *p2 = NULL;                 /* Mainstor pointers         */
     /* Store on next page */
     for ( ; i < n; i++)
         store_fw (p2++, regs->CR_L((r1 + i) & 0xF));
+
+    ITIMER_UPDATE(effective_addr2,(n*4)-1,regs);
 
 } /* end DEF_INST(store_control) */
 
@@ -6140,7 +6138,7 @@ DEF_INST(store_cpu_timer)
 {
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
-U64     dreg;                           /* Double word workarea      */
+S64     dreg;                           /* Double word workarea      */
 
     S(inst, regs, b2, effective_addr2);
 
@@ -6153,20 +6151,13 @@ U64     dreg;                           /* Double word workarea      */
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 #endif /*defined(_FEATURE_SIE)*/
 
-    /* Obtain the TOD clock update lock */
-    obtain_lock (&sysblk.todlock);
+    obtain_lock(&sysblk.intlock);
 
     /* Save the CPU timer value */
-    dreg = --regs->ptimer;
-
-    /* Release the TOD clock update lock */
-    release_lock (&sysblk.todlock);
-
-    /* Obtain the interrupt lock */
-    obtain_lock (&sysblk.intlock);
+    dreg = cpu_timer(regs);
 
     /* reset the cpu timer pending flag according to its value */
-    if( (S64)regs->ptimer < 0 )
+    if( CPU_TIMER(regs) < 0 )
     {
         ON_IC_PTIMER(regs);
 
@@ -6175,8 +6166,7 @@ U64     dreg;                           /* Double word workarea      */
            and we are enabled for such interrupts *JJ */
         if( OPEN_IC_PTIMER(regs) )
         {
-            /* Release the interrupt lock */
-            release_lock (&sysblk.intlock);
+            release_lock(&sysblk.intlock);
 
             regs->psw.IA -= 4;
             VALIDATE_AIA(regs);
@@ -6186,8 +6176,7 @@ U64     dreg;                           /* Double word workarea      */
     else
         OFF_IC_PTIMER(regs);
 
-    /* Release the interrupt lock */
-    release_lock (&sysblk.intlock);
+    release_lock(&sysblk.intlock);
 
     /* Store CPU timer value at operand location */
     ARCH_DEP(vstore8) ( dreg, effective_addr2, b2, regs );

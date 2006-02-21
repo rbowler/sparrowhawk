@@ -1,4 +1,4 @@
-/* SR.C         (c)Copyright Greg Smith, 2005                        */
+/* SR.C         (c)Copyright Greg Smith, 2005-2006                   */
 /*              Suspend/Resume a Hercules session                    */
 
 #include "hstdinc.h"
@@ -186,7 +186,7 @@ BYTE     psw[16];
         SR_WRITE_VALUE(file, SR_CPU_DXC, regs->dxc, sizeof(regs->dxc));
         SR_WRITE_VALUE(file, SR_CPU_MC, regs->MC_G, sizeof(regs->MC_G));
         SR_WRITE_VALUE(file, SR_CPU_EA, regs->EA_G, sizeof(regs->EA_G));
-        SR_WRITE_VALUE(file, SR_CPU_PTIMER, regs->ptimer, sizeof(regs->ptimer));
+        SR_WRITE_VALUE(file, SR_CPU_PTIMER, cpu_timer(regs), sizeof(S64));
         SR_WRITE_VALUE(file, SR_CPU_CLKC, regs->clkc, sizeof(regs->clkc));
         SR_WRITE_VALUE(file, SR_CPU_CHANSET, regs->chanset, sizeof(regs->chanset));
         SR_WRITE_VALUE(file, SR_CPU_TODPR, regs->todpr, sizeof(regs->todpr));
@@ -203,8 +203,6 @@ BYTE     psw[16];
         SR_WRITE_VALUE(file, SR_CPU_INVALIDATE, regs->invalidate, 1);
         SR_WRITE_VALUE(file, SR_CPU_SIGPRESET, regs->sigpreset, 1);
         SR_WRITE_VALUE(file, SR_CPU_SIGPIRESET, regs->sigpireset, 1);
-        SR_WRITE_VALUE(file, SR_CPU_VTIMERINT, regs->vtimerint, 1);
-        SR_WRITE_VALUE(file, SR_CPU_RTIMERINT, regs->rtimerint, 1);
         SR_WRITE_VALUE(file, SR_CPU_INTS_STATE, regs->ints_state, sizeof(regs->ints_state));
         SR_WRITE_VALUE(file, SR_CPU_INTS_MASK, regs->ints_mask, sizeof(regs->ints_mask));
         for (j = 0; j < MAX_CPU_ENGINES; j++)
@@ -312,6 +310,7 @@ DEVBLK  *dev = NULL;
 IOINT   *ioq = NULL;
 char     buf[SR_MAX_STRING_LENGTH+1];
 char     zeros[16];
+S64      dreg;
 
     UNREFERENCED(cmdline);
 
@@ -777,7 +776,8 @@ char     zeros[16];
 
         case SR_CPU_PTIMER:
             if (regs == NULL) goto sr_null_regs_exit;
-            SR_READ_VALUE(file, len, &regs->ptimer, sizeof(regs->ptimer));
+            SR_READ_VALUE(file, len, &dreg, sizeof(S64));
+            set_cpu_timer(regs, dreg);
             break;
 
         case SR_CPU_CLKC:
@@ -849,18 +849,6 @@ char     zeros[16];
             if (regs == NULL) goto sr_null_regs_exit;
             SR_READ_VALUE(file, len, &rc, sizeof(rc));
             regs->sigpireset = rc;
-            break;
-
-        case SR_CPU_VTIMERINT:
-            if (regs == NULL) goto sr_null_regs_exit;
-            SR_READ_VALUE(file, len, &rc, sizeof(rc));
-            regs->vtimerint = rc;
-            break;
-
-        case SR_CPU_RTIMERINT:
-            if (regs == NULL) goto sr_null_regs_exit;
-            SR_READ_VALUE(file, len, &rc, sizeof(rc));
-            regs->rtimerint = rc;
             break;
 
         case SR_CPU_INTS_STATE:
@@ -1245,19 +1233,19 @@ char     zeros[16];
 #if defined(_370)
             case ARCH_370:
                 rc = create_thread (&dev->tid, &sysblk.detattr,
-                                    s370_execute_ccw_chain, dev);
+                                    s370_execute_ccw_chain, dev, "device thread");
                 break;
 #endif
 #if defined(_390)
             case ARCH_390:
                 rc = create_thread (&dev->tid, &sysblk.detattr,
-                                    s390_execute_ccw_chain, dev);
+                                    s390_execute_ccw_chain, dev, "device thread");
                 break;
 #endif
 #if defined(_900)
             case ARCH_900:
                 rc = create_thread (&dev->tid, &sysblk.detattr,
-                                    z900_execute_ccw_chain, dev);
+                                    z900_execute_ccw_chain, dev, "device thread");
                 break;
 #endif
             } /* switch (sysblk.arch_mode) */

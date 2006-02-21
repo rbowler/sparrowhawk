@@ -1,4 +1,4 @@
-/* DASDCOPY.C   (c) Copyright Roger Bowler, 1999-2005                */
+/* DASDCOPY.C   (c) Copyright Roger Bowler, 1999-2006                */
 /*       Copy a dasd file to another dasd file.                      */
 /*       Input file and output file may be compressed or not.        */
 /*       Files may be either ckd (or cckd) or fba (or cfba) but      */
@@ -55,7 +55,7 @@ BYTE            unitstat;               /* Device unit status        */
 char            msgbuf[512];            /* Message buffer            */
 size_t          fba_bytes_remaining=0;  /* FBA bytes to be copied    */
 int             nullfmt = CKDDASD_NULLTRK_FMT0; /* Null track format */
-BYTE            pathname[MAX_PATH];     /* file path in host format  */
+char            pathname[MAX_PATH];     /* file path in host format  */
 
 #if defined(ENABLE_NLS)
     setlocale(LC_ALL, "");

@@ -1,8 +1,8 @@
-/* CHSC.C       (c) Copyright Jan Jaeger, 2002-2005                  */
+/* CHSC.C       (c) Copyright Jan Jaeger, 2002-2006                  */
 /*              Channel Subsystem Call                               */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements channel subsystem interface functions      */
@@ -116,6 +116,15 @@ U16 req_len, rsp_len;
 
     memset(chsc_rsp10->general_char, 0x00, sizeof(chsc_rsp10->general_char));
     memset(chsc_rsp10->chsc_char, 0x00, sizeof(chsc_rsp10->chsc_char));
+
+    chsc_rsp10->general_char[0][0] = 0 
+#if defined(FEATURE_REGION_RELOCATE)
+                                   | 0x24
+#endif
+#if defined(FEATURE_CANCEL_IO_FACILITY)
+                                   | 0x02
+#endif
+                                       ;
 
 #if defined(FEATURE_QUEUED_DIRECT_IO)
     chsc_rsp10->general_char[1][1] = 0

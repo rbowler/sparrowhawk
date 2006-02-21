@@ -2,7 +2,7 @@
  * Hercules System/370, ESA/390, z/Architecture emulator
  * ieee.c
  * Binary (IEEE) Floating Point Instructions
- * Copyright (c) 2001-2005 Willem Konynenberg <wfk@xos.nl>
+ * Copyright (c) 2001-2006 Willem Konynenberg <wfk@xos.nl>
  * TCEB, TCDB and TCXB contributed by Per Jessen, 20 September 2001.
  * THDER,THDR by Roger Bowler, 19 July 2003.
  * Additional instructions by Roger Bowler, November 2004:
@@ -22,7 +22,7 @@
  */
 
 /*
- * Based very loosely on float.c by Peter Kuschnerus, (c) 2000-2005.
+ * Based very loosely on float.c by Peter Kuschnerus, (c) 2000-2006.
  */
 
 /*
@@ -141,7 +141,7 @@ do { \
 #endif
 
 struct ebfp {
-    char    sign;
+    BYTE    sign;
     int fpclass;
     int exp;
     U64 fracth;
@@ -149,14 +149,14 @@ struct ebfp {
     long double v;
 };
 struct lbfp {
-    char    sign;
+    BYTE    sign;
     int fpclass;
     int exp;
     U64 fract;
     double  v;
 };
 struct sbfp {
-    char    sign;
+    BYTE    sign;
     int fpclass;
     int exp;
     int fract;
@@ -1954,7 +1954,7 @@ DEF_INST(convert_fix32_to_bfp_ext_reg)
     RRE(inst, regs, r1, r2);
     //logmsg("CXFBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
-    BFPREGPAIR2_CHECK(r1, r2, regs);
+    BFPREGPAIR2_CHECK(r1, 0, regs);
 
     op2 = regs->GR_L(r2);
 
@@ -2032,7 +2032,7 @@ DEF_INST(convert_fix64_to_bfp_ext_reg)
     RRE(inst, regs, r1, r2);
     //logmsg("CXGBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
-    BFPREGPAIR2_CHECK(r1, r2, regs);
+    BFPREGPAIR2_CHECK(r1, 0, regs);
 
     op2 = regs->GR_G(r2);
 
@@ -2990,18 +2990,6 @@ DEF_INST(divide_bfp_short)
     }
 }
 
-/*
- * B38C EFPC  - EXTRACT FPC                                    [RRE]
- */
-DEF_INST(extract_floating_point_control_register)
-{
-    int r1, unused;
-
-    RRE(inst, regs, r1, unused);
-    //logmsg("EFPC r1=%d\n", r1);
-
-    regs->GR_L(r1) = regs->fpc;
-}
 
 /*
  * B342 LTXBR - LOAD AND TEST (extended BFP)                   [RRE]

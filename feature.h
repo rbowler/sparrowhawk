@@ -1,4 +1,4 @@
-/* FEATURES.H   (c) Copyright Jan Jaeger, 2000-2005                  */
+/* FEATURES.H   (c) Copyright Jan Jaeger, 2000-2006                  */
 /*      Architecture-dependent macro definitions                     */
 /*-------------------------------------------------------------------*/
 /* S/370, ESA/390 and ESAME features implemented                     */
@@ -468,6 +468,25 @@ z900_ ## _name
  #else
   #define MAXADDRESS             0x00FFFFFF
  #endif
+#endif
+
+
+#undef ITIMER_UPDATE
+#undef ITIMER_SYNC
+#if defined(FEATURE_INTERVAL_TIMER)
+ #define ITIMER_UPDATE(_addr, _len, _regs)       \
+    do {                                         \
+	if( ITIMER_ACCESS((_addr), (_len)) )     \
+            ARCH_DEP(fetch_int_timer) ((_regs)); \
+    } while(0) 
+ #define ITIMER_SYNC(_addr, _len, _regs)         \
+    do {                                         \
+        if( ITIMER_ACCESS((_addr), (_len)) )     \
+	    ARCH_DEP(store_int_timer) ((_regs)); \
+    } while (0)
+#else
+ #define ITIMER_UPDATE(_addr, _len, _regs)
+ #define ITIMER_SYNC(_addr, _len, _regs)
 #endif
 
 

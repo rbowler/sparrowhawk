@@ -1,4 +1,4 @@
-/* CARDPCH.C    (c) Copyright Roger Bowler, 1999-2005                */
+/* CARDPCH.C    (c) Copyright Roger Bowler, 1999-2006                */
 /*              ESA/390 Card Punch Device Handler                    */
 
 /*-------------------------------------------------------------------*/
@@ -155,7 +155,7 @@ int             rc;                     /* Return code               */
 int             i;                      /* Loop counter              */
 int             num;                    /* Number of bytes to move   */
 BYTE            c;                      /* Output character          */
-BYTE            pathname[MAX_PATH];     /* file path in host format  */
+char            pathname[MAX_PATH];     /* file path in host format  */
 
     UNREFERENCED(prevcode);
     UNREFERENCED(ccwseq);

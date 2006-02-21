@@ -1,8 +1,8 @@
-/* OPCODE.H (c) Copyright Jan Jaeger, 2000-2005          */
+/* OPCODE.H (c) Copyright Jan Jaeger, 2000-2006          */
 /*      Instruction decoding macros and prototypes       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
 
 #ifndef _OPCODE_H
 #define _OPCODE_H
@@ -145,7 +145,7 @@ OPC_DLL_IMPORT zz_func opcode_b9xx[][GEN_MAXARCH];
 OPC_DLL_IMPORT zz_func opcode_c0xx[][GEN_MAXARCH];
 OPC_DLL_IMPORT zz_func opcode_c2xx[][GEN_MAXARCH];                      /*@Z9*/
 OPC_DLL_IMPORT zz_func opcode_e3xx[][GEN_MAXARCH];
-OPC_DLL_IMPORT zz_func opcode_e4xx[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_e4xx[256][GEN_MAXARCH];
 extern         zz_func v_opcode_e4xx[][GEN_MAXARCH];
 OPC_DLL_IMPORT zz_func opcode_e5xx[][GEN_MAXARCH];
 OPC_DLL_IMPORT zz_func opcode_e6xx[][GEN_MAXARCH];
@@ -1847,6 +1847,9 @@ DEF_INST(load_fp_int_float_long_reg);
 DEF_INST(convert_fixed_to_float_short_reg);
 DEF_INST(convert_fixed_to_float_long_reg);
 DEF_INST(convert_fixed_to_float_ext_reg);
+DEF_INST(convert_64fixed_to_float_short_reg);
+DEF_INST(convert_64fixed_to_float_long_reg);
+DEF_INST(convert_64fixed_to_float_ext_reg);
 DEF_INST(convert_float_short_to_fixed_reg);
 DEF_INST(convert_float_long_to_fixed_reg);
 DEF_INST(convert_float_ext_to_fixed_reg);
@@ -2407,7 +2410,6 @@ DEF_INST(divide_bfp_short_reg);
 DEF_INST(divide_bfp_short);
 DEF_INST(divide_integer_bfp_long_reg);
 DEF_INST(divide_integer_bfp_short_reg);
-DEF_INST(extract_floating_point_control_register);
 DEF_INST(load_and_test_bfp_ext_reg);
 DEF_INST(load_and_test_bfp_long_reg);
 DEF_INST(load_and_test_bfp_short_reg);

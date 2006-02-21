@@ -1,4 +1,4 @@
-/* DASDPDSU.C   (c) Copyright Roger Bowler, 1999-2005                */
+/* DASDPDSU.C   (c) Copyright Roger Bowler, 1999-2006                */
 /*              Hercules DASD Utilities: PDS unloader                */
 
 /*-------------------------------------------------------------------*/
@@ -53,7 +53,7 @@ FILE           *ofp;                    /* Output file pointer       */
 char            ofname[256];            /* Output file name          */
 int             offset;                 /* Offset of record in buffer*/
 char            card[81];               /* Logical record (ASCIIZ)   */
-BYTE            pathname[MAX_PATH];     /* ofname in host format     */
+char            pathname[MAX_PATH];     /* ofname in host format     */
 
     /* Build the output file name */
     memset (ofname, 0, sizeof(ofname));

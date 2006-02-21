@@ -6,7 +6,7 @@
 /* z/Architecture emulator. This file may only be used with and within the    */
 /* Hercules emulator for non-commercial use!                                  */
 /*                                                                            */
-/*                              (c) Copyright Bernard van der Helm, 2003-2005 */
+/*                              (c) Copyright Bernard van der Helm, 2003-2006 */
 /*                              Noordwijkerhout, The Netherlands.             */
 /*----------------------------------------------------------------------------*/
 
@@ -51,11 +51,33 @@
 /*----------------------------------------------------------------------------*/
 /* Bit strings for query functions                                            */
 /*----------------------------------------------------------------------------*/
+#undef KIMD_BITS
+#undef KLMD_BITS
+#undef KM_BITS
+#undef KMAC_BITS
+#undef KMC_BITS
+
+#ifdef FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_1
 #define KIMD_BITS       { 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+#else
+#define KIMD_BITS       { 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+#endif
+#ifdef FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_1
 #define KLMD_BITS       { 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+#else
+#define KLMD_BITS       { 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+#endif
+#ifdef FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_1
 #define KM_BITS         { 0xf0, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+#else
+#define KM_BITS         { 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+#endif
 #define KMAC_BITS       { 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+#ifdef FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_1
 #define KMC_BITS        { 0xf0, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+#else
+#define KMC_BITS        { 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+#endif
 
 /*----------------------------------------------------------------------------*/
 /* Write bytes on one line                                                    */
@@ -247,7 +269,7 @@ static void ARCH_DEP(kimd_sha_1)(int r1, int r2, REGS *regs)
     ARCH_DEP(vfetchc)(buffer, 63, GR_A(r2, regs), r2, regs);
 
 #ifdef OPTION_KIMD_DEBUG
-    LOGBYTE2("  input :", buffer, 16, 4);
+    LOGBYTE2("input :", buffer, 16, 4);
 #endif
 
     sha1_process(&context, buffer);
@@ -328,7 +350,7 @@ static void ARCH_DEP(kimd_sha_256)(int r1, int r2, REGS *regs)
     ARCH_DEP(vfetchc)(buffer, 63, GR_A(r2, regs), r2, regs);
 
 #ifdef OPTION_KIMD_DEBUG
-    LOGBYTE2("  input :", buffer, 16, 4);
+    LOGBYTE2("input :", buffer, 16, 4);
 #endif
 
     sha256_process(&context, buffer);
@@ -1948,7 +1970,7 @@ static void ARCH_DEP(kmc_prng)(int r1, int r2, REGS *regs)
 #endif /* FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_1 */
 
 /*----------------------------------------------------------------------------*/
-/* B93E Compute intermediate message digest (KIMD)                            */
+/* B93E KIMD  - Compute intermediate message digest                     [RRE] */
 /*----------------------------------------------------------------------------*/
 DEF_INST(compute_intermediate_message_digest_d)
 {
@@ -1993,7 +2015,7 @@ DEF_INST(compute_intermediate_message_digest_d)
 }
 
 /*----------------------------------------------------------------------------*/
-/* B93F Compute last message digest (KLMD)                                    */
+/* B93F KLMD  - Compute last message digest                             [RRE] */
 /*----------------------------------------------------------------------------*/
 DEF_INST(compute_last_message_digest_d)
 {
@@ -2038,7 +2060,7 @@ DEF_INST(compute_last_message_digest_d)
 }
 
 /*----------------------------------------------------------------------------*/
-/* B92E Cipher message (KM)                                                   */
+/* B92E KM    - Cipher message                                          [RRE] */
 /*----------------------------------------------------------------------------*/
 DEF_INST(cipher_message_d)
 {
@@ -2091,7 +2113,7 @@ DEF_INST(cipher_message_d)
 }
 
 /*----------------------------------------------------------------------------*/
-/* B91E Compute message authentication code (KMAC)                            */
+/* B91E KMAC  - Compute message authentication code                     [RRE] */
 /*----------------------------------------------------------------------------*/
 DEF_INST(compute_message_authentication_code_d)
 {
@@ -2136,7 +2158,7 @@ DEF_INST(compute_message_authentication_code_d)
 }
 
 /*----------------------------------------------------------------------------*/
-/* B92F Cipher message with chaining (KMC)                                    */
+/* B92F KMC   - Cipher message with chaining                            [RRE] */
 /*----------------------------------------------------------------------------*/
 DEF_INST(cipher_message_with_chaining_d)
 {

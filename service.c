@@ -1,8 +1,8 @@
-/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2005                */
+/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2006                */
 /*              ESA/390 Service Processor                            */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements service processor functions                */
@@ -595,8 +595,10 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     /* Test SCLP command word */
     switch (sclp_command & SCLP_COMMAND_MASK) {
 
-    case SCLP_READ_SCP_INFO:
     case SCLP_READ_IFL_INFO:
+        if(!sysblk.pgmprdos)
+            goto invalidcmd;
+    case SCLP_READ_SCP_INFO:
 
         /* Set the main storage change bit */
         STORAGE_KEY(sccb_absolute_addr, regs) |= STORKEY_CHANGE;
@@ -704,7 +706,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         sccb->resp = SCCB_RESP_INFO;
 
         /* OR in program product OS restriction flag. */
-        if(sclp_command != SCLP_READ_IFL_INFO)
+        if((sclp_command & SCLP_COMMAND_MASK) != SCLP_READ_IFL_INFO)
             sccb->resp |= sysblk.pgmprdos;
 
         break;
@@ -1319,6 +1321,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 #endif /*FEATURE_CPU_RECONFIG*/
 
     default:
+    invalidcmd:
 
         if( HDC3(debug_sclp_unknown_command, sclp_command, sccb, regs) )
             break;

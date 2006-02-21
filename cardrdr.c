@@ -1,4 +1,4 @@
-/* CARDRDR.C    (c) Copyright Roger Bowler, 1999-2005                */
+/* CARDRDR.C    (c) Copyright Roger Bowler, 1999-2006                */
 /*              ESA/390 Card Reader Device Handler                   */
 
 /*-------------------------------------------------------------------*/
@@ -405,7 +405,7 @@ int     rc;                             /* Return code               */
 int     i;                              /* Array subscript           */
 int     len;                            /* Length of data            */
 BYTE    buf[160];                       /* Auto-detection buffer     */
-BYTE    pathname[MAX_PATH];             /* file path in host format  */
+char    pathname[MAX_PATH];             /* file path in host format  */
 
     *unitstat = 0;
 

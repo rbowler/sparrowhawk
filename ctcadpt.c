@@ -1,11 +1,11 @@
 // Hercules Channel-to-Channel Emulation Support
 // ====================================================================
 //
-// Copyright (C) James A. Pierson, 2002-2005
-//               Roger Bowler, 2000-2005
+// Copyright (C) James A. Pierson, 2002-2006
+//               Roger Bowler, 2000-2006
 //
-// vmnet     (C) Copyright Willem Konynenberg, 2000-2005
-// CTCT      (C) Copyright Vic Cross, 2001-2005
+// vmnet     (C) Copyright Willem Konynenberg, 2000-2006
+// CTCT      (C) Copyright Vic Cross, 2001-2006
 //
 // Notes:
 //   This module contains the remaining CTC emulation modes that
@@ -448,6 +448,7 @@ void  CTCX_ExecuteCCW( DEVBLK* pDEVBLK, BYTE  bCode,
 
 static int  CTCT_Init( DEVBLK *dev, int argc, char *argv[] )
 {
+    char           str[80];            // Thread name
     int            rc;                 // Return code
     int            mtu;                // MTU size (binary)
     int            lport;              // Listen port (binary)
@@ -636,7 +637,9 @@ static int  CTCT_Init( DEVBLK *dev, int argc, char *argv[] )
         arg = malloc( sizeof( CTCG_PARMBLK ) );
         memcpy( arg, &parm, sizeof( parm ) );
         arg->dev = dev;
-        create_thread( &tid, NULL, CTCT_ListenThread, arg );
+        snprintf(str,sizeof(str),"CTCT %4.4X ListenThread",dev->devnum);
+        str[sizeof(str)-1]=0;
+        create_thread( &tid, NULL, CTCT_ListenThread, arg, str );
     }
     else  // successfully connected (outbound) to the other end
     {

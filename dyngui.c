@@ -1,6 +1,6 @@
 /*********************************************************************/
 /* DYNGUI.C     Hercules External GUI Interface DLL                  */
-/*              (c) Copyright "Fish" (David B. Trout), 2003-2005     */
+/*              (c) Copyright "Fish" (David B. Trout), 2003-2006     */
 /*                                                                   */
 /* Primary contact:   Fish   [fish@infidels.com]                     */
 /*                                                                   */
@@ -1142,6 +1142,8 @@ void Cleanup()
 
 void gui_panel_display ()
 {
+    SET_THREAD_NAME("dyngui");
+
     if ( !bDoneProcessing )
     {
         logmsg(_("HHCDG001I dyngui.dll initiated\n"));

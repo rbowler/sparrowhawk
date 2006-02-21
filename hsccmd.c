@@ -1,5 +1,5 @@
-/* HSCCMD.C     (c) Copyright Roger Bowler, 1999-2005                */
-/*              (c) Copyright "Fish" (David B. Trout), 2002-2005     */
+/* HSCCMD.C     (c) Copyright Roger Bowler, 1999-2006                */
+/*              (c) Copyright "Fish" (David B. Trout), 2002-2006     */
 /*              Execute Hercules System Commands                     */
 /*                                                                   */
 /*   Released under the Q Public License (http://www.conmicro.cx/    */
@@ -44,92 +44,20 @@ extern void ecpsvm_command(int argc,char **argv);
 int process_script_file(char *,int);
 
 ///////////////////////////////////////////////////////////////////////
-/* cause_crash command - purposely crash Herc for debugging purposes */
+/* $test_cmd - do something or other */
 
-char* fish_msgs[8] =
+int $test_cmd(int argc, char *argv[],char *cmdline)
 {
-    "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n",
-    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    "2222222222222222222222222222222222222222222222222222222222222222222222222222222222222222\n",
-    "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
-    "4444444444444444444444444444444444444444444444444444444444444444444444444444444444444444\n",
-    "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
-    "6666666666666666666666666666666666666666666666666666666666666666666666666666666666666666\n",
-    "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
-};
-
-COND fish_cond;
-LOCK fish_lock;
-
-void*  fish_thread ( void* arg )
-{
-    int i, thread_num = (int) arg;
-
-    srand( time( NULL ) );
-
-    logmsg( "\n** thread %d waiting\n", thread_num );
-
-    obtain_lock    (             &fish_lock );
-    wait_condition ( &fish_cond, &fish_lock );
-    release_lock   (             &fish_lock );
-
-    logmsg( "\n** thread %d starting\n", thread_num );
-
-    for (i=0; i < 50*1000; i++)
-        logmsg( fish_msgs[ rand() % 8 ] );
-
-    sleep(5);
-
-    logmsg( "\n** thread %d done\n", thread_num );
-
-    return NULL;
-}
-
-int crash_cmd(int argc, char *argv[],char *cmdline)
-{
-#if 1
-    TID tid;
-    int num_threads;
-    static int didthis = 0;
-
-    UNREFERENCED(cmdline);
-
-    if (!didthis)
-    {
-        didthis = 1;
-        initialize_condition ( &fish_cond );
-        initialize_lock      ( &fish_lock );
-    }
-
-    if (argc != 2)
-    {
-        logmsg("invalid arg; 1-8\n");
-        return 0;
-    }
-
-    num_threads = atoi(argv[1]);
-
-    if (num_threads < 0 || num_threads > 8)
-    {
-        logmsg("invalid arg; 1-8\n");
-        return 0;
-    }
-
-    while (num_threads--)
-        create_thread( &tid, &sysblk.detattr, fish_thread, (void*) num_threads );
-
-    sleep( 1 );
-
-    broadcast_condition ( &fish_cond );
-
-    return 0;
-#else
     UNREFERENCED(argc);
     UNREFERENCED(argv);
     UNREFERENCED(cmdline);
-    cause_crash();      // (should not return)
-    return 0;           // (make compiler happy)
-#endif
+    // Cause Hercules to hang...
+    while(1)
+    {
+        logmsg("** $test_cmd!\n");
+        sleep(5);
+    }
+    return 0;
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -670,40 +598,46 @@ int quiet_cmd(int argc, char *argv[], char *cmdline)
 ///////////////////////////////////////////////////////////////////////
 /* format_tod - generate displayable date from TOD value */
 /* always uses epoch of 1900 */
-char * format_tod(char *buf, U64 tod)
+char * format_tod(char *buf, U64 tod, int flagdate)
 {
     int leapyear, years, days, hours, minutes, seconds, microseconds;
 
-    if(tod > 365*24*60*60*16000000LL)
+    if(tod >= TOD_YEAR)
     {
-        tod -= 365*24*60*60*16000000LL;
-        years = ((tod/(1461*24*60*60*16000000LL))*4) + 1;
-        tod %= 1461*24*60*60*16000000LL;
-        if((leapyear = tod / (365*24*60*60*16000000LL)) == 4)
+        tod -= TOD_YEAR;
+        years = (tod / TOD_4YEARS * 4) + 1;
+        tod %= TOD_4YEARS;
+        if((leapyear = tod / TOD_YEAR) == 4)
         {
-            tod %= 365*24*60*60*16000000LL;
+            tod %= TOD_YEAR;
             years--;
-            tod += 365*24*60*60*16000000LL;
+            tod += TOD_YEAR;
         }
         else
-            tod %= 365*24*60*60*16000000LL;
+            tod %= TOD_YEAR;
 
         years += leapyear;
     }
     else
         years = 0;
 
-    days = tod / (24*60*60*16000000LL);
-    tod %= 24*60*60*16000000LL;
-    hours = tod / (60*60*16000000LL);
-    tod %= 60*60*16000000LL;
-    minutes = tod / (60*16000000LL);
-    tod %= 60*16000000LL;
-    seconds = tod / 16000000LL;
-    microseconds = (tod % 16000000LL) / 16;
+    days = tod / TOD_DAY;
+    tod %= TOD_DAY;
+    hours = tod / TOD_HOUR;
+    tod %= TOD_HOUR;
+    minutes = tod / TOD_MIN;
+    tod %= TOD_MIN;
+    seconds = tod / TOD_SEC;
+    microseconds = (tod % TOD_SEC) / TOD_USEC;
+
+    if (flagdate)
+    {
+        years += 1900;
+        days += 1;
+    }
     
     sprintf(buf,"%4d.%03d %02d:%02d:%02d.%06d",
-        1900+years,days+1,hours,minutes,seconds,microseconds);
+        years,days,hours,minutes,seconds,microseconds);
 
     return buf;
 }
@@ -715,6 +649,25 @@ int clocks_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs;
 char clock_buf[30];
+U64 tod_now;
+U64 hw_now;
+S64 epoch_now;
+U64 epoch_now_abs;
+char epoch_sign;
+U64 clkc_now;
+S64 cpt_now;
+#if defined(_FEATURE_SIE)
+U64 vtod_now = 0;
+S64 vepoch_now = 0;
+U64 vepoch_now_abs = 0;
+char vepoch_sign = ' ';
+U64 vclkc_now = 0;
+S64 vcpt_now = 0;
+char sie_flag = 0;
+#endif
+U32 itimer = 0;
+char itimer_formatted[20];
+char arch370_flag = 0;
 
     UNREFERENCED(cmdline);
     UNREFERENCED(argc);
@@ -730,51 +683,95 @@ char clock_buf[30];
     }
     regs = sysblk.regs[sysblk.pcpu];
 
-    logmsg( _("HHCPN028I tod = %16.16" I64_FMT "X    %s\n"),
-               (U64)(TOD_CLOCK(regs) << 8),
-               format_tod(clock_buf,(U64)TOD_CLOCK(regs)));
-
-    logmsg( _("          h/w = %16.16" I64_FMT "X    %s\n"),
-               (U64)(tod_clock << 8),
-               format_tod(clock_buf,(U64)tod_clock));
-
-    logmsg( _("          off = %16.16" I64_FMT "X\n"),
-                (S64)(regs->tod_epoch << 8));
-
-    logmsg( _("          ckc = %16.16" I64_FMT "X    %s\n"),
-               (U64)(regs->clkc << 8),
-               format_tod(clock_buf,(U64)regs->clkc));
-
-    logmsg( _("          cpt = %16.16" I64_FMT "X\n"), (U64)regs->ptimer );
-
+/* Get the clock values all at once for consistency and so we can
+   release the CPU lock more quickly. */
+    tod_now = (tod_clock(regs) << 8) >> 8;
+    hw_now = hw_tod;
+    epoch_now = regs->tod_epoch;
+    clkc_now = regs->clkc;
+    cpt_now = CPU_TIMER(regs);
 #if defined(_FEATURE_SIE)
     if(regs->sie_active)
     {
+        vtod_now = (TOD_CLOCK(regs->guestregs) << 8) >> 8;
+        vepoch_now = regs->guestregs->tod_epoch;
+        vclkc_now = regs->guestregs->clkc;
+        vcpt_now = CPU_TIMER(regs->guestregs);
+        sie_flag = 1;
+    }
+#endif
+    if (regs->arch_mode == ARCH_370)
+    {
+        itimer = INT_TIMER(regs);
+        /* The interval timer counts 76800 per second, or one every
+           13.0208 microseconds. */
+        sprintf(itimer_formatted,"%02u:%02u:%02u.%06u",
+                (itimer/(76800*60*60)),((itimer%(76800*60*60))/(76800*60)),
+                ((itimer%(76800*60))/76800),((itimer%76800)*13));
+        arch370_flag = 1;
+    }
+        
+    release_lock(&sysblk.cpulock[sysblk.pcpu]);
+
+    logmsg( _("HHCPN028I tod = %16.16" I64_FMT "X    %s\n"),
+               (tod_now << 8),format_tod(clock_buf,tod_now,TRUE));
+
+    logmsg( _("          h/w = %16.16" I64_FMT "X    %s\n"),
+               (hw_now << 8),format_tod(clock_buf,hw_now,TRUE));
+
+    if (epoch_now < 0) {
+        epoch_now_abs = -(epoch_now);
+        epoch_sign = '-';
+    }
+    else
+    {
+        epoch_now_abs = epoch_now;
+        epoch_sign = ' ';
+    }
+    logmsg( _("          off = %16.16" I64_FMT "X   %c%s\n"),
+               (epoch_now << 8),epoch_sign,
+               format_tod(clock_buf,epoch_now_abs,FALSE));
+
+    logmsg( _("          ckc = %16.16" I64_FMT "X    %s\n"),
+               (clkc_now << 8),format_tod(clock_buf,clkc_now,TRUE));
+
+    if (regs->cpustate != CPUSTATE_STOPPED)
+        logmsg( _("          cpt = %16.16" I64_FMT "X\n"), cpt_now << 8);
+    else
+        logmsg( _("          cpt = not decrementing\n"));
+
+#if defined(_FEATURE_SIE)
+    if(sie_flag)
+    {
 
         logmsg( _("         vtod = %16.16" I64_FMT "X    %s\n"),
-                   (U64)TOD_CLOCK(regs->guestregs) << 8,
-                   format_tod(clock_buf,(U64)TOD_CLOCK(regs->guestregs)));
+                   (vtod_now << 8),format_tod(clock_buf,vtod_now,TRUE));
 
-        logmsg( _("         voff = %16.16" I64_FMT "X\n"),
-                   (S64)regs->guestregs->tod_epoch << 8);
+        if (epoch_now < 0) {
+            epoch_now_abs = -(epoch_now);
+            epoch_sign = '-';
+        }
+        else
+        {
+            epoch_now_abs = epoch_now;
+            epoch_sign = ' ';
+        }
+        logmsg( _("         voff = %16.16" I64_FMT "X   %c%s\n"),
+                   (vepoch_now << 8),vepoch_sign,
+                   format_tod(clock_buf,vepoch_now_abs,FALSE));
 
         logmsg( _("         vckc = %16.16" I64_FMT "X    %s\n"), 
-                   (U64)regs->guestregs->clkc << 8,
-                   format_tod(clock_buf,(U64)regs->guestregs->clkc));
+                   (vclkc_now << 8),format_tod(clock_buf,vclkc_now,TRUE));
 
-        logmsg( _("         vcpt = %16.16" I64_FMT "X\n"),(U64)regs->guestregs->ptimer);
+        logmsg( _("         vcpt = %16.16" I64_FMT "X\n"),vcpt_now << 8);
     }
 #endif
 
-    if (regs->arch_mode == ARCH_370)
+    if (arch370_flag)
     {
-        U32 itimer;
-        PSA_3XX *psa = (void*) (regs->mainstor + regs->PX);
-        FETCH_FW(itimer, psa->inttimer);
-        logmsg( "          itm = %8.8" I32_FMT "X\n", itimer );
+        logmsg( _("          itm = %8.8" I32_FMT "X                     %s\n"),
+                   itimer, itimer_formatted );
     }
-
-    release_lock(&sysblk.cpulock[sysblk.pcpu]);
 
     return 0;
 }
@@ -2175,7 +2172,7 @@ int devtmax_cmd(int argc, char *argv[], char *cmdline)
        and more threads can be created */
 
     if (sysblk.ioq && (!sysblk.devtmax || sysblk.devtnbr < sysblk.devtmax))
-        create_thread(&tid, &sysblk.detattr, device_thread, NULL);
+        create_thread(&tid, &sysblk.detattr, device_thread, NULL, "idle device thread");
 
     /* Wakeup threads in case they need to terminate */
     broadcast_condition (&sysblk.ioqcond);
@@ -2420,7 +2417,7 @@ REGS *regs;
     int     fd;                         /* File descriptor           */
     int     len;                        /* Number of bytes read      */
     BYTE    c;                          /* (dummy sscanf work area)  */
-    BYTE    pathname[MAX_PATH];         /* fname in host path format */
+    char    pathname[MAX_PATH];         /* fname in host path format */
 
     UNREFERENCED(cmdline);
 
@@ -2548,7 +2545,7 @@ REGS *regs;
     char   *loadaddr;                   /* loadcore memory address   */
     U32     aaddr;                      /* Absolute storage address  */
     int     len;                        /* Number of bytes read      */
-    BYTE    pathname[MAX_PATH];         /* file in host path format  */
+    char    pathname[MAX_PATH];         /* file in host path format  */
 
     UNREFERENCED(cmdline);
 
@@ -2623,7 +2620,7 @@ int loadtext_cmd(int argc, char *argv[], char *cmdline)
     int     len;                        /* Number of bytes read      */
     int     n;
     REGS   *regs;
-    BYTE    pathname[MAX_PATH];
+    char    pathname[MAX_PATH];
 
     UNREFERENCED(cmdline);
 
@@ -2765,10 +2762,18 @@ int ipending_cmd(int argc, char *argv[], char *cmdline)
             sysblk.regs[i]->cpuad,
             IS_IC_PTIMER(sysblk.regs[i]) ? "" : _("not ")
             );
+#if defined(_FEATURE_INTERVAL_TIMER)
         logmsg( _("          CPU%4.4X: Interval timer %spending\n"),
             sysblk.regs[i]->cpuad,
             IS_IC_ITIMER(sysblk.regs[i]) ? "" : _("not ")
             );
+#if defined(_FEATURE_ECPSVM)
+        logmsg( _("          CPU%4.4X: ECPS vtimer %spending\n"),
+            sysblk.regs[i]->cpuad,
+            IS_IC_ECPSVTIMER(sysblk.regs[i]) ? "" : _("not ")
+            );
+#endif /*defined(_FEATURE_ECPSVM)*/
+#endif /*defined(_FEATURE_INTERVAL_TIMER)*/
         logmsg( _("          CPU%4.4X: External call %spending\n"),
             sysblk.regs[i]->cpuad,
             IS_IC_EXTCALL(sysblk.regs[i]) ? "" : _("not ")
@@ -3175,7 +3180,7 @@ char   *scrbuf = NULL;                  /* RC file input buffer      */
 int     scrlen;                         /* length of RC file record  */
 int     scr_pause_amt = 0;              /* seconds to pause RC file  */
 char   *p;                              /* (work)                    */
-BYTE    pathname[MAX_PATH];             /* (work)                    */
+char    pathname[MAX_PATH];             /* (work)                    */
 
     /* Check the recursion level - if it exceeds a certain amount
        abort the script stack
@@ -3937,12 +3942,13 @@ int sizeof_cmd(int argc, char *argv[], char *cmdline)
     UNREFERENCED(argv);
 
     logmsg(_("HHCPN161I (void *) ..........%7d\n"),sizeof(void *));
-    logmsg(_("HHCPN162I (unsigned int) ....%7d\n"),sizeof(unsigned int));
-    logmsg(_("HHCPN163I SYSBLK ............%7d\n"),sizeof(SYSBLK));
-    logmsg(_("HHCPN164I REGS ..............%7d\n"),sizeof(REGS));
-    logmsg(_("HHCPN165I DEVBLK ............%7d\n"),sizeof(DEVBLK));
-    logmsg(_("HHCPN166I TLB entry .........%7d\n"),sizeof(TLB)/TLBN);
-    logmsg(_("HHCPN167I TLB table .........%7d\n"),sizeof(TLB));
+    logmsg(_("HHCPN161I (unsigned int) ....%7d\n"),sizeof(unsigned int));
+    logmsg(_("HHCPN161I (off_t) ...........%7d\n"),sizeof(OFF_T));
+    logmsg(_("HHCPN161I SYSBLK ............%7d\n"),sizeof(SYSBLK));
+    logmsg(_("HHCPN161I REGS ..............%7d\n"),sizeof(REGS));
+    logmsg(_("HHCPN161I DEVBLK ............%7d\n"),sizeof(DEVBLK));
+    logmsg(_("HHCPN161I TLB entry .........%7d\n"),sizeof(TLB)/TLBN);
+    logmsg(_("HHCPN161I TLB table .........%7d\n"),sizeof(TLB));
     return 0;
 }
 
@@ -4129,8 +4135,8 @@ COMMAND ( "sizeof",    sizeof_cmd,    "Display size of structures\n" )
 COMMAND ( "suspend",   suspend_cmd,   "Suspend hercules" )
 COMMAND ( "resume",    resume_cmd,    "Resume hercules\n" )
 
-#define CRASH_CMD   "c_crash"       // (hidden internal command)
-COMMAND ( CRASH_CMD,   crash_cmd,     "(hidden internal command)" )
+#define   TEST_CMD "$test"          // (hidden internal command)
+COMMAND ( TEST_CMD, $test_cmd,        "(hidden internal command)" )
 
 COMMAND ( NULL, NULL, NULL )         /* (end of table) */
 };
@@ -4253,7 +4259,7 @@ int ListAllCommands(int argc, char *argv[], char *cmdline)
     for (pCmdTab = Commands; pCmdTab->pszCommand; pCmdTab++)
     {
         // (don't display hidden internal commands)
-        if ( strcasecmp( pCmdTab->pszCommand, CRASH_CMD ) != 0 )
+        if ( strcasecmp( pCmdTab->pszCommand, TEST_CMD ) != 0 )
             logmsg( _("  %-9.9s    %s \n"), pCmdTab->pszCommand, pCmdTab->pszCmdDesc );
     }
 

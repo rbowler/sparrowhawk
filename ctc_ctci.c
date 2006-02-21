@@ -2,11 +2,11 @@
 // Hercules IP Channel-to-Channel Support (CTCI)
 // ====================================================================
 //
-// Copyright    (C) Copyright James A. Pierson, 2002-2005
-//              (C) Copyright "Fish" (David B. Trout), 2002-2005
-//              (C) Copyright Roger Bowler, 2000-2005
+// Copyright    (C) Copyright James A. Pierson, 2002-2006
+//              (C) Copyright "Fish" (David B. Trout), 2002-2006
+//              (C) Copyright Roger Bowler, 2000-2006
 //
-// linux 2.4 modifications (c) Copyright Fritz Elfert, 2001-2005
+// linux 2.4 modifications (c) Copyright Fritz Elfert, 2001-2006
 //
 
 #include "hstdinc.h"
@@ -105,6 +105,7 @@ int  CTCI_Init( DEVBLK* pDEVBLK, int argc, char *argv[] )
     int             rc = 0;             // Return code
     int             nIFType;            // Interface type
     int             nIFFlags;           // Interface flags
+    char            thread_name[32];
 
     nIFType =               // Interface type
         0
@@ -324,7 +325,9 @@ int  CTCI_Init( DEVBLK* pDEVBLK, int argc, char *argv[] )
     pDevCTCBLK->pDEVBLK[0]->fd =
     pDevCTCBLK->pDEVBLK[1]->fd = pDevCTCBLK->fd;
 
-    create_thread( &pDevCTCBLK->tid, NULL, CTCI_ReadThread, pDevCTCBLK );
+    snprintf(thread_name,sizeof(thread_name),"CTCI %4.4X ReadThread",pDEVBLK->devnum);
+    thread_name[sizeof(thread_name)-1]=0;
+    create_thread( &pDevCTCBLK->tid, NULL, CTCI_ReadThread, pDevCTCBLK, thread_name );
 
     pDevCTCBLK->pDEVBLK[0]->tid = pDevCTCBLK->tid;
     pDevCTCBLK->pDEVBLK[1]->tid = pDevCTCBLK->tid;

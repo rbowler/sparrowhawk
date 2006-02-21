@@ -2,7 +2,7 @@
 // Hercules LAN Channel Station Support
 // ====================================================================
 //
-// Copyright (C) 2002-2005 by James A. Pierson
+// Copyright (C) 2002-2006 by James A. Pierson
 
 #include "hstdinc.h"
 #include "hercules.h"
@@ -251,7 +251,8 @@ int  LCS_Init( DEVBLK* pDEVBLK, int argc, char *argv[] )
             initialize_join_attr( &thread_attr );
             create_thread( &pLCSBLK->Port[pLCSDev->bPort].tid,
                            &thread_attr, LCS_PortThread,
-                           &pLCSBLK->Port[pLCSDev->bPort] );
+                           &pLCSBLK->Port[pLCSDev->bPort],
+                           "LCS_PortThread" );
 
             /* Identify the thread ID with the devices on which they are active */
             pLCSDev->pDEVBLK[0]->tid = pLCSBLK->Port[pLCSDev->bPort].tid;
@@ -1750,7 +1751,7 @@ static int  BuildOAT( char* pszOATName, PLCSBLK pLCSBLK )
     char*       pszNetMask   = NULL;
 
     struct in_addr  addr;               // Work area for addresses
-    BYTE        pathname[MAX_PATH];     // pszOATName in host path format
+    char        pathname[MAX_PATH];     // pszOATName in host path format
 
     // Open the configuration file
     hostpath(pathname, pszOATName, sizeof(pathname));

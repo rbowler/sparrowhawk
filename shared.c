@@ -1,4 +1,4 @@
-/* SHARED.C     (c)Copyright Greg Smith, 2002-2005                   */
+/* SHARED.C     (c)Copyright Greg Smith, 2002-2006                   */
 /*              Shared Device Server                                 */
 
 #include "hstdinc.h"
@@ -141,9 +141,11 @@ char    *p, buf[1024];                  /* Work buffer               */
             rmtnum = p + 1;
         }
 
+#if defined( HAVE_SYS_UN_H )
         if ( strcmp (ipname, "localhost") == 0)
             dev->localhost = 1;
         else
+#endif
         {
             if ( (he = gethostbyname (ipname)) == NULL )
                 return -1;
@@ -2853,7 +2855,7 @@ TID                     tid;            /* Negotiation thread id     */
 
             /* Create a thread to complete the client connection */
             if ( create_thread (&tid, &sysblk.detattr,
-                                serverConnect, psock) )
+                                serverConnect, psock, "serverConnect") )
             {
                 logmsg(_("HHCSH061E serverConnect create_thread: %s\n"),
                         strerror(HSO_errno));

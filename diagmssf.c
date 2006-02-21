@@ -1,4 +1,4 @@
-/* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2005                  */
+/* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2006                  */
 /*              ESA/390 Diagnose Functions                           */
 
 /*-------------------------------------------------------------------*/
@@ -8,7 +8,7 @@
 /* LPAR RMF interface call                                           */
 /*                                                                   */
 /*                                             04/12/1999 Jan Jaeger */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
 /*-------------------------------------------------------------------*/
 
 #include "hstdinc.h"
@@ -387,20 +387,11 @@ static U64        diag204tod;          /* last diag204 tod           */
         if ( abs > regs->mainlim )
             ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-        /* Obtain the TOD clock update lock */
-        obtain_lock (&sysblk.todlock);
-
-        /* Update the TOD clock */
-        update_tod_clock();
-
         /* save last diag204 tod */
         dreg = diag204tod;
 
         /* Retrieve the TOD clock value and shift out the epoch */
-        diag204tod = TOD_CLOCK(regs) << 8;
-
-        /* Release the TOD clock update lock */
-        release_lock (&sysblk.todlock);
+        diag204tod = tod_clock(regs) << 8;
 
         /* Point to DIAG 204 data area */
         hdrinfo = (DIAG204_HDR*)(regs->mainstor + abs);

@@ -1,6 +1,6 @@
 /* TIMER.C   */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
 
 #include "hstdinc.h"
 
@@ -11,7 +11,7 @@
 #include "feat390.h"
 #include "feat370.h"
 
-int ecpsvm_testvtimer(REGS *,int);
+// ZZ int ecpsvm_testvtimer(REGS *,int);
 
 /*-------------------------------------------------------------------*/
 /* Check for timer event                                             */
@@ -24,16 +24,10 @@ int ecpsvm_testvtimer(REGS *,int);
 /*                                                                   */
 /* tod_delta is in hercules internal clock format (>> 8)             */
 /*-------------------------------------------------------------------*/
-void update_cpu_timer(U64 tod_delta)
+void update_cpu_timer(void)
 {
 int             cpu;                    /* CPU counter               */
 REGS           *regs;                   /* -> CPU register context   */
-PSA_3XX        *psa;                    /* -> Prefixed storage area  */
-S32             itimer;                 /* Interval timer value      */
-S32             olditimer;              /* Previous interval timer   */
-#if defined(OPTION_MIPS_COUNTING) && ( defined(_FEATURE_SIE) || defined(_FEATURE_ECPSVM) )
-S32             itimer_diff;            /* TOD difference in TU      */
-#endif
 U32             intmask = 0;            /* Interrupt CPU mask        */
 
     /* Access the diffent register contexts with the intlock held */
@@ -44,10 +38,15 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
      */
     for (cpu = 0; cpu < HI_CPU; cpu++)
     {
+        obtain_lock(&sysblk.cpulock[cpu]);
+
         /* Ignore this CPU if it is not started */
         if (!IS_CPU_ONLINE(cpu)
          || CPUSTATE_STOPPED == sysblk.regs[cpu]->cpustate)
+        {
+            release_lock(&sysblk.cpulock[cpu]);
             continue;
+        }
 
         /* Point to the CPU register context */
         regs = sysblk.regs[cpu];
@@ -85,10 +84,8 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
          * [2] Decrement the CPU timer for each CPU  *
          *-------------------------------------------*/
 
-        regs->ptimer = (S64)regs->ptimer - (tod_delta << 8);
-
         /* Set interrupt flag if the CPU timer is negative */
-        if ((S64)regs->ptimer < 0)
+        if (CPU_TIMER(regs) < 0)
         {
             if (!IS_IC_PTIMER(regs))
             {
@@ -103,11 +100,8 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
         /* When running under SIE also update the SIE copy */
         if(regs->sie_active)
         {
-            /* Decrement the guest CPU timer */
-            regs->guestregs->ptimer = (S64)regs->guestregs->ptimer - (tod_delta << 8);
-
             /* Set interrupt flag if the CPU timer is negative */
-            if ((S64)regs->guestregs->ptimer < 0)
+            if (CPU_TIMER(regs->guestregs) < 0)
             {
                 ON_IC_PTIMER(regs->guestregs);
                 intmask |= BIT(regs->cpuad);
@@ -117,64 +111,17 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
         }
 #endif /*defined(_FEATURE_SIE)*/
 
+
         /*-------------------------------------------*
          * [3] Check for interval timer interrupt    *
          *-------------------------------------------*/
 
-#if defined(OPTION_MIPS_COUNTING) && ( defined(_FEATURE_SIE) || defined(_FEATURE_ECPSVM) )
-        /* Calculate diff in interval timer units plus rounding to improve accuracy */
-        itimer_diff = (S32) ((((6*tod_delta)/625)+1) >> 1);
-        if (itimer_diff <= 0)           /* Handle gettimeofday low */
-            itimer_diff = 1;            /* resolution problems     */
-#endif
-
         if(regs->arch_mode == ARCH_370)
         {
-            /* Point to PSA in main storage */
-            psa = (PSA_3XX*)(regs->mainstor + regs->PX);
-
-                    /* Decrement the location 80 timer */
-            FETCH_FW(itimer,psa->inttimer);
-                    olditimer = itimer;
-
-                    /* The interval timer is decremented as though bit 23 is
-                       decremented by one every 1/300 of a second. This comes
-                       out to subtracting 768 (X'300') every 1/100 of a second.
-                       76800/CLK_TCK comes out to 768 on Intel versions of
-                       Linux, where the clock ticks every 1/100 second; it
-                       comes out to 75 on the Alpha, with its 1024/second
-                       tick interval. See 370 POO page 4-29. (ESA doesn't
-                       even have an interval timer.) */
-#if defined(OPTION_MIPS_COUNTING) && ( defined(_FEATURE_SIE) || defined(_FEATURE_ECPSVM) )
-            itimer -= itimer_diff;
-#else
-            itimer -= 76800 / CLK_TCK;
-#endif
-            STORE_FW(psa->inttimer,itimer);
-
-            /* Set interrupt flag and interval timer interrupt pending
-               if the interval timer went from positive to negative */
-            if (itimer < 0 && olditimer >= 0)
-            {
-#if defined(_FEATURE_ECPSVM)
-                regs->rtimerint=1;      /* To resolve concurrent V/R Int Timer Ints */
-#endif
-                ON_IC_ITIMER(regs);
+            if( chk_int_timer(regs) )
                 intmask |= BIT(regs->cpuad);
-            }
-#if defined(_FEATURE_ECPSVM)
-#if defined(OPTION_MIPS_COUNTING)
-            if(ecpsvm_testvtimer(regs,itimer_diff)==0)
-#else /* OPTION_MIPS_COUNTING */
-            if(ecpsvm_testvtimer(regs,76800 / CLK_TCK)==0)
-#endif /* OPTION_MIPS_COUNTING */
-            {
-                ON_IC_ITIMER(regs);
-                intmask |= BIT(regs->cpuad);
-            }
-#endif /* _FEATURE_ECPSVM */
+        }
 
-        } /*if(regs->arch_mode == ARCH_370)*/
 
 #if defined(_FEATURE_SIE)
         /* When running under SIE also update the SIE copy */
@@ -183,28 +130,13 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
             if(SIE_STATB(regs->guestregs, M, 370)
               && SIE_STATNB(regs->guestregs, M, ITMOF))
             {
-                /* Decrement the location 80 timer */
-                FETCH_FW(itimer,regs->guestregs->sie_psa->inttimer);
-                olditimer = itimer;
-
-#if defined(OPTION_MIPS_COUNTING)
-                itimer -= itimer_diff;
-#else
-                itimer -= 76800 / CLK_TCK;
-#endif
-                STORE_FW(regs->guestregs->sie_psa->inttimer,itimer);
-
-                /* Set interrupt flag and interval timer interrupt pending
-                   if the interval timer went from positive to negative */
-                if (itimer < 0 && olditimer >= 0)
-                {
-                    ON_IC_ITIMER(regs->guestregs);
+                if( chk_int_timer(regs->guestregs) )
                     intmask |= BIT(regs->cpuad);
-                }
             }
         }
 #endif /*defined(_FEATURE_SIE)*/
 
+    release_lock(&sysblk.cpulock[cpu]);
 
     } /* end for(cpu) */
 
@@ -262,16 +194,13 @@ struct  timeval tv;                     /* Structure for select      */
 
     while (sysblk.cpus)
     {
-        /* Obtain the TOD lock */
-        obtain_lock (&sysblk.todlock);
-
         /* Update TOD clock */
         update_tod_clock();
 
 #ifdef OPTION_MIPS_COUNTING
         /* Calculate MIPS rate and percentage CPU busy */
-        diff = (prev == 0 ? 0 : tod_clock - prev);
-        prev = tod_clock;
+        diff = (prev == 0 ? 0 : hw_tod - prev);
+        prev = hw_tod;
 
         /* Shift the epoch out of the difference for the CPU timer */
         diff <<= 8;
@@ -363,9 +292,6 @@ struct  timeval tv;                     /* Structure for select      */
 
         } /* end if(usecctr) */
 #endif /*OPTION_MIPS_COUNTING*/
-
-        /* Release the TOD lock */
-        release_lock (&sysblk.todlock);
 
         /* Sleep for one system clock tick by specifying a one-microsecond
            delay, which will get stretched out to the next clock tick */

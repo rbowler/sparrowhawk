@@ -1,4 +1,4 @@
-/* FEATCHK.H    (c) Copyright Jan Jaeger, 2000-2005                  */
+/* FEATCHK.H    (c) Copyright Jan Jaeger, 2000-2006                  */
 /*-------------------------------------------------------------------*/
 /*                                                                   */
 /*           Feature definition consistency checks                   */
@@ -41,6 +41,10 @@
 
 #if defined(FEATURE_INTERVAL_TIMER)
  #define _FEATURE_INTERVAL_TIMER
+#endif
+
+#if defined(FEATURE_ECPSVM)
+ #define _FEATURE_ECPSVM
 #endif
 
 #if defined(FEATURE_VECTOR_FACILITY)

@@ -1,4 +1,4 @@
-/* PRINTER.C    (c) Copyright Roger Bowler, 1999-2005                */
+/* PRINTER.C    (c) Copyright Roger Bowler, 1999-2006                */
 /*              ESA/390 Line Printer Device Handler                  */
 
 /*-------------------------------------------------------------------*/
@@ -69,7 +69,7 @@ static int
 open_printer (DEVBLK *dev)
 {
 pid_t           pid;                    /* Child process identifier  */
-BYTE            pathname[MAX_PATH];     /* file path in host format  */
+char            pathname[MAX_PATH];     /* file path in host format  */
 #if !defined( _MSVC_ )
 int             pipefd[2];              /* Pipe descriptors          */
 int             rc;                     /* Return code               */

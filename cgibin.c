@@ -1,4 +1,4 @@
-/* CGIBIN.C     (c)Copyright Jan Jaeger, 2002-2005                   */
+/* CGIBIN.C     (c)Copyright Jan Jaeger, 2002-2006                   */
 /*              HTTP cgi-bin routines                                */
 
 /* This file contains all cgi routines that may be executed on the   */
@@ -44,6 +44,10 @@
 
 
 #include "hstdinc.h"
+
+#define _CGIBIN_C_
+#define _HENGINE_DLL_
+
 #include "hercules.h"
 #include "devtype.h"
 #include "opcode.h"

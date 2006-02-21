@@ -1,4 +1,4 @@
-/* HDLMAIN.C    (c) Copyright Jan Jaeger, 2003-2005                  */
+/* HDLMAIN.C    (c) Copyright Jan Jaeger, 2003-2006                  */
 /*              Hercules Dynamic Loader                              */
 
 #include "hstdinc.h"
@@ -202,6 +202,7 @@ HDL_DEVICE_SECTION;
 #endif /*!defined(OPTION_DYNAMIC_LOAD)*/
 
     /* Count Key Data Direct Access Storage Devices */
+    HDL_DEVICE(2305, ckddasd_device_hndinfo );
     HDL_DEVICE(2311, ckddasd_device_hndinfo );
     HDL_DEVICE(2314, ckddasd_device_hndinfo );
     HDL_DEVICE(3330, ckddasd_device_hndinfo );

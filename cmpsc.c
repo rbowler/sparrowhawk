@@ -7,7 +7,7 @@
 /* Mario Bezzi. Thanks Mario! Also special thanks to Greg Smith who           */
 /* introduced iregs, needed when a page fault occurs.                         */
 /*                                                                            */
-/*                              (c) Copyright Bernard van der Helm, 2000-2005 */
+/*                              (c) Copyright Bernard van der Helm, 2000-2006 */
 /*                              Noordwijkerhout, The Netherlands.             */
 /*                                                                            */
 /*----------------------------------------------------------------------------*/
@@ -1054,6 +1054,8 @@ static int ARCH_DEP(test_ec)(int r2, REGS *regs, REGS *iregs, BYTE *cce)
   return(1);
 }
 
+/*----------------------------------------------------------------------------*/
+/* B263 CMPSC - Compression Call                                        [RRE] */
 /*----------------------------------------------------------------------------*/
 /* compression_call. Compression and expanding looks simple in this function. */
 /*----------------------------------------------------------------------------*/

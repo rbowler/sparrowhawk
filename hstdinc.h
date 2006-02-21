@@ -1,4 +1,4 @@
-/* HSTDINC.H    (c) Copyright Roger Bowler, 1999-2005                */
+/* HSTDINC.H    (c) Copyright Roger Bowler, 1999-2006                */
 /*              Hercules precompilation-eligible Header Files        */
 
 /* This file contains #include statements for all of the header      */
@@ -102,6 +102,9 @@
 #ifdef HAVE_SYS_MMAN_H
   #include <sys/mman.h>
 #endif
+#ifdef HAVE_SYS_PARAM_H
+  #include <sys/param.h>
+#endif
 #ifdef HAVE_SYS_MOUNT_H
   #include <sys/mount.h>
 #endif
@@ -124,7 +127,9 @@
   #include <sys/wait.h>
 #endif
 #ifdef HAVE_BYTESWAP_H
+ #ifndef NO_ASM_BYTESWAP
   #include <byteswap.h>
+ #endif
 #endif
 #ifdef HAVE_BZLIB_H
   // windows.h #defines 'small' as char and bzlib.h

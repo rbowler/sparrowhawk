@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////////
 // SCSITAPE.C   --   Hercules SCSI tape handling module
 //
-// (c) Copyright "Fish" (David B. Trout), 2005. Released under
+// (c) Copyright "Fish" (David B. Trout), 2005-2006. Released under
 // the Q Public License (http://www.conmicro.cx/hercules/herclic.html)
 // as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
@@ -1008,7 +1008,8 @@ void update_status_scsitape( DEVBLK* dev, int no_trace )
                 &dev->stape_mountmon_tid,
                 &sysblk.detattr,
                 scsi_tapemountmon_thread,
-                dev
+                dev,
+                "scsi_tapemountmon_thread"
             )
             == 0
         );
@@ -1030,7 +1031,6 @@ void *scsi_tapemountmon_thread( void *db )
     DEVBLK* dev = db;
     int priority;
     /* int rc; */
-
 
     // Set thread priority BELOW that of the cpu and device threads
     // in order to minimize whatever impact we may have on them...

@@ -1,7 +1,7 @@
 /* HSCMISC.C    Misc. system command routines                        */
 /*                                                                   */
-/*              (c) Copyright Roger Bowler, 1999-2005                */
-/*              (c) Copyright Jan Jaeger, 1999-2005                  */
+/*              (c) Copyright Roger Bowler, 1999-2006                */
+/*              (c) Copyright Jan Jaeger, 1999-2006                  */
 
 #include "hstdinc.h"
 
@@ -205,7 +205,8 @@ TID tid;
         cancel_wait_sigq();
     else
         if(can_signal_quiesce() && !signal_quiesce(0,0))
-            create_thread(&tid, &sysblk.detattr, do_shutdown_wait, NULL);
+            create_thread(&tid, &sysblk.detattr, do_shutdown_wait,
+                          NULL, "do_shutdown_wait");
         else
             do_shutdown_now();
 }
@@ -661,6 +662,11 @@ char    hbuf[40];                       /* Hexadecimal buffer        */
 BYTE    cbuf[17];                       /* Character buffer          */
 BYTE    c;                              /* Character work area       */
 
+#if defined(FEATURE_INTERVAL_TIMER)
+    if(ITIMER_ACCESS(raddr,16))
+        ARCH_DEP(store_int_timer)(regs);
+#endif
+    
     if (draflag)
     {
         n = sprintf (buf, "R:"F_RADR":", raddr);
@@ -860,6 +866,7 @@ char    buf[100];                       /* Message buffer            */
             regs->mainstor[aaddr] = newval[i];
             STORAGE_KEY(aaddr, regs) |= (STORKEY_REF | STORKEY_CHANGE);
         } /* end for(i) */
+
     }
 
     /* Display real storage */

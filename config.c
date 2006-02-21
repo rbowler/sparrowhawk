@@ -1,4 +1,4 @@
-/* CONFIG.C     (c) Copyright Jan Jaeger, 2000-2005                  */
+/* CONFIG.C     (c) Copyright Jan Jaeger, 2000-2006                  */
 /*              Device configuration functions                       */
 
 /*-------------------------------------------------------------------*/
@@ -75,10 +75,17 @@ int     cpu;
 /*-------------------------------------------------------------------*/
 int configure_cpu(int cpu)
 {
+char  thread_name[16];
+
     if(IS_CPU_ONLINE(cpu))
         return -1;
 
-    if ( create_thread (&sysblk.cputid[cpu], &sysblk.detattr, cpu_thread, &cpu) )
+    snprintf(thread_name,sizeof(thread_name),"cpu%d thread",cpu);
+    thread_name[sizeof(thread_name)-1]=0;
+
+    if ( create_thread (&sysblk.cputid[cpu], &sysblk.detattr, cpu_thread,
+                        &cpu, thread_name)
+       )
     {
         logmsg(_("HHCCF040E Cannot create CPU%4.4X thread: %s\n"),
                cpu, strerror(errno));

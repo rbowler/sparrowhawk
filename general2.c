@@ -1,11 +1,11 @@
-/* GENERAL2.C   (c) Copyright Roger Bowler, 1994-2005                */
+/* GENERAL2.C   (c) Copyright Roger Bowler, 1994-2006                */
 /*              ESA/390 CPU Emulator                                 */
 /*              Instructions N-Z                                     */
 
-/*              (c) Copyright Peter Kuschnerus, 1999-2005 (UPT & CFC)*/
+/*              (c) Copyright Peter Kuschnerus, 1999-2006 (UPT & CFC)*/
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all general instructions of the            */
@@ -42,6 +42,7 @@
 #include "hercules.h"
 #include "opcode.h"
 #include "inline.h"
+#include "clock.h"
 
 
 /*-------------------------------------------------------------------*/
@@ -90,11 +91,13 @@ BYTE   *dest;                           /* Pointer to target byte    */
 
     SI(inst, regs, i2, b1, effective_addr1);
 
+    ITIMER_SYNC(effective_addr1,1,regs);
     /* Get byte mainstor address */
     dest = MADDR (effective_addr1, b1, regs, ACCTYPE_WRITE, regs->psw.pkey );
 
     /* OR byte with immediate operand, setting condition code */
     regs->psw.cc = ((*dest |= i2) != 0);
+    ITIMER_UPDATE(effective_addr1,1,regs);
 }
 
 
@@ -114,6 +117,9 @@ int     cc = 0;                         /* Condition code            */
 
     SS_L(inst, regs, len, b1, addr1, b2, addr2);
 
+    ITIMER_SYNC(addr1,len,regs);
+    ITIMER_SYNC(addr2,len,regs);
+
     /* Quick out for 1 byte (no boundary crossed) */
     if (unlikely(len == 0))
     {
@@ -121,6 +127,7 @@ int     cc = 0;                         /* Condition code            */
         dest1 = MADDR (addr1, b1, regs, ACCTYPE_WRITE, regs->psw.pkey);
         *dest1 |= *source1;
         regs->psw.cc = (*dest1 != 0);
+        ITIMER_UPDATE(addr1,len,regs);
         return;
     }
 
@@ -224,6 +231,8 @@ int     cc = 0;                         /* Condition code            */
     }
 
     regs->psw.cc = cc;
+
+    ITIMER_UPDATE(addr1,len,regs);
 
 }
 
@@ -419,7 +428,7 @@ VADR    effective_addr2,
                         effective_addr2, b2, effective_addr4, b4, regs);
                 break;
             case PLO_CSGR:
-                regs->psw.cc = ARCH_DEP(plo_clgr) (r1, r3,
+                regs->psw.cc = ARCH_DEP(plo_csgr) (r1, r3,
                         effective_addr2, b2, effective_addr4, b4, regs);
                 break;
             case PLO_CSX:
@@ -845,17 +854,23 @@ DEF_INST(store)
 int     r1;                             /* Values of R fields        */
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
+#if 0
 U32    *p;                              /* Mainstor pointer          */
+#endif
 
     RX(inst, regs, r1, b2, effective_addr2);
 
     /* Store register contents at operand address */
+    /* FOLLOWING BLOCK COMMENTED OUT ISW 20060119 */
+#if 0
     if ((effective_addr2 & 3) == 0)
     {
         p = (U32*)MADDR(effective_addr2, b2, regs, ACCTYPE_WRITE, regs->psw.pkey);
         STORE_FW (p, regs->GR_L(r1));
+        ITIMER_UPDATE(effective_addr2, 4-1, regs);
     }
     else
+#endif
         ARCH_DEP(vstore4) ( regs->GR_L(r1), effective_addr2, b2, regs );
 
 } /* end DEF_INST(store) */
@@ -920,7 +935,6 @@ VADR    effective_addr2;                /* Effective address         */
 }
 
 
-#if 1 /* Old STCM */
 /*-------------------------------------------------------------------*/
 /* BE   STCM  - Store Characters under Mask                     [RS] */
 /*-------------------------------------------------------------------*/
@@ -969,93 +983,7 @@ BYTE    rbyte[4];                       /* Byte work area            */
 
     } /* switch (r3) */
 }
-#else /* New STCM */
 
-/*-------------------------------------------------------------------*/
-/* BE   STCM  - Store Characters under Mask                     [RS] */
-/*-------------------------------------------------------------------*/
-DEF_INST(store_characters_under_mask)
-{
-  BYTE bytes[4];
-  int b2;
-  VADR effective_addr2;
-  static void *jmptable[] = { &&m0, &&m1, &&m2, &&m3, &&m4, &&m5, &&m6, &&m7, &&m8, &&m9, &&ma, &&mb, &&mc, &&md, &&me, &&mf };
-  int r1;
-  int r3;
-
-  RS(inst, regs, r1, r3, b2, effective_addr2);
-
-  goto *jmptable[r3]; 
-
-  m0: /* 0000 */
-  ARCH_DEP(validate_operand)(effective_addr2, b2, 0, ACCTYPE_WRITE, regs);  /* stated in POP! */
-  return;
-
-  m1: /* 0001 */
-  ARCH_DEP(vstoreb)((regs->GR_L(r1) & 0x000000ff), effective_addr2, b2, regs);
-  return;
-
-  m2: /* 0010 */
-  ARCH_DEP(vstoreb)(((regs->GR_L(r1) & 0x0000ff00) >> 8), effective_addr2, b2, regs);
-  return;
-
-  m3: /* 0011 */
-  ARCH_DEP(vstore2)((regs->GR_L(r1) & 0x0000ffff), effective_addr2, b2, regs);
-  return;
-
-  m4: /* 0100 */
-  ARCH_DEP(vstoreb)(((regs->GR_L(r1) & 0x00ff0000) >> 16), effective_addr2, b2, regs);
-  return;
-
-  m5: /* 0101 */
-  ARCH_DEP(vstore2)((((regs->GR_L(r1) & 0x00ff0000) >> 8) | (regs->GR_L(r1) & 0x000000ff)), effective_addr2, b2, regs);
-  return;
-
-  m6: /* 0110 */
-  ARCH_DEP(vstore2)((regs->GR_L(r1) & 0x00ffff00) >> 8, effective_addr2, b2, regs);
-  return;
-
-  m7: /* 0111 */
-  store_fw(bytes, ((regs->GR_L(r1) & 0x00ffffff) << 8));
-  ARCH_DEP(vstorec)(bytes, 2, effective_addr2, b2, regs);
-  return;
-
-  m8: /* 1000 */
-  ARCH_DEP(vstoreb)(((regs->GR_L(r1) & 0xff000000) >> 24), effective_addr2, b2, regs);
-  return;
-
-  m9: /* 1001 */
-  ARCH_DEP(vstore2)((((regs->GR_L(r1) & 0xff000000) >> 16) | (regs->GR_L(r1) & 0x000000ff)), effective_addr2, b2, regs);
-  return;
-
-  ma: /* 1010 */
-  ARCH_DEP(vstore2)((((regs->GR_L(r1) & 0xff000000) >> 16) | ((regs->GR_L(r1) & 0x0000ff00) >> 8)), effective_addr2, b2, regs);
-  return;
-
-  mb: /* 1011 */
-  store_fw(bytes, ((regs->GR_L(r1) & 0xff000000) | ((regs->GR_L(r1) & 0x0000ffff) << 8)));
-  ARCH_DEP(vstorec)(bytes, 2, effective_addr2, b2, regs);
-  return;
-
-  mc: /* 1100 */
-  ARCH_DEP(vstore2)(((regs->GR_L(r1) & 0xffff0000) >> 16), effective_addr2, b2, regs);
-  return;
-
-  md: /* 1101 */
-  store_fw(bytes, ((regs->GR_L(r1) & 0xffff0000) | ((regs->GR_L(r1) & 0x000000ff) << 8)));
-  ARCH_DEP(vstorec)(bytes, 2, effective_addr2, b2, regs);
-  return;
-
-  me: /* 1110 */
-  store_fw(bytes, (regs->GR_L(r1) & 0xffffff00));
-  ARCH_DEP(vstorec)(bytes, 2, effective_addr2, b2, regs);
-  return;
-
-  mf: /* 1111 */
-  ARCH_DEP(vstore4)(regs->GR_L(r1), effective_addr2, b2, regs);
-  return;
-}
-#endif /* New STCM */
 
 /*-------------------------------------------------------------------*/
 /* B205 STCK  - Store Clock                                      [S] */
@@ -1080,23 +1008,14 @@ U64     dreg;                           /* Double word work area     */
         /* Perform serialization before fetching clock */
         PERFORM_SERIALIZATION (regs);
 
-    /* Obtain the TOD clock update lock */
-    obtain_lock (&sysblk.todlock);
-
-    /* Update the TOD clock value */
-    update_tod_clock();
-
     /* Retrieve the TOD clock value and shift out the epoch */
-    dreg = TOD_CLOCK(regs) << 8;
+    dreg = tod_clock(regs) << 8;
 
 #if defined(FEATURE_STORE_CLOCK_FAST)
     if(inst[1] == 0x05) // STCK only
 #endif /*defined(FEATURE_STORE_CLOCK_FAST)*/
         /* Insert the cpu address to ensure a unique value */
         dreg |= regs->cpuad;
-
-    /* Release the TOD clock update lock */
-    release_lock (&sysblk.todlock);
 
 // /*debug*/logmsg("Store TOD clock=%16.16" I64_FMT "X\n", dreg);
 
@@ -1135,17 +1054,8 @@ U64     dreg;                           /* Double word work area     */
     /* Perform serialization before fetching clock */
     PERFORM_SERIALIZATION (regs);
 
-    /* Obtain the TOD clock update lock */
-    obtain_lock (&sysblk.todlock);
-
-    /* Update the TOD clock value */
-    update_tod_clock();
-
     /* Retrieve the TOD epoch, clock bits 0-51, and 4 zeroes */
-    dreg = TOD_CLOCK(regs);
-
-    /* Release the TOD clock update lock */
-    release_lock (&sysblk.todlock);
+    dreg = tod_clock(regs);
 
     /* Check that all 16 bytes of the operand are accessible */
     ARCH_DEP(validate_operand) (effective_addr2, b2, 15, ACCTYPE_WRITE, regs);
@@ -1165,7 +1075,7 @@ U64     dreg;                           /* Double word work area     */
     effective_addr2 &= ADDRESS_MAXWRAP(regs);
 
     /* Store nonzero value in pos 72 to 111 */
-    dreg = (dreg << 21) | 0x00100000 | (regs->cpuad << 16) | regs->todpr;
+    dreg = 0x0000000100000000ULL | (regs->cpuad << 16) | regs->todpr;
 
     ARCH_DEP(vstore8) ( dreg, effective_addr2, b2, regs );
 
@@ -1241,6 +1151,8 @@ U32     rwork[16];                      /* Intermediate work area    */
 
     if (unlikely(w))
         ARCH_DEP(vstorec) (rwork, (n * 4) - 1, effective_addr2, b2, regs);
+
+    ITIMER_UPDATE(effective_addr2,(n*4)-1,regs);
 
 } /* end DEF_INST(store_multiple) */
 
@@ -1458,6 +1370,7 @@ BYTE    old;                            /* Old value                 */
 
     S(inst, regs, b2, effective_addr2);
 
+    ITIMER_SYNC(effective_addr2,0,regs);
     /* Perform serialization before starting operation */
     PERFORM_SERIALIZATION (regs);
 
@@ -1494,6 +1407,10 @@ BYTE    old;                            /* Old value                 */
 #endif /*defined(_FEATURE_SIE)*/
             if (sysblk.cpus > 1)
                 sched_yield();
+    }
+    else
+    {
+        ITIMER_UPDATE(effective_addr2,0,regs);
     }
 }
 
@@ -1857,8 +1774,8 @@ BYTE    lbyte;                          /* Left result byte of pair  */
 
 /*-------------------------------------------------------------------*/
 /* 0102 UPT   - Update Tree                                      [E] */
-/*              (c) Copyright Peter Kuschnerus, 1999-2005            */
-/*              (c) Copyright "Fish" (David B. Trout), 2005          */
+/*              (c) Copyright Peter Kuschnerus, 1999-2006            */
+/*              (c) Copyright "Fish" (David B. Trout), 2005-2006     */
 /*-------------------------------------------------------------------*/
 
 DEF_INST(update_tree)
@@ -2024,6 +1941,10 @@ DEF_INST(convert_utf8_to_utf32)
 #endif /*defined(FEATURE_ETF3_ENHANCEMENT)*/
   int xlated;                      /* characters translated          */
 
+// NOTE: it's faster to decode with RRE format
+// and then to handle the 'wfc' flag separately...
+
+//RRF_M(inst, regs, r1, r2, wfc);
   RRE(inst, regs, r1, r2);
   ODD2_CHECK(r1, r2, regs);
 
@@ -2264,6 +2185,10 @@ DEF_INST(convert_utf16_to_utf32)
 #endif /*defined(FEATURE_ETF3_ENHANCEMENT)*/
   int xlated;                      /* characters translated          */
 
+// NOTE: it's faster to decode with RRE format
+// and then to handle the 'wfc' flag separately...
+
+//RRF_M(inst, regs, r1, r2, wfc);
   RRE(inst, regs, r1, r2);
   ODD2_CHECK(r1, r2, regs);
 
@@ -2591,7 +2516,7 @@ DEF_INST(convert_utf32_to_utf16)
 }
 
 /*-------------------------------------------------------------------*/
-/* B9B1 STSTU - Search String Unicode                          [RRE] */
+/* B9BE SRSTU - Search String Unicode                          [RRE] */
 /*-------------------------------------------------------------------*/
 DEF_INST(search_string_unicode)
 {

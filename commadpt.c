@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------*/
 /* Hercules Communication Line Driver                                */
-/* (c) 1999-2005 Roger Bowler & Others                               */
+/* (c) 1999-2006 Roger Bowler & Others                               */
 /* Use of this program is governed by the QPL License                */
 /* Original Author : Ivan Warren                                     */
 /* Prime Maintainer : Ivan Warren                                    */
@@ -1300,6 +1300,7 @@ static void msg016w017i(DEVBLK *dev,char *dialt,char *kw,char *kv)
 /*-------------------------------------------------------------------*/
 static int commadpt_init_handler (DEVBLK *dev, int argc, char *argv[])
 {
+    char thread_name[32];
     int i;
     int rc;
     int pc; /* Parse code */
@@ -1611,8 +1612,14 @@ static int commadpt_init_handler (DEVBLK *dev, int argc, char *argv[])
         }
 
         /* Start the async worker thread */
+
+    /* Set thread-name for debugging purposes */
+        snprintf(thread_name,sizeof(thread_name),
+                 "commadpt %4.4X thread",dev->devnum);
+        thread_name[sizeof(thread_name)-1]=0;
+
         dev->commadpt->curpending=COMMADPT_PEND_TINIT;
-        if(create_thread(&dev->commadpt->cthread,&sysblk.detattr,commadpt_thread,dev->commadpt))
+        if(create_thread(&dev->commadpt->cthread,&sysblk.detattr,commadpt_thread,dev->commadpt,thread_name))
         {
             logmsg(D_("HHCCA022E create_thread: %s\n"),strerror(errno));
             release_lock(&dev->commadpt->lock);

@@ -1,9 +1,9 @@
-/* OPCODE.C     (c) Copyright Jan Jaeger, 2000-2005                  */
+/* OPCODE.C     (c) Copyright Jan Jaeger, 2000-2006                  */
 /*              Instruction decoding functions                       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
 
 #include "hstdinc.h"
 
@@ -1508,7 +1508,7 @@ DLL_EXPORT zz_func opcode_table[256][GEN_MAXARCH] = {
  /*22*/   GENx370x390x900 (load_and_test_float_long_reg,RR,"LTDR"),
  /*23*/   GENx370x390x900 (load_complement_float_long_reg,RR,"LCDR"),
  /*24*/   GENx370x390x900 (halve_float_long_reg,RR,"HDR"),
- /*25*/   GENx370x390x900 (round_float_long_reg,RR,"LRDR"),
+ /*25*/   GENx370x390x900 (round_float_long_reg,RR,"LDXR"),
  /*26*/   GENx370x390x900 (multiply_float_ext_reg,RR,"MXR"),
  /*27*/   GENx370x390x900 (multiply_float_long_to_ext_reg,RR,"MXDR"),
  /*28*/   GENx370x390x900 (load_float_long_reg,RR,"LDR"),
@@ -1524,14 +1524,14 @@ DLL_EXPORT zz_func opcode_table[256][GEN_MAXARCH] = {
  /*32*/   GENx370x390x900 (load_and_test_float_short_reg,RR,"LTER"),
  /*33*/   GENx370x390x900 (load_complement_float_short_reg,RR,"LCER"),
  /*34*/   GENx370x390x900 (halve_float_short_reg,RR,"HER"),
- /*35*/   GENx370x390x900 (round_float_short_reg,RR,"LRER"),
+ /*35*/   GENx370x390x900 (round_float_short_reg,RR,"LEDR"),
  /*36*/   GENx370x390x900 (add_float_ext_reg,RR,"AXR"),
  /*37*/   GENx370x390x900 (subtract_float_ext_reg,RR,"SXR"),
  /*38*/   GENx370x390x900 (load_float_short_reg,RR,"LER"),
  /*39*/   GENx370x390x900 (compare_float_short_reg,RR,"CER"),
  /*3A*/   GENx370x390x900 (add_float_short_reg,RR,"AER"),
  /*3B*/   GENx370x390x900 (subtract_float_short_reg,RR,"SER"),
- /*3C*/   GENx370x390x900 (multiply_float_short_to_long_reg,RR,"MER"),
+ /*3C*/   GENx370x390x900 (multiply_float_short_to_long_reg,RR,"MDER"),
  /*3D*/   GENx370x390x900 (divide_float_short_reg,RR,"DER"),
  /*3E*/   GENx370x390x900 (add_unnormal_float_short_reg,RR,"AUR"),
  /*3F*/   GENx370x390x900 (subtract_unnormal_float_short_reg,RR,"SUR"),
@@ -1595,7 +1595,7 @@ DLL_EXPORT zz_func opcode_table[256][GEN_MAXARCH] = {
  /*79*/   GENx370x390x900 (compare_float_short,RX,"CE"),
  /*7A*/   GENx370x390x900 (add_float_short,RX,"AE"),
  /*7B*/   GENx370x390x900 (subtract_float_short,RX,"SE"),
- /*7C*/   GENx370x390x900 (multiply_float_short_to_long,RX,"ME"),
+ /*7C*/   GENx370x390x900 (multiply_float_short_to_long,RX,"MDE"),
  /*7D*/   GENx370x390x900 (divide_float_short,RX,"DE"),
  /*7E*/   GENx370x390x900 (add_unnormal_float_short,RX,"AU"),
  /*7F*/   GENx370x390x900 (subtract_unnormal_float_short,RX,"SU"),
@@ -1985,7 +1985,7 @@ DLL_EXPORT zz_func opcode_01xx[256][GEN_MAXARCH] = {
  /*01FC*/ GENx___x___x___ ,
  /*01FD*/ GENx___x___x___ ,
  /*01FE*/ GENx___x___x___ ,
- /*01FF*/ GENx___x390x900 (trap2,E,"TRAP") };
+ /*01FF*/ GENx___x390x900 (trap2,E,"TRAP2") };
 
 
 // #if defined(FEATURE_ESAME)
@@ -2547,7 +2547,7 @@ DLL_EXPORT zz_func opcode_b2xx[256][GEN_MAXARCH] = {
  /*B2FC*/ GENx___x___x___ ,
  /*B2FD*/ GENx___x___x___ ,
  /*B2FE*/ GENx___x___x___ ,
- /*B2FF*/ GENx___x390x900 (trap4,S,"TRAP") };
+ /*B2FF*/ GENx___x390x900 (trap4,S,"TRAP4") };
 
 
 // #if defined(FEATURE_BASIC_FP_EXTENSIONS)
@@ -2738,7 +2738,7 @@ DLL_EXPORT zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B3B6*/ GENx___x390x900 (convert_fixed_to_float_ext_reg,RRE,"CXFR"),
  /*B3B7*/ GENx___x___x___ ,
  /*B3B8*/ GENx___x390x900 (convert_float_short_to_fixed_reg,RRF_M,"CFER"),
- /*B3B3*/ GENx___x390x900 (convert_float_long_to_fixed_reg,RRF_M,"CFDR"),
+ /*B3B9*/ GENx___x390x900 (convert_float_long_to_fixed_reg,RRF_M,"CFDR"),
  /*B3BA*/ GENx___x390x900 (convert_float_ext_to_fixed_reg,RRF_M,"CFXR"),
  /*B3BB*/ GENx___x___x___ ,
  /*B3BC*/ GENx___x___x___ ,
@@ -2749,13 +2749,22 @@ DLL_EXPORT zz_func opcode_b3xx[256][GEN_MAXARCH] = {
  /*B3C1*/ GENx___x___x___ ,
  /*B3C2*/ GENx___x___x___ ,
  /*B3C3*/ GENx___x___x___ ,
- /*B3C4*/ GENx___x___x900 (dummy_instruction,RRE,"CEGR"),
- /*B3C5*/ GENx___x___x900 (dummy_instruction,RRE,"CDGR"),
- /*B3C6*/ GENx___x___x900 (dummy_instruction,RRE,"CXGR"),
+ /*B3C4*/ GENx___x___x900 (convert_64fixed_to_float_short_reg,RRE,"CEGR"),
+ /*B3C5*/ GENx___x___x900 (convert_64fixed_to_float_long_reg,RRE,"CDGR"),
+ /*B3C6*/ GENx___x___x900 (convert_64fixed_to_float_ext_reg,RRE,"CXGR"),
  /*B3C7*/ GENx___x___x___ ,
- /*B3C8*/ GENx___x___x900 (dummy_instruction,RRF_R,"CGER"),
- /*B3C9*/ GENx___x___x900 (dummy_instruction,RRF_R,"CGDR"),
- /*B3CA*/ GENx___x___x900 (dummy_instruction,RRF_R,"CGXR"),
+
+ /* The following instructuib haven't been coded yet */
+ /*B3C8   GENx___x___x900 (dummy_instruction,RRF_M,"CGER"),*/
+          GENx___x___x___ ,
+
+ /*B3C9   GENx___x___x900 (dummy_instruction,RRF_M,"CGDR"),*/
+          GENx___x___x___ ,
+
+ /*B3CA   GENx___x___x900 (dummy_instruction,RRF_M,"CGXR"),*/
+          GENx___x___x___ ,
+
+
  /*B3CB*/ GENx___x___x___ ,
  /*B3CC*/ GENx___x___x___ ,
  /*B3CD*/ GENx___x___x___ ,
@@ -3005,7 +3014,7 @@ DLL_EXPORT zz_func opcode_b9xx[256][GEN_MAXARCH] = {
  /*B9BB*/ GENx___x___x___ ,
  /*B9BC*/ GENx___x___x___ ,
  /*B9BD*/ GENx___x___x___ ,
- /*B9BE*/ GENx___x___x900 (search_string_unicode,SS_L,"SRSTU"),
+ /*B9BE*/ GENx___x___x900 (search_string_unicode,RRE,"SRSTU"),
  /*B9BF*/ GENx___x___x___ ,
  /*B9C0*/ GENx___x___x___ ,
  /*B9C1*/ GENx___x___x___ ,

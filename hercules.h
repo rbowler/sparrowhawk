@@ -1,8 +1,8 @@
-/* HERCULES.H   (c) Copyright Roger Bowler, 1999-2005                */
+/* HERCULES.H   (c) Copyright Roger Bowler, 1999-2006                */
 /*              Hercules Header Files                                */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
 
 #ifdef HAVE_CONFIG_H
   #include <config.h> // Hercules build configuration options/settings
@@ -83,7 +83,7 @@
 #include "hthreads.h"     // (Hercules-wide threading macros)
 #include "hmacros.h"      // (Hercules-wide #define macros)
 
-#if !defined(HAVE_BYTESWAP_H)
+#if !defined(HAVE_BYTESWAP_H) || defined(NO_ASM_BYTESWAP)
  #include "hbyteswp.h"    // (Hercules equivalent of <byteswap.h>)
 #endif
 

@@ -1,4 +1,4 @@
-/* TAPEDEV.C    (c) Copyright Roger Bowler, 1999-2005                */
+/* TAPEDEV.C    (c) Copyright Roger Bowler, 1999-2006                */
 /* JCS - minor changes by John Summerfield                           */
 /*              ESA/390 Tape Device Handler                          */
 /* Original Author : Roger Bowler                                    */
@@ -436,7 +436,7 @@ static int passedeot_awstape (DEVBLK *dev)
 static int open_awstape (DEVBLK *dev, BYTE *unitstat,BYTE code)
 {
 int             rc;                     /* Return code               */
-BYTE            pathname[MAX_PATH];     /* file path in host format  */
+char            pathname[MAX_PATH];     /* file path in host format  */
 
     /* Check for no tape in drive */
     if (!strcmp (dev->filename, TAPE_UNLOADED))
@@ -1468,7 +1468,7 @@ char           *tdfreckwd;              /* -> Keyword in TDF record  */
 char           *tdfblklen;              /* -> Length in TDF record   */
 OMATAPE_DESC   *tdftab;                 /* -> Tape descriptor array  */
 BYTE            c;                      /* Work area for sscanf      */
-BYTE            pathname[MAX_PATH];     /* file path in host format  */
+char            pathname[MAX_PATH];     /* file path in host format  */
 
     /* Isolate the base path name of the TDF file */
     for (pathlen = strlen(dev->filename); pathlen > 0; )
@@ -1729,7 +1729,7 @@ static int open_omatape (DEVBLK *dev, BYTE *unitstat,BYTE code)
 {
 int             rc;                     /* Return code               */
 OMATAPE_DESC   *omadesc;                /* -> OMA descriptor entry   */
-BYTE            pathname[MAX_PATH];     /* file path in host format  */
+char            pathname[MAX_PATH];     /* file path in host format  */
 
     /* Read the OMA descriptor file if necessary */
     if (!dev->omadesc)
@@ -3090,7 +3090,8 @@ static void ReqAutoMount( DEVBLK *dev )
                 &dev->stape_mountmon_tid,
                 &sysblk.detattr,
                 scsi_tapemountmon_thread,
-                dev
+                dev,
+                "scsi_tapemountmon_thread"
             )
             == 0
         );
@@ -4265,7 +4266,7 @@ static void autoload_init(DEVBLK *dev,int ac,char **av)
     char    *verb;
     int        i;
     char    *strtokw;
-    BYTE     pathname[MAX_PATH];
+    char     pathname[MAX_PATH];
 
     autoload_close(dev);
     if(ac<1)
@@ -5094,7 +5095,13 @@ BYTE            rustat;                 /* Addl CSW stat on Rewind Unload */
         if ( dev->als )
         {
             TID dummy_tid;
-            create_thread( &dummy_tid, &sysblk.detattr, autoload_wait_for_tapemount_thread, dev );
+            char thread_name[64];
+            snprintf(thread_name,sizeof(thread_name),
+                "autoload wait for %4.4X tapemount thread",
+                dev->devnum);
+            thread_name[sizeof(thread_name)-1]=0;
+            create_thread( &dummy_tid, &sysblk.detattr, autoload_wait_for_tapemount_thread,
+                           dev, thread_name );
         }
 
         ReqAutoMount(dev);

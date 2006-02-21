@@ -2,9 +2,6 @@
 # MAKEFILE-DLLMOD.MSVC (c) Copyright Roger Bowler, 2005
 # Build Hercules for Win32 using MSVC and nmake (DLL version with loadable modules)
 #
-# This file and the executable program(s) generated from it are
-# subject to the terms of the Hercules Public Licence Version 2
-#
 # DD/MM/YY Description.......................................................
 # 17/02/05 Created by - Roger Bowler
 # 01/03/05 Place debug/retail builds into separate directories - Fish
@@ -60,7 +57,7 @@
 
 #   >>>  Jay!  <<<  Be sure to change the below V1/V2/V3/V4 values to match!
 
-VERSION = \"3.03.1\"
+VERSION = \"3.04\"
 
 # The below VERSION digits values SHOULD match the ABOVE VERSION number.
 #
@@ -76,11 +73,20 @@ VERSION = \"3.03.1\"
 # I plan to try and "automate" the incrementing of the "build count" value
 # (actually it's ALREADY automated on my own system), but it can remain 0
 # for now since at the moment we only support the major/inter/minor scheme.
+#
+# Note: The Hercules intermediate version is the second component of the
+# version number. Version 2.17 was the 17th intermediate release of version
+# 2. Assigning one digit to each of V1-V4 intermixes the build number in
+# V4 with the minor release, and would cause problems with two or more
+# minor releases of the same intermediate release. This is similar to the
+# RPM version numbering scheme; the build number corresponds to the RPM build
+# number (what comes after the - in the version number; 3.03-2 would
+# correspond to V1=3, V2=03, V3=0, V4=2). -- JRM, 12 Feb 06
 
 V1 = 3
-V2 = 0
-V3 = 3
-V4 = 1
+V2 = 04
+V3 = 0
+V4 = 0
 
 !ENDIF
 
@@ -576,10 +582,10 @@ $(O)hsys.lib:    $(X)hsys.dll
 # Individual DLLs are dependent their own code as well as the
 # export libraries from other DLLs that they're dependent on..
 
-$(X)hsys.dll:    $(hsys_OBJ)                                   $(O)hercver.res
+$(X)hsys.dll:    $(hsys_OBJ)    			       $(O)hercver.res
     $(linkdll)
 
-$(X)hutil.dll:   $(hutil_OBJ)   $(O)hsys.lib                           $(O)hercver.res
+$(X)hutil.dll:   $(hutil_OBJ)   $(O)hsys.lib    		       $(O)hercver.res
     $(linkdll)
 
 $(X)htape.dll:   $(htape_OBJ)   $(O)hsys.lib           $(O)hutil.lib           $(O)hercver.res
@@ -647,9 +653,9 @@ $(X)herclin.exe:  $(O)herclin.obj   $(O)hdlmain.obj $(O)hengine.lib $(O)hdasd.li
 # -------------------------------------------------------------
 # System utilities
 
-$(X)conspawn.exe: $(O)$(@B).obj                                      $(O)hercver.res
+$(X)conspawn.exe: $(O)$(@B).obj 				     $(O)hercver.res
 
-$(X)dmap2hrc.exe: $(O)$(@B).obj           $(O)hsys.lib $(O)hutil.lib $(O)hercver.res
+$(X)dmap2hrc.exe: $(O)$(@B).obj 	  $(O)hsys.lib $(O)hutil.lib $(O)hercver.res
 
 # -------------------------------------------------------------
 # Dasd utilities

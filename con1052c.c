@@ -1,4 +1,4 @@
-/* CON1052.C    (c)Copyright Jan Jaeger, 2004-2005                   */
+/* CON1052.C    (c)Copyright Jan Jaeger, 2004-2006                   */
 /*              Emulated 1052 on hercules console                    */
 
 #include "hstdinc.h"
@@ -199,7 +199,7 @@ BYTE    c;                              /* Print character           */
         iobuf[len] = '\0';
 
         /* Send the data to the console */
-        logmsg(iobuf);
+        logmsg((char *)iobuf);
 
         /* Return normal status */
         *unitstat = CSW_CE | CSW_DE;

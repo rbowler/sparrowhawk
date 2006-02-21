@@ -1,8 +1,8 @@
-/* EXTERNAL.C   (c) Copyright Roger Bowler, 1999-2005                */
+/* EXTERNAL.C   (c) Copyright Roger Bowler, 1999-2006                */
 /*              ESA/390 External Interrupt and Timer                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2005      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2005      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements external interrupt, timer, and signalling  */
@@ -171,6 +171,11 @@ int     rc;
 
     /* Store the interrupt code in the PSW */
     regs->psw.intcode = code;
+
+#if defined(FEATURE_INTERVAL_TIMER)
+    /* Ensure the interrupt timer is uptodate */
+    ARCH_DEP(store_int_timer) (regs);
+#endif
 
     /* Zero extcpuad field unless extcall or ems signal */
     if(code != EXT_EXTERNAL_CALL_INTERRUPT
@@ -351,7 +356,7 @@ U16     cpuad;                          /* Originating CPU address   */
     }
 
     /* External interrupt if TOD clock exceeds clock comparator */
-    if ( TOD_CLOCK(regs) > regs->clkc
+    if ( tod_clock(regs) > regs->clkc
         && sysblk.insttrace == 0
         && sysblk.inststep == 0
         && OPEN_IC_CLKC(regs) )
@@ -364,13 +369,13 @@ U16     cpuad;                          /* Originating CPU address   */
     }
 
     /* External interrupt if CPU timer is negative */
-    if ((S64)regs->ptimer < 0
+    if ( CPU_TIMER(regs) < 0
         && OPEN_IC_PTIMER(regs) )
     {
         if (sysblk.insttrace || sysblk.inststep)
         {
             logmsg (_("HHCCP025I External interrupt: CPU timer=%16.16" I64_FMT "X\n"),
-                    (long long)regs->ptimer);
+                    (long long)CPU_TIMER(regs) << 8);
         }
         ARCH_DEP(external_interrupt) (EXT_CPU_TIMER_INTERRUPT, regs);
     }
@@ -383,40 +388,21 @@ U16     cpuad;                          /* Originating CPU address   */
 #endif /*defined(_FEATURE_SIE)*/
         )
     {
-#if defined(FEATURE_ECPSVM)
-        if(ecpsvm_virttmr_ext(regs)==0)
-        {
-            regs->vtimerint=0;
-            /* If no Real Int Timer Int pending */
-            /* Otherwise, we keep the Int Timer */
-            /* status on                        */
-            if(!regs->rtimerint)
-            {
-                OFF_IC_ITIMER(regs);
-            }
-            ARCH_DEP(external_interrupt) (EXT_VINTERVAL_TIMER_INTERRUPT,regs);
-        }
-#endif
         if (sysblk.insttrace || sysblk.inststep)
         {
             logmsg (_("HHCCP026I External interrupt: Interval timer\n"));
         }
-        /* NOTE : Virtual Interval Timer may still be there.. */
-        /*        but we will have to wait for the next timer */
-        /*        pass , because if regs->vtimerint is still  */
-        /*        1, it means the conditions were not right   */
-        /*        to present the interrupt...                 */
         OFF_IC_ITIMER(regs);
-#if defined(FEATURE_ECPSVM)
-        if(regs->rtimerint)
-        {
-            regs->rtimerint=0;
-#endif
-            ARCH_DEP(external_interrupt) (EXT_INTERVAL_TIMER_INTERRUPT, regs);
-#if defined(FEATURE_ECPSVM)
-        }
-#endif
+        ARCH_DEP(external_interrupt) (EXT_INTERVAL_TIMER_INTERRUPT, regs);
     }
+
+#if defined(FEATURE_ECPSVM)
+    if ( OPEN_IC_ECPSVTIMER(regs) )
+    {
+        OFF_IC_ECPSVTIMER(regs);
+        ARCH_DEP(external_interrupt) (EXT_VINTERVAL_TIMER_INTERRUPT,regs);
+    }
+#endif /*FEATURE_ECPSVM*/
 #endif /*FEATURE_INTERVAL_TIMER*/
 
     /* External interrupt if service signal is pending */
@@ -460,7 +446,6 @@ U16     cpuad;                          /* Originating CPU address   */
 /*-------------------------------------------------------------------*/
 void ARCH_DEP(store_status) (REGS *ssreg, RADR aaddr)
 {
-U64     dreg;                           /* Double register work area */
 int     i;                              /* Array subscript           */
 PSA     *sspsa;                         /* -> Store status area      */
 
@@ -473,7 +458,7 @@ PSA     *sspsa;                         /* -> Store status area      */
 #endif /*defined(FEATURE_ESAME)*/
 
 #if defined(FEATURE_ESAME)
-    /* For store status at address, we must ajust the PSA offset */
+    /* For store status at address, we must adjust the PSA offset */
     /* ZZ THIS TEST IS NOT CONCLUSIVE */
     if(aaddr != 0 && aaddr != ssreg->PX)
         aaddr -= 512 + 4096 ;
@@ -485,8 +470,7 @@ PSA     *sspsa;                         /* -> Store status area      */
     sspsa = (void*)(ssreg->mainstor + aaddr);
 
     /* Store CPU timer in bytes 216-223 */
-    dreg = ssreg->ptimer;
-    STORE_DW(sspsa->storeptmr, ssreg->ptimer);
+    STORE_DW(sspsa->storeptmr, cpu_timer(ssreg));
 
     /* Store clock comparator in bytes 224-231 */
 #if defined(FEATURE_ESAME)

@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //         w32chan.c           Fish's new i/o scheduling logic
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2001-2005. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2001-2006. Released under the Q Public License
 // (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
@@ -325,9 +325,9 @@ DEVTHREADPARMS*  CreateDeviceThread(unsigned short wDevNum)
     pThreadParms->dwThreadID = 0;
 
 #ifdef FISH_HANG
-    if (fthread_create(__FILE__,__LINE__,&dwThreadID,NULL,DeviceThread,pThreadParms) != 0)
+    if (fthread_create(__FILE__,__LINE__,&dwThreadID,NULL,DeviceThread,pThreadParms,"DeviceThread") != 0)
 #else
-    if (fthread_create(&dwThreadID,NULL,DeviceThread,pThreadParms) != 0)
+    if (fthread_create(&dwThreadID,NULL,DeviceThread,pThreadParms,"DeviceThread") != 0)
 #endif
     {
         logmsg(_("HHCCP089E fthread_create(DeviceThread) failed; device=%4.4X, strerror=\"%s\"\n"),

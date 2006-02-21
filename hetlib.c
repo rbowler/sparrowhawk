@@ -1,7 +1,7 @@
 /*
 || ----------------------------------------------------------------------------
 ||
-|| HETLIB.C     (c) Copyright Leland Lucius, 2000-2005
+|| HETLIB.C     (c) Copyright Leland Lucius, 2000-2006
 ||              Released under terms of the Q Public License.
 ||
 || Library for managing Hercules Emulated Tapes.
@@ -137,7 +137,7 @@ het_open( HETB **hetb, char *filename, int flags )
     int   rc;
     int   fd;
     int   oflags;
-    BYTE  pathname[MAX_PATH];
+    char  pathname[MAX_PATH];
 
     /*
     || Initialize
