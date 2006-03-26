@@ -5,7 +5,6 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: hercules 2.16\n"
-"Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2006-02-17 21:53-0600\n"
 "PO-Revision-Date: 2002-05-10 16:16+0200\n"
 "Last-Translator: Jan Jaeger <jj@septa.nl>\n"
@@ -13,6 +12,7 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=ISO-8859-1\n"
 "Content-Transfer-Encoding: 8bit\n"
+"Report-Msgid-Bugs-To: \n"
 
 #: cache.c:389
 #, fuzzy, c-format
@@ -344,18 +344,14 @@ msgstr "*** Spur %d HA Validierungsfehler!  %2.2x%2.2x%2.2x%2.2x%2.2x\n"
 msgid ""
 "HHCCD122E %4.4X file[%d] invalid byte 0 trk %d: buf %2.2x%2.2x%2.2x%2.2x%"
 "2.2x\n"
-msgstr ""
-"%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%"
-"2.2x\n"
+msgstr "%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%2.2x\n"
 
 #: cckddasd.c:3290
 #, fuzzy, c-format
 msgid ""
 "HHCCD123E %4.4X file[%d] invalid byte 0 blkgrp %d: buf %2.2x%2.2x%2.2x%2.2x%"
 "2.2x\n"
-msgstr ""
-"%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%"
-"2.2x\n"
+msgstr "%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%2.2x\n"
 
 #: cckddasd.c:3305
 #, c-format
@@ -368,9 +364,7 @@ msgstr ""
 msgid ""
 "HHCCD125E %4.4X file[%d] invalid %s hdr %s %d buf %p:%2.2x%2.2x%2.2x%2.2x%"
 "2.2x\n"
-msgstr ""
-"%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%"
-"2.2x\n"
+msgstr "%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%2.2x\n"
 
 #: cckddasd.c:3467
 #, c-format
@@ -555,17 +549,13 @@ msgstr "HHC423I Fout %2$s bij openen bestand \"%1$s\"\n"
 #: cckddasd.c:4572
 #, fuzzy, c-format
 msgid "x unknown space: %2.2x%2.2x%2.2x%2.2x%2.2x\n"
-msgstr ""
-"%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%"
-"2.2x\n"
+msgstr "%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%2.2x\n"
 
 #: cckddasd.c:4841
 #, fuzzy, c-format
 msgid ""
 "HHCCD193E %4.4X file[%d] uncompress error trk %d: %2.2x%2.2x%2.2x%2.2x%2.2x\n"
-msgstr ""
-"%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%"
-"2.2x\n"
+msgstr "%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%2.2x\n"
 
 #: cckddasd.c:4844
 #, c-format
@@ -986,18 +976,14 @@ msgstr "HHC409I Fout %2$s bij lezen van bestand \"%1$s\"\n"
 #: ckddasd.c:991
 #, fuzzy, c-format
 msgid "HHCDA034I read trk %d trkhdr %2.2x %2.2x%2.2x %2.2x%2.2x\n"
-msgstr ""
-"%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%"
-"2.2x\n"
+msgstr "%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%2.2x\n"
 
 #: ckddasd.c:1000
 #, fuzzy, c-format
 msgid ""
 "HHCDA035E %4.4X invalid track header for cyl %d head %d  %2.2x%2.2x%2.2x%2.2x"
 "%2.2x\n"
-msgstr ""
-"%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%"
-"2.2x\n"
+msgstr "%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%2.2x\n"
 
 #: ckddasd.c:1514
 #, fuzzy, c-format
@@ -7477,9 +7463,7 @@ msgstr ""
 
 #, fuzzy
 #~ msgid "HHCDL017I Updating VTOC pointer %2.2X%2.2X%2.2X%2.2X%2.2X\n"
-#~ msgstr ""
-#~ "%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%"
-#~ "2.2x%2.2x\n"
+#~ msgstr "%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%2.2x\n"
 
 #, fuzzy
 #~ msgid "HHCDL018E Cannot read VOL1 record\n"
@@ -7569,9 +7553,7 @@ msgstr ""
 #~ msgid ""
 #~ "HHCDL044E %s cyl %d head %d invalid track header %2.2X%2.2X%2.2X%2.2X%"
 #~ "2.2X\n"
-#~ msgstr ""
-#~ "%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%"
-#~ "2.2x%2.2x\n"
+#~ msgstr "%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%2.2x\n"
 
 #, fuzzy
 #~ msgid "HHCDL045E %s cyl %d head %d rec %d record not found\n"
@@ -7701,9 +7683,7 @@ msgstr ""
 #~ msgid ""
 #~ "HHCDL100E %s cyl %d head %d invalid track header %2.2X%2.2X%2.2X%2.2X%"
 #~ "2.2X\n"
-#~ msgstr ""
-#~ "%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%"
-#~ "2.2x%2.2x\n"
+#~ msgstr "%4.4X ckddasd: Kopfdaten ungültig für Zyl.  %d Spur %d  %2.2x%2.2x%2.2x%2.2x%2.2x\n"
 
 #, fuzzy
 #~ msgid "HHCDL101E %s cyl %d head %d rec %d note list record not found\n"

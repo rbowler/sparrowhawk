@@ -1,6 +1,7 @@
 
 ####   Don't forget to change the version number in configure.ac!   ####
 
+02 Mar 2006 Fix for compiling under GCC 4.0 on Intel Mac - Jay Maynard
 21 Feb 2006 Fix string overrun when hitting tab at the wrong time - Bjoern
             Zeeb
 18 Feb 2006 Reinstate byteswap.h check - Greg Smith
