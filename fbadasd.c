@@ -1,5 +1,7 @@
-/* FBADASD.C    (c) Copyright Roger Bowler, 1999-2006                */
+/* FBADASD.C    (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 FBA Direct Access Storage Device Handler     */
+
+// $Id: fbadasd.c,v 1.47 2007/06/23 00:04:09 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
@@ -10,6 +12,20 @@
 /* Additional credits:                                               */
 /*      0671 device support by Jay Maynard                           */
 /*-------------------------------------------------------------------*/
+
+// $Log: fbadasd.c,v $
+// Revision 1.47  2007/06/23 00:04:09  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.46  2007/06/06 02:55:39  ivan
+// Allow Byte 0 Bit 3 of FBA Locate CCW to be non-zero
+//
+// Revision 1.45  2007/03/15 20:57:55  gsmith
+// Fix fba when the fba device is > 4G
+//
+// Revision 1.44  2006/12/08 09:43:20  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -35,7 +51,12 @@
 /*-------------------------------------------------------------------*/
 /* Bit definitions for Locate operation byte                         */
 /*-------------------------------------------------------------------*/
-#define FBAOPER_RESV            0xF0    /* Reserved bits - must be 0 */
+#define FBAOPER_RESV            0xE0    /* Reserved bits - must be 0 */
+                                        /* Note : Bit 3 seems to be  */
+                                        /* The "suppress" bit but is */
+                                        /* apparently ignored        */
+                                        /* It is therefore valid but */
+                                        /* not used.                 */
 #define FBAOPER_CODE            0x0F    /* Operation code bits...    */
 #define FBAOPER_WRITE           0x01    /* ...write data             */
 #define FBAOPER_READREP         0x02    /* ...read replicated data   */
@@ -51,7 +72,7 @@
 int fbadasd_init_handler ( DEVBLK *dev, int argc, char *argv[] )
 {
 int     rc;                             /* Return code               */
-struct  STAT statbuf;                   /* File information          */
+struct  stat statbuf;                   /* File information          */
 int     startblk;                       /* Device origin block number*/
 int     numblks;                        /* Device block count        */
 BYTE    c;                              /* Character work area       */
@@ -79,7 +100,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
 
     /* Check for possible remote device */
     hostpath(pathname, dev->filename, sizeof(pathname));
-    if (STAT(pathname, &statbuf) < 0)
+    if (stat(pathname, &statbuf) < 0)
     {
         rc = shared_fba_init ( dev, argc, argv);
         if (rc < 0)
@@ -199,7 +220,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     else
     {
         /* Determine the device size */
-        rc = FSTAT (dev->fd, &statbuf);
+        rc = fstat (dev->fd, &statbuf);
         if (rc < 0)
         {
             logmsg (_("HHCDA064E File %s fstat error: %s\n"),
@@ -246,7 +267,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 dev->fd = -1;
                 return -1;
             }
-            dev->fbaorigin = startblk;
+            dev->fbaorigin = (off_t)startblk;
             dev->fbanumblk -= startblk;
         }
 
@@ -267,8 +288,8 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     }
     dev->fbaend = (dev->fbaorigin + dev->fbanumblk) * dev->fbablksiz;
 
-    logmsg (_("HHCDA067I %s origin=%d blks=%d\n"),
-            dev->filename, dev->fbaorigin, dev->fbanumblk);
+    logmsg (_("HHCDA067I %s origin=%lld blks=%d\n"),
+            dev->filename, (long long)dev->fbaorigin, dev->fbanumblk);
 
     /* Set number of sense bytes */
     dev->numsense = 24;
@@ -312,9 +333,9 @@ void fbadasd_query_device (DEVBLK *dev, char **class,
 {
 
     *class = "DASD";
-    snprintf (buffer, buflen, "%s [%d,%d]",
+    snprintf (buffer, buflen, "%s [%lld,%d]",
             dev->filename,
-            dev->fbaorigin, dev->fbanumblk);
+            (long long)dev->fbaorigin, dev->fbanumblk);
 
 } /* end function fbadasd_query_device */
 
@@ -323,7 +344,7 @@ void fbadasd_query_device (DEVBLK *dev, char **class,
 /*-------------------------------------------------------------------*/
 static int fba_blkgrp_len (DEVBLK *dev, int blkgrp)
 {
-OFF_T   offset;                         /* Offset of block group     */
+off_t   offset;                         /* Offset of block group     */
 
     offset = blkgrp * FBA_BLKGRP_SIZE;
     if (dev->fbaend - offset < FBA_BLKGRP_SIZE)
@@ -478,7 +499,7 @@ int fbadasd_read_blkgrp (DEVBLK *dev, int blkgrp, BYTE *unitstat)
 int             rc;                     /* Return code               */
 int             i, o;                   /* Cache indexes             */
 int             len;                    /* Length to read            */
-OFF_T           offset;                 /* File offsets              */
+off_t           offset;                 /* File offsets              */
 
     /* Return if reading the same block group */
     if (blkgrp >= 0 && blkgrp == dev->bufcur)
@@ -497,8 +518,8 @@ OFF_T           offset;                 /* File offsets              */
         dev->bufupd = 0;
 
         /* Seek to the old block group offset */
-        offset = (OFF_T)((dev->bufcur * FBA_BLKGRP_SIZE) + dev->bufupdlo);
-        offset = LSEEK (dev->fd, offset, SEEK_SET);
+        offset = (off_t)((dev->bufcur * FBA_BLKGRP_SIZE) + dev->bufupdlo);
+        offset = lseek (dev->fd, offset, SEEK_SET);
         if (offset < 0)
         {
             /* Handle seek error condition */
@@ -607,14 +628,14 @@ fba_read_blkgrp_retry:
     cache_unlock (CACHE_DEVBUF);
 
     /* Get offset and length */
-    offset = (OFF_T)(blkgrp * FBA_BLKGRP_SIZE);
+    offset = (off_t)(blkgrp * FBA_BLKGRP_SIZE);
     len = fba_blkgrp_len (dev, blkgrp);
 
     logdevtr (dev, _("HHCDA074I read blkgrp %d offset %" I64_FMT "d len %d\n"),
               blkgrp, (long long)offset, fba_blkgrp_len(dev, blkgrp));
 
     /* Seek to the block group offset */
-    offset = LSEEK (dev->fd, offset, SEEK_SET);
+    offset = lseek (dev->fd, offset, SEEK_SET);
     if (offset < 0)
     {
         /* Handle seek error condition */
@@ -1025,19 +1046,18 @@ int     repcnt;                         /* Replication count         */
         repcnt = iobuf[1];
 
         /* Bytes 2-3 contain the block count */
-        dev->fbalcnum = (iobuf[2] << 8) | iobuf[3];
+        dev->fbalcnum = fetch_hw(iobuf + 2);
 
         /* Bytes 4-7 contain the displacement of the first block
            relative to the start of the dataset */
-        dev->fbalcblk = (iobuf[4] << 24) | (iobuf[5] << 16)
-                        | (iobuf[6] << 8) | iobuf[7];
+        dev->fbalcblk = fetch_fw(iobuf + 4);
 
         /* Verify that the block count is non-zero, and that
            the starting and ending blocks fall within the extent */
-        if (!(U32)dev->fbalcnum
-            || (U32)(dev->fbalcnum - 1) > (U32)dev->fbaxlast
-            || (U32)dev->fbalcblk < (U32)dev->fbaxfirst
-            || (U32)dev->fbalcblk > (U32)(dev->fbaxlast - (dev->fbalcnum - 1)))
+        if (   dev->fbalcnum == 0
+            || dev->fbalcnum >  dev->fbaxlast + 1
+            || dev->fbalcblk <  dev->fbaxfirst
+            || dev->fbalcblk >  dev->fbaxlast + 1 - dev->fbalcnum)
         {
             dev->sense[0] = SENSE_CR;
             *unitstat = CSW_CE | CSW_DE | CSW_UC;
@@ -1057,9 +1077,10 @@ int     repcnt;                         /* Replication count         */
         }
 
         /* Position device to start of block */
-        dev->fbarba = (dev->fbalcblk - dev->fbaxfirst
-                     + dev->fbaorigin
-                     + dev->fbaxblkn) * dev->fbablksiz;
+        dev->fbarba = (dev->fbaorigin
+                     + dev->fbaxblkn
+                     + dev->fbalcblk - dev->fbaxfirst
+                      ) * dev->fbablksiz;
 
         logdevtr (dev, _("HHCDA077I Positioning to %8.8" I64_FMT "X (%" I64_FMT "u)\n"),
                  (long long unsigned int)dev->fbarba, (long long unsigned int)dev->fbarba);
@@ -1120,26 +1141,22 @@ int     repcnt;                         /* Replication count         */
 
         /* Bytes 4-7 contain the block number of the first block
            of the extent relative to the start of the device */
-        dev->fbaxblkn = (iobuf[4] << 24) | (iobuf[5] << 16)
-                        | (iobuf[6] << 8) | iobuf[7];
+        dev->fbaxblkn = fetch_fw(iobuf + 4);
 
         /* Bytes 8-11 contain the block number of the first block
            of the extent relative to the start of the dataset */
-        dev->fbaxfirst = (iobuf[8] << 24) | (iobuf[9] << 16)
-                        | (iobuf[10] << 8) | iobuf[11];
+        dev->fbaxfirst = fetch_fw(iobuf + 8);
 
         /* Bytes 12-15 contain the block number of the last block
            of the extent relative to the start of the dataset */
-        dev->fbaxlast = (iobuf[12] << 24) | (iobuf[13] << 16)
-                        | (iobuf[14] << 8) | iobuf[15];
+        dev->fbaxlast = fetch_fw(iobuf + 12);
 
         /* Validate the extent description by checking that the
            ending block is not less than the starting block and
            that the ending block does not exceed the device size */
         if (dev->fbaxlast < dev->fbaxfirst
-            || dev->fbaxblkn > dev->fbanumblk
-            || dev->fbaxlast - dev->fbaxfirst
-                >= dev->fbanumblk - dev->fbaxblkn)
+         || dev->fbaxblkn > (U32)dev->fbanumblk
+         || dev->fbaxlast - dev->fbaxfirst >= dev->fbanumblk - dev->fbaxblkn)
         {
             logmsg(_("HHCDA081E invalid extent: first block %d, last block %d,\n"),
                     dev->fbaxfirst, dev->fbaxlast);
@@ -1413,7 +1430,7 @@ BYTE byte;
             break;
         case SR_DEV_FBA_ORIGIN:
             SR_READ_VALUE(file, len, &rc, sizeof(rc));
-            if ((int)rc != dev->fbaorigin)
+            if ((off_t)rc != dev->fbaorigin)
             {
                 logmsg(_("HHCDA901E %4.4x FBA origin mismatch: %d, expected %d,\n"),
                        rc, dev->fbaorigin);
@@ -1491,6 +1508,7 @@ DLL_EXPORT DEVHND fbadasd_device_hndinfo = {
         &fbadasd_used,                  /* Device Query used          */
         NULL,                           /* Device Reserve             */
         NULL,                           /* Device Release             */
+        NULL,                           /* Device Attention           */
         NULL,                           /* Immediate CCW Codes        */
         NULL,                           /* Signal Adapter Input       */
         NULL,                           /* Signal Adapter Ouput       */

@@ -1,7 +1,9 @@
-/* MACHCHK.C    (c) Copyright Jan Jaeger, 2000-2006                  */
+/* MACHCHK.C    (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              ESA/390 Machine Check Functions                      */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+
+// $Id: machchk.c,v 1.50 2007/06/23 00:04:14 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* The machine check function supports dynamic I/O configuration.    */
@@ -16,6 +18,17 @@
 /* includes the machine check, checkstop, and malfunction alert      */
 /* external interrupt as defined in the architecture. - 6/8/01 *JJ   */
 /*-------------------------------------------------------------------*/
+
+// $Log: machchk.c,v $
+// Revision 1.50  2007/06/23 00:04:14  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.49  2007/01/16 01:45:33  gsmith
+// Tweaks to instruction stepping/tracing
+//
+// Revision 1.48  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -42,7 +55,7 @@
 /* the channel report word for the first channel path or device      */
 /* which has a CRW pending, and resets the CRW for that device.      */
 /*-------------------------------------------------------------------*/
-U32 channel_report()
+U32 channel_report(REGS *regs)
 {
 DEVBLK *dev;
 U32 i,j;
@@ -52,17 +65,17 @@ U32 i,j;
     {
         if(sysblk.chp_reset[i])
         {
-            obtain_lock(&sysblk.intlock);
+            OBTAIN_INTLOCK(regs);
             for(j = 0; j < 32; j++)
             {
                 if(sysblk.chp_reset[i] & (0x80000000 >> j))
                 {
                     sysblk.chp_reset[i] &= ~(0x80000000 >> j);
-                    release_lock(&sysblk.intlock);
+                    RELEASE_INTLOCK(regs);
                     return CRW_SOL | CRW_CHPID | CRW_AR | CRW_INIT | ((i*32)+j);
                 }
             }
-            release_lock(&sysblk.intlock);
+            RELEASE_INTLOCK(regs);
         }
     }
 
@@ -90,10 +103,10 @@ U32 i,j;
 void machine_check_crwpend()
 {
     /* Signal waiting CPUs that an interrupt may be pending */
-    obtain_lock (&sysblk.intlock);
+    OBTAIN_INTLOCK(NULL);
     ON_IC_CHANRPT;
     WAKEUP_CPUS_MASK (sysblk.waiting_mask);
-    release_lock (&sysblk.intlock);
+    RELEASE_INTLOCK(NULL);
 
 } /* end function machine_check_crwpend */
 
@@ -198,13 +211,14 @@ U64     mcic = MCIC_P  |  /* Instruction processing damage */
 U32     xdmg = 0;
 RADR    fsta = 0;
 
+
+    /* Release intlock if held */
+    if (regs->cpuad == sysblk.intowner)
+        RELEASE_INTLOCK(regs);
+
     /* Release mainlock if held */
-    if (regs->mainlock)
+    if (regs->cpuad == sysblk.mainowner)
         RELEASE_MAINLOCK(regs);
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
-    if(regs->sie_active && regs->guestregs->mainlock)
-        RELEASE_MAINLOCK(regs->guestregs);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Exit SIE when active */
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
@@ -232,7 +246,7 @@ RADR    fsta = 0;
     STORE_DW(psa->mckint, mcic);
 
     /* Trace the machine check interrupt */
-    if (sysblk.insttrace || sysblk.inststep)
+    if (CPU_STEPPING_OR_TRACING(regs, 0))
         logmsg (_("HHCCP019I Machine Check code=%16.16" I64_FMT "u\n"),
                   (long long)mcic);
 

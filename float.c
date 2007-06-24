@@ -1,5 +1,7 @@
-/* FLOAT.C      (c) Copyright Peter Kuschnerus, 2000-2006            */
+/* FLOAT.C      (c) Copyright Peter Kuschnerus, 2000-2007            */
 /*              ESA/390 Hex Floatingpoint Instructions               */
+
+// $Id: float.c,v 1.49 2007/06/23 00:04:09 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements the ESA/390 Hex Floatingpoint Instructions */
@@ -10,7 +12,7 @@
 /* Incorporated all floating point instructions from cpu.c in order  */
 /* to implement revised instruction decoding.                        */
 /*                                               Jan Jaeger 01/07/00 */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 /*-------------------------------------------------------------------*/
 
 /*-------------------------------------------------------------------*/
@@ -26,7 +28,22 @@
 /* FPS Extensions Facility: LXR,LZER,LZDR,LZXR     R.Bowler 06juil03 */
 /* HFP Multiply and Add/Subtract Facility          R.Bowler 10juil03 */
 /* Convert 64fixed to float family CEGR,CDGR,CXGR  BvdHelm  28/01/06 */
+/* Completed the family CGER, CGDR and CGXR        BvdHelm  04/11/06 */
 /*-------------------------------------------------------------------*/
+
+// $Log: float.c,v $
+// Revision 1.49  2007/06/23 00:04:09  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.48  2007/01/13 07:19:55  bernard
+// backout ccmask
+//
+// Revision 1.47  2007/01/12 15:23:26  bernard
+// ccmask phase 1
+//
+// Revision 1.46  2006/12/08 09:43:21  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -3032,7 +3049,7 @@ int     pgm_check;
 /* 25   LDXR  - Load Rounded Floating Point Long Register       [RR] */
 /*              Older mnemonic of this instruction is LRDR           */
 /*-------------------------------------------------------------------*/
-DEF_INST(round_float_long_reg)
+DEF_INST(load_rounded_float_long_reg)
 {
 int     r1, r2;                         /* Values of R fields        */
 LONG_FLOAT fl;
@@ -3535,7 +3552,7 @@ int     pgm_check;
 /* 35   LEDR  - Load Rounded Floating Point Short Register      [RR] */
 /*              Older mnemonic of this instruction is LRER           */
 /*-------------------------------------------------------------------*/
-DEF_INST(round_float_short_reg)
+DEF_INST(load_rounded_float_short_reg)
 {
 int     r1, r2;                         /* Values of R fields        */
 LONG_FLOAT from_fl;
@@ -4649,7 +4666,7 @@ SHORT_FLOAT fl;
 /*-------------------------------------------------------------------*/
 /* B324 LDER  - Load Length. Float. Short to Long Register     [RRE] */
 /*-------------------------------------------------------------------*/
-DEF_INST(loadlength_float_short_to_long_reg)
+DEF_INST(load_lengthened_float_short_to_long_reg)
 {
 int     r1, r2;                         /* Values of R fields        */
 int     i1;
@@ -4669,7 +4686,7 @@ int     i1;
 /*-------------------------------------------------------------------*/
 /* B325 LXDR  - Load Length. Float. Long to Extended Register  [RRE] */
 /*-------------------------------------------------------------------*/
-DEF_INST(loadlength_float_long_to_ext_reg)
+DEF_INST(load_lengthened_float_long_to_ext_reg)
 {
 int     r1, r2;                         /* Values of R fields        */
 int     i1, i2;
@@ -4704,7 +4721,7 @@ int     i1, i2;
 /*-------------------------------------------------------------------*/
 /* B326 LXER  - Load Length. Float. Short to Extended Register [RRE] */
 /*-------------------------------------------------------------------*/
-DEF_INST(loadlength_float_short_to_ext_reg)
+DEF_INST(load_lengthened_float_short_to_ext_reg)
 {
 int     r1, r2;                         /* Values of R fields        */
 int     i1, i2;
@@ -5047,7 +5064,7 @@ int     i1, i2;
 /*-------------------------------------------------------------------*/
 /* B366 LEXR  - Load Rounded Float. Extended to Short Register [RRE] */
 /*-------------------------------------------------------------------*/
-DEF_INST(round_float_ext_to_short_reg)
+DEF_INST(load_rounded_float_ext_to_short_reg)
 {
 int     r1, r2;                         /* Values of R fields        */
 EXTENDED_FLOAT from_fl;
@@ -5513,9 +5530,9 @@ S64     fix;
 
 
 /*-------------------------------------------------------------------*/
-/* B3C4 CEGR - Convert from 64Fixed to Float. Short Register   [RRE] */
+/* B3C4 CEGR - Convert from Fix64 to Float. Short Register     [RRE] */
 /*-------------------------------------------------------------------*/
-DEF_INST(convert_64fixed_to_float_short_reg)
+DEF_INST(convert_fix64_to_float_short_reg)
 {
 int     r1, r2;                         /* Values of R fields        */
 int     i1;
@@ -5551,9 +5568,9 @@ U64     fix;
 
 
 /*-------------------------------------------------------------------*/
-/* B3C5 CDGR - Convert from 64Fixed to Float. Long Register    [RRE] */
+/* B3C5 CDGR - Convert from Fix64 to Float. Long Register      [RRE] */
 /*-------------------------------------------------------------------*/
-DEF_INST(convert_64fixed_to_float_long_reg)
+DEF_INST(convert_fix64_to_float_long_reg)
 {
 int     r1, r2;                         /* Values of R fields        */
 int     i1;
@@ -5590,9 +5607,9 @@ U64     fix;
 
 
 /*-------------------------------------------------------------------*/
-/* B3C6 CXGR - Convert from 64Fixed to Float. Extended Register[RRE] */
+/* B3C6 CXGR - Convert from Fix64 to Float. Extended Register[RRE]   */
 /*-------------------------------------------------------------------*/
-DEF_INST(convert_64fixed_to_float_ext_reg)
+DEF_INST(convert_fix64_to_float_ext_reg)
 {
 int     r1, r2;                         /* Values of R fields        */
 int     i1;
@@ -6035,9 +6052,412 @@ U64     lsfract;
 
 
 /*-------------------------------------------------------------------*/
+/* B3C8 CGER  - Convert from Float. Short to Fix64 Register    [RRF] */
+/*-------------------------------------------------------------------*/
+DEF_INST(convert_float_short_to_fix64_reg)
+{
+int     r1, r2;                         /* Values of R fields        */
+int     m3;
+SHORT_FLOAT fl;
+BYTE    shift;
+U32     lsfract;
+
+    RRF_M(inst, regs, r1, r2, m3);
+    HFPM_CHECK(m3, regs);
+    HFPREG_CHECK(r2, regs);
+
+    /* Get register content */
+    get_sf(&fl, regs->fpr + FPR2I(r2));
+
+    if (fl.short_fract) {
+        /* not zero */
+        normal_sf(&fl);
+
+        if (fl.expo > 72) {
+            /* exeeds range by exponent */
+            regs->GR_G(r1) = fl.sign ? 0x8000000000000000ULL : 0x7FFFFFFFFFFFFFFFULL;
+            regs->psw.cc = 3;
+            return;
+        }
+        if (fl.expo > 70) {
+            /* to be left shifted */
+            fl.short_fract <<= ((fl.expo - 70) * 4);
+            if (fl.sign) {
+                /* negative */
+                if (fl.short_fract > 0x80000000UL) {
+                    /* exeeds range by value */
+                    regs->GR_G(r1) = 0x8000000000000000ULL;
+                    regs->psw.cc = 3;
+                    return;
+                }
+            } else {
+                /* positive */
+                if (fl.short_fract > 0x7FFFFFFFUL) {
+                    /* exeeds range by value */
+                    regs->GR_G(r1) = 0x7FFFFFFFFFFFFFFFULL;
+                    regs->psw.cc = 3;
+                    return;
+                }
+            }
+        } else if ((fl.expo > 64)
+               && (fl.expo < 70)) {
+            /* to be right shifted and to be rounded */
+            shift = ((70 - fl.expo) * 4);
+            lsfract = fl.short_fract << (32 - shift);
+            fl.short_fract >>= shift;
+
+            if (m3 == 1) {
+                /* biased round to nearest */
+                if (lsfract & 0x80000000UL) {
+                    fl.short_fract++;
+                }
+            } else if (m3 == 4) {
+                /* round to nearest */
+                if ((lsfract > 0x80000000UL)
+                || ((fl.short_fract & 0x00000001UL)
+                    && (lsfract == 0x80000000UL))) {
+                    fl.short_fract++;
+                }
+            } else if (m3 == 6) {
+                /* round toward + */
+                if ((fl.sign == POS)
+                && lsfract) {
+                    fl.short_fract++;
+                }
+            } else if (m3 == 7) {
+                /* round toward - */
+                if ((fl.sign == NEG)
+                && lsfract) {
+                    fl.short_fract++;
+                }
+            }
+        } else if (fl.expo == 64) {
+            /* to be rounded */
+            lsfract = fl.short_fract << 8;
+            fl.short_fract = 0;
+
+            if (m3 == 1) {
+                /* biased round to nearest */
+                if (lsfract & 0x80000000UL) {
+                    fl.short_fract++;
+                }
+            } else if (m3 == 4) {
+                /* round to nearest */
+                if (lsfract > 0x80000000UL) {
+                    fl.short_fract++;
+                }
+            } else if (m3 == 6) {
+                /* round toward + */
+                if ((fl.sign == POS)
+                && lsfract) {
+                    fl.short_fract++;
+                }
+            } else if (m3 == 7) {
+                /* round toward - */
+                if ((fl.sign == NEG)
+                && lsfract) {
+                    fl.short_fract++;
+                }
+            }
+        } else if (fl.expo < 64) {
+            fl.short_fract = 0;
+            if (((m3 == 6)
+                && (fl.sign == POS))
+            || ((m3 == 7)
+                && (fl.sign == NEG))) {
+                fl.short_fract++;
+            }
+        }
+        if (fl.sign) {
+            /* negative */
+            regs->GR_G(r1) = -((S64) fl.short_fract);
+            regs->psw.cc = 1;
+        } else {
+            /* positive */
+            regs->GR_G(r1) = fl.short_fract;
+            regs->psw.cc = 2;
+        }
+    } else {
+        /* zero */
+        regs->GR_G(r1) = 0;
+        regs->psw.cc = 0;
+    }
+}
+
+
+/*-------------------------------------------------------------------*/
+/* B3C9 CGDR  - Convert from Float. Long to Fix64 Register     [RRF] */
+/*-------------------------------------------------------------------*/
+DEF_INST(convert_float_long_to_fix64_reg)
+{
+int     r1, r2;                         /* Values of R fields        */
+int     m3;
+LONG_FLOAT fl;
+BYTE    shift;
+U64     lsfract;
+
+    RRF_M(inst, regs, r1, r2, m3);
+    HFPM_CHECK(m3, regs);
+    HFPREG_CHECK(r2, regs);
+
+    /* Get register content */
+    get_lf(&fl, regs->fpr + FPR2I(r2));
+
+    if (fl.long_fract) {
+        /* not zero */
+        normal_lf(&fl);
+
+        if (fl.expo > 72) {
+            /* exeeds range by exponent */
+            regs->GR_G(r1) = fl.sign ? 0x8000000000000000ULL : 0x7FFFFFFFFFFFFFFFULL;
+            regs->psw.cc = 3;
+            return;
+        }
+        if (fl.expo > 64) {
+            /* to be right shifted and to be rounded */
+            shift = ((78 - fl.expo) * 4);
+            lsfract = fl.long_fract << (64 - shift);
+            fl.long_fract >>= shift;
+
+            if (m3 == 1) {
+                /* biased round to nearest */
+                if (lsfract & 0x8000000000000000ULL) {
+                    fl.long_fract++;
+                }
+            } else if (m3 == 4) {
+                /* round to nearest */
+                if ((lsfract > 0x8000000000000000ULL)
+                || ((fl.long_fract & 0x0000000000000001ULL)
+                    && (lsfract == 0x8000000000000000ULL))) {
+                    fl.long_fract++;
+                }
+            } else if (m3 == 6) {
+                /* round toward + */
+                if ((fl.sign == POS)
+                && lsfract) {
+                    fl.long_fract++;
+                }
+            } else if (m3 == 7) {
+                /* round toward - */
+                if ((fl.sign == NEG)
+                && lsfract) {
+                    fl.long_fract++;
+                }
+            }
+            if (fl.expo == 72) {
+                if (fl.sign) {
+                    /* negative */
+                    if (fl.long_fract > 0x80000000UL) {
+                        /* exeeds range by value */
+                        regs->GR_G(r1) = 0x8000000000000000ULL;
+                        regs->psw.cc = 3;
+                        return;
+                    }
+                } else {
+                    /* positive */
+                    if (fl.long_fract > 0x7FFFFFFFUL) {
+                        /* exeeds range by value */
+                        regs->GR_G(r1) = 0x7FFFFFFFFFFFFFFFULL;
+                        regs->psw.cc = 3;
+                        return;
+                    }
+                }
+            }
+        } else if (fl.expo == 64) {
+            /* to be rounded */
+            lsfract = fl.long_fract << 8;
+            fl.long_fract = 0;
+
+            if (m3 == 1) {
+                /* biased round to nearest */
+                if (lsfract & 0x8000000000000000ULL) {
+                    fl.long_fract++;
+                }
+            } else if (m3 == 4) {
+                /* round to nearest */
+                if (lsfract > 0x8000000000000000ULL) {
+                    fl.long_fract++;
+                }
+            } else if (m3 == 6) {
+                /* round toward + */
+                if ((fl.sign == POS)
+                && lsfract) {
+                    fl.long_fract++;
+                }
+            } else if (m3 == 7) {
+                /* round toward - */
+                if ((fl.sign == NEG)
+                && lsfract) {
+                    fl.long_fract++;
+                }
+            }
+        } else {
+            /* fl.expo < 64 */
+            fl.long_fract = 0;
+            if (((m3 == 6)
+                && (fl.sign == POS))
+            || ((m3 == 7)
+                && (fl.sign == NEG))) {
+                fl.long_fract++;
+            }
+        }
+        if (fl.sign) {
+            /* negative */
+            regs->GR_G(r1) = -((S64) fl.long_fract);
+            regs->psw.cc = 1;
+        } else {
+            /* positive */
+            regs->GR_G(r1) = fl.long_fract;
+            regs->psw.cc = 2;
+        }
+    } else {
+        /* zero */
+        regs->GR_G(r1) = 0;
+        regs->psw.cc = 0;
+    }
+}
+
+
+/*-------------------------------------------------------------------*/
+/* B3CA CGXR  - Convert from Float. Extended to Fix64 Register [RRF] */
+/*-------------------------------------------------------------------*/
+DEF_INST(convert_float_ext_to_fix64_reg)
+{
+int     r1, r2;                         /* Values of R fields        */
+int     m3;
+EXTENDED_FLOAT fl;
+BYTE    shift;
+U64     lsfract;
+
+    RRF_M(inst, regs, r1, r2, m3);
+    HFPM_CHECK(m3, regs);
+    HFPODD_CHECK(r2, regs);
+
+    /* Get register content */
+    get_ef(&fl, regs->fpr + FPR2I(r2));
+
+    if (fl.ms_fract
+    || fl.ls_fract) {
+        /* not zero */
+        normal_ef(&fl);
+
+        if (fl.expo > 72) {
+            /* exeeds range by exponent */
+            regs->GR_G(r1) = fl.sign ? 0x8000000000000000ULL : 0x7FFFFFFFFFFFFFFFULL;
+            regs->psw.cc = 3;
+            return;
+        }
+        if (fl.expo > 64) {
+            /* to be right shifted and to be rounded */
+            shift = ((92 - fl.expo - 16) * 4);
+            lsfract = fl.ms_fract << (64 - shift);
+            fl.ms_fract >>= shift;
+
+            if (m3 == 1) {
+                /* biased round to nearest */
+                if (lsfract & 0x8000000000000000ULL) {
+                    fl.ms_fract++;
+                }
+            } else if (m3 == 4) {
+                /* round to nearest */
+                if (((lsfract & 0x8000000000000000ULL)
+                    && ((lsfract & 0x7FFFFFFFFFFFFFFFULL)
+                        || fl.ls_fract))
+                || ( (fl.ms_fract & 0x0000000000000001ULL)
+                    && (lsfract == 0x8000000000000000ULL)
+                    && (fl.ls_fract == 0))) {
+                    fl.ms_fract++;
+                }
+            } else if (m3 == 6) {
+                /* round toward + */
+                if ((fl.sign == POS)
+                && (lsfract
+                    || fl.ls_fract)) {
+                    fl.ms_fract++;
+                }
+            } else if (m3 == 7) {
+                /* round toward - */
+                if ((fl.sign == NEG)
+                && (lsfract
+                    || fl.ls_fract)) {
+                    fl.ms_fract++;
+                }
+            }
+        } else if (fl.expo == 64) {
+            /* to be rounded */
+            lsfract = fl.ms_fract << 16;
+            fl.ms_fract = 0;
+
+            if (m3 == 1) {
+                /* biased round to nearest */
+                if (lsfract & 0x8000000000000000ULL) {
+                    fl.ms_fract++;
+                }
+            } else if (m3 == 4) {
+                /* round to nearest */
+                if ((lsfract & 0x8000000000000000ULL)
+                && ((lsfract & 0x7FFFFFFFFFFFFFFFULL)
+                    || fl.ls_fract)) {
+                    fl.ms_fract++;
+                }
+            } else if (m3 == 6) {
+                /* round toward + */
+                if ((fl.sign == POS)
+                && (lsfract
+                    || fl.ls_fract)) {
+                    fl.ms_fract++;
+                }
+            } else if (m3 == 7) {
+                /* round toward - */
+                if ((fl.sign == NEG)
+                && (lsfract
+                    || fl.ls_fract)) {
+                    fl.ms_fract++;
+                }
+            }
+        } else {
+            /* fl.expo < 64 */
+            fl.ms_fract = 0;
+            if (((m3 == 6)
+                && (fl.sign == POS))
+            || ((m3 == 7)
+                && (fl.sign == NEG))) {
+                fl.ms_fract++;
+            }
+        }
+        if (fl.sign) {
+            /* negative */
+            if (fl.ms_fract > 0x80000000UL) {
+                /* exeeds range by value */
+                regs->GR_G(r1) = 0x8000000000000000ULL;
+                regs->psw.cc = 3;
+                return;
+            }
+            regs->GR_G(r1) = -((S64) fl.ms_fract);
+            regs->psw.cc = 1;
+        } else {
+            /* positive */
+            if (fl.ms_fract > 0x7FFFFFFFUL) {
+                /* exeeds range by value */
+                regs->GR_G(r1) = 0x7FFFFFFFUL;
+                regs->psw.cc = 3;
+                return;
+            }
+            regs->GR_G(r1) = fl.ms_fract;
+            regs->psw.cc = 2;
+        }
+    } else {
+        /* zero */
+        regs->GR_G(r1) = 0;
+        regs->psw.cc = 0;
+    }
+}
+
+
+/*-------------------------------------------------------------------*/
 /* ED24 LDE   - Load Lengthened Floating Point Short to Long   [RXE] */
 /*-------------------------------------------------------------------*/
-DEF_INST(loadlength_float_short_to_long)
+DEF_INST(load_lengthened_float_short_to_long)
 {
 int     r1;                             /* Value of R field          */
 int     i1;
@@ -6059,7 +6479,7 @@ VADR    effective_addr2;                /* Effective address         */
 /*-------------------------------------------------------------------*/
 /* ED25 LXD  - Load Lengthened Floating Point Long to Extended [RXE] */
 /*-------------------------------------------------------------------*/
-DEF_INST(loadlength_float_long_to_ext)
+DEF_INST(load_lengthened_float_long_to_ext)
 {
 int     r1;                             /* Value of R field          */
 int     i1;
@@ -6097,7 +6517,7 @@ U64     wkd;
 /*-------------------------------------------------------------------*/
 /* ED26 LXE   - Load Lengthened Float. Short to Extended       [RXE] */
 /*-------------------------------------------------------------------*/
-DEF_INST(loadlength_float_short_to_ext)
+DEF_INST(load_lengthened_float_short_to_ext)
 {
 int     r1;                             /* Value of R field          */
 int     i1;

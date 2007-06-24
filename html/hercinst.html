@@ -28,10 +28,13 @@ Hercules Version 3: Installation and Operation</TITLE>
     </p>
     <p>
         <a href="#operating">Operating Procedure</a>
+        <ul>
+            <li><a href="#commands">Panel commands</a>
+            <li><a href="#RCFILE">The .RC &nbsp;("run commands")&nbsp; file</a>
+            <li><a href="#HAO">HAO &nbsp;("Hercules Automatic Operator")</a>
+        </ul>
     </p>
-    <p>
-        <a href="#RCFILE">.RC &nbsp;("run commands")&nbsp; file</a>
-    </p>
+
     <p>
         <a href="#support">Technical Support</a>
     </p>
@@ -40,13 +43,6 @@ Hercules Version 3: Installation and Operation</TITLE>
 <p><hr><a name="install"></a>
 <h2>Installation Procedure</h2>
 <a name="instsource"></a>
-<h3>Building from source - Windows with Cygwin</h3>
-<p>
-For building the Cygwin version of Hercules on Windows, Volker Bandke
-has instructions on his "<b>Building Hercules for Windows</b>" web page at
-<a href="http://www.bsp-gmbh.com/hercules/herc_w32_2.html">http://www.bsp-gmbh.com/hercules/herc_w32_2.html</a>.
-</p>
-
 <h3>Building from source - Windows (without Cygwin)</h3>
 <p>
 For building the MSVC version of Hercules on Windows (a version of
@@ -55,16 +51,23 @@ Hercules that does <i>not</i> require Cygwin), Fish has instructions on his
 <a href="http://www.softdevlabs.com/Hercules/hercules-msvc-build.html">http://www.softdevlabs.com/Hercules/hercules-msvc-build.html</a>.
 </p>
 
+<h3>Building from source - Windows with Cygwin</h3>
+<p>
+For building the Cygwin version of Hercules on Windows, Volker Bandke
+has instructions on his "<b>Building Hercules for Windows</b>" web page at
+<a href="http://www.bsp-gmbh.com/hercules/herc_w32_2.html">http://www.bsp-gmbh.com/hercules/herc_w32_2.html</a>.
+</p>
+
 <h3>Building from source - Linux and Mac OS X</h3>
 <ol>
 <li>Download the distribution file
-<a href="http://www.hercules-390.org/hercules-3.04.tar.gz">hercules-3.04.tar.gz</a>
+<a href="http://www.hercules-390.org/hercules-3.05.tar.gz">hercules-3.05.tar.gz</a>
 <br><em>Note:</em> By downloading this file you agree to the terms
     of the <a href="herclic.html">Q Public Licence</a>.
 <p>
 <li>Use these commands to unzip the distribution file:
-<pre>tar xvzf ../hercules-3.04.tar.gz
-cd hercules-3.04</pre>
+<pre>tar xvzf ../hercules-3.05.tar.gz
+cd hercules-3.05</pre>
 
 <li>Verify you have all of the correct versions of all of the
 required packages installed:
@@ -102,7 +105,7 @@ compiler and other software levels.
 <ol>
 <li>Download the RPM file you want:
 <ul>
-<li><a href="http://www.hercules-390.org/hercules-3.04-1.i686.rpm">hercules-3.04-1.i686.rpm</a>: Intel
+<li><a href="http://www.hercules-390.org/hercules-3.05-1.i686.rpm">hercules-3.05-1.i686.rpm</a>: Intel
 </ul>
 <li>Install the RPM:
 <br><code>rpm -Uvh</code> <i>RPMfile</i>
@@ -141,27 +144,22 @@ in subtle ways if the wrong optimization settings are used.</p>
 
 <ol>
 <li>Download the compressed disk image: <a
-href="http://www.hercules-390.org/hercules-3.04-panther.dmg">hercules-3.04-panther.dmg</a> if you're
-running OS X version 10.3, or <a
-href="http://www.hercules-390.org/hercules-3.04-tiger.dmg">hercules-3.04-tiger.dmg</a> if you're running
-version 10.4 or later.
+href="http://www.hercules-390.org/hercules-3.05-tiger.dmg">hercules-3.05-tiger.dmg</a>.
+This package is a universal binary and requires OS X version 10.4 (Tiger) or later.
 <li>Mount the image by double-clicking on it in the Finder.
 Your web browser may have done that for you already.
 <li>Installation and use instructions are in the
 file <code>OS&nbsp;X&nbsp;ReadMe.rtf</code>.
 <li>If you want to use CTC networking on your Hercules system, you will need
-to install the supplied Tunnel driver. Note that, at this writing, the
-Panther version of the driver works fine, but the Tiger version will hang
-at Hercules shutdown, and you must reboot in order to clear the problem.
-Unfortunately, the Panther driver will not work on Tiger at all.
+to install the supplied Tunnel driver.
 </ol>
 
 <h3>Installing on Windows (without Cygwin):</h3>
 <ol>
 <li>Download the <a
-href="http://www.hercules-390.org/hercules-3.04-native.exe">self-extracting
+href="http://www.hercules-390.org/hercules-3.05-native.exe">self-extracting
 Windows archive</a> or the <a
-href="http://www.hercules-390.org/hercules-3.04-native.msi">Windows
+href="http://www.hercules-390.org/hercules-3.05-native.msi">Windows
 Installer package</a>.
 <li>If you downloaded the self-extracting archive, simply execute it to
 install Hercules on your system. If you downloaded the Windows Installer
@@ -182,32 +180,12 @@ http://www.softdevlabs.com/Hercules/hercgui-index.html</a>.
 
 <h3>Installing on Windows with Cygwin:</h3>
 <ol>
-<li>You must first install the Cygwin package.
-Download the 'setup.exe' program from <a href="http://www.cygwin.com">the Cygwin
-site</a>, and run it. (Right-click on the
-<img src="http://www.cygwin.com/cygwin-icon.gif" border=0 alt="Cygwin!"> icon
-labeled "<a href="http://www.cygwin.com/setup.exe">Install or update now!
-(using setup.exe)</a>" and select "Save Target As..." and then run it after
-it's been downloaded) If it's not preselected for you,
-select the libintl-2 package when you're presented with a list of packages
-to install. (NOTE: Hercules version 3.04 was built with version 1.5.15 
-of Cygwin, and may not work with other versions, as the
-Cygwin library tends to have subtle incompatibilities from version
-to version that Hercules seems to stress.)
-
-<li>Download the self-extracting Windows archive: 
-<ul>
-<li><a href="http://www.hercules-390.org/hercules-3.04-cygwin-p4.exe">hercules-3.04-cygwin-p4.exe</a>:
-Pentium 4 version
-<li><a href="http://www.hercules-390.org/hercules-3.04-cygwin-i686.exe">hercules-3.04-cygwin-i686.exe</a>:
-Pentium Pro/Pentium II and above version
-<li><a href="http://www.hercules-390.org/hercules-3.04-cygwin-i586.exe">hercules-3.04-cygwin-i586.exe</a>:
-Pentium version
-</ul>
-<li>Run one of the above self-extracting archives to install the Hercules
-executables on your system. Also please note that Hercules has several file
-paths compiled into the code, and so it is best to install the package
-into the default directories unless you really know what you're doing.
+<li>
+Hercules 3.05 is now supplied as prebuilt binaries only in a native Windows
+version. This version will work perfectly well under Cygwin, as well as
+native Windows, and does not require any specific version of the Cygwin
+libraries. Follow the instructions above to install the native Windows
+version.
 </ol>
 
 <p><hr><a name="config"></a>
@@ -249,32 +227,32 @@ where:
 <blockquote>
 <dl>
         <dt><code><em>filename</em></code><p><dd>
-        
+
             is the name of the configuration file.
             The default, if none is specified, is <b><em>hercules.cnf</em></b>.
             The default may be overridden via the <code>HERCULES_CNF</code>
             environment variable.
         <p>
         <dt><code><em>-d</em></code><p><dd>
-        
+
             specifies that Hercules is to be run in 'daemon' mode,
             wherein it runs invisibly with no attached console.
         <p>
         <dt><code><em>dyndir</em></code><p><dd>
-        
+
             is the directory from which dynamic modules are to be loaded.
             The default depends on the host platform on which Hercules
             is being run. This option overrides the default.
         <p>
         <dt><code><em>dynmod</em></code><p><dd>
-        
+
             is the name of an additional dynamic module to be loaded
             at startup. More than one additional module may be specified,
             although each must be preceded with the <code>-l</code>
             option specifier.
         <p>
         <dt><code><em>logfile</em></code><p><dd>
-        
+
             is an optional log file which will receive a copy of
             all messages displayed on the control panel
         <p>
@@ -291,10 +269,20 @@ instead of a tn3270 client.
 <p>
 Now you can enter an ipl command from the control panel.
 
+<p><br>
+<hr width="50%">
 
+<a name="commands">
 <h4>Panel commands</h4>
 <p>
+The following is what is displayed on the Hercules harware console (HMC)
+in response to the '?' command being entered. Please note that it may not
+be completely accurate or up-to-date. Please enter the '?' command for
+yourself for a more complete, accurate and up-to-date list of supported
+panel commands.
+<p>
 <pre>
+
     Command      Description...
     -------      -----------------------------------------------
     ?            list all commands
@@ -304,6 +292,7 @@ Now you can enter an ipl command from the control panel.
 
     hst          history of commands
     log          direct log output
+    logopt       change log options 
     version      display version information
 
     quit         terminate the emulator
@@ -317,7 +306,7 @@ Now you can enter an ipl command from the control panel.
     startall     start all CPU's
     stopall      stop all CPU's
 
-    cf           configure CPU online or offline
+    cf           configure current CPU online or offline
     cfall        configure all CPU's online or offline
 
     .reply       scp command
@@ -329,7 +318,6 @@ Now you can enter an ipl command from the control panel.
     i            generate I/O attention interrupt for device
     ext          generate external interrupt
     restart      generate restart interrupt
-    store        store CPU status at absolute zero
     archmode     set architecture mode
     loadparm     set IPL parameter
 
@@ -337,13 +325,16 @@ Now you can enter an ipl command from the control panel.
     iplc         IPL Clear from device xxxx
     sysreset     Issue SYSTEM Reset manual operation
     sysclear     Issue SYSTEM Clear Reset manual operation
+    store        store CPU status at absolute zero
 
     psw          display program status word
-    gpr          display general purpose registers
+    gpr          display or alter general purpose registers
     fpr          display floating point registers
+    fpc          display floating point control register
     cr           display control registers
     ar           display access registers
     pr           display prefix register
+    timerint     display or set timers update interval
     clocks       display tod clkc and cpu timer
     ipending     display pending interrupts
     ds           display subchannel
@@ -357,17 +348,32 @@ Now you can enter an ipl command from the control panel.
     detach       remove device
     define       rename device
     devinit      reinitialize device
-    devlist      list all devices
+    devlist      list device or all devices
+
+    qd           query dasd
 
     scsimount    automatic SCSI tape mounts
 
+    cd           change directory
+    pwd          print working directory
     sh           shell command
+
     cache        cache command
     cckd         cckd command
     shrd         shrd command
+    conkpalv     display/alter console TCP keep-alive settings
     quiet        toggle automatic refresh of panel display data
 
+    t            instruction trace
+    t+           instruction trace on
+    t-           instruction trace off
+    t?           instruction trace query
+    s            instruction stepping
+    s+           instruction stepping on
+    s-           instruction stepping off
+    s?           instruction stepping query
     b            set breakpoint
+    b+           set breakpoint
     b-           delete breakpoint
     g            turn off instruction stepping and start CPU
 
@@ -383,13 +389,15 @@ Now you can enter an ipl command from the control panel.
     lsdep        list module dependencies
 
     iodelay      display or set I/O delay value
-    tt32stats    display CTCI-W32 statistics
+    tt32stats    (deprecated; use 'tt32' cmd instead)
+    tt32         control/query CTCI-W32 functionality
     toddrag      display or set TOD clock drag factor
     panrate      display or set rate at which console refreshes
     syncio       display syncio devices statistics
     maxrates     display maximum observed MIPS/SIOS rate for the
                  defined interval or define a new reporting interval
 
+    defsym       Define symbol
     script       Run a sequence of panel commands contained in a file
     cscript      Cancels a running script thread
 
@@ -405,20 +413,23 @@ Now you can enter an ipl command from the control panel.
     suspend      Suspend hercules
     resume       Resume hercules
 
-    sf+          add shadow file
-    sf-          delete shadow file
-    sf=          rename shadow file
+    herclogo     Read a new hercules logo file
+
+    traceopt     Instruction trace display options
+
+    sf+dev       add shadow file
+    sf-dev       delete shadow file
+    sf=dev ..    rename shadow file
     sfc          compress shadow files
     sfd          display shadow file stats
 
-    t{+/-}       turn instruction tracing on/off
-    s{+/-}       turn instruction stepping on/off
     t{+/-}dev    turn CCW tracing on/off
     s{+/-}dev    turn CCW stepping on/off
     t{+/-}CKD    turn CKD_KEY tracing on/off
     f{+/-}adr    mark frames unusable/usable
+
 </pre>
-<p> 
+<p>
 The <em>ipl</em> command may also be used to perform a load from cdrom or
 server.  For example if a standard SuSE S/390 Linux distribution CD is loaded
 and mounted on /cdrom for example, this cdrom may then be ipl-ed by:
@@ -447,7 +458,9 @@ Press ? to obtain help in either control panel.
 Some commands also offer additional help information regarding their syntax,
 etc. Enter&nbsp; "<tt>help <i>&lt;command name&gt;</i></tt>" &nbsp; to display
 this additional help information. (Note: not every command supports help)
+
 <p>
+<hr width="50%">
 
 <a name="RCFILE">
 <h4>The &nbsp;hercules.rc &nbsp;(run-commands)&nbsp; file</h4>
@@ -480,17 +493,100 @@ value <tt><i>nnn</i></tt> can be any number from 1 to 999 and specifies the
 number of seconds to delay before reading the next line. Creative use of the
 run-commands file can completely automate Hercules startup.
 <p>
-    
+<hr width="50%">
+
+<a name="HAO">
+<h4>The "Hercules Automatic Operator" (HAO) Facility</h4>
+</a>
+<p>
+The Hercules Automatic Operator (HAO) feature is a facility that allows one
+to automatically issue panel commands in response to certain messages being
+issued.
+<p>
+To use the Hercules Automatic Operator facility, one first defines a "rule"
+consisting of a "target" and an associated "command". The "target" is just
+a regular expression pattern used to match against the text of the various
+messages that Hercules issues as it runs. Whenever a match is found, the
+rule "fires" and its associated command is automatically issued.
+<p>
+The Hercules Automatic Operator facility is <i>only</i> for those messages
+issued <i>by Hercules</i> to its HMC (hardware console). It <i>cannot</i>
+be used for whatever messages the guest operating system may issue to any
+of its terminals. It is only a <i>Hercules</i> automatic operator and
+<i>not</i> a "VSE", "MVS", "VM", etc, automatic operator.
+
+<h5>Defining a Rule</h5>
+<p>
+To define a HAO rule, enter the command:
+<pre>
+   hao <i>target</i>
+</pre>
+<p>
+to define the rule's "target" match pattern (a simple regular expression),
+followed by the command:
+<pre>
+   hao <i>command</i>
+</pre>
+<p>
+to define the rule's associated panel-command.
+<p>
+The target pattern is a simple regular expression value as defined by
+whatever regular expression facility your host build platform happens
+to support. For Windows it must be a Perl Compatible Regular Expression (PCRE).
+For other supported build platforms it might be some other supported regular
+expression syntax. Check your host platform's programming documentation for
+further details.
+<p>
+The associated <i>command</i> is whatever valid Hercules panel command you
+wish to issue in response to a message being issued that matches the given
+pattern <i>target</i>. 
+
+<h5>Other commands and limitations</h5>
+<p>
+To delete a fully or partially defined HAO rule, first use the 'hao list'
+command to list all of the defined (or partially defined) rules, and then use
+the 'hao del <i>nnn</i>' command to delete the specific rule identified by <i>nnn</i>.
+(All rules are assigned numbers as they are defined and are thus identified
+by their numeric value). Optionally, one may delete ALL defined or partially
+defined rules by issuing the command 'hao clear'.
+<p>
+The current implementation limits the total number of defined rules to 10. If
+you need to define more than 10 rules you will either have to build Hercules
+for yourself (increasing the value of the HAO_MAXRULE constant in hao.c) or
+else beg one of the Hercules developers to please do it for you.
+<p>
+Note that there is currently no way to define a command whose arguments vary  
+based on actual message text. That is to say, there is currently no way to say
+<blockquote>
+   "Reply with the command 'devinit <i>cuu</i> filename'
+   in response to message text 'HHCXXnnnI Device <i>cuu</i>
+   intervention required.' where <i>cuu</i> is whatever cuu
+    was identified in the message."
+</blockquote>
+<p>
+The HAO is <i><b>not</b></i> that sophisticated (yet). Only simple plain-text commands may
+be defined and issued. No automatic substitution is done based on message text
+(although normal 'DEFSYM' symbol substitution <i><b>is</b></i> supported however, as that
+is a normal panel-command feature supported separately from the HAO). This may
+possibly change in the future however, depending on user need/demand.
+<p>
+<i><b>All</b></i> defined rules are checked for a match each time Hercules issues a message.
+There is no way to specify "stop processing subsequent rules". If a message is
+issued that matches two or more rules, each associated command is then issued
+in sequence. Thus the advice to choose your rules' target patterns carefully
+very much applies here.
+<p>
+
 <p><hr><a name="support"></a>
 <h2>Technical Support</h2>
 
 <P>
-Please see our <a href="hercsupp.html">Technical Support</a> web page.
+For technical support, please refer our <a href="hercsupp.html">Technical Support</a> web page.
 </P>
 
-<p><center><hr width=15% noshade>
+<p><center><hr width=15% noshade><p>
 <a href="index.html"><img src="images/back.gif" border=0 alt="back"></a>
 </center>
-<p class="lastupd">Last updated $Date: 2006/02/12 21:58:08 $ $Revision: 1.41 $</p>
+<p class="lastupd">Last updated $Date: 2007/06/22 12:04:39 $ $Revision: 1.47 $</p>
 </BODY>
 </HTML>

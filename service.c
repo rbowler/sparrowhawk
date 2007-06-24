@@ -1,8 +1,10 @@
-/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2006                */
+/* SERVICE.C    (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 Service Processor                            */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+
+// $Id: service.c,v 1.76 2007/06/23 00:04:15 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements service processor functions                */
@@ -19,6 +21,20 @@
 /*      Break syscons output if too long - Jan Jaeger                */
 /*      Added CPI - Control Program Information ev. - JJ 2001-11-19  */
 /*-------------------------------------------------------------------*/
+
+// $Log: service.c,v $
+// Revision 1.76  2007/06/23 00:04:15  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.75  2007/01/13 07:25:10  bernard
+// backout ccmask
+//
+// Revision 1.74  2007/01/12 15:24:46  bernard
+// ccmask phase 1
+//
+// Revision 1.73  2006/12/08 09:43:30  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -104,7 +120,7 @@ void scp_command (char *command, int priomsg)
     }
 
     /* Obtain the interrupt lock */
-    obtain_lock (&sysblk.intlock);
+    OBTAIN_INTLOCK(NULL);
 
     /* If an event buffer available signal is pending then reject the
        command with message indicating that service processor is busy */
@@ -113,7 +129,7 @@ void scp_command (char *command, int priomsg)
         logmsg (_("HHCCP039E Service Processor busy\n"));
 
         /* Release the interrupt lock */
-        release_lock (&sysblk.intlock);
+        RELEASE_INTLOCK(NULL);
         return;
     }
 
@@ -132,7 +148,7 @@ void scp_command (char *command, int priomsg)
     WAKEUP_CPUS_MASK (sysblk.waiting_mask);
 
     /* Release the interrupt lock */
-    release_lock (&sysblk.intlock);
+    RELEASE_INTLOCK(NULL);
 
 } /* end function scp_command */
 
@@ -153,7 +169,7 @@ int signal_quiesce (U16 count, BYTE unit)
     }
 
     /* Obtain the interrupt lock */
-    obtain_lock (&sysblk.intlock);
+    OBTAIN_INTLOCK(NULL);
 
     /* If an event buffer available signal is pending then reject the
        command with message indicating that service processor is busy */
@@ -162,7 +178,7 @@ int signal_quiesce (U16 count, BYTE unit)
         logmsg (_("HHCCP082E Service Processor busy\n"));
 
         /* Release the interrupt lock */
-        release_lock (&sysblk.intlock);
+        RELEASE_INTLOCK(NULL);
         return -1;
     }
 
@@ -180,7 +196,7 @@ int signal_quiesce (U16 count, BYTE unit)
     WAKEUP_CPUS_MASK (sysblk.waiting_mask);
 
     /* Release the interrupt lock */
-    release_lock (&sysblk.intlock);
+    RELEASE_INTLOCK(NULL);
 
     return 0;
 } /* end function signal_quiesce */
@@ -444,7 +460,7 @@ DEF_INST(service_call)
 U32             r1, r2;                 /* Values of R fields        */
 U32             sclp_command;           /* SCLP command code         */
 U32             sccb_real_addr;         /* SCCB real address         */
-U32             i;                      /* Array subscripts          */
+int             i;                      /* Array subscripts          */
 U32             realmb;                 /* Real storage size in MB   */
 U32             sccb_absolute_addr;     /* Absolute address of SCCB  */
 U32             sccblen;                /* Length of SCCB            */
@@ -466,17 +482,17 @@ U32             chpbit;                 /* Bit number for CHPID      */
 #ifdef FEATURE_SYSTEM_CONSOLE
 SCCB_EVENT_MASK*evd_mask;               /* Event mask                */
 SCCB_EVD_HDR   *evd_hdr;                /* Event header              */
-U32             evd_len;                /* Length of event data      */
+U16             evd_len;                /* Length of event data      */
 SCCB_EVD_BK    *evd_bk;                 /* Event data                */
 SCCB_MCD_BK    *mcd_bk;                 /* Message Control Data      */
 SCCB_SGQ_BK    *sgq_bk;                 /* Signal Quiesce            */
-U32             mcd_len;                /* Length of MCD             */
+U16             mcd_len;                /* Length of MCD             */
 SCCB_OBJ_HDR   *obj_hdr;                /* Object Header             */
-U32             obj_len;                /* Length of Object          */
-U32             obj_type;               /* Object type               */
+U16             obj_len;                /* Length of Object          */
+U16             obj_type;               /* Object type               */
 SCCB_MTO_BK    *mto_bk;                 /* Message Text Object       */
 BYTE           *event_msg;              /* Message Text pointer      */
-U32             event_msglen;           /* Message Text length       */
+int             event_msglen;           /* Message Text length       */
 SCCB_CPI_BK    *cpi_bk;                 /* Control Program Info      */
 BYTE            message[4089];          /* Maximum event data buffer
                                            length plus one for \0    */
@@ -580,13 +596,13 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         || (sclp_command & SCLP_COMMAND_CLASS) == 0x01)
     {
         /* Obtain the interrupt lock */
-        obtain_lock (&sysblk.intlock);
+        OBTAIN_INTLOCK(regs);
 
         /* If a service signal is pending then return condition
            code 2 to indicate that service processor is busy */
         if (IS_IC_SERVSIG && (sysblk.servparm & SERVSIG_ADDR))
         {
-            release_lock (&sysblk.intlock);
+            RELEASE_INTLOCK(regs);
             regs->psw.cc = 2;
             return;
         }
@@ -850,6 +866,12 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
             while (mcd_len > sizeof(SCCB_MCD_BK))
             {
                 FETCH_HW(obj_len,obj_hdr->length);
+                if (obj_len == 0)
+                {
+                    sccb->reas = SCCB_REAS_BUFF_LEN_ERR;
+                    sccb->resp = SCCB_RESP_BUFF_LEN_ERR;
+                    break;
+                }
                 FETCH_HW(obj_type,obj_hdr->type);
                 if (obj_type == SCCB_OBJ_TYPE_MESSAGE)
                 {
@@ -857,7 +879,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
                     event_msg = (BYTE*)(mto_bk+1);
                     event_msglen = obj_len -
                             (sizeof(SCCB_OBJ_HDR) + sizeof(SCCB_MTO_BK));
-                    if ((int)event_msglen < 0)
+                    if (event_msglen < 0)
                     {
                         sccb->reas = SCCB_REAS_BUFF_LEN_ERR;
                         sccb->resp = SCCB_RESP_BUFF_LEN_ERR;
@@ -1124,7 +1146,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         {
             servc_cp_recv_mask <<= 8;
             servc_cp_send_mask <<= 8;
-            if (i < masklen)
+            if ((U32)i < masklen)
             {
                 servc_cp_recv_mask |= evd_mask->masks[i];
                 servc_cp_send_mask |= evd_mask->masks[i + masklen];
@@ -1136,7 +1158,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
 
         /* Write the events that we support back */
         memset (&evd_mask->masks[2 * masklen], 0, 2 * masklen);
-        for (i = 0; (i < 4) && (i < masklen); i++)
+        for (i = 0; (i < 4) && ((U32)i < masklen); i++)
         {
             evd_mask->masks[i + (2 * masklen)] |=
                 (ARCH_DEP(sclp_recv_mask) >> ((3-i)*8)) & 0xFF;
@@ -1197,7 +1219,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
         xstincnum = (sysblk.xpndsize << XSTORE_PAGESHIFT)
                         / XSTORE_INCREMENT_SIZE;
         FETCH_FW(i, sccbxmap->incnum);
-        if ( i < 1 || i > xstincnum )
+        if ( i < 1 || (U32)i > xstincnum )
         {
             sccb->reas = SCCB_REAS_INVALID_RSC;
             sccb->resp = SCCB_RESP_REJECT;
@@ -1348,7 +1370,7 @@ BYTE            *xstmap;                /* Xstore bitmap, zero means
     ON_IC_SERVSIG;
 
     /* Release the interrupt lock */
-    release_lock (&sysblk.intlock);
+    RELEASE_INTLOCK(regs);
 
     /* Set condition code 0 */
     regs->psw.cc = 0;

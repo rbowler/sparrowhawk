@@ -1,13 +1,23 @@
 /*
 || ----------------------------------------------------------------------------
 ||
-|| HETINIT.C    (c) Copyright Leland Lucius, 2000-2006
+|| HETINIT.C    (c) Copyright Leland Lucius, 2000-2007
 ||              Released under terms of the Q Public License.
 ||
 || Creates IEHINITT or NL format Hercules Emulated Tapes.
 ||
 || ----------------------------------------------------------------------------
 */
+
+// $Id: hetinit.c,v 1.24 2007/06/23 00:04:10 ivan Exp $
+//
+// $Log: hetinit.c,v $
+// Revision 1.24  2007/06/23 00:04:10  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.23  2006/12/08 09:43:26  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 

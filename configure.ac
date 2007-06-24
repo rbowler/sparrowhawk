@@ -2,15 +2,54 @@
 # CONFIGURE.AC: Process this file with AutoConf to produce a configure script.
 ###############################################################################
 
+# $Id: configure.ac,v 1.193 2007/06/24 04:17:15 jmaynard Exp $
+
 #    AC is AutoConfigure, AM is AutoMake, and AH is AutoHeader. The
 #    'HC_XXXX..' macros are custom Hercules autoconf macros defined
 #    in the 'hercules.m4' file in the 'autoconf' subdirectory.
 
+###############################################################################
+#
+#                       ***  CHANGE HISTORY  ***
+#
+#  DD/MM/YY Name Description...
+#  -------- ---- --------------------------------------------------------------
+#
+#  09/04/06 Fish Added this Change History section
+#  09/04/06 Fish Added AC_CHECK_MEMBERS for 'sockaddr_in.sin_len'
+#  11/04/06 Fish Remove JRM comments re: SIOCSIFNETMASK, SIOCSIFHWADDR,
+#                SIOCADDRT and SIOCDELRT declarations (AC_CHECK_DECLS)
+#                since now automatically handled by hercwind.h & hostopts.h.
+#  20/04/06 Fish Add AC_CHECK_DECLS check for SIOCDIFADDR per Kees Verruijt
+#                [kees@verruijt.net] for Apple OS X 10.4.6 TUNTAP_ClrIPAddr
+#  16/08/06 Fish Check for C99 flexible arrays support.
+#  25/09/06 Fish OPTION_HAO  <==  --disable/enable-automatic-operator
+#  25/09/06 Fish "--disable/enable-enhanced-configsymbols/configincludes" ==>
+#                OPTION_ENHANCED_CONFIG_SYMBOLS, OPTION_ENHANCED_CONFIG_INCLUDE
+#  27/09/06 Fish Add check for nanosleep.
+#  07/12/06 jj   Add decNumber/Makefile to ac_output
+#
+###############################################################################
+
+# $Log: configure.ac,v $
+# Revision 1.193  2007/06/24 04:17:15  jmaynard
+# Grumble. Missed the version tag in the MSVC build. Fixed.
+#
+# Revision 1.192  2007/06/20 23:40:58  jmaynard
+# 3.05 version bump.
+#
+# Revision 1.191  2007/01/10 16:30:48  rbowler
+# Include netinet/tcp.h for Unix keepalive settings
+#
+# Revision 1.190  2006/12/08 09:43:18  jj
+# Add CVS message log
+#
+
 AC_INIT(hercules.h)                     # (package, version, bugreport email, etc)
-AC_REVISION($Revision: 1.178.2.1 $)         # (the version of this configure.ac)
+AC_REVISION($Revision: 1.193 $)         # (the version of this configure.ac)
 AC_CONFIG_AUX_DIR(autoconf)             # (directory containing auxillary build tools)
-AM_INIT_AUTOMAKE(hercules,3.04.1)       # (the version of our software package)
-# Don't forget to change it in makefile-dllmod.msvc, too!
+AM_INIT_AUTOMAKE(hercules,3.05)         # (the version of our software package)
+# Don't forget to change it in msvc.makefile.includes/VERSION.msvc, too!
 AM_CONFIG_HEADER(config.h)              # (the file the resulting configure script will produce)
 AM_MAINTAINER_MODE()
 AC_CANONICAL_HOST()                     # (sets $host_cpu, $host_vendor, and $host_os)
@@ -228,6 +267,8 @@ AH_TEMPLATE( [HERC_LOCALEDIR],          [Directory where to find NLS data] )
 AH_TEMPLATE( [MODULESDIR],              [Directory where HERCULES modules are installed] )
 AH_TEMPLATE( [DEBUG],                   [Define to enable extra debugging code (TRACE/VERIFY/ASSERT macros)] )
 
+AH_TEMPLATE( [C99_FLEXIBLE_ARRAYS],     [Define if your gcc properly supports C99 flexible arrays] )
+
 AH_TEMPLATE( [HAVE_ATTR_REGPARM],       [Define if your gcc properly supports __attribute__((regparm(n)))] )
 AH_TEMPLATE( [NO_ASM_BYTESWAP],         [Define to disable assembler routines for byte swapping] )
 AH_TEMPLATE( [NO_IEEE_SUPPORT],         [Define to disable IEEE floating point support] )
@@ -242,6 +283,9 @@ AH_TEMPLATE( [HAVE_INTTYPES_H],         [Define if inttypes.h header file is pre
 AH_TEMPLATE( [HAVE_U_INT],              [Define if your system uses u_int8_t, etc, instead of uint8_t] )
 
 AH_TEMPLATE( [OPTION_CONFIG_SYMBOLS],   [Define to enable symbolic substitutions in configuration file] )
+AH_TEMPLATE( [OPTION_ENHANCED_CONFIG_SYMBOLS], [Define to enable enhanced-mode symbolic substitutions in configuration file] )
+AH_TEMPLATE( [OPTION_ENHANCED_CONFIG_INCLUDE], [Define to enable enhanced-mode 'include' file support in configuration file] )
+AH_TEMPLATE( [OPTION_HAO],              [Define to enable Hercules Automatic Operator feature] )
 AH_TEMPLATE( [OPTION_DYNAMIC_LOAD],     [Define to enable Hercules Dynamic Loader feature] )
 AH_TEMPLATE( [HDL_BUILD_SHARED],        [Define to indicate shared libraries are being used] )
 AH_TEMPLATE( [HDL_USE_LIBTOOL],         [Define to cause dynamic loader to use libtool instead of dlopen] )
@@ -453,6 +497,13 @@ AC_CHECK_HEADERS( netinet/in.h,   [hc_cv_have_netinet_in_h=yes],   [hc_cv_have_n
     #include <sys/socket.h>
     #endif
 ] )
+AC_CHECK_HEADERS( netinet/tcp.h,  [hc_cv_have_netinet_tcp_h=yes],  [hc_cv_have_netinet_tcp_h=no],
+[
+    #include <sys/types.h>
+    #if HAVE_SYS_SOCKET_H
+    #include <sys/socket.h>
+    #endif
+] )
 AC_CHECK_HEADERS( net/route.h,    [hc_cv_have_net_route_h=yes],    [hc_cv_have_net_route_h=no],
 [
     #include <sys/types.h>
@@ -538,13 +589,11 @@ AC_CHECK_DECLS( LOGIN_NAME_MAX,       [hc_cv_have_login_name_max=yes],      [hc_
 AC_CHECK_DECLS( _SC_NPROCESSORS_CONF, [hc_cv_have_sc_nprocessors_conf=yes], [hc_cv_have_sc_nprocessors_conf=no], [#include <unistd.h>] )
 AC_CHECK_DECLS( _SC_NPROCESSORS_ONLN, [hc_cv_have_sc_nprocessors_onln=yes], [hc_cv_have_sc_nprocessors_onln=no], [#include <unistd.h>] )
 
-# The following can be used to replace the OPTION_TUNTAP_* definitions in
-# hostopts.h, whenever the Windows version of the checks involved can be
-# set up. --JRM
-#AC_CHECK_DECLS( SIOCSIFNETMASK,       [hc_cv_have_siocsifnetmask=yes],      [hc_cv_have_siocsifnetmask=no],      [#include <linux/sockios.h>] )
-#AC_CHECK_DECLS( SIOCSIFHWADDR,        [hc_cv_have_siocsifhwaddr=yes],       [hc_cv_have_siocsifhwaddr=no],       [#include <linux/sockios.h>] )
-#AC_CHECK_DECLS( SIOCADDRT,            [hc_cv_have_siocaddrt=yes],           [hc_cv_have_siocaddrt=no],           [#include <linux/sockios.h>] )
-#AC_CHECK_DECLS( SIOCDELRT,            [hc_cv_have_siocdelrt=yes],           [hc_cv_have_siocdelrt=no],           [#include <linux/sockios.h>] )
+AC_CHECK_DECLS( SIOCSIFNETMASK,       [hc_cv_have_siocsifnetmask=yes],      [hc_cv_have_siocsifnetmask=no],      [#include <linux/sockios.h>] )
+AC_CHECK_DECLS( SIOCSIFHWADDR,        [hc_cv_have_siocsifhwaddr=yes],       [hc_cv_have_siocsifhwaddr=no],       [#include <linux/sockios.h>] )
+AC_CHECK_DECLS( SIOCADDRT,            [hc_cv_have_siocaddrt=yes],           [hc_cv_have_siocaddrt=no],           [#include <linux/sockios.h>] )
+AC_CHECK_DECLS( SIOCDELRT,            [hc_cv_have_siocdelrt=yes],           [hc_cv_have_siocdelrt=no],           [#include <linux/sockios.h>] )
+AC_CHECK_DECLS( SIOCDIFADDR,          [hc_cv_have_siocdifaddr=yes],         [hc_cv_have_siocdifaddr=no],         [#include <linux/sockios.h>] )
 
 AC_CACHE_SAVE()
 
@@ -647,7 +696,7 @@ AC_CHECK_FUNCS( strerror_r )
 AC_CHECK_FUNCS( strsignal, [hc_cv_have_strsignal=yes], [hc_cv_have_strsignal=no] )
 AC_CHECK_FUNCS( sys_siglist )
 AC_CHECK_FUNCS( InitializeCriticalSectionAndSpinCount )
-AC_CHECK_FUNCS( sleep usleep )
+AC_CHECK_FUNCS( sleep usleep nanosleep )
 AC_CHECK_FUNCS( sched_yield )
 AC_CHECK_FUNCS( strtok_r )
 AC_CHECK_FUNCS( pipe )
@@ -690,6 +739,19 @@ AC_CACHE_SAVE()
 #   Checks for structures and structure members...
 ###############################################################################
 
+AC_CHECK_MEMBERS( [struct sockaddr_in.sin_len],
+                  [hc_cv_have_sockaddr_in_sin_len=yes ],
+                  [hc_cv_have_sockaddr_in_sin_len=no  ],
+[
+#include <sys/types.h>
+#if HAVE_SYS_SOCKET_H
+#include <sys/socket.h>
+#endif
+#if HAVE_NETINET_IN_H
+#include <netinet/in.h>
+#endif
+] )
+
 AC_CHECK_MEMBERS( [struct in_addr.s_addr],
                   [hc_cv_have_in_addr_s_addr=yes  ],
                   [hc_cv_have_in_addr_s_addr=no   ],
@@ -698,7 +760,9 @@ AC_CHECK_MEMBERS( [struct in_addr.s_addr],
 #if HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
 #endif
+#if HAVE_NETINET_IN_H
 #include <netinet/in.h>
+#endif
 ] )
 
 AC_CHECK_MEMBERS( [struct sigaction.sa_sigaction],
@@ -827,6 +891,20 @@ AC_CACHE_CHECK( [if this is the broken 2.96 version of GCC],
         fi
     ]
 )
+
+#----------------------------------------------#
+#  Check C99 if flexible arrays are supported  #
+#----------------------------------------------#
+#  The logic to test whether C99 flexible      #
+#  arrays are supported is defined in the      #
+#  'HC_C99_FLEXIBLE_ARRAYS' macro in the       #
+#  'hercules.m4' file in the 'autoconf' sub-   #
+#   directory, and issues the AC_DEFINE for    #
+#  'C99_FLEXIBLE_ARRAYS' if it's supported     #
+#  and also sets '$hc_cv_c99_flexible_array'.  #
+#----------------------------------------------#
+
+HC_C99_FLEXIBLE_ARRAYS()
 
 #--------------------------------------------------------#
 #  Check if GCC supports '__attribute__ ((regparm(n)))'  #
@@ -1076,16 +1154,17 @@ fi
 
 AC_MSG_CHECKING( [whether byte-swapping can be done using assembler] )
 
-# (byteswap assembler routines are i486+ only)
+# (use our own byteswap assembler routines are i486+ only)
+# use system's byteswap routines if present...
 
 case "$host_cpu" in
 
-    i486|i586|i686|i786)
+    i486|i586|i686|i786|x86_64)
 
         hc_cv_asm_byteswap=yes
         ;;
     *)
-        hc_cv_asm_byteswap=no
+        hc_cv_asm_byteswap=$hc_cv_have_byteswap_h
         ;;
 esac
 
@@ -1249,6 +1328,60 @@ AC_ARG_ENABLE( configsymbols,
     [hc_cv_opt_configsymbols=yes]
 )
 
+AC_ARG_ENABLE( enhanced-configsymbols,
+
+    AC_HELP_STRING( [--disable-enhanced-configsymbols],
+
+        [disable enhanced-mode symbolic substitutions in configuration file]
+    ),
+    [
+        case "${enableval}" in
+        yes) hc_cv_opt_enhanced_configsymbols=yes                      ;;
+        no)  hc_cv_opt_enhanced_configsymbols=no                       ;;
+        *)   AC_MSG_RESULT( [ERROR: invalid 'enhanced-configsymbols' option] )
+             hc_error=yes
+             ;;
+        esac
+    ],
+    [hc_cv_opt_enhanced_configsymbols=yes]
+)
+
+AC_ARG_ENABLE( enhanced-configincludes,
+
+    AC_HELP_STRING( [--disable-enhanced-configincludes],
+
+        [disable enhanced-mode 'include' file support in configuration file]
+    ),
+    [
+        case "${enableval}" in
+        yes) hc_cv_opt_enhanced_configincludes=yes                      ;;
+        no)  hc_cv_opt_enhanced_configincludes=no                       ;;
+        *)   AC_MSG_RESULT( [ERROR: invalid 'enhanced-configincludes' option] )
+             hc_error=yes
+             ;;
+        esac
+    ],
+    [hc_cv_opt_enhanced_configincludes=yes]
+)
+
+AC_ARG_ENABLE( automatic-operator,
+
+    AC_HELP_STRING( [--disable-automatic-operator],
+
+        [disable Hercules Automatic Operator feature]
+    ),
+    [
+        case "${enableval}" in
+        yes) hc_cv_opt_auto_oper=yes                      ;;
+        no)  hc_cv_opt_auto_oper=no                       ;;
+        *)   AC_MSG_RESULT( [ERROR: invalid 'automatic-operator' option] )
+             hc_error=yes
+             ;;
+        esac
+    ],
+    [hc_cv_opt_auto_oper=$hc_cv_have_regex_h]
+)
+
 AC_ARG_ENABLE( external-gui,
 
     AC_HELP_STRING( [--disable-external-gui],
@@ -1366,6 +1499,44 @@ else
     hc_cv_setuid_hercifc=no
 fi
 
+if test "$hc_cv_is_apple" = "yes"; then
+
+    AC_ARG_ENABLE( universal-binary,
+
+        AC_HELP_STRING( [--enable-universal-binary],
+
+            [build Mac OS X universal binary]
+        ),
+        [
+            case "${enableval}" in
+            yes) hc_cv_opt_build_apple_univ_binary=yes             ;;
+            no)  hc_cv_opt_build_apple_univ_binary=no              ;;
+            *)   AC_MSG_RESULT( [ERROR: invalid 'universal-binary' option] )
+                 hc_error=yes
+                 ;;
+            esac
+        ],
+        [hc_cv_opt_build_apple_univ_binary=no]
+    )
+
+    hc_cv_build_apple_univ_binary=$hc_cv_opt_build_apple_univ_binary
+
+    # If we're building a universal binary, turn off regparm and assembler
+    # byteswap: while the Intel compiler can deal with them, the PPC
+    # compiler cannot, and only those options common to both can be used.
+    # Turn off dependency tracking, too. -- JRM
+
+    if test "$hc_cv_build_apple_univ_binary" = "yes"; then
+        hc_cv_regparm_attr_supported=no
+        hc_cv_asm_byteswap=no
+        am_cv_CC_dependencies_compiler_type=none
+        am_cv_CXX_dependencies_compiler_type=none
+    fi
+
+else
+    hc_cv_build_apple_univ_binary=no
+fi
+
 #-----------------------------------------------------------------
 #  The handling of AC_ARG_ENABLE for "--enable-getoptwrapper"
 #  is defined within the 'HC_ARG_ENABLE_GETOPTWRAPPER' macro
@@ -1464,6 +1635,15 @@ if test "$hc_cv_opt_dynamic_load" = "yes"; then
       AC_MSG_RESULT( [ERROR: dynamic-load requires libtool or dlltool] )
       hc_error=yes
    fi
+fi
+
+#------------------------------------------------------------------------------
+
+if test "$hc_cv_opt_auto_oper" = "yes"  &&
+   test "$hc_cv_have_regex_h" != "yes"; then
+
+   AC_MSG_RESULT( [ERROR: automatic-operator requested but 'regex.h' header not found] )
+   hc_error=yes
 fi
 
 #------------------------------------------------------------------------------
@@ -1621,14 +1801,18 @@ if test "$hc_cv_auto_optimize" = "yes"; then
 
     if test "$hc_cv_is_intel_x86_arch" = "yes"; then
 
-        hc_cv_optimization_flags="$hc_cv_optimization_flags -march=$hc_cv_intel_cpu_type"
-
-        if test "$hc_cv_builtin_alloca_broke" != "yes"  &&
-           test "$hc_cv_opt_debug"            != "yes"; then
-
-            hc_cv_optimization_flags="$hc_cv_optimization_flags -fomit-frame-pointer"
+        if test "$hc_cv_build_apple_univ_binary" = "yes"; then
+            hc_cv_optimization_flags="$hc_cv_optimization_flags -arch i386 -arch ppc"
         else
-            hc_cv_optimization_flags="$hc_cv_optimization_flags -fno-omit-frame-pointer"
+            hc_cv_optimization_flags="$hc_cv_optimization_flags -march=$hc_cv_intel_cpu_type"
+
+            if test "$hc_cv_builtin_alloca_broke" != "yes"  &&
+               test "$hc_cv_opt_debug"            != "yes"; then
+
+                hc_cv_optimization_flags="$hc_cv_optimization_flags -fomit-frame-pointer"
+            else
+                hc_cv_optimization_flags="$hc_cv_optimization_flags -fno-omit-frame-pointer"
+            fi
         fi
     fi
 fi
@@ -1699,25 +1883,28 @@ AC_MSG_NOTICE( [                                         ] )
 #  (place only AC_DEFINE here; place AC_DEFINE_UNQUOTED above)  #
 #---------------------------------------------------------------#
 
-test "$hc_cv_opt_debug"                = "yes"  &&  AC_DEFINE(DEBUG)
-test "$hc_cv_have_inttypes_h"          = "yes"  &&  AC_DEFINE(HAVE_INTTYPES_H)
-test "$hc_cv_have_u_int8_t"            = "yes"  &&  AC_DEFINE(HAVE_U_INT)
-test "$hc_cv_opt_configsymbols"        = "yes"  &&  AC_DEFINE(OPTION_CONFIG_SYMBOLS)
-test "$hc_cv_opt_dynamic_load"         = "yes"  &&  AC_DEFINE(OPTION_DYNAMIC_LOAD)
-test "$hc_cv_opt_fthreads"             = "yes"  &&  AC_DEFINE(OPTION_FTHREADS)
-test "$hc_cv_opt_fishhang"             = "yes"  &&  AC_DEFINE(FISH_HANG)
-test "$hc_cv_hdl_build_shared"         = "yes"  &&  AC_DEFINE(HDL_BUILD_SHARED)
-test "$hc_cv_have_lt_dlopen"           = "yes"  &&  AC_DEFINE(HDL_USE_LIBTOOL)
-test "$hc_cv_is_windows"               = "yes"  &&  AC_DEFINE(WIN32)
-test "$hc_cv_opt_external_gui"         = "yes"  &&  AC_DEFINE(EXTERNALGUI)
-test "$hc_cv_opt_cckd_bzip2"           = "yes"  &&  AC_DEFINE(CCKD_BZIP2)
-test "$hc_cv_opt_het_bzip2"            = "yes"  &&  AC_DEFINE(HET_BZIP2)
-test "$hc_cv_timespec_in_sys_types_h"  = "yes"  &&  AC_DEFINE(TIMESPEC_IN_SYS_TYPES_H)
-test "$hc_cv_timespec_in_time_h"       = "yes"  &&  AC_DEFINE(TIMESPEC_IN_TIME_H)
-test "$hc_cv_have_getset_uid"         != "yes"  &&  AC_DEFINE(NO_SETUID)
-test "$hc_cv_asm_byteswap"            != "yes"  &&  AC_DEFINE(NO_ASM_BYTESWAP)
-test "$hc_cv_non_unique_gettimeofday"  = "yes"  &&  AC_DEFINE(NON_UNIQUE_GETTIMEOFDAY)
-test "$hc_cv_build_hercifc"            = "yes"  &&  AC_DEFINE(BUILD_HERCIFC)
+test "$hc_cv_opt_debug"                   = "yes"  &&  AC_DEFINE(DEBUG)
+test "$hc_cv_have_inttypes_h"             = "yes"  &&  AC_DEFINE(HAVE_INTTYPES_H)
+test "$hc_cv_have_u_int8_t"               = "yes"  &&  AC_DEFINE(HAVE_U_INT)
+test "$hc_cv_opt_configsymbols"           = "yes"  &&  AC_DEFINE(OPTION_CONFIG_SYMBOLS)
+test "$hc_cv_opt_enhanced_configsymbols"  = "yes"  &&  AC_DEFINE(OPTION_ENHANCED_CONFIG_SYMBOLS)
+test "$hc_cv_opt_enhanced_configincludes" = "yes"  &&  AC_DEFINE(OPTION_ENHANCED_CONFIG_INCLUDE)
+test "$hc_cv_opt_auto_oper"               = "yes"  &&  AC_DEFINE(OPTION_HAO)
+test "$hc_cv_opt_dynamic_load"            = "yes"  &&  AC_DEFINE(OPTION_DYNAMIC_LOAD)
+test "$hc_cv_opt_fthreads"                = "yes"  &&  AC_DEFINE(OPTION_FTHREADS)
+test "$hc_cv_opt_fishhang"                = "yes"  &&  AC_DEFINE(FISH_HANG)
+test "$hc_cv_hdl_build_shared"            = "yes"  &&  AC_DEFINE(HDL_BUILD_SHARED)
+test "$hc_cv_have_lt_dlopen"              = "yes"  &&  AC_DEFINE(HDL_USE_LIBTOOL)
+test "$hc_cv_is_windows"                  = "yes"  &&  AC_DEFINE(WIN32)
+test "$hc_cv_opt_external_gui"            = "yes"  &&  AC_DEFINE(EXTERNALGUI)
+test "$hc_cv_opt_cckd_bzip2"              = "yes"  &&  AC_DEFINE(CCKD_BZIP2)
+test "$hc_cv_opt_het_bzip2"               = "yes"  &&  AC_DEFINE(HET_BZIP2)
+test "$hc_cv_timespec_in_sys_types_h"     = "yes"  &&  AC_DEFINE(TIMESPEC_IN_SYS_TYPES_H)
+test "$hc_cv_timespec_in_time_h"          = "yes"  &&  AC_DEFINE(TIMESPEC_IN_TIME_H)
+test "$hc_cv_have_getset_uid"            != "yes"  &&  AC_DEFINE(NO_SETUID)
+test "$hc_cv_asm_byteswap"               != "yes"  &&  AC_DEFINE(NO_ASM_BYTESWAP)
+test "$hc_cv_non_unique_gettimeofday"     = "yes"  &&  AC_DEFINE(NON_UNIQUE_GETTIMEOFDAY)
+test "$hc_cv_build_hercifc"               = "yes"  &&  AC_DEFINE(BUILD_HERCIFC)
 
 if test $hc_cv_have_sa_sigaction != yes ||
    test $hc_cv_have_sigusr1      != yes ||
@@ -1824,7 +2011,7 @@ AM_CONDITIONAL( USE_DLLTOOL,         [ test "$hc_cv_is_windows"       = "yes" ] 
 
 AC_CACHE_SAVE()
 
-AC_OUTPUT( [ Makefile util/Makefile html/Makefile crypto/Makefile po/Makefile.in po/Makefile man/Makefile m4/Makefile ] )
+AC_OUTPUT( [ Makefile util/Makefile html/Makefile crypto/Makefile po/Makefile.in po/Makefile man/Makefile m4/Makefile decNumber/Makefile] )
 
 ###############################################################################
 #   (end-of-file)

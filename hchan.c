@@ -1,6 +1,9 @@
-/* GCHAN.C       (c) Copyright Ivan Warren, 2005-2006                */
+/* GCHAN.C       (c) Copyright Ivan Warren, 2005-2007                */
 /* Based on work (c)Roger Bowler, Jan Jaeger & Others 1999-2006      */
 /*              Generic channel device handler                       */
+
+// $Id: hchan.c,v 1.10 2007/06/23 00:04:10 ivan Exp $
+
 /* This code is covered by the QPL Licence                           */
 /**CAUTION*CAUTION*CAUTION*CAUTION*CAUTION*CAUTION*CAUTION*CAUTION****/
 /* THIS CODE IS CURRENTLY IN A DEVELOPMENT STAGE AND IS NOT          */
@@ -13,6 +16,13 @@
 /* communicate with external device handlers.                        */
 /*-------------------------------------------------------------------*/
 
+// $Log: hchan.c,v $
+// Revision 1.10  2007/06/23 00:04:10  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.9  2006/12/08 09:43:21  jj
+// Add CVS message log
+//
 
 #include "hercules.h"
 
@@ -172,6 +182,7 @@ DEVHND hchan_device_hndinfo = {
         NULL,                          /* Device Query used          */
         NULL,                          /* Device Reserve             */
         NULL,                          /* Device Release             */
+        NULL,                          /* Device Attention           */
         NULL,                          /* Immediate CCW Codes        */
         NULL,                          /* Signal Adapter Input       */
         NULL,                          /* Signal Adapter Output      */
@@ -197,7 +208,7 @@ HDL_DEPENDENCY_SECTION;
      HDL_DEPENDENCY(DEVBLK);
      HDL_DEPENDENCY(SYSBLK);
 }
-END_DEPENDENCY_SECTION;
+END_DEPENDENCY_SECTION
 
 
 #if defined(WIN32) && !defined(HDL_USE_LIBTOOL) && !defined(_MSVC_)
@@ -206,7 +217,7 @@ END_DEPENDENCY_SECTION;
   {
       HDL_RESOLVE_PTRVAR( psysblk, sysblk );
   }
-  END_RESOLVER_SECTION;
+  END_RESOLVER_SECTION
 #endif
 
 
@@ -218,5 +229,5 @@ HDL_DEVICE_SECTION;
     HDL_DEVICE(2880, hchan_device_hndinfo );
     HDL_DEVICE(9032, hchan_device_hndinfo );
 }
-END_DEVICE_SECTION;
+END_DEVICE_SECTION
 #endif

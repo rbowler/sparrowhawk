@@ -1,5 +1,15 @@
-/* HDLMAIN.C    (c) Copyright Jan Jaeger, 2003-2006                  */
+/* HDLMAIN.C    (c) Copyright Jan Jaeger, 2003-2007                  */
 /*              Hercules Dynamic Loader                              */
+
+// $Id: hdlmain.c,v 1.48 2007/06/23 00:04:10 ivan Exp $
+//
+// $Log: hdlmain.c,v $
+// Revision 1.48  2007/06/23 00:04:10  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.47  2006/12/08 09:43:25  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -56,7 +66,7 @@ HDL_DEPENDENCY_SECTION;
      HDL_DEPENDENCY(SYSBLK);
      HDL_DEPENDENCY(WEBBLK);
 }
-END_DEPENDENCY_SECTION;
+END_DEPENDENCY_SECTION
 
 
 HDL_REGISTER_SECTION;
@@ -71,6 +81,7 @@ HDL_REGISTER_SECTION;
     HDL_REGISTER( debug_device_state,         UNRESOLVED      );
     HDL_REGISTER( debug_program_interrupt,    UNRESOLVED      );
     HDL_REGISTER( debug_diagnose,             UNRESOLVED      );
+    HDL_REGISTER( debug_iucv,                 UNRESOLVED      );
     HDL_REGISTER( debug_sclp_unknown_command, UNRESOLVED      );
     HDL_REGISTER( debug_sclp_unknown_event,   UNRESOLVED      );
     HDL_REGISTER( debug_sclp_event_data,      UNRESOLVED      );
@@ -78,6 +89,7 @@ HDL_REGISTER_SECTION;
     HDL_REGISTER( debug_watchdog_signal,      UNRESOLVED      );
 #if defined(OPTION_W32_CTCI)
     HDL_REGISTER( debug_tt32_stats,           UNRESOLVED      );
+    HDL_REGISTER( debug_tt32_tracing,         UNRESOLVED      );
 #endif
 
     HDL_REGISTER( hdl_device_type_equates,    UNRESOLVED      );
@@ -98,7 +110,7 @@ HDL_REGISTER_SECTION;
 #endif /*defined(_900_FEATURE_MESSAGE_SECURITY_ASSIST)*/
 
 }
-END_REGISTER_SECTION;
+END_REGISTER_SECTION
 
 
 HDL_RESOLVER_SECTION;
@@ -118,6 +130,7 @@ HDL_RESOLVER_SECTION;
     HDL_RESOLVE( debug_chsc_unknown_request );
 #if defined(OPTION_W32_CTCI)
     HDL_RESOLVE( debug_tt32_stats           );
+    HDL_RESOLVE( debug_tt32_tracing         );
 #endif
 
     HDL_RESOLVE( hdl_device_type_equates    );
@@ -138,14 +151,14 @@ HDL_RESOLVER_SECTION;
 #endif /*defined(_900_FEATURE_MESSAGE_SECURITY_ASSIST)*/
 
 }
-END_RESOLVER_SECTION;
+END_RESOLVER_SECTION
 
 
 HDL_FINAL_SECTION;
 {
     system_cleanup();
 }
-END_FINAL_SECTION;
+END_FINAL_SECTION
 
 
 #endif /*defined(OPTION_DYNAMIC_LOAD)*/
@@ -222,7 +235,7 @@ HDL_DEVICE_SECTION;
     HDL_DEVICE(9335, fbadasd_device_hndinfo );
     HDL_DEVICE(9336, fbadasd_device_hndinfo );
 }
-END_DEVICE_SECTION;
+END_DEVICE_SECTION
 
 
 #endif /*!defined(_GEN_ARCH)*/

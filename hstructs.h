@@ -1,4 +1,4 @@
-/* HSTRUCTS.H   (c) Copyright Roger Bowler, 1999-2006                */
+/* HSTRUCTS.H   (c) Copyright Roger Bowler, 1999-2007                */
 /*              Hercules Structure Definitions                       */
 
 //      This header auto-#included by 'hercules.h'...
@@ -6,10 +6,70 @@
 //      The <config.h> header and other required headers are
 //      presumed to have already been #included ahead of it...
 
+// $Id: hstructs.h,v 1.69 2007/06/23 00:04:11 ivan Exp $
+//
+// $Log: hstructs.h,v $
+// Revision 1.69  2007/06/23 00:04:11  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.68  2007/06/06 22:14:58  gsmith
+// Fix SYNCHRONIZE_CPUS when numcpu > number of host processors - Greg
+//
+// Revision 1.67  2007/03/22 11:56:19  rbowler
+// Remove double hyphen option from print-to-pipe feature
+//
+// Revision 1.66  2007/03/15 20:57:55  gsmith
+// Fix fba when the fba device is > 4G
+//
+// Revision 1.65  2007/03/13 15:55:29  fish
+// Backward-compatible fix of print-to-pipe to accept parameters.  :)
+//
+// Revision 1.64  2007/03/05 14:44:17  rbowler
+// Restore original print-to-pipe parameter-passing
+//
+// Revision 1.63  2007/02/26 15:35:07  fish
+// Fix print-to-pipe to accept paramters
+//
+// Revision 1.62  2007/02/03 18:58:06  gsmith
+// Fix MVT tape CMDREJ error
+//
+// Revision 1.61  2007/01/31 00:48:03  kleonard
+// Add logopt config statement and panel command
+//
+// Revision 1.60  2007/01/11 19:54:34  fish
+// Addt'l keep-alive mods: create associated supporting config-file stmt and panel command where individual customer-preferred values can be specified and/or dynamically modified.
+//
+// Revision 1.59  2007/01/07 11:25:33  rbowler
+// Instruction tracing regsfirst and noregs modes
+//
+// Revision 1.58  2007/01/06 09:05:18  gsmith
+// Enable display_inst to display traditionally too
+//
+// Revision 1.57  2007/01/04 23:12:04  gsmith
+// remove thunk calls for program_interrupt
+//
+// Revision 1.56  2007/01/04 01:08:41  gsmith
+// 03 Jan 2007 single_cpu_dw fetch/store patch for ia32
+//
+// Revision 1.55  2006/12/21 22:39:39  gsmith
+// 21 Dec 2006 Range for s+, t+ - Greg Smith
+//
+// Revision 1.54  2006/12/20 04:26:20  gsmith
+// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
+//
+// Revision 1.53  2006/12/11 11:39:17  ivan
+// Set tape blockid type to U32 in devblk instead of long that becomes 64 bit wide
+// on 64 bit systems. Suggested by rod/zazubek on main list
+//
+// Revision 1.52  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
+
 #ifndef _HSTRUCTS_H
 #define _HSTRUCTS_H
 
 #include "hercules.h"
+#include "opcode.h"
 
 /*-------------------------------------------------------------------*/
 /* Structure definition for CPU register context                     */
@@ -22,7 +82,17 @@ struct REGS {                           /* Processor registers       */
 
         DW      px;                     /* Prefix register           */
         PSW     psw;                    /* Program status word       */
-        PSW     captured_zpsw;          /* Captured-z/Arch PSW reg   */
+        BYTE   *ip;                     /* Mainstor inst address     */
+
+     /* AIA - Instruction fetch accelerator                          */
+        BYTE   *aip;                    /* Mainstor page address     */
+        uintptr_t aim;                  /* Mainstor xor address      */
+        BYTE   *aie;                    /* Mainstor page end address */
+        DW      aiv;                    /* Virtual page address      */
+
+        U64     bear;                   /* Breaking event address reg*/
+        BYTE   *bear_ip;                /* Breaking event inst ptr   */
+
         DW      gr[16];                 /* General registers         */
 
         DW      cr_special[1];          /* Negative Index into cr    */
@@ -39,6 +109,26 @@ struct REGS {                           /* Processor registers       */
         DW      mc;                     /* Monitor Code              */
         DW      ea;                     /* Exception address         */
         DW      et;                     /* Execute Target address    */
+
+        unsigned int                    /* Flags (cpu thread only)   */
+                execflag:1,             /* 1=EXecuted instruction    */
+                permode:1,              /* 1=PER active              */
+                instinvalid:1,          /* 1=Inst field is invalid   */
+                opinterv:1,             /* 1=Operator intervening    */
+                checkstop:1,            /* 1=CPU is checkstop-ed     */
+                hostint:1,              /* 1=Host generated interrupt*/
+                host:1,                 /* REGS are hostregs         */
+                guest:1;                /* REGS are guestregs        */
+        unsigned int                    /* Flags (intlock serialized)*/
+                dummy:1,                /* 1=Dummy regs structure    */
+                configured:1,           /* 1=CPU is online           */
+                loadstate:1,            /* 1=CPU is in load state    */
+                ghostregs:1,            /* 1=Ghost registers (panel) */
+                invalidate:1,           /* 1=Do AIA/AEA invalidation */
+                tracing:1,              /* 1=Trace is active         */
+                stepwait:1,             /* 1=Wait in inst stepping   */
+                sigpreset:1,            /* 1=SIGP cpu reset received */
+                sigpireset:1;           /* 1=SIGP initial cpu reset  */
 
         S64     cpu_timer;              /* CPU timer epoch           */
         S64     int_timer;              /* S/370 Interval timer      */
@@ -90,8 +180,6 @@ struct REGS {                           /* Processor registers       */
 #define PX_L      px.F.L.F
 #define AIV_G     aiv.D
 #define AIV_L     aiv.F.L.F
-#define AIE_G     aie.D
-#define AIE_L     aie.F.L.F
 #define AR(_r)    ar[(_r)]
 
         U16     chanset;                /* Connected channel set     */
@@ -105,29 +193,38 @@ struct REGS {                           /* Processor registers       */
         BYTE   *storkeys;               /* -> Main storage key array */
         RADR    mainlim;                /* Central Storage limit or  */
                                         /* guest storage limit (SIE) */
-#if defined(_FEATURE_SIE)
-     /* These notes are to try and maintain my own sanity ... Greg
-      * `sie_state' has the real address of the SIEBK
-      * `siebk' has the mainstor address of the SIEBK
-      * `sie_active' is 1 in hostregs if SIE is executing
-      *         and the current register context is `guestregs'
-      * `sie_mode' is 1 in guestregs always
-      * `hostregs' is always NULL in hostregs
-      *         (sysblk.regs[i]->hostregs == NULL)
-      * `guestregs' is always NULL in guestregs
-      *         (sysblk.regs[i]->guestregs->guestregs == NULL)
+        PSA_3XX *psa;                   /* -> PSA for this CPU       */
+
+     /*
+      * The fields hostregs and guestregs have been move outside the
+      * scope of _FEATURE_SIE to reduce conditional code.
+      *
+      *   sysblk.regs[i] always points to the host regs
+      *   flag `host' is always 1 for the host regs
+      *   flag `guest' is always 1 for the guest regs
+      *   `hostregs' is always equal to sysblk.regs[i] (in both
+      *       hostregs and guestregs)
+      *   `guestregs' is always equal to sysblk.regs[i]->guestregs
+      *       (in both hostregs and guestregs).
+      *       sysblk.regs[i]->guestregs is NULL until the first SIE
+      *       instruction is executed on that CPU.
+      *   `sie_active' is 1 in hostregs if SIE is executing
+      *       and the current register context is `guestregs'
+      *   `sie_mode' is 1 in guestregs always
+      *   `sie_state' has the real address of the SIEBK
+      *   `siebk' has the mainstor address of the SIEBK
       */
-        RADR    sie_state;              /* Address of the SIE state
-                                           descriptor block or 0 when
-                                           not running under SIE     */
-        SIEBK  *siebk;                  /* Sie State Desc structure  */
-        SIEFN   sie_guestpi;            /* SIE guest pgm int routine */
-        SIEFN   sie_hostpi;             /* SIE host pgm int routine  */
         REGS   *hostregs;               /* Pointer to the hypervisor
                                            register context          */
         REGS   *guestregs;              /* Pointer to the guest
                                            register context          */
-        PSA_3XX *psa;                   /* PSA of guest CPU          */
+        SYSBLK *sysblk;                 /* Pointer to sysblk         */
+
+#if defined(_FEATURE_SIE)
+        RADR    sie_state;              /* Address of the SIE state
+                                           descriptor block or 0 when
+                                           not running under SIE     */
+        SIEBK  *siebk;                  /* Sie State Desc structure  */
         RADR    sie_px;                 /* Host address of guest px  */
         RADR    sie_mso;                /* Main Storage Origin       */
         RADR    sie_xso;                /* eXpanded Storage Origin   */
@@ -135,11 +232,11 @@ struct REGS {                           /* Processor registers       */
         RADR    sie_rcpo;               /* Ref and Change Preserv.   */
         RADR    sie_scao;               /* System Contol Area        */
         S64     sie_epoch;              /* TOD offset in state desc. */
+#endif /*defined(_FEATURE_SIE)*/
         unsigned int
                 sie_active:1,           /* SIE active (host only)    */
                 sie_mode:1,             /* Running under SIE (guest) */
                 sie_pref:1;             /* Preferred-storage mode    */
-#endif /*defined(_FEATURE_SIE)*/
 
 // #if defined(FEATURE_PER)
         U16     perc;                   /* PER code                  */
@@ -147,30 +244,19 @@ struct REGS {                           /* Processor registers       */
         BYTE    peraid;                 /* PER access id             */
 // #endif /*defined(FEATURE_PER)*/
 
-// #if defined(FEATURE_PER3)
-        U64     bear;                   /* Breaking event address reg*/
-// #endif /*defined(FEATURE_PER3)*/
-
-        BYTE    cpustate;               /* CPU stopped/started state */
-        unsigned int                    /* Flags (cpu thread only)   */
-                opinterv:1,             /* 1=Operator intervening    */
-                mainlock:2,             /* !0=Mainlock held           */
-                checkstop:1,            /* 1=CPU is checkstop-ed     */
-                hostint:1,              /* 1=Host generated interrupt*/
-                execflag:1,             /* 1=EXecuted instruction    */
-                instvalid:1,            /* 1=Inst field is valid     */
-                permode:1;              /* 1=PER active              */
-        unsigned int                    /* Flags (intlock serialized)*/
-                dummy:1,                /* 1=Dummy regs structure    */
-                configured:1,           /* 1=CPU is online           */
-                loadstate:1,            /* 1=CPU is in load state    */
-                ghostregs:1,            /* 1=Ghost registers (panel) */
-                invalidate:1,           /* 1=Do AIA/AEA invalidation */
-                tracing:1,              /* 1=Trace is active         */
-                sigpreset:1,            /* 1=SIGP cpu reset received */
-                sigpireset:1;           /* 1=SIGP initial cpu reset  */
+        U32     cpubit;
         U32     ints_state;             /* CPU Interrupts Status     */
         U32     ints_mask;              /* Respective Interrupts Mask*/
+     /*
+      * Making the following flags 'stand-alone' (instead of bit-
+      * flags like they were) addresses a compiler bit-flag serial-
+      * ization issue that occurs with the 'SYNCHRONIZE_CPUS' macro
+      * used during synchronize broadcast (cpu<->cpu communication)
+      */
+        int     intwait;                /* 1=Waiting on intlock      */
+        int     syncio;                 /* 1=Synchronous i/o active  */
+
+        BYTE    cpustate;               /* CPU stopped/started state */
         BYTE    malfcpu                 /* Malfuction alert flags    */
                     [MAX_CPU_ENGINES];  /* for each CPU (1=pending)  */
         BYTE    emercpu                 /* Emergency signal flags    */
@@ -179,10 +265,8 @@ struct REGS {                           /* Processor registers       */
         BYTE    inst[8];                /* Fetched instruction when
                                            instruction crosses a page
                                            boundary                  */
-        BYTE    *ip;                    /* Pointer to last-fetched
-                                           instruction (either inst
-                                           above or in mainstor      */
         BYTE    *invalidate_main;       /* Mainstor addr to invalidat*/
+        PSW     captured_zpsw;          /* Captured-z/Arch PSW reg   */
 #if defined(_FEATURE_VECTOR_FACILITY)
         VFREGS *vf;                     /* Vector Facility           */
 #endif /*defined(_FEATURE_VECTOR_FACILITY)*/
@@ -194,35 +278,6 @@ struct REGS {                           /* Processor registers       */
                                            switch architecture mode  */
         COND    intcond;                /* CPU interrupt condition   */
         LOCK    *cpulock;               /* CPU lock for this CPU     */
-
-     /* Opcode table pointers                                        */
-
-        FUNC   *s370_opcode_table;
-        FUNC   *s370_opcode_a4xx, *s370_opcode_a5xx, *s370_opcode_a6xx,
-               *s370_opcode_b2xx, *s370_opcode_e4xx, *s370_opcode_e5xx,
-               *s370_opcode_e6xx, *s370_opcode_edxx;
-
-        FUNC   *s390_opcode_table;
-        FUNC   *s390_opcode_01xx, *s390_opcode_a4xx, *s390_opcode_a5xx,
-               *s390_opcode_a6xx, *s390_opcode_a7xx, *s390_opcode_b2xx,
-               *s390_opcode_b3xx, *s390_opcode_b9xx, *s390_opcode_c0xx,
-               *s390_opcode_c2xx,                               /*@Z9*/
-               *s390_opcode_e3xx, *s390_opcode_e4xx, *s390_opcode_e5xx,
-               *s390_opcode_ebxx, *s390_opcode_ecxx, *s390_opcode_edxx;
-
-        FUNC   *z900_opcode_table;
-        FUNC   *z900_opcode_01xx, *z900_opcode_a5xx, *z900_opcode_a7xx,
-               *z900_opcode_b2xx, *z900_opcode_b3xx, *z900_opcode_b9xx,
-               *z900_opcode_c0xx,
-               *z900_opcode_c2xx,                               /*@Z9*/
-               *z900_opcode_e3xx, *z900_opcode_e5xx,
-               *z900_opcode_ebxx, *z900_opcode_ecxx, *z900_opcode_edxx;
-
-     /* AIA - Instruction fetch accelerator                          */
-
-        BYTE   *aim;                    /* Mainstor address          */
-        DW      aiv;                    /* Virtual address           */
-        DW      aie;                    /* Virtual page end address  */
 
      /* Mainstor address lookup accelerator                          */
 
@@ -236,6 +291,82 @@ struct REGS {                           /* Processor registers       */
         BYTE    aea_common_alb[16];     /* alb pseudo registers      */
 
         BYTE    aea_aleprot[16];        /* ale protected             */
+
+     /* Function pointers */
+        pi_func program_interrupt;
+        func    trace_br;
+
+     /* ------------------------------------------------------------ */
+        U64     regs_copy_end;          /* Copy regs to here         */
+     /* ------------------------------------------------------------ */
+
+     /* Opcode table pointers                                        */
+
+        FUNC    s370_opcode_table[256];
+        FUNC   *s370_opcode_a4xx,
+               *s370_opcode_a5xx,
+               *s370_opcode_a6xx,
+ #if defined(MULTI_BYTE_ASSIST)
+                s370_opcode_b2xx[256],
+ #else
+               *s370_opcode_b2xx,
+ #endif
+               *s370_opcode_e4xx,
+               *s370_opcode_e5xx,
+               *s370_opcode_e6xx,
+               *s370_opcode_edxx;
+
+        FUNC    s390_opcode_table[256];
+        FUNC   *s390_opcode_01xx,
+               *s390_opcode_a4xx,
+               *s390_opcode_a5xx,
+               *s390_opcode_a6xx,
+ #if defined(MULTI_BYTE_ASSIST)
+                s390_opcode_a7xx[256],
+                s390_opcode_b2xx[256],
+                s390_opcode_b9xx[256],
+                s390_opcode_c0xx[256],
+                s390_opcode_e3xx[256],
+                s390_opcode_ebxx[256],
+ #else
+               *s390_opcode_a7xx,
+               *s390_opcode_b2xx,
+               *s390_opcode_b9xx,
+               *s390_opcode_c0xx,
+               *s390_opcode_e3xx,
+               *s390_opcode_ebxx,
+ #endif
+               *s390_opcode_b3xx,
+               *s390_opcode_c2xx,
+               *s390_opcode_e4xx,
+               *s390_opcode_e5xx,
+               *s390_opcode_ecxx,
+               *s390_opcode_edxx;
+
+        FUNC    z900_opcode_table[256];
+        FUNC   *z900_opcode_01xx,
+               *z900_opcode_a5xx,
+ #if defined(MULTI_BYTE_ASSIST)
+                z900_opcode_a7xx[256],
+                z900_opcode_b2xx[256],
+                z900_opcode_b9xx[256],
+                z900_opcode_c0xx[256],
+                z900_opcode_e3xx[256],
+                z900_opcode_ebxx[256],
+ #else
+               *z900_opcode_a7xx,
+               *z900_opcode_b2xx,
+               *z900_opcode_b9xx,
+               *z900_opcode_c0xx,
+               *z900_opcode_e3xx,
+               *z900_opcode_ebxx,
+ #endif
+               *z900_opcode_b3xx,
+               *z900_opcode_c2xx,
+               *z900_opcode_c8xx,
+               *z900_opcode_e5xx,
+               *z900_opcode_ecxx,
+               *z900_opcode_edxx;
 
      /* TLB - Translation lookaside buffer                           */
 
@@ -278,7 +409,7 @@ struct ZPBLK {
 /* System configuration block                                        */
 /*-------------------------------------------------------------------*/
 struct SYSBLK {
-#define HDL_VERS_SYSBLK   "3.04"        /* Internal Version Number   */
+#define HDL_VERS_SYSBLK   "3.05"        /* Internal Version Number   */
 #define HDL_SIZE_SYSBLK   sizeof(SYSBLK)
         int     arch_mode;              /* Architecturual mode       */
                                         /* 0 == S/370                */
@@ -294,6 +425,7 @@ struct SYSBLK {
         TID     wdtid;                  /* Thread-id for watchdog    */
         U16     ipldev;                 /* IPL device                */
         int     iplcpu;                 /* IPL cpu                   */
+        int     ipllcss;                /* IPL lcss                  */
         int     numcpu;                 /* Number of CPUs installed  */
         int     numvec;                 /* Number vector processors  */
         int     maxcpu;                 /* Max number of CPUs        */
@@ -316,12 +448,23 @@ struct SYSBLK {
         REGS    footprregs[MAX_CPU_ENGINES][OPTION_FOOTPRINT_BUFFER];
         U32     footprptr[MAX_CPU_ENGINES];
 #endif
+
+#define LOCK_OWNER_NONE  0xFFFF
+#define LOCK_OWNER_OTHER 0xFFFE
+        U16     mainowner;              /* Mainlock owner            */
+        U16     intowner;               /* Intlock owner             */
+
         LOCK    mainlock;               /* Main storage lock         */
         LOCK    intlock;                /* Interrupt lock            */
         LOCK    sigplock;               /* Signal processor lock     */
         ATTR    detattr;                /* Detached thread attribute */
+        ATTR    joinattr;               /* Joinable thread attribute */
         TID     cnsltid;                /* Thread-id for console     */
         TID     socktid;                /* Thread-id for sockdev     */
+                                        /* 3270 Console Keep-Alive:  */
+        int     kaidle;                 /* Keepalive idle seconds    */
+        int     kaintv;                 /* Keepalive probe interval  */
+        int     kacnt;                  /* Keepalive probe count     */
 #if defined( OPTION_WAKEUP_SELECT_VIA_PIPE )
         LOCK    cnslpipe_lock;          /* signaled flag access lock */
         int     cnslpipe_flag;          /* 1 == already signaled     */
@@ -341,10 +484,16 @@ struct SYSBLK {
 #define SHCMDOPT_DISABLE  0x80          /* Globally disable 'sh' cmd */
 #define SHCMDOPT_NODIAG8  0x40          /* Disallow only for DIAG8   */
         int     panrate;                /* Panel refresh rate        */
+        int     timerint;               /* microsecs timer interval  */
         int     npquiet;                /* New Panel quiet indicator */
+        char   *pantitle;               /* Alt console panel title   */
+#if defined(OPTION_HAO)
+        TID     haotid;                 /* Herc Auto-Oper thread-id  */
+#endif /* defined(OPTION_HAO) */
 #if defined(OPTION_SCSI_TAPE)
         int     auto_scsi_mount_secs;   /* Check for SCSI tape mount
                                            frequency; 0 == disabled  */
+#define DEFAULT_AUTO_SCSI_MOUNT_SECS  (5)
 #endif
         DEVBLK *firstdev;               /* -> First device block     */
 #if defined(OPTION_FAST_DEVLOOKUP)
@@ -353,7 +502,7 @@ struct SYSBLK {
         DEVBLK ***subchan_fl;           /* Subchannel table fast     */
                                         /* lookup table              */
 #endif  /* FAST_DEVICE_LOOKUP */
-        U16     highsubchan;            /* Highest subchannel + 1    */
+        U16     highsubchan[FEATURE_LCSS_MAX];  /* Highest subchan+1 */
         U32     chp_reset[8];           /* Channel path reset masks  */
         IOINT  *iointq;                 /* I/O interrupt queue       */
 #if !defined(OPTION_FISHIO)
@@ -370,38 +519,32 @@ struct SYSBLK {
         U32     servparm;               /* Service signal parameter  */
         unsigned int                    /* Flags                     */
                 daemon_mode:1,          /* Daemon mode active        */
-                sigintreq:1,            /* 1=SIGINT request pending  */
-                insttrace:1,            /* 1=Instruction trace       */
-                inststep:1,             /* 1=Instruction step        */
-                instbreak:1,            /* 1=Have breakpoint         */
-                inststop:1,             /* 1 = stop on program check */ /*VMA*/
-                vmactive:1,             /* 1 = vma active            */ /*VMA*/
-                mschdelay:1,            /* 1 = delay MSCH instruction*/ /*LNX*/
+                panel_init:1,           /* Panel display initialized */
+                sigintreq:1,            /* 1 = SIGINT request pending*/
+                insttrace:1,            /* 1 = Instruction trace     */
+                inststep:1,             /* 1 = Instruction step      */
                 shutdown:1,             /* 1 = shutdown requested    */
                 shutfini:1,             /* 1 = shutdown complete     */
                 main_clear:1,           /* 1 = mainstor is cleared   */
-                xpnd_clear:1;           /* 1 = xpndstor is cleared   */
+                xpnd_clear:1,           /* 1 = xpndstor is cleared   */
+                showregsfirst:1,        /* 1 = show regs before inst */
+                showregsnone:1,         /* 1 = show no registers     */
+                nomountedtapereinit:1,  /* 1 = disallow tape devinit
+                                             if tape already mounted */
+                logoptnotime:1;         /* 1 = don't timestamp log   */
         U32     ints_state;             /* Common Interrupts Status  */
         U32     config_mask;            /* Configured CPUs           */
         U32     started_mask;           /* Started CPUs              */
         U32     waiting_mask;           /* Waiting CPUs              */
-        int     broadcast_code;         /* Broadcast code            */
-#define BROADCAST_PTLB  1               /* Broadcast purge tlb       */
-#define BROADCAST_PALB  2               /* Broadcast purge alb       */
-#define BROADCAST_PTLBE 4               /* Broadcast purge tlb entry */
-        DW      broadcast_pfra;         /* Broadcast pfra            */
-#define BROADCAST_PFRA_G broadcast_pfra.D
-#define BROADCAST_PFRA_L broadcast_pfra.F.L.F
-        int     broadcast_count;        /* Broadcast CPU count       */
-        COND    broadcast_cond;         /* Broadcast condition       */
-        U64     breakaddr[2];           /* Breakpoint addresses      */
+        U64     traceaddr[2];           /* Tracing address range     */
+        U64     stepaddr[2];            /* Stepping address range    */
 #ifdef FEATURE_ECPSVM
 //
         /* ECPS:VM */
         struct {
-                U16 available:1,
-                    debug:1;
-                U16 level;
+            u_int level:16;
+            u_int debug:1;
+            u_int available:1;
         } ecpsvm;                       /* ECPS:VM structure         */
 //
 #endif
@@ -419,6 +562,11 @@ struct SYSBLK {
         char   *httpuser;               /* HTTP userid               */
         char   *httppass;               /* HTTP password             */
         char   *httproot;               /* HTTP root                 */
+     /* Fields used by SYNCHRONIZE_CPUS */
+        int     syncing;                /* 1=Sync in progress        */
+        U32     sync_mask;              /* CPU mask for syncing CPUs */
+        COND    sync_cond;              /* COND for syncing CPU      */
+        COND    sync_bc_cond;           /* COND for other CPUs       */
 #if defined(_FEATURE_ASN_AND_LX_REUSE)
         int     asnandlxreuse;          /* ASN And LX Reuse enable   */
 #endif
@@ -462,6 +610,7 @@ struct SYSBLK {
         U64 imapb9[256];
         U64 imapc0[16];
         U64 imapc2[16];                                         /*@Z9*/
+        U64 imapc8[16];
         U64 imape3[256];
         U64 imape4[256];
         U64 imape5[256];
@@ -480,6 +629,7 @@ struct SYSBLK {
             + sizeof(sysblk.imapb9) \
             + sizeof(sysblk.imapc0) \
             + sizeof(sysblk.imapc2) /*@Z9*/ \
+            + sizeof(sysblk.imapc8) \
             + sizeof(sysblk.imape3) \
             + sizeof(sysblk.imape4) \
             + sizeof(sysblk.imape5) \
@@ -489,6 +639,9 @@ struct SYSBLK {
             + sizeof(sysblk.imapxx) )
 #endif
 
+        char    *logofile;              /* Fancy 3270 logo box       */
+        char    **herclogo;             /* 3270 Logo data            */
+        size_t  logolines;              /* Number of lines in logo   */
 #if defined(OPTION_MIPS_COUNTING)
         /* Merged Counters for all CPUs                              */
         U64     instcount;              /* Instruction counter       */
@@ -496,7 +649,10 @@ struct SYSBLK {
         U32     siosrate;               /* IOs per second            */
 #endif /*defined(OPTION_MIPS_COUNTING)*/
 
+        int     regs_copy_len;          /* Length to copy for REGS   */
+
         REGS    dummyregs;              /* Regs for unconfigured CPU */
+
 };
 
 /*-------------------------------------------------------------------*/
@@ -517,14 +673,16 @@ struct IOINT {                          /* I/O interrupt queue entry */
 /* Device configuration block                                        */
 /*-------------------------------------------------------------------*/
 struct DEVBLK {                         /* Device configuration block*/
-#define HDL_VERS_DEVBLK   "3.03"        /* Internal Version Number   */
+#define HDL_VERS_DEVBLK   "3.05"        /* Internal Version Number   */
 #define HDL_SIZE_DEVBLK   sizeof(DEVBLK)
         DEVBLK *nextdev;                /* -> next device block      */
+        REGS   *regs;                   /* -> REGS if syncio         */
         LOCK    lock;                   /* Device block lock         */
         int     allocated;              /* Device block free/in use  */
 
         /*  device identification                                    */
 
+        U16     ssid;                   /* Subsystem ID incl. lcssid */
         U16     subchan;                /* Subchannel number         */
         U16     devnum;                 /* Device number             */
         U16     devtype;                /* Device type               */
@@ -544,7 +702,7 @@ struct DEVBLK {                         /* Device configuration block*/
         BYTE   *storkeys;               /* -> Main storage key array */
         RADR    mainlim;                /* Central Storage limit or  */
                                         /* guest storage limit (SIE) */
-        char    filename[PATH_MAX];     /* filename                  */
+        char    filename[PATH_MAX+1];   /* filename (plus poss "|")  */
 
         /*  device i/o fields...                                     */
 
@@ -650,6 +808,9 @@ struct DEVBLK {                         /* Device configuration block*/
         int     ioactive;               /* System Id active on device*/
 #define DEV_SYS_NONE    0               /* No active system on device*/
 #define DEV_SYS_LOCAL   0xffff          /* Local system active on dev*/
+        /* By Adrian - Password for Tape drive (and 1 spare)         */   
+        BYTE    drvpwd[11];               /* Password for drive        */   
+        BYTE    reserved3;              /* (pad/align/unused/avail)  */   
 
         /*  control flags...                                         */
 
@@ -657,7 +818,7 @@ struct DEVBLK {                         /* Device configuration block*/
 #ifdef OPTION_CKD_KEY_TRACING
                 ckdkeytrace:1,          /* 1=Log CKD_KEY_TRACE       */
 #endif /*OPTION_CKD_KEY_TRACING*/
-                syncio:1,               /* 1=Synchronous I/Os allowed*/
+                syncio:2,               /* 1=Synchronous I/Os allowed*/
                 shared:1,               /* 1=Device is shareable     */
                 console:1,              /* 1=Console device          */
                 connected:1,            /* 1=Console client connected*/
@@ -734,10 +895,9 @@ struct DEVBLK {                         /* Device configuration block*/
         int     pos3270;                /* Current screen position   */
         int     keybdrem;               /* Number of bytes remaining
                                            in keyboard read buffer   */
-        U32                             /* Flags                     */
-                eab3270:1,              /* 1=Extended attributes     */
-                ewa3270:1,              /* 1=Last erase was EWA      */
-                prompt1052:1;           /* 1=Prompt for linemode i/p */
+        u_int   eab3270:1;              /* 1=Extended attributes     */
+        u_int   ewa3270:1;              /* 1=Last erase was EWA      */
+        u_int   prompt1052:1;           /* 1=Prompt for linemode i/p */
         BYTE    aid3270;                /* Current input AID value   */
         BYTE    mod3270;                /* 3270 model number         */
 
@@ -751,13 +911,12 @@ struct DEVBLK {                         /* Device configuration block*/
                                            read from data buffer     */
         int     cardrem;                /* Number of bytes remaining
                                            in data buffer            */
-        U32                             /* Flags                     */
-                multifile:1,            /* 1=auto-open next i/p file */
-                rdreof:1,               /* 1=Unit exception at EOF   */
-                ebcdic:1,               /* 1=Card deck is EBCDIC     */
-                ascii:1,                /* 1=Convert ASCII to EBCDIC */
-                trunc:1,                /* Truncate overlength record*/
-                autopad:1;              /* 1=Pad incomplete last rec
+        u_int   multifile:1;            /* 1=auto-open next i/p file */
+        u_int   rdreof:1;               /* 1=Unit exception at EOF   */
+        u_int   ebcdic:1;               /* 1=Card deck is EBCDIC     */
+        u_int   ascii:1;                /* 1=Convert ASCII to EBCDIC */
+        u_int   trunc:1;                /* Truncate overlength record*/
+        u_int   autopad:1;              /* 1=Pad incomplete last rec
                                            to 80 bytes if EBCDIC     */
 
         /*  Device dependent fields for ctcadpt                      */
@@ -767,8 +926,7 @@ struct DEVBLK {                         /* Device configuration block*/
         int     ctcrem;                 /* bytes remaining in buffer */
         int     ctclastpos;             /* last packet read          */
         int     ctclastrem;             /* last packet read          */
-        U32                             /* Flags                     */
-                ctcxmode:1;             /* 0=Basic mode, 1=Extended  */
+        u_int   ctcxmode:1;             /* 0=Basic mode, 1=Extended  */
         BYTE    ctctype;                /* CTC_xxx device type       */
         BYTE    netdevname[IFNAMSIZ];   /* network device name       */
 
@@ -779,22 +937,21 @@ struct DEVBLK {                         /* Device configuration block*/
         int     printrem;               /* Number of bytes remaining
                                            in print buffer           */
         pid_t   ptpcpid;                /* print-to-pipe child pid   */
-        U32                             /* Flags                     */
-                crlf:1,                 /* 1=CRLF delimiters, 0=LF   */
-                diaggate:1,             /* 1=Diagnostic gate command */
-                fold:1,                 /* 1=Fold to upper case      */
-                ispiped:1,              /* 1=Piped device            */
-                stopprt:1;              /* 1=stopped; 0=started      */
+        u_int   crlf:1;                 /* 1=CRLF delimiters, 0=LF   */
+        u_int   diaggate:1;             /* 1=Diagnostic gate command */
+        u_int   fold:1;                 /* 1=Fold to upper case      */
+        u_int   ispiped:1;              /* 1=Piped device            */
+        u_int   stopprt:1;              /* 1=stopped; 0=started      */
 
         /*  Device dependent fields for tapedev                      */
 
         void   *omadesc;                /* -> OMA descriptor array   */
         U16     omafiles;               /* Number of OMA tape files  */
         U16     curfilen;               /* Current file number       */
-        long    blockid;                /* Current device block ID   */
-        long    nxtblkpos;              /* Offset from start of file
+        U32     blockid;                /* Current device block ID   */
+        off_t   nxtblkpos;              /* Offset from start of file
                                            to next block             */
-        long    prvblkpos;              /* Offset from start of file
+        off_t   prvblkpos;              /* Offset from start of file
                                            to previous block         */
         U16     curblkrem;              /* Number of bytes unread
                                            from current block        */
@@ -804,26 +961,25 @@ struct DEVBLK {                         /* Device configuration block*/
 
         struct                          /* HET device parms          */
         {
-            U16 compress:1;             /* 1=Compression enabled     */
-            U16 method:3;               /* Compression method        */
-            U16 level:4;                /* Compression level         */
-            U16 strictsize:1;           /* Strictly enforce MAXSIZE  */
-            U16 displayfeat:1;          /* Device has a display      */
+          u_int compress:1;             /* 1=Compression enabled     */
+          u_int method:3;               /* Compression method        */
+          u_int level:4;                /* Compression level         */
+          u_int strictsize:1;           /* Strictly enforce MAXSIZE  */
+          u_int displayfeat:1;          /* Device has a display      */
                                         /* feature installed         */
-            U16 deonirq:1;              /* DE on IRQ on tape motion  */
+          u_int deonirq:1;              /* DE on IRQ on tape motion  */
                                         /* MVS 3.8j workaround       */
-            U16 logical_readonly;       /* Tape is forced READ ONLY  */
-            U16 chksize;                /* Chunk size                */
-            size_t maxsize;             /* Maximum allowed TAPE file
+          u_int logical_readonly:1;     /* Tape is forced READ ONLY  */
+          U16   chksize;                /* Chunk size                */
+          off_t maxsize;                /* Maximum allowed TAPE file
                                            size                      */
-            size_t eotmargin;           /* Amount of space left
+          off_t eotmargin;              /* Amount of space left
                                            before reporting EOT      */
         }       tdparms;                /* HET device parms          */
-        U32                             /* Flags                     */
-                poserror:1,             /* Positioning error         */
-                readonly:1,             /* 1=Tape is write-protected */
-                longfmt:1,              /* 1=Long record format (DDR)*/ /*DDR*/
-                sns_pending:1;          /* Contingency Allegiance    */
+        u_int   poserror:1;             /* Positioning error         */
+        u_int   readonly:1;             /* 1=Tape is write-protected */
+        u_int   longfmt:1;              /* 1=Long record format (DDR)*/ /*DDR*/
+        u_int   sns_pending:1;          /* Contingency Allegiance    */
                                         /* - means : don't build a   */
                                         /* sense on X'04' : it's     */
                                         /* aleady there              */
@@ -832,8 +988,21 @@ struct DEVBLK {                         /* Device configuration block*/
                                         /*        or a device init   */
 #if defined(OPTION_SCSI_TAPE)
         U32     sstat;                  /* Generic SCSI tape device-
-                                           independent status field  */
+                                           independent status field;
+                                           (struct mtget->mt_gstat)  */
         TID     stape_mountmon_tid;     /* Tape-mount monitor thread */
+        u_int   stape_close_rewinds:1;  /* 1=Rewind at close         */
+        u_int   stape_blkid_32:1;       /* 1=block-ids are 32 bits   */
+        u_int   stape_no_erg:1;         /* 1=ignore Erase Gap CCWs   */
+        u_int   stape_getstat_busy:1;   /* 1=Status wrkr thrd busy   */
+        u_int   stape_threads_exit:1;   /* 1=Ask helpr thrds to exit */
+        TID     stape_getstat_tid;      /* Tape status wrkr thrd tid */
+        LOCK    stape_getstat_lock;     /* LOCK for status wrkr thrd */
+        COND    stape_getstat_cond;     /* COND for status wrkr thrd */
+        COND    stape_exit_cond;        /* thread wait for exit COND */
+        U32     stape_getstat_sstat;    /* status wrkr thrd status   */
+        struct timeval
+                stape_getstat_query_tod;/* TOD of actual drive query */
 #endif
         BYTE    tapedevt;               /* Hercules tape device type */
         TAPEMEDIA_HANDLER *tmh;         /* Tape Media Handling       */
@@ -863,9 +1032,10 @@ struct DEVBLK {                         /* Device configuration block*/
 #define TAPEDISPTYP_REWINDING      3    /* Rewind in progress   (SYS)*/
 #define TAPEDISPTYP_UNLOADING      4    /* Unload in progress   (SYS)*/
 #define TAPEDISPTYP_CLEAN          5    /* Clean recommended    (SYS)*/
-#define TAPEDISPTYP_MOUNT          6    /* Mount Message active      */
-#define TAPEDISPTYP_UNMOUNT        7    /* Unmount message active    */
-#define TAPEDISPTYP_UMOUNTMOUNT    8    /* Unmount/Mount msg active  */
+#define TAPEDISPTYP_MOUNT          6    /* Display Until Mounted     */
+#define TAPEDISPTYP_UNMOUNT        7    /* Display Until Unmounted   */
+#define TAPEDISPTYP_UMOUNTMOUNT    8    /* Display #1 Until Unmounted,
+                                              then #2 Until Mounted  */
 #define TAPEDISPTYP_WAITACT        9    /* Display until motion      */
 
 #define IS_TAPEDISPTYP_SYSMSG( dev ) \
@@ -896,24 +1066,25 @@ struct DEVBLK {                         /* Device configuration block*/
         /*  Device dependent fields for fbadasd                      */
 
         FBADEV *fbatab;                 /* Device table entry        */
-        int     fbaorigin;              /* Device origin block number*/
         int     fbanumblk;              /* Number of blocks in device*/
-        OFF_T   fbarba;                 /* Relative byte offset      */
-        OFF_T   fbaend;                 /* Last RBA in file          */
-        int     fbaxblkn;               /* Offset from start of device
-                                           to first block of extent  */
-        int     fbaxfirst;              /* Block number within dataset
-                                           of first block of extent  */
-        int     fbaxlast;               /* Block number within dataset
-                                           of last block of extent   */
-        int     fbalcblk;               /* Block number within dataset
-                                           of first block for locate */
-        int     fbalcnum;               /* Block count for locate    */
         int     fbablksiz;              /* Physical block size       */
-        int                             /* Flags                     */
-                fbaxtdef:1;             /* 1=Extent defined          */
-        BYTE    fbaoper;                /* Locate operation byte     */
+        off_t   fbaorigin;              /* Device origin block number*/
+        off_t   fbarba;                 /* Relative byte offset      */
+        off_t   fbaend;                 /* Last RBA in file          */
+        /* Values from define extent */
+        u_int   fbaxtdef:1;             /* 1=Extent defined          */
         BYTE    fbamask;                /* Define extent file mask   */
+        U32     fbaxblkn;               /* Offset from start of device
+                                           to first block of extent  */
+        U32     fbaxfirst;              /* Block number within dataset
+                                           of first block of extent  */
+        U32     fbaxlast;               /* Block number within dataset
+                                           of last block of extent   */
+        /* Values from locate */
+        BYTE    fbaoper;                /* Locate operation byte     */
+        U16     fbalcnum;               /* Block count for locate    */
+        U32     fbalcblk;               /* Block number within dataset
+                                           of first block for locate */
 
         /*  Device dependent fields for ckddasd                      */
 
@@ -923,7 +1094,7 @@ struct DEVBLK {                         /* Device configuration block*/
                                            in each CKD image file    */
         CKDDEV *ckdtab;                 /* Device table entry        */
         CKDCU  *ckdcu;                  /* Control unit entry        */
-        OFF_T   ckdtrkoff;              /* Track image file offset   */
+        off_t   ckdtrkoff;              /* Track image file offset   */
         int     ckdcyls;                /* Number of cylinders       */
         int     ckdtrks;                /* Number of tracks          */
         int     ckdheads;               /* #of heads per cylinder    */
@@ -954,28 +1125,27 @@ struct DEVBLK {                         /* Device configuration block*/
         BYTE    ckdreserved1;           /* Alignment                 */
         void   *cckd_ext;               /* -> Compressed ckddasd
                                            extension otherwise NULL  */
-        U32                             /* Flags                     */
-                ckd3990:1,              /* 1=Control unit is 3990    */
-                ckdxtdef:1,             /* 1=Define Extent processed */
-                ckdsetfm:1,             /* 1=Set File Mask processed */
-                ckdlocat:1,             /* 1=Locate Record processed */
-                ckdspcnt:1,             /* 1=Space Count processed   */
-                ckdseek:1,              /* 1=Seek command processed  */
-                ckdskcyl:1,             /* 1=Seek cylinder processed */
-                ckdrecal:1,             /* 1=Recalibrate processed   */
-                ckdrdipl:1,             /* 1=Read IPL processed      */
-                ckdxmark:1,             /* 1=End of track mark found */
-                ckdhaeq:1,              /* 1=Search Home Addr Equal  */
-                ckdideq:1,              /* 1=Search ID Equal         */
-                ckdkyeq:1,              /* 1=Search Key Equal        */
-                ckdwckd:1,              /* 1=Write R0 or Write CKD   */
-                ckdtrkof:1,             /* 1=Track ovfl on this blk  */
-                ckdssi:1,               /* 1=Set Special Intercept   */
-                ckdnolazywr:1,          /* 1=Perform updates now     */
-                ckdrdonly:1,            /* 1=Open read only          */
-                ckdwrha:1,              /* 1=Write Home Address      */
+        u_int   ckd3990:1;              /* 1=Control unit is 3990    */
+        u_int   ckdxtdef:1;             /* 1=Define Extent processed */
+        u_int   ckdsetfm:1;             /* 1=Set File Mask processed */
+        u_int   ckdlocat:1;             /* 1=Locate Record processed */
+        u_int   ckdspcnt:1;             /* 1=Space Count processed   */
+        u_int   ckdseek:1;              /* 1=Seek command processed  */
+        u_int   ckdskcyl:1;             /* 1=Seek cylinder processed */
+        u_int   ckdrecal:1;             /* 1=Recalibrate processed   */
+        u_int   ckdrdipl:1;             /* 1=Read IPL processed      */
+        u_int   ckdxmark:1;             /* 1=End of track mark found */
+        u_int   ckdhaeq:1;              /* 1=Search Home Addr Equal  */
+        u_int   ckdideq:1;              /* 1=Search ID Equal         */
+        u_int   ckdkyeq:1;              /* 1=Search Key Equal        */
+        u_int   ckdwckd:1;              /* 1=Write R0 or Write CKD   */
+        u_int   ckdtrkof:1;             /* 1=Track ovfl on this blk  */
+        u_int   ckdssi:1;               /* 1=Set Special Intercept   */
+        u_int   ckdnolazywr:1;          /* 1=Perform updates now     */
+        u_int   ckdrdonly:1;            /* 1=Open read only          */
+        u_int   ckdwrha:1;              /* 1=Write Home Address      */
                                         /* Line above ISW20030819-1  */
-                ckdfakewr:1;            /* 1=Fake successful write
+        u_int   ckdfakewr:1;            /* 1=Fake successful write
                                              for read only file      */
         U16     ckdssdlen;              /* #of bytes of data prepared
                                            for Read Subsystem Data   */
@@ -989,7 +1159,11 @@ struct DEVGRP {                         /* Device Group Structure    */
         int     members;                /* #of member devices in grp */
         int     acount;                 /* #allocated members in grp */
         void   *grp_data;               /* Group dep data (generic)  */
+#ifdef C99_FLEXIBLE_ARRAYS
+        DEVBLK *memdev[];               /* Member devices            */
+#else
         DEVBLK *memdev[0];              /* Member devices            */
+#endif
 };
 
 
@@ -1062,13 +1236,15 @@ struct CCKDDASD_DEVHDR {                /* Compress device header    */
 /* 46 */S16              compress_parm; /* Compression parameter     */
 /* 48 */BYTE             resv2[464];    /* Reserved                  */
 };
+#define CCKD_DEVHDR      CCKDDASD_DEVHDR
 
 #define CCKD_VERSION           0
-#define CCKD_RELEASE           2
+#define CCKD_RELEASE           3
 #define CCKD_MODLVL            1
 
 #define CCKD_NOFUDGE           1         /* [deprecated]             */
 #define CCKD_BIGENDIAN         2
+#define CCKD_SPERRS            32        /* Space errors detected    */
 #define CCKD_ORDWR             64        /* Opened read/write since
                                             last chkdsk              */
 #define CCKD_OPENED            128
@@ -1090,10 +1266,15 @@ struct CCKDDASD_DEVHDR {                /* Compress device header    */
 struct CCKD_L2ENT {                     /* Level 2 table entry       */
         U32              pos;           /* Track offset              */
         U16              len;           /* Track length              */
-        U16              size;          /* Track size [deprecated]   */
+        U16              size;          /* Track size  (size >= len) */
 };
 
-struct CCKD_FREEBLK {                   /* Free block                */
+struct CCKD_FREEBLK {                   /* Free block (file)         */
+        U32              pos;           /* Position next free blk    */
+        U32              len;           /* Length this free blk      */
+};
+
+struct CCKD_IFREEBLK {                  /* Free block (internal)     */
         U32              pos;           /* Position next free blk    */
         U32              len;           /* Length this free blk      */
         int              prev;          /* Index to prev free blk    */
@@ -1114,12 +1295,15 @@ typedef  CCKD_L2ENT   CCKD_L2TAB[256];  /* Level 2 table             */
 typedef  char         CCKD_TRACE[128];  /* Trace table entry         */
 
 #define CCKDDASD_DEVHDR_SIZE   ((ssize_t)sizeof(CCKDDASD_DEVHDR))
+#define CCKD_DEVHDR_SIZE       CCKDDASD_DEVHDR_SIZE
+#define CCKD_DEVHDR_POS        CKDDASD_DEVHDR_SIZE
 #define CCKD_L1ENT_SIZE        ((ssize_t)sizeof(CCKD_L1ENT))
-#define CCKD_L1TAB_POS         CKDDASD_DEVHDR_SIZE+CCKDDASD_DEVHDR_SIZE
+#define CCKD_L1TAB_POS         ((CCKD_DEVHDR_POS)+(CCKD_DEVHDR_SIZE))
 #define CCKD_L2ENT_SIZE        ((ssize_t)sizeof(CCKD_L2ENT))
 #define CCKD_L2TAB_SIZE        ((ssize_t)sizeof(CCKD_L2TAB))
-#define CCKD_FREEBLK_SIZE      8
-#define CCKD_FREEBLK_ISIZE     ((ssize_t)sizeof(CCKD_FREEBLK))
+#define CCKD_FREEBLK_SIZE      ((ssize_t)sizeof(CCKD_FREEBLK))
+#define CCKD_FREEBLK_ISIZE     ((ssize_t)sizeof(CCKD_IFREEBLK))
+#define CCKD_IFREEBLK_SIZE     (CCKD_FREEBLK_ISIZE)
 
 /* Flag bits */
 #define CCKD_SIZE_EXACT         0x01    /* Space obtained is exact   */
@@ -1256,6 +1440,7 @@ struct CCKDDASD_EXT {                   /* Ext for compressed ckd    */
         LOCK             filelock;      /* File lock                 */
         LOCK             iolock;        /* I/O lock                  */
         COND             iocond;        /* I/O condition             */
+        long long        maxsize;       /* Maximum file size         */
         int              iowaiters;     /* Number I/O waiters        */
         int              wrpending;     /* Number writes pending     */
         int              ras;           /* Number readaheads active  */
@@ -1264,11 +1449,11 @@ struct CCKDDASD_EXT {                   /* Ext for compressed ckd    */
         int              l1x;           /* Active level 2 table index*/
         CCKD_L2ENT      *l2;            /* Active level 2 table      */
         int              l2active;      /* Active level 2 cache entry*/
-        OFF_T            l2bounds;      /* L2 tables boundary        */
+        off_t            l2bounds;      /* L2 tables boundary        */
         int              active;        /* Active cache entry        */
         BYTE            *newbuf;        /* Uncompressed buffer       */
         unsigned int     freemin;       /* Minimum free space size   */
-        CCKD_FREEBLK    *free;          /* Internal free space chain */
+        CCKD_IFREEBLK   *free;          /* Internal free space chain */
         int              freenbr;       /* Number free space entries */
         int              free1st;       /* Index of 1st entry        */
         int              freelast;      /* Index of last entry       */

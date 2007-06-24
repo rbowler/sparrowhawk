@@ -1,9 +1,40 @@
-/* CONFIG.C     (c) Copyright Jan Jaeger, 2000-2006                  */
+/* CONFIG.C     (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              Device configuration functions                       */
+
+// $Id: config.c,v 1.199 2007/06/23 00:04:04 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* The original configuration builder is now called bldcfg.c         */
 /*-------------------------------------------------------------------*/
+
+// $Log: config.c,v $
+// Revision 1.199  2007/06/23 00:04:04  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.198  2007/06/22 02:22:50  gsmith
+// revert config_cpu.pat due to problems in testing
+//
+// Revision 1.197  2007/06/20 03:52:19  gsmith
+// configure_cpu now returns when the CPU is fully configured
+//
+// Revision 1.196  2007/06/09 02:10:04  kleonard
+// Skip making CRW pending in S/370 mode
+//
+// Revision 1.195  2007/02/03 18:58:06  gsmith
+// Fix MVT tape CMDREJ error
+//
+// Revision 1.194  2007/01/11 19:54:33  fish
+// Addt'l keep-alive mods: create associated supporting config-file stmt and panel command where individual customer-preferred values can be specified and/or dynamically modified.
+//
+// Revision 1.193  2007/01/02 18:53:33  fish
+// (fix comments only)
+//
+// Revision 1.192  2007/01/02 18:46:16  fish
+// Fix bug in deconfigure_cpu function & tweak power-off diagnose instructions so that they actually work properly now
+//
+// Revision 1.191  2006/12/08 09:43:18  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -42,11 +73,11 @@ DEVBLK *dev;
 int     cpu;
 
     /* Deconfigure all CPU's */
-    obtain_lock (&sysblk.intlock);
+    OBTAIN_INTLOCK(NULL);
     for (cpu = 0; cpu < MAX_CPU_ENGINES; cpu++)
         if(IS_CPU_ONLINE(cpu))
             deconfigure_cpu(cpu);
-    release_lock (&sysblk.intlock);
+    RELEASE_INTLOCK(NULL);
 
 #if defined(OPTION_SHARED_DEVICES)
     /* Terminate the shared device listener thread */
@@ -57,7 +88,7 @@ int     cpu;
     /* Detach all devices */
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
        if (dev->allocated)
-           detach_subchan(dev->subchan);
+           detach_subchan(SSID_TO_LCSS(dev->ssid), dev->subchan);
 
 #if !defined(OPTION_FISHIO)
     /* Terminate device threads */
@@ -75,6 +106,7 @@ int     cpu;
 /*-------------------------------------------------------------------*/
 int configure_cpu(int cpu)
 {
+int   i;
 char  thread_name[16];
 
     if(IS_CPU_ONLINE(cpu))
@@ -92,8 +124,19 @@ char  thread_name[16];
         return -1;
     }
 
+    /* Find out if we are a cpu thread */
+    for (i = 0; i < MAX_CPU_ENGINES; i++)
+        if (sysblk.cputid[i] == thread_id())
+            break;
+
+    if (i < MAX_CPU_ENGINES)
+        sysblk.regs[i]->intwait = 1;
+
     /* Wait for CPU thread to initialize */
     wait_condition (&sysblk.cpucond, &sysblk.intlock);
+
+    if (i < MAX_CPU_ENGINES)
+        sysblk.regs[i]->intwait = 0;
 
     return 0;
 } /* end function configure_cpu */
@@ -105,21 +148,49 @@ char  thread_name[16];
 /*-------------------------------------------------------------------*/
 int deconfigure_cpu(int cpu)
 {
-    if (!IS_CPU_ONLINE(cpu))
-        return -1;
+int   i;
 
-    sysblk.regs[cpu]->configured = 0;
-    sysblk.regs[cpu]->cpustate = CPUSTATE_STOPPING;
-    ON_IC_INTERRUPT(sysblk.regs[cpu]);
+    /* Find out if we are a cpu thread */
+    for (i = 0; i < MAX_CPU_ENGINES; i++)
+        if (sysblk.cputid[i] == thread_id())
+            break;
 
-    /* Wake up CPU as it may be waiting */
-    WAKEUP_CPU (sysblk.regs[cpu]);
+    /* If we're NOT trying to deconfigure ourselves */
+    if (cpu != i)
+    {
+        if (!IS_CPU_ONLINE(cpu))
+            return -1;
 
-    /* Wait for CPU thread to terminate */
-    wait_condition (&sysblk.cpucond, &sysblk.intlock);
+        /* Deconfigure CPU */
+        sysblk.regs[cpu]->configured = 0;
+        sysblk.regs[cpu]->cpustate = CPUSTATE_STOPPING;
+        ON_IC_INTERRUPT(sysblk.regs[cpu]);
 
-    join_thread (sysblk.cputid[cpu], NULL);
-    detach_thread( sysblk.cputid[cpu] );
+        /* Wake up CPU as it may be waiting */
+        WAKEUP_CPU (sysblk.regs[cpu]);
+
+        /* (if we're a cpu thread) */
+        if (i < MAX_CPU_ENGINES)
+            sysblk.regs[i]->intwait = 1;
+
+        /* Wait for CPU thread to terminate */
+        wait_condition (&sysblk.cpucond, &sysblk.intlock);
+
+        /* (if we're a cpu thread) */
+        if (i < MAX_CPU_ENGINES)
+            sysblk.regs[i]->intwait = 0;
+
+        join_thread (sysblk.cputid[cpu], NULL);
+        detach_thread( sysblk.cputid[cpu] );
+    }
+    else
+    {
+        /* Else we ARE trying to deconfigure ourselves */
+        sysblk.regs[cpu]->configured = 0;
+        sysblk.regs[cpu]->cpustate = CPUSTATE_STOPPING;
+        ON_IC_INTERRUPT(sysblk.regs[cpu]);
+    }
+
     sysblk.cputid[cpu] = 0;
 
     return 0;
@@ -129,15 +200,15 @@ int deconfigure_cpu(int cpu)
 
 /* 4 next functions used for fast device lookup cache management */
 #if defined(OPTION_FAST_DEVLOOKUP)
-static void AddDevnumFastLookup(DEVBLK *dev,U16 devnum)
+static void AddDevnumFastLookup(DEVBLK *dev,U16 lcss,U16 devnum)
 {
     unsigned int Channel;
     if(sysblk.devnum_fl==NULL)
     {
-        sysblk.devnum_fl=(DEVBLK ***)malloc(sizeof(DEVBLK **)*256);
-        memset(sysblk.devnum_fl,0,sizeof(DEVBLK **)*256);
+        sysblk.devnum_fl=(DEVBLK ***)malloc(sizeof(DEVBLK **)*256*FEATURE_LCSS_MAX);
+        memset(sysblk.devnum_fl,0,sizeof(DEVBLK **)*256*FEATURE_LCSS_MAX);
     }
-    Channel=(devnum & 0xff00)>>8;
+    Channel=(devnum & 0xff00)>>8 | ((lcss & (FEATURE_LCSS_MAX-1))<<8);
     if(sysblk.devnum_fl[Channel]==NULL)
     {
         sysblk.devnum_fl[Channel]=(DEVBLK **)malloc(sizeof(DEVBLK *)*256);
@@ -145,18 +216,20 @@ static void AddDevnumFastLookup(DEVBLK *dev,U16 devnum)
     }
     sysblk.devnum_fl[Channel][devnum & 0xff]=dev;
 }
-static void AddSubchanFastLookup(DEVBLK *dev,U16 subchan)
+
+
+static void AddSubchanFastLookup(DEVBLK *dev,U16 ssid, U16 subchan)
 {
     unsigned int schw;
 #if 0
-    logmsg("DEBUG : ASFL Adding %d\n",subchan);
+    logmsg(D_("DEBUG : ASFL Adding %d\n"),subchan);
 #endif
     if(sysblk.subchan_fl==NULL)
     {
-        sysblk.subchan_fl=(DEVBLK ***)malloc(sizeof(DEVBLK **)*256);
-        memset(sysblk.subchan_fl,0,sizeof(DEVBLK **)*256);
+        sysblk.subchan_fl=(DEVBLK ***)malloc(sizeof(DEVBLK **)*256*FEATURE_LCSS_MAX);
+        memset(sysblk.subchan_fl,0,sizeof(DEVBLK **)*256*FEATURE_LCSS_MAX);
     }
-    schw=(subchan & 0xff00)>>8;
+    schw=((subchan & 0xff00)>>8)|(SSID_TO_LCSS(ssid)<<8);
     if(sysblk.subchan_fl[schw]==NULL)
     {
         sysblk.subchan_fl[schw]=(DEVBLK **)malloc(sizeof(DEVBLK *)*256);
@@ -164,31 +237,35 @@ static void AddSubchanFastLookup(DEVBLK *dev,U16 subchan)
     }
     sysblk.subchan_fl[schw][subchan & 0xff]=dev;
 }
-static void DelDevnumFastLookup(U16 devnum)
+
+
+static void DelDevnumFastLookup(U16 lcss,U16 devnum)
 {
     unsigned int Channel;
     if(sysblk.devnum_fl==NULL)
     {
         return;
     }
-    Channel=(devnum & 0xff00)>>8;
+    Channel=(devnum & 0xff00)>>8 | ((lcss & (FEATURE_LCSS_MAX-1))<<8);
     if(sysblk.devnum_fl[Channel]==NULL)
     {
         return;
     }
     sysblk.devnum_fl[Channel][devnum & 0xff]=NULL;
 }
-static void DelSubchanFastLookup(U16 subchan)
+
+
+static void DelSubchanFastLookup(U16 ssid, U16 subchan)
 {
     unsigned int schw;
 #if 0
-    logmsg("DEBUG : DSFL Removing %d\n",subchan);
+    logmsg(D_("DEBUG : DSFL Removing %d\n"),subchan);
 #endif
     if(sysblk.subchan_fl==NULL)
     {
         return;
     }
-    schw=(subchan & 0xff00)>>8;
+    schw=((subchan & 0xff00)>>8)|(SSID_TO_LCSS(ssid) << 8);
     if(sysblk.subchan_fl[schw]==NULL)
     {
         return;
@@ -197,13 +274,17 @@ static void DelSubchanFastLookup(U16 subchan)
 }
 #endif
 
-DEVBLK *get_devblk(U16 devnum)
+
+DEVBLK *get_devblk(U16 lcss, U16 devnum)
 {
 DEVBLK *dev;
 DEVBLK**dvpp;
 
+    if(lcss >= FEATURE_LCSS_MAX)
+        lcss = 0;
+
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
-        if (!(dev->allocated)) break;
+        if (!(dev->allocated) && dev->ssid == LCSS_TO_SSID(lcss)) break;
 
     if(!dev)
     {
@@ -219,6 +300,11 @@ DEVBLK**dvpp;
         initialize_lock (&dev->lock);
         initialize_condition (&dev->resumecond);
         initialize_condition (&dev->iocond);
+#if defined(OPTION_SCSI_TAPE)
+        initialize_lock      (&dev->stape_getstat_lock);
+        initialize_condition (&dev->stape_getstat_cond);
+        initialize_condition (&dev->stape_exit_cond   );
+#endif
 
         /* Search for the last device block on the chain */
         for (dvpp = &(sysblk.firstdev); *dvpp != NULL;
@@ -227,7 +313,8 @@ DEVBLK**dvpp;
         /* Add the new device block to the end of the chain */
         *dvpp = dev;
 
-        dev->subchan = sysblk.highsubchan++;
+        dev->ssid = LCSS_TO_SSID(lcss);
+        dev->subchan = sysblk.highsubchan[lcss]++;
     }
 
     /* Initialize the device block */
@@ -240,10 +327,9 @@ DEVBLK**dvpp;
     dev->devprio = sysblk.devprio;
     dev->hnd = NULL;
     dev->devnum = devnum;
-    dev->chanset = devnum >> 12;
-    if( dev->chanset >= sysblk.numcpu)
-        dev->chanset = sysblk.numcpu > 0 ? sysblk.numcpu - 1 : 0;
+    dev->chanset = lcss;
     dev->fd = -1;
+    dev->syncio = 0;
     dev->ioint.dev = dev;
     dev->ioint.pending = 1;
     dev->pciioint.dev = dev;
@@ -273,7 +359,10 @@ DEVBLK**dvpp;
 
 #ifdef _FEATURE_CHANNEL_SUBSYSTEM
     /* Indicate a CRW is pending for this device */
-    dev->crwpending = 1;
+#if defined(_370)
+    if (sysblk.arch_mode != ARCH_370)
+#endif /*defined(_370)*/
+        dev->crwpending = 1;
 #endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
 
 #ifdef EXTERNALGUI
@@ -307,7 +396,7 @@ void ret_devblk(DEVBLK *dev)
 /*-------------------------------------------------------------------*/
 /* Function to build a device configuration block                    */
 /*-------------------------------------------------------------------*/
-int attach_device (U16 devnum, char *type,
+int attach_device (U16 lcss, U16 devnum, const char *type,
                    int addargc, char *addargv[])
 {
 DEVBLK *dev;                            /* -> Device block           */
@@ -315,14 +404,14 @@ int     rc;                             /* Return code               */
 int     i;                              /* Loop index                */
 
     /* Check whether device number has already been defined */
-    if (find_device_by_devnum(devnum) != NULL)
+    if (find_device_by_devnum(lcss,devnum) != NULL)
     {
-        logmsg (_("HHCCF041E Device %4.4X already exists\n"), devnum);
+        logmsg (_("HHCCF041E Device %d:%4.4X already exists\n"), lcss,devnum);
         return 1;
     }
 
     /* obtain device block */
-    dev = get_devblk(devnum);
+    dev = get_devblk(lcss,devnum);
 
     if(!(dev->hnd = hdl_ghnd(type)))
     {
@@ -399,8 +488,18 @@ int     i;                              /* Loop index                */
 
 #ifdef _FEATURE_CHANNEL_SUBSYSTEM
     /* Signal machine check */
-    machine_check_crwpend();
+#if defined(_370)
+    if (sysblk.arch_mode != ARCH_370)
+#endif
+        machine_check_crwpend();
 #endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
+
+    /*
+    if(lcss!=0 && sysblk.arch_mode==ARCH_370)
+    {
+        logmsg(_("HHCCF078W %d:%4.4X : Only devices on CSS 0 are usable in S/370 mode\n"),lcss,devnum);
+    }
+    */
 
     return 0;
 } /* end function attach_device */
@@ -417,9 +516,9 @@ int     i;                              /* Loop index                */
     obtain_lock(&dev->lock);
 
 #if defined(OPTION_FAST_DEVLOOKUP)
-    DelSubchanFastLookup(dev->subchan);
+    DelSubchanFastLookup(dev->ssid, dev->subchan);
     if(dev->pmcw.flag5 & PMCW5_V)
-        DelDevnumFastLookup(dev->devnum);
+        DelDevnumFastLookup(SSID_TO_LCSS(dev->ssid),dev->devnum);
 #endif
 
     /* Close file or socket */
@@ -437,7 +536,10 @@ int     i;                              /* Loop index                */
 
 #ifdef _FEATURE_CHANNEL_SUBSYSTEM
     /* Indicate a CRW is pending for this device */
-    dev->crwpending = 1;
+#if defined(_370)
+    if (sysblk.arch_mode != ARCH_370)
+#endif /*defined(_370)*/
+        dev->crwpending = 1;
 #endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
 
     // detach all devices in group
@@ -467,9 +569,15 @@ int     i;                              /* Loop index                */
 
     ret_devblk(dev);
 
+    /* Zeroize the PMCW */
+    memset (&dev->pmcw, 0, sizeof(PMCW));
+
 #ifdef _FEATURE_CHANNEL_SUBSYSTEM
     /* Signal machine check */
-    machine_check_crwpend();
+#if defined(_370)
+    if (sysblk.arch_mode != ARCH_370)
+#endif
+        machine_check_crwpend();
 #endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
 
     return 0;
@@ -479,24 +587,24 @@ int     i;                              /* Loop index                */
 /*-------------------------------------------------------------------*/
 /* Function to delete a device configuration block by subchannel     */
 /*-------------------------------------------------------------------*/
-int detach_subchan (U16 subchan)
+int detach_subchan (U16 lcss, U16 subchan)
 {
 DEVBLK *dev;                            /* -> Device block           */
 int    rc;
 
     /* Find the device block */
-    dev = find_device_by_subchan (subchan);
+    dev = find_device_by_subchan ((LCSS_TO_SSID(lcss)<<16)|subchan);
 
     if (dev == NULL)
     {
-        logmsg (_("HHCCF046E Subchannel %4.4X does not exist\n"), subchan);
+        logmsg (_("HHCCF046E Subchannel %d:%4.4X does not exist\n"), lcss, subchan);
         return 1;
     }
 
     rc = detach_devblk( dev );
 
     if(!rc)
-        logmsg (_("HHCCF047I Subchannel %4.4X detached\n"), subchan);
+        logmsg (_("HHCCF047I Subchannel %d:%4.4X detached\n"), lcss, subchan);
 
     return rc;
 }
@@ -505,17 +613,17 @@ int    rc;
 /*-------------------------------------------------------------------*/
 /* Function to delete a device configuration block by device number  */
 /*-------------------------------------------------------------------*/
-int detach_device (U16 devnum)
+int detach_device (U16 lcss,U16 devnum)
 {
 DEVBLK *dev;                            /* -> Device block           */
 int    rc;
 
     /* Find the device block */
-    dev = find_device_by_devnum (devnum);
+    dev = find_device_by_devnum (lcss,devnum);
 
     if (dev == NULL)
     {
-        logmsg (_("HHCCF046E Device %4.4X does not exist\n"), devnum);
+        logmsg (_("HHCCF046E Device %d:%4.4X does not exist\n"), lcss, devnum);
         return 1;
     }
 
@@ -531,23 +639,23 @@ int    rc;
 /*-------------------------------------------------------------------*/
 /* Function to rename a device configuration block                   */
 /*-------------------------------------------------------------------*/
-int define_device (U16 olddevn, U16 newdevn)
+int define_device (U16 lcss, U16 olddevn,U16 newdevn)
 {
 DEVBLK *dev;                            /* -> Device block           */
 
     /* Find the device block */
-    dev = find_device_by_devnum (olddevn);
+    dev = find_device_by_devnum (lcss, olddevn);
 
     if (dev == NULL)
     {
-        logmsg (_("HHCCF048E Device %4.4X does not exist\n"), olddevn);
+        logmsg (_("HHCCF048E Device %d:%4.4X does not exist\n"), lcss, olddevn);
         return 1;
     }
 
     /* Check that new device number does not already exist */
-    if (find_device_by_devnum(newdevn) != NULL)
+    if (find_device_by_devnum(lcss, newdevn) != NULL)
     {
-        logmsg (_("HHCCF049E Device %4.4X already exists\n"), newdevn);
+        logmsg (_("HHCCF049E Device %d:%4.4X already exists\n"), lcss, newdevn);
         return 1;
     }
 
@@ -564,13 +672,16 @@ DEVBLK *dev;                            /* -> Device block           */
     /* Disable the device */
     dev->pmcw.flag5 &= ~PMCW5_E;
 #if defined(OPTION_FAST_DEVLOOKUP)
-    DelSubchanFastLookup(olddevn);
-    DelSubchanFastLookup(newdevn);
+    DelDevnumFastLookup(lcss,olddevn);
+    DelDevnumFastLookup(lcss,newdevn);
 #endif
 
 #ifdef _FEATURE_CHANNEL_SUBSYSTEM
     /* Indicate a CRW is pending for this device */
-    dev->crwpending = 1;
+#if defined(_370)
+    if (sysblk.arch_mode != ARCH_370)
+#endif /*defined(_370)*/
+        dev->crwpending = 1;
 #endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
 
     /* Release device lock */
@@ -578,7 +689,10 @@ DEVBLK *dev;                            /* -> Device block           */
 
 #ifdef _FEATURE_CHANNEL_SUBSYSTEM
     /* Signal machine check */
-    machine_check_crwpend();
+#if defined(_370)
+    if (sysblk.arch_mode != ARCH_370)
+#endif
+        machine_check_crwpend();
 #endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
 
 //  logmsg (_("HHCCF050I Device %4.4X defined as %4.4X\n"),
@@ -697,17 +811,17 @@ DEVBLK *tmp;
 /*-------------------------------------------------------------------*/
 /* Function to find a device block given the device number           */
 /*-------------------------------------------------------------------*/
-DLL_EXPORT DEVBLK *find_device_by_devnum (U16 devnum)
+DLL_EXPORT DEVBLK *find_device_by_devnum (U16 lcss,U16 devnum)
 {
 DEVBLK *dev;
 #if defined(OPTION_FAST_DEVLOOKUP)
 DEVBLK **devtab;
 int Chan;
 
-    Chan=(devnum & 0xff00)>>8;
+    Chan=(devnum & 0xff00)>>8 | ((lcss & (FEATURE_LCSS_MAX-1))<<8);
     if(sysblk.devnum_fl!=NULL)
     {
-        devtab=sysblk.devnum_fl[(devnum & 0xff00)>>8];
+        devtab=sysblk.devnum_fl[Chan];
         if(devtab!=NULL)
         {
             dev=devtab[devnum & 0xff];
@@ -717,18 +831,18 @@ int Chan;
             }
             else
             {
-                DelDevnumFastLookup(devnum);
+                DelDevnumFastLookup(lcss,devnum);
             }
         }
     }
 
 #endif
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
-        if (dev->allocated && dev->devnum == devnum && dev->pmcw.flag5 & PMCW5_V) break;
+        if (dev->allocated && dev->devnum == devnum && lcss==SSID_TO_LCSS(dev->ssid) && dev->pmcw.flag5 & PMCW5_V) break;
 #if defined(OPTION_FAST_DEVLOOKUP)
     if(dev)
     {
-        AddDevnumFastLookup(dev,devnum);
+        AddDevnumFastLookup(dev,lcss,devnum);
     }
 #endif
     return dev;
@@ -738,44 +852,521 @@ int Chan;
 /*-------------------------------------------------------------------*/
 /* Function to find a device block given the subchannel number       */
 /*-------------------------------------------------------------------*/
-DEVBLK *find_device_by_subchan (U16 subchan)
+DEVBLK *find_device_by_subchan (U32 ioid)
 {
+    U16 subchan = ioid & 0xFFFF;
     DEVBLK *dev;
 #if defined(OPTION_FAST_DEVLOOKUP)
+    unsigned int schw = ((subchan & 0xff00)>>8)|(IOID_TO_LCSS(ioid)<<8);
 #if 0
-    logmsg("DEBUG : FDBS FL Looking for %d\n",subchan);
+    logmsg(D_("DEBUG : FDBS FL Looking for %d\n"),subchan);
 #endif
-    if(sysblk.subchan_fl!=NULL)
-    {
-        if(sysblk.subchan_fl[(subchan & 0xff00)>>8]!=NULL)
-        {
-            dev=sysblk.subchan_fl[(subchan & 0xff00)>>8][subchan & 0xff];
-            if(dev)
-            {
-                return dev;
-            }
-        }
-    }
+    if(sysblk.subchan_fl && sysblk.subchan_fl[schw] && sysblk.subchan_fl[schw][subchan & 0xff])
+        return sysblk.subchan_fl[schw][subchan & 0xff];
 #endif
 #if 0
-    logmsg("DEBUG : FDBS SL Looking for %d\n",subchan);
+    logmsg(D_("DEBUG : FDBS SL Looking for %8.8x\n"),ioid);
 #endif
     for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
-        if (dev->allocated && dev->subchan == subchan) break;
+        if (dev->ssid == IOID_TO_SSID(ioid) && dev->subchan == subchan) break;
 
 #if defined(OPTION_FAST_DEVLOOKUP)
     if(dev)
     {
-        AddSubchanFastLookup(dev,subchan);
+        AddSubchanFastLookup(dev, IOID_TO_SSID(ioid), subchan);
     }
     else
     {
-        DelSubchanFastLookup(subchan);
+        DelSubchanFastLookup(IOID_TO_SSID(ioid), subchan);
     }
 #endif
 
     return dev;
 } /* end function find_device_by_subchan */
 
-#endif /*!defined(_GEN_ARCH)*/
+/* Internal device parsing structures */
 
+typedef struct _DEVARRAY
+{
+    U16 cuu1;
+    U16 cuu2;
+} DEVARRAY;
+
+typedef struct _DEVNUMSDESC
+{
+    BYTE lcss;
+    DEVARRAY *da;
+} DEVNUMSDESC;
+
+
+/*-------------------------------------------------------------------*/
+/* Function to Parse a LCSS specification in a device number spec    */
+/* Syntax : [lcss:]Anything...                                       */
+/* Function args :                                                   */
+/*               const char * spec : Parsed string                   */
+/*               char **rest : Rest of string (or original str)      */
+/* Returns :                                                         */
+/*               int : 0 if not specified, 0<=n<FEATURE_LCSS_MAX     */
+/*                     -1 Spec error                                 */
+/*                                                                   */
+/* If the function returns a positive value, then *rest should       */
+/* be freed by the caller.                                           */
+/*-------------------------------------------------------------------*/
+
+static int
+parse_lcss(const char *spec,
+           char **rest,int verbose)
+{
+    int     lcssid;
+    char    *wrk;
+    char    *lcss;
+    char    *r;
+    char    *strptr;
+    char    *garbage;
+
+    wrk=malloc(strlen(spec)+1);
+    strcpy(wrk,spec);
+    lcss=strtok(wrk,":");
+    if(lcss==NULL)
+    {
+        if(verbose)
+        {
+            logmsg(_("HHCCF074E Unspecified error occured while parsing Logical Channel Subsystem Identification\n"));
+        }
+        free(wrk);
+        return(-1);
+    }
+    r=strtok(NULL,":");
+    if(r==NULL)
+    {
+        *rest=wrk;
+        return 0;
+    }
+    garbage=strtok(NULL,":");
+    if(garbage!=NULL)
+    {
+        if(verbose)
+        {
+            logmsg(_("HHCCF075E No more than 1 Logical Channel Subsystem Identification may be specified\n"));
+        }
+        free(wrk);
+        return(-1);
+    }
+    lcssid=strtoul(lcss,&strptr,10);
+    if(*strptr!=0)
+    {
+        if(verbose)
+        {
+            logmsg(_("HHCCF076E Non numeric Logical Channel Subsystem Identification %s\n"),lcss);
+        }
+        free(wrk);
+        return -1;
+    }
+    if(lcssid>FEATURE_LCSS_MAX)
+    {
+        if(verbose)
+        {
+            logmsg(_("HHCCF077E Logical Channel Subsystem Identification %d exceeds maximum of %d\n"),lcssid,FEATURE_LCSS_MAX-1);
+        }
+        free(wrk);
+        return -1;
+    }
+    *rest=malloc(strlen(r)+1);
+    strcpy(*rest,r);
+    free(wrk);
+    return lcssid;
+}
+
+static int
+parse_single_devnum__INTERNAL(const char *spec,
+                    U16 *p_lcss,
+                    U16 *p_devnum,
+                    int verbose)
+{
+    int rc;
+    U16     lcss;
+    char    *r;
+    char    *strptr;
+    rc=parse_lcss(spec,&r,verbose);
+    if(rc<0)
+    {
+        return -1;
+    }
+    lcss=rc;
+    rc=strtoul(r,&strptr,16);
+    if(rc<0 || rc>0xffff || *strptr!=0)
+    {
+        if(verbose)
+        {
+            logmsg(_("HHCCF055E Incorrect device address specification near character %c\n"),*strptr);
+        }
+        free(r);
+        return -1;
+    }
+    *p_devnum=rc;
+    *p_lcss=lcss;
+    return 0;
+}
+
+int
+parse_single_devnum(const char *spec,
+                    U16 *lcss,
+                    U16 *devnum)
+{
+    return parse_single_devnum__INTERNAL(spec,lcss,devnum,1);
+}
+int
+parse_single_devnum_silent(const char *spec,
+                    U16 *lcss,
+                    U16 *devnum)
+{
+    return parse_single_devnum__INTERNAL(spec,lcss,devnum,0);
+}
+
+/*-------------------------------------------------------------------*/
+/* Function to Parse compound device numbers                         */
+/* Syntax : [lcss:]CCUU[-CUU][,CUU..][.nn][...]                      */
+/* Examples : 200-23F                                                */
+/*            200,201                                                */
+/*            200.16                                                 */
+/*            200-23F,280.8                                          */
+/*            etc...                                                 */
+/* : is the LCSS id separator (only 0 or 1 allowed and it must be 1st*/
+/* - is the range specification (from CUU to CUU)                    */
+/* , is the separator                                                */
+/* . is the count indicator (nn is decimal)                          */
+/* 1st parm is the specification string as specified above           */
+/* 2nd parm is the address of an array of DEVARRAY                   */
+/* Return value : 0 - Parsing error, etc..                           */
+/*                >0 - Size of da                                    */
+/*                                                                   */
+/* NOTE : A basic validity check is made for the following :         */
+/*        All CUUs must belong on the same channel                   */
+/*        (this check is to eventually pave the way to a formal      */
+/*         channel/cu/device architecture)                           */
+/*        no 2 identical CCUUs                                       */
+/*   ex : 200,300 : WRONG                                            */
+/*        200.12,200.32 : WRONG                                      */
+/*        2FF.2 : WRONG                                              */
+/* NOTE : caller should free the array returned in da if the return  */
+/*        value is not 0                                             */
+/*-------------------------------------------------------------------*/
+static size_t parse_devnums(const char *spec,DEVNUMSDESC *dd)
+{
+    size_t gcount;      /* Group count                     */
+    size_t i;           /* Index runner                    */
+    char *grps;         /* Pointer to current devnum group */
+    char *sc;           /* Specification string copy       */
+    DEVARRAY *dgrs;   /* Device groups                   */
+    U16  cuu1,cuu2;     /* CUUs                            */
+    char *strptr;       /* strtoul ptr-ptr                 */
+    int  basechan=0;    /* Channel for all CUUs            */
+    int  duplicate;     /* duplicated CUU indicator        */
+    int badcuu;         /* offending CUU                   */
+    int rc;             /* Return code work var            */
+
+    rc=parse_lcss(spec,&sc,1);
+    if(rc<0)
+    {
+        return 0;
+    }
+    dd->lcss=rc;
+
+    /* Split by ',' groups */
+    gcount=0;
+    grps=strtok(sc,",");
+    dgrs=NULL;
+    while(grps!=NULL)
+    {
+        if(dgrs==NULL)
+        {
+            dgrs=malloc(sizeof(DEVARRAY));
+        }
+        else
+        {
+            dgrs=realloc(dgrs,(sizeof(DEVARRAY))*(gcount+1));
+        }
+        cuu1=strtoul(grps,&strptr,16);
+        switch(*strptr)
+        {
+        case 0:     /* Single CUU */
+            cuu2=cuu1;
+            break;
+        case '-':   /* CUU Range */
+            cuu2=strtoul(&strptr[1],&strptr,16);
+            if(*strptr!=0)
+            {
+                logmsg(_("HHCCF053E Incorrect second device number in device range near character %c\n"),*strptr);
+                free(dgrs);
+                free(sc);
+                return(0);
+            }
+            break;
+        case '.':   /* CUU Count */
+            cuu2=cuu1+strtoul(&strptr[1],&strptr,10);
+            cuu2--;
+            if(*strptr!=0)
+            {
+                logmsg(_("HHCCF054E Incorrect Device count near character %c\n"),*strptr);
+                free(dgrs);
+                free(sc);
+                return(0);
+            }
+            break;
+        default:
+            logmsg(_("HHCCF055E Incorrect device address specification near character %c\n"),*strptr);
+            free(dgrs);
+            free(sc);
+            return(0);
+        }
+        /* Check cuu1 <= cuu2 */
+        if(cuu1>cuu2)
+        {
+            logmsg(_("HHCCF056E Incorrect device address range. %4.4X < %4.4X\n"),cuu2,cuu1);
+            free(dgrs);
+            free(sc);
+            return(0);
+        }
+        if(gcount==0)
+        {
+            basechan=(cuu1 >> 8) & 0xff;
+        }
+        badcuu=-1;
+        if(((cuu1 >> 8) & 0xff) != basechan)
+        {
+            badcuu=cuu1;
+        }
+        else
+        {
+            if(((cuu2 >> 8) & 0xff) != basechan)
+            {
+                badcuu=cuu2;
+            }
+        }
+        if(badcuu>=0)
+        {
+            logmsg(_("HHCCF057E %4.4X is on wrong channel (1st device defined on channel %2.2X)\n"),badcuu,basechan);
+            free(dgrs);
+            free(sc);
+            return(0);
+        }
+        /* Check for duplicates */
+        duplicate=0;
+        for(i=0;i<gcount;i++)
+        {
+            /* check 1st cuu not within existing range */
+            if(cuu1>=dgrs[i].cuu1 && cuu1<=dgrs[i].cuu2)
+            {
+                duplicate=1;
+                break;
+            }
+            /* check 2nd cuu not within existing range */
+            if(cuu2>=dgrs[i].cuu1 && cuu1<=dgrs[i].cuu2)
+            {
+                duplicate=1;
+                break;
+            }
+            /* check current range doesn't completelly overlap existing range */
+            if(cuu1<dgrs[i].cuu1 && cuu2>dgrs[i].cuu2)
+            {
+                duplicate=1;
+                break;
+            }
+        }
+        if(duplicate)
+        {
+            logmsg(_("HHCCF058E Some or all devices in %4.4X-%4.4X duplicate devices already defined\n"),cuu1,cuu2);
+            free(dgrs);
+            free(sc);
+            return(0);
+        }
+        dgrs[gcount].cuu1=cuu1;
+        dgrs[gcount].cuu2=cuu2;
+        gcount++;
+        grps=strtok(NULL,",");
+    }
+    free(sc);
+    dd->da=dgrs;
+    return(gcount);
+}
+
+int
+parse_and_attach_devices(const char *sdevnum,
+                        const char *sdevtype,
+                        int  addargc,
+                        char **addargv)
+{
+        DEVNUMSDESC dnd;
+        int         baddev;
+        size_t      devncount;
+        DEVARRAY    *da;
+        int         i;
+        U16         devnum;
+        int         rc;
+
+#if defined(OPTION_CONFIG_SYMBOLS)
+        int         j;
+        char        **newargv;
+        char        **orig_newargv;
+#endif
+
+        devncount=parse_devnums(sdevnum,&dnd);
+
+        if(devncount==0)
+        {
+            return -2;
+        }
+
+#if defined(OPTION_CONFIG_SYMBOLS)
+        newargv=malloc(MAX_ARGS*sizeof(char *));
+        orig_newargv=malloc(MAX_ARGS*sizeof(char *));
+#endif /* #if defined(OPTION_CONFIG_SYMBOLS) */
+        for(baddev=0,i=0;i<(int)devncount;i++)
+        {
+            da=dnd.da;
+            for(devnum=da[i].cuu1;devnum<=da[i].cuu2;devnum++)
+            {
+#if defined(OPTION_CONFIG_SYMBOLS)
+               char wrkbfr[16];
+               snprintf(wrkbfr,sizeof(wrkbfr),"%3.3x",devnum);
+               set_symbol("cuu",wrkbfr);
+               snprintf(wrkbfr,sizeof(wrkbfr),"%4.4x",devnum);
+               set_symbol("ccuu",wrkbfr);
+               snprintf(wrkbfr,sizeof(wrkbfr),"%3.3X",devnum);
+               set_symbol("CUU",wrkbfr);
+               snprintf(wrkbfr,sizeof(wrkbfr),"%4.4X",devnum);
+               set_symbol("CCUU",wrkbfr);
+               snprintf(wrkbfr,sizeof(wrkbfr),"%d",dnd.lcss);
+               set_symbol("CSS",wrkbfr);
+               for(j=0;j<addargc;j++)
+               {
+                   orig_newargv[j]=newargv[j]=resolve_symbol_string(addargv[j]);
+               }
+                /* Build the device configuration block */
+               rc=attach_device(dnd.lcss, devnum, sdevtype, addargc, newargv);
+               for(j=0;j<addargc;j++)
+               {
+                   free(orig_newargv[j]);
+               }
+#else /* #if defined(OPTION_CONFIG_SYMBOLS) */
+                /* Build the device configuration block (no syms) */
+               rc=attach_device(dnd.lcss, devnum, sdevtype, addargc, addargv);
+#endif /* #if defined(OPTION_CONFIG_SYMBOLS) */
+               if(rc!=0)
+               {
+                   baddev=1;
+                   break;
+               }
+            }
+            if(baddev)
+            {
+                break;
+            }
+        }
+#if defined(OPTION_CONFIG_SYMBOLS)
+        free(newargv);
+        free(orig_newargv);
+#endif /* #if defined(OPTION_CONFIG_SYMBOLS) */
+        free(dnd.da);
+        return baddev?0:-1;
+} 
+
+#define MAX_LOGO_LINES 256
+void
+clearlogo()
+{
+    size_t i;
+    if(sysblk.herclogo!=NULL)
+    {
+        for(i=0;i<sysblk.logolines;i++)
+        {
+            free(sysblk.herclogo[i]);
+        }
+        free(sysblk.herclogo);
+        sysblk.herclogo=NULL;
+    }
+}
+int
+readlogo(char *fn)
+{
+    char    **data;
+    char    bfr[256];
+    char    *rec;
+    FILE *lf;
+
+    clearlogo();
+
+    lf=fopen(fn,"r");
+    if(lf==NULL)
+    {
+        return -1;
+    }
+    data=malloc(sizeof(char *)*MAX_LOGO_LINES);
+    sysblk.logolines=0;
+    while((rec=fgets(bfr,sizeof(bfr),lf))!=NULL)
+    {
+        rec[strlen(rec)-1]=0;
+        data[sysblk.logolines]=malloc(strlen(rec)+1);
+        strcpy(data[sysblk.logolines],rec);
+        sysblk.logolines++;
+        if(sysblk.logolines>MAX_LOGO_LINES)
+        {
+            break;
+        }
+    }
+    fclose(lf);
+    sysblk.herclogo=data;
+    return 0;
+}
+
+DLL_EXPORT int parse_conkpalv(char* s, int* idle, int* intv, int* cnt )
+{
+    size_t n; char *p1, *p2, *p3, c;
+    ASSERT(s && *s && idle && intv && cnt);
+    if (!s || !*s || !idle || !intv || !cnt) return -1;
+    // Format: "(idle,intv,cnt)". All numbers. No spaces.
+    if (0
+        || (n = strlen(s)) < 7
+        || s[0]   != '('
+        || s[n-1] != ')'
+    )
+        return -1;
+    // 1st sub-operand
+    if (!(p1 = strchr(s+1, ','))) return -1;
+    c = *p1; *p1 = 0;
+    if ( strspn( s+1, "0123456789" ) != strlen(s+1) )
+    {
+        *p1 = c;
+        return -1;
+    }
+    *p1 = c;
+    // 2nd sub-operand
+    if (!(p2 = strchr(p1+1, ','))) return -1;
+    c = *p2; *p2 = 0;
+    if ( strspn( p1+1, "0123456789" ) != strlen(p1+1) )
+    {
+        *p2 = c;
+        return -1;
+    }
+    *p2 = c;
+    // 3rd sub-operand
+    if (!(p3 = strchr(p2+1, ')'))) return -1;
+    c = *p3; *p3 = 0;
+    if ( strspn( p2+1, "0123456789" ) != strlen(p2+1) )
+    {
+        *p3 = c;
+        return -1;
+    }
+    *p3 = c;
+    // convert each to number
+    c = *p1; *p1 = 0; *idle = atoi(s+1);  *p1 = c;
+    c = *p2; *p2 = 0; *intv = atoi(p1+1); *p2 = c;
+    c = *p3; *p3 = 0; *cnt  = atoi(p2+1); *p3 = c;
+    // check results
+    if (*idle <= 0 || INT_MAX == *idle) return -1;
+    if (*intv <= 0 || INT_MAX == *intv) return -1;
+    if (*cnt  <= 0 || INT_MAX == *cnt ) return -1;
+    return 0;
+}
+
+#endif /*!defined(_GEN_ARCH)*/

@@ -4,6 +4,13 @@
 /*                                                                      */
 /************************************************************************/
 
+// $Id: memrchr.c,v 1.7 2006/12/08 09:43:29 jj Exp $
+//
+// $Log: memrchr.c,v $
+// Revision 1.7  2006/12/08 09:43:29  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
 
 #define _MEMRCHR_C_

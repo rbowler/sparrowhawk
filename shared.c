@@ -1,5 +1,18 @@
-/* SHARED.C     (c)Copyright Greg Smith, 2002-2006                   */
+/* SHARED.C     (c)Copyright Greg Smith, 2002-2007                   */
 /*              Shared Device Server                                 */
+
+// $Id: shared.c,v 1.36 2007/06/23 00:04:15 ivan Exp $
+//
+// $Log: shared.c,v $
+// Revision 1.36  2007/06/23 00:04:15  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.35  2006/12/28 20:32:54  fish
+// Fix "HHCSH043I 0.0.0.0 disconnected from ..."; save clientip in SHRD block at connect and use at disconnect.
+//
+// Revision 1.34  2006/12/08 09:43:30  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -1077,7 +1090,7 @@ int             rc;                     /* Return code               */
 /*-------------------------------------------------------------------*/
 static int shared_fba_blkgrp_len (DEVBLK *dev, int blkgrp)
 {
-OFF_T   offset;                         /* Offset of block group     */
+off_t   offset;                         /* Offset of block group     */
 
     offset = blkgrp * FBA_BLKGRP_SIZE;
     if (dev->fbaend - offset < FBA_BLKGRP_SIZE)
@@ -2338,10 +2351,11 @@ int i;                                  /* Loop index                */
     }
 
     logmsg(_("HHCSH043I %s disconnected from %4.4X id=%d\n"),
-           clientip(dev->shrd[ix]->fd), dev->devnum, id);
+        dev->shrd[ix]->ipaddr, dev->devnum, id);
 
     /* Release the SHRD block */
     close_socket (dev->shrd[ix]->fd);
+    free (dev->shrd[ix]->ipaddr);
     free (dev->shrd[ix]);
     dev->shrd[ix] = NULL;
 
@@ -2396,16 +2410,18 @@ int             maxfd;                  /* Max fd for select         */
 struct timeval  wait;                   /* Wait time for select      */
 BYTE            hdr[SHRD_HDR_SIZE + 65536];  /* Header + buffer      */
 BYTE           *buf = hdr + SHRD_HDR_SIZE;   /* Buffer               */
+char           *ipaddr = NULL;          /* IP addr of connected peer */
 
     csock = *psock;
     free (psock);
+    ipaddr = clientip(csock);
 
-    shrdtrc(dev,"server_connect %s sock %d\n",clientip(csock),csock);
+    shrdtrc(dev,"server_connect %s sock %d\n",ipaddr,csock);
 
     rc = recvData(csock, hdr, buf, 65536, 1);
     if (rc < 0)
     {
-        logmsg(_("HHCSH0474 %s connect failed\n"), clientip (csock));
+        logmsg(_("HHCSH0474 %s connect failed\n"), ipaddr);
         close_socket (csock);
         return NULL;
     }
@@ -2477,13 +2493,14 @@ BYTE           *buf = hdr + SHRD_HDR_SIZE;   /* Buffer               */
     if (id == 0) id = serverId (dev);
     dev->shrd[ix]->id = id;
     dev->shrd[ix]->fd = csock;
+    dev->shrd[ix]->ipaddr = strdup(ipaddr);
     dev->shrd[ix]->time = time (NULL);
     dev->shrd[ix]->purgen = -1;
     dev->shrdconn++;
     SHRD_SET_HDR (dev->shrd[ix]->hdr, cmd, flag, devnum, id, len);
 
     logmsg (_("HHCSH053I %s connected to %4.4X id=%d\n"),
-            clientip(csock), devnum, id);
+            ipaddr, devnum, id);
 
     /* Return if device thread already active */
     if (dev->shrdtid)
@@ -2602,7 +2619,7 @@ BYTE           *buf = hdr + SHRD_HDR_SIZE;   /* Buffer               */
             if (rc < 0)
             {
                 logmsg(_("HHCSH047E %4.4X %s recv error id=%d\n"),
-                     dev->devnum, clientip(dev->shrd[ix]->fd), dev->shrd[ix]->id);
+                    dev->devnum, dev->shrd[ix]->ipaddr, dev->shrd[ix]->id);
                 dev->shrd[ix]->disconnect = 1;
                 dev->shrd[ix]->pending = 0;
                 obtain_lock (&dev->lock);
@@ -2985,6 +3002,7 @@ DEVHND shared_ckd_device_hndinfo = {
         &shared_used,                  /* Device Query used          */
         &shared_reserve,               /* Device Reserve             */
         &shared_release,               /* Device Release             */
+        NULL,                          /* Device Attention           */
         NULL,                          /* Immediate CCW Codes        */
         NULL,                          /* Signal Adapter Input       */
         NULL,                          /* Signal Adapter Output      */
@@ -3006,6 +3024,7 @@ DEVHND shared_fba_device_hndinfo = {
         &shared_used,                  /* Device Query used          */
         &shared_reserve,               /* Device Reserve             */
         &shared_release,               /* Device Release             */
+        NULL,                          /* Device Attention           */
         NULL,                          /* Immediate CCW Codes        */
         NULL,                          /* Signal Adapter Input       */
         NULL,                          /* Signal Adapter Output      */

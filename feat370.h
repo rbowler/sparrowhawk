@@ -1,5 +1,22 @@
-/* FEAT370.H    (c) Copyright Jan Jaeger, 2000-2006                  */
+/* FEAT370.H    (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              S/370 feature definitions                            */
+
+// $Id: feat370.h,v 1.23 2007/06/23 00:04:09 ivan Exp $
+//
+// $Log: feat370.h,v $
+// Revision 1.23  2007/06/23 00:04:09  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.22  2006/12/31 17:53:48  gsmith
+// 2006 Dec 31 Update ecpsvm.c for new psw IA scheme
+//
+// Revision 1.21  2006/12/20 04:26:19  gsmith
+// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
+//
+// Revision 1.20  2006/12/08 09:43:21  jj
+// Add CVS message log
+//
+
 #if defined(OPTION_370_MODE)
 #define _ARCH_370_NAME "S/370"
 

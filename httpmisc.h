@@ -1,5 +1,15 @@
-/* HTTPMISC.C   (c)Copyright Jan Jaeger, 2002-2006                   */
+/* HTTPMISC.C   (c)Copyright Jan Jaeger, 2002-2007                   */
 /*              HTTP Server                                          */
+
+// $Id: httpmisc.h,v 1.26 2007/06/23 00:04:12 ivan Exp $
+//
+// $Log: httpmisc.h,v $
+// Revision 1.26  2007/06/23 00:04:12  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.25  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
 
 #ifndef _HTTPMISC_H
 #define _HTTPMISC_H
@@ -46,7 +56,11 @@
 
 #define HTML_STATIC_EXPIRY_TIME (60*60*24*7)
 
-#define HTTP_PATH_LENGTH 1024
+#if defined(PATH_MAX)
+ #define HTTP_PATH_LENGTH PATH_MAX
+#else
+ #define HTTP_PATH_LENGTH 1024
+#endif
 
 typedef struct _CGIVAR {
     struct _CGIVAR *next;

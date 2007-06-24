@@ -1,6 +1,8 @@
-/* PANEL.C      (c) Copyright Roger Bowler, 1999-2006                */
+/* PANEL.C      (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 Control Panel Commands                       */
-/*                                                                   */
+
+// $Id: panel.c,v 1.211 2007/06/23 00:04:15 ivan Exp $
+
 /*              Modified for New Panel Display =NP=                  */
 /*-------------------------------------------------------------------*/
 /* This module is the control panel for the ESA/390 emulator.        */
@@ -17,13 +19,24 @@
 /*      Set/reset bad frame indicator command by Jan Jaeger          */
 /*      attach/detach/define commands by Jan Jaeger                  */
 /*      Panel refresh rate triva by Reed H. Petty                    */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 /*      64-bit address support by Roger Bowler                       */
 /*      Display subchannel command by Nobumichi Kozawa               */
 /*      External GUI logic contributed by "Fish" (David B. Trout)    */
 /*      Socket Devices originally designed by Malcolm Beattie;       */
 /*      actual implementation by "Fish" (David B. Trout).            */
 /*-------------------------------------------------------------------*/
+
+// $Log: panel.c,v $
+// Revision 1.211  2007/06/23 00:04:15  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.210  2006/12/20 04:26:20  gsmith
+// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
+//
+// Revision 1.209  2006/12/08 09:43:29  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -60,6 +73,7 @@
 static int    NPDup = 0;       /* 1 when new panel is up */
 static int    NPDinit = 0;     /* 1 when new panel is initialized */
 static int    NPhelpup = 0;    /* 1 when displaying help panel */
+static int    NPhelppaint = 1; /* 1 when the help panel needs painted */
 static int    NPhelpdown = 0;  /* 1 when the help panel is brought down */
 static int    NPregdisp = 0;   /* which regs are displayed 0=gpr, 1=cr, 2=ar, 3=fpr */
 
@@ -591,15 +605,20 @@ void NP_update(REGS *regs)
              NP_screen_redraw(regs);
              NPhelpup = 0;
              NPhelpdown = 0;
+             NPhelppaint = 1;
         }
         else
         {
-            set_color (COLOR_LIGHT_GREY, COLOR_BLACK);
-            clr_screen ();
-            for (i = 0; strcmp(NPhelp[i], ""); i++)
+            if (NPhelppaint)
             {
-                set_pos (i+1, 1);
-                draw_text (NPhelp[i]);
+                set_color (COLOR_LIGHT_GREY, COLOR_BLACK);
+                clr_screen ();
+                for (i = 0; strcmp(NPhelp[i], ""); i++)
+                {
+                    set_pos (i+1, 1);
+                    draw_text (NPhelp[i]);
+                }
+                NPhelppaint = 0;
             }
             return;
         }
@@ -703,7 +722,9 @@ void NP_update(REGS *regs)
     }
 
     /* Display psw state */
-    sprintf (buf, "%c%c%c%c%c%c%c%c",
+    sprintf (buf, "%2d%c%c%c%c%c%c%c%c",
+                  regs->psw.amode64                  ? 64  : 
+                  regs->psw.amode                    ? 31  : 24, 
                   regs->cpustate == CPUSTATE_STOPPED ? 'M' : '.',
                   sysblk.inststep                    ? 'T' : '.',
                   WAITSTATE (&regs->psw)             ? 'W' : '.',
@@ -715,7 +736,7 @@ void NP_update(REGS *regs)
     if (!NPpswstate_valid || strcmp(NPpswstate, buf))
     {
         set_color (COLOR_LIGHT_YELLOW, COLOR_BLACK );
-        set_pos (mode || zhost ? 4 : 3, 30);
+        set_pos (mode || zhost ? 4 : 3, 28);
         draw_text (buf);
         NPpswstate_valid = 1;
         strcpy (NPpswstate, buf);
@@ -1054,6 +1075,7 @@ void NP_update(REGS *regs)
             draw_text (buf);
             set_pos (i+3, 58);
             draw_text (devnam);
+            fill_text (' ', PANEL_MAX_COLS);
         }
     }
 
@@ -1189,11 +1211,11 @@ REGS *copy_regs(int cpu)
         return &sysblk.dummyregs;
     }
 
-    memcpy (&copyregs, regs, sizeof(REGS) - sizeof(TLB));
+    memcpy (&copyregs, regs, sysblk.regs_copy_len);
 #if defined(_FEATURE_SIE)
     if (regs->sie_active)
     {
-        memcpy (&copysieregs, regs->guestregs, sizeof(REGS) - sizeof(TLB));
+        memcpy (&copysieregs, regs->guestregs, sysblk.regs_copy_len);
         copyregs.guestregs = &copysieregs;
         copysieregs.hostregs = &copyregs;
         regs = &copysieregs;
@@ -1201,6 +1223,8 @@ REGS *copy_regs(int cpu)
     else
 #endif
         regs = &copyregs;
+
+    SET_PSW_IA(regs);
 
     release_lock(&sysblk.cpulock[cpu]);
     return regs;
@@ -1258,6 +1282,9 @@ char    buf[1024];                      /* Buffer workarea           */
             "tid="TIDPAT", pid=%d\n"),
             thread_id(), getpid());
 
+    /* Notify logger_thread we're in control */
+    sysblk.panel_init = 1;
+
     hdl_adsc("panel_cleanup",panel_cleanup, NULL);
     history_init();
 
@@ -1296,6 +1323,12 @@ char    buf[1024];                      /* Buffer workarea           */
 
     /* Put the terminal into cbreak mode */
     set_or_reset_console_mode( keybfd, 1 );
+
+    /* Set console title */
+#if defined( _MSVC_ )
+    if (sysblk.pantitle)
+        w32_set_console_title(sysblk.pantitle);
+#endif /* defined( _MSVC_ ) */
 
     /* Clear the screen */
     set_color (COLOR_DEFAULT_FG, COLOR_DEFAULT_BG);
@@ -1895,7 +1928,7 @@ char    buf[1024];                      /* Buffer workarea           */
                 }
                 i++;
             } /* end for(i) */
-        }
+        } /* end if keystroke */
 
 FinishShutdown:
 
@@ -2114,7 +2147,9 @@ FinishShutdown:
                             for(i = 0;i < 17;i++)
                                 buf[len++] = ' ';
 #endif /*defined(_FEATURE_SIE)*/
-                    len += sprintf (buf+len, "%c%c%c%c%c%c%c%c",
+                    len += sprintf (buf+len, "%2d%c%c%c%c%c%c%c%c",
+                           regs->psw.amode64                  ? 64 :
+                           regs->psw.amode                    ? 31 : 24, 
                            regs->cpustate == CPUSTATE_STOPPED ? 'M' : '.',
                            sysblk.inststep                    ? 'T' : '.',
                            WAITSTATE(&regs->psw)              ? 'W' : '.',
@@ -2161,10 +2196,10 @@ FinishShutdown:
                     NPDinit = 1;
                     NP_screen_redraw(regs);
                 }
-                NP_update(regs);
-                fflush (confp);
-                redraw_msgs = redraw_cmd = redraw_status = 0;
             }
+            NP_update(regs);
+            fflush (confp);
+            redraw_msgs = redraw_cmd = redraw_status = 0;
         }
 
     /* =END= */

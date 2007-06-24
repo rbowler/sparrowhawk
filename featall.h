@@ -1,5 +1,36 @@
-/* FEATALL.H    (c) Copyright Jan Jaeger, 2000-2006                  */
+/* FEATALL.H    (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              Architecture-dependent macro definitions             */
+
+// $Id: featall.h,v 1.125 2007/06/23 00:04:09 ivan Exp $
+//
+// $Log: featall.h,v $
+// Revision 1.125  2007/06/23 00:04:09  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.124  2007/05/26 21:45:25  rbowler
+// Activate Compare-and-Swap-and-Store feature
+//
+// Revision 1.123  2007/04/24 16:34:41  rbowler
+// Define feature macros and STFL bit settings for new features in zPOP-05
+//
+// Revision 1.122  2007/01/04 01:08:41  gsmith
+// 03 Jan 2007 single_cpu_dw fetch/store patch for ia32
+//
+// Revision 1.121  2006/12/31 21:16:32  gsmith
+// 2006 Dec 31 really back out mainlockx.pat
+//
+// Revision 1.120  2006/12/20 09:09:40  jj
+// Fix bogus log entries
+//
+// Revision 1.119  2006/12/20 04:26:19  gsmith
+// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
+//
+// Revision 1.118  2006/12/20 04:22:00  gsmith
+// 2006 Dec 19 Backout mainlockx.pat - possible SMP problems - Greg Smith
+//
+// Revision 1.117  2006/12/08 09:43:21  jj
+// Add CVS message log
+//
 
 /*-------------------------------------------------------------------*/
 /* Default features                                                  */
@@ -17,14 +48,14 @@
 #define PANEL_REFRESH_RATE              /* Enable panrate feature    */
 #define PANEL_REFRESH_RATE_FAST      50 /* Fast refresh rate         */
 #define PANEL_REFRESH_RATE_SLOW     500 /* Slow refresh rate         */
+#define DEFAULT_TIMER_REFRESH_USECS  50 /* Default timer refresh int */
 #define MAX_DEVICE_THREAD_IDLE_SECS 300 /* 5 Minute thread timeout   */
 #undef  OPTION_NO_INLINE_DAT            /* Performance option        */
 #undef  OPTION_NO_INLINE_LOGICAL        /* Performance option        */
 #undef  OPTION_NO_INLINE_VSTORE         /* Performance option        */
 #undef  OPTION_NO_INLINE_IFETCH         /* Performance option        */
-#define OPTION_FAST_MOVECHAR            /* Performance option        */
-#define OPTION_FAST_MOVELONG            /* Performance option        */
-#define OPTION_FAST_PREFIX              /* Performance option        */
+#define OPTION_MULTI_BYTE_ASSIST        /* Performance option        */
+#define OPTION_SINGLE_CPU_DW            /* Performance option (ia32) */
 #define OPTION_FAST_DEVLOOKUP           /* Fast devnum/subchan lookup*/
 #define OPTION_IODELAY_KLUDGE           /* IODELAY kludge for linux  */
 #undef  OPTION_FOOTPRINT_BUFFER /* 2048 ** Size must be a power of 2 */
@@ -35,6 +66,7 @@
 #define OPTION_NOP_MODEL158_DIAGNOSE    /* NOP mod 158 specific diags*/
 #define FEATURE_ALD_FORMAT            0 /* Use fmt0 Access-lists     */
 #define FEATURE_SIE_MAXZONES          8 /* Maximum SIE Zones         */
+#define FEATURE_LCSS_MAX              4 /* Number of supported lcss's*/
 // #define SIE_DEBUG_PERFMON            /* SIE performance monitor   */
 #define OPTION_LPARNAME                 /* DIAG 204 lparname         */
 #define OPTION_HTTP_SERVER              /* HTTP server support       */
@@ -45,6 +77,9 @@
 #ifndef FISH_HANG
 #define OPTION_PTTRACE                  /* Pthreads tracing          */
 #endif
+//#define OPTION_DEBUG_MESSAGES           // Prefix msgs with filename
+                                        // and line# if DEBUG build
+#define OPTION_SET_STSI_INFO            /* Set STSI info in cfg file */
 
 /*********************************************************************\
  *********************************************************************
@@ -90,11 +125,14 @@
 #undef FEATURE_CHECKSUM_INSTRUCTION
 #undef FEATURE_CHSC
 #undef FEATURE_COMPARE_AND_MOVE_EXTENDED
+#undef FEATURE_COMPARE_AND_SWAP_AND_STORE                       /*407*/
 #undef FEATURE_COMPRESSION
+#undef FEATURE_CONDITIONAL_SSKE                                 /*407*/
 #undef FEATURE_CPU_RECONFIG
 #undef FEATURE_CPUID_FORMAT_1
 #undef FEATURE_DAT_ENHANCEMENT
 #undef FEATURE_DAT_ENHANCEMENT_FACILITY_2                       /*@Z9*/
+#undef FEATURE_DECIMAL_FLOATING_POINT                           /*DFP*/
 #undef FEATURE_DUAL_ADDRESS_SPACE
 #undef FEATURE_ECPSVM
 #undef FEATURE_EMULATE_VM
@@ -111,7 +149,9 @@
 #undef FEATURE_EXTENDED_TRANSLATION_FACILITY_2
 #undef FEATURE_EXTENDED_TRANSLATION_FACILITY_3
 #undef FEATURE_EXTERNAL_INTERRUPT_ASSIST
+#undef FEATURE_EXTRACT_CPU_TIME                                 /*407*/
 #undef FEATURE_FETCH_PROTECTION_OVERRIDE
+#undef FEATURE_FPS_ENHANCEMENT                                  /*DFP*/
 #undef FEATURE_FPS_EXTENSIONS
 #undef FEATURE_HERCULES_DIAGCALLS
 #undef FEATURE_HEXADECIMAL_FLOATING_POINT
@@ -119,6 +159,7 @@
 #undef FEATURE_HFP_MULTIPLY_ADD_SUBTRACT
 #undef FEATURE_HFP_UNNORMALIZED_EXTENSION                       /*@Z9*/
 #undef FEATURE_HYPERVISOR
+#undef FEATURE_IEEE_EXCEPTION_SIMULATION                        /*407*/
 #undef FEATURE_IMMEDIATE_AND_RELATIVE
 #undef FEATURE_INCORRECT_LENGTH_INDICATION_SUPPRESSION
 #undef FEATURE_INTERPRETIVE_EXECUTION
@@ -134,12 +175,14 @@
 #undef FEATURE_MOVE_PAGE_FACILITY_2
 #undef FEATURE_MSSF_CALL
 #undef FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE
+#undef FEATURE_MVCOS                                            /*407*/
 #undef FEATURE_MVS_ASSIST
 #undef FEATURE_PAGE_PROTECTION
 #undef FEATURE_PERFORM_LOCKED_OPERATION
 #undef FEATURE_PER
 #undef FEATURE_PER2
 #undef FEATURE_PER3                                             /*@Z9*/
+#undef FEATURE_PFPO                                             /*407*/
 #undef FEATURE_PRIVATE_SPACE
 #undef FEATURE_PROTECTION_INTERCEPTION_CONTROL
 #undef FEATURE_QUEUED_DIRECT_IO

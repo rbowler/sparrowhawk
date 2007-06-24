@@ -1,8 +1,18 @@
-/* PLO.C        (c) Copyright Jan Jaeger, 2000-2006                  */
+/* PLO.C        (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              Perform Locked Operation functions codes             */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+
+// $Id: plo.c,v 1.23 2007/06/23 00:04:15 ivan Exp $
+//
+// $Log: plo.c,v $
+// Revision 1.23  2007/06/23 00:04:15  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.22  2006/12/08 09:43:29  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 

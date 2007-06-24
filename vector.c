@@ -1,5 +1,7 @@
 /* vector.c     S/370 and ESA/390 Vector Operations                  */
 
+// $Id: vector.c,v 1.21 2007/06/23 00:04:19 ivan Exp $
+
 /*-------------------------------------------------------------------*/
 /* This module implements the Vector Facility instruction execution  */
 /* function of the S/370 and ESA/390 architectures, as described in  */
@@ -8,9 +10,26 @@
 /*                                             28/05/2000 Jan Jaeger */
 /*                                                                   */
 /* Instruction decoding rework                 09/07/2000 Jan Jaeger */
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 /*-------------------------------------------------------------------*/
+
+// $Log: vector.c,v $
+// Revision 1.21  2007/06/23 00:04:19  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.20  2007/01/13 07:26:30  bernard
+// backout ccmask
+//
+// Revision 1.19  2007/01/12 15:25:11  bernard
+// ccmask phase 1
+//
+// Revision 1.18  2006/12/20 04:26:20  gsmith
+// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
+//
+// Revision 1.17  2006/12/08 09:43:31  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -268,8 +287,7 @@ U64     d;
             regs->GR_L(gr1) += 8;
 #if 0
             /* This is where the instruction may be interrupted */
-            regs->psw.IA -= REAL_ILC(regs);
-            VALIDATE_AIA(regs);
+            UPD_PSW_IA(regs, PSW_IA(regs, -4));
             return;
 #endif
         }
@@ -284,8 +302,8 @@ U64     d;
         regs->psw.cc = 0;
     }
 
-    /* Set CC2 if vr 14 is restored, CC0 if not restored, 
-       CC3 and CC1 for other VR's respectively */
+    /* Set 2 if vr 14 is restored, 0 if not restored, 
+       3 and 1 for other VR's respectively */
     if(n2 != 14) regs->psw.cc++;
 
     /* Update the vector pair number, and zero element number */
@@ -343,8 +361,7 @@ U64     d;
             regs->GR_L(gr1) += 8;
 #if 0
             /* This is where the instruction may be interrupted */
-            regs->psw.IA -= REAL_ILC(regs);
-            VALIDATE_AIA(regs);
+            UPD_PSW_IA(regs, PSW_IA(regs, -4));
             return;
 #endif
         }
@@ -362,8 +379,8 @@ U64     d;
         regs->psw.cc = 0;
     }
 
-    /* Set CC2 if vr 14 is restored, CC0 if not restored, 
-       CC3 and CC1 for other VR's respectively */
+    /* Set 2 if vr 14 is restored, 0 if not restored, 
+       3 and 1 for other VR's respectively */
     if(n2 != 14) regs->psw.cc++;
 
     /* Update the vector pair number, and zero element number */
@@ -419,8 +436,7 @@ U64     d;
             regs->GR_L(gr1) += 8;
 #if 0
             /* This is where the instruction may be interrupted */
-            regs->psw.IA -= REAL_ILC(regs);
-            VALIDATE_AIA(regs);
+            UPD_PSW_IA(regs, PSW_IA(regs, -4));
             return;
 #endif
         }
@@ -435,8 +451,8 @@ U64     d;
         regs->psw.cc = 0;
     }
 
-    /* Set CC2 if vr 14 is restored, CC0 if not restored, 
-       CC3 and CC1 for other VR's respectively */
+    /* Set 2 if vr 14 is restored, 0 if not restored, 
+       3 and 1 for other VR's respectively */
     if(n2 != 14) regs->psw.cc++;
 
     /* Update the vector pair number, and zero element number */

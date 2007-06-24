@@ -1,10 +1,20 @@
-/* CCKDDASD.C   (c) Copyright Roger Bowler, 1999-2006                */
+/* CCKDDASD.C   (c) Copyright Roger Bowler, 1999-2007                */
 /*       ESA/390 Compressed CKD Direct Access Storage Device Handler */
+
+// $Id: cckddasd.c,v 1.141 2007/06/23 00:04:03 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device functions for compressed emulated     */
 /* count-key-data direct access storage devices.                     */
 /*-------------------------------------------------------------------*/
+
+// $Log: cckddasd.c,v $
+// Revision 1.141  2007/06/23 00:04:03  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.140  2006/12/08 09:43:17  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -26,9 +36,9 @@ void    cckddasd_end(DEVBLK *dev);
 
 int     cckd_open (DEVBLK *dev, int sfx, int flags, mode_t mode);
 int     cckd_close (DEVBLK *dev, int sfx);
-int     cckd_read (DEVBLK *dev, int sfx, OFF_T off, void *buf, size_t len);
-int     cckd_write (DEVBLK *dev, int sfx, OFF_T off, void *buf, size_t len);
-int     cckd_ftruncate(DEVBLK *dev, int sfx, OFF_T off);
+int     cckd_read (DEVBLK *dev, int sfx, off_t off, void *buf, size_t len);
+int     cckd_write (DEVBLK *dev, int sfx, off_t off, void *buf, size_t len);
+int     cckd_ftruncate(DEVBLK *dev, int sfx, off_t off);
 void   *cckd_malloc(DEVBLK *dev, char *id, size_t size);
 void   *cckd_calloc(DEVBLK *dev, char *id, size_t n, size_t size);
 void    cckd_free(DEVBLK *dev, char *id,void *p);
@@ -52,8 +62,8 @@ void    cckd_purge_cache(DEVBLK *dev);
 int     cckd_purge_cache_scan(int *answer, int ix, int i, void *data);
 void    cckd_writer(void *arg);
 int     cckd_writer_scan(int *o, int ix, int i, void *data);
-OFF_T   cckd_get_space(DEVBLK *dev, int *size, int flags);
-void    cckd_rel_space(DEVBLK *dev, OFF_T pos, int len, int size);
+off_t   cckd_get_space(DEVBLK *dev, int *size, int flags);
+void    cckd_rel_space(DEVBLK *dev, off_t pos, int len, int size);
 void    cckd_flush_space(DEVBLK *dev);
 int     cckd_read_chdr(DEVBLK *dev);
 int     cckd_write_chdr(DEVBLK *dev);
@@ -295,9 +305,10 @@ int             fdflags;                /* File flags                */
         cckd->fd[i] = -1;
         cckd->open[i] = CCKD_OPEN_NONE;
     }
+    cckd->maxsize = sizeof(off_t) > 4 ? 0xffffffffll : 0x7fffffffll;
 
     /* call the chkdsk function */
-    if (cckd_chkdsk (cckd->fd[0], stdout, 0) < 0)
+    if (cckd_chkdsk (dev, 0) < 0)
         return -1;
 
     /* Perform initial read */
@@ -406,6 +417,12 @@ int             i;                      /* Index                     */
     for (i = 0; i <= cckd->sfn; i++)
         cckd_free (dev, "l1", cckd->l1[i]);
 
+    /* reset the device handler */
+    if (cckd->ckddasd)
+        dev->hnd = &ckddasd_device_hndinfo;
+    else
+        dev->hnd = &fbadasd_device_hndinfo;
+
     /* write some statistics */
     if (!dev->batch)
         cckd_sf_stats (dev);
@@ -415,10 +432,11 @@ int             i;                      /* Index                     */
     dev->cckd_ext= NULL;
     cckd_free (dev, "ext", cckd);
 
-    free (dev->dasdsfn);
+    if (dev->dasdsfn) free (dev->dasdsfn);
     dev->dasdsfn = NULL;
 
     close (dev->fd);
+    dev->fd = -1;
 
     /* If no more devices then perform global termination */
     if (cckdblk.dev1st == NULL) cckddasd_term ();
@@ -615,7 +633,7 @@ int             rc = 0;                 /* Return code               */
 /*-------------------------------------------------------------------*/
 /* Read from a cckd file                                             */
 /*-------------------------------------------------------------------*/
-int cckd_read (DEVBLK *dev, int sfx, OFF_T off, void *buf, size_t len)
+int cckd_read (DEVBLK *dev, int sfx, off_t off, void *buf, size_t len)
 {
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
 int             rc;                     /* Return code               */
@@ -626,7 +644,7 @@ int             rc;                     /* Return code               */
                 sfx, cckd->fd[sfx], (long long)off, (long)len);
 
     /* Seek to specified offset */
-    if (LSEEK (cckd->fd[sfx], off, SEEK_SET) < 0)
+    if (lseek (cckd->fd[sfx], off, SEEK_SET) < 0)
     {
         logmsg (_("HHCCD130E %4.4X file[%d] lseek error, offset 0x%" I64_FMT "x: %s\n"),
                 dev->devnum, sfx, (long long)off, strerror(errno));
@@ -656,7 +674,7 @@ int             rc;                     /* Return code               */
 /*-------------------------------------------------------------------*/
 /* Write to a cckd file                                              */
 /*-------------------------------------------------------------------*/
-int cckd_write (DEVBLK *dev, int sfx, OFF_T off, void *buf, size_t len)
+int cckd_write (DEVBLK *dev, int sfx, off_t off, void *buf, size_t len)
 {
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
 int             rc = 0;                 /* Return code               */
@@ -667,7 +685,7 @@ int             rc = 0;                 /* Return code               */
                 sfx, cckd->fd[sfx], (long long)off, (long)len);
 
     /* Seek to specified offset */
-    if (LSEEK (cckd->fd[sfx], off, SEEK_SET) < 0)
+    if (lseek (cckd->fd[sfx], off, SEEK_SET) < 0)
     {
         logmsg (_("HHCCD130E %4.4X file[%d] lseek error, offset 0x%" I64_FMT "x: %s\n"),
                 dev->devnum, sfx, (long long)off, strerror(errno));
@@ -696,7 +714,7 @@ int             rc = 0;                 /* Return code               */
 /*-------------------------------------------------------------------*/
 /* Truncate a cckd file                                              */
 /*-------------------------------------------------------------------*/
-int cckd_ftruncate(DEVBLK *dev, int sfx, OFF_T off)
+int cckd_ftruncate(DEVBLK *dev, int sfx, off_t off)
 {
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
 
@@ -706,7 +724,7 @@ CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
                 sfx, cckd->fd[sfx], (long long)off);
 
     /* Truncate the file */
-    if (FTRUNCATE (cckd->fd[sfx], off) < 0)
+    if (ftruncate (cckd->fd[sfx], off) < 0)
     {
         logmsg (_("HHCCD130E %4.4X file[%d] ftruncate error, offset 0x%" I64_FMT "x: %s\n"),
                 dev->devnum, sfx, (long long)off, strerror(errno));
@@ -1849,7 +1867,7 @@ int             sfx;                    /* Shadow file index         */
 int             err = 0, n = 0, i, p;
 size_t  largest=0;
 size_t  total=0;
-OFF_T           fpos;
+off_t           fpos;
 
     cckd = dev->cckd_ext;
     sfx = cckd->sfn;
@@ -1916,12 +1934,12 @@ OFF_T           fpos;
 /*-------------------------------------------------------------------*/
 /* Get file space                                                    */
 /*-------------------------------------------------------------------*/
-OFF_T cckd_get_space(DEVBLK *dev, int *size, int flags)
+off_t cckd_get_space(DEVBLK *dev, int *size, int flags)
 {
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
 int             i,p,n;                  /* Free space indexes        */
 int             len2;                   /* Other lengths             */
-OFF_T           fpos;                   /* Free space offset         */
+off_t           fpos;                   /* Free space offset         */
 unsigned int    flen;                   /* Free space size           */
 int             sfx;                    /* Shadow file index         */
 int             len;                    /* Requested length          */
@@ -1955,11 +1973,11 @@ int             len;                    /* Requested length          */
 
 cckd_get_space_atend:
 
-        fpos = (OFF_T)cckd->cdevhdr[sfx].size;
-        if ((U64)(fpos + len) > (U64)4294967295ULL)
+        fpos = (off_t)cckd->cdevhdr[sfx].size;
+        if ((long long)(fpos + len) > cckd->maxsize)
         {
-            logmsg (_("HHCCD102E %4.4X file[%d] get space error, size exceeds 4G\n"),
-                    dev->devnum, sfx);
+            logmsg (_("HHCCD102E %4.4X file[%d] get space error, size exceeds %lldM\n"),
+                    dev->devnum, sfx, (cckd->maxsize >> 20) + 1);
             return -1;
         }
         cckd->cdevhdr[sfx].size += len;
@@ -1971,14 +1989,14 @@ cckd_get_space_atend:
     }
 
     /* Scan free space chain */
-    fpos = (OFF_T)cckd->cdevhdr[sfx].free;
+    fpos = (off_t)cckd->cdevhdr[sfx].free;
     for (i = cckd->free1st; i >= 0; i = cckd->free[i].next)
     {
         if (cckd->free[i].pending == 0
          && (len2 <= (int)cckd->free[i].len || len == (int)cckd->free[i].len)
          && ((flags & CCKD_L2SPACE) || fpos >= cckd->l2bounds))
             break;
-        fpos = (OFF_T)cckd->free[i].pos;
+        fpos = (off_t)cckd->free[i].pos;
     }
 
     /* This can happen if largest comes before l2bounds */
@@ -2057,11 +2075,11 @@ cckd_get_space_atend:
 /*-------------------------------------------------------------------*/
 /* Release file space                                                */
 /*-------------------------------------------------------------------*/
-void cckd_rel_space(DEVBLK *dev, OFF_T pos, int len, int size)
+void cckd_rel_space(DEVBLK *dev, off_t pos, int len, int size)
 {
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
 int             sfx;                    /* Shadow file index         */
-OFF_T           ppos, npos;             /* Prev/next free offsets    */
+off_t           ppos, npos;             /* Prev/next free offsets    */
 int             i, p, n;                /* Free space indexes        */
 int             pending;                /* Calculated pending value  */
 int             fsize = size;           /* Free space size           */
@@ -2262,7 +2280,7 @@ U32             ppos, pos;              /* Free space offsets        */
         }
 
         /* Truncate the file */
-        cckd_ftruncate (dev, sfx, (OFF_T)cckd->cdevhdr[sfx].size);
+        cckd_ftruncate (dev, sfx, (off_t)cckd->cdevhdr[sfx].size);
 
     } /* Release space at end of the file */
 
@@ -2277,7 +2295,6 @@ int cckd_read_chdr (DEVBLK *dev)
 {
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
 int             sfx;                    /* File index                */
-int             fend,mend;              /* Byte order indicators     */
 
     cckd = dev->cckd_ext;
     sfx = cckd->sfn;
@@ -2292,13 +2309,11 @@ int             fend,mend;              /* Byte order indicators     */
 
     /* Check endian format */
     cckd->swapend[sfx] = 0;
-    fend = ((cckd->cdevhdr[sfx].options & CCKD_BIGENDIAN) != 0);
-    mend = cckd_endian ();
-    if (fend != mend)
+    if ((cckd->cdevhdr[sfx].options & CCKD_BIGENDIAN) != cckd_endian())
     {
         if (cckd->open[sfx] == CCKD_OPEN_RW)
         {
-            if (cckd_swapend (cckd->fd[sfx], stdout) < 0)
+            if (cckd_swapend (dev) < 0)
                 return -1;
             cckd_swapend_chdr (&cckd->cdevhdr[sfx]);
         }
@@ -2336,7 +2351,12 @@ int             sfx;                    /* File index                */
 
     cckd_trace (dev, "file[%d] write_chdr\n", sfx);
 
-    if (cckd_write (dev, sfx, CKDDASD_DEVHDR_SIZE, &cckd->cdevhdr[sfx], CCKDDASD_DEVHDR_SIZE) < 0)
+    /* Set version.release.modlvl */
+    cckd->cdevhdr[sfx].vrm[0] = CCKD_VERSION;
+    cckd->cdevhdr[sfx].vrm[1] = CCKD_RELEASE;
+    cckd->cdevhdr[sfx].vrm[2] = CCKD_MODLVL;
+
+    if (cckd_write (dev, sfx, CCKD_DEVHDR_POS, &cckd->cdevhdr[sfx], CCKD_DEVHDR_SIZE) < 0)
         return -1;
 
     return 0;
@@ -2423,11 +2443,11 @@ int cckd_write_l1ent (DEVBLK *dev, int l1x)
 {
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
 int             sfx;                    /* File index                */
-OFF_T           off;                    /* Offset to l1 entry        */
+off_t           off;                    /* Offset to l1 entry        */
 
     cckd = dev->cckd_ext;
     sfx = cckd->sfn;
-    off = (OFF_T)(CCKD_L1TAB_POS + l1x * CCKD_L1ENT_SIZE);
+    off = (off_t)(CCKD_L1TAB_POS + l1x * CCKD_L1ENT_SIZE);
 
     cckd_trace (dev, "file[%d] write_l1ent[%d] , 0x%" I64_FMT "x\n",
                 sfx, l1x, (long long)off);
@@ -2482,14 +2502,15 @@ CKDDASD_DEVHDR  devhdr;                 /* Device header             */
 } /* end function cckd_read_init */
 
 /*-------------------------------------------------------------------*/
-/* Read  the free space                                              */
+/* Read free space                                                   */
 /*-------------------------------------------------------------------*/
 int cckd_read_fsp (DEVBLK *dev)
 {
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
-OFF_T           fpos;                   /* Free space offset         */
+off_t           fpos;                   /* Free space offset         */
 int             sfx;                    /* File index                */
 int             i;                      /* Index                     */
+CCKD_FREEBLK    freeblk;                /* First freeblk read        */
 
     cckd = dev->cckd_ext;
     sfx = cckd->sfn;
@@ -2512,18 +2533,61 @@ int             i;                      /* Index                     */
     if (cckd->cdevhdr[sfx].free_number)
     {
         cckd->free1st = 0;
-        fpos = (OFF_T)cckd->cdevhdr[sfx].free;
-        for (i = 0; i < cckd->cdevhdr[sfx].free_number; i++)
+
+        /* Read the first freeblk to determine old/new format */
+        fpos = (off_t)cckd->cdevhdr[sfx].free;
+        if (cckd_read (dev, sfx, fpos, &freeblk, CCKD_FREEBLK_SIZE) < 0)
+            return -1;
+
+        if (memcmp(&freeblk, "FREE_BLK", 8) == 0)
         {
-            if (cckd_read (dev, sfx, fpos, &cckd->free[i], CCKD_FREEBLK_SIZE) < 0)
+            /* new format free space */
+            CCKD_FREEBLK *fsp;
+            U32 ofree = cckd->cdevhdr[sfx].free;
+            int n = cckd->cdevhdr[sfx].free_number * CCKD_FREEBLK_SIZE;
+            if ((fsp = cckd_malloc (dev, "fsp", n)) == NULL)
                 return -1;
-            cckd->free[i].prev = i - 1;
-            cckd->free[i].next = i + 1;
-            fpos = (OFF_T)cckd->free[i].pos;
-        }
-        cckd->free[i-1].next = -1;
-        cckd->freelast = i-1;
-    }
+            fpos += CCKD_FREEBLK_SIZE;
+            if (cckd_read (dev, sfx, fpos, fsp, n) < 0)
+                return -1;
+            for (i = 0; i < cckd->cdevhdr[sfx].free_number; i++)
+            {
+                if (i == 0)
+                    cckd->cdevhdr[sfx].free = fsp[i].pos;
+                else
+                    cckd->free[i-1].pos = fsp[i].pos;
+                cckd->free[i].pos  = 0;
+                cckd->free[i].len  = fsp[i].len;
+                cckd->free[i].prev = i - 1;
+                cckd->free[i].next = i + 1;
+            }
+            cckd->free[i-1].next = -1;
+            cckd->freelast = i-1;
+            free (fsp);
+
+            /* truncate if new format free space was at the end */
+            if (ofree == cckd->cdevhdr[sfx].size)
+            {
+                fpos = (off_t)cckd->cdevhdr[sfx].size;
+                cckd_ftruncate(dev, sfx, fpos);
+            }
+        } /* new format free space */
+        else
+        {
+            /* old format free space */
+            fpos = (off_t)cckd->cdevhdr[sfx].free;
+            for (i = 0; i < cckd->cdevhdr[sfx].free_number; i++)
+            {
+                if (cckd_read (dev, sfx, fpos, &cckd->free[i], CCKD_FREEBLK_SIZE) < 0)
+                    return -1;
+                cckd->free[i].prev = i - 1;
+                cckd->free[i].next = i + 1;
+                fpos = (off_t)cckd->free[i].pos;
+            }
+            cckd->free[i-1].next = -1;
+            cckd->freelast = i-1;
+        } /* old format free space */
+    } /* if (cckd->cdevhdr[sfx].free_number) */
 
     /* Build singly linked chain of available free space entries */
     if (cckd->cdevhdr[sfx].free_number < cckd->freenbr)
@@ -2546,33 +2610,86 @@ int             i;                      /* Index                     */
 int cckd_write_fsp (DEVBLK *dev)
 {
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
-OFF_T           fpos;                   /* Free space offset         */
+off_t           fpos;                   /* Free space offset         */
+U32             ppos;                   /* Previous free space offset*/
 int             sfx;                    /* File index                */
-int             i;                      /* Index                     */
+int             i, j, n;                /* Work variables            */
+int             rc;                     /* Return code               */
+CCKD_FREEBLK   *fsp = NULL;             /* -> new format free space  */
 
     cckd = dev->cckd_ext;
     sfx = cckd->sfn;
 
+    if (cckd->free == NULL)
+        return 0;
+
     cckd_trace (dev, "file[%d] write_fsp number %d\n",
                 sfx, cckd->cdevhdr[sfx].free_number);
 
+    /* get rid of pending free space */
     for (i = 0; i < CCKD_MAX_FREEPEND; i++)
         cckd_flush_space(dev);
 
+    /* sanity checks */
     if (cckd->cdevhdr[sfx].free_number == 0 || cckd->cdevhdr[sfx].free == 0)
     {
         cckd->cdevhdr[sfx].free_number = cckd->cdevhdr[sfx].free = 0;
         cckd->free1st = cckd->freelast = cckd->freeavail = -1;
     }
 
-    fpos = (OFF_T)cckd->cdevhdr[sfx].free;
-    for (i = cckd->free1st; i >= 0; i = cckd->free[i].next)
+    /* Write any free spaces */
+    if (cckd->cdevhdr[sfx].free)
     {
-        if (cckd_write (dev, sfx, fpos, &cckd->free[i], CCKD_FREEBLK_SIZE) < 0)
-            return -1;
-        fpos = (OFF_T)cckd->free[i].pos;
-    }
+        /* size needed for new format free space */
+        n = (cckd->cdevhdr[sfx].free_number+1) * CCKD_FREEBLK_SIZE;
 
+        /* look for existing free space to fit new format free space */   
+        fpos = 0;
+        for (i = cckd->free1st; i >= 0; i = cckd->free[i].next)
+            if (n <= (int)cckd->free[i].len)
+                break;
+        if (i >= 0)
+            fpos = cckd->free[i].prev < 0
+                 ? (off_t)cckd->cdevhdr[sfx].free
+                 : (off_t)cckd->free[cckd->free[i].prev].pos;
+
+        /* if no applicable space see if we can append to the file */
+        if (fpos == 0 && cckd->maxsize - cckd->cdevhdr[sfx].size >= n)
+            fpos = (off_t)cckd->cdevhdr[sfx].size;
+
+        if (fpos && (fsp = cckd_malloc (dev, "fsp", n)) == NULL)
+            fpos = 0;
+
+        if (fpos)
+        {
+            /* New format free space */
+            memcpy (&fsp[0], "FREE_BLK", 8);
+            ppos = cckd->cdevhdr[sfx].free;
+            for (i = cckd->free1st, j = 1; i >= 0; i = cckd->free[i].next)
+            {
+                fsp[j].pos = ppos;
+                fsp[j++].len = cckd->free[i].len;
+                ppos = cckd->free[i].pos;
+            }
+            rc = cckd_write (dev, sfx, fpos, fsp, n);
+            cckd_free (dev, "fsp", fsp);
+            if (rc < 0)
+                return -1;
+            cckd->cdevhdr[sfx].free = (U32)fpos;
+        } /* new format free space */
+        else
+        {
+            /* Old format free space */
+            for (i = cckd->free1st; i >= 0; i = cckd->free[i].next)
+            {
+                if (cckd_write (dev, sfx, fpos, &cckd->free[i], CCKD_FREEBLK_SIZE) < 0)
+                    return -1;
+                fpos = (off_t)cckd->free[i].pos;
+            }
+        } /* old format free space */
+    } /* if (cckd->cdevhdr[sfx].free) */
+
+    /* Free the free space array */
     if (cckd->free) cckd_free (dev, "free", cckd->free);
     cckd->free = NULL;
     cckd->freenbr = 0;
@@ -2588,7 +2705,7 @@ int             i;                      /* Index                     */
 int cckd_read_l2 (DEVBLK *dev, int sfx, int l1x)
 {
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
-OFF_T           off;                    /* L2 file offset            */
+off_t           off;                    /* L2 file offset            */
 int             fnd;                    /* Found cache               */
 int             lru;                    /* Oldest available cache    */
 CCKD_L2ENT     *buf;                    /* -> Cache buffer           */
@@ -2661,7 +2778,7 @@ int             nullfmt;                /* Null track format         */
     /* Read the new level 2 table */
     else
     {
-        off = (OFF_T)cckd->l1[sfx][l1x];
+        off = (off_t)cckd->l1[sfx][l1x];
         if (cckd_read (dev, sfx, off, buf, CCKD_L2TAB_SIZE) < 0)
         {
             cache_lock(CACHE_L2);
@@ -2762,7 +2879,7 @@ int cckd_write_l2 (DEVBLK *dev)
 {
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
 int             sfx,l1x;                /* Lookup table indices      */
-OFF_T           off, old_off;           /* New/old L2 file offsets   */
+off_t           off, old_off;           /* New/old L2 file offsets   */
 int             size = CCKD_L2TAB_SIZE; /* L2 table size             */
 int             fix;                    /* Null format type          */
 
@@ -2776,7 +2893,7 @@ int             fix;                    /* Null format type          */
 
     if (sfx < 0 || l1x < 0) return -1;
 
-    old_off = (OFF_T)cckd->l1[sfx][l1x];
+    old_off = (off_t)cckd->l1[sfx][l1x];
 
     if (cckd->l1[sfx][l1x] == 0 || cckd->l1[sfx][l1x] == 0xffffffff)
         cckd->l2bounds += CCKD_L2TAB_SIZE;
@@ -2863,7 +2980,7 @@ int cckd_write_l2ent (DEVBLK *dev,  CCKD_L2ENT *l2, int trk)
 {
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
 int             sfx,l1x,l2x;            /* Lookup table indices      */
-OFF_T           off;                    /* L2 entry offset           */
+off_t           off;                    /* L2 entry offset           */
 
     cckd = dev->cckd_ext;
 
@@ -2886,7 +3003,7 @@ OFF_T           off;                    /* L2 entry offset           */
         return cckd_write_l2 (dev);
 
     /* Write the level 2 table entry */
-    off = (OFF_T)(cckd->l1[sfx][l1x] + l2x * CCKD_L2ENT_SIZE);
+    off = (off_t)(cckd->l1[sfx][l1x] + l2x * CCKD_L2ENT_SIZE);
     if (cckd_write (dev, sfx, off, &cckd->l2[l2x], CCKD_L2ENT_SIZE) < 0)
         return -1;
 
@@ -2914,7 +3031,7 @@ CCKD_L2ENT      l2;                     /* Level 2 entry             */
     /* Read the track image or build a null track image */
     if (l2.pos != 0)
     {
-        rc = cckd_read (dev, sfx, (OFF_T)l2.pos, buf, (size_t)l2.len);
+        rc = cckd_read (dev, sfx, (off_t)l2.pos, buf, (size_t)l2.len);
         if (rc < 0)
             goto cckd_read_trkimg_error;
 
@@ -2952,7 +3069,7 @@ int cckd_write_trkimg (DEVBLK *dev, BYTE *buf, int len, int trk, int flags)
 {
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
 int             rc;                     /* Return code               */
-OFF_T           off;                    /* File offset               */
+off_t           off;                    /* File offset               */
 CCKD_L2ENT      l2, oldl2;              /* Level 2 entries           */
 int             sfx,l1x,l2x;            /* Lookup table indices      */
 int             after = 0;              /* 1=New track after old     */
@@ -3019,7 +3136,7 @@ int             size;                   /* Size of new track         */
         return -1;
 
     /* Release the previous space */
-    cckd_rel_space (dev, (OFF_T)oldl2.pos, (int)oldl2.len, (int)oldl2.size);
+    cckd_rel_space (dev, (off_t)oldl2.pos, (int)oldl2.len, (int)oldl2.size);
 
     /* `after' is 1 if the new offset is after the old offset */
     return after;
@@ -3440,7 +3557,7 @@ int cckd_sf_init (DEVBLK *dev)
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
 int             rc;                     /* Return code               */
 int             i;                      /* Index                     */
-struct STAT     st;                     /* stat() buffer             */
+struct stat     st;                     /* stat() buffer             */
 char            pathname[MAX_PATH];     /* file path in host format  */
 
     cckd = dev->cckd_ext;
@@ -3479,7 +3596,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     for (cckd->sfn = 1; cckd->sfn <= CCKD_MAX_SF; cckd->sfn++)
     {
         hostpath(pathname, cckd_sf_name (dev, cckd->sfn), sizeof(pathname));
-        if (STAT (pathname, &st) < 0)
+        if (stat (pathname, &st) < 0)
             break;
 
         /* Try to open the shadow file read-write then read-only */
@@ -3488,7 +3605,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
                 break;
 
         /* Call the chkdsk function */
-        rc = cckd_chkdsk (cckd->fd[cckd->sfn], stdout, 0);
+        rc = cckd_chkdsk (dev, 0);
         if (rc < 0) return -1;
 
         /* Perform initial read */
@@ -3703,7 +3820,7 @@ int             err = 0;                /* 1=I/O error occurred      */
 int             l2updated;              /* 1=L2 table was updated    */
 int             i,j;                    /* Loop indexes              */
 int             merge, force;           /* Flags                     */
-OFF_T           pos;                    /* File offset               */
+off_t           pos;                    /* File offset               */
 size_t          len;                    /* Length to read/write      */
 int             size;                   /* Image size                */
 CCKD_L2ENT      from_l2[256],           /* Level 2 tables            */
@@ -3776,7 +3893,7 @@ BYTE            buf[65536];             /* Buffer                    */
     }
     else
     {
-        if (cckd_chkdsk (cckd->fd[to_sfx], stdout, 0) < 0)
+        if (cckd_chkdsk (dev, 0) < 0)
         {
             logmsg (_("HHCCD173E %4.4X file[%d] not merged, "
                     "file[%d] check failed\n"),
@@ -3818,7 +3935,7 @@ BYTE            buf[65536];             /* Buffer                    */
                 memset (&from_l2, 0xff, CCKD_L2TAB_SIZE);
             else
             {
-                pos = (OFF_T)cckd->l1[from_sfx][i];
+                pos = (off_t)cckd->l1[from_sfx][i];
                 if (cckd_read(dev, from_sfx, pos, &from_l2, CCKD_L2TAB_SIZE) < 0)
                 {
                     err = 1;
@@ -3833,7 +3950,7 @@ BYTE            buf[65536];             /* Buffer                    */
                 memset (&to_l2, 0xff, CCKD_L2TAB_SIZE);
             else
             {
-                pos = (OFF_T)cckd->l1[to_sfx][i];
+                pos = (off_t)cckd->l1[to_sfx][i];
                 if (cckd_read(dev, to_sfx, pos, &to_l2, CCKD_L2TAB_SIZE) < 0)
                 {
                     err = 1;
@@ -3854,7 +3971,7 @@ BYTE            buf[65536];             /* Buffer                    */
                 len = (int)from_l2[j].len;
                 if (len > CKDDASD_NULLTRK_FMTMAX)
                 {
-                    pos = (OFF_T)from_l2[j].pos;
+                    pos = (off_t)from_l2[j].pos;
                     if (cckd_read (dev, from_sfx, pos, buf, len) < 0)
                     {
                         err = 1;
@@ -3887,7 +4004,7 @@ BYTE            buf[65536];             /* Buffer                    */
                 }
 
                 /* Release space occupied by old `to' entry */
-                cckd_rel_space (dev, (OFF_T)to_l2[j].pos, (int)to_l2[j].len,
+                cckd_rel_space (dev, (off_t)to_l2[j].pos, (int)to_l2[j].len,
                                                           (int)to_l2[j].size);
 
                 /* Update `to' l2 table entry */
@@ -3901,7 +4018,7 @@ BYTE            buf[65536];             /* Buffer                    */
             /* Update the `to' level 2 table */
             if (l2updated)
             {
-                pos = (OFF_T)cckd->l1[to_sfx][i];
+                pos = (off_t)cckd->l1[to_sfx][i];
                 if (memcmp (&to_l2, &empty_l2[fix], CCKD_L2TAB_SIZE) == 0)
                 {
                     cckd_rel_space (dev, pos, CCKD_L2TAB_SIZE, CCKD_L2TAB_SIZE);
@@ -3910,7 +4027,7 @@ BYTE            buf[65536];             /* Buffer                    */
                 else
                 {
                     size = CCKD_L2TAB_SIZE;
-                    if (pos == 0 || pos == (OFF_T)0xffffffff)
+                    if (pos == 0 || pos == (off_t)0xffffffff)
                         pos = cckd_get_space (dev, &size, CCKD_L2SPACE);
                     if (cckd_write(dev, to_sfx, pos, &to_l2, CCKD_L2TAB_SIZE) < 0)
                     {
@@ -3931,7 +4048,7 @@ BYTE            buf[65536];             /* Buffer                    */
 
         /* Validate the merge */
         cckd_harden (dev);
-        cckd_chkdsk (cckd->fd[to_sfx], stdout, err ? 2 : 0);
+        cckd_chkdsk (dev, err ? 2 : 0);
         cckd_read_init (dev);
 
     } /* if merge */
@@ -4057,7 +4174,7 @@ int             rc;                     /* Return code               */
     cckd_harden (dev);
 
     /* Call the compress function */
-    rc = cckd_comp (cckd->fd[cckd->sfn], stdout);
+    rc = cckd_comp (dev);
 
     /* Perform initial read */
     rc = cckd_read_init (dev);
@@ -4083,7 +4200,7 @@ int             rc;                     /* Return code               */
 void cckd_sf_stats (DEVBLK *dev)
 {
 CCKDDASD_EXT   *cckd;                   /* -> cckd extension         */
-struct STAT     st;                     /* File information          */
+struct stat     st;                     /* File information          */
 int             i;                      /* Index                     */
 int             rc;                     /* Return code               */
 char           *ost[] = {"  ", "ro", "rd", "rw"};
@@ -4100,7 +4217,7 @@ int             freenbr=0;              /* Total number free spaces  */
 //  obtain_lock (&cckd->filelock);
 
     /* Calculate totals */
-    rc = FSTAT (cckd->fd[0], &st);
+    rc = fstat (cckd->fd[0], &st);
     for (i = 0; i <= cckd->sfn; i++)
     {
         if (!i) size = st.st_size;
@@ -4365,7 +4482,7 @@ int             after = 0, a;           /* New space after old       */
 int             sfx;                    /* File index                */
 int             i, j, l;                /* Indexes                   */
 int             flags;                  /* Write trkimg flags        */
-OFF_T           fpos, upos;             /* File offsets              */
+off_t           fpos, upos;             /* File offsets              */
 size_t          flen, ulen, len;        /* Lengths                   */
 int             trk;                    /* Track number              */
 int             l1x,l2x;                /* Table Indexes             */
@@ -4382,7 +4499,7 @@ BYTE            buf[256*1024];          /* Buffer                    */
                     size, cckd->cdevhdr[cckd->sfn].free,
                     cckd->cdevhdr[cckd->sfn].free_number,
                     cckd->cdevhdr[cckd->sfn].free_largest);
-        fpos = (OFF_T)cckd->cdevhdr[cckd->sfn].free;
+        fpos = (off_t)cckd->cdevhdr[cckd->sfn].free;
         for (i = cckd->free1st; i >= 0; i = cckd->free[i].next)
         {
             cckd_trace (dev, "gcperc free[%4d]:%8.8x end %8.8x len %10d%cpend %d\n",
@@ -4396,6 +4513,7 @@ BYTE            buf[256*1024];          /* Buffer                    */
     if (!cckd->l2ok)
         cckd_gc_l2(dev, buf);
 
+    /* garbage collection cycle */
     while (moved < size && after < 4)
     {
         obtain_lock (&cckd->filelock);
@@ -4470,7 +4588,7 @@ BYTE            buf[256*1024];          /* Buffer                    */
         }
         else if (!cckd->cdevhdr[sfx].free_number && cckd->cdevhdr[sfx].free_imbed)
         {
-            upos = (OFF_T)(CCKD_L1TAB_POS + cckd->cdevhdr[sfx].numl1tab * CCKD_L1ENT_SIZE);
+            upos = (off_t)(CCKD_L1TAB_POS + cckd->cdevhdr[sfx].numl1tab * CCKD_L1ENT_SIZE);
             while (1)
             {
                 for (i = 0; i < cckd->cdevhdr[sfx].numl1tab; i++)
@@ -4573,6 +4691,7 @@ cckd_gc_perc_space_error:
               "%2.2x%2.2x%2.2x%2.2x%2.2x\n"),
             dev->devnum,cckd->sfn,(long long)(upos + i),
             buf[i], buf[i+1],buf[i+2], buf[i+3], buf[i+4]);
+    cckd->cdevhdr[cckd->sfn].options |= CCKD_SPERRS;
     cckd_print_itrace();
 
 cckd_gc_perc_error:
@@ -4609,7 +4728,7 @@ int             sfx;                    /* Shadow file index         */
 int             i, j;                   /* Work variables            */
 int             trk;                    /* Track number              */
 int             len;                    /* Track length              */
-OFF_T           pos, fpos;              /* File offsets              */
+off_t           pos, fpos;              /* File offsets              */
 
     cckd = dev->cckd_ext;
 
@@ -4622,7 +4741,7 @@ OFF_T           pos, fpos;              /* File offsets              */
     /* Find any level 2 table out of bounds */
     for (i = 0; i < cckd->cdevhdr[sfx].numl1tab; i++)
         if (cckd->l1[sfx][i] != 0 && cckd->l1[sfx][i] != 0xffffffff
-         && cckd->l2bounds - CCKD_L2TAB_SIZE < (OFF_T)cckd->l1[sfx][i])
+         && cckd->l2bounds - CCKD_L2TAB_SIZE < (off_t)cckd->l1[sfx][i])
             break;
 
     /* Return OK if no l2 tables out of bounds */
@@ -4632,20 +4751,20 @@ OFF_T           pos, fpos;              /* File offsets              */
     /* Relocate all track images within the bounds */
     pos = CCKD_L1TAB_POS + (cckd->cdevhdr[sfx].numl1tab * CCKD_L1ENT_SIZE);
     i = cckd->free1st;
-    fpos = (OFF_T)cckd->cdevhdr[sfx].free;
+    fpos = (off_t)cckd->cdevhdr[sfx].free;
     while (pos < cckd->l2bounds)
     {
         if (i >= 0 && pos == fpos)
         {
             pos += cckd->free[i].len;
-            fpos = (OFF_T)cckd->free[i].pos;
+            fpos = (off_t)cckd->free[i].pos;
             i = cckd->free[i].next;
             j = 0;
         }
         else
         {
             for (j = 0; j < cckd->cdevhdr[sfx].numl1tab; j++)
-                if (pos == (OFF_T)cckd->l1[sfx][j])
+                if (pos == (off_t)cckd->l1[sfx][j])
                 {
                     pos += CCKD_L2TAB_SIZE;
                     break;
@@ -4666,14 +4785,14 @@ OFF_T           pos, fpos;              /* File offsets              */
             /* Start over */
             pos = CCKD_L1TAB_POS + (cckd->cdevhdr[sfx].numl1tab * CCKD_L1ENT_SIZE);
             i = cckd->free1st;
-            fpos = (OFF_T)cckd->cdevhdr[sfx].free;
+            fpos = (off_t)cckd->cdevhdr[sfx].free;
         }
     }
 
     do {
         /* Find a level 2 table to relocate */
         i = cckd->free1st;
-        fpos = (OFF_T)cckd->cdevhdr[sfx].free;
+        fpos = (off_t)cckd->cdevhdr[sfx].free;
         cckd_trace (dev, "gc_l2 first free[%d] pos 0x%x len %d pending %d\n",
                     i, (int)fpos, i >= 0 ? (int)cckd->free[i].len : -1,
                     i >= 0 ? cckd->free[i].pending : -1);
@@ -4687,13 +4806,13 @@ OFF_T           pos, fpos;              /* File offsets              */
            )
         {
             for (i = 0; i < cckd->cdevhdr[sfx].numl1tab; i++)
-                if (fpos + cckd->free[i].len == (OFF_T)cckd->l1[sfx][i])
+                if (fpos + cckd->free[i].len == (off_t)cckd->l1[sfx][i])
                     break;
         }
         else
         {
             for (i = 0; i < cckd->cdevhdr[sfx].numl1tab; i++)
-                if (cckd->l2bounds - CCKD_L2TAB_SIZE < (OFF_T)cckd->l1[sfx][i]
+                if (cckd->l2bounds - CCKD_L2TAB_SIZE < (off_t)cckd->l1[sfx][i]
                  && cckd->l1[sfx][i] != 0xffffffff)
                     break;
         }
@@ -5390,6 +5509,8 @@ void cckd_trace(DEVBLK *dev, char *msg, ...)
 {
 va_list         vl;
 struct timeval  tv;
+time_t          t;
+char            tbuf[64];
 CCKD_TRACE     *p;
 int             l;
 
@@ -5425,18 +5546,24 @@ int             l;
     /*             for heap overrun (vsprintf)        */
     if (cckdblk.itrace)
     {
+        gettimeofday(&tv, NULL);
+        t = tv.tv_sec;
+        strcpy(tbuf, ctime(&t));
+        tbuf[19] = '\0';
+
         va_start(vl,msg);
+
         p = cckdblk.itracep++;
         if (p >= cckdblk.itracex)
         {
             p = cckdblk.itrace;
             cckdblk.itracep = p + 1;
         }
-        gettimeofday(&tv, NULL);
+
         if (p)
         {
-            l = sprintf ((char *)p, "%6.6ld" "." "%6.6ld %4.4X:",
-                      tv.tv_sec, tv.tv_usec, dev ? dev->devnum : 0);
+            l = sprintf ((char *)p, "%s" "." "%6.6ld %4.4X:",
+                      tbuf+11, tv.tv_usec, dev ? dev->devnum : 0);
             vsprintf ((char *)p + l, msg, vl);
         }
     }
@@ -5456,6 +5583,7 @@ DEVHND cckddasd_device_hndinfo = {
         &cckd_used,                     /* Device Query used          */
         NULL,                           /* Device Reserve             */
         NULL,                           /* Device Release             */
+        NULL,                           /* Device Attention           */
         NULL,                           /* Immediate CCW Codes        */
         NULL,                           /* Signal Adapter Input       */
         NULL,                           /* Signal Adapter Ouput       */
@@ -5477,6 +5605,7 @@ DEVHND cfbadasd_device_hndinfo = {
         &cfba_used,                     /* Device Query used          */
         NULL,                           /* Device Reserve             */
         NULL,                           /* Device Release             */
+        NULL,                           /* Device Attention           */
         NULL,                           /* Immediate CCW Codes        */
         NULL,                           /* Signal Adapter Input       */
         NULL,                           /* Signal Adapter Ouput       */

@@ -8,6 +8,13 @@
 /*                                                                      */
 /************************************************************************/
 
+// $Id: memrchr.h,v 1.3 2006/12/08 09:43:29 jj Exp $
+//
+// $Log: memrchr.h,v $
+// Revision 1.3  2006/12/08 09:43:29  jj
+// Add CVS message log
+//
+
 #ifndef MEMRCHR_H
 #define MEMRCHR_H
 

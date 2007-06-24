@@ -1,5 +1,7 @@
 @echo off
 
+rem $Id: makefile.bat,v 1.6 2006/12/08 09:43:29 jj Exp $
+
 rem -------------------------------------------------------------------
 rem
 rem                         MAKEFILE.BAT
@@ -47,6 +49,10 @@ rem  09/01/05  Fish  '-g' option apparently only for VS 8.0
 rem  11/17/05  Fish  Support for building within DevStudio 6.0
 rem                  whenever VS 8.0 is also installed.
 rem  11/29/05  Fish  Added comments re: 'ASSEMBLY_LISTINGS' option
+rem
+rem $Log: makefile.bat,v $
+rem Revision 1.6  2006/12/08 09:43:29  jj
+rem Add CVS message log
 rem
 rem -------------------------------------------------------------------
 

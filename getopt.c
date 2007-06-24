@@ -1,5 +1,7 @@
 /*      $NetBSD: getopt_long.c,v 1.15 2002/01/31 22:43:40 tv Exp $      */
 
+// $Id: getopt.c,v 1.3 2006/12/08 09:43:21 jj Exp $
+
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -35,6 +37,11 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
+// $Log: getopt.c,v $
+// Revision 1.3  2006/12/08 09:43:21  jj
+// Add CVS message log
+//
 
 #define _GETOPT_C_
 #define _HUTIL_DLL_

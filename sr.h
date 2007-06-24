@@ -1,5 +1,7 @@
-/* SR.H         (c)Copyright Greg Smith, 2004-2006                   */
+/* SR.H         (c)Copyright Greg Smith, 2004-2007                   */
 /*              Suspend/Resume a Hercules session                    */
+
+// $Id: sr.h,v 1.15 2007/06/23 00:04:16 ivan Exp $
 
 /*
  * The suspend/resume functions allow a hercules instance to be
@@ -124,6 +126,15 @@
  * key requires that another key has been previously processed.
  *
  */
+
+// $Log: sr.h,v $
+// Revision 1.15  2007/06/23 00:04:16  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.14  2006/12/08 09:43:30  jj
+// Add CVS message log
+//
+
 #ifndef _HERCULES_SR_H
 #define _HERCULES_SR_H
 
@@ -174,8 +185,17 @@
 #define SR_SYS_VMACTIVE         0xace10042
 #define SR_SYS_MSCHDELAY        0xace10043
 #define SR_SYS_LOADPARM         0xace10044
+ /*
+  * Following 3 tags added for Multiple 
+  * Logical Channel Subsystem support
+  */
+#define SR_SYS_IOPENDING_LCSS   0xace10045
+#define SR_SYS_PCIPENDING_LCSS  0xace10046
+#define SR_SYS_ATTNPENDING_LCSS 0xace10047
 
 #define SR_SYS_SERVC            0xace11000
+
+#define SR_SYS_CLOCK            0xace12000
 
 #define SR_CPU                  0xace20000
 #define SR_CPU_ARCHMODE         0xace20001
@@ -364,6 +384,11 @@
 #define SR_DEV_ARGC             0xace30002
 #define SR_DEV_ARGV             0xace30003
 #define SR_DEV_TYPNAME          0xace30004
+ /*
+  * Following tag added for multiple Logical
+  * Channel subsystem support
+  */
+#define SR_DEV_LCSS             0xace30005
 #define SR_DEV_ORB              0xace30010
 #define SR_DEV_PMCW             0xace30011
 #define SR_DEV_SCSW             0xace30012
@@ -377,6 +402,9 @@
 #define SR_DEV_SENSE            0xace3001a
 #define SR_DEV_PGSTAT           0xace3001b
 #define SR_DEV_PGID             0xace3001c
+ /* By Adrian - SR_DEV_DRVPWD              */   
+#define SR_DEV_DRVPWD           0xace3001d   
+   
 #define SR_DEV_BUSY             0xace30020
 #define SR_DEV_RESERVED         0xace30021
 #define SR_DEV_SUSPENDED        0xace30022
@@ -467,7 +495,7 @@
 #define SR_WRITE(_ptr, _size, _nmemb, _stream) \
  fwrite((_ptr), (_size), (_nmemb), (_stream))
 #define SR_SEEK(_stream, _offset, _whence) \
- FSEEK((_stream), (_offset), (_whence))
+ fseek((_stream), (_offset), (_whence))
 #define SR_CLOSE(_stream) \
  fclose((_stream))
 #endif

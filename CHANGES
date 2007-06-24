@@ -1,7 +1,269 @@
-
-####   Don't forget to change the version number in configure.ac!   ####
-
-02 Mar 2006 Fix for compiling under GCC 4.0 on Intel Mac - Jay Maynard
+21 Jun 2007 revert config_cpu.pat due to problems in testing - Greg
+20 Jun 2007 3.05 release doc changes - Jay Maynard
+18 Jun 2007 make 3990-6 default control unit for 3390 devices - Greg
+18 Jun 2007 configure_cpu now returns when the CPU is fully configured - Greg
+08 Jun 2007 Skip making CRW pending in S/370 mode - Kevin Leonard
+06 Jun 2007 Fix SYNCHRONIZE_CPUS when numcpu > number of host processors - Greg
+06 Jun 2007 Ignore suppress bit in FBA Locate CCW Byte 0 - H.U. - Ivan Warren
+26 May 2007 Compare-and-Swap-and-Store feature - Roger Bowler
+18 May 2007 Conditional SSKE feature - Roger Bowler
+04 May 2007 Restore dasdtab.c RDC response circumvention to prevent command
+            reject in DSF for X'0A' command to alternate track - Kevin Leonard
+25 Apr 2007 Rename RSS instruction format as SSF - Roger Bowler
+04 Apr 2007 Fix Locate Block & Read BlockId for SCSI tape inadvertently
+            broken by 31 Aug 2006 preliminary 3590 support change - Fish
+26 Mar 2007 Suppress spurious error messages from hercifc - Greg
+25 Mar 2007 Ensure started_mask CPU bit is off for terminating cpu thread - Fish by Greg
+20 Mar 2007 Redefine ACC_ and ACCTYPE_ macros - Greg
+18 Mar 2007 Simplify MULTIPLE_CONTROLLED_DATA_SPACE tests - Greg
+17 Mar 2007 Clarify load_address_space_designator code - Greg
+16 Mar 2007 Reduce REGS copying by hscmisc.c - Greg
+15 Mar 2007 Fix fba when the fba device is > 4G - Greg
+10 Mar 2007 machdep.h updates - Greg
+08 Mar 2007 concpy rework - Greg
+08 Mar 2007 More tweaks to machdep.h i686 code - Greg
+07 Mar 2007 Fix store_dw_i686 - Greg
+07 Mar 2007 Fix fetch_dw_i686 - Greg
+07 Mar 2007 Remove inline attr from vfetchx/vstorex _full functions - Greg
+07 Mar 2007 Fix for SIE'd TPROT - Ivan Warren
+06 Mar 2007 Fix ckd RDC response - Greg
+27 Feb 2007 PR# misc/87 startup messages fix completion - Kevin Leonard
+27 Feb 2007 Fix minor glitch in enhanced symbol substitution - Fish
+26 Feb 2007 Extend original print-to-pipe parameter handling to support
+            passing parms when path to filename also contains blanks - Fish
+25 Feb 2007 Fix het_locate to continue on tapemark - herc_fun [os_390@hotmail.com] by Fish
+25 Feb 2007 Fix crash in LCS close if devinit of incomplete group - Fish
+18 Feb 2007 Add TIME and NOTIME synonyms for LOGOPT operands - Kevin Leonard
+14 Feb 2007 Fix ckd RCD, SNSS, SNSID responses - Greg
+13 Feb 2007 Treat DIAG X'9C' same as DIAG X'44' - Fish
+08 Feb 2007 Don't log Sense Running State SIGP order - Fish
+03 Feb 2007 Fix MVT tape CMDREJ error - Greg Smith
+31 Jan 2007 Add LOGOPT init statement and panel command - Kevin Leonard
+30 Jan 2007 Decimal Floating Point (DFP) facility - Roger Bowler
+15 Jan 2007 ia32/x64 cmpxchgX assists fix/enhancements - Greg & Ivan
+14 Jan 2007 Fix S370 only build - nerak60510 by Greg
+11 Jan 2007 implement ccmask phase 1 - Bernard van der Helm
+10 Jan 2007 Try to detect 3270 connections that have died - Fish
+09 Jan 2007 Tweaks to sloppy fetch - Greg Smith
+09 Jan 2007 Tweaks to cpuloop - Greg Smith
+09 Jan 2007 Bypass mainlock if only 1 cpu started - Greg Smith
+09 Jan 2007 Tweaks to lm/stm - Greg Smith
+08 Jan 2007 Add dasdconv -q (quiet) option - Roger Bowler
+04 Jan 2007 remove thunk calls for program_interrupt - Greg Smith
+03 Jan 2007 single_cpu_dw fetch/store patch for ia32 - Greg Smith
+03 Jan 2007 vstorex patch to vstore2, vstore4, vstore8 - Greg Smith
+30 Dec 2006 Minor correction to PR# build_msc/103 fix - Fish
+03 Jan 2007 Sloppy fetch - Greg Smith
+02 Jan 2007 Fix deconfigure_cpu so power-off diagnoses work - Fish
+31 Dec 2006 Fix PR# misc/94 for good this time! (hopefully) - Fish
+31 Dec 2006 new 'cd' and 'pwd' commands to go with 'sh' command - Fish
+31 Dec 2006 Fix cmdline tabbed filename-completion for MSVC - Fish
+30 Dec 2006 Add ability to modify gpr reg values to gpr command - Fish
+30 Dec 2006 PR# build_msc/103: fix MSVC diag 8 'sh' capture - Fish
+27 Dec 2006 Permanently disable Microsoft's completely INSANE
+            Invalid CRT Parameter handling behavior - Fish
+27 Dec 2006 PR# tape/100: Fix crash if bad filespec in OMA (TDF) - Fish
+23 Dec 2006 Misc dyngui mods (64-bit regs, efficiency, etc) - Fish
+23 Dec 2006 Fix integrated 1052/3215 for output with % - Ivan Warren
+21 Dec 2006 Fix SIGP to do single logmsg - Greg Smith
+21 Dec 2006 Range for s+, t+ - Greg Smith
+20 Dec 2006 Fix instruction display in program interrupt - Greg Smith
+20 Dec 2006 Clear FPC register during Initial CPU Reset - Roger Bowler
+20 Dec 2006 Clear AR,FPR,VR regs during Clear Reset - Roger Bowler
+19 Dec 2006 ip_all.pat - performance patch - Greg Smith
+19 Dec 2006 Backout mainlockx.pat - possible SMP problmes - Greg Smith
+19 Dec 2006 New FPC command to display FPC register - Roger Bowler
+17 Dec 2006 Modify FPR command to display FP registers in pairs - Roger Bowler
+17 Dec 2006 Display DXC in msg HHCCP014I for PIC7 - Roger Bowler
+11 Dec 2006 Set tape blockid to U32 - (by "zazubek") - Ivan Warren
+08 Dec 2006 Add model, plant and manufacturer config parameter - Bernard
+06 Dec 2006 Include Mike Cowlishaw decNumber package - Roger Bowler
+30 Nov 2006 Floating Point Support Enhancement feature - Roger Bowler
+29 Nov 2006 Zero out GPRS on IPL Clear and System clear - Ivan Warren
+29 Nov 2006 Begin Decimal Floating Point (DFP) framework - Roger Bowler
+27 Nov 2006 Remove GNU dependencies from dasdlist - Bjoern A. Zeeb (rbowler)
+26 Nov 2006 Move initialization hao before .rc processing - Bernard
+22 Nov 2006 Fix aws/het files trailing garbage - Fish
+19 Nov 2006 Fix small typo in qdio.c - Jan Jaeger
+18 Nov 2006 Multi-byte opcode performance fix for ia32 - Greg Smith
+09 Nov 2006 qd (query ckd dasd) panel command - Greg Smith
+08 Nov 2006 Fix (hopefully) hang after resume - Greg Smith
+08 Nov 2006 Fix Diag 204 RMF structure size - Ivan Warren
+            Detected by "aleeuw2000"
+06 Nov 2006 Update to instfetch processing - Greg Smith
+06 Nov 2006 Fix ECPS:VM VTIMER processing - Ivan Warren
+05 Nov 2006 OBTAIN_MAINLOCKx macros - Greg Smith
+05 Nov 2006 Simplify PER processing - Greg Smith
+04 Nov 2006 Added CGER, CGDR, CGXR - Bernard van der Helm
+31 Oct 2006 Use accelerated byte swaps for x86_64 - Ivan Warren
+30 Oct 2006 Reinstate dasdconv stdin option - Roger Bowler
+27 Oct 2006 Reformatted dyncrypt.c, no functional change - Bernard
+26 Oct 2006 make KM/KMC/KMAC/KIMD/KLMD compliant regarding stringent
+            register checkings as per POP - Ivan Warren
+25 Oct 2006 Performance enhancements suggested by Kees, part 1
+            distinguish between strict/non-strict load/store - Greg Smith
+19 Oct 2006 Fix TUNSETIFF problem on linux 2.6.18 - Greg Smith
+12 Oct 2006 Fix 370 and 390 only modes - Greg Smith
+09 Oct 2006 Fix some compiler warnings - Ivan Warren
+02 Oct 2006 Fix some interval timer processing issues - Ivan Warren
+01 Oct 2006 minor(?) accuracy/efficiency tweaks to Win32 'gettimeofday' - Fish
+30 Sep 2006 timer interval config stmt & panel cmd - Enrico Sorichetti by Fish
+30 Sep 2006 Use nanosleep in timer_update_thread if available - Fish
+28 Sep 2006 RSS instruction format and ECTG instruction - Jan Jaeger
+26 Sep 2006 PR# misc/99: Config file "include <filename>" with "Enhanced"
+            symbol substitution - Hackules by Enrico Sorichetti by Fish
+26 Sep 2006 Fix ieee bfp to integer conversions - Jimmy by Greg Smith
+23 Sep 2006 RO/RW/RING/NORING tape config options (replaces previous
+            RO/NORING) - Kevin Leonard by Jay Maynard
+22 Sep 2006 Fix possible loop in SERVC WRITE_EVENT_DATA - Jan Jaeger
+22 Sep 2006 PR# misc/30: HAO (Hercules Automatic Operator) - Bernard
+            van der Helm by Fish
+21 Sep 2006 PR# misc/79: single device devlist & defsym command - Fish
+20 Sep 2006 PR# misc/98: "Additive" OSTAILOR - Fish
+20 Sep 2006 PR# misc/89: fix "HHCCP038E No SCP command" - Fish
+19 Sep 2006 Added RO and NORING as synonyms for READONLY tape config option;
+            fixed compilation if SCSI not supported - Jay Maynard
+15 Sep 2006 PR# misc/96: fix premature .RC processing wrt CPUSTATE - Fish
+06 Sep 2006 Win32 PCRE (Perl-Compatible Regular Expression) support - Fish
+31 Aug 2006 Support emulating 3590 SCSI as 3480/3490's and vice versa - Fish
+31 Aug 2006 Preliminary support for 3590 (partial and very incomplete) - Fish
+24 Aug 2006 Set Windows default thread priorities same as other hosts - Fish
+24 Aug 2006 Fix some addtl SCSI tape status related bugs [of my own!] - Fish
+19 Aug 2006 Fix auto-scsi-mount bug causing too frequent drive queries - Fish
+16 Aug 2006 C99 flexible arrays support - Fish
+05 Aug 2006 Added addressing mode in panel - Bernard van der Helm
+03 Aug 2006 Add official support for 3590 tape device types using 32-bit
+            block-ids affecting LOCATE BLOCK, etc / BOT detection - Fish
+03 Aug 2006 New conspawn keyword: 'startgui' to start Windows GUI
+            application via ShellExecute to prevent hang at exit - Fish
+01 Aug 2006 PR# misc/94: Sporadic missed .RC file processing - Fish
+21 Jul 2006 Small change to ECPS:VM fix by P. Coghlan - Ivan Warren
+21 Jul 2006 Several small bugfixes from Peter Coghlan - Jay Maynard
+21 Jul 2006 read_socket and write_socket wrapper routines to fix short
+            read problems for sockdev card readers (new source file
+            hsocket.c) - Robert Styma and Jay Maynard
+02 Jul 2006 PR# network/93: honor specified CTCI-W32 buffer sizes - Fish
+28 Jun 2006 Fix doubled/duplicated startup 'version' logmsgs caused by
+            PR# misc/87 when Herc is run in daemon/hercgui mode  - Fish
+25 Jun 2006 Fix seq dasdload blksize pad bug - Peter Sylvester
+            [peter.sylvester@edelweb.fr] by Fish
+23 Jun 2006 PR#s misc/21 and PR# network/62: HTTP Server: do 'shutdown'
+            to gracefully close connection before closing the socket - Fish
+22 Jun 2006 Back out incorrect modification to BFPREGPAIR macros - Roger Bowler
+21 Jun 2006 Correct unresolved external symbol __imp__debug_tt32_tracing - Roger Bowler
+21 Jun 2006 Correct BFPREGPAIR checks to prevent spurious 0C6 - Roger Bowler
+18 Jun 2006 Add diagnose 0x308 - re-ipl - Bernard van der Helm
+13 Jun 2006 Add diagnose 0x224 - CPU name array - Greg Smith
+13 Jun 2006 Added diagnose 308 reipl. Not activated in feat900.h! - Bernard
+11 Jun 2006 PR# tape/88: "SCSI tape issues": 1. WTM failures with some
+            mfg/model drives (e.g. STK4890), 2. Spurious HHCTA073W for
+            'rewind-at-close' devtype - Fish
+10 Jun 2006 PR# misc/87: Herc system startup message issuance problem - Fish
+09 Jun 2006 PR# emul/91: Change FTELL, FSEEK, etc to lowercase - Fish
+09 Jun 2006 Instr disassembly enhancement: display instruction name - Fish
+07 Jun 2006 PR# misc/71: Incorrect disassembly of some instructions - Fish
+05 Jun 2006 PR# misc/68: devinit w/no arguments == use original - Fish
+05 Jun 2006 PR# dasd/81: DASDINIT option to bypass VOL1 creation - Fish
+06 May 2006 Fix SYNCHRONIZE_CPUS bit-flag serialization issue - Fish
+06 May 2006 Fix header-#include and stop-lan port-serialization issues
+            causing some tuntap calls (e.g. set-macaddr) to fail - Fish
+02 May 2006 PERFORM SUBSYSTEM FUNCTION and CONTROL ACCESS CCWs - Adrian
+            Trenkwalder
+02 May 2006 Fix for invalid bits in LOCATE BLOCK tape CCW - Adrian Trenkwalder
+30 Apr 2006 Dyncrypt changed towards POP - Bernard van der Helm
+27 Apr 2006 Fix halt_subchan to terminate suspended i/o - Greg Smith
+26 Apr 2006 Fix AR tlb lookup in XC mode - Jan Jaeger
+23 Apr 2006 PR# network/69: segfault @ incomplete LCS group attach - Fish
+23 Apr 2006 Fix LCS port read delay / hercifc SIOCGIFFLAGS issue - Fish
+21 Apr 2006 Apple OS X 10.4.6 TUNTAP_ClrIPAddr (ioctl(SIOCDIFADDR))
+            patch by Kees Verruijt [kees@verruijt.net] - Fish
+21 Apr 2006 tt32 v3.1: replace tt32stats cmd with tt32 cmd - Fish
+21 Apr 2006 tt32 v3.1: new "tuntap32_build_herc_iface_mac" function - Fish
+21 Apr 2006 tt32 v3.1: new "_ex" functions - Fish
+21 Apr 2006 LCS support for RARP frames - Fish
+21 Apr 2006 TUNTAP_GetFlags: don't read LCS adapter until iface is IFF_UP
+            (resolves "HHCLC042E port 00: Read error" issue) - Fish
+19 Apr 2006 Re-fix panel refresh (fill_text, not erase_to_eol; sigh) - Fish
+14 Apr 2006 RECFM bits in dasdblks.h (correction by Christophe Nillon) - Roger Bowler
+12 Apr 2006 SYNCHRONIZE_CPUS macro in place of synchronize_broadcast - Greg
+10 Apr 2006 Portability: change bitfield types from BYTE to u_int - Fish
+09 Apr 2006 Transparently handle BSD sockaddr_in sin_len - Fish
+09 Apr 2006 Un-"fix" panel.c refresh (sigh) - Fish
+09 Apr 2006 Fix bug causing bogus routing table setup for CTCI - Bjoern Zeeb
+09 Apr 2006 Added likely/unlikely statements dyncrypt.c - Bernard vd Helm
+08 Apr 2006 Added likely/unlikely statements cmpsc.c - Bernard van der Helm
+07 Apr 2006 New 'PANTITLE' config stmt to set console/panel title - Fish
+06 Apr 2006 PR# 34/tape: prevent tape mount unless no tape mounted - Fish
+06 Apr 2006 Missed a scsimount detach/devinit bug - Fish
+06 Apr 2006 PR# 53/tape: Bus-Tech compressed AWS file support - Fish
+06 Apr 2006 PR# 70/tape: AWS tapes 2GB filesize limitation - Fish
+05 Apr 2006 PR# 18/tape: Herc very slow initializing if no tape in SCSI
+            tape drive, PR# 48/tape: Tape mount/unmount messages still
+            not handled correctly, fix bsr/fsr in light of 01 Apr 2006
+            w32stape fixes for utilities, tweak to auto-scsi-mount logic
+            to eliminate(?) WIN32 drive query inefficiencies - Fish
+05 Apr 2006 fix(?) panel.c to always refresh the New Panel display,
+            fix minor New Panel device status painting glitch - Fish
+01 Apr 2006 tapecopy: accept WIN32 "\\.\Tape0" filename, use blockid
+            segment# for ext GUI progress msgs, rewind at exit - Fish
+01 Apr 2006 Addt'l Win32 SCSI status fixes for utils; s/b ok now - Fish
+27 Mar 2006 SCSI tape fixes (MAJOR COMMIT):  (Fish)
+             1) serialize open/close processing
+             2) support "YES" as valid AUTO_SCSI_MOUNT specification
+                (uses default interval value, currently 5 seconds)
+             3) "scsimount" panel command:
+                 a) support '0' and 'yes'
+                 b) don't issue "no active mount requests"
+                    for tape drives without display feature
+                 c) fix mount/unmount request detection
+             4) process 'rewind' option at CLOSE, not open (oops)
+             5) add devnum (with LCSS prefix) to most messages
+             6) attempt to fix *nix issue of 'EOF' status not being set
+                when BSR/FSR spaces over a tapemark
+             7) reset 'blockid' to -1 and remove redundant update
+                status call in BSF/FSF.
+             8) reset 'curfilen' to 0 in rewind_scsitape (and 'blockid'
+                to -1 if rewind fails)
+             9) fix erase-gap and data-security-erase functions
+                so they actually return an i/o status
+            10) start automount thread (if AUTO_SCSI_MOUNT is specified)
+                when tape is determined to be not mounted regardless
+                of whether drive/device-type has display-feature
+            11) remove premature open_scsitape call in tapedev_init_handler
+                to reinstate original behavior of not opening the tape until
+                needed by tapedev CCW processing (PR# tape/18 "slow startup")
+            12) in an effort to reduce the impact of slow tape status
+                retrieval (that in addition to the above premature call
+                to open_scsitape (which calls update_status_scsitape)
+                was what was causing PR# tape/18 "slow startup"), a new
+                tape status worker thread retrieval technique was designed
+                which allows specifying a timeout value completely different
+                from whatever one the host o/s may use (if any).
+            13) change message text in 'load_display' function to be more
+                technically accurate and fix ReqAutoMount mount/unmount
+                request detection to correct bogus mount/unmount messages
+            14) add support for Windows tape device names ("\\.\Tape0")
+            15) use blockid (as returned by Read Block Id CCW) *as-is*
+                in LOCATE BLOCK CCW,
+            16) complete rewrite/overhaul of w32stape.c:
+               a) remove rewind logic from open
+                  (now done by 'close_scsitape')
+               b) properly track positioning status and setting of
+                  errno values after each i/o so that accuracy of
+                  device status & errno can be relied upon (e.g.
+                  BOT/EOF/EOT/EOD can now be properly detected)
+               c) BSF/BSR fixed to move BACKWARDS, not forwards (oops)
+               d) fix Read Block Id logic (MTIOCPOS) to return a more
+                  technically accurate position value (the actual one)
+            17) many minor editorial corrections (remove TRACE stmts, etc)
+05 Mar 2006 hercules logo spec precedence fix by "Rodrigo" - Ivan Warren
+01 Mar 2006 Customizable 3270 Logo screen. See README.HERCLOGO - Ivan Warren
+28 Feb 2006 Generalize Multiple CSS device numbering for most statements
+            and panel commands. Allow multiple devices on panel attach
+            command. Multiple CSS support for suspend/resume - Ivan Warren
+26 Feb 2006 Implement LCSS feature - Jan Jaeger
+25 Feb 2006 cckd 0.3.1 - Greg Smith
+24 Feb 2006 Skeletal last floating point instructions - Bernard van der Helm
 21 Feb 2006 Fix string overrun when hitting tab at the wrong time - Bjoern
             Zeeb
 18 Feb 2006 Reinstate byteswap.h check - Greg Smith
@@ -59,16 +321,16 @@
 04 Dec 2005 Added real time conversions to 'clocks' display - Jay Maynard
 04 Dec 2005 va_copy 'va-list' copying macro - Fish
 04 Dec 2005 tape close fixes (fixes tape devinit crash) - Fish
-04 Dec 2005 Made misc/56 fix compile on gcc 3 through an ugly hack - Jay Maynard
+04 Dec 2005 Made PR# misc/56 fix compile on gcc 3 through an ugly hack - Jay Maynard
 04 Dec 2005 CTCT fixes - Fish
-04 Dec 2005 More proper misc/56 fix (hopefully) - Fish
+04 Dec 2005 More proper PR# misc/56 fix (hopefully) - Fish
 04 Dec 2005 Relax SYSEPOCH restrictions - Jan Jaeger
 04 Dec 2005 New clock design - Jan Jaeger
 04 Dec 2005 OS X portability fixes - Jay Maynard
-04 Dec 2005 misc/56: Brute force fix for segfault in some panel commands - Jay Maynard
+04 Dec 2005 PR# misc/56: Brute force fix for segfault in some panel commands - Jay Maynard
 04 Dec 2005 Fix error in sha-1 message digest - Roger Bowler
 03 Dec 2005 Fix fillfnam.c problem debugged by bb5ch39t - Greg Smith
-03 Dec 2005 misc/29: SHCMDOPT shell command disablement cfg stmt - Fish
+03 Dec 2005 PR# misc/29: SHCMDOPT shell command disablement cfg stmt - Fish
 03 Dec 2005 Add crypto files to VS8 vcproj file - Fish
 03 Dec 2005 Fix MSVC conspawn/shell cmd glitch: CREATE_NO_WINDOW - Fish
 03 Dec 2005 Temp fix to allow up to 1031 cckd devices - Greg Smith
@@ -77,7 +339,7 @@
 01 Dec 2005 Volker fix to MSVC makefile for VS 8.0 "manifest" files - Fish
 01 Dec 2005 dyngui: SetCurrentDirectory support for shell commands - Fish
 01 Dec 2005 Fix things so BOTH print-to-pipe AND 'sh'ell command work - Fish
-29 Nov 2005 build_msc/45, printer/24: Poor man's fork for MSVC builds - Fish
+29 Nov 2005 PR# build_msc/45, PR# printer/24: Poor man's fork for MSVC builds - Fish
 28 Nov 2005 enable ATTR_REGPARM performance option for MSVC builds - Fish
 28 Nov 2005 enable machine assists in machdep.h for MSVC VC7 compiler - Fish
 28 Nov 2005 Fix concpy bug discovered by Fish - Greg Smith
@@ -170,15 +432,15 @@
 04 Oct 2005 rename FEATURE_LOAD_PAGE_TABLE_ENTRY_ADDRESS as FEATURE_DAT_ENHANCEMENT_FACILITY_2 - Roger Bowler
 04 Oct 2005 rename FEATURE_BRANCH_DETECTION as FEATURE_PER3 - Roger Bowler
 04 Oct 2005 rename FEATURE_CPACF_ENHANCEMENTS as FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_1 - Roger Bowler
-22 Sep 2005 tape/27: *proper* VC7 Large File Support - Fish 
+22 Sep 2005 PR# tape/27: *proper* VC7 Large File Support - Fish
 21 Sep 2005 Init cckd->l2active to -1 instead of 0 - Greg
 21 Sep 2005 tweak concpy to avoid double byteswap - Fish
 21 Sep 2005 Add inline assembler assists to startup buildinfo display - Fish
 21 Sep 2005 sysblk.mipsrate now per second instead of millisecond, fix
             bug in timer_update_thread when elapsed < 1 millisec - Fish
 20 Sep 2005 Fix divide_single fixed-point-divide-exception check - Greg
-16 Sep 2005 hercgui/22: issue dasdload REQCYL= progress msg sooner - Fish
-16 Sep 2005 tape/27: discard bug-ridden VC7 Large File Support - Fish
+16 Sep 2005 PR# hercgui/22: issue dasdload REQCYL= progress msg sooner - Fish
+16 Sep 2005 PR# tape/27: discard bug-ridden VC7 Large File Support - Fish
 16 Sep 2005 startio should return cc 2 if startpending is on - Greg
 16 Sep 2005 Changes to allow building via Cygwin if desired - Fish
 16 Sep 2005 Bring MSVC branch up-to-date with head branch - Fish
@@ -198,13 +460,13 @@
                was read instead of simply returning 0 bytes read.
             2. w32_internal_mtop: MTWEOF: changed to retry WriteTapemark
                with generic TAPE_FILEMARKS if TAPE_LONG_FILEMARKS fails.
-31 Aug 2005 tape/31: Merge Jay's tapecopy changes (that added support
+31 Aug 2005 PR# tape/31: Merge Jay's tapecopy changes (that added support
             for copying from AWS i/p to SCSI o/p) from cvs head into
             the MSVC 'mingw_port' branch - Fish
 30 Aug 2005 dasdtab entries for 3990 model 3 and 6 - Roger Bowler
 30 Aug 2005 Add back support for 'CTCI-W32' format device statements,
             remove 28 Aug messages that say it's not supported - Fish
-29 Aug 2005 misc/12: support for Cygwin paths (e.g./cygdrive/x/) - Fish
+29 Aug 2005 PR# misc/12: support for Cygwin paths (e.g./cygdrive/x/) - Fish
 28 Aug 2005 Tell about unsupported CTC emulations - Fish
 28 Aug 2005 Tell where crash dump is going - Fish
 18 Aug 2005 ostailor panel command; add display to pgmtrace command - Fish
@@ -227,7 +489,7 @@
 30 Jul 2005 ALS5: AFI,AGFI,ALFI,ALGFI,CFI,CGFI,CLFI,CLGFI,LGFI,SLFI,SLGFI - Roger Bowler
 30 Jul 2005 ALS5 framework: LPTEA,STCKF,STFLE - Roger Bowler
 30 Jul 2005 dasdcat/hetlib: add O_BINARY to open - Fish
-29 Jul 2005 misc/9: Cap reported mips/sios rates - Fish
+29 Jul 2005 PR# misc/9: Cap reported mips/sios rates - Fish
 29 Jul 2005 Add missing support for 'try_obtain_lock' to PTT tracing - Fish
 29 Jul 2005 Reapply Ivan's 16 Mar 2005 console close logic update errone-
             ously negated trying to keep MSVC sync'ed with cvs head - Fish
@@ -240,7 +502,7 @@
             "_USE_32BIT_TIME_T" to makefile-dllmod.msvc as VS8 workaround - Fish
 05 Jul 2005 bootstrap.c: added addt'l verbage to "Oops!" message - Fish
 05 Jul 2005 ASN-and-LX-reuse facility fixes to PC/PR/PT et al. instructions - Fish
-04 Jul 2005 emul/4: MSVC port puts garbage in bits 64-95 of ESAME PSW - Roger Bowler
+04 Jul 2005 PR# emul/4: MSVC port puts garbage in bits 64-95 of ESAME PSW - Roger Bowler
 03 Jul 2005 hstruct.h: CR_SIZE obsoleted - Fish
 03 Jul 2005 bldcfg.c: Log run options - Fish
 03 Jul 2005 Move DISABLE_CRT_INVALID_PARAMETER_HANDLER logic

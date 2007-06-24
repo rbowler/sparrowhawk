@@ -1,9 +1,23 @@
-/* SR.C         (c)Copyright Greg Smith, 2005-2006                   */
+/* SR.C         (c)Copyright Greg Smith, 2005-2007                   */
 /*              Suspend/Resume a Hercules session                    */
+
+// $Id: sr.c,v 1.32 2007/06/23 00:04:16 ivan Exp $
+//
+// $Log: sr.c,v $
+// Revision 1.32  2007/06/23 00:04:16  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.31  2006/12/21 22:39:39  gsmith
+// 21 Dec 2006 Range for s+, t+ - Greg Smith
+//
+// Revision 1.30  2006/12/08 09:43:30  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
 #define _HERCULES_SR_C
+#define _HENGINE_DLL_
 
 #include "hercules.h"
 #include "opcode.h"
@@ -70,7 +84,7 @@ BYTE     psw[16];
     }
 
     /* Save CPU state and stop all CPU's */
-    obtain_lock (&sysblk.intlock);
+    OBTAIN_INTLOCK(NULL);
     started_mask = sysblk.started_mask;
     while (sysblk.started_mask)
     {
@@ -83,11 +97,11 @@ BYTE     psw[16];
                 signal_condition(&sysblk.regs[i]->intcond);
             }
         }
-        release_lock (&sysblk.intlock);
+        RELEASE_INTLOCK(NULL);
         usleep (1000);
-        obtain_lock (&sysblk.intlock);
+        OBTAIN_INTLOCK(NULL);
     }
-    release_lock (&sysblk.intlock);
+    RELEASE_INTLOCK(NULL);
 
     /* Wait for I/O queue to clear out */
 #ifdef OPTION_FISHIO
@@ -142,19 +156,26 @@ BYTE     psw[16];
 
     for (ioq = sysblk.iointq; ioq; ioq = ioq->next)
         if (ioq->pcipending)
+        {
+            SR_WRITE_VALUE(file,SR_SYS_PCIPENDING_LCSS, SSID_TO_LCSS(ioq->dev->ssid),sizeof(U16));
             SR_WRITE_VALUE(file,SR_SYS_PCIPENDING, ioq->dev->devnum,sizeof(ioq->dev->devnum));
+        }
         else if (ioq->attnpending)
+        {
+            SR_WRITE_VALUE(file,SR_SYS_ATTNPENDING_LCSS, SSID_TO_LCSS(ioq->dev->ssid),sizeof(U16));
             SR_WRITE_VALUE(file,SR_SYS_ATTNPENDING, ioq->dev->devnum,sizeof(ioq->dev->devnum));
+        }
         else
+        {
+            SR_WRITE_VALUE(file,SR_SYS_IOPENDING_LCSS, SSID_TO_LCSS(ioq->dev->ssid),sizeof(U16));
             SR_WRITE_VALUE(file,SR_SYS_IOPENDING, ioq->dev->devnum,sizeof(ioq->dev->devnum));
+        }
 
     for (i = 0; i < 8; i++)
         SR_WRITE_VALUE(file,SR_SYS_CHP_RESET+i,sysblk.chp_reset[i],sizeof(sysblk.chp_reset[0]));
 
     SR_WRITE_VALUE (file,SR_SYS_SERVPARM,sysblk.servparm,sizeof(sysblk.servparm));
     SR_WRITE_VALUE (file,SR_SYS_SIGINTREQ,sysblk.sigintreq,1);
-    SR_WRITE_VALUE (file,SR_SYS_VMACTIVE,sysblk.vmactive,1);
-    SR_WRITE_VALUE (file,SR_SYS_MSCHDELAY,sysblk.mschdelay,1);
     SR_WRITE_STRING(file,SR_SYS_LOADPARM,str_loadparm());
     SR_WRITE_VALUE (file,SR_SYS_INTS_STATE,sysblk.ints_state,sizeof(sysblk.ints_state));
     SR_WRITE_HDR(file, SR_DELIMITER, 0);
@@ -162,6 +183,11 @@ BYTE     psw[16];
     /* Save service console state */
     SR_WRITE_HDR(file, SR_SYS_SERVC, 0);
     servc_hsuspend(file);
+    SR_WRITE_HDR(file, SR_DELIMITER, 0);
+
+    /* Save clock state */
+    SR_WRITE_HDR(file, SR_SYS_CLOCK, 0);
+    clock_hsuspend(file);
     SR_WRITE_HDR(file, SR_DELIMITER, 0);
 
     /* Write CPU data */
@@ -197,7 +223,7 @@ BYTE     psw[16];
         SR_WRITE_VALUE(file, SR_CPU_CHECKSTOP, regs->checkstop, 1);
         SR_WRITE_VALUE(file, SR_CPU_HOSTINT, regs->hostint, 1);
         SR_WRITE_VALUE(file, SR_CPU_EXECFLAG, regs->execflag, 1);
-        SR_WRITE_VALUE(file, SR_CPU_INSTVALID, regs->instvalid, 1);
+//      SR_WRITE_VALUE(file, SR_CPU_INSTVALID, regs->instvalid, 1);
         SR_WRITE_VALUE(file, SR_CPU_PERMODE, regs->permode, 1);
         SR_WRITE_VALUE(file, SR_CPU_LOADSTATE, regs->loadstate, 1);
         SR_WRITE_VALUE(file, SR_CPU_INVALIDATE, regs->invalidate, 1);
@@ -220,6 +246,7 @@ BYTE     psw[16];
 
         /* These fields must come first so the device could be attached */
         SR_WRITE_VALUE(file, SR_DEV, dev->devnum, sizeof(dev->devnum));
+        SR_WRITE_VALUE(file, SR_DEV_LCSS, SSID_TO_LCSS(dev->ssid), sizeof(U16));
         SR_WRITE_VALUE(file, SR_DEV_ARGC, dev->argc, sizeof(dev->argc));
         for (i = 0; i < dev->argc; i++)
             if (dev->argv[i])
@@ -246,6 +273,9 @@ BYTE     psw[16];
         SR_WRITE_BUF  (file, SR_DEV_SENSE, dev->sense, 32);
         SR_WRITE_VALUE(file, SR_DEV_PGSTAT, dev->pgstat, sizeof(dev->pgstat));
         SR_WRITE_BUF  (file, SR_DEV_PGID, dev->pgid, 11);
+        /* By Adrian - SR_DEV_DRVPWD                          */   
+        SR_WRITE_BUF  (file, SR_DEV_DRVPWD, dev->drvpwd, 11);   
+   
         SR_WRITE_VALUE(file, SR_DEV_BUSY, dev->busy, 1);
         SR_WRITE_VALUE(file, SR_DEV_RESERVED, dev->reserved, 1);
         SR_WRITE_VALUE(file, SR_DEV_SUSPENDED, dev->suspended, 1);
@@ -302,6 +332,7 @@ U32      started_mask = 0;
 int      i, rc;
 REGS    *regs = NULL;
 U16      devnum=0;
+U16      lcss=0;
 U16      hw;
 int      devargc;
 char    *devargv[16];
@@ -326,16 +357,16 @@ S64      dreg;
     memset (zeros, 0, sizeof(zeros));
 
     /* Make sure all CPUs are deconfigured or stopped */
-    obtain_lock(&sysblk.intlock);
+    OBTAIN_INTLOCK(NULL);
     for (i = 0; i < MAX_CPU_ENGINES; i++)
         if (IS_CPU_ONLINE(i)
          && CPUSTATE_STOPPED != sysblk.regs[i]->cpustate)
         {
-            release_lock(&sysblk.intlock);
+            RELEASE_INTLOCK(NULL);
             logmsg( _("HHCSR103E All CPU's must be stopped to resume\n") );
             return -1;
         }
-    release_lock(&sysblk.intlock);
+    RELEASE_INTLOCK(NULL);
 
     file = SR_OPEN (fn, "rb");
     if (file == NULL)
@@ -354,11 +385,11 @@ S64      dreg;
     }
 
     /* Deconfigure all CPUs */
-    obtain_lock(&sysblk.intlock);
+    OBTAIN_INTLOCK(NULL);
     for (i = 0; i < MAX_CPU_ENGINES; i++)
         if (IS_CPU_ONLINE(i))
             deconfigure_cpu(i);
-    release_lock(&sysblk.intlock);
+    RELEASE_INTLOCK(NULL);
 
     while (key != SR_EOF)
     {
@@ -509,9 +540,13 @@ S64      dreg;
             SR_READ_VALUE(file, len, &sysblk.mbd, sizeof(sysblk.mbd));
             break;
 
+        case SR_SYS_IOPENDING_LCSS:
+            SR_READ_VALUE(file,len,&lcss,sizeof(lcss));
+            break;
+
         case SR_SYS_IOPENDING:
             SR_READ_VALUE(file, len, &hw, sizeof(hw));
-            dev = find_device_by_devnum(hw);
+            dev = find_device_by_devnum(lcss,hw);
             if (dev == NULL) break;
             if (ioq == NULL)
                 sysblk.iointq = &dev->ioint;
@@ -519,11 +554,16 @@ S64      dreg;
                 ioq->next = &dev->ioint;
             ioq = &dev->ioint;
             dev = NULL;
+            lcss = 0;
+            break;
+
+        case SR_SYS_PCIPENDING_LCSS:
+            SR_READ_VALUE(file,len,&lcss,sizeof(lcss));
             break;
 
         case SR_SYS_PCIPENDING:
             SR_READ_VALUE(file, len, &hw, sizeof(hw));
-            dev = find_device_by_devnum(hw);
+            dev = find_device_by_devnum(lcss,hw);
             if (dev == NULL) break;
             if (ioq == NULL)
                 sysblk.iointq = &dev->pciioint;
@@ -531,11 +571,16 @@ S64      dreg;
                 ioq->next = &dev->pciioint;
             ioq = &dev->pciioint;
             dev = NULL;
+            lcss = 0;
+            break;
+
+        case SR_SYS_ATTNPENDING_LCSS:
+            SR_READ_VALUE(file,len,&lcss,sizeof(lcss));
             break;
 
         case SR_SYS_ATTNPENDING:
             SR_READ_VALUE(file, len, &hw, sizeof(hw));
-            dev = find_device_by_devnum(hw);
+            dev = find_device_by_devnum(lcss,hw);
             if (dev == NULL) break;
             if (ioq == NULL)
                 sysblk.iointq = &dev->attnioint;
@@ -543,6 +588,7 @@ S64      dreg;
                 ioq->next = &dev->attnioint;
             ioq = &dev->attnioint;
             dev = NULL;
+            lcss = 0;
             break;
 
         case SR_SYS_CHP_RESET_0:
@@ -566,16 +612,6 @@ S64      dreg;
             sysblk.sigintreq = rc;
             break;
 
-        case SR_SYS_VMACTIVE:
-            SR_READ_VALUE(file, len, &rc, sizeof(rc));
-            sysblk.vmactive = rc;
-            break;
-
-        case SR_SYS_MSCHDELAY:
-            SR_READ_VALUE(file, len, &rc, sizeof(rc));
-            sysblk.mschdelay = rc;
-            break;
-
         case SR_SYS_LOADPARM:
             SR_READ_STRING(file, buf, len);
             set_loadparm ((char *)buf);
@@ -583,6 +619,11 @@ S64      dreg;
 
         case SR_SYS_SERVC:
             rc = servc_hresume(file);
+            if (rc < 0) goto sr_error_exit;
+            break;
+
+        case SR_SYS_CLOCK:
+            rc = clock_hresume(file);
             if (rc < 0) goto sr_error_exit;
             break;
 
@@ -594,15 +635,15 @@ S64      dreg;
                        i, MAX_CPU_ENGINES-1);
                 goto sr_error_exit;
             }
-            obtain_lock (&sysblk.intlock);
+            OBTAIN_INTLOCK(NULL);
             if (IS_CPU_ONLINE(i))
             {
-                release_lock (&sysblk.intlock);
+                RELEASE_INTLOCK(NULL);
                 logmsg( _("HHCSR114E CPU%4.4d already configured\n"), i);
                 goto sr_error_exit;
             }
             rc = configure_cpu(i);
-            release_lock (&sysblk.intlock);
+            RELEASE_INTLOCK(NULL);
             if (rc < 0)
             {
                 logmsg( _("HHCSR115E CPU%4.4d unable to configure online\n"), i);
@@ -941,6 +982,11 @@ S64      dreg;
 
         case SR_DEV:
             SR_READ_VALUE(file, len, &devnum, sizeof(devnum));
+            lcss=0;
+            break;
+
+        case SR_DEV_LCSS:
+            SR_READ_VALUE(file, len, &lcss, sizeof(U16));
             break;
 
         case SR_DEV_ARGC:
@@ -957,10 +1003,10 @@ S64      dreg;
 
         case SR_DEV_TYPNAME:
             SR_READ_STRING(file, buf, len);
-            dev = find_device_by_devnum(devnum);
+            dev = find_device_by_devnum(lcss,devnum);
             if (dev == NULL)
             {
-                if (attach_device (devnum, buf, devargc, devargv))
+                if (attach_device (lcss, devnum, buf, devargc, devargv))
                 {
                     logmsg( _("HHCSR118W Device %4.4X initialization failed\n"),
                             devnum);
@@ -1116,6 +1162,20 @@ S64      dreg;
             }
             SR_READ_BUF(file, &dev->pgid, len);
             break;
+   
+        /* By Adrian - SR_DEV_DRVPWD                          */   
+        case SR_DEV_DRVPWD:   
+            SR_SKIP_NULL_DEV(dev, file, len);   
+            if (len != 11)   
+            {   
+                logmsg( _("HHCSR134E Device %4.4X DRVPWD size mismatch: %d expected %d\n"),   
+                        dev->devnum, len, 11);   
+                goto sr_error_exit;   
+            }   
+            SR_READ_BUF(file, &dev->drvpwd, len);   
+            break;   
+   
+   
 
         case SR_DEV_BUSY:
             SR_SKIP_NULL_DEV(dev, file, len);
@@ -1265,7 +1325,7 @@ S64      dreg;
     machine_check_crwpend();
 
     /* Start the CPUs */
-    obtain_lock (&sysblk.intlock);
+    OBTAIN_INTLOCK(NULL);
     ON_IC_IOPENDING;
     for (i = 0; i < MAX_CPU_ENGINES; i++)
         if (IS_CPU_ONLINE(i) && (started_mask & BIT(i)))
@@ -1275,7 +1335,7 @@ S64      dreg;
             sysblk.regs[i]->checkstop = 0;
             WAKEUP_CPU(sysblk.regs[i]);
         }
-    release_lock (&sysblk.intlock);
+    RELEASE_INTLOCK(NULL);
 
     return 0;
 

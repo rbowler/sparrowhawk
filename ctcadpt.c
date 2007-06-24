@@ -1,11 +1,11 @@
 // Hercules Channel-to-Channel Emulation Support
 // ====================================================================
 //
-// Copyright (C) James A. Pierson, 2002-2006
+// Copyright (C) James A. Pierson, 2002-2007
 //               Roger Bowler, 2000-2006
 //
-// vmnet     (C) Copyright Willem Konynenberg, 2000-2006
-// CTCT      (C) Copyright Vic Cross, 2001-2006
+// vmnet     (C) Copyright Willem Konynenberg, 2000-2007
+// CTCT      (C) Copyright Vic Cross, 2001-2007
 //
 // Notes:
 //   This module contains the remaining CTC emulation modes that
@@ -15,6 +15,16 @@
 //
 //   Please read README.NETWORKING for more info.
 //
+// $Id: ctcadpt.c,v 1.68 2007/06/23 00:04:07 ivan Exp $
+//
+// $Log: ctcadpt.c,v $
+// Revision 1.68  2007/06/23 00:04:07  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.67  2006/12/08 09:43:19  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
 
 #define _CTCADPT_C_
@@ -82,6 +92,7 @@ DEVHND ctcadpt_device_hndinfo =
         NULL,                          /* Device Query used          */
         NULL,                          /* Device Reserve             */
         NULL,                          /* Device Release             */
+        NULL,                          /* Device Attention           */
         NULL,                          /* Immediate CCW Codes        */
         NULL,                          /* Signal Adapter Input       */
         NULL,                          /* Signal Adapter Output      */
@@ -104,6 +115,7 @@ DEVHND ctct_device_hndinfo =
         NULL,                          /* Device Query used          */
         NULL,                          /* Device Reserve             */
         NULL,                          /* Device Release             */
+        NULL,                          /* Device Attention           */
         NULL,                          /* Immediate CCW Codes        */
         NULL,                          /* Signal Adapter Input       */
         NULL,                          /* Signal Adapter Output      */
@@ -126,6 +138,7 @@ DEVHND vmnet_device_hndinfo =
         NULL,                          /* Device Query used          */
         NULL,                          /* Device Reserve             */
         NULL,                          /* Device Release             */
+        NULL,                          /* Device Attention           */
         NULL,                          /* Immediate CCW Codes        */
         NULL,                          /* Signal Adapter Input       */
         NULL,                          /* Signal Adapter Output      */
@@ -639,7 +652,7 @@ static int  CTCT_Init( DEVBLK *dev, int argc, char *argv[] )
         arg->dev = dev;
         snprintf(str,sizeof(str),"CTCT %4.4X ListenThread",dev->devnum);
         str[sizeof(str)-1]=0;
-        create_thread( &tid, NULL, CTCT_ListenThread, arg, str );
+        create_thread( &tid, &sysblk.joinattr, CTCT_ListenThread, arg, str );
     }
     else  // successfully connected (outbound) to the other end
     {
@@ -1069,8 +1082,9 @@ char *ipaddress;
 static int VMNET_Init(DEVBLK *dev, int argc, char *argv[])
 {
 U16             xdevnum;                /* Pair device devnum        */
-BYTE            c;                      /* tmp for scanf             */
 DEVBLK          *xdev;                  /* Pair device               */
+int rc;
+U16 lcss;
 
     dev->devtype = 0x3088;
 
@@ -1086,13 +1100,14 @@ DEVBLK          *xdev;                  /* Pair device               */
         logmsg(_("HHCCT027E %4.4X: Not enough parameters\n"), dev->devnum);
         return -1;
     }
-    if (strlen(argv[0]) > 4
-        || sscanf(argv[0], "%hx%c", &xdevnum, &c) != 1) {
-        logmsg(_("HHCCT028E %4.4X: Bad device number '%s'\n"),
-                  dev->devnum, argv[0]);
+    rc=parse_single_devnum(argv[0],&lcss,&xdevnum);
+    if (rc<0)
+    {
+        logmsg(_("HHCCT028E %d:%4.4X: Bad device number '%s'\n"),
+                  SSID_TO_LCSS(dev->ssid), dev->devnum, argv[0]);
         return -1;
     }
-    xdev = find_device_by_devnum(xdevnum);
+    xdev = find_device_by_devnum(lcss,xdevnum);
     if (xdev != NULL) {
         if (start_vmnet(dev, xdev, argc - 1, &argv[1]))
             return -1;

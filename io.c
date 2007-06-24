@@ -1,8 +1,10 @@
-/* IO.C         (c) Copyright Roger Bowler, 1994-2006                */
+/* IO.C         (c) Copyright Roger Bowler, 1994-2007                */
 /*              ESA/390 CPU Emulator                                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+
+// $Id: io.c,v 1.61 2007/06/23 00:04:14 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements all I/O instructions of the                */
@@ -29,6 +31,20 @@
 /*      I/O rate counter - Valery Pogonchenko                        */
 /*      64-bit IDAW support - Roger Bowler v209                  @IWZ*/
 /*-------------------------------------------------------------------*/
+
+// $Log: io.c,v $
+// Revision 1.61  2007/06/23 00:04:14  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.60  2007/01/13 07:23:42  bernard
+// backout ccmask
+//
+// Revision 1.59  2007/01/12 15:24:21  bernard
+// ccmask phase 1
+//
+// Revision 1.58  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -66,12 +82,11 @@ DEVBLK *dev;                            /* -> device block           */
 #endif
        SIE_INTERCEPT(regs);
 
-    /* Program check if reg 1 bits 0-15 not X'0001' */
-    if ( regs->GR_LHH(1) != 0x0001 )
-        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
+    /* Program check if the ssid including lcss is invalid */
+    SSID_CHECK(regs);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_LHL(1));
+    dev = find_device_by_subchan (regs->GR_L(1));
 
     /* Condition code 3 if subchannel does not exist,
        is not valid, or is not enabled */
@@ -112,12 +127,11 @@ DEVBLK *dev;                            /* -> device block           */
 #endif
        SIE_INTERCEPT(regs);
 
-    /* Program check if reg 1 bits 0-15 not X'0001' */
-    if ( regs->GR_LHH(1) != 0x0001 )
-        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
+    /* Program check if the ssid including lcss is invalid */
+    SSID_CHECK(regs);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_LHL(1));
+    dev = find_device_by_subchan (regs->GR_L(1));
 
     /* Condition code 3 if subchannel does not exist,
        is not valid, or is not enabled */
@@ -172,12 +186,11 @@ PMCW    pmcw;                           /* Path management ctl word  */
         || (pmcw.flag27 & PMCW27_RESV))
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
 
-    /* Program check if reg 1 bits 0-15 not X'0001' */
-    if ( regs->GR_LHH(1) != 0x0001 )
-        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
+    /* Program check if the ssid including lcss is invalid */
+    SSID_CHECK(regs);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_LHL(1));
+    dev = find_device_by_subchan (regs->GR_L(1));
 
     /* Condition code 3 if subchannel does not exist */
     if (dev == NULL)
@@ -294,13 +307,13 @@ BYTE    chpid;
 
     chpid = regs->GR_L(1) & 0xFF;
 
-    if( !(regs->psw.cc = chp_reset(chpid)) )
+    if( !(regs->psw.cc = chp_reset(regs, chpid)) )
     {
-        obtain_lock(&sysblk.intlock);
+        OBTAIN_INTLOCK(regs);
         sysblk.chp_reset[chpid/32] |= 0x80000000 >> (chpid % 32);
         ON_IC_CHANRPT;
         WAKEUP_CPUS_MASK (sysblk.waiting_mask);
-        release_lock (&sysblk.intlock);
+        RELEASE_INTLOCK(regs);
     }
 
     RETURN_INTCHECK(regs);
@@ -326,12 +339,11 @@ DEVBLK *dev;                            /* -> device block           */
 #endif
        SIE_INTERCEPT(regs);
 
-    /* Program check if reg 1 bits 0-15 not X'0001' */
-    if ( regs->GR_LHH(1) != 0x0001 )
-        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
+    /* Program check if the ssid including lcss is invalid */
+    SSID_CHECK(regs);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_LHL(1));
+    dev = find_device_by_subchan (regs->GR_L(1));
 
     /* Condition code 3 if subchannel does not exist,
        is not valid, or is not enabled */
@@ -494,12 +506,11 @@ ORB     orb;                            /* Operation request block   */
         ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
 #endif /*!defined(FEATURE_MIDAW)*/                              /*@MW*/
 
-    /* Program check if reg 1 bits 0-15 not X'0001' */
-    if ( regs->GR_LHH(1) != 0x0001 )
-        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
+    /* Program check if the ssid including lcss is invalid */
+    SSID_CHECK(regs);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_LHL(1));
+    dev = find_device_by_subchan (regs->GR_L(1));
 
     /* Condition code 3 if subchannel does not exist,
        is not valid, is not enabled, or no path available */
@@ -531,7 +542,7 @@ ORB     orb;                            /* Operation request block   */
     regs->siocount++;
 
     /* Set the last path used mask */
-    if (0 == regs->psw.cc) dev->pmcw.lpum = 0x80;
+    if (regs->psw.cc == 0) dev->pmcw.lpum = 0x80;
 
 }
 
@@ -586,7 +597,7 @@ U32     n;                              /* Integer work area         */
     ARCH_DEP(validate_operand) (effective_addr2, b2, 0, ACCTYPE_WRITE, regs);
 
     /* Obtain any pending channel report */
-    n = channel_report();
+    n = channel_report(regs);
 
     /* Store channel report word at operand address */
     ARCH_DEP(vstore4) ( n, effective_addr2, b2, regs );
@@ -613,12 +624,11 @@ SCHIB   schib;                          /* Subchannel information blk*/
 
     SIE_INTERCEPT(regs);
 
-    /* Program check if reg 1 bits 0-15 not X'0001' */
-    if ( regs->GR_LHH(1) != 0x0001 )
-        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
+    /* Program check if the ssid including lcss is invalid */
+    SSID_CHECK(regs);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_LHL(1));
+    dev = find_device_by_subchan (regs->GR_L(1));
 
     /* Set condition code 3 if subchannel does not exist */
     if (dev == NULL)
@@ -693,14 +703,14 @@ RADR    pfx;                            /* Prefix                    */
     if( IS_IC_IOPENDING )
     {
         /* Obtain the interrupt lock */
-        obtain_lock (&sysblk.intlock);
+        OBTAIN_INTLOCK(regs);
 
         /* Test and clear pending interrupt, set condition code */
         icode = ARCH_DEP(present_io_interrupt) (regs, &ioid, &ioparm,
                                                        &iointid, NULL);
 
         /* Release the interrupt lock */
-        release_lock (&sysblk.intlock);
+        RELEASE_INTLOCK(regs);
 
         /* Store the SSID word and I/O parameter if an interrupt was pending */
         if (icode)
@@ -784,12 +794,11 @@ int     cc;                             /* Condition Code            */
 
     FW_CHECK(effective_addr2, regs);
 
-    /* Program check if reg 1 bits 0-15 not X'0001' */
-    if ( regs->GR_LHH(1) != 0x0001 )
-        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
+    /* Program check if the ssid including lcss is invalid */
+    SSID_CHECK(regs);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_LHL(1));
+    dev = find_device_by_subchan (regs->GR_L(1));
 
     /* Condition code 3 if subchannel does not exist,
        is not valid, or is not enabled */
@@ -842,12 +851,11 @@ DEVBLK *dev;                            /* -> device block           */
 #endif
        SIE_INTERCEPT(regs);
 
-    /* Program check if reg 1 bits 0-15 not X'0001' */
-    if ( regs->GR_LHH(1) != 0x0001 )
-        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
+    /* Program check if the ssid including lcss is invalid */
+    SSID_CHECK(regs);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_LHL(1));
+    dev = find_device_by_subchan (regs->GR_L(1));
 
     /* Condition code 3 if subchannel does not exist,
        is not valid, or is not enabled */
@@ -903,14 +911,8 @@ BYTE    ccwkey;                         /* Bits 0-3=key, 4=7=zeroes  */
     SIE_INTERCEPT(regs);
 
     /* Locate the device block */
-    dev = find_device_by_devnum (effective_addr2);
-
-    /* Set condition code 3 if device does not exist */
-    if (dev == NULL
-#if defined(FEATURE_CHANNEL_SWITCHING)
-        || regs->chanset != dev->chanset
-#endif /*defined(FEATURE_CHANNEL_SWITCHING)*/
-        )
+    if(regs->chanset == 0xFFFF
+      || !(dev = find_device_by_devnum (regs->chanset,effective_addr2)) )
     {
         regs->psw.cc = 3;
         return;
@@ -952,14 +954,8 @@ DEVBLK *dev;                            /* -> device block for SIO   */
     SIE_INTERCEPT(regs);
 
     /* Locate the device block */
-    dev = find_device_by_devnum (effective_addr2);
-
-    /* Set condition code 3 if device does not exist */
-    if (dev == NULL
-#if defined(FEATURE_CHANNEL_SWITCHING)
-        || regs->chanset != dev->chanset
-#endif /*defined(FEATURE_CHANNEL_SWITCHING)*/
-       )
+    if(regs->chanset == 0xFFFF
+      || !(dev = find_device_by_devnum (regs->chanset,effective_addr2)) )
     {
         regs->psw.cc = 3;
         return;
@@ -969,7 +965,7 @@ DEVBLK *dev;                            /* -> device block for SIO   */
     regs->psw.cc = testio (regs, dev, inst[1]);
     /* Yield time slice so that device handler may get some time */
     /* to possibly complete an I/O - to prevent a TIO Busy Loop  */
-    if(regs->psw.cc==2)
+    if(regs->psw.cc == 2)
     {
         sched_yield();
     }
@@ -994,14 +990,8 @@ DEVBLK *dev;                            /* -> device block for SIO   */
     SIE_INTERCEPT(regs);
 
     /* Locate the device block */
-    dev = find_device_by_devnum (effective_addr2);
-
-    /* Set condition code 3 if device does not exist */
-    if (dev == NULL
-#if defined(FEATURE_CHANNEL_SWITCHING)
-        || regs->chanset != dev->chanset
-#endif /*defined(FEATURE_CHANNEL_SWITCHING)*/
-       )
+    if(regs->chanset == 0xFFFF
+      || !(dev = find_device_by_devnum (regs->chanset,effective_addr2)) )
     {
         regs->psw.cc = 3;
         return;
@@ -1091,8 +1081,8 @@ int     i;
 
     effective_addr2 &= 0xFFFF;
 
-    /* Hercules has as many channelsets as CPU's */
-    if(effective_addr2 >= MAX_CPU)
+    /* Hercules has as many channelsets as CSS's */
+    if(effective_addr2 >= FEATURE_LCSS_MAX)
     {
         regs->psw.cc = 3;
         return;
@@ -1109,7 +1099,7 @@ int     i;
     /* Disconnect channel set */
     regs->chanset = 0xFFFF;
 
-    obtain_lock(&sysblk.intlock);
+    OBTAIN_INTLOCK(regs);
 
     /* If the addressed channelset is connected to another
        CPU then return with cc1 */
@@ -1118,7 +1108,7 @@ int     i;
         if (IS_CPU_ONLINE(i)
          && sysblk.regs[i]->chanset == effective_addr2)
         {
-            release_lock(&sysblk.intlock);
+            RELEASE_INTLOCK(regs);
             regs->psw.cc = 1;
             return;
         }
@@ -1130,7 +1120,7 @@ int     i;
     /* Interrupts may be pending on this channelset */
     ON_IC_IOPENDING;
 
-    release_lock(&sysblk.intlock);
+    RELEASE_INTLOCK(regs);
 
     regs->psw.cc = 0;
 
@@ -1152,8 +1142,8 @@ int     i;
 
     SIE_INTERCEPT(regs);
 
-    /* Hercules has as many channelsets as CPU's */
-    if(effective_addr2 >= MAX_CPU)
+    /* Hercules has as many channelsets as CSS's */
+    if(effective_addr2 >= FEATURE_LCSS_MAX)
     {
         regs->psw.cc = 3;
         return;
@@ -1168,7 +1158,7 @@ int     i;
         return;
     }
 
-    obtain_lock(&sysblk.intlock);
+    OBTAIN_INTLOCK(regs);
 
     /* If the addressed channelset is connected to another
        CPU then return with cc0 */
@@ -1184,12 +1174,12 @@ int     i;
             }
             else
                 regs->psw.cc = 1;
-            release_lock(&sysblk.intlock);
+            RELEASE_INTLOCK(regs);
             return;
         }
     }
 
-    release_lock(&sysblk.intlock);
+    RELEASE_INTLOCK(regs);
 
     /* The channel set is not connected, no operation
        is performed */

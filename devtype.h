@@ -1,5 +1,15 @@
-/* DEVTYPE.H    (c) Copyright Jan Jaeger, 1999-2006                  */
+/* DEVTYPE.H    (c) Copyright Jan Jaeger, 1999-2007                  */
 /*              Hercules Device Definitions                          */
+
+// $Id: devtype.h,v 1.20 2007/06/23 00:04:08 ivan Exp $
+//
+// $Log: devtype.h,v $
+// Revision 1.20  2007/06/23 00:04:08  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.19  2006/12/08 09:43:20  jj
+// Add CVS message log
+//
 
 #if !defined(_DEVICES_H)
 
@@ -40,6 +50,7 @@ struct DEVHND {
         DEVUF *used;                   /* Device Query used          */
         DEVRR *reserve;                /* Device Reserve             */
         DEVRR *release;                /* Device Release             */
+        DEVRR *attention;              /* Device Attention           */
         DEVIM immed;                   /* Immediate CCW Codes        */
         DEVSA *siga_r;                 /* Signal Adapter Input       */
         DEVSA *siga_w;                 /* Signal Adapter Output      */

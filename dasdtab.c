@@ -1,5 +1,7 @@
-/* DASDTAB.C    (c) Copyright Roger Bowler, 1999-2006                */
+/* DASDTAB.C    (c) Copyright Roger Bowler, 1999-2007                */
 /*              Hercules Supported DASD definitions                  */
+
+// $Id: dasdtab.c,v 1.37 2007/06/23 00:04:08 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains the tables that define the attributes of     */
@@ -11,6 +13,29 @@
 /* device capacity page at: http://www.sdisw.com/dasd_capacity.html  */
 /* (used with permission)                                            */
 /*-------------------------------------------------------------------*/
+
+// $Log: dasdtab.c,v $
+// Revision 1.37  2007/06/23 00:04:08  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.36  2007/06/20 04:09:54  gsmith
+// make 3990-6 default control unit for 3390 devices
+//
+// Revision 1.35  2007/06/07 19:15:05  kleonard
+// Document circumvention for DSF X'0A' command reject
+//
+// Revision 1.34  2007/05/04 19:28:38  kleonard
+// Circumvent command reject for DSF X'0A' command
+//
+// Revision 1.33  2007/03/06 22:54:19  gsmith
+// Fix ckd RDC response
+//
+// Revision 1.32  2007/02/15 00:10:04  gsmith
+// Fix ckd RCD, SNSS, SNSID responses
+//
+// Revision 1.31  2006/12/08 09:43:20  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -64,15 +89,15 @@ static CKDDEV ckdtab[] = {
  {"EMC3380K+", 0x3380,0x1e,0x20,0x0e, 3339,3,15,47988,47476,1088,47968,222,0x0000, 1, 0x20,0x01,0xec,0x00,0xec,0x00,"3880"},
  {"EMC3380K++",0x3380,0x1e,0x20,0x0e, 3993,3,15,47988,47476,1088,47968,222,0x0000, 1, 0x20,0x01,0xec,0x00,0xec,0x00,"3880"},
 
- {"3390",      0x3390,0x02,0x20,0x26, 1113,1,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990"},
- {"3390-1",    0x3390,0x02,0x20,0x26, 1113,1,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990"},
- {"3390-2",    0x3390,0x06,0x20,0x27, 2226,1,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990"},
- {"3390-3",    0x3390,0x0a,0x20,0x24, 3339,1,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990"},
- {"3390-9",    0x3390,0x0c,0x20,0x32,10017,3,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990"},
- {"3390-27",   0x3390,0x0c,0x20,0x32,32760,3,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990"},
- {"3390-J",    0x3390,0x0c,0x20,0x32,32760,3,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990"},
- {"3390-54",   0x3390,0x0c,0x20,0x32,65520,3,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990"},
- {"3390-JJ",   0x3390,0x0c,0x20,0x32,65520,3,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990"},
+ {"3390",      0x3390,0x02,0x20,0x26, 1113,1,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990-6"},
+ {"3390-1",    0x3390,0x02,0x20,0x26, 1113,1,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990-6"},
+ {"3390-2",    0x3390,0x06,0x20,0x27, 2226,1,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990-6"},
+ {"3390-3",    0x3390,0x0a,0x20,0x24, 3339,1,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990-6"},
+ {"3390-9",    0x3390,0x0c,0x20,0x32,10017,3,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990-6"},
+ {"3390-27",   0x3390,0x0c,0x20,0x32,32760,3,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990-6"},
+ {"3390-J",    0x3390,0x0c,0x20,0x32,32760,3,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990-6"},
+ {"3390-54",   0x3390,0x0c,0x20,0x32,65520,3,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990-6"},
+ {"3390-JJ",   0x3390,0x0c,0x20,0x32,65520,3,15,57326,56664,1428,58786,224,0x7708, 2, 34,19,   9,   6,116,6,"3990-6"},
 
  {"9345",      0x9345,0x04,0x20,0x04, 1440,0,15,48174,46456,1184,48280,213,0x8b07, 2, 34,18,   7,   6,116,6,"9343"},
  {"9345-1",    0x9345,0x04,0x20,0x04, 1440,0,15,48174,46456,1184,48280,213,0x8b07, 2, 34,18,   7,   6,116,6,"9343"},
@@ -84,15 +109,16 @@ static CKDDEV ckdtab[] = {
 /* CKD control unit definitions                                      */
 /*-------------------------------------------------------------------*/
 static CKDCU ckdcutab[] = {
-/* name          type model code features   ciws -------- */
- {"2835",       0x2835,0x00,0x00,0x50000103,0,0,0,0,0,0,0,0},
- {"2841",       0x2841,0x00,0x00,0x50000103,0,0,0,0,0,0,0,0},
- {"3830",       0x3830,0x02,0x00,0x50000103,0,0,0,0,0,0,0,0},
- {"3880",       0x3880,0x05,0x09,0x80000000,0,0,0,0,0,0,0,0},
- {"3990",       0x3990,0xc2,0x10,0xd0000002,0x40fa0100,0,0,0,0,0,0,0},
- {"3990-3",     0x3990,0xec,0x06,0xd000009e,0x40fa0100,0x41270004,0x423e0040,0,0,0,0,0},
- {"3990-6",     0x3990,0xe9,0x15,0xd00010fe,0x40fa0100,0x41270004,0x423e0060,0,0,0,0,0},
- {"9343",       0x9343,0xe0,0x11,0x80000000,0,0,0,0,0,0,0,0}
+/*                              func/ type                           */
+/* name          type model code feat code features   ciws --------- */
+ {"2835",       0x2835,0x00,0x00,0x00,0x00,0x50000103,0,0,0,0,0,0,0,0},
+ {"2841",       0x2841,0x00,0x00,0x00,0x00,0x50000103,0,0,0,0,0,0,0,0},
+ {"3830",       0x3830,0x02,0x00,0x00,0x00,0x50000103,0,0,0,0,0,0,0,0},
+ {"3880",       0x3880,0x05,0x09,0x00,0x00,0x80000000,0,0,0,0,0,0,0,0},
+ {"3990",       0x3990,0xc2,0x10,0x00,0x00,0xd0000002,0x40fa0100,0,0,0,0,0,0,0},
+ {"3990-3",     0x3990,0xec,0x06,0x00,0x00,0xd000009e,0x40fa0100,0x41270004,0x423e0040,0,0,0,0,0},
+ {"3990-6",     0x3990,0xe9,0x15,0x48,0x15,0x50003097,0x40fa0100,0x41270004,0x423e0060,0,0,0,0,0},
+ {"9343",       0x9343,0xe0,0x11,0x00,0x00,0x80000000,0,0,0,0,0,0,0,0}
 } ;
 #define CKDCU_NUM (sizeof(ckdcutab)/CKDCU_SIZE)
 
@@ -199,68 +225,24 @@ U32 i;                                  /* Loop Index                */
 /*-------------------------------------------------------------------*/
 int dasd_build_ckd_devid (CKDDEV *ckd, CKDCU *cu, BYTE *devid)
 {
-int len;                                /* Length built              */
+int len;
 
     memset (devid, 0, 256);
 
-    devid[0]  = 0xFF;
-    devid[1]  = (cu->devt >> 8) & 0xff;
-    devid[2]  = cu->devt & 0xff;
-    devid[3]  = cu->model;
-    devid[4]  = (ckd->devt >> 8) & 0xff;
-    devid[5]  = ckd->devt & 0xff;
-    devid[6]  = ckd->model;
-    devid[7]  = 0x00;
+    store_fw (devid + 0, 0xFF000000 | (cu->devt << 8) | cu->model);
+    store_fw (devid + 4, (ckd->devt << 16) | (ckd->model << 8) | 0x00);
+    store_fw (devid + 8, cu->ciw1);
+    store_fw (devid +12, cu->ciw2);
+    store_fw (devid +16, cu->ciw3);
+    store_fw (devid +20, cu->ciw4);
+    store_fw (devid +24, cu->ciw5);
+    store_fw (devid +28, cu->ciw6);
+    store_fw (devid +32, cu->ciw7);
+    store_fw (devid +36, cu->ciw8);
 
-    devid[8]  = (cu->ciw1 >> 24) & 0xff;
-    devid[9]  = (cu->ciw1 >> 16) & 0xff;
-    devid[10] = (cu->ciw1 >>  8) & 0xff;
-    devid[11] = cu->ciw1 & 0xff;
-
-    devid[12] = (cu->ciw2 >> 24) & 0xff;
-    devid[13] = (cu->ciw2 >> 16) & 0xff;
-    devid[14] = (cu->ciw2 >>  8) & 0xff;
-    devid[15] = cu->ciw2 & 0xff;
-
-    devid[16] = (cu->ciw3 >> 24) & 0xff;
-    devid[17] = (cu->ciw3 >> 16) & 0xff;
-    devid[18] = (cu->ciw3 >>  8) & 0xff;
-    devid[19] = cu->ciw3 & 0xff;
-
-    devid[20] = (cu->ciw4 >> 24) & 0xff;
-    devid[21] = (cu->ciw4 >> 16) & 0xff;
-    devid[22] = (cu->ciw4 >>  8) & 0xff;
-    devid[23] = cu->ciw4 & 0xff;
-
-    devid[24] = (cu->ciw5 >> 24) & 0xff;
-    devid[25] = (cu->ciw5 >> 16) & 0xff;
-    devid[26] = (cu->ciw5 >>  8) & 0xff;
-    devid[27] = cu->ciw5 & 0xff;
-
-    devid[28] = (cu->ciw6 >> 24) & 0xff;
-    devid[29] = (cu->ciw6 >> 16) & 0xff;
-    devid[30] = (cu->ciw6 >>  8) & 0xff;
-    devid[31] = cu->ciw6 & 0xff;
-
-    devid[32] = (cu->ciw7 >> 24) & 0xff;
-    devid[33] = (cu->ciw7 >> 16) & 0xff;
-    devid[34] = (cu->ciw7 >>  8) & 0xff;
-    devid[35] = cu->ciw7 & 0xff;
-
-    devid[36] = (cu->ciw8 >> 24) & 0xff;
-    devid[37] = (cu->ciw8 >> 16) & 0xff;
-    devid[38] = (cu->ciw8 >>  8) & 0xff;
-    devid[39] = cu->ciw8 & 0xff;
-
-    if (cu->ciw8 != 0) len = 40;
-    else if (cu->ciw7 != 0) len = 36;
-    else if (cu->ciw6 != 0) len = 32;
-    else if (cu->ciw5 != 0) len = 28;
-    else if (cu->ciw4 != 0) len = 24;
-    else if (cu->ciw3 != 0) len = 20;
-    else if (cu->ciw2 != 0) len = 16;
-    else if (cu->ciw1 != 0) len = 12;
-    else len = 7;
+    /* Calculate length */
+    for (len = 40; fetch_fw(devid + len-4) == 0; len -= 4);
+    len = len < 12 ? 12 : len;
 
     return len;
 }
@@ -278,84 +260,166 @@ int altcyls;                            /* Number alternate cyls     */
     else altcyls = 0;
 
     memset (devchar, 0, 64);
-    devchar[0]  = (cu->devt >> 8) & 0xff;
-    devchar[1]  = cu->devt & 0xff;
-    devchar[2]  = cu->model;
-    devchar[3]  = (ckd->devt >> 8) & 0xff;
-    devchar[4]  = ckd->devt & 0xff;
-    devchar[5]  = ckd->model;
-    devchar[6]  = (cu->sctlfeat >> 24) & 0xff;
-    devchar[7]  = (cu->sctlfeat >> 16) & 0xff;
-    devchar[8]  = (cu->sctlfeat >> 8) & 0xff;
-    devchar[9]  = cu->sctlfeat & 0xff;
-    devchar[10] = ckd->class;
-    devchar[11] = ckd->code;
-    devchar[12] = ((cyls - altcyls) >> 8) & 0xff;
-    devchar[13] = (cyls - altcyls) & 0xff;
-    devchar[14] = (ckd->heads >> 8) & 0xff;
-    devchar[15] = ckd->heads & 0xff;
-    devchar[16] = (BYTE)(ckd->sectors);
-    devchar[17] = 0; // (ckd->len >> 16) & 0xff;
-    devchar[18] = (ckd->len >> 8) & 0xff;
-    devchar[19] = ckd->len & 0xff;
-    devchar[20] = (ckd->har0 >> 8) & 0xff;
-    devchar[21] = ckd->har0 & 0xff;
+    store_hw(devchar+0, cu->devt);              // Storage control type
+    devchar[2]  = cu->model;                    // CU model
+    store_hw(devchar+3, ckd->devt);             // Device type
+    devchar[5]  = ckd->model;                   // Device model
+    store_fw(devchar+6, cu->sctlfeat);          // Device and SD facilities
+    devchar[10] = ckd->class;                   // Device class code
+    devchar[11] = ckd->code;                    // Device type code
+    store_hw(devchar+12, cyls - altcyls);       // Primary cylinders
+    store_hw(devchar+14, ckd->heads);           // Tracks per cylinder
+    devchar[16] = (BYTE)(ckd->sectors);         // Number of sectors
+    store_hw(devchar+18, ckd->len);             // Track length
+    store_hw(devchar+20, ckd->har0);            // Length of HA and R0
     if (ckd->formula > 0)
     {
-        devchar[22] = (BYTE)(ckd->formula);
-        devchar[23] = (BYTE)(ckd->f1);
-        devchar[24] = (BYTE)(ckd->f2);
-        devchar[25] = (BYTE)(ckd->f3);
-        devchar[26] = (BYTE)(ckd->f4);
-        devchar[27] = (BYTE)(ckd->f5);
+        devchar[22] = (BYTE)(ckd->formula);     // Track capacity formula
+        devchar[23] = (BYTE)(ckd->f1);          // Factor F1
+        devchar[24] = (BYTE)(ckd->f2);          // Factor F2
+        devchar[25] = (BYTE)(ckd->f3);          // (F2F3)
+        devchar[26] = (BYTE)(ckd->f4);          // Factor F3
+        devchar[27] = (BYTE)(ckd->f5);          // (F4F5)
     }
-    else
+    if (altcyls > 0)
     {
-        devchar[22] = 0;
-        devchar[23] = 0;
-        devchar[24] = 0;
-        devchar[25] = 0;
-        devchar[26] = 0;
-        devchar[27] = 0;
+        store_hw(devchar+28, cyls - altcyls);   // Alternate cylinder & tracks
+        store_hw(devchar+30, altcyls * ckd->heads);
     }
-    if (altcyls > 0)            // alternate cylinders and tracks
-    {
-        devchar[28] = (ckd->cyls >> 8) & 0xff;
-        devchar[29] = ckd->cyls & 0xff;
-        devchar[30] = ((altcyls * ckd->heads) >> 8) & 0xff;
-        devchar[31] = (altcyls * ckd->heads) & 0xff;
-    }
-    else
-    {
-        devchar[28] = 0;
-        devchar[29] = 0;
-        devchar[30] = 0;
-        devchar[31] = 0;
-    }
-    devchar[32] = 0;            // diagnostic cylinders and tracks
-    devchar[33] = 0;
-    devchar[34] = 0;
-    devchar[35] = 0;
-    devchar[36] = 0;            // device support cylinders and tracks
-    devchar[37] = 0;
-    devchar[38] = 0;
-    devchar[39] = 0;
-    devchar[40] = ckd->code;
-    devchar[41] = ckd->code;
-    devchar[42] = cu->code;
-    devchar[43] = 0;
-    devchar[44] = (ckd->r0 >> 8) & 0xff;
-    devchar[45] = ckd->r0 & 0xff;
-    devchar[46] = 0;
-    devchar[47] = 0;
-    devchar[48] = (BYTE)(ckd->f6);
-    devchar[49] = (ckd->rpscalc >> 8) & 0xff;
-    devchar[50] = ckd->rpscalc & 0xff;
-    devchar[56] = 0xff;         // real CU type code
-    devchar[57] = 0xff;         // real device type code
+    devchar[40] = ckd->code;                    // MDR record ID
+    devchar[41] = ckd->code;                    // OBR record ID
+    devchar[42] = cu->code;                     // CU Type Code
+    devchar[43] = 0x02;                         // Parameter length
+    store_hw(devchar+44, ckd->r0);              // Record 0 length
+    devchar[47] = 0x01;                         // Track set
+    devchar[48] = (BYTE)(ckd->f6);              // F6
+    store_hw(devchar+49, ckd->rpscalc);         // RPS factor
+    devchar[51] = MODEL6(cu) ? 0x0f : 0x00;     // reserved byte 51
+    devchar[54] = cu->funcfeat;                 // device/CU functions/features
+    devchar[56] = cu->typecode;                 // Real CU type code
+
+    /*---------------------------------------------------------------*/
+    /* 2007/05/04 @kl                                                */
+    /* The following line to set devchar[57] to 0xff was restored    */
+    /* to circumvent a command reject when ICKDSF issues a Read      */
+    /* Special Home Address (0x0a) to an alternate track.            */
+    /* According to the IBM 3880 Storage Control Reference,          */
+    /* GA16-1661-09, and the 3990/9330 Reference, GA32-0274-05,      */
+    /* it should be 0x00 for real 3380 and 3390 devices.  Setting    */
+    /* it to 0xff makes the underlying real DASD look like a         */
+    /* disk array (whose virtual 3380/3390 disks have no alternate   */
+    /* tracks).  This causes DSF to skip issuing the 0x0a channel    */
+    /* command, which Hercules does not currently support, for       */
+    /* alternate tracks.                                             */
+    /*---------------------------------------------------------------*/
+    devchar[57] = 0xff;                         // real device type code
 
     return 64;
 }
+
+
+/*-------------------------------------------------------------------*/
+/* Build CKD configuration data                                      */
+/*-------------------------------------------------------------------*/
+DLL_EXPORT int dasd_build_ckd_config_data (DEVBLK *dev, BYTE *iobuf, int count)
+{
+int  i;
+BYTE buf[256];
+
+    /* Clear the configuration data area */
+    memset (buf, 0, 256);
+
+    /* Bytes 0-31: NED 1  Node element descriptor for the device */
+    store_fw (buf, 0xc4010100);
+    sprintf ((char *)&buf[4], "  %4.4X0%2.2XHRCZZ000000000001",
+                        dev->ckdtab->devt, dev->ckdtab->model);
+    for (i = 4; i < 30; i++)
+        buf[i] = host_to_guest(buf[i]);
+    store_hw(buf + 30, 0x0300);
+
+    /* Bytes 32-63: NED 2  Node element descriptor for the string */
+    store_fw (buf + 32, 0xc4000000);
+    sprintf ((char *)&buf[36], "  %4.4X0%2.2XHRCZZ000000000001",
+                        dev->ckdtab->devt, dev->ckdtab->model);
+    for (i = 36; i < 62; i++)
+        buf[i] = host_to_guest(buf[i]);
+    store_hw (buf + 62, 0x0300);
+
+    /* Bytes 64-95: NED 3  Node element descriptor for the storage director */
+    store_fw (buf + 64, 0xd4020000);
+    sprintf ((char *)&buf[68], "  %4.4X0%2.2XHRCZZ000000000001",
+                        dev->ckdcu->devt, dev->ckdcu->model);
+    for (i = 68; i < 94; i++)
+        buf[i] = host_to_guest(buf[i]);
+    store_hw (buf + 94, 0x0300);
+
+    /* Bytes 96-127: NED 4  Node element descriptor for the subsystem */
+    store_fw (buf + 96, 0xF0000001);
+    sprintf ((char *)&buf[100], "  %4.4X   HRCZZ000000000001",
+                        dev->ckdcu->devt);
+    for (i = 100; i < 126; i++)
+        buf[i] = host_to_guest(buf[i]);
+    store_hw (buf + 126, 0x0300);
+
+    /* Bytes 128-223: zeroes */
+
+    /* Bytes 224-255: NEQ  Node Element Qualifier */
+    buf[224] = 0x80;                  // flags (general NEQ)
+    buf[225] = 0;                     // record selector
+    store_hw (buf + 226, IFID(dev));  // interface id
+    store_hw (buf + 228, 0);          // must be zero
+    buf[230] = 0x1E;                  // primary missing interrupt timer interval
+    buf[231] = 0x00;                  // secondary missing interrupt timer interval
+    store_hw (buf + 232, SSID(dev));  // subsystem id
+    buf[234] = 0x80;                  // path/cluster id
+    buf[235] = (dev->devnum & 0xFF);  // unit address
+    buf[236] = (dev->devnum & 0xFF);  // physical device id
+    buf[237] = (dev->devnum & 0xFF);  // physical device address
+    buf[238] = buf[227];              // SA ID (same as interface ID, byte 227)
+    store_hw (buf + 239, 0);          // escon link address
+    buf[241] = 0x80;                  // interface protocol type (parallel)
+//  buf[241] = 0x40;                  // interface protocol type (escon)
+    buf[242] = 0x80;                  // NEQ format flags
+    buf[243] = (dev->devnum & 0xFF);  // logical device address (LDA)
+                                      // bytes 244-255 must be zero
+
+    /* Copy data characteristics to the I/O buf */
+    count = count > 256 ? 256 : count;
+    memcpy (iobuf, buf, count);
+
+    return 256;
+}
+
+
+/*-------------------------------------------------------------------*/
+/* Build CKD subsystem status                                        */
+/*-------------------------------------------------------------------*/
+DLL_EXPORT int dasd_build_ckd_subsys_status (DEVBLK *dev, BYTE *iobuf, int count)
+{
+int  num;
+BYTE buf[44];
+
+    /* Build the basic subsystem status data in the I/O area */
+    memset (buf, 0, 44);
+    buf[1] = dev->devnum & 0xFF;
+    buf[2] = DEVICES_PER_SUBSYS - 1;
+    store_hw (buf + 38, SSID(dev));
+    num = 40;
+
+    /* Build an additional 4 bytes of data for the 3990-6 */
+    if (MODEL6(dev->ckdcu)) 
+    {
+        buf[0] = 0x01;            /* Set 3990-6 enhanced flag */
+        num = 44;                   
+    } /* end if(3990-6) */
+
+    /* Copy subsystem status to the I/O buf */
+    count = count > num ? num : count;
+    memcpy (iobuf, buf, count);
+
+    return num;
+}
+
 
 /*-------------------------------------------------------------------*/
 /* Build FBA devid field                                             */

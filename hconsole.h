@@ -1,9 +1,19 @@
 //////////////////////////////////////////////////////////////////////////////////////////
 //   hconsole.h        Hercules hardware console (panel) support functions
 //////////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2006. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2007. Released under the Q Public License
 // (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
 //////////////////////////////////////////////////////////////////////////////////////////
+
+// $Id: hconsole.h,v 1.8 2007/06/23 00:04:10 ivan Exp $
+//
+// $Log: hconsole.h,v $
+// Revision 1.8  2007/06/23 00:04:10  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.7  2006/12/08 09:43:25  jj
+// Add CVS message log
+//
 
 #ifndef _HCONSOLE_H
 #define _HCONSOLE_H
@@ -60,5 +70,9 @@ extern  void  translate_keystroke( char kbbuf[], int* pkblen );
 extern  int   console_beep( FILE* confp );
 extern  int   get_console_dim( FILE* confp, int* rows, int* cols );
 extern  int   set_console_cursor_shape( FILE* confp, int ins );
+
+#if defined( _MSVC_ )
+extern  int   w32_set_console_title( char* pszTitle );
+#endif
 
 #endif // _HCONSOLE_H

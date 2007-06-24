@@ -1,10 +1,23 @@
-/* CARDRDR.C    (c) Copyright Roger Bowler, 1999-2006                */
+/* CARDRDR.C    (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 Card Reader Device Handler                   */
+
+// $Id: cardrdr.c,v 1.46 2007/06/23 00:04:03 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
 /* card reader devices.                                              */
 /*-------------------------------------------------------------------*/
+
+// $Log: cardrdr.c,v $
+// Revision 1.46  2007/06/23 00:04:03  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.45  2006/12/28 16:13:28  fish
+// Fix PR# readers/104: "HHCRD011E Close error... No Error" in 'cardrdr_close_device' function.
+//
+// Revision 1.44  2006/12/08 09:43:17  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 #include "hercules.h"
@@ -339,12 +352,13 @@ static int cardrdr_close_device ( DEVBLK *dev )
     /* Close the device file */
 
     if (0
-        || (  dev->bs && close_socket( dev->fd ) < 0 )
-        || ( !dev->bs && dev->fh && fclose(dev->fh) != 0 )
+        || (  dev->bs && dev->fd >=  0   && close_socket( dev->fd ) <  0 )
+        || ( !dev->bs && dev->fh != NULL &&    fclose(    dev->fh ) != 0 )
     )
     {
+        int errnum = dev->bs ? get_HSO_errno() : errno;
         logmsg (_("HHCRD011E Close error on file \"%s\": %s\n"),
-            dev->filename, strerror(errno));
+            dev->filename, strerror(errnum));
         dev->fd = -1;
         dev->fh = NULL;
         return -1;
@@ -866,6 +880,7 @@ DEVHND cardrdr_device_hndinfo = {
         NULL,                          /* Device Query used          */
         NULL,                          /* Device Reserve             */
         NULL,                          /* Device Release             */
+        NULL,                          /* Device Attention           */
         NULL,                          /* Immediate CCW Codes        */
         NULL,                          /* Signal Adapter Input       */
         NULL,                          /* Signal Adapter Output      */
@@ -891,7 +906,7 @@ HDL_DEPENDENCY_SECTION;
      HDL_DEPENDENCY(DEVBLK);
      HDL_DEPENDENCY(SYSBLK);
 }
-END_DEPENDENCY_SECTION;
+END_DEPENDENCY_SECTION
 
 
 #if defined(WIN32) && !defined(HDL_USE_LIBTOOL) && !defined(_MSVC_)
@@ -900,7 +915,7 @@ END_DEPENDENCY_SECTION;
   {
     HDL_RESOLVE_PTRVAR( psysblk, sysblk );
   }
-  END_RESOLVER_SECTION;
+  END_RESOLVER_SECTION
 #endif
 
 
@@ -910,5 +925,5 @@ HDL_DEVICE_SECTION;
     HDL_DEVICE(2501, cardrdr_device_hndinfo );
     HDL_DEVICE(3505, cardrdr_device_hndinfo );
 }
-END_DEVICE_SECTION;
+END_DEVICE_SECTION
 #endif

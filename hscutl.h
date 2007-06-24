@@ -4,6 +4,20 @@
 /* laneous global utility functions.                                 */
 /*********************************************************************/
 
+// $Id: hscutl.h,v 1.21 2007/01/10 15:12:11 rbowler Exp $
+//
+// $Log: hscutl.h,v $
+// Revision 1.21  2007/01/10 15:12:11  rbowler
+// Console keepalive for Unix
+//
+// Revision 1.20  2007/01/10 09:32:39  fish
+// Enable connection keep-alive to try and detect 3270 clients that
+// have died (MSVC only right now; don't know how to do it on *nix)
+//
+// Revision 1.19  2006/12/08 09:43:26  jj
+// Add CVS message log
+//
+
 #ifndef __HSCUTL_H__
 #define __HSCUTL_H__
 
@@ -70,6 +84,11 @@
   /* (returns 1==true if it's a socket, 0==false otherwise)    */
   int socket_is_socket( int sfd );
 
+  /* Set the SO_KEEPALIVE option and timeout values for a
+     socket connection to detect when client disconnects */
+  void socket_keepalive( int sfd, int idle_time, int probe_interval,
+                         int probe_count );
+
 #endif // !defined(_MSVC_)
 
 /*********************************************************************/
@@ -84,6 +103,7 @@
   HUT_DLL_IMPORT const char *get_symbol(const char *);
   HUT_DLL_IMPORT char *resolve_symbol_string(const char *);
   HUT_DLL_IMPORT void kill_all_symbols(void);
+  HUT_DLL_IMPORT void list_all_symbols(void);
 #endif
 
 #ifdef _MSVC_
@@ -161,9 +181,21 @@ strlcat(char *dst, const char *src, size_t siz);
 #endif
 
 /* Subtract/add gettimeofday struct timeval */
-//#include <sys/time.h> // (you'll need this too)
 HUT_DLL_IMPORT int timeval_subtract (struct timeval *beg_timeval, struct timeval *end_timeval, struct timeval *dif_timeval);
 HUT_DLL_IMPORT int timeval_add      (struct timeval *dif_timeval, struct timeval *accum_timeval);
+
+/*
+  Easier to use timed_wait_condition that waits for
+  the specified relative amount of time without you
+  having to build an absolute timeout time yourself
+*/
+HUT_DLL_IMPORT int timed_wait_condition_relative_usecs
+(
+    COND*            pCOND,     // ptr to condition to wait on
+    LOCK*            pLOCK,     // ptr to controlling lock (must be held!)
+    U32              usecs,     // max #of microseconds to wait
+    struct timeval*  pTV        // [OPTIONAL] ptr to tod value (may be NULL)
+);
 
 // TEST
 HUT_DLL_IMPORT void cause_crash();

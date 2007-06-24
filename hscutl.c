@@ -8,6 +8,23 @@
 /* z/Architecture emulator                                           */
 /*********************************************************************/
 
+// $Id: hscutl.c,v 1.25 2007/01/12 14:38:47 rbowler Exp $
+//
+// $Log: hscutl.c,v $
+// Revision 1.25  2007/01/12 14:38:47  rbowler
+// Error checking for Unix keepalive
+//
+// Revision 1.24  2007/01/10 15:12:11  rbowler
+// Console keepalive for Unix
+//
+// Revision 1.23  2007/01/10 09:32:39  fish
+// Enable connection keep-alive to try and detect 3270 clients that
+// have died (MSVC only right now; don't know how to do it on *nix)
+//
+// Revision 1.22  2006/12/08 09:43:26  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
 
 #define _HSCUTL_C_
@@ -477,6 +494,19 @@ DLL_EXPORT char *resolve_symbol_string(const char *text)
     return(resstr);
 }
 
+/* (called by defsym panel command) */
+DLL_EXPORT void list_all_symbols(void)
+{
+    SYMBOL_TOKEN* tok; int i;
+    for ( i=0; i < symbol_count; i++ )
+    {
+        tok = symbols[i];
+        if (tok)
+            logmsg("HHCPN042I %s=%s\n", tok->var, tok->val ? tok->val : "");
+    }
+    return;
+}
+
 DLL_EXPORT void kill_all_symbols(void)
 {
     SYMBOL_TOKEN        *tok;
@@ -562,6 +592,42 @@ DLL_EXPORT int timeval_add
     return ((accum_timeval->tv_sec < 0 || accum_timeval->tv_usec < 0) ? -1 : 0);
 }
 
+/*
+  Easier to use timed_wait_condition that waits for
+  the specified relative amount of time without you
+  having to build an absolute timeout time yourself
+*/
+DLL_EXPORT int timed_wait_condition_relative_usecs
+(
+    COND*            pCOND,     // ptr to condition to wait on
+    LOCK*            pLOCK,     // ptr to controlling lock (must be held!)
+    U32              usecs,     // max #of microseconds to wait
+    struct timeval*  pTV        // [OPTIONAL] ptr to tod value (may be NULL)
+)
+{
+    struct timespec timeout_timespec;
+    struct timeval  now;
+
+    if (!pTV)
+    {
+        pTV = &now;
+        gettimeofday( pTV, NULL );
+    }
+
+    timeout_timespec.tv_sec  = pTV->tv_sec  + ( usecs / 1000000 );
+    timeout_timespec.tv_nsec = pTV->tv_usec + ( usecs % 1000000 );
+
+    if ( timeout_timespec.tv_nsec > 1000000 )
+    {
+        timeout_timespec.tv_sec  += timeout_timespec.tv_nsec / 1000000;
+        timeout_timespec.tv_nsec %=                            1000000;
+    }
+
+    timeout_timespec.tv_nsec *= 1000;
+
+    return timed_wait_condition( pCOND, pLOCK, &timeout_timespec );
+}
+
 /*********************************************************************
   The following couple of Hercules 'utility' functions may be defined
   elsewhere depending on which host platform we're being built for...
@@ -620,8 +686,45 @@ DLL_EXPORT int  socket_deinit ( void ) { return 0; }
 /* (returns 1==true if it's a socket, 0==false otherwise)    */
 DLL_EXPORT int socket_is_socket( int sfd )
 {
-    struct STAT st;
-    return ( FSTAT( sfd, &st ) == 0 && S_ISSOCK( st.st_mode ) );
+    struct stat st;
+    return ( fstat( sfd, &st ) == 0 && S_ISSOCK( st.st_mode ) );
+}
+/* Set the SO_KEEPALIVE option and timeout values for a
+   socket connection to detect when client disconnects */
+void socket_keepalive( int sfd, int idle_time, int probe_interval,
+        int probe_count )
+{
+    int rc, optval = 1;
+    rc = setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &optval, sizeof(optval));
+    logmsg("HHCUT001I SO_KEEPALIVE rc=%d %s\n", rc, strerror(errno));
+
+  #if defined(TCP_KEEPALIVE)
+    optval = idle_time;
+    rc = setsockopt(sfd, IPPROTO_TCP, TCP_KEEPALIVE, &optval, sizeof(optval)); 
+    if (rc) logmsg("HHCUT002I TCP_KEEPALIVE rc=%d %s\n", rc, strerror(errno));
+  #elif defined(TCP_KEEPIDLE)
+    optval = idle_time;
+    rc = setsockopt(sfd, SOL_TCP, TCP_KEEPIDLE, &optval, sizeof(optval)); 
+    if (rc) logmsg("HHCUT003I TCP_KEEPIDLE rc=%d %s\n", rc, strerror(errno));
+  #else
+    UNREFERENCED(idle_time);
+  #endif
+
+  #if defined(TCP_KEEPINTVL)
+    optval = probe_interval;
+    rc = setsockopt(sfd, SOL_TCP, TCP_KEEPINTVL, &optval, sizeof(optval)); 
+    if (rc) logmsg("HHCUT004I TCP_KEEPINTVL rc=%d %s\n", rc, strerror(errno));
+  #else
+    UNREFERENCED(probe_interval);
+  #endif
+
+  #if defined(TCP_KEEPCNT)
+    optval = probe_count;
+    rc = setsockopt(sfd, SOL_TCP, TCP_KEEPCNT, &optval, sizeof(optval)); 
+    if (rc) logmsg("HHCUT005I TCP_KEEPCNT rc=%d %s\n", rc, strerror(errno));
+  #else
+    UNREFERENCED(probe_count);
+  #endif
 }
 
 #endif // !defined(WIN32)

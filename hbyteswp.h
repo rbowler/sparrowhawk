@@ -5,6 +5,13 @@
 /* compile option -DNO_ASM_BYTESWAP will expand 'C' code             */
 /* otherwise Intel (486+) assember will be generated                 */
 
+// $Id: hbyteswp.h,v 1.10 2006/12/08 09:43:21 jj Exp $
+//
+// $Log: hbyteswp.h,v $
+// Revision 1.10  2006/12/08 09:43:21  jj
+// Add CVS message log
+//
+
 #ifndef _BYTESWAP_H
 #define _BYTESWAP_H
 

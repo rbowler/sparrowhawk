@@ -1,14 +1,33 @@
-/* INLINE.H     (c) Copyright Jan Jaeger, 2000-2006                  */
+/* INLINE.H     (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              Inline function definitions                          */
 
+// $Id: inline.h,v 1.49 2007/06/23 00:04:14 ivan Exp $
+
 /* Original author Roger Bowler, 1999                                */
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 
 /* Storage protection override fix               Jan Jaeger 31/08/00 */
 /* ESAME low-address protection          v208d Roger Bowler 20/01/01 */
 /* ESAME subspace replacement            v208e Roger Bowler 27/01/01 */
 /* Multiply/Divide Logical instructions         Vic Cross 13/02/2001 */
+
+// $Log: inline.h,v $
+// Revision 1.49  2007/06/23 00:04:14  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.48  2007/03/20 22:28:52  gsmith
+// Use non-concurrent load for fetch_doubleword_absolute on 32bit hosts
+//
+// Revision 1.47  2007/03/07 15:36:56  ivan
+// Fix explicit store protection check for SIE'd guests
+//
+// Revision 1.46  2007/01/04 23:12:04  gsmith
+// remove thunk calls for program_interrupt
+//
+// Revision 1.45  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
 
 // #define INLINE_STORE_FETCH_ADDR_CHECK
 
@@ -21,11 +40,14 @@ _DAT_C_STATIC int ARCH_DEP(authorize_asn) (U16 ax, U32 aste[],
 #if defined(FEATURE_ACCESS_REGISTERS)
 _DAT_C_STATIC U16 ARCH_DEP(translate_alet) (U32 alet, U16 eax,
         int acctype, REGS *regs, U32 *asteo, U32 aste[]);
+_DAT_C_STATIC void ARCH_DEP(purge_alb_all) ();
 _DAT_C_STATIC void ARCH_DEP(purge_alb) (REGS *regs);
 #endif
 _DAT_C_STATIC int ARCH_DEP(translate_addr) (VADR vaddr, int arn,
         REGS *regs, int acctype);
+_DAT_C_STATIC void ARCH_DEP(purge_tlb_all) ();
 _DAT_C_STATIC void ARCH_DEP(purge_tlb) (REGS *regs);
+_DAT_C_STATIC void ARCH_DEP(purge_tlbe_all) (RADR pfra);
 _DAT_C_STATIC void ARCH_DEP(purge_tlbe) (REGS *regs, RADR pfra);
 _DAT_C_STATIC void ARCH_DEP(invalidate_tlb) (REGS *regs, BYTE mask);
 #if ARCH_MODE == ARCH_390 && defined(_900)
@@ -71,19 +93,18 @@ _VSTORE_C_STATIC U32 ARCH_DEP(vfetch4) (VADR addr, int arn,
         REGS *regs);
 _VSTORE_C_STATIC U64 ARCH_DEP(vfetch8) (VADR addr, int arn,
         REGS *regs);
-_VFETCH_C_STATIC BYTE * ARCH_DEP(instfetch) (BYTE *dest, VADR addr,
-        REGS *regs);
 _VSTORE_C_STATIC void ARCH_DEP(move_chars) (VADR addr1, int arn1,
       BYTE key1, VADR addr2, int arn2, BYTE key2, int len, REGS *regs);
 _VSTORE_C_STATIC void ARCH_DEP(validate_operand) (VADR addr, int arn,
         int len, int acctype, REGS *regs);
+_VFETCH_C_STATIC BYTE * ARCH_DEP(instfetch) (REGS *regs, int exec);
 
-#if defined(_FEATURE_SIE) && defined(_370)
-_VFETCH_C_STATIC BYTE * s370_instfetch (BYTE *dest, U32 addr, REGS *regs);
+#if defined(_FEATURE_SIE) && defined(_370) && !defined(_IEEE_C_)
+_VFETCH_C_STATIC BYTE * s370_instfetch (REGS *regs, int exec);
 #endif /*defined(_FEATURE_SIE)*/
 
 #if defined(_FEATURE_ZSIE) && defined(_900)
-_VFETCH_C_STATIC BYTE * s390_instfetch (BYTE *dest, U32 addr, REGS *regs);
+_VFETCH_C_STATIC BYTE * s390_instfetch (REGS *regs, int exec);
 #endif /*defined(_FEATURE_ZSIE)*/
 
 #if !defined(_INLINE_H)
@@ -431,6 +452,10 @@ static inline int ARCH_DEP(is_store_protected) (VADR addr, BYTE skey,
        into the page, regardless of the access key and storage key */
     if (regs->dat.protect)
         return 1;
+#if defined(_FEATURE_SIE)
+    if(SIE_MODE(regs) && regs->hostregs->dat.protect)
+        return 1;
+#endif
 
     /* [3.4.1] Store is allowed if access key is zero, regardless
        of the storage key */
@@ -472,7 +497,7 @@ static inline BYTE *ARCH_DEP(fetch_main_absolute) (RADR addr,
 {
 #if defined(INLINE_STORE_FETCH_ADDR_CHECK)
     if(addr > regs->mainlim - len)
-        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+        regs->program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
 #endif /*defined(INLINE_STORE_FETCH_ADDR_CHECK)*/
 
     SIE_TRANSLATE(&addr, ACCTYPE_READ, regs);
@@ -497,7 +522,16 @@ static inline BYTE *ARCH_DEP(fetch_main_absolute) (RADR addr,
 static inline U64 ARCH_DEP(fetch_doubleword_absolute) (RADR addr,
                                 REGS *regs)
 {
+ // The change below affects 32 bit hosts that use something like
+ // cmpxchg8b to fetch the doubleword concurrently.
+ // This routine is mainly called by DAT in 64 bit guest mode
+ // to access DAT-related values.  In most `well-behaved' OS's,
+ // other CPUs should not be interfering with these values
+ #if !defined(OPTION_STRICT_ALIGNMENT)
+    return CSWAP64(*(U64 *)FETCH_MAIN_ABSOLUTE(addr, regs, 8));
+ #else
     return fetch_dw(FETCH_MAIN_ABSOLUTE(addr, regs, 8));
+ #endif
 } /* end function fetch_doubleword_absolute */
 
 
@@ -542,7 +576,7 @@ static inline void ARCH_DEP(store_doubleword_absolute) (U64 value,
 {
 #if defined(INLINE_STORE_FETCH_ADDR_CHECK)
     if(addr > regs->mainlim - 8)
-        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+        regs->program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
 #endif /*defined(INLINE_STORE_FETCH_ADDR_CHECK)*/
 
     SIE_TRANSLATE(&addr, ACCTYPE_WRITE, regs);
@@ -567,7 +601,7 @@ static inline void ARCH_DEP(store_fullword_absolute) (U32 value,
 {
 #if defined(INLINE_STORE_FETCH_ADDR_CHECK)
     if(addr > regs->mainlim - 4)
-        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+        regs->program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
 #endif /*defined(INLINE_STORE_FETCH_ADDR_CHECK)*/
 
     SIE_TRANSLATE(&addr, ACCTYPE_WRITE, regs);
@@ -646,7 +680,7 @@ BYTE    *p;                             /* Mainstor pointer          */
 
     /* Program check if DUCT origin address is invalid */
     if (ducto > regs->mainlim)
-        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+        regs->program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Fetch DUCT words 0, 1, and 3 from absolute storage
        (note: the DUCT cannot cross a page boundary) */
@@ -668,7 +702,7 @@ BYTE    *p;                             /* Mainstor pointer          */
 
     /* Program check if ASTE origin address is invalid */
     if (ssasteo > regs->mainlim)
-        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+        regs->program_interrupt (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Fetch subspace ASTE words 0, 2, 3, and 5 from absolute
        storage (note: the ASTE cannot cross a page boundary) */
@@ -685,7 +719,7 @@ BYTE    *p;                             /* Mainstor pointer          */
     {
         regs->excarid = 0;
         if (xcode == NULL)
-            ARCH_DEP(program_interrupt) (regs, PGM_ASTE_VALIDITY_EXCEPTION);
+            regs->program_interrupt (regs, PGM_ASTE_VALIDITY_EXCEPTION);
         else
             *xcode = PGM_ASTE_VALIDITY_EXCEPTION;
         return 0;
@@ -697,7 +731,7 @@ BYTE    *p;                             /* Mainstor pointer          */
     {
         regs->excarid = 0;
         if (xcode == NULL)
-            ARCH_DEP(program_interrupt) (regs, PGM_ASTE_SEQUENCE_EXCEPTION);
+            regs->program_interrupt (regs, PGM_ASTE_SEQUENCE_EXCEPTION);
         else
             *xcode = PGM_ASTE_SEQUENCE_EXCEPTION;
         return 0;

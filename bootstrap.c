@@ -2,6 +2,16 @@
 /* Hercules main executable code */
 /*********************************/
 
+// $Id: bootstrap.c,v 1.11 2006/12/28 03:04:34 fish Exp $
+//
+// $Log: bootstrap.c,v $
+// Revision 1.11  2006/12/28 03:04:34  fish
+// Permanently disable in bootstrap.c Microsoft's completely INSANE Invalid CRT Parameter handling behavior
+//
+// Revision 1.10  2006/12/08 09:43:16  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
 #include "hercules.h"
 #if defined(HDL_USE_LIBTOOL)
@@ -25,6 +35,9 @@ int main(int ac,char *av[])
 
 #else // defined( _MSVC_ )
 
+// (damn optimizer is getting in the way so disable it)
+#pragma optimize( "", off )
+
 ///////////////////////////////////////////////////////////////////////////////
 // Windows version...
 
@@ -41,10 +54,26 @@ typedef BOOL (MINIDUMPWRITEDUMPFUNC)
 
 static MINIDUMPWRITEDUMPFUNC*  g_pfnMiniDumpWriteDumpFunc  = NULL;
 static HMODULE                 g_hDbgHelpDll               = NULL;
-static WCHAR                   g_wszHercDrive[_MAX_DRIVE]  = L"";
-static WCHAR                   g_wszHercDir[2*_MAX_DIR]    = L"";
+
+// Global string buffers to prevent C4748 warning: "/GS can not protect
+// parameters and local variables from local buffer overrun because
+// optimizations are disabled in function"
+
+static WCHAR  g_wszHercDrive [ 4 * _MAX_DRIVE ]  = {0};
+static WCHAR  g_wszHercDir   [ 4 * _MAX_DIR   ]  = {0};
+static WCHAR  g_wszFileDir   [ 4 * _MAX_DIR   ]  = {0};
+static WCHAR  g_wszHercPath  [ 4 * _MAX_PATH  ]  = {0};
+static WCHAR  g_wszDumpPath  [ 4 * _MAX_PATH  ]  = {0};
+static WCHAR  g_wszFileName  [ 4 * _MAX_FNAME ]  = {0};
+
+static TCHAR    g_szSaveTitle[ 512 ] = {0};
+static LPCTSTR  g_pszTempTitle = _T("{98C1C303-2A9E-11d4-9FF5-0060677l8D04}");
+
+// (forward reference)
 
 static void ProcessException( EXCEPTION_POINTERS* pExceptionPtrs );
+
+// (helper macro)
 
 #ifndef ARRAYSIZE
 #define ARRAYSIZE(x) (sizeof(x)/sizeof(x[0]))
@@ -57,6 +86,10 @@ int main(int ac,char *av[])
     int rc = 0;
 
     SET_THREAD_NAME("bootstrap");
+
+    // Disable Microsoft's INSANE invalid crt parameter handling!
+
+    DISABLE_CRT_INVALID_PARAMETER_HANDLER();
 
     // If we're being debugged, then let the debugger
     // catch the exception. Otherwise, let our exception
@@ -74,9 +107,8 @@ int main(int ac,char *av[])
                 GetProcAddress( g_hDbgHelpDll, _T("MiniDumpWriteDump")))
         )
         {
-            WCHAR wszHercPath[_MAX_PATH] = L"";
-            GetModuleFileNameW( NULL, wszHercPath, ARRAYSIZE(wszHercPath) );
-            _wsplitpath( wszHercPath, g_wszHercDrive, g_wszHercDir, NULL, NULL );
+            GetModuleFileNameW( NULL, g_wszHercPath, ARRAYSIZE(g_wszHercPath) );
+            _wsplitpath( g_wszHercPath, g_wszHercDrive, g_wszHercDir, NULL, NULL );
         }
 
         SetErrorMode( SEM_NOGPFAULTERRORBOX );
@@ -87,6 +119,12 @@ int main(int ac,char *av[])
         }
         __except
         (
+            fflush(stdout),
+            fflush(stderr),
+            _ftprintf( stderr, _T("]!OOPS!\n") ),
+            fflush(stdout),
+            fflush(stderr),
+            Sleep(10),
             _tprintf( _T("\n\n") ),
             _tprintf( _T("                   ***************\n") ),
             _tprintf( _T("                   *    OOPS!    *\n") ),
@@ -109,20 +147,49 @@ int main(int ac,char *av[])
 
 ///////////////////////////////////////////////////////////////////////////////
 
+static HWND FindConsoleHandle()
+{
+    HWND hWnd;
+    if (!GetConsoleTitle(g_szSaveTitle,ARRAYSIZE(g_szSaveTitle)))
+        return NULL;
+    if (!SetConsoleTitle(g_pszTempTitle))
+        return NULL;
+    Sleep(20);
+    hWnd = FindWindow(NULL,g_pszTempTitle);
+    SetConsoleTitle(g_szSaveTitle);
+    return hWnd;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 static BOOL CreateMiniDump( EXCEPTION_POINTERS* pExceptionPtrs );
 
 static void ProcessException( EXCEPTION_POINTERS* pExceptionPtrs )
 {
+    UINT uiMBFlags =
+        0
+        | MB_SYSTEMMODAL
+        | MB_TOPMOST
+        | MB_SETFOREGROUND
+        ;
+
+    HWND hwndMBOwner = FindConsoleHandle();
+
+    if (!hwndMBOwner || !IsWindowVisible(hwndMBOwner))
+        hwndMBOwner = GetDesktopWindow();
+
     if ( !g_pfnMiniDumpWriteDumpFunc )
     {
         MessageBox
         (
-            NULL,
+            hwndMBOwner,
             _T("The creation of a crash dump for analysis by the Hercules ")
             _T("development team is NOT possible\nbecause the required 'DbgHelp.dll' ")
             _T("is missing or is not installed or was otherwise not located.")
             ,_T("OOPS!  Hercules has crashed!"),
-            MB_OK
+            uiMBFlags
+                | MB_ICONERROR
+                | MB_OK
         );
 
         return;
@@ -130,27 +197,27 @@ static void ProcessException( EXCEPTION_POINTERS* pExceptionPtrs )
 
     if ( IDYES == MessageBox
     (
-        NULL,
+        hwndMBOwner,
         _T("The creation of a crash dump for further analysis by ")
         _T("the Hercules development team is strongly suggested.\n\n")
         _T("Would you like to create a crash dump for ")
         _T("the Hercules development team to analyze?")
         ,_T("OOPS!  Hercules has crashed!"),
-        MB_YESNO
+        uiMBFlags
+            | MB_ICONERROR
+            | MB_YESNO
     ))
     {
         if ( CreateMiniDump( pExceptionPtrs ) )
         {
-            // ZZ FIXME: Figure out why this MessageBox never appears.
-            // It *used* to but it's not anymore and I don't know why.
-            // The function *is* always returning TRUE...  <grumble>
-
             MessageBox
             (
-                NULL,
+                hwndMBOwner,
                 _T("Please send the dump to the Hercules development team for analysis.")
                 ,_T("Dump Complete"),
-                MB_OK
+                uiMBFlags
+                    | MB_ICONEXCLAMATION
+                    | MB_OK
             );
         }
     }
@@ -172,18 +239,17 @@ static BOOL CALLBACK MyMiniDumpCallback  // (fwd ref)
 static BOOL CreateMiniDump( EXCEPTION_POINTERS* pExceptionPtrs )
 {
     BOOL bSuccess = FALSE;
-    WCHAR wszDumpPath[4*_MAX_PATH];
     HANDLE hDumpFile;
 
-    _wmakepath( wszDumpPath, g_wszHercDrive, g_wszHercDir, L"Hercules", L".dmp" );
+    _wmakepath( g_wszDumpPath, g_wszHercDrive, g_wszHercDir, L"Hercules", L".dmp" );
 
-    _tprintf( _T("Creating crash dump \"%S\"...\n"), wszDumpPath );
+    _tprintf( _T("Creating crash dump \"%ls\"...\n"), g_wszDumpPath );
     _tprintf( _T("Please wait; this may take a few minutes...\n") );
     _tprintf( _T("(another message will appear when the dump is complete)\n") );
 
     hDumpFile = CreateFileW
     (
-        wszDumpPath,
+        g_wszDumpPath,
         GENERIC_WRITE,
         0, NULL, CREATE_ALWAYS,
         FILE_ATTRIBUTE_NORMAL, NULL
@@ -224,7 +290,7 @@ static BOOL CreateMiniDump( EXCEPTION_POINTERS* pExceptionPtrs )
 
         if ( bSuccess )
         {
-            _tprintf( _T("Dump \"%S\" created.\n"), wszDumpPath );
+            _tprintf( _T("Dump \"%ls\" created.\n"), g_wszDumpPath );
         }
         else
             _tprintf( _T("MiniDumpWriteDump failed! Error: %u\n"), GetLastError() );
@@ -240,20 +306,20 @@ static BOOL CreateMiniDump( EXCEPTION_POINTERS* pExceptionPtrs )
 ///////////////////////////////////////////////////////////////////////////////
 // Build User Stream Arrays...
 
-#define MAX_MINIDUMP_USER_STREAMS  (50)
+#define MAX_MINIDUMP_USER_STREAMS  (64)
 
-static MINIDUMP_USER_STREAM UserStreamArray[MAX_MINIDUMP_USER_STREAMS];
+static  char                  g_host_info_str [ 1024 ];
+static  MINIDUMP_USER_STREAM  UserStreamArray [ MAX_MINIDUMP_USER_STREAMS ];
 
 static void BuildUserStreams( MINIDUMP_USER_STREAM_INFORMATION* pMDUSI )
 {
-    static char host_info_str[256];
     const char** ppszBldInfoStr;
     int nNumBldInfoStrs;
     ULONG UserStreamCount;
 
     _ASSERTE( pMDUSI );
 
-    get_hostinfo_str( NULL, host_info_str, sizeof(host_info_str) );
+    get_hostinfo_str( NULL, g_host_info_str, sizeof(g_host_info_str) );
     nNumBldInfoStrs = get_buildinfo_strings( &ppszBldInfoStr );
 
     UserStreamCount = min( (3+nNumBldInfoStrs), MAX_MINIDUMP_USER_STREAMS );
@@ -282,8 +348,8 @@ static void BuildUserStreams( MINIDUMP_USER_STREAM_INFORMATION* pMDUSI )
     if ( UserStreamCount < pMDUSI->UserStreamCount )
     {
         UserStreamArray[UserStreamCount].Type       = CommentStreamA;
-        UserStreamArray[UserStreamCount].Buffer     =        host_info_str;
-        UserStreamArray[UserStreamCount].BufferSize = strlen(host_info_str)+1;
+        UserStreamArray[UserStreamCount].Buffer     =        g_host_info_str;
+        UserStreamArray[UserStreamCount].BufferSize = strlen(g_host_info_str)+1;
         UserStreamCount++;
     }
 
@@ -397,18 +463,16 @@ static BOOL CALLBACK MyMiniDumpCallback
 static BOOL IsDataSectionNeeded( const WCHAR* pwszModuleName )
 {
     BOOL bNeeded = FALSE;
-    WCHAR wszFileDir[_MAX_DIR] = L"";
-    WCHAR wszFileName[_MAX_FNAME] = L"";
 
     _ASSERTE( pwszModuleName );
 
-    _wsplitpath( pwszModuleName, NULL, wszFileDir, wszFileName, NULL );
+    _wsplitpath( pwszModuleName, NULL, g_wszFileDir, g_wszFileName, NULL );
 
-    if ( _wcsicmp( wszFileName, L"ntdll" ) == 0 )
+    if ( _wcsicmp( g_wszFileName, L"ntdll" ) == 0 )
     {
         bNeeded = TRUE;
     }
-    else if ( _wcsicmp( wszFileDir, g_wszHercDir ) == 0 )
+    else if ( _wcsicmp( g_wszFileDir, g_wszHercDir ) == 0 )
     {
         bNeeded = TRUE;
     }
@@ -417,5 +481,7 @@ static BOOL IsDataSectionNeeded( const WCHAR* pwszModuleName )
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
+#pragma optimize( "", on )
 
 #endif // !defined( _MSVC_ )

@@ -1,9 +1,26 @@
-/* HSTDINC.H    (c) Copyright Roger Bowler, 1999-2006                */
+/* HSTDINC.H    (c) Copyright Roger Bowler, 1999-2007                */
 /*              Hercules precompilation-eligible Header Files        */
 
 /* This file contains #include statements for all of the header      */
 /* files which are not dependent on the mainframe architectural      */
 /* features selected and thus are eligible for precompilation        */
+
+// $Id: hstdinc.h,v 1.15 2007/06/23 00:04:11 ivan Exp $
+//
+// $Log: hstdinc.h,v $
+// Revision 1.15  2007/06/23 00:04:11  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.14  2007/01/10 16:30:48  rbowler
+// Include netinet/tcp.h for Unix keepalive settings
+//
+// Revision 1.13  2007/01/10 09:32:39  fish
+// Enable connection keep-alive to try and detect 3270 clients that
+// have died (MSVC only right now; don't know how to do it on *nix)
+//
+// Revision 1.12  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
 
 #ifndef _HSTDINC_H
 #define _HSTDINC_H
@@ -31,18 +48,19 @@
   #ifndef _WIN32_WINNT
     #define _WIN32_WINNT 0x0403  // Windows 98 or WinNT SP4 or greater
   #endif
-  #include <winsock2.h>
+  #include <winsock2.h>         // Windows Sockets 2
+  #include <mstcpip.h>          // (need struct tcp_keepalive)
 #endif
 #ifdef WIN32
   #include <windows.h>
 #endif
 #ifdef _MSVC_
+  #include <tchar.h>
   #include <wincon.h>
   #include <conio.h>
   #include <io.h>
   #include <lmcons.h>
   #include <tlhelp32.h>
-  #include <tchar.h>
   #include <dbghelp.h>
   #include <crtdbg.h>
 #endif
@@ -95,6 +113,9 @@
 #endif
 #ifdef HAVE_NETINET_IN_H
   #include <netinet/in.h>
+#endif
+#ifdef HAVE_NETINET_TCP_H
+  #include <netinet/tcp.h>
 #endif
 #ifdef HAVE_SYS_IOCTL_H
   #include <sys/ioctl.h>
@@ -219,7 +240,6 @@
   #include <unistd.h>           // Unix standard definitions
 #endif
 
-#include "hsocket.h"            // Equates for socket functions
 #include "hostopts.h"           // Must come before htypes.h
 #include "htypes.h"             // Hercules-wide data types
 

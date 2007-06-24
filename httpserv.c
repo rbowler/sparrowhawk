@@ -1,5 +1,7 @@
-/* HTTPSERV.C   (c)Copyright Jan Jaeger, 2002-2006                   */
+/* HTTPSERV.C   (c)Copyright Jan Jaeger, 2002-2007                   */
 /*              HTTP Server                                          */
+
+// $Id: httpserv.c,v 1.74 2007/06/23 00:04:12 ivan Exp $
 
 /* This file contains all code required for the HTTP server,         */
 /* when the http_server thread is started it will listen on          */
@@ -26,6 +28,17 @@
 /*                                                                   */
 /*                                                                   */
 /*                                           Jan Jaeger - 28/03/2002 */
+
+// $Log: httpserv.c,v $
+// Revision 1.74  2007/06/23 00:04:12  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.73  2006/12/31 23:49:00  fish
+// Use "access()" to validate http_server root directory and not "chdir()"!!
+//
+// Revision 1.72  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -96,7 +109,7 @@ DLL_EXPORT void html_header(WEBBLK *webblk)
     if (webblk->request_type != REQTYPE_POST)
         hprintf(webblk->sock,"Expires: 0\n");
 
-    hprintf(webblk->sock,"Content-type: text/html;\n\n");
+    hprintf(webblk->sock,"Content-type: text/html\n\n");
 
     if (!html_include(webblk,HTML_HEADER))
         hprintf(webblk->sock,"<HTML>\n<HEAD>\n<TITLE>Hercules</TITLE>\n</HEAD>\n<BODY>\n\n");
@@ -113,9 +126,54 @@ DLL_EXPORT void html_footer(WEBBLK *webblk)
 static void http_exit(WEBBLK *webblk)
 {
 CGIVAR *cgivar;
+int rc;
     if(webblk)
     {
-        close_socket(webblk->sock);
+        /* MS SDK docs state:
+
+            "To assure that all data is sent and received on a connected
+             socket before it is closed, an application should use shutdown
+             to close connection before calling closesocket. For example,
+             to initiate a graceful disconnect:
+
+                1, Call WSAAsyncSelect to register for FD_CLOSE notification.
+                2. Call shutdown with how=SD_SEND.
+                3. When FD_CLOSE received, call recv until zero returned,
+                   or SOCKET_ERROR.
+                4. Call closesocket.
+
+            Note: The shutdown function does not block regardless of the
+            SO_LINGER setting on the socket."
+        */
+
+        // Notify other end of connection to not expect any more data from us.
+        // They should detect this via their own 'recv' returning zero bytes
+        // (thus letting them know they've thus received all the data from us
+        // they're ever going to receive). They should then do their own
+        // 'shutdown(s,SHUT_WR)' at their end letting US know we're also not
+        // going to be receiving any more data from THEM. This is called a
+        // "graceful close" of the connection...
+
+        shutdown( webblk->sock, SHUT_WR );
+
+        // Now wait for them to shudown THEIR end of the connection (i.e. wait
+        // for them to do their own 'shutdown(s,SHUT_WR)') by "hanging" on a
+        // 'recv' call until we either eventually detect they've shutdown their
+        // end of the connection (0 bytes received) or else an error occurs...
+
+        do
+        {
+            BYTE c;
+            rc = read_socket( webblk->sock, &c, 1 );
+        }
+        while ( rc > 0 );
+
+        // NOW we can SAFELY close the socket since we now KNOW for CERTAIN
+        // that they've received ALL of the data we previously sent to them...
+        // (otherwise they wouldn't have close their connection on us!)
+
+        close_socket( webblk->sock );
+
         if(webblk->user) free(webblk->user);
         if(webblk->request) free(webblk->request);
         cgivar = webblk->cgivar;
@@ -614,7 +672,6 @@ TID                     httptid;        /* Negotiation thread id     */
        ending with a '/' and save in sysblk.httproot. */
     {
         char absolute_httproot_path[HTTP_PATH_LENGTH];
-        char save_working_directory[HTTP_PATH_LENGTH];
         int  rc;
 #if defined(_MSVC_)
         /* Expand any embedded %var% environ vars */
@@ -634,10 +691,10 @@ TID                     httptid;        /* Negotiation thread id     */
             return NULL;
         }
         /* Verify that the absolute path is valid */
-        VERIFY(getcwd(save_working_directory,sizeof(save_working_directory)));
-        rc = chdir(absolute_httproot_path);     // (verify path)
-        VERIFY(!chdir(save_working_directory)); // (restore cwd)
-        if (rc != 0)
+        // mode: 0 = exist only, 2 = write, 4 = read, 6 = read/write
+        // rc: 0 = success, -1 = error (errno = cause)
+        // ENOENT = File name or path not found.
+        if (access( absolute_httproot_path, 4 ) != 0)
         {
             logmsg( _("HHCCF066E Invalid HTTPROOT: \"%s\": %s\n"),
                    absolute_httproot_path, strerror(errno));

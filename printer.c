@@ -1,10 +1,41 @@
-/* PRINTER.C    (c) Copyright Roger Bowler, 1999-2006                */
+/* PRINTER.C    (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 Line Printer Device Handler                  */
+
+// $Id: printer.c,v 1.45 2007/06/23 00:04:15 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
 /* System/370 line printer devices.                                  */
 /*-------------------------------------------------------------------*/
+
+// $Log: printer.c,v $
+// Revision 1.45  2007/06/23 00:04:15  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.44  2007/03/22 11:56:19  rbowler
+// Remove double hyphen option from print-to-pipe feature
+//
+// Revision 1.43  2007/03/15 04:16:14  fish
+// fix query func to show ptp pargs too
+//
+// Revision 1.42  2007/03/15 02:56:47  fish
+// (minor fix)
+//
+// Revision 1.41  2007/03/13 15:55:29  fish
+// Backward-compatible fix of print-to-pipe to accept parameters.  :)
+//
+// Revision 1.40  2007/03/05 14:44:17  rbowler
+// Restore original print-to-pipe parameter-passing
+//
+// Revision 1.39  2007/02/26 15:35:07  fish
+// Fix print-to-pipe to accept paramters
+//
+// Revision 1.38  2007/02/26 13:38:51  rbowler
+// Messages HHCPR001E,HHCPR002E not logged to control panel
+//
+// Revision 1.37  2006/12/08 09:43:29  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -171,19 +202,8 @@ int             rc;                     /* Return code               */
         SETMODE(TERM);
 
         /* Execute the specified pipe receiver program */
-
-#if defined(OPTION_FISH_STUPID_GUI_PRTSPLR_EXPERIMENT)
-        {
-            /* The dev=, pid= and extgui= arguments are for informational
-               purposes only so the spooler knows who/what it's spooling. */
-            BYTE  cmdline[256];
-            snprintf(cmdline,256,"\"%s\" pid=%d dev=%4.4X",
-                dev->filename+1,getpid(),dev->devnum);
-            rc = system (cmdline);
-        }
-#else
         rc = system (dev->filename+1);
-#endif
+
         if (rc == 0)
         {
             /* Log end of child process */
@@ -252,14 +272,13 @@ int     i;                              /* Array subscript           */
     /* The first argument is the file name */
     if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
     {
-        fprintf (stderr,
-                _("HHCPR001E File name missing or invalid for printer %4.4X\n"),
+        logmsg (_("HHCPR001E File name missing or invalid for printer %4.4X\n"),
                  dev->devnum);
         return -1;
     }
 
     /* Save the file name in the device block */
-    strcpy (dev->filename, argv[0]);
+    strncpy (dev->filename, argv[0], sizeof(dev->filename));
 
     if(!sscanf(dev->typname,"%hx",&(dev->devtype)))
         dev->devtype = 0x1403;
@@ -282,7 +301,7 @@ int     i;                              /* Array subscript           */
             continue;
         }
 
-        fprintf (stderr, _("HHCPR002E Invalid argument for printer %4.4X: %s\n"),
+        logmsg (_("HHCPR002E Invalid argument for printer %4.4X: %s\n"),
                 dev->devnum, argv[i]);
         return -1;
     }
@@ -815,6 +834,7 @@ DEVHND printer_device_hndinfo = {
         NULL,                          /* Device Query used          */
         NULL,                          /* Device Reserve             */
         NULL,                          /* Device Release             */
+        NULL,                          /* Device Attention           */
         printer_immed_commands,        /* Immediate CCW Codes        */
         NULL,                          /* Signal Adapter Input       */
         NULL,                          /* Signal Adapter Output      */
@@ -838,7 +858,7 @@ HDL_DEPENDENCY_SECTION;
      HDL_DEPENDENCY(HERCULES);
      HDL_DEPENDENCY(DEVBLK);
 }
-END_DEPENDENCY_SECTION;
+END_DEPENDENCY_SECTION
 
 
 HDL_DEVICE_SECTION;
@@ -846,5 +866,5 @@ HDL_DEVICE_SECTION;
     HDL_DEVICE(1403, printer_device_hndinfo );
     HDL_DEVICE(3211, printer_device_hndinfo );
 }
-END_DEVICE_SECTION;
+END_DEVICE_SECTION
 #endif

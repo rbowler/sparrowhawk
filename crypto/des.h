@@ -1,3 +1,10 @@
+// $Id: des.h,v 1.5 2006/12/08 09:43:34 jj Exp $
+//
+// $Log: des.h,v $
+// Revision 1.5  2006/12/08 09:43:34  jj
+// Add CVS message log
+//
+
 #ifndef _DES_H
 #define _DES_H
 

@@ -1,18 +1,55 @@
-## Process this file with automake to produce Makefile.in
-#
+# ***************************************************************************
 # Makefile for Hercules S/370, ESA/390 and z/Architecture emulator
+# Process this file with 'automake' to produce Makefile.in
 #
+# $Id: Makefile.am,v 1.178 2007/06/02 13:46:41 rbowler Exp $
+#
+# $Log: Makefile.am,v $
+# Revision 1.178  2007/06/02 13:46:41  rbowler
+# PFPO framework
+#
+# Revision 1.177  2006/12/30 21:13:37  rbowler
+# Backout rev 1.176
+#
+# Revision 1.175  2006/12/30 16:54:07  rbowler
+# Reinstate missing changelog entries
+#
+# Revision 1.174  2006/12/30 15:37:01  jmaynard
+# Removed a coupple of stray ^Ms.
+#
+# Revision 1.173  2006/12/30 01:20:09  fish
+# Add new MSVC makefile includes to distribution
+#
+# Revision 1.172  2006/12/18 13:35:51  rbowler
+# Add hstdint.h to make dist
+#
+# Revision 1.171  2006/12/13 17:16:30  rbowler
+# Make libherc depend on libdecNumber
+#
+# Revision 1.170  2006/12/11 16:56:59  rbowler
+# Update Makefile.am to search decNumber for include files
+#
+# Revision 1.169  2006/12/09 01:05:59  ivan
+# Remove makefile-dll.msvc from Makefile.am dist list since it has been removed from the repository
+#
+# Revision 1.168  2006/12/08 09:43:16  jj
+# Add CVS message log
+#
+# DD/MM/YY Description.......................................................
+# 06/09/06 Change History added - Fish
+# 06/09/06 HAO (Hercules Automatic Operator) support - Fish
+# ***************************************************************************
 
 AUTOMAKE_OPTIONS = foreign 1.5
 ACLOCAL_AMFLAGS  = -I m4
 
 lns=@LN_S@
 
-SUBDIRS = m4 po util html man . crypto
+SUBDIRS = decNumber m4 po util html man . crypto
 
 LDADD = @LTLIBICONV@ @LTLIBINTL@ @LIBS@
 
-AM_CPPFLAGS = -I$(top_srcdir)
+AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/decNumber
 
 if BUILD_HERCIFC
   HERCIFC = hercifc
@@ -285,6 +322,7 @@ endif
                         logmsg.c     \
                         hdl.c        \
                         hostinfo.c   \
+                        hsocket.c    \
                         memrchr.c    \
                         parser.c     \
                         pttrace.c    \
@@ -317,6 +355,7 @@ endif
                        vstore.c     \
                        general1.c   \
                        general2.c   \
+                       pfpo.c       \
                        plo.c        \
                        control.c    \
                        crypto.c     \
@@ -342,11 +381,13 @@ endif
                        timer.c      \
                        esame.c      \
                        ieee.c       \
+                       dfp.c        \
                        machdep.h    \
                        httpserv.c   \
                        cgibin.c     \
                        loadparm.c   \
                        hsccmd.c     \
+                       hao.c        \
                        hscmisc.c    \
                        sr.c         \
                        $(FISHIO)    \
@@ -368,6 +409,7 @@ endif
                       libhercu.la     \
                       libherct.la     \
                       libhercd.la     \
+                      decNumber/libdecNumber.la \
                       $(LDADD)
 
 #
@@ -549,18 +591,39 @@ EXTRA_DIST = autoconf/config.rpath \
              README.COMMADPT       \
              README.CVS            \
              README.ECPSVM         \
+             README.HAO            \
              README.HDL            \
              README.ISSUES         \
              README.MINGW          \
              README.NETWORKING     \
              README.OSX            \
              README.TAPE           \
+             README.HERCLOGO       \
              CHANGES               \
              RELEASE.NOTES         \
              README.MSVC           \
              makefile.msvc         \
-             makefile-dll.msvc     \
              makefile-dllmod.msvc  \
+             msvc.makefile.includes/BZIP2_DIR.msvc    \
+             msvc.makefile.includes/BZIP2_FLAGS.msvc  \
+             msvc.makefile.includes/BZIP2_RULES.msvc  \
+             msvc.makefile.includes/CONFIG.msvc       \
+             msvc.makefile.includes/DEBUG_RETAIL.msvc \
+             msvc.makefile.includes/HERC_FLAGS.msvc   \
+             msvc.makefile.includes/MOD_RULES1.msvc   \
+             msvc.makefile.includes/MOD_RULES2.msvc   \
+             msvc.makefile.includes/MODULES.msvc      \
+             msvc.makefile.includes/OBJ_CODE.msvc     \
+             msvc.makefile.includes/OUTDIR_RULES.msvc \
+             msvc.makefile.includes/OUTPUT_DIRS.msvc  \
+             msvc.makefile.includes/PCRE_DIR.msvc     \
+             msvc.makefile.includes/PCRE_FLAGS.msvc   \
+             msvc.makefile.includes/PCRE_RULES.msvc   \
+             msvc.makefile.includes/PRIM_RULES.msvc   \
+             msvc.makefile.includes/VERSION.msvc      \
+             msvc.makefile.includes/ZLIB_DIR.msvc     \
+             msvc.makefile.includes/ZLIB_FLAGS.msvc   \
+             msvc.makefile.includes/ZLIB_RULES.msvc   \
              makefile.bat          \
              Hercules.dsp          \
              Hercules.dsw          \
@@ -571,6 +634,7 @@ EXTRA_DIST = autoconf/config.rpath \
              conspawn.c            \
              getopt.c              \
              w32stape.c            \
+             herclogo.txt          \
              hercules.ico
 
 
@@ -644,6 +708,7 @@ noinst_HEADERS = fishhang.h     \
                  hconsole.h     \
                  hextapi.h      \
                  hstdinc.h      \
+                 hstdint.h      \
                  hsocket.h      \
                  w32stape.h     \
                  w32dl.h        \
@@ -679,7 +744,7 @@ tar: dist
 install-exec-local:
 if SETUID_HERCIFC
 	chown root $(DESTDIR)$(bindir)/hercifc
-	chmod 0751 $(DESTDIR)$(bindir)/hercifc
+	chmod 0750 $(DESTDIR)$(bindir)/hercifc
 	chmod +s   $(DESTDIR)$(bindir)/hercifc
 	rm                             hercifc
 endif

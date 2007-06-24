@@ -1,6 +1,16 @@
 /* DAT.C */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+
+// $Id: dat.c,v 1.11 2007/06/23 00:04:08 ivan Exp $
+//
+// $Log: dat.c,v $
+// Revision 1.11  2007/06/23 00:04:08  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.10  2006/12/08 09:43:20  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 #include "hercules.h"

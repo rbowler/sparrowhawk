@@ -2,8 +2,8 @@
 // Hercules Interface Configuration Program
 // ====================================================================
 //
-// Copyright    (C) Copyright Roger Bowler, 2000-2006
-//              (C) Copyright James A. Pierson, 2002-2006
+// Copyright    (C) Copyright Roger Bowler, 2000-2007
+//              (C) Copyright James A. Pierson, 2002-2007
 //
 // Based on code originally written by Roger Bowler
 // Modified to communicate via unix sockets.
@@ -17,6 +17,19 @@
 // the Hercules message log by ctcadpt.c
 //
 // The exit status is zero if successful, non-zero if error.
+//
+
+// $Id: hercifc.c,v 1.28 2007/06/23 00:04:10 ivan Exp $
+//
+// $Log: hercifc.c,v $
+// Revision 1.28  2007/06/23 00:04:10  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.27  2007/03/26 23:02:14  gsmith
+// Suppress spurious error messages from hercifc
+//
+// Revision 1.26  2006/12/08 09:43:25  jj
+// Add CVS message log
 //
 
 #include "hercules.h"
@@ -36,8 +49,10 @@ int main( int argc, char **argv )
     void*       pArg         = NULL;    // -> ifreq or rtentry 
     CTLREQ      ctlreq;                 // Request Buffer
     int         sockfd;                 // Socket descriptor
+    int         fd;                     // FD for ioctl
     int         rc;                     // Return code
     pid_t       ppid;                   // Parent's PID
+    int         answer;                 // 1 = write answer to stdout
     char        szMsgBuffer[255];
 
     UNREFERENCED( argc );
@@ -52,7 +67,7 @@ int main( int argc, char **argv )
                  pszProgName );
         exit( 1 );
     }
-        
+
     // Obtain a socket for ioctl operations
     sockfd = socket( AF_INET, SOCK_DGRAM, 0 );
 
@@ -72,7 +87,7 @@ int main( int argc, char **argv )
         rc = read( STDIN_FILENO, 
                    &ctlreq, 
                    CTLREQ_SIZE );
-        
+
         if( rc == -1 )
         {
             fprintf( stderr,
@@ -90,8 +105,19 @@ int main( int argc, char **argv )
             exit( 4 );
         }
 
+        fd = sockfd;
+        answer = 0;
+
         switch( ctlreq.iCtlOp )
         {
+        case TUNSETIFF:
+            pOp  = "TUNSETIFF";
+            pArg = &ctlreq.iru.ifreq;
+            pIF  = "?";
+            fd = ctlreq.iProcID;
+            answer = 1;
+            break;
+
         case SIOCSIFADDR:
             pOp  = "SIOCSIFADDR";
             pArg = &ctlreq.iru.ifreq;
@@ -109,6 +135,15 @@ int main( int argc, char **argv )
             pArg = &ctlreq.iru.ifreq;
             pIF  = ctlreq.iru.ifreq.ifr_name;
             break;
+
+#if 0 /* (hercifc can't "get" information, only "set" it) */
+        case SIOCGIFFLAGS:
+            pOp  = "SIOCGIFFLAGS";
+            pArg = &ctlreq.iru.ifreq;
+            pIF  = ctlreq.iru.ifreq.ifr_name;
+            answer = 1;
+            break;
+#endif /* (caller should do 'ioctl' directly themselves instead) */
 
         case SIOCSIFMTU:
             pOp  = "SIOCSIFMTU";
@@ -149,11 +184,19 @@ int main( int argc, char **argv )
             pIF  = ctlreq.szIFName;
             ctlreq.iru.rtentry.rt_dev = ctlreq.szIFName;
             break;
+
         case SIOCDELRT:
             pOp  = "SIOCDELRT";
             pArg = &ctlreq.iru.rtentry;
             pIF  = ctlreq.szIFName;
             ctlreq.iru.rtentry.rt_dev = ctlreq.szIFName;
+            break;
+#endif
+#ifdef OPTION_TUNTAP_CLRIPADDR
+        case SIOCDIFADDR:
+            pOp  = "SIOCDIFADDR";
+            pArg = &ctlreq.iru.ifreq;
+            pIF  = ctlreq.iru.ifreq.ifr_name;
             break;
 #endif
         case CTLREQ_OP_DONE:
@@ -166,12 +209,10 @@ int main( int argc, char **argv )
             snprintf( szMsgBuffer,sizeof(szMsgBuffer),
                      _("HHCIF004W %s: Unknown request: %8.8lX.\n"),
                      pszProgName, ctlreq.iCtlOp );
-            
             write( STDERR_FILENO, szMsgBuffer, strlen( szMsgBuffer ) );
-
             continue;
         }
-            
+
 #if defined(DEBUG) || defined(_DEBUG)
         snprintf( szMsgBuffer,sizeof(szMsgBuffer),
                  _("HHCIF006I %s: Doing %s on %s\n"),
@@ -179,16 +220,31 @@ int main( int argc, char **argv )
 
         write( STDERR_FILENO, szMsgBuffer, strlen( szMsgBuffer ) );
 #endif /*defined(DEBUG) || defined(_DEBUG)*/
-    
-        rc = ioctl( sockfd, ctlreq.iCtlOp, pArg );
 
+        rc = ioctl( fd, ctlreq.iCtlOp, pArg );
         if( rc < 0 )
         {
-            snprintf( szMsgBuffer,sizeof(szMsgBuffer),
-                     _("HHCIF005E %s: ioctl error doing %s on %s: %s\n"),
-                     pszProgName, pOp, pIF, strerror( errno ) );
-            
-            write( STDERR_FILENO, szMsgBuffer, strlen( szMsgBuffer ) );
+            if (1
+        #if defined(SIOCSIFHWADDR) && defined(ENOTSUP)
+                 /* Suppress spurious error message */
+             && !(ctlreq.iCtlOp == SIOCSIFHWADDR && errno == ENOTSUP)
+        #endif
+        #if defined(SIOCDIFADDR) && defined(EINVAL)
+                 /* Suppress spurious error message */
+             && !(ctlreq.iCtlOp == SIOCDIFADDR   && errno == EINVAL)
+        #endif
+               )
+            {
+                snprintf( szMsgBuffer,sizeof(szMsgBuffer),
+                     _("HHCIF005E %s: ioctl error doing %s on %s: %d %s\n"),
+                     pszProgName, pOp, pIF, errno, strerror( errno ) );
+
+                write( STDERR_FILENO, szMsgBuffer, strlen( szMsgBuffer ) );
+            }
+        }
+        else if (answer)
+        {
+            write( STDOUT_FILENO, &ctlreq, CTLREQ_SIZE );
         }
     }
 
@@ -197,3 +253,4 @@ int main( int argc, char **argv )
 }
 
 #endif // defined(BUILD_HERCIFC)
+

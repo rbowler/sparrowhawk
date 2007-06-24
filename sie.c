@@ -1,4 +1,4 @@
-/* SIE.C        (c) Copyright Jan Jaeger, 1999-2006                  */
+/* SIE.C        (c) Copyright Jan Jaeger, 1999-2007                  */
 /*              Interpretive Execution                               */
 
 /*      This module contains the SIE instruction as                  */
@@ -8,7 +8,38 @@
 /*      Enterprise Systems Architecture / Extended Configuration     */
 /*      Principles of Operation, SC24-5594-02 and SC24-5965-00       */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+
+// $Id: sie.c,v 1.105 2007/06/23 00:04:15 ivan Exp $
+//
+// $Log: sie.c,v $
+// Revision 1.105  2007/06/23 00:04:15  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.104  2007/06/06 22:14:58  gsmith
+// Fix SYNCHRONIZE_CPUS when numcpu > number of host processors - Greg
+//
+// Revision 1.103  2007/02/09 23:59:58  ivan
+// Fix some PER issue (tentative)
+//
+// Revision 1.102  2007/01/13 07:25:51  bernard
+// backout ccmask
+//
+// Revision 1.101  2007/01/12 15:25:00  bernard
+// ccmask phase 1
+//
+// Revision 1.100  2007/01/04 23:12:04  gsmith
+// remove thunk calls for program_interrupt
+//
+// Revision 1.99  2006/12/21 22:39:39  gsmith
+// 21 Dec 2006 Range for s+, t+ - Greg Smith
+//
+// Revision 1.98  2006/12/20 04:26:20  gsmith
+// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
+//
+// Revision 1.97  2006/12/08 09:43:30  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -259,7 +290,7 @@ U64     dreg;
 
 #if defined(SIE_DEBUG)
     logmsg(_("SIE: state descriptor " F_RADR "\n"),effective_addr2);
-    ARCH_DEP(display_inst) (regs, regs->ip);
+    ARCH_DEP(display_inst) (regs, regs->instinvalid ? NULL : regs->ip);
 #endif /*defined(SIE_DEBUG)*/
 
     if(effective_addr2 > regs->mainlim - (sizeof(SIEBK)-1))
@@ -272,9 +303,9 @@ U64     dreg;
      */
     if (regs->sie_active)
     {
-        obtain_lock(&sysblk.intlock);
+        OBTAIN_INTLOCK(regs);
         regs->sie_active = 0;
-        release_lock(&sysblk.intlock);
+        RELEASE_INTLOCK(regs);
     }
 
      /* Initialize guestregs if first time */
@@ -300,7 +331,8 @@ U64     dreg;
     if (STATEBK->mx & SIE_MX_ESAME)
     {
         GUESTREGS->arch_mode = ARCH_900;
-        GUESTREGS->sie_guestpi = (SIEFN)&z900_program_interrupt;
+        GUESTREGS->program_interrupt = &z900_program_interrupt;
+        GUESTREGS->trace_br = (func)&z900_trace_br;
         icode = z900_load_psw(GUESTREGS, STATEBK->psw);
     }
 #else /*!defined(FEATURE_ESAME)*/
@@ -308,7 +340,7 @@ U64     dreg;
     {
 #if defined(_370)
         GUESTREGS->arch_mode = ARCH_370;
-        GUESTREGS->sie_guestpi = (SIEFN)&s370_program_interrupt;
+        GUESTREGS->program_interrupt = &s370_program_interrupt;
         icode = s370_load_psw(GUESTREGS, STATEBK->psw);
 #else
         /* Validity intercept when 370 mode not installed */
@@ -325,7 +357,8 @@ U64     dreg;
 #endif /*!defined(FEATURE_ESAME)*/
     {
         GUESTREGS->arch_mode = ARCH_390;
-        GUESTREGS->sie_guestpi = (SIEFN)&s390_program_interrupt;
+        GUESTREGS->program_interrupt = &s390_program_interrupt;
+        GUESTREGS->trace_br = (func)&s390_trace_br;
         icode = s390_load_psw(GUESTREGS, STATEBK->psw);
     }
 #if !defined(FEATURE_ESAME)
@@ -338,9 +371,6 @@ U64     dreg;
         return;
     }
 #endif /*!defined(FEATURE_ESAME)*/
-
-    /* Set host program interrupt routine */
-    GUESTREGS->sie_hostpi = (SIEFN)&ARCH_DEP(program_interrupt);
 
     /* Prefered guest indication */
     GUESTREGS->sie_pref = (STATEBK->m & SIE_M_VR) ? 1 : 0;
@@ -570,16 +600,14 @@ U64     dreg;
     /* Initialize interrupt mask and state */
     SET_IC_MASK(GUESTREGS);
     SET_IC_INITIAL_STATE(GUESTREGS);
+    SET_IC_PER(GUESTREGS);
 
     /* Initialize accelerated address lookup values */
     SET_AEA_MODE(GUESTREGS);
     SET_AEA_COMMON(GUESTREGS);
-
-    /* Force instfetch() to be called for the first instruction */
-    GUESTREGS->instvalid = 0;
-    GUESTREGS->ip = GUESTREGS->inst;
-    GUESTREGS->inst[0] = 0;
     INVALIDATE_AIA(GUESTREGS);
+
+    GUESTREGS->tracing = regs->tracing;
 
     /*
      * Do setjmp(progjmp) because translate_addr() may result in
@@ -592,9 +620,9 @@ U64     dreg;
          * access guestregs when holding intlock.
          * This is the *only* place sie_active is set to one.
          */
-        obtain_lock(&sysblk.intlock);
+        OBTAIN_INTLOCK(regs);
         regs->sie_active = 1;
-        release_lock(&sysblk.intlock);
+        RELEASE_INTLOCK(regs);
 
         /* Get PSA pointer and ensure PSA is paged in */
         if(GUESTREGS->sie_pref)
@@ -610,9 +638,9 @@ U64     dreg;
                 SIE_SET_VI(SIE_VI_WHO_CPU, SIE_VI_WHEN_SIENT,
                            SIE_VI_WHY_PFACC, GUESTREGS);
                 STATEBK->c = SIE_C_VALIDITY;
-                obtain_lock(&sysblk.intlock);
+                OBTAIN_INTLOCK(regs);
                 regs->sie_active = 0;
-                release_lock(&sysblk.intlock);
+                RELEASE_INTLOCK(regs);
                 return;
             }
 
@@ -624,16 +652,16 @@ U64     dreg;
                 SIE_SET_VI(SIE_VI_WHO_CPU, SIE_VI_WHEN_SIENT,
                            SIE_VI_WHY_PFACC, GUESTREGS);
                 STATEBK->c = SIE_C_VALIDITY;
-                obtain_lock(&sysblk.intlock);
+                OBTAIN_INTLOCK(regs);
                 regs->sie_active = 0;
-                release_lock(&sysblk.intlock);
+                RELEASE_INTLOCK(regs);
                 return;
             }
             GUESTREGS->psa = (PSA_3XX*)(GUESTREGS->mainstor + GUESTREGS->sie_px);
         }
 
         /* Intialize guest timers */
-        obtain_lock(&sysblk.intlock);
+        OBTAIN_INTLOCK(regs);
 
         /* CPU timer */
         if(CPU_TIMER(GUESTREGS) < 0)
@@ -677,11 +705,11 @@ U64     dreg;
 
 #endif /*!defined(FEATURE_ESAME)*/
 
-        release_lock(&sysblk.intlock);
+        RELEASE_INTLOCK(regs);
 
         /* Early exceptions associated with the guest load_psw() */
         if(icode)
-            (GUESTREGS->sie_guestpi) (GUESTREGS, icode);
+            GUESTREGS->program_interrupt (GUESTREGS, icode);
 
         /* Run SIE in guests architecture mode */
         icode = run_sie[GUESTREGS->arch_mode] (regs);
@@ -705,17 +733,17 @@ int     n;
 
 #if defined(SIE_DEBUG)
     logmsg(_("SIE: interception code %d\n"),code);
-    ARCH_DEP(display_inst) (GUESTREGS, GUESTREGS->instvalid ?
-                                        GUESTREGS->ip : NULL);
+    ARCH_DEP(display_inst) (GUESTREGS,
+                            GUESTREGS->instinvalid ? NULL : GUESTREGS->ip);
 #endif /*defined(SIE_DEBUG)*/
 
     SIE_PERFMON(SIE_PERF_EXIT);
     SIE_PERFMON(SIE_PERF_PGMINT);
 
     /* Indicate we have left SIE mode */
-    obtain_lock (&sysblk.intlock);
+    OBTAIN_INTLOCK(regs);
     regs->sie_active = 0;
-    release_lock (&sysblk.intlock);
+    RELEASE_INTLOCK(regs);
 
     /* zeroize interception status */
     STATEBK->f = 0;
@@ -725,9 +753,8 @@ int     n;
         case SIE_HOST_INTERRUPT:
            /* If a host interrupt is pending
               then backup the psw and exit */
-            regs->psw.IA -= REAL_ILC(regs);
-            regs->psw.IA &= ADDRESS_MAXWRAP(regs);
-            VALIDATE_AIA(regs);
+            SET_PSW_IA(regs);
+            UPD_PSW_IA (regs, regs->psw.IA -REAL_ILC(regs));
             break;
         case SIE_HOST_PGMINT:
             break;
@@ -829,6 +856,7 @@ int     n;
 #if defined(FEATURE_BINARY_FLOATING_POINT)
     regs->fpc =  GUESTREGS->fpc;
 #endif /*defined(FEATURE_BINARY_FLOATING_POINT)*/
+    INVALIDATE_AIA(regs);
     SET_AEA_MODE(regs);
 
     /* Zeroize the interruption parameters */
@@ -844,17 +872,17 @@ int     n;
 
 #if defined(_FEATURE_PER)
         /* Handle PER or concurrent PER event */
-        if( OPEN_IC_PERINT(GUESTREGS)
+        if( OPEN_IC_PER(GUESTREGS)
           && ECMODE(&GUESTREGS->psw)
           && (GUESTREGS->psw.sysmask & PSW_PERMODE) )
         {
         PSA *psa;
 #if defined(_FEATURE_PER2)
-            GUESTREGS->perc |= OPEN_IC_PERINT(GUESTREGS) >> ((32 - IC_CR9_SHIFT) - 16);
+            GUESTREGS->perc |= OPEN_IC_PER(GUESTREGS) >> ((32 - IC_CR9_SHIFT) - 16);
             /* Positions 14 and 15 contain zeros if a storage alteration
                event was not indicated */
-            if( !(OPEN_IC_PERINT(GUESTREGS) & IC_PER_SA)
-              || (OPEN_IC_PERINT(GUESTREGS) & IC_PER_STURA) )
+            if( !(OPEN_IC_PER_SA(GUESTREGS))
+              || (OPEN_IC_PER_STURA(GUESTREGS)) )
                 GUESTREGS->perc &= 0xFFFC;
 
 #endif /*defined(_FEATURE_PER2)*/
@@ -871,10 +899,15 @@ int     n;
         OFF_IC_PER(GUESTREGS);
 #endif /*defined(_FEATURE_PER)*/
 
+        /* Backup to the previous instruction */
+        GUESTREGS->ip -= REAL_ILC(GUESTREGS);
+        if (GUESTREGS->ip < GUESTREGS->aip)
+            GUESTREGS->ip = GUESTREGS->inst;
+
         /* Update interception parameters in the state descriptor */
         if(GUESTREGS->ip[0] != 0x44)
         {
-            if(GUESTREGS->instvalid)
+            if(!GUESTREGS->instinvalid)
                 memcpy(STATEBK->ipa, GUESTREGS->ip, ILC(GUESTREGS->ip[0]));
         }
         else
@@ -896,6 +929,7 @@ int ARCH_DEP(run_sie) (REGS *regs)
 {
     int   icode;    /* SIE longjmp intercept code      */
     BYTE  oldv;     /* siebk->v change check reference */
+    BYTE *ip;       /* instruction pointer             */
 
     SIE_PERFMON(SIE_PERF_RUNSIE);
 
@@ -938,24 +972,14 @@ int ARCH_DEP(run_sie) (REGS *regs)
                     SIE_PERFMON(SIE_PERF_INTCHECK);
 
                     /* Process PER program interrupts */
-                    if( OPEN_IC_PERINT(GUESTREGS) )
+                    if( OPEN_IC_PER(GUESTREGS) )
                         ARCH_DEP(program_interrupt) (GUESTREGS, PGM_PER_EVENT);
 
-                    obtain_lock(&sysblk.intlock);
-
-                    /* Turn off "possible interrupt" flag */
-                    /* Otherwise we come back here every  */
-                    /* time                               */
-                    /* ISW20041224                        */
+                    OBTAIN_INTLOCK(regs);
                     OFF_IC_INTERRUPT(GUESTREGS);
 
-                    /* Perform broadcasted purge of ALB and TLB if requested
-                       synchronize_broadcast() must be called until there are
-                       no more broadcast pending because synchronize_broadcast()
-                       releases and reacquires the mainlock. */
-
-                    while ((IS_IC_BROADCAST(regs)))
-                        ARCH_DEP(synchronize_broadcast)(regs, 0, 0);
+                    /* Set psw.IA and invalidate the aia */
+                    INVALIDATE_AIA(GUESTREGS);
 
                     if( OPEN_IC_EXTPENDING(GUESTREGS) )
                         ARCH_DEP(perform_external_interrupt) (GUESTREGS);
@@ -975,7 +999,7 @@ int ARCH_DEP(run_sie) (REGS *regs)
                         /* Test for disabled wait PSW and issue message */
                         if( IS_IC_DISABLED_WAIT_PSW(GUESTREGS) )
                         {
-                            release_lock (&sysblk.intlock);
+                            RELEASE_INTLOCK(regs);
                             longjmp(GUESTREGS->progjmp, SIE_INTERCEPT_WAIT);
                         }
 
@@ -986,11 +1010,10 @@ int ARCH_DEP(run_sie) (REGS *regs)
                          || SIE_I_HOST(regs)
                                           )
                         {
-                            release_lock (&sysblk.intlock);
+                            RELEASE_INTLOCK(regs);
                             break;
                         }
 
-                        INVALIDATE_AIA(GUESTREGS);
                         SET_AEA_MODE(GUESTREGS);
 
                         {
@@ -1000,21 +1023,31 @@ int ARCH_DEP(run_sie) (REGS *regs)
                             gettimeofday(&now, NULL);
                             waittime.tv_sec = now.tv_sec;
                             waittime.tv_nsec = ((now.tv_usec + 3333) * 1000);
-
-                            sysblk.waiting_mask |= BIT(regs->cpuad);
+#ifdef OPTION_MIPS_COUNTING
+                            regs->waittod = hw_clock();
+#endif
+                            sysblk.waiting_mask |= regs->cpubit;
+                            sysblk.intowner = LOCK_OWNER_NONE;
                             timed_wait_condition
                                  (&regs->intcond, &sysblk.intlock, &waittime);
-                            sysblk.waiting_mask &= ~BIT(regs->cpuad);
+                            while (sysblk.syncing)
+                                 wait_condition (&sysblk.sync_bc_cond, &sysblk.intlock);
+                            sysblk.intowner = regs->cpuad;
+                            sysblk.waiting_mask ^= regs->cpubit;
+#ifdef OPTION_MIPS_COUNTING
+                            regs->waittime += hw_clock() - regs->waittod;
+                            regs->waittod = 0;
+#endif
                         }
 
-                        release_lock (&sysblk.intlock);
+                        RELEASE_INTLOCK(regs);
 
                         break;
 
                     } /* end if(wait) */
 #endif
 
-                    release_lock(&sysblk.intlock);
+                    RELEASE_INTLOCK(regs);
                 }
 
                 if(
@@ -1022,35 +1055,37 @@ int ARCH_DEP(run_sie) (REGS *regs)
                                           )
                     break;
 
-                GUESTREGS->ip = INSTRUCTION_FETCH(GUESTREGS->inst, GUESTREGS->psw.IA, GUESTREGS, 0);
+                ip = INSTRUCTION_FETCH(GUESTREGS, 0);
 
 #if defined(SIE_DEBUG)
                 /* Display the instruction */
-                ARCH_DEP(display_inst) (GUESTREGS, GUESTREGS->ip);
+                ARCH_DEP(display_inst) (GUESTREGS,
+                         GUESTREGS->instinvalid ? NULL : ip);
 #endif /*defined(SIE_DEBUG)*/
 
                 SIE_PERFMON(SIE_PERF_EXEC);
-                regs->instcount++;
-                EXECUTE_INSTRUCTION(GUESTREGS->ip, GUESTREGS);
+                GUESTREGS->instcount = 1;
+                EXECUTE_INSTRUCTION(ip, GUESTREGS);
 
-#ifdef FEATURE_PER
-                if (!PER_MODE(GUESTREGS))
-#endif
                 do
                 {
-                    REGS *gregs = GUESTREGS;
                     SIE_PERFMON(SIE_PERF_EXEC_U);
-                    UNROLLED_EXECUTE(gregs);
-                    UNROLLED_EXECUTE(gregs);
-                    UNROLLED_EXECUTE(gregs);
-                    regs->instcount += 7;
-                    UNROLLED_EXECUTE(gregs);
-                    UNROLLED_EXECUTE(gregs);
-                    UNROLLED_EXECUTE(gregs);
-                    UNROLLED_EXECUTE(gregs);
+
+                    UNROLLED_EXECUTE(GUESTREGS);
+                    UNROLLED_EXECUTE(GUESTREGS);
+                    UNROLLED_EXECUTE(GUESTREGS);
+
+                    GUESTREGS->instcount += 8;
+
+                    UNROLLED_EXECUTE(GUESTREGS);
+                    UNROLLED_EXECUTE(GUESTREGS);
+                    UNROLLED_EXECUTE(GUESTREGS);
+                    UNROLLED_EXECUTE(GUESTREGS);
+                    UNROLLED_EXECUTE(GUESTREGS);
+
                 } while( likely(!SIE_I_HOST(regs)
                                 && GUESTREGS->siebk->v==oldv
-                                && !SIE_IC_INTERRUPT_CPU(GUESTREGS)));
+                                && !SIE_INTERRUPT_PENDING(GUESTREGS)));
                 /******************************************/
                 /* ABOVE : Keep executing instructions    */
                 /*         in a tight loop until...       */
@@ -1058,11 +1093,14 @@ int ARCH_DEP(run_sie) (REGS *regs)
                 /*  - An external source changes siebk->v */
                 /*  - A guest interrupt is made pending   */
                 /******************************************/
+
+                regs->instcount += GUESTREGS->instcount;
+
             } while( unlikely(!SIE_I_HOST(regs)
                             && !SIE_I_WAIT(GUESTREGS)
                             && !SIE_I_EXT(GUESTREGS)
                             && !SIE_I_IO(GUESTREGS)
-                            && !SIE_IC_INTERRUPT_CPU(GUESTREGS)));
+                            && !SIE_INTERRUPT_PENDING(GUESTREGS)));
             /******************************************/
             /* ABOVE : Remain in SIE until...         */
             /*  - A Host Interrupt is made pending    */
@@ -1074,7 +1112,7 @@ int ARCH_DEP(run_sie) (REGS *regs)
         if(icode == 0 || icode == SIE_NO_INTERCEPT)
         {
             /* Check PER first, higher priority */
-            if( OPEN_IC_PERINT(GUESTREGS) )
+            if( OPEN_IC_PER(GUESTREGS) )
                 ARCH_DEP(program_interrupt) (GUESTREGS, PGM_PER_EVENT);
 
             if( SIE_I_EXT(GUESTREGS) )
@@ -1230,7 +1268,7 @@ int     zone;                           /* Zone number               */
     if( IS_IC_IOPENDING )
     {
         /* Obtain the interrupt lock */
-        obtain_lock (&sysblk.intlock);
+        OBTAIN_INTLOCK(regs);
 
         /* Test and clear pending interrupt, set condition code */
         if( ARCH_DEP(present_zone_io_interrupt) (&ioid, &ioparm,
@@ -1244,7 +1282,7 @@ int     zone;                           /* Zone number               */
             STORE_FW(tpziid[2],iointid);
 
             /* Release the interrupt lock */
-            release_lock (&sysblk.intlock);
+            RELEASE_INTLOCK(regs);
 
             ARCH_DEP(vstorec(&tpziid, sizeof(tpziid)-1,regs->GR(2), 2, regs));
 
@@ -1253,7 +1291,7 @@ int     zone;                           /* Zone number               */
         else
         {
             /* Release the interrupt lock */
-            release_lock (&sysblk.intlock);
+            RELEASE_INTLOCK(regs);
             regs->psw.cc = 0;
         }
 
@@ -1271,12 +1309,11 @@ void ARCH_DEP(diagnose_002) (REGS *regs, int r1, int r3)
 DEVBLK *dev;
 U32    newgr1;
 
-    /* Program check if reg 1 bits 0-15 not X'0001' */
-    if ( regs->GR_LHH(1) != 0x0001 )
-        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
+    /* Program check if the ssid including lcss is invalid */
+    SSID_CHECK(regs);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_LHL(1));
+    dev = find_device_by_subchan (regs->GR_L(1));
 
     /* Condition code 3 if subchannel does not exist,
        is not valid, or is not enabled */

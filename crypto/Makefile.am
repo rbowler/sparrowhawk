@@ -3,6 +3,13 @@
 # Makefile for Hercules S/370, ESA/390 and z/Architecture emulator
 #
 
+# $Id: Makefile.am,v 1.13 2006/12/08 09:43:34 jj Exp $
+#
+# $Log: Makefile.am,v $
+# Revision 1.13  2006/12/08 09:43:34  jj
+# Add CVS message log
+#
+
 lns=@LN_S@
 
 LDADD = @LTLIBINTL@ @LIBS@ ../libhercs.la ../libherc.la ../libhercu.la

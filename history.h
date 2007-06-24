@@ -1,3 +1,10 @@
+// $Id: history.h,v 1.4 2006/12/08 09:43:26 jj Exp $
+//
+// $Log: history.h,v $
+// Revision 1.4  2006/12/08 09:43:26  jj
+// Add CVS message log
+//
+
 #ifndef HISTORY_H
 #define HISTORY_H
 

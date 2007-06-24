@@ -1,8 +1,10 @@
-/* VSTORE.H     (c) Copyright Roger Bowler, 1999-2006                */
+/* VSTORE.H     (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 Virtual Storage Functions                    */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+
+// $Id: vstore.h,v 1.78 2007/06/23 00:04:19 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains various functions which store, fetch, and    */
@@ -30,6 +32,47 @@
 /* wmove_chars                                                       */
 /* wvalidate_operand                                                 */
 /*-------------------------------------------------------------------*/
+
+// $Log: vstore.h,v $
+// Revision 1.78  2007/06/23 00:04:19  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.77  2007/03/13 00:11:14  gsmith
+// Updates to concpy for 64-bit hosts
+//
+// Revision 1.76  2007/03/09 00:54:31  gsmith
+// concpy rework
+//
+// Revision 1.75  2007/03/08 01:27:02  gsmith
+// Remove inline attr from vfetchx/vstorex _full functions
+//
+// Revision 1.74  2007/02/18 16:27:36  gsmith
+// Fix instfetch when instruction crosses 0x800
+//
+// Revision 1.73  2007/01/11 02:44:25  gsmith
+// Temp patch to help messed up gcc v4 optimizations
+//
+// Revision 1.72  2007/01/09 23:19:35  gsmith
+// Tweaks to sloppy fetch
+//
+// Revision 1.71  2007/01/04 23:12:04  gsmith
+// remove thunk calls for program_interrupt
+//
+// Revision 1.70  2007/01/04 01:08:41  gsmith
+// 03 Jan 2007 single_cpu_dw fetch/store patch for ia32
+//
+// Revision 1.69  2007/01/04 00:29:17  gsmith
+// 03 Jan 2007 vstorex patch to vstore2, vstore4, vstore8
+//
+// Revision 1.68  2007/01/03 05:53:34  gsmith
+// 03 Jan 2007 Sloppy fetch - Greg Smith
+//
+// Revision 1.67  2006/12/20 04:26:20  gsmith
+// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
+//
+// Revision 1.66  2006/12/08 09:43:31  jj
+// Add CVS message log
+//
 
 #define s370_wstorec(_src, _len, _addr, _arn, _regs) \
         s370_vstorec((_src), (_len), ((_addr) & ADDRESS_MAXWRAP((_regs))), (_arn), (_regs)) 
@@ -214,30 +257,19 @@ BYTE   *main1;                          /* Mainstor address          */
 /*      causes an addressing, translation, or protection             */
 /*      exception, and in this case the function does not return.    */
 /*-------------------------------------------------------------------*/
-_VSTORE_C_STATIC void ARCH_DEP(vstore2_full) (U16 value, VADR addr,
+_VSTORE_FULL_C_STATIC void ARCH_DEP(vstore2_full)(U16 value, VADR addr,
                                               int arn, REGS *regs)
 {
 BYTE   *main1, *main2;                  /* Mainstor addresses        */
 BYTE   *sk;                             /* Storage key addresses     */
 
-    /* Check if store crosses a boundary */
-    if ((addr & 0x7FF) != 0x7FF)
-    {
-        main1 = MADDR(addr, arn, regs, ACCTYPE_WRITE, regs->psw.pkey);
-        STORE_HW (main1, value);
-        ITIMER_UPDATE(addr,2-1,regs);
-    }
-    else
-    {
-        main1 = MADDR(addr, arn, regs, ACCTYPE_WRITE_SKP,
-                      regs->psw.pkey);
-        sk = regs->dat.storkey;
-        main2 = MADDR((addr + 1) & ADDRESS_MAXWRAP(regs), arn, regs,
-                      ACCTYPE_WRITE, regs->psw.pkey);
-        *sk |= (STORKEY_REF | STORKEY_CHANGE);
-        *main1 = value >> 8;
-        *main2 = value & 0xFF;
-    }
+    main1 = MADDR(addr, arn, regs, ACCTYPE_WRITE_SKP, regs->psw.pkey);
+    sk = regs->dat.storkey;
+    main2 = MADDR((addr + 1) & ADDRESS_MAXWRAP(regs), arn, regs,
+                  ACCTYPE_WRITE, regs->psw.pkey);
+    *sk |= (STORKEY_REF | STORKEY_CHANGE);
+    *main1 = value >> 8;
+    *main2 = value & 0xFF;
 
 } /* end function ARCH_DEP(vstore2_full) */
 
@@ -246,7 +278,7 @@ _VSTORE_C_STATIC void ARCH_DEP(vstore2) (U16 value, VADR addr, int arn,
                                                             REGS *regs)
 {
     /* Most common case : Aligned & not crossing page boundary */
-    if (likely(!(addr & 1) || (addr & 0x7FF) != 0x7FF))
+    if (likely(!((VADR_L)addr & 1) || ((VADR_L)addr & 0x7FF) != 0x7FF))
     {
         BYTE *mn;
         mn = MADDR (addr, arn, regs, ACCTYPE_WRITE, regs->psw.pkey);
@@ -270,7 +302,7 @@ _VSTORE_C_STATIC void ARCH_DEP(vstore2) (U16 value, VADR addr, int arn,
 /*      causes an addressing, translation, or protection             */
 /*      exception, and in this case the function does not return.    */
 /*-------------------------------------------------------------------*/
-_VSTORE_C_STATIC void ARCH_DEP(vstore4_full) (U32 value, VADR addr,
+_VSTORE_FULL_C_STATIC void ARCH_DEP(vstore4_full)(U32 value, VADR addr,
                                               int arn, REGS *regs)
 {
 BYTE   *main1, *main2;                  /* Mainstor addresses        */
@@ -278,35 +310,15 @@ BYTE   *sk;                             /* Storage key addresses     */
 int     len;                            /* Length to end of page     */
 BYTE    temp[4];                        /* Copied value              */ 
 
-    /* Check if store crosses a boundary */
-    if ((addr & 0x7FF) <= 0x7FC)
-    {
-        main1 = MADDR (addr, arn, regs, ACCTYPE_WRITE, regs->psw.pkey);
-        STORE_FW(main1, value);
-        ITIMER_UPDATE(addr,4-1,regs);
-    }
-    else
-    {
-        len = 0x800 - (addr & 0x7FF);
-        main1 = MADDR (addr, arn, regs, ACCTYPE_WRITE_SKP,
-                       regs->psw.pkey);
-        sk = regs->dat.storkey;
-        main2 = MADDR ((addr + len) & ADDRESS_MAXWRAP(regs), arn,
-                       regs, ACCTYPE_WRITE, regs->psw.pkey);
-        *sk |= (STORKEY_REF | STORKEY_CHANGE);
-        STORE_FW(temp, value);
-        switch (len) {
-        case 1: memcpy (main1, temp,     1);
-                memcpy (main2, temp + 1, 3);
-                break;
-        case 2: memcpy (main1, temp,     2);
-                memcpy (main2, temp + 2, 2);
-                break;
-        case 3: memcpy (main1, temp,     3);
-                memcpy (main2, temp + 3, 1);
-                break;
-        }
-    }
+    len = 0x800 - (addr & 0x7FF);
+    main1 = MADDR(addr, arn, regs, ACCTYPE_WRITE_SKP, regs->psw.pkey);
+    sk = regs->dat.storkey;
+    main2 = MADDR((addr + len) & ADDRESS_MAXWRAP(regs), arn, regs,
+                  ACCTYPE_WRITE, regs->psw.pkey);
+    *sk |= (STORKEY_REF | STORKEY_CHANGE);
+    STORE_FW(temp, value);
+    memcpy(main1, temp, len);
+    memcpy(main2, temp+len, 4-len);
 
 } /* end function ARCH_DEP(vstore4_full) */
 
@@ -315,7 +327,7 @@ _VSTORE_C_STATIC void ARCH_DEP(vstore4) (U32 value, VADR addr, int arn,
                                                             REGS *regs)
 {
     /* Most common case : Aligned & not crossing page boundary */
-    if(likely(!(addr & 0x03)) || ((addr & 0x7ff) <= 0x7fc))
+    if(likely(!((VADR_L)addr & 0x03)) || (((VADR_L)addr & 0x7ff) <= 0x7fc))
     {
         BYTE *mn;
         mn = MADDR(addr, arn, regs, ACCTYPE_WRITE, regs->psw.pkey);
@@ -339,7 +351,7 @@ _VSTORE_C_STATIC void ARCH_DEP(vstore4) (U32 value, VADR addr, int arn,
 /*      causes an addressing, translation, or protection             */
 /*      exception, and in this case the function does not return.    */
 /*-------------------------------------------------------------------*/
-_VSTORE_C_STATIC void ARCH_DEP(vstore8_full) (U64 value, VADR addr,
+_VSTORE_FULL_C_STATIC void ARCH_DEP(vstore8_full)(U64 value, VADR addr,
                                               int arn, REGS *regs)
 {
 BYTE   *main1, *main2;                  /* Mainstor addresses        */
@@ -347,57 +359,30 @@ BYTE   *sk;                             /* Storage key addresses     */
 int     len;                            /* Length to end of page     */
 BYTE    temp[8];                        /* Copied value              */ 
 
-    /* Check if store crosses a boundary */
-    if ((addr & 0x7FF) <= 0x7F8)
-    {
-        main1 = MADDR(addr, arn, regs, ACCTYPE_WRITE, regs->psw.pkey);
-        STORE_DW(main1, value);
-        ITIMER_UPDATE(addr,8-1,regs);
-    }
-    else
-    {
-        len = 0x800 - (addr & 0x7FF);
-        main1 = MADDR(addr, arn, regs, ACCTYPE_WRITE_SKP,
-                      regs->psw.pkey);
-        sk = regs->dat.storkey;
-        main2 = MADDR((addr + len) & ADDRESS_MAXWRAP(regs), arn,
-                      regs, ACCTYPE_WRITE, regs->psw.pkey);
-        *sk |= (STORKEY_REF | STORKEY_CHANGE);
-        STORE_DW(temp, value);
-        switch (len) {
-        case 1: memcpy (main1, temp,     1);
-                memcpy (main2, temp + 1, 7);
-                break;
-        case 2: memcpy (main1, temp,     2);
-                memcpy (main2, temp + 2, 6);
-                break;
-        case 3: memcpy (main1, temp,     3);
-                memcpy (main2, temp + 3, 5);
-                break;
-        case 4: memcpy (main1, temp,     4);
-                memcpy (main2, temp + 4, 4);
-                break;
-        case 5: memcpy (main1, temp,     5);
-                memcpy (main2, temp + 5, 3);
-                break;
-        case 6: memcpy (main1, temp,     6);
-                memcpy (main2, temp + 6, 2);
-                break;
-        case 7: memcpy (main1, temp,     7);
-                memcpy (main2, temp + 7, 1);
-                break;
-        }
-    }
+    len = 0x800 - (addr & 0x7FF);
+    main1 = MADDR(addr, arn, regs, ACCTYPE_WRITE_SKP, regs->psw.pkey);
+    sk = regs->dat.storkey;
+    main2 = MADDR((addr + len) & ADDRESS_MAXWRAP(regs), arn, regs,
+                  ACCTYPE_WRITE, regs->psw.pkey);
+    *sk |= (STORKEY_REF | STORKEY_CHANGE);
+    STORE_DW(temp, value);
+    memcpy(main1, temp, len);
+    memcpy(main2, temp+len, 8-len);
 
 } /* end function ARCH_DEP(vstore8) */
 _VSTORE_C_STATIC void ARCH_DEP(vstore8) (U64 value, VADR addr, int arn,
                                                             REGS *regs)
 {
     /* Most common case : Aligned & not crossing page boundary */
-    if(likely(!(addr & 0x07)) || ((addr & 0x7ff) <= 0x7f8))
+    if(likely(!((VADR_L)addr & 0x07)) || (((VADR_L)addr & 0x7ff) <= 0x7f8))
     {
-        BYTE *mn;
-        mn=MADDR(addr,arn,regs,ACCTYPE_WRITE,regs->psw.pkey);
+        U64 *mn;
+        mn = (U64*)MADDR(addr,arn,regs,ACCTYPE_WRITE,regs->psw.pkey);
+#if defined(OPTION_SINGLE_CPU_DW) && defined(ASSIST_STORE_DW)
+        if (regs->cpubit == regs->sysblk->started_mask)
+            *mn = CSWAP64(value);
+        else
+#endif
         STORE_DW(mn, value);
         ITIMER_UPDATE(addr,8-1,regs);
     }
@@ -482,28 +467,24 @@ BYTE   *mn;                           /* Main storage address      */
 /*      causes an addressing, translation, or fetch protection       */
 /*      exception, and in this case the function does not return.    */
 /*-------------------------------------------------------------------*/
-_VSTORE_C_STATIC U16 ARCH_DEP(vfetch2_full) (VADR addr, int arn,
+_VSTORE_FULL_C_STATIC U16 ARCH_DEP(vfetch2_full) (VADR addr, int arn,
                                              REGS *regs)
 {
-BYTE   *main1, *main2;                  /* Main storage addresses    */
+BYTE   *mn;                             /* Main storage addresses    */
+U16     value;
 
-    main1 = MADDR (addr, arn, regs, ACCTYPE_READ, regs->psw.pkey);
-
-    if( (addr & 0x7FF) < 0x7FF)
-    {
-        ITIMER_SYNC(addr,2-1,regs);
-        return fetch_hw (main1);
-    }
-
-    main2 = MADDR ((addr + 1) & ADDRESS_MAXWRAP(regs),
-                   arn, regs, ACCTYPE_READ, regs->psw.pkey);
-    return (*main1 << 8) | *main2;
+    mn = MADDR (addr, arn, regs, ACCTYPE_READ, regs->psw.pkey);
+    value = *mn << 8;
+    mn = MADDR ((addr + 1) & ADDRESS_MAXWRAP(regs), arn, regs,
+                 ACCTYPE_READ, regs->psw.pkey);
+    value |= *mn;
+    return value;
 
 } /* end function ARCH_DEP(vfetch2) */
 
 _VSTORE_C_STATIC U16 ARCH_DEP(vfetch2) (VADR addr, int arn, REGS *regs)
 {
-    if(likely(!(addr & 0x01)) || ((addr & 0x7ff) !=0x7ff ))
+    if(likely(!((VADR_L)addr & 0x01)) || (((VADR_L)addr & 0x7ff) !=0x7ff ))
     {
     BYTE *mn;
         ITIMER_SYNC(addr,2-1,regs);
@@ -527,42 +508,26 @@ _VSTORE_C_STATIC U16 ARCH_DEP(vfetch2) (VADR addr, int arn, REGS *regs)
 /*      causes an addressing, translation, or fetch protection       */
 /*      exception, and in this case the function does not return.    */
 /*-------------------------------------------------------------------*/
-_VSTORE_C_STATIC U32 ARCH_DEP(vfetch4_full) (VADR addr, int arn,
+_VSTORE_FULL_C_STATIC U32 ARCH_DEP(vfetch4_full) (VADR addr, int arn,
                                              REGS *regs)
 {
-BYTE   *main1, *main2;                  /* Main storage addresses    */
+BYTE   *mn;                             /* Main storage addresses    */
 int     len;                            /* Length to end of page     */
-BYTE    temp[4];                        /* Copy destination          */
+BYTE    temp[8];                        /* Copy destination          */
 
-    main1 = MADDR (addr, arn, regs, ACCTYPE_READ, regs->psw.pkey);
-
-    if ((addr & 0x7FF) <= 0x7FC)
-    {
-        ITIMER_SYNC(addr,4-1,regs);
-        return fetch_fw(main1);
-    }
-
+    mn = MADDR (addr, arn, regs, ACCTYPE_READ, regs->psw.pkey);
+    memcpy(temp, mn, 4);
     len = 0x800 - (addr & 0x7FF);
-    main2 = MADDR ((addr + len) & ADDRESS_MAXWRAP(regs), arn, regs,
-                   ACCTYPE_READ, regs->psw.pkey);
-    switch (len) {
-    case 1: memcpy (temp,     main1, 1);
-            memcpy (temp + 1, main2, 3);
-            break;
-    case 2: memcpy (temp,     main1, 2);
-            memcpy (temp + 2, main2, 2);
-            break;
-    case 3: memcpy (temp,     main1, 3);
-            memcpy (temp + 3, main2, 1);
-            break;
-    }
+    mn = MADDR ((addr + len) & ADDRESS_MAXWRAP(regs), arn, regs,
+                 ACCTYPE_READ, regs->psw.pkey);
+    memcpy(temp+len, mn, 4);
     return fetch_fw(temp);
 
 } /* end function ARCH_DEP(vfetch4_full) */
 
 _VSTORE_C_STATIC U32 ARCH_DEP(vfetch4) (VADR addr, int arn, REGS *regs)
 {
-    if ( (likely(!(addr & 0x03)) || ((addr & 0x7ff) <= 0x7fc )))
+    if ( (likely(!((VADR_L)addr & 0x03)) || (((VADR_L)addr & 0x7ff) <= 0x7fc )))
     {
     BYTE *mn;
         ITIMER_SYNC(addr,4-1,regs);
@@ -586,60 +551,35 @@ _VSTORE_C_STATIC U32 ARCH_DEP(vfetch4) (VADR addr, int arn, REGS *regs)
 /*      causes an addressing, translation, or fetch protection       */
 /*      exception, and in this case the function does not return.    */
 /*-------------------------------------------------------------------*/
-_VSTORE_C_STATIC U64 ARCH_DEP(vfetch8_full) (VADR addr, int arn,
+_VSTORE_FULL_C_STATIC U64 ARCH_DEP(vfetch8_full) (VADR addr, int arn,
                                              REGS *regs)
 {
-BYTE   *main1, *main2;                  /* Main storage addresses    */
+BYTE   *mn;                             /* Main storage addresses    */
 int     len;                            /* Length to end of page     */
-BYTE    temp[8];                        /* Copy destination          */
+BYTE    temp[16];                       /* Copy destination          */
 
     /* Get absolute address of first byte of operand */
-    main1 = MADDR (addr, arn, regs, ACCTYPE_READ, regs->psw.pkey);
-
-    /* Fetch 4 bytes when operand does not cross a boundary */
-    if ((addr & 0x7FF) <= 0x7F8)
-    {
-        ITIMER_SYNC(addr,8-1,regs);
-        return fetch_dw(main1);
-    }
-
+    mn = MADDR (addr, arn, regs, ACCTYPE_READ, regs->psw.pkey);
+    memcpy(temp, mn, 8);
     len = 0x800 - (addr & 0x7FF);
-    main2 = MADDR ((addr + len) & ADDRESS_MAXWRAP(regs),
-                   arn, regs, ACCTYPE_READ, regs->psw.pkey);
-    switch (len) {
-    case 1: memcpy (temp,     main1, 1);
-            memcpy (temp + 1, main2, 7);
-            break;
-    case 2: memcpy (temp,     main1, 2);
-            memcpy (temp + 2, main2, 6);
-            break;
-    case 3: memcpy (temp,     main1, 3);
-            memcpy (temp + 3, main2, 5);
-            break;
-    case 4: memcpy (temp,     main1, 4);
-            memcpy (temp + 4, main2, 4);
-            break;
-    case 5: memcpy (temp,     main1, 5);
-            memcpy (temp + 5, main2, 3);
-            break;
-    case 6: memcpy (temp,     main1, 6);
-            memcpy (temp + 6, main2, 2);
-            break;
-    case 7: memcpy (temp,     main1, 7);
-            memcpy (temp + 7, main2, 1);
-            break;
-    }
+    mn = MADDR ((addr + len) & ADDRESS_MAXWRAP(regs), arn, regs,
+                ACCTYPE_READ, regs->psw.pkey);
+    memcpy(temp+len, mn, 8);
     return fetch_dw(temp);
 
 } /* end function ARCH_DEP(vfetch8) */
 
 _VSTORE_C_STATIC U64 ARCH_DEP(vfetch8) (VADR addr, int arn, REGS *regs)
 {
-    if(likely(!(addr & 0x07)) || ((addr & 0x7ff) <= 0x7f8 ))
+    if(likely(!((VADR_L)addr & 0x07)) || (((VADR_L)addr & 0x7ff) <= 0x7f8 ))
     {
-    BYTE *mn;
+    U64 *mn;
         ITIMER_SYNC(addr,8-1,regs);
-        mn = MADDR (addr, arn, regs, ACCTYPE_READ, regs->psw.pkey);
+        mn=(U64*)MADDR (addr, arn, regs, ACCTYPE_READ, regs->psw.pkey);
+#if defined(OPTION_SINGLE_CPU_DW) && defined(ASSIST_FETCH_DW)
+        if (regs->cpubit == regs->sysblk->started_mask)
+            return CSWAP64(*mn);
+#endif
         return fetch_dw(mn);
     }
     return ARCH_DEP(vfetch8_full)(addr,arn,regs);
@@ -651,32 +591,61 @@ _VSTORE_C_STATIC U64 ARCH_DEP(vfetch8) (VADR addr, int arn, REGS *regs)
 /* Fetch instruction from halfword-aligned virtual storage location  */
 /*                                                                   */
 /* Input:                                                            */
-/*      dest    Pointer to 6-byte area to receive instruction bytes  */
-/*      addr    Logical address of leftmost instruction halfword     */
 /*      regs    Pointer to the CPU register context                  */
+/*      exec    If 1 then called by EXecute otherwise called by      */
+/*              INSTRUCTION_FETCH                                    */
+/*                                                                   */
+/* If called by INSTRUCTION_FETCH then                               */
+/*      addr    regs->psw.IA                                         */
+/*      dest    regs->inst                                           */
+/*                                                                   */
+/* If called by EXecute then                                         */
+/*      addr    regs->ET                                             */
+/*      dest    regs->exinst                                         */
 /*                                                                   */
 /* Output:                                                           */
-/*      If successful, from one to three instruction halfwords will  */
-/*      be fetched from main storage and stored into the 6-byte area */
-/*      pointed to by dest.                                          */
+/*      If successful, a pointer is returned to the instruction. If  */
+/*      the instruction crossed a page boundary then the instruction */
+/*      is copied either to regs->inst or regs->exinst (depending on */
+/*      the exec flag).  Otherwise the pointer points into mainstor. */
+/*                                                                   */
+/*      If the exec flag is 0 and tracing or PER is not active then  */
+/*      the AIA is updated.  This forces interrupts to be checked    */
+/*      instfetch to be call for each instruction.  Note that        */
+/*      process_trace() is called from here if tracing is active.    */
 /*                                                                   */
 /*      A program check may be generated if the instruction address  */
 /*      is odd, or causes an addressing or translation exception,    */
-/*      and in this case the function does not return.               */
+/*      and in this case the function does not return.  In the       */
+/*      latter case, regs->instinvalid is 1 which indicates to       */
+/*      program_interrupt that the exception occurred during         */
+/*      instruction fetch.                                           */
+/*                                                                   */
+/*      Because this function is inlined and `exec' is a constant    */
+/*      (either 0 or 1) the references to exec are optimized out by  */
+/*      the compiler.                                                */
 /*-------------------------------------------------------------------*/
-_VFETCH_C_STATIC BYTE * ARCH_DEP(instfetch) (BYTE *dest, VADR addr,
-                                                            REGS *regs)
+_VFETCH_C_STATIC BYTE * ARCH_DEP(instfetch) (REGS *regs, int exec)
 {
-BYTE   *ia;                             /* Instruction address       */
-int     len = 0;                        /* Lengths for page crossing */
+VADR    addr;                           /* Instruction address       */
+BYTE   *ia;                             /* Instruction pointer       */
+BYTE   *dest;                           /* Copied instruction        */
+int     pagesz;                         /* Effective page size       */
+int     offset;                         /* Address offset into page  */
+int     len;                            /* Length for page crossing  */
 
-    /* Make sure addresses are wrapped */
-    addr &= ADDRESS_MAXWRAP(regs);
-    regs->psw.IA &= ADDRESS_MAXWRAP(regs);
+    SET_BEAR_REG(regs, regs->bear_ip);
+
+    addr = exec ? regs->ET
+         : likely(regs->aie == NULL) ? regs->psw.IA : PSW_IA(regs,0);
+
+    offset = (int)(addr & PAGEFRAME_BYTEMASK);
 
     /* Program check if instruction address is odd */
-    if ( unlikely(addr & 0x01) )
-        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+    if ( unlikely(offset & 0x01) )
+        regs->program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
+
+    pagesz = unlikely(addr < 0x800) ? 0x800 : PAGEFRAME_PAGESIZE;
 
 #if defined(FEATURE_PER)
     /* Save the address address used to fetch the instruction */
@@ -693,8 +662,7 @@ int     len = 0;                        /* Lengths for page crossing */
         regs->perc = 0;
 #endif /*!defined(FEATURE_PER2)*/
 
-        /* For EXecute instvalid will be true */
-        if(!regs->instvalid)
+        if(!exec)
             regs->peradr = addr;
 
         /* Test for PER instruction-fetching event */
@@ -709,55 +677,121 @@ int     len = 0;                        /* Lengths for page crossing */
             if ( EN_IC_PER_IFNUL(regs) )
             {
                 ON_IC_PER_IFNUL(regs);
+                regs->psw.IA = addr;
                 regs->psw.zeroilc = 1;
-                ARCH_DEP(program_interrupt) (regs, PGM_PER_EVENT);
+                regs->program_interrupt(regs, PGM_PER_EVENT);
             }
       #endif /*defined(FEATURE_PER3)*/
         }
+        /* Quick exit if aia valid */
+        if (!exec && !regs->tracing
+         && regs->aie && regs->ip < regs->aip + pagesz - 5)
+            return regs->ip;
     }
 #endif /*defined(FEATURE_PER)*/
+
+    if (!exec) regs->instinvalid = 1;
 
     /* Get instruction address */
     ia = MADDR (addr, USE_INST_SPACE, regs, ACCTYPE_INSTFETCH, regs->psw.pkey);
 
     /* If boundary is crossed then copy instruction to destination */
-    if ( unlikely((addr & 0x7FF) > 0x7FA) )
+    if ( offset + ILC(ia[0]) > pagesz )
     {
-     // NOTE: `dest' must be at least 8 bytes
-        len = 0x800 - (addr & 0x7FF);
-        if (ILC(ia[0]) > len)
-        {
-            memcpy (dest, ia, 4);
-            addr = (addr + len) & ADDRESS_MAXWRAP(regs);
-            ia = MADDR(addr, USE_INST_SPACE, regs, ACCTYPE_INSTFETCH, regs->psw.pkey);
-            memcpy(dest + len, ia, 4);
-        }
+        /* Note - dest is 8 bytes */
+        dest = exec ? regs->exinst : regs->inst;
+        memcpy (dest, ia, 4);
+        len = pagesz - offset;
+        offset = 0;
+        addr = (addr + len) & ADDRESS_MAXWRAP(regs);
+        ia = MADDR(addr, USE_INST_SPACE, regs, ACCTYPE_INSTFETCH, regs->psw.pkey);
+        if (!exec) regs->ip = ia - len;
+        memcpy(dest + len, ia, 4);
+    }
+    else
+    {
+        dest = ia;
+        if (!exec) regs->ip = ia;
+    }
+
+    if (!exec)
+    {
+        regs->instinvalid = 0;
+
+        /* Update the AIA */
+        regs->AIV = addr & PAGEFRAME_PAGEMASK;
+        regs->aip = (BYTE *)((uintptr_t)ia & ~PAGEFRAME_BYTEMASK);
+        regs->aim = (uintptr_t)regs->aip ^ (uintptr_t)regs->AIV;
+        if (likely(!regs->tracing && !regs->permode))
+            regs->aie = regs->aip + pagesz - 5;
         else
-            len = 0;
+        {
+            regs->aie = (BYTE *)1;
+            if (regs->tracing)
+                ARCH_DEP(process_trace)(regs);
+        }
     }
 
-    /* Update the AIA */
-    if (!regs->instvalid
-#if defined(FEATURE_PER)
-      && !EN_IC_PER(regs)
-#endif /*defined(FEATURE_PER)*/
-       )
-    {
-        int off;
-        regs->AIV = addr & TLB_PAGEMASK;
-        regs->AIE = (addr & TLB_PAGEMASK)
-                  | (addr < PSA_SIZE ? 0x7FB : (TLB_BYTEMASK -  4));
-        off = addr & TLB_BYTEMASK;
-        regs->aim = NEW_INSTADDR(regs, addr-off, ia-off);
-    }
-
-    regs->instvalid = 1;
-    return len ? dest : ia;
+    return dest;
 
 } /* end function ARCH_DEP(instfetch) */
 #endif
 
+
+/*-------------------------------------------------------------------*/
+/* Copy 8 bytes at a time concurrently                               */
+/*-------------------------------------------------------------------*/
+#ifndef _VSTORE_CONCPY
+#define _VSTORE_CONCPY
+static __inline__ void concpy (REGS *regs, void *d, void *s, int n)
+{
+ int   n2;
+ BYTE *dest = (BYTE *)d, *src = (BYTE *)s;
+
+    /* Byte for byte copy if short length or possible overlap */
+    if (n < 8
+     || (dest <= src  && dest + 8 > src)
+     || (src  <= dest && src  + 8 > dest))
+    {
+        for ( ; n; n--)
+            *(dest++) = *(src++);
+        return;
+    }
+
+    /* copy to an 8 byte boundary */
+    n2 = (intptr_t)dest & 7;
+    n -= n2;
+    for ( ; n2; n2--)
+        *(dest++) = *(src++);
+
+#if defined(SIZEOF_LONG) && SIZEOF_LONG == 8 && !defined(OPTION_STRICT_ALIGNMENT)
+    UNREFERENCED(regs);
+    /* copy 8 bytes at a time */
+    for ( ; n >= 8; n -= 8, dest += 8, src += 8)
+        *(U64 *)dest = *(U64 *)src;
+#else
+ #if !defined(OPTION_STRICT_ALIGNMENT)
+    /* copy 4 bytes at a time if only one cpu started */
+    if (regs->cpubit == regs->sysblk->started_mask)
+        for ( ; n >= 4; n -= 4, dest += 4, src += 4)
+            *(U32 *)dest = *(U32 *)src;
+    else
+ #else
+    UNREFERENCED(regs);
+ #endif
+    /* else copy 8 bytes at a time concurrently */
+        for ( ; n >= 8; n -= 8, dest += 8, src += 8)
+            store_dw_noswap(dest,fetch_dw_noswap(src));
+#endif
+
+    /* copy leftovers */
+    for ( ; n; n--)
+        *(dest++) = *(src++);
+}
+#endif /* !defined(_VSTORE_CONCPY) */
+
 #if !defined(OPTION_NO_INLINE_VSTORE) || defined(_VSTORE_C)
+
 /*-------------------------------------------------------------------*/
 /* Move characters using specified keys and address spaces           */
 /*                                                                   */
@@ -833,7 +867,7 @@ int     len2, len3;                     /* Lengths to copy           */
         if ( NOCROSS2K(addr2,len) )
         {
             /* (1) - No boundaries are crossed */
-            concpy (dest1, source1, len + 1);
+            concpy (regs, dest1, source1, len + 1);
         }
         else
         {
@@ -841,8 +875,8 @@ int     len2, len3;                     /* Lengths to copy           */
             len2 = 0x800 - (addr2 & 0x7FF);
             source2 = MADDR ((addr2 + len2) & ADDRESS_MAXWRAP(regs),
                               arn2, regs, ACCTYPE_READ, key2);
-            concpy (dest1, source1, len2);
-            concpy (dest1 + len2, source2, len - len2 + 1);
+            concpy (regs, dest1, source1, len2);
+            concpy (regs, dest1 + len2, source2, len - len2 + 1);
         }
     }
     else
@@ -860,8 +894,8 @@ int     len2, len3;                     /* Lengths to copy           */
         if ( NOCROSS2K(addr2,len) )
         {
              /* (3) - First operand crosses a boundary */
-             concpy (dest1, source1, len2);
-             concpy (dest2, source1 + len2, len - len2 + 1);
+             concpy (regs, dest1, source1, len2);
+             concpy (regs, dest2, source1 + len2, len - len2 + 1);
         }
         else
         {
@@ -872,22 +906,22 @@ int     len2, len3;                     /* Lengths to copy           */
             if (len2 == len3)
             {
                 /* (4a) - Both operands cross at the same time */
-                concpy (dest1, source1, len2);
-                concpy (dest2, source2, len - len2 + 1);
+                concpy (regs, dest1, source1, len2);
+                concpy (regs, dest2, source2, len - len2 + 1);
             }
             else if (len2 < len3)
             {
                 /* (4b) - First operand crosses first */
-                concpy (dest1, source1, len2);
-                concpy (dest2, source1 + len2, len3 - len2);
-                concpy (dest2 + len3 - len2, source2, len - len3 + 1);
+                concpy (regs, dest1, source1, len2);
+                concpy (regs, dest2, source1 + len2, len3 - len2);
+                concpy (regs, dest2 + len3 - len2, source2, len - len3 + 1);
             }
             else
             {
                 /* (4c) - Second operand crosses first */
-                concpy (dest1, source1, len3);
-                concpy (dest1 + len3, source2, len2 - len3);
-                concpy (dest2, source2 + len2 - len3, len - len2 + 1);
+                concpy (regs, dest1, source1, len3);
+                concpy (regs, dest1 + len3, source2, len2 - len3);
+                concpy (regs, dest2, source2 + len2 - len3, len - len2 + 1);
             }
         }
     }

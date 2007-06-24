@@ -1,5 +1,7 @@
-/* QETH.C       (c) Copyright Jan Jaeger,   1999-2006                */
+/* QETH.C       (c) Copyright Jan Jaeger,   1999-2007                */
 /*              OSA Express                                          */
+
+// $Id: qeth.c,v 1.10 2007/06/23 00:04:15 ivan Exp $
 
 /* This module contains device handling functions for the            */
 /* OSA Express emulated card                                         */
@@ -7,6 +9,14 @@
 /* Device module hdtqeth.dll devtype QETH (config)                   */
 /* hercules.cnf:                                                     */
 /* 0A00-0A02 QETH <optional parameters>                              */
+
+// $Log: qeth.c,v $
+// Revision 1.10  2007/06/23 00:04:15  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.9  2006/12/08 09:43:29  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -294,15 +304,27 @@ logmsg(D_("SIGA-w dev(%4.4x) qmask(%8.8x)\n"),dev->devnum);
 #if defined(OPTION_DYNAMIC_LOAD)
 static
 #endif
-DEVHND qeth_device_hndinfo = {
-        &qeth_init_handler,
-        &qeth_execute_ccw,
-        &qeth_close_device,
-        &qeth_query_device,
-        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-        &qeth_initiate_input,
-        &qeth_initiate_output,
-        NULL, NULL
+DEVHND qeth_device_hndinfo =
+{
+        &qeth_init_handler,     /* Device Initialisation      */
+        &qeth_execute_ccw,      /* Device CCW execute         */
+        &qeth_close_device,     /* Device Close               */
+        &qeth_query_device,     /* Device Query               */
+        NULL,                   /* Device Start channel pgm   */
+        NULL,                   /* Device End channel pgm     */
+        NULL,                   /* Device Resume channel pgm  */
+        NULL,                   /* Device Suspend channel pgm */
+        NULL,                   /* Device Read                */
+        NULL,                   /* Device Write               */
+        NULL,                   /* Device Query used          */
+        NULL,                   /* Device Reserve             */
+        NULL,                   /* Device Release             */
+        NULL,                   /* Device Attention           */
+        NULL,                   /* Immediate CCW Codes        */
+        &qeth_initiate_input,   /* Signal Adapter Input       */
+        &qeth_initiate_output,  /* Signal Adapter Output      */
+        NULL,                   /* Hercules suspend           */
+        NULL                    /* Hercules resume            */
 };
 
 /* Libtool static name colision resolution */
@@ -323,7 +345,7 @@ HDL_DEPENDENCY_SECTION;
      HDL_DEPENDENCY(DEVBLK);
      HDL_DEPENDENCY(SYSBLK);
 }
-END_DEPENDENCY_SECTION;
+END_DEPENDENCY_SECTION
 
 
 #if defined(WIN32) && !defined(HDL_USE_LIBTOOL) && !defined(_MSVC_)
@@ -332,7 +354,7 @@ END_DEPENDENCY_SECTION;
   {
     HDL_RESOLVE_PTRVAR( psysblk, sysblk );
   }
-  END_RESOLVER_SECTION;
+  END_RESOLVER_SECTION
 #endif
 
 
@@ -340,5 +362,5 @@ HDL_DEVICE_SECTION;
 {
     HDL_DEVICE(QETH, qeth_device_hndinfo );
 }
-END_DEVICE_SECTION;
+END_DEVICE_SECTION
 #endif

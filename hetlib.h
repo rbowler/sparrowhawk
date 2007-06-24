@@ -4,13 +4,23 @@
 /*
 || ----------------------------------------------------------------------------
 ||
-|| HETLIB.H     (c) Copyright Leland Lucius, 2000-2006
+|| HETLIB.H     (c) Copyright Leland Lucius, 2000-2007
 ||              Released under terms of the Q Public License.
 ||
 || Header for the Hercules Emulated Tape library.
 ||
 || ----------------------------------------------------------------------------
 */
+
+// $Id: hetlib.h,v 1.17 2007/06/23 00:04:11 ivan Exp $
+//
+// $Log: hetlib.h,v $
+// Revision 1.17  2007/06/23 00:04:11  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.16  2006/12/08 09:43:26  jj
+// Add CVS message log
+//
 
 #include "hercules.h"
 
@@ -38,10 +48,10 @@
 */
 typedef struct _hethdr
 {
-    uint8_t        clen[ 2 ];          /* Length of current block          */
-    uint8_t        plen[ 2 ];          /* Length of previous block         */
-    uint8_t        flags1;             /* Flags byte 1                     */
-    uint8_t        flags2;             /* Flags byte 2                     */
+    uint8_t        clen[ 2 ];          /* Length of current block           */
+    uint8_t        plen[ 2 ];          /* Length of previous block          */
+    uint8_t        flags1;             /* Flags byte 1                      */
+    uint8_t        flags2;             /* Flags byte 2                      */
 } HETHDR;
 
 /*
@@ -61,23 +71,29 @@ typedef struct _hethdr
 #define HETHDR_FLAGS1_ZLIB      0x01    /* ZLIB compression                 */
 
 /*
+|| Definitions for HETHDR flags byte 2 (incompatable with AWSTAPE and HET)
+*/
+#define HETHDR_FLAGS2_COMPRESS     0x80 /* Compression method mask          */
+#define HETHDR_FLAGS2_ZLIB_BUSTECH 0x80 /* Bus-Tech ZLIB compression        */
+
+/*
 || Control block for Hercules Emulated Tape files
 */
 typedef struct _hetb
 {
-    FILE            *fd;                /* Tape file descriptor             */
-    uint32_t       chksize;            /* Size of output chunks            */
-    uint32_t       ublksize;           /* Current block compressed size    */
-    uint32_t       cblksize;           /* Current block uncompressed size  */
-    uint32_t       cblk;               /* Current block number             */
+    FILE           *fd;                 /* Tape file descriptor             */
+    uint32_t        chksize;            /* Size of output chunks            */
+    uint32_t        ublksize;           /* Current block compressed size    */
+    uint32_t        cblksize;           /* Current block uncompressed size  */
+    uint32_t        cblk;               /* Current block number             */
     HETHDR          chdr;               /* Current block header             */
-    uint8_t        writeprotect:1;     /* TRUE=write protected             */
-    uint8_t        readlast:1;         /* TRUE=last i/o was read           */
-    uint8_t        truncated:1;        /* TRUE=file truncated              */
-    uint8_t        compress:1;         /* TRUE=compress written data       */
-    uint8_t        decompress:1;       /* TRUE=decompress read data        */
-    uint8_t        method:2;           /* 1=ZLIB, 2=BZLIB compresion       */
-    uint8_t        level:4;            /* 1=<n<=9 compression level        */
+    u_int           writeprotect:1;     /* TRUE=write protected             */
+    u_int           readlast:1;         /* TRUE=last i/o was read           */
+    u_int           truncated:1;        /* TRUE=file truncated              */
+    u_int           compress:1;         /* TRUE=compress written data       */
+    u_int           decompress:1;       /* TRUE=decompress read data        */
+    u_int           method:2;           /* 1=ZLIB, 2=BZLIB compresion       */
+    u_int           level:4;            /* 1=<n<=9 compression level        */
 } HETB;
 
 /*
@@ -85,15 +101,6 @@ typedef struct _hetb
 */
 #define HETMETH_ZLIB            1       /* ZLIB compression                 */
 #define HETMETH_BZLIB           2       /* BZLIB compression                */
-
-/*
-|| Default settings
-*/
-#define HETDFLT_COMPRESS        TRUE    /* Compress written data            */
-#define HETDFLT_DECOMPRESS      TRUE    /* Decompress read data             */
-#define HETDFLT_METHOD          HETMETH_ZLIB /* Use ZLIB compression        */
-#define HETDFLT_LEVEL           4       /* Middle of the road               */
-#define HETDFLT_CHKSIZE         HETMAX_BLOCKSIZE /* As big as it gets       */
 
 /*
 || Limits
@@ -110,6 +117,15 @@ typedef struct _hetb
 #define HETMAX_CHUNKSIZE        65535   /* Maximum chunksize                */
 #define HETMIN_BLOCKSIZE        1       /* Minimum blocksize                */
 #define HETMAX_BLOCKSIZE        65535   /* Maximum blocksize                */
+
+/*
+|| Default settings
+*/
+#define HETDFLT_COMPRESS        TRUE    /* Compress written data            */
+#define HETDFLT_DECOMPRESS      TRUE    /* Decompress read data             */
+#define HETDFLT_METHOD          HETMETH_ZLIB /* Use ZLIB compression        */
+#define HETDFLT_LEVEL           4       /* Middle of the road               */
+#define HETDFLT_CHKSIZE         HETMAX_BLOCKSIZE /* As big as it gets       */
 
 /*
 || Flags for het_open()
@@ -177,6 +193,6 @@ HET_DLL_IMPORT int het_bsf( HETB *hetb );
 HET_DLL_IMPORT int het_fsf( HETB *hetb );
 HET_DLL_IMPORT int het_rewind( HETB *hetb );
 HET_DLL_IMPORT const char *het_error( int rc );
-HET_DLL_IMPORT OFF_T het_tell ( HETB *hetb );
+HET_DLL_IMPORT off_t het_tell ( HETB *hetb );
 
 #endif /* defined( _HETLIB_H_ ) */

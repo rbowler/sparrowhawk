@@ -1,5 +1,18 @@
-/* FEAT390.H    (c) Copyright Jan Jaeger, 2000-2006                  */
+/* FEAT390.H    (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              ESA/390 feature definitions                          */
+
+// $Id: feat390.h,v 1.38 2007/06/23 00:04:09 ivan Exp $
+//
+// $Log: feat390.h,v $
+// Revision 1.38  2007/06/23 00:04:09  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.37  2007/04/25 12:10:27  rbowler
+// Move LFAS,SFASR to IEEE-exception-simulation facility
+//
+// Revision 1.36  2006/12/08 09:43:21  jj
+// Add CVS message log
+//
 
 /* This file MUST NOT contain #undef statements */
 #if defined(OPTION_390_MODE)
@@ -31,6 +44,7 @@
 #define FEATURE_EXTENDED_TRANSLATION_FACILITY_2
 #define FEATURE_EXTERNAL_INTERRUPT_ASSIST
 #define FEATURE_FETCH_PROTECTION_OVERRIDE
+#define FEATURE_FPS_ENHANCEMENT                                 /*DFP*/
 #define FEATURE_FPS_EXTENSIONS
 #define FEATURE_HERCULES_DIAGCALLS
 #define FEATURE_HEXADECIMAL_FLOATING_POINT

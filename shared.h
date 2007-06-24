@@ -1,5 +1,7 @@
 /*-------------------------------------------------------------------
- * Shared device support           (c)Copyright Greg Smith, 2002-2006
+ * Shared device support           (c)Copyright Greg Smith, 2002-2007
+ *
+ * $Id: shared.h,v 1.16 2007/06/23 00:04:15 ivan Exp $
  *
  * Shared device support allows multiple Hercules instances to share
  * devices.  The device will be `local' to one instance and `remote'
@@ -309,6 +311,15 @@
  *
  *
  *
+ * $Log: shared.h,v $
+ * Revision 1.16  2007/06/23 00:04:15  ivan
+ * Update copyright notices to include current year (2007)
+ *
+ * Revision 1.15  2006/12/28 20:32:54  fish
+ * Fix "HHCSH043I 0.0.0.0 disconnected from ..."; save clientip in SHRD block at connect and use at disconnect.
+ *
+ * Revision 1.14  2006/12/08 09:43:30  jj
+ * Add CVS message log
  *
  *
  *-------------------------------------------------------------------*/
@@ -409,6 +420,7 @@ typedef char SHRD_TRACE[128];           /* Trace entry               */
 struct SHRD {
         int     id;                     /* Identifier                */
         int     fd;                     /* Socket                    */
+        char   *ipaddr;                 /* IP addr of connected peer */
         time_t  time;                   /* Time last request         */
         int     release;                /* Client release level      */
         int     comp;                   /* Compression parameter     */

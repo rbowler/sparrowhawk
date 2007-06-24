@@ -1,5 +1,7 @@
-/* DASDCONV.C   (c) Copyright Roger Bowler, 1999-2006                */
+/* DASDCONV.C   (c) Copyright Roger Bowler, 1999-2007                */
 /*              Hercules DASD Utilities: DASD image converter        */
+
+// $Id: dasdconv.c,v 1.16 2007/06/23 00:04:08 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This program converts a CKD disk image from HDR-30 format         */
@@ -10,14 +12,34 @@
 /*      dasdconv [options] infile outfile                            */
 /*                                                                   */
 /* options      -r means overwrite existing outfile                  */
-/* infile       is the name of the HDR-30 format CKD image file.     */
-/*              A compressed (.gz) image is also acceptable if       */
-/*              this module was compiled with HAVE_LIBZ option.      */
+/*              -q means suppress progress messages                  */
+/*              -lfs creates one large output file (if supported)    */
+/* infile       is the name of the HDR-30 format CKD image file      */
+/*              ("-" means that the CKD image is read from stdin)    */
+/*              If this module was compiled with HAVE_LIBZ option    */
+/*              activated, then the input file may be compressed     */
+/*              or uncompressed. Otherwise it must be uncompressed.  */
 /* outfile      is the name of the AWSCKD image file to be created.  */
 /*              If the image exceeds 2GB then multiple files will    */
 /*              be created, with names suffixed _1, _2, etc.         */
+/*              (except if the underlying file system supports files */
+/*              larger than 2GB and the -lfs option is specified).   */
 /*              This program will not overwrite an existing file.    */
 /*-------------------------------------------------------------------*/
+
+// $Log: dasdconv.c,v $
+// Revision 1.16  2007/06/23 00:04:08  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.15  2007/06/08 15:28:19  rbowler
+// Error message if dasdconv does not support gz input file
+//
+// Revision 1.14  2007/01/08 12:25:26  rbowler
+// Add dasdconv -q (quiet) option
+//
+// Revision 1.13  2006/12/08 09:43:19  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -54,6 +76,7 @@ typedef struct _H30CKD_RECHDR {         /* Record header             */
 BYTE eighthexFF[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 BYTE twelvehex00[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 BYTE ebcdicvol1[] = {0xE5, 0xD6, 0xD3, 0xF1};
+BYTE gz_magic_id[] = {0x1F, 0x8B};
 
 /*-------------------------------------------------------------------*/
 /* Definition of file descriptor for gzip and non-gzip builds        */
@@ -88,15 +111,16 @@ argexit ( int code )
 {
     fprintf (stderr,
             "Syntax:\tdasdconv [options] infile outfile\n"
-            "where:\n\tinfile   = name of input HDR-30 CKD image file\n"
+            "where:\n\tinfile   = name of input HDR-30 CKD image file"
+                                " (\"-\" means stdin)\n"
           #if defined(HAVE_LIBZ)
-            "\t\t   or name of compressed (.gz) image file\n"
+            "\t\t   (input file may be compressed)\n"
           #endif /*defined(HAVE_LIBZ)*/
             "\toutfile  = name of AWSCKD image file to be created\n"  
-            "options:\n\t-r       = replace existing output file\n");
-    if (sizeof(OFF_T) > 4) fprintf(stderr,
-            "\t-lfs     = build one large output file (if supported)\n"
-);
+            "options:\n\t-r       = replace existing output file\n"  
+            "\t-q       = suppress progress messages\n");
+    if (sizeof(off_t) > 4) fprintf(stderr,
+            "\t-lfs     = build one large output file\n");
     EXIT(code);
 } /* end function argexit */
 
@@ -278,7 +302,11 @@ char            pathname[MAX_PATH];     /* file path in host format  */
 
     /* Open the HDR-30 CKD image file */
   #if defined(HAVE_LIBZ)
-    ifd = gzopen (pathname, "rb");
+    if (strcmp(ifname, "-") == 0)
+        ifd = gzdopen (STDIN_FILENO, "rb");
+    else
+        ifd = gzopen (pathname, "rb");
+
     if (ifd == NULL)
     {
         fprintf (stderr,
@@ -288,19 +316,37 @@ char            pathname[MAX_PATH];     /* file path in host format  */
         EXIT(3);
     }
   #else /*!defined(HAVE_LIBZ)*/
-    ifd = open (pathname, O_RDONLY | O_BINARY);
-    if (ifd < 0)
+    if (strcmp(ifname, "-") == 0)
+        ifd = STDIN_FILENO;
+    else
     {
-        fprintf (stderr,
-                "Cannot open %s: %s\n",
-                ifname, strerror(errno));
-        EXIT(3);
+        ifd = open (pathname, O_RDONLY | O_BINARY);
+
+        if (ifd < 0)
+        {
+            fprintf (stderr,
+                    "Cannot open %s: %s\n",
+                    ifname, strerror(errno));
+            EXIT(3);
+        }
     }
   #endif /*!defined(HAVE_LIBZ)*/
 
     /* Read the first track header */
     read_input_data (ifd, ifname, (BYTE*)&h30trkhdr,
                     H30CKD_TRKHDR_SIZE, 0);
+
+  #if !defined(HAVE_LIBZ)
+    /* Reject input if compressed and we lack gzip support */
+    if (memcmp(h30trkhdr.devcode, gz_magic_id, sizeof(gz_magic_id)) == 0) 
+    {
+        fprintf (stderr,
+                "Input file %s appears to be a .gz file\n"
+                "but this program was compiled without compression support\n",
+                ifname);
+        EXIT(3);
+    }
+  #endif /*!defined(HAVE_LIBZ)*/
 
     /* Extract the device type code from the track header */
     FETCH_HW (code, h30trkhdr.devcode);
@@ -422,7 +468,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
 /*-------------------------------------------------------------------*/
 static void
 convert_ckd_file (IFD ifd, char *ifname, int itrklen, BYTE *itrkbuf,
-                int repl,
+                int repl, int quiet,
                 char *ofname, int fseqn, U16 devtype, U32 heads,
                 U32 trksize, BYTE *obuf, U32 start, U32 end,
                 U32 volcyls, BYTE *volser)
@@ -512,6 +558,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
                 fprintf (stderr, "CYL=%u\n", cyl);
             else
 #endif /*EXTERNALGUI*/
+            if (quiet == 0)
                 fprintf (stderr, "Writing cylinder %u\r", cyl);
         }
 
@@ -661,7 +708,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
 /*-------------------------------------------------------------------*/
 static void
 convert_ckd (int lfs, IFD ifd, char *ifname, int itrklen,
-            BYTE *itrkbuf, int repl,
+            BYTE *itrkbuf, int repl, int quiet,
             char *ofname, U16 devtype, U32 heads,
             U32 maxdlen, U32 volcyls, BYTE *volser)
 {
@@ -772,7 +819,7 @@ U32             trksize;                /* AWSCKD image track length */
             endcyl = volcyls - 1;
 
         /* Create an AWSCKD image file */
-        convert_ckd_file (ifd, ifname, itrklen, itrkbuf, repl,
+        convert_ckd_file (ifd, ifname, itrklen, itrkbuf, repl, quiet,
                         sfname, fileseq, devtype, heads, trksize,
                         obuf, cyl, endcyl, volcyls, volser);
     }
@@ -789,6 +836,7 @@ int main ( int argc, char *argv[] )
 {
 IFD             ifd;                    /* Input file descriptor     */
 int             repl = 0;               /* 1=replace existing file   */
+int             quiet = 0;              /* 1=suppress progress msgs  */
 BYTE           *itrkbuf;                /* -> Input track buffer     */
 U32             itrklen;                /* Input track length        */
 U32             volcyls;                /* Total cylinders on volume */
@@ -819,11 +867,14 @@ int             lfs = 0;                /* 1 = Build large file      */
     /* Process the options in the argument list */
     for (; argc > 1; argc--, argv++)
     {
+        if (strcmp(argv[1], "-") == 0) break;
         if (argv[1][0] != '-') break;
         if (strcmp(argv[1], "-r") == 0)
             repl = 1;
+        else if (strcmp(argv[1], "-q") == 0)
+            quiet = 1;
         else
-        if (sizeof(OFF_T) > 4 && strcmp(argv[1], "-lfs") == 0)
+        if (sizeof(off_t) > 4 && strcmp(argv[1], "-lfs") == 0)
             lfs = 1;
         else
             argexit(5);
@@ -864,7 +915,7 @@ int             lfs = 0;                /* 1 = Build large file      */
     } /* end switch(devtype) */
 
     /* Create the device */
-    convert_ckd (lfs, ifd, ifname, itrklen, itrkbuf, repl,
+    convert_ckd (lfs, ifd, ifname, itrklen, itrkbuf, repl, quiet,
                 ofname, devtype, heads, maxdlen, volcyls, volser);
 
     /* Release the input buffer and close the input file */

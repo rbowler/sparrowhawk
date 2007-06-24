@@ -1,6 +1,15 @@
-/* CLOCK.H      (c) Copyright Jan Jaeger, 2000-2006                  */
+/* CLOCK.H      (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              TOD Clock functions                                  */
 
+// $Id: clock.h,v 1.25 2007/06/23 00:04:04 ivan Exp $
+//
+// $Log: clock.h,v $
+// Revision 1.25  2007/06/23 00:04:04  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.24  2006/12/08 09:43:18  jj
+// Add CVS message log
+//
 
 #if !defined(_CLOCK_C_)
  #define _CLOCK_EXTERN extern
@@ -38,11 +47,14 @@ void set_int_timer(REGS *, S32);        /* Set interval timer        */
 U64 tod_clock(REGS *);                  /* Get TOD clock             */ 
 void set_tod_clock(U64);                /* Set TOD clock             */
 int chk_int_timer(REGS *);              /* Check int_timer pending   */
+int clock_hsuspend(void *file);         /* Hercules suspend          */
+int clock_hresume(void *file);          /* Hercules resume           */
 
 #endif
 
-void ARCH_DEP(store_int_timer) (REGS *);
-void ARCH_DEP(fetch_int_timer) (REGS *);
+DLL_EXPORT void ARCH_DEP(store_int_timer) (REGS *);
+void ARCH_DEP(store_int_timer_nolock) (REGS *);
+DLL_EXPORT void ARCH_DEP(fetch_int_timer) (REGS *);
 
 void ARCH_DEP(set_gross_s_rate) (REGS *);
 void ARCH_DEP(set_fine_s_rate) (REGS *);

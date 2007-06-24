@@ -1,6 +1,16 @@
 /* LOGMSG.C : ISW 2003 */
 /* logmsg frontend routing */
 
+// $Id: logmsg.c,v 1.19 2006/12/11 17:14:29 rbowler Exp $
+//
+// $Log: logmsg.c,v $
+// Revision 1.19  2006/12/11 17:14:29  rbowler
+// Fix logmsg.c:315: parse error before `func' (gcc 2.95) after 1.5.4.12
+//
+// Revision 1.18  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
 
 #define _HUTIL_DLL_
@@ -38,13 +48,14 @@
 #define  BFR_VSNPRINTF()                  \
     bfr=malloc(siz);                      \
     rc=-1;                                \
-    while(bfr&&(rc<0||rc>=siz))           \
+    while(bfr&&rc<0)                      \
     {                                     \
         va_start(vl,msg);                 \
         rc=vsnprintf(bfr,siz,msg,vl);     \
         va_end(vl);                       \
         if(rc>=0 && rc<siz)               \
             break;                        \
+        rc=-1;                            \
         siz+=BFR_CHUNKSIZE;               \
         bfr=realloc(bfr,siz);             \
     }
@@ -304,13 +315,13 @@ DLL_EXPORT void log_capture_closer(void *vcd)
     return;
 }
 
-DLL_EXPORT char *log_capture(void *(*func)(void *),void *arg)
+DLL_EXPORT char *log_capture(void *(*fun)(void *),void *p)
 {
     struct log_capture_data cd;
     cd.obfr=NULL;
     cd.sz=0;
     log_open(log_capture_writer,log_capture_closer,&cd);
-    func(arg);
+    fun(p);
     log_close();
     return(cd.obfr);
 }

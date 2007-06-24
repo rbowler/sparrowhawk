@@ -1,9 +1,18 @@
-/* CLOCK.C      (c) Copyright Jan Jaeger, 2000-2006                  */
+/* CLOCK.C      (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              TOD Clock functions                                  */
+
+// $Id: clock.c,v 1.41 2007/06/23 00:04:04 ivan Exp $
 
 /* The emulated hardware clock is based on the host clock, adjusted  */
 /* by means of an offset and a steering rate.                        */
 
+// $Log: clock.c,v $
+// Revision 1.41  2007/06/23 00:04:04  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.40  2006/12/08 09:43:18  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -16,6 +25,8 @@
 #include "opcode.h"
 
 #include "inline.h"
+
+#include "sr.h"
 
 #if !defined(_CLOCK_C_)
 #define _CLOCK_C_
@@ -331,7 +342,7 @@ int pending = 0;
         if(itimer < 0 && regs->ecps_oldtmr >= 0)
         {
             ON_IC_ECPSVTIMER(regs);
-            pending = 1;
+            pending += 2;
         }
     }
 #endif /*defined(_FEATURE_ECPSVM)*/
@@ -386,45 +397,199 @@ U64 new_clock;
     return new_clock;
 }
 
+#define SR_SYS_CLOCK_CURRENT_CSR          ( SR_SYS_CLOCK | 0x001 )
+#define SR_SYS_CLOCK_UNIVERSAL_TOD        ( SR_SYS_CLOCK | 0x002 )
+#define SR_SYS_CLOCK_HW_STEERING          ( SR_SYS_CLOCK | 0x004 )
+#define SR_SYS_CLOCK_HW_EPISODE           ( SR_SYS_CLOCK | 0x005 )
+#define SR_SYS_CLOCK_HW_OFFSET            ( SR_SYS_CLOCK | 0x006 )
+
+#define SR_SYS_CLOCK_OLD_CSR              ( SR_SYS_CLOCK | 0x100 )
+#define SR_SYS_CLOCK_OLD_CSR_START_TIME   ( SR_SYS_CLOCK | 0x101 )
+#define SR_SYS_CLOCK_OLD_CSR_BASE_OFFSET  ( SR_SYS_CLOCK | 0x102 )
+#define SR_SYS_CLOCK_OLD_CSR_FINE_S_RATE  ( SR_SYS_CLOCK | 0x103 )
+#define SR_SYS_CLOCK_OLD_CSR_GROSS_S_RATE ( SR_SYS_CLOCK | 0x104 )
+
+#define SR_SYS_CLOCK_NEW_CSR              ( SR_SYS_CLOCK | 0x200 )
+#define SR_SYS_CLOCK_NEW_CSR_START_TIME   ( SR_SYS_CLOCK | 0x201 )
+#define SR_SYS_CLOCK_NEW_CSR_BASE_OFFSET  ( SR_SYS_CLOCK | 0x202 )
+#define SR_SYS_CLOCK_NEW_CSR_FINE_S_RATE  ( SR_SYS_CLOCK | 0x203 )
+#define SR_SYS_CLOCK_NEW_CSR_GROSS_S_RATE ( SR_SYS_CLOCK | 0x204 )
+
+int clock_hsuspend(void *file)
+{
+    int i;
+    char buf[SR_MAX_STRING_LENGTH];
+
+    i = (current == &new);
+    SR_WRITE_VALUE(file, SR_SYS_CLOCK_CURRENT_CSR, i, sizeof(i));
+    SR_WRITE_VALUE(file, SR_SYS_CLOCK_UNIVERSAL_TOD, universal_tod, sizeof(universal_tod));
+    snprintf(buf, sizeof(buf), "%f", hw_steering);
+    SR_WRITE_STRING(file, SR_SYS_CLOCK_HW_STEERING, buf);
+    SR_WRITE_VALUE(file, SR_SYS_CLOCK_HW_EPISODE, hw_episode, sizeof(hw_episode));
+    SR_WRITE_VALUE(file, SR_SYS_CLOCK_HW_OFFSET, hw_offset, sizeof(hw_offset));
+
+    SR_WRITE_VALUE(file, SR_SYS_CLOCK_OLD_CSR_START_TIME,   old.start_time,   sizeof(old.start_time));
+    SR_WRITE_VALUE(file, SR_SYS_CLOCK_OLD_CSR_BASE_OFFSET,  old.base_offset,  sizeof(old.base_offset));
+    SR_WRITE_VALUE(file, SR_SYS_CLOCK_OLD_CSR_FINE_S_RATE,  old.fine_s_rate,  sizeof(old.fine_s_rate));
+    SR_WRITE_VALUE(file, SR_SYS_CLOCK_OLD_CSR_GROSS_S_RATE, old.gross_s_rate, sizeof(old.gross_s_rate));
+
+    SR_WRITE_VALUE(file, SR_SYS_CLOCK_NEW_CSR_START_TIME,   new.start_time,   sizeof(new.start_time));
+    SR_WRITE_VALUE(file, SR_SYS_CLOCK_NEW_CSR_BASE_OFFSET,  new.base_offset,  sizeof(new.base_offset));
+    SR_WRITE_VALUE(file, SR_SYS_CLOCK_NEW_CSR_FINE_S_RATE,  new.fine_s_rate,  sizeof(new.fine_s_rate));
+    SR_WRITE_VALUE(file, SR_SYS_CLOCK_NEW_CSR_GROSS_S_RATE, new.gross_s_rate, sizeof(new.gross_s_rate));
+
+    return 0;
+}
+
+int clock_hresume(void *file)
+{
+    size_t key, len;
+    int i;
+    float f;
+    char buf[SR_MAX_STRING_LENGTH];
+
+    memset(&old, 0, sizeof(CSR));
+    memset(&new, 0, sizeof(CSR));
+    current = &new;
+    universal_tod = 0;
+    hw_steering = 0.0;
+    hw_episode = 0;
+    hw_offset = 0;
+
+    do {
+        SR_READ_HDR(file, key, len);
+        switch (key) {
+        case SR_SYS_CLOCK_CURRENT_CSR:
+            SR_READ_VALUE(file, len, &i, sizeof(i));
+            current = i ? &new : &old;
+            break;
+        case SR_SYS_CLOCK_UNIVERSAL_TOD:
+            SR_READ_VALUE(file, len, &universal_tod, sizeof(universal_tod));
+            break;
+        case SR_SYS_CLOCK_HW_STEERING:
+            SR_READ_STRING(file, buf, len);
+            sscanf(buf, "%f",&f);
+            hw_steering = f;
+            break;
+        case SR_SYS_CLOCK_HW_EPISODE:
+            SR_READ_VALUE(file, len, &hw_episode, sizeof(hw_episode));
+            break;
+        case SR_SYS_CLOCK_HW_OFFSET:
+            SR_READ_VALUE(file, len, &hw_offset, sizeof(hw_offset));
+            break;
+        case SR_SYS_CLOCK_OLD_CSR_START_TIME:
+            SR_READ_VALUE(file, len, &old.start_time, sizeof(old.start_time));
+            break;
+        case SR_SYS_CLOCK_OLD_CSR_BASE_OFFSET:
+            SR_READ_VALUE(file, len, &old.base_offset, sizeof(old.base_offset));
+            break;
+        case SR_SYS_CLOCK_OLD_CSR_FINE_S_RATE:
+            SR_READ_VALUE(file, len, &old.fine_s_rate, sizeof(old.fine_s_rate));
+            break;
+        case SR_SYS_CLOCK_OLD_CSR_GROSS_S_RATE:
+            SR_READ_VALUE(file, len, &old.gross_s_rate, sizeof(old.gross_s_rate));
+            break;
+        case SR_SYS_CLOCK_NEW_CSR_START_TIME:
+            SR_READ_VALUE(file, len, &new.start_time, sizeof(new.start_time));
+            break;
+        case SR_SYS_CLOCK_NEW_CSR_BASE_OFFSET:
+            SR_READ_VALUE(file, len, &new.base_offset, sizeof(new.base_offset));
+            break;
+        case SR_SYS_CLOCK_NEW_CSR_FINE_S_RATE:
+            SR_READ_VALUE(file, len, &new.fine_s_rate, sizeof(new.fine_s_rate));
+            break;
+        case SR_SYS_CLOCK_NEW_CSR_GROSS_S_RATE:
+            SR_READ_VALUE(file, len, &new.gross_s_rate, sizeof(new.gross_s_rate));
+            break;
+        default:
+            SR_READ_SKIP(file, len);
+            break;
+        }
+    } while ((key & SR_SYS_MASK) == SR_SYS_CLOCK);
+    return 0;
+}
+
 
 #endif
 
 
 #if defined(FEATURE_INTERVAL_TIMER)
-void ARCH_DEP(store_int_timer) (REGS *regs)
+static void ARCH_DEP(_store_int_timer_2) (REGS *regs,int getlock)
 {
 S32 itimer;
+S32 vtimer=0;
+
     FETCH_FW(itimer, regs->psa->inttimer);
+    if(getlock)
+    {
+        OBTAIN_INTLOCK(regs->hostregs?regs:NULL);
+    }
     if(itimer != regs->old_timer)
     {
-// ZZ   logmsg(D_("Interval timer out of sync, core=%8.8X, internal=%8.8X\n"), itimer, regs->old_timer);
+// ZZ       logmsg(D_("Interval timer out of sync, core=%8.8X, internal=%8.8X\n"), itimer, regs->old_timer);
         set_int_timer(regs, itimer);
     }
     else
-        regs->old_timer = itimer = int_timer(regs);
+    {
+        itimer=int_timer(regs);
+    }
     STORE_FW(regs->psa->inttimer, itimer);
 #if defined(FEATURE_ECPSVM)
     if(regs->ecps_vtmrpt)
     {
-        FETCH_FW(itimer, regs->ecps_vtmrpt);
-        if(itimer != regs->ecps_oldtmr)
+        FETCH_FW(vtimer, regs->ecps_vtmrpt);
+        if(vtimer != regs->ecps_oldtmr)
         {
 // ZZ       logmsg(D_("ECPS vtimer out of sync, core=%8.8X, internal=%8.8X\n"), itimer, regs->ecps_vtimer);
             set_ecps_vtimer(regs, itimer);
         }
         else
-            regs->ecps_oldtmr = itimer = ecps_vtimer(regs);
+        {
+            vtimer=ecps_vtimer(regs);
+        }
         STORE_FW(regs->ecps_vtmrpt, itimer);
     }
 #endif /*defined(FEATURE_ECPSVM)*/
+
+    /* ISW : Invoke chk_int_timer *before* setting old_timer */
+    /*       however, the value must be one fetched *before* */
+    /*       chk_int_timer was invoked otherwise a window    */
+    /*       exists during which the interval timer could go */
+    /*       negative undetected                             */
+
     chk_int_timer(regs);
+    regs->old_timer = itimer;
+#if defined(FEATURE_ECPSVM)
+    if(regs->ecps_vtmrpt)
+    {
+        regs->ecps_oldtmr = vtimer;
+    }
+#endif /*defined(FEATURE_ECPSVM)*/
+
+    if(getlock)
+    {
+        RELEASE_INTLOCK(regs->hostregs?regs:NULL);
+    }
 }
 
 
-void ARCH_DEP(fetch_int_timer) (REGS *regs)
+DLL_EXPORT void ARCH_DEP(store_int_timer) (REGS *regs)
+{
+    ARCH_DEP(_store_int_timer_2) (regs,1);
+}
+
+
+void ARCH_DEP(store_int_timer_nolock) (REGS *regs)
+{
+    ARCH_DEP(_store_int_timer_2) (regs,0);
+}
+
+
+DLL_EXPORT void ARCH_DEP(fetch_int_timer) (REGS *regs)
 {
 S32 itimer;
     FETCH_FW(itimer, regs->psa->inttimer);
+    OBTAIN_INTLOCK(regs->hostregs?regs:NULL);
     set_int_timer(regs, itimer);
 #if defined(FEATURE_ECPSVM)
     if(regs->ecps_vtmrpt)
@@ -433,6 +598,7 @@ S32 itimer;
         set_ecps_vtimer(regs, itimer);
     }
 #endif /*defined(FEATURE_ECPSVM)*/
+    RELEASE_INTLOCK(regs->hostregs?regs:NULL);
 }
 #endif
 

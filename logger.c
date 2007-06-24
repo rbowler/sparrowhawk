@@ -1,5 +1,7 @@
-/* LOGGER.C     (c) Copyright Jan Jaeger, 2003-2006                  */
+/* LOGGER.C     (c) Copyright Jan Jaeger, 2003-2007                  */
 /*              System logger functions                              */
+
+// $Id: logger.c,v 1.49 2007/06/23 00:04:14 ivan Exp $
 
 /* If standard output or standard error is redirected then the log   */
 /* is written to the redirection.                                    */
@@ -11,6 +13,20 @@
 /* Any thread can determine background mode by inspecting stderr     */
 /* for isatty()                                                      */
 
+// $Log: logger.c,v $
+// Revision 1.49  2007/06/23 00:04:14  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.48  2007/02/27 21:59:32  kleonard
+// PR# misc/87 startup messages fix completion
+//
+// Revision 1.47  2007/01/31 00:48:03  kleonard
+// Add logopt config statement and panel command
+//
+// Revision 1.46  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
 
 #define _LOGGER_C_
@@ -18,8 +34,6 @@
 
 #include "hercules.h"
 #include "opcode.h"             /* Required for SETMODE macro        */
-
-
 static ATTR  logger_attr;
 static COND  logger_cond;
 static LOCK  logger_lock;
@@ -286,6 +300,18 @@ int bytes_read;
             bytes_read = 0;
         }
 
+        /* If Hercules is not running in daemon mode and panel
+           initialization is not yet complete, write message
+           to stderr so the user can see it on the terminal */
+        if (!sysblk.daemon_mode)
+        {
+            if (!sysblk.panel_init)
+            {
+                /* (ignore any errors; we did the best we could) */
+                fwrite( logger_buffer + logger_currmsg, bytes_read, 1, stderr );
+            }
+        }
+
         if (logger_hrdcpy)
 #ifndef OPTION_TIMESTAMP_LOGFILE
             logger_logfile_write( logger_buffer + logger_currmsg, bytes_read );
@@ -300,7 +326,7 @@ int bytes_read;
 
             if (needstamp)
             {
-                logger_logfile_timestamp();
+                if (!sysblk.logoptnotime) logger_logfile_timestamp();
                 needstamp = 0;
             }
 
@@ -321,7 +347,7 @@ int bytes_read;
                     break;
                 }
 
-                logger_logfile_timestamp();
+                if (!sysblk.logoptnotime) logger_logfile_timestamp();
             }
 
             if (nLeft)
@@ -352,7 +378,7 @@ int bytes_read;
         char* term_msg = _("HHCLG014I logger thread terminating\n");
         int   term_msg_len = strlen( term_msg );
 #ifdef OPTION_TIMESTAMP_LOGFILE
-        logger_logfile_timestamp();
+        if (!sysblk.logoptnotime) logger_logfile_timestamp();
 #endif
         logger_logfile_write( term_msg, term_msg_len );
     }
@@ -371,7 +397,6 @@ int bytes_read;
 
 DLL_EXPORT void logger_init(void)
 {
-//  initialize_detach_attr (&logger_attr);
     initialize_join_attr(&logger_attr);     // (JOINable)
     initialize_condition (&logger_cond);
     initialize_lock (&logger_lock);

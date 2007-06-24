@@ -1,6 +1,15 @@
-/* SERVICE.H    (c) Copyright Jan Jaeger, 1999-2006                  */
+/* SERVICE.H    (c) Copyright Jan Jaeger, 1999-2007                  */
 /*              Service Processor Architectured fields               */
 
+// $Id: service.h,v 1.12 2007/06/23 00:04:15 ivan Exp $
+//
+// $Log: service.h,v $
+// Revision 1.12  2007/06/23 00:04:15  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.11  2006/12/08 09:43:30  jj
+// Add CVS message log
+//
 
 #if !defined(_SERVICE_H)
 

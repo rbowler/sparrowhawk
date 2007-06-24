@@ -1,6 +1,8 @@
 /* $OpenBSD: sha2.c,v 1.6 2004/05/03 02:57:36 millert Exp $ */
 /* modified for use with dyncrypt */
 
+// $Id: sha256.c,v 1.9 2006/12/08 09:43:35 jj Exp $
+
 /*
  * FILE: sha2.c
  * AUTHOR: Aaron D. Gifford <me@aarongifford.com>
@@ -35,8 +37,20 @@
  * $From: sha2.c,v 1.1 2001/11/08 00:01:51 adg Exp adg $
  */
 
+// $Log: sha256.c,v $
+// Revision 1.9  2006/12/08 09:43:35  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
+
+#include "hercules.h"
 #include "opcode.h" /* For CSWAP macros */
+
 #include "sha256.h"
 
 #define bcopy(_src,_dest,_len) memcpy(_dest,_src,_len)

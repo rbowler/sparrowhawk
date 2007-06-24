@@ -1,5 +1,15 @@
-/* LOGGER.H     (c) Copyright Jan Jaeger, 2003-2006                  */
+/* LOGGER.H     (c) Copyright Jan Jaeger, 2003-2007                  */
 /*              System logger functions                              */
+
+// $Id: logger.h,v 1.22 2007/06/23 00:04:14 ivan Exp $
+//
+// $Log: logger.h,v $
+// Revision 1.22  2007/06/23 00:04:14  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.21  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
 
 #ifndef __LOGGER_H__
 #define __LOGGER_H__

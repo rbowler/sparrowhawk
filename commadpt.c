@@ -6,6 +6,13 @@
 /* Prime Maintainer : Ivan Warren                                    */
 /*-------------------------------------------------------------------*/
 
+// $Id: commadpt.c,v 1.39 2006/12/08 09:43:18 jj Exp $
+//
+// $Log: commadpt.c,v $
+// Revision 1.39  2006/12/08 09:43:18  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
 #include "hercules.h"
 #include "devtype.h"
@@ -123,7 +130,7 @@ static void logdump(char *txt,DEVBLK *dev,BYTE *bfr,size_t sz)
 /*-------------------------------------------------------------------*/
 /* Buffer ring management : Init a buffer ring                       */
 /*-------------------------------------------------------------------*/
-void commadpt_ring_init(COMMADPT_RING *ring,size_t sz)
+void commadpt_ring_init(COMMADPT_RING *ring,size_t sz,int trace)
 {
     ring->bfr=malloc(sz);
     ring->sz=sz;
@@ -131,12 +138,24 @@ void commadpt_ring_init(COMMADPT_RING *ring,size_t sz)
     ring->lo=0;
     ring->havedata=0;
     ring->overflow=0;
+    if(trace)
+    {
+        logmsg("HCCCA999D : Ring buffer for ring %p allocated at %p\n",
+            ring,
+            ring->bfr);
+    }
 }
 /*-------------------------------------------------------------------*/
 /* Buffer ring management : Free a buffer ring                       */
 /*-------------------------------------------------------------------*/
-static void commadpt_ring_terminate(COMMADPT_RING *ring)
+static void commadpt_ring_terminate(COMMADPT_RING *ring,int trace)
 {
+    if(trace)
+    {
+        logmsg("HCCCA999D : Ring buffer for ring %p at %p freed\n",
+            ring,
+            ring->bfr);
+    }
     if(ring->bfr!=NULL)
     {
         free(ring->bfr);
@@ -164,7 +183,7 @@ static void commadpt_ring_flush(COMMADPT_RING *ring)
 inline static void commadpt_ring_push(COMMADPT_RING *ring,BYTE b)
 {
     ring->bfr[ring->hi++]=b;
-    if(ring->hi>ring->sz)
+    if(ring->hi>=ring->sz)
     {
         ring->hi=0;
     }
@@ -192,7 +211,7 @@ inline static BYTE commadpt_ring_pop(COMMADPT_RING *ring)
 {
     register BYTE b;
     b=ring->bfr[ring->lo++];
-    if(ring->lo>ring->sz)
+    if(ring->lo>=ring->sz)
     {
         ring->lo=0;
     }
@@ -220,11 +239,22 @@ inline static size_t commadpt_ring_popbfr(COMMADPT_RING *ring,BYTE *b,size_t sz)
 /*-------------------------------------------------------------------*/
 static void commadpt_clean_device(DEVBLK *dev)
 {
-    commadpt_ring_terminate(&dev->commadpt->inbfr);
-    commadpt_ring_terminate(&dev->commadpt->outbfr);
-    commadpt_ring_terminate(&dev->commadpt->rdwrk);
+    if(!dev)
+    {
+        /*
+         * Shouldn't happen.. But during shutdown, some weird
+         * things happen !
+         */
+        return;
+    }
     if(dev->commadpt!=NULL)
     {
+        commadpt_ring_terminate(&dev->commadpt->inbfr,dev->ccwtrace);
+        commadpt_ring_terminate(&dev->commadpt->outbfr,dev->ccwtrace);
+        commadpt_ring_terminate(&dev->commadpt->rdwrk,dev->ccwtrace);
+        commadpt_ring_terminate(&dev->commadpt->pollbfr,dev->ccwtrace);
+        /* release the CA lock */
+        release_lock(&dev->commadpt->lock);
         free(dev->commadpt);
         dev->commadpt=NULL;
         if(dev->ccwtrace)
@@ -256,10 +286,10 @@ static int commadpt_alloc_device(DEVBLK *dev)
         return -1;
     }
     memset(dev->commadpt,0,sizeof(COMMADPT));
-    commadpt_ring_init(&dev->commadpt->inbfr,4096);
-    commadpt_ring_init(&dev->commadpt->outbfr,4096);
-    commadpt_ring_init(&dev->commadpt->pollbfr,4096);
-    commadpt_ring_init(&dev->commadpt->rdwrk,65536);
+    commadpt_ring_init(&dev->commadpt->inbfr,4096,dev->ccwtrace);
+    commadpt_ring_init(&dev->commadpt->outbfr,4096,dev->ccwtrace);
+    commadpt_ring_init(&dev->commadpt->pollbfr,4096,dev->ccwtrace);
+    commadpt_ring_init(&dev->commadpt->rdwrk,65536,dev->ccwtrace);
     dev->commadpt->dev=dev;
     return 0;
 }
@@ -1319,10 +1349,6 @@ static int commadpt_init_handler (DEVBLK *dev, int argc, char *argv[])
                 logmsg(_("HHCCA300D %4.4X:Initialisation starting\n"),dev->devnum);
         }
 
-        if(dev->commadpt!=NULL)
-        {
-            commadpt_clean_device(dev);
-        }
         rc=commadpt_alloc_device(dev);
         if(rc<0)
         {
@@ -1673,14 +1699,14 @@ static int commadpt_close_device ( DEVBLK *dev )
         logmsg(_("HHCCA300D %4.4X:Closing down\n"),dev->devnum);
     }
 
-    /* Obtain the CA lock */
-    obtain_lock(&dev->commadpt->lock);
-
     /* Terminate current I/O thread if necessary */
     if(dev->busy)
     {
         commadpt_halt(dev);
     }
+
+    /* Obtain the CA lock */
+    obtain_lock(&dev->commadpt->lock);
 
     /* Terminate worker thread if it is still up */
     if(dev->commadpt->have_cthread)
@@ -1692,10 +1718,9 @@ static int commadpt_close_device ( DEVBLK *dev )
         dev->commadpt->have_cthread=0;
     }
 
-    /* release the CA lock */
-    release_lock(&dev->commadpt->lock);
 
     /* Free all work storage */
+    /* The CA lock will be released by the cleanup routine */
     commadpt_clean_device(dev);
 
     /* Indicate to hercules the device is no longer opened */
@@ -2487,6 +2512,7 @@ DEVHND comadpt_device_hndinfo = {
         NULL,                          /* Device Query used          */
         NULL,                          /* Device Reserve             */
         NULL,                          /* Device Release             */
+        NULL,                          /* Device Attention           */
         commadpt_immed_command,        /* Immediate CCW Codes        */
         NULL,                          /* Signal Adapter Input       */
         NULL,                          /* Signal Adapter Output      */
@@ -2513,7 +2539,7 @@ HDL_DEPENDENCY_SECTION;
      HDL_DEPENDENCY(DEVBLK);
      HDL_DEPENDENCY(SYSBLK);
 }
-END_DEPENDENCY_SECTION;
+END_DEPENDENCY_SECTION
 
 
 #if defined(WIN32) && !defined(HDL_USE_LIBTOOL) && !defined(_MSVC_)
@@ -2522,7 +2548,7 @@ END_DEPENDENCY_SECTION;
   {
     HDL_RESOLVE_PTRVAR( psysblk, sysblk );
   }
-  END_RESOLVER_SECTION;
+  END_RESOLVER_SECTION
 #endif
 
 
@@ -2530,5 +2556,5 @@ HDL_DEVICE_SECTION;
 {
     HDL_DEVICE(2703, comadpt_device_hndinfo );
 }
-END_DEVICE_SECTION;
+END_DEVICE_SECTION
 #endif

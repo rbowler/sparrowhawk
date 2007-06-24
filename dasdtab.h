@@ -1,11 +1,27 @@
-/* DASDTAB.H    (c) Copyright Roger Bowler, 1999-2006                */
+/* DASDTAB.H    (c) Copyright Roger Bowler, 1999-2007                */
 /*              DASD table structures                                */
+
+// $Id: dasdtab.h,v 1.14 2007/06/23 00:04:08 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This header file contains defines the table entries that          */
 /* describe all DASD devices supported by Hercules.                  */
 /* It also contains function prototypes for the DASD table utilities.*/
 /*-------------------------------------------------------------------*/
+
+// $Log: dasdtab.h,v $
+// Revision 1.14  2007/06/23 00:04:08  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.13  2007/03/06 22:54:19  gsmith
+// Fix ckd RDC response
+//
+// Revision 1.12  2007/02/15 00:10:04  gsmith
+// Fix ckd RCD, SNSS, SNSID responses
+//
+// Revision 1.11  2006/12/08 09:43:20  jj
+// Add CVS message log
+//
 
 #if !defined(_DASDTAB_H)
 #define _DASDTAB_H
@@ -21,6 +37,23 @@
 #else
 #define DTB_DLL_IMPORT DLL_EXPORT
 #endif
+
+#define CKD_CONFIG_DATA_SIZE 256
+#if 0
+#define myssid (dev->devnum & 0xffe0)   /* Storage subsystem identifier
+                                           32 devices per subsystem  */
+#else
+#define myssid SSID(dev)
+#endif
+
+/* 32 devices per subsystem */
+#define DEVICES_PER_SUBSYS_SHIFT 5
+#define DEVICES_PER_SUBSYS (1 << DEVICES_PER_SUBSYS_SHIFT)
+#define SSID(_dev) ((_dev)->devnum & ~(DEVICES_PER_SUBSYS-1))
+#define IFID(_dev) ((SSID((_dev)) >> DEVICES_PER_SUBSYS_SHIFT) & 0x7)
+
+/* Test for 3990-6 control unit with extended function */
+#define MODEL6(_cu) ((_cu)->devt == 0x3990 && (_cu)->model == 0xe9)
 
 /*-------------------------------------------------------------------*/
 /* Definition of a CKD DASD device entry                             */
@@ -54,6 +87,8 @@ typedef struct _CKDCU {                 /* CKD Control Unit entry    */
         U16     devt;                   /* Control Unit type         */
         BYTE    model;                  /* Control Unit model        */
         BYTE    code;                   /* Control Unit code         */
+        BYTE    funcfeat;               /* Functions/Features        */
+        BYTE    typecode;               /* CU Type Code              */
         U32     sctlfeat;               /* Control Unit features     */
         U32     ciw1;                   /* CIW 1                     */
         U32     ciw2;                   /* CIW 2                     */
@@ -96,6 +131,8 @@ typedef struct _FBADEV {                /* FBA Device entry          */
 DTB_DLL_IMPORT void   *dasd_lookup (int, char *, U32   , U32   );
 int     dasd_build_ckd_devid (CKDDEV *, CKDCU *, BYTE *);
 int     dasd_build_ckd_devchar (CKDDEV *, CKDCU *, BYTE *, int);
+DTB_DLL_IMPORT int     dasd_build_ckd_config_data (DEVBLK *, BYTE *, int);
+DTB_DLL_IMPORT int     dasd_build_ckd_subsys_status (DEVBLK *, BYTE *, int);
 int     dasd_build_fba_devid (FBADEV *, BYTE *);
 int     dasd_build_fba_devchar (FBADEV *, BYTE *, int);
 

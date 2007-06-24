@@ -2,6 +2,8 @@
 
 #****************************************************************************
 #
+# $Id: cvslvlck,v 1.12 2006/12/25 13:55:19 jj Exp $
+#
 #                         C V S L V L C K
 #
 #  This perl script checks the user's system for the required levels of
@@ -10,6 +12,11 @@
 #****************************************************************************
 #
 #                       ---- CHANGE LOG ----
+# $Log: cvslvlck,v $
+# Revision 1.12  2006/12/25 13:55:19  jj
+# Add cvs message log
+#
+# 
 # DD/MM/YY Description...
 # 21/09/03 Removed libintl & libtool. Although "gettextize" is no longer
 #          run, pkg "gettext" is still needed to run the msgfmt/msgmerge
@@ -77,8 +84,8 @@ $ans = lc $ans;
 if ($ans eq 'y' || $ans eq '') {
 	die "HOME environment variable not set" if ! exists $ENV{'HOME'};
 	my $home = $ENV{'HOME'};		# root nonsense, ~ doesn't work right
-	unless (open PROFILE, "> $home/.profile") {die "Open $home/.profile failed: $!"};
-	print PROFILE "CVSROOT=$cvsroot ; export CVSROOT\n";
+	unless (open PROFILE, ">> $home/.profile") {die "Open $home/.profile failed: $!"};
+	print PROFILE "\nCVSROOT=$cvsroot ; export CVSROOT\n";
 	close PROFILE;
 	print "Updated $home/.profile for CVSROOT\n";
 	print "To use updated CVSROOT value, open new session or logout/login\n";

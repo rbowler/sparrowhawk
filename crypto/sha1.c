@@ -1,6 +1,8 @@
 /* $OpenBSD: sha1.c,v 1.5 2004/04/28 20:39:35 hshoexer Exp $ */
 /* modified for use with dyncrypt */
 
+// $Id: sha1.c,v 1.14 2006/12/08 09:43:35 jj Exp $
+
 /*
  * SHA-1 in C
  * By Steve Reid <steve@edmweb.com>
@@ -17,9 +19,12 @@
 
 /* #define SHA1HANDSOFF */ /* Copies data before messing with it. */
 
+// $Log: sha1.c,v $
+// Revision 1.14  2006/12/08 09:43:35  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
-#include "opcode.h" /* For CSWAP macros */
 #include "sha1.h"
 
 #define bcopy(_src,_dest,_len) memcpy(_dest,_src,_len)

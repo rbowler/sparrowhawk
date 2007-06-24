@@ -1,5 +1,7 @@
-/* DASDPDSU.C   (c) Copyright Roger Bowler, 1999-2006                */
+/* DASDPDSU.C   (c) Copyright Roger Bowler, 1999-2007                */
 /*              Hercules DASD Utilities: PDS unloader                */
+
+// $Id: dasdpdsu.c,v 1.27 2007/06/23 00:04:08 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This program unloads members of a partitioned dataset from        */
@@ -15,6 +17,14 @@
 /* working directory. If the ascii keyword is not specified then     */
 /* the members are unloaded as fixed length binary files.            */
 /*-------------------------------------------------------------------*/
+
+// $Log: dasdpdsu.c,v $
+// Revision 1.27  2007/06/23 00:04:08  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.26  2006/12/08 09:43:19  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 

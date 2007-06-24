@@ -2,6 +2,13 @@
 /*   HTYPES.H             Hercules typedefs...                       */
 /*-------------------------------------------------------------------*/
 
+// $Id: htypes.h,v 1.8 2006/12/08 09:43:28 jj Exp $
+//
+// $Log: htypes.h,v $
+// Revision 1.8  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
+
 #ifndef _HTYPES_H_
 #define _HTYPES_H_
 /*
@@ -58,7 +65,7 @@ typedef  uint8_t    QWORD[16];  // unsigned quadword   (16 bytes)
   #define  I64_FMT                  "l"
 #else // defined(SIZEOF_LONG) && SIZEOF_LONG == 4
   #define  I16_FMT                  "h"
-  #define  I32_FMT                  "l"
+  #define  I32_FMT                  ""
   #define  I64_FMT                  "ll"
 #endif
 
@@ -163,6 +170,7 @@ typedef struct CCKDDASD_DEVHDR  CCKDDASD_DEVHDR;  // Compress device header
 typedef struct CCKD_L2ENT       CCKD_L2ENT;       // Level 2 table entry
 
 typedef struct CCKD_FREEBLK     CCKD_FREEBLK;     // Free block
+typedef struct CCKD_IFREEBLK    CCKD_IFREEBLK;    // Free block (internal)
 typedef struct CCKD_RA          CCKD_RA;          // Readahead queue entry
 
 typedef struct CCKDBLK          CCKDBLK;          // Global cckd dasd block

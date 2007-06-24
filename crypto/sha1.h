@@ -1,11 +1,18 @@
 /* $OpenBSD: sha1.h,v 1.4 2004/04/28 20:39:35 hshoexer Exp $ */
 /* modified for use with dyncrypt */
 
+// $Id: sha1.h,v 1.11 2006/12/08 09:43:35 jj Exp $
+
 /*
  * SHA-1 in C
  * By Steve Reid <steve@edmweb.com>
  * 100% Public Domain
  */
+
+// $Log: sha1.h,v $
+// Revision 1.11  2006/12/08 09:43:35  jj
+// Add CVS message log
+//
 
 #ifndef _SHA1_H_
 #define _SHA1_H_

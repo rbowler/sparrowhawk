@@ -1,5 +1,7 @@
-/* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2006                  */
+/* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2007                  */
 /*              ESA/390 Diagnose Functions                           */
+
+// $Id: diagmssf.c,v 1.43 2007/06/23 00:04:08 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements various diagnose functions                 */
@@ -8,8 +10,19 @@
 /* LPAR RMF interface call                                           */
 /*                                                                   */
 /*                                             04/12/1999 Jan Jaeger */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 /*-------------------------------------------------------------------*/
+
+// $Log: diagmssf.c,v $
+// Revision 1.43  2007/06/23 00:04:08  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.42  2007/01/14 23:14:12  rbowler
+// Fix signed/unsigned mismatch in 370-only build
+//
+// Revision 1.41  2006/12/08 09:43:20  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -170,8 +183,10 @@ typedef struct _DIAG204_PART {
 
 typedef struct _DIAG204_PART_CPU {
         HWORD   cpaddr;                 /* CP address                */
-        HWORD   resv2[2];
-        HWORD   relshare;               /* Relative share            */
+        BYTE    resv2[2];
+        BYTE    index;                  /* Index into diag224 area   */
+        BYTE    cflag;                  /*   ???                     */
+        HWORD   weight;                 /* Weight                    */
         DBLWRD  totdispatch;            /* Total dispatch time       */
         DBLWRD  effdispatch;            /* Effective dispatch time   */
     } DIAG204_PART_CPU;
@@ -237,11 +252,11 @@ DEVBLK            *dev;                /* Device block pointer       */
         ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
     /* Obtain the interrupt lock */
-    obtain_lock (&sysblk.intlock);
+    OBTAIN_INTLOCK(regs);
 
     /* If a service signal is pending then we cannot process the request */
     if( IS_IC_SERVSIG && (sysblk.servparm & SERVSIG_ADDR)) {
-        release_lock (&sysblk.intlock);
+        RELEASE_INTLOCK(regs);
         return 2;   /* Service Processor Busy */
     }
 
@@ -347,7 +362,7 @@ DEVBLK            *dev;                /* Device block pointer       */
     ON_IC_SERVSIG; 
 
     /* Release the interrupt lock */
-    release_lock (&sysblk.intlock);
+    RELEASE_INTLOCK(regs);
 
     /* Return condition code 0: Command initiated */
     return 0;
@@ -366,7 +381,7 @@ DIAG204_PART_CPU  *cpuinfo;            /* CPU info                   */
 RADR              abs;                 /* abs addr of data area      */
 U64               dreg;                /* work doubleword            */
 U64               tdis = 0, teff = 0;
-U32               i;                   /* loop counter               */
+int               i;                   /* loop counter               */
 struct rusage     usage;               /* RMF type data              */
 static BYTE       physical[8] =
               {0xD7,0xC8,0xE8,0xE2,0xC9,0xC3,0xC1,0xD3}; /* PHYSICAL */
@@ -421,7 +436,7 @@ static U64        diag204tod;          /* last diag204 tod           */
           {
               memset(cpuinfo, 0, sizeof(DIAG204_PART_CPU));
               STORE_HW(cpuinfo->cpaddr,sysblk.regs[i]->cpuad);
-              STORE_HW(cpuinfo->relshare,100);
+              STORE_HW(cpuinfo->weight,100);
               dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) / sysblk.cpus;
               dreg = (dreg * 1000000) + (i ? 0 : (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec));
               tdis += dreg;
@@ -462,6 +477,54 @@ static U64        diag204tod;          /* last diag204 tod           */
     } /*switch(regs->GR_L(r2))*/
 
 } /* end function diag204_call */
+
+/*-------------------------------------------------------------------*/
+/* Process LPAR DIAG 224 call                                        */
+/*-------------------------------------------------------------------*/
+void ARCH_DEP(diag224_call) (int r1, int r2, REGS *regs)
+{
+RADR              abs;                 /* abs addr of data area      */
+BYTE             *p;                   /* pointer to the data area   */
+int               i;                   /* loop index                 */
+
+//FIXME : this is probably incomplete.
+//        see linux/arch/s390/hypfs/hypfs_diag.c
+    UNREFERENCED(r1);
+
+    abs = APPLY_PREFIXING (regs->GR_L(r2), regs->PX);
+
+    /* Program check if data area is not on a page boundary */
+    if ( (abs & PAGEFRAME_BYTEMASK) != 0x000)
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+    /* Program check if data area is outside main storage */
+    if ( abs > regs->mainlim )
+        ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
+
+    /* Point to DIAG 224 data area */
+    p = regs->mainstor + abs;
+
+    /* Mark page referenced */
+    STORAGE_KEY(abs, regs) |= STORKEY_REF | STORKEY_CHANGE;
+
+    /* First byte contains the number of entries - 1 */
+    *p = 0;
+
+    /* Clear the next 15 bytes */
+    memset (p + 1, 0, 15);
+
+    /* Set the first and only 16 byte entry */
+    p += 16;
+    if (sysblk.pgmprdos == PGM_PRD_OS_LICENSED)
+        memcpy(p, "CP                ", 16);
+    else
+        memcpy(p, "ICF               ", 16);
+
+    /* Convert to EBCDIC */
+    for (i = 0; i < 16; i++)
+        p[i] = host_to_guest(p[i]);
+
+} /* end function diag224_call */
 
 
 #if !defined(_GEN_ARCH)

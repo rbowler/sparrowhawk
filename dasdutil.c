@@ -1,9 +1,19 @@
-/* DASDUTIL.C   (c) Copyright Roger Bowler, 1999-2006                */
+/* DASDUTIL.C   (c) Copyright Roger Bowler, 1999-2007                */
 /*              Hercules DASD Utilities: Common subroutines          */
+
+// $Id: dasdutil.c,v 1.60 2007/06/23 00:04:08 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains common subroutines used by DASD utilities    */
 /*-------------------------------------------------------------------*/
+
+// $Log: dasdutil.c,v $
+// Revision 1.60  2007/06/23 00:04:08  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.59  2006/12/08 09:43:20  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -490,8 +500,10 @@ int             extsize;                /* Extent size in tracks     */
 /*-------------------------------------------------------------------*/
 /* Subroutine to open a CKD image file                               */
 /* Input:                                                            */
-/*      fname   CKD image file name                                  */
-/*      omode   Open mode: O_RDONLY or O_RDWR                        */
+/*      fname    CKD image file name                                 */
+/*      sfname   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           */
+/*      omode    Open mode: O_RDONLY or O_RDWR                       */
+/*      dasdcopy xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           */
 /*                                                                   */
 /* The CKD image file is opened, a track buffer is obtained,         */
 /* and a CKD image file descriptor structure is built.               */
@@ -728,8 +740,10 @@ BYTE            unitstat;               /* Unit status               */
 /*-------------------------------------------------------------------*/
 /* Subroutine to open a FBA image file                               */
 /* Input:                                                            */
-/*      fname   FBA image file name                                  */
-/*      omode   Open mode: O_RDONLY or O_RDWR                        */
+/*      fname    FBA image file name                                 */
+/*      sfname   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           */
+/*      omode    Open mode: O_RDONLY or O_RDWR                       */
+/*      dasdcopy xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           */
 /*                                                                   */
 /* The FBA image file is opened, a track buffer is obtained,         */
 /* and a FBA image file descriptor structure is built.               */
@@ -986,6 +1000,7 @@ char            volser[7];              /* Volume serial (ASCIIZ)    */
 /*      numrecs Number of records of specified length per track      */
 /*      numhead Number of tracks per cylinder                        */
 /*      numcyls Number of cylinders per volume                       */
+/* Note:                                                             */
 /*      A NULL address may be specified for any of the output        */
 /*      fields if the output value is not required.                  */
 /*      The return value is 0 if the record will fit on the track,   */
@@ -1106,27 +1121,30 @@ int             fl1, fl2, int1, int2;   /* 3380/3390/9345 calculation*/
 /*-------------------------------------------------------------------*/
 /* Subroutine to create a CKD DASD image file                        */
 /* Input:                                                            */
-/*      fname   DASD image file name                                 */
-/*      fseqn   Sequence number of this file (1=first)               */
-/*      devtype Device type                                          */
-/*      heads   Number of heads per cylinder                         */
-/*      trksize DADS image track length                              */
-/*      buf     -> Track image buffer                                */
-/*      start   Starting cylinder number for this file               */
-/*      end     Ending cylinder number for this file                 */
-/*      volcyls Total number of cylinders on volume                  */
-/*      volser  Volume serial number                                 */
-/*      comp    Compression algorithm for a compressed device.       */
-/*              Will be 0xff if device is not to be compressed.      */
+/*      fname    DASD image file name                                */
+/*      fseqn    Sequence number of this file (1=first)              */
+/*      devtype  Device type                                         */
+/*      heads    Number of heads per cylinder                        */
+/*      trksize  DADS image track length                             */
+/*      buf      -> Track image buffer                               */
+/*      start    Starting cylinder number for this file              */
+/*      end      Ending cylinder number for this file                */
+/*      volcyls  Total number of cylinders on volume                 */
+/*      volser   Volume serial number                                */
+/*      comp     Compression algorithm for a compressed device.      */
+/*               Will be 0xff if device is not to be compressed.     */
+/*      dasdcopy xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      */
+/*      nullfmt  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      */
+/*      rawflag  create raw image (skip special track 0 handling)    */
 /*-------------------------------------------------------------------*/
 static int
 create_ckd_file (char *fname, int fseqn, U16 devtype, U32 heads,
                 U32 trksize, BYTE *buf, U32 start, U32 end,
                 U32 volcyls, char *volser, BYTE comp, int dasdcopy,
-                int nullfmt)
+                int nullfmt, int rawflag)
 {
 int             rc;                     /* Return code               */
-OFF_T           rcoff;                  /* Return value from lseek() */
+off_t           rcoff;                  /* Return value from lseek() */
 int             fd;                     /* File descriptor           */
 int             i;                      /* Loop counter              */
 int             n;                      /* Loop delimiter            */
@@ -1336,7 +1354,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
                 r++;
 
                 /* Track 0 contains IPL records and volume label */
-                if (trk == 0)
+                if (!rawflag && trk == 0)
                 {
                     /* Build the IPL1 record */
                     rechdr = (CKDDASD_RECHDR*)pos;
@@ -1605,7 +1623,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
         cdevhdr.size = cdevhdr.used = cpos;
 
         /* Rewrite the compressed device header */
-        rcoff = LSEEK (fd, CKDDASD_DEVHDR_SIZE, SEEK_SET);
+        rcoff = lseek (fd, CKDDASD_DEVHDR_SIZE, SEEK_SET);
         if (rcoff == -1)
         {
             fprintf (stderr, _("HHCDU036E %s compressed device header "
@@ -1623,7 +1641,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
         }
 
         /* Rewrite the secondary lookup table */
-        rcoff = LSEEK (fd, (OFF_T)l1[0], SEEK_SET);
+        rcoff = lseek (fd, (off_t)l1[0], SEEK_SET);
         if (rcoff == -1)
         {
             fprintf (stderr, _("HHCDU038E %s secondary lookup table "
@@ -1639,7 +1657,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
                     fname, errno ? strerror(errno) : "incomplete");
             return -1;
         }
-        rc = FTRUNCATE(fd, (OFF_T)cdevhdr.size);
+        rc = ftruncate(fd, (off_t)cdevhdr.size);
 
         free (l1);
         cyl = volcyls;
@@ -1665,14 +1683,18 @@ char            pathname[MAX_PATH];     /* file path in host format  */
 /*-------------------------------------------------------------------*/
 /* Subroutine to create a CKD DASD image                             */
 /* Input:                                                            */
-/*      fname   DASD image file name                                 */
-/*      devtype Device type                                          */
-/*      heads   Number of heads per cylinder                         */
-/*      maxdlen Maximum R1 record data length                        */
-/*      volcyls Total number of cylinders on volume                  */
-/*      volser  Volume serial number                                 */
-/*      comp    Compression algorithm for a compressed device.       */
-/*              Will be 0xff if device is not to be compressed.      */
+/*      fname    DASD image file name                                */
+/*      devtype  Device type                                         */
+/*      heads    Number of heads per cylinder                        */
+/*      maxdlen  Maximum R1 record data length                       */
+/*      volcyls  Total number of cylinders on volume                 */
+/*      volser   Volume serial number                                */
+/*      comp     Compression algorithm for a compressed device.      */
+/*               Will be 0xff if device is not to be compressed.     */
+/*      lfs      build large (uncompressed) file (if supported)      */
+/*      dasdcopy xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      */
+/*      nullfmt  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      */
+/*      rawflag  create raw image (skip special track 0 handling)    */
 /*                                                                   */
 /* If the total number of cylinders exceeds the capacity of a 2GB    */
 /* file, then multiple CKD image files will be created, with the     */
@@ -1682,7 +1704,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
 DLL_EXPORT int
 create_ckd (char *fname, U16 devtype, U32 heads, U32 maxdlen,
            U32 volcyls, char *volser, BYTE comp, int lfs, int dasdcopy,
-           int nullfmt)
+           int nullfmt, int rawflag)
 {
 int             i;                      /* Array subscript           */
 int             rc;                     /* Return code               */
@@ -1742,7 +1764,7 @@ U32             trksize;                /* DASD image track length   */
     fprintf (stderr,
             _("HHCDU044I Creating %4.4X volume %s: %u cyls, "
             "%u trks/cyl, %u bytes/track\n"),
-            devtype, volser, volcyls, heads, trksize);
+            devtype, rawflag ? "" : volser, volcyls, heads, trksize);
 
     /* Copy the unsuffixed DASD image file name */
     strcpy (sfname, fname);
@@ -1796,7 +1818,7 @@ U32             trksize;                /* DASD image track length   */
         /* Create a CKD DASD image file */
         rc = create_ckd_file (sfname, fileseq, devtype, heads,
                     trksize, buf, cyl, endcyl, volcyls, volser,
-                    comp, dasdcopy, nullfmt);
+                    comp, dasdcopy, nullfmt, rawflag);
         if (rc < 0) return -1;
     }
 
@@ -1809,17 +1831,20 @@ U32             trksize;                /* DASD image track length   */
 /*-------------------------------------------------------------------*/
 /* Subroutine to create an FBA DASD image file                       */
 /* Input:                                                            */
-/*      fname   DASD image file name                                 */
-/*      devtype Device type                                          */
-/*      sectsz  Sector size                                          */
-/*      sectors Number of sectors                                    */
-/*      volser  Volume serial number                                 */
-/*      comp    Compression algorithm for a compressed device.       */
-/*              Will be 0xff if device is not to be compressed.      */
+/*      fname    DASD image file name                                */
+/*      devtype  Device type                                         */
+/*      sectsz   Sector size                                         */
+/*      sectors  Number of sectors                                   */
+/*      volser   Volume serial number                                */
+/*      comp     Compression algorithm for a compressed device.      */
+/*               Will be 0xff if device is not to be compressed.     */
+/*      lfs      build large (uncompressed) file (if supported)      */
+/*      dasdcopy xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      */
+/*      rawflag  create raw image (skip sector 1 VOL1 processing)    */
 /*-------------------------------------------------------------------*/
 DLL_EXPORT int
 create_fba (char *fname, U16 devtype, U32 sectsz, U32 sectors,
-            char *volser, BYTE comp, int lfs, int dasdcopy)
+            char *volser, BYTE comp, int lfs, int dasdcopy, int rawflag)
 {
 int             rc;                     /* Return code               */
 int             fd;                     /* File descriptor           */
@@ -1834,7 +1859,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     if (comp != 0xff)
     {
         rc = create_compressed_fba (fname, devtype, sectsz, sectors,
-                                    volser, comp, lfs, dasdcopy);
+                                    volser, comp, lfs, dasdcopy, rawflag);
         return rc;
     }
 
@@ -1864,7 +1889,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     fprintf (stderr,
             _("HHCDU047I Creating %4.4X volume %s: "
             "%u sectors, %u bytes/sector\n"),
-            devtype, volser, sectors, sectsz);
+            devtype, rawflag ? "" : volser, sectors, sectsz);
 
     /* if `dasdcopy' > 1 then we can replace the existing file */
     if (dasdcopy > 1) x = 0;
@@ -1883,8 +1908,8 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     /* If the `dasdcopy' bit is on then simply allocate the space */
     if (dasdcopy)
     {
-        OFF_T sz = sectors * sectsz;
-        rc = FTRUNCATE (fd, sz);
+        off_t sz = sectors * sectsz;
+        rc = ftruncate (fd, sz);
         if (rc < 0)
         {
             fprintf (stderr, _("HHCDU049E %s dasdcopy ftruncate error: %s\n"),
@@ -1901,7 +1926,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
             memset (buf, 0, sectsz);
 
             /* Sector 1 contains the volume label */
-            if (sectnum == 1)
+            if (!rawflag && sectnum == 1)
             {
                 convert_to_ebcdic (buf, 4, "VOL1");
                 convert_to_ebcdic (buf+4, 6, volser);
@@ -1953,19 +1978,23 @@ char            pathname[MAX_PATH];     /* file path in host format  */
 /*-------------------------------------------------------------------*/
 /* Subroutine to create a compressed FBA DASD image file             */
 /* Input:                                                            */
-/*      fname   DASD image file name                                 */
-/*      devtype Device type                                          */
-/*      sectsz  Sector size                                          */
-/*      sectors Number of sectors                                    */
-/*      volser  Volume serial number                                 */
-/*      comp    Compression algorithm for a compressed device.       */
+/*      fname    DASD image file name                                */
+/*      devtype  Device type                                         */
+/*      sectsz   Sector size                                         */
+/*      sectors  Number of sectors                                   */
+/*      volser   Volume serial number                                */
+/*      comp     Compression algorithm for a compressed device.      */
+/*      lfs      build large (uncompressed) file (if supported)      */
+/*      dasdcopy xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      */
+/*      rawflag  create raw image (skip sector 1 VOL1 processing)    */
 /*-------------------------------------------------------------------*/
 int
 create_compressed_fba (char *fname, U16 devtype, U32 sectsz,
-           U32 sectors, char *volser, BYTE comp, int lfs, int dasdcopy)
+           U32 sectors, char *volser, BYTE comp, int lfs, int dasdcopy,
+           int rawflag)
 {
 int             rc;                     /* Return code               */
-OFF_T           rcoff;                  /* Return value from lseek() */
+off_t           rcoff;                  /* Return value from lseek() */
 int             fd;                     /* File descriptor           */
 CKDDASD_DEVHDR  devhdr;                 /* Device header             */
 CCKDDASD_DEVHDR cdevhdr;                /* Compressed device header  */
@@ -2010,7 +2039,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     fprintf (stderr,
             _("HHCDU055I Creating %4.4X compressed volume %s: "
             "%u sectors, %u bytes/sector\n"),
-            devtype, volser, sectors, sectsz);
+            devtype, rawflag ? "" : volser, sectors, sectsz);
 
     /* Write the device header */
     memset (&devhdr, 0, CKDDASD_DEVHDR_SIZE);
@@ -2072,8 +2101,11 @@ char            pathname[MAX_PATH];     /* file path in host format  */
 
     /* Write the 1st block group */
     memset (&buf, 0, CKDDASD_DEVHDR_SIZE + CFBA_BLOCK_SIZE);
-    convert_to_ebcdic (&buf[CKDDASD_TRKHDR_SIZE+sectsz], 4, "VOL1");
-    convert_to_ebcdic (&buf[CKDDASD_TRKHDR_SIZE+sectsz+4], 6, volser);
+    if (!rawflag)
+    {
+        convert_to_ebcdic (&buf[CKDDASD_TRKHDR_SIZE+sectsz], 4, "VOL1");
+        convert_to_ebcdic (&buf[CKDDASD_TRKHDR_SIZE+sectsz+4], 6, volser);
+    }
     len2 = sizeof(buf2);
 #ifdef HAVE_LIBZ
     rc = compress2 (&buf2[0], &len2, &buf[CKDDASD_TRKHDR_SIZE],
@@ -2117,7 +2149,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     }
 
     /* Re-write the compressed device header */
-    rcoff = LSEEK (fd, CKDDASD_DEVHDR_SIZE, SEEK_SET);
+    rcoff = lseek (fd, CKDDASD_DEVHDR_SIZE, SEEK_SET);
     if (rcoff < 0)
     {
         fprintf (stderr, _("HHCDU063E %s cdevhdr lseek error: %s\n"),
@@ -2133,7 +2165,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     }
 
     /* Re-write the 1st level 2 table */
-    rcoff = LSEEK (fd, CKDDASD_DEVHDR_SIZE + CCKDDASD_DEVHDR_SIZE + l1tabsz, SEEK_SET);
+    rcoff = lseek (fd, CKDDASD_DEVHDR_SIZE + CCKDDASD_DEVHDR_SIZE + l1tabsz, SEEK_SET);
     if (rcoff < 0)
     {
         fprintf (stderr, _("HHCDU065E %s l2tab lseek error: %s\n"),

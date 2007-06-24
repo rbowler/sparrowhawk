@@ -7,6 +7,16 @@
 //      The <config.h> header and other required headers are
 //      presumed to have already been #included ahead of it...
 
+// $Id: hexterns.h,v 1.15 2007/01/11 19:54:33 fish Exp $
+//
+// $Log: hexterns.h,v $
+// Revision 1.15  2007/01/11 19:54:33  fish
+// Addt'l keep-alive mods: create associated supporting config-file stmt and panel command where individual customer-preferred values can be specified and/or dynamically modified.
+//
+// Revision 1.14  2006/12/08 09:43:26  jj
+// Add CVS message log
+//
+
 #ifndef _HEXTERNS_H
 #define _HEXTERNS_H
 
@@ -50,6 +60,16 @@
 #define HCMD_DLL_IMPORT DLL_EXPORT
 #endif
 
+#ifndef _HAO_C_
+#ifndef _HENGINE_DLL_
+#define HAO_DLL_IMPORT DLL_IMPORT
+#else   /* _HENGINE_DLL_ */
+#define HAO_DLL_IMPORT extern
+#endif  /* _HENGINE_DLL_ */
+#else
+#define HAO_DLL_IMPORT DLL_EXPORT
+#endif
+
 #ifndef _PANEL_C_
 #ifndef _HENGINE_DLL_
 #define HPAN_DLL_IMPORT DLL_IMPORT
@@ -80,6 +100,16 @@
 #define CCDU_DLL_IMPORT DLL_EXPORT
 #endif
 
+#ifndef _CONFIG_C_
+#ifndef _HENGINE_DLL_
+#define CONF_DLL_IMPORT DLL_IMPORT
+#else   /* _HDASD_DLL_ */
+#define CONF_DLL_IMPORT extern
+#endif  /* _HDASD_DLL_ */
+#else
+#define CONF_DLL_IMPORT DLL_EXPORT
+#endif
+
 #if defined( _MSC_VER ) && (_MSC_VER >= 1300) && (_MSC_VER < 1400)
 //  '_ftol'   is defined in MSVCRT.DLL
 //  '_ftol2'  we define ourselves in "w32ftol2.c"
@@ -102,8 +132,10 @@ int setresgid(gid_t rgid, gid_t egid, gid_t sgid);
 /* Function used to compare filenames */
 #if defined(MIXEDCASE_FILENAMES_ARE_UNIQUE)
   #define strfilenamecmp  strcmp
+  #define strnfilenamecmp  strncmp
 #else
   #define strfilenamecmp  strcasecmp
+  #define strnfilenamecmp  strncasecmp
 #endif
 
 /* Global data areas in module config.c                              */
@@ -118,20 +150,27 @@ HSYS_DLL_IMPORT int extgui;             // __attribute__ ((deprecated));
 /* Functions in module config.c */
 void build_config (char *fname);
 void release_config ();
-DLL_EXPORT DEVBLK *find_device_by_devnum (U16 devnum);
-DEVBLK *find_device_by_subchan (U16 subchan);
-DEVBLK *get_devblk (U16 devnum);
+CONF_DLL_IMPORT DEVBLK *find_device_by_devnum (U16 lcss, U16 devnum);
+DEVBLK *find_device_by_subchan (U32 ioid);
+DEVBLK *get_devblk (U16 lcss, U16 devnum);
 void ret_devblk (DEVBLK *dev);
-int  attach_device (U16 devnum, char *devtype, int addargc,
+int  attach_device (U16 lcss, U16 devnum, const char *devtype, int addargc,
         char *addargv[]);
-int  detach_subchan (U16 subchan);
-int  detach_device (U16 devnum);
-int  define_device (U16 olddev, U16 newdev);
+int  detach_subchan (U16 lcss, U16 subchan);
+int  detach_device (U16 lcss, U16 devnum);
+int  define_device (U16 lcss, U16 olddev, U16 newdev);
 DLL_EXPORT int  group_device(DEVBLK *dev, int members);
 int  configure_cpu (int cpu);
 int  deconfigure_cpu (int cpu);
 DLL_EXPORT int parse_args (char* p, int maxargc, char** pargv, int* pargc);
 #define MAX_ARGS  12                    /* Max argv[] array size     */
+int parse_and_attach_devices(const char *devnums,const char *devtype,int ac,char **av);
+CONF_DLL_IMPORT int parse_single_devnum(const char *spec, U16 *lcss, U16 *devnum);
+int parse_single_devnum_silent(const char *spec, U16 *lcss, U16 *devnum);
+int readlogo(char *fn);
+void clearlogo(void);
+CONF_DLL_IMPORT int parse_conkpalv(char* s, int* idle, int* intv, int* cnt );
+
 
 /* Global data areas and functions in module cpu.c                   */
 extern const char* arch_name[];
@@ -149,13 +188,20 @@ HPAN_DLL_IMPORT time_t prev_int_start_time; // (start time of previous interval)
 HPAN_DLL_IMPORT void update_maxrates_hwm(); // (update high-water-mark values)
 #endif // OPTION_MIPS_COUNTING
 
+/* Functions in module hao.c (Hercules Automatic Operator) */
+#if defined(OPTION_HAO)
+HAO_DLL_IMPORT void hao_initialize(void);       /* initialize hao */
+HAO_DLL_IMPORT void hao_command(char *command); /* process hao command */
+HAO_DLL_IMPORT void hao_message(char *message); /* process message */
+#endif /* defined(OPTION_HAO) */
+
 /* Functions in module hsccmd.c (so PTT debugging patches can access them) */
 HCMD_DLL_IMPORT int aia_cmd     (int argc, char *argv[], char *cmdline);
 HCMD_DLL_IMPORT int stopall_cmd (int argc, char *argv[], char *cmdline);
 
 #if defined(OPTION_DYNAMIC_LOAD)
 
-HHDL_DLL_IMPORT char *(*hdl_device_type_equates) (char *);
+HHDL_DLL_IMPORT char *(*hdl_device_type_equates) (const char *);
 HCMD_DLL_IMPORT void *(panel_command_r)          (void *cmdline);
 HPAN_DLL_IMPORT void  (panel_display_r)          (void);
 
@@ -170,6 +216,7 @@ HSYS_DLL_IMPORT void *(*debug_cpu_state)            (REGS *);
 HSYS_DLL_IMPORT void *(*debug_watchdog_signal)      (REGS *);
 HSYS_DLL_IMPORT void *(*debug_program_interrupt)    (REGS *, int);
 HSYS_DLL_IMPORT void *(*debug_diagnose)             (U32, int,  int, REGS *);
+HSYS_DLL_IMPORT void *(*debug_iucv)                 (int, VADR, REGS *);
 HSYS_DLL_IMPORT void *(*debug_sclp_unknown_command) (U32,    void *, REGS *);
 HSYS_DLL_IMPORT void *(*debug_sclp_unknown_event)   (void *, void *, REGS *);
 HSYS_DLL_IMPORT void *(*debug_chsc_unknown_request) (void *, void *, REGS *);
@@ -182,6 +229,7 @@ void panel_display (void);
 #define debug_device_state              NULL
 #define debug_program_interrupt         NULL
 #define debug_diagnose                  NULL
+#define debug_iucv                      NULL
 #define debug_sclp_unknown_command      NULL
 #define debug_sclp_unknown_event        NULL
 #define debug_sclp_event_data           NULL
@@ -196,6 +244,13 @@ char *str_loadparm();
 void set_lparname(char *name);
 void get_lparname(BYTE *dest);
 char *str_lparname();
+
+#if defined(OPTION_SET_STSI_INFO)
+/* Functions in control.c */
+void set_manufacturer(char *name);
+void set_plant(char *name);
+void set_model(char *name);
+#endif /* defined(OPTION_SET_STSI_INFO) */
 
 /* Functions in module impl.c */
 IMPL_DLL_IMPORT void system_cleanup(void);
@@ -260,16 +315,17 @@ CCKD_DLL_IMPORT int     cckd_command(char *, int);
 CCKD_DLL_IMPORT void    cckd_print_itrace ();
 
 /* Functions in module cckdutil.c */
-CCDU_DLL_IMPORT int     cckd_swapend (int, FILE *);
-CCDU_DLL_IMPORT void    cckd_swapend_chdr (CCKDDASD_DEVHDR *);
+CCDU_DLL_IMPORT int     cckd_swapend (DEVBLK *);
+CCDU_DLL_IMPORT void    cckd_swapend_chdr (CCKD_DEVHDR *);
 CCDU_DLL_IMPORT void    cckd_swapend_l1 (CCKD_L1ENT *, int);
 CCDU_DLL_IMPORT void    cckd_swapend_l2 (CCKD_L2ENT *);
 CCDU_DLL_IMPORT void    cckd_swapend_free (CCKD_FREEBLK *);
 CCDU_DLL_IMPORT void    cckd_swapend4 (char *);
 CCDU_DLL_IMPORT void    cckd_swapend2 (char *);
 CCDU_DLL_IMPORT int     cckd_endian ();
-CCDU_DLL_IMPORT int     cckd_comp (int, FILE *);
-CCDU_DLL_IMPORT int     cckd_chkdsk(int, FILE *, int);
+CCDU_DLL_IMPORT int     cckd_comp (DEVBLK *);
+CCDU_DLL_IMPORT int     cckd_chkdsk (DEVBLK *, int);
+CCDU_DLL_IMPORT void    cckdumsg (DEVBLK *, int, char *, ...);
 
 /* Functions in module hscmisc.c */
 int herc_system (char* command);
@@ -307,7 +363,8 @@ int  ecpsvm_virttmr_ext(REGS *regs);
 
 /* Functions in module w32ctca.c */
 #if defined(OPTION_W32_CTCI)
-HSYS_DLL_IMPORT int (*debug_tt32_stats) (int);
+HSYS_DLL_IMPORT int  (*debug_tt32_stats)   (int);
+HSYS_DLL_IMPORT void (*debug_tt32_tracing) (int);
 #endif // defined(OPTION_W32_CTCI)
 
 #endif // _HEXTERNS_H

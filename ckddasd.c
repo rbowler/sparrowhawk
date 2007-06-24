@@ -1,5 +1,7 @@
-/* CKDDASD.C    (c) Copyright Roger Bowler, 1999-2006                */
+/* CKDDASD.C    (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 CKD Direct Access Storage Device Handler     */
+
+// $Id: ckddasd.c,v 1.86 2007/06/23 00:04:04 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
@@ -15,6 +17,17 @@
 /*      Track overflow write fix by Roger Bowler, thanks to Valery   */
 /*        Pogonchenko and Volker Bandke             V1.71 16/01/2001 */
 /*-------------------------------------------------------------------*/
+
+// $Log: ckddasd.c,v $
+// Revision 1.86  2007/06/23 00:04:04  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.85  2007/02/15 00:10:04  gsmith
+// Fix ckd RCD, SNSS, SNSID responses
+//
+// Revision 1.84  2006/12/08 09:43:18  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -198,7 +211,7 @@ static  BYTE eighthexFF[] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
 int ckddasd_init_handler ( DEVBLK *dev, int argc, char *argv[] )
 {
 int             rc;                     /* Return code               */
-struct STAT     statbuf;                /* File information          */
+struct stat     statbuf;                /* File information          */
 CKDDASD_DEVHDR  devhdr;                 /* Device header             */
 CCKDDASD_DEVHDR cdevhdr;                /* Compressed device header  */
 int             i;                      /* Loop index                */
@@ -234,7 +247,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
 
     /* Check for possible remote device */
     hostpath(pathname, dev->filename, sizeof(pathname));
-    if (STAT(pathname, &statbuf) < 0)
+    if (stat(pathname, &statbuf) < 0)
     {
         rc = shared_ckd_init ( dev, argc, argv);
         if (rc < 0)
@@ -381,7 +394,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
         }
 
         /* Determine the device size */
-        rc = FSTAT (dev->fd, &statbuf);
+        rc = fstat (dev->fd, &statbuf);
         if (rc < 0)
         {
             logmsg (_("HHCDA007E %s fstat error: %s\n"),
@@ -476,7 +489,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
                     devhdr.fileseq = fileseq == 1 ? 0 : fileseq;
                     highcyl = 0;
                     devhdr.highcyl[0] = devhdr.highcyl[1] = 0;
-                    LSEEK (dev->fd, 0, SEEK_SET);
+                    lseek (dev->fd, 0, SEEK_SET);
                     rc = write (dev->fd, &devhdr, CKDDASD_DEVHDR_SIZE);
                 }
             }
@@ -524,7 +537,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
 
         /* Consistency check device header */
         if (cckd == 0 && dev->dasdcopy == 0 && (cyls * heads != trks
-            || ((OFF_T)trks * trksize) + CKDDASD_DEVHDR_SIZE
+            || ((off_t)trks * trksize) + CKDDASD_DEVHDR_SIZE
                             != statbuf.st_size
             || (highcyl != 0 && highcyl != dev->ckdcyls + cyls - 1)))
         {
@@ -764,7 +777,7 @@ int ckddasd_read_track (DEVBLK *dev, int trk, BYTE *unitstat)
 int             rc;                     /* Return code               */
 int             cyl;                    /* Cylinder                  */
 int             head;                   /* Head                      */
-OFF_T           offset;                 /* File offsets              */
+off_t           offset;                 /* File offsets              */
 int             i,o,f;                  /* Indexes                   */
 int             active;                 /* 1=Synchronous I/O active  */
 CKDDASD_TRKHDR *trkhdr;                 /* -> New track header       */
@@ -804,8 +817,8 @@ CKDDASD_TRKHDR *trkhdr;                 /* -> New track header       */
         dev->bufupd = 0;
 
         /* Seek to the old track image offset */
-        offset = (OFF_T)(dev->ckdtrkoff + dev->bufupdlo);
-        offset = LSEEK (dev->fd, offset, SEEK_SET);
+        offset = (off_t)(dev->ckdtrkoff + dev->bufupdlo);
+        offset = lseek (dev->fd, offset, SEEK_SET);
         if (offset < 0)
         {
             /* Handle seek error condition */
@@ -889,7 +902,7 @@ ckd_read_track_retry:
 
         /* Calculate the track offset */
         dev->ckdtrkoff = CKDDASD_DEVHDR_SIZE +
-             (OFF_T)(trk - (f ? dev->ckdhitrk[f-1] : 0)) * dev->ckdtrksz;
+             (off_t)(trk - (f ? dev->ckdhitrk[f-1] : 0)) * dev->ckdtrksz;
 
         dev->syncio_active = active;
 
@@ -934,7 +947,7 @@ ckd_read_track_retry:
 
     /* Calculate the track offset */
     dev->ckdtrkoff = CKDDASD_DEVHDR_SIZE +
-         (OFF_T)(trk - (f ? dev->ckdhitrk[f-1] : 0)) * dev->ckdtrksz;
+         (off_t)(trk - (f ? dev->ckdhitrk[f-1] : 0)) * dev->ckdtrksz;
 
     dev->syncio_active = active;
 
@@ -942,8 +955,8 @@ ckd_read_track_retry:
               trk, f+1, (long long)dev->ckdtrkoff, dev->ckdtrksz);
 
     /* Seek to the track image offset */
-    offset = (OFF_T)dev->ckdtrkoff;
-    offset = LSEEK (dev->fd, offset, SEEK_SET);
+    offset = (off_t)dev->ckdtrkoff;
+    offset = lseek (dev->fd, offset, SEEK_SET);
     if (offset < 0)
     {
         /* Handle seek error condition */
@@ -2084,8 +2097,6 @@ BYTE            cchhr[5];               /* Search argument           */
 BYTE            sector;                 /* Sector number             */
 BYTE            key[256];               /* Key for search operations */
 BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
-#define myssid (dev->devnum & 0xffe0)   /* Storage subsystem identifier
-                                           32 devices per subsystem  */
 
     /* If this is a data-chained READ, then return any data remaining
        in the buffer which was not used by the previous CCW */
@@ -3135,7 +3146,8 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
 
         case 0xB0: /* Set Interface Identifier */
 
-            /* Command reject if flag byte bits 0-6 are not zero */
+            /* Command reject if flag byte bits 0-5 are not zero 
+               or bits 6-7 are 11 or 10 */
             if ((iobuf[1] & 0xFE) != 0x00)
             {
                 ckd_build_sense (dev, SENSE_CR, 0, 0,
@@ -3147,26 +3159,22 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             /* Prepare subsystem data (node descriptor record) */
             memset (iobuf, 0x00, 96);
 
-            /* Bytes 0-31 contain node descriptor data */
-            iobuf[0] = 0x00;
-            memcpy (&iobuf[1], "010", 3);
+            /* Bytes 0-31 contain the subsystem node descriptor */
+            store_fw(&iobuf[0], 0x00000100);
             sprintf ((char *)&iobuf[4], "00%4.4X   HRCZZ000000000001",
                                 dev->ckdcu->devt);
-            for (i = 1; i < 30; i++)
+            for (i = 4; i < 30; i++)
                 iobuf[i] = host_to_guest(iobuf[i]);
 
             /* Bytes 32-63 contain node qualifier data */
-            iobuf[32] = 0x00; /* Flags */
-            iobuf[40] = 0x81; /* 81=Parallel range, 82=ESCON range */
-            iobuf[41] = 0x01; /* 00=N/A, 01=LED, 02=Laser */
-            iobuf[42] = 0x00; iobuf[43] = 0x00; /* Start of range */
-            memcpy (&iobuf[44], &iobuf[40], 4);
-            iobuf[46] = 0x00; iobuf[47] = 0x01; /* End of range */
-            memcpy (&iobuf[48], &iobuf[40], 8);
-            iobuf[50] = 0x00; iobuf[51] = 0x10; /* Start of range */
-            iobuf[54] = 0x00; iobuf[55] = 0x11; /* End of range */
+            store_fw(&iobuf[32],0x00000000); // flags+zeros
+            store_fw(&iobuf[40],0x00000000);
+            store_fw(&iobuf[40],0x41010000); // start range
+            store_fw(&iobuf[44],0x41010001); // end range
+            store_fw(&iobuf[48],0x41010010); // start range
+            store_fw(&iobuf[52],0x41010011); // end range
 
-            /* Bytes 64-95 contain second node qualifier data */
+            /* Bytes 64-95 contain a 2nd subsystem node descriptor */
             iobuf[64] = 0x00;
 
             /* Indicate the length of subsystem data prepared */
@@ -5096,24 +5104,11 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
         }
 
         /* Build the basic subsystem status data in the I/O area */
-        memset (iobuf, 0x00, 40);
-        iobuf[1] = dev->devnum & 0xFF;
-        iobuf[38] = (myssid >> 8) & 0xff;
-        iobuf[39] = myssid & 0xff;
-        num = 40;
-
-        /* Build an additional 4 bytes of data for the 3990-6 */
-        if (dev->ckdcu->code == 0x15) 
-        {
-            iobuf[0] = 0x01;            /* Set 3990-6 enhanced flag */
-            memset (iobuf+40, 0x00, 4);
-            num = 44;                   
-        } /* end if(3990-6) */
+        num = dasd_build_ckd_subsys_status (dev, iobuf, count);
 
         /* Calculate residual byte count */
-        num = (count < num) ? count : num;
-        *residual = count - num;
-        if (count < 40) *more = 1;
+        *residual = count < num ? 0 : count - num;
+        *more = count < num;
 
         /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;
@@ -5164,58 +5159,12 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
             break;
         }
 
+        /* Build the configuration data area */
+        num = dasd_build_ckd_config_data (dev, iobuf, count);
+
         /* Calculate residual byte count */
-        num = (count < CONFIG_DATA_SIZE) ? count : CONFIG_DATA_SIZE;
-        *residual = count - num;
-        if (count < CONFIG_DATA_SIZE) *more = 1;
-
-        /* Clear the configuration data area */
-        memset (iobuf, 0x00, CONFIG_DATA_SIZE);
-
-        /* Bytes 0-31 contain node element descriptor 1 (HDA) data */
-        iobuf[0] = 0xCC;
-        iobuf[1] = 0x01;
-        iobuf[2] = 0x01;
-        sprintf ((char *)&iobuf[4], "00%4.4X0%2.2XHRCZZ000000000001",
-                            dev->ckdtab->devt, dev->ckdtab->model);
-        for (i = 4; i < 30; i++)
-            iobuf[i] = host_to_guest(iobuf[i]);
-        iobuf[31] = 0x30;
-
-        /* Bytes 32-63 contain node element descriptor 2 (unit) data */
-        memcpy (&iobuf[32], &iobuf[0], 32);
-        iobuf[33] = 0x00;
-        iobuf[34] = 0x00;
-
-        /* Bytes 64-95 contain node element descriptor 3 (CU) data */
-        iobuf[64] = 0xD4;
-        iobuf[65] = 0x02;
-        sprintf ((char *)&iobuf[68], "00%4.4X0%2.2XHRCZZ000000000001",
-                            dev->ckdcu->devt, dev->ckdcu->model);
-        for (i = 68; i < 94; i++)
-            iobuf[i] = host_to_guest(iobuf[i]);
-        iobuf[95] = 0x91;
-
-       /* Bytes 96-127 contain node element desc 4 (subsystem) data */
-        memcpy (&iobuf[96], &iobuf[64], 32);
-        iobuf[96] = 0xF0;
-        iobuf[97] = 0x00;
-        iobuf[98] = 0x00;
-        iobuf[99] = 0x01;
-
-        /* Bytes 128-223 contain zeroes */
-
-        /* Bytes 224-255 contain node element qualifier data */
-        iobuf[224] = 0x80;
-        iobuf[230] = 0x3c;
-        iobuf[232] = (myssid >> 8) & 0xff;
-        iobuf[233] = myssid & 0xff;
-        iobuf[234] = 0x80;
-        iobuf[235] = dev->devnum & 0xff;
-        iobuf[236] = dev->devnum & 0xff;
-        iobuf[237] = dev->devnum & 0xff;
-        iobuf[241] = 0x80; /* Channel: 80=Parallel,40=ESCON,10=Fiber */
-        iobuf[243] = dev->devnum & 0xff;
+        *residual = count < num ? 0 : count - num;
+        *more = count < num;
 
         /* Return unit status */
         *unitstat = CSW_CE | CSW_DE;
@@ -5293,6 +5242,7 @@ DLL_EXPORT DEVHND ckddasd_device_hndinfo = {
         &ckddasd_used,                  /* Device Query used          */
         NULL,                           /* Device Reserve             */
         NULL,                           /* Device Release             */
+        NULL,                           /* Device Attention           */
         NULL,                           /* Immediate CCW Codes        */
         NULL,                           /* Signal Adapter Input       */
         NULL,                           /* Signal Adapter Ouput       */

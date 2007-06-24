@@ -1,5 +1,7 @@
-/* IMPL.C       (c) Copyright Roger Bowler, 1999-2006                */
+/* IMPL.C       (c) Copyright Roger Bowler, 1999-2007                */
 /*              Hercules Initialization Module                       */
+
+// $Id: impl.c,v 1.123 2007/06/23 00:04:14 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module initializes the Hercules S/370 or ESA/390 emulator.   */
@@ -8,6 +10,23 @@
 /* control panel which runs under the main thread when in foreground */
 /* mode.                                                             */
 /*-------------------------------------------------------------------*/
+
+// $Log: impl.c,v $
+// Revision 1.123  2007/06/23 00:04:14  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.122  2007/02/27 21:59:32  kleonard
+// PR# misc/87 startup messages fix completion
+//
+// Revision 1.121  2007/01/13 07:29:22  bernard
+// backout ccmask
+//
+// Revision 1.120  2007/01/12 16:43:44  bernard
+// ccmask phase 1
+//
+// Revision 1.119  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -153,17 +172,60 @@ DLL_EXPORT  COMMANDHANDLER getCommandHandler(void)
 void* process_rc_file (void* dummy)
 {
 char   *rcname;                         /* hercules.rc name pointer  */
+int     is_default_rc  = 0;             /* 1 == default name used    */
+int     numcpu         = 0;             /* #of ONLINE & STOPPED CPUs */
+int     i;                              /* (work)                    */
 
     UNREFERENCED(dummy);
 
+    /* Wait for all installed/configured CPUs to
+       come ONLINE and enter the STOPPED state */
+
+    OBTAIN_INTLOCK(NULL);
+
+    for (;;)
+    {
+        numcpu = 0;
+        for (i = 0; i < MAX_CPU_ENGINES; i++)
+            if (IS_CPU_ONLINE(i) &&
+                CPUSTATE_STOPPED == sysblk.regs[i]->cpustate)
+                numcpu++;
+        if (numcpu == sysblk.numcpu)
+            break;
+        RELEASE_INTLOCK(NULL);
+        usleep( 10 * 1000 );
+        OBTAIN_INTLOCK(NULL);
+    }
+
+    RELEASE_INTLOCK(NULL);
+
+    /* Wait for panel thread to engage */
+
+    while (!sysblk.panel_init)
+        usleep( 10 * 1000 );
+
     /* Obtain the name of the hercules.rc file or default */
 
-    if(!(rcname = getenv("HERCULES_RC")))
+    if (!(rcname = getenv("HERCULES_RC")))
+    {
         rcname = "hercules.rc";
+        is_default_rc = 1;
+    }
+
+#if defined(OPTION_HAO)
+    /* Initialize the Hercules Automatic Operator */
+
+    hao_initialize();
+#endif /* defined(OPTION_HAO) */
 
     /* Run the script processor for this file */
 
-    process_script_file(rcname,1);
+    if (process_script_file(rcname,1) != 0)
+        if (ENOENT == errno)
+            if (!is_default_rc)
+                logmsg(_("HHCPN995E .RC file \"%s\" not found.\n"),
+                    rcname);
+        // (else error message already issued)
 
     return NULL;
 }
@@ -194,27 +256,41 @@ TID     logcbtid;                       /* RC file thread identifier */
     /* Initialize 'hostinfo' BEFORE display_version is called */
     init_hostinfo( &hostinfo );
 
-    if(isatty(STDERR_FILENO))
-        display_version (stderr, "Hercules ", TRUE);
-    else
-        if(isatty(STDOUT_FILENO))
-            display_version (stdout, "Hercules ", TRUE);
-
 #ifdef _MSVC_
     /* Initialize sockets package */
     VERIFY( socket_init() == 0 );
 #endif
 
-    /* Clear the system configuration block */
-    memset (&sysblk, 0, sizeof(SYSBLK));
-
-    /* ensure hdl_shut is called in case of shutdown
+    /* Ensure hdl_shut is called in case of shutdown
        hdl_shut will ensure entries are only called once */
     atexit(hdl_shut);
 
     set_codepage(NULL);
 
+    /* Clear the system configuration block */
+    memset (&sysblk, 0, sizeof(SYSBLK));
+
+    /* Copy length for regs */
+    sysblk.regs_copy_len = (int)((uintptr_t)&sysblk.dummyregs.regs_copy_end
+                               - (uintptr_t)&sysblk.dummyregs);
+
+    /* Set the daemon_mode flag indicating whether we running in
+       background/daemon mode or not (meaning both stdout/stderr
+       are redirected to a non-tty device). Note that this flag
+       needs to be set before logger_init gets called since the
+       logger_logfile_write function relies on its setting.
+    */
+    sysblk.daemon_mode = !isatty(STDERR_FILENO) && !isatty(STDOUT_FILENO);
+
+    /* Initialize the logmsg pipe and associated logger thread.
+       This causes all subsequent logmsg's to be redirected to
+       the logger facility for handling by virtue of stdout/stderr
+       being redirected to the logger facility.
+    */
     logger_init();
+
+#if 0 // 20060628: doesn't seem to occur anymore; will remove perm-
+      // anently once we're certain this is indeed now a dead issue.
 
     /* ZZFIXME: I don't know what's going on (yet), but for some reason
        log messages seem to get permanently "stuck" in the logmsg pipe.
@@ -223,8 +299,21 @@ TID     logcbtid;                       /* RC file thread identifier */
        without the GUI and is thus NOT a GUI related issue.
     */
     usleep(100000);     /* wait a bit before issuing messages */
+#endif
 
-    /* Display the version identifier */
+    /* Now display the version information again after logger_init
+       has been called so that either the panel display thread or the
+       external gui can see the version which was previously possibly
+       only displayed to the actual physical screen the first time we
+       did it further above (depending on whether we're running in
+       daemon_mode (external gui mode) or not). This it the call that
+       the panel thread or the one the external gui actually "sees".
+       The first call further above wasn't seen by either since it
+       was issued before logger_init was called and thus got written
+       directly to the physical screen whereas this one will be inter-
+       cepted and handled by the logger facility thereby allowing the
+       panel thread or external gui to "see" it and thus display it.
+    */
     display_version (stdout, "Hercules ", TRUE);
 
 #if defined(OPTION_DYNAMIC_LOAD)
@@ -237,10 +326,6 @@ TID     logcbtid;                       /* RC file thread identifier */
     bindtextdomain(PACKAGE, HERC_LOCALEDIR);
     textdomain(PACKAGE);
 #endif
-
-    /* default to background mode when both stdout and stderr
-       are redirected to a non-tty device */
-    sysblk.daemon_mode = !isatty(STDERR_FILENO);
 
 #ifdef EXTERNALGUI
     /* Set GUI flag if specified as final argument */
@@ -269,7 +354,7 @@ TID     logcbtid;                       /* RC file thread identifier */
         cfgfile = "hercules.cnf";
 
     /* Process the command line options */
-    while ((c = getopt(argc, argv, "f:p:l:d")) != EOF)
+    while ((c = getopt(argc, argv, "f:p:l:db:")) != EOF)
     {
 
         switch (c) {
@@ -291,6 +376,9 @@ TID     logcbtid;                       /* RC file thread identifier */
             }
             break;
 #endif /* defined(OPTION_DYNAMIC_LOAD) */
+        case 'b':
+            sysblk.logofile=optarg;
+            break;
         case 'd':
             sysblk.daemon_mode = 1;
             break;
@@ -307,7 +395,7 @@ TID     logcbtid;                       /* RC file thread identifier */
     if (arg_error)
     {
         fprintf (stderr,
-                "usage: %s [-f config-filename] [-d]"
+                "usage: %s [-f config-filename] [-d] [-b logo-filename]"
 #if defined(OPTION_DYNAMIC_LOAD)
                 " [-p dyn-load-dir] [[-l dynmod-to-load]...]"
 #endif /* defined(OPTION_DYNAMIC_LOAD) */

@@ -1,7 +1,7 @@
 /*
 || ----------------------------------------------------------------------------
 ||
-|| HETUPD.C     (c) Copyright Leland Lucius, 2000-2006
+|| HETUPD.C     (c) Copyright Leland Lucius, 2000-2007
 ||              Released under terms of the Q Public License.
 ||
 || Copy/update Hercules Emulated Tapes while allowing various modifications
@@ -10,6 +10,16 @@
 ||
 || ----------------------------------------------------------------------------
 */
+
+// $Id: hetupd.c,v 1.26 2007/06/23 00:04:11 ivan Exp $
+//
+// $Log: hetupd.c,v $
+// Revision 1.26  2007/06/23 00:04:11  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.25  2006/12/08 09:43:26  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -34,7 +44,7 @@ static HETB *s_hetb     = NULL;
 static HETB *d_hetb     = NULL;
 #ifdef EXTERNALGUI
 /* Previous reported file position */
-static OFF_T prevpos = 0;
+static off_t prevpos = 0;
 /* Report progress every this many bytes */
 #define PROGRESS_MASK (~0x3FFFF /* 256K */)
 #endif /*EXTERNALGUI*/
@@ -122,7 +132,7 @@ copytape( void )
         if( extgui )
         {
             /* Report progress every nnnK */
-            OFF_T curpos = FTELL( s_hetb->fd );
+            off_t curpos = ftell( s_hetb->fd );
             if( ( curpos & PROGRESS_MASK ) != ( prevpos & PROGRESS_MASK ) )
             {
                 prevpos = curpos;

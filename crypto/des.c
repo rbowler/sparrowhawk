@@ -3,6 +3,8 @@
  * modified for use with dyncrypt
  */
 
+// $Id: des.c,v 1.9 2006/12/08 09:43:34 jj Exp $
+
 /*
  * PuTTY is copyright 1997-2005 Simon Tatham.
  *
@@ -31,8 +33,21 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+// $Log: des.c,v $
+// Revision 1.9  2006/12/08 09:43:34  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
-#include "opcode.h" /* For CSWAP macros */
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
+
+#include "hercules.h"
+#include "opcode.h" /* For fetch_fw */
+
+
 #include "des.h"
 
 

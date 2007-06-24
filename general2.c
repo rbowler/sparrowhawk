@@ -1,11 +1,13 @@
-/* GENERAL2.C   (c) Copyright Roger Bowler, 1994-2006                */
+/* GENERAL2.C   (c) Copyright Roger Bowler, 1994-2007                */
 /*              ESA/390 CPU Emulator                                 */
 /*              Instructions N-Z                                     */
 
-/*              (c) Copyright Peter Kuschnerus, 1999-2006 (UPT & CFC)*/
+// $Id: general2.c,v 1.114 2007/06/23 00:04:10 ivan Exp $
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/*              (c) Copyright Peter Kuschnerus, 1999-2007 (UPT & CFC)*/
+
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all general instructions of the            */
@@ -28,6 +30,38 @@
 /*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
 /*      Clear TEA on data exception - Peter Kuschnerus           v209*/
 /*-------------------------------------------------------------------*/
+
+// $Log: general2.c,v $
+// Revision 1.114  2007/06/23 00:04:10  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.113  2007/01/13 07:21:48  bernard
+// backout ccmask
+//
+// Revision 1.112  2007/01/12 15:23:51  bernard
+// ccmask phase 1
+//
+// Revision 1.111  2007/01/09 05:10:19  gsmith
+// Tweaks to lm/stm
+//
+// Revision 1.110  2007/01/04 23:12:04  gsmith
+// remove thunk calls for program_interrupt
+//
+// Revision 1.109  2006/12/31 21:16:32  gsmith
+// 2006 Dec 31 really back out mainlockx.pat
+//
+// Revision 1.108  2006/12/20 09:09:40  jj
+// Fix bogus log entries
+//
+// Revision 1.107  2006/12/20 04:26:20  gsmith
+// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
+//
+// Revision 1.106  2006/12/20 04:22:00  gsmith
+// 2006 Dec 19 Backout mainlockx.pat - possible SMP problems - Greg Smith
+//
+// Revision 1.105  2006/12/08 09:43:21  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -52,7 +86,7 @@ DEF_INST(or_register)
 {
 int     r1, r2;                         /* Values of R fields        */
 
-    RR(inst, regs, r1, r2);
+    RR0(inst, regs, r1, r2);
 
     /* OR second operand with first and set condition code */
     regs->psw.cc = ( regs->GR_L(r1) |= regs->GR_L(r2) ) ? 1 : 0;
@@ -318,7 +352,7 @@ VADR    effective_addr2,
                                      b4, effective_addr4);
 
     if(regs->GR_L(0) & PLO_GPR0_RESV)
-        ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
+        regs->program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
 
     if(regs->GR_L(0) & PLO_GPR0_T)
         switch(regs->GR_L(0) & PLO_GPR0_FC)
@@ -471,7 +505,7 @@ VADR    effective_addr2,
 
 
             default:
-                ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
+                regs->program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
 
         }
 
@@ -501,7 +535,7 @@ BYTE    termchar;                       /* Terminating character     */
 
     /* Program check if bits 0-23 of register 0 not zero */
     if ((regs->GR_L(0) & 0xFFFFFF00) != 0)
-        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+        regs->program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Load string terminating character from register 0 bits 24-31 */
     termchar = regs->GR_LHLCL(0);
@@ -556,7 +590,7 @@ DEF_INST(set_access_register)
 {
 int     r1, r2;                         /* Values of R fields        */
 
-    RRE(inst, regs, r1, r2);
+    RRE0(inst, regs, r1, r2);
 
     /* Copy R2 general register to R1 access register */
     regs->AR(r1) = regs->GR_L(r2);
@@ -572,7 +606,7 @@ DEF_INST(set_program_mask)
 {
 int     r1, r2;                         /* Values of R fields        */
 
-    RR(inst, regs, r1, r2);
+    RR0(inst, regs, r1, r2);
 
     /* Set condition code from bits 2-3 of R1 register */
     regs->psw.cc = ( regs->GR_L(r1) & 0x30000000 ) >> 28;
@@ -628,7 +662,7 @@ U32     h, i, j, m;                     /* Integer work areas        */
     {
         regs->psw.cc = 3;
         if ( FOMASK(&regs->psw) )
-            ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+            regs->program_interrupt (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
         return;
     }
 
@@ -712,7 +746,7 @@ U32     i, j;                           /* Integer work areas        */
     {
         regs->psw.cc = 3;
         if ( FOMASK(&regs->psw) )
-            ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+            regs->program_interrupt (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
         return;
     }
 
@@ -733,7 +767,7 @@ int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
 U32     n;                              /* Integer work areas        */
 
-    RS(inst, regs, r1, r3, b2, effective_addr2);
+    RS0(inst, regs, r1, r3, b2, effective_addr2);
 
     /* Use rightmost six bits of operand address as shift count */
     n = effective_addr2 & 0x3F;
@@ -810,7 +844,7 @@ int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
 U32     n;                              /* Integer work areas        */
 
-    RS(inst, regs, r1, r3, b2, effective_addr2);
+    RS0(inst, regs, r1, r3, b2, effective_addr2);
 
     /* Use rightmost six bits of operand address as shift count */
     n = effective_addr2 & 0x3F;
@@ -836,7 +870,7 @@ int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
 U32     n;                              /* Integer work areas        */
 
-    RS(inst, regs, r1, r3, b2, effective_addr2);
+    RS0(inst, regs, r1, r3, b2, effective_addr2);
 
     /* Use rightmost six bits of operand address as shift count */
     n = effective_addr2 & 0x3F;
@@ -1112,47 +1146,64 @@ DEF_INST(store_multiple)
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
-int     i, m, n, w = 0;                 /* Integer work area         */
-U32    *p1, *p2 = NULL;                 /* Mainstor pointers         */
-U32     rwork[16];                      /* Intermediate work area    */
+int     i, m, n;                        /* Integer work areas        */
+U32    *p1, *p2;                        /* Mainstor pointers         */
 
     RS(inst, regs, r1, r3, b2, effective_addr2);
 
-    /* Calculate number of regs to store */
-    n = ((r3 - r1) & 0xF) + 1;
+    /* Calculate number of bytes to store */
+    n = (((r3 - r1) & 0xF) + 1) << 2;
 
-    /* Calculate number of words to next boundary */
-    m = (0x800 - (effective_addr2 & 0x7ff)) >> 2;
-    if (unlikely((effective_addr2 & 3) && m < n))
+    /* Calculate number of bytes to next boundary */
+    m = 0x800 - ((VADR_L)effective_addr2 & 0x7ff);
+
+    /* Get address of first page */
+    p1 = (U32*)MADDR(effective_addr2, b2, regs, ACCTYPE_WRITE, regs->psw.pkey);
+
+    if (likely(n <= m))
     {
-        m = n;
-        p1 = rwork;
-        w = 1;
+        /* boundary not crossed */
+        n >>= 2;
+        for (i = 0; i < n; i++)
+            store_fw (p1++, regs->GR_L((r1 + i) & 0xF));
+        ITIMER_UPDATE(effective_addr2,(n*4)-1,regs);
     }
     else
     {
-        /* Address of operand beginning */
-        p1 = (U32*)MADDR(effective_addr2, b2, regs, ACCTYPE_WRITE, regs->psw.pkey);
+        /* boundary crossed, get address of the 2nd page */
+        effective_addr2 += m;
+        effective_addr2 &= ADDRESS_MAXWRAP(regs);
+        p2 = (U32*)MADDR(effective_addr2, b2, regs, ACCTYPE_WRITE, regs->psw.pkey);
 
-        /* Get address of next page if boundary crossed */
-        if (unlikely (m < n))
-            p2 = (U32*)MADDR(effective_addr2 + (m*4), b2, regs, ACCTYPE_WRITE, regs->psw.pkey);
+        if (likely((m & 0x3) == 0))
+        {
+            /* word aligned */
+            m >>= 2;
+            for (i = 0; i < m; i++)
+                store_fw (p1++, regs->GR_L((r1 + i) & 0xF));
+            n >>= 2;
+            for ( ; i < n; i++)
+                store_fw (p2++, regs->GR_L((r1 + i) & 0xF));
+        }
         else
-            m = n;
+        {
+            /* worst case */
+            U32 rwork[16];
+            BYTE *b1, *b2;
+
+            for (i = 0; i < (n >> 2); i++)
+                rwork[i] = CSWAP32(regs->GR_L((r1 + i) & 0xF));
+            b1 = (BYTE *)&rwork[0];
+
+            b2 = (BYTE *)p1;
+            for (i = 0; i < m; i++)
+                *b2++ = *b1++;
+
+            b2 = (BYTE *)p2;
+            for ( ; i < n; i++)
+                *b2++ = *b1++;
+        }
     }
-
-    /* Store to first page */
-    for (i = 0; i < m; i++)
-        store_fw (p1++, regs->GR_L((r1 + i) & 0xF));
-
-    /* Store to next page */
-    for ( ; i < n; i++)
-        store_fw (p2++, regs->GR_L((r1 + i) & 0xF));
-
-    if (unlikely(w))
-        ARCH_DEP(vstorec) (rwork, (n * 4) - 1, effective_addr2, b2, regs);
-
-    ITIMER_UPDATE(effective_addr2,(n*4)-1,regs);
 
 } /* end DEF_INST(store_multiple) */
 
@@ -1174,7 +1225,7 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && FOMASK(&regs->psw) )
-        ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+        regs->program_interrupt (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
 }
 
 
@@ -1201,7 +1252,7 @@ U32     n;                              /* 32-bit operand values     */
 
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && FOMASK(&regs->psw) )
-        ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+        regs->program_interrupt (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
 }
 
 
@@ -1228,7 +1279,7 @@ U32     n;                              /* 32-bit operand values     */
 
     /* Program check if fixed-point overflow */
     if ( regs->psw.cc == 3 && FOMASK(&regs->psw) )
-        ARCH_DEP(program_interrupt) (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
+        regs->program_interrupt (regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION);
 }
 
 
@@ -1239,7 +1290,7 @@ DEF_INST(subtract_logical_register)
 {
 int     r1, r2;                         /* Values of R fields        */
 
-    RR(inst, regs, r1, r2);
+    RR0(inst, regs, r1, r2);
 
     /* Subtract unsigned operands and set condition code */
     if (likely(r1 == r2))
@@ -1344,10 +1395,7 @@ int     rc;                             /* Return code               */
 
     /* Load new PSW from PSA+X'60' */
     if ( (rc = ARCH_DEP(load_psw) ( regs, psa->svcnew ) ) )
-    {
-        regs->psw.zeroilc = 0;
-        ARCH_DEP(program_interrupt) (regs, rc);
-    }
+        regs->program_interrupt (regs, rc);
 
     /* Perform serialization and checkpoint synchronization */
     PERFORM_SERIALIZATION (regs);
@@ -1398,7 +1446,7 @@ BYTE    old;                            /* Old value                 */
 #if defined(_FEATURE_SIE)
         if(SIE_STATB(regs, IC0, TS1))
         {
-            if( !OPEN_IC_PERINT(regs) )
+            if( !OPEN_IC_PER(regs) )
                 longjmp(regs->progjmp, SIE_INTERCEPT_INST);
             else
                 longjmp(regs->progjmp, SIE_INTERCEPT_INSTCOMP);
@@ -1453,7 +1501,7 @@ U16     i2;                             /* 16-bit operand values     */
 U16     h1;                             /* 16-bit operand values     */
 U16     h2;                             /* 16-bit operand values     */
 
-    RI(inst, regs, r1, opcd, i2);
+    RI0(inst, regs, r1, opcd, i2);
 
     /* AND register bits 0-15 with immediate operand */
     h1 = i2 & regs->GR_LHH(r1);
@@ -1483,7 +1531,7 @@ U16     i2;                             /* 16-bit operand values     */
 U16     h1;                             /* 16-bit operand values     */
 U16     h2;                             /* 16-bit operand values     */
 
-    RI(inst, regs, r1, opcd, i2);
+    RI0(inst, regs, r1, opcd, i2);
 
     /* AND register bits 16-31 with immediate operand */
     h1 = i2 & regs->GR_LHL(r1);
@@ -1774,8 +1822,8 @@ BYTE    lbyte;                          /* Left result byte of pair  */
 
 /*-------------------------------------------------------------------*/
 /* 0102 UPT   - Update Tree                                      [E] */
-/*              (c) Copyright Peter Kuschnerus, 1999-2006            */
-/*              (c) Copyright "Fish" (David B. Trout), 2005-2006     */
+/*              (c) Copyright Peter Kuschnerus, 1999-2007            */
+/*              (c) Copyright "Fish" (David B. Trout), 2005-2007     */
 /*-------------------------------------------------------------------*/
 
 DEF_INST(update_tree)
@@ -1808,7 +1856,7 @@ BYTE    a64 = regs->psw.amode64;        /* 64-bit mode flag          */
         || ( GR_A(4,regs) & UPT_ALIGN_MASK )
         || ( GR_A(5,regs) & UPT_ALIGN_MASK )
     )
-        ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+        regs->program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Bubble the tree by moving successively higher nodes towards the
        front (beginning) of the tree, only stopping whenever we either:
@@ -2530,7 +2578,7 @@ DEF_INST(search_string_unicode)
 
   /* Program check if bits 0-15 of register 0 not zero */
   if(regs->GR_L(0) & 0xFFFF0000)
-    ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+    regs->program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
   /* Load string terminating character from register 0 bits 16-31 */
   termchar = (U16) regs->GR(0);

@@ -2,6 +2,8 @@
 /* HOSTOPTS.H   --   HOST-specific features and options              */
 /*-------------------------------------------------------------------*/
 
+// $Id: hostopts.h,v 1.15 2007/02/26 15:34:46 fish Exp $
+
 //    This header file #included by 'featall.h' and 'hercules.h'
 
 /*
@@ -35,8 +37,20 @@
    Please. :)
 */
 
+// $Log: hostopts.h,v $
+// Revision 1.15  2007/02/26 15:34:46  fish
+// remove stupid fish prt spooler crap
+//
+// Revision 1.14  2006/12/08 09:43:26  jj
+// Add CVS message log
+//
+
 #ifndef _HOSTOPTS_H
 #define _HOSTOPTS_H
+
+#if defined(_MSVC_)
+#include "hercwind.h"   // (need HAVE_DECL_SIOCSIFHWADDR, etc)
+#endif
 
 /*-------------------------------------------------------------------*/
 /* ZZ FIXME
@@ -99,15 +113,10 @@
 /* Constants used in "#if OPTION_NAME == OPTION_VALUE" statements    */
 /*-------------------------------------------------------------------*/
 
-
 //       HOW_TO_IMPLEMENT_SH_COMMAND
 
-#if defined( HAVE_FORK )
 #define  USE_FORK_API_FOR_SH_COMMAND           4
-#endif
-#if defined( _MSVC_ )
 #define  USE_W32_POOR_MANS_FORK                5
-#endif
 #define  USE_ANSI_SYSTEM_API_FOR_SH_COMMAND    9
 
 
@@ -117,6 +126,39 @@
 #define  CURSOR_SHAPE_VIA_SPECIAL_LINUX_ESCAPE  1
 
 
+/*-------------------------------------------------------------------*/
+/* The following is now handled automatically for ALL host platforms */
+/*-------------------------------------------------------------------*/
+
+#undef    OPTION_TUNTAP_SETNETMASK      /* (default initial setting) */
+#undef    OPTION_TUNTAP_SETMACADDR      /* (default initial setting) */
+#undef    OPTION_TUNTAP_DELADD_ROUTES   /* (default initial setting) */
+#undef    OPTION_TUNTAP_CLRIPADDR       /* (default initial setting) */
+
+#if defined(HAVE_DECL_SIOCSIFNETMASK) && \
+            HAVE_DECL_SIOCSIFNETMASK
+
+  #define OPTION_TUNTAP_SETNETMASK      /* TUNTAP_SetNetMask works   */
+
+#endif
+#if defined(HAVE_DECL_SIOCSIFHWADDR) && \
+            HAVE_DECL_SIOCSIFHWADDR
+
+  #define OPTION_TUNTAP_SETMACADDR      /* TUNTAP_SetMACAddr works   */
+
+#endif
+#if defined(HAVE_DECL_SIOCADDRT) && defined(HAVE_DECL_SIOCDELRT) && \
+            HAVE_DECL_SIOCADDRT  &&         HAVE_DECL_SIOCDELRT
+
+  #define OPTION_TUNTAP_DELADD_ROUTES   /* Del/Add Routes    works   */
+
+#endif
+#if defined(HAVE_DECL_SIOCDIFADDR) && \
+            HAVE_DECL_SIOCDIFADDR
+
+  #define OPTION_TUNTAP_CLRIPADDR       /* TUNTAP_ClrIPAddr works    */
+
+#endif
 
 /*-------------------------------------------------------------------*/
 /* Hard-coded Win32-specific features and options...                 */
@@ -133,14 +175,15 @@
 
 #define HTTP_SERVER_CONNECT_KLUDGE
 
-#undef  OPTION_FISH_STUPID_GUI_PRTSPLR_EXPERIMENT     /* (Don't ask!) */
 /*  Note:  OPTION_FISHIO  only possible with  OPTION_FTHREADS        */
 #if defined(OPTION_FTHREADS)
   #define OPTION_FISHIO                 /* Use Fish's I/O scheduler  */
 #else
   #undef  OPTION_FISHIO                 /* Use Herc's I/O scheduler  */
 #endif
+
 #define OPTION_W32_CTCI                 /* Fish's TunTap for CTCA's  */
+#undef  TUNTAP_IFF_RUNNING_NEEDED       /* TunTap32 doesn't allow it */
 
 #define OPTION_SCSI_TAPE                /* SCSI tape support         */
 #ifdef _MSVC_
@@ -152,17 +195,27 @@
 #endif
 #undef  OPTION_FBA_BLKDEVICE            /* (no FBA BLKDEVICE support)*/
 
-#define OPTION_TUNTAP_SETNETMASK        /* TUNTAP_SetNetMask works   */
-#define OPTION_TUNTAP_SETMACADDR        /* TUNTAP_SetMACAddr works   */
-#define OPTION_TUNTAP_DELADD_ROUTES     /* Del/Add Routes    works   */
-
 #define MAX_DEVICE_THREADS          0   /* (0 == unlimited)          */
 #undef  MIXEDCASE_FILENAMES_ARE_UNIQUE  /* ("Foo" same as "fOo"!!)   */
 
-#define DEFAULT_HERCPRIO    0
-#define DEFAULT_TOD_PRIO    0
-#define DEFAULT_CPU_PRIO    0
-#define DEFAULT_DEV_PRIO   -8
+#if 0
+  // I can't recall the reason (if there even WAS one!) why Windows's
+  // priority settings needed to be set to the below values, so I'm
+  // going to disable them and use more reasonable values instead,
+  // especially since a low TOD thread priority causes DOS/VS's clock
+  // to go kerflunky! (Fish)
+  #define DEFAULT_HERCPRIO    0
+  #define DEFAULT_TOD_PRIO    0
+  #define DEFAULT_CPU_PRIO    0
+  #define DEFAULT_DEV_PRIO   -8
+#else
+  // These look more reasonable to me (and are the same default values
+  // used by all other hosts too) so we'll try them for a while. (Fish)
+  #define DEFAULT_HERCPRIO    0
+  #define DEFAULT_TOD_PRIO  -20
+  #define DEFAULT_CPU_PRIO   15
+  #define DEFAULT_DEV_PRIO    8
+#endif
 
 #ifdef _MSVC_
   #define HOW_TO_IMPLEMENT_SH_COMMAND   USE_W32_POOR_MANS_FORK
@@ -179,14 +232,12 @@
 #define DLL_IMPORT   extern
 #define DLL_EXPORT
 
+#define TUNTAP_IFF_RUNNING_NEEDED       /* Needed by tuntap driver?? */
+
 #undef  OPTION_SCSI_TAPE                /* No SCSI tape support      */
 #undef  OPTION_SCSI_ERASE_TAPE          /* (NOT supported)           */
 #undef  OPTION_SCSI_ERASE_GAP           /* (NOT supported)           */
 #undef  OPTION_FBA_BLKDEVICE            /* (no FBA BLKDEVICE support)*/
-
-#undef  OPTION_TUNTAP_SETNETMASK        /* TUNTAP_SetNetMask broken  */
-#undef  OPTION_TUNTAP_SETMACADDR        /* TUNTAP_SetMACAddr broken  */
-#undef  OPTION_TUNTAP_DELADD_ROUTES     /* Del/Add Routes    broken  */
 
 #define MAX_DEVICE_THREADS          0   /* (0 == unlimited)          */
 #define MIXEDCASE_FILENAMES_ARE_UNIQUE  /* ("Foo" and "fOo" unique)  */
@@ -208,11 +259,10 @@
 #define DLL_IMPORT   extern
 #define DLL_EXPORT
 
+#define TUNTAP_IFF_RUNNING_NEEDED       /* Needed by tuntap driver?? */
+
 #undef  OPTION_SCSI_ERASE_TAPE          /* (NOT supported)           */
 #undef  OPTION_SCSI_ERASE_GAP           /* (NOT supported)           */
-
-#undef  OPTION_TUNTAP_SETMACADDR        /* TUNTAP_SetMACAddr broken  */
-#undef  OPTION_TUNTAP_DELADD_ROUTES     /* Del/Add Routes    broken  */
 
 #define MAX_DEVICE_THREADS          0   /* (0 == unlimited)          */
 #define MIXEDCASE_FILENAMES_ARE_UNIQUE  /* ("Foo" and "fOo" unique)  */
@@ -225,23 +275,20 @@
 #define HOW_TO_IMPLEMENT_SH_COMMAND       USE_ANSI_SYSTEM_API_FOR_SH_COMMAND
 #define SET_CONSOLE_CURSOR_SHAPE_METHOD   CURSOR_SHAPE_NOT_SUPPORTED
 
-
 /*-------------------------------------------------------------------*/
-/* Hard-coded OTHER host-specific features and options...            */
+/* GNU 'C' (e.g. Linux) options...                                   */
 /*-------------------------------------------------------------------*/
-#else                                   /* "Other platform" options  */
+#elif defined(__GNUC__)                 /* E.g. Linux options        */
 
 #define DLL_IMPORT   extern
 #define DLL_EXPORT
+
+#define TUNTAP_IFF_RUNNING_NEEDED       /* Needed by tuntap driver?? */
 
 #define OPTION_SCSI_TAPE                /* SCSI tape support         */
 #undef  OPTION_SCSI_ERASE_TAPE          /* (NOT supported)           */
 #undef  OPTION_SCSI_ERASE_GAP           /* (NOT supported)           */
 #define OPTION_FBA_BLKDEVICE            /* FBA block device support  */
-
-#define OPTION_TUNTAP_SETNETMASK        /* TUNTAP_SetNetMask works   */
-#define OPTION_TUNTAP_SETMACADDR        /* TUNTAP_SetMACAddr works   */
-#define OPTION_TUNTAP_DELADD_ROUTES     /* Del/Add Routes    works   */
 
 #define MAX_DEVICE_THREADS          0   /* (0 == unlimited)          */
 #define MIXEDCASE_FILENAMES_ARE_UNIQUE  /* ("Foo" and "fOo" unique)  */
@@ -251,8 +298,41 @@
 #define DEFAULT_CPU_PRIO   15
 #define DEFAULT_DEV_PRIO    8
 
-#define HOW_TO_IMPLEMENT_SH_COMMAND       USE_FORK_API_FOR_SH_COMMAND
+#if defined( HAVE_FORK )
+  #define HOW_TO_IMPLEMENT_SH_COMMAND     USE_FORK_API_FOR_SH_COMMAND
+#else
+  #define HOW_TO_IMPLEMENT_SH_COMMAND     USE_ANSI_SYSTEM_API_FOR_SH_COMMAND
+#endif
 #define SET_CONSOLE_CURSOR_SHAPE_METHOD   CURSOR_SHAPE_VIA_SPECIAL_LINUX_ESCAPE
+
+/*-------------------------------------------------------------------*/
+/* Hard-coded OTHER (DEFAULT) host-specific features and options...  */
+/*-------------------------------------------------------------------*/
+#else                                   /* "Other platform" options  */
+
+#define DLL_IMPORT   extern             /* (a safe default)          */
+#define DLL_EXPORT
+
+#undef TUNTAP_IFF_RUNNING_NEEDED        /* (tuntape support unknown) */
+#undef  OPTION_SCSI_TAPE                /* (NO SCSI tape support)    */
+#undef  OPTION_SCSI_ERASE_TAPE          /* (NOT supported)           */
+#undef  OPTION_SCSI_ERASE_GAP           /* (NOT supported)           */
+#undef  OPTION_FBA_BLKDEVICE            /* (no FBA BLKDEVICE support)*/
+
+#define MAX_DEVICE_THREADS          0   /* (0 == unlimited)          */
+#define MIXEDCASE_FILENAMES_ARE_UNIQUE  /* ("Foo" and "fOo" unique)  */
+
+#define DEFAULT_HERCPRIO    0
+#define DEFAULT_TOD_PRIO  -20
+#define DEFAULT_CPU_PRIO   15
+#define DEFAULT_DEV_PRIO    8
+
+#if defined( HAVE_FORK )
+  #define HOW_TO_IMPLEMENT_SH_COMMAND     USE_FORK_API_FOR_SH_COMMAND
+#else
+  #define HOW_TO_IMPLEMENT_SH_COMMAND     USE_ANSI_SYSTEM_API_FOR_SH_COMMAND
+#endif
+#define SET_CONSOLE_CURSOR_SHAPE_METHOD   CURSOR_SHAPE_NOT_SUPPORTED
 
 #endif // (host-specific tests)
 

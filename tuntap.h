@@ -2,14 +2,31 @@
 // Hercules - TUN/TAP Abstraction Layer
 // ====================================================================
 //
-// Copyright (C) 2002-2006 by James A. Pierson
+// Copyright (C) 2002-2007 by James A. Pierson
 //           (C) 2002-2006 by "Fish" (David B. Trout)
+//
+
+// $Id: tuntap.h,v 1.12 2007/06/23 00:04:19 ivan Exp $
+//
+// $Log: tuntap.h,v $
+// Revision 1.12  2007/06/23 00:04:19  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.11  2006/12/08 09:43:31  jj
+// Add CVS message log
 //
 
 #ifndef __TUNTAP_H_
 #define __TUNTAP_H_
 
 #include "hercules.h"
+
+#if defined( HAVE_STRUCT_SOCKADDR_IN_SIN_LEN )
+  #define set_sockaddr_in_sin_len( sockaddr_in_ptr ) \
+    (sockaddr_in_ptr)->sin_len = sizeof( struct sockaddr_in )
+#else
+  #define set_sockaddr_in_sin_len( sockaddr_in_ptr )
+#endif
 
 // ====================================================================
 // Declarations
@@ -28,6 +45,9 @@ extern int      TUNTAP_CreateInterface  ( char*   pszTUNDevice,
 // Configure TUN/TAP Interface
 //
 
+#ifdef   OPTION_TUNTAP_CLRIPADDR
+extern int      TUNTAP_ClrIPAddr        ( char*   pszNetDevName );
+#endif
 extern int      TUNTAP_SetIPAddr        ( char*   pszNetDevName,
                                           char*   pszIPAddr );
 extern int      TUNTAP_SetDestAddr      ( char*   pszNetDevName,
@@ -47,6 +67,8 @@ extern int      TUNTAP_SetMACAddr       ( char*   pszNetDevName,
 
 extern int      TUNTAP_SetFlags         ( char*   pszNetDevName,
                                           int     iFlags );
+extern int      TUNTAP_GetFlags         ( char*   pszNetDevName,
+                                          int*    piFlags );
 
 #ifdef OPTION_TUNTAP_DELADD_ROUTES
 extern int      TUNTAP_AddRoute         ( char*   pszNetDevName,
@@ -60,6 +82,9 @@ extern int      TUNTAP_DelRoute         ( char*   pszNetDevName,
                                           char*   pszGWAddr,
                                           int     iFlags );
 #endif
+
+// (the following function used by Win32 *and* NON-Win32 platforms)
+extern void build_herc_iface_mac ( BYTE* out_mac, const BYTE* in_ip );
 
 //
 // Helper Macros

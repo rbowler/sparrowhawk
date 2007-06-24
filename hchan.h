@@ -1,3 +1,10 @@
+// $Id: hchan.h,v 1.5 2006/12/08 09:43:21 jj Exp $
+//
+// $Log: hchan.h,v $
+// Revision 1.5  2006/12/08 09:43:21  jj
+// Add CVS message log
+//
+
 #ifndef __HCHAN_H__
 #define __HCHAN_H__
 /*

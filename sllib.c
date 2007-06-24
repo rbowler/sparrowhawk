@@ -1,13 +1,23 @@
 /*
 || ----------------------------------------------------------------------------
 ||
-|| SLLIB.C      (c) Copyright Leland Lucius, 2000-2006
+|| SLLIB.C      (c) Copyright Leland Lucius, 2000-2007
 ||              Released under terms of the Q Public License.
 ||
 || Library for managing Standard Label tapes.
 ||
 || ----------------------------------------------------------------------------
 */
+
+// $Id: sllib.c,v 1.16 2007/06/23 00:04:15 ivan Exp $
+//
+// $Log: sllib.c,v $
+// Revision 1.16  2007/06/23 00:04:15  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.15  2006/12/08 09:43:30  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 

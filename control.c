@@ -1,8 +1,10 @@
-/* CONTROL.C    (c) Copyright Roger Bowler, 1994-2006                */
+/* CONTROL.C    (c) Copyright Roger Bowler, 1994-2007                */
 /*              ESA/390 CPU Emulator                                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+
+// $Id: control.c,v 1.255 2007/06/23 00:04:05 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements all control instructions of the            */
@@ -28,6 +30,74 @@
 /*      SIGP orders 11,12.2,13,15 - Fish                     Oct 2005*/
 /*-------------------------------------------------------------------*/
 
+// $Log: control.c,v $
+// Revision 1.255  2007/06/23 00:04:05  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.254  2007/06/06 22:14:57  gsmith
+// Fix SYNCHRONIZE_CPUS when numcpu > number of host processors - Greg
+//
+// Revision 1.253  2007/05/26 21:16:11  rbowler
+// fix control.c:4990: warning: return type defaults to `int'
+//
+// Revision 1.252  2007/05/20 15:36:44  jj
+// Ensure that the reference bit of the rcp area is set when conditional SSKE refers to the storage key in the rcp area
+//
+// Revision 1.251  2007/05/17 22:47:35  rbowler
+// Conditional SSKE for SIE
+//
+// Revision 1.250  2007/05/17 13:51:31  rbowler
+// Conditional SSKE correction
+//
+// Revision 1.249  2007/04/26 22:27:48  rbowler
+// Conditional SSKE feature (non SIE-mode)
+//
+// Revision 1.248  2007/04/26 21:09:08  rbowler
+// Change SSKE instruction format from RRE to RRF_M
+//
+// Revision 1.247  2007/03/31 20:18:17  gsmith
+// Init tlbID after copying regs to newregs
+//
+// Revision 1.246  2007/03/25 04:20:36  gsmith
+// Ensure started_mask CPU bit is off for terminating cpu thread - Fish by Greg
+//
+// Revision 1.245  2007/02/12 22:36:29  rbowler
+// Remove tabs, reformat comments
+//
+// Revision 1.244  2007/02/12 06:16:45  fish
+// Don't log Sense Running State SIGP
+//
+// Revision 1.243  2007/01/14 23:31:46  gsmith
+// nerak's patch, one more time
+//
+// Revision 1.242  2007/01/13 07:13:41  bernard
+// backout ccmask
+//
+// Revision 1.241  2007/01/12 15:21:31  bernard
+// ccmaks phase 1
+//
+// Revision 1.240  2007/01/05 14:26:08  fish
+// Fix SIGP processing in light of recent AIA performance mods
+//
+// Revision 1.239  2006/12/31 21:16:32  gsmith
+// 2006 Dec 31 really back out mainlockx.pat
+//
+// Revision 1.238  2006/12/22 00:51:43  gsmith
+// 21 Dec 2006 Fix SIGP to do single logmsg - Greg Smith
+//
+// Revision 1.237  2006/12/20 09:09:40  jj
+// Fix bogus log entries
+//
+// Revision 1.236  2006/12/20 04:26:19  gsmith
+// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
+//
+// Revision 1.235  2006/12/20 04:22:00  gsmith
+// 2006 Dec 19 Backout mainlockx.pat - possible SMP problems - Greg Smith
+//
+// Revision 1.234  2006/12/08 09:43:18  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
 
 #if !defined(_HENGINE_DLL_)
@@ -48,6 +118,9 @@
 #include "w32chan.h"
 #endif // defined(OPTION_FISHIO)
 
+/* Temporary debug */
+extern  int     ipending_cmd(int,void *,void *);
+
 #if defined(FEATURE_BRANCH_AND_SET_AUTHORITY)
 /*-------------------------------------------------------------------*/
 /* B25A BSA   - Branch and Set Authority                       [RRE] */
@@ -64,7 +137,6 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
 #endif /*FEATURE_TRACING*/
 
     RRE(inst, regs, r1, r2);
-    regs->psw.IA &= ADDRESS_MAXWRAP(regs);
 
     /* Special operation exception if ASF is not enabled */
     if (!ASF_ENABLED(regs))
@@ -136,12 +208,12 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
       #if defined(FEATURE_ESAME)
         if (regs->psw.amode64)
         {
-            duct_reta = regs->psw.IA;
+            duct_reta = PSW_IA(regs, 0);
         }
         else
       #endif /*!defined(FEATURE_ESAME)*/
         {
-            duct_reta = (regs->psw.IA) & DUCT_IA31;
+            duct_reta = PSW_IA(regs, 0) & DUCT_IA31;
             if (regs->psw.amode) duct_reta |= DUCT_AM31;
         }
 
@@ -173,14 +245,14 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         /* Set the problem state bit in the current PSW */
         regs->psw.states |= BIT(PSW_PROB_BIT);
 
-        /* Update the breaking event address register */
-        UPDATE_BEAR_A(regs);
+        /* Set the breaking event address register */
+        SET_BEAR_REG(regs, regs->ip - 4);
 
         /* Set PSW instruction address and amode from R2 register */
       #if defined(FEATURE_ESAME)
         if (regs->psw.amode64)
         {
-            regs->psw.IA = regs->GR_G(r2);
+            UPD_PSW_IA(regs, regs->GR_G(r2));
         }
         else
       #endif /*defined(FEATURE_ESAME)*/
@@ -191,7 +263,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
       #endif /*defined(FEATURE_ESAME)*/
             regs->psw.amode = 1;
             regs->psw.AMASK = AMASK31;
-            regs->psw.IA = regs->GR_L(r2) & AMASK31;
+            UPD_PSW_IA(regs, regs->GR_L(r2));
         }
         else
         {
@@ -200,7 +272,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
       #endif /*defined(FEATURE_ESAME)*/
             regs->psw.amode = 0;
             regs->psw.AMASK = AMASK24;
-            regs->psw.IA = regs->GR_L(r2) & AMASK24;
+            UPD_PSW_IA(regs, regs->GR_L(r2));
         }
 
     } /* end if(BSA-ba) */
@@ -218,9 +290,9 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
                                         duct_reta &DUCT_IA31, regs);
       #endif /*FEATURE_TRACING*/
 
-        /* Update the breaking event address register */
-        UPDATE_BEAR_A(regs);
-         
+        /* Set the breaking event address register */
+        SET_BEAR_REG(regs, regs->ip - 4);
+
         /* If R1 is non-zero, save the current PSW addressing mode
            and instruction address in the R1 register */
         if (r1 != 0)
@@ -228,12 +300,12 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
           #if defined(FEATURE_ESAME)
             if (regs->psw.amode64)
             {
-                regs->GR_G(r1) = regs->psw.IA;
+                regs->GR_G(r1) = PSW_IA(regs, 0);
             }
             else
           #endif /*defined(FEATURE_ESAME)*/
             {
-                regs->GR_L(r1) = regs->psw.IA;
+                regs->GR_L(r1) = PSW_IA(regs, 0);
                 if (regs->psw.amode) regs->GR_L(r1) |= 0x80000000;
             }
         }
@@ -242,12 +314,12 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
       #if defined(FEATURE_ESAME)
         if (regs->psw.amode64)
         {
-            regs->psw.IA = duct_reta;
+            UPD_PSW_IA(regs, duct_reta);
         }
         else
       #endif /*defined(FEATURE_ESAME)*/
         {
-            regs->psw.IA = duct_reta & DUCT_IA31;
+            UPD_PSW_IA(regs, duct_reta & DUCT_IA31);
             regs->psw.amode = (duct_reta & DUCT_AM31) ? 1 : 0;
             regs->psw.AMASK = regs->psw.amode ? AMASK31 : AMASK24;
         }
@@ -295,17 +367,8 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         regs->CR(12) = newcr12;
 #endif /*FEATURE_TRACING*/
 
-#if defined(FEATURE_PER)
-    if( EN_IC_PER_SB(regs)
-#if defined(FEATURE_PER2)
-      && ( !(regs->CR(9) & CR9_BAC)
-       || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
-#endif /*defined(FEATURE_PER2)*/
-        )
-        ON_IC_PER_SB(regs);
-#endif /*defined(FEATURE_PER)*/
-
-    VALIDATE_AIA(regs);
+    /* Check for Successful Branch PER event */
+    PER_SB(regs, regs->psw.IA);
 
 } /* end DEF_INST(branch_and_set_authority) */
 #endif /*defined(FEATURE_BRANCH_AND_SET_AUTHORITY)*/
@@ -505,18 +568,15 @@ CREG    inst_cr;                        /* Instruction CR            */
     {
       #if defined(FEATURE_ESAME)
         if (regs->psw.amode64)
-            regs->GR_G(r1) = regs->psw.IA;
+            regs->GR_G(r1) = PSW_IA(regs, 0);
         else
       #endif /*!defined(FEATURE_ESAME)*/
-            regs->GR_L(r1) = (regs->psw.IA & ADDRESS_MAXWRAP(regs)) |
+            regs->GR_L(r1) = PSW_IA(regs, 0) |
                                 (regs->psw.amode ? 0x80000000 : 0);
     }
 
     /* Update the breaking event address register */
-    UPDATE_BEAR_A(regs);
-
-    /* Set mode and branch to address specified by R2 operand */
-    regs->psw.IA = newia;
+    SET_BEAR_REG(regs, regs->ip - 4);
 
   #if defined(FEATURE_ESAME)
     if (regs->psw.amode64 == 0 && (newia & 0x80000000))
@@ -526,14 +586,15 @@ CREG    inst_cr;                        /* Instruction CR            */
     {
         regs->psw.amode = 1;
         regs->psw.AMASK = AMASK31;
-        regs->psw.IA = newia & AMASK31;
     }
     else
     {
         regs->psw.amode = 0;
         regs->psw.AMASK = AMASK24;
-        regs->psw.IA = newia & AMASK24;
     }
+
+    /* Set mode and branch to address specified by R2 operand */
+    UPD_PSW_IA(regs, newia);
 
     /* Set the SSTD (or SASCE) equal to PSTD (or PASCE) */
     regs->CR(7) = regs->CR(1);
@@ -586,18 +647,9 @@ CREG    inst_cr;                        /* Instruction CR            */
     SET_AEA_COMMON(regs);
     if (inst_cr != regs->CR(regs->aea_ar[USE_INST_SPACE]))
         INVALIDATE_AIA(regs);
-    else
-        VALIDATE_AIA(regs);
 
-#if defined(FEATURE_PER)
-    if( EN_IC_PER_SB(regs)
-#if defined(FEATURE_PER2)
-      && ( !(regs->CR(9) & CR9_BAC)
-       || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
-#endif /*defined(FEATURE_PER2)*/
-        )
-        ON_IC_PER_SB(regs);
-#endif /*defined(FEATURE_PER)*/
+    /* Check for Successful Branch PER event */
+    PER_SB(regs, regs->psw.IA);
 
 } /* end DEF_INST(branch_in_subspace_group) */
 #endif /*defined(FEATURE_SUBSPACE_GROUP)*/
@@ -646,7 +698,7 @@ VADR    n = 0;                          /* Work area                 */
     }
     else
     {
-        n1 = regs->psw.IA & ADDRESS_MAXWRAP(regs);
+        n1 = PSW_IA(regs, 0);
       #if defined(FEATURE_ESAME)
         if ( regs->psw.amode64 )
             n1 |= 0x01;
@@ -658,7 +710,7 @@ VADR    n = 0;                          /* Work area                 */
 
     /* Obtain the branch address from the R2 register, or use
        the updated PSW instruction address if R2 is zero */
-    n2 = (r2 != 0) ? regs->GR(r2) : regs->psw.IA;
+    n2 = (r2 != 0) ? regs->GR(r2) : PSW_IA(regs, 0);
     n2 &= ADDRESS_MAXWRAP(regs);
 
     /* Set the addressing mode bit in the branch address */
@@ -688,21 +740,10 @@ VADR    n = 0;                          /* Work area                 */
     /* Execute the branch unless R2 specifies register 0 */
     if ( r2 != 0 )
     {
-        UPDATE_BEAR_A(regs);
-        regs->psw.IA = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
-
-#if defined(FEATURE_PER)
-        if( EN_IC_PER_SB(regs)
-#if defined(FEATURE_PER2)
-          && ( !(regs->CR(9) & CR9_BAC)
-           || PER_RANGE_CHECK(regs->psw.IA,regs->CR(10),regs->CR(11)) )
-#endif /*defined(FEATURE_PER2)*/
-            )
-            ON_IC_PER_SB(regs);
-#endif /*defined(FEATURE_PER)*/
+        UPDATE_BEAR(regs, -4);
+        UPD_PSW_IA(regs, regs->GR(r2));
+        PER_SB(regs, regs->psw.IA);
     }
-
-    VALIDATE_AIA(regs);
 
 } /* end DEF_INST(branch_and_stack) */
 #endif /*defined(FEATURE_LINKAGE_STACK)*/
@@ -762,9 +803,13 @@ U32     old;                            /* old value                 */
         /* Perform requested funtion specified as per request code in r2 */
         if (regs->GR_L(r2) & 3)
         {
-            obtain_lock (&sysblk.intlock);
-            ARCH_DEP(synchronize_broadcast)(regs, regs->GR_L(r2) & 3, 0);
-            release_lock (&sysblk.intlock);
+            OBTAIN_INTLOCK(regs);
+            SYNCHRONIZE_CPUS(regs);
+            if (regs->GR_L(r2) & 1)
+                ARCH_DEP(purge_tlb_all)();
+            if (regs->GR_L(r2) & 2)
+                ARCH_DEP(purge_alb_all)();
+            RELEASE_INTLOCK(regs);
         }
     }
     else
@@ -1525,8 +1570,8 @@ int     r1, r2;                         /* Values of R fields        */
 
     /* Perform serialization before operation */
     PERFORM_SERIALIZATION (regs);
-
-    OBTAIN_MAINLOCK(regs);
+    OBTAIN_INTLOCK(regs);
+    SYNCHRONIZE_CPUS(regs);
 
 #if defined(_FEATURE_SIE)
     if(SIE_MODE(regs) && regs->sie_scao)
@@ -1534,7 +1579,7 @@ int     r1, r2;                         /* Values of R fields        */
         STORAGE_KEY(regs->sie_scao, regs) |= STORKEY_REF;
         if(regs->mainstor[regs->sie_scao] & 0x80)
         {
-            RELEASE_MAINLOCK(regs);
+            RELEASE_INTLOCK(regs);
             longjmp(regs->progjmp, SIE_INTERCEPT_INST);
         }
         regs->mainstor[regs->sie_scao] |= 0x80;
@@ -1553,7 +1598,7 @@ int     r1, r2;                         /* Values of R fields        */
     }
 #endif /*defined(_FEATURE_SIE)*/
 
-    RELEASE_MAINLOCK(regs);
+    RELEASE_INTLOCK(regs);
 
 } /* DEF_INST(invalidate_page_table_entry) */
 
@@ -1911,8 +1956,14 @@ U16     updated = 0;                    /* Updated control regs      */
     if (updated & BIT(regs->aea_ar[USE_INST_SPACE]))
         INVALIDATE_AIA(regs);
 #endif
-    if ((updated & BIT(9)) && EN_IC_PER_SA(regs))
-        ARCH_DEP(invalidate_tlb)(regs,~(ACC_WRITE|ACC_CHECK));
+    if (updated & BIT(9))
+    {
+        OBTAIN_INTLOCK(regs);
+        SET_IC_PER(regs);
+        RELEASE_INTLOCK(regs);
+        if (EN_IC_PER_SA(regs))
+            ARCH_DEP(invalidate_tlb)(regs,~(ACC_WRITE|ACC_CHECK));
+    }
 
     RETURN_INTCHECK(regs);
 
@@ -1956,8 +2007,8 @@ int     amode64;
     /* Fetch new PSW from operand address */
     STORE_DW ( dword, ARCH_DEP(vfetch8) ( effective_addr2, b2, regs ) );
 
-    /* Update the breaking event address register */
-    UPDATE_BEAR_A(regs);
+    /* Set the breaking event address register */
+    SET_BEAR_REG(regs, regs->ip - 4);
 
     /* Load updated PSW (ESA/390 Format in ESAME mode) */
 #if !defined(FEATURE_ESAME)
@@ -2918,33 +2969,33 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         /* For basic PC, load linkage info into general register 14 */
       #if defined(FEATURE_ESAME)
         if (regs->psw.amode64)
-            regs->GR_G(14) = (regs->psw.IA & ADDRESS_MAXWRAP(regs)) | PROBSTATE(&regs->psw);
+            regs->GR_G(14) = PSW_IA(regs, 0) | PROBSTATE(&regs->psw);
         else
             regs->GR_L(14) = (regs->psw.amode ? 0x80000000 : 0)
-                            | (regs->psw.IA & ADDRESS_MAXWRAP(regs)) | PROBSTATE(&regs->psw);
+                            | PSW_IA(regs, 0) | PROBSTATE(&regs->psw);
       #else /*!defined(FEATURE_ESAME)*/
         regs->GR_L(14) = (regs->psw.amode ? 0x80000000 : 0)
-                        | (regs->psw.IA & ADDRESS_MAXWRAP(regs)) | PROBSTATE(&regs->psw);
+                        | PSW_IA(regs, 0) | PROBSTATE(&regs->psw);
       #endif /*!defined(FEATURE_ESAME)*/
 
-        /* Update the breaking event address register */
-        UPDATE_BEAR_A(regs);
+        /* Set the breaking event address register */
+        SET_BEAR_REG(regs, regs->ip - 4);
 
         /* Update the PSW from the entry table */
       #if defined(FEATURE_ESAME)
         if (regs->psw.amode64)
-            regs->psw.IA = ((U64)(ete[0]) << 32)
-                                | (U64)(ete[1] & 0xFFFFFFFE);
+            UPD_PSW_IA(regs , ((U64)(ete[0]) << 32)
+                                | (U64)(ete[1] & 0xFFFFFFFE));
         else
         {
             regs->psw.amode = (ete[1] & ETE1_AMODE) ? 1 : 0;
             regs->psw.AMASK = regs->psw.amode ? AMASK31 : AMASK24;
-            regs->psw.IA = ete[1] & ETE1_EIA;
+            UPD_PSW_IA(regs, ete[1] & ETE1_EIA);
         }
       #else /*!defined(FEATURE_ESAME)*/
         regs->psw.amode = (ete[1] & ETE1_AMODE) ? 1 : 0;
         regs->psw.AMASK = regs->psw.amode ? AMASK31 : AMASK24;
-        regs->psw.IA = ete[1] & ETE1_EIA;
+        UPD_PSW_IA(regs, ete[1] & ETE1_EIA);
       #endif /*!defined(FEATURE_ESAME)*/
         if (ete[1] & ETE1_PROB)
             regs->psw.states |= BIT(PSW_PROB_BIT);
@@ -2991,7 +3042,7 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
             csi = pasn << 16 | (aste[5] & 0x0000FFFF);
 
         /* Set the addressing mode bits in the return address */
-        retn = regs->psw.IA & ADDRESS_MAXWRAP(regs);
+        retn = PSW_IA(regs, 0);
       #if defined(FEATURE_ESAME)
         if ( regs->psw.amode64 )
             retn |= 0x01;
@@ -3011,8 +3062,8 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         ARCH_DEP(form_stack_entry) (LSED_UET_PC, retn, 0, csi,
                                         pcnum, regs);
 
-        /* Update the breaking event address register */
-        UPDATE_BEAR_A(regs);
+        /* Set the breaking event address register */
+        SET_BEAR_REG(regs, regs->ip - 4);
 
         /* Update the PSW from the entry table */
       #if defined(FEATURE_ESAME)
@@ -3021,20 +3072,20 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
             regs->psw.amode64 = 1;
             regs->psw.amode = 1;
             regs->psw.AMASK = AMASK64;
-            regs->psw.IA = ((U64)(ete[0]) << 32)
-                                | (U64)(ete[1] & 0xFFFFFFFE);
+            UPD_PSW_IA(regs, ((U64)(ete[0]) << 32)
+                                | (U64)(ete[1] & 0xFFFFFFFE));
         }
         else
         {
             regs->psw.amode64 = 0;
             regs->psw.amode = (ete[1] & ETE1_AMODE) ? 1 : 0;
             regs->psw.AMASK = regs->psw.amode ? AMASK31 : AMASK24;
-            regs->psw.IA = ete[1] & ETE1_EIA;
+            UPD_PSW_IA(regs, ete[1] & ETE1_EIA);
         }
       #else /*!defined(FEATURE_ESAME)*/
         regs->psw.amode = (ete[1] & ETE1_AMODE) ? 1 : 0;
         regs->psw.AMASK = regs->psw.amode ? AMASK31 : AMASK24;
-        regs->psw.IA = ete[1] & ETE1_EIA;
+        UPD_PSW_IA(regs, ete[1] & ETE1_EIA);
       #endif /*!defined(FEATURE_ESAME)*/
         if (ete[1] & ETE1_PROB)
             regs->psw.states |= BIT(PSW_PROB_BIT);
@@ -3159,15 +3210,8 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
     SET_AEA_COMMON(regs);             // cr[1], cr[7] may be updated
     INVALIDATE_AIA(regs);
 
-#if defined(FEATURE_PER)
-    if( EN_IC_PER_SB(regs)
-#if defined(FEATURE_PER2)
-      && ( !(regs->CR(9) & CR9_BAC)
-       || PER_RANGE_CHECK(regs->psw.IA&ADDRESS_MAXWRAP(regs),regs->CR(10),regs->CR(11)) )
-#endif /*defined(FEATURE_PER2)*/
-        )
-        ON_IC_PER_SB(regs);
-#endif /*defined(FEATURE_PER)*/
+    /* Check for Successful Branch PER event */
+    PER_SB(regs, regs->psw.IA);
 
     /* Generate space switch event if required */
     if ( ssevent || (pasn != 0 && IS_IC_PER(regs)) )
@@ -3228,45 +3272,17 @@ int     rc;                             /* return code from load_psw */
     PERFORM_SERIALIZATION (regs);
     PERFORM_CHKPT_SYNC (regs);
 
+    INVALIDATE_AIA(regs);
+
     /* Create a working copy of the CPU registers... */
-
-    /*
-       PROGRAMMING NOTE: The following code is designed to make a copy
-       of everything in the REGS structure *except* the TLB (since it
-       is so large, and besides, we're going to invalidate the entire
-       thing anyway, so why even bother to copy it in the first place?)
-
-       When it was originally written, the TLB was the VERY LAST field
-       defined in the REGS structure. The below code is simply checking
-       to make sure no new fields have been added to the REGS structure
-       *following* the TLB field (since it's designed to only copy the
-       REGS structure *up to* the TLB, but *not* anything else that may
-       be *following* the TLB).
-       
-       If new fields have been added to the REGS structure *following*
-       the TLB however, then the test fails and we simply make a copy
-       of the entire REGS structure (which, as explained, is undesirable
-       since it's a waste of time to copy data you're not going to use
-       anyway). Thus the below test is simply a performance enhancement
-       and nothing more (i.e. it doesn't matter WHICH way we do it, as
-       long as it gets done).
-    */
-    if ((uintptr_t)regs + sizeof(REGS) == (uintptr_t)&regs->tlb + sizeof(TLB))
-    {
-        // Make a working copy of everything *EXCEPT* the TLB...
-        memcpy( &newregs, regs, sizeof(REGS) - sizeof(TLB) );
-    }
-    else
-    {
-        // Make a COMPLETE copy of the *entire* REGS structure...
-        newregs = *regs;
-    }
+    memcpy( &newregs, regs, sysblk.regs_copy_len );
 
     /* Now INVALIDATE ALL TLB ENTRIES in our working copy.. */
     memset( &newregs.tlb.vaddr, 0, TLBN * sizeof(DW) );
+    newregs.tlbID = 1;
 
-    /* Update the copy of the breaking event address register */
-    UPDATE_BEAR_A(&newregs);
+    /* Set the breaking event address register in the copy */
+    SET_BEAR_REG(&newregs, newregs.ip - (newregs.execflag ? 4 : 2));
 
     /* Save the primary ASN (CR4) and primary STD (CR1) */
     oldpasn = regs->CR_LHL(4);
@@ -3442,20 +3458,14 @@ int     rc;                             /* return code from load_psw */
         regs->perc = newregs.perc;
     }
 
-    if( EN_IC_PER_SB(regs)
-#if defined(FEATURE_PER2)
-      && ( !(regs->CR(9) & CR9_BAC)
-       || PER_RANGE_CHECK(regs->psw.IA&ADDRESS_MAXWRAP(regs),regs->CR(10),regs->CR(11)) )
-#endif /*defined(FEATURE_PER2)*/
-        )
-        ON_IC_PER_SB(regs);
+    PER_SB(regs, regs->psw.IA);
+
 #endif /*defined(FEATURE_PER)*/
 
     /* Update cpu states */
     SET_IC_MASK(regs);
     SET_AEA_MODE(regs);               // psw has been updated
     SET_AEA_COMMON(regs);             // control regs been updated
-    INVALIDATE_AIA(regs);
 
     /* Generate space switch event if required */
     if ( ssevent == 1 || (ssevent == 2 && IS_IC_PER(regs)) )
@@ -3719,22 +3729,15 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         regs->CR(12) = newcr12;
 #endif /*FEATURE_TRACING*/
 
-#if defined(FEATURE_PER)
-    if( EN_IC_PER_SB(regs)
-#if defined(FEATURE_PER2)
-      && ( !(regs->CR(9) & CR9_BAC)
-       || PER_RANGE_CHECK(ia,regs->CR(10),regs->CR(11)) )
-#endif /*defined(FEATURE_PER2)*/
-        )
-        ON_IC_PER_SB(regs);
-#endif /*defined(FEATURE_PER)*/
+    /* Check for Successful Branch PER event */
+    PER_SB(regs, ia);
 
-    /* Update the breaking event address register */
-    UPDATE_BEAR_A(regs);
+    /* Set the breaking event address register */
+    SET_BEAR_REG(regs, regs->ip - 4);
 
     /* Replace PSW amode, instruction address, and problem state bit */
     regs->psw.amode = amode;
-    regs->psw.IA = ia;
+    UPD_PSW_IA(regs, ia);
     if (prob)
         regs->psw.states |= BIT(PSW_PROB_BIT);
     else
@@ -4341,7 +4344,7 @@ int     ssevent = 0;                    /* 1=space switch event      */
     if (((oldmode != 3 && mode == 3) || (oldmode == 3 && mode != 3))
          && (regs->CR(1) & SSEVENT_BIT
               || regs->CR(13) & SSEVENT_BIT
-              || OPEN_IC_PERINT(regs) ))
+              || OPEN_IC_PER(regs) ))
       {
         /* Indicate space-switch event required */
         ssevent = 1;
@@ -4410,14 +4413,14 @@ U64     dreg;                           /* Clock value               */
 
     /* reset the clock comparator pending flag according to
        the setting of the tod clock */
-    obtain_lock(&sysblk.intlock);
+    OBTAIN_INTLOCK(regs);
 
     if( tod_clock(regs) > regs->clkc )
         ON_IC_CLKC(regs);
     else
         OFF_IC_CLKC(regs);
 
-    release_lock(&sysblk.intlock);
+    RELEASE_INTLOCK(regs);
 
     /* Return condition code zero */
     regs->psw.cc = 0;
@@ -4457,7 +4460,7 @@ U64     dreg;                           /* Clock value               */
 
     dreg >>= 8;
 
-    obtain_lock(&sysblk.intlock);
+    OBTAIN_INTLOCK(regs);
 
     regs->clkc = dreg;
 
@@ -4468,7 +4471,7 @@ U64     dreg;                           /* Clock value               */
     else
         OFF_IC_CLKC(regs);
 
-    release_lock (&sysblk.intlock);
+    RELEASE_INTLOCK(regs);
 
     RETURN_INTCHECK(regs);
 }
@@ -4519,7 +4522,7 @@ S64     dreg;                           /* Timer value               */
     /* Fetch the CPU timer value from operand location */
     dreg = ARCH_DEP(vfetch8) ( effective_addr2, b2, regs );
 
-    obtain_lock(&sysblk.intlock);
+    OBTAIN_INTLOCK(regs);
 
     set_cpu_timer(regs, dreg);
 
@@ -4529,7 +4532,7 @@ S64     dreg;                           /* Timer value               */
     else
         OFF_IC_PTIMER(regs);
 
-    release_lock(&sysblk.intlock);
+    RELEASE_INTLOCK(regs);
 
 //  /*debug*/logmsg("Set CPU timer=%16.16" I64_FMT "X\n", dreg);
 
@@ -4968,20 +4971,102 @@ RADR    n;                              /* Absolute storage addr     */
 //  /*debug*/logmsg("SSK storage block %8.8X key %2.2X\n",
 //  /*debug*/       regs->GR_L(r2), regs->GR_LHLCL(r1) & 0xFE);
 
-}
+} /* end DEF_INST(set_storage_key) */
 #endif /*defined(FEATURE_BASIC_STORAGE_KEYS)*/
 
 
 #if defined(FEATURE_EXTENDED_STORAGE_KEYS)
+#if defined(FEATURE_CONDITIONAL_SSKE)
 /*-------------------------------------------------------------------*/
-/* B22B SSKE  - Set Storage Key extended                       [RRE] */
+/* SUBROUTINE TO PERFORM CONDITIONAL SSKE PROCESSING                 */
+/* Input:                                                            */
+/*      regs    Register context                                     */
+/*      r1      Register number field from SSKE instruction          */
+/*      m3      Mask field from SSKE instruction                     */
+/*      skey    Contents of storage key before modification          */
+/* Output (when conditional SSKE is not indicated):                  */
+/*      r1 register and condition code remain unchanged;             */
+/*      The function return value is 0.                              */
+/* Output (when conditional SSKE is indicated):                      */
+/*      r1 register bits 48-55 contain original storage key;         */
+/*      - if storage key is to be updated, the condition code        */
+/*        is set to 1 and the function return value is 0;            */
+/*      - if storage key update is to be bypassed, the condition     */
+/*        code is set to 0 and the function return value is 1;       */
+/*-------------------------------------------------------------------*/
+static inline int ARCH_DEP(conditional_sske_procedure)
+        (REGS *regs, int r1, int m3, BYTE skey)
+{
+    /* Perform normal SSKE if MR and MC bits are both zero */
+    if ((m3 & (SSKE_MASK_MR | SSKE_MASK_MC)) == 0)
+        return 0;
+
+    /* Perform conditional SSKE if either MR or MC bits are set */
+
+    /* Insert storage key into R1 register bits 48-55 */
+    regs->GR_LHLCH(r1) = skey & ~(STORKEY_BADFRM);
+
+    /* If storage key and fetch bit do not equal new values
+       in R1 register bits 56-60 then set condition code 1
+       and return to SSKE to update storage key */
+    if ((regs->GR_LHLCH(r1) & (STORKEY_KEY | STORKEY_FETCH))
+        != (regs->GR_LHLCL(r1) & (STORKEY_KEY | STORKEY_FETCH)))
+    {
+        regs->psw.cc = 1;
+        return 0;
+    }
+
+    /* If both MR and MC mask bits are one then set
+       condition code 0 and leave storage key unchanged */
+    if ((m3 & (SSKE_MASK_MR | SSKE_MASK_MC))
+        == (SSKE_MASK_MR | SSKE_MASK_MC))
+    {
+        regs->psw.cc = 0;
+        return 1;
+    }
+
+    /* If MR bit is zero and reference bit is equal to
+       bit 61 of R1 register then set condition code 0
+       and leave storage key unchanged */
+    if ((m3 & SSKE_MASK_MR) == 0
+        && ((regs->GR_LHLCH(r1) & STORKEY_REF)
+           == (regs->GR_LHLCL(r1) & STORKEY_REF)))
+    {
+        regs->psw.cc = 0;
+        return 1;
+    }
+
+    /* If MC bit is zero and the change bit is equal to
+       bit 62 of R1 register then set condition code 0
+       and leave storage key unchanged */
+    if ((m3 & SSKE_MASK_MC) == 0
+        && ((regs->GR_LHLCH(r1) & STORKEY_CHANGE)
+           == (regs->GR_LHLCL(r1) & STORKEY_CHANGE)))
+    {
+        regs->psw.cc = 0;
+        return 1;
+    }
+
+    /* Set condition code 1 and let SSKE update storage key */
+    regs->psw.cc = 1;
+    return 0;
+
+} /* end function conditional_sske_procedure */
+#endif /*defined(FEATURE_CONDITIONAL_SSKE)*/
+#endif /*defined(FEATURE_EXTENDED_STORAGE_KEYS)*/
+
+
+#if defined(FEATURE_EXTENDED_STORAGE_KEYS)
+/*-------------------------------------------------------------------*/
+/* B22B SSKE  - Set Storage Key extended                       [RRF] */
 /*-------------------------------------------------------------------*/
 DEF_INST(set_storage_key_extended)
 {
 int     r1, r2;                         /* Register numbers          */
+int     m3;                             /* Mask field                */
 RADR    n;                              /* Abs frame addr stor key   */
 
-    RRE(inst, regs, r1, r2);
+    RRF_M(inst, regs, r1, r2, m3);
 
     PRIV_CHECK(regs);
 
@@ -5096,7 +5181,13 @@ RADR    n;                              /* Abs frame addr stor key   */
 
                 /* fetch the RCP key */
                 rcpkey = regs->mainstor[rcpa];
+                /* set the reference bit in the RCP key */
                 STORAGE_KEY(rcpa, regs) |= STORKEY_REF;
+#if defined(FEATURE_CONDITIONAL_SSKE)
+                /* Perform conditional SSKE procedure */
+                if (ARCH_DEP(conditional_sske_procedure)(regs, r1, m3, rcpkey))
+                    return;
+#endif /*defined(FEATURE_CONDITIONAL_SSKE)*/
                 /* or with host set */
                 rcpkey |= realkey << 4;
                 /* insert new settings of the guest set */
@@ -5133,6 +5224,17 @@ RADR    n;                              /* Abs frame addr stor key   */
         }
         else
         {
+#if defined(FEATURE_CONDITIONAL_SSKE)
+            /* Perform conditional SSKE procedure */
+            if (ARCH_DEP(conditional_sske_procedure)(regs, r1, m3,
+#if defined(FEATURE_4K_STORAGE_KEYS) && !defined(_FEATURE_2K_STORAGE_KEYS)
+                    STORAGE_KEY(n, regs)
+#else
+                    (STORAGE_KEY1(n, regs) | STORAGE_KEY2(n, regs))
+#endif
+                ))
+                return;
+#endif /*defined(FEATURE_CONDITIONAL_SSKE)*/
             /* Update the storage key from R1 register bits 24-30 */
 #if !defined(_FEATURE_2K_STORAGE_KEYS)
             STORAGE_KEY(n, regs) &= STORKEY_BADFRM;
@@ -5148,6 +5250,18 @@ RADR    n;                              /* Abs frame addr stor key   */
     else
 #endif /*defined(_FEATURE_SIE)*/
     {
+#if defined(FEATURE_CONDITIONAL_SSKE)
+        /* Perform conditional SSKE procedure */
+        if (ARCH_DEP(conditional_sske_procedure)(regs, r1, m3,
+#if defined(FEATURE_4K_STORAGE_KEYS) && !defined(_FEATURE_2K_STORAGE_KEYS)
+                STORAGE_KEY(n, regs)
+#else
+                (STORAGE_KEY1(n, regs) | STORAGE_KEY2(n, regs))
+#endif
+            ))
+            return;
+#endif /*defined(FEATURE_CONDITIONAL_SSKE)*/
+
         /* Update the storage key from R1 register bits 24-30 */
 #if defined(FEATURE_4K_STORAGE_KEYS) && !defined(_FEATURE_2K_STORAGE_KEYS)
         STORAGE_KEY(n, regs) &= STORKEY_BADFRM;
@@ -5165,11 +5279,10 @@ RADR    n;                              /* Abs frame addr stor key   */
     PERFORM_CHKPT_SYNC (regs);
 
     /* Invalidate AIA/AEA so that the REF and CHANGE bits will be set
-     * when referenced next.
-     */
+       when referenced next */
     STORKEY_INVALIDATE(regs, n);
 
-}
+} /* end DEF_INST(set_storage_key_extended) */
 #endif /*defined(FEATURE_EXTENDED_STORAGE_KEYS)*/
 
 
@@ -5255,7 +5368,8 @@ BYTE    order;                          /* SIGP order code           */
 int     cpu;                            /* cpu number                */
 int     set_arch = 0;                   /* Need to switch mode       */
 #endif /*defined(_900) || defined(FEATURE_ESAME)*/
-int     log_sigp = 0;                   /* Log SIGP instruction flag */
+size_t  log_sigp = 0;                   /* Log SIGP instruction flag */
+char    log_buf[128];                   /* Log buffer                */
 static char *ordername[] = {
     /* 0x00                          */  "Unassigned",
     /* 0x01 SIGP_SENSE               */  "Sense",
@@ -5316,14 +5430,14 @@ static char *ordername[] = {
         return;
     }
 
-    /* Trace all "unusual" SIGPs... (anything OTHER THAN Sense,
-       External Call and Emergency Signal (which are considered
-       normal) to ANY cpu, -or- ANY SIGP at all sent to a CPU
-       that is configured offline (which is indeed unusual!)) */
-    if (order > LOG_SIGPORDER || !IS_CPU_ONLINE(cpad))
+    /* Trace SIGP unless Sense, External Call, Emergency Signal,
+       Sense Running State,
+       or the target CPU is configured offline */
+    if ((order > LOG_SIGPORDER && order != SIGP_SENSE_RUNNING_STATE)
+        || !IS_CPU_ONLINE(cpad))
     {
-        log_sigp = 1;
-        logmsg ("CPU%4.4X: SIGP %s (%2.2X) CPU%4.4X, PARM "F_GREG,
+        log_sigp = snprintf ( log_buf, sizeof(log_buf), 
+                "CPU%4.4X: SIGP %s (%2.2X) CPU%4.4X, PARM "F_GREG,
                 regs->cpuad,
                 order >= sizeof(ordername) / sizeof(ordername[0]) ?
                         "Unassigned" : ordername[order],
@@ -5340,12 +5454,12 @@ static char *ordername[] = {
     {
         regs->psw.cc = 2;
         if (log_sigp)
-            logmsg (": CC 2\n");
+            logmsg("%s: CC 2\n",log_buf);
         return;
     }
 
     /* Obtain the interrupt lock */
-    obtain_lock(&sysblk.intlock);
+    OBTAIN_INTLOCK(regs);
 
     /* If the cpu is not part of the configuration then return cc3
        Initial CPU reset may IML a processor that is currently not
@@ -5357,11 +5471,11 @@ static char *ordername[] = {
 #endif /*defined(FEATURE_S370_CHANNEL)*/
        && !IS_CPU_ONLINE(cpad))
     {
-        release_lock(&sysblk.intlock);
+        RELEASE_INTLOCK(regs);
         release_lock(&sysblk.sigplock);
         regs->psw.cc = 3;
         if (log_sigp)
-            logmsg (": CC 3\n");
+            logmsg("%s: CC 3\n",log_buf);
         return;
     }
 
@@ -5380,11 +5494,12 @@ static char *ordername[] = {
        && (tregs) && (tregs->cpustate == CPUSTATE_STOPPING
         || IS_IC_RESTART(tregs)))
     {
-        release_lock(&sysblk.intlock);
+        RELEASE_INTLOCK(regs);
         release_lock(&sysblk.sigplock);
         regs->psw.cc = 2;
         if (log_sigp)
-            logmsg (": CC 2\n");
+            logmsg("%s: CC 2\n",log_buf);
+        sched_yield();
         return;
     }
 
@@ -5458,6 +5573,8 @@ static char *ordername[] = {
             else
             {
                 U16 check_asn = (parm & 0xFFFF);
+
+                SET_PSW_IA(tregs);
 
                 if (0
 
@@ -5794,6 +5911,7 @@ static char *ordername[] = {
                             sysblk.arch_mode = ARCH_390;
                             set_arch = 1;
 
+                            INVALIDATE_AIA(regs);
                             regs->captured_zpsw = regs->psw;
                             regs->psw.states |= BIT(PSW_NOTESAME_BIT);
                             regs->PX_L &= 0x7FFFE000;
@@ -5803,6 +5921,7 @@ static char *ordername[] = {
                                 if (IS_CPU_ONLINE(cpu) &&
                                     sysblk.regs[cpu]->cpuad != regs->cpuad)
                                 {
+                                    INVALIDATE_AIA(sysblk.regs[cpu]);
                                     sysblk.regs[cpu]->captured_zpsw = sysblk.regs[cpu]->psw;
                                     sysblk.regs[cpu]->psw.states |= BIT(PSW_NOTESAME_BIT);
                                     sysblk.regs[cpu]->PX_L &= 0x7FFFE000;
@@ -5820,6 +5939,7 @@ static char *ordername[] = {
                             sysblk.arch_mode = ARCH_900;
                             set_arch = 1;
 
+                            INVALIDATE_AIA(regs);
                             regs->psw.states &= ~BIT(PSW_NOTESAME_BIT);
                             regs->psw.IA_H = 0;
                             regs->PX_G &= 0x7FFFE000;
@@ -5829,6 +5949,7 @@ static char *ordername[] = {
                                 if (IS_CPU_ONLINE(cpu) &&
                                     sysblk.regs[cpu]->cpuad != regs->cpuad)
                                 {
+                                    INVALIDATE_AIA(sysblk.regs[cpu]);
                                     sysblk.regs[cpu]->psw.states &= ~BIT(PSW_NOTESAME_BIT);
                                     sysblk.regs[cpu]->psw.IA_H = 0;
                                     sysblk.regs[cpu]->PX_G &= 0x7FFFE000;
@@ -5846,6 +5967,7 @@ static char *ordername[] = {
                             sysblk.arch_mode = ARCH_900;
                             set_arch = 1;
 
+                            INVALIDATE_AIA(regs);
                             regs->psw.states &= ~BIT(PSW_NOTESAME_BIT);
                             regs->psw.IA_H = 0;
                             regs->PX_G &= 0x7FFFE000;
@@ -5855,6 +5977,7 @@ static char *ordername[] = {
                                 if (IS_CPU_ONLINE(cpu) &&
                                     sysblk.regs[cpu]->cpuad != regs->cpuad)
                                 {
+                                    INVALIDATE_AIA(sysblk.regs[cpu]);
                                     sysblk.regs[cpu]->psw = sysblk.regs[cpu]->captured_zpsw;
                                     sysblk.regs[cpu]->PX_G &= 0x7FFFE000;
                                 }
@@ -5924,7 +6047,7 @@ static char *ordername[] = {
         WAKEUP_CPU (sysblk.regs[cpad]);
 
     /* Release the interrupt lock */
-    release_lock (&sysblk.intlock);
+    RELEASE_INTLOCK(regs);
 
     /* If status is non-zero, load the status word into
        the R1 register and return condition code 1 */
@@ -5940,9 +6063,9 @@ static char *ordername[] = {
     if (log_sigp)
     {
         if (regs->psw.cc == 0)
-            logmsg (": CC 0\n");
+            logmsg("%s: CC 0\n",log_buf);
         else
-            logmsg (": CC 1 STATUS %8.8X\n", (U32)status);
+            logmsg("%s: CC 1 STATUS %8.8X\n",log_buf, (U32)status);
     }
 
     /* Perform serialization after completing operation */
@@ -5950,7 +6073,10 @@ static char *ordername[] = {
 
 #if defined(_900) || defined(FEATURE_ESAME) || defined(FEATURE_HERCULES_DIAGCALLS)
     if(set_arch)
+    {
+        OBTAIN_INTLOCK(regs);
         longjmp(regs->archjmp, 0);
+    }
 #endif /*defined(_900) || defined(FEATURE_ESAME)*/
 
     RETURN_INTCHECK(regs);
@@ -5979,7 +6105,7 @@ U64     dreg;                           /* Clock value               */
 #endif /*defined(_FEATURE_SIE)*/
 
     /* Obtain the interrupt lock */
-    obtain_lock (&sysblk.intlock);
+    OBTAIN_INTLOCK(regs);
 
     /* Save clock comparator value */
     dreg = regs->clkc;
@@ -5995,16 +6121,15 @@ U64     dreg;                           /* Clock value               */
            and we are enabled for such interrupts *JJ */
         if( OPEN_IC_CLKC(regs) )
         {
-            release_lock (&sysblk.intlock);
-            regs->psw.IA -= 4;
-            VALIDATE_AIA(regs);
+            RELEASE_INTLOCK(regs);
+            UPD_PSW_IA(regs, PSW_IA(regs, -4));
             RETURN_INTCHECK(regs);
         }
     }
     else
         OFF_IC_CLKC(regs);
 
-    release_lock (&sysblk.intlock);
+    RELEASE_INTLOCK(regs);
 
     /* Store clock comparator value at operand location */
     ARCH_DEP(vstore8) ((dreg << 8), effective_addr2, b2, regs );
@@ -6151,7 +6276,7 @@ S64     dreg;                           /* Double word workarea      */
         longjmp(regs->progjmp, SIE_INTERCEPT_INST);
 #endif /*defined(_FEATURE_SIE)*/
 
-    obtain_lock(&sysblk.intlock);
+    OBTAIN_INTLOCK(regs);
 
     /* Save the CPU timer value */
     dreg = cpu_timer(regs);
@@ -6166,17 +6291,15 @@ S64     dreg;                           /* Double word workarea      */
            and we are enabled for such interrupts *JJ */
         if( OPEN_IC_PTIMER(regs) )
         {
-            release_lock(&sysblk.intlock);
-
-            regs->psw.IA -= 4;
-            VALIDATE_AIA(regs);
+            RELEASE_INTLOCK(regs);
+            UPD_PSW_IA(regs, PSW_IA(regs, -4));
             RETURN_INTCHECK(regs);
         }
     }
     else
         OFF_IC_PTIMER(regs);
 
-    release_lock(&sysblk.intlock);
+    RELEASE_INTLOCK(regs);
 
     /* Store CPU timer value at operand location */
     ARCH_DEP(vstore8) ( dreg, effective_addr2, b2, regs );
@@ -6209,8 +6332,6 @@ VADR    effective_addr2;                /* Effective address         */
 }
 
 
-#ifdef FEATURE_STORE_SYSTEM_INFORMATION
-
 #if !defined(_STSI_CAPABILITY)
 #define _STSI_CAPABILITY
 static inline U32 stsi_capability (REGS *regs)
@@ -6230,6 +6351,61 @@ struct rusage     usage;               /* RMF type data              */
 } /* end function stsi_capability */
 #endif /*!defined(_STSI_CAPABILITY)*/
 
+#if !defined(SET_STSI_STATIC)
+#define SET_STSI_STATIC
+#if defined(OPTION_SET_STSI_INFO)
+                          /*  "H    R    C"  */
+static BYTE manufact[16] = { 0xC8,0xD9,0xC3,0x40,0x40,0x40,0x40,0x40,
+                             0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40 };
+
+void set_manufacturer(char *name)
+{
+    size_t i;
+
+    for(i = 0; name && i < strlen(name) && i < sizeof(manufact); i++)
+        if(isprint(name[i]))
+            manufact[i] = host_to_guest((int)(islower(name[i]) ? toupper(name[i]) : name[i]));
+        else
+            manufact[i] = 0x40;
+    for(; i < sizeof(manufact); i++)
+        manufact[i] = 0x40;
+}
+
+                      /*  "Z    Z"  */
+static BYTE plant[4] = { 0xE9,0xE9,0x40,0x40 };
+
+void set_plant(char *name)
+{
+    size_t i;
+
+    for(i = 0; name && i < strlen(name) && i < sizeof(plant); i++)
+        if(isprint(name[i]))
+            plant[i] = host_to_guest((int)(islower(name[i]) ? toupper(name[i]) : name[i]));
+        else
+            plant[i] = 0x40;
+    for(; i < sizeof(plant); i++)
+        plant[i] = 0x40;
+}
+                      /*  "E    M    U    L    A    T    O    R" */
+static BYTE model[8] = { 0xC5,0xD4,0xE4,0xD3,0xC1,0xE3,0xD6,0xD9 };
+
+void set_model(char *name)
+{
+    size_t i;
+
+    for(i = 0; name && i < strlen(name) && i < sizeof(model); i++)
+        if(isprint(name[i]))
+            model[i] = host_to_guest((int)(islower(name[i]) ? toupper(name[i]) : name[i]));
+        else
+            model[i] = 0x40;
+    for(; i < sizeof(model); i++)
+        model[i] = 0x40;
+}
+
+#endif /* defined(OPTION_STSI_INFO) */
+#endif /* !defined(SET_STSI_STATIC) */
+
+#ifdef FEATURE_STORE_SYSTEM_INFORMATION
 /*-------------------------------------------------------------------*/
 /* B27D STSI  - Store System Information                         [S] */
 /*-------------------------------------------------------------------*/
@@ -6249,6 +6425,7 @@ SYSIB322  *sysib322;                    /* VM CPUs                   */
 SYSIBVMDB *sysib322;                    /* VM description block      */
 #endif
 
+#if !defined(OPTION_SET_STSI_INFO)
                           /*  "H    R    C"  */
 static BYTE manufact[16] = { 0xC8,0xD9,0xC3,0x40,0x40,0x40,0x40,0x40,
                              0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40 };
@@ -6256,13 +6433,14 @@ static BYTE manufact[16] = { 0xC8,0xD9,0xC3,0x40,0x40,0x40,0x40,0x40,
                       /*  "Z    Z"  */
 static BYTE plant[4] = { 0xE9,0xE9,0x40,0x40 };
 
+                      /*  "E    M    U    L    A    T    O    R" */
+static BYTE model[8] = { 0xC5,0xD4,0xE4,0xD3,0xC1,0xE3,0xD6,0xD9 };
+#endif /* !defined(OPTION_SET_STSI_INFO) */
+
                            /*  "0    1    2    3    4    5    6    7" */
 static BYTE hexebcdic[16] = { 0xF0,0xF1,0xF2,0xF3,0xF4,0xF5,0xF6,0xF7,
                            /*  "8    9    A    B    C    D    E    F" */
                               0xF8,0xF9,0xC1,0xC2,0xC3,0xC4,0xC5,0xC6 };
-
-                      /*  "E    M    U    L    A    T    O    R" */
-static BYTE model[8] = { 0xC5,0xD4,0xE4,0xD3,0xC1,0xE3,0xD6,0xD9 };
 
                         /* x'004B' = 75 = 75% for each subsequent cpu */
 static BYTE mpfact[32*2] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,

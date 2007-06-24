@@ -1,7 +1,9 @@
-/* BLDCFG.C     (c) Copyright Roger Bowler, 1999-2006                */
+/* BLDCFG.C     (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 Configuration Builder                        */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+
+// $Id: bldcfg.c,v 1.77 2007/06/23 00:04:03 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module builds the configuration tables for the Hercules      */
@@ -20,8 +22,54 @@
 /*      PANRATE parameter by Reed H. Petty                           */
 /*      CPUPRIO parameter by Jan Jaeger                              */
 /*      HERCPRIO, TODPRIO, DEVPRIO parameters by Mark L. Gaubatz     */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/*      $(DEFSYM) symbol substitution support by Ivan Warren         */
+/*      Patch for ${var=def} symbol substitution (hax #26),          */
+/*          and INCLUDE <filename> support (modified hax #27),       */
+/*          contributed by Enrico Sorichetti based on                */
+/*          original patches by "Hackules"                           */
 /*-------------------------------------------------------------------*/
+
+// $Log: bldcfg.c,v $
+// Revision 1.77  2007/06/23 00:04:03  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.76  2007/06/06 22:14:57  gsmith
+// Fix SYNCHRONIZE_CPUS when numcpu > number of host processors - Greg
+//
+// Revision 1.75  2007/02/27 05:30:36  fish
+// Fix minor glitch in enhanced symbol substitution
+//
+// Revision 1.74  2007/02/26 21:33:46  rbowler
+// Allow either quotes or apostrophes as argument delimiters in config statements
+//
+// Revision 1.73  2007/02/18 23:49:25  kleonard
+// Add TIME and NOTIME synonyms for LOGOPT operands
+//
+// Revision 1.72  2007/01/31 00:48:03  kleonard
+// Add logopt config statement and panel command
+//
+// Revision 1.71  2007/01/14 19:42:38  gsmith
+// Fix S370 only build - nerak60510
+//
+// Revision 1.70  2007/01/14 18:36:53  gsmith
+// Fix S370 only build - nerak60510
+//
+// Revision 1.69  2007/01/11 19:54:33  fish
+// Addt'l keep-alive mods: create associated supporting config-file stmt and panel command where individual customer-preferred values can be specified and/or dynamically modified.
+//
+// Revision 1.68  2007/01/08 09:52:00  rbowler
+// Rename symptom command as traceopt
+//
+// Revision 1.67  2007/01/07 11:25:33  rbowler
+// Instruction tracing regsfirst and noregs modes
+//
+// Revision 1.66  2007/01/06 09:05:18  gsmith
+// Enable display_inst to display traditionally too
+//
+// Revision 1.65  2006/12/08 09:43:16  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -57,17 +105,27 @@
  #undef   _GEN_ARCH
 #endif
 
-
 typedef struct _DEVARRAY
 {
     U16 cuu1;
     U16 cuu2;
 } DEVARRAY;
 
+typedef struct _DEVNUMSDESC
+{
+    BYTE lcss;
+    DEVARRAY *da;
+} DEVNUMSDESC;
+
 /*-------------------------------------------------------------------*/
 /* Static data areas                                                 */
 /*-------------------------------------------------------------------*/
-static int  stmt = 0;                   /* Config statement number   */
+#define MAX_INC_LEVEL 8                 /* Maximum nest level        */
+static int  inc_level;                  /* Current nesting level     */
+// following commented out ISW 20061009 : Not referenced anywhere.
+// static int  inc_fname[MAX_INC_LEVEL];   /* filename (base or incl)   */
+static int  inc_stmtnum[MAX_INC_LEVEL]; /* statement number          */
+static int  inc_ignore_errors = 0;      /* 1==ignore include errors  */
 #ifdef EXTERNALGUI
 static char buf[1024];                  /* Config statement buffer   */
 #else /*!EXTERNALGUI*/
@@ -86,9 +144,9 @@ static char *addargv[MAX_ARGS];         /* Additional argument array */
 /* then points to each argument found in the original string. Any    */
 /* argument that begins with '#' comment indicator causes early      */
 /* termination of the parsing and is not included in the count. Any  */
-/* argument found that starts with a double-quote character causes   */
-/* all characters following the double-quote up to the next double-  */
-/* quote to be included as part of that argument. The quotes them-   */
+/* argument found that starts with a quote or apostrophe causes      */
+/* all characters up to the next quote or apostrophe to be           */
+/* included as part of that argument. The quotes/apostrophes them-   */
 /* selves are not considered part of any argument and are ignored.   */
 /* p            Points to string to be parsed.                       */
 /* maxargc      Maximum allowable number of arguments. (Prevents     */
@@ -112,12 +170,13 @@ DLL_EXPORT int parse_args (char* p, int maxargc, char** pargv, int* pargc)
 
         *pargv = p; ++*pargc; // count new arg
 
-        while (*p && !isspace(*p) && *p != '\"') p++; if (!*p) break; // find end of arg
+        while (*p && !isspace(*p) && *p != '\"' && *p != '\'') p++; if (!*p) break; // find end of arg
 
-        if (*p == '\"')
+        if (*p == '\"' || *p == '\'')
         {
+            char delim = *p;
             if (p == *pargv) *pargv = p+1;
-            while (*++p && *p != '\"'); if (!*p) break; // find end of quoted string
+            while (*++p && *p != delim); if (!*p) break; // find end of quoted string
         }
 
         *p++ = 0; // mark end of arg
@@ -131,8 +190,13 @@ void delayed_exit (int exit_code)
 {
     /* Delay exiting is to give the system
      * time to display the error message. */
+    fflush(stderr);  
+    fflush(stdout);  
     usleep(100000);
-    hdl_shut();
+//  hdl_shut();
+    do_shutdown();
+    fflush(stderr);  
+    fflush(stdout);  
     usleep(100000);
     exit(exit_code);
 }
@@ -231,6 +295,13 @@ static int read_config (char *fname, FILE *fp)
 int     i;                              /* Array subscript           */
 int     c;                              /* Character work area       */
 int     stmtlen;                        /* Statement length          */
+#if defined( OPTION_ENHANCED_CONFIG_SYMBOLS )
+int     inc_dollar;                     /* >=0 Ndx of dollar         */
+int     inc_lbrace;                     /* >=0 Ndx of lbrace + 1     */
+int     inc_colon;                      /* >=0 Ndx of colon          */
+int     inc_equals;                     /* >=0 Ndx of equals         */
+char    *inc_envvar;                    /* ->Environment variable    */
+#endif // defined( OPTION_ENHANCED_CONFIG_SYMBOLS )
 int     lstarted;                       /* Indicate if non-whitespace*/
                                         /* has been seen yet in line */
 char   *cnfline;                        /* Pointer to copy of buffer */
@@ -238,10 +309,17 @@ char   *cnfline;                        /* Pointer to copy of buffer */
 char   *buf1;                           /* Pointer to resolved buffer*/
 #endif /*defined(OPTION_CONFIG_SYMBOLS)*/
 
+#if defined( OPTION_ENHANCED_CONFIG_SYMBOLS )
+    inc_dollar = -1;
+    inc_lbrace = -1;
+    inc_colon  = -1;
+    inc_equals = -1;
+#endif // defined( OPTION_ENHANCED_CONFIG_SYMBOLS )
+
     while (1)
     {
         /* Increment statement number */
-        stmt++;
+        inc_stmtnum[inc_level]++;
 
         /* Read next statement from configuration file */
         for (stmtlen = 0, lstarted = 0; ;)
@@ -253,7 +331,7 @@ char   *buf1;                           /* Pointer to resolved buffer*/
             if (ferror(fp))
             {
                 fprintf(stderr, _("HHCCF001S Error reading file %s line %d: %s\n"),
-                    fname, stmt, strerror(errno));
+                    fname, inc_stmtnum[inc_level], strerror(errno));
                 delayed_exit(1);
             }
 
@@ -276,9 +354,120 @@ char   *buf1;                           /* Pointer to resolved buffer*/
             if (stmtlen >= (int)(sizeof(buf) - 1))
             {
                 fprintf(stderr, _("HHCCF002S File %s line %d is too long\n"),
-                    fname, stmt);
+                    fname, inc_stmtnum[inc_level]);
                 delayed_exit(1);
             }
+
+#if defined( OPTION_ENHANCED_CONFIG_SYMBOLS )
+            /* inc_dollar already processed? */
+            if (inc_dollar >= 0)
+            {
+                /* Left brace already processed? */
+                if (inc_lbrace >= 0)
+                {
+                    /* End of variable spec? */
+                    if (c == '}')
+                    {
+                        /* Terminate it */
+                        buf[stmtlen] = '\0';
+
+                        /* Terminate var name if we have a inc_colon specifier */
+                        if (inc_colon >= 0)
+                        {
+                            buf[inc_colon] = '\0';
+                        }
+
+                        /* Terminate var name if we have a default value */
+                        if (inc_equals >= 0)
+                        {
+                            buf[inc_equals] = '\0';
+                        }
+
+                        /* Reset statement index to start of variable */
+                        stmtlen = inc_dollar;
+
+                        /* Get variable value */
+                        inc_envvar = getenv (&buf[inc_lbrace]);
+
+                        /* Variable unset? */
+                        if (inc_envvar == NULL)
+                        {
+                            /* Substitute default if specified */
+                            if (inc_equals >= 0)
+                            {
+                                inc_envvar = &buf[inc_equals+1];
+                            }
+                        }
+                        else // (environ variable defined)
+                        {
+                            /* Have ":=" specification? */
+                            if (/*inc_colon >= 0 && */inc_equals >= 0)
+                            {
+                                /* Substitute default if value is NULL */
+                                if (strlen (inc_envvar) == 0)
+                                {
+                                    inc_envvar = &buf[inc_equals+1];
+                                }
+                            }
+                        }
+
+                        /* Have a value? (environment or default) */
+                        if (inc_envvar != NULL)
+                        {
+                            /* Check that statement does not overflow buffer */
+                            if (stmtlen+strlen(inc_envvar) >= sizeof(buf) - 1)
+                            {
+                                fprintf(stderr, _("HHCCF002S File %s line %d is too long\n"),
+                                                fname, inc_stmtnum[inc_level]);
+                                delayed_exit(1);
+                            }
+
+                            /* Copy to buffer and update index */
+                            stmtlen += sprintf (&buf[stmtlen], "%s", inc_envvar);
+                        }
+
+                        /* Reset indexes */
+                        inc_equals = -1;
+                        inc_colon = -1;
+                        inc_lbrace = -1;
+                        inc_dollar = -1;
+                        continue;
+                    }
+                    else if (c == ':' && inc_colon < 0 && inc_equals < 0)
+                    {
+                        /* Remember possible start of default specifier */
+                        inc_colon = stmtlen;
+                    }
+                    else if (c == '=' && inc_equals < 0)
+                    {
+                        /* Remember possible start of default specifier */
+                        inc_equals = stmtlen;
+                    }
+                }
+                else // (inc_lbrace < 0)
+                {
+                    /* Remember start of variable name */
+                    if (c == '{')
+                    {
+                        inc_lbrace = stmtlen + 1;
+                    }
+                    else
+                    {
+                        /* Reset inc_dollar specifier if immediately following
+                           character is not a left brace */
+                        inc_dollar = -1;
+                    }
+                }
+            }
+            else // (inc_dollar < 0)
+            {
+                /* Enter variable substitution state */
+                if (c == '$')
+                {
+                    inc_dollar = stmtlen;
+                }
+            }
+#endif // defined( OPTION_ENHANCED_CONFIG_SYMBOLS )
 
             /* Append character to buffer */
             buf[stmtlen++] = c;
@@ -310,7 +499,7 @@ char   *buf1;                           /* Pointer to resolved buffer*/
         if(strlen(buf1)>=sizeof(buf))
         {
             fprintf(stderr, _("HHCCF002S File %s line %d is too long\n"),
-                fname, stmt);
+                fname, inc_stmtnum[inc_level]);
             free(buf1);
             delayed_exit(1);
         }
@@ -350,163 +539,6 @@ char   *buf1;                           /* Pointer to resolved buffer*/
 
     return 0;
 } /* end function read_config */
-/*-------------------------------------------------------------------*/
-/* Function to Parse compound device numbers                         */
-/* Syntax : CCUU[-CUU][,CUU..][.nn][...]                             */
-/* Examples : 200-23F                                                */
-/*            200,201                                                */
-/*            200.16                                                 */
-/*            200-23F,280.8                                          */
-/*            etc...                                                 */
-/* - is the range specification (from CUU to CUU)                    */
-/* , is the separator                                                */
-/* . is the count indicator (nn is decimal)                          */
-/* 1st parm is the specification string as specified above           */
-/* 2nd parm is the address of an array of DEVARRAY                   */
-/* Return value : 0 - Parsing error, etc..                           */
-/*                >0 - Size of da                                    */
-/*                                                                   */
-/* NOTE : A basic validity check is made for the following :         */
-/*        All CUUs must belong on the same channel                   */
-/*        (this check is to eventually pave the way to a formal      */
-/*         channel/cu/device architecture)                           */
-/*        no 2 identical CCUUs                                       */
-/*   ex : 200,300 : WRONG                                            */
-/*        200.12,200.32 : WRONG                                      */
-/*        2FF.2 : WRONG                                              */
-/* NOTE : caller should free the array returned in da if the return  */
-/*        value is not 0                                             */
-/*-------------------------------------------------------------------*/
-static size_t parse_devnums(const char *spec,DEVARRAY **da)
-{
-    size_t gcount;      /* Group count                     */
-    size_t i;           /* Index runner                    */
-    char *grps;         /* Pointer to current devnum group */
-    char *sc;           /* Specification string copy       */
-    DEVARRAY *dgrs;     /* Device groups                   */
-    U16  cuu1,cuu2;     /* CUUs                            */
-    char *strptr;       /* strtoul ptr-ptr                 */
-// FIXME: gcc 2.96 for BYTE causes invalid HHCCF057E ... WTF ??
-//  BYTE basechan=0;    /* Channel for all CUUs            */
-    int  basechan=0;    /* Channel for all CUUs            */
-    int  duplicate;     /* duplicated CUU indicator        */
-    int badcuu;         /* offending CUU                   */
-
-    sc=malloc(strlen(spec)+1);
-    strcpy(sc,spec);
-
-    /* Split by ',' groups */
-    gcount=0;
-    grps=strtok(sc,",");
-    dgrs=NULL;
-    while(grps!=NULL)
-    {
-        if(dgrs==NULL)
-        {
-            dgrs=malloc(sizeof(DEVARRAY));
-        }
-        else
-        {
-            dgrs=realloc(dgrs,(sizeof(DEVARRAY))*(gcount+1));
-        }
-        cuu1=strtoul(grps,&strptr,16);
-        switch(*strptr)
-        {
-        case 0:     /* Single CUU */
-            cuu2=cuu1;
-            break;
-        case '-':   /* CUU Range */
-            cuu2=strtoul(&strptr[1],&strptr,16);
-            if(*strptr!=0)
-            {
-                fprintf(stderr,_("HHCCF053E Incorrect second device number in device range near character %c\n"),*strptr);
-                free(dgrs);
-                return(0);
-            }
-            break;
-        case '.':   /* CUU Count */
-            cuu2=cuu1+strtoul(&strptr[1],&strptr,10);
-            cuu2--;
-            if(*strptr!=0)
-            {
-                fprintf(stderr,_("HHCCF054E Incorrect Device count near character %c\n"),*strptr);
-                free(dgrs);
-                return(0);
-            }
-            break;
-        default:
-            fprintf(stderr,_("HHCCF055E Incorrect device address specification near character %c\n"),*strptr);
-            free(dgrs);
-            return(0);
-        }
-        /* Check cuu1 <= cuu2 */
-        if(cuu1>cuu2)
-        {
-            fprintf(stderr,_("HHCCF056E Incorrect device address range. %4.4X < %4.4X\n"),cuu2,cuu1);
-            free(dgrs);
-            return(0);
-        }
-        if(gcount==0)
-        {
-            basechan=(cuu1 >> 8) & 0xff;
-        }
-        badcuu=-1;
-        if(((cuu1 >> 8) & 0xff) != basechan)
-        {
-            badcuu=cuu1;
-        }
-        else
-        {
-            if(((cuu2 >> 8) & 0xff) != basechan)
-            {
-                badcuu=cuu2;
-            }
-        }
-        if(badcuu>=0)
-        {
-            fprintf(stderr,_("HHCCF057E %4.4X is on wrong channel (1st device defined on channel %2.2X)\n"),badcuu,basechan);
-            free(dgrs);
-            return(0);
-        }
-        /* Check for duplicates */
-        duplicate=0;
-        for(i=0;i<gcount;i++)
-        {
-            /* check 1st cuu not within existing range */
-            if(cuu1>=dgrs[i].cuu1 && cuu1<=dgrs[i].cuu2)
-            {
-                duplicate=1;
-                break;
-            }
-            /* check 2nd cuu not within existing range */
-            if(cuu2>=dgrs[i].cuu1 && cuu1<=dgrs[i].cuu2)
-            {
-                duplicate=1;
-                break;
-            }
-            /* check current range doesn't completelly overlap existing range */
-            if(cuu1<dgrs[i].cuu1 && cuu2>dgrs[i].cuu2)
-            {
-                duplicate=1;
-                break;
-            }
-        }
-        if(duplicate)
-        {
-            fprintf(stderr,_("HHCCF058E Some or all devices in %4.4X-%4.4X duplicate devices already defined\n"),cuu1,cuu2);
-            free(dgrs);
-            return(0);
-        }
-        dgrs[gcount].cuu1=cuu1;
-        dgrs[gcount].cuu2=cuu2;
-        gcount++;
-        grps=strtok(NULL,",");
-    }
-    free(sc);
-    *da=dgrs;
-    return(gcount);
-}
-
 
 static inline S64 lyear_adjust(int epoch)
 {
@@ -539,10 +571,11 @@ DLL_EXPORT char *config_cnslport = "3270";
 void build_config (char *fname)
 {
 int     rc;                             /* Return code               */
-int     i,j;                            /* Array subscript           */
+int     i;                              /* Array subscript           */
 int     scount;                         /* Statement counter         */
 /* int     cpu; */                      /* CPU number                */
-FILE   *fp;                             /* Configuration file pointer*/
+FILE   *inc_fp[MAX_INC_LEVEL];          /* Configuration file pointer*/
+
 char   *sserial;                        /* -> CPU serial string      */
 char   *smodel;                         /* -> CPU model string       */
 char   *sversion;                       /* -> CPU version string     */
@@ -560,12 +593,19 @@ char   *sshcmdopt;                      /* -> SHCMDOPT shell cmd opt */
 char   *stoddrag;                       /* -> TOD clock drag factor  */
 char   *sostailor;                      /* -> OS to tailor system to */
 char   *spanrate;                       /* -> Panel refresh rate     */
+char   *stimerint;                      /* -> Timer update interval  */
 char   *sdevtmax;                       /* -> Max device threads     */
 char   *shercprio;                      /* -> Hercules base priority */
 char   *stodprio;                       /* -> Timer thread priority  */
 char   *scpuprio;                       /* -> CPU thread priority    */
 char   *sdevprio;                       /* -> Device thread priority */
 char   *spgmprdos;                      /* -> Program product OS OK  */
+char   *slogofile;                      /* -> 3270 logo file         */
+char   *smountedtapereinit;             /* -> mounted tape reinit opt*/
+char   *slogopt[MAX_ARGS-1];            /* -> log options            */
+int    logoptc;                         /*    count of log options   */
+char   *straceopt;                      /* -> display_inst option    */
+char   *sconkpalv;                      /* -> console keep-alive opt */
 #if defined(_FEATURE_ASN_AND_LX_REUSE)
 char   *sasnandlxreuse;                 /* -> ASNLXREUSE Optional    */
 #endif
@@ -611,6 +651,7 @@ int     diag8cmd;                       /* Allow diagnose 8 commands */
 BYTE    shcmdopt;                       /* Shell cmd allow option(s) */
 double  toddrag;                        /* TOD clock drag factor     */
 U64     ostailor;                       /* OS to tailor system to    */
+int     timerint;                       /* Timer update interval     */
 int     panrate;                        /* Panel refresh rate        */
 int     hercprio;                       /* Hercules base priority    */
 int     todprio;                        /* Timer thread priority     */
@@ -623,10 +664,6 @@ BYTE    pgmprdos;                       /* Program product OS OK     */
 DEVBLK *dev;                            /* -> Device Block           */
 char   *sdevnum;                        /* -> Device number string   */
 char   *sdevtype;                       /* -> Device type string     */
-U16     devnum;                         /* Device number             */
-DEVARRAY *devnarray=NULL;               /* Compound device numbers   */
-size_t  devncount;                      /* size of comp devnum array */
-int     baddev;                         /* devblk attach failed ind  */
 int     devtmax;                        /* Max number device threads */
 #if defined(_FEATURE_ECPSVM)
 int     ecpsvmavail;                    /* ECPS:VM Available flag    */
@@ -643,6 +680,11 @@ BYTE    c;                              /* Work area for sscanf      */
 #if defined(OPTION_LPARNAME)
 char   *lparname;                       /* DIAG 204 lparname         */
 #endif /*defined(OPTION_LPARNAME)*/
+#if defined(OPTION_SET_STSI_INFO)
+char   *stsi_model;                     /* Info                      */
+char   *stsi_plant;                     /*      for                  */
+char   *stsi_manufacturer;              /*          STSI             */ 
+#endif /*defined(OPTION_SET_STSI_INFO) */
 #ifdef OPTION_SELECT_KLUDGE
 int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
                                            this allows the console to
@@ -651,15 +693,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
                                            cygwin from thrashing in
                                            select(). sigh            */
 #endif
-#if defined(OPTION_CONFIG_SYMBOLS)
-char **newargv;
-char **orig_newargv;
-#endif
 char    pathname[MAX_PATH];             /* file path in host format  */
-
-#if !defined(OPTION_CONFIG_SYMBOLS)
-    UNREFERENCED(j);
-#endif
 
     /* Initialize SETMODE and set user authority */
     SETMODE(INIT);
@@ -670,15 +704,17 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         dummyfd[i] = dup(fileno(stderr));
 #endif
 
-    /* Open the configuration file */
+    /* Open the base configuration file */
     hostpath(pathname, fname, sizeof(pathname));
-    fp = fopen (pathname, "r");
-    if (fp == NULL)
+    inc_level = 0;
+    inc_fp[inc_level] = fopen (pathname, "r");
+    if (inc_fp[inc_level] == NULL)
     {
-        fprintf(stderr, _("HHCCF003S Cannot open file %s: %s\n"),
+        fprintf(stderr, _("HHCCF003S Open error file %s: %s\n"),
                 fname, strerror(errno));
         delayed_exit(1);
     }
+    inc_stmtnum[inc_level] = 0;
 
     /* Set the default system parameter values */
     serial = 0x000001;
@@ -699,13 +735,17 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     archmode = ARCH_370;
 #endif
     ostailor = OS_NONE;
-    panrate = PANEL_REFRESH_RATE_SLOW;
+    panrate  = PANEL_REFRESH_RATE_SLOW;
+    timerint = DEFAULT_TIMER_REFRESH_USECS;
     hercprio = DEFAULT_HERCPRIO;
     todprio  = DEFAULT_TOD_PRIO;
     cpuprio  = DEFAULT_CPU_PRIO;
     devprio  = DEFAULT_DEV_PRIO;
     pgmprdos = PGM_PRD_OS_RESTRICTED;
-    devtmax = MAX_DEVICE_THREADS;
+    devtmax  = MAX_DEVICE_THREADS;
+    sysblk.kaidle = KEEPALIVE_IDLE_TIME;
+    sysblk.kaintv = KEEPALIVE_PROBE_INTERVAL;
+    sysblk.kacnt  = KEEPALIVE_PROBE_COUNT;
 #if defined(_FEATURE_ECPSVM)
     ecpsvmavail = 0;
     ecpsvmlevel = 20;
@@ -740,12 +780,65 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     for (scount = 0; ; scount++)
     {
         /* Read next record from the configuration file */
-        if ( read_config (fname, fp) )
+        while (read_config (fname, inc_fp[inc_level]) && inc_level >= 0 )
+        {
+            fclose (inc_fp[inc_level--]);
+        }
+        if (inc_level < 0)
         {
             fprintf(stderr, _("HHCCF004S No device records in file %s\n"),
                     fname);
             delayed_exit(1);
         }
+
+#if defined( OPTION_ENHANCED_CONFIG_INCLUDE )
+        if  (strcasecmp (keyword, "ignore") == 0)
+        {
+            if  (strcasecmp (operand, "include_errors") == 0) 
+            {              
+                logmsg( _("HHCCF081I %s Will ignore include errors .\n"),
+                        fname);
+                inc_ignore_errors = 1 ;
+            }
+
+            continue ;
+        }
+
+        /* Check for include statement */
+        if (strcasecmp (keyword, "include") == 0)
+        {              
+            if (++inc_level >= MAX_INC_LEVEL)
+            {
+                fprintf(stderr, _( "HHCCF082S Error in %s line %d: "
+                        "Maximum nesting level (%d) reached\n"),
+                        fname, inc_stmtnum[inc_level-1], MAX_INC_LEVEL);
+                delayed_exit(1);
+            }
+
+            logmsg( _("HHCCF083I %s Including %s at %d.\n"),
+                        fname, operand, inc_stmtnum[inc_level-1]);
+            hostpath(pathname, operand, sizeof(pathname));
+            inc_fp[inc_level] = fopen (pathname, "r");
+            if (inc_fp[inc_level] == NULL)
+            {
+                inc_level--;
+                if ( inc_ignore_errors == 1 ) 
+                {
+                    fprintf(stderr, _("HHCCF084W %s Open error ignored file %s: %s\n"),
+                                    fname, operand, strerror(errno));
+                    continue ;
+                }
+                else 
+                {
+                    fprintf(stderr, _("HHCCF085S %s Open error file %s: %s\n"),
+                                    fname, operand, strerror(errno));
+                    delayed_exit(1);
+                }
+            }
+            inc_stmtnum[inc_level] = 0;
+            continue;
+        }
+#endif // defined( OPTION_ENHANCED_CONFIG_INCLUDE )
 
         /* Exit loop if first device statement found */
         if (strlen(keyword) <= 4
@@ -785,12 +878,19 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         stoddrag = NULL;
         sostailor = NULL;
         spanrate = NULL;
+        stimerint = NULL;
         shercprio = NULL;
         stodprio = NULL;
         scpuprio = NULL;
         sdevprio = NULL;
         sdevtmax = NULL;
         spgmprdos = NULL;
+        slogofile = NULL;
+        straceopt = NULL;
+        sconkpalv = NULL;
+        smountedtapereinit = NULL;
+        slogopt[0] = NULL;
+        logoptc = 0;
 #if defined(_FEATURE_ECPSVM)
         secpsvmlevel = NULL;
         secpsvmlvl = NULL;
@@ -812,6 +912,11 @@ char    pathname[MAX_PATH];             /* file path in host format  */
 #if defined(OPTION_LPARNAME)
         lparname = NULL;
 #endif /*defined(OPTION_LPARNAME)*/
+#if defined(OPTION_SET_STSI_INFO)
+        stsi_model = NULL;
+        stsi_plant = NULL;
+        stsi_manufacturer = NULL;
+#endif /* defined(OPTION_SET_STSI_INFO) */
 #if defined( OPTION_SCSI_TAPE )
         sauto_scsi_mount = NULL;
 #endif /* defined( OPTION_SCSI_TAPE ) */
@@ -870,6 +975,10 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 config_cnslport = strdup(operand);
             }
+            else if (strcasecmp (keyword, "conkpalv") == 0)
+            {
+                sconkpalv = operand;
+            }
             else if (strcasecmp (keyword, "numcpu") == 0)
             {
                 snumcpu = operand;
@@ -890,6 +999,17 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                     syroffset = addargv[0];
                     addargc--;
                 }
+            }
+            else if (strcasecmp (keyword, "logopt") == 0)
+            {
+                slogopt[0] = operand;
+                logoptc = addargc + 1;
+
+                for(i = 0; i < addargc; i++)
+                    slogopt[i+1] = addargv[i];
+
+                addargc = 0;
+
             }
             else if (strcasecmp (keyword, "yroffset") == 0)
             {
@@ -917,6 +1037,10 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 spanrate = operand;
             }
 #endif /*PANEL_REFRESH_RATE*/
+            else if (strcasecmp (keyword, "timerint") == 0)
+            {
+                stimerint = operand;
+            }
             else if (strcasecmp (keyword, "ostailor") == 0)
             {
                 sostailor = operand;
@@ -957,6 +1081,32 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 set_codepage(operand);
             }
+            else if (strcasecmp (keyword, "logofile") == 0)
+            {
+                fprintf(stderr, _("HHCCF061W Warning in %s line %d: "
+                    "LOGOFILE statement deprecated. Use HERCLOGO instead\n"),
+                    fname, inc_stmtnum[inc_level]);
+                slogofile=operand;
+            }
+            else if (strcasecmp (keyword, "herclogo") == 0)
+            {
+                slogofile=operand;
+            }
+            else if (strcasecmp (keyword, "pantitle") == 0)
+            {
+                if (sysblk.pantitle)
+                    free(sysblk.pantitle);
+                sysblk.pantitle = strdup(operand);
+            }
+            else if (strcasecmp (keyword, "mounted_tape_reinit") == 0)
+            {
+                smountedtapereinit = operand;
+            }
+            else if (strcasecmp (keyword, "traceopt") == 0
+                     || strcasecmp (keyword, "symptom") == 0)
+            {
+                straceopt = operand;
+            }
 #if defined(_FEATURE_ECPSVM)
             /* ECPS:VM support */
             else if(strcasecmp(keyword, "ecps:vm") == 0)
@@ -966,7 +1116,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 ecpsvmac=addargc;
                 fprintf(stderr, _("HHCCF061W Warning in %s line %d: "
                     "ECPS:VM Statement deprecated. Use ECPSVM instead\n"),
-                    fname, stmt);
+                    fname, inc_stmtnum[inc_level]);
                 addargc=0;
             }
             else if(strcasecmp(keyword, "ecpsvm") == 0)
@@ -1002,14 +1152,14 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 {
                     fprintf(stderr, _("HHCCF059S Error in %s line %d: "
                         "Missing symbol name on DEFSYM statement\n"),
-                        fname, stmt);
+                        fname, inc_stmtnum[inc_level]);
                     delayed_exit(1);
                 }
                 if(addargc!=1)
                 {
                     fprintf(stderr, _("HHCCF060S Error in %s line %d: "
                         "DEFSYM requires a single symbol value (include quotation marks if necessary)\n"),
-                        fname, stmt);
+                        fname, inc_stmtnum[inc_level]);
                     delayed_exit(1);
                 }
         /*
@@ -1036,7 +1186,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 {
                     fprintf(stderr, _("HHCCF007S Error in %s line %d: "
                         "Missing argument.\n"),
-                        fname, stmt);
+                        fname, inc_stmtnum[inc_level]);
                     delayed_exit(1);
                 }
                 if (sscanf(operand, "%hu%c", &sysblk.httpport, &c) != 1
@@ -1044,7 +1194,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 {
                     fprintf(stderr, _("HHCCF029S Error in %s line %d: "
                             "Invalid HTTP port number %s\n"),
-                            fname, stmt, operand);
+                            fname, inc_stmtnum[inc_level], operand);
                     delayed_exit(1);
                 }
                 if (addargc > 0)
@@ -1055,7 +1205,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                     {
                         fprintf(stderr, _("HHCCF005S Error in %s line %d: "
                             "Unrecognized argument %s\n"),
-                            fname, stmt, addargv[0]);
+                            fname, inc_stmtnum[inc_level], addargv[0]);
                         delayed_exit(1);
                     }
                     addargc--;
@@ -1073,7 +1223,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                     {
                         fprintf(stderr, _("HHCCF006S Error in %s line %d: "
                             "Userid, but no password given %s\n"),
-                            fname, stmt, addargv[1]);
+                            fname, inc_stmtnum[inc_level], addargv[1]);
                         delayed_exit(1);
                     }
                     addargc--;
@@ -1086,7 +1236,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 {
                     fprintf(stderr, _("HHCCF007S Error in %s line %d: "
                         "Missing argument.\n"),
-                        fname, stmt);
+                        fname, inc_stmtnum[inc_level]);
                     delayed_exit(1);
                 }
                 if (sysblk.httproot) free(sysblk.httproot);
@@ -1120,6 +1270,21 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             }
 #endif /*defined(OPTION_LPARNAME)*/
 
+#if defined(OPTION_SET_STSI_INFO)
+           else if (strcasecmp (keyword, "model") == 0)
+           {
+               stsi_model = operand;
+           }
+           else if (strcasecmp (keyword, "plant") == 0)
+           {
+               stsi_plant = operand;
+           }
+           else if (strcasecmp (keyword, "manufacturer") == 0)
+           {
+               stsi_manufacturer = operand;
+           }
+#endif /* defined(OPTION_SET_STSI_INFO) */
+
 #if defined( OPTION_SCSI_TAPE )
             else if (strcasecmp (keyword, "auto_scsi_mount") == 0)
             {
@@ -1138,7 +1303,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 logmsg( _("HHCCF008E Error in %s line %d: "
                         "Unrecognized keyword %s\n"),
-                        fname, stmt, keyword);
+                        fname, inc_stmtnum[inc_level], keyword);
                 operand = "";
                 addargc = 0;
             }
@@ -1148,7 +1313,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 logmsg( _("HHCCF009E Error in %s line %d: "
                         "Incorrect number of operands\n"),
-                        fname, stmt);
+                        fname, inc_stmtnum[inc_level]);
             }
         }
 
@@ -1181,7 +1346,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF010S Error in %s line %d: "
                         "Unknown or unsupported ARCHMODE specification %s\n"),
-                        fname, stmt, sarchmode);
+                        fname, inc_stmtnum[inc_level], sarchmode);
                 delayed_exit(1);
             }
         }
@@ -1190,6 +1355,31 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         /* Indicate if z/Architecture is supported */
         sysblk.arch_z900 = sysblk.arch_mode != ARCH_390;
 #endif
+
+        /* Parse "logopt" operands */
+        if (slogopt[0])
+        {
+            for(i=0; i < logoptc; i++)
+            {
+                if (strcasecmp(slogopt[i],"timestamp") == 0 ||
+                    strcasecmp(slogopt[i],"time"     ) == 0)
+                {
+                    sysblk.logoptnotime = 0;
+                    continue;
+                }
+                if (strcasecmp(slogopt[i],"notimestamp") == 0 ||
+                    strcasecmp(slogopt[i],"notime"     ) == 0)
+                {
+                    sysblk.logoptnotime = 1;
+                    continue;
+                }
+
+                fprintf(stderr, _("HHCCF089S Error in %s line %d: "
+                        "Invalid log option keyword %s\n"),
+                        fname, inc_stmtnum[inc_level], slogopt[i]);
+                delayed_exit(1);
+            } /* for(i=0; i < logoptc; i++) */
+        }
 
         /* Parse CPU version number operand */
         if (sversion != NULL)
@@ -1200,7 +1390,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF012S Error in %s line %d: "
                         "%s is not a valid CPU version code\n"),
-                        fname, stmt, sversion);
+                        fname, inc_stmtnum[inc_level], sversion);
                 delayed_exit(1);
             }
             dfltver = 0;
@@ -1214,7 +1404,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF051S Error in %s line %d: "
                         "%s is not a valid serial number\n"),
-                        fname, stmt, sserial);
+                        fname, inc_stmtnum[inc_level], sserial);
                 delayed_exit(1);
             }
         }
@@ -1227,7 +1417,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF012S Error in %s line %d: "
                         "%s is not a valid CPU model\n"),
-                        fname, stmt, smodel);
+                        fname, inc_stmtnum[inc_level], smodel);
                 delayed_exit(1);
             }
         }
@@ -1240,7 +1430,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF013S Error in %s line %d: "
                         "Invalid main storage size %s\n"),
-                        fname, stmt, smainsize);
+                        fname, inc_stmtnum[inc_level], smainsize);
                 delayed_exit(1);
             }
         }
@@ -1253,7 +1443,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF014S Error in %s line %d: "
                         "Invalid expanded storage size %s\n"),
-                        fname, stmt, sxpndsize);
+                        fname, inc_stmtnum[inc_level], sxpndsize);
                 delayed_exit(1);
             }
         }
@@ -1264,7 +1454,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF016S Error in %s line %d: "
                         "Invalid Hercules process group thread priority %s\n"),
-                        fname, stmt, shercprio);
+                        fname, inc_stmtnum[inc_level], shercprio);
                 delayed_exit(1);
             }
 
@@ -1285,7 +1475,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF016S Error in %s line %d: "
                         "Invalid TOD Clock thread priority %s\n"),
-                        fname, stmt, stodprio);
+                        fname, inc_stmtnum[inc_level], stodprio);
                 delayed_exit(1);
             }
 
@@ -1306,7 +1496,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF016S Error in %s line %d: "
                         "Invalid CPU thread priority %s\n"),
-                        fname, stmt, scpuprio);
+                        fname, inc_stmtnum[inc_level], scpuprio);
                 delayed_exit(1);
             }
 
@@ -1327,7 +1517,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF016S Error in %s line %d: "
                         "Invalid device thread priority %s\n"),
-                        fname, stmt, sdevprio);
+                        fname, inc_stmtnum[inc_level], sdevprio);
                 delayed_exit(1);
             }
 
@@ -1345,7 +1535,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF016S Error in %s line %d: "
                         "Invalid device thread priority %s\n"),
-                        fname, stmt, sdevprio);
+                        fname, inc_stmtnum[inc_level], sdevprio);
                 delayed_exit(1);
             }
 
@@ -1365,7 +1555,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF018S Error in %s line %d: "
                         "Invalid number of CPUs %s\n"),
-                        fname, stmt, snumcpu);
+                        fname, inc_stmtnum[inc_level], snumcpu);
                 delayed_exit(1);
             }
         }
@@ -1380,7 +1570,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF019S Error in %s line %d: "
                         "Invalid number of VFs %s\n"),
-                        fname, stmt, snumvec);
+                        fname, inc_stmtnum[inc_level], snumvec);
                 delayed_exit(1);
             }
 #else /*!_FEATURE_VECTOR_FACILITY*/
@@ -1396,7 +1586,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF021S Error in %s line %d: "
                         "Load parameter %s exceeds 8 characters\n"),
-                        fname, stmt, sloadparm);
+                        fname, inc_stmtnum[inc_level], sloadparm);
                 delayed_exit(1);
             }
 
@@ -1415,7 +1605,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                         "%s is not a valid system epoch.\n"
                         "          The only valid values are "
                         "1801-2099\n"),
-                        fname, stmt, ssysepoch);
+                        fname, inc_stmtnum[inc_level], ssysepoch);
                 delayed_exit(1);
             }
         }
@@ -1428,7 +1618,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF070S Error in %s line %d: "
                         "%s is not a valid year offset\n"),
-                        fname, stmt, syroffset);
+                        fname, inc_stmtnum[inc_level], syroffset);
                 delayed_exit(1);
             }
         }
@@ -1442,7 +1632,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF023S Error in %s line %d: "
                         "%s is not a valid timezone offset\n"),
-                        fname, stmt, stzoffset);
+                        fname, inc_stmtnum[inc_level], stzoffset);
                 delayed_exit(1);
             }
         }
@@ -1459,7 +1649,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF052S Error in %s line %d: "
                         "%s: invalid argument\n"),
-                        fname, stmt, sdiag8cmd);
+                        fname, inc_stmtnum[inc_level], sdiag8cmd);
                 delayed_exit(1);
             }
         }
@@ -1476,7 +1666,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF052S Error in %s line %d: "
                         "%s: invalid argument\n"),
-                        fname, stmt, sshcmdopt);
+                        fname, inc_stmtnum[inc_level], sshcmdopt);
                 delayed_exit(1);
             }
         }
@@ -1489,7 +1679,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF024S Error in %s line %d: "
                         "Invalid TOD clock drag factor %s\n"),
-                        fname, stmt, stoddrag);
+                        fname, inc_stmtnum[inc_level], stoddrag);
                 delayed_exit(1);
             }
         }
@@ -1512,12 +1702,33 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 {
                     fprintf(stderr, _("HHCCF025S Error in %s line %d: "
                             "Invalid panel refresh rate %s\n"),
-                            fname, stmt, spanrate);
+                            fname, inc_stmtnum[inc_level], spanrate);
                     delayed_exit(1);
                 }
             }
         }
 #endif /*PANEL_REFRESH_RATE*/
+
+        /* Parse timer update interval*/
+        if (stimerint)
+        {
+            if  (strcasecmp (stimerint, "default") == 0)
+                timerint = DEFAULT_TIMER_REFRESH_USECS;
+            else
+            {
+                if (0
+                    || sscanf(stimerint, "%d%c", &timerint, &c) != 1
+                    || timerint < 1
+                    || timerint > 1000000
+                )
+                {
+                    fprintf(stderr, _("HHCCF025S Error in %s line %d: "
+                            "Invalid timer update interval %s\n"),
+                            fname, inc_stmtnum[inc_level], stimerint);
+                    delayed_exit(1);
+                }
+            }
+        }
 
         /* Parse OS tailoring operand */
         if (sostailor != NULL)
@@ -1526,21 +1737,61 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 ostailor = OS_OS390;
             }
+            else if (strcasecmp (sostailor, "+OS/390") == 0)
+            {
+                ostailor &= OS_OS390;
+            }
+            else if (strcasecmp (sostailor, "-OS/390") == 0)
+            {
+                ostailor |= ~OS_OS390;
+            }
             else if (strcasecmp (sostailor, "Z/OS") == 0)
             {
                 ostailor = OS_ZOS;
+            }
+            else if (strcasecmp (sostailor, "+Z/OS") == 0)
+            {
+                ostailor &= OS_ZOS;
+            }
+            else if (strcasecmp (sostailor, "-Z/OS") == 0)
+            {
+                ostailor |= ~OS_ZOS;
             }
             else if (strcasecmp (sostailor, "VSE") == 0)
             {
                 ostailor = OS_VSE;
             }
+            else if (strcasecmp (sostailor, "+VSE") == 0)
+            {
+                ostailor &= OS_VSE;
+            }
+            else if (strcasecmp (sostailor, "-VSE") == 0)
+            {
+                ostailor |= ~OS_VSE;
+            }
             else if (strcasecmp (sostailor, "VM") == 0)
             {
                 ostailor = OS_VM;
             }
+            else if (strcasecmp (sostailor, "+VM") == 0)
+            {
+                ostailor &= OS_VM;
+            }
+            else if (strcasecmp (sostailor, "-VM") == 0)
+            {
+                ostailor |= ~OS_VM;
+            }
             else if (strcasecmp (sostailor, "LINUX") == 0)
             {
                 ostailor = OS_LINUX;
+            }
+            else if (strcasecmp (sostailor, "+LINUX") == 0)
+            {
+                ostailor &= OS_LINUX;
+            }
+            else if (strcasecmp (sostailor, "-LINUX") == 0)
+            {
+                ostailor |= ~OS_LINUX;
             }
             else if (strcasecmp (sostailor, "NULL") == 0)
             {
@@ -1554,7 +1805,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF026S Error in %s line %d: "
                         "Unknown OS tailor specification %s\n"),
-                        fname, stmt, sostailor);
+                        fname, inc_stmtnum[inc_level], sostailor);
                 delayed_exit(1);
             }
         }
@@ -1567,7 +1818,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF027S Error in %s line %d: "
                         "Invalid maximum device threads %s\n"),
-                        fname, stmt, sdevtmax);
+                        fname, inc_stmtnum[inc_level], sdevtmax);
                 delayed_exit(1);
             }
         }
@@ -1592,9 +1843,99 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF028S Error in %s line %d: "
                         "Invalid program product OS permission %s\n"),
-                        fname, stmt, spgmprdos);
+                        fname, inc_stmtnum[inc_level], spgmprdos);
                 delayed_exit(1);
             }
+        }
+
+        /* Parse terminal logo option */
+        if(sysblk.logofile == NULL) /* LogoFile NOT passed in command line */
+        {
+            if(slogofile != NULL) /* LogoFile SET in hercules config */
+            {
+                sysblk.logofile=slogofile;
+                readlogo(sysblk.logofile);
+            }
+            else /* Try to Read Logo File using Default FileName */
+            {
+                slogofile=getenv("HERCLOGO");
+                if(slogofile==NULL)
+                {
+                    readlogo("herclogo.txt");
+                }
+                else
+                {
+                    readlogo(slogofile);
+                }
+            } /* Otherwise Use Internal LOGO */
+        }
+        else /* LogoFile passed in command line */
+        {
+            readlogo(sysblk.logofile);
+        }
+
+        /* Parse "traceopt" option */
+        if (straceopt)
+        {
+            if (strcasecmp(straceopt, "traditional") == 0)
+            {
+                sysblk.showregsfirst = 0;
+                sysblk.showregsnone = 0;
+            }
+            else if (strcasecmp(straceopt, "regsfirst") == 0)
+            {
+                sysblk.showregsfirst = 1;
+                sysblk.showregsnone = 0;
+            }
+            else if (strcasecmp(straceopt, "noregs") == 0)
+            {
+                sysblk.showregsfirst = 0;
+                sysblk.showregsnone = 1;
+            }
+            else
+            {
+                fprintf(stderr, _("HHCCF088S Error in %s line %d: "
+                        "Invalid trace option keyword %s\n"),
+                        fname, inc_stmtnum[inc_level], straceopt);
+                delayed_exit(1);
+            }
+        }
+
+        /* Parse "conkpalv" option */
+        if (sconkpalv)
+        {
+            int idle, intv, cnt;
+            if (parse_conkpalv(sconkpalv, &idle, &intv, &cnt) != 0)
+            {
+                fprintf(stderr, _("HHCCF088S Error in %s line %d: "
+                        "Invalid format: %s\n"),
+                        fname, inc_stmtnum[inc_level], sconkpalv);
+                delayed_exit(1);
+            }
+            sysblk.kaidle = idle;
+            sysblk.kaintv = intv;
+            sysblk.kacnt  = cnt;
+        }
+
+        /* Parse "mounted_tape_reinit" option */
+        if ( smountedtapereinit )
+        {
+            if ( strcasecmp( smountedtapereinit, "disallow" ) == 0 )
+            {
+                sysblk.nomountedtapereinit = 1;
+            }
+            else if ( strcasecmp( smountedtapereinit, "allow" ) == 0 )
+            {
+                sysblk.nomountedtapereinit = 0;
+            }
+            else
+            {
+                fprintf(stderr, _("HHCCF052S Error in %s line %d: "
+                        "%s: invalid argument\n"),
+                        fname, inc_stmtnum[inc_level], smountedtapereinit);
+                delayed_exit(1);
+            }
+            smountedtapereinit = NULL;
         }
 
 #if defined(_FEATURE_ECPSVM)
@@ -1623,7 +1964,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                     {
                         logmsg(_("HHCCF062W Warning in %s line %d: "
                                 "Missing ECPSVM level value. 20 Assumed\n"),
-                                fname, stmt);
+                                fname, inc_stmtnum[inc_level]);
                         ecpsvmavail=1;
                         ecpsvmlevel=20;
                         break;
@@ -1632,7 +1973,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                     {
                         logmsg(_("HHCCF051W Warning in %s line %d: "
                                 "Invalid ECPSVM level value : %s. 20 Assumed\n"),
-                                fname, stmt, secpsvmlevel);
+                                fname, inc_stmtnum[inc_level], secpsvmlevel);
                         ecpsvmavail=1;
                         ecpsvmlevel=20;
                         break;
@@ -1644,7 +1985,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 {
                     logmsg(_("HHCCF051W Error in %s line %d: "
                             "Invalid ECPSVM keyword : %s. NO Assumed\n"),
-                            fname, stmt, secpsvmlevel);
+                            fname, inc_stmtnum[inc_level], secpsvmlevel);
                     ecpsvmavail=0;
                     ecpsvmlevel=0;
                     break;
@@ -1653,7 +1994,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 {
                     logmsg(_("HHCCF063W Warning in %s line %d: "
                             "Specifying ECPSVM level directly is deprecated. Use the 'LEVEL' keyword instead.\n"),
-                            fname, stmt);
+                            fname, inc_stmtnum[inc_level]);
                     break;
                 }
                 break;
@@ -1672,7 +2013,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF029S Error in %s line %d: "
                         "Invalid SHRDPORT port number %s\n"),
-                        fname, stmt, sshrdport);
+                        fname, inc_stmtnum[inc_level], sshrdport);
                 delayed_exit(1);
             }
         }
@@ -1693,7 +2034,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             else {
                 fprintf(stderr, _("HHCCF067S Error in %s line %d: "
                             "Incorrect keyword %s for the ASN_AND_LX_REUSE statement.\n"),
-                            fname, stmt, sasnandlxreuse);
+                            fname, inc_stmtnum[inc_level], sasnandlxreuse);
                             delayed_exit(1);
             }
         }
@@ -1708,7 +2049,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF030S Error in %s line %d: "
                         "Invalid I/O delay value: %s\n"),
-                        fname, stmt, siodelay);
+                        fname, inc_stmtnum[inc_level], siodelay);
                 delayed_exit(1);
             }
             /* See http://games.groups.yahoo.com/group/zHercules/message/10688 */
@@ -1730,7 +2071,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 fprintf(stderr, _("HHCCF031S Error in %s line %d: "
                         "Invalid ptt value: %s\n"),
-                        fname, stmt, sptt);
+                        fname, inc_stmtnum[inc_level], sptt);
                 delayed_exit(1);
             }
         }
@@ -1745,6 +2086,15 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         set_lparname(lparname);
 #endif /*defined(OPTION_LPARNAME)*/
 
+#if defined(OPTION_SET_STSI_INFO)
+    if(stsi_model)
+       set_model(stsi_model);
+    if(stsi_plant)
+       set_plant(stsi_plant);
+    if(stsi_manufacturer)
+       set_manufacturer(stsi_manufacturer);
+#endif /* defined(OPTION_SET_STSI_INFO) */
+
 #if defined( OPTION_SCSI_TAPE )
         /* Parse automatic SCSI tape mounts operand */
         if ( sauto_scsi_mount )
@@ -1752,6 +2102,10 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             if ( strcasecmp( sauto_scsi_mount, "no" ) == 0 )
             {
                 sysblk.auto_scsi_mount_secs = 0;
+            }
+            else if ( strcasecmp( sauto_scsi_mount, "yes" ) == 0 )
+            {
+                sysblk.auto_scsi_mount_secs = DEFAULT_AUTO_SCSI_MOUNT_SECS;
             }
             else
             {
@@ -1766,7 +2120,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                         _( "HHCCF068S Error in %s line %d: Invalid Auto_SCSI_Mount value: %s\n" )
 
                         ,fname
-                        ,stmt
+                        ,inc_stmtnum[inc_level]
                         ,sauto_scsi_mount
                     );
                     delayed_exit(1);
@@ -1791,7 +2145,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                     _( "HHCCF066S Error in %s line %d: Invalid HTTP_SERVER_CONNECT_KLUDGE value: %s\n" )
 
                     ,fname
-                    ,stmt
+                    ,inc_stmtnum[inc_level]
                     ,shttp_server_kludge_msecs
                 );
                 delayed_exit(1);
@@ -1855,13 +2209,17 @@ char    pathname[MAX_PATH];             /* file path in host format  */
 #endif
     initialize_lock (&sysblk.todlock);
     initialize_lock (&sysblk.mainlock);
+    sysblk.mainowner = LOCK_OWNER_NONE;
     initialize_lock (&sysblk.intlock);
+    sysblk.intowner = LOCK_OWNER_NONE;
     initialize_lock (&sysblk.sigplock);
-    initialize_condition (&sysblk.broadcast_cond);
     initialize_detach_attr (&sysblk.detattr);
+    initialize_join_attr   (&sysblk.joinattr);
     initialize_condition (&sysblk.cpucond);
     for (i = 0; i < MAX_CPU_ENGINES; i++)
         initialize_lock (&sysblk.cpulock[i]);
+    initialize_condition (&sysblk.sync_cond);
+    initialize_condition (&sysblk.sync_bc_cond);
 
 #if defined(OPTION_FISHIO)
     InitIOScheduler                     // initialize i/o scheduler...
@@ -1892,7 +2250,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         sysepoch = 1900;
         yroffset = -28;
         logmsg( _("HHCCF071W SYSEPOCH 1928 is deprecated and "
-              	"will be invalid in a future release.\n"
+                "will be invalid in a future release.\n"
                 "          Specify SYSEPOCH 1900 and YROFFSET -28 instead.\n"));
     }
     if (sysepoch == 1988)
@@ -1900,7 +2258,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         sysepoch = 1960;
         yroffset = -28;
         logmsg( _("HHCCF071W SYSEPOCH 1988 is deprecated and "
-              	"will be invalid in a future release.\n"
+                "will be invalid in a future release.\n"
                 "          Specify SYSEPOCH 1960 and YROFFSET -28 instead.\n"));
     }
     /* Only 1900 and 1960 are valid by this point. There are 16*1000000 clock
@@ -1965,6 +2323,9 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     /* Set the panel refresh rate */
     sysblk.panrate = panrate;
 
+    /* Set the timer update interval */
+    sysblk.timerint = timerint;
+
     /* Gabor Hoffer (performance option) */
     copy_opcode_tables();
 
@@ -1979,91 +2340,78 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         {
             fprintf(stderr, _("HHCCF035S Error in %s line %d: "
                     "Missing device number or device type\n"),
-                    fname, stmt);
+                    fname, inc_stmtnum[inc_level]);
             delayed_exit(1);
         }
         /* Parse devnum */
-        devncount=parse_devnums(sdevnum,&devnarray);
+        rc=parse_and_attach_devices(sdevnum,sdevtype,addargc,addargv);
 
-        if(devncount==0)
+        if(rc==-2)
         {
             fprintf(stderr, _("HHCCF036S Error in %s line %d: "
                     "%s is not a valid device number(s) specification\n"),
-                    fname, stmt, sdevnum);
+                    fname, inc_stmtnum[inc_level], sdevnum);
             delayed_exit(1);
         }
-#if defined(OPTION_CONFIG_SYMBOLS)
-        newargv=malloc(MAX_ARGS*sizeof(char *));
-        orig_newargv=malloc(MAX_ARGS*sizeof(char *));
-#endif /* #if defined(OPTION_CONFIG_SYMBOLS) */
-        for(baddev=0,i=0;i<(int)devncount;i++)
-        {
-            for(devnum=devnarray[i].cuu1;devnum<=devnarray[i].cuu2;devnum++)
-            {
-#if defined(OPTION_CONFIG_SYMBOLS)
-               char wrkbfr[16];
-               snprintf(wrkbfr,sizeof(wrkbfr),"%3.3x",devnum);
-               set_symbol("cuu",wrkbfr);
-               snprintf(wrkbfr,sizeof(wrkbfr),"%4.4x",devnum);
-               set_symbol("ccuu",wrkbfr);
-               snprintf(wrkbfr,sizeof(wrkbfr),"%3.3X",devnum);
-               set_symbol("CUU",wrkbfr);
-               snprintf(wrkbfr,sizeof(wrkbfr),"%4.4X",devnum);
-               set_symbol("CCUU",wrkbfr);
-               for(j=0;j<addargc;j++)
-               {
-                   orig_newargv[j]=newargv[j]=resolve_symbol_string(addargv[j]);
-               }
-                /* Build the device configuration block */
-               rc=attach_device(devnum, sdevtype, addargc, newargv);
-               for(j=0;j<addargc;j++)
-               {
-                   free(orig_newargv[j]);
-               }
-#else /* #if defined(OPTION_CONFIG_SYMBOLS) */
-                /* Build the device configuration block (no syms) */
-               rc=attach_device(devnum, sdevtype, addargc, addargv);
-#endif /* #if defined(OPTION_CONFIG_SYMBOLS) */
-               if(rc!=0)
-               {
-                   baddev=1;
-                   break;
-               }
-            }
-            if(baddev)
-            {
-                break;
-            }
-        }
-#if defined(OPTION_CONFIG_SYMBOLS)
-        free(newargv);
-        free(orig_newargv);
-#endif /* #if defined(OPTION_CONFIG_SYMBOLS) */
-        free(devnarray);
-
-        // Programming Note (mostly for myself!): while it is proper to
-        // abort Hercules startup for control file statement errors, it
-        // is NOT proper to do so for any device statement errors. If a
-        // device fails to initialize (due to statement (syntax) error,
-        // file not found, etc), the error is simply logged to the Herc
-        // log file but Hercules startup is NOT to be aborted. This was
-        // supposedly decided/determined back in 2003/03/20 by a change
-        // that Jan made but which I was unaware of. Sorry!  --  Fish
-        /*
-        if (baddev)
-        {
-            // (error message already issued)
-            delayed_exit(1); // (abort startup)
-        }
-        */
 
         /* Read next device record from the configuration file */
-        if (read_config (fname, fp))
+#if defined( OPTION_ENHANCED_CONFIG_INCLUDE )
+        while (1)
+        {
+            while (inc_level >= 0 && read_config (fname, inc_fp[inc_level]) )
+            {
+                fclose (inc_fp[inc_level--]);
+            }
+
+            if (inc_level < 0 || strcasecmp (keyword, "include") != 0)
+                break;
+
+            if (++inc_level >= MAX_INC_LEVEL)
+            {
+                fprintf(stderr, _( "HHCCF082S Error in %s line %d: "
+                        "Maximum nesting level (%d) reached\n"),
+                        fname, inc_stmtnum[inc_level-1], MAX_INC_LEVEL);
+                delayed_exit(1);
+            }
+
+            logmsg( _("HHCCF083I %s Including %s at %d .\n"),
+                        fname, operand, inc_stmtnum[inc_level-1]);
+            hostpath(pathname, operand, sizeof(pathname));
+            inc_fp[inc_level] = fopen (pathname, "r");
+            if (inc_fp[inc_level] == NULL)
+            {
+                inc_level--;
+                if ( inc_ignore_errors == 1 ) 
+                {
+                    fprintf(stderr, _("HHCCF084W %s Open error ignored file %s: %s\n"),
+                                    fname, operand, strerror(errno));
+                    continue ;
+                }
+                else 
+                {
+                    fprintf(stderr, _("HHCCF085E %s Open error file %s: %s\n"),
+                                    fname, operand, strerror(errno));
+                    delayed_exit(1);
+                }
+            }
+            inc_stmtnum[inc_level] = 0;
+            continue;
+        }
+
+        if (inc_level < 0)
+#else // !defined( OPTION_ENHANCED_CONFIG_INCLUDE )
+        if (read_config (fname, inc_fp[inc_level]))
+#endif // defined( OPTION_ENHANCED_CONFIG_INCLUDE )
             break;
 
     } /* end while(1) */
 
-    /* Configure storage now.  We do this after processing the device
+#if !defined( OPTION_ENHANCED_CONFIG_INCLUDE )
+    /* close configuration file */
+    rc = fclose(inc_fp[inc_level]);
+#endif // !defined( OPTION_ENHANCED_CONFIG_INCLUDE )
+
+    /* Now configure storage.  We do this after processing the device
      * statements so the fork()ed hercifc process won't require as much
      * virtual storage.  We will need to update all the devices too.
      */
@@ -2134,24 +2482,24 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     (
         "HHCCF069I Run-options enabled for this run:\n"
         "          NUMCPU:           %d\n"
+#if defined(_FEATURE_ASN_AND_LX_REUSE)
         "          ASN-and-LX-reuse: %sabled\n"
+#endif
         "          DIAG8CMD:         %sabled\n"
 
         ,sysblk.numcpu
+#if defined(_FEATURE_ASN_AND_LX_REUSE)
         ,( sysblk.asnandlxreuse ) ? "EN" : "DIS"
+#endif
         ,( sysblk.diag8cmd      ) ? "EN" : "DIS"
     );
-    
+
     /* Start the CPUs */
-    obtain_lock (&sysblk.intlock);
+    OBTAIN_INTLOCK(NULL);
     for(i = 0; i < numcpu; i++)
         configure_cpu(i);
-    release_lock (&sysblk.intlock);
-
-    /* close configuration file */
-    rc = fclose(fp);
+    RELEASE_INTLOCK(NULL);
 
 } /* end function build_config */
-
 
 #endif /*!defined(_GEN_ARCH)*/

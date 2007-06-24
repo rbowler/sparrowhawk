@@ -1,15 +1,31 @@
-/* VM.C         (c) Copyright Roger Bowler, 2000-2006                */
+/* VM.C         (c) Copyright Roger Bowler, 2000-2007                */
 /*              ESA/390 VM Diagnose calls and IUCV instruction       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+
+// $Id: vm.c,v 1.45 2007/06/23 00:04:19 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements miscellaneous diagnose functions           */
 /* described in SC24-5670 VM/ESA CP Programming Services             */
 /* and SC24-5855 VM/ESA CP Diagnosis Reference.                      */
 /*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 /*-------------------------------------------------------------------*/
+
+// $Log: vm.c,v $
+// Revision 1.45  2007/06/23 00:04:19  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.44  2007/01/13 07:27:04  bernard
+// backout ccmask
+//
+// Revision 1.43  2007/01/12 15:25:23  bernard
+// ccmaks phase 1
+//
+// Revision 1.42  2006/12/08 09:43:31  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -111,7 +127,7 @@ U16             devnum;                 /* Device number             */
     devnum = regs->GR_L(r1);
 
     /* Locate the device block */
-    dev = find_device_by_devnum (devnum);
+    dev = find_device_by_devnum (0,devnum);
 
     /* Return condition code 3 if device does not exist */
     if (dev == NULL) return 3;
@@ -219,7 +235,7 @@ BYTE            skey1, skey2;           /* Storage keys of first and
                 | ioparm.sbicount[3];
 
     /* Locate the device block */
-    dev = find_device_by_devnum (devnum);
+    dev = find_device_by_devnum (0,devnum);
 
     /* Set return code 2 and cond code 1 if device does not exist
        or does not support the synchronous I/O call */
@@ -469,7 +485,7 @@ BYTE            chanstat = 0;           /* Subchannel status         */
                 | ioparm.ccwaddr[3];
 
     /* Locate the device block */
-    dev = find_device_by_devnum (devnum);
+    dev = find_device_by_devnum (0,devnum);
 
     /* Set return code 1 and cond code 1 if device does not exist */
     if (dev == NULL)
@@ -851,7 +867,7 @@ int     j,k;
     {
         if(!freeresp)
         {
-                strncpy (resp, dresp,256);
+                strlcpy (resp, dresp, sizeof(resp));
                 dresp=resp;
         }
         resplen = strlen(dresp);
@@ -1120,6 +1136,9 @@ VADR    effective_addr2;                /* Effective address         */
         ARCH_DEP(program_interrupt) (regs, PGM_OPERATION_EXCEPTION);
 
     SIE_INTERCEPT(regs);
+
+    if( HDC3(debug_iucv, b2, effective_addr2, regs) )
+        return;
 
     /* Set condition code to indicate IUCV not available */
     regs->psw.cc = 3;

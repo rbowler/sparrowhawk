@@ -1,5 +1,7 @@
-/* DASDLOAD.C   (c) Copyright Roger Bowler, 1999-2006                */
+/* DASDLOAD.C   (c) Copyright Roger Bowler, 1999-2007                */
 /*              Hercules DASD Utilities: DASD image loader           */
+
+// $Id: dasdload.c,v 1.53 2007/06/23 00:04:08 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This program creates a virtual DASD volume from a list of         */
@@ -11,6 +13,17 @@
 /*      Corrections to CVOL initialization logic by Jay Maynard      */
 /*      IEBCOPY native dataset support by Ronen Tzur                 */
 /*-------------------------------------------------------------------*/
+
+// $Log: dasdload.c,v $
+// Revision 1.53  2007/06/23 00:04:08  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.52  2007/05/24 21:13:27  rbowler
+// Circumvent MSVC optimizer bug in cvol_initialize function
+//
+// Revision 1.51  2006/12/08 09:43:19  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -144,7 +157,7 @@ argexit ( int code )
             "\t-bz2: compress using bzip2\n"
 #endif
             );
-    if (sizeof(OFF_T) > 4)
+    if (sizeof(off_t) > 4)
         fprintf (stderr,
             "\t-lfs: create single large output file\n"
             );
@@ -3161,11 +3174,13 @@ static char    *sys1name[NUM_SYS1_DATASETS] =
 
     /* Increment bytes used by the length of the ICE */
     bytes += 18;
-    catent = (PDSDIR*)(datablk.kdarea + keylen + bytes);
 
     /* Build the dataset pointers for SYS1.xxxxxxxx datasets */
     for (i = 0; i < NUM_SYS1_DATASETS; i++)
     {
+        /* Point to next dataset pointer entry */
+        catent = (PDSDIR*)(datablk.kdarea + keylen + bytes);
+
         /* Set the name of the dataset pointer entry */
         convert_to_ebcdic (catent->pds2name, 8, sys1name[i]);
 
@@ -3197,9 +3212,11 @@ static char    *sys1name[NUM_SYS1_DATASETS] =
 
         /* Increment bytes used by the length of the dataset pointer */
         bytes += 26;
-        catent = (PDSDIR*)(datablk.kdarea + keylen + bytes);
 
     } /* end for(i) */
+
+    /* Point to last entry in block */
+    catent = (PDSDIR*)(datablk.kdarea + keylen + bytes);
 
     /* Set the last entry in block marker */
     memcpy (catent->pds2name, eighthexFF, 8);
@@ -3459,7 +3476,7 @@ int             outtrkbr = 0;           /* Output bytes remaining on
                                            track of real device      */
 int             outtrk = 0;             /* Output relative track     */
 int             outrec = 0;             /* Output record number      */
-struct STAT     st;                     /* Data area for fstat()     */
+struct stat     st;                     /* Data area for fstat()     */
 DATABLK         datablk;                /* Data block                */
 char            pathname[MAX_PATH];     /* sfname in host path format*/
 
@@ -3500,7 +3517,7 @@ char            pathname[MAX_PATH];     /* sfname in host path format*/
     }
 
     /* Get input file status */
-    rc = FSTAT(sfd, &st);
+    rc = fstat(sfd, &st);
     if (rc < 0)
     {
         XMERRF ("HHCDL126E Cannot stat %s: %s\n",
@@ -3536,7 +3553,9 @@ char            pathname[MAX_PATH];     /* sfname in host path format*/
         /* Pad the block if necessary */
         if (rc < blksz)
         {
-            blksz = ((rc / lrecl) + 1) * lrecl;
+            /* Adjust blksize down to next
+               highest multiple of lrecl */
+            blksz = (((rc-1) / lrecl) + 1) * lrecl;
             memset (&datablk.kdarea[rc], 0, blksz - rc);
         }
 
@@ -3719,7 +3738,7 @@ static int      stmtno = 0;             /* Statement number          */
 
 #ifdef EXTERNALGUI
         /* Indicate input file progess */
-        if (extgui) fprintf (stderr, "IPOS=%" I64_FMT "d\n", (U64)FTELL(cfp));
+        if (extgui) fprintf (stderr, "IPOS=%" I64_FMT "d\n", (U64)ftell(cfp));
 #endif /*EXTERNALGUI*/
 
         /* Check for DOS end of file character */
@@ -3990,7 +4009,7 @@ BYTE            c;                      /* Character work area       */
     if (plrecl == NULL) return 0;
 
     if (sscanf(plrecl, "%u%c", lrecl, &c) != 1
-        || *lrecl > 32767)
+        || *lrecl > MAX_DATALEN)
     {
         XMERRF ("HHCDL030E Invalid logical record length: %s\n",
                 plrecl);
@@ -4002,7 +4021,7 @@ BYTE            c;                      /* Character work area       */
     if (pblksz == NULL) return 0;
 
     if (sscanf(pblksz, "%u%c", blksz, &c) != 1
-        || *blksz > 32767)
+        || *blksz > MAX_DATALEN)
     {
         XMERRF ("HHCDL031E Invalid block size: %s\n",
                 pblksz);
@@ -4155,7 +4174,7 @@ int             fsflag = 0;             /* 1=Free space message sent */
         case METHOD_XMIT:               /* IEBCOPY wrapped in XMIT */
         case METHOD_VS:                 /* "straight" IEBCOPY */
             /* Create dataset using IEBCOPY file as input */
-            maxtrks = 32767;
+            maxtrks = MAX_TRACKS;
             rc = process_iebcopy_file (ifname, ofname, cif,
                                     devtype, heads, trklen,
                                     outcyl, outhead, maxtrks,
@@ -4404,7 +4423,7 @@ char            pathname[MAX_PATH];     /* cfname in host path format*/
 #endif
         else if (strcmp("a", &argv[1][1]) == 0)
             altcylflag = 1;
-        else if (strcmp("lfs", &argv[1][1]) == 0 && sizeof(OFF_T) > 4)
+        else if (strcmp("lfs", &argv[1][1]) == 0 && sizeof(off_t) > 4)
             lfs = 1;
         else argexit(0);
     }
@@ -4519,7 +4538,7 @@ char            pathname[MAX_PATH];     /* cfname in host path format*/
     if (extgui) fprintf (stderr, "REQCYLS=%d\n", reqcyls);
 #endif /*EXTERNALGUI*/
     rc = create_ckd (ofname, devtype, outheads, outmaxdl, reqcyls,
-                     volser, comp, lfs, 0, 0);
+                     volser, comp, lfs, 0, 0, 0);
     if (rc < 0)
     {
         XMERRF ("HHCDL007E Cannot create %s\n", ofname);

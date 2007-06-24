@@ -1,5 +1,15 @@
-/* HDL.C        (c) Copyright Jan Jaeger, 2003-2006                  */
+/* HDL.C        (c) Copyright Jan Jaeger, 2003-2007                  */
 /*              Hercules Dynamic Loader                              */
+
+// $Id: hdl.c,v 1.53 2007/06/23 00:04:10 ivan Exp $
+//
+// $Log: hdl.c,v $
+// Revision 1.53  2007/06/23 00:04:10  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.52  2006/12/08 09:43:25  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -49,7 +59,7 @@ static HDLSHD *hdl_shdlist;              /* Shutdown call list       */
 
 /* Global hdl_device_type_equates */
 
-DLL_EXPORT char *(*hdl_device_type_equates)(char *);
+DLL_EXPORT char *(*hdl_device_type_equates)(const char *);
 
 /* hdl_adsc - add shutdown call
  */
@@ -228,7 +238,7 @@ HDLDEV *newhnd;
 
 /* hdl_fhnd - find registered device handler
  */
-static DEVHND * hdl_fhnd (char *devname)
+static DEVHND * hdl_fhnd (const char *devname)
 {
 DLLENT *dllent;
 HDLDEV *hndent;
@@ -250,7 +260,7 @@ HDLDEV *hndent;
 
 /* hdl_bdnm - build device module name
  */
-static char * hdl_bdnm (char *ltype)
+static char * hdl_bdnm (const char *ltype)
 {
 char *dtname;
 unsigned int n;
@@ -269,7 +279,7 @@ unsigned int n;
 
 /* hdl_ghnd - obtain device handler
  */
-DLL_EXPORT DEVHND * hdl_ghnd (char *devtype)
+DLL_EXPORT DEVHND * hdl_ghnd (const char *devtype)
 {
 DEVHND *hnd;
 char *hdtname;

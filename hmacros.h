@@ -7,6 +7,19 @@
 //      The <config.h> header and other required headers are
 //      presumed to have already been #included ahead of it...
 
+// $Id: hmacros.h,v 1.17 2007/06/06 22:14:57 gsmith Exp $
+//
+// $Log: hmacros.h,v $
+// Revision 1.17  2007/06/06 22:14:57  gsmith
+// Fix SYNCHRONIZE_CPUS when numcpu > number of host processors - Greg
+//
+// Revision 1.16  2007/01/04 23:12:04  gsmith
+// remove thunk calls for program_interrupt
+//
+// Revision 1.15  2006/12/08 09:43:26  jj
+// Add CVS message log
+//
+
 #ifndef _HMACROS_H
 #define _HMACROS_H
 
@@ -47,12 +60,16 @@
 
 #ifdef _MSVC_
   #define  socket               w32_socket
-  #define  read_socket(f,b,n)   recv(f,b,n,0)
-  #define  write_socket(f,b,n)  send(f,b,n,0)
+/* Now defined in hsocket.h
+  int read_socket(int fd, char *ptr, int nbytes);
+  int write_socket(int fd, const char *ptr, int nbytes);
+*/
   #define  close_socket(f)      closesocket(f)
 #else
-  #define  read_socket(f,b,n)   read(f,b,n)
-  #define  write_socket(f,b,n)  write(f,b,n)
+/* Now defined in hsocket.h
+  int read_socket(int fd, char *ptr, int nbytes);
+  int write_socket(int fd, const char *ptr, int nbytes);
+*/
   #define  close_socket(f)      close(f)
 #endif
 
@@ -104,55 +121,41 @@
 
 #ifdef _MSVC_
   /* "Native" 64-bit Large File Support */
-  #define    OFF_T              __int64
+  #define    off_t              __int64
   #if (_MSC_VER >= 1400)
-    #define  FTRUNCATE          _chsize_s
-    #define  FTELL              _ftelli64
-    #define  FSEEK              _fseeki64
+    #define  ftruncate          _chsize_s
+    #define  ftell              _ftelli64
+    #define  fseek              _fseeki64
   #else // (_MSC_VER < 1400)
-    #define  FTRUNCATE          w32_ftrunc64
-    #define  FTELL              w32_ftelli64
-    #define  FSEEK              w32_fseeki64
+    #define  ftruncate          w32_ftrunc64
+    #define  ftell              w32_ftelli64
+    #define  fseek              w32_fseeki64
   #endif
-  #define    LSEEK              _lseeki64
-  #define    FSTAT              _fstati64
-  #define    STAT               _stati64
+  #define    lseek              _lseeki64
+  #define    fstat              _fstati64
+  #define    stat               _stati64
 #elif defined(_LFS_LARGEFILE) || ( defined(SIZEOF_OFF_T) && SIZEOF_OFF_T > 4 )
   /* Native 64-bit Large File Support */
-  #define    OFF_T              off_t
-  #define    FTRUNCATE          ftruncate
   #if defined(HAVE_FSEEKO)
-    #define  FTELL              ftello
-    #define  FSEEK              fseeko
+    #define  ftell              ftello
+    #define  fseek              fseeko
   #else
     #if defined(SIZEOF_LONG) && SIZEOF_LONG <= 4
       #warning fseek/ftell use offset arguments of insufficient size
     #endif
-    #define  FTELL              ftell
-    #define  FSEEK              fseek
   #endif
-  #define    LSEEK              lseek
-  #define    FSTAT              fstat
-  #define    STAT               stat
 #elif defined(_LFS64_LARGEFILE)
   /* Transitional 64-bit Large File Support */
-  #define    OFF_T              off64_t
-  #define    FTRUNCATE          ftruncate64
-  #define    FTELL              ftello64
-  #define    FSEEK              fseeko64
-  #define    LSEEK              lseek64
-  #define    FSTAT              fstat64
-  #define    STAT               stat64
+  #define    off_t              off64_t
+  #define    ftruncate          ftruncate64
+  #define    ftell              ftello64
+  #define    fseek              fseeko64
+  #define    lseek              lseek64
+  #define    fstat              fstat64
+  #define    stat               stat64
 #else // !defined(_LFS_LARGEFILE) && !defined(_LFS64_LARGEFILE) && (!defined(SIZEOF_OFF_T) || SIZEOF_OFF_T <= 4)
   /* No 64-bit Large File Support at all */
-  #warning 'Large File Support' missing
-  #define    OFF_T              off_t
-  #define    FTRUNCATE          ftruncate
-  #define    FTELL              ftell
-  #define    FSEEK              fseek
-  #define    LSEEK              lseek
-  #define    FSTAT              fstat
-  #define    STAT               stat
+  #warning Large File Support missing
 #endif
 
 /*-------------------------------------------------------------------*/
@@ -177,13 +180,14 @@
 
 /* Add message prefix filename:linenumber: to messages
    when compiled with debug enabled - JJ 30/12/99 */
-#define DEBUG_MESSAGES
+/* But only if OPTION_DEBUG_MESSAGES defined in featall.h - Fish */
+
 #define DEBUG_MSG_Q( _string ) #_string
 #define DEBUG_MSG_M( _string ) DEBUG_MSG_Q( _string )
 #define DEBUG_MSG( _string ) __FILE__ ":" DEBUG_MSG_M( __LINE__ ) ":" _string
 #define D_( _string ) DEBUG_MSG( _string )
 
-#if defined(DEBUG)
+#if defined(OPTION_DEBUG_MESSAGES) && defined(DEBUG)
   #define DEBUG_( _string ) D_( _string )
 #else
   #define DEBUG_( _string ) _string
@@ -209,7 +213,7 @@
       { \
         if (!(a)) \
         { \
-          logmsg("HHCxx999W *** Assertion Failed! *** Source(line): %s(%d); function: %s\n",__FILE__,__LINE__,__FUNCTION__); \
+          logmsg("HHCxx999W *** Assertion Failed! *** %s(%d); function: %s\n",__FILE__,__LINE__,__FUNCTION__); \
           if (IsDebuggerPresent()) DebugBreak();   /* (break into debugger) */ \
         } \
       } \
@@ -222,7 +226,7 @@
       { \
         if (!(a)) \
         { \
-          logmsg("HHCxx999W *** Assertion Failed! *** Source(line): %s(%d)\n",__FILE__,__LINE__); \
+          logmsg("HHCxx999W *** Assertion Failed! *** %s(%d)\n",__FILE__,__LINE__); \
         } \
       } \
       while(0)
@@ -252,8 +256,12 @@
 /* Opcode routing table function pointer */
 typedef void (ATTR_REGPARM(2)*FUNC)();
 
-/* SIE guest/host program interrupt routine function pointer */
-typedef void (*SIEFN)();
+/* Program Interrupt function pointer */
+typedef void (ATTR_REGPARM(2) *pi_func) (REGS *regs, int pcode);
+
+/* trace_br function */
+typedef U32  (*s390_trace_br_func) (int amode,  U32 ia, REGS *regs);
+typedef U64  (*z900_trace_br_func) (int amode,  U64 ia, REGS *regs);
 
 /*-------------------------------------------------------------------*/
 /* compiler optimization hints         (for performance)             */
@@ -301,6 +309,104 @@ typedef void (*SIEFN)();
 
 #define MAX_REPORTED_MIPSRATE  (250000000) /* instructions / second  */
 #define MAX_REPORTED_SIOSRATE  (10000)     /* SIOs per second        */
+
+/*-------------------------------------------------------------------*/
+/* Obtain/Release mainlock.                                          */
+/* mainlock is only obtained by a CPU thread                         */
+/*-------------------------------------------------------------------*/
+
+#define OBTAIN_MAINLOCK(_regs) \
+ do { \
+  if ((_regs)->hostregs->cpubit != (_regs)->sysblk->started_mask) { \
+   obtain_lock(&(_regs)->sysblk->mainlock); \
+   (_regs)->sysblk->mainowner = regs->hostregs->cpuad; \
+  } \
+ } while (0)
+
+#define RELEASE_MAINLOCK(_regs) \
+ do { \
+   if ((_regs)->sysblk->mainowner == (_regs)->hostregs->cpuad) { \
+     (_regs)->sysblk->mainowner = LOCK_OWNER_NONE; \
+     release_lock(&(_regs)->sysblk->mainlock); \
+   } \
+ } while (0)
+
+/*-------------------------------------------------------------------*/
+/* Obtain/Release intlock.                                           */
+/* intlock can be obtained by any thread                             */
+/* if obtained by a cpu thread, check to see if synchronize_cpus     */
+/* is in progress.                                                   */
+/*-------------------------------------------------------------------*/
+
+#define OBTAIN_INTLOCK(_iregs) \
+ do { \
+   REGS *_regs = (_iregs); \
+   if ((_regs)) \
+     (_regs)->hostregs->intwait = 1; \
+   obtain_lock (&sysblk.intlock); \
+   if ((_regs)) { \
+     while (sysblk.syncing) { \
+       sysblk.sync_mask &= ~(_regs)->hostregs->cpubit; \
+       if (!sysblk.sync_mask) \
+         signal_condition(&sysblk.sync_cond); \
+       wait_condition(&sysblk.sync_bc_cond, &sysblk.intlock); \
+     } \
+     (_regs)->hostregs->intwait = 0; \
+     sysblk.intowner = (_regs)->hostregs->cpuad; \
+   } else \
+     sysblk.intowner = LOCK_OWNER_OTHER; \
+ } while (0)
+
+#define RELEASE_INTLOCK(_regs) \
+ do { \
+   sysblk.intowner = LOCK_OWNER_NONE; \
+   release_lock(&sysblk.intlock); \
+ } while (0)
+
+/*-------------------------------------------------------------------*/
+/* Returns when all other CPU threads are blocked on intlock         */
+/*-------------------------------------------------------------------*/
+
+#define SYNCHRONIZE_CPUS(_regs) \
+ do { \
+   int _i, _n = 0; \
+   U32 _mask = sysblk.started_mask \
+             ^ (sysblk.waiting_mask | (_regs)->hostregs->cpubit); \
+   for (_i = 0; _mask && _i < sysblk.hicpu; _i++) { \
+     if ((_mask & BIT(_i))) { \
+       if (sysblk.regs[_i]->intwait || sysblk.regs[_i]->syncio) \
+         _mask ^= BIT(_i); \
+       else { \
+         ON_IC_INTERRUPT(sysblk.regs[_i]); \
+         if (SIE_MODE(sysblk.regs[_i])) \
+           ON_IC_INTERRUPT(sysblk.regs[_i]->guestregs); \
+         _n++; \
+       } \
+     } \
+   } \
+   if (_n) { \
+     if (_n < hostinfo.num_procs) { \
+       for (_n = 1; _mask; _n++) { \
+         if (_n & 0xff) \
+           sched_yield(); \
+         else \
+           usleep(1); \
+         for (_i = 0; _i < sysblk.hicpu; _i++) \
+           if ((_mask & BIT(_i)) && sysblk.regs[_i]->intwait) \
+             _mask ^= BIT(_i); \
+       } \
+     } else { \
+       sysblk.sync_mask = sysblk.started_mask \
+                        ^ (sysblk.waiting_mask | (_regs)->hostregs->cpubit); \
+       sysblk.syncing = 1; \
+       sysblk.intowner = LOCK_OWNER_NONE; \
+       wait_condition(&sysblk.sync_cond, &sysblk.intlock); \
+       sysblk.intowner = (_regs)->hostregs->cpuad; \
+       sysblk.syncing = 0; \
+       broadcast_condition(&sysblk.sync_bc_cond); \
+     } \
+   } \
+ } while (0)
 
 /*-------------------------------------------------------------------*/
 /* Macros to signal interrupt condition to a CPU[s]...               */

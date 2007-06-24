@@ -1,8 +1,36 @@
-/* ESA390.H     (c) Copyright Roger Bowler, 1994-2006                */
+/* ESA390.H     (c) Copyright Roger Bowler, 1994-2007                */
 /*              ESA/390 Data Areas                                   */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+
+// $Id: esa390.h,v 1.94 2007/06/23 00:04:09 ivan Exp $
+//
+// $Log: esa390.h,v $
+// Revision 1.94  2007/06/23 00:04:09  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.93  2007/06/02 16:23:33  rbowler
+// IUCV external interrupt code and submask definitions
+//
+// Revision 1.92  2007/04/27 10:50:40  rbowler
+// STFL bit 27 for MVCOS
+//
+// Revision 1.91  2007/04/26 22:27:48  rbowler
+// Conditional SSKE feature (non SIE-mode)
+//
+// Revision 1.90  2007/04/24 16:34:41  rbowler
+// Define feature macros and STFL bit settings for new features in zPOP-05
+//
+// Revision 1.89  2007/02/01 16:53:51  rbowler
+// Additional STFL bit definitions
+//
+// Revision 1.88  2006/12/20 04:26:19  gsmith
+// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
+//
+// Revision 1.87  2006/12/08 09:43:20  jj
+// Add CVS message log
+//
 
 #ifndef _ESA390_H
 #define _ESA390_H
@@ -26,6 +54,10 @@
                  U64 D;
                  struct { FW H; FW L; } F;
                } DW;
+ typedef union {
+                 struct { DW H; DW L; } D;
+                 struct { FW HH; FW HL; FW LH; FW LL; } F;
+               } QW;
 
 #else // !defined(WORDS_BIGENDIAN)
 
@@ -42,6 +74,10 @@
                  U64 D;
                  struct { FW L; FW H; } F;
                } DW;
+ typedef union {
+                 struct { DW L; DW H; } D;
+                 struct { FW LL; FW LH; FW HL; FW HH; } F;
+               } QW;
 
 #endif // defined(WORDS_BIGENDIAN)
 
@@ -69,18 +105,19 @@ typedef struct  _PSW {
         BYTE     progmask;              /* Program mask    (20 - 23) */
         BYTE     zerobyte;              /* Zeroes          (24 - 31) */
                                         /* or (esame)      (24 - 30) */
-        U32      zeroword;              /* esame only      (32 - 63) */
-        BYTE                            /* Addressing mode (31 - 32) */
-                 amode64:1,             /* 64-bit addressing         */
-                 amode:1,               /* 31-bit addressing         */
+        u_int                           /* Addressing mode (31 - 32) */
+                 amode64:1,             /* 64-bit addressing    (31) */
+                 amode:1,               /* 31-bit addressing    (32) */
                  zeroilc:1;             /* 1=Zero ILC                */
+        U32      zeroword;              /* esame only      (33 - 63) */
         DW       ia;                    /* Instruction addrress      */
                                         /*                 (33 - 63) */
                                         /* or (esame)      (64 -127) */
         DW       amask;                 /* Address wraparound mask   */
         U16      intcode;               /* Interruption code         */
-        U16      unused;                /* (unused)                  */
-    } PSW;                              /* 28 bytes                  */
+        BYTE     ilc;                   /* Instruction length count  */
+        BYTE     unused;
+    } PSW;
 
 #define IA_G     ia.D
 #define IA_H     ia.F.H.F
@@ -151,6 +188,7 @@ typedef struct  _PSW {
 #define TLB_MASK        0x3FF           /* Mask for 1024 entries     */
 #define TLB_REAL_ASD_L  0xFFFFFFFF      /* ASD values for real mode  */
 #define TLB_REAL_ASD_G  0xFFFFFFFFFFFFFFFFULL
+#define TLB_HOST_ASD    0x800           /* Host entry for XC guest   */
 typedef struct _TLB  {
         DW              asd[TLBN];      /* Address space designator  */
 #define TLB_ASD_G(_n)   asd[(_n)].D
@@ -185,9 +223,8 @@ typedef struct _DAT {
         int     stid;                   /* Address space indicator   */
         BYTE   *storkey;                /* ->Storage key             */
         U16     xcode;                  /* Translation exception code*/
-        BYTE    private:1,              /* 1=Private address space   */
+        u_int   private:1,              /* 1=Private address space   */
                 protect:2;              /* 1=Page prot, 2=ALE prot   */
-        BYTE    reserved[1];            /* [alignment]               */
       } DAT;
 
 /* Bit definitions for control register 0 */
@@ -225,6 +262,7 @@ typedef struct _DAT {
 #define CR0_XM_ETR      0x00000010      /* External timer mask       */
 #define CR0_PC_FAST     0x00000008      /* PC fast control        390*/
 #define CR0_CRYPTO      0x00000004      /* Crypto control       ESAME*/
+#define CR0_IUCV        0x00000002      /* IUCV interrupt mask       */
 
 #define SERVSIG_PEND    0x00000001      /* Event buffer pending      */
 #define SERVSIG_ADDR    0xFFFFFFF8      /* Parameter address         */
@@ -922,6 +960,7 @@ typedef struct _PSA_900 {               /* Prefixed storage area     */
 #define EXT_EXTERNAL_CALL_INTERRUPT                     0x1202
 #define EXT_ETR_INTERRUPT                               0x1406
 #define EXT_SERVICE_SIGNAL_INTERRUPT                    0x2401
+#define EXT_IUCV_INTERRUPT                              0x4000
 #if defined(FEATURE_ECPSVM)
 #define EXT_VINTERVAL_TIMER_INTERRUPT                   0x0100
 #endif
@@ -1281,6 +1320,10 @@ typedef struct _MBK {
                                            extended is installed  @Z9*/
 #define STFL_1_SENSE_RUN_STATUS 0x40    /* Sense running status   @Z9
                                            facility is installed  @Z9*/
+#define STFL_1_CONDITIONAL_SSKE 0x20    /* Conditional SSKE facility
+                                           is installed           407*/
+#define STFL_1_CONFIG_TOPOLOGY  0x10    /* STSI-enhancement for
+                                           configuration topology    */
 #define STFL_2_TRAN_FAC2        0x80    /* Extended translation
                                            facility 2 is installed   */
 #define STFL_2_MSG_SECURITY     0x40    /* Message security assist
@@ -1301,10 +1344,26 @@ typedef struct _MBK {
                                            facility 2 enhancement @Z9*/
 #define STFL_3_STORE_CLOCK_FAST 0x40    /* Store clock fast       @Z9
                                            enhancement installed  @Z9*/
+#define STFL_3_MVCOS            0x10    /* MVCOS instruction
+                                           is installed           407*/
 #define STFL_3_TOD_CLOCK_STEER  0x08    /* TOD clock steering     @Z9
                                            facility is installed  @Z9*/
 #define STFL_3_ETF3_ENHANCEMENT 0x02    /* Extended translation   @Z9
                                            facility 3 enhancement @Z9*/
+#define STFL_3_EXTRACT_CPU_TIME 0x01    /* Extract CPU time facility
+                                           is installed           407*/
+#define STFL_4_CSSF             0x80    /* Compare-and-Swap-and-Store
+                                           facility is installed     */
+#define STFL_4_CSSF2            0x40    /* Compare-and-Swap-and-Store
+                                           facility 2 is installed   */
+#define STFL_5_FPS_ENHANCEMENT  0x40    /* Floating point support    
+                                           enhancements (FPR-GR-loading
+                                           FPS-sign-handling, and
+                                           DFP-rounding) installed   */
+#define STFL_5_DECIMAL_FLOAT    0x20    /* Decimal floating point
+                                           (DFP) facility            */
+#define STFL_5_DFP_HPERF        0x10    /* DFP has high performance  */
+#define STFL_5_PFPO             0x08    /* PFPO instruction installed*/
 
 /* Bit definitions for the Vector Facility */
 #define VSR_M    0x0001000000000000ULL  /* Vector mask mode bit      */
@@ -1952,22 +2011,59 @@ typedef struct _PTFFQSI {               /* Query Steering Information*/
 #define FPC_DXC_U       0x00001000
 #define FPC_DXC_X       0x00000800
 #define FPC_DXC_Y       0x00000400
-#define FPC_RM          0x00000003
-#define FPC_RESERVED    0x070700FC
+#define FPC_DRM         0x00000070
+#define FPC_BRM         0x00000003
+#define FPC_RESERVED    0x0707008C
+
+/* Shift counts to allow alignment of each field in the FPC register */
+#define FPC_MASK_SHIFT  27
+#define FPC_FLAG_SHIFT  19
+#define FPC_DXC_SHIFT   8
+#define FPC_DRM_SHIFT   4
+#define FPC_BRM_SHIFT   0
 
 /* Data exception codes */
 #define DXC_DECIMAL             0x00    /* Decimal operand exception */
 #define DXC_AFP_REGISTER        0x01    /* AFP register exception    */
 #define DXC_BFP_INSTRUCTION     0x02    /* BFP instruction exception */
+#define DXC_DFP_INSTRUCTION     0x03    /* DFP instruction exception */
 #define DXC_IEEE_INEXACT_TRUNC  0x08    /* IEEE inexact, truncated   */
+#define DXC_IEEE_INEXACT_IISE   0x0B    /* IEEE inexact (IISE)    DFP*/
 #define DXC_IEEE_INEXACT_INCR   0x0C    /* IEEE inexact, incremented */
 #define DXC_IEEE_UF_EXACT       0x10    /* IEEE underflow. exact     */
+#define DXC_IEEE_UF_EXACT_IISE  0x13    /* IEEE u/flow,exact(IISE)DFP*/
 #define DXC_IEEE_UF_INEX_TRUNC  0x18    /* IEEE u/flow,inexact,trunc */
+#define DXC_IEEE_UF_INEX_IISE   0x1B    /* IEEE u/flow,inex(IISE) DFP*/
 #define DXC_IEEE_UF_INEX_INCR   0x1C    /* IEEE u/flow,inexact,incr  */
 #define DXC_IEEE_OF_EXACT       0x20    /* IEEE overflow. exact      */
+#define DXC_IEEE_OF_EXACT_IISE  0x23    /* IEEE o/flow,exact(IISE)DFP*/
 #define DXC_IEEE_OF_INEX_TRUNC  0x28    /* IEEE o/flow,inexact,trunc */
+#define DXC_IEEE_OF_INEX_IISE   0x2B    /* IEEE o/flow,inex(IISE) DFP*/
 #define DXC_IEEE_OF_INEX_INCR   0x2C    /* IEEE o/flow,inexact,incr  */
 #define DXC_IEEE_DIV_ZERO       0x40    /* IEEE division by zero     */
+#define DXC_IEEE_DIV_ZERO_IISE  0x43    /* IEEE div by zero(IISE) DFP*/
 #define DXC_IEEE_INVALID_OP     0x80    /* IEEE invalid operation    */
+#define DXC_IEEE_INV_OP_IISE    0x83    /* IEEE invalid op (IISE) DFP*/
+/* Note: IISE = IEEE-interruption-simulation event */
+
+/* Decimal rounding modes */
+#define DRM_RNE                 0       /* Round to nearest tie even */
+#define DRM_RTZ                 1       /* Round toward zero         */
+#define DRM_RTPI                2       /* Round toward +infinity    */
+#define DRM_RTMI                3       /* Round toward -infinity    */
+#define DRM_RNAZ                4       /* Round nearest tie away 0  */
+#define DRM_RNTZ                5       /* Round nearest tie toward 0*/
+#define DRM_RAFZ                6       /* Round away from zero      */
+#define DRM_RFSP                7       /* Prepare shorter precision */
+
+/* Binary rounding modes */
+#define BRM_RNE                 0       /* Round to nearest tie even */
+#define BRM_RTZ                 1       /* Round toward zero         */
+#define BRM_RTPI                2       /* Round toward +infinity    */
+#define BRM_RTMI                3       /* Round toward -infinity    */
+
+/* Mask bits for conditional SSKE facility */
+#define SSKE_MASK_MR            0x04    /* Reference bit update mask */
+#define SSKE_MASK_MC            0x02    /* Change bit update mask    */
 
 #endif // _ESA390_H

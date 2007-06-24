@@ -1,8 +1,18 @@
 /*
  * dasdcat
  *
- * Vast swathes copied from dasdpdsu.c (c) Copyright Roger Bowler, 1999-2006
- * Changes and additions Copyright 2000-2006 by Malcolm Beattie
+ * Vast swathes copied from dasdpdsu.c (c) Copyright Roger Bowler, 1999-2007
+ * Changes and additions Copyright 2000-2007 by Malcolm Beattie
+ *
+ * $Id: dasdcat.c,v 1.32 2007/06/23 00:04:08 ivan Exp $
+ *
+ * $Log: dasdcat.c,v $
+ * Revision 1.32  2007/06/23 00:04:08  ivan
+ * Update copyright notices to include current year (2007)
+ *
+ * Revision 1.31  2006/12/08 09:43:19  jj
+ * Add CVS message log
+ *
  */
 
 #include "hstdinc.h"

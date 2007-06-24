@@ -1,5 +1,15 @@
-/* HDTEQ.C      (c) Copyright Jan Jaeger, 2003-2006                  */
+/* HDTEQ.C      (c) Copyright Jan Jaeger, 2003-2007                  */
 /*              Hercules Dynamic Loader                              */
+
+// $Id: hdteq.c,v 1.15 2007/06/23 00:04:10 ivan Exp $
+//
+// $Log: hdteq.c,v $
+// Revision 1.15  2007/06/23 00:04:10  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.14  2006/12/08 09:43:25  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -48,6 +58,7 @@ static DTEQ dteq[] = {
 //  { "3420",   "3420"  },
     { "3480",   "3420"  },
     { "3490",   "3420"  },
+    { "3590",   "3420"  },
     { "9347",   "3420"  },
     { "9348",   "3420"  },
     { "8809",   "3420"  },
@@ -100,12 +111,12 @@ HDL_DEPENDENCY_SECTION;
 {
      HDL_DEPENDENCY(HERCULES);
 }
-END_DEPENDENCY_SECTION;
+END_DEPENDENCY_SECTION
 
 
 HDL_REGISTER_SECTION;
 {
     HDL_REGISTER(hdl_device_type_equates,hdt_device_type_equates);
 }
-END_REGISTER_SECTION;
+END_REGISTER_SECTION
 #endif

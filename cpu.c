@@ -1,8 +1,10 @@
-/* CPU.C        (c) Copyright Roger Bowler, 1994-2006                */
+/* CPU.C        (c) Copyright Roger Bowler, 1994-2007                */
 /*              ESA/390 CPU Emulator                                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+
+// $Id: cpu.c,v 1.185 2007/06/23 00:04:05 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements the CPU instruction execution function of  */
@@ -27,6 +29,68 @@
 /*      ASN-and-LX-reuse facility - Roger Bowler, June 2004      @ALR*/
 /*-------------------------------------------------------------------*/
 
+// $Log: cpu.c,v $
+// Revision 1.185  2007/06/23 00:04:05  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.184  2007/06/22 02:22:50  gsmith
+// revert config_cpu.pat due to problems in testing
+//
+// Revision 1.183  2007/06/20 03:52:19  gsmith
+// configure_cpu now returns when the CPU is fully configured
+//
+// Revision 1.182  2007/06/06 22:14:57  gsmith
+// Fix SYNCHRONIZE_CPUS when numcpu > number of host processors - Greg
+//
+// Revision 1.181  2007/04/09 23:07:42  gsmith
+// call cpu_uninit() on run_cpu exit
+//
+// Revision 1.180  2007/03/25 04:20:36  gsmith
+// Ensure started_mask CPU bit is off for terminating cpu thread - Fish by Greg
+//
+// Revision 1.179  2007/03/13 01:43:37  gsmith
+// Synchronize started cpu
+//
+// Revision 1.178  2007/01/16 01:45:33  gsmith
+// Tweaks to instruction stepping/tracing
+//
+// Revision 1.177  2007/01/09 23:18:21  gsmith
+// Tweaks to cpuloop
+//
+// Revision 1.176  2007/01/04 23:12:03  gsmith
+// remove thunk calls for program_interrupt
+//
+// Revision 1.175  2007/01/04 01:08:41  gsmith
+// 03 Jan 2007 single_cpu_dw fetch/store patch for ia32
+//
+// Revision 1.174  2007/01/03 14:21:41  rbowler
+// Reinstate semantics of 'g' command changed by hsccmd rev 1.197
+//
+// Revision 1.173  2006/12/30 16:15:57  gsmith
+// 2006 Dec 30 Fix cpu_init to call set_jump_pointers for all arches
+//
+// Revision 1.172  2006/12/21 22:39:38  gsmith
+// 21 Dec 2006 Range for s+, t+ - Greg Smith
+//
+// Revision 1.171  2006/12/21 01:45:01  gsmith
+// 20 Dec 2006 Fix instruction display in program interrupt - Greg Smithh
+//
+// Revision 1.170  2006/12/20 23:37:29  rbowler
+// ip_pat cpu.c rev 1.168 duplicated 2 lines from rev 1.167
+//
+// Revision 1.169  2006/12/20 10:52:08  rbowler
+// cpu.c(294) : warning C4101: 'ip' : unreferenced local variable
+//
+// Revision 1.168  2006/12/20 04:26:19  gsmith
+// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
+//
+// Revision 1.167  2006/12/17 21:54:24  rbowler
+// Display DXC in msg HHCCP014I for PIC7
+//
+// Revision 1.166  2006/12/08 09:43:19  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
 
 #if !defined(_HENGINE_DLL_)
@@ -49,9 +113,9 @@
 void ARCH_DEP(store_psw) (REGS *regs, BYTE *addr)
 {
 
-    /* Ensure real instruction address is properly wrapped */
-    if(likely(!regs->psw.zeroilc))
-        regs->psw.IA &= ADDRESS_MAXWRAP(regs);
+    /* Ensure psw.IA is set */
+    if (!regs->psw.zeroilc)
+        SET_PSW_IA(regs);
 
 #if defined(FEATURE_BCMODE)
     if ( ECMODE(&regs->psw) ) {
@@ -128,6 +192,8 @@ void ARCH_DEP(store_psw) (REGS *regs, BYTE *addr)
 /*-------------------------------------------------------------------*/
 int ARCH_DEP(load_psw) (REGS *regs, BYTE *addr)
 {
+    INVALIDATE_AIA(regs);
+
     regs->psw.zeroilc = 1;
 
     regs->psw.sysmask = addr[0];
@@ -255,7 +321,7 @@ int ARCH_DEP(load_psw) (REGS *regs, BYTE *addr)
     regs->psw.zeroilc = 0;
 
     /* Check for wait state PSW */
-    if (WAITSTATE(&regs->psw) && (sysblk.insttrace || sysblk.inststep))
+    if (WAITSTATE(&regs->psw) && CPU_STEPPING_OR_TRACING_ALL)
     {
         logmsg (_("HHCCP043I Wait state PSW loaded: "));
         display_psw (regs);
@@ -269,7 +335,7 @@ int ARCH_DEP(load_psw) (REGS *regs, BYTE *addr)
 /*-------------------------------------------------------------------*/
 /* Load program interrupt new PSW                                    */
 /*-------------------------------------------------------------------*/
-void ARCH_DEP(program_interrupt) (REGS *regs, int pcode)
+void (ATTR_REGPARM(2) ARCH_DEP(program_interrupt)) (REGS *regs, int pcode)
 {
 PSA    *psa;                            /* -> Prefixed storage area  */
 REGS   *realregs;                       /* True regs structure       */
@@ -285,6 +351,7 @@ int     nointercept;                    /* True for virtual pgmint   */
 #if defined(OPTION_FOOTPRINT_BUFFER)
 U32     n;
 #endif /*defined(OPTION_FOOTPRINT_BUFFER)*/
+char    dxcstr[8]={0};                  /* " DXC=xx" if data excptn  */
 
 static char *pgmintname[] = {
         /* 01 */        "Operation exception",
@@ -373,14 +440,43 @@ static char *pgmintname[] = {
     realregs = sysblk.regs[regs->cpuad];
 #endif /*!defined(_FEATURE_SIE)*/
 
-    /* Prevent machine check when in (almos) interrupt loop */
+    /* Prevent machine check when in (almost) interrupt loop */
     realregs->instcount++;
 
-    /* Set instruction length (ilc) */
-    ilc = REAL_ILC(regs);
+    /* Release any locks */
+    if (sysblk.intowner == realregs->cpuad)
+        RELEASE_INTLOCK(realregs);
+    if (sysblk.mainowner == realregs->cpuad)
+        RELEASE_MAINLOCK(realregs);
+
+    /* Ensure psw.IA is set and aia invalidated */
+    INVALIDATE_AIA(realregs);
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
     if(realregs->sie_active)
-        sie_ilc = REAL_ILC(realregs->guestregs);
+        INVALIDATE_AIA(realregs->guestregs);
+#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
+
+    /* Set instruction length (ilc) */
+    ilc = realregs->psw.zeroilc ? 0 : REAL_ILC(realregs);
+    if (realregs->psw.ilc == 0 && !realregs->psw.zeroilc)
+    {
+        /* This can happen if BALR, BASR, BASSM or BSM
+           program checks during trace */
+        ilc = realregs->execflag ? 4 : 2;
+        realregs->ip += 2;
+    }
+#if defined(FEATURE_INTERPRETIVE_EXECUTION)
+    if(realregs->sie_active)
+    {
+        sie_ilc = realregs->guestregs->psw.zeroilc
+                ? 0 : REAL_ILC(realregs->guestregs);
+        if (realregs->guestregs->psw.ilc == 0
+         && !realregs->guestregs->psw.zeroilc)
+        {
+            sie_ilc = realregs->guestregs->execflag ? 4 : 2;
+            realregs->guestregs->ip += 2;
+        }
+    }
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Set `execflag' to 0 in case EXecuted instruction program-checked */
@@ -391,12 +487,8 @@ static char *pgmintname[] = {
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Unlock the main storage lock if held */
-    if (realregs->mainlock)
+    if (realregs->cpuad == sysblk.mainowner)
         RELEASE_MAINLOCK(realregs);
-#if defined(FEATURE_INTERPRETIVE_EXECUTION)
-    if(realregs->sie_active && realregs->guestregs->mainlock)
-        RELEASE_MAINLOCK(realregs->guestregs);
-#endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
     /* Remove PER indication from program interrupt code
        such that interrupt code specific tests may be done.
@@ -406,7 +498,7 @@ static char *pgmintname[] = {
 
     /* If this is a concurrent PER event then we must add the PER
        bit to the interrupts code */
-    if( OPEN_IC_PERINT(realregs) )
+    if( OPEN_IC_PER(realregs) )
         pcode |= PGM_PER_EVENT;
 
     /* Perform serialization and checkpoint synchronization */
@@ -434,7 +526,7 @@ static char *pgmintname[] = {
 #if defined(_FEATURE_PROTECTION_INTERCEPTION_CONTROL)
         realregs->guestregs->hostint = 1;
 #endif /*defined(_FEATURE_PROTECTION_INTERCEPTION_CONTROL)*/
-        (realregs->guestregs->sie_guestpi) (realregs->guestregs, pcode);
+        (realregs->guestregs->program_interrupt) (realregs->guestregs, pcode);
     }
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
 
@@ -470,26 +562,24 @@ static char *pgmintname[] = {
       || code == PGM_STACK_TYPE_EXCEPTION
       || code == PGM_STACK_OPERATION_EXCEPTION
       || code == PGM_VECTOR_OPERATION_EXCEPTION)
-      && realregs->instvalid)
+      && !realregs->instinvalid)
     {
         realregs->psw.IA -= ilc;
         realregs->psw.IA &= ADDRESS_MAXWRAP(realregs);
-        VALIDATE_AIA(realregs);
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
         /* When in SIE mode the guest instruction causing this
            host exception must also be nullified */
-        if(realregs->sie_active && realregs->guestregs->instvalid)
+        if(realregs->sie_active && !realregs->guestregs->instinvalid)
         {
             realregs->guestregs->psw.IA -= sie_ilc;
             realregs->guestregs->psw.IA &= ADDRESS_MAXWRAP(realregs->guestregs);
-            VALIDATE_AIA(realregs->guestregs);
         }
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
     }
 
     /* The OLD PSW must be incremented on the following
        exceptions during instfetch */
-    if(!realregs->instvalid &&
+    if(realregs->instinvalid &&
       (  code == PGM_PROTECTION_EXCEPTION
       || code == PGM_ADDRESSING_EXCEPTION
       || code == PGM_SPECIFICATION_EXCEPTION
@@ -506,9 +596,10 @@ static char *pgmintname[] = {
     HDC2(debug_program_interrupt, regs, pcode);
 
     /* Trace program checks other then PER event */
-    if(code && (sysblk.insttrace || sysblk.inststep
+    if(code && (CPU_STEPPING_OR_TRACING(realregs, ilc)
         || sysblk.pgminttr & ((U64)1 << ((code - 1) & 0x3F))))
     {
+     BYTE *ip;
 #if defined(OPTION_FOOTPRINT_BUFFER)
         if(!(sysblk.insttrace || sysblk.inststep))
             for(n = sysblk.footprptr[realregs->cpuad] + 1 ;
@@ -526,11 +617,20 @@ static char *pgmintname[] = {
 #if defined(SIE_DEBUG)
         logmsg (MSTRING(_GEN_ARCH) " ");
 #endif /*defined(SIE_DEBUG)*/
-        logmsg (_("CPU%4.4X: %s CODE=%4.4X ILC=%d\n"), realregs->cpuad,
-                pgmintname[ (code - 1) & 0x3F], pcode, ilc);
-        ARCH_DEP(display_inst) (realregs, realregs->instvalid ?
-                                                realregs->ip : NULL);
+        if (code == PGM_DATA_EXCEPTION)
+            sprintf(dxcstr, " DXC=%2.2X", regs->dxc);
+        logmsg (_("CPU%4.4X: %s CODE=%4.4X ILC=%d%s\n"), realregs->cpuad,
+                pgmintname[ (code - 1) & 0x3F], pcode, ilc, dxcstr);
+
+        /* Calculate instruction pointer */
+        ip = realregs->instinvalid ? NULL
+           : (realregs->ip - ilc < realregs->aip)
+             ? realregs->inst : realregs->ip - ilc;
+
+        ARCH_DEP(display_inst) (realregs, ip);
     }
+
+    realregs->instinvalid = 0;
 
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
     /* If this is a host exception in SIE state then leave SIE */
@@ -542,8 +642,10 @@ static char *pgmintname[] = {
     px = realregs->PX;
 
     /* If under SIE use translated to host absolute prefix */
+#if defined(_FEATURE_SIE)
     if(SIE_MODE(regs))
         px = regs->sie_px;
+#endif
 
 #if defined(_FEATURE_SIE)
     if(!SIE_MODE(regs) ||
@@ -628,20 +730,21 @@ static char *pgmintname[] = {
            code == 0x40) )
               OFF_IC_PER_SA(realregs);
 
-    if( OPEN_IC_PERINT(realregs) )
+    if( OPEN_IC_PER(realregs) )
     {
-        if( realregs->tracing )
+        if( CPU_STEPPING_OR_TRACING(realregs, ilc) )
             logmsg(_("HHCCP015I CPU%4.4X PER event: code=%4.4X perc=%2.2X "
                      "addr=" F_VADR "\n"),
               regs->cpuad, pcode, IS_IC_PER(realregs) >> 16,
               (realregs->psw.IA - ilc) & ADDRESS_MAXWRAP(realregs) );
 
-        realregs->perc |= OPEN_IC_PERINT(realregs) >> ((32 - IC_CR9_SHIFT) - 16);
+        realregs->perc |= OPEN_IC_PER(realregs) >> ((32 - IC_CR9_SHIFT) - 16);
 
         /* Positions 14 and 15 contain zeros if a storage alteration
            event was not indicated */
-        if( !(OPEN_IC_PERINT(realregs) & IC_PER_SA)
-          || (OPEN_IC_PERINT(realregs) & IC_PER_STURA) )
+//FIXME: is this right??
+        if( !(OPEN_IC_PER_SA(realregs))
+          || (OPEN_IC_PER_STURA(realregs)) )
             realregs->perc &= 0xFFFC;
 
         STORE_HW(psa->perint, realregs->perc);
@@ -651,10 +754,11 @@ static char *pgmintname[] = {
         if( IS_IC_PER_SA(realregs) && ACCESS_REGISTER_MODE(&realregs->psw) )
             psa->perarid = realregs->peraid;
 
+#if defined(_FEATURE_SIE)
         /* Reset PER pending indication */
         if(nointercept)
             OFF_IC_PER(realregs);
-
+#endif
     }
     else
     {
@@ -670,7 +774,7 @@ static char *pgmintname[] = {
     {
         /* Store the program interrupt code at PSA+X'8C' */
         psa->pgmint[0] = 0;
-        psa->pgmint[1] = regs->psw.zeroilc ? 0 : ilc;
+        psa->pgmint[1] = ilc;
         STORE_HW(psa->pgmint + 2, pcode);
 
         /* Store the exception access identification at PSA+160 */
@@ -775,6 +879,7 @@ static char *pgmintname[] = {
 
 #if defined(FEATURE_PER3)
         /* Store the breaking event address register in the PSA */
+        SET_BEAR_REG(regs, regs->bear_ip);
         STORE_W(psa->bea, regs->bear);
 #endif /*defined(FEATURE_PER3)*/
 
@@ -788,8 +893,8 @@ static char *pgmintname[] = {
     if(nointercept)
     {
 #endif /*defined(_FEATURE_SIE)*/
-
-        obtain_lock(&sysblk.intlock);
+//FIXME: Why are we getting intlock here??
+//      OBTAIN_INTLOCK(realregs);
 
         /* Store current PSW at PSA+X'28' or PSA+X'150' for ESAME */
         ARCH_DEP(store_psw) (realregs, psa->pgmold);
@@ -800,7 +905,7 @@ static char *pgmintname[] = {
 #if defined(_FEATURE_SIE)
             if(SIE_MODE(realregs))
             {
-                release_lock(&sysblk.intlock);
+//              RELEASE_INTLOCK(realregs);
                 longjmp(realregs->progjmp, pcode);
             }
             else
@@ -809,12 +914,14 @@ static char *pgmintname[] = {
                 logmsg (_("HHCCP016I CPU%4.4X: Program interrupt loop: "),
                           realregs->cpuad);
                 display_psw (realregs);
+                OBTAIN_INTLOCK(realregs);
                 realregs->cpustate = CPUSTATE_STOPPING;
                 ON_IC_INTERRUPT(realregs);
+                RELEASE_INTLOCK(realregs);
             }
         }
 
-        release_lock(&sysblk.intlock);
+//      RELEASE_INTLOCK(realregs);
 
         longjmp(realregs->progjmp, SIE_NO_INTERCEPT);
 
@@ -855,10 +962,10 @@ PSA    *psa;                            /* -> Prefixed storage area  */
         regs->cpustate = CPUSTATE_STARTED;
     }
 
-    release_lock(&sysblk.intlock);
+    RELEASE_INTLOCK(regs);
 
     if ( rc )
-        ARCH_DEP(program_interrupt)(regs, rc);
+        regs->program_interrupt(regs, rc);
 
     longjmp (regs->progjmp, SIE_INTERCEPT_RESTART);
 } /* end function restart_interrupt */
@@ -896,7 +1003,11 @@ DBLWRD  csw;                            /* CSW for S/370 channels    */
 #endif
     {
         /* Point to PSA in main storage */
-        pfx = SIE_MODE(regs) ? regs->sie_px : regs->PX;
+        pfx =
+#if defined(_FEATURE_SIE)
+              SIE_MODE(regs) ? regs->sie_px :
+#endif
+              regs->PX;
         psa = (void*)(regs->mainstor + pfx);
         STORAGE_KEY(pfx, regs) |= (STORKEY_REF | STORKEY_CHANGE);
     }
@@ -913,7 +1024,7 @@ DBLWRD  csw;                            /* CSW for S/370 channels    */
         STORE_FW(psa->ioid, ioid);
 
     /* Trace the I/O interrupt */
-    if (sysblk.insttrace || sysblk.inststep)
+    if (CPU_STEPPING_OR_TRACING(regs, 0))
         logmsg (_("HHCCP044I I/O interrupt code=%4.4X "
                 "CSW=%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X\n"),
                 regs->psw.intcode,
@@ -934,7 +1045,7 @@ DBLWRD  csw;                            /* CSW for S/370 channels    */
 #endif /*defined(FEATURE_ESAME)*/
 
     /* Trace the I/O interrupt */
-    if (sysblk.insttrace || sysblk.inststep)
+    if (CPU_STEPPING_OR_TRACING(regs, 0))
 #if !defined(FEATURE_ESAME) && !defined(_FEATURE_IO_ASSIST)
         logmsg (_("HHCCP045I I/O interrupt code=%8.8X parm=%8.8X\n"),
                   ioid, ioparm);
@@ -956,12 +1067,12 @@ DBLWRD  csw;                            /* CSW for S/370 channels    */
 
         if ( rc )
         {
-            release_lock(&sysblk.intlock);
-            ARCH_DEP(program_interrupt) (regs, rc);
+            RELEASE_INTLOCK(regs);
+            regs->program_interrupt (regs, rc);
         }
     }
 
-    release_lock(&sysblk.intlock);
+    RELEASE_INTLOCK(regs);
 
     longjmp(regs->progjmp, icode);
 
@@ -1004,7 +1115,7 @@ RADR    fsta;                           /* Failing storage address   */
     STORE_DW(psa->mckint, mcic);
 
     /* Trace the machine check interrupt */
-    if (sysblk.insttrace || sysblk.inststep)
+    if (CPU_STEPPING_OR_TRACING(regs, 0))
         logmsg (_("HHCCP022I Machine Check code=%16.16" I64_FMT "u\n"),
                   (long long)mcic);
 
@@ -1025,10 +1136,10 @@ RADR    fsta;                           /* Failing storage address   */
     /* Load new PSW from PSA+X'70' */
     rc = ARCH_DEP(load_psw) ( regs, psa->mcknew );
 
-    release_lock(&sysblk.intlock);
+    RELEASE_INTLOCK(regs);
 
     if ( rc )
-        ARCH_DEP(program_interrupt) (regs, rc);
+        regs->program_interrupt (regs, rc);
 
     longjmp (regs->progjmp, SIE_INTERCEPT_MCK);
 } /* end function perform_mck_interrupt */
@@ -1078,7 +1189,7 @@ int   cpu  = *ptr;
             cpu, thread_id(), getpid(),
             getpriority(PRIO_PROCESS,0));
 
-    obtain_lock(&sysblk.intlock);
+    OBTAIN_INTLOCK(NULL);
 
     /* Signal cpu has started */
     signal_condition (&sysblk.cpucond);
@@ -1098,7 +1209,7 @@ int   cpu  = *ptr;
         {
             logmsg (_("HHCCP006S Cannot create timer thread: %s\n"),
                            strerror(errno));
-            release_lock(&sysblk.intlock);
+            RELEASE_INTLOCK(NULL);
             return NULL;
         }
     }
@@ -1128,11 +1239,15 @@ int   cpu  = *ptr;
     logmsg (_("HHCCP008I CPU%4.4X thread ended: tid="TIDPAT", pid=%d\n"),
             cpu, thread_id(), getpid());
 
-    release_lock(&sysblk.intlock);
+    RELEASE_INTLOCK(NULL);
 
     return NULL;
 }
 
+
+void s370_set_jump_pointers(REGS *regs, int jump);
+void s390_set_jump_pointers(REGS *regs, int jump);
+void z900_set_jump_pointers(REGS *regs, int jump);
 
 /*-------------------------------------------------------------------*/
 /* Initialize a CPU                                                  */
@@ -1144,9 +1259,10 @@ int i;
     obtain_lock (&sysblk.cpulock[cpu]);
 
     regs->cpuad = cpu;
+    regs->cpubit = BIT(cpu);
     regs->arch_mode = sysblk.arch_mode;
-    regs->chanset = cpu;
     regs->mainstor = sysblk.mainstor;
+    regs->sysblk = &sysblk;
     /* 
      * ISW20060125 : LINE REMOVED : This is the job of 
      *               the INITIAL CPU RESET
@@ -1167,23 +1283,25 @@ int i;
 #endif /*defined(_FEATURE_VECTOR_FACILITY)*/
     initial_cpu_reset(regs);
 
-#if defined(_FEATURE_SIE)
-    if (hostregs)
-    {
-        hostregs->guestregs = regs;
-        regs->hostregs = hostregs;
-        regs->sie_mode = 1;
-        regs->opinterv = 0;
-        regs->cpustate = CPUSTATE_STARTED;
-    }
-    else
-#endif /*defined(_FEATURE_SIE)*/
+    if (hostregs == NULL)
     {
         regs->cpustate = CPUSTATE_STOPPING;
         ON_IC_INTERRUPT(regs);
+        regs->hostregs = regs;
+        regs->host = 1;
         sysblk.regs[cpu] = regs;
-        sysblk.config_mask |= BIT(cpu);
-        sysblk.started_mask |= BIT(cpu);
+        sysblk.config_mask |= regs->cpubit;
+        sysblk.started_mask |= regs->cpubit;
+    }
+    else
+    {
+        hostregs->guestregs = regs;
+        regs->hostregs = hostregs;
+        regs->guestregs = regs;
+        regs->guest = 1;
+        regs->sie_mode = 1;
+        regs->opinterv = 0;
+        regs->cpustate = CPUSTATE_STARTED;
     }
 
     /* Initialize accelerated lookup fields */
@@ -1200,6 +1318,17 @@ int i;
     /* Initialize opcode table pointers */
     set_opcode_pointers (regs);
 
+    /* Set multi-byte jump code pointers */
+#if defined(_370)
+    s370_set_jump_pointers(regs, 0);
+#endif
+#if defined(_390)
+    s390_set_jump_pointers(regs, 0);
+#endif
+#if defined(_900)
+    z900_set_jump_pointers(regs, 0);
+#endif
+
     regs->configured = 1;
 
     release_lock (&sysblk.cpulock[cpu]);
@@ -1213,24 +1342,24 @@ int i;
 /*-------------------------------------------------------------------*/
 void *cpu_uninit (int cpu, REGS *regs)
 {
-    if (!regs->hostregs)
-        obtain_lock (&sysblk.cpulock[cpu]);
-
-    if (regs->guestregs)
+    if (regs->host)
     {
-        cpu_uninit (cpu, regs->guestregs);
-        free (regs->guestregs);
+        obtain_lock (&sysblk.cpulock[cpu]);
+        if (regs->guestregs)
+        {
+            cpu_uninit (cpu, regs->guestregs);
+            free (regs->guestregs);
+        }
     }
 
     destroy_condition(&regs->intcond);
 
-    if (!regs->hostregs)
+    if (regs->host)
     {
         /* Remove CPU from all CPU bit masks */
         sysblk.config_mask &= ~BIT(cpu);
         sysblk.started_mask &= ~BIT(cpu);
         sysblk.waiting_mask &= ~BIT(cpu);
-
         sysblk.regs[cpu] = NULL;
         release_lock (&sysblk.cpulock[cpu]);
     }
@@ -1245,22 +1374,19 @@ void *cpu_uninit (int cpu, REGS *regs)
 /*-------------------------------------------------------------------*/
 /* Process interrupt                                                 */
 /*-------------------------------------------------------------------*/
-void ARCH_DEP(process_interrupt)(REGS *regs)
+void (ATTR_REGPARM(1) ARCH_DEP(process_interrupt))(REGS *regs)
 {
     /* Process PER program interrupts */
-    if( OPEN_IC_PERINT(regs) )
-        ARCH_DEP(program_interrupt) (regs, PGM_PER_EVENT);
+    if( OPEN_IC_PER(regs) )
+        regs->program_interrupt (regs, PGM_PER_EVENT);
 
     /* Obtain the interrupt lock */
-    obtain_lock (&sysblk.intlock);
+    OBTAIN_INTLOCK(regs);
     OFF_IC_INTERRUPT(regs);
+    regs->tracing = (sysblk.inststep || sysblk.insttrace);
 
-    /* Perform broadcasted purge of ALB and TLB */
-    while (IS_IC_BROADCAST(regs))
-        ARCH_DEP(synchronize_broadcast)(regs, 0, 0);
-
-    /* Set tracing bit */
-    regs->tracing = (sysblk.instbreak || sysblk.inststep || sysblk.insttrace);
+    /* Ensure psw.IA is set and invalidate the aia */
+    INVALIDATE_AIA(regs);
 
     /* Perform invalidation */
     if (unlikely(regs->invalidate))
@@ -1323,7 +1449,7 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
             PERFORM_SERIALIZATION (regs);
             PERFORM_CHKPT_SYNC (regs);
             ARCH_DEP (initial_cpu_reset) (regs);
-            release_lock(&sysblk.intlock);
+            RELEASE_INTLOCK(regs);
             longjmp(regs->progjmp, SIE_NO_INTERCEPT);
         }
 
@@ -1333,7 +1459,7 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
             PERFORM_SERIALIZATION (regs);
             PERFORM_CHKPT_SYNC (regs);
             ARCH_DEP(cpu_reset) (regs);
-            release_lock(&sysblk.intlock);
+            RELEASE_INTLOCK(regs);
             longjmp(regs->progjmp, SIE_NO_INTERCEPT);
         }
 
@@ -1344,7 +1470,7 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
             ARCH_DEP(store_status) (regs, 0);
             logmsg (_("HHCCP010I CPU%4.4X store status completed.\n"),
                     regs->cpuad);
-            release_lock(&sysblk.intlock);
+            RELEASE_INTLOCK(regs);
             longjmp(regs->progjmp, SIE_NO_INTERCEPT);
         }
     } /*CPUSTATE_STOPPING*/
@@ -1365,27 +1491,24 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
 #ifdef OPTION_MIPS_COUNTING
         regs->waittod = hw_clock();
 #endif
-
-        /* Wait until there is work to do */
-        HDC1(debug_cpu_state, regs);
-
-        /* The CPU timer is not being decremented for
-         * a CPU that is in the manual state
-         * (e.g. stopped in single step mode
-         * or otherwise)
-         */
         saved_timer = cpu_timer(regs);
         regs->ints_state = IC_INITIAL_STATE;
-        sysblk.started_mask &= ~BIT(regs->cpuad);
-        while (regs->cpustate == CPUSTATE_STOPPED)
-        {
-            wait_condition (&regs->intcond, &sysblk.intlock);
-        }
-        sysblk.started_mask |= BIT(regs->cpuad);
+        sysblk.started_mask ^= regs->cpubit;
+        sysblk.intowner = LOCK_OWNER_NONE;
+
+        /* Wait while we are STOPPED */
+        wait_condition (&regs->intcond, &sysblk.intlock);
+
+        /* Wait while SYNCHRONIZE_CPUS is in progress */
+        while (sysblk.syncing)
+            wait_condition (&sysblk.sync_bc_cond, &sysblk.intlock);
+
+        sysblk.intowner = regs->cpuad;
+        sysblk.started_mask |= regs->cpubit;
         regs->ints_state |= sysblk.ints_state;
         set_cpu_timer(regs,saved_timer);
 
-        HDC1(debug_cpu_state, regs);
+        ON_IC_INTERRUPT(regs);
 
 #ifdef OPTION_MIPS_COUNTING
         /* Calculate the time we waited */
@@ -1399,16 +1522,13 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
         ARCH_DEP(purge_alb) (regs);
 #endif /*defined(FEATURE_ACCESS_REGISTERS)*/
 
-        release_lock (&sysblk.intlock);
-
         /* If the architecture mode has changed we must adapt */
         if(sysblk.arch_mode != regs->arch_mode)
             longjmp(regs->archjmp,SIE_NO_INTERCEPT);
-        longjmp(regs->progjmp, SIE_NO_INTERCEPT);
     } /*CPUSTATE_STOPPED*/
 
     /* Test for wait state */
-    if (WAITSTATE(&regs->psw))
+    else if (WAITSTATE(&regs->psw))
     {
 #ifdef OPTION_MIPS_COUNTING
         regs->waittod = hw_clock();
@@ -1422,32 +1542,36 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
                     regs->cpuad);
             display_psw (regs);
             regs->cpustate = CPUSTATE_STOPPING;
-            release_lock (&sysblk.intlock);
+            RELEASE_INTLOCK(regs);
             longjmp(regs->progjmp, SIE_NO_INTERCEPT);
         }
 
-        /* Wait for I/O, external or restart interrupt */
-        sysblk.waiting_mask |= BIT(regs->cpuad);
+        /* Indicate we are giving up intlock */
+        sysblk.intowner = LOCK_OWNER_NONE;
+        sysblk.waiting_mask |= regs->cpubit;
+
+        /* Wait for interrupt */
         wait_condition (&regs->intcond, &sysblk.intlock);
-        sysblk.waiting_mask &= ~BIT(regs->cpuad);
+
+        /* Wait while SYNCHRONIZE_CPUS is in progress */
+        while (sysblk.syncing)
+            wait_condition (&sysblk.sync_bc_cond, &sysblk.intlock);
+
+        /* Indicate we now own intlock */
+        sysblk.waiting_mask ^= regs->cpubit;
+        sysblk.intowner = regs->cpuad;
 
 #ifdef OPTION_MIPS_COUNTING
         /* Calculate the time we waited */
         regs->waittime += hw_clock() - regs->waittod;
         regs->waittod = 0;
 #endif
-
-        release_lock (&sysblk.intlock);
-
-        longjmp(regs->progjmp, SIE_NO_INTERCEPT);
     } /* end if(wait) */
 
     /* Release the interrupt lock */
-    release_lock (&sysblk.intlock);
+    RELEASE_INTLOCK(regs);
 
-    /* Do progjmp if tracing so we get into the right loop */
-    if (regs->tracing)
-        longjmp(regs->progjmp, SIE_NO_INTERCEPT);
+    longjmp(regs->progjmp, SIE_NO_INTERCEPT);
 
 } /* process_interrupt */
 
@@ -1456,55 +1580,56 @@ void ARCH_DEP(process_interrupt)(REGS *regs)
 /*-------------------------------------------------------------------*/
 void ARCH_DEP(process_trace)(REGS *regs)
 {
-int     shouldbreak;                    /* 1=Stop at breakpoint      */
+int     shouldtrace = 0;                /* 1=Trace instruction       */
+int     shouldstep = 0;                 /* 1=Wait for start command  */
 
-     /* Test for breakpoint */
-    shouldbreak = sysblk.instbreak
-                ? sysblk.breakaddr[0] <= sysblk.breakaddr[1]
-                  ?      sysblk.breakaddr[0] <= (regs->psw.IA & ADDRESS_MAXWRAP(regs))
-                      && (regs->psw.IA & ADDRESS_MAXWRAP(regs)) <= sysblk.breakaddr[1]
-                    ? 1
-                    : 0
-                  :      sysblk.breakaddr[1] <= (regs->psw.IA & ADDRESS_MAXWRAP(regs))
-                      && (regs->psw.IA & ADDRESS_MAXWRAP(regs)) <= sysblk.breakaddr[0]
-                    ? 1
-                    : 0
-                : 0;
+    /* Test for trace */
+    if (CPU_TRACING(regs, 0))
+        shouldtrace = 1;
+
+    /* Test for step */
+    if (CPU_STEPPING(regs, 0))
+        shouldstep = 1;
 
     /* Display the instruction */
-    if (sysblk.insttrace || sysblk.inststep || shouldbreak)
+    if (shouldtrace || shouldstep)
     {
-        ARCH_DEP(display_inst) (regs, regs->ip);
-        if (sysblk.inststep || shouldbreak)
+        BYTE *ip = regs->ip < regs->aip ? regs->inst : regs->ip;
+        ARCH_DEP(display_inst) (regs, ip);
+    }
+
+    /* Stop the CPU */
+    if (shouldstep)
+    {
+        REGS *hostregs = regs->hostregs;
+        S64 saved_timer[2];
+
+        OBTAIN_INTLOCK(hostregs);
+#ifdef OPTION_MIPS_COUNTING
+        hostregs->waittod = hw_clock();
+#endif
+        /* The CPU timer is not decremented for a CPU that is in
+           the manual state (e.g. stopped in single step mode) */
+        saved_timer[0] = cpu_timer(regs);
+        saved_timer[1] = cpu_timer(hostregs);
+        hostregs->cpustate = CPUSTATE_STOPPED;
+        sysblk.started_mask &= ~hostregs->cpubit;
+        hostregs->stepwait = 1;
+        sysblk.intowner = LOCK_OWNER_NONE;
+        while (hostregs->cpustate == CPUSTATE_STOPPED)
         {
-        S64 saved_timer;
-            /* Put CPU into stopped state */
-            regs->opinterv = 0;
-            regs->cpustate = CPUSTATE_STOPPED;
-
-            /* Wait for start command from panel */
-            obtain_lock (&sysblk.intlock);
-
-            HDC1(debug_cpu_state, regs);
-
-            /* The CPU timer is not being decremented for
-             * a CPU that is in the manual state
-             * (e.g. stopped in single step mode
-             * or otherwise)
-             */
-            saved_timer = cpu_timer(regs);
-            sysblk.waiting_mask |= BIT(regs->cpuad);
-            while (regs->cpustate == CPUSTATE_STOPPED)
-            {
-                wait_condition (&regs->intcond, &sysblk.intlock);
-            }
-            sysblk.waiting_mask &= ~BIT(regs->cpuad);
-            set_cpu_timer(regs, saved_timer);
-
-            HDC1(debug_cpu_state, regs);
-
-            release_lock (&sysblk.intlock);
+            wait_condition (&hostregs->intcond, &sysblk.intlock);
         }
+        sysblk.intowner = hostregs->cpuad;
+        hostregs->stepwait = 0;
+        sysblk.started_mask |= hostregs->cpubit;
+        set_cpu_timer(regs,saved_timer[0]);
+        set_cpu_timer(hostregs,saved_timer[1]);
+#ifdef OPTION_MIPS_COUNTING
+        hostregs->waittime += hw_clock() - hostregs->waittod;
+        hostregs->waittod = 0;
+#endif
+        RELEASE_INTLOCK(hostregs);
     }
 } /* process_trace */
 
@@ -1514,12 +1639,16 @@ int     shouldbreak;                    /* 1=Stop at breakpoint      */
 /*-------------------------------------------------------------------*/
 REGS *ARCH_DEP(run_cpu) (int cpu, REGS *oldregs)
 {
+BYTE   *ip;
 REGS    regs;
 
     if (oldregs)
     {
         memcpy (&regs, oldregs, sizeof(REGS));
         free (oldregs);
+        regs.hostregs = &regs;
+        if (regs.guestregs)
+            regs.guestregs->hostregs = &regs;
         sysblk.regs[cpu] = &regs;
         release_lock(&sysblk.cpulock[cpu]);
         logmsg (_("HHCCP007I CPU%4.4X architecture mode set to %s\n"),
@@ -1542,10 +1671,13 @@ REGS    regs;
 #endif /*FEATURE_VECTOR_FACILITY*/
     }
 
-    regs.tracing = (sysblk.instbreak || sysblk.inststep || sysblk.insttrace);
-    regs.ints_state |= sysblk.ints_state;
+    regs.program_interrupt = &ARCH_DEP(program_interrupt);
+#if defined(FEATURE_TRACING)
+    regs.trace_br = (func)&ARCH_DEP(trace_br);
+#endif
 
-    release_lock (&sysblk.intlock);
+    regs.tracing = (sysblk.inststep || sysblk.insttrace);
+    regs.ints_state |= sysblk.ints_state;
 
     /* Establish longjmp destination for architecture switch */
     setjmp(regs.archjmp);
@@ -1553,7 +1685,6 @@ REGS    regs;
     /* Switch architecture mode if appropriate */
     if(sysblk.arch_mode != regs.arch_mode)
     {
-        obtain_lock(&sysblk.intlock);
         regs.arch_mode = sysblk.arch_mode;
         oldregs = malloc (sizeof(REGS));
         if (oldregs)
@@ -1570,69 +1701,145 @@ REGS    regs;
         return oldregs;
     }
 
+    RELEASE_INTLOCK(&regs);
+
     /* Establish longjmp destination for program check */
     setjmp(regs.progjmp);
 
-    /* Set `execflag' is 0 in case EXecuted instruction did a longjmp() */
+    /* Set `execflag' to 0 in case EXecuted instruction did a longjmp() */
     regs.execflag = 0;
 
-    if (regs.tracing || PER_MODE(&regs))
-        goto slowloop;
-
-    while (1)
+    while (!INTERRUPT_PENDING(&regs))
     {
-        /* Test for interrupts if it appears that one may be pending */
-        if ( unlikely(IC_INTERRUPT_CPU_NO_PER(&regs)) )
-        {
-            ARCH_DEP(process_interrupt)(&regs);
-            if (!regs.configured)
-                return cpu_uninit(cpu, &regs);
-        }
-
-        regs.ip = INSTRUCTION_FETCH(regs.inst, regs.psw.IA, &regs, 0);
+        ip = INSTRUCTION_FETCH(&regs, 0);
         regs.instcount++;
-        EXECUTE_INSTRUCTION(regs.ip, &regs);
+        EXECUTE_INSTRUCTION(ip, &regs);
 
         do {
             UNROLLED_EXECUTE(&regs);
             UNROLLED_EXECUTE(&regs);
             UNROLLED_EXECUTE(&regs);
+            UNROLLED_EXECUTE(&regs);
+            UNROLLED_EXECUTE(&regs);
+            UNROLLED_EXECUTE(&regs);
 
-            regs.instcount += 8;
+            regs.instcount += 12;
 
             UNROLLED_EXECUTE(&regs);
             UNROLLED_EXECUTE(&regs);
             UNROLLED_EXECUTE(&regs);
             UNROLLED_EXECUTE(&regs);
             UNROLLED_EXECUTE(&regs);
-        } while (!IC_INTERRUPT_CPU_NO_PER(&regs));
-        regs.instvalid = 0;
-    }
+            UNROLLED_EXECUTE(&regs);
+        } while (!INTERRUPT_PENDING(&regs));
+    } /* while(!INTERRUPT_PENDING(&regs)) */
 
-slowloop:
-    while (1)
-    {
-        /* Test for interrupts if it appears that one may be pending */
-        if ( IC_INTERRUPT_CPU(&regs) )
-        {
-            ARCH_DEP(process_interrupt)(&regs);
-            if (!regs.configured)
-                return cpu_uninit(cpu, &regs);
-        }
-
-        /* Fetch the next sequential instruction */
-        regs.ip = INSTRUCTION_FETCH(regs.inst, regs.psw.IA, &regs, 0);
-
-        if( regs.tracing )
-            ARCH_DEP(process_trace)(&regs);
-
-        /* Execute the instruction */
-        regs.instcount++;
-        EXECUTE_INSTRUCTION(regs.ip, &regs);
-    }
+    /* process_interrupt will do longjmp unless we're exiting */
+    ARCH_DEP(process_interrupt)(&regs);
+    return cpu_uninit(cpu, &regs);
 
 } /* end function cpu_thread */
 
+
+/*-------------------------------------------------------------------*/
+/* Set Jump Pointers                                                 */
+/*                                                                   */
+/* For supported architectures and certain multi-byte instructions,  */
+/* EXECUTE_INSTRUCTION and UNROLLED_EXECUTE call a label in this     */
+/* function which does a jump to the real instruction.               */
+/*                                                                   */
+/* The reason why we use labels instead of individual pointers is    */
+/* that if -fomit-frame-pointer is omitted then the backframe        */
+/* isn't pushed onto the stack.                                      */
+/*                                                                   */
+/* The reason why this routine is in cpu.c is an attempt to provide  */
+/* locality with the corresponding run_cpu function.                 */
+/*                                                                   */
+/* This routine is called from cpu_init                              */
+/*                                                                   */
+/*-------------------------------------------------------------------*/
+void ARCH_DEP(set_jump_pointers) (REGS *regs, int jump)
+{
+
+#if defined(MULTI_BYTE_ASSIST)
+
+    /* Use `switch' to confuse smart-ass optimizing compilers */
+    switch (jump) {
+
+ #if defined(MULTI_BYTE_ASSIST_IA32)
+  #if ARCH_MODE != ARCH_370
+    case 0xa7:
+jump_a7xx:
+ __asm__ (
+        "movzbl 1(%%eax),%%ecx\n\t"
+        "jmp    *%c0(%%edx,%%ecx,4)"
+        : : "i" (offsetof(REGS,ARCH_DEP(opcode_a7xx)))
+        );
+        return;
+  #endif /* ARCH_MODE != ARCH_370 */
+    case 0xb2:
+jump_b2xx:
+ __asm__ (
+        "movzbl 1(%%eax),%%ecx\n\t"
+        "jmp    *%c0(%%edx,%%ecx,4)"
+        : : "i" (offsetof(REGS,ARCH_DEP(opcode_b2xx)))
+        );
+        return;
+  #if defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390)
+    case 0xb9:
+jump_b9xx:
+ __asm__ (
+        "movzbl 1(%%eax),%%ecx\n\t"
+        "jmp    *%c0(%%edx,%%ecx,4)"
+        : : "i" (offsetof(REGS,ARCH_DEP(opcode_b9xx)))
+        );
+        return;
+    case 0xc0:
+jump_c0xx:
+ __asm__ (
+        "movzbl 1(%%eax),%%ecx\n\t"
+        "jmp    *%c0(%%edx,%%ecx,4)"
+        : : "i" (offsetof(REGS,ARCH_DEP(opcode_c0xx)))
+        );
+        return;
+    case 0xe3:
+jump_e3xx:
+ __asm__ (
+        "movzbl 5(%%eax),%%ecx\n\t"
+        "jmp    *%c0(%%edx,%%ecx,4)"
+        : : "i" (offsetof(REGS,ARCH_DEP(opcode_e3xx)))
+        );
+        return;
+    case 0xeb:
+jump_ebxx:
+ __asm__ (
+        "movzbl 5(%%eax),%%ecx\n\t"
+        "jmp    *%c0(%%edx,%%ecx,4)"
+        : : "i" (offsetof(REGS,ARCH_DEP(opcode_ebxx)))
+        );
+        return;
+  #endif /* defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390) */
+ #endif /* defined(MULTI_BYTE_ASSIST_IA32) */
+
+    } /* switch(jump) */
+
+ #if ARCH_MODE != ARCH_370
+    regs->ARCH_DEP(opcode_table)[0xa7] = &&jump_a7xx;
+ #endif
+    regs->ARCH_DEP(opcode_table)[0xb2] = &&jump_b2xx;
+ #if defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390)
+    regs->ARCH_DEP(opcode_table)[0xb9] = &&jump_b9xx;
+    regs->ARCH_DEP(opcode_table)[0xc0] = &&jump_c0xx;
+    regs->ARCH_DEP(opcode_table)[0xe3] = &&jump_e3xx;
+    regs->ARCH_DEP(opcode_table)[0xeb] = &&jump_ebxx;
+ #endif /* defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390) */
+
+#else /* !defined(MULTI_BYTE_ASSIST) */
+    UNREFERENCED(regs);
+    UNREFERENCED(jump);
+#endif /* !defined(MULTI_BYTE_ASSIST) */
+
+}
 
 #if !defined(_GEN_ARCH)
 
@@ -1652,7 +1859,9 @@ slowloop:
 /*-------------------------------------------------------------------*/
 DLL_EXPORT void copy_psw (REGS *regs, BYTE *addr)
 {
-REGS cregs = *regs;
+REGS cregs;
+
+    memcpy(&cregs, regs, sysblk.regs_copy_len);
 
     switch(cregs.arch_mode) {
 #if defined(_370)

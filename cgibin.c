@@ -1,5 +1,7 @@
-/* CGIBIN.C     (c)Copyright Jan Jaeger, 2002-2006                   */
+/* CGIBIN.C     (c)Copyright Jan Jaeger, 2002-2007                   */
 /*              HTTP cgi-bin routines                                */
+
+// $Id: cgibin.c,v 1.74 2007/06/23 00:04:03 ivan Exp $
 
 /* This file contains all cgi routines that may be executed on the   */
 /* server (ie under control of a hercules thread)                    */
@@ -42,6 +44,16 @@
 /*                                                                   */
 /*                                           Jan Jaeger - 28/03/2002 */
 
+// $Log: cgibin.c,v $
+// Revision 1.74  2007/06/23 00:04:03  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.73  2007/01/14 23:14:12  rbowler
+// Fix signed/unsigned mismatch in 370-only build
+//
+// Revision 1.72  2006/12/08 09:43:18  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -651,11 +663,11 @@ U32 addr = 0;
 
 void cgibin_ipl(WEBBLK *webblk)
 {
-U32 i;
+int i;
 char *value;
 DEVBLK *dev;
 U16 ipldev;
-U32 iplcpu;
+int iplcpu;
 U32 doipl;
 
     html_header(webblk);
@@ -713,9 +725,9 @@ U32 doipl;
     }
     else
     {
-        obtain_lock (&sysblk.intlock);
+        OBTAIN_INTLOCK(NULL);
         /* Perform IPL function */
-        if( load_ipl(ipldev, iplcpu,0) )
+        if( load_ipl(0, ipldev, iplcpu,0) )
         {
             hprintf(webblk->sock,"<h3>IPL failed, see the "
                                   "<a href=\"syslog#bottom\">system log</a> "
@@ -725,7 +737,7 @@ U32 doipl;
         {
             hprintf(webblk->sock,"<h3>IPL completed</h3>\n");
         }
-        release_lock (&sysblk.intlock);
+        RELEASE_INTLOCK(NULL);
     }
 
     html_footer(webblk);
@@ -978,13 +990,17 @@ int zone;
                               "<td>%8.8X</td>"
                               "<td>%2.2X</td></tr>\n",
                               zone,
+#if defined(_FEATURE_SIE)
                               (U32)sysblk.zpb[zone].mso << 20,
                               ((U32)sysblk.zpb[zone].msl << 20) | 0xFFFFF,
                               (U32)sysblk.zpb[zone].eso << 20,
                               ((U32)sysblk.zpb[zone].esl << 20) | 0xFFFFF,
                               (U32)sysblk.zpb[zone].mbo,
-                              sysblk.zpb[zone].mbk);
-
+                              sysblk.zpb[zone].mbk
+#else
+                              0, 0, 0, 0, 0, 0
+#endif
+               );
     }
 
     hprintf(webblk->sock,"</table>\n");
@@ -1038,7 +1054,7 @@ int i,j;
         if((cpustate = cgi_variable(webblk,cpuname)))
             sscanf(cpustate,"%d",&cpuonline);
         
-        obtain_lock (&sysblk.intlock);
+        OBTAIN_INTLOCK(NULL);
 
         switch(cpuonline) {
 
@@ -1053,7 +1069,7 @@ int i,j;
             break;
         }
 
-        release_lock (&sysblk.intlock);
+        RELEASE_INTLOCK(NULL);
     }
 
     for(i = 0; i < MAX_CPU; i++)
@@ -1100,11 +1116,10 @@ void cgibin_xml_rates_info(WEBBLK *webblk)
     hprintf(webblk->sock,"<hercules>\n");
     hprintf(webblk->sock,"\t<arch>%d</arch>\n", sysblk.arch_mode);
     hprintf(webblk->sock,"\t<mips>%.1d.%.2d</mips>\n",
-        sysblk.mipsrate / 1000, (sysblk.mipsrate % 1000) / 10);
+        sysblk.mipsrate / 1000000, (sysblk.mipsrate % 1000000) / 10000);
     hprintf(webblk->sock,"\t<siosrate>%d</siosrate>\n", sysblk.siosrate);
     hprintf(webblk->sock,"</hercules>\n");
 }
-
 
 /* The following table is the cgi-bin directory, which               */
 /* associates directory filenames with cgibin routines               */

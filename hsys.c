@@ -1,3 +1,9 @@
+// $Id: hsys.c,v 1.6 2006/12/08 09:43:28 jj Exp $
+//
+// $Log: hsys.c,v $
+// Revision 1.6  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -13,6 +19,7 @@ DLL_EXPORT int extgui = 0;
 
 #if defined(OPTION_W32_CTCI)
 DLL_EXPORT int (*debug_tt32_stats)(int) = NULL;
+DLL_EXPORT void (*debug_tt32_tracing)(int) = NULL;
 #endif
 #if defined(OPTION_DYNAMIC_LOAD)
 
@@ -25,6 +32,7 @@ DLL_EXPORT void *(*debug_cpu_state) (REGS *);
 DLL_EXPORT void *(*debug_device_state) (DEVBLK *);
 DLL_EXPORT void *(*debug_program_interrupt) (REGS *, int);
 DLL_EXPORT void *(*debug_diagnose) (U32, int, int, REGS *);
+DLL_EXPORT void *(*debug_iucv) (int, VADR, REGS *);
 DLL_EXPORT void *(*debug_sclp_unknown_command) (U32, void *, REGS *);
 DLL_EXPORT void *(*debug_sclp_unknown_event) (void *, void *, REGS *);
 DLL_EXPORT void *(*debug_sclp_event_data) (void *, void *, REGS *);

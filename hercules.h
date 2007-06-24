@@ -1,8 +1,18 @@
-/* HERCULES.H   (c) Copyright Roger Bowler, 1999-2006                */
+/* HERCULES.H   (c) Copyright Roger Bowler, 1999-2007                */
 /*              Hercules Header Files                                */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+
+// $Id: hercules.h,v 1.300 2007/06/23 00:04:10 ivan Exp $
+//
+// $Log: hercules.h,v $
+// Revision 1.300  2007/06/23 00:04:10  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.299  2006/12/08 09:43:25  jj
+// Add CVS message log
+//
 
 #ifdef HAVE_CONFIG_H
   #include <config.h> // Hercules build configuration options/settings
@@ -57,8 +67,12 @@
 
 #include "hstdinc.h"      // Precompilation-eligible header files
 
-#if defined(HAVE_GETOPT_LONG) && !defined(__GETOPT_H__)
-  #include <getopt.h>
+#ifdef _MSVC_
+  #include "getopt.h"
+#else
+  #if defined(HAVE_GETOPT_LONG) && !defined(__GETOPT_H__)
+    #include <getopt.h>
+  #endif
 #endif
 
 #ifdef OPTION_DYNAMIC_LOAD
@@ -112,6 +126,7 @@
 #include "sockdev.h"
 #include "w32ctca.h"
 
+#include "hsocket.h"
 #include "hstructs.h"     // (Hercules-wide structures)
 #include "hexterns.h"     // (Hercules-wide extern function prototypes)
 

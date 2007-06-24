@@ -2,11 +2,20 @@
 // Hercules IP Channel-to-Channel Support (CTCI)
 // ====================================================================
 //
-// Copyright    (C) Copyright James A. Pierson, 2002-2006
-//              (C) Copyright "Fish" (David B. Trout), 2002-2006
-//              (C) Copyright Roger Bowler, 2000-2006
+// Copyright    (C) Copyright James A. Pierson, 2002-2007
+//              (C) Copyright "Fish" (David B. Trout), 2002-2007
+//              (C) Copyright Roger Bowler, 2000-2007
 //
-// linux 2.4 modifications (c) Copyright Fritz Elfert, 2001-2006
+// linux 2.4 modifications (c) Copyright Fritz Elfert, 2001-2007
+//
+// $Id: ctc_ctci.c,v 1.66 2007/06/23 00:04:05 ivan Exp $
+//
+// $Log: ctc_ctci.c,v $
+// Revision 1.66  2007/06/23 00:04:05  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.65  2006/12/08 09:43:19  jj
+// Add CVS message log
 //
 
 #include "hstdinc.h"
@@ -17,6 +26,9 @@
 #include "opcode.h"
 /* getopt dynamic linking kludge */
 #include "herc_getopt.h"
+#if defined(OPTION_W32_CTCI)
+#include "tt32api.h"
+#endif
 
 /*-------------------------------------------------------------------*/
 /* Ivan Warren 20040227                                              */
@@ -81,6 +93,7 @@ DEVHND ctci_device_hndinfo =
         NULL,                          /* Device Query used          */
         NULL,                          /* Device Reserve             */
         NULL,                          /* Device Release             */
+        NULL,                          /* Device Attention           */
         CTCI_Immed_Commands,           /* Immediate CCW Codes        */
         NULL,                          /* Signal Adapter Input       */
         NULL,                          /* Signal Adapter Output      */
@@ -105,7 +118,7 @@ int  CTCI_Init( DEVBLK* pDEVBLK, int argc, char *argv[] )
     int             rc = 0;             // Return code
     int             nIFType;            // Interface type
     int             nIFFlags;           // Interface flags
-    char            thread_name[32];
+    char            thread_name[32];    // CTCI_ReadThread
 
     nIFType =               // Interface type
         0
@@ -113,22 +126,20 @@ int  CTCI_Init( DEVBLK* pDEVBLK, int argc, char *argv[] )
         | IFF_NO_PI         // (no packet info)
         ;
 
-    // ZZ FIXME: Technically, IFF_RUNNING should NOT be set by the user.
-    //           Only the interface itself should set IFF_RUNNING when-
-    //           ever it is successfully created/initialized (i.e. is
-    //           operational). Once it's operational (running), then it
-    //           may be enabled via IFF_UP. If it's not in IFF_RUNNING
-    //           state however, then IFF_UP cannot be set because the
-    //           interface is technically "broken" (not operational),
-    //           and non-operational (non-working) interfaces cannot be
-    //           enabled.  --  Fish, June 2004.
-
-    nIFFlags =              // Interface flags
+    nIFFlags =               // Interface flags
         0
-        | IFF_UP            // (interface has been enabled)
-        | IFF_RUNNING       // (interface is operational)
+        | IFF_UP            // (interface is being enabled)
         | IFF_BROADCAST     // (interface broadcast addr is valid)
         ;
+
+#if defined( TUNTAP_IFF_RUNNING_NEEDED )
+
+    nIFFlags |=             // ADDITIONAL Interface flags
+        0
+        | IFF_RUNNING       // (interface is ALSO operational)
+        ;
+
+#endif /* defined( TUNTAP_IFF_RUNNING_NEEDED ) */
 
     pDEVBLK->devtype = 0x3088;
 
@@ -224,81 +235,65 @@ int  CTCI_Init( DEVBLK* pDEVBLK, int argc, char *argv[] )
                   pDevCTCBLK->szTUNDevName);
     }
 
+#if defined(OPTION_W32_CTCI)
+
+    // Set the specified driver/dll i/o buffer sizes..
+    {
+        struct tt32ctl tt32ctl;
+
+        memset( &tt32ctl, 0, sizeof(tt32ctl) );
+        strlcpy( tt32ctl.tt32ctl_name, pDevCTCBLK->szTUNDevName, sizeof(tt32ctl.tt32ctl_name) );
+
+        tt32ctl.tt32ctl_devbuffsize = pDevCTCBLK->iKernBuff;
+        if( TUNTAP_IOCtl( pDevCTCBLK->fd, TT32SDEVBUFF, (char*)&tt32ctl ) != 0  )
+        {
+            logmsg( _("HHCCT074W TT32SDEVBUFF failed for device %s: %s.\n"),
+                    pDevCTCBLK->szTUNDevName, strerror( errno ) );
+        }
+
+        tt32ctl.tt32ctl_iobuffsize = pDevCTCBLK->iIOBuff;
+        if( TUNTAP_IOCtl( pDevCTCBLK->fd, TT32SIOBUFF, (char*)&tt32ctl ) != 0  )
+        {
+            logmsg( _("HHCCT075W TT32SIOBUFF failed for device %s: %s.\n"),
+                    pDevCTCBLK->szTUNDevName, strerror( errno ) );
+        }
+    }
+#endif
+
+#ifdef OPTION_TUNTAP_CLRIPADDR
+    VERIFY( TUNTAP_ClrIPAddr ( pDevCTCBLK->szTUNDevName ) == 0 );
+#endif
+
 #ifdef OPTION_TUNTAP_SETMACADDR
 
     if( !pDevCTCBLK->szMACAddress[0] )   // (if MAC address unspecified)
     {
-        // Build a default MAC addr based on the guest (destination) ip
-        // address so as to effectively *UNOFFICIALLY* assign ourselves
-        // the following Ethernet address block:
-
-        /* (from: http://www.iana.org/assignments/ethernet-numbers)
-           (only the first 2 and last 2 paragraphs are of interest)
-
-            IANA ETHERNET ADDRESS BLOCK - UNICAST USE
-
-            The IANA owns an Ethernet address block which may be used for
-            unicast address asignments or other special purposes.
-
-            The IANA may assign unicast global IEEE 802 MAC address from it's
-            assigned OUI (00-00-5E) for use in IETF standard track protocols.  The
-            intended usage is for dynamic mapping between IP addresses and IEEE
-            802 MAC addresses.  These IEEE 802 MAC addresses are not to be
-            permanently assigned to any hardware interface, nor is this a
-            substitute for a network equipment supplier getting its own OUI.
-
-            ... (snipped)
-
-            Using this representation, the range of Internet Unicast addresses is:
-
-                   00-00-5E-00-00-00  to  00-00-5E-FF-FF-FF  in hex, ...
-
-            ... (snipped)
-
-            The low order 24 bits of these unicast addresses are assigned as
-            follows:
-
-            Dotted Decimal          Description                     Reference
-            ----------------------- ------------------------------- ---------
-            000.000.000-000.000.255 Reserved                        [IANA]
-            000.001.000-000.001.255 Virual Router Redundancy (VRRP) [Hinden]
-            000.002.000-127.255.255 Reserved                        [IANA]
-            128.000.000-255.255.255 Hercules TUNTAP (CTCI)          [Fish]
-        */
-
-        // Here's what we're basically doing:
-
-        //    00-00-5E-00-00-00  to  00-00-5E-00-00-FF  =  'Reserved' by IANA
-        //    00-00-5E-00-01-00  to  00-00-5E-00-01-FF  =  'VRRP' by Hinden
-        //    00-00-5E-00-02-00  to  00-00-5E-7F-FF-FF  =  (unassigned)
-        //    00-00-5E-80-00-00  to  00-00-5E-FF-FF-FF  =  'Hercules' by Fish
-
-        //    00-00-5E-00-00-00   (starting value)
-        //    00-00-5E-ip-ip-ip   (move in low-order 3 bytes of destination IP address)
-        //    00-00-5E-8p-ip-ip   ('OR' on the x'80' high-order bit)
-
         in_addr_t  wrk_guest_ip_addr;
+        MAC        wrk_guest_mac_addr;
 
         if ((in_addr_t)-1 != (wrk_guest_ip_addr = inet_addr( pDevCTCBLK->szGuestIPAddr )))
         {
-            *(((BYTE*)&wrk_guest_ip_addr) + sizeof(wrk_guest_ip_addr) - 3 ) |= 0x80;
+            build_herc_iface_mac ( wrk_guest_mac_addr, (const BYTE*) &wrk_guest_ip_addr );
 
             snprintf
             (
                 pDevCTCBLK->szMACAddress,  sizeof( pDevCTCBLK->szMACAddress ),
 
-                "00:00:5E:%2.2X:%2.2X:%2.2X"
+                "%2.2X:%2.2X:%2.2X:%2.2X:%2.2X:%2.2X"
 
-                ,*(((BYTE*)&wrk_guest_ip_addr) + sizeof(wrk_guest_ip_addr) - 3 )
-                ,*(((BYTE*)&wrk_guest_ip_addr) + sizeof(wrk_guest_ip_addr) - 2 )
-                ,*(((BYTE*)&wrk_guest_ip_addr) + sizeof(wrk_guest_ip_addr) - 1 )
+                ,wrk_guest_mac_addr[0]
+                ,wrk_guest_mac_addr[1]
+                ,wrk_guest_mac_addr[2]
+                ,wrk_guest_mac_addr[3]
+                ,wrk_guest_mac_addr[4]
+                ,wrk_guest_mac_addr[5]
             );
         }
     }
 
     TRACE
     (
-        "** CTCI_Init: %4.4X (%s): IP %s  -->  default MAC %s\n"
+        "** CTCI_Init: %4.4X (%s): IP \"%s\"  -->  default MAC \"%s\"\n"
 
         ,pDevCTCBLK->pDEVBLK[0]->devnum
         ,pDevCTCBLK->szTUNDevName
@@ -327,7 +322,7 @@ int  CTCI_Init( DEVBLK* pDEVBLK, int argc, char *argv[] )
 
     snprintf(thread_name,sizeof(thread_name),"CTCI %4.4X ReadThread",pDEVBLK->devnum);
     thread_name[sizeof(thread_name)-1]=0;
-    create_thread( &pDevCTCBLK->tid, NULL, CTCI_ReadThread, pDevCTCBLK, thread_name );
+    create_thread( &pDevCTCBLK->tid, &sysblk.joinattr, CTCI_ReadThread, pDevCTCBLK, thread_name );
 
     pDevCTCBLK->pDEVBLK[0]->tid = pDevCTCBLK->tid;
     pDevCTCBLK->pDEVBLK[1]->tid = pDevCTCBLK->tid;
@@ -588,10 +583,6 @@ int  CTCI_Close( DEVBLK* pDEVBLK )
         // read request could have been freed (by the close call)
         // by the time the read request eventually gets serviced.
 
-        // I'll eventually get around to addressing this issue in
-        // the next release of TunTap32, but for now, the threads
-        // doing the i/o must be the ones that do the closing.
-
         TID tid = pCTCBLK->tid;
         pCTCBLK->fCloseInProgress = 1;  // (ask read thread to exit)
         signal_thread( tid, SIGUSR2 );   // (for non-Win32 platforms)
@@ -621,7 +612,7 @@ void  CTCI_Query( DEVBLK* pDEVBLK, char** ppszClass,
 
     if(!pCTCBLK)
     {
-        strlcpy(pBuffer,"*Uninitialised",iBufLen);
+        strlcpy(pBuffer,"*Uninitialized",iBufLen);
         return;
     }
 
@@ -954,7 +945,7 @@ static void*  CTCI_ReadThread( PCTCBLK pCTCBLK )
 
     pCTCBLK->pid = getpid();
 
-    do
+    while( pCTCBLK->fd != -1 && !pCTCBLK->fCloseInProgress )
     {
         // Read frame from the TUN/TAP interface
         iLength = TUNTAP_Read( pCTCBLK->fd, szBuff, sizeof(szBuff) );
@@ -962,8 +953,6 @@ static void*  CTCI_ReadThread( PCTCBLK pCTCBLK )
         // Check for error condition
         if( iLength < 0 )
         {
-            if( pCTCBLK->fd == -1 || pCTCBLK->fCloseInProgress )
-                break;
             logmsg( _("HHCCT048E %4.4X: Error reading from %s: %s\n"),
                 pDEVBLK->devnum, pCTCBLK->szTUNDevName,
                 strerror( errno ) );
@@ -1001,11 +990,10 @@ static void*  CTCI_ReadThread( PCTCBLK pCTCBLK )
             usleep( CTC_DELAY_USECS );  // (wait a bit before retrying...)
         }
     }
-    while( pCTCBLK->fd != -1 && !pCTCBLK->fCloseInProgress );
 
     // We must do the close since we were the one doing the i/o...
 
-    VERIFY( TUNTAP_Close( pCTCBLK->fd ) == 0 );
+    VERIFY( pCTCBLK->fd == -1 || TUNTAP_Close( pCTCBLK->fd ) == 0 );
     pCTCBLK->fd = -1;
 
     return NULL;
@@ -1102,7 +1090,7 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
     int             iMTU;
     int             i;
     MAC             mac;                // Work area for MAC address
-#if defined(WIN32)
+#if defined(OPTION_W32_CTCI)
     int             iKernBuff;
     int             iIOBuff;
 #endif
@@ -1114,15 +1102,15 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
     // Set some initial defaults
     strcpy( pCTCBLK->szMTU,     "1500" );
     strcpy( pCTCBLK->szNetMask, "255.255.255.255" );
-#if defined( WIN32 )
+#if defined( OPTION_W32_CTCI )
     strcpy( pCTCBLK->szTUNCharName,  tt32_get_default_iface() );
 #else
-    strcpy( pCTCBLK->szTUNCharName,  "/dev/net/tun" );
+    strcpy( pCTCBLK->szTUNCharName,  HERCTUN_DEV );
 #endif
 
-#if defined( WIN32 )
-    pCTCBLK->iKernBuff     = DEF_TT32DRV_BUFFSIZE_K * 1024;
-    pCTCBLK->iIOBuff       = DEF_TT32DRV_BUFFSIZE_K * 1024;
+#if defined( OPTION_W32_CTCI )
+    pCTCBLK->iKernBuff = DEF_CAPTURE_BUFFSIZE;
+    pCTCBLK->iIOBuff   = DEF_PACKET_BUFFSIZE;
 #endif
 
     // Initialize getopt's counter. This is necessary in the case
@@ -1178,8 +1166,10 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
         static struct option options[] =
         {
             { "dev",     1, NULL, 'n' },
+#if defined( OPTION_W32_CTCI )
             { "kbuff",   1, NULL, 'k' },
             { "ibuff",   1, NULL, 'i' },
+#endif
             { "mtu",     1, NULL, 't' },
             { "netmask", 1, NULL, 's' },
             { "mac",     1, NULL, 'm' },
@@ -1188,10 +1178,18 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
         };
 
         c = getopt_long( argc, argv,
-                 "n:k:i:t:s:m:d",
+                 "n"
+#if defined( OPTION_W32_CTCI )
+                 ":k:i"
+#endif
+                 ":t:s:m:d",
                  options, &iOpt );
 #else /* defined(HAVE_GETOPT_LONG) */
-        c = getopt( argc, argv, "n:k:i:t:s:m:d");
+        c = getopt( argc, argv, "n"
+#if defined( OPTION_W32_CTCI )
+            ":k:i"
+#endif
+            ":t:s:m:d");
 #endif /* defined(HAVE_GETOPT_LONG) */
 
         if( c == -1 ) // No more options found
@@ -1224,12 +1222,12 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
             strcpy( pCTCBLK->szTUNCharName, optarg );
             break;
 
-        case 'k':     // Kernel Buffer Size (ignored if not Windows)
-#if defined( WIN32 )
+#if defined( OPTION_W32_CTCI )
+        case 'k':     // Kernel Buffer Size (Windows only)
             iKernBuff = atoi( optarg );
 
-            if( iKernBuff < MIN_TT32DLL_BUFFSIZE_K    ||
-                iKernBuff > MAX_TT32DLL_BUFFSIZE_K )
+            if( iKernBuff * 1024 < MIN_CAPTURE_BUFFSIZE    ||
+                iKernBuff * 1024 > MAX_CAPTURE_BUFFSIZE )
             {
                 logmsg( _("HHCCT052E %4.4X: Invalid kernel buffer size %s\n"),
                     pDEVBLK->devnum, optarg );
@@ -1237,15 +1235,13 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
             }
 
             pCTCBLK->iKernBuff = iKernBuff * 1024;
-#endif
             break;
 
-        case 'i':     // I/O Buffer Size (ignored if not Windows)
-#if defined( WIN32 )
+        case 'i':     // I/O Buffer Size (Windows only)
             iIOBuff = atoi( optarg );
 
-            if( iIOBuff < MIN_TT32DLL_BUFFSIZE_K    ||
-                iIOBuff > MAX_TT32DLL_BUFFSIZE_K )
+            if( iIOBuff * 1024 < MIN_PACKET_BUFFSIZE    ||
+                iIOBuff * 1024 > MAX_PACKET_BUFFSIZE )
             {
                 logmsg( _("HHCCT053E %4.4X: Invalid DLL I/O buffer size %s\n"),
                     pDEVBLK->devnum, optarg );
@@ -1253,8 +1249,8 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
             }
 
             pCTCBLK->iIOBuff = iIOBuff * 1024;
-#endif
             break;
+#endif // defined( OPTION_W32_CTCI )
 
         case 't':     // MTU of point-to-point link (ignored if Windows)
             iMTU = atoi( optarg );
@@ -1269,7 +1265,7 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
             strcpy( pCTCBLK->szMTU, optarg );
             break;
 
-        case 's':     // Netmask of point-to-point link (ignored if Windows)
+        case 's':     // Netmask of point-to-point link
             if( inet_aton( optarg, &addr ) == 0 )
             {
                 logmsg( _("HHCCT055E %4.4X: Invalid netmask %s\n"),
@@ -1280,7 +1276,7 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
             strcpy( pCTCBLK->szNetMask, optarg );
             break;
 
-        case 'm':     // (ignored if not Windows)
+        case 'm':
             if( ParseMAC( optarg, mac ) != 0 )
             {
                 logmsg( _("HHCCT056E %4.4X: Invalid MAC address %s\n"),
@@ -1487,8 +1483,8 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
                 // Kernel Buffer Size
                 iKernBuff = atoi( *argv );
 
-                if( iKernBuff < MIN_TT32DRV_BUFFSIZE_K ||
-                    iKernBuff > MAX_TT32DRV_BUFFSIZE_K )
+                if( iKernBuff * 1024 < MIN_CAPTURE_BUFFSIZE ||
+                    iKernBuff * 1024 > MAX_CAPTURE_BUFFSIZE )
                 {
                     logmsg( _("HHCCT069E %4.4X: Invalid kernel buffer size %s\n"),
                         pDEVBLK->devnum, *argv );
@@ -1504,8 +1500,8 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
                 // I/O Buffer Size
                 iIOBuff = atoi( *argv );
 
-                if( iIOBuff < MIN_TT32DLL_BUFFSIZE_K ||
-                    iIOBuff > MAX_TT32DLL_BUFFSIZE_K )
+                if( iIOBuff * 1024 < MIN_PACKET_BUFFSIZE ||
+                    iIOBuff * 1024 > MAX_PACKET_BUFFSIZE )
                 {
                     logmsg( _("HHCCT070E %4.4X: Invalid DLL I/O buffer size %s\n"),
                         pDEVBLK->devnum, *argv );

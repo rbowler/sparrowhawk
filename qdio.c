@@ -1,7 +1,23 @@
-/* QDIO.C       (c) Copyright Jan Jaeger, 2003-2006                  */
+/* QDIO.C       (c) Copyright Jan Jaeger, 2003-2007                  */
 /*              Queued Direct Input Output                           */
 
+// $Id: qdio.c,v 1.23 2007/06/23 00:04:15 ivan Exp $
+
 /*      This module contains the Signal Adapter instruction          */
+
+// $Log: qdio.c,v $
+// Revision 1.23  2007/06/23 00:04:15  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.22  2007/01/13 07:24:14  bernard
+// backout ccmask
+//
+// Revision 1.21  2007/01/12 15:24:33  bernard
+// ccmask phase 1
+//
+// Revision 1.20  2006/12/08 09:43:29  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -40,12 +56,11 @@ DEVBLK *dev;                            /* -> device block           */
     if(regs->GR_L(0) > SIGA_FC_MAX)
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
-    /* Operand exception if reg 1 bits 0-15 not X'0001' */
-    if ( regs->GR_LHH(1) != 0x0001 )
-        ARCH_DEP(program_interrupt) (regs, PGM_OPERAND_EXCEPTION);
+    /* Program check if the ssid including lcss is invalid */
+    SSID_CHECK(regs);
 
     /* Locate the device block for this subchannel */
-    dev = find_device_by_subchan (regs->GR_LHL(1));
+    dev = find_device_by_subchan (regs->GR_L(1));
 
     /* Condition code 3 if subchannel does not exist,
        is not valid, or is not enabled or is not a QDIO subchannel */
@@ -82,7 +97,7 @@ DEVBLK *dev;                            /* -> device block           */
         break;
 
     case SIGA_FC_W:
-    if(dev->hnd->siga_r)
+    if(dev->hnd->siga_w)
             regs->psw.cc = (dev->hnd->siga_w) (dev, regs->GR_L(2) );
         else
             regs->psw.cc = 3;

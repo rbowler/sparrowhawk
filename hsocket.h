@@ -1,16 +1,50 @@
-/* HSOCKET.H    (c) Copyright Roger Bowler, 2005-2006                */
+/* HSOCKET.H    (c) Copyright Roger Bowler, 2005-2007                */
 /*              Equates for socket functions                         */
 
 /*  This header file contains equates for the socket functions       */
 /*  and constants whose values differ between Unix and Winsock       */
 
-#if !defined(_HSOCKET_H) 
-#define _HSOCKET_H  
+// $Id: hsocket.h,v 1.10 2007/06/23 00:04:11 ivan Exp $
+//
+// $Log: hsocket.h,v $
+// Revision 1.10  2007/06/23 00:04:11  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.9  2006/12/08 09:43:27  jj
+// Add CVS message log
+//
+
+#if !defined(_HSOCKET_H)
+#define _HSOCKET_H
+
+#ifndef _HSOCKET_C_
+#ifndef _HUTIL_DLL_
+#define HSOCK_DLL_IMPORT DLL_IMPORT
+#else   
+#define HSOCK_DLL_IMPORT extern
+#endif 
+#else
+#define HSOCK_DLL_IMPORT DLL_EXPORT
+#endif
+
+/*-------------------------------------------------------------------*/
+/* Socket related constants related to 'shutdown' API call           */
+/*-------------------------------------------------------------------*/
+
+#ifdef _MSVC_
+
+    /* Map SUS\*nix constants to Windows socket equivalents */
+
+    #define  SHUT_RD     SD_RECEIVE
+    #define  SHUT_WR     SD_SEND
+    #define  SHUT_RDWR   SD_BOTH
+
+#endif
 
 #if defined(_WINSOCKAPI_)
 
 /*-------------------------------------------------------------------*/
-/* Equates for systems which use the Winsock API                     */                                                                                                                                                                                      
+/* Equates for systems which use the Winsock API                     */
 /*-------------------------------------------------------------------*/
 
 #define get_HSO_errno()         ((int)WSAGetLastError())
@@ -18,7 +52,7 @@
 
 #define HSO_errno               get_HSO_errno()
 
-#define HSO_EINTR               WSAEINTR  
+#define HSO_EINTR               WSAEINTR
 #define HSO_EBADF               WSAEBADF
 #define HSO_EACCES              WSAEACCES
 #define HSO_EFAULT              WSAEFAULT
@@ -118,5 +152,12 @@
 #define HSO_EREMOTE             EREMOTE
 
 #endif
+
+/*-------------------------------------------------------------------*/
+/* Local function definitions                                        */
+/*-------------------------------------------------------------------*/
+
+HSOCK_DLL_IMPORT int read_socket(int fd, void *ptr, int nbytes);
+HSOCK_DLL_IMPORT int write_socket(int fd, const void *ptr, int nbytes);
 
 #endif /*!defined(_HSOCKET_H)*/

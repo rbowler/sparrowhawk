@@ -1,9 +1,22 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //         fthreads.h           Fish's WIN32 version of pthreads
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2001-2006. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2001-2007. Released under the Q Public License
 // (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
+
+// $Id: fthreads.h,v 1.22 2007/06/23 00:04:10 ivan Exp $
+//
+// $Log: fthreads.h,v $
+// Revision 1.22  2007/06/23 00:04:10  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.21  2007/01/10 09:29:45  fish
+// Fix thread naming that was inadvertently broken by my 12/28 fishhang change that introduced use of _beginthreadex
+//
+// Revision 1.20  2006/12/08 09:43:21  jj
+// Add CVS message log
+//
 
 #ifndef _FTHREADS_H_
 #define _FTHREADS_H_
@@ -175,7 +188,7 @@ int  fthread_create
     fthread_attr_t*  pThreadAttr,
     PFT_THREAD_FUNC  pfnThreadFunc,
     void*            pvThreadArgs,
-    char*            pszName
+    char*            pszThreadName
 );
 
 ////////////////////////////////////////////////////////////////////////////////////

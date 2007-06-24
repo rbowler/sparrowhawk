@@ -1,3 +1,10 @@
+// $Id: cckdfix.c,v 1.7 2006/12/08 09:43:17 jj Exp $
+//
+// $Log: cckdfix.c,v $
+// Revision 1.7  2006/12/08 09:43:17  jj
+// Add CVS message log
+//
+
 #include "hercules.h"
 int main ( int argc, char *argv[])
 {
@@ -104,7 +111,7 @@ char            pathname[MAX_PATH];
 
 //      memset (&cdevhdr.resv2, 0, 464);
 
-        LSEEK (fd, 0, SEEK_SET);
+        lseek (fd, 0, SEEK_SET);
         write (fd, &devhdr, CKDDASD_DEVHDR_SIZE);
         write (fd, &cdevhdr, CCKDDASD_DEVHDR_SIZE);
 

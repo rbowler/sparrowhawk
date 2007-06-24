@@ -1,6 +1,8 @@
 /* $OpenBSD: rijndael.c,v 1.18 2005/05/25 05:47:53 markus Exp $ */
 /* modified for use by dyncrypt */
 
+// $Id: aes.c,v 1.8 2006/12/08 09:43:34 jj Exp $
+
 /**
  * rijndael-alg-fst.c
  *
@@ -27,8 +29,20 @@
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// $Log: aes.c,v $
+// Revision 1.8  2006/12/08 09:43:34  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
-#include "opcode.h" /* For CSWAP macros */
+
+#if !defined(_HENGINE_DLL_)
+#define _HENGINE_DLL_
+#endif
+
+#include "hercules.h"
+#include "opcode.h" /* For fetch_fw */
+
 #include "aes.h"
 
 #define FULL_UNROLL

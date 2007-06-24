@@ -1,7 +1,17 @@
-/* TAPEDEV.H    (c) Copyright Ivan Warren and others, 2003-2006      */
+/* TAPEDEV.H    (c) Copyright Ivan Warren and others, 2003-2007      */
 /*                                                                   */
 /* This module contains tape related structures and defines          */
 /* for the Hercules ESA/390 emulator.                                */
+
+// $Id: tapedev.h,v 1.19 2007/06/23 00:04:18 ivan Exp $
+//
+// $Log: tapedev.h,v $
+// Revision 1.19  2007/06/23 00:04:18  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.18  2006/12/08 09:43:30  jj
+// Add CVS message log
+//
 
 #ifndef __TAPEDEV_H__
 #define __TAPEDEV_H__
@@ -127,6 +137,37 @@ extern void build_senseX (int ERCode,DEVBLK *dev,BYTE *unitstat,BYTE code);
 #define SPG_SET_COMMAND_RESV    0x60    /* ...reserved bit setting   */
 #define SPG_SET_RESV            0x1F    /* Reserved bits, must be 0  */
 
+/* By Adrian Trenkwalder                                             */   
+/* Perform Subsystem Function order byte for PSF command             */   
+/* The first 3 orders are not supported yet (x'18', x'1B', x'1C')    */   
+#define PSF_ORDER_PRSD          0x18  /* Prep. for Read Subsyst. Data*/   
+#define PSF_ORDER_SSIC          0x1B    /* Set Special Intercept Cond*/   
+#define PSF_ORDER_MNS           0x1C    /* Message Not Supported     */   
+#define PSF_ORDER_AFEL          0x80    /* Activate Forced Error Log.*/   
+#define PSF_ORDER_DFEL          0x81    /* Deact. Forced Error Log.  */   
+#define PSF_ACTION_FEL_IMPLICIT 0x01    /* ..Implicit (De)Activate   */   
+#define PSF_ACTION_FEL_EXPLICIT 0x02    /* ..Explicit (De)Activate   */   
+#define PSF_ORDER_AAC           0x82    /* Activate Access Control   */   
+#define PSF_ORDER_DAC           0x83    /* Deact. Access Control     */   
+#define PSF_ACTION_AC_LWP       0x80    /* ..Logical Write Protect   */   
+#define PSF_ACTION_AC_DCD       0x10    /* ..Data Compaction Default */   
+#define PSF_ACTION_AC_DCR       0x02    /* ..Data Check Recovery     */   
+#define PSF_ACTION_AC_ER        0x01    /* ..Extended Recovery       */   
+#define PSF_ORDER_RVF           0x90    /* Reset Volume Fenced       */   
+#define PSF_ORDER_PIN_DEV       0xA1    /* Pin Device                */   
+#define PSF_ACTION_PIN_CU0      0x00    /* ..Control unit 0          */   
+#define PSF_ACTION_PIN_CU1      0x01    /* ..Control unit 1          */   
+#define PSF_ORDER_UNPIN_DEV     0xA2    /* Unpin Device              */   
+#define PSF_FLAG_ZERO       0x00    /* Must be zero for all ord. */   
+   
+/* By Adrian Trenkwalder                                             */   
+/* Control Access Function Control                                   */   
+#define CAC_FUNCTION            0xC0    /* Function control bits     */   
+#define CAC_SET_PASSWORD        0x00    /* ..Set Password            */   
+#define CAC_COND_ENABLE         0x80    /* ..Conditional Enable      */   
+#define CAC_COND_DISABLE        0x40    /* ..Conditional Disable     */   
+   
+   
 /*-------------------------------------------------------------------*/
 /* Definitions for tape device type field in device block            */
 /*-------------------------------------------------------------------*/
@@ -146,7 +187,7 @@ extern void build_senseX (int ERCode,DEVBLK *dev,BYTE *unitstat,BYTE code);
 #define STS_EOD(dev)            GMT_EOD     ( (dev)->sstat )
 #define STS_WR_PROT(dev)        GMT_WR_PROT ( (dev)->sstat )
 #define STS_ONLINE(dev)         GMT_ONLINE  ( (dev)->sstat )
-#define STS_NOT_MOUNTED(dev)    GMT_DR_OPEN ( (dev)->sstat )
+#define STS_NOT_MOUNTED(dev)   (GMT_DR_OPEN ( (dev)->sstat ) || (dev)->fd < 0)
 #endif
 
 #define  AUTOLOAD_WAIT_FOR_TAPEMOUNT_INTERVAL_SECS  (5) /* (default) */

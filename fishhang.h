@@ -1,9 +1,25 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //         fishhang.h           verify/debug proper Hercules LOCK handling...
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2002-2006. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2002-2007. Released under the Q Public License
 // (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
+
+// $Id: fishhang.h,v 1.14 2007/06/23 00:04:09 ivan Exp $
+//
+// $Log: fishhang.h,v $
+// Revision 1.14  2007/06/23 00:04:09  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.13  2006/12/31 12:25:26  fish
+// Fix "undefined reference to _beginthreadex" issue for non-MSVC (i.e. Cygwin) builds.
+//
+// Revision 1.12  2006/12/28 15:49:35  fish
+// Use _beginthreadex/_endthreadex instead of CreateThread/ExitThread in continuing effort to try and resolve our still existing long-standing 'errno' issue...
+//
+// Revision 1.11  2006/12/08 09:43:21  jj
+// Add CVS message log
+//
 
 #ifndef _FISHHANG_H_
 #define _FISHHANG_H_
@@ -98,8 +114,13 @@
     #define MyLeaveCriticalSection(pCS)                     (LeaveCriticalSection((CRITICAL_SECTION*)(pCS)))
     #define MyDeleteCriticalSection(pCS)                    (DeleteCriticalSection((CRITICAL_SECTION*)(pCS)))
 
+  #ifdef _MSVC_
+    #define MyCreateThread(sec,stack,start,parm,flags,tid)  ((HANDLE) _beginthreadex((sec),(stack),(start),(parm),(flags),(tid)))
+    #define MyExitThread(code)                              (_endthreadex((code)))
+  #else // (Cygwin)
     #define MyCreateThread(sec,stack,start,parm,flags,tid)  (CreateThread((sec),(stack),(start),(parm),(flags),(tid)))
     #define MyExitThread(code)                              (ExitThread((code)))
+  #endif
 
     #define MyCreateEvent(sec,man,set,name)                 (CreateEvent((sec),(man),(set),(name)))
     #define MySetEvent(h)                                   (SetEvent((h)))

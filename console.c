@@ -1,5 +1,7 @@
-/* CONSOLE.C    (c)Copyright Roger Bowler, 1999-2006                 */
+/* CONSOLE.C    (c)Copyright Roger Bowler, 1999-2007                 */
 /*              ESA/390 Console Device Handler                       */
+
+// $Id: console.c,v 1.93 2007/06/23 16:13:54 jmaynard Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for console        */
@@ -49,6 +51,31 @@
 /* Ignore "Negotiate About Window Size" client option (for now) so   */
 /* WinNT version of telnet works. -- Greg Price (implemted by Fish)  */
 /*-------------------------------------------------------------------*/
+
+// $Log: console.c,v $
+// Revision 1.93  2007/06/23 16:13:54  jmaynard
+// Fixing two messages out of internationalization by removing redundant
+// carriage returns.
+//
+// Revision 1.92  2007/06/23 00:04:04  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.91  2007/01/11 19:54:33  fish
+// Addt'l keep-alive mods: create associated supporting config-file stmt and panel command where individual customer-preferred values can be specified and/or dynamically modified.
+//
+// Revision 1.90  2007/01/10 15:35:49  rbowler
+// Consoles cannot connect after rev 1.88
+//
+// Revision 1.89  2007/01/10 15:12:11  rbowler
+// Console keepalive for Unix
+//
+// Revision 1.88  2007/01/10 09:32:39  fish
+// Enable connection keep-alive to try and detect 3270 clients that
+// have died (MSVC only right now; don't know how to do it on *nix)
+//
+// Revision 1.87  2006/12/08 09:43:18  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 #include "hercules.h"
@@ -893,8 +920,8 @@ int     eor = 0;                        /* 1=End of record received  */
 
     if (rc < 0) {
         if ( HSO_ECONNRESET == HSO_errno )
-            logmsg( _( "HHCTE014I %4.4X device %4.4X disconnected.\n" ),
-                dev->devtype, dev->devnum );
+            logmsg( _( "HHCTE014I %4.4X device %4.4X client %s connection reset\n" ),
+                dev->devtype, dev->devnum, inet_ntoa(dev->ipaddr) );
         else
             TNSERROR("console: DBG023: recv: %s\n", strerror(HSO_errno));
         dev->sense[0] = SENSE_EC;
@@ -903,8 +930,8 @@ int     eor = 0;                        /* 1=End of record received  */
 
     /* If zero bytes were received then client has closed connection */
     if (rc == 0) {
-        logmsg (_("HHCTE007I Device %4.4X connection closed by client %s\n"),
-                dev->devnum, inet_ntoa(dev->ipaddr));
+        logmsg (_("HHCTE007I %4.4X device %4.4X client %s connection closed\n"),
+                dev->devtype, dev->devnum, inet_ntoa(dev->ipaddr));
         dev->sense[0] = SENSE_IR;
         return (CSW_ATTN | CSW_UC | CSW_DE);
     }
@@ -1194,6 +1221,346 @@ BYTE    c;                              /* Character work area       */
 
 } /* end function recv_1052_data */
 
+/* The following code and functions are here
+ * to build a more fancy logo
+ */
+#define SF_ATTR_PROTECTED   0x20
+#define SF_ATTR_NUMERIC     0x10
+/* One of */
+#define SF_ATTR_WDISPNSEL   0x00
+#define SF_ATTR_WDISPSEL    0x04
+#define SF_ATTR_HIGHLIGHT   0x08
+#define SF_ATTR_INVISIBLE   0x0C
+
+#define SF_ATTR_MDT         0x01
+
+/*
+static char *herclogo[]={
+    " HHH          HHH   The S/370, ESA/390 and z/Architecture",
+    " HHH          HHH                 Emulator",
+    " HHH          HHH",
+    " HHH          HHH  EEEE RRR   CCC U  U L    EEEE  SSS",
+    " HHHHHHHHHHHHHHHH  E    R  R C    U  U L    E    S",
+    " HHHHHHHHHHHHHHHH  EEE  RRR  C    U  U L    EEE   SS",
+    " HHHHHHHHHHHHHHHH  E    R R  C    U  U L    E       S",
+    " HHH          HHH  EEEE R  R  CCC  UU  LLLL EEEE SSS ",
+    " HHH          HHH",
+    " HHH          HHH",
+    " HHH          HHH     My PC thinks it's a MAINFRAME",
+    "",
+    " Copyright (c) 1999-2007 Roger Bowler, Jan Jaeger, and others"};
+    */
+
+static char *herclogo[]={
+"@ALIGN NONE",
+"@SBA 0,0",
+"@SF P",
+"Hercules Version  :",
+"@SF HP",
+"$(VERSION)",
+"@NL",
+"@SF P",
+"Host name         :",
+"@SF HP",
+"$(HOSTNAME)",
+"@NL",
+"@SF P",
+"Host OS           :",
+"@SF HP",
+"$(HOSTOS)-$(HOSTOSREL) $(HOSTOSVER)",
+"@NL",
+"@SF P",
+"Host Architecture :",
+"@SF HP",
+"$(HOSTARCH)",
+"@NL",
+"@SF P",
+"Processors        :",
+"@SF HP",
+"$(HOSTNUMCPUS)",
+"@NL",
+"@SF P",
+"Chanl Subsys      :",
+"@SF HP",
+"$(CSS)",
+"@NL",
+"@SF P",
+"Device number     :",
+"@SF HP",
+"$(CCUU)",
+"@NL",
+"@SF P",
+"Subchannel        :",
+"@SF HP",
+"$(SUBCHAN)",
+"@SF P",
+"@ALIGN LEFT",
+"",
+"",
+"           HHH          HHH   The S/370, ESA/390 and z/Architecture",
+"           HHH          HHH                 Emulator",
+"           HHH          HHH",
+"           HHH          HHH  EEEE RRR   CCC U  U L    EEEE  SSS",
+"           HHHHHHHHHHHHHHHH  E    R  R C    U  U L    E    S",
+"           HHHHHHHHHHHHHHHH  EEE  RRR  C    U  U L    EEE   SS",
+"           HHHHHHHHHHHHHHHH  E    R R  C    U  U L    E       S",
+"           HHH          HHH  EEEE R  R  CCC  UU  LLLL EEEE SSS",
+"           HHH          HHH",
+"           HHH          HHH",
+"           HHH          HHH     My PC thinks it's a MAINFRAME",
+"",
+"           Copyright (c) 1999-2007 Roger Bowler, Jan Jaeger, and others"};
+
+#define LOGO_BUFFERSIZE 256;
+
+static char *buffer_addchar(char *b,size_t *l,size_t *al,char c)
+{
+    size_t len;
+    size_t alen;
+    len=*l;
+    alen=*al;
+    if(len>=alen)
+    {
+        if(!alen)
+        {
+            alen=LOGO_BUFFERSIZE;
+            b=malloc(alen);
+            if(!b)
+            {
+                return NULL;
+            }
+        }
+        else
+        {
+            alen+=LOGO_BUFFERSIZE;
+            b=realloc(b,alen);
+            if(!b)
+            {
+                return NULL;
+            }
+        }
+    }
+    b[len++]=c;
+    *al=alen;
+    *l=len;
+    return b;
+}
+
+static char *buffer_addstring(char *b,size_t *l,size_t *al,char *s)
+{
+    size_t i;
+    for(i=0;s[i]!=0;i++)
+    {
+        b=buffer_addchar(b,l,al,s[i]);
+        if(!b)
+        {
+            return NULL;
+        }
+    }
+    return b;
+}
+
+static char *buffer_addsba(char *b,size_t *l,size_t *al,int x, int y)
+{
+    int pos;
+    pos=x*80+y;
+    b=buffer_addchar(b,l,al,0x11);
+    if(!b) return NULL;
+    b=buffer_addchar(b,l,al,sba_code[pos>>6]);
+    if(!b) return NULL;
+    b=buffer_addchar(b,l,al,sba_code[pos & 0x3f]);
+    return b;
+}
+static char *buffer_addsf(char *b,size_t *l,size_t *al,int a)
+{
+    b=buffer_addchar(b,l,al,0x1d);
+    if(!b) return NULL;
+    b=buffer_addchar(b,l,al,sba_code[a & 0x3f]);
+    return b;
+}
+
+#define ALIGN_NONE 0
+#define ALIGN_CENTER 1
+#define ALIGN_LEFT 2
+#define ALIGN_RIGHT 3
+static char *build_logo(char **logodata,size_t logosize,size_t *blen)
+{
+    size_t  len;
+    size_t  alen;
+    char *bfr;
+    char    *cline;
+    size_t i,j;
+    char    *verb;
+    char    *rest;
+    int     xpos,ypos;
+    int     attr;
+    int     align;
+    char    *wrk;
+
+    bfr=NULL;
+    len=0;
+    alen=0;
+    bfr=buffer_addchar(bfr,&len,&alen,0xf5);
+    bfr=buffer_addchar(bfr,&len,&alen,0x40);
+    if(bfr==NULL)
+    {
+        return NULL;
+    }
+    align=ALIGN_NONE;
+    xpos=0;
+    ypos=0;
+    attr=SF_ATTR_PROTECTED;
+    for(i=0;i<logosize;i++)
+    {
+        cline=malloc(strlen(logodata[i])+1);
+        strcpy(cline,logodata[i]);
+        while(1)
+        {
+            if(cline[0]!='@')
+            {
+#if defined(OPTION_CONFIG_SYMBOLS)
+                wrk=resolve_symbol_string(cline);
+                free(cline);
+                cline=wrk;
+#endif
+                switch(align)
+                {
+                    case ALIGN_RIGHT:
+                        ypos=strlen(cline);
+                        if(ypos<80)
+                        {
+                            ypos=80-ypos;
+                        }
+                        else
+                        {
+                            ypos=0;
+                        }
+                        break;
+                    case ALIGN_CENTER:
+                        ypos=strlen(cline);
+                        if(ypos<80)
+                        {
+                            ypos=(80-ypos)/2;
+                        }
+                        break;
+                    case ALIGN_LEFT:
+                        ypos=0;
+                        break;
+                    default:
+                        break;
+                }
+                bfr=buffer_addsba(bfr,&len,&alen,xpos,ypos);
+                bfr=buffer_addsf(bfr,&len,&alen,attr);
+                if(align==ALIGN_NONE)
+                {
+                    ypos+=strlen(cline);
+                    ypos++;
+                }
+                else
+                {
+                    xpos++;
+                    ypos=0;
+                }
+                bfr=buffer_addstring(bfr,&len,&alen,(char *)translate_to_ebcdic(cline));
+                break;
+            }
+            verb=strtok(cline," \t");
+            if(verb==NULL)
+            {
+                break;
+            }
+            rest=strtok(NULL," \t");
+            if(strcasecmp(verb,"@sba")==0)
+            {
+                if(rest==NULL)
+                {
+                    break;
+                }
+                wrk=strtok(rest,",");
+                if(wrk!=NULL)
+                {
+                    xpos=atoi(wrk);
+                }
+                wrk=strtok(NULL,",");
+                if(wrk!=NULL)
+                {
+                    ypos=atoi(wrk);
+                }
+                break;
+            }
+            if(strcasecmp(verb,"@sf")==0)
+            {
+                attr=SF_ATTR_PROTECTED;
+                if(rest==NULL)
+                {
+                    break;
+                }
+                for(j=0;rest[j]!=0;j++)
+                {
+                    switch(rest[j])
+                    {
+                        case 'h':
+                        case 'H':
+                            attr|=SF_ATTR_HIGHLIGHT;
+                            break;
+                        case 'i':
+                        case 'I':
+                            attr&=~SF_ATTR_PROTECTED;
+                            break;
+                        default:
+                            break;
+                    }
+                }
+                break;
+            }
+            if(strcasecmp(verb,"@nl")==0)
+            {
+                xpos++;
+                ypos=0;
+                break;
+            }
+            if(strcasecmp(verb,"@align")==0)
+            {
+                align=ALIGN_NONE;
+                if(rest==NULL)
+                {
+                    break;
+                }
+                while(1)
+                {
+                    if(strcasecmp(rest,"center")==0)
+                    {
+                        align=ALIGN_CENTER;
+                        break;
+                    }
+                    if(strcasecmp(rest,"right")==0)
+                    {
+                        align=ALIGN_RIGHT;
+                        break;
+                    }
+                    if(strcasecmp(rest,"none")==0)
+                    {
+                        align=ALIGN_NONE;
+                        break;
+                    }
+                    if(strcasecmp(rest,"left")==0)
+                    {
+                        align=ALIGN_LEFT;
+                        break;
+                    }
+                    break;
+                }
+                break;
+            }
+            break;
+        }
+        free(cline);
+    }
+    bfr=buffer_addchar(bfr,&len,&alen,IAC);
+    bfr=buffer_addchar(bfr,&len,&alen,EOR_MARK);
+    *blen=len;
+    return bfr;
+}
 
 /*-------------------------------------------------------------------*/
 /* NEW CLIENT CONNECTION THREAD                                      */
@@ -1212,14 +1579,18 @@ U16                     devnum;         /* Requested device number   */
 BYTE                    class;          /* D=3270, P=3287, K=3215/1052 */
 BYTE                    model;          /* 3270 model (2,3,4,5,X)    */
 BYTE                    extended;       /* Extended attributes (Y,N) */
-char                    buf[256];       /* Message buffer            */
+char                    buf[1920];       /* Message buffer            */
 char                    conmsg[256];    /* Connection message        */
-char                    devmsg[25];     /* Device message            */
+char                    devmsg[64];     /* Device message            */
 char                    hostmsg[256];   /* Host ID message           */
 char                    num_procs[16];  /* #of processors string     */
 char                    rejmsg[256];    /* Rejection message         */
 char                    group[16];      /* Console group             */
+size_t                  logoheight;
+char                    *logobfr;
+char                    *logoout;
 
+    logobfr=NULL;
     /* Load the socket address from the thread parameter */
     csock = *csockp;
 
@@ -1443,51 +1814,64 @@ char                    group[16];      /* Console group             */
     }
     else
     {
-        snprintf (devmsg, sizeof(devmsg), "Connected to device %4.4X",
-                  dev->devnum);
+        snprintf (devmsg, sizeof(devmsg), "Connected to device %d:%4.4X",
+                  SSID_TO_LCSS(dev->ssid), dev->devnum);
     }
 
-    logmsg (_("HHCTE009I Client %s connected to %4.4X device %4.4X\n"),
-            clientip, dev->devtype, dev->devnum);
+    logmsg (_("HHCTE009I Client %s connected to %4.4X device %d:%4.4X\n"),
+            clientip, dev->devtype, SSID_TO_LCSS(dev->ssid), dev->devnum);
 
     /* Send connection message to client */
     if (class != 'K')
     {
-        len = snprintf (buf, sizeof(buf),
-                    "\xF5\x40\x11\x40\x40\x1D\x60%s"
-                    "\x11\xC1\x50\x1D\x60%s"
-                    "\x11\xC2\x60\x1D\x60%s",
-                    translate_to_ebcdic(conmsg),
-                    translate_to_ebcdic(hostmsg),
-                    translate_to_ebcdic(devmsg));
-
-        if (len < sizeof(buf))
+#if defined(OPTION_CONFIG_SYMBOLS)
+        set_symbol("VERSION",VERSION);
+        set_symbol("BDATE",__DATE__);
+        set_symbol("BTIME",__TIME__);
+        set_symbol("HOSTNAME",cons_hostinfo.nodename);
+        set_symbol("HOSTOS",cons_hostinfo.sysname);
+        set_symbol("HOSTOSREL",cons_hostinfo.release);
+        set_symbol("HOSTOSVER",cons_hostinfo.version);
+        set_symbol("HOSTARCH",cons_hostinfo.machine);
+        set_symbol("HOSTNUMCPUS",num_procs);
+        snprintf(conmsg,sizeof(conmsg),"%3.3X",dev->devnum);
+        set_symbol("CUU",conmsg);
+        snprintf(conmsg,sizeof(conmsg),"%3.3x",dev->devnum);
+        set_symbol("cuu",conmsg);
+        snprintf(conmsg,sizeof(conmsg),"%4.4X",dev->devnum);
+        set_symbol("CCUU",conmsg);
+        snprintf(conmsg,sizeof(conmsg),"%4.4X",dev->devnum);
+        set_symbol("ccuu",conmsg);
+        snprintf(conmsg,sizeof(conmsg),"%d",SSID_TO_LCSS(dev->ssid));
+        set_symbol("CSS",conmsg);
+        snprintf(conmsg,sizeof(conmsg),"%4.4X",dev->subchan);
+        set_symbol("SUBCHAN",conmsg);
+#endif // defined(OPTION_CONFIG_SYMBOLS)
+        if(sysblk.herclogo!=NULL)
         {
-            buf[len++] = IAC;
+            logobfr=build_logo(sysblk.herclogo,sysblk.logolines,&len);
         }
         else
         {
-            ASSERT(FALSE);
+            logoheight=sizeof(herclogo)/sizeof(char *);
+            logobfr=build_logo(herclogo,logoheight,&len);
         }
-
-        if (len < sizeof(buf))
-        {
-            buf[len++] = EOR_MARK;
-        }
-        else
-        {
-            ASSERT(FALSE);
-        }
+        logoout=logobfr;
     }
     else
     {
         len = snprintf (buf, sizeof(buf), "%s\r\n%s\r\n%s\r\n",
                         conmsg, hostmsg, devmsg);
+        logoout=buf;
     }
 
     if (class != 'P')  /* do not write connection resp on 3287 */
     {
-        rc = send_packet (csock, (BYTE *)buf, len, "CONNECTION RESPONSE");
+        rc = send_packet (csock, (BYTE *)logoout, len, "CONNECTION RESPONSE");
+    }
+    if(logobfr)
+    {
+        free(logobfr);
     }
 
     /* Raise attention interrupt for the device,
@@ -1497,6 +1881,9 @@ char                    group[16];      /* Console group             */
     */
     if ( class != 'P' && !INITIAL_POWERON_370() )
         device_attention (dev, CSW_DE);
+
+    /* Try to detect dropped connections */
+    socket_keepalive( csock, sysblk.kaidle, sysblk.kaintv, sysblk.kacnt );
 
     /* Signal connection thread to redrive its select loop */
     SIGNAL_CONSOLE_THREAD();
@@ -3098,7 +3485,7 @@ BYTE    stat;                           /* Unit status               */
             if (dev->prompt1052)
             {
                 snprintf ((char *)dev->buf, dev->bufsize,
-                        _("HHCTE006A Enter input for console device %4.4X\r\n"),
+                        _("HHCTE006A Enter input for console device %4.4X\n"),
                         dev->devnum);
                 len = strlen((char *)dev->buf);
                 rc = send_packet (dev->fd, dev->buf, len, NULL);
@@ -3230,6 +3617,7 @@ DEVHND constty_device_hndinfo = {
         NULL,                          /* Device Query used          */
         NULL,                          /* Device Reserve             */
         NULL,                          /* Device Release             */
+        NULL,                          /* Device Attention           */
         constty_immed,                 /* Immediate CCW Codes        */
         NULL,                          /* Signal Adapter Input       */
         NULL,                          /* Signal Adapter Output      */
@@ -3265,6 +3653,7 @@ DEVHND loc3270_device_hndinfo = {
         NULL,                          /* Device Query used          */
         NULL,                          /* Device Reserve             */
         NULL,                          /* Device Release             */
+        NULL,                          /* Device Attention           */
         loc3270_immed,                 /* Immediate CCW Codes        */
         NULL,                          /* Signal Adapter Input       */
         NULL,                          /* Signal Adapter Output      */
@@ -3280,7 +3669,7 @@ HDL_DEPENDENCY_SECTION;
      HDL_DEPENDENCY(DEVBLK);
      HDL_DEPENDENCY(SYSBLK);
 }
-END_DEPENDENCY_SECTION;
+END_DEPENDENCY_SECTION
 
 
 #if defined(WIN32) && !defined(HDL_USE_LIBTOOL) && !defined(_MSVC_)
@@ -3291,16 +3680,16 @@ END_DEPENDENCY_SECTION;
     HDL_RESOLVE_PTRVAR( psysblk, sysblk );
     HDL_RESOLVE( config_cnslport );
   }
-  END_RESOLVER_SECTION;
+  END_RESOLVER_SECTION
 #endif
 
 
-HDL_DEVICE_SECTION;
+HDL_DEVICE_SECTION
 {
     HDL_DEVICE(1052, constty_device_hndinfo );
     HDL_DEVICE(3215, constty_device_hndinfo );
     HDL_DEVICE(3270, loc3270_device_hndinfo );
     HDL_DEVICE(3287, loc3270_device_hndinfo );
 }
-END_DEVICE_SECTION;
+END_DEVICE_SECTION
 #endif

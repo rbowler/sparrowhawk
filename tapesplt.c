@@ -1,11 +1,21 @@
-/* tapesplt.C  (c) Copyright Jay Maynard, 2000-2006                 */
+/* tapesplt.C  (c) Copyright Jay Maynard, 2000-2007                 */
 /*              Split AWSTAPE format tape image                      */
+
+// $Id: tapesplt.c,v 1.26 2007/06/23 00:04:18 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This program reads an AWSTAPE format tape image file and produces */
 /* output files containing pieces of it, controlled by command line  */
 /* options.                                                          */
 /*-------------------------------------------------------------------*/
+
+// $Log: tapesplt.c,v $
+// Revision 1.26  2007/06/23 00:04:18  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.25  2006/12/08 09:43:31  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 

@@ -1,6 +1,16 @@
 /* TIMER.C   */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+
+// $Id: timer.c,v 1.65 2007/06/23 00:04:18 ivan Exp $
+//
+// $Log: timer.c,v $
+// Revision 1.65  2007/06/23 00:04:18  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.64  2006/12/08 09:43:31  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -31,22 +41,17 @@ REGS           *regs;                   /* -> CPU register context   */
 U32             intmask = 0;            /* Interrupt CPU mask        */
 
     /* Access the diffent register contexts with the intlock held */
-    obtain_lock (&sysblk.intlock);
+    OBTAIN_INTLOCK(NULL);
 
     /* Check for [1] clock comparator, [2] cpu timer, and
      * [3] interval timer interrupts for each CPU.
      */
     for (cpu = 0; cpu < HI_CPU; cpu++)
     {
-        obtain_lock(&sysblk.cpulock[cpu]);
-
         /* Ignore this CPU if it is not started */
         if (!IS_CPU_ONLINE(cpu)
          || CPUSTATE_STOPPED == sysblk.regs[cpu]->cpustate)
-        {
-            release_lock(&sysblk.cpulock[cpu]);
             continue;
-        }
 
         /* Point to the CPU register context */
         regs = sysblk.regs[cpu];
@@ -111,7 +116,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
         }
 #endif /*defined(_FEATURE_SIE)*/
 
-
+#if defined(_FEATURE_INTERVAL_TIMER)
         /*-------------------------------------------*
          * [3] Check for interval timer interrupt    *
          *-------------------------------------------*/
@@ -136,7 +141,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
         }
 #endif /*defined(_FEATURE_SIE)*/
 
-    release_lock(&sysblk.cpulock[cpu]);
+#endif /*defined(_FEATURE_INTERVAL_TIMER)*/
 
     } /* end for(cpu) */
 
@@ -144,7 +149,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
        then wake up those CPUs if they are waiting */
     WAKEUP_CPUS_MASK (intmask);
 
-    release_lock(&sysblk.intlock);
+    RELEASE_INTLOCK(NULL);
 
 } /* end function check_timer_event */
 
@@ -172,7 +177,13 @@ U64     then;                           /* Previous time of day (us) */
 int     interval;                       /* Interval (us)             */
 double  cpupct;                         /* Calculated cpu percentage */
 #endif /*OPTION_MIPS_COUNTING*/
+#if !defined(HAVE_NANOSLEEP) && !defined(HAVE_USLEEP)
 struct  timeval tv;                     /* Structure for select      */
+#endif
+#if defined( HAVE_NANOSLEEP )
+struct  timespec  rqtp;                 /* requested sleep interval  */
+struct  timespec  rmtp;                 /* remaining sleep interval  */
+#endif
 
     UNREFERENCED(argp);
 
@@ -293,11 +304,31 @@ struct  timeval tv;                     /* Structure for select      */
         } /* end if(usecctr) */
 #endif /*OPTION_MIPS_COUNTING*/
 
-        /* Sleep for one system clock tick by specifying a one-microsecond
-           delay, which will get stretched out to the next clock tick */
-        tv.tv_sec = 0;
-        tv.tv_usec = 1;
-        select (0, NULL, NULL, NULL, &tv);
+        /* Sleep for another timer update interval... */
+
+#if defined( HAVE_NANOSLEEP )
+
+        rqtp.tv_sec  = 0;
+        rqtp.tv_nsec = sysblk.timerint * 1000;
+
+        while ( nanosleep ( &rqtp, &rmtp ) < 0 )
+        {
+            // (EINTR presumed)
+            rqtp.tv_sec  = rmtp.tv_sec;
+            rqtp.tv_nsec = rmtp.tv_nsec;
+        }
+
+#elif defined( HAVE_USLEEP )
+
+        usleep ( sysblk.timerint );
+
+#else
+        tv.tv_sec  = 0;
+        tv.tv_usec = sysblk.timerint;
+
+        select ( 0, NULL, NULL, NULL, &tv );
+
+#endif /* nanosleep, usleep or select */
 
     } /* end while */
 

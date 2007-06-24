@@ -1,8 +1,10 @@
-/* IPL.C        (c) Copyright Roger Bowler, 1999-2006                */
+/* IPL.C        (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 Initial Program Loader                       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+
+// $Id: ipl.c,v 1.101 2007/06/23 00:04:14 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements the Initial Program Load (IPL) function of */
@@ -14,7 +16,25 @@
 /*                                                                   */
 /*-------------------------------------------------------------------*/
 
+// $Log: ipl.c,v $
+// Revision 1.101  2007/06/23 00:04:14  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.100  2006/12/20 15:41:16  rbowler
+// Clear FPC register during Initial CPU Reset
+//
+// Revision 1.99  2006/12/20 15:11:54  rbowler
+// Clear AR, FPR, and VR registers during Clear Reset
+//
+// Revision 1.98  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
+
+#define _IPL_C
+#define _HENGINE_DLL_
+
 #include "hercules.h"
 #include "opcode.h"
 #include "inline.h"
@@ -70,9 +90,24 @@ int ARCH_DEP(system_reset) (int cpu, int clear)
 
         /* Reset all CPUs in the configuration */
         for (cpu = 0; cpu < MAX_CPU; cpu++)
+        {
             if (IS_CPU_ONLINE(cpu))
-                if (ARCH_DEP(initial_cpu_reset) (sysblk.regs[cpu]))
+            {
+                regs=sysblk.regs[cpu];
+                if (ARCH_DEP(initial_cpu_reset) (regs))
+                {
                     rc = -1;
+                }
+                /* Clear all the registers (AR, GPR, FPR, VR)
+                   as part of the CPU CLEAR RESET operation */
+                memset (regs->ar,0,sizeof(regs->ar));
+                memset (regs->gr,0,sizeof(regs->gr));
+                memset (regs->fpr,0,sizeof(regs->fpr));
+              #if defined(_FEATURE_VECTOR_FACILITY)
+                memset (regs->vf->vr,0,sizeof(regs->vf->vr));
+              #endif /*defined(_FEATURE_VECTOR_FACILITY)*/
+            }
+        }
 
         /* Perform I/O subsystem reset */
         io_reset ();
@@ -81,12 +116,13 @@ int ARCH_DEP(system_reset) (int cpu, int clear)
         sysblk.main_clear = sysblk.xpnd_clear = 0;
         storage_clear();
         xstorage_clear();
+
     }
 
     /* ZZ FIXME: we should probably present a machine-check
        if we encounter any errors during the reset (rc != 0) */
     return rc;
-}
+} /* end function system_reset */
 
 /*-------------------------------------------------------------------*/
 /*                  LOAD (aka IPL) functions...                      */
@@ -160,7 +196,7 @@ static int ARCH_DEP(common_load_begin) (int cpu, int clear)
 /* Returns 0 if successful, -1 if error                              */
 /* intlock MUST be held on entry                                     */
 /*-------------------------------------------------------------------*/
-int ARCH_DEP(load_ipl) (U16 devnum, int cpu, int clear)
+int ARCH_DEP(load_ipl) (U16 lcss, U16 devnum, int cpu, int clear)
 {
 REGS   *regs;                           /* -> Regs                   */
 DEVBLK *dev;                            /* -> Device control block   */
@@ -177,19 +213,13 @@ BYTE    chanstat;                       /* IPL device channel status */
     regs = sysblk.regs[cpu];    /* Point to IPL CPU's registers */
 
     /* Point to the device block for the IPL device */
-    dev = find_device_by_devnum (devnum);
+    dev = find_device_by_devnum (lcss,devnum);
     if (dev == NULL)
     {
-        logmsg (_("HHCCP027E Device %4.4X not in configuration\n"),
-                devnum);
-        HDC1(debug_cpu_state, regs);
-        return -1;
-    }
-
-    if (sysblk.arch_mode == ARCH_370
-      && dev->chanset != regs->chanset)
-    {
-        logmsg(_("HHCCP028E Device not connected to channelset\n"));
+        logmsg (_("HHCCP027E Device %4.4X not in configuration%s\n"),
+                devnum,
+                (sysblk.arch_mode == ARCH_370 ?
+                  " or not conneceted to channelset" : ""));
         HDC1(debug_cpu_state, regs);
         return -1;
     }
@@ -216,12 +246,12 @@ BYTE    chanstat;                       /* IPL device channel status */
     memset (&dev->orb, 0, sizeof(ORB));                        /*@IWZ*/
     dev->busy = 1;
 
-    release_lock (&sysblk.intlock);
+    RELEASE_INTLOCK(NULL);
 
     /* Execute the IPL channel program */
     ARCH_DEP(execute_ccw_chain) (dev);
 
-    obtain_lock (&sysblk.intlock);
+    OBTAIN_INTLOCK(NULL);
 
     /* Clear the interrupt pending and device busy conditions */
     DEQUEUE_IO_INTERRUPT(&dev->ioint);
@@ -270,18 +300,16 @@ BYTE    chanstat;                       /* IPL device channel status */
 #ifdef FEATURE_CHANNEL_SUBSYSTEM
     /* Set LPUM */
     dev->pmcw.lpum = 0x80;
-    /* Store X'0001' + subchannel number at locations 184-187 */
-    regs->psa->ioid[0] = 0;
-    regs->psa->ioid[1] = 1;
-    STORE_HW(regs->psa->ioid + 2, dev->subchan);
+    STORE_FW(regs->psa->ioid, (dev->ssid<<16)|dev->subchan);
 
     /* Store zeroes at locations 188-191 */
     memset (regs->psa->ioparm, 0, 4);
 #endif /*FEATURE_CHANNEL_SUBSYSTEM*/
 
-    /* Save IPL device number and cpu number */
+    /* Save IPL device number, cpu number and lcss */
     sysblk.ipldev = devnum;
     sysblk.iplcpu = regs->cpuad;
+    sysblk.ipllcss = lcss;
 
     /* Finish up... */
     return ARCH_DEP(common_load_finish) (regs);
@@ -438,7 +466,7 @@ int             i;                      /* Array subscript           */
     regs->extccpu = 0;
     for (i = 0; i < MAX_CPU; i++)
         regs->emercpu[i] = 0;
-    regs->instvalid = 0;
+    regs->instinvalid = 1;
     regs->instcount = 0;
 
     /* Clear interrupts */
@@ -459,9 +487,7 @@ int             i;                      /* Array subscript           */
     ARCH_DEP(purge_alb) (regs);
 #endif /*defined(FEATURE_ACCESS_REGISTERS)*/
 
-#if defined(_FEATURE_SIE)
-    if(!regs->hostregs)
-#endif /*defined(_FEATURE_SIE)*/
+    if(regs->host)
     {
         /* Put the CPU into the stopped state */
         regs->opinterv = 0;
@@ -470,18 +496,16 @@ int             i;                      /* Array subscript           */
     }
 
 #ifdef FEATURE_INTERVAL_TIMER
-    ARCH_DEP(store_int_timer) (regs);
+    ARCH_DEP(store_int_timer_nolock) (regs);
 #endif
 
-#if defined(_FEATURE_SIE)
-   if(regs->guestregs)
+   if(regs->host && regs->guestregs)
    {
         ARCH_DEP(cpu_reset)(regs->guestregs);
         /* CPU state of SIE copy cannot be controlled */
         regs->guestregs->opinterv = 0;
         regs->guestregs->cpustate = CPUSTATE_STARTED;
    }
-#endif /*defined(_FEATURE_SIE)*/
 
    return 0;
 } /* end function cpu_reset */
@@ -499,7 +523,7 @@ int ARCH_DEP(initial_cpu_reset) (REGS *regs)
     memset ( &regs->psw,           0, sizeof(regs->psw)           );
     memset ( &regs->captured_zpsw, 0, sizeof(regs->captured_zpsw) );
     memset ( regs->cr,             0, sizeof(regs->cr)            );
-
+    regs->fpc    = 0;
     regs->PX     = 0;
     /* 
      * ISW20060125 : Since we reset the prefix, we must also adjust 
@@ -513,7 +537,9 @@ int ARCH_DEP(initial_cpu_reset) (REGS *regs)
     regs->todpr  = 0;
     regs->clkc   = 0;
     set_cpu_timer(regs, 0);
+#ifdef _FEATURE_INTERVAL_TIMER
     set_int_timer(regs, 0);
+#endif
 
     /* The breaking event address register is initialised to 1 */
     regs->bear = 1;
@@ -526,6 +552,12 @@ int ARCH_DEP(initial_cpu_reset) (REGS *regs)
     regs->CR(2) = 0xFFFFFFFF;
 #endif /*FEATURE_S370_CHANNEL*/
 
+    regs->chanset = 
+#if defined(FEATURE_CHANNEL_SWITCHING)
+                    regs->cpuad < FEATURE_LCSS_MAX ? regs->cpuad :
+#endif /*defined(FEATURE_CHANNEL_SWITCHING)*/
+                                                                   0xFFFF;
+
     /* Initialize the machine check masks in control register 14 */
     regs->CR(14) = CR14_CHKSTOP | CR14_SYNCMCEL | CR14_XDMGRPT;
 
@@ -534,10 +566,8 @@ int ARCH_DEP(initial_cpu_reset) (REGS *regs)
     regs->CR(15) = 512;
 #endif /*!FEATURE_LINKAGE_STACK*/
 
-#if defined(_FEATURE_SIE)
-    if(regs->guestregs)
+    if(regs->host && regs->guestregs)
       ARCH_DEP(initial_cpu_reset)(regs->guestregs);
-#endif /*defined(_FEATURE_SIE)*/
 
     return 0;
 } /* end function initial_cpu_reset */
@@ -612,21 +642,21 @@ char pathname[MAX_PATH];
 /*  Load / IPL         (Load Normal  -or-  Load Clear)               */
 /*-------------------------------------------------------------------*/
 
-int load_ipl (U16 devnum, int cpu, int clear)
+int load_ipl (U16 lcss, U16 devnum, int cpu, int clear)
 {
     switch(sysblk.arch_mode) {
 #if defined(_370)
         case ARCH_370:
-            return s370_load_ipl (devnum, cpu, clear);
+            return s370_load_ipl (lcss, devnum, cpu, clear);
 #endif
 #if defined(_390)
         case ARCH_390:
-            return s390_load_ipl(devnum, cpu, clear);
+            return s390_load_ipl (lcss, devnum, cpu, clear);
 #endif
 #if defined(_900)
         case ARCH_900:
             /* z/Arch always starts out in ESA390 mode */
-            return s390_load_ipl(devnum, cpu, clear);
+            return s390_load_ipl (lcss, devnum, cpu, clear);
 #endif
     }
     return -1;
@@ -657,7 +687,7 @@ int load_hmc (char *fname, int cpu, int clear)
 }
 
 /*-------------------------------------------------------------------*/
-/*  Initial CPU Reset    (i.e. CPU Clear Reset)                      */
+/*  Initial CPU Reset                                                */
 /*-------------------------------------------------------------------*/
 int initial_cpu_reset (REGS *regs)
 {

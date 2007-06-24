@@ -1,7 +1,7 @@
 //////////////////////////////////////////////////////////////////////////////////////////
 //   w32util.c        Windows porting functions
 //////////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2005-2006. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2005-2007. Released under the Q Public License
 // (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
 //////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -11,6 +11,37 @@
 //   select, fdopen, etc, #undef's in the Windows Socket Handling section!!
 //
 //////////////////////////////////////////////////////////////////////////////////////////
+
+// $Id: w32util.c,v 1.29 2007/06/23 00:04:19 ivan Exp $
+//
+// $Log: w32util.c,v $
+// Revision 1.29  2007/06/23 00:04:19  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.28  2007/01/11 19:54:34  fish
+// Addt'l keep-alive mods: create associated supporting config-file stmt and panel command where individual customer-preferred values can be specified and/or dynamically modified.
+//
+// Revision 1.27  2007/01/10 15:12:11  rbowler
+// Console keepalive for Unix
+//
+// Revision 1.26  2007/01/10 09:32:39  fish
+// Enable connection keep-alive to try and detect 3270 clients that have died (MSVC only right now; don't know how to do it on *nix)
+//
+// Revision 1.25  2007/01/03 22:02:31  fish
+// Minor correction to PR# build_msc/103 fix
+//
+// Revision 1.24  2006/12/30 18:48:11  fish
+// PR# build_msc/103: fix MSVC diag 8 'sh' capture
+//
+// Revision 1.23  2006/12/28 15:49:35  fish
+// Use _beginthreadex/_endthreadex instead of CreateThread/ExitThread in continuing effort to try and resolve our still existing long-standing 'errno' issue...
+//
+// Revision 1.22  2006/12/28 04:04:33  fish
+// (just a very minor update to some comments)
+//
+// Revision 1.21  2006/12/08 09:43:34  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -42,13 +73,12 @@ static void DummyCRTInvalidParameterHandler  // (override Microsoft insanity)
 static _invalid_parameter_handler  old_iph  = NULL;
 static int                         prev_rm  = 0;
 
-// This function should only ever called whenever we're being run under the
-// control of a debugger. It's sole purpose is to bypass Microsoft's INSANE
-// handling of invalid parameters being passed to CRT functions, which ends
-// up causing TWO COMPLETELY DIFFERENT ASSERTION DIALOGS to appear for EACH
-// and EVERY minor little itty-bitty frickin problem, BOTH of which must be
-// separately dismissed each fricking time of course (which can become VERY
-// annoying after about the sixteenth time I can't even begin to tell you!)
+// This function's sole purpose is to bypass Microsoft's INSANE handling of
+// invalid parameters being passed to CRT functions, which ends up causing
+// TWO COMPLETELY DIFFERENT ASSERTION DIALOGS to appear for EACH and EVERY
+// minor little itty-bitty frickin problem, BOTH of which must be separately
+// dismissed each fricking time of course (which can become VERY annoying
+// after about the sixteenth time I can't even begin to tell you!)
 
 DLL_EXPORT void DisableInvalidParameterHandling()
 {
@@ -242,8 +272,8 @@ DLL_EXPORT int w32_fseeki64 ( FILE* stream, __int64 offset, int origin )
     }
     else if (SEEK_END == origin)
     {
-        struct STAT fst;
-        if ( FSTAT( fileno( stream ), &fst ) != 0 )
+        struct stat fst;
+        if ( fstat( fileno( stream ), &fst ) != 0 )
             return -1;
         offset_from_beg = (__int64)fst.st_size + offset;
     }
@@ -413,6 +443,123 @@ DLL_EXPORT unsigned sleep ( unsigned seconds )
 //#endif
 
 //////////////////////////////////////////////////////////////////////////////////////////
+// high resolution sleep
+
+#if !defined( HAVE_NANOSLEEP ) || !defined( HAVE_USLEEP )
+
+static int w32_nanosleep ( const struct timespec* rqtp )
+{
+    /*
+    DESCRIPTION
+
+        The nanosleep() function shall cause the current thread
+        to be suspended from execution until either the time interval
+        specified by the rqtp argument has elapsed or a signal is
+        delivered to the calling thread, and its action is to invoke
+        a signal-catching function or to terminate the process. The
+        suspension time may be longer than requested because the argument
+        value is rounded up to an integer multiple of the sleep resolution
+        or because of the scheduling of other activity by the system.
+        But, except for the case of being interrupted by a signal, the
+        suspension time shall not be less than the time specified by rqtp,
+        as measured by the system clock CLOCK_REALTIME.
+
+        The use of the nanosleep() function has no effect on the action
+        or blockage of any signal.
+
+    RETURN VALUE
+
+        If the nanosleep() function returns because the requested time
+        has elapsed, its return value shall be zero.
+
+        If the nanosleep() function returns because it has been interrupted
+        by a signal, it shall return a value of -1 and set errno to indicate
+        the interruption. If the rmtp argument is non-NULL, the timespec
+        structure referenced by it is updated to contain the amount of time
+        remaining in the interval (the requested time minus the time actually
+        slept). If the rmtp argument is NULL, the remaining time is not returned.
+
+        If nanosleep() fails, it shall return a value of -1 and set errno
+        to indicate the error.
+
+    ERRORS
+
+        The nanosleep() function shall fail if:
+
+        [EINTR]   The nanosleep() function was interrupted by a signal.
+
+        [EINVAL]  The rqtp argument specified a nanosecond value less than zero
+                  or greater than or equal to 1000 million.
+    */
+
+    static BOOL    bDidInit    = FALSE;
+    static HANDLE  hTimer      = NULL;
+    LARGE_INTEGER  liDueTime;
+
+    // Create the waitable timer if needed...
+
+    if (unlikely( !bDidInit ))
+    {
+        bDidInit = TRUE;
+
+        VERIFY( ( hTimer = CreateWaitableTimer( NULL, TRUE, NULL ) ) != NULL );
+    }
+
+    // Check passed parameters...
+
+    if (unlikely(!rqtp
+        || rqtp->tv_nsec < 0
+        || rqtp->tv_nsec >= 1000000000
+    ))
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    // Note: Win32 waitable timers: parameter is #of 100-nanosecond intervals.
+    //       Positive values indicate absolute UTC time. Negative values indicate
+    //       relative time. The actual timer accuracy depends on the capability
+    //       of your hardware.
+
+    liDueTime.QuadPart = -(                 // (negative means relative)
+        (((__int64)rqtp->tv_sec * 10000000))
+        +
+        (((__int64)rqtp->tv_nsec + 99) / 100)
+    );
+
+    // Set the waitable timer...
+
+    VERIFY( SetWaitableTimer( hTimer, &liDueTime, 0, NULL, NULL, FALSE ) );
+
+    // Wait for the waitable timer to expire...
+
+    VERIFY( WaitForSingleObject( hTimer, INFINITE ) == WAIT_OBJECT_0 );
+
+    return 0;
+}
+
+#endif
+
+//////////////////////////////////////////////////////////////////////////////////////////
+// nanosleep - high resolution sleep
+
+#if !defined( HAVE_NANOSLEEP )
+
+DLL_EXPORT int nanosleep ( const struct timespec* rqtp, struct timespec* rmtp )
+{
+    if (unlikely(rmtp))
+    {
+        rmtp->tv_sec  = 0;
+        rmtp->tv_nsec = 0;
+    }
+
+    return w32_nanosleep ( rqtp );
+}
+
+#endif
+
+//////////////////////////////////////////////////////////////////////////////////////////
+// usleep - suspend execution for an interval
 
 #if !defined( HAVE_USLEEP )
 
@@ -434,54 +581,34 @@ DLL_EXPORT int usleep ( useconds_t useconds )
     //     [EINVAL]     The time interval specified
     //                  one million or more microseconds"
 
-    static BOOL    bDidInit    = FALSE;
-    static HANDLE  hTimer      = NULL;
-    LARGE_INTEGER  liDueTime;
+    struct timespec rqtp;
 
-    if ( !bDidInit )
-    {
-        bDidInit = TRUE;
-
-        // Create the waitable timer...
-
-        VERIFY( ( hTimer = CreateWaitableTimer( NULL, TRUE, NULL ) ) != NULL );
-    }
-
-    if ( useconds < 0 || useconds >= 1000000 )
+    if (unlikely( useconds < 0 || useconds >= 1000000 ))
     {
         errno = EINVAL;
         return -1;
     }
 
-    // Note: Win32 waitable timers: parameter is #of 100-nanosecond intervals.
-    //       Positive values indicate absolute UTC time. Negative values indicate
-    //       relative time. The actual timer accuracy depends on the capability
-    //       of your hardware.
+    rqtp.tv_sec  = 0;
+    rqtp.tv_nsec = useconds * 1000;
 
-    liDueTime.QuadPart = -10 * useconds;    // (negative means relative)
-
-    // Set the waitable timer...
-
-    VERIFY( SetWaitableTimer( hTimer, &liDueTime, 0, NULL, NULL, FALSE ) );
-
-    // Wait for the waitable timer to expire...
-
-    VERIFY( WaitForSingleObject( hTimer, INFINITE ) == WAIT_OBJECT_0 );
-
-    return 0;
+    return w32_nanosleep ( &rqtp );
 }
 
 #endif
 
 //////////////////////////////////////////////////////////////////////////////////////////
+// gettimeofday...
 
 #if !defined( HAVE_GETTIMEOFDAY )
 
-// Number of 100 nanosecond units from 1 Jan 1601 to 1 Jan 1970
+// Number of 100-nanosecond units from 1 Jan 1601 to 1 Jan 1970
 
 #define  EPOCH_BIAS  116444736000000000ULL
 
-static LARGE_INTEGER FileTimeToTimeMicroseconds( const FILETIME* pFT )
+// Helper function to convert Windows system-time value to microseconds...
+
+static LARGE_INTEGER FileTimeToMicroseconds( const FILETIME* pFT )
 {
     LARGE_INTEGER  liWork;  // (work area)
 
@@ -490,7 +617,7 @@ static LARGE_INTEGER FileTimeToTimeMicroseconds( const FILETIME* pFT )
     liWork.HighPart = pFT->dwHighDateTime;
     liWork.LowPart  = pFT->dwLowDateTime;
 
-    // Convert to 100 nanosecond units since 1 Jan 1970
+    // Convert to 100-nanosecond units since 1 Jan 1970
 
     liWork.QuadPart -= EPOCH_BIAS;
 
@@ -503,21 +630,22 @@ static LARGE_INTEGER FileTimeToTimeMicroseconds( const FILETIME* pFT )
 
 DLL_EXPORT int gettimeofday ( struct timeval* pTV, void* pTZ )
 {
-    LARGE_INTEGER          liCurrentHPCValue;
-    static LARGE_INTEGER   liStartingHPCValue;
-    static LARGE_INTEGER   liStartingSystemTime;
-    static double          dHPCTicksPerMicrosecond;
-    static struct timeval  tvPrevious;
-    static BOOL            bDidInit = FALSE;
+    LARGE_INTEGER          liCurrentHPCValue;       // (high-performance-counter tick count)
+    static LARGE_INTEGER   liStartingHPCValue;      // (high-performance-counter tick count)
+    static LARGE_INTEGER   liStartingSystemTime;    // (time of last resync in microseconds)
+    static struct timeval  tvPrevSyncVal = {0,0};   // (time of last resync as timeval)
+    static struct timeval  tvPrevRetVal  = {0,0};   // (previously returned value)
+    static double          dHPCTicksPerMicrosecond; // (just what it says)
+    static BOOL            bInSync = FALSE;         // (work flag)
 
     UNREFERENCED(pTZ);
 
-    if ( !bDidInit )
+    // One-time (and periodic!) initialization...
+
+    if (unlikely( !bInSync ))
     {
         FILETIME       ftStartingSystemTime;
         LARGE_INTEGER  liHPCTicksPerSecond;
-
-        bDidInit = TRUE;
 
         // The "GetSystemTimeAsFileTime" function obtains the current system date
         // and time. The information is in Coordinated Universal Time (UTC) format.
@@ -528,13 +656,18 @@ DLL_EXPORT int gettimeofday ( struct timeval* pTV, void* pTZ )
         VERIFY( QueryPerformanceFrequency( &liHPCTicksPerSecond ) );
         dHPCTicksPerMicrosecond = (double) liHPCTicksPerSecond.QuadPart / 1000000.0;
 
-        liStartingSystemTime = FileTimeToTimeMicroseconds( &ftStartingSystemTime );
+        liStartingSystemTime = FileTimeToMicroseconds( &ftStartingSystemTime );
 
-        tvPrevious.tv_sec = 0;
-        tvPrevious.tv_usec = 0;
+        tvPrevSyncVal.tv_sec = 0;       // (to force init further below)
+        tvPrevSyncVal.tv_usec = 0;      // (to force init further below)
+
+        bInSync = TRUE;
     }
 
-    if (!pTV)
+    // The following check for user error must FOLLOW the above initialization
+    // code block so the above initialization code block ALWAYS gets executed!
+
+    if (unlikely( !pTV ))
         return EFAULT;
 
     // Query current high-performance counter value...
@@ -559,49 +692,68 @@ DLL_EXPORT int gettimeofday ( struct timeval* pTV, void* pTZ )
     pTV->tv_sec   =  (long)(liCurrentHPCValue.QuadPart / 1000000);
     pTV->tv_usec  =  (long)(liCurrentHPCValue.QuadPart % 1000000);
 
-    if ( !tvPrevious.tv_sec )
-    {
-        tvPrevious.tv_sec  = pTV->tv_sec;
-        tvPrevious.tv_usec = pTV->tv_usec;
-    }
-
     // Re-sync to system clock every so often to prevent clock drift
     // since high-performance timer updated independently from clock.
 
 #define  RESYNC_GTOD_EVERY_SECS  30
 
-    if ( (pTV->tv_sec - tvPrevious.tv_sec ) > RESYNC_GTOD_EVERY_SECS )
-        bDidInit = FALSE;
+    // (initialize time of previous 'sync')
 
-    // Ensure each call returns a unique value...
-
-    while (pTV->tv_sec < tvPrevious.tv_sec ||
-        (pTV->tv_sec  == tvPrevious.tv_sec &&
-         pTV->tv_usec <= tvPrevious.tv_usec))
+    if (unlikely( !tvPrevSyncVal.tv_sec ))
     {
-        pTV->tv_usec += 1;
+        tvPrevSyncVal.tv_sec  = pTV->tv_sec;
+        tvPrevSyncVal.tv_usec = pTV->tv_usec;
+    }
 
-        if (pTV->tv_usec >= 1000000)
+    // (is is time to resync again?)
+
+    if (unlikely( (pTV->tv_sec - tvPrevSyncVal.tv_sec ) > RESYNC_GTOD_EVERY_SECS ))
+    {
+        bInSync = FALSE;    // (force resync)
+        return gettimeofday( pTV, NULL );
+    }
+
+    // Ensure that each call returns a unique, ever-increasing value...
+
+    if (unlikely( !tvPrevRetVal.tv_sec ))
+    {
+        tvPrevRetVal.tv_sec  = pTV->tv_sec;
+        tvPrevRetVal.tv_usec = pTV->tv_usec;
+    }
+
+    if (unlikely
+    (0
+        ||      pTV->tv_sec  <  tvPrevRetVal.tv_sec
+        || (1
+            &&  pTV->tv_sec  == tvPrevRetVal.tv_sec
+            &&  pTV->tv_usec <= tvPrevRetVal.tv_usec
+           )
+    ))
+    {
+        pTV->tv_usec = tvPrevRetVal.tv_sec;
+        pTV->tv_usec = tvPrevRetVal.tv_usec + 1;
+
+        if (unlikely(pTV->tv_usec >= 1000000))
         {
-            pTV->tv_usec -= 1000000;
-            pTV->tv_sec  += 1;
+            pTV->tv_sec  += pTV->tv_usec / 1000000;
+            pTV->tv_usec  = pTV->tv_usec % 1000000;
         }
     }
 
-    // Save returned value for next time...
+    // Save previously returned value for next time...
 
-    tvPrevious.tv_sec  = pTV->tv_sec;
-    tvPrevious.tv_usec = pTV->tv_usec;
+    tvPrevRetVal.tv_sec  = pTV->tv_sec;
+    tvPrevRetVal.tv_usec = pTV->tv_usec;
 
-    if ( bDidInit )
-        return 0;
+    // Done!
 
-    return gettimeofday( pTV, NULL );
+    return 0;       // (always unless user error)
 }
 
 #endif
 
 //////////////////////////////////////////////////////////////////////////////////////////
+// scandir...
 
 #if !defined( HAVE_SCANDIR )
 
@@ -1280,7 +1432,7 @@ int w32_get_stdin_char( char* pCharBuff, size_t wait_millisecs )
         hStdInAvailable = CreateEvent(NULL,TRUE,FALSE,NULL);
         hGotStdIn       = CreateEvent(NULL,TRUE,TRUE,NULL); // (initially signaled)
 
-        hThread = CreateThread
+        hThread = (HANDLE) _beginthreadex
         (
             NULL,               // pointer to security attributes
             64*1024,            // initial thread stack size in bytes
@@ -1509,6 +1661,51 @@ DLL_EXPORT int socket_is_socket( int sfd )
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
+// Set the SO_KEEPALIVE option and timeout values for a
+// socket connection to detect when client disconnects */
+
+DLL_EXPORT void socket_keepalive( int sfd, int idle_time, int probe_interval, int probe_count )
+{
+    DWORD   dwBytesReturned;            // (not used)
+
+    struct tcp_keepalive  ka;
+
+    ka.onoff              = TRUE;
+    ka.keepalivetime      = idle_time       * 1000;
+    ka.keepaliveinterval  = probe_interval  * 1000;
+    UNREFERENCED(probe_count);
+
+    // It either works or it doesn't <shrug>
+
+    // PROGRAMMING NOTE: the 'dwBytesReturned' value must apparently always be
+    // specified in order for this call to work at all. If you don't specify it,
+    // even though the call succeeds (does not return an error), the automatic
+    // keep-alive polling does not occur!
+
+    if (0 != WSAIoctl
+    (
+        (SOCKET)sfd,                    // [in]  Descriptor identifying a socket
+        SIO_KEEPALIVE_VALS,             // [in]  Control code of operation to perform
+        &ka,                            // [in]  Pointer to the input buffer
+        sizeof(ka),                     // [in]  Size of the input buffer, in bytes
+        NULL,                           // [out] Pointer to the output buffer
+        0,                              // [in]  Size of the output buffer, in bytes
+        &dwBytesReturned,               // [out] Pointer to actual number of bytes of output
+        NULL,                           // [in]  Pointer to a WSAOVERLAPPED structure
+                                        //       (ignored for nonoverlapped sockets)
+        NULL                            // [in]  Pointer to the completion routine called
+                                        //       when the operation has been completed
+                                        //       (ignored for nonoverlapped sockets)
+    ))
+    {
+        DWORD dwLastError = WSAGetLastError();
+        TRACE("*** WSAIoctl(SIO_KEEPALIVE_VALS) failed; rc %d: %s\n",
+            dwLastError, w32_strerror(dwLastError) );
+        ASSERT(1); // (in case we're debugging)
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////
 // The inet_aton() function converts the specified string,
 // in the Internet standard dot notation, to a network address,
 // and stores the address in the structure provided.
@@ -1521,8 +1718,9 @@ DLL_EXPORT int socket_is_socket( int sfd )
 DLL_EXPORT int inet_aton( const char* cp, struct in_addr* addr )
 {
     // Return success as long as both args are not NULL *and*
-    // the result is not INADDR_NONE, -OR- if it is, if
-    // that's the actual expected value of the conversion...
+    // the result is not INADDR_NONE (0xFFFFFFFF), -OR- if it
+    // is [INADDR_NONE], [we return success] if that is the
+    // actual expected value of the conversion...
 
     return
     (
@@ -1541,9 +1739,9 @@ DLL_EXPORT int inet_aton( const char* cp, struct in_addr* addr )
 #endif // !defined( HAVE_INET_ATON )
 
 //////////////////////////////////////////////////////////////////////////////////////////
-// All internal calls to Windows's 'FD_ISSET' or 'FD_ISSET' macros MUST use the below
-// macros instead and NOT the #defined 'FD_ISSET' or 'FD_ISSET' macros! The #defined
-// 'FD_ISSET' and 'FD_ISSET' macros are coded (in hmacros.h) to route the calls to the
+// All internal calls to Windows's 'FD_ISSET' or 'FD_SET' macros MUST use the below
+// macros instead and NOT the #defined 'FD_ISSET' or 'FD_SET' macros! The #defined
+// 'FD_ISSET' and 'FD_SET' macros are coded (in hmacros.h) to route the calls to the
 // internal 'w32_FD_SET' and 'w32_FD_ISSET' functions further below!
 
 #define  ORIGINAL_FD_ISSET    __WSAFDIsSet
@@ -2102,6 +2300,25 @@ char*    buffer_overflow_msg      = NULL;   // used to trim received message
 int      buffer_overflow_msg_len  = 0;      // length of above truncation msg
 
 //////////////////////////////////////////////////////////////////////////////////////////
+// Fork control...
+
+typedef struct _PIPED_PROCESS_CTL
+{
+    char*               pszBuffer;          // ptr to current logmsgs buffer
+    size_t              nAllocSize;         // allocated size of logmsgs buffer
+    size_t              nStrLen;            // amount used - 1 (because of NULL)
+    CRITICAL_SECTION    csLock;             // lock for accessing above buffer
+}
+PIPED_PROCESS_CTL;
+
+typedef struct _PIPED_THREAD_CTL
+{
+    HANDLE              hStdXXX;            // stdout or stderr handle
+    PIPED_PROCESS_CTL*  pPipedProcessCtl;   // ptr to process control
+}
+PIPED_THREAD_CTL;
+
+//////////////////////////////////////////////////////////////////////////////////////////
 // "Poor man's" fork...
 
 UINT WINAPI w32_read_piped_process_stdxxx_output_thread ( void* pThreadParm ); // (fwd ref)
@@ -2130,6 +2347,10 @@ DLL_EXPORT pid_t w32_poor_mans_fork ( char* pszCommandLine, int* pnWriteToChildS
     char* pszNewCommandLine;            // (because we build pvt copy for CreateProcess)
     BOOL  bSuccess;                     // (work)
     int   rc;                           // (work)
+
+    PIPED_PROCESS_CTL*  pPipedProcessCtl        = NULL;
+    PIPED_THREAD_CTL*   pPipedStdOutThreadCtl   = NULL;
+    PIPED_THREAD_CTL*   pPipedStdErrThreadCtl   = NULL;
 
     //////////////////////////////////////////////////
     // Initialize fields...
@@ -2241,19 +2462,31 @@ DLL_EXPORT pid_t w32_poor_mans_fork ( char* pszCommandLine, int* pnWriteToChildS
 
     bSuccess = CreateProcess
     (
-        NULL,                       // name of executable module = from command-line
-        pszNewCommandLine,          // command line with arguments
-        NULL,                       // process security attributes = use defaults
-        NULL,                       // primary thread security attributes = use defaults
-        TRUE,                       // HANDLE inheritance flag = allow
-                                    // (required when STARTF_USESTDHANDLES flag is used)
-        CREATE_NO_WINDOW,           // creation flags = no console
-        NULL,                       // environment block ptr = make a copy from parent's
-        NULL,                       // initial working directory = same as parent's
-        &siStartInfo,               // input STARTUPINFO pointer
-        &piProcInfo                 // output PROCESS_INFORMATION
+        NULL,                   // name of executable module = from command-line
+        pszNewCommandLine,      // command line with arguments
+
+        NULL,                   // process security attributes = use defaults
+        NULL,                   // primary thread security attributes = use defaults
+
+        TRUE,                   // HANDLE inheritance flag = allow
+                                // (required when STARTF_USESTDHANDLES flag is used)
+
+        0,  //  NOTE!  >>>--->  // UNDOCUMENTED SECRET! MUST BE ZERO! Can't be "CREATE_NO_WINDOW"
+                                // nor "DETACHED_PROCESS", etc, or else it sometimes doesn't work
+                                // or else a console window appears! ("ipconfig" being one such
+                                // example). THIS IS NOT DOCUMENTED *ANYWHERE* IN ANY MICROSOFT
+                                // DOCUMENTATION THAT I COULD FIND! I only stumbled across it by
+                                // sheer good fortune in a news group post after some intensive
+                                // Googling and have experimentally verified it works as desired.
+
+        NULL,                   // environment block ptr = make a copy from parent's
+        NULL,                   // initial working directory = same as parent's
+
+        &siStartInfo,           // input STARTUPINFO pointer
+        &piProcInfo             // output PROCESS_INFORMATION
     );
-    rc = GetLastError();            // (save return code)
+
+    rc = GetLastError();                        // (save return code)
 
     // Close the HANDLEs we don't need...
 
@@ -2262,7 +2495,6 @@ DLL_EXPORT pid_t w32_poor_mans_fork ( char* pszCommandLine, int* pnWriteToChildS
     VERIFY(CloseHandle(hChildWriteToStdout));   // (MUST close so child won't hang!)
     VERIFY(CloseHandle(hChildWriteToStderr));   // (MUST close so child won't hang!)
 
-           CloseHandle(piProcInfo.hProcess);    // (we don't need this one)
            CloseHandle(piProcInfo.hThread);     // (we don't need this one)
 
     free(pszNewCommandLine);                    // (not needed anymore)
@@ -2283,17 +2515,61 @@ DLL_EXPORT pid_t w32_poor_mans_fork ( char* pszCommandLine, int* pnWriteToChildS
         return -1;
     }
 
+    // Allocate/intialize control blocks for piped process/thread control...
+
+    // If we were passed a pnWriteToChildStdinFD pointer, then the caller
+    // is in charge of the process and will handle message capturing/logging
+    // (such as is done with the print-to-pipe facility).
+
+    // Otherwise (pnWriteToChildStdinFD is NULL) the caller wishes for us
+    // to capture the piped process's o/p, so we pass a PIPED_PROCESS_CTL
+    // structure to the stdout/stderr monitoring threads. This structure
+    // contains a pointer to a buffer where they can accumulate messages.
+
+    // Then once the process exits WE will then issue the "logmsg". This
+    // is necessary in order to "capture" the process's o/p since the logmsg
+    // capture facility is designed to capture o/p for a specific thread,
+    // where that thread is US! (else if we let the monitoring thread issue
+    // the logmsg's, they'll never get captured since they don't have the
+    // same thread-id as the thread that started the capture, which was us!
+    // (actually it was the caller, but we're the same thread as they are!)).
+
+    pPipedStdOutThreadCtl = malloc( sizeof(PIPED_THREAD_CTL) );
+    pPipedStdErrThreadCtl = malloc( sizeof(PIPED_THREAD_CTL) );
+
+    pPipedStdOutThreadCtl->hStdXXX = hOurReadFromStdout;
+    pPipedStdErrThreadCtl->hStdXXX = hOurReadFromStderr;
+
+    if ( !pnWriteToChildStdinFD )
+    {
+        pPipedProcessCtl = malloc( sizeof(PIPED_PROCESS_CTL) );
+
+        pPipedStdOutThreadCtl->pPipedProcessCtl = pPipedProcessCtl;
+        pPipedStdErrThreadCtl->pPipedProcessCtl = pPipedProcessCtl;
+
+        InitializeCriticalSection( &pPipedProcessCtl->csLock );
+        pPipedProcessCtl->nAllocSize =         1;    // (purposely small for debugging)
+        pPipedProcessCtl->pszBuffer  = malloc( 1 );  // (purposely small for debugging)
+        *pPipedProcessCtl->pszBuffer = 0;            // (null terminate string buffer)
+        pPipedProcessCtl->nStrLen    = 0;            // (no msgs yet)
+    }
+    else
+    {
+        pPipedStdOutThreadCtl->pPipedProcessCtl = NULL;
+        pPipedStdErrThreadCtl->pPipedProcessCtl = NULL;
+    }
+
     //////////////////////////////////////////////////
     // Create o/p pipe monitoring worker threads...
     //////////////////////////////////////////////////
     // Stdout...
 
-    hWorkerThread = CreateThread
+    hWorkerThread = (HANDLE) _beginthreadex
     (
         NULL,                                       // pointer to security attributes = use defaults
         PIPE_THREAD_STACKSIZE,                      // initial thread stack size
         w32_read_piped_process_stdxxx_output_thread,
-        (void*)hOurReadFromStdout,                  // thread argument = pipe HANDLE
+        pPipedStdOutThreadCtl,                      // thread argument
         0,                                          // special creation flags = none needed
         &dwThreadId                                 // pointer to receive thread ID
     );
@@ -2301,13 +2577,22 @@ DLL_EXPORT pid_t w32_poor_mans_fork ( char* pszCommandLine, int* pnWriteToChildS
 
     if (!hWorkerThread || INVALID_HANDLE_VALUE == hWorkerThread)
     {
-        TRACE("*** CreateThread() failed! rc = %d : %s\n",
+        TRACE("*** _beginthreadex() failed! rc = %d : %s\n",
             rc,w32_strerror(rc));
 
         if (pnWriteToChildStdinFD)
         VERIFY(CloseHandle(hOurWriteToStdin));
         VERIFY(CloseHandle(hOurReadFromStdout));
         VERIFY(CloseHandle(hOurReadFromStderr));
+
+        if ( !pnWriteToChildStdinFD )
+        {
+            DeleteCriticalSection( &pPipedProcessCtl->csLock );
+            free( pPipedProcessCtl->pszBuffer );
+            free( pPipedProcessCtl );
+        }
+        free( pPipedStdOutThreadCtl );
+        free( pPipedStdErrThreadCtl );
 
         errno = rc;
         return -1;
@@ -2320,12 +2605,12 @@ DLL_EXPORT pid_t w32_poor_mans_fork ( char* pszCommandLine, int* pnWriteToChildS
     //////////////////////////////////////////////////
     // Stderr...
 
-    hWorkerThread = CreateThread
+    hWorkerThread = (HANDLE) _beginthreadex
     (
         NULL,                                       // pointer to security attributes = use defaults
         PIPE_THREAD_STACKSIZE,                      // initial thread stack size
         w32_read_piped_process_stdxxx_output_thread,
-        (void*)hOurReadFromStderr,                  // thread argument = pipe HANDLE
+        pPipedStdErrThreadCtl,                      // thread argument
         0,                                          // special creation flags = none needed
         &dwThreadId                                 // pointer to receive thread ID
     );
@@ -2333,13 +2618,22 @@ DLL_EXPORT pid_t w32_poor_mans_fork ( char* pszCommandLine, int* pnWriteToChildS
 
     if (!hWorkerThread || INVALID_HANDLE_VALUE == hWorkerThread)
     {
-        TRACE("*** CreateThread() failed! rc = %d : %s\n",
+        TRACE("*** _beginthreadex() failed! rc = %d : %s\n",
             rc,w32_strerror(rc));
 
         if (pnWriteToChildStdinFD)
         VERIFY(CloseHandle(hOurWriteToStdin));
         VERIFY(CloseHandle(hOurReadFromStdout));
         VERIFY(CloseHandle(hOurReadFromStderr));
+
+        if ( !pnWriteToChildStdinFD )
+        {
+            DeleteCriticalSection( &pPipedProcessCtl->csLock );
+            free( pPipedProcessCtl->pszBuffer );
+            free( pPipedProcessCtl );
+        }
+        free( pPipedStdOutThreadCtl );
+        free( pPipedStdErrThreadCtl );
 
         errno = rc;
         return -1;
@@ -2349,11 +2643,37 @@ DLL_EXPORT pid_t w32_poor_mans_fork ( char* pszCommandLine, int* pnWriteToChildS
 
     SET_THREAD_NAME_ID(dwThreadId,"w32_read_piped_process_stdERR_output_thread");
 
-    // Return a C run-time file descriptor
-    // for the write-to-child-stdin HANDLE...
+    // Piped process capture handling...
 
-    if ( pnWriteToChildStdinFD )
+    if ( !pnWriteToChildStdinFD )
+    {
+        // We're in control of the process...
+        // Wait for it to exit...
+
+        WaitForSingleObject( piProcInfo.hProcess, INFINITE );
+        CloseHandle( piProcInfo.hProcess );
+
+        // Now print ALL captured messages AT ONCE...
+
+        logmsg( "%s", pPipedProcessCtl->pszBuffer );
+
+        // Free resources...
+
+        DeleteCriticalSection( &pPipedProcessCtl->csLock );
+        free( pPipedProcessCtl->pszBuffer );
+        free( pPipedProcessCtl );
+    }
+    else
+    {
+        // Caller is in control of the process...
+
+        CloseHandle( piProcInfo.hProcess );
+
+        // Return a C run-time file descriptor
+        // for the write-to-child-stdin HANDLE...
+
         *pnWriteToChildStdinFD = _open_osfhandle( (intptr_t) hOurWriteToStdin, 0 );
+    }
 
     // Success!
 
@@ -2363,30 +2683,40 @@ DLL_EXPORT pid_t w32_poor_mans_fork ( char* pszCommandLine, int* pnWriteToChildS
 //////////////////////////////////////////////////////////////////////////////////////////
 // Thread to read message data from the child process's stdxxx o/p pipe...
 
-void w32_parse_piped_process_stdxxx_data ( char* holdbuff, int* pnHoldAmount );
+void w32_parse_piped_process_stdxxx_data ( PIPED_PROCESS_CTL* pPipedProcessCtl, char* holdbuff, int* pnHoldAmount );
 
 UINT  WINAPI  w32_read_piped_process_stdxxx_output_thread ( void* pThreadParm )
 {
-    HANDLE    hOurReadFromStdxxx;
-    DWORD     nAmountRead;
-    int       nHoldAmount;
-    BOOL      oflow;
-    unsigned  nRetcode;
+    PIPED_THREAD_CTL*   pPipedStdXXXThreadCtl   = NULL;
+    PIPED_PROCESS_CTL*  pPipedProcessCtl        = NULL;
+
+    HANDLE    hOurReadFromStdxxx  = NULL;
+    DWORD     nAmountRead         = 0;
+    int       nHoldAmount         = 0;
+    BOOL      oflow               = FALSE;
+    unsigned  nRetcode            = 0;
 
     char   readbuff [ PIPEBUFSIZE ];
     char   holdbuff [ HOLDBUFSIZE ];
 
-    hOurReadFromStdxxx  = (HANDLE) pThreadParm;
-    nAmountRead         = 0;
-    nHoldAmount         = 0;
-    oflow               = FALSE;
-    nRetcode            = 0;
+    // Extract parms
+
+    pPipedStdXXXThreadCtl = (PIPED_THREAD_CTL*) pThreadParm;
+
+    pPipedProcessCtl    = pPipedStdXXXThreadCtl->pPipedProcessCtl;
+    hOurReadFromStdxxx  = pPipedStdXXXThreadCtl->hStdXXX;
+
+    free( pPipedStdXXXThreadCtl );      // (prevent memory leak)
+
+    // Begin work...
 
     for (;;)
     {
         if (!ReadFile(hOurReadFromStdxxx, readbuff, PIPEBUFSIZE-1, &nAmountRead, NULL))
         {
-            if (ERROR_BROKEN_PIPE == (nRetcode = GetLastError())) nRetcode = 0;
+            if (ERROR_BROKEN_PIPE == (nRetcode = GetLastError()))
+                nRetcode = 0;
+            // (else keep value returned from GetLastError())
             break;
         }
         *(readbuff+nAmountRead) = 0;
@@ -2412,12 +2742,14 @@ UINT  WINAPI  w32_read_piped_process_stdxxx_output_thread ( void* pThreadParm )
 
         // Pass all existing data to parsing function...
 
-        w32_parse_piped_process_stdxxx_data(holdbuff,&nHoldAmount);
+        w32_parse_piped_process_stdxxx_data( pPipedProcessCtl, holdbuff, &nHoldAmount );
 
         if (oflow) ASSERT(!nHoldAmount); oflow = FALSE;
     }
 
-    CloseHandle(hOurReadFromStdxxx);    // (prevent HANDLE leak)
+    // Finish up...
+
+    CloseHandle( hOurReadFromStdxxx );      // (prevent HANDLE leak)
 
     return nRetcode;
 }
@@ -2426,7 +2758,7 @@ UINT  WINAPI  w32_read_piped_process_stdxxx_output_thread ( void* pThreadParm )
 // Parse piped child's stdout/stderr o/p data into individual newline delimited
 // messages for displaying on the Hercules hardware console...
 
-void w32_parse_piped_process_stdxxx_data ( char* holdbuff, int* pnHoldAmount )
+void w32_parse_piped_process_stdxxx_data ( PIPED_PROCESS_CTL* pPipedProcessCtl, char* holdbuff, int* pnHoldAmount )
 {
     // This function executes in the context of the worker thread that calls it.
 
@@ -2471,7 +2803,45 @@ void w32_parse_piped_process_stdxxx_data ( char* holdbuff, int* pnHoldAmount )
 
         while (--pmsgend >= pbeg && isspace(*pmsgend)) {*pmsgend = 0; --nlen;}
 
-        logmsg("%s\n",pbeg);            // send all child's msgs to Herc console
+        // If we were passed a PIPED_PROCESS_CTL pointer, then the root thread
+        // wants us to just capture the o/p and IT will issue the logmsg within
+        // its own thread. Otherwise root thread isn't interested in capturing
+        // and thus we must issue the individual logmsg's ourselves...
+
+        if (!pPipedProcessCtl)
+        {
+            logmsg("%s\n",pbeg);    // send all child's msgs to Herc console
+        }
+        else
+        {
+            size_t  nNewStrLen, nAllocSizeNeeded;   // (work)
+
+            EnterCriticalSection( &pPipedProcessCtl->csLock );
+
+            nNewStrLen        = strlen( pbeg );
+            nAllocSizeNeeded  = ((((pPipedProcessCtl->nStrLen + nNewStrLen + 2) / 4096) + 1) * 4096);
+
+            if ( nAllocSizeNeeded > pPipedProcessCtl->nAllocSize )
+            {
+                pPipedProcessCtl->nAllocSize = nAllocSizeNeeded;
+                pPipedProcessCtl->pszBuffer  = realloc( pPipedProcessCtl->pszBuffer, nAllocSizeNeeded );
+                ASSERT( pPipedProcessCtl->pszBuffer );
+            }
+
+            if (nNewStrLen)
+            {
+                memcpy( pPipedProcessCtl->pszBuffer + pPipedProcessCtl->nStrLen, pbeg, nNewStrLen );
+                pPipedProcessCtl->nStrLen += nNewStrLen;
+            }
+
+            *(pPipedProcessCtl->pszBuffer + pPipedProcessCtl->nStrLen) = '\n';
+            pPipedProcessCtl->nStrLen++;
+            *(pPipedProcessCtl->pszBuffer + pPipedProcessCtl->nStrLen) = '\0';
+
+            ASSERT( pPipedProcessCtl->nStrLen <= pPipedProcessCtl->nAllocSize );
+
+            LeaveCriticalSection( &pPipedProcessCtl->csLock );
+        }
 
         // 'pend' should still point to the end of this message (where newline was)
 

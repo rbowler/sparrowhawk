@@ -1,8 +1,10 @@
-/* STACK.C      (c) Copyright Roger Bowler, 1999-2006                */
+/* STACK.C      (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 Linkage Stack Operations                     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+
+// $Id: stack.c,v 1.84 2007/06/23 00:04:16 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements the linkage stack functions of ESA/390     */
@@ -21,6 +23,17 @@
 /* Correction to stack types in ESAME mode                Jan Jaeger */
 /* ASN-and-LX-reuse facility                  June 2004 Roger Bowler */
 /*-------------------------------------------------------------------*/
+
+// $Log: stack.c,v $
+// Revision 1.84  2007/06/23 00:04:16  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.83  2006/12/20 04:26:20  gsmith
+// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
+//
+// Revision 1.82  2006/12/08 09:43:30  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -233,15 +246,7 @@ int  i;
         regs->CR(12) = ARCH_DEP(trace_br) (1, trap_ia, regs);
   #endif /*FEATURE_TRACING*/
 
-#if defined(FEATURE_PER)
-    if( EN_IC_PER_SB(regs)
-#if defined(FEATURE_PER2)
-      && ( !(regs->CR(9) & CR9_BAC)
-       || PER_RANGE_CHECK(trap_ia,regs->CR(10),regs->CR(11)) )
-#endif /*defined(FEATURE_PER2)*/
-        )
-        ON_IC_PER_SB(regs);
-#endif /*defined(FEATURE_PER)*/
+    PER_SB(regs, trap_ia);
 
     trap_flags = REAL_ILC(regs) << 16;
 
@@ -332,8 +337,11 @@ int  i;
     /* Load the Trap Control Block Address in gr15 */
     regs->GR_L(15) = duct11 & DUCT11_TCBA;
 
-    /* Update the Breaking Event Address Register */
-    UPDATE_BEAR_A(regs);
+    /* Ensure psw.IA is set */
+    SET_PSW_IA(regs);
+
+    /* Set the Breaking Event Address Register */
+    SET_BEAR_REG(regs, regs->ip - ((trap_is_trap4 || regs->execflag) ? 4 : 2));
 
     /* Set the Trap program address as a 31 bit instruction address */
 #if defined(FEATURE_ESAME)
@@ -341,8 +349,7 @@ int  i;
 #endif /*defined(FEATURE_ESAME)*/
     regs->psw.amode = 1;
     regs->psw.AMASK = AMASK31;
-    regs->psw.IA = trap_ia;
-    VALIDATE_AIA(regs);
+    UPD_PSW_IA(regs, trap_ia);
     /* set PSW to primary space */
     regs->psw.asc = 0;
     SET_AEA_MODE(regs);

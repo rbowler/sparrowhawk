@@ -3,6 +3,13 @@
    This file is in the public domain.
 */
 
+// $Id: strsignal.c,v 1.3 2006/12/08 09:43:30 jj Exp $
+//
+// $Log: strsignal.c,v $
+// Revision 1.3  2006/12/08 09:43:30  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
 
 #include "hercules.h"

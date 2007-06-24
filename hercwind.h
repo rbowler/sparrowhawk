@@ -1,10 +1,20 @@
-/* HERCWIND.H   (c) Copyright Roger Bowler, 2005-2006                */
+/* HERCWIND.H   (c) Copyright Roger Bowler, 2005-2007                */
 /*              MSVC Environment Specific Definitions                */
 
 /*-------------------------------------------------------------------*/
 /* Header file containing additional data structures and function    */
 /* prototypes required by Hercules in the MSVC environment           */
 /*-------------------------------------------------------------------*/
+
+// $Id: hercwind.h,v 1.15 2007/06/23 00:04:10 ivan Exp $
+//
+// $Log: hercwind.h,v $
+// Revision 1.15  2007/06/23 00:04:10  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.14  2006/12/08 09:43:26  jj
+// Add CVS message log
+//
 
 #if !defined(_HERCWIND_H)
 #define _HERCWIND_H
@@ -46,6 +56,14 @@
 
 ///////////////////////////////////////////////////////////////////////
 // Disable some warnings that tend to get in the way...
+//
+// FIXME: purposely disabling warning C4244 is dangerous IMO and might
+// come back to haunt us in the future when we DO happen to introduce
+// an unintentional coding error that results in unexpected data loss.
+//
+// We should instead take the time to fix all places where it's issued
+// (being sure to add comments when we do) so that we can then rely on
+// C4244 to warn us of real/actual coding errors.  -  Fish, April 2006
 
 #pragma warning( disable: 4142 ) // C4142: benign redefinition of type
 #pragma warning( disable: 4244 ) // C4244: conversion from 'type' to 'type', possible loss of data
@@ -119,6 +137,8 @@ typedef int             mode_t;
 #endif
 
 #define OPTION_CONFIG_SYMBOLS
+#define OPTION_ENHANCED_CONFIG_SYMBOLS
+#define OPTION_ENHANCED_CONFIG_INCLUDE
 #define OPTION_FTHREADS 
 #define HAVE_STRSIGNAL
 #define EXTERNALGUI
@@ -127,8 +147,9 @@ typedef int             mode_t;
 
 #undef  NO_ATTR_REGPARM         // ( ATTR_REGPARM(x) == __fastcall )
 #define HAVE_ATTR_REGPARM       // ( ATTR_REGPARM(x) == __fastcall )
+#define C99_FLEXIBLE_ARRAYS     // ("DEVBLK *memdev[];" supported)
 
-#include "getopt.h"
+//#include "getopt.h"
 #define HAVE_GETOPT_LONG
 
 #include <math.h>
@@ -137,5 +158,22 @@ typedef int             mode_t;
 #define HAVE_FABSL
 #define HAVE_FMODL
 #define HAVE_FREXPL
+
+// The following are needed by hostopts.h...
+
+#define HAVE_DECL_SIOCSIFNETMASK  1     // (manually defined in tuntap.h)
+#define HAVE_DECL_SIOCSIFHWADDR   1     // (manually defined in tuntap.h)
+#define HAVE_DECL_SIOCADDRT       0     // (unsupported by CTCI-W32)
+#define HAVE_DECL_SIOCDELRT       0     // (unsupported by CTCI-W32)
+#define HAVE_DECL_SIOCDIFADDR     0     // (unsupported by CTCI-W32)
+
+// GNUWin32 PCRE (Perl-Compatible Regular Expressions) support...
+
+#if defined(HAVE_PCRE)
+  // (earlier packages failed to define this so we must do so ourselves)
+  #define  PCRE_DATA_SCOPE  extern __declspec(dllimport)
+  #include PCRE_INCNAME                 // (passed by makefile)
+  #define  OPTION_HAO                   // Hercules Automatic Operator
+#endif
 
 #endif /*!defined(_HERCWIND_H)*/

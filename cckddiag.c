@@ -1,10 +1,21 @@
-/* CCKDDIAG.C   (c) Copyright Roger Bowler, 1999-2006                */
+/* CCKDDIAG.C   (c) Copyright Roger Bowler, 1999-2007                */
 /*       CCKD diagnostic tool                                        */
 /* 2003-02-07 James M. Morrison initial implementation               */
 /* portions borrowed from cckdcdsk & other CCKD code                 */
+
+// $Id: cckddiag.c,v 1.26 2007/06/23 00:04:03 ivan Exp $
+
 /*-------------------------------------------------------------------*/
 /* Diagnostic tool to display various CCKD data                      */
 /*-------------------------------------------------------------------*/
+
+// $Log: cckddiag.c,v $
+// Revision 1.26  2007/06/23 00:04:03  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.25  2006/12/08 09:43:17  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -117,13 +128,13 @@ void *makbuf(int len, char *label) {
 int readpos(
             int fd,               /* opened CCKD image file          */
             void *buf,            /* buffer of size len              */
-            OFF_T offset,         /* offset into CCKD image to read  */
+            off_t offset,         /* offset into CCKD image to read  */
             size_t len            /* length of data to read          */
             ) {
     if (debug) 
         fprintf(stdout, "\nREADPOS seeking %d (0x%8.8X)\n", 
                         (int)offset, (unsigned int)offset);
-    if (LSEEK(fd, offset, SEEK_SET) < 0) {
+    if (lseek(fd, offset, SEEK_SET) < 0) {
         fprintf(stdout, _("lseek to pos 0x%8.8x error: %s\n"),
                         (unsigned int) offset, strerror(errno));
         clean();
@@ -170,7 +181,9 @@ int             rc;                     /* Return code               */
 BYTE           *bufp;                   /* Buffer pointer            */
 #endif
 size_t          bufl;                   /* Buffer length             */
+#ifdef CCKD_BZIP2
 unsigned int    ubufl;                  /* when size_t != unsigned int */
+#endif
 
 #if !defined( HAVE_LIBZ ) && !defined( CCKD_BZIP2 )
     UNREFERENCED(heads);
@@ -227,7 +240,7 @@ unsigned int    ubufl;                  /* when size_t != unsigned int */
                          ibuf[0], ibuf[1], ibuf[2], ibuf[3], ibuf[4]);
             return -1;
         }
-	bufl=ubufl;
+        bufl=ubufl;
         bufl += CKDDASD_TRKHDR_SIZE;
         break;
 #endif
@@ -333,19 +346,19 @@ int             len;
 }
 
 /*-------------------------------------------------------------------*/
-/* offtify - given decimal or hex input string, return OFF_T         */
+/* offtify - given decimal or hex input string, return off_t         */
 /* Locale independent, does not check for overflow                   */
 /* References <ctype.h> and <string.h>                               */
 /*-------------------------------------------------------------------*/
 /* Based on code in P. J. Plauger's "The Standard C Library"         */
 /* See page 34, in Chapter 2 (ctype.h)                               */
-OFF_T offtify(char *s) {
+off_t offtify(char *s) {
 
 static const char  xd[] = {"0123456789abcdefABCDEF"};
 static const char  xv[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
                            10, 11, 12, 13, 14, 15, 
                            10, 11, 12, 13, 14, 15};
-OFF_T              v;
+off_t              v;
 char               *p;
 
         p = s;
@@ -359,7 +372,7 @@ char               *p;
                         p, (U64)v, (U64)v);
             return v;
         } else {                                 /* decimal input */
-            v = (OFF_T) atoll(s);
+            v = (off_t) atoll(s);
             if (debug) 
                 fprintf(stdout, 
                         "OFFTIFY string %s decimal %" I64_FMT "X %" I64_FMT "d\n", 
@@ -402,11 +415,11 @@ int             op_tt = 0;              /* relative track #          */
 int             swapend;                /* 1 = New endianess doesn't
                                              match machine endianess */
 int             n, trk=0, l1ndx=0, l2ndx=0;
-OFF_T           l2taboff=0;             /* offset to assoc. L2 table */
+off_t           l2taboff=0;             /* offset to assoc. L2 table */
 int             ckddasd;                /* 1=CKD dasd  0=FBA dasd    */
 int             heads=0;                /* Heads per cylinder        */
 int             blks;                   /* Number fba blocks         */
-OFF_T           trkhdroff=0;            /* offset to assoc. trk hdr  */
+off_t           trkhdroff=0;            /* offset to assoc. trk hdr  */
 int             imglen=0;               /* track length              */
 char            pathname[MAX_PATH];     /* file path in host format  */
 
@@ -562,7 +575,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
                 ckd->name, heads);
     } else {
         blks  = 0;
-      #if 0 /* cdevhdr is uninitialised and blks is never referenced... */
+      #if 0 /* cdevhdr is uninitialized and blks is never referenced... */
         blks  = ((U32)(cdevhdr.cyls[0]) << 24)
               | ((U32)(cdevhdr.cyls[2]) << 16)
               | ((U32)(cdevhdr.cyls[1]) << 8)

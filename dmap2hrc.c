@@ -1,11 +1,21 @@
-/* DMAP2HRC.C   (c) Copyright Jay Maynard, 2001-2006                 */
+/* DMAP2HRC.C   (c) Copyright Jay Maynard, 2001-2007                 */
 /*              Convert P/390 DEVMAP to Hercules config file         */
+
+// $Id: dmap2hrc.c,v 1.20 2007/06/23 00:04:08 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This program reads a P/390 DEVMAP file and extracts the device    */
 /* definitions from it, then writes them to the standard output in   */
 /* the format Hercules uses for its .cnf file.                       */
 /*-------------------------------------------------------------------*/
+
+// $Log: dmap2hrc.c,v $
+// Revision 1.20  2007/06/23 00:04:08  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.19  2006/12/08 09:43:20  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 

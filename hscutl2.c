@@ -21,6 +21,13 @@
 /*                                                                    */
 /**********************************************************************/
 
+// $Id: hscutl2.c,v 1.10 2006/12/08 09:43:26 jj Exp $
+//
+// $Log: hscutl2.c,v $
+// Revision 1.10  2006/12/08 09:43:26  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
 
 #define _HSCUTL2_C_

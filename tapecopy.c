@@ -1,8 +1,10 @@
-/* TAPECOPY.C   (c) Copyright Roger Bowler, 1999-2006                */
+/* TAPECOPY.C   (c) Copyright Roger Bowler, 1999-2007                */
 /*              Convert SCSI tape into AWSTAPE format                */
 
+// $Id: tapecopy.c,v 1.42 2007/06/23 00:04:17 ivan Exp $
+
 /*              Read from AWSTAPE and write to SCSI tape mods        */
-/*              Copyright 2005-2006 James R. Maynard III             */
+/*              Copyright 2005-2007 James R. Maynard III             */
 
 /*-------------------------------------------------------------------*/
 /* This program reads a SCSI tape and produces a disk file with      */
@@ -10,6 +12,14 @@
 /* If no disk file name is supplied, then the program simply         */
 /* prints a summary of the tape files and blocksizes.                */
 /*-------------------------------------------------------------------*/
+
+// $Log: tapecopy.c,v $
+// Revision 1.42  2007/06/23 00:04:17  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.41  2006/12/08 09:43:30  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -38,13 +48,8 @@ int main (int argc, char *argv[])
 time_t curr_progress_time = 0;
 time_t prev_progress_time = 0;
 #define PROGRESS_INTERVAL_SECS  (   3   )     /* (just what it says) */
-#define MAX_BLKS                ( 13000 )     /* (just a wild guess) */
 #endif /*defined(EXTERNALGUI)*/
 
-/*-------------------------------------------------------------------*/
-/* Tape ioctl areas                                                  */
-/*-------------------------------------------------------------------*/
-struct mtget mtget;                     /* Area for MTIOCGET ioctl   */
 
 /*-------------------------------------------------------------------*/
 /* Return Codes...                                                   */
@@ -242,18 +247,18 @@ static void print_usage (void)
 /*                  +1  ==  end-of-tape                              */
 /*                  -1  ==  error                                    */
 /*-------------------------------------------------------------------*/
-static int obtain_status (char *devname, int devfd)
+static int obtain_status (char *devname, int devfd, struct mtget* mtget)
 {
 int rc;                                 /* Return code               */
 
-    rc = ioctl_tape (devfd, MTIOCGET, (char*)&mtget);
+    rc = ioctl_tape (devfd, MTIOCGET, (char*)mtget);
     if (rc < 0)
     {
         if (1
             && EIO == errno
             && (0
-                || GMT_EOD( mtget.mt_gstat )
-                || GMT_EOT( mtget.mt_gstat )
+                || GMT_EOD( mtget->mt_gstat )
+                || GMT_EOT( mtget->mt_gstat )
             )
         )
             return +1;
@@ -263,8 +268,8 @@ int rc;                                 /* Return code               */
         return -1;
     }
 
-    if (GMT_EOD( mtget.mt_gstat ) ||
-        GMT_EOT( mtget.mt_gstat ))
+    if (GMT_EOD( mtget->mt_gstat ) ||
+        GMT_EOT( mtget->mt_gstat ))
         return +1;
 
     return 0;
@@ -273,7 +278,7 @@ int rc;                                 /* Return code               */
 /*-------------------------------------------------------------------*/
 /* Read a block from SCSI tape                                       */
 /*-------------------------------------------------------------------*/
-int read_scsi_tape (int devfd, void *buf, size_t bufsize)
+int read_scsi_tape (int devfd, void *buf, size_t bufsize, struct mtget* mtget)
 {
     int rc;
     int save_errno;
@@ -283,24 +288,16 @@ int read_scsi_tape (int devfd, void *buf, size_t bufsize)
     {
         /* Determine whether end-of-tape has been read */
         save_errno = errno;
-        if (devnamein)
+        ASSERT( devnamein );
+        rc = obtain_status (devnamein, devfd, mtget);
+        if (rc == +1)
         {
-            rc = obtain_status (devnamein, devfd);
-            if (0
-#ifdef _MSVC_
-                || save_errno == ERROR_NO_DATA_DETECTED
-#endif
-                || rc == +1
-            )
-            {
-                printf (_("HHCTC011I End of tape.\n"));
-                return(-1);
-            }
+            printf (_("HHCTC011I End of tape.\n"));
+            errno = save_errno;
+            return(-1);
         }
-        errno = save_errno;
-
         printf (_("HHCTC008E Error reading %s: errno=%d: %s\n"),
-                devnamein, errno, strerror(errno));
+            devnamein, errno, strerror(errno));
         EXIT( RC_ERROR_READING_DATA );
     }
 
@@ -505,6 +502,11 @@ BYTE            labelrec[81];           /* Standard label (ASCIIZ)   */
 int64_t         bytes_read;             /* Bytes read from i/p file  */
 int64_t         file_bytes;             /* Byte count for curr file  */
 char            pathname[MAX_PATH];     /* file name in host format  */
+struct mtget    mtget;                  /* Area for MTIOCGET ioctl   */
+#if defined(EXTERNALGUI)
+struct mtpos    mtpos;                  /* Area for MTIOCPOS ioctl   */
+int             is3590 = 0;             /* 1 == 3590, 0 == 3480/3490 */
+#endif /*defined(EXTERNALGUI)*/
 
 #if defined(ENABLE_NLS)
     setlocale(LC_ALL, "");
@@ -537,8 +539,9 @@ char            pathname[MAX_PATH];     /* file name in host format  */
         return(0); /* Make gcc -Wall happy */
     }
 
-    if (strlen(    argv[1]      ) >  5
-        && memcmp( argv[1], "/dev/", 5 ) == 0
+    if (0
+        || ( strlen( argv[1] ) > 5 && strnfilenamecmp( argv[1], "/dev/",       5 ) == 0 )
+        || ( strlen( argv[1] ) > 8 && strnfilenamecmp( argv[1], "\\\\.\\Tape", 8 ) == 0 )
     )
     {
         devnamein = argv[1];
@@ -555,8 +558,9 @@ char            pathname[MAX_PATH];     /* file name in host format  */
     */
     if (argc > 2 && argv[2] )
     {
-        if (strlen(   argv[2]       ) >  5
-            && memcmp( argv[2], "/dev/", 5 ) == 0
+        if (0
+            || ( strlen( argv[2] ) > 5 && strnfilenamecmp( argv[2], "/dev/",       5 ) == 0 )
+            || ( strlen( argv[2] ) > 8 && strnfilenamecmp( argv[2], "\\\\.\\Tape", 8 ) == 0 )
         )
         {
             devnameout = argv[2];
@@ -599,7 +603,7 @@ char            pathname[MAX_PATH];     /* file name in host format  */
         EXIT( RC_ERROR_OPENING_SCSI_DEVICE );
     }
 
-    SLEEP(1);
+    usleep(50000);
 
     /* Set the tape device to process variable length blocks */
     opblk.mt_op = MTSETBLK;
@@ -612,7 +616,7 @@ char            pathname[MAX_PATH];     /* file name in host format  */
         EXIT( RC_ERROR_SETTING_SCSI_VARBLK_PROCESSING );
     }
 
-    SLEEP(1);
+    usleep(50000);
 
     /* Rewind the tape to the beginning */
     opblk.mt_op = MTREW;
@@ -625,10 +629,10 @@ char            pathname[MAX_PATH];     /* file name in host format  */
         EXIT( RC_ERROR_REWINDING_SCSI );
     }
 
-    SLEEP(1);
+    usleep(50000);
 
     /* Obtain the tape status */
-    rc = obtain_status ((devnamein ? devnamein : devnameout), devfd);
+    rc = obtain_status ((devnamein ? devnamein : devnameout), devfd, &mtget);
     if (rc < 0)
         EXIT( RC_ERROR_OBTAINING_SCSI_STATUS );
 
@@ -691,12 +695,37 @@ char            pathname[MAX_PATH];     /* file name in host format  */
     file_bytes = 0;
 
 #if defined(EXTERNALGUI)
+    // Notify the GUI of the high-end of the copy-progress range...
     if ( extgui )
     {
-        fprintf( stderr, "BLKS=%d\n", MAX_BLKS );
+        // Retrieve BOT block-id...
+        VERIFY( 0 == ioctl_tape( devfd, MTIOCPOS, (char*)&mtpos ) );
+
+        is3590 = ((mtpos.mt_blkno & 0x7F000000) != 0x01000000) ? 1 : 0;
+
+        if (!is3590)
+        {
+            // The seg# portion the SCSI tape physical
+            // block-id number values ranges from 1 to 95...
+            fprintf( stderr, "BLKS=%d\n", 95 );
+        }
+        else
+        {
+            // FIXME: 3590s (e.g. Magstar) use 32-bit block addressing,
+            // and thus its block-id does not contain a seg# value, so
+            // we must use some other technique. For now, we'll simply
+            // presume the last block on the tape is block# 0x003FFFFF
+            // (just to keep things simple).
+
+            fprintf( stderr, "BLKS=%d\n", 0x003FFFFF );
+        }
+
+        // Init time of last issued progress message
         prev_progress_time = time( NULL );
     }
 #endif /*defined(EXTERNALGUI)*/
+
+    /* Perform the copy... */
 
     while (1)
     {
@@ -708,7 +737,13 @@ char            pathname[MAX_PATH];     /* file name in host format  */
                 ( prev_progress_time + PROGRESS_INTERVAL_SECS ) )
             {
                 prev_progress_time = curr_progress_time;
-                fprintf( stderr, "BLK=%d\n", totalblks );
+                if ( ioctl_tape( devfd, MTIOCPOS, (char*)&mtpos ) == 0 )
+                {
+                    if (!is3590)
+                        fprintf( stderr, "BLK=%d\n", (mtpos.mt_blkno >> 24) & 0x0000007F );
+                    else
+                        fprintf( stderr, "BLK=%d\n", mtpos.mt_blkno );
+                }
             }
         }
 #endif /*defined(EXTERNALGUI)*/
@@ -718,7 +753,7 @@ char            pathname[MAX_PATH];     /* file name in host format  */
 
         /* Read a block */
         if (devnamein)
-            len = read_scsi_tape(devfd, buf, sizeof(buf));
+            len = read_scsi_tape(devfd, buf, sizeof(buf), &mtget);
         else
             len = read_aws_disk(diskfd, buf, sizeof(buf));
 
@@ -754,7 +789,7 @@ char            pathname[MAX_PATH];     /* file name in host format  */
             /* Show the 'tapemark' AFTER the above file summary since
                that's the actual physical sequence of events; i.e. the
                file data came first THEN it was followed by a tapemark */
-            printf(_("(tapemark)\n"));
+            printf(_("          (tapemark)\n"));  // (align past HHCmsg#)
 
             /* Reset counters for next file */
             if (blkcount)
@@ -836,6 +871,20 @@ char            pathname[MAX_PATH];     /* file name in host format  */
         ,(double) ( bytes_written + HALF_MEGABYTE ) / (double) ONE_MEGABYTE
     );
     close (diskfd);
+
+    /* Rewind the tape back to the beginning again before exiting */
+
+    opblk.mt_op = MTREW;
+    opblk.mt_count = 1;
+
+    rc = ioctl_tape (devfd, MTIOCTOP, (char*)&opblk);
+
+    if (rc < 0)
+    {
+        printf (_("HHCTC006E Error rewinding %s: rc=%d, errno=%d: %s\n"),
+                (devnamein ? devnamein : devnameout), rc, errno, strerror(errno));
+        EXIT( RC_ERROR_REWINDING_SCSI );
+    }
 
     close_tape (devfd);
 

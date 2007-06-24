@@ -1,5 +1,15 @@
-/* LOADPARM.C   (c) Copyright Jan Jaeger, 2004-2006                  */
+/* LOADPARM.C   (c) Copyright Jan Jaeger, 2004-2007                  */
 /*              SCLP / MSSF loadparm                                 */
+
+// $Id: loadparm.c,v 1.12 2007/06/23 00:04:14 ivan Exp $
+//
+// $Log: loadparm.c,v $
+// Revision 1.12  2007/06/23 00:04:14  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.11  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 

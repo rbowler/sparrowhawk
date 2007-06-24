@@ -1,4 +1,4 @@
-/* FEATCHK.H    (c) Copyright Jan Jaeger, 2000-2006                  */
+/* FEATCHK.H    (c) Copyright Jan Jaeger, 2000-2007                  */
 /*-------------------------------------------------------------------*/
 /*                                                                   */
 /*           Feature definition consistency checks                   */
@@ -9,6 +9,31 @@
 /*  can include emulation support                                    */
 /*                                                                   */
 /*-------------------------------------------------------------------*/
+
+// $Id: featchk.h,v 1.47 2007/06/23 00:04:09 ivan Exp $
+//
+// $Log: featchk.h,v $
+// Revision 1.47  2007/06/23 00:04:09  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.46  2007/03/08 01:27:02  gsmith
+// Remove inline attr from vfetchx/vstorex _full functions
+//
+// Revision 1.45  2007/01/14 23:31:46  gsmith
+// nerak's patch, one more time
+//
+// Revision 1.44  2007/01/14 19:49:13  gsmith
+// Fix typos
+//
+// Revision 1.43  2007/01/14 19:42:38  gsmith
+// Fix S370 only build - nerak60510
+//
+// Revision 1.42  2007/01/04 14:21:27  rbowler
+// Decimal floating point does not require binary floating point
+//
+// Revision 1.41  2006/12/08 09:43:21  jj
+// Add CVS message log
+//
 
 #if defined(FEATCHK_CHECK_ALL)
 
@@ -114,8 +139,10 @@
 #undef _VSTORE_C_STATIC
 #if !defined(OPTION_NO_INLINE_VSTORE)
  #define _VSTORE_C_STATIC static inline
+ #define _VSTORE_FULL_C_STATIC static
 #else
  #define _VSTORE_C_STATIC
+ #define _VSTORE_FULL_C_STATIC
 #endif
 
 #undef _VFETCH_C_STATIC
@@ -302,6 +329,17 @@
 #if defined(FEATURE_BINARY_FLOATING_POINT) \
  && defined(NO_IEEE_SUPPORT)
  #undef FEATURE_BINARY_FLOATING_POINT
+ #undef FEATURE_FPS_EXTENSIONS
+#endif
+
+#if defined(FEATURE_BINARY_FLOATING_POINT) \
+ && !defined(FEATURE_BASIC_FP_EXTENSIONS)
+ #error Binary floating point requires basic FP extensions
+#endif
+
+#if defined(FEATURE_DECIMAL_FLOATING_POINT) \
+ && !defined(FEATURE_BASIC_FP_EXTENSIONS)
+ #error Decimal floating point requires basic FP extensions
 #endif
 
 #if defined(FEATURE_BASIC_FP_EXTENSIONS) \
@@ -310,8 +348,7 @@
 #endif
 
 #if !defined(FEATURE_BASIC_FP_EXTENSIONS)
- #if defined(FEATURE_BINARY_FLOATING_POINT) \
-  || defined(FEATURE_HFP_EXTENSIONS) \
+ #if defined(FEATURE_HFP_EXTENSIONS) \
   || defined(FEATURE_FPS_EXTENSIONS)
   #error Floating point extensions require basic FP extensions
  #endif

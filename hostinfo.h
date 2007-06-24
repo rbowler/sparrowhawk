@@ -1,12 +1,22 @@
-/* HOSTINFO.H   (c) Copyright "Fish" (David B. Trout), 2002-2006     */
+/* HOSTINFO.H   (c) Copyright "Fish" (David B. Trout), 2002-2007     */
 
 /*   Released under the Q Public License                             */
 /*      (http://www.conmicro.cx/hercules/herclic.html)               */
 /*   as modifications to Hercules.                                   */
 
+// $Id: hostinfo.h,v 1.12 2007/06/23 00:04:11 ivan Exp $
+
 /*-------------------------------------------------------------------*/
 /* Header file contains host system information                      */
 /*-------------------------------------------------------------------*/
+
+// $Log: hostinfo.h,v $
+// Revision 1.12  2007/06/23 00:04:11  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.11  2006/12/08 09:43:26  jj
+// Add CVS message log
+//
 
 #ifndef _HOSTINFO_H_
 #define _HOSTINFO_H_
@@ -28,7 +38,7 @@ typedef struct HOST_INFO
     char  sysname[20];
     char  nodename[20];
     char  release[20];
-    char  version[20];
+    char  version[50];
     char  machine[20];
     int   trycritsec_avail;             /* 1=TryEnterCriticalSection */
     int   num_procs;                    /* #of processors            */

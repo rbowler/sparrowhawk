@@ -1,9 +1,19 @@
 //////////////////////////////////////////////////////////////////////////////////////////
 //   hconsole.c        Hercules hardware console (panel) support functions
 //////////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2005-2006. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2005-2007. Released under the Q Public License
 // (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
 //////////////////////////////////////////////////////////////////////////////////////////
+
+// $Id: hconsole.c,v 1.10 2007/06/23 00:04:10 ivan Exp $
+//
+// $Log: hconsole.c,v $
+// Revision 1.10  2007/06/23 00:04:10  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.9  2006/12/08 09:43:21  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -408,6 +418,39 @@ int  set_console_cursor_shape( FILE* confp, int ins )
         return -1;
     }
 
+    return 0;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////
+// From KB article 124103: "How To Obtain a Console Window Handle (HWND)"
+// http://support.microsoft.com/?kbid=124103
+
+#define MAX_WINDOW_TITLE_LEN  (256)   // (purely arbitrary)
+
+static TCHAR g_szOriginalTitle[ MAX_WINDOW_TITLE_LEN ] = {0};
+
+int w32_set_console_title( char* pszTitle )
+{
+    TCHAR    szNewTitleBuff [ MAX_WINDOW_TITLE_LEN ];
+    LPCTSTR  pszNewTitle = NULL;
+
+    if (!g_szOriginalTitle[0])
+        VERIFY(GetConsoleTitle( g_szOriginalTitle, MAX_WINDOW_TITLE_LEN ));
+
+    if (pszTitle)
+    {
+        _sntprintf( szNewTitleBuff, MAX_WINDOW_TITLE_LEN-1, _T("%hs"), pszTitle );
+        szNewTitleBuff[MAX_WINDOW_TITLE_LEN-1]=0;
+        pszNewTitle = szNewTitleBuff;
+    }
+    else
+        pszNewTitle = g_szOriginalTitle;
+
+    if (!SetConsoleTitle( pszNewTitle ))
+    {
+        errno = GetLastError();
+        return -1;
+    }
     return 0;
 }
 

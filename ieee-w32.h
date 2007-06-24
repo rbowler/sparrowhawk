@@ -1,3 +1,10 @@
+// $Id: ieee-w32.h,v 1.7 2006/12/08 09:43:28 jj Exp $
+//
+// $Log: ieee-w32.h,v $
+// Revision 1.7  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
+
 #ifndef _IEEE_W32_H
 #define _IEEE_W32_H
 
@@ -265,7 +272,7 @@ signbit (double x)
   int32_t hx;
 
   GET_HIGH_WORD (hx, x);
-  return hx & 0x80000000;
+  return (hx & 0x80000000) != 0;
 }
 
 #if !defined(HAVE_FREXPL)

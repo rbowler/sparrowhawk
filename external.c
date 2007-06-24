@@ -1,8 +1,10 @@
-/* EXTERNAL.C   (c) Copyright Roger Bowler, 1999-2006                */
+/* EXTERNAL.C   (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 External Interrupt and Timer                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2006      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+// $Id: external.c,v 1.71 2007/06/23 00:04:09 ivan Exp $
+
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements external interrupt, timer, and signalling  */
@@ -14,7 +16,6 @@
 /*      TOD clock offset contributed by Jay Maynard                  */
 /*      Correction to timer interrupt by Valery Pogonchenko          */
 /*      TOD clock drag factor contributed by Jan Jaeger              */
-/*      Synchronized broadcasting contributed by Jan Jaeger          */
 /*      CPU timer and clock comparator interrupt improvements by     */
 /*          Jan Jaeger, after a suggestion by Willem Koynenberg      */
 /*      Prevent TOD clock and CPU timer from going back - Jan Jaeger */
@@ -22,6 +23,20 @@
 /*      Fix todclock - Jay Maynard                                   */
 /*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
 /*-------------------------------------------------------------------*/
+
+// $Log: external.c,v $
+// Revision 1.71  2007/06/23 00:04:09  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.70  2007/02/26 00:54:22  gsmith
+// Display timer interrupts only if tracing/stepping all
+//
+// Revision 1.69  2007/01/16 01:45:33  gsmith
+// Tweaks to instruction stepping/tracing
+//
+// Revision 1.68  2006/12/08 09:43:20  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -34,104 +49,8 @@
 #endif
 
 #include "hercules.h"
-
 #include "opcode.h"
-
 #include "inline.h"
-
-
-/*-------------------------------------------------------------------*/
-/* Synchronize broadcast request                                     */
-/* Input:                                                            */
-/*      regs    A pointer to the CPU register context                */
-/*      code    A mask indicating which function to perform.         */
-/*              More than 1 function may be requested:               */
-/*              PTLB  - 0x01 - purge TLB            (CSP)            */
-/*              PALB  - 0x02 - purge ALB            (CSP)            */
-/*              PTLBE - 0x04 - purge TLB entry      (IPTE)           */
-/*              If the code is zero then we are entering on the      */
-/*              behalf of another CPU and the function to be         */
-/*              performed is in sysblk.broadcast_code.               */
-/*      pfra    Real address if PTLBE request                        */
-/*                                                                   */
-/* The intlock MUST be held on entry                                 */
-/*                                                                   */
-/* Signals all other CPU's to perform a requested function           */
-/* synchronously, such as purging the ALB and TLB buffers.           */
-/* The CPU issuing the broadcast request will wait until             */
-/* all other CPU's have performed the requested action.         *JJ  */
-/*                                                                   */
-/*-------------------------------------------------------------------*/
-void ARCH_DEP(synchronize_broadcast) (REGS *regs, int code, RADR pfra)
-{
-U32     i;                              /* Array subscript           */
-REGS   *realregs;                       /* Real REGS if guest        */
-REGS   *tregs;                          /* Target regs               */
-
-    realregs = SIE_MODE(regs) ? regs->hostregs : regs;
-
-    do {
-        if (code)
-        {
-            /* Complete any outstanding broadcasts */
-            while (sysblk.broadcast_count)
-                ARCH_DEP(synchronize_broadcast) (realregs, 0, 0);
-
-            /* Turn broadcast bit on for all started CPUs */
-            for (i = 0; i < MAX_CPU; i++)
-                if (IS_CPU_ONLINE(i))
-                {
-                    tregs = sysblk.regs[i];
-                    if ( sysblk.started_mask & BIT(tregs->cpuad) )
-                    {
-                        ON_IC_BROADCAST(tregs);
-                        sysblk.broadcast_count++;
-                    }
-                }
-            sysblk.broadcast_code = code;
-            sysblk.BROADCAST_PFRA = pfra;
-            WAKEUP_CPUS_MASK(sysblk.waiting_mask);
-        }
-
-        /* Perform the requested functions */
-        if (IS_IC_BROADCAST(realregs))
-        {
-            /* Purge TLB */
-            if (sysblk.broadcast_code & BROADCAST_PTLB)
-                ARCH_DEP(purge_tlb) (realregs);
-
-            /* Purge TLB entries */
-            if (sysblk.broadcast_code & BROADCAST_PTLBE)
-                ARCH_DEP(purge_tlbe) (realregs, sysblk.BROADCAST_PFRA);
-
-#if defined(FEATURE_ACCESS_REGISTERS)
-            /* Purge ALB */
-            if (sysblk.broadcast_code & BROADCAST_PALB)
-                ARCH_DEP(purge_alb) (realregs);
-#endif /*defined(FEATURE_ACCESS_REGISTERS)*/
-
-            OFF_IC_BROADCAST(realregs);
-            sysblk.broadcast_count--;
-        }
-
-        /* Wait for the other CPUs.  If count is zero and code is
-         * non-zero then there are no other CPUs
-         */
-        if (sysblk.broadcast_count)
-            wait_condition (&sysblk.broadcast_cond, &sysblk.intlock);
-        else if (!code)
-            broadcast_condition (&sysblk.broadcast_cond);
-
-        /* If we were the instigating CPU and there are other CPUs
-         * then we waited.  While we were waiting, another CPU may
-         * have instigated a synchronize broadcast request.
-         */
-        code = 0;
-
-    } while (sysblk.broadcast_count);
-
-} /* end function synchronize_broadcast */
-
 
 /*-------------------------------------------------------------------*/
 /* Load external interrupt new PSW                                   */
@@ -172,10 +91,6 @@ int     rc;
     /* Store the interrupt code in the PSW */
     regs->psw.intcode = code;
 
-#if defined(FEATURE_INTERVAL_TIMER)
-    /* Ensure the interrupt timer is uptodate */
-    ARCH_DEP(store_int_timer) (regs);
-#endif
 
     /* Zero extcpuad field unless extcall or ems signal */
     if(code != EXT_EXTERNAL_CALL_INTERRUPT
@@ -205,12 +120,17 @@ int     rc;
 
         if ( rc )
         {
-            release_lock(&sysblk.intlock);
+            RELEASE_INTLOCK(regs);
             ARCH_DEP(program_interrupt)(regs, rc);
         }
     }
 
-    release_lock(&sysblk.intlock);
+#if defined(FEATURE_INTERVAL_TIMER)
+    /* Ensure the interval timer is uptodate */
+    ARCH_DEP(store_int_timer_nolock) (regs);
+#endif
+    RELEASE_INTLOCK(regs);
+
 
     if ( SIE_MODE(regs)
 #if defined(_FEATURE_EXPEDITED_SIE_SUBSET)
@@ -357,11 +277,9 @@ U16     cpuad;                          /* Originating CPU address   */
 
     /* External interrupt if TOD clock exceeds clock comparator */
     if ( tod_clock(regs) > regs->clkc
-        && sysblk.insttrace == 0
-        && sysblk.inststep == 0
         && OPEN_IC_CLKC(regs) )
     {
-        if (sysblk.insttrace || sysblk.inststep)
+        if (CPU_STEPPING_OR_TRACING_ALL)
         {
             logmsg (_("HHCCP024I External interrupt: Clock comparator\n"));
         }
@@ -372,7 +290,7 @@ U16     cpuad;                          /* Originating CPU address   */
     if ( CPU_TIMER(regs) < 0
         && OPEN_IC_PTIMER(regs) )
     {
-        if (sysblk.insttrace || sysblk.inststep)
+        if (CPU_STEPPING_OR_TRACING_ALL)
         {
             logmsg (_("HHCCP025I External interrupt: CPU timer=%16.16" I64_FMT "X\n"),
                     (long long)CPU_TIMER(regs) << 8);
@@ -388,7 +306,7 @@ U16     cpuad;                          /* Originating CPU address   */
 #endif /*defined(_FEATURE_SIE)*/
         )
     {
-        if (sysblk.insttrace || sysblk.inststep)
+        if (CPU_STEPPING_OR_TRACING_ALL)
         {
             logmsg (_("HHCCP026I External interrupt: Interval timer\n"));
         }

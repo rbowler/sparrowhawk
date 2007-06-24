@@ -1,9 +1,22 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //         fthreads.c           Fish's WIN32 version of pthreads
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2001-2006. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2001-2007. Released under the Q Public License
 // (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
+
+// $Id: fthreads.c,v 1.29 2007/06/23 00:04:10 ivan Exp $
+//
+// $Log: fthreads.c,v $
+// Revision 1.29  2007/06/23 00:04:10  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.28  2007/01/10 09:29:45  fish
+// Fix thread naming that was inadvertently broken by my 12/28 fishhang change that introduced use of _beginthreadex
+//
+// Revision 1.27  2006/12/08 09:43:21  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -849,6 +862,7 @@ typedef struct _ftCallThreadParms
 {
     PFT_THREAD_FUNC  pfnTheirThreadFunc;
     void*            pvTheirThreadArgs;
+    char*            pszTheirThreadName;
     FTHREAD*         pFTHREAD;
 }
 FT_CALL_THREAD_PARMS;
@@ -870,6 +884,9 @@ static DWORD  __stdcall  FTWin32ThreadFunc
     pfnTheirThreadFunc = pCallTheirThreadParms->pfnTheirThreadFunc;
     pvTheirThreadArgs  = pCallTheirThreadParms->pvTheirThreadArgs;
     pFTHREAD           = pCallTheirThreadParms->pFTHREAD;
+
+    // PROGRAMMING NOTE: -1 == "current calling thread"
+    SET_THREAD_NAME_ID ( -1, pCallTheirThreadParms->pszTheirThreadName );
 
     free ( pCallTheirThreadParms );
 
@@ -921,7 +938,7 @@ int  fthread_create
     fthread_attr_t*  pThreadAttr,
     PFT_THREAD_FUNC  pfnThreadFunc,
     void*            pvThreadArgs,
-    char*            pszName
+    char*            pszThreadName
 )
 {
     static BOOL            bDidInit = FALSE;
@@ -990,6 +1007,7 @@ int  fthread_create
 
     pCallTheirThreadParms->pfnTheirThreadFunc = pfnThreadFunc;
     pCallTheirThreadParms->pvTheirThreadArgs  = pvThreadArgs;
+    pCallTheirThreadParms->pszTheirThreadName = pszThreadName;
     pCallTheirThreadParms->pFTHREAD           = pFTHREAD;
 
     InitializeListLink(&pFTHREAD->ThreadListLink);
@@ -1023,8 +1041,6 @@ int  fthread_create
     *pdwThreadID            = dwThreadID;
 
     InsertListHead ( &ThreadListHead, &pFTHREAD->ThreadListLink );
-
-    SET_THREAD_NAME_ID ( dwThreadID, pszName );
 
     UnlockThreadsList();
 

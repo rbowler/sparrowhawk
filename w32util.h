@@ -1,9 +1,26 @@
 //////////////////////////////////////////////////////////////////////////////////////////
 //   w32util.h        Windows porting functions
 //////////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2005-2006. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2005-2007. Released under the Q Public License
 // (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
 //////////////////////////////////////////////////////////////////////////////////////////
+
+// $Id: w32util.h,v 1.10 2007/06/23 00:04:19 ivan Exp $
+//
+// $Log: w32util.h,v $
+// Revision 1.10  2007/06/23 00:04:19  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.9  2007/01/10 15:12:12  rbowler
+// Console keepalive for Unix
+//
+// Revision 1.8  2007/01/10 09:32:39  fish
+// Enable connection keep-alive to try and detect 3270 clients that
+// have died (MSVC only right now; don't know how to do it on *nix)
+//
+// Revision 1.7  2006/12/08 09:43:34  jj
+// Add CVS message log
+//
 
 #ifndef _W32UTIL_H
 #define _W32UTIL_H
@@ -69,6 +86,10 @@ W32_DLL_IMPORT char* strtok_r ( char* s, const char* sep, char** lasts);
 
 #if !defined( HAVE_GETTIMEOFDAY )
   W32_DLL_IMPORT int gettimeofday ( struct timeval* pTV, void* pTZ);
+#endif
+
+#if !defined( HAVE_NANOSLEEP )
+  W32_DLL_IMPORT int nanosleep ( const struct timespec* rqtp, struct timespec* rmtp );
 #endif
 
 #if !defined( HAVE_USLEEP )
@@ -164,6 +185,10 @@ W32_DLL_IMPORT int socket_set_blocking_mode( int sfd, int blocking_mode );
 // Determine whether a file descriptor is a socket or not...
 // (returns 1==true if it's a socket, 0==false otherwise)
 W32_DLL_IMPORT int socket_is_socket( int sfd );
+
+// Set the SO_KEEPALIVE option and timeout values for a
+// socket connection to detect when client disconnects */
+W32_DLL_IMPORT void socket_keepalive( int sfd, int idle_time, int probe_interval, int probe_count );
 
 // Retrieve directory where process was loaded from...
 // (returns >0 == success, 0 == failure)

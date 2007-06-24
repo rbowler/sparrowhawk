@@ -1,10 +1,20 @@
-/* CARDPCH.C    (c) Copyright Roger Bowler, 1999-2006                */
+/* CARDPCH.C    (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 Card Punch Device Handler                    */
+
+// $Id: cardpch.c,v 1.31 2007/06/23 00:04:03 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
 /* System/370 card punch devices.                                    */
 /*-------------------------------------------------------------------*/
+
+// $Log: cardpch.c,v $
+// Revision 1.31  2007/06/23 00:04:03  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.30  2006/12/08 09:43:16  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 #include "hercules.h"
@@ -320,6 +330,7 @@ DEVHND cardpch_device_hndinfo = {
         NULL,                          /* Device Query used          */
         NULL,                          /* Device Reserve             */
         NULL,                          /* Device Release             */
+        NULL,                          /* Device Attention           */
         NULL,                          /* Immediate CCW Codes        */
         NULL,                          /* Signal Adapter Input       */
         NULL,                          /* Signal Adapter Output      */
@@ -344,12 +355,12 @@ HDL_DEPENDENCY_SECTION;
      HDL_DEPENDENCY(HERCULES);
      HDL_DEPENDENCY(DEVBLK);
 }
-END_DEPENDENCY_SECTION;
+END_DEPENDENCY_SECTION
 
 
 HDL_DEVICE_SECTION;
 {
     HDL_DEVICE(3525, cardpch_device_hndinfo );
 }
-END_DEVICE_SECTION;
+END_DEVICE_SECTION
 #endif

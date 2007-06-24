@@ -1,13 +1,26 @@
 /*
 || ----------------------------------------------------------------------------
 ||
-|| HETLIB.C     (c) Copyright Leland Lucius, 2000-2006
+|| HETLIB.C     (c) Copyright Leland Lucius, 2000-2007
 ||              Released under terms of the Q Public License.
 ||
 || Library for managing Hercules Emulated Tapes.
 ||
 || ----------------------------------------------------------------------------
 */
+
+// $Id: hetlib.c,v 1.32 2007/06/23 00:04:10 ivan Exp $
+//
+// $Log: hetlib.c,v $
+// Revision 1.32  2007/06/23 00:04:10  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.31  2007/02/25 21:10:44  fish
+// Fix het_locate to continue on tapemark
+//
+// Revision 1.30  2006/12/08 09:43:26  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -750,14 +763,14 @@ het_read( HETB *hetb, void *sbuf )
     char *tptr;
     int rc;
     unsigned long slen;
-    int flags;
+    int flags1, flags2;
     unsigned long tlen;
     char tbuf[ HETMAX_BLOCKSIZE ];
 
     /*
     || Initialize
     */
-    flags = 0;
+    flags1 = flags2 = 0;
     tlen = 0;
     tptr = sbuf;
 
@@ -778,7 +791,7 @@ het_read( HETB *hetb, void *sbuf )
         /*
         || Have we seen a BOR chunk yet?
         */
-        if( !( flags & HETHDR_FLAGS1_BOR ) )
+        if( !( flags1 & HETHDR_FLAGS1_BOR ) )
         {
             /*
             || Nope, so this chunk MUST have the BOR set
@@ -794,8 +807,14 @@ het_read( HETB *hetb, void *sbuf )
             */
             if( hetb->decompress )
             {
-                if( hetb->chdr.flags1 & HETHDR_FLAGS1_COMPRESS )
+                if( hetb->chdr.flags1 & HETHDR_FLAGS1_COMPRESS ||
+                    hetb->chdr.flags2 & HETHDR_FLAGS2_COMPRESS )
                 {
+                    if( ( hetb->chdr.flags1 & HETHDR_FLAGS1_COMPRESS ) &&
+                        ( hetb->chdr.flags2 & HETHDR_FLAGS2_COMPRESS ) )
+                    {
+                        return( HETE_BADCOMPRESS );
+                    }
                     tptr = tbuf;
                 }
             }
@@ -803,7 +822,8 @@ het_read( HETB *hetb, void *sbuf )
             /*
             || Save flags for later validation
             */
-            flags = hetb->chdr.flags1;
+            flags1 = hetb->chdr.flags1;
+            flags2 = hetb->chdr.flags2;
         }
         else
         {
@@ -819,8 +839,13 @@ het_read( HETB *hetb, void *sbuf )
         /*
         || Compression flags from related chunks must match
         */
-        if( ( flags & HETHDR_FLAGS1_COMPRESS ) !=
+        if( (            flags1 & HETHDR_FLAGS1_COMPRESS ) !=
             ( hetb->chdr.flags1 & HETHDR_FLAGS1_COMPRESS ) )
+        {
+            return( HETE_BADCOMPRESS );
+        }
+        if( (            flags2 & HETHDR_FLAGS2_COMPRESS ) !=
+            ( hetb->chdr.flags2 & HETHDR_FLAGS2_COMPRESS ) )
         {
             return( HETE_BADCOMPRESS );
         }
@@ -874,9 +899,31 @@ het_read( HETB *hetb, void *sbuf )
         switch( hetb->chdr.flags1 & HETHDR_FLAGS1_COMPRESS )
         {
             case 0:
+                switch( hetb->chdr.flags2 & HETHDR_FLAGS2_COMPRESS )
+                {
+                    case 0:
+                    break;
+#if defined( HAVE_LIBZ )
+                    case HETHDR_FLAGS2_ZLIB_BUSTECH:
+                        slen = HETMAX_BLOCKSIZE;
+
+                        rc = uncompress( sbuf, &slen, (unsigned char *)tbuf, tlen );
+                        if( rc != Z_OK )
+                        {
+                            errno = rc;
+                            return( HETE_DECERR );
+                        }
+
+                        tlen = slen;
+                    break;
+#endif /* defined( HAVE_LIBZ ) */
+                    default:
+                        return( HETE_UNKMETH );
+                    break;
+                }
             break;
 
-#if defined(HAVE_LIBZ)
+#if defined( HAVE_LIBZ )
             case HETHDR_FLAGS1_ZLIB:
                 slen = HETMAX_BLOCKSIZE;
 
@@ -889,7 +936,7 @@ het_read( HETB *hetb, void *sbuf )
 
                 tlen = slen;
             break;
-#endif
+#endif /* defined( HAVE_LIBZ ) */
 
 #if defined( HET_BZIP2 )
             case HETHDR_FLAGS1_BZLIB:
@@ -1003,7 +1050,7 @@ int
 het_write_header( HETB *hetb, int len, int flags1, int flags2 )
 {
     int    rc;
-    OFF_T  rcoff;
+    off_t  rcoff;
 
 #if defined( HETDEBUGW )
     printf("write hdr: pl=%d, cl=%d, f1=%02x, f2=%02x\n",
@@ -1041,7 +1088,7 @@ het_write_header( HETB *hetb, int len, int flags1, int flags2 )
     */
     if( !hetb->readlast )
     {
-        FSEEK( hetb->fd, 0, SEEK_CUR );
+        fseek( hetb->fd, 0, SEEK_CUR );
         hetb->readlast = FALSE;
     }
 
@@ -1050,13 +1097,13 @@ het_write_header( HETB *hetb, int len, int flags1, int flags2 )
     */
     if( !hetb->truncated )
     {
-        rcoff = FTELL( hetb->fd );
+        rcoff = ftell( hetb->fd );
         if( rcoff == -1 )
         {
             return( HETE_ERROR );
         }
 
-        rc = FTRUNCATE( fileno( hetb->fd ), rcoff );
+        rc = ftruncate( fileno( hetb->fd ), rcoff );
         if( rc == -1 )
         {
             return( HETE_ERROR );
@@ -1309,6 +1356,16 @@ het_write( HETB *hetb, void *sbuf, int slen )
     while( slen > 0 );
 
     /*
+    || Set new physical EOF
+    */
+    do rc = ftruncate( fileno( hetb->fd ), ftell( hetb->fd ) );
+    while (EINTR == rc);
+    if (rc != 0)
+    {
+        return( HETE_ERROR );
+    }
+
+    /*
     || Success
     */
     return( hetb->cblksize );
@@ -1383,6 +1440,16 @@ het_tapemark( HETB *hetb )
     if( rc < 0 )
     {
         return( rc );
+    }
+
+    /*
+    || Set new physical EOF
+    */
+    do rc = ftruncate( fileno( hetb->fd ), ftell( hetb->fd ) );
+    while (EINTR == rc);
+    if (rc != 0)
+    {
+        return( HETE_ERROR );
     }
 
     /*
@@ -1474,7 +1541,7 @@ het_locate( HETB *hetb, int block )
     while( (int)hetb->cblk < block )
     {
         rc = het_fsb( hetb );
-        if( rc < 0 )
+        if( rc < 0 && HETE_TAPEMARK != rc )
         {
             return( rc );
         }
@@ -1560,7 +1627,8 @@ het_bsb( HETB *hetb )
 {
     int rc;
     int newblk;
-    int offset;
+    int offset;     // (note: safe to use 'int' as offset here
+                    //  since we only ever seek from SEEK_CUR)
     int tapemark = FALSE;
 
     /*
@@ -1599,7 +1667,7 @@ het_bsb( HETB *hetb )
         /*
         || Reposition to start of chunk
         */
-        rc = FSEEK( hetb->fd,
+        rc = fseek( hetb->fd,
                     offset,
                     SEEK_CUR );
         if( rc == -1 )
@@ -1632,7 +1700,7 @@ het_bsb( HETB *hetb )
     || Reposition to chunk header preceding this one so we can load keep the
     || chdr in the HET current.
     */
-    rc = FSEEK( hetb->fd,
+    rc = fseek( hetb->fd,
                 offset,
                 SEEK_CUR );
     if( rc == -1 )
@@ -1652,7 +1720,7 @@ het_bsb( HETB *hetb )
     /*
     || Finally reposition back to the where we should be
     */
-    rc = FSEEK( hetb->fd,
+    rc = fseek( hetb->fd,
                 HETHDR_CLEN( hetb ),
                 SEEK_CUR );
     if( rc == -1 )
@@ -1769,7 +1837,7 @@ het_fsb( HETB *hetb )
         /*
         || Seek to next chunk
         */
-        rc = FSEEK( hetb->fd,
+        rc = fseek( hetb->fd,
                     HETHDR_CLEN( hetb ),
                     SEEK_CUR );
         if( rc == -1 )
@@ -2036,7 +2104,7 @@ het_rewind( HETB *hetb )
     /*
     || Just seek to the beginning of the file
     */
-    rc = FSEEK( hetb->fd,
+    rc = fseek( hetb->fd,
                 0,
                 SEEK_SET );
     if( rc == -1 )
@@ -2139,10 +2207,10 @@ het_error( int rc )
     SYNOPSIS
             #include "hetlib.h"
 
-            OFF_T het_tell( HETB *hetb )
+            off_t het_tell( HETB *hetb )
 
     DESCRIPTION
-            Returns a OFF_T describing the actual read/write cursor
+            Returns a off_t describing the actual read/write cursor
             within the HET file
 
     RETURN VALUE
@@ -2162,7 +2230,7 @@ het_error( int rc )
             {
                 HETB *hetb;
                 int rc;
-                OFF_T rwptr;
+                off_t rwptr;
 
                 rc = het_open( &hetb, argv[ 1 ], 0 );
                 if( rc >= 0 )
@@ -2189,10 +2257,10 @@ het_error( int rc )
 ==DOC==*/
 
 DLL_EXPORT
-OFF_T
+off_t
 het_tell( HETB *hetb )
 {
-    OFF_T rwptr = FTELL( hetb->fd );
+    off_t rwptr = ftell( hetb->fd );
     if ( rwptr < 0 )
     {
         return HETE_ERROR;

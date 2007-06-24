@@ -1,5 +1,40 @@
-/* FEAT900.H    (c) Copyright Jan Jaeger, 2000-2006                  */
+/* FEAT900.H    (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              ESAME feature definitions                            */
+
+// $Id: feat900.h,v 1.72 2007/06/23 00:04:09 ivan Exp $
+//
+// $Log: feat900.h,v $
+// Revision 1.72  2007/06/23 00:04:09  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.71  2007/06/02 13:46:41  rbowler
+// PFPO framework
+//
+// Revision 1.70  2007/05/26 21:45:25  rbowler
+// Activate Compare-and-Swap-and-Store feature
+//
+// Revision 1.69  2007/05/18 21:49:04  rbowler
+// Activate Conditional-SSKE feature
+//
+// Revision 1.68  2007/04/27 10:50:41  rbowler
+// STFL bit 27 for MVCOS
+//
+// Revision 1.67  2007/04/26 21:09:08  rbowler
+// Change SSKE instruction format from RRE to RRF_M
+//
+// Revision 1.66  2007/04/25 15:27:01  rbowler
+// Activate Extract-CPU-Time facility
+//
+// Revision 1.65  2007/04/25 12:10:27  rbowler
+// Move LFAS,SFASR to IEEE-exception-simulation facility
+//
+// Revision 1.64  2007/01/30 16:43:28  rbowler
+// Activate Decimal Floating Point Facility
+//
+// Revision 1.63  2006/12/08 09:43:21  jj
+// Add CVS message log
+//
+
 #if defined(OPTION_900_MODE)
 #define _ARCH_900_NAME "z/Arch" /* also: "ESAME" */
 
@@ -19,11 +54,15 @@
 #define FEATURE_CHECKSUM_INSTRUCTION
 #define FEATURE_CHSC
 #define FEATURE_COMPARE_AND_MOVE_EXTENDED
+#define FEATURE_COMPARE_AND_SWAP_AND_STORE                      /*407*/
 #define FEATURE_COMPRESSION
-#define FEATURE_CPUID_FORMAT_1
+#define FEATURE_CONDITIONAL_SSKE                                /*407*/
 #define FEATURE_CPU_RECONFIG
+#define FEATURE_CPUID_FORMAT_1
 #define FEATURE_DAT_ENHANCEMENT
 #define FEATURE_DAT_ENHANCEMENT_FACILITY_2                      /*@Z9*/
+#define FEATURE_DECIMAL_FLOATING_POINT                          /*DFP*/
+#define FEATURE_DIAG308_REIPL
 #define FEATURE_DUAL_ADDRESS_SPACE
 #define FEATURE_EMULATE_VM
 #define FEATURE_ESAME
@@ -38,7 +77,9 @@
 #define FEATURE_EXTENDED_TRANSLATION_FACILITY_2
 #define FEATURE_EXTENDED_TRANSLATION_FACILITY_3
 #define FEATURE_EXTERNAL_INTERRUPT_ASSIST
+#define FEATURE_EXTRACT_CPU_TIME                                /*407*/
 #define FEATURE_FETCH_PROTECTION_OVERRIDE
+#define FEATURE_FPS_ENHANCEMENT                                 /*DFP*/
 #define FEATURE_FPS_EXTENSIONS
 #define FEATURE_HERCULES_DIAGCALLS
 #define FEATURE_HEXADECIMAL_FLOATING_POINT
@@ -46,6 +87,7 @@
 #define FEATURE_HFP_MULTIPLY_ADD_SUBTRACT
 //#define FEATURE_HFP_UNNORMALIZED_EXTENSION                      /*@Z9*/
 #define FEATURE_HYPERVISOR
+#define FEATURE_IEEE_EXCEPTION_SIMULATION                       /*407*/
 #define FEATURE_IMMEDIATE_AND_RELATIVE
 #define FEATURE_INCORRECT_LENGTH_INDICATION_SUPPRESSION
 #define FEATURE_INTERPRETIVE_EXECUTION
@@ -58,12 +100,14 @@
 #define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_1             /*@Z9*/
 #define FEATURE_MIDAW                                           /*@Z9*/
 #define FEATURE_MOVE_PAGE_FACILITY_2
+//#define FEATURE_MVCOS                                           /*407*/
 #define FEATURE_MVS_ASSIST
 #define FEATURE_PAGE_PROTECTION
 #define FEATURE_PERFORM_LOCKED_OPERATION
 #define FEATURE_PER
 #define FEATURE_PER2
 #define FEATURE_PER3                                            /*@Z9*/
+//#define FEATURE_PFPO                                            /*407*/
 #define FEATURE_PRIVATE_SPACE
 #define FEATURE_PROTECTION_INTERCEPTION_CONTROL
 #define FEATURE_QUEUED_DIRECT_IO

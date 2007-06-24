@@ -1,5 +1,23 @@
-/* CON1052.C    (c)Copyright Jan Jaeger, 2004-2006                   */
+/* CON1052.C    (c)Copyright Jan Jaeger, 2004-2007                   */
 /*              Emulated 1052 on hercules console                    */
+
+// $Id: con1052c.c,v 1.13 2007/06/23 16:13:54 jmaynard Exp $
+//
+// $Log: con1052c.c,v $
+// Revision 1.13  2007/06/23 16:13:54  jmaynard
+// Fixing two messages out of internationalization by removing redundant
+// carriage returns.
+//
+// Revision 1.12  2007/06/23 00:04:04  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.11  2006/12/23 00:51:08  ivan
+// Fix logmsg() call in con1052c.c from logmsg(bfr) to logmsg("%s",bfr) to prevent
+// Write CCW data with embedded '%' characters to be interpreted as printf formating orders
+//
+// Revision 1.10  2006/12/08 09:43:18  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -199,7 +217,7 @@ BYTE    c;                              /* Print character           */
         iobuf[len] = '\0';
 
         /* Send the data to the console */
-        logmsg((char *)iobuf);
+        logmsg("%s",(char *)iobuf);
 
         /* Return normal status */
         *unitstat = CSW_CE | CSW_DE;
@@ -222,7 +240,7 @@ BYTE    c;                              /* Print character           */
         {
             /* Display prompting message on console if allowed */
             if (dev->prompt1052)
-                logmsg (_("HHC1C001A Enter input for console device %4.4X\r\n"),
+                logmsg (_("HHC1C001A Enter input for console device %4.4X\n"),
                   dev->devnum);
 
             obtain_lock(&dev->lock);
@@ -331,6 +349,7 @@ DEVHND con1052_device_hndinfo = {
         NULL,                          /* Device Query used          */
         NULL,                          /* Device Reserve             */
         NULL,                          /* Device Release             */
+        NULL,                          /* Device Attention           */
         con1052_immed,                 /* Immediate CCW Codes        */
         NULL,                          /* Signal Adapter Input       */
         NULL,                          /* Signal Adapter Output      */
@@ -403,7 +422,7 @@ HDL_DEPENDENCY_SECTION;
      HDL_DEPENDENCY(DEVBLK);
      HDL_DEPENDENCY(SYSBLK);
 }
-END_DEPENDENCY_SECTION;
+END_DEPENDENCY_SECTION
 
 
 #if defined(WIN32) && !defined(HDL_USE_LIBTOOL) && !defined(_MSVC_)
@@ -413,7 +432,7 @@ HDL_RESOLVER_SECTION;
     HDL_RESOLVE_PTRVAR(psysblk, sysblk);
     HDL_RESOLVE(panel_command);
 }
-END_RESOLVER_SECTION;
+END_RESOLVER_SECTION
 #endif
 
 
@@ -422,13 +441,13 @@ HDL_DEVICE_SECTION;
     HDL_DEVICE(1052-C, con1052_device_hndinfo);
     HDL_DEVICE(3215-C, con1052_device_hndinfo);
 }
-END_DEVICE_SECTION;
+END_DEVICE_SECTION
 
 
 HDL_REGISTER_SECTION;
 {
    HDL_REGISTER (panel_command, con1052_panel_command);
 }
-END_REGISTER_SECTION;
+END_REGISTER_SECTION
 
 #endif

@@ -1,9 +1,19 @@
-/* DASDCOPY.C   (c) Copyright Roger Bowler, 1999-2006                */
+/* DASDCOPY.C   (c) Copyright Roger Bowler, 1999-2007                */
 /*       Copy a dasd file to another dasd file.                      */
 /*       Input file and output file may be compressed or not.        */
 /*       Files may be either ckd (or cckd) or fba (or cfba) but      */
 /*       file types (ckd/cckd or fba/cfba) may not be mixed.         */
 /*-------------------------------------------------------------------*/
+
+// $Id: dasdcopy.c,v 1.28 2007/06/23 00:04:08 ivan Exp $
+//
+// $Log: dasdcopy.c,v $
+// Revision 1.28  2007/06/23 00:04:08  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.27  2006/12/08 09:43:19  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -310,10 +320,10 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     /* Create the output file */
     if (ckddasd)
         rc = create_ckd(ofile, idev->devtype, idev->ckdheads,
-                        ckd->r1, cyls, "", comp, lfs, 1+r, nullfmt);
+                        ckd->r1, cyls, "", comp, lfs, 1+r, nullfmt, 0);
     else
         rc = create_fba(ofile, idev->devtype, fba->size,
-                        blks, "", comp, lfs, 1+r);
+                        blks, "", comp, lfs, 1+r, 0);
     if (rc < 0)
     {
         fprintf (stderr, _("HHCDC006E %s: %s create failed\n"), pgm, ofile);
@@ -416,7 +426,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     }
 
     close_image_file(icif); close_image_file(ocif);
-    if (!quiet) printf (_("\nHHCDC010I Copy successful !!!       \n"));
+    if (!quiet) printf (_("HHCDC010I %s successfully completed.\n"), pgm);
     return 0;
 }
 
@@ -557,7 +567,7 @@ int syntax (char *pgm)
             "     -cyls  n          size of output file\n"
             "     -a                output file will have alt cyls\n"
             ),
-            (sizeof(OFF_T) > 4) ? _( "     -lfs              create single large output file\n" ) : ( "" )
+            (sizeof(off_t) > 4) ? _( "     -lfs              create single large output file\n" ) : ( "" )
             );
     else if (strcmp(pgm, "fba2cfba") == 0)
         snprintf(usage,8192,_(
@@ -612,7 +622,7 @@ int syntax (char *pgm)
             "%s"
             "     -blks  n          size of output file\n"
             ),
-            (sizeof(OFF_T) > 4) ? _( "     -lfs              create single large output file\n" ) : ( "" )
+            (sizeof(off_t) > 4) ? _( "     -lfs              create single large output file\n" ) : ( "" )
             );
     else
         snprintf(usage,8192,_(
@@ -654,7 +664,7 @@ int syntax (char *pgm)
 #else
             ""
 #endif
-            ,(sizeof(OFF_T) > 4) ? _( "     -lfs              output ckd file will be a single file\n" ) : ( "" )
+            ,(sizeof(off_t) > 4) ? _( "     -lfs              output ckd file will be a single file\n" ) : ( "" )
             );
     printf (usage);
     return -1;

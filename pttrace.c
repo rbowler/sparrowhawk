@@ -1,9 +1,19 @@
-/* PTTRACE.C   (c) Copyright Greg Smith, 2003-2006                   */
+/* PTTRACE.C   (c) Copyright Greg Smith, 2003-2007                   */
 /*       pthreads trace debugger                                     */
+
+// $Id: pttrace.c,v 1.30 2007/06/23 00:04:15 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* Trace threading calls                                             */
 /*-------------------------------------------------------------------*/
+
+// $Log: pttrace.c,v $
+// Revision 1.30  2007/06/23 00:04:15  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.29  2006/12/08 09:43:29  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -18,9 +28,16 @@ PTT_TRACE *pttrace;                     /* Pthreads trace table      */
 int        pttracex;                    /* Pthreads trace index      */
 int        pttracen;                    /* Pthreads trace entries    */
 LOCK       pttlock;                     /* Pthreads trace lock       */
-int        pttimer;                     /* 1=trace timer events      */
+int        pttimer;                     /* 1=trace timer/clock events*/
+int        pttlogger;                   /* 1=trace loger events      */
 int        pttnothreads;                /* 1=no threads events       */
 int        pttnolock;                   /* 1=no PTT locking          */
+int        pttnotod;                    /* 1=don't call gettimeofday */
+int        pttnowrap;                   /* 1=don't wrap              */
+int        pttto;                       /* timeout in seconds        */
+TID        ptttotid;                    /* timeout thread id         */
+LOCK       ptttolock;                   /* timeout thread lock       */
+COND       ptttocond;                   /* timeout thread condition  */
 
 DLL_EXPORT void ptt_trace_init (int n, int init)
 {
@@ -44,73 +61,192 @@ DLL_EXPORT void ptt_trace_init (int n, int init)
         pthread_mutex_init (&pttlock, NULL);
 #endif
         pttimer = 0; /* (default = 'notimer') */
+        pttlogger = 0;
         pttnothreads = 0;
         pttnolock = 0;
+        pttnotod = 0;
+        pttnowrap = 0;
+        pttto = 0;
+        ptttotid = 0;
+#if defined(OPTION_FTHREADS)
+        fthread_mutex_init (&ptttolock, NULL);
+ #if defined(FISH_HANG)
+        fthread_cond_init (__FILE__, __LINE__, &ptttocond);
+ #else
+        fthread_cond_init (&ptttocond);
+ #endif
+#else
+        pthread_mutex_init (&ptttolock, NULL);
+        pthread_cond_init (&ptttocond, NULL);
+#endif
     }
 }
 
 DLL_EXPORT int ptt_cmd(int argc, char *argv[], char* cmdline)
 {
-    int  n;
+    int  rc = 0;
+    int  n, to = -1;
     char c;
 
     UNREFERENCED(cmdline);
 
-    if (argc > 1)
+    /* print trace table if no arguments */
+    if (argc <= 1 && pttracen)
+        return ptt_pthread_print();
+
+    /* process arguments; last arg can be trace table size */
+    for (--argc, argv++; argc; --argc, ++argv)
     {
-        if (argc == 2 && strcasecmp("timer", argv[1]) == 0)
+        if (strcasecmp("opts", argv[0]) == 0)
+            continue;
+        else if (strcasecmp("timer", argv[0]) == 0)
         {
             pttimer = 1;
-            return 0;
+            continue;
         }
-        if (argc == 2 && strcasecmp("notimer", argv[1]) == 0)
+        else if (strcasecmp("notimer", argv[0]) == 0)
         {
             pttimer = 0;
-            return 0;
+            continue;
         }
-        if (argc == 2 && strcasecmp("nothreads", argv[1]) == 0)
+        else if (strcasecmp("logger", argv[0]) == 0)
+        {
+            pttlogger = 1;
+            continue;
+        }
+        else if (strcasecmp("nologger", argv[0]) == 0)
+        {
+            pttlogger = 0;
+            continue;
+        }
+        else if (strcasecmp("nothreads", argv[0]) == 0)
         {
             pttnothreads = 1;
-            return 0;
+            continue;
         }
-        if (argc == 2 && strcasecmp("threads", argv[1]) == 0)
+        else if (strcasecmp("threads", argv[0]) == 0)
         {
             pttnothreads = 0;
-            return 0;
+            continue;
         }
-        if (argc == 2 && strcasecmp("nolock", argv[1]) == 0)
+        else if (strcasecmp("nolock", argv[0]) == 0)
         {
             pttnolock = 1;
-            return 0;
+            continue;
         }
-        if (argc == 2 && strcasecmp("lock", argv[1]) == 0)
+        else if (strcasecmp("lock", argv[0]) == 0)
         {
             pttnolock = 0;
-            return 0;
+            continue;
         }
-        if (argc != 2 || sscanf(argv[1], "%d%c", &n, &c) != 1 || n < 0)
+        else if (strcasecmp("notod", argv[0]) == 0)
         {
-            logmsg( _("HHCPT001E Invalid value\n"));
-            return -1;
+            pttnotod = 1;
+            continue;
         }
-        OBTAIN_PTTLOCK;
-        if (pttrace == NULL)
+        else if (strcasecmp("tod", argv[0]) == 0)
         {
-            if (pttracen != 0)
+            pttnotod = 0;
+            continue;
+        }
+        else if (strcasecmp("nowrap", argv[0]) == 0)
+        {
+            pttnowrap = 1;
+            continue;
+        }
+        else if (strcasecmp("wrap", argv[0]) == 0)
+        {
+            pttnowrap = 0;
+            continue;
+        }
+        else if (strncasecmp("to=", argv[0], 3) == 0 && strlen(argv[0]) > 3
+              && (sscanf(&argv[0][3], "%d%c", &to, &c) == 1 && to >= 0))
+        {
+            pttto = to;
+            continue;
+        }
+        else if (argc == 1 && sscanf(argv[0], "%d%c", &n, &c) == 1 && n >= 0)
+        {
+            OBTAIN_PTTLOCK;
+            if (pttracen == 0)
             {
-                RELEASE_PTTLOCK;
-                logmsg( _("HHCPT002E Trace is busy\n"));
-                return -1;
+                if (pttrace != NULL)
+                {
+                    RELEASE_PTTLOCK;
+                    logmsg( _("HHCPT002E Trace is busy\n"));
+                    return -1;
+                }
             }
+            else if (pttrace)
+            {
+                pttracen = 0;
+                RELEASE_PTTLOCK;
+                usleep(1000);
+                OBTAIN_PTTLOCK;
+                free (pttrace);
+                pttrace = NULL;
+            }
+            ptt_trace_init (n, 0);
+            RELEASE_PTTLOCK;
         }
         else
-            free (pttrace);
-        ptt_trace_init (n, 0);
-        RELEASE_PTTLOCK;
+        {
+            logmsg( _("HHCPT001E Invalid value: %s\n"), argv[0]);
+            rc = -1;
+            break;
+        }
+    } /* for each ptt argument */
+
+    logmsg( _("HHCPT003I ptt %s %s %s %s %s %s to=%d %d\n"),
+           pttimer ? "timer" : "notimer",
+           pttnothreads ? "nothreads" : "threads",
+           pttnolock ? "nolock" : "lock",
+           pttnotod ? "notod" : "tod",
+           pttnowrap ? "nowrap" : "wrap",
+           pttlogger ? "logger" : "nologger",
+           pttto,
+           pttracen);
+
+    /* wakeup timeout thread if to= specified */
+    if (to >= 0 && ptttotid)
+    {
+        obtain_lock (&ptttolock);
+        ptttotid = 0;
+        signal_condition (&ptttocond);
+        release_lock (&ptttolock);
     }
-    else
+
+    /* start timeout thread if positive to= specified */
+    if (to > 0)
+    {
+        obtain_lock (&ptttolock);
+        ptttotid = 0;
+        create_thread (&ptttotid, NULL, ptt_timeout, NULL, "ptt_timeout");
+        release_lock (&ptttolock);
+    }
+
+    return rc;
+}
+
+/* thread to print trace after timeout */
+void *ptt_timeout()
+{
+    struct timeval  now;
+    struct timespec tm;
+
+    obtain_lock (&ptttolock);
+    gettimeofday (&now, NULL);
+    tm.tv_sec = now.tv_sec + pttto;
+    tm.tv_nsec = now.tv_usec * 1000;
+    timed_wait_condition (&ptttocond, &ptttolock, &tm);
+    if (thread_id() == ptttotid)
+    {
         ptt_pthread_print();
-    return 0;
+        pttto = 0;
+        ptttotid = 0;
+    }
+    release_lock (&ptttolock);
+    return NULL;
 }
 
 #ifndef OPTION_FTHREADS
@@ -352,9 +488,9 @@ DLL_EXPORT int ptt_pthread_kill(fthread_t tid, int sig, char *file, int line)
 DLL_EXPORT void ptt_pthread_trace (char * type, void *data1, void *data2,
                         char *file, int line, int result)
 {
-int i;
+int i, n;
 
-    if (pttrace == NULL) return;
+    if (pttrace == NULL || pttracen == 0) return;
 
     /*
     ** Fish debug: it appears MSVC sometimes sets the __FILE__ macro
@@ -370,28 +506,29 @@ int i;
         if (!p) p = strrchr( file, '/' );
         if (p)
             file = p+1;
-#if 1
-        if ( strcasecmp( file, "logger.c" ) == 0 )
-            return; // fish debug: I'm not interested in these
-#endif
     }
 #endif
 
-/* Timer thread can produce hundreds of entries per second
- * (by obtaining intlock and todlock each HZ).
- * Command `ptt timer' will trace timer entries, `ptt notimer'
- * (default) will ignore timer entries.
- */
-    if (pttimer == 0 && strcasecmp(file, "timer.c") == 0) return;
+    /*
+     * Messages from timer.c, clock.c and/or logger.c are not usually
+     * that interesting and take up table space.  Check the flags to
+     * see if we want to trace them.
+     */
+    if (pttimer   == 0 && strcasecmp(file, "timer.c")  == 0) return;
+    if (pttimer   == 0 && strcasecmp(file, "clock.c")  == 0) return;
+    if (pttlogger == 0 && strcasecmp(file, "logger.c") == 0) return;
+
+    /* check for `nowrap' */
+    if (pttnowrap && pttracex + 1 >= pttracen) return;
 
     OBTAIN_PTTLOCK;
-    if (pttrace == NULL)
+    if (pttrace == NULL || (n = pttracen) == 0)
     {
         RELEASE_PTTLOCK;
         return;
     }
     i = pttracex++;
-    if (pttracex >= pttracen) pttracex = 0;
+    if (pttracex >= n) pttracex = 0;
     RELEASE_PTTLOCK;
     pttrace[i].tid   = thread_id();
     pttrace[i].type  = type;
@@ -399,64 +536,67 @@ int i;
     pttrace[i].data2 = data2;
     pttrace[i].file  = file;
     pttrace[i].line  = line;
-    gettimeofday(&pttrace[i].tv,NULL);
+    if (pttnotod == 0)
+        gettimeofday(&pttrace[i].tv,NULL);
     pttrace[i].result = result;
 }
 
-DLL_EXPORT void ptt_pthread_print ()
+DLL_EXPORT int ptt_pthread_print ()
 {
-PTT_TRACE *p;
-int   i;
+int   i, n, count = 0;
 char  result[32]; // (result is 'int'; if 64-bits, 19 digits or more!)
 char  tbuf[256];
 time_t tt;
 const char dot = '.';
 
-    if (pttrace == NULL) return;
+    if (pttrace == NULL || pttracen == 0) return count;
     OBTAIN_PTTLOCK;
-    p = pttrace;
-    pttrace = NULL;
+    n = pttracen;
+    pttracen = 0;
     RELEASE_PTTLOCK;
+
     i = pttracex;
     do
     {
-        if (p[i].tid)
+        if (pttrace[i].tid)
         {
-            tt = p[i].tv.tv_sec; strcpy(tbuf, ctime(&tt)); tbuf[19] = '\0';
+            tt = pttrace[i].tv.tv_sec; strcpy(tbuf, ctime(&tt)); tbuf[19] = '\0';
 
-            if (p[i].result == PTT_MAGIC)
+            if (pttrace[i].result == PTT_MAGIC)
                 result[0] = '\0';
             else
-                sprintf(result, "%d", p[i].result);
+                sprintf(result, "%d", pttrace[i].result);
 
             logmsg
             (
-                "%8.8x "                // Thead id
-                "%-12.12s "             // Trace type (string; 12 chars)
-                PTR_FMTx" "             // Data value 1
-                PTR_FMTx" "             // Data value 2
-                "%-12.12s "             // File name
-                "%4d "                  // Line number
-                "%s%c%6.6ld "           // Time of day (HH:MM:SS.usecs)
-                "%s\n"                  // Numeric result (or empty string)
+                "%8.8x "                      // Thead id
+                "%-12.12s "                   // Trace type (string; 12 chars)
+                PTR_FMTx" "                   // Data value 1
+                PTR_FMTx" "                   // Data value 2
+                "%-12.12s "                   // File name
+                "%4d "                        // Line number
+                "%s%c%6.6ld "                 // Time of day (HH:MM:SS.usecs)
+                "%s\n"                        // Numeric result (or empty string)
 
-                ,(U32)p[i].tid          // Thead id
-                ,p[i].type              // Trace type (string; 12 chars)
-                ,(uintptr_t)p[i].data1  // Data value 1
-                ,(uintptr_t)p[i].data2  // Data value 2
-                ,p[i].file              // File name
-                ,p[i].line              // Line number
-                ,tbuf + 11              // Time of day (HH:MM:SS)
-                ,dot                    // Time of day (decimal point)
-                ,p[i].tv.tv_usec        // Time of day (microseconds)
-                ,result                 // Numeric result (or empty string)
+                ,(U32)pttrace[i].tid          // Thead id
+                ,pttrace[i].type              // Trace type (string; 12 chars)
+                ,(uintptr_t)pttrace[i].data1  // Data value 1
+                ,(uintptr_t)pttrace[i].data2  // Data value 2
+                ,pttrace[i].file              // File name
+                ,pttrace[i].line              // Line number
+                ,tbuf + 11                    // Time of day (HH:MM:SS)
+                ,dot                          // Time of day (decimal point)
+                ,pttrace[i].tv.tv_usec        // Time of day (microseconds)
+                ,result                       // Numeric result (or empty string)
             );
+            count++;
         }
-        if (++i >= pttracen) i = 0;
+        if (++i >= n) i = 0;
     } while (i != pttracex);
-    memset (p, 0, PTT_TRACE_SIZE * pttracen);
+    memset (pttrace, 0, PTT_TRACE_SIZE * n);
     pttracex = 0;
-    pttrace = p;
+    pttracen = n;
+    return count;
 }
 
 #endif

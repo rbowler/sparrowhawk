@@ -1,5 +1,7 @@
-/* ASSIST.C     (c) Copyright Roger Bowler, 1999-2006                */
+/* ASSIST.C     (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 MVS Assist Routines                          */
+
+// $Id: assist.c,v 1.24 2007/06/23 00:04:03 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains routines which process the MVS Assist        */
@@ -8,10 +10,20 @@
 
 /*              Instruction decode rework - Jan Jaeger               */
 /*              Correct address wraparound - Jan Jaeger              */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 /*              Add dummy assist instruction - Jay Maynard,          */
 /*                  suggested by Brandon Hill                        */
 
+// $Log: assist.c,v $
+// Revision 1.24  2007/06/23 00:04:03  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.23  2006/12/20 04:26:19  gsmith
+// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
+//
+// Revision 1.22  2006/12/08 09:43:16  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -173,14 +185,13 @@ int     acc_mode = 0;                   /* access mode to use        */
         newia = ARCH_DEP(vfetch4) ( lit_addr, acc_mode, regs );
 
         /* Save the link information in register 12 */
-        regs->GR_L(12) = regs->psw.IA & ADDRESS_MAXWRAP(regs);
+        regs->GR_L(12) = PSW_IA(regs, 0);
 
         /* Copy LITOLOC into register 13 to signify obtain failure */
         regs->GR_L(13) = newia;
 
         /* Update the PSW instruction address */
-        regs->psw.IA = newia & ADDRESS_MAXWRAP(regs);
-        VALIDATE_AIA(regs);
+        UPD_PSW_IA(regs, newia);
     }
 
     /* Release main-storage access lock */
@@ -270,14 +281,13 @@ int     acc_mode = 0;                   /* access mode to use        */
         newia = ARCH_DEP(vfetch4) ( lit_addr, acc_mode, regs );
 
         /* Save the link information in register 12 */
-        regs->GR_L(12) = regs->psw.IA & ADDRESS_MAXWRAP(regs);
+        regs->GR_L(12) = PSW_IA(regs, 0);
 
         /* Copy LITRLOC into register 13 to signify release failure */
         regs->GR_L(13) = newia;
 
         /* Update the PSW instruction address */
-        regs->psw.IA = newia & ADDRESS_MAXWRAP(regs);
-        VALIDATE_AIA(regs);
+        UPD_PSW_IA(regs, newia);
     }
 
     /* Release main-storage access lock */
@@ -362,14 +372,13 @@ int     acc_mode = 0;                   /* access mode to use        */
         newia = ARCH_DEP(vfetch4) ( lit_addr, acc_mode, regs );
 
         /* Save the link information in register 12 */
-        regs->GR_L(12) = regs->psw.IA & ADDRESS_MAXWRAP(regs);
+        regs->GR_L(12) = PSW_IA(regs, 0);
 
         /* Copy LITOCMS into register 13 to signify obtain failure */
         regs->GR_L(13) = newia;
 
         /* Update the PSW instruction address */
-        regs->psw.IA = newia & ADDRESS_MAXWRAP(regs);
-        VALIDATE_AIA(regs);
+        UPD_PSW_IA(regs, newia);
     }
 
     /* Release main-storage access lock */
@@ -457,14 +466,13 @@ int     acc_mode = 0;                   /* access mode to use        */
         newia = ARCH_DEP(vfetch4) ( lit_addr, acc_mode, regs );
 
         /* Save the link information in register 12 */
-        regs->GR_L(12) = regs->psw.IA & ADDRESS_MAXWRAP(regs);
+        regs->GR_L(12) = PSW_IA(regs, 0);
 
         /* Copy LITRCMS into register 13 to signify release failure */
         regs->GR_L(13) = newia;
 
         /* Update the PSW instruction address */
-        regs->psw.IA = newia & ADDRESS_MAXWRAP(regs);
-        VALIDATE_AIA(regs);
+        UPD_PSW_IA(regs, newia);
     }
 
     /* Release main-storage access lock */

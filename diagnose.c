@@ -1,5 +1,7 @@
-/* DIAGNOSE.C   (c) Copyright Roger Bowler, 2000-2006                */
+/* DIAGNOSE.C   (c) Copyright Roger Bowler, 2000-2007                */
 /*              ESA/390 Diagnose Functions                           */
+
+// $Id: diagnose.c,v 1.47 2007/06/23 00:04:08 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements miscellaneous diagnose functions           */
@@ -9,8 +11,29 @@
 /* Additional credits:                                               */
 /*      Hercules-specific diagnose calls by Jay Maynard.             */
 /*      Set/reset bad frame indicator call by Jan Jaeger.            */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2006      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 /*-------------------------------------------------------------------*/
+
+// $Log: diagnose.c,v $
+// Revision 1.47  2007/06/23 00:04:08  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.46  2007/02/13 19:34:40  fish
+// DIAG  X'9C'  (156)
+//
+// Revision 1.45  2007/01/13 07:17:06  bernard
+// backout ccmask
+//
+// Revision 1.44  2007/01/12 15:22:18  bernard
+// ccmask phase 1
+//
+// Revision 1.43  2007/01/02 18:46:16  fish
+// Fix bug in deconfigure_cpu function & tweak power-off diagnose instructions so that they actually work properly now
+//
+// Revision 1.42  2006/12/08 09:43:20  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
 
 #if !defined(_HENGINE_DLL_)
@@ -82,6 +105,50 @@ static char *prefix[] = {
 }
 #endif /*defined(OPTION_DYNAMIC_LOAD)*/
 
+#if defined(FEATURE_DIAG308_REIPL) && !defined(STOP_CPUS_AND_IPL)
+#define STOP_CPUS_AND_IPL
+/*---------------------------------------------------------------------------*/
+/* Within diagnose 0x308 (re-ipl) a thread is started with the next code.    */
+/*---------------------------------------------------------------------------*/
+void *stop_cpus_and_ipl(int *whatever)
+{
+  int i;
+  char iplcmd[256];
+  int cpustates;
+  int mask;
+
+  UNREFERENCED(whatever);
+  panel_command("stopall");
+  logmsg("Diagnose 0x308 called: System is re-ipled\n");
+  sprintf(iplcmd, "ipl %03X", sysblk.ipldev);
+  do
+  {
+    OBTAIN_INTLOCK(NULL);
+    cpustates = CPUSTATE_STOPPED;
+    mask = sysblk.started_mask;
+    for(i = 0; mask; i++)
+    {
+      if(mask & 1)
+      {
+        logmsg("Checking cpu %d\n", i);
+        if(IS_CPU_ONLINE(i) && sysblk.regs[i]->cpustate != CPUSTATE_STOPPED)
+          cpustates = sysblk.regs[i]->cpustate;
+      }
+      mask >>= 1;
+    }
+    RELEASE_INTLOCK(NULL);
+    if(cpustates != CPUSTATE_STOPPED)
+    {
+      logmsg("Waiting 1 second for cpu's to stop...\n");
+      sleep(1);
+    }
+  }
+  while(cpustates != CPUSTATE_STOPPED);
+  panel_command(iplcmd);  
+  return NULL;
+}
+#endif /*defined(FEATURE_DIAG308_REIPL)*/
+
 /*-------------------------------------------------------------------*/
 /* Diagnose instruction                                              */
 /*-------------------------------------------------------------------*/
@@ -132,7 +199,7 @@ U32   code;
         ON_IC_INTERRUPT(regs);
 
         /* Release the configuration */
-        release_config();
+        do_shutdown();
 
         /* Power Off: exit hercules */
         exit(0);
@@ -160,12 +227,30 @@ U32   code;
 #endif /*FEATURE_MSSF_CALL*/
 
 
+#if defined(FEATURE_HYPERVISOR) || defined(FEATURE_EMULATE_VM)
+    case 0x09C:
+    /*---------------------------------------------------------------*/
+    /* Diagnose 09C: Voluntary Time Slice End With Target CPU        */
+    /*---------------------------------------------------------------*/
+        ARCH_DEP(scpend_call) ();   // (treat same as DIAG X'44')
+        break;
+#endif
+
+
 #if defined(FEATURE_HYPERVISOR)
     case 0x204:
     /*---------------------------------------------------------------*/
     /* Diagnose 204: LPAR RMF Interface                              */
     /*---------------------------------------------------------------*/
         ARCH_DEP(diag204_call) (r1, r2, regs);
+        regs->psw.cc = 0;
+        break;
+
+    case 0x224:
+    /*---------------------------------------------------------------*/
+    /* Diagnose 224: CPU Names                                       */
+    /*---------------------------------------------------------------*/
+        ARCH_DEP(diag224_call) (r1, r2, regs);
         regs->psw.cc = 0;
         break;
 #endif /*defined(FEATURE_HYPERVISOR)*/
@@ -475,6 +560,23 @@ U32   code;
 
 #endif /*FEATURE_HERCULES_DIAGCALLS*/
 
+#ifdef FEATURE_DIAG308_REIPL
+    /*---------------------------------------------------------------*/
+    /* Diagnose 308: re-IPL with previous parameters                 */
+    /*---------------------------------------------------------------*/
+    case 0x308:
+        {
+          ATTR attr;
+          TID tid;
+
+          if(create_thread(&tid, &attr, stop_cpus_and_ipl, NULL, "Stop cpus and ipl"))
+            logmsg("Error starting thread in diagnose 0x308: %s\n", strerror(errno));
+          regs->cpustate = CPUSTATE_STOPPING;
+          ON_IC_INTERRUPT(regs);
+        }
+        break;
+#endif /* FEATURE_DIAG308_REIPL */
+
     default:
     /*---------------------------------------------------------------*/
     /* Diagnose xxx: Invalid function code                           */
@@ -486,7 +588,7 @@ U32   code;
     /*  Power Off diagnose on 4361, 9371, 9373, 9375, 9377, 9221:    */
     /*                                                               */
     /*          DS 0H                                                */
-    /*          DC X'8302',S(SHUTDATA)     MUST BE R1 AND R2         */
+    /*          DC X'8302',S(SHUTDATA)     MUST BE R0 AND R2         */
     /*          ...                                                  */
     /*          DS 0H                                                */
     /* SHUTDATA DC X'0000FFFF'             MUST BE X'0000FFFF'       */
@@ -510,7 +612,7 @@ U32   code;
             ON_IC_INTERRUPT(regs);
 
             /* Release the configuration */
-            release_config();
+            do_shutdown();
 
             /* Power Off: exit hercules */
             exit(0);

@@ -1,11 +1,21 @@
-/* DASDBLKS.H   (c) Copyright Roger Bowler, 1999-2006                */
+/* DASDBLKS.H   (c) Copyright Roger Bowler, 1999-2007                */
 /*              DASD control block structures                        */
+
+// $Id: dasdblks.h,v 1.21 2007/06/23 00:04:08 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This header file contains definitions of OS Data Management       */
 /* control block structures for use by the Hercules DASD utilities.  */
 /* It also contains function prototypes for the DASD utilities.      */
 /*-------------------------------------------------------------------*/
+
+// $Log: dasdblks.h,v $
+// Revision 1.21  2007/06/23 00:04:08  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.20  2006/12/08 09:43:19  jj
+// Add CVS message log
+//
 
 #include "hercules.h"
 
@@ -34,6 +44,8 @@ typedef  struct  CIFBLK         CIFBLK;         // CKD image file descriptor
 typedef  struct  COPYR1         COPYR1;         // IEBCOPY header record 1
 typedef  struct  COPYR2         COPYR2;         // IEBCOPY header record 2
 typedef  struct  DATABLK        DATABLK;        // IEBCOPY unload data rec
+
+#define  MAX_TRACKS   32767
 
 /*-------------------------------------------------------------------*/
 /* Definition of DSCB records in VTOC                                */
@@ -198,8 +210,8 @@ struct FORMAT5_DSCB {                   /* DSCB5: Free space map     */
 #define RECFM_BLOCKED           0x10    /* Bit 3=Blocked             */
 #define RECFM_SPANNED           0x08    /* Bit 4=Spanned or standard */
 #define RECFM_CTLCHAR           0x06    /* Bits 5-6=Carriage control */
-#define RECFM_CTLCHAR_A         0x02    /* ...ANSI carriage control  */
-#define RECFM_CTLCHAR_M         0x04    /* ...Machine carriage ctl.  */
+#define RECFM_CTLCHAR_A         0x04    /* ...ANSI carriage control  */
+#define RECFM_CTLCHAR_M         0x02    /* ...Machine carriage ctl.  */
 
 /*-------------------------------------------------------------------*/
 /* Definition of PDS directory entry                                 */
@@ -317,7 +329,8 @@ struct DATABLK {                        /* IEBCOPY unload data rec   */
         BYTE    rec;                    /* Record number             */
         BYTE    klen;                   /* Key length                */
         HWORD   dlen;                   /* Data length               */
-        BYTE    kdarea[32760];          /* Key and data area         */
+#define MAX_DATALEN      32767
+        BYTE    kdarea[MAX_DATALEN];    /* Key and data area         */
 };
 
 /*-------------------------------------------------------------------*/
@@ -374,11 +387,12 @@ DUT_DLL_IMPORT int  capacity_calc (CIFBLK *cif, int used, int keylen, int datale
         int *maxdlen, int *numrecs, int *numhead, int *numcyls);
 DUT_DLL_IMPORT int create_ckd (char *fname, U16 devtype, U32 heads, U32 maxdlen,
         U32 volcyls, char *volser, BYTE comp, int lfs, int dasdcopy,
-        int nullfmt);
+        int nullfmt, int rawflag);
 DUT_DLL_IMPORT int create_fba (char *fname, U16 devtype, U32 sectsz, U32 sectors,
-        char *volser, BYTE comp, int lfs, int dasdcopy);
+        char *volser, BYTE comp, int lfs, int dasdcopy, int rawflag);
 int create_compressed_fba (char *fname, U16 devtype, U32 sectsz,
-        U32 sectors, char *volser, BYTE comp, int lfs, int dasdcopy);
+        U32 sectors, char *volser, BYTE comp, int lfs, int dasdcopy,
+        int rawflag);
 int get_verbose_util(void);
 DUT_DLL_IMPORT void set_verbose_util(int v);
 

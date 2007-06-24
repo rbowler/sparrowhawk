@@ -1,6 +1,13 @@
 /* PARSER.C     (c) Copyright Nobody, 1999-2001                      */
 /*              Simple parameter parser                              */
 
+// $Id: parser.c,v 1.3 2006/12/08 09:43:29 jj Exp $
+//
+// $Log: parser.c,v $
+// Revision 1.3  2006/12/08 09:43:29  jj
+// Add CVS message log
+//
+
 #include "hstdinc.h"
 
 #define _PARSER_C_

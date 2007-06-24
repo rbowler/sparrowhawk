@@ -1,7 +1,41 @@
-/* HSCMISC.C    Misc. system command routines                        */
-/*                                                                   */
-/*              (c) Copyright Roger Bowler, 1999-2006                */
-/*              (c) Copyright Jan Jaeger, 1999-2006                  */
+/* HSCMISC.C    (c) Copyright Roger Bowler, 1999-2007                */
+/*              (c) Copyright Jan Jaeger, 1999-2007                  */
+/*              Miscellaneous System Command Routines                */
+
+// $Id: hscmisc.c,v 1.60 2007/06/23 00:04:11 ivan Exp $
+//
+// $Log: hscmisc.c,v $
+// Revision 1.60  2007/06/23 00:04:11  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.59  2007/03/17 22:20:46  gsmith
+// Fix hostregs address calculation in copy_regs
+//
+// Revision 1.58  2007/03/16 22:47:10  gsmith
+// Reduce REGS copying by hscmisc.c
+//
+// Revision 1.57  2007/01/07 11:25:33  rbowler
+// Instruction tracing regsfirst and noregs modes
+//
+// Revision 1.56  2007/01/06 09:05:18  gsmith
+// Enable display_inst to display traditionally too
+//
+// Revision 1.55  2006/12/30 18:47:30  fish
+// 1. Display regs BEFORE instr being traced.
+// 2. Fix condition for Control Regs trace
+//
+// Revision 1.54  2006/12/18 14:01:54  rbowler
+// Only show CPU in FPR display if numcpu>1
+//
+// Revision 1.53  2006/12/17 23:03:28  rbowler
+// Display FPR when tracing floating-point instructions
+//
+// Revision 1.52  2006/12/17 21:58:50  rbowler
+// FPR command to display register pairs
+//
+// Revision 1.51  2006/12/08 09:43:26  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -39,9 +73,9 @@ static int is_wait_sigq_pending()
 {
 int pending;
 
-    obtain_lock(&sysblk.intlock);
+    OBTAIN_INTLOCK(NULL);
     pending = wait_sigq_pending;
-    release_lock(&sysblk.intlock);
+    RELEASE_INTLOCK(NULL);
 
     return pending;
 }
@@ -52,14 +86,14 @@ int pending, i;
     /* Wait for all CPU's to stop */
     do
     {
-        obtain_lock(&sysblk.intlock);
+        OBTAIN_INTLOCK(NULL);
         wait_sigq_pending = 0;
         for (i = 0; i < MAX_CPU_ENGINES; i++)
         if (IS_CPU_ONLINE(i)
           && sysblk.regs[i]->cpustate != CPUSTATE_STOPPED)
             wait_sigq_pending = 1;
         pending = wait_sigq_pending;
-        release_lock(&sysblk.intlock);
+        RELEASE_INTLOCK(NULL);
 
         if(pending)
             SLEEP(1);
@@ -69,9 +103,9 @@ int pending, i;
 
 static void cancel_wait_sigq()
 {
-    obtain_lock(&sysblk.intlock);
+    OBTAIN_INTLOCK(NULL);
     wait_sigq_pending = 0;
-    release_lock(&sysblk.intlock);
+    RELEASE_INTLOCK(NULL);
 }
 
 /*                       do_shutdown_now
@@ -286,6 +320,51 @@ static void display_regs64(char *hdr,U16 cpuad,U64 *r,int numcpus)
 #endif
 
 /*-------------------------------------------------------------------*/
+/* Display registers for the instruction display                     */
+/*-------------------------------------------------------------------*/
+void display_inst_regs (REGS *regs, BYTE *inst, BYTE opcode)
+{
+    /* Display the general purpose registers */
+    if (!(opcode == 0xB3 || (opcode >= 0x20 && opcode <= 0x3F)) 
+        || (opcode == 0xB3 && (
+                (inst[1] >= 0x80 && inst[1] <= 0xCF)
+                || (inst[1] >= 0xE1 && inst[1] <= 0xFE)
+           )))
+    {
+        display_regs (regs);
+        if (sysblk.showregsfirst) logmsg("\n");
+    }
+
+    /* Display control registers if appropriate */
+    if (!REAL_MODE(&regs->psw) || opcode == 0xB2)
+    {
+        display_cregs (regs);
+        if (sysblk.showregsfirst) logmsg("\n");
+    }
+
+    /* Display access registers if appropriate */
+    if (!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
+    {
+        display_aregs (regs);
+        if (sysblk.showregsfirst) logmsg("\n");
+    }
+
+    /* Display floating-point registers if appropriate */
+    if (opcode == 0xB3 || opcode == 0xED
+        || (opcode >= 0x20 && opcode <= 0x3F)
+        || (opcode >= 0x60 && opcode <= 0x70)
+        || (opcode >= 0x78 && opcode <= 0x7F)
+        || (opcode == 0xB2 && inst[1] == 0x2D) /*DXR*/
+        || (opcode == 0xB2 && inst[1] == 0x44) /*SQDR*/
+        || (opcode == 0xB2 && inst[1] == 0x45) /*SQER*/
+       )
+    {
+        display_fregs (regs);
+        if (sysblk.showregsfirst) logmsg("\n");
+    }
+}
+
+/*-------------------------------------------------------------------*/
 /* Display general purpose registers                                 */
 /*-------------------------------------------------------------------*/
 void display_regs (REGS *regs)
@@ -377,35 +456,38 @@ void display_aregs (REGS *regs)
 /*-------------------------------------------------------------------*/
 void display_fregs (REGS *regs)
 {
+char    cpustr[10] = {0};               /* "CPU:nnnn " or ""         */
+
+    if(sysblk.cpus>1)
+        sprintf(cpustr, "CPU%4.4X: ", regs->cpuad);
 
     if(regs->CR(0) & CR0_AFP)
         logmsg
         (
-            "CPU%4.4X:  FPR0=%8.8X %8.8X   FPR1=%8.8X %8.8X\n"
-            "CPU%4.4X:  FPR2=%8.8X %8.8X   FPR3=%8.8X %8.8X\n"
-            "CPU%4.4X:  FPR4=%8.8X %8.8X   FPR5=%8.8X %8.8X\n"
-            "CPU%4.4X:  FPR6=%8.8X %8.8X   FPR7=%8.8X %8.8X\n"
-            "CPU%4.4X:  FPR8=%8.8X %8.8X   FPR9=%8.8X %8.8X\n"
-            "CPU%4.4X:  FPRa=%8.8X %8.8X   FPRb=%8.8X %8.8X\n"
-            "CPU%4.4X:  FPRc=%8.8X %8.8X   FPRd=%8.8X %8.8X\n"
-            "CPU%4.4X:  FPRe=%8.8X %8.8X   FPRf=%8.8X %8.8X\n"
-
-            ,regs->cpuad, regs->fpr[0],  regs->fpr[1],  regs->fpr[2],  regs->fpr[3]
-            ,regs->cpuad, regs->fpr[4],  regs->fpr[5],  regs->fpr[6],  regs->fpr[7]
-            ,regs->cpuad, regs->fpr[8],  regs->fpr[9],  regs->fpr[10], regs->fpr[11]
-            ,regs->cpuad, regs->fpr[12], regs->fpr[13], regs->fpr[14], regs->fpr[15]
-            ,regs->cpuad, regs->fpr[16], regs->fpr[17], regs->fpr[18], regs->fpr[19]
-            ,regs->cpuad, regs->fpr[20], regs->fpr[21], regs->fpr[22], regs->fpr[23]
-            ,regs->cpuad, regs->fpr[24], regs->fpr[25], regs->fpr[26], regs->fpr[27]
-            ,regs->cpuad, regs->fpr[28], regs->fpr[29], regs->fpr[30], regs->fpr[31]
+            "%sFPR0=%8.8X %8.8X  FPR2=%8.8X %8.8X\n"
+            "%sFPR1=%8.8X %8.8X  FPR3=%8.8X %8.8X\n"
+            "%sFPR4=%8.8X %8.8X  FPR6=%8.8X %8.8X\n"
+            "%sFPR5=%8.8X %8.8X  FPR7=%8.8X %8.8X\n"
+            "%sFPR8=%8.8X %8.8X  FP10=%8.8X %8.8X\n"
+            "%sFPR9=%8.8X %8.8X  FP11=%8.8X %8.8X\n"
+            "%sFP12=%8.8X %8.8X  FP14=%8.8X %8.8X\n"
+            "%sFP13=%8.8X %8.8X  FP15=%8.8X %8.8X\n"
+            ,cpustr, regs->fpr[0],  regs->fpr[1],  regs->fpr[4],  regs->fpr[5]
+            ,cpustr, regs->fpr[2],  regs->fpr[3],  regs->fpr[6],  regs->fpr[7]
+            ,cpustr, regs->fpr[8],  regs->fpr[9],  regs->fpr[12], regs->fpr[13]
+            ,cpustr, regs->fpr[10], regs->fpr[11], regs->fpr[14], regs->fpr[15]
+            ,cpustr, regs->fpr[16], regs->fpr[17], regs->fpr[20], regs->fpr[21]
+            ,cpustr, regs->fpr[18], regs->fpr[19], regs->fpr[22], regs->fpr[23]
+            ,cpustr, regs->fpr[24], regs->fpr[25], regs->fpr[28], regs->fpr[29]
+            ,cpustr, regs->fpr[26], regs->fpr[27], regs->fpr[30], regs->fpr[31]
         );
     else
         logmsg
         (
-            "CPU%4.4X:  FPR0=%8.8X %8.8X   FPR2=%8.8X %8.8X\n"
-            "CPU%4.4X:  FPR4=%8.8X %8.8X   FPR6=%8.8X %8.8X\n"
-            ,regs->cpuad, regs->fpr[0], regs->fpr[1], regs->fpr[2], regs->fpr[3]
-            ,regs->cpuad, regs->fpr[4], regs->fpr[5], regs->fpr[6], regs->fpr[7]
+            "%sFPR0=%8.8X %8.8X  FPR2=%8.8X %8.8X\n"
+            "%sFPR4=%8.8X %8.8X  FPR6=%8.8X %8.8X\n"
+            ,cpustr, regs->fpr[0], regs->fpr[1], regs->fpr[2], regs->fpr[3]
+            ,cpustr, regs->fpr[4], regs->fpr[5], regs->fpr[6], regs->fpr[7]
         );
 
 } /* end function display_fregs */
@@ -582,6 +664,47 @@ void get_connected_client (DEVBLK* dev, char** pclientip, char** pclientname)
     release_lock (&dev->lock);
 }
 
+/*-------------------------------------------------------------------*/
+/* Return the address of a regs structure to be used for address     */
+/* translation.  This address should be freed by the caller.         */
+/*-------------------------------------------------------------------*/
+static REGS  *copy_regs (REGS *regs)
+{
+ REGS  *newregs, *hostregs;
+ size_t size;
+
+    size = SIE_MODE(regs) ? 2*sizeof(REGS) : sizeof(REGS);
+    newregs = malloc(size);
+    if (newregs == NULL)
+    {
+        logmsg(_("HHCMS001E malloc failed for REGS copy: %s\n"),
+               strerror(errno));
+        return NULL;
+    }
+
+    /* Perform partial copy and clear the TLB */
+    memcpy(newregs, regs, sysblk.regs_copy_len);
+    memset(&newregs->tlb.vaddr, 0, TLBN * sizeof(DW));
+    newregs->ghostregs = 1;
+    newregs->hostregs = newregs;
+    newregs->guestregs = NULL;
+
+    /* Copy host regs if in SIE mode */
+    if(SIE_MODE(newregs))
+    {
+        hostregs = newregs + 1;
+        memcpy(hostregs, regs->hostregs, sysblk.regs_copy_len);
+        memset(&hostregs->tlb.vaddr, 0, TLBN * sizeof(DW));
+        hostregs->ghostregs = 1;
+        hostregs->hostregs = hostregs;
+        hostregs->guestregs = newregs;
+        newregs->hostregs = hostregs;
+        newregs->guestregs = newregs;
+    }
+
+    return newregs;
+}
+
 #endif /*!defined(_HSCMISC_C)*/
 
 
@@ -609,40 +732,23 @@ void get_connected_client (DEVBLK* dev, char** pclientip, char** pclientname)
 static U16 ARCH_DEP(virt_to_abs) (RADR *raptr, int *siptr,
                         VADR vaddr, int arn, REGS *regs, int acctype)
 {
-RADR    raddr;
-int     icode;
-REGS    gregs, hgregs;
+int icode;
 
-    // ZZFIXME:  Win32 builds emits bad code here
-    //           so we have the next stmt:
-    //           (is that still true??)
-    if (!regs) return 0;
-
-    gregs = *regs;
-    gregs.ghostregs = 1;
-
-    if(SIE_MODE(&gregs))
+    if( !(icode = setjmp(regs->progjmp)) )
     {
-        hgregs = *gregs.hostregs;
-        gregs.hostregs = &hgregs;
-        hgregs.guestregs = &gregs;
+        int temp_arn = arn; // bypass longjmp clobber warning
+        if (acctype == ACCTYPE_INSTFETCH)
+            temp_arn = USE_INST_SPACE;
+        if (SIE_MODE(regs))
+            memcpy(regs->hostregs->progjmp, regs->progjmp,
+                   sizeof(jmp_buf));
+        ARCH_DEP(logical_to_main) (vaddr, temp_arn, regs, acctype, 0);
     }
 
-    hgregs.ghostregs = 1;
+    *siptr = regs->dat.stid;
+    *raptr = regs->hostregs->dat.raddr;
 
-    if( !(icode = setjmp(gregs.progjmp)) )
-    {
-        memcpy(&hgregs.progjmp,&gregs.progjmp,sizeof(jmp_buf));
-        ARCH_DEP(logical_to_main) (vaddr, arn, &gregs, acctype, 0);
-        raddr = SIE_MODE(&gregs) ? hgregs.dat.raddr : gregs.dat.raddr;
-    }
-    else
-        return icode;
-
-    *siptr = gregs.dat.stid;
-    *raptr = raddr;
-
-    return 0;
+    return icode;
 
 } /* end function virt_to_abs */
 
@@ -959,7 +1065,7 @@ char    buf[100];                       /* Message buffer            */
 /*-------------------------------------------------------------------*/
 /* Display instruction                                               */
 /*-------------------------------------------------------------------*/
-void ARCH_DEP(display_inst) (REGS *regs, BYTE *inst)
+void ARCH_DEP(display_inst) (REGS *iregs, BYTE *inst)
 {
 QWORD   qword;                          /* Doubleword work area      */
 BYTE    opcode;                         /* Instruction operation code*/
@@ -970,6 +1076,12 @@ VADR    addr1 = 0, addr2 = 0;           /* Operand addresses         */
 #endif /*DISPLAY_INSTRUCTION_OPERANDS*/
 char    buf[256];                       /* Message buffer            */
 int     n;                              /* Number of bytes in buffer */
+REGS   *regs;                           /* Copied regs               */
+
+    if (iregs->ghostregs)
+        regs = iregs;
+    else if ((regs = copy_regs(iregs)) == NULL)
+        return;
 
   #if defined(_FEATURE_SIE)
     if(SIE_MODE(regs))
@@ -1013,12 +1125,17 @@ int     n;                              /* Number of bytes in buffer */
     {
         logmsg (_("%sInstruction fetch error\n"), buf);
         display_regs (regs);
+        if (!iregs->ghostregs) free(regs);
         return;
     }
 
     /* Extract the opcode and determine the instruction length */
     opcode = inst[0];
     ilc = ILC(opcode);
+
+    /* Show registers associated with the instruction */
+    if (sysblk.showregsfirst)
+        display_inst_regs (regs, inst, opcode);
 
     /* Display the instruction */
     n += sprintf (buf+n, "INST=%2.2X%2.2X", inst[0], inst[1]);
@@ -1034,6 +1151,7 @@ int     n;                              /* Number of bytes in buffer */
     if (ilc > 2
         && opcode != 0x84 && opcode != 0x85
         && opcode != 0xA5 && opcode != 0xA7
+        && opcode != 0xB3
         && opcode != 0xC0 && opcode != 0xEC)
     {
         /* Calculate the effective address of the first operand */
@@ -1088,7 +1206,6 @@ int     n;                              /* Number of bytes in buffer */
             ((inst[1] >= 0x20 && inst[1] <= 0x2F)
             || (inst[1] >= 0x40 && inst[1] <= 0x6F)
             || (inst[1] >= 0xA0 && inst[1] <= 0xAF)))
-        || opcode == 0xB3
         || opcode == 0xB9)
     {
         b1 = inst[3] >> 4;
@@ -1145,18 +1262,12 @@ int     n;                              /* Number of bytes in buffer */
 
 #endif /*DISPLAY_INSTRUCTION_OPERANDS*/
 
-    /* Display the general purpose registers */
-    display_regs (regs);
+    /* Show registers associated with the instruction */
+    if (!sysblk.showregsfirst && !sysblk.showregsnone)
+        display_inst_regs (regs, inst, opcode);
 
-    /* Display control registers if appropriate */
-    if (!REAL_MODE(&regs->psw) || regs->ip[0] == 0xB2)
-        display_cregs (regs);
-
-    /* Display access registers if appropriate */
-    if (!REAL_MODE(&regs->psw) && ACCESS_REGISTER_MODE(&regs->psw))
-        display_aregs (regs);
-
-    // display_fregs (regs)
+    if (!iregs->ghostregs)
+        free (regs);
 
 } /* end function display_inst */
 
@@ -1198,8 +1309,15 @@ void alter_display_real (char *opnd, REGS *regs)
 } /* end function alter_display_real */
 
 
-void alter_display_virt (char *opnd, REGS *regs)
+void alter_display_virt (char *opnd, REGS *iregs)
 {
+ REGS *regs;
+
+    if (iregs->ghostregs)
+        regs = iregs;
+    else if ((regs = copy_regs(iregs)) == NULL)
+        return;
+
     switch(sysblk.arch_mode) {
 #if defined(_370)
         case ARCH_370:
@@ -1215,11 +1333,20 @@ void alter_display_virt (char *opnd, REGS *regs)
 #endif
     }
 
+    if (!iregs->ghostregs)
+        free(regs);
 } /* end function alter_display_virt */
 
 
-void display_inst(REGS *regs, BYTE *inst)
+void display_inst(REGS *iregs, BYTE *inst)
 {
+ REGS *regs;
+
+    if (iregs->ghostregs)
+        regs = iregs;
+    else if ((regs = copy_regs(iregs)) == NULL)
+        return;
+
     switch(regs->arch_mode) {
 #if defined(_370)
         case ARCH_370:
@@ -1238,11 +1365,20 @@ void display_inst(REGS *regs, BYTE *inst)
 #endif
     }
 
+    if (!iregs->ghostregs)
+        free (regs);
 }
 
 
-void disasm_stor(REGS *regs, char *opnd)
+void disasm_stor(REGS *iregs, char *opnd)
 {
+ REGS *regs;
+
+    if (iregs->ghostregs)
+        regs = iregs;
+    else if ((regs = copy_regs(iregs)) == NULL)
+        return;
+
     switch(regs->arch_mode) {
 #if defined(_370)
         case ARCH_370:
@@ -1261,6 +1397,8 @@ void disasm_stor(REGS *regs, char *opnd)
 #endif
     }
 
+    if (!iregs->ghostregs)
+        free(regs);
 }
 
 /*-------------------------------------------------------------------*/

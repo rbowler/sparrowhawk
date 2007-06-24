@@ -1,5 +1,15 @@
-/* CRYPTO.C     (c) Copyright Jan Jaeger, 2000-2006                  */
+/* CRYPTO.C     (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              Cryptographic instructions                           */
+
+// $Id: crypto.c,v 1.14 2007/06/23 00:04:05 ivan Exp $
+//
+// $Log: crypto.c,v $
+// Revision 1.14  2007/06/23 00:04:05  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.13  2006/12/08 09:43:19  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 

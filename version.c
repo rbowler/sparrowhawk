@@ -1,10 +1,20 @@
-/* VERSION.C    (c) Copyright Roger Bowler, 1999-2006                */
+/* VERSION.C    (c) Copyright Roger Bowler, 1999-2007                */
 /*              Hercules Version Display Module                      */
+
+// $Id: version.c,v 1.49 2007/06/23 00:04:19 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module displays the Hercules program name, version, build    */
 /* date and time, and copyright notice to the indicated file.        */
 /*-------------------------------------------------------------------*/
+
+// $Log: version.c,v $
+// Revision 1.49  2007/06/23 00:04:19  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.48  2006/12/08 09:43:31  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -70,12 +80,12 @@ static const char *build_info[] = {
     "Using fthreads instead of pthreads",
 #endif
 #if defined(OPTION_DYNAMIC_LOAD)
-    "With Dynamic loading support",
+    "Dynamic loading support",
 #if defined(MODULESDIR)
     "Loadable module default base directory is "MODULESDIR,
 #endif
 #else
-    "Without Dynamic loading support",
+    "No Dynamic loading support",
 #endif
 #if defined(HDL_BUILD_SHARED)
     "Using shared libraries",
@@ -84,7 +94,7 @@ static const char *build_info[] = {
 #endif
 
 #if !defined(EXTERNALGUI)
-    "No external GUI support",
+    "No External GUI support",
 #endif
 
 #if defined(OPTION_HTTP_SERVER)
@@ -112,6 +122,14 @@ static const char *build_info[] = {
 
 #if !defined(HAVE_LIBZ)
     "No ZLIB support",
+#endif
+
+#if defined(HAVE_REGEX_H) || defined(HAVE_PCRE)
+    "Regular Expressions support",
+#endif
+
+#if defined(OPTION_HAO)
+    "Automatic Operator support",
 #endif
 
 #if !defined(HET_BZIP2)

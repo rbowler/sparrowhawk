@@ -531,6 +531,10 @@ SOURCE=.\devtype.h
 # End Source File
 # Begin Source File
 
+SOURCE=.\dfp.c
+# End Source File
+# Begin Source File
+
 SOURCE=.\diagmssf.c
 # End Source File
 # Begin Source File
@@ -916,6 +920,10 @@ SOURCE=.\parser.c
 # Begin Source File
 
 SOURCE=.\parser.h
+# End Source File
+# Begin Source File
+
+SOURCE=.\pfpo.c
 # End Source File
 # Begin Source File
 

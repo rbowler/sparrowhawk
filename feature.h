@@ -1,10 +1,38 @@
-/* FEATURES.H   (c) Copyright Jan Jaeger, 2000-2006                  */
+/* FEATURES.H   (c) Copyright Jan Jaeger, 2000-2007                  */
 /*      Architecture-dependent macro definitions                     */
 /*-------------------------------------------------------------------*/
 /* S/370, ESA/390 and ESAME features implemented                     */
 /*-------------------------------------------------------------------*/
 
 //        This header file #included by 'hercules.h'
+
+// $Id: feature.h,v 1.77 2007/06/23 00:04:09 ivan Exp $
+//
+// $Log: feature.h,v $
+// Revision 1.77  2007/06/23 00:04:09  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.76  2007/01/13 07:30:02  bernard
+// backout ccmask
+//
+// Revision 1.75  2007/01/12 16:43:32  bernard
+// ccmask phase 1
+//
+// Revision 1.74  2007/01/12 16:21:26  bernard
+// ccmask phase 1
+//
+// Revision 1.73  2007/01/12 15:20:44  bernard
+// ccmask phase 1
+//
+// Revision 1.72  2007/01/03 05:53:34  gsmith
+// 03 Jan 2007 Sloppy fetch - Greg Smith
+//
+// Revision 1.71  2006/12/20 04:26:19  gsmith
+// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
+//
+// Revision 1.70  2006/12/08 09:43:21  jj
+// Add CVS message log
+//
 
 #ifdef HAVE_CONFIG_H
   #include <config.h> // Hercules build configuration options/settings
@@ -83,6 +111,7 @@
 #undef RADR
 #undef F_RADR
 #undef VADR
+#undef VADR_L
 #undef F_VADR
 #undef GREG
 #undef F_GREG
@@ -107,7 +136,7 @@
 #undef TLBID_PAGEMASK
 #undef TLBID_BYTEMASK
 #undef ASD_PRIVATE
-#undef BROADCAST_PFRA
+#undef PER_SB
 
 #if __GEN_ARCH == 370
 
@@ -182,6 +211,7 @@ s370_ ## _name
 #define F_RADR  "%8.8"I64_FMT"X"
 #endif
 #define VADR    U32
+#define VADR_L  VADR
 #define F_VADR  "%8.8"I32_FMT"X"
 #define GREG    U32
 #define F_GREG  "%8.8"I32_FMT"X"
@@ -205,7 +235,6 @@ s370_ ## _name
 #define TLBID_PAGEMASK  0x00E00000
 #define TLBID_BYTEMASK  0x001FFFFF
 #define ASD_PRIVATE   SEGTAB_370_CMN
-#define BROADCAST_PFRA BROADCAST_PFRA_L
 
 #elif __GEN_ARCH == 390
 
@@ -289,6 +318,7 @@ s390_ ## _name
 #define F_RADR  "%8.8"I64_FMT"X"
 #endif
 #define VADR    U32
+#define VADR_L  VADR
 #define F_VADR  "%8.8"I32_FMT"X"
 #define GREG    U32
 #define F_GREG  "%8.8"I32_FMT"X"
@@ -312,7 +342,6 @@ s390_ ## _name
 #define TLBID_PAGEMASK  0x7FC00000
 #define TLBID_BYTEMASK  0x003FFFFF
 #define ASD_PRIVATE   STD_PRIVATE
-#define BROADCAST_PFRA BROADCAST_PFRA_L
 
 #elif __GEN_ARCH == 900
 
@@ -410,6 +439,11 @@ z900_ ## _name
 #endif
 #define F_RADR  "%16.16"I64_FMT"X"
 #define VADR    U64
+#if SIZEOF_INT == 4
+#define VADR_L  U32
+#else
+#define VADR_L  VADR
+#endif
 #define F_VADR  "%16.16"I64_FMT"X"
 #define GREG    U64
 #define F_GREG  "%16.16"I64_FMT"X"
@@ -433,7 +467,6 @@ z900_ ## _name
 #define TLBID_PAGEMASK  0xFFFFFFFFFFC00000ULL
 #define TLBID_BYTEMASK  0x00000000003FFFFFULL
 #define ASD_PRIVATE   (ASCE_P|ASCE_R)
-#define BROADCAST_PFRA BROADCAST_PFRA_G
 
 #else
 
@@ -635,7 +668,7 @@ do { \
   #define HOME_SPACE_MODE(p) \
     ((p)->asc == PSW_HOME_SPACE_MODE)
   #define AEA_MODE(_regs) \
-    ( ( REAL_MODE(&(_regs)->psw) ? 0 : (((_regs)->psw.asc >> 6) + 1) ) \
+    ( ( REAL_MODE(&(_regs)->psw) ? (SIE_STATB((_regs), MX, XC) && AR_BIT(&(_regs)->psw) ? 2 : 0) : (((_regs)->psw.asc >> 6) + 1) ) \
     | ( PER_MODE((_regs)) ? 0x40 : 0 ) \
  )
 #else
@@ -778,5 +811,31 @@ do { \
        ARCH_DEP(logical_to_main) ((_addr), (_arn), (_regs), (_acctype), (_akey)) \
      ) \
  )
+
+/*
+ * PER Successful Branch
+ */
+#if defined(FEATURE_PER)
+ #if defined(FEATURE_PER2)
+  #define PER_SB(_regs, _addr) \
+   do { \
+    if (unlikely(EN_IC_PER_SB((_regs))) \
+     && (!((_regs)->CR(9) & CR9_BAC) \
+      || PER_RANGE_CHECK((_addr) & ADDRESS_MAXWRAP((_regs)), \
+                          (_regs)->CR(10), (_regs)->CR(11)) \
+        ) \
+       ) \
+     ON_IC_PER_SB((_regs)); \
+   } while (0)
+ #else /*!defined(FEATURE_PER2)*/
+  #define PER_SB(_regs, _addr) \
+   do { \
+    if (unlikely(EN_IC_PER_SB((_regs)))) \
+     ON_IC_PER_SB((_regs)); \
+   } while (0)
+ #endif /*!defined(FEATURE_PER2)*/
+#else /*!defined(FEATURE_PER)*/
+ #define PER_SB(_regs,_addr)
+#endif /*!defined(FEATURE_PER)*/
 
 /* end of FEATURES.H */

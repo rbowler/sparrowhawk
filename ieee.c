@@ -2,7 +2,7 @@
  * Hercules System/370, ESA/390, z/Architecture emulator
  * ieee.c
  * Binary (IEEE) Floating Point Instructions
- * Copyright (c) 2001-2006 Willem Konynenberg <wfk@xos.nl>
+ * Copyright (c) 2001-2007 Willem Konynenberg <wfk@xos.nl>
  * TCEB, TCDB and TCXB contributed by Per Jessen, 20 September 2001.
  * THDER,THDR by Roger Bowler, 19 July 2003.
  * Additional instructions by Roger Bowler, November 2004:
@@ -12,6 +12,8 @@
  * Licensed under the Q Public License
  * For details, see html/herclic.html
  */
+
+// $Id: ieee.c,v 1.78 2007/06/23 00:04:13 ivan Exp $
 
 /*
  * This module implements the ESA/390 Binary (IEEE) Floating Point
@@ -57,6 +59,23 @@
  * actually only 80-bits, so the conversion from extended format to native
  * long double format will cause loss of precision and range.
  */
+
+// $Log: ieee.c,v $
+// Revision 1.78  2007/06/23 00:04:13  ivan
+// Update copyright notices to include current year (2007)
+//
+// Revision 1.77  2007/01/13 07:22:32  bernard
+// backout ccmask
+//
+// Revision 1.76  2007/01/12 15:24:07  bernard
+// ccmask phase 1
+//
+// Revision 1.75  2007/01/04 23:12:04  gsmith
+// remove thunk calls for program_interrupt
+//
+// Revision 1.74  2006/12/08 09:43:28  jj
+// Add CVS message log
+//
 
 #include "hstdinc.h"
 
@@ -131,7 +150,7 @@ do { \
 /* Macro to generate program check if invalid BFP rounding method */
 #define BFPRM_CHECK(x,regs) \
         {if (!((x)==0 || (x)==1 || ((x)>=4 && (x)<=7))) \
-            {program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);}}
+            {regs->program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);}}
 
 #if !defined(_IEEE_C)
 /* Architecture independent code goes within this ifdef */
@@ -141,26 +160,23 @@ do { \
 #endif
 
 struct ebfp {
-    BYTE    sign;
-    int fpclass;
+    int sign;
     int exp;
     U64 fracth;
     U64 fractl;
     long double v;
 };
 struct lbfp {
-    BYTE    sign;
-    int fpclass;
+    int sign;
     int exp;
     U64 fract;
-    double  v;
+    double v;
 };
 struct sbfp {
-    BYTE    sign;
-    int fpclass;
+    int sign;
     int exp;
     int fract;
-    float   v;
+    float v;
 };
 
 #ifndef HAVE_SQRTL
@@ -197,7 +213,6 @@ struct sbfp {
 /* I guess this could go into an include file... */
 #define vfetch4 ARCH_DEP(vfetch4)
 #define vfetch8 ARCH_DEP(vfetch8)
-#define program_interrupt ARCH_DEP(program_interrupt)
 
 /* locally defined architecture-dependent functions */
 #define ieee_exception ARCH_DEP(ieee_exception)
@@ -234,9 +249,9 @@ struct sbfp {
 #define subtract_ebfp ARCH_DEP(subtract_ebfp)
 #define subtract_lbfp ARCH_DEP(subtract_lbfp)
 #define subtract_sbfp ARCH_DEP(subtract_sbfp)
-#define testdataclass_ebfp ARCH_DEP(testdataclass_ebfp)
-#define testdataclass_lbfp ARCH_DEP(testdataclass_lbfp)
-#define testdataclass_sbfp ARCH_DEP(testdataclass_sbfp)
+#define test_data_class_ebfp ARCH_DEP(test_data_class_ebfp)
+#define test_data_class_lbfp ARCH_DEP(test_data_class_lbfp)
+#define test_data_class_sbfp ARCH_DEP(test_data_class_sbfp)
 #define divint_lbfp ARCH_DEP(divint_lbfp)
 #define divint_sbfp ARCH_DEP(divint_sbfp)
 
@@ -272,7 +287,7 @@ static inline int ieee_exception(int raised, REGS * regs)
         regs->fpc |= dxc << 8;
         if (dxc == DXC_IEEE_DIV_ZERO || dxc == DXC_IEEE_INVALID_OP) {
             /* suppress operation */
-            program_interrupt(regs, PGM_DATA_EXCEPTION);
+            regs->program_interrupt(regs, PGM_DATA_EXCEPTION);
         }
         /*
          * Other operations need to take appropriate action
@@ -973,7 +988,7 @@ static int cnvt_bfp_to_hfp (struct lbfp *op, int class, U32 *fpr)
  */
 static int cnvt_hfp_to_bfp (U32 *fpr, int rounding,
         int bfp_fractbits, int bfp_emax, int bfp_ebias,
-        BYTE *result_sign, int *result_exp, U64 *result_fract)
+        int *result_sign, int *result_exp, U64 *result_fract)
 {
     BYTE sign;
     short expo;
@@ -1255,7 +1270,7 @@ static int add_ebfp(struct ebfp *op1, struct ebfp *op2, REGS *regs)
     } else if (cl1 == FP_ZERO) {
         if (cl2 == FP_ZERO && op1->sign != op2->sign) {
             /* exact-zero difference result */
-            ebfpzero(op1, ((regs->fpc & FPC_RM) == 3) ? 1 : 0);
+            ebfpzero(op1, ((regs->fpc & FPC_BRM) == 3) ? 1 : 0);
         } else {
             *op1 = *op2;
             cl1 = cl2;
@@ -1289,7 +1304,7 @@ DEF_INST(add_bfp_ext_reg)
     put_ebfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -1387,7 +1402,7 @@ DEF_INST(add_bfp_long_reg)
     put_lbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -1413,7 +1428,7 @@ DEF_INST(add_bfp_long)
     put_lbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -1511,7 +1526,7 @@ DEF_INST(add_bfp_short_reg)
     put_sbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -1537,7 +1552,7 @@ DEF_INST(add_bfp_short)
     put_sbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -1616,7 +1631,7 @@ DEF_INST(compare_bfp_ext_reg)
     pgm_check = compare_ebfp(&op1, &op2, 0, regs);
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -1694,7 +1709,7 @@ DEF_INST(compare_bfp_long_reg)
     pgm_check = compare_lbfp(&op1, &op2, 0, regs);
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -1718,7 +1733,7 @@ DEF_INST(compare_bfp_long)
     pgm_check = compare_lbfp(&op1, &op2, 0, regs);
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -1796,7 +1811,7 @@ DEF_INST(compare_bfp_short_reg)
     pgm_check = compare_sbfp(&op1, &op2, 0, regs);
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -1820,7 +1835,7 @@ DEF_INST(compare_bfp_short)
     pgm_check = compare_sbfp(&op1, &op2, 0, regs);
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -1844,7 +1859,7 @@ DEF_INST(compare_and_signal_bfp_ext_reg)
     pgm_check = compare_ebfp(&op1, &op2, 1, regs);
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -1867,7 +1882,7 @@ DEF_INST(compare_and_signal_bfp_long_reg)
     pgm_check = compare_lbfp(&op1, &op2, 1, regs);
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -1891,7 +1906,7 @@ DEF_INST(compare_and_signal_bfp_long)
     pgm_check = compare_lbfp(&op1, &op2, 1, regs);
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -1914,7 +1929,7 @@ DEF_INST(compare_and_signal_bfp_short_reg)
     pgm_check = compare_sbfp(&op1, &op2, 1, regs);
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -1938,7 +1953,7 @@ DEF_INST(compare_and_signal_bfp_short)
     pgm_check = compare_sbfp(&op1, &op2, 1, regs);
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -1954,7 +1969,7 @@ DEF_INST(convert_fix32_to_bfp_ext_reg)
     RRE(inst, regs, r1, r2);
     //logmsg("CXFBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
-    BFPREGPAIR2_CHECK(r1, 0, regs);
+    BFPREGPAIR_CHECK(r1, regs);
 
     op2 = regs->GR_L(r2);
 
@@ -2032,7 +2047,7 @@ DEF_INST(convert_fix64_to_bfp_ext_reg)
     RRE(inst, regs, r1, r2);
     //logmsg("CXGBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
-    BFPREGPAIR2_CHECK(r1, 0, regs);
+    BFPREGPAIR_CHECK(r1, regs);
 
     op2 = regs->GR_G(r2);
 
@@ -2115,7 +2130,7 @@ DEF_INST(convert_bfp_ext_to_fix32_reg)
     RRF_M(inst, regs, r1, r2, m3);
     //logmsg("CFXBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
-    BFPREGPAIR2_CHECK(r1, r2, regs);
+    BFPREGPAIR_CHECK(r2, regs);
     BFPRM_CHECK(m3,regs);
 
     get_ebfp(&op2, regs->fpr + FPR2I(r2));
@@ -2129,7 +2144,7 @@ DEF_INST(convert_bfp_ext_to_fix32_reg)
             pgm_check = ieee_exception(FE_INEXACT, regs);
             if (pgm_check) {
                 ebfpston(&op2);logmsg("INEXACT\n");
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         break;
@@ -2148,7 +2163,7 @@ DEF_INST(convert_bfp_ext_to_fix32_reg)
         if (regs->fpc & FPC_MASK_IMX) {
             pgm_check = ieee_exception(FE_INEXACT, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         break;
@@ -2160,7 +2175,7 @@ DEF_INST(convert_bfp_ext_to_fix32_reg)
         if (raised) {
             pgm_check = ieee_exception(raised, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         regs->GR_L(r1) = op1;
@@ -2194,7 +2209,7 @@ DEF_INST(convert_bfp_long_to_fix32_reg)
             pgm_check = ieee_exception(FE_INEXACT, regs);
             if (pgm_check) {
                 lbfpston(&op2);logmsg("INEXACT\n");
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         break;
@@ -2213,7 +2228,7 @@ DEF_INST(convert_bfp_long_to_fix32_reg)
         if (regs->fpc & FPC_MASK_IMX) {
             pgm_check = ieee_exception(FE_INEXACT, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         break;
@@ -2225,7 +2240,7 @@ DEF_INST(convert_bfp_long_to_fix32_reg)
         if (raised) {
             pgm_check = ieee_exception(raised, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         regs->GR_L(r1) = op1;
@@ -2258,7 +2273,7 @@ DEF_INST(convert_bfp_short_to_fix32_reg)
         if (regs->fpc & FPC_MASK_IMX) {
             pgm_check = ieee_exception(FE_INEXACT, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         break;
@@ -2277,7 +2292,7 @@ DEF_INST(convert_bfp_short_to_fix32_reg)
         if (regs->fpc & FPC_MASK_IMX) {
             pgm_check = ieee_exception(FE_INEXACT, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         break;
@@ -2289,7 +2304,7 @@ DEF_INST(convert_bfp_short_to_fix32_reg)
         if (raised) {
             pgm_check = ieee_exception(raised, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         regs->GR_L(r1) = op1;
@@ -2311,7 +2326,7 @@ DEF_INST(convert_bfp_ext_to_fix64_reg)
     RRF_M(inst, regs, r1, r2, m3);
     //logmsg("CGXBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
-    BFPREGPAIR2_CHECK(r1, r2, regs);
+    BFPREGPAIR_CHECK(r2, regs);
     BFPRM_CHECK(m3,regs);
 
     get_ebfp(&op2, regs->fpr + FPR2I(r2));
@@ -2325,7 +2340,7 @@ DEF_INST(convert_bfp_ext_to_fix64_reg)
             pgm_check = ieee_exception(FE_INEXACT, regs);
             if (pgm_check) {
                 ebfpston(&op2);logmsg("INEXACT\n");
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         break;
@@ -2344,7 +2359,7 @@ DEF_INST(convert_bfp_ext_to_fix64_reg)
         if (regs->fpc & FPC_MASK_IMX) {
             pgm_check = ieee_exception(FE_INEXACT, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         break;
@@ -2356,7 +2371,7 @@ DEF_INST(convert_bfp_ext_to_fix64_reg)
         if (raised) {
             pgm_check = ieee_exception(raised, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         regs->GR_G(r1) = op1;
@@ -2392,7 +2407,7 @@ DEF_INST(convert_bfp_long_to_fix64_reg)
             pgm_check = ieee_exception(FE_INEXACT, regs);
             if (pgm_check) {
                 lbfpston(&op2);logmsg("INEXACT\n");
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         break;
@@ -2411,7 +2426,7 @@ DEF_INST(convert_bfp_long_to_fix64_reg)
         if (regs->fpc & FPC_MASK_IMX) {
             pgm_check = ieee_exception(FE_INEXACT, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         break;
@@ -2423,7 +2438,7 @@ DEF_INST(convert_bfp_long_to_fix64_reg)
         if (raised) {
             pgm_check = ieee_exception(raised, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         regs->GR_G(r1) = op1;
@@ -2458,7 +2473,7 @@ DEF_INST(convert_bfp_short_to_fix64_reg)
         if (regs->fpc & FPC_MASK_IMX) {
             pgm_check = ieee_exception(FE_INEXACT, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         break;
@@ -2477,7 +2492,7 @@ DEF_INST(convert_bfp_short_to_fix64_reg)
         if (regs->fpc & FPC_MASK_IMX) {
             pgm_check = ieee_exception(FE_INEXACT, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         break;
@@ -2489,7 +2504,7 @@ DEF_INST(convert_bfp_short_to_fix64_reg)
         if (raised) {
             pgm_check = ieee_exception(raised, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         regs->GR_G(r1) = op1;
@@ -2530,7 +2545,7 @@ static int integer_ebfp(struct ebfp *op, int mode, REGS *regs)
         } else {
             ieee_exception(FE_INVALID, regs);
         }
-        ebfpston(op);
+        ebfpntos(op);
 
         raised = fetestexcept(FE_ALL_EXCEPT);
         if (raised) {
@@ -2575,7 +2590,7 @@ static int integer_lbfp(struct lbfp *op, int mode, REGS *regs)
         } else {
             ieee_exception(FE_INVALID, regs);
         }
-        lbfpston(op);
+        lbfpntos(op);
 
         raised = fetestexcept(FE_ALL_EXCEPT);
         if (raised) {
@@ -2620,7 +2635,7 @@ static int integer_sbfp(struct sbfp *op, int mode, REGS *regs)
         } else {
             ieee_exception(FE_INVALID, regs);
         }
-        sbfpston(op);
+        sbfpntos(op);
 
         raised = fetestexcept(FE_ALL_EXCEPT);
         if (raised) {
@@ -2732,7 +2747,7 @@ DEF_INST(divide_bfp_ext_reg)
     put_ebfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -2833,7 +2848,7 @@ DEF_INST(divide_bfp_long_reg)
     put_lbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -2859,7 +2874,7 @@ DEF_INST(divide_bfp_long)
     put_lbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -2960,7 +2975,7 @@ DEF_INST(divide_bfp_short_reg)
     put_sbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -2986,7 +3001,7 @@ DEF_INST(divide_bfp_short)
     put_sbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -3013,7 +3028,7 @@ DEF_INST(load_and_test_bfp_ext_reg)
     }
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 
     switch (ebfpclassify(&op)) {
@@ -3052,7 +3067,7 @@ DEF_INST(load_and_test_bfp_long_reg)
     }
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 
     switch (lbfpclassify(&op)) {
@@ -3091,7 +3106,7 @@ DEF_INST(load_and_test_bfp_short_reg)
     }
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 
     switch (sbfpclassify(&op)) {
@@ -3112,7 +3127,7 @@ DEF_INST(load_and_test_bfp_short_reg)
 /*
  * B357 FIEBR - LOAD FP INTEGER (short BFP)                    [RRF]
  */
-DEF_INST(load_fp_int_short_reg)
+DEF_INST(load_fp_int_bfp_short_reg)
 {
     int r1, r2, m3, pgm_check;
     struct sbfp op;
@@ -3127,17 +3142,17 @@ DEF_INST(load_fp_int_short_reg)
     pgm_check = integer_sbfp(&op, m3, regs);
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 
     put_sbfp(&op, regs->fpr + FPR2I(r1));
 
-} /* end DEF_INST(load_fp_int_short_reg) */
+} /* end DEF_INST(load_fp_int_bfp_short_reg) */
 
 /*
  * B35F FIDBR - LOAD FP INTEGER (long BFP)                     [RRF]
  */
-DEF_INST(load_fp_int_long_reg)
+DEF_INST(load_fp_int_bfp_long_reg)
 {
     int r1, r2, m3, pgm_check;
     struct lbfp op;
@@ -3152,17 +3167,17 @@ DEF_INST(load_fp_int_long_reg)
     pgm_check = integer_lbfp(&op, m3, regs);
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 
     put_lbfp(&op, regs->fpr + FPR2I(r1));
 
-} /* end DEF_INST(load_fp_int_long_reg) */
+} /* end DEF_INST(load_fp_int_bfp_long_reg) */
 
 /*
  * B347 FIXBR - LOAD FP INTEGER (extended BFP)                 [RRF]
  */
-DEF_INST(load_fp_int_ext_reg)
+DEF_INST(load_fp_int_bfp_ext_reg)
 {
     int r1, r2, m3, pgm_check;
     struct ebfp op;
@@ -3178,12 +3193,12 @@ DEF_INST(load_fp_int_ext_reg)
     pgm_check = integer_ebfp(&op, m3, regs);
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 
     put_ebfp(&op, regs->fpr + FPR2I(r1));
 
-} /* end DEF_INST(load_fp_int_ext_reg) */
+} /* end DEF_INST(load_fp_int_bfp_ext_reg) */
 
 /*
  * B29D LFPC  - LOAD FPC                                         [S]
@@ -3193,7 +3208,7 @@ DEF_INST(load_fp_int_ext_reg)
 /*
  * B304 LDEBR - LOAD LENGTHENED (short to long BFP)            [RRE]
  */
-DEF_INST(loadlength_bfp_short_to_long_reg)
+DEF_INST(load_lengthened_bfp_short_to_long_reg)
 {
     int r1, r2;
     struct lbfp op1;
@@ -3213,7 +3228,7 @@ DEF_INST(loadlength_bfp_short_to_long_reg)
 /*
  * ED04 LDEB  - LOAD LENGTHENED (short to long BFP)            [RXE]
  */
-DEF_INST(loadlength_bfp_short_to_long)
+DEF_INST(load_lengthened_bfp_short_to_long)
 {
     int r1, b2;
     VADR effective_addr2;
@@ -3234,7 +3249,7 @@ DEF_INST(loadlength_bfp_short_to_long)
 /*
  * B305 LXDBR - LOAD LENGTHENED (long to extended BFP)         [RRE]
  */
-DEF_INST(loadlength_bfp_long_to_ext_reg)
+DEF_INST(load_lengthened_bfp_long_to_ext_reg)
 {
     int r1, r2;
     struct ebfp op1;
@@ -3243,7 +3258,7 @@ DEF_INST(loadlength_bfp_long_to_ext_reg)
     RRE(inst, regs, r1, r2);
     //logmsg("LXDBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
-    BFPREGPAIR2_CHECK(r1, 0, regs);
+    BFPREGPAIR_CHECK(r1, regs);
 
     get_lbfp(&op2, regs->fpr + FPR2I(r2));
 
@@ -3255,7 +3270,7 @@ DEF_INST(loadlength_bfp_long_to_ext_reg)
 /*
  * ED05 LXDB  - LOAD LENGTHENED (long to extended BFP)         [RXE]
  */
-DEF_INST(loadlength_bfp_long_to_ext)
+DEF_INST(load_lengthened_bfp_long_to_ext)
 {
     int r1, b2;
     VADR effective_addr2;
@@ -3263,9 +3278,9 @@ DEF_INST(loadlength_bfp_long_to_ext)
     struct lbfp op2;
 
     RXE(inst, regs, r1, b2, effective_addr2);
-    //logmsg("LXEB r1=%d b2=%d\n", r1, b2);
+    //logmsg("LXDB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
-    BFPREGPAIR2_CHECK(r1, 0, regs);
+    BFPREGPAIR_CHECK(r1, regs);
 
     vfetch_lbfp(&op2, effective_addr2, b2, regs);
 
@@ -3277,7 +3292,7 @@ DEF_INST(loadlength_bfp_long_to_ext)
 /*
  * B306 LXEBR - LOAD LENGTHENED (short to extended BFP)        [RRE]
  */
-DEF_INST(loadlength_bfp_short_to_ext_reg)
+DEF_INST(load_lengthened_bfp_short_to_ext_reg)
 {
     int r1, r2;
     struct ebfp op1;
@@ -3286,7 +3301,7 @@ DEF_INST(loadlength_bfp_short_to_ext_reg)
     RRE(inst, regs, r1, r2);
     //logmsg("LXEBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
-    BFPREGPAIR2_CHECK(r1, 0, regs);
+    BFPREGPAIR_CHECK(r1, regs);
 
     get_sbfp(&op2, regs->fpr + FPR2I(r2));
 
@@ -3298,7 +3313,7 @@ DEF_INST(loadlength_bfp_short_to_ext_reg)
 /*
  * ED06 LXEB  - LOAD LENGTHENED (short to extended BFP)        [RXE]
  */
-DEF_INST(loadlength_bfp_short_to_ext)
+DEF_INST(load_lengthened_bfp_short_to_ext)
 {
     int r1, b2;
     VADR effective_addr2;
@@ -3308,7 +3323,7 @@ DEF_INST(loadlength_bfp_short_to_ext)
     RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("LXEB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
-    BFPREGPAIR2_CHECK(r1, 0, regs);
+    BFPREGPAIR_CHECK(r1, regs);
 
     vfetch_sbfp(&op2, effective_addr2, b2, regs);
 
@@ -3602,7 +3617,7 @@ DEF_INST(load_positive_bfp_short_reg)
 /*
  * B344 LEDBR - LOAD ROUNDED (long to short BFP)                [RRE]
  */
-DEF_INST(round_bfp_long_to_short_reg)
+DEF_INST(load_rounded_bfp_long_to_short_reg)
 {
     int r1, r2, raised;
     struct sbfp op1;
@@ -3637,7 +3652,7 @@ DEF_INST(round_bfp_long_to_short_reg)
         if (raised) {
             pgm_check = ieee_exception(raised, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         break;
@@ -3645,12 +3660,12 @@ DEF_INST(round_bfp_long_to_short_reg)
 
     put_sbfp(&op1, regs->fpr + FPR2I(r1));
 
-} /* end DEF_INST(round_bfp_long_to_short_reg) */
+} /* end DEF_INST(load_rounded_bfp_long_to_short_reg) */
 
 /*
  * B345 LDXBR - LOAD ROUNDED (extended to long BFP)             [RRE]
  */
-DEF_INST(round_bfp_ext_to_long_reg)
+DEF_INST(load_rounded_bfp_ext_to_long_reg)
 {
     int r1, r2, raised;
     struct lbfp op1;
@@ -3686,7 +3701,7 @@ DEF_INST(round_bfp_ext_to_long_reg)
         if (raised) {
             pgm_check = ieee_exception(raised, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         break;
@@ -3694,12 +3709,12 @@ DEF_INST(round_bfp_ext_to_long_reg)
 
     put_lbfp(&op1, regs->fpr + FPR2I(r1));
 
-} /* end DEF_INST(round_bfp_ext_to_long_reg) */
+} /* end DEF_INST(load_rounded_bfp_ext_to_long_reg) */
 
 /*
  * B346 LEXBR - LOAD ROUNDED (extended to short BFP)            [RRE]
  */
-DEF_INST(round_bfp_ext_to_short_reg)
+DEF_INST(load_rounded_bfp_ext_to_short_reg)
 {
     int r1, r2, raised;
     struct sbfp op1;
@@ -3735,7 +3750,7 @@ DEF_INST(round_bfp_ext_to_short_reg)
         if (raised) {
             pgm_check = ieee_exception(raised, regs);
             if (pgm_check) {
-                program_interrupt(regs, pgm_check);
+                regs->program_interrupt(regs, pgm_check);
             }
         }
         break;
@@ -3743,7 +3758,7 @@ DEF_INST(round_bfp_ext_to_short_reg)
 
     put_sbfp(&op1, regs->fpr + FPR2I(r1));
 
-} /* end DEF_INST(round_bfp_ext_to_short_reg) */
+} /* end DEF_INST(load_rounded_bfp_ext_to_short_reg) */
 
 /*
  * MULTIPLY (extended)
@@ -3842,7 +3857,7 @@ DEF_INST(multiply_bfp_ext_reg)
     put_ebfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -3859,7 +3874,7 @@ DEF_INST(multiply_bfp_long_to_ext_reg)
     RRE(inst, regs, r1, r2);
     //logmsg("MXDBR r1=%d r2=%d\n", r1, r2);
     BFPINST_CHECK(regs);
-    BFPREGPAIR2_CHECK(r1, 0, regs);
+    BFPREGPAIR_CHECK(r1, regs);
 
     get_lbfp(&op1, regs->fpr + FPR2I(r1));
     get_lbfp(&op2, regs->fpr + FPR2I(r2));
@@ -3872,7 +3887,7 @@ DEF_INST(multiply_bfp_long_to_ext_reg)
     put_ebfp(&eb1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 } /* end DEF_INST(multiply_bfp_long_to_ext_reg) */
 
@@ -3890,7 +3905,7 @@ DEF_INST(multiply_bfp_long_to_ext)
     RXE(inst, regs, r1, b2, effective_addr2);
     //logmsg("MXDB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
-    BFPREGPAIR2_CHECK(r1, 0, regs);
+    BFPREGPAIR_CHECK(r1, regs);
 
     get_lbfp(&op1, regs->fpr + FPR2I(r1));
     vfetch_lbfp(&op2, effective_addr2, b2, regs);
@@ -3903,7 +3918,7 @@ DEF_INST(multiply_bfp_long_to_ext)
     put_ebfp(&eb1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 } /* end DEF_INST(multiply_bfp_long_to_ext) */
 
@@ -4003,7 +4018,7 @@ DEF_INST(multiply_bfp_long_reg)
     put_lbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -4029,7 +4044,7 @@ DEF_INST(multiply_bfp_long)
     put_lbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -4058,7 +4073,7 @@ DEF_INST(multiply_bfp_short_to_long_reg)
     put_lbfp(&lb1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 } /* end DEF_INST(multiply_bfp_short_to_long_reg) */
 
@@ -4088,7 +4103,7 @@ DEF_INST(multiply_bfp_short_to_long)
     put_lbfp(&lb1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 } /* end DEF_INST(multiply_bfp_short_to_long) */
 
@@ -4188,7 +4203,7 @@ DEF_INST(multiply_bfp_short_reg)
     put_sbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -4214,7 +4229,7 @@ DEF_INST(multiply_bfp_short)
     put_sbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -4241,7 +4256,7 @@ DEF_INST(multiply_add_bfp_long_reg)
     put_lbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 } /* end DEF_INST(multiply_add_bfp_long_reg) */
 
@@ -4269,7 +4284,7 @@ DEF_INST(multiply_add_bfp_long)
     put_lbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 } /* end DEF_INST(multiply_add_bfp_long) */
 
@@ -4296,7 +4311,7 @@ DEF_INST(multiply_add_bfp_short_reg)
     put_sbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 } /* end DEF_INST(multiply_add_bfp_short_reg) */
 
@@ -4324,7 +4339,7 @@ DEF_INST(multiply_add_bfp_short)
     put_sbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 } /* end DEF_INST(multiply_add_bfp_short) */
 
@@ -4352,7 +4367,7 @@ DEF_INST(multiply_subtract_bfp_long_reg)
     put_lbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 } /* end DEF_INST(multiply_subtract_bfp_long_reg) */
 
@@ -4381,7 +4396,7 @@ DEF_INST(multiply_subtract_bfp_long)
     put_lbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 } /* end DEF_INST(multiply_subtract_bfp_long) */
 
@@ -4409,7 +4424,7 @@ DEF_INST(multiply_subtract_bfp_short_reg)
     put_sbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 } /* end DEF_INST(multiply_subtract_bfp_short_reg) */
 
@@ -4438,7 +4453,7 @@ DEF_INST(multiply_subtract_bfp_short)
     put_sbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 } /* end DEF_INST(multiply_subtract_bfp_short) */
 
@@ -4502,7 +4517,7 @@ DEF_INST(squareroot_bfp_ext_reg)
     put_ebfp(&op, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -4555,7 +4570,7 @@ DEF_INST(squareroot_bfp_long_reg)
     put_lbfp(&op, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -4580,7 +4595,7 @@ DEF_INST(squareroot_bfp_long)
     put_lbfp(&op, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -4633,7 +4648,7 @@ DEF_INST(squareroot_bfp_short_reg)
     put_sbfp(&op, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -4658,7 +4673,7 @@ DEF_INST(squareroot_bfp_short)
     put_sbfp(&op, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -4690,7 +4705,7 @@ DEF_INST(subtract_bfp_ext_reg)
     put_ebfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -4716,7 +4731,7 @@ DEF_INST(subtract_bfp_long_reg)
     put_lbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -4743,7 +4758,7 @@ DEF_INST(subtract_bfp_long)
     put_lbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -4769,7 +4784,7 @@ DEF_INST(subtract_bfp_short_reg)
     put_sbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -4796,7 +4811,7 @@ DEF_INST(subtract_bfp_short)
     put_sbfp(&op1, regs->fpr + FPR2I(r1));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 }
 
@@ -4804,7 +4819,7 @@ DEF_INST(subtract_bfp_short)
  * ED10 TCEB   - TEST DATA CLASS (short BFP)                   [RXE]
  * Per Jessen, Willem Konynenberg, 20 September 2001
  */
-DEF_INST(testdataclass_bfp_short)
+DEF_INST(test_data_class_bfp_short)
 {
     int r1, b2;
     VADR effective_addr2;
@@ -4846,7 +4861,7 @@ DEF_INST(testdataclass_bfp_short)
  * ED11 TCDB   - TEST DATA CLASS (long BFP)                   [RXE]
  * Per Jessen, Willem Konynenberg, 20 September 2001
  */
-DEF_INST(testdataclass_bfp_long)
+DEF_INST(test_data_class_bfp_long)
 {
     int r1, b2;
     VADR effective_addr2;
@@ -4888,7 +4903,7 @@ DEF_INST(testdataclass_bfp_long)
  * ED12 TCXB   - TEST DATA CLASS (extended BFP)               [RXE]
  * Per Jessen, Willem Konynenberg, 20 September 2001
  */
-DEF_INST(testdataclass_bfp_ext)
+DEF_INST(test_data_class_bfp_ext)
 {
     int r1, b2;
     VADR effective_addr2;
@@ -4900,7 +4915,7 @@ DEF_INST(testdataclass_bfp_ext)
 
     //logmsg("TCXB r1=%d b2=%d\n", r1, b2);
     BFPINST_CHECK(regs);
-    BFPREGPAIR2_CHECK( r1, 0, regs );
+    BFPREGPAIR_CHECK(r1, regs);
 
     // retrieve first operand.
     get_ebfp(&op1, regs->fpr + FPR2I(r1));
@@ -4967,7 +4982,7 @@ DEF_INST(divide_integer_bfp_long_reg)
     //logmsg("DIDBR r1=%d r3=%d r2=%d m4=%d\n", r1, r3, r2, m4);
     BFPINST_CHECK(regs);
     if (r1 == r2 || r2 == r3 || r1 == r3) {
-        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
+        regs->program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
     }
     BFPRM_CHECK(m4,regs);
 
@@ -4980,7 +4995,7 @@ DEF_INST(divide_integer_bfp_long_reg)
     put_lbfp(&op3, regs->fpr + FPR2I(r3));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 } /* end DEF_INST(divide_integer_bfp_long_reg) */
 
@@ -5024,7 +5039,7 @@ DEF_INST(divide_integer_bfp_short_reg)
     //logmsg("DIEBR r1=%d r3=%d r2=%d m4=%d\n", r1, r3, r2, m4);
     BFPINST_CHECK(regs);
     if (r1 == r2 || r2 == r3 || r1 == r3) {
-        program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
+        regs->program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
     }
     BFPRM_CHECK(m4,regs);
 
@@ -5037,7 +5052,7 @@ DEF_INST(divide_integer_bfp_short_reg)
     put_sbfp(&op3, regs->fpr + FPR2I(r3));
 
     if (pgm_check) {
-        program_interrupt(regs, pgm_check);
+        regs->program_interrupt(regs, pgm_check);
     }
 } /* end DEF_INST(divide_integer_bfp_short_reg) */
 
